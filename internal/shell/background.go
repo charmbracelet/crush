@@ -70,12 +70,17 @@ var (
 	idCounter             atomic.Uint64
 )
 
+// newBackgroundShellManager creates a new BackgroundShellManager instance.
+func newBackgroundShellManager() *BackgroundShellManager {
+	return &BackgroundShellManager{
+		shells: csync.NewMap[string, *BackgroundShell](),
+	}
+}
+
 // GetBackgroundShellManager returns the singleton background shell manager.
 func GetBackgroundShellManager() *BackgroundShellManager {
 	backgroundManagerOnce.Do(func() {
-		backgroundManager = &BackgroundShellManager{
-			shells: csync.NewMap[string, *BackgroundShell](),
-		}
+		backgroundManager = newBackgroundShellManager()
 	})
 	return backgroundManager
 }

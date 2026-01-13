@@ -73,6 +73,7 @@ type (
 	SwitchSessionsMsg      struct{}
 	NewSessionsMsg         struct{}
 	SwitchModelMsg         struct{}
+	SwitchThemeMsg         struct{}
 	QuitMsg                struct{}
 	OpenFilePickerMsg      struct{}
 	ToggleHelpMsg          struct{}
@@ -337,6 +338,15 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			Shortcut:    "ctrl+l",
 			Handler: func(cmd Command) tea.Cmd {
 				return util.CmdHandler(SwitchModelMsg{})
+			},
+		},
+		{
+			ID:          "switch_theme",
+			Title:       "Switch Theme",
+			Description: "Switch to a different theme",
+			Shortcut:    "ctrl+t",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(SwitchThemeMsg{})
 			},
 		},
 	}

@@ -194,8 +194,7 @@ type LSPConfig struct {
 type TUIOptions struct {
 	CompactMode bool   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
 	DiffMode    string `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
-	// Here we can add themes later or any TUI related options
-	//
+	Theme       string `json:"theme,omitempty" jsonschema:"description=Theme name for the TUI interface,example=charmtone,example=catppuccin-latte,example=catppuccin-frappe"`
 
 	Completions Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
 }
@@ -294,6 +293,13 @@ func (l LSPs) Sorted() []LSP {
 		return strings.Compare(a.Name, b.Name)
 	})
 	return sorted
+}
+
+func (c *Config) GetTheme() string {
+	if c.Options.TUI != nil {
+		return c.Options.TUI.Theme
+	}
+	return ""
 }
 
 func (l LSPConfig) ResolvedEnv() []string {
@@ -568,6 +574,23 @@ func (c *Config) RefreshOAuthToken(ctx context.Context, providerID string) error
 	); err != nil {
 		return fmt.Errorf("failed to persist refreshed token: %w", err)
 	}
+
+	return nil
+}
+
+func (c *Config) SetTheme(themeName string) error {
+	err := c.SetConfigField("options.tui.theme", themeName)
+	if err != nil {
+		return fmt.Errorf("failed to save theme to config file: %w", err)
+	}
+
+	if c.Options == nil {
+		c.Options = &Options{}
+	}
+	if c.Options.TUI == nil {
+		c.Options.TUI = &TUIOptions{}
+	}
+	c.Options.TUI.Theme = themeName
 
 	return nil
 }

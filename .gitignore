@@ -34,6 +34,10 @@ ehthumbs.db
 Thumbs.db
 *.log
 
+Taskfile.main.yaml
+crush.json.tmp
+crush.main.json
+
 # Binary output directory
 /bin/
 /dist/

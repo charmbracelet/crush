@@ -35,7 +35,6 @@
         ],
         "semanticTokens": true
       }
-    },
-    "nixd": {}
+    }
   }
 }

@@ -5,7 +5,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: security-${{ github.event.pull_request.number || github.ref }}
+  group: build-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:

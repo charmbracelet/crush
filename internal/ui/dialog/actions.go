@@ -2,6 +2,7 @@ package dialog
 
 import (
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
@@ -37,12 +38,28 @@ type (
 	ActionToggleThinking    struct{}
 	ActionExternalEditor    struct{}
 	ActionToggleYoloMode    struct{}
+	ActionInitializeProject struct{}
 	ActionSummarize         struct {
 		SessionID string
 	}
 	ActionPermissionResponse struct {
 		Permission permission.PermissionRequest
 		Action     PermissionAction
+	}
+	ActionRunCustomCommand struct {
+		CommandID string
+		// Used when running a user-defined command
+		Content string
+		// Used when running a prompt from MCP
+		Client string
+	}
+	ActionOpenCustomCommandArgumentsDialog struct {
+		CommandID string
+		// Used when running a user-defined command
+		Content string
+		// Used when running a prompt from MCP
+		Client    string
+		Arguments []commands.Argument
 	}
 )
 

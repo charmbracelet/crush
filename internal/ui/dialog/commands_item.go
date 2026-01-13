@@ -2,37 +2,42 @@ package dialog
 
 import (
 	"github.com/charmbracelet/crush/internal/ui/styles"
-	"github.com/charmbracelet/crush/internal/uicmd"
 	"github.com/sahilm/fuzzy"
 )
 
 // CommandItem wraps a uicmd.Command to implement the ListItem interface.
 type CommandItem struct {
-	Cmd     uicmd.Command
-	t       *styles.Styles
-	m       fuzzy.Match
-	cache   map[int]string
-	focused bool
+	id       string
+	title    string
+	shortcut string
+	action   Action
+	t        *styles.Styles
+	m        fuzzy.Match
+	cache    map[int]string
+	focused  bool
 }
 
 var _ ListItem = &CommandItem{}
 
 // NewCommandItem creates a new CommandItem.
-func NewCommandItem(t *styles.Styles, cmd uicmd.Command) *CommandItem {
+func NewCommandItem(t *styles.Styles, id, title, shortcut string, action Action) *CommandItem {
 	return &CommandItem{
-		Cmd: cmd,
-		t:   t,
+		id:       id,
+		t:        t,
+		title:    title,
+		shortcut: shortcut,
+		action:   action,
 	}
 }
 
 // Filter implements ListItem.
 func (c *CommandItem) Filter() string {
-	return c.Cmd.Title
+	return c.title
 }
 
 // ID implements ListItem.
 func (c *CommandItem) ID() string {
-	return c.Cmd.ID
+	return c.id
 }
 
 // SetFocused implements ListItem.
@@ -49,7 +54,12 @@ func (c *CommandItem) SetMatch(m fuzzy.Match) {
 	c.m = m
 }
 
+// Action returns the action associated with the command item.
+func (c *CommandItem) Action() Action {
+	return c.action
+}
+
 // Render implements ListItem.
 func (c *CommandItem) Render(width int) string {
-	return renderItem(c.t, c.Cmd.Title, c.Cmd.Shortcut, c.focused, width, c.cache, &c.m)
+	return renderItem(c.t, c.title, c.shortcut, c.focused, width, c.cache, &c.m)
 }

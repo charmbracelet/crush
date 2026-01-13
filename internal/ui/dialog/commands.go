@@ -1,9 +1,7 @@
 package dialog
 
 import (
-	"fmt"
 	"os"
-	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/help"
@@ -12,21 +10,31 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/agent"
+	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
-	"github.com/charmbracelet/crush/internal/uicmd"
-	"github.com/charmbracelet/crush/internal/uiutil"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 )
 
 // CommandsID is the identifier for the commands dialog.
 const CommandsID = "commands"
+
+// CommandType represents the type of commands being displayed.
+type CommandType uint
+
+// String returns the string representation of the CommandType.
+func (c CommandType) String() string { return []string{"System", "User", "MCP"}[c] }
+
+const sidebarCompactModeBreakpoint = 120
+
+const (
+	SystemCommands CommandType = iota
+	UserCommands
+	MCPPrompts
+)
 
 // Commands represents a dialog that shows available commands.
 type Commands struct {
@@ -37,39 +45,33 @@ type Commands struct {
 		Next,
 		Previous,
 		Tab,
+		ShiftTab,
 		Close key.Binding
 	}
 
-	sessionID  string // can be empty for non-session-specific commands
-	selected   uicmd.CommandType
-	userCmds   []uicmd.Command
-	mcpPrompts *csync.Slice[uicmd.Command]
+	sessionID string // can be empty for non-session-specific commands
+	selected  CommandType
 
 	help  help.Model
 	input textinput.Model
 	list  *list.FilterableList
 
-	width int
+	windowWidth int
+
+	customCommands    []commands.CustomCommand
+	mcpCustomCommands []commands.MCPCustomCommand
 }
 
 var _ Dialog = (*Commands)(nil)
 
 // NewCommands creates a new commands dialog.
-func NewCommands(com *common.Common, sessionID string) (*Commands, error) {
-	commands, err := uicmd.LoadCustomCommandsFromConfig(com.Config())
-	if err != nil {
-		return nil, err
-	}
-
-	mcpPrompts := csync.NewSlice[uicmd.Command]()
-	mcpPrompts.SetSlice(uicmd.LoadMCPPrompts())
-
+func NewCommands(com *common.Common, sessionID string, customCommands []commands.CustomCommand, mcpCustomCommands []commands.MCPCustomCommand) (*Commands, error) {
 	c := &Commands{
-		com:        com,
-		userCmds:   commands,
-		selected:   uicmd.SystemCommands,
-		mcpPrompts: mcpPrompts,
-		sessionID:  sessionID,
+		com:               com,
+		selected:          SystemCommands,
+		sessionID:         sessionID,
+		customCommands:    customCommands,
+		mcpCustomCommands: mcpCustomCommands,
 	}
 
 	help := help.New()
@@ -107,12 +109,16 @@ func NewCommands(com *common.Common, sessionID string) (*Commands, error) {
 		key.WithKeys("tab"),
 		key.WithHelp("tab", "switch selection"),
 	)
+	c.keyMap.ShiftTab = key.NewBinding(
+		key.WithKeys("shift+tab"),
+		key.WithHelp("shift+tab", "switch selection prev"),
+	)
 	closeKey := CloseKey
 	closeKey.SetHelp("esc", "cancel")
 	c.keyMap.Close = closeKey
 
 	// Set initial commands
-	c.setCommandType(c.selected)
+	c.setCommandItems(c.selected)
 
 	return c, nil
 }
@@ -150,17 +156,18 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 		case key.Matches(msg, c.keyMap.Select):
 			if selectedItem := c.list.SelectedItem(); selectedItem != nil {
 				if item, ok := selectedItem.(*CommandItem); ok && item != nil {
-					// TODO: Please unravel this mess later and the Command
-					// Handler design.
-					if cmd := item.Cmd.Handler(item.Cmd); cmd != nil { // Huh??
-						return cmd()
-					}
+					return item.Action()
 				}
 			}
 		case key.Matches(msg, c.keyMap.Tab):
-			if len(c.userCmds) > 0 || c.mcpPrompts.Len() > 0 {
+			if len(c.customCommands) > 0 || len(c.mcpCustomCommands) > 0 {
 				c.selected = c.nextCommandType()
-				c.setCommandType(c.selected)
+				c.setCommandItems(c.selected)
+			}
+		case key.Matches(msg, c.keyMap.ShiftTab):
+			if len(c.customCommands) > 0 || len(c.mcpCustomCommands) > 0 {
+				c.selected = c.previousCommandType()
+				c.setCommandItems(c.selected)
 			}
 		default:
 			var cmd tea.Cmd
@@ -175,28 +182,18 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 	return nil
 }
 
-// ReloadMCPPrompts reloads the MCP prompts.
-func (c *Commands) ReloadMCPPrompts() tea.Cmd {
-	c.mcpPrompts.SetSlice(uicmd.LoadMCPPrompts())
-	// If we're currently viewing MCP prompts, refresh the list
-	if c.selected == uicmd.MCPPrompts {
-		c.setCommandType(uicmd.MCPPrompts)
-	}
-	return nil
-}
-
 // Cursor returns the cursor position relative to the dialog.
 func (c *Commands) Cursor() *tea.Cursor {
 	return InputCursor(c.com.Styles, c.input.Cursor())
 }
 
 // commandsRadioView generates the command type selector radio buttons.
-func commandsRadioView(sty *styles.Styles, selected uicmd.CommandType, hasUserCmds bool, hasMCPPrompts bool) string {
+func commandsRadioView(sty *styles.Styles, selected CommandType, hasUserCmds bool, hasMCPPrompts bool) string {
 	if !hasUserCmds && !hasMCPPrompts {
 		return ""
 	}
 
-	selectedFn := func(t uicmd.CommandType) string {
+	selectedFn := func(t CommandType) string {
 		if t == selected {
 			return sty.RadioOn.Padding(0, 1).Render() + sty.HalfMuted.Render(t.String())
 		}
@@ -204,14 +201,14 @@ func commandsRadioView(sty *styles.Styles, selected uicmd.CommandType, hasUserCm
 	}
 
 	parts := []string{
-		selectedFn(uicmd.SystemCommands),
+		selectedFn(SystemCommands),
 	}
 
 	if hasUserCmds {
-		parts = append(parts, selectedFn(uicmd.UserCommands))
+		parts = append(parts, selectedFn(UserCommands))
 	}
 	if hasMCPPrompts {
-		parts = append(parts, selectedFn(uicmd.MCPPrompts))
+		parts = append(parts, selectedFn(MCPPrompts))
 	}
 
 	return strings.Join(parts, " ")
@@ -222,7 +219,12 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := c.com.Styles
 	width := max(0, min(defaultDialogMaxWidth, area.Dx()))
 	height := max(0, min(defaultDialogHeight, area.Dy()))
-	c.width = width
+	if area.Dx() != c.windowWidth && c.selected == SystemCommands {
+		// since some items in the list depend on width (e.g. toggle sidebar command),
+		// we need to reset the command items when width changes
+		c.setCommandItems(c.selected)
+	}
+	c.windowWidth = area.Dx()
 	innerWidth := width - c.com.Styles.Dialog.View.GetHorizontalFrameSize()
 	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
 		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
@@ -233,7 +235,7 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	c.list.SetSize(innerWidth, height-heightOffset)
 	c.help.SetWidth(innerWidth)
 
-	radio := commandsRadioView(t, c.selected, len(c.userCmds) > 0, c.mcpPrompts.Len() > 0)
+	radio := commandsRadioView(t, c.selected, len(c.customCommands) > 0, len(c.mcpCustomCommands) > 0)
 	titleStyle := t.Dialog.Title
 	dialogStyle := t.Dialog.View.Width(width)
 	headerOffset := lipgloss.Width(radio) + titleStyle.GetHorizontalFrameSize() + dialogStyle.GetHorizontalFrameSize()
@@ -265,99 +267,113 @@ func (c *Commands) FullHelp() [][]key.Binding {
 	}
 }
 
-func (c *Commands) nextCommandType() uicmd.CommandType {
+func (c *Commands) nextCommandType() CommandType {
 	switch c.selected {
-	case uicmd.SystemCommands:
-		if len(c.userCmds) > 0 {
-			return uicmd.UserCommands
+	case SystemCommands:
+		if len(c.customCommands) > 0 {
+			return UserCommands
 		}
-		if c.mcpPrompts.Len() > 0 {
-			return uicmd.MCPPrompts
-		}
-		fallthrough
-	case uicmd.UserCommands:
-		if c.mcpPrompts.Len() > 0 {
-			return uicmd.MCPPrompts
+		if len(c.mcpCustomCommands) > 0 {
+			return MCPPrompts
 		}
 		fallthrough
-	case uicmd.MCPPrompts:
-		return uicmd.SystemCommands
+	case UserCommands:
+		if len(c.mcpCustomCommands) > 0 {
+			return MCPPrompts
+		}
+		fallthrough
+	case MCPPrompts:
+		return SystemCommands
 	default:
-		return uicmd.SystemCommands
+		return SystemCommands
 	}
 }
 
-func (c *Commands) setCommandType(commandType uicmd.CommandType) {
+func (c *Commands) previousCommandType() CommandType {
+	switch c.selected {
+	case SystemCommands:
+		if len(c.mcpCustomCommands) > 0 {
+			return MCPPrompts
+		}
+		if len(c.customCommands) > 0 {
+			return UserCommands
+		}
+		return SystemCommands
+	case UserCommands:
+		return SystemCommands
+	case MCPPrompts:
+		if len(c.customCommands) > 0 {
+			return UserCommands
+		}
+		return SystemCommands
+	default:
+		return SystemCommands
+	}
+}
+
+func (c *Commands) setCommandItems(commandType CommandType) {
 	c.selected = commandType
 
-	var commands []uicmd.Command
-	switch c.selected {
-	case uicmd.SystemCommands:
-		commands = c.defaultCommands()
-	case uicmd.UserCommands:
-		commands = c.userCmds
-	case uicmd.MCPPrompts:
-		commands = slices.Collect(c.mcpPrompts.Seq())
-	}
-
 	commandItems := []list.FilterableItem{}
-	for _, cmd := range commands {
-		commandItems = append(commandItems, NewCommandItem(c.com.Styles, cmd))
+	switch c.selected {
+	case SystemCommands:
+		for _, cmd := range c.defaultCommands() {
+			commandItems = append(commandItems, cmd)
+		}
+	case UserCommands:
+		for _, cmd := range c.customCommands {
+			var action Action
+			if len(cmd.Arguments) > 0 {
+				action = ActionOpenCustomCommandArgumentsDialog{
+					CommandID: cmd.ID,
+					Content:   cmd.Content,
+					Arguments: cmd.Arguments,
+				}
+			} else {
+				action = ActionRunCustomCommand{
+					CommandID: cmd.ID,
+					Content:   cmd.Content,
+				}
+			}
+			commandItems = append(commandItems, NewCommandItem(c.com.Styles, "custom_"+cmd.ID, cmd.Name, "", action))
+		}
+	case MCPPrompts:
+		for _, cmd := range c.mcpCustomCommands {
+			var action Action
+			if len(cmd.Arguments) > 0 {
+				action = ActionOpenCustomCommandArgumentsDialog{
+					CommandID: cmd.ID,
+					Client:    cmd.Client,
+					Arguments: cmd.Arguments,
+				}
+			} else {
+				action = ActionRunCustomCommand{
+					CommandID: cmd.ID,
+					Client:    cmd.Client,
+				}
+			}
+			commandItems = append(commandItems, NewCommandItem(c.com.Styles, "mcp_"+cmd.ID, cmd.Name, "", action))
+		}
 	}
 
 	c.list.SetItems(commandItems...)
-	c.list.SetSelected(0)
 	c.list.SetFilter("")
 	c.list.ScrollToTop()
 	c.list.SetSelected(0)
 	c.input.SetValue("")
 }
 
-// TODO: Rethink this
-func (c *Commands) defaultCommands() []uicmd.Command {
-	commands := []uicmd.Command{
-		{
-			ID:          "new_session",
-			Title:       "New Session",
-			Description: "start a new session",
-			Shortcut:    "ctrl+n",
-			Handler: func(cmd uicmd.Command) tea.Cmd {
-				return uiutil.CmdHandler(ActionNewSession{})
-			},
-		},
-		{
-			ID:          "switch_session",
-			Title:       "Switch Session",
-			Description: "Switch to a different session",
-			Shortcut:    "ctrl+s",
-			Handler: func(cmd uicmd.Command) tea.Cmd {
-				return uiutil.CmdHandler(ActionOpenDialog{SessionsID})
-			},
-		},
-		{
-			ID:          "switch_model",
-			Title:       "Switch Model",
-			Description: "Switch to a different model",
-			// FIXME: The shortcut might get updated if enhanced keyboard is supported.
-			Shortcut: "ctrl+l",
-			Handler: func(cmd uicmd.Command) tea.Cmd {
-				return uiutil.CmdHandler(ActionOpenDialog{ModelsID})
-			},
-		},
+// defaultCommands returns the list of default system commands.
+func (c *Commands) defaultCommands() []*CommandItem {
+	commands := []*CommandItem{
+		NewCommandItem(c.com.Styles, "new_session", "New Session", "ctrl+n", ActionNewSession{}),
+		NewCommandItem(c.com.Styles, "switch_session", "Switch Session", "ctrl+s", ActionOpenDialog{SessionsID}),
+		NewCommandItem(c.com.Styles, "switch_model", "Switch Model", "ctrl+l", ActionOpenDialog{ModelsID}),
 	}
 
 	// Only show compact command if there's an active session
 	if c.sessionID != "" {
-		commands = append(commands, uicmd.Command{
-			ID:          "Summarize",
-			Title:       "Summarize Session",
-			Description: "Summarize the current session and create a new one with the summary",
-			Handler: func(cmd uicmd.Command) tea.Cmd {
-				return uiutil.CmdHandler(ActionSummarize{
-					SessionID: c.sessionID,
-				})
-			},
-		})
+		commands = append(commands, NewCommandItem(c.com.Styles, "summarize", "Summarize Session", "", ActionSummarize{SessionID: c.sessionID}))
 	}
 
 	// Add reasoning toggle for models that support it
@@ -374,116 +390,56 @@ func (c *Commands) defaultCommands() []uicmd.Command {
 				if selectedModel.Think {
 					status = "Disable"
 				}
-				commands = append(commands, uicmd.Command{
-					ID:          "toggle_thinking",
-					Title:       status + " Thinking Mode",
-					Description: "Toggle model thinking for reasoning-capable models",
-					Handler: func(cmd uicmd.Command) tea.Cmd {
-						return uiutil.CmdHandler(ActionToggleThinking{})
-					},
-				})
+				commands = append(commands, NewCommandItem(c.com.Styles, "toggle_thinking", status+" Thinking Mode", "", ActionToggleThinking{}))
 			}
 
 			// OpenAI models: reasoning effort dialog
 			if len(model.ReasoningLevels) > 0 {
-				commands = append(commands, uicmd.Command{
-					ID:          "select_reasoning_effort",
-					Title:       "Select Reasoning Effort",
-					Description: "Choose reasoning effort level (low/medium/high)",
-					Handler: func(cmd uicmd.Command) tea.Cmd {
-						return uiutil.CmdHandler(ActionOpenDialog{
-							// TODO: Pass reasoning dialog id
-						})
-					},
-				})
+				commands = append(commands, NewCommandItem(c.com.Styles, "select_reasoning_effort", "Select Reasoning Effort", "", ActionOpenDialog{
+					// TODO: Pass in the reasoning effort dialog id
+				}))
 			}
 		}
 	}
 	// Only show toggle compact mode command if window width is larger than compact breakpoint (90)
-	// TODO: Get. Rid. Of. Magic. Numbers!
-	if c.width > 120 && c.sessionID != "" {
-		commands = append(commands, uicmd.Command{
-			ID:          "toggle_sidebar",
-			Title:       "Toggle Sidebar",
-			Description: "Toggle between compact and normal layout",
-			Handler: func(cmd uicmd.Command) tea.Cmd {
-				return uiutil.CmdHandler(ActionToggleCompactMode{})
-			},
-		})
+	if c.windowWidth > sidebarCompactModeBreakpoint && c.sessionID != "" {
+		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_sidebar", "Toggle Sidebar", "", ActionToggleCompactMode{}))
 	}
 	if c.sessionID != "" {
 		cfg := c.com.Config()
 		agentCfg := cfg.Agents[config.AgentCoder]
 		model := cfg.GetModelByType(agentCfg.Model)
 		if model != nil && model.SupportsImages {
-			commands = append(commands, uicmd.Command{
-				ID:          "file_picker",
-				Title:       "Open File Picker",
-				Shortcut:    "ctrl+f",
-				Description: "Open file picker",
-				Handler: func(cmd uicmd.Command) tea.Cmd {
-					return uiutil.CmdHandler(ActionOpenDialog{
-						// TODO: Pass file picker dialog id
-					})
-				},
-			})
+			commands = append(commands, NewCommandItem(c.com.Styles, "file_picker", "Open File Picker", "ctrl+f", ActionOpenDialog{
+				// TODO: Pass in the file picker dialog id
+			}))
 		}
 	}
 
 	// Add external editor command if $EDITOR is available
 	// TODO: Use [tea.EnvMsg] to get environment variable instead of os.Getenv
 	if os.Getenv("EDITOR") != "" {
-		commands = append(commands, uicmd.Command{
-			ID:          "open_external_editor",
-			Title:       "Open External Editor",
-			Shortcut:    "ctrl+o",
-			Description: "Open external editor to compose message",
-			Handler: func(cmd uicmd.Command) tea.Cmd {
-				return uiutil.CmdHandler(ActionExternalEditor{})
-			},
-		})
+		commands = append(commands, NewCommandItem(c.com.Styles, "open_external_editor", "Open External Editor", "ctrl+o", ActionExternalEditor{}))
 	}
 
-	return append(commands, []uicmd.Command{
-		{
-			ID:          "toggle_yolo",
-			Title:       "Toggle Yolo Mode",
-			Description: "Toggle yolo mode",
-			Handler: func(cmd uicmd.Command) tea.Cmd {
-				return uiutil.CmdHandler(ActionToggleYoloMode{})
-			},
-		},
-		{
-			ID:          "toggle_help",
-			Title:       "Toggle Help",
-			Shortcut:    "ctrl+g",
-			Description: "Toggle help",
-			Handler: func(cmd uicmd.Command) tea.Cmd {
-				return uiutil.CmdHandler(ActionToggleHelp{})
-			},
-		},
-		{
-			ID:          "init",
-			Title:       "Initialize Project",
-			Description: fmt.Sprintf("Create/Update the %s memory file", config.Get().Options.InitializeAs),
-			Handler: func(cmd uicmd.Command) tea.Cmd {
-				initPrompt, err := agent.InitializePrompt(*c.com.Config())
-				if err != nil {
-					return uiutil.ReportError(err)
-				}
-				return uiutil.CmdHandler(chat.SendMsg{
-					Text: initPrompt,
-				})
-			},
-		},
-		{
-			ID:          "quit",
-			Title:       "Quit",
-			Description: "Quit",
-			Shortcut:    "ctrl+c",
-			Handler: func(cmd uicmd.Command) tea.Cmd {
-				return uiutil.CmdHandler(tea.QuitMsg{})
-			},
-		},
-	}...)
+	return append(commands,
+		NewCommandItem(c.com.Styles, "toggle_yolo", "Toggle Yolo Mode", "", ActionToggleYoloMode{}),
+		NewCommandItem(c.com.Styles, "toggle_help", "Toggle Help", "ctrl+g", ActionToggleHelp{}),
+		NewCommandItem(c.com.Styles, "init", "Initialize Project", "", ActionInitializeProject{}),
+		NewCommandItem(c.com.Styles, "quit", "Quit", "ctrl+c", tea.QuitMsg{}),
+	)
+}
+
+func (c *Commands) SetCustomCommands(customCommands []commands.CustomCommand) {
+	c.customCommands = customCommands
+	if c.selected == UserCommands {
+		c.setCommandItems(c.selected)
+	}
+}
+
+func (c *Commands) SetMCPCustomCommands(mcpCustomCommands []commands.MCPCustomCommand) {
+	c.mcpCustomCommands = mcpCustomCommands
+	if c.selected == MCPPrompts {
+		c.setCommandItems(c.selected)
+	}
 }

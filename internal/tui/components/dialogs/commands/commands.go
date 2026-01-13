@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/agents"
 	"github.com/charmbracelet/crush/internal/tui/exp/list"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
@@ -433,6 +434,16 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 	}
 
 	return append(commands, []Command{
+		{
+			ID:          "agents",
+			Title:       "Subagents",
+			Description: "Manage custom subagents",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(dialogs.OpenDialogMsg{
+					Model: agents.NewAgentsDialog(),
+				})
+			},
+		},
 		{
 			ID:          "toggle_yolo",
 			Title:       "Toggle Yolo Mode",

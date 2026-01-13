@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/subagent"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -24,6 +25,7 @@ var modelPairs = []modelPair{
 	{"openai-gpt-5", openaiBuilder("gpt-5"), openaiBuilder("gpt-4o")},
 	{"openrouter-kimi-k2", openRouterBuilder("moonshotai/kimi-k2-0905"), openRouterBuilder("qwen/qwen3-next-80b-a3b-instruct")},
 	{"zai-glm4.6", zAIBuilder("glm-4.6"), zAIBuilder("glm-4.5-air")},
+	{"vertex-gemini-2-flash", vertexBuilder("gemini-2.0-flash-exp"), vertexBuilder("gemini-2.0-flash-exp")},
 }
 
 func getModels(t *testing.T, r *vcr.Recorder, pair modelPair) (fantasy.LanguageModel, fantasy.LanguageModel) {
@@ -617,6 +619,70 @@ func TestCoderAgent(t *testing.T) {
 
 				require.True(t, foundGlobResult, "Expected to find glob tool result")
 				require.True(t, foundLSResult, "Expected to find ls tool result")
+			})
+			t.Run("subagent tool", func(t *testing.T) {
+				agent, env := setupAgent(t, pair)
+
+				// Create a subagent definition
+				subagentName := "test-subagent"
+				subagentPrompt := "You are a specialized subagent. When asked to 'ping', you respond with 'pong' and nothing else."
+				subagentDef := &subagent.Subagent{
+					Name:         subagentName,
+					Description:  "A test subagent",
+					SystemPrompt: subagentPrompt,
+					Source:       subagent.SubagentSourceProject,
+				}
+
+				// The agent in these tests is a sessionAgent created by coderAgent()
+				// We need to inject the coordinator so we can call subagentTool
+				sa := agent.(*sessionAgent)
+				sa.coordinator, _ = NewCoordinator(t.Context(), env.config, env.sessions, env.messages, env.permissions, env.history, env.lspClients)
+
+				// Add subagent tool to the agent
+				subTool, err := sa.coordinator.(*coordinator).subagentTool(t.Context(), subagentDef)
+				require.NoError(t, err)
+				agent.SetTools(append(sa.tools, subTool))
+
+				session, err := env.sessions.Create(t.Context(), "New Session")
+				require.NoError(t, err)
+
+				res, err := agent.Run(t.Context(), SessionAgentCall{
+					Prompt:          fmt.Sprintf("Use the %s tool and ask it to 'ping'", subagentName),
+					SessionID:       session.ID,
+					MaxOutputTokens: 10000,
+				})
+				require.NoError(t, err)
+				assert.NotNil(t, res)
+
+				msgs, err := env.messages.List(t.Context(), session.ID)
+				require.NoError(t, err)
+
+				foundSubagent := false
+				foundPong := false
+				var subTCID string
+
+				for _, msg := range msgs {
+					if msg.Role == message.Assistant {
+						for _, tc := range msg.ToolCalls() {
+							if tc.Name == subagentName {
+								foundSubagent = true
+								subTCID = tc.ID
+							}
+						}
+					}
+					if msg.Role == message.Tool {
+						for _, tr := range msg.ToolResults() {
+							if tr.ToolCallID == subTCID {
+								if strings.Contains(strings.ToLower(tr.Content), "pong") {
+									foundPong = true
+								}
+							}
+						}
+					}
+				}
+
+				require.True(t, foundSubagent, "Expected assistant to call subagent tool")
+				require.True(t, foundPong, "Expected subagent to return 'pong'")
 			})
 		})
 	}

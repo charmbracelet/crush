@@ -94,6 +94,7 @@ type sessionAgent struct {
 	tools              *csync.Slice[fantasy.AgentTool]
 
 	isSubAgent           bool
+	coordinator          Coordinator
 	sessions             session.Service
 	messages             message.Service
 	disableAutoSummarize bool
@@ -111,6 +112,7 @@ type SessionAgentOptions struct {
 	IsSubAgent           bool
 	DisableAutoSummarize bool
 	IsYolo               bool
+	Coordinator          Coordinator
 	Sessions             session.Service
 	Messages             message.Service
 	Tools                []fantasy.AgentTool
@@ -125,6 +127,7 @@ func NewSessionAgent(
 		systemPromptPrefix:   csync.NewValue(opts.SystemPromptPrefix),
 		systemPrompt:         csync.NewValue(opts.SystemPrompt),
 		isSubAgent:           opts.IsSubAgent,
+		coordinator:          opts.Coordinator,
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
 		disableAutoSummarize: opts.DisableAutoSummarize,

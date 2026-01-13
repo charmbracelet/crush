@@ -87,12 +87,11 @@ type Model struct {
 }
 
 type sessionAgent struct {
-	largeModel         Model
-	smallModel         Model
-	systemPromptPrefix string
-	systemPrompt       string
-	tools              []fantasy.AgentTool
-	mu                 sync.RWMutex
+	largeModel         *csync.Value[Model]
+	smallModel         *csync.Value[Model]
+	systemPromptPrefix *csync.Value[string]
+	systemPrompt       *csync.Value[string]
+	tools              *csync.Slice[fantasy.AgentTool]
 
 	isSubAgent           bool
 	sessions             session.Service
@@ -121,15 +120,15 @@ func NewSessionAgent(
 	opts SessionAgentOptions,
 ) SessionAgent {
 	return &sessionAgent{
-		largeModel:           opts.LargeModel,
-		smallModel:           opts.SmallModel,
-		systemPromptPrefix:   opts.SystemPromptPrefix,
-		systemPrompt:         opts.SystemPrompt,
+		largeModel:           csync.NewValue(opts.LargeModel),
+		smallModel:           csync.NewValue(opts.SmallModel),
+		systemPromptPrefix:   csync.NewValue(opts.SystemPromptPrefix),
+		systemPrompt:         csync.NewValue(opts.SystemPrompt),
 		isSubAgent:           opts.IsSubAgent,
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
 		disableAutoSummarize: opts.DisableAutoSummarize,
-		tools:                opts.Tools,
+		tools:                csync.NewSliceFrom(opts.Tools),
 		isYolo:               opts.IsYolo,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, context.CancelFunc](),
@@ -156,11 +155,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	}
 
 	// Copy mutable fields under lock to avoid races with SetTools/SetModels.
-	a.mu.RLock()
-	agentTools := a.tools
-	largeModel := a.largeModel
-	systemPrompt := a.systemPrompt
-	a.mu.RUnlock()
+	agentTools := a.tools.Copy()
+	largeModel := a.largeModel.Get()
+	systemPrompt := a.systemPrompt.Get()
 
 	if len(agentTools) > 0 {
 		// Add Anthropic caching to the last tool.
@@ -269,15 +266,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			assistantMsg, err = a.messages.Create(callContext, call.SessionID, message.CreateMessageParams{
 				Role:     message.Assistant,
 				Parts:    []message.ContentPart{},
-				Model:    a.largeModel.ModelCfg.Model,
-				Provider: a.largeModel.ModelCfg.Provider,
+				Model:    largeModel.ModelCfg.Model,
+				Provider: largeModel.ModelCfg.Provider,
 			})
 			if err != nil {
 				return callContext, prepared, err
 			}
 			callContext = context.WithValue(callContext, tools.MessageIDContextKey, assistantMsg.ID)
-			callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, a.largeModel.CatwalkCfg.SupportsImages)
-			callContext = context.WithValue(callContext, tools.ModelNameContextKey, a.largeModel.CatwalkCfg.Name)
+			callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatwalkCfg.SupportsImages)
+			callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatwalkCfg.Name)
 			currentAssistant = &assistantMsg
 			return callContext, prepared, err
 		},
@@ -371,7 +368,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				sessionLock.Unlock()
 				return getSessionErr
 			}
-			a.updateSessionUsage(a.largeModel, &updatedSession, stepResult.Usage, a.openrouterCost(stepResult.ProviderMetadata))
+			a.updateSessionUsage(largeModel, &updatedSession, stepResult.Usage, a.openrouterCost(stepResult.ProviderMetadata))
 			_, sessionErr := a.sessions.Save(genCtx, updatedSession)
 			sessionLock.Unlock()
 			if sessionErr != nil {
@@ -381,7 +378,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		},
 		StopWhen: []fantasy.StopCondition{
 			func(_ []fantasy.StepResult) bool {
-				cw := int64(a.largeModel.CatwalkCfg.ContextWindow)
+				cw := int64(largeModel.CatwalkCfg.ContextWindow)
 				tokens := currentSession.CompletionTokens + currentSession.PromptTokens
 				remaining := cw - tokens
 				var threshold int64
@@ -483,7 +480,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				currentAssistant.AddFinish(
 					message.FinishReasonError,
 					"Copilot model not enabled",
-					fmt.Sprintf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", a.largeModel.CatwalkCfg.Name, link),
+					fmt.Sprintf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", largeModel.CatwalkCfg.Name, link),
 				)
 			} else {
 				currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), providerErr.Message)
@@ -539,10 +536,8 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	}
 
 	// Copy mutable fields under lock to avoid races with SetModels.
-	a.mu.RLock()
-	largeModel := a.largeModel
-	systemPromptPrefix := a.systemPromptPrefix
-	a.mu.RUnlock()
+	largeModel := a.largeModel.Get()
+	systemPromptPrefix := a.systemPromptPrefix.Get()
 
 	currentSession, err := a.sessions.Get(ctx, sessionID)
 	if err != nil {
@@ -745,12 +740,9 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		return
 	}
 
-	// Copy mutable fields under lock to avoid races with SetModels.
-	a.mu.RLock()
-	smallModel := a.smallModel
-	largeModel := a.largeModel
-	systemPromptPrefix := a.systemPromptPrefix
-	a.mu.RUnlock()
+	smallModel := a.smallModel.Get()
+	largeModel := a.largeModel.Get()
+	systemPromptPrefix := a.systemPromptPrefix.Get()
 
 	var maxOutputTokens int64 = 40
 	if smallModel.CatwalkCfg.CanReason {
@@ -982,32 +974,24 @@ func (a *sessionAgent) QueuedPromptsList(sessionID string) []string {
 }
 
 func (a *sessionAgent) SetModels(large Model, small Model) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.largeModel = large
-	a.smallModel = small
+	a.largeModel.Set(large)
+	a.smallModel.Set(small)
 }
 
 func (a *sessionAgent) SetTools(tools []fantasy.AgentTool) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.tools = tools
+	a.tools.SetSlice(tools)
 }
 
 func (a *sessionAgent) SetSystemPrompt(systemPrompt string) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.systemPrompt = systemPrompt
+	a.systemPrompt.Set(systemPrompt)
 }
 
 func (a *sessionAgent) Model() Model {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	return a.largeModel
+	return a.largeModel.Get()
 }
 
 func (a *sessionAgent) promptPrefix() string {
-	return a.systemPromptPrefix
+	return a.systemPromptPrefix.Get()
 }
 
 // convertToToolResult converts a fantasy tool result to a message tool result.
@@ -1065,8 +1049,9 @@ func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) mes
 //	BEFORE: [tool result: image data]
 //	AFTER:  [tool result: "Image loaded - see attached"], [user: image attachment]
 func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Message) []fantasy.Message {
-	providerSupportsMedia := a.largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderAnthropic) ||
-		a.largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderBedrock)
+	largeModel := a.largeModel.Get()
+	providerSupportsMedia := largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderAnthropic) ||
+		largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderBedrock)
 
 	if providerSupportsMedia {
 		return messages

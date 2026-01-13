@@ -131,10 +131,7 @@ func (s *Slice[T]) Seq() iter.Seq[T] {
 
 // Seq2 returns an iterator that yields index-value pairs from the slice.
 func (s *Slice[T]) Seq2() iter.Seq2[int, T] {
-	s.mu.RLock()
-	items := make([]T, len(s.inner))
-	copy(items, s.inner)
-	s.mu.RUnlock()
+	items := s.Copy()
 	return func(yield func(int, T) bool) {
 		for i, v := range items {
 			if !yield(i, v) {
@@ -142,4 +139,13 @@ func (s *Slice[T]) Seq2() iter.Seq2[int, T] {
 			}
 		}
 	}
+}
+
+// Copy returns a copy of the inner slice.
+func (s *Slice[T]) Copy() []T {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := make([]T, len(s.inner))
+	copy(items, s.inner)
+	return items
 }

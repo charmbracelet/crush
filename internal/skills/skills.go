@@ -147,7 +147,7 @@ func Discover(paths []string) []*Skill {
 				slog.Warn("Skill validation failed", "path", path, "error", err)
 				return nil
 			}
-			slog.Info("Successfully loaded skill", "name", skill.Name, "path", path)
+			slog.Debug("Successfully loaded skill", "name", skill.Name, "path", path)
 			mu.Lock()
 			skills = append(skills, skill)
 			mu.Unlock()

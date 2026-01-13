@@ -111,7 +111,7 @@ func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permis
 				strings.TrimPrefix(filePath, workingDir),
 			)
 
-			p := permissions.Request(
+			p, err := permissions.Request(ctx,
 				permission.CreatePermissionRequest{
 					SessionID:   sessionID,
 					Path:        fsext.PathOrPrefix(filePath, workingDir),
@@ -126,6 +126,9 @@ func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permis
 					},
 				},
 			)
+			if err != nil {
+				return fantasy.ToolResponse{}, err
+			}
 			if !p {
 				return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 			}

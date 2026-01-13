@@ -154,9 +154,8 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 					content = "<html>\n<body>\n" + body + "\n</body>\n</html>"
 				}
 			}
-			// calculate byte size of content
-			contentSize := int64(len(content))
-			if contentSize > MaxReadSize {
+			// truncate content if it exceeds max read size
+			if int64(len(content)) > MaxReadSize {
 				content = content[:MaxReadSize]
 				content += fmt.Sprintf("\n\n[Content truncated to %d bytes]", MaxReadSize)
 			}

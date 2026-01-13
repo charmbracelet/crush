@@ -194,6 +194,7 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 
 	cfg.Options.SubagentsJSON = agentsJSON
 	cfg.SetupSubagents()
+	cfg.SetupAgents()
 
 	if cfg.Permissions == nil {
 		cfg.Permissions = &config.Permissions{}

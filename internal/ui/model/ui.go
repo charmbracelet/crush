@@ -1652,7 +1652,6 @@ func (m *UI) generateLayout(w, h int) layout {
 	// The sidebar width
 	sidebarWidth := 30
 	// The header height
-	// TODO: handle compact
 	const landingHeaderHeight = 4
 
 	var helpKeyMap help.KeyMap = m

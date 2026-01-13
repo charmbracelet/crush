@@ -183,6 +183,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			a.generateTitle(titleCtx, call.SessionID, call.Prompt)
 		})
 	}
+	defer wg.Wait()
 
 	// Add the user message to the session.
 	_, err = a.createUserMessage(ctx, call)
@@ -491,7 +492,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		}
 		return nil, err
 	}
-	wg.Wait()
 
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"cmp"
 	"context"
 	"net/http"
 	"os"
@@ -106,7 +107,10 @@ func zAIBuilder(model string) builderFunc {
 func vertexBuilder(model string) builderFunc {
 	return func(t *testing.T, r *vcr.Recorder) (fantasy.LanguageModel, error) {
 		provider, err := google.New(
-			google.WithVertex(os.Getenv("GOOGLE_CLOUD_PROJECT"), os.Getenv("GOOGLE_CLOUD_LOCATION")),
+			google.WithVertex(
+				cmp.Or(os.Getenv("VERTEXAI_PROJECT"), os.Getenv("GOOGLE_CLOUD_PROJECT")),
+				cmp.Or(os.Getenv("VERTEXAI_LOCATION"), os.Getenv("GOOGLE_CLOUD_LOCATION")),
+			),
 			google.WithHTTPClient(&http.Client{Transport: r}),
 		)
 		if err != nil {

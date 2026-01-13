@@ -1596,16 +1596,12 @@ func (m *UI) toggleCompactMode() tea.Cmd {
 
 // handleCompactMode updates the UI state based on window size and compact mode setting.
 func (m *UI) handleCompactMode(newWidth, newHeight int) {
-	// If compact mode is forced by user toggle, ignore auto-switching
-	if m.forceCompactMode {
-		if m.state == uiChat {
-			m.isCompact = true
-		}
-		return
-	}
-
 	// Auto-switch based on window size
 	if m.state == uiChat {
+		if m.forceCompactMode {
+			m.isCompact = true
+			return
+		}
 		if newWidth < compactModeWidthBreakpoint || newHeight < compactModeHeightBreakpoint {
 			m.isCompact = true
 		} else {

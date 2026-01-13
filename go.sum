@@ -118,8 +118,8 @@ github.com/charmbracelet/x/exp/slice v0.0.0-20251201173703-9f73bfd934ff h1:Uwr+/
 github.com/charmbracelet/x/exp/slice v0.0.0-20251201173703-9f73bfd934ff/go.mod h1:vqEfX6xzqW1pKKZUUiFOKg0OQ7bCh54Q2vR/tserrRA=
 github.com/charmbracelet/x/json v0.2.0 h1:DqB+ZGx2h+Z+1s98HOuOyli+i97wsFQIxP2ZQANTPrQ=
 github.com/charmbracelet/x/json v0.2.0/go.mod h1:opFIflx2YgXgi49xVUu8gEQ21teFAxyMwvOiZhIvWNM=
-github.com/charmbracelet/x/powernap v0.0.0-20251015113943-25f979b54ad4 h1:i/XilBPYK4L1Yo/mc9FPx0SyJzIsN0y4sj1MWq9Sscc=
-github.com/charmbracelet/x/powernap v0.0.0-20251015113943-25f979b54ad4/go.mod h1:cmdl5zlP5mR8TF2Y68UKc7hdGUDiSJ2+4hk0h04Hsx4=
+github.com/charmbracelet/x/powernap v0.0.0-20260113133648-7b26af63fd1f h1:kbOP6wsI93KA1QKDKpZ/PuiwklbCAIModqKFmnfylPE=
+github.com/charmbracelet/x/powernap v0.0.0-20260113133648-7b26af63fd1f/go.mod h1:cmdl5zlP5mR8TF2Y68UKc7hdGUDiSJ2+4hk0h04Hsx4=
 github.com/charmbracelet/x/term v0.2.2 h1:xVRT/S2ZcKdhhOuSP4t5cLi5o+JxklsoEObBSgfgZRk=
 github.com/charmbracelet/x/term v0.2.2/go.mod h1:kF8CY5RddLWrsgVwpw4kAa6TESp6EB5y3uxGLeCqzAI=
 github.com/charmbracelet/x/termios v0.1.1 h1:o3Q2bT8eqzGnGPOYheoYS8eEleT5ZVNYNy8JawjaNZY=

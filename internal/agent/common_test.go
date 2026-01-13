@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"cmp"
 	"context"
 	"net/http"
 	"os"
@@ -10,6 +11,7 @@ import (
 
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
+	"charm.land/fantasy/providers/google"
 	"charm.land/fantasy/providers/openai"
 	"charm.land/fantasy/providers/openaicompat"
 	"charm.land/fantasy/providers/openrouter"
@@ -33,6 +35,7 @@ import (
 // fakeEnv is an environment for testing.
 type fakeEnv struct {
 	workingDir  string
+	config      *config.Config
 	sessions    session.Service
 	messages    message.Service
 	permissions permission.Service
@@ -101,6 +104,22 @@ func zAIBuilder(model string) builderFunc {
 	}
 }
 
+func vertexBuilder(model string) builderFunc {
+	return func(t *testing.T, r *vcr.Recorder) (fantasy.LanguageModel, error) {
+		provider, err := google.New(
+			google.WithVertex(
+				cmp.Or(os.Getenv("VERTEXAI_PROJECT"), os.Getenv("GOOGLE_CLOUD_PROJECT")),
+				cmp.Or(os.Getenv("VERTEXAI_LOCATION"), os.Getenv("GOOGLE_CLOUD_LOCATION")),
+			),
+			google.WithHTTPClient(&http.Client{Transport: r}),
+		)
+		if err != nil {
+			return nil, err
+		}
+		return provider.LanguageModel(t.Context(), model)
+	}
+}
+
 func testEnv(t *testing.T) fakeEnv {
 	// Use a fixed path for VCR cassette compatibility. The cassettes contain
 	// this path in recorded HTTP request bodies. Using t.TempDir() would
@@ -122,6 +141,8 @@ func testEnv(t *testing.T) fakeEnv {
 	history := history.NewService(q, conn)
 	lspClients := csync.NewMap[string, *lsp.Client]()
 
+	cfg, _ := config.Init(workingDir, "", false)
+
 	t.Cleanup(func() {
 		conn.Close()
 		os.RemoveAll(workingDir)
@@ -129,6 +150,7 @@ func testEnv(t *testing.T) fakeEnv {
 
 	return fakeEnv{
 		workingDir,
+		cfg,
 		sessions,
 		messages,
 		permissions,
@@ -152,7 +174,19 @@ func testSessionAgent(env fakeEnv, large, small fantasy.LanguageModel, systemPro
 			DefaultMaxTokens: 10000,
 		},
 	}
-	agent := NewSessionAgent(SessionAgentOptions{largeModel, smallModel, "", systemPrompt, false, false, true, env.sessions, env.messages, tools})
+	agent := NewSessionAgent(SessionAgentOptions{
+		LargeModel:           largeModel,
+		SmallModel:           smallModel,
+		SystemPromptPrefix:   "",
+		SystemPrompt:         systemPrompt,
+		IsSubAgent:           false,
+		DisableAutoSummarize: false,
+		IsYolo:               true,
+		Coordinator:          nil,
+		Sessions:             env.sessions,
+		Messages:             env.messages,
+		Tools:                tools,
+	})
 	return agent
 }
 

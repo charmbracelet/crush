@@ -1,6 +1,7 @@
 package status
 
 import (
+	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/help"
@@ -18,11 +19,12 @@ type StatusCmp interface {
 }
 
 type statusCmp struct {
-	info       util.InfoMsg
-	width      int
-	messageTTL time.Duration
-	help       help.Model
-	keyMap     help.KeyMap
+	info           util.InfoMsg
+	width          int
+	messageTTL     time.Duration
+	help           help.Model
+	keyMap         help.KeyMap
+	activeSubagent *util.ActiveSubagentMsg
 }
 
 // clearMessageCmd is a command that clears status messages after a timeout
@@ -53,13 +55,30 @@ func (m *statusCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		return m, m.clearMessageCmd(ttl)
 	case util.ClearStatusMsg:
 		m.info = util.InfoMsg{}
+	case util.ActiveSubagentMsg:
+		m.activeSubagent = &msg
+		if msg.Name == "" {
+			m.activeSubagent = nil
+		}
 	}
 	return m, nil
 }
 
 func (m *statusCmp) View() string {
 	t := styles.CurrentTheme()
-	status := t.S().Base.Padding(0, 1, 1, 1).Render(m.help.View(m.keyMap))
+	helpView := m.help.View(m.keyMap)
+
+	if m.activeSubagent != nil {
+		subagentStyle := lipgloss.NewStyle().
+			Background(lipgloss.Color(m.activeSubagent.Color)).
+			Foreground(t.White).
+			Bold(true).
+			Padding(0, 1)
+		indicator := subagentStyle.Render(strings.ToUpper(m.activeSubagent.Name))
+		helpView = indicator + " " + helpView
+	}
+
+	status := t.S().Base.Padding(0, 1, 1, 1).Render(helpView)
 	if m.info.Msg != "" {
 		status = m.infoMsg()
 	}

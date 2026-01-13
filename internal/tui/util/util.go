@@ -43,3 +43,8 @@ type (
 	InfoMsg        = uiutil.InfoMsg
 	ClearStatusMsg = uiutil.ClearStatusMsg
 )
+
+type ActiveSubagentMsg struct {
+	Name  string
+	Color string
+}

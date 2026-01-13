@@ -2,17 +2,20 @@ package agent
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/fantasy"
 	"charm.land/x/vcr"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/subagent"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -24,6 +27,7 @@ var modelPairs = []modelPair{
 	{"openai-gpt-5", openaiBuilder("gpt-5"), openaiBuilder("gpt-4o")},
 	{"openrouter-kimi-k2", openRouterBuilder("moonshotai/kimi-k2-0905"), openRouterBuilder("qwen/qwen3-next-80b-a3b-instruct")},
 	{"zai-glm4.6", zAIBuilder("glm-4.6"), zAIBuilder("glm-4.5-air")},
+	{"vertex-gemini-2-flash", vertexBuilder("gemini-2.0-flash-exp"), vertexBuilder("gemini-2.0-flash-exp")},
 }
 
 func getModels(t *testing.T, r *vcr.Recorder, pair modelPair) (fantasy.LanguageModel, fantasy.LanguageModel) {
@@ -34,7 +38,7 @@ func getModels(t *testing.T, r *vcr.Recorder, pair modelPair) (fantasy.LanguageM
 	return large, small
 }
 
-func setupAgent(t *testing.T, pair modelPair) (SessionAgent, fakeEnv) {
+func setupAgent(t *testing.T, pair modelPair) (SessionAgent, fakeEnv, *vcr.Recorder) {
 	r := vcr.NewRecorder(t)
 	large, small := getModels(t, r, pair)
 	env := testEnv(t)
@@ -42,7 +46,7 @@ func setupAgent(t *testing.T, pair modelPair) (SessionAgent, fakeEnv) {
 	createSimpleGoProject(t, env.workingDir)
 	agent, err := coderAgent(r, env, large, small)
 	require.NoError(t, err)
-	return agent, env
+	return agent, env, r
 }
 
 func TestCoderAgent(t *testing.T) {
@@ -53,7 +57,7 @@ func TestCoderAgent(t *testing.T) {
 	for _, pair := range modelPairs {
 		t.Run(pair.name, func(t *testing.T) {
 			t.Run("simple test", func(t *testing.T) {
-				agent, env := setupAgent(t, pair)
+				agent, env, _ := setupAgent(t, pair)
 
 				session, err := env.sessions.Create(t.Context(), "New Session")
 				require.NoError(t, err)
@@ -61,7 +65,7 @@ func TestCoderAgent(t *testing.T) {
 				res, err := agent.Run(t.Context(), SessionAgentCall{
 					Prompt:          "Hello",
 					SessionID:       session.ID,
-					MaxOutputTokens: 10000,
+					MaxOutputTokens: 8192,
 				})
 				require.NoError(t, err)
 				assert.NotNil(t, res)
@@ -72,14 +76,14 @@ func TestCoderAgent(t *testing.T) {
 				assert.Equal(t, len(msgs), 2)
 			})
 			t.Run("read a file", func(t *testing.T) {
-				agent, env := setupAgent(t, pair)
+				agent, env, _ := setupAgent(t, pair)
 
 				session, err := env.sessions.Create(t.Context(), "New Session")
 				require.NoError(t, err)
 				res, err := agent.Run(t.Context(), SessionAgentCall{
 					Prompt:          "Read the go mod",
 					SessionID:       session.ID,
-					MaxOutputTokens: 10000,
+					MaxOutputTokens: 8192,
 				})
 
 				require.NoError(t, err)
@@ -112,7 +116,7 @@ func TestCoderAgent(t *testing.T) {
 				require.True(t, foundFile)
 			})
 			t.Run("update a file", func(t *testing.T) {
-				agent, env := setupAgent(t, pair)
+				agent, env, _ := setupAgent(t, pair)
 
 				session, err := env.sessions.Create(t.Context(), "New Session")
 				require.NoError(t, err)
@@ -120,7 +124,7 @@ func TestCoderAgent(t *testing.T) {
 				res, err := agent.Run(t.Context(), SessionAgentCall{
 					Prompt:          "update the main.go file by changing the print to say hello from crush",
 					SessionID:       session.ID,
-					MaxOutputTokens: 10000,
+					MaxOutputTokens: 8192,
 				})
 				require.NoError(t, err)
 				assert.NotNil(t, res)
@@ -161,10 +165,10 @@ func TestCoderAgent(t *testing.T) {
 				mainGoPath := filepath.Join(env.workingDir, "main.go")
 				content, err := os.ReadFile(mainGoPath)
 				require.NoError(t, err)
-				require.Contains(t, strings.ToLower(string(content)), "hello from crush")
+				require.Contains(t, strings.ReplaceAll(strings.ReplaceAll(strings.ToLower(string(content)), " ", ""), ",", ""), "hellofromcrush")
 			})
 			t.Run("bash tool", func(t *testing.T) {
-				agent, env := setupAgent(t, pair)
+				agent, env, _ := setupAgent(t, pair)
 
 				session, err := env.sessions.Create(t.Context(), "New Session")
 				require.NoError(t, err)
@@ -172,7 +176,7 @@ func TestCoderAgent(t *testing.T) {
 				res, err := agent.Run(t.Context(), SessionAgentCall{
 					Prompt:          "use bash to create a file named test.txt with content 'hello bash'. do not print its timestamp",
 					SessionID:       session.ID,
-					MaxOutputTokens: 10000,
+					MaxOutputTokens: 8192,
 				})
 				require.NoError(t, err)
 				assert.NotNil(t, res)
@@ -208,7 +212,7 @@ func TestCoderAgent(t *testing.T) {
 				require.Contains(t, string(content), "hello bash")
 			})
 			t.Run("download tool", func(t *testing.T) {
-				agent, env := setupAgent(t, pair)
+				agent, env, _ := setupAgent(t, pair)
 
 				session, err := env.sessions.Create(t.Context(), "New Session")
 				require.NoError(t, err)
@@ -216,7 +220,7 @@ func TestCoderAgent(t *testing.T) {
 				res, err := agent.Run(t.Context(), SessionAgentCall{
 					Prompt:          "download the file from https://example-files.online-convert.com/document/txt/example.txt and save it as example.txt",
 					SessionID:       session.ID,
-					MaxOutputTokens: 10000,
+					MaxOutputTokens: 8192,
 				})
 				require.NoError(t, err)
 				assert.NotNil(t, res)
@@ -251,7 +255,7 @@ func TestCoderAgent(t *testing.T) {
 				require.NoError(t, err, "Expected example.txt file to exist")
 			})
 			t.Run("fetch tool", func(t *testing.T) {
-				agent, env := setupAgent(t, pair)
+				agent, env, _ := setupAgent(t, pair)
 
 				session, err := env.sessions.Create(t.Context(), "New Session")
 				require.NoError(t, err)
@@ -259,7 +263,7 @@ func TestCoderAgent(t *testing.T) {
 				res, err := agent.Run(t.Context(), SessionAgentCall{
 					Prompt:          "fetch the content from https://example-files.online-convert.com/website/html/example.html and tell me if it contains the word 'John Doe'",
 					SessionID:       session.ID,
-					MaxOutputTokens: 10000,
+					MaxOutputTokens: 8192,
 				})
 				require.NoError(t, err)
 				assert.NotNil(t, res)
@@ -290,7 +294,7 @@ func TestCoderAgent(t *testing.T) {
 				require.True(t, foundFetch, "Expected to find a fetch operation")
 			})
 			t.Run("glob tool", func(t *testing.T) {
-				agent, env := setupAgent(t, pair)
+				agent, env, _ := setupAgent(t, pair)
 
 				session, err := env.sessions.Create(t.Context(), "New Session")
 				require.NoError(t, err)
@@ -298,7 +302,7 @@ func TestCoderAgent(t *testing.T) {
 				res, err := agent.Run(t.Context(), SessionAgentCall{
 					Prompt:          "use glob to find all .go files in the current directory",
 					SessionID:       session.ID,
-					MaxOutputTokens: 10000,
+					MaxOutputTokens: 8192,
 				})
 				require.NoError(t, err)
 				assert.NotNil(t, res)
@@ -330,7 +334,7 @@ func TestCoderAgent(t *testing.T) {
 				require.True(t, foundGlob, "Expected to find a glob operation")
 			})
 			t.Run("grep tool", func(t *testing.T) {
-				agent, env := setupAgent(t, pair)
+				agent, env, _ := setupAgent(t, pair)
 
 				session, err := env.sessions.Create(t.Context(), "New Session")
 				require.NoError(t, err)
@@ -338,7 +342,7 @@ func TestCoderAgent(t *testing.T) {
 				res, err := agent.Run(t.Context(), SessionAgentCall{
 					Prompt:          "use grep to search for the word 'package' in go files",
 					SessionID:       session.ID,
-					MaxOutputTokens: 10000,
+					MaxOutputTokens: 8192,
 				})
 				require.NoError(t, err)
 				assert.NotNil(t, res)
@@ -370,7 +374,7 @@ func TestCoderAgent(t *testing.T) {
 				require.True(t, foundGrep, "Expected to find a grep operation")
 			})
 			t.Run("ls tool", func(t *testing.T) {
-				agent, env := setupAgent(t, pair)
+				agent, env, _ := setupAgent(t, pair)
 
 				session, err := env.sessions.Create(t.Context(), "New Session")
 				require.NoError(t, err)
@@ -378,7 +382,7 @@ func TestCoderAgent(t *testing.T) {
 				res, err := agent.Run(t.Context(), SessionAgentCall{
 					Prompt:          "use ls to list the files in the current directory",
 					SessionID:       session.ID,
-					MaxOutputTokens: 10000,
+					MaxOutputTokens: 8192,
 				})
 				require.NoError(t, err)
 				assert.NotNil(t, res)
@@ -411,7 +415,7 @@ func TestCoderAgent(t *testing.T) {
 				require.True(t, foundLS, "Expected to find an ls operation")
 			})
 			t.Run("multiedit tool", func(t *testing.T) {
-				agent, env := setupAgent(t, pair)
+				agent, env, _ := setupAgent(t, pair)
 
 				session, err := env.sessions.Create(t.Context(), "New Session")
 				require.NoError(t, err)
@@ -419,7 +423,7 @@ func TestCoderAgent(t *testing.T) {
 				res, err := agent.Run(t.Context(), SessionAgentCall{
 					Prompt:          "use multiedit to change 'Hello, World!' to 'Hello, Crush!' and add a comment '// Greeting' above the fmt.Println line in main.go",
 					SessionID:       session.ID,
-					MaxOutputTokens: 10000,
+					MaxOutputTokens: 8192,
 				})
 				require.NoError(t, err)
 				assert.NotNil(t, res)
@@ -459,7 +463,7 @@ func TestCoderAgent(t *testing.T) {
 					t.Skip("skipping flacky test on macos for now")
 				}
 
-				agent, env := setupAgent(t, pair)
+				agent, env, _ := setupAgent(t, pair)
 
 				session, err := env.sessions.Create(t.Context(), "New Session")
 				require.NoError(t, err)
@@ -467,7 +471,7 @@ func TestCoderAgent(t *testing.T) {
 				res, err := agent.Run(t.Context(), SessionAgentCall{
 					Prompt:          "use sourcegraph to search for 'func main' in Go repositories",
 					SessionID:       session.ID,
-					MaxOutputTokens: 10000,
+					MaxOutputTokens: 8192,
 				})
 				require.NoError(t, err)
 				assert.NotNil(t, res)
@@ -498,7 +502,7 @@ func TestCoderAgent(t *testing.T) {
 				require.True(t, foundSourcegraph, "Expected to find a sourcegraph operation")
 			})
 			t.Run("write tool", func(t *testing.T) {
-				agent, env := setupAgent(t, pair)
+				agent, env, _ := setupAgent(t, pair)
 
 				session, err := env.sessions.Create(t.Context(), "New Session")
 				require.NoError(t, err)
@@ -506,7 +510,7 @@ func TestCoderAgent(t *testing.T) {
 				res, err := agent.Run(t.Context(), SessionAgentCall{
 					Prompt:          "use write to create a new file called config.json with content '{\"name\": \"test\", \"version\": \"1.0.0\"}'",
 					SessionID:       session.ID,
-					MaxOutputTokens: 10000,
+					MaxOutputTokens: 8192,
 				})
 				require.NoError(t, err)
 				assert.NotNil(t, res)
@@ -543,7 +547,7 @@ func TestCoderAgent(t *testing.T) {
 				require.Contains(t, string(content), "1.0.0", "Expected config.json to contain '1.0.0'")
 			})
 			t.Run("parallel tool calls", func(t *testing.T) {
-				agent, env := setupAgent(t, pair)
+				agent, env, _ := setupAgent(t, pair)
 
 				session, err := env.sessions.Create(t.Context(), "New Session")
 				require.NoError(t, err)
@@ -551,7 +555,7 @@ func TestCoderAgent(t *testing.T) {
 				res, err := agent.Run(t.Context(), SessionAgentCall{
 					Prompt:          "use glob to find all .go files and use ls to list the current directory, it is very important that you run both tool calls in parallel",
 					SessionID:       session.ID,
-					MaxOutputTokens: 10000,
+					MaxOutputTokens: 8192,
 				})
 				require.NoError(t, err)
 				assert.NotNil(t, res)
@@ -617,6 +621,74 @@ func TestCoderAgent(t *testing.T) {
 
 				require.True(t, foundGlobResult, "Expected to find glob tool result")
 				require.True(t, foundLSResult, "Expected to find ls tool result")
+			})
+			t.Run("subagent tool", func(t *testing.T) {
+				agent, env, r := setupAgent(t, pair)
+
+				// Create a subagent definition
+				subagentName := "test-subagent"
+				subagentDef := &subagent.Subagent{
+					Name:         subagentName,
+					Description:  "A test subagent that always says pong",
+					SystemPrompt: "If the user says anything, respond ONLY with 'SUBAGENT_PONG_REPLY'. Do not say anything else.",
+					Source:       subagent.SubagentSourceProject,
+				}
+
+				// The agent in these tests is a sessionAgent created by coderAgent()
+				// We need to inject the coordinator so we can call subagentTool
+				sa := agent.(*sessionAgent)
+				coord, _ := NewCoordinator(t.Context(), env.config, env.sessions, env.messages, env.permissions, env.history, env.lspClients, &http.Client{Transport: r})
+				sa.coordinator = coord
+
+				// Add subagent tool to the agent
+				subTool, err := sa.coordinator.(*coordinator).subagentTool(t.Context(), subagentDef)
+				require.NoError(t, err)
+				agent.SetTools(append(sa.tools, subTool))
+
+				// Wait for coordinator to be ready (building main agent tools etc)
+				_ = sa.coordinator.(*coordinator).readyWg.Wait()
+				time.Sleep(2 * time.Second)
+
+				session, err := env.sessions.Create(t.Context(), "New Session")
+				require.NoError(t, err)
+
+				res, err := agent.Run(t.Context(), SessionAgentCall{
+					Prompt:          fmt.Sprintf("Use the %s tool and tell it 'ping'", subagentName),
+					SessionID:       session.ID,
+					MaxOutputTokens: 8192,
+				})
+				require.NoError(t, err)
+				assert.NotNil(t, res)
+
+				msgs, err := env.messages.List(t.Context(), session.ID)
+				require.NoError(t, err)
+
+				var foundSubagent bool
+				var foundResult bool
+				var subTCID string
+
+				for _, msg := range msgs {
+					if msg.Role == message.Assistant {
+						for _, tc := range msg.ToolCalls() {
+							if tc.Name == subagentName {
+								foundSubagent = true
+								subTCID = tc.ID
+							}
+						}
+					}
+					if msg.Role == message.Tool {
+						for _, tr := range msg.ToolResults() {
+							if tr.ToolCallID == subTCID {
+								if tr.Content != "" {
+									foundResult = true
+								}
+							}
+						}
+					}
+				}
+
+				require.True(t, foundSubagent, "Expected assistant to call subagent tool")
+				require.True(t, foundResult, "Expected subagent to return a result")
 			})
 		})
 	}

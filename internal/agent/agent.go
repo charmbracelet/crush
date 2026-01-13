@@ -96,6 +96,7 @@ type sessionAgent struct {
 	systemPrompt         string
 	isSubAgent           bool
 	tools                []fantasy.AgentTool
+	coordinator          Coordinator
 	sessions             session.Service
 	messages             message.Service
 	disableAutoSummarize bool
@@ -113,6 +114,7 @@ type SessionAgentOptions struct {
 	IsSubAgent           bool
 	DisableAutoSummarize bool
 	IsYolo               bool
+	Coordinator          Coordinator
 	Sessions             session.Service
 	Messages             message.Service
 	Tools                []fantasy.AgentTool
@@ -127,10 +129,11 @@ func NewSessionAgent(
 		systemPromptPrefix:   opts.SystemPromptPrefix,
 		systemPrompt:         opts.SystemPrompt,
 		isSubAgent:           opts.IsSubAgent,
+		tools:                opts.Tools,
+		coordinator:          opts.Coordinator,
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
 		disableAutoSummarize: opts.DisableAutoSummarize,
-		tools:                opts.Tools,
 		isYolo:               opts.IsYolo,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, context.CancelFunc](),
@@ -193,6 +196,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return nil
 		})
 	}
+	defer wg.Wait()
 
 	// Add the user message to the session.
 	_, err = a.createUserMessage(ctx, call)

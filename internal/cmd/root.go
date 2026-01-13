@@ -37,6 +37,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Debug")
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
 	rootCmd.Flags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
+	rootCmd.Flags().String("agents", "", "JSON object defining session-only subagents")
 
 	rootCmd.AddCommand(
 		runCmd,
@@ -178,6 +179,7 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 	debug, _ := cmd.Flags().GetBool("debug")
 	yolo, _ := cmd.Flags().GetBool("yolo")
 	dataDir, _ := cmd.Flags().GetString("data-dir")
+	agentsJSON, _ := cmd.Flags().GetString("agents")
 	ctx := cmd.Context()
 
 	cwd, err := ResolveCwd(cmd)
@@ -189,6 +191,9 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	cfg.Options.SubagentsJSON = agentsJSON
+	cfg.SetupSubagents()
 
 	if cfg.Permissions == nil {
 		cfg.Permissions = &config.Permissions{}

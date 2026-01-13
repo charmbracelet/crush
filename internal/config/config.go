@@ -18,9 +18,11 @@ import (
 	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/oauth/hyper"
+	"github.com/charmbracelet/crush/internal/subagent"
 	"github.com/invopop/jsonschema"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -268,6 +270,7 @@ type Options struct {
 	Attribution               *Attribution `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
 	DisableMetrics            bool         `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
 	InitializeAs              string       `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
+	SubagentsJSON             string       `json:"-"`
 }
 
 type MCPs map[string]MCPConfig
@@ -392,6 +395,8 @@ type Config struct {
 	Tools Tools `json:"tools,omitzero" jsonschema:"description=Tool configurations"`
 
 	Agents map[string]Agent `json:"-"`
+
+	Subagents map[string]*subagent.Subagent `json:"-"`
 
 	// Internal
 	workingDir string `json:"-"`
@@ -702,7 +707,7 @@ func (c *Config) recordRecentModel(modelType SelectedModelType, model SelectedMo
 	return nil
 }
 
-func allToolNames() []string {
+func AllToolNames() []string {
 	return []string{
 		"agent",
 		"bash",
@@ -752,7 +757,7 @@ func filterSlice(data []string, mask []string, include bool) []string {
 }
 
 func (c *Config) SetupAgents() {
-	allowedTools := resolveAllowedTools(allToolNames(), c.Options.DisabledTools)
+	allowedTools := resolveAllowedTools(AllToolNames(), c.Options.DisabledTools)
 
 	agents := map[string]Agent{
 		AgentCoder: {
@@ -778,8 +783,33 @@ func (c *Config) SetupAgents() {
 	c.Agents = agents
 }
 
+func (c *Config) SetupSubagents() {
+	userDir := filepath.Join(home.Dir(), ".config", appName, "agents")
+	projectDir := filepath.Join(c.workingDir, ".crush", "agents")
+
+	loader := subagent.NewLoader(userDir, projectDir, c.Options.SubagentsJSON)
+	subs, err := loader.Load()
+	if err != nil {
+		slog.Error("failed to load subagents", "error", err)
+		return
+	}
+	c.Subagents = subs
+}
+
 func (c *Config) Resolver() VariableResolver {
 	return c.resolver
+}
+
+// ResolveModelAlias maps a subagent model alias to a Crush model type.
+func ResolveModelAlias(alias string) SelectedModelType {
+	switch alias {
+	case "haiku", "small":
+		return SelectedModelTypeSmall
+	case "opus", "sonnet", "large", "", "inherit":
+		return SelectedModelTypeLarge
+	default:
+		return SelectedModelTypeLarge
+	}
 }
 
 func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {

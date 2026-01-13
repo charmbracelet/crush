@@ -61,6 +61,10 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error creating session: %s", err)
 			}
+
+			publishSubagentStarted("agent", "white")
+			defer publishSubagentStopped()
+
 			model := agent.Model()
 			maxTokens := model.CatwalkCfg.DefaultMaxTokens
 			if model.ModelCfg.MaxTokens != 0 {

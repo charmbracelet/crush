@@ -6,6 +6,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -185,7 +186,7 @@ func NewGrepTool(workingDir string) fantasy.AgentTool {
 func searchFiles(ctx context.Context, pattern, rootPath, include string, limit int) ([]grepMatch, bool, error) {
 	matches, err := searchWithRipgrep(ctx, pattern, rootPath, include)
 	if err != nil {
-		matches, err = searchFilesWithRegex(pattern, rootPath, include)
+		matches, err = searchFilesWithRegex(ctx, pattern, rootPath, include)
 		if err != nil {
 			return nil, false, err
 		}
@@ -219,7 +220,8 @@ func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]gr
 
 	output, err := cmd.Output()
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		exitErr := &exec.ExitError{}
+		if errors.As(err, &exitErr) {
 			return []grepMatch{}, nil
 		}
 		return nil, err
@@ -272,7 +274,7 @@ type ripgrepMatch struct {
 	} `json:"data"`
 }
 
-func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error) {
+func searchFilesWithRegex(ctx context.Context, pattern, rootPath, include string) ([]grepMatch, error) {
 	matches := []grepMatch{}
 
 	// Use cached regex compilation
@@ -294,6 +296,13 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 	walker := fsext.NewFastGlobWalker(rootPath)
 
 	err = filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
+		// Check context cancellation
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		if err != nil {
 			return nil // Skip errors
 		}
@@ -342,6 +351,12 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 
 		return nil
 	})
+
+	// If context was cancelled, return context error
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -386,7 +401,7 @@ func isTextFile(filePath string) bool {
 	// Read first 512 bytes for MIME type detection.
 	buffer := make([]byte, 512)
 	n, err := file.Read(buffer)
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return false
 	}
 

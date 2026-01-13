@@ -65,11 +65,14 @@ jobs:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           persist-credentials: false
-      - uses: golang/govulncheck-action@b625fbe08f3bccbe446d94fbf87fcc875a4f50ee # v1.0.4
+      - uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
         with:
-          output-format: sarif
-          output-file: results.sarif
-          go-version-input: 1.26.0-rc.1 # change to "stable" once Go 1.26 is released
+          go-version: 1.26.0-rc.1 # change to "stable" once Go 1.26 is released
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: Run govulncheck
+        run: |
+          govulncheck -C . -format sarif ./... > results.sarif
       - uses: github/codeql-action/upload-sarif@cf1bb45a277cb3c205638b2cd5c984db1c46a412 # v4.31.7
         with:
           sarif_file: results.sarif
@@ -86,4 +89,4 @@ jobs:
       - uses: actions/dependency-review-action@3c4e3dcb1aa7874d2c16be7d79418e9b7efd6261 # v4.8.2
         with:
           fail-on-severity: critical
-          allow-licenses: BSD-2-Clause, BSD-3-Clause, MIT, Apache-2.0, MPL-2.0, ISC
+          allow-licenses: BSD-2-Clause, BSD-3-Clause, MIT, Apache-2.0, MPL-2.0, ISC, LicenseRef-scancode-google-patent-license-golang

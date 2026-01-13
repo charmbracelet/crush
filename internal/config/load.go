@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"maps"
 	"os"
@@ -25,24 +24,10 @@ import (
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/log"
 	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
+	"github.com/qjebbs/go-jsons"
 )
 
 const defaultCatwalkURL = "https://catwalk.charm.sh"
-
-// LoadReader config via io.Reader.
-func LoadReader(fd io.Reader) (*Config, error) {
-	data, err := io.ReadAll(fd)
-	if err != nil {
-		return nil, err
-	}
-
-	var config Config
-	err = json.Unmarshal(data, &config)
-	if err != nil {
-		return nil, err
-	}
-	return &config, err
-}
 
 // Load loads the configuration from the default paths.
 func Load(workingDir, dataDir string, debug bool) (*Config, error) {
@@ -137,6 +122,14 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 	restore := PushPopCrushEnv()
 	defer restore()
 
+	// When disable_default_providers is enabled, skip all default/embedded
+	// providers entirely. Users must fully specify any providers they want.
+	// We skip to the custom provider validation loop which handles all
+	// user-configured providers uniformly.
+	if c.Options.DisableDefaultProviders {
+		knownProviders = nil
+	}
+
 	for _, p := range knownProviders {
 		knownProviderNames[string(p.ID)] = true
 		config, configExists := c.Providers.Get(string(p.ID))
@@ -202,11 +195,12 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 
 		switch {
 		case p.ID == catwalk.InferenceProviderAnthropic && config.OAuthToken != nil:
-			prepared.SetupClaudeCode()
-		case p.ID == catwalk.InferenceProviderCopilot:
-			if config.OAuthToken != nil {
-				prepared.SetupGitHubCopilot()
-			}
+			// Claude Code subscription is not supported anymore. Remove to show onboarding.
+			c.RemoveConfigField("providers.anthropic")
+			c.Providers.Del(string(p.ID))
+			continue
+		case p.ID == catwalk.InferenceProviderCopilot && config.OAuthToken != nil:
+			prepared.SetupGitHubCopilot()
 		}
 
 		switch p.ID {
@@ -365,14 +359,19 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	slices.Sort(c.Options.ContextPaths)
 	c.Options.ContextPaths = slices.Compact(c.Options.ContextPaths)
 
-	// Add the default skills directory if not already present.
-	defaultSkillsDir := GlobalSkillsDir()
-	if !slices.Contains(c.Options.SkillsPaths, defaultSkillsDir) {
-		c.Options.SkillsPaths = append([]string{defaultSkillsDir}, c.Options.SkillsPaths...)
+	// Add the default skills directories if not already present.
+	for _, dir := range GlobalSkillsDirs() {
+		if !slices.Contains(c.Options.SkillsPaths, dir) {
+			c.Options.SkillsPaths = append(c.Options.SkillsPaths, dir)
+		}
 	}
 
 	if str, ok := os.LookupEnv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE"); ok {
 		c.Options.DisableProviderAutoUpdate, _ = strconv.ParseBool(str)
+	}
+
+	if str, ok := os.LookupEnv("CRUSH_DISABLE_DEFAULT_PROVIDERS"); ok {
+		c.Options.DisableDefaultProviders, _ = strconv.ParseBool(str)
 	}
 
 	if c.Options.Attribution == nil {
@@ -630,35 +629,39 @@ func lookupConfigs(cwd string) []string {
 }
 
 func loadFromConfigPaths(configPaths []string) (*Config, error) {
-	var configs []io.Reader
+	var configs [][]byte
 
 	for _, path := range configPaths {
-		fd, err := os.Open(path)
+		data, err := os.ReadFile(path)
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
 			}
 			return nil, fmt.Errorf("failed to open config file %s: %w", path, err)
 		}
-		defer fd.Close()
-
-		configs = append(configs, fd)
+		if len(data) == 0 {
+			continue
+		}
+		configs = append(configs, data)
 	}
 
-	return loadFromReaders(configs)
+	return loadFromBytes(configs)
 }
 
-func loadFromReaders(readers []io.Reader) (*Config, error) {
-	if len(readers) == 0 {
+func loadFromBytes(configs [][]byte) (*Config, error) {
+	if len(configs) == 0 {
 		return &Config{}, nil
 	}
 
-	merged, err := Merge(readers)
+	data, err := jsons.Merge(configs)
 	if err != nil {
-		return nil, fmt.Errorf("failed to merge configuration readers: %w", err)
+		return nil, err
 	}
-
-	return LoadReader(merged)
+	var config Config
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, err
+	}
+	return &config, nil
 }
 
 func hasVertexCredentials(env env.Env) bool {
@@ -746,24 +749,29 @@ func isInsideWorktree() bool {
 	return err == nil && strings.TrimSpace(string(bts)) == "true"
 }
 
-// GlobalSkillsDir returns the default directory for Agent Skills.
-// Skills in this directory are auto-discovered and their files can be read
+// GlobalSkillsDirs returns the default directories for Agent Skills.
+// Skills in these directories are auto-discovered and their files can be read
 // without permission prompts.
-func GlobalSkillsDir() string {
+func GlobalSkillsDirs() []string {
 	if crushSkills := os.Getenv("CRUSH_SKILLS_DIR"); crushSkills != "" {
-		return crushSkills
-	}
-	if xdgConfigHome := os.Getenv("XDG_CONFIG_HOME"); xdgConfigHome != "" {
-		return filepath.Join(xdgConfigHome, appName, "skills")
+		return []string{crushSkills}
 	}
 
-	if runtime.GOOS == "windows" {
-		localAppData := cmp.Or(
+	// Determine the base config directory.
+	var configBase string
+	if xdgConfigHome := os.Getenv("XDG_CONFIG_HOME"); xdgConfigHome != "" {
+		configBase = xdgConfigHome
+	} else if runtime.GOOS == "windows" {
+		configBase = cmp.Or(
 			os.Getenv("LOCALAPPDATA"),
 			filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local"),
 		)
-		return filepath.Join(localAppData, appName, "skills")
+	} else {
+		configBase = filepath.Join(home.Dir(), ".config")
 	}
 
-	return filepath.Join(home.Dir(), ".config", appName, "skills")
+	return []string{
+		filepath.Join(configBase, appName, "skills"),
+		filepath.Join(configBase, "agents", "skills"),
+	}
 }

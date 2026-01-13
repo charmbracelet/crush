@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -18,8 +19,8 @@ type mockPermissionService struct {
 	*pubsub.Broker[permission.PermissionRequest]
 }
 
-func (m *mockPermissionService) Request(req permission.CreatePermissionRequest) bool {
-	return true
+func (m *mockPermissionService) Request(ctx context.Context, req permission.CreatePermissionRequest) (bool, error) {
+	return true, nil
 }
 
 func (m *mockPermissionService) Grant(req permission.PermissionRequest) {}
@@ -119,7 +120,7 @@ func TestMultiEditSequentialApplication(t *testing.T) {
 	_ = NewMultiEditTool(lspClients, permissions, files, tmpDir)
 
 	// Simulate reading the file first.
-	recordFileRead(testFile)
+	filetracker.RecordRead(testFile)
 
 	// Manually test the sequential application logic.
 	currentContent := content

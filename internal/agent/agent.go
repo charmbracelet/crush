@@ -68,6 +68,7 @@ type SessionAgent interface {
 	Run(context.Context, SessionAgentCall) (*fantasy.AgentResult, error)
 	SetModels(large Model, small Model)
 	SetTools(tools []fantasy.AgentTool)
+	SetSystemPrompt(systemPrompt string)
 	Cancel(sessionID string)
 	CancelAll()
 	IsSessionBusy(sessionID string) bool
@@ -134,7 +135,7 @@ func NewSessionAgent(
 }
 
 func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
-	if call.Prompt == "" {
+	if call.Prompt == "" && !message.ContainsTextAttachment(call.Attachments) {
 		return nil, ErrEmptyPrompt
 	}
 	if call.SessionID == "" {
@@ -182,6 +183,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			a.generateTitle(titleCtx, call.SessionID, call.Prompt)
 		})
 	}
+	defer wg.Wait()
 
 	// Add the user message to the session.
 	_, err = a.createUserMessage(ctx, call)
@@ -444,7 +446,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				Content:    content,
 				IsError:    true,
 			}
-			_, createErr = a.messages.Create(context.Background(), currentAssistant.SessionID, message.CreateMessageParams{
+			_, createErr = a.messages.Create(ctx, currentAssistant.SessionID, message.CreateMessageParams{
 				Role: message.Tool,
 				Parts: []message.ContentPart{
 					toolResult,
@@ -490,7 +492,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		}
 		return nil, err
 	}
-	wg.Wait()
 
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
@@ -561,15 +562,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return err
 	}
 
-	summaryPromptText := "Provide a detailed summary of our conversation above."
-	if len(currentSession.Todos) > 0 {
-		summaryPromptText += "\n\n## Current Todo List\n\n"
-		for _, t := range currentSession.Todos {
-			summaryPromptText += fmt.Sprintf("- [%s] %s\n", t.Status, t.Content)
-		}
-		summaryPromptText += "\nInclude these tasks and their statuses in your summary. "
-		summaryPromptText += "Instruct the resuming assistant to use the `todos` tool to continue tracking progress on these tasks."
-	}
+	summaryPromptText := buildSummaryPrompt(currentSession.Todos)
 
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:          summaryPromptText,
@@ -833,10 +826,6 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		modelConfig.CostPer1MIn/1e6*float64(resp.TotalUsage.InputTokens) +
 		modelConfig.CostPer1MOut/1e6*float64(resp.TotalUsage.OutputTokens)
 
-	if a.isClaudeCode() {
-		cost = 0
-	}
-
 	// Use override cost if available (e.g., from OpenRouter).
 	if openrouterCost != nil {
 		cost = *openrouterCost
@@ -874,10 +863,6 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 		modelConfig.CostPer1MIn/1e6*float64(usage.InputTokens) +
 		modelConfig.CostPer1MOut/1e6*float64(usage.OutputTokens)
 
-	if a.isClaudeCode() {
-		cost = 0
-	}
-
 	a.eventTokensUsed(session.ID, model, usage, cost)
 
 	if overrideCost != nil {
@@ -891,14 +876,17 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 }
 
 func (a *sessionAgent) Cancel(sessionID string) {
-	// Cancel regular requests.
-	if cancel, ok := a.activeRequests.Take(sessionID); ok && cancel != nil {
+	// Cancel regular requests. Don't use Take() here - we need the entry to
+	// remain in activeRequests so IsBusy() returns true until the goroutine
+	// fully completes (including error handling that may access the DB).
+	// The defer in processRequest will clean up the entry.
+	if cancel, ok := a.activeRequests.Get(sessionID); ok && cancel != nil {
 		slog.Info("Request cancellation initiated", "session_id", sessionID)
 		cancel()
 	}
 
 	// Also check for summarize requests.
-	if cancel, ok := a.activeRequests.Take(sessionID + "-summarize"); ok && cancel != nil {
+	if cancel, ok := a.activeRequests.Get(sessionID + "-summarize"); ok && cancel != nil {
 		slog.Info("Summarize cancellation initiated", "session_id", sessionID)
 		cancel()
 	}
@@ -980,22 +968,16 @@ func (a *sessionAgent) SetTools(tools []fantasy.AgentTool) {
 	a.tools = tools
 }
 
+func (a *sessionAgent) SetSystemPrompt(systemPrompt string) {
+	a.systemPrompt = systemPrompt
+}
+
 func (a *sessionAgent) Model() Model {
 	return a.largeModel
 }
 
 func (a *sessionAgent) promptPrefix() string {
-	if a.isClaudeCode() {
-		return "You are Claude Code, Anthropic's official CLI for Claude."
-	}
 	return a.systemPromptPrefix
-}
-
-// XXX: this should be generalized to cover other subscription plans, like Copilot.
-func (a *sessionAgent) isClaudeCode() bool {
-	cfg := config.Get()
-	pc, ok := cfg.Providers.Get(a.largeModel.ModelCfg.Provider)
-	return ok && pc.ID == string(catwalk.InferenceProviderAnthropic) && pc.OAuthToken != nil
 }
 
 // convertToToolResult converts a fantasy tool result to a message tool result.
@@ -1118,4 +1100,19 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 	}
 
 	return convertedMessages
+}
+
+// buildSummaryPrompt constructs the prompt text for session summarization.
+func buildSummaryPrompt(todos []session.Todo) string {
+	var sb strings.Builder
+	sb.WriteString("Provide a detailed summary of our conversation above.")
+	if len(todos) > 0 {
+		sb.WriteString("\n\n## Current Todo List\n\n")
+		for _, t := range todos {
+			fmt.Fprintf(&sb, "- [%s] %s\n", t.Status, t.Content)
+		}
+		sb.WriteString("\nInclude these tasks and their statuses in your summary. ")
+		sb.WriteString("Instruct the resuming assistant to use the `todos` tool to continue tracking progress on these tasks.")
+	}
+	return sb.String()
 }

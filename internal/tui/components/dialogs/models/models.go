@@ -10,13 +10,11 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
-	"github.com/charmbracelet/crush/internal/tui/components/dialogs/claude"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/copilot"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/hyper"
 	"github.com/charmbracelet/crush/internal/tui/exp/list"
@@ -81,12 +79,6 @@ type modelDialogCmp struct {
 	// Copilot device flow state
 	copilotDeviceFlow     *copilot.DeviceFlow
 	showCopilotDeviceFlow bool
-
-	// Claude state
-	claudeAuthMethodChooser     *claude.AuthMethodChooser
-	claudeOAuth2                *claude.OAuth2
-	showClaudeAuthMethodChooser bool
-	showClaudeOAuth2            bool
 }
 
 func NewModelDialogCmp() ModelDialog {
@@ -111,9 +103,6 @@ func NewModelDialogCmp() ModelDialog {
 		width:       defaultWidth,
 		keyMap:      DefaultKeyMap(),
 		help:        help,
-
-		claudeAuthMethodChooser: claude.NewAuthMethodChooser(),
-		claudeOAuth2:            claude.NewOAuth2(),
 	}
 }
 
@@ -121,8 +110,6 @@ func (m *modelDialogCmp) Init() tea.Cmd {
 	return tea.Batch(
 		m.modelList.Init(),
 		m.apiKeyInput.Init(),
-		m.claudeAuthMethodChooser.Init(),
-		m.claudeOAuth2.Init(),
 	)
 }
 
@@ -133,7 +120,6 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		m.wHeight = msg.Height
 		m.apiKeyInput.SetWidth(m.width - 2)
 		m.help.SetWidth(m.width - 2)
-		m.claudeAuthMethodChooser.SetWidth(m.width - 2)
 		return m, m.modelList.SetSize(m.listWidth(), m.listHeight())
 	case APIKeyStateChangeMsg:
 		u, cmd := m.apiKeyInput.Update(msg)
@@ -157,20 +143,6 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		return m, nil
 	case copilot.DeviceFlowCompletedMsg:
 		return m, m.saveOauthTokenAndContinue(msg.Token, true)
-	case claude.ValidationCompletedMsg:
-		var cmds []tea.Cmd
-		u, cmd := m.claudeOAuth2.Update(msg)
-		m.claudeOAuth2 = u.(*claude.OAuth2)
-		cmds = append(cmds, cmd)
-
-		if msg.State == claude.OAuthValidationStateValid {
-			cmds = append(cmds, m.saveOauthTokenAndContinue(msg.Token, false))
-			m.keyMap.isClaudeOAuthHelpComplete = true
-		}
-
-		return m, tea.Batch(cmds...)
-	case claude.AuthenticationCompleteMsg:
-		return m, util.CmdHandler(dialogs.CloseDialogMsg{})
 	case tea.KeyPressMsg:
 		switch {
 		// Handle Hyper device flow keys
@@ -178,18 +150,6 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			return m, m.hyperDeviceFlow.CopyCode()
 		case key.Matches(msg, key.NewBinding(key.WithKeys("c", "C"))) && m.showCopilotDeviceFlow:
 			return m, m.copilotDeviceFlow.CopyCode()
-		case key.Matches(msg, key.NewBinding(key.WithKeys("c", "C"))) && m.showClaudeOAuth2 && m.claudeOAuth2.State == claude.OAuthStateURL:
-			return m, tea.Sequence(
-				tea.SetClipboard(m.claudeOAuth2.URL),
-				func() tea.Msg {
-					_ = clipboard.WriteAll(m.claudeOAuth2.URL)
-					return nil
-				},
-				util.ReportInfo("URL copied to clipboard"),
-			)
-		case key.Matches(msg, m.keyMap.Choose) && m.showClaudeAuthMethodChooser:
-			m.claudeAuthMethodChooser.ToggleChoice()
-			return m, nil
 		case key.Matches(msg, m.keyMap.Select):
 			// If showing device flow, enter copies code and opens URL
 			if m.showHyperDeviceFlow && m.hyperDeviceFlow != nil {
@@ -209,37 +169,15 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			}
 
 			askForApiKey := func() {
-				m.keyMap.isClaudeAuthChoiceHelp = false
-				m.keyMap.isClaudeOAuthHelp = false
 				m.keyMap.isAPIKeyHelp = true
 				m.showHyperDeviceFlow = false
 				m.showCopilotDeviceFlow = false
-				m.showClaudeAuthMethodChooser = false
 				m.needsAPIKey = true
 				m.selectedModel = selectedItem
 				m.selectedModelType = modelType
 				m.apiKeyInput.SetProviderName(selectedItem.Provider.Name)
 			}
 
-			if m.showClaudeAuthMethodChooser {
-				switch m.claudeAuthMethodChooser.State {
-				case claude.AuthMethodAPIKey:
-					askForApiKey()
-				case claude.AuthMethodOAuth2:
-					m.selectedModel = selectedItem
-					m.selectedModelType = modelType
-					m.showClaudeAuthMethodChooser = false
-					m.showClaudeOAuth2 = true
-					m.keyMap.isClaudeAuthChoiceHelp = false
-					m.keyMap.isClaudeOAuthHelp = true
-				}
-				return m, nil
-			}
-			if m.showClaudeOAuth2 {
-				m2, cmd2 := m.claudeOAuth2.ValidationConfirm()
-				m.claudeOAuth2 = m2.(*claude.OAuth2)
-				return m, cmd2
-			}
 			if m.isAPIKeyValid {
 				return m, m.saveOauthTokenAndContinue(m.apiKeyValue, true)
 			}
@@ -298,10 +236,6 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				)
 			}
 			switch selectedItem.Provider.ID {
-			case catwalk.InferenceProviderAnthropic:
-				m.showClaudeAuthMethodChooser = true
-				m.keyMap.isClaudeAuthChoiceHelp = true
-				return m, nil
 			case hyperp.Name:
 				m.showHyperDeviceFlow = true
 				m.selectedModel = selectedItem
@@ -327,9 +261,6 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			return m, nil
 		case key.Matches(msg, m.keyMap.Tab):
 			switch {
-			case m.showClaudeAuthMethodChooser:
-				m.claudeAuthMethodChooser.ToggleChoice()
-				return m, nil
 			case m.needsAPIKey:
 				u, cmd := m.apiKeyInput.Update(msg)
 				m.apiKeyInput = u.(*APIKeyInput)
@@ -355,12 +286,6 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				}
 				m.showCopilotDeviceFlow = false
 				m.selectedModel = nil
-			case m.showClaudeAuthMethodChooser:
-				m.claudeAuthMethodChooser.SetDefaults()
-				m.showClaudeAuthMethodChooser = false
-				m.keyMap.isClaudeAuthChoiceHelp = false
-				m.keyMap.isClaudeOAuthHelp = false
-				return m, nil
 			case m.needsAPIKey:
 				if m.isAPIKeyValid {
 					return m, nil
@@ -377,14 +302,6 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			}
 		default:
 			switch {
-			case m.showClaudeAuthMethodChooser:
-				u, cmd := m.claudeAuthMethodChooser.Update(msg)
-				m.claudeAuthMethodChooser = u.(*claude.AuthMethodChooser)
-				return m, cmd
-			case m.showClaudeOAuth2:
-				u, cmd := m.claudeOAuth2.Update(msg)
-				m.claudeOAuth2 = u.(*claude.OAuth2)
-				return m, cmd
 			case m.needsAPIKey:
 				u, cmd := m.apiKeyInput.Update(msg)
 				m.apiKeyInput = u.(*APIKeyInput)
@@ -397,10 +314,6 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		}
 	case tea.PasteMsg:
 		switch {
-		case m.showClaudeOAuth2:
-			u, cmd := m.claudeOAuth2.Update(msg)
-			m.claudeOAuth2 = u.(*claude.OAuth2)
-			return m, cmd
 		case m.needsAPIKey:
 			u, cmd := m.apiKeyInput.Update(msg)
 			m.apiKeyInput = u.(*APIKeyInput)
@@ -432,10 +345,6 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		case m.showCopilotDeviceFlow && m.copilotDeviceFlow != nil:
 			u, cmd := m.copilotDeviceFlow.Update(msg)
 			m.copilotDeviceFlow = u.(*copilot.DeviceFlow)
-			return m, cmd
-		case m.showClaudeOAuth2:
-			u, cmd := m.claudeOAuth2.Update(msg)
-			m.claudeOAuth2 = u.(*claude.OAuth2)
 			return m, cmd
 		default:
 			u, cmd := m.apiKeyInput.Update(msg)
@@ -483,27 +392,6 @@ func (m *modelDialogCmp) View() string {
 	m.keyMap.isCopilotUnavailable = false
 
 	switch {
-	case m.showClaudeAuthMethodChooser:
-		chooserView := m.claudeAuthMethodChooser.View()
-		content := lipgloss.JoinVertical(
-			lipgloss.Left,
-			t.S().Base.Padding(0, 1, 1, 1).Render(core.Title("Let's Auth Anthropic", m.width-4)),
-			chooserView,
-			"",
-			t.S().Base.Width(m.width-2).PaddingLeft(1).AlignHorizontal(lipgloss.Left).Render(m.help.View(m.keyMap)),
-		)
-		return m.style().Render(content)
-	case m.showClaudeOAuth2:
-		m.keyMap.isClaudeOAuthURLState = m.claudeOAuth2.State == claude.OAuthStateURL
-		oauth2View := m.claudeOAuth2.View()
-		content := lipgloss.JoinVertical(
-			lipgloss.Left,
-			t.S().Base.Padding(0, 1, 1, 1).Render(core.Title("Let's Auth Anthropic", m.width-4)),
-			oauth2View,
-			"",
-			t.S().Base.Width(m.width-2).PaddingLeft(1).AlignHorizontal(lipgloss.Left).Render(m.help.View(m.keyMap)),
-		)
-		return m.style().Render(content)
 	case m.needsAPIKey:
 		// Show API key input
 		m.keyMap.isAPIKeyHelp = true
@@ -539,16 +427,6 @@ func (m *modelDialogCmp) Cursor() *tea.Cursor {
 	}
 	if m.showCopilotDeviceFlow && m.copilotDeviceFlow != nil {
 		return m.copilotDeviceFlow.Cursor()
-	}
-	if m.showClaudeAuthMethodChooser {
-		return nil
-	}
-	if m.showClaudeOAuth2 {
-		if cursor := m.claudeOAuth2.CodeInput.Cursor(); cursor != nil {
-			cursor.Y += 2 // FIXME(@andreynering): Why do we need this?
-			return m.moveCursor(cursor)
-		}
-		return nil
 	}
 	if m.needsAPIKey {
 		cursor := m.apiKeyInput.Cursor()

@@ -11,7 +11,6 @@ import (
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/styles"
-	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
 // RenderOptions contains options for rendering LSP lists.
@@ -61,36 +60,23 @@ func RenderLSPList(lspClients *csync.Map[string, *lsp.Client], opts RenderOption
 		// Calculate diagnostic counts if we have LSP clients
 		var extraContent string
 		if lspClients != nil {
-			lspErrs := map[protocol.DiagnosticSeverity]int{
-				protocol.SeverityError:       0,
-				protocol.SeverityWarning:     0,
-				protocol.SeverityHint:        0,
-				protocol.SeverityInformation: 0,
-			}
 			if client, ok := lspClients.Get(l.Name); ok {
-				for _, diagnostics := range client.GetDiagnostics() {
-					for _, diagnostic := range diagnostics {
-						if severity, ok := lspErrs[diagnostic.Severity]; ok {
-							lspErrs[diagnostic.Severity] = severity + 1
-						}
-					}
+				counts := client.GetDiagnosticCounts()
+				errs := []string{}
+				if counts.Error > 0 {
+					errs = append(errs, t.S().Base.Foreground(t.Error).Render(fmt.Sprintf("%s %d", styles.ErrorIcon, counts.Error)))
 				}
+				if counts.Warning > 0 {
+					errs = append(errs, t.S().Base.Foreground(t.Warning).Render(fmt.Sprintf("%s %d", styles.WarningIcon, counts.Warning)))
+				}
+				if counts.Hint > 0 {
+					errs = append(errs, t.S().Base.Foreground(t.FgHalfMuted).Render(fmt.Sprintf("%s %d", styles.HintIcon, counts.Hint)))
+				}
+				if counts.Information > 0 {
+					errs = append(errs, t.S().Base.Foreground(t.FgHalfMuted).Render(fmt.Sprintf("%s %d", styles.InfoIcon, counts.Information)))
+				}
+				extraContent = strings.Join(errs, " ")
 			}
-
-			errs := []string{}
-			if lspErrs[protocol.SeverityError] > 0 {
-				errs = append(errs, t.S().Base.Foreground(t.Error).Render(fmt.Sprintf("%s %d", styles.ErrorIcon, lspErrs[protocol.SeverityError])))
-			}
-			if lspErrs[protocol.SeverityWarning] > 0 {
-				errs = append(errs, t.S().Base.Foreground(t.Warning).Render(fmt.Sprintf("%s %d", styles.WarningIcon, lspErrs[protocol.SeverityWarning])))
-			}
-			if lspErrs[protocol.SeverityHint] > 0 {
-				errs = append(errs, t.S().Base.Foreground(t.FgHalfMuted).Render(fmt.Sprintf("%s %d", styles.HintIcon, lspErrs[protocol.SeverityHint])))
-			}
-			if lspErrs[protocol.SeverityInformation] > 0 {
-				errs = append(errs, t.S().Base.Foreground(t.FgHalfMuted).Render(fmt.Sprintf("%s %d", styles.InfoIcon, lspErrs[protocol.SeverityInformation])))
-			}
-			extraContent = strings.Join(errs, " ")
 		}
 
 		lspList = append(lspList,

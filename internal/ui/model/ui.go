@@ -1581,13 +1581,11 @@ func (m *UI) FullHelp() [][]key.Binding {
 func (m *UI) toggleCompactMode() tea.Cmd {
 	m.forceCompactMode = !m.forceCompactMode
 
-	// Update config
 	err := m.com.Config().SetCompactMode(m.forceCompactMode)
 	if err != nil {
 		return uiutil.ReportError(err)
 	}
 
-	// Update state
 	m.handleCompactMode(m.width, m.height)
 	m.updateLayoutAndSize()
 
@@ -1596,7 +1594,6 @@ func (m *UI) toggleCompactMode() tea.Cmd {
 
 // handleCompactMode updates the UI state based on window size and compact mode setting.
 func (m *UI) handleCompactMode(newWidth, newHeight int) {
-	// Auto-switch based on window size
 	if m.state == uiChat {
 		if m.forceCompactMode {
 			m.isCompact = true
@@ -2003,10 +2000,8 @@ func (m *UI) renderEditorView(width int) string {
 // renderHeader renders and caches the header logo at the specified width.
 func (m *UI) renderHeader(compact bool, width int) {
 	if compact && m.session != nil && m.com.App != nil {
-		// Use compact header for uiChatCompact mode
 		m.header = renderCompactHeader(m.com, m.session, m.com.App.LSPClients, m.detailsOpen, width)
 	} else {
-		// Use regular logo for other modes
 		m.header = renderLogo(m.com.Styles, compact, width)
 	}
 }

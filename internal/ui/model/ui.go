@@ -1734,6 +1734,9 @@ func (m *UI) generateLayout(w, h int) layout {
 			// Add one line gap between header and main content
 			mainRect.Min.Y += 1
 			mainRect, editorRect := uv.SplitVertical(mainRect, uv.Fixed(mainRect.Dy()-editorHeight))
+			mainRect.Max.X -= 1 // Add padding right
+			// Add bottom margin to main
+			mainRect.Max.Y -= 1
 			layout.header = headerRect
 			layout.main = mainRect
 			layout.editor = editorRect

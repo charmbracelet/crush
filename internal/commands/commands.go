@@ -19,11 +19,13 @@ const (
 	projectCommandPrefix = "project:"
 )
 
+// Argument represents a command argument with its name and required status.
 type Argument struct {
 	Name     string
 	Required bool
 }
 
+// MCPCustomCommand represents a custom command loaded from an MCP server.
 type MCPCustomCommand struct {
 	ID        string
 	Name      string
@@ -31,6 +33,7 @@ type MCPCustomCommand struct {
 	Arguments []Argument
 }
 
+// CustomCommand represents a user-defined custom command loaded from markdown files.
 type CustomCommand struct {
 	ID        string
 	Name      string
@@ -43,10 +46,13 @@ type commandSource struct {
 	prefix string
 }
 
+// LoadCustomCommands loads custom commands from multiple sources including
+// XDG config directory, home directory, and project directory.
 func LoadCustomCommands(cfg *config.Config) ([]CustomCommand, error) {
 	return loadAll(buildCommandSources(cfg))
 }
 
+// LoadMCPCustomCommands loads custom commands from available MCP servers.
 func LoadMCPCustomCommands() ([]MCPCustomCommand, error) {
 	var commands []MCPCustomCommand
 	for mcpName, prompts := range mcp.Prompts() {

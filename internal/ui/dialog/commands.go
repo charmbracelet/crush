@@ -274,6 +274,7 @@ func (c *Commands) FullHelp() [][]key.Binding {
 	}
 }
 
+// nextCommandType returns the next command type in the cycle.
 func (c *Commands) nextCommandType() CommandType {
 	switch c.selected {
 	case SystemCommands:
@@ -296,6 +297,7 @@ func (c *Commands) nextCommandType() CommandType {
 	}
 }
 
+// previousCommandType returns the previous command type in the cycle.
 func (c *Commands) previousCommandType() CommandType {
 	switch c.selected {
 	case SystemCommands:
@@ -318,6 +320,7 @@ func (c *Commands) previousCommandType() CommandType {
 	}
 }
 
+// setCommandItems sets the command items based on the specified command type.
 func (c *Commands) setCommandItems(commandType CommandType) {
 	c.selected = commandType
 
@@ -437,6 +440,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	)
 }
 
+// SetCustomCommands sets the custom commands and refreshes the view if user commands are currently displayed.
 func (c *Commands) SetCustomCommands(customCommands []commands.CustomCommand) {
 	c.customCommands = customCommands
 	if c.selected == UserCommands {
@@ -444,6 +448,7 @@ func (c *Commands) SetCustomCommands(customCommands []commands.CustomCommand) {
 	}
 }
 
+// SetMCPCustomCommands sets the MCP custom commands and refreshes the view if MCP prompts are currently displayed.
 func (c *Commands) SetMCPCustomCommands(mcpCustomCommands []commands.MCPCustomCommand) {
 	c.mcpCustomCommands = mcpCustomCommands
 	if c.selected == MCPPrompts {

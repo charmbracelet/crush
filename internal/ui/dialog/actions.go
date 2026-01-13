@@ -40,6 +40,7 @@ type (
 	ActionToggleThinking    struct{}
 	ActionExternalEditor    struct{}
 	ActionToggleYoloMode    struct{}
+	// ActionInitializeProject is a message to initialize a project.
 	ActionInitializeProject struct{}
 	ActionSummarize         struct {
 		SessionID string
@@ -48,6 +49,7 @@ type (
 		Permission permission.PermissionRequest
 		Action     PermissionAction
 	}
+	// ActionRunCustomCommand is a message to run a custom command.
 	ActionRunCustomCommand struct {
 		CommandID string
 		// Used when running a user-defined command
@@ -55,6 +57,7 @@ type (
 		// Used when running a prompt from MCP
 		Client string
 	}
+	// ActionOpenCustomCommandArgumentsDialog is a message to open the custom command arguments dialog.
 	ActionOpenCustomCommandArgumentsDialog struct {
 		CommandID string
 		// Used when running a user-defined command

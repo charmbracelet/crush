@@ -408,7 +408,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 			}
 		}
 	}
-	// Only show toggle compact mode command if window width is larger than compact breakpoint (90)
+	// Only show toggle compact mode command if window width is larger than compact breakpoint (120)
 	if c.windowWidth > sidebarCompactModeBreakpoint && c.sessionID != "" {
 		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_sidebar", "Toggle Sidebar", "", ActionToggleCompactMode{}))
 	}

@@ -349,6 +349,7 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.Permissions,
 		app.History,
 		app.LSPClients,
+		nil,
 	)
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)

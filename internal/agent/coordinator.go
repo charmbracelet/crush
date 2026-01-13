@@ -65,6 +65,7 @@ type coordinator struct {
 	permissions permission.Service
 	history     history.Service
 	lspClients  *csync.Map[string, *lsp.Client]
+	httpClient  *http.Client
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
@@ -80,6 +81,7 @@ func NewCoordinator(
 	permissions permission.Service,
 	history history.Service,
 	lspClients *csync.Map[string, *lsp.Client],
+	httpClient *http.Client,
 ) (Coordinator, error) {
 	c := &coordinator{
 		cfg:         cfg,
@@ -88,6 +90,7 @@ func NewCoordinator(
 		permissions: permissions,
 		history:     history,
 		lspClients:  lspClients,
+		httpClient:  httpClient,
 		agents:      make(map[string]SessionAgent),
 	}
 
@@ -559,8 +562,11 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 		opts = append(opts, anthropic.WithBaseURL(baseURL))
 	}
 
-	if c.cfg.Options.Debug {
-		httpClient := log.NewHTTPClient()
+	httpClient := c.httpClient
+	if httpClient == nil && c.cfg.Options.Debug {
+		httpClient = log.NewHTTPClient()
+	}
+	if httpClient != nil {
 		opts = append(opts, anthropic.WithHTTPClient(httpClient))
 	}
 	return anthropic.New(opts...)
@@ -571,8 +577,11 @@ func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[st
 		openai.WithAPIKey(apiKey),
 		openai.WithUseResponsesAPI(),
 	}
-	if c.cfg.Options.Debug {
-		httpClient := log.NewHTTPClient()
+	httpClient := c.httpClient
+	if httpClient == nil && c.cfg.Options.Debug {
+		httpClient = log.NewHTTPClient()
+	}
+	if httpClient != nil {
 		opts = append(opts, openai.WithHTTPClient(httpClient))
 	}
 	if len(headers) > 0 {
@@ -588,8 +597,11 @@ func (c *coordinator) buildOpenrouterProvider(_, apiKey string, headers map[stri
 	opts := []openrouter.Option{
 		openrouter.WithAPIKey(apiKey),
 	}
-	if c.cfg.Options.Debug {
-		httpClient := log.NewHTTPClient()
+	httpClient := c.httpClient
+	if httpClient == nil && c.cfg.Options.Debug {
+		httpClient = log.NewHTTPClient()
+	}
+	if httpClient != nil {
 		opts = append(opts, openrouter.WithHTTPClient(httpClient))
 	}
 	if len(headers) > 0 {
@@ -633,8 +645,11 @@ func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[str
 		azure.WithAPIKey(apiKey),
 		azure.WithUseResponsesAPI(),
 	}
-	if c.cfg.Options.Debug {
-		httpClient := log.NewHTTPClient()
+	httpClient := c.httpClient
+	if httpClient == nil && c.cfg.Options.Debug {
+		httpClient = log.NewHTTPClient()
+	}
+	if httpClient != nil {
 		opts = append(opts, azure.WithHTTPClient(httpClient))
 	}
 	if options == nil {
@@ -652,8 +667,11 @@ func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[str
 
 func (c *coordinator) buildBedrockProvider(headers map[string]string) (fantasy.Provider, error) {
 	var opts []bedrock.Option
-	if c.cfg.Options.Debug {
-		httpClient := log.NewHTTPClient()
+	httpClient := c.httpClient
+	if httpClient == nil && c.cfg.Options.Debug {
+		httpClient = log.NewHTTPClient()
+	}
+	if httpClient != nil {
 		opts = append(opts, bedrock.WithHTTPClient(httpClient))
 	}
 	if len(headers) > 0 {
@@ -671,8 +689,11 @@ func (c *coordinator) buildGoogleProvider(baseURL, apiKey string, headers map[st
 		google.WithBaseURL(baseURL),
 		google.WithGeminiAPIKey(apiKey),
 	}
-	if c.cfg.Options.Debug {
-		httpClient := log.NewHTTPClient()
+	httpClient := c.httpClient
+	if httpClient == nil && c.cfg.Options.Debug {
+		httpClient = log.NewHTTPClient()
+	}
+	if httpClient != nil {
 		opts = append(opts, google.WithHTTPClient(httpClient))
 	}
 	if len(headers) > 0 {
@@ -683,8 +704,11 @@ func (c *coordinator) buildGoogleProvider(baseURL, apiKey string, headers map[st
 
 func (c *coordinator) buildGoogleVertexProvider(headers map[string]string, options map[string]string) (fantasy.Provider, error) {
 	opts := []google.Option{}
-	if c.cfg.Options.Debug {
-		httpClient := log.NewHTTPClient()
+	httpClient := c.httpClient
+	if httpClient == nil && c.cfg.Options.Debug {
+		httpClient = log.NewHTTPClient()
+	}
+	if httpClient != nil {
 		opts = append(opts, google.WithHTTPClient(httpClient))
 	}
 	if len(headers) > 0 {
@@ -704,8 +728,11 @@ func (c *coordinator) buildHyperProvider(baseURL, apiKey string) (fantasy.Provid
 		hyper.WithBaseURL(baseURL),
 		hyper.WithAPIKey(apiKey),
 	}
-	if c.cfg.Options.Debug {
-		httpClient := log.NewHTTPClient()
+	httpClient := c.httpClient
+	if httpClient == nil && c.cfg.Options.Debug {
+		httpClient = log.NewHTTPClient()
+	}
+	if httpClient != nil {
 		opts = append(opts, hyper.WithHTTPClient(httpClient))
 	}
 	return hyper.New(opts...)

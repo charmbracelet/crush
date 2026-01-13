@@ -49,6 +49,9 @@ func mcpCounts(t *styles.Styles, counts mcp.Counts) string {
 // mcpList renders a list of MCP clients with their status and counts,
 // truncating to maxItems if needed.
 func mcpList(t *styles.Styles, mcps []mcp.ClientInfo, width, maxItems int) string {
+	if maxItems <= 0 {
+		return ""
+	}
 	var renderedMcps []string
 
 	for _, m := range mcps {

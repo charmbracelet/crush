@@ -72,6 +72,9 @@ func lspDiagnostics(t *styles.Styles, diagnostics map[protocol.DiagnosticSeverit
 // lspList renders a list of LSP clients with their status and diagnostics,
 // truncating to maxItems if needed.
 func lspList(t *styles.Styles, lsps []LSPInfo, width, maxItems int) string {
+	if maxItems <= 0 {
+		return ""
+	}
 	var renderedLsps []string
 	for _, l := range lsps {
 		var icon string

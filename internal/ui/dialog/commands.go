@@ -227,11 +227,11 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	width := max(0, min(defaultDialogMaxWidth, area.Dx()))
 	height := max(0, min(defaultDialogHeight, area.Dy()))
 	if area.Dx() != c.windowWidth && c.selected == SystemCommands {
+		c.windowWidth = area.Dx()
 		// since some items in the list depend on width (e.g. toggle sidebar command),
 		// we need to reset the command items when width changes
 		c.setCommandItems(c.selected)
 	}
-	c.windowWidth = area.Dx()
 	innerWidth := width - c.com.Styles.Dialog.View.GetHorizontalFrameSize()
 	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
 		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +

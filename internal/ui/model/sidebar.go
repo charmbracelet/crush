@@ -133,7 +133,7 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 
 	lspSection := m.lspInfo(width, maxLSPs, true)
 	mcpSection := m.mcpInfo(width, maxMCPs, true)
-	filesSection := m.filesInfo(m.com.Config().WorkingDir(), width, maxFiles)
+	filesSection := m.filesInfo(m.com.Config().WorkingDir(), width, maxFiles, true)
 
 	uv.NewStyledString(
 		lipgloss.NewStyle().

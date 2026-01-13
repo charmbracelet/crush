@@ -69,9 +69,22 @@ type Styles struct {
 	TagError lipgloss.Style
 	TagInfo  lipgloss.Style
 
-	// Headers
-	HeaderTool       lipgloss.Style
-	HeaderToolNested lipgloss.Style
+	// Header
+	Header struct {
+		Charm        lipgloss.Style // Style for "Charm™" label
+		Diagonals    lipgloss.Style // Style for diagonal separators (╱)
+		Percentage   lipgloss.Style // Style for context percentage
+		Keystroke    lipgloss.Style // Style for keystroke hints (e.g., "ctrl+d")
+		KeystrokeTip lipgloss.Style // Style for keystroke action text (e.g., "open", "close")
+		WorkingDir   lipgloss.Style // Style for current working directory
+		Separator    lipgloss.Style // Style for separator dots (•)
+	}
+
+	CompactDetails struct {
+		View    lipgloss.Style
+		Version lipgloss.Style
+		Title   lipgloss.Style
+	}
 
 	// Panels
 	PanelMuted lipgloss.Style
@@ -995,9 +1008,18 @@ func DefaultStyles() Styles {
 	s.TagError = s.TagBase.Background(redDark)
 	s.TagInfo = s.TagBase.Background(blueLight)
 
-	// headers
-	s.HeaderTool = lipgloss.NewStyle().Foreground(blue)
-	s.HeaderToolNested = lipgloss.NewStyle().Foreground(fgHalfMuted)
+	// Compact header styles
+	s.Header.Charm = base.Foreground(secondary)
+	s.Header.Diagonals = base.Foreground(primary)
+	s.Header.Percentage = s.Muted
+	s.Header.Keystroke = s.Muted
+	s.Header.KeystrokeTip = s.Subtle
+	s.Header.WorkingDir = s.Muted
+	s.Header.Separator = s.Subtle
+
+	s.CompactDetails.Title = s.Base
+	s.CompactDetails.View = s.Base.Padding(0, 1, 1, 1).Border(lipgloss.RoundedBorder()).BorderForeground(borderFocus)
+	s.CompactDetails.Version = s.Muted
 
 	// panels
 	s.PanelMuted = s.Muted.Background(bgBaseLighter)

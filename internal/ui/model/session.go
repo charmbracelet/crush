@@ -169,9 +169,13 @@ func (m *UI) handleFileEvent(file history.File) tea.Cmd {
 
 // filesInfo renders the modified files section for the sidebar, showing files
 // with their addition/deletion counts.
-func (m *UI) filesInfo(cwd string, width, maxItems int) string {
+func (m *UI) filesInfo(cwd string, width, maxItems int, isSection bool) string {
 	t := m.com.Styles
-	title := common.Section(t, "Modified Files", width)
+
+	title := t.Subtle.Render("Modified Files")
+	if isSection {
+		title = common.Section(t, "Modified Files", width)
+	}
 	list := t.Subtle.Render("None")
 
 	if len(m.sessionFiles) > 0 {
@@ -184,6 +188,9 @@ func (m *UI) filesInfo(cwd string, width, maxItems int) string {
 // fileList renders a list of files with their diff statistics, truncating to
 // maxItems and showing a "...and N more" message if needed.
 func fileList(t *styles.Styles, cwd string, files []SessionFile, width, maxItems int) string {
+	if maxItems <= 0 {
+		return ""
+	}
 	var renderedFiles []string
 	filesShown := 0
 

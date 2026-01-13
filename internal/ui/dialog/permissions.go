@@ -61,22 +61,15 @@ type Permissions struct {
 	permission     permission.PermissionRequest
 	selectedOption int // 0: Allow, 1: Allow for session, 2: Deny
 
-	// Content viewport for scrollable non-diff content (bash commands, URLs, etc.).
-	// Diff views use their own internal scrolling via diffXOffset/diffYOffset.
-	viewport viewport.Model
+	viewport      viewport.Model
+	viewportDirty bool // true when viewport content needs to be re-rendered
+	viewportWidth int
 
 	// Diff view state.
 	diffSplitMode        *bool // nil means use default based on width
 	defaultDiffSplitMode bool  // default split mode based on width
-
-	diffXOffset int
-	diffYOffset int
-
-	// Content caching.
-	cachedContent string
-	contentDirty  bool
-	lastWidth     int
-	lastHeight    int
+	unifiedDiffContent   string
+	splitDiffContent     string
 
 	help   help.Model
 	keyMap permissionsKeyMap
@@ -207,7 +200,6 @@ func NewPermissions(com *common.Common, perm permission.PermissionRequest, opts 
 		viewport:       vp,
 		help:           h,
 		keyMap:         km,
-		contentDirty:   true, // Mark as dirty initially
 	}
 
 	for _, opt := range opts {
@@ -229,7 +221,7 @@ func (*Permissions) ID() string {
 	return PermissionsID
 }
 
-// Update implements [Dialog].
+// HandleMsg implements [Dialog].
 func (p *Permissions) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
@@ -254,66 +246,28 @@ func (p *Permissions) HandleMsg(msg tea.Msg) Action {
 			if p.hasDiffView() {
 				newMode := !p.isSplitMode()
 				p.diffSplitMode = &newMode
-				p.contentDirty = true
+				p.viewportDirty = true
 			}
 		case key.Matches(msg, p.keyMap.ToggleFullscreen):
 			if p.hasDiffView() {
 				p.fullscreen = !p.fullscreen
-				p.contentDirty = true
 			}
 		case key.Matches(msg, p.keyMap.ScrollDown):
-			if p.hasDiffView() {
-				p.diffYOffset++
-				p.contentDirty = true
-			} else {
-				p.viewport, _ = p.viewport.Update(msg)
-			}
+			p.viewport, _ = p.viewport.Update(msg)
 		case key.Matches(msg, p.keyMap.ScrollUp):
-			if p.hasDiffView() {
-				p.diffYOffset = max(0, p.diffYOffset-1)
-				p.contentDirty = true
-			} else {
-				p.viewport, _ = p.viewport.Update(msg)
-			}
+			p.viewport, _ = p.viewport.Update(msg)
 		case key.Matches(msg, p.keyMap.ScrollLeft):
-			if p.hasDiffView() {
-				p.diffXOffset = max(0, p.diffXOffset-5)
-				p.contentDirty = true
-			} else {
-				p.viewport, _ = p.viewport.Update(msg)
-			}
+			p.viewport, _ = p.viewport.Update(msg)
 		case key.Matches(msg, p.keyMap.ScrollRight):
-			if p.hasDiffView() {
-				p.diffXOffset += 5
-				p.contentDirty = true
-			} else {
-				p.viewport, _ = p.viewport.Update(msg)
-			}
-		}
-	case tea.MouseWheelMsg:
-		if p.hasDiffView() {
-			switch msg.Button {
-			case tea.MouseWheelDown:
-				p.diffYOffset++
-				p.contentDirty = true
-			case tea.MouseWheelUp:
-				p.diffYOffset = max(0, p.diffYOffset-1)
-				p.contentDirty = true
-			case tea.MouseWheelLeft:
-				p.diffXOffset = max(0, p.diffXOffset-5)
-				p.contentDirty = true
-			case tea.MouseWheelRight:
-				p.diffXOffset += 5
-				p.contentDirty = true
-			}
-		} else {
-			// For non-diff content, delegate scrolling to the viewport.
 			p.viewport, _ = p.viewport.Update(msg)
 		}
+	case tea.MouseWheelMsg:
+		p.viewport, _ = p.viewport.Update(msg)
 	default:
 		// Pass unhandled keys to viewport for non-diff content scrolling.
 		if !p.hasDiffView() {
 			p.viewport, _ = p.viewport.Update(msg)
+			p.viewportDirty = true
 		}
 	}
 
@@ -391,31 +345,24 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	p.defaultDiffSplitMode = width >= splitModeMinWidth
 
-	// Mark content as dirty if size changed.
-	if contentWidth != p.lastWidth || availableHeight != p.lastHeight {
-		p.contentDirty = true
-		p.lastWidth = contentWidth
-		p.lastHeight = availableHeight
+	if p.viewport.Width() != contentWidth-1 {
+		// Mark diff content as dirty if width has changed
+		p.viewportDirty = true
 	}
 
 	var content string
 	var scrollbar string
-	if p.hasDiffView() {
-		// Diff views handle their own scrolling via diffXOffset/diffYOffset.
-		// No scrollbar for diff views.
-		content = p.getOrRenderContent(contentWidth, availableHeight)
-	} else {
-		// Non-diff content uses the viewport for scrolling.
-		p.viewport.SetWidth(contentWidth - 1) // -1 for scrollbar
-		p.viewport.SetHeight(availableHeight)
-		if p.contentDirty {
-			p.viewport.SetContent(p.renderContent(contentWidth-1, availableHeight))
-			p.contentDirty = false
-		}
-		content = p.viewport.View()
-		if p.canScroll() {
-			scrollbar = common.Scrollbar(t, availableHeight, p.viewport.TotalLineCount(), availableHeight, p.viewport.YOffset())
-		}
+	// Non-diff content uses the viewport for scrolling.
+	p.viewport.SetWidth(contentWidth - 1) // -1 for scrollbar
+	p.viewport.SetHeight(availableHeight)
+	if p.viewportDirty {
+		p.viewport.SetContent(p.renderContent(contentWidth - 1))
+		p.viewportWidth = p.viewport.Width()
+		p.viewportDirty = false
+	}
+	content = p.viewport.View()
+	if p.canScroll() {
+		scrollbar = common.Scrollbar(t, availableHeight, p.viewport.TotalLineCount(), availableHeight, p.viewport.YOffset())
 	}
 
 	// Join content with scrollbar if present.
@@ -492,104 +439,97 @@ func (p *Permissions) renderKeyValue(key, value string, width int) string {
 	return lipgloss.JoinHorizontal(lipgloss.Left, keyStr, valueStr)
 }
 
-func (p *Permissions) getOrRenderContent(width, height int) string {
-	// Return cached content if available and not dirty.
-	if !p.contentDirty && p.cachedContent != "" {
-		return p.cachedContent
-	}
-
-	// Generate new content.
-	content := p.renderContent(width, height)
-
-	// Cache the result.
-	p.cachedContent = content
-	p.contentDirty = false
-
-	return content
-}
-
-func (p *Permissions) renderContent(width, height int) string {
+func (p *Permissions) renderContent(width int) string {
 	switch p.permission.ToolName {
 	case tools.BashToolName:
-		return p.renderBashContent(width)
+		return p.renderBashContent()
 	case tools.EditToolName:
-		return p.renderEditContent(width, height)
+		return p.renderEditContent(width)
 	case tools.WriteToolName:
-		return p.renderWriteContent(width, height)
+		return p.renderWriteContent(width)
 	case tools.MultiEditToolName:
-		return p.renderMultiEditContent(width, height)
+		return p.renderMultiEditContent(width)
 	case tools.DownloadToolName:
-		return p.renderDownloadContent(width)
+		return p.renderDownloadContent()
 	case tools.FetchToolName:
-		return p.renderFetchContent(width)
+		return p.renderFetchContent()
 	case tools.AgenticFetchToolName:
-		return p.renderAgenticFetchContent(width)
+		return p.renderAgenticFetchContent()
 	case tools.ViewToolName:
-		return p.renderViewContent(width)
+		return p.renderViewContent()
 	case tools.LSToolName:
-		return p.renderLSContent(width)
+		return p.renderLSContent()
 	default:
-		return p.renderDefaultContent(width)
+		return p.renderDefaultContent()
 	}
 }
 
-func (p *Permissions) renderBashContent(contentWidth int) string {
+func (p *Permissions) renderBashContent() string {
 	params, ok := p.permission.Params.(tools.BashPermissionsParams)
 	if !ok {
 		return ""
 	}
 
-	return p.com.Styles.Dialog.ContentPanel.Width(contentWidth).Render(params.Command)
+	return p.com.Styles.Dialog.ContentPanel.Render(params.Command)
 }
 
-func (p *Permissions) renderEditContent(contentWidth, contentHeight int) string {
+func (p *Permissions) renderEditContent(contentWidth int) string {
 	params, ok := p.permission.Params.(tools.EditPermissionsParams)
 	if !ok {
 		return ""
 	}
-	return p.renderDiff(params.FilePath, params.OldContent, params.NewContent, contentWidth, contentHeight)
+	return p.renderDiff(params.FilePath, params.OldContent, params.NewContent, contentWidth)
 }
 
-func (p *Permissions) renderWriteContent(contentWidth, contentHeight int) string {
+func (p *Permissions) renderWriteContent(contentWidth int) string {
 	params, ok := p.permission.Params.(tools.WritePermissionsParams)
 	if !ok {
 		return ""
 	}
-	return p.renderDiff(params.FilePath, params.OldContent, params.NewContent, contentWidth, contentHeight)
+	return p.renderDiff(params.FilePath, params.OldContent, params.NewContent, contentWidth)
 }
 
-func (p *Permissions) renderMultiEditContent(contentWidth, contentHeight int) string {
+func (p *Permissions) renderMultiEditContent(contentWidth int) string {
 	params, ok := p.permission.Params.(tools.MultiEditPermissionsParams)
 	if !ok {
 		return ""
 	}
-	return p.renderDiff(params.FilePath, params.OldContent, params.NewContent, contentWidth, contentHeight)
+	return p.renderDiff(params.FilePath, params.OldContent, params.NewContent, contentWidth)
 }
 
-func (p *Permissions) renderDiff(filePath, oldContent, newContent string, contentWidth, contentHeight int) string {
+func (p *Permissions) renderDiff(filePath, oldContent, newContent string, contentWidth int) string {
+	if !p.viewportDirty {
+		if p.isSplitMode() {
+			return p.splitDiffContent
+		}
+		return p.unifiedDiffContent
+	}
+
+	isSplitMode := p.isSplitMode()
 	formatter := common.DiffFormatter(p.com.Styles).
 		Before(fsext.PrettyPath(filePath), oldContent).
 		After(fsext.PrettyPath(filePath), newContent).
-		Height(contentHeight).
-		Width(contentWidth).
-		XOffset(p.diffXOffset).
-		YOffset(p.diffYOffset)
+		// TODO: Allow horizontal scrolling instead of cropping. However, the
+		// diffview currently would only background color the width of the
+		// content. If the viewport is wider than the content, the rest of the
+		// line would not be colored properly.
+		Width(contentWidth)
 
-	if p.isSplitMode() {
+	var result string
+	if isSplitMode {
 		formatter = formatter.Split()
+		p.splitDiffContent = formatter.String()
+		result = p.splitDiffContent
 	} else {
 		formatter = formatter.Unified()
+		p.unifiedDiffContent = formatter.String()
+		result = p.unifiedDiffContent
 	}
-	result := formatter.String()
 
-	// In full screen we want it to take the full space.
-	if p.fullscreen {
-		return lipgloss.NewStyle().Width(contentWidth).Height(contentHeight).Render(result)
-	}
 	return result
 }
 
-func (p *Permissions) renderDownloadContent(contentWidth int) string {
+func (p *Permissions) renderDownloadContent() string {
 	params, ok := p.permission.Params.(tools.DownloadPermissionsParams)
 	if !ok {
 		return ""
@@ -600,19 +540,19 @@ func (p *Permissions) renderDownloadContent(contentWidth int) string {
 		content += fmt.Sprintf("\nTimeout: %ds", params.Timeout)
 	}
 
-	return p.com.Styles.Dialog.ContentPanel.Width(contentWidth).Render(content)
+	return p.com.Styles.Dialog.ContentPanel.Render(content)
 }
 
-func (p *Permissions) renderFetchContent(contentWidth int) string {
+func (p *Permissions) renderFetchContent() string {
 	params, ok := p.permission.Params.(tools.FetchPermissionsParams)
 	if !ok {
 		return ""
 	}
 
-	return p.com.Styles.Dialog.ContentPanel.Width(contentWidth).Render(params.URL)
+	return p.com.Styles.Dialog.ContentPanel.Render(params.URL)
 }
 
-func (p *Permissions) renderAgenticFetchContent(contentWidth int) string {
+func (p *Permissions) renderAgenticFetchContent() string {
 	params, ok := p.permission.Params.(tools.AgenticFetchPermissionsParams)
 	if !ok {
 		return ""
@@ -625,10 +565,10 @@ func (p *Permissions) renderAgenticFetchContent(contentWidth int) string {
 		content = fmt.Sprintf("Prompt: %s", params.Prompt)
 	}
 
-	return p.com.Styles.Dialog.ContentPanel.Width(contentWidth).Render(content)
+	return p.com.Styles.Dialog.ContentPanel.Render(content)
 }
 
-func (p *Permissions) renderViewContent(contentWidth int) string {
+func (p *Permissions) renderViewContent() string {
 	params, ok := p.permission.Params.(tools.ViewPermissionsParams)
 	if !ok {
 		return ""
@@ -642,10 +582,10 @@ func (p *Permissions) renderViewContent(contentWidth int) string {
 		content += fmt.Sprintf("\nLines to read: %d", params.Limit)
 	}
 
-	return p.com.Styles.Dialog.ContentPanel.Width(contentWidth).Render(content)
+	return p.com.Styles.Dialog.ContentPanel.Render(content)
 }
 
-func (p *Permissions) renderLSContent(contentWidth int) string {
+func (p *Permissions) renderLSContent() string {
 	params, ok := p.permission.Params.(tools.LSPermissionsParams)
 	if !ok {
 		return ""
@@ -656,10 +596,10 @@ func (p *Permissions) renderLSContent(contentWidth int) string {
 		content += fmt.Sprintf("\nIgnore patterns: %s", strings.Join(params.Ignore, ", "))
 	}
 
-	return p.com.Styles.Dialog.ContentPanel.Width(contentWidth).Render(content)
+	return p.com.Styles.Dialog.ContentPanel.Render(content)
 }
 
-func (p *Permissions) renderDefaultContent(contentWidth int) string {
+func (p *Permissions) renderDefaultContent() string {
 	content := p.permission.Description
 
 	// Pretty-print JSON params if available.
@@ -691,7 +631,7 @@ func (p *Permissions) renderDefaultContent(contentWidth int) string {
 		return ""
 	}
 
-	return p.com.Styles.Dialog.ContentPanel.Width(contentWidth).Render(strings.TrimSpace(content))
+	return p.com.Styles.Dialog.ContentPanel.Render(strings.TrimSpace(content))
 }
 
 func (p *Permissions) renderButtons(contentWidth int) string {

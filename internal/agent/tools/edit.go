@@ -292,7 +292,7 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 		}
 	}
 	if file.Content != oldContent {
-		// User Manually changed the content store an intermediate version
+		// User manually changed the content; store an intermediate version
 		_, err = edit.files.CreateVersion(edit.ctx, sessionID, filePath, oldContent)
 		if err != nil {
 			slog.Error("Error creating file history version", "error", err)
@@ -430,7 +430,7 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 		}
 	}
 	if file.Content != oldContent {
-		// User Manually changed the content store an intermediate version
+		// User manually changed the content; store an intermediate version
 		_, err = edit.files.CreateVersion(edit.ctx, sessionID, filePath, oldContent)
 		if err != nil {
 			slog.Debug("Error creating file history version", "error", err)

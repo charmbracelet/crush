@@ -66,6 +66,11 @@ type editorCmp struct {
 
 	keyMap EditorKeyMap
 
+	// Input history
+	history       []string
+	historyIndex  int
+	pendingInput  string
+
 	// File path completions
 	currentQuery          string
 	completionsStartIndex int
@@ -151,8 +156,16 @@ func (m *editorCmp) send() tea.Cmd {
 		return nil
 	}
 
+	// Save input to history if it's not empty
+	if value != "" {
+		m.history = append(m.history, value)
+		m.historyIndex = len(m.history)
+		m.pendingInput = ""
+	}
+
 	m.textarea.Reset()
 	m.attachments = nil
+	m.historyIndex = len(m.history)
 	// Change the placeholder when sending a new message.
 	m.randomizePlaceholders()
 
@@ -338,6 +351,30 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			m.textarea.InsertRune('\n')
 			cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
 		}
+		// Handle history navigation
+		if key.Matches(msg, m.keyMap.HistoryUp) {
+			if len(m.history) > 0 && m.historyIndex > 0 {
+				// Save current input if we're not already browsing history
+				if m.historyIndex == len(m.history) {
+					m.pendingInput = m.textarea.Value()
+				}
+				m.historyIndex--
+				m.textarea.SetValue(m.history[m.historyIndex])
+				m.textarea.MoveToEnd()
+			}
+		}
+		if key.Matches(msg, m.keyMap.HistoryDown) {
+			if m.historyIndex < len(m.history) {
+				m.historyIndex++
+				if m.historyIndex == len(m.history) {
+					// Restore pending input
+					m.textarea.SetValue(m.pendingInput)
+				} else {
+					m.textarea.SetValue(m.history[m.historyIndex])
+				}
+				m.textarea.MoveToEnd()
+			}
+		}
 		// Handle Enter key
 		if m.textarea.Focused() && key.Matches(msg, m.keyMap.SendMessage) {
 			value := m.textarea.Value()
@@ -357,6 +394,13 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	if m.textarea.Focused() {
 		kp, ok := msg.(tea.KeyPressMsg)
 		if ok {
+			// Reset history index when user types anything other than navigation keys
+			if !key.Matches(kp, m.keyMap.HistoryUp) && !key.Matches(kp, m.keyMap.HistoryDown) {
+				if m.historyIndex < len(m.history) {
+					m.historyIndex = len(m.history)
+					m.pendingInput = ""
+				}
+			}
 			if kp.String() == "space" || m.textarea.Value() == "" {
 				m.isCompletionsOpen = false
 				m.currentQuery = ""

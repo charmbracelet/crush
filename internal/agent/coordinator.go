@@ -324,16 +324,17 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 
 	largeProviderCfg, _ := c.cfg.Providers.Get(large.ModelCfg.Provider)
 	result := NewSessionAgent(SessionAgentOptions{
-		large,
-		small,
-		largeProviderCfg.SystemPromptPrefix,
-		"",
-		isSubAgent,
-		c.cfg.Options.DisableAutoSummarize,
-		c.permissions.SkipRequests(),
-		c.sessions,
-		c.messages,
-		nil,
+		LargeModel:           large,
+		SmallModel:           small,
+		SystemPromptPrefix:   largeProviderCfg.SystemPromptPrefix,
+		SystemPrompt:         "",
+		IsSubAgent:           isSubAgent,
+		DisableAutoSummarize: c.cfg.Options.DisableAutoSummarize,
+		IsYolo:               c.permissions.SkipRequests(),
+		Coordinator:          c,
+		Sessions:             c.sessions,
+		Messages:             c.messages,
+		Tools:                nil,
 	})
 
 	c.readyWg.Go(func() error {
@@ -346,7 +347,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	})
 
 	c.readyWg.Go(func() error {
-		tools, err := c.buildTools(ctx, agent)
+		tools, err := c.buildTools(ctx, agent, isSubAgent)
 		if err != nil {
 			return err
 		}
@@ -357,7 +358,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	return result, nil
 }
 
-func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fantasy.AgentTool, error) {
+func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool) ([]fantasy.AgentTool, error) {
 	var allTools []fantasy.AgentTool
 	if slices.Contains(agent.AllowedTools, AgentToolName) {
 		agentTool, err := c.agentTool(ctx)
@@ -402,6 +403,21 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 
 	if len(c.cfg.LSP) > 0 {
 		allTools = append(allTools, tools.NewDiagnosticsTool(c.lspClients), tools.NewReferencesTool(c.lspClients))
+	}
+
+	// Add custom subagents
+	if !isSubAgent {
+		for _, sub := range c.cfg.Subagents {
+			if sub.Disabled {
+				continue
+			}
+			tool, err := c.subagentTool(ctx, sub)
+			if err != nil {
+				slog.Error("failed to create subagent tool", "subagent", sub.Name, "error", err)
+				continue
+			}
+			allTools = append(allTools, tool)
+		}
 	}
 
 	var filteredTools []fantasy.AgentTool
@@ -810,7 +826,7 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 		return errors.New("coder agent not configured")
 	}
 
-	tools, err := c.buildTools(ctx, agentCfg)
+	tools, err := c.buildTools(ctx, agentCfg, false)
 	if err != nil {
 		return err
 	}

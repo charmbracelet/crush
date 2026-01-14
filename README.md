@@ -622,6 +622,185 @@ Local models can also be configured via OpenAI-compatible API. Here are two comm
 }
 ```
 
+## Headless / CI Usage
+
+Crush supports **first-class headless execution** for CI pipelines, containers, and automation.
+The `crush run` command runs without a TUI and works without a TTY.
+
+### Quick Start
+
+```bash
+# Simple prompt
+crush run "Explain Go contexts"
+
+# Pipe from stdin
+cat file.go | crush run "Review this code"
+
+# JSON output for scripting
+crush run -f json "List 5 ideas" | jq '.output'
+```
+
+### Input Sources (Priority Order)
+
+1. **stdin** (if piped): `echo "prompt" | crush run`
+2. **--input file**: `crush run -i prompt.txt`
+3. **Arguments**: `crush run "your prompt"`
+
+### Output Formats
+
+| Format | Description | Use Case |
+|--------|-------------|----------|
+| `text` | Streamed plain text (default) | Human reading |
+| `json` | Structured JSON, buffered | Scripting, parsing |
+| `stream-json` | NDJSON, real-time events | Pipelines, monitoring |
+| `raw` | Raw model output only | Minimal processing |
+
+```bash
+# Real-time NDJSON streaming
+crush run -f stream-json "Build app" | while read -r line; do
+  echo "$line" | jq -r '.type'
+done
+```
+
+### JSON Output Schema (v1.0.0)
+
+```json
+{
+  "version": "1.0.0",
+  "timestamp": "2025-01-14T09:00:00Z",
+  "model": "Claude Sonnet 4",
+  "provider": "anthropic",
+  "session": "abc123",
+  "request_id": "req_xyz",
+  "input": "your prompt",
+  "output": "model response",
+  "tokens": {
+    "input": 100,
+    "output": 50,
+    "cache_read": 0,
+    "cache_create": 0,
+    "total": 150
+  },
+  "duration_ms": 1234,
+  "turns": 3,
+  "tool_calls": 5,
+  "status": "success",
+  "stop_reason": "end_turn"
+}
+```
+
+### All Flags
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--format` | `-f` | Output format: text, json, stream-json, raw |
+| `--model` | `-m` | Override the default model |
+| `--session` | `-s` | Use or create a named session |
+| `--continue` | `-c` | Continue the most recent session |
+| `--timeout` | `-t` | Max execution time (e.g., 5m, 1h) |
+| `--input` | `-i` | Read prompt from file |
+| `--output` | `-o` | Write output to file (+ stdout) |
+| `--quiet` | `-q` | Hide spinner |
+| `--verbose` | `-v` | Debug output to stderr |
+| `--max-turns` | | Limit agent turns (tool iterations) |
+| `--allowed-tools` | | Auto-approve these tools |
+| `--append-system-prompt` | | Add custom instructions |
+| `--system-prompt` | | Replace system prompt entirely |
+| `--no-skills` | | Disable agent skills |
+| `--no-cache` | | Disable prompt caching |
+
+### Exit Codes
+
+| Code | Constant | Meaning |
+|------|----------|---------|
+| 0 | `ExitSuccess` | Success |
+| 1 | `ExitRuntimeError` | Runtime/model/timeout error |
+| 2 | `ExitInvalidInput` | Invalid flags or input |
+| 3 | `ExitConfigError` | Configuration error |
+| 130 | `ExitInterrupted` | SIGINT/Ctrl+C |
+
+### Error Codes (JSON)
+
+When `status: "error"`, the `error_code` field contains:
+
+| Code | Meaning |
+|------|---------|
+| `INVALID_FORMAT` | Invalid --format value |
+| `INVALID_INPUT` | Bad input data |
+| `NO_PROMPT` | No prompt provided |
+| `FILE_NOT_FOUND` | Input file missing |
+| `TIMEOUT` | Execution timed out |
+| `INTERRUPTED` | Execution interrupted |
+| `NO_PROVIDER` | No API provider configured |
+| `AUTH_FAILED` | Authentication failed |
+| `RATE_LIMITED` | API rate limited |
+| `MAX_TURNS_EXCEEDED` | Hit max-turns limit |
+
+### Advanced Examples
+
+```bash
+# Short flags for common operations
+crush run -f json -m claude-sonnet-4 -t 5m "Analyze code"
+
+# Output to both stdout and file
+crush run -o results.txt "Generate report"
+
+# Limit agent behavior
+crush run --max-turns 3 --allowed-tools view,ls,grep "Read-only exploration"
+
+# Custom system instructions
+crush run --append-system-prompt "Always use TypeScript" "Create component"
+
+# Replace system prompt entirely (advanced)
+crush run --system-prompt "You are a code reviewer. Only find bugs." "Review"
+```
+
+### CI Pipeline Examples
+
+**GitHub Actions:**
+
+```yaml
+- name: AI Code Review
+  run: |
+    crush run -f json -t 10m --max-turns 10 \
+      "Review changes in this PR" > review.json
+  env:
+    ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+**GitLab CI:**
+
+```yaml
+generate-docs:
+  script:
+    - crush run -f json --allowed-tools view,ls,grep \
+        "Generate API docs" | jq '.output' > docs.md
+```
+
+### Docker Usage
+
+```bash
+# No TTY required
+docker run --rm \
+  -e OPENAI_API_KEY=$OPENAI_API_KEY \
+  -v $(pwd):/workspace \
+  -w /workspace \
+  crush:latest run -f json "Describe this project"
+
+  crush:latest run --format json "Describe this project"
+```
+
+### Differences from TUI Mode
+
+| Feature | TUI Mode | Headless Mode |
+|---------|----------|---------------|
+| Interactive | ✓ | ✗ |
+| Requires TTY | ✓ | ✗ |
+| Visual feedback | Rich UI | Optional spinner |
+| Output formats | Rendered | Text/JSON/Stream-JSON/Raw |
+| Permission prompts | Interactive | Auto-approved (or --allowed-tools) |
+| Session continuation | Manual | --continue flag |
+
 ## Logging
 
 Sometimes you need to look at logs. Luckily, Crush logs all sorts of

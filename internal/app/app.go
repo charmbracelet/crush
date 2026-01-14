@@ -276,7 +276,231 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 	}
 }
 
+// RunNonInteractiveWithOptions runs the application in non-interactive mode
+// with full headless options including JSON output, model override, and timeouts.
+func (app *App) RunNonInteractiveWithOptions(ctx context.Context, output io.Writer, prompt string, opts HeadlessOptions) error {
+	slog.Info("Running in headless mode", "format", opts.Format, "model", opts.ModelID)
+
+	startTime := time.Now()
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var (
+		spinner   *format.Spinner
+		stderrTTY = term.IsTerminal(os.Stderr.Fd())
+		stdinTTY  = term.IsTerminal(os.Stdin.Fd())
+		stdoutTTY bool
+	)
+
+	if f, ok := output.(*os.File); ok {
+		stdoutTTY = term.IsTerminal(f.Fd())
+	}
+
+	// Show spinner for text/raw formats if appropriate
+	showSpinner := opts.ShouldShowSpinner() && stderrTTY
+	if showSpinner {
+		t := styles.CurrentTheme()
+		hasDarkBG := true
+		if f, ok := output.(*os.File); ok && stdinTTY && stdoutTTY {
+			hasDarkBG = lipgloss.HasDarkBackground(os.Stdin, f)
+		}
+		defaultFG := lipgloss.LightDark(hasDarkBG)(charmtone.Pepper, t.FgBase)
+
+		spinner = format.NewSpinner(ctx, cancel, anim.Settings{
+			Size:        10,
+			Label:       "Generating",
+			LabelColor:  defaultFG,
+			GradColorA:  t.Primary,
+			GradColorB:  t.Secondary,
+			CycleColors: true,
+		})
+		spinner.Start()
+	}
+
+	stopSpinner := func() {
+		if spinner != nil {
+			spinner.Stop()
+			spinner = nil
+		}
+	}
+	defer stopSpinner()
+
+	// Create session
+	const maxPromptLengthForTitle = 100
+	const titlePrefix = "Headless: "
+	var titleSuffix string
+	if len(prompt) > maxPromptLengthForTitle {
+		titleSuffix = prompt[:maxPromptLengthForTitle] + "..."
+	} else {
+		titleSuffix = prompt
+	}
+	title := titlePrefix + titleSuffix
+
+	sess, err := app.Sessions.Create(ctx, title)
+	if err != nil {
+		return app.handleHeadlessError(output, prompt, startTime, opts, fmt.Errorf("failed to create session: %w", err))
+	}
+	slog.Info("Created session for headless run", "session_id", sess.ID)
+
+	// Auto-approve permissions for headless execution
+	app.Permissions.AutoApproveSession(sess.ID)
+
+	// For JSON format, we buffer the output
+	var outputBuffer strings.Builder
+
+	type response struct {
+		result *fantasy.AgentResult
+		err    error
+	}
+	done := make(chan response, 1)
+
+	go func(ctx context.Context, sessionID, prompt string) {
+		result, err := app.AgentCoordinator.Run(ctx, sess.ID, prompt)
+		if err != nil {
+			done <- response{
+				err: fmt.Errorf("agent processing failed: %w", err),
+			}
+			return
+		}
+		done <- response{
+			result: result,
+		}
+	}(ctx, sess.ID, prompt)
+
+	messageEvents := app.Messages.Subscribe(ctx)
+	messageReadBytes := make(map[string]int)
+
+	defer func() {
+		if stderrTTY && opts.Format != FormatJSON {
+			_, _ = fmt.Fprintf(os.Stderr, ansi.ResetProgressBar)
+		}
+		// Print newline for text/raw formats
+		if opts.Format != FormatJSON {
+			_, _ = fmt.Fprintln(output)
+		}
+	}()
+
+	var agentResult *fantasy.AgentResult
+
+	for {
+		if showSpinner && stderrTTY {
+			_, _ = fmt.Fprintf(os.Stderr, ansi.SetIndeterminateProgressBar)
+		}
+
+		select {
+		case res := <-done:
+			stopSpinner()
+			if res.err != nil {
+				if errors.Is(res.err, context.Canceled) || errors.Is(res.err, agent.ErrRequestCancelled) {
+					slog.Info("Headless: agent processing cancelled", "session_id", sess.ID)
+					if opts.Format == FormatJSON {
+						return app.outputHeadlessJSON(output, prompt, outputBuffer.String(), startTime, nil, "error", "execution cancelled")
+					}
+					return nil
+				}
+				return app.handleHeadlessError(output, prompt, startTime, opts, res.err)
+			}
+			agentResult = res.result
+
+			// Output final result
+			if opts.Format == FormatJSON {
+				return app.outputHeadlessJSON(output, prompt, outputBuffer.String(), startTime, agentResult, "success", "")
+			}
+			return nil
+
+		case event := <-messageEvents:
+			msg := event.Payload
+			if msg.SessionID == sess.ID && msg.Role == message.Assistant && len(msg.Parts) > 0 {
+				stopSpinner()
+
+				content := msg.Content().String()
+				readBytes := messageReadBytes[msg.ID]
+
+				if len(content) < readBytes {
+					slog.Error("Headless: message content is shorter than read bytes", "message_length", len(content), "read_bytes", readBytes)
+					return app.handleHeadlessError(output, prompt, startTime, opts, fmt.Errorf("message content is shorter than read bytes: %d < %d", len(content), readBytes))
+				}
+
+				part := content[readBytes:]
+				if readBytes == 0 {
+					part = strings.TrimLeft(part, " \t")
+				}
+
+				// For JSON, buffer the output; for text/raw, stream it
+				if opts.Format == FormatJSON {
+					outputBuffer.WriteString(part)
+				} else {
+					fmt.Fprint(output, part)
+				}
+				messageReadBytes[msg.ID] = len(content)
+			}
+
+		case <-ctx.Done():
+			stopSpinner()
+			if opts.Format == FormatJSON {
+				errMsg := "execution cancelled"
+				if ctx.Err() == context.DeadlineExceeded {
+					errMsg = "execution timed out"
+				}
+				return app.outputHeadlessJSON(output, prompt, outputBuffer.String(), startTime, nil, "error", errMsg)
+			}
+			return ctx.Err()
+		}
+	}
+}
+
+// handleHeadlessError handles errors for headless execution based on format.
+func (app *App) handleHeadlessError(output io.Writer, prompt string, startTime time.Time, opts HeadlessOptions, err error) error {
+	if opts.Format == FormatJSON {
+		return app.outputHeadlessJSON(output, prompt, "", startTime, nil, "error", err.Error())
+	}
+	return err
+}
+
+// outputHeadlessJSON outputs the result as JSON.
+func (app *App) outputHeadlessJSON(output io.Writer, input, outputText string, startTime time.Time, result *fantasy.AgentResult, status, errMsg string) error {
+	duration := time.Since(startTime)
+
+	// Get model name from coordinator if available
+	modelName := ""
+	if app.AgentCoordinator != nil {
+		model := app.AgentCoordinator.Model()
+		if model.CatwalkCfg.Name != "" {
+			modelName = model.CatwalkCfg.Name
+		} else if model.ModelCfg.Model != "" {
+			modelName = model.ModelCfg.Model
+		}
+	}
+
+	// Extract token usage from result (if available)
+	var tokens TokenUsage
+	if result != nil && result.Usage != nil {
+		tokens.Input = result.Usage.InputTokens
+		tokens.Output = result.Usage.OutputTokens
+	}
+
+	headlessResult := HeadlessResult{
+		Model:      modelName,
+		Input:      input,
+		Output:     outputText,
+		Tokens:     tokens,
+		DurationMS: duration.Milliseconds(),
+		Status:     status,
+		Error:      errMsg,
+	}
+
+	jsonBytes, err := headlessResult.ToJSON()
+	if err != nil {
+		return fmt.Errorf("failed to serialize JSON output: %w", err)
+	}
+
+	fmt.Fprintln(output, string(jsonBytes))
+	return nil
+}
+
 func (app *App) UpdateAgentModel(ctx context.Context) error {
+
 	if app.AgentCoordinator == nil {
 		return fmt.Errorf("agent configuration is missing")
 	}

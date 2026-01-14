@@ -19,7 +19,7 @@ You are a test agent.
 `
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "test-agent.md")
-	err := os.WriteFile(path, []byte(content), 0644)
+	err := os.WriteFile(path, []byte(content), 0o644)
 	require.NoError(t, err)
 
 	sub, err := ParseSubagentFile(path)
@@ -49,9 +49,9 @@ Project prompt
 `
 	cliJSON := `{"shared-agent": {"description": "CLI level", "prompt": "CLI prompt"}}`
 
-	err := os.WriteFile(filepath.Join(userDir, "shared.md"), []byte(userContent), 0644)
+	err := os.WriteFile(filepath.Join(userDir, "shared.md"), []byte(userContent), 0o644)
 	require.NoError(t, err)
-	err = os.WriteFile(filepath.Join(projectDir, "shared.md"), []byte(projectContent), 0644)
+	err = os.WriteFile(filepath.Join(projectDir, "shared.md"), []byte(projectContent), 0o644)
 	require.NoError(t, err)
 
 	// Test CLI priority

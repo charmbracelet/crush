@@ -1020,9 +1020,9 @@ func substituteArgs(content string, args map[string]string) string {
 func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType) tea.Cmd {
 	switch provider.ID {
 	case "hyper":
-		return m.openOAuthDialog(provider, model, modelType)
+		return m.openOAuthHyperDialog(provider, model, modelType)
 	case catwalk.InferenceProviderCopilot:
-		return m.openOAuthDialog(provider, model, modelType)
+		return m.openOAuthCopilotDialog(provider, model, modelType)
 	default:
 		return m.openAPIKeyInputDialog(provider, model, modelType)
 	}
@@ -1042,19 +1042,23 @@ func (m *UI) openAPIKeyInputDialog(provider catwalk.Provider, model config.Selec
 	return nil
 }
 
-func (m *UI) openOAuthDialog(provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType) tea.Cmd {
+func (m *UI) openOAuthHyperDialog(provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType) tea.Cmd {
 	if m.dialog.ContainsDialog(dialog.OAuthID) {
 		m.dialog.BringToFront(dialog.OAuthID)
 		return nil
 	}
 
-	oAuthDialog, err := dialog.NewOAuth(m.com, provider, model, modelType)
+	oAuthDialog, err := dialog.NewOAuthHyper(m.com, provider, model, modelType)
 	if err != nil {
 		return uiutil.ReportError(err)
 	}
 	m.dialog.OpenDialog(oAuthDialog)
 
 	return oAuthDialog.Init()
+}
+
+func (m *UI) openOAuthCopilotDialog(provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType) tea.Cmd {
+	panic("TODO")
 }
 
 func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {

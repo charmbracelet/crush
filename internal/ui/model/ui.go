@@ -18,6 +18,7 @@ import (
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -103,6 +104,9 @@ type (
 		Content     string
 		Attachments []message.Attachment
 	}
+
+	// closeDialogMsg is sent to close the current dialog.
+	closeDialogMsg struct{}
 )
 
 // UI represents the main user interface model.
@@ -351,6 +355,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			commands.SetMCPPrompts(m.mcpPrompts)
 		}
 
+	case closeDialogMsg:
+		m.dialog.CloseFrontDialog()
+
 	case pubsub.Event[message.Message]:
 		// Check if this is a child session message for an agent tool.
 		if m.session == nil {
@@ -501,6 +508,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		}
+	case spinner.TickMsg:
+		if m.dialog.HasDialogs() {
+			// route to dialog
+			if cmd := m.handleDialogMsg(msg); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
+
 	case tea.KeyPressMsg:
 		if cmd := m.handleKeyPressMsg(msg); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -936,23 +951,56 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 
 	case dialog.ActionRunCustomCommand:
-		if len(msg.Arguments) > 0 {
-			// TODO: open arguments dialog
+		if len(msg.Arguments) > 0 && msg.Args == nil {
+			m.dialog.CloseFrontDialog()
+			argsDialog := dialog.NewArguments(
+				m.com,
+				"Custom Command Arguments",
+				"",
+				msg.Arguments,
+				msg, // Pass the action as the result
+			)
+			m.dialog.OpenDialog(argsDialog)
+			break
 		}
-		cmds = append(cmds, m.sendMessage(msg.Content))
-		m.dialog.CloseDialog(dialog.CommandsID)
+		content := msg.Content
+		if msg.Args != nil {
+			content = substituteArgs(content, msg.Args)
+		}
+		cmds = append(cmds, m.sendMessage(content))
+		m.dialog.CloseFrontDialog()
 	case dialog.ActionRunMCPPrompt:
-		if len(msg.Arguments) > 0 {
-			// TODO: open arguments dialog
+		if len(msg.Arguments) > 0 && msg.Args == nil {
+			m.dialog.CloseFrontDialog()
+			title := msg.Title
+			if title == "" {
+				title = "MCP Prompt Arguments"
+			}
+			argsDialog := dialog.NewArguments(
+				m.com,
+				title,
+				msg.Description,
+				msg.Arguments,
+				msg, // Pass the action as the result
+			)
+			m.dialog.OpenDialog(argsDialog)
+			break
 		}
-		cmds = append(cmds, m.runMCPPrompt(msg.ClientID, msg.PromptID, nil))
-		m.dialog.CloseDialog(dialog.CommandsID)
-	// TODO:
+		cmds = append(cmds, m.runMCPPrompt(msg.ClientID, msg.PromptID, msg.Args))
 	default:
 		cmds = append(cmds, uiutil.CmdHandler(msg))
 	}
 
 	return tea.Batch(cmds...)
+}
+
+// substituteArgs replaces $ARG_NAME placeholders in content with actual values.
+func substituteArgs(content string, args map[string]string) string {
+	for name, value := range args {
+		placeholder := "$" + name
+		content = strings.ReplaceAll(content, placeholder, value)
+	}
+	return content
 }
 
 // openAPIKeyInputDialog opens the API key input dialog.
@@ -2422,7 +2470,7 @@ func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
 }
 
 func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string) tea.Cmd {
-	return func() tea.Msg {
+	load := func() tea.Msg {
 		prompt, err := commands.GetMCPPrompt(clientID, promptID, arguments)
 		if err != nil {
 			// TODO: make this better
@@ -2436,6 +2484,16 @@ func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string
 			Content: prompt,
 		}
 	}
+
+	var cmds []tea.Cmd
+	if cmd := m.dialog.StartLoading(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	cmds = append(cmds, load, func() tea.Msg {
+		return closeDialogMsg{}
+	})
+
+	return tea.Sequence(cmds...)
 }
 
 // renderLogo renders the Crush logo with the given styles and dimensions.

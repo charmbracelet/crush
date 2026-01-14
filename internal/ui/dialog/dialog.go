@@ -27,7 +27,7 @@ var CloseKey = key.NewBinding(
 )
 
 // Action represents an action taken in a dialog after handling a message.
-type Action interface{}
+type Action any
 
 // Dialog is a component that can be displayed on top of the UI.
 type Dialog interface {
@@ -39,6 +39,12 @@ type Dialog interface {
 	// Draw draws the dialog onto the provided screen within the specified area
 	// and returns the desired cursor position on the screen.
 	Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor
+}
+
+// LoadingDialog is a dialog that can show a loading state.
+type LoadingDialog interface {
+	StartLoading() tea.Cmd
+	StopLoading()
 }
 
 // Overlay manages multiple dialogs as an overlay.
@@ -134,6 +140,25 @@ func (d *Overlay) Update(msg tea.Msg) tea.Msg {
 	}
 
 	return dialog.HandleMsg(msg)
+}
+
+// StartLoading starts the loading state for the front dialog if it
+// implements [LoadingDialog].
+func (d *Overlay) StartLoading() tea.Cmd {
+	dialog := d.DialogLast()
+	if ld, ok := dialog.(LoadingDialog); ok {
+		return ld.StartLoading()
+	}
+	return nil
+}
+
+// StopLoading stops the loading state for the front dialog if it
+// implements [LoadingDialog].
+func (d *Overlay) StopLoading() {
+	dialog := d.DialogLast()
+	if ld, ok := dialog.(LoadingDialog); ok {
+		ld.StopLoading()
+	}
 }
 
 // DrawCenterCursor draws the given string view centered in the screen area and

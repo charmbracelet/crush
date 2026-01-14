@@ -341,9 +341,11 @@ func (c *Commands) setCommandItems(commandType CommandType) {
 	case MCPPrompts:
 		for _, cmd := range c.mcpPrompts {
 			action := ActionRunMCPPrompt{
-				PromptID:  cmd.PromptID,
-				ClientID:  cmd.ClientID,
-				Arguments: cmd.Arguments,
+				Title:       cmd.Title,
+				Description: cmd.Description,
+				PromptID:    cmd.PromptID,
+				ClientID:    cmd.ClientID,
+				Arguments:   cmd.Arguments,
 			}
 			commandItems = append(commandItems, NewCommandItem(c.com.Styles, "mcp_"+cmd.ID, cmd.PromptID, "", action))
 		}

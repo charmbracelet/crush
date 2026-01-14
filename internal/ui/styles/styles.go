@@ -340,6 +340,12 @@ type Styles struct {
 		ScrollbarThumb lipgloss.Style
 		ScrollbarTrack lipgloss.Style
 
+		// Arguments
+		Arguments struct {
+			Content     lipgloss.Style
+			Description lipgloss.Style
+		}
+
 		Commands struct{}
 	}
 

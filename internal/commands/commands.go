@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -20,18 +21,22 @@ const (
 	projectCommandPrefix = "project:"
 )
 
-// Argument represents a command argument with its name and required status.
+// Argument represents a command argument with its metadata.
 type Argument struct {
-	Name     string
-	Required bool
+	ID          string
+	Title       string
+	Description string
+	Required    bool
 }
 
 // MCPPrompt represents a custom command loaded from an MCP server.
 type MCPPrompt struct {
-	ID        string
-	PromptID  string
-	ClientID  string
-	Arguments []Argument
+	ID          string
+	Title       string
+	Description string
+	PromptID    string
+	ClientID    string
+	Arguments   []Argument
 }
 
 // CustomCommand represents a user-defined custom command loaded from markdown files.
@@ -61,14 +66,33 @@ func LoadMCPPrompts() ([]MCPPrompt, error) {
 			key := mcpName + ":" + prompt.Name
 			var args []Argument
 			for _, arg := range prompt.Arguments {
-				args = append(args, Argument{Name: arg.Name, Required: arg.Required})
+				title := arg.Title
+				if title == "" {
+					title = arg.Name
+				}
+				args = append(args, Argument{
+					ID:          arg.Name,
+					Title:       title,
+					Description: arg.Description,
+					Required:    arg.Required,
+				})
 			}
+			slog.Info("Loaded MCP prompt as command",
+				"command_id", key,
+				"client_id", mcpName,
+				"prompt_id", prompt.Name,
+				"arguments", len(args),
+				"title", prompt.Title,
+				"description", prompt.Description,
+			)
 
 			commands = append(commands, MCPPrompt{
-				ID:        key,
-				PromptID:  prompt.Name,
-				ClientID:  mcpName,
-				Arguments: args,
+				ID:          key,
+				Title:       prompt.Title,
+				Description: prompt.Description,
+				PromptID:    prompt.Name,
+				ClientID:    mcpName,
+				Arguments:   args,
 			})
 		}
 	}
@@ -169,7 +193,7 @@ func extractArgNames(content string) []Argument {
 		if !seen[arg] {
 			seen[arg] = true
 			// for normal custom commands, all args are required
-			args = append(args, Argument{Name: arg, Required: true})
+			args = append(args, Argument{ID: arg, Title: arg, Required: true})
 		}
 	}
 

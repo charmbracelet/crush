@@ -95,7 +95,7 @@ func (m *APIKeyInput) ID() string {
 	return APIKeyInputID
 }
 
-// Update implements tea.Model.
+// HandleMsg implements [Dialog].
 func (m *APIKeyInput) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
 	case ActionChangeAPIKeyState:
@@ -149,7 +149,7 @@ func (m *APIKeyInput) HandleMsg(msg tea.Msg) Action {
 	return nil
 }
 
-// View implements tea.Model.
+// Draw implements [Dialog].
 func (m *APIKeyInput) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := m.com.Styles
 
@@ -239,8 +239,8 @@ func (m *APIKeyInput) inputView() string {
 }
 
 // Cursor returns the cursor position relative to the dialog.
-func (c *APIKeyInput) Cursor() *tea.Cursor {
-	return InputCursor(c.com.Styles, c.input.Cursor())
+func (m *APIKeyInput) Cursor() *tea.Cursor {
+	return InputCursor(m.com.Styles, m.input.Cursor())
 }
 
 // FullHelp returns the full help view.

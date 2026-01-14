@@ -128,7 +128,7 @@ func (c *Commands) ID() string {
 	return CommandsID
 }
 
-// HandleMsg implements Dialog.
+// HandleMsg implements [Dialog].
 func (c *Commands) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:

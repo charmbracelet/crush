@@ -158,6 +158,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	agentTools := a.tools.Copy()
 	largeModel := a.largeModel.Get()
 	systemPrompt := a.systemPrompt.Get()
+	promptPrefix := a.systemPromptPrefix.Get()
 
 	if len(agentTools) > 0 {
 		// Add Anthropic caching to the last tool.
@@ -240,7 +241,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
 			}
 
-			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages)
+			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel)
 
 			lastSystemRoleInx := 0
 			systemMessageUpdated := false
@@ -258,7 +259,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				}
 			}
 
-			if promptPrefix := a.promptPrefix(); promptPrefix != "" {
+			if promptPrefix != "" {
 				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(promptPrefix)}, prepared.Messages...)
 			}
 
@@ -990,10 +991,6 @@ func (a *sessionAgent) Model() Model {
 	return a.largeModel.Get()
 }
 
-func (a *sessionAgent) promptPrefix() string {
-	return a.systemPromptPrefix.Get()
-}
-
 // convertToToolResult converts a fantasy tool result to a message tool result.
 func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) message.ToolResult {
 	baseResult := message.ToolResult{
@@ -1048,8 +1045,7 @@ func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) mes
 //
 //	BEFORE: [tool result: image data]
 //	AFTER:  [tool result: "Image loaded - see attached"], [user: image attachment]
-func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Message) []fantasy.Message {
-	largeModel := a.largeModel.Get()
+func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Message, largeModel Model) []fantasy.Message {
 	providerSupportsMedia := largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderAnthropic) ||
 		largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderBedrock)
 

@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -25,11 +26,11 @@ type Argument struct {
 	Required bool
 }
 
-// MCPCustomCommand represents a custom command loaded from an MCP server.
-type MCPCustomCommand struct {
+// MCPPrompt represents a custom command loaded from an MCP server.
+type MCPPrompt struct {
 	ID        string
-	Name      string
-	Client    string
+	PromptID  string
+	ClientID  string
 	Arguments []Argument
 }
 
@@ -52,9 +53,9 @@ func LoadCustomCommands(cfg *config.Config) ([]CustomCommand, error) {
 	return loadAll(buildCommandSources(cfg))
 }
 
-// LoadMCPCustomCommands loads custom commands from available MCP servers.
-func LoadMCPCustomCommands() ([]MCPCustomCommand, error) {
-	var commands []MCPCustomCommand
+// LoadMCPPrompts loads custom commands from available MCP servers.
+func LoadMCPPrompts() ([]MCPPrompt, error) {
+	var commands []MCPPrompt
 	for mcpName, prompts := range mcp.Prompts() {
 		for _, prompt := range prompts {
 			key := mcpName + ":" + prompt.Name
@@ -63,10 +64,10 @@ func LoadMCPCustomCommands() ([]MCPCustomCommand, error) {
 				args = append(args, Argument{Name: arg.Name, Required: arg.Required})
 			}
 
-			commands = append(commands, MCPCustomCommand{
+			commands = append(commands, MCPPrompt{
 				ID:        key,
-				Name:      prompt.Name,
-				Client:    mcpName,
+				PromptID:  prompt.Name,
+				ClientID:  mcpName,
 				Arguments: args,
 			})
 		}
@@ -210,4 +211,13 @@ func ensureDir(path string) error {
 
 func isMarkdownFile(name string) bool {
 	return strings.HasSuffix(strings.ToLower(name), ".md")
+}
+
+func GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error) {
+	// TODO: we should pass the context down
+	result, err := mcp.GetPromptMessages(context.Background(), clientID, promptID, args)
+	if err != nil {
+		return "", err
+	}
+	return strings.Join(result, " "), nil
 }

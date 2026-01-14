@@ -93,9 +93,15 @@ type (
 	userCommandsLoadedMsg struct {
 		Commands []commands.CustomCommand
 	}
-	// mcpCustomCommandsLoadedMsg is sent when mcp prompts are loaded.
-	mcpCustomCommandsLoadedMsg struct {
-		Prompts []commands.MCPCustomCommand
+	// mcpPromptsLoadedMsg is sent when mcp prompts are loaded.
+	mcpPromptsLoadedMsg struct {
+		Prompts []commands.MCPPrompt
+	}
+	// sendMessageMsg is sent to send a message.
+	// currently only used for mcp prompts.
+	sendMessageMsg struct {
+		Content     string
+		Attachments []message.Attachment
 	}
 )
 
@@ -167,8 +173,8 @@ type UI struct {
 	sidebarLogo string
 
 	// custom commands & mcp commands
-	customCommands    []commands.CustomCommand
-	mcpCustomCommands []commands.MCPCustomCommand
+	customCommands []commands.CustomCommand
+	mcpPrompts     []commands.MCPPrompt
 
 	// forceCompactMode tracks whether compact mode is forced by user toggle
 	forceCompactMode bool
@@ -282,15 +288,15 @@ func (m *UI) loadCustomCommands() tea.Cmd {
 // loadMCPrompts loads the MCP prompts asynchronously.
 func (m *UI) loadMCPrompts() tea.Cmd {
 	return func() tea.Msg {
-		prompts, err := commands.LoadMCPCustomCommands()
+		prompts, err := commands.LoadMCPPrompts()
 		if err != nil {
 			slog.Error("failed to load mcp prompts", "error", err)
 		}
 		if prompts == nil {
 			// flag them as loaded even if there is none or an error
-			prompts = []commands.MCPCustomCommand{}
+			prompts = []commands.MCPPrompt{}
 		}
-		return mcpCustomCommandsLoadedMsg{Prompts: prompts}
+		return mcpPromptsLoadedMsg{Prompts: prompts}
 	}
 }
 
@@ -319,6 +325,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 
+	case sendMessageMsg:
+		cmds = append(cmds, m.sendMessage(msg.Content, msg.Attachments...))
+
 	case userCommandsLoadedMsg:
 		m.customCommands = msg.Commands
 		dia := m.dialog.Dialog(dialog.CommandsID)
@@ -330,8 +339,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if ok {
 			commands.SetCustomCommands(m.customCommands)
 		}
-	case mcpCustomCommandsLoadedMsg:
-		m.mcpCustomCommands = msg.Prompts
+	case mcpPromptsLoadedMsg:
+		m.mcpPrompts = msg.Prompts
 		dia := m.dialog.Dialog(dialog.CommandsID)
 		if dia == nil {
 			break
@@ -339,7 +348,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		commands, ok := dia.(*dialog.Commands)
 		if ok {
-			commands.SetMCPCustomCommands(m.mcpCustomCommands)
+			commands.SetMCPPrompts(m.mcpPrompts)
 		}
 
 	case pubsub.Event[message.Message]:
@@ -374,7 +383,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 		}
-		if initialized && m.mcpCustomCommands == nil {
+		if initialized && m.mcpPrompts == nil {
 			cmds = append(cmds, m.loadMCPrompts())
 		}
 	case pubsub.Event[permission.PermissionRequest]:
@@ -927,13 +936,17 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 
 	case dialog.ActionRunCustomCommand:
+		if len(msg.Arguments) > 0 {
+			// TODO: open arguments dialog
+		}
 		cmds = append(cmds, m.sendMessage(msg.Content))
 		m.dialog.CloseDialog(dialog.CommandsID)
-	case dialog.ActionRunMCPCustomCommand:
-	// TODO:
-	case dialog.ActionOpenCustomCommandArgumentsDialog:
-	// TODO:
-	case dialog.ActionOpenMCPCustomCommandArgumentsDialog:
+	case dialog.ActionRunMCPPrompt:
+		if len(msg.Arguments) > 0 {
+			// TODO: open arguments dialog
+		}
+		cmds = append(cmds, m.runMCPPrompt(msg.ClientID, msg.PromptID, nil))
+		m.dialog.CloseDialog(dialog.CommandsID)
 	// TODO:
 	default:
 		cmds = append(cmds, uiutil.CmdHandler(msg))
@@ -2180,7 +2193,7 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 		sessionID = m.session.ID
 	}
 
-	commands, err := dialog.NewCommands(m.com, sessionID, m.customCommands, m.mcpCustomCommands)
+	commands, err := dialog.NewCommands(m.com, sessionID, m.customCommands, m.mcpPrompts)
 	if err != nil {
 		return uiutil.ReportError(err)
 	}
@@ -2406,6 +2419,23 @@ func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
 				),
 			),
 	).Draw(scr, area)
+}
+
+func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string) tea.Cmd {
+	return func() tea.Msg {
+		prompt, err := commands.GetMCPPrompt(clientID, promptID, arguments)
+		if err != nil {
+			// TODO: make this better
+			return uiutil.ReportError(err)()
+		}
+
+		if prompt == "" {
+			return nil
+		}
+		return sendMessageMsg{
+			Content: prompt,
+		}
+	}
 }
 
 // renderLogo renders the Crush logo with the given styles and dimensions.

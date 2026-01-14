@@ -38,6 +38,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/stringext"
+	"github.com/charmbracelet/x/exp/charmtone"
 )
 
 const defaultSessionName = "Untitled Session"
@@ -466,18 +467,19 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		var fantasyErr *fantasy.Error
 		var providerErr *fantasy.ProviderError
 		const defaultTitle = "Provider Error"
+		linkStyle := lipgloss.NewStyle().Foreground(charmtone.Guac).Underline(true)
 		if isCancelErr {
 			currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
 		} else if isPermissionErr {
 			currentAssistant.AddFinish(message.FinishReasonPermissionDenied, "User denied permission", "")
 		} else if errors.Is(err, hyper.ErrNoCredits) {
 			url := hyper.BaseURL()
-			link := lipgloss.NewStyle().Hyperlink(url, "id=hyper").Render(url)
+			link := linkStyle.Hyperlink(url, "id=hyper").Render(url)
 			currentAssistant.AddFinish(message.FinishReasonError, "No credits", "You're out of credits. Add more at "+link)
 		} else if errors.As(err, &providerErr) {
 			if providerErr.Message == "The requested model is not supported." {
 				url := "https://github.com/settings/copilot/features"
-				link := lipgloss.NewStyle().Hyperlink(url, "id=hyper").Render(url)
+				link := linkStyle.Hyperlink(url, "id=copilot").Render(url)
 				currentAssistant.AddFinish(
 					message.FinishReasonError,
 					"Copilot model not enabled",

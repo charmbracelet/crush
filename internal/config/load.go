@@ -254,6 +254,7 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 				continue
 			}
 		}
+		prepared.MigrateCredentials()
 		c.Providers.Set(string(p.ID), prepared)
 	}
 
@@ -307,6 +308,7 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 			continue
 		}
 
+		providerConfig.MigrateCredentials()
 		c.Providers.Set(id, providerConfig)
 	}
 	return nil

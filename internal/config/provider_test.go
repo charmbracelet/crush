@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
+	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/stretchr/testify/require"
 )
 
@@ -302,6 +303,182 @@ func TestCachePathFor(t *testing.T) {
 			} else {
 				require.Contains(t, result, "crush")
 				require.Contains(t, result, "providers.json")
+			}
+		})
+	}
+}
+
+func TestProviderConfig_MigrateCredentials(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		config   ProviderConfig
+		expected []ProviderCredential
+	}{
+		{
+			name: "migrate single api key",
+			config: ProviderConfig{
+				ID:     "test-provider",
+				APIKey:  "sk-test-key",
+				Type:    "openai",
+			},
+			expected: []ProviderCredential{
+				{
+					Name:    "default",
+					APIKey:  "sk-test-key",
+					Default: true,
+				},
+			},
+		},
+		{
+			name: "do not migrate if credentials already exist",
+			config: ProviderConfig{
+				ID: "test-provider",
+				Credentials: []ProviderCredential{
+					{
+						Name:    "work",
+						APIKey:  "sk-work-key",
+						Default: true,
+					},
+				},
+				APIKey: "sk-test-key",
+			},
+			expected: []ProviderCredential{
+				{
+					Name:    "work",
+					APIKey:  "sk-work-key",
+					Default: true,
+				},
+			},
+		},
+		{
+			name: "do not migrate if no api key or oauth",
+			config: ProviderConfig{
+				ID:   "test-provider",
+				Type: "openai",
+			},
+			expected: nil,
+		},
+		{
+			name: "migrate oauth token",
+			config: ProviderConfig{
+				ID:        "test-provider",
+				OAuthToken:  &oauth.Token{AccessToken: "test-token"},
+			},
+			expected: []ProviderCredential{
+				{
+					Name:      "default",
+					OAuthToken: &oauth.Token{AccessToken: "test-token"},
+					Default:   true,
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.config.MigrateCredentials()
+			// Check that credentials are set (ignore CreatedAt as it's set to current time)
+			require.Len(t, tt.config.Credentials, len(tt.expected))
+			if len(tt.expected) > 0 {
+				require.Equal(t, tt.expected[0].Name, tt.config.Credentials[0].Name)
+				require.Equal(t, tt.expected[0].APIKey, tt.config.Credentials[0].APIKey)
+				require.Equal(t, tt.expected[0].Default, tt.config.Credentials[0].Default)
+				if tt.expected[0].OAuthToken != nil {
+					require.Equal(t, tt.expected[0].OAuthToken.AccessToken, tt.config.Credentials[0].OAuthToken.AccessToken)
+				}
+			}
+		})
+	}
+}
+
+func TestProviderConfig_ResolveCredential(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		config         ProviderConfig
+		credentialName string
+		expectedAPIKey string
+		expectedOAuth  *oauth.Token
+		expectError    bool
+	}{
+		{
+			name: "resolve by name",
+			config: ProviderConfig{
+				ID: "test-provider",
+				Credentials: []ProviderCredential{
+					{
+						Name:   "work",
+						APIKey: "sk-work-key",
+					},
+					{
+						Name:   "personal",
+						APIKey: "sk-personal-key",
+					},
+				},
+			},
+			credentialName: "work",
+			expectedAPIKey:   "sk-work-key",
+			expectError:      false,
+		},
+		{
+			name: "resolve default when name not specified",
+			config: ProviderConfig{
+				ID: "test-provider",
+				Credentials: []ProviderCredential{
+					{
+						Name:    "work",
+						APIKey:  "sk-work-key",
+					},
+					{
+						Name:    "personal",
+						APIKey:  "sk-personal-key",
+						Default: true,
+					},
+				},
+			},
+			credentialName: "",
+			expectedAPIKey:   "sk-personal-key",
+			expectError:      false,
+		},
+		{
+			name: "fallback to legacy api key",
+			config: ProviderConfig{
+				ID:     "test-provider",
+				APIKey:  "sk-legacy-key",
+			},
+			credentialName: "",
+			expectedAPIKey:   "sk-legacy-key",
+			expectError:      false,
+		},
+		{
+			name: "error when credential not found",
+			config: ProviderConfig{
+				ID: "test-provider",
+				Credentials: []ProviderCredential{
+					{
+						Name:   "work",
+						APIKey: "sk-work-key",
+					},
+				},
+			},
+			credentialName: "nonexistent",
+			expectError:      true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			apiKey, oauthToken, err := tt.config.ResolveCredential(tt.credentialName, &shellVariableResolver{})
+			
+			if tt.expectError {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, tt.expectedAPIKey, apiKey)
+				require.Equal(t, tt.expectedOAuth, oauthToken)
 			}
 		})
 	}

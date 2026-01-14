@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/copilot"
@@ -71,6 +72,12 @@ type modelDialogCmp struct {
 	selectedModelType config.SelectedModelType
 	isAPIKeyValid     bool
 	apiKeyValue       string
+	credentialName    string
+
+	// Credential selector state
+	credentialSelector     *CredentialSelector
+	showCredentialSelector bool
+	selectedCredential     string
 
 	// Hyper device flow state
 	hyperDeviceFlow     *hyper.DeviceFlow
@@ -143,7 +150,16 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		return m, nil
 	case copilot.DeviceFlowCompletedMsg:
 		return m, m.saveOauthTokenAndContinue(msg.Token, true)
+	case CredentialSelectedMsg:
+		m.showCredentialSelector = false
+		m.selectedCredential = msg.Credential
+		return m, m.saveModelWithCredential(msg.Credential)
 	case tea.KeyPressMsg:
+		if m.showCredentialSelector && m.credentialSelector != nil {
+			u, cmd := m.credentialSelector.Update(msg)
+			m.credentialSelector = u.(*CredentialSelector)
+			return m, cmd
+		}
 		switch {
 		// Handle Hyper device flow keys
 		case key.Matches(msg, key.NewBinding(key.WithKeys("c", "C"))) && m.showHyperDeviceFlow:
@@ -184,6 +200,7 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			if m.needsAPIKey {
 				// Handle API key submission
 				m.apiKeyValue = m.apiKeyInput.Value()
+			m.credentialName = m.apiKeyInput.CredentialName()
 				provider, err := m.getProvider(m.selectedModel.Provider.ID)
 				if err != nil || provider == nil {
 					return m, util.ReportError(fmt.Errorf("provider %s not found", m.selectedModel.Provider.ID))
@@ -218,6 +235,23 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 						}
 					},
 				)
+			}
+
+			// Check if provider has multiple credentials
+			credentials, err := m.getProviderCredentials(string(selectedItem.Provider.ID))
+			if err == nil && len(credentials) > 1 {
+				m.showCredentialSelector = true
+				m.selectedModel = selectedItem
+				m.selectedModelType = modelType
+				m.credentialSelector = NewCredentialSelector(
+					string(selectedItem.Provider.ID),
+					selectedItem.Provider.Name,
+					credentials,
+					selectedItem,
+					modelType,
+				)
+				m.credentialSelector.SetSize(m.width-2, m.wHeight-10)
+				return m, nil
 			}
 
 			// Check if provider is configured
@@ -391,6 +425,16 @@ func (m *modelDialogCmp) View() string {
 	m.keyMap.isCopilotDeviceFlow = false
 	m.keyMap.isCopilotUnavailable = false
 
+	if m.showCredentialSelector && m.credentialSelector != nil {
+		// Show credential selector
+		credentialSelectorView := m.credentialSelector.View()
+		content := lipgloss.JoinVertical(
+			lipgloss.Left,
+			credentialSelectorView,
+		)
+		return m.style().Render(content)
+	}
+
 	switch {
 	case m.needsAPIKey:
 		// Show API key input
@@ -496,6 +540,15 @@ func (m *modelDialogCmp) modelTypeRadio() string {
 	return t.S().Base.Foreground(t.FgHalfMuted).Render(iconUnselected + " " + choices[0] + "  " + iconSelected + " " + choices[1])
 }
 
+func (m *modelDialogCmp) getProviderCredentials(providerID string) ([]config.ProviderCredential, error) {
+	cfg := config.Get()
+	provider, ok := cfg.Providers.Get(providerID)
+	if !ok {
+		return nil, fmt.Errorf("provider %s not found", providerID)
+	}
+	return provider.Credentials, nil
+}
+
 func (m *modelDialogCmp) isProviderConfigured(providerID string) bool {
 	cfg := config.Get()
 	_, ok := cfg.Providers.Get(providerID)
@@ -522,9 +575,44 @@ func (m *modelDialogCmp) saveOauthTokenAndContinue(apiKey any, close bool) tea.C
 	}
 
 	cfg := config.Get()
-	err := cfg.SetProviderAPIKey(string(m.selectedModel.Provider.ID), apiKey)
-	if err != nil {
-		return util.ReportError(fmt.Errorf("failed to save API key: %w", err))
+
+	// If this is a new API key (from signup flow), add it as a credential
+	if m.credentialName != "" {
+		providerConfig, ok := cfg.Providers.Get(string(m.selectedModel.Provider.ID))
+		if ok {
+			// Add new credential to existing provider
+			newCred := config.ProviderCredential{
+				Name: m.credentialName,
+			}
+			switch v := apiKey.(type) {
+			case string:
+				newCred.APIKey = v
+			case *oauth.Token:
+				newCred.OAuthToken = v
+			}
+			if m.credentialName == "default" || len(providerConfig.Credentials) == 0 {
+				newCred.Default = true
+			}
+			providerConfig.Credentials = append(providerConfig.Credentials, newCred)
+			cfg.Providers.Set(string(m.selectedModel.Provider.ID), providerConfig)
+
+			// Save to config file
+			var credentialsData []interface{}
+			for _, c := range providerConfig.Credentials {
+				credentialsData = append(credentialsData, c)
+			}
+			if err := cfg.SetConfigField(fmt.Sprintf("providers.%s.credentials", m.selectedModel.Provider.ID), credentialsData); err != nil {
+				return util.ReportError(fmt.Errorf("failed to save credential: %w", err))
+			}
+
+			m.credentialName = ""
+		}
+	} else {
+		// Legacy path: just set the API key
+		err := cfg.SetProviderAPIKey(string(m.selectedModel.Provider.ID), apiKey)
+		if err != nil {
+			return util.ReportError(fmt.Errorf("failed to save API key: %w", err))
+		}
 	}
 
 	// Reset API key state and continue with model selection
@@ -539,6 +627,31 @@ func (m *modelDialogCmp) saveOauthTokenAndContinue(apiKey any, close bool) tea.C
 			Model: config.SelectedModel{
 				Model:           selectedModel.Model.ID,
 				Provider:        string(selectedModel.Provider.ID),
+				Credential:      m.credentialName,
+				ReasoningEffort: selectedModel.Model.DefaultReasoningEffort,
+				MaxTokens:       selectedModel.Model.DefaultMaxTokens,
+			},
+			ModelType: m.selectedModelType,
+		}),
+	)
+	return tea.Sequence(cmds...)
+}
+
+func (m *modelDialogCmp) saveModelWithCredential(credential string) tea.Cmd {
+	if m.selectedModel == nil {
+		return util.ReportError(fmt.Errorf("no model selected"))
+	}
+
+	selectedModel := *m.selectedModel
+	var cmds []tea.Cmd
+	cmds = append(
+		cmds,
+		util.CmdHandler(dialogs.CloseDialogMsg{}),
+		util.CmdHandler(ModelSelectedMsg{
+			Model: config.SelectedModel{
+				Model:           selectedModel.Model.ID,
+				Provider:        string(selectedModel.Provider.ID),
+				Credential:      credential,
 				ReasoningEffort: selectedModel.Model.DefaultReasoningEffort,
 				MaxTokens:       selectedModel.Model.DefaultMaxTokens,
 			},

@@ -645,6 +645,11 @@ func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
 // if the message is a tool result it will update the corresponding tool call message
 func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 	var cmds []tea.Cmd
+	existing := m.chat.MessageItem(msg.ID)
+	if existing != nil {
+		// message already exists, skip
+		return nil
+	}
 	switch msg.Role {
 	case message.User, message.Assistant:
 		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil)
@@ -920,6 +925,16 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		case dialog.PermissionDeny:
 			m.com.App.Permissions.Deny(msg.Permission)
 		}
+
+	case dialog.ActionRunCustomCommand:
+		cmds = append(cmds, m.sendMessage(msg.Content))
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionRunMCPCustomCommand:
+	// TODO:
+	case dialog.ActionOpenCustomCommandArgumentsDialog:
+	// TODO:
+	case dialog.ActionOpenMCPCustomCommandArgumentsDialog:
+	// TODO:
 	default:
 		cmds = append(cmds, uiutil.CmdHandler(msg))
 	}
@@ -1055,7 +1070,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 				m.randomizePlaceholders()
 
-				return m.sendMessage(value, attachments)
+				return m.sendMessage(value, attachments...)
 			case key.Matches(msg, m.keyMap.Chat.NewSession):
 				if m.session == nil || m.session.ID == "" {
 					break
@@ -2013,7 +2028,7 @@ func (m *UI) renderSidebarLogo(width int) {
 }
 
 // sendMessage sends a message with the given content and attachments.
-func (m *UI) sendMessage(content string, attachments []message.Attachment) tea.Cmd {
+func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.Cmd {
 	if m.com.App.AgentCoordinator == nil {
 		return uiutil.ReportError(fmt.Errorf("coder agent is not initialized"))
 	}

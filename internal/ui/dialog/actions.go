@@ -51,18 +51,21 @@ type (
 	}
 	// ActionRunCustomCommand is a message to run a custom command.
 	ActionRunCustomCommand struct {
-		CommandID string
-		// Used when running a user-defined command
 		Content string
-		// Used when running a prompt from MCP
-		Client string
+	}
+	// ActionRunMCPCustomCommand is a message to run a custom command.
+	ActionRunMCPCustomCommand struct {
+		CommandID string
+		Client    string
 	}
 	// ActionOpenCustomCommandArgumentsDialog is a message to open the custom command arguments dialog.
 	ActionOpenCustomCommandArgumentsDialog struct {
+		Content   string
+		Arguments []commands.Argument
+	}
+	// ActionOpenMCPCustomCommandArgumentsDialog is a message to open the custom command arguments dialog.
+	ActionOpenMCPCustomCommandArgumentsDialog struct {
 		CommandID string
-		// Used when running a user-defined command
-		Content string
-		// Used when running a prompt from MCP
 		Client    string
 		Arguments []commands.Argument
 	}

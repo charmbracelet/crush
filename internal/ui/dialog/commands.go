@@ -335,14 +335,12 @@ func (c *Commands) setCommandItems(commandType CommandType) {
 			var action Action
 			if len(cmd.Arguments) > 0 {
 				action = ActionOpenCustomCommandArgumentsDialog{
-					CommandID: cmd.ID,
 					Content:   cmd.Content,
 					Arguments: cmd.Arguments,
 				}
 			} else {
 				action = ActionRunCustomCommand{
-					CommandID: cmd.ID,
-					Content:   cmd.Content,
+					Content: cmd.Content,
 				}
 			}
 			commandItems = append(commandItems, NewCommandItem(c.com.Styles, "custom_"+cmd.ID, cmd.Name, "", action))
@@ -351,13 +349,13 @@ func (c *Commands) setCommandItems(commandType CommandType) {
 		for _, cmd := range c.mcpCustomCommands {
 			var action Action
 			if len(cmd.Arguments) > 0 {
-				action = ActionOpenCustomCommandArgumentsDialog{
+				action = ActionOpenMCPCustomCommandArgumentsDialog{
 					CommandID: cmd.ID,
 					Client:    cmd.Client,
 					Arguments: cmd.Arguments,
 				}
 			} else {
-				action = ActionRunCustomCommand{
+				action = ActionRunMCPCustomCommand{
 					CommandID: cmd.ID,
 					Client:    cmd.Client,
 				}

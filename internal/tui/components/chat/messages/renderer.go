@@ -230,11 +230,8 @@ func (gr genericRenderer) Render(v *toolCallCmp) string {
 	}
 
 	// Try to detect subagent-like tools by input
-	var params map[string]any
-	if err := json.Unmarshal([]byte(v.call.Input), &params); err == nil {
-		if _, ok := params["prompt"].(string); ok && len(params) == 1 {
-			return agentRenderer{}.Render(v)
-		}
+	if isSubagentLikeInput(v.call.Input) {
+		return agentRenderer{}.Render(v)
 	}
 
 	return gr.renderWithParams(v, prettifyToolName(v.call.Name), []string{v.call.Input}, func() string {
@@ -1089,12 +1086,8 @@ func renderPlainContent(v *toolCallCmp, content string) string {
 	content = strings.TrimSpace(content)
 
 	// If it looks like JSON, try to render it as code
-	if (strings.HasPrefix(content, "{") && strings.HasSuffix(content, "}")) ||
-		(strings.HasPrefix(content, "[") && strings.HasSuffix(content, "]")) {
-		var m any
-		if json.Unmarshal([]byte(content), &m) == nil {
-			return renderCodeContent(v, "response.json", content, 0)
-		}
+	if looksLikeJSON(content) {
+		return renderCodeContent(v, "response.json", content, 0)
 	}
 
 	lines := strings.Split(content, "\n")
@@ -1335,6 +1328,56 @@ func prettifyToolName(name string) string {
 		}
 		return name
 	}
+}
+
+// isSubagentLikeInput checks if the input looks like a subagent tool call
+// (single "prompt" parameter).
+func isSubagentLikeInput(input string) bool {
+	var params map[string]any
+	if err := json.Unmarshal([]byte(input), &params); err != nil {
+		return false
+	}
+	_, ok := params["prompt"].(string)
+	return ok && len(params) == 1
+}
+
+// prettifyJSONParam attempts to make a JSON parameter more readable.
+// For single-key objects, returns just the value.
+// For multi-key objects, returns "k=v, k=v" format.
+// For non-JSON, returns the input unchanged.
+func prettifyJSONParam(input string) string {
+	var m map[string]any
+	if err := json.Unmarshal([]byte(input), &m); err != nil {
+		return input
+	}
+	if len(m) == 0 {
+		return input
+	}
+	if len(m) == 1 {
+		for _, v := range m {
+			return fmt.Sprint(v)
+		}
+	}
+	var parts []string
+	for k, v := range m {
+		parts = append(parts, fmt.Sprintf("%s=%v", k, v))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// looksLikeJSON checks if content appears to be valid JSON (object or array).
+func looksLikeJSON(content string) bool {
+	content = strings.TrimSpace(content)
+	if len(content) < 2 {
+		return false
+	}
+	isObject := strings.HasPrefix(content, "{") && strings.HasSuffix(content, "}")
+	isArray := strings.HasPrefix(content, "[") && strings.HasSuffix(content, "]")
+	if !isObject && !isArray {
+		return false
+	}
+	var m any
+	return json.Unmarshal([]byte(content), &m) == nil
 }
 
 // -----------------------------------------------------------------------------

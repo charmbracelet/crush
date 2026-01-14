@@ -109,44 +109,6 @@ func TestSlice(t *testing.T) {
 		require.Equal(t, "world", val)
 	})
 
-	t.Run("Prepend", func(t *testing.T) {
-		s := NewSlice[string]()
-		s.Append("world")
-		s.Prepend("hello")
-
-		require.Equal(t, 2, s.Len())
-		val, ok := s.Get(0)
-		require.True(t, ok)
-		require.Equal(t, "hello", val)
-
-		val, ok = s.Get(1)
-		require.True(t, ok)
-		require.Equal(t, "world", val)
-	})
-
-	t.Run("Delete", func(t *testing.T) {
-		s := NewSliceFrom([]int{1, 2, 3, 4, 5})
-
-		// Delete middle element
-		ok := s.Delete(2)
-		require.True(t, ok)
-		require.Equal(t, 4, s.Len())
-
-		expected := []int{1, 2, 4, 5}
-		actual := slices.Collect(s.Seq())
-		require.Equal(t, expected, actual)
-
-		// Delete out of bounds
-		ok = s.Delete(10)
-		require.False(t, ok)
-		require.Equal(t, 4, s.Len())
-
-		// Delete negative index
-		ok = s.Delete(-1)
-		require.False(t, ok)
-		require.Equal(t, 4, s.Len())
-	})
-
 	t.Run("Get", func(t *testing.T) {
 		s := NewSliceFrom([]string{"a", "b", "c"})
 
@@ -160,25 +122,6 @@ func TestSlice(t *testing.T) {
 
 		// Negative index
 		_, ok = s.Get(-1)
-		require.False(t, ok)
-	})
-
-	t.Run("Set", func(t *testing.T) {
-		s := NewSliceFrom([]string{"a", "b", "c"})
-
-		ok := s.Set(1, "modified")
-		require.True(t, ok)
-
-		val, ok := s.Get(1)
-		require.True(t, ok)
-		require.Equal(t, "modified", val)
-
-		// Out of bounds
-		ok = s.Set(10, "invalid")
-		require.False(t, ok)
-
-		// Negative index
-		ok = s.Set(-1, "invalid")
 		require.False(t, ok)
 	})
 

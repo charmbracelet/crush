@@ -643,7 +643,7 @@ func TestCoderAgent(t *testing.T) {
 				// Add subagent tool to the agent
 				subTool, err := sa.coordinator.(*coordinator).subagentTool(t.Context(), subagentDef)
 				require.NoError(t, err)
-				agent.SetTools(append(sa.tools, subTool))
+				agent.SetTools(append(sa.tools.Copy(), subTool))
 
 				// Wait for coordinator to be ready (building main agent tools etc)
 				_ = sa.coordinator.(*coordinator).readyWg.Wait()

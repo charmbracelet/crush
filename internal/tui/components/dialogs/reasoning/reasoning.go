@@ -237,11 +237,15 @@ func (r *reasoningDialogCmp) listHeight() int {
 }
 
 func (r *reasoningDialogCmp) moveCursor(cursor *tea.Cursor) *tea.Cursor {
+	if cursor == nil {
+		return nil
+	}
+	cur := *cursor
 	row, col := r.Position()
 	offset := row + 3
-	cursor.Y += offset
-	cursor.X = cursor.X + col + 2
-	return cursor
+	cur.Y += offset
+	cur.X = cur.X + col + 2
+	return &cur
 }
 
 func (r *reasoningDialogCmp) style() lipgloss.Style {

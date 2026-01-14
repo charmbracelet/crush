@@ -226,11 +226,15 @@ const (
 )
 
 func (c *commandArgumentsDialogCmp) moveCursor(cursor *tea.Cursor) *tea.Cursor {
+	if cursor == nil {
+		return nil
+	}
+	cur := *cursor
 	row, col := c.Position()
 	offset := row + headerHeight + (1+c.focused)*itemHeight
-	cursor.Y += offset
-	cursor.X = cursor.X + col + paddingHorizontal
-	return cursor
+	cur.Y += offset
+	cur.X = cur.X + col + paddingHorizontal
+	return &cur
 }
 
 func (c *commandArgumentsDialogCmp) Position() (int, int) {

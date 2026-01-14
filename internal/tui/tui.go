@@ -629,11 +629,6 @@ func (a *appModel) View() tea.View {
 	var cursor *tea.Cursor
 	if v, ok := page.(util.Cursor); ok {
 		cursor = v.Cursor()
-		// Hide the cursor if it's positioned outside the textarea
-		statusHeight := a.height - strings.Count(pageView, "\n") + 1
-		if cursor != nil && cursor.Y+statusHeight+chat.EditorHeight-2 <= a.height { // 2 for the top and bottom app padding
-			cursor = nil
-		}
 	}
 	activeView := a.dialog.ActiveModel()
 	if activeView != nil {

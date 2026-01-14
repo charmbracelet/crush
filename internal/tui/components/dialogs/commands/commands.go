@@ -288,11 +288,15 @@ func (c *commandDialogCmp) listHeight() int {
 }
 
 func (c *commandDialogCmp) moveCursor(cursor *tea.Cursor) *tea.Cursor {
+	if cursor == nil {
+		return nil
+	}
+	cur := *cursor
 	row, col := c.Position()
 	offset := row + 3
-	cursor.Y += offset
-	cursor.X = cursor.X + col + 2
-	return cursor
+	cur.Y += offset
+	cur.X = cur.X + col + 2
+	return &cur
 }
 
 func (c *commandDialogCmp) style() lipgloss.Style {

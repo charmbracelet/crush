@@ -145,10 +145,6 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		return true, nil
 	}
 
-	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
-		ToolCallID: opts.ToolCallID,
-	})
-
 	fileInfo, err := os.Stat(opts.Path)
 	dir := opts.Path
 	if err == nil {
@@ -196,6 +192,11 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	respCh := make(chan bool, 1)
 	s.pendingRequests.Set(permission.ID, respCh)
 	defer s.pendingRequests.Del(permission.ID)
+
+	// Notify the UI that permission is being requested for this tool call.
+	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+		ToolCallID: opts.ToolCallID,
+	})
 
 	// Publish the request
 	s.Publish(pubsub.CreatedEvent, permission)

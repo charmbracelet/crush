@@ -29,7 +29,6 @@ var (
 	sessions = csync.NewMap[string, *mcp.ClientSession]()
 	states   = csync.NewMap[string, ClientInfo]()
 	broker   = pubsub.NewBroker[Event]()
-	initOnce sync.Once
 	initDone = make(chan struct{})
 )
 
@@ -199,17 +198,16 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 		}(name, m)
 	}
 	wg.Wait()
-	initOnce.Do(func() { close(initDone) })
+	close(initDone)
 }
 
-// WaitForInit blocks until MCP initialization is complete.
-// If Initialize was never called, this returns immediately.
-func WaitForInit(ctx context.Context) error {
+// Wait blocks until all configured MCP clients have finished their initial connection attempt.
+func Wait(ctx context.Context) error {
 	select {
-	case <-initDone:
-		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	case <-initDone:
+		return nil
 	}
 }
 
@@ -353,7 +351,7 @@ func maybeTimeoutErr(err error, timeout time.Duration) error {
 
 func createTransport(ctx context.Context, m config.MCPConfig, resolver config.VariableResolver) (mcp.Transport, error) {
 	switch m.Type {
-	case config.MCPStdio:
+	case config.MCPStdio, "":
 		command, err := resolver.ResolveValue(m.Command)
 		if err != nil {
 			return nil, fmt.Errorf("invalid mcp command: %w", err)

@@ -333,6 +333,8 @@ type Styles struct {
 
 		List lipgloss.Style
 
+		Spinner lipgloss.Style
+
 		// ContentPanel is used for content blocks with subtle background.
 		ContentPanel lipgloss.Style
 
@@ -342,8 +344,12 @@ type Styles struct {
 
 		// Arguments
 		Arguments struct {
-			Content     lipgloss.Style
-			Description lipgloss.Style
+			Content                  lipgloss.Style
+			Description              lipgloss.Style
+			InputLabelBlurred        lipgloss.Style
+			InputLabelFocused        lipgloss.Style
+			InputRequiredMarkBlurred lipgloss.Style
+			InputRequiredMarkFocused lipgloss.Style
 		}
 
 		Commands struct{}
@@ -1211,8 +1217,16 @@ func DefaultStyles() Styles {
 
 	s.Dialog.List = base.Margin(0, 0, 1, 0)
 	s.Dialog.ContentPanel = base.Background(bgSubtle).Foreground(fgBase).Padding(1, 2)
+	s.Dialog.Spinner = base.Foreground(secondary)
 	s.Dialog.ScrollbarThumb = base.Foreground(secondary)
 	s.Dialog.ScrollbarTrack = base.Foreground(border)
+
+	s.Dialog.Arguments.Content = base.Padding(1)
+	s.Dialog.Arguments.Description = base.MarginBottom(1)
+	s.Dialog.Arguments.InputLabelBlurred = base.Foreground(fgMuted)
+	s.Dialog.Arguments.InputLabelFocused = base.Bold(true)
+	s.Dialog.Arguments.InputRequiredMarkBlurred = base.Foreground(fgMuted).SetString("*")
+	s.Dialog.Arguments.InputRequiredMarkFocused = base.Foreground(primary).Bold(true).SetString("*")
 
 	s.Status.Help = lipgloss.NewStyle().Padding(0, 1)
 	s.Status.SuccessIndicator = base.Foreground(bgSubtle).Background(green).Padding(0, 1).Bold(true).SetString("OKAY!")

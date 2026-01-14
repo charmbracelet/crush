@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"io/fs"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -77,15 +76,6 @@ func LoadMCPPrompts() ([]MCPPrompt, error) {
 					Required:    arg.Required,
 				})
 			}
-			slog.Info("Loaded MCP prompt as command",
-				"command_id", key,
-				"client_id", mcpName,
-				"prompt_id", prompt.Name,
-				"arguments", len(args),
-				"title", prompt.Title,
-				"description", prompt.Description,
-			)
-
 			commands = append(commands, MCPPrompt{
 				ID:          key,
 				Title:       prompt.Title,

@@ -6,6 +6,7 @@ import (
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -51,6 +52,9 @@ type Commands struct {
 
 	sessionID string // can be empty for non-session-specific commands
 	selected  CommandType
+
+	spinner spinner.Model
+	loading bool
 
 	help  help.Model
 	input textinput.Model
@@ -120,6 +124,11 @@ func NewCommands(com *common.Common, sessionID string, customCommands []commands
 	// Set initial commands
 	c.setCommandItems(c.selected)
 
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	s.Style = com.Styles.Dialog.Spinner
+	c.spinner = s
+
 	return c, nil
 }
 
@@ -131,6 +140,12 @@ func (c *Commands) ID() string {
 // HandleMsg implements [Dialog].
 func (c *Commands) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
+	case spinner.TickMsg:
+		if c.loading {
+			var cmd tea.Cmd
+			c.spinner, cmd = c.spinner.Update(msg)
+			return ActionCmd{Cmd: cmd}
+		}
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, c.keyMap.Close):
@@ -248,6 +263,10 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	headerOffset := lipgloss.Width(radio) + titleStyle.GetHorizontalFrameSize() + dialogStyle.GetHorizontalFrameSize()
 	helpView := ansi.Truncate(c.help.View(c), innerWidth, "")
 	header := common.DialogTitle(t, "Commands", width-headerOffset) + radio
+
+	if c.loading {
+		helpView = t.Dialog.HelpView.Width(width).Render(c.spinner.View() + " Generating Prompt...")
+	}
 	view := HeaderInputListHelpView(t, width, c.list.Height(), header,
 		c.input.View(), c.list.Render(), helpView)
 
@@ -439,4 +458,18 @@ func (c *Commands) SetMCPPrompts(mcpPrompts []commands.MCPPrompt) {
 	if c.selected == MCPPrompts {
 		c.setCommandItems(c.selected)
 	}
+}
+
+// StartLoading implements [LoadingDialog].
+func (a *Commands) StartLoading() tea.Cmd {
+	if a.loading {
+		return nil
+	}
+	a.loading = true
+	return a.spinner.Tick
+}
+
+// StopLoading implements [LoadingDialog].
+func (a *Commands) StopLoading() {
+	a.loading = false
 }

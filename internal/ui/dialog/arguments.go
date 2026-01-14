@@ -103,7 +103,7 @@ func NewArguments(com *common.Common, title, description string, arguments []com
 	}
 	s := spinner.New()
 	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(com.Styles.Secondary)
+	s.Style = com.Styles.Dialog.Spinner
 	a.spinner = s
 
 	return a
@@ -196,8 +196,7 @@ func (a *Arguments) Cursor(descriptionHeight int) *tea.Cursor {
 func (a *Arguments) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	s := a.com.Styles
 
-	dialogContentStyle := s.Base.Padding(1)
-
+	dialogContentStyle := s.Dialog.Arguments.Content
 	possibleWidth := area.Dx() - s.Dialog.View.GetHorizontalFrameSize() - dialogContentStyle.GetHorizontalFrameSize()
 	// Build fields with label and input.
 	caser := cases.Title(language.English)
@@ -214,14 +213,19 @@ func (a *Arguments) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			titleParts[i] = caser.String(strings.ToLower(part))
 		}
 		labelText := strings.Join(titleParts, " ")
-		if arg.Required {
-			labelText += s.Base.Foreground(s.Primary).Render("*")
-		}
 
-		labelStyle := s.Base.Foreground(s.FgMuted)
+		markRequiredStyle := s.Dialog.Arguments.InputRequiredMarkBlurred
+
+		labelStyle := s.Dialog.Arguments.InputLabelBlurred
 		if isFocused {
-			labelStyle = s.Base.Foreground(s.FgBase).Bold(true)
+			labelStyle = s.Dialog.Arguments.InputLabelFocused
+			markRequiredStyle = s.Dialog.Arguments.InputRequiredMarkFocused
 		}
+		if arg.Required {
+			labelText += markRequiredStyle.String()
+		}
+		label := labelStyle.Render(labelText)
+
 		labelWidth := lipgloss.Width(labelText)
 		placeholderWidth := lipgloss.Width(a.inputs[i].Placeholder)
 
@@ -229,7 +233,6 @@ func (a *Arguments) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		inputWidth = min(inputWidth, min(possibleWidth, maxInputWidth))
 		a.inputs[i].SetWidth(inputWidth + lipgloss.Width(a.inputs[i].Prompt))
 
-		label := labelStyle.Render(labelText)
 		inputLine := a.inputs[i].View()
 
 		field := lipgloss.JoinVertical(lipgloss.Left, label, inputLine, "")
@@ -256,7 +259,7 @@ func (a *Arguments) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	// Add description if available.
 	var description string
 	if a.description != "" {
-		descStyle := s.Base.Width(width).MarginBottom(1)
+		descStyle := s.Dialog.Arguments.Description.Width(width)
 		description = descStyle.Render(a.description)
 	}
 

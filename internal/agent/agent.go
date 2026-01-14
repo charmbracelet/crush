@@ -98,6 +98,7 @@ type sessionAgent struct {
 	messages             message.Service
 	disableAutoSummarize bool
 	isYolo               bool
+	maxSteps             int
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, context.CancelFunc]
@@ -114,6 +115,8 @@ type SessionAgentOptions struct {
 	Sessions             session.Service
 	Messages             message.Service
 	Tools                []fantasy.AgentTool
+	// MaxSteps limits the number of agent steps (LLM calls). 0 means no limit.
+	MaxSteps int
 }
 
 func NewSessionAgent(
@@ -130,6 +133,7 @@ func NewSessionAgent(
 		disableAutoSummarize: opts.DisableAutoSummarize,
 		tools:                csync.NewSliceFrom(opts.Tools),
 		isYolo:               opts.IsYolo,
+		maxSteps:             opts.MaxSteps,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, context.CancelFunc](),
 	}
@@ -378,7 +382,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		StopWhen: []fantasy.StopCondition{
-			func(_ []fantasy.StepResult) bool {
+			func(steps []fantasy.StepResult) bool {
+				// Stop if max steps reached.
+				if a.maxSteps > 0 && len(steps) >= a.maxSteps {
+					return true
+				}
 				cw := int64(largeModel.CatwalkCfg.ContextWindow)
 				tokens := currentSession.CompletionTokens + currentSession.PromptTokens
 				remaining := cw - tokens

@@ -234,6 +234,7 @@ func (f *FilePicker) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	t := f.com.Styles
 	rc := NewRenderContext(t, width)
+	rc.Gap = 1
 	rc.Title = "Add Image"
 	rc.Help = f.help.View(f)
 

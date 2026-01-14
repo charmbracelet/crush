@@ -9,7 +9,6 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
@@ -17,7 +16,6 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/charmbracelet/x/ansi"
 )
 
 // CommandsID is the identifier for the commands dialog.
@@ -247,6 +245,7 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		// we need to reset the command items when width changes
 		c.setCommandItems(c.selected)
 	}
+
 	innerWidth := width - c.com.Styles.Dialog.View.GetHorizontalFrameSize()
 	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
 		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
@@ -257,18 +256,20 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	c.list.SetSize(innerWidth, height-heightOffset)
 	c.help.SetWidth(innerWidth)
 
-	radio := commandsRadioView(t, c.selected, len(c.customCommands) > 0, len(c.mcpPrompts) > 0)
-	titleStyle := t.Dialog.Title
-	dialogStyle := t.Dialog.View.Width(width)
-	headerOffset := lipgloss.Width(radio) + titleStyle.GetHorizontalFrameSize() + dialogStyle.GetHorizontalFrameSize()
-	helpView := ansi.Truncate(c.help.View(c), innerWidth, "")
-	header := common.DialogTitle(t, "Commands", width-headerOffset) + radio
+	rc := NewRenderContext(t, width)
+	rc.Title = "Commands"
+	rc.TitleInfo = commandsRadioView(t, c.selected, len(c.customCommands) > 0, len(c.mcpPrompts) > 0)
+	inputView := t.Dialog.InputPrompt.Render(c.input.View())
+	rc.AddPart(inputView)
+	listView := t.Dialog.List.Height(c.list.Height()).Render(c.list.Render())
+	rc.AddPart(listView)
+	rc.Help = c.help.View(c)
 
 	if c.loading {
-		helpView = t.Dialog.HelpView.Width(width).Render(c.spinner.View() + " Generating Prompt...")
+		rc.Help = c.spinner.View() + " Generating Prompt..."
 	}
-	view := HeaderInputListHelpView(t, width, c.list.Height(), header,
-		c.input.View(), c.list.Render(), helpView)
+
+	view := rc.Render()
 
 	cur := c.Cursor()
 	DrawCenterCursor(scr, area, view, cur)

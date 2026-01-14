@@ -10,13 +10,11 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/uiutil"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/charmbracelet/x/ansi"
 )
 
 // ModelType represents the type of model to select.
@@ -253,19 +251,16 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	m.list.SetSize(innerWidth, height-heightOffset)
 	m.help.SetWidth(innerWidth)
 
-	titleStyle := t.Dialog.Title
-	dialogStyle := t.Dialog.View
+	rc := NewRenderContext(t, width)
+	rc.Title = "Switch Model"
+	rc.TitleInfo = m.modelTypeRadioView()
+	inputView := t.Dialog.InputPrompt.Render(m.input.View())
+	rc.AddPart(inputView)
+	listView := t.Dialog.List.Height(m.list.Height()).Render(m.list.Render())
+	rc.AddPart(listView)
+	rc.Help = m.help.View(m)
 
-	radios := m.modelTypeRadioView()
-
-	headerOffset := lipgloss.Width(radios) + titleStyle.GetHorizontalFrameSize() +
-		dialogStyle.GetHorizontalFrameSize()
-
-	header := common.DialogTitle(t, "Switch Model", width-headerOffset) + radios
-
-	helpView := ansi.Truncate(m.help.View(m), innerWidth, "")
-	view := HeaderInputListHelpView(t, width, m.list.Height(), header,
-		m.input.View(), m.list.Render(), helpView)
+	view := rc.Render()
 
 	cur := m.Cursor()
 	DrawCenterCursor(scr, area, view, cur)

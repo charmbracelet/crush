@@ -10,7 +10,6 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/charmbracelet/x/ansi"
 )
 
 // SessionsID is the identifier for the session selector dialog.
@@ -154,15 +153,15 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	s.list.SetSize(innerWidth, height-heightOffset)
 	s.help.SetWidth(innerWidth)
 
-	titleStyle := s.com.Styles.Dialog.Title
-	dialogStyle := s.com.Styles.Dialog.View.Width(width)
-	header := common.DialogTitle(s.com.Styles, "Switch Session",
-		max(0, width-dialogStyle.GetHorizontalFrameSize()-
-			titleStyle.GetHorizontalFrameSize()))
+	rc := NewRenderContext(t, width)
+	rc.Title = "Switch Session"
+	inputView := t.Dialog.InputPrompt.Render(s.input.View())
+	rc.AddPart(inputView)
+	listView := t.Dialog.List.Height(s.list.Height()).Render(s.list.Render())
+	rc.AddPart(listView)
+	rc.Help = s.help.View(s)
 
-	helpView := ansi.Truncate(s.help.View(s), innerWidth, "")
-	view := HeaderInputListHelpView(s.com.Styles, width, s.list.Height(), header,
-		s.input.View(), s.list.Render(), helpView)
+	view := rc.Render()
 
 	cur := s.Cursor()
 	DrawCenterCursor(scr, area, view, cur)

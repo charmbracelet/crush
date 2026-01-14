@@ -4,8 +4,10 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // InputCursor adjusts the cursor position for an input field within a dialog.
@@ -43,9 +45,15 @@ type RenderContext struct {
 	// Width is the total width of the dialog including any margins, borders,
 	// and paddings.
 	Width int
+	// Gap is the gap between content parts. Zero means no gap.
+	Gap int
 	// Title is the title of the dialog. This will be styled using the default
 	// dialog title style and prepended to the content parts slice.
 	Title string
+	// TitleInfo is additional information to display next to the title. This
+	// part is displayed as is, any styling must be applied before setting this
+	// field.
+	TitleInfo string
 	// Parts are the rendered parts of the dialog.
 	Parts []string
 	// Help is the help view content. This will be appended to the content parts
@@ -76,55 +84,47 @@ func (rc *RenderContext) Render() string {
 
 	parts := []string{}
 	if len(rc.Title) > 0 {
+		var titleInfoWidth int
+		if len(rc.TitleInfo) > 0 {
+			titleInfoWidth = lipgloss.Width(rc.TitleInfo)
+		}
 		title := common.DialogTitle(rc.Styles, rc.Title,
 			max(0, rc.Width-dialogStyle.GetHorizontalFrameSize()-
-				titleStyle.GetHorizontalFrameSize()))
-		parts = append(parts, titleStyle.Render(title), "")
+				titleStyle.GetHorizontalFrameSize()-
+				titleInfoWidth))
+		if len(rc.TitleInfo) > 0 {
+			title += rc.TitleInfo
+		}
+		parts = append(parts, titleStyle.Render(title))
+		if rc.Gap > 0 {
+			parts = append(parts, make([]string, rc.Gap)...)
+		}
 	}
 
-	for i, p := range rc.Parts {
-		if len(p) > 0 {
-			parts = append(parts, p)
-		}
-		if i < len(rc.Parts)-1 {
-			parts = append(parts, "")
+	if rc.Gap <= 0 {
+		parts = append(parts, rc.Parts...)
+	} else {
+		for i, p := range rc.Parts {
+			if len(p) > 0 {
+				parts = append(parts, p)
+			}
+			if i < len(rc.Parts)-1 {
+				parts = append(parts, make([]string, rc.Gap)...)
+			}
 		}
 	}
 
 	if len(rc.Help) > 0 {
-		parts = append(parts, "")
+		if rc.Gap > 0 {
+			parts = append(parts, make([]string, rc.Gap)...)
+		}
 		helpStyle := rc.Styles.Dialog.HelpView
 		helpStyle = helpStyle.Width(rc.Width - dialogStyle.GetHorizontalFrameSize())
-		parts = append(parts, helpStyle.Render(rc.Help))
+		helpView := ansi.Truncate(helpStyle.Render(rc.Help), rc.Width, "")
+		parts = append(parts, helpView)
 	}
 
 	content := strings.Join(parts, "\n")
 
 	return dialogStyle.Render(content)
-}
-
-// HeaderInputListHelpView generates a view for dialogs with a header, input,
-// list, and help sections.
-func HeaderInputListHelpView(t *styles.Styles, width, listHeight int, header, input, list, help string) string {
-	rc := NewRenderContext(t, width)
-
-	titleStyle := t.Dialog.Title
-	inputStyle := t.Dialog.InputPrompt
-	listStyle := t.Dialog.List.Height(listHeight)
-	listContent := listStyle.Render(list)
-
-	if len(header) > 0 {
-		rc.AddPart(titleStyle.Render(header))
-	}
-	if len(input) > 0 {
-		rc.AddPart(inputStyle.Render(input))
-	}
-	if len(list) > 0 {
-		rc.AddPart(listContent)
-	}
-	if len(help) > 0 {
-		rc.Help = help
-	}
-
-	return rc.Render()
 }

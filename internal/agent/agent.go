@@ -709,15 +709,15 @@ func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.S
 	}
 
 	if session.SummaryMessageID != "" {
-		summaryMsgInex := -1
+		summaryMsgIndex := -1
 		for i, msg := range msgs {
 			if msg.ID == session.SummaryMessageID {
-				summaryMsgInex = i
+				summaryMsgIndex = i
 				break
 			}
 		}
-		if summaryMsgInex != -1 {
-			msgs = msgs[summaryMsgInex:]
+		if summaryMsgIndex != -1 {
+			msgs = msgs[summaryMsgIndex:]
 			msgs[0].Role = message.User
 		}
 	}

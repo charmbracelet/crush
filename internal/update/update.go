@@ -106,7 +106,7 @@ func (c *github) Latest(ctx context.Context) (*Release, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("github api returned status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("GitHub API returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	var release Release

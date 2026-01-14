@@ -326,5 +326,5 @@ func retryAfter(resp *http.Response) string {
 		d := time.Duration(after) * time.Second
 		return "Try again in " + d.String()
 	}
-	return "Try again in later"
+	return "Try again later"
 }

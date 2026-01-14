@@ -1222,7 +1222,7 @@ func DefaultStyles() Styles {
 	s.Dialog.ScrollbarTrack = base.Foreground(border)
 
 	s.Dialog.Arguments.Content = base.Padding(1)
-	s.Dialog.Arguments.Description = base.MarginBottom(1)
+	s.Dialog.Arguments.Description = base.MarginBottom(1).MaxHeight(3)
 	s.Dialog.Arguments.InputLabelBlurred = base.Foreground(fgMuted)
 	s.Dialog.Arguments.InputLabelFocused = base.Bold(true)
 	s.Dialog.Arguments.InputRequiredMarkBlurred = base.Foreground(fgMuted).SetString("*")

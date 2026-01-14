@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"golang.org/x/text/cases"
@@ -25,6 +26,7 @@ const ArgumentsID = "arguments"
 const (
 	maxInputWidth        = 120
 	minInputWidth        = 30
+	maxViewportHeight    = 20
 	argumentsFieldHeight = 3 // label + input + spacing per field
 )
 
@@ -46,8 +48,12 @@ type Arguments struct {
 		Confirm,
 		Next,
 		Previous,
+		ScrollUp,
+		ScrollDown,
 		Close key.Binding
 	}
+
+	viewport viewport.Model
 }
 
 var _ Dialog = (*Arguments)(nil)
@@ -123,6 +129,56 @@ func (a *Arguments) focusInput(newIndex int) {
 	a.focused = ((newIndex % n) + n) % n
 
 	a.inputs[a.focused].Focus()
+
+	// Ensure the newly focused field is visible in the viewport
+	a.ensureFieldVisible(a.focused)
+}
+
+// isFieldVisible checks if a field at the given index is visible in the viewport.
+func (a *Arguments) isFieldVisible(fieldIndex int) bool {
+	fieldStart := fieldIndex * argumentsFieldHeight
+	fieldEnd := fieldStart + argumentsFieldHeight - 1
+	viewportTop := a.viewport.YOffset()
+	viewportBottom := viewportTop + a.viewport.Height() - 1
+
+	return fieldStart >= viewportTop && fieldEnd <= viewportBottom
+}
+
+// ensureFieldVisible scrolls the viewport to make the field visible.
+func (a *Arguments) ensureFieldVisible(fieldIndex int) {
+	if a.isFieldVisible(fieldIndex) {
+		return
+	}
+
+	fieldStart := fieldIndex * argumentsFieldHeight
+	fieldEnd := fieldStart + argumentsFieldHeight - 1
+	viewportTop := a.viewport.YOffset()
+	viewportHeight := a.viewport.Height()
+
+	// If field is above viewport, scroll up to show it at top
+	if fieldStart < viewportTop {
+		a.viewport.SetYOffset(fieldStart)
+		return
+	}
+
+	// If field is below viewport, scroll down to show it at bottom
+	if fieldEnd > viewportTop+viewportHeight-1 {
+		a.viewport.SetYOffset(fieldEnd - viewportHeight + 1)
+	}
+}
+
+// findVisibleFieldByOffset returns the field index closest to the given viewport offset.
+func (a *Arguments) findVisibleFieldByOffset(fromTop bool) int {
+	offset := a.viewport.YOffset()
+	if !fromTop {
+		offset += a.viewport.Height() - 1
+	}
+
+	fieldIndex := offset / argumentsFieldHeight
+	if fieldIndex >= len(a.inputs) {
+		return len(a.inputs) - 1
+	}
+	return fieldIndex
 }
 
 // HandleMsg implements Dialog.
@@ -173,6 +229,12 @@ func (a *Arguments) HandleMsg(msg tea.Msg) Action {
 			a.inputs[a.focused], cmd = a.inputs[a.focused].Update(msg)
 			return ActionCmd{Cmd: cmd}
 		}
+	case tea.MouseWheelMsg:
+		a.viewport, _ = a.viewport.Update(msg)
+		// If focused field scrolled out of view, focus the visible field
+		if !a.isFieldVisible(a.focused) {
+			a.focusInput(a.findVisibleFieldByOffset(msg.Button == tea.MouseWheelDown))
+		}
 	case tea.PasteMsg:
 		var cmd tea.Cmd
 		a.inputs[a.focused], cmd = a.inputs[a.focused].Update(msg)
@@ -188,7 +250,7 @@ func (a *Arguments) Cursor(descriptionHeight int) *tea.Cursor {
 	if cursor == nil {
 		return nil
 	}
-	cursor.Y += descriptionHeight + a.focused*argumentsFieldHeight + 1
+	cursor.Y += descriptionHeight + a.focused*argumentsFieldHeight - a.viewport.YOffset() + 1
 	return cursor
 }
 
@@ -231,7 +293,7 @@ func (a *Arguments) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 		inputWidth := max(placeholderWidth, labelWidth, minInputWidth)
 		inputWidth = min(inputWidth, min(possibleWidth, maxInputWidth))
-		a.inputs[i].SetWidth(inputWidth + lipgloss.Width(a.inputs[i].Prompt))
+		a.inputs[i].SetWidth(inputWidth)
 
 		inputLine := a.inputs[i].View()
 
@@ -241,10 +303,10 @@ func (a *Arguments) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	renderedFields := lipgloss.JoinVertical(lipgloss.Left, fields...)
 
-	// We ancor the width to the fields so the field with the longest description
-	// determines the dialog width. The width is capped at maxInputWidth or the
-	// available area width.
-	width := lipgloss.Width(renderedFields) + dialogContentStyle.GetHorizontalFrameSize() + s.Dialog.View.GetHorizontalFrameSize()
+	// Anchor width to the longest field, capped at maxInputWidth.
+	const scrollbarWidth = 1
+	width := lipgloss.Width(renderedFields)
+	height := lipgloss.Height(renderedFields)
 
 	// Use standard header
 	titleStyle := s.Dialog.Title
@@ -264,16 +326,27 @@ func (a *Arguments) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	}
 
 	helpView := s.Dialog.HelpView.Width(width).Render(a.help.View(a))
+	if a.loading {
+		helpView = s.Dialog.HelpView.Width(width).Render(a.spinner.View() + " Generating Prompt...")
+	}
 
+	availableHeight := area.Dy() - s.Dialog.View.GetVerticalFrameSize() - dialogContentStyle.GetVerticalFrameSize() - lipgloss.Height(header) - lipgloss.Height(description) - lipgloss.Height(helpView) - 2 // extra spacing
+	viewportHeight := min(height, maxViewportHeight, availableHeight)
+
+	a.viewport.SetWidth(width) // -1 for scrollbar
+	a.viewport.SetHeight(viewportHeight)
+	a.viewport.SetContent(renderedFields)
+
+	scrollbar := common.Scrollbar(s, viewportHeight, a.viewport.TotalLineCount(), viewportHeight, a.viewport.YOffset())
+	content := a.viewport.View()
+	if scrollbar != "" {
+		content = lipgloss.JoinHorizontal(lipgloss.Top, content, scrollbar)
+	}
 	contentParts := []string{}
 	if description != "" {
 		contentParts = append(contentParts, description)
 	}
-	contentParts = append(contentParts, renderedFields)
-
-	if a.loading {
-		helpView = s.Dialog.HelpView.Width(width).Render(a.spinner.View() + " Generating Prompt...")
-	}
+	contentParts = append(contentParts, content)
 
 	view := lipgloss.JoinVertical(
 		lipgloss.Left,

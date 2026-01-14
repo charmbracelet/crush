@@ -173,10 +173,14 @@ func (a *APIKeyInput) View() string {
 
 func (a *APIKeyInput) Cursor() *tea.Cursor {
 	cursor := a.input.Cursor()
-	if cursor != nil && a.showTitle {
-		cursor.Y += 2 // Adjust for title and spacing
+	if cursor != nil {
+		c := *cursor
+		if a.showTitle {
+			c.Y += 2 // Adjust for title and spacing
+		}
+		return &c
 	}
-	return cursor
+	return nil
 }
 
 func (a *APIKeyInput) Value() string {

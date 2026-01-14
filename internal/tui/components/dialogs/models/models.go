@@ -468,17 +468,21 @@ func (m *modelDialogCmp) Position() (int, int) {
 }
 
 func (m *modelDialogCmp) moveCursor(cursor *tea.Cursor) *tea.Cursor {
+	if cursor == nil {
+		return nil
+	}
+	cur := *cursor
 	row, col := m.Position()
 	if m.needsAPIKey {
 		offset := row + 3 // Border + title + API key input offset
-		cursor.Y += offset
-		cursor.X = cursor.X + col + 2
+		cur.Y += offset
+		cur.X = cur.X + col + 2
 	} else {
 		offset := row + 3 // Border + title
-		cursor.Y += offset
-		cursor.X = cursor.X + col + 2
+		cur.Y += offset
+		cur.X = cur.X + col + 2
 	}
-	return cursor
+	return &cur
 }
 
 func (m *modelDialogCmp) ID() dialogs.DialogID {

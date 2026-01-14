@@ -168,11 +168,15 @@ func (s *sessionDialogCmp) Position() (int, int) {
 }
 
 func (s *sessionDialogCmp) moveCursor(cursor *tea.Cursor) *tea.Cursor {
+	if cursor == nil {
+		return nil
+	}
+	cur := *cursor
 	row, col := s.Position()
 	offset := row + 3 // Border + title
-	cursor.Y += offset
-	cursor.X = cursor.X + col + 2
-	return cursor
+	cur.Y += offset
+	cur.X = cur.X + col + 2
+	return &cur
 }
 
 // ID implements SessionDialog.

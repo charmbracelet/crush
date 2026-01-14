@@ -160,13 +160,14 @@ func (c *agentsDialogCmp) ID() dialogs.DialogID {
 
 func (c *agentsDialogCmp) Cursor() *tea.Cursor {
 	if cursor, ok := c.agentList.(util.Cursor); ok {
-		cursor := cursor.Cursor()
-		if cursor != nil {
+		cur := cursor.Cursor()
+		if cur != nil {
 			row, col := c.Position()
-			cursor.Y += row + 3
-			cursor.X += col + 2
+			c := *cur
+			c.Y += row + 3
+			c.X += col + 2
+			return &c
 		}
-		return cursor
 	}
 	return nil
 }

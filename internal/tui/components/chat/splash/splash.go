@@ -730,6 +730,7 @@ func (s *splashCmp) moveCursor(cursor *tea.Cursor) *tea.Cursor {
 	if cursor == nil {
 		return nil
 	}
+	c := *cursor
 	// Calculate the correct Y offset based on current state
 	logoHeight := lipgloss.Height(s.logoRendered)
 	if s.needsAPIKey {
@@ -737,15 +738,15 @@ func (s *splashCmp) moveCursor(cursor *tea.Cursor) *tea.Cursor {
 		baseOffset := logoHeight + SplashScreenPaddingY + infoSectionHeight
 		remainingHeight := s.height - baseOffset - lipgloss.Height(s.apiKeyInput.View()) - SplashScreenPaddingY
 		offset := baseOffset + remainingHeight
-		cursor.Y += offset
-		cursor.X += 1
+		c.Y += offset
+		c.X += 1
 	} else if s.isOnboarding {
 		offset := logoHeight + SplashScreenPaddingY + s.logoGap() + 2
-		cursor.Y += offset
-		cursor.X += 1
+		c.Y += offset
+		c.X += 1
 	}
 
-	return cursor
+	return &c
 }
 
 func (s *splashCmp) logoGap() int {

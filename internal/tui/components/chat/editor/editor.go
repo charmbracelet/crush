@@ -421,10 +421,12 @@ func (m *editorCmp) completionsPosition() (int, int) {
 func (m *editorCmp) Cursor() *tea.Cursor {
 	cursor := m.textarea.Cursor()
 	if cursor != nil {
-		cursor.X = cursor.X + m.x + 1
-		cursor.Y = cursor.Y + m.y + 1 // adjust for padding
+		c := *cursor
+		c.X = c.X + m.x + 1
+		c.Y = c.Y + m.y + 1 // adjust for padding
+		return &c
 	}
-	return cursor
+	return nil
 }
 
 var readyPlaceholders = [...]string{

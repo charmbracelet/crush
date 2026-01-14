@@ -107,10 +107,10 @@ func (p *permissionDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	case tea.KeyPressMsg:
 		switch {
-		case key.Matches(msg, p.keyMap.Right) || key.Matches(msg, p.keyMap.Tab):
+		case key.Matches(msg, p.keyMap.Right) || key.Matches(msg, p.keyMap.Tab) || key.Matches(msg, p.keyMap.Down):
 			p.selectedOption = (p.selectedOption + 1) % 3
 			return p, nil
-		case key.Matches(msg, p.keyMap.Left):
+		case key.Matches(msg, p.keyMap.Left) || key.Matches(msg, p.keyMap.Up):
 			p.selectedOption = (p.selectedOption + 2) % 3
 		case key.Matches(msg, p.keyMap.Select):
 			return p, p.selectCurrentOption()

@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
+	"image/color"
 	"strings"
 	"time"
 
@@ -221,6 +222,19 @@ func (gr genericRenderer) Render(v *toolCallCmp) string {
 		return gr.renderWithParams(v, prettifyToolName(v.call.Name), []string{v.call.Input}, func() string {
 			return renderMediaContent(v, v.result.MIMEType, v.result.Content)
 		})
+	}
+
+	// If it has nested tool calls, it's likely a subagent or agentic tool
+	if len(v.nestedToolCalls) > 0 {
+		return agentRenderer{}.Render(v)
+	}
+
+	// Try to detect subagent-like tools by input
+	var params map[string]any
+	if err := json.Unmarshal([]byte(v.call.Input), &params); err == nil {
+		if _, ok := params["prompt"].(string); ok && len(params) == 1 {
+			return agentRenderer{}.Render(v)
+		}
 	}
 
 	return gr.renderWithParams(v, prettifyToolName(v.call.Name), []string{v.call.Input}, func() string {
@@ -630,6 +644,65 @@ func (fr simpleFetchRenderer) getFileExtension(format string) string {
 	}
 }
 
+// renderAgentLike provides a common rendering for agent-like tools (agent, agentic fetch, subagents)
+func (br baseRenderer) renderAgentLike(v *toolCallCmp, toolName, tag, prompt string, tagBg, tagFg color.Color) string {
+	t := styles.CurrentTheme()
+	width := v.textWidth()
+	if v.isNested {
+		width -= 4
+	}
+
+	header := br.makeHeader(v, toolName, width)
+	if res, done := earlyState(header, v); v.cancelled && done {
+		return res
+	}
+
+	tagStyled := t.S().Base.Bold(true).Padding(0, 1).MarginLeft(2).Background(tagBg).Foreground(tagFg).Render(tag)
+	remainingWidth := width - (lipgloss.Width(tagStyled) + 3)
+	remainingWidth = min(remainingWidth, 120-(lipgloss.Width(tagStyled)+3))
+
+	promptStyled := t.S().Muted.Width(remainingWidth).Render(strings.ReplaceAll(prompt, "\n", " "))
+
+	headerWithTask := lipgloss.JoinVertical(
+		lipgloss.Left,
+		header,
+		"",
+		lipgloss.JoinHorizontal(
+			lipgloss.Left,
+			tagStyled,
+			" ",
+			promptStyled,
+		),
+	)
+
+	if len(v.nestedToolCalls) > 0 {
+		childTools := tree.Root(headerWithTask)
+		for _, call := range v.nestedToolCalls {
+			call.SetSize(remainingWidth, 1)
+			childTools.Child(call.View())
+		}
+		headerWithTask = childTools.Enumerator(RoundedEnumeratorWithWidth(2, lipgloss.Width(tagStyled)-5)).String()
+	}
+
+	var parts []string
+	parts = append(parts, headerWithTask)
+
+	if v.result.ToolCallID == "" {
+		v.spinning = true
+		parts = append(parts, "", v.anim.View())
+	} else {
+		v.spinning = false
+	}
+
+	finalHeader := lipgloss.JoinVertical(lipgloss.Left, parts...)
+	if v.result.ToolCallID == "" {
+		return finalHeader
+	}
+
+	body := renderMarkdownContent(v, v.result.Content)
+	return joinHeaderBody(finalHeader, body)
+}
+
 // -----------------------------------------------------------------------------
 //  Agentic fetch renderer
 // -----------------------------------------------------------------------------
@@ -643,65 +716,19 @@ type agenticFetchRenderer struct {
 func (fr agenticFetchRenderer) Render(v *toolCallCmp) string {
 	t := styles.CurrentTheme()
 	var params tools.AgenticFetchParams
-	var args []string
-	if err := fr.unmarshalParams(v.call.Input, &params); err == nil {
-		if params.URL != "" {
-			args = newParamBuilder().
-				addMain(params.URL).
-				build()
-		}
-	}
+	_ = fr.unmarshalParams(v.call.Input, &params)
 
 	prompt := params.Prompt
-	prompt = strings.ReplaceAll(prompt, "\n", " ")
-
-	header := fr.makeHeader(v, "Agentic Fetch", v.textWidth(), args...)
-	if res, done := earlyState(header, v); v.cancelled && done {
-		return res
+	if prompt == "" {
+		prompt = v.call.Input
 	}
 
-	taskTag := t.S().Base.Bold(true).Padding(0, 1).MarginLeft(2).Background(t.GreenLight).Foreground(t.Border).Render("Prompt")
-	remainingWidth := v.textWidth() - (lipgloss.Width(taskTag) + 1)
-	remainingWidth = min(remainingWidth, 120-(lipgloss.Width(taskTag)+1))
-	prompt = t.S().Base.Width(remainingWidth).Render(prompt)
-	header = lipgloss.JoinVertical(
-		lipgloss.Left,
-		header,
-		"",
-		lipgloss.JoinHorizontal(
-			lipgloss.Left,
-			taskTag,
-			" ",
-			prompt,
-		),
-	)
-	childTools := tree.Root(header)
-
-	for _, call := range v.nestedToolCalls {
-		call.SetSize(remainingWidth, 1)
-		childTools.Child(call.View())
-	}
-	parts := []string{
-		childTools.Enumerator(RoundedEnumeratorWithWidth(2, lipgloss.Width(taskTag)-5)).String(),
+	name := "Agentic Fetch"
+	if params.URL != "" {
+		name = fmt.Sprintf("Fetch: %s", params.URL)
 	}
 
-	if v.result.ToolCallID == "" {
-		v.spinning = true
-		parts = append(parts, "", v.anim.View())
-	} else {
-		v.spinning = false
-	}
-
-	header = lipgloss.JoinVertical(
-		lipgloss.Left,
-		parts...,
-	)
-
-	if v.result.ToolCallID == "" {
-		return header
-	}
-	body := renderMarkdownContent(v, v.result.Content)
-	return joinHeaderBody(header, body)
+	return fr.renderAgentLike(v, name, "Prompt", prompt, t.GreenLight, t.Border)
 }
 
 // formatTimeout converts timeout seconds to duration string
@@ -940,58 +967,22 @@ func RoundedEnumeratorWithWidth(lPadding, width int) tree.Enumerator {
 func (tr agentRenderer) Render(v *toolCallCmp) string {
 	t := styles.CurrentTheme()
 	var params agent.AgentParams
-	tr.unmarshalParams(v.call.Input, &params)
+	_ = tr.unmarshalParams(v.call.Input, &params)
 
 	prompt := params.Prompt
-	prompt = strings.ReplaceAll(prompt, "\n", " ")
-
-	header := tr.makeHeader(v, "Agent", v.textWidth())
-	if res, done := earlyState(header, v); v.cancelled && done {
-		return res
+	if prompt == "" {
+		var m map[string]any
+		if err := tr.unmarshalParams(v.call.Input, &m); err == nil {
+			if p, ok := m["prompt"].(string); ok {
+				prompt = p
+			}
+		}
 	}
-	taskTag := t.S().Base.Bold(true).Padding(0, 1).MarginLeft(2).Background(t.BlueLight).Foreground(t.White).Render("Task")
-	remainingWidth := v.textWidth() - lipgloss.Width(header) - lipgloss.Width(taskTag) - 2
-	remainingWidth = min(remainingWidth, 120-lipgloss.Width(taskTag)-2)
-	prompt = t.S().Muted.Width(remainingWidth).Render(prompt)
-	header = lipgloss.JoinVertical(
-		lipgloss.Left,
-		header,
-		"",
-		lipgloss.JoinHorizontal(
-			lipgloss.Left,
-			taskTag,
-			" ",
-			prompt,
-		),
-	)
-	childTools := tree.Root(header)
-
-	for _, call := range v.nestedToolCalls {
-		call.SetSize(remainingWidth, 1)
-		childTools.Child(call.View())
-	}
-	parts := []string{
-		childTools.Enumerator(RoundedEnumeratorWithWidth(2, lipgloss.Width(taskTag)-5)).String(),
+	if prompt == "" {
+		prompt = v.call.Input
 	}
 
-	if v.result.ToolCallID == "" {
-		v.spinning = true
-		parts = append(parts, "", v.anim.View())
-	} else {
-		v.spinning = false
-	}
-
-	header = lipgloss.JoinVertical(
-		lipgloss.Left,
-		parts...,
-	)
-
-	if v.result.ToolCallID == "" {
-		return header
-	}
-
-	body := renderMarkdownContent(v, v.result.Content)
-	return joinHeaderBody(header, body)
+	return tr.renderAgentLike(v, prettifyToolName(v.call.Name), "Task", prompt, t.BlueLight, t.White)
 }
 
 // renderParamList renders params, params[0] (params[1]=params[2] ....)
@@ -1001,6 +992,27 @@ func renderParamList(nested bool, paramsWidth int, params ...string) string {
 		return ""
 	}
 	mainParam := params[0]
+
+	// If it's the only parameter and looks like JSON, try to unmarshal it for a prettier display
+	if len(params) == 1 {
+		var m map[string]any
+		if err := json.Unmarshal([]byte(mainParam), &m); err == nil {
+			if len(m) == 1 {
+				// Single key, just show its value
+				for _, v := range m {
+					mainParam = fmt.Sprint(v)
+				}
+			} else {
+				// Multiple keys, show as k=v
+				var parts []string
+				for k, v := range m {
+					parts = append(parts, fmt.Sprintf("%s=%v", k, v))
+				}
+				mainParam = strings.Join(parts, ", ")
+			}
+		}
+	}
+
 	if paramsWidth >= 0 && lipgloss.Width(mainParam) > paramsWidth {
 		mainParam = ansi.Truncate(mainParam, paramsWidth, "…")
 	}
@@ -1075,8 +1087,17 @@ func renderPlainContent(v *toolCallCmp, content string) string {
 	content = strings.ReplaceAll(content, "\r\n", "\n") // Normalize line endings
 	content = strings.ReplaceAll(content, "\t", "    ") // Replace tabs with spaces
 	content = strings.TrimSpace(content)
-	lines := strings.Split(content, "\n")
 
+	// If it looks like JSON, try to render it as code
+	if (strings.HasPrefix(content, "{") && strings.HasSuffix(content, "}")) ||
+		(strings.HasPrefix(content, "[") && strings.HasSuffix(content, "]")) {
+		var m any
+		if json.Unmarshal([]byte(content), &m) == nil {
+			return renderCodeContent(v, "response.json", content, 0)
+		}
+	}
+
+	lines := strings.Split(content, "\n")
 	width := v.textWidth() - 2
 	var out []string
 	for i, ln := range lines {
@@ -1307,6 +1328,11 @@ func prettifyToolName(name string) string {
 	case tools.WriteToolName:
 		return "Write"
 	default:
+		name = strings.ReplaceAll(name, "-", " ")
+		name = strings.ReplaceAll(name, "_", " ")
+		if len(name) > 0 {
+			name = strings.ToUpper(name[:1]) + name[1:]
+		}
 		return name
 	}
 }

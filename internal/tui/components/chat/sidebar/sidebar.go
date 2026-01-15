@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crush/internal/gitinfo"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/lsp"
@@ -607,7 +608,39 @@ func (m *sidebarCmp) SetCompactMode(compact bool) {
 }
 
 func cwd() string {
-	cwd := config.Get().WorkingDir()
+	workDir := config.Get().WorkingDir()
 	t := styles.CurrentTheme()
-	return t.S().Muted.Render(home.Short(cwd))
+	s := t.S()
+
+	git := gitinfo.Get(workDir)
+	if !git.IsRepo {
+		// Not a git repo - just show the path in muted style.
+		return s.Muted.Render(home.Short(workDir))
+	}
+
+	// Git repo: show "repoName/path branch •"
+	var parts []string
+
+	// Repo name (bold/accent).
+	repoStyle := lipgloss.NewStyle().Foreground(t.Accent).Bold(true)
+	parts = append(parts, repoStyle.Render(git.RepoName))
+
+	// Path inside repo (muted).
+	if git.PathInRepo != "" {
+		parts = append(parts, s.Muted.Render("/"+git.PathInRepo))
+	}
+
+	// Branch with color based on dirty status.
+	branchStyle := lipgloss.NewStyle().Foreground(t.Success)
+	if git.IsDirty {
+		branchStyle = lipgloss.NewStyle().Foreground(t.Warning)
+	}
+	branch := " " + branchStyle.Render(git.Branch)
+
+	// Dirty indicator.
+	if git.IsDirty {
+		branch += lipgloss.NewStyle().Foreground(t.Warning).Render(" •")
+	}
+
+	return strings.Join(parts, "") + branch
 }

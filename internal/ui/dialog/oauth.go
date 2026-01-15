@@ -286,7 +286,6 @@ func (m *OAuth) innerDialogContent() string {
 		return greenStyle.
 			Margin(1).
 			Width(m.width - 2).
-			Align(lipgloss.Center).
 			Render("Authentication successful!")
 
 	case OAuthStateError:

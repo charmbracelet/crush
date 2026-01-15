@@ -34,7 +34,6 @@ var modelsCmd = &cobra.Command{
 			return fmt.Errorf("no providers configured - please run 'crush' to set up a provider interactively")
 		}
 
-		// Collect providers and their models, sorted by provider ID.
 		var providerIDs []string
 		providerModels := make(map[string][]string)
 
@@ -50,12 +49,6 @@ var modelsCmd = &cobra.Command{
 		}
 		sort.Strings(providerIDs)
 
-		if len(providerIDs) == 0 {
-			fmt.Println("No models found in configured providers")
-			return nil
-		}
-
-		// Build tree structure.
 		t := tree.New()
 		for _, providerID := range providerIDs {
 			providerNode := tree.Root(providerID)
@@ -65,7 +58,7 @@ var modelsCmd = &cobra.Command{
 			t.Child(providerNode)
 		}
 
-		fmt.Println(t)
+		cmd.Println(t)
 		return nil
 	},
 }

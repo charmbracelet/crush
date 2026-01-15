@@ -296,8 +296,8 @@ func (app *App) UpdateAgentModel(ctx context.Context) error {
 // Format: "model-name" (searches all providers) or "provider/model-name".
 // Model matching is case-insensitive.
 func (app *App) overrideModelForNonInteractive(ctx context.Context, modelStr string) error {
-	providerID, modelID, _ := strings.Cut(modelStr, "/")
-	if modelID == "" {
+	providerID, modelID, ok := strings.Cut(strings.ToLower(modelStr), "/")
+	if !ok {
 		modelID = providerID
 		providerID = ""
 	}
@@ -310,19 +310,18 @@ func (app *App) overrideModelForNonInteractive(ctx context.Context, modelStr str
 		}
 	}
 
-	// Find all matching providers for this model (case-insensitive).
 	type match struct {
 		provider string
-		modelID  string // Actual model ID from config (preserves original case).
+		modelID  string
 	}
+
 	var matches []match
-	modelIDLower := strings.ToLower(modelID)
 	for name, provider := range cfg.Providers.Seq2() {
 		if provider.Disable || (providerID != "" && name != providerID) {
 			continue
 		}
 		for _, m := range provider.Models {
-			if strings.ToLower(m.ID) == modelIDLower {
+			if strings.ToLower(m.ID) == modelID {
 				matches = append(matches, match{provider: name, modelID: m.ID})
 				break
 			}
@@ -335,11 +334,11 @@ func (app *App) overrideModelForNonInteractive(ctx context.Context, modelStr str
 	case len(matches) == 0:
 		return fmt.Errorf("model %q not found in any configured provider", modelID)
 	case len(matches) > 1 && providerID == "":
-		providerNames := make([]string, len(matches))
+		names := make([]string, len(matches))
 		for i, m := range matches {
-			providerNames[i] = m.provider
+			names[i] = m.provider
 		}
-		return fmt.Errorf("model %q found in multiple providers: %v. Please specify provider using 'provider/model' format", modelID, providerNames)
+		return fmt.Errorf("model %q found in multiple providers: %v. Please specify provider using 'provider/model' format", modelID, names)
 	}
 
 	found := matches[0]

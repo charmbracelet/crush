@@ -267,10 +267,12 @@ func (m *OAuth) innerDialogContent() string {
 			Width(m.width - 2).
 			Render("Browser not opening? Refer to\n" + link)
 
-		waiting := greenStyle.
+		waiting := lipgloss.NewStyle().
+			Margin(1, 1).
 			Width(m.width - 2).
-			Margin(1).
-			Render(m.spinner.View() + "Verifying...")
+			Render(
+				greenStyle.Render(m.spinner.View()) + mutedStyle.Render("Verifying..."),
+			)
 
 		return lipgloss.JoinVertical(
 			lipgloss.Left,

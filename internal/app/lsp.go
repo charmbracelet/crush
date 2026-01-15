@@ -25,6 +25,18 @@ func (app *App) initLSPClients(ctx context.Context) {
 			manager.RemoveServer(name)
 			continue
 		}
+
+		// HACK: the user might have the command name in their config, instead
+		// of the actual name. This finds out these cases, and adjusts the name
+		// accordingly.
+		if _, ok := manager.GetServer(name); !ok {
+			for sname, server := range manager.GetServers() {
+				if server.Command == name {
+					name = sname
+					break
+				}
+			}
+		}
 		userConfiguredLSPs = append(userConfiguredLSPs, name)
 		manager.AddServer(name, &powernapconfig.ServerConfig{
 			Command:     clientConfig.Command,

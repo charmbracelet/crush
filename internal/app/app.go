@@ -341,6 +341,7 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		return fmt.Errorf("coder agent configuration is missing")
 	}
 	var err error
+	httpClient := log.NewHTTPClientWithRetry(app.config.Options.Debug)
 	app.AgentCoordinator, err = agent.NewCoordinator(
 		ctx,
 		app.config,
@@ -349,7 +350,7 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.Permissions,
 		app.History,
 		app.LSPClients,
-		nil,
+		httpClient,
 	)
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)

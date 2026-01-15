@@ -1028,49 +1028,26 @@ func substituteArgs(content string, args map[string]string) string {
 }
 
 func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType) tea.Cmd {
+	var (
+		dlg dialog.Dialog
+		cmd tea.Cmd
+	)
+
 	switch provider.ID {
 	case "hyper":
-		return m.openOAuthHyperDialog(provider, model, modelType)
+		dlg, cmd = dialog.NewOAuthHyper(m.com, provider, model, modelType)
 	case catwalk.InferenceProviderCopilot:
-		return m.openOAuthCopilotDialog(provider, model, modelType)
+		dlg, cmd = dialog.NewOAuthCopilot(m.com, provider, model, modelType)
 	default:
-		return m.openAPIKeyInputDialog(provider, model, modelType)
+		dlg, cmd = dialog.NewAPIKeyInput(m.com, provider, model, modelType)
 	}
-}
 
-func (m *UI) openAPIKeyInputDialog(provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType) tea.Cmd {
-	if m.dialog.ContainsDialog(dialog.APIKeyInputID) {
-		m.dialog.BringToFront(dialog.APIKeyInputID)
+	if m.dialog.ContainsDialog(dlg.ID()) {
+		m.dialog.BringToFront(dlg.ID())
 		return nil
 	}
 
-	apiKeyInputDialog, err := dialog.NewAPIKeyInput(m.com, provider, model, modelType)
-	if err != nil {
-		return uiutil.ReportError(err)
-	}
-	m.dialog.OpenDialog(apiKeyInputDialog)
-	return nil
-}
-
-func (m *UI) openOAuthHyperDialog(provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType) tea.Cmd {
-	if m.dialog.ContainsDialog(dialog.OAuthID) {
-		m.dialog.BringToFront(dialog.OAuthID)
-		return nil
-	}
-
-	oAuthDialog, cmd := dialog.NewOAuthHyper(m.com, provider, model, modelType)
-	m.dialog.OpenDialog(oAuthDialog)
-	return cmd
-}
-
-func (m *UI) openOAuthCopilotDialog(provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType) tea.Cmd {
-	if m.dialog.ContainsDialog(dialog.OAuthID) {
-		m.dialog.BringToFront(dialog.OAuthID)
-		return nil
-	}
-
-	oAuthDialog, cmd := dialog.NewOAuthCopilot(m.com, provider, model, modelType)
-	m.dialog.OpenDialog(oAuthDialog)
+	m.dialog.OpenDialog(dlg)
 	return cmd
 }
 

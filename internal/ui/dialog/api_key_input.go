@@ -54,7 +54,7 @@ type APIKeyInput struct {
 var _ Dialog = (*APIKeyInput)(nil)
 
 // NewAPIKeyInput creates a new Models dialog.
-func NewAPIKeyInput(com *common.Common, provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType) (*APIKeyInput, error) {
+func NewAPIKeyInput(com *common.Common, provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType) (*APIKeyInput, tea.Cmd) {
 	t := com.Styles
 
 	m := APIKeyInput{}

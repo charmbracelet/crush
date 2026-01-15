@@ -459,10 +459,16 @@ func getFilteredProviders(cfg *config.Config) ([]catwalk.Provider, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get providers: %w", err)
 	}
-	filteredProviders := []catwalk.Provider{}
+	var filteredProviders []catwalk.Provider
 	for _, p := range providers {
-		hasAPIKeyEnv := strings.HasPrefix(p.APIKey, "$")
-		if hasAPIKeyEnv && p.ID != catwalk.InferenceProviderAzure {
+		var (
+			isAzure         = p.ID == catwalk.InferenceProviderAzure
+			isCopilot       = p.ID == catwalk.InferenceProviderCopilot
+			isHyper         = string(p.ID) == "hyper"
+			hasAPIKeyEnv    = strings.HasPrefix(p.APIKey, "$")
+			_, isConfigured = cfg.Providers.Get(string(p.ID))
+		)
+		if isAzure || isCopilot || isHyper || hasAPIKeyEnv || isConfigured {
 			filteredProviders = append(filteredProviders, p)
 		}
 	}

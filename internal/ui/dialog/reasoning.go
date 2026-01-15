@@ -19,11 +19,13 @@ import (
 )
 
 const (
+	// ReasoningID is the identifier for the reasoning effort dialog.
 	ReasoningID              = "reasoning"
 	reasoningDialogMaxWidth  = 80
 	reasoningDialogMaxHeight = 12
 )
 
+// Reasoning represents a dialog for selecting reasoning effort.
 type Reasoning struct {
 	com   *common.Common
 	help  help.Model
@@ -39,6 +41,7 @@ type Reasoning struct {
 	}
 }
 
+// ReasoningItem represents a reasoning effort list item.
 type ReasoningItem struct {
 	effort    string
 	title     string
@@ -54,6 +57,7 @@ var (
 	_ ListItem = (*ReasoningItem)(nil)
 )
 
+// NewReasoning creates a new reasoning effort dialog.
 func NewReasoning(com *common.Common) (*Reasoning, error) {
 	r := &Reasoning{com: com}
 
@@ -95,10 +99,12 @@ func NewReasoning(com *common.Common) (*Reasoning, error) {
 	return r, nil
 }
 
+// ID implements Dialog.
 func (r *Reasoning) ID() string {
 	return ReasoningID
 }
 
+// HandleMsg implements [Dialog].
 func (r *Reasoning) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
@@ -146,10 +152,12 @@ func (r *Reasoning) HandleMsg(msg tea.Msg) Action {
 	return nil
 }
 
+// Cursor returns the cursor position relative to the dialog.
 func (r *Reasoning) Cursor() *tea.Cursor {
 	return InputCursor(r.com.Styles, r.input.Cursor())
 }
 
+// Draw implements [Dialog].
 func (r *Reasoning) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := r.com.Styles
 	width := max(0, min(reasoningDialogMaxWidth, area.Dx()))
@@ -185,6 +193,7 @@ func (r *Reasoning) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	return cur
 }
 
+// ShortHelp implements [help.KeyMap].
 func (r *Reasoning) ShortHelp() []key.Binding {
 	return []key.Binding{
 		r.keyMap.UpDown,
@@ -193,6 +202,7 @@ func (r *Reasoning) ShortHelp() []key.Binding {
 	}
 }
 
+// FullHelp implements [help.KeyMap].
 func (r *Reasoning) FullHelp() [][]key.Binding {
 	m := [][]key.Binding{}
 	slice := []key.Binding{
@@ -252,14 +262,17 @@ func (r *Reasoning) setReasoningItems() error {
 	return nil
 }
 
+// Filter returns the filter value for the reasoning item.
 func (r *ReasoningItem) Filter() string {
 	return r.title
 }
 
+// ID returns the unique identifier for the reasoning effort.
 func (r *ReasoningItem) ID() string {
 	return r.effort
 }
 
+// SetFocused sets the focus state of the reasoning item.
 func (r *ReasoningItem) SetFocused(focused bool) {
 	if r.focused != focused {
 		r.cache = nil
@@ -267,11 +280,13 @@ func (r *ReasoningItem) SetFocused(focused bool) {
 	r.focused = focused
 }
 
+// SetMatch sets the fuzzy match for the reasoning item.
 func (r *ReasoningItem) SetMatch(m fuzzy.Match) {
 	r.cache = nil
 	r.m = m
 }
 
+// Render returns the string representation of the reasoning item.
 func (r *ReasoningItem) Render(width int) string {
 	info := ""
 	if r.isCurrent {

@@ -45,6 +45,7 @@ type (
 	ActionSummarize         struct {
 		SessionID string
 	}
+	// ActionSelectReasoningEffort is a message indicating a reasoning effort has been selected.
 	ActionSelectReasoningEffort struct {
 		Effort string
 	}

@@ -894,6 +894,13 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionToggleHelp:
 		m.status.ToggleHelp()
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionExternalEditor:
+		if m.session != nil && m.com.App.AgentCoordinator.IsSessionBusy(m.session.ID) {
+			cmds = append(cmds, uiutil.ReportWarn("Agent is working, please wait..."))
+			break
+		}
+		cmds = append(cmds, m.openEditor(m.textarea.Value()))
+		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleCompactMode:
 		cmds = append(cmds, m.toggleCompactMode())
 		m.dialog.CloseDialog(dialog.CommandsID)

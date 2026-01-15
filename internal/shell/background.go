@@ -19,6 +19,30 @@ const (
 	CompletedJobRetentionMinutes = 8 * 60
 )
 
+// syncBuffer is a thread-safe wrapper around bytes.Buffer.
+type syncBuffer struct {
+	buf bytes.Buffer
+	mu  sync.RWMutex
+}
+
+func (sb *syncBuffer) Write(p []byte) (n int, err error) {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	return sb.buf.Write(p)
+}
+
+func (sb *syncBuffer) WriteString(s string) (n int, err error) {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	return sb.buf.WriteString(s)
+}
+
+func (sb *syncBuffer) String() string {
+	sb.mu.RLock()
+	defer sb.mu.RUnlock()
+	return sb.buf.String()
+}
+
 // BackgroundShell represents a shell running in the background.
 type BackgroundShell struct {
 	ID          string
@@ -28,8 +52,8 @@ type BackgroundShell struct {
 	WorkingDir  string
 	ctx         context.Context
 	cancel      context.CancelFunc
-	stdout      *bytes.Buffer
-	stderr      *bytes.Buffer
+	stdout      *syncBuffer
+	stderr      *syncBuffer
 	done        chan struct{}
 	exitErr     error
 	completedAt int64 // Unix timestamp when job completed (0 if still running)
@@ -46,12 +70,17 @@ var (
 	idCounter             atomic.Uint64
 )
 
+// newBackgroundShellManager creates a new BackgroundShellManager instance.
+func newBackgroundShellManager() *BackgroundShellManager {
+	return &BackgroundShellManager{
+		shells: csync.NewMap[string, *BackgroundShell](),
+	}
+}
+
 // GetBackgroundShellManager returns the singleton background shell manager.
 func GetBackgroundShellManager() *BackgroundShellManager {
 	backgroundManagerOnce.Do(func() {
-		backgroundManager = &BackgroundShellManager{
-			shells: csync.NewMap[string, *BackgroundShell](),
-		}
+		backgroundManager = newBackgroundShellManager()
 	})
 	return backgroundManager
 }
@@ -80,8 +109,8 @@ func (m *BackgroundShellManager) Start(ctx context.Context, workingDir string, b
 		Shell:       shell,
 		ctx:         shellCtx,
 		cancel:      cancel,
-		stdout:      &bytes.Buffer{},
-		stderr:      &bytes.Buffer{},
+		stdout:      &syncBuffer{},
+		stderr:      &syncBuffer{},
 		done:        make(chan struct{}),
 	}
 

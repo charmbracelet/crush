@@ -28,10 +28,17 @@ type LSPermissionsParams struct {
 	Depth  int      `json:"depth"`
 }
 
+type NodeType string
+
+const (
+	NodeTypeFile      NodeType = "file"
+	NodeTypeDirectory NodeType = "directory"
+)
+
 type TreeNode struct {
 	Name     string      `json:"name"`
 	Path     string      `json:"path"`
-	Type     string      `json:"type"` // "file" or "directory"
+	Type     NodeType    `json:"type"`
 	Children []*TreeNode `json:"children,omitempty"`
 }
 
@@ -179,9 +186,9 @@ func createFileTree(sortedPaths []string, rootPath string) []*TreeNode {
 
 			isLastPart := i == len(parts)-1
 			isDir := !isLastPart || strings.HasSuffix(relativePath, string(filepath.Separator))
-			nodeType := "file"
+			nodeType := NodeTypeFile
 			if isDir {
-				nodeType = "directory"
+				nodeType = NodeTypeDirectory
 			}
 			newNode := &TreeNode{
 				Name:     part,
@@ -228,13 +235,13 @@ func printNode(builder *strings.Builder, node *TreeNode, level int) {
 	indent := strings.Repeat("  ", level)
 
 	nodeName := node.Name
-	if node.Type == "directory" {
+	if node.Type == NodeTypeDirectory {
 		nodeName = nodeName + "/"
 	}
 
 	fmt.Fprintf(builder, "%s- %s\n", indent, nodeName)
 
-	if node.Type == "directory" && len(node.Children) > 0 {
+	if node.Type == NodeTypeDirectory && len(node.Children) > 0 {
 		for _, child := range node.Children {
 			printNode(builder, child, level+1)
 		}

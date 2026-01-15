@@ -1,11 +1,27 @@
 name: build
 on: [push, pull_request]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
-    uses: charmbracelet/meta/.github/workflows/build.yml@main
-    with:
-      go-version: ""
-      go-version-file: ./go.mod
-    secrets:
-      gh_pat: "${{ secrets.PERSONAL_ACCESS_TOKEN }}"
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          go-version-file: go.mod
+      - run: go mod tidy
+      - run: git diff --exit-code
+      - run: go build -race ./...
+      - run: go test -race -failfast ./...

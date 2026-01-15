@@ -68,8 +68,9 @@ type permissionService struct {
 	allowedTools          []string
 
 	// used to make sure we only process one request at a time
-	requestMu     sync.Mutex
-	activeRequest *PermissionRequest
+	requestMu       sync.Mutex
+	activeRequest   *PermissionRequest
+	activeRequestMu sync.Mutex
 }
 
 func (s *permissionService) GrantPersistent(permission PermissionRequest) {
@@ -86,9 +87,11 @@ func (s *permissionService) GrantPersistent(permission PermissionRequest) {
 	s.sessionPermissions = append(s.sessionPermissions, permission)
 	s.sessionPermissionsMu.Unlock()
 
+	s.activeRequestMu.Lock()
 	if s.activeRequest != nil && s.activeRequest.ID == permission.ID {
 		s.activeRequest = nil
 	}
+	s.activeRequestMu.Unlock()
 }
 
 func (s *permissionService) Grant(permission PermissionRequest) {
@@ -101,9 +104,11 @@ func (s *permissionService) Grant(permission PermissionRequest) {
 		respCh <- true
 	}
 
+	s.activeRequestMu.Lock()
 	if s.activeRequest != nil && s.activeRequest.ID == permission.ID {
 		s.activeRequest = nil
 	}
+	s.activeRequestMu.Unlock()
 }
 
 func (s *permissionService) Deny(permission PermissionRequest) {
@@ -117,9 +122,11 @@ func (s *permissionService) Deny(permission PermissionRequest) {
 		respCh <- false
 	}
 
+	s.activeRequestMu.Lock()
 	if s.activeRequest != nil && s.activeRequest.ID == permission.ID {
 		s.activeRequest = nil
 	}
+	s.activeRequestMu.Unlock()
 }
 
 func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRequest) (bool, error) {
@@ -190,7 +197,9 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	}
 	s.sessionPermissionsMu.RUnlock()
 
+	s.activeRequestMu.Lock()
 	s.activeRequest = &permission
+	s.activeRequestMu.Unlock()
 
 	respCh := make(chan bool, 1)
 	s.pendingRequests.Set(permission.ID, respCh)

@@ -177,6 +177,14 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 		if len(config.ExtraHeaders) > 0 {
 			maps.Copy(headers, config.ExtraHeaders)
 		}
+		for k, v := range headers {
+			resolved, err := resolver.ResolveValue(v)
+			if err != nil {
+				slog.Error("Could not resolve provider header", "err", err.Error())
+				continue
+			}
+			headers[k] = resolved
+		}
 		prepared := ProviderConfig{
 			ID:                 string(p.ID),
 			Name:               p.Name,
@@ -305,6 +313,15 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 			slog.Warn("Skipping custom provider due to missing API endpoint", "provider", id, "error", err)
 			c.Providers.Del(id)
 			continue
+		}
+
+		for k, v := range providerConfig.ExtraHeaders {
+			resolved, err := resolver.ResolveValue(v)
+			if err != nil {
+				slog.Error("Could not resolve provider header", "err", err.Error())
+				continue
+			}
+			providerConfig.ExtraHeaders[k] = resolved
 		}
 
 		c.Providers.Set(id, providerConfig)

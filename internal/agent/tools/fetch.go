@@ -73,12 +73,14 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 				return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 			}
 
+			// maxFetchTimeoutSeconds is the maximum allowed timeout for fetch requests (2 minutes)
+			const maxFetchTimeoutSeconds = 120
+
 			// Handle timeout with context
 			requestCtx := ctx
 			if params.Timeout > 0 {
-				maxTimeout := 120 // 2 minutes
-				if params.Timeout > maxTimeout {
-					params.Timeout = maxTimeout
+				if params.Timeout > maxFetchTimeoutSeconds {
+					params.Timeout = maxFetchTimeoutSeconds
 				}
 				var cancel context.CancelFunc
 				requestCtx, cancel = context.WithTimeout(ctx, time.Duration(params.Timeout)*time.Second)
@@ -102,7 +104,10 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("Request failed with status code: %d", resp.StatusCode)), nil
 			}
 
-			maxSize := int64(5 * 1024 * 1024) // 5MB
+			// maxFetchResponseSizeBytes is the maximum size of response body to read (5MB)
+			const maxFetchResponseSizeBytes = int64(5 * 1024 * 1024)
+
+			maxSize := maxFetchResponseSizeBytes
 			body, err := io.ReadAll(io.LimitReader(resp.Body, maxSize))
 			if err != nil {
 				return fantasy.NewTextErrorResponse("Failed to read response body: " + err.Error()), nil
@@ -110,8 +115,8 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 
 			content := string(body)
 
-			isValidUt8 := utf8.ValidString(content)
-			if !isValidUt8 {
+			validUTF8 := utf8.ValidString(content)
+			if !validUTF8 {
 				return fantasy.NewTextErrorResponse("Response content is not valid UTF-8"), nil
 			}
 			contentType := resp.Header.Get("Content-Type")
@@ -154,9 +159,8 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 					content = "<html>\n<body>\n" + body + "\n</body>\n</html>"
 				}
 			}
-			// calculate byte size of content
-			contentSize := int64(len(content))
-			if contentSize > MaxReadSize {
+			// truncate content if it exceeds max read size
+			if int64(len(content)) > MaxReadSize {
 				content = content[:MaxReadSize]
 				content += fmt.Sprintf("\n\n[Content truncated to %d bytes]", MaxReadSize)
 			}

@@ -168,7 +168,7 @@ func loginCopilot() error {
 			fmt.Println()
 			fmt.Println(lipgloss.NewStyle().Hyperlink(copilot.SignupURL, "id=copilot-signup").Render(copilot.SignupURL))
 			fmt.Println()
-			fmt.Println("You may be able to request free access if elegible. For more information, see:")
+			fmt.Println("You may be able to request free access if eligible. For more information, see:")
 			fmt.Println()
 			fmt.Println(lipgloss.NewStyle().Hyperlink(copilot.FreeURL, "id=copilot-free").Render(copilot.FreeURL))
 		}

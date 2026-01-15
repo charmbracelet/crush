@@ -36,13 +36,6 @@ type WritePermissionsParams struct {
 	NewContent string `json:"new_content,omitempty"`
 }
 
-type writeTool struct {
-	lspClients  *csync.Map[string, *lsp.Client]
-	permissions permission.Service
-	files       history.Service
-	workingDir  string
-}
-
 type WriteResponseMetadata struct {
 	Diff      string `json:"diff"`
 	Additions int    `json:"additions"`
@@ -148,7 +141,7 @@ func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permis
 				}
 			}
 			if file.Content != oldContent {
-				// User Manually changed the content store an intermediate version
+				// User manually changed the content; store an intermediate version
 				_, err = files.CreateVersion(ctx, sessionID, filePath, oldContent)
 				if err != nil {
 					slog.Error("Error creating file history version", "error", err)

@@ -456,7 +456,7 @@ func TestCoderAgent(t *testing.T) {
 			})
 			t.Run("sourcegraph tool", func(t *testing.T) {
 				if runtime.GOOS == "darwin" {
-					t.Skip("skipping flacky test on macos for now")
+					t.Skip("skipping flakey test on macos for now")
 				}
 
 				agent, env := setupAgent(t, pair)

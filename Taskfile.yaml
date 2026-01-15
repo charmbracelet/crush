@@ -5,6 +5,8 @@ version: "3"
 vars:
   VERSION:
     sh: git describe --long 2>/dev/null || echo ""
+  RACE:
+    sh: test -f race.log && echo "1" || echo ""
 
 env:
   CGO_ENABLED: 0
@@ -37,20 +39,20 @@ tasks:
     vars:
       LDFLAGS: '{{if .VERSION}}-ldflags="-X github.com/charmbracelet/crush/internal/version.Version={{.VERSION}}"{{end}}'
     cmds:
-      - go build {{.LDFLAGS}} .
+      - "go build {{if .RACE}}-race{{end}} {{.LDFLAGS}} ."
     generates:
       - crush
 
   run:
     desc: Run build
     cmds:
-      - go build -o crush .
-      - ./crush {{.CLI_ARGS}}
+      - task: build
+      - "./crush {{.CLI_ARGS}} {{if .RACE}}2>race.log{{end}}"
 
   test:
     desc: Run tests
     cmds:
-      - go test ./... {{.CLI_ARGS}}
+      - go test -race -failfast ./... {{.CLI_ARGS}}
 
   test:record:
     desc: Run tests and record all VCR cassettes again

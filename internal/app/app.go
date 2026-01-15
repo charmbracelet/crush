@@ -17,6 +17,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/fantasy"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
@@ -124,17 +125,15 @@ func (app *App) Config() *config.Config {
 
 // RunNonInteractive runs the application in non-interactive mode with the
 // given prompt, printing to stdout.
-func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt, model string, quiet bool) error {
+func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt, largeModel, smallModel string, quiet bool) error {
 	slog.Info("Running in non-interactive mode")
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// If a model is specified, temporarily override the large model config and
-	// rebuild the agent.
-	if model != "" {
-		if err := app.overrideModelForNonInteractive(ctx, model); err != nil {
-			return fmt.Errorf("failed to override model: %w", err)
+	if largeModel != "" || smallModel != "" {
+		if err := app.overrideModelsForNonInteractive(ctx, largeModel, smallModel); err != nil {
+			return fmt.Errorf("failed to override models: %w", err)
 		}
 	}
 
@@ -291,68 +290,156 @@ func (app *App) UpdateAgentModel(ctx context.Context) error {
 	return app.AgentCoordinator.UpdateModels(ctx)
 }
 
-// overrideModelForNonInteractive parses the model string and temporarily
-// overrides the large model configuration, then rebuilds the agent.
+// overrideModelsForNonInteractive parses the model strings and temporarily
+// overrides the model configurations, then rebuilds the agent.
 // Format: "model-name" (searches all providers) or "provider/model-name".
 // Model matching is case-insensitive.
-func (app *App) overrideModelForNonInteractive(ctx context.Context, modelStr string) error {
-	providerID, modelID, ok := strings.Cut(strings.ToLower(modelStr), "/")
-	if !ok {
-		modelID = providerID
-		providerID = ""
-	}
-
+// If largeModel is provided but smallModel is not, the small model defaults to
+// the provider's default small model.
+func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel, smallModel string) error {
 	cfg := app.config
-
-	if providerID != "" {
-		if _, ok := cfg.Providers.Get(providerID); !ok {
-			return fmt.Errorf("provider %q not found in configuration", providerID)
-		}
-	}
 
 	type match struct {
 		provider string
 		modelID  string
 	}
 
-	var matches []match
-	for name, provider := range cfg.Providers.Seq2() {
-		if provider.Disable || (providerID != "" && name != providerID) {
-			continue
+	// Parse "provider/model" or just "model" into components.
+	parseModelStr := func(modelStr string) (providerFilter, modelID string) {
+		providerFilter, modelID, ok := strings.Cut(strings.ToLower(modelStr), "/")
+		if !ok {
+			return "", providerFilter
 		}
-		for _, m := range provider.Models {
-			if strings.ToLower(m.ID) == modelID {
-				matches = append(matches, match{provider: name, modelID: m.ID})
-				break
+		return providerFilter, modelID
+	}
+
+	largeProviderFilter, largeModelID := parseModelStr(largeModel)
+	smallProviderFilter, smallModelID := parseModelStr(smallModel)
+
+	// Validate provider filters exist.
+	for _, pf := range []struct {
+		filter, label string
+	}{
+		{largeProviderFilter, "large"},
+		{smallProviderFilter, "small"},
+	} {
+		if pf.filter != "" {
+			if _, ok := cfg.Providers.Get(pf.filter); !ok {
+				return fmt.Errorf("%s model: provider %q not found in configuration", pf.label, pf.filter)
 			}
 		}
 	}
 
-	switch {
-	case len(matches) == 0 && providerID != "":
-		return fmt.Errorf("model %q not found in provider %q", modelID, providerID)
-	case len(matches) == 0:
-		return fmt.Errorf("model %q not found in any configured provider", modelID)
-	case len(matches) > 1 && providerID == "":
-		names := make([]string, len(matches))
-		for i, m := range matches {
-			names[i] = m.provider
+	// Find matching models in a single pass.
+	var largeMatches, smallMatches []match
+	for name, provider := range cfg.Providers.Seq2() {
+		if provider.Disable {
+			continue
 		}
-		return fmt.Errorf("model %q found in multiple providers: %v. Please specify provider using 'provider/model' format", modelID, names)
+		for _, m := range provider.Models {
+			modelIDLower := strings.ToLower(m.ID)
+			if largeModelID != "" && modelIDLower == largeModelID &&
+				(largeProviderFilter == "" || name == largeProviderFilter) {
+				largeMatches = append(largeMatches, match{provider: name, modelID: m.ID})
+			}
+			if smallModelID != "" && modelIDLower == smallModelID &&
+				(smallProviderFilter == "" || name == smallProviderFilter) {
+				smallMatches = append(smallMatches, match{provider: name, modelID: m.ID})
+			}
+		}
 	}
 
-	found := matches[0]
-	slog.Info("Overriding model for non-interactive run", "provider", found.provider, "model", found.modelID)
-
-	cfg.Models[config.SelectedModelTypeLarge] = config.SelectedModel{
-		Provider: found.provider,
-		Model:    found.modelID,
+	// Validate and return a single match.
+	validateMatches := func(matches []match, modelID, providerFilter, label string) (match, error) {
+		switch {
+		case len(matches) == 0 && providerFilter != "":
+			return match{}, fmt.Errorf("%s model: model %q not found in provider %q", label, modelID, providerFilter)
+		case len(matches) == 0:
+			return match{}, fmt.Errorf("%s model: model %q not found in any configured provider", label, modelID)
+		case len(matches) > 1 && providerFilter == "":
+			names := make([]string, len(matches))
+			for i, m := range matches {
+				names[i] = m.provider
+			}
+			return match{}, fmt.Errorf("%s model: model %q found in multiple providers: %v. Please specify provider using 'provider/model' format", label, modelID, names)
+		}
+		return matches[0], nil
 	}
 
-	if err := app.AgentCoordinator.UpdateModels(ctx); err != nil {
-		return fmt.Errorf("failed to update agent with new model: %w", err)
+	var largeProviderID string
+
+	// Override large model.
+	if largeModel != "" {
+		found, err := validateMatches(largeMatches, largeModelID, largeProviderFilter, "large")
+		if err != nil {
+			return err
+		}
+		largeProviderID = found.provider
+		slog.Info("Overriding large model for non-interactive run", "provider", found.provider, "model", found.modelID)
+		cfg.Models[config.SelectedModelTypeLarge] = config.SelectedModel{
+			Provider: found.provider,
+			Model:    found.modelID,
+		}
 	}
-	return nil
+
+	// Override small model.
+	switch {
+	case smallModel != "":
+		found, err := validateMatches(smallMatches, smallModelID, smallProviderFilter, "small")
+		if err != nil {
+			return err
+		}
+		slog.Info("Overriding small model for non-interactive run", "provider", found.provider, "model", found.modelID)
+		cfg.Models[config.SelectedModelTypeSmall] = config.SelectedModel{
+			Provider: found.provider,
+			Model:    found.modelID,
+		}
+
+	case largeModel != "":
+		// No small model specified, but large model was - use provider's default.
+		smallCfg := app.getDefaultSmallModel(largeProviderID)
+		cfg.Models[config.SelectedModelTypeSmall] = smallCfg
+	}
+
+	return app.AgentCoordinator.UpdateModels(ctx)
+}
+
+// getDefaultSmallModel returns the default small model configuration for a
+// provider. Falls back to the large model if no default is found.
+func (app *App) getDefaultSmallModel(providerID string) config.SelectedModel {
+	cfg := app.config
+	largeModelCfg := cfg.Models[config.SelectedModelTypeLarge]
+
+	// Find the provider in the known providers list to get its default small model.
+	knownProviders, _ := config.Providers(cfg)
+	var knownProvider *catwalk.Provider
+	for _, p := range knownProviders {
+		if string(p.ID) == providerID {
+			knownProvider = &p
+			break
+		}
+	}
+
+	// For unknown/local providers, use the large model as small.
+	if knownProvider == nil {
+		slog.Warn("Using large model as small model for unknown provider", "provider", providerID, "model", largeModelCfg.Model)
+		return largeModelCfg
+	}
+
+	defaultSmallModelID := knownProvider.DefaultSmallModelID
+	model := cfg.GetModel(providerID, defaultSmallModelID)
+	if model == nil {
+		slog.Warn("Default small model not found, using large model", "provider", providerID, "model", largeModelCfg.Model)
+		return largeModelCfg
+	}
+
+	slog.Info("Using provider default small model", "provider", providerID, "model", defaultSmallModelID)
+	return config.SelectedModel{
+		Provider:        providerID,
+		Model:           defaultSmallModelID,
+		MaxTokens:       model.DefaultMaxTokens,
+		ReasoningEffort: model.DefaultReasoningEffort,
+	}
 }
 
 func (app *App) setupEvents() {

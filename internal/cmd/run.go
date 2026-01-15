@@ -32,7 +32,8 @@ crush run --quiet "Generate a README for this project"
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		quiet, _ := cmd.Flags().GetBool("quiet")
-		model, _ := cmd.Flags().GetString("model")
+		largeModel, _ := cmd.Flags().GetString("model")
+		smallModel, _ := cmd.Flags().GetString("small-model")
 
 		// Cancel on SIGINT or SIGTERM.
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
@@ -63,7 +64,7 @@ crush run --quiet "Generate a README for this project"
 		event.SetNonInteractive(true)
 		event.AppInitialized()
 
-		return app.RunNonInteractive(ctx, os.Stdout, prompt, model, quiet)
+		return app.RunNonInteractive(ctx, os.Stdout, prompt, largeModel, smallModel, quiet)
 	},
 	PostRun: func(cmd *cobra.Command, args []string) {
 		event.AppExited()
@@ -73,4 +74,5 @@ crush run --quiet "Generate a README for this project"
 func init() {
 	runCmd.Flags().BoolP("quiet", "q", false, "Hide spinner")
 	runCmd.Flags().StringP("model", "m", "", "Model to use. Can be 'model' or 'provider/model' to deduplicate")
+	runCmd.Flags().String("small-model", "", "Small model to use. If not provided, uses the default small model for the provider")
 }

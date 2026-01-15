@@ -45,6 +45,9 @@ type (
 	ActionSummarize         struct {
 		SessionID string
 	}
+	ActionSelectReasoningEffort struct {
+		Effort string
+	}
 	ActionPermissionResponse struct {
 		Permission permission.PermissionRequest
 		Action     PermissionAction

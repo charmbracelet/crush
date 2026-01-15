@@ -931,8 +931,18 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 
-		_, isProviderConfigured := cfg.Providers.Get(msg.Model.Provider)
-		if !isProviderConfigured {
+		var (
+			providerID   = msg.Model.Provider
+			isCopilot    = providerID == string(catwalk.InferenceProviderCopilot)
+			isConfigured = func() bool { _, ok := cfg.Providers.Get(providerID); return ok }
+		)
+
+		// Attempt to import GitHub Copilot tokens from VSCode if available.
+		if isCopilot && !isConfigured() {
+			config.Get().ImportCopilot()
+		}
+
+		if !isConfigured() {
 			m.dialog.CloseDialog(dialog.ModelsID)
 			if cmd := m.openAuthenticationDialog(msg.Provider, msg.Model, msg.ModelType); cmd != nil {
 				cmds = append(cmds, cmd)
@@ -1058,7 +1068,18 @@ func (m *UI) openOAuthHyperDialog(provider catwalk.Provider, model config.Select
 }
 
 func (m *UI) openOAuthCopilotDialog(provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType) tea.Cmd {
-	panic("TODO")
+	if m.dialog.ContainsDialog(dialog.OAuthID) {
+		m.dialog.BringToFront(dialog.OAuthID)
+		return nil
+	}
+
+	oAuthDialog, err := dialog.NewOAuthCopilot(m.com, provider, model, modelType)
+	if err != nil {
+		return uiutil.ReportError(err)
+	}
+	m.dialog.OpenDialog(oAuthDialog)
+
+	return oAuthDialog.Init()
 }
 
 func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {

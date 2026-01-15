@@ -63,6 +63,7 @@ type OAuth struct {
 	userCode        string
 	verificationURL string
 	expiresIn       int
+	interval        int
 	token           *oauth.Token
 	cancelFunc      context.CancelFunc
 }
@@ -157,6 +158,7 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 		m.userCode = msg.UserCode
 		m.expiresIn = msg.ExpiresIn
 		m.verificationURL = msg.VerificationURL
+		m.interval = msg.Interval
 		m.State = OAuthStateDisplay
 		return ActionCmd{m.oAuthProvider.startPolling(msg.DeviceCode, msg.ExpiresIn)}
 

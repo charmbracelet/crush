@@ -83,6 +83,7 @@ type (
 		UserCode        string
 		ExpiresIn       int
 		VerificationURL string
+		Interval        int
 	}
 
 	// ActionCompleteOAuth is sent when the device flow completes successfully.

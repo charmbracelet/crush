@@ -124,11 +124,19 @@ func (app *App) Config() *config.Config {
 
 // RunNonInteractive runs the application in non-interactive mode with the
 // given prompt, printing to stdout.
-func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt string, quiet bool) error {
+func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt, model string, quiet bool) error {
 	slog.Info("Running in non-interactive mode")
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	// If a model is specified, temporarily override the large model config and
+	// rebuild the agent.
+	if model != "" {
+		if err := app.overrideModelForNonInteractive(ctx, model); err != nil {
+			return fmt.Errorf("failed to override model: %w", err)
+		}
+	}
 
 	var (
 		spinner   *format.Spinner
@@ -281,6 +289,71 @@ func (app *App) UpdateAgentModel(ctx context.Context) error {
 		return fmt.Errorf("agent configuration is missing")
 	}
 	return app.AgentCoordinator.UpdateModels(ctx)
+}
+
+// overrideModelForNonInteractive parses the model string and temporarily
+// overrides the large model configuration, then rebuilds the agent.
+// Format: "model-name" (searches all providers) or "provider/model-name".
+// Model matching is case-insensitive.
+func (app *App) overrideModelForNonInteractive(ctx context.Context, modelStr string) error {
+	providerID, modelID, _ := strings.Cut(modelStr, "/")
+	if modelID == "" {
+		modelID = providerID
+		providerID = ""
+	}
+
+	cfg := app.config
+
+	if providerID != "" {
+		if _, ok := cfg.Providers.Get(providerID); !ok {
+			return fmt.Errorf("provider %q not found in configuration", providerID)
+		}
+	}
+
+	// Find all matching providers for this model (case-insensitive).
+	type match struct {
+		provider string
+		modelID  string // Actual model ID from config (preserves original case).
+	}
+	var matches []match
+	modelIDLower := strings.ToLower(modelID)
+	for name, provider := range cfg.Providers.Seq2() {
+		if provider.Disable || (providerID != "" && name != providerID) {
+			continue
+		}
+		for _, m := range provider.Models {
+			if strings.ToLower(m.ID) == modelIDLower {
+				matches = append(matches, match{provider: name, modelID: m.ID})
+				break
+			}
+		}
+	}
+
+	switch {
+	case len(matches) == 0 && providerID != "":
+		return fmt.Errorf("model %q not found in provider %q", modelID, providerID)
+	case len(matches) == 0:
+		return fmt.Errorf("model %q not found in any configured provider", modelID)
+	case len(matches) > 1 && providerID == "":
+		providerNames := make([]string, len(matches))
+		for i, m := range matches {
+			providerNames[i] = m.provider
+		}
+		return fmt.Errorf("model %q found in multiple providers: %v. Please specify provider using 'provider/model' format", modelID, providerNames)
+	}
+
+	found := matches[0]
+	slog.Info("Overriding model for non-interactive run", "provider", found.provider, "model", found.modelID)
+
+	cfg.Models[config.SelectedModelTypeLarge] = config.SelectedModel{
+		Provider: found.provider,
+		Model:    found.modelID,
+	}
+
+	if err := app.AgentCoordinator.UpdateModels(ctx); err != nil {
+		return fmt.Errorf("failed to update agent with new model: %w", err)
+	}
+	return nil
 }
 
 func (app *App) setupEvents() {

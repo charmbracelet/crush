@@ -72,6 +72,11 @@ type messageListCmp struct {
 	lastClickX    int
 	lastClickY    int
 	clickCount    int
+
+	// Frame dropping for fast-forward during high CPU load
+	lastRenderTime    time.Time
+	cachedView       string
+	minRenderInterval time.Duration
 }
 
 // New creates a new message list component with custom keybindings
@@ -89,8 +94,11 @@ func New(app *app.App) MessageListCmp {
 	return &messageListCmp{
 		app:               app,
 		listCmp:           listCmp,
-		previousSelected:  "",
-		defaultListKeyMap: defaultListKeyMap,
+		previousSelected:   "",
+		defaultListKeyMap:   defaultListKeyMap,
+		lastRenderTime:     time.Time{},
+		cachedView:        "",
+		minRenderInterval:  50 * time.Millisecond, // 20fps maximum, allows frame dropping
 	}
 }
 
@@ -213,12 +221,27 @@ func (m *messageListCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 
 // View renders the message list or an initial screen if empty.
 func (m *messageListCmp) View() string {
+	// Frame dropping: Skip rendering if we rendered too recently
+	// This creates "fast-forward" effect during high CPU load
+	now := time.Now()
+	if !m.lastRenderTime.IsZero() && now.Sub(m.lastRenderTime) < m.minRenderInterval {
+		// Return cached view instead of re-rendering
+		return m.cachedView
+	}
+
+	// Actually render the view
 	t := styles.CurrentTheme()
-	return t.S().Base.
+	result := t.S().Base.
 		Padding(1, 1, 0, 1).
 		Width(m.width).
 		Height(m.height).
 		Render(m.listCmp.View())
+
+	// Update cache and last render time
+	m.lastRenderTime = now
+	m.cachedView = result
+
+	return result
 }
 
 func (m *messageListCmp) handlePermissionRequest(permission permission.PermissionNotification) tea.Cmd {

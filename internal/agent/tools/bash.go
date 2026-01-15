@@ -137,6 +137,9 @@ var bannedCommands = []string{
 	"pfctl",
 	"route",
 	"ufw",
+
+	// File deletion (use delete tool instead for proper LSP integration)
+	"rm",
 }
 
 func bashDescription(attribution *config.Attribution, modelName string) string {

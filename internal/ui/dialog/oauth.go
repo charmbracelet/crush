@@ -240,7 +240,7 @@ func (m *OAuth) innerDialogContent() string {
 
 	case OAuthStateDisplay:
 		instructions := lipgloss.NewStyle().
-			Margin(1).
+			Margin(0, 1).
 			Width(m.width - 2).
 			Render(
 				whiteStyle.Render("Press ") +
@@ -253,7 +253,7 @@ func (m *OAuth) innerDialogContent() string {
 			Height(7).
 			Align(lipgloss.Center, lipgloss.Center).
 			Background(t.BgBaseLighter).
-			Margin(1).
+			Margin(0, 1).
 			Render(
 				lipgloss.NewStyle().
 					Bold(true).
@@ -268,7 +268,7 @@ func (m *OAuth) innerDialogContent() string {
 			Render("Browser not opening? Refer to\n" + link)
 
 		waiting := lipgloss.NewStyle().
-			Margin(1, 1).
+			Margin(0, 1).
 			Width(m.width - 2).
 			Render(
 				greenStyle.Render(m.spinner.View()) + mutedStyle.Render("Verifying..."),
@@ -276,10 +276,15 @@ func (m *OAuth) innerDialogContent() string {
 
 		return lipgloss.JoinVertical(
 			lipgloss.Left,
+			"",
 			instructions,
+			"",
 			codeBox,
+			"",
 			url,
+			"",
 			waiting,
+			"",
 		)
 
 	case OAuthStateSuccess:

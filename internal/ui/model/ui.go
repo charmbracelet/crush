@@ -903,25 +903,22 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 
-		cfg := m.com.Config()
-		if cfg == nil {
-			cmds = append(cmds, uiutil.ReportError(errors.New("configuration not found")))
-			break
-		}
-
-		agentCfg, ok := cfg.Agents[config.AgentCoder]
-		if !ok {
-			cmds = append(cmds, uiutil.ReportError(errors.New("agent configuration not found")))
-			break
-		}
-
-		currentModel := cfg.Models[agentCfg.Model]
-		currentModel.Think = !currentModel.Think
-		if err := cfg.UpdatePreferredModel(agentCfg.Model, currentModel); err != nil {
-			cmds = append(cmds, uiutil.ReportError(err))
-			break
-		}
 		cmds = append(cmds, func() tea.Msg {
+			cfg := m.com.Config()
+			if cfg == nil {
+				return uiutil.ReportError(errors.New("configuration not found"))()
+			}
+
+			agentCfg, ok := cfg.Agents[config.AgentCoder]
+			if !ok {
+				return uiutil.ReportError(errors.New("agent configuration not found"))()
+			}
+
+			currentModel := cfg.Models[agentCfg.Model]
+			currentModel.Think = !currentModel.Think
+			if err := cfg.UpdatePreferredModel(agentCfg.Model, currentModel); err != nil {
+				return uiutil.ReportError(err)()
+			}
 			m.com.App.UpdateAgentModel(context.TODO())
 			status := "disabled"
 			if currentModel.Think {

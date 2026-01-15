@@ -180,49 +180,93 @@ func (m *sidebarCmp) handleFileHistoryEvent(event pubsub.Event[history.File]) te
 		file := event.Payload
 
 		if event.Type == pubsub.DeletedEvent {
-			m.files.Del(file.Path)
+			return m.handleFileDeleted(file)
+		}
+
+		existing, found := m.files.Get(file.Path)
+		if !found {
+			m.files.Set(file.Path, SessionFile{
+				History: FileHistory{
+					initialVersion: file,
+					latestVersion:  file,
+				},
+				FilePath: file.Path,
+			})
 			return nil
 		}
-		found := false
-		for existing := range m.files.Seq() {
-			if existing.FilePath != file.Path {
-				continue
-			}
-			if existing.History.latestVersion.Version < file.Version {
-				existing.History.latestVersion = file
-			} else if file.Version == 0 {
-				existing.History.initialVersion = file
-			} else {
-				// If the version is not greater than the latest, we ignore it
-				continue
-			}
-			before, _ := fsext.ToUnixLineEndings(existing.History.initialVersion.Content)
-			after, _ := fsext.ToUnixLineEndings(existing.History.latestVersion.Content)
-			path := existing.History.initialVersion.Path
-			cwd := config.Get().WorkingDir()
-			path = strings.TrimPrefix(path, cwd)
-			_, additions, deletions := diff.GenerateDiff(before, after, path)
-			existing.Additions = additions
-			existing.Deletions = deletions
-			m.files.Set(file.Path, existing)
-			found = true
-			break
-		}
-		if found {
+
+		if !m.shouldUpdateFileVersion(existing, file) {
 			return nil
 		}
-		sf := SessionFile{
-			History: FileHistory{
-				initialVersion: file,
-				latestVersion:  file,
-			},
-			FilePath:  file.Path,
-			Additions: 0,
-			Deletions: 0,
-		}
-		m.files.Set(file.Path, sf)
+
+		m.updateFileVersion(&existing, file)
+		m.recalculateFileDiff(&existing)
+		m.files.Set(file.Path, existing)
 		return nil
 	}
+}
+
+func (m *sidebarCmp) handleFileDeleted(file history.File) tea.Msg {
+	existing, found := m.files.Get(file.Path)
+	if !found {
+		return nil
+	}
+
+	if existing.History.initialVersion.Content == "" {
+		m.files.Del(file.Path)
+		return nil
+	}
+
+	existing.History.latestVersion = history.File{
+		ID:        file.ID,
+		SessionID: file.SessionID,
+		Path:      file.Path,
+		Content:   "",
+		Version:   file.Version,
+		CreatedAt: file.CreatedAt,
+		UpdatedAt: file.UpdatedAt,
+	}
+
+	m.recalculateFileDiff(&existing)
+	m.files.Set(file.Path, existing)
+	return nil
+}
+
+func (m *sidebarCmp) shouldUpdateFileVersion(existing SessionFile, file history.File) bool {
+	if existing.FilePath != file.Path {
+		return false
+	}
+
+	if existing.History.latestVersion.Version < file.Version {
+		return true
+	}
+
+	if file.Version == 0 {
+		return true
+	}
+
+	return false
+}
+
+func (m *sidebarCmp) updateFileVersion(existing *SessionFile, file history.File) {
+	if existing.History.latestVersion.Version < file.Version {
+		existing.History.latestVersion = file
+	} else if file.Version == 0 {
+		existing.History.initialVersion = file
+	}
+}
+
+func (m *sidebarCmp) recalculateFileDiff(existing *SessionFile) {
+	before, _ := fsext.ToUnixLineEndings(existing.History.initialVersion.Content)
+	after, _ := fsext.ToUnixLineEndings(existing.History.latestVersion.Content)
+
+	path := existing.History.initialVersion.Path
+	cwd := config.Get().WorkingDir()
+	path = strings.TrimPrefix(path, cwd)
+
+	_, additions, deletions := diff.GenerateDiff(before, after, path)
+	existing.Additions = additions
+	existing.Deletions = deletions
 }
 
 func (m *sidebarCmp) loadSessionFiles() tea.Msg {

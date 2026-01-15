@@ -90,12 +90,14 @@ func NewDeleteTool(lspClients *csync.Map[string, *lsp.Client], permissions permi
 				return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 			}
 
+			// Save file content to history BEFORE deleting.
+			saveDeletedFileHistory(ctx, files, sessionID, filePath, isDir)
+
 			if err := os.RemoveAll(filePath); err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error deleting path: %w", err)
 			}
 
 			lspCloseAndDeleteFiles(ctx, lspClients, filePath, isDir)
-			deleteFileHistory(ctx, files, sessionID, filePath, isDir)
 			return fantasy.NewTextResponse(fmt.Sprintf("Successfully deleted: %s", filePath)), nil
 		})
 }
@@ -136,21 +138,43 @@ func lspCloseAndDeleteFiles(ctx context.Context, lsps *csync.Map[string, *lsp.Cl
 	}
 }
 
-func deleteFileHistory(ctx context.Context, files history.Service, sessionID, filePath string, isDir bool) {
-	sessionFiles, err := files.ListLatestSessionFiles(ctx, sessionID)
+func saveDeletedFileHistory(ctx context.Context, files history.Service, sessionID, filePath string, isDir bool) {
+	if isDir {
+		// For directories, walk through and save all files.
+		_ = filepath.Walk(filePath, func(path string, info os.FileInfo, err error) error {
+			if err != nil || info.IsDir() {
+				return nil
+			}
+			saveFileBeforeDeletion(ctx, files, sessionID, path)
+			return nil
+		})
+	} else {
+		// For single file.
+		saveFileBeforeDeletion(ctx, files, sessionID, filePath)
+	}
+}
+
+func saveFileBeforeDeletion(ctx context.Context, files history.Service, sessionID, filePath string) {
+	// Check if file already exists in history.
+	existing, err := files.GetByPathAndSession(ctx, filePath, sessionID)
+	if err == nil && existing.Path != "" {
+		// File exists in history, create empty version to show deletion.
+		_, _ = files.CreateVersion(ctx, sessionID, filePath, "")
+		return
+	}
+
+	// File not in history, read content and create initial + empty version.
+	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return
 	}
 
-	for _, file := range sessionFiles {
-		if !shouldDeletePath(file.Path, filePath, isDir) {
-			continue
-		}
-
-		fileEntry, err := files.GetByPathAndSession(ctx, file.Path, sessionID)
-		if err != nil {
-			continue
-		}
-		_ = files.Delete(ctx, fileEntry.ID)
+	// Create initial version with current content.
+	_, err = files.Create(ctx, sessionID, filePath, string(content))
+	if err != nil {
+		return
 	}
+
+	// Create empty version to show deletion.
+	_, _ = files.CreateVersion(ctx, sessionID, filePath, "")
 }

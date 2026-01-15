@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
@@ -37,7 +38,7 @@ type DeletePermissionsParams struct {
 const DeleteToolName = "delete"
 
 // NewDeleteTool creates a new delete tool.
-func NewDeleteTool(lspClients *csync.Map[string, *lsp.Client], permissions permission.Service, workingDir string) fantasy.AgentTool {
+func NewDeleteTool(lspClients *csync.Map[string, *lsp.Client], permissions permission.Service, files history.Service, workingDir string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		DeleteToolName,
 		string(deleteDescription),
@@ -93,7 +94,8 @@ func NewDeleteTool(lspClients *csync.Map[string, *lsp.Client], permissions permi
 				return fantasy.ToolResponse{}, fmt.Errorf("error deleting path: %w", err)
 			}
 
-			lspCloseAndDeleteFiles(ctx, lspClients, filePath)
+			lspCloseAndDeleteFiles(ctx, lspClients, filePath, isDir)
+			deleteFileHistory(ctx, files, sessionID, filePath, isDir)
 			return fantasy.NewTextResponse(fmt.Sprintf("Successfully deleted: %s", filePath)), nil
 		})
 }
@@ -105,26 +107,50 @@ func buildDeleteDescription(filePath string, isDir bool) string {
 	return fmt.Sprintf("Delete directory %s and all its contents", filePath)
 }
 
-func lspCloseAndDeleteFiles(ctx context.Context, lsps *csync.Map[string, *lsp.Client], filePath string) {
-	cleanPath := filepath.Clean(filePath)
+// shouldDeletePath checks if a path matches the deletion target.
+// For files, it matches exact paths. For directories, it matches the directory
+// and all paths within it.
+func shouldDeletePath(path, targetPath string, isDir bool) bool {
+	cleanPath := filepath.Clean(path)
+	cleanTarget := filepath.Clean(targetPath)
+
+	if cleanPath == cleanTarget {
+		return true
+	}
+
+	return isDir && strings.HasPrefix(cleanPath, cleanTarget+string(filepath.Separator))
+}
+
+func lspCloseAndDeleteFiles(ctx context.Context, lsps *csync.Map[string, *lsp.Client], filePath string, isDir bool) {
 	for client := range lsps.Seq() {
 		for uri := range client.OpenFiles() {
 			path, err := protocol.DocumentURI(uri).Path()
 			if err != nil {
 				continue
 			}
-			if path != cleanPath && !strings.HasPrefix(path, cleanPath+string(filepath.Separator)) {
+			if !shouldDeletePath(path, filePath, isDir) {
 				continue
 			}
-			_ = client.CloseFile(ctx, path)
-			_ = client.DidChangeWatchedFiles(ctx, protocol.DidChangeWatchedFilesParams{
-				Changes: []protocol.FileEvent{
-					{
-						URI:  protocol.URIFromPath(path),
-						Type: protocol.Deleted,
-					},
-				},
-			})
+			_ = client.DeleteFile(ctx, path)
 		}
+	}
+}
+
+func deleteFileHistory(ctx context.Context, files history.Service, sessionID, filePath string, isDir bool) {
+	sessionFiles, err := files.ListLatestSessionFiles(ctx, sessionID)
+	if err != nil {
+		return
+	}
+
+	for _, file := range sessionFiles {
+		if !shouldDeletePath(file.Path, filePath, isDir) {
+			continue
+		}
+
+		fileEntry, err := files.GetByPathAndSession(ctx, file.Path, sessionID)
+		if err != nil {
+			continue
+		}
+		_ = files.Delete(ctx, fileEntry.ID)
 	}
 }

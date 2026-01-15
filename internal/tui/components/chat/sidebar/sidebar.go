@@ -178,6 +178,11 @@ func (m *sidebarCmp) View() string {
 func (m *sidebarCmp) handleFileHistoryEvent(event pubsub.Event[history.File]) tea.Cmd {
 	return func() tea.Msg {
 		file := event.Payload
+
+		if event.Type == pubsub.DeletedEvent {
+			m.files.Del(file.Path)
+			return nil
+		}
 		found := false
 		for existing := range m.files.Seq() {
 			if existing.FilePath != file.Path {

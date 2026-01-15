@@ -355,6 +355,21 @@ func (c *Client) CloseFile(ctx context.Context, filepath string) error {
 	return nil
 }
 
+// DeleteFile deletes a file from the LSP context.
+func (c *Client) DeleteFile(ctx context.Context, filepath string) error {
+	if err := c.CloseFile(ctx, filepath); err != nil {
+		return err
+	}
+	return c.DidChangeWatchedFiles(ctx, protocol.DidChangeWatchedFilesParams{
+		Changes: []protocol.FileEvent{
+			{
+				URI:  protocol.URIFromPath(filepath),
+				Type: protocol.Deleted,
+			},
+		},
+	})
+}
+
 // OpenFiles returns an iterator over all currently open file URIs.
 func (c *Client) OpenFiles() iter.Seq[string] {
 	return func(yield func(string) bool) {

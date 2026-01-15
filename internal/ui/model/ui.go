@@ -1058,13 +1058,9 @@ func (m *UI) openOAuthHyperDialog(provider catwalk.Provider, model config.Select
 		return nil
 	}
 
-	oAuthDialog, err := dialog.NewOAuthHyper(m.com, provider, model, modelType)
-	if err != nil {
-		return uiutil.ReportError(err)
-	}
+	oAuthDialog, cmd := dialog.NewOAuthHyper(m.com, provider, model, modelType)
 	m.dialog.OpenDialog(oAuthDialog)
-
-	return oAuthDialog.Init()
+	return cmd
 }
 
 func (m *UI) openOAuthCopilotDialog(provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType) tea.Cmd {
@@ -1073,13 +1069,9 @@ func (m *UI) openOAuthCopilotDialog(provider catwalk.Provider, model config.Sele
 		return nil
 	}
 
-	oAuthDialog, err := dialog.NewOAuthCopilot(m.com, provider, model, modelType)
-	if err != nil {
-		return uiutil.ReportError(err)
-	}
+	oAuthDialog, cmd := dialog.NewOAuthCopilot(m.com, provider, model, modelType)
 	m.dialog.OpenDialog(oAuthDialog)
-
-	return oAuthDialog.Init()
+	return cmd
 }
 
 func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {

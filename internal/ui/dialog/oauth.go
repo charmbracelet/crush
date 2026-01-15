@@ -71,7 +71,7 @@ type OAuth struct {
 var _ Dialog = (*OAuth)(nil)
 
 // newOAuth creates a new device flow component.
-func newOAuth(com *common.Common, provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType, oAuthProvider OAuthProvider) (*OAuth, error) {
+func newOAuth(com *common.Common, provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType, oAuthProvider OAuthProvider) (*OAuth, tea.Cmd) {
 	t := com.Styles
 
 	m := OAuth{}
@@ -101,17 +101,12 @@ func newOAuth(com *common.Common, provider catwalk.Provider, model config.Select
 	)
 	m.keyMap.Close = CloseKey
 
-	return &m, nil
+	return &m, tea.Batch(m.spinner.Tick, m.oAuthProvider.initiateAuth)
 }
 
 // ID implements Dialog.
 func (m *OAuth) ID() string {
 	return OAuthID
-}
-
-// Init implements Dialog.
-func (m *OAuth) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, m.oAuthProvider.initiateAuth)
 }
 
 // HandleMsg handles messages and state transitions.

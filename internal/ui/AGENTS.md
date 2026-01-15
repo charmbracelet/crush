@@ -4,6 +4,8 @@
 - Never use commands to send messages when you can directly mutate children or state.
 - Keep things simple; do not overcomplicate.
 - Create files if needed to separate logic; do not nest models.
+- Always do IO in commands
+- Never change the model state inside of a command use messages and than update the state in the main loop
 
 ## Architecture
 

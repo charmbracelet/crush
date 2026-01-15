@@ -18,23 +18,32 @@ import (
 func (m *UI) modelInfo(width int) string {
 	model := m.selectedLargeModel()
 	reasoningInfo := ""
-	if model != nil && model.CatwalkCfg.CanReason {
+	providerName := ""
+
+	if model != nil {
+		// Get provider name first
 		providerConfig, ok := m.com.Config().Providers.Get(model.ModelCfg.Provider)
 		if ok {
-			switch providerConfig.Type {
-			case catwalk.TypeAnthropic:
-				if model.ModelCfg.Think {
-					reasoningInfo = "Thinking On"
-				} else {
-					reasoningInfo = "Thinking Off"
+			providerName = providerConfig.Name
+
+			// Only check reasoning if model can reason
+			if model.CatwalkCfg.CanReason {
+				switch providerConfig.Type {
+				case catwalk.TypeAnthropic:
+					if model.ModelCfg.Think {
+						reasoningInfo = "Thinking On"
+					} else {
+						reasoningInfo = "Thinking Off"
+					}
+				default:
+					formatter := cases.Title(language.English, cases.NoLower)
+					reasoningEffort := cmp.Or(model.ModelCfg.ReasoningEffort, model.CatwalkCfg.DefaultReasoningEffort)
+					reasoningInfo = formatter.String(fmt.Sprintf("Reasoning %s", reasoningEffort))
 				}
-			default:
-				formatter := cases.Title(language.English, cases.NoLower)
-				reasoningEffort := cmp.Or(model.ModelCfg.ReasoningEffort, model.CatwalkCfg.DefaultReasoningEffort)
-				reasoningInfo = formatter.String(fmt.Sprintf("Reasoning %s", reasoningEffort))
 			}
 		}
 	}
+
 	var modelContext *common.ModelContextInfo
 	if m.session != nil {
 		modelContext = &common.ModelContextInfo{
@@ -43,7 +52,7 @@ func (m *UI) modelInfo(width int) string {
 			ModelContext: model.CatwalkCfg.ContextWindow,
 		}
 	}
-	return common.ModelInfo(m.com.Styles, model.CatwalkCfg.Name, reasoningInfo, modelContext, width)
+	return common.ModelInfo(m.com.Styles, model.CatwalkCfg.Name, providerName, reasoningInfo, modelContext, width)
 }
 
 // getDynamicHeightLimits will give us the num of items to show in each section based on the hight

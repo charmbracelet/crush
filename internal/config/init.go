@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -103,7 +104,7 @@ func contextPathsExist(dir string) (bool, error) {
 
 // dirHasNoVisibleFiles returns true if the directory has no files/dirs after applying ignore rules
 func dirHasNoVisibleFiles(dir string) (bool, error) {
-	files, _, err := fsext.ListDirectory(dir, nil, 1, 1)
+	files, _, err := fsext.ListDirectory(context.Background(), dir, nil, 1, 1)
 	if err != nil {
 		return false, err
 	}

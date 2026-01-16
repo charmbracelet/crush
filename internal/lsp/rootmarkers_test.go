@@ -15,10 +15,10 @@ func TestHasRootMarkers(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Test with empty root markers (should return true)
-	require.True(t, HasRootMarkers(tmpDir, []string{}))
+	require.True(t, HasRootMarkers(t.Context(), tmpDir, []string{}))
 
 	// Test with non-existent markers
-	require.False(t, HasRootMarkers(tmpDir, []string{"go.mod", "package.json"}))
+	require.False(t, HasRootMarkers(t.Context(), tmpDir, []string{"go.mod", "package.json"}))
 
 	// Create a go.mod file
 	goModPath := filepath.Join(tmpDir, "go.mod")
@@ -26,12 +26,12 @@ func TestHasRootMarkers(t *testing.T) {
 	require.NoError(t, err)
 
 	// Test with existing marker
-	require.True(t, HasRootMarkers(tmpDir, []string{"go.mod", "package.json"}))
+	require.True(t, HasRootMarkers(t.Context(), tmpDir, []string{"go.mod", "package.json"}))
 
 	// Test with only non-existent markers
-	require.False(t, HasRootMarkers(tmpDir, []string{"package.json", "Cargo.toml"}))
+	require.False(t, HasRootMarkers(t.Context(), tmpDir, []string{"package.json", "Cargo.toml"}))
 
 	// Test with glob patterns
-	require.True(t, HasRootMarkers(tmpDir, []string{"*.mod"}))
-	require.False(t, HasRootMarkers(tmpDir, []string{"*.json"}))
+	require.True(t, HasRootMarkers(t.Context(), tmpDir, []string{"*.mod"}))
+	require.False(t, HasRootMarkers(t.Context(), tmpDir, []string{"*.json"}))
 }

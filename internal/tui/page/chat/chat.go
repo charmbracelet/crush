@@ -627,6 +627,9 @@ func (p *chatPage) View() string {
 			chatView = lipgloss.JoinVertical(lipgloss.Left, views...)
 		} else {
 			sidebarView := p.sidebar.View()
+			// Calculate the expected height for the messages column to match sidebar.
+			// This prevents sidebar content from pushing the editor down.
+			messagesColumnHeight := p.height - EditorHeight
 			var messagesColumn string
 			if pillsArea != "" {
 				messagesColumn = lipgloss.JoinVertical(
@@ -637,6 +640,8 @@ func (p *chatPage) View() string {
 			} else {
 				messagesColumn = messagesView
 			}
+			// Constrain messagesColumn to match sidebar height.
+			messagesColumn = t.S().Base.Height(messagesColumnHeight).Render(messagesColumn)
 			messages := lipgloss.JoinHorizontal(
 				lipgloss.Left,
 				messagesColumn,

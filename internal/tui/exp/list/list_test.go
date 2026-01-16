@@ -383,6 +383,34 @@ func TestListMovement(t *testing.T) {
 		assert.Equal(t, 32, lipgloss.Height(l.rendered))
 		golden.RequireEqual(t, []byte(l.View()))
 	})
+	t.Run("should stay at bottom when last item grows in backwards list at offset 0", func(t *testing.T) {
+		t.Parallel()
+		items := []Item{}
+		for i := range 30 {
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
+			items = append(items, item)
+		}
+		l := New(items, WithDirectionBackward(), WithSize(10, 10)).(*list[Item])
+		execCmd(l, l.Init())
+
+		// We should be at the bottom (offset == 0).
+		assert.Equal(t, 0, l.offset)
+
+		// Grow the last item.
+		item := items[29]
+		execCmd(l, l.UpdateItem(item.ID(), NewSelectableItem("Item 29\nLine 2\nLine 3")))
+
+		// Offset should stay at 0 because we're at the bottom and want to stay there.
+		// In DirectionBackward, offset=0 means showing the last `height` lines.
+		assert.Equal(t, 0, l.offset)
+		assert.Equal(t, 32, lipgloss.Height(l.rendered))
+
+		// View should show the new content at the bottom.
+		viewAfter := l.View()
+		assert.Contains(t, viewAfter, "Line 2")
+		assert.Contains(t, viewAfter, "Line 3")
+		golden.RequireEqual(t, []byte(l.View()))
+	})
 	t.Run("should stay at the position it is when the hight of an item below is decreases in backwards list", func(t *testing.T) {
 		t.Parallel()
 		items := []Item{}

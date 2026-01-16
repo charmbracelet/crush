@@ -26,15 +26,35 @@ type ModelContextInfo struct {
 	Cost         float64
 }
 
-// ModelInfo renders model information including name, reasoning settings, and
-// optional context usage/cost.
-func ModelInfo(t *styles.Styles, modelName string, reasoningInfo string, context *ModelContextInfo, width int) string {
+// ModelInfo renders model information including name, provider, reasoning
+// settings, and optional context usage/cost.
+func ModelInfo(t *styles.Styles, modelName, providerName, reasoningInfo string, context *ModelContextInfo, width int) string {
 	modelIcon := t.Subtle.Render(styles.ModelIcon)
 	modelName = t.Base.Render(modelName)
-	modelInfo := fmt.Sprintf("%s %s", modelIcon, modelName)
 
-	parts := []string{
-		modelInfo,
+	// Build first line with model name and optionally provider on the same line
+	var firstLine string
+	if providerName != "" {
+		providerInfo := t.Muted.Render(fmt.Sprintf("via %s", providerName))
+		modelWithProvider := fmt.Sprintf("%s %s %s", modelIcon, modelName, providerInfo)
+
+		// Check if it fits on one line
+		if lipgloss.Width(modelWithProvider) <= width {
+			firstLine = modelWithProvider
+		} else {
+			// If it doesn't fit, put provider on next line
+			firstLine = fmt.Sprintf("%s %s", modelIcon, modelName)
+		}
+	} else {
+		firstLine = fmt.Sprintf("%s %s", modelIcon, modelName)
+	}
+
+	parts := []string{firstLine}
+
+	// If provider didn't fit on first line, add it as second line
+	if providerName != "" && !strings.Contains(firstLine, "via") {
+		providerInfo := fmt.Sprintf("via %s", providerName)
+		parts = append(parts, t.Muted.PaddingLeft(2).Render(providerInfo))
 	}
 
 	if reasoningInfo != "" {

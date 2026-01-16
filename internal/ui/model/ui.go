@@ -110,6 +110,8 @@ type UI struct {
 	session      *session.Session
 	sessionFiles []SessionFile
 
+	lastUserMessageTime int64
+
 	// The width and height of the terminal in cells.
 	width  int
 	height int
@@ -596,11 +598,26 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 		msgPtrs[i] = &msgs[i]
 	}
 	toolResultMap := chat.BuildToolResultMap(msgPtrs)
+	if len(msgPtrs) > 0 {
+		m.lastUserMessageTime = msgPtrs[0].CreatedAt
+	}
 
 	// Add messages to chat with linked tool results
 	items := make([]chat.MessageItem, 0, len(msgs)*2)
 	for _, msg := range msgPtrs {
-		items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap)...)
+		switch msg.Role {
+		case message.User:
+			m.lastUserMessageTime = msg.CreatedAt
+			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap)...)
+		case message.Assistant:
+			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap)...)
+			if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
+				infoItem := chat.NewAssistantInfoItem(m.com.Styles, msg, time.Unix(m.lastUserMessageTime, 0))
+				items = append(items, infoItem)
+			}
+		default:
+			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap)...)
+		}
 	}
 
 	// Load nested tool calls for agent/agentic_fetch tools.
@@ -692,7 +709,8 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 		return nil
 	}
 	switch msg.Role {
-	case message.User, message.Assistant:
+	case message.User:
+		m.lastUserMessageTime = msg.CreatedAt
 		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil)
 		for _, item := range items {
 			if animatable, ok := item.(chat.Animatable); ok {
@@ -704,6 +722,26 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 		m.chat.AppendMessages(items...)
 		if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
 			cmds = append(cmds, cmd)
+		}
+	case message.Assistant:
+		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil)
+		for _, item := range items {
+			if animatable, ok := item.(chat.Animatable); ok {
+				if cmd := animatable.StartAnimation(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			}
+		}
+		m.chat.AppendMessages(items...)
+		if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
+			infoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, time.Unix(m.lastUserMessageTime, 0))
+			m.chat.AppendMessages(infoItem)
+			if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 		}
 	case message.Tool:
 		for _, tr := range msg.ToolResults() {
@@ -733,9 +771,23 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 		}
 	}
 
+	shouldRenderAssistant := chat.ShouldRenderAssistantMessage(&msg)
 	// if the message of the assistant does not have any  response just tool calls we need to remove it
-	if !chat.ShouldRenderAssistantMessage(&msg) && len(msg.ToolCalls()) > 0 && existingItem != nil {
+	if !shouldRenderAssistant && len(msg.ToolCalls()) > 0 && existingItem != nil {
 		m.chat.RemoveMessage(msg.ID)
+		if infoItem := m.chat.MessageItem(chat.AssistantInfoID(msg.ID)); infoItem != nil {
+			m.chat.RemoveMessage(chat.AssistantInfoID(msg.ID))
+		}
+	}
+
+	if shouldRenderAssistant && msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
+		if infoItem := m.chat.MessageItem(chat.AssistantInfoID(msg.ID)); infoItem == nil {
+			newInfoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, time.Unix(m.lastUserMessageTime, 0))
+			m.chat.AppendMessages(newInfoItem)
+			if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
 	}
 
 	var items []chat.MessageItem

@@ -238,39 +238,121 @@ func (m *Chat) SelectedItemInView() bool {
 	return m.list.SelectedItemInView()
 }
 
+func (m *Chat) isSelectable(index int) bool {
+	item := m.list.ItemAt(index)
+	if item == nil {
+		return false
+	}
+	_, ok := item.(list.Focusable)
+	return ok
+}
+
 // SetSelected sets the selected message index in the chat list.
 func (m *Chat) SetSelected(index int) {
 	m.list.SetSelected(index)
+	if index < 0 || index >= m.list.Len() {
+		return
+	}
+	for {
+		if m.isSelectable(m.list.Selected()) {
+			return
+		}
+		if m.list.SelectNext() {
+			continue
+		}
+		// If we're at the end and the last item isn't selectable, walk backwards
+		// to find the nearest selectable item.
+		for {
+			if !m.list.SelectPrev() {
+				return
+			}
+			if m.isSelectable(m.list.Selected()) {
+				return
+			}
+		}
+	}
 }
 
 // SelectPrev selects the previous message in the chat list.
 func (m *Chat) SelectPrev() {
-	m.list.SelectPrev()
+	for {
+		if !m.list.SelectPrev() {
+			return
+		}
+		if m.isSelectable(m.list.Selected()) {
+			return
+		}
+	}
 }
 
 // SelectNext selects the next message in the chat list.
 func (m *Chat) SelectNext() {
-	m.list.SelectNext()
+	for {
+		if !m.list.SelectNext() {
+			return
+		}
+		if m.isSelectable(m.list.Selected()) {
+			return
+		}
+	}
 }
 
 // SelectFirst selects the first message in the chat list.
 func (m *Chat) SelectFirst() {
-	m.list.SelectFirst()
+	if !m.list.SelectFirst() {
+		return
+	}
+	if m.isSelectable(m.list.Selected()) {
+		return
+	}
+	for {
+		if !m.list.SelectNext() {
+			return
+		}
+		if m.isSelectable(m.list.Selected()) {
+			return
+		}
+	}
 }
 
 // SelectLast selects the last message in the chat list.
 func (m *Chat) SelectLast() {
-	m.list.SelectLast()
+	if !m.list.SelectLast() {
+		return
+	}
+	if m.isSelectable(m.list.Selected()) {
+		return
+	}
+	for {
+		if !m.list.SelectPrev() {
+			return
+		}
+		if m.isSelectable(m.list.Selected()) {
+			return
+		}
+	}
 }
 
 // SelectFirstInView selects the first message currently in view.
 func (m *Chat) SelectFirstInView() {
-	m.list.SelectFirstInView()
+	startIdx, endIdx := m.list.VisibleItemIndices()
+	for i := startIdx; i <= endIdx; i++ {
+		if m.isSelectable(i) {
+			m.list.SetSelected(i)
+			return
+		}
+	}
 }
 
 // SelectLastInView selects the last message currently in view.
 func (m *Chat) SelectLastInView() {
-	m.list.SelectLastInView()
+	startIdx, endIdx := m.list.VisibleItemIndices()
+	for i := endIdx; i >= startIdx; i-- {
+		if m.isSelectable(i) {
+			m.list.SetSelected(i)
+			return
+		}
+	}
 }
 
 // ClearMessages removes all messages from the chat list.
@@ -333,6 +415,9 @@ func (m *Chat) HandleMouseDown(x, y int) bool {
 
 	itemIdx, itemY := m.list.ItemIndexAtPosition(x, y)
 	if itemIdx < 0 {
+		return false
+	}
+	if !m.isSelectable(itemIdx) {
 		return false
 	}
 

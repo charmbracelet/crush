@@ -4,13 +4,19 @@
 package chat
 
 import (
+	"fmt"
 	"image"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
+	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 )
@@ -42,9 +48,19 @@ type Expandable interface {
 // UI and be part of a [list.List] identifiable by a unique ID.
 type MessageItem interface {
 	list.Item
-	list.Highlightable
-	list.Focusable
 	Identifiable
+}
+
+// HighlightableMessageItem is a message item that supports highlighting.
+type HighlightableMessageItem interface {
+	MessageItem
+	list.Highlightable
+}
+
+// FocusableMessageItem is a message item that supports focus.
+type FocusableMessageItem interface {
+	MessageItem
+	list.Focusable
 }
 
 // SendMsg represents a message to send a chat message.
@@ -144,6 +160,73 @@ type focusableMessageItem struct {
 // SetFocused implements MessageItem.
 func (f *focusableMessageItem) SetFocused(focused bool) {
 	f.focused = focused
+}
+
+// AssistantInfoID returns a stable ID for assistant info items.
+func AssistantInfoID(messageID string) string {
+	return fmt.Sprintf("%s:assistant-info", messageID)
+}
+
+// AssistantInfoItem renders model info and response time after assistant completes.
+type AssistantInfoItem struct {
+	*cachedMessageItem
+
+	id                  string
+	message             *message.Message
+	sty                 *styles.Styles
+	lastUserMessageTime time.Time
+}
+
+// NewAssistantInfoItem creates a new AssistantInfoItem.
+func NewAssistantInfoItem(sty *styles.Styles, message *message.Message, lastUserMessageTime time.Time) MessageItem {
+	return &AssistantInfoItem{
+		cachedMessageItem:   &cachedMessageItem{},
+		id:                  AssistantInfoID(message.ID),
+		message:             message,
+		sty:                 sty,
+		lastUserMessageTime: lastUserMessageTime,
+	}
+}
+
+// ID implements MessageItem.
+func (a *AssistantInfoItem) ID() string {
+	return a.id
+}
+
+// Render implements MessageItem.
+func (a *AssistantInfoItem) Render(width int) string {
+	innerWidth := max(0, width-messageLeftPaddingTotal)
+	content, _, ok := a.getCachedRender(innerWidth)
+	if !ok {
+		content = a.renderContent(innerWidth)
+		height := lipgloss.Height(content)
+		a.setCachedRender(content, innerWidth, height)
+	}
+
+	return a.sty.Chat.Message.SectionHeader.Render(content)
+}
+
+func (a *AssistantInfoItem) renderContent(width int) string {
+	finishData := a.message.FinishPart()
+	if finishData == nil {
+		return ""
+	}
+	finishTime := time.Unix(finishData.Time, 0)
+	duration := finishTime.Sub(a.lastUserMessageTime)
+	infoMsg := a.sty.Chat.Message.AssistantInfoDuration.Render(duration.String())
+	icon := a.sty.Chat.Message.AssistantInfoIcon.Render(styles.ModelIcon)
+	model := config.Get().GetModel(a.message.Provider, a.message.Model)
+	if model == nil {
+		model = &catwalk.Model{Name: "Unknown Model"}
+	}
+	modelFormatted := a.sty.Chat.Message.AssistantInfoModel.Render(model.Name)
+	providerName := a.message.Provider
+	if providerConfig, ok := config.Get().Providers.Get(a.message.Provider); ok {
+		providerName = providerConfig.Name
+	}
+	provider := a.sty.Chat.Message.AssistantInfoProvider.Render(fmt.Sprintf("via %s", providerName))
+	assistant := fmt.Sprintf("%s %s %s %s", icon, modelFormatted, provider, infoMsg)
+	return common.Section(a.sty, assistant, width)
 }
 
 // cappedMessageWidth returns the maximum width for message content for readability.

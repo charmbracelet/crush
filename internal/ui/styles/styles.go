@@ -238,6 +238,10 @@ type Styles struct {
 			ThinkingTruncationHint lipgloss.Style // "… (N lines hidden)" hint
 			ThinkingFooterTitle    lipgloss.Style // "Thought for" text
 			ThinkingFooterDuration lipgloss.Style // Duration value
+			AssistantInfoIcon      lipgloss.Style
+			AssistantInfoModel     lipgloss.Style
+			AssistantInfoProvider  lipgloss.Style
+			AssistantInfoDuration  lipgloss.Style
 		}
 	}
 
@@ -1193,6 +1197,10 @@ func DefaultStyles() Styles {
 	// No padding or border for compact tool calls within messages
 	s.Chat.Message.ToolCallCompact = s.Muted
 	s.Chat.Message.SectionHeader = s.Base.PaddingLeft(2)
+	s.Chat.Message.AssistantInfoIcon = s.Subtle
+	s.Chat.Message.AssistantInfoModel = s.Muted
+	s.Chat.Message.AssistantInfoProvider = s.Subtle
+	s.Chat.Message.AssistantInfoDuration = s.Subtle
 
 	// Thinking section styles
 	s.Chat.Message.ThinkingBox = s.Subtle.Background(bgBaseLighter)

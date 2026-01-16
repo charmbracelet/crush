@@ -341,12 +341,26 @@ type Agent struct {
 }
 
 type Tools struct {
-	Ls ToolLs `json:"ls,omitzero"`
+	Ls   ToolLs   `json:"ls,omitzero"`
+	Bash ToolBash `json:"bash,omitzero"`
 }
 
 type ToolLs struct {
 	MaxDepth *int `json:"max_depth,omitempty" jsonschema:"description=Maximum depth for the ls tool,default=0,example=10"`
 	MaxItems *int `json:"max_items,omitempty" jsonschema:"description=Maximum number of items to return for the ls tool,default=1000,example=100"`
+}
+
+type ToolBash struct {
+	DisableDefaultCommands    bool                        `json:"disable_banned_defaults,omitempty"`
+	BannedCommands            []string                    `json:"banned_commands,omitempty"`
+	DisableDefaultSubCommands bool                        `json:"disable_banned_sub_command_defaults,omitempty"`
+	BannedSubCommands         []BannedToolArgsAndOrParams `json:"banned_sub_commands,omitempty"`
+}
+
+type BannedToolArgsAndOrParams struct {
+	Command string   `json:"command"`
+	Args    []string `json:"args"`
+	Flags   []string `json:"flags"`
 }
 
 func (t ToolLs) Limits() (depth, items int) {

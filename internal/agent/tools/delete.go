@@ -31,7 +31,6 @@ type DeleteParams struct {
 type DeletePermissionsParams struct {
 	FilePath  string `json:"file_path"`
 	Recursive bool   `json:"recursive,omitempty"`
-	IsDir     bool   `json:"is_dir,omitempty"`
 }
 
 // DeleteToolName is the name of the delete tool.
@@ -79,7 +78,6 @@ func NewDeleteTool(lspClients *csync.Map[string, *lsp.Client], permissions permi
 					Params: DeletePermissionsParams{
 						FilePath:  filePath,
 						Recursive: params.Recursive,
-						IsDir:     isDir,
 					},
 				},
 			)

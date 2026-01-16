@@ -539,6 +539,7 @@ Crush currently supports running Anthropic models through Bedrock, with caching 
 - A Bedrock provider will appear once you have AWS configured, i.e. `aws configure`
 - Crush also expects the `AWS_REGION` or `AWS_DEFAULT_REGION` to be set
 - To use a specific AWS profile set `AWS_PROFILE` in your environment, i.e. `AWS_PROFILE=myprofile crush`
+- You can also use `AWS_CONFIG_FILE` (in combination with `AWS_PROFILE`) to use a custom AWS config
 - Alternatively to `aws configure`, you can also just set `AWS_BEARER_TOKEN_BEDROCK`
 
 ### Vertex AI Platform

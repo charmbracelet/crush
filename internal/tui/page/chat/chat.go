@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"charm.land/bubbles/v2/help"
@@ -14,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -30,9 +32,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/core/layout"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/commands"
-	"github.com/charmbracelet/crush/internal/tui/components/dialogs/copilot"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/filepicker"
-	"github.com/charmbracelet/crush/internal/tui/components/dialogs/hyper"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/models"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/reasoning"
 	"github.com/charmbracelet/crush/internal/tui/page"
@@ -56,14 +56,6 @@ const (
 	PanelTypeChat   PanelType = "chat"
 	PanelTypeEditor PanelType = "editor"
 	PanelTypeSplash PanelType = "splash"
-)
-
-// PillSection represents which pill section is focused when in pills panel.
-type PillSection int
-
-const (
-	PillSectionTodos PillSection = iota
-	PillSectionQueue
 )
 
 const (
@@ -125,18 +117,9 @@ type chatPage struct {
 	splashFullScreen bool
 	isOnboarding     bool
 	isProjectInit    bool
-	promptQueue      int
-
-	// Pills state
-	pillsExpanded      bool
-	focusedPillSection PillSection
-
-	// Todo spinner
-	todoSpinner spinner.Model
 }
 
 func New(app *app.App) ChatPage {
-	t := styles.CurrentTheme()
 	return &chatPage{
 		app:         app,
 		keyMap:      DefaultKeyMap(),
@@ -146,10 +129,6 @@ func New(app *app.App) ChatPage {
 		editor:      editor.New(app),
 		splash:      splash.New(),
 		focusedPane: PanelTypeSplash,
-		todoSpinner: spinner.New(
-			spinner.WithSpinner(spinner.MiniDot),
-			spinner.WithStyle(t.S().Base.Foreground(t.GreenDark)),
-		),
 	}
 }
 
@@ -188,13 +167,6 @@ func (p *chatPage) Init() tea.Cmd {
 
 func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	var cmds []tea.Cmd
-	if p.session.ID != "" && p.app.AgentCoordinator != nil {
-		queueSize := p.app.AgentCoordinator.QueuedPrompts(p.session.ID)
-		if queueSize != p.promptQueue {
-			p.promptQueue = queueSize
-			cmds = append(cmds, p.SetSize(p.width, p.height))
-		}
-	}
 	switch msg := msg.(type) {
 	case tea.KeyboardEnhancementsMsg:
 		p.keyboardEnhancements = msg
@@ -210,7 +182,7 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		}
 		return p, nil
 	case tea.MouseClickMsg:
-		if p.isOnboarding || p.isProjectInit {
+		if p.isOnboarding {
 			return p, nil
 		}
 		if p.compact {
@@ -239,7 +211,7 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		}
 		return p, nil
 	case tea.MouseReleaseMsg:
-		if p.isOnboarding || p.isProjectInit {
+		if p.isOnboarding {
 			return p, nil
 		}
 		if p.compact {
@@ -297,19 +269,6 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		p.editor = u.(editor.Editor)
 		return p, cmd
 	case pubsub.Event[session.Session]:
-		if msg.Payload.ID == p.session.ID {
-			prevHasIncompleteTodos := hasIncompleteTodos(p.session.Todos)
-			prevHasInProgress := p.hasInProgressTodo()
-			p.session = msg.Payload
-			newHasIncompleteTodos := hasIncompleteTodos(p.session.Todos)
-			newHasInProgress := p.hasInProgressTodo()
-			if prevHasIncompleteTodos != newHasIncompleteTodos {
-				cmds = append(cmds, p.SetSize(p.width, p.height))
-			}
-			if !prevHasInProgress && newHasInProgress {
-				cmds = append(cmds, p.todoSpinner.Tick)
-			}
-		}
 		u, cmd := p.header.Update(msg)
 		p.header = u.(header.Header)
 		cmds = append(cmds, cmd)
@@ -336,18 +295,6 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 		return p, tea.Batch(cmds...)
 
-	case hyper.DeviceFlowCompletedMsg,
-		hyper.DeviceAuthInitiatedMsg,
-		hyper.DeviceFlowErrorMsg,
-		copilot.DeviceAuthInitiatedMsg,
-		copilot.DeviceFlowErrorMsg,
-		copilot.DeviceFlowCompletedMsg:
-		if p.focusedPane == PanelTypeSplash {
-			u, cmd := p.splash.Update(msg)
-			p.splash = u.(splash.Splash)
-			cmds = append(cmds, cmd)
-		}
-		return p, tea.Batch(cmds...)
 	case models.APIKeyStateChangeMsg:
 		if p.focusedPane == PanelTypeSplash {
 			u, cmd := p.splash.Update(msg)
@@ -358,17 +305,6 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	case pubsub.Event[message.Message],
 		anim.StepMsg,
 		spinner.TickMsg:
-		// Update todo spinner if agent is busy and we have in-progress todos
-		agentBusy := p.app.AgentCoordinator != nil && p.app.AgentCoordinator.IsBusy()
-		if _, ok := msg.(spinner.TickMsg); ok && p.hasInProgressTodo() && agentBusy {
-			var cmd tea.Cmd
-			p.todoSpinner, cmd = p.todoSpinner.Update(msg)
-			cmds = append(cmds, cmd)
-		}
-		// Start spinner when agent becomes busy and we have in-progress todos
-		if _, ok := msg.(pubsub.Event[message.Message]); ok && p.hasInProgressTodo() && agentBusy {
-			cmds = append(cmds, p.todoSpinner.Tick)
-		}
 		if p.focusedPane == PanelTypeSplash {
 			u, cmd := p.splash.Update(msg)
 			p.splash = u.(splash.Splash)
@@ -437,17 +373,8 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			}
 			return p, p.newSession()
 		case key.Matches(msg, p.keyMap.AddAttachment):
-			// Skip attachment handling during onboarding/splash screen
-			if p.focusedPane == PanelTypeSplash || p.isOnboarding {
-				u, cmd := p.splash.Update(msg)
-				p.splash = u.(splash.Splash)
-				return p, cmd
-			}
 			agentCfg := config.Get().Agents[config.AgentCoder]
 			model := config.Get().GetModelByType(agentCfg.Model)
-			if model == nil {
-				return p, util.ReportWarn("No model configured yet")
-			}
 			if model.SupportsImages {
 				return p, util.CmdHandler(commands.OpenFilePickerMsg{})
 			} else {
@@ -459,7 +386,8 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				p.splash = u.(splash.Splash)
 				return p, cmd
 			}
-			return p, p.changeFocus()
+			p.changeFocus()
+			return p, nil
 		case key.Matches(msg, p.keyMap.Cancel):
 			if p.session.ID != "" && p.app.AgentCoordinator.IsBusy() {
 				return p, p.cancel()
@@ -467,18 +395,6 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		case key.Matches(msg, p.keyMap.Details):
 			p.toggleDetails()
 			return p, nil
-		case key.Matches(msg, p.keyMap.TogglePills):
-			if p.session.ID != "" {
-				return p, p.togglePillsExpanded()
-			}
-		case key.Matches(msg, p.keyMap.PillLeft):
-			if p.session.ID != "" && p.pillsExpanded {
-				return p, p.switchPillSection(-1)
-			}
-		case key.Matches(msg, p.keyMap.PillRight):
-			if p.session.ID != "" && p.pillsExpanded {
-				return p, p.switchPillSection(1)
-			}
 		}
 
 		switch p.focusedPane {
@@ -552,94 +468,19 @@ func (p *chatPage) View() string {
 	} else {
 		messagesView := p.chat.View()
 		editorView := p.editor.View()
-
-		hasIncompleteTodos := hasIncompleteTodos(p.session.Todos)
-		hasQueue := p.promptQueue > 0
-		todosFocused := p.pillsExpanded && p.focusedPillSection == PillSectionTodos
-		queueFocused := p.pillsExpanded && p.focusedPillSection == PillSectionQueue
-
-		// Use spinner when agent is busy, otherwise show static icon
-		agentBusy := p.app.AgentCoordinator != nil && p.app.AgentCoordinator.IsBusy()
-		inProgressIcon := t.S().Base.Foreground(t.GreenDark).Render(styles.CenterSpinnerIcon)
-		if agentBusy {
-			inProgressIcon = p.todoSpinner.View()
-		}
-
-		var pills []string
-		if hasIncompleteTodos {
-			pills = append(pills, todoPill(p.session.Todos, inProgressIcon, todosFocused, p.pillsExpanded, t))
-		}
-		if hasQueue {
-			pills = append(pills, queuePill(p.promptQueue, queueFocused, p.pillsExpanded, t))
-		}
-
-		var expandedList string
-		if p.pillsExpanded {
-			if todosFocused && hasIncompleteTodos {
-				expandedList = todoList(p.session.Todos, inProgressIcon, t, p.width-SideBarWidth)
-			} else if queueFocused && hasQueue {
-				queueItems := p.app.AgentCoordinator.QueuedPromptsList(p.session.ID)
-				expandedList = queueList(queueItems, t)
-			}
-		}
-
-		var pillsArea string
-		if len(pills) > 0 {
-			pillsRow := lipgloss.JoinHorizontal(lipgloss.Top, pills...)
-
-			// Add help hint for expanding/collapsing pills based on state.
-			var helpDesc string
-			if p.pillsExpanded {
-				helpDesc = "close"
-			} else {
-				helpDesc = "open"
-			}
-			// Style to match help section: keys in FgMuted, description in FgSubtle
-			helpKey := t.S().Base.Foreground(t.FgMuted).Render("ctrl+space")
-			helpText := t.S().Base.Foreground(t.FgSubtle).Render(helpDesc)
-			helpHint := lipgloss.JoinHorizontal(lipgloss.Center, helpKey, " ", helpText)
-			pillsRow = lipgloss.JoinHorizontal(lipgloss.Center, pillsRow, " ", helpHint)
-
-			if expandedList != "" {
-				pillsArea = lipgloss.JoinVertical(
-					lipgloss.Left,
-					pillsRow,
-					expandedList,
-				)
-			} else {
-				pillsArea = pillsRow
-			}
-
-			pillsArea = t.S().Base.
-				MaxWidth(p.width).
-				MarginTop(1).
-				PaddingLeft(3).
-				Render(pillsArea)
-		}
-
 		if p.compact {
 			headerView := p.header.View()
-			views := []string{headerView, messagesView}
-			if pillsArea != "" {
-				views = append(views, pillsArea)
-			}
-			views = append(views, editorView)
-			chatView = lipgloss.JoinVertical(lipgloss.Left, views...)
+			chatView = lipgloss.JoinVertical(
+				lipgloss.Left,
+				headerView,
+				messagesView,
+				editorView,
+			)
 		} else {
 			sidebarView := p.sidebar.View()
-			var messagesColumn string
-			if pillsArea != "" {
-				messagesColumn = lipgloss.JoinVertical(
-					lipgloss.Left,
-					messagesView,
-					pillsArea,
-				)
-			} else {
-				messagesColumn = messagesView
-			}
 			messages := lipgloss.JoinHorizontal(
 				lipgloss.Left,
-				messagesColumn,
+				messagesView,
 				sidebarView,
 			)
 			chatView = lipgloss.JoinVertical(
@@ -669,7 +510,9 @@ func (p *chatPage) View() string {
 		)
 		layers = append(layers, lipgloss.NewLayer(details).X(1).Y(1))
 	}
-	canvas := lipgloss.NewCompositor(layers...)
+	canvas := lipgloss.NewCanvas(
+		layers...,
+	)
 	return canvas.Render()
 }
 
@@ -801,30 +644,14 @@ func (p *chatPage) SetSize(width, height int) tea.Cmd {
 			cmds = append(cmds, p.editor.SetPosition(0, height-EditorHeight))
 		}
 	} else {
-		hasIncompleteTodos := hasIncompleteTodos(p.session.Todos)
-		hasQueue := p.promptQueue > 0
-		hasPills := hasIncompleteTodos || hasQueue
-
-		pillsAreaHeight := 0
-		if hasPills {
-			pillsAreaHeight = pillHeightWithBorder + 1 // +1 for padding top
-			if p.pillsExpanded {
-				if p.focusedPillSection == PillSectionTodos && hasIncompleteTodos {
-					pillsAreaHeight += len(p.session.Todos)
-				} else if p.focusedPillSection == PillSectionQueue && hasQueue {
-					pillsAreaHeight += p.promptQueue
-				}
-			}
-		}
-
 		if p.compact {
-			cmds = append(cmds, p.chat.SetSize(width, height-EditorHeight-HeaderHeight-pillsAreaHeight))
+			cmds = append(cmds, p.chat.SetSize(width, height-EditorHeight-HeaderHeight))
 			p.detailsWidth = width - DetailsPositioning
 			cmds = append(cmds, p.sidebar.SetSize(p.detailsWidth-LeftRightBorders, p.detailsHeight-TopBottomBorders))
 			cmds = append(cmds, p.editor.SetSize(width, EditorHeight))
 			cmds = append(cmds, p.header.SetWidth(width-BorderWidth))
 		} else {
-			cmds = append(cmds, p.chat.SetSize(width-SideBarWidth, height-EditorHeight-pillsAreaHeight))
+			cmds = append(cmds, p.chat.SetSize(width-SideBarWidth, height-EditorHeight))
 			cmds = append(cmds, p.editor.SetSize(width, EditorHeight))
 			cmds = append(cmds, p.sidebar.SetSize(SideBarWidth, height-EditorHeight))
 		}
@@ -854,12 +681,45 @@ func (p *chatPage) setSession(sess session.Session) tea.Cmd {
 		return nil
 	}
 
+	// Determine if this is a resume (existing session with messages)
+	isResume := sess.MessageCount > 0
+
 	var cmds []tea.Cmd
 	p.session = sess
 
-	if p.hasInProgressTodo() {
-		cmds = append(cmds, p.todoSpinner.Tick)
+	// Execute session-start hooks
+	cfg := config.Get()
+	agentCfg := cfg.Agents[config.AgentCoder]
+	model := cfg.GetModelByType(agentCfg.Model)
+	providerCfg := cfg.GetProviderForModel(agentCfg.Model)
+
+	modelName := ""
+	providerName := ""
+	if model != nil {
+		modelName = model.ID
 	}
+	if providerCfg != nil {
+		providerName = providerCfg.Name
+	}
+
+	cmds = append(cmds, func() tea.Msg {
+		if _, err := p.app.HooksManager.ExecuteSessionStart(
+			context.Background(),
+			sess.ID,
+			cfg.WorkingDir(),
+			hooks.SessionStartData{
+				SessionID:   sess.ID,
+				SessionName: sess.Title,
+				WorkingDir:  cfg.WorkingDir(),
+				Model:       modelName,
+				Provider:    providerName,
+				IsResume:    isResume,
+			},
+		); err != nil {
+			slog.Warn("Failed to execute session-start hooks", "error", err)
+		}
+		return nil
+	})
 
 	cmds = append(cmds, p.SetSize(p.width, p.height))
 	cmds = append(cmds, p.chat.SetSession(sess))
@@ -870,56 +730,20 @@ func (p *chatPage) setSession(sess session.Session) tea.Cmd {
 	return tea.Sequence(cmds...)
 }
 
-func (p *chatPage) changeFocus() tea.Cmd {
+func (p *chatPage) changeFocus() {
 	if p.session.ID == "" {
-		return nil
+		return
 	}
-
 	switch p.focusedPane {
-	case PanelTypeEditor:
-		p.focusedPane = PanelTypeChat
-		p.chat.Focus()
-		p.editor.Blur()
 	case PanelTypeChat:
 		p.focusedPane = PanelTypeEditor
 		p.editor.Focus()
 		p.chat.Blur()
+	case PanelTypeEditor:
+		p.focusedPane = PanelTypeChat
+		p.chat.Focus()
+		p.editor.Blur()
 	}
-	return nil
-}
-
-func (p *chatPage) togglePillsExpanded() tea.Cmd {
-	hasPills := hasIncompleteTodos(p.session.Todos) || p.promptQueue > 0
-	if !hasPills {
-		return nil
-	}
-	p.pillsExpanded = !p.pillsExpanded
-	if p.pillsExpanded {
-		if hasIncompleteTodos(p.session.Todos) {
-			p.focusedPillSection = PillSectionTodos
-		} else {
-			p.focusedPillSection = PillSectionQueue
-		}
-	}
-	return p.SetSize(p.width, p.height)
-}
-
-func (p *chatPage) switchPillSection(dir int) tea.Cmd {
-	if !p.pillsExpanded {
-		return nil
-	}
-	hasIncompleteTodos := hasIncompleteTodos(p.session.Todos)
-	hasQueue := p.promptQueue > 0
-
-	if dir < 0 && p.focusedPillSection == PillSectionQueue && hasIncompleteTodos {
-		p.focusedPillSection = PillSectionTodos
-		return p.SetSize(p.width, p.height)
-	}
-	if dir > 0 && p.focusedPillSection == PillSectionTodos && hasQueue {
-		p.focusedPillSection = PillSectionQueue
-		return p.SetSize(p.width, p.height)
-	}
-	return nil
 }
 
 func (p *chatPage) cancel() tea.Cmd {
@@ -958,10 +782,7 @@ func (p *chatPage) sendMessage(text string, attachments []message.Attachment) te
 	session := p.session
 	var cmds []tea.Cmd
 	if p.session.ID == "" {
-		// XXX: The second argument here is the session name, which we leave
-		// blank as it will be auto-generated. Ideally, we remove the need for
-		// that argument entirely.
-		newSession, err := p.app.Sessions.Create(context.Background(), "")
+		newSession, err := p.app.Sessions.Create(context.Background(), "New Session")
 		if err != nil {
 			return util.ReportError(err)
 		}
@@ -1034,38 +855,6 @@ func (p *chatPage) Help() help.KeyMap {
 	var shortList []key.Binding
 	var fullList [][]key.Binding
 	switch {
-	case p.isOnboarding:
-		switch {
-		case p.splash.IsShowingHyperOAuth2() || p.splash.IsShowingCopilotOAuth2():
-			shortList = append(shortList,
-				key.NewBinding(
-					key.WithKeys("enter"),
-					key.WithHelp("enter", "copy url & open signup"),
-				),
-				key.NewBinding(
-					key.WithKeys("c"),
-					key.WithHelp("c", "copy url"),
-				),
-			)
-		default:
-			shortList = append(shortList,
-				key.NewBinding(
-					key.WithKeys("enter"),
-					key.WithHelp("enter", "submit"),
-				),
-			)
-		}
-		shortList = append(shortList,
-			// Quit
-			key.NewBinding(
-				key.WithKeys("ctrl+c"),
-				key.WithHelp("ctrl+c", "quit"),
-			),
-		)
-		// keep them the same
-		for _, v := range shortList {
-			fullList = append(fullList, []key.Binding{v})
-		}
 	case p.isOnboarding && !p.splash.IsShowingAPIKey():
 		shortList = append(shortList,
 			// Choose model
@@ -1175,42 +964,23 @@ func (p *chatPage) Help() help.KeyMap {
 		globalBindings := []key.Binding{}
 		// we are in a session
 		if p.session.ID != "" {
-			var tabKey key.Binding
-			switch p.focusedPane {
-			case PanelTypeEditor:
-				tabKey = key.NewBinding(
-					key.WithKeys("tab"),
-					key.WithHelp("tab", "focus chat"),
-				)
-			case PanelTypeChat:
+			tabKey := key.NewBinding(
+				key.WithKeys("tab"),
+				key.WithHelp("tab", "focus chat"),
+			)
+			if p.focusedPane == PanelTypeChat {
 				tabKey = key.NewBinding(
 					key.WithKeys("tab"),
 					key.WithHelp("tab", "focus editor"),
 				)
-			default:
-				tabKey = key.NewBinding(
-					key.WithKeys("tab"),
-					key.WithHelp("tab", "focus chat"),
-				)
 			}
 			shortList = append(shortList, tabKey)
 			globalBindings = append(globalBindings, tabKey)
-
-			// Show left/right to switch sections when expanded and both exist
-			hasTodos := hasIncompleteTodos(p.session.Todos)
-			hasQueue := p.promptQueue > 0
-			if p.pillsExpanded && hasTodos && hasQueue {
-				shortList = append(shortList, p.keyMap.PillLeft)
-				globalBindings = append(globalBindings, p.keyMap.PillLeft)
-			}
 		}
 		commandsBinding := key.NewBinding(
 			key.WithKeys("ctrl+p"),
 			key.WithHelp("ctrl+p", "commands"),
 		)
-		if p.focusedPane == PanelTypeEditor && p.editor.IsEmpty() {
-			commandsBinding.SetHelp("/ or ctrl+p", "commands")
-		}
 		modelsBinding := key.NewBinding(
 			key.WithKeys("ctrl+m", "ctrl+l"),
 			key.WithHelp("ctrl+l", "models"),
@@ -1392,13 +1162,4 @@ func (p *chatPage) isMouseOverChat(x, y int) bool {
 
 	// Check if mouse coordinates are within chat bounds
 	return x >= chatX && x < chatX+chatWidth && y >= chatY && y < chatY+chatHeight
-}
-
-func (p *chatPage) hasInProgressTodo() bool {
-	for _, todo := range p.session.Todos {
-		if todo.Status == session.TodoStatusInProgress {
-			return true
-		}
-	}
-	return false
 }

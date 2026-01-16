@@ -10,7 +10,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -24,6 +23,7 @@ import (
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/format"
 	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
@@ -31,13 +31,13 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
+	"github.com/charmbracelet/crush/internal/term"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/update"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
-	"github.com/charmbracelet/x/term"
 )
 
 type App struct {
@@ -47,6 +47,7 @@ type App struct {
 	Permissions permission.Service
 
 	AgentCoordinator agent.Coordinator
+	HooksManager     hooks.Manager
 
 	LSPClients *csync.Map[string, *lsp.Client]
 
@@ -62,14 +63,14 @@ type App struct {
 	cleanupFuncs []func() error
 }
 
-// New initializes a new application instance.
+// New initializes a new applcation instance.
 func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	q := db.New(conn)
 	sessions := session.NewService(q)
 	messages := message.NewService(q)
 	files := history.NewService(q, conn)
 	skipPermissionsRequests := cfg.Permissions != nil && cfg.Permissions.SkipRequests
-	var allowedTools []string
+	allowedTools := []string{}
 	if cfg.Permissions != nil && cfg.Permissions.AllowedTools != nil {
 		allowedTools = cfg.Permissions.AllowedTools
 	}
@@ -89,6 +90,9 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 		serviceEventsWG: &sync.WaitGroup{},
 		tuiWG:           &sync.WaitGroup{},
 	}
+
+	// Initialize hooks manager.
+	app.HooksManager = hooks.NewManager(cfg.WorkingDir(), cfg.Options.DataDirectory, cfg.Hooks)
 
 	app.setupEvents()
 
@@ -130,27 +134,15 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	var (
-		spinner   *format.Spinner
-		stdoutTTY bool
-		stderrTTY bool
-		stdinTTY  bool
-	)
-
-	if f, ok := output.(*os.File); ok {
-		stdoutTTY = term.IsTerminal(f.Fd())
-	}
-	stderrTTY = term.IsTerminal(os.Stderr.Fd())
-	stdinTTY = term.IsTerminal(os.Stdin.Fd())
-
-	if !quiet && stderrTTY {
+	var spinner *format.Spinner
+	if !quiet {
 		t := styles.CurrentTheme()
 
 		// Detect background color to set the appropriate color for the
 		// spinner's 'Generating...' text. Without this, that text would be
 		// unreadable in light terminals.
 		hasDarkBG := true
-		if f, ok := output.(*os.File); ok && stdinTTY && stdoutTTY {
+		if f, ok := output.(*os.File); ok {
 			hasDarkBG = lipgloss.HasDarkBackground(os.Stdin, f)
 		}
 		defaultFG := lipgloss.LightDark(hasDarkBG)(charmtone.Pepper, t.FgBase)
@@ -192,6 +184,32 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 	}
 	slog.Info("Created session for non-interactive run", "session_id", sess.ID)
 
+	// Execute session-start hooks
+	cfg := config.Get()
+	agentCfg := cfg.Agents[config.AgentCoder]
+	model := cfg.GetModelByType(agentCfg.Model)
+	providerCfg := cfg.GetProviderForModel(agentCfg.Model)
+
+	modelName := ""
+	providerName := ""
+	if model != nil {
+		modelName = model.ID
+	}
+	if providerCfg != nil {
+		providerName = providerCfg.Name
+	}
+
+	if _, err := app.HooksManager.ExecuteSessionStart(ctx, sess.ID, cfg.WorkingDir(), hooks.SessionStartData{
+		SessionID:   sess.ID,
+		SessionName: title,
+		WorkingDir:  cfg.WorkingDir(),
+		Model:       modelName,
+		Provider:    providerName,
+		IsResume:    false,
+	}); err != nil {
+		slog.Warn("Failed to execute session-start hooks", "error", err)
+	}
+
 	// Automatically approve all permission requests for this non-interactive
 	// session.
 	app.Permissions.AutoApproveSession(sess.ID)
@@ -216,9 +234,10 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 
 	messageEvents := app.Messages.Subscribe(ctx)
 	messageReadBytes := make(map[string]int)
+	supportsProgressBar := term.SupportsProgressBar()
 
 	defer func() {
-		if stderrTTY {
+		if supportsProgressBar {
 			_, _ = fmt.Fprintf(os.Stderr, ansi.ResetProgressBar)
 		}
 
@@ -228,9 +247,9 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 	}()
 
 	for {
-		if stderrTTY {
-			// HACK: Reinitialize the terminal progress bar on every iteration
-			// so it doesn't get hidden by the terminal due to inactivity.
+		if supportsProgressBar {
+			// HACK: Reinitialize the terminal progress bar on every iteration so
+			// it doesn't get hidden by the terminal due to inactivity.
 			_, _ = fmt.Fprintf(os.Stderr, ansi.SetIndeterminateProgressBar)
 		}
 
@@ -260,11 +279,6 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 				}
 
 				part := content[readBytes:]
-				// Trim leading whitespace. Sometimes the LLM includes leading
-				// formatting and intentation, which we don't want here.
-				if readBytes == 0 {
-					part = strings.TrimLeft(part, " \t")
-				}
 				fmt.Fprint(output, part)
 				messageReadBytes[msg.ID] = len(content)
 			}
@@ -277,9 +291,6 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 }
 
 func (app *App) UpdateAgentModel(ctx context.Context) error {
-	if app.AgentCoordinator == nil {
-		return fmt.Errorf("agent configuration is missing")
-	}
 	return app.AgentCoordinator.UpdateModels(ctx)
 }
 
@@ -348,6 +359,7 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.Permissions,
 		app.History,
 		app.LSPClients,
+		app.HooksManager,
 	)
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)
@@ -390,48 +402,30 @@ func (app *App) Subscribe(program *tea.Program) {
 
 // Shutdown performs a graceful shutdown of the application.
 func (app *App) Shutdown() {
-	start := time.Now()
-	defer func() { slog.Info("Shutdown took " + time.Since(start).String()) }()
-
-	// First, cancel all agents and wait for them to finish. This must complete
-	// before closing the DB so agents can finish writing their state.
 	if app.AgentCoordinator != nil {
 		app.AgentCoordinator.CancelAll()
 	}
 
-	// Now run remaining cleanup tasks in parallel.
-	var wg sync.WaitGroup
-
 	// Kill all background shells.
-	wg.Go(func() {
-		shell.GetBackgroundShellManager().KillAll()
-	})
+	shell.GetBackgroundShellManager().KillAll()
 
 	// Shutdown all LSP clients.
-	shutdownCtx, cancel := context.WithTimeout(app.globalCtx, 5*time.Second)
-	defer cancel()
 	for name, client := range app.LSPClients.Seq2() {
-		wg.Go(func() {
-			if err := client.Close(shutdownCtx); err != nil &&
-				!errors.Is(err, io.EOF) &&
-				!errors.Is(err, context.Canceled) &&
-				err.Error() != "signal: killed" {
-				slog.Warn("Failed to shutdown LSP client", "name", name, "error", err)
-			}
-		})
+		shutdownCtx, cancel := context.WithTimeout(app.globalCtx, 5*time.Second)
+		if err := client.Close(shutdownCtx); err != nil {
+			slog.Error("Failed to shutdown LSP client", "name", name, "error", err)
+		}
+		cancel()
 	}
 
-	// Call all cleanup functions.
+	// Call call cleanup functions.
 	for _, cleanup := range app.cleanupFuncs {
 		if cleanup != nil {
-			wg.Go(func() {
-				if err := cleanup(); err != nil {
-					slog.Error("Failed to cleanup app properly on shutdown", "error", err)
-				}
-			})
+			if err := cleanup(); err != nil {
+				slog.Error("Failed to cleanup app properly on shutdown", "error", err)
+			}
 		}
 	}
-	wg.Wait()
 }
 
 // checkForUpdates checks for available updates.

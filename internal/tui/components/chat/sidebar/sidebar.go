@@ -563,7 +563,7 @@ func (s *sidebarCmp) currentModelBlock() string {
 	if model.CanReason {
 		reasoningInfoStyle := t.S().Subtle.PaddingLeft(2)
 		switch modelProvider.Type {
-		case catwalk.TypeAnthropic:
+		case catwalk.TypeAnthropic, catwalk.TypeVertexAI:
 			formatter := cases.Title(language.English, cases.NoLower)
 			if selectedModel.Think {
 				parts = append(parts, reasoningInfoStyle.Render(formatter.String("Thinking on")))

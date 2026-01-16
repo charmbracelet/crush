@@ -5,7 +5,6 @@ import (
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/stretchr/testify/require"
 )
 
@@ -15,7 +14,7 @@ func TestParseModelStr(t *testing.T) {
 		modelStr        string
 		expectedFilter  string
 		expectedModelID string
-		setupProviders  func() *csync.Map[string, config.ProviderConfig]
+		setupProviders  func() map[string]config.ProviderConfig
 	}{
 		{
 			name:            "simple model with no slashes",
@@ -70,12 +69,8 @@ func TestParseModelStr(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &config.Config{
-				Providers: tt.setupProviders(),
-			}
-			app := &App{config: cfg}
-
-			filter, modelID := app.parseModelStr(tt.modelStr)
+			providers := tt.setupProviders()
+			filter, modelID := parseModelStr(providers, tt.modelStr)
 
 			require.Equal(t, tt.expectedFilter, filter, "provider filter mismatch")
 			require.Equal(t, tt.expectedModelID, modelID, "model ID mismatch")
@@ -83,40 +78,40 @@ func TestParseModelStr(t *testing.T) {
 	}
 }
 
-func setupMockProviders() *csync.Map[string, config.ProviderConfig] {
-	providers := csync.NewMap[string, config.ProviderConfig]()
-	providers.Set("openai", config.ProviderConfig{
-		ID:     "openai",
-		Name:   "OpenAI",
-		Models: []catwalk.Model{{ID: "gpt-4o"}, {ID: "gpt-4o-mini"}},
-	})
-	providers.Set("anthropic", config.ProviderConfig{
-		ID:     "anthropic",
-		Name:   "Anthropic",
-		Models: []catwalk.Model{{ID: "claude-3-sonnet"}, {ID: "claude-3-opus"}},
-	})
-	return providers
-}
-
-func setupMockProvidersWithSlashes() *csync.Map[string, config.ProviderConfig] {
-	providers := csync.NewMap[string, config.ProviderConfig]()
-	providers.Set("synthetic", config.ProviderConfig{
-		ID:   "synthetic",
-		Name: "Synthetic",
-		Models: []catwalk.Model{
-			{ID: "moonshot/kimi-k2"},
-			{ID: "deepseek/deepseek-chat"},
+func setupMockProviders() map[string]config.ProviderConfig {
+	return map[string]config.ProviderConfig{
+		"openai": {
+			ID:     "openai",
+			Name:   "OpenAI",
+			Models: []catwalk.Model{{ID: "gpt-4o"}, {ID: "gpt-4o-mini"}},
 		},
-	})
-	providers.Set("openai", config.ProviderConfig{
-		ID:     "openai",
-		Name:   "OpenAI",
-		Models: []catwalk.Model{{ID: "gpt-4o"}},
-	})
-	return providers
+		"anthropic": {
+			ID:     "anthropic",
+			Name:   "Anthropic",
+			Models: []catwalk.Model{{ID: "claude-3-sonnet"}, {ID: "claude-3-opus"}},
+		},
+	}
 }
 
-func TestFindModel(t *testing.T) {
+func setupMockProvidersWithSlashes() map[string]config.ProviderConfig {
+	return map[string]config.ProviderConfig{
+		"synthetic": {
+			ID:   "synthetic",
+			Name: "Synthetic",
+			Models: []catwalk.Model{
+				{ID: "moonshot/kimi-k2"},
+				{ID: "deepseek/deepseek-chat"},
+			},
+		},
+		"openai": {
+			ID:     "openai",
+			Name:   "OpenAI",
+			Models: []catwalk.Model{{ID: "gpt-4o"}},
+		},
+	}
+}
+
+func TestFindModels(t *testing.T) {
 	tests := []struct {
 		name             string
 		modelStr         string
@@ -124,7 +119,7 @@ func TestFindModel(t *testing.T) {
 		expectedModelID  string
 		expectError      bool
 		errorContains    string
-		setupProviders   func() *csync.Map[string, config.ProviderConfig]
+		setupProviders   func() map[string]config.ProviderConfig
 	}{
 		{
 			name:             "simple model found in one provider",
@@ -169,17 +164,17 @@ func TestFindModel(t *testing.T) {
 			modelStr:      "shared-model",
 			expectError:   true,
 			errorContains: "multiple providers",
-			setupProviders: func() *csync.Map[string, config.ProviderConfig] {
-				providers := csync.NewMap[string, config.ProviderConfig]()
-				providers.Set("openai", config.ProviderConfig{
-					ID:     "openai",
-					Models: []catwalk.Model{{ID: "shared-model"}},
-				})
-				providers.Set("anthropic", config.ProviderConfig{
-					ID:     "anthropic",
-					Models: []catwalk.Model{{ID: "shared-model"}},
-				})
-				return providers
+			setupProviders: func() map[string]config.ProviderConfig {
+				return map[string]config.ProviderConfig{
+					"openai": {
+						ID:     "openai",
+						Models: []catwalk.Model{{ID: "shared-model"}},
+					},
+					"anthropic": {
+						ID:     "anthropic",
+						Models: []catwalk.Model{{ID: "shared-model"}},
+					},
+				}
 			},
 		},
 		{
@@ -194,19 +189,28 @@ func TestFindModel(t *testing.T) {
 			name:           "empty model string",
 			modelStr:       "",
 			expectError:    true,
-			errorContains:  "empty model ID",
+			errorContains:  "not found",
 			setupProviders: setupMockProviders,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &config.Config{
-				Providers: tt.setupProviders(),
-			}
-			app := &App{config: cfg}
+			providers := tt.setupProviders()
 
-			match, err := app.findModel(tt.modelStr)
+			// Use findModels with the model as "large" and empty "small".
+			matches, _, err := findModels(providers, tt.modelStr, "")
+			if err != nil {
+				if tt.expectError {
+					require.Contains(t, err.Error(), tt.errorContains)
+				} else {
+					require.NoError(t, err)
+				}
+				return
+			}
+
+			// Validate the matches.
+			match, err := validateMatches(matches, tt.modelStr, "large")
 
 			if tt.expectError {
 				require.Error(t, err)

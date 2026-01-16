@@ -26,11 +26,11 @@ import (
 )
 
 var (
-	sessions  = csync.NewMap[string, *mcp.ClientSession]()
-	states    = csync.NewMap[string, ClientInfo]()
-	broker    = pubsub.NewBroker[Event]()
-	initOnce  sync.Once
-	initDone  = make(chan struct{})
+	sessions = csync.NewMap[string, *mcp.ClientSession]()
+	states   = csync.NewMap[string, ClientInfo]()
+	broker   = pubsub.NewBroker[Event]()
+	initOnce sync.Once
+	initDone = make(chan struct{})
 )
 
 // State represents the current state of an MCP client

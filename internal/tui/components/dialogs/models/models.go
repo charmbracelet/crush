@@ -272,6 +272,34 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				m.modelList.SetInputPlaceholder(largeModelInputPlaceholder)
 				return m, m.modelList.SetModelType(LargeModelType)
 			}
+		case key.Matches(msg, m.keyMap.Edit):
+			// Only handle edit key in the main model selection view
+			if !m.showClaudeAuthMethodChooser && !m.showClaudeOAuth2 && !m.needsAPIKey {
+				selectedItem := m.modelList.SelectedModel()
+				if selectedItem != nil {
+					// Check if provider is configured
+					if m.isProviderConfigured(string(selectedItem.Provider.ID)) {
+						// Trigger API key editing flow
+						m.keyMap.isClaudeAuthChoiseHelp = false
+						m.keyMap.isClaudeOAuthHelp = false
+						m.keyMap.isAPIKeyHelp = true
+						m.showClaudeAuthMethodChooser = false
+						m.needsAPIKey = true
+						m.selectedModel = selectedItem
+						m.selectedModelType = config.SelectedModelTypeLarge
+						if m.modelList.GetModelType() == SmallModelType {
+							m.selectedModelType = config.SelectedModelTypeSmall
+						}
+						m.apiKeyInput.SetProviderName(selectedItem.Provider.Name)
+						// Pre-fill with existing API key if available
+						if providerConfig, ok := config.Get().Providers.Get(string(selectedItem.Provider.ID)); ok && providerConfig.APIKey != "" {
+							m.apiKeyInput.input.SetValue(providerConfig.APIKey)
+						}
+						return m, nil
+					}
+				}
+			}
+			return m, nil
 		case key.Matches(msg, m.keyMap.Close):
 			switch {
 			case m.showHyperDeviceFlow:
@@ -296,6 +324,7 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				m.isAPIKeyValid = false
 				m.apiKeyValue = ""
 				m.apiKeyInput.Reset()
+				m.keyMap.isAPIKeyHelp = false
 				return m, nil
 			default:
 				return m, util.CmdHandler(dialogs.CloseDialogMsg{})

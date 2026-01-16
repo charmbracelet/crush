@@ -820,7 +820,6 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	// Clean up title.
 	var title string
 	title = strings.ReplaceAll(resp.Response.Content.Text(), "\n", " ")
-	slog.Info("generated title", "title", title)
 
 	// Remove thinking tags if present.
 	title = thinkTagRegex.ReplaceAllString(title, "")

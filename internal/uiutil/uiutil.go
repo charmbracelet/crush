@@ -65,6 +65,12 @@ type (
 	ClearStatusMsg struct{}
 )
 
+// IsEmpty checks if the [InfoMsg] is empty.
+func (m InfoMsg) IsEmpty() bool {
+	var zero InfoMsg
+	return m == zero
+}
+
 // ExecShell parses a shell command string and executes it with exec.Command.
 // Uses shell.Fields for proper handling of shell syntax like quotes and
 // arguments while preserving TTY handling for terminal editors.

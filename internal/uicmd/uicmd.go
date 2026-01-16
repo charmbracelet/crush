@@ -1,6 +1,7 @@
 // Package uicmd provides functionality to load and handle custom commands
 // from markdown files and MCP prompts.
 // TODO: Move this into internal/ui after refactoring.
+// TODO: DELETE when we delete the old tui
 package uicmd
 
 import (

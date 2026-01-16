@@ -33,3 +33,8 @@ type UpdateAvailableMsg struct {
 	LatestVersion  string
 	IsDevelopment  bool
 }
+
+// MessageDroppedMsg is sent when a message is dropped due to a slow consumer.
+type MessageDroppedMsg struct {
+	Name string
+}

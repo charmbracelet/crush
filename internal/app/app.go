@@ -290,25 +290,6 @@ func (app *App) UpdateAgentModel(ctx context.Context) error {
 	return app.AgentCoordinator.UpdateModels(ctx)
 }
 
-// parseModelStr parses a model string into provider filter and model ID.
-// Format: "model-name" or "provider/model-name" or "synthetic/moonshot/kimi-k2".
-// This function only checks if the first component is a valid provider name; if not,
-// it treats the entire string as a model ID (which may contain slashes).
-func (app *App) parseModelStr(modelStr string) (providerFilter, modelID string) {
-	parts := strings.Split(strings.ToLower(modelStr), "/")
-	if len(parts) == 1 {
-		return "", parts[0]
-	}
-
-	// Check if the first part is a valid provider name
-	if _, ok := app.config.Providers.Get(parts[0]); ok {
-		return parts[0], strings.Join(parts[1:], "/")
-	}
-
-	// First part is not a valid provider, treat entire string as model ID
-	return "", strings.ToLower(modelStr)
-}
-
 // overrideModelsForNonInteractive parses the model strings and temporarily
 // overrides the model configurations, then rebuilds the agent.
 // Format: "model-name" (searches all providers) or "provider/model-name".
@@ -316,77 +297,24 @@ func (app *App) parseModelStr(modelStr string) (providerFilter, modelID string) 
 // If largeModel is provided but smallModel is not, the small model defaults to
 // the provider's default small model.
 func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel, smallModel string) error {
-	cfg := app.config
+	providers := app.config.Providers.Copy()
 
-	type match struct {
-		provider string
-		modelID  string
-	}
-
-	largeProviderFilter, largeModelID := app.parseModelStr(largeModel)
-	smallProviderFilter, smallModelID := app.parseModelStr(smallModel)
-
-	// Validate provider filters exist.
-	for _, pf := range []struct {
-		filter, label string
-	}{
-		{largeProviderFilter, "large"},
-		{smallProviderFilter, "small"},
-	} {
-		if pf.filter != "" {
-			if _, ok := cfg.Providers.Get(pf.filter); !ok {
-				return fmt.Errorf("%s model: provider %q not found in configuration", pf.label, pf.filter)
-			}
-		}
-	}
-
-	// Find matching models in a single pass.
-	var largeMatches, smallMatches []match
-	for name, provider := range cfg.Providers.Seq2() {
-		if provider.Disable {
-			continue
-		}
-		for _, m := range provider.Models {
-			modelIDLower := strings.ToLower(m.ID)
-			if largeModelID != "" && modelIDLower == largeModelID &&
-				(largeProviderFilter == "" || name == largeProviderFilter) {
-				largeMatches = append(largeMatches, match{provider: name, modelID: m.ID})
-			}
-			if smallModelID != "" && modelIDLower == smallModelID &&
-				(smallProviderFilter == "" || name == smallProviderFilter) {
-				smallMatches = append(smallMatches, match{provider: name, modelID: m.ID})
-			}
-		}
-	}
-
-	// Validate and return a single match.
-	validateMatches := func(matches []match, modelID, providerFilter, label string) (match, error) {
-		switch {
-		case len(matches) == 0 && providerFilter != "":
-			return match{}, fmt.Errorf("%s model: model %q not found in provider %q", label, modelID, providerFilter)
-		case len(matches) == 0:
-			return match{}, fmt.Errorf("%s model: model %q not found in any configured provider", label, modelID)
-		case len(matches) > 1 && providerFilter == "":
-			names := make([]string, len(matches))
-			for i, m := range matches {
-				names[i] = m.provider
-			}
-			return match{}, fmt.Errorf("%s model: model %q found in multiple providers: %v. Please specify provider using 'provider/model' format", label, modelID, names)
-		}
-		return matches[0], nil
+	largeMatches, smallMatches, err := findModels(providers, largeModel, smallModel)
+	if err != nil {
+		return err
 	}
 
 	var largeProviderID string
 
 	// Override large model.
 	if largeModel != "" {
-		found, err := validateMatches(largeMatches, largeModelID, largeProviderFilter, "large")
+		found, err := validateMatches(largeMatches, largeModel, "large")
 		if err != nil {
 			return err
 		}
 		largeProviderID = found.provider
 		slog.Info("Overriding large model for non-interactive run", "provider", found.provider, "model", found.modelID)
-		cfg.Models[config.SelectedModelTypeLarge] = config.SelectedModel{
+		app.config.Models[config.SelectedModelTypeLarge] = config.SelectedModel{
 			Provider: found.provider,
 			Model:    found.modelID,
 		}
@@ -395,12 +323,12 @@ func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel,
 	// Override small model.
 	switch {
 	case smallModel != "":
-		found, err := validateMatches(smallMatches, smallModelID, smallProviderFilter, "small")
+		found, err := validateMatches(smallMatches, smallModel, "small")
 		if err != nil {
 			return err
 		}
 		slog.Info("Overriding small model for non-interactive run", "provider", found.provider, "model", found.modelID)
-		cfg.Models[config.SelectedModelTypeSmall] = config.SelectedModel{
+		app.config.Models[config.SelectedModelTypeSmall] = config.SelectedModel{
 			Provider: found.provider,
 			Model:    found.modelID,
 		}
@@ -408,64 +336,10 @@ func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel,
 	case largeModel != "":
 		// No small model specified, but large model was - use provider's default.
 		smallCfg := app.getDefaultSmallModel(largeProviderID)
-		cfg.Models[config.SelectedModelTypeSmall] = smallCfg
+		app.config.Models[config.SelectedModelTypeSmall] = smallCfg
 	}
 
 	return app.AgentCoordinator.UpdateModels(ctx)
-}
-
-// modelMatch represents a found model.
-type modelMatch struct {
-	provider string
-	modelID  string
-}
-
-// findModel finds a model in the configured providers.
-// Returns an error if no match is found or multiple matches across providers.
-func (app *App) findModel(modelStr string) (modelMatch, error) {
-	providerFilter, modelID := app.parseModelStr(modelStr)
-	if modelID == "" {
-		return modelMatch{}, fmt.Errorf("empty model ID")
-	}
-
-	// Validate provider filter if specified.
-	if providerFilter != "" {
-		if _, ok := app.config.Providers.Get(providerFilter); !ok {
-			return modelMatch{}, fmt.Errorf("provider %q not found in configuration", providerFilter)
-		}
-	}
-
-	// Find matching models.
-	var matches []modelMatch
-	for name, provider := range app.config.Providers.Seq2() {
-		if provider.Disable {
-			continue
-		}
-		for _, m := range provider.Models {
-			if strings.ToLower(m.ID) == modelID &&
-				(providerFilter == "" || name == providerFilter) {
-				matches = append(matches, modelMatch{provider: name, modelID: m.ID})
-			}
-		}
-	}
-
-	// Validate matches.
-	switch {
-	case len(matches) == 0 && providerFilter != "":
-		return modelMatch{}, fmt.Errorf("model %q not found in provider %q", modelID, providerFilter)
-	case len(matches) == 0:
-		return modelMatch{}, fmt.Errorf("model %q not found in any configured provider", modelID)
-	case len(matches) > 1 && providerFilter == "":
-		names := make([]string, len(matches))
-		for i, m := range matches {
-			names[i] = m.provider
-		}
-		return modelMatch{}, fmt.Errorf("model %q found in multiple providers: %v. Please specify provider using 'provider/model' format", modelID, names)
-	case len(matches) > 1:
-		// Multiple matches in same provider shouldn't happen (model IDs are unique), but if it does, take the first
-		return matches[0], nil
-	}
-	return matches[0], nil
 }
 
 // provider. Falls back to the large model if no default is found.

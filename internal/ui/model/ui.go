@@ -1,6 +1,7 @@
 package model
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -270,11 +271,6 @@ func (m *UI) Init() tea.Cmd {
 	var cmds []tea.Cmd
 	if m.QueryVersion {
 		cmds = append(cmds, tea.RequestTerminalVersion)
-		// XXX: Right now, we're using the same logic to determine image
-		// support. Terminals like Apple Terminal and possibly others might
-		// bleed characters when querying for Kitty graphics via APC escape
-		// sequences.
-		cmds = append(cmds, timage.RequestCapabilities())
 	}
 	// load the user commands async
 	cmds = append(cmds, m.loadCustomCommands())
@@ -316,6 +312,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.sendProgressBar {
 			m.sendProgressBar = slices.Contains(msg, "WT_SESSION")
 		}
+		m.imgCaps.Env = uv.Environ(msg)
+		// XXX: Right now, we're using the same logic to determine image
+		// support. Terminals like Apple Terminal and possibly others might
+		// bleed characters when querying for Kitty graphics via APC escape
+		// sequences.
+		cmds = append(cmds, timage.RequestCapabilities(m.imgCaps.Env))
 	case loadSessionMsg:
 		m.state = uiChat
 		if m.forceCompactMode {
@@ -558,6 +560,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// captures the response. Any response means the terminal understands
 		// the protocol.
 		m.imgCaps.SupportsKittyGraphics = true
+		if !bytes.HasPrefix(msg.Payload, []byte("OK")) {
+			slog.Warn("unexpected Kitty graphics response",
+				"response", string(msg.Payload),
+				"options", msg.Options)
+		}
 	default:
 		if m.dialog.HasDialogs() {
 			if cmd := m.handleDialogMsg(msg); cmd != nil {

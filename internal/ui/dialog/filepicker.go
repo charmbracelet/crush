@@ -34,6 +34,7 @@ type FilePicker struct {
 	fp              filepicker.Model
 	help            help.Model
 	previewingImage bool // indicates if an image is being previewed
+	isTmux          bool
 
 	km struct {
 		Select,
@@ -108,6 +109,7 @@ func (f *FilePicker) SetImageCapabilities(caps *fimage.Capabilities) {
 			f.imgEnc = fimage.EncodingKitty
 		}
 		f.cellSize = caps.CellSize()
+		_, f.isTmux = caps.Env.LookupEnv("TMUX")
 	}
 }
 
@@ -184,7 +186,7 @@ func (f *FilePicker) HandleMsg(msg tea.Msg) Action {
 			img, err := loadImage(selFile)
 			if err == nil {
 				cmds = append(cmds, tea.Sequence(
-					f.imgEnc.Transmit(selFile, img, f.cellSize, f.imgPrevWidth, f.imgPrevHeight),
+					f.imgEnc.Transmit(selFile, img, f.cellSize, f.imgPrevWidth, f.imgPrevHeight, f.isTmux),
 					func() tea.Msg {
 						f.previewingImage = true
 						return nil

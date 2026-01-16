@@ -281,9 +281,9 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		if err == nil {
 			options[openrouter.Name] = parsed
 		}
-	case google.Name:
+	case google.Name, "google-vertex":
 		_, hasReasoning := mergedOptions["thinking_config"]
-		if !hasReasoning {
+		if !hasReasoning && model.ModelCfg.Think {
 			mergedOptions["thinking_config"] = map[string]any{
 				"thinking_budget":  2000,
 				"include_thoughts": true,
@@ -385,7 +385,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 	}
 
 	allTools = append(allTools,
-		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Options.Attribution, modelName),
+		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Options.Attribution, modelName, c.cfg.Permissions.AllowDangerousCommands),
 		tools.NewJobOutputTool(),
 		tools.NewJobKillTool(),
 		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),

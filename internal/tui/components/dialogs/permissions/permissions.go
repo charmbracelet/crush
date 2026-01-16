@@ -3,6 +3,7 @@ package permissions
 import (
 	"encoding/json"
 	"fmt"
+	"image/color"
 	"strings"
 
 	"charm.land/bubbles/v2/help"
@@ -106,12 +107,17 @@ func (p *permissionDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		cmd := p.SetSize()
 		cmds = append(cmds, cmd)
 	case tea.KeyPressMsg:
+		// For dangerous permissions, only 2 options (Allow, Deny)
+		numOptions := 3
+		if p.permission.IsDangerous {
+			numOptions = 2
+		}
 		switch {
 		case key.Matches(msg, p.keyMap.Right) || key.Matches(msg, p.keyMap.Tab):
-			p.selectedOption = (p.selectedOption + 1) % 3
+			p.selectedOption = (p.selectedOption + 1) % numOptions
 			return p, nil
 		case key.Matches(msg, p.keyMap.Left):
-			p.selectedOption = (p.selectedOption + 2) % 3
+			p.selectedOption = (p.selectedOption + numOptions - 1) % numOptions
 		case key.Matches(msg, p.keyMap.Select):
 			return p, p.selectCurrentOption()
 		case key.Matches(msg, p.keyMap.Allow):
@@ -120,6 +126,10 @@ func (p *permissionDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				util.CmdHandler(PermissionResponseMsg{Action: PermissionAllow, Permission: p.permission}),
 			)
 		case key.Matches(msg, p.keyMap.AllowSession):
+			// Disable session approval for dangerous permissions
+			if p.permission.IsDangerous {
+				return p, nil
+			}
 			return p, tea.Batch(
 				util.CmdHandler(dialogs.CloseDialogMsg{}),
 				util.CmdHandler(PermissionResponseMsg{Action: PermissionAllowForSession, Permission: p.permission}),
@@ -222,13 +232,23 @@ func (p *permissionDialogCmp) isMouseOverDialog(x, y int) bool {
 func (p *permissionDialogCmp) selectCurrentOption() tea.Cmd {
 	var action PermissionAction
 
-	switch p.selectedOption {
-	case 0:
-		action = PermissionAllow
-	case 1:
-		action = PermissionAllowForSession
-	case 2:
-		action = PermissionDeny
+	if p.permission.IsDangerous {
+		// For dangerous permissions: 0=Allow, 1=Deny (no session option)
+		switch p.selectedOption {
+		case 0:
+			action = PermissionAllow
+		case 1:
+			action = PermissionDeny
+		}
+	} else {
+		switch p.selectedOption {
+		case 0:
+			action = PermissionAllow
+		case 1:
+			action = PermissionAllowForSession
+		case 2:
+			action = PermissionDeny
+		}
 	}
 
 	return tea.Batch(
@@ -241,22 +261,39 @@ func (p *permissionDialogCmp) renderButtons() string {
 	t := styles.CurrentTheme()
 	baseStyle := t.S().Base
 
-	buttons := []core.ButtonOpts{
-		{
-			Text:           "Allow",
-			UnderlineIndex: 0, // "A"
-			Selected:       p.selectedOption == 0,
-		},
-		{
-			Text:           "Allow for Session",
-			UnderlineIndex: 10, // "S" in "Session"
-			Selected:       p.selectedOption == 1,
-		},
-		{
-			Text:           "Deny",
-			UnderlineIndex: 0, // "D"
-			Selected:       p.selectedOption == 2,
-		},
+	var buttons []core.ButtonOpts
+	if p.permission.IsDangerous {
+		// For dangerous permissions: only Allow and Deny (no session approval)
+		buttons = []core.ButtonOpts{
+			{
+				Text:           "Allow",
+				UnderlineIndex: 0, // "A"
+				Selected:       p.selectedOption == 0,
+			},
+			{
+				Text:           "Deny",
+				UnderlineIndex: 0, // "D"
+				Selected:       p.selectedOption == 1,
+			},
+		}
+	} else {
+		buttons = []core.ButtonOpts{
+			{
+				Text:           "Allow",
+				UnderlineIndex: 0, // "A"
+				Selected:       p.selectedOption == 0,
+			},
+			{
+				Text:           "Allow for Session",
+				UnderlineIndex: 10, // "S" in "Session"
+				Selected:       p.selectedOption == 1,
+			},
+			{
+				Text:           "Deny",
+				UnderlineIndex: 0, // "D"
+				Selected:       p.selectedOption == 2,
+			},
+		}
 	}
 
 	content := core.SelectableButtons(buttons, "  ")
@@ -740,7 +777,18 @@ func (p *permissionDialogCmp) styleViewport() string {
 func (p *permissionDialogCmp) render() string {
 	t := styles.CurrentTheme()
 	baseStyle := t.S().Base
-	title := core.Title("Permission Required", p.width-4)
+
+	// Use different title and border color for dangerous permissions
+	var title string
+	var borderColor color.Color
+	if p.permission.IsDangerous {
+		title = core.Title("⚠ DANGEROUS COMMAND", p.width-4)
+		borderColor = t.Red
+	} else {
+		title = core.Title("Permission Required", p.width-4)
+		borderColor = t.BorderFocus
+	}
+
 	// Render header
 	headerContent := p.renderHeader()
 	// Render buttons
@@ -787,7 +835,7 @@ func (p *permissionDialogCmp) render() string {
 	dialog := baseStyle.
 		Padding(0, 1).
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(t.BorderFocus).
+		BorderForeground(borderColor).
 		Width(p.width).
 		Render(
 			content,

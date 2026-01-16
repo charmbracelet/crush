@@ -66,7 +66,8 @@ type bashDescriptionData struct {
 	ModelName       string
 }
 
-var bannedCommands = []string{
+// BannedCommands is exported for use by the dangerous command detection.
+var BannedCommands = []string{
 	// Network/Download tools
 	"alias",
 	"aria2c",
@@ -140,7 +141,7 @@ var bannedCommands = []string{
 }
 
 func bashDescription(attribution *config.Attribution, modelName string) string {
-	bannedCommandsStr := strings.Join(bannedCommands, ", ")
+	bannedCommandsStr := strings.Join(BannedCommands, ", ")
 	var out bytes.Buffer
 	if err := bashDescriptionTpl.Execute(&out, bashDescriptionData{
 		BannedCommands:  bannedCommandsStr,
@@ -156,7 +157,7 @@ func bashDescription(attribution *config.Attribution, modelName string) string {
 
 func blockFuncs() []shell.BlockFunc {
 	return []shell.BlockFunc{
-		shell.CommandsBlocker(bannedCommands),
+		shell.CommandsBlocker(BannedCommands),
 
 		// System package managers
 		shell.ArgumentsBlocker("apk", []string{"add"}, nil),
@@ -186,7 +187,84 @@ func blockFuncs() []shell.BlockFunc {
 	}
 }
 
-func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelName string) fantasy.AgentTool {
+// blockFuncsWithDangerous returns block functions that allow dangerous commands
+// (returns empty slice so nothing is blocked at shell level).
+func blockFuncsWithDangerous() []shell.BlockFunc {
+	return []shell.BlockFunc{
+		// Only block the argument-based dangerous commands, not the base commands
+		// System package managers
+		shell.ArgumentsBlocker("apk", []string{"add"}, nil),
+		shell.ArgumentsBlocker("apt", []string{"install"}, nil),
+		shell.ArgumentsBlocker("apt-get", []string{"install"}, nil),
+		shell.ArgumentsBlocker("dnf", []string{"install"}, nil),
+		shell.ArgumentsBlocker("pacman", nil, []string{"-S"}),
+		shell.ArgumentsBlocker("pkg", []string{"install"}, nil),
+		shell.ArgumentsBlocker("yum", []string{"install"}, nil),
+		shell.ArgumentsBlocker("zypper", []string{"install"}, nil),
+
+		// Language-specific package managers
+		shell.ArgumentsBlocker("brew", []string{"install"}, nil),
+		shell.ArgumentsBlocker("cargo", []string{"install"}, nil),
+		shell.ArgumentsBlocker("gem", []string{"install"}, nil),
+		shell.ArgumentsBlocker("go", []string{"install"}, nil),
+		shell.ArgumentsBlocker("npm", []string{"install"}, []string{"--global"}),
+		shell.ArgumentsBlocker("npm", []string{"install"}, []string{"-g"}),
+		shell.ArgumentsBlocker("pip", []string{"install"}, []string{"--user"}),
+		shell.ArgumentsBlocker("pip3", []string{"install"}, []string{"--user"}),
+		shell.ArgumentsBlocker("pnpm", []string{"add"}, []string{"--global"}),
+		shell.ArgumentsBlocker("pnpm", []string{"add"}, []string{"-g"}),
+		shell.ArgumentsBlocker("yarn", []string{"global", "add"}, nil),
+
+		// `go test -exec` can run arbitrary commands
+		shell.ArgumentsBlocker("go", []string{"test"}, []string{"-exec"}),
+	}
+}
+
+// ContainsDangerousCommand checks if a command string contains any banned commands.
+// Returns the first dangerous command found, or empty string if none.
+func ContainsDangerousCommand(command string) string {
+	cmdLower := strings.ToLower(command)
+	words := strings.Fields(cmdLower)
+
+	// Build a set for quick lookup
+	bannedSet := make(map[string]struct{})
+	for _, cmd := range BannedCommands {
+		bannedSet[cmd] = struct{}{}
+	}
+
+	// Check each word as a potential command
+	for _, word := range words {
+		// Strip any path prefix (e.g., /usr/bin/curl -> curl)
+		base := filepath.Base(word)
+		if _, ok := bannedSet[base]; ok {
+			return base
+		}
+	}
+
+	// Also check for pipe commands and subshells
+	for _, banned := range BannedCommands {
+		// Check for patterns like: | curl, ; curl, && curl, $( curl
+		patterns := []string{
+			"| " + banned,
+			"|" + banned,
+			"; " + banned,
+			";" + banned,
+			"&& " + banned,
+			"&&" + banned,
+			"$(" + banned,
+			"`" + banned,
+		}
+		for _, pattern := range patterns {
+			if strings.Contains(cmdLower, pattern) {
+				return banned
+			}
+		}
+	}
+
+	return ""
+}
+
+func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelName string, allowDangerousCommands bool) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		BashToolName,
 		string(bashDescription(attribution, modelName)),
@@ -197,6 +275,15 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 
 			// Determine working directory
 			execWorkingDir := cmp.Or(params.WorkingDir, workingDir)
+
+			// Check for dangerous commands first
+			dangerousCmd := ContainsDangerousCommand(params.Command)
+			isDangerous := dangerousCmd != ""
+
+			// If dangerous command detected and not allowed, return error
+			if isDangerous && !allowDangerousCommands {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("command '%s' is not allowed for security reasons. Enable 'allow_dangerous_commands' in config to allow with explicit approval.", dangerousCmd)), nil
+			}
 
 			isSafeReadOnly := false
 			cmdLower := strings.ToLower(params.Command)
@@ -214,7 +301,9 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			if sessionID == "" {
 				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for executing shell command")
 			}
-			if !isSafeReadOnly {
+
+			// Dangerous commands always require explicit permission (never safe)
+			if isDangerous || !isSafeReadOnly {
 				p, err := permissions.Request(ctx,
 					permission.CreatePermissionRequest{
 						SessionID:   sessionID,
@@ -224,6 +313,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 						Action:      "execute",
 						Description: fmt.Sprintf("Execute command: %s", params.Command),
 						Params:      BashPermissionsParams(params),
+						IsDangerous: isDangerous,
 					},
 				)
 				if err != nil {
@@ -234,13 +324,19 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				}
 			}
 
+			// Select block functions based on whether dangerous commands are allowed
+			shellBlockFuncs := blockFuncs()
+			if allowDangerousCommands {
+				shellBlockFuncs = blockFuncsWithDangerous()
+			}
+
 			// If explicitly requested as background, start immediately with detached context
 			if params.RunInBackground {
 				startTime := time.Now()
 				bgManager := shell.GetBackgroundShellManager()
 				bgManager.Cleanup()
 				// Use background context so it continues after tool returns
-				bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), params.Command, params.Description)
+				bgShell, err := bgManager.Start(context.Background(), execWorkingDir, shellBlockFuncs, params.Command, params.Description)
 				if err != nil {
 					return fantasy.ToolResponse{}, fmt.Errorf("error starting background shell: %w", err)
 				}
@@ -295,7 +391,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			// Start with detached context so it can survive if moved to background
 			bgManager := shell.GetBackgroundShellManager()
 			bgManager.Cleanup()
-			bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), params.Command, params.Description)
+			bgShell, err := bgManager.Start(context.Background(), execWorkingDir, shellBlockFuncs, params.Command, params.Description)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error starting shell: %w", err)
 			}

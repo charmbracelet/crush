@@ -23,6 +23,7 @@ type CreatePermissionRequest struct {
 	Action      string `json:"action"`
 	Params      any    `json:"params"`
 	Path        string `json:"path"`
+	IsDangerous bool   `json:"is_dangerous"` // Dangerous commands require special handling (no session approval, red UI)
 }
 
 type PermissionNotification struct {
@@ -40,6 +41,7 @@ type PermissionRequest struct {
 	Action      string `json:"action"`
 	Params      any    `json:"params"`
 	Path        string `json:"path"`
+	IsDangerous bool   `json:"is_dangerous"` // Dangerous commands require special handling (no session approval, red UI)
 }
 
 type Service interface {
@@ -177,25 +179,29 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		Description: opts.Description,
 		Action:      opts.Action,
 		Params:      opts.Params,
+		IsDangerous: opts.IsDangerous,
 	}
 
-	s.sessionPermissionsMu.RLock()
-	for _, p := range s.sessionPermissions {
-		if p.ToolName == permission.ToolName && p.Action == permission.Action && p.SessionID == permission.SessionID && p.Path == permission.Path {
-			s.sessionPermissionsMu.RUnlock()
-			return true, nil
+	// Dangerous permissions cannot use session-based caching.
+	if !permission.IsDangerous {
+		s.sessionPermissionsMu.RLock()
+		for _, p := range s.sessionPermissions {
+			if p.ToolName == permission.ToolName && p.Action == permission.Action && p.SessionID == permission.SessionID && p.Path == permission.Path {
+				s.sessionPermissionsMu.RUnlock()
+				return true, nil
+			}
 		}
-	}
-	s.sessionPermissionsMu.RUnlock()
+		s.sessionPermissionsMu.RUnlock()
 
-	s.sessionPermissionsMu.RLock()
-	for _, p := range s.sessionPermissions {
-		if p.ToolName == permission.ToolName && p.Action == permission.Action && p.SessionID == permission.SessionID && p.Path == permission.Path {
-			s.sessionPermissionsMu.RUnlock()
-			return true, nil
+		s.sessionPermissionsMu.RLock()
+		for _, p := range s.sessionPermissions {
+			if p.ToolName == permission.ToolName && p.Action == permission.Action && p.SessionID == permission.SessionID && p.Path == permission.Path {
+				s.sessionPermissionsMu.RUnlock()
+				return true, nil
+			}
 		}
+		s.sessionPermissionsMu.RUnlock()
 	}
-	s.sessionPermissionsMu.RUnlock()
 
 	s.activeRequestMu.Lock()
 	s.activeRequest = &permission

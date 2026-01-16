@@ -243,8 +243,12 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case commands.SwitchSessionsMsg:
 		return a, func() tea.Msg {
 			allSessions, _ := a.app.Sessions.List(context.Background())
+			var busySessionIDs []string
+			if a.app.AgentCoordinator != nil {
+				busySessionIDs = a.app.AgentCoordinator.BusySessionIDs()
+			}
 			return dialogs.OpenDialogMsg{
-				Model: sessions.NewSessionDialogCmp(allSessions, a.selectedSessionID),
+				Model: sessions.NewSessionDialogCmp(allSessions, a.selectedSessionID, busySessionIDs),
 			}
 		}
 
@@ -539,8 +543,12 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		cmds = append(cmds,
 			func() tea.Msg {
 				allSessions, _ := a.app.Sessions.List(context.Background())
+				var busySessionIDs []string
+				if a.app.AgentCoordinator != nil {
+					busySessionIDs = a.app.AgentCoordinator.BusySessionIDs()
+				}
 				return dialogs.OpenDialogMsg{
-					Model: sessions.NewSessionDialogCmp(allSessions, a.selectedSessionID),
+					Model: sessions.NewSessionDialogCmp(allSessions, a.selectedSessionID, busySessionIDs),
 				}
 			},
 		)
@@ -564,11 +572,6 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 // moveToPage handles navigation between different pages in the application.
 func (a *appModel) moveToPage(pageID page.PageID) tea.Cmd {
-	if a.app.AgentCoordinator.IsBusy() {
-		// TODO: maybe remove this :  For now we don't move to any page if the agent is busy
-		return util.ReportWarn("Agent is busy, please wait...")
-	}
-
 	var cmds []tea.Cmd
 	if _, ok := a.loadedPages[pageID]; !ok {
 		cmd := a.pages[pageID].Init()

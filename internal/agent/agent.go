@@ -81,6 +81,7 @@ type SessionAgent interface {
 	CancelAll()
 	IsSessionBusy(sessionID string) bool
 	IsBusy() bool
+	BusySessionIDs() []string
 	QueuedPrompts(sessionID string) int
 	QueuedPromptsList(sessionID string) []string
 	ClearQueue(sessionID string)
@@ -960,6 +961,16 @@ func (a *sessionAgent) IsBusy() bool {
 func (a *sessionAgent) IsSessionBusy(sessionID string) bool {
 	_, busy := a.activeRequests.Get(sessionID)
 	return busy
+}
+
+func (a *sessionAgent) BusySessionIDs() []string {
+	var ids []string
+	for sessionID, cancelFunc := range a.activeRequests.Seq2() {
+		if cancelFunc != nil {
+			ids = append(ids, sessionID)
+		}
+	}
+	return ids
 }
 
 func (a *sessionAgent) QueuedPrompts(sessionID string) int {

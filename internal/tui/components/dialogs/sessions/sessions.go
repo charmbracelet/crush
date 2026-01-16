@@ -1,6 +1,8 @@
 package sessions
 
 import (
+	"slices"
+
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -30,13 +32,17 @@ type sessionDialogCmp struct {
 	wHeight           int
 	width             int
 	selectedSessionID string
+	busySessionIDs    []string
 	keyMap            KeyMap
 	sessionsList      SessionsList
 	help              help.Model
 }
 
-// NewSessionDialogCmp creates a new session switching dialog
-func NewSessionDialogCmp(sessions []session.Session, selectedID string) SessionDialog {
+// busyIndicator is shown next to sessions with active agents.
+const busyIndicator = "●"
+
+// NewSessionDialogCmp creates a new session switching dialog.
+func NewSessionDialogCmp(sessions []session.Session, selectedID string, busySessionIDs []string) SessionDialog {
 	t := styles.CurrentTheme()
 	listKeyMap := list.DefaultKeyMap()
 	keyMap := DefaultKeyMap()
@@ -47,8 +53,13 @@ func NewSessionDialogCmp(sessions []session.Session, selectedID string) SessionD
 
 	items := make([]list.CompletionItem[session.Session], len(sessions))
 	if len(sessions) > 0 {
-		for i, session := range sessions {
-			items[i] = list.NewCompletionItem(session.Title, session, list.WithCompletionID(session.ID))
+		for i, s := range sessions {
+			title := s.Title
+			// Add busy indicator if the session has an active agent.
+			if slices.Contains(busySessionIDs, s.ID) {
+				title = busyIndicator + " " + title
+			}
+			items[i] = list.NewCompletionItem(title, s, list.WithCompletionID(s.ID))
 		}
 	}
 
@@ -64,14 +75,15 @@ func NewSessionDialogCmp(sessions []session.Session, selectedID string) SessionD
 	)
 	help := help.New()
 	help.Styles = t.S().Help
-	s := &sessionDialogCmp{
+	dialog := &sessionDialogCmp{
 		selectedSessionID: selectedID,
+		busySessionIDs:    busySessionIDs,
 		keyMap:            DefaultKeyMap(),
 		sessionsList:      sessionsList,
 		help:              help,
 	}
 
-	return s
+	return dialog
 }
 
 func (s *sessionDialogCmp) Init() tea.Cmd {

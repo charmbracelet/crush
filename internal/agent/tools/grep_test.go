@@ -85,7 +85,9 @@ func TestGrepWithIgnoreFiles(t *testing.T) {
 
 	// Test both implementations
 	for name, fn := range map[string]func(pattern, path, include string) ([]grepMatch, error){
-		"regex": searchFilesWithRegex,
+		"regex": func(pattern, path, include string) ([]grepMatch, error) {
+			return searchFilesWithRegex(t.Context(), pattern, path, include)
+		},
 		"rg": func(pattern, path, include string) ([]grepMatch, error) {
 			return searchWithRipgrep(t.Context(), pattern, path, include)
 		},
@@ -145,7 +147,9 @@ func TestSearchImplementations(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(tempDir, ".crushignore"), []byte("file5.txt\n"), 0o644))
 
 	for name, fn := range map[string]func(pattern, path, include string) ([]grepMatch, error){
-		"regex": searchFilesWithRegex,
+		"regex": func(pattern, path, include string) ([]grepMatch, error) {
+			return searchFilesWithRegex(t.Context(), pattern, path, include)
+		},
 		"rg": func(pattern, path, include string) ([]grepMatch, error) {
 			return searchWithRipgrep(t.Context(), pattern, path, include)
 		},
@@ -396,7 +400,9 @@ func TestColumnMatch(t *testing.T) {
 
 	// Test both implementations
 	for name, fn := range map[string]func(pattern, path, include string) ([]grepMatch, error){
-		"regex": searchFilesWithRegex,
+		"regex": func(pattern, path, include string) ([]grepMatch, error) {
+			return searchFilesWithRegex(t.Context(), pattern, path, include)
+		},
 		"rg": func(pattern, path, include string) ([]grepMatch, error) {
 			return searchWithRipgrep(t.Context(), pattern, path, include)
 		},

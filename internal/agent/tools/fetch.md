@@ -1,45 +1,48 @@
-Fetches raw content from URL and returns it in specified format without any AI processing.
+Fetch raw content from a URL. Fast and lightweight - no AI processing.
 
 <when_to_use>
-Use this tool when you need:
-- Raw, unprocessed content from a URL
-- Direct access to API responses or JSON data
-- HTML/text/markdown content without interpretation
-- Simple, fast content retrieval without analysis
-- To save tokens by avoiding AI processing
+Use Fetch when:
+- Need raw HTML, JSON, or text from a URL
+- Accessing API endpoints directly
+- Want content without interpretation
+- Saving tokens (no AI processing)
 
-DO NOT use this tool when you need to:
-- Extract specific information from a webpage (use agentic_fetch instead)
-- Answer questions about web content (use agentic_fetch instead)
-- Analyze or summarize web pages (use agentic_fetch instead)
+Do NOT use Fetch when:
+- Need to extract specific information → use `agentic_fetch`
+- Need to analyze or summarize content → use `agentic_fetch`
+- Want to search the web → use `agentic_fetch` without URL
+- Downloading binary files → use `download`
 </when_to_use>
 
-<usage>
-- Provide URL to fetch content from
-- Specify desired output format (text, markdown, or html)
-- Optional timeout for request
-</usage>
+<parameters>
+- url: URL to fetch (required)
+- format: "text", "markdown", or "html" (required)
+- timeout: Seconds to wait (optional, max 120)
+</parameters>
 
-<features>
-- Supports three output formats: text, markdown, html
-- Auto-handles HTTP redirects
-- Fast and lightweight - no AI processing
-- Sets reasonable timeouts to prevent hanging
-- Validates input parameters before requests
-</features>
+<format_guide>
+- `text`: Plain text, best for APIs or simple content
+- `markdown`: Converted from HTML, good for documentation
+- `html`: Raw HTML structure
+</format_guide>
 
-<limitations>
-- Max response size: 5MB
-- Only supports HTTP and HTTPS protocols
-- Cannot handle authentication or cookies
-- Some websites may block automated requests
-- Returns raw content only - no analysis or extraction
-</limitations>
+<limits>
+- Max response: 5MB
+- HTTP/HTTPS only
+- No authentication or cookies
+- Some sites block automated requests
+</limits>
 
-<tips>
-- Use text format for plain text content or simple API responses
-- Use markdown format for content that should be rendered with formatting
-- Use html format when you need raw HTML structure
-- Set appropriate timeouts for potentially slow websites
-- If the user asks to analyze or extract from a page, use agentic_fetch instead
-</tips>
+<example>
+Fetch API response:
+```
+url: "https://api.github.com/repos/owner/repo"
+format: "text"
+```
+
+Fetch documentation as markdown:
+```
+url: "https://docs.example.com/api"
+format: "markdown"
+```
+</example>

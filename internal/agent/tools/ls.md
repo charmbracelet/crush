@@ -1,34 +1,44 @@
-Shows files and subdirectories in tree structure for exploring project organization.
+List directory contents in tree structure. Use this instead of shell `ls`.
 
-<usage>
-- Provide path to list (defaults to current working directory)
-- Optional glob patterns to ignore
-- Results displayed in tree structure
-</usage>
+<when_to_use>
+Use LS when:
+- Exploring project structure
+- Finding what's in a directory
+- Understanding folder organization
+- Checking if files/directories exist
 
-<features>
-- Hierarchical view of files and directories
-- Auto-skips hidden files/directories (starting with '.')
-- Skips common system directories like __pycache__
-- Can filter files matching specific patterns
-</features>
+Do NOT use LS when:
+- Finding files by pattern → use `glob`
+- Searching file contents → use `grep`
+- Reading file contents → use `view`
+</when_to_use>
 
-<limitations>
-- Results limited to 1000 files
-- Large directories truncated
-- No file sizes or permissions shown
-- Cannot recursively list all directories in large projects
-</limitations>
+<parameters>
+- path: Directory to list (default: current directory)
+- ignore: Glob patterns to exclude (optional)
+- depth: Max traversal depth (optional)
+</parameters>
 
-<cross_platform>
-- Hidden file detection uses Unix convention (files starting with '.')
-- Windows hidden files (with hidden attribute) not auto-skipped
-- Common Windows directories (System32, Program Files) not in default ignore
-- Path separators handled automatically (/ and \ work)
-</cross_platform>
+<output>
+- Hierarchical tree structure
+- Skips hidden files (starting with '.')
+- Skips common system dirs (__pycache__, node_modules, etc.)
+- Limited to 1000 files
+</output>
 
-<tips>
-- Use Glob for finding files by name patterns instead of browsing
-- Use Grep for searching file contents
-- Combine with other tools for effective exploration
-</tips>
+<examples>
+List project root:
+```
+path: "."
+```
+
+List src excluding tests:
+```
+path: "src"
+ignore: ["*_test.go", "*.test.ts"]
+```
+</examples>
+
+<tip>
+For large projects, use `glob` to find specific files instead of browsing the entire tree.
+</tip>

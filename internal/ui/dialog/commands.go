@@ -10,6 +10,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
+	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
@@ -400,7 +401,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 			selectedModel := cfg.Models[agentCfg.Model]
 
 			// Anthropic models: thinking toggle
-			if providerCfg.Type == catwalk.TypeAnthropic {
+			if providerCfg.Type == catwalk.TypeAnthropic || providerCfg.Type == catwalk.Type(hyper.Name) {
 				status := "Enable"
 				if selectedModel.Think {
 					status = "Disable"
@@ -411,7 +412,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 			// OpenAI models: reasoning effort dialog
 			if len(model.ReasoningLevels) > 0 {
 				commands = append(commands, NewCommandItem(c.com.Styles, "select_reasoning_effort", "Select Reasoning Effort", "", ActionOpenDialog{
-					// TODO: Pass in the reasoning effort dialog id
+					DialogID: ReasoningID,
 				}))
 			}
 		}

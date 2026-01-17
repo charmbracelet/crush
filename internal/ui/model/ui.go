@@ -925,6 +925,36 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionToggleCompactMode:
 		cmds = append(cmds, m.toggleCompactMode())
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionToggleThinking:
+		if m.com.App.AgentCoordinator.IsBusy() {
+			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait..."))
+			break
+		}
+
+		cmds = append(cmds, func() tea.Msg {
+			cfg := m.com.Config()
+			if cfg == nil {
+				return uiutil.ReportError(errors.New("configuration not found"))()
+			}
+
+			agentCfg, ok := cfg.Agents[config.AgentCoder]
+			if !ok {
+				return uiutil.ReportError(errors.New("agent configuration not found"))()
+			}
+
+			currentModel := cfg.Models[agentCfg.Model]
+			currentModel.Think = !currentModel.Think
+			if err := cfg.UpdatePreferredModel(agentCfg.Model, currentModel); err != nil {
+				return uiutil.ReportError(err)()
+			}
+			m.com.App.UpdateAgentModel(context.TODO())
+			status := "disabled"
+			if currentModel.Think {
+				status = "enabled"
+			}
+			return uiutil.NewInfoMsg("Thinking mode " + status)
+		})
+		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionQuit:
 		cmds = append(cmds, tea.Quit)
 	case dialog.ActionInitializeProject:
@@ -969,15 +999,47 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, uiutil.ReportError(err))
 		}
 
-		// XXX: Should this be in a separate goroutine?
-		go m.com.App.UpdateAgentModel(context.TODO())
+		cmds = append(cmds, func() tea.Msg {
+			m.com.App.UpdateAgentModel(context.TODO())
 
-		modelMsg := fmt.Sprintf("%s model changed to %s", msg.ModelType, msg.Model.Model)
-		cmds = append(cmds, uiutil.ReportInfo(modelMsg))
+			modelMsg := fmt.Sprintf("%s model changed to %s", msg.ModelType, msg.Model.Model)
+
+			return uiutil.NewInfoMsg(modelMsg)
+		})
+
 		m.dialog.CloseDialog(dialog.APIKeyInputID)
 		m.dialog.CloseDialog(dialog.OAuthID)
 		m.dialog.CloseDialog(dialog.ModelsID)
-		// TODO CHANGE
+	case dialog.ActionSelectReasoningEffort:
+		if m.com.App.AgentCoordinator.IsBusy() {
+			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait..."))
+			break
+		}
+
+		cfg := m.com.Config()
+		if cfg == nil {
+			cmds = append(cmds, uiutil.ReportError(errors.New("configuration not found")))
+			break
+		}
+
+		agentCfg, ok := cfg.Agents[config.AgentCoder]
+		if !ok {
+			cmds = append(cmds, uiutil.ReportError(errors.New("agent configuration not found")))
+			break
+		}
+
+		currentModel := cfg.Models[agentCfg.Model]
+		currentModel.ReasoningEffort = msg.Effort
+		if err := cfg.UpdatePreferredModel(agentCfg.Model, currentModel); err != nil {
+			cmds = append(cmds, uiutil.ReportError(err))
+			break
+		}
+
+		cmds = append(cmds, func() tea.Msg {
+			m.com.App.UpdateAgentModel(context.TODO())
+			return uiutil.NewInfoMsg("Reasoning effort set to " + msg.Effort)
+		})
+		m.dialog.CloseDialog(dialog.ReasoningID)
 	case dialog.ActionPermissionResponse:
 		m.dialog.CloseDialog(dialog.PermissionsID)
 		switch msg.Action {
@@ -2248,6 +2310,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openCommandsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.ReasoningID:
+		if cmd := m.openReasoningDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.QuitID:
 		if cmd := m.openQuitDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -2310,6 +2376,22 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 
 	m.dialog.OpenDialog(commands)
 
+	return nil
+}
+
+// openReasoningDialog opens the reasoning effort dialog.
+func (m *UI) openReasoningDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.ReasoningID) {
+		m.dialog.BringToFront(dialog.ReasoningID)
+		return nil
+	}
+
+	reasoningDialog, err := dialog.NewReasoning(m.com)
+	if err != nil {
+		return uiutil.ReportError(err)
+	}
+
+	m.dialog.OpenDialog(reasoningDialog)
 	return nil
 }
 

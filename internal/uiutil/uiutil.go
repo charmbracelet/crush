@@ -26,10 +26,7 @@ func CmdHandler(msg tea.Msg) tea.Cmd {
 
 func ReportError(err error) tea.Cmd {
 	slog.Error("Error reported", "error", err)
-	return CmdHandler(InfoMsg{
-		Type: InfoTypeError,
-		Msg:  err.Error(),
-	})
+	return CmdHandler(NewErrorMsg(err))
 }
 
 type InfoType int
@@ -42,18 +39,33 @@ const (
 	InfoTypeUpdate
 )
 
-func ReportInfo(info string) tea.Cmd {
-	return CmdHandler(InfoMsg{
+func NewInfoMsg(info string) InfoMsg {
+	return InfoMsg{
 		Type: InfoTypeInfo,
 		Msg:  info,
-	})
+	}
+}
+
+func NewWarnMsg(warn string) InfoMsg {
+	return InfoMsg{
+		Type: InfoTypeWarn,
+		Msg:  warn,
+	}
+}
+
+func NewErrorMsg(err error) InfoMsg {
+	return InfoMsg{
+		Type: InfoTypeError,
+		Msg:  err.Error(),
+	}
+}
+
+func ReportInfo(info string) tea.Cmd {
+	return CmdHandler(NewInfoMsg(info))
 }
 
 func ReportWarn(warn string) tea.Cmd {
-	return CmdHandler(InfoMsg{
-		Type: InfoTypeWarn,
-		Msg:  warn,
-	})
+	return CmdHandler(NewWarnMsg(warn))
 }
 
 type (

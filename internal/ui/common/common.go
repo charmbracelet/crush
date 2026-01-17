@@ -1,13 +1,21 @@
 package common
 
 import (
+	"fmt"
 	"image"
+	"os"
 
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
 )
+
+// MaxAttachmentSize defines the maximum allowed size for file attachments (5 MB).
+const MaxAttachmentSize = int64(5 * 1024 * 1024)
+
+// AllowedImageTypes defines the permitted image file types.
+var AllowedImageTypes = []string{".jpg", ".jpeg", ".png"}
 
 // Common defines common UI options and configurations.
 type Common struct {
@@ -39,4 +47,19 @@ func CenterRect(area uv.Rectangle, width, height int) uv.Rectangle {
 	maxX := minX + width
 	maxY := minY + height
 	return image.Rect(minX, minY, maxX, maxY)
+}
+
+// IsFileTooBig checks if the file at the given path exceeds the specified size
+// limit.
+func IsFileTooBig(filePath string, sizeLimit int64) (bool, error) {
+	fileInfo, err := os.Stat(filePath)
+	if err != nil {
+		return false, fmt.Errorf("error getting file info: %w", err)
+	}
+
+	if fileInfo.Size() > sizeLimit {
+		return true, nil
+	}
+
+	return false, nil
 }

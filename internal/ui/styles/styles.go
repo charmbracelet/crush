@@ -173,12 +173,14 @@ type Styles struct {
 	FgSubtle      color.Color
 	Border        color.Color
 	BorderColor   color.Color // Border focus color
+	Error         color.Color
 	Warning       color.Color
 	Info          color.Color
 	White         color.Color
 	BlueLight     color.Color
 	Blue          color.Color
 	BlueDark      color.Color
+	GreenLight    color.Color
 	Green         color.Color
 	GreenDark     color.Color
 	Red           color.Color
@@ -353,6 +355,8 @@ type Styles struct {
 		}
 
 		Commands struct{}
+
+		ImagePreview lipgloss.Style
 	}
 
 	// Status bar and help
@@ -459,6 +463,7 @@ func DefaultStyles() Styles {
 		borderFocus = charmtone.Charple
 
 		// Status
+		error   = charmtone.Sriracha
 		warning = charmtone.Zest
 		info    = charmtone.Malibu
 
@@ -473,8 +478,9 @@ func DefaultStyles() Styles {
 		yellow = charmtone.Mustard
 		// citron = charmtone.Citron
 
-		green     = charmtone.Julep
-		greenDark = charmtone.Guac
+		greenLight = charmtone.Bok
+		green      = charmtone.Julep
+		greenDark  = charmtone.Guac
 		// greenLight = charmtone.Bok
 
 		red     = charmtone.Coral
@@ -505,12 +511,14 @@ func DefaultStyles() Styles {
 	s.FgSubtle = fgSubtle
 	s.Border = border
 	s.BorderColor = borderFocus
+	s.Error = error
 	s.Warning = warning
 	s.Info = info
 	s.White = white
 	s.BlueLight = blueLight
 	s.Blue = blue
 	s.BlueDark = blueDark
+	s.GreenLight = greenLight
 	s.Green = green
 	s.GreenDark = greenDark
 	s.Red = red
@@ -1220,6 +1228,8 @@ func DefaultStyles() Styles {
 	s.Dialog.Spinner = base.Foreground(secondary)
 	s.Dialog.ScrollbarThumb = base.Foreground(secondary)
 	s.Dialog.ScrollbarTrack = base.Foreground(border)
+
+	s.Dialog.ImagePreview = lipgloss.NewStyle().Padding(0, 1).Foreground(fgSubtle)
 
 	s.Dialog.Arguments.Content = base.Padding(1)
 	s.Dialog.Arguments.Description = base.MarginBottom(1).MaxHeight(3)

@@ -39,6 +39,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/completions"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
+	timage "github.com/charmbracelet/crush/internal/ui/image"
 	"github.com/charmbracelet/crush/internal/ui/logo"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/uiutil"
@@ -47,12 +48,6 @@ import (
 	"github.com/charmbracelet/ultraviolet/screen"
 	"github.com/charmbracelet/x/editor"
 )
-
-// Max file size set to 5M.
-const maxAttachmentSize = int64(5 * 1024 * 1024)
-
-// Allowed image formats.
-var allowedImageTypes = []string{".jpg", ".jpeg", ".png"}
 
 // Compact mode breakpoints.
 const (
@@ -176,6 +171,9 @@ type UI struct {
 	// sidebarLogo keeps a cached version of the sidebar sidebarLogo.
 	sidebarLogo string
 
+	// imgCaps stores the terminal image capabilities.
+	imgCaps timage.Capabilities
+
 	// custom commands & mcp commands
 	customCommands []commands.CustomCommand
 	mcpPrompts     []commands.MCPPrompt
@@ -272,6 +270,11 @@ func (m *UI) Init() tea.Cmd {
 	var cmds []tea.Cmd
 	if m.QueryVersion {
 		cmds = append(cmds, tea.RequestTerminalVersion)
+		// XXX: Right now, we're using the same logic to determine image
+		// support. Terminals like Apple Terminal and possibly others might
+		// bleed characters when querying for Kitty graphics via APC escape
+		// sequences.
+		cmds = append(cmds, timage.RequestCapabilities())
 	}
 	// load the user commands async
 	cmds = append(cmds, m.loadCustomCommands())
@@ -375,6 +378,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.appendSessionMessage(msg.Payload))
 		case pubsub.UpdatedEvent:
 			cmds = append(cmds, m.updateSessionMessage(msg.Payload))
+		case pubsub.DeletedEvent:
+			m.chat.RemoveMessage(msg.Payload.ID)
 		}
 	case pubsub.Event[history.File]:
 		cmds = append(cmds, m.handleFileEvent(msg.Payload))
@@ -412,6 +417,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		m.handleCompactMode(m.width, m.height)
 		m.updateLayoutAndSize()
+		// XXX: We need to store cell dimensions for image rendering.
+		m.imgCaps.Columns, m.imgCaps.Rows = msg.Width, msg.Height
 	case tea.KeyboardEnhancementsMsg:
 		m.keyenh = msg
 		if msg.SupportsKeyDisambiguation() {
@@ -541,6 +548,16 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.completionsOpen {
 			m.completions.SetFiles(msg.Files)
 		}
+	case uv.WindowPixelSizeEvent:
+		// [timage.RequestCapabilities] requests the terminal to send a window
+		// size event to help determine pixel dimensions.
+		m.imgCaps.PixelWidth = msg.Width
+		m.imgCaps.PixelHeight = msg.Height
+	case uv.KittyGraphicsEvent:
+		// [timage.RequestCapabilities] sends a Kitty graphics query and this
+		// captures the response. Any response means the terminal understands
+		// the protocol.
+		m.imgCaps.SupportsKittyGraphics = true
 	default:
 		if m.dialog.HasDialogs() {
 			if cmd := m.handleDialogMsg(msg); cmd != nil {
@@ -887,12 +904,23 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait before summarizing session..."))
 			break
 		}
-		err := m.com.App.AgentCoordinator.Summarize(context.Background(), msg.SessionID)
-		if err != nil {
-			cmds = append(cmds, uiutil.ReportError(err))
-		}
+		cmds = append(cmds, func() tea.Msg {
+			err := m.com.App.AgentCoordinator.Summarize(context.Background(), msg.SessionID)
+			if err != nil {
+				return uiutil.ReportError(err)()
+			}
+			return nil
+		})
+		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleHelp:
 		m.status.ToggleHelp()
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionExternalEditor:
+		if m.session != nil && m.com.App.AgentCoordinator.IsSessionBusy(m.session.ID) {
+			cmds = append(cmds, uiutil.ReportWarn("Agent is working, please wait..."))
+			break
+		}
+		cmds = append(cmds, m.openEditor(m.textarea.Value()))
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleCompactMode:
 		cmds = append(cmds, m.toggleCompactMode())
@@ -948,10 +976,20 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 
-		_, isProviderConfigured := cfg.Providers.Get(msg.Model.Provider)
-		if !isProviderConfigured {
+		var (
+			providerID   = msg.Model.Provider
+			isCopilot    = providerID == string(catwalk.InferenceProviderCopilot)
+			isConfigured = func() bool { _, ok := cfg.Providers.Get(providerID); return ok }
+		)
+
+		// Attempt to import GitHub Copilot tokens from VSCode if available.
+		if isCopilot && !isConfigured() {
+			config.Get().ImportCopilot()
+		}
+
+		if !isConfigured() {
 			m.dialog.CloseDialog(dialog.ModelsID)
-			if cmd := m.openAPIKeyInputDialog(msg.Provider, msg.Model, msg.ModelType); cmd != nil {
+			if cmd := m.openAuthenticationDialog(msg.Provider, msg.Model, msg.ModelType); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 			break
@@ -970,6 +1008,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		})
 
 		m.dialog.CloseDialog(dialog.APIKeyInputID)
+		m.dialog.CloseDialog(dialog.OAuthID)
 		m.dialog.CloseDialog(dialog.ModelsID)
 	case dialog.ActionSelectReasoningEffort:
 		if m.com.App.AgentCoordinator.IsBusy() {
@@ -1011,6 +1050,15 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		case dialog.PermissionDeny:
 			m.com.App.Permissions.Deny(msg.Permission)
 		}
+
+	case dialog.ActionFilePickerSelected:
+		cmds = append(cmds, tea.Sequence(
+			msg.Cmd(),
+			func() tea.Msg {
+				m.dialog.CloseDialog(dialog.FilePickerID)
+				return nil
+			},
+		))
 
 	case dialog.ActionRunCustomCommand:
 		if len(msg.Arguments) > 0 && msg.Args == nil {
@@ -1065,19 +1113,28 @@ func substituteArgs(content string, args map[string]string) string {
 	return content
 }
 
-// openAPIKeyInputDialog opens the API key input dialog.
-func (m *UI) openAPIKeyInputDialog(provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType) tea.Cmd {
-	if m.dialog.ContainsDialog(dialog.APIKeyInputID) {
-		m.dialog.BringToFront(dialog.APIKeyInputID)
+func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType) tea.Cmd {
+	var (
+		dlg dialog.Dialog
+		cmd tea.Cmd
+	)
+
+	switch provider.ID {
+	case "hyper":
+		dlg, cmd = dialog.NewOAuthHyper(m.com, provider, model, modelType)
+	case catwalk.InferenceProviderCopilot:
+		dlg, cmd = dialog.NewOAuthCopilot(m.com, provider, model, modelType)
+	default:
+		dlg, cmd = dialog.NewAPIKeyInput(m.com, provider, model, modelType)
+	}
+
+	if m.dialog.ContainsDialog(dlg.ID()) {
+		m.dialog.BringToFront(dlg.ID())
 		return nil
 	}
 
-	apiKeyInputDialog, err := dialog.NewAPIKeyInput(m.com, provider, model, modelType)
-	if err != nil {
-		return uiutil.ReportError(err)
-	}
-	m.dialog.OpenDialog(apiKeyInputDialog)
-	return nil
+	m.dialog.OpenDialog(dlg)
+	return cmd
 }
 
 func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
@@ -1169,6 +1226,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			}
 
 			switch {
+			case key.Matches(msg, m.keyMap.Editor.AddImage):
+				if cmd := m.openFilesDialog(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+
 			case key.Matches(msg, m.keyMap.Editor.SendMessage):
 				value := m.textarea.Value()
 				if before, ok := strings.CutSuffix(value, "\\"); ok {
@@ -2354,8 +2416,22 @@ func (m *UI) openSessionsDialog() tea.Cmd {
 	}
 
 	m.dialog.OpenDialog(dialog)
-
 	return nil
+}
+
+// openFilesDialog opens the file picker dialog.
+func (m *UI) openFilesDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.FilePickerID) {
+		// Bring to front
+		m.dialog.BringToFront(dialog.FilePickerID)
+		return nil
+	}
+
+	filePicker, cmd := dialog.NewFilePicker(m.com)
+	filePicker.SetImageCapabilities(&m.imgCaps)
+	m.dialog.OpenDialog(filePicker)
+
+	return cmd
 }
 
 // openPermissionsDialog opens the permissions dialog for a permission request.
@@ -2420,7 +2496,7 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 	if strings.Count(msg.Content, "\n") > 2 {
 		return func() tea.Msg {
 			content := []byte(msg.Content)
-			if int64(len(content)) > maxAttachmentSize {
+			if int64(len(content)) > common.MaxAttachmentSize {
 				return uiutil.ReportWarn("Paste is too big (>5mb)")
 			}
 			name := fmt.Sprintf("paste_%d.txt", m.pasteIdx())
@@ -2447,7 +2523,7 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 	// Check if file has an allowed image extension.
 	isAllowedType := false
 	lowerPath := strings.ToLower(path)
-	for _, ext := range allowedImageTypes {
+	for _, ext := range common.AllowedImageTypes {
 		if strings.HasSuffix(lowerPath, ext) {
 			isAllowedType = true
 			break
@@ -2463,7 +2539,7 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 		if err != nil {
 			return uiutil.ReportError(err)
 		}
-		if fileInfo.Size() > maxAttachmentSize {
+		if fileInfo.Size() > common.MaxAttachmentSize {
 			return uiutil.ReportWarn("File is too big (>5mb)")
 		}
 

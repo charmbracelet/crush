@@ -223,8 +223,10 @@ func (m *messageCmp) renderAssistantMessage() string {
 // message content and any attached files with appropriate icons.
 func (m *messageCmp) renderUserMessage() string {
 	t := styles.CurrentTheme()
-	parts := []string{
-		m.toMarkdown(m.message.Content().String()),
+	var parts []string
+
+	if s := m.message.Content().String(); s != "" {
+		parts = append(parts, m.toMarkdown(s))
 	}
 
 	attachmentStyle := t.S().Base.
@@ -256,7 +258,7 @@ func (m *messageCmp) renderUserMessage() string {
 	}
 
 	if len(attachments) > 0 {
-		parts = append(parts, "", strings.Join(attachments, ""))
+		parts = append(parts, strings.Join(attachments, ""))
 	}
 
 	joined := lipgloss.JoinVertical(lipgloss.Left, parts...)

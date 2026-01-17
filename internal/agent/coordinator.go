@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/history"
@@ -317,17 +318,12 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		return nil, err
 	}
 
-	systemPrompt, err := prompt.Build(ctx, large.Model.Provider(), large.Model.Model(), *c.cfg)
-	if err != nil {
-		return nil, err
-	}
-
 	largeProviderCfg, _ := c.cfg.Providers.Get(large.ModelCfg.Provider)
 	result := NewSessionAgent(SessionAgentOptions{
 		large,
 		small,
 		largeProviderCfg.SystemPromptPrefix,
-		systemPrompt,
+		"",
 		isSubAgent,
 		c.cfg.Options.DisableAutoSummarize,
 		c.permissions.SkipRequests(),
@@ -335,6 +331,16 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		c.messages,
 		nil,
 	})
+
+	c.readyWg.Go(func() error {
+		systemPrompt, err := prompt.Build(ctx, large.Model.Provider(), large.Model.Model(), *c.cfg)
+		if err != nil {
+			return err
+		}
+		result.SetSystemPrompt(systemPrompt)
+		return nil
+	})
+
 	c.readyWg.Go(func() error {
 		tools, err := c.buildTools(ctx, agent)
 		if err != nil {
@@ -415,6 +421,11 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		}
 	}
 
+	// Wait for MCP initialization to complete before reading MCP tools.
+	if err := mcp.WaitForInit(ctx); err != nil {
+		return nil, fmt.Errorf("failed to wait for MCP initialization: %w", err)
+	}
+
 	for _, tool := range tools.GetMCPTools(c.permissions, c.cfg.WorkingDir()) {
 		if agent.AllowedMCP == nil {
 			// No MCP restrictions
@@ -493,7 +504,7 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 	}
 
 	if smallCatwalkModel == nil {
-		return Model{}, Model{}, errors.New("snall model not found in provider config")
+		return Model{}, Model{}, errors.New("small model not found in provider config")
 	}
 
 	largeModelID := largeModelCfg.Model
@@ -527,13 +538,13 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 		}, nil
 }
 
-func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, isOauth bool) (fantasy.Provider, error) {
+func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string) (fantasy.Provider, error) {
 	var opts []anthropic.Option
 
-	if isOauth {
+	if strings.HasPrefix(apiKey, "Bearer ") {
 		// NOTE: Prevent the SDK from picking up the API key from env.
 		os.Setenv("ANTHROPIC_API_KEY", "")
-		headers["Authorization"] = fmt.Sprintf("Bearer %s", apiKey)
+		headers["Authorization"] = apiKey
 	} else if apiKey != "" {
 		// X-Api-Key header
 		opts = append(opts, anthropic.WithAPIKey(apiKey))
@@ -740,7 +751,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 	case openai.Name:
 		return c.buildOpenaiProvider(baseURL, apiKey, headers)
 	case anthropic.Name:
-		return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.OAuthToken != nil)
+		return c.buildAnthropicProvider(baseURL, apiKey, headers)
 	case openrouter.Name:
 		return c.buildOpenrouterProvider(baseURL, apiKey, headers)
 	case azure.Name:

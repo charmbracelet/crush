@@ -19,7 +19,6 @@ import (
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/oauth"
-	"github.com/charmbracelet/crush/internal/oauth/claude"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/oauth/hyper"
 	"github.com/invopop/jsonschema"
@@ -155,21 +154,6 @@ func (pc *ProviderConfig) ToProvider() catwalk.Provider {
 	return provider
 }
 
-func (pc *ProviderConfig) SetupClaudeCode() {
-	pc.SystemPromptPrefix = "You are Claude Code, Anthropic's official CLI for Claude."
-	pc.ExtraHeaders["anthropic-version"] = "2023-06-01"
-
-	value := pc.ExtraHeaders["anthropic-beta"]
-	const want = "oauth-2025-04-20"
-	if !strings.Contains(value, want) {
-		if value != "" {
-			value += ","
-		}
-		value += want
-	}
-	pc.ExtraHeaders["anthropic-beta"] = value
-}
-
 func (pc *ProviderConfig) SetupGitHubCopilot() {
 	maps.Copy(pc.ExtraHeaders, copilot.Headers())
 }
@@ -264,6 +248,7 @@ type Options struct {
 	DataDirectory             string       `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data (relative to working directory),default=.crush,example=.crush"` // Relative to the cwd
 	DisabledTools             []string     `json:"disabled_tools,omitempty" jsonschema:"description=List of built-in tools to disable and hide from the agent,example=bash,example=sourcegraph"`
 	DisableProviderAutoUpdate bool         `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`
+	DisableDefaultProviders   bool         `json:"disable_default_providers,omitempty" jsonschema:"description=Ignore all default/embedded providers. When enabled, providers must be fully specified in the config file with base_url, models, and api_key - no merging with defaults occurs,default=false"`
 	Attribution               *Attribution `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
 	DisableMetrics            bool         `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
 	InitializeAs              string       `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
@@ -522,6 +507,25 @@ func (c *Config) SetConfigField(key string, value any) error {
 	return nil
 }
 
+func (c *Config) RemoveConfigField(key string) error {
+	data, err := os.ReadFile(c.dataConfigDir)
+	if err != nil {
+		return fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	newValue, err := sjson.Delete(string(data), key)
+	if err != nil {
+		return fmt.Errorf("failed to delete config field %s: %w", key, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(c.dataConfigDir), 0o755); err != nil {
+		return fmt.Errorf("failed to create config directory %q: %w", c.dataConfigDir, err)
+	}
+	if err := os.WriteFile(c.dataConfigDir, []byte(newValue), 0o600); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+	return nil
+}
+
 // RefreshOAuthToken refreshes the OAuth token for the given provider.
 func (c *Config) RefreshOAuthToken(ctx context.Context, providerID string) error {
 	providerConfig, exists := c.Providers.Get(providerID)
@@ -536,8 +540,6 @@ func (c *Config) RefreshOAuthToken(ctx context.Context, providerID string) error
 	var newToken *oauth.Token
 	var refreshErr error
 	switch providerID {
-	case string(catwalk.InferenceProviderAnthropic):
-		newToken, refreshErr = claude.RefreshToken(ctx, providerConfig.OAuthToken.RefreshToken)
 	case string(catwalk.InferenceProviderCopilot):
 		newToken, refreshErr = copilot.RefreshToken(ctx, providerConfig.OAuthToken.RefreshToken)
 	case hyperp.Name:
@@ -554,8 +556,6 @@ func (c *Config) RefreshOAuthToken(ctx context.Context, providerID string) error
 	providerConfig.APIKey = newToken.AccessToken
 
 	switch providerID {
-	case string(catwalk.InferenceProviderAnthropic):
-		providerConfig.SetupClaudeCode()
 	case string(catwalk.InferenceProviderCopilot):
 		providerConfig.SetupGitHubCopilot()
 	}
@@ -594,8 +594,6 @@ func (c *Config) SetProviderAPIKey(providerID string, apiKey any) error {
 			providerConfig.APIKey = v.AccessToken
 			providerConfig.OAuthToken = v
 			switch providerID {
-			case string(catwalk.InferenceProviderAnthropic):
-				providerConfig.SetupClaudeCode()
 			case string(catwalk.InferenceProviderCopilot):
 				providerConfig.SetupGitHubCopilot()
 			}
@@ -809,21 +807,21 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	for k, v := range c.ExtraHeaders {
 		req.Header.Set(k, v)
 	}
-	b, err := client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to create request for provider %s: %w", c.ID, err)
 	}
+	defer resp.Body.Close()
 	if c.ID == string(catwalk.InferenceProviderZAI) {
-		if b.StatusCode == http.StatusUnauthorized {
-			// for z.ai just check if the http response is not 401
-			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, b.Status)
+		if resp.StatusCode == http.StatusUnauthorized {
+			// For z.ai just check if the http response is not 401.
+			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, resp.Status)
 		}
 	} else {
-		if b.StatusCode != http.StatusOK {
-			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, b.Status)
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, resp.Status)
 		}
 	}
-	_ = b.Body.Close()
 	return nil
 }
 

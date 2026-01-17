@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"maps"
 	"net/http"
 	"os"
 	"os/exec"
@@ -30,6 +29,8 @@ var (
 	sessions = csync.NewMap[string, *mcp.ClientSession]()
 	states   = csync.NewMap[string, ClientInfo]()
 	broker   = pubsub.NewBroker[Event]()
+	initOnce sync.Once
+	initDone = make(chan struct{})
 )
 
 // State represents the current state of an MCP client
@@ -98,7 +99,7 @@ func SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {
 
 // GetStates returns the current state of all MCP clients
 func GetStates() map[string]ClientInfo {
-	return maps.Collect(states.Seq2())
+	return states.Copy()
 }
 
 // GetState returns the state of a specific MCP client
@@ -108,29 +109,28 @@ func GetState(name string) (ClientInfo, bool) {
 
 // Close closes all MCP clients. This should be called during application shutdown.
 func Close() error {
-	var errs []error
 	var wg sync.WaitGroup
-	for name, session := range sessions.Seq2() {
-		wg.Go(func() {
-			done := make(chan bool, 1)
-			go func() {
+	done := make(chan struct{}, 1)
+	go func() {
+		for name, session := range sessions.Seq2() {
+			wg.Go(func() {
 				if err := session.Close(); err != nil &&
 					!errors.Is(err, io.EOF) &&
 					!errors.Is(err, context.Canceled) &&
 					err.Error() != "signal: killed" {
-					errs = append(errs, fmt.Errorf("close mcp: %s: %w", name, err))
+					slog.Warn("Failed to shutdown MCP client", "name", name, "error", err)
 				}
-				done <- true
-			}()
-			select {
-			case <-done:
-			case <-time.After(time.Millisecond * 250):
-			}
-		})
+			})
+		}
+		wg.Wait()
+		done <- struct{}{}
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
 	}
-	wg.Wait()
 	broker.Shutdown()
-	return errors.Join(errs...)
+	return nil
 }
 
 // Initialize initializes MCP clients based on the provided configuration.
@@ -199,6 +199,18 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 		}(name, m)
 	}
 	wg.Wait()
+	initOnce.Do(func() { close(initDone) })
+}
+
+// WaitForInit blocks until MCP initialization is complete.
+// If Initialize was never called, this returns immediately.
+func WaitForInit(ctx context.Context) error {
+	select {
+	case <-initDone:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func getOrRenewClient(ctx context.Context, name string) (*mcp.ClientSession, error) {

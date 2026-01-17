@@ -38,9 +38,17 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/stringext"
+	"github.com/charmbracelet/x/exp/charmtone"
 )
 
-const defaultSessionName = "Untitled Session"
+const (
+	defaultSessionName = "Untitled Session"
+
+	// Constants for auto-summarization thresholds
+	largeContextWindowThreshold = 200_000
+	largeContextWindowBuffer    = 20_000
+	smallContextWindowRatio     = 0.2
+)
 
 //go:embed templates/title.md
 var titlePrompt []byte
@@ -68,6 +76,7 @@ type SessionAgent interface {
 	Run(context.Context, SessionAgentCall) (*fantasy.AgentResult, error)
 	SetModels(large Model, small Model)
 	SetTools(tools []fantasy.AgentTool)
+	SetSystemPrompt(systemPrompt string)
 	Cancel(sessionID string)
 	CancelAll()
 	IsSessionBusy(sessionID string) bool
@@ -86,12 +95,13 @@ type Model struct {
 }
 
 type sessionAgent struct {
-	largeModel           Model
-	smallModel           Model
-	systemPromptPrefix   string
-	systemPrompt         string
+	largeModel         *csync.Value[Model]
+	smallModel         *csync.Value[Model]
+	systemPromptPrefix *csync.Value[string]
+	systemPrompt       *csync.Value[string]
+	tools              *csync.Slice[fantasy.AgentTool]
+
 	isSubAgent           bool
-	tools                []fantasy.AgentTool
 	sessions             session.Service
 	messages             message.Service
 	disableAutoSummarize bool
@@ -118,15 +128,15 @@ func NewSessionAgent(
 	opts SessionAgentOptions,
 ) SessionAgent {
 	return &sessionAgent{
-		largeModel:           opts.LargeModel,
-		smallModel:           opts.SmallModel,
-		systemPromptPrefix:   opts.SystemPromptPrefix,
-		systemPrompt:         opts.SystemPrompt,
+		largeModel:           csync.NewValue(opts.LargeModel),
+		smallModel:           csync.NewValue(opts.SmallModel),
+		systemPromptPrefix:   csync.NewValue(opts.SystemPromptPrefix),
+		systemPrompt:         csync.NewValue(opts.SystemPrompt),
 		isSubAgent:           opts.IsSubAgent,
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
 		disableAutoSummarize: opts.DisableAutoSummarize,
-		tools:                opts.Tools,
+		tools:                csync.NewSliceFrom(opts.Tools),
 		isYolo:               opts.IsYolo,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, context.CancelFunc](),
@@ -134,7 +144,7 @@ func NewSessionAgent(
 }
 
 func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
-	if call.Prompt == "" {
+	if call.Prompt == "" && !message.ContainsTextAttachment(call.Attachments) {
 		return nil, ErrEmptyPrompt
 	}
 	if call.SessionID == "" {
@@ -152,15 +162,21 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		return nil, nil
 	}
 
-	if len(a.tools) > 0 {
+	// Copy mutable fields under lock to avoid races with SetTools/SetModels.
+	agentTools := a.tools.Copy()
+	largeModel := a.largeModel.Get()
+	systemPrompt := a.systemPrompt.Get()
+	promptPrefix := a.systemPromptPrefix.Get()
+
+	if len(agentTools) > 0 {
 		// Add Anthropic caching to the last tool.
-		a.tools[len(a.tools)-1].SetProviderOptions(a.getCacheControlOptions())
+		agentTools[len(agentTools)-1].SetProviderOptions(a.getCacheControlOptions())
 	}
 
 	agent := fantasy.NewAgent(
-		a.largeModel.Model,
-		fantasy.WithSystemPrompt(a.systemPrompt),
-		fantasy.WithTools(a.tools...),
+		largeModel.Model,
+		fantasy.WithSystemPrompt(systemPrompt),
+		fantasy.WithTools(agentTools...),
 	)
 
 	sessionLock := sync.Mutex{}
@@ -182,6 +198,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			a.generateTitle(titleCtx, call.SessionID, call.Prompt)
 		})
 	}
+	defer wg.Wait()
 
 	// Add the user message to the session.
 	_, err = a.createUserMessage(ctx, call)
@@ -232,7 +249,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
 			}
 
-			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages)
+			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel)
 
 			lastSystemRoleInx := 0
 			systemMessageUpdated := false
@@ -250,7 +267,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				}
 			}
 
-			if promptPrefix := a.promptPrefix(); promptPrefix != "" {
+			if promptPrefix != "" {
 				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(promptPrefix)}, prepared.Messages...)
 			}
 
@@ -258,15 +275,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			assistantMsg, err = a.messages.Create(callContext, call.SessionID, message.CreateMessageParams{
 				Role:     message.Assistant,
 				Parts:    []message.ContentPart{},
-				Model:    a.largeModel.ModelCfg.Model,
-				Provider: a.largeModel.ModelCfg.Provider,
+				Model:    largeModel.ModelCfg.Model,
+				Provider: largeModel.ModelCfg.Provider,
 			})
 			if err != nil {
 				return callContext, prepared, err
 			}
 			callContext = context.WithValue(callContext, tools.MessageIDContextKey, assistantMsg.ID)
-			callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, a.largeModel.CatwalkCfg.SupportsImages)
-			callContext = context.WithValue(callContext, tools.ModelNameContextKey, a.largeModel.CatwalkCfg.Name)
+			callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatwalkCfg.SupportsImages)
+			callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatwalkCfg.Name)
 			currentAssistant = &assistantMsg
 			return callContext, prepared, err
 		},
@@ -360,7 +377,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				sessionLock.Unlock()
 				return getSessionErr
 			}
-			a.updateSessionUsage(a.largeModel, &updatedSession, stepResult.Usage, a.openrouterCost(stepResult.ProviderMetadata))
+			a.updateSessionUsage(largeModel, &updatedSession, stepResult.Usage, a.openrouterCost(stepResult.ProviderMetadata))
 			_, sessionErr := a.sessions.Save(genCtx, updatedSession)
 			sessionLock.Unlock()
 			if sessionErr != nil {
@@ -370,14 +387,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		},
 		StopWhen: []fantasy.StopCondition{
 			func(_ []fantasy.StepResult) bool {
-				cw := int64(a.largeModel.CatwalkCfg.ContextWindow)
+				cw := int64(largeModel.CatwalkCfg.ContextWindow)
 				tokens := currentSession.CompletionTokens + currentSession.PromptTokens
 				remaining := cw - tokens
 				var threshold int64
-				if cw > 200_000 {
-					threshold = 20_000
+				if cw > largeContextWindowThreshold {
+					threshold = largeContextWindowBuffer
 				} else {
-					threshold = int64(float64(cw) * 0.2)
+					threshold = int64(float64(cw) * smallContextWindowRatio)
 				}
 				if (remaining <= threshold) && !a.disableAutoSummarize {
 					shouldSummarize = true
@@ -444,7 +461,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				Content:    content,
 				IsError:    true,
 			}
-			_, createErr = a.messages.Create(context.Background(), currentAssistant.SessionID, message.CreateMessageParams{
+			_, createErr = a.messages.Create(ctx, currentAssistant.SessionID, message.CreateMessageParams{
 				Role: message.Tool,
 				Parts: []message.ContentPart{
 					toolResult,
@@ -457,22 +474,23 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		var fantasyErr *fantasy.Error
 		var providerErr *fantasy.ProviderError
 		const defaultTitle = "Provider Error"
+		linkStyle := lipgloss.NewStyle().Foreground(charmtone.Guac).Underline(true)
 		if isCancelErr {
 			currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
 		} else if isPermissionErr {
 			currentAssistant.AddFinish(message.FinishReasonPermissionDenied, "User denied permission", "")
 		} else if errors.Is(err, hyper.ErrNoCredits) {
 			url := hyper.BaseURL()
-			link := lipgloss.NewStyle().Hyperlink(url, "id=hyper").Render(url)
+			link := linkStyle.Hyperlink(url, "id=hyper").Render(url)
 			currentAssistant.AddFinish(message.FinishReasonError, "No credits", "You're out of credits. Add more at "+link)
 		} else if errors.As(err, &providerErr) {
 			if providerErr.Message == "The requested model is not supported." {
 				url := "https://github.com/settings/copilot/features"
-				link := lipgloss.NewStyle().Hyperlink(url, "id=hyper").Render(url)
+				link := linkStyle.Hyperlink(url, "id=copilot").Render(url)
 				currentAssistant.AddFinish(
 					message.FinishReasonError,
 					"Copilot model not enabled",
-					fmt.Sprintf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", a.largeModel.CatwalkCfg.Name, link),
+					fmt.Sprintf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", largeModel.CatwalkCfg.Name, link),
 				)
 			} else {
 				currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), providerErr.Message)
@@ -490,7 +508,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		}
 		return nil, err
 	}
-	wg.Wait()
 
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
@@ -528,6 +545,10 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return ErrSessionBusy
 	}
 
+	// Copy mutable fields under lock to avoid races with SetModels.
+	largeModel := a.largeModel.Get()
+	systemPromptPrefix := a.systemPromptPrefix.Get()
+
 	currentSession, err := a.sessions.Get(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to get session: %w", err)
@@ -548,28 +569,20 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	defer a.activeRequests.Del(sessionID)
 	defer cancel()
 
-	agent := fantasy.NewAgent(a.largeModel.Model,
+	agent := fantasy.NewAgent(largeModel.Model,
 		fantasy.WithSystemPrompt(string(summaryPrompt)),
 	)
 	summaryMessage, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
 		Role:             message.Assistant,
-		Model:            a.largeModel.Model.Model(),
-		Provider:         a.largeModel.Model.Provider(),
+		Model:            largeModel.Model.Model(),
+		Provider:         largeModel.Model.Provider(),
 		IsSummaryMessage: true,
 	})
 	if err != nil {
 		return err
 	}
 
-	summaryPromptText := "Provide a detailed summary of our conversation above."
-	if len(currentSession.Todos) > 0 {
-		summaryPromptText += "\n\n## Current Todo List\n\n"
-		for _, t := range currentSession.Todos {
-			summaryPromptText += fmt.Sprintf("- [%s] %s\n", t.Status, t.Content)
-		}
-		summaryPromptText += "\nInclude these tasks and their statuses in your summary. "
-		summaryPromptText += "Instruct the resuming assistant to use the `todos` tool to continue tracking progress on these tasks."
-	}
+	summaryPromptText := buildSummaryPrompt(currentSession.Todos)
 
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:          summaryPromptText,
@@ -577,8 +590,8 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		ProviderOptions: opts,
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = options.Messages
-			if a.systemPromptPrefix != "" {
-				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(a.systemPromptPrefix)}, prepared.Messages...)
+			if systemPromptPrefix != "" {
+				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(systemPromptPrefix)}, prepared.Messages...)
 			}
 			return callContext, prepared, nil
 		},
@@ -629,7 +642,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		}
 	}
 
-	a.updateSessionUsage(a.largeModel, &currentSession, resp.TotalUsage, openrouterCost)
+	a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, openrouterCost)
 
 	// Just in case, get just the last usage info.
 	usage := resp.Response.Usage
@@ -716,15 +729,15 @@ func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.S
 	}
 
 	if session.SummaryMessageID != "" {
-		summaryMsgInex := -1
+		summaryMsgIndex := -1
 		for i, msg := range msgs {
 			if msg.ID == session.SummaryMessageID {
-				summaryMsgInex = i
+				summaryMsgIndex = i
 				break
 			}
 		}
-		if summaryMsgInex != -1 {
-			msgs = msgs[summaryMsgInex:]
+		if summaryMsgIndex != -1 {
+			msgs = msgs[summaryMsgIndex:]
 			msgs[0].Role = message.User
 		}
 	}
@@ -737,9 +750,13 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		return
 	}
 
+	smallModel := a.smallModel.Get()
+	largeModel := a.largeModel.Get()
+	systemPromptPrefix := a.systemPromptPrefix.Get()
+
 	var maxOutputTokens int64 = 40
-	if a.smallModel.CatwalkCfg.CanReason {
-		maxOutputTokens = a.smallModel.CatwalkCfg.DefaultMaxTokens
+	if smallModel.CatwalkCfg.CanReason {
+		maxOutputTokens = smallModel.CatwalkCfg.DefaultMaxTokens
 	}
 
 	newAgent := func(m fantasy.LanguageModel, p []byte, tok int64) fantasy.Agent {
@@ -753,9 +770,9 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		Prompt: fmt.Sprintf("Generate a concise title for the following content:\n\n%s\n <think>\n\n</think>", userPrompt),
 		PrepareStep: func(callCtx context.Context, opts fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = opts.Messages
-			if a.systemPromptPrefix != "" {
+			if systemPromptPrefix != "" {
 				prepared.Messages = append([]fantasy.Message{
-					fantasy.NewSystemMessage(a.systemPromptPrefix),
+					fantasy.NewSystemMessage(systemPromptPrefix),
 				}, prepared.Messages...)
 			}
 			return callCtx, prepared, nil
@@ -763,7 +780,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	}
 
 	// Use the small model to generate the title.
-	model := &a.smallModel
+	model := smallModel
 	agent := newAgent(model.Model, titlePrompt, maxOutputTokens)
 	resp, err := agent.Stream(ctx, streamCall)
 	if err == nil {
@@ -772,7 +789,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	} else {
 		// It didn't work. Let's try with the big model.
 		slog.Error("error generating title with small model; trying big model", "err", err)
-		model = &a.largeModel
+		model = largeModel
 		agent = newAgent(model.Model, titlePrompt, maxOutputTokens)
 		resp, err = agent.Stream(ctx, streamCall)
 		if err == nil {
@@ -803,7 +820,6 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	// Clean up title.
 	var title string
 	title = strings.ReplaceAll(resp.Response.Content.Text(), "\n", " ")
-	slog.Info("generated title", "title", title)
 
 	// Remove thinking tags if present.
 	title = thinkTagRegex.ReplaceAllString(title, "")
@@ -832,10 +848,6 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		modelConfig.CostPer1MOutCached/1e6*float64(resp.TotalUsage.CacheReadTokens) +
 		modelConfig.CostPer1MIn/1e6*float64(resp.TotalUsage.InputTokens) +
 		modelConfig.CostPer1MOut/1e6*float64(resp.TotalUsage.OutputTokens)
-
-	if a.isClaudeCode() {
-		cost = 0
-	}
 
 	// Use override cost if available (e.g., from OpenRouter).
 	if openrouterCost != nil {
@@ -874,10 +886,6 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 		modelConfig.CostPer1MIn/1e6*float64(usage.InputTokens) +
 		modelConfig.CostPer1MOut/1e6*float64(usage.OutputTokens)
 
-	if a.isClaudeCode() {
-		cost = 0
-	}
-
 	a.eventTokensUsed(session.ID, model, usage, cost)
 
 	if overrideCost != nil {
@@ -891,14 +899,17 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 }
 
 func (a *sessionAgent) Cancel(sessionID string) {
-	// Cancel regular requests.
-	if cancel, ok := a.activeRequests.Take(sessionID); ok && cancel != nil {
+	// Cancel regular requests. Don't use Take() here - we need the entry to
+	// remain in activeRequests so IsBusy() returns true until the goroutine
+	// fully completes (including error handling that may access the DB).
+	// The defer in processRequest will clean up the entry.
+	if cancel, ok := a.activeRequests.Get(sessionID); ok && cancel != nil {
 		slog.Info("Request cancellation initiated", "session_id", sessionID)
 		cancel()
 	}
 
 	// Also check for summarize requests.
-	if cancel, ok := a.activeRequests.Take(sessionID + "-summarize"); ok && cancel != nil {
+	if cancel, ok := a.activeRequests.Get(sessionID + "-summarize"); ok && cancel != nil {
 		slog.Info("Summarize cancellation initiated", "session_id", sessionID)
 		cancel()
 	}
@@ -972,30 +983,20 @@ func (a *sessionAgent) QueuedPromptsList(sessionID string) []string {
 }
 
 func (a *sessionAgent) SetModels(large Model, small Model) {
-	a.largeModel = large
-	a.smallModel = small
+	a.largeModel.Set(large)
+	a.smallModel.Set(small)
 }
 
 func (a *sessionAgent) SetTools(tools []fantasy.AgentTool) {
-	a.tools = tools
+	a.tools.SetSlice(tools)
+}
+
+func (a *sessionAgent) SetSystemPrompt(systemPrompt string) {
+	a.systemPrompt.Set(systemPrompt)
 }
 
 func (a *sessionAgent) Model() Model {
-	return a.largeModel
-}
-
-func (a *sessionAgent) promptPrefix() string {
-	if a.isClaudeCode() {
-		return "You are Claude Code, Anthropic's official CLI for Claude."
-	}
-	return a.systemPromptPrefix
-}
-
-// XXX: this should be generalized to cover other subscription plans, like Copilot.
-func (a *sessionAgent) isClaudeCode() bool {
-	cfg := config.Get()
-	pc, ok := cfg.Providers.Get(a.largeModel.ModelCfg.Provider)
-	return ok && pc.ID == string(catwalk.InferenceProviderAnthropic) && pc.OAuthToken != nil
+	return a.largeModel.Get()
 }
 
 // convertToToolResult converts a fantasy tool result to a message tool result.
@@ -1052,9 +1053,9 @@ func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) mes
 //
 //	BEFORE: [tool result: image data]
 //	AFTER:  [tool result: "Image loaded - see attached"], [user: image attachment]
-func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Message) []fantasy.Message {
-	providerSupportsMedia := a.largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderAnthropic) ||
-		a.largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderBedrock)
+func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Message, largeModel Model) []fantasy.Message {
+	providerSupportsMedia := largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderAnthropic) ||
+		largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderBedrock)
 
 	if providerSupportsMedia {
 		return messages
@@ -1118,4 +1119,19 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 	}
 
 	return convertedMessages
+}
+
+// buildSummaryPrompt constructs the prompt text for session summarization.
+func buildSummaryPrompt(todos []session.Todo) string {
+	var sb strings.Builder
+	sb.WriteString("Provide a detailed summary of our conversation above.")
+	if len(todos) > 0 {
+		sb.WriteString("\n\n## Current Todo List\n\n")
+		for _, t := range todos {
+			fmt.Fprintf(&sb, "- [%s] %s\n", t.Status, t.Content)
+		}
+		sb.WriteString("\nInclude these tasks and their statuses in your summary. ")
+		sb.WriteString("Instruct the resuming assistant to use the `todos` tool to continue tracking progress on these tasks.")
+	}
+	return sb.String()
 }

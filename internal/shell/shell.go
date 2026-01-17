@@ -247,12 +247,14 @@ func (s *Shell) newInterp(stdout, stderr io.Writer) (*interp.Runner, error) {
 	)
 }
 
-// updateShellFromRunner updates the shell from the interpreter after execution
+// updateShellFromRunner updates the shell from the interpreter after execution.
 func (s *Shell) updateShellFromRunner(runner *interp.Runner) {
 	s.cwd = runner.Dir
-	s.env = nil
+	s.env = s.env[:0]
 	for name, vr := range runner.Vars {
-		s.env = append(s.env, fmt.Sprintf("%s=%s", name, vr.Str))
+		if vr.Exported {
+			s.env = append(s.env, name+"="+vr.Str)
+		}
 	}
 }
 

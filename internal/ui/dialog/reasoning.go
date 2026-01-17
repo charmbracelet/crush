@@ -12,7 +12,6 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/sahilm/fuzzy"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -172,11 +171,10 @@ func (r *Reasoning) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	r.list.SetSize(innerWidth, height-heightOffset)
 	r.help.SetWidth(innerWidth)
 
-	titleStyle := t.Dialog.Title
-	dialogStyle := t.Dialog.View.Width(width)
-	header := common.DialogTitle(t, "Select Reasoning Effort",
-		max(0, width-dialogStyle.GetHorizontalFrameSize()-
-			titleStyle.GetHorizontalFrameSize()))
+	rc := NewRenderContext(t, width)
+	rc.Title = "Select Reasoning Effort"
+	inputView := t.Dialog.InputPrompt.Render(r.input.View())
+	rc.AddPart(inputView)
 
 	visibleCount := len(r.list.VisibleItems())
 	if r.list.Height() >= visibleCount {
@@ -184,9 +182,12 @@ func (r *Reasoning) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	} else {
 		r.list.ScrollToSelected()
 	}
-	helpView := ansi.Truncate(r.help.View(r), innerWidth, "")
-	view := HeaderInputListHelpView(t, width, r.list.Height(), header,
-		r.input.View(), r.list.Render(), helpView)
+
+	listView := t.Dialog.List.Height(r.list.Height()).Render(r.list.Render())
+	rc.AddPart(listView)
+	rc.Help = r.help.View(r)
+
+	view := rc.Render()
 
 	cur := r.Cursor()
 	DrawCenterCursor(scr, area, view, cur)

@@ -952,7 +952,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			if currentModel.Think {
 				status = "enabled"
 			}
-			return uiutil.ReportInfo("Thinking mode " + status)()
+			return uiutil.NewInfoMsg("Thinking mode " + status)
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionQuit:
@@ -1004,7 +1004,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 			modelMsg := fmt.Sprintf("%s model changed to %s", msg.ModelType, msg.Model.Model)
 
-			return uiutil.ReportInfo(modelMsg)()
+			return uiutil.NewInfoMsg(modelMsg)
 		})
 
 		m.dialog.CloseDialog(dialog.APIKeyInputID)
@@ -1037,7 +1037,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 		cmds = append(cmds, func() tea.Msg {
 			m.com.App.UpdateAgentModel(context.TODO())
-			return uiutil.ReportInfo("Reasoning effort set to " + msg.Effort)()
+			return uiutil.NewInfoMsg("Reasoning effort set to " + msg.Effort)
 		})
 		m.dialog.CloseDialog(dialog.ReasoningID)
 	case dialog.ActionPermissionResponse:

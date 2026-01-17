@@ -187,6 +187,7 @@ func init() {
 	registry.register(tools.DownloadToolName, func() renderer { return downloadRenderer{} })
 	registry.register(tools.ViewToolName, func() renderer { return viewRenderer{} })
 	registry.register(tools.EditToolName, func() renderer { return editRenderer{} })
+	registry.register(tools.DeleteToolName, func() renderer { return deleteRenderer{} })
 	registry.register(tools.MultiEditToolName, func() renderer { return multiEditRenderer{} })
 	registry.register(tools.WriteToolName, func() renderer { return writeRenderer{} })
 	registry.register(tools.FetchToolName, func() renderer { return simpleFetchRenderer{} })
@@ -564,6 +565,33 @@ func (mer multiEditRenderer) Render(v *toolCallCmp) string {
 		}
 
 		return formatted
+	})
+}
+
+// -----------------------------------------------------------------------------
+//  Delete renderer
+// -----------------------------------------------------------------------------
+
+// deleteRenderer handles file/directory deletion display
+type deleteRenderer struct {
+	baseRenderer
+}
+
+// Render displays the delete operation with file path and recursive flag
+func (dr deleteRenderer) Render(v *toolCallCmp) string {
+	var params tools.DeleteParams
+	var args []string
+	if err := dr.unmarshalParams(v.call.Input, &params); err == nil {
+		file := fsext.PrettyPath(params.FilePath)
+		pb := newParamBuilder().addMain(file)
+		if params.Recursive {
+			pb.addFlag("recursive", true)
+		}
+		args = pb.build()
+	}
+
+	return dr.renderWithParams(v, "Delete", args, func() string {
+		return renderPlainContent(v, v.result.Content)
 	})
 }
 

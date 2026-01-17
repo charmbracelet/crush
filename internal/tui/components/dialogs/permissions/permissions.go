@@ -451,6 +451,8 @@ func (p *permissionDialogCmp) getOrGenerateContent() string {
 		content = p.generateViewContent()
 	case tools.LSToolName:
 		content = p.generateLSContent()
+	case tools.DeleteToolName:
+		content = p.generateDeleteContent()
 	default:
 		content = p.generateDefaultContent()
 	}
@@ -657,6 +659,24 @@ func (p *permissionDialogCmp) generateLSContent() string {
 		return finalContent
 	}
 	return ""
+}
+
+func (p *permissionDialogCmp) generateDeleteContent() string {
+	params, ok := p.permission.Params.(tools.DeletePermissionsParams)
+	if !ok {
+		return ""
+	}
+	t := styles.CurrentTheme()
+	baseStyle := t.S().Base.Background(t.BgSubtle)
+
+	content := fmt.Sprintf("Filepath: %s", fsext.PrettyPath(params.FilePath))
+	if params.Recursive {
+		content += " (recursive)"
+	}
+	return baseStyle.
+		Padding(1, 2).
+		Width(p.contentViewPort.Width()).
+		Render(content)
 }
 
 func (p *permissionDialogCmp) generateDefaultContent() string {

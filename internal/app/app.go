@@ -40,6 +40,13 @@ import (
 	"github.com/charmbracelet/x/term"
 )
 
+// UpdateAvailableMsg is sent when a new version is available.
+type UpdateAvailableMsg struct {
+	CurrentVersion string
+	LatestVersion  string
+	IsDevelopment  bool
+}
+
 type App struct {
 	Sessions    session.Service
 	Messages    message.Service
@@ -452,7 +459,7 @@ func (app *App) checkForUpdates(ctx context.Context) {
 	if err != nil || !info.Available() {
 		return
 	}
-	app.events <- pubsub.UpdateAvailableMsg{
+	app.events <- UpdateAvailableMsg{
 		CurrentVersion: info.Current,
 		LatestVersion:  info.Latest,
 		IsDevelopment:  info.IsDevelopment(),

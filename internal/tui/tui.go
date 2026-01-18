@@ -385,7 +385,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, tea.Batch(cmds...)
 	// Update Available
-	case pubsub.UpdateAvailableMsg:
+	case app.UpdateAvailableMsg:
 		// Show update notification in status bar
 		statusMsg := fmt.Sprintf("Crush update available: v%s → v%s.", msg.CurrentVersion, msg.LatestVersion)
 		if msg.IsDevelopment {

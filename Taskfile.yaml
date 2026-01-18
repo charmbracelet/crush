@@ -122,6 +122,10 @@ tasks:
         msg: Not on main branch
       - sh: "[ $(git status --porcelain=2 | wc -l) = 0 ]"
         msg: "Git is dirty"
+      - sh: 'gh run list --workflow build.yml --commit $(git rev-parse HEAD) --status success --json conclusion -q ".[0].conclusion" | grep -q success'
+        msg: "Test build for this commit failed or not present"
+      - sh: 'gh run list --workflow snapshot.yml --commit $(git rev-parse HEAD) --status success --json conclusion -q ".[0].conclusion" | grep -q success'
+        msg: "Snapshot build for this commit failed or not present"
     cmds:
       - task: fetch-tags
       - git commit --allow-empty -m "{{.NEXT}}"

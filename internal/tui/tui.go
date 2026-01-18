@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/event"
+	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/stringext"
@@ -592,6 +593,7 @@ func (a *appModel) View() tea.View {
 	view.AltScreen = true
 	view.MouseMode = tea.MouseModeCellMotion
 	view.BackgroundColor = t.BgBase
+	view.WindowTitle = "crush " + home.Short(config.Get().WorkingDir())
 	if a.wWidth < 25 || a.wHeight < 15 {
 		view.Content = t.S().Base.Width(a.wWidth).Height(a.wHeight).
 			Align(lipgloss.Center, lipgloss.Center).

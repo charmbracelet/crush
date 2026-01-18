@@ -766,6 +766,8 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		)
 	}
 
+	var reasoningContent strings.Builder
+
 	streamCall := fantasy.AgentStreamCall{
 		Prompt: fmt.Sprintf("Generate a concise title for the following content:\n\n%s\n <think>\n\n</think>", userPrompt),
 		PrepareStep: func(callCtx context.Context, opts fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
@@ -776,6 +778,11 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 				}, prepared.Messages...)
 			}
 			return callCtx, prepared, nil
+		},
+		OnReasoningDelta: func(id string, text string) error {
+			// Also capture reasoning for title fallback.
+			reasoningContent.WriteString(text)
+			return nil
 		},
 	}
 
@@ -822,9 +829,23 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	title = strings.ReplaceAll(resp.Response.Content.Text(), "\n", " ")
 
 	// Remove thinking tags if present.
-	title = thinkTagRegex.ReplaceAllString(title, "")
+	title = removeThinkingTags(title)
 
-	title = strings.TrimSpace(title)
+	// If title is empty, try reasoning content (models may put the title in
+	// reasoning).
+	if title == "" && reasoningContent.Len() > 0 {
+		reasoningTitle := strings.ReplaceAll(reasoningContent.String(), "\n", " ")
+		reasoningTitle = removeThinkingTags(reasoningTitle)
+		// Extract last sentence or reasonable length from reasoning, if
+		// present.
+		if len(reasoningTitle) > 0 {
+			if sentences := strings.Split(reasoningTitle, "."); len(sentences) > 1 {
+				reasoningTitle = strings.TrimSpace(sentences[len(sentences)-1])
+			}
+		}
+		title = reasoningTitle
+	}
+
 	if title == "" {
 		slog.Warn("empty title; using fallback")
 		title = defaultSessionName
@@ -1134,4 +1155,11 @@ func buildSummaryPrompt(todos []session.Todo) string {
 		sb.WriteString("Instruct the resuming assistant to use the `todos` tool to continue tracking progress on these tasks.")
 	}
 	return sb.String()
+}
+
+// removeThinkingTags removes <think>...</think> tags from the given string.
+// Used to clean up generated session titles.
+func removeThinkingTags(s string) string {
+	s = thinkTagRegex.ReplaceAllString(s, "")
+	return strings.TrimSpace(s)
 }

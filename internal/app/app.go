@@ -60,6 +60,10 @@ type App struct {
 	// global context and cleanup functions
 	globalCtx    context.Context
 	cleanupFuncs []func() error
+
+	// initialPrompt stores the seeded prompt for interactive mode.
+	// When set, the TUI will automatically send this prompt upon initialization.
+	initialPrompt string
 }
 
 // New initializes a new application instance.
@@ -120,6 +124,27 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 // Config returns the application configuration.
 func (app *App) Config() *config.Config {
 	return app.config
+}
+
+// SetInitialPrompt sets the initial prompt for the interactive session.
+// When set, the TUI will automatically send this prompt upon initialization.
+func (app *App) SetInitialPrompt(prompt string) {
+	app.initialPrompt = prompt
+}
+
+// InitialPrompt returns the initial prompt for the interactive session.
+func (app *App) InitialPrompt() string {
+	return app.initialPrompt
+}
+
+// HasInitialPrompt returns true if an initial prompt has been set.
+func (app *App) HasInitialPrompt() bool {
+	return app.initialPrompt != ""
+}
+
+// ClearInitialPrompt clears the initial prompt after it has been used.
+func (app *App) ClearInitialPrompt() {
+	app.initialPrompt = ""
 }
 
 // RunNonInteractive runs the application in non-interactive mode with the

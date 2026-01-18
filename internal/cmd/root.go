@@ -37,6 +37,8 @@ func init() {
 	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Debug")
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
 	rootCmd.Flags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
+	rootCmd.Flags().StringP("prompt", "p", "", "Initial prompt to seed the interactive session")
+	rootCmd.Flags().StringP("prompt-file", "P", "", "Read initial prompt from file")
 
 	rootCmd.AddCommand(
 		runCmd,
@@ -50,12 +52,27 @@ func init() {
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "crush",
+	Use:   "crush [prompt]",
 	Short: "An AI assistant for software development",
 	Long:  "An AI assistant for software development and similar tasks with direct access to the terminal",
+	Args:  cobra.ArbitraryArgs,
 	Example: `
 # Run in interactive mode
 crush
+
+# Run in interactive mode with a seeded prompt
+crush "Explain the project structure"
+
+# Run in interactive mode with a prompt flag
+crush -p "Help me debug this issue"
+
+# Run in interactive mode with a prompt from file
+crush -P ./prompts/analyze.md
+
+# Pipe input to seed the interactive session
+echo "Explain this" | crush
+crush < requirements.txt
+crush <<< "What files are in this directory?"
 
 # Run with debug logging
 crush -d
@@ -69,18 +86,29 @@ crush -D /path/to/custom/.crush
 # Print version
 crush -v
 
-# Run a single non-interactive prompt
+# Run a single non-interactive prompt (exits after completion)
 crush run "Explain the use of context in Go"
 
 # Run in dangerous mode (auto-accept all permissions)
 crush -y
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Collect initial prompt from flags, args, or stdin
+		initialPrompt, err := collectInitialPrompt(cmd, args)
+		if err != nil {
+			return err
+		}
+
 		app, err := setupAppWithProgressBar(cmd)
 		if err != nil {
 			return err
 		}
 		defer app.Shutdown()
+
+		// Set initial prompt for the TUI to use
+		if initialPrompt != "" {
+			app.SetInitialPrompt(initialPrompt)
+		}
 
 		event.AppInitialized()
 
@@ -295,4 +323,43 @@ func shouldQueryTerminalVersion(env uv.Environ) bool {
 		(!strings.Contains(termProg, "Apple") && !okSSHTTY) ||
 		// Terminals that do support XTVERSION.
 		stringext.ContainsAny(termType, "alacritty", "ghostty", "kitty", "rio", "wezterm")
+}
+
+// collectInitialPrompt collects the initial prompt from various sources.
+// Priority order:
+//  1. -F/--prompt-file flag (read from file)
+//  2. -p/--prompt flag
+//  3. Positional arguments (crush "message")
+//  4. stdin redirection (pipe, file redirect, here string)
+func collectInitialPrompt(cmd *cobra.Command, args []string) (string, error) {
+	var prompt string
+
+	// Priority 1: Read from -F/--prompt-file flag
+	promptFile, _ := cmd.Flags().GetString("prompt-file")
+	if promptFile != "" {
+		content, err := os.ReadFile(promptFile)
+		if err != nil {
+			return "", fmt.Errorf("failed to read prompt file %q: %w", promptFile, err)
+		}
+		prompt = string(content)
+	}
+
+	// Priority 2: Read from -p/--prompt flag
+	if prompt == "" {
+		prompt, _ = cmd.Flags().GetString("prompt")
+	}
+
+	// Priority 3: Read from positional arguments
+	if prompt == "" && len(args) > 0 {
+		prompt = strings.Join(args, " ")
+	}
+
+	// Priority 4: Read from stdin (pipe, file redirect, here string)
+	// MaybePrependStdin will prepend stdin content if available
+	prompt, err := MaybePrependStdin(prompt)
+	if err != nil {
+		return "", fmt.Errorf("failed to read from stdin: %w", err)
+	}
+
+	return strings.TrimSpace(prompt), nil
 }

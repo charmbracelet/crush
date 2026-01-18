@@ -298,6 +298,8 @@ After significant changes:
 - Only use the tools you know exist.
 
 <bash_commands>
+**CRITICAL**: The `description` parameter is REQUIRED for all bash tool calls. Always provide it.
+
 When running non-trivial bash commands (especially those that modify the system):
 - Briefly explain what the command does and why you're running it
 - This ensures the user understands potentially dangerous operations

@@ -334,6 +334,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		c.sessions,
 		c.messages,
 		nil,
+		0, // MaxSteps: no limit for main agent
 	})
 
 	c.readyWg.Go(func() error {

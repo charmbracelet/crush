@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"slices"
 	"sort"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2/tree"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 )
 
@@ -71,6 +73,15 @@ crush models gpt5`,
 			slices.Sort(providerModels[providerID])
 		}
 		sort.Strings(providerIDs)
+
+		if !isatty.IsTerminal(os.Stdout.Fd()) {
+			for _, providerID := range providerIDs {
+				for _, modelID := range providerModels[providerID] {
+					fmt.Println(providerID, modelID)
+				}
+			}
+			return nil
+		}
 
 		t := tree.New()
 		for _, providerID := range providerIDs {

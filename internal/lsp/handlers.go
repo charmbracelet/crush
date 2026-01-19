@@ -104,7 +104,7 @@ func HandleServerMessage(_ context.Context, method string, params json.RawMessag
 }
 
 // HandleDiagnostics handles diagnostic notifications from the LSP server
-func HandleDiagnostics(client *Client, params json.RawMessage) {
+func HandleDiagnostics(ctx context.Context, client *Client, params json.RawMessage) {
 	var diagParams protocol.PublishDiagnosticsParams
 	if err := json.Unmarshal(params, &diagParams); err != nil {
 		slog.Error("Error unmarshaling diagnostics params", "error", err)
@@ -121,6 +121,6 @@ func HandleDiagnostics(client *Client, params json.RawMessage) {
 
 	// Trigger callback if set
 	if client.onDiagnosticsChanged != nil {
-		client.onDiagnosticsChanged(client.name, totalCount)
+		client.onDiagnosticsChanged(ctx, client.name, totalCount)
 	}
 }

@@ -41,7 +41,7 @@ type Client struct {
 	config config.LSPConfig
 
 	// Diagnostic change callback
-	onDiagnosticsChanged func(name string, count int)
+	onDiagnosticsChanged func(ctx context.Context, name string, count int)
 
 	// Diagnostic cache
 	diagnostics *csync.VersionedMap[protocol.DocumentURI, []protocol.Diagnostic]
@@ -144,8 +144,8 @@ func (c *Client) Initialize(ctx context.Context, workspaceDir string) (*protocol
 	c.RegisterServerRequestHandler("workspace/configuration", HandleWorkspaceConfiguration)
 	c.RegisterServerRequestHandler("client/registerCapability", HandleRegisterCapability)
 	c.RegisterNotificationHandler("window/showMessage", HandleServerMessage)
-	c.RegisterNotificationHandler("textDocument/publishDiagnostics", func(_ context.Context, _ string, params json.RawMessage) {
-		HandleDiagnostics(c, params)
+	c.RegisterNotificationHandler("textDocument/publishDiagnostics", func(ctx context.Context, _ string, params json.RawMessage) {
+		HandleDiagnostics(ctx, c, params)
 	})
 
 	return result, nil
@@ -192,7 +192,7 @@ func (c *Client) GetName() string {
 }
 
 // SetDiagnosticsCallback sets the callback function for diagnostic changes
-func (c *Client) SetDiagnosticsCallback(callback func(name string, count int)) {
+func (c *Client) SetDiagnosticsCallback(callback func(ctx context.Context, name string, count int)) {
 	c.onDiagnosticsChanged = callback
 }
 

@@ -242,7 +242,7 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 	sessionID := GetSessionFromContext(edit.ctx)
 
 	if sessionID == "" {
-		return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for creating a new file")
+		return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for deleting content")
 	}
 
 	_, additions, removals := diff.GenerateDiff(

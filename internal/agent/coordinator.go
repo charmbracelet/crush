@@ -864,18 +864,12 @@ func (c *coordinator) RecoverSession(ctx context.Context, sessionID string) erro
 		// Handle incomplete assistant messages with tool calls
 		if msg.Role == message.Assistant && len(msg.ToolCalls()) > 0 {
 			// Mark any unfinished tool calls as finished
-			updated := false
 			for _, tc := range msg.ToolCalls() {
 				if !tc.Finished {
 					msg.FinishToolCall(tc.ID)
-					updated = true
 				}
 			}
-			if updated {
-				if updateErr := c.messages.Update(ctx, msg); updateErr != nil {
-					slog.Error("Failed to update tool calls", "message_id", msg.ID, "error", updateErr)
-				}
-			}
+			// Batch all modifications before single update
 			msg.FinishThinking()
 			msg.AddFinish(message.FinishReasonError, "Response interrupted", "Session was interrupted during tool execution")
 			if updateErr := c.messages.Update(ctx, msg); updateErr != nil {

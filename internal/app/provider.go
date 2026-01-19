@@ -13,8 +13,7 @@ import (
 // This function only checks if the first component is a valid provider name; if not,
 // it treats the entire string as a model ID (which may contain slashes).
 func parseModelStr(providers map[string]config.ProviderConfig, modelStr string) (providerFilter, modelID string) {
-	// TODO: simplify this
-	parts := strings.Split(strings.ToLower(modelStr), "/")
+	parts := strings.Split(modelStr, "/")
 	if len(parts) == 1 {
 		return "", parts[0]
 	}
@@ -24,7 +23,7 @@ func parseModelStr(providers map[string]config.ProviderConfig, modelStr string) 
 	}
 
 	// First part is not a valid provider, treat entire string as model ID
-	return "", strings.ToLower(modelStr)
+	return "", modelStr
 }
 
 // modelMatch represents a found model.
@@ -58,19 +57,21 @@ func findModels(providers map[string]config.ProviderConfig, largeModel, smallMod
 			continue
 		}
 		for _, m := range provider.Models {
-			modelIDLower := strings.ToLower(m.ID)
-			if largeModelID != "" && modelIDLower == largeModelID &&
-				(largeProviderFilter == "" || name == largeProviderFilter) {
+			if filter(largeModelID, largeProviderFilter, m.ID, name) {
 				largeMatches = append(largeMatches, modelMatch{provider: name, modelID: m.ID})
 			}
-			if smallModelID != "" && modelIDLower == smallModelID &&
-				(smallProviderFilter == "" || name == smallProviderFilter) {
+			if filter(smallModelID, smallProviderFilter, m.ID, name) {
 				smallMatches = append(smallMatches, modelMatch{provider: name, modelID: m.ID})
 			}
 		}
 	}
 
 	return largeMatches, smallMatches, nil
+}
+
+func filter(modelFilter, providerFilter, model, provider string) bool {
+	return modelFilter != "" && model == modelFilter &&
+		(providerFilter == "" || provider == providerFilter)
 }
 
 // Validate and return a single match.

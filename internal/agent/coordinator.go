@@ -54,6 +54,7 @@ type Coordinator interface {
 	QueuedPromptsList(sessionID string) []string
 	ClearQueue(sessionID string)
 	Summarize(context.Context, string) error
+	RecoverSession(ctx context.Context, sessionID string) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
 }
@@ -832,6 +833,58 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 		return errors.New("model provider not configured")
 	}
 	return c.currentAgent.Summarize(ctx, sessionID, getProviderOptions(c.currentAgent.Model(), providerCfg))
+}
+
+func (c *coordinator) RecoverSession(ctx context.Context, sessionID string) error {
+	// Skip recovery if session is currently active
+	if c.currentAgent.IsSessionBusy(sessionID) {
+		return nil
+	}
+
+	msgs, err := c.messages.List(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to list messages: %w", err)
+	}
+
+	for _, msg := range msgs {
+		if msg.IsFinished() {
+			continue
+		}
+
+		// Handle incomplete summary messages
+		if msg.IsSummaryMessage {
+			msg.FinishThinking()
+			msg.AddFinish(message.FinishReasonError, "Summarization interrupted", "Session was interrupted during summarization")
+			if updateErr := c.messages.Update(ctx, msg); updateErr != nil {
+				slog.Error("Failed to recover summary message", "message_id", msg.ID, "error", updateErr)
+			}
+			continue
+		}
+
+		// Handle incomplete assistant messages with tool calls
+		if msg.Role == message.Assistant && len(msg.ToolCalls()) > 0 {
+			// Mark any unfinished tool calls as finished
+			updated := false
+			for _, tc := range msg.ToolCalls() {
+				if !tc.Finished {
+					msg.FinishToolCall(tc.ID)
+					updated = true
+				}
+			}
+			if updated {
+				if updateErr := c.messages.Update(ctx, msg); updateErr != nil {
+					slog.Error("Failed to update tool calls", "message_id", msg.ID, "error", updateErr)
+				}
+			}
+			msg.FinishThinking()
+			msg.AddFinish(message.FinishReasonError, "Response interrupted", "Session was interrupted during tool execution")
+			if updateErr := c.messages.Update(ctx, msg); updateErr != nil {
+				slog.Error("Failed to recover assistant message", "message_id", msg.ID, "error", updateErr)
+			}
+		}
+	}
+
+	return nil
 }
 
 func (c *coordinator) isUnauthorized(err error) bool {

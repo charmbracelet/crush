@@ -470,6 +470,8 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		case key.Matches(msg, p.keyMap.TogglePills):
 			if p.session.ID != "" {
 				return p, p.togglePillsExpanded()
+			} else {
+				return p, nil
 			}
 		case key.Matches(msg, p.keyMap.PillLeft):
 			if p.session.ID != "" && p.pillsExpanded {
@@ -595,7 +597,7 @@ func (p *chatPage) View() string {
 				helpDesc = "open"
 			}
 			// Style to match help section: keys in FgMuted, description in FgSubtle
-			helpKey := t.S().Base.Foreground(t.FgMuted).Render("ctrl+space")
+			helpKey := t.S().Base.Foreground(t.FgMuted).Render("ctrl+space/ctrl+t")
 			helpText := t.S().Base.Foreground(t.FgSubtle).Render(helpDesc)
 			helpHint := lipgloss.JoinHorizontal(lipgloss.Center, helpKey, " ", helpText)
 			pillsRow = lipgloss.JoinHorizontal(lipgloss.Center, pillsRow, " ", helpHint)

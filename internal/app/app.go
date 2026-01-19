@@ -52,10 +52,8 @@ type App struct {
 
 	config *config.Config
 
-	serviceEventsWG *sync.WaitGroup
-	eventsCtx       context.Context
-	events          chan tea.Msg
-	tuiWG           *sync.WaitGroup
+	// program holds reference to the TUI program for sending events.
+	program *tea.Program
 
 	// global context and cleanup functions
 	globalCtx    context.Context
@@ -84,13 +82,7 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 		globalCtx: ctx,
 
 		config: cfg,
-
-		events:          make(chan tea.Msg, 100),
-		serviceEventsWG: &sync.WaitGroup{},
-		tuiWG:           &sync.WaitGroup{},
 	}
-
-	app.setupEvents()
 
 	// Initialize LSP clients in the background.
 	app.initLSPClients(ctx)
@@ -223,8 +215,35 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 		}
 	}(ctx, sess.ID, prompt)
 
-	messageEvents := app.Messages.Subscribe(ctx)
-	messageReadBytes := make(map[string]int)
+	var (
+		messageReadBytes   = make(map[string]int)
+		messageReadBytesMu sync.Mutex
+	)
+
+	// Register callback to process messages directly.
+	app.Messages.AddListener("non-interactive", func(event pubsub.Event[message.Message]) {
+		msg := event.Payload
+		if msg.SessionID != sess.ID || msg.Role != message.Assistant || len(msg.Parts) == 0 {
+			return
+		}
+		stopSpinner()
+
+		content := msg.Content().String()
+
+		messageReadBytesMu.Lock()
+		readBytes := messageReadBytes[msg.ID]
+		if len(content) >= readBytes {
+			part := content[readBytes:]
+			// Trim leading whitespace. Sometimes the LLM includes leading
+			// formatting and indentation, which we don't want here.
+			if readBytes == 0 {
+				part = strings.TrimLeft(part, " \t")
+			}
+			fmt.Fprint(output, part)
+			messageReadBytes[msg.ID] = len(content)
+		}
+		messageReadBytesMu.Unlock()
+	})
 
 	defer func() {
 		if stderrTTY {
@@ -236,6 +255,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 		_, _ = fmt.Fprintln(output)
 	}()
 
+	// Wait for agent completion or cancellation.
 	for {
 		if stderrTTY {
 			// HACK: Reinitialize the terminal progress bar on every iteration
@@ -255,29 +275,6 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 			}
 			return nil
 
-		case event := <-messageEvents:
-			msg := event.Payload
-			if msg.SessionID == sess.ID && msg.Role == message.Assistant && len(msg.Parts) > 0 {
-				stopSpinner()
-
-				content := msg.Content().String()
-				readBytes := messageReadBytes[msg.ID]
-
-				if len(content) < readBytes {
-					slog.Error("Non-interactive: message content is shorter than read bytes", "message_length", len(content), "read_bytes", readBytes)
-					return fmt.Errorf("message content is shorter than read bytes: %d < %d", len(content), readBytes)
-				}
-
-				part := content[readBytes:]
-				// Trim leading whitespace. Sometimes the LLM includes leading
-				// formatting and intentation, which we don't want here.
-				if readBytes == 0 {
-					part = strings.TrimLeft(part, " \t")
-				}
-				fmt.Fprint(output, part)
-				messageReadBytes[msg.ID] = len(content)
-			}
-
 		case <-ctx.Done():
 			stopSpinner()
 			return ctx.Err()
@@ -290,57 +287,6 @@ func (app *App) UpdateAgentModel(ctx context.Context) error {
 		return fmt.Errorf("agent configuration is missing")
 	}
 	return app.AgentCoordinator.UpdateModels(ctx)
-}
-
-func (app *App) setupEvents() {
-	ctx, cancel := context.WithCancel(app.globalCtx)
-	app.eventsCtx = ctx
-	setupSubscriber(ctx, app.serviceEventsWG, "sessions", app.Sessions.Subscribe, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "messages", app.Messages.Subscribe, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "permissions", app.Permissions.Subscribe, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "permissions-notifications", app.Permissions.SubscribeNotifications, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "history", app.History.Subscribe, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "mcp", mcp.SubscribeEvents, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "lsp", SubscribeLSPEvents, app.events)
-	cleanupFunc := func() error {
-		cancel()
-		app.serviceEventsWG.Wait()
-		return nil
-	}
-	app.cleanupFuncs = append(app.cleanupFuncs, cleanupFunc)
-}
-
-func setupSubscriber[T any](
-	ctx context.Context,
-	wg *sync.WaitGroup,
-	name string,
-	subscriber func(context.Context) <-chan pubsub.Event[T],
-	outputCh chan<- tea.Msg,
-) {
-	wg.Go(func() {
-		subCh := subscriber(ctx)
-		for {
-			select {
-			case event, ok := <-subCh:
-				if !ok {
-					slog.Debug("subscription channel closed", "name", name)
-					return
-				}
-				var msg tea.Msg = event
-				select {
-				case outputCh <- msg:
-				case <-time.After(2 * time.Second):
-					slog.Warn("message dropped due to slow consumer", "name", name)
-				case <-ctx.Done():
-					slog.Debug("subscription cancelled", "name", name)
-					return
-				}
-			case <-ctx.Done():
-				slog.Debug("subscription cancelled", "name", name)
-				return
-			}
-		}
-	})
 }
 
 func (app *App) InitCoderAgent(ctx context.Context) error {
@@ -365,36 +311,37 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 	return nil
 }
 
-// Subscribe sends events to the TUI as tea.Msgs.
+// Subscribe registers event listeners that send events to the TUI program.
 func (app *App) Subscribe(program *tea.Program) {
 	defer log.RecoverPanic("app.Subscribe", func() {
 		slog.Info("TUI subscription panic: attempting graceful shutdown")
 		program.Quit()
 	})
 
-	app.tuiWG.Add(1)
-	tuiCtx, tuiCancel := context.WithCancel(app.globalCtx)
-	app.cleanupFuncs = append(app.cleanupFuncs, func() error {
-		slog.Debug("Cancelling TUI message handler")
-		tuiCancel()
-		app.tuiWG.Wait()
-		return nil
-	})
-	defer app.tuiWG.Done()
+	app.program = program
 
-	for {
-		select {
-		case <-tuiCtx.Done():
-			slog.Debug("TUI message handler shutting down")
-			return
-		case msg, ok := <-app.events:
-			if !ok {
-				slog.Debug("TUI message channel closed")
-				return
-			}
-			program.Send(msg)
-		}
-	}
+	// Register listeners that send directly to the program.
+	app.Sessions.AddListener("tui-sessions", func(event pubsub.Event[session.Session]) {
+		program.Send(event)
+	})
+	app.Messages.AddListener("tui-messages", func(event pubsub.Event[message.Message]) {
+		program.Send(event)
+	})
+	app.Permissions.AddListener("tui-permissions", func(event pubsub.Event[permission.PermissionRequest]) {
+		program.Send(event)
+	})
+	app.Permissions.AddNotificationListener("tui-permissions-notifications", func(event pubsub.Event[permission.PermissionNotification]) {
+		program.Send(event)
+	})
+	app.History.AddListener("tui-history", func(event pubsub.Event[history.File]) {
+		program.Send(event)
+	})
+	mcp.AddEventListener("tui-mcp", func(event pubsub.Event[mcp.Event]) {
+		program.Send(event)
+	})
+	AddLSPEventListener("tui-lsp", func(event pubsub.Event[LSPEvent]) {
+		program.Send(event)
+	})
 }
 
 // Shutdown performs a graceful shutdown of the application.
@@ -452,9 +399,11 @@ func (app *App) checkForUpdates(ctx context.Context) {
 	if err != nil || !info.Available() {
 		return
 	}
-	app.events <- pubsub.UpdateAvailableMsg{
-		CurrentVersion: info.Current,
-		LatestVersion:  info.Latest,
-		IsDevelopment:  info.IsDevelopment(),
+	if app.program != nil {
+		app.program.Send(pubsub.UpdateAvailableMsg{
+			CurrentVersion: info.Current,
+			LatestVersion:  info.Latest,
+			IsDevelopment:  info.IsDevelopment(),
+		})
 	}
 }

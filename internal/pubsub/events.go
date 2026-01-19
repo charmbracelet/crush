@@ -9,7 +9,7 @@ const (
 )
 
 type Subscriber[T any] interface {
-	Subscribe(context.Context) <-chan Event[T]
+	AddListener(key string, fn func(Event[T]))
 }
 
 type (
@@ -23,7 +23,7 @@ type (
 	}
 
 	Publisher[T any] interface {
-		Publish(EventType, T)
+		Publish(context.Context, EventType, T)
 	}
 )
 

@@ -55,7 +55,7 @@ func RefreshPrompts(ctx context.Context, name string) {
 
 	prompts, err := getPrompts(ctx, session)
 	if err != nil {
-		updateState(name, StateError, err, nil, Counts{})
+		updateState(ctx, name, StateError, err, nil, Counts{})
 		return
 	}
 
@@ -63,7 +63,7 @@ func RefreshPrompts(ctx context.Context, name string) {
 
 	prev, _ := states.Get(name)
 	prev.Counts.Prompts = len(prompts)
-	updateState(name, StateConnected, nil, session, prev.Counts)
+	updateState(ctx, name, StateConnected, nil, session, prev.Counts)
 }
 
 func getPrompts(ctx context.Context, c *mcp.ClientSession) ([]*Prompt, error) {

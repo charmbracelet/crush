@@ -23,11 +23,12 @@ func (m *mockPermissionService) Request(ctx context.Context, req permission.Crea
 	return true, nil
 }
 
-func (m *mockPermissionService) Grant(req permission.PermissionRequest) {}
+func (m *mockPermissionService) Grant(ctx context.Context, req permission.PermissionRequest) {}
 
-func (m *mockPermissionService) Deny(req permission.PermissionRequest) {}
+func (m *mockPermissionService) Deny(ctx context.Context, req permission.PermissionRequest) {}
 
-func (m *mockPermissionService) GrantPersistent(req permission.PermissionRequest) {}
+func (m *mockPermissionService) GrantPersistent(ctx context.Context, req permission.PermissionRequest) {
+}
 
 func (m *mockPermissionService) AutoApproveSession(sessionID string) {}
 
@@ -37,8 +38,7 @@ func (m *mockPermissionService) SkipRequests() bool {
 	return false
 }
 
-func (m *mockPermissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[permission.PermissionNotification] {
-	return make(<-chan pubsub.Event[permission.PermissionNotification])
+func (m *mockPermissionService) AddNotificationListener(key string, fn func(pubsub.Event[permission.PermissionNotification])) {
 }
 
 type mockHistoryService struct {

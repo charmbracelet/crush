@@ -4,6 +4,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -114,7 +115,10 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 		var wg sync.WaitGroup
 		wg.Add(1)
 
-		events := service.Subscribe(t.Context())
+		events := make(chan pubsub.Event[PermissionRequest], 10)
+		service.AddListener("test", func(event pubsub.Event[PermissionRequest]) {
+			events <- event
+		})
 
 		go func() {
 			defer wg.Done()
@@ -125,7 +129,7 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 		event := <-events
 
 		permissionReq = event.Payload
-		service.GrantPersistent(permissionReq)
+		service.GrantPersistent(t.Context(), permissionReq)
 
 		wg.Wait()
 		assert.True(t, result1, "First request should be granted")
@@ -155,7 +159,10 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 			Path:        "/tmp/test.txt",
 		}
 
-		events := service.Subscribe(t.Context())
+		events := make(chan pubsub.Event[PermissionRequest], 10)
+		service.AddListener("test", func(event pubsub.Event[PermissionRequest]) {
+			events <- event
+		})
 		var result1 bool
 		var wg sync.WaitGroup
 
@@ -167,7 +174,7 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 		event := <-events
 		permissionReq = event.Payload
 
-		service.Grant(permissionReq)
+		service.Grant(t.Context(), permissionReq)
 		wg.Wait()
 		assert.True(t, result1, "First request should be granted")
 
@@ -179,14 +186,17 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 
 		event = <-events
 		permissionReq = event.Payload
-		service.Deny(permissionReq)
+		service.Deny(t.Context(), permissionReq)
 		wg.Wait()
 		assert.False(t, result2, "Second request should be denied")
 	})
 	t.Run("Concurrent requests with different outcomes", func(t *testing.T) {
 		service := NewPermissionService("/tmp", false, []string{})
 
-		events := service.Subscribe(t.Context())
+		events := make(chan pubsub.Event[PermissionRequest], 10)
+		service.AddListener("test", func(event pubsub.Event[PermissionRequest]) {
+			events <- event
+		})
 
 		var wg sync.WaitGroup
 		results := make([]bool, 3)
@@ -228,11 +238,11 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 			event := <-events
 			switch event.Payload.ToolName {
 			case "tool1":
-				service.Grant(event.Payload)
+				service.Grant(t.Context(), event.Payload)
 			case "tool2":
-				service.GrantPersistent(event.Payload)
+				service.GrantPersistent(t.Context(), event.Payload)
 			case "tool3":
-				service.Deny(event.Payload)
+				service.Deny(t.Context(), event.Payload)
 			}
 		}
 		wg.Wait()

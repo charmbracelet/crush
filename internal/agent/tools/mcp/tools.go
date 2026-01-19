@@ -117,7 +117,7 @@ func RefreshTools(ctx context.Context, name string) {
 
 	tools, err := getTools(ctx, session)
 	if err != nil {
-		updateState(name, StateError, err, nil, Counts{})
+		updateState(ctx, name, StateError, err, nil, Counts{})
 		return
 	}
 
@@ -125,7 +125,7 @@ func RefreshTools(ctx context.Context, name string) {
 
 	prev, _ := states.Get(name)
 	prev.Counts.Tools = toolCount
-	updateState(name, StateConnected, nil, session, prev.Counts)
+	updateState(ctx, name, StateConnected, nil, session, prev.Counts)
 }
 
 func getTools(ctx context.Context, session *mcp.ClientSession) ([]*Tool, error) {

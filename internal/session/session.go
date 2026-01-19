@@ -73,7 +73,7 @@ func (s *service) Create(ctx context.Context, title string) (Session, error) {
 		return Session{}, err
 	}
 	session := s.fromDBItem(dbSession)
-	s.Publish(pubsub.CreatedEvent, session)
+	s.Publish(ctx, pubsub.CreatedEvent, session)
 	event.SessionCreated()
 	return session, nil
 }
@@ -88,7 +88,7 @@ func (s *service) CreateTaskSession(ctx context.Context, toolCallID, parentSessi
 		return Session{}, err
 	}
 	session := s.fromDBItem(dbSession)
-	s.Publish(pubsub.CreatedEvent, session)
+	s.Publish(ctx, pubsub.CreatedEvent, session)
 	return session, nil
 }
 
@@ -102,7 +102,7 @@ func (s *service) CreateTitleSession(ctx context.Context, parentSessionID string
 		return Session{}, err
 	}
 	session := s.fromDBItem(dbSession)
-	s.Publish(pubsub.CreatedEvent, session)
+	s.Publish(ctx, pubsub.CreatedEvent, session)
 	return session, nil
 }
 
@@ -115,7 +115,7 @@ func (s *service) Delete(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	s.Publish(pubsub.DeletedEvent, session)
+	s.Publish(ctx, pubsub.DeletedEvent, session)
 	event.SessionDeleted()
 	return nil
 }
@@ -153,7 +153,7 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 		return Session{}, err
 	}
 	session = s.fromDBItem(dbSession)
-	s.Publish(pubsub.UpdatedEvent, session)
+	s.Publish(ctx, pubsub.UpdatedEvent, session)
 	return session, nil
 }
 

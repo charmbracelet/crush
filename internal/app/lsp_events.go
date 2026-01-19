@@ -41,9 +41,9 @@ var (
 	lspBroker = pubsub.NewBroker[LSPEvent]()
 )
 
-// SubscribeLSPEvents returns a channel for LSP events
-func SubscribeLSPEvents(ctx context.Context) <-chan pubsub.Event[LSPEvent] {
-	return lspBroker.Subscribe(ctx)
+// AddLSPEventListener registers a callback for LSP events.
+func AddLSPEventListener(key string, fn func(pubsub.Event[LSPEvent])) {
+	lspBroker.AddListener(key, fn)
 }
 
 // GetLSPStates returns the current state of all LSP clients
@@ -71,7 +71,7 @@ func updateLSPState(name string, state lsp.ServerState, err error, client *lsp.C
 	lspStates.Set(name, info)
 
 	// Publish state change event
-	lspBroker.Publish(pubsub.UpdatedEvent, LSPEvent{
+	lspBroker.Publish(context.Background(), pubsub.UpdatedEvent, LSPEvent{
 		Type:            LSPEventStateChanged,
 		Name:            name,
 		State:           state,
@@ -87,7 +87,7 @@ func updateLSPDiagnostics(name string, diagnosticCount int) {
 		lspStates.Set(name, info)
 
 		// Publish diagnostics change event
-		lspBroker.Publish(pubsub.UpdatedEvent, LSPEvent{
+		lspBroker.Publish(context.Background(), pubsub.UpdatedEvent, LSPEvent{
 			Type:            LSPEventDiagnosticsChanged,
 			Name:            name,
 			State:           info.State,

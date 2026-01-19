@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"regexp"
 	"slices"
@@ -112,6 +113,7 @@ func (a appModel) Init() tea.Cmd {
 
 // Update handles incoming messages and updates the application state.
 func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	slog.Info("app update", "msg", fmt.Sprintf("%T", msg))
 	var cmds []tea.Cmd
 	var cmd tea.Cmd
 	a.isConfigured = config.HasInitialDataConfig()
@@ -324,11 +326,14 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case permissions.PermissionResponseMsg:
 		switch msg.Action {
 		case permissions.PermissionAllow:
-			a.app.Permissions.Grant(msg.Permission)
+			// TODO: get the context from somewhere
+			a.app.Permissions.Grant(context.Background(), msg.Permission)
 		case permissions.PermissionAllowForSession:
-			a.app.Permissions.GrantPersistent(msg.Permission)
+			// TODO: get the context from somewhere
+			a.app.Permissions.GrantPersistent(context.Background(), msg.Permission)
 		case permissions.PermissionDeny:
-			a.app.Permissions.Deny(msg.Permission)
+			// TODO: get the context from somewhere
+			a.app.Permissions.Deny(context.Background(), msg.Permission)
 		}
 		return a, nil
 	case splash.OnboardingCompleteMsg:

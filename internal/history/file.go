@@ -120,7 +120,7 @@ func (s *service) createWithVersion(ctx context.Context, sessionID, path, conten
 		}
 
 		file = s.fromDBItem(dbFile)
-		s.Publish(pubsub.CreatedEvent, file)
+		s.Publish(ctx, pubsub.CreatedEvent, file)
 		return file, nil
 	}
 
@@ -179,7 +179,7 @@ func (s *service) Delete(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	s.Publish(pubsub.DeletedEvent, file)
+	s.Publish(ctx, pubsub.DeletedEvent, file)
 	return nil
 }
 

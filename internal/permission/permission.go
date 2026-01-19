@@ -44,14 +44,14 @@ type PermissionRequest struct {
 
 type Service interface {
 	pubsub.Subscriber[PermissionRequest]
-	GrantPersistent(permission PermissionRequest)
-	Grant(permission PermissionRequest)
-	Deny(permission PermissionRequest)
+	GrantPersistent(ctx context.Context, permission PermissionRequest)
+	Grant(ctx context.Context, permission PermissionRequest)
+	Deny(ctx context.Context, permission PermissionRequest)
 	Request(ctx context.Context, opts CreatePermissionRequest) (bool, error)
 	AutoApproveSession(sessionID string)
 	SetSkipRequests(skip bool)
 	SkipRequests() bool
-	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
+	AddNotificationListener(key string, fn func(pubsub.Event[PermissionNotification]))
 }
 
 type permissionService struct {
@@ -73,8 +73,8 @@ type permissionService struct {
 	activeRequestMu sync.Mutex
 }
 
-func (s *permissionService) GrantPersistent(permission PermissionRequest) {
-	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+func (s *permissionService) GrantPersistent(ctx context.Context, permission PermissionRequest) {
+	s.notificationBroker.Publish(ctx, pubsub.CreatedEvent, PermissionNotification{
 		ToolCallID: permission.ToolCallID,
 		Granted:    true,
 	})
@@ -94,8 +94,8 @@ func (s *permissionService) GrantPersistent(permission PermissionRequest) {
 	s.activeRequestMu.Unlock()
 }
 
-func (s *permissionService) Grant(permission PermissionRequest) {
-	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+func (s *permissionService) Grant(ctx context.Context, permission PermissionRequest) {
+	s.notificationBroker.Publish(ctx, pubsub.CreatedEvent, PermissionNotification{
 		ToolCallID: permission.ToolCallID,
 		Granted:    true,
 	})
@@ -111,8 +111,8 @@ func (s *permissionService) Grant(permission PermissionRequest) {
 	s.activeRequestMu.Unlock()
 }
 
-func (s *permissionService) Deny(permission PermissionRequest) {
-	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+func (s *permissionService) Deny(ctx context.Context, permission PermissionRequest) {
+	s.notificationBroker.Publish(ctx, pubsub.CreatedEvent, PermissionNotification{
 		ToolCallID: permission.ToolCallID,
 		Granted:    false,
 		Denied:     true,
@@ -135,7 +135,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	}
 
 	// tell the UI that a permission was requested
-	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+	s.notificationBroker.Publish(ctx, pubsub.CreatedEvent, PermissionNotification{
 		ToolCallID: opts.ToolCallID,
 	})
 	s.requestMu.Lock()
@@ -206,7 +206,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	defer s.pendingRequests.Del(permission.ID)
 
 	// Publish the request
-	s.Publish(pubsub.CreatedEvent, permission)
+	s.Publish(ctx, pubsub.CreatedEvent, permission)
 
 	select {
 	case <-ctx.Done():
@@ -222,8 +222,8 @@ func (s *permissionService) AutoApproveSession(sessionID string) {
 	s.autoApproveSessionsMu.Unlock()
 }
 
-func (s *permissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification] {
-	return s.notificationBroker.Subscribe(ctx)
+func (s *permissionService) AddNotificationListener(key string, fn func(pubsub.Event[PermissionNotification])) {
+	s.notificationBroker.AddListener(key, fn)
 }
 
 func (s *permissionService) SetSkipRequests(skip bool) {

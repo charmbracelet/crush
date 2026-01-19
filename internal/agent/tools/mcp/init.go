@@ -92,9 +92,9 @@ type ClientInfo struct {
 	ConnectedAt time.Time
 }
 
-// SubscribeEvents returns a channel for MCP events
-func SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {
-	return broker.Subscribe(ctx)
+// AddEventListener registers a callback for MCP events.
+func AddEventListener(key string, fn func(pubsub.Event[Event])) {
+	broker.AddListener(key, fn)
 }
 
 // GetStates returns the current state of all MCP clients
@@ -139,13 +139,13 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 	// Initialize states for all configured MCPs
 	for name, m := range cfg.MCP {
 		if m.Disabled {
-			updateState(name, StateDisabled, nil, nil, Counts{})
+			updateState(ctx, name, StateDisabled, nil, nil, Counts{})
 			slog.Debug("skipping disabled mcp", "name", name)
 			continue
 		}
 
 		// Set initial starting state
-		updateState(name, StateStarting, nil, nil, Counts{})
+		updateState(ctx, name, StateStarting, nil, nil, Counts{})
 
 		wg.Add(1)
 		go func(name string, m config.MCPConfig) {
@@ -161,7 +161,7 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 					default:
 						err = fmt.Errorf("panic: %v", v)
 					}
-					updateState(name, StateError, err, nil, Counts{})
+					updateState(ctx, name, StateError, err, nil, Counts{})
 					slog.Error("panic in mcp client initialization", "error", err, "name", name)
 				}
 			}()
@@ -175,7 +175,7 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 			tools, err := getTools(ctx, session)
 			if err != nil {
 				slog.Error("error listing tools", "error", err)
-				updateState(name, StateError, err, nil, Counts{})
+				updateState(ctx, name, StateError, err, nil, Counts{})
 				session.Close()
 				return
 			}
@@ -183,7 +183,7 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 			prompts, err := getPrompts(ctx, session)
 			if err != nil {
 				slog.Error("error listing prompts", "error", err)
-				updateState(name, StateError, err, nil, Counts{})
+				updateState(ctx, name, StateError, err, nil, Counts{})
 				session.Close()
 				return
 			}
@@ -192,7 +192,7 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 			updatePrompts(name, prompts)
 			sessions.Set(name, session)
 
-			updateState(name, StateConnected, nil, session, Counts{
+			updateState(ctx, name, StateConnected, nil, session, Counts{
 				Tools:   toolCount,
 				Prompts: len(prompts),
 			})
@@ -230,20 +230,20 @@ func getOrRenewClient(ctx context.Context, name string) (*mcp.ClientSession, err
 	if err == nil {
 		return sess, nil
 	}
-	updateState(name, StateError, maybeTimeoutErr(err, timeout), nil, state.Counts)
+	updateState(ctx, name, StateError, maybeTimeoutErr(err, timeout), nil, state.Counts)
 
 	sess, err = createSession(ctx, name, m, cfg.Resolver())
 	if err != nil {
 		return nil, err
 	}
 
-	updateState(name, StateConnected, nil, sess, state.Counts)
+	updateState(ctx, name, StateConnected, nil, sess, state.Counts)
 	sessions.Set(name, sess)
 	return sess, nil
 }
 
 // updateState updates the state of an MCP client and publishes an event
-func updateState(name string, state State, err error, client *mcp.ClientSession, counts Counts) {
+func updateState(ctx context.Context, name string, state State, err error, client *mcp.ClientSession, counts Counts) {
 	info := ClientInfo{
 		Name:   name,
 		State:  state,
@@ -260,7 +260,7 @@ func updateState(name string, state State, err error, client *mcp.ClientSession,
 	states.Set(name, info)
 
 	// Publish state change event
-	broker.Publish(pubsub.UpdatedEvent, Event{
+	broker.Publish(ctx, pubsub.UpdatedEvent, Event{
 		Type:   EventStateChanged,
 		Name:   name,
 		State:  state,
@@ -276,7 +276,7 @@ func createSession(ctx context.Context, name string, m config.MCPConfig, resolve
 
 	transport, err := createTransport(mcpCtx, m, resolver)
 	if err != nil {
-		updateState(name, StateError, err, nil, Counts{})
+		updateState(ctx, name, StateError, err, nil, Counts{})
 		slog.Error("error creating mcp client", "error", err, "name", name)
 		cancel()
 		cancelTimer.Stop()
@@ -290,14 +290,14 @@ func createSession(ctx context.Context, name string, m config.MCPConfig, resolve
 			Title:   "Crush",
 		},
 		&mcp.ClientOptions{
-			ToolListChangedHandler: func(context.Context, *mcp.ToolListChangedRequest) {
-				broker.Publish(pubsub.UpdatedEvent, Event{
+			ToolListChangedHandler: func(ctx context.Context, _ *mcp.ToolListChangedRequest) {
+				broker.Publish(ctx, pubsub.UpdatedEvent, Event{
 					Type: EventToolsListChanged,
 					Name: name,
 				})
 			},
-			PromptListChangedHandler: func(context.Context, *mcp.PromptListChangedRequest) {
-				broker.Publish(pubsub.UpdatedEvent, Event{
+			PromptListChangedHandler: func(ctx context.Context, _ *mcp.PromptListChangedRequest) {
+				broker.Publish(ctx, pubsub.UpdatedEvent, Event{
 					Type: EventPromptsListChanged,
 					Name: name,
 				})
@@ -311,7 +311,7 @@ func createSession(ctx context.Context, name string, m config.MCPConfig, resolve
 	session, err := client.Connect(mcpCtx, transport, nil)
 	if err != nil {
 		err = maybeStdioErr(err, transport)
-		updateState(name, StateError, maybeTimeoutErr(err, timeout), nil, Counts{})
+		updateState(ctx, name, StateError, maybeTimeoutErr(err, timeout), nil, Counts{})
 		slog.Error("MCP client failed to initialize", "error", err, "name", name)
 		cancel()
 		cancelTimer.Stop()

@@ -53,7 +53,7 @@ func (s *service) Delete(ctx context.Context, id string) error {
 	}
 	// Clone the message before publishing to avoid race conditions with
 	// concurrent modifications to the Parts slice.
-	s.Publish(pubsub.DeletedEvent, message.Clone())
+	s.Publish(ctx, pubsub.DeletedEvent, message.Clone())
 	return nil
 }
 
@@ -89,7 +89,7 @@ func (s *service) Create(ctx context.Context, sessionID string, params CreateMes
 	}
 	// Clone the message before publishing to avoid race conditions with
 	// concurrent modifications to the Parts slice.
-	s.Publish(pubsub.CreatedEvent, message.Clone())
+	s.Publish(ctx, pubsub.CreatedEvent, message.Clone())
 	return message, nil
 }
 
@@ -130,7 +130,7 @@ func (s *service) Update(ctx context.Context, message Message) error {
 	message.UpdatedAt = time.Now().Unix()
 	// Clone the message before publishing to avoid race conditions with
 	// concurrent modifications to the Parts slice.
-	s.Publish(pubsub.UpdatedEvent, message.Clone())
+	s.Publish(ctx, pubsub.UpdatedEvent, message.Clone())
 	return nil
 }
 

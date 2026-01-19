@@ -226,9 +226,11 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 		if msg.SessionID != sess.ID || msg.Role != message.Assistant || len(msg.Parts) == 0 {
 			return
 		}
-		stopSpinner()
 
 		content := msg.Content().String()
+		if content != "" {
+			stopSpinner()
+		}
 
 		messageReadBytesMu.Lock()
 		readBytes := messageReadBytes[msg.ID]

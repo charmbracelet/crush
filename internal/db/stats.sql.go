@@ -12,16 +12,16 @@ import (
 
 const getAverageResponseTime = `-- name: GetAverageResponseTime :one
 SELECT
-    COALESCE(AVG(finished_at - created_at), 0) as avg_response_seconds
+    CAST(COALESCE(AVG(finished_at - created_at), 0) AS INTEGER) as avg_response_seconds
 FROM messages
 WHERE role = 'assistant'
   AND finished_at IS NOT NULL
   AND finished_at > created_at
 `
 
-func (q *Queries) GetAverageResponseTime(ctx context.Context) (interface{}, error) {
+func (q *Queries) GetAverageResponseTime(ctx context.Context) (int64, error) {
 	row := q.queryRow(ctx, q.getAverageResponseTimeStmt, getAverageResponseTime)
-	var avg_response_seconds interface{}
+	var avg_response_seconds int64
 	err := row.Scan(&avg_response_seconds)
 	return avg_response_seconds, err
 }

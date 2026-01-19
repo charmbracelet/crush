@@ -318,8 +318,8 @@ func TestRecoverSession(t *testing.T) {
 
 // dummyAgent implements SessionAgent for testing purposes.
 type dummyAgent struct {
-	t        *testing.T
-	isBusy   bool
+	t      *testing.T
+	isBusy bool
 }
 
 func (a *dummyAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {

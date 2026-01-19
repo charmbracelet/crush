@@ -71,3 +71,23 @@ FROM messages
 WHERE role = 'assistant'
   AND finished_at IS NOT NULL
   AND finished_at > created_at;
+
+-- name: GetToolUsage :many
+SELECT
+    json_extract(value, '$.data.name') as tool_name,
+    COUNT(*) as call_count
+FROM messages, json_each(parts)
+WHERE json_extract(value, '$.type') = 'tool_call'
+  AND json_extract(value, '$.data.name') IS NOT NULL
+GROUP BY tool_name
+ORDER BY call_count DESC;
+
+-- name: GetHourDayHeatmap :many
+SELECT
+    CAST(strftime('%w', created_at, 'unixepoch') AS INTEGER) as day_of_week,
+    CAST(strftime('%H', created_at, 'unixepoch') AS INTEGER) as hour,
+    COUNT(*) as session_count
+FROM sessions
+WHERE parent_session_id IS NULL
+GROUP BY day_of_week, hour
+ORDER BY day_of_week, hour;

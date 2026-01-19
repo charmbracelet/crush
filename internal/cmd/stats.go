@@ -30,14 +30,16 @@ var statsCmd = &cobra.Command{
 
 // Stats holds all the statistics data.
 type Stats struct {
-	GeneratedAt       time.Time        `json:"generated_at"`
-	Total             TotalStats       `json:"total"`
-	UsageByDay        []DailyUsage     `json:"usage_by_day"`
-	UsageByModel      []ModelUsage     `json:"usage_by_model"`
-	UsageByHour       []HourlyUsage    `json:"usage_by_hour"`
-	UsageByDayOfWeek  []DayOfWeekUsage `json:"usage_by_day_of_week"`
-	RecentActivity    []DailyActivity  `json:"recent_activity"`
-	AvgResponseTimeMs float64          `json:"avg_response_time_ms"`
+	GeneratedAt       time.Time          `json:"generated_at"`
+	Total             TotalStats         `json:"total"`
+	UsageByDay        []DailyUsage       `json:"usage_by_day"`
+	UsageByModel      []ModelUsage       `json:"usage_by_model"`
+	UsageByHour       []HourlyUsage      `json:"usage_by_hour"`
+	UsageByDayOfWeek  []DayOfWeekUsage   `json:"usage_by_day_of_week"`
+	RecentActivity    []DailyActivity    `json:"recent_activity"`
+	AvgResponseTimeMs float64            `json:"avg_response_time_ms"`
+	ToolUsage         []ToolUsage        `json:"tool_usage"`
+	HourDayHeatmap    []HourDayHeatmapPt `json:"hour_day_heatmap"`
 }
 
 type TotalStats struct {
@@ -84,6 +86,17 @@ type DailyActivity struct {
 	SessionCount int64   `json:"session_count"`
 	TotalTokens  int64   `json:"total_tokens"`
 	Cost         float64 `json:"cost"`
+}
+
+type ToolUsage struct {
+	ToolName  string `json:"tool_name"`
+	CallCount int64  `json:"call_count"`
+}
+
+type HourDayHeatmapPt struct {
+	DayOfWeek    int   `json:"day_of_week"`
+	Hour         int   `json:"hour"`
+	SessionCount int64 `json:"session_count"`
 }
 
 func runStats(cmd *cobra.Command, _ []string) error {
@@ -236,6 +249,33 @@ func gatherStats(ctx context.Context, conn *sql.DB) (*Stats, error) {
 		return nil, fmt.Errorf("get average response time: %w", err)
 	}
 	stats.AvgResponseTimeMs = toFloat64(avgResp) * 1000
+
+	// Tool usage.
+	toolUsage, err := queries.GetToolUsage(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get tool usage: %w", err)
+	}
+	for _, t := range toolUsage {
+		if name, ok := t.ToolName.(string); ok && name != "" {
+			stats.ToolUsage = append(stats.ToolUsage, ToolUsage{
+				ToolName:  name,
+				CallCount: t.CallCount,
+			})
+		}
+	}
+
+	// Hour/day heatmap.
+	heatmap, err := queries.GetHourDayHeatmap(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get hour day heatmap: %w", err)
+	}
+	for _, h := range heatmap {
+		stats.HourDayHeatmap = append(stats.HourDayHeatmap, HourDayHeatmapPt{
+			DayOfWeek:    int(h.DayOfWeek),
+			Hour:         int(h.Hour),
+			SessionCount: h.SessionCount,
+		})
+	}
 
 	return stats, nil
 }
@@ -428,6 +468,7 @@ func generateHTML(stats *Stats, path string) error {
             padding-top: 2rem;
             border-top: 1px solid var(--border);
         }
+
     </style>
 </head>
 <body>
@@ -470,17 +511,17 @@ func generateHTML(stats *Stats, path string) error {
                 </div>
             </div>
 
-            <div class="chart-card">
-                <h2>Usage by Hour of Day</h2>
+            <div class="chart-card full-width">
+                <h2>Activity Heatmap (Hour × Day of Week)</h2>
                 <div class="chart-container">
-                    <canvas id="hourlyChart"></canvas>
+                    <canvas id="heatmapChart"></canvas>
                 </div>
             </div>
 
             <div class="chart-card">
-                <h2>Usage by Day of Week</h2>
+                <h2>Tool Usage</h2>
                 <div class="chart-container">
-                    <canvas id="dowChart"></canvas>
+                    <canvas id="toolChart"></canvas>
                 </div>
             </div>
 
@@ -491,9 +532,9 @@ func generateHTML(stats *Stats, path string) error {
                 </div>
             </div>
 
-            <div class="chart-card">
+            <div class="chart-card full-width">
                 <h2>Usage by Model</h2>
-                <div class="chart-container">
+                <div class="chart-container tall">
                     <canvas id="modelChart"></canvas>
                 </div>
             </div>
@@ -585,51 +626,84 @@ func generateHTML(stats *Stats, path string) error {
             });
         }
 
-        // Hourly Usage Chart
-        const hourLabels = Array.from({length: 24}, (_, i) => i + ':00');
-        const hourData = new Array(24).fill(0);
-        stats.usage_by_hour?.forEach(h => { hourData[h.hour] = h.session_count; });
+        // Heatmap (Hour × Day of Week) - Bubble Chart
+        const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        
+        if (stats.hour_day_heatmap && stats.hour_day_heatmap.length > 0) {
+            let maxCount = Math.max(...stats.hour_day_heatmap.map(h => h.session_count));
+            if (maxCount === 0) maxCount = 1;
+            const scaleFactor = 20 / Math.sqrt(maxCount);
+            
+            new Chart(document.getElementById('heatmapChart'), {
+                type: 'bubble',
+                data: {
+                    datasets: [{
+                        label: 'Sessions',
+                        data: stats.hour_day_heatmap.filter(h => h.session_count > 0).map(h => ({
+                            x: h.hour,
+                            y: h.day_of_week,
+                            r: Math.sqrt(h.session_count) * scaleFactor,
+                            count: h.session_count
+                        })),
+                        backgroundColor: 'rgba(122, 162, 247, 0.6)',
+                        borderColor: 'rgba(122, 162, 247, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            min: 0,
+                            max: 23,
+                            grid: { display: false },
+                            title: { display: true, text: 'Hour of Day' },
+                            ticks: { stepSize: 1, callback: v => Number.isInteger(v) ? v : '' }
+                        },
+                        y: {
+                            min: 0,
+                            max: 6,
+                            reverse: true,
+                            grid: { display: false },
+                            title: { display: true, text: 'Day of Week' },
+                            ticks: { stepSize: 1, callback: v => dayLabels[v] || '' }
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: ctx => dayLabels[ctx.raw.y] + ' ' + ctx.raw.x + ':00 - ' + ctx.raw.count + ' sessions'
+                            }
+                        }
+                    }
+                }
+            });
+        }
 
-        new Chart(document.getElementById('hourlyChart'), {
-            type: 'bar',
-            data: {
-                labels: hourLabels,
-                datasets: [{
-                    label: 'Sessions',
-                    data: hourData,
-                    backgroundColor: '#7dcfff',
-                    borderRadius: 2
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { display: false } }
-            }
-        });
-
-        // Day of Week Chart
-        const dowLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-        const dowData = new Array(7).fill(0);
-        stats.usage_by_day_of_week?.forEach(d => { dowData[d.day_of_week] = d.session_count; });
-
-        new Chart(document.getElementById('dowChart'), {
-            type: 'bar',
-            data: {
-                labels: dowLabels,
-                datasets: [{
-                    label: 'Sessions',
-                    data: dowData,
-                    backgroundColor: '#9ece6a',
-                    borderRadius: 4
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { display: false } }
-            }
-        });
+        // Tool Usage Chart
+        if (stats.tool_usage && stats.tool_usage.length > 0) {
+            const toolColors = ['#7aa2f7', '#bb9af7', '#7dcfff', '#9ece6a', '#f7768e', '#e0af68', '#73daca', '#ff9e64', '#c0caf5', '#565f89'];
+            new Chart(document.getElementById('toolChart'), {
+                type: 'bar',
+                data: {
+                    labels: stats.tool_usage.slice(0, 15).map(t => t.tool_name),
+                    datasets: [{
+                        label: 'Calls',
+                        data: stats.tool_usage.slice(0, 15).map(t => t.call_count),
+                        backgroundColor: toolColors,
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
 
         // Token Distribution Pie
         new Chart(document.getElementById('tokenPieChart'), {
@@ -650,24 +724,25 @@ func generateHTML(stats *Stats, path string) error {
             }
         });
 
-        // Model Usage Chart
+        // Model Usage Chart (horizontal bar)
         if (stats.usage_by_model && stats.usage_by_model.length > 0) {
-            const modelColors = ['#7aa2f7', '#bb9af7', '#7dcfff', '#9ece6a', '#f7768e', '#e0af68', '#73daca'];
+            const modelColors = ['#7aa2f7', '#bb9af7', '#7dcfff', '#9ece6a', '#f7768e', '#e0af68', '#73daca', '#ff9e64', '#c0caf5', '#565f89'];
             new Chart(document.getElementById('modelChart'), {
-                type: 'doughnut',
+                type: 'bar',
                 data: {
                     labels: stats.usage_by_model.map(m => m.model + ' (' + m.provider + ')'),
                     datasets: [{
+                        label: 'Messages',
                         data: stats.usage_by_model.map(m => m.message_count),
-                        backgroundColor: modelColors.slice(0, stats.usage_by_model.length)
+                        backgroundColor: modelColors.slice(0, stats.usage_by_model.length),
+                        borderRadius: 4
                     }]
                 },
                 options: {
+                    indexAxis: 'y',
                     responsive: true,
                     maintainAspectRatio: false,
-                    plugins: {
-                        legend: { position: 'bottom' }
-                    }
+                    plugins: { legend: { display: false } }
                 }
             });
         }

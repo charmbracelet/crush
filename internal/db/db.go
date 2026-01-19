@@ -57,6 +57,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getFileByPathAndSessionStmt, err = db.PrepareContext(ctx, getFileByPathAndSession); err != nil {
 		return nil, fmt.Errorf("error preparing query GetFileByPathAndSession: %w", err)
 	}
+	if q.getHourDayHeatmapStmt, err = db.PrepareContext(ctx, getHourDayHeatmap); err != nil {
+		return nil, fmt.Errorf("error preparing query GetHourDayHeatmap: %w", err)
+	}
 	if q.getMessageStmt, err = db.PrepareContext(ctx, getMessage); err != nil {
 		return nil, fmt.Errorf("error preparing query GetMessage: %w", err)
 	}
@@ -65,6 +68,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.getSessionByIDStmt, err = db.PrepareContext(ctx, getSessionByID); err != nil {
 		return nil, fmt.Errorf("error preparing query GetSessionByID: %w", err)
+	}
+	if q.getToolUsageStmt, err = db.PrepareContext(ctx, getToolUsage); err != nil {
+		return nil, fmt.Errorf("error preparing query GetToolUsage: %w", err)
 	}
 	if q.getTotalStatsStmt, err = db.PrepareContext(ctx, getTotalStats); err != nil {
 		return nil, fmt.Errorf("error preparing query GetTotalStats: %w", err)
@@ -168,6 +174,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing getFileByPathAndSessionStmt: %w", cerr)
 		}
 	}
+	if q.getHourDayHeatmapStmt != nil {
+		if cerr := q.getHourDayHeatmapStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getHourDayHeatmapStmt: %w", cerr)
+		}
+	}
 	if q.getMessageStmt != nil {
 		if cerr := q.getMessageStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getMessageStmt: %w", cerr)
@@ -181,6 +192,11 @@ func (q *Queries) Close() error {
 	if q.getSessionByIDStmt != nil {
 		if cerr := q.getSessionByIDStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getSessionByIDStmt: %w", cerr)
+		}
+	}
+	if q.getToolUsageStmt != nil {
+		if cerr := q.getToolUsageStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getToolUsageStmt: %w", cerr)
 		}
 	}
 	if q.getTotalStatsStmt != nil {
@@ -303,9 +319,11 @@ type Queries struct {
 	getAverageResponseTimeStmt     *sql.Stmt
 	getFileStmt                    *sql.Stmt
 	getFileByPathAndSessionStmt    *sql.Stmt
+	getHourDayHeatmapStmt          *sql.Stmt
 	getMessageStmt                 *sql.Stmt
 	getRecentActivityStmt          *sql.Stmt
 	getSessionByIDStmt             *sql.Stmt
+	getToolUsageStmt               *sql.Stmt
 	getTotalStatsStmt              *sql.Stmt
 	getUsageByDayStmt              *sql.Stmt
 	getUsageByDayOfWeekStmt        *sql.Stmt
@@ -337,9 +355,11 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getAverageResponseTimeStmt:     q.getAverageResponseTimeStmt,
 		getFileStmt:                    q.getFileStmt,
 		getFileByPathAndSessionStmt:    q.getFileByPathAndSessionStmt,
+		getHourDayHeatmapStmt:          q.getHourDayHeatmapStmt,
 		getMessageStmt:                 q.getMessageStmt,
 		getRecentActivityStmt:          q.getRecentActivityStmt,
 		getSessionByIDStmt:             q.getSessionByIDStmt,
+		getToolUsageStmt:               q.getToolUsageStmt,
 		getTotalStatsStmt:              q.getTotalStatsStmt,
 		getUsageByDayStmt:              q.getUsageByDayStmt,
 		getUsageByDayOfWeekStmt:        q.getUsageByDayOfWeekStmt,

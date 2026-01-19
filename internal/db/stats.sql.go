@@ -26,6 +26,46 @@ func (q *Queries) GetAverageResponseTime(ctx context.Context) (interface{}, erro
 	return avg_response_seconds, err
 }
 
+const getHourDayHeatmap = `-- name: GetHourDayHeatmap :many
+SELECT
+    CAST(strftime('%w', created_at, 'unixepoch') AS INTEGER) as day_of_week,
+    CAST(strftime('%H', created_at, 'unixepoch') AS INTEGER) as hour,
+    COUNT(*) as session_count
+FROM sessions
+WHERE parent_session_id IS NULL
+GROUP BY day_of_week, hour
+ORDER BY day_of_week, hour
+`
+
+type GetHourDayHeatmapRow struct {
+	DayOfWeek    int64 `json:"day_of_week"`
+	Hour         int64 `json:"hour"`
+	SessionCount int64 `json:"session_count"`
+}
+
+func (q *Queries) GetHourDayHeatmap(ctx context.Context) ([]GetHourDayHeatmapRow, error) {
+	rows, err := q.query(ctx, q.getHourDayHeatmapStmt, getHourDayHeatmap)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetHourDayHeatmapRow{}
+	for rows.Next() {
+		var i GetHourDayHeatmapRow
+		if err := rows.Scan(&i.DayOfWeek, &i.Hour, &i.SessionCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getRecentActivity = `-- name: GetRecentActivity :many
 SELECT
     date(created_at, 'unixepoch') as day,
@@ -61,6 +101,45 @@ func (q *Queries) GetRecentActivity(ctx context.Context) ([]GetRecentActivityRow
 			&i.TotalTokens,
 			&i.Cost,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getToolUsage = `-- name: GetToolUsage :many
+SELECT
+    json_extract(value, '$.data.name') as tool_name,
+    COUNT(*) as call_count
+FROM messages, json_each(parts)
+WHERE json_extract(value, '$.type') = 'tool_call'
+  AND json_extract(value, '$.data.name') IS NOT NULL
+GROUP BY tool_name
+ORDER BY call_count DESC
+`
+
+type GetToolUsageRow struct {
+	ToolName  interface{} `json:"tool_name"`
+	CallCount int64       `json:"call_count"`
+}
+
+func (q *Queries) GetToolUsage(ctx context.Context) ([]GetToolUsageRow, error) {
+	rows, err := q.query(ctx, q.getToolUsageStmt, getToolUsage)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetToolUsageRow{}
+	for rows.Next() {
+		var i GetToolUsageRow
+		if err := rows.Scan(&i.ToolName, &i.CallCount); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"html"
 	"html/template"
-	"image/color"
 	"os"
 	"path/filepath"
 	"time"
@@ -19,6 +18,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/logo"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
 )
@@ -320,11 +320,29 @@ func generateHTML(stats *Stats, path string) error {
 	}
 
 	data := struct {
-		StatsJSON template.JS
-		LogoHTML  template.HTML
+		StatsJSON   template.JS
+		LogoHTML    template.HTML
+		BgColor     string
+		BgSecondary string
+		TextColor   string
+		TextMuted   string
+		Accent      string
+		Accent2     string
+		Accent3     string
+		Accent4     string
+		BorderColor string
 	}{
-		StatsJSON: template.JS(statsJSON),
-		LogoHTML:  template.HTML(renderLogoHTML()),
+		StatsJSON:   template.JS(statsJSON),
+		LogoHTML:    template.HTML(renderLogoHTML()),
+		BgColor:     charmtone.Pepper.Hex(),
+		BgSecondary: charmtone.BBQ.Hex(),
+		TextColor:   charmtone.Salt.Hex(),
+		TextMuted:   charmtone.Squid.Hex(),
+		Accent:      charmtone.Charple.Hex(),
+		Accent2:     charmtone.Malibu.Hex(),
+		Accent3:     charmtone.Guac.Hex(),
+		Accent4:     charmtone.Coral.Hex(),
+		BorderColor: charmtone.Charcoal.Hex(),
 	}
 
 	var buf bytes.Buffer
@@ -337,17 +355,12 @@ func generateHTML(stats *Stats, path string) error {
 
 // renderLogoHTML generates the ASCII logo and returns it as styled HTML.
 func renderLogoHTML() string {
-	// Charmtone colors.
-	charple := color.RGBA{0x6B, 0x50, 0xFF, 0xFF}
-	malibu := color.RGBA{0x00, 0xA4, 0xFF, 0xFF}
-	squid := color.RGBA{0x85, 0x83, 0x92, 0xFF}
-
 	result := logo.Render(version.Version, false, logo.Opts{
-		FieldColor:   charple,
-		TitleColorA:  charple,
-		TitleColorB:  malibu,
-		CharmColor:   squid,
-		VersionColor: squid,
+		FieldColor:   charmtone.Charple,
+		TitleColorA:  charmtone.Charple,
+		TitleColorB:  charmtone.Malibu,
+		CharmColor:   charmtone.Squid,
+		VersionColor: charmtone.Squid,
 		Width:        0,
 	})
 

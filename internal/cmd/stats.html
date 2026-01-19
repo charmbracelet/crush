@@ -7,15 +7,15 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
-            --bg: #201F26;
-            --bg-secondary: #2D2C35;
-            --text: #F1EFEF;
-            --text-muted: #858392;
-            --accent: #6B50FF;
-            --accent2: #00A4FF;
-            --accent3: #00FFB2;
-            --accent4: #FF577D;
-            --border: #4D4C57;
+            --bg: {{.BgColor}};
+            --bg-secondary: {{.BgSecondary}};
+            --text: {{.TextColor}};
+            --text-muted: {{.TextMuted}};
+            --accent: {{.Accent}};
+            --accent2: {{.Accent2}};
+            --accent3: {{.Accent3}};
+            --accent4: {{.Accent4}};
+            --border: {{.BorderColor}};
         }
         * {
             margin: 0;
@@ -40,7 +40,7 @@
             font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
             font-size: 14px;
             line-height: 1.1;
-            background: linear-gradient(90deg, #6B50FF, #00A4FF);
+            background: linear-gradient(90deg, var(--accent), var(--accent2));
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;

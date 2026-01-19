@@ -20,7 +20,7 @@ import (
 )
 
 type BashParams struct {
-	Description     string `json:"description" description:"A brief description of what the command does, try to keep it under 30 characters or so"`
+	Description     string `json:"description" description:"A brief description of what the command does, try to keep it under 30 characters or so, this is required"`
 	Command         string `json:"command" description:"The command to execute"`
 	WorkingDir      string `json:"working_dir,omitempty" description:"The working directory to execute the command in (defaults to current directory)"`
 	RunInBackground bool   `json:"run_in_background,omitempty" description:"Set to true (boolean) to run this command in the background. Use job_output to read the output later."`

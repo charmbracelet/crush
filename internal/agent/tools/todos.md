@@ -1,90 +1,61 @@
-Creates and manages a structured task list for tracking progress on complex, multi-step coding tasks.
+Track progress on multi-step tasks. User sees the todo list in real-time in the UI.
 
 <when_to_use>
-Use this tool proactively in these scenarios:
+Use Todos when:
+- Task has 3+ distinct steps
+- Working on something complex that benefits from tracking
+- User provides multiple tasks to complete
+- Need to show progress on a longer task
 
-- Complex multi-step tasks requiring 3+ distinct steps or actions
-- Non-trivial tasks requiring careful planning or multiple operations
-- User explicitly requests todo list management
-- User provides multiple tasks (numbered or comma-separated list)
-- After receiving new instructions to capture requirements
-- When starting work on a task (mark as in_progress BEFORE beginning)
-- After completing a task (mark completed and add new follow-up tasks)
+Skip Todos when:
+- Simple single-step task
+- Trivial changes (roughly the easiest 25% of requests)
+- Quick questions or lookups
 </when_to_use>
 
-<when_not_to_use>
-Skip this tool when:
+<rules>
+- **No single-item lists** - if it's one step, just do it
+- **One in_progress at a time** - complete current before starting next
+- **Update immediately** - mark done right after completing, not in batches
+- **Max 70 chars** per task description
+- **Never print todos** in your response - user sees them in UI
+- **Track goals, not operations** - don't include searching, linting, testing, or codebase exploration as tasks. These are means to an end, not user-visible deliverables.
+</rules>
 
-- Single, straightforward task
-- Trivial task with no organizational benefit
-- Task completable in less than 3 trivial steps
-- Purely conversational or informational request
-</when_not_to_use>
+<task_format>
+Each task needs:
+- content: What to do (imperative: "Add tests", "Fix bug")
+- active_form: Present tense (for display: "Adding tests", "Fixing bug")
+- status: "pending", "in_progress", or "completed"
+</task_format>
 
-<task_states>
-- **pending**: Task not yet started
-- **in_progress**: Currently working on (limit to ONE task at a time)
-- **completed**: Task finished successfully
-
-**IMPORTANT**: Each task requires two forms:
-- **content**: Imperative form describing what needs to be done (e.g., "Run tests", "Build the project")
-- **active_form**: Present continuous form shown during execution (e.g., "Running tests", "Building the project")
-</task_states>
-
-<task_management>
-- Update task status in real-time as you work
-- Mark tasks complete IMMEDIATELY after finishing (don't batch completions)
-- Exactly ONE task must be in_progress at any time (not less, not more)
-- Complete current tasks before starting new ones
-- Remove tasks that are no longer relevant from the list entirely
-</task_management>
-
-<completion_requirements>
-ONLY mark a task as completed when you have FULLY accomplished it.
-
-Never mark completed if:
-- Tests are failing
-- Implementation is partial
-- You encountered unresolved errors
-- You couldn't find necessary files or dependencies
-
-If blocked:
-- Keep task as in_progress
-- Create new task describing what needs to be resolved
-</completion_requirements>
-
-<task_breakdown>
-- Create specific, actionable items
-- Break complex tasks into smaller, manageable steps
-- Use clear, descriptive task names
-- Always provide both content and active_form
-</task_breakdown>
+<workflow>
+1. Create todos as first action for complex tasks
+2. Mark first task as in_progress
+3. After completing each task, update status to completed
+4. Mark next task as in_progress
+5. Add new tasks if discovered during work
+</workflow>
 
 <examples>
-✅ Good task:
+Good first todo call:
 ```json
 {
-  "content": "Implement user authentication with JWT tokens",
-  "status": "in_progress",
-  "active_form": "Implementing user authentication with JWT tokens"
+  "todos": [
+    {"content": "Find authentication code", "active_form": "Finding authentication code", "status": "in_progress"},
+    {"content": "Add input validation", "active_form": "Adding input validation", "status": "pending"},
+    {"content": "Write tests", "active_form": "Writing tests", "status": "pending"}
+  ]
 }
 ```
 
-❌ Bad task (missing active_form):
+Bad: Single item list
 ```json
 {
-  "content": "Fix bug",
-  "status": "pending"
+  "todos": [
+    {"content": "Fix the bug", "active_form": "Fixing the bug", "status": "in_progress"}
+  ]
 }
 ```
+→ Just fix the bug, no todo needed.
 </examples>
-
-<output_behavior>
-**NEVER** print or list todos in your response text. The user sees the todo list in real-time in the UI.
-</output_behavior>
-
-<tips>
-- When in doubt, use this tool - being proactive demonstrates attentiveness
-- One task in_progress at a time keeps work focused
-- Update immediately after state changes for accurate tracking
-</tips>

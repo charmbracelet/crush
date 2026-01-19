@@ -1,19 +1,21 @@
-Retrieves the current output from a background shell.
+Get output from a background shell process.
 
 <usage>
-- Provide the shell ID returned from a background bash execution
-- Returns the current stdout and stderr output
-- Indicates whether the shell has completed execution
+- Provide shell_id from a background bash execution
+- Returns current stdout/stderr
+- Shows if process is still running or completed
 </usage>
 
-<features>
-- View output from running background processes
-- Check if background process has completed
-- Get cumulative output from process start
-</features>
+<behavior>
+- Returns cumulative output from process start
+- Check "done" field to see if process completed
+- Can call multiple times to see incremental output
+</behavior>
 
-<tips>
-- Use this to monitor long-running processes
-- Check the 'done' status to see if process completed
-- Can be called multiple times to view incremental output
-</tips>
+<example>
+After starting a server with `run_in_background=true`:
+```
+shell_id: "abc123"
+```
+→ Returns server output and whether it's still running.
+</example>

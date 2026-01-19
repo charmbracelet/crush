@@ -1,26 +1,41 @@
-Find all references to/usage of a symbol by name using the Language Server Protocol (LSP).
+Find all references to a symbol using LSP. More accurate than grep for code symbols.
 
-<usage>
-- Provide symbol name (e.g., "MyFunction", "myVariable", "MyType").
-- Optional path to narrow search to a directory or file (defaults to current directory).
-- Tool automatically locates the symbol and returns all references.
-</usage>
+<when_to_use>
+Use References when:
+- Finding where a function/method is called
+- Finding usages of a type, variable, or constant
+- Understanding impact before renaming/refactoring
+- Need semantic accuracy (grep finds strings, this finds actual references)
 
-<features>
-- Semantic-aware reference search (more accurate than grep/glob).
-- Returns references grouped by file with line and column numbers.
-- Supports multiple programming languages via LSP.
-- Finds only real references (not comments or unrelated strings).
-</features>
+Do NOT use References when:
+- Searching for arbitrary text → use `grep`
+- Finding files by name → use `glob`
+- Symbol isn't in a language with LSP support
+</when_to_use>
 
-<limitations>
-- May not find references in files not opened or indexed by the LSP server.
-- Results depend on the capabilities of the active LSP providers.
-</limitations>
+<parameters>
+- symbol: Name to search for (e.g., "MyFunction", "UserService", "configPath")
+- path: Directory to narrow search (optional, default: current directory)
+</parameters>
+
+<output>
+- References grouped by file
+- Line and column numbers for each usage
+- Only real code references (not comments or strings)
+</output>
 
 <tips>
-- Use this first when searching for where a symbol is used.
-- Do not use grep/glob for symbol searches.
-- Narrow scope with the path parameter for faster, more relevant results.
-- Use qualified names (e.g., pkg.Func, Class.method) for higher precision.
+- Use qualified names for precision: "pkg.Function", "Class.method"
+- Narrow scope with path parameter for faster results
+- Works best with statically typed languages
+- Depends on LSP server capabilities and indexing
 </tips>
+
+<example>
+Before refactoring `handleRequest`:
+```
+symbol: "handleRequest"
+path: "src/handlers"
+```
+→ Shows all callers so you know what might break.
+</example>

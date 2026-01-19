@@ -7,13 +7,18 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"html"
 	"html/template"
+	"image/color"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/tui/components/logo"
+	"github.com/charmbracelet/crush/internal/version"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
 )
@@ -316,8 +321,10 @@ func generateHTML(stats *Stats, path string) error {
 
 	data := struct {
 		StatsJSON template.JS
+		LogoHTML  template.HTML
 	}{
 		StatsJSON: template.JS(statsJSON),
+		LogoHTML:  template.HTML(renderLogoHTML()),
 	}
 
 	var buf bytes.Buffer
@@ -326,4 +333,27 @@ func generateHTML(stats *Stats, path string) error {
 	}
 
 	return os.WriteFile(path, buf.Bytes(), 0o644)
+}
+
+// renderLogoHTML generates the ASCII logo and returns it as styled HTML.
+func renderLogoHTML() string {
+	// Charmtone colors.
+	charple := color.RGBA{0x6B, 0x50, 0xFF, 0xFF}
+	malibu := color.RGBA{0x00, 0xA4, 0xFF, 0xFF}
+	squid := color.RGBA{0x85, 0x83, 0x92, 0xFF}
+
+	result := logo.Render(version.Version, false, logo.Opts{
+		FieldColor:   charple,
+		TitleColorA:  charple,
+		TitleColorB:  malibu,
+		CharmColor:   squid,
+		VersionColor: squid,
+		Width:        0,
+	})
+
+	// Strip ANSI codes and escape HTML.
+	stripped := ansi.Strip(result)
+	escaped := html.EscapeString(stripped)
+
+	return escaped
 }

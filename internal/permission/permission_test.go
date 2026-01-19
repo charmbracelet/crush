@@ -116,7 +116,7 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 		wg.Add(1)
 
 		events := make(chan pubsub.Event[PermissionRequest], 10)
-		service.AddListener("test", func(event pubsub.Event[PermissionRequest]) {
+		service.AddListener(func(event pubsub.Event[PermissionRequest]) {
 			events <- event
 		})
 
@@ -160,7 +160,7 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 		}
 
 		events := make(chan pubsub.Event[PermissionRequest], 10)
-		service.AddListener("test", func(event pubsub.Event[PermissionRequest]) {
+		service.AddListener(func(event pubsub.Event[PermissionRequest]) {
 			events <- event
 		})
 		var result1 bool
@@ -194,7 +194,7 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 		service := NewPermissionService("/tmp", false, []string{})
 
 		events := make(chan pubsub.Event[PermissionRequest], 10)
-		service.AddListener("test", func(event pubsub.Event[PermissionRequest]) {
+		service.AddListener(func(event pubsub.Event[PermissionRequest]) {
 			events <- event
 		})
 

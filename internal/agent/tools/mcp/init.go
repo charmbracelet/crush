@@ -93,8 +93,8 @@ type ClientInfo struct {
 }
 
 // AddEventListener registers a callback for MCP events.
-func AddEventListener(key string, fn func(pubsub.Event[Event])) {
-	broker.AddListener(key, fn)
+func AddEventListener(fn func(pubsub.Event[Event])) {
+	broker.AddListener(fn)
 }
 
 // GetStates returns the current state of all MCP clients

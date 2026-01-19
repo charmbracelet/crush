@@ -19,10 +19,10 @@ func NewBroker[T any]() *Broker[T] {
 }
 
 // AddListener registers a callback for events.
-func (b *Broker[T]) AddListener(key string, fn func(Event[T])) {
+func (b *Broker[T]) AddListener(fn func(Event[T])) {
 	b.signal.AddListener(func(_ context.Context, event Event[T]) {
 		fn(event)
-	}, key)
+	})
 }
 
 // Publish emits an event to all listeners without blocking.

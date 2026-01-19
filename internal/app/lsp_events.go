@@ -42,8 +42,8 @@ var (
 )
 
 // AddLSPEventListener registers a callback for LSP events.
-func AddLSPEventListener(key string, fn func(pubsub.Event[LSPEvent])) {
-	lspBroker.AddListener(key, fn)
+func AddLSPEventListener(fn func(pubsub.Event[LSPEvent])) {
+	lspBroker.AddListener(fn)
 }
 
 // GetLSPStates returns the current state of all LSP clients

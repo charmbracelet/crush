@@ -51,7 +51,7 @@ type Service interface {
 	AutoApproveSession(sessionID string)
 	SetSkipRequests(skip bool)
 	SkipRequests() bool
-	AddNotificationListener(key string, fn func(pubsub.Event[PermissionNotification]))
+	AddNotificationListener(fn func(pubsub.Event[PermissionNotification]))
 }
 
 type permissionService struct {
@@ -222,8 +222,8 @@ func (s *permissionService) AutoApproveSession(sessionID string) {
 	s.autoApproveSessionsMu.Unlock()
 }
 
-func (s *permissionService) AddNotificationListener(key string, fn func(pubsub.Event[PermissionNotification])) {
-	s.notificationBroker.AddListener(key, fn)
+func (s *permissionService) AddNotificationListener(fn func(pubsub.Event[PermissionNotification])) {
+	s.notificationBroker.AddListener(fn)
 }
 
 func (s *permissionService) SetSkipRequests(skip bool) {

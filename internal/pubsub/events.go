@@ -9,7 +9,7 @@ const (
 )
 
 type Subscriber[T any] interface {
-	AddListener(key string, fn func(Event[T]))
+	AddListener(fn func(Event[T]))
 }
 
 type (

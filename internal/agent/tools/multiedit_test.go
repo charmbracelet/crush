@@ -38,7 +38,7 @@ func (m *mockPermissionService) SkipRequests() bool {
 	return false
 }
 
-func (m *mockPermissionService) AddNotificationListener(key string, fn func(pubsub.Event[permission.PermissionNotification])) {
+func (m *mockPermissionService) AddNotificationListener(fn func(pubsub.Event[permission.PermissionNotification])) {
 }
 
 type mockHistoryService struct {

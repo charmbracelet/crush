@@ -221,7 +221,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 	)
 
 	// Register callback to process messages directly.
-	app.Messages.AddListener("non-interactive", func(event pubsub.Event[message.Message]) {
+	app.Messages.AddListener(func(event pubsub.Event[message.Message]) {
 		msg := event.Payload
 		if msg.SessionID != sess.ID || msg.Role != message.Assistant || len(msg.Parts) == 0 {
 			return
@@ -321,25 +321,25 @@ func (app *App) Subscribe(program *tea.Program) {
 	app.program = program
 
 	// Register listeners that send directly to the program.
-	app.Sessions.AddListener("tui-sessions", func(event pubsub.Event[session.Session]) {
+	app.Sessions.AddListener(func(event pubsub.Event[session.Session]) {
 		program.Send(event)
 	})
-	app.Messages.AddListener("tui-messages", func(event pubsub.Event[message.Message]) {
+	app.Messages.AddListener(func(event pubsub.Event[message.Message]) {
 		program.Send(event)
 	})
-	app.Permissions.AddListener("tui-permissions", func(event pubsub.Event[permission.PermissionRequest]) {
+	app.Permissions.AddListener(func(event pubsub.Event[permission.PermissionRequest]) {
 		program.Send(event)
 	})
-	app.Permissions.AddNotificationListener("tui-permissions-notifications", func(event pubsub.Event[permission.PermissionNotification]) {
+	app.Permissions.AddNotificationListener(func(event pubsub.Event[permission.PermissionNotification]) {
 		program.Send(event)
 	})
-	app.History.AddListener("tui-history", func(event pubsub.Event[history.File]) {
+	app.History.AddListener(func(event pubsub.Event[history.File]) {
 		program.Send(event)
 	})
-	mcp.AddEventListener("tui-mcp", func(event pubsub.Event[mcp.Event]) {
+	mcp.AddEventListener(func(event pubsub.Event[mcp.Event]) {
 		program.Send(event)
 	})
-	AddLSPEventListener("tui-lsp", func(event pubsub.Event[LSPEvent]) {
+	AddLSPEventListener(func(event pubsub.Event[LSPEvent]) {
 		program.Send(event)
 	})
 }

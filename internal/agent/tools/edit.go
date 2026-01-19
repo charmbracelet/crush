@@ -45,9 +45,15 @@ type EditResponseMetadata struct {
 
 const EditToolName = "edit"
 
+const (
+	errOldStringNotFound     = "old_string not found in file. Make sure it matches exactly, including whitespace and line breaks"
+	errOldStringMultipleHits = "old_string appears multiple times in the file. Please provide more context to ensure a unique match, or set replace_all to true"
+)
+
 var (
-	oldStringNotFoundErr        = fantasy.NewTextErrorResponse("old_string not found in file. Make sure it matches exactly, including whitespace and line breaks.")
-	oldStringMultipleMatchesErr = fantasy.NewTextErrorResponse("old_string appears multiple times in the file. Please provide more context to ensure a unique match, or set replace_all to true")
+	viewLinePrefixRE     = regexp.MustCompile(`^\s*\d+\|\s?`)
+	collapseBlankLinesRE = regexp.MustCompile(`\n{3,}`)
+	markdownCodeFenceRE  = regexp.MustCompile("(?s)^\\s*```[^\\n]*\\n(.*)\\n```\\s*$")
 )
 
 //go:embed edit.md
@@ -217,31 +223,27 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 	oldContent, isCrlf := fsext.ToUnixLineEndings(string(content))
 
 	var newContent string
-	var deletionCount int
 
 	if replaceAll {
 		// For replaceAll, try fuzzy match if exact match fails.
 		replaced, found := replaceAllWithBestMatch(oldContent, oldString, "")
 		if !found {
-			return fantasy.NewTextErrorResponse("old_string not found in file. Make sure it matches exactly, including whitespace and line breaks"), nil
+			return fantasy.NewTextErrorResponse(errOldStringNotFound), nil
 		}
 		newContent = replaced
-		deletionCount = 1
 	} else {
 		// Try exact match first, then fuzzy match.
 		matchedString, found, isMultiple := findBestMatch(oldContent, oldString)
 		if !found {
-			return fantasy.NewTextErrorResponse("old_string not found in file. Make sure it matches exactly, including whitespace and line breaks"), nil
+			return fantasy.NewTextErrorResponse(errOldStringNotFound), nil
 		}
 		if isMultiple {
-			return fantasy.NewTextErrorResponse("old_string appears multiple times in the file. Please provide more context to ensure a unique match, or set replace_all to true"), nil
+			return fantasy.NewTextErrorResponse(errOldStringMultipleHits), nil
 		}
 
 		index := strings.Index(oldContent, matchedString)
 		newContent = oldContent[:index] + oldContent[index+len(matchedString):]
-		deletionCount = 1
 	}
-	_ = deletionCount
 
 	sessionID := GetSessionFromContext(edit.ctx)
 
@@ -361,17 +363,17 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 		// For replaceAll, try fuzzy match if exact match fails.
 		replaced, found := replaceAllWithBestMatch(oldContent, oldString, newString)
 		if !found {
-			return fantasy.NewTextErrorResponse("old_string not found in file. Make sure it matches exactly, including whitespace and line breaks"), nil
+			return fantasy.NewTextErrorResponse(errOldStringNotFound), nil
 		}
 		newContent = replaced
 	} else {
 		// Try exact match first, then fuzzy match.
 		matchedString, found, isMultiple := findBestMatch(oldContent, oldString)
 		if !found {
-			return fantasy.NewTextErrorResponse("old_string not found in file. Make sure it matches exactly, including whitespace and line breaks"), nil
+			return fantasy.NewTextErrorResponse(errOldStringNotFound), nil
 		}
 		if isMultiple {
-			return fantasy.NewTextErrorResponse("old_string appears multiple times in the file. Please provide more context to ensure a unique match, or set replace_all to true"), nil
+			return fantasy.NewTextErrorResponse(errOldStringMultipleHits), nil
 		}
 
 		index := strings.Index(oldContent, matchedString)
@@ -541,8 +543,6 @@ func findBestMatch(content, oldString string) (string, bool, bool) {
 	return "", false, false
 }
 
-var viewLinePrefixRE = regexp.MustCompile(`^\s*\d+\|\s?`)
-
 func normalizeOldStringForMatching(oldString string) string {
 	oldString, _ = fsext.ToUnixLineEndings(oldString)
 	oldString = stripZeroWidthCharacters(oldString)
@@ -561,8 +561,7 @@ func stripZeroWidthCharacters(s string) string {
 }
 
 func stripMarkdownCodeFences(s string) string {
-	re := regexp.MustCompile("(?s)^\\s*```[^\\n]*\\n(.*)\\n```\\s*$")
-	m := re.FindStringSubmatch(s)
+	m := markdownCodeFenceRE.FindStringSubmatch(s)
 	if len(m) != 2 {
 		return s
 	}
@@ -608,6 +607,8 @@ func trimSurroundingBlankLines(s string) string {
 	return strings.Join(lines[start:end], "\n")
 }
 
+// replaceAllWithBestMatch replaces all occurrences of oldString in content
+// with newString, using fuzzy matching strategies if an exact match fails.
 func replaceAllWithBestMatch(content, oldString, newString string) (string, bool) {
 	oldString = normalizeOldStringForMatching(oldString)
 	if oldString == "" {
@@ -696,8 +697,7 @@ func trimTrailingWhitespacePerLine(s string) string {
 // collapseBlankLines replaces multiple consecutive blank lines with a single
 // blank line.
 func collapseBlankLines(s string) string {
-	re := regexp.MustCompile(`\n{3,}`)
-	return re.ReplaceAllString(s, "\n\n")
+	return collapseBlankLinesRE.ReplaceAllString(s, "\n\n")
 }
 
 // tryNormalizeIndentation attempts to find a match by adjusting indentation.

@@ -144,6 +144,41 @@ func TestRecoverSession(t *testing.T) {
 		require.True(t, toolCalls[0].Finished)
 	})
 
+	t.Run("incomplete assistant message without tool calls", func(t *testing.T) {
+		env := testEnv(t)
+
+		sess, err := env.sessions.Create(t.Context(), "Test Session")
+		require.NoError(t, err)
+
+		// Create an incomplete assistant message with partial content but no tool calls
+		assistantMsg, err := env.messages.Create(t.Context(), sess.ID, message.CreateMessageParams{
+			Role:  message.Assistant,
+			Parts: []message.ContentPart{message.TextContent{Text: "This is a partial response..."}},
+			Model: "test-model",
+		})
+		require.NoError(t, err)
+
+		// Verify the message is not finished
+		require.False(t, assistantMsg.IsFinished())
+
+		// Create coordinator with mock services
+		coordinator := &coordinator{
+			sessions: env.sessions,
+			messages: env.messages,
+		}
+
+		err = coordinator.RecoverSession(t.Context(), sess.ID)
+		require.NoError(t, err)
+
+		// Verify the assistant message was recovered
+		recoveredMsg, err := env.messages.Get(t.Context(), assistantMsg.ID)
+		require.NoError(t, err)
+		require.True(t, recoveredMsg.IsFinished())
+		require.Equal(t, message.FinishReasonError, recoveredMsg.FinishReason())
+		require.Contains(t, recoveredMsg.FinishPart().Message, "Response interrupted")
+		require.Equal(t, "This is a partial response...", recoveredMsg.Content().Text)
+	})
+
 	t.Run("session is busy - skips recovery", func(t *testing.T) {
 		env := testEnv(t)
 

@@ -881,6 +881,18 @@ func (c *coordinator) RecoverSession(ctx context.Context, sessionID string) erro
 			if updateErr := c.messages.Update(ctx, msg); updateErr != nil {
 				slog.Error("Failed to recover assistant message", "message_id", msg.ID, "error", updateErr)
 			}
+			continue
+		}
+
+		// Handle incomplete assistant messages without tool calls
+		// (e.g., message content was partially generated but interrupted)
+		if msg.Role == message.Assistant && msg.Content().Text != "" {
+			msg.FinishThinking()
+			msg.AddFinish(message.FinishReasonError, "Response interrupted", "Session was interrupted during response generation")
+			if updateErr := c.messages.Update(ctx, msg); updateErr != nil {
+				slog.Error("Failed to recover assistant message", "message_id", msg.ID, "error", updateErr)
+			}
+			continue
 		}
 	}
 

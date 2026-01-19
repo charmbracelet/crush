@@ -625,8 +625,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		// so the UI doesn't get stuck in a "Summarizing" state forever.
 		summaryMessage.FinishThinking()
 		summaryMessage.AddFinish(message.FinishReasonError, "Summarization failed", err.Error())
-		updateErr := a.messages.Update(ctx, summaryMessage)
-		if updateErr != nil {
+		if updateErr := a.messages.Update(ctx, summaryMessage); updateErr != nil {
 			return updateErr
 		}
 		return err

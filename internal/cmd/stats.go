@@ -333,7 +333,7 @@ func generateHTML(stats *Stats, path string) error {
 		BorderColor string
 	}{
 		StatsJSON:   template.JS(statsJSON),
-		LogoHTML:    template.HTML(renderLogoHTML()),
+		LogoHTML:    template.HTML(renderLogoHTML(300)),
 		BgColor:     charmtone.Pepper.Hex(),
 		BgSecondary: charmtone.BBQ.Hex(),
 		TextColor:   charmtone.Salt.Hex(),
@@ -353,15 +353,16 @@ func generateHTML(stats *Stats, path string) error {
 	return os.WriteFile(path, buf.Bytes(), 0o644)
 }
 
-// renderLogoHTML generates the ASCII logo and returns it as styled HTML.
-func renderLogoHTML() string {
+// renderLogoHTML generates the ASCII logo at the given width and returns it
+// as escaped HTML.
+func renderLogoHTML(width int) string {
 	result := logo.Render(version.Version, false, logo.Opts{
 		FieldColor:   charmtone.Charple,
 		TitleColorA:  charmtone.Charple,
 		TitleColorB:  charmtone.Malibu,
 		CharmColor:   charmtone.Squid,
 		VersionColor: charmtone.Squid,
-		Width:        0,
+		Width:        width,
 	})
 
 	// Strip ANSI codes and escape HTML.

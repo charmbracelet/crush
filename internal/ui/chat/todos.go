@@ -82,7 +82,7 @@ func (t *TodosToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 					} else {
 						headerText = fmt.Sprintf("created %d todos", meta.Total)
 					}
-					body = formatTodosList(sty, meta.Todos, styles.ArrowRightIcon, cappedWidth)
+					body = FormatTodosList(sty, meta.Todos, styles.ArrowRightIcon, cappedWidth)
 				} else {
 					// Build header based on what changed.
 					hasCompleted := len(meta.JustCompleted) > 0
@@ -108,7 +108,7 @@ func (t *TodosToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 					// Build body with details.
 					if allCompleted {
 						// Show all todos when all are completed, like when created.
-						body = formatTodosList(sty, meta.Todos, styles.ArrowRightIcon, cappedWidth)
+						body = FormatTodosList(sty, meta.Todos, styles.ArrowRightIcon, cappedWidth)
 					} else if meta.JustStarted != "" {
 						body = sty.Tool.TodoInProgressIcon.Render(styles.ArrowRightIcon+" ") +
 							sty.Base.Render(meta.JustStarted)
@@ -135,8 +135,8 @@ func (t *TodosToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	return joinToolParts(header, sty.Tool.Body.Render(body))
 }
 
-// formatTodosList formats a list of todos for display.
-func formatTodosList(sty *styles.Styles, todos []session.Todo, inProgressIcon string, width int) string {
+// FormatTodosList formats a list of todos for display.
+func FormatTodosList(sty *styles.Styles, todos []session.Todo, inProgressIcon string, width int) string {
 	if len(todos) == 0 {
 		return ""
 	}

@@ -21,7 +21,7 @@ const (
 	WarningIcon string = "⚠"
 	InfoIcon    string = "ⓘ"
 	HintIcon    string = "∵"
-	SpinnerIcon string = "..."
+	SpinnerIcon string = "⋯"
 	LoadingIcon string = "⟳"
 	ModelIcon   string = "◇"
 
@@ -389,6 +389,18 @@ type Styles struct {
 		Image    lipgloss.Style
 		Text     lipgloss.Style
 		Deleting lipgloss.Style
+	}
+
+	// Pills styles for todo/queue pills
+	Pills struct {
+		Base            lipgloss.Style // Base pill style with padding
+		Focused         lipgloss.Style // Focused pill with visible border
+		Blurred         lipgloss.Style // Blurred pill with hidden border
+		QueueItemPrefix lipgloss.Style // Prefix for queue list items
+		HelpKey         lipgloss.Style // Keystroke hint style
+		HelpText        lipgloss.Style // Help action text style
+		Area            lipgloss.Style // Pills area container
+		TodoSpinner     lipgloss.Style // Todo spinner style
 	}
 }
 
@@ -1261,6 +1273,16 @@ func DefaultStyles() Styles {
 	s.Attachments.Text = attachmentIconStyle.SetString(TextIcon)
 	s.Attachments.Normal = base.Padding(0, 1).MarginRight(1).Background(fgMuted).Foreground(fgBase)
 	s.Attachments.Deleting = base.Padding(0, 1).Bold(true).Background(red).Foreground(fgBase)
+
+	// Pills styles
+	s.Pills.Base = base.Padding(0, 1)
+	s.Pills.Focused = base.Padding(0, 1).BorderStyle(lipgloss.RoundedBorder()).BorderForeground(bgOverlay)
+	s.Pills.Blurred = base.Padding(0, 1).BorderStyle(lipgloss.HiddenBorder())
+	s.Pills.QueueItemPrefix = s.Muted.SetString("  •")
+	s.Pills.HelpKey = s.Muted
+	s.Pills.HelpText = s.Subtle
+	s.Pills.Area = base
+	s.Pills.TodoSpinner = base.Foreground(greenDark)
 
 	return s
 }

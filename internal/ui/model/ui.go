@@ -187,6 +187,16 @@ type UI struct {
 
 	// detailsOpen tracks whether the details panel is open (in compact mode)
 	detailsOpen bool
+
+	// pills state
+	pillsExpanded      bool
+	focusedPillSection pillSection
+	promptQueue        int
+	pillsView          string
+
+	// Todo spinner
+	todoSpinner    spinner.Model
+	todoIsSpinning bool
 }
 
 // New creates a new instance of the [UI] model.
@@ -208,6 +218,11 @@ func New(com *common.Common) *UI {
 		com.Styles.Completions.Normal,
 		com.Styles.Completions.Focused,
 		com.Styles.Completions.Match,
+	)
+
+	todoSpinner := spinner.New(
+		spinner.WithSpinner(spinner.MiniDot),
+		spinner.WithStyle(com.Styles.Pills.TodoSpinner),
 	)
 
 	// Attachments component
@@ -235,6 +250,7 @@ func New(com *common.Common) *UI {
 		chat:        ch,
 		completions: comp,
 		attachments: attachments,
+		todoSpinner: todoSpinner,
 	}
 
 	status := NewStatus(com, ui)
@@ -310,6 +326,13 @@ func (m *UI) loadMCPrompts() tea.Cmd {
 // Update handles updates to the UI model.
 func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
+	if m.hasSession() && m.isAgentBusy() {
+		queueSize := m.com.App.AgentCoordinator.QueuedPrompts(m.session.ID)
+		if queueSize != m.promptQueue {
+			m.promptQueue = queueSize
+			m.updateLayoutAndSize()
+		}
+	}
 	switch msg := msg.(type) {
 	case tea.EnvMsg:
 		// Is this Windows Terminal?
@@ -330,6 +353,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if cmd := m.setSessionMessages(msgs); cmd != nil {
 			cmds = append(cmds, cmd)
+		}
+		if hasInProgressTodo(m.session.Todos) {
+			// only start spinner if there is an in-progress todo
+			if m.isAgentBusy() {
+				m.todoIsSpinning = true
+				cmds = append(cmds, m.todoSpinner.Tick)
+			}
+			m.updateLayoutAndSize()
 		}
 
 	case sendMessageMsg:
@@ -361,6 +392,16 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case closeDialogMsg:
 		m.dialog.CloseFrontDialog()
 
+	case pubsub.Event[session.Session]:
+		if m.session != nil && msg.Payload.ID == m.session.ID {
+			prevHasInProgress := hasInProgressTodo(m.session.Todos)
+			m.session = &msg.Payload
+			if !prevHasInProgress && hasInProgressTodo(m.session.Todos) {
+				m.todoIsSpinning = true
+				cmds = append(cmds, m.todoSpinner.Tick)
+				m.updateLayoutAndSize()
+			}
+		}
 	case pubsub.Event[message.Message]:
 		// Check if this is a child session message for an agent tool.
 		if m.session == nil {
@@ -381,6 +422,17 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case pubsub.DeletedEvent:
 			m.chat.RemoveMessage(msg.Payload.ID)
 		}
+		// start the spinner if there is a new message
+		if hasInProgressTodo(m.session.Todos) && m.isAgentBusy() && !m.todoIsSpinning {
+			m.todoIsSpinning = true
+			cmds = append(cmds, m.todoSpinner.Tick)
+		}
+		// stop the spinner if the agent is not busy anymore
+		if m.todoIsSpinning && !m.isAgentBusy() {
+			m.todoIsSpinning = false
+		}
+		// there is a number of things that could change the pills here so we want to re-render
+		m.renderPills()
 	case pubsub.Event[history.File]:
 		cmds = append(cmds, m.handleFileEvent(msg.Payload))
 	case pubsub.Event[app.LSPEvent]:
@@ -522,6 +574,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		}
+		if m.state == uiChat && m.hasSession() && hasInProgressTodo(m.session.Todos) && m.todoIsSpinning {
+			var cmd tea.Cmd
+			m.todoSpinner, cmd = m.todoSpinner.Update(msg)
+			if cmd != nil {
+				m.renderPills()
+				cmds = append(cmds, cmd)
+			}
+		}
 
 	case tea.KeyPressMsg:
 		if cmd := m.handleKeyPressMsg(msg); cmd != nil {
@@ -571,7 +631,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case uiFocusMain:
 	case uiFocusEditor:
 		// Textarea placeholder logic
-		if m.com.App.AgentCoordinator != nil && m.com.App.AgentCoordinator.IsBusy() {
+		if m.isAgentBusy() {
 			m.textarea.Placeholder = m.workingPlaceholder
 		} else {
 			m.textarea.Placeholder = m.readyPlaceholder
@@ -893,14 +953,14 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.setEditorPrompt(yolo)
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionNewSession:
-		if m.com.App.AgentCoordinator != nil && m.com.App.AgentCoordinator.IsBusy() {
+		if m.isAgentBusy() {
 			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait before starting a new session..."))
 			break
 		}
 		m.newSession()
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSummarize:
-		if m.com.App.AgentCoordinator != nil && m.com.App.AgentCoordinator.IsBusy() {
+		if m.isAgentBusy() {
 			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait before summarizing session..."))
 			break
 		}
@@ -916,7 +976,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.status.ToggleHelp()
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionExternalEditor:
-		if m.session != nil && m.com.App.AgentCoordinator.IsSessionBusy(m.session.ID) {
+		if m.isAgentBusy() {
 			cmds = append(cmds, uiutil.ReportWarn("Agent is working, please wait..."))
 			break
 		}
@@ -926,7 +986,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		cmds = append(cmds, m.toggleCompactMode())
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleThinking:
-		if m.com.App.AgentCoordinator.IsBusy() {
+		if m.isAgentBusy() {
 			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait..."))
 			break
 		}
@@ -958,14 +1018,14 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionQuit:
 		cmds = append(cmds, tea.Quit)
 	case dialog.ActionInitializeProject:
-		if m.com.App.AgentCoordinator != nil && m.com.App.AgentCoordinator.IsBusy() {
+		if m.isAgentBusy() {
 			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait before summarizing session..."))
 			break
 		}
 		cmds = append(cmds, m.initializeProject())
 
 	case dialog.ActionSelectModel:
-		if m.com.App.AgentCoordinator.IsBusy() {
+		if m.isAgentBusy() {
 			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait..."))
 			break
 		}
@@ -1011,7 +1071,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.OAuthID)
 		m.dialog.CloseDialog(dialog.ModelsID)
 	case dialog.ActionSelectReasoningEffort:
-		if m.com.App.AgentCoordinator.IsBusy() {
+		if m.isAgentBusy() {
 			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait..."))
 			break
 		}
@@ -1165,6 +1225,27 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			m.detailsOpen = !m.detailsOpen
 			m.updateLayoutAndSize()
 			return true
+		case key.Matches(msg, m.keyMap.Chat.TogglePills):
+			if m.state == uiChat && m.hasSession() {
+				if cmd := m.togglePillsExpanded(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				return true
+			}
+		case key.Matches(msg, m.keyMap.Chat.PillLeft):
+			if m.state == uiChat && m.hasSession() && m.pillsExpanded {
+				if cmd := m.switchPillSection(-1); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				return true
+			}
+		case key.Matches(msg, m.keyMap.Chat.PillRight):
+			if m.state == uiChat && m.hasSession() && m.pillsExpanded {
+				if cmd := m.switchPillSection(1); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				return true
+			}
 		}
 		return false
 	}
@@ -1185,7 +1266,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 	// Handle cancel key when agent is busy.
 	if key.Matches(msg, m.keyMap.Chat.Cancel) {
-		if m.com.App.AgentCoordinator != nil && m.com.App.AgentCoordinator.IsBusy() {
+		if m.isAgentBusy() {
 			if cmd := m.cancelAgent(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
@@ -1257,10 +1338,10 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 				return m.sendMessage(value, attachments...)
 			case key.Matches(msg, m.keyMap.Chat.NewSession):
-				if m.session == nil || m.session.ID == "" {
+				if !m.hasSession() {
 					break
 				}
-				if m.com.App.AgentCoordinator != nil && m.com.App.AgentCoordinator.IsBusy() {
+				if m.isAgentBusy() {
 					cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait before starting a new session..."))
 					break
 				}
@@ -1271,7 +1352,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				m.chat.Focus()
 				m.chat.SetSelected(m.chat.Len() - 1)
 			case key.Matches(msg, m.keyMap.Editor.OpenEditor):
-				if m.session != nil && m.com.App.AgentCoordinator.IsSessionBusy(m.session.ID) {
+				if m.isAgentBusy() {
 					cmds = append(cmds, uiutil.ReportWarn("Agent is working, please wait..."))
 					break
 				}
@@ -1466,6 +1547,9 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		}
 
 		m.chat.Draw(scr, layout.main)
+		if layout.pills.Dy() > 0 && m.pillsView != "" {
+			uv.NewStyledString(m.pillsView).Draw(scr, layout.pills)
+		}
 
 		editorWidth := scr.Bounds().Dx()
 		if !m.isCompact {
@@ -1565,7 +1649,7 @@ func (m *UI) View() tea.View {
 	content = strings.Join(contentLines, "\n")
 
 	v.Content = content
-	if m.sendProgressBar && m.com.App != nil && m.com.App.AgentCoordinator != nil && m.com.App.AgentCoordinator.IsBusy() {
+	if m.sendProgressBar && m.isAgentBusy() {
 		// HACK: use a random percentage to prevent ghostty from hiding it
 		// after a timeout.
 		v.ProgressBar = tea.NewProgressBar(tea.ProgressBarIndeterminate, rand.Intn(100))
@@ -1589,7 +1673,7 @@ func (m *UI) ShortHelp() []key.Binding {
 		binds = append(binds, k.Quit)
 	case uiChat:
 		// Show cancel binding if agent is busy.
-		if m.com.App.AgentCoordinator != nil && m.com.App.AgentCoordinator.IsBusy() {
+		if m.isAgentBusy() {
 			cancelBinding := k.Chat.Cancel
 			if m.isCanceling {
 				cancelBinding.SetHelp("esc", "press again to cancel")
@@ -1624,6 +1708,9 @@ func (m *UI) ShortHelp() []key.Binding {
 				k.Chat.PageDown,
 				k.Chat.Copy,
 			)
+			if m.pillsExpanded && hasIncompleteTodos(m.session.Todos) && m.promptQueue > 0 {
+				binds = append(binds, k.Chat.PillLeft)
+			}
 		}
 	default:
 		// TODO: other states
@@ -1651,7 +1738,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 	help := k.Help
 	help.SetHelp("ctrl+g", "less")
 	hasAttachments := len(m.attachments.List()) > 0
-	hasSession := m.session != nil && m.session.ID != ""
+	hasSession := m.hasSession()
 	commands := k.Commands
 	if m.focus == uiFocusEditor && m.textarea.LineCount() == 0 {
 		commands.SetHelp("/ or ctrl+p", "commands")
@@ -1665,7 +1752,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 			})
 	case uiChat:
 		// Show cancel binding if agent is busy.
-		if m.com.App.AgentCoordinator != nil && m.com.App.AgentCoordinator.IsBusy() {
+		if m.isAgentBusy() {
 			cancelBinding := k.Chat.Cancel
 			if m.isCanceling {
 				cancelBinding.SetHelp("esc", "press again to cancel")
@@ -1733,6 +1820,9 @@ func (m *UI) FullHelp() [][]key.Binding {
 					k.Chat.ClearHighlight,
 				},
 			)
+			if m.pillsExpanded && hasIncompleteTodos(m.session.Todos) && m.promptQueue > 0 {
+				binds = append(binds, []key.Binding{k.Chat.PillLeft})
+			}
 		}
 	default:
 		if m.session == nil {
@@ -1821,6 +1911,7 @@ func (m *UI) updateSize() {
 	m.chat.SetSize(m.layout.main.Dx(), m.layout.main.Dy())
 	m.textarea.SetWidth(m.layout.editor.Dx())
 	m.textarea.SetHeight(m.layout.editor.Dy())
+	m.renderPills()
 
 	// Handle different app states
 	switch m.state {
@@ -1932,10 +2023,18 @@ func (m *UI) generateLayout(w, h int) layout {
 			mainRect.Min.Y += 1
 			mainRect, editorRect := uv.SplitVertical(mainRect, uv.Fixed(mainRect.Dy()-editorHeight))
 			mainRect.Max.X -= 1 // Add padding right
-			// Add bottom margin to main
-			mainRect.Max.Y -= 1
 			layout.header = headerRect
-			layout.main = mainRect
+			pillsHeight := m.pillsAreaHeight()
+			if pillsHeight > 0 {
+				pillsHeight = min(pillsHeight, mainRect.Dy())
+				chatRect, pillsRect := uv.SplitVertical(mainRect, uv.Fixed(mainRect.Dy()-pillsHeight))
+				layout.main = chatRect
+				layout.pills = pillsRect
+			} else {
+				layout.main = mainRect
+			}
+			// Add bottom margin to main
+			layout.main.Max.Y -= 1
 			layout.editor = editorRect
 		} else {
 			// Layout
@@ -1952,10 +2051,18 @@ func (m *UI) generateLayout(w, h int) layout {
 			sideRect.Min.X += 1
 			mainRect, editorRect := uv.SplitVertical(mainRect, uv.Fixed(mainRect.Dy()-editorHeight))
 			mainRect.Max.X -= 1 // Add padding right
-			// Add bottom margin to main
-			mainRect.Max.Y -= 1
 			layout.sidebar = sideRect
-			layout.main = mainRect
+			pillsHeight := m.pillsAreaHeight()
+			if pillsHeight > 0 {
+				pillsHeight = min(pillsHeight, mainRect.Dy())
+				chatRect, pillsRect := uv.SplitVertical(mainRect, uv.Fixed(mainRect.Dy()-pillsHeight))
+				layout.main = chatRect
+				layout.pills = pillsRect
+			} else {
+				layout.main = mainRect
+			}
+			// Add bottom margin to main
+			layout.main.Max.Y -= 1
 			layout.editor = editorRect
 		}
 	}
@@ -1982,6 +2089,9 @@ type layout struct {
 
 	// main is the area for the main pane. (e.x chat, configure, landing)
 	main uv.Rectangle
+
+	// pills is the area for the pills panel.
+	pills uv.Rectangle
 
 	// editor is the area for the editor pane.
 	editor uv.Rectangle
@@ -2156,6 +2266,19 @@ func isWhitespace(b byte) bool {
 	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
 }
 
+// isAgentBusy returns true if the agent coordinator exists and is currently
+// busy processing a request.
+func (m *UI) isAgentBusy() bool {
+	return m.com.App != nil &&
+		m.com.App.AgentCoordinator != nil &&
+		m.com.App.AgentCoordinator.IsBusy()
+}
+
+// hasSession returns true if there is an active session with a valid ID.
+func (m *UI) hasSession() bool {
+	return m.session != nil && m.session.ID != ""
+}
+
 // mimeOf detects the MIME type of the given content.
 func mimeOf(content []byte) string {
 	mimeBufferSize := min(512, len(content))
@@ -2219,7 +2342,7 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 	}
 
 	var cmds []tea.Cmd
-	if m.session == nil || m.session.ID == "" {
+	if !m.hasSession() {
 		newSession, err := m.com.App.Sessions.Create(context.Background(), "New Session")
 		if err != nil {
 			return uiutil.ReportError(err)
@@ -2267,7 +2390,7 @@ func cancelTimerCmd() tea.Cmd {
 // and starts a timer. The second press (before the timer expires) actually
 // cancels the agent.
 func (m *UI) cancelAgent() tea.Cmd {
-	if m.session == nil || m.session.ID == "" {
+	if !m.hasSession() {
 		return nil
 	}
 
@@ -2280,6 +2403,9 @@ func (m *UI) cancelAgent() tea.Cmd {
 		// Second escape press - actually cancel the agent.
 		m.isCanceling = false
 		coordinator.Cancel(m.session.ID)
+		// Stop the spinning todo indicator.
+		m.todoIsSpinning = false
+		m.renderPills()
 		return nil
 	}
 
@@ -2469,7 +2595,7 @@ func (m *UI) handlePermissionNotification(notification permission.PermissionNoti
 // newSession clears the current session state and prepares for a new session.
 // The actual session creation happens when the user sends their first message.
 func (m *UI) newSession() {
-	if m.session == nil || m.session.ID == "" {
+	if !m.hasSession() {
 		return
 	}
 
@@ -2480,6 +2606,9 @@ func (m *UI) newSession() {
 	m.textarea.Focus()
 	m.chat.Blur()
 	m.chat.ClearMessages()
+	m.pillsExpanded = false
+	m.promptQueue = 0
+	m.pillsView = ""
 }
 
 // handlePasteMsg handles a paste message.

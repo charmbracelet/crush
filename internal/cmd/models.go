@@ -85,7 +85,7 @@ crush models gpt5`,
 		if !isatty.IsTerminal(os.Stdout.Fd()) {
 			for _, providerID := range providerIDs {
 				for _, modelID := range providerModels[providerID] {
-					fmt.Println(providerID, modelID)
+					fmt.Println(providerID + "/" + modelID)
 				}
 			}
 			return nil

@@ -299,7 +299,7 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 		}
 	}
 	// Store the new version
-	_, err = edit.files.CreateVersion(edit.ctx, sessionID, filePath, "")
+	_, err = edit.files.CreateVersion(edit.ctx, sessionID, filePath, newContent)
 	if err != nil {
 		slog.Error("Error creating file history version", "error", err)
 	}

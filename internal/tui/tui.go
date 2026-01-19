@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"math/rand"
 	"regexp"
 	"slices"
@@ -113,7 +112,6 @@ func (a appModel) Init() tea.Cmd {
 
 // Update handles incoming messages and updates the application state.
 func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	slog.Info("app update", "msg", fmt.Sprintf("%T", msg))
 	var cmds []tea.Cmd
 	var cmd tea.Cmd
 	a.isConfigured = config.HasInitialDataConfig()

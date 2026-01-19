@@ -129,7 +129,6 @@ func Close() error {
 	case <-done:
 	case <-time.After(5 * time.Second):
 	}
-	broker.Shutdown()
 	return nil
 }
 

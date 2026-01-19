@@ -180,6 +180,15 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 			spinner = nil
 		}
 	}
+
+	// Wait for MCP initialization to complete before reading MCP tools.
+	if err := mcp.WaitForInit(ctx); err != nil {
+		return fmt.Errorf("failed to wait for MCP initialization: %w", err)
+	}
+
+	// force update of agent models before running so mcp tools are loaded
+	app.AgentCoordinator.UpdateModels(ctx)
+
 	defer stopSpinner()
 
 	const maxPromptLengthForTitle = 100

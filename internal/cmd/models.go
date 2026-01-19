@@ -42,18 +42,14 @@ crush models gpt5`,
 			return fmt.Errorf("no providers configured - please run 'crush' to set up a provider interactively")
 		}
 
-		filter := func(p config.ProviderConfig, m catwalk.Model) bool { return true }
-		if len(args) > 0 {
-			filter = func(p config.ProviderConfig, m catwalk.Model) bool {
-				input := strings.ToLower(strings.Join(args, " "))
-				contains := func(s string) bool {
-					return strings.Contains(strings.ToLower(s), input)
+		term := strings.ToLower(strings.Join(args, " "))
+		filter := func(p config.ProviderConfig, m catwalk.Model) bool {
+			for _, s := range []string{p.ID, p.Name, m.ID, m.Name} {
+				if term == "" || strings.Contains(strings.ToLower(s), term) {
+					return true
 				}
-				return contains(p.ID) ||
-					contains(p.Name) ||
-					contains(m.ID) ||
-					contains(m.Name)
 			}
+			return false
 		}
 
 		var providerIDs []string
@@ -63,16 +59,28 @@ crush models gpt5`,
 			if provider.Disable {
 				continue
 			}
-			providerIDs = append(providerIDs, providerID)
+			var found bool
 			for _, model := range provider.Models {
 				if !filter(provider, model) {
 					continue
 				}
 				providerModels[providerID] = append(providerModels[providerID], model.ID)
+				found = true
+			}
+			if !found {
+				continue
 			}
 			slices.Sort(providerModels[providerID])
+			providerIDs = append(providerIDs, providerID)
 		}
 		sort.Strings(providerIDs)
+
+		if len(providerIDs) == 0 && len(args) == 0 {
+			return fmt.Errorf("no enabled providers found")
+		}
+		if len(providerIDs) == 0 {
+			return fmt.Errorf("no enabled providers found matching %q", term)
+		}
 
 		if !isatty.IsTerminal(os.Stdout.Fd()) {
 			for _, providerID := range providerIDs {
@@ -89,9 +97,7 @@ crush models gpt5`,
 			for _, modelID := range providerModels[providerID] {
 				providerNode.Child(modelID)
 			}
-			if providerNode.Children().Length() > 0 {
-				t.Child(providerNode)
-			}
+			t.Child(providerNode)
 		}
 
 		cmd.Println(t)

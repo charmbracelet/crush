@@ -30,7 +30,7 @@
             padding: 2rem;
         }
         .container {
-            max-width: 1400px;
+            max-width: 1200px;
             margin: 0 auto;
         }
         h1 {
@@ -43,16 +43,29 @@
             margin-bottom: 2rem;
         }
         .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            display: flex;
+            flex-wrap: wrap;
             gap: 1rem;
             margin-bottom: 2rem;
+            width: 100%;
         }
         .stat-card {
             background: var(--bg-secondary);
             border: 1px solid var(--border);
             border-radius: 12px;
             padding: 1.5rem;
+            flex: 1 1 150px;
+            max-width: calc((100% - 5rem) / 6);
+        }
+        @media (max-width: 1024px) {
+            .stat-card {
+                max-width: calc((100% - 2rem) / 3);
+            }
+        }
+        @media (max-width: 600px) {
+            .stat-card {
+                max-width: calc((100% - 1rem) / 2);
+            }
         }
         .stat-card h3 {
             font-size: 0.875rem;
@@ -70,24 +83,36 @@
             color: var(--accent4);
         }
         .charts-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
+            display: flex;
+            flex-direction: column;
             gap: 1.5rem;
             margin-bottom: 2rem;
-        }
-        @media (max-width: 1024px) {
-            .charts-grid {
-                grid-template-columns: 1fr;
-            }
+            width: 100%;
         }
         .chart-card {
             background: var(--bg-secondary);
             border: 1px solid var(--border);
             border-radius: 12px;
             padding: 1.5rem;
+            width: 100%;
+            box-sizing: border-box;
         }
         .chart-card.full-width {
-            grid-column: 1 / -1;
+            width: 100%;
+        }
+        .chart-row {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1.5rem;
+            width: 100%;
+        }
+        .chart-row .chart-card {
+            width: 100%;
+        }
+        @media (max-width: 1024px) {
+            .chart-row {
+                grid-template-columns: 1fr;
+            }
         }
         .chart-card h2 {
             font-size: 1.25rem;
@@ -182,17 +207,19 @@
                 </div>
             </div>
 
-            <div class="chart-card">
-                <h2>Tool Usage</h2>
-                <div class="chart-container">
-                    <canvas id="toolChart"></canvas>
+            <div class="chart-row">
+                <div class="chart-card">
+                    <h2>Tool Usage</h2>
+                    <div class="chart-container">
+                        <canvas id="toolChart"></canvas>
+                    </div>
                 </div>
-            </div>
 
-            <div class="chart-card">
-                <h2>Token Distribution</h2>
-                <div class="chart-container">
-                    <canvas id="tokenPieChart"></canvas>
+                <div class="chart-card">
+                    <h2>Token Distribution</h2>
+                    <div class="chart-container">
+                        <canvas id="tokenPieChart"></canvas>
+                    </div>
                 </div>
             </div>
 
@@ -202,23 +229,23 @@
                     <canvas id="modelChart"></canvas>
                 </div>
             </div>
-        </div>
 
-        <div class="chart-card">
-            <h2>Daily Usage History</h2>
-            <table id="daily-table">
-                <thead>
-                    <tr>
-                        <th>Date</th>
-                        <th>Sessions</th>
-                        <th>Prompt Tokens</th>
-                        <th>Completion Tokens</th>
-                        <th>Total Tokens</th>
-                        <th>Cost</th>
-                    </tr>
-                </thead>
-                <tbody></tbody>
-            </table>
+            <div class="chart-card full-width">
+                <h2>Daily Usage History</h2>
+                <table id="daily-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Sessions</th>
+                            <th>Prompt Tokens</th>
+                            <th>Completion Tokens</th>
+                            <th>Total Tokens</th>
+                            <th>Cost</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
         </div>
 
         <div class="footer">

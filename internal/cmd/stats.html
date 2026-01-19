@@ -183,11 +183,11 @@
                 <div class="value cost" id="total-cost"></div>
             </div>
             <div class="stat-card">
-                <h3>Avg Tokens/Session</h3>
+                <h3>Tokens/Session</h3>
                 <div class="value" id="avg-tokens"></div>
             </div>
             <div class="stat-card">
-                <h3>Avg Response Time</h3>
+                <h3>Response Time</h3>
                 <div class="value" id="avg-response"></div>
             </div>
         </div>
@@ -261,6 +261,12 @@
             return new Intl.NumberFormat().format(Math.round(n));
         }
 
+        function formatCompact(n) {
+            if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+            if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+            return Math.round(n).toString();
+        }
+
         function formatCost(n) {
             return '$' + n.toFixed(2);
         }
@@ -273,11 +279,11 @@
         // Populate summary cards
         document.getElementById('generated-at').textContent = new Date(stats.generated_at).toLocaleString();
         document.getElementById('total-sessions').textContent = formatNumber(stats.total.total_sessions);
-        document.getElementById('total-messages').textContent = formatNumber(stats.total.total_messages);
-        document.getElementById('total-tokens').textContent = formatNumber(stats.total.total_tokens);
+        document.getElementById('total-messages').textContent = formatCompact(stats.total.total_messages);
+        document.getElementById('total-tokens').textContent = formatCompact(stats.total.total_tokens);
         document.getElementById('total-cost').textContent = formatCost(stats.total.total_cost);
-        document.getElementById('avg-tokens').textContent = formatNumber(stats.total.avg_tokens_per_session);
-        document.getElementById('avg-response').textContent = formatTime(stats.avg_response_time_ms);
+        document.getElementById('avg-tokens').innerHTML = '<span title="Average">x̅</span> ' + formatCompact(stats.total.avg_tokens_per_session);
+        document.getElementById('avg-response').innerHTML = '<span title="Average">x̅</span> ' + formatTime(stats.avg_response_time_ms);
 
         // Chart defaults
         Chart.defaults.color = '#F1EFEF';

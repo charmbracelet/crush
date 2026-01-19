@@ -9,23 +9,17 @@ import (
 	"fmt"
 	"html/template"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
+	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
 )
 
 //go:embed stats.html
 var statsTemplate string
-
-func init() {
-	statsCmd.Flags().Bool("json", false, "Output stats as JSON instead of opening HTML")
-	statsCmd.Flags().Bool("no-open", false, "Generate HTML but don't open it in browser")
-}
 
 var statsCmd = &cobra.Command{
 	Use:   "stats",
@@ -106,8 +100,6 @@ type HourDayHeatmapPt struct {
 }
 
 func runStats(cmd *cobra.Command, _ []string) error {
-	outputJSON, _ := cmd.Flags().GetBool("json")
-	noOpen, _ := cmd.Flags().GetBool("no-open")
 	dataDir, _ := cmd.Flags().GetString("data-dir")
 	ctx := cmd.Context()
 
@@ -130,12 +122,6 @@ func runStats(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("failed to gather stats: %w", err)
 	}
 
-	if outputJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(stats)
-	}
-
 	htmlPath := filepath.Join(dataDir, "stats.html")
 	if err := generateHTML(stats, htmlPath); err != nil {
 		return fmt.Errorf("failed to generate HTML: %w", err)
@@ -143,11 +129,9 @@ func runStats(cmd *cobra.Command, _ []string) error {
 
 	fmt.Printf("Stats generated: %s\n", htmlPath)
 
-	if !noOpen {
-		if err := openBrowser(htmlPath); err != nil {
-			fmt.Printf("Could not open browser: %v\n", err)
-			fmt.Println("Please open the file manually.")
-		}
+	if err := browser.OpenFile(htmlPath); err != nil {
+		fmt.Printf("Could not open browser: %v\n", err)
+		fmt.Println("Please open the file manually.")
 	}
 
 	return nil
@@ -317,21 +301,6 @@ func nullFloat64ToInt64(n sql.NullFloat64) int64 {
 		return int64(n.Float64)
 	}
 	return 0
-}
-
-func openBrowser(url string) error {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", url)
-	case "linux":
-		cmd = exec.Command("xdg-open", url)
-	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", url)
-	default:
-		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
-	}
-	return cmd.Start()
 }
 
 func generateHTML(stats *Stats, path string) error {

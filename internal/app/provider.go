@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/crush/internal/config"
+	xstrings "github.com/charmbracelet/x/exp/strings"
 )
 
 // parseModelStr parses a model string into provider filter and model ID.
@@ -82,7 +83,12 @@ func validateMatches(matches []modelMatch, modelID, label string) (modelMatch, e
 		for i, m := range matches {
 			names[i] = m.provider
 		}
-		return modelMatch{}, fmt.Errorf("%s model: model %q found in multiple providers: %s. Please specify provider using 'provider/model' format", label, modelID, strings.Join(names, ","))
+		return modelMatch{}, fmt.Errorf(
+			"%s model: model %q found in multiple providers: %s. Please specify provider using 'provider/model' format",
+			label,
+			modelID,
+			xstrings.EnglishJoin(names, true),
+		)
 	}
 	return matches[0], nil
 }

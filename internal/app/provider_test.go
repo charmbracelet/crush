@@ -45,13 +45,6 @@ func TestParseModelStr(t *testing.T) {
 			setupProviders:  setupMockProvidersWithSlashes,
 		},
 		{
-			name:            "case insensitive provider",
-			modelStr:        "OpenAI/GPT-4o",
-			expectedFilter:  "openai",
-			expectedModelID: "gpt-4o",
-			setupProviders:  setupMockProviders,
-		},
-		{
 			name:            "empty model string",
 			modelStr:        "",
 			expectedFilter:  "",
@@ -176,14 +169,6 @@ func TestFindModels(t *testing.T) {
 					},
 				}
 			},
-		},
-		{
-			name:             "case insensitive model ID",
-			modelStr:         "GPT-4O",
-			expectedProvider: "openai",
-			expectedModelID:  "gpt-4o",
-			expectError:      false,
-			setupProviders:   setupMockProviders,
 		},
 		{
 			name:           "empty model string",

@@ -46,7 +46,7 @@ func findModels(providers map[string]config.ProviderConfig, largeModel, smallMod
 	} {
 		if pf.filter != "" {
 			if _, ok := providers[pf.filter]; !ok {
-				return nil, nil, fmt.Errorf("%s model: provider %q not found in configuration", pf.label, pf.filter)
+				return nil, nil, fmt.Errorf("%s model: provider %q not found in configuration. Use 'crush models' to list available models", pf.label, pf.filter)
 			}
 		}
 	}

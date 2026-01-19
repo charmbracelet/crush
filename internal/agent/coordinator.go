@@ -375,6 +375,14 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		allTools = append(allTools, agenticFetchTool)
 	}
 
+	if slices.Contains(agent.AllowedTools, tools.MemorySearchToolName) {
+		memorySearchTool, err := c.memorySearchTool(ctx)
+		if err != nil {
+			return nil, err
+		}
+		allTools = append(allTools, memorySearchTool)
+	}
+
 	// Get the model name for the agent
 	modelName := ""
 	if modelCfg, ok := c.cfg.Models[agent.Model]; ok {

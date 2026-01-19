@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/fantasy"
 	"charm.land/x/vcr"
@@ -646,8 +647,105 @@ func BenchmarkBuildSummaryPrompt(b *testing.B) {
 		b.Run(tc.name, func(b *testing.B) {
 			b.ReportAllocs()
 			for range b.N {
-				_ = buildSummaryPrompt(todos)
+				_ = buildSummaryPrompt("test-session-id", todos)
 			}
 		})
 	}
+}
+
+func TestSerializeTranscript(t *testing.T) {
+	now := time.Now().Unix()
+
+	msgs := []message.Message{
+		{
+			ID:        "msg1",
+			Role:      message.User,
+			SessionID: "sess1",
+			CreatedAt: now,
+			Parts: []message.ContentPart{
+				message.TextContent{Text: "Hello, can you help me?"},
+			},
+		},
+		{
+			ID:        "msg2",
+			Role:      message.Assistant,
+			SessionID: "sess1",
+			Model:     "claude-sonnet-4-20250514",
+			Provider:  "anthropic",
+			CreatedAt: now + 1,
+			Parts: []message.ContentPart{
+				message.TextContent{Text: "Of course! What do you need help with?"},
+				message.ToolCall{
+					ID:    "tc1",
+					Name:  "view",
+					Input: `{"file_path": "/test/file.go"}`,
+				},
+			},
+		},
+		{
+			ID:        "msg3",
+			Role:      message.Tool,
+			SessionID: "sess1",
+			CreatedAt: now + 2,
+			Parts: []message.ContentPart{
+				message.ToolResult{
+					ToolCallID: "tc1",
+					Name:       "view",
+					Content:    "package main\n\nfunc main() {}",
+					IsError:    false,
+				},
+			},
+		},
+	}
+
+	transcript := serializeTranscript(msgs)
+
+	// Verify structure.
+	require.Contains(t, transcript, "# Session Transcript")
+	require.Contains(t, transcript, "## User")
+	require.Contains(t, transcript, "## Assistant")
+	require.Contains(t, transcript, "## Tool Results")
+
+	// Verify user message.
+	require.Contains(t, transcript, "Hello, can you help me?")
+
+	// Verify assistant message.
+	require.Contains(t, transcript, "claude-sonnet-4-20250514")
+	require.Contains(t, transcript, "Of course! What do you need help with?")
+	require.Contains(t, transcript, "**Tool:** `view`")
+	require.Contains(t, transcript, `"file_path": "/test/file.go"`)
+
+	// Verify tool result.
+	require.Contains(t, transcript, "**Status:** Success")
+	require.Contains(t, transcript, "package main")
+}
+
+func TestSerializeTranscript_TruncatesLongToolResults(t *testing.T) {
+	now := time.Now().Unix()
+
+	// Create a tool result with content larger than the truncation threshold.
+	longContent := strings.Repeat("x", 15000)
+
+	msgs := []message.Message{
+		{
+			ID:        "msg1",
+			Role:      message.Tool,
+			SessionID: "sess1",
+			CreatedAt: now,
+			Parts: []message.ContentPart{
+				message.ToolResult{
+					ToolCallID: "tc1",
+					Name:       "bash",
+					Content:    longContent,
+					IsError:    false,
+				},
+			},
+		},
+	}
+
+	transcript := serializeTranscript(msgs)
+
+	// Verify truncation happened.
+	require.Contains(t, transcript, "... (truncated)")
+	require.Less(t, len(transcript), 15000, "Transcript should be smaller than original content")
 }

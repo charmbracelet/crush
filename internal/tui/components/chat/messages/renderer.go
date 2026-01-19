@@ -191,6 +191,7 @@ func init() {
 	registry.register(tools.WriteToolName, func() renderer { return writeRenderer{} })
 	registry.register(tools.FetchToolName, func() renderer { return simpleFetchRenderer{} })
 	registry.register(tools.AgenticFetchToolName, func() renderer { return agenticFetchRenderer{} })
+	registry.register(tools.MemorySearchToolName, func() renderer { return memorySearchRenderer{} })
 	registry.register(tools.WebFetchToolName, func() renderer { return webFetchRenderer{} })
 	registry.register(tools.WebSearchToolName, func() renderer { return webSearchRenderer{} })
 	registry.register(tools.GlobToolName, func() renderer { return globRenderer{} })
@@ -673,6 +674,77 @@ func (fr agenticFetchRenderer) Render(v *toolCallCmp) string {
 			taskTag,
 			" ",
 			prompt,
+		),
+	)
+	childTools := tree.Root(header)
+
+	for _, call := range v.nestedToolCalls {
+		call.SetSize(remainingWidth, 1)
+		childTools.Child(call.View())
+	}
+	parts := []string{
+		childTools.Enumerator(RoundedEnumeratorWithWidth(2, lipgloss.Width(taskTag)-5)).String(),
+	}
+
+	if v.result.ToolCallID == "" {
+		v.spinning = true
+		parts = append(parts, "", v.anim.View())
+	} else {
+		v.spinning = false
+	}
+
+	header = lipgloss.JoinVertical(
+		lipgloss.Left,
+		parts...,
+	)
+
+	if v.result.ToolCallID == "" {
+		return header
+	}
+	body := renderMarkdownContent(v, v.result.Content)
+	return joinHeaderBody(header, body)
+}
+
+// -----------------------------------------------------------------------------
+//  Memory Search renderer
+// -----------------------------------------------------------------------------
+
+// memorySearchRenderer handles session transcript searching with nested tool calls
+type memorySearchRenderer struct {
+	baseRenderer
+}
+
+// Render displays the memory search query and nested tool calls
+func (mr memorySearchRenderer) Render(v *toolCallCmp) string {
+	t := styles.CurrentTheme()
+	var params tools.MemorySearchParams
+	if err := mr.unmarshalParams(v.call.Input, &params); err != nil {
+		return mr.renderWithParams(v, "Memory Search", []string{v.call.Input}, func() string {
+			return renderPlainContent(v, v.result.Content)
+		})
+	}
+
+	query := params.Query
+	query = strings.ReplaceAll(query, "\n", " ")
+
+	header := mr.makeHeader(v, "Memory Search", v.textWidth())
+	if res, done := earlyState(header, v); v.cancelled && done {
+		return res
+	}
+
+	taskTag := t.S().Base.Bold(true).Padding(0, 1).MarginLeft(2).Background(t.Citron).Foreground(t.Border).Render("Query")
+	remainingWidth := v.textWidth() - (lipgloss.Width(taskTag) + 1)
+	remainingWidth = min(remainingWidth, 120-(lipgloss.Width(taskTag)+1))
+	query = t.S().Base.Width(remainingWidth).Render(query)
+	header = lipgloss.JoinVertical(
+		lipgloss.Left,
+		header,
+		"",
+		lipgloss.JoinHorizontal(
+			lipgloss.Left,
+			taskTag,
+			" ",
+			query,
 		),
 	)
 	childTools := tree.Root(header)
@@ -1288,6 +1360,8 @@ func prettifyToolName(name string) string {
 		return "Fetch"
 	case tools.AgenticFetchToolName:
 		return "Agentic Fetch"
+	case tools.MemorySearchToolName:
+		return "Memory Search"
 	case tools.WebFetchToolName:
 		return "Fetch"
 	case tools.WebSearchToolName:

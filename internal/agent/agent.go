@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -562,6 +563,11 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return nil
 	}
 
+	// Save transcript for later search via memory_search tool.
+	if err := a.saveTranscript(ctx, sessionID); err != nil {
+		slog.Warn("failed to save transcript", "error", err)
+	}
+
 	aiMsgs, _ := a.preparePrompt(msgs)
 
 	genCtx, cancel := context.WithCancel(ctx)
@@ -582,7 +588,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return err
 	}
 
-	summaryPromptText := buildSummaryPrompt(currentSession.Todos)
+	summaryPromptText := buildSummaryPrompt(sessionID, currentSession.Todos)
 
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:          summaryPromptText,
@@ -686,6 +692,13 @@ func (a *sessionAgent) createUserMessage(ctx context.Context, call SessionAgentC
 
 func (a *sessionAgent) preparePrompt(msgs []message.Message, attachments ...message.Attachment) ([]fantasy.Message, []fantasy.FilePart) {
 	var history []fantasy.Message
+	hasSummary := false
+	for _, msg := range msgs {
+		if msg.IsSummaryMessage {
+			hasSummary = true
+			break
+		}
+	}
 	if !a.isSubAgent {
 		history = append(history, fantasy.NewUserMessage(
 			fmt.Sprintf("<system_reminder>%s</system_reminder>",
@@ -694,6 +707,13 @@ If you are working on tasks that would benefit from a todo list please use the "
 If not, please feel free to ignore. Again do not mention this message to the user.`,
 			),
 		))
+		if hasSummary {
+			history = append(history, fantasy.NewUserMessage(
+				fmt.Sprintf("<system_reminder>%s</system_reminder>",
+					`This session was summarized. If you need specific details from before the summary (commands, code, file paths, errors, decisions), use the "memory_search" tool to search the full transcript instead of guessing.`,
+				),
+			))
+		}
 	}
 	for _, m := range msgs {
 		if len(m.Parts) == 0 {
@@ -1122,9 +1142,16 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 }
 
 // buildSummaryPrompt constructs the prompt text for session summarization.
-func buildSummaryPrompt(todos []session.Todo) string {
+func buildSummaryPrompt(sessionID string, todos []session.Todo) string {
 	var sb strings.Builder
 	sb.WriteString("Provide a detailed summary of our conversation above.")
+
+	// Include transcript path for memory search.
+	transcriptPath := TranscriptPath(sessionID)
+	sb.WriteString("\n\n## Session Transcript\n\n")
+	sb.WriteString(fmt.Sprintf("The full conversation transcript has been saved to: `%s`\n", transcriptPath))
+	sb.WriteString("The resuming assistant can use the `memory_search` tool to search this transcript for specific details from the conversation.\n")
+
 	if len(todos) > 0 {
 		sb.WriteString("\n\n## Current Todo List\n\n")
 		for _, t := range todos {
@@ -1134,4 +1161,133 @@ func buildSummaryPrompt(todos []session.Todo) string {
 		sb.WriteString("Instruct the resuming assistant to use the `todos` tool to continue tracking progress on these tasks.")
 	}
 	return sb.String()
+}
+
+// serializeTranscript converts a slice of messages to a searchable markdown
+// transcript format. The transcript includes user messages, assistant
+// responses, tool calls, tool results, and reasoning content.
+func serializeTranscript(msgs []message.Message) string {
+	var sb strings.Builder
+	sb.WriteString("# Session Transcript\n\n")
+
+	for _, msg := range msgs {
+		roleHeader := "Message"
+		switch msg.Role {
+		case message.User:
+			roleHeader = "User"
+		case message.Assistant:
+			roleHeader = "Assistant"
+		case message.Tool:
+			roleHeader = "Tool Results"
+		}
+		sb.WriteString(fmt.Sprintf("## %s\n\n", roleHeader))
+
+		switch msg.Role {
+		case message.User:
+			if text := msg.Content().Text; text != "" {
+				sb.WriteString("### Content\n\n")
+				sb.WriteString(text)
+				sb.WriteString("\n\n")
+			}
+			// Include binary content paths.
+			attachments := msg.BinaryContent()
+			if len(attachments) > 0 {
+				sb.WriteString("### Attachments\n\n")
+				for _, bc := range attachments {
+					sb.WriteString(fmt.Sprintf("- %s (%s)\n", bc.Path, bc.MIMEType))
+				}
+				sb.WriteString("\n")
+			}
+
+		case message.Assistant:
+			if msg.Model != "" {
+				sb.WriteString(fmt.Sprintf("**Model:** %s (%s)\n", msg.Model, msg.Provider))
+			}
+			sb.WriteString("\n")
+
+			// Reasoning content.
+			if reasoning := msg.ReasoningContent(); reasoning.Thinking != "" {
+				sb.WriteString("### Reasoning\n\n")
+				sb.WriteString("<thinking>\n")
+				sb.WriteString(reasoning.Thinking)
+				sb.WriteString("\n</thinking>\n\n")
+			}
+
+			// Text content.
+			if text := msg.Content().Text; text != "" {
+				sb.WriteString("### Response\n\n")
+				sb.WriteString(text)
+				sb.WriteString("\n\n")
+			}
+
+			// Tool calls.
+			toolCalls := msg.ToolCalls()
+			if len(toolCalls) > 0 {
+				sb.WriteString("### Tool Calls\n\n")
+				for _, tc := range toolCalls {
+					sb.WriteString("#### Tool Call\n\n")
+					sb.WriteString(fmt.Sprintf("**Tool:** `%s`\n\n", tc.Name))
+					sb.WriteString("**Input:**\n\n")
+					sb.WriteString("```json\n")
+					sb.WriteString(tc.Input)
+					sb.WriteString("\n```\n\n")
+				}
+			}
+
+		case message.Tool:
+			for _, tr := range msg.ToolResults() {
+				sb.WriteString("#### Tool Result\n\n")
+				sb.WriteString(fmt.Sprintf("**Tool:** `%s`\n", tr.Name))
+				if tr.IsError {
+					sb.WriteString("**Status:** Error\n")
+				} else {
+					sb.WriteString("**Status:** Success\n")
+				}
+				// Truncate very long tool results.
+				content := tr.Content
+				const maxToolResultLen = 10000
+				if len(content) > maxToolResultLen {
+					content = content[:maxToolResultLen] + "\n... (truncated)"
+					sb.WriteString("**Output:** (truncated)\n\n")
+				} else {
+					sb.WriteString("**Output:**\n\n")
+				}
+				sb.WriteString("```\n")
+				sb.WriteString(content)
+				sb.WriteString("\n```\n\n")
+			}
+		}
+
+		sb.WriteString("---\n\n")
+	}
+
+	return sb.String()
+}
+
+// saveTranscript serializes messages to a markdown file for later search.
+func (a *sessionAgent) saveTranscript(ctx context.Context, sessionID string) error {
+	msgs, err := a.messages.List(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to list messages: %w", err)
+	}
+	cfg := config.Get()
+	transcriptsDir := filepath.Join(cfg.Options.DataDirectory, "transcripts")
+	if err := os.MkdirAll(transcriptsDir, 0o755); err != nil {
+		return fmt.Errorf("failed to create transcripts directory: %w", err)
+	}
+
+	transcriptPath := filepath.Join(transcriptsDir, sessionID+".md")
+	transcript := serializeTranscript(msgs)
+	if err := os.WriteFile(transcriptPath, []byte(transcript), 0o644); err != nil {
+		return fmt.Errorf("failed to write transcript: %w", err)
+	}
+
+	slog.Debug("saved transcript", "path", transcriptPath, "messages", len(msgs))
+	return nil
+}
+
+// TranscriptPath returns the path where a session's transcript would be saved.
+func TranscriptPath(sessionID string) string {
+	cfg := config.Get()
+	return filepath.Join(cfg.Options.DataDirectory, "transcripts", sessionID+".md")
 }

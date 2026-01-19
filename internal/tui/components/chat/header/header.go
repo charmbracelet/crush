@@ -15,7 +15,6 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
 type Header interface {
@@ -106,13 +105,7 @@ func (h *header) details(availWidth int) string {
 
 	errorCount := 0
 	for l := range h.lspClients.Seq() {
-		for _, diagnostics := range l.GetDiagnostics() {
-			for _, diagnostic := range diagnostics {
-				if diagnostic.Severity == protocol.SeverityError {
-					errorCount++
-				}
-			}
-		}
+		errorCount += l.GetDiagnosticCounts().Error
 	}
 
 	if errorCount > 0 {

@@ -67,7 +67,7 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, config
 		lspClient.SetServerState(lsp.StateError)
 		updateLSPState(name, lsp.StateError, err, lspClient, 0)
 	} else {
-		// Server reached a ready state scuccessfully.
+		// Server reached a ready state successfully.
 		slog.Debug("LSP server is ready", "name", name)
 		lspClient.SetServerState(lsp.StateReady)
 		updateLSPState(name, lsp.StateReady, nil, lspClient, 0)

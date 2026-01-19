@@ -1,15 +1,14 @@
 package editor
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"math/rand"
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -32,6 +31,12 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/editor"
+)
+
+var (
+	errClipboardPlatformUnsupported = fmt.Errorf("clipboard operations are not supported on this platform")
+	errClipboardUnknownFormat       = fmt.Errorf("unknown clipboard format")
 )
 
 type Editor interface {
@@ -94,16 +99,6 @@ type OpenEditorMsg struct {
 }
 
 func (m *editorCmp) openEditor(value string) tea.Cmd {
-	editor := os.Getenv("EDITOR")
-	if editor == "" {
-		// Use platform-appropriate default editor
-		if runtime.GOOS == "windows" {
-			editor = "notepad"
-		} else {
-			editor = "nvim"
-		}
-	}
-
 	tmpfile, err := os.CreateTemp("", "msg_*.md")
 	if err != nil {
 		return util.ReportError(err)
@@ -112,8 +107,18 @@ func (m *editorCmp) openEditor(value string) tea.Cmd {
 	if _, err := tmpfile.WriteString(value); err != nil {
 		return util.ReportError(err)
 	}
-	cmdStr := editor + " " + tmpfile.Name()
-	return util.ExecShell(context.TODO(), cmdStr, func(err error) tea.Msg {
+	cmd, err := editor.Command(
+		"crush",
+		tmpfile.Name(),
+		editor.AtPosition(
+			m.textarea.Line()+1,
+			m.textarea.Column()+1,
+		),
+	)
+	if err != nil {
+		return util.ReportError(err)
+	}
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		if err != nil {
 			return util.ReportError(err)
 		}
@@ -147,7 +152,7 @@ func (m *editorCmp) send() tea.Cmd {
 
 	attachments := m.attachments
 
-	if value == "" {
+	if value == "" && !message.ContainsTextAttachment(attachments) {
 		return nil
 	}
 
@@ -234,13 +239,31 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		m.textarea.SetValue(msg.Text)
 		m.textarea.MoveToEnd()
 	case tea.PasteMsg:
-		content, path, err := pasteToFile(msg)
-		if errors.Is(err, errNotAFile) {
+		// If pasted text has more than 2 newlines, treat it as a file attachment.
+		if strings.Count(msg.Content, "\n") > 2 {
+			content := []byte(msg.Content)
+			if len(content) > maxAttachmentSize {
+				return m, util.ReportWarn("Paste is too big (>5mb)")
+			}
+			name := fmt.Sprintf("paste_%d.txt", m.pasteIdx())
+			mimeType := mimeOf(content)
+			attachment := message.Attachment{
+				FileName: name,
+				FilePath: name,
+				MimeType: mimeType,
+				Content:  content,
+			}
+			return m, util.CmdHandler(filepicker.FilePickedMsg{
+				Attachment: attachment,
+			})
+		}
+
+		// Try to parse as a file path.
+		content, path, err := filepathToFile(msg.Content)
+		if err != nil {
+			// Not a file path, just update the textarea normally.
 			m.textarea, cmd = m.textarea.Update(msg)
 			return m, cmd
-		}
-		if err != nil {
-			return m, util.ReportError(err)
 		}
 
 		if len(content) > maxAttachmentSize {
@@ -257,7 +280,6 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		if !attachment.IsText() && !attachment.IsImage() {
 			return m, util.ReportWarn("Invalid file content type: " + mimeType)
 		}
-		m.textarea.InsertString(attachment.FileName)
 		return m, util.CmdHandler(filepicker.FilePickedMsg{
 			Attachment: attachment,
 		})
@@ -320,6 +342,84 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		if key.Matches(msg, m.keyMap.Newline) {
 			m.textarea.InsertRune('\n')
 			cmds = append(cmds, util.CmdHandler(completions.CloseCompletionsMsg{}))
+		}
+		// Handle image paste from clipboard
+		if key.Matches(msg, m.keyMap.PasteImage) {
+			imageData, err := readClipboard(clipboardFormatImage)
+
+			if err != nil || len(imageData) == 0 {
+				// If no image data found, try to get text data (could be file path)
+				var textData []byte
+				textData, err = readClipboard(clipboardFormatText)
+				if err != nil || len(textData) == 0 {
+					// If clipboard is empty, show a warning
+					return m, util.ReportWarn("No data found in clipboard. Note: Some terminals may not support reading image data from clipboard directly.")
+				}
+
+				// Check if the text data is a file path
+				textStr := string(textData)
+				// First, try to interpret as a file path (existing functionality)
+				path := strings.ReplaceAll(textStr, "\\ ", " ")
+				path, err = filepath.Abs(strings.TrimSpace(path))
+				if err == nil {
+					isAllowedType := false
+					for _, ext := range filepicker.AllowedTypes {
+						if strings.HasSuffix(path, ext) {
+							isAllowedType = true
+							break
+						}
+					}
+					if isAllowedType {
+						tooBig, _ := filepicker.IsFileTooBig(path, filepicker.MaxAttachmentSize)
+						if !tooBig {
+							content, err := os.ReadFile(path)
+							if err == nil {
+								mimeBufferSize := min(512, len(content))
+								mimeType := http.DetectContentType(content[:mimeBufferSize])
+								fileName := filepath.Base(path)
+								attachment := message.Attachment{FilePath: path, FileName: fileName, MimeType: mimeType, Content: content}
+								return m, util.CmdHandler(filepicker.FilePickedMsg{
+									Attachment: attachment,
+								})
+							}
+						}
+					}
+				}
+
+				// If not a valid file path, show a warning
+				return m, util.ReportWarn("No image found in clipboard")
+			} else {
+				// We have image data from the clipboard
+				// Create a temporary file to store the clipboard image data
+				tempFile, err := os.CreateTemp("", "clipboard_image_crush_*")
+				if err != nil {
+					return m, util.ReportError(err)
+				}
+				defer tempFile.Close()
+
+				// Write clipboard content to the temporary file
+				_, err = tempFile.Write(imageData)
+				if err != nil {
+					return m, util.ReportError(err)
+				}
+
+				// Determine the file extension based on the image data
+				mimeBufferSize := min(512, len(imageData))
+				mimeType := http.DetectContentType(imageData[:mimeBufferSize])
+
+				// Create an attachment from the temporary file
+				fileName := filepath.Base(tempFile.Name())
+				attachment := message.Attachment{
+					FilePath: tempFile.Name(),
+					FileName: fileName,
+					MimeType: mimeType,
+					Content:  imageData,
+				}
+
+				return m, util.CmdHandler(filepicker.FilePickedMsg{
+					Attachment: attachment,
+				})
+			}
 		}
 		// Handle Enter key
 		if m.textarea.Focused() && key.Matches(msg, m.keyMap.SendMessage) {
@@ -628,33 +728,21 @@ func New(app *app.App) Editor {
 
 var maxAttachmentSize = 5 * 1024 * 1024 // 5MB
 
-var errNotAFile = errors.New("not a file")
+var pasteRE = regexp.MustCompile(`paste_(\d+).txt`)
 
-func pasteToFile(msg tea.PasteMsg) ([]byte, string, error) {
-	content, path, err := filepathToFile(msg.Content)
-	if err == nil {
-		return content, path, err
+func (m *editorCmp) pasteIdx() int {
+	result := 0
+	for _, at := range m.attachments {
+		found := pasteRE.FindStringSubmatch(at.FileName)
+		if len(found) == 0 {
+			continue
+		}
+		idx, err := strconv.Atoi(found[1])
+		if err == nil {
+			result = max(result, idx)
+		}
 	}
-
-	if strings.Count(msg.Content, "\n") > 2 {
-		return contentToFile([]byte(msg.Content))
-	}
-
-	return nil, "", errNotAFile
-}
-
-func contentToFile(content []byte) ([]byte, string, error) {
-	f, err := os.CreateTemp("", "paste_*.txt")
-	if err != nil {
-		return nil, "", err
-	}
-	if _, err := f.Write(content); err != nil {
-		return nil, "", err
-	}
-	if err := f.Close(); err != nil {
-		return nil, "", err
-	}
-	return content, f.Name(), nil
+	return result + 1
 }
 
 func filepathToFile(name string) ([]byte, string, error) {

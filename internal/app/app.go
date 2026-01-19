@@ -173,6 +173,15 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 			spinner = nil
 		}
 	}
+
+	// Wait for MCP initialization to complete before reading MCP tools.
+	if err := mcp.WaitForInit(ctx); err != nil {
+		return fmt.Errorf("failed to wait for MCP initialization: %w", err)
+	}
+
+	// force update of agent models before running so mcp tools are loaded
+	app.AgentCoordinator.UpdateModels(ctx)
+
 	defer stopSpinner()
 
 	const maxPromptLengthForTitle = 100
@@ -392,12 +401,15 @@ func (app *App) Subscribe(program *tea.Program) {
 func (app *App) Shutdown() {
 	start := time.Now()
 	defer func() { slog.Info("Shutdown took " + time.Since(start).String()) }()
-	var wg sync.WaitGroup
+
+	// First, cancel all agents and wait for them to finish. This must complete
+	// before closing the DB so agents can finish writing their state.
 	if app.AgentCoordinator != nil {
-		wg.Go(func() {
-			app.AgentCoordinator.CancelAll()
-		})
+		app.AgentCoordinator.CancelAll()
 	}
+
+	// Now run remaining cleanup tasks in parallel.
+	var wg sync.WaitGroup
 
 	// Kill all background shells.
 	wg.Go(func() {
@@ -405,12 +417,15 @@ func (app *App) Shutdown() {
 	})
 
 	// Shutdown all LSP clients.
+	shutdownCtx, cancel := context.WithTimeout(app.globalCtx, 5*time.Second)
+	defer cancel()
 	for name, client := range app.LSPClients.Seq2() {
 		wg.Go(func() {
-			shutdownCtx, cancel := context.WithTimeout(app.globalCtx, 5*time.Second)
-			defer cancel()
-			if err := client.Close(shutdownCtx); err != nil {
-				slog.Error("Failed to shutdown LSP client", "name", name, "error", err)
+			if err := client.Close(shutdownCtx); err != nil &&
+				!errors.Is(err, io.EOF) &&
+				!errors.Is(err, context.Canceled) &&
+				err.Error() != "signal: killed" {
+				slog.Warn("Failed to shutdown LSP client", "name", name, "error", err)
 			}
 		})
 	}

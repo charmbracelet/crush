@@ -173,7 +173,7 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 	} else {
 		description = fmt.Sprintf("Create file %s with %d edits", params.FilePath, editsApplied)
 	}
-	p := edit.permissions.Request(permission.CreatePermissionRequest{
+	p, err := edit.permissions.Request(edit.ctx, permission.CreatePermissionRequest{
 		SessionID:   sessionID,
 		Path:        fsext.PathOrPrefix(params.FilePath, edit.workingDir),
 		ToolCallID:  call.ID,
@@ -186,12 +186,15 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 			NewContent: currentContent,
 		},
 	})
+	if err != nil {
+		return fantasy.ToolResponse{}, err
+	}
 	if !p {
 		return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
 	// Write the file
-	err := os.WriteFile(params.FilePath, []byte(currentContent), 0o644)
+	err = os.WriteFile(params.FilePath, []byte(currentContent), 0o644)
 	if err != nil {
 		return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
 	}
@@ -314,7 +317,7 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 	} else {
 		description = fmt.Sprintf("Apply %d edits to file %s", editsApplied, params.FilePath)
 	}
-	p := edit.permissions.Request(permission.CreatePermissionRequest{
+	p, err := edit.permissions.Request(edit.ctx, permission.CreatePermissionRequest{
 		SessionID:   sessionID,
 		Path:        fsext.PathOrPrefix(params.FilePath, edit.workingDir),
 		ToolCallID:  call.ID,
@@ -327,6 +330,9 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 			NewContent: currentContent,
 		},
 	})
+	if err != nil {
+		return fantasy.ToolResponse{}, err
+	}
 	if !p {
 		return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 	}

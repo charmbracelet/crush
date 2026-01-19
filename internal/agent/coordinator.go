@@ -837,7 +837,7 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 
 func (c *coordinator) RecoverSession(ctx context.Context, sessionID string) error {
 	// Skip recovery if session is currently active
-	if c.currentAgent.IsSessionBusy(sessionID) {
+	if c.currentAgent != nil && c.currentAgent.IsSessionBusy(sessionID) {
 		return nil
 	}
 

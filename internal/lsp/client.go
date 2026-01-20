@@ -140,14 +140,10 @@ func (c *Client) createPowernapClient() error {
 	}
 
 	clientConfig := powernap.ClientConfig{
-		Command: home.Long(command),
-		Args:    c.config.Args,
-		RootURI: rootURI,
-		Environment: func() map[string]string {
-			env := make(map[string]string)
-			maps.Copy(env, c.config.Env)
-			return env
-		}(),
+		Command:     home.Long(command),
+		Args:        c.config.Args,
+		RootURI:     rootURI,
+		Environment: maps.Clone(c.config.Env),
 		Settings:    c.config.Options,
 		InitOptions: c.config.InitOptions,
 		WorkspaceFolders: []protocol.WorkspaceFolder{
@@ -180,15 +176,11 @@ func (c *Client) registerHandlers() {
 
 // Restart closes the current LSP client and creates a new one with the same configuration.
 func (c *Client) Restart() error {
-	slog.Info("Restarting LSP client", "name", c.name)
-
-	// Store currently open files to reopen after restart
 	var openFiles []string
 	for uri := range c.openFiles.Seq2() {
 		openFiles = append(openFiles, string(uri))
 	}
 
-	// Close existing client
 	closeCtx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
 	defer cancel()
 
@@ -196,7 +188,6 @@ func (c *Client) Restart() error {
 		slog.Warn("Error closing client during restart", "name", c.name, "error", err)
 	}
 
-	// Reset diagnostic cache
 	c.diagCountsCache = DiagnosticCounts{}
 	c.diagCountsVersion = 0
 
@@ -204,7 +195,6 @@ func (c *Client) Restart() error {
 		return err
 	}
 
-	// Re-initialize the client
 	initCtx, cancel := context.WithTimeout(c.ctx, 30*time.Second)
 	defer cancel()
 
@@ -223,14 +213,11 @@ func (c *Client) Restart() error {
 		return err
 	}
 
-	// Reopen previously opened files
 	for _, uri := range openFiles {
 		if err := c.OpenFile(initCtx, uri); err != nil {
 			slog.Warn("Failed to reopen file after restart", "file", uri, "error", err)
 		}
 	}
-
-	slog.Info("Successfully restarted LSP client", "name", c.name)
 	return nil
 }
 

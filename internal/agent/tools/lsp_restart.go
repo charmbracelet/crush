@@ -22,7 +22,7 @@ var lspRestartDescription []byte
 type LSPRestartParams struct {
 	// Name is the optional name of a specific LSP client to restart.
 	// If empty, all LSP clients will be restarted.
-	Name string `json:"name"` // Optional: specific LSP client name
+	Name string `json:"name"`
 }
 
 func NewLSPRestartTool(lspClients *csync.Map[string, *lsp.Client]) fantasy.AgentTool {
@@ -34,14 +34,10 @@ func NewLSPRestartTool(lspClients *csync.Map[string, *lsp.Client]) fantasy.Agent
 				return fantasy.NewTextErrorResponse("no LSP clients available to restart"), nil
 			}
 
-			// Determine which clients to restart
 			clientsToRestart := make(map[string]*lsp.Client)
-
 			if params.Name == "" {
-				// Restart all clients
 				maps.Insert(clientsToRestart, lspClients.Seq2())
 			} else {
-				// Restart specific client
 				client, exists := lspClients.Get(params.Name)
 				if !exists {
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("LSP client '%s' not found", params.Name)), nil
@@ -55,8 +51,6 @@ func NewLSPRestartTool(lspClients *csync.Map[string, *lsp.Client]) fantasy.Agent
 			var wg sync.WaitGroup
 			for name, client := range clientsToRestart {
 				wg.Go(func() {
-					slog.Info("Restarting LSP client", "name", name)
-
 					if err := client.Restart(); err != nil {
 						slog.Error("Failed to restart LSP client", "name", name, "error", err)
 						mu.Lock()
@@ -64,11 +58,9 @@ func NewLSPRestartTool(lspClients *csync.Map[string, *lsp.Client]) fantasy.Agent
 						mu.Unlock()
 						return
 					}
-
 					mu.Lock()
 					restarted = append(restarted, name)
 					mu.Unlock()
-					slog.Info("Successfully restarted LSP client", "name", name)
 				})
 			}
 

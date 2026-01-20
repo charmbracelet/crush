@@ -41,7 +41,8 @@ const OAuthID = "oauth"
 
 // OAuth handles the OAuth flow authentication.
 type OAuth struct {
-	com *common.Common
+	com          *common.Common
+	isOnboarding bool
 
 	provider      catwalk.Provider
 	model         config.SelectedModel
@@ -71,11 +72,19 @@ type OAuth struct {
 var _ Dialog = (*OAuth)(nil)
 
 // newOAuth creates a new device flow component.
-func newOAuth(com *common.Common, provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType, oAuthProvider OAuthProvider) (*OAuth, tea.Cmd) {
+func newOAuth(
+	com *common.Common,
+	isOnboarding bool,
+	provider catwalk.Provider,
+	model config.SelectedModel,
+	modelType config.SelectedModelType,
+	oAuthProvider OAuthProvider,
+) (*OAuth, tea.Cmd) {
 	t := com.Styles
 
 	m := OAuth{}
 	m.com = com
+	m.isOnboarding = isOnboarding
 	m.provider = provider
 	m.model = model
 	m.modelType = modelType
@@ -175,9 +184,14 @@ func (m *OAuth) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	var (
 		t           = m.com.Styles
 		dialogStyle = t.Dialog.View.Width(m.width)
-		view        = dialogStyle.Render(m.dialogContent())
 	)
-	DrawCenterCursor(scr, area, view, nil)
+	if m.isOnboarding {
+		view := m.dialogContent()
+		DrawOnboarding(scr, area, view)
+	} else {
+		view := dialogStyle.Render(m.dialogContent())
+		DrawCenter(scr, area, view)
+	}
 	return nil
 }
 
@@ -205,10 +219,15 @@ func (m *OAuth) headerContent() string {
 	var (
 		t            = m.com.Styles
 		titleStyle   = t.Dialog.Title
+		textStyle    = t.Dialog.PrimaryText
 		dialogStyle  = t.Dialog.View.Width(m.width)
 		headerOffset = titleStyle.GetHorizontalFrameSize() + dialogStyle.GetHorizontalFrameSize()
+		dialogTitle  = fmt.Sprintf("Authenticate with %s", m.oAuthProvider.name())
 	)
-	return common.DialogTitle(t, titleStyle.Render("Authenticate with "+m.oAuthProvider.name()), m.width-headerOffset)
+	if m.isOnboarding {
+		return textStyle.Render(dialogTitle)
+	}
+	return common.DialogTitle(t, titleStyle.Render(dialogTitle), m.width-headerOffset)
 }
 
 func (m *OAuth) innerDialogContent() string {

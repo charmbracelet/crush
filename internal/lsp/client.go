@@ -261,11 +261,11 @@ func (c *Client) HandlesFile(path string) bool {
 			suffix = "." + suffix
 		}
 		if strings.HasSuffix(name, suffix) {
-			slog.Debug("handles file", "name", c.name, "file", name, "filetype", filetype)
+			slog.Debug("Handles file", "name", c.name, "file", name, "filetype", filetype)
 			return true
 		}
 	}
-	slog.Debug("doesn't handle file", "name", c.name, "file", name)
+	slog.Debug("Doesn't handle file", "name", c.name, "file", name)
 	return false
 }
 

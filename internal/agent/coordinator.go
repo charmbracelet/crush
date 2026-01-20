@@ -419,7 +419,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		}
 		if len(agent.AllowedMCP) == 0 {
 			// No MCPs allowed
-			slog.Debug("no MCPs allowed", "tool", tool.Name(), "agent", agent.Name)
+			slog.Debug("No MCPs allowed", "tool", tool.Name(), "agent", agent.Name)
 			break
 		}
 

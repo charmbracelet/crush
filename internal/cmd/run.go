@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"strings"
 
+	"charm.land/log/v2"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/spf13/cobra"
 )
@@ -47,6 +48,10 @@ crush run --quiet "Generate a README for this project"
 			return fmt.Errorf("no providers configured - please run 'crush' to set up a provider interactively")
 		}
 
+		if !quiet {
+			slog.SetDefault(slog.New(log.New(os.Stderr)))
+		}
+
 		prompt := strings.Join(args, " ")
 
 		prompt, err = MaybePrependStdin(prompt)
@@ -62,7 +67,7 @@ crush run --quiet "Generate a README for this project"
 		event.SetNonInteractive(true)
 		event.AppInitialized()
 
-		return app.RunNonInteractive(ctx, os.Stdout, prompt, quiet)
+		return app.RunNonInteractive(ctx, os.Stdout, prompt)
 	},
 	PostRun: func(cmd *cobra.Command, args []string) {
 		event.AppExited()
@@ -70,5 +75,5 @@ crush run --quiet "Generate a README for this project"
 }
 
 func init() {
-	runCmd.Flags().BoolP("quiet", "q", false, "Hide spinner")
+	runCmd.Flags().BoolP("quiet", "q", false, "Hide logs")
 }

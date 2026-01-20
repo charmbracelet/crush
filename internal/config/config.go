@@ -310,7 +310,7 @@ func (m MCPConfig) ResolvedHeaders() map[string]string {
 		var err error
 		m.Headers[e], err = resolver.ResolveValue(v)
 		if err != nil {
-			slog.Error("error resolving header variable", "error", err, "variable", e, "value", v)
+			slog.Error("Error resolving header variable", "error", err, "variable", e, "value", v)
 			continue
 		}
 	}
@@ -831,7 +831,7 @@ func resolveEnvs(envs map[string]string) []string {
 		var err error
 		envs[e], err = resolver.ResolveValue(v)
 		if err != nil {
-			slog.Error("error resolving environment variable", "error", err, "variable", e, "value", v)
+			slog.Error("Error resolving environment variable", "error", err, "variable", e, "value", v)
 			continue
 		}
 	}

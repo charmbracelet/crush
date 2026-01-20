@@ -194,6 +194,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 		_, _ = fmt.Fprintln(output)
 	}()
 
+	var printed bool
 	for {
 		if stderrTTY {
 			// HACK: Reinitialize the terminal progress bar on every iteration
@@ -230,7 +231,11 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 				if readBytes == 0 {
 					part = strings.TrimLeft(part, " \t")
 				}
-				fmt.Fprint(output, part)
+				// ignores initial whitespace only messages
+				if printed || strings.TrimSpace(part) != "" {
+					printed = true
+					fmt.Fprint(output, part)
+				}
 				messageReadBytes[msg.ID] = len(content)
 			}
 

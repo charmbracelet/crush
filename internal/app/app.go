@@ -355,7 +355,7 @@ func (app *App) Subscribe(program *tea.Program) {
 // Shutdown performs a graceful shutdown of the application.
 func (app *App) Shutdown() {
 	start := time.Now()
-	defer func() { slog.Info("Shutdown took " + time.Since(start).String()) }()
+	defer func() { slog.Debug("Shutdown took " + time.Since(start).String()) }()
 
 	// First, cancel all agents and wait for them to finish. This must complete
 	// before closing the DB so agents can finish writing their state.

@@ -12,6 +12,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -340,6 +341,17 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			// TODO: implement
 		},
 		OnToolCall: func(tc fantasy.ToolCallContent) error {
+			var arg []any
+			var v map[string]any
+			if err := json.Unmarshal([]byte(tc.Input), &v); err == nil {
+				for k, v := range v {
+					arg = append(arg, k, fmt.Sprintf("%v", v))
+				}
+			}
+			if len(arg) == 0 {
+				arg = append(arg, "arg", tc.Input)
+			}
+			slog.Info("Using "+tc.ToolName+" tool", arg...)
 			toolCall := message.ToolCall{
 				ID:               tc.ToolCallID,
 				Name:             tc.ToolName,

@@ -308,6 +308,8 @@ func (l *List) Render() string {
 		currentOffset = 0 // Reset offset for subsequent items
 	}
 
+	l.height = max(l.height, 0)
+
 	if len(lines) > l.height {
 		lines = lines[:l.height]
 	}

@@ -77,7 +77,7 @@ type uiState uint8
 
 // Possible uiState values.
 const (
-	uiConfigure uiState = iota
+	uiOnboarding uiState = iota
 	uiInitialize
 	uiLanding
 	uiChat
@@ -258,7 +258,7 @@ func New(com *common.Common) *UI {
 		dialog:      dialog.NewOverlay(),
 		keyMap:      keyMap,
 		focus:       uiFocusNone,
-		state:       uiConfigure,
+		state:       uiOnboarding,
 		textarea:    ta,
 		chat:        ch,
 		completions: comp,
@@ -273,13 +273,10 @@ func New(com *common.Common) *UI {
 	// set onboarding state defaults
 	ui.onboarding.yesInitializeSelected = true
 
-	// If no provider is configured show the user the provider list
 	if !com.Config().IsConfigured() {
-		ui.state = uiConfigure
-		// if the project needs initialization show the user the question
+		ui.state = uiOnboarding
 	} else if n, _ := config.ProjectNeedsInitialization(); n {
 		ui.state = uiInitialize
-		// otherwise go to the landing UI
 	} else {
 		ui.state = uiLanding
 		ui.focus = uiFocusEditor
@@ -1392,7 +1389,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	}
 
 	switch m.state {
-	case uiConfigure:
+	case uiOnboarding:
 		return tea.Batch(cmds...)
 	case uiInitialize:
 		cmds = append(cmds, m.updateInitializeView(msg)...)
@@ -1647,14 +1644,14 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	screen.Clear(scr)
 
 	switch m.state {
-	case uiConfigure:
+	case uiOnboarding:
 		header := uv.NewStyledString(m.header)
 		header.Draw(scr, layout.header)
 
 		mainView := lipgloss.NewStyle().Width(layout.main.Dx()).
 			Height(layout.main.Dy()).
 			Background(lipgloss.ANSIColor(rand.Intn(256))).
-			Render(" Configure ")
+			Render(" Onboarding ")
 		main := uv.NewStyledString(mainView)
 		main.Draw(scr, layout.main)
 
@@ -2052,7 +2049,7 @@ func (m *UI) updateSize() {
 
 	// Handle different app states
 	switch m.state {
-	case uiConfigure, uiInitialize, uiLanding:
+	case uiOnboarding, uiInitialize, uiLanding:
 		m.renderHeader(false, m.layout.header.Dx())
 
 	case uiChat:
@@ -2094,7 +2091,7 @@ func (m *UI) generateLayout(w, h int) layout {
 	appRect.Min.X += 1
 	appRect.Max.X -= 1
 
-	if slices.Contains([]uiState{uiConfigure, uiInitialize, uiLanding}, m.state) {
+	if slices.Contains([]uiState{uiOnboarding, uiInitialize, uiLanding}, m.state) {
 		// extra padding on left and right for these states
 		appRect.Min.X += 1
 		appRect.Max.X -= 1
@@ -2107,7 +2104,7 @@ func (m *UI) generateLayout(w, h int) layout {
 
 	// Handle different app states
 	switch m.state {
-	case uiConfigure, uiInitialize:
+	case uiOnboarding, uiInitialize:
 		// Layout
 		//
 		// header

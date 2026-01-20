@@ -916,25 +916,25 @@ func (a *sessionAgent) Cancel(sessionID string) {
 	// fully completes (including error handling that may access the DB).
 	// The defer in processRequest will clean up the entry.
 	if cancel, ok := a.activeRequests.Get(sessionID); ok && cancel != nil {
-		slog.Info("Request cancellation initiated", "session_id", sessionID)
+		slog.Debug("Request cancellation initiated", "session_id", sessionID)
 		cancel()
 	}
 
 	// Also check for summarize requests.
 	if cancel, ok := a.activeRequests.Get(sessionID + "-summarize"); ok && cancel != nil {
-		slog.Info("Summarize cancellation initiated", "session_id", sessionID)
+		slog.Debug("Summarize cancellation initiated", "session_id", sessionID)
 		cancel()
 	}
 
 	if a.QueuedPrompts(sessionID) > 0 {
-		slog.Info("Clearing queued prompts", "session_id", sessionID)
+		slog.Debug("Clearing queued prompts", "session_id", sessionID)
 		a.messageQueue.Del(sessionID)
 	}
 }
 
 func (a *sessionAgent) ClearQueue(sessionID string) {
 	if a.QueuedPrompts(sessionID) > 0 {
-		slog.Info("Clearing queued prompts", "session_id", sessionID)
+		slog.Debug("Clearing queued prompts", "session_id", sessionID)
 		a.messageQueue.Del(sessionID)
 	}
 }

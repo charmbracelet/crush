@@ -319,7 +319,7 @@ func createSession(ctx context.Context, name string, m config.MCPConfig, resolve
 	}
 
 	cancelTimer.Stop()
-	slog.Info("MCP client initialized", "name", name)
+	slog.Debug("MCP client initialized", "name", name)
 	return session, nil
 }
 

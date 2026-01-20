@@ -142,7 +142,7 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	mergedOptions, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(model, providerCfg)
 
 	if providerCfg.OAuthToken != nil && providerCfg.OAuthToken.IsExpired() {
-		slog.Info("Token needs to be refreshed", "provider", providerCfg.ID)
+		slog.Debug("Token needs to be refreshed", "provider", providerCfg.ID)
 		if err := c.refreshOAuth2Token(ctx, providerCfg); err != nil {
 			return nil, err
 		}
@@ -167,18 +167,18 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	if c.isUnauthorized(originalErr) {
 		switch {
 		case providerCfg.OAuthToken != nil:
-			slog.Info("Received 401. Refreshing token and retrying", "provider", providerCfg.ID)
+			slog.Debug("Received 401. Refreshing token and retrying", "provider", providerCfg.ID)
 			if err := c.refreshOAuth2Token(ctx, providerCfg); err != nil {
 				return nil, originalErr
 			}
-			slog.Info("Retrying request with refreshed OAuth token", "provider", providerCfg.ID)
+			slog.Debug("Retrying request with refreshed OAuth token", "provider", providerCfg.ID)
 			return run()
 		case strings.Contains(providerCfg.APIKeyTemplate, "$"):
-			slog.Info("Received 401. Refreshing API Key template and retrying", "provider", providerCfg.ID)
+			slog.Debug("Received 401. Refreshing API Key template and retrying", "provider", providerCfg.ID)
 			if err := c.refreshApiKeyTemplate(ctx, providerCfg); err != nil {
 				return nil, originalErr
 			}
-			slog.Info("Retrying request with refreshed API key", "provider", providerCfg.ID)
+			slog.Debug("Retrying request with refreshed API key", "provider", providerCfg.ID)
 			return run()
 		}
 	}

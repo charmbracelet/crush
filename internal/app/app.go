@@ -101,7 +101,7 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	go app.checkForUpdates(ctx)
 
 	go func() {
-		slog.Info("Initializing MCP clients")
+		slog.Debug("Initializing MCP clients")
 		mcp.Initialize(ctx, app.Permissions, cfg)
 	}()
 
@@ -127,7 +127,7 @@ func (app *App) Config() *config.Config {
 // RunNonInteractive runs the application in non-interactive mode with the
 // given prompt, printing to stdout.
 func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt string) error {
-	slog.Info("Running in non-interactive mode")
+	slog.Debug("Running in non-interactive mode")
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -157,7 +157,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 	if err != nil {
 		return fmt.Errorf("failed to create session for non-interactive mode: %w", err)
 	}
-	slog.Info("Created session for non-interactive run", "session_id", sess.ID)
+	slog.Debug("Created session for non-interactive run", "session_id", sess.ID)
 
 	// Automatically approve all permission requests for this non-interactive
 	// session.
@@ -205,7 +205,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 		case result := <-done:
 			if result.err != nil {
 				if errors.Is(result.err, context.Canceled) || errors.Is(result.err, agent.ErrRequestCancelled) {
-					slog.Info("Non-interactive: agent processing cancelled", "session_id", sess.ID)
+					slog.Debug("Non-interactive: agent processing cancelled", "session_id", sess.ID)
 					return nil
 				}
 				return fmt.Errorf("agent processing failed: %w", result.err)
@@ -285,7 +285,7 @@ func setupSubscriber[T any](
 				select {
 				case outputCh <- msg:
 				case <-time.After(2 * time.Second):
-					slog.Warn("Message dropped due to slow consumer", "name", name)
+					slog.Debug("Message dropped due to slow consumer", "name", name)
 				case <-ctx.Done():
 					slog.Debug("Subscription cancelled", "name", name)
 					return

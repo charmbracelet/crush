@@ -71,7 +71,7 @@ func NewAPIKeyInput(com *common.Common, provider catwalk.Provider, model config.
 	m.input.Placeholder = "Enter you API key..."
 	m.input.SetStyles(com.Styles.TextInput)
 	m.input.Focus()
-	m.input.SetWidth(innerWidth - t.Dialog.InputPrompt.GetHorizontalFrameSize() - 1) // (1) cursor padding
+	m.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding
 
 	m.spinner = spinner.New(
 		spinner.WithSpinner(spinner.Dot),

@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}}</title>
+    <style>
+        :root {
+            /* Charmtone palette */
+            --pepper: #201F26;
+            --bbq: #2d2c35;
+            --charcoal: #3A3943;
+            --iron: #4D4C57;
+            --oyster: #605F6B;
+            --squid: #858392;
+            --smoke: #BFBCC8;
+            --ash: #DFDBDD;
+            --salt: #F1EFEF;
+            --butter: #FFFAF1;
+            
+            /* Accents */
+            --charple: #6B50FF;
+            --dolly: #FF60FF;
+            --julep: #00FFB2;
+            --tang: #FF985A;
+            --malibu: #00A4FF;
+            --cherry: #FF388B;
+            --hazy: #8B75FF;
+            --blush: #FF84FF;
+            --bok: #68FFD6;
+            
+            /* Semantic */
+            --bg: var(--pepper);
+            --bg-secondary: var(--bbq);
+            --bg-tertiary: var(--charcoal);
+            --border: var(--iron);
+            --text: var(--smoke);
+            --text-bright: var(--butter);
+            --text-muted: var(--squid);
+            --user: var(--julep);
+            --agent: var(--dolly);
+            --system: var(--tang);
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.5;
+            padding: 1.5rem;
+            font-size: 14px;
+        }
+        .container { max-width: 1100px; margin: 0 auto; }
+        header {
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        h1 { font-size: 1.25rem; font-weight: 600; color: var(--text-bright); margin-bottom: 0.25rem; }
+        .meta { color: var(--text-muted); font-size: 0.75rem; display: flex; gap: 1rem; flex-wrap: wrap; }
+        .metrics {
+            display: flex;
+            gap: 1.5rem;
+            margin-top: 0.75rem;
+            padding: 0.75rem 1rem;
+            background: var(--bg-secondary);
+            border-radius: 6px;
+            font-size: 0.8rem;
+        }
+        .metric { text-align: center; }
+        .metric-value { font-size: 1.1rem; font-weight: 600; color: var(--charple); }
+        .metric-label { color: var(--text-muted); font-size: 0.7rem; }
+        
+        /* Timeline */
+        .timeline { display: flex; flex-direction: column; gap: 2px; }
+        .step {
+            background: var(--bg-secondary);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .step-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 0.75rem;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.15s;
+        }
+        .step-header:hover { background: var(--bg-tertiary); }
+        .step-toggle {
+            color: var(--text-muted);
+            font-size: 0.7rem;
+            transition: transform 0.15s;
+            width: 1rem;
+        }
+        .step.expanded .step-toggle { transform: rotate(90deg); }
+        .step-source {
+            font-size: 0.65rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            padding: 0.125rem 0.4rem;
+            border-radius: 3px;
+            letter-spacing: 0.03em;
+        }
+        .step.user .step-source { background: rgba(0, 255, 178, 0.15); color: var(--user); }
+        .step.agent .step-source { background: rgba(255, 96, 255, 0.15); color: var(--agent); }
+        .step.system .step-source { background: rgba(255, 152, 90, 0.15); color: var(--system); }
+        .step-id { font-size: 0.7rem; color: var(--text-muted); font-family: monospace; }
+        .step-preview {
+            flex: 1;
+            font-size: 0.8rem;
+            color: var(--text);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-left: 0.5rem;
+        }
+        .step-time { font-size: 0.65rem; color: var(--text-muted); margin-left: auto; }
+        .step-badges { display: flex; gap: 0.25rem; margin-left: 0.5rem; }
+        .badge {
+            font-size: 0.6rem;
+            padding: 0.1rem 0.35rem;
+            border-radius: 3px;
+            background: var(--bg-tertiary);
+            color: var(--text-muted);
+        }
+        .badge.tools { background: rgba(107, 80, 255, 0.2); color: var(--charple); }
+        .badge.thinking { background: rgba(255, 96, 255, 0.2); color: var(--blush); }
+        
+        /* Expanded content */
+        .step-body { display: none; padding: 0.75rem; border-top: 1px solid var(--border); }
+        .step.expanded .step-body { display: block; }
+        .message {
+            background: var(--bg);
+            padding: 0.75rem;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-size: 0.85rem;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .message:empty { display: none; }
+        .reasoning {
+            margin-top: 0.5rem;
+            padding: 0.5rem 0.75rem;
+            background: rgba(255, 96, 255, 0.08);
+            border-left: 2px solid var(--agent);
+            border-radius: 0 4px 4px 0;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .section-label {
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin-bottom: 0.25rem;
+            letter-spacing: 0.03em;
+        }
+        .reasoning .section-label { color: var(--blush); }
+        
+        /* Tool calls */
+        .tool-calls { margin-top: 0.5rem; display: flex; flex-direction: column; gap: 2px; }
+        .tool-call {
+            background: var(--bg);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .tool-call-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.4rem 0.6rem;
+            cursor: pointer;
+            user-select: none;
+            font-size: 0.8rem;
+        }
+        .tool-call-header:hover { background: var(--bg-tertiary); }
+        .tool-status { 
+            font-size: 0.7rem; 
+            width: 1rem;
+        }
+        .tool-call.completed .tool-status { color: var(--julep); }
+        .tool-call.pending .tool-status { color: var(--squid); }
+        .tool-call-name { font-family: monospace; font-weight: 600; color: var(--malibu); }
+        .tool-call-preview { 
+            flex: 1;
+            color: var(--squid); 
+            font-size: 0.75rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .tool-call-toggle { 
+            color: var(--text-muted); 
+            font-size: 0.6rem; 
+            transition: transform 0.15s;
+            margin-left: auto;
+        }
+        .tool-call.expanded .tool-call-toggle { transform: rotate(90deg); }
+        .tool-call-body { display: none; padding: 0.5rem 0.6rem; border-top: 1px solid var(--border); }
+        .tool-call.expanded .tool-call-body { display: block; }
+        .tool-args { margin-bottom: 0.5rem; }
+        .tool-result {
+            border-top: 1px solid var(--border);
+            padding-top: 0.5rem;
+            margin-top: 0.5rem;
+        }
+        .tool-result-content {
+            background: var(--bg-secondary);
+            padding: 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            max-height: 200px;
+            overflow-y: auto;
+            color: var(--smoke);
+        }
+        .tool-pending {
+            color: var(--squid);
+            font-size: 0.75rem;
+            font-style: italic;
+            padding: 0.25rem 0;
+        }
+        pre {
+            background: var(--bg-tertiary);
+            padding: 0.5rem;
+            border-radius: 3px;
+            overflow-x: auto;
+            font-size: 0.75rem;
+            font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        
+        footer {
+            margin-top: 1.5rem;
+            padding-top: 0.75rem;
+            border-top: 1px solid var(--border);
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.7rem;
+        }
+        footer a { color: var(--charple); text-decoration: none; }
+        footer a:hover { text-decoration: underline; }
+        
+        /* Controls */
+        .controls {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 0.75rem;
+        }
+        .btn {
+            font-size: 0.7rem;
+            padding: 0.3rem 0.6rem;
+            border-radius: 4px;
+            border: 1px solid var(--border);
+            background: var(--bg-secondary);
+            color: var(--text);
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .btn:hover { background: var(--bg-tertiary); border-color: var(--oyster); }
+        .filter-group { display: flex; gap: 0.25rem; }
+        .filter-btn { border-radius: 3px; }
+        .filter-btn.active { background: var(--charple); border-color: var(--charple); color: var(--butter); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1 id="title"></h1>
+            <div class="meta">
+                <span id="session-id"></span>
+                <span id="schema-version"></span>
+                <span id="model-name"></span>
+            </div>
+            <div class="metrics" id="metrics"></div>
+        </header>
+        <div class="controls">
+            <button class="btn" onclick="expandAll()">Expand All</button>
+            <button class="btn" onclick="collapseAll()">Collapse All</button>
+            <div class="filter-group">
+                <button class="btn filter-btn active" data-filter="all" onclick="filterSteps('all', this)">All</button>
+                <button class="btn filter-btn" data-filter="user" onclick="filterSteps('user', this)">User</button>
+                <button class="btn filter-btn" data-filter="agent" onclick="filterSteps('agent', this)">Agent</button>
+                <button class="btn filter-btn" data-filter="system" onclick="filterSteps('system', this)">System</button>
+            </div>
+        </div>
+        <div class="timeline" id="timeline"></div>
+        <footer>
+            Generated by <a href="https://github.com/charmbracelet/crush">Crush</a> · Harbor ATIF v1.4
+        </footer>
+    </div>
+
+    <script>
+        const trajectory = {{.TrajectoryJSON}};
+
+        function formatTimestamp(ts) {
+            if (!ts) return '';
+            const d = new Date(ts);
+            return d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function truncate(text, max = 100) {
+            if (!text) return '';
+            const single = text.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+            if (single.length <= max) return single;
+            return single.slice(0, max) + '…';
+        }
+
+        function renderHeader() {
+            document.getElementById('title').textContent = trajectory.agent.name + ' Trajectory';
+            document.getElementById('session-id').textContent = 'Session: ' + trajectory.session_id.slice(0, 20) + (trajectory.session_id.length > 20 ? '…' : '');
+            document.getElementById('schema-version').textContent = trajectory.schema_version;
+            if (trajectory.agent.model_name) {
+                document.getElementById('model-name').textContent = 'Model: ' + trajectory.agent.model_name;
+            }
+
+            const metrics = trajectory.final_metrics;
+            if (metrics) {
+                document.getElementById('metrics').innerHTML = `
+                    <div class="metric">
+                        <div class="metric-value">${metrics.total_steps || trajectory.steps.length}</div>
+                        <div class="metric-label">Steps</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value">${((metrics.total_prompt_tokens || 0) / 1000).toFixed(1)}k</div>
+                        <div class="metric-label">Prompt</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value">${((metrics.total_completion_tokens || 0) / 1000).toFixed(1)}k</div>
+                        <div class="metric-label">Completion</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value">$${(metrics.total_cost_usd || 0).toFixed(3)}</div>
+                        <div class="metric-label">Cost</div>
+                    </div>
+                `;
+            }
+        }
+
+        function renderToolCall(tc, idx, observationResults) {
+            const argsJson = typeof tc.arguments === 'string' 
+                ? tc.arguments 
+                : JSON.stringify(tc.arguments, null, 2);
+            
+            // Extract key params for header preview
+            const args = typeof tc.arguments === 'object' ? tc.arguments : {};
+            const preview = getToolPreview(tc.function_name, args);
+            
+            // Find the matching result for this tool call
+            const result = (observationResults || []).find(r => r.source_call_id === tc.tool_call_id);
+            
+            const resultHtml = result ? `
+                <div class="tool-result">
+                    <div class="tool-result-content">${escapeHtml(result.content)}</div>
+                </div>
+            ` : '<div class="tool-pending">Waiting for result...</div>';
+            
+            return `
+                <div class="tool-call ${result ? 'completed' : 'pending'}" id="tc-${idx}">
+                    <div class="tool-call-header" onclick="toggleToolCall('tc-${idx}')">
+                        <span class="tool-status">${result ? '✓' : '○'}</span>
+                        <span class="tool-call-name">${escapeHtml(tc.function_name)}</span>
+                        <span class="tool-call-preview">${escapeHtml(preview)}</span>
+                        <span class="tool-call-toggle">▶</span>
+                    </div>
+                    <div class="tool-call-body">
+                        <div class="tool-args">
+                            <div class="section-label">Arguments</div>
+                            <pre>${escapeHtml(argsJson)}</pre>
+                        </div>
+                        ${resultHtml}
+                    </div>
+                </div>
+            `;
+        }
+
+        function getToolPreview(name, args) {
+            // Extract key params like the TUI does
+            switch(name) {
+                case 'bash':
+                    return truncate(args.command || '', 60);
+                case 'view':
+                case 'edit':
+                case 'write':
+                case 'multiedit':
+                    return args.file_path || '';
+                case 'glob':
+                    return args.pattern || '';
+                case 'grep':
+                    return `${args.pattern || ''}${args.path ? ' in ' + args.path : ''}`;
+                case 'ls':
+                    return args.path || '.';
+                case 'fetch':
+                case 'agentic_fetch':
+                case 'download':
+                    return args.url || '';
+                case 'sourcegraph':
+                    return args.query || '';
+                case 'todos':
+                    const todos = args.todos || [];
+                    const completed = todos.filter(t => t.status === 'completed').length;
+                    return `${completed}/${todos.length}`;
+                case 'agent':
+                    return truncate(args.prompt || '', 50);
+                default:
+                    // Try to get first string value
+                    for (const key of Object.keys(args)) {
+                        if (typeof args[key] === 'string' && args[key].length < 80) {
+                            return truncate(args[key], 60);
+                        }
+                    }
+                    return '';
+            }
+        }
+
+        function renderStep(step, idx) {
+            const observationResults = step.observation?.results || [];
+            const toolCalls = (step.tool_calls || []).map((tc, i) => renderToolCall(tc, `${idx}-${i}`, observationResults)).join('');
+            const reasoning = step.reasoning_content ? `
+                <div class="reasoning">
+                    <div class="section-label">Thinking</div>
+                    ${escapeHtml(step.reasoning_content)}
+                </div>
+            ` : '';
+            
+            const badges = [];
+            if (step.tool_calls && step.tool_calls.length > 0) {
+                badges.push(`<span class="badge tools">${step.tool_calls.length} tool${step.tool_calls.length > 1 ? 's' : ''}</span>`);
+            }
+            if (step.reasoning_content) {
+                badges.push(`<span class="badge thinking">thinking</span>`);
+            }
+
+            const preview = step.message || (step.observation?.results?.[0]?.content) || '';
+
+            return `
+                <div class="step ${step.source}" data-source="${step.source}" id="step-${idx}">
+                    <div class="step-header" onclick="toggleStep('step-${idx}')">
+                        <span class="step-toggle">▶</span>
+                        <span class="step-source">${step.source}</span>
+                        <span class="step-id">#${step.step_id}</span>
+                        <span class="step-preview">${escapeHtml(truncate(preview, 80))}</span>
+                        <div class="step-badges">${badges.join('')}</div>
+                        <span class="step-time">${formatTimestamp(step.timestamp)}</span>
+                    </div>
+                    <div class="step-body">
+                        ${step.message ? `<div class="message">${escapeHtml(step.message)}</div>` : ''}
+                        ${reasoning}
+                        ${toolCalls ? '<div class="tool-calls">' + toolCalls + '</div>' : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderTimeline() {
+            const timeline = document.getElementById('timeline');
+            timeline.innerHTML = trajectory.steps.map((s, i) => renderStep(s, i)).join('');
+        }
+
+        function toggleStep(id) {
+            document.getElementById(id).classList.toggle('expanded');
+        }
+
+        function toggleToolCall(id) {
+            document.getElementById(id).classList.toggle('expanded');
+        }
+
+        function expandAll() {
+            document.querySelectorAll('.step').forEach(el => el.classList.add('expanded'));
+        }
+
+        function collapseAll() {
+            document.querySelectorAll('.step').forEach(el => el.classList.remove('expanded'));
+            document.querySelectorAll('.tool-call').forEach(el => el.classList.remove('expanded'));
+        }
+
+        function filterSteps(filter, btn) {
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            document.querySelectorAll('.step').forEach(el => {
+                if (filter === 'all' || el.dataset.source === filter) {
+                    el.style.display = '';
+                } else {
+                    el.style.display = 'none';
+                }
+            });
+        }
+
+        renderHeader();
+        renderTimeline();
+    </script>
+</body>
+</html>

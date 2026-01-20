@@ -46,6 +46,7 @@ func init() {
 		logsCmd,
 		schemaCmd,
 		loginCmd,
+		trajectoryCmd,
 	)
 }
 

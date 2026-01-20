@@ -22,5 +22,4 @@ Restart LSP (Language Server Protocol) clients.
 <tips>
 - Use when LSP diagnostics are stale or unresponsive
 - Call this tool if you notice LSP features not working properly
-- Check logs if restart fails for any client
 </tips>

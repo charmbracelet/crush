@@ -62,8 +62,9 @@ func (mt ModelType) Placeholder() string {
 }
 
 const (
-	largeModelInputPlaceholder = "Choose a model for large, complex tasks"
-	smallModelInputPlaceholder = "Choose a model for small, simple tasks"
+	onboardingModelInputPlaceholder = "Find your fave"
+	largeModelInputPlaceholder      = "Choose a model for large, complex tasks"
+	smallModelInputPlaceholder      = "Choose a model for small, simple tasks"
 )
 
 // ModelsID is the identifier for the model selection dialog.
@@ -73,7 +74,8 @@ const defaultModelsDialogMaxWidth = 70
 
 // Models represents a model selection dialog.
 type Models struct {
-	com *common.Common
+	com          *common.Common
+	isOnboarding bool
 
 	modelType ModelType
 	providers []catwalk.Provider
@@ -94,10 +96,12 @@ type Models struct {
 var _ Dialog = (*Models)(nil)
 
 // NewModels creates a new Models dialog.
-func NewModels(com *common.Common) (*Models, error) {
+func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 	t := com.Styles
 	m := &Models{}
 	m.com = com
+	m.isOnboarding = isOnboarding
+
 	help := help.New()
 	help.Styles = t.DialogHelpStyles()
 
@@ -108,7 +112,7 @@ func NewModels(com *common.Common) (*Models, error) {
 
 	m.input = textinput.New()
 	m.input.SetVirtualCursor(false)
-	m.input.Placeholder = largeModelInputPlaceholder
+	m.input.Placeholder = onboardingModelInputPlaceholder
 	m.input.SetStyles(com.Styles.TextInput)
 	m.input.Focus()
 
@@ -194,6 +198,9 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 				ModelType: modelItem.SelectedModelType(),
 			}
 		case key.Matches(msg, m.keyMap.Tab):
+			if m.isOnboarding {
+				break
+			}
 			if m.modelType == ModelTypeLarge {
 				m.modelType = ModelTypeSmall
 			} else {
@@ -251,6 +258,7 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
 		t.Dialog.HelpView.GetVerticalFrameSize() +
 		t.Dialog.View.GetVerticalFrameSize()
+
 	m.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding
 	m.list.SetSize(innerWidth, height-heightOffset)
 	m.help.SetWidth(innerWidth)
@@ -258,21 +266,49 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc := NewRenderContext(t, width)
 	rc.Title = "Switch Model"
 	rc.TitleInfo = m.modelTypeRadioView()
+
+	if m.isOnboarding {
+		titleText := t.Dialog.PrimaryText.Render("To start, let's choose a provider and model.")
+		rc.AddPart(titleText)
+	}
+
 	inputView := t.Dialog.InputPrompt.Render(m.input.View())
 	rc.AddPart(inputView)
+
 	listView := t.Dialog.List.Height(m.list.Height()).Render(m.list.Render())
 	rc.AddPart(listView)
+
 	rc.Help = m.help.View(m)
 
-	view := rc.Render()
-
 	cur := m.Cursor()
-	DrawCenterCursor(scr, area, view, cur)
+
+	if m.isOnboarding {
+		rc.Title = ""
+		rc.TitleInfo = ""
+		rc.IsOnboarding = true
+		view := rc.Render()
+		DrawOnboardingCursor(scr, area, view, cur)
+
+		// FIXME(@andreynering): Figure it out how to properly fix this
+		if cur != nil {
+			cur.Y -= 1
+			cur.X -= 1
+		}
+	} else {
+		view := rc.Render()
+		DrawCenterCursor(scr, area, view, cur)
+	}
 	return cur
 }
 
 // ShortHelp returns the short help view.
 func (m *Models) ShortHelp() []key.Binding {
+	if m.isOnboarding {
+		return []key.Binding{
+			m.keyMap.UpDown,
+			m.keyMap.Select,
+		}
+	}
 	return []key.Binding{
 		m.keyMap.UpDown,
 		m.keyMap.Tab,
@@ -459,10 +495,12 @@ func (m *Models) setProviderItems() error {
 	// Set model groups in the list.
 	m.list.SetGroups(groups...)
 	m.list.SetSelectedItem(selectedItemID)
-	m.list.ScrollToSelected()
+	m.list.ScrollToTop()
 
 	// Update placeholder based on model type
-	m.input.Placeholder = m.modelType.Placeholder()
+	if !m.isOnboarding {
+		m.input.Placeholder = m.modelType.Placeholder()
+	}
 
 	return nil
 }

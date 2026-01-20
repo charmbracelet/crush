@@ -59,6 +59,10 @@ type RenderContext struct {
 	// Help is the help view content. This will be appended to the content parts
 	// slice using the default dialog help style.
 	Help string
+	// IsOnboarding indicates whether to render the dialog as part of the
+	// onboarding flow. This means that the content will be rendered at the
+	// bottom left of the screen.
+	IsOnboarding bool
 }
 
 // NewRenderContext creates a new RenderContext with the provided styles and width.
@@ -82,7 +86,8 @@ func (rc *RenderContext) Render() string {
 	titleStyle := rc.Styles.Dialog.Title
 	dialogStyle := rc.Styles.Dialog.View.Width(rc.Width)
 
-	parts := []string{}
+	var parts []string
+
 	if len(rc.Title) > 0 {
 		var titleInfoWidth int
 		if len(rc.TitleInfo) > 0 {
@@ -125,6 +130,8 @@ func (rc *RenderContext) Render() string {
 	}
 
 	content := strings.Join(parts, "\n")
-
+	if rc.IsOnboarding {
+		return content
+	}
 	return dialogStyle.Render(content)
 }

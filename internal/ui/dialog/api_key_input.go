@@ -33,7 +33,8 @@ const APIKeyInputID = "api_key_input"
 
 // APIKeyInput represents a model selection dialog.
 type APIKeyInput struct {
-	com *common.Common
+	com          *common.Common
+	isOnboarding bool
 
 	provider  catwalk.Provider
 	model     config.SelectedModel
@@ -54,11 +55,18 @@ type APIKeyInput struct {
 var _ Dialog = (*APIKeyInput)(nil)
 
 // NewAPIKeyInput creates a new Models dialog.
-func NewAPIKeyInput(com *common.Common, provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType) (*APIKeyInput, tea.Cmd) {
+func NewAPIKeyInput(
+	com *common.Common,
+	isOnboarding bool,
+	provider catwalk.Provider,
+	model config.SelectedModel,
+	modelType config.SelectedModelType,
+) (*APIKeyInput, tea.Cmd) {
 	t := com.Styles
 
 	m := APIKeyInput{}
 	m.com = com
+	m.isOnboarding = isOnboarding
 	m.provider = provider
 	m.model = model
 	m.modelType = modelType
@@ -170,28 +178,45 @@ func (m *APIKeyInput) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		helpStyle.Render(m.help.View(m)),
 	}, "\n")
 
-	view := dialogStyle.Render(content)
-
 	cur := m.Cursor()
-	DrawCenterCursor(scr, area, view, cur)
+
+	if m.isOnboarding {
+		view := content
+		DrawOnboardingCursor(scr, area, view, cur)
+
+		// FIXME(@andreynering): Figure it out how to properly fix this
+		if cur != nil {
+			cur.Y -= 1
+			cur.X -= 1
+		}
+	} else {
+		view := dialogStyle.Render(content)
+		DrawCenterCursor(scr, area, view, cur)
+	}
 	return cur
 }
 
 func (m *APIKeyInput) headerView() string {
-	t := m.com.Styles
-	titleStyle := t.Dialog.Title
-	dialogStyle := t.Dialog.View.Width(m.width)
-
+	var (
+		t           = m.com.Styles
+		titleStyle  = t.Dialog.Title
+		textStyle   = t.Dialog.PrimaryText
+		dialogStyle = t.Dialog.View.Width(m.width)
+	)
+	if m.isOnboarding {
+		return textStyle.Render(m.dialogTitle())
+	}
 	headerOffset := titleStyle.GetHorizontalFrameSize() + dialogStyle.GetHorizontalFrameSize()
 	return common.DialogTitle(t, titleStyle.Render(m.dialogTitle()), m.width-headerOffset)
 }
 
 func (m *APIKeyInput) dialogTitle() string {
-	t := m.com.Styles
-	textStyle := t.Dialog.TitleText
-	errorStyle := t.Dialog.TitleError
-	accentStyle := t.Dialog.TitleAccent
-
+	var (
+		t           = m.com.Styles
+		textStyle   = t.Dialog.TitleText
+		errorStyle  = t.Dialog.TitleError
+		accentStyle = t.Dialog.TitleAccent
+	)
 	switch m.state {
 	case APIKeyInputStateInitial:
 		return textStyle.Render("Enter your ") + accentStyle.Render(fmt.Sprintf("%s Key", m.provider.Name)) + textStyle.Render(".")

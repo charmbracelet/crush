@@ -299,6 +299,11 @@ func (m *UI) Init() tea.Cmd {
 	if m.QueryCapabilities {
 		cmds = append(cmds, tea.RequestTerminalVersion)
 	}
+	if m.state == uiOnboarding {
+		if cmd := m.openModelsDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
 	// load the user commands async
 	cmds = append(cmds, m.loadCustomCommands())
 	return tea.Batch(cmds...)
@@ -1028,10 +1033,23 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		return tea.Batch(cmds...)
 	}
 
+	isOnboarding := m.state == uiOnboarding
+
 	switch msg := action.(type) {
 	// Generic dialog messages
 	case dialog.ActionClose:
+		if isOnboarding && m.dialog.ContainsDialog(dialog.ModelsID) {
+			break
+		}
+
 		m.dialog.CloseFrontDialog()
+
+		if isOnboarding {
+			if cmd := m.openModelsDialog(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
+
 		if m.focus == uiFocusEditor {
 			cmds = append(cmds, m.textarea.Focus())
 		}
@@ -1164,10 +1182,18 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 		if err := cfg.UpdatePreferredModel(msg.ModelType, msg.Model); err != nil {
 			cmds = append(cmds, uiutil.ReportError(err))
+		} else if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
+			// Ensure small model is set is unset.
+			smallModel := m.com.App.GetDefaultSmallModel(providerID)
+			if err := cfg.UpdatePreferredModel(config.SelectedModelTypeSmall, smallModel); err != nil {
+				cmds = append(cmds, uiutil.ReportError(err))
+			}
 		}
 
 		cmds = append(cmds, func() tea.Msg {
-			m.com.App.UpdateAgentModel(context.TODO())
+			if err := m.com.App.UpdateAgentModel(context.TODO()); err != nil {
+				return uiutil.ReportError(err)
+			}
 
 			modelMsg := fmt.Sprintf("%s model changed to %s", msg.ModelType, msg.Model.Model)
 
@@ -1177,6 +1203,16 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.APIKeyInputID)
 		m.dialog.CloseDialog(dialog.OAuthID)
 		m.dialog.CloseDialog(dialog.ModelsID)
+
+		if isOnboarding {
+			m.state = uiLanding
+			m.focus = uiFocusEditor
+
+			m.com.Config().SetupAgents()
+			if err := m.com.App.InitCoderAgent(context.TODO()); err != nil {
+				cmds = append(cmds, uiutil.ReportError(err))
+			}
+		}
 	case dialog.ActionSelectReasoningEffort:
 		if m.isAgentBusy() {
 			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait..."))
@@ -1284,15 +1320,17 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 	var (
 		dlg dialog.Dialog
 		cmd tea.Cmd
+
+		isOnboarding = m.state == uiOnboarding
 	)
 
 	switch provider.ID {
 	case "hyper":
-		dlg, cmd = dialog.NewOAuthHyper(m.com, provider, model, modelType)
+		dlg, cmd = dialog.NewOAuthHyper(m.com, isOnboarding, provider, model, modelType)
 	case catwalk.InferenceProviderCopilot:
-		dlg, cmd = dialog.NewOAuthCopilot(m.com, provider, model, modelType)
+		dlg, cmd = dialog.NewOAuthCopilot(m.com, isOnboarding, provider, model, modelType)
 	default:
-		dlg, cmd = dialog.NewAPIKeyInput(m.com, provider, model, modelType)
+		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
 	}
 
 	if m.dialog.ContainsDialog(dlg.ID()) {
@@ -1648,12 +1686,8 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		header := uv.NewStyledString(m.header)
 		header.Draw(scr, layout.header)
 
-		mainView := lipgloss.NewStyle().Width(layout.main.Dx()).
-			Height(layout.main.Dy()).
-			Background(lipgloss.ANSIColor(rand.Intn(256))).
-			Render(" Onboarding ")
-		main := uv.NewStyledString(mainView)
-		main.Draw(scr, layout.main)
+		// NOTE: Onboarding flow will be rendered as dialogs below, but
+		// positioned at the bottom left of the screen.
 
 	case uiInitialize:
 		header := uv.NewStyledString(m.header)
@@ -1697,11 +1731,14 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		}
 	}
 
+	isOnboarding := m.state == uiOnboarding
+
 	// Add status and help layer
+	m.status.SetHideHelp(isOnboarding)
 	m.status.Draw(scr, layout.status)
 
 	// Draw completions popup if open
-	if m.completionsOpen && m.completions.HasItems() {
+	if !isOnboarding && m.completionsOpen && m.completions.HasItems() {
 		w, h := m.completions.Size()
 		x := m.completionsPositionStart.X
 		y := m.completionsPositionStart.Y - h
@@ -2606,7 +2643,8 @@ func (m *UI) openModelsDialog() tea.Cmd {
 		return nil
 	}
 
-	modelsDialog, err := dialog.NewModels(m.com)
+	isOnboarding := m.state == uiOnboarding
+	modelsDialog, err := dialog.NewModels(m.com, isOnboarding)
 	if err != nil {
 		return uiutil.ReportError(err)
 	}

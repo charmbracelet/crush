@@ -170,13 +170,29 @@ func DrawCenterCursor(scr uv.Screen, area uv.Rectangle, view string, cur *tea.Cu
 		cur.X += center.Min.X
 		cur.Y += center.Min.Y
 	}
-
 	uv.NewStyledString(view).Draw(scr, center)
 }
 
 // DrawCenter draws the given string view centered in the screen area.
 func DrawCenter(scr uv.Screen, area uv.Rectangle, view string) {
 	DrawCenterCursor(scr, area, view, nil)
+}
+
+// DrawOnboarding draws the given string view centered in the screen area.
+func DrawOnboarding(scr uv.Screen, area uv.Rectangle, view string) {
+	DrawOnboardingCursor(scr, area, view, nil)
+}
+
+// DrawOnboardingCursor draws the given string view positioned at the bottom
+// left area of the screen.
+func DrawOnboardingCursor(scr uv.Screen, area uv.Rectangle, view string, cur *tea.Cursor) {
+	width, height := lipgloss.Size(view)
+	bottomLeft := common.BottomLeftRect(area, width, height)
+	if cur != nil {
+		cur.X += bottomLeft.Min.X
+		cur.Y += bottomLeft.Min.Y
+	}
+	uv.NewStyledString(view).Draw(scr, bottomLeft)
 }
 
 // Draw renders the overlay and its dialogs.

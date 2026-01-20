@@ -12,8 +12,14 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 )
 
-func NewOAuthCopilot(com *common.Common, provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType) (*OAuth, tea.Cmd) {
-	return newOAuth(com, provider, model, modelType, &OAuthCopilot{})
+func NewOAuthCopilot(
+	com *common.Common,
+	isOnboarding bool,
+	provider catwalk.Provider,
+	model config.SelectedModel,
+	modelType config.SelectedModelType,
+) (*OAuth, tea.Cmd) {
+	return newOAuth(com, isOnboarding, provider, model, modelType, &OAuthCopilot{})
 }
 
 type OAuthCopilot struct {

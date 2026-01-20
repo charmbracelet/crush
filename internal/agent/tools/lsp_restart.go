@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"strings"
 	"sync"
 
 	"charm.land/fantasy"
@@ -75,10 +76,10 @@ func NewLSPRestartTool(lspClients *csync.Map[string, *lsp.Client]) fantasy.Agent
 
 			var output string
 			if len(restarted) > 0 {
-				output = fmt.Sprintf("Successfully restarted %d LSP client(s): %s\n", len(restarted), fmt.Sprintf("%v", restarted))
+				output = fmt.Sprintf("Successfully restarted %d LSP client(s): %s\n", len(restarted), strings.Join(restarted, ", "))
 			}
 			if len(failed) > 0 {
-				output += fmt.Sprintf("Failed to restart %d LSP client(s): %s\n", len(failed), fmt.Sprintf("%v", failed))
+				output += fmt.Sprintf("Failed to restart %d LSP client(s): %s\n", len(failed), strings.Join(failed, ", "))
 				return fantasy.NewTextErrorResponse(output), nil
 			}
 

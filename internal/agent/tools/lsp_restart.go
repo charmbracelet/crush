@@ -57,8 +57,8 @@ func NewLSPRestartTool(lspClients *csync.Map[string, *lsp.Client]) fantasy.Agent
 				wg.Go(func() {
 					slog.Info("Restarting LSP client", "name", name)
 
-					if err := client.Close(ctx); err != nil {
-						slog.Error("Failed to close LSP client", "name", name, "error", err)
+					if err := client.Restart(); err != nil {
+						slog.Error("Failed to restart LSP client", "name", name, "error", err)
 						mu.Lock()
 						failed = append(failed, name)
 						mu.Unlock()

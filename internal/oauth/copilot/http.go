@@ -13,5 +13,6 @@ func Headers() map[string]string {
 		"Editor-Version":         editorVersion,
 		"Editor-Plugin-Version":  editorPluginVersion,
 		"Copilot-Integration-Id": integrationID,
+		"Copilot-Vision-Request": "true",
 	}
 }

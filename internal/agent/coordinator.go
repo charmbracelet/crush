@@ -297,9 +297,20 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
 			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
 		}
-		parsed, err := openaicompat.ParseOptions(mergedOptions)
-		if err == nil {
-			options[openaicompat.Name] = parsed
+		if providerCfg.ID == string(catwalk.InferenceProviderCopilot) && openai.IsResponsesModel(model.CatwalkCfg.ID) {
+			if openai.IsResponsesReasoningModel(model.CatwalkCfg.ID) {
+				mergedOptions["reasoning_summary"] = "auto"
+				mergedOptions["include"] = []openai.IncludeType{openai.IncludeReasoningEncryptedContent}
+			}
+			parsed, err := openai.ParseResponsesOptions(mergedOptions)
+			if err == nil {
+				options[openaicompat.Name] = parsed
+			}
+		} else {
+			parsed, err := openaicompat.ParseOptions(mergedOptions)
+			if err == nil {
+				options[openaicompat.Name] = parsed
+			}
 		}
 	}
 

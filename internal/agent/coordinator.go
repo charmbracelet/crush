@@ -292,15 +292,40 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		if err == nil {
 			options[google.Name] = parsed
 		}
-	case openaicompat.Name:
-		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
-		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
-			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
+	case hyper.Name:
+		if strings.HasPrefix(model.CatwalkCfg.ID, "claude") {
+			_, hasThink := mergedOptions["thinking"]
+			if !hasThink && model.ModelCfg.Think {
+				mergedOptions["thinking"] = map[string]any{
+					"budget_tokens": 2000,
+				}
+			}
+			parsed, err := anthropic.ParseOptions(mergedOptions)
+			if err == nil {
+				options[anthropic.Name] = parsed
+			}
+		} else {
+			_, hasReasoningEffort := mergedOptions["reasoning_effort"]
+			if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
+				mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
+			}
+			if openai.IsResponsesModel(model.CatwalkCfg.ID) {
+				if openai.IsResponsesReasoningModel(model.CatwalkCfg.ID) {
+					mergedOptions["reasoning_summary"] = "auto"
+					mergedOptions["include"] = []openai.IncludeType{openai.IncludeReasoningEncryptedContent}
+				}
+				parsed, err := openai.ParseResponsesOptions(mergedOptions)
+				if err == nil {
+					options[openai.Name] = parsed
+				}
+			} else {
+				parsed, err := openaicompat.ParseOptions(mergedOptions)
+				if err == nil {
+					options[openai.Name] = parsed
+				}
+			}
 		}
-		parsed, err := openaicompat.ParseOptions(mergedOptions)
-		if err == nil {
-			options[openaicompat.Name] = parsed
-		}
+		slog.Error("HIER", "opts", options)
 	}
 
 	return options

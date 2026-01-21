@@ -10,10 +10,6 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/styles"
 )
 
-// -----------------------------------------------------------------------------
-// MCP Tool
-// -----------------------------------------------------------------------------
-
 // MCPToolMessageItem is a message item that represents a bash tool call.
 type MCPToolMessageItem struct {
 	*baseToolMessageItem
@@ -79,7 +75,7 @@ func (b *MCPToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *T
 
 	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
 	// see if the result is json
-	result := make(map[string]any)
+	var result json.RawMessage
 	var body string
 	if err := json.Unmarshal([]byte(opts.Result.Content), &result); err == nil {
 		prettyResult, err := json.MarshalIndent(result, "", "  ")

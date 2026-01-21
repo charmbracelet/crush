@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/shell"
@@ -18,7 +19,8 @@ const (
 var jobOutputDescription []byte
 
 type JobOutputParams struct {
-	ShellID string `json:"shell_id" description:"The ID of the background shell to retrieve output from"`
+	ShellID     string `json:"shell_id" description:"The ID of the background shell to retrieve output from"`
+	MaxWaitTime *int   `json:"max_wait_time,omitempty" description:"Maximum time in seconds to wait for the job to complete. If not set or set to 0, will return immediately without waiting"`
 }
 
 type JobOutputResponseMetadata struct {
@@ -44,7 +46,34 @@ func NewJobOutputTool() fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("background shell not found: %s", params.ShellID)), nil
 			}
 
+			// Get initial output
 			stdout, stderr, done, err := bgShell.GetOutput()
+
+			// If job is not done and max_wait_time is specified, wait for completion
+			if !done && params.MaxWaitTime != nil && *params.MaxWaitTime > 0 {
+				waitTime := time.Duration(*params.MaxWaitTime) * time.Second
+				waitDone := make(chan bool, 1)
+
+				// Start a goroutine to wait for the job to complete
+				go func() {
+					bgShell.Wait()
+					waitDone <- true
+				}()
+
+				// Wait for either completion or timeout
+				select {
+				case <-waitDone:
+					// Job completed, get final output
+					stdout, stderr, done, err = bgShell.GetOutput()
+				case <-time.After(waitTime):
+					// Timeout occurred, job is still running
+					// Get the most recent output before timeout
+					stdout, stderr, done, err = bgShell.GetOutput()
+				case <-ctx.Done():
+					// Context was cancelled
+					return fantasy.NewTextErrorResponse("operation cancelled"), nil
+				}
+			}
 
 			var outputParts []string
 			if stdout != "" {
@@ -63,6 +92,9 @@ func NewJobOutputTool() fantasy.AgentTool {
 						outputParts = append(outputParts, fmt.Sprintf("Exit code %d", exitCode))
 					}
 				}
+			} else if params.MaxWaitTime != nil && *params.MaxWaitTime > 0 {
+				// Job is still running after waiting period
+				outputParts = append(outputParts, fmt.Sprintf("Task is still running after waiting %d seconds. Try calling again with a longer wait time.", *params.MaxWaitTime))
 			}
 
 			output := strings.Join(outputParts, "\n")

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"iter"
 	"log/slog"
 	"maps"
 	"os"
@@ -334,6 +335,50 @@ func (c *Client) IsFileOpen(filepath string) bool {
 	uri := string(protocol.URIFromPath(filepath))
 	_, exists := c.openFiles.Get(uri)
 	return exists
+}
+
+// CloseFile closes a single file in the LSP server and clears its diagnostics.
+func (c *Client) CloseFile(ctx context.Context, filepath string) error {
+	uri := string(protocol.URIFromPath(filepath))
+
+	if _, exists := c.openFiles.Get(uri); !exists {
+		return nil // Not open, nothing to do.
+	}
+
+	if err := c.client.NotifyDidCloseTextDocument(ctx, uri); err != nil {
+		return fmt.Errorf("error closing file: %w", err)
+	}
+
+	c.openFiles.Del(uri)
+	c.ClearDiagnosticsForURI(protocol.DocumentURI(uri))
+
+	return nil
+}
+
+// DeleteFile deletes a file from the LSP context.
+func (c *Client) DeleteFile(ctx context.Context, filepath string) error {
+	if err := c.CloseFile(ctx, filepath); err != nil {
+		return err
+	}
+	return c.DidChangeWatchedFiles(ctx, protocol.DidChangeWatchedFilesParams{
+		Changes: []protocol.FileEvent{
+			{
+				URI:  protocol.URIFromPath(filepath),
+				Type: protocol.Deleted,
+			},
+		},
+	})
+}
+
+// OpenFiles returns an iterator over all currently open file URIs.
+func (c *Client) OpenFiles() iter.Seq[string] {
+	return func(yield func(string) bool) {
+		for uri := range c.openFiles.Seq2() {
+			if !yield(uri) {
+				return
+			}
+		}
+	}
 }
 
 // CloseAllFiles closes all currently open files.

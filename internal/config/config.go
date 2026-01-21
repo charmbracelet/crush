@@ -686,6 +686,7 @@ func allToolNames() []string {
 		"bash",
 		"job_output",
 		"job_kill",
+		"delete",
 		"download",
 		"edit",
 		"multiedit",

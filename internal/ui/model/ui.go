@@ -56,6 +56,9 @@ const (
 	compactModeHeightBreakpoint = 30
 )
 
+// If pasted text has more than 2 newlines, treat it as a file attachment.
+const pasteLinesThreshold = 10
+
 // Session details panel max height.
 const sessionDetailsMaxHeight = 20
 
@@ -2680,8 +2683,7 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 		return nil
 	}
 
-	// If pasted text has more than 2 newlines, treat it as a file attachment.
-	if strings.Count(msg.Content, "\n") > 2 {
+	if strings.Count(msg.Content, "\n") > pasteLinesThreshold {
 		return func() tea.Msg {
 			content := []byte(msg.Content)
 			if int64(len(content)) > common.MaxAttachmentSize {

@@ -292,7 +292,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		if err == nil {
 			options[google.Name] = parsed
 		}
-	case hyper.Name:
+	case hyper.Name, openaicompat.Name:
 		if strings.HasPrefix(model.CatwalkCfg.ID, "claude") {
 			_, hasThink := mergedOptions["thinking"]
 			if !hasThink && model.ModelCfg.Think {
@@ -319,13 +319,12 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 					options[openai.Name] = parsed
 				}
 			} else {
-				parsed, err := openaicompat.ParseOptions(mergedOptions)
+				parsed, err := openai.ParseOptions(mergedOptions)
 				if err == nil {
 					options[openai.Name] = parsed
 				}
 			}
 		}
-		slog.Error("HIER", "opts", options)
 	}
 
 	return options

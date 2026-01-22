@@ -71,23 +71,6 @@
         .header-light {
             display: none;
         }
-        .footer-light {
-            display: none;
-        }
-        @media (prefers-color-scheme: light) {
-            .header-dark {
-                display: none;
-            }
-            .header-light {
-                display: block;
-            }
-            .footer-dark {
-                display: none;
-            }
-            .footer-light {
-                display: block;
-            }
-        }
         .stats-grid {
             display: flex;
             flex-wrap: wrap;
@@ -102,6 +85,11 @@
             padding: 1.5rem;
             flex: 1 1 150px;
             max-width: calc((100% - 5rem) / 6);
+        }
+        @media (prefers-color-scheme: light) {
+            .stat-card {
+                background: var(--butter);
+            }
         }
         @media (max-width: 1024px) {
             .stat-card {
@@ -145,6 +133,11 @@
             padding: 1.5rem;
             width: 100%;
             box-sizing: border-box;
+        }
+        @media (prefers-color-scheme: light) {
+            .chart-card {
+                background: var(--butter);
+            }
         }
         .chart-card.full-width {
             width: 100%;
@@ -209,6 +202,16 @@
             height: auto;
             display: block;
         }
+        /* Override charm brand colors in footer */
+        .footer-container .cls-3 {
+            fill: #fffaf1 !important;
+        }
+        @media (prefers-color-scheme: light) {
+            /* Override charm brand colors in footer */
+            .footer-container .cls-3 {
+                fill: #644CED !important;
+            }
+        }
 
     </style>
 </head>
@@ -216,7 +219,6 @@
     <div class="container">
         <div class="header-wrapper">
             <div class="header-dark">{{.HeaderDark}}</div>
-            <div class="header-light">{{.HeaderLight}}</div>
         </div>
 
         <div class="stats-grid">
@@ -313,9 +315,7 @@
     </div>
 
     <div class="footer-container">
-            <div class="footer-dark">{{.FooterDark}}</div>
-            <div class="footer-light">{{.FooterLight}}</div>
-        </div>
+        <div class="footer-dark">{{.FooterDark}}</div>
     </div>
 
     <script>
@@ -351,6 +351,15 @@
         function formatTime(ms) {
             if (ms < 1000) return Math.round(ms) + 'ms';
             return (ms / 1000).toFixed(1) + 's';
+        }
+
+        function createGradient(ctx, chartArea) {
+            if (!chartArea) return colors.charple;
+            const gradient = ctx.createLinearGradient(chartArea.left, 0, chartArea.right, 0);
+            gradient.addColorStop(0, colors.charple);
+            gradient.addColorStop(0.5, colors.urchin);
+            gradient.addColorStop(1, colors.cherry);
+            return gradient;
         }
 
         // Populate summary cards
@@ -462,10 +471,6 @@
         }
 
         if (stats.tool_usage?.length > 0) {
-            const third = Math.floor(stats.tool_usage.length / 3);
-            const toolColors = stats.tool_usage.map((_, i) =>
-                i < third ? colors.charple : i < third * 2 ? colors.urchin : colors.cherry
-            );
             new Chart(document.getElementById('toolChart'), {
                 type: 'bar',
                 data: {
@@ -473,7 +478,7 @@
                     datasets: [{
                         label: 'Calls',
                         data: stats.tool_usage.map(t => t.call_count),
-                        backgroundColor: toolColors,
+                        backgroundColor: ctx => createGradient(ctx.chart.ctx, ctx.chart.chartArea),
                         borderRadius: 4
                     }]
                 },
@@ -514,16 +519,7 @@
                     datasets: [{
                         label: 'Messages',
                         data: stats.usage_by_model.map(m => m.message_count),
-                        backgroundColor: ctx => {
-                            const bar = ctx.raw;
-                            const chart = ctx.chart;
-                            const { ctx: chartCtx, chartArea: rect } = chart;
-                            if (!rect || !bar) return colors.charple;
-                            const gradient = chartCtx.createLinearGradient(rect.left, 0, rect.right, 0);
-                            gradient.addColorStop(0, colors.charple);
-                            gradient.addColorStop(1, colors.cherry);
-                            return gradient;
-                        },
+                        backgroundColor: ctx => createGradient(ctx.chart.ctx, ctx.chart.chartArea),
                         borderRadius: 4
                     }]
                 },

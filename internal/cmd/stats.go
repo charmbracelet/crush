@@ -21,14 +21,8 @@ import (
 //go:embed stats/index.html
 var statsTemplate string
 
-//go:embed stats/header_light.svg
-var headerLightSVG string
-
 //go:embed stats/header_dark.svg
 var headerDarkSVG string
-
-//go:embed stats/footer_light.svg
-var footerLightSVG string
 
 //go:embed stats/footer_dark.svg
 var footerDarkSVG string
@@ -329,17 +323,13 @@ func generateHTML(stats *Stats, path string) error {
 	}
 
 	data := struct {
-		StatsJSON   template.JS
-		HeaderLight template.HTML
-		HeaderDark  template.HTML
-		FooterLight template.HTML
-		FooterDark  template.HTML
+		StatsJSON  template.JS
+		HeaderDark template.HTML
+		FooterDark template.HTML
 	}{
-		StatsJSON:   template.JS(statsJSON),
-		HeaderLight: template.HTML(headerLightSVG),
-		HeaderDark:  template.HTML(headerDarkSVG),
-		FooterLight: template.HTML(footerLightSVG),
-		FooterDark:  template.HTML(footerDarkSVG),
+		StatsJSON:  template.JS(statsJSON),
+		HeaderDark: template.HTML(headerDarkSVG),
+		FooterDark: template.HTML(footerDarkSVG),
 	}
 
 	var buf bytes.Buffer

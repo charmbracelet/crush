@@ -356,10 +356,13 @@
         const charpleColor = { r: 107, g: 80, b: 255 };
         const tunaColor = { r: 255, g: 109, b: 170 };
 
-        function interpolateColor(ratio) {
+        function interpolateColor(ratio, alpha = 1) {
             const r = Math.round(charpleColor.r + (tunaColor.r - charpleColor.r) * ratio);
             const g = Math.round(charpleColor.g + (tunaColor.g - charpleColor.g) * ratio);
             const b = Math.round(charpleColor.b + (tunaColor.b - charpleColor.b) * ratio);
+            if (alpha < 1) {
+                return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+            }
             return `rgb(${r}, ${g}, ${b})`;
         }
 
@@ -428,15 +431,9 @@
                         backgroundColor: ctx => {
                             const count = ctx.raw?.count || ctx.dataset.data[ctx.dataIndex]?.count || 0;
                             const ratio = count / maxCount;
-                            const color = ratio > 0.5 ? colors.cherry : colors.charple;
-                            return color + '99';
+                            return interpolateColor(ratio, 0.6);
                         },
-                        borderColor: ctx => {
-                            const count = ctx.raw?.count || ctx.dataset.data[ctx.dataIndex]?.count || 0;
-                            const ratio = count / maxCount;
-                            return ratio > 0.5 ? colors.cherry : colors.charple;
-                        },
-                        borderWidth: 1
+                        borderWidth: 0
                     }]
                 },
                 options: {
@@ -504,7 +501,8 @@
                 labels: ['Prompt Tokens', 'Completion Tokens'],
                 datasets: [{
                     data: [stats.total.total_prompt_tokens, stats.total.total_completion_tokens],
-                    backgroundColor: [colors.charple, colors.julep]
+                    backgroundColor: [colors.charple, colors.julep],
+                    borderWidth: 0
                 }]
             },
             options: {
@@ -555,7 +553,8 @@
                     labels: Object.keys(providerData),
                     datasets: [{
                         data: Object.values(providerData),
-                        backgroundColor: Object.keys(providerData).map((_, i) => providerColors[i % providerColors.length])
+                        backgroundColor: Object.keys(providerData).map((_, i) => providerColors[i % providerColors.length]),
+                        borderWidth: 0
                     }]
                 },
                 options: {

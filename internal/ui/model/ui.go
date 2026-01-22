@@ -311,7 +311,7 @@ func (m *UI) loadCustomCommands() tea.Cmd {
 	return func() tea.Msg {
 		customCommands, err := commands.LoadCustomCommands(m.com.Config())
 		if err != nil {
-			slog.Error("failed to load custom commands", "error", err)
+			slog.Error("Failed to load custom commands", "error", err)
 		}
 		return userCommandsLoadedMsg{Commands: customCommands}
 	}
@@ -322,7 +322,7 @@ func (m *UI) loadMCPrompts() tea.Cmd {
 	return func() tea.Msg {
 		prompts, err := commands.LoadMCPPrompts()
 		if err != nil {
-			slog.Error("failed to load mcp prompts", "error", err)
+			slog.Error("Failed to load mcp prompts", "error", err)
 		}
 		if prompts == nil {
 			// flag them as loaded even if there is none or an error
@@ -647,7 +647,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// the protocol.
 		m.imgCaps.SupportsKittyGraphics = true
 		if !bytes.HasPrefix(msg.Payload, []byte("OK")) {
-			slog.Warn("unexpected Kitty graphics response",
+			slog.Warn("Unexpected Kitty graphics response",
 				"response", string(msg.Payload),
 				"options", msg.Options)
 		}

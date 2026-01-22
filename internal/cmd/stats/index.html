@@ -546,26 +546,22 @@
 
         // Model Usage Chart (horizontal bar)
         if (stats.usage_by_model && stats.usage_by_model.length > 0) {
-            const modelColors = [
-                colors.charple,
-                colors.urchin,
-                colors.cherry
-            ];
-            // Create a repeating pattern if we need more colors
-            while (modelColors.length < stats.usage_by_model.length) {
-                modelColors.push(colors.charple);
-                modelColors.push(colors.urchin);
-                modelColors.push(colors.cherry);
-            }
-            const backgroundColors = modelColors.slice(0, stats.usage_by_model.length);
-            new Chart(document.getElementById('modelChart'), {
+            const modelChart = new Chart(document.getElementById('modelChart'), {
                 type: 'bar',
                 data: {
                     labels: stats.usage_by_model.map(m => m.model + ' (' + m.provider + ')'),
                     datasets: [{
                         label: 'Messages',
                         data: stats.usage_by_model.map(m => m.message_count),
-                        backgroundColor: backgroundColors,
+                        backgroundColor: function(context) {
+                            const chart = context.chart;
+                            const { ctx, chartArea } = chart;
+                            if (!chartArea) return colors.charple;
+                            const gradient = ctx.createLinearGradient(chartArea.left, 0, chartArea.right, 0);
+                            gradient.addColorStop(0, colors.charple);
+                            gradient.addColorStop(1, colors.cherry);
+                            return gradient;
+                        },
                         borderRadius: 4
                     }]
                 },

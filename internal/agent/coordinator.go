@@ -292,6 +292,17 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		if err == nil {
 			options[google.Name] = parsed
 		}
+	case bedrock.Name:
+		_, hasThink := mergedOptions["thinking"]
+		if !hasThink && model.ModelCfg.Think {
+			mergedOptions["thinking"] = map[string]any{
+				"reasoning_effort": "medium",
+			}
+		}
+		parsed, err := bedrock.ParseOptions(mergedOptions)
+		if err == nil {
+			options[bedrock.Name] = parsed
+		}
 	case openaicompat.Name:
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
 		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {

@@ -7,15 +7,43 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
-            --bg: {{.BgColor}};
-            --bg-secondary: {{.BgSecondary}};
-            --text: {{.TextColor}};
-            --text-muted: {{.TextMuted}};
-            --accent: {{.Accent}};
-            --accent2: {{.Accent2}};
-            --accent3: {{.Accent3}};
-            --accent4: {{.Accent4}};
-            --border: {{.BorderColor}};
+            /* Dark mode colors - charmtone dark palette */
+            --bg: #201F26;
+            --bg-secondary: #2D2C35;
+            --text: #FFFAF1;
+            --text-muted: #858392;
+            --accent: #6B50FF;
+            --accent2: #00A4FF;
+            --accent3: #00FFB2;
+            --accent4: #FF577D;
+            --border: #4D4C57;
+            /* Specific charmtone colors for charts */
+            --charple: #6B50FF;
+            --cherry: #FF388B;
+            --julep: #00FFB2;
+            --urchin: #C337E0;
+            --butter: #FFFAF1;
+        }
+
+        /* Light mode colors - charmtone light palette */
+        @media (prefers-color-scheme: light) {
+            :root {
+                --bg: #FFFFFF;
+                --bg-secondary: #F8F9FA;
+                --text: #201F26;
+                --text-muted: #8B8E99;
+                --accent: #644CED;
+                --accent2: #0096FF;
+                --accent3: #00E0C3;
+                --accent4: #FF6384;
+                --border: #E8E6EB;
+                /* Specific charmtone colors for charts (same in both modes) */
+                --charple: #6B50FF;
+                --cherry: #FF388B;
+                --julep: #00FFB2;
+                --urchin: #C337E0;
+                --butter: #FFFAF1;
+            }
         }
         * {
             margin: 0;
@@ -97,10 +125,10 @@
         .stat-card .value {
             font-size: 2rem;
             font-weight: 700;
-            color: var(--accent);
+            color: var(--butter);
         }
         .stat-card .value.cost {
-            color: var(--accent4);
+            color: var(--butter);
         }
         .charts-grid {
             display: flex;
@@ -311,8 +339,8 @@
         document.getElementById('avg-response').innerHTML = '<span title="Average">x̅</span> ' + formatTime(stats.avg_response_time_ms);
 
         // Chart defaults
-        Chart.defaults.color = '#F1EFEF';
-        Chart.defaults.borderColor = '#4D4C57';
+        Chart.defaults.color = 'var(--butter)';
+        Chart.defaults.borderColor = 'var(--border)';
 
         // Recent Activity Chart
         if (stats.recent_activity && stats.recent_activity.length > 0) {
@@ -323,16 +351,14 @@
                     datasets: [{
                         label: 'Sessions',
                         data: stats.recent_activity.map(d => d.session_count),
-                        backgroundColor: '#6B50FF',
+                        backgroundColor: 'var(--charple)',
                         borderRadius: 4,
                         yAxisID: 'y'
                     }, {
                         label: 'Tokens (K)',
                         data: stats.recent_activity.map(d => d.total_tokens / 1000),
-                        type: 'line',
-                        borderColor: '#00A4FF',
-                        backgroundColor: 'transparent',
-                        tension: 0.3,
+                        backgroundColor: 'var(--julep)',
+                        borderRadius: 4,
                         yAxisID: 'y1'
                     }]
                 },
@@ -356,6 +382,9 @@
             if (maxCount === 0) maxCount = 1;
             const scaleFactor = 20 / Math.sqrt(maxCount);
 
+            const charple = getComputedStyle(document.documentElement).getPropertyValue('--charple').trim();
+            const cherry = getComputedStyle(document.documentElement).getPropertyValue('--cherry').trim();
+
             new Chart(document.getElementById('heatmapChart'), {
                 type: 'bubble',
                 data: {
@@ -367,8 +396,17 @@
                             r: Math.sqrt(h.session_count) * scaleFactor,
                             count: h.session_count
                         })),
-                        backgroundColor: 'rgba(107, 80, 255, 0.6)',
-                        borderColor: 'rgba(107, 80, 255, 1)',
+                        backgroundColor: ctx => {
+                            const count = ctx.raw?.count || ctx.dataset.data[ctx.dataIndex]?.count || 0;
+                            const ratio = count / maxCount;
+                            // Use charple for lower session counts, cherry for higher
+                            return ratio > 0.5 ? cherry + '99' : charple + '99';
+                        },
+                        borderColor: ctx => {
+                            const count = ctx.raw?.count || ctx.dataset.data[ctx.dataIndex]?.count || 0;
+                            const ratio = count / maxCount;
+                            return ratio > 0.5 ? cherry : charple;
+                        },
                         borderWidth: 1
                     }]
                 },
@@ -406,7 +444,18 @@
 
         // Tool Usage Chart
         if (stats.tool_usage && stats.tool_usage.length > 0) {
-            const toolColors = ['#6B50FF', '#00A4FF', '#00FFB2', '#FF577D', '#FF388B', '#E8FF27', '#12C78F', '#FF985A', '#F379FF', '#858392'];
+            const toolColors = [
+                getComputedStyle(document.documentElement).getPropertyValue('--charple').trim(),
+                getComputedStyle(document.documentElement).getPropertyValue('--urchin').trim(),
+                getComputedStyle(document.documentElement).getPropertyValue('--cherry').trim(),
+                'var(--charple)',
+                'var(--urchin)',
+                'var(--cherry)',
+                'var(--charple)',
+                'var(--urchin)',
+                'var(--cherry)',
+                'var(--charple)'
+            ].map(c => c.startsWith('var') ? getComputedStyle(document.documentElement).getPropertyValue(c.slice(4, -1)).trim() : c);
             new Chart(document.getElementById('toolChart'), {
                 type: 'bar',
                 data: {
@@ -434,7 +483,10 @@
                 labels: ['Prompt Tokens', 'Completion Tokens'],
                 datasets: [{
                     data: [stats.total.total_prompt_tokens, stats.total.total_completion_tokens],
-                    backgroundColor: ['#6B50FF', '#00A4FF']
+                    backgroundColor: [
+                        getComputedStyle(document.documentElement).getPropertyValue('--charple').trim(),
+                        getComputedStyle(document.documentElement).getPropertyValue('--julep').trim()
+                    ]
                 }]
             },
             options: {
@@ -448,7 +500,18 @@
 
         // Model Usage Chart (horizontal bar)
         if (stats.usage_by_model && stats.usage_by_model.length > 0) {
-            const modelColors = ['#6B50FF', '#00A4FF', '#00FFB2', '#FF577D', '#FF388B', '#E8FF27', '#12C78F', '#FF985A', '#F379FF', '#858392'];
+            const modelColors = [
+                getComputedStyle(document.documentElement).getPropertyValue('--charple').trim(),
+                getComputedStyle(document.documentElement).getPropertyValue('--urchin').trim(),
+                getComputedStyle(document.documentElement).getPropertyValue('--cherry').trim(),
+                'var(--charple)',
+                'var(--urchin)',
+                'var(--cherry)',
+                'var(--charple)',
+                'var(--urchin)',
+                'var(--cherry)',
+                'var(--charple)'
+            ].map(c => c.startsWith('var') ? getComputedStyle(document.documentElement).getPropertyValue(c.slice(4, -1)).trim() : c);
             new Chart(document.getElementById('modelChart'), {
                 type: 'bar',
                 data: {

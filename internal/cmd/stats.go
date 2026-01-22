@@ -14,7 +14,6 @@ import (
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
-	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
 )
@@ -333,30 +332,12 @@ func generateHTML(stats *Stats, path string) error {
 		HeaderDark  template.HTML
 		FooterLight template.HTML
 		FooterDark  template.HTML
-		BgColor     string
-		BgSecondary string
-		TextColor   string
-		TextMuted   string
-		Accent      string
-		Accent2     string
-		Accent3     string
-		Accent4     string
-		BorderColor string
 	}{
 		StatsJSON:   template.JS(statsJSON),
 		HeaderLight: template.HTML(headerLightSVG),
 		HeaderDark:  template.HTML(headerDarkSVG),
 		FooterLight: template.HTML(footerLightSVG),
 		FooterDark:  template.HTML(footerDarkSVG),
-		BgColor:     charmtone.Pepper.Hex(),
-		BgSecondary: charmtone.BBQ.Hex(),
-		TextColor:   charmtone.Salt.Hex(),
-		TextMuted:   charmtone.Squid.Hex(),
-		Accent:      charmtone.Charple.Hex(),
-		Accent2:     charmtone.Malibu.Hex(),
-		Accent3:     charmtone.Guac.Hex(),
-		Accent4:     charmtone.Coral.Hex(),
-		BorderColor: charmtone.Charcoal.Hex(),
 	}
 
 	var buf bytes.Buffer

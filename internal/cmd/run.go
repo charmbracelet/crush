@@ -30,6 +30,9 @@ crush run "What is this code doing?" <<< prrr.go
 
 # Run in quiet mode (hide the spinner)
 crush run --quiet "Generate a README for this project"
+
+# Run in verbose mode
+crush run --verbose "Generate a README for this project"
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		quiet, _ := cmd.Flags().GetBool("quiet")

@@ -17,11 +17,64 @@
             --accent3: #00FFB2;
             --accent4: #FF577D;
             --border: #4D4C57;
-            /* Specific charmtone colors for charts */
-            --charple: #6B50FF;
+            /* Charmtone colors (global - same in both light and dark modes) */
+            --cumin: #BF976F;
+            --tang: #FF985A;
+            --yam: #FFB587;
+            --paprika: #D36C64;
+            --bengal: #FF6E63;
+            --uni: #FF937D;
+            --sriracha: #EB4268;
+            --coral: #FF577D;
+            --salmon: #FF7F90;
+            --chili: #E23080;
             --cherry: #FF388B;
-            --julep: #00FFB2;
+            --tuna: #FF6DAA;
+            --macaron: #E940B0;
+            --pony: #FF4FBF;
+            --cheeky: #FF79D0;
+            --flamingo: #F947E3;
+            --dolly: #FF60FF;
+            --blush: #FF84FF;
             --urchin: #C337E0;
+            --mochi: #EB5DFF;
+            --lilac: #F379FF;
+            --prince: #9C35E1;
+            --violet: #C259FF;
+            --mauve: #D46EFF;
+            --grape: #7134DD;
+            --plum: #9953FF;
+            --orchid: #AD6EFF;
+            --jelly: #4A30D9;
+            --charple: #6B50FF;
+            --hazy: #8B75FF;
+            --ox: #3331B2;
+            --sapphire: #4949FF;
+            --guppy: #7272FF;
+            --oceania: #2B55B3;
+            --thunder: #4776FF;
+            --anchovy: #719AFC;
+            --damson: #007AB8;
+            --malibu: #00A4FF;
+            --sardine: #4FBEFE;
+            --zinc: #10B1AE;
+            --turtle: #0ADCD9;
+            --lichen: #5CDFEA;
+            --guac: #12C78F;
+            --julep: #00FFB2;
+            --bok: #68FFD6;
+            --mustard: #F5EF34;
+            --citron: #E8FF27;
+            --zest: #E8FE96;
+            --pepper: #201F26;
+            --bbq: #2d2c35;
+            --charcoal: #3A3943;
+            --iron: #4D4C57;
+            --oyster: #605F6B;
+            --squid: #858392;
+            --smoke: #BFBCC8;
+            --ash: #DFDBDD;
+            --salt: #F1EFEF;
             --butter: #FFFAF1;
         }
 
@@ -37,12 +90,6 @@
                 --accent3: #00E0C3;
                 --accent4: #FF6384;
                 --border: #E8E6EB;
-                /* Specific charmtone colors for charts (same in both modes) */
-                --charple: #6B50FF;
-                --cherry: #FF388B;
-                --julep: #00FFB2;
-                --urchin: #C337E0;
-                --butter: #FFFAF1;
             }
         }
         * {
@@ -116,7 +163,7 @@
             }
         }
         .stat-card h3 {
-            font-size: 0.875rem;
+            font-size: 0.75rem;
             color: var(--text-muted);
             text-transform: uppercase;
             letter-spacing: 0.05em;
@@ -310,6 +357,18 @@
     <script>
         const stats = {{.StatsJSON}};
 
+        // Get all charmtone colors once from computed styles
+        const rootStyles = getComputedStyle(document.documentElement);
+        const colors = {
+            charple: rootStyles.getPropertyValue('--charple').trim(),
+            cherry: rootStyles.getPropertyValue('--cherry').trim(),
+            julep: rootStyles.getPropertyValue('--julep').trim(),
+            urchin: rootStyles.getPropertyValue('--urchin').trim(),
+            butter: rootStyles.getPropertyValue('--butter').trim(),
+            charcoal: rootStyles.getPropertyValue('--charcoal').trim(),
+            squid: rootStyles.getPropertyValue('--squid').trim(),
+        };
+
         // Helper functions
         function formatNumber(n) {
             return new Intl.NumberFormat().format(Math.round(n));
@@ -339,8 +398,8 @@
         document.getElementById('avg-response').innerHTML = '<span title="Average">x̅</span> ' + formatTime(stats.avg_response_time_ms);
 
         // Chart defaults
-        Chart.defaults.color = 'var(--butter)';
-        Chart.defaults.borderColor = 'var(--border)';
+        Chart.defaults.color = colors.squid;
+        Chart.defaults.borderColor = colors.squid;
 
         // Recent Activity Chart
         if (stats.recent_activity && stats.recent_activity.length > 0) {
@@ -351,13 +410,13 @@
                     datasets: [{
                         label: 'Sessions',
                         data: stats.recent_activity.map(d => d.session_count),
-                        backgroundColor: 'var(--charple)',
+                        backgroundColor: colors.charple,
                         borderRadius: 4,
                         yAxisID: 'y'
                     }, {
                         label: 'Tokens (K)',
                         data: stats.recent_activity.map(d => d.total_tokens / 1000),
-                        backgroundColor: 'var(--julep)',
+                        backgroundColor: colors.julep,
                         borderRadius: 4,
                         yAxisID: 'y1'
                     }]
@@ -382,9 +441,6 @@
             if (maxCount === 0) maxCount = 1;
             const scaleFactor = 20 / Math.sqrt(maxCount);
 
-            const charple = getComputedStyle(document.documentElement).getPropertyValue('--charple').trim();
-            const cherry = getComputedStyle(document.documentElement).getPropertyValue('--cherry').trim();
-
             new Chart(document.getElementById('heatmapChart'), {
                 type: 'bubble',
                 data: {
@@ -400,12 +456,12 @@
                             const count = ctx.raw?.count || ctx.dataset.data[ctx.dataIndex]?.count || 0;
                             const ratio = count / maxCount;
                             // Use charple for lower session counts, cherry for higher
-                            return ratio > 0.5 ? cherry + '99' : charple + '99';
+                            return ratio > 0.5 ? colors.cherry + '99' : colors.charple + '99';
                         },
                         borderColor: ctx => {
                             const count = ctx.raw?.count || ctx.dataset.data[ctx.dataIndex]?.count || 0;
                             const ratio = count / maxCount;
-                            return ratio > 0.5 ? cherry : charple;
+                            return ratio > 0.5 ? colors.cherry : colors.charple;
                         },
                         borderWidth: 1
                     }]
@@ -444,18 +500,11 @@
 
         // Tool Usage Chart
         if (stats.tool_usage && stats.tool_usage.length > 0) {
-            const toolColors = [
-                getComputedStyle(document.documentElement).getPropertyValue('--charple').trim(),
-                getComputedStyle(document.documentElement).getPropertyValue('--urchin').trim(),
-                getComputedStyle(document.documentElement).getPropertyValue('--cherry').trim(),
-                'var(--charple)',
-                'var(--urchin)',
-                'var(--cherry)',
-                'var(--charple)',
-                'var(--urchin)',
-                'var(--cherry)',
-                'var(--charple)'
-            ].map(c => c.startsWith('var') ? getComputedStyle(document.documentElement).getPropertyValue(c.slice(4, -1)).trim() : c);
+            const toolColors = [colors.charple, colors.urchin, colors.cherry];
+            // Create a repeating pattern if we need more colors
+            while (toolColors.length < Math.min(stats.tool_usage.length, 15)) {
+                toolColors.push(colors.charple, colors.urchin, colors.cherry);
+            }
             new Chart(document.getElementById('toolChart'), {
                 type: 'bar',
                 data: {
@@ -483,10 +532,7 @@
                 labels: ['Prompt Tokens', 'Completion Tokens'],
                 datasets: [{
                     data: [stats.total.total_prompt_tokens, stats.total.total_completion_tokens],
-                    backgroundColor: [
-                        getComputedStyle(document.documentElement).getPropertyValue('--charple').trim(),
-                        getComputedStyle(document.documentElement).getPropertyValue('--julep').trim()
-                    ]
+                    backgroundColor: [colors.charple, colors.julep]
                 }]
             },
             options: {
@@ -501,17 +547,17 @@
         // Model Usage Chart (horizontal bar)
         if (stats.usage_by_model && stats.usage_by_model.length > 0) {
             const modelColors = [
-                getComputedStyle(document.documentElement).getPropertyValue('--charple').trim(),
-                getComputedStyle(document.documentElement).getPropertyValue('--urchin').trim(),
-                getComputedStyle(document.documentElement).getPropertyValue('--cherry').trim(),
-                'var(--charple)',
-                'var(--urchin)',
-                'var(--cherry)',
-                'var(--charple)',
-                'var(--urchin)',
-                'var(--cherry)',
-                'var(--charple)'
-            ].map(c => c.startsWith('var') ? getComputedStyle(document.documentElement).getPropertyValue(c.slice(4, -1)).trim() : c);
+                colors.charple,
+                colors.urchin,
+                colors.cherry
+            ];
+            // Create a repeating pattern if we need more colors
+            while (modelColors.length < stats.usage_by_model.length) {
+                modelColors.push(colors.charple);
+                modelColors.push(colors.urchin);
+                modelColors.push(colors.cherry);
+            }
+            const backgroundColors = modelColors.slice(0, stats.usage_by_model.length);
             new Chart(document.getElementById('modelChart'), {
                 type: 'bar',
                 data: {
@@ -519,7 +565,7 @@
                     datasets: [{
                         label: 'Messages',
                         data: stats.usage_by_model.map(m => m.message_count),
-                        backgroundColor: modelColors.slice(0, stats.usage_by_model.length),
+                        backgroundColor: backgroundColors,
                         borderRadius: 4
                     }]
                 },

@@ -16,11 +16,14 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/fantasy"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/format"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
@@ -29,9 +32,12 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
+	"github.com/charmbracelet/crush/internal/tui/components/anim"
+	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/update"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/charmbracelet/x/term"
 )
 
@@ -101,7 +107,7 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	go app.checkForUpdates(ctx)
 
 	go func() {
-		slog.Debug("Initializing MCP clients")
+		slog.Info("Initializing MCP clients")
 		mcp.Initialize(ctx, app.Permissions, cfg)
 	}()
 
@@ -126,13 +132,61 @@ func (app *App) Config() *config.Config {
 
 // RunNonInteractive runs the application in non-interactive mode with the
 // given prompt, printing to stdout.
-func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt string) error {
-	slog.Debug("Running in non-interactive mode")
+func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt, largeModel, smallModel string, quiet bool) error {
+	slog.Info("Running in non-interactive mode")
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	stderrTTY := term.IsTerminal(os.Stderr.Fd())
+	if largeModel != "" || smallModel != "" {
+		if err := app.overrideModelsForNonInteractive(ctx, largeModel, smallModel); err != nil {
+			return fmt.Errorf("failed to override models: %w", err)
+		}
+	}
+
+	var (
+		spinner   *format.Spinner
+		stdoutTTY bool
+		stderrTTY bool
+		stdinTTY  bool
+	)
+
+	if f, ok := output.(*os.File); ok {
+		stdoutTTY = term.IsTerminal(f.Fd())
+	}
+	stderrTTY = term.IsTerminal(os.Stderr.Fd())
+	stdinTTY = term.IsTerminal(os.Stdin.Fd())
+
+	if !quiet && stderrTTY {
+		t := styles.CurrentTheme()
+
+		// Detect background color to set the appropriate color for the
+		// spinner's 'Generating...' text. Without this, that text would be
+		// unreadable in light terminals.
+		hasDarkBG := true
+		if f, ok := output.(*os.File); ok && stdinTTY && stdoutTTY {
+			hasDarkBG = lipgloss.HasDarkBackground(os.Stdin, f)
+		}
+		defaultFG := lipgloss.LightDark(hasDarkBG)(charmtone.Pepper, t.FgBase)
+
+		spinner = format.NewSpinner(ctx, cancel, anim.Settings{
+			Size:        10,
+			Label:       "Generating",
+			LabelColor:  defaultFG,
+			GradColorA:  t.Primary,
+			GradColorB:  t.Secondary,
+			CycleColors: true,
+		})
+		spinner.Start()
+	}
+
+	// Helper function to stop spinner once.
+	stopSpinner := func() {
+		if !quiet && spinner != nil {
+			spinner.Stop()
+			spinner = nil
+		}
+	}
 
 	// Wait for MCP initialization to complete before reading MCP tools.
 	if err := mcp.WaitForInit(ctx); err != nil {
@@ -141,6 +195,8 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 
 	// force update of agent models before running so mcp tools are loaded
 	app.AgentCoordinator.UpdateModels(ctx)
+
+	defer stopSpinner()
 
 	const maxPromptLengthForTitle = 100
 	const titlePrefix = "Non-interactive: "
@@ -157,7 +213,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 	if err != nil {
 		return fmt.Errorf("failed to create session for non-interactive mode: %w", err)
 	}
-	slog.Debug("Created session for non-interactive run", "session_id", sess.ID)
+	slog.Info("Created session for non-interactive run", "session_id", sess.ID)
 
 	// Automatically approve all permission requests for this non-interactive
 	// session.
@@ -194,7 +250,6 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 		_, _ = fmt.Fprintln(output)
 	}()
 
-	var printed bool
 	for {
 		if stderrTTY {
 			// HACK: Reinitialize the terminal progress bar on every iteration
@@ -204,9 +259,10 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 
 		select {
 		case result := <-done:
+			stopSpinner()
 			if result.err != nil {
 				if errors.Is(result.err, context.Canceled) || errors.Is(result.err, agent.ErrRequestCancelled) {
-					slog.Debug("Non-interactive: agent processing cancelled", "session_id", sess.ID)
+					slog.Info("Non-interactive: agent processing cancelled", "session_id", sess.ID)
 					return nil
 				}
 				return fmt.Errorf("agent processing failed: %w", result.err)
@@ -216,6 +272,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 		case event := <-messageEvents:
 			msg := event.Payload
 			if msg.SessionID == sess.ID && msg.Role == message.Assistant && len(msg.Parts) > 0 {
+				stopSpinner()
 
 				content := msg.Content().String()
 				readBytes := messageReadBytes[msg.ID]
@@ -231,15 +288,12 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 				if readBytes == 0 {
 					part = strings.TrimLeft(part, " \t")
 				}
-				// ignores initial whitespace only messages
-				if printed || strings.TrimSpace(part) != "" {
-					printed = true
-					fmt.Fprint(output, part)
-				}
+				fmt.Fprint(output, part)
 				messageReadBytes[msg.ID] = len(content)
 			}
 
 		case <-ctx.Done():
+			stopSpinner()
 			return ctx.Err()
 		}
 	}
@@ -250,6 +304,95 @@ func (app *App) UpdateAgentModel(ctx context.Context) error {
 		return fmt.Errorf("agent configuration is missing")
 	}
 	return app.AgentCoordinator.UpdateModels(ctx)
+}
+
+// overrideModelsForNonInteractive parses the model strings and temporarily
+// overrides the model configurations, then rebuilds the agent.
+// Format: "model-name" (searches all providers) or "provider/model-name".
+// Model matching is case-insensitive.
+// If largeModel is provided but smallModel is not, the small model defaults to
+// the provider's default small model.
+func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel, smallModel string) error {
+	providers := app.config.Providers.Copy()
+
+	largeMatches, smallMatches, err := findModels(providers, largeModel, smallModel)
+	if err != nil {
+		return err
+	}
+
+	var largeProviderID string
+
+	// Override large model.
+	if largeModel != "" {
+		found, err := validateMatches(largeMatches, largeModel, "large")
+		if err != nil {
+			return err
+		}
+		largeProviderID = found.provider
+		slog.Info("Overriding large model for non-interactive run", "provider", found.provider, "model", found.modelID)
+		app.config.Models[config.SelectedModelTypeLarge] = config.SelectedModel{
+			Provider: found.provider,
+			Model:    found.modelID,
+		}
+	}
+
+	// Override small model.
+	switch {
+	case smallModel != "":
+		found, err := validateMatches(smallMatches, smallModel, "small")
+		if err != nil {
+			return err
+		}
+		slog.Info("Overriding small model for non-interactive run", "provider", found.provider, "model", found.modelID)
+		app.config.Models[config.SelectedModelTypeSmall] = config.SelectedModel{
+			Provider: found.provider,
+			Model:    found.modelID,
+		}
+
+	case largeModel != "":
+		// No small model specified, but large model was - use provider's default.
+		smallCfg := app.getDefaultSmallModel(largeProviderID)
+		app.config.Models[config.SelectedModelTypeSmall] = smallCfg
+	}
+
+	return app.AgentCoordinator.UpdateModels(ctx)
+}
+
+// provider. Falls back to the large model if no default is found.
+func (app *App) getDefaultSmallModel(providerID string) config.SelectedModel {
+	cfg := app.config
+	largeModelCfg := cfg.Models[config.SelectedModelTypeLarge]
+
+	// Find the provider in the known providers list to get its default small model.
+	knownProviders, _ := config.Providers(cfg)
+	var knownProvider *catwalk.Provider
+	for _, p := range knownProviders {
+		if string(p.ID) == providerID {
+			knownProvider = &p
+			break
+		}
+	}
+
+	// For unknown/local providers, use the large model as small.
+	if knownProvider == nil {
+		slog.Warn("Using large model as small model for unknown provider", "provider", providerID, "model", largeModelCfg.Model)
+		return largeModelCfg
+	}
+
+	defaultSmallModelID := knownProvider.DefaultSmallModelID
+	model := cfg.GetModel(providerID, defaultSmallModelID)
+	if model == nil {
+		slog.Warn("Default small model not found, using large model", "provider", providerID, "model", largeModelCfg.Model)
+		return largeModelCfg
+	}
+
+	slog.Info("Using provider default small model", "provider", providerID, "model", defaultSmallModelID)
+	return config.SelectedModel{
+		Provider:        providerID,
+		Model:           defaultSmallModelID,
+		MaxTokens:       model.DefaultMaxTokens,
+		ReasoningEffort: model.DefaultReasoningEffort,
+	}
 }
 
 func (app *App) setupEvents() {
@@ -283,20 +426,20 @@ func setupSubscriber[T any](
 			select {
 			case event, ok := <-subCh:
 				if !ok {
-					slog.Debug("Subscription channel closed", "name", name)
+					slog.Debug("subscription channel closed", "name", name)
 					return
 				}
 				var msg tea.Msg = event
 				select {
 				case outputCh <- msg:
 				case <-time.After(2 * time.Second):
-					slog.Debug("Message dropped due to slow consumer", "name", name)
+					slog.Warn("message dropped due to slow consumer", "name", name)
 				case <-ctx.Done():
-					slog.Debug("Subscription cancelled", "name", name)
+					slog.Debug("subscription cancelled", "name", name)
 					return
 				}
 			case <-ctx.Done():
-				slog.Debug("Subscription cancelled", "name", name)
+				slog.Debug("subscription cancelled", "name", name)
 				return
 			}
 		}
@@ -360,7 +503,7 @@ func (app *App) Subscribe(program *tea.Program) {
 // Shutdown performs a graceful shutdown of the application.
 func (app *App) Shutdown() {
 	start := time.Now()
-	defer func() { slog.Debug("Shutdown took " + time.Since(start).String()) }()
+	defer func() { slog.Info("Shutdown took " + time.Since(start).String()) }()
 
 	// First, cancel all agents and wait for them to finish. This must complete
 	// before closing the DB so agents can finish writing their state.

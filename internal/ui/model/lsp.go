@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -39,6 +40,11 @@ func (m *UI) lspInfo(width, maxItems int, isSection bool) string {
 
 		lsps = append(lsps, LSPInfo{LSPClientInfo: state, Diagnostics: lspErrs})
 	}
+
+	slices.SortFunc(lsps, func(a, b LSPInfo) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+
 	title := t.Subtle.Render("LSPs")
 	if isSection {
 		title = common.Section(t, title, width)

@@ -353,13 +353,14 @@
             return (ms / 1000).toFixed(1) + 's';
         }
 
-        function createGradient(ctx, chartArea) {
-            if (!chartArea) return colors.charple;
-            const gradient = ctx.createLinearGradient(chartArea.left, 0, chartArea.right, 0);
-            gradient.addColorStop(0, colors.charple);
-            gradient.addColorStop(0.5, colors.urchin);
-            gradient.addColorStop(1, colors.cherry);
-            return gradient;
+        const charpleColor = { r: 107, g: 80, b: 255 };
+        const tunaColor = { r: 255, g: 109, b: 170 };
+
+        function interpolateColor(ratio) {
+            const r = Math.round(charpleColor.r + (tunaColor.r - charpleColor.r) * ratio);
+            const g = Math.round(charpleColor.g + (tunaColor.g - charpleColor.g) * ratio);
+            const b = Math.round(charpleColor.b + (tunaColor.b - charpleColor.b) * ratio);
+            return `rgb(${r}, ${g}, ${b})`;
         }
 
         // Populate summary cards
@@ -471,6 +472,7 @@
         }
 
         if (stats.tool_usage?.length > 0) {
+            const maxValue = Math.max(...stats.tool_usage.map(t => t.call_count));
             new Chart(document.getElementById('toolChart'), {
                 type: 'bar',
                 data: {
@@ -478,7 +480,11 @@
                     datasets: [{
                         label: 'Calls',
                         data: stats.tool_usage.map(t => t.call_count),
-                        backgroundColor: ctx => createGradient(ctx.chart.ctx, ctx.chart.chartArea),
+                        backgroundColor: ctx => {
+                            const value = ctx.raw;
+                            const ratio = value / maxValue;
+                            return interpolateColor(ratio);
+                        },
                         borderRadius: 4
                     }]
                 },
@@ -512,6 +518,7 @@
 
         // Model Usage Chart (horizontal bar)
         if (stats.usage_by_model?.length > 0) {
+            const maxValue = Math.max(...stats.usage_by_model.map(m => m.message_count));
             new Chart(document.getElementById('modelChart'), {
                 type: 'bar',
                 data: {
@@ -519,7 +526,11 @@
                     datasets: [{
                         label: 'Messages',
                         data: stats.usage_by_model.map(m => m.message_count),
-                        backgroundColor: ctx => createGradient(ctx.chart.ctx, ctx.chart.chartArea),
+                        backgroundColor: ctx => {
+                            const value = ctx.raw;
+                            const ratio = value / maxValue;
+                            return interpolateColor(ratio);
+                        },
                         borderRadius: 4
                     }]
                 },

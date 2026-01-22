@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"log/slog"
+	"os/exec"
 	"slices"
 	"time"
 
@@ -80,6 +81,13 @@ func toOurConfig(in *powernapconfig.ServerConfig) config.LSPConfig {
 
 // createAndStartLSPClient creates a new LSP client, initializes it, and starts its workspace watcher.
 func (app *App) createAndStartLSPClient(ctx context.Context, name string, config config.LSPConfig, userConfigured bool) {
+	if !userConfigured {
+		if _, err := exec.LookPath(config.Command); err != nil {
+			slog.Warn("Default LSP config skipped: server not installed", "name", name, "error", err)
+			return
+		}
+	}
+
 	slog.Debug("Creating LSP client", "name", name, "command", config.Command, "fileTypes", config.FileTypes, "args", config.Args)
 
 	// Update state to starting.
@@ -89,7 +97,7 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, config
 	lspClient, err := lsp.New(ctx, name, config, app.config.Resolver())
 	if err != nil {
 		if !userConfigured {
-			slog.Debug("Default LSP config disabled due to error", "name", name, "error", err)
+			slog.Warn("Default LSP config skipped due to error", "name", name, "error", err)
 			updateLSPState(name, lsp.StateDisabled, nil, nil, 0)
 			return
 		}

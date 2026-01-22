@@ -205,6 +205,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	var currentAssistant *message.Message
 	var shouldSummarize bool
+	var hitMaxTokens bool
 	result, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
 		Files:            files,
@@ -348,6 +349,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			switch stepResult.FinishReason {
 			case fantasy.FinishReasonLength:
 				finishReason = message.FinishReasonMaxTokens
+				hitMaxTokens = true
+				slog.Info("model hit max output tokens, will attempt auto-recovery",
+					"session_id", call.SessionID)
 			case fantasy.FinishReasonStop:
 				finishReason = message.FinishReasonEndTurn
 			case fantasy.FinishReasonToolCalls:
@@ -391,6 +395,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	a.eventPromptResponded(call.SessionID, time.Since(startTime).Truncate(time.Second))
 
 	if err != nil {
+		slog.Debug("agent.Run error received",
+			"error", err.Error(),
+			"is_truncation", isTruncationError(err),
+			"session_id", call.SessionID)
 		isCancelErr := errors.Is(err, context.Canceled)
 		isPermissionErr := errors.Is(err, permission.ErrorPermissionDenied)
 		if currentAssistant == nil {
@@ -488,17 +496,42 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		if updateErr != nil {
 			return nil, updateErr
 		}
+
+		// Check if this is a truncation error (e.g., XML parsing failure from
+		// truncated tool calls). If so, attempt to auto-summarize and re-queue.
+		if isTruncationError(err) && !a.disableAutoSummarize {
+			slog.Info("detected truncation error, attempting auto-summarize and re-queue",
+				"error", err.Error(),
+				"session_id", call.SessionID)
+			a.activeRequests.Del(call.SessionID)
+			if summarizeErr := a.Summarize(ctx, call.SessionID, call.ProviderOptions); summarizeErr != nil {
+				slog.Warn("auto-summarize after truncation error failed", "error", summarizeErr)
+				return nil, err
+			}
+			// Re-queue the call to continue from where we left off.
+			call.Prompt = fmt.Sprintf("The previous session was interrupted due to output truncation. The initial user request was: `%s`. Please continue from where you left off.", call.Prompt)
+			a.messageQueue.Set(call.SessionID, []SessionAgentCall{call})
+			// Process the queued message.
+			return a.Run(ctx, call)
+		}
+
 		return nil, err
 	}
 	wg.Wait()
+
+	// Handle max tokens hit (output truncation) - trigger auto-summarize and re-queue.
+	if hitMaxTokens && !a.disableAutoSummarize {
+		shouldSummarize = true
+	}
 
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
 		if summarizeErr := a.Summarize(genCtx, call.SessionID, call.ProviderOptions); summarizeErr != nil {
 			return nil, summarizeErr
 		}
-		// If the agent wasn't done...
-		if len(currentAssistant.ToolCalls()) > 0 {
+		// If the agent wasn't done (has pending tool calls, incomplete todos, or hit max tokens)...
+		hasPendingWork := len(currentAssistant.ToolCalls()) > 0 || hasIncompleteTodos(currentSession.Todos) || hitMaxTokens
+		if hasPendingWork {
 			existing, ok := a.messageQueue.Get(call.SessionID)
 			if !ok {
 				existing = []SessionAgentCall{}
@@ -1107,4 +1140,44 @@ func buildSummaryPrompt(todos []session.Todo) string {
 		sb.WriteString("Instruct the resuming assistant to use the `todos` tool to continue tracking progress on these tasks.")
 	}
 	return sb.String()
+}
+
+// isTruncationError checks if the error is due to output truncation (e.g., XML
+// parsing failures from truncated tool calls).
+func isTruncationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	// XML parsing errors from truncated tool calls.
+	if strings.Contains(errStr, "XML syntax error") {
+		return true
+	}
+	// Failed to parse XML (wrapper message).
+	if strings.Contains(errStr, "failed to parse XML") {
+		return true
+	}
+	// Tool call parsing failed (from providers like GLM).
+	if strings.Contains(errStr, "tool call parsing failed") {
+		return true
+	}
+	// JSON parsing errors from truncated tool calls.
+	if strings.Contains(errStr, "unexpected end of JSON") {
+		return true
+	}
+	// Generic truncation indicators.
+	if strings.Contains(errStr, "unexpected EOF") {
+		return true
+	}
+	return false
+}
+
+// hasIncompleteTodos checks if the session has any todos that are not completed.
+func hasIncompleteTodos(todos []session.Todo) bool {
+	for _, todo := range todos {
+		if todo.Status != session.TodoStatusCompleted {
+			return true
+		}
+	}
+	return false
 }

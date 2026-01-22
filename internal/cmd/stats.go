@@ -7,7 +7,6 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"html"
 	"html/template"
 	"os"
 	"path/filepath"
@@ -15,16 +14,25 @@ import (
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
-	"github.com/charmbracelet/crush/internal/tui/components/logo"
-	"github.com/charmbracelet/crush/internal/version"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
 )
 
-//go:embed stats.html
+//go:embed stats/index.html
 var statsTemplate string
+
+//go:embed stats/header_light.svg
+var headerLightSVG string
+
+//go:embed stats/header_dark.svg
+var headerDarkSVG string
+
+//go:embed stats/footer_light.svg
+var footerLightSVG string
+
+//go:embed stats/footer_dark.svg
+var footerDarkSVG string
 
 var statsCmd = &cobra.Command{
 	Use:   "stats",
@@ -127,7 +135,7 @@ func runStats(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("failed to gather stats: %w", err)
 	}
 
-	htmlPath := filepath.Join(dataDir, "stats.html")
+	htmlPath := filepath.Join(dataDir, "stats/index.html")
 	if err := generateHTML(stats, htmlPath); err != nil {
 		return fmt.Errorf("failed to generate HTML: %w", err)
 	}
@@ -321,7 +329,10 @@ func generateHTML(stats *Stats, path string) error {
 
 	data := struct {
 		StatsJSON   template.JS
-		LogoHTML    template.HTML
+		HeaderLight template.HTML
+		HeaderDark  template.HTML
+		FooterLight template.HTML
+		FooterDark  template.HTML
 		BgColor     string
 		BgSecondary string
 		TextColor   string
@@ -333,7 +344,10 @@ func generateHTML(stats *Stats, path string) error {
 		BorderColor string
 	}{
 		StatsJSON:   template.JS(statsJSON),
-		LogoHTML:    template.HTML(renderLogoHTML(300)),
+		HeaderLight: template.HTML(headerLightSVG),
+		HeaderDark:  template.HTML(headerDarkSVG),
+		FooterLight: template.HTML(footerLightSVG),
+		FooterDark:  template.HTML(footerDarkSVG),
 		BgColor:     charmtone.Pepper.Hex(),
 		BgSecondary: charmtone.BBQ.Hex(),
 		TextColor:   charmtone.Salt.Hex(),
@@ -350,24 +364,10 @@ func generateHTML(stats *Stats, path string) error {
 		return fmt.Errorf("execute template: %w", err)
 	}
 
+	// Ensure parent directory exists.
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create directory: %w", err)
+	}
+
 	return os.WriteFile(path, buf.Bytes(), 0o644)
-}
-
-// renderLogoHTML generates the ASCII logo at the given width and returns it
-// as escaped HTML.
-func renderLogoHTML(width int) string {
-	result := logo.Render(version.Version, false, logo.Opts{
-		FieldColor:   charmtone.Charple,
-		TitleColorA:  charmtone.Charple,
-		TitleColorB:  charmtone.Malibu,
-		CharmColor:   charmtone.Squid,
-		VersionColor: charmtone.Squid,
-		Width:        width,
-	})
-
-	// Strip ANSI codes and escape HTML.
-	stripped := ansi.Strip(result)
-	escaped := html.EscapeString(stripped)
-
-	return escaped
 }

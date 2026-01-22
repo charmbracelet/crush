@@ -363,8 +363,8 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 		if providerCfg != nil && model != nil && model.CanReason {
 			selectedModel := cfg.Models[agentCfg.Model]
 
-			// Anthropic models: thinking toggle
-			if providerCfg.Type == catwalk.TypeAnthropic || providerCfg.Type == catwalk.Type(hyper.Name) {
+			// Anthropic/Bedrock models: thinking toggle
+			if providerCfg.Type == catwalk.TypeAnthropic || providerCfg.Type == catwalk.Type(hyper.Name) || providerCfg.Type == catwalk.TypeBedrock {
 				status := "Enable"
 				if selectedModel.Think {
 					status = "Disable"

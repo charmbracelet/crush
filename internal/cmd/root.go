@@ -22,6 +22,8 @@ import (
 	"github.com/charmbracelet/crush/internal/projects"
 	"github.com/charmbracelet/crush/internal/stringext"
 	"github.com/charmbracelet/crush/internal/tui"
+	"github.com/charmbracelet/crush/internal/ui/common"
+	ui "github.com/charmbracelet/crush/internal/ui/model"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/fang"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -86,11 +88,21 @@ crush -y
 
 		// Set up the TUI.
 		var env uv.Environ = os.Environ()
-		ui := tui.New(app)
-		ui.QueryVersion = shouldQueryTerminalVersion(env)
 
+		var model tea.Model
+		if v, _ := strconv.ParseBool(env.Getenv("CRUSH_NEW_UI")); v {
+			slog.Info("New UI in control!")
+			com := common.DefaultCommon(app)
+			ui := ui.New(com)
+			ui.QueryVersion = shouldQueryTerminalVersion(env)
+			model = ui
+		} else {
+			ui := tui.New(app)
+			ui.QueryVersion = shouldQueryTerminalVersion(env)
+			model = ui
+		}
 		program := tea.NewProgram(
-			ui,
+			model,
 			tea.WithEnvironment(env),
 			tea.WithContext(cmd.Context()),
 			tea.WithFilter(tui.MouseEventFilter)) // Filter mouse events based on focus state

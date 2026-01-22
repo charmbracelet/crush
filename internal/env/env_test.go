@@ -90,13 +90,15 @@ func TestMapEnv_Env(t *testing.T) {
 	t.Run("empty map", func(t *testing.T) {
 		env := NewFromMap(map[string]string{})
 		envVars := env.Env()
-		require.Nil(t, envVars)
+		require.NotNil(t, envVars)
+		require.Len(t, envVars, 0)
 	})
 
 	t.Run("nil map", func(t *testing.T) {
 		env := NewFromMap(nil)
 		envVars := env.Env()
-		require.Nil(t, envVars)
+		require.NotNil(t, envVars)
+		require.Len(t, envVars, 0)
 	})
 }
 

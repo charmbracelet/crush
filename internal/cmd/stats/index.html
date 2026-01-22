@@ -81,10 +81,10 @@
         /* Light mode colors - charmtone light palette */
         @media (prefers-color-scheme: light) {
             :root {
-                --bg: #FFFFFF;
-                --bg-secondary: #F8F9FA;
+                --bg: #F0F0F0;
+                --bg-secondary: #FBFBFB;
                 --text: #201F26;
-                --text-muted: #8B8E99;
+                --text-muted: #4D4C57;
                 --accent: #644CED;
                 --accent2: #0096FF;
                 --accent3: #00E0C3;
@@ -176,6 +176,14 @@
         }
         .stat-card .value.cost {
             color: var(--butter);
+        }
+        @media (prefers-color-scheme: light) {
+            .stat-card .value {
+                color: var(--pepper);
+            }
+            .stat-card .value.cost {
+                color: var(--pepper);
+            }
         }
         .charts-grid {
             display: flex;

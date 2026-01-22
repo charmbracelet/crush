@@ -15,7 +15,6 @@ import (
 // TestModelDialogOpens tests that the model dialog opens with ctrl+l.
 func TestModelDialogOpens(t *testing.T) {
 	SkipIfE2EDisabled(t)
-	SkipOnWindows(t)
 
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config", "crush")
@@ -69,7 +68,6 @@ func TestModelDialogOpens(t *testing.T) {
 // TestModelDialogClose tests that escape closes the model dialog.
 func TestModelDialogClose(t *testing.T) {
 	SkipIfE2EDisabled(t)
-	SkipOnWindows(t)
 
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config", "crush")
@@ -114,7 +112,6 @@ func TestModelDialogClose(t *testing.T) {
 // TestModelConfigLoads tests that model configuration loads successfully.
 func TestModelConfigLoads(t *testing.T) {
 	SkipIfE2EDisabled(t)
-	SkipOnWindows(t)
 
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config", "crush")

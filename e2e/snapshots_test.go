@@ -12,7 +12,6 @@ import (
 // TestSnapshotHelp tests help output snapshot.
 func TestSnapshotHelp(t *testing.T) {
 	SkipIfE2EDisabled(t)
-	SkipOnWindows(t)
 
 	// Use a tall terminal to capture all help output.
 	term := NewTestTerminal(t, []string{"--help"}, 100, 80)
@@ -31,7 +30,6 @@ func TestSnapshotHelp(t *testing.T) {
 // TestSnapshotVersion tests version output matches expected format.
 func TestSnapshotVersion(t *testing.T) {
 	SkipIfE2EDisabled(t)
-	SkipOnWindows(t)
 
 	term := NewTestTerminal(t, []string{"--version"}, 80, 20)
 	defer term.Close()
@@ -51,7 +49,6 @@ func TestSnapshotVersion(t *testing.T) {
 // TestSnapshotRunHelp tests run help snapshot.
 func TestSnapshotRunHelp(t *testing.T) {
 	SkipIfE2EDisabled(t)
-	SkipOnWindows(t)
 
 	term := NewTestTerminal(t, []string{"run", "--help"}, 100, 40)
 	defer term.Close()

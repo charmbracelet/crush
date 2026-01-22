@@ -16,7 +16,6 @@ const clipboardTestDelay = 2 * time.Second
 // This is a smoke test - actual clipboard content testing requires X11/Wayland.
 func TestClipboardCtrlVDoesNotCrash(t *testing.T) {
 	SkipIfE2EDisabled(t)
-	SkipOnWindows(t)
 
 	term := NewIsolatedTerminal(t, 100, 30)
 	defer term.Close()
@@ -45,7 +44,6 @@ func TestClipboardCtrlVDoesNotCrash(t *testing.T) {
 // TestClipboardCopyKeybinding tests that 'c' key for copy doesn't crash.
 func TestClipboardCopyKeybinding(t *testing.T) {
 	SkipIfE2EDisabled(t)
-	SkipOnWindows(t)
 
 	term := NewIsolatedTerminal(t, 100, 30)
 	defer term.Close()
@@ -69,7 +67,6 @@ func TestClipboardCopyKeybinding(t *testing.T) {
 // TestClipboardMultilineInput tests multi-line input with Ctrl+J (newline).
 func TestClipboardMultilineInput(t *testing.T) {
 	SkipIfE2EDisabled(t)
-	SkipOnWindows(t)
 
 	term := NewIsolatedTerminal(t, 100, 30)
 	defer term.Close()
@@ -96,7 +93,6 @@ func TestClipboardMultilineInput(t *testing.T) {
 // TestBracketedPasteInsertsText tests that bracketed paste inserts text into the editor.
 func TestBracketedPasteInsertsText(t *testing.T) {
 	SkipIfE2EDisabled(t)
-	SkipOnWindows(t)
 
 	term := NewIsolatedTerminal(t, 100, 30)
 	defer term.Close()
@@ -124,7 +120,6 @@ func TestBracketedPasteInsertsText(t *testing.T) {
 // creates a file attachment instead of inline text.
 func TestBracketedPasteMultilineCreatesAttachment(t *testing.T) {
 	SkipIfE2EDisabled(t)
-	SkipOnWindows(t)
 
 	term := NewIsolatedTerminal(t, 100, 30)
 	defer term.Close()
@@ -152,7 +147,6 @@ func TestBracketedPasteMultilineCreatesAttachment(t *testing.T) {
 // sends OSC 52 to write to clipboard without crashing.
 func TestCopyKeyBindingDoesNotCrashWithoutMessage(t *testing.T) {
 	SkipIfE2EDisabled(t)
-	SkipOnWindows(t)
 
 	term := NewIsolatedTerminal(t, 100, 30)
 	defer term.Close()
@@ -177,7 +171,6 @@ func TestCopyKeyBindingDoesNotCrashWithoutMessage(t *testing.T) {
 // TestPasteRawText tests that raw text paste works.
 func TestPasteRawText(t *testing.T) {
 	SkipIfE2EDisabled(t)
-	SkipOnWindows(t)
 
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config", "crush")

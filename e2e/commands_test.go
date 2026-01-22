@@ -10,7 +10,6 @@ import (
 // TestCommandsRunHelp tests run command help output.
 func TestCommandsRunHelp(t *testing.T) {
 	SkipIfE2EDisabled(t)
-	SkipOnWindows(t)
 
 	term := NewTestTerminal(t, []string{"run", "--help"}, 100, 40)
 	defer term.Close()
@@ -22,7 +21,6 @@ func TestCommandsRunHelp(t *testing.T) {
 // TestCommandsRunMissingPrompt tests run command without prompt.
 func TestCommandsRunMissingPrompt(t *testing.T) {
 	SkipIfE2EDisabled(t)
-	SkipOnWindows(t)
 
 	term := NewTestTerminal(t, []string{"run"}, 80, 24)
 	defer term.Close()
@@ -36,7 +34,6 @@ func TestCommandsRunMissingPrompt(t *testing.T) {
 func TestCommandsProjects(t *testing.T) {
 	SkipIfE2EDisabled(t)
 	t.Skip("Projects command may fail due to project database issues")
-	SkipOnWindows(t)
 
 	term := NewTestTerminal(t, []string{"projects"}, 120, 40)
 	defer term.Close()
@@ -50,7 +47,6 @@ func TestCommandsProjects(t *testing.T) {
 // TestCommandsSchema tests the schema command.
 func TestCommandsSchema(t *testing.T) {
 	SkipIfE2EDisabled(t)
-	SkipOnWindows(t)
 
 	term := NewTestTerminal(t, []string{"schema"}, 100, 40)
 	defer term.Close()

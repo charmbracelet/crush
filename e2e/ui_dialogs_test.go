@@ -15,7 +15,6 @@ import (
 // TestSessionsDialogOpens tests that the sessions dialog opens with ctrl+s.
 func TestSessionsDialogOpens(t *testing.T) {
 	SkipIfE2EDisabled(t)
-	SkipOnWindows(t)
 
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config", "crush")
@@ -52,7 +51,6 @@ func TestSessionsDialogOpens(t *testing.T) {
 // TestCommandsDialogOpens tests that the commands dialog opens with ctrl+p.
 func TestCommandsDialogOpens(t *testing.T) {
 	SkipIfE2EDisabled(t)
-	SkipOnWindows(t)
 
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config", "crush")
@@ -90,7 +88,6 @@ func TestCommandsDialogOpens(t *testing.T) {
 // TestModelsDialogOpens tests that the models dialog opens with ctrl+l.
 func TestModelsDialogOpens(t *testing.T) {
 	SkipIfE2EDisabled(t)
-	SkipOnWindows(t)
 
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config", "crush")
@@ -128,7 +125,6 @@ func TestModelsDialogOpens(t *testing.T) {
 // TestEscapeClosesDialog tests that escape closes any open dialog.
 func TestEscapeClosesDialog(t *testing.T) {
 	SkipIfE2EDisabled(t)
-	SkipOnWindows(t)
 
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config", "crush")
@@ -173,7 +169,6 @@ func TestEscapeClosesDialog(t *testing.T) {
 // TestTextInput tests that typing text appears in the input area.
 func TestTextInput(t *testing.T) {
 	SkipIfE2EDisabled(t)
-	SkipOnWindows(t)
 
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config", "crush")
@@ -211,7 +206,6 @@ func TestTextInput(t *testing.T) {
 // TestCtrlGOpensMoreMenu tests that ctrl+g opens the more menu.
 func TestCtrlGOpensMoreMenu(t *testing.T) {
 	SkipIfE2EDisabled(t)
-	SkipOnWindows(t)
 
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config", "crush")

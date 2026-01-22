@@ -26,14 +26,6 @@ func SkipIfE2EDisabled(t *testing.T) {
 	}
 }
 
-// SkipOnWindows skips the test on Windows.
-func SkipOnWindows(t *testing.T) {
-	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("Skipping test on Windows")
-	}
-}
-
 // CrushBinary returns the path to the crush binary.
 // Checks CRUSH_BINARY env var first, then falls back to ../crush.
 func CrushBinary() string {
@@ -44,11 +36,6 @@ func CrushBinary() string {
 	_, file, _, _ := runtime.Caller(0)
 	testDir := filepath.Dir(file)
 	return filepath.Join(testDir, "..", "crush")
-}
-
-// IsWindows returns true if running on Windows.
-func IsWindows() bool {
-	return runtime.GOOS == "windows"
 }
 
 // TestConfigJSON returns the config JSON for isolated test environments.

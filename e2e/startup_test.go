@@ -11,7 +11,6 @@ import (
 // TestStartupVersion tests the --version flag.
 func TestStartupVersion(t *testing.T) {
 	SkipIfE2EDisabled(t)
-	SkipOnWindows(t)
 
 	term := NewTestTerminal(t, []string{"--version"}, 80, 24)
 	defer term.Close()
@@ -23,7 +22,6 @@ func TestStartupVersion(t *testing.T) {
 // TestStartupHelp tests the --help flag.
 func TestStartupHelp(t *testing.T) {
 	SkipIfE2EDisabled(t)
-	SkipOnWindows(t)
 
 	// Use a tall terminal to capture all help output.
 	term := NewTestTerminal(t, []string{"--help"}, 100, 80)
@@ -38,7 +36,6 @@ func TestStartupHelp(t *testing.T) {
 // TestStartupRunHelp tests the run command help.
 func TestStartupRunHelp(t *testing.T) {
 	SkipIfE2EDisabled(t)
-	SkipOnWindows(t)
 
 	term := NewTestTerminal(t, []string{"run", "--help"}, 100, 40)
 	defer term.Close()
@@ -57,7 +54,6 @@ func TestStartupRunHelp(t *testing.T) {
 // TestStartupRunNoPrompt tests run command error without prompt.
 func TestStartupRunNoPrompt(t *testing.T) {
 	SkipIfE2EDisabled(t)
-	SkipOnWindows(t)
 
 	term := NewTestTerminal(t, []string{"run"}, 80, 24)
 	defer term.Close()
@@ -69,7 +65,6 @@ func TestStartupRunNoPrompt(t *testing.T) {
 // TestStartupDebugFlag tests the -d debug flag.
 func TestStartupDebugFlag(t *testing.T) {
 	SkipIfE2EDisabled(t)
-	SkipOnWindows(t)
 
 	term := NewTestTerminal(t, []string{"-d", "--help"}, 100, 80)
 	defer term.Close()
@@ -83,7 +78,6 @@ func TestStartupDebugFlag(t *testing.T) {
 // TestStartupYoloFlag tests the -y yolo flag.
 func TestStartupYoloFlag(t *testing.T) {
 	SkipIfE2EDisabled(t)
-	SkipOnWindows(t)
 
 	term := NewTestTerminal(t, []string{"-y", "--help"}, 100, 80)
 	defer term.Close()
@@ -97,7 +91,6 @@ func TestStartupYoloFlag(t *testing.T) {
 // TestStartupDirs tests the dirs command.
 func TestStartupDirs(t *testing.T) {
 	SkipIfE2EDisabled(t)
-	SkipOnWindows(t)
 
 	term := NewTestTerminal(t, []string{"dirs"}, 80, 24)
 	defer term.Close()

@@ -15,7 +15,6 @@ import (
 // TestNewSessionDialogOpens tests that the new session dialog opens with ctrl+n.
 func TestNewSessionDialogOpens(t *testing.T) {
 	SkipIfE2EDisabled(t)
-	SkipOnWindows(t)
 
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config", "crush")
@@ -59,7 +58,6 @@ func TestNewSessionDialogOpens(t *testing.T) {
 // TestNewSessionDialogClose tests that escape closes the new session dialog.
 func TestNewSessionDialogClose(t *testing.T) {
 	SkipIfE2EDisabled(t)
-	SkipOnWindows(t)
 
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config", "crush")
@@ -102,7 +100,6 @@ func TestNewSessionDialogClose(t *testing.T) {
 // TestNewSessionTextInput tests text input in new session dialog.
 func TestNewSessionTextInput(t *testing.T) {
 	SkipIfE2EDisabled(t)
-	SkipOnWindows(t)
 
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config", "crush")

@@ -341,17 +341,17 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			// TODO: implement
 		},
 		OnToolCall: func(tc fantasy.ToolCallContent) error {
-			var arg []any
+			args := []any{"name", tc.ToolName}
 			var v map[string]any
 			if err := json.Unmarshal([]byte(tc.Input), &v); err == nil {
-				for k, v := range v {
-					arg = append(arg, k, fmt.Sprintf("%v", v))
+				for k, val := range v {
+					args = append(args, k, fmt.Sprintf("%v", val))
 				}
 			}
-			if len(arg) == 0 {
-				arg = append(arg, "arg", tc.Input)
+			if len(args) == 0 {
+				args = append(args, "arg", tc.Input)
 			}
-			slog.Info("Using "+tc.ToolName+" tool", arg...)
+			slog.Info("Using tool", args...)
 			toolCall := message.ToolCall{
 				ID:               tc.ToolCallID,
 				Name:             tc.ToolName,

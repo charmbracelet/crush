@@ -651,3 +651,137 @@ func BenchmarkBuildSummaryPrompt(b *testing.B) {
 		})
 	}
 }
+
+func TestIsTruncationError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{
+			name:     "nil error",
+			err:      nil,
+			expected: false,
+		},
+		{
+			name:     "XML syntax error",
+			err:      fmt.Errorf("failed to parse: XML syntax error on line 1: element <tool_call> closed by </arg_value>"),
+			expected: true,
+		},
+		{
+			name:     "unexpected end of JSON",
+			err:      fmt.Errorf("unexpected end of JSON input"),
+			expected: true,
+		},
+		{
+			name:     "unexpected EOF",
+			err:      fmt.Errorf("unexpected EOF while reading response"),
+			expected: true,
+		},
+		{
+			name:     "regular error",
+			err:      fmt.Errorf("connection refused"),
+			expected: false,
+		},
+		{
+			name:     "wrapped XML error",
+			err:      fmt.Errorf("tool parsing failed: %w", fmt.Errorf("XML syntax error on line 5")),
+			expected: true,
+		},
+		{
+			name:     "rate limit error",
+			err:      fmt.Errorf("rate limit exceeded"),
+			expected: false,
+		},
+		{
+			name:     "failed to parse XML wrapper",
+			err:      fmt.Errorf("failed to parse XML: XML syntax error on line 1: element <tool_call> closed by </arg_value>"),
+			expected: true,
+		},
+		{
+			name:     "tool call parsing failed",
+			err:      fmt.Errorf("glm-4.6 tool call parsing failed: some error"),
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := isTruncationError(tt.err)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestHasIncompleteTodos(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		todos    []session.Todo
+		expected bool
+	}{
+		{
+			name:     "empty todos",
+			todos:    []session.Todo{},
+			expected: false,
+		},
+		{
+			name:     "nil todos",
+			todos:    nil,
+			expected: false,
+		},
+		{
+			name: "all completed",
+			todos: []session.Todo{
+				{Content: "Task 1", Status: session.TodoStatusCompleted},
+				{Content: "Task 2", Status: session.TodoStatusCompleted},
+			},
+			expected: false,
+		},
+		{
+			name: "one pending",
+			todos: []session.Todo{
+				{Content: "Task 1", Status: session.TodoStatusCompleted},
+				{Content: "Task 2", Status: session.TodoStatusPending},
+			},
+			expected: true,
+		},
+		{
+			name: "one in progress",
+			todos: []session.Todo{
+				{Content: "Task 1", Status: session.TodoStatusCompleted},
+				{Content: "Task 2", Status: session.TodoStatusInProgress},
+			},
+			expected: true,
+		},
+		{
+			name: "all pending",
+			todos: []session.Todo{
+				{Content: "Task 1", Status: session.TodoStatusPending},
+				{Content: "Task 2", Status: session.TodoStatusPending},
+			},
+			expected: true,
+		},
+		{
+			name: "mixed statuses",
+			todos: []session.Todo{
+				{Content: "Task 1", Status: session.TodoStatusCompleted},
+				{Content: "Task 2", Status: session.TodoStatusInProgress},
+				{Content: "Task 3", Status: session.TodoStatusPending},
+			},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := hasIncompleteTodos(tt.todos)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}

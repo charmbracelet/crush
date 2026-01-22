@@ -40,6 +40,9 @@ var statsCmd = &cobra.Command{
 	RunE:  runStats,
 }
 
+// Day names for day of week statistics.
+var dayNames = []string{"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"}
+
 // Stats holds all the statistics data.
 type Stats struct {
 	GeneratedAt       time.Time          `json:"generated_at"`
@@ -220,11 +223,10 @@ func gatherStats(ctx context.Context, conn *sql.DB) (*Stats, error) {
 	if err != nil {
 		return nil, fmt.Errorf("get usage by day of week: %w", err)
 	}
-	dayNames := []string{"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"}
 	for _, d := range dowUsage {
 		stats.UsageByDayOfWeek = append(stats.UsageByDayOfWeek, DayOfWeekUsage{
 			DayOfWeek:        int(d.DayOfWeek),
-			DayName:          dayNames[d.DayOfWeek],
+			DayName:          dayNames[int(d.DayOfWeek)],
 			SessionCount:     d.SessionCount,
 			PromptTokens:     nullFloat64ToInt64(d.PromptTokens),
 			CompletionTokens: nullFloat64ToInt64(d.CompletionTokens),

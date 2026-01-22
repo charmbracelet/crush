@@ -124,14 +124,8 @@
             font-weight: 700;
             color: var(--butter);
         }
-        .stat-card .value.cost {
-            color: var(--butter);
-        }
         @media (prefers-color-scheme: light) {
             .stat-card .value {
-                color: var(--pepper);
-            }
-            .stat-card .value.cost {
                 color: var(--pepper);
             }
         }
@@ -413,8 +407,8 @@
                         backgroundColor: ctx => {
                             const count = ctx.raw?.count || ctx.dataset.data[ctx.dataIndex]?.count || 0;
                             const ratio = count / maxCount;
-                            // Use charple for lower session counts, cherry for higher
-                            return ratio > 0.5 ? colors.cherry + '99' : colors.charple + '99';
+                            const color = ratio > 0.5 ? colors.cherry : colors.charple;
+                            return color + '99';
                         },
                         borderColor: ctx => {
                             const count = ctx.raw?.count || ctx.dataset.data[ctx.dataIndex]?.count || 0;
@@ -462,10 +456,8 @@
             const toolColors = [];
             const third = numItems / 3;
             for (let i = 0; i < numItems; i++) {
-                if (i < third) {
-                    toolColors.push(colors.charple);
-                } else if (i < third * 2) {
-                    toolColors.push(colors.urchin);
+                if (i < third * 2) {
+                    toolColors.push(i < third ? colors.charple : colors.urchin);
                 } else {
                     toolColors.push(colors.cherry);
                 }
@@ -543,12 +535,7 @@
         const tableBody = document.querySelector('#daily-table tbody');
         stats.usage_by_day?.slice(0, 30).forEach(d => {
             const row = document.createElement('tr');
-            row.innerHTML = '<td>' + d.day + '</td>' +
-                '<td>' + d.session_count + '</td>' +
-                '<td>' + formatNumber(d.prompt_tokens) + '</td>' +
-                '<td>' + formatNumber(d.completion_tokens) + '</td>' +
-                '<td>' + formatNumber(d.total_tokens) + '</td>' +
-                '<td>' + formatCost(d.cost) + '</td>';
+            row.innerHTML = `<td>${d.day}</td><td>${d.session_count}</td><td>${formatNumber(d.prompt_tokens)}</td><td>${formatNumber(d.completion_tokens)}</td><td>${formatNumber(d.total_tokens)}</td><td>${formatCost(d.cost)}</td>`;
             tableBody.appendChild(row);
         });
     </script>

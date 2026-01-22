@@ -60,7 +60,8 @@
             margin: 0 auto;
         }
         .header-wrapper {
-            margin-bottom: 2rem;
+            max-width: 1200px;
+            margin: 0 auto 2rem;
         }
         .header-wrapper svg {
             width: 100%;
@@ -93,7 +94,6 @@
             gap: 1rem;
             margin-bottom: 2rem;
             width: 100%;
-            padding: 0 2rem;
         }
         .stat-card {
             background: var(--bg-secondary);
@@ -124,6 +124,7 @@
             font-size: 2rem;
             font-weight: 700;
             color: var(--butter);
+            white-space: nowrap;
         }
         @media (prefers-color-scheme: light) {
             .stat-card .value {
@@ -136,7 +137,6 @@
             gap: 1.5rem;
             margin-bottom: 2rem;
             width: 100%;
-            padding: 0 2rem;
         }
         .chart-card {
             background: var(--bg-secondary);
@@ -200,7 +200,8 @@
             font-size: 0.875rem;
         }
         .footer-container {
-            margin-top: 2rem;
+            max-width: 1200px;
+            margin: 2rem auto 0;
             padding-top: 2rem;
         }
         .footer-container svg {
@@ -292,23 +293,26 @@
 
             <div class="chart-card full-width">
                 <h2>Daily Usage History</h2>
-                <table id="daily-table">
-                    <thead>
-                        <tr>
-                            <th>Date</th>
-                            <th>Sessions</th>
-                            <th>Prompt Tokens</th>
-                            <th>Completion Tokens</th>
-                            <th>Total Tokens</th>
-                            <th>Cost</th>
-                        </tr>
-                    </thead>
-                    <tbody></tbody>
-                </table>
+                <div style="overflow-x: auto;">
+                    <table id="daily-table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Sessions</th>
+                                <th>Prompt Tokens</th>
+                                <th>Completion Tokens</th>
+                                <th>Total Tokens</th>
+                                <th>Cost</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
             </div>
         </div>
+    </div>
 
-        <div class="footer-container">
+    <div class="footer-container">
             <div class="footer-dark">{{.FooterDark}}</div>
             <div class="footer-light">{{.FooterLight}}</div>
         </div>

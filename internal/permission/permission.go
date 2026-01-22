@@ -188,15 +188,6 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	}
 	s.sessionPermissionsMu.RUnlock()
 
-	s.sessionPermissionsMu.RLock()
-	for _, p := range s.sessionPermissions {
-		if p.ToolName == permission.ToolName && p.Action == permission.Action && p.SessionID == permission.SessionID && p.Path == permission.Path {
-			s.sessionPermissionsMu.RUnlock()
-			return true, nil
-		}
-	}
-	s.sessionPermissionsMu.RUnlock()
-
 	s.activeRequestMu.Lock()
 	s.activeRequest = &permission
 	s.activeRequestMu.Unlock()

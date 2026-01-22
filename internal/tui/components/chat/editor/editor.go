@@ -16,7 +16,6 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	nativeclipboard "github.com/aymanbagabas/go-nativeclipboard"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/fsext"
@@ -34,6 +33,14 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/editor"
 )
+
+var (
+	errClipboardPlatformUnsupported = fmt.Errorf("clipboard operations are not supported on this platform")
+	errClipboardUnknownFormat       = fmt.Errorf("unknown clipboard format")
+)
+
+// If pasted text has more than 10 newlines, treat it as a file attachment.
+const pasteLinesThreshold = 10
 
 type Editor interface {
 	util.Model
@@ -235,8 +242,7 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		m.textarea.SetValue(msg.Text)
 		m.textarea.MoveToEnd()
 	case tea.PasteMsg:
-		// If pasted text has more than 2 newlines, treat it as a file attachment.
-		if strings.Count(msg.Content, "\n") > 2 {
+		if strings.Count(msg.Content, "\n") > pasteLinesThreshold {
 			content := []byte(msg.Content)
 			if len(content) > maxAttachmentSize {
 				return m, util.ReportWarn("Paste is too big (>5mb)")
@@ -341,12 +347,12 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		}
 		// Handle image paste from clipboard
 		if key.Matches(msg, m.keyMap.PasteImage) {
-			imageData, err := nativeclipboard.Image.Read()
+			imageData, err := readClipboard(clipboardFormatImage)
 
 			if err != nil || len(imageData) == 0 {
 				// If no image data found, try to get text data (could be file path)
 				var textData []byte
-				textData, err = nativeclipboard.Text.Read()
+				textData, err = readClipboard(clipboardFormatText)
 				if err != nil || len(textData) == 0 {
 					// If clipboard is empty, show a warning
 					return m, util.ReportWarn("No data found in clipboard. Note: Some terminals may not support reading image data from clipboard directly.")

@@ -227,7 +227,7 @@ func (s *Shell) blockHandler() func(next interp.ExecHandlerFunc) interp.ExecHand
 
 			for _, blockFunc := range s.blockFuncs {
 				if blockFunc(args) {
-					return fmt.Errorf("command is not allowed for security reasons: %s", strings.Join(args, " "))
+					return fmt.Errorf("command is not allowed for security reasons: %q", args[0])
 				}
 			}
 

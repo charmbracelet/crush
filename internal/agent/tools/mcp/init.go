@@ -29,6 +29,8 @@ var (
 	sessions = csync.NewMap[string, *mcp.ClientSession]()
 	states   = csync.NewMap[string, ClientInfo]()
 	broker   = pubsub.NewBroker[Event]()
+	initOnce sync.Once
+	initDone = make(chan struct{})
 )
 
 // State represents the current state of an MCP client
@@ -197,6 +199,18 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 		}(name, m)
 	}
 	wg.Wait()
+	initOnce.Do(func() { close(initDone) })
+}
+
+// WaitForInit blocks until MCP initialization is complete.
+// If Initialize was never called, this returns immediately.
+func WaitForInit(ctx context.Context) error {
+	select {
+	case <-initDone:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func getOrRenewClient(ctx context.Context, name string) (*mcp.ClientSession, error) {

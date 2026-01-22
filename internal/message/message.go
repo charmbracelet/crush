@@ -63,7 +63,7 @@ func (s *service) Create(ctx context.Context, sessionID string, params CreateMes
 			Reason: "stop",
 		})
 	}
-	partsJSON, err := marshallParts(params.Parts)
+	partsJSON, err := marshalParts(params.Parts)
 	if err != nil {
 		return Message{}, err
 	}
@@ -110,7 +110,7 @@ func (s *service) DeleteSessionMessages(ctx context.Context, sessionID string) e
 }
 
 func (s *service) Update(ctx context.Context, message Message) error {
-	parts, err := marshallParts(message.Parts)
+	parts, err := marshalParts(message.Parts)
 	if err != nil {
 		return err
 	}
@@ -158,7 +158,7 @@ func (s *service) List(ctx context.Context, sessionID string) ([]Message, error)
 }
 
 func (s *service) fromDBItem(item db.Message) (Message, error) {
-	parts, err := unmarshallParts([]byte(item.Parts))
+	parts, err := unmarshalParts([]byte(item.Parts))
 	if err != nil {
 		return Message{}, err
 	}
@@ -192,7 +192,7 @@ type partWrapper struct {
 	Data ContentPart `json:"data"`
 }
 
-func marshallParts(parts []ContentPart) ([]byte, error) {
+func marshalParts(parts []ContentPart) ([]byte, error) {
 	wrappedParts := make([]partWrapper, len(parts))
 
 	for i, part := range parts {
@@ -225,7 +225,7 @@ func marshallParts(parts []ContentPart) ([]byte, error) {
 	return json.Marshal(wrappedParts)
 }
 
-func unmarshallParts(data []byte) ([]ContentPart, error) {
+func unmarshalParts(data []byte) ([]ContentPart, error) {
 	temp := []json.RawMessage{}
 
 	if err := json.Unmarshal(data, &temp); err != nil {

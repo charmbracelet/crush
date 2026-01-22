@@ -14,7 +14,9 @@ concurrency:
 
 jobs:
   snapshot:
-    runs-on: ubuntu-latest
+    runs-on:
+      # Use our own large runners with more CPU and RAM for faster builds
+      group: releasers
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:

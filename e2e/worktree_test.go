@@ -11,6 +11,7 @@ import (
 
 // TestNewSessionDialogOpens tests that the new session dialog opens with ctrl+n.
 func TestNewSessionDialogOpens(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	trifle.SkipOnWindows(t)
 
 	script := fmt.Sprintf(`
@@ -60,6 +61,7 @@ exec "%s"
 
 // TestNewSessionDialogClose tests that escape closes the new session dialog.
 func TestNewSessionDialogClose(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	trifle.SkipOnWindows(t)
 
 	script := fmt.Sprintf(`
@@ -106,6 +108,7 @@ exec "%s"
 
 // TestNewSessionTextInput tests text input in new session dialog.
 func TestNewSessionTextInput(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	trifle.SkipOnWindows(t)
 
 	script := fmt.Sprintf(`

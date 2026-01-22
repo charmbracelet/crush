@@ -11,6 +11,7 @@ import (
 
 // TestModelDialogOpens tests that the model dialog opens with ctrl+l.
 func TestModelDialogOpens(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	trifle.SkipOnWindows(t)
 
 	script := fmt.Sprintf(`
@@ -67,6 +68,7 @@ exec "%s"
 
 // TestModelDialogClose tests that escape closes the model dialog.
 func TestModelDialogClose(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	trifle.SkipOnWindows(t)
 
 	script := fmt.Sprintf(`
@@ -115,6 +117,7 @@ exec "%s"
 
 // TestModelConfigLoads tests that model configuration loads successfully.
 func TestModelConfigLoads(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	trifle.SkipOnWindows(t)
 
 	script := fmt.Sprintf(`

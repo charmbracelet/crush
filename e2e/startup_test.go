@@ -9,6 +9,7 @@ import (
 
 // TestStartupVersion tests the --version flag.
 func TestStartupVersion(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	trifle.SkipOnWindows(t)
 
 	term, err := trifle.NewTerminal(CrushBinary(), []string{"--version"}, trifle.TerminalOptions{
@@ -29,6 +30,7 @@ func TestStartupVersion(t *testing.T) {
 
 // TestStartupHelp tests the --help flag.
 func TestStartupHelp(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	trifle.SkipOnWindows(t)
 
 	term, err := trifle.NewTerminal(CrushBinary(), []string{"--help"}, trifle.TerminalOptions{
@@ -48,6 +50,7 @@ func TestStartupHelp(t *testing.T) {
 
 // TestStartupRunHelp tests the run command help.
 func TestStartupRunHelp(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	trifle.SkipOnWindows(t)
 
 	term, err := trifle.NewTerminal(CrushBinary(), []string{"run", "--help"}, trifle.TerminalOptions{
@@ -76,6 +79,7 @@ func TestStartupRunHelp(t *testing.T) {
 
 // TestStartupRunNoPrompt tests run command error without prompt.
 func TestStartupRunNoPrompt(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	trifle.SkipOnWindows(t)
 
 	term, err := trifle.NewTerminal(CrushBinary(), []string{"run"}, trifle.TerminalOptions{
@@ -95,6 +99,7 @@ func TestStartupRunNoPrompt(t *testing.T) {
 
 // TestStartupDebugFlag tests the -d debug flag.
 func TestStartupDebugFlag(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	trifle.SkipOnWindows(t)
 
 	term, err := trifle.NewTerminal(CrushBinary(), []string{"-d", "--help"}, trifle.TerminalOptions{
@@ -114,6 +119,7 @@ func TestStartupDebugFlag(t *testing.T) {
 
 // TestStartupYoloFlag tests the -y yolo flag.
 func TestStartupYoloFlag(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	trifle.SkipOnWindows(t)
 
 	term, err := trifle.NewTerminal(CrushBinary(), []string{"-y", "--help"}, trifle.TerminalOptions{
@@ -133,6 +139,7 @@ func TestStartupYoloFlag(t *testing.T) {
 
 // TestStartupDirs tests the dirs command.
 func TestStartupDirs(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	trifle.SkipOnWindows(t)
 
 	term, err := trifle.NewTerminal(CrushBinary(), []string{"dirs"}, trifle.TerminalOptions{

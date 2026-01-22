@@ -11,6 +11,7 @@ import (
 
 // TestSessionsDialogOpens tests that the sessions dialog opens with ctrl+s.
 func TestSessionsDialogOpens(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	trifle.SkipOnWindows(t)
 
 	script := fmt.Sprintf(`
@@ -53,6 +54,7 @@ exec "%s"
 
 // TestCommandsDialogOpens tests that the commands dialog opens with ctrl+p.
 func TestCommandsDialogOpens(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	trifle.SkipOnWindows(t)
 
 	script := fmt.Sprintf(`
@@ -94,6 +96,7 @@ exec "%s"
 
 // TestModelsDialogOpens tests that the models dialog opens with ctrl+l.
 func TestModelsDialogOpens(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	trifle.SkipOnWindows(t)
 
 	script := fmt.Sprintf(`
@@ -135,6 +138,7 @@ exec "%s"
 
 // TestEscapeClosesDialog tests that escape closes any open dialog.
 func TestEscapeClosesDialog(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	trifle.SkipOnWindows(t)
 
 	script := fmt.Sprintf(`
@@ -183,6 +187,7 @@ exec "%s"
 
 // TestTextInput tests that typing text appears in the input area.
 func TestTextInput(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	trifle.SkipOnWindows(t)
 
 	script := fmt.Sprintf(`
@@ -226,6 +231,7 @@ exec "%s"
 
 // TestCtrlGOpensMoreMenu tests that ctrl+g opens the more menu.
 func TestCtrlGOpensMoreMenu(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	trifle.SkipOnWindows(t)
 
 	script := fmt.Sprintf(`

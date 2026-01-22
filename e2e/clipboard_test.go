@@ -16,6 +16,7 @@ const clipboardTestDelay = 2 * time.Second
 // TestClipboardCtrlVDoesNotCrash tests that Ctrl+V doesn't crash the app.
 // This is a smoke test - actual clipboard content testing requires X11/Wayland.
 func TestClipboardCtrlVDoesNotCrash(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	trifle.SkipOnWindows(t)
 
 	// Create temp dir for isolated test.
@@ -73,6 +74,7 @@ func TestClipboardCtrlVDoesNotCrash(t *testing.T) {
 
 // TestClipboardCopyKeybinding tests that 'c' key for copy doesn't crash.
 func TestClipboardCopyKeybinding(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	trifle.SkipOnWindows(t)
 
 	// Create temp dir for isolated test.
@@ -121,6 +123,7 @@ func TestClipboardCopyKeybinding(t *testing.T) {
 
 // TestClipboardMultilineInput tests multi-line input with Ctrl+J (newline).
 func TestClipboardMultilineInput(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	trifle.SkipOnWindows(t)
 
 	// Create temp dir for isolated test.
@@ -180,6 +183,7 @@ func TestClipboardMultilineInput(t *testing.T) {
 
 // TestBracketedPasteInsertsText tests that bracketed paste inserts text into the editor.
 func TestBracketedPasteInsertsText(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	trifle.SkipOnWindows(t)
 
 	tmpDir := t.TempDir()
@@ -223,6 +227,7 @@ func TestBracketedPasteInsertsText(t *testing.T) {
 // TestBracketedPasteMultilineCreatesAttachment tests that pasting 3+ lines
 // creates a file attachment instead of inline text.
 func TestBracketedPasteMultilineCreatesAttachment(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	trifle.SkipOnWindows(t)
 
 	tmpDir := t.TempDir()
@@ -265,6 +270,7 @@ func TestBracketedPasteMultilineCreatesAttachment(t *testing.T) {
 // TestCopyKeyBindingDoesNotCrashWithoutMessage tests that pressing 'c' on a message
 // sends OSC 52 to write to clipboard without crashing.
 func TestCopyKeyBindingDoesNotCrashWithoutMessage(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	trifle.SkipOnWindows(t)
 
 	tmpDir := t.TempDir()
@@ -308,6 +314,7 @@ func TestCopyKeyBindingDoesNotCrashWithoutMessage(t *testing.T) {
 
 // TestPasteRawText tests that raw text paste (without brackets) works.
 func TestPasteRawText(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	trifle.SkipOnWindows(t)
 
 	tmpDir := t.TempDir()

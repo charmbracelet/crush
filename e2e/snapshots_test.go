@@ -11,6 +11,7 @@ import (
 
 // TestSnapshotHelp tests help output snapshot.
 func TestSnapshotHelp(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	trifle.SkipOnWindows(t)
 
 	term, err := trifle.NewTerminal(CrushBinary(), []string{"--help"}, trifle.TerminalOptions{
@@ -33,6 +34,7 @@ func TestSnapshotHelp(t *testing.T) {
 
 // TestSnapshotVersion tests version output matches expected format.
 func TestSnapshotVersion(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	trifle.SkipOnWindows(t)
 
 	term, err := trifle.NewTerminal(CrushBinary(), []string{"--version"}, trifle.TerminalOptions{
@@ -60,6 +62,7 @@ func TestSnapshotVersion(t *testing.T) {
 
 // TestSnapshotRunHelp tests run help snapshot.
 func TestSnapshotRunHelp(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	trifle.SkipOnWindows(t)
 
 	term, err := trifle.NewTerminal(CrushBinary(), []string{"run", "--help"}, trifle.TerminalOptions{

@@ -9,6 +9,7 @@ import (
 
 // TestCommandsRunHelp tests run command help output.
 func TestCommandsRunHelp(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	trifle.SkipOnWindows(t)
 
 	term, err := trifle.NewTerminal(CrushBinary(), []string{"run", "--help"}, trifle.TerminalOptions{
@@ -28,6 +29,7 @@ func TestCommandsRunHelp(t *testing.T) {
 
 // TestCommandsRunMissingPrompt tests run command without prompt.
 func TestCommandsRunMissingPrompt(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	trifle.SkipOnWindows(t)
 
 	term, err := trifle.NewTerminal(CrushBinary(), []string{"run"}, trifle.TerminalOptions{
@@ -48,6 +50,7 @@ func TestCommandsRunMissingPrompt(t *testing.T) {
 // TestCommandsProjects tests the projects command.
 // Note: This test may fail if the projects database has invalid JSON.
 func TestCommandsProjects(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	t.Skip("Projects command may fail due to project database issues")
 	trifle.SkipOnWindows(t)
 
@@ -75,6 +78,7 @@ func TestCommandsProjects(t *testing.T) {
 
 // TestCommandsSchema tests the schema command.
 func TestCommandsSchema(t *testing.T) {
+	SkipIfE2EDisabled(t)
 	trifle.SkipOnWindows(t)
 
 	term, err := trifle.NewTerminal(CrushBinary(), []string{"schema"}, trifle.TerminalOptions{

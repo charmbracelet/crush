@@ -25,3 +25,17 @@ jobs:
       - run: git diff --exit-code
       - run: go build -race ./...
       - run: go test -race -failfast ./...
+        env:
+          E2E_SKIP: "1"
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
+        with:
+          go-version-file: go.mod
+      - run: go build -o crush .
+      - run: go test -v -timeout 300s ./e2e/...

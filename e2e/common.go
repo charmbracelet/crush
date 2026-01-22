@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"testing"
 	"time"
 )
 
@@ -12,6 +13,14 @@ const (
 	startupDelay     = 3 * time.Second
 	dialogTransition = 500 * time.Millisecond
 )
+
+// SkipIfE2EDisabled skips the test if E2E_SKIP is set.
+func SkipIfE2EDisabled(t *testing.T) {
+	t.Helper()
+	if os.Getenv("E2E_SKIP") != "" {
+		t.Skip("E2E tests disabled via E2E_SKIP env var")
+	}
+}
 
 // CrushBinary returns the path to the crush binary.
 // Checks CRUSH_BINARY env var first, then falls back to ../crush.

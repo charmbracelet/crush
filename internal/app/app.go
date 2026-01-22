@@ -132,7 +132,7 @@ func (app *App) Config() *config.Config {
 
 // RunNonInteractive runs the application in non-interactive mode with the
 // given prompt, printing to stdout.
-func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt, largeModel, smallModel string, quiet bool) error {
+func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt, largeModel, smallModel string, hideSpinner bool) error {
 	slog.Info("Running in non-interactive mode")
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -157,7 +157,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	stderrTTY = term.IsTerminal(os.Stderr.Fd())
 	stdinTTY = term.IsTerminal(os.Stdin.Fd())
 
-	if !quiet && stderrTTY {
+	if !hideSpinner && stderrTTY {
 		t := styles.CurrentTheme()
 
 		// Detect background color to set the appropriate color for the
@@ -182,7 +182,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 
 	// Helper function to stop spinner once.
 	stopSpinner := func() {
-		if !quiet && spinner != nil {
+		if !hideSpinner && spinner != nil {
 			spinner.Stop()
 			spinner = nil
 		}
@@ -250,6 +250,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 		_, _ = fmt.Fprintln(output)
 	}()
 
+	var printed bool
 	for {
 		if stderrTTY {
 			// HACK: Reinitialize the terminal progress bar on every iteration
@@ -262,7 +263,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 			stopSpinner()
 			if result.err != nil {
 				if errors.Is(result.err, context.Canceled) || errors.Is(result.err, agent.ErrRequestCancelled) {
-					slog.Info("Non-interactive: agent processing cancelled", "session_id", sess.ID)
+					slog.Debug("Non-interactive: agent processing cancelled", "session_id", sess.ID)
 					return nil
 				}
 				return fmt.Errorf("agent processing failed: %w", result.err)
@@ -288,7 +289,11 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 				if readBytes == 0 {
 					part = strings.TrimLeft(part, " \t")
 				}
-				fmt.Fprint(output, part)
+				// ignores initial whitespace only messages
+				if printed || strings.TrimSpace(part) != "" {
+					printed = true
+					fmt.Fprint(output, part)
+				}
 				messageReadBytes[msg.ID] = len(content)
 			}
 
@@ -426,20 +431,20 @@ func setupSubscriber[T any](
 			select {
 			case event, ok := <-subCh:
 				if !ok {
-					slog.Debug("subscription channel closed", "name", name)
+					slog.Debug("Subscription channel closed", "name", name)
 					return
 				}
 				var msg tea.Msg = event
 				select {
 				case outputCh <- msg:
 				case <-time.After(2 * time.Second):
-					slog.Warn("message dropped due to slow consumer", "name", name)
+					slog.Debug("Message dropped due to slow consumer", "name", name)
 				case <-ctx.Done():
-					slog.Debug("subscription cancelled", "name", name)
+					slog.Debug("Subscription cancelled", "name", name)
 					return
 				}
 			case <-ctx.Done():
-				slog.Debug("subscription cancelled", "name", name)
+				slog.Debug("Subscription cancelled", "name", name)
 				return
 			}
 		}
@@ -503,7 +508,7 @@ func (app *App) Subscribe(program *tea.Program) {
 // Shutdown performs a graceful shutdown of the application.
 func (app *App) Shutdown() {
 	start := time.Now()
-	defer func() { slog.Info("Shutdown took " + time.Since(start).String()) }()
+	defer func() { slog.Debug("Shutdown took " + time.Since(start).String()) }()
 
 	// First, cancel all agents and wait for them to finish. This must complete
 	// before closing the DB so agents can finish writing their state.

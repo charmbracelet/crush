@@ -838,7 +838,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 
 	title = strings.TrimSpace(title)
 	if title == "" {
-		slog.Warn("Empty title; using fallback")
+		slog.Debug("Empty title; using fallback")
 		title = defaultSessionName
 	}
 

@@ -23,7 +23,6 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
@@ -1618,7 +1617,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 				m.chat.SelectLast()
 			default:
-				handleGlobalKeys(msg)
+				if ok, cmd := m.chat.HandleKeyMsg(msg); ok {
+					cmds = append(cmds, cmd)
+				} else {
+					handleGlobalKeys(msg)
+				}
 			}
 		default:
 			handleGlobalKeys(msg)
@@ -2916,18 +2919,14 @@ func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string
 }
 
 func (m *UI) copyChatHighlight() tea.Cmd {
-	text := m.chat.HighlightContent()
-	return tea.Sequence(
-		tea.SetClipboard(text),
-		func() tea.Msg {
-			_ = clipboard.WriteAll(text)
-			return nil
-		},
+	text := m.chat.HighlighContent()
+	return common.CopyToClipboardWithCallback(
+		text,
+		"Selected text copied to clipboard",
 		func() tea.Msg {
 			m.chat.ClearMouse()
 			return nil
 		},
-		uiutil.ReportInfo("Selected text copied to clipboard"),
 	)
 }
 

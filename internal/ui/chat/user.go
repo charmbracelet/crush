@@ -3,6 +3,7 @@ package chat
 import (
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
@@ -91,4 +92,13 @@ func (m *UserMessageItem) renderAttachments(width int) string {
 		})
 	}
 	return m.attachments.Render(attachments, false, width)
+}
+
+// HandleKeyEvent implements KeyEventHandler.
+func (m *UserMessageItem) HandleKeyEvent(key tea.KeyMsg) (bool, tea.Cmd) {
+	if key.String() == "c" {
+		text := m.message.Content().Text
+		return true, common.CopyToClipboard(text, "Message copied to clipboard")
+	}
+	return false, nil
 }

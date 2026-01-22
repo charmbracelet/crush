@@ -413,6 +413,24 @@ func (t *baseToolMessageItem) HandleMouseClick(btn ansi.MouseButton, x, y int) b
 	return true
 }
 
+// HandleKeyEvent implements KeyEventHandler.
+func (t *baseToolMessageItem) HandleKeyEvent(key tea.KeyMsg) (bool, tea.Cmd) {
+	if key.String() == "c" {
+		// Copy the tool result content if available, otherwise copy the tool call input
+		var text string
+		if t.result != nil && t.result.Content != "" {
+			text = t.result.Content
+		} else if t.toolCall.Input != "" {
+			text = t.toolCall.Input
+		} else {
+			return false, nil
+		}
+
+		return true, common.CopyToClipboard(text, "Tool content copied to clipboard")
+	}
+	return false, nil
+}
+
 // pendingTool renders a tool that is still in progress with an animation.
 func pendingTool(sty *styles.Styles, name string, anim *anim.Anim) string {
 	icon := sty.Tool.IconPending.Render()

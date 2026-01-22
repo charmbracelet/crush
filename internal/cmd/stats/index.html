@@ -500,10 +500,17 @@
 
         // Tool Usage Chart
         if (stats.tool_usage && stats.tool_usage.length > 0) {
-            const toolColors = [colors.charple, colors.urchin, colors.cherry];
-            // Create a repeating pattern if we need more colors
-            while (toolColors.length < Math.min(stats.tool_usage.length, 15)) {
-                toolColors.push(colors.charple, colors.urchin, colors.cherry);
+            const numItems = Math.min(stats.tool_usage.length, 15);
+            const toolColors = [];
+            const third = numItems / 3;
+            for (let i = 0; i < numItems; i++) {
+                if (i < third) {
+                    toolColors.push(colors.charple);
+                } else if (i < third * 2) {
+                    toolColors.push(colors.urchin);
+                } else {
+                    toolColors.push(colors.cherry);
+                }
             }
             new Chart(document.getElementById('toolChart'), {
                 type: 'bar',

@@ -698,6 +698,7 @@ func allToolNames() []string {
 		"lsp_references",
 		"fetch",
 		"agentic_fetch",
+		"memory_search",
 		"glob",
 		"grep",
 		"ls",

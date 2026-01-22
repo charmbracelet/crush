@@ -309,6 +309,11 @@ func (m *toolCallCmp) formatParametersForCopy() string {
 			}
 			return strings.Join(parts, "\n")
 		}
+	case tools.MemorySearchToolName:
+		var params tools.MemorySearchParams
+		if json.Unmarshal([]byte(m.call.Input), &params) == nil {
+			return fmt.Sprintf("**Query:** %s", params.Query)
+		}
 	case tools.WebFetchToolName:
 		var params tools.WebFetchParams
 		if json.Unmarshal([]byte(m.call.Input), &params) == nil {
@@ -421,6 +426,8 @@ func (m *toolCallCmp) formatResultForCopy() string {
 		return m.formatFetchResultForCopy()
 	case tools.AgenticFetchToolName:
 		return m.formatAgenticFetchResultForCopy()
+	case tools.MemorySearchToolName:
+		return m.formatMemorySearchResultForCopy()
 	case tools.WebFetchToolName:
 		return m.formatWebFetchResultForCopy()
 	case agent.AgentToolName:
@@ -663,6 +670,21 @@ func (m *toolCallCmp) formatAgenticFetchResultForCopy() string {
 		result.WriteString(fmt.Sprintf("Prompt: %s\n\n", params.Prompt))
 	}
 
+	result.WriteString("```markdown\n")
+	result.WriteString(m.result.Content)
+	result.WriteString("\n```")
+
+	return result.String()
+}
+
+func (m *toolCallCmp) formatMemorySearchResultForCopy() string {
+	var params tools.MemorySearchParams
+	if json.Unmarshal([]byte(m.call.Input), &params) != nil {
+		return m.result.Content
+	}
+
+	var result strings.Builder
+	result.WriteString(fmt.Sprintf("Query: %s\n\n", params.Query))
 	result.WriteString("```markdown\n")
 	result.WriteString(m.result.Content)
 	result.WriteString("\n```")

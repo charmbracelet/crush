@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Crush Usage Statistics</title>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
@@ -360,8 +361,7 @@
         Chart.defaults.color = colors.squid;
         Chart.defaults.borderColor = colors.squid;
 
-        // Recent Activity Chart
-        if (stats.recent_activity && stats.recent_activity.length > 0) {
+        if (stats.recent_activity?.length > 0) {
             new Chart(document.getElementById('recentActivityChart'), {
                 type: 'bar',
                 data: {
@@ -395,7 +395,7 @@
         // Heatmap (Hour × Day of Week) - Bubble Chart
         const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-        if (stats.hour_day_heatmap && stats.hour_day_heatmap.length > 0) {
+        if (stats.hour_day_heatmap?.length > 0) {
             let maxCount = Math.max(...stats.hour_day_heatmap.map(h => h.session_count));
             if (maxCount === 0) maxCount = 1;
             const scaleFactor = 20 / Math.sqrt(maxCount);
@@ -457,18 +457,11 @@
             });
         }
 
-        // Tool Usage Chart
-        if (stats.tool_usage && stats.tool_usage.length > 0) {
-            const numItems = stats.tool_usage.length;
-            const toolColors = [];
-            const third = numItems / 3;
-            for (let i = 0; i < numItems; i++) {
-                if (i < third * 2) {
-                    toolColors.push(i < third ? colors.charple : colors.urchin);
-                } else {
-                    toolColors.push(colors.cherry);
-                }
-            }
+        if (stats.tool_usage?.length > 0) {
+            const third = Math.floor(stats.tool_usage.length / 3);
+            const toolColors = stats.tool_usage.map((_, i) =>
+                i < third ? colors.charple : i < third * 2 ? colors.urchin : colors.cherry
+            );
             new Chart(document.getElementById('toolChart'), {
                 type: 'bar',
                 data: {
@@ -509,19 +502,20 @@
         });
 
         // Model Usage Chart (horizontal bar)
-        if (stats.usage_by_model && stats.usage_by_model.length > 0) {
-            const modelChart = new Chart(document.getElementById('modelChart'), {
+        if (stats.usage_by_model?.length > 0) {
+            new Chart(document.getElementById('modelChart'), {
                 type: 'bar',
                 data: {
-                    labels: stats.usage_by_model.map(m => m.model + ' (' + m.provider + ')'),
+                    labels: stats.usage_by_model.map(m => `${m.model} (${m.provider})`),
                     datasets: [{
                         label: 'Messages',
                         data: stats.usage_by_model.map(m => m.message_count),
-                        backgroundColor: function(context) {
-                            const chart = context.chart;
-                            const { ctx, chartArea } = chart;
-                            if (!chartArea) return colors.charple;
-                            const gradient = ctx.createLinearGradient(chartArea.left, 0, chartArea.right, 0);
+                        backgroundColor: ctx => {
+                            const bar = ctx.raw;
+                            const chart = ctx.chart;
+                            const { ctx: chartCtx, chartArea: rect } = chart;
+                            if (!rect || !bar) return colors.charple;
+                            const gradient = chartCtx.createLinearGradient(rect.left, 0, rect.right, 0);
                             gradient.addColorStop(0, colors.charple);
                             gradient.addColorStop(1, colors.cherry);
                             return gradient;
@@ -538,12 +532,11 @@
             });
         }
 
-        // Provider Pie Chart
-        if (stats.usage_by_model && stats.usage_by_model.length > 0) {
-            const providerData = {};
-            stats.usage_by_model.forEach(m => {
-                providerData[m.provider] = (providerData[m.provider] || 0) + m.message_count;
-            });
+        if (stats.usage_by_model?.length > 0) {
+            const providerData = stats.usage_by_model.reduce((acc, m) => {
+                acc[m.provider] = (acc[m.provider] || 0) + m.message_count;
+                return acc;
+            }, {});
             const providerColors = [colors.charple, colors.julep, colors.urchin, colors.cherry];
             new Chart(document.getElementById('providerPieChart'), {
                 type: 'doughnut',
@@ -566,11 +559,15 @@
 
         // Daily Usage Table
         const tableBody = document.querySelector('#daily-table tbody');
-        stats.usage_by_day?.slice(0, 30).forEach(d => {
-            const row = document.createElement('tr');
-            row.innerHTML = `<td>${d.day}</td><td>${d.session_count}</td><td>${formatNumber(d.prompt_tokens)}</td><td>${formatNumber(d.completion_tokens)}</td><td>${formatNumber(d.total_tokens)}</td><td>${formatCost(d.cost)}</td>`;
-            tableBody.appendChild(row);
-        });
+        if (stats.usage_by_day?.length > 0) {
+            const fragment = document.createDocumentFragment();
+            stats.usage_by_day.slice(0, 30).forEach(d => {
+                const row = document.createElement('tr');
+                row.innerHTML = `<td>${d.day}</td><td>${d.session_count}</td><td>${formatNumber(d.prompt_tokens)}</td><td>${formatNumber(d.completion_tokens)}</td><td>${formatNumber(d.total_tokens)}</td><td>${formatCost(d.cost)}</td>`;
+                fragment.appendChild(row);
+            });
+            tableBody.appendChild(fragment);
+        }
     </script>
 </body>
 </html>

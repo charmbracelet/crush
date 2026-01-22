@@ -14,6 +14,7 @@ require (
 	github.com/MakeNowJust/heredoc v1.0.0
 	github.com/PuerkitoBio/goquery v1.11.0
 	github.com/alecthomas/chroma/v2 v2.23.0
+	github.com/aleksclark/trifle v0.0.0-20260122171317-82c0a935ab92
 	github.com/atotto/clipboard v0.1.4
 	github.com/aymanbagabas/go-nativeclipboard v0.1.2
 	github.com/aymanbagabas/go-udiff v0.3.1
@@ -109,6 +110,7 @@ require (
 	github.com/clipperhouse/displaywidth v0.7.0 // indirect
 	github.com/clipperhouse/stringish v0.1.1 // indirect
 	github.com/clipperhouse/uax29/v2 v2.3.0 // indirect
+	github.com/creack/pty v1.1.24 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/disintegration/gift v1.1.2 // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect

@@ -735,8 +735,8 @@ Or by setting the following in your config:
 }
 ```
 
-Crush also respects the [`DO_NOT_TRACK`](https://consoledonottrack.com)
-convention which can be enabled via `export DO_NOT_TRACK=1`.
+Crush also respects the `DO_NOT_TRACK` convention which can be enabled via
+`export DO_NOT_TRACK=1`.
 
 ## Contributing
 

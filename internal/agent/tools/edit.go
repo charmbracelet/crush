@@ -216,12 +216,10 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 	oldContent, isCrlf := fsext.ToUnixLineEndings(string(content))
 
 	var newContent string
-	var deletionCount int
 
 	if replaceAll {
 		newContent = strings.ReplaceAll(oldContent, oldString, "")
-		deletionCount = strings.Count(oldContent, oldString)
-		if deletionCount == 0 {
+		if newContent == oldContent {
 			return oldStringNotFoundErr, nil
 		}
 	} else {
@@ -236,13 +234,12 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 		}
 
 		newContent = oldContent[:index] + oldContent[index+len(oldString):]
-		deletionCount = 1
 	}
 
 	sessionID := GetSessionFromContext(edit.ctx)
 
 	if sessionID == "" {
-		return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for creating a new file")
+		return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for deleting content")
 	}
 
 	_, additions, removals := diff.GenerateDiff(
@@ -299,7 +296,7 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 		}
 	}
 	// Store the new version
-	_, err = edit.files.CreateVersion(edit.ctx, sessionID, filePath, "")
+	_, err = edit.files.CreateVersion(edit.ctx, sessionID, filePath, newContent)
 	if err != nil {
 		slog.Error("Error creating file history version", "error", err)
 	}
@@ -352,14 +349,9 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 	oldContent, isCrlf := fsext.ToUnixLineEndings(string(content))
 
 	var newContent string
-	var replacementCount int
 
 	if replaceAll {
 		newContent = strings.ReplaceAll(oldContent, oldString, newString)
-		replacementCount = strings.Count(oldContent, oldString)
-		if replacementCount == 0 {
-			return oldStringNotFoundErr, nil
-		}
 	} else {
 		index := strings.Index(oldContent, oldString)
 		if index == -1 {
@@ -372,7 +364,6 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 		}
 
 		newContent = oldContent[:index] + newString + oldContent[index+len(oldString):]
-		replacementCount = 1
 	}
 
 	if oldContent == newContent {

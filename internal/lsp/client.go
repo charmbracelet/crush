@@ -345,7 +345,7 @@ func (c *Client) CloseAllFiles(ctx context.Context) {
 			slog.Debug("Closing file", "file", uri)
 		}
 		if err := c.client.NotifyDidCloseTextDocument(ctx, uri); err != nil {
-			slog.Warn("Error closing rile", "uri", uri, "error", err)
+			slog.Warn("Error closing file", "uri", uri, "error", err)
 			continue
 		}
 		c.openFiles.Del(uri)

@@ -53,6 +53,11 @@ var defaultContextPaths = []string{
 
 type SelectedModelType string
 
+// String returns the string representation of the [SelectedModelType].
+func (s SelectedModelType) String() string {
+	return string(s)
+}
+
 const (
 	SelectedModelTypeLarge SelectedModelType = "large"
 	SelectedModelTypeSmall SelectedModelType = "small"

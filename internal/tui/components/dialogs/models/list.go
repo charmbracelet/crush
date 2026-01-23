@@ -58,20 +58,27 @@ func (m *ModelListComponent) Init() tea.Cmd {
 	var cmds []tea.Cmd
 	if len(m.providers) == 0 {
 		cfg := config.Get()
-		providers, err := config.Providers(cfg)
-		filteredProviders := []catwalk.Provider{}
-		for _, p := range providers {
-			hasAPIKeyEnv := strings.HasPrefix(p.APIKey, "$")
-			isHyper := p.ID == "hyper"
-			isCopilot := p.ID == catwalk.InferenceProviderCopilot
-			if (hasAPIKeyEnv && p.ID != catwalk.InferenceProviderAzure) || isHyper || isCopilot {
-				filteredProviders = append(filteredProviders, p)
-			}
-		}
 
-		m.providers = filteredProviders
-		if err != nil {
-			cmds = append(cmds, util.ReportError(err))
+		if cfg.Options.DisableDefaultProviders {
+			for _, providerConfig := range cfg.EnabledProviders() {
+				m.providers = append(m.providers, providerConfig.ToProvider())
+			}
+		} else {
+			providers, err := config.Providers(cfg)
+			filteredProviders := []catwalk.Provider{}
+			for _, p := range providers {
+				hasAPIKeyEnv := strings.HasPrefix(p.APIKey, "$")
+				isHyper := p.ID == "hyper"
+				isCopilot := p.ID == catwalk.InferenceProviderCopilot
+				if (hasAPIKeyEnv && p.ID != catwalk.InferenceProviderAzure) || isHyper || isCopilot {
+					filteredProviders = append(filteredProviders, p)
+				}
+			}
+
+			m.providers = filteredProviders
+			if err != nil {
+				cmds = append(cmds, util.ReportError(err))
+			}
 		}
 	}
 	cmds = append(cmds, m.list.Init(), m.SetModelType(m.modelType))

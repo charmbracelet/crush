@@ -304,12 +304,13 @@ func createDotCrushDir(dir string) error {
 
 // shouldQueryCapabilities determines if terminal capability queries should be performed.
 //
-// Returns false for SSH sessions and Apple Terminal.app as they don't support XTVERSION queries.
-// Character bleeding issues can occur when querying incompatible terminals.
+// Returns false for:
+//   - Apple Terminal.app (TERM_PROGRAM contains "Apple") — causes probe bleed
+//   - SSH sessions with unknown terminals — conservative fallback
 //
 // Returns true for:
-//   - Kitty-compatible terminals (alacritty, ghostty, kitty, rio, wezterm) detected via TERM
-//   - Generic terminals where TERM_PROGRAM is not set
+//   - Kitty-compatible terminals (alacritty, ghostty, kitty, rio, wezterm) — even over SSH
+//   - Local sessions (no SSH_TTY) with any terminal
 //
 // The actual capability query (performed in ui.Update) sends XTVERSION escape sequences
 // to detect Kitty Graphics Protocol support and terminal pixel dimensions.

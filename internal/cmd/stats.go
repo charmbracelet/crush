@@ -323,22 +323,6 @@ func generateHTML(stats *Stats, path string) error {
 		return err
 	}
 
-	// Parse and execute the JS template first (it contains {{.StatsJSON}})
-	jsTmpl, err := template.New("stats_js").Parse(statsJS)
-	if err != nil {
-		return fmt.Errorf("parse js template: %w", err)
-	}
-
-	var jsBuf bytes.Buffer
-	jsData := struct {
-		StatsJSON template.JS
-	}{
-		StatsJSON: template.JS(statsJSON),
-	}
-	if err := jsTmpl.Execute(&jsBuf, jsData); err != nil {
-		return fmt.Errorf("execute js template: %w", err)
-	}
-
 	tmpl, err := template.New("stats").Parse(statsTemplate)
 	if err != nil {
 		return fmt.Errorf("parse template: %w", err)
@@ -346,14 +330,14 @@ func generateHTML(stats *Stats, path string) error {
 
 	data := struct {
 		StatsJSON template.JS
-		CSS       template.HTML
-		JS        template.HTML
+		CSS       template.CSS
+		JS        template.JS
 		Header    template.HTML
 		Footer    template.HTML
 	}{
 		StatsJSON: template.JS(statsJSON),
-		CSS:       template.HTML(statsCSS),
-		JS:        template.HTML(jsBuf.String()),
+		CSS:       template.CSS(statsCSS),
+		JS:        template.JS(statsJS),
 		Header:    template.HTML(headerDarkSVG),
 		Footer:    template.HTML(footerDarkSVG),
 	}

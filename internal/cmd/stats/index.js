@@ -15,6 +15,9 @@ const colors = {
   malibu: rootStyles.getPropertyValue("--malibu").trim(),
 };
 
+const easeDuration = 500;
+const easeType = "easeOutQuart";
+
 // Helper functions
 function formatNumber(n) {
   return new Intl.NumberFormat().format(Math.round(n));
@@ -108,7 +111,7 @@ if (stats.recent_activity?.length > 0) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      animation: { duration: 1200, easing: "easeOutBack" },
+      animation: { duration: 800, easing: easeType },
       interaction: { mode: "index", intersect: false },
       scales: {
         y: { position: "left", title: { display: true, text: "Sessions" } },
@@ -159,7 +162,7 @@ if (stats.hour_day_heatmap?.length > 0) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      animation: { duration: 1500, easing: "easeOutElastic" },
+      animation: { duration: easeDuration, easing: easeType },
       scales: {
         x: {
           min: 0,
@@ -226,7 +229,7 @@ if (stats.tool_usage?.length > 0) {
       indexAxis: "y",
       responsive: true,
       maintainAspectRatio: false,
-      animation: { duration: 1000, easing: "easeOutExpo" },
+      animation: { duration: easeDuration, easing: easeType },
       plugins: { legend: { display: false } },
     },
   });
@@ -251,7 +254,7 @@ new Chart(document.getElementById("tokenPieChart"), {
   options: {
     responsive: true,
     maintainAspectRatio: false,
-    animation: { duration: 1200, easing: "easeOutBounce" },
+    animation: { duration: easeDuration, easing: easeType },
     plugins: {
       legend: { position: "bottom" },
     },
@@ -289,7 +292,7 @@ if (stats.usage_by_model?.length > 0) {
       indexAxis: "y",
       responsive: true,
       maintainAspectRatio: false,
-      animation: { duration: 1100, easing: "easeInOutSine" },
+      animation: { duration: easeDuration, easing: easeType },
       plugins: { legend: { display: false } },
     },
   });
@@ -325,7 +328,7 @@ if (stats.usage_by_model?.length > 0) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      animation: { duration: 1200, easing: "easeOutBack" },
+      animation: { duration: easeDuration, easing: easeType },
       plugins: {
         legend: { position: "bottom" },
       },

@@ -8,7 +8,6 @@
   --accent2: #00a4ff;
   --accent3: #00ffb2;
   --accent4: #ff577d;
-  --border: #4d4c57;
   /* Charmtone colors (global - same in both light and dark modes) */
   --charple: #6b50ff;
   --cherry: #ff388b;
@@ -36,7 +35,6 @@
     --accent2: #0096ff;
     --accent3: #00e0c3;
     --accent4: #ff6384;
-    --border: #e8e6eb;
   }
 }
 
@@ -137,7 +135,6 @@ body {
 
 .chart-card {
   background: var(--bg-secondary);
-  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 1.5rem;
   width: 100%;

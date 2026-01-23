@@ -189,7 +189,10 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 	if err != nil {
 		return fantasy.ToolResponse{}, err
 	}
-	if !p {
+	if !p.Granted {
+		if p.Message != "" {
+			return fantasy.NewTextErrorResponse("User denied permission." + permission.UserCommentaryTag(p.Message)), nil
+		}
 		return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
@@ -221,7 +224,7 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 	}
 
 	return fantasy.WithResponseMetadata(
-		fantasy.NewTextResponse(message),
+		fantasy.NewTextResponse(p.AppendCommentary(message)),
 		MultiEditResponseMetadata{
 			OldContent:   "",
 			NewContent:   currentContent,
@@ -333,7 +336,10 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 	if err != nil {
 		return fantasy.ToolResponse{}, err
 	}
-	if !p {
+	if !p.Granted {
+		if p.Message != "" {
+			return fantasy.NewTextErrorResponse("User denied permission." + permission.UserCommentaryTag(p.Message)), nil
+		}
 		return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
@@ -380,7 +386,7 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 	}
 
 	return fantasy.WithResponseMetadata(
-		fantasy.NewTextResponse(message),
+		fantasy.NewTextResponse(p.AppendCommentary(message)),
 		MultiEditResponseMetadata{
 			OldContent:   oldContent,
 			NewContent:   currentContent,

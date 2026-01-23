@@ -83,7 +83,10 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 			if err != nil {
 				return fantasy.ToolResponse{}, err
 			}
-			if !p {
+			if !p.Granted {
+				if p.Message != "" {
+					return fantasy.NewTextErrorResponse("User denied permission." + permission.UserCommentaryTag(p.Message)), nil
+				}
 				return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 			}
 
@@ -142,6 +145,6 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 				responseMsg += fmt.Sprintf(" (Content-Type: %s)", contentType)
 			}
 
-			return fantasy.NewTextResponse(responseMsg), nil
+			return fantasy.NewTextResponse(p.AppendCommentary(responseMsg)), nil
 		})
 }

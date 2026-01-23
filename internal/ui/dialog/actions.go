@@ -61,6 +61,7 @@ type (
 	ActionPermissionResponse struct {
 		Permission permission.PermissionRequest
 		Action     PermissionAction
+		Commentary string // User's commentary or instructions for the action.
 	}
 	// ActionRunCustomCommand is a message to run a custom command.
 	ActionRunCustomCommand struct {

@@ -19,15 +19,15 @@ type mockPermissionService struct {
 	*pubsub.Broker[permission.PermissionRequest]
 }
 
-func (m *mockPermissionService) Request(ctx context.Context, req permission.CreatePermissionRequest) (bool, error) {
-	return true, nil
+func (m *mockPermissionService) Request(ctx context.Context, req permission.CreatePermissionRequest) (permission.PermissionResult, error) {
+	return permission.PermissionResult{Granted: true}, nil
 }
 
-func (m *mockPermissionService) Grant(req permission.PermissionRequest) {}
+func (m *mockPermissionService) Grant(req permission.PermissionRequest, message string) {}
 
-func (m *mockPermissionService) Deny(req permission.PermissionRequest) {}
+func (m *mockPermissionService) Deny(req permission.PermissionRequest, message string) {}
 
-func (m *mockPermissionService) GrantPersistent(req permission.PermissionRequest) {}
+func (m *mockPermissionService) GrantPersistent(req permission.PermissionRequest, message string) {}
 
 func (m *mockPermissionService) AutoApproveSession(sessionID string) {}
 

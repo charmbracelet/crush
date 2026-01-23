@@ -145,7 +145,10 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 	if err != nil {
 		return fantasy.ToolResponse{}, err
 	}
-	if !p {
+	if !p.Granted {
+		if p.Message != "" {
+			return fantasy.NewTextErrorResponse("User denied permission." + permission.UserCommentaryTag(p.Message)), nil
+		}
 		return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
@@ -172,7 +175,7 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 	filetracker.RecordRead(filePath)
 
 	return fantasy.WithResponseMetadata(
-		fantasy.NewTextResponse("File created: "+filePath),
+		fantasy.NewTextResponse(p.AppendCommentary("File created: "+filePath)),
 		EditResponseMetadata{
 			OldContent: "",
 			NewContent: content,
@@ -266,7 +269,10 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 	if err != nil {
 		return fantasy.ToolResponse{}, err
 	}
-	if !p {
+	if !p.Granted {
+		if p.Message != "" {
+			return fantasy.NewTextErrorResponse("User denied permission." + permission.UserCommentaryTag(p.Message)), nil
+		}
 		return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
@@ -305,7 +311,7 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 	filetracker.RecordRead(filePath)
 
 	return fantasy.WithResponseMetadata(
-		fantasy.NewTextResponse("Content deleted from file: "+filePath),
+		fantasy.NewTextResponse(p.AppendCommentary("Content deleted from file: "+filePath)),
 		EditResponseMetadata{
 			OldContent: oldContent,
 			NewContent: newContent,
@@ -398,7 +404,10 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 	if err != nil {
 		return fantasy.ToolResponse{}, err
 	}
-	if !p {
+	if !p.Granted {
+		if p.Message != "" {
+			return fantasy.NewTextErrorResponse("User denied permission." + permission.UserCommentaryTag(p.Message)), nil
+		}
 		return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
@@ -437,7 +446,7 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 	filetracker.RecordRead(filePath)
 
 	return fantasy.WithResponseMetadata(
-		fantasy.NewTextResponse("Content replaced in file: "+filePath),
+		fantasy.NewTextResponse(p.AppendCommentary("Content replaced in file: "+filePath)),
 		EditResponseMetadata{
 			OldContent: oldContent,
 			NewContent: newContent,

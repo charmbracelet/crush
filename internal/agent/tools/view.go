@@ -74,6 +74,7 @@ func NewViewTool(lspClients *csync.Map[string, *lsp.Client], permissions permiss
 			isOutsideWorkDir := err != nil || strings.HasPrefix(relPath, "..")
 			isSkillFile := isInSkillsPath(absFilePath, skillsPaths)
 
+			var permResult permission.PermissionResult
 			// Request permission for files outside working directory, unless it's a skill file.
 			if isOutsideWorkDir && !isSkillFile {
 				sessionID := GetSessionFromContext(ctx)
@@ -81,7 +82,7 @@ func NewViewTool(lspClients *csync.Map[string, *lsp.Client], permissions permiss
 					return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for accessing files outside working directory")
 				}
 
-				granted, err := permissions.Request(ctx,
+				permResult, err = permissions.Request(ctx,
 					permission.CreatePermissionRequest{
 						SessionID:   sessionID,
 						Path:        absFilePath,
@@ -95,7 +96,10 @@ func NewViewTool(lspClients *csync.Map[string, *lsp.Client], permissions permiss
 				if err != nil {
 					return fantasy.ToolResponse{}, err
 				}
-				if !granted {
+				if !permResult.Granted {
+					if permResult.Message != "" {
+						return fantasy.NewTextErrorResponse("User denied permission." + permission.UserCommentaryTag(permResult.Message)), nil
+					}
 					return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 				}
 			}
@@ -192,7 +196,7 @@ func NewViewTool(lspClients *csync.Map[string, *lsp.Client], permissions permiss
 			output += getDiagnostics(filePath, lspClients)
 			filetracker.RecordRead(filePath)
 			return fantasy.WithResponseMetadata(
-				fantasy.NewTextResponse(output),
+				fantasy.NewTextResponse(permResult.AppendCommentary(output)),
 				ViewResponseMetadata{
 					FilePath: filePath,
 					Content:  content,

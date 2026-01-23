@@ -69,7 +69,10 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 			if err != nil {
 				return fantasy.ToolResponse{}, err
 			}
-			if !p {
+			if !p.Granted {
+				if p.Message != "" {
+					return fantasy.NewTextErrorResponse("User denied permission." + permission.UserCommentaryTag(p.Message)), nil
+				}
 				return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 			}
 
@@ -165,7 +168,7 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 				content += fmt.Sprintf("\n\n[Content truncated to %d bytes]", MaxReadSize)
 			}
 
-			return fantasy.NewTextResponse(content), nil
+			return fantasy.NewTextResponse(p.AppendCommentary(content)), nil
 		})
 }
 

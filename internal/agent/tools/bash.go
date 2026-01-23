@@ -214,8 +214,10 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			if sessionID == "" {
 				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for executing shell command")
 			}
+			var permResult permission.PermissionResult
 			if !isSafeReadOnly {
-				p, err := permissions.Request(ctx,
+				var err error
+				permResult, err = permissions.Request(ctx,
 					permission.CreatePermissionRequest{
 						SessionID:   sessionID,
 						Path:        execWorkingDir,
@@ -229,7 +231,10 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				if err != nil {
 					return fantasy.ToolResponse{}, err
 				}
-				if !p {
+				if !permResult.Granted {
+					if permResult.Message != "" {
+						return fantasy.NewTextErrorResponse("User denied permission." + permission.UserCommentaryTag(permResult.Message)), nil
+					}
 					return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 				}
 			}
@@ -270,10 +275,10 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 						WorkingDirectory: bgShell.WorkingDir,
 					}
 					if stdout == "" {
-						return fantasy.WithResponseMetadata(fantasy.NewTextResponse(BashNoOutput), metadata), nil
+						return fantasy.WithResponseMetadata(fantasy.NewTextResponse(permResult.AppendCommentary(BashNoOutput)), metadata), nil
 					}
 					stdout += fmt.Sprintf("\n\n<cwd>%s</cwd>", normalizeWorkingDir(bgShell.WorkingDir))
-					return fantasy.WithResponseMetadata(fantasy.NewTextResponse(stdout), metadata), nil
+					return fantasy.WithResponseMetadata(fantasy.NewTextResponse(permResult.AppendCommentary(stdout)), metadata), nil
 				}
 
 				// Still running after fast-failure check - return as background job
@@ -286,7 +291,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 					ShellID:          bgShell.ID,
 				}
 				response := fmt.Sprintf("Background shell started with ID: %s\n\nUse job_output tool to view output or job_kill to terminate.", bgShell.ID)
-				return fantasy.WithResponseMetadata(fantasy.NewTextResponse(response), metadata), nil
+				return fantasy.WithResponseMetadata(fantasy.NewTextResponse(permResult.AppendCommentary(response)), metadata), nil
 			}
 
 			// Start synchronous execution with auto-background support
@@ -351,10 +356,10 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 					WorkingDirectory: bgShell.WorkingDir,
 				}
 				if stdout == "" {
-					return fantasy.WithResponseMetadata(fantasy.NewTextResponse(BashNoOutput), metadata), nil
+					return fantasy.WithResponseMetadata(fantasy.NewTextResponse(permResult.AppendCommentary(BashNoOutput)), metadata), nil
 				}
 				stdout += fmt.Sprintf("\n\n<cwd>%s</cwd>", normalizeWorkingDir(bgShell.WorkingDir))
-				return fantasy.WithResponseMetadata(fantasy.NewTextResponse(stdout), metadata), nil
+				return fantasy.WithResponseMetadata(fantasy.NewTextResponse(permResult.AppendCommentary(stdout)), metadata), nil
 			}
 
 			// Still running - keep as background job
@@ -367,7 +372,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				ShellID:          bgShell.ID,
 			}
 			response := fmt.Sprintf("Command is taking longer than expected and has been moved to background.\n\nBackground shell ID: %s\n\nUse job_output tool to view output or job_kill to terminate.", bgShell.ID)
-			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(response), metadata), nil
+			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(permResult.AppendCommentary(response)), metadata), nil
 		})
 }
 

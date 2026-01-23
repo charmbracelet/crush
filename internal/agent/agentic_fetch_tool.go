@@ -93,7 +93,10 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 			if err != nil {
 				return fantasy.ToolResponse{}, err
 			}
-			if !p {
+			if !p.Granted {
+				if p.Message != "" {
+					return fantasy.NewTextErrorResponse("User denied permission." + permission.UserCommentaryTag(p.Message)), nil
+				}
 				return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 			}
 
@@ -228,6 +231,6 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				return fantasy.ToolResponse{}, fmt.Errorf("error saving parent session: %s", err)
 			}
 
-			return fantasy.NewTextResponse(result.Response.Content.Text()), nil
+			return fantasy.NewTextResponse(p.AppendCommentary(result.Response.Content.Text())), nil
 		}), nil
 }

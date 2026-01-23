@@ -103,7 +103,10 @@ func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolRe
 	if err != nil {
 		return fantasy.ToolResponse{}, err
 	}
-	if !p {
+	if !p.Granted {
+		if p.Message != "" {
+			return fantasy.NewTextErrorResponse("User denied permission." + permission.UserCommentaryTag(p.Message)), nil
+		}
 		return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
@@ -125,9 +128,9 @@ func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolRe
 		} else {
 			response = fantasy.NewMediaResponse(result.Data, result.MediaType)
 		}
-		response.Content = result.Content
+		response.Content = p.AppendCommentary(result.Content)
 		return response, nil
 	default:
-		return fantasy.NewTextResponse(result.Content), nil
+		return fantasy.NewTextResponse(p.AppendCommentary(result.Content)), nil
 	}
 }

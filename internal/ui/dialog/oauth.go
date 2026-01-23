@@ -208,7 +208,7 @@ func (m *OAuth) headerContent() string {
 		dialogStyle  = t.Dialog.View.Width(m.width)
 		headerOffset = titleStyle.GetHorizontalFrameSize() + dialogStyle.GetHorizontalFrameSize()
 	)
-	return common.DialogTitle(t, titleStyle.Render("Authenticate with "+m.oAuthProvider.name()), m.width-headerOffset)
+	return common.DialogTitle(t, titleStyle.Render("Authenticate with "+m.oAuthProvider.name()), m.width-headerOffset, t.Primary, t.Secondary)
 }
 
 func (m *OAuth) innerDialogContent() string {

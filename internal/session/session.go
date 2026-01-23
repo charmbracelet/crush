@@ -111,9 +111,15 @@ func (s *service) Delete(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	err = s.q.DeleteSession(ctx, session.ID)
-	if err != nil {
-		return err
+	// Delete related entities first.
+	if err = s.q.DeleteSessionMessages(ctx, session.ID); err != nil {
+		return fmt.Errorf("deleting session messages: %w", err)
+	}
+	if err = s.q.DeleteSessionFiles(ctx, session.ID); err != nil {
+		return fmt.Errorf("deleting session files: %w", err)
+	}
+	if err = s.q.DeleteSession(ctx, session.ID); err != nil {
+		return fmt.Errorf("deleting session: %w", err)
 	}
 	s.Publish(pubsub.DeletedEvent, session)
 	event.SessionDeleted()

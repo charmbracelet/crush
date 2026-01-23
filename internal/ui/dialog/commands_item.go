@@ -66,5 +66,11 @@ func (c *CommandItem) Shortcut() string {
 
 // Render implements ListItem.
 func (c *CommandItem) Render(width int) string {
-	return renderItem(c.t, c.title, c.shortcut, c.focused, width, c.cache, &c.m)
+	styles := ListIemStyles{
+		ItemBlurred:     c.t.Dialog.NormalItem,
+		ItemFocused:     c.t.Dialog.SelectedItem,
+		InfoTextBlurred: c.t.Base,
+		InfoTextFocused: c.t.Subtle,
+	}
+	return renderItem(styles, c.title, c.shortcut, c.focused, width, c.cache, &c.m)
 }

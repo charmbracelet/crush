@@ -4,10 +4,7 @@
   --bg-secondary: #2d2c35;
   --text: #fffaf1;
   --text-muted: #858392;
-  --accent: #6b50ff;
-  --accent2: #00a4ff;
-  --accent3: #00ffb2;
-  --accent4: #ff577d;
+
   /* Charmtone colors (global - same in both light and dark modes) */
   --charple: #6b50ff;
   --cherry: #ff388b;
@@ -22,6 +19,7 @@
   --coral: #ff577d;
   --violet: #c259ff;
   --malibu: #00a4ff;
+  --hazy: #8b75ff;
 }
 
 /* Light mode colors - charmtone light palette */
@@ -31,10 +29,6 @@
     --bg-secondary: #fbfbfb;
     --text: #201f26;
     --text-muted: #4d4c57;
-    --accent: #644ced;
-    --accent2: #0096ff;
-    --accent3: #00e0c3;
-    --accent4: #ff6384;
   }
 }
 
@@ -76,12 +70,10 @@ body {
 }
 
 .header-info {
-  padding: 0 0.5rem;
   margin-bottom: 2rem;
   font-size: 0.875rem;
-  color: var(--text-muted);
+  color: var(--hazy);
   font-family: "JetBrains Mono", "SF Mono", Consolas, monospace;
-  text-align: center;
 }
 
 .stats-grid {

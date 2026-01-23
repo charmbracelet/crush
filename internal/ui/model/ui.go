@@ -497,6 +497,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case copyChatHighlightMsg:
 		cmds = append(cmds, m.copyChatHighlight())
 	case tea.MouseClickMsg:
+		// Pass mouse events to dialogs first if any are open.
+		if m.dialog.HasDialogs() {
+			m.dialog.Update(msg)
+			return m, tea.Batch(cmds...)
+		}
 		switch m.state {
 		case uiChat:
 			x, y := msg.X, msg.Y
@@ -509,6 +514,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseMotionMsg:
+		// Pass mouse events to dialogs first if any are open.
+		if m.dialog.HasDialogs() {
+			m.dialog.Update(msg)
+			return m, tea.Batch(cmds...)
+		}
+
 		switch m.state {
 		case uiChat:
 			if msg.Y <= 0 {
@@ -541,6 +552,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseReleaseMsg:
+		// Pass mouse events to dialogs first if any are open.
+		if m.dialog.HasDialogs() {
+			m.dialog.Update(msg)
+			return m, tea.Batch(cmds...)
+		}
 		const doubleClickThreshold = 500 * time.Millisecond
 
 		switch m.state {

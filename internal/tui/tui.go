@@ -325,11 +325,11 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case permissions.PermissionResponseMsg:
 		switch msg.Action {
 		case permissions.PermissionAllow:
-			a.app.Permissions.Grant(msg.Permission)
+			a.app.Permissions.Grant(msg.Permission, "")
 		case permissions.PermissionAllowForSession:
-			a.app.Permissions.GrantPersistent(msg.Permission)
+			a.app.Permissions.GrantPersistent(msg.Permission, "")
 		case permissions.PermissionDeny:
-			a.app.Permissions.Deny(msg.Permission)
+			a.app.Permissions.Deny(msg.Permission, "")
 		}
 		return a, nil
 	case splash.OnboardingCompleteMsg:

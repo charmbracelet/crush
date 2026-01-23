@@ -1190,11 +1190,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.PermissionsID)
 		switch msg.Action {
 		case dialog.PermissionAllow:
-			m.com.App.Permissions.Grant(msg.Permission)
+			m.com.App.Permissions.Grant(msg.Permission, msg.Commentary)
 		case dialog.PermissionAllowForSession:
-			m.com.App.Permissions.GrantPersistent(msg.Permission)
+			m.com.App.Permissions.GrantPersistent(msg.Permission, msg.Commentary)
 		case dialog.PermissionDeny:
-			m.com.App.Permissions.Deny(msg.Permission)
+			m.com.App.Permissions.Deny(msg.Permission, msg.Commentary)
 		}
 
 	case dialog.ActionFilePickerSelected:

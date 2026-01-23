@@ -7,6 +7,7 @@ import (
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -73,6 +74,10 @@ type Permissions struct {
 	unifiedDiffContent   string
 	splitDiffContent     string
 
+	// Commentary input for user feedback.
+	input        textinput.Model
+	inputFocused bool
+
 	help   help.Model
 	keyMap permissionsKeyMap
 }
@@ -85,6 +90,9 @@ type permissionsKeyMap struct {
 	Allow            key.Binding
 	AllowSession     key.Binding
 	Deny             key.Binding
+	CtrlAllow        key.Binding
+	CtrlAllowSession key.Binding
+	CtrlDeny         key.Binding
 	Close            key.Binding
 	ToggleDiffMode   key.Binding
 	ToggleFullscreen key.Binding
@@ -94,6 +102,7 @@ type permissionsKeyMap struct {
 	ScrollRight      key.Binding
 	Choose           key.Binding
 	Scroll           key.Binding
+	FocusInput       key.Binding
 }
 
 func defaultPermissionsKeyMap() permissionsKeyMap {
@@ -115,16 +124,28 @@ func defaultPermissionsKeyMap() permissionsKeyMap {
 			key.WithHelp("enter", "confirm"),
 		),
 		Allow: key.NewBinding(
-			key.WithKeys("a", "A", "ctrl+a"),
+			key.WithKeys("a"),
 			key.WithHelp("a", "allow"),
 		),
 		AllowSession: key.NewBinding(
-			key.WithKeys("s", "S", "ctrl+s"),
+			key.WithKeys("s"),
 			key.WithHelp("s", "allow session"),
 		),
 		Deny: key.NewBinding(
-			key.WithKeys("d", "D"),
+			key.WithKeys("d"),
 			key.WithHelp("d", "deny"),
+		),
+		CtrlAllow: key.NewBinding(
+			key.WithKeys("ctrl+a"),
+			key.WithHelp("ctrl+a", "allow"),
+		),
+		CtrlAllowSession: key.NewBinding(
+			key.WithKeys("ctrl+s"),
+			key.WithHelp("ctrl+s", "session"),
+		),
+		CtrlDeny: key.NewBinding(
+			key.WithKeys("ctrl+d"),
+			key.WithHelp("ctrl+d", "deny"),
 		),
 		Close: CloseKey,
 		ToggleDiffMode: key.NewBinding(
@@ -158,6 +179,10 @@ func defaultPermissionsKeyMap() permissionsKeyMap {
 		Scroll: key.NewBinding(
 			key.WithKeys("shift+left", "shift+down", "shift+up", "shift+right"),
 			key.WithHelp("shift+←↓↑→", "scroll"),
+		),
+		FocusInput: key.NewBinding(
+			key.WithKeys("/"),
+			key.WithHelp("/", "add comment"),
 		),
 	}
 }
@@ -195,11 +220,18 @@ func NewPermissions(com *common.Common, perm permission.PermissionRequest, opts 
 		HalfPageDown: key.NewBinding(key.WithDisabled()),
 	}
 
+	// Configure text input for user commentary.
+	input := textinput.New()
+	input.SetVirtualCursor(false)
+	input.Placeholder = "Feedback for the agent (optional)..."
+	input.SetStyles(com.Styles.TextInput)
+
 	p := &Permissions{
 		com:            com,
 		permission:     perm,
 		selectedOption: 0,
 		viewport:       vp,
+		input:          input,
 		help:           h,
 		keyMap:         km,
 	}
@@ -227,10 +259,42 @@ func (*Permissions) ID() string {
 func (p *Permissions) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
+		// When input is focused, handle navigation and shortcuts first.
+		if p.inputFocused {
+			switch {
+			case key.Matches(msg, p.keyMap.Close):
+				// Escape unfocuses the input.
+				p.inputFocused = false
+				p.input.Blur()
+				return nil
+			case key.Matches(msg, p.keyMap.Select):
+				// Enter confirms the current selection with the comment.
+				return p.selectCurrentOption()
+			case key.Matches(msg, p.keyMap.Tab):
+				p.selectedOption = (p.selectedOption + 1) % 3
+				return nil
+			case key.Matches(msg, p.keyMap.CtrlAllow):
+				return p.respond(PermissionAllow)
+			case key.Matches(msg, p.keyMap.CtrlAllowSession):
+				return p.respond(PermissionAllowForSession)
+			case key.Matches(msg, p.keyMap.CtrlDeny):
+				return p.respond(PermissionDeny)
+			default:
+				// Pass other keys to the text input.
+				p.input, _ = p.input.Update(msg)
+				return nil
+			}
+		}
+
+		// Normal dialog navigation when input is not focused.
 		switch {
 		case key.Matches(msg, p.keyMap.Close):
 			// Escape denies the permission request.
 			return p.respond(PermissionDeny)
+		case key.Matches(msg, p.keyMap.FocusInput):
+			p.inputFocused = true
+			p.input.Focus()
+			return nil
 		case key.Matches(msg, p.keyMap.Right), key.Matches(msg, p.keyMap.Tab):
 			p.selectedOption = (p.selectedOption + 1) % 3
 		case key.Matches(msg, p.keyMap.Left):
@@ -238,11 +302,11 @@ func (p *Permissions) HandleMsg(msg tea.Msg) Action {
 			p.selectedOption = (p.selectedOption + 2) % 3
 		case key.Matches(msg, p.keyMap.Select):
 			return p.selectCurrentOption()
-		case key.Matches(msg, p.keyMap.Allow):
+		case key.Matches(msg, p.keyMap.Allow), key.Matches(msg, p.keyMap.CtrlAllow):
 			return p.respond(PermissionAllow)
-		case key.Matches(msg, p.keyMap.AllowSession):
+		case key.Matches(msg, p.keyMap.AllowSession), key.Matches(msg, p.keyMap.CtrlAllowSession):
 			return p.respond(PermissionAllowForSession)
-		case key.Matches(msg, p.keyMap.Deny):
+		case key.Matches(msg, p.keyMap.Deny), key.Matches(msg, p.keyMap.CtrlDeny):
 			return p.respond(PermissionDeny)
 		case key.Matches(msg, p.keyMap.ToggleDiffMode):
 			if p.hasDiffView() {
@@ -291,6 +355,7 @@ func (p *Permissions) respond(action PermissionAction) tea.Msg {
 	return ActionPermissionResponse{
 		Permission: p.permission,
 		Action:     action,
+		Commentary: p.input.Value(),
 	}
 }
 
@@ -336,13 +401,20 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	contentWidth := p.calculateContentWidth(width)
 	header := p.renderHeader(contentWidth)
 	buttons := p.renderButtons(contentWidth)
+
+	// Render the input field.
+	p.input.SetWidth(contentWidth - t.Dialog.InputPrompt.GetHorizontalFrameSize() - 1)
+	inputView := t.Dialog.InputPrompt.Render(p.input.View())
+
 	helpView := p.help.View(p)
 
 	// Calculate available height for content.
 	headerHeight := lipgloss.Height(header)
 	buttonsHeight := lipgloss.Height(buttons)
+	inputHeight := lipgloss.Height(inputView)
 	helpHeight := lipgloss.Height(helpView)
-	frameHeight := dialogStyle.GetVerticalFrameSize() + layoutSpacingLines
+	// Add extra spacing lines for input section.
+	frameHeight := dialogStyle.GetVerticalFrameSize() + layoutSpacingLines + 2
 
 	p.defaultDiffSplitMode = width >= splitModeMinWidth
 
@@ -361,7 +433,7 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			availableHeight = maxHeight - fixedHeight
 		}
 	} else {
-		availableHeight = maxHeight - headerHeight - buttonsHeight - helpHeight - frameHeight
+		availableHeight = maxHeight - headerHeight - buttonsHeight - inputHeight - helpHeight - frameHeight
 	}
 
 	// Determine if scrollbar is needed.
@@ -379,6 +451,7 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	var content string
 	var scrollbar string
+	availableHeight = min(availableHeight, lipgloss.Height(renderedContent))
 	p.viewport.SetWidth(viewportWidth)
 	p.viewport.SetHeight(availableHeight)
 	if p.viewportDirty {
@@ -387,6 +460,7 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		p.viewportDirty = false
 	}
 	content = p.viewport.View()
+
 	if needsScrollbar {
 		scrollbar = common.Scrollbar(t, availableHeight, p.viewport.TotalLineCount(), availableHeight, p.viewport.YOffset())
 	}
@@ -400,11 +474,28 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	if content != "" {
 		parts = append(parts, "", content)
 	}
-	parts = append(parts, "", buttons, "", helpView)
+	parts = append(parts, "", inputView, "", buttons, "", helpView)
 
 	innerContent := lipgloss.JoinVertical(lipgloss.Left, parts...)
-	DrawCenterCursor(scr, area, dialogStyle.Render(innerContent), nil)
-	return nil
+
+	var cur *tea.Cursor
+	if p.inputFocused {
+		cur = p.input.Cursor()
+		if cur != nil {
+			// Calculate Y offset: header + empty line + content + empty line.
+			yOffset := headerHeight
+			if content != "" {
+				yOffset += 1 + lipgloss.Height(content)
+			}
+			yOffset += 1 // Empty line before input.
+
+			// Add dialog frame offsets.
+			cur.X += dialogStyle.GetHorizontalFrameSize()/2 + 1
+			cur.Y += dialogStyle.GetVerticalFrameSize()/2 + yOffset + 1
+		}
+	}
+	DrawCenterCursor(scr, area, dialogStyle.Render(innerContent), cur)
+	return cur
 }
 
 func (p *Permissions) renderHeader(contentWidth int) string {
@@ -734,9 +825,22 @@ func (p *Permissions) canScroll() bool {
 
 // ShortHelp implements [help.KeyMap].
 func (p *Permissions) ShortHelp() []key.Binding {
+	// When input is focused, show different help.
+	if p.inputFocused {
+		return []key.Binding{
+			p.keyMap.Tab,
+			p.keyMap.Select,
+			p.keyMap.CtrlAllow,
+			p.keyMap.CtrlAllowSession,
+			p.keyMap.CtrlDeny,
+			p.keyMap.Close,
+		}
+	}
+
 	bindings := []key.Binding{
 		p.keyMap.Choose,
 		p.keyMap.Select,
+		p.keyMap.FocusInput,
 		p.keyMap.Close,
 	}
 

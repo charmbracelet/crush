@@ -122,7 +122,10 @@ func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permis
 			if err != nil {
 				return fantasy.ToolResponse{}, err
 			}
-			if !p {
+			if !p.Granted {
+				if p.Message != "" {
+					return fantasy.NewTextErrorResponse("User denied permission." + permission.UserCommentaryTag(p.Message)), nil
+				}
 				return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 			}
 
@@ -161,7 +164,7 @@ func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permis
 			result := fmt.Sprintf("File successfully written: %s", filePath)
 			result = fmt.Sprintf("<result>\n%s\n</result>", result)
 			result += getDiagnostics(filePath, lspClients)
-			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(result),
+			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(p.AppendCommentary(result)),
 				WriteResponseMetadata{
 					Diff:      diff,
 					Additions: additions,

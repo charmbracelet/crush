@@ -78,6 +78,7 @@ func NewLsTool(permissions permission.Service, workingDir string, lsConfig confi
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("error resolving search path: %v", err)), nil
 			}
 
+			var permResult permission.PermissionResult
 			relPath, err := filepath.Rel(absWorkingDir, absSearchPath)
 			if err != nil || strings.HasPrefix(relPath, "..") {
 				// Directory is outside working directory, request permission
@@ -86,7 +87,7 @@ func NewLsTool(permissions permission.Service, workingDir string, lsConfig confi
 					return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for accessing directories outside working directory")
 				}
 
-				granted, err := permissions.Request(ctx,
+				permResult, err = permissions.Request(ctx,
 					permission.CreatePermissionRequest{
 						SessionID:   sessionID,
 						Path:        absSearchPath,
@@ -100,7 +101,10 @@ func NewLsTool(permissions permission.Service, workingDir string, lsConfig confi
 				if err != nil {
 					return fantasy.ToolResponse{}, err
 				}
-				if !granted {
+				if !permResult.Granted {
+					if permResult.Message != "" {
+						return fantasy.NewTextErrorResponse("User denied permission." + permission.UserCommentaryTag(permResult.Message)), nil
+					}
 					return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 				}
 			}
@@ -111,7 +115,7 @@ func NewLsTool(permissions permission.Service, workingDir string, lsConfig confi
 			}
 
 			return fantasy.WithResponseMetadata(
-				fantasy.NewTextResponse(output),
+				fantasy.NewTextResponse(permResult.AppendCommentary(output)),
 				metadata,
 			), nil
 		})

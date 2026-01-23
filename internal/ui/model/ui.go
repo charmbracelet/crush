@@ -145,13 +145,9 @@ type UI struct {
 	// terminal.
 	sendProgressBar bool
 
-	// QueryVersion instructs the TUI to query for the terminal version when it
+	// QueryCapabilities instructs the TUI to query for the terminal version when it
 	// starts.
-	QueryVersion bool
-
-	// QueryImageCapabilities instructs the TUI to query for image capabilities
-	// when it starts.
-	QueryImageCapabilities bool
+	QueryCapabilities bool
 
 	// Editor components
 	textarea textarea.Model
@@ -304,7 +300,7 @@ func New(com *common.Common) *UI {
 // Init initializes the UI model.
 func (m *UI) Init() tea.Cmd {
 	var cmds []tea.Cmd
-	if m.QueryVersion {
+	if m.QueryCapabilities {
 		cmds = append(cmds, tea.RequestTerminalVersion)
 	}
 	// load the user commands async
@@ -358,7 +354,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Only query for image capabilities if the terminal is known to
 		// support Kitty graphics protocol. This prevents character bleeding
 		// on terminals that don't understand the APC escape sequences.
-		if m.QueryImageCapabilities {
+		if m.QueryCapabilities {
 			cmds = append(cmds, timage.RequestCapabilities(m.imgCaps.Env))
 		}
 	case loadSessionMsg:

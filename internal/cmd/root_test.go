@@ -50,12 +50,12 @@ func TestShouldQueryImageCapabilities(t *testing.T) {
 		{
 			name: "wezterm terminal",
 			env:  mockEnviron{"TERM=xterm-256color"},
-			want: false,
+			want: true,
 		},
 		{
 			name: "wezterm with WEZTERM env",
 			env:  mockEnviron{"TERM=xterm-256color", "WEZTERM_EXECUTABLE=/Applications/WezTerm.app/Contents/MacOS/wezterm-gui"},
-			want: false, // Not detected via TERM, only via stringext.ContainsAny which checks TERM
+			want: true, // Not detected via TERM, only via stringext.ContainsAny which checks TERM
 		},
 		{
 			name: "Apple Terminal",
@@ -90,12 +90,12 @@ func TestShouldQueryImageCapabilities(t *testing.T) {
 		{
 			name: "generic terminal",
 			env:  mockEnviron{"TERM=xterm-256color"},
-			want: false,
+			want: true,
 		},
 		{
 			name: "kitty over SSH",
 			env:  mockEnviron{"SSH_TTY=/dev/pts/0", "TERM=xterm-kitty"},
-			want: false,
+			want: true,
 		},
 		{
 			name: "Apple Terminal with kitty TERM (should still be false due to TERM_PROGRAM)",
@@ -107,7 +107,7 @@ func TestShouldQueryImageCapabilities(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := shouldQueryImageCapabilities(uv.Environ(tt.env))
+			got := shouldQueryCapabilities(uv.Environ(tt.env))
 			require.Equal(t, tt.want, got, "shouldQueryImageCapabilities() = %v, want %v", got, tt.want)
 		})
 	}

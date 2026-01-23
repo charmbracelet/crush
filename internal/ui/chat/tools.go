@@ -244,6 +244,8 @@ func NewToolMessageItem(
 		item = NewTodosToolMessageItem(sty, toolCall, result, canceled)
 	case tools.ReferencesToolName:
 		item = NewReferencesToolMessageItem(sty, toolCall, result, canceled)
+	case tools.LSPRestartToolName:
+		item = NewLSPRestartToolMessageItem(sty, toolCall, result, canceled)
 	default:
 		if strings.HasPrefix(toolCall.Name, "mcp_") {
 			item = NewMCPToolMessageItem(sty, toolCall, result, canceled)

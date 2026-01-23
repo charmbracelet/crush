@@ -701,9 +701,6 @@ crush update-providers /path/to/local-providers.json
 # Reset providers to the embedded version, embedded at crush at build time.
 crush update-providers embedded
 
-# Note: Some newer providers like Vercel AI Gateway may only be available
-# in the embedded version until the next Catwalk release.
-
 # For more info:
 crush update-providers --help
 ```

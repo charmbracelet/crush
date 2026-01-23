@@ -209,12 +209,12 @@
             display: block;
         }
         /* Override charm brand colors in footer */
-        .footer-container .cls-3 {
+        .footer-container .st2 {
             fill: #fffaf1 !important;
         }
         @media (prefers-color-scheme: light) {
             /* Override charm brand colors in footer */
-            .footer-container .cls-3 {
+            .footer-container .st2 {
                 fill: #644CED !important;
             }
         }
@@ -377,6 +377,18 @@
             return `rgb(${r}, ${g}, ${b})`;
         }
 
+        function getTopItemsWithOthers(items, countKey, labelKey, topN = 10) {
+            const topItems = items.slice(0, topN);
+            const otherItems = items.slice(topN);
+            const otherCount = otherItems.reduce((sum, item) => sum + item[countKey], 0);
+            const displayItems = [...topItems];
+            if (otherItems.length > 0) {
+                const otherItem = { [countKey]: otherCount, [labelKey]: 'others' };
+                displayItems.push(otherItem);
+            }
+            return displayItems;
+        }
+
         // Populate summary cards
         document.getElementById('total-sessions').textContent = formatNumber(stats.total.total_sessions);
         document.getElementById('total-messages').textContent = formatCompact(stats.total.total_messages);
@@ -482,14 +494,15 @@
         }
 
         if (stats.tool_usage?.length > 0) {
-            const maxValue = Math.max(...stats.tool_usage.map(t => t.call_count));
+            const displayTools = getTopItemsWithOthers(stats.tool_usage, 'call_count', 'tool_name');
+            const maxValue = Math.max(...displayTools.map(t => t.call_count));
             new Chart(document.getElementById('toolChart'), {
                 type: 'bar',
                 data: {
-                    labels: stats.tool_usage.map(t => t.tool_name),
+                    labels: displayTools.map(t => t.tool_name),
                     datasets: [{
                         label: 'Calls',
-                        data: stats.tool_usage.map(t => t.call_count),
+                        data: displayTools.map(t => t.call_count),
                         backgroundColor: ctx => {
                             const value = ctx.raw;
                             const ratio = value / maxValue;
@@ -531,14 +544,15 @@
 
         // Model Usage Chart (horizontal bar)
         if (stats.usage_by_model?.length > 0) {
-            const maxValue = Math.max(...stats.usage_by_model.map(m => m.message_count));
+            const displayModels = getTopItemsWithOthers(stats.usage_by_model, 'message_count', 'model');
+            const maxValue = Math.max(...displayModels.map(m => m.message_count));
             new Chart(document.getElementById('modelChart'), {
                 type: 'bar',
                 data: {
-                    labels: stats.usage_by_model.map(m => `${m.model} (${m.provider})`),
+                    labels: displayModels.map(m => m.provider ? `${m.model} (${m.provider})` : m.model),
                     datasets: [{
                         label: 'Messages',
-                        data: stats.usage_by_model.map(m => m.message_count),
+                        data: displayModels.map(m => m.message_count),
                         backgroundColor: ctx => {
                             const value = ctx.raw;
                             const ratio = value / maxValue;

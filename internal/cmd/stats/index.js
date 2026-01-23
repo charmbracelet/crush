@@ -108,7 +108,7 @@ if (stats.recent_activity?.length > 0) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      animation: false,
+      animation: { duration: 1200, easing: "easeOutBack" },
       interaction: { mode: "index", intersect: false },
       scales: {
         y: { position: "left", title: { display: true, text: "Sessions" } },
@@ -159,7 +159,7 @@ if (stats.hour_day_heatmap?.length > 0) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      animation: false,
+      animation: { duration: 1500, easing: "easeOutElastic" },
       scales: {
         x: {
           min: 0,
@@ -226,7 +226,7 @@ if (stats.tool_usage?.length > 0) {
       indexAxis: "y",
       responsive: true,
       maintainAspectRatio: false,
-      animation: false,
+      animation: { duration: 1000, easing: "easeOutExpo" },
       plugins: { legend: { display: false } },
     },
   });
@@ -251,7 +251,7 @@ new Chart(document.getElementById("tokenPieChart"), {
   options: {
     responsive: true,
     maintainAspectRatio: false,
-    animation: false,
+    animation: { duration: 1200, easing: "easeOutBounce" },
     plugins: {
       legend: { position: "bottom" },
     },
@@ -289,7 +289,7 @@ if (stats.usage_by_model?.length > 0) {
       indexAxis: "y",
       responsive: true,
       maintainAspectRatio: false,
-      animation: false,
+      animation: { duration: 1100, easing: "easeInOutSine" },
       plugins: { legend: { display: false } },
     },
   });
@@ -325,7 +325,7 @@ if (stats.usage_by_model?.length > 0) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      animation: false,
+      animation: { duration: 1200, easing: "easeOutBack" },
       plugins: {
         legend: { position: "bottom" },
       },

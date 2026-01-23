@@ -188,7 +188,7 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 			}
 		default:
 			var cmd tea.Cmd
-			for _, item := range c.list.VisibleItems() {
+			for _, item := range c.list.FilteredItems() {
 				if item, ok := item.(*CommandItem); ok && item != nil {
 					if msg.String() == item.Shortcut() {
 						return item.Action()

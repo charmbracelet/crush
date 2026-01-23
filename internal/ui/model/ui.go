@@ -873,6 +873,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 	var cmds []tea.Cmd
 	existingItem := m.chat.MessageItem(msg.ID)
+	atBottom := m.chat.list.AtBottom()
 
 	if existingItem != nil {
 		if assistantItem, ok := existingItem.(*chat.AssistantMessageItem); ok {
@@ -893,9 +894,6 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 		if infoItem := m.chat.MessageItem(chat.AssistantInfoID(msg.ID)); infoItem == nil {
 			newInfoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, time.Unix(m.lastUserMessageTime, 0))
 			m.chat.AppendMessages(newInfoItem)
-			if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
 		}
 	}
 
@@ -922,9 +920,12 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 			}
 		}
 	}
+
 	m.chat.AppendMessages(items...)
-	if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
-		cmds = append(cmds, cmd)
+	if atBottom {
+		if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	}
 
 	return tea.Batch(cmds...)
@@ -934,6 +935,7 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.Cmd {
 	var cmds []tea.Cmd
 
+	atBottom := m.chat.list.AtBottom()
 	// Only process messages with tool calls or results.
 	if len(event.Payload.ToolCalls()) == 0 && len(event.Payload.ToolResults()) == 0 {
 		return nil
@@ -1012,6 +1014,12 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 
 	// Update the chat so it updates the index map for animations to work as expected
 	m.chat.UpdateNestedToolIDs(toolCallID)
+
+	if atBottom {
+		if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
 
 	return tea.Batch(cmds...)
 }
@@ -2905,7 +2913,7 @@ func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string
 }
 
 func (m *UI) copyChatHighlight() tea.Cmd {
-	text := m.chat.HighlighContent()
+	text := m.chat.HighlightContent()
 	return tea.Sequence(
 		tea.SetClipboard(text),
 		func() tea.Msg {

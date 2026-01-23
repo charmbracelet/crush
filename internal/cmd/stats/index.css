@@ -1,0 +1,208 @@
+<style>
+        :root {
+            /* Dark mode colors - charmtone dark palette */
+            --bg: #201F26;
+            --bg-secondary: #2D2C35;
+            --text: #FFFAF1;
+            --text-muted: #858392;
+            --accent: #6B50FF;
+            --accent2: #00A4FF;
+            --accent3: #00FFB2;
+            --accent4: #FF577D;
+            --border: #4D4C57;
+            /* Charmtone colors (global - same in both light and dark modes) */
+            --charple: #6B50FF;
+            --cherry: #FF388B;
+            --julep: #00FFB2;
+            --urchin: #C337E0;
+            --butter: #FFFAF1;
+            --squid: #858392;
+            --pepper: #201F26;
+            --iron: #4D4C57;
+            --tuna: #FF6DAA;
+            --uni: #FF937D;
+            --coral: #FF577D;
+            --violet: #C259FF;
+            --malibu: #00A4FF;
+        }
+
+        /* Light mode colors - charmtone light palette */
+        @media (prefers-color-scheme: light) {
+            :root {
+                --bg: #F0F0F0;
+                --bg-secondary: #FBFBFB;
+                --text: #201F26;
+                --text-muted: #4D4C57;
+                --accent: #644CED;
+                --accent2: #0096FF;
+                --accent3: #00E0C3;
+                --accent4: #FF6384;
+                --border: #E8E6EB;
+            }
+        }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            padding: 2rem 0;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .header-wrapper {
+            max-width: 1200px;
+            margin: 0 auto 2rem;
+        }
+        .header-wrapper svg {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        .stats-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            margin-bottom: 2rem;
+            width: 100%;
+        }
+        .stat-card {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 1.5rem;
+            flex: 1 1 150px;
+            max-width: calc((100% - 5rem) / 6);
+        }
+        @media (prefers-color-scheme: light) {
+            .stat-card {
+                background: var(--butter);
+            }
+        }
+        @media (max-width: 1024px) {
+            .stat-card {
+                max-width: calc((100% - 2rem) / 3);
+            }
+        }
+        @media (max-width: 600px) {
+            .stat-card {
+                max-width: calc((100% - 1rem) / 2);
+            }
+        }
+        .stat-card h3 {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.5rem;
+        }
+        .stat-card .value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--butter);
+            white-space: nowrap;
+        }
+        @media (prefers-color-scheme: light) {
+            .stat-card .value {
+                color: var(--pepper);
+            }
+        }
+        .charts-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+            width: 100%;
+        }
+        .chart-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        @media (prefers-color-scheme: light) {
+            .chart-card {
+                background: var(--butter);
+            }
+        }
+        .chart-card.full-width {
+            width: 100%;
+        }
+        .chart-row {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1.5rem;
+            width: 100%;
+        }
+        .chart-row .chart-card {
+            width: 100%;
+        }
+        @media (max-width: 1024px) {
+            .chart-row {
+                grid-template-columns: 1fr;
+            }
+        }
+        .chart-card h2 {
+            font-size: 1.25rem;
+            margin-bottom: 1rem;
+            color: var(--text);
+        }
+        .chart-container {
+            position: relative;
+            height: 300px;
+        }
+        .chart-container.tall {
+            height: 400px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+        th, td {
+            text-align: left;
+            padding: 0.75rem;
+            border-bottom: 1px solid var(--border);
+        }
+        th {
+            color: var(--text-muted);
+            font-weight: 500;
+            font-size: 0.875rem;
+        }
+        td {
+            font-family: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+        }
+        .model-tag {
+            background: var(--bg);
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.875rem;
+        }
+        .footer-container {
+            max-width: 1200px;
+            margin: 2rem auto 0;
+            padding-top: 2rem;
+        }
+        .footer-container svg {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        /* Override charm brand colors in footer */
+        .footer-container .st2 {
+            fill: #fffaf1 !important;
+        }
+        @media (prefers-color-scheme: light) {
+            /* Override charm brand colors in footer */
+            .footer-container .st2 {
+                fill: #644CED !important;
+            }
+        }
+</style>

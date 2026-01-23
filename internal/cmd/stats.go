@@ -21,10 +21,16 @@ import (
 //go:embed stats/index.html
 var statsTemplate string
 
-//go:embed stats/header_dark.svg
+//go:embed stats/index.css
+var statsCSS string
+
+//go:embed stats/index.js
+var statsJS string
+
+//go:embed stats/header.svg
 var headerDarkSVG string
 
-//go:embed stats/footer_dark.svg
+//go:embed stats/footer.svg
 var footerDarkSVG string
 
 var statsCmd = &cobra.Command{
@@ -317,19 +323,39 @@ func generateHTML(stats *Stats, path string) error {
 		return err
 	}
 
+	// Parse and execute the JS template first (it contains {{.StatsJSON}})
+	jsTmpl, err := template.New("stats_js").Parse(statsJS)
+	if err != nil {
+		return fmt.Errorf("parse js template: %w", err)
+	}
+
+	var jsBuf bytes.Buffer
+	jsData := struct {
+		StatsJSON template.JS
+	}{
+		StatsJSON: template.JS(statsJSON),
+	}
+	if err := jsTmpl.Execute(&jsBuf, jsData); err != nil {
+		return fmt.Errorf("execute js template: %w", err)
+	}
+
 	tmpl, err := template.New("stats").Parse(statsTemplate)
 	if err != nil {
 		return fmt.Errorf("parse template: %w", err)
 	}
 
 	data := struct {
-		StatsJSON  template.JS
-		HeaderDark template.HTML
-		FooterDark template.HTML
+		StatsJSON template.JS
+		CSS       template.HTML
+		JS        template.HTML
+		Header    template.HTML
+		Footer    template.HTML
 	}{
-		StatsJSON:  template.JS(statsJSON),
-		HeaderDark: template.HTML(headerDarkSVG),
-		FooterDark: template.HTML(footerDarkSVG),
+		StatsJSON: template.JS(statsJSON),
+		CSS:       template.HTML(statsCSS),
+		JS:        template.HTML(jsBuf.String()),
+		Header:    template.HTML(headerDarkSVG),
+		Footer:    template.HTML(footerDarkSVG),
 	}
 
 	var buf bytes.Buffer

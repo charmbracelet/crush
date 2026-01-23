@@ -8,9 +8,12 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/uiutil"
 )
 
 // markProjectInitialized marks the current project as initialized in the config.
@@ -44,12 +47,22 @@ func (m *UI) updateInitializeView(msg tea.KeyPressMsg) (cmds []tea.Cmd) {
 
 // initializeProject starts project initialization and transitions to the landing view.
 func (m *UI) initializeProject() tea.Cmd {
-	// TODO: initialize the project
-	// for now we just go to the landing page
-	m.state = uiLanding
-	m.focus = uiFocusEditor
-	// TODO: actually send a message to the agent
-	return m.markProjectInitialized
+	// clear the session
+	m.newSession()
+	cfg := m.com.Config()
+	var cmds []tea.Cmd
+
+	initialize := func() tea.Msg {
+		initPrompt, err := agent.InitializePrompt(*cfg)
+		if err != nil {
+			return uiutil.InfoMsg{Type: uiutil.InfoTypeError, Msg: err.Error()}
+		}
+		return sendMessageMsg{Content: initPrompt}
+	}
+	// Mark the project as initialized
+	cmds = append(cmds, initialize, m.markProjectInitialized)
+
+	return tea.Sequence(cmds...)
 }
 
 // skipInitializeProject skips project initialization and transitions to the landing view.

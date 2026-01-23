@@ -166,11 +166,11 @@ func DefaultKeyMap() KeyMap {
 	)
 
 	km.Chat.Down = key.NewBinding(
-		key.WithKeys("down", "ctrl+j", "ctrl+n", "j"),
+		key.WithKeys("down", "ctrl+j", "j"),
 		key.WithHelp("↓", "down"),
 	)
 	km.Chat.Up = key.NewBinding(
-		key.WithKeys("up", "ctrl+k", "ctrl+p", "k"),
+		key.WithKeys("up", "ctrl+k", "k"),
 		key.WithHelp("↑", "up"),
 	)
 	km.Chat.UpDown = key.NewBinding(

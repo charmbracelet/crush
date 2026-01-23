@@ -174,7 +174,7 @@ go install github.com/charmbracelet/crush@latest
 ## Getting Started
 
 The quickest way to get started is to grab an API key for your preferred
-provider such as Anthropic, OpenAI, Groq, or OpenRouter and just start
+provider such as Anthropic, OpenAI, Groq, OpenRouter, or Vercel AI Gateway and just start
 Crush. You'll be prompted to enter your API key.
 
 That said, you can also set environment variables for preferred providers.
@@ -184,6 +184,7 @@ That said, you can also set environment variables for preferred providers.
 | `ANTHROPIC_API_KEY`         | Anthropic                                          |
 | `OPENAI_API_KEY`            | OpenAI                                             |
 | `OPENROUTER_API_KEY`        | OpenRouter                                         |
+| `VERCEL_API_KEY`            | Vercel AI Gateway                                  |
 | `GEMINI_API_KEY`            | Google Gemini                                      |
 | `CEREBRAS_API_KEY`          | Cerebras                                           |
 | `HF_TOKEN`                  | Huggingface Inference                              |

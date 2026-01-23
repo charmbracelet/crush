@@ -69,6 +69,8 @@ const (
 // ModelsID is the identifier for the model selection dialog.
 const ModelsID = "models"
 
+const defaultModelsDialogMaxWidth = 70
+
 // Models represents a model selection dialog.
 type Models struct {
 	com *common.Common
@@ -204,8 +206,10 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
 			value := m.input.Value()
+			m.list.Focus()
 			m.list.SetFilter(value)
-			m.list.ScrollToSelected()
+			m.list.SelectFirst()
+			m.list.ScrollToTop()
 			return ActionCmd{cmd}
 		}
 	}
@@ -240,7 +244,7 @@ func (m *Models) modelTypeRadioView() string {
 // Draw implements [Dialog].
 func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := m.com.Styles
-	width := max(0, min(defaultDialogMaxWidth, area.Dx()))
+	width := max(0, min(defaultModelsDialogMaxWidth, area.Dx()))
 	height := max(0, min(defaultDialogHeight, area.Dy()))
 	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
 	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
@@ -442,6 +446,7 @@ func (m *Models) setProviderItems() error {
 	// Set model groups in the list.
 	m.list.SetGroups(groups...)
 	m.list.SetSelectedItem(selectedItemID)
+	m.list.ScrollToSelected()
 
 	// Update placeholder based on model type
 	m.input.Placeholder = m.modelType.Placeholder()

@@ -57,7 +57,6 @@ func NewSessions(com *common.Common, selectedSessionID string) (*Session, error)
 	s.list = list.NewFilterableList(sessionItems(com.Styles, sessions...)...)
 	s.list.Focus()
 	s.list.SetSelected(s.selectedSessionInx)
-	s.list.ScrollToSelected()
 
 	s.input = textinput.New()
 	s.input.SetVirtualCursor(false)
@@ -152,6 +151,14 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	s.input.SetWidth(innerWidth - t.Dialog.InputPrompt.GetHorizontalFrameSize() - 1) // (1) cursor padding
 	s.list.SetSize(innerWidth, height-heightOffset)
 	s.help.SetWidth(innerWidth)
+
+	// This makes it so we do not scroll the list if we don't have to
+	start, end := s.list.VisibleItemIndices()
+
+	// if selected index is outside visible range, scroll to it
+	if s.selectedSessionInx < start || s.selectedSessionInx > end {
+		s.list.ScrollToSelected()
+	}
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Switch Session"

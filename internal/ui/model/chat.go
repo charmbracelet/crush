@@ -481,9 +481,9 @@ func (m *Chat) HasHighlight() bool {
 	return startItemIdx >= 0 && endItemIdx >= 0 && (startLine != endLine || startCol != endCol)
 }
 
-// HighlighContent returns the currently highlighted content based on the mouse
+// HighlightContent returns the currently highlighted content based on the mouse
 // selection. It returns an empty string if no content is highlighted.
-func (m *Chat) HighlighContent() string {
+func (m *Chat) HighlightContent() string {
 	startItemIdx, startLine, startCol, endItemIdx, endLine, endCol := m.getHighlightRange()
 	if startItemIdx < 0 || endItemIdx < 0 || startLine == endLine && startCol == endCol {
 		return ""

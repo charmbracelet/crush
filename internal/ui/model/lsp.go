@@ -23,8 +23,14 @@ type LSPInfo struct {
 func (m *UI) lspInfo(width, maxItems int, isSection bool) string {
 	var lsps []LSPInfo
 	t := m.com.Styles
+	lspConfigs := m.com.Config().LSP.Sorted()
 
-	for _, state := range m.lspStates {
+	for _, cfg := range lspConfigs {
+		state, ok := m.lspStates[cfg.Name]
+		if !ok {
+			continue
+		}
+
 		client, ok := m.com.App.LSPClients.Get(state.Name)
 		if !ok {
 			continue
@@ -39,6 +45,7 @@ func (m *UI) lspInfo(width, maxItems int, isSection bool) string {
 
 		lsps = append(lsps, LSPInfo{LSPClientInfo: state, Diagnostics: lspErrs})
 	}
+
 	title := t.Subtle.Render("LSPs")
 	if isSection {
 		title = common.Section(t, title, width)

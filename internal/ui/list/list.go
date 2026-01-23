@@ -75,6 +75,32 @@ func (l *List) Gap() int {
 	return l.gap
 }
 
+// AtBottom returns whether the list is scrolled to the bottom.
+func (l *List) AtBottom() bool {
+	if len(l.items) == 0 {
+		return true
+	}
+
+	// Calculate total height of all items from the bottom.
+	var totalHeight int
+	for i := len(l.items) - 1; i >= 0; i-- {
+		item := l.getItem(i)
+		totalHeight += item.height
+		if l.gap > 0 && i < len(l.items)-1 {
+			totalHeight += l.gap
+		}
+		if totalHeight >= l.height {
+			// This is the expected bottom position.
+			expectedIdx := i
+			expectedLine := totalHeight - l.height
+			return l.offsetIdx == expectedIdx && l.offsetLine >= expectedLine
+		}
+	}
+
+	// All items fit in viewport - we're at bottom if at top.
+	return l.offsetIdx == 0 && l.offsetLine == 0
+}
+
 // SetReverse shows the list in reverse order.
 func (l *List) SetReverse(reverse bool) {
 	l.reverse = reverse

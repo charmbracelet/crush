@@ -265,6 +265,8 @@ func New(com *common.Common) *UI {
 		completions: comp,
 		attachments: attachments,
 		todoSpinner: todoSpinner,
+		lspStates:   make(map[string]app.LSPClientInfo),
+		mcpStates:   make(map[string]mcp.ClientInfo),
 	}
 
 	status := NewStatus(com, ui)
@@ -495,6 +497,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case copyChatHighlightMsg:
 		cmds = append(cmds, m.copyChatHighlight())
 	case tea.MouseClickMsg:
+		// Pass mouse events to dialogs first if any are open.
+		if m.dialog.HasDialogs() {
+			m.dialog.Update(msg)
+			return m, tea.Batch(cmds...)
+		}
 		switch m.state {
 		case uiChat:
 			x, y := msg.X, msg.Y
@@ -507,6 +514,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseMotionMsg:
+		// Pass mouse events to dialogs first if any are open.
+		if m.dialog.HasDialogs() {
+			m.dialog.Update(msg)
+			return m, tea.Batch(cmds...)
+		}
+
 		switch m.state {
 		case uiChat:
 			if msg.Y <= 0 {
@@ -539,6 +552,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseReleaseMsg:
+		// Pass mouse events to dialogs first if any are open.
+		if m.dialog.HasDialogs() {
+			m.dialog.Update(msg)
+			return m, tea.Batch(cmds...)
+		}
 		const doubleClickThreshold = 500 * time.Millisecond
 
 		switch m.state {
@@ -547,7 +565,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Adjust for chat area position
 			x -= m.layout.main.Min.X
 			y -= m.layout.main.Min.Y
-			if m.chat.HandleMouseUp(x, y) {
+			if m.chat.HandleMouseUp(x, y) && m.chat.HasHighlight() {
 				cmds = append(cmds, tea.Tick(doubleClickThreshold, func(t time.Time) tea.Msg {
 					if time.Since(m.lastClickTime) >= doubleClickThreshold {
 						return copyChatHighlightMsg{}
@@ -855,6 +873,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 	var cmds []tea.Cmd
 	existingItem := m.chat.MessageItem(msg.ID)
+	atBottom := m.chat.list.AtBottom()
 
 	if existingItem != nil {
 		if assistantItem, ok := existingItem.(*chat.AssistantMessageItem); ok {
@@ -875,9 +894,6 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 		if infoItem := m.chat.MessageItem(chat.AssistantInfoID(msg.ID)); infoItem == nil {
 			newInfoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, time.Unix(m.lastUserMessageTime, 0))
 			m.chat.AppendMessages(newInfoItem)
-			if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
 		}
 	}
 
@@ -904,9 +920,12 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 			}
 		}
 	}
+
 	m.chat.AppendMessages(items...)
-	if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
-		cmds = append(cmds, cmd)
+	if atBottom {
+		if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	}
 
 	return tea.Batch(cmds...)
@@ -916,6 +935,7 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.Cmd {
 	var cmds []tea.Cmd
 
+	atBottom := m.chat.list.AtBottom()
 	// Only process messages with tool calls or results.
 	if len(event.Payload.ToolCalls()) == 0 && len(event.Payload.ToolResults()) == 0 {
 		return nil
@@ -994,6 +1014,12 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 
 	// Update the chat so it updates the index map for animations to work as expected
 	m.chat.UpdateNestedToolIDs(toolCallID)
+
+	if atBottom {
+		if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
 
 	return tea.Batch(cmds...)
 }
@@ -1106,6 +1132,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 		cmds = append(cmds, m.initializeProject())
+		m.dialog.CloseDialog(dialog.CommandsID)
 
 	case dialog.ActionSelectModel:
 		if m.isAgentBusy() {
@@ -1329,6 +1356,13 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 				return true
 			}
+		case key.Matches(msg, m.keyMap.Suspend):
+			if m.isAgentBusy() {
+				cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait..."))
+				return true
+			}
+			cmds = append(cmds, tea.Suspend)
+			return true
 		}
 		return false
 	}
@@ -1430,10 +1464,12 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 				m.newSession()
 			case key.Matches(msg, m.keyMap.Tab):
-				m.focus = uiFocusMain
-				m.textarea.Blur()
-				m.chat.Focus()
-				m.chat.SetSelected(m.chat.Len() - 1)
+				if m.state != uiLanding {
+					m.focus = uiFocusMain
+					m.textarea.Blur()
+					m.chat.Focus()
+					m.chat.SetSelected(m.chat.Len() - 1)
+				}
 			case key.Matches(msg, m.keyMap.Editor.OpenEditor):
 				if m.isAgentBusy() {
 					cmds = append(cmds, uiutil.ReportWarn("Agent is working, please wait..."))
@@ -1443,6 +1479,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			case key.Matches(msg, m.keyMap.Editor.Newline):
 				m.textarea.InsertRune('\n')
 				m.closeCompletions()
+				ta, cmd := m.textarea.Update(msg)
+				m.textarea = ta
+				cmds = append(cmds, cmd)
 			default:
 				if handleGlobalKeys(msg) {
 					// Handle global keys first before passing to textarea.
@@ -1506,6 +1545,16 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				m.focus = uiFocusEditor
 				cmds = append(cmds, m.textarea.Focus())
 				m.chat.Blur()
+			case key.Matches(msg, m.keyMap.Chat.NewSession):
+				if !m.hasSession() {
+					break
+				}
+				if m.isAgentBusy() {
+					cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait before starting a new session..."))
+					break
+				}
+				m.focus = uiFocusEditor
+				m.newSession()
 			case key.Matches(msg, m.keyMap.Chat.Expand):
 				m.chat.ToggleExpandedSelectedItem()
 			case key.Matches(msg, m.keyMap.Chat.Up):
@@ -2867,7 +2916,7 @@ func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string
 }
 
 func (m *UI) copyChatHighlight() tea.Cmd {
-	text := m.chat.HighlighContent()
+	text := m.chat.HighlightContent()
 	return tea.Sequence(
 		tea.SetClipboard(text),
 		func() tea.Msg {

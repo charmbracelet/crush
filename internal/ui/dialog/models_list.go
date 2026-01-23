@@ -57,6 +57,7 @@ func (f *ModelsList) SetGroups(groups ...ModelGroup) {
 // SetFilter sets the filter query and updates the list items.
 func (f *ModelsList) SetFilter(q string) {
 	f.query = q
+	f.SetItems(f.VisibleItems()...)
 }
 
 // SetSelected sets the selected item index. It overrides the base method to
@@ -103,49 +104,56 @@ func (f *ModelsList) SetSelectedItem(itemID string) {
 // SelectNext selects the next model item, skipping any non-focusable items
 // like group headers and spacers.
 func (f *ModelsList) SelectNext() (v bool) {
-	for {
-		v = f.List.SelectNext()
+	v = f.List.SelectNext()
+	for v {
 		selectedItem := f.SelectedItem()
 		if _, ok := selectedItem.(*ModelItem); ok {
 			return v
 		}
+		v = f.List.SelectNext()
 	}
+	return v
 }
 
 // SelectPrev selects the previous model item, skipping any non-focusable items
 // like group headers and spacers.
 func (f *ModelsList) SelectPrev() (v bool) {
-	for {
-		v = f.List.SelectPrev()
+	v = f.List.SelectPrev()
+	for v {
 		selectedItem := f.SelectedItem()
 		if _, ok := selectedItem.(*ModelItem); ok {
 			return v
 		}
+		v = f.List.SelectPrev()
 	}
+	return v
 }
 
 // SelectFirst selects the first model item in the list.
 func (f *ModelsList) SelectFirst() (v bool) {
 	v = f.List.SelectFirst()
-	for {
+	for v {
 		selectedItem := f.SelectedItem()
-		if _, ok := selectedItem.(*ModelItem); ok {
+		_, ok := selectedItem.(*ModelItem)
+		if ok {
 			return v
 		}
 		v = f.List.SelectNext()
 	}
+	return v
 }
 
 // SelectLast selects the last model item in the list.
 func (f *ModelsList) SelectLast() (v bool) {
 	v = f.List.SelectLast()
-	for {
+	for v {
 		selectedItem := f.SelectedItem()
 		if _, ok := selectedItem.(*ModelItem); ok {
 			return v
 		}
 		v = f.List.SelectPrev()
 	}
+	return v
 }
 
 // IsSelectedFirst checks if the selected item is the first model item.

@@ -2919,7 +2919,7 @@ func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string
 }
 
 func (m *UI) copyChatHighlight() tea.Cmd {
-	text := m.chat.HighlighContent()
+	text := m.chat.HighlightContent()
 	return common.CopyToClipboardWithCallback(
 		text,
 		"Selected text copied to clipboard",

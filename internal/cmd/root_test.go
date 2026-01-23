@@ -12,18 +12,18 @@ import (
 type mockEnviron []string
 
 func (m mockEnviron) Getenv(key string) string {
-	for _, env := range m {
-		kv := strings.SplitN(env, "=", 2)
-		if len(kv) == 2 && kv[0] == key {
-			return kv[1]
-		}
-	}
-	return ""
+	v, _ := m.LookupEnv(key)
+	return v
 }
 
 func (m mockEnviron) LookupEnv(key string) (string, bool) {
-	val := m.Getenv(key)
-	return val, val != ""
+	for _, env := range m {
+		kv := strings.SplitN(env, "=", 2)
+		if len(kv) == 2 && kv[0] == key {
+			return kv[1], true
+		}
+	}
+	return "", false
 }
 
 func (m mockEnviron) ExpandEnv(s string) string {

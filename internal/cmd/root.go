@@ -33,8 +33,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const OSVendorTypeApple = "Apple"
+const osVendorTypeApple = "Apple"
 
+// kittyTerminals defines terminals supporting Kitty graphics. READ-ONLY.
 var kittyTerminals = []string{"alacritty", "ghostty", "kitty", "rio", "wezterm"}
 
 func init() {
@@ -310,7 +311,7 @@ func shouldQueryTerminalVersion(env uv.Environ) bool {
 	termProg, okTermProg := env.LookupEnv("TERM_PROGRAM")
 	_, okSSHTTY := env.LookupEnv("SSH_TTY")
 	return (!okTermProg && !okSSHTTY) ||
-		(!strings.Contains(termProg, OSVendorTypeApple) && !okSSHTTY) ||
+		(!strings.Contains(termProg, osVendorTypeApple) && !okSSHTTY) ||
 		// Terminals that do support XTVERSION.
 		stringext.ContainsAny(termType, kittyTerminals...)
 }
@@ -321,10 +322,10 @@ func shouldQueryImageCapabilities(env uv.Environ) bool {
 	_, okSSHTTY := env.LookupEnv("SSH_TTY")
 
 	if okSSHTTY {
-		return false
+		return true
 	}
 
-	if okTermProg && strings.Contains(termProg, OSVendorTypeApple) {
+	if okTermProg && strings.Contains(termProg, osVendorTypeApple) {
 		return false
 	}
 

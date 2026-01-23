@@ -1169,13 +1169,15 @@ func buildSummaryPrompt(todos []session.Todo) string {
 	return sb.String()
 }
 
-// isTruncationError checks if the error is due to output truncation (e.g., XML
-// parsing failures from truncated tool calls).
-func isTruncationError(err error) bool {
+// isRecoverableError checks if the error is due to output truncation, server
+// issues, or other transient failures that can be recovered by summarizing and
+// re-queuing.
+func isRecoverableError(err error) bool {
 	if err == nil {
 		return false
 	}
 	errStr := err.Error()
+
 	// XML parsing errors from truncated tool calls.
 	if strings.Contains(errStr, "XML syntax error") {
 		return true
@@ -1196,7 +1198,55 @@ func isTruncationError(err error) bool {
 	if strings.Contains(errStr, "unexpected EOF") {
 		return true
 	}
+
+	// Server/infrastructure errors that may be transient.
+	if strings.Contains(errStr, "connection reset") {
+		return true
+	}
+	if strings.Contains(errStr, "connection refused") {
+		return true
+	}
+	if strings.Contains(errStr, "context deadline exceeded") {
+		return true
+	}
+	if strings.Contains(errStr, "timeout") {
+		return true
+	}
+	if strings.Contains(errStr, "server error") {
+		return true
+	}
+	if strings.Contains(errStr, "internal server error") {
+		return true
+	}
+	if strings.Contains(errStr, "bad gateway") {
+		return true
+	}
+	if strings.Contains(errStr, "service unavailable") {
+		return true
+	}
+	if strings.Contains(errStr, "gateway timeout") {
+		return true
+	}
+	// Ollama-specific errors.
+	if strings.Contains(errStr, "model is loading") {
+		return true
+	}
+	if strings.Contains(errStr, "out of memory") {
+		return true
+	}
+	if strings.Contains(errStr, "CUDA") {
+		return true
+	}
+	if strings.Contains(errStr, "GPU") {
+		return true
+	}
+
 	return false
+}
+
+// isTruncationError is an alias for backwards compatibility.
+func isTruncationError(err error) bool {
+	return isRecoverableError(err)
 }
 
 // hasIncompleteTodos checks if the session has any todos that are not completed.

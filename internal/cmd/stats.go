@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"html/template"
 	"os"
+	"os/user"
 	"path/filepath"
 	"time"
 
@@ -141,8 +142,20 @@ func runStats(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("no data available: no sessions found in database")
 	}
 
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get current directory: %w", err)
+	}
+	projName := filepath.Base(cwd)
+
+	currentUser, err := user.Current()
+	if err != nil {
+		return fmt.Errorf("failed to get current user: %w", err)
+	}
+	username := currentUser.Username
+
 	htmlPath := filepath.Join(dataDir, "stats/index.html")
-	if err := generateHTML(stats, htmlPath); err != nil {
+	if err := generateHTML(stats, projName, username, htmlPath); err != nil {
 		return fmt.Errorf("failed to generate HTML: %w", err)
 	}
 
@@ -321,7 +334,7 @@ func nullFloat64ToInt64(n sql.NullFloat64) int64 {
 	return 0
 }
 
-func generateHTML(stats *Stats, path string) error {
+func generateHTML(stats *Stats, projName, username, path string) error {
 	statsJSON, err := json.Marshal(stats)
 	if err != nil {
 		return err
@@ -333,17 +346,23 @@ func generateHTML(stats *Stats, path string) error {
 	}
 
 	data := struct {
-		StatsJSON template.JS
-		CSS       template.CSS
-		JS        template.JS
-		Header    template.HTML
-		Footer    template.HTML
+		StatsJSON   template.JS
+		CSS         template.CSS
+		JS          template.JS
+		Header      template.HTML
+		Footer      template.HTML
+		GeneratedAt string
+		ProjectName string
+		Username    string
 	}{
-		StatsJSON: template.JS(statsJSON),
-		CSS:       template.CSS(statsCSS),
-		JS:        template.JS(statsJS),
-		Header:    template.HTML(headerSVG),
-		Footer:    template.HTML(footerSVG),
+		StatsJSON:   template.JS(statsJSON),
+		CSS:         template.CSS(statsCSS),
+		JS:          template.JS(statsJS),
+		Header:      template.HTML(headerSVG),
+		Footer:      template.HTML(footerSVG),
+		GeneratedAt: stats.GeneratedAt.Format("2006-01-02"),
+		ProjectName: projName,
+		Username:    username,
 	}
 
 	var buf bytes.Buffer

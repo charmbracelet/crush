@@ -63,16 +63,6 @@
           "type": "object",
           "description": "Model configurations for different model types"
         },
-        "recent_models": {
-          "additionalProperties": {
-            "items": {
-              "$ref": "#/$defs/SelectedModel"
-            },
-            "type": "array"
-          },
-          "type": "object",
-          "description": "Recently used models sorted by most recent first"
-        },
         "providers": {
           "additionalProperties": {
             "$ref": "#/$defs/ProviderConfig"

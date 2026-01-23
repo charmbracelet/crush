@@ -258,8 +258,7 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	c.input.SetWidth(innerWidth - t.Dialog.InputPrompt.GetHorizontalFrameSize() - 1) // (1) cursor padding
 
-	listHeight := min(height-heightOffset, c.list.Len())
-	c.list.SetSize(innerWidth, listHeight)
+	c.list.SetSize(innerWidth, height-heightOffset)
 	c.help.SetWidth(innerWidth)
 
 	rc := NewRenderContext(t, width)

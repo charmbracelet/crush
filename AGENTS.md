@@ -70,3 +70,6 @@ func TestYourFunction(t *testing.T) {
 - ALWAYS use semantic commits (`fix:`, `feat:`, `chore:`, `refactor:`, `docs:`, `sec:`, etc).
 - Try to keep commits to one line, not including your attribution. Only use
   multi-line commits when additional context is truly necessary.
+
+## Working on the TUI (UI)
+Anytime you need to work on the tui before starting work read the internal/ui/AGENTS.md file

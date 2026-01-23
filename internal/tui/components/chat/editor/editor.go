@@ -39,6 +39,9 @@ var (
 	errClipboardUnknownFormat       = fmt.Errorf("unknown clipboard format")
 )
 
+// If pasted text has more than 10 newlines, treat it as a file attachment.
+const pasteLinesThreshold = 10
+
 type Editor interface {
 	util.Model
 	layout.Sizeable
@@ -239,8 +242,7 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		m.textarea.SetValue(msg.Text)
 		m.textarea.MoveToEnd()
 	case tea.PasteMsg:
-		// If pasted text has more than 2 newlines, treat it as a file attachment.
-		if strings.Count(msg.Content, "\n") > 2 {
+		if strings.Count(msg.Content, "\n") > pasteLinesThreshold {
 			content := []byte(msg.Content)
 			if len(content) > maxAttachmentSize {
 				return m, util.ReportWarn("Paste is too big (>5mb)")

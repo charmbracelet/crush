@@ -100,14 +100,26 @@ func NewIsolatedTerminalWithConfig(t *testing.T, cols, rows int, configJSON stri
 	t.Helper()
 
 	tmpDir := t.TempDir()
+
+	// Create config directory and write config file.
 	configPath := filepath.Join(tmpDir, "config", "crush")
 	if err := os.MkdirAll(configPath, 0o755); err != nil {
 		t.Fatalf("Failed to create config dir: %v", err)
 	}
-
 	configFile := filepath.Join(configPath, "crush.json")
 	if err := os.WriteFile(configFile, []byte(configJSON), 0o644); err != nil {
 		t.Fatalf("Failed to write config: %v", err)
+	}
+
+	// Create data directory and write data config file.
+	// This is required to skip the onboarding flow.
+	dataPath := filepath.Join(tmpDir, "data", "crush")
+	if err := os.MkdirAll(dataPath, 0o755); err != nil {
+		t.Fatalf("Failed to create data dir: %v", err)
+	}
+	dataFile := filepath.Join(dataPath, "crush.json")
+	if err := os.WriteFile(dataFile, []byte(configJSON), 0o644); err != nil {
+		t.Fatalf("Failed to write data config: %v", err)
 	}
 
 	term, err := vttest.NewTerminal(t, cols, rows)

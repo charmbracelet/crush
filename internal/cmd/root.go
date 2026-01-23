@@ -105,7 +105,6 @@ crush -y
 		} else {
 			ui := tui.New(app)
 			ui.QueryVersion = shouldQueryTerminalVersion(env)
-			ui.QueryImageCapabilities = shouldQueryImageCapabilities(env)
 			model = ui
 		}
 		program := tea.NewProgram(

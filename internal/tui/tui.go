@@ -88,10 +88,6 @@ type appModel struct {
 	// QueryVersion instructs the TUI to query for the terminal version when it
 	// starts.
 	QueryVersion bool
-
-	// QueryImageCapabilities instructs the TUI to query for image capabilities
-	// when it starts.
-	QueryImageCapabilities bool
 }
 
 // Init initializes the application model and returns initial commands.

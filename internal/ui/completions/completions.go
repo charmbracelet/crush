@@ -104,7 +104,6 @@ func (c *Completions) OpenWithFiles(depth, limit int) tea.Cmd {
 // SetFiles sets the file items on the completions popup.
 func (c *Completions) SetFiles(files []string) {
 	items := make([]list.FilterableItem, 0, len(files))
-	width := 0
 	for _, file := range files {
 		file = strings.TrimPrefix(file, "./")
 		item := NewCompletionItem(
@@ -114,8 +113,6 @@ func (c *Completions) SetFiles(files []string) {
 			c.focusedStyle,
 			c.matchStyle,
 		)
-
-		width = max(width, ansi.StringWidth(file))
 		items = append(items, item)
 	}
 
@@ -125,11 +122,22 @@ func (c *Completions) SetFiles(files []string) {
 	c.list.SetFilter("") // Clear any previous filter.
 	c.list.Focus()
 
-	c.width = ordered.Clamp(width+2, int(minWidth), int(maxWidth))
+	c.width = maxWidth
 	c.height = ordered.Clamp(len(items), int(minHeight), int(maxHeight))
 	c.list.SetSize(c.width, c.height)
 	c.list.SelectFirst()
 	c.list.ScrollToSelected()
+
+	// recalculate width by using just the visible items
+	start, end := c.list.VisibleItemIndices()
+	width := 0
+	if end != 0 {
+		for _, file := range files[start : end+1] {
+			width = max(width, ansi.StringWidth(file))
+		}
+	}
+	c.width = ordered.Clamp(width+2, int(minWidth), int(maxWidth))
+	c.list.SetSize(c.width, c.height)
 }
 
 // Close closes the completions popup.
@@ -150,10 +158,14 @@ func (c *Completions) Filter(query string) {
 	c.query = query
 	c.list.SetFilter(query)
 
+	// recalculate width by using just the visible items
 	items := c.list.VisibleItems()
+	start, end := c.list.VisibleItemIndices()
 	width := 0
-	for _, item := range items {
-		width = max(width, ansi.StringWidth(item.(interface{ Text() string }).Text()))
+	if end != 0 {
+		for _, item := range items[start : end+1] {
+			width = max(width, ansi.StringWidth(item.(interface{ Text() string }).Text()))
+		}
 	}
 	c.width = ordered.Clamp(width+2, int(minWidth), int(maxWidth))
 	c.height = ordered.Clamp(len(items), int(minHeight), int(maxHeight))

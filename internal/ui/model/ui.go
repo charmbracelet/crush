@@ -496,6 +496,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case copyChatHighlightMsg:
 		cmds = append(cmds, m.copyChatHighlight())
+	case DelayedClickMsg:
+		// Handle delayed single-click action (e.g., expansion).
+		m.chat.HandleDelayedClick(msg)
 	case tea.MouseClickMsg:
 		switch m.state {
 		case uiChat:
@@ -503,8 +506,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Adjust for chat area position
 			x -= m.layout.main.Min.X
 			y -= m.layout.main.Min.Y
-			if m.chat.HandleMouseDown(x, y) {
+			if handled, cmd := m.chat.HandleMouseDown(x, y); handled {
 				m.lastClickTime = time.Now()
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			}
 		}
 

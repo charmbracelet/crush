@@ -28,10 +28,10 @@ var statsCSS string
 var statsJS string
 
 //go:embed stats/header.svg
-var headerDarkSVG string
+var headerSVG string
 
 //go:embed stats/footer.svg
-var footerDarkSVG string
+var footerSVG string
 
 var statsCmd = &cobra.Command{
 	Use:   "stats",
@@ -338,8 +338,8 @@ func generateHTML(stats *Stats, path string) error {
 		StatsJSON: template.JS(statsJSON),
 		CSS:       template.CSS(statsCSS),
 		JS:        template.JS(statsJS),
-		Header:    template.HTML(headerDarkSVG),
-		Footer:    template.HTML(footerDarkSVG),
+		Header:    template.HTML(headerSVG),
+		Footer:    template.HTML(footerSVG),
 	}
 
 	var buf bytes.Buffer

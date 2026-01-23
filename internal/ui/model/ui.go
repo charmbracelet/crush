@@ -149,6 +149,10 @@ type UI struct {
 	// starts.
 	QueryVersion bool
 
+	// QueryImageCapabilities instructs the TUI to query for image capabilities
+	// when it starts.
+	QueryImageCapabilities bool
+
 	// Editor components
 	textarea textarea.Model
 
@@ -351,11 +355,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sendProgressBar = slices.Contains(msg, "WT_SESSION")
 		}
 		m.imgCaps.Env = uv.Environ(msg)
-		// XXX: Right now, we're using the same logic to determine image
-		// support. Terminals like Apple Terminal and possibly others might
-		// bleed characters when querying for Kitty graphics via APC escape
-		// sequences.
-		cmds = append(cmds, timage.RequestCapabilities(m.imgCaps.Env))
+		// Only query for image capabilities if the terminal is known to
+		// support Kitty graphics protocol. This prevents character bleeding
+		// on terminals that don't understand the APC escape sequences.
+		if m.QueryImageCapabilities {
+			cmds = append(cmds, timage.RequestCapabilities(m.imgCaps.Env))
+		}
 	case loadSessionMsg:
 		m.state = uiChat
 		if m.forceCompactMode {

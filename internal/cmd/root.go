@@ -95,10 +95,12 @@ crush -y
 			com := common.DefaultCommon(app)
 			ui := ui.New(com)
 			ui.QueryVersion = shouldQueryTerminalVersion(env)
+			ui.QueryImageCapabilities = shouldQueryImageCapabilities(env)
 			model = ui
 		} else {
 			ui := tui.New(app)
 			ui.QueryVersion = shouldQueryTerminalVersion(env)
+			ui.QueryImageCapabilities = shouldQueryImageCapabilities(env)
 			model = ui
 		}
 		program := tea.NewProgram(
@@ -307,4 +309,20 @@ func shouldQueryTerminalVersion(env uv.Environ) bool {
 		(!strings.Contains(termProg, "Apple") && !okSSHTTY) ||
 		// Terminals that do support XTVERSION.
 		stringext.ContainsAny(termType, "alacritty", "ghostty", "kitty", "rio", "wezterm")
+}
+
+func shouldQueryImageCapabilities(env uv.Environ) bool {
+	termType := env.Getenv("TERM")
+	termProg, okTermProg := env.LookupEnv("TERM_PROGRAM")
+	_, okSSHTTY := env.LookupEnv("SSH_TTY")
+
+	if okSSHTTY {
+		return false
+	}
+
+	if okTermProg && strings.Contains(termProg, "Apple") {
+		return false
+	}
+
+	return stringext.ContainsAny(termType, "alacritty", "ghostty", "kitty", "rio", "wezterm")
 }

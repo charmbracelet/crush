@@ -1479,6 +1479,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			case key.Matches(msg, m.keyMap.Editor.Newline):
 				m.textarea.InsertRune('\n')
 				m.closeCompletions()
+				ta, cmd := m.textarea.Update(msg)
+				m.textarea = ta
+				cmds = append(cmds, cmd)
 			default:
 				if handleGlobalKeys(msg) {
 					// Handle global keys first before passing to textarea.

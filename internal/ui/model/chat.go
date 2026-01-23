@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/list"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/clipperhouse/uax29/v2/words"
 	"github.com/rivo/uniseg"
 )
 
@@ -787,61 +788,53 @@ func findWordBoundaries(line string, col int) (startCol, endCol int) {
 		return 0, 0
 	}
 
+	// Build a mapping of byte offset to grapheme index.
 	gr := uniseg.NewGraphemes(line)
-	var graphemes []string
+	byteToGrapheme := make(map[int]int)
+	graphemeIdx := 0
+	byteOffset := 0
 	for gr.Next() {
-		graphemes = append(graphemes, gr.Str())
+		byteToGrapheme[byteOffset] = graphemeIdx
+		byteOffset += len(gr.Str())
+		graphemeIdx++
 	}
+	byteToGrapheme[byteOffset] = graphemeIdx // End of string.
+	totalGraphemes := graphemeIdx
 
-	if col >= len(graphemes) {
-		col = len(graphemes) - 1
+	if col >= totalGraphemes {
+		col = totalGraphemes - 1
 	}
 	if col < 0 {
 		return 0, 0
 	}
 
-	// Check if we clicked on a space
-	if graphemes[col] == " " || graphemes[col] == "\t" {
-		return col, col
-	}
+	// Segment the line into words using UAX#29.
+	iter := words.FromString(line)
+	for iter.Next() {
+		tokenStart := iter.Start()
+		tokenEnd := iter.End()
 
-	// Find start of word (search backwards)
-	startCol = col
-	for startCol > 0 {
-		if isWordBoundary(graphemes[startCol-1]) {
-			break
+		graphemeStart, ok := byteToGrapheme[tokenStart]
+		if !ok {
+			continue
 		}
-		startCol--
-	}
-
-	// Find end of word (search forwards)
-	endCol = col + 1
-	for endCol < len(graphemes) {
-		if isWordBoundary(graphemes[endCol]) {
-			break
+		graphemeEnd, ok := byteToGrapheme[tokenEnd]
+		if !ok {
+			continue
 		}
-		endCol++
+
+		// Check if the column falls within this segment.
+		if col >= graphemeStart && col < graphemeEnd {
+			token := iter.Value()
+			// If clicked on whitespace, return empty selection.
+			if strings.TrimSpace(token) == "" {
+				return col, col
+			}
+			return graphemeStart, graphemeEnd
+		}
 	}
 
-	return startCol, endCol
-}
-
-// isWordBoundary returns true if the character is a word boundary.
-func isWordBoundary(s string) bool {
-	if s == "" {
-		return true
-	}
-	r := []rune(s)
-	if len(r) == 0 {
-		return true
-	}
-	c := r[0]
-	return c == ' ' || c == '\t' || c == '\n' || c == '\r' ||
-		c == '.' || c == ',' || c == ';' || c == ':' ||
-		c == '!' || c == '?' || c == '"' || c == '\'' ||
-		c == '(' || c == ')' || c == '[' || c == ']' ||
-		c == '{' || c == '}' || c == '<' || c == '>' ||
-		c == '/' || c == '\\' || c == '|' || c == '`'
+	return col, col
 }
 
 // abs returns the absolute value of an integer.

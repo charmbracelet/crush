@@ -30,6 +30,11 @@
             --squid: #858392;
             --pepper: #201F26;
             --iron: #4D4C57;
+            --tuna: #FF6DAA;
+            --uni: #FF937D;
+            --coral: #FF577D;
+            --violet: #C259FF;
+            --malibu: #00A4FF;
         }
 
         /* Light mode colors - charmtone light palette */
@@ -334,6 +339,11 @@
             butter: rootStyles.getPropertyValue('--butter').trim(),
             squid: rootStyles.getPropertyValue('--squid').trim(),
             pepper: rootStyles.getPropertyValue('--pepper').trim(),
+            tuna: rootStyles.getPropertyValue('--tuna').trim(),
+            uni: rootStyles.getPropertyValue('--uni').trim(),
+            coral: rootStyles.getPropertyValue('--coral').trim(),
+            violet: rootStyles.getPropertyValue('--violet').trim(),
+            malibu: rootStyles.getPropertyValue('--malibu').trim(),
         };
 
         // Helper functions
@@ -403,6 +413,7 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    animation: false,
                     interaction: { mode: 'index', intersect: false },
                     scales: {
                         y: { position: 'left', title: { display: true, text: 'Sessions' } },
@@ -434,7 +445,7 @@
                         backgroundColor: ctx => {
                             const count = ctx.raw?.count || ctx.dataset.data[ctx.dataIndex]?.count || 0;
                             const ratio = count / maxCount;
-                            return interpolateColor(ratio, 0.6);
+                            return interpolateColor(ratio);
                         },
                         borderWidth: 0
                     }]
@@ -442,6 +453,7 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    animation: false,
                     scales: {
                         x: {
                             min: 0,
@@ -492,6 +504,7 @@
                     indexAxis: 'y',
                     responsive: true,
                     maintainAspectRatio: false,
+                    animation: false,
                     plugins: { legend: { display: false } }
                 }
             });
@@ -511,6 +524,7 @@
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                animation: false,
                 plugins: {
                     legend: { position: 'bottom' }
                 }
@@ -539,6 +553,7 @@
                     indexAxis: 'y',
                     responsive: true,
                     maintainAspectRatio: false,
+                    animation: false,
                     plugins: { legend: { display: false } }
                 }
             });
@@ -549,7 +564,7 @@
                 acc[m.provider] = (acc[m.provider] || 0) + m.message_count;
                 return acc;
             }, {});
-            const providerColors = [colors.charple, colors.julep, colors.urchin, colors.cherry];
+            const providerColors = [colors.malibu, colors.charple, colors.violet, colors.tuna, colors.coral, colors.uni];
             new Chart(document.getElementById('providerPieChart'), {
                 type: 'doughnut',
                 data: {
@@ -563,6 +578,7 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    animation: false,
                     plugins: {
                         legend: { position: 'bottom' }
                     }

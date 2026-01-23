@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,7 +28,7 @@ func TestSessionsDialogOpens(t *testing.T) {
 	require.NoError(t, err)
 	defer term.Close()
 
-	cmd := exec.Command(CrushBinary())
+	cmd := exec.CommandContext(context.Background(), CrushBinary())
 	cmd.Env = append(os.Environ(),
 		"XDG_CONFIG_HOME="+filepath.Join(tmpDir, "config"),
 		"XDG_DATA_HOME="+filepath.Join(tmpDir, "data"),
@@ -63,7 +64,7 @@ func TestCommandsDialogOpens(t *testing.T) {
 	require.NoError(t, err)
 	defer term.Close()
 
-	cmd := exec.Command(CrushBinary())
+	cmd := exec.CommandContext(context.Background(), CrushBinary())
 	cmd.Env = append(os.Environ(),
 		"XDG_CONFIG_HOME="+filepath.Join(tmpDir, "config"),
 		"XDG_DATA_HOME="+filepath.Join(tmpDir, "data"),
@@ -100,7 +101,7 @@ func TestModelsDialogOpens(t *testing.T) {
 	require.NoError(t, err)
 	defer term.Close()
 
-	cmd := exec.Command(CrushBinary())
+	cmd := exec.CommandContext(context.Background(), CrushBinary())
 	cmd.Env = append(os.Environ(),
 		"XDG_CONFIG_HOME="+filepath.Join(tmpDir, "config"),
 		"XDG_DATA_HOME="+filepath.Join(tmpDir, "data"),
@@ -137,7 +138,7 @@ func TestEscapeClosesDialog(t *testing.T) {
 	require.NoError(t, err)
 	defer term.Close()
 
-	cmd := exec.Command(CrushBinary())
+	cmd := exec.CommandContext(context.Background(), CrushBinary())
 	cmd.Env = append(os.Environ(),
 		"XDG_CONFIG_HOME="+filepath.Join(tmpDir, "config"),
 		"XDG_DATA_HOME="+filepath.Join(tmpDir, "data"),
@@ -181,7 +182,7 @@ func TestTextInput(t *testing.T) {
 	require.NoError(t, err)
 	defer term.Close()
 
-	cmd := exec.Command(CrushBinary())
+	cmd := exec.CommandContext(context.Background(), CrushBinary())
 	cmd.Env = append(os.Environ(),
 		"XDG_CONFIG_HOME="+filepath.Join(tmpDir, "config"),
 		"XDG_DATA_HOME="+filepath.Join(tmpDir, "data"),
@@ -218,7 +219,7 @@ func TestCtrlGOpensMoreMenu(t *testing.T) {
 	require.NoError(t, err)
 	defer term.Close()
 
-	cmd := exec.Command(CrushBinary())
+	cmd := exec.CommandContext(context.Background(), CrushBinary())
 	cmd.Env = append(os.Environ(),
 		"XDG_CONFIG_HOME="+filepath.Join(tmpDir, "config"),
 		"XDG_DATA_HOME="+filepath.Join(tmpDir, "data"),

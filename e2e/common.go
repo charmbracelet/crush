@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"os"
@@ -74,7 +75,7 @@ func NewTestTerminal(t *testing.T, args []string, cols, rows int) *vttest.Termin
 		t.Fatalf("Failed to create terminal: %v", err)
 	}
 
-	cmd := exec.Command(CrushBinary(), args...)
+	cmd := exec.CommandContext(context.Background(), CrushBinary(), args...)
 	if err := term.Start(cmd); err != nil {
 		term.Close()
 		t.Fatalf("Failed to start crush: %v", err)
@@ -106,7 +107,7 @@ func NewIsolatedTerminal(t *testing.T, cols, rows int) *vttest.Terminal {
 		t.Fatalf("Failed to create terminal: %v", err)
 	}
 
-	cmd := exec.Command(CrushBinary())
+	cmd := exec.CommandContext(context.Background(), CrushBinary())
 	cmd.Env = append(os.Environ(),
 		"XDG_CONFIG_HOME="+filepath.Join(tmpDir, "config"),
 		"XDG_DATA_HOME="+filepath.Join(tmpDir, "data"),

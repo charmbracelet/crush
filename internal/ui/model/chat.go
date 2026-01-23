@@ -411,6 +411,16 @@ func (m *Chat) ToggleExpandedSelectedItem() {
 	}
 }
 
+// HandleKeyMsg handles key events for the chat component.
+func (m *Chat) HandleKeyMsg(key tea.KeyMsg) (bool, tea.Cmd) {
+	if m.list.Focused() {
+		if handler, ok := m.list.SelectedItem().(chat.KeyEventHandler); ok {
+			return handler.HandleKeyEvent(key)
+		}
+	}
+	return false, nil
+}
+
 // HandleMouseDown handles mouse down events for the chat component.
 func (m *Chat) HandleMouseDown(x, y int) bool {
 	if m.list.Len() == 0 {

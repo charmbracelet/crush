@@ -33,6 +33,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const OSVendorTypeApple = "Apple"
+
+var kittyTerminals = []string{"alacritty", "ghostty", "kitty", "rio", "wezterm"}
+
 func init() {
 	rootCmd.PersistentFlags().StringP("cwd", "c", "", "Current working directory")
 	rootCmd.PersistentFlags().StringP("data-dir", "D", "", "Custom crush data directory")
@@ -306,9 +310,9 @@ func shouldQueryTerminalVersion(env uv.Environ) bool {
 	termProg, okTermProg := env.LookupEnv("TERM_PROGRAM")
 	_, okSSHTTY := env.LookupEnv("SSH_TTY")
 	return (!okTermProg && !okSSHTTY) ||
-		(!strings.Contains(termProg, "Apple") && !okSSHTTY) ||
+		(!strings.Contains(termProg, OSVendorTypeApple) && !okSSHTTY) ||
 		// Terminals that do support XTVERSION.
-		stringext.ContainsAny(termType, "alacritty", "ghostty", "kitty", "rio", "wezterm")
+		stringext.ContainsAny(termType, kittyTerminals...)
 }
 
 func shouldQueryImageCapabilities(env uv.Environ) bool {
@@ -320,9 +324,9 @@ func shouldQueryImageCapabilities(env uv.Environ) bool {
 		return false
 	}
 
-	if okTermProg && strings.Contains(termProg, "Apple") {
+	if okTermProg && strings.Contains(termProg, OSVendorTypeApple) {
 		return false
 	}
 
-	return stringext.ContainsAny(termType, "alacritty", "ghostty", "kitty", "rio", "wezterm")
+	return stringext.ContainsAny(termType, kittyTerminals...)
 }

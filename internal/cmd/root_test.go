@@ -105,7 +105,6 @@ func TestShouldQueryImageCapabilities(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			got := shouldQueryImageCapabilities(uv.Environ(tt.env))
@@ -120,39 +119,38 @@ func TestStringextContainsAny(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name     string
-		s        string
-		substr   []string
-		want     bool
+		name   string
+		s      string
+		substr []string
+		want   bool
 	}{
 		{
 			name:   "kitty in TERM",
 			s:      "xterm-kitty",
-			substr: []string{"alacritty", "ghostty", "kitty", "rio", "wezterm"},
+			substr: kittyTerminals,
 			want:   true,
 		},
 		{
 			name:   "wezterm in TERM",
 			s:      "wezterm",
-			substr: []string{"alacritty", "ghostty", "kitty", "rio", "wezterm"},
+			substr: kittyTerminals,
+			want:   true,
+		},
+		{
+			name:   "alacritty in TERM",
+			s:      "alacritty",
+			substr: kittyTerminals,
 			want:   true,
 		},
 		{
 			name:   "generic terminal not in list",
 			s:      "xterm-256color",
-			substr: []string{"alacritty", "ghostty", "kitty", "rio", "wezterm"},
+			substr: kittyTerminals,
 			want:   false,
-		},
-		{
-			name:   "alacritty in TERM",
-			s:      "alacritty",
-			substr: []string{"alacritty", "ghostty", "kitty", "rio", "wezterm"},
-			want:   true,
 		},
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			got := stringext.ContainsAny(tt.s, tt.substr...)

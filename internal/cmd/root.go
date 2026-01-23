@@ -322,7 +322,7 @@ func shouldQueryImageCapabilities(env uv.Environ) bool {
 	_, okSSHTTY := env.LookupEnv("SSH_TTY")
 
 	if okSSHTTY {
-		return true
+		return false
 	}
 
 	if okTermProg && strings.Contains(termProg, osVendorTypeApple) {

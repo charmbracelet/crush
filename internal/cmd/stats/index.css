@@ -75,6 +75,15 @@ body {
   display: block;
 }
 
+.header-info {
+  padding: 0 0.5rem;
+  margin-bottom: 2rem;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  font-family: "JetBrains Mono", "SF Mono", Consolas, monospace;
+  text-align: center;
+}
+
 .stats-grid {
   display: flex;
   flex-wrap: wrap;
@@ -227,13 +236,6 @@ td {
   width: 100%;
   height: auto;
   display: block;
-}
-
-.footer-info {
-  padding: 0 0.5rem;
-  font-size: 0.875rem;
-  color: var(--text-muted);
-  text-align: center;
 }
 
 /* Override charm brand colors in footer */

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
@@ -142,20 +143,19 @@ func runStats(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("no data available: no sessions found in database")
 	}
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("failed to get current directory: %w", err)
-	}
-	projName := filepath.Base(cwd)
-
 	currentUser, err := user.Current()
 	if err != nil {
 		return fmt.Errorf("failed to get current user: %w", err)
 	}
 	username := currentUser.Username
+	project, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get current directory: %w", err)
+	}
+	project = strings.Replace(project, currentUser.HomeDir, "~", 1)
 
 	htmlPath := filepath.Join(dataDir, "stats/index.html")
-	if err := generateHTML(stats, projName, username, htmlPath); err != nil {
+	if err := generateHTML(stats, project, username, htmlPath); err != nil {
 		return fmt.Errorf("failed to generate HTML: %w", err)
 	}
 

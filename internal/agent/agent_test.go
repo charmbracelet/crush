@@ -664,11 +664,13 @@ func TestIsTruncationError(t *testing.T) {
 		err      error
 		expected bool
 	}{
+		// Nil error.
 		{
 			name:     "nil error",
 			err:      nil,
 			expected: false,
 		},
+		// Truncation errors.
 		{
 			name:     "XML syntax error",
 			err:      fmt.Errorf("failed to parse: XML syntax error on line 1: element <tool_call> closed by </arg_value>"),
@@ -685,19 +687,9 @@ func TestIsTruncationError(t *testing.T) {
 			expected: true,
 		},
 		{
-			name:     "regular error",
-			err:      fmt.Errorf("connection refused"),
-			expected: false,
-		},
-		{
 			name:     "wrapped XML error",
 			err:      fmt.Errorf("tool parsing failed: %w", fmt.Errorf("XML syntax error on line 5")),
 			expected: true,
-		},
-		{
-			name:     "rate limit error",
-			err:      fmt.Errorf("rate limit exceeded"),
-			expected: false,
 		},
 		{
 			name:     "failed to parse XML wrapper",
@@ -708,6 +700,74 @@ func TestIsTruncationError(t *testing.T) {
 			name:     "tool call parsing failed",
 			err:      fmt.Errorf("glm-4.6 tool call parsing failed: some error"),
 			expected: true,
+		},
+		// Server/infrastructure errors (now recoverable).
+		{
+			name:     "connection refused",
+			err:      fmt.Errorf("dial tcp: connection refused"),
+			expected: true,
+		},
+		{
+			name:     "connection reset",
+			err:      fmt.Errorf("read: connection reset by peer"),
+			expected: true,
+		},
+		{
+			name:     "context deadline exceeded",
+			err:      fmt.Errorf("context deadline exceeded"),
+			expected: true,
+		},
+		{
+			name:     "timeout error",
+			err:      fmt.Errorf("request timeout after 30s"),
+			expected: true,
+		},
+		{
+			name:     "internal server error",
+			err:      fmt.Errorf("internal server error"),
+			expected: true,
+		},
+		{
+			name:     "bad gateway",
+			err:      fmt.Errorf("502 bad gateway"),
+			expected: true,
+		},
+		{
+			name:     "service unavailable",
+			err:      fmt.Errorf("503 service unavailable"),
+			expected: true,
+		},
+		{
+			name:     "gateway timeout",
+			err:      fmt.Errorf("504 gateway timeout"),
+			expected: true,
+		},
+		// Ollama-specific errors.
+		{
+			name:     "model is loading",
+			err:      fmt.Errorf("model is loading, please wait"),
+			expected: true,
+		},
+		{
+			name:     "out of memory",
+			err:      fmt.Errorf("CUDA out of memory"),
+			expected: true,
+		},
+		{
+			name:     "GPU error",
+			err:      fmt.Errorf("GPU memory exhausted"),
+			expected: true,
+		},
+		// Non-recoverable errors.
+		{
+			name:     "rate limit error",
+			err:      fmt.Errorf("rate limit exceeded"),
+			expected: false,
+		},
+		{
+			name:     "authentication error",
+			err:      fmt.Errorf("invalid API key"),
+			expected: false,
 		},
 	}
 

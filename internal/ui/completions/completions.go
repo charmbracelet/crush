@@ -83,7 +83,7 @@ func (c *Completions) Query() string {
 
 // Size returns the visible size of the popup.
 func (c *Completions) Size() (width, height int) {
-	visible := len(c.list.VisibleItems())
+	visible := len(c.list.FilteredItems())
 	return c.width, min(visible, c.height)
 }
 
@@ -159,7 +159,7 @@ func (c *Completions) Filter(query string) {
 	c.list.SetFilter(query)
 
 	// recalculate width by using just the visible items
-	items := c.list.VisibleItems()
+	items := c.list.FilteredItems()
 	start, end := c.list.VisibleItemIndices()
 	width := 0
 	if end != 0 {
@@ -176,7 +176,7 @@ func (c *Completions) Filter(query string) {
 
 // HasItems returns whether there are visible items.
 func (c *Completions) HasItems() bool {
-	return len(c.list.VisibleItems()) > 0
+	return len(c.list.FilteredItems()) > 0
 }
 
 // Update handles key events for the completions.
@@ -215,7 +215,7 @@ func (c *Completions) Update(msg tea.KeyPressMsg) (tea.Msg, bool) {
 
 // selectPrev selects the previous item with circular navigation.
 func (c *Completions) selectPrev() {
-	items := c.list.VisibleItems()
+	items := c.list.FilteredItems()
 	if len(items) == 0 {
 		return
 	}
@@ -227,7 +227,7 @@ func (c *Completions) selectPrev() {
 
 // selectNext selects the next item with circular navigation.
 func (c *Completions) selectNext() {
-	items := c.list.VisibleItems()
+	items := c.list.FilteredItems()
 	if len(items) == 0 {
 		return
 	}
@@ -239,7 +239,7 @@ func (c *Completions) selectNext() {
 
 // selectCurrent returns a command with the currently selected item.
 func (c *Completions) selectCurrent(insert bool) tea.Msg {
-	items := c.list.VisibleItems()
+	items := c.list.FilteredItems()
 	if len(items) == 0 {
 		return nil
 	}
@@ -270,7 +270,7 @@ func (c *Completions) Render() string {
 		return ""
 	}
 
-	items := c.list.VisibleItems()
+	items := c.list.FilteredItems()
 	if len(items) == 0 {
 		return ""
 	}

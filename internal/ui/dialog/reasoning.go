@@ -176,7 +176,7 @@ func (r *Reasoning) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	inputView := t.Dialog.InputPrompt.Render(r.input.View())
 	rc.AddPart(inputView)
 
-	visibleCount := len(r.list.VisibleItems())
+	visibleCount := len(r.list.FilteredItems())
 	if r.list.Height() >= visibleCount {
 		r.list.ScrollToTop()
 	} else {

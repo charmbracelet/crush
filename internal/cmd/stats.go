@@ -137,6 +137,10 @@ func runStats(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("failed to gather stats: %w", err)
 	}
 
+	if stats.Total.TotalSessions == 0 {
+		return fmt.Errorf("no data available: no sessions found in database")
+	}
+
 	htmlPath := filepath.Join(dataDir, "stats/index.html")
 	if err := generateHTML(stats, htmlPath); err != nil {
 		return fmt.Errorf("failed to generate HTML: %w", err)

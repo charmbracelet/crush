@@ -147,7 +147,7 @@ func (s *Session) HandleMsg(msg tea.Msg) Action {
 					s.list.SelectFirst()
 					s.list.ScrollToSelected()
 					deleteSession := func() tea.Msg {
-						err := s.com.App.Sessions.Delete(context.Background(), sessionItem.ID())
+						err := s.com.App.Sessions.Delete(context.TODO(), sessionItem.ID())
 						if err != nil {
 							return uiutil.NewErrorMsg(err)
 						}

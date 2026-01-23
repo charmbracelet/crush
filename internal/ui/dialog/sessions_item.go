@@ -54,7 +54,6 @@ func (s *SessionItem) SetMatch(m fuzzy.Match) {
 }
 
 // Render returns the string representation of the session item.
-// TODO: remove duplicate code with renderitem
 func (s *SessionItem) Render(width int) string {
 	info := humanize.Time(time.Unix(s.UpdatedAt, 0))
 	styles := ListIemStyles{

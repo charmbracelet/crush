@@ -88,7 +88,15 @@ func NewTestTerminal(t *testing.T, args []string, cols, rows int) *vttest.Termin
 }
 
 // NewIsolatedTerminal creates a terminal with isolated config environment.
+// Uses the default TestConfigJSON for configuration.
 func NewIsolatedTerminal(t *testing.T, cols, rows int) *vttest.Terminal {
+	t.Helper()
+	return NewIsolatedTerminalWithConfig(t, cols, rows, TestConfigJSON())
+}
+
+// NewIsolatedTerminalWithConfig creates a terminal with isolated config environment
+// using the provided config JSON string.
+func NewIsolatedTerminalWithConfig(t *testing.T, cols, rows int, configJSON string) *vttest.Terminal {
 	t.Helper()
 
 	tmpDir := t.TempDir()
@@ -98,7 +106,7 @@ func NewIsolatedTerminal(t *testing.T, cols, rows int) *vttest.Terminal {
 	}
 
 	configFile := filepath.Join(configPath, "crush.json")
-	if err := os.WriteFile(configFile, []byte(TestConfigJSON()), 0o644); err != nil {
+	if err := os.WriteFile(configFile, []byte(configJSON), 0o644); err != nil {
 		t.Fatalf("Failed to write config: %v", err)
 	}
 

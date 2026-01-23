@@ -1,25 +1,16 @@
 package e2e
 
 import (
-	"context"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/x/vttest"
 	"github.com/stretchr/testify/require"
 )
 
 // TestModelDialogOpens tests that the model dialog opens with ctrl+l.
 func TestModelDialogOpens(t *testing.T) {
 	SkipIfE2EDisabled(t)
-
-	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config", "crush")
-	require.NoError(t, os.MkdirAll(configPath, 0o755))
 
 	configJSON := `{
   "providers": {
@@ -34,20 +25,9 @@ func TestModelDialogOpens(t *testing.T) {
     "small": { "provider": "test-provider", "model": "test-model-small" }
   }
 }`
-	configFile := filepath.Join(configPath, "crush.json")
-	require.NoError(t, os.WriteFile(configFile, []byte(configJSON), 0o644))
 
-	term, err := vttest.NewTerminal(t, 120, 50)
-	require.NoError(t, err)
+	term := NewIsolatedTerminalWithConfig(t, 120, 50, configJSON)
 	defer term.Close()
-
-	cmd := exec.CommandContext(context.Background(), CrushBinary())
-	cmd.Env = append(os.Environ(),
-		"XDG_CONFIG_HOME="+filepath.Join(tmpDir, "config"),
-		"XDG_DATA_HOME="+filepath.Join(tmpDir, "data"),
-		"HOME="+tmpDir,
-	)
-	require.NoError(t, term.Start(cmd))
 
 	time.Sleep(startupDelay)
 
@@ -70,24 +50,8 @@ func TestModelDialogOpens(t *testing.T) {
 func TestModelDialogClose(t *testing.T) {
 	SkipIfE2EDisabled(t)
 
-	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config", "crush")
-	require.NoError(t, os.MkdirAll(configPath, 0o755))
-
-	configFile := filepath.Join(configPath, "crush.json")
-	require.NoError(t, os.WriteFile(configFile, []byte(TestConfigJSON()), 0o644))
-
-	term, err := vttest.NewTerminal(t, 120, 50)
-	require.NoError(t, err)
+	term := NewIsolatedTerminal(t, 120, 50)
 	defer term.Close()
-
-	cmd := exec.CommandContext(context.Background(), CrushBinary())
-	cmd.Env = append(os.Environ(),
-		"XDG_CONFIG_HOME="+filepath.Join(tmpDir, "config"),
-		"XDG_DATA_HOME="+filepath.Join(tmpDir, "data"),
-		"HOME="+tmpDir,
-	)
-	require.NoError(t, term.Start(cmd))
 
 	time.Sleep(startupDelay)
 
@@ -114,10 +78,6 @@ func TestModelDialogClose(t *testing.T) {
 func TestModelConfigLoads(t *testing.T) {
 	SkipIfE2EDisabled(t)
 
-	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config", "crush")
-	require.NoError(t, os.MkdirAll(configPath, 0o755))
-
 	configJSON := `{
   "providers": {
     "anthropic": {
@@ -130,20 +90,9 @@ func TestModelConfigLoads(t *testing.T) {
     "small": { "provider": "anthropic", "model": "claude-haiku-3-20240307" }
   }
 }`
-	configFile := filepath.Join(configPath, "crush.json")
-	require.NoError(t, os.WriteFile(configFile, []byte(configJSON), 0o644))
 
-	term, err := vttest.NewTerminal(t, 120, 50)
-	require.NoError(t, err)
+	term := NewIsolatedTerminalWithConfig(t, 120, 50, configJSON)
 	defer term.Close()
-
-	cmd := exec.CommandContext(context.Background(), CrushBinary())
-	cmd.Env = append(os.Environ(),
-		"XDG_CONFIG_HOME="+filepath.Join(tmpDir, "config"),
-		"XDG_DATA_HOME="+filepath.Join(tmpDir, "data"),
-		"HOME="+tmpDir,
-	)
-	require.NoError(t, term.Start(cmd))
 
 	time.Sleep(startupDelay)
 

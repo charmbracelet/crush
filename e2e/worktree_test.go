@@ -1,40 +1,17 @@
 package e2e
 
 import (
-	"context"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/charmbracelet/x/vttest"
-	"github.com/stretchr/testify/require"
 )
 
 // TestNewSessionDialogOpens tests that the new session dialog opens with ctrl+n.
 func TestNewSessionDialogOpens(t *testing.T) {
 	SkipIfE2EDisabled(t)
 
-	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config", "crush")
-	require.NoError(t, os.MkdirAll(configPath, 0o755))
-
-	configFile := filepath.Join(configPath, "crush.json")
-	require.NoError(t, os.WriteFile(configFile, []byte(TestConfigJSON()), 0o644))
-
-	term, err := vttest.NewTerminal(t, 100, 40)
-	require.NoError(t, err)
+	term := NewIsolatedTerminal(t, 100, 40)
 	defer term.Close()
-
-	cmd := exec.CommandContext(context.Background(), CrushBinary())
-	cmd.Env = append(os.Environ(),
-		"XDG_CONFIG_HOME="+filepath.Join(tmpDir, "config"),
-		"XDG_DATA_HOME="+filepath.Join(tmpDir, "data"),
-		"HOME="+tmpDir,
-	)
-	require.NoError(t, term.Start(cmd))
 
 	time.Sleep(startupDelay)
 
@@ -60,24 +37,8 @@ func TestNewSessionDialogOpens(t *testing.T) {
 func TestNewSessionDialogClose(t *testing.T) {
 	SkipIfE2EDisabled(t)
 
-	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config", "crush")
-	require.NoError(t, os.MkdirAll(configPath, 0o755))
-
-	configFile := filepath.Join(configPath, "crush.json")
-	require.NoError(t, os.WriteFile(configFile, []byte(TestConfigJSON()), 0o644))
-
-	term, err := vttest.NewTerminal(t, 100, 40)
-	require.NoError(t, err)
+	term := NewIsolatedTerminal(t, 100, 40)
 	defer term.Close()
-
-	cmd := exec.CommandContext(context.Background(), CrushBinary())
-	cmd.Env = append(os.Environ(),
-		"XDG_CONFIG_HOME="+filepath.Join(tmpDir, "config"),
-		"XDG_DATA_HOME="+filepath.Join(tmpDir, "data"),
-		"HOME="+tmpDir,
-	)
-	require.NoError(t, term.Start(cmd))
 
 	time.Sleep(startupDelay)
 	term.SendText("\x0e") // Ctrl+N
@@ -102,24 +63,8 @@ func TestNewSessionDialogClose(t *testing.T) {
 func TestNewSessionTextInput(t *testing.T) {
 	SkipIfE2EDisabled(t)
 
-	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config", "crush")
-	require.NoError(t, os.MkdirAll(configPath, 0o755))
-
-	configFile := filepath.Join(configPath, "crush.json")
-	require.NoError(t, os.WriteFile(configFile, []byte(TestConfigJSON()), 0o644))
-
-	term, err := vttest.NewTerminal(t, 100, 40)
-	require.NoError(t, err)
+	term := NewIsolatedTerminal(t, 100, 40)
 	defer term.Close()
-
-	cmd := exec.CommandContext(context.Background(), CrushBinary())
-	cmd.Env = append(os.Environ(),
-		"XDG_CONFIG_HOME="+filepath.Join(tmpDir, "config"),
-		"XDG_DATA_HOME="+filepath.Join(tmpDir, "data"),
-		"HOME="+tmpDir,
-	)
-	require.NoError(t, term.Start(cmd))
 
 	time.Sleep(startupDelay)
 	term.SendText("\x0e") // Ctrl+N

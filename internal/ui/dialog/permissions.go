@@ -95,6 +95,7 @@ type permissionsKeyMap struct {
 	ScrollRight      key.Binding
 	Choose           key.Binding
 	Scroll           key.Binding
+	Hide             key.Binding
 }
 
 func defaultPermissionsKeyMap() permissionsKeyMap {
@@ -159,6 +160,10 @@ func defaultPermissionsKeyMap() permissionsKeyMap {
 		Scroll: key.NewBinding(
 			key.WithKeys("shift+left", "shift+down", "shift+up", "shift+right"),
 			key.WithHelp("shift+←↓↑→", "scroll"),
+		),
+		Hide: key.NewBinding(
+			key.WithKeys("ctrl+h"),
+			key.WithHelp("ctrl+h", "hide dialog"),
 		),
 	}
 }
@@ -768,6 +773,7 @@ func (p *Permissions) ShortHelp() []key.Binding {
 		p.keyMap.Choose,
 		p.keyMap.Select,
 		p.keyMap.Close,
+		p.keyMap.Hide,
 	}
 
 	if p.canScroll() {

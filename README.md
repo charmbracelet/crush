@@ -190,12 +190,13 @@ That said, you can also set environment variables for preferred providers.
 | `HF_TOKEN`                  | Huggingface Inference                              |
 | `VERTEXAI_PROJECT`          | Google Cloud VertexAI (Gemini)                     |
 | `VERTEXAI_LOCATION`         | Google Cloud VertexAI (Gemini)                     |
+| `SYNTHETIC_API_KEY`         | Synthetic                                          |
 | `GROQ_API_KEY`              | Groq                                               |
-| `AWS_ACCESS_KEY_ID`         | Amazon Bedrock (Claude)                               |
-| `AWS_SECRET_ACCESS_KEY`     | Amazon Bedrock (Claude)                               |
-| `AWS_REGION`                | Amazon Bedrock (Claude)                               |
-| `AWS_PROFILE`               | Amazon Bedrock (Custom Profile)                       |
-| `AWS_BEARER_TOKEN_BEDROCK`  | Amazon Bedrock                                        |
+| `AWS_ACCESS_KEY_ID`         | Amazon Bedrock (Claude)                            |
+| `AWS_SECRET_ACCESS_KEY`     | Amazon Bedrock (Claude)                            |
+| `AWS_REGION`                | Amazon Bedrock (Claude)                            |
+| `AWS_PROFILE`               | Amazon Bedrock (Custom Profile)                    |
+| `AWS_BEARER_TOKEN_BEDROCK`  | Amazon Bedrock                                     |
 | `AZURE_OPENAI_API_ENDPOINT` | Azure OpenAI models                                |
 | `AZURE_OPENAI_API_KEY`      | Azure OpenAI models (optional when using Entra ID) |
 | `AZURE_OPENAI_API_VERSION`  | Azure OpenAI models                                |

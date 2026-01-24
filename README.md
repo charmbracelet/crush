@@ -183,15 +183,16 @@ That said, you can also set environment variables for preferred providers.
 | --------------------------- | -------------------------------------------------- |
 | `ANTHROPIC_API_KEY`         | Anthropic                                          |
 | `OPENAI_API_KEY`            | OpenAI                                             |
-| `OPENROUTER_API_KEY`        | OpenRouter                                         |
 | `VERCEL_API_KEY`            | Vercel AI Gateway                                  |
 | `GEMINI_API_KEY`            | Google Gemini                                      |
+| `SYNTHETIC_API_KEY`         | Synthetic                                          |
+| `ZAI_API_KEY`               | Z.ai                                               |
+| `HF_TOKEN`                  | Hugging Face Inference                             |
 | `CEREBRAS_API_KEY`          | Cerebras                                           |
-| `HF_TOKEN`                  | Huggingface Inference                              |
+| `OPENROUTER_API_KEY`        | OpenRouter                                         |
+| `GROQ_API_KEY`              | Groq                                               |
 | `VERTEXAI_PROJECT`          | Google Cloud VertexAI (Gemini)                     |
 | `VERTEXAI_LOCATION`         | Google Cloud VertexAI (Gemini)                     |
-| `SYNTHETIC_API_KEY`         | Synthetic                                          |
-| `GROQ_API_KEY`              | Groq                                               |
 | `AWS_ACCESS_KEY_ID`         | Amazon Bedrock (Claude)                            |
 | `AWS_SECRET_ACCESS_KEY`     | Amazon Bedrock (Claude)                            |
 | `AWS_REGION`                | Amazon Bedrock (Claude)                            |

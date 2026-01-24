@@ -289,7 +289,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 				if readBytes == 0 {
 					part = strings.TrimLeft(part, " \t")
 				}
-				// ignores initial whitespace only messages
+				// Ignore initial whitespace-only messages.
 				if printed || strings.TrimSpace(part) != "" {
 					printed = true
 					fmt.Fprint(output, part)

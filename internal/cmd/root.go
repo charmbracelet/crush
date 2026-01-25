@@ -302,16 +302,22 @@ func createDotCrushDir(dir string) error {
 	return nil
 }
 
+// shouldQueryCapabilities determines if terminal capability queries should be performed.
+//
+// Returns false for:
+//   - Apple Terminal.app (TERM_PROGRAM contains "Apple") — causes probe bleed
+//   - SSH sessions with unknown terminals — conservative fallback
+//
+// Returns true for:
+//   - Kitty-compatible terminals (alacritty, ghostty, kitty, rio, wezterm) — even over SSH
+//   - Local sessions (no SSH_TTY) with any terminal
+//
+// The actual capability query (performed in ui.Update) sends XTVERSION escape sequences
+// to detect Kitty Graphics Protocol support and terminal pixel dimensions.
 func shouldQueryCapabilities(env uv.Environ) bool {
-	const osVendorTypeApple = "Apple"
-	termType := env.Getenv("TERM")
-	termProg, okTermProg := env.LookupEnv("TERM_PROGRAM")
-	_, okSSHTTY := env.LookupEnv("SSH_TTY")
-	if okTermProg && strings.Contains(termProg, osVendorTypeApple) {
+	if termProg, ok := env.LookupEnv("TERM_PROGRAM"); ok && strings.Contains(termProg, "Apple") {
 		return false
 	}
-	return (!okTermProg && !okSSHTTY) ||
-		(!strings.Contains(termProg, osVendorTypeApple) && !okSSHTTY) ||
-		// Terminals that do support XTVERSION.
-		stringext.ContainsAny(termType, kittyTerminals...)
+	_, hasSSH := env.LookupEnv("SSH_TTY")
+	return !hasSSH || stringext.ContainsAny(env.Getenv("TERM"), kittyTerminals...)
 }

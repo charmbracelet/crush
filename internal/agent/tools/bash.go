@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/shell"
+	"github.com/charmbracelet/crush/internal/telemetry"
 )
 
 type BashParams struct {
@@ -191,6 +192,14 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 		BashToolName,
 		string(bashDescription(attribution, modelName)),
 		func(ctx context.Context, params BashParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			// Start telemetry span for tool execution.
+			ctx, span := telemetry.StartSpan(ctx, telemetry.SpanToolExecute)
+			span.SetAttributes(telemetry.AttrToolName.String(BashToolName))
+			if telemetry.CaptureContent() {
+				span.SetAttributes(telemetry.AttrToolInput.String(telemetry.TruncateString(params.Command)))
+			}
+			defer span.End()
+
 			if params.Command == "" {
 				return fantasy.NewTextErrorResponse("missing command"), nil
 			}

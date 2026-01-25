@@ -38,7 +38,10 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/stringext"
+	"github.com/charmbracelet/crush/internal/telemetry"
 	"github.com/charmbracelet/x/exp/charmtone"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -167,6 +170,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	largeModel := a.largeModel.Get()
 	systemPrompt := a.systemPrompt.Get()
 	promptPrefix := a.systemPromptPrefix.Get()
+
+	// Start telemetry span for agent run.
+	ctx, span := telemetry.StartSpan(ctx, telemetry.SpanAgentRun,
+		trace.WithAttributes(
+			telemetry.AttrSessionID.String(call.SessionID),
+			telemetry.AttrModelProvider.String(largeModel.ModelCfg.Provider),
+			telemetry.AttrModelID.String(largeModel.ModelCfg.Model),
+		),
+	)
+	defer span.End()
 
 	if len(agentTools) > 0 {
 		// Add Anthropic caching to the last tool.
@@ -371,6 +384,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				finishReason = message.FinishReasonToolUse
 			}
 			currentAssistant.AddFinish(finishReason, "", "")
+
+			// Record telemetry attributes for this step.
+			span.SetAttributes(
+				telemetry.AttrLLMInputTokens.Int64(stepResult.Usage.InputTokens),
+				telemetry.AttrLLMOutputTokens.Int64(stepResult.Usage.OutputTokens),
+				telemetry.AttrLLMStopReason.String(string(stepResult.FinishReason)),
+			)
+
 			sessionLock.Lock()
 			updatedSession, getSessionErr := a.sessions.Get(genCtx, call.SessionID)
 			if getSessionErr != nil {
@@ -408,6 +429,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	a.eventPromptResponded(call.SessionID, time.Since(startTime).Truncate(time.Second))
 
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+
 		isCancelErr := errors.Is(err, context.Canceled)
 		isPermissionErr := errors.Is(err, permission.ErrorPermissionDenied)
 		if currentAssistant == nil {

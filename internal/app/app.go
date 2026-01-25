@@ -32,6 +32,7 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
+	"github.com/charmbracelet/crush/internal/telemetry"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/update"
@@ -544,6 +545,15 @@ func (app *App) Shutdown() {
 		}
 	}
 	wg.Wait()
+
+	// Shutdown telemetry last to ensure all spans are flushed.
+	if telemetry.IsEnabled() {
+		telemetryCtx, telemetryCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer telemetryCancel()
+		if err := telemetry.Shutdown(telemetryCtx); err != nil {
+			slog.Warn("Failed to shutdown telemetry", "error", err)
+		}
+	}
 }
 
 // checkForUpdates checks for available updates.

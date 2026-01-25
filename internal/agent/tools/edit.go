@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/telemetry"
 
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -64,6 +65,14 @@ func NewEditTool(lspClients *csync.Map[string, *lsp.Client], permissions permiss
 		EditToolName,
 		string(editDescription),
 		func(ctx context.Context, params EditParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			// Start telemetry span for tool execution.
+			ctx, span := telemetry.StartSpan(ctx, telemetry.SpanToolExecute)
+			span.SetAttributes(telemetry.AttrToolName.String(EditToolName))
+			if telemetry.CaptureContent() {
+				span.SetAttributes(telemetry.AttrToolInput.String(telemetry.TruncateString(params.FilePath)))
+			}
+			defer span.End()
+
 			if params.FilePath == "" {
 				return fantasy.NewTextErrorResponse("file_path is required"), nil
 			}

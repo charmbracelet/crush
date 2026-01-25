@@ -133,6 +133,7 @@ func NewIsolatedTerminalWithConfig(t *testing.T, cols, rows int, configJSON stri
 		"XDG_DATA_HOME="+filepath.Join(tmpDir, "data"),
 		"HOME="+tmpDir,
 		"USERPROFILE="+tmpDir, // Windows equivalent of HOME
+		"CRUSH_NEW_UI=true",   // Use new UI for all e2e tests
 	)
 	if err := term.Start(cmd); err != nil {
 		term.Close()

@@ -3,6 +3,10 @@
 
 "area: ci":
   - "/^ci: /i"
+"area: crush run":
+  - "/crush run/i"
+  - "/headless/i"
+  - "/non-interactive/i"
 "area: diff":
   - "/diff/i"
 "area: docs":

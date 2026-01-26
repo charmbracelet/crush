@@ -33,6 +33,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// kittyTerminals defines terminals supporting querying capabilities.
+var kittyTerminals = []string{"alacritty", "ghostty", "kitty", "rio", "wezterm"}
+
 func init() {
 	rootCmd.PersistentFlags().StringP("cwd", "c", "", "Current working directory")
 	rootCmd.PersistentFlags().StringP("data-dir", "D", "", "Custom crush data directory")
@@ -94,11 +97,11 @@ crush -y
 			slog.Info("New UI in control!")
 			com := common.DefaultCommon(app)
 			ui := ui.New(com)
-			ui.QueryVersion = shouldQueryTerminalVersion(env)
+			ui.QueryCapabilities = shouldQueryCapabilities(env)
 			model = ui
 		} else {
 			ui := tui.New(app)
-			ui.QueryVersion = shouldQueryTerminalVersion(env)
+			ui.QueryVersion = shouldQueryCapabilities(env)
 			model = ui
 		}
 		program := tea.NewProgram(
@@ -299,12 +302,16 @@ func createDotCrushDir(dir string) error {
 	return nil
 }
 
-func shouldQueryTerminalVersion(env uv.Environ) bool {
+func shouldQueryCapabilities(env uv.Environ) bool {
+	const osVendorTypeApple = "Apple"
 	termType := env.Getenv("TERM")
 	termProg, okTermProg := env.LookupEnv("TERM_PROGRAM")
 	_, okSSHTTY := env.LookupEnv("SSH_TTY")
+	if okTermProg && strings.Contains(termProg, osVendorTypeApple) {
+		return false
+	}
 	return (!okTermProg && !okSSHTTY) ||
-		(!strings.Contains(termProg, "Apple") && !okSSHTTY) ||
+		(!strings.Contains(termProg, osVendorTypeApple) && !okSSHTTY) ||
 		// Terminals that do support XTVERSION.
-		stringext.ContainsAny(termType, "alacritty", "ghostty", "kitty", "rio", "wezterm")
+		stringext.ContainsAny(termType, kittyTerminals...)
 }

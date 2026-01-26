@@ -16,8 +16,8 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/ansi/kitty"
-	"github.com/charmbracelet/x/mosaic"
 	"github.com/disintegration/imaging"
+	paintbrush "github.com/jordanella/go-ansi-paintbrush"
 )
 
 // Capabilities represents the capabilities of displaying images on the
@@ -246,8 +246,40 @@ func (e Encoding) Render(id string, cols, rows int) string {
 
 	switch e {
 	case EncodingBlocks:
-		m := mosaic.New().Width(cols).Height(rows).Scale(1)
-		return strings.TrimSpace(m.Render(img))
+		canvas := paintbrush.New()
+		canvas.SetImage(img)
+		canvas.SetWidth(cols)
+		canvas.SetHeight(rows)
+		canvas.Weights = map[rune]float64{
+			'': .95,
+			'': .95,
+			'▁': .9,
+			'▂': .9,
+			'▃': .9,
+			'▄': .9,
+			'▅': .9,
+			'▆': .85,
+			'█': .85,
+			'▊': .95,
+			'▋': .95,
+			'▌': .95,
+			'▍': .95,
+			'▎': .95,
+			'▏': .95,
+			'●': .95,
+			'◀': .95,
+			'▲': .95,
+			'▶': .95,
+			'▼': .9,
+			'○': .8,
+			'◉': .95,
+			'◧': .9,
+			'◨': .9,
+			'◩': .9,
+			'◪': .9,
+		}
+		canvas.Paint()
+		return strings.TrimSpace(canvas.GetResult())
 	case EncodingKitty:
 		// Build Kitty graphics unicode place holders
 		var fg color.Color

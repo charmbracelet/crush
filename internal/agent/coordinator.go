@@ -355,6 +355,11 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		if err != nil {
 			return err
 		}
+		// Wrap tools for Anthropic OAuth compatibility
+		// Anthropic blocks lowercase tool names (bash, read, write, edit) with OAuth tokens
+		if largeProviderCfg.OAuthToken != nil && largeProviderCfg.Type == anthropic.Name {
+			tools = WrapToolsForOAuth(tools)
+		}
 		result.SetTools(tools)
 		return nil
 	})
@@ -831,6 +836,13 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	// Wrap tools for Anthropic OAuth compatibility
+	largeProviderCfg, ok := c.cfg.Providers.Get(large.ModelCfg.Provider)
+	if ok && largeProviderCfg.OAuthToken != nil && largeProviderCfg.Type == anthropic.Name {
+		tools = WrapToolsForOAuth(tools)
+	}
+
 	c.currentAgent.SetTools(tools)
 	return nil
 }

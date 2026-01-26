@@ -12,8 +12,8 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/list"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/clipperhouse/displaywidth"
 	"github.com/clipperhouse/uax29/v2/words"
-	"github.com/rivo/uniseg"
 )
 
 // Constants for multi-click detection.
@@ -798,44 +798,32 @@ func findWordBoundaries(line string, col int) (startCol, endCol int) {
 		return 0, 0
 	}
 
-	// Build a mapping of byte offset to grapheme index.
-	gr := uniseg.NewGraphemes(line)
-	byteToGrapheme := make(map[int]int)
-	graphemeIdx := 0
-	byteOffset := 0
-	for gr.Next() {
-		byteToGrapheme[byteOffset] = graphemeIdx
-		byteOffset += len(gr.Str())
-		graphemeIdx++
-	}
-	byteToGrapheme[byteOffset] = graphemeIdx // End of string.
-	totalGraphemes := graphemeIdx
-
-	if col >= totalGraphemes {
-		col = totalGraphemes - 1
-	}
-	if col < 0 {
-		return 0, 0
+	i := displaywidth.StringGraphemes(line)
+	for i.Next() {
 	}
 
 	// Segment the line into words using UAX#29.
+	lineCol := 0 // tracks the visited column widths
+	lastCol := 0 // tracks the start of the current token
 	iter := words.FromString(line)
 	for iter.Next() {
-		tokenStart := iter.Start()
-		tokenEnd := iter.End()
+		token := iter.Value()
+		tokenWidth := displaywidth.String(token)
 
-		graphemeStart, ok := byteToGrapheme[tokenStart]
-		if !ok {
-			continue
-		}
-		graphemeEnd, ok := byteToGrapheme[tokenEnd]
-		if !ok {
-			continue
+		graphemeStart := lineCol
+		graphemeEnd := lineCol + tokenWidth
+		lineCol += tokenWidth
+
+		// If clicked before this token, return the previous token boundaries.
+		if col < graphemeStart {
+			return lastCol, lastCol
 		}
 
-		// Check if the column falls within this segment.
+		// Update lastCol to the end of this token for next iteration.
+		lastCol = graphemeEnd
+
+		// If clicked within this token, return its boundaries.
 		if col >= graphemeStart && col < graphemeEnd {
-			token := iter.Value()
 			// If clicked on whitespace, return empty selection.
 			if strings.TrimSpace(token) == "" {
 				return col, col

@@ -808,7 +808,12 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 		if c.ID == "kimi-coding" {
 			testURL = baseURL + "/v1/models"
 		}
-		headers["x-api-key"] = apiKey
+		// OAuth tokens use Authorization header, API keys use x-api-key
+		if strings.HasPrefix(apiKey, "Bearer ") {
+			headers["Authorization"] = apiKey
+		} else {
+			headers["x-api-key"] = apiKey
+		}
 		headers["anthropic-version"] = "2023-06-01"
 	case catwalk.TypeGoogle:
 		baseURL, _ := resolver.ResolveValue(c.BaseURL)

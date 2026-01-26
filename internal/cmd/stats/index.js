@@ -91,23 +91,23 @@ if (stats.recent_activity?.length > 0) {
     type: "bar",
     data: {
       labels: stats.recent_activity.map((d) => d.day),
-    datasets: [
-      {
-        label: "Sessions",
-        data: stats.recent_activity.map((d) => d.session_count),
-        backgroundColor: colors.charple,
-        borderRadius: 4,
-        yAxisID: "y",
-      },
-      {
-        label: "Tokens (K)",
-        data: stats.recent_activity.map((d) => d.total_tokens / 1000),
-        backgroundColor: colors.julep,
-        borderRadius: 4,
-        yAxisID: "y1",
-      },
-    ],
-  },
+      datasets: [
+        {
+          label: "Sessions",
+          data: stats.recent_activity.map((d) => d.session_count),
+          backgroundColor: colors.charple,
+          borderRadius: 4,
+          yAxisID: "y",
+        },
+        {
+          label: "Tokens (K)",
+          data: stats.recent_activity.map((d) => d.total_tokens / 1000),
+          backgroundColor: colors.julep,
+          borderRadius: 4,
+          yAxisID: "y1",
+        },
+      ],
+    },
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -163,7 +163,7 @@ if (stats.hour_day_heatmap?.length > 0) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      animation: { duration: easeDuration, easing: easeType },
+      animation: false,
       scales: {
         x: {
           min: 0,
@@ -200,7 +200,6 @@ if (stats.hour_day_heatmap?.length > 0) {
       },
     },
   });
-
 }
 
 if (stats.tool_usage?.length > 0) {
@@ -305,16 +304,16 @@ if (stats.usage_by_model?.length > 0) {
     acc[m.provider] = (acc[m.provider] || 0) + m.message_count;
     return acc;
   }, {});
-const providerColors = [
-  colors.malibu,
-  colors.charple,
-  colors.violet,
-  colors.tuna,
-  colors.coral,
-  colors.uni,
-];
-new Chart(document.getElementById("providerPieChart"), {
-  type: "doughnut",
+  const providerColors = [
+    colors.malibu,
+    colors.charple,
+    colors.violet,
+    colors.tuna,
+    colors.coral,
+    colors.uni,
+  ];
+  new Chart(document.getElementById("providerPieChart"), {
+    type: "doughnut",
     data: {
       labels: Object.keys(providerData),
       datasets: [
@@ -336,7 +335,6 @@ new Chart(document.getElementById("providerPieChart"), {
       },
     },
   });
-
 }
 
 // Daily Usage Table

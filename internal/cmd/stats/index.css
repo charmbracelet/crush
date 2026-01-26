@@ -45,7 +45,7 @@ body {
   background: var(--bg);
   color: var(--text);
   line-height: 1.6;
-  padding: 2rem 0;
+  padding: 2rem 1rem;
 }
 
 .container {
@@ -236,7 +236,6 @@ td {
 }
 
 @media (prefers-color-scheme: light) {
-
   /* Override charm brand colors in footer */
   .footer-container .st2 {
     fill: #644ced !important;

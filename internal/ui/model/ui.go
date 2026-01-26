@@ -571,7 +571,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.dialog.Update(msg)
 			return m, tea.Batch(cmds...)
 		}
-		const doubleClickThreshold = 500 * time.Millisecond
 
 		switch m.state {
 		case uiChat:

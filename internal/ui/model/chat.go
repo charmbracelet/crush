@@ -18,8 +18,8 @@ import (
 
 // Constants for multi-click detection.
 const (
-	clickActionDelay = 180 * time.Millisecond // Delay before triggering click action
-	clickTolerance   = 2                      // x,y tolerance for double/tripple click
+	doubleClickThreshold = 500 * time.Millisecond // 0.5s is typical double-click threshold
+	clickTolerance       = 2                      // x,y tolerance for double/tripple click
 )
 
 // DelayedClickMsg is sent after the double-click threshold to trigger a
@@ -470,7 +470,7 @@ func (m *Chat) HandleMouseDown(x, y int) (bool, tea.Cmd) {
 
 	// Detect multi-click (double/triple)
 	now := time.Now()
-	if now.Sub(m.lastClickTime) <= clickActionDelay &&
+	if now.Sub(m.lastClickTime) <= doubleClickThreshold &&
 		abs(x-m.lastClickX) <= clickTolerance &&
 		abs(y-m.lastClickY) <= clickTolerance {
 		m.clickCount++
@@ -499,7 +499,7 @@ func (m *Chat) HandleMouseDown(x, y int) (bool, tea.Cmd) {
 
 		// Schedule delayed click action (e.g., expansion) after a short delay.
 		// If a double-click occurs, the clickID will be invalidated.
-		cmd = tea.Tick(clickActionDelay, func(t time.Time) tea.Msg {
+		cmd = tea.Tick(doubleClickThreshold, func(t time.Time) tea.Msg {
 			return DelayedClickMsg{
 				ClickID: clickID,
 				ItemIdx: itemIdx,

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/stringext"
 	uv "github.com/charmbracelet/ultraviolet"
+	xstrings "github.com/charmbracelet/x/exp/strings"
 	"github.com/stretchr/testify/require"
 )
 
@@ -153,7 +153,7 @@ func TestStringextContainsAny(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := stringext.ContainsAny(tt.s, tt.substr...)
+			got := xstrings.ContainsAnyOf(tt.s, tt.substr...)
 			require.Equal(t, tt.want, got)
 		})
 	}

@@ -851,7 +851,7 @@ func (c *coordinator) RecoverSession(ctx context.Context, sessionID string) erro
 	}
 
 	for _, msg := range msgs {
-		if msg.IsFinished() {
+		if msg.IsFinished() || msg.Role == message.Assistant {
 			continue
 		}
 

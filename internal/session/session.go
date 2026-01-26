@@ -61,7 +61,8 @@ type Service interface {
 
 type service struct {
 	*pubsub.Broker[Session]
-	q db.Querier
+	db *sql.DB
+	q  *db.Queries
 }
 
 func (s *service) Create(ctx context.Context, title string) (Session, error) {
@@ -107,14 +108,32 @@ func (s *service) CreateTitleSession(ctx context.Context, parentSessionID string
 }
 
 func (s *service) Delete(ctx context.Context, id string) error {
-	session, err := s.Get(ctx, id)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	qtx := s.q.WithTx(tx)
+
+	dbSession, err := qtx.GetSessionByID(ctx, id)
 	if err != nil {
 		return err
 	}
-	err = s.q.DeleteSession(ctx, session.ID)
-	if err != nil {
-		return err
+	if err = qtx.DeleteSessionMessages(ctx, dbSession.ID); err != nil {
+		return fmt.Errorf("deleting session messages: %w", err)
 	}
+	if err = qtx.DeleteSessionFiles(ctx, dbSession.ID); err != nil {
+		return fmt.Errorf("deleting session files: %w", err)
+	}
+	if err = qtx.DeleteSession(ctx, dbSession.ID); err != nil {
+		return fmt.Errorf("deleting session: %w", err)
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("committing transaction: %w", err)
+	}
+
+	session := s.fromDBItem(dbSession)
 	s.Publish(pubsub.DeletedEvent, session)
 	event.SessionDeleted()
 	return nil
@@ -223,11 +242,12 @@ func unmarshalTodos(data string) ([]Todo, error) {
 	return todos, nil
 }
 
-func NewService(q db.Querier) Service {
+func NewService(q *db.Queries, conn *sql.DB) Service {
 	broker := pubsub.NewBroker[Session]()
 	return &service{
-		broker,
-		q,
+		Broker: broker,
+		db:     conn,
+		q:      q,
 	}
 }
 

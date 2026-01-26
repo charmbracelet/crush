@@ -118,6 +118,11 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 		return nil, err
 	}
 
+	// refresh models before each run
+	if err := c.UpdateModels(ctx); err != nil {
+		return nil, fmt.Errorf("failed to update models: %w", err)
+	}
+
 	model := c.currentAgent.Model()
 	maxTokens := model.CatwalkCfg.DefaultMaxTokens
 	if model.ModelCfg.MaxTokens != 0 {
@@ -402,7 +407,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 	)
 
 	if len(c.cfg.LSP) > 0 {
-		allTools = append(allTools, tools.NewDiagnosticsTool(c.lspClients), tools.NewReferencesTool(c.lspClients))
+		allTools = append(allTools, tools.NewDiagnosticsTool(c.lspClients), tools.NewReferencesTool(c.lspClients), tools.NewLSPRestartTool(c.lspClients))
 	}
 
 	var filteredTools []fantasy.AgentTool

@@ -53,7 +53,7 @@ func (m *UI) modelInfo(width int) string {
 		}
 		return common.ModelInfo(m.com.Styles, model.CatwalkCfg.Name, providerName, reasoningInfo, modelContext, width)
 	}
-	return ""
+	return common.ModelInfo(m.com.Styles, model.CatwalkCfg.Name, providerName, reasoningInfo, modelContext, width)
 }
 
 // getDynamicHeightLimits will give us the num of items to show in each section based on the hight

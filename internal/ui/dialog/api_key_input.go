@@ -207,7 +207,7 @@ func (m *APIKeyInput) headerView() string {
 		return textStyle.Render(m.dialogTitle())
 	}
 	headerOffset := titleStyle.GetHorizontalFrameSize() + dialogStyle.GetHorizontalFrameSize()
-	return common.DialogTitle(t, titleStyle.Render(m.dialogTitle()), m.width-headerOffset)
+	return common.DialogTitle(t, titleStyle.Render(m.dialogTitle()), m.width-headerOffset, m.com.Styles.Primary, m.com.Styles.Secondary)
 }
 
 func (m *APIKeyInput) dialogTitle() string {

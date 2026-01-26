@@ -412,6 +412,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dialog.CloseFrontDialog()
 
 	case pubsub.Event[session.Session]:
+		if msg.Type == pubsub.DeletedEvent {
+			if m.session != nil && m.session.ID == msg.Payload.ID {
+				m.newSession()
+			}
+			break
+		}
 		if m.session != nil && msg.Payload.ID == m.session.ID {
 			prevHasInProgress := hasInProgressTodo(m.session.Todos)
 			m.session = &msg.Payload

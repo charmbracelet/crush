@@ -387,7 +387,7 @@ func (c *Commands) setCommandItems(commandType CommandType) {
 func (c *Commands) defaultCommands() []*CommandItem {
 	commands := []*CommandItem{
 		NewCommandItem(c.com.Styles, "new_session", "New Session", "ctrl+n", ActionNewSession{}),
-		NewCommandItem(c.com.Styles, "switch_session", "Switch Session", "ctrl+s", ActionOpenDialog{SessionsID}),
+		NewCommandItem(c.com.Styles, "switch_session", "Sessions", "ctrl+s", ActionOpenDialog{SessionsID}),
 		NewCommandItem(c.com.Styles, "switch_model", "Switch Model", "ctrl+l", ActionOpenDialog{ModelsID}),
 	}
 

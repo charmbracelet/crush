@@ -420,7 +420,7 @@ func (t *baseToolMessageItem) HandleMouseClick(btn ansi.MouseButton, x, y int) b
 
 // HandleKeyEvent implements KeyEventHandler.
 func (t *baseToolMessageItem) HandleKeyEvent(key tea.KeyMsg) (bool, tea.Cmd) {
-	if key.String() == "c" {
+	if k := key.String(); k == "c" || k == "y" {
 		text := t.formatToolForCopy()
 		return true, common.CopyToClipboard(text, "Tool content copied to clipboard")
 	}

@@ -96,7 +96,7 @@ func (m *UserMessageItem) renderAttachments(width int) string {
 
 // HandleKeyEvent implements KeyEventHandler.
 func (m *UserMessageItem) HandleKeyEvent(key tea.KeyMsg) (bool, tea.Cmd) {
-	if key.String() == "c" {
+	if k := key.String(); k == "c" || k == "y" {
 		text := m.message.Content().Text
 		return true, common.CopyToClipboard(text, "Message copied to clipboard")
 	}

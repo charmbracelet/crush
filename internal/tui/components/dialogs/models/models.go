@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/tui/components/core"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
+	"github.com/charmbracelet/crush/internal/tui/components/dialogs/anthropic"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/copilot"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/hyper"
 	"github.com/charmbracelet/crush/internal/tui/exp/list"
@@ -79,6 +80,10 @@ type modelDialogCmp struct {
 	// Copilot device flow state
 	copilotDeviceFlow     *copilot.DeviceFlow
 	showCopilotDeviceFlow bool
+
+	// Anthropic OAuth flow state
+	anthropicDeviceFlow     *anthropic.DeviceFlow
+	showAnthropicDeviceFlow bool
 }
 
 func NewModelDialogCmp() ModelDialog {
@@ -143,6 +148,21 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		return m, nil
 	case copilot.DeviceFlowCompletedMsg:
 		return m, m.saveOauthTokenAndContinue(msg.Token, true)
+	case anthropic.AuthInitiatedMsg, anthropic.DeviceFlowErrorMsg:
+		if m.anthropicDeviceFlow != nil {
+			u, cmd := m.anthropicDeviceFlow.Update(msg)
+			m.anthropicDeviceFlow = u.(*anthropic.DeviceFlow)
+			return m, cmd
+		}
+		return m, nil
+	case anthropic.DeviceFlowCompletedMsg:
+		// Prefix with "Bearer " so coordinator uses Authorization header
+		bearerToken := "Bearer " + msg.Token.AccessToken
+		msg.Token.AccessToken = bearerToken
+		return m, m.saveOauthTokenAndContinue(msg.Token, true)
+	case anthropic.APIKeySubmittedMsg:
+		// Handle API key submission from Anthropic dialog
+		return m, m.saveOauthTokenAndContinue(msg.APIKey, true)
 	case tea.KeyPressMsg:
 		switch {
 		// Handle Hyper device flow keys
@@ -157,6 +177,10 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			}
 			if m.showCopilotDeviceFlow && m.copilotDeviceFlow != nil {
 				return m, m.copilotDeviceFlow.CopyCodeAndOpenURL()
+			}
+			// For Anthropic, enter submits the authorization code
+			if m.showAnthropicDeviceFlow && m.anthropicDeviceFlow != nil {
+				return m, m.anthropicDeviceFlow.SubmitCode()
 			}
 			selectedItem := m.modelList.SelectedModel()
 			if selectedItem == nil {
@@ -255,12 +279,23 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				m.copilotDeviceFlow = copilot.NewDeviceFlow()
 				m.copilotDeviceFlow.SetWidth(m.width - 2)
 				return m, m.copilotDeviceFlow.Init()
+			case catwalk.InferenceProviderAnthropic:
+				m.showAnthropicDeviceFlow = true
+				m.selectedModel = selectedItem
+				m.selectedModelType = modelType
+				m.anthropicDeviceFlow = anthropic.NewDeviceFlow()
+				m.anthropicDeviceFlow.SetWidth(m.width - 2)
+				return m, m.anthropicDeviceFlow.Init()
 			}
 			// For other providers, show API key input
 			askForApiKey()
 			return m, nil
 		case key.Matches(msg, m.keyMap.Tab):
 			switch {
+			case m.showAnthropicDeviceFlow && m.anthropicDeviceFlow != nil:
+				u, cmd := m.anthropicDeviceFlow.Update(msg)
+				m.anthropicDeviceFlow = u.(*anthropic.DeviceFlow)
+				return m, cmd
 			case m.needsAPIKey:
 				u, cmd := m.apiKeyInput.Update(msg)
 				m.apiKeyInput = u.(*APIKeyInput)
@@ -286,6 +321,12 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				}
 				m.showCopilotDeviceFlow = false
 				m.selectedModel = nil
+			case m.showAnthropicDeviceFlow:
+				if m.anthropicDeviceFlow != nil {
+					m.anthropicDeviceFlow.Cancel()
+				}
+				m.showAnthropicDeviceFlow = false
+				m.selectedModel = nil
 			case m.needsAPIKey:
 				if m.isAPIKeyValid {
 					return m, nil
@@ -306,6 +347,10 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				u, cmd := m.apiKeyInput.Update(msg)
 				m.apiKeyInput = u.(*APIKeyInput)
 				return m, cmd
+			case m.showAnthropicDeviceFlow && m.anthropicDeviceFlow != nil:
+				u, cmd := m.anthropicDeviceFlow.Update(msg)
+				m.anthropicDeviceFlow = u.(*anthropic.DeviceFlow)
+				return m, cmd
 			default:
 				u, cmd := m.modelList.Update(msg)
 				m.modelList = u
@@ -317,6 +362,10 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		case m.needsAPIKey:
 			u, cmd := m.apiKeyInput.Update(msg)
 			m.apiKeyInput = u.(*APIKeyInput)
+			return m, cmd
+		case m.showAnthropicDeviceFlow && m.anthropicDeviceFlow != nil:
+			u, cmd := m.anthropicDeviceFlow.Update(msg)
+			m.anthropicDeviceFlow = u.(*anthropic.DeviceFlow)
 			return m, cmd
 		default:
 			var cmd tea.Cmd
@@ -334,6 +383,10 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			u, cmd = m.copilotDeviceFlow.Update(msg)
 			m.copilotDeviceFlow = u.(*copilot.DeviceFlow)
 		}
+		if m.showAnthropicDeviceFlow && m.anthropicDeviceFlow != nil {
+			u, cmd = m.anthropicDeviceFlow.Update(msg)
+			m.anthropicDeviceFlow = u.(*anthropic.DeviceFlow)
+		}
 		return m, cmd
 	default:
 		// Pass all other messages to the device flow for spinner animation
@@ -345,6 +398,10 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		case m.showCopilotDeviceFlow && m.copilotDeviceFlow != nil:
 			u, cmd := m.copilotDeviceFlow.Update(msg)
 			m.copilotDeviceFlow = u.(*copilot.DeviceFlow)
+			return m, cmd
+		case m.showAnthropicDeviceFlow && m.anthropicDeviceFlow != nil:
+			u, cmd := m.anthropicDeviceFlow.Update(msg)
+			m.anthropicDeviceFlow = u.(*anthropic.DeviceFlow)
 			return m, cmd
 		default:
 			u, cmd := m.apiKeyInput.Update(msg)
@@ -372,7 +429,7 @@ func (m *modelDialogCmp) View() string {
 		return m.style().Render(content)
 	}
 	if m.showCopilotDeviceFlow && m.copilotDeviceFlow != nil {
-		// Show Hyper device flow
+		// Show Copilot device flow
 		m.keyMap.isCopilotDeviceFlow = m.copilotDeviceFlow.State != copilot.DeviceFlowStateUnavailable
 		m.keyMap.isCopilotUnavailable = m.copilotDeviceFlow.State == copilot.DeviceFlowStateUnavailable
 		deviceFlowView := m.copilotDeviceFlow.View()
@@ -385,11 +442,26 @@ func (m *modelDialogCmp) View() string {
 		)
 		return m.style().Render(content)
 	}
+	if m.showAnthropicDeviceFlow && m.anthropicDeviceFlow != nil {
+		// Show Anthropic OAuth flow
+		m.keyMap.isAnthropicDeviceFlow = true
+		radio := m.anthropicDeviceFlow.RadioView()
+		deviceFlowView := m.anthropicDeviceFlow.View()
+		content := lipgloss.JoinVertical(
+			lipgloss.Left,
+			t.S().Base.Padding(0, 1, 1, 1).Render(core.Title("Anthropic", m.width-lipgloss.Width(radio)-5)+" "+radio),
+			deviceFlowView,
+			"",
+			t.S().Base.Width(m.width-2).PaddingLeft(1).AlignHorizontal(lipgloss.Left).Render(m.help.View(m.keyMap)),
+		)
+		return m.style().Render(content)
+	}
 
 	// Reset the flags when not showing device flow
 	m.keyMap.isHyperDeviceFlow = false
 	m.keyMap.isCopilotDeviceFlow = false
 	m.keyMap.isCopilotUnavailable = false
+	m.keyMap.isAnthropicDeviceFlow = false
 
 	switch {
 	case m.needsAPIKey:
@@ -427,6 +499,14 @@ func (m *modelDialogCmp) Cursor() *tea.Cursor {
 	}
 	if m.showCopilotDeviceFlow && m.copilotDeviceFlow != nil {
 		return m.copilotDeviceFlow.Cursor()
+	}
+	if m.showAnthropicDeviceFlow && m.anthropicDeviceFlow != nil {
+		cursor := m.anthropicDeviceFlow.Cursor()
+		if cursor != nil {
+			cursor = m.moveCursor(cursor)
+			return cursor
+		}
+		return nil
 	}
 	if m.needsAPIKey {
 		cursor := m.apiKeyInput.Cursor()

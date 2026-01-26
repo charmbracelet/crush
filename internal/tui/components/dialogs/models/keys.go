@@ -15,9 +15,10 @@ type KeyMap struct {
 	isAPIKeyHelp  bool
 	isAPIKeyValid bool
 
-	isHyperDeviceFlow    bool
-	isCopilotDeviceFlow  bool
-	isCopilotUnavailable bool
+	isHyperDeviceFlow     bool
+	isCopilotDeviceFlow   bool
+	isCopilotUnavailable  bool
+	isAnthropicDeviceFlow bool
 }
 
 func DefaultKeyMap() KeyMap {
@@ -82,6 +83,19 @@ func (k KeyMap) ShortHelp() []key.Binding {
 			key.NewBinding(
 				key.WithKeys("enter"),
 				key.WithHelp("enter", "copy & open"),
+			),
+			k.Close,
+		}
+	}
+	if k.isAnthropicDeviceFlow {
+		return []key.Binding{
+			key.NewBinding(
+				key.WithKeys("enter"),
+				key.WithHelp("enter", "submit"),
+			),
+			key.NewBinding(
+				key.WithKeys("tab"),
+				key.WithHelp("tab", "switch"),
 			),
 			k.Close,
 		}

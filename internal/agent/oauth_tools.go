@@ -64,11 +64,6 @@ func (w *oauthToolWrapper) Info() fantasy.ToolInfo {
 	}
 }
 
-// Name returns the renamed tool name.
-func (w *oauthToolWrapper) Name() string {
-	return w.renamedName
-}
-
 // WrapToolsForOAuth wraps tools with Claude Code-style names for Anthropic OAuth.
 // This is necessary because Anthropic blocks lowercase tool names (bash, read, write, edit)
 // when using OAuth tokens.

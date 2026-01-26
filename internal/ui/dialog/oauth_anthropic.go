@@ -193,10 +193,8 @@ func (m *OAuthAnthropic) HandleMsg(msg tea.Msg) Action {
 		}
 		m.authParams = msg.AuthParams
 		m.State = OAuthAnthropicStateWaitingForCode
-		// Open browser automatically
-		if err := browser.OpenURL(m.authParams.AuthURL); err != nil {
-			// Non-fatal, user can still manually open
-		}
+		// Open browser automatically (non-fatal, user can still manually open)
+		_ = browser.OpenURL(m.authParams.AuthURL)
 		return ActionCmd{m.codeInput.Focus()}
 
 	case ActionAnthropicTokenExchanged:

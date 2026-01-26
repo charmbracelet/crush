@@ -328,10 +328,23 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	}
 
 	largeProviderCfg, _ := c.cfg.Providers.Get(large.ModelCfg.Provider)
+
+	// Build system prompt prefix, prepending Claude Code identity for OAuth
+	systemPromptPrefix := largeProviderCfg.SystemPromptPrefix
+	if largeProviderCfg.OAuthToken != nil && largeProviderCfg.Type == anthropic.Name {
+		// For OAuth tokens, we MUST identify as Claude Code
+		claudeCodeIdentity := "You are Claude Code, Anthropic's official CLI for Claude."
+		if systemPromptPrefix != "" {
+			systemPromptPrefix = claudeCodeIdentity + "\n\n" + systemPromptPrefix
+		} else {
+			systemPromptPrefix = claudeCodeIdentity
+		}
+	}
+
 	result := NewSessionAgent(SessionAgentOptions{
 		large,
 		small,
-		largeProviderCfg.SystemPromptPrefix,
+		systemPromptPrefix,
 		"",
 		isSubAgent,
 		c.cfg.Options.DisableAutoSummarize,
@@ -724,6 +737,9 @@ func (c *coordinator) isAnthropicThinking(model config.SelectedModel) bool {
 	return false
 }
 
+// claudeCodeVersion is used for User-Agent when using OAuth tokens
+const claudeCodeVersion = "2.1.2"
+
 func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model config.SelectedModel, isSubAgent bool) (fantasy.Provider, error) {
 	headers := maps.Clone(providerCfg.ExtraHeaders)
 	if headers == nil {
@@ -732,21 +748,31 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 
 	// handle special headers for anthropic
 	if providerCfg.Type == anthropic.Name {
-		// Add OAuth beta flag if using OAuth authentication
+		// Add OAuth/setup-token headers if using OAuth authentication
+		// This mimics Claude Code's headers exactly for compatibility
 		if providerCfg.OAuthToken != nil {
-			if v, ok := headers["anthropic-beta"]; ok {
-				headers["anthropic-beta"] = v + ",oauth-2025-04-20"
-			} else {
-				headers["anthropic-beta"] = "oauth-2025-04-20"
+			// Build the anthropic-beta header with all required flags
+			betaFlags := []string{"claude-code-20250219", "oauth-2025-04-20"}
+			if c.isAnthropicThinking(model) {
+				betaFlags = append(betaFlags, "interleaved-thinking-2025-05-14")
 			}
-		}
-
-		// Add thinking beta flag if using thinking model
-		if c.isAnthropicThinking(model) {
-			if v, ok := headers["anthropic-beta"]; ok {
-				headers["anthropic-beta"] = v + ",interleaved-thinking-2025-05-14"
+			if v, ok := headers["anthropic-beta"]; ok && v != "" {
+				headers["anthropic-beta"] = v + "," + strings.Join(betaFlags, ",")
 			} else {
-				headers["anthropic-beta"] = "interleaved-thinking-2025-05-14"
+				headers["anthropic-beta"] = strings.Join(betaFlags, ",")
+			}
+
+			// Add Claude Code identity headers
+			headers["user-agent"] = fmt.Sprintf("claude-cli/%s (external, cli)", claudeCodeVersion)
+			headers["x-app"] = "cli"
+		} else {
+			// Add thinking beta flag if using thinking model (non-OAuth)
+			if c.isAnthropicThinking(model) {
+				if v, ok := headers["anthropic-beta"]; ok {
+					headers["anthropic-beta"] = v + ",interleaved-thinking-2025-05-14"
+				} else {
+					headers["anthropic-beta"] = "interleaved-thinking-2025-05-14"
+				}
 			}
 		}
 	}
@@ -841,6 +867,19 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 	largeProviderCfg, ok := c.cfg.Providers.Get(large.ModelCfg.Provider)
 	if ok && largeProviderCfg.OAuthToken != nil && largeProviderCfg.Type == anthropic.Name {
 		tools = WrapToolsForOAuth(tools)
+
+		// Update system prompt prefix with Claude Code identity for OAuth
+		systemPromptPrefix := largeProviderCfg.SystemPromptPrefix
+		claudeCodeIdentity := "You are Claude Code, Anthropic's official CLI for Claude."
+		if systemPromptPrefix != "" {
+			systemPromptPrefix = claudeCodeIdentity + "\n\n" + systemPromptPrefix
+		} else {
+			systemPromptPrefix = claudeCodeIdentity
+		}
+		c.currentAgent.SetSystemPromptPrefix(systemPromptPrefix)
+	} else if ok {
+		// Non-OAuth: use provider's system prompt prefix as-is
+		c.currentAgent.SetSystemPromptPrefix(largeProviderCfg.SystemPromptPrefix)
 	}
 
 	c.currentAgent.SetTools(tools)

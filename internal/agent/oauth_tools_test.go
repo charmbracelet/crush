@@ -9,8 +9,9 @@ import (
 
 // mockTool is a simple mock implementation of fantasy.AgentTool for testing
 type mockTool struct {
-	name        string
-	description string
+	name            string
+	description     string
+	providerOptions fantasy.ProviderOptions
 }
 
 func (m *mockTool) Info() fantasy.ToolInfo {
@@ -21,15 +22,17 @@ func (m *mockTool) Info() fantasy.ToolInfo {
 	}
 }
 
-func (m *mockTool) Name() string {
-	return m.name
+func (m *mockTool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolResponse, error) {
+	return fantasy.ToolResponse{Content: "mock result"}, nil
 }
 
-func (m *mockTool) Call(ctx context.Context, input string) (fantasy.ToolResult, error) {
-	return fantasy.ToolResult{Content: "mock result"}, nil
+func (m *mockTool) ProviderOptions() fantasy.ProviderOptions {
+	return m.providerOptions
 }
 
-func (m *mockTool) SetProviderOptions(opts fantasy.ProviderOptions) {}
+func (m *mockTool) SetProviderOptions(opts fantasy.ProviderOptions) {
+	m.providerOptions = opts
+}
 
 func TestToClaudeCodeName(t *testing.T) {
 	tests := []struct {
@@ -43,8 +46,8 @@ func TestToClaudeCodeName(t *testing.T) {
 		{"grep", "Grep"},
 		{"glob", "Glob"},
 		{"view", "View"},
-		{"BASH", "Bash"},   // case insensitive
-		{"custom", "custom"}, // not in the list
+		{"BASH", "Bash"},           // case insensitive
+		{"custom", "custom"},       // not in the list
 		{"multiedit", "multiedit"}, // not in the list
 	}
 
@@ -100,9 +103,6 @@ func TestWrapToolsForOAuth(t *testing.T) {
 	// Check that bash was renamed to Bash
 	if wrapped[0].Info().Name != "Bash" {
 		t.Errorf("First tool name = %q, want %q", wrapped[0].Info().Name, "Bash")
-	}
-	if wrapped[0].Name() != "Bash" {
-		t.Errorf("First tool Name() = %q, want %q", wrapped[0].Name(), "Bash")
 	}
 
 	// Check that read was renamed to Read

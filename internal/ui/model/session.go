@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -45,6 +46,10 @@ func (m *UI) loadSession(sessionID string) tea.Cmd {
 		if err != nil {
 			// TODO: better error handling
 			return uiutil.ReportError(err)()
+		}
+
+		if recoverErr := m.com.App.AgentCoordinator.RecoverSession(context.Background(), session.ID); recoverErr != nil {
+			slog.Error("Failed to recover session", "session_id", session.ID, "error", recoverErr)
 		}
 
 		files, err := m.com.App.History.ListBySession(context.Background(), sessionID)

@@ -841,7 +841,6 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 }
 
 func (c *coordinator) RecoverSession(ctx context.Context, sessionID string) error {
-	// Skip recovery if session is currently active
 	if c.currentAgent != nil && c.currentAgent.IsSessionBusy(sessionID) {
 		return nil
 	}
@@ -856,42 +855,16 @@ func (c *coordinator) RecoverSession(ctx context.Context, sessionID string) erro
 			continue
 		}
 
-		// Handle incomplete summary messages
-		if msg.IsSummaryMessage {
-			msg.FinishThinking()
-			msg.AddFinish(message.FinishReasonError, "Summarization interrupted", "Session was interrupted during summarization")
-			if updateErr := c.messages.Update(ctx, msg); updateErr != nil {
-				slog.Error("Failed to recover summary message", "message_id", msg.ID, "error", updateErr)
+		for _, tc := range msg.ToolCalls() {
+			if !tc.Finished {
+				msg.FinishToolCall(tc.ID)
 			}
-			continue
 		}
 
-		// Handle incomplete assistant messages with tool calls
-		if msg.Role == message.Assistant && len(msg.ToolCalls()) > 0 {
-			// Mark any unfinished tool calls as finished
-			for _, tc := range msg.ToolCalls() {
-				if !tc.Finished {
-					msg.FinishToolCall(tc.ID)
-				}
-			}
-			// Batch all modifications before single update
-			msg.FinishThinking()
-			msg.AddFinish(message.FinishReasonError, "Response interrupted", "Session was interrupted during tool execution")
-			if updateErr := c.messages.Update(ctx, msg); updateErr != nil {
-				slog.Error("Failed to recover assistant message", "message_id", msg.ID, "error", updateErr)
-			}
-			continue
-		}
-
-		// Handle incomplete assistant messages without tool calls
-		// (e.g., message content was partially generated but interrupted)
-		if msg.Role == message.Assistant && msg.Content().Text != "" {
-			msg.FinishThinking()
-			msg.AddFinish(message.FinishReasonError, "Response interrupted", "Session was interrupted during response generation")
-			if updateErr := c.messages.Update(ctx, msg); updateErr != nil {
-				slog.Error("Failed to recover assistant message", "message_id", msg.ID, "error", updateErr)
-			}
-			continue
+		msg.FinishThinking()
+		msg.AddFinish(message.FinishReasonError, "Session interrupted", "The session was previously interrupted")
+		if updateErr := c.messages.Update(ctx, msg); updateErr != nil {
+			slog.Error("Failed to recover message", "message_id", msg.ID, "error", updateErr)
 		}
 	}
 

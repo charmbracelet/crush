@@ -5,9 +5,12 @@ import (
 	"image"
 	"os"
 
+	tea "charm.land/bubbletea/v2"
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/crush/internal/uiutil"
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
@@ -49,6 +52,16 @@ func CenterRect(area uv.Rectangle, width, height int) uv.Rectangle {
 	return image.Rect(minX, minY, maxX, maxY)
 }
 
+// BottomLeftRect returns a new [Rectangle] positioned at the bottom-left within the given area with the
+// specified width and height.
+func BottomLeftRect(area uv.Rectangle, width, height int) uv.Rectangle {
+	minX := area.Min.X
+	maxX := minX + width
+	maxY := area.Max.Y
+	minY := maxY - height
+	return image.Rect(minX, minY, maxX, maxY)
+}
+
 // IsFileTooBig checks if the file at the given path exceeds the specified size
 // limit.
 func IsFileTooBig(filePath string, sizeLimit int64) (bool, error) {
@@ -62,4 +75,26 @@ func IsFileTooBig(filePath string, sizeLimit int64) (bool, error) {
 	}
 
 	return false, nil
+}
+
+// CopyToClipboard copies the given text to the clipboard using both OSC 52
+// (terminal escape sequence) and native clipboard for maximum compatibility.
+// Returns a command that reports success to the user with the given message.
+func CopyToClipboard(text, successMessage string) tea.Cmd {
+	return CopyToClipboardWithCallback(text, successMessage, nil)
+}
+
+// CopyToClipboardWithCallback copies text to clipboard and executes a callback
+// before showing the success message.
+// This is useful when you need to perform additional actions like clearing UI state.
+func CopyToClipboardWithCallback(text, successMessage string, callback tea.Cmd) tea.Cmd {
+	return tea.Sequence(
+		tea.SetClipboard(text),
+		func() tea.Msg {
+			_ = clipboard.WriteAll(text)
+			return nil
+		},
+		callback,
+		uiutil.ReportInfo(successMessage),
+	)
 }

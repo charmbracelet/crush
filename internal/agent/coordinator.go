@@ -406,7 +406,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 	)
 
 	if len(c.cfg.LSP) > 0 {
-		allTools = append(allTools, tools.NewDiagnosticsTool(c.lspClients), tools.NewReferencesTool(c.lspClients))
+		allTools = append(allTools, tools.NewDiagnosticsTool(c.lspClients), tools.NewReferencesTool(c.lspClients), tools.NewLSPRestartTool(c.lspClients))
 	}
 
 	var filteredTools []fantasy.AgentTool

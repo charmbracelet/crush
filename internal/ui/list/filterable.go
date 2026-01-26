@@ -69,7 +69,7 @@ func (f *FilterableList) PrependItems(items ...FilterableItem) {
 // SetFilter sets the filter query and updates the list items.
 func (f *FilterableList) SetFilter(q string) {
 	f.query = q
-	f.List.SetItems(f.VisibleItems()...)
+	f.List.SetItems(f.FilteredItems()...)
 	f.ScrollToTop()
 }
 
@@ -87,8 +87,8 @@ func (f FilterableItemsSource) String(i int) string {
 	return f[i].Filter()
 }
 
-// VisibleItems returns the visible items after filtering.
-func (f *FilterableList) VisibleItems() []Item {
+// FilteredItems returns the visible items after filtering.
+func (f *FilterableList) FilteredItems() []Item {
 	if f.query == "" {
 		items := make([]Item, len(f.items))
 		for i, item := range f.items {
@@ -120,6 +120,6 @@ func (f *FilterableList) VisibleItems() []Item {
 
 // Render renders the filterable list.
 func (f *FilterableList) Render() string {
-	f.List.SetItems(f.VisibleItems()...)
+	f.List.SetItems(f.FilteredItems()...)
 	return f.List.Render()
 }

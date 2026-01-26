@@ -45,14 +45,15 @@ func (m *UI) modelInfo(width int) string {
 	}
 
 	var modelContext *common.ModelContextInfo
-	if m.session != nil {
+	if model != nil && m.session != nil {
 		modelContext = &common.ModelContextInfo{
 			ContextUsed:  m.session.CompletionTokens + m.session.PromptTokens,
 			Cost:         m.session.Cost,
 			ModelContext: model.CatwalkCfg.ContextWindow,
 		}
+		return common.ModelInfo(m.com.Styles, model.CatwalkCfg.Name, providerName, reasoningInfo, modelContext, width)
 	}
-	return common.ModelInfo(m.com.Styles, model.CatwalkCfg.Name, providerName, reasoningInfo, modelContext, width)
+	return ""
 }
 
 // getDynamicHeightLimits will give us the num of items to show in each section based on the hight

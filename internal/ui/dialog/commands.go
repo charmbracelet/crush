@@ -188,7 +188,7 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 			}
 		default:
 			var cmd tea.Cmd
-			for _, item := range c.list.VisibleItems() {
+			for _, item := range c.list.FilteredItems() {
 				if item, ok := item.(*CommandItem); ok && item != nil {
 					if msg.String() == item.Shortcut() {
 						return item.Action()
@@ -256,10 +256,9 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		t.Dialog.HelpView.GetVerticalFrameSize() +
 		t.Dialog.View.GetVerticalFrameSize()
 
-	c.input.SetWidth(innerWidth - t.Dialog.InputPrompt.GetHorizontalFrameSize() - 1) // (1) cursor padding
+	c.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding
 
-	listHeight := min(height-heightOffset, c.list.Len())
-	c.list.SetSize(innerWidth, listHeight)
+	c.list.SetSize(innerWidth, height-heightOffset)
 	c.help.SetWidth(innerWidth)
 
 	rc := NewRenderContext(t, width)

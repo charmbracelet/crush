@@ -129,32 +129,7 @@ func (s *Session) HandleMsg(msg tea.Msg) Action {
 		case sessionsModeDeleting:
 			switch {
 			case key.Matches(msg, s.keyMap.ConfirmDelete):
-				var sessionItem *SessionItem
-				if item := s.list.SelectedItem(); item != nil {
-					sessionItem = item.(*SessionItem)
-				}
-				s.sessionsMode = sessionsModeNormal
-				if sessionItem != nil {
-					var newSessions []session.Session
-					for _, session := range s.sessions {
-						if session.ID == sessionItem.ID() {
-							continue
-						}
-						newSessions = append(newSessions, session)
-					}
-					s.sessions = newSessions
-					s.list.SetItems(sessionItems(s.com.Styles, sessionsModeNormal, s.sessions...)...)
-					s.list.SelectFirst()
-					s.list.ScrollToSelected()
-					deleteSession := func() tea.Msg {
-						err := s.com.App.Sessions.Delete(context.TODO(), sessionItem.ID())
-						if err != nil {
-							return uiutil.NewErrorMsg(err)
-						}
-						return nil
-					}
-					return ActionCmd{deleteSession}
-				}
+				return s.confirmDeleteSession()
 			case key.Matches(msg, s.keyMap.CancelDelete):
 				s.sessionsMode = sessionsModeNormal
 				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeNormal, s.sessions...)...)
@@ -258,11 +233,50 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	return cur
 }
 
-func (s *Session) isCurrentSessionBusy() bool {
-	var sessionItem *SessionItem
+func (s *Session) selectedSessionItem() *SessionItem {
 	if item := s.list.SelectedItem(); item != nil {
-		sessionItem = item.(*SessionItem)
+		return item.(*SessionItem)
 	}
+	return nil
+}
+
+func (s *Session) confirmDeleteSession() Action {
+	sessionItem := s.selectedSessionItem()
+	s.sessionsMode = sessionsModeNormal
+	if sessionItem == nil {
+		return nil
+	}
+
+	s.removeSession(sessionItem.ID())
+	return ActionCmd{s.deleteSessionCmd(sessionItem.ID())}
+}
+
+func (s *Session) removeSession(id string) {
+	var newSessions []session.Session
+	for _, sess := range s.sessions {
+		if sess.ID == id {
+			continue
+		}
+		newSessions = append(newSessions, sess)
+	}
+	s.sessions = newSessions
+	s.list.SetItems(sessionItems(s.com.Styles, sessionsModeNormal, s.sessions...)...)
+	s.list.SelectFirst()
+	s.list.ScrollToSelected()
+}
+
+func (s *Session) deleteSessionCmd(id string) tea.Cmd {
+	return func() tea.Msg {
+		err := s.com.App.Sessions.Delete(context.TODO(), id)
+		if err != nil {
+			return uiutil.NewErrorMsg(err)
+		}
+		return nil
+	}
+}
+
+func (s *Session) isCurrentSessionBusy() bool {
+	sessionItem := s.selectedSessionItem()
 	if sessionItem == nil {
 		return false
 	}

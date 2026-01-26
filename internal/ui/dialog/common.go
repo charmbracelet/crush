@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"image/color"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -42,6 +43,14 @@ func InputCursor(t *styles.Styles, cur *tea.Cursor) *tea.Cursor {
 type RenderContext struct {
 	// Styles is the styles to use for rendering.
 	Styles *styles.Styles
+	// TitleStyle is the style of the dialog title by default it uses Styles.Dialog.Title
+	TitleStyle lipgloss.Style
+	// ViewStyle is the style of the dialog title by default it uses Styles.Dialog.View
+	ViewStyle lipgloss.Style
+	// TitleGradientFromColor is the color the title gradient starts by defaults its Style.Primary
+	TitleGradientFromColor color.Color
+	// TitleGradientToColor is the color the title gradient starts by defaults its Style.Secondary
+	TitleGradientToColor color.Color
 	// Width is the total width of the dialog including any margins, borders,
 	// and paddings.
 	Width int
@@ -59,14 +68,22 @@ type RenderContext struct {
 	// Help is the help view content. This will be appended to the content parts
 	// slice using the default dialog help style.
 	Help string
+	// IsOnboarding indicates whether to render the dialog as part of the
+	// onboarding flow. This means that the content will be rendered at the
+	// bottom left of the screen.
+	IsOnboarding bool
 }
 
 // NewRenderContext creates a new RenderContext with the provided styles and width.
 func NewRenderContext(t *styles.Styles, width int) *RenderContext {
 	return &RenderContext{
-		Styles: t,
-		Width:  width,
-		Parts:  []string{},
+		Styles:                 t,
+		TitleStyle:             t.Dialog.Title,
+		ViewStyle:              t.Dialog.View,
+		TitleGradientFromColor: t.Primary,
+		TitleGradientToColor:   t.Secondary,
+		Width:                  width,
+		Parts:                  []string{},
 	}
 }
 
@@ -79,10 +96,11 @@ func (rc *RenderContext) AddPart(part string) {
 
 // Render renders the dialog using the provided context.
 func (rc *RenderContext) Render() string {
-	titleStyle := rc.Styles.Dialog.Title
-	dialogStyle := rc.Styles.Dialog.View.Width(rc.Width)
+	titleStyle := rc.TitleStyle
+	dialogStyle := rc.ViewStyle.Width(rc.Width)
 
-	parts := []string{}
+	var parts []string
+
 	if len(rc.Title) > 0 {
 		var titleInfoWidth int
 		if len(rc.TitleInfo) > 0 {
@@ -91,7 +109,7 @@ func (rc *RenderContext) Render() string {
 		title := common.DialogTitle(rc.Styles, rc.Title,
 			max(0, rc.Width-dialogStyle.GetHorizontalFrameSize()-
 				titleStyle.GetHorizontalFrameSize()-
-				titleInfoWidth))
+				titleInfoWidth), rc.TitleGradientFromColor, rc.TitleGradientToColor)
 		if len(rc.TitleInfo) > 0 {
 			title += rc.TitleInfo
 		}
@@ -125,6 +143,8 @@ func (rc *RenderContext) Render() string {
 	}
 
 	content := strings.Join(parts, "\n")
-
+	if rc.IsOnboarding {
+		return content
+	}
 	return dialogStyle.Render(content)
 }

@@ -41,6 +41,11 @@ type Expandable interface {
 	ToggleExpanded()
 }
 
+// KeyEventHandler is an interface for items that can handle key events.
+type KeyEventHandler interface {
+	HandleKeyEvent(key tea.KeyMsg) (bool, tea.Cmd)
+}
+
 // MessageItem represents a [message.Message] item that can be displayed in the
 // UI and be part of a [list.List] identifiable by a unique ID.
 type MessageItem interface {

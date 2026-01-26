@@ -338,6 +338,7 @@ type Styles struct {
 			FullDesc       lipgloss.Style
 			FullSeparator  lipgloss.Style
 		}
+
 		NormalItem   lipgloss.Style
 		SelectedItem lipgloss.Style
 		InputPrompt  lipgloss.Style
@@ -366,6 +367,16 @@ type Styles struct {
 		Commands struct{}
 
 		ImagePreview lipgloss.Style
+
+		Sessions struct {
+			DeletingView                   lipgloss.Style
+			DeletingItemFocused            lipgloss.Style
+			DeletingItemBlurred            lipgloss.Style
+			DeletingTitle                  lipgloss.Style
+			DeletingMessage                lipgloss.Style
+			DeletingTitleGradientFromColor color.Color
+			DeletingTitleGradientToColor   color.Color
+		}
 	}
 
 	// Status bar and help
@@ -1267,6 +1278,14 @@ func DefaultStyles() Styles {
 	s.Dialog.Arguments.InputLabelFocused = base.Bold(true)
 	s.Dialog.Arguments.InputRequiredMarkBlurred = base.Foreground(fgMuted).SetString("*")
 	s.Dialog.Arguments.InputRequiredMarkFocused = base.Foreground(primary).Bold(true).SetString("*")
+
+	s.Dialog.Sessions.DeletingTitle = s.Dialog.Title.Foreground(red)
+	s.Dialog.Sessions.DeletingView = s.Dialog.View.BorderForeground(red)
+	s.Dialog.Sessions.DeletingMessage = s.Base.Padding(1)
+	s.Dialog.Sessions.DeletingTitleGradientFromColor = red
+	s.Dialog.Sessions.DeletingTitleGradientToColor = s.Primary
+	s.Dialog.Sessions.DeletingItemBlurred = s.Dialog.NormalItem.Foreground(fgSubtle)
+	s.Dialog.Sessions.DeletingItemFocused = s.Dialog.SelectedItem.Background(red)
 
 	s.Status.Help = lipgloss.NewStyle().Padding(0, 1)
 	s.Status.SuccessIndicator = base.Foreground(bgSubtle).Background(green).Padding(0, 1).Bold(true).SetString("OKAY!")

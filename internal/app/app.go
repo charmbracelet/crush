@@ -73,7 +73,7 @@ type App struct {
 // New initializes a new application instance.
 func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	q := db.New(conn)
-	sessions := session.NewService(q)
+	sessions := session.NewService(q, conn)
 	messages := message.NewService(q)
 	files := history.NewService(q, conn)
 	skipPermissionsRequests := cfg.Permissions != nil && cfg.Permissions.SkipRequests
@@ -351,15 +351,16 @@ func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel,
 
 	case largeModel != "":
 		// No small model specified, but large model was - use provider's default.
-		smallCfg := app.getDefaultSmallModel(largeProviderID)
+		smallCfg := app.GetDefaultSmallModel(largeProviderID)
 		app.config.Models[config.SelectedModelTypeSmall] = smallCfg
 	}
 
 	return app.AgentCoordinator.UpdateModels(ctx)
 }
 
+// GetDefaultSmallModel returns the default small model for the given
 // provider. Falls back to the large model if no default is found.
-func (app *App) getDefaultSmallModel(providerID string) config.SelectedModel {
+func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
 	cfg := app.config
 	largeModelCfg := cfg.Models[config.SelectedModelTypeLarge]
 

@@ -106,7 +106,13 @@ func (m *ModelItem) Render(width int) string {
 	if m.showProvider {
 		providerInfo = string(m.prov.Name)
 	}
-	return renderItem(m.t, m.model.Name, providerInfo, m.focused, width, m.cache, &m.m)
+	styles := ListIemStyles{
+		ItemBlurred:     m.t.Dialog.NormalItem,
+		ItemFocused:     m.t.Dialog.SelectedItem,
+		InfoTextBlurred: m.t.Base,
+		InfoTextFocused: m.t.Subtle,
+	}
+	return renderItem(styles, m.model.Name, providerInfo, m.focused, width, m.cache, &m.m)
 }
 
 // SetFocused implements ListItem.

@@ -51,7 +51,6 @@ func (m *UI) modelInfo(width int) string {
 			Cost:         m.session.Cost,
 			ModelContext: model.CatwalkCfg.ContextWindow,
 		}
-		return common.ModelInfo(m.com.Styles, model.CatwalkCfg.Name, providerName, reasoningInfo, modelContext, width)
 	}
 	return common.ModelInfo(m.com.Styles, model.CatwalkCfg.Name, providerName, reasoningInfo, modelContext, width)
 }

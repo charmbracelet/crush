@@ -63,7 +63,34 @@ body {
   text-decoration: none;
 }
 
-.header-wrapper svg {
+.header-content {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.header-svg {
+  flex-grow: 1;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  direction: rtl;
+}
+
+.header-svg svg {
+  height: 100%;
+  width: auto;
+  min-width: 100%;
+  display: block;
+}
+
+.heartbit-svg {
+  flex-shrink: 0;
+  width: 50px;
+  flex-basis: 50px;
+}
+
+.heartbit-svg svg {
   width: 100%;
   height: auto;
   display: block;

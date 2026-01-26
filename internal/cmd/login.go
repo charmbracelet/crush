@@ -1,17 +1,20 @@
 package cmd
 
 import (
+	"bufio"
 	"cmp"
 	"context"
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
 	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/charmbracelet/crush/internal/oauth/anthropic"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/oauth/hyper"
 	"github.com/pkg/browser"
@@ -24,19 +27,24 @@ var loginCmd = &cobra.Command{
 	Short:   "Login Crush to a platform",
 	Long: `Login Crush to a specified platform.
 The platform should be provided as an argument.
-Available platforms are: hyper, copilot.`,
+Available platforms are: hyper, copilot, anthropic.`,
 	Example: `
 # Authenticate with Charm Hyper
 crush login
 
 # Authenticate with GitHub Copilot
 crush login copilot
+
+# Authenticate with Anthropic (Claude)
+crush login anthropic
   `,
 	ValidArgs: []cobra.Completion{
 		"hyper",
 		"copilot",
 		"github",
 		"github-copilot",
+		"anthropic",
+		"claude",
 	},
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -55,6 +63,8 @@ crush login copilot
 			return loginHyper()
 		case "copilot", "github", "github-copilot":
 			return loginCopilot()
+		case "anthropic", "claude":
+			return loginAnthropic()
 		default:
 			return fmt.Errorf("unknown platform: %s", args[0])
 		}
@@ -202,4 +212,85 @@ func getLoginContext() context.Context {
 
 func waitEnter() {
 	_, _ = fmt.Scanln()
+}
+
+func loginAnthropic() error {
+	ctx := getLoginContext()
+	cfg := config.Get()
+
+	if cfg.HasConfigField("providers.anthropic.oauth") {
+		fmt.Println("You are already logged in to Anthropic.")
+		return nil
+	}
+
+	fmt.Println("🔐 Starting Anthropic OAuth flow...")
+	fmt.Println()
+
+	// Initiate the OAuth flow
+	authParams, err := anthropic.InitiateAuth()
+	if err != nil {
+		return fmt.Errorf("failed to initiate auth: %w", err)
+	}
+
+	fmt.Println("Opening browser to:")
+	fmt.Println(authParams.AuthURL)
+	fmt.Println()
+
+	if err := browser.OpenURL(authParams.AuthURL); err != nil {
+		fmt.Println("Could not open the URL. Please manually open it in your browser.")
+	}
+
+	fmt.Println(strings.Repeat("=", 70))
+	fmt.Println("After authorizing, the page will show a code and state.")
+	fmt.Println("Copy them and paste in this format: code#state")
+	fmt.Println("Example: abc123xyz...#def456uvw...")
+	fmt.Println(strings.Repeat("=", 70))
+	fmt.Println()
+
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("Paste code#state here: ")
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("failed to read input: %w", err)
+	}
+	codeState := strings.TrimSpace(input)
+
+	if !strings.Contains(codeState, "#") {
+		return fmt.Errorf("invalid format. Expected: code#state")
+	}
+
+	parts := strings.Split(codeState, "#")
+	code := parts[0]
+	returnedState := parts[1]
+
+	// Validate state (CSRF protection)
+	if returnedState != authParams.State {
+		return fmt.Errorf("state mismatch - possible CSRF attack")
+	}
+
+	fmt.Println()
+	fmt.Println("✅ Authorization code received!")
+	fmt.Println()
+	fmt.Println("🔄 Exchanging for tokens...")
+
+	// Exchange code for tokens
+	token, err := anthropic.ExchangeCode(ctx, code, authParams.CodeVerifier, returnedState)
+	if err != nil {
+		return fmt.Errorf("token exchange failed: %w", err)
+	}
+
+	// Save the tokens
+	// IMPORTANT: Prefix with "Bearer " so coordinator uses Authorization header
+	bearerToken := "Bearer " + token.AccessToken
+	if err := cmp.Or(
+		cfg.SetConfigField("providers.anthropic.api_key", bearerToken),
+		cfg.SetConfigField("providers.anthropic.oauth", token),
+	); err != nil {
+		return err
+	}
+
+	fmt.Println("✅ Tokens obtained successfully!")
+	fmt.Println()
+	fmt.Println("You're now authenticated with Anthropic!")
+	return nil
 }

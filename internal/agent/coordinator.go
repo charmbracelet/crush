@@ -726,11 +726,23 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 	}
 
 	// handle special headers for anthropic
-	if providerCfg.Type == anthropic.Name && c.isAnthropicThinking(model) {
-		if v, ok := headers["anthropic-beta"]; ok {
-			headers["anthropic-beta"] = v + ",interleaved-thinking-2025-05-14"
-		} else {
-			headers["anthropic-beta"] = "interleaved-thinking-2025-05-14"
+	if providerCfg.Type == anthropic.Name {
+		// Add OAuth beta flag if using OAuth authentication
+		if providerCfg.OAuthToken != nil {
+			if v, ok := headers["anthropic-beta"]; ok {
+				headers["anthropic-beta"] = v + ",oauth-2025-04-20"
+			} else {
+				headers["anthropic-beta"] = "oauth-2025-04-20"
+			}
+		}
+
+		// Add thinking beta flag if using thinking model
+		if c.isAnthropicThinking(model) {
+			if v, ok := headers["anthropic-beta"]; ok {
+				headers["anthropic-beta"] = v + ",interleaved-thinking-2025-05-14"
+			} else {
+				headers["anthropic-beta"] = "interleaved-thinking-2025-05-14"
+			}
 		}
 	}
 

@@ -192,7 +192,9 @@ func sessionItems(t *styles.Styles, mode sessionsMode, sessions ...session.Sessi
 			item.updateTitleInput = textinput.New()
 			item.updateTitleInput.SetVirtualCursor(false)
 			item.updateTitleInput.Prompt = ""
-			item.updateTitleInput.SetStyles(t.TextInput)
+			inputStyle := t.TextInput
+			inputStyle.Focused.Placeholder = inputStyle.Focused.Placeholder.Foreground(t.FgHalfMuted)
+			item.updateTitleInput.SetStyles(inputStyle)
 			item.updateTitleInput.Focus()
 		}
 		items[i] = item

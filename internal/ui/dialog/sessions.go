@@ -146,7 +146,11 @@ func (s *Session) HandleMsg(msg tea.Msg) Action {
 		case sessionsModeDeleting:
 			switch {
 			case key.Matches(msg, s.keyMap.ConfirmDelete):
-				return s.confirmDeleteSession()
+				action := s.confirmDeleteSession()
+				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeNormal, s.sessions...)...)
+				s.list.SelectFirst()
+				s.list.ScrollToSelected()
+				return action
 			case key.Matches(msg, s.keyMap.CancelDelete):
 				s.sessionsMode = sessionsModeNormal
 				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeNormal, s.sessions...)...)
@@ -154,7 +158,9 @@ func (s *Session) HandleMsg(msg tea.Msg) Action {
 		case sessionsModeUpdating:
 			switch {
 			case key.Matches(msg, s.keyMap.ConfirmRename):
-				return s.confirmRenameSession()
+				action := s.confirmRenameSession()
+				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeNormal, s.sessions...)...)
+				return action
 			case key.Matches(msg, s.keyMap.CancelRename):
 				s.sessionsMode = sessionsModeNormal
 				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeNormal, s.sessions...)...)
@@ -341,9 +347,6 @@ func (s *Session) removeSession(id string) {
 		newSessions = append(newSessions, sess)
 	}
 	s.sessions = newSessions
-	s.list.SetItems(sessionItems(s.com.Styles, sessionsModeNormal, s.sessions...)...)
-	s.list.SelectFirst()
-	s.list.ScrollToSelected()
 }
 
 func (s *Session) deleteSessionCmd(id string) tea.Cmd {
@@ -380,9 +383,6 @@ func (s *Session) updateSession(session session.Session) {
 			break
 		}
 	}
-	s.list.SetItems(sessionItems(s.com.Styles, sessionsModeNormal, s.sessions...)...)
-	s.list.SelectFirst()
-	s.list.ScrollToSelected()
 }
 
 func (s *Session) updateSessionCmd(session session.Session) tea.Cmd {

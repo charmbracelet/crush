@@ -78,16 +78,17 @@ body {
 }
 
 .header-svg svg {
-  height: 100%;
-  width: auto;
-  min-width: 100%;
+  height: auto;
+  height: 70px;
+  width: 100%;
   display: block;
 }
 
 .heartbit-svg {
   flex-shrink: 0;
-  width: 50px;
-  flex-basis: 50px;
+  width: 70px;
+  flex-basis: 70px;
+  margin-left: 1rem;
 }
 
 .heartbit-svg svg {
@@ -263,6 +264,7 @@ td {
 }
 
 @media (prefers-color-scheme: light) {
+
   /* Override charm brand colors in footer */
   .footer-container .st2 {
     fill: #644ced !important;

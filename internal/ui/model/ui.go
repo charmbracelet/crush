@@ -29,6 +29,7 @@ import (
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/filetracker"
+	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/message"
@@ -2817,29 +2818,45 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 		}
 	}
 
-	var cmd tea.Cmd
-	path := strings.ReplaceAll(msg.Content, "\\ ", " ")
-	// Try to get an image.
-	path, err := filepath.Abs(strings.TrimSpace(path))
-	if err != nil {
-		m.textarea, cmd = m.textarea.Update(msg)
-		return cmd
-	}
+	// Attempt to parse pasted content as file paths. If possible to parse,
+	// all files exist and are valid, add as attachments.
+	// Otherwise, paste as text.
+	paths := fsext.PasteStringToPaths(msg.Content)
+	allExistsAndValid := func() bool {
+		for _, path := range paths {
+			if _, err := os.Stat(path); os.IsNotExist(err) {
+				return false
+			}
 
-	// Check if file has an allowed image extension.
-	isAllowedType := false
-	lowerPath := strings.ToLower(path)
-	for _, ext := range common.AllowedImageTypes {
-		if strings.HasSuffix(lowerPath, ext) {
-			isAllowedType = true
-			break
+			lowerPath := strings.ToLower(path)
+			isValid := false
+			for _, ext := range common.AllowedImageTypes {
+				if strings.HasSuffix(lowerPath, ext) {
+					isValid = true
+					break
+				}
+			}
+			if !isValid {
+				return false
+			}
 		}
+		return true
 	}
-	if !isAllowedType {
+	if !allExistsAndValid() {
+		var cmd tea.Cmd
 		m.textarea, cmd = m.textarea.Update(msg)
 		return cmd
 	}
 
+	var cmds []tea.Cmd
+	for _, path := range paths {
+		cmds = append(cmds, m.handleFilePathPaste(path))
+	}
+	return tea.Batch(cmds...)
+}
+
+// handleFilePathPaste handles a pasted file path.
+func (m *UI) handleFilePathPaste(path string) tea.Cmd {
 	return func() tea.Msg {
 		fileInfo, err := os.Stat(path)
 		if err != nil {

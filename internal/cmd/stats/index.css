@@ -74,14 +74,17 @@ body {
   flex-shrink: 1;
   min-width: 0;
   overflow: hidden;
-  direction: rtl;
+  height: 70px;
+  display: flex;
+  align-items: center;
 }
 
 .header-svg svg {
-  height: auto;
   height: 70px;
-  width: 100%;
+  width: auto;
+  min-width: 1300px;
   display: block;
+  pointer-events: none;
 }
 
 .heartbit-svg {

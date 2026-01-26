@@ -379,6 +379,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			}
 			a.updateSessionUsage(largeModel, &updatedSession, stepResult.Usage, a.openrouterCost(stepResult.ProviderMetadata))
 			_, sessionErr := a.sessions.Save(genCtx, updatedSession)
+			if sessionErr == nil {
+				currentSession = updatedSession
+			}
 			sessionLock.Unlock()
 			if sessionErr != nil {
 				return sessionErr

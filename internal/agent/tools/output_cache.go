@@ -209,3 +209,22 @@ func (c *OutputCache) Clear(sessionID string) {
 		}
 	}
 }
+
+// tailOutput returns the last n lines of content and whether it was truncated.
+// This is used by the CachedTool wrapper to truncate large outputs.
+func tailOutput(content string, n int) (result string, truncated bool) {
+	if content == "" {
+		return "", false
+	}
+
+	lines := strings.Split(content, "\n")
+	totalLines := len(lines)
+
+	if totalLines <= n {
+		return content, false
+	}
+
+	// Return last n lines.
+	start := totalLines - n
+	return strings.Join(lines[start:], "\n"), true
+}

@@ -41,9 +41,6 @@ type BashResponseMetadata struct {
 	WorkingDirectory string `json:"working_directory"`
 	Background       bool   `json:"background,omitempty"`
 	ShellID          string `json:"shell_id,omitempty"`
-	TotalLines       int    `json:"total_lines,omitempty"`
-	Truncated        bool   `json:"truncated,omitempty"`
-	ToolCallID       string `json:"tool_call_id,omitempty"`
 }
 
 const (
@@ -52,8 +49,6 @@ const (
 	AutoBackgroundThreshold = 1 * time.Minute // Commands taking longer automatically become background jobs
 	MaxOutputLength         = 30000
 	BashNoOutput            = "no output"
-	// DefaultTailLines is the default number of lines to show in bash output.
-	DefaultTailLines = 100
 )
 
 //go:embed bash.tpl
@@ -264,39 +259,21 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 						return fantasy.ToolResponse{}, fmt.Errorf("[Job %s] error executing command: %w", bgShell.ID, execErr)
 					}
 
-					fullOutput, totalLines := formatOutput(stdout, stderr, execErr)
-
-					// Cache the full output for later retrieval
-					sessionID := GetSessionFromContext(ctx)
-					if sessionID != "" {
-						GetOutputCache().Store(sessionID, call.ID, fullOutput)
-					}
-
-					// Truncate to last N lines
-					displayOutput, truncated := tailOutput(fullOutput, DefaultTailLines)
+					stdout = formatOutput(stdout, stderr, execErr)
 
 					metadata := BashResponseMetadata{
 						StartTime:        startTime.UnixMilli(),
 						EndTime:          time.Now().UnixMilli(),
-						Output:           fullOutput,
+						Output:           stdout,
 						Description:      params.Description,
 						Background:       params.RunInBackground,
 						WorkingDirectory: bgShell.WorkingDir,
-						TotalLines:       totalLines,
-						Truncated:        truncated,
-						ToolCallID:       call.ID,
 					}
-					if displayOutput == "" {
+					if stdout == "" {
 						return fantasy.WithResponseMetadata(fantasy.NewTextResponse(BashNoOutput), metadata), nil
 					}
-
-					var response strings.Builder
-					if truncated {
-						fmt.Fprintf(&response, "[Showing last %d of %d lines. Use output_head/output_tail/output_grep with tool_call_id=%q to explore full output]\n\n", DefaultTailLines, totalLines, call.ID)
-					}
-					response.WriteString(displayOutput)
-					fmt.Fprintf(&response, "\n\n<cwd>%s</cwd>", normalizeWorkingDir(bgShell.WorkingDir))
-					return fantasy.WithResponseMetadata(fantasy.NewTextResponse(response.String()), metadata), nil
+					stdout += fmt.Sprintf("\n\n<cwd>%s</cwd>", normalizeWorkingDir(bgShell.WorkingDir))
+					return fantasy.WithResponseMetadata(fantasy.NewTextResponse(stdout), metadata), nil
 				}
 
 				// Still running after fast-failure check - return as background job
@@ -363,39 +340,21 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 					return fantasy.ToolResponse{}, fmt.Errorf("[Job %s] error executing command: %w", bgShell.ID, execErr)
 				}
 
-				fullOutput, totalLines := formatOutput(stdout, stderr, execErr)
-
-				// Cache the full output for later retrieval
-				sessionID := GetSessionFromContext(ctx)
-				if sessionID != "" {
-					GetOutputCache().Store(sessionID, call.ID, fullOutput)
-				}
-
-				// Truncate to last N lines
-				displayOutput, truncated := tailOutput(fullOutput, DefaultTailLines)
+				stdout = formatOutput(stdout, stderr, execErr)
 
 				metadata := BashResponseMetadata{
 					StartTime:        startTime.UnixMilli(),
 					EndTime:          time.Now().UnixMilli(),
-					Output:           fullOutput,
+					Output:           stdout,
 					Description:      params.Description,
 					Background:       params.RunInBackground,
 					WorkingDirectory: bgShell.WorkingDir,
-					TotalLines:       totalLines,
-					Truncated:        truncated,
-					ToolCallID:       call.ID,
 				}
-				if displayOutput == "" {
+				if stdout == "" {
 					return fantasy.WithResponseMetadata(fantasy.NewTextResponse(BashNoOutput), metadata), nil
 				}
-
-				var response strings.Builder
-				if truncated {
-					fmt.Fprintf(&response, "[Showing last %d of %d lines. Use output_head/output_tail/output_grep with tool_call_id=%q to explore full output]\n\n", DefaultTailLines, totalLines, call.ID)
-				}
-				response.WriteString(displayOutput)
-				fmt.Fprintf(&response, "\n\n<cwd>%s</cwd>", normalizeWorkingDir(bgShell.WorkingDir))
-				return fantasy.WithResponseMetadata(fantasy.NewTextResponse(response.String()), metadata), nil
+				stdout += fmt.Sprintf("\n\n<cwd>%s</cwd>", normalizeWorkingDir(bgShell.WorkingDir))
+				return fantasy.WithResponseMetadata(fantasy.NewTextResponse(stdout), metadata), nil
 			}
 
 			// Still running - keep as background job
@@ -412,11 +371,13 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 		})
 }
 
-// formatOutput formats the output of a completed command with error handling.
-// Returns the formatted output and total line count.
-func formatOutput(stdout, stderr string, execErr error) (output string, totalLines int) {
+// formatOutput formats the output of a completed command with error handling
+func formatOutput(stdout, stderr string, execErr error) string {
 	interrupted := shell.IsInterrupt(execErr)
 	exitCode := shell.ExitCode(execErr)
+
+	stdout = truncateOutput(stdout)
+	stderr = truncateOutput(stderr)
 
 	errorMessage := stderr
 	if errorMessage == "" && execErr != nil {
@@ -445,26 +406,20 @@ func formatOutput(stdout, stderr string, execErr error) (output string, totalLin
 		stdout += "\n" + errorMessage
 	}
 
-	totalLines = countLines(stdout)
-	return stdout, totalLines
+	return stdout
 }
 
-// tailOutput returns the last n lines of content and whether it was truncated.
-func tailOutput(content string, n int) (result string, truncated bool) {
-	if content == "" {
-		return "", false
+func truncateOutput(content string) string {
+	if len(content) <= MaxOutputLength {
+		return content
 	}
 
-	lines := strings.Split(content, "\n")
-	totalLines := len(lines)
+	halfLength := MaxOutputLength / 2
+	start := content[:halfLength]
+	end := content[len(content)-halfLength:]
 
-	if totalLines <= n {
-		return content, false
-	}
-
-	// Return last n lines
-	start := totalLines - n
-	return strings.Join(lines[start:], "\n"), true
+	truncatedLinesCount := countLines(content[halfLength : len(content)-halfLength])
+	return fmt.Sprintf("%s\n\n... [%d lines truncated] ...\n\n%s", start, truncatedLinesCount, end)
 }
 
 func countLines(s string) int {

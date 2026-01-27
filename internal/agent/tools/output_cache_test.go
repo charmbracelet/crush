@@ -189,9 +189,9 @@ func TestTailOutput_LargeOutput(t *testing.T) {
 	}
 	content := strings.Join(lines, "\n")
 
-	result, truncated := tailOutput(content, DefaultTailLines)
+	result, truncated := tailOutput(content, DefaultOutputLines)
 	require.True(t, truncated)
 
 	resultLines := strings.Split(result, "\n")
-	require.Len(t, resultLines, DefaultTailLines)
+	require.Len(t, resultLines, DefaultOutputLines)
 }

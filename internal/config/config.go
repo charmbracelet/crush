@@ -685,7 +685,8 @@ func (c *Config) recordRecentModel(modelType SelectedModelType, model SelectedMo
 	return nil
 }
 
-func allToolNames() []string {
+// AllToolNames returns the list of all available tool names.
+func AllToolNames() []string {
 	return []string{
 		"agent",
 		"bash",
@@ -735,7 +736,7 @@ func filterSlice(data []string, mask []string, include bool) []string {
 }
 
 func (c *Config) SetupAgents() {
-	allowedTools := resolveAllowedTools(allToolNames(), c.Options.DisabledTools)
+	allowedTools := resolveAllowedTools(AllToolNames(), c.Options.DisabledTools)
 
 	agents := map[string]Agent{
 		AgentCoder: {

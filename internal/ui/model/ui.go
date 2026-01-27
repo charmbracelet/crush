@@ -1117,11 +1117,6 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		cmds = append(cmds, m.toggleCompactMode())
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleThinking:
-		if m.isAgentBusy() {
-			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait..."))
-			break
-		}
-
 		cmds = append(cmds, func() tea.Msg {
 			cfg := m.com.Config()
 			if cfg == nil {

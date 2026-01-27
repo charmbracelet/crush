@@ -59,6 +59,10 @@ func (app *App) initLSPClients(ctx context.Context) {
 		}
 	}
 	for name, server := range filtered {
+		if app.config.Options.AutoLSP != nil && !*app.config.Options.AutoLSP && !slices.Contains(userConfiguredLSPs, name) {
+			slog.Debug("Ignoring non user-define LSP client due to AutoLSP being disabled", "name", name)
+			continue
+		}
 		go app.createAndStartLSPClient(
 			ctx, name,
 			toOurConfig(server),

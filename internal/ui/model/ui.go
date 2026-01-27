@@ -1109,6 +1109,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		cmds = append(cmds, m.initializeProject())
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionOpenAgents:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		if cmd := m.openAgentsDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 
 	case dialog.ActionSelectModel:
 		if m.isAgentBusy() {
@@ -2546,6 +2551,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openReasoningDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.AgentsID:
+		if cmd := m.openAgentsDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.QuitID:
 		if cmd := m.openQuitDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -2567,6 +2576,23 @@ func (m *UI) openQuitDialog() tea.Cmd {
 
 	quitDialog := dialog.NewQuit(m.com)
 	m.dialog.OpenDialog(quitDialog)
+	return nil
+}
+
+// openAgentsDialog opens the agents dialog.
+func (m *UI) openAgentsDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.AgentsID) {
+		// Bring to front.
+		m.dialog.BringToFront(dialog.AgentsID)
+		return nil
+	}
+
+	agentsDialog, err := dialog.NewAgents(m.com)
+	if err != nil {
+		return uiutil.ReportError(err)
+	}
+
+	m.dialog.OpenDialog(agentsDialog)
 	return nil
 }
 

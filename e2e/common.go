@@ -143,6 +143,33 @@ func NewIsolatedTerminalWithConfig(t *testing.T, cols, rows int, configJSON stri
 	return term
 }
 
+// NewIsolatedTerminalWithConfigAndEnv creates a terminal with isolated config environment
+// using the provided config JSON string and a pre-created tmpDir for full control over
+// the environment (e.g., for creating agent files before starting).
+func NewIsolatedTerminalWithConfigAndEnv(t *testing.T, cols, rows int, configJSON string, tmpDir string) *vttest.Terminal {
+	t.Helper()
+
+	term, err := vttest.NewTerminal(t, cols, rows)
+	if err != nil {
+		t.Fatalf("Failed to create terminal: %v", err)
+	}
+
+	cmd := exec.CommandContext(context.Background(), CrushBinary())
+	cmd.Env = append(os.Environ(),
+		"XDG_CONFIG_HOME="+filepath.Join(tmpDir, "config"),
+		"XDG_DATA_HOME="+filepath.Join(tmpDir, "data"),
+		"HOME="+tmpDir,
+		"USERPROFILE="+tmpDir, // Windows equivalent of HOME
+		"CRUSH_NEW_UI=true",   // Use new UI for all e2e tests
+	)
+	if err := term.Start(cmd); err != nil {
+		term.Close()
+		t.Fatalf("Failed to start crush: %v", err)
+	}
+
+	return term
+}
+
 // SnapshotText returns the text content of the terminal snapshot.
 func SnapshotText(snap vttest.Snapshot) string {
 	var lines []string

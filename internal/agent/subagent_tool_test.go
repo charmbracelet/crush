@@ -20,7 +20,7 @@ func TestBuildSubagentDescription(t *testing.T) {
 			name:      "no subagents",
 			subagents: nil,
 			validate: func(t *testing.T, desc string) {
-				require.Contains(t, desc, "Launch a new agent")
+				require.Contains(t, desc, "Invoke a user-defined subagent")
 				require.NotContains(t, desc, "<available_subagents>")
 			},
 		},
@@ -28,7 +28,7 @@ func TestBuildSubagentDescription(t *testing.T) {
 			name:      "empty subagents slice",
 			subagents: []*subagent.Subagent{},
 			validate: func(t *testing.T, desc string) {
-				require.Contains(t, desc, "Launch a new agent")
+				require.Contains(t, desc, "Invoke a user-defined subagent")
 				require.NotContains(t, desc, "<available_subagents>")
 			},
 		},
@@ -139,4 +139,48 @@ func TestSubagentDescriptionFormat(t *testing.T) {
 	// Should have proper structure.
 	require.True(t, strings.HasSuffix(desc, "</available_subagents>\n"))
 	require.Contains(t, desc, "You can specify a subagent by name using the 'subagent' parameter")
+}
+
+func TestAvailableSubagentNames(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		subagents []*subagent.Subagent
+		expected  string
+	}{
+		{
+			name:      "no subagents",
+			subagents: nil,
+			expected:  "(none)",
+		},
+		{
+			name:      "empty slice",
+			subagents: []*subagent.Subagent{},
+			expected:  "(none)",
+		},
+		{
+			name: "single subagent",
+			subagents: []*subagent.Subagent{
+				{Name: "code-reviewer"},
+			},
+			expected: "code-reviewer",
+		},
+		{
+			name: "multiple subagents",
+			subagents: []*subagent.Subagent{
+				{Name: "code-reviewer"},
+				{Name: "test-writer"},
+				{Name: "doc-generator"},
+			},
+			expected: "code-reviewer, test-writer, doc-generator",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tt.expected, availableSubagentNames(tt.subagents))
+		})
+	}
 }

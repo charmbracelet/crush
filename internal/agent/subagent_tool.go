@@ -25,11 +25,11 @@ var subagentToolDescription []byte
 // SubagentParams are the parameters for the subagent tool.
 type SubagentParams struct {
 	Prompt   string `json:"prompt" description:"The task for the agent to perform"`
-	Subagent string `json:"subagent,omitempty" description:"Optional: name of specific subagent to use (e.g., 'code-reviewer')"`
+	Subagent string `json:"subagent" description:"The name of the subagent to invoke (e.g., 'code-reviewer')"`
 }
 
 const (
-	SubagentToolName = "agent"
+	SubagentToolName = "subagent"
 )
 
 // subagentTool creates a tool for invoking user-defined subagents.
@@ -53,6 +53,9 @@ func (c *coordinator) subagentTool(ctx context.Context) (fantasy.AgentTool, erro
 			if params.Prompt == "" {
 				return fantasy.NewTextErrorResponse("prompt is required"), nil
 			}
+			if params.Subagent == "" {
+				return fantasy.NewTextErrorResponse("subagent name is required"), nil
+			}
 
 			sessionID := tools.GetSessionFromContext(ctx)
 			if sessionID == "" {
@@ -64,13 +67,10 @@ func (c *coordinator) subagentTool(ctx context.Context) (fantasy.AgentTool, erro
 				return fantasy.ToolResponse{}, errors.New("agent message id missing from context")
 			}
 
-			// Find the specified subagent or use default task agent.
-			var selectedSubagent *subagent.Subagent
-			if params.Subagent != "" {
-				selectedSubagent = subagent.FindByName(subagents, params.Subagent)
-				if selectedSubagent == nil {
-					return fantasy.NewTextErrorResponse(fmt.Sprintf("subagent '%s' not found", params.Subagent)), nil
-				}
+			// Find the specified subagent.
+			selectedSubagent := subagent.FindByName(subagents, params.Subagent)
+			if selectedSubagent == nil {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("subagent '%s' not found. Available subagents: %s", params.Subagent, availableSubagentNames(subagents))), nil
 			}
 
 			// Create the agent for this invocation.
@@ -132,34 +132,23 @@ func (c *coordinator) subagentTool(ctx context.Context) (fantasy.AgentTool, erro
 }
 
 // buildSubagentAgent creates an agent for the given subagent definition.
+// Subagents always have access to all tools by default.
 func (c *coordinator) buildSubagentAgent(ctx context.Context, sa *subagent.Subagent) (SessionAgent, error) {
-	// Use default task agent configuration if no subagent specified.
-	if sa == nil {
-		agentCfg, ok := c.cfg.Agents[config.AgentTask]
-		if !ok {
-			return nil, errors.New("task agent not configured")
-		}
-		p, err := taskPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
-		if err != nil {
-			return nil, err
-		}
-		return c.buildAgent(ctx, p, agentCfg, true)
-	}
-
 	// Create a permission service for this subagent.
 	subagentPermissions := c.createSubagentPermissions(sa)
 
 	// Build agent config from subagent definition.
+	// Subagents get all tools by default - use tools field only if explicitly specified.
 	agentCfg := config.Agent{
 		Name:         sa.Name,
 		Description:  sa.Description,
 		Model:        config.SelectedModelTypeLarge,
-		AllowedTools: sa.Tools,
+		AllowedTools: config.AllToolNames(), // All tools by default
 	}
 
-	// If no tools specified, use all tools.
-	if len(agentCfg.AllowedTools) == 0 {
-		agentCfg.AllowedTools = config.AllToolNames()
+	// If tools are explicitly restricted in the subagent spec, use those instead.
+	if len(sa.Tools) > 0 {
+		agentCfg.AllowedTools = sa.Tools
 	}
 
 	// Build the prompt.
@@ -322,4 +311,16 @@ func firstLine(s string) string {
 		return s
 	}
 	return s[:idx]
+}
+
+// availableSubagentNames returns a comma-separated list of subagent names.
+func availableSubagentNames(subagents []*subagent.Subagent) string {
+	if len(subagents) == 0 {
+		return "(none)"
+	}
+	names := make([]string, len(subagents))
+	for i, sa := range subagents {
+		names[i] = sa.Name
+	}
+	return strings.Join(names, ", ")
 }

@@ -1,16 +1,17 @@
-Launch a new agent that has access to the following tools: GlobTool, GrepTool, LS, View. When you are searching for a keyword or file and are not confident that you will find the right match on the first try, use the Agent tool to perform the search for you.
+Invoke a user-defined subagent with specialized capabilities. Subagents are custom agents defined in markdown files with YAML frontmatter that specify their system prompt, tool access, and permission controls.
 
 <usage>
-- If you are searching for a keyword like "config" or "logger", or for questions like "which file does X?", the Agent tool is strongly recommended
-- If you want to read a specific file path, use the View or GlobTool tool instead of the Agent tool, to find the match more quickly
-- If you are searching for a specific class definition like "class Foo", use the GlobTool tool instead, to find the match more quickly
+- Use this tool when you need to invoke a specialized agent for a specific task
+- Each subagent has its own system prompt optimized for particular use cases (e.g., code review, test generation, documentation)
+- Subagents have full access to all tools by default, unless explicitly restricted in their definition
+- Subagents can have pre-approved tools (no permission prompts) or run in yolo mode
 </usage>
 
 <usage_notes>
-1. Launch multiple agents concurrently whenever possible, to maximize performance; to do that, use a single message with multiple tool uses
-2. When the agent is done, it will return a single message back to you. The result returned by the agent is not visible to the user. To show the user the result, you should send a text message back to the user with a concise summary of the result.
-3. Each agent invocation is stateless. You will not be able to send additional messages to the agent, nor will the agent be able to communicate with you outside of its final report. Therefore, your prompt should contain a highly detailed task description for the agent to perform autonomously and you should specify exactly what information the agent should return back to you in its final and only message to you.
-4. The agent's outputs should generally be trusted
-5. IMPORTANT: The agent can not use Bash, Replace, Edit, so can not modify files. If you want to use these tools, use them directly instead of going through the agent.
+1. The `subagent` parameter is required - you must specify which subagent to invoke
+2. Launch multiple subagents concurrently when tasks are independent
+3. Each subagent invocation is stateless - include all necessary context in the prompt
+4. The subagent's response is returned to you, not directly visible to the user
+5. Subagents inherit the parent session's model configuration
 </usage_notes>
 

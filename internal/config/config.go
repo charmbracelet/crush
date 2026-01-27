@@ -187,7 +187,7 @@ type MCPConfig struct {
 
 type LSPConfig struct {
 	Disabled    bool              `json:"disabled,omitempty" jsonschema:"description=Whether this LSP server is disabled,default=false"`
-	Command     string            `json:"command,omitempty" jsonschema:"required,description=Command to execute for the LSP server,example=gopls"`
+	Command     string            `json:"command,omitempty" jsonschema:"description=Command to execute for the LSP server,example=gopls"`
 	Args        []string          `json:"args,omitempty" jsonschema:"description=Arguments to pass to the LSP server command"`
 	Env         map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set to the LSP server command"`
 	FileTypes   []string          `json:"filetypes,omitempty" jsonschema:"description=File types this LSP server handles,example=go,example=mod,example=rs,example=c,example=js,example=ts"`
@@ -346,7 +346,7 @@ type Agent struct {
 }
 
 type Tools struct {
-	Ls ToolLs `json:"ls,omitzero"`
+	Ls ToolLs `json:"ls,omitempty"`
 }
 
 type ToolLs struct {
@@ -379,7 +379,7 @@ type Config struct {
 
 	Permissions *Permissions `json:"permissions,omitempty" jsonschema:"description=Permission settings for tool usage"`
 
-	Tools Tools `json:"tools,omitzero" jsonschema:"description=Tool configurations"`
+	Tools Tools `json:"tools,omitempty" jsonschema:"description=Tool configurations"`
 
 	Agents map[string]Agent `json:"-"`
 

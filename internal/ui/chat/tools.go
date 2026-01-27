@@ -255,14 +255,7 @@ func NewToolMessageItem(
 		if strings.HasPrefix(toolCall.Name, "mcp_") {
 			item = NewMCPToolMessageItem(sty, toolCall, result, canceled)
 		} else {
-			// TODO: Implement other tool items
-			item = newBaseToolMessageItem(
-				sty,
-				toolCall,
-				result,
-				&DefaultToolRenderContext{},
-				canceled,
-			)
+			item = NewGenericToolMessageItem(sty, toolCall, result, canceled)
 		}
 	}
 	item.SetMessageID(messageID)
@@ -1399,6 +1392,6 @@ func prettifyToolName(name string) string {
 	case tools.WriteToolName:
 		return "Write"
 	default:
-		return name
+		return genericPrettyName(name)
 	}
 }

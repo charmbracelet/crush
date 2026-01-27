@@ -48,9 +48,11 @@ func (m *UI) updateInitializeView(msg tea.KeyPressMsg) (cmds []tea.Cmd) {
 // initializeProject starts project initialization and transitions to the landing view.
 func (m *UI) initializeProject() tea.Cmd {
 	// clear the session
-	m.newSession()
-	cfg := m.com.Config()
 	var cmds []tea.Cmd
+	if cmd := m.newSession(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	cfg := m.com.Config()
 
 	initialize := func() tea.Msg {
 		initPrompt, err := agent.InitializePrompt(*cfg)

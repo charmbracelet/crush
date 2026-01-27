@@ -211,6 +211,13 @@ type UI struct {
 
 	// mouse highlighting related state
 	lastClickTime time.Time
+
+	// Prompt history for up/down navigation through previous messages.
+	promptHistory struct {
+		messages []string
+		index    int
+		draft    string
+	}
 }
 
 // New creates a new instance of the [UI] model.
@@ -307,6 +314,8 @@ func (m *UI) Init() tea.Cmd {
 	}
 	// load the user commands async
 	cmds = append(cmds, m.loadCustomCommands())
+	// load prompt history async
+	cmds = append(cmds, m.loadPromptHistory())
 	return tea.Batch(cmds...)
 }
 
@@ -382,6 +391,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.updateLayoutAndSize()
 		}
+		// Reload prompt history for the new session.
+		m.historyReset()
+		cmds = append(cmds, m.loadPromptHistory())
 
 	case sendMessageMsg:
 		cmds = append(cmds, m.sendMessage(msg.Content, msg.Attachments...))
@@ -409,13 +421,20 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			commands.SetMCPPrompts(m.mcpPrompts)
 		}
 
+	case promptHistoryLoadedMsg:
+		m.promptHistory.messages = msg.messages
+		m.promptHistory.index = -1
+		m.promptHistory.draft = ""
+
 	case closeDialogMsg:
 		m.dialog.CloseFrontDialog()
 
 	case pubsub.Event[session.Session]:
 		if msg.Type == pubsub.DeletedEvent {
 			if m.session != nil && m.session.ID == msg.Payload.ID {
-				m.newSession()
+				if cmd := m.newSession(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			}
 			break
 		}
@@ -1088,7 +1107,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait before starting a new session..."))
 			break
 		}
-		m.newSession()
+		if cmd := m.newSession(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSummarize:
 		if m.isAgentBusy() {
@@ -1494,8 +1515,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 
 				m.randomizePlaceholders()
+				m.historyReset()
 
-				return m.sendMessage(value, attachments...)
+				return tea.Batch(m.sendMessage(value, attachments...), m.loadPromptHistory())
 			case key.Matches(msg, m.keyMap.Chat.NewSession):
 				if !m.hasSession() {
 					break
@@ -1504,7 +1526,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait before starting a new session..."))
 					break
 				}
-				m.newSession()
+				if cmd := m.newSession(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			case key.Matches(msg, m.keyMap.Tab):
 				if m.state != uiLanding {
 					m.focus = uiFocusMain
@@ -1524,6 +1548,21 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				ta, cmd := m.textarea.Update(msg)
 				m.textarea = ta
 				cmds = append(cmds, cmd)
+			case key.Matches(msg, m.keyMap.Editor.HistoryPrev):
+				cmd := m.handleHistoryUp(msg)
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			case key.Matches(msg, m.keyMap.Editor.HistoryNext):
+				cmd := m.handleHistoryDown(msg)
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			case key.Matches(msg, m.keyMap.Editor.Escape):
+				cmd := m.handleHistoryEscape(msg)
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			default:
 				if handleGlobalKeys(msg) {
 					// Handle global keys first before passing to textarea.
@@ -1556,6 +1595,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				ta, cmd := m.textarea.Update(msg)
 				m.textarea = ta
 				cmds = append(cmds, cmd)
+
+				// Any text modification becomes the current draft.
+				m.updateHistoryDraft(curValue)
 
 				// After updating textarea, check if we need to filter completions.
 				// Skip filtering on the initial @ keystroke since items are loading async.
@@ -1596,7 +1638,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					break
 				}
 				m.focus = uiFocusEditor
-				m.newSession()
+				if cmd := m.newSession(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			case key.Matches(msg, m.keyMap.Chat.Expand):
 				m.chat.ToggleExpandedSelectedItem()
 			case key.Matches(msg, m.keyMap.Chat.Up):
@@ -2773,9 +2817,10 @@ func (m *UI) handlePermissionNotification(notification permission.PermissionNoti
 
 // newSession clears the current session state and prepares for a new session.
 // The actual session creation happens when the user sends their first message.
-func (m *UI) newSession() {
+// Returns a command to reload prompt history.
+func (m *UI) newSession() tea.Cmd {
 	if !m.hasSession() {
-		return
+		return nil
 	}
 
 	m.session = nil
@@ -2788,6 +2833,8 @@ func (m *UI) newSession() {
 	m.pillsExpanded = false
 	m.promptQueue = 0
 	m.pillsView = ""
+	m.historyReset()
+	return m.loadPromptHistory()
 }
 
 // handlePasteMsg handles a paste message.

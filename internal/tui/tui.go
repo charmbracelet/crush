@@ -270,6 +270,13 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 	case commands.ToggleYoloModeMsg:
 		a.app.Permissions.SetSkipRequests(!a.app.Permissions.SkipRequests())
+		// Also forward to current page to update editor UI
+		if item, ok := a.pages[a.currentPage]; ok {
+			updated, cmd := item.Update(msg)
+			a.pages[a.currentPage] = updated
+			return a, cmd
+		}
+		return a, nil
 	case commands.ToggleHelpMsg:
 		a.status.ToggleFullHelp()
 		a.showingFullHelp = !a.showingFullHelp

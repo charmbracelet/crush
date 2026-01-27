@@ -297,6 +297,7 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			m.mode = commands.YoloMode
 		}
 		m.setEditorPrompt()
+		// Don't forward - parent will handle permission toggle
 		return m, nil
 	case commands.CycleModeMsg:
 		m.mode = (m.mode + 1) % 3
@@ -758,12 +759,19 @@ func New(app *app.App) Editor {
 	ta.CharLimit = -1
 	ta.SetVirtualCursor(false)
 	ta.Focus()
+
+	// Initialize mode based on current permissions state
+	initialMode := commands.RegularMode
+	if app.Permissions.SkipRequests() {
+		initialMode = commands.YoloMode
+	}
+
 	e := &editorCmp{
 		// TODO: remove the app instance from here
 		app:      app,
 		textarea: ta,
 		keyMap:   DefaultEditorKeyMap(),
-		mode:     commands.RegularMode,
+		mode:     initialMode,
 	}
 	e.setEditorPrompt()
 

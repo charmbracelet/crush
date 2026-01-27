@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
@@ -297,11 +298,14 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			m.mode = commands.YoloMode
 		}
 		m.setEditorPrompt()
+		m.syncModeToPermissions()
 		// Don't forward - parent will handle permission toggle
 		return m, nil
 	case commands.CycleModeMsg:
 		m.mode = (m.mode + 1) % 3
 		m.setEditorPrompt()
+		// Sync permissions with new mode
+		m.syncModeToPermissions()
 		return m, nil
 	case tea.KeyPressMsg:
 		cur := m.textarea.Cursor()
@@ -707,6 +711,20 @@ func (m *editorCmp) GetMode() commands.EditorMode {
 	return m.mode
 }
 
+// syncModeToPermissions updates the permission service to match the editor mode.
+func (m *editorCmp) syncModeToPermissions() {
+	var permMode permission.PermissionMode
+	switch m.mode {
+	case commands.RegularMode:
+		permMode = permission.ModeRegular
+	case commands.YoloMode:
+		permMode = permission.ModeYolo
+	case commands.PlanMode:
+		permMode = permission.ModePlan
+	}
+	m.app.Permissions.SetMode(permMode)
+}
+
 func normalPromptFunc(info textarea.PromptInfo) string {
 	t := styles.CurrentTheme()
 	if info.LineNumber == 0 {
@@ -760,10 +778,16 @@ func New(app *app.App) Editor {
 	ta.SetVirtualCursor(false)
 	ta.Focus()
 
-	// Initialize mode based on current permissions state
+	// Initialize mode based on current permissions state.
 	initialMode := commands.RegularMode
-	if app.Permissions.SkipRequests() {
+	permMode := app.Permissions.GetMode()
+	switch permMode {
+	case permission.ModeYolo:
 		initialMode = commands.YoloMode
+	case permission.ModePlan:
+		initialMode = commands.PlanMode
+	case permission.ModeRegular:
+		initialMode = commands.RegularMode
 	}
 
 	e := &editorCmp{

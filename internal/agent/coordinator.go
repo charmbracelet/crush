@@ -69,7 +69,6 @@ type coordinator struct {
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
-	isPlanMode   bool
 
 	readyWg errgroup.Group
 }
@@ -120,7 +119,14 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 
 // RunWithPlanMode implements Coordinator with plan mode support.
 func (c *coordinator) RunWithPlanMode(ctx context.Context, sessionID string, prompt string, isPlanMode bool, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
-	c.isPlanMode = isPlanMode
+	// Set the permission mode based on isPlanMode parameter
+	if isPlanMode {
+		c.permissions.SetMode(permission.ModePlan)
+	} else if c.permissions.GetMode() == permission.ModePlan {
+		// If we're exiting plan mode, restore to regular mode
+		c.permissions.SetMode(permission.ModeRegular)
+	}
+
 	if err := c.readyWg.Wait(); err != nil {
 		return nil, err
 	}
@@ -343,10 +349,9 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		SystemPrompt:         "",
 		IsSubAgent:           isSubAgent,
 		DisableAutoSummarize: c.cfg.Options.DisableAutoSummarize,
-		IsYolo:               c.permissions.SkipRequests(),
-		IsPlan:               c.isPlanMode,
 		Sessions:             c.sessions,
 		Messages:             c.messages,
+		Permissions:          c.permissions,
 		Tools:                nil,
 	})
 

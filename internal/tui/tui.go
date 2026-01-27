@@ -269,8 +269,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Model: quit.NewQuitDialog(),
 		})
 	case commands.ToggleYoloModeMsg:
-		a.app.Permissions.SetSkipRequests(!a.app.Permissions.SkipRequests())
-		// Also forward to current page to update editor UI
+		// Forward to current page to update editor UI, which will sync permissions
 		if item, ok := a.pages[a.currentPage]; ok {
 			updated, cmd := item.Update(msg)
 			a.pages[a.currentPage] = updated

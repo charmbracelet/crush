@@ -14,6 +14,18 @@ import (
 	"github.com/google/uuid"
 )
 
+// PermissionMode represents the three mutually exclusive permission states.
+type PermissionMode int
+
+const (
+	// ModeRegular requires user approval for each action.
+	ModeRegular PermissionMode = iota
+	// ModeYolo automatically approves all actions without prompting.
+	ModeYolo
+	// ModePlan blocks all write operations and prompts for read operations.
+	ModePlan
+)
+
 var ErrorPermissionDenied = errors.New("user denied permission")
 
 type CreatePermissionRequest struct {
@@ -50,7 +62,11 @@ type Service interface {
 	Deny(permission PermissionRequest)
 	Request(ctx context.Context, opts CreatePermissionRequest) (bool, error)
 	AutoApproveSession(sessionID string)
+	SetMode(mode PermissionMode)
+	GetMode() PermissionMode
+	// Deprecated: Use SetMode(ModeYolo) instead.
 	SetSkipRequests(skip bool)
+	// Deprecated: Use GetMode() == ModeYolo instead.
 	SkipRequests() bool
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
 }
@@ -65,7 +81,8 @@ type permissionService struct {
 	pendingRequests       *csync.Map[string, chan bool]
 	autoApproveSessions   map[string]bool
 	autoApproveSessionsMu sync.RWMutex
-	skip                  bool
+	mode                  PermissionMode
+	modeMu                sync.RWMutex
 	allowedTools          []string
 
 	// used to make sure we only process one request at a time
@@ -131,15 +148,23 @@ func (s *permissionService) Deny(permission PermissionRequest) {
 }
 
 func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRequest) (bool, error) {
-	// Check if plan mode is active - deny all write operations.
-	// This check must come BEFORE skip mode check, as plan mode should
-	// override yolo mode for safety.
-	if isPlanMode(ctx) && isWriteOperation(opts.Action) {
-		return false, fmt.Errorf("write operations are not allowed in plan mode")
-	}
+	s.modeMu.RLock()
+	mode := s.mode
+	s.modeMu.RUnlock()
 
-	if s.skip {
+	// Check mode-specific behavior
+	switch mode {
+	case ModePlan:
+		// Plan mode: block all write operations
+		if isWriteOperation(opts.Action) {
+			return false, fmt.Errorf("write operations are not allowed in plan mode")
+		}
+		// Read operations fall through to normal permission checks
+	case ModeYolo:
+		// Yolo mode: auto-approve everything
 		return true, nil
+	case ModeRegular:
+		// Regular mode: fall through to normal permission checks
 	}
 
 	// tell the UI that a permission was requested
@@ -233,43 +258,46 @@ func (s *permissionService) SubscribeNotifications(ctx context.Context) <-chan p
 	return s.notificationBroker.Subscribe(ctx)
 }
 
+func (s *permissionService) SetMode(mode PermissionMode) {
+	s.modeMu.Lock()
+	s.mode = mode
+	s.modeMu.Unlock()
+}
+
+func (s *permissionService) GetMode() PermissionMode {
+	s.modeMu.RLock()
+	defer s.modeMu.RUnlock()
+	return s.mode
+}
+
 func (s *permissionService) SetSkipRequests(skip bool) {
-	s.skip = skip
+	if skip {
+		s.SetMode(ModeYolo)
+	} else {
+		s.SetMode(ModeRegular)
+	}
 }
 
 func (s *permissionService) SkipRequests() bool {
-	return s.skip
+	return s.GetMode() == ModeYolo
 }
 
 func NewPermissionService(workingDir string, skip bool, allowedTools []string) Service {
+	mode := ModeRegular
+	if skip {
+		mode = ModeYolo
+	}
 	return &permissionService{
 		Broker:              pubsub.NewBroker[PermissionRequest](),
 		notificationBroker:  pubsub.NewBroker[PermissionNotification](),
 		workingDir:          workingDir,
 		sessionPermissions:  make([]PermissionRequest, 0),
 		autoApproveSessions: make(map[string]bool),
-		skip:                skip,
+		mode:                mode,
 		allowedTools:        allowedTools,
 		pendingRequests:     csync.NewMap[string, chan bool](),
 	}
 }
-
-// isPlanMode checks if plan mode is enabled in the context by importing from
-// tools package.
-func isPlanMode(ctx context.Context) bool {
-	planMode := ctx.Value(planModeContextKey("plan_mode"))
-	if planMode == nil {
-		return false
-	}
-	b, ok := planMode.(bool)
-	if !ok {
-		return false
-	}
-	return b
-}
-
-// planModeContextKey is the key type for plan mode in context.
-type planModeContextKey string
 
 // isWriteOperation checks if an action is a write operation that should be
 // blocked in plan mode.

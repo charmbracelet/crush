@@ -51,7 +51,9 @@ type (
 	ActionToggleYoloMode    struct{}
 	// ActionInitializeProject is a message to initialize a project.
 	ActionInitializeProject struct{}
-	ActionSummarize         struct {
+	// ActionOpenMCPServers is a message to open the MCP servers dialog.
+	ActionOpenMCPServers struct{}
+	ActionSummarize      struct {
 		SessionID string
 	}
 	// ActionSelectReasoningEffort is a message indicating a reasoning effort has been selected.

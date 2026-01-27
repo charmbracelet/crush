@@ -1155,6 +1155,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		cmds = append(cmds, m.initializeProject())
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionOpenMCPServers:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		if cmd := m.openMCPServersDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 
 	case dialog.ActionSelectModel:
 		if m.isAgentBusy() {
@@ -2618,6 +2623,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openReasoningDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.MCPServersID:
+		if cmd := m.openMCPServersDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.QuitID:
 		if cmd := m.openQuitDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -2639,6 +2648,23 @@ func (m *UI) openQuitDialog() tea.Cmd {
 
 	quitDialog := dialog.NewQuit(m.com)
 	m.dialog.OpenDialog(quitDialog)
+	return nil
+}
+
+// openMCPServersDialog opens the MCP servers dialog.
+func (m *UI) openMCPServersDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.MCPServersID) {
+		// Bring to front.
+		m.dialog.BringToFront(dialog.MCPServersID)
+		return nil
+	}
+
+	mcpDialog, err := dialog.NewMCPServers(m.com)
+	if err != nil {
+		return uiutil.ReportError(err)
+	}
+
+	m.dialog.OpenDialog(mcpDialog)
 	return nil
 }
 

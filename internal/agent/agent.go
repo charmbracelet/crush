@@ -372,17 +372,18 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			}
 			currentAssistant.AddFinish(finishReason, "", "")
 			sessionLock.Lock()
-			updatedSession, getSessionErr := a.sessions.Get(genCtx, call.SessionID)
+			defer sessionLock.Unlock()
+
+			updatedSession, getSessionErr := a.sessions.Get(ctx, call.SessionID)
 			if getSessionErr != nil {
-				sessionLock.Unlock()
 				return getSessionErr
 			}
 			a.updateSessionUsage(largeModel, &updatedSession, stepResult.Usage, a.openrouterCost(stepResult.ProviderMetadata))
-			_, sessionErr := a.sessions.Save(genCtx, updatedSession)
-			sessionLock.Unlock()
+			_, sessionErr := a.sessions.Save(ctx, updatedSession)
 			if sessionErr != nil {
 				return sessionErr
 			}
+			currentSession = updatedSession
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		StopWhen: []fantasy.StopCondition{
@@ -855,7 +856,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	}
 
 	promptTokens := resp.TotalUsage.InputTokens + resp.TotalUsage.CacheCreationTokens
-	completionTokens := resp.TotalUsage.OutputTokens + resp.TotalUsage.CacheReadTokens
+	completionTokens := resp.TotalUsage.OutputTokens
 
 	// Atomically update only title and usage fields to avoid overriding other
 	// concurrent session updates.
@@ -894,8 +895,8 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 		session.Cost += cost
 	}
 
-	session.CompletionTokens = usage.OutputTokens + usage.CacheReadTokens
-	session.PromptTokens = usage.InputTokens + usage.CacheCreationTokens
+	session.CompletionTokens = usage.OutputTokens
+	session.PromptTokens = usage.InputTokens + usage.CacheReadTokens
 }
 
 func (a *sessionAgent) Cancel(sessionID string) {

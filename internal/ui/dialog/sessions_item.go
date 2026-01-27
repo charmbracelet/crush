@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/list"
@@ -28,10 +30,12 @@ type ListItem interface {
 // SessionItem wraps a [session.Session] to implement the [ListItem] interface.
 type SessionItem struct {
 	session.Session
-	t       *styles.Styles
-	m       fuzzy.Match
-	cache   map[int]string
-	focused bool
+	t                *styles.Styles
+	sessionsMode     sessionsMode
+	m                fuzzy.Match
+	cache            map[int]string
+	updateTitleInput textinput.Model
+	focused          bool
 }
 
 var _ ListItem = &SessionItem{}
@@ -52,13 +56,59 @@ func (s *SessionItem) SetMatch(m fuzzy.Match) {
 	s.m = m
 }
 
+// InputValue returns the updated title value
+func (s *SessionItem) InputValue() string {
+	return s.updateTitleInput.Value()
+}
+
+// HandleInput forwards input message to the update title input
+func (s *SessionItem) HandleInput(msg tea.Msg) tea.Cmd {
+	var cmd tea.Cmd
+	s.updateTitleInput, cmd = s.updateTitleInput.Update(msg)
+	return cmd
+}
+
+// Cursor returns the cursor of the update title input
+func (s *SessionItem) Cursor() *tea.Cursor {
+	return s.updateTitleInput.Cursor()
+}
+
 // Render returns the string representation of the session item.
 func (s *SessionItem) Render(width int) string {
 	info := humanize.Time(time.Unix(s.UpdatedAt, 0))
-	return renderItem(s.t, s.Title, info, s.focused, width, s.cache, &s.m)
+	styles := ListIemStyles{
+		ItemBlurred:     s.t.Dialog.NormalItem,
+		ItemFocused:     s.t.Dialog.SelectedItem,
+		InfoTextBlurred: s.t.Subtle,
+		InfoTextFocused: s.t.Base,
+	}
+
+	switch s.sessionsMode {
+	case sessionsModeDeleting:
+		styles.ItemBlurred = s.t.Dialog.Sessions.DeletingItemBlurred
+		styles.ItemFocused = s.t.Dialog.Sessions.DeletingItemFocused
+	case sessionsModeUpdating:
+		styles.ItemBlurred = s.t.Dialog.Sessions.UpdatingItemBlurred
+		styles.ItemFocused = s.t.Dialog.Sessions.UpdatingItemFocused
+		if s.focused {
+			inputWidth := width - styles.InfoTextFocused.GetHorizontalFrameSize()
+			s.updateTitleInput.SetWidth(inputWidth)
+			s.updateTitleInput.Placeholder = ansi.Truncate(s.Title, width, "…")
+			return styles.ItemFocused.Render(s.updateTitleInput.View())
+		}
+	}
+
+	return renderItem(styles, s.Title, info, s.focused, width, s.cache, &s.m)
 }
 
-func renderItem(t *styles.Styles, title string, info string, focused bool, width int, cache map[int]string, m *fuzzy.Match) string {
+type ListIemStyles struct {
+	ItemBlurred     lipgloss.Style
+	ItemFocused     lipgloss.Style
+	InfoTextBlurred lipgloss.Style
+	InfoTextFocused lipgloss.Style
+}
+
+func renderItem(t ListIemStyles, title string, info string, focused bool, width int, cache map[int]string, m *fuzzy.Match) string {
 	if cache == nil {
 		cache = make(map[int]string)
 	}
@@ -68,9 +118,9 @@ func renderItem(t *styles.Styles, title string, info string, focused bool, width
 		return cached
 	}
 
-	style := t.Dialog.NormalItem
+	style := t.ItemBlurred
 	if focused {
-		style = t.Dialog.SelectedItem
+		style = t.ItemFocused
 	}
 
 	var infoText string
@@ -79,9 +129,9 @@ func renderItem(t *styles.Styles, title string, info string, focused bool, width
 	if len(info) > 0 {
 		infoText = fmt.Sprintf(" %s ", info)
 		if focused {
-			infoText = t.Base.Render(infoText)
+			infoText = t.InfoTextFocused.Render(infoText)
 		} else {
-			infoText = t.Subtle.Render(infoText)
+			infoText = t.InfoTextBlurred.Render(infoText)
 		}
 
 		infoWidth = lipgloss.Width(infoText)
@@ -134,10 +184,20 @@ func (s *SessionItem) SetFocused(focused bool) {
 
 // sessionItems takes a slice of [session.Session]s and convert them to a slice
 // of [ListItem]s.
-func sessionItems(t *styles.Styles, sessions ...session.Session) []list.FilterableItem {
+func sessionItems(t *styles.Styles, mode sessionsMode, sessions ...session.Session) []list.FilterableItem {
 	items := make([]list.FilterableItem, len(sessions))
 	for i, s := range sessions {
-		items[i] = &SessionItem{Session: s, t: t}
+		item := &SessionItem{Session: s, t: t, sessionsMode: mode}
+		if mode == sessionsModeUpdating {
+			item.updateTitleInput = textinput.New()
+			item.updateTitleInput.SetVirtualCursor(false)
+			item.updateTitleInput.Prompt = ""
+			inputStyle := t.TextInput
+			inputStyle.Focused.Placeholder = inputStyle.Focused.Placeholder.Foreground(t.FgHalfMuted)
+			item.updateTitleInput.SetStyles(inputStyle)
+			item.updateTitleInput.Focus()
+		}
+		items[i] = item
 	}
 	return items
 }

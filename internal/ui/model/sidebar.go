@@ -45,7 +45,7 @@ func (m *UI) modelInfo(width int) string {
 	}
 
 	var modelContext *common.ModelContextInfo
-	if m.session != nil {
+	if model != nil && m.session != nil {
 		modelContext = &common.ModelContextInfo{
 			ContextUsed:  m.session.CompletionTokens + m.session.PromptTokens,
 			Cost:         m.session.Cost,

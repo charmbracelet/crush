@@ -83,7 +83,7 @@ func (c *Completions) Query() string {
 
 // Size returns the visible size of the popup.
 func (c *Completions) Size() (width, height int) {
-	visible := len(c.list.VisibleItems())
+	visible := len(c.list.FilteredItems())
 	return c.width, min(visible, c.height)
 }
 
@@ -104,7 +104,6 @@ func (c *Completions) OpenWithFiles(depth, limit int) tea.Cmd {
 // SetFiles sets the file items on the completions popup.
 func (c *Completions) SetFiles(files []string) {
 	items := make([]list.FilterableItem, 0, len(files))
-	width := 0
 	for _, file := range files {
 		file = strings.TrimPrefix(file, "./")
 		item := NewCompletionItem(
@@ -114,8 +113,6 @@ func (c *Completions) SetFiles(files []string) {
 			c.focusedStyle,
 			c.matchStyle,
 		)
-
-		width = max(width, ansi.StringWidth(file))
 		items = append(items, item)
 	}
 
@@ -125,11 +122,22 @@ func (c *Completions) SetFiles(files []string) {
 	c.list.SetFilter("") // Clear any previous filter.
 	c.list.Focus()
 
-	c.width = ordered.Clamp(width+2, int(minWidth), int(maxWidth))
+	c.width = maxWidth
 	c.height = ordered.Clamp(len(items), int(minHeight), int(maxHeight))
 	c.list.SetSize(c.width, c.height)
 	c.list.SelectFirst()
 	c.list.ScrollToSelected()
+
+	// recalculate width by using just the visible items
+	start, end := c.list.VisibleItemIndices()
+	width := 0
+	if end != 0 {
+		for _, file := range files[start : end+1] {
+			width = max(width, ansi.StringWidth(file))
+		}
+	}
+	c.width = ordered.Clamp(width+2, int(minWidth), int(maxWidth))
+	c.list.SetSize(c.width, c.height)
 }
 
 // Close closes the completions popup.
@@ -150,10 +158,14 @@ func (c *Completions) Filter(query string) {
 	c.query = query
 	c.list.SetFilter(query)
 
-	items := c.list.VisibleItems()
+	// recalculate width by using just the visible items
+	items := c.list.FilteredItems()
+	start, end := c.list.VisibleItemIndices()
 	width := 0
-	for _, item := range items {
-		width = max(width, ansi.StringWidth(item.(interface{ Text() string }).Text()))
+	if end != 0 {
+		for _, item := range items[start : end+1] {
+			width = max(width, ansi.StringWidth(item.(interface{ Text() string }).Text()))
+		}
 	}
 	c.width = ordered.Clamp(width+2, int(minWidth), int(maxWidth))
 	c.height = ordered.Clamp(len(items), int(minHeight), int(maxHeight))
@@ -164,7 +176,7 @@ func (c *Completions) Filter(query string) {
 
 // HasItems returns whether there are visible items.
 func (c *Completions) HasItems() bool {
-	return len(c.list.VisibleItems()) > 0
+	return len(c.list.FilteredItems()) > 0
 }
 
 // Update handles key events for the completions.
@@ -203,7 +215,7 @@ func (c *Completions) Update(msg tea.KeyPressMsg) (tea.Msg, bool) {
 
 // selectPrev selects the previous item with circular navigation.
 func (c *Completions) selectPrev() {
-	items := c.list.VisibleItems()
+	items := c.list.FilteredItems()
 	if len(items) == 0 {
 		return
 	}
@@ -215,7 +227,7 @@ func (c *Completions) selectPrev() {
 
 // selectNext selects the next item with circular navigation.
 func (c *Completions) selectNext() {
-	items := c.list.VisibleItems()
+	items := c.list.FilteredItems()
 	if len(items) == 0 {
 		return
 	}
@@ -227,7 +239,7 @@ func (c *Completions) selectNext() {
 
 // selectCurrent returns a command with the currently selected item.
 func (c *Completions) selectCurrent(insert bool) tea.Msg {
-	items := c.list.VisibleItems()
+	items := c.list.FilteredItems()
 	if len(items) == 0 {
 		return nil
 	}
@@ -258,7 +270,7 @@ func (c *Completions) Render() string {
 		return ""
 	}
 
-	items := c.list.VisibleItems()
+	items := c.list.FilteredItems()
 	if len(items) == 0 {
 		return ""
 	}

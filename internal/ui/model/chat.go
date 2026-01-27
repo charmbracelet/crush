@@ -66,6 +66,10 @@ func (m *Chat) Draw(scr uv.Screen, area uv.Rectangle) {
 // SetSize sets the size of the chat view port.
 func (m *Chat) SetSize(width, height int) {
 	m.list.SetSize(width, height)
+	// Anchor to bottom if we were at the bottom.
+	if m.list.AtBottom() {
+		m.list.ScrollToBottom()
+	}
 }
 
 // Len returns the number of items in the chat list.
@@ -411,6 +415,16 @@ func (m *Chat) ToggleExpandedSelectedItem() {
 	}
 }
 
+// HandleKeyMsg handles key events for the chat component.
+func (m *Chat) HandleKeyMsg(key tea.KeyMsg) (bool, tea.Cmd) {
+	if m.list.Focused() {
+		if handler, ok := m.list.SelectedItem().(chat.KeyEventHandler); ok {
+			return handler.HandleKeyEvent(key)
+		}
+	}
+	return false, nil
+}
+
 // HandleMouseDown handles mouse down events for the chat component.
 func (m *Chat) HandleMouseDown(x, y int) bool {
 	if m.list.Len() == 0 {
@@ -481,9 +495,9 @@ func (m *Chat) HasHighlight() bool {
 	return startItemIdx >= 0 && endItemIdx >= 0 && (startLine != endLine || startCol != endCol)
 }
 
-// HighlighContent returns the currently highlighted content based on the mouse
+// HighlightContent returns the currently highlighted content based on the mouse
 // selection. It returns an empty string if no content is highlighted.
-func (m *Chat) HighlighContent() string {
+func (m *Chat) HighlightContent() string {
 	startItemIdx, startLine, startCol, endItemIdx, endLine, endCol := m.getHighlightRange()
 	if startItemIdx < 0 || endItemIdx < 0 || startLine == endLine && startCol == endCol {
 		return ""

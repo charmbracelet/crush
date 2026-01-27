@@ -20,7 +20,6 @@ import (
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/projects"
-	"github.com/charmbracelet/crush/internal/stringext"
 	"github.com/charmbracelet/crush/internal/tui"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	ui "github.com/charmbracelet/crush/internal/ui/model"
@@ -29,9 +28,13 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
+	xstrings "github.com/charmbracelet/x/exp/strings"
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 )
+
+// kittyTerminals defines terminals supporting querying capabilities.
+var kittyTerminals = []string{"alacritty", "ghostty", "kitty", "rio", "wezterm"}
 
 func init() {
 	rootCmd.PersistentFlags().StringP("cwd", "c", "", "Current working directory")
@@ -48,6 +51,7 @@ func init() {
 		logsCmd,
 		schemaCmd,
 		loginCmd,
+		statsCmd,
 	)
 }
 
@@ -94,11 +98,11 @@ crush -y
 			slog.Info("New UI in control!")
 			com := common.DefaultCommon(app)
 			ui := ui.New(com)
-			ui.QueryVersion = shouldQueryTerminalVersion(env)
+			ui.QueryCapabilities = shouldQueryCapabilities(env)
 			model = ui
 		} else {
 			ui := tui.New(app)
-			ui.QueryVersion = shouldQueryTerminalVersion(env)
+			ui.QueryVersion = shouldQueryCapabilities(env)
 			model = ui
 		}
 		program := tea.NewProgram(
@@ -299,12 +303,16 @@ func createDotCrushDir(dir string) error {
 	return nil
 }
 
-func shouldQueryTerminalVersion(env uv.Environ) bool {
+func shouldQueryCapabilities(env uv.Environ) bool {
+	const osVendorTypeApple = "Apple"
 	termType := env.Getenv("TERM")
 	termProg, okTermProg := env.LookupEnv("TERM_PROGRAM")
 	_, okSSHTTY := env.LookupEnv("SSH_TTY")
+	if okTermProg && strings.Contains(termProg, osVendorTypeApple) {
+		return false
+	}
 	return (!okTermProg && !okSSHTTY) ||
-		(!strings.Contains(termProg, "Apple") && !okSSHTTY) ||
+		(!strings.Contains(termProg, osVendorTypeApple) && !okSSHTTY) ||
 		// Terminals that do support XTVERSION.
-		stringext.ContainsAny(termType, "alacritty", "ghostty", "kitty", "rio", "wezterm")
+		xstrings.ContainsAnyOf(termType, kittyTerminals...)
 }

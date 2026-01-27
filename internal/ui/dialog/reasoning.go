@@ -176,7 +176,7 @@ func (r *Reasoning) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	inputView := t.Dialog.InputPrompt.Render(r.input.View())
 	rc.AddPart(inputView)
 
-	visibleCount := len(r.list.VisibleItems())
+	visibleCount := len(r.list.FilteredItems())
 	if r.list.Height() >= visibleCount {
 		r.list.ScrollToTop()
 	} else {
@@ -293,5 +293,11 @@ func (r *ReasoningItem) Render(width int) string {
 	if r.isCurrent {
 		info = "current"
 	}
-	return renderItem(r.t, r.title, info, r.focused, width, r.cache, &r.m)
+	styles := ListIemStyles{
+		ItemBlurred:     r.t.Dialog.NormalItem,
+		ItemFocused:     r.t.Dialog.SelectedItem,
+		InfoTextBlurred: r.t.Base,
+		InfoTextFocused: r.t.Subtle,
+	}
+	return renderItem(styles, r.title, info, r.focused, width, r.cache, &r.m)
 }

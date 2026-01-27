@@ -66,7 +66,7 @@ type bashDescriptionData struct {
 	ModelName       string
 }
 
-var bannedCommands = []string{
+var defaultBannedCommands = []string{
 	// Network/Download tools
 	"alias",
 	"aria2c",
@@ -139,8 +139,9 @@ var bannedCommands = []string{
 	"ufw",
 }
 
-func bashDescription(attribution *config.Attribution, modelName string) string {
-	bannedCommandsStr := strings.Join(bannedCommands, ", ")
+func bashDescription(attribution *config.Attribution, modelName string, bashConfig config.ToolBash) string {
+	bannedCommandsList := resolveBannedCommandsList(bashConfig)
+	bannedCommandsStr := strings.Join(bannedCommandsList, ", ")
 	var out bytes.Buffer
 	if err := bashDescriptionTpl.Execute(&out, bashDescriptionData{
 		BannedCommands:  bannedCommandsStr,
@@ -154,42 +155,72 @@ func bashDescription(attribution *config.Attribution, modelName string) string {
 	return out.String()
 }
 
-func blockFuncs() []shell.BlockFunc {
-	return []shell.BlockFunc{
-		shell.CommandsBlocker(bannedCommands),
+var defaultBannedSubCommands = []shell.BlockFunc{
+	// System package managers
+	shell.ArgumentsBlocker("apk", []string{"add"}, nil),
+	shell.ArgumentsBlocker("apt", []string{"install"}, nil),
+	shell.ArgumentsBlocker("apt-get", []string{"install"}, nil),
+	shell.ArgumentsBlocker("dnf", []string{"install"}, nil),
+	shell.ArgumentsBlocker("pacman", nil, []string{"-S"}),
+	shell.ArgumentsBlocker("pkg", []string{"install"}, nil),
+	shell.ArgumentsBlocker("yum", []string{"install"}, nil),
+	shell.ArgumentsBlocker("zypper", []string{"install"}, nil),
 
-		// System package managers
-		shell.ArgumentsBlocker("apk", []string{"add"}, nil),
-		shell.ArgumentsBlocker("apt", []string{"install"}, nil),
-		shell.ArgumentsBlocker("apt-get", []string{"install"}, nil),
-		shell.ArgumentsBlocker("dnf", []string{"install"}, nil),
-		shell.ArgumentsBlocker("pacman", nil, []string{"-S"}),
-		shell.ArgumentsBlocker("pkg", []string{"install"}, nil),
-		shell.ArgumentsBlocker("yum", []string{"install"}, nil),
-		shell.ArgumentsBlocker("zypper", []string{"install"}, nil),
+	// Language-specific package managers
+	shell.ArgumentsBlocker("brew", []string{"install"}, nil),
+	shell.ArgumentsBlocker("cargo", []string{"install"}, nil),
+	shell.ArgumentsBlocker("gem", []string{"install"}, nil),
+	shell.ArgumentsBlocker("go", []string{"install"}, nil),
+	shell.ArgumentsBlocker("npm", []string{"install"}, []string{"--global"}),
+	shell.ArgumentsBlocker("npm", []string{"install"}, []string{"-g"}),
+	shell.ArgumentsBlocker("pip", []string{"install"}, []string{"--user"}),
+	shell.ArgumentsBlocker("pip3", []string{"install"}, []string{"--user"}),
+	shell.ArgumentsBlocker("pnpm", []string{"add"}, []string{"--global"}),
+	shell.ArgumentsBlocker("pnpm", []string{"add"}, []string{"-g"}),
+	shell.ArgumentsBlocker("yarn", []string{"global", "add"}, nil),
 
-		// Language-specific package managers
-		shell.ArgumentsBlocker("brew", []string{"install"}, nil),
-		shell.ArgumentsBlocker("cargo", []string{"install"}, nil),
-		shell.ArgumentsBlocker("gem", []string{"install"}, nil),
-		shell.ArgumentsBlocker("go", []string{"install"}, nil),
-		shell.ArgumentsBlocker("npm", []string{"install"}, []string{"--global"}),
-		shell.ArgumentsBlocker("npm", []string{"install"}, []string{"-g"}),
-		shell.ArgumentsBlocker("pip", []string{"install"}, []string{"--user"}),
-		shell.ArgumentsBlocker("pip3", []string{"install"}, []string{"--user"}),
-		shell.ArgumentsBlocker("pnpm", []string{"add"}, []string{"--global"}),
-		shell.ArgumentsBlocker("pnpm", []string{"add"}, []string{"-g"}),
-		shell.ArgumentsBlocker("yarn", []string{"global", "add"}, nil),
-
-		// `go test -exec` can run arbitrary commands
-		shell.ArgumentsBlocker("go", []string{"test"}, []string{"-exec"}),
-	}
+	// `go test -exec` can run arbitrary commands
+	shell.ArgumentsBlocker("go", []string{"test"}, []string{"-exec"}),
 }
 
-func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelName string) fantasy.AgentTool {
+func blockFuncs(bannedCommands []string, bannedSubCommands []config.BannedToolArgsAndOrParams, includeSubCommandDefaults bool) []shell.BlockFunc {
+	blockFuncs := []shell.BlockFunc{}
+	blockFuncs = append(blockFuncs, shell.CommandsBlocker(bannedCommands))
+
+	for _, bannedSubCmd := range bannedSubCommands {
+		blockFuncs = append(blockFuncs, shell.ArgumentsBlocker(bannedSubCmd.Command, bannedSubCmd.Args, bannedSubCmd.Flags))
+	}
+
+	if includeSubCommandDefaults {
+		blockFuncs = append(blockFuncs, defaultBannedSubCommands...)
+	}
+	return blockFuncs
+}
+
+func resolveBannedCommandsList(cfg config.ToolBash) []string {
+	bannedCommands := cfg.BannedCommands
+	if !cfg.DisableDefaultCommands {
+		if len(bannedCommands) == 0 {
+			return defaultBannedCommands
+		}
+		bannedCommands = append(bannedCommands, defaultBannedCommands...)
+	}
+	return bannedCommands
+}
+
+func resolveBlockFuncs(cfg config.ToolBash) []shell.BlockFunc {
+	return blockFuncs(resolveBannedCommandsList(cfg), cfg.BannedSubCommands, cfg.DisableDefaultSubCommands)
+}
+
+func NewBashTool(
+	permissions permission.Service,
+	workingDir string, attribution *config.Attribution,
+	modelName string,
+	bashConfig config.ToolBash,
+) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		BashToolName,
-		string(bashDescription(attribution, modelName)),
+		string(bashDescription(attribution, modelName, bashConfig)),
 		func(ctx context.Context, params BashParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Command == "" {
 				return fantasy.NewTextErrorResponse("missing command"), nil
@@ -240,7 +271,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				bgManager := shell.GetBackgroundShellManager()
 				bgManager.Cleanup()
 				// Use background context so it continues after tool returns
-				bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), params.Command, params.Description)
+				bgShell, err := bgManager.Start(context.Background(), execWorkingDir, resolveBlockFuncs(bashConfig), params.Command, params.Description)
 				if err != nil {
 					return fantasy.ToolResponse{}, fmt.Errorf("error starting background shell: %w", err)
 				}
@@ -295,7 +326,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			// Start with detached context so it can survive if moved to background
 			bgManager := shell.GetBackgroundShellManager()
 			bgManager.Cleanup()
-			bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), params.Command, params.Description)
+			bgShell, err := bgManager.Start(context.Background(), execWorkingDir, resolveBlockFuncs(bashConfig), params.Command, params.Description)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error starting shell: %w", err)
 			}

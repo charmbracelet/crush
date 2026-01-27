@@ -45,7 +45,7 @@ import (
 	timage "github.com/charmbracelet/crush/internal/ui/image"
 	"github.com/charmbracelet/crush/internal/ui/logo"
 	"github.com/charmbracelet/crush/internal/ui/styles"
-	"github.com/charmbracelet/crush/internal/uiutil"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/version"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/screen"
@@ -368,7 +368,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sessionFiles = msg.files
 		msgs, err := m.com.App.Messages.List(context.Background(), m.session.ID)
 		if err != nil {
-			cmds = append(cmds, uiutil.ReportError(err))
+			cmds = append(cmds, util.ReportError(err))
 			break
 		}
 		if cmd := m.setSessionMessages(msgs); cmd != nil {
@@ -649,14 +649,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case openEditorMsg:
 		m.textarea.SetValue(msg.Text)
 		m.textarea.MoveToEnd()
-	case uiutil.InfoMsg:
+	case util.InfoMsg:
 		m.status.SetInfoMsg(msg)
 		ttl := msg.TTL
 		if ttl <= 0 {
 			ttl = DefaultStatusTTL
 		}
 		cmds = append(cmds, clearInfoMsgCmd(ttl))
-	case uiutil.ClearStatusMsg:
+	case util.ClearStatusMsg:
 		m.status.ClearInfoMsg()
 	case completions.FilesLoadedMsg:
 		// Handle async file loading for completions.
@@ -1085,20 +1085,20 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionNewSession:
 		if m.isAgentBusy() {
-			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait before starting a new session..."))
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
 			break
 		}
 		m.newSession()
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSummarize:
 		if m.isAgentBusy() {
-			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait before summarizing session..."))
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
 			break
 		}
 		cmds = append(cmds, func() tea.Msg {
 			err := m.com.App.AgentCoordinator.Summarize(context.Background(), msg.SessionID)
 			if err != nil {
-				return uiutil.ReportError(err)()
+				return util.ReportError(err)()
 			}
 			return nil
 		})
@@ -1108,7 +1108,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionExternalEditor:
 		if m.isAgentBusy() {
-			cmds = append(cmds, uiutil.ReportWarn("Agent is working, please wait..."))
+			cmds = append(cmds, util.ReportWarn("Agent is working, please wait..."))
 			break
 		}
 		cmds = append(cmds, m.openEditor(m.textarea.Value()))
@@ -1118,39 +1118,39 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleThinking:
 		if m.isAgentBusy() {
-			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait..."))
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
 			break
 		}
 
 		cmds = append(cmds, func() tea.Msg {
 			cfg := m.com.Config()
 			if cfg == nil {
-				return uiutil.ReportError(errors.New("configuration not found"))()
+				return util.ReportError(errors.New("configuration not found"))()
 			}
 
 			agentCfg, ok := cfg.Agents[config.AgentCoder]
 			if !ok {
-				return uiutil.ReportError(errors.New("agent configuration not found"))()
+				return util.ReportError(errors.New("agent configuration not found"))()
 			}
 
 			currentModel := cfg.Models[agentCfg.Model]
 			currentModel.Think = !currentModel.Think
 			if err := cfg.UpdatePreferredModel(agentCfg.Model, currentModel); err != nil {
-				return uiutil.ReportError(err)()
+				return util.ReportError(err)()
 			}
 			m.com.App.UpdateAgentModel(context.TODO())
 			status := "disabled"
 			if currentModel.Think {
 				status = "enabled"
 			}
-			return uiutil.NewInfoMsg("Thinking mode " + status)
+			return util.NewInfoMsg("Thinking mode " + status)
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionQuit:
 		cmds = append(cmds, tea.Quit)
 	case dialog.ActionInitializeProject:
 		if m.isAgentBusy() {
-			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait before summarizing session..."))
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
 			break
 		}
 		cmds = append(cmds, m.initializeProject())
@@ -1158,13 +1158,13 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 	case dialog.ActionSelectModel:
 		if m.isAgentBusy() {
-			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait..."))
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
 			break
 		}
 
 		cfg := m.com.Config()
 		if cfg == nil {
-			cmds = append(cmds, uiutil.ReportError(errors.New("configuration not found")))
+			cmds = append(cmds, util.ReportError(errors.New("configuration not found")))
 			break
 		}
 
@@ -1188,23 +1188,23 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 
 		if err := cfg.UpdatePreferredModel(msg.ModelType, msg.Model); err != nil {
-			cmds = append(cmds, uiutil.ReportError(err))
+			cmds = append(cmds, util.ReportError(err))
 		} else if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
 			// Ensure small model is set is unset.
 			smallModel := m.com.App.GetDefaultSmallModel(providerID)
 			if err := cfg.UpdatePreferredModel(config.SelectedModelTypeSmall, smallModel); err != nil {
-				cmds = append(cmds, uiutil.ReportError(err))
+				cmds = append(cmds, util.ReportError(err))
 			}
 		}
 
 		cmds = append(cmds, func() tea.Msg {
 			if err := m.com.App.UpdateAgentModel(context.TODO()); err != nil {
-				return uiutil.ReportError(err)
+				return util.ReportError(err)
 			}
 
 			modelMsg := fmt.Sprintf("%s model changed to %s", msg.ModelType, msg.Model.Model)
 
-			return uiutil.NewInfoMsg(modelMsg)
+			return util.NewInfoMsg(modelMsg)
 		})
 
 		m.dialog.CloseDialog(dialog.APIKeyInputID)
@@ -1217,37 +1217,37 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 			m.com.Config().SetupAgents()
 			if err := m.com.App.InitCoderAgent(context.TODO()); err != nil {
-				cmds = append(cmds, uiutil.ReportError(err))
+				cmds = append(cmds, util.ReportError(err))
 			}
 		}
 	case dialog.ActionSelectReasoningEffort:
 		if m.isAgentBusy() {
-			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait..."))
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
 			break
 		}
 
 		cfg := m.com.Config()
 		if cfg == nil {
-			cmds = append(cmds, uiutil.ReportError(errors.New("configuration not found")))
+			cmds = append(cmds, util.ReportError(errors.New("configuration not found")))
 			break
 		}
 
 		agentCfg, ok := cfg.Agents[config.AgentCoder]
 		if !ok {
-			cmds = append(cmds, uiutil.ReportError(errors.New("agent configuration not found")))
+			cmds = append(cmds, util.ReportError(errors.New("agent configuration not found")))
 			break
 		}
 
 		currentModel := cfg.Models[agentCfg.Model]
 		currentModel.ReasoningEffort = msg.Effort
 		if err := cfg.UpdatePreferredModel(agentCfg.Model, currentModel); err != nil {
-			cmds = append(cmds, uiutil.ReportError(err))
+			cmds = append(cmds, util.ReportError(err))
 			break
 		}
 
 		cmds = append(cmds, func() tea.Msg {
 			m.com.App.UpdateAgentModel(context.TODO())
-			return uiutil.NewInfoMsg("Reasoning effort set to " + msg.Effort)
+			return util.NewInfoMsg("Reasoning effort set to " + msg.Effort)
 		})
 		m.dialog.CloseDialog(dialog.ReasoningID)
 	case dialog.ActionPermissionResponse:
@@ -1308,7 +1308,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		cmds = append(cmds, m.runMCPPrompt(msg.ClientID, msg.PromptID, msg.Args))
 	default:
-		cmds = append(cmds, uiutil.CmdHandler(msg))
+		cmds = append(cmds, util.CmdHandler(msg))
 	}
 
 	return tea.Batch(cmds...)
@@ -1400,7 +1400,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			}
 		case key.Matches(msg, m.keyMap.Suspend):
 			if m.isAgentBusy() {
-				cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait..."))
+				cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
 				return true
 			}
 			cmds = append(cmds, tea.Suspend)
@@ -1501,7 +1501,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					break
 				}
 				if m.isAgentBusy() {
-					cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait before starting a new session..."))
+					cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
 					break
 				}
 				m.newSession()
@@ -1514,7 +1514,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 			case key.Matches(msg, m.keyMap.Editor.OpenEditor):
 				if m.isAgentBusy() {
-					cmds = append(cmds, uiutil.ReportWarn("Agent is working, please wait..."))
+					cmds = append(cmds, util.ReportWarn("Agent is working, please wait..."))
 					break
 				}
 				cmds = append(cmds, m.openEditor(m.textarea.Value()))
@@ -1592,7 +1592,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					break
 				}
 				if m.isAgentBusy() {
-					cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait before starting a new session..."))
+					cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
 					break
 				}
 				m.focus = uiFocusEditor
@@ -2051,7 +2051,7 @@ func (m *UI) toggleCompactMode() tea.Cmd {
 
 	err := m.com.Config().SetCompactMode(m.forceCompactMode)
 	if err != nil {
-		return uiutil.ReportError(err)
+		return util.ReportError(err)
 	}
 
 	m.handleCompactMode(m.width, m.height)
@@ -2287,11 +2287,11 @@ type layout struct {
 func (m *UI) openEditor(value string) tea.Cmd {
 	tmpfile, err := os.CreateTemp("", "msg_*.md")
 	if err != nil {
-		return uiutil.ReportError(err)
+		return util.ReportError(err)
 	}
 	defer tmpfile.Close() //nolint:errcheck
 	if _, err := tmpfile.WriteString(value); err != nil {
-		return uiutil.ReportError(err)
+		return util.ReportError(err)
 	}
 	cmd, err := editor.Command(
 		"crush",
@@ -2302,18 +2302,18 @@ func (m *UI) openEditor(value string) tea.Cmd {
 		),
 	)
 	if err != nil {
-		return uiutil.ReportError(err)
+		return util.ReportError(err)
 	}
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		if err != nil {
-			return uiutil.ReportError(err)
+			return util.ReportError(err)
 		}
 		content, err := os.ReadFile(tmpfile.Name())
 		if err != nil {
-			return uiutil.ReportError(err)
+			return util.ReportError(err)
 		}
 		if len(content) == 0 {
-			return uiutil.ReportWarn("Message is empty")
+			return util.ReportWarn("Message is empty")
 		}
 		os.Remove(tmpfile.Name())
 		return openEditorMsg{
@@ -2516,14 +2516,14 @@ func (m *UI) renderSidebarLogo(width int) {
 // sendMessage sends a message with the given content and attachments.
 func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.Cmd {
 	if m.com.App.AgentCoordinator == nil {
-		return uiutil.ReportError(fmt.Errorf("coder agent is not initialized"))
+		return util.ReportError(fmt.Errorf("coder agent is not initialized"))
 	}
 
 	var cmds []tea.Cmd
 	if !m.hasSession() {
 		newSession, err := m.com.App.Sessions.Create(context.Background(), "New Session")
 		if err != nil {
-			return uiutil.ReportError(err)
+			return util.ReportError(err)
 		}
 		m.state = uiChat
 		if m.forceCompactMode {
@@ -2545,8 +2545,8 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 			if isCancelErr || isPermissionErr {
 				return nil
 			}
-			return uiutil.InfoMsg{
-				Type: uiutil.InfoTypeError,
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
 				Msg:  err.Error(),
 			}
 		}
@@ -2653,7 +2653,7 @@ func (m *UI) openModelsDialog() tea.Cmd {
 	isOnboarding := m.state == uiOnboarding
 	modelsDialog, err := dialog.NewModels(m.com, isOnboarding)
 	if err != nil {
-		return uiutil.ReportError(err)
+		return util.ReportError(err)
 	}
 
 	m.dialog.OpenDialog(modelsDialog)
@@ -2676,7 +2676,7 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 
 	commands, err := dialog.NewCommands(m.com, sessionID, m.customCommands, m.mcpPrompts)
 	if err != nil {
-		return uiutil.ReportError(err)
+		return util.ReportError(err)
 	}
 
 	m.dialog.OpenDialog(commands)
@@ -2693,7 +2693,7 @@ func (m *UI) openReasoningDialog() tea.Cmd {
 
 	reasoningDialog, err := dialog.NewReasoning(m.com)
 	if err != nil {
-		return uiutil.ReportError(err)
+		return util.ReportError(err)
 	}
 
 	m.dialog.OpenDialog(reasoningDialog)
@@ -2717,7 +2717,7 @@ func (m *UI) openSessionsDialog() tea.Cmd {
 
 	dialog, err := dialog.NewSessions(m.com, selectedSessionID)
 	if err != nil {
-		return uiutil.ReportError(err)
+		return util.ReportError(err)
 	}
 
 	m.dialog.OpenDialog(dialog)
@@ -2804,7 +2804,7 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 		return func() tea.Msg {
 			content := []byte(msg.Content)
 			if int64(len(content)) > common.MaxAttachmentSize {
-				return uiutil.ReportWarn("Paste is too big (>5mb)")
+				return util.ReportWarn("Paste is too big (>5mb)")
 			}
 			name := fmt.Sprintf("paste_%d.txt", m.pasteIdx())
 			mimeBufferSize := min(512, len(content))
@@ -2860,15 +2860,15 @@ func (m *UI) handleFilePathPaste(path string) tea.Cmd {
 	return func() tea.Msg {
 		fileInfo, err := os.Stat(path)
 		if err != nil {
-			return uiutil.ReportError(err)
+			return util.ReportError(err)
 		}
 		if fileInfo.Size() > common.MaxAttachmentSize {
-			return uiutil.ReportWarn("File is too big (>5mb)")
+			return util.ReportWarn("File is too big (>5mb)")
 		}
 
 		content, err := os.ReadFile(path)
 		if err != nil {
-			return uiutil.ReportError(err)
+			return util.ReportError(err)
 		}
 
 		mimeBufferSize := min(512, len(content))
@@ -2955,7 +2955,7 @@ func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string
 		prompt, err := commands.GetMCPPrompt(clientID, promptID, arguments)
 		if err != nil {
 			// TODO: make this better
-			return uiutil.ReportError(err)()
+			return util.ReportError(err)()
 		}
 
 		if prompt == "" {
@@ -2991,7 +2991,7 @@ func (m *UI) copyChatHighlight() tea.Cmd {
 
 // renderLogo renders the Crush logo with the given styles and dimensions.
 func renderLogo(t *styles.Styles, compact bool, width int) string {
-	return logo.Render(version.Version, compact, logo.Opts{
+	return logo.Render(t, version.Version, compact, logo.Opts{
 		FieldColor:   t.LogoFieldColor,
 		TitleColorA:  t.LogoTitleColorA,
 		TitleColorB:  t.LogoTitleColorB,

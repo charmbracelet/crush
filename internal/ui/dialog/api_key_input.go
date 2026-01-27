@@ -14,7 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
-	"github.com/charmbracelet/crush/internal/uiutil"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/exp/charmtone"
 )
@@ -316,7 +316,7 @@ func (m *APIKeyInput) saveKeyAndContinue() Action {
 
 	err := cfg.SetProviderAPIKey(string(m.provider.ID), m.input.Value())
 	if err != nil {
-		return ActionCmd{uiutil.ReportError(fmt.Errorf("failed to save API key: %w", err))}
+		return ActionCmd{util.ReportError(fmt.Errorf("failed to save API key: %w", err))}
 	}
 
 	return ActionSelectModel{

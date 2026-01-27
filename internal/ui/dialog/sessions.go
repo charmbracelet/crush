@@ -12,7 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
-	"github.com/charmbracelet/crush/internal/uiutil"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
@@ -182,7 +182,7 @@ func (s *Session) HandleMsg(msg tea.Msg) Action {
 				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeUpdating, s.sessions...)...)
 			case key.Matches(msg, s.keyMap.Delete):
 				if s.isCurrentSessionBusy() {
-					return ActionCmd{uiutil.ReportWarn("Agent is busy, please wait...")}
+					return ActionCmd{util.ReportWarn("Agent is busy, please wait...")}
 				}
 				s.sessionsMode = sessionsModeDeleting
 				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeDeleting, s.sessions...)...)
@@ -353,7 +353,7 @@ func (s *Session) deleteSessionCmd(id string) tea.Cmd {
 	return func() tea.Msg {
 		err := s.com.App.Sessions.Delete(context.TODO(), id)
 		if err != nil {
-			return uiutil.NewErrorMsg(err)
+			return util.NewErrorMsg(err)
 		}
 		return nil
 	}
@@ -389,7 +389,7 @@ func (s *Session) updateSessionCmd(session session.Session) tea.Cmd {
 	return func() tea.Msg {
 		_, err := s.com.App.Sessions.Save(context.TODO(), session)
 		if err != nil {
-			return uiutil.NewErrorMsg(err)
+			return util.NewErrorMsg(err)
 		}
 		return nil
 	}

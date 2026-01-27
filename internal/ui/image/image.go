@@ -12,7 +12,7 @@ import (
 	"sync"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/uiutil"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/ansi/kitty"
@@ -219,8 +219,8 @@ func (e Encoding) Transmit(id string, img image.Image, cs CellSize, cols, rows i
 			},
 		}); err != nil {
 			slog.Error("failed to encode image for kitty graphics", "err", err)
-			return uiutil.InfoMsg{
-				Type: uiutil.InfoTypeError,
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
 				Msg:  "failed to encode image",
 			}
 		}

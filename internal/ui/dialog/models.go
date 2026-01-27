@@ -13,7 +13,7 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/uiutil"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
@@ -207,7 +207,7 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 				m.modelType = ModelTypeLarge
 			}
 			if err := m.setProviderItems(); err != nil {
-				return uiutil.ReportError(err)
+				return util.ReportError(err)
 			}
 		default:
 			var cmd tea.Cmd

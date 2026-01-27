@@ -2,7 +2,7 @@ package common
 
 import (
 	"github.com/alecthomas/chroma/v2"
-	"github.com/charmbracelet/crush/internal/tui/exp/diffview"
+	"github.com/charmbracelet/crush/internal/ui/diffview"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 )
 

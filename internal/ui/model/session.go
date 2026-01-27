@@ -15,7 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
-	"github.com/charmbracelet/crush/internal/uiutil"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -44,13 +44,13 @@ func (m *UI) loadSession(sessionID string) tea.Cmd {
 		session, err := m.com.App.Sessions.Get(context.Background(), sessionID)
 		if err != nil {
 			// TODO: better error handling
-			return uiutil.ReportError(err)()
+			return util.ReportError(err)()
 		}
 
 		files, err := m.com.App.History.ListBySession(context.Background(), sessionID)
 		if err != nil {
 			// TODO: better error handling
-			return uiutil.ReportError(err)()
+			return util.ReportError(err)()
 		}
 
 		filesByPath := make(map[string][]history.File)

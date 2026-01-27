@@ -46,6 +46,7 @@ type Coordinator interface {
 	// INFO: (kujtim) this is not used yet we will use this when we have multiple agents
 	// SetMainAgent(string)
 	Run(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error)
+	RunWithPlanMode(ctx context.Context, sessionID, prompt string, isPlanMode bool, attachments ...message.Attachment) (*fantasy.AgentResult, error)
 	Cancel(sessionID string)
 	CancelAll()
 	IsSessionBusy(sessionID string) bool
@@ -68,6 +69,7 @@ type coordinator struct {
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
+	isPlanMode   bool
 
 	readyWg errgroup.Group
 }
@@ -113,6 +115,12 @@ func NewCoordinator(
 
 // Run implements Coordinator.
 func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
+	return c.RunWithPlanMode(ctx, sessionID, prompt, false, attachments...)
+}
+
+// RunWithPlanMode implements Coordinator with plan mode support.
+func (c *coordinator) RunWithPlanMode(ctx context.Context, sessionID string, prompt string, isPlanMode bool, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
+	c.isPlanMode = isPlanMode
 	if err := c.readyWg.Wait(); err != nil {
 		return nil, err
 	}
@@ -329,16 +337,17 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 
 	largeProviderCfg, _ := c.cfg.Providers.Get(large.ModelCfg.Provider)
 	result := NewSessionAgent(SessionAgentOptions{
-		large,
-		small,
-		largeProviderCfg.SystemPromptPrefix,
-		"",
-		isSubAgent,
-		c.cfg.Options.DisableAutoSummarize,
-		c.permissions.SkipRequests(),
-		c.sessions,
-		c.messages,
-		nil,
+		LargeModel:           large,
+		SmallModel:           small,
+		SystemPromptPrefix:   largeProviderCfg.SystemPromptPrefix,
+		SystemPrompt:         "",
+		IsSubAgent:           isSubAgent,
+		DisableAutoSummarize: c.cfg.Options.DisableAutoSummarize,
+		IsYolo:               c.permissions.SkipRequests(),
+		IsPlan:               c.isPlanMode,
+		Sessions:             c.sessions,
+		Messages:             c.messages,
+		Tools:                nil,
 	})
 
 	c.readyWg.Go(func() error {

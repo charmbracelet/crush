@@ -24,6 +24,7 @@ import (
 type SendMsg struct {
 	Text        string
 	Attachments []message.Attachment
+	IsPlanMode  bool
 }
 
 type SessionSelectedMsg = session.Session

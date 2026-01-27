@@ -106,6 +106,7 @@ type sessionAgent struct {
 	messages             message.Service
 	disableAutoSummarize bool
 	isYolo               bool
+	isPlan               bool
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, context.CancelFunc]
@@ -119,6 +120,7 @@ type SessionAgentOptions struct {
 	IsSubAgent           bool
 	DisableAutoSummarize bool
 	IsYolo               bool
+	IsPlan               bool
 	Sessions             session.Service
 	Messages             message.Service
 	Tools                []fantasy.AgentTool
@@ -138,6 +140,7 @@ func NewSessionAgent(
 		disableAutoSummarize: opts.DisableAutoSummarize,
 		tools:                csync.NewSliceFrom(opts.Tools),
 		isYolo:               opts.IsYolo,
+		isPlan:               opts.IsPlan,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, context.CancelFunc](),
 	}
@@ -167,6 +170,26 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	largeModel := a.largeModel.Get()
 	systemPrompt := a.systemPrompt.Get()
 	promptPrefix := a.systemPromptPrefix.Get()
+
+	// Inject plan mode instructions if enabled.
+	if a.isPlan {
+		planModeInstructions := `
+
+Plan mode is active. The user indicated that they do not want you to execute yet -- you MUST NOT make any edits, run any non-readonly tools (including changing configs or making commits), or otherwise make any changes to the system. This supercedes any other instructions you have received.
+
+When in plan mode:
+- Only use READ-ONLY tools (View, LS, Glob, Grep, Bash with readonly commands)
+- DO NOT use Edit, Write, Multiedit, or any tools that modify files
+- DO NOT run bash commands that modify the system
+- DO NOT make commits or push changes
+- Your goal is to explore, understand, and create a plan
+- Explain what you would do and what files you would change
+- Ask clarifying questions if needed
+`
+		systemPrompt = string(promptPrefix) + planModeInstructions + "\n" + systemPrompt
+	} else {
+		systemPrompt = string(promptPrefix) + "\n" + systemPrompt
+	}
 
 	if len(agentTools) > 0 {
 		// Add Anthropic caching to the last tool.

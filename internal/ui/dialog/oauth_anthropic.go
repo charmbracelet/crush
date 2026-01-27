@@ -299,7 +299,7 @@ func (m *OAuthAnthropic) headerContent() string {
 	if m.isOnboarding {
 		return textStyle.Render(dialogTitle)
 	}
-	return common.DialogTitle(t, titleStyle.Render(dialogTitle), m.width-headerOffset)
+	return common.DialogTitle(t, titleStyle.Render(dialogTitle), m.width-headerOffset, t.Primary, t.Secondary)
 }
 
 func (m *OAuthAnthropic) innerDialogContent() string {

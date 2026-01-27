@@ -208,7 +208,9 @@ func NewToolMessageItem(
 	canceled bool,
 ) ToolMessageItem {
 	var item ToolMessageItem
-	switch toolCall.Name {
+	// Normalize tool name for OAuth compatibility (Edit -> edit, Write -> write)
+	normalizedName := agent.FromClaudeCodeName(toolCall.Name)
+	switch normalizedName {
 	case tools.BashToolName:
 		item = NewBashToolMessageItem(sty, toolCall, result, canceled)
 	case tools.JobOutputToolName:
@@ -854,7 +856,9 @@ func (t *baseToolMessageItem) formatToolForCopy() string {
 
 // formatParametersForCopy formats tool parameters for clipboard copying.
 func (t *baseToolMessageItem) formatParametersForCopy() string {
-	switch t.toolCall.Name {
+	// Normalize tool name for OAuth compatibility (Edit -> edit, Write -> write)
+	normalizedName := agent.FromClaudeCodeName(t.toolCall.Name)
+	switch normalizedName {
 	case tools.BashToolName:
 		var params tools.BashParams
 		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
@@ -1020,7 +1024,9 @@ func (t *baseToolMessageItem) formatResultForCopy() string {
 		return fmt.Sprintf("[Media: %s]", t.result.MIMEType)
 	}
 
-	switch t.toolCall.Name {
+	// Normalize tool name for OAuth compatibility (Edit -> edit, Write -> write)
+	normalizedName := agent.FromClaudeCodeName(t.toolCall.Name)
+	switch normalizedName {
 	case tools.BashToolName:
 		return t.formatBashResultForCopy()
 	case tools.ViewToolName:
@@ -1354,7 +1360,9 @@ func (t *baseToolMessageItem) formatAgentResultForCopy() string {
 
 // prettifyToolName returns a human-readable name for tool names.
 func prettifyToolName(name string) string {
-	switch name {
+	// Normalize tool name for OAuth compatibility (Edit -> edit, Write -> write)
+	normalizedName := agent.FromClaudeCodeName(name)
+	switch normalizedName {
 	case agent.AgentToolName:
 		return "Agent"
 	case tools.BashToolName:

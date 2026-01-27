@@ -10,6 +10,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -315,7 +316,9 @@ func (p *Permissions) respond(action PermissionAction) tea.Msg {
 }
 
 func (p *Permissions) hasDiffView() bool {
-	switch p.permission.ToolName {
+	// Normalize tool name for OAuth compatibility (Edit -> edit, Write -> write)
+	normalizedName := agent.FromClaudeCodeName(p.permission.ToolName)
+	switch normalizedName {
 	case tools.EditToolName, tools.WriteToolName, tools.MultiEditToolName:
 		return true
 	}
@@ -521,7 +524,9 @@ func prettyName(name string) string {
 }
 
 func (p *Permissions) renderContent(width int) string {
-	switch p.permission.ToolName {
+	// Normalize tool name for OAuth compatibility (Edit -> edit, Write -> write)
+	normalizedName := agent.FromClaudeCodeName(p.permission.ToolName)
+	switch normalizedName {
 	case tools.BashToolName:
 		return p.renderBashContent(width)
 	case tools.EditToolName:

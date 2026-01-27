@@ -181,7 +181,9 @@ func (m *toolCallCmp) View() string {
 		return box.Render(m.renderPending())
 	}
 
-	r := registry.lookup(m.call.Name)
+	// Normalize tool name for OAuth compatibility (Edit -> edit, Write -> write)
+	normalizedName := agent.FromClaudeCodeName(m.call.Name)
+	r := registry.lookup(normalizedName)
 
 	if m.isNested {
 		return box.Render(r.Render(m))
@@ -245,7 +247,9 @@ func (m *toolCallCmp) formatToolForCopy() string {
 }
 
 func (m *toolCallCmp) formatParametersForCopy() string {
-	switch m.call.Name {
+	// Normalize tool name for OAuth compatibility (Edit -> edit, Write -> write)
+	normalizedName := agent.FromClaudeCodeName(m.call.Name)
+	switch normalizedName {
 	case tools.BashToolName:
 		var params tools.BashParams
 		if json.Unmarshal([]byte(m.call.Input), &params) == nil {
@@ -406,7 +410,9 @@ func (m *toolCallCmp) formatResultForCopy() string {
 		return fmt.Sprintf("[Media: %s]", m.result.MIMEType)
 	}
 
-	switch m.call.Name {
+	// Normalize tool name for OAuth compatibility (Edit -> edit, Write -> write)
+	normalizedName := agent.FromClaudeCodeName(m.call.Name)
+	switch normalizedName {
 	case tools.BashToolName:
 		return m.formatBashResultForCopy()
 	case tools.ViewToolName:

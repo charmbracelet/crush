@@ -24,7 +24,7 @@ INSERT INTO messages (
 ) VALUES (
     ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'), strftime('%s', 'now')
 )
-RETURNING id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message
+RETURNING id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, tool_chain_summary
 `
 
 type CreateMessageParams struct {
@@ -59,6 +59,7 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (M
 		&i.FinishedAt,
 		&i.Provider,
 		&i.IsSummaryMessage,
+		&i.ToolChainSummary,
 	)
 	return i, err
 }
@@ -84,7 +85,7 @@ func (q *Queries) DeleteSessionMessages(ctx context.Context, sessionID string) e
 }
 
 const getMessage = `-- name: GetMessage :one
-SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message
+SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, tool_chain_summary
 FROM messages
 WHERE id = ? LIMIT 1
 `
@@ -103,12 +104,13 @@ func (q *Queries) GetMessage(ctx context.Context, id string) (Message, error) {
 		&i.FinishedAt,
 		&i.Provider,
 		&i.IsSummaryMessage,
+		&i.ToolChainSummary,
 	)
 	return i, err
 }
 
 const listMessagesBySession = `-- name: ListMessagesBySession :many
-SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message
+SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, tool_chain_summary
 FROM messages
 WHERE session_id = ?
 ORDER BY created_at ASC
@@ -134,6 +136,7 @@ func (q *Queries) ListMessagesBySession(ctx context.Context, sessionID string) (
 			&i.FinishedAt,
 			&i.Provider,
 			&i.IsSummaryMessage,
+			&i.ToolChainSummary,
 		); err != nil {
 			return nil, err
 		}
@@ -165,5 +168,21 @@ type UpdateMessageParams struct {
 
 func (q *Queries) UpdateMessage(ctx context.Context, arg UpdateMessageParams) error {
 	_, err := q.exec(ctx, q.updateMessageStmt, updateMessage, arg.Parts, arg.FinishedAt, arg.ID)
+	return err
+}
+
+const updateMessageSummary = `-- name: UpdateMessageSummary :exec
+UPDATE messages
+SET tool_chain_summary = ?, updated_at = strftime('%s', 'now')
+WHERE id = ?
+`
+
+type UpdateMessageSummaryParams struct {
+	ToolChainSummary sql.NullString `json:"tool_chain_summary"`
+	ID               string         `json:"id"`
+}
+
+func (q *Queries) UpdateMessageSummary(ctx context.Context, arg UpdateMessageSummaryParams) error {
+	_, err := q.exec(ctx, q.updateMessageSummaryStmt, updateMessageSummary, arg.ToolChainSummary, arg.ID)
 	return err
 }

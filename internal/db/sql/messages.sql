@@ -41,3 +41,8 @@ WHERE id = ?;
 -- name: DeleteSessionMessages :exec
 DELETE FROM messages
 WHERE session_id = ?;
+
+-- name: UpdateMessageSummary :exec
+UPDATE messages
+SET tool_chain_summary = ?, updated_at = strftime('%s', 'now')
+WHERE id = ?;

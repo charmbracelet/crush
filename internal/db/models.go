@@ -29,6 +29,7 @@ type Message struct {
 	FinishedAt       sql.NullInt64  `json:"finished_at"`
 	Provider         sql.NullString `json:"provider"`
 	IsSummaryMessage int64          `json:"is_summary_message"`
+	ToolChainSummary sql.NullString `json:"tool_chain_summary"`
 }
 
 type Session struct {

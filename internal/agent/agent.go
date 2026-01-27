@@ -38,6 +38,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/stringext"
+	"github.com/charmbracelet/crush/internal/toolchain"
 	"github.com/charmbracelet/x/exp/charmtone"
 )
 
@@ -55,6 +56,9 @@ var titlePrompt []byte
 
 //go:embed templates/summary.md
 var summaryPrompt []byte
+
+//go:embed templates/toolchain_summary.md
+var toolchainSummaryPrompt []byte
 
 // Used to remove <think> tags from generated titles.
 var thinkTagRegex = regexp.MustCompile(`<think>.*?</think>`)
@@ -106,9 +110,11 @@ type sessionAgent struct {
 	messages             message.Service
 	disableAutoSummarize bool
 	isYolo               bool
+	toolchainConfig      *config.ToolChainConfig
 
-	messageQueue   *csync.Map[string, []SessionAgentCall]
-	activeRequests *csync.Map[string, context.CancelFunc]
+	messageQueue      *csync.Map[string, []SessionAgentCall]
+	activeRequests    *csync.Map[string, context.CancelFunc]
+	chainSummaryCache *csync.Map[string, string] // messageID -> LLM summary
 }
 
 type SessionAgentOptions struct {
@@ -122,11 +128,16 @@ type SessionAgentOptions struct {
 	Sessions             session.Service
 	Messages             message.Service
 	Tools                []fantasy.AgentTool
+	ToolchainConfig      *config.ToolChainConfig
 }
 
 func NewSessionAgent(
 	opts SessionAgentOptions,
 ) SessionAgent {
+	toolchainCfg := opts.ToolchainConfig
+	if toolchainCfg == nil {
+		toolchainCfg = config.DefaultToolChainConfig()
+	}
 	return &sessionAgent{
 		largeModel:           csync.NewValue(opts.LargeModel),
 		smallModel:           csync.NewValue(opts.SmallModel),
@@ -138,8 +149,10 @@ func NewSessionAgent(
 		disableAutoSummarize: opts.DisableAutoSummarize,
 		tools:                csync.NewSliceFrom(opts.Tools),
 		isYolo:               opts.IsYolo,
+		toolchainConfig:      toolchainCfg,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, context.CancelFunc](),
+		chainSummaryCache:    csync.NewMap[string, string](),
 	}
 }
 
@@ -215,7 +228,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	defer cancel()
 	defer a.activeRequests.Del(call.SessionID)
 
-	history, files := a.preparePrompt(msgs, call.Attachments...)
+	history, files := a.preparePrompt(ctx, msgs, call.Attachments...)
 
 	startTime := time.Now()
 	a.eventPromptSent(call.SessionID)
@@ -562,7 +575,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return nil
 	}
 
-	aiMsgs, _ := a.preparePrompt(msgs)
+	aiMsgs, _ := a.preparePrompt(ctx, msgs)
 
 	genCtx, cancel := context.WithCancel(ctx)
 	a.activeRequests.Set(sessionID, cancel)
@@ -684,7 +697,14 @@ func (a *sessionAgent) createUserMessage(ctx context.Context, call SessionAgentC
 	return msg, nil
 }
 
-func (a *sessionAgent) preparePrompt(msgs []message.Message, attachments ...message.Attachment) ([]fantasy.Message, []fantasy.FilePart) {
+func (a *sessionAgent) preparePrompt(ctx context.Context, msgs []message.Message, attachments ...message.Attachment) ([]fantasy.Message, []fantasy.FilePart) {
+	// Compress tool chains in older messages to reduce context usage
+	preserveCount := 5 // Default
+	if a.toolchainConfig != nil && a.toolchainConfig.PreserveRecentTurns > 0 {
+		preserveCount = a.toolchainConfig.PreserveRecentTurns
+	}
+	msgs = a.compressToolChains(ctx, msgs, preserveCount)
+
 	var history []fantasy.Message
 	if !a.isSubAgent {
 		history = append(history, fantasy.NewUserMessage(
@@ -720,6 +740,136 @@ If not, please feel free to ignore. Again do not mention this message to the use
 	}
 
 	return history, files
+}
+
+// compressToolChains identifies and compresses tool chains in older messages.
+// It preserves recent turns uncompressed and replaces tool call sequences
+// with summary messages to reduce context window usage.
+func (a *sessionAgent) compressToolChains(ctx context.Context, msgs []message.Message, preserveCount int) []message.Message {
+	cfg := a.toolchainConfig
+	if cfg == nil || !cfg.Enabled {
+		return msgs
+	}
+
+	if len(msgs) <= preserveCount {
+		return msgs
+	}
+
+	// Split messages: older ones to potentially compress, recent to preserve
+	cutoff := len(msgs) - preserveCount
+	if cutoff <= 0 {
+		return msgs
+	}
+	olderMsgs := msgs[:cutoff]
+	recentMsgs := msgs[cutoff:]
+
+	// Build toolchain config from our config
+	tcConfig := toolchain.Config{
+		Enabled:        cfg.Enabled,
+		MinCalls:       cfg.MinCalls,
+		IncludeTimings: cfg.IncludeTimings,
+	}
+
+	summarizer := toolchain.NewSummarizerFromConfig(tcConfig)
+	compressed := a.compressMessages(ctx, olderMsgs, summarizer, tcConfig)
+
+	// Combine compressed older messages with preserved recent ones
+	result := make([]message.Message, 0, len(compressed)+len(recentMsgs))
+	result = append(result, compressed...)
+	result = append(result, recentMsgs...)
+
+	return result
+}
+
+// compressMessages processes a slice of messages and compresses tool chains.
+func (a *sessionAgent) compressMessages(ctx context.Context, msgs []message.Message, summarizer *toolchain.Summarizer, cfg toolchain.Config) []message.Message {
+	if len(msgs) == 0 {
+		return msgs
+	}
+
+	result := make([]message.Message, 0, len(msgs))
+	i := 0
+
+	for i < len(msgs) {
+		msg := msgs[i]
+
+		// Check if this is an assistant message with tool calls
+		if msg.Role != message.Assistant {
+			result = append(result, msg)
+			i++
+			continue
+		}
+
+		toolCalls := msg.ToolCalls()
+		if len(toolCalls) < cfg.MinCalls {
+			result = append(result, msg)
+			i++
+			continue
+		}
+
+		// Found a potential chain - collect tool calls and results
+		chain := &toolchain.Chain{
+			SessionID: msg.SessionID,
+			MessageID: msg.ID,
+		}
+
+		// Add tool calls from this message
+		for _, tc := range toolCalls {
+			chain.Add(toolchain.ToolCall{
+				ID:    tc.ID,
+				Name:  tc.Name,
+				Input: tc.Input,
+			})
+		}
+
+		// Look ahead for tool result messages
+		j := i + 1
+		for j < len(msgs) && msgs[j].Role == message.Tool {
+			toolResults := msgs[j].ToolResults()
+			for _, tr := range toolResults {
+				// Update the corresponding tool call with its result
+				for k := range chain.Calls {
+					if chain.Calls[k].ID == tr.ToolCallID {
+						chain.Calls[k].Output = tr.Content
+						chain.Calls[k].IsError = tr.IsError
+						break
+					}
+				}
+			}
+			j++
+		}
+
+		// Try LLM-based summarization first, fall back to pattern-based
+		summary, err := a.summarizeToolChainWithLLM(ctx, chain)
+		if err != nil {
+			slog.Debug("LLM summarization failed, using pattern fallback", "error", err)
+			summary = summarizer.PatternSummary(chain)
+		}
+		if summary == "" {
+			// Fallback - keep original messages
+			result = append(result, msg)
+			i++
+			continue
+		}
+
+		// Create a summary message replacing the tool chain
+		summaryMsg := message.Message{
+			ID:        msg.ID + "-summary",
+			SessionID: msg.SessionID,
+			Role:      message.Assistant,
+			Parts: []message.ContentPart{
+				message.TextContent{
+					Text: fmt.Sprintf("[Tool Chain Summary] %s", summary),
+				},
+			},
+		}
+		result = append(result, summaryMsg)
+
+		// Skip past the tool result messages we consumed
+		i = j
+	}
+
+	return result
 }
 
 func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.Session) ([]message.Message, error) {
@@ -1134,4 +1284,101 @@ func buildSummaryPrompt(todos []session.Todo) string {
 		sb.WriteString("Instruct the resuming assistant to use the `todos` tool to continue tracking progress on these tasks.")
 	}
 	return sb.String()
+}
+
+// summarizeToolChainWithLLM uses the small model to generate a semantic summary.
+// It checks the in-memory cache first, then the database, and finally generates
+// with the LLM if no cached summary exists. Generated summaries are persisted
+// to the database for survival across restarts.
+func (a *sessionAgent) summarizeToolChainWithLLM(ctx context.Context, chain *toolchain.Chain) (string, error) {
+	if chain == nil || chain.IsEmpty() {
+		return "", nil
+	}
+
+	// Check in-memory cache first (fast path)
+	if a.chainSummaryCache != nil {
+		if cached, ok := a.chainSummaryCache.Get(chain.MessageID); ok {
+			return cached, nil
+		}
+	}
+
+	// Check DB if cache miss (survives restarts)
+	if chain.MessageID != "" && a.messages != nil {
+		msg, err := a.messages.Get(ctx, chain.MessageID)
+		if err == nil && msg.ToolChainSummary != "" {
+			// Cache in memory for future lookups
+			if a.chainSummaryCache != nil {
+				a.chainSummaryCache.Set(chain.MessageID, msg.ToolChainSummary)
+			}
+			return msg.ToolChainSummary, nil
+		}
+	}
+
+	// If smallModel isn't set, return error to trigger fallback
+	if a.smallModel == nil {
+		return "", errors.New("small model not configured")
+	}
+	smallModel := a.smallModel.Get()
+	if smallModel.Model == nil {
+		return "", errors.New("small model not configured")
+	}
+
+	// Build prompt with tool calls and results
+	prompt := buildToolChainPrompt(chain)
+
+	// Use small model with low token limit
+	var maxTokens int64 = 200
+	agent := fantasy.NewAgent(smallModel.Model,
+		fantasy.WithSystemPrompt(string(toolchainSummaryPrompt)),
+		fantasy.WithMaxOutputTokens(maxTokens),
+	)
+
+	resp, err := agent.Stream(ctx, fantasy.AgentStreamCall{
+		Prompt: prompt,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	summary := resp.Response.Content.Text()
+
+	// Persist to DB for survival across restarts
+	if chain.MessageID != "" && a.messages != nil {
+		_ = a.messages.UpdateSummary(ctx, chain.MessageID, summary)
+	}
+
+	// Cache in memory
+	if a.chainSummaryCache != nil {
+		a.chainSummaryCache.Set(chain.MessageID, summary)
+	}
+
+	return summary, nil
+}
+
+// buildToolChainPrompt formats tool calls and results for the LLM.
+func buildToolChainPrompt(chain *toolchain.Chain) string {
+	var sb strings.Builder
+	for _, call := range chain.Calls {
+		sb.WriteString(fmt.Sprintf("Tool: %s\n", call.Name))
+		sb.WriteString(fmt.Sprintf("Input: %s\n", truncateString(call.Input, 200)))
+		if call.Output != "" {
+			sb.WriteString(fmt.Sprintf("Result: %s\n", truncateString(call.Output, 500)))
+		}
+		if call.IsError {
+			sb.WriteString("Status: ERROR\n")
+		}
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
+// truncateString truncates a string to the given max length, adding "..." if truncated.
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	if maxLen <= 3 {
+		return s[:maxLen]
+	}
+	return s[:maxLen-3] + "..."
 }

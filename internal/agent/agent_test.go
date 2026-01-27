@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,8 @@ import (
 	"charm.land/fantasy"
 	"charm.land/x/vcr"
 	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/stretchr/testify/assert"
@@ -649,5 +652,202 @@ func BenchmarkBuildSummaryPrompt(b *testing.B) {
 				_ = buildSummaryPrompt(todos)
 			}
 		})
+	}
+}
+
+func TestCompressToolChains(t *testing.T) {
+	tests := []struct {
+		name          string
+		config        *config.ToolChainConfig
+		msgs          []message.Message
+		preserveCount int
+		wantLen       int // expected number of messages after compression
+	}{
+		{
+			name:          "nil_config_returns_unchanged",
+			config:        nil,
+			msgs:          createTestMessages(10, true),
+			preserveCount: 5,
+			wantLen:       10,
+		},
+		{
+			name: "disabled_config_returns_unchanged",
+			config: &config.ToolChainConfig{
+				Enabled: false,
+			},
+			msgs:          createTestMessages(10, true),
+			preserveCount: 5,
+			wantLen:       10,
+		},
+		{
+			name: "preserves_recent_messages",
+			config: &config.ToolChainConfig{
+				Enabled:  true,
+				MinCalls: 3,
+			},
+			msgs:          createTestMessages(5, true),
+			preserveCount: 5,
+			wantLen:       5, // All messages preserved
+		},
+		{
+			name: "compresses_older_tool_chains",
+			config: &config.ToolChainConfig{
+				Enabled:  true,
+				MinCalls: 3,
+			},
+			msgs:          createMessagesWithToolChain(t),
+			preserveCount: 2,
+			wantLen:       3, // 1 summary message + 2 preserved messages
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			agent := &sessionAgent{
+				toolchainConfig:   tt.config,
+				chainSummaryCache: csync.NewMap[string, string](),
+			}
+
+			result := agent.compressToolChains(context.Background(), tt.msgs, tt.preserveCount)
+			assert.Len(t, result, tt.wantLen)
+		})
+	}
+}
+
+func TestCompressToolChains_PreservesRecentTurns(t *testing.T) {
+	cfg := &config.ToolChainConfig{
+		Enabled:  true,
+		MinCalls: 2,
+	}
+	agent := &sessionAgent{
+		toolchainConfig:   cfg,
+		chainSummaryCache: csync.NewMap[string, string](),
+	}
+
+	// Create messages: older ones with tool chains, newer ones without
+	msgs := []message.Message{
+		// Older messages (should be compressed)
+		{
+			ID:        "msg-1",
+			SessionID: "session-1",
+			Role:      message.Assistant,
+			Parts: []message.ContentPart{
+				message.ToolCall{ID: "tc-1", Name: "grep", Input: `{"pattern": "foo"}`},
+				message.ToolCall{ID: "tc-2", Name: "grep", Input: `{"pattern": "bar"}`},
+				message.ToolCall{ID: "tc-3", Name: "grep", Input: `{"pattern": "baz"}`},
+			},
+		},
+		{
+			ID:        "msg-2",
+			SessionID: "session-1",
+			Role:      message.Tool,
+			Parts: []message.ContentPart{
+				message.ToolResult{ToolCallID: "tc-1", Content: "found foo"},
+				message.ToolResult{ToolCallID: "tc-2", Content: "found bar"},
+				message.ToolResult{ToolCallID: "tc-3", Content: "found baz"},
+			},
+		},
+		// Recent messages (should be preserved)
+		{
+			ID:        "msg-3",
+			SessionID: "session-1",
+			Role:      message.User,
+			Parts: []message.ContentPart{
+				message.TextContent{Text: "What did you find?"},
+			},
+		},
+		{
+			ID:        "msg-4",
+			SessionID: "session-1",
+			Role:      message.Assistant,
+			Parts: []message.ContentPart{
+				message.TextContent{Text: "I found foo, bar, and baz."},
+			},
+		},
+	}
+
+	result := agent.compressToolChains(context.Background(), msgs, 2)
+
+	// Should have: 1 summary message + 2 preserved recent messages = 3
+	require.Len(t, result, 3)
+
+	// Last two should be the preserved messages
+	assert.Equal(t, "msg-3", result[1].ID)
+	assert.Equal(t, "msg-4", result[2].ID)
+
+	// First should be a summary
+	assert.Contains(t, result[0].ID, "summary")
+}
+
+func createTestMessages(count int, withToolCalls bool) []message.Message {
+	msgs := make([]message.Message, count)
+	for i := range count {
+		msg := message.Message{
+			ID:        fmt.Sprintf("msg-%d", i),
+			SessionID: "session-1",
+		}
+		if i%2 == 0 {
+			msg.Role = message.User
+			msg.Parts = []message.ContentPart{
+				message.TextContent{Text: fmt.Sprintf("User message %d", i)},
+			}
+		} else {
+			msg.Role = message.Assistant
+			if withToolCalls && i < count-2 {
+				msg.Parts = []message.ContentPart{
+					message.ToolCall{ID: fmt.Sprintf("tc-%d", i), Name: "bash"},
+				}
+			} else {
+				msg.Parts = []message.ContentPart{
+					message.TextContent{Text: fmt.Sprintf("Assistant message %d", i)},
+				}
+			}
+		}
+		msgs[i] = msg
+	}
+	return msgs
+}
+
+func createMessagesWithToolChain(t *testing.T) []message.Message {
+	t.Helper()
+	return []message.Message{
+		// Tool chain (older messages)
+		{
+			ID:        "msg-1",
+			SessionID: "session-1",
+			Role:      message.Assistant,
+			Parts: []message.ContentPart{
+				message.ToolCall{ID: "tc-1", Name: "grep", Input: `{"pattern": "foo"}`},
+				message.ToolCall{ID: "tc-2", Name: "grep", Input: `{"pattern": "bar"}`},
+				message.ToolCall{ID: "tc-3", Name: "grep", Input: `{"pattern": "baz"}`},
+			},
+		},
+		{
+			ID:        "msg-2",
+			SessionID: "session-1",
+			Role:      message.Tool,
+			Parts: []message.ContentPart{
+				message.ToolResult{ToolCallID: "tc-1", Content: "found foo"},
+				message.ToolResult{ToolCallID: "tc-2", Content: "found bar"},
+				message.ToolResult{ToolCallID: "tc-3", Content: "found baz"},
+			},
+		},
+		// Recent messages (to preserve)
+		{
+			ID:        "msg-3",
+			SessionID: "session-1",
+			Role:      message.User,
+			Parts: []message.ContentPart{
+				message.TextContent{Text: "What did you find?"},
+			},
+		},
+		{
+			ID:        "msg-4",
+			SessionID: "session-1",
+			Role:      message.Assistant,
+			Parts: []message.ContentPart{
+				message.TextContent{Text: "I found foo, bar, and baz."},
+			},
+		},
 	}
 }

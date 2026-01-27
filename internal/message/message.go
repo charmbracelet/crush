@@ -24,6 +24,7 @@ type Service interface {
 	pubsub.Subscriber[Message]
 	Create(ctx context.Context, sessionID string, params CreateMessageParams) (Message, error)
 	Update(ctx context.Context, message Message) error
+	UpdateSummary(ctx context.Context, id string, summary string) error
 	Get(ctx context.Context, id string) (Message, error)
 	List(ctx context.Context, sessionID string) ([]Message, error)
 	Delete(ctx context.Context, id string) error
@@ -157,6 +158,13 @@ func (s *service) List(ctx context.Context, sessionID string) ([]Message, error)
 	return messages, nil
 }
 
+func (s *service) UpdateSummary(ctx context.Context, id string, summary string) error {
+	return s.q.UpdateMessageSummary(ctx, db.UpdateMessageSummaryParams{
+		ID:               id,
+		ToolChainSummary: sql.NullString{String: summary, Valid: summary != ""},
+	})
+}
+
 func (s *service) fromDBItem(item db.Message) (Message, error) {
 	parts, err := unmarshalParts([]byte(item.Parts))
 	if err != nil {
@@ -172,6 +180,7 @@ func (s *service) fromDBItem(item db.Message) (Message, error) {
 		CreatedAt:        item.CreatedAt,
 		UpdatedAt:        item.UpdatedAt,
 		IsSummaryMessage: item.IsSummaryMessage != 0,
+		ToolChainSummary: item.ToolChainSummary.String,
 	}, nil
 }
 

@@ -135,6 +135,7 @@ type Message struct {
 	CreatedAt        int64
 	UpdatedAt        int64
 	IsSummaryMessage bool
+	ToolChainSummary string
 }
 
 func (m *Message) Content() TextContent {

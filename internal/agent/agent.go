@@ -372,20 +372,18 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			}
 			currentAssistant.AddFinish(finishReason, "", "")
 			sessionLock.Lock()
-			updatedSession, getSessionErr := a.sessions.Get(genCtx, call.SessionID)
+			defer sessionLock.Unlock()
+
+			updatedSession, getSessionErr := a.sessions.Get(ctx, call.SessionID)
 			if getSessionErr != nil {
-				sessionLock.Unlock()
 				return getSessionErr
 			}
 			a.updateSessionUsage(largeModel, &updatedSession, stepResult.Usage, a.openrouterCost(stepResult.ProviderMetadata))
-			_, sessionErr := a.sessions.Save(genCtx, updatedSession)
-			if sessionErr == nil {
-				currentSession = updatedSession
-			}
-			sessionLock.Unlock()
+			_, sessionErr := a.sessions.Save(ctx, updatedSession)
 			if sessionErr != nil {
 				return sessionErr
 			}
+			currentSession = updatedSession
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		StopWhen: []fantasy.StopCondition{
@@ -898,7 +896,7 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 	}
 
 	session.CompletionTokens = usage.OutputTokens
-	session.PromptTokens = usage.InputTokens + usage.CacheCreationTokens
+	session.PromptTokens = usage.InputTokens + usage.CacheReadTokens
 }
 
 func (a *sessionAgent) Cancel(sessionID string) {

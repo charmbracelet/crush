@@ -258,8 +258,6 @@ func New(com *common.Common) *UI {
 		com:         com,
 		dialog:      dialog.NewOverlay(),
 		keyMap:      keyMap,
-		focus:       uiFocusNone,
-		state:       uiOnboarding,
 		textarea:    ta,
 		chat:        ch,
 		completions: comp,
@@ -271,18 +269,6 @@ func New(com *common.Common) *UI {
 
 	status := NewStatus(com, ui)
 
-	// set onboarding state defaults
-	ui.onboarding.yesInitializeSelected = true
-
-	if !com.Config().IsConfigured() {
-		ui.state = uiOnboarding
-	} else if n, _ := config.ProjectNeedsInitialization(); n {
-		ui.state = uiInitialize
-	} else {
-		ui.state = uiLanding
-		ui.focus = uiFocusEditor
-	}
-
 	ui.setEditorPrompt(false)
 	ui.randomizePlaceholders()
 	ui.textarea.Placeholder = ui.readyPlaceholder
@@ -290,6 +276,20 @@ func New(com *common.Common) *UI {
 
 	// Initialize compact mode from config
 	ui.forceCompactMode = com.Config().Options.TUI.CompactMode
+
+	// set onboarding state defaults
+	ui.onboarding.yesInitializeSelected = true
+
+	desiredState := uiLanding
+	desiredFocus := uiFocusEditor
+	if !com.Config().IsConfigured() {
+		desiredState = uiOnboarding
+	} else if n, _ := config.ProjectNeedsInitialization(); n {
+		desiredState = uiInitialize
+	}
+
+	// set initial state
+	ui.setState(desiredState, desiredFocus)
 
 	return ui
 }
@@ -308,6 +308,14 @@ func (m *UI) Init() tea.Cmd {
 	// load the user commands async
 	cmds = append(cmds, m.loadCustomCommands())
 	return tea.Batch(cmds...)
+}
+
+// setState changes the UI state and focus.
+func (m *UI) setState(state uiState, focus uiFocusState) {
+	m.state = state
+	m.focus = focus
+	// Changing the state may change layout, so update it.
+	m.updateLayoutAndSize()
 }
 
 // loadCustomCommands loads the custom commands asynchronously.
@@ -360,10 +368,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, timage.RequestCapabilities(m.imgCaps.Env))
 		}
 	case loadSessionMsg:
-		m.state = uiChat
 		if m.forceCompactMode {
 			m.isCompact = true
 		}
+		m.setState(uiChat, m.focus)
 		m.session = msg.session
 		m.sessionFiles = msg.files
 		msgs, err := m.com.App.Messages.List(context.Background(), m.session.ID)
@@ -493,7 +501,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.handleCompactMode(m.width, m.height)
 		m.updateLayoutAndSize()
 		// XXX: We need to store cell dimensions for image rendering.
 		m.imgCaps.Columns, m.imgCaps.Rows = msg.Width, msg.Height
@@ -1212,9 +1219,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.ModelsID)
 
 		if isOnboarding {
-			m.state = uiLanding
-			m.focus = uiFocusEditor
-
+			m.setState(uiLanding, uiFocusEditor)
 			m.com.Config().SetupAgents()
 			if err := m.com.App.InitCoderAgent(context.TODO()); err != nil {
 				cmds = append(cmds, uiutil.ReportError(err))
@@ -1507,7 +1512,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				m.newSession()
 			case key.Matches(msg, m.keyMap.Tab):
 				if m.state != uiLanding {
-					m.focus = uiFocusMain
+					m.setState(m.state, uiFocusMain)
 					m.textarea.Blur()
 					m.chat.Focus()
 					m.chat.SetSelected(m.chat.Len() - 1)
@@ -2054,29 +2059,26 @@ func (m *UI) toggleCompactMode() tea.Cmd {
 		return uiutil.ReportError(err)
 	}
 
-	m.handleCompactMode(m.width, m.height)
 	m.updateLayoutAndSize()
 
 	return nil
 }
 
-// handleCompactMode updates the UI state based on window size and compact mode setting.
-func (m *UI) handleCompactMode(newWidth, newHeight int) {
+// updateLayoutAndSize updates the layout and sizes of UI components.
+func (m *UI) updateLayoutAndSize() {
+	// Determine if we should be in compact mode
 	if m.state == uiChat {
 		if m.forceCompactMode {
 			m.isCompact = true
 			return
 		}
-		if newWidth < compactModeWidthBreakpoint || newHeight < compactModeHeightBreakpoint {
+		if m.width < compactModeWidthBreakpoint || m.height < compactModeHeightBreakpoint {
 			m.isCompact = true
 		} else {
 			m.isCompact = false
 		}
 	}
-}
 
-// updateLayoutAndSize updates the layout and sizes of UI components.
-func (m *UI) updateLayoutAndSize() {
 	m.layout = m.generateLayout(m.width, m.height)
 	m.updateSize()
 }
@@ -2121,7 +2123,7 @@ func (m *UI) generateLayout(w, h int) layout {
 	const landingHeaderHeight = 4
 
 	var helpKeyMap help.KeyMap = m
-	if m.status.ShowingAll() {
+	if m.status != nil && m.status.ShowingAll() {
 		for _, row := range helpKeyMap.FullHelp() {
 			helpHeight = max(helpHeight, len(row))
 		}
@@ -2525,7 +2527,6 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 		if err != nil {
 			return uiutil.ReportError(err)
 		}
-		m.state = uiChat
 		if m.forceCompactMode {
 			m.isCompact = true
 		}
@@ -2533,6 +2534,7 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 			m.session = &newSession
 			cmds = append(cmds, m.loadSession(newSession.ID))
 		}
+		m.setState(uiChat, m.focus)
 	}
 
 	// Capture session ID to avoid race with main goroutine updating m.session.
@@ -2780,8 +2782,7 @@ func (m *UI) newSession() {
 
 	m.session = nil
 	m.sessionFiles = nil
-	m.state = uiLanding
-	m.focus = uiFocusEditor
+	m.setState(uiLanding, uiFocusEditor)
 	m.textarea.Focus()
 	m.chat.Blur()
 	m.chat.ClearMessages()

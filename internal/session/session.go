@@ -203,7 +203,7 @@ func (s *service) List(ctx context.Context) ([]Session, error) {
 func (s service) fromDBItem(item db.Session) Session {
 	todos, err := unmarshalTodos(item.Todos.String)
 	if err != nil {
-		slog.Error("failed to unmarshal todos", "session_id", item.ID, "error", err)
+		slog.Error("Failed to unmarshal todos", "session_id", item.ID, "error", err)
 	}
 	return Session{
 		ID:               item.ID,

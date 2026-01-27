@@ -49,7 +49,7 @@ func GetPromptMessages(ctx context.Context, clientName, promptName string, args 
 func RefreshPrompts(ctx context.Context, name string) {
 	session, ok := sessions.Get(name)
 	if !ok {
-		slog.Warn("refresh prompts: no session", "name", name)
+		slog.Warn("Refresh prompts: no session", "name", name)
 		return
 	}
 

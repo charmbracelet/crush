@@ -26,6 +26,8 @@
   need of a temporary directory. This directory does not need to be removed.
 - **JSON tags**: Use snake_case for JSON field names
 - **File permissions**: Use octal notation (0o755, 0o644) for file permissions
+- **Log messages**: Log messages must start with a capital letter (e.g., "Failed to save session" not "failed to save session")
+  - This is enforced by `task lint:log` which runs as part of `task lint`
 - **Comments**: End comments in periods unless comments are at the end of the line.
 
 ## Testing with Mock Providers

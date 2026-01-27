@@ -49,7 +49,7 @@ var Enabled = sync.OnceValue(func() bool {
 var Embedded = sync.OnceValue(func() catwalk.Provider {
 	var provider catwalk.Provider
 	if err := json.Unmarshal(embedded, &provider); err != nil {
-		slog.Error("could not use embedded provider data", "err", err)
+		slog.Error("Could not use embedded provider data", "err", err)
 	}
 	return provider
 })

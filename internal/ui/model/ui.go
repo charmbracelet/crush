@@ -2247,7 +2247,9 @@ func (m *UI) generateLayout(w, h int) layout {
 
 	if !layout.editor.Empty() {
 		// Add editor margins 1 top and bottom
-		layout.editor.Min.Y += 1
+		if len(m.attachments.List()) == 0 {
+			layout.editor.Min.Y += 1
+		}
 		layout.editor.Max.Y -= 1
 	}
 

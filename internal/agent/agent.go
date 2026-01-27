@@ -35,10 +35,10 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/notification"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/stringext"
+	"github.com/charmbracelet/crush/internal/ui/notification"
 	"github.com/charmbracelet/x/exp/charmtone"
 )
 
@@ -108,6 +108,7 @@ type sessionAgent struct {
 	messages             message.Service
 	disableAutoSummarize bool
 	isYolo               bool
+	notify               notification.Sink
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, context.CancelFunc]
@@ -124,6 +125,7 @@ type SessionAgentOptions struct {
 	Sessions             session.Service
 	Messages             message.Service
 	Tools                []fantasy.AgentTool
+	Notify               notification.Sink
 }
 
 func NewSessionAgent(
@@ -140,6 +142,7 @@ func NewSessionAgent(
 		disableAutoSummarize: opts.DisableAutoSummarize,
 		tools:                csync.NewSliceFrom(opts.Tools),
 		isYolo:               opts.IsYolo,
+		notify:               opts.Notify,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, context.CancelFunc](),
 	}
@@ -513,9 +516,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	}
 
 	// Send notification that agent has finished its turn (skip for nested/non-interactive sessions).
-	if !call.NonInteractive {
-		notifBody := fmt.Sprintf("Agent's turn completed in \"%s\"", currentSession.Title)
-		_ = notification.Send("Crush is waiting...", notifBody)
+	if !call.NonInteractive && a.notify != nil {
+		a.notify(notification.Notification{
+			Title:   "Crush is waiting...",
+			Message: fmt.Sprintf("Agent's turn completed in \"%s\"", currentSession.Title),
+		})
 	}
 
 	if shouldSummarize {

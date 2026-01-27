@@ -10,7 +10,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/styles"
-	"github.com/charmbracelet/crush/internal/uiutil"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
@@ -95,6 +95,6 @@ func CopyToClipboardWithCallback(text, successMessage string, callback tea.Cmd) 
 			return nil
 		},
 		callback,
-		uiutil.ReportInfo(successMessage),
+		util.ReportInfo(successMessage),
 	)
 }

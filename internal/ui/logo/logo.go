@@ -8,7 +8,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/MakeNowJust/heredoc"
-	"github.com/charmbracelet/crush/internal/tui/styles"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/slice"
 )
@@ -34,7 +34,7 @@ type Opts struct {
 //
 // The compact argument determines whether it renders compact for the sidebar
 // or wider for the main pane.
-func Render(version string, compact bool, o Opts) string {
+func Render(s *styles.Styles, version string, compact bool, o Opts) string {
 	const charm = " Charm™"
 
 	fg := func(c color.Color, s string) string {
@@ -59,7 +59,7 @@ func Render(version string, compact bool, o Opts) string {
 	crushWidth := lipgloss.Width(crush)
 	b := new(strings.Builder)
 	for r := range strings.SplitSeq(crush, "\n") {
-		fmt.Fprintln(b, styles.ApplyForegroundGrad(r, o.TitleColorA, o.TitleColorB))
+		fmt.Fprintln(b, styles.ApplyForegroundGrad(s, r, o.TitleColorA, o.TitleColorB))
 	}
 	crush = b.String()
 
@@ -117,14 +117,13 @@ func Render(version string, compact bool, o Opts) string {
 
 // SmallRender renders a smaller version of the Crush logo, suitable for
 // smaller windows or sidebar usage.
-func SmallRender(width int) string {
-	t := styles.CurrentTheme()
-	title := t.S().Base.Foreground(t.Secondary).Render("Charm™")
-	title = fmt.Sprintf("%s %s", title, styles.ApplyBoldForegroundGrad("Crush", t.Secondary, t.Primary))
+func SmallRender(t *styles.Styles, width int) string {
+	title := t.Base.Foreground(t.Secondary).Render("Charm™")
+	title = fmt.Sprintf("%s %s", title, styles.ApplyBoldForegroundGrad(t, "Crush", t.Secondary, t.Primary))
 	remainingWidth := width - lipgloss.Width(title) - 1 // 1 for the space after "Crush"
 	if remainingWidth > 0 {
 		lines := strings.Repeat("╱", remainingWidth)
-		title = fmt.Sprintf("%s %s", title, t.S().Base.Foreground(t.Primary).Render(lines))
+		title = fmt.Sprintf("%s %s", title, t.Base.Foreground(t.Primary).Render(lines))
 	}
 	return title
 }

@@ -14,7 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/uiutil"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/pkg/browser"
 )
@@ -173,7 +173,7 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 
 	case ActionOAuthErrored:
 		m.State = OAuthStateError
-		cmd := tea.Batch(m.oAuthProvider.stopPolling, uiutil.ReportError(msg.Error))
+		cmd := tea.Batch(m.oAuthProvider.stopPolling, util.ReportError(msg.Error))
 		return ActionCmd{cmd}
 	}
 	return nil
@@ -352,7 +352,7 @@ func (d *OAuth) copyCode() tea.Cmd {
 	}
 	return tea.Sequence(
 		tea.SetClipboard(d.userCode),
-		uiutil.ReportInfo("Code copied to clipboard"),
+		util.ReportInfo("Code copied to clipboard"),
 	)
 }
 
@@ -368,7 +368,7 @@ func (d *OAuth) copyCodeAndOpenURL() tea.Cmd {
 			}
 			return nil
 		},
-		uiutil.ReportInfo("Code copied and URL opened"),
+		util.ReportInfo("Code copied and URL opened"),
 	)
 }
 
@@ -377,7 +377,7 @@ func (m *OAuth) saveKeyAndContinue() Action {
 
 	err := cfg.SetProviderAPIKey(string(m.provider.ID), m.token)
 	if err != nil {
-		return ActionCmd{uiutil.ReportError(fmt.Errorf("failed to save API key: %w", err))}
+		return ActionCmd{util.ReportError(fmt.Errorf("failed to save API key: %w", err))}
 	}
 
 	return ActionSelectModel{

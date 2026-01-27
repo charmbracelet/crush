@@ -15,7 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/uiutil"
+	"github.com/charmbracelet/crush/internal/ui/util"
 )
 
 // ActionClose is a message to close the current dialog.
@@ -131,22 +131,22 @@ func (a ActionFilePickerSelected) Cmd() tea.Cmd {
 	return func() tea.Msg {
 		isFileLarge, err := common.IsFileTooBig(path, common.MaxAttachmentSize)
 		if err != nil {
-			return uiutil.InfoMsg{
-				Type: uiutil.InfoTypeError,
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
 				Msg:  fmt.Sprintf("unable to read the image: %v", err),
 			}
 		}
 		if isFileLarge {
-			return uiutil.InfoMsg{
-				Type: uiutil.InfoTypeError,
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
 				Msg:  "file too large, max 5MB",
 			}
 		}
 
 		content, err := os.ReadFile(path)
 		if err != nil {
-			return uiutil.InfoMsg{
-				Type: uiutil.InfoTypeError,
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
 				Msg:  fmt.Sprintf("unable to read the image: %v", err),
 			}
 		}

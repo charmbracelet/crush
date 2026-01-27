@@ -3,6 +3,7 @@ package permission
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -130,6 +131,13 @@ func (s *permissionService) Deny(permission PermissionRequest) {
 }
 
 func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRequest) (bool, error) {
+	// Check if plan mode is active - deny all write operations.
+	// This check must come BEFORE skip mode check, as plan mode should
+	// override yolo mode for safety.
+	if isPlanMode(ctx) && isWriteOperation(opts.Action) {
+		return false, fmt.Errorf("write operations are not allowed in plan mode")
+	}
+
 	if s.skip {
 		return true, nil
 	}
@@ -244,4 +252,28 @@ func NewPermissionService(workingDir string, skip bool, allowedTools []string) S
 		allowedTools:        allowedTools,
 		pendingRequests:     csync.NewMap[string, chan bool](),
 	}
+}
+
+// isPlanMode checks if plan mode is enabled in the context by importing from
+// tools package.
+func isPlanMode(ctx context.Context) bool {
+	planMode := ctx.Value(planModeContextKey("plan_mode"))
+	if planMode == nil {
+		return false
+	}
+	b, ok := planMode.(bool)
+	if !ok {
+		return false
+	}
+	return b
+}
+
+// planModeContextKey is the key type for plan mode in context.
+type planModeContextKey string
+
+// isWriteOperation checks if an action is a write operation that should be
+// blocked in plan mode.
+func isWriteOperation(action string) bool {
+	writeActions := []string{"write", "execute"}
+	return slices.Contains(writeActions, action)
 }

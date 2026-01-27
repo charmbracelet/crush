@@ -1,6 +1,7 @@
 package permission
 
 import (
+	"context"
 	"sync"
 	"testing"
 
@@ -250,4 +251,85 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, result, "Repeated request should be auto-approved due to persistent permission")
 	})
+}
+
+func TestPermissionService_PlanMode(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		isPlanMode  bool
+		action      string
+		shouldBlock bool
+		errContains string
+	}{
+		{
+			name:        "plan mode blocks write action",
+			isPlanMode:  true,
+			action:      "write",
+			shouldBlock: true,
+			errContains: "write operations are not allowed in plan mode",
+		},
+		{
+			name:        "plan mode blocks execute action",
+			isPlanMode:  true,
+			action:      "execute",
+			shouldBlock: true,
+			errContains: "write operations are not allowed in plan mode",
+		},
+		{
+			name:        "plan mode allows read action",
+			isPlanMode:  true,
+			action:      "read",
+			shouldBlock: false,
+		},
+		{
+			name:        "regular mode allows write action",
+			isPlanMode:  false,
+			action:      "write",
+			shouldBlock: false,
+		},
+		{
+			name:        "regular mode allows execute action",
+			isPlanMode:  false,
+			action:      "execute",
+			shouldBlock: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			// Use skip mode to avoid blocking on permission prompts.
+			service := NewPermissionService("/tmp", true, []string{})
+
+			ctx := t.Context()
+			if tt.isPlanMode {
+				ctx = planModeContext(ctx, true)
+			}
+
+			result, err := service.Request(ctx, CreatePermissionRequest{
+				SessionID:  "test-session",
+				ToolCallID: "test-call",
+				ToolName:   "test-tool",
+				Action:     tt.action,
+				Path:       "/tmp",
+			})
+
+			if tt.shouldBlock {
+				require.Error(t, err)
+				assert.False(t, result)
+				assert.Contains(t, err.Error(), tt.errContains)
+			} else {
+				// In skip mode, all non-blocked requests are auto-approved.
+				require.NoError(t, err)
+				assert.True(t, result)
+			}
+		})
+	}
+}
+
+// planModeContext adds plan mode to the context for testing.
+func planModeContext(ctx context.Context, enabled bool) context.Context {
+	return context.WithValue(ctx, planModeContextKey("plan_mode"), enabled)
 }

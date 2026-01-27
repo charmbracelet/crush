@@ -307,6 +307,7 @@ When in plan mode:
 			callContext = context.WithValue(callContext, tools.MessageIDContextKey, assistantMsg.ID)
 			callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatwalkCfg.SupportsImages)
 			callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatwalkCfg.Name)
+			callContext = context.WithValue(callContext, tools.PlanModeContextKey, a.isPlan)
 			currentAssistant = &assistantMsg
 			return callContext, prepared, err
 		},

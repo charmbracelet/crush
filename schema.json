@@ -92,10 +92,7 @@
         }
       },
       "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "tools"
-      ]
+      "type": "object"
     },
     "LSPConfig": {
       "properties": {
@@ -162,10 +159,7 @@
         }
       },
       "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "command"
-      ]
+      "type": "object"
     },
     "LSPs": {
       "additionalProperties": {
@@ -435,6 +429,10 @@
             "CLAUDE.md",
             "docs/LLMs.md"
           ]
+        },
+        "auto_lsp": {
+          "type": "boolean",
+          "description": "Automatically setup LSPs based on root markers"
         }
       },
       "additionalProperties": false,
@@ -698,10 +696,7 @@
         }
       },
       "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "ls"
-      ]
+      "type": "object"
     }
   }
 }

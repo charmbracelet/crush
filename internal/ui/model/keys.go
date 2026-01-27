@@ -15,6 +15,10 @@ type KeyMap struct {
 		AttachmentDeleteMode key.Binding
 		Escape               key.Binding
 		DeleteAllAttachments key.Binding
+
+		// History navigation
+		HistoryPrev key.Binding
+		HistoryNext key.Binding
 	}
 
 	Chat struct {
@@ -130,6 +134,12 @@ func DefaultKeyMap() KeyMap {
 	km.Editor.DeleteAllAttachments = key.NewBinding(
 		key.WithKeys("r"),
 		key.WithHelp("ctrl+r+r", "delete all attachments"),
+	)
+	km.Editor.HistoryPrev = key.NewBinding(
+		key.WithKeys("up"),
+	)
+	km.Editor.HistoryNext = key.NewBinding(
+		key.WithKeys("down"),
 	)
 
 	km.Chat.NewSession = key.NewBinding(

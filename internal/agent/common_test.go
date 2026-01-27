@@ -112,7 +112,7 @@ func testEnv(t *testing.T) fakeEnv {
 	require.NoError(t, err)
 
 	q := db.New(conn)
-	sessions := session.NewService(q)
+	sessions := session.NewService(q, conn)
 	messages := message.NewService(q)
 
 	permissions := permission.NewPermissionService(workingDir, true, []string{})

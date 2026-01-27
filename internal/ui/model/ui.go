@@ -29,6 +29,7 @@ import (
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/filetracker"
+	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/message"
@@ -210,6 +211,13 @@ type UI struct {
 
 	// mouse highlighting related state
 	lastClickTime time.Time
+
+	// Prompt history for up/down navigation through previous messages.
+	promptHistory struct {
+		messages []string
+		index    int
+		draft    string
+	}
 }
 
 // New creates a new instance of the [UI] model.
@@ -257,8 +265,6 @@ func New(com *common.Common) *UI {
 		com:         com,
 		dialog:      dialog.NewOverlay(),
 		keyMap:      keyMap,
-		focus:       uiFocusNone,
-		state:       uiOnboarding,
 		textarea:    ta,
 		chat:        ch,
 		completions: comp,
@@ -270,18 +276,6 @@ func New(com *common.Common) *UI {
 
 	status := NewStatus(com, ui)
 
-	// set onboarding state defaults
-	ui.onboarding.yesInitializeSelected = true
-
-	if !com.Config().IsConfigured() {
-		ui.state = uiOnboarding
-	} else if n, _ := config.ProjectNeedsInitialization(); n {
-		ui.state = uiInitialize
-	} else {
-		ui.state = uiLanding
-		ui.focus = uiFocusEditor
-	}
-
 	ui.setEditorPrompt(false)
 	ui.randomizePlaceholders()
 	ui.textarea.Placeholder = ui.readyPlaceholder
@@ -289,6 +283,20 @@ func New(com *common.Common) *UI {
 
 	// Initialize compact mode from config
 	ui.forceCompactMode = com.Config().Options.TUI.CompactMode
+
+	// set onboarding state defaults
+	ui.onboarding.yesInitializeSelected = true
+
+	desiredState := uiLanding
+	desiredFocus := uiFocusEditor
+	if !com.Config().IsConfigured() {
+		desiredState = uiOnboarding
+	} else if n, _ := config.ProjectNeedsInitialization(); n {
+		desiredState = uiInitialize
+	}
+
+	// set initial state
+	ui.setState(desiredState, desiredFocus)
 
 	return ui
 }
@@ -306,7 +314,17 @@ func (m *UI) Init() tea.Cmd {
 	}
 	// load the user commands async
 	cmds = append(cmds, m.loadCustomCommands())
+	// load prompt history async
+	cmds = append(cmds, m.loadPromptHistory())
 	return tea.Batch(cmds...)
+}
+
+// setState changes the UI state and focus.
+func (m *UI) setState(state uiState, focus uiFocusState) {
+	m.state = state
+	m.focus = focus
+	// Changing the state may change layout, so update it.
+	m.updateLayoutAndSize()
 }
 
 // loadCustomCommands loads the custom commands asynchronously.
@@ -359,10 +377,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, timage.RequestCapabilities(m.imgCaps.Env))
 		}
 	case loadSessionMsg:
-		m.state = uiChat
 		if m.forceCompactMode {
 			m.isCompact = true
 		}
+		m.setState(uiChat, m.focus)
 		m.session = msg.session
 		m.sessionFiles = msg.files
 		msgs, err := m.com.App.Messages.List(context.Background(), m.session.ID)
@@ -381,6 +399,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.updateLayoutAndSize()
 		}
+		// Reload prompt history for the new session.
+		m.historyReset()
+		cmds = append(cmds, m.loadPromptHistory())
 
 	case sendMessageMsg:
 		cmds = append(cmds, m.sendMessage(msg.Content, msg.Attachments...))
@@ -408,10 +429,23 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			commands.SetMCPPrompts(m.mcpPrompts)
 		}
 
+	case promptHistoryLoadedMsg:
+		m.promptHistory.messages = msg.messages
+		m.promptHistory.index = -1
+		m.promptHistory.draft = ""
+
 	case closeDialogMsg:
 		m.dialog.CloseFrontDialog()
 
 	case pubsub.Event[session.Session]:
+		if msg.Type == pubsub.DeletedEvent {
+			if m.session != nil && m.session.ID == msg.Payload.ID {
+				if cmd := m.newSession(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			}
+			break
+		}
 		if m.session != nil && msg.Payload.ID == m.session.ID {
 			prevHasInProgress := hasInProgressTodo(m.session.Todos)
 			m.session = &msg.Payload
@@ -486,7 +520,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.handleCompactMode(m.width, m.height)
 		m.updateLayoutAndSize()
 		// XXX: We need to store cell dimensions for image rendering.
 		m.imgCaps.Columns, m.imgCaps.Rows = msg.Width, msg.Height
@@ -1081,7 +1114,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait before starting a new session..."))
 			break
 		}
-		m.newSession()
+		if cmd := m.newSession(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSummarize:
 		if m.isAgentBusy() {
@@ -1110,11 +1145,6 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		cmds = append(cmds, m.toggleCompactMode())
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleThinking:
-		if m.isAgentBusy() {
-			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait..."))
-			break
-		}
-
 		cmds = append(cmds, func() tea.Msg {
 			cfg := m.com.Config()
 			if cfg == nil {
@@ -1205,9 +1235,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.ModelsID)
 
 		if isOnboarding {
-			m.state = uiLanding
-			m.focus = uiFocusEditor
-
+			m.setState(uiLanding, uiFocusEditor)
 			m.com.Config().SetupAgents()
 			if err := m.com.App.InitCoderAgent(context.TODO()); err != nil {
 				cmds = append(cmds, uiutil.ReportError(err))
@@ -1487,8 +1515,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 
 				m.randomizePlaceholders()
+				m.historyReset()
 
-				return m.sendMessage(value, attachments...)
+				return tea.Batch(m.sendMessage(value, attachments...), m.loadPromptHistory())
 			case key.Matches(msg, m.keyMap.Chat.NewSession):
 				if !m.hasSession() {
 					break
@@ -1497,10 +1526,12 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait before starting a new session..."))
 					break
 				}
-				m.newSession()
+				if cmd := m.newSession(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			case key.Matches(msg, m.keyMap.Tab):
 				if m.state != uiLanding {
-					m.focus = uiFocusMain
+					m.setState(m.state, uiFocusMain)
 					m.textarea.Blur()
 					m.chat.Focus()
 					m.chat.SetSelected(m.chat.Len() - 1)
@@ -1517,6 +1548,21 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				ta, cmd := m.textarea.Update(msg)
 				m.textarea = ta
 				cmds = append(cmds, cmd)
+			case key.Matches(msg, m.keyMap.Editor.HistoryPrev):
+				cmd := m.handleHistoryUp(msg)
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			case key.Matches(msg, m.keyMap.Editor.HistoryNext):
+				cmd := m.handleHistoryDown(msg)
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			case key.Matches(msg, m.keyMap.Editor.Escape):
+				cmd := m.handleHistoryEscape(msg)
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			default:
 				if handleGlobalKeys(msg) {
 					// Handle global keys first before passing to textarea.
@@ -1549,6 +1595,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				ta, cmd := m.textarea.Update(msg)
 				m.textarea = ta
 				cmds = append(cmds, cmd)
+
+				// Any text modification becomes the current draft.
+				m.updateHistoryDraft(curValue)
 
 				// After updating textarea, check if we need to filter completions.
 				// Skip filtering on the initial @ keystroke since items are loading async.
@@ -1589,7 +1638,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					break
 				}
 				m.focus = uiFocusEditor
-				m.newSession()
+				if cmd := m.newSession(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			case key.Matches(msg, m.keyMap.Chat.Expand):
 				m.chat.ToggleExpandedSelectedItem()
 			case key.Matches(msg, m.keyMap.Chat.Up):
@@ -2047,29 +2098,26 @@ func (m *UI) toggleCompactMode() tea.Cmd {
 		return uiutil.ReportError(err)
 	}
 
-	m.handleCompactMode(m.width, m.height)
 	m.updateLayoutAndSize()
 
 	return nil
 }
 
-// handleCompactMode updates the UI state based on window size and compact mode setting.
-func (m *UI) handleCompactMode(newWidth, newHeight int) {
+// updateLayoutAndSize updates the layout and sizes of UI components.
+func (m *UI) updateLayoutAndSize() {
+	// Determine if we should be in compact mode
 	if m.state == uiChat {
 		if m.forceCompactMode {
 			m.isCompact = true
 			return
 		}
-		if newWidth < compactModeWidthBreakpoint || newHeight < compactModeHeightBreakpoint {
+		if m.width < compactModeWidthBreakpoint || m.height < compactModeHeightBreakpoint {
 			m.isCompact = true
 		} else {
 			m.isCompact = false
 		}
 	}
-}
 
-// updateLayoutAndSize updates the layout and sizes of UI components.
-func (m *UI) updateLayoutAndSize() {
 	m.layout = m.generateLayout(m.width, m.height)
 	m.updateSize()
 }
@@ -2114,7 +2162,7 @@ func (m *UI) generateLayout(w, h int) layout {
 	const landingHeaderHeight = 4
 
 	var helpKeyMap help.KeyMap = m
-	if m.status.ShowingAll() {
+	if m.status != nil && m.status.ShowingAll() {
 		for _, row := range helpKeyMap.FullHelp() {
 			helpHeight = max(helpHeight, len(row))
 		}
@@ -2240,7 +2288,9 @@ func (m *UI) generateLayout(w, h int) layout {
 
 	if !layout.editor.Empty() {
 		// Add editor margins 1 top and bottom
-		layout.editor.Min.Y += 1
+		if len(m.attachments.List()) == 0 {
+			layout.editor.Min.Y += 1
+		}
 		layout.editor.Max.Y -= 1
 	}
 
@@ -2518,7 +2568,6 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 		if err != nil {
 			return uiutil.ReportError(err)
 		}
-		m.state = uiChat
 		if m.forceCompactMode {
 			m.isCompact = true
 		}
@@ -2526,6 +2575,7 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 			m.session = &newSession
 			cmds = append(cmds, m.loadSession(newSession.ID))
 		}
+		m.setState(uiChat, m.focus)
 	}
 
 	// Capture session ID to avoid race with main goroutine updating m.session.
@@ -2766,21 +2816,23 @@ func (m *UI) handlePermissionNotification(notification permission.PermissionNoti
 
 // newSession clears the current session state and prepares for a new session.
 // The actual session creation happens when the user sends their first message.
-func (m *UI) newSession() {
+// Returns a command to reload prompt history.
+func (m *UI) newSession() tea.Cmd {
 	if !m.hasSession() {
-		return
+		return nil
 	}
 
 	m.session = nil
 	m.sessionFiles = nil
-	m.state = uiLanding
-	m.focus = uiFocusEditor
+	m.setState(uiLanding, uiFocusEditor)
 	m.textarea.Focus()
 	m.chat.Blur()
 	m.chat.ClearMessages()
 	m.pillsExpanded = false
 	m.promptQueue = 0
 	m.pillsView = ""
+	m.historyReset()
+	return m.loadPromptHistory()
 }
 
 // handlePasteMsg handles a paste message.
@@ -2811,29 +2863,45 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 		}
 	}
 
-	var cmd tea.Cmd
-	path := strings.ReplaceAll(msg.Content, "\\ ", " ")
-	// Try to get an image.
-	path, err := filepath.Abs(strings.TrimSpace(path))
-	if err != nil {
-		m.textarea, cmd = m.textarea.Update(msg)
-		return cmd
-	}
+	// Attempt to parse pasted content as file paths. If possible to parse,
+	// all files exist and are valid, add as attachments.
+	// Otherwise, paste as text.
+	paths := fsext.PasteStringToPaths(msg.Content)
+	allExistsAndValid := func() bool {
+		for _, path := range paths {
+			if _, err := os.Stat(path); os.IsNotExist(err) {
+				return false
+			}
 
-	// Check if file has an allowed image extension.
-	isAllowedType := false
-	lowerPath := strings.ToLower(path)
-	for _, ext := range common.AllowedImageTypes {
-		if strings.HasSuffix(lowerPath, ext) {
-			isAllowedType = true
-			break
+			lowerPath := strings.ToLower(path)
+			isValid := false
+			for _, ext := range common.AllowedImageTypes {
+				if strings.HasSuffix(lowerPath, ext) {
+					isValid = true
+					break
+				}
+			}
+			if !isValid {
+				return false
+			}
 		}
+		return true
 	}
-	if !isAllowedType {
+	if !allExistsAndValid() {
+		var cmd tea.Cmd
 		m.textarea, cmd = m.textarea.Update(msg)
 		return cmd
 	}
 
+	var cmds []tea.Cmd
+	for _, path := range paths {
+		cmds = append(cmds, m.handleFilePathPaste(path))
+	}
+	return tea.Batch(cmds...)
+}
+
+// handleFilePathPaste handles a pasted file path.
+func (m *UI) handleFilePathPaste(path string) tea.Cmd {
 	return func() tea.Msg {
 		fileInfo, err := os.Stat(path)
 		if err != nil {

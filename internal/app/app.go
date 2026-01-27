@@ -73,7 +73,7 @@ type App struct {
 // New initializes a new application instance.
 func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	q := db.New(conn)
-	sessions := session.NewService(q)
+	sessions := session.NewService(q, conn)
 	messages := message.NewService(q)
 	files := history.NewService(q, conn)
 	skipPermissionsRequests := cfg.Permissions != nil && cfg.Permissions.SkipRequests
@@ -101,7 +101,7 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	app.setupEvents()
 
 	// Initialize LSP clients in the background.
-	app.initLSPClients(ctx)
+	go app.initLSPClients(ctx)
 
 	// Check for updates in the background.
 	go app.checkForUpdates(ctx)

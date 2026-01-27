@@ -199,7 +199,7 @@ type MCPConfig struct {
 
 type LSPConfig struct {
 	Disabled    bool              `json:"disabled,omitempty" jsonschema:"description=Whether this LSP server is disabled,default=false"`
-	Command     string            `json:"command,omitempty" jsonschema:"required,description=Command to execute for the LSP server,example=gopls"`
+	Command     string            `json:"command,omitempty" jsonschema:"description=Command to execute for the LSP server,example=gopls"`
 	Args        []string          `json:"args,omitempty" jsonschema:"description=Arguments to pass to the LSP server command"`
 	Env         map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set to the LSP server command"`
 	FileTypes   []string          `json:"filetypes,omitempty" jsonschema:"description=File types this LSP server handles,example=go,example=mod,example=rs,example=c,example=js,example=ts"`
@@ -269,6 +269,7 @@ type Options struct {
 	Attribution               *Attribution `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
 	DisableMetrics            bool         `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
 	InitializeAs              string       `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
+	AutoLSP                   *bool        `json:"auto_lsp,omitempty" jsonschema:"description=Automatically setup LSPs based on root markers"`
 }
 
 type MCPs map[string]MCPConfig
@@ -358,7 +359,7 @@ type Agent struct {
 }
 
 type Tools struct {
-	Ls ToolLs `json:"ls,omitzero"`
+	Ls ToolLs `json:"ls,omitempty"`
 }
 
 type ToolLs struct {
@@ -391,7 +392,7 @@ type Config struct {
 
 	Permissions *Permissions `json:"permissions,omitempty" jsonschema:"description=Permission settings for tool usage"`
 
-	Tools Tools `json:"tools,omitzero" jsonschema:"description=Tool configurations"`
+	Tools Tools `json:"tools,omitempty" jsonschema:"description=Tool configurations"`
 
 	Agents map[string]Agent `json:"-"`
 

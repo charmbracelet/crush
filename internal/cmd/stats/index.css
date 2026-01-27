@@ -1,0 +1,275 @@
+:root {
+  /* Dark mode colors - charmtone dark palette */
+  --bg: #201f26;
+  --bg-secondary: #2d2c35;
+  --text: #fffaf1;
+  --text-muted: #858392;
+
+  /* Charmtone colors (global - same in both light and dark modes) */
+  --charple: #6b50ff;
+  --cherry: #ff388b;
+  --julep: #00ffb2;
+  --urchin: #c337e0;
+  --butter: #fffaf1;
+  --squid: #858392;
+  --pepper: #201f26;
+  --iron: #4d4c57;
+  --tuna: #ff6daa;
+  --uni: #ff937d;
+  --coral: #ff577d;
+  --violet: #c259ff;
+  --malibu: #00a4ff;
+  --hazy: #8b75ff;
+}
+
+/* Light mode colors - charmtone light palette */
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f0f0f0;
+    --bg-secondary: #fbfbfb;
+    --text: #201f26;
+    --text-muted: #4d4c57;
+  }
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu,
+    sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  padding: 2rem 1rem;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.header-wrapper {
+  max-width: 1200px;
+  margin: 0 auto 2rem;
+}
+
+.header-wrapper a {
+  display: block;
+  text-decoration: none;
+}
+
+.header-content {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.header-svg {
+  flex-grow: 1;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  height: 70px;
+  display: flex;
+  align-items: center;
+}
+
+.header-svg svg {
+  height: 70px;
+  width: auto;
+  min-width: 1300px;
+  display: block;
+  pointer-events: none;
+}
+
+.heartbit-svg {
+  flex-shrink: 0;
+  width: 70px;
+  flex-basis: 70px;
+  margin-left: 1rem;
+}
+
+.heartbit-svg svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.header-info {
+  margin-bottom: 2rem;
+  font-size: 0.875rem;
+  color: var(--hazy);
+  font-family: "JetBrains Mono", "SF Mono", Consolas, monospace;
+}
+
+.stats-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 2rem;
+  width: 100%;
+}
+
+.stat-card {
+  background: var(--bg-secondary);
+  border-radius: 12px;
+  padding: 1.5rem;
+  flex: 1 1 150px;
+  max-width: calc((100% - 5rem) / 6);
+}
+
+@media (prefers-color-scheme: light) {
+  .stat-card {
+    background: var(--butter);
+  }
+}
+
+@media (max-width: 1024px) {
+  .stat-card {
+    max-width: calc((100% - 2rem) / 3);
+  }
+}
+
+@media (max-width: 600px) {
+  .stat-card {
+    max-width: calc((100% - 1rem) / 2);
+  }
+}
+
+.stat-card h3 {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
+}
+
+.stat-card .value {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--butter);
+  white-space: nowrap;
+}
+
+@media (prefers-color-scheme: light) {
+  .stat-card .value {
+    color: var(--pepper);
+  }
+}
+
+.charts-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+  width: 100%;
+}
+
+.chart-card {
+  background: var(--bg-secondary);
+  border-radius: 12px;
+  padding: 1.5rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+@media (prefers-color-scheme: light) {
+  .chart-card {
+    background: var(--butter);
+  }
+}
+
+.chart-card.full-width {
+  width: 100%;
+}
+
+.chart-row {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.5rem;
+  width: 100%;
+}
+
+.chart-row .chart-card {
+  width: 100%;
+}
+
+@media (max-width: 1024px) {
+  .chart-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.chart-card h2 {
+  font-size: 1.25rem;
+  margin-bottom: 1rem;
+  color: var(--text);
+}
+
+.chart-container {
+  position: relative;
+  height: 300px;
+}
+
+.chart-container.tall {
+  height: 400px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+th {
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 0.875rem;
+}
+
+td {
+  font-family: "JetBrains Mono", "SF Mono", Consolas, monospace;
+}
+
+.model-tag {
+  background: var(--bg);
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.875rem;
+}
+
+.footer-container {
+  max-width: 1200px;
+  margin: 2rem auto 0;
+}
+
+.footer-container svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* Override charm brand colors in footer */
+.footer-container .st2 {
+  fill: #fffaf1 !important;
+}
+
+@media (prefers-color-scheme: light) {
+
+  /* Override charm brand colors in footer */
+  .footer-container .st2 {
+    fill: #644ced !important;
+  }
+}

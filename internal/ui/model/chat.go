@@ -66,6 +66,10 @@ func (m *Chat) Draw(scr uv.Screen, area uv.Rectangle) {
 // SetSize sets the size of the chat view port.
 func (m *Chat) SetSize(width, height int) {
 	m.list.SetSize(width, height)
+	// Anchor to bottom if we were at the bottom.
+	if m.list.AtBottom() {
+		m.list.ScrollToBottom()
+	}
 }
 
 // Len returns the number of items in the chat list.

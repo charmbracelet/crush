@@ -70,6 +70,7 @@ type Permissions struct {
 	// Diff view state.
 	diffSplitMode        *bool // nil means use default based on width
 	defaultDiffSplitMode bool  // default split mode based on width
+	diffXOffset          int   // horizontal scroll offset for diff view
 	unifiedDiffContent   string
 	splitDiffContent     string
 
@@ -259,12 +260,31 @@ func (p *Permissions) HandleMsg(msg tea.Msg) Action {
 		case key.Matches(msg, p.keyMap.ScrollUp):
 			p.viewport, _ = p.viewport.Update(msg)
 		case key.Matches(msg, p.keyMap.ScrollLeft):
-			p.viewport, _ = p.viewport.Update(msg)
+			if p.hasDiffView() {
+				p.scrollLeft()
+			} else {
+				p.viewport, _ = p.viewport.Update(msg)
+			}
 		case key.Matches(msg, p.keyMap.ScrollRight):
-			p.viewport, _ = p.viewport.Update(msg)
+			if p.hasDiffView() {
+				p.scrollRight()
+			} else {
+				p.viewport, _ = p.viewport.Update(msg)
+			}
 		}
 	case tea.MouseWheelMsg:
-		p.viewport, _ = p.viewport.Update(msg)
+		if p.hasDiffView() {
+			switch msg.Button {
+			case tea.MouseWheelLeft:
+				p.scrollLeft()
+			case tea.MouseWheelRight:
+				p.scrollRight()
+			default:
+				p.viewport, _ = p.viewport.Update(msg)
+			}
+		} else {
+			p.viewport, _ = p.viewport.Update(msg)
+		}
 	default:
 		// Pass unhandled keys to viewport for non-diff content scrolling.
 		if !p.hasDiffView() {
@@ -307,6 +327,18 @@ func (p *Permissions) isSplitMode() bool {
 		return *p.diffSplitMode
 	}
 	return p.defaultDiffSplitMode
+}
+
+const horizontalScrollStep = 5
+
+func (p *Permissions) scrollLeft() {
+	p.diffXOffset = max(0, p.diffXOffset-horizontalScrollStep)
+	p.viewportDirty = true
+}
+
+func (p *Permissions) scrollRight() {
+	p.diffXOffset += horizontalScrollStep
+	p.viewportDirty = true
 }
 
 // Draw implements [Dialog].
@@ -410,7 +442,7 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 func (p *Permissions) renderHeader(contentWidth int) string {
 	t := p.com.Styles
 
-	title := common.DialogTitle(t, "Permission Required", contentWidth-t.Dialog.Title.GetHorizontalFrameSize())
+	title := common.DialogTitle(t, "Permission Required", contentWidth-t.Dialog.Title.GetHorizontalFrameSize(), t.Primary, t.Secondary)
 	title = t.Dialog.Title.Render(title)
 
 	// Tool info.
@@ -558,10 +590,7 @@ func (p *Permissions) renderDiff(filePath, oldContent, newContent string, conten
 	formatter := common.DiffFormatter(p.com.Styles).
 		Before(fsext.PrettyPath(filePath), oldContent).
 		After(fsext.PrettyPath(filePath), newContent).
-		// TODO: Allow horizontal scrolling instead of cropping. However, the
-		// diffview currently would only background color the width of the
-		// content. If the viewport is wider than the content, the rest of the
-		// line would not be colored properly.
+		XOffset(p.diffXOffset).
 		Width(contentWidth)
 
 	var result string

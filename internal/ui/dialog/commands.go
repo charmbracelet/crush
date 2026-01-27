@@ -387,7 +387,7 @@ func (c *Commands) setCommandItems(commandType CommandType) {
 func (c *Commands) defaultCommands() []*CommandItem {
 	commands := []*CommandItem{
 		NewCommandItem(c.com.Styles, "new_session", "New Session", "ctrl+n", ActionNewSession{}),
-		NewCommandItem(c.com.Styles, "switch_session", "Switch Session", "ctrl+s", ActionOpenDialog{SessionsID}),
+		NewCommandItem(c.com.Styles, "switch_session", "Sessions", "ctrl+s", ActionOpenDialog{SessionsID}),
 		NewCommandItem(c.com.Styles, "switch_model", "Switch Model", "ctrl+l", ActionOpenDialog{ModelsID}),
 	}
 
@@ -422,7 +422,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		}
 	}
 	// Only show toggle compact mode command if window width is larger than compact breakpoint (120)
-	if c.windowWidth > sidebarCompactModeBreakpoint && c.sessionID != "" {
+	if c.windowWidth >= sidebarCompactModeBreakpoint && c.sessionID != "" {
 		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_sidebar", "Toggle Sidebar", "", ActionToggleCompactMode{}))
 	}
 	if c.sessionID != "" {

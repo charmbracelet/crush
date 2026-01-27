@@ -365,7 +365,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		Sessions:             c.sessions,
 		Messages:             c.messages,
 		Tools:                nil,
-		ModelSemaphore:      c.modelSemaphore,
+		ModelSemaphore:       c.modelSemaphore,
 	})
 
 	c.readyWg.Go(func() error {

@@ -171,6 +171,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	systemPrompt := a.systemPrompt.Get()
 	promptPrefix := a.systemPromptPrefix.Get()
 
+	// Acquire model semaphore token
+	if a.modelSemaphore != nil {
+		largeModelCfg := largeModel.ModelCfg
+		release, err := a.modelSemaphore.Acquire(ctx, largeModelCfg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to acquire model semaphore: %w", err)
+		}
+		defer release()
+	}
+
 	if len(agentTools) > 0 {
 		// Add Anthropic caching to the last tool.
 		agentTools[len(agentTools)-1].SetProviderOptions(a.getCacheControlOptions())
@@ -565,6 +575,16 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return nil
 	}
 
+	// Acquire model semaphore token
+	if a.modelSemaphore != nil {
+		largeModelCfg := largeModel.ModelCfg
+		release, err := a.modelSemaphore.Acquire(ctx, largeModelCfg)
+		if err != nil {
+			return fmt.Errorf("failed to acquire model semaphore: %w", err)
+		}
+		defer release()
+	}
+
 	aiMsgs, _ := a.preparePrompt(msgs)
 
 	genCtx, cancel := context.WithCancel(ctx)
@@ -749,16 +769,17 @@ func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.S
 
 // tryGenerateTitleWithModel attempts to generate a title using the specified model.
 // It handles semaphore acquisition and release automatically via defer.
-func (a *sessionAgent) tryGenerateTitleWithModel(ctx context.Context, model Model, newAgent func(fantasy.LanguageModel, []byte, int64) fantasy.Agent, streamCall fantasy.AgentStreamCall, maxOutputTokens int64) (*fantasy.AgentResult, error) {
+func (a *sessionAgent) tryGenerateTitleWithModel(ctx context.Context, model Model, newAgent func(fantasy.LanguageModel, []byte, int64) fantasy.Agent, streamCall fantasy.AgentStreamCall, maxOutputTokens int64) (*fantasy.AgentResult, Model, error) {
 	if a.modelSemaphore != nil {
 		release, err := a.modelSemaphore.Acquire(ctx, model.ModelCfg)
 		if err != nil {
-			return nil, err
+			return nil, model, err
 		}
 		defer release()
 	}
 	agent := newAgent(model.Model, titlePrompt, maxOutputTokens)
-	return agent.Stream(ctx, streamCall)
+	resp, err := agent.Stream(ctx, streamCall)
+	return resp, model, err
 }
 
 // generateTitle generates a session titled based on the initial prompt.
@@ -801,17 +822,14 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	var resp *fantasy.AgentResult
 	var err error
 
-	resp, err = a.tryGenerateTitleWithModel(ctx, smallModel, newAgent, streamCall, maxOutputTokens)
-	modelUsed = smallModel
+	resp, modelUsed, err = a.tryGenerateTitleWithModel(ctx, smallModel, newAgent, streamCall, maxOutputTokens)
 
 	if err != nil {
 		// Small model failed, try large model.
 		slog.Error("error generating title with small model; trying big model", "err", err)
 
 		// Small semaphore already released by wrapper, now try large.
-		resp, err = a.tryGenerateTitleWithModel(ctx, largeModel, newAgent, streamCall, maxOutputTokens)
-		modelUsed = largeModel
-
+		resp, modelUsed, err = a.tryGenerateTitleWithModel(ctx, largeModel, newAgent, streamCall, maxOutputTokens)
 		if err != nil {
 			// Both failed - large semaphore already released by wrapper.
 			slog.Error("error generating title with large model", "err", err)

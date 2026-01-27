@@ -295,3 +295,229 @@ func TestDefaultDiscoveryPaths(t *testing.T) {
 	require.Contains(t, paths, "/project/.crush/agents")
 	require.Contains(t, paths, "/project/.claude/agents")
 }
+
+func TestParsePermissionControls(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		content  string
+		validate func(t *testing.T, agent *Subagent)
+	}{
+		{
+			name: "yolo_mode enables auto-approval",
+			content: `---
+name: yolo-agent
+description: Auto-approves everything
+yolo_mode: true
+---
+
+YOLO prompt.
+`,
+			validate: func(t *testing.T, agent *Subagent) {
+				require.True(t, agent.YoloMode)
+				require.Empty(t, agent.AllowedTools)
+			},
+		},
+		{
+			name: "allowed_tools for selective auto-approval",
+			content: `---
+name: selective-agent
+description: Only some tools auto-approved
+allowed_tools:
+  - view
+  - grep
+  - glob
+---
+
+Selective prompt.
+`,
+			validate: func(t *testing.T, agent *Subagent) {
+				require.False(t, agent.YoloMode)
+				require.Equal(t, []string{"view", "grep", "glob"}, agent.AllowedTools)
+			},
+		},
+		{
+			name: "allowed_tools with action specifier",
+			content: `---
+name: action-specific-agent
+description: Action-specific permissions
+allowed_tools:
+  - bash:execute
+  - edit:write
+---
+
+Action prompt.
+`,
+			validate: func(t *testing.T, agent *Subagent) {
+				require.Contains(t, agent.AllowedTools, "bash:execute")
+				require.Contains(t, agent.AllowedTools, "edit:write")
+			},
+		},
+		{
+			name: "tools restriction limits available tools",
+			content: `---
+name: restricted-agent
+description: Limited tools
+tools:
+  - View
+  - Grep
+  - LS
+---
+
+Restricted prompt.
+`,
+			validate: func(t *testing.T, agent *Subagent) {
+				require.Equal(t, []string{"View", "Grep", "LS"}, agent.Tools)
+			},
+		},
+		{
+			name: "model inheritance",
+			content: `---
+name: inherit-model-agent
+description: Uses parent model
+model: inherit
+---
+
+Inherit prompt.
+`,
+			validate: func(t *testing.T, agent *Subagent) {
+				require.Equal(t, "inherit", agent.Model)
+			},
+		},
+		{
+			name: "explicit model selection",
+			content: `---
+name: small-model-agent
+description: Uses small model
+model: small
+---
+
+Small model prompt.
+`,
+			validate: func(t *testing.T, agent *Subagent) {
+				require.Equal(t, "small", agent.Model)
+			},
+		},
+		{
+			name: "max_steps limits iterations",
+			content: `---
+name: limited-steps-agent
+description: Limited iterations
+max_steps: 5
+---
+
+Limited prompt.
+`,
+			validate: func(t *testing.T, agent *Subagent) {
+				require.Equal(t, 5, agent.MaxSteps)
+			},
+		},
+		{
+			name: "combined permission controls",
+			content: `---
+name: combined-agent
+description: Multiple permission features
+tools:
+  - View
+  - Grep
+  - Bash
+allowed_tools:
+  - view
+  - grep
+max_steps: 10
+---
+
+Combined prompt with restricted tools but some auto-approved.
+`,
+			validate: func(t *testing.T, agent *Subagent) {
+				require.Equal(t, []string{"View", "Grep", "Bash"}, agent.Tools)
+				require.Equal(t, []string{"view", "grep"}, agent.AllowedTools)
+				require.Equal(t, 10, agent.MaxSteps)
+				require.False(t, agent.YoloMode)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			agent, err := ParseContent([]byte(tt.content), "test.md")
+			require.NoError(t, err)
+			require.NotNil(t, agent)
+			tt.validate(t, agent)
+		})
+	}
+}
+
+func TestParseComplexPrompts(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		content  string
+		validate func(t *testing.T, agent *Subagent)
+	}{
+		{
+			name: "multiline system prompt",
+			content: `---
+name: multiline-agent
+description: Has multiline prompt
+---
+
+You are a specialized agent.
+
+## Guidelines
+
+1. Follow these rules
+2. Do this correctly
+
+## Examples
+
+Here is an example of good output.
+`,
+			validate: func(t *testing.T, agent *Subagent) {
+				require.Contains(t, agent.Prompt, "You are a specialized agent.")
+				require.Contains(t, agent.Prompt, "## Guidelines")
+				require.Contains(t, agent.Prompt, "## Examples")
+			},
+		},
+		{
+			name:    "prompt with code blocks",
+			content: "---\nname: code-agent\ndescription: Has code in prompt\n---\n\nWhen writing code, follow this pattern:\n\n```go\nfunc example() {\n    // Do something\n}\n```\n",
+			validate: func(t *testing.T, agent *Subagent) {
+				require.Contains(t, agent.Prompt, "```go")
+				require.Contains(t, agent.Prompt, "func example()")
+			},
+		},
+		{
+			name: "prompt with yaml-like content",
+			content: `---
+name: yaml-content-agent
+description: Has yaml in prompt
+---
+
+Example configuration:
+key: value
+nested:
+  foo: bar
+`,
+			validate: func(t *testing.T, agent *Subagent) {
+				require.Contains(t, agent.Prompt, "key: value")
+				require.Contains(t, agent.Prompt, "nested:")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			agent, err := ParseContent([]byte(tt.content), "test.md")
+			require.NoError(t, err)
+			require.NotNil(t, agent)
+			tt.validate(t, agent)
+		})
+	}
+}

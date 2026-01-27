@@ -13,3 +13,4 @@ Launch a new agent that has access to the following tools: GlobTool, GrepTool, L
 4. The agent's outputs should generally be trusted
 5. IMPORTANT: The agent can not use Bash, Replace, Edit, so can not modify files. If you want to use these tools, use them directly instead of going through the agent.
 </usage_notes>
+

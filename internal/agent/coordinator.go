@@ -851,17 +851,17 @@ func (c *coordinator) RecoverSession(ctx context.Context, sessionID string) erro
 	}
 
 	for _, msg := range msgs {
-		if msg.IsFinished() || msg.Role == message.Assistant {
+		if msg.IsFinished() {
 			continue
 		}
 
+		msg.FinishThinking()
 		for _, tc := range msg.ToolCalls() {
 			if !tc.Finished {
 				msg.FinishToolCall(tc.ID)
 			}
 		}
 
-		msg.FinishThinking()
 		msg.AddFinish(message.FinishReasonError, "Session interrupted", "The session was previously interrupted")
 		if updateErr := c.messages.Update(ctx, msg); updateErr != nil {
 			slog.Error("Failed to recover message", "message_id", msg.ID, "error", updateErr)

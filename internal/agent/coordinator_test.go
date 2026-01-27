@@ -93,7 +93,7 @@ func TestRecoverSession(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, recoveredMsg.IsFinished())
 		require.Equal(t, message.FinishReasonError, recoveredMsg.FinishReason())
-		require.Contains(t, recoveredMsg.FinishPart().Message, "Summarization interrupted")
+		require.Contains(t, recoveredMsg.FinishPart().Message, "Session interrupted")
 	})
 
 	t.Run("incomplete assistant message with tool calls", func(t *testing.T) {
@@ -136,7 +136,7 @@ func TestRecoverSession(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, recoveredMsg.IsFinished())
 		require.Equal(t, message.FinishReasonError, recoveredMsg.FinishReason())
-		require.Contains(t, recoveredMsg.FinishPart().Message, "Response interrupted")
+		require.Contains(t, recoveredMsg.FinishPart().Message, "Session interrupted")
 
 		// Verify the tool call was marked as finished
 		toolCalls := recoveredMsg.ToolCalls()
@@ -175,7 +175,7 @@ func TestRecoverSession(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, recoveredMsg.IsFinished())
 		require.Equal(t, message.FinishReasonError, recoveredMsg.FinishReason())
-		require.Contains(t, recoveredMsg.FinishPart().Message, "Response interrupted")
+		require.Contains(t, recoveredMsg.FinishPart().Message, "Session interrupted")
 		require.Equal(t, "This is a partial response...", recoveredMsg.Content().Text)
 	})
 

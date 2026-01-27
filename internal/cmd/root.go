@@ -98,7 +98,6 @@ crush -y
 			slog.Info("New UI in control!")
 			com := common.DefaultCommon(app)
 			ui := ui.New(com)
-			ui.QueryCapabilities = shouldQueryCapabilities(env)
 			model = ui
 		} else {
 			ui := tui.New(app)
@@ -303,6 +302,7 @@ func createDotCrushDir(dir string) error {
 	return nil
 }
 
+// TODO: Remove me after dropping the old TUI.
 func shouldQueryCapabilities(env uv.Environ) bool {
 	const osVendorTypeApple = "Apple"
 	termType := env.Getenv("TERM")

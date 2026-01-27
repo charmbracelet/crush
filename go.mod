@@ -31,7 +31,7 @@ require (
 	github.com/charmbracelet/x/exp/ordered v0.1.0
 	github.com/charmbracelet/x/exp/slice v0.0.0-20251201173703-9f73bfd934ff
 	github.com/charmbracelet/x/exp/strings v0.1.0
-	github.com/charmbracelet/x/powernap v0.0.0-20260113142046-c1fa3de7983b
+	github.com/charmbracelet/x/powernap v0.0.0-20260127155452-b72a9a918687
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/denisbrodbeck/machineid v1.0.1
 	github.com/disintegration/imageorient v0.0.0-20180920195336-8147d86e83ec

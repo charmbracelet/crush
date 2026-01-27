@@ -213,7 +213,6 @@ func (l *List) ScrollBy(lines int) {
 			l.offsetIdx = lastOffsetIdx
 			l.offsetLine = lastOffsetLine
 		}
-
 	} else if lines < 0 {
 		// Scroll up
 		l.offsetLine += lines // lines is negative

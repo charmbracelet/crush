@@ -160,6 +160,13 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				return fantasy.ToolResponse{}, errors.New("small model provider not configured")
 			}
 
+			// Acquire model semaphore token (small model is used for fetch)
+			release, err := c.modelSemaphore.Acquire(ctx, small.ModelCfg)
+			if err != nil {
+				return fantasy.ToolResponse{}, fmt.Errorf("failed to acquire model semaphore: %w", err)
+			}
+			defer release()
+
 			webFetchTool := tools.NewWebFetchTool(tmpDir, client)
 			webSearchTool := tools.NewWebSearchTool(client)
 			fetchTools := []fantasy.AgentTool{

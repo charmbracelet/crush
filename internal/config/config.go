@@ -92,6 +92,18 @@ type SelectedModel struct {
 
 	// Override provider specific options.
 	ProviderOptions map[string]any `json:"provider_options,omitempty" jsonschema:"description=Additional provider-specific options for the model"`
+
+	// ConcurrencyLevel controls maximum number of concurrent requests
+	// for this model. 0 or missing means unlimited.
+	//
+	// Recommended values:
+	//   - 0 (or omit field): unlimited (default)
+	//   - 1-5: low to moderate concurrency
+	//   - 10-20: high concurrency (for powerful systems)
+	//
+	// Note: Setting too high may overwhelm rate limits or exhaust resources.
+	// Note: Negative values are invalid and will be treated as 0 (unlimited).
+	ConcurrencyLevel int64 `json:"concurrency_level,omitempty" jsonschema:"description=Maximum number of concurrent requests for this model (0 = unlimited),minimum=0,example=5"`
 }
 
 type ProviderConfig struct {

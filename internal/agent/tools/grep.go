@@ -185,7 +185,7 @@ func NewGrepTool(workingDir string) fantasy.AgentTool {
 func searchFiles(ctx context.Context, pattern, rootPath, include string, limit int) ([]grepMatch, bool, error) {
 	matches, err := searchWithRipgrep(ctx, pattern, rootPath, include)
 	if err != nil {
-		matches, err = searchFilesWithRegex(pattern, rootPath, include)
+		matches, err = searchFilesWithRegex(ctx, pattern, rootPath, include)
 		if err != nil {
 			return nil, false, err
 		}
@@ -272,7 +272,7 @@ type ripgrepMatch struct {
 	} `json:"data"`
 }
 
-func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error) {
+func searchFilesWithRegex(ctx context.Context, pattern, rootPath, include string) ([]grepMatch, error) {
 	matches := []grepMatch{}
 
 	// Use cached regex compilation
@@ -293,7 +293,18 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 	// Create walker with gitignore and crushignore support
 	walker := fsext.NewFastGlobWalker(rootPath)
 
+	const maxScannedFiles = 10000
+	var scannedFiles int
 	err = filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		scannedFiles++
+		if scannedFiles > maxScannedFiles {
+			return fmt.Errorf("search space too large (over %d files scanned). Use a more specific path", maxScannedFiles)
+		}
+
 		if err != nil {
 			return nil // Skip errors
 		}

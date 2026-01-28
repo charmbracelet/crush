@@ -263,8 +263,8 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 		return fantasy.NewTextErrorResponse("you must read the file before editing it. Use the View tool first"), nil
 	}
 
-	// Check if file was modified since last read
-	modTime := fileInfo.ModTime()
+	// Check if file was modified since last read.
+	modTime := fileInfo.ModTime().Truncate(time.Second)
 	if modTime.After(lastRead) {
 		return fantasy.NewTextErrorResponse(
 			fmt.Sprintf("file %s has been modified since it was last read (mod time: %s, last read: %s)",

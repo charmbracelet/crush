@@ -87,7 +87,6 @@ func NewViewTool(
 
 			// Request permission for files outside working directory, unless it's a skill file.
 			if isOutsideWorkDir && !isSkillFile {
-
 				granted, err := permissions.Request(ctx,
 					permission.CreatePermissionRequest{
 						SessionID:   sessionID,

@@ -76,7 +76,7 @@ func NewWriteTool(
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("Path is a directory, not a file: %s", filePath)), nil
 				}
 
-				modTime := fileInfo.ModTime()
+				modTime := fileInfo.ModTime().Truncate(time.Second)
 				lastRead := filetracker.LastReadTime(ctx, sessionID, filePath)
 				if modTime.After(lastRead) {
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("File %s has been modified since it was last read.\nLast modification: %s\nLast read: %s\n\nPlease read the file again before modifying it.",

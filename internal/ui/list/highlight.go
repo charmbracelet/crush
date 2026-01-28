@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/stringext"
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
@@ -53,6 +54,8 @@ func Highlight(content string, area image.Rectangle, startLine, startCol, endLin
 // HighlightBuffer highlights a region of text within the given content and
 // region, returning a [uv.ScreenBuffer].
 func HighlightBuffer(content string, area image.Rectangle, startLine, startCol, endLine, endCol int, highlighter Highlighter) *uv.ScreenBuffer {
+	content = stringext.NormalizeSpace(content)
+
 	if startLine < 0 || startCol < 0 {
 		return nil
 	}

@@ -1540,6 +1540,10 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if cmd != nil {
 					cmds = append(cmds, cmd)
 				}
+			case key.Matches(msg, m.keyMap.Editor.OpenCommands) && m.textarea.Value() == "":
+				if cmd := m.openCommandsDialog(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			default:
 				if handleGlobalKeys(msg) {
 					// Handle global keys first before passing to textarea.
@@ -1988,6 +1992,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 					k.Editor.Newline,
 					k.Editor.AddImage,
 					k.Editor.MentionFile,
+					k.Editor.OpenCommands,
 					k.Editor.OpenEditor,
 				},
 			)
@@ -2036,6 +2041,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 					k.Editor.Newline,
 					k.Editor.AddImage,
 					k.Editor.MentionFile,
+					k.Editor.OpenCommands,
 					k.Editor.OpenEditor,
 				},
 			)

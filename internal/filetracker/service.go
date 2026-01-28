@@ -1,8 +1,11 @@
+// Package filetracker provides functionality to track file reads in sessions.
 package filetracker
 
 import (
 	"context"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/db"
@@ -29,9 +32,14 @@ func NewService(q *db.Queries) Service {
 
 // RecordRead records when a file was read.
 func (s *service) RecordRead(ctx context.Context, sessionID, path string) {
+	relpath, err := s.relpath(path)
+	if err != nil {
+		slog.Error("Error recording file read", "error", err, "file", path)
+		return
+	}
 	if err := s.q.RecordFileRead(ctx, db.RecordFileReadParams{
 		SessionID: sessionID,
-		Path:      path,
+		Path:      relpath,
 	}); err != nil {
 		slog.Error("Error recording file read", "error", err, "file", path)
 	}
@@ -40,13 +48,30 @@ func (s *service) RecordRead(ctx context.Context, sessionID, path string) {
 // LastReadTime returns when a file was last read.
 // Returns zero time if never read.
 func (s *service) LastReadTime(ctx context.Context, sessionID, path string) time.Time {
+	relpath, err := s.relpath(path)
+	if err != nil {
+		slog.Error("Error getting last read time", "error", err, "file", path)
+		return time.Time{}
+	}
 	readFile, err := s.q.GetFileRead(ctx, db.GetFileReadParams{
 		SessionID: sessionID,
-		Path:      path,
+		Path:      relpath,
 	})
 	if err != nil {
 		return time.Time{}
 	}
 
 	return time.Unix(readFile.ReadAt, 0)
+}
+
+func (s *service) relpath(path string) (string, error) {
+	basepath, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	relpath, err := filepath.Rel(basepath, path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(relpath), nil
 }

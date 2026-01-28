@@ -8,15 +8,12 @@ import (
 )
 
 func TestError(t *testing.T) {
-	t.Parallel()
-
 	t.Run("returns early when client is nil", func(t *testing.T) {
 		// This test verifies that when the PostHog client is not initialized
 		// the Error function safely returns early without attempting to
 		// enqueue any events. This is important during initialization or when
 		// metrics are disabled, as we don't want the error reporting mechanism
 		// itself to cause panics.
-		t.Parallel()
 		originalClient := client
 		defer func() {
 			client = originalClient
@@ -29,7 +26,6 @@ func TestError(t *testing.T) {
 	t.Run("handles nil client without panicking", func(t *testing.T) {
 		// This test covers various edge cases where the error value might be
 		// nil, a string, or an error type.
-		t.Parallel()
 		originalClient := client
 		defer func() {
 			client = originalClient
@@ -49,7 +45,6 @@ func TestError(t *testing.T) {
 		//
 		// Even with these additional properties, the function should handle
 		// them gracefully without panicking.
-		t.Parallel()
 		originalClient := client
 		defer func() {
 			client = originalClient

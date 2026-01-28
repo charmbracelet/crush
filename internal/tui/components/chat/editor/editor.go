@@ -1,7 +1,6 @@
 package editor
 
 import (
-	"context"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -18,6 +17,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
@@ -213,7 +213,7 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			}
 			absPath, _ := filepath.Abs(item.Path)
 			// Skip attachment if file was already read and hasn't been modified.
-			lastRead := m.app.FileTracker.LastReadTime(context.Background(), m.session.ID, absPath)
+			lastRead := filetracker.LastReadTime(absPath)
 			if !lastRead.IsZero() {
 				if info, err := os.Stat(item.Path); err == nil && !info.ModTime().After(lastRead) {
 					return m, nil
@@ -224,7 +224,7 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				// if it fails, let the LLM handle it later.
 				return m, nil
 			}
-			m.app.FileTracker.RecordRead(context.Background(), m.session.ID, absPath)
+			filetracker.RecordRead(absPath)
 			m.attachments = append(m.attachments, message.Attachment{
 				FilePath: item.Path,
 				FileName: filepath.Base(item.Path),

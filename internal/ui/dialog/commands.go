@@ -27,8 +27,9 @@ type CommandType uint
 func (c CommandType) String() string { return []string{"System", "User", "MCP"}[c] }
 
 const (
-	sidebarCompactModeBreakpoint  = 120
-	defaultCommandsDialogMaxWidth = 70
+	sidebarCompactModeBreakpoint   = 120
+	defaultCommandsDialogMaxHeight = 20
+	defaultCommandsDialogMaxWidth  = 70
 )
 
 const (
@@ -240,7 +241,7 @@ func commandsRadioView(sty *styles.Styles, selected CommandType, hasUserCmds boo
 func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := c.com.Styles
 	width := max(0, min(defaultCommandsDialogMaxWidth, area.Dx()))
-	height := max(0, min(defaultDialogHeight, area.Dy()))
+	height := max(0, min(defaultCommandsDialogMaxHeight, area.Dy()))
 	if area.Dx() != c.windowWidth && c.selected == SystemCommands {
 		c.windowWidth = area.Dx()
 		// since some items in the list depend on width (e.g. toggle sidebar command),

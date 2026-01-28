@@ -13,5 +13,9 @@ func Headers() map[string]string {
 		"Editor-Version":         editorVersion,
 		"Editor-Plugin-Version":  editorPluginVersion,
 		"Copilot-Integration-Id": integrationID,
+
+		// TODO: need to conditionally enable this when the user is sending
+		// messages with images.
+		// "Copilot-Vision-Request": "true",
 	}
 }

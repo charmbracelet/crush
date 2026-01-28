@@ -1540,6 +1540,10 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if cmd != nil {
 					cmds = append(cmds, cmd)
 				}
+			case key.Matches(msg, m.keyMap.Editor.Commands) && m.textarea.Value() == "":
+				if cmd := m.openCommandsDialog(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			default:
 				if handleGlobalKeys(msg) {
 					// Handle global keys first before passing to textarea.
@@ -1863,7 +1867,7 @@ func (m *UI) ShortHelp() []key.Binding {
 	k := &m.keyMap
 	tab := k.Tab
 	commands := k.Commands
-	if m.focus == uiFocusEditor && m.textarea.LineCount() == 0 {
+	if m.focus == uiFocusEditor && m.textarea.Value() == "" {
 		commands.SetHelp("/ or ctrl+p", "commands")
 	}
 
@@ -1939,7 +1943,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 	hasAttachments := len(m.attachments.List()) > 0
 	hasSession := m.hasSession()
 	commands := k.Commands
-	if m.focus == uiFocusEditor && m.textarea.LineCount() == 0 {
+	if m.focus == uiFocusEditor && m.textarea.Value() == "" {
 		commands.SetHelp("/ or ctrl+p", "commands")
 	}
 

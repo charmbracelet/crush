@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/plugin"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/log"
@@ -407,6 +408,25 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 
 	if len(c.cfg.LSP) > 0 {
 		allTools = append(allTools, tools.NewDiagnosticsTool(c.lspClients), tools.NewReferencesTool(c.lspClients), tools.NewLSPRestartTool(c.lspClients))
+	}
+
+	// Add plugin tools.
+	pluginApp := plugin.NewApp(
+		plugin.WithWorkingDir(c.cfg.WorkingDir()),
+		plugin.WithPermissions(c.permissions),
+		plugin.WithExtensionConfig(c.cfg.Extensions),
+	)
+	for _, name := range plugin.RegisteredTools() {
+		factory, ok := plugin.GetToolFactory(name)
+		if !ok {
+			continue
+		}
+		tool, err := factory(ctx, pluginApp)
+		if err != nil {
+			slog.Error("failed to create plugin tool", "name", name, "error", err)
+			continue
+		}
+		allTools = append(allTools, tool)
 	}
 
 	var filteredTools []fantasy.AgentTool

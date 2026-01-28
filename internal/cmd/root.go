@@ -24,6 +24,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	ui "github.com/charmbracelet/crush/internal/ui/model"
 	"github.com/charmbracelet/crush/internal/version"
+	"github.com/charmbracelet/crush/plugin"
 	"github.com/charmbracelet/fang"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
@@ -42,6 +43,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Debug")
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
 	rootCmd.Flags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
+	rootCmd.Flags().Bool("list-plugins", false, "List registered plugins and exit")
 
 	rootCmd.AddCommand(
 		runCmd,
@@ -82,6 +84,11 @@ crush run "Explain the use of context in Go"
 crush -y
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Handle --list-plugins flag.
+		if listPlugins, _ := cmd.Flags().GetBool("list-plugins"); listPlugins {
+			return listRegisteredPlugins()
+		}
+
 		app, err := setupAppWithProgressBar(cmd)
 		if err != nil {
 			return err
@@ -315,4 +322,18 @@ func shouldQueryCapabilities(env uv.Environ) bool {
 		(!strings.Contains(termProg, osVendorTypeApple) && !okSSHTTY) ||
 		// Terminals that do support XTVERSION.
 		xstrings.ContainsAnyOf(termType, kittyTerminals...)
+}
+
+// listRegisteredPlugins prints all registered plugin tools and exits.
+func listRegisteredPlugins() error {
+	tools := plugin.RegisteredTools()
+	if len(tools) == 0 {
+		fmt.Println("No plugins registered")
+		return nil
+	}
+	fmt.Println("Registered plugin tools:")
+	for _, name := range tools {
+		fmt.Printf("  - %s\n", name)
+	}
+	return nil
 }

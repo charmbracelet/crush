@@ -18,6 +18,7 @@ import (
 	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/charmbracelet/crush/plugin"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/oauth/hyper"
@@ -382,6 +383,8 @@ type Config struct {
 
 	Tools Tools `json:"tools,omitempty" jsonschema:"description=Tool configurations"`
 
+	Extensions map[string]map[string]any `json:"extensions,omitempty" jsonschema:"description=Extension configurations"`
+
 	Agents map[string]Agent `json:"-"`
 
 	// Internal
@@ -737,7 +740,9 @@ func filterSlice(data []string, mask []string, include bool) []string {
 }
 
 func (c *Config) SetupAgents() {
-	allowedTools := resolveAllowedTools(allToolNames(), c.Options.DisabledTools)
+	// Include both built-in tools and registered plugin tools.
+	allTools := append(allToolNames(), plugin.RegisteredTools()...)
+	allowedTools := resolveAllowedTools(allTools, c.Options.DisabledTools)
 
 	agents := map[string]Agent{
 		AgentCoder: {

@@ -442,6 +442,16 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		commands = append(commands, NewCommandItem(c.com.Styles, "open_external_editor", "Open External Editor", "ctrl+o", ActionExternalEditor{}))
 	}
 
+	// Add Docker MCP command if available and not already enabled
+	if config.IsDockerMCPAvailable() && !cfg.IsDockerMCPEnabled() {
+		commands = append(commands, NewCommandItem(c.com.Styles, "enable_docker_mcp", "Enable Docker MCP", "", ActionEnableDockerMCP{}))
+	}
+
+	// Add disable Docker MCP command if it's currently enabled
+	if cfg.IsDockerMCPEnabled() {
+		commands = append(commands, NewCommandItem(c.com.Styles, "disable_docker_mcp", "Disable Docker MCP", "", ActionDisableDockerMCP{}))
+	}
+
 	return append(commands,
 		NewCommandItem(c.com.Styles, "toggle_yolo", "Toggle Yolo Mode", "", ActionToggleYoloMode{}),
 		NewCommandItem(c.com.Styles, "toggle_help", "Toggle Help", "ctrl+g", ActionToggleHelp{}),

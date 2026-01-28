@@ -123,13 +123,42 @@ func (d *DockerMCPToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 		return joinToolParts(header, d.renderMCPServers(sty, opts, cappedWidth))
 	}
 
-	if !opts.HasResult() || opts.Result.Content == "" {
+	if !opts.HasResult() {
 		return header
 	}
 
 	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
-	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
-	return joinToolParts(header, body)
+	var parts []string
+
+	// Handle text content.
+	if opts.Result.Content != "" {
+		var body string
+		var result json.RawMessage
+		if err := json.Unmarshal([]byte(opts.Result.Content), &result); err == nil {
+			prettyResult, err := json.MarshalIndent(result, "", "  ")
+			if err == nil {
+				body = sty.Tool.Body.Render(toolOutputCodeContent(sty, "result.json", string(prettyResult), 0, bodyWidth, opts.ExpandedContent))
+			} else {
+				body = sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
+			}
+		} else if looksLikeMarkdown(opts.Result.Content) {
+			body = sty.Tool.Body.Render(toolOutputCodeContent(sty, "result.md", opts.Result.Content, 0, bodyWidth, opts.ExpandedContent))
+		} else {
+			body = sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
+		}
+		parts = append(parts, body)
+	}
+
+	// Handle image content.
+	if opts.Result.Data != "" && strings.HasPrefix(opts.Result.MIMEType, "image/") {
+		parts = append(parts, "", toolOutputImageContent(sty, opts.Result.Data, opts.Result.MIMEType))
+	}
+
+	if len(parts) == 0 {
+		return header
+	}
+
+	return joinToolParts(header, strings.Join(parts, "\n"))
 }
 
 // FindMCPResponse represents the response from mcp-find.

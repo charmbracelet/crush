@@ -45,7 +45,6 @@ func (s *service) LastReadTime(ctx context.Context, sessionID, path string) time
 		Path:      path,
 	})
 	if err != nil {
-		// Return zero time if not found
 		return time.Time{}
 	}
 

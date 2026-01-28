@@ -293,7 +293,7 @@ func (r *ReasoningItem) Render(width int) string {
 	if r.isCurrent {
 		info = "current"
 	}
-	styles := ListIemStyles{
+	styles := ListItemStyles{
 		ItemBlurred:     r.t.Dialog.NormalItem,
 		ItemFocused:     r.t.Dialog.SelectedItem,
 		InfoTextBlurred: r.t.Base,

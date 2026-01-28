@@ -34,6 +34,7 @@ import (
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
 	"github.com/charmbracelet/crush/internal/tui/styles"
+	"github.com/charmbracelet/crush/internal/ui/notification"
 	"github.com/charmbracelet/crush/internal/update"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/x/ansi"
@@ -68,6 +69,9 @@ type App struct {
 	// global context and cleanup functions
 	globalCtx    context.Context
 	cleanupFuncs []func() error
+
+	// notifications is the channel for notification requests from agents.
+	notifications chan notification.Notification
 }
 
 // New initializes a new application instance.
@@ -96,6 +100,7 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 		events:          make(chan tea.Msg, 100),
 		serviceEventsWG: &sync.WaitGroup{},
 		tuiWG:           &sync.WaitGroup{},
+		notifications:   make(chan notification.Notification, 64),
 	}
 
 	app.setupEvents()
@@ -128,6 +133,16 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 // Config returns the application configuration.
 func (app *App) Config() *config.Config {
 	return app.config
+}
+
+// Notifications returns the channel for receiving notification requests.
+func (app *App) Notifications() <-chan notification.Notification {
+	return app.notifications
+}
+
+// NotifySink returns a Sink function that agents can use to publish notifications.
+func (app *App) NotifySink() notification.Sink {
+	return notification.NewChannelSink(app.notifications)
 }
 
 // RunNonInteractive runs the application in non-interactive mode with the
@@ -461,6 +476,7 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.Permissions,
 		app.History,
 		app.LSPClients,
+		app.NotifySink(),
 	)
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)

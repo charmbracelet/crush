@@ -207,6 +207,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				TopK:             small.ModelCfg.TopK,
 				FrequencyPenalty: small.ModelCfg.FrequencyPenalty,
 				PresencePenalty:  small.ModelCfg.PresencePenalty,
+				NonInteractive:   true,
 			})
 			if err != nil {
 				return fantasy.NewTextErrorResponse("error generating response"), nil

@@ -291,7 +291,7 @@ func (t *baseToolMessageItem) Animate(msg anim.StepMsg) tea.Cmd {
 
 // RawRender implements [MessageItem].
 func (t *baseToolMessageItem) RawRender(width int) string {
-	toolItemWidth := width - messageLeftPaddingTotal
+	toolItemWidth := width - MessageLeftPaddingTotal
 	if t.hasCappedWidth {
 		toolItemWidth = cappedMessageWidth(width)
 	}

@@ -105,8 +105,19 @@ func runBuild(flags *buildFlags) error {
 
 	// Get the current module path for Crush.
 	crushModule := "github.com/charmbracelet/crush"
+	var crushLocalPath string
+
 	if flags.crushPath != "" {
-		crushModule = flags.crushPath
+		// Check if it's a local path.
+		if strings.HasPrefix(flags.crushPath, "./") || strings.HasPrefix(flags.crushPath, "/") || strings.HasPrefix(flags.crushPath, "../") {
+			absPath, err := filepath.Abs(flags.crushPath)
+			if err != nil {
+				return fmt.Errorf("failed to resolve crush path: %w", err)
+			}
+			crushLocalPath = absPath
+		} else {
+			crushModule = flags.crushPath
+		}
 	}
 
 	// Generate go.mod.
@@ -120,7 +131,9 @@ require (
 `, crushModule)
 
 	// Add replace directive for local Crush.
-	if flags.crushPath == "" {
+	if crushLocalPath != "" {
+		goModContent += fmt.Sprintf("\nreplace %s => %s\n", crushModule, crushLocalPath)
+	} else if flags.crushPath == "" {
 		cwd, err := os.Getwd()
 		if err != nil {
 			return fmt.Errorf("failed to get current directory: %w", err)
@@ -146,6 +159,20 @@ require (
 				return fmt.Errorf("could not extract module name from %s", modPath)
 			}
 			goModContent += fmt.Sprintf("replace %s => %s\n", moduleName, absPath)
+
+			// Propagate replace directives from plugin's go.mod, resolving relative paths.
+			for _, replace := range extractReplaceDirectives(string(modContent)) {
+				// Skip the crush replace since we already added it.
+				if replace.Module == crushModule {
+					continue
+				}
+				targetPath := replace.Path
+				if !filepath.IsAbs(targetPath) {
+					targetPath = filepath.Join(absPath, targetPath)
+					targetPath, _ = filepath.Abs(targetPath)
+				}
+				goModContent += fmt.Sprintf("replace %s => %s\n", replace.Module, targetPath)
+			}
 		}
 	}
 
@@ -252,4 +279,30 @@ func extractModuleName(content string) string {
 		}
 	}
 	return ""
+}
+
+// replaceDirective represents a replace directive in go.mod.
+type replaceDirective struct {
+	Module string
+	Path   string
+}
+
+// extractReplaceDirectives extracts replace directives from go.mod content.
+func extractReplaceDirectives(content string) []replaceDirective {
+	var directives []replaceDirective
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "replace ") {
+			// Format: replace module => path
+			line = strings.TrimPrefix(line, "replace ")
+			parts := strings.Split(line, "=>")
+			if len(parts) == 2 {
+				module := strings.TrimSpace(parts[0])
+				path := strings.TrimSpace(parts[1])
+				directives = append(directives, replaceDirective{Module: module, Path: path})
+			}
+		}
+	}
+	return directives
 }

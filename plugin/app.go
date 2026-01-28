@@ -1,7 +1,10 @@
 package plugin
 
 import (
+	"encoding/json"
+	"fmt"
 	"log/slog"
+	"reflect"
 
 	"github.com/charmbracelet/crush/internal/permission"
 )
@@ -9,11 +12,13 @@ import (
 // App provides access to application services for plugins.
 // It is passed to tool factories during initialization.
 type App struct {
-	workingDir      string
-	extensionConfig map[string]map[string]any
-	permissions     permission.Service
-	logger          *slog.Logger
-	cleanupFuncs    []func() error
+	workingDir        string
+	pluginConfig      map[string]map[string]any
+	disabledPlugins   []string
+	permissions       permission.Service
+	messageSubscriber MessageSubscriber
+	logger            *slog.Logger
+	cleanupFuncs      []func() error
 }
 
 // AppOption configures an App instance.
@@ -22,7 +27,7 @@ type AppOption func(*App)
 // NewApp creates a new App instance for plugins.
 func NewApp(opts ...AppOption) *App {
 	app := &App{
-		extensionConfig: make(map[string]map[string]any),
+		pluginConfig: make(map[string]map[string]any),
 	}
 	for _, opt := range opts {
 		opt(app)
@@ -37,11 +42,26 @@ func WithWorkingDir(dir string) AppOption {
 	}
 }
 
-// WithExtensionConfig sets the extension configuration.
-func WithExtensionConfig(cfg map[string]map[string]any) AppOption {
+// WithPluginConfig sets the plugin configuration.
+func WithPluginConfig(cfg map[string]map[string]any) AppOption {
 	return func(a *App) {
-		a.extensionConfig = cfg
+		if cfg != nil {
+			a.pluginConfig = cfg
+		}
 	}
+}
+
+// WithDisabledPlugins sets the list of disabled plugins.
+func WithDisabledPlugins(disabled []string) AppOption {
+	return func(a *App) {
+		a.disabledPlugins = disabled
+	}
+}
+
+// WithExtensionConfig is deprecated. Use WithPluginConfig instead.
+// Kept for backwards compatibility.
+func WithExtensionConfig(cfg map[string]map[string]any) AppOption {
+	return WithPluginConfig(cfg)
 }
 
 // WithPermissions sets the permission service.
@@ -58,22 +78,99 @@ func WithLogger(l *slog.Logger) AppOption {
 	}
 }
 
+// WithMessageSubscriber sets the message subscriber for hooks.
+func WithMessageSubscriber(ms MessageSubscriber) AppOption {
+	return func(a *App) {
+		a.messageSubscriber = ms
+	}
+}
+
 // WorkingDir returns the current working directory.
 func (a *App) WorkingDir() string {
 	return a.workingDir
 }
 
-// ExtensionConfig returns config for a specific extension.
-func (a *App) ExtensionConfig(name string) map[string]any {
-	if a.extensionConfig == nil {
+// IsPluginDisabled returns true if the plugin is disabled by config.
+func (a *App) IsPluginDisabled(name string) bool {
+	for _, disabled := range a.disabledPlugins {
+		if disabled == name {
+			return true
+		}
+	}
+	return false
+}
+
+// PluginConfig returns the raw config map for a specific plugin.
+func (a *App) PluginConfig(name string) map[string]any {
+	if a.pluginConfig == nil {
 		return nil
 	}
-	return a.extensionConfig[name]
+	return a.pluginConfig[name]
+}
+
+// ExtensionConfig is deprecated. Use PluginConfig instead.
+func (a *App) ExtensionConfig(name string) map[string]any {
+	return a.PluginConfig(name)
+}
+
+// LoadConfig loads and validates plugin configuration into a typed struct.
+// The target must be a pointer to a struct. If no config is found, the struct
+// is left with its default/zero values.
+//
+// Example:
+//
+//	type MyConfig struct {
+//	    APIKey  string `json:"api_key"`
+//	    Timeout int    `json:"timeout"`
+//	}
+//
+//	var cfg MyConfig
+//	if err := app.LoadConfig("myplugin", &cfg); err != nil {
+//	    return nil, err
+//	}
+func (a *App) LoadConfig(name string, target any) error {
+	if target == nil {
+		return fmt.Errorf("target cannot be nil")
+	}
+
+	rv := reflect.ValueOf(target)
+	if rv.Kind() != reflect.Ptr || rv.IsNil() {
+		return fmt.Errorf("target must be a non-nil pointer to a struct")
+	}
+
+	if rv.Elem().Kind() != reflect.Struct {
+		return fmt.Errorf("target must be a pointer to a struct, got pointer to %s", rv.Elem().Kind())
+	}
+
+	raw := a.PluginConfig(name)
+	if raw == nil {
+		// No config provided, leave defaults.
+		return nil
+	}
+
+	// Marshal to JSON and unmarshal into the target struct.
+	// This provides automatic type coercion and validation.
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return fmt.Errorf("failed to serialize config for %s: %w", name, err)
+	}
+
+	if err := json.Unmarshal(data, target); err != nil {
+		return fmt.Errorf("failed to parse config for %s: %w", name, err)
+	}
+
+	return nil
 }
 
 // Permissions returns the permission service.
 func (a *App) Permissions() permission.Service {
 	return a.permissions
+}
+
+// Messages returns the message subscriber for hooks to observe chat messages.
+// Returns nil if no message subscriber is configured.
+func (a *App) Messages() MessageSubscriber {
+	return a.messageSubscriber
 }
 
 // Logger returns a structured logger.

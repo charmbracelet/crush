@@ -2,6 +2,7 @@ package styles
 
 import (
 	"image/color"
+	"strings"
 
 	"charm.land/bubbles/v2/filepicker"
 	"charm.land/bubbles/v2/help"
@@ -1347,35 +1348,36 @@ func boolPtr(b bool) *bool       { return &b }
 func stringPtr(s string) *string { return &s }
 func uintPtr(u uint) *uint       { return &u }
 func chromaStyle(style ansi.StylePrimitive) string {
-	var s string
+	var s strings.Builder
 
 	if style.Color != nil {
-		s = *style.Color
+		s.WriteString(*style.Color)
 	}
 	if style.BackgroundColor != nil {
-		if s != "" {
-			s += " "
+		if s.Len() > 0 {
+			s.WriteString(" ")
 		}
-		s += "bg:" + *style.BackgroundColor
+		s.WriteString("bg:")
+		s.WriteString(*style.BackgroundColor)
 	}
 	if style.Italic != nil && *style.Italic {
-		if s != "" {
-			s += " "
+		if s.Len() > 0 {
+			s.WriteString(" ")
 		}
-		s += "italic"
+		s.WriteString("italic")
 	}
 	if style.Bold != nil && *style.Bold {
-		if s != "" {
-			s += " "
+		if s.Len() > 0 {
+			s.WriteString(" ")
 		}
-		s += "bold"
+		s.WriteString("bold")
 	}
 	if style.Underline != nil && *style.Underline {
-		if s != "" {
-			s += " "
+		if s.Len() > 0 {
+			s.WriteString(" ")
 		}
-		s += "underline"
+		s.WriteString("underline")
 	}
 
-	return s
+	return s.String()
 }

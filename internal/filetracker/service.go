@@ -32,14 +32,9 @@ func NewService(q *db.Queries) Service {
 
 // RecordRead records when a file was read.
 func (s *service) RecordRead(ctx context.Context, sessionID, path string) {
-	relpath, err := s.relpath(path)
-	if err != nil {
-		slog.Error("Error recording file read", "error", err, "file", path)
-		return
-	}
 	if err := s.q.RecordFileRead(ctx, db.RecordFileReadParams{
 		SessionID: sessionID,
-		Path:      relpath,
+		Path:      relpath(path),
 	}); err != nil {
 		slog.Error("Error recording file read", "error", err, "file", path)
 	}
@@ -48,14 +43,9 @@ func (s *service) RecordRead(ctx context.Context, sessionID, path string) {
 // LastReadTime returns when a file was last read.
 // Returns zero time if never read.
 func (s *service) LastReadTime(ctx context.Context, sessionID, path string) time.Time {
-	relpath, err := s.relpath(path)
-	if err != nil {
-		slog.Error("Error getting last read time", "error", err, "file", path)
-		return time.Time{}
-	}
 	readFile, err := s.q.GetFileRead(ctx, db.GetFileReadParams{
 		SessionID: sessionID,
-		Path:      relpath,
+		Path:      relpath(path),
 	})
 	if err != nil {
 		return time.Time{}
@@ -64,14 +54,17 @@ func (s *service) LastReadTime(ctx context.Context, sessionID, path string) time
 	return time.Unix(readFile.ReadAt, 0)
 }
 
-func (s *service) relpath(path string) (string, error) {
+func relpath(path string) string {
+	path = filepath.Clean(path)
 	basepath, err := os.Getwd()
 	if err != nil {
-		return "", err
+		slog.Warn("Error getting basepath", "error", err)
+		return path
 	}
 	relpath, err := filepath.Rel(basepath, path)
 	if err != nil {
-		return "", err
+		slog.Warn("Error getting relpath", "error", err)
+		return path
 	}
-	return filepath.Clean(relpath), nil
+	return relpath
 }

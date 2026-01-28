@@ -42,7 +42,6 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/completions"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
-	timage "github.com/charmbracelet/crush/internal/ui/image"
 	"github.com/charmbracelet/crush/internal/ui/logo"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/uiutil"
@@ -145,9 +144,8 @@ type UI struct {
 	// terminal.
 	sendProgressBar bool
 
-	// QueryCapabilities instructs the TUI to query for the terminal version when it
-	// starts.
-	QueryCapabilities bool
+	// caps hold different terminal capabilities that we query for.
+	caps common.Capabilities
 
 	// Editor components
 	textarea textarea.Model
@@ -181,9 +179,6 @@ type UI struct {
 
 	// sidebarLogo keeps a cached version of the sidebar sidebarLogo.
 	sidebarLogo string
-
-	// imgCaps stores the terminal image capabilities.
-	imgCaps timage.Capabilities
 
 	// custom commands & mcp commands
 	customCommands []commands.CustomCommand
@@ -304,9 +299,6 @@ func New(com *common.Common) *UI {
 // Init initializes the UI model.
 func (m *UI) Init() tea.Cmd {
 	var cmds []tea.Cmd
-	if m.QueryCapabilities {
-		cmds = append(cmds, tea.RequestTerminalVersion)
-	}
 	if m.state == uiOnboarding {
 		if cmd := m.openModelsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -363,19 +355,15 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateLayoutAndSize()
 		}
 	}
+	// Update terminal capabilities
+	m.caps.Update(msg)
 	switch msg := msg.(type) {
 	case tea.EnvMsg:
 		// Is this Windows Terminal?
 		if !m.sendProgressBar {
 			m.sendProgressBar = slices.Contains(msg, "WT_SESSION")
 		}
-		m.imgCaps.Env = uv.Environ(msg)
-		// Only query for image capabilities if the terminal is known to
-		// support Kitty graphics protocol. This prevents character bleeding
-		// on terminals that don't understand the APC escape sequences.
-		if m.QueryCapabilities {
-			cmds = append(cmds, timage.RequestCapabilities(m.imgCaps.Env))
-		}
+		cmds = append(cmds, common.QueryCmd(uv.Environ(msg)))
 	case loadSessionMsg:
 		if m.forceCompactMode {
 			m.isCompact = true
@@ -521,8 +509,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.updateLayoutAndSize()
-		// XXX: We need to store cell dimensions for image rendering.
-		m.imgCaps.Columns, m.imgCaps.Rows = msg.Width, msg.Height
 	case tea.KeyboardEnhancementsMsg:
 		m.keyenh = msg
 		if msg.SupportsKeyDisambiguation() {
@@ -689,16 +675,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.completionsOpen {
 			m.completions.SetFiles(msg.Files)
 		}
-	case uv.WindowPixelSizeEvent:
-		// [timage.RequestCapabilities] requests the terminal to send a window
-		// size event to help determine pixel dimensions.
-		m.imgCaps.PixelWidth = msg.Width
-		m.imgCaps.PixelHeight = msg.Height
 	case uv.KittyGraphicsEvent:
-		// [timage.RequestCapabilities] sends a Kitty graphics query and this
-		// captures the response. Any response means the terminal understands
-		// the protocol.
-		m.imgCaps.SupportsKittyGraphics = true
 		if !bytes.HasPrefix(msg.Payload, []byte("OK")) {
 			slog.Warn("unexpected Kitty graphics response",
 				"response", string(msg.Payload),
@@ -2776,7 +2753,7 @@ func (m *UI) openFilesDialog() tea.Cmd {
 	}
 
 	filePicker, cmd := dialog.NewFilePicker(m.com)
-	filePicker.SetImageCapabilities(&m.imgCaps)
+	filePicker.SetImageCapabilities(&m.caps)
 	m.dialog.OpenDialog(filePicker)
 
 	return cmd

@@ -41,7 +41,6 @@ func (e *testEnv) createSession(t *testing.T, sessionID string) {
 }
 
 func TestService_RecordRead(t *testing.T) {
-	t.Parallel()
 	env := setupTest(t)
 
 	sessionID := "test-session-1"
@@ -56,7 +55,6 @@ func TestService_RecordRead(t *testing.T) {
 }
 
 func TestService_LastReadTime_NotFound(t *testing.T) {
-	t.Parallel()
 	env := setupTest(t)
 
 	lastRead := env.svc.LastReadTime(env.ctx, "nonexistent-session", "/nonexistent/path")
@@ -64,7 +62,6 @@ func TestService_LastReadTime_NotFound(t *testing.T) {
 }
 
 func TestService_RecordRead_UpdatesTimestamp(t *testing.T) {
-	t.Parallel()
 	env := setupTest(t)
 
 	sessionID := "test-session-2"
@@ -76,7 +73,7 @@ func TestService_RecordRead_UpdatesTimestamp(t *testing.T) {
 	require.False(t, firstRead.IsZero())
 
 	synctest.Test(t, func(t *testing.T) {
-		time.Sleep(5 * time.Second)
+		time.Sleep(100 * time.Millisecond)
 		synctest.Wait()
 		env.svc.RecordRead(env.ctx, sessionID, path)
 		secondRead := env.svc.LastReadTime(env.ctx, sessionID, path)
@@ -86,7 +83,6 @@ func TestService_RecordRead_UpdatesTimestamp(t *testing.T) {
 }
 
 func TestService_RecordRead_DifferentSessions(t *testing.T) {
-	t.Parallel()
 	env := setupTest(t)
 
 	path := "/shared/file.go"
@@ -104,7 +100,6 @@ func TestService_RecordRead_DifferentSessions(t *testing.T) {
 }
 
 func TestService_RecordRead_DifferentPaths(t *testing.T) {
-	t.Parallel()
 	env := setupTest(t)
 
 	sessionID := "test-session-3"

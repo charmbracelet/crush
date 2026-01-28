@@ -28,7 +28,6 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/home"
@@ -117,6 +116,9 @@ type UI struct {
 	com          *common.Common
 	session      *session.Session
 	sessionFiles []SessionFile
+
+	// keeps track of read files while we don't have a session id
+	sessionFileReads []string
 
 	lastUserMessageTime int64
 
@@ -2414,13 +2416,20 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 
 	return func() tea.Msg {
 		absPath, _ := filepath.Abs(path)
-		// Skip attachment if file was already read and hasn't been modified.
-		lastRead := filetracker.LastReadTime(absPath)
-		if !lastRead.IsZero() {
-			if info, err := os.Stat(path); err == nil && !info.ModTime().After(lastRead) {
-				return nil
+
+		if m.hasSession() {
+			// Skip attachment if file was already read and hasn't been modified.
+			lastRead := m.com.App.FileTracker.LastReadTime(context.Background(), m.session.ID, absPath)
+			if !lastRead.IsZero() {
+				if info, err := os.Stat(path); err == nil && !info.ModTime().After(lastRead) {
+					return nil
+				}
 			}
+		} else if slices.Contains(m.sessionFileReads, absPath) {
+			return nil
 		}
+
+		m.sessionFileReads = append(m.sessionFileReads, absPath)
 
 		// Add file as attachment.
 		content, err := os.ReadFile(path)
@@ -2428,7 +2437,6 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 			// If it fails, let the LLM handle it later.
 			return nil
 		}
-		filetracker.RecordRead(absPath)
 
 		return message.Attachment{
 			FilePath: path,
@@ -2553,6 +2561,10 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 			cmds = append(cmds, m.loadSession(newSession.ID))
 		}
 		m.setState(uiChat, m.focus)
+	}
+
+	for _, path := range m.sessionFileReads {
+		m.com.App.FileTracker.RecordRead(context.Background(), m.session.ID, path)
 	}
 
 	// Capture session ID to avoid race with main goroutine updating m.session.
@@ -2801,6 +2813,7 @@ func (m *UI) newSession() tea.Cmd {
 
 	m.session = nil
 	m.sessionFiles = nil
+	m.sessionFileReads = nil
 	m.setState(uiLanding, uiFocusEditor)
 	m.textarea.Focus()
 	m.chat.Blur()

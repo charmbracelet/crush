@@ -82,18 +82,18 @@ func send(event string, props ...any) {
 }
 
 // Error logs an error event to PostHog with the error type and message.
-func Error(err any, props ...any) {
+func Error(errToLog any, props ...any) {
 	if client == nil {
 		return
 	}
 	posthogErr := client.Enqueue(posthog.NewDefaultException(
 		time.Now(),
 		distinctId,
-		reflect.TypeOf(err).String(),
-		fmt.Sprintf("%v", err),
+		reflect.TypeOf(errToLog).String(),
+		fmt.Sprintf("%v", errToLog),
 	))
-	if err != nil {
-		slog.Error("Failed to enqueue PostHog error", "err", err, "props", props, "posthogErr", posthogErr)
+	if posthogErr != nil {
+		slog.Error("Failed to enqueue PostHog error", "err", errToLog, "props", props, "posthogErr", posthogErr)
 		return
 	}
 }

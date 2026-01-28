@@ -106,12 +106,12 @@ func (d *DockerMCPToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 		toolParams = append(toolParams, k, v)
 	}
 
-	header := d.makeHeader(sty, tool, cappedWidth, opts, toolParams...)
-	if opts.Compact {
-		return header
+	if opts.IsPending() {
+		return pendingTool(sty, d.formatToolName(sty, tool), opts.Anim)
 	}
 
-	if opts.IsPending() {
+	header := d.makeHeader(sty, tool, cappedWidth, opts, toolParams...)
+	if opts.Compact {
 		return header
 	}
 
@@ -218,6 +218,19 @@ func (d *DockerMCPToolRenderContext) renderMCPServers(sty *styles.Styles, opts *
 }
 
 func (d *DockerMCPToolRenderContext) makeHeader(sty *styles.Styles, tool string, width int, opts *ToolRenderOpts, params ...string) string {
+	if opts.Compact {
+		return d.makeCompactHeader(sty, tool, width, params...)
+	}
+
+	icon := toolIcon(sty, opts.Status)
+	if opts.IsPending() {
+		icon = sty.Tool.IconPending.Render()
+	}
+	prefix := fmt.Sprintf("%s %s ", icon, d.formatToolName(sty, tool))
+	return prefix + toolParamList(sty, params, width-lipgloss.Width(prefix))
+}
+
+func (d *DockerMCPToolRenderContext) formatToolName(sty *styles.Styles, tool string) string {
 	mainTool := "Docker MCP"
 	action := tool
 	actionStyle := sty.Tool.MCPToolName
@@ -242,18 +255,9 @@ func (d *DockerMCPToolRenderContext) makeHeader(sty *styles.Styles, tool string,
 		action = stringext.Capitalize(action)
 	}
 
-	if opts.Compact {
-		return d.makeCompactHeader(sty, tool, width, params...)
-	}
-
-	icon := toolIcon(sty, opts.Status)
-	if opts.IsPending() {
-		icon = sty.Tool.IconPending.Render()
-	}
 	toolNameStyled := sty.Tool.MCPName.Render(mainTool)
 	arrow := sty.Tool.MCPArrow.String()
-	prefix := fmt.Sprintf("%s %s %s %s ", icon, toolNameStyled, arrow, actionStyle.Render(action))
-	return prefix + toolParamList(sty, params, width-lipgloss.Width(prefix))
+	return fmt.Sprintf("%s %s %s", toolNameStyled, arrow, actionStyle.Render(action))
 }
 
 func (d *DockerMCPToolRenderContext) makeCompactHeader(sty *styles.Styles, tool string, width int, params ...string) string {

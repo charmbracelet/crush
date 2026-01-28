@@ -181,7 +181,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	}
 
 	if s := instructions.String(); s != "" {
-		systemPrompt += "<mcp-instructions>" + s + "</mcp-instructions>"
+		systemPrompt += "\n\n<mcp-instructions>\n" + s + "\n</mcp-instructions>"
 	}
 
 	if len(agentTools) > 0 {

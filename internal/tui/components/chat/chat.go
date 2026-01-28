@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"charm.land/bubbles/v2/key"
@@ -544,6 +545,14 @@ func (m *messageListCmp) SetSession(session session.Session) tea.Cmd {
 	}
 
 	m.session = session
+
+	// Recover any incomplete messages from interrupted sessions
+	if m.app.AgentCoordinator != nil {
+		if recoverErr := m.app.AgentCoordinator.RecoverSession(context.Background(), session.ID); recoverErr != nil {
+			slog.Error("Failed to recover session", "session_id", session.ID, "error", recoverErr)
+		}
+	}
+
 	sessionMessages, err := m.app.Messages.List(context.Background(), session.ID)
 	if err != nil {
 		return util.ReportError(err)

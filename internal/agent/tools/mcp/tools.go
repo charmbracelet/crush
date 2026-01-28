@@ -83,7 +83,7 @@ func RunTool(ctx context.Context, name, toolName string, input string) (ToolResu
 	textContent := strings.Join(textParts, "\n")
 
 	// We need to to make sure the data is base64
-	// when using something like docker + playwrite the data was not returned correctly
+	// when using something like docker + playwright the data was not returned correctly
 	if imageData != nil {
 		return ToolResult{
 			Type:      "image",

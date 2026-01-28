@@ -3,6 +3,7 @@ package filetracker
 import (
 	"context"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/db"
@@ -74,11 +75,14 @@ func TestService_RecordRead_UpdatesTimestamp(t *testing.T) {
 	firstRead := env.svc.LastReadTime(env.ctx, sessionID, path)
 	require.False(t, firstRead.IsZero())
 
-	time.Sleep(100 * time.Millisecond)
-	env.svc.RecordRead(env.ctx, sessionID, path)
-	secondRead := env.svc.LastReadTime(env.ctx, sessionID, path)
+	synctest.Test(t, func(t *testing.T) {
+		time.Sleep(5 * time.Second)
+		synctest.Wait()
+		env.svc.RecordRead(env.ctx, sessionID, path)
+		secondRead := env.svc.LastReadTime(env.ctx, sessionID, path)
 
-	require.False(t, secondRead.Before(firstRead), "second read time should not be before first")
+		require.False(t, secondRead.Before(firstRead), "second read time should not be before first")
+	})
 }
 
 func TestService_RecordRead_DifferentSessions(t *testing.T) {

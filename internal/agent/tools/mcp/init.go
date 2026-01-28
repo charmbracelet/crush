@@ -145,8 +145,6 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 		}
 
 		// Set initial starting state
-		updateState(name, StateStarting, nil, nil, Counts{})
-
 		wg.Add(1)
 		go func(name string, m config.MCPConfig) {
 			defer func() {
@@ -166,36 +164,9 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 				}
 			}()
 
-			// createSession handles its own timeout internally.
-			session, err := createSession(ctx, name, m, cfg.Resolver())
-			if err != nil {
-				return
+			if err := initClient(ctx, name, m, cfg.Resolver()); err != nil {
+				slog.Debug("failed to initialize mcp client", "name", name, "error", err)
 			}
-
-			tools, err := getTools(ctx, session)
-			if err != nil {
-				slog.Error("error listing tools", "error", err)
-				updateState(name, StateError, err, nil, Counts{})
-				session.Close()
-				return
-			}
-
-			prompts, err := getPrompts(ctx, session)
-			if err != nil {
-				slog.Error("error listing prompts", "error", err)
-				updateState(name, StateError, err, nil, Counts{})
-				session.Close()
-				return
-			}
-
-			toolCount := updateTools(name, tools)
-			updatePrompts(name, prompts)
-			sessions.Set(name, session)
-
-			updateState(name, StateConnected, nil, session, Counts{
-				Tools:   toolCount,
-				Prompts: len(prompts),
-			})
 		}(name, m)
 	}
 	wg.Wait()
@@ -226,11 +197,16 @@ func InitializeSingle(ctx context.Context, name string, cfg *config.Config) erro
 		return nil
 	}
 
+	return initClient(ctx, name, m, cfg.Resolver())
+}
+
+// initClient initializes a single MCP client with the given configuration.
+func initClient(ctx context.Context, name string, m config.MCPConfig, resolver config.VariableResolver) error {
 	// Set initial starting state.
 	updateState(name, StateStarting, nil, nil, Counts{})
 
 	// createSession handles its own timeout internally.
-	session, err := createSession(ctx, name, m, cfg.Resolver())
+	session, err := createSession(ctx, name, m, resolver)
 	if err != nil {
 		return err
 	}

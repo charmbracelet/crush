@@ -27,7 +27,7 @@ func (m *UI) loadPromptHistory() tea.Cmd {
 			messages, err = m.com.App.Messages.ListAllUserMessages(ctx)
 		}
 		if err != nil {
-			slog.Error("failed to load prompt history", "error", err)
+			slog.Error("Failed to load prompt history", "error", err)
 			return promptHistoryLoadedMsg{messages: nil}
 		}
 

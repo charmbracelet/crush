@@ -802,22 +802,22 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	resp, err := agent.Stream(ctx, streamCall)
 	if err == nil {
 		// We successfully generated a title with the small model.
-		slog.Info("generated title with small model")
+		slog.Debug("Generated title with small model")
 	} else {
 		// It didn't work. Let's try with the big model.
-		slog.Error("error generating title with small model; trying big model", "err", err)
+		slog.Error("Error generating title with small model; trying big model", "err", err)
 		model = largeModel
 		agent = newAgent(model.Model, titlePrompt, maxOutputTokens)
 		resp, err = agent.Stream(ctx, streamCall)
 		if err == nil {
-			slog.Info("generated title with large model")
+			slog.Debug("Generated title with large model")
 		} else {
 			// Welp, the large model didn't work either. Use the default
 			// session name and return.
-			slog.Error("error generating title with large model", "err", err)
+			slog.Error("Error generating title with large model", "err", err)
 			saveErr := a.sessions.UpdateTitleAndUsage(ctx, sessionID, defaultSessionName, 0, 0, 0)
 			if saveErr != nil {
-				slog.Error("failed to save session title and usage", "error", saveErr)
+				slog.Error("Failed to save session title and usage", "error", saveErr)
 			}
 			return
 		}
@@ -826,10 +826,10 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	if resp == nil {
 		// Actually, we didn't get a response so we can't. Use the default
 		// session name and return.
-		slog.Error("response is nil; can't generate title")
+		slog.Error("Response is nil; can't generate title")
 		saveErr := a.sessions.UpdateTitleAndUsage(ctx, sessionID, defaultSessionName, 0, 0, 0)
 		if saveErr != nil {
-			slog.Error("failed to save session title and usage", "error", saveErr)
+			slog.Error("Failed to save session title and usage", "error", saveErr)
 		}
 		return
 	}
@@ -843,7 +843,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 
 	title = strings.TrimSpace(title)
 	if title == "" {
-		slog.Warn("empty title; using fallback")
+		slog.Debug("Empty title; using fallback")
 		title = defaultSessionName
 	}
 
@@ -878,7 +878,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	// concurrent session updates.
 	saveErr := a.sessions.UpdateTitleAndUsage(ctx, sessionID, title, promptTokens, completionTokens, cost)
 	if saveErr != nil {
-		slog.Error("failed to save session title and usage", "error", saveErr)
+		slog.Error("Failed to save session title and usage", "error", saveErr)
 		return
 	}
 }
@@ -921,25 +921,25 @@ func (a *sessionAgent) Cancel(sessionID string) {
 	// fully completes (including error handling that may access the DB).
 	// The defer in processRequest will clean up the entry.
 	if cancel, ok := a.activeRequests.Get(sessionID); ok && cancel != nil {
-		slog.Info("Request cancellation initiated", "session_id", sessionID)
+		slog.Debug("Request cancellation initiated", "session_id", sessionID)
 		cancel()
 	}
 
 	// Also check for summarize requests.
 	if cancel, ok := a.activeRequests.Get(sessionID + "-summarize"); ok && cancel != nil {
-		slog.Info("Summarize cancellation initiated", "session_id", sessionID)
+		slog.Debug("Summarize cancellation initiated", "session_id", sessionID)
 		cancel()
 	}
 
 	if a.QueuedPrompts(sessionID) > 0 {
-		slog.Info("Clearing queued prompts", "session_id", sessionID)
+		slog.Debug("Clearing queued prompts", "session_id", sessionID)
 		a.messageQueue.Del(sessionID)
 	}
 }
 
 func (a *sessionAgent) ClearQueue(sessionID string) {
 	if a.QueuedPrompts(sessionID) > 0 {
-		slog.Info("Clearing queued prompts", "session_id", sessionID)
+		slog.Debug("Clearing queued prompts", "session_id", sessionID)
 		a.messageQueue.Del(sessionID)
 	}
 }
@@ -1099,7 +1099,7 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 			if media, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentMedia](toolResult.Output); ok {
 				decoded, err := base64.StdEncoding.DecodeString(media.Data)
 				if err != nil {
-					slog.Warn("failed to decode media data", "error", err)
+					slog.Warn("Failed to decode media data", "error", err)
 					textParts = append(textParts, part)
 					continue
 				}

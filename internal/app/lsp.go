@@ -140,7 +140,7 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, config
 		updateLSPState(name, lsp.StateReady, nil, lspClient, 0)
 	}
 
-	slog.Info("LSP client initialized", "name", name)
+	slog.Debug("LSP client initialized", "name", name)
 
 	// Add to map with mutex protection before starting goroutine
 	app.LSPClients.Set(name, lspClient)

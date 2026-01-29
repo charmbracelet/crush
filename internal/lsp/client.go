@@ -317,12 +317,12 @@ func (c *Client) HandlesFile(path string) bool {
 	// Check if file is within working directory.
 	absPath, err := filepath.Abs(path)
 	if err != nil {
-		slog.Debug("cannot resolve path", "name", c.name, "file", path, "error", err)
+		slog.Debug("Cannot resolve path", "name", c.name, "file", path, "error", err)
 		return false
 	}
 	relPath, err := filepath.Rel(c.workDir, absPath)
 	if err != nil || strings.HasPrefix(relPath, "..") {
-		slog.Debug("file outside workspace", "name", c.name, "file", path, "workDir", c.workDir)
+		slog.Debug("File outside workspace", "name", c.name, "file", path, "workDir", c.workDir)
 		return false
 	}
 
@@ -339,11 +339,11 @@ func (c *Client) HandlesFile(path string) bool {
 			suffix = "." + suffix
 		}
 		if strings.HasSuffix(name, suffix) || filetype == string(kind) {
-			slog.Debug("handles file", "name", c.name, "file", name, "filetype", filetype, "kind", kind)
+			slog.Debug("Handles file", "name", c.name, "file", name, "filetype", filetype, "kind", kind)
 			return true
 		}
 	}
-	slog.Debug("doesn't handle file", "name", c.name, "file", name)
+	slog.Debug("Doesn't handle file", "name", c.name, "file", name)
 	return false
 }
 

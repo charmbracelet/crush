@@ -140,7 +140,7 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 	for name, m := range cfg.MCP {
 		if m.Disabled {
 			updateState(name, StateDisabled, nil, nil, Counts{})
-			slog.Debug("skipping disabled mcp", "name", name)
+			slog.Debug("Skipping disabled MCP", "name", name)
 			continue
 		}
 
@@ -162,7 +162,7 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 						err = fmt.Errorf("panic: %v", v)
 					}
 					updateState(name, StateError, err, nil, Counts{})
-					slog.Error("panic in mcp client initialization", "error", err, "name", name)
+					slog.Error("Panic in MCP client initialization", "error", err, "name", name)
 				}
 			}()
 
@@ -174,7 +174,7 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 
 			tools, err := getTools(ctx, session)
 			if err != nil {
-				slog.Error("error listing tools", "error", err)
+				slog.Error("Error listing tools", "error", err)
 				updateState(name, StateError, err, nil, Counts{})
 				session.Close()
 				return
@@ -182,7 +182,7 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 
 			prompts, err := getPrompts(ctx, session)
 			if err != nil {
-				slog.Error("error listing prompts", "error", err)
+				slog.Error("Error listing prompts", "error", err)
 				updateState(name, StateError, err, nil, Counts{})
 				session.Close()
 				return
@@ -277,7 +277,7 @@ func createSession(ctx context.Context, name string, m config.MCPConfig, resolve
 	transport, err := createTransport(mcpCtx, m, resolver)
 	if err != nil {
 		updateState(name, StateError, err, nil, Counts{})
-		slog.Error("error creating mcp client", "error", err, "name", name)
+		slog.Error("Error creating MCP client", "error", err, "name", name)
 		cancel()
 		cancelTimer.Stop()
 		return nil, err
@@ -319,7 +319,7 @@ func createSession(ctx context.Context, name string, m config.MCPConfig, resolve
 	}
 
 	cancelTimer.Stop()
-	slog.Info("MCP client initialized", "name", name)
+	slog.Debug("MCP client initialized", "name", name)
 	return session, nil
 }
 

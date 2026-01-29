@@ -53,7 +53,7 @@ func TestFork(t *testing.T) {
 	require.Contains(t, newSession.Title, sourceSession.Title)
 
 	forkedMessages := getMessages(newSession.ID)
-	require.Len(t, forkedMessages, 3)
+	require.Len(t, forkedMessages, 2)
 
 	for i, msg := range forkedMessages {
 		require.Equal(t, sourceMessages[i].Role, msg.Role)

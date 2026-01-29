@@ -1193,6 +1193,44 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			}
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
+		m.chat.list.Blur()
+		m.focus = uiFocusEditor
+		cmds = append(cmds, m.textarea.Focus())
+
+	case dialog.ActionDeleteMessages:
+		if m.isAgentBusy() {
+			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait..."))
+			break
+		}
+		if m.session == nil {
+			cmds = append(cmds, uiutil.ReportWarn("No session to delete from..."))
+			break
+		}
+		selectedItem := m.chat.SelectedItem()
+		if selectedItem == nil {
+			cmds = append(cmds, uiutil.ReportWarn("No message selected..."))
+			break
+		}
+		if _, ok := selectedItem.(*chat.UserMessageItem); !ok {
+			cmds = append(cmds, uiutil.ReportWarn("Can only delete from user messages..."))
+			break
+		}
+		messageID, ok := m.getMessageIDFromItem(selectedItem)
+		if !ok {
+			cmds = append(cmds, uiutil.ReportWarn("Cannot get message ID from selected item..."))
+			break
+		}
+		cmds = append(cmds, func() tea.Msg {
+			err := m.com.App.Messages.DeleteMessagesFrom(context.Background(), m.session.ID, messageID)
+			if err != nil {
+				return uiutil.ReportError(err)()
+			}
+			return m.loadSession(m.session.ID)()
+		})
+		m.dialog.CloseDialog(dialog.CommandsID)
+		m.chat.list.Blur()
+		m.focus = uiFocusEditor
+		cmds = append(cmds, m.textarea.Focus())
 
 	case dialog.ActionSelectModel:
 		if m.isAgentBusy() {
@@ -2752,10 +2790,12 @@ func (m *UI) openModelsDialog() tea.Cmd {
 // openCommandsDialog opens the commands dialog.
 func (m *UI) openCommandsDialog() tea.Cmd {
 	canFork := false
+	canDelete := false
 	selectedItem := m.chat.SelectedItem()
 	if selectedItem != nil {
 		if _, ok := selectedItem.(*chat.UserMessageItem); ok {
 			canFork = true
+			canDelete = true
 		}
 	}
 
@@ -2769,7 +2809,7 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 		sessionID = m.session.ID
 	}
 
-	commands, err := dialog.NewCommands(m.com, sessionID, m.customCommands, m.mcpPrompts, canFork)
+	commands, err := dialog.NewCommands(m.com, sessionID, m.customCommands, m.mcpPrompts, canFork, canDelete)
 	if err != nil {
 		return uiutil.ReportError(err)
 	}

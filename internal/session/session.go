@@ -173,7 +173,7 @@ func (s *service) Fork(ctx context.Context, sourceSessionID, upToMessageID strin
 		return Session{}, fmt.Errorf("creating session: %w", err)
 	}
 
-	for i := 0; i <= targetIndex; i++ {
+	for i := 0; i < targetIndex; i++ {
 		_, err = messageSvc.Copy(ctx, newSession.ID, messages[i])
 		if err != nil {
 			_ = s.Delete(ctx, newSession.ID)

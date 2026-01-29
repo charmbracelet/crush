@@ -66,12 +66,13 @@ type Commands struct {
 	customCommands []commands.CustomCommand
 	mcpPrompts     []commands.MCPPrompt
 	canFork        bool // whether a user message is selected for forking
+	canDelete      bool // whether a user message is selected for deletion
 }
 
 var _ Dialog = (*Commands)(nil)
 
 // NewCommands creates a new commands dialog.
-func NewCommands(com *common.Common, sessionID string, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt, canFork bool) (*Commands, error) {
+func NewCommands(com *common.Common, sessionID string, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt, canFork, canDelete bool) (*Commands, error) {
 	c := &Commands{
 		com:            com,
 		selected:       SystemCommands,
@@ -79,6 +80,7 @@ func NewCommands(com *common.Common, sessionID string, customCommands []commands
 		customCommands: customCommands,
 		mcpPrompts:     mcpPrompts,
 		canFork:        canFork,
+		canDelete:      canDelete,
 	}
 
 	help := help.New()
@@ -393,6 +395,12 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	if c.canFork {
 		commands = append(commands,
 			NewCommandItem(c.com.Styles, "fork_conversation", "Fork Conversation", "", ActionForkConversation{}),
+		)
+	}
+
+	if c.canDelete {
+		commands = append(commands,
+			NewCommandItem(c.com.Styles, "delete_messages", "Delete Messages (including this)", "", ActionDeleteMessages{}),
 		)
 	}
 

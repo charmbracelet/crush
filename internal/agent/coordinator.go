@@ -70,8 +70,9 @@ type coordinator struct {
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
 
-	pluginApp *plugin.App
-	hooks     []plugin.Hook
+	pluginApp          *plugin.App
+	hooks              []plugin.Hook
+	sessionInfoAdapter *SessionInfoAdapter
 
 	readyWg errgroup.Group
 }
@@ -154,6 +155,12 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	}
 
 	mergedOptions, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(model, providerCfg)
+
+	// Update session info adapter for plugins.
+	if c.sessionInfoAdapter != nil {
+		c.sessionInfoAdapter.SetSessionID(sessionID)
+		c.sessionInfoAdapter.SetModel(model.CatwalkCfg.ID, model.ModelCfg.Provider)
+	}
 
 	if providerCfg.OAuthToken != nil && providerCfg.OAuthToken.IsExpired() {
 		slog.Info("Token needs to be refreshed", "provider", providerCfg.ID)
@@ -910,6 +917,9 @@ func (c *coordinator) initPluginHooks(ctx context.Context) error {
 	// Create message subscriber adapter for hooks.
 	messageAdapter := NewMessageSubscriberAdapter(c.messages)
 
+	// Create session info adapter for hooks.
+	c.sessionInfoAdapter = NewSessionInfoAdapter(c.sessions)
+
 	// Create shared plugin app for both tools and hooks.
 	c.pluginApp = plugin.NewApp(
 		plugin.WithWorkingDir(c.cfg.WorkingDir()),
@@ -917,6 +927,7 @@ func (c *coordinator) initPluginHooks(ctx context.Context) error {
 		plugin.WithPluginConfig(pluginConfig),
 		plugin.WithDisabledPlugins(disabledPlugins),
 		plugin.WithMessageSubscriber(messageAdapter),
+		plugin.WithSessionInfoProvider(c.sessionInfoAdapter),
 	)
 
 	// Initialize registered hooks.

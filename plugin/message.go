@@ -68,3 +68,30 @@ type MessageSubscriber interface {
 	// The channel is closed when ctx is canceled.
 	SubscribeMessages(ctx context.Context) <-chan MessageEvent
 }
+
+// SessionInfo contains metadata about the current session.
+type SessionInfo struct {
+	// Model is the AI model identifier (e.g., "claude-3-opus-20240229").
+	Model string
+	// Provider is the API provider (e.g., "anthropic", "bedrock", "openrouter").
+	Provider string
+	// Tokens contains token usage counters.
+	Tokens TokenUsage
+	// CostUSD is the estimated cost in USD.
+	CostUSD float64
+}
+
+// TokenUsage contains token usage counters.
+type TokenUsage struct {
+	Input      int64 // Total input tokens consumed.
+	Output     int64 // Total output tokens generated.
+	CacheRead  int64 // Tokens read from cache (Anthropic).
+	CacheWrite int64 // Tokens written to cache (Anthropic).
+}
+
+// SessionInfoProvider allows plugins to get session metadata.
+type SessionInfoProvider interface {
+	// SessionInfo returns the current session info.
+	// Returns nil if no session is active.
+	SessionInfo() *SessionInfo
+}

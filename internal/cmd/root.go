@@ -324,16 +324,29 @@ func shouldQueryCapabilities(env uv.Environ) bool {
 		xstrings.ContainsAnyOf(termType, kittyTerminals...)
 }
 
-// listRegisteredPlugins prints all registered plugin tools and exits.
+// listRegisteredPlugins prints all registered plugin tools and hooks.
 func listRegisteredPlugins() error {
 	tools := plugin.RegisteredTools()
-	if len(tools) == 0 {
+	hooks := plugin.RegisteredHooks()
+
+	if len(tools) == 0 && len(hooks) == 0 {
 		fmt.Println("No plugins registered")
 		return nil
 	}
-	fmt.Println("Registered plugin tools:")
-	for _, name := range tools {
-		fmt.Printf("  - %s\n", name)
+
+	if len(tools) > 0 {
+		fmt.Println("Registered plugin tools:")
+		for _, name := range tools {
+			fmt.Printf("  - %s\n", name)
+		}
 	}
+
+	if len(hooks) > 0 {
+		fmt.Println("Registered plugin hooks:")
+		for _, name := range hooks {
+			fmt.Printf("  - %s\n", name)
+		}
+	}
+
 	return nil
 }

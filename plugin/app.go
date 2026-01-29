@@ -12,13 +12,14 @@ import (
 // App provides access to application services for plugins.
 // It is passed to tool factories during initialization.
 type App struct {
-	workingDir        string
-	pluginConfig      map[string]map[string]any
-	disabledPlugins   []string
-	permissions       permission.Service
-	messageSubscriber MessageSubscriber
-	logger            *slog.Logger
-	cleanupFuncs      []func() error
+	workingDir          string
+	pluginConfig        map[string]map[string]any
+	disabledPlugins     []string
+	permissions         permission.Service
+	messageSubscriber   MessageSubscriber
+	sessionInfoProvider SessionInfoProvider
+	logger              *slog.Logger
+	cleanupFuncs        []func() error
 }
 
 // AppOption configures an App instance.
@@ -82,6 +83,13 @@ func WithLogger(l *slog.Logger) AppOption {
 func WithMessageSubscriber(ms MessageSubscriber) AppOption {
 	return func(a *App) {
 		a.messageSubscriber = ms
+	}
+}
+
+// WithSessionInfoProvider sets the session info provider for hooks.
+func WithSessionInfoProvider(sip SessionInfoProvider) AppOption {
+	return func(a *App) {
+		a.sessionInfoProvider = sip
 	}
 }
 
@@ -171,6 +179,12 @@ func (a *App) Permissions() permission.Service {
 // Returns nil if no message subscriber is configured.
 func (a *App) Messages() MessageSubscriber {
 	return a.messageSubscriber
+}
+
+// SessionInfo returns the session info provider for hooks to get session metadata.
+// Returns nil if no session info provider is configured.
+func (a *App) SessionInfo() SessionInfoProvider {
+	return a.sessionInfoProvider
 }
 
 // Logger returns a structured logger.

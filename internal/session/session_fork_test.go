@@ -25,7 +25,7 @@ func TestFork(t *testing.T) {
 	sourceSession, err := svc.Create(ctx, "Source Session")
 	require.NoError(t, err)
 
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		_, err = msgSvc.Create(ctx, sourceSession.ID, message.CreateMessageParams{
 			Role: message.User,
 			Parts: []message.ContentPart{

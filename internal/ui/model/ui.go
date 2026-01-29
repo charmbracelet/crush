@@ -2794,10 +2794,8 @@ func (m *UI) openModelsDialog() tea.Cmd {
 func (m *UI) openCommandsDialog() tea.Cmd {
 	isUserMessageSelected := false
 	selectedItem := m.chat.SelectedItem()
-	if selectedItem != nil {
-		if _, ok := selectedItem.(*chat.UserMessageItem); ok {
-			isUserMessageSelected = true
-		}
+	if _, ok := selectedItem.(*chat.UserMessageItem); ok {
+		isUserMessageSelected = true
 	}
 
 	if m.dialog.ContainsDialog(dialog.CommandsID) {

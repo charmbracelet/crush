@@ -315,6 +315,10 @@ type Styles struct {
 		MCPName     lipgloss.Style // The mcp name
 		MCPToolName lipgloss.Style // The mcp tool name
 		MCPArrow    lipgloss.Style // The mcp arrow icon
+
+		// Docker MCP tools
+		DockerMCPActionAdd lipgloss.Style // Docker MCP add action (green)
+		DockerMCPActionDel lipgloss.Style // Docker MCP remove action (red)
 	}
 
 	// Dialog styles
@@ -1160,6 +1164,10 @@ func DefaultStyles() Styles {
 	s.Tool.MCPName = base.Foreground(blue)
 	s.Tool.MCPToolName = base.Foreground(blueDark)
 	s.Tool.MCPArrow = base.Foreground(blue).SetString(ArrowRightIcon)
+
+	// Docker MCP styles
+	s.Tool.DockerMCPActionAdd = base.Foreground(greenLight)
+	s.Tool.DockerMCPActionDel = base.Foreground(red)
 
 	// Buttons
 	s.ButtonFocus = lipgloss.NewStyle().Foreground(white).Background(secondary)

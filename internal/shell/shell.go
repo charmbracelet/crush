@@ -218,6 +218,45 @@ func splitArgsFlags(parts []string) (args []string, flags []string) {
 	return args, flags
 }
 
+// IsCommandBlocked checks if a command string would be blocked by the given
+// block functions. This is useful for detecting dangerous commands before
+// execution.
+func IsCommandBlocked(command string, blockFuncs []BlockFunc) bool {
+	// Parse the command to extract arguments
+	line, err := syntax.NewParser().Parse(strings.NewReader(command), "")
+	if err != nil {
+		// If we can't parse it, consider it potentially dangerous
+		return true
+	}
+
+	// Extract the command and arguments from the parsed syntax tree
+	blocked := false
+	syntax.Walk(line, func(node syntax.Node) bool {
+		if callExpr, ok := node.(*syntax.CallExpr); ok {
+			args := make([]string, 0, len(callExpr.Args))
+			for _, arg := range callExpr.Args {
+				// Extract the word from the argument
+				for _, part := range arg.Parts {
+					if lit, ok := part.(*syntax.Lit); ok {
+						args = append(args, lit.Value)
+					}
+				}
+			}
+
+			// Check if this command is blocked
+			for _, blockFunc := range blockFuncs {
+				if blockFunc(args) {
+					blocked = true
+					return false
+				}
+			}
+		}
+		return true
+	})
+
+	return blocked
+}
+
 func (s *Shell) blockHandler() func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
 	return func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
 		return func(ctx context.Context, args []string) error {

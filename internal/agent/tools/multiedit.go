@@ -58,7 +58,13 @@ const MultiEditToolName = "multiedit"
 //go:embed multiedit.md
 var multieditDescription []byte
 
-func NewMultiEditTool(lspClients *csync.Map[string, *lsp.Client], permissions permission.Service, files history.Service, workingDir string) fantasy.AgentTool {
+func NewMultiEditTool(
+	lspClients *csync.Map[string, *lsp.Client],
+	permissions permission.Service,
+	files history.Service,
+	filetracker filetracker.Service,
+	workingDir string,
+) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		MultiEditToolName,
 		string(multieditDescription),
@@ -81,7 +87,7 @@ func NewMultiEditTool(lspClients *csync.Map[string, *lsp.Client], permissions pe
 			var response fantasy.ToolResponse
 			var err error
 
-			editCtx := editContext{ctx, permissions, files, workingDir}
+			editCtx := editContext{ctx, permissions, files, filetracker, workingDir}
 			// Handle file creation case (first edit has empty old_string)
 			if len(params.Edits) > 0 && params.Edits[0].OldString == "" {
 				response, err = processMultiEditWithCreation(editCtx, params, call)
@@ -210,8 +216,7 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 		slog.Error("Error creating file history version", "error", err)
 	}
 
-	filetracker.RecordWrite(params.FilePath)
-	filetracker.RecordRead(params.FilePath)
+	edit.filetracker.RecordRead(edit.ctx, sessionID, params.FilePath)
 
 	var message string
 	if len(failedEdits) > 0 {
@@ -247,14 +252,19 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 		return fantasy.NewTextErrorResponse(fmt.Sprintf("path is a directory, not a file: %s", params.FilePath)), nil
 	}
 
+	sessionID := GetSessionFromContext(edit.ctx)
+	if sessionID == "" {
+		return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for editing file")
+	}
+
 	// Check if file was read before editing
-	if filetracker.LastReadTime(params.FilePath).IsZero() {
+	lastRead := edit.filetracker.LastReadTime(edit.ctx, sessionID, params.FilePath)
+	if lastRead.IsZero() {
 		return fantasy.NewTextErrorResponse("you must read the file before editing it. Use the View tool first"), nil
 	}
 
-	// Check if file was modified since last read
-	modTime := fileInfo.ModTime()
-	lastRead := filetracker.LastReadTime(params.FilePath)
+	// Check if file was modified since last read.
+	modTime := fileInfo.ModTime().Truncate(time.Second)
 	if modTime.After(lastRead) {
 		return fantasy.NewTextErrorResponse(
 			fmt.Sprintf("file %s has been modified since it was last read (mod time: %s, last read: %s)",
@@ -299,12 +309,6 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 			), nil
 		}
 		return fantasy.NewTextErrorResponse("no changes made - all edits resulted in identical content"), nil
-	}
-
-	// Get session and message IDs
-	sessionID := GetSessionFromContext(edit.ctx)
-	if sessionID == "" {
-		return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for editing file")
 	}
 
 	// Generate diff and check permissions
@@ -369,8 +373,7 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 		slog.Error("Error creating file history version", "error", err)
 	}
 
-	filetracker.RecordWrite(params.FilePath)
-	filetracker.RecordRead(params.FilePath)
+	edit.filetracker.RecordRead(edit.ctx, sessionID, params.FilePath)
 
 	var message string
 	if len(failedEdits) > 0 {

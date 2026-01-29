@@ -22,6 +22,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
@@ -64,6 +65,7 @@ type coordinator struct {
 	messages    message.Service
 	permissions permission.Service
 	history     history.Service
+	filetracker filetracker.Service
 	lspClients  *csync.Map[string, *lsp.Client]
 
 	currentAgent SessionAgent
@@ -79,6 +81,7 @@ func NewCoordinator(
 	messages message.Service,
 	permissions permission.Service,
 	history history.Service,
+	filetracker filetracker.Service,
 	lspClients *csync.Map[string, *lsp.Client],
 ) (Coordinator, error) {
 	c := &coordinator{
@@ -87,6 +90,7 @@ func NewCoordinator(
 		messages:    messages,
 		permissions: permissions,
 		history:     history,
+		filetracker: filetracker,
 		lspClients:  lspClients,
 		agents:      make(map[string]SessionAgent),
 	}
@@ -393,16 +397,16 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		tools.NewJobOutputTool(),
 		tools.NewJobKillTool(),
 		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),
-		tools.NewEditTool(c.lspClients, c.permissions, c.history, c.cfg.WorkingDir()),
-		tools.NewMultiEditTool(c.lspClients, c.permissions, c.history, c.cfg.WorkingDir()),
+		tools.NewEditTool(c.lspClients, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
+		tools.NewMultiEditTool(c.lspClients, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 		tools.NewFetchTool(c.permissions, c.cfg.WorkingDir(), nil),
 		tools.NewGlobTool(c.cfg.WorkingDir()),
 		tools.NewGrepTool(c.cfg.WorkingDir()),
 		tools.NewLsTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Tools.Ls),
 		tools.NewSourcegraphTool(nil),
 		tools.NewTodosTool(c.sessions),
-		tools.NewViewTool(c.lspClients, c.permissions, c.cfg.WorkingDir(), c.cfg.Options.SkillsPaths...),
-		tools.NewWriteTool(c.lspClients, c.permissions, c.history, c.cfg.WorkingDir()),
+		tools.NewViewTool(c.lspClients, c.permissions, c.filetracker, c.cfg.WorkingDir(), c.cfg.Options.SkillsPaths...),
+		tools.NewWriteTool(c.lspClients, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 	)
 
 	if len(c.cfg.LSP) > 0 {

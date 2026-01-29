@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -17,7 +18,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/app"
-	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
@@ -66,6 +66,7 @@ type editorCmp struct {
 	x, y               int
 	app                *app.App
 	session            session.Session
+	sessionFileReads   []string
 	textarea           textarea.Model
 	attachments        []message.Attachment
 	deleteMode         bool
@@ -181,6 +182,9 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
+	case chat.SessionClearedMsg:
+		m.session = session.Session{}
+		m.sessionFileReads = nil
 	case tea.WindowSizeMsg:
 		return m, m.repositionCompletions
 	case filepicker.FilePickedMsg:
@@ -212,19 +216,27 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				m.completionsStartIndex = 0
 			}
 			absPath, _ := filepath.Abs(item.Path)
+
+			ctx := context.Background()
+
 			// Skip attachment if file was already read and hasn't been modified.
-			lastRead := filetracker.LastReadTime(absPath)
-			if !lastRead.IsZero() {
-				if info, err := os.Stat(item.Path); err == nil && !info.ModTime().After(lastRead) {
-					return m, nil
+			if m.session.ID != "" {
+				lastRead := m.app.FileTracker.LastReadTime(ctx, m.session.ID, absPath)
+				if !lastRead.IsZero() {
+					if info, err := os.Stat(item.Path); err == nil && !info.ModTime().After(lastRead) {
+						return m, nil
+					}
 				}
+			} else if slices.Contains(m.sessionFileReads, absPath) {
+				return m, nil
 			}
+
+			m.sessionFileReads = append(m.sessionFileReads, absPath)
 			content, err := os.ReadFile(item.Path)
 			if err != nil {
 				// if it fails, let the LLM handle it later.
 				return m, nil
 			}
-			filetracker.RecordRead(absPath)
 			m.attachments = append(m.attachments, message.Attachment{
 				FilePath: item.Path,
 				FileName: filepath.Base(item.Path),
@@ -662,6 +674,9 @@ func (c *editorCmp) Bindings() []key.Binding {
 // we need to move some functionality to the page level
 func (c *editorCmp) SetSession(session session.Session) tea.Cmd {
 	c.session = session
+	for _, path := range c.sessionFileReads {
+		c.app.FileTracker.RecordRead(context.Background(), session.ID, path)
+	}
 	return nil
 }
 

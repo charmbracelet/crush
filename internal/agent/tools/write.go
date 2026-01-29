@@ -44,7 +44,13 @@ type WriteResponseMetadata struct {
 
 const WriteToolName = "write"
 
-func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permission.Service, files history.Service, workingDir string) fantasy.AgentTool {
+func NewWriteTool(
+	lspClients *csync.Map[string, *lsp.Client],
+	permissions permission.Service,
+	files history.Service,
+	filetracker filetracker.Service,
+	workingDir string,
+) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		WriteToolName,
 		string(writeDescription),
@@ -57,6 +63,11 @@ func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permis
 				return fantasy.NewTextErrorResponse("content is required"), nil
 			}
 
+			sessionID := GetSessionFromContext(ctx)
+			if sessionID == "" {
+				return fantasy.ToolResponse{}, fmt.Errorf("session_id is required")
+			}
+
 			filePath := filepathext.SmartJoin(workingDir, params.FilePath)
 
 			fileInfo, err := os.Stat(filePath)
@@ -65,8 +76,8 @@ func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permis
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("Path is a directory, not a file: %s", filePath)), nil
 				}
 
-				modTime := fileInfo.ModTime()
-				lastRead := filetracker.LastReadTime(filePath)
+				modTime := fileInfo.ModTime().Truncate(time.Second)
+				lastRead := filetracker.LastReadTime(ctx, sessionID, filePath)
 				if modTime.After(lastRead) {
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("File %s has been modified since it was last read.\nLast modification: %s\nLast read: %s\n\nPlease read the file again before modifying it.",
 						filePath, modTime.Format(time.RFC3339), lastRead.Format(time.RFC3339))), nil
@@ -91,11 +102,6 @@ func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permis
 				if readErr == nil {
 					oldContent = string(oldBytes)
 				}
-			}
-
-			sessionID := GetSessionFromContext(ctx)
-			if sessionID == "" {
-				return fantasy.ToolResponse{}, fmt.Errorf("session_id is required")
 			}
 
 			diff, additions, removals := diff.GenerateDiff(
@@ -153,8 +159,7 @@ func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permis
 				slog.Error("Error creating file history version", "error", err)
 			}
 
-			filetracker.RecordWrite(filePath)
-			filetracker.RecordRead(filePath)
+			filetracker.RecordRead(ctx, sessionID, filePath)
 
 			notifyLSPs(ctx, lspClients, params.FilePath)
 

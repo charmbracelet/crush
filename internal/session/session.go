@@ -26,6 +26,7 @@ type Todo struct {
 	Content    string     `json:"content"`
 	Status     TodoStatus `json:"status"`
 	ActiveForm string     `json:"active_form"`
+	Context    string     `json:"context,omitempty"`
 }
 
 type Session struct {

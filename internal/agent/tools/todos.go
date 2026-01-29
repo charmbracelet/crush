@@ -22,6 +22,7 @@ type TodoItem struct {
 	Content    string `json:"content" description:"What needs to be done (imperative form)"`
 	Status     string `json:"status" description:"Task status: pending, in_progress, or completed"`
 	ActiveForm string `json:"active_form" description:"Present continuous form (e.g., 'Running tests')"`
+	Context    string `json:"context,omitempty" description:"Optional context: relevant files, functions, reasoning, or implementation notes"`
 }
 
 type TodosResponseMetadata struct {
@@ -72,6 +73,7 @@ func NewTodosTool(sessions session.Service) fantasy.AgentTool {
 					Content:    item.Content,
 					Status:     session.TodoStatus(item.Status),
 					ActiveForm: item.ActiveForm,
+					Context:    item.Context,
 				}
 
 				newStatus := session.TodoStatus(item.Status)

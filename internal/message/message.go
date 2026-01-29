@@ -28,6 +28,7 @@ type Service interface {
 	List(ctx context.Context, sessionID string) ([]Message, error)
 	ListUserMessages(ctx context.Context, sessionID string) ([]Message, error)
 	ListAllUserMessages(ctx context.Context) ([]Message, error)
+	Copy(ctx context.Context, sessionID string, message Message) (Message, error)
 	Delete(ctx context.Context, id string) error
 	DeleteSessionMessages(ctx context.Context, sessionID string) error
 }
@@ -93,6 +94,17 @@ func (s *service) Create(ctx context.Context, sessionID string, params CreateMes
 	// concurrent modifications to the Parts slice.
 	s.Publish(pubsub.CreatedEvent, message.Clone())
 	return message, nil
+}
+
+func (s *service) Copy(ctx context.Context, sessionID string, message Message) (Message, error) {
+	params := CreateMessageParams{
+		Role:             message.Role,
+		Parts:            message.Parts,
+		Model:            message.Model,
+		Provider:         message.Provider,
+		IsSummaryMessage: message.IsSummaryMessage,
+	}
+	return s.Create(ctx, sessionID, params)
 }
 
 func (s *service) DeleteSessionMessages(ctx context.Context, sessionID string) error {

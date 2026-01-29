@@ -41,6 +41,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/completions"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
+	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/logo"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/uiutil"
@@ -1156,6 +1157,41 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 		cmds = append(cmds, m.initializeProject())
+		m.dialog.CloseDialog(dialog.CommandsID)
+
+	case dialog.ActionForkConversation:
+		if m.isAgentBusy() {
+			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait..."))
+			break
+		}
+		if m.session == nil {
+			cmds = append(cmds, uiutil.ReportWarn("No session to fork..."))
+			break
+		}
+		selectedItem := m.chat.SelectedItem()
+		if selectedItem == nil {
+			cmds = append(cmds, uiutil.ReportWarn("No message selected..."))
+			break
+		}
+		if _, ok := selectedItem.(*chat.UserMessageItem); !ok {
+			cmds = append(cmds, uiutil.ReportWarn("Can only fork from user messages..."))
+			break
+		}
+		messageID, ok := m.getMessageIDFromItem(selectedItem)
+		if !ok {
+			cmds = append(cmds, uiutil.ReportWarn("Cannot fork from selected item..."))
+			break
+		}
+		cmds = append(cmds, func() tea.Msg {
+			newSession, err := m.com.App.Sessions.Fork(context.Background(), m.session.ID, messageID, m.com.App.Messages)
+			if err != nil {
+				return uiutil.ReportError(err)()
+			}
+			return loadSessionMsg{
+				session: &newSession,
+				files:   []SessionFile{},
+			}
+		})
 		m.dialog.CloseDialog(dialog.CommandsID)
 
 	case dialog.ActionSelectModel:
@@ -2489,6 +2525,22 @@ func (m *UI) hasSession() bool {
 	return m.session != nil && m.session.ID != ""
 }
 
+// getMessageIDFromItem gets the message ID from a selected chat item.
+func (m *UI) getMessageIDFromItem(item list.Item) (string, bool) {
+	if toolMsg, ok := item.(chat.ToolMessageItem); ok {
+		return toolMsg.MessageID(), true
+	}
+	if msgItem, ok := item.(chat.MessageItem); ok {
+		itemID := msgItem.ID()
+		if strings.HasSuffix(itemID, ":assistant-info") {
+			baseID := strings.TrimSuffix(itemID, ":assistant-info")
+			return baseID, true
+		}
+		return itemID, true
+	}
+	return "", false
+}
+
 // mimeOf detects the MIME type of the given content.
 func mimeOf(content []byte) string {
 	mimeBufferSize := min(512, len(content))
@@ -2699,10 +2751,17 @@ func (m *UI) openModelsDialog() tea.Cmd {
 
 // openCommandsDialog opens the commands dialog.
 func (m *UI) openCommandsDialog() tea.Cmd {
+	canFork := false
+	selectedItem := m.chat.SelectedItem()
+	if selectedItem != nil {
+		if _, ok := selectedItem.(*chat.UserMessageItem); ok {
+			canFork = true
+		}
+	}
+
 	if m.dialog.ContainsDialog(dialog.CommandsID) {
-		// Bring to front
-		m.dialog.BringToFront(dialog.CommandsID)
-		return nil
+		// Close and reopen to refresh state
+		m.dialog.CloseDialog(dialog.CommandsID)
 	}
 
 	sessionID := ""
@@ -2710,7 +2769,7 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 		sessionID = m.session.ID
 	}
 
-	commands, err := dialog.NewCommands(m.com, sessionID, m.customCommands, m.mcpPrompts)
+	commands, err := dialog.NewCommands(m.com, sessionID, m.customCommands, m.mcpPrompts, canFork)
 	if err != nil {
 		return uiutil.ReportError(err)
 	}

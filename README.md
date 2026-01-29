@@ -369,6 +369,74 @@ completely hidden from the agent.
 
 To disable tools from MCP servers, see the [MCP config section](#mcps).
 
+### Configuring Individual Tools
+
+Some built-in tools can be configured with specific options. These configurations go in the `tools` section of your crush.json file.
+
+#### Bash Tool Configuration
+
+The bash tool can be configured to allow specific commands that would otherwise be blocked. This is useful when you need to use certain system commands for development or administration tasks.
+
+##### Configuration File
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "tools": {
+    "bash": {
+      "allowed_commands": ["curl", "wget", "apt", "npm", "go", "pnpm", "yarn"]
+    }
+  }
+}
+```
+
+##### Command Line Option
+
+You can also specify allowed commands directly via command line using the `-a` or `--allowed` flag, which has the highest priority (overrides both config file and hardcoded restrictions):
+
+```bash
+# Allow specific commands for interactive mode
+crush -a curl,wget,apt,npm
+
+# Allow commands with spaces
+crush -a "curl wget apt npm"
+
+# For non-interactive mode
+crush run -a curl,wget,apt "Install dependencies"
+```
+
+##### Priority Order
+
+Allowed commands are resolved in this priority order (highest to lowest):
+1. **Command line** (`-a/--allowed` flag) - highest priority
+2. **Configuration file** (`tools.bash.allowed_commands` in crush.json)
+3. **Hardcoded restrictions** - default if nothing else is specified
+
+##### How It Works
+
+The `allowed_commands` array removes specified commands from the banned commands list, allowing them to be used with any arguments. For example, if `"apt"` is in the allowed commands list:
+- `apt install python3` will be allowed
+- But `dnf install git` will still be blocked
+
+#### LS Tool Configuration
+
+The ls tool can be configured with limits to control output size:
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "tools": {
+    "ls": {
+      "max_depth": 0,
+      "max_items": 1000
+    }
+  }
+}
+```
+
+- `max_depth`: Maximum directory depth to traverse (0 = current directory only)
+- `max_items`: Maximum number of items to return
+
 ### Agent Skills
 
 Crush supports the [Agent Skills](https://agentskills.io) open standard for

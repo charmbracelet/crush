@@ -348,7 +348,8 @@ type Agent struct {
 }
 
 type Tools struct {
-	Ls ToolLs `json:"ls,omitempty"`
+	Ls   ToolLs   `json:"ls,omitzero"`
+	Bash ToolBash `json:"bash,omitzero"`
 }
 
 type ToolLs struct {
@@ -358,6 +359,10 @@ type ToolLs struct {
 
 func (t ToolLs) Limits() (depth, items int) {
 	return ptrValOr(t.MaxDepth, 0), ptrValOr(t.MaxItems, 0)
+}
+
+type ToolBash struct {
+	AllowedCommands []string `json:"allowed_commands,omitempty" jsonschema:"description=List of commands to remove from the banned commands list,example=curl,example=wget"`
 }
 
 // Config holds the configuration for crush.

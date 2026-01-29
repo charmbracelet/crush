@@ -256,15 +256,18 @@ func TestPermissionService_PlanMode(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name        string
-		mode        PermissionMode
-		action      string
-		shouldBlock bool
-		errContains string
+		name         string
+		mode         PermissionMode
+		toolName     string
+		action       string
+		allowedTools []string
+		shouldBlock  bool
+		errContains  string
 	}{
 		{
 			name:        "plan mode blocks write action",
 			mode:        ModePlan,
+			toolName:    "test-tool",
 			action:      "write",
 			shouldBlock: true,
 			errContains: "write operations are not allowed in plan mode",
@@ -272,25 +275,37 @@ func TestPermissionService_PlanMode(t *testing.T) {
 		{
 			name:        "plan mode blocks execute action",
 			mode:        ModePlan,
+			toolName:    "test-tool",
 			action:      "execute",
 			shouldBlock: true,
 			errContains: "write operations are not allowed in plan mode",
 		},
 		{
+			name:         "plan mode allows sequential thinking tool",
+			mode:         ModePlan,
+			toolName:     "mcp_sequential-thinking_sequentialthinking",
+			action:       "execute",
+			allowedTools: []string{"mcp_sequential-thinking_sequentialthinking"},
+			shouldBlock:  false,
+		},
+		{
 			name:        "yolo mode allows write action",
 			mode:        ModeYolo,
+			toolName:    "test-tool",
 			action:      "write",
 			shouldBlock: false,
 		},
 		{
 			name:        "yolo mode allows execute action",
 			mode:        ModeYolo,
+			toolName:    "test-tool",
 			action:      "execute",
 			shouldBlock: false,
 		},
 		{
 			name:        "yolo mode allows read action",
 			mode:        ModeYolo,
+			toolName:    "test-tool",
 			action:      "read",
 			shouldBlock: false,
 		},
@@ -300,7 +315,7 @@ func TestPermissionService_PlanMode(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			// Create service in regular mode initially.
-			service := NewPermissionService("/tmp", false, []string{})
+			service := NewPermissionService("/tmp", false, tt.allowedTools)
 
 			// Set the mode for this test case.
 			service.SetMode(tt.mode)
@@ -310,7 +325,7 @@ func TestPermissionService_PlanMode(t *testing.T) {
 			result, err := service.Request(ctx, CreatePermissionRequest{
 				SessionID:  "test-session",
 				ToolCallID: "test-call",
-				ToolName:   "test-tool",
+				ToolName:   tt.toolName,
 				Action:     tt.action,
 				Path:       "/tmp",
 			})

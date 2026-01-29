@@ -155,8 +155,8 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	// Check mode-specific behavior
 	switch mode {
 	case ModePlan:
-		// Plan mode: block all write operations
-		if isWriteOperation(opts.Action) {
+		// Plan mode: block all write operations (except read-only tools)
+		if isWriteOperation(opts.Action) && !isReadOnlyTool(opts.ToolName) {
 			return false, fmt.Errorf("write operations are not allowed in plan mode")
 		}
 		// Read operations fall through to normal permission checks
@@ -304,4 +304,13 @@ func NewPermissionService(workingDir string, skip bool, allowedTools []string) S
 func isWriteOperation(action string) bool {
 	writeActions := []string{"write", "execute"}
 	return slices.Contains(writeActions, action)
+}
+
+// isReadOnlyTool checks if a tool is read-only and should be allowed in plan
+// mode despite having an "execute" action. These tools don't modify state.
+func isReadOnlyTool(toolName string) bool {
+	readOnlyTools := []string{
+		"mcp_sequential-thinking_sequentialthinking",
+	}
+	return slices.Contains(readOnlyTools, toolName)
 }

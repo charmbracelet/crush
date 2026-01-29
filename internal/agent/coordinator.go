@@ -452,10 +452,53 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		}
 		slog.Debug("MCP not allowed", "tool", tool.Name(), "agent", agent.Name)
 	}
+
+	// Filter out write tools in plan mode
+	if c.permissions.GetMode() == permission.ModePlan {
+		filteredTools = filterPlanModeTools(filteredTools)
+	}
+
 	slices.SortFunc(filteredTools, func(a, b fantasy.AgentTool) int {
 		return strings.Compare(a.Info().Name, b.Info().Name)
 	})
 	return filteredTools, nil
+}
+
+// filterPlanModeTools removes write tools when in plan mode, keeping only
+// read-only tools.
+func filterPlanModeTools(tools []fantasy.AgentTool) []fantasy.AgentTool {
+	// List of tools allowed in plan mode (read-only operations)
+	allowedInPlanMode := []string{
+		"view",
+		"ls",
+		"glob",
+		"grep",
+		"lsp_diagnostics",
+		"lsp_references",
+		"agent",
+		"fetch",
+		"agentic_fetch",
+		"sourcegraph",
+		"job_output",
+		"job_kill",
+		"bash", // bash is allowed but write operations are blocked by permission system
+		"mcp_sequential-thinking_sequentialthinking",
+	}
+
+	var result []fantasy.AgentTool
+	for _, tool := range tools {
+		toolName := tool.Info().Name
+		// Allow if in the allowlist
+		if slices.Contains(allowedInPlanMode, toolName) {
+			result = append(result, tool)
+			continue
+		}
+		// Allow MCP tools that start with mcp_sequential-thinking_
+		if strings.HasPrefix(toolName, "mcp_sequential-thinking_") {
+			result = append(result, tool)
+		}
+	}
+	return result
 }
 
 // TODO: when we support multiple agents we need to change this so that we pass in the agent specific model config

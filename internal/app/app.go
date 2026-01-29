@@ -152,6 +152,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 		stdoutTTY bool
 		stderrTTY bool
 		stdinTTY  bool
+		progress  bool
 	)
 
 	if f, ok := output.(*os.File); ok {
@@ -159,6 +160,8 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	}
 	stderrTTY = term.IsTerminal(os.Stderr.Fd())
 	stdinTTY = term.IsTerminal(os.Stdin.Fd())
+
+	progress = app.config.Options.Progress == nil || *app.config.Options.Progress
 
 	if !quiet && stderrTTY {
 		t := styles.CurrentTheme()
@@ -244,7 +247,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	messageReadBytes := make(map[string]int)
 
 	defer func() {
-		if stderrTTY {
+		if progress && stderrTTY {
 			_, _ = fmt.Fprintf(os.Stderr, ansi.ResetProgressBar)
 		}
 
@@ -254,7 +257,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	}()
 
 	for {
-		if stderrTTY {
+		if progress && stderrTTY {
 			// HACK: Reinitialize the terminal progress bar on every iteration
 			// so it doesn't get hidden by the terminal due to inactivity.
 			_, _ = fmt.Fprintf(os.Stderr, ansi.SetIndeterminateProgressBar)

@@ -105,8 +105,8 @@ type sessionAgent struct {
 	isSubAgent           bool
 	sessions             session.Service
 	messages             message.Service
+	permissions          permission.Service
 	disableAutoSummarize bool
-	isYolo               bool
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, context.CancelFunc]
@@ -119,9 +119,9 @@ type SessionAgentOptions struct {
 	SystemPrompt         string
 	IsSubAgent           bool
 	DisableAutoSummarize bool
-	IsYolo               bool
 	Sessions             session.Service
 	Messages             message.Service
+	Permissions          permission.Service
 	Tools                []fantasy.AgentTool
 }
 
@@ -136,9 +136,9 @@ func NewSessionAgent(
 		isSubAgent:           opts.IsSubAgent,
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
+		permissions:          opts.Permissions,
 		disableAutoSummarize: opts.DisableAutoSummarize,
 		tools:                csync.NewSliceFrom(opts.Tools),
-		isYolo:               opts.IsYolo,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, context.CancelFunc](),
 	}
@@ -182,6 +182,25 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	if s := instructions.String(); s != "" {
 		systemPrompt += "\n\n<mcp-instructions>\n" + s + "\n</mcp-instructions>"
+	}
+
+	// Inject plan mode instructions if enabled.
+	if a.permissions != nil && a.permissions.GetMode() == permission.ModePlan {
+		planModeInstructions := `
+Plan mode is active. The user indicated that they do not want you to execute yet -- you MUST NOT make any edits, run any non-readonly tools (including changing configs or making commits), or otherwise make any changes to the system. This supercedes any other instructions you have received.
+
+When in plan mode:
+- Only use READ-ONLY tools (View, LS, Glob, Grep, lsp_diagnostics, lsp_references, agent, fetch, agentic_fetch, sourcegraph, mcp_sequential-thinking_sequentialthinking, Bash with readonly commands)
+- DO NOT use Edit, Write, Multiedit, or any tools that modify files
+- DO NOT run bash commands that modify the system
+- DO NOT make commits or push changes
+- Your goal is to explore, understand, and create a plan
+- Explain what you would do and what files you would change
+- Ask clarifying questions if needed
+`
+		systemPrompt = string(promptPrefix) + planModeInstructions + systemPrompt
+	} else {
+		systemPrompt = string(promptPrefix) + systemPrompt
 	}
 
 	if len(agentTools) > 0 {
@@ -300,6 +319,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			callContext = context.WithValue(callContext, tools.MessageIDContextKey, assistantMsg.ID)
 			callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatwalkCfg.SupportsImages)
 			callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatwalkCfg.Name)
+			isPlanMode := a.permissions != nil && a.permissions.GetMode() == permission.ModePlan
+			callContext = context.WithValue(callContext, tools.PlanModeContextKey, isPlanMode)
 			currentAssistant = &assistantMsg
 			return callContext, prepared, err
 		},

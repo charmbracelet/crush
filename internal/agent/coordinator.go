@@ -46,6 +46,7 @@ type Coordinator interface {
 	// INFO: (kujtim) this is not used yet we will use this when we have multiple agents
 	// SetMainAgent(string)
 	Run(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error)
+	RunWithPlanMode(ctx context.Context, sessionID, prompt string, isPlanMode bool, attachments ...message.Attachment) (*fantasy.AgentResult, error)
 	Cancel(sessionID string)
 	CancelAll()
 	IsSessionBusy(sessionID string) bool
@@ -113,6 +114,21 @@ func NewCoordinator(
 
 // Run implements Coordinator.
 func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
+	return c.RunWithPlanMode(ctx, sessionID, prompt, false, attachments...)
+}
+
+// RunWithPlanMode implements Coordinator with plan mode support.
+func (c *coordinator) RunWithPlanMode(ctx context.Context, sessionID string, prompt string, isPlanMode bool, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
+	// Set the permission mode based on isPlanMode parameter
+	previousMode := c.permissions.GetMode()
+	if isPlanMode {
+		c.permissions.SetMode(permission.ModePlan)
+	} else if previousMode == permission.ModePlan {
+		// If we're exiting plan mode, restore to regular mode and notify the agent
+		c.permissions.SetMode(permission.ModeRegular)
+		prompt = "[SYSTEM: Plan mode has been exited. You can now execute write operations and modify the system.]\n\n" + prompt
+	}
+
 	if err := c.readyWg.Wait(); err != nil {
 		return nil, err
 	}
@@ -329,16 +345,16 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 
 	largeProviderCfg, _ := c.cfg.Providers.Get(large.ModelCfg.Provider)
 	result := NewSessionAgent(SessionAgentOptions{
-		large,
-		small,
-		largeProviderCfg.SystemPromptPrefix,
-		"",
-		isSubAgent,
-		c.cfg.Options.DisableAutoSummarize,
-		c.permissions.SkipRequests(),
-		c.sessions,
-		c.messages,
-		nil,
+		LargeModel:           large,
+		SmallModel:           small,
+		SystemPromptPrefix:   largeProviderCfg.SystemPromptPrefix,
+		SystemPrompt:         "",
+		IsSubAgent:           isSubAgent,
+		DisableAutoSummarize: c.cfg.Options.DisableAutoSummarize,
+		Sessions:             c.sessions,
+		Messages:             c.messages,
+		Permissions:          c.permissions,
+		Tools:                nil,
 	})
 
 	c.readyWg.Go(func() error {
@@ -438,10 +454,53 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		}
 		slog.Debug("MCP not allowed", "tool", tool.Name(), "agent", agent.Name)
 	}
+
+	// Filter out write tools in plan mode
+	if c.permissions.GetMode() == permission.ModePlan {
+		filteredTools = filterPlanModeTools(filteredTools)
+	}
+
 	slices.SortFunc(filteredTools, func(a, b fantasy.AgentTool) int {
 		return strings.Compare(a.Info().Name, b.Info().Name)
 	})
 	return filteredTools, nil
+}
+
+// filterPlanModeTools removes write tools when in plan mode, keeping only
+// read-only tools.
+func filterPlanModeTools(tools []fantasy.AgentTool) []fantasy.AgentTool {
+	// List of tools allowed in plan mode (read-only operations)
+	allowedInPlanMode := []string{
+		"view",
+		"ls",
+		"glob",
+		"grep",
+		"lsp_diagnostics",
+		"lsp_references",
+		"agent",
+		"fetch",
+		"agentic_fetch",
+		"sourcegraph",
+		"job_output",
+		"job_kill",
+		"bash", // bash is allowed but write operations are blocked by permission system
+		"mcp_sequential-thinking_sequentialthinking",
+	}
+
+	var result []fantasy.AgentTool
+	for _, tool := range tools {
+		toolName := tool.Info().Name
+		// Allow if in the allowlist
+		if slices.Contains(allowedInPlanMode, toolName) {
+			result = append(result, tool)
+			continue
+		}
+		// Allow MCP tools that start with mcp_sequential-thinking_
+		if strings.HasPrefix(toolName, "mcp_sequential-thinking_") {
+			result = append(result, tool)
+		}
+	}
+	return result
 }
 
 // TODO: when we support multiple agents we need to change this so that we pass in the agent specific model config

@@ -73,6 +73,12 @@ func NewCharmtoneTheme() *Theme {
 	t.YoloDotsFocused = lipgloss.NewStyle().Foreground(charmtone.Zest).SetString(":::")
 	t.YoloDotsBlurred = t.YoloDotsFocused.Foreground(charmtone.Squid)
 
+	// Editor: Plan Mode.
+	t.PlanIconFocused = lipgloss.NewStyle().Foreground(charmtone.Pepper).Background(charmtone.Charple).Bold(true).SetString(" # ")
+	t.PlanIconBlurred = t.PlanIconFocused.Foreground(charmtone.Pepper).Background(charmtone.Squid)
+	t.PlanDotsFocused = lipgloss.NewStyle().Foreground(charmtone.Charple).SetString(":::")
+	t.PlanDotsBlurred = t.PlanDotsFocused.Foreground(charmtone.Squid)
+
 	// oAuth Chooser.
 	t.AuthBorderSelected = lipgloss.NewStyle().BorderForeground(charmtone.Guac)
 	t.AuthTextSelected = lipgloss.NewStyle().Foreground(charmtone.Julep)

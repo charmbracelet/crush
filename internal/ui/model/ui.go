@@ -329,6 +329,56 @@ func (m *UI) focusEditor() tea.Cmd {
 	return m.textarea.Focus()
 }
 
+func (m *UI) fork() tea.Msg {
+	if m.isAgentBusy() {
+		return uiutil.ReportWarn("Agent is busy, please wait...")()
+	}
+	if m.session == nil {
+		return uiutil.ReportWarn("No session to fork...")()
+	}
+	selectedItem := m.chat.SelectedItem()
+	if selectedItem == nil {
+		return uiutil.ReportWarn("No message selected...")()
+	}
+	messageID, ok := m.getMessageIDFromItem(selectedItem)
+	if !ok {
+		return uiutil.ReportWarn("Cannot fork from selected item...")()
+	}
+	newSession, err := m.com.App.Sessions.Fork(context.Background(), m.session.ID, messageID, m.com.App.Messages)
+	if err != nil {
+		return uiutil.ReportError(err)()
+	}
+	return loadSessionMsg{
+		session: &newSession,
+		files:   []SessionFile{},
+	}
+}
+
+func (m *UI) delete() tea.Msg {
+	if m.isAgentBusy() {
+		return uiutil.ReportWarn("Agent is busy, please wait...")()
+	}
+	if m.session == nil {
+		return uiutil.ReportWarn("No session to delete from...")()
+	}
+	selectedItem := m.chat.SelectedItem()
+	if selectedItem == nil {
+		return uiutil.ReportWarn("No message selected...")()
+	}
+	if _, ok := selectedItem.(*chat.UserMessageItem); !ok {
+		return uiutil.ReportWarn("Can only delete from user messages...")()
+	}
+	messageID, ok := m.getMessageIDFromItem(selectedItem)
+	if !ok {
+		return uiutil.ReportWarn("Cannot get message ID from selected item...")()
+	}
+	err := m.com.App.Messages.DeleteMessagesFrom(context.Background(), m.session.ID, messageID)
+	if err != nil {
+		return uiutil.ReportError(err)()
+	}
+	return m.loadSession(m.session.ID)()
+}
+
 // loadCustomCommands loads the custom commands asynchronously.
 func (m *UI) loadCustomCommands() tea.Cmd {
 	return func() tea.Msg {
@@ -1165,76 +1215,12 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		cmds = append(cmds, m.initializeProject())
 		m.dialog.CloseDialog(dialog.CommandsID)
-
 	case dialog.ActionForkConversation:
-		if m.isAgentBusy() {
-			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait..."))
-			break
-		}
-		if m.session == nil {
-			cmds = append(cmds, uiutil.ReportWarn("No session to fork..."))
-			break
-		}
-		selectedItem := m.chat.SelectedItem()
-		if selectedItem == nil {
-			cmds = append(cmds, uiutil.ReportWarn("No message selected..."))
-			break
-		}
-		if _, ok := selectedItem.(*chat.UserMessageItem); !ok {
-			cmds = append(cmds, uiutil.ReportWarn("Can only fork from user messages..."))
-			break
-		}
-		messageID, ok := m.getMessageIDFromItem(selectedItem)
-		if !ok {
-			cmds = append(cmds, uiutil.ReportWarn("Cannot fork from selected item..."))
-			break
-		}
-		cmds = append(cmds, func() tea.Msg {
-			newSession, err := m.com.App.Sessions.Fork(context.Background(), m.session.ID, messageID, m.com.App.Messages)
-			if err != nil {
-				return uiutil.ReportError(err)()
-			}
-			return loadSessionMsg{
-				session: &newSession,
-				files:   []SessionFile{},
-			}
-		})
 		m.dialog.CloseDialog(dialog.CommandsID)
-		cmds = append(cmds, m.focusEditor())
-
+		cmds = append(cmds, m.fork, m.focusEditor())
 	case dialog.ActionDeleteMessages:
-		if m.isAgentBusy() {
-			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait..."))
-			break
-		}
-		if m.session == nil {
-			cmds = append(cmds, uiutil.ReportWarn("No session to delete from..."))
-			break
-		}
-		selectedItem := m.chat.SelectedItem()
-		if selectedItem == nil {
-			cmds = append(cmds, uiutil.ReportWarn("No message selected..."))
-			break
-		}
-		if _, ok := selectedItem.(*chat.UserMessageItem); !ok {
-			cmds = append(cmds, uiutil.ReportWarn("Can only delete from user messages..."))
-			break
-		}
-		messageID, ok := m.getMessageIDFromItem(selectedItem)
-		if !ok {
-			cmds = append(cmds, uiutil.ReportWarn("Cannot get message ID from selected item..."))
-			break
-		}
-		cmds = append(cmds, func() tea.Msg {
-			err := m.com.App.Messages.DeleteMessagesFrom(context.Background(), m.session.ID, messageID)
-			if err != nil {
-				return uiutil.ReportError(err)()
-			}
-			return m.loadSession(m.session.ID)()
-		})
 		m.dialog.CloseDialog(dialog.CommandsID)
-		cmds = append(cmds, m.focusEditor())
-
+		cmds = append(cmds, m.delete, m.focusEditor())
 	case dialog.ActionSelectModel:
 		if m.isAgentBusy() {
 			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait..."))

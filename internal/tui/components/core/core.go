@@ -8,6 +8,8 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/tui/exp/diffview"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/x/ansi"
@@ -204,4 +206,18 @@ func DiffFormatter() *diffview.DiffView {
 	style := chroma.MustNewStyle("crush", styles.GetChromaTheme())
 	diff := formatDiff.ChromaStyle(style).Style(t.S().Diff).TabWidth(4)
 	return diff
+}
+
+// FormatModelWithProvider formats a model name with its provider name.
+// Returns the formatted string with "Provider / Model" format.
+func FormatModelWithProvider(model *catwalk.Model, provider *config.ProviderConfig, modelStyle lipgloss.Style) string {
+	if provider != nil {
+		providerName := provider.Name
+		if providerName == "" {
+			providerName = provider.ID
+		}
+		return modelStyle.Render(providerName + " / " + model.Name)
+	}
+
+	return modelStyle.Render(model.Name)
 }

@@ -3,6 +3,7 @@ package permission
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -11,6 +12,18 @@ import (
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
+)
+
+// PermissionMode represents the three mutually exclusive permission states.
+type PermissionMode int
+
+const (
+	// ModeRegular requires user approval for each action.
+	ModeRegular PermissionMode = iota
+	// ModeYolo automatically approves all actions without prompting.
+	ModeYolo
+	// ModePlan blocks all write operations and prompts for read operations.
+	ModePlan
 )
 
 var ErrorPermissionDenied = errors.New("user denied permission")
@@ -49,7 +62,11 @@ type Service interface {
 	Deny(permission PermissionRequest)
 	Request(ctx context.Context, opts CreatePermissionRequest) (bool, error)
 	AutoApproveSession(sessionID string)
+	SetMode(mode PermissionMode)
+	GetMode() PermissionMode
+	// Deprecated: Use SetMode(ModeYolo) instead.
 	SetSkipRequests(skip bool)
+	// Deprecated: Use GetMode() == ModeYolo instead.
 	SkipRequests() bool
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
 }
@@ -64,7 +81,8 @@ type permissionService struct {
 	pendingRequests       *csync.Map[string, chan bool]
 	autoApproveSessions   map[string]bool
 	autoApproveSessionsMu sync.RWMutex
-	skip                  bool
+	mode                  PermissionMode
+	modeMu                sync.RWMutex
 	allowedTools          []string
 
 	// used to make sure we only process one request at a time
@@ -130,8 +148,23 @@ func (s *permissionService) Deny(permission PermissionRequest) {
 }
 
 func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRequest) (bool, error) {
-	if s.skip {
+	s.modeMu.RLock()
+	mode := s.mode
+	s.modeMu.RUnlock()
+
+	// Check mode-specific behavior
+	switch mode {
+	case ModePlan:
+		// Plan mode: block all write operations (except read-only tools)
+		if isWriteOperation(opts.Action) && !isReadOnlyTool(opts.ToolName) {
+			return false, fmt.Errorf("write operations are not allowed in plan mode")
+		}
+		// Read operations fall through to normal permission checks
+	case ModeYolo:
+		// Yolo mode: auto-approve everything
 		return true, nil
+	case ModeRegular:
+		// Regular mode: fall through to normal permission checks
 	}
 
 	// tell the UI that a permission was requested
@@ -225,23 +258,59 @@ func (s *permissionService) SubscribeNotifications(ctx context.Context) <-chan p
 	return s.notificationBroker.Subscribe(ctx)
 }
 
+func (s *permissionService) SetMode(mode PermissionMode) {
+	s.modeMu.Lock()
+	s.mode = mode
+	s.modeMu.Unlock()
+}
+
+func (s *permissionService) GetMode() PermissionMode {
+	s.modeMu.RLock()
+	defer s.modeMu.RUnlock()
+	return s.mode
+}
+
 func (s *permissionService) SetSkipRequests(skip bool) {
-	s.skip = skip
+	if skip {
+		s.SetMode(ModeYolo)
+	} else {
+		s.SetMode(ModeRegular)
+	}
 }
 
 func (s *permissionService) SkipRequests() bool {
-	return s.skip
+	return s.GetMode() == ModeYolo
 }
 
 func NewPermissionService(workingDir string, skip bool, allowedTools []string) Service {
+	mode := ModeRegular
+	if skip {
+		mode = ModeYolo
+	}
 	return &permissionService{
 		Broker:              pubsub.NewBroker[PermissionRequest](),
 		notificationBroker:  pubsub.NewBroker[PermissionNotification](),
 		workingDir:          workingDir,
 		sessionPermissions:  make([]PermissionRequest, 0),
 		autoApproveSessions: make(map[string]bool),
-		skip:                skip,
+		mode:                mode,
 		allowedTools:        allowedTools,
 		pendingRequests:     csync.NewMap[string, chan bool](),
 	}
+}
+
+// isWriteOperation checks if an action is a write operation that should be
+// blocked in plan mode.
+func isWriteOperation(action string) bool {
+	writeActions := []string{"write", "execute"}
+	return slices.Contains(writeActions, action)
+}
+
+// isReadOnlyTool checks if a tool is read-only and should be allowed in plan
+// mode despite having an "execute" action. These tools don't modify state.
+func isReadOnlyTool(toolName string) bool {
+	readOnlyTools := []string{
+		"mcp_sequential-thinking_sequentialthinking",
+	}
+	return slices.Contains(readOnlyTools, toolName)
 }

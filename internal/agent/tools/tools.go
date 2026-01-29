@@ -9,6 +9,7 @@ type (
 	messageIDContextKey string
 	supportsImagesKey   string
 	modelNameKey        string
+	planModeKey         string
 )
 
 const (
@@ -20,6 +21,8 @@ const (
 	SupportsImagesContextKey supportsImagesKey = "supports_images"
 	// ModelNameContextKey is the key for the model name in the context.
 	ModelNameContextKey modelNameKey = "model_name"
+	// PlanModeContextKey is the key for plan mode in the context.
+	PlanModeContextKey planModeKey = "plan_mode"
 )
 
 // GetSessionFromContext retrieves the session ID from the context.
@@ -71,4 +74,17 @@ func GetModelNameFromContext(ctx context.Context) string {
 		return ""
 	}
 	return s
+}
+
+// IsPlanMode checks if plan mode is enabled in the context.
+func IsPlanMode(ctx context.Context) bool {
+	planMode := ctx.Value(PlanModeContextKey)
+	if planMode == nil {
+		return false
+	}
+	b, ok := planMode.(bool)
+	if !ok {
+		return false
+	}
+	return b
 }

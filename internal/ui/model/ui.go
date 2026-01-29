@@ -747,7 +747,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.textarea.Placeholder = m.readyPlaceholder
 		}
-		if m.com.App.Permissions.SkipRequests() {
+		if m.com.App.Permissions.GetMode() == permission.ModeYolo {
 			m.textarea.Placeholder = "Yolo mode!"
 		}
 	}
@@ -1117,6 +1117,7 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	var cmds []tea.Cmd
 	action := m.dialog.Update(msg)
+	slog.Info("handleDialogMsg", "action", fmt.Sprintf("%T", action), "msg", fmt.Sprintf("%T", msg))
 	if action == nil {
 		return tea.Batch(cmds...)
 	}
@@ -1160,9 +1161,13 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 	// Command dialog messages
 	case dialog.ActionToggleYoloMode:
-		yolo := !m.com.App.Permissions.SkipRequests()
-		m.com.App.Permissions.SetSkipRequests(yolo)
-		m.setEditorPrompt(yolo)
+		isYolo := m.com.App.Permissions.GetMode() == permission.ModeYolo
+		if isYolo {
+			m.com.App.Permissions.SetMode(permission.ModeRegular)
+		} else {
+			m.com.App.Permissions.SetMode(permission.ModeYolo)
+		}
+		m.setEditorPrompt(!isYolo)
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionNewSession:
 		if m.isAgentBusy() {

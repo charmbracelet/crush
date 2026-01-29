@@ -393,7 +393,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	if c.isUserMessageSelected {
 		commands = append(commands,
 			NewCommandItem(c.com.Styles, "fork_conversation", "Fork Conversation", "", ActionForkConversation{}),
-			NewCommandItem(c.com.Styles, "delete_messages", "Delete Messages (including this)", "", ActionDeleteMessages{}),
+			NewCommandItem(c.com.Styles, "delete_messages", "Delete Bellow", "", ActionDeleteMessages{}),
 		)
 	}
 

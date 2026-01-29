@@ -13,11 +13,15 @@ import (
 )
 
 const (
-	fps        = 24
-	decay      = 12
-	pauseSteps = 48
-	lowChar    = "•"
-	highChar   = "│"
+	fps             = 24
+	decay           = 12
+	pauseSteps      = 48
+	lowChar         = "·"
+	highChar        = "│"
+	ellipsisChar    = "."
+	maxEllipsisDots = 3
+	ellipsisFPS     = 8
+	ellipsisPause   = 2 // frames to pause at max dots
 )
 
 // Internal ID management. Used during animating to ensure that frame messages
@@ -32,12 +36,14 @@ type Config struct {
 	Width      int
 	EmptyColor color.Color
 	Blend      []color.Color
+	LabelColor color.Color
 }
 
 // DefaultConfig returns the default spinner configuration.
 func DefaultConfig() Config {
 	return Config{
-		Width:      16,
+		Width:      14,
+		LabelColor: charmtone.Smoke,
 		EmptyColor: charmtone.Charcoal,
 		Blend: []color.Color{
 			charmtone.Charcoal,
@@ -47,24 +53,31 @@ func DefaultConfig() Config {
 	}
 }
 
+// StepMsg is a message sent to spinners to indicate it's time to update their
+// state.
 type StepMsg struct {
 	ID  int
 	tag int
 }
 
+// Spinner is a spinner Bubble.
 type Spinner struct {
-	Config      Config
-	id          int
-	tag         int
-	index       int
-	pause       int
-	cells       []int
-	maxAt       []int // frame when cell reached max height
-	emptyChar   string
-	blendStyles []lipgloss.Style
+	Label            string
+	Config           Config
+	id               int
+	tag              int
+	ellipsisStep     int
+	index            int
+	pause            int
+	cells            []int
+	maxAt            []int // frame when cell reached max height
+	emptyChar        string
+	blendStyles      []lipgloss.Style
+	labelEllipsisDot string
 }
 
-func NewSpinner() Spinner {
+// NewSpinner creates a new Spinner with the given label.
+func NewSpinner(label string) Spinner {
 	c := DefaultConfig()
 	blend := lipgloss.Blend1D(c.Width, c.Blend...)
 	blendStyles := make([]lipgloss.Style, len(blend))
@@ -73,26 +86,37 @@ func NewSpinner() Spinner {
 		blendStyles[i] = lipgloss.NewStyle().Foreground(s)
 	}
 
+	labelStyle := lipgloss.NewStyle().Foreground(c.LabelColor)
+
 	return Spinner{
-		Config:      c,
-		id:          nextID(),
-		index:       -1,
-		cells:       make([]int, c.Width),
-		maxAt:       make([]int, c.Width),
-		emptyChar:   lipgloss.NewStyle().Foreground(c.EmptyColor).Render(string(lowChar)),
-		blendStyles: blendStyles,
+		Label:            labelStyle.Render(label),
+		labelEllipsisDot: labelStyle.Render(ellipsisChar),
+		Config:           c,
+		id:               nextID(),
+		index:            -1,
+		cells:            make([]int, c.Width),
+		maxAt:            make([]int, c.Width),
+		emptyChar:        lipgloss.NewStyle().Foreground(c.EmptyColor).Render(string(lowChar)),
+		blendStyles:      blendStyles,
 	}
 }
 
+// Init initializes the spinner. It satisfies tea.Model.
 func (s Spinner) Init() tea.Cmd {
 	return nil
 }
 
+// Update updates the spinner per incoming messages. It satisfies tea.Model.
 func (s Spinner) Update(msg tea.Msg) (Spinner, tea.Cmd) {
 	if _, ok := msg.(StepMsg); ok {
 		if msg.(StepMsg).ID != s.id {
 			// Reject events from other spinners.
 			return s, nil
+		}
+
+		s.ellipsisStep++
+		if s.ellipsisStep > ellipsisFPS*(maxEllipsisDots+ellipsisPause) {
+			s.ellipsisStep = 0
 		}
 
 		if s.pause > 0 {
@@ -119,17 +143,19 @@ func (s Spinner) Update(msg tea.Msg) (Spinner, tea.Cmd) {
 		}
 
 		s.tag++
-		return s, s.Step()
+		return s, s.Start()
 	}
 	return s, nil
 }
 
-func (s Spinner) Step() tea.Cmd {
+// Start starts the spinner animation.
+func (s Spinner) Start() tea.Cmd {
 	return tea.Tick(time.Second/time.Duration(fps), func(t time.Time) tea.Msg {
 		return StepMsg{ID: s.id}
 	})
 }
 
+// View renders the spinner to a string. It satisfies tea.Model.
 func (s Spinner) View() string {
 	if s.Config.Width == 0 {
 		return ""
@@ -142,6 +168,17 @@ func (s Spinner) View() string {
 			continue
 		}
 		b.WriteString(s.blendStyles[s.cells[i]-1].Render(highChar))
+	}
+
+	if s.Label != "" {
+		b.WriteString(" ")
+		b.WriteString(s.Label)
+
+		// Draw ellipsis.
+		dots := min(s.ellipsisStep/ellipsisFPS, maxEllipsisDots)
+		for range dots {
+			b.WriteString(s.labelEllipsisDot)
+		}
 	}
 
 	return b.String()

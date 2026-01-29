@@ -1,5 +1,7 @@
 package main
 
+// This example is used for spinner tuning.
+
 import (
 	"fmt"
 	"os"
@@ -17,7 +19,7 @@ type Model struct {
 
 // Init initializes the model. It satisfies tea.Model.
 func (m Model) Init() tea.Cmd {
-	return m.spinner.Step()
+	return m.spinner.Start()
 }
 
 // Update updates the model per on incoming messages. It satisfies tea.Model.
@@ -45,15 +47,8 @@ func (m Model) View() tea.View {
 }
 
 func main() {
-	f, err := tea.LogToFile("spinner.log", "spinner")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating log file: %v\n", err)
-		os.Exit(1)
-	}
-	defer f.Close()
-
 	if _, err := tea.NewProgram(Model{
-		spinner: spinner.NewSpinner(),
+		spinner: spinner.NewSpinner("Romanticizing"),
 	}).Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error running program: %v\n", err)
 		os.Exit(1)

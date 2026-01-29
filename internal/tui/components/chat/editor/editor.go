@@ -358,6 +358,7 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		if key.Matches(msg, m.keyMap.CycleMode) {
 			m.mode = (m.mode + 1) % 3
 			m.setEditorPrompt()
+			m.syncModeToPermissions()
 			return m, nil
 		}
 		if key.Matches(msg, DeleteKeyMaps.Escape) {

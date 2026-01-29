@@ -45,6 +45,13 @@ func (m Model) View() tea.View {
 }
 
 func main() {
+	f, err := tea.LogToFile("spinner.log", "spinner")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating log file: %v\n", err)
+		os.Exit(1)
+	}
+	defer f.Close()
+
 	if _, err := tea.NewProgram(Model{
 		spinner: spinner.NewSpinner(),
 	}).Run(); err != nil {

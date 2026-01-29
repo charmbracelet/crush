@@ -2,6 +2,7 @@
 package spinner
 
 import (
+	"log"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -10,11 +11,13 @@ import (
 )
 
 const (
-	fps       = 24
-	emptyChar = '░'
+	fps        = 24
+	pauseSteps = 72
+	width      = 12
 )
 
 var blocks = []rune{
+	' ',
 	'▁',
 	'▂',
 	'▃',
@@ -33,26 +36,23 @@ func nextID() int {
 	return int(atomic.AddInt64(&lastID, 1))
 }
 
-type StepMsg struct{ ID int }
-
-type Config struct {
-	Width int
-}
-
-func DefaultConfig() Config {
-	return Config{Width: 12}
+type StepMsg struct {
+	ID  int
+	tag int
 }
 
 type Spinner struct {
-	Config Config
-	id     int
-	index  int
+	id    int
+	tag   int
+	index int
+	pause int
+	cells []int
 }
 
 func NewSpinner() Spinner {
 	return Spinner{
-		id:     nextID(),
-		Config: DefaultConfig(),
+		id:    nextID(),
+		cells: make([]int, width),
 	}
 }
 
@@ -66,10 +66,28 @@ func (s Spinner) Update(msg tea.Msg) (Spinner, tea.Cmd) {
 			// Reject events from other spinners.
 			return s, nil
 		}
-		s.index++
-		if s.index > s.Config.Width-1 {
-			s.index = 0
+
+		if s.pause > 0 {
+			s.pause--
+			log.Println("pausing", s.pause)
+		} else {
+			s.index++
+			if s.index > width {
+				s.pause = pauseSteps
+				s.index = 0
+			}
+
 		}
+
+		for i, c := range s.cells {
+			if s.index == i {
+				s.cells[i] = len(blocks) - 1
+			} else {
+				s.cells[i] = max(0, c-1)
+			}
+		}
+
+		s.tag++
 		return s, s.Step()
 	}
 	return s, nil
@@ -82,13 +100,13 @@ func (s Spinner) Step() tea.Cmd {
 }
 
 func (s Spinner) View() string {
+	if len(blocks) == 0 {
+		return ""
+	}
+
 	var b strings.Builder
-	for i := range s.Config.Width {
-		if i == s.index {
-			b.WriteRune(blocks[len(blocks)-1])
-			continue
-		}
-		b.WriteRune(emptyChar)
+	for i := range s.cells {
+		b.WriteRune(blocks[s.cells[i]])
 	}
 
 	return b.String()

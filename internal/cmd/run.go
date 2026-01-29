@@ -29,6 +29,12 @@ crush run "What is this code doing?" <<< prrr.go
 
 # Run in quiet mode (hide the spinner)
 crush run --quiet "Generate a README for this project"
+
+# Allow specific commands for this run
+crush run -a curl,wget,apt "Install dependencies"
+
+# Allow multiple commands with spaces
+crush run -a "curl wget apt npm" "Setup project"
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		quiet, _ := cmd.Flags().GetBool("quiet")

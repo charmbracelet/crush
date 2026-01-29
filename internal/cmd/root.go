@@ -40,6 +40,7 @@ func init() {
 	rootCmd.PersistentFlags().StringP("cwd", "c", "", "Current working directory")
 	rootCmd.PersistentFlags().StringP("data-dir", "D", "", "Custom crush data directory")
 	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Debug")
+	rootCmd.PersistentFlags().StringSliceP("allowed", "a", []string{}, "Commands to allow (overrides config and hardcoded restrictions)")
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
 	rootCmd.Flags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
 
@@ -80,6 +81,12 @@ crush run "Explain the use of context in Go"
 
 # Run in dangerous mode (auto-accept all permissions)
 crush -y
+
+# Allow specific commands (overrides config)
+crush -a curl,wget,apt,npm
+
+# Allow commands with spaces
+crush -a "curl wget apt npm"
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		app, err := setupAppWithProgressBar(cmd)
@@ -193,6 +200,7 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 	debug, _ := cmd.Flags().GetBool("debug")
 	yolo, _ := cmd.Flags().GetBool("yolo")
 	dataDir, _ := cmd.Flags().GetString("data-dir")
+	allowedCommands, _ := cmd.Flags().GetStringSlice("allowed")
 	ctx := cmd.Context()
 
 	cwd, err := ResolveCwd(cmd)
@@ -209,6 +217,12 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 		cfg.Permissions = &config.Permissions{}
 	}
 	cfg.Permissions.SkipRequests = yolo
+
+	// Override allowed_commands from command line if provided
+	if len(allowedCommands) > 0 {
+		// Command line has highest priority - override config
+		cfg.Tools.Bash.AllowedCommands = allowedCommands
+	}
 
 	if err := createDotCrushDir(cfg.Options.DataDirectory); err != nil {
 		return nil, err

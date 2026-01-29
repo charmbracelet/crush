@@ -95,3 +95,18 @@ type SessionInfoProvider interface {
 	// Returns nil if no session is active.
 	SessionInfo() *SessionInfo
 }
+
+// PromptSubmitter allows plugins to submit prompts to the agent.
+type PromptSubmitter interface {
+	// SubmitPrompt sends a prompt to the agent as if it were typed by the user.
+	// If the agent is busy, the prompt will be queued and executed when ready.
+	// The sessionID is automatically determined from the current session.
+	SubmitPrompt(ctx context.Context, prompt string) error
+
+	// CurrentSessionID returns the ID of the currently active session.
+	// Returns empty string if no session is active.
+	CurrentSessionID() string
+
+	// IsSessionBusy returns true if the current session is busy processing.
+	IsSessionBusy() bool
+}

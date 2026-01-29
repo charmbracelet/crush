@@ -18,6 +18,7 @@ type App struct {
 	permissions         permission.Service
 	messageSubscriber   MessageSubscriber
 	sessionInfoProvider SessionInfoProvider
+	promptSubmitter     PromptSubmitter
 	logger              *slog.Logger
 	cleanupFuncs        []func() error
 }
@@ -90,6 +91,13 @@ func WithMessageSubscriber(ms MessageSubscriber) AppOption {
 func WithSessionInfoProvider(sip SessionInfoProvider) AppOption {
 	return func(a *App) {
 		a.sessionInfoProvider = sip
+	}
+}
+
+// WithPromptSubmitter sets the prompt submitter for hooks to send prompts.
+func WithPromptSubmitter(ps PromptSubmitter) AppOption {
+	return func(a *App) {
+		a.promptSubmitter = ps
 	}
 }
 
@@ -185,6 +193,12 @@ func (a *App) Messages() MessageSubscriber {
 // Returns nil if no session info provider is configured.
 func (a *App) SessionInfo() SessionInfoProvider {
 	return a.sessionInfoProvider
+}
+
+// PromptSubmitter returns the prompt submitter for hooks to send prompts.
+// Returns nil if no prompt submitter is configured.
+func (a *App) PromptSubmitter() PromptSubmitter {
+	return a.promptSubmitter
 }
 
 // Logger returns a structured logger.

@@ -70,9 +70,10 @@ type coordinator struct {
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
 
-	pluginApp          *plugin.App
-	hooks              []plugin.Hook
-	sessionInfoAdapter *SessionInfoAdapter
+	pluginApp               *plugin.App
+	hooks                   []plugin.Hook
+	sessionInfoAdapter      *SessionInfoAdapter
+	promptSubmitterAdapter  *PromptSubmitterAdapter
 
 	readyWg errgroup.Group
 }
@@ -118,6 +119,13 @@ func NewCoordinator(
 	}
 	c.currentAgent = agent
 	c.agents[config.AgentCoder] = agent
+
+	// Set the coordinator reference on the prompt submitter adapter.
+	// This must be done after the coordinator is fully initialized.
+	if c.promptSubmitterAdapter != nil {
+		c.promptSubmitterAdapter.SetCoordinator(c)
+	}
+
 	return c, nil
 }
 
@@ -160,6 +168,11 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	if c.sessionInfoAdapter != nil {
 		c.sessionInfoAdapter.SetSessionID(sessionID)
 		c.sessionInfoAdapter.SetModel(model.CatwalkCfg.ID, model.ModelCfg.Provider)
+	}
+
+	// Update prompt submitter adapter with current session.
+	if c.promptSubmitterAdapter != nil {
+		c.promptSubmitterAdapter.SetSessionID(sessionID)
 	}
 
 	if providerCfg.OAuthToken != nil && providerCfg.OAuthToken.IsExpired() {
@@ -920,6 +933,10 @@ func (c *coordinator) initPluginHooks(ctx context.Context) error {
 	// Create session info adapter for hooks.
 	c.sessionInfoAdapter = NewSessionInfoAdapter(c.sessions)
 
+	// Create prompt submitter adapter for hooks.
+	// The coordinator reference will be set after NewCoordinator returns.
+	c.promptSubmitterAdapter = NewPromptSubmitterAdapter()
+
 	// Create shared plugin app for both tools and hooks.
 	c.pluginApp = plugin.NewApp(
 		plugin.WithWorkingDir(c.cfg.WorkingDir()),
@@ -928,6 +945,7 @@ func (c *coordinator) initPluginHooks(ctx context.Context) error {
 		plugin.WithDisabledPlugins(disabledPlugins),
 		plugin.WithMessageSubscriber(messageAdapter),
 		plugin.WithSessionInfoProvider(c.sessionInfoAdapter),
+		plugin.WithPromptSubmitter(c.promptSubmitterAdapter),
 	)
 
 	// Initialize registered hooks.

@@ -161,7 +161,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	stderrTTY = term.IsTerminal(os.Stderr.Fd())
 	stdinTTY = term.IsTerminal(os.Stdin.Fd())
 	progress = app.config.Options.Progress == nil || *app.config.Options.Progress
-  
+
 	if !hideSpinner && stderrTTY {
 		t := styles.CurrentTheme()
 

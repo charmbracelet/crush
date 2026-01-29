@@ -141,7 +141,7 @@ func renderItem(t ListIemStyles, title string, info string, focused bool, width 
 	titleWidth := lipgloss.Width(title)
 	gap := strings.Repeat(" ", max(0, lineWidth-titleWidth-infoWidth))
 	content := title
-	if matches := len(m.MatchedIndexes); matches > 0 {
+	if m != nil && len(m.MatchedIndexes) > 0 {
 		var lastPos int
 		parts := make([]string, 0)
 		ranges := matchedRanges(m.MatchedIndexes)

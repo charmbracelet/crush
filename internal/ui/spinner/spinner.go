@@ -8,15 +8,16 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/charmtone"
 )
 
 const (
 	fps        = 24
+	decay      = 12
 	pauseSteps = 48
-	width      = 12
-	lowChar    = '•'
-	highChar   = '│'
+	lowChar    = "•"
+	highChar   = "│"
 )
 
 // Internal ID management. Used during animating to ensure that frame messages
@@ -28,8 +29,22 @@ func nextID() int {
 }
 
 type Config struct {
-	LowColor  color.Color
-	PeakColor color.Color
+	Width      int
+	EmptyColor color.Color
+	Blend      []color.Color
+}
+
+// DefaultConfig returns the default spinner configuration.
+func DefaultConfig() Config {
+	return Config{
+		Width:      16,
+		EmptyColor: charmtone.Charcoal,
+		Blend: []color.Color{
+			charmtone.Charcoal,
+			charmtone.Charple,
+			charmtone.Dolly,
+		},
+	}
 }
 
 type StepMsg struct {
@@ -38,25 +53,34 @@ type StepMsg struct {
 }
 
 type Spinner struct {
-	Config Config
-	id     int
-	tag    int
-	index  int
-	pause  int
-	cells  []int
-	maxAt  []int // frame when cell reached max height
+	Config      Config
+	id          int
+	tag         int
+	index       int
+	pause       int
+	cells       []int
+	maxAt       []int // frame when cell reached max height
+	emptyChar   string
+	blendStyles []lipgloss.Style
 }
 
 func NewSpinner() Spinner {
+	c := DefaultConfig()
+	blend := lipgloss.Blend1D(c.Width, c.Blend...)
+	blendStyles := make([]lipgloss.Style, len(blend))
+
+	for i, s := range blend {
+		blendStyles[i] = lipgloss.NewStyle().Foreground(s)
+	}
+
 	return Spinner{
-		Config: Config{
-			PeakColor: charmtone.Charple,
-			LowColor:  charmtone.Blush,
-		},
-		id:    nextID(),
-		index: -1,
-		cells: make([]int, width),
-		maxAt: make([]int, width),
+		Config:      c,
+		id:          nextID(),
+		index:       -1,
+		cells:       make([]int, c.Width),
+		maxAt:       make([]int, c.Width),
+		emptyChar:   lipgloss.NewStyle().Foreground(c.EmptyColor).Render(string(lowChar)),
+		blendStyles: blendStyles,
 	}
 }
 
@@ -75,7 +99,7 @@ func (s Spinner) Update(msg tea.Msg) (Spinner, tea.Cmd) {
 			s.pause--
 		} else {
 			s.index++
-			if s.index > width {
+			if s.index > s.Config.Width {
 				s.pause = pauseSteps
 				s.index = -1
 			}
@@ -84,10 +108,10 @@ func (s Spinner) Update(msg tea.Msg) (Spinner, tea.Cmd) {
 
 		for i, c := range s.cells {
 			if s.index == i {
-				s.cells[i] = width - 1
+				s.cells[i] = s.Config.Width - 1
 				s.maxAt[i] = s.tag
 			} else {
-				if s.maxAt[i] >= 0 && s.tag-s.maxAt[i] < 8 {
+				if s.maxAt[i] >= 0 && s.tag-s.maxAt[i] < decay {
 					continue
 				}
 				s.cells[i] = max(0, c-1)
@@ -107,17 +131,17 @@ func (s Spinner) Step() tea.Cmd {
 }
 
 func (s Spinner) View() string {
-	if width == 0 {
+	if s.Config.Width == 0 {
 		return ""
 	}
 
 	var b strings.Builder
 	for i := range s.cells {
 		if s.cells[i] == 0 {
-			b.WriteRune(lowChar)
+			b.WriteString(s.emptyChar)
 			continue
 		}
-		b.WriteRune(highChar)
+		b.WriteString(s.blendStyles[s.cells[i]-1].Render(highChar))
 	}
 
 	return b.String()

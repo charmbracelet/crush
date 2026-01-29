@@ -148,7 +148,7 @@ func renderItem(t ListIemStyles, title string, info string, focused bool, width 
 		for _, rng := range ranges {
 			start, stop := bytePosToVisibleCharPos(title, rng)
 			if start > lastPos {
-				parts = append(parts, title[lastPos:start])
+				parts = append(parts, ansi.Cut(title, lastPos, start))
 			}
 			// NOTE: We're using [ansi.Style] here instead of [lipglosStyle]
 			// because we can control the underline start and stop more
@@ -157,13 +157,13 @@ func renderItem(t ListIemStyles, title string, info string, focused bool, width 
 			// with other style
 			parts = append(parts,
 				ansi.NewStyle().Underline(true).String(),
-				title[start:stop+1],
+				ansi.Cut(title, start, stop+1),
 				ansi.NewStyle().Underline(false).String(),
 			)
 			lastPos = stop + 1
 		}
-		if lastPos < len(title) {
-			parts = append(parts, title[lastPos:])
+		if lastPos < ansi.StringWidth(title) {
+			parts = append(parts, ansi.Cut(title, lastPos, ansi.StringWidth(title)))
 		}
 
 		content = strings.Join(parts, "")

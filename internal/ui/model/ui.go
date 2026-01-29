@@ -144,7 +144,8 @@ type UI struct {
 
 	// sendProgressBar instructs the TUI to send progress bar updates to the
 	// terminal.
-	sendProgressBar bool
+	sendProgressBar    bool
+	progressBarEnabled bool
 
 	// caps hold different terminal capabilities that we query for.
 	caps common.Capabilities
@@ -294,6 +295,9 @@ func New(com *common.Common) *UI {
 
 	// set initial state
 	ui.setState(desiredState, desiredFocus)
+
+	// disable indeterminate progress bar
+	ui.progressBarEnabled = com.Config().Options.Progress == nil || *com.Config().Options.Progress
 
 	return ui
 }
@@ -1854,7 +1858,7 @@ func (m *UI) View() tea.View {
 	content = strings.Join(contentLines, "\n")
 
 	v.Content = content
-	if m.sendProgressBar && m.isAgentBusy() {
+	if m.progressBarEnabled && m.sendProgressBar && m.isAgentBusy() {
 		// HACK: use a random percentage to prevent ghostty from hiding it
 		// after a timeout.
 		v.ProgressBar = tea.NewProgressBar(tea.ProgressBarIndeterminate, rand.Intn(100))

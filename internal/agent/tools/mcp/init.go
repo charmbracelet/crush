@@ -145,8 +145,6 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 		}
 
 		// Set initial starting state
-		updateState(name, StateStarting, nil, nil, Counts{})
-
 		wg.Add(1)
 		go func(name string, m config.MCPConfig) {
 			defer func() {
@@ -166,36 +164,9 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 				}
 			}()
 
-			// createSession handles its own timeout internally.
-			session, err := createSession(ctx, name, m, cfg.Resolver())
-			if err != nil {
-				return
+			if err := initClient(ctx, name, m, cfg.Resolver()); err != nil {
+				slog.Debug("failed to initialize mcp client", "name", name, "error", err)
 			}
-
-			tools, err := getTools(ctx, session)
-			if err != nil {
-				slog.Error("error listing tools", "error", err)
-				updateState(name, StateError, err, nil, Counts{})
-				session.Close()
-				return
-			}
-
-			prompts, err := getPrompts(ctx, session)
-			if err != nil {
-				slog.Error("error listing prompts", "error", err)
-				updateState(name, StateError, err, nil, Counts{})
-				session.Close()
-				return
-			}
-
-			toolCount := updateTools(name, tools)
-			updatePrompts(name, prompts)
-			sessions.Set(name, session)
-
-			updateState(name, StateConnected, nil, session, Counts{
-				Tools:   toolCount,
-				Prompts: len(prompts),
-			})
 		}(name, m)
 	}
 	wg.Wait()
@@ -211,6 +182,85 @@ func WaitForInit(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// InitializeSingle initializes a single MCP client by name.
+func InitializeSingle(ctx context.Context, name string, cfg *config.Config) error {
+	m, exists := cfg.MCP[name]
+	if !exists {
+		return fmt.Errorf("mcp '%s' not found in configuration", name)
+	}
+
+	if m.Disabled {
+		updateState(name, StateDisabled, nil, nil, Counts{})
+		slog.Debug("skipping disabled mcp", "name", name)
+		return nil
+	}
+
+	return initClient(ctx, name, m, cfg.Resolver())
+}
+
+// initClient initializes a single MCP client with the given configuration.
+func initClient(ctx context.Context, name string, m config.MCPConfig, resolver config.VariableResolver) error {
+	// Set initial starting state.
+	updateState(name, StateStarting, nil, nil, Counts{})
+
+	// createSession handles its own timeout internally.
+	session, err := createSession(ctx, name, m, resolver)
+	if err != nil {
+		return err
+	}
+
+	tools, err := getTools(ctx, session)
+	if err != nil {
+		slog.Error("error listing tools", "error", err)
+		updateState(name, StateError, err, nil, Counts{})
+		session.Close()
+		return err
+	}
+
+	prompts, err := getPrompts(ctx, session)
+	if err != nil {
+		slog.Error("error listing prompts", "error", err)
+		updateState(name, StateError, err, nil, Counts{})
+		session.Close()
+		return err
+	}
+
+	toolCount := updateTools(name, tools)
+	updatePrompts(name, prompts)
+	sessions.Set(name, session)
+
+	updateState(name, StateConnected, nil, session, Counts{
+		Tools:   toolCount,
+		Prompts: len(prompts),
+	})
+
+	return nil
+}
+
+// DisableSingle disables and closes a single MCP client by name.
+func DisableSingle(name string) error {
+	session, ok := sessions.Get(name)
+	if ok {
+		if err := session.Close(); err != nil &&
+			!errors.Is(err, io.EOF) &&
+			!errors.Is(err, context.Canceled) &&
+			err.Error() != "signal: killed" {
+			slog.Warn("error closing mcp session", "name", name, "error", err)
+		}
+		sessions.Del(name)
+	}
+
+	// Clear tools and prompts for this MCP.
+	updateTools(name, nil)
+	updatePrompts(name, nil)
+
+	// Update state to disabled.
+	updateState(name, StateDisabled, nil, nil, Counts{})
+
+	slog.Info("Disabled mcp client", "name", name)
+	return nil
 }
 
 func getOrRenewClient(ctx context.Context, name string) (*mcp.ClientSession, error) {

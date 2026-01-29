@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/plugin"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/log"
@@ -69,6 +70,9 @@ type coordinator struct {
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
 
+	pluginApp *plugin.App
+	hooks     []plugin.Hook
+
 	readyWg errgroup.Group
 }
 
@@ -89,6 +93,11 @@ func NewCoordinator(
 		history:     history,
 		lspClients:  lspClients,
 		agents:      make(map[string]SessionAgent),
+	}
+
+	// Initialize plugin hooks.
+	if err := c.initPluginHooks(ctx); err != nil {
+		return nil, fmt.Errorf("failed to initialize plugin hooks: %w", err)
 	}
 
 	agentCfg, ok := cfg.Agents[config.AgentCoder]
@@ -407,6 +416,24 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 
 	if len(c.cfg.LSP) > 0 {
 		allTools = append(allTools, tools.NewDiagnosticsTool(c.lspClients), tools.NewReferencesTool(c.lspClients), tools.NewLSPRestartTool(c.lspClients))
+	}
+
+	// Add plugin tools.
+	for _, name := range plugin.RegisteredTools() {
+		if c.pluginApp.IsPluginDisabled(name) {
+			slog.Debug("skipping disabled plugin", "name", name)
+			continue
+		}
+		factory, ok := plugin.GetToolFactory(name)
+		if !ok {
+			continue
+		}
+		tool, err := factory(ctx, c.pluginApp)
+		if err != nil {
+			slog.Error("failed to create plugin tool", "name", name, "error", err)
+			continue
+		}
+		allTools = append(allTools, tool)
 	}
 
 	var filteredTools []fantasy.AgentTool
@@ -868,5 +895,56 @@ func (c *coordinator) refreshApiKeyTemplate(ctx context.Context, providerCfg con
 	if err := c.UpdateModels(ctx); err != nil {
 		return err
 	}
+	return nil
+}
+
+// initPluginHooks initializes plugin hooks and starts them in background goroutines.
+func (c *coordinator) initPluginHooks(ctx context.Context) error {
+	var disabledPlugins []string
+	var pluginConfig map[string]map[string]any
+	if c.cfg.Options != nil {
+		disabledPlugins = c.cfg.Options.DisabledPlugins
+		pluginConfig = c.cfg.Options.Plugins
+	}
+
+	// Create message subscriber adapter for hooks.
+	messageAdapter := NewMessageSubscriberAdapter(c.messages)
+
+	// Create shared plugin app for both tools and hooks.
+	c.pluginApp = plugin.NewApp(
+		plugin.WithWorkingDir(c.cfg.WorkingDir()),
+		plugin.WithPermissions(c.permissions),
+		plugin.WithPluginConfig(pluginConfig),
+		plugin.WithDisabledPlugins(disabledPlugins),
+		plugin.WithMessageSubscriber(messageAdapter),
+	)
+
+	// Initialize registered hooks.
+	for _, name := range plugin.RegisteredHooks() {
+		if c.pluginApp.IsPluginDisabled(name) {
+			slog.Debug("skipping disabled hook", "name", name)
+			continue
+		}
+		factory, ok := plugin.GetHookFactory(name)
+		if !ok {
+			continue
+		}
+		hook, err := factory(ctx, c.pluginApp)
+		if err != nil {
+			slog.Error("failed to create plugin hook", "name", name, "error", err)
+			continue
+		}
+		c.hooks = append(c.hooks, hook)
+
+		// Start hook in background.
+		go func(h plugin.Hook) {
+			if err := h.Start(ctx); err != nil {
+				slog.Error("hook error", "name", h.Name(), "error", err)
+			}
+		}(hook)
+
+		slog.Debug("started plugin hook", "name", name)
+	}
+
 	return nil
 }

@@ -689,10 +689,32 @@
       "additionalProperties": false,
       "type": "object"
     },
+    "ToolBash": {
+      "properties": {
+        "allowed_commands": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "curl",
+              "wget",
+              "apt",
+              "npm"
+            ]
+          },
+          "type": "array",
+          "description": "List of commands to remove from the banned commands list"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "Tools": {
       "properties": {
         "ls": {
           "$ref": "#/$defs/ToolLs"
+        },
+        "bash": {
+          "$ref": "#/$defs/ToolBash"
         }
       },
       "additionalProperties": false,

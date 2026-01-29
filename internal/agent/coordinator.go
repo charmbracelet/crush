@@ -120,11 +120,13 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 // RunWithPlanMode implements Coordinator with plan mode support.
 func (c *coordinator) RunWithPlanMode(ctx context.Context, sessionID string, prompt string, isPlanMode bool, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
 	// Set the permission mode based on isPlanMode parameter
+	previousMode := c.permissions.GetMode()
 	if isPlanMode {
 		c.permissions.SetMode(permission.ModePlan)
-	} else if c.permissions.GetMode() == permission.ModePlan {
-		// If we're exiting plan mode, restore to regular mode
+	} else if previousMode == permission.ModePlan {
+		// If we're exiting plan mode, restore to regular mode and notify the agent
 		c.permissions.SetMode(permission.ModeRegular)
+		prompt = "[SYSTEM: Plan mode has been exited. You can now execute write operations and modify the system.]\n\n" + prompt
 	}
 
 	if err := c.readyWg.Wait(); err != nil {

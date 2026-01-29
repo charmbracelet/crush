@@ -2559,8 +2559,8 @@ func (m *UI) getMessageIDFromItem(item list.Item) (string, bool) {
 	}
 	if msgItem, ok := item.(chat.MessageItem); ok {
 		itemID := msgItem.ID()
-		if strings.HasSuffix(itemID, ":assistant-info") {
-			baseID := strings.TrimSuffix(itemID, ":assistant-info")
+		if before, ok := strings.CutSuffix(itemID, ":assistant-info"); ok {
+			baseID := before
 			return baseID, true
 		}
 		return itemID, true

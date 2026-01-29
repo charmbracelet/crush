@@ -31,7 +31,7 @@ tasks:
   lint:log:
     desc: Check that log messages start with capital letters
     cmds:
-      - bash scripts/check_log_capitalization.sh
+      - ./scripts/check_log_capitalization.sh
 
   lint:fix:
     desc: Run base linters and fix issues

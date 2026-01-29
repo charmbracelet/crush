@@ -322,6 +322,13 @@ func (m *UI) setState(state uiState, focus uiFocusState) {
 	m.updateLayoutAndSize()
 }
 
+// focusEditor focuses the editor and blurs the chat list.
+func (m *UI) focusEditor() tea.Cmd {
+	m.chat.list.Blur()
+	m.focus = uiFocusEditor
+	return m.textarea.Focus()
+}
+
 // loadCustomCommands loads the custom commands asynchronously.
 func (m *UI) loadCustomCommands() tea.Cmd {
 	return func() tea.Msg {
@@ -1193,9 +1200,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			}
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
-		m.chat.list.Blur()
-		m.focus = uiFocusEditor
-		cmds = append(cmds, m.textarea.Focus())
+		cmds = append(cmds, m.focusEditor())
 
 	case dialog.ActionDeleteMessages:
 		if m.isAgentBusy() {
@@ -1228,9 +1233,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			return m.loadSession(m.session.ID)()
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
-		m.chat.list.Blur()
-		m.focus = uiFocusEditor
-		cmds = append(cmds, m.textarea.Focus())
+		cmds = append(cmds, m.focusEditor())
 
 	case dialog.ActionSelectModel:
 		if m.isAgentBusy() {
@@ -2789,13 +2792,11 @@ func (m *UI) openModelsDialog() tea.Cmd {
 
 // openCommandsDialog opens the commands dialog.
 func (m *UI) openCommandsDialog() tea.Cmd {
-	canFork := false
-	canDelete := false
+	isUserMessageSelected := false
 	selectedItem := m.chat.SelectedItem()
 	if selectedItem != nil {
 		if _, ok := selectedItem.(*chat.UserMessageItem); ok {
-			canFork = true
-			canDelete = true
+			isUserMessageSelected = true
 		}
 	}
 
@@ -2809,7 +2810,7 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 		sessionID = m.session.ID
 	}
 
-	commands, err := dialog.NewCommands(m.com, sessionID, m.customCommands, m.mcpPrompts, canFork, canDelete)
+	commands, err := dialog.NewCommands(m.com, sessionID, m.customCommands, m.mcpPrompts, isUserMessageSelected)
 	if err != nil {
 		return uiutil.ReportError(err)
 	}

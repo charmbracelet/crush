@@ -826,11 +826,14 @@ func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
 // if the message is a tool result it will update the corresponding tool call message
 func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 	var cmds []tea.Cmd
+	atBottom := m.chat.list.AtBottom()
+
 	existing := m.chat.MessageItem(msg.ID)
 	if existing != nil {
 		// message already exists, skip
 		return nil
 	}
+
 	switch msg.Role {
 	case message.User:
 		m.lastUserMessageTime = msg.CreatedAt
@@ -856,14 +859,18 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 			}
 		}
 		m.chat.AppendMessages(items...)
-		if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
-			cmds = append(cmds, cmd)
+		if atBottom {
+			if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 		}
 		if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
 			infoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, time.Unix(m.lastUserMessageTime, 0))
 			m.chat.AppendMessages(infoItem)
-			if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
-				cmds = append(cmds, cmd)
+			if atBottom {
+				if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			}
 		}
 	case message.Tool:
@@ -875,6 +882,11 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 			}
 			if toolMsgItem, ok := toolItem.(chat.ToolMessageItem); ok {
 				toolMsgItem.SetResult(&tr)
+				if atBottom {
+					if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+				}
 			}
 		}
 	}

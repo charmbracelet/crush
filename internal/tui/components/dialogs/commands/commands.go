@@ -79,9 +79,18 @@ type (
 	OpenReasoningDialogMsg struct{}
 	OpenExternalEditorMsg  struct{}
 	ToggleYoloModeMsg      struct{}
+	CycleModeMsg           struct{}
 	CompactMsg             struct {
 		SessionID string
 	}
+)
+
+type EditorMode int
+
+const (
+	RegularMode EditorMode = iota
+	YoloMode
+	PlanMode
 )
 
 func NewCommandDialog(sessionID string) CommandsDialog {
@@ -437,6 +446,15 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			Description: "Toggle yolo mode",
 			Handler: func(cmd Command) tea.Cmd {
 				return util.CmdHandler(ToggleYoloModeMsg{})
+			},
+		},
+		{
+			ID:          "cycle_mode",
+			Title:       "Cycle Mode",
+			Shortcut:    "shift+tab",
+			Description: "Cycle between regular, yolo, and plan mode",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(CycleModeMsg{})
 			},
 		},
 		{

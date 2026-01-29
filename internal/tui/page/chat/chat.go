@@ -267,7 +267,7 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		p.editor = u.(editor.Editor)
 		return p, cmd
 	case chat.SendMsg:
-		return p, p.sendMessage(msg.Text, msg.Attachments)
+		return p, p.sendMessage(msg.Text, msg.Attachments, msg.IsPlanMode)
 	case chat.SessionSelectedMsg:
 		return p, p.setSession(msg)
 	case splash.SubmitAPIKeyMsg:
@@ -388,6 +388,11 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		u, cmd := p.editor.Update(msg)
 		p.editor = u.(editor.Editor)
 		return p, cmd
+	case commands.CycleModeMsg:
+		// update the editor style
+		u, cmd := p.editor.Update(msg)
+		p.editor = u.(editor.Editor)
+		return p, cmd
 	case pubsub.Event[history.File], sidebar.SessionFilesMsg:
 		u, cmd := p.sidebar.Update(msg)
 		p.sidebar = u.(sidebar.Sidebar)
@@ -404,7 +409,7 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			return p, util.ReportWarn("Agent is busy, please wait before executing a command...")
 		}
 
-		cmd := p.sendMessage(msg.Content, nil)
+		cmd := p.sendMessage(msg.Content, nil, false)
 		if cmd != nil {
 			return p, cmd
 		}
@@ -957,7 +962,7 @@ func (p *chatPage) toggleDetails() {
 	p.setShowDetails(!p.showingDetails)
 }
 
-func (p *chatPage) sendMessage(text string, attachments []message.Attachment) tea.Cmd {
+func (p *chatPage) sendMessage(text string, attachments []message.Attachment, isPlanMode bool) tea.Cmd {
 	session := p.session
 	var cmds []tea.Cmd
 	if p.session.ID == "" {
@@ -976,7 +981,7 @@ func (p *chatPage) sendMessage(text string, attachments []message.Attachment) te
 	}
 	cmds = append(cmds, p.chat.GoToBottom())
 	cmds = append(cmds, func() tea.Msg {
-		_, err := p.app.AgentCoordinator.Run(context.Background(), session.ID, text, attachments...)
+		_, err := p.app.AgentCoordinator.RunWithPlanMode(context.Background(), session.ID, text, isPlanMode, attachments...)
 		if err != nil {
 			isCancelErr := errors.Is(err, context.Canceled)
 			isPermissionErr := errors.Is(err, permission.ErrorPermissionDenied)

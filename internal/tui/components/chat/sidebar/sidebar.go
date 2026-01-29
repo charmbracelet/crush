@@ -546,12 +546,15 @@ func (s *sidebarCmp) currentModelBlock() string {
 
 	selectedModel := cfg.Models[agentCfg.Model]
 
-	model := config.Get().GetModelByType(agentCfg.Model)
+	model := cfg.GetModelByType(agentCfg.Model)
 
 	t := styles.CurrentTheme()
 
 	modelIcon := t.S().Base.Foreground(t.FgSubtle).Render(styles.ModelIcon)
-	modelName := t.S().Text.Render(model.Name)
+
+	// Get provider and format model display
+	provider := cfg.GetProviderForModel(agentCfg.Model)
+	modelName := core.FormatModelWithProvider(model, provider, t.S().Text)
 	modelInfo := fmt.Sprintf("%s %s", modelIcon, modelName)
 	parts := []string{
 		modelInfo,

@@ -28,7 +28,6 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/home"
@@ -118,6 +117,9 @@ type UI struct {
 	session      *session.Session
 	sessionFiles []SessionFile
 
+	// keeps track of read files while we don't have a session id
+	sessionFileReads []string
+
 	lastUserMessageTime int64
 
 	// The width and height of the terminal in cells.
@@ -142,7 +144,8 @@ type UI struct {
 
 	// sendProgressBar instructs the TUI to send progress bar updates to the
 	// terminal.
-	sendProgressBar bool
+	sendProgressBar    bool
+	progressBarEnabled bool
 
 	// caps hold different terminal capabilities that we query for.
 	caps common.Capabilities
@@ -292,6 +295,9 @@ func New(com *common.Common) *UI {
 
 	// set initial state
 	ui.setState(desiredState, desiredFocus)
+
+	// disable indeterminate progress bar
+	ui.progressBarEnabled = com.Config().Options.Progress == nil || *com.Config().Options.Progress
 
 	return ui
 }
@@ -1540,6 +1546,10 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if cmd != nil {
 					cmds = append(cmds, cmd)
 				}
+			case key.Matches(msg, m.keyMap.Editor.Commands) && m.textarea.Value() == "":
+				if cmd := m.openCommandsDialog(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			default:
 				if handleGlobalKeys(msg) {
 					// Handle global keys first before passing to textarea.
@@ -1848,7 +1858,7 @@ func (m *UI) View() tea.View {
 	content = strings.Join(contentLines, "\n")
 
 	v.Content = content
-	if m.sendProgressBar && m.isAgentBusy() {
+	if m.progressBarEnabled && m.sendProgressBar && m.isAgentBusy() {
 		// HACK: use a random percentage to prevent ghostty from hiding it
 		// after a timeout.
 		v.ProgressBar = tea.NewProgressBar(tea.ProgressBarIndeterminate, rand.Intn(100))
@@ -1863,7 +1873,7 @@ func (m *UI) ShortHelp() []key.Binding {
 	k := &m.keyMap
 	tab := k.Tab
 	commands := k.Commands
-	if m.focus == uiFocusEditor && m.textarea.LineCount() == 0 {
+	if m.focus == uiFocusEditor && m.textarea.Value() == "" {
 		commands.SetHelp("/ or ctrl+p", "commands")
 	}
 
@@ -1939,7 +1949,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 	hasAttachments := len(m.attachments.List()) > 0
 	hasSession := m.hasSession()
 	commands := k.Commands
-	if m.focus == uiFocusEditor && m.textarea.LineCount() == 0 {
+	if m.focus == uiFocusEditor && m.textarea.Value() == "" {
 		commands.SetHelp("/ or ctrl+p", "commands")
 	}
 
@@ -2414,13 +2424,20 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 
 	return func() tea.Msg {
 		absPath, _ := filepath.Abs(path)
-		// Skip attachment if file was already read and hasn't been modified.
-		lastRead := filetracker.LastReadTime(absPath)
-		if !lastRead.IsZero() {
-			if info, err := os.Stat(path); err == nil && !info.ModTime().After(lastRead) {
-				return nil
+
+		if m.hasSession() {
+			// Skip attachment if file was already read and hasn't been modified.
+			lastRead := m.com.App.FileTracker.LastReadTime(context.Background(), m.session.ID, absPath)
+			if !lastRead.IsZero() {
+				if info, err := os.Stat(path); err == nil && !info.ModTime().After(lastRead) {
+					return nil
+				}
 			}
+		} else if slices.Contains(m.sessionFileReads, absPath) {
+			return nil
 		}
+
+		m.sessionFileReads = append(m.sessionFileReads, absPath)
 
 		// Add file as attachment.
 		content, err := os.ReadFile(path)
@@ -2428,7 +2445,6 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 			// If it fails, let the LLM handle it later.
 			return nil
 		}
-		filetracker.RecordRead(absPath)
 
 		return message.Attachment{
 			FilePath: path,
@@ -2553,6 +2569,10 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 			cmds = append(cmds, m.loadSession(newSession.ID))
 		}
 		m.setState(uiChat, m.focus)
+	}
+
+	for _, path := range m.sessionFileReads {
+		m.com.App.FileTracker.RecordRead(context.Background(), m.session.ID, path)
 	}
 
 	// Capture session ID to avoid race with main goroutine updating m.session.
@@ -2801,6 +2821,7 @@ func (m *UI) newSession() tea.Cmd {
 
 	m.session = nil
 	m.sessionFiles = nil
+	m.sessionFileReads = nil
 	m.setState(uiLanding, uiFocusEditor)
 	m.textarea.Focus()
 	m.chat.Blur()

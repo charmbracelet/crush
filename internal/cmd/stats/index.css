@@ -189,20 +189,15 @@ body {
 }
 
 .chart-row {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  display: flex;
+  flex-wrap: wrap;
   gap: 1.5rem;
   width: 100%;
 }
 
 .chart-row .chart-card {
-  width: 100%;
-}
-
-@media (max-width: 1024px) {
-  .chart-row {
-    grid-template-columns: 1fr;
-  }
+  flex: 1 1 300px;
+  max-width: calc((100% - 1.5rem) / 2);
 }
 
 .chart-card h2 {

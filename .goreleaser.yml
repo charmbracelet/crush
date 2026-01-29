@@ -268,6 +268,7 @@ nix:
       name: "Charm"
       email: "charmcli@users.noreply.github.com"
     license: fsl11Mit
+    formatter: nixfmt
     skip_upload: "{{ with .Prerelease }}true{{ end }}"
     extra_install: |-
       installManPage ./manpages/crush.1.gz

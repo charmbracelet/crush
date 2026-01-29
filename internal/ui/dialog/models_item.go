@@ -110,7 +110,7 @@ func (m *ModelItem) Render(width int) string {
 		ItemBlurred:     m.t.Dialog.NormalItem,
 		ItemFocused:     m.t.Dialog.SelectedItem,
 		InfoTextBlurred: m.t.Base,
-		InfoTextFocused: m.t.Subtle,
+		InfoTextFocused: m.t.Base,
 	}
 	return renderItem(styles, m.model.Name, providerInfo, m.focused, width, m.cache, &m.m)
 }

@@ -2,31 +2,22 @@
 package spinner
 
 import (
-	"log"
+	"image/color"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/exp/charmtone"
 )
 
 const (
 	fps        = 24
-	pauseSteps = 72
+	pauseSteps = 48
 	width      = 12
+	lowChar    = '•'
+	highChar   = '│'
 )
-
-var blocks = []rune{
-	' ',
-	'▁',
-	'▂',
-	'▃',
-	'▄',
-	'▅',
-	'▆',
-	'▇',
-	'█',
-}
 
 // Internal ID management. Used during animating to ensure that frame messages
 // are received only by spinner components that sent them.
@@ -36,23 +27,36 @@ func nextID() int {
 	return int(atomic.AddInt64(&lastID, 1))
 }
 
+type Config struct {
+	LowColor  color.Color
+	PeakColor color.Color
+}
+
 type StepMsg struct {
 	ID  int
 	tag int
 }
 
 type Spinner struct {
-	id    int
-	tag   int
-	index int
-	pause int
-	cells []int
+	Config Config
+	id     int
+	tag    int
+	index  int
+	pause  int
+	cells  []int
+	maxAt  []int // frame when cell reached max height
 }
 
 func NewSpinner() Spinner {
 	return Spinner{
+		Config: Config{
+			PeakColor: charmtone.Charple,
+			LowColor:  charmtone.Blush,
+		},
 		id:    nextID(),
+		index: -1,
 		cells: make([]int, width),
+		maxAt: make([]int, width),
 	}
 }
 
@@ -69,20 +73,23 @@ func (s Spinner) Update(msg tea.Msg) (Spinner, tea.Cmd) {
 
 		if s.pause > 0 {
 			s.pause--
-			log.Println("pausing", s.pause)
 		} else {
 			s.index++
 			if s.index > width {
 				s.pause = pauseSteps
-				s.index = 0
+				s.index = -1
 			}
 
 		}
 
 		for i, c := range s.cells {
 			if s.index == i {
-				s.cells[i] = len(blocks) - 1
+				s.cells[i] = width - 1
+				s.maxAt[i] = s.tag
 			} else {
+				if s.maxAt[i] >= 0 && s.tag-s.maxAt[i] < 8 {
+					continue
+				}
 				s.cells[i] = max(0, c-1)
 			}
 		}
@@ -100,13 +107,17 @@ func (s Spinner) Step() tea.Cmd {
 }
 
 func (s Spinner) View() string {
-	if len(blocks) == 0 {
+	if width == 0 {
 		return ""
 	}
 
 	var b strings.Builder
 	for i := range s.cells {
-		b.WriteRune(blocks[s.cells[i]])
+		if s.cells[i] == 0 {
+			b.WriteRune(lowChar)
+			continue
+		}
+		b.WriteRune(highChar)
 	}
 
 	return b.String()

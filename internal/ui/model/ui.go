@@ -524,6 +524,16 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case copyChatHighlightMsg:
 		cmds = append(cmds, m.copyChatHighlight())
 	case tea.MouseClickMsg:
+		// Handle middle-click paste from X11 PRIMARY selection.
+		if msg.Button == tea.MouseMiddle {
+			if text := readPrimarySelection(); text != "" {
+				// Re-use paste handling by converting to a PasteMsg.
+				if cmd := m.handlePasteMsg(tea.PasteMsg{Content: text}); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				return m, tea.Batch(cmds...)
+			}
+		}
 		// Pass mouse events to dialogs first if any are open.
 		if m.dialog.HasDialogs() {
 			m.dialog.Update(msg)

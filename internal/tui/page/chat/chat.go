@@ -220,10 +220,22 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			p.focusedPane = PanelTypeChat
 			p.chat.Focus()
 			p.editor.Blur()
+			// Route middle-click to editor for PRIMARY selection paste.
+			if msg.Button == tea.MouseMiddle {
+				u, cmd := p.editor.Update(msg)
+				p.editor = u.(editor.Editor)
+				return p, cmd
+			}
 		} else {
 			p.focusedPane = PanelTypeEditor
 			p.editor.Focus()
 			p.chat.Blur()
+			// Route middle-click to editor for PRIMARY selection paste.
+			if msg.Button == tea.MouseMiddle {
+				u, cmd := p.editor.Update(msg)
+				p.editor = u.(editor.Editor)
+				return p, cmd
+			}
 		}
 		u, cmd := p.chat.Update(msg)
 		p.chat = u.(chat.MessageListCmp)

@@ -16,8 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 )
 
-//go:embed templates/agentic_fetch.md
-var agenticFetchToolDescription []byte
+const agenticFetchToolDescription = "Fetch and analyze web content using AI, or search the web for information."
 
 // agenticFetchValidationResult holds the validated parameters from the tool call context.
 type agenticFetchValidationResult struct {
@@ -64,7 +63,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 
 	return fantasy.NewParallelAgentTool(
 		tools.AgenticFetchToolName,
-		string(agenticFetchToolDescription),
+		agenticFetchToolDescription,
 		func(ctx context.Context, params tools.AgenticFetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			validationResult, err := validateAgenticFetchParams(ctx, params)
 			if err != nil {

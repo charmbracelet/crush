@@ -1,1 +1,0 @@
-Search file contents by regex pattern. Returns matching files sorted by modification time. Use `literal_text=true` for exact text with special chars. Use `include` to filter file types (e.g., `*.go`). Max 100 results.

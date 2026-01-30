@@ -1,1 +1,0 @@
-Find files by name pattern. Returns paths sorted by modification time (newest first). Patterns: `*` matches non-separator chars, `**` matches any path, `?` single char, `[...]` char class. Max 100 results.

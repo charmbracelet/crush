@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	_ "embed"
 	"fmt"
 	"net/http"
 	"os"
@@ -12,8 +11,7 @@ import (
 	"charm.land/fantasy"
 )
 
-//go:embed web_fetch.md
-var webFetchToolDescription []byte
+const webFetchToolDescription = "Fetch web page content and convert to markdown. Max 5MB."
 
 // NewWebFetchTool creates a simple web fetch tool for sub-agents (no permissions needed).
 func NewWebFetchTool(workingDir string, client *http.Client) fantasy.AgentTool {
@@ -30,7 +28,7 @@ func NewWebFetchTool(workingDir string, client *http.Client) fantasy.AgentTool {
 
 	return fantasy.NewParallelAgentTool(
 		WebFetchToolName,
-		string(webFetchToolDescription),
+		webFetchToolDescription,
 		func(ctx context.Context, params WebFetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.URL == "" {
 				return fantasy.NewTextErrorResponse("url is required"), nil

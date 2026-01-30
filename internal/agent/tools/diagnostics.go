@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	_ "embed"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -21,13 +20,12 @@ type DiagnosticsParams struct {
 
 const DiagnosticsToolName = "lsp_diagnostics"
 
-//go:embed diagnostics.md
-var diagnosticsDescription []byte
+const diagnosticsDescription = "Get LSP diagnostics for a file or project."
 
 func NewDiagnosticsTool(lspClients *csync.Map[string, *lsp.Client]) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		DiagnosticsToolName,
-		string(diagnosticsDescription),
+		diagnosticsDescription,
 		func(ctx context.Context, params DiagnosticsParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if lspClients.Len() == 0 {
 				return fantasy.NewTextErrorResponse("no LSP clients available"), nil

@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	_ "embed"
 	"fmt"
 	"log/slog"
 	"os"
@@ -55,8 +54,7 @@ type MultiEditResponseMetadata struct {
 
 const MultiEditToolName = "multiedit"
 
-//go:embed multiedit.md
-var multieditDescription []byte
+const multieditDescription = "Multiple edits to a single file in one operation."
 
 func NewMultiEditTool(
 	lspClients *csync.Map[string, *lsp.Client],
@@ -67,7 +65,7 @@ func NewMultiEditTool(
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		MultiEditToolName,
-		string(multieditDescription),
+		multieditDescription,
 		func(ctx context.Context, params MultiEditParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.FilePath == "" {
 				return fantasy.NewTextErrorResponse("file_path is required"), nil

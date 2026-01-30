@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	_ "embed"
 	"fmt"
 	"log/slog"
 	"os"
@@ -22,8 +21,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 )
 
-//go:embed write.md
-var writeDescription []byte
+const writeDescription = "Create or overwrite file with content."
 
 type WriteParams struct {
 	FilePath string `json:"file_path" description:"The path to the file to write"`
@@ -53,7 +51,7 @@ func NewWriteTool(
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		WriteToolName,
-		string(writeDescription),
+		writeDescription,
 		func(ctx context.Context, params WriteParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.FilePath == "" {
 				return fantasy.NewTextErrorResponse("file_path is required"), nil

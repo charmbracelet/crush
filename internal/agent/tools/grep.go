@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -97,8 +96,7 @@ const (
 	maxGrepContentWidth = 500
 )
 
-//go:embed grep.md
-var grepDescription []byte
+const grepDescription = "Search file contents by regex. Max 100 results."
 
 // escapeRegexPattern escapes special regex characters so they're treated as literal characters
 func escapeRegexPattern(pattern string) string {
@@ -115,7 +113,7 @@ func escapeRegexPattern(pattern string) string {
 func NewGrepTool(workingDir string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		GrepToolName,
-		string(grepDescription),
+		grepDescription,
 		func(ctx context.Context, params GrepParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Pattern == "" {
 				return fantasy.NewTextErrorResponse("pattern is required"), nil

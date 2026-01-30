@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	_ "embed"
 	"fmt"
 	"log/slog"
 	"os"
@@ -49,8 +48,7 @@ var (
 	oldStringMultipleMatchesErr = fantasy.NewTextErrorResponse("old_string appears multiple times in the file. Please provide more context to ensure a unique match, or set replace_all to true")
 )
 
-//go:embed edit.md
-var editDescription []byte
+const editDescription = "Edit file by replacing exact text match."
 
 type editContext struct {
 	ctx         context.Context
@@ -69,7 +67,7 @@ func NewEditTool(
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		EditToolName,
-		string(editDescription),
+		editDescription,
 		func(ctx context.Context, params EditParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.FilePath == "" {
 				return fantasy.NewTextErrorResponse("file_path is required"), nil

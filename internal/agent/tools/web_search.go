@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	_ "embed"
 	"log/slog"
 	"net/http"
 	"time"
@@ -10,8 +9,7 @@ import (
 	"charm.land/fantasy"
 )
 
-//go:embed web_search.md
-var webSearchToolDescription []byte
+const webSearchToolDescription = "Search the web using DuckDuckGo."
 
 // NewWebSearchTool creates a web search tool for sub-agents (no permissions needed).
 func NewWebSearchTool(client *http.Client) fantasy.AgentTool {
@@ -28,7 +26,7 @@ func NewWebSearchTool(client *http.Client) fantasy.AgentTool {
 
 	return fantasy.NewParallelAgentTool(
 		WebSearchToolName,
-		string(webSearchToolDescription),
+		webSearchToolDescription,
 		func(ctx context.Context, params WebSearchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Query == "" {
 				return fantasy.NewTextErrorResponse("query is required"), nil

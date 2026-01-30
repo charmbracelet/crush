@@ -3,7 +3,6 @@ package tools
 import (
 	"bufio"
 	"context"
-	_ "embed"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -20,8 +19,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 )
 
-//go:embed view.md
-var viewDescription []byte
+const viewDescription = "Read file contents with line numbers. Max 5MB."
 
 type ViewParams struct {
 	FilePath string `json:"file_path" description:"The path to the file to read"`
@@ -56,7 +54,7 @@ func NewViewTool(
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		ViewToolName,
-		string(viewDescription),
+		viewDescription,
 		func(ctx context.Context, params ViewParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.FilePath == "" {
 				return fantasy.NewTextErrorResponse("file_path is required"), nil

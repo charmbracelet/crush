@@ -3,7 +3,6 @@ package tools
 import (
 	"cmp"
 	"context"
-	_ "embed"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -31,13 +30,12 @@ type referencesTool struct {
 
 const ReferencesToolName = "lsp_references"
 
-//go:embed references.md
-var referencesDescription []byte
+const referencesDescription = "Find all references to a symbol using LSP."
 
 func NewReferencesTool(lspClients *csync.Map[string, *lsp.Client]) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		ReferencesToolName,
-		string(referencesDescription),
+		referencesDescription,
 		func(ctx context.Context, params ReferencesParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Symbol == "" {
 				return fantasy.NewTextErrorResponse("symbol is required"), nil

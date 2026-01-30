@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	_ "embed"
 	"errors"
 	"fmt"
 
@@ -13,8 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 )
 
-//go:embed templates/agent_tool.md
-var agentToolDescription []byte
+const agentToolDescription = "Launch a sub-agent with access to Glob, Grep, LS, and View tools for searching files."
 
 type AgentParams struct {
 	Prompt string `json:"prompt" description:"The task for the agent to perform"`
@@ -40,7 +38,7 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 	}
 	return fantasy.NewParallelAgentTool(
 		AgentToolName,
-		string(agentToolDescription),
+		agentToolDescription,
 		func(ctx context.Context, params AgentParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Prompt == "" {
 				return fantasy.NewTextErrorResponse("prompt is required"), nil

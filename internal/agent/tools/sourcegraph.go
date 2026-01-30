@@ -3,7 +3,6 @@ package tools
 import (
 	"bytes"
 	"context"
-	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -28,8 +27,7 @@ type SourcegraphResponseMetadata struct {
 
 const SourcegraphToolName = "sourcegraph"
 
-//go:embed sourcegraph.md
-var sourcegraphDescription []byte
+const sourcegraphDescription = "Search code across public repositories using Sourcegraph. Max 20 results."
 
 func NewSourcegraphTool(client *http.Client) fantasy.AgentTool {
 	if client == nil {
@@ -44,7 +42,7 @@ func NewSourcegraphTool(client *http.Client) fantasy.AgentTool {
 	}
 	return fantasy.NewParallelAgentTool(
 		SourcegraphToolName,
-		string(sourcegraphDescription),
+		sourcegraphDescription,
 		func(ctx context.Context, params SourcegraphParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Query == "" {
 				return fantasy.NewTextErrorResponse("Query parameter is required"), nil

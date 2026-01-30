@@ -3,7 +3,6 @@ package tools
 import (
 	"cmp"
 	"context"
-	_ "embed"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -52,13 +51,12 @@ const (
 	maxLSFiles = 1000
 )
 
-//go:embed ls.md
-var lsDescription []byte
+const lsDescription = "List files and directories. Max 1000 files."
 
 func NewLsTool(permissions permission.Service, workingDir string, lsConfig config.ToolLs) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		LSToolName,
-		string(lsDescription),
+		lsDescription,
 		func(ctx context.Context, params LSParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			searchPath, err := fsext.Expand(cmp.Or(params.Path, workingDir))
 			if err != nil {

@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	_ "embed"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -16,8 +15,7 @@ import (
 
 const LSPRestartToolName = "lsp_restart"
 
-//go:embed lsp_restart.md
-var lspRestartDescription []byte
+const lspRestartDescription = "Restart LSP clients."
 
 type LSPRestartParams struct {
 	// Name is the optional name of a specific LSP client to restart.
@@ -28,7 +26,7 @@ type LSPRestartParams struct {
 func NewLSPRestartTool(lspClients *csync.Map[string, *lsp.Client]) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		LSPRestartToolName,
-		string(lspRestartDescription),
+		lspRestartDescription,
 		func(ctx context.Context, params LSPRestartParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if lspClients.Len() == 0 {
 				return fantasy.NewTextErrorResponse("no LSP clients available to restart"), nil

@@ -153,5 +153,5 @@ tasks:
     desc: Update Fantasy and Catwalk
     cmds:
       - go get charm.land/fantasy
-      - go get github.com/charmbracelet/catwalk
+      - go get charm.land/catwalk
       - go mod tidy

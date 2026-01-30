@@ -38,6 +38,10 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 	if err != nil {
 		return nil, err
 	}
+
+	// Get model config that will be used (agent tool uses large model)
+	modelCfg := agent.Model().ModelCfg
+
 	return fantasy.NewParallelAgentTool(
 		AgentToolName,
 		string(agentToolDescription),
@@ -56,6 +60,12 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 				return fantasy.ToolResponse{}, errors.New("agent message id missing from context")
 			}
 
+			// Acquire model semaphore token
+			release, err := c.modelSemaphore.Acquire(ctx, modelCfg)
+			if err != nil {
+				return fantasy.ToolResponse{}, fmt.Errorf("failed to acquire model semaphore: %w", err)
+			}
+			defer release()
 			agentToolSessionID := c.sessions.CreateAgentToolSessionID(agentMessageID, call.ID)
 			session, err := c.sessions.CreateTaskSession(ctx, agentToolSessionID, sessionID, "New Agent Session")
 			if err != nil {

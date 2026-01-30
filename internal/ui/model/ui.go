@@ -1450,14 +1450,14 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				return true
 			}
 		case key.Matches(msg, m.keyMap.Chat.PillLeft):
-			if m.state == uiChat && m.hasSession() && m.pillsExpanded {
+			if m.state == uiChat && m.hasSession() && m.pillsExpanded && m.focus != uiFocusEditor {
 				if cmd := m.switchPillSection(-1); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
 				return true
 			}
 		case key.Matches(msg, m.keyMap.Chat.PillRight):
-			if m.state == uiChat && m.hasSession() && m.pillsExpanded {
+			if m.state == uiChat && m.hasSession() && m.pillsExpanded && m.focus != uiFocusEditor {
 				if cmd := m.switchPillSection(1); cmd != nil {
 					cmds = append(cmds, cmd)
 				}

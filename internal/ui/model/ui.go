@@ -523,6 +523,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case copyChatHighlightMsg:
 		cmds = append(cmds, m.copyChatHighlight())
+	case DelayedClickMsg:
+		// Handle delayed single-click action (e.g., expansion).
+		m.chat.HandleDelayedClick(msg)
 	case tea.MouseClickMsg:
 		// Pass mouse events to dialogs first if any are open.
 		if m.dialog.HasDialogs() {
@@ -535,8 +538,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Adjust for chat area position
 			x -= m.layout.main.Min.X
 			y -= m.layout.main.Min.Y
-			if m.chat.HandleMouseDown(x, y) {
+			if handled, cmd := m.chat.HandleMouseDown(x, y); handled {
 				m.lastClickTime = time.Now()
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			}
 		}
 
@@ -584,7 +590,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.dialog.Update(msg)
 			return m, tea.Batch(cmds...)
 		}
-		const doubleClickThreshold = 500 * time.Millisecond
 
 		switch m.state {
 		case uiChat:

@@ -66,7 +66,7 @@ func (c *CommandItem) Shortcut() string {
 
 // Render implements ListItem.
 func (c *CommandItem) Render(width int) string {
-	styles := ListIemStyles{
+	styles := ListItemStyles{
 		ItemBlurred:     c.t.Dialog.NormalItem,
 		ItemFocused:     c.t.Dialog.SelectedItem,
 		InfoTextBlurred: c.t.Base,

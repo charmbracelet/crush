@@ -2,6 +2,8 @@ charm.land/bubbles/v2 v2.0.0-rc.1.0.20260109112849-ae99f46cec66 h1:2BdJynsAW+8rv
 charm.land/bubbles/v2 v2.0.0-rc.1.0.20260109112849-ae99f46cec66/go.mod h1:5AbN6cEd/47gkEf8TgiQ2O3RZ5QxMS14l9W+7F9fPC4=
 charm.land/bubbletea/v2 v2.0.0-rc.2.0.20251216153312-819e2e89c62e h1:tXwTmgGpwZT7ParKF5xbEQBVjM2e1uKhKi/GpfU3mYQ=
 charm.land/bubbletea/v2 v2.0.0-rc.2.0.20251216153312-819e2e89c62e/go.mod h1:pDM18flq3Z4njKZPA3zCvyVSSIJbMcoqlE82BdGUtL8=
+charm.land/catwalk v0.16.0 h1:NP6lPz086OAsFdyYTRE6x1CyAosX6MpqdY303ntwsX0=
+charm.land/catwalk v0.16.0/go.mod h1:kAdk/GjAJbl1AjRjmfU5c9lZfs7PeC3Uy9TgaVtlN64=
 charm.land/fantasy v0.6.1 h1:v3pavSHpZ5xTw98TpNYoj6DRq4ksCBWwJiZeiG/mVIc=
 charm.land/fantasy v0.6.1/go.mod h1:Ifj41bNnIXJ1aF6sLKcS9y3MzWbDnObmcHrCaaHfpZ0=
 charm.land/glamour/v2 v2.0.0-20260123212943-6014aa153a9b h1:A6IUUyChZDWP16RUdRJCfmYISAKWQGyIcfhZJUCViQ0=
@@ -96,8 +98,6 @@ github.com/charlievieth/fastwalk v1.0.14 h1:3Eh5uaFGwHZd8EGwTjJnSpBkfwfsak9h6ICg
 github.com/charlievieth/fastwalk v1.0.14/go.mod h1:diVcUreiU1aQ4/Wu3NbxxH4/KYdKpLDojrQ1Bb2KgNY=
 github.com/charmbracelet/anthropic-sdk-go v0.0.0-20251024181547-21d6f3d9a904 h1:rwLdEpG9wE6kL69KkEKDiWprO8pQOZHZXeod6+9K+mw=
 github.com/charmbracelet/anthropic-sdk-go v0.0.0-20251024181547-21d6f3d9a904/go.mod h1:8TIYxZxsuCqqeJ0lga/b91tBwrbjoHDC66Sq5t8N2R4=
-github.com/charmbracelet/catwalk v0.15.0 h1:5oWJdvchTPfF7855A0n40+XbZQz4+vouZ/NhQ661JKI=
-github.com/charmbracelet/catwalk v0.15.0/go.mod h1:qg+Yl9oaZTkTvRscqbxfttzOFQ4v0pOT5XwC7b5O0NQ=
 github.com/charmbracelet/colorprofile v0.4.1 h1:a1lO03qTrSIRaK8c3JRxJDZOvhvIeSco3ej+ngLk1kk=
 github.com/charmbracelet/colorprofile v0.4.1/go.mod h1:U1d9Dljmdf9DLegaJ0nGZNJvoXAhayhmidOdcBwAvKk=
 github.com/charmbracelet/fang v0.4.4 h1:G4qKxF6or/eTPgmAolwPuRNyuci3hTUGGX1rj1YkHJY=

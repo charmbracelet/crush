@@ -1,8 +1,8 @@
 package dialog
 
 import (
+	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -106,7 +106,7 @@ func (m *ModelItem) Render(width int) string {
 	if m.showProvider {
 		providerInfo = string(m.prov.Name)
 	}
-	styles := ListIemStyles{
+	styles := ListItemStyles{
 		ItemBlurred:     m.t.Dialog.NormalItem,
 		ItemFocused:     m.t.Dialog.SelectedItem,
 		InfoTextBlurred: m.t.Base,

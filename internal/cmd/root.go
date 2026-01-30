@@ -179,12 +179,19 @@ func supportsProgressBar() bool {
 }
 
 func setupAppWithProgressBar(cmd *cobra.Command) (*app.App, error) {
-	if supportsProgressBar() {
+	app, err := setupApp(cmd)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check if progress bar is enabled in config (defaults to true if nil)
+	progressEnabled := app.Config().Options.Progress == nil || *app.Config().Options.Progress
+	if progressEnabled && supportsProgressBar() {
 		_, _ = fmt.Fprintf(os.Stderr, ansi.SetIndeterminateProgressBar)
 		defer func() { _, _ = fmt.Fprintf(os.Stderr, ansi.ResetProgressBar) }()
 	}
 
-	return setupApp(cmd)
+	return app, nil
 }
 
 // setupApp handles the common setup logic for both interactive and non-interactive modes.

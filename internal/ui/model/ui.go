@@ -22,8 +22,8 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/commands"
@@ -330,7 +330,7 @@ func (m *UI) loadCustomCommands() tea.Cmd {
 	return func() tea.Msg {
 		customCommands, err := commands.LoadCustomCommands(m.com.Config())
 		if err != nil {
-			slog.Error("failed to load custom commands", "error", err)
+			slog.Error("Failed to load custom commands", "error", err)
 		}
 		return userCommandsLoadedMsg{Commands: customCommands}
 	}
@@ -341,7 +341,7 @@ func (m *UI) loadMCPrompts() tea.Cmd {
 	return func() tea.Msg {
 		prompts, err := commands.LoadMCPPrompts()
 		if err != nil {
-			slog.Error("failed to load mcp prompts", "error", err)
+			slog.Error("Failed to load MCP prompts", "error", err)
 		}
 		if prompts == nil {
 			// flag them as loaded even if there is none or an error
@@ -396,6 +396,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Reload prompt history for the new session.
 		m.historyReset()
 		cmds = append(cmds, m.loadPromptHistory())
+		m.updateLayoutAndSize()
 
 	case sendMessageMsg:
 		cmds = append(cmds, m.sendMessage(msg.Content, msg.Attachments...))
@@ -529,13 +530,18 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.dialog.Update(msg)
 			return m, tea.Batch(cmds...)
 		}
+
+		if cmd := m.handleClickFocus(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+
 		switch m.state {
 		case uiChat:
 			x, y := msg.X, msg.Y
 			// Adjust for chat area position
 			x -= m.layout.main.Min.X
 			y -= m.layout.main.Min.Y
-			if m.chat.HandleMouseDown(x, y) {
+			if !image.Pt(msg.X, msg.Y).In(m.layout.sidebar) && m.chat.HandleMouseDown(x, y) {
 				m.lastClickTime = time.Now()
 			}
 		}
@@ -683,7 +689,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case uv.KittyGraphicsEvent:
 		if !bytes.HasPrefix(msg.Payload, []byte("OK")) {
-			slog.Warn("unexpected Kitty graphics response",
+			slog.Warn("Unexpected Kitty graphics response",
 				"response", string(msg.Payload),
 				"options", msg.Options)
 		}
@@ -830,11 +836,14 @@ func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
 // if the message is a tool result it will update the corresponding tool call message
 func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 	var cmds []tea.Cmd
+	atBottom := m.chat.list.AtBottom()
+
 	existing := m.chat.MessageItem(msg.ID)
 	if existing != nil {
 		// message already exists, skip
 		return nil
 	}
+
 	switch msg.Role {
 	case message.User:
 		m.lastUserMessageTime = msg.CreatedAt
@@ -860,14 +869,18 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 			}
 		}
 		m.chat.AppendMessages(items...)
-		if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
-			cmds = append(cmds, cmd)
+		if atBottom {
+			if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 		}
 		if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
 			infoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, time.Unix(m.lastUserMessageTime, 0))
 			m.chat.AppendMessages(infoItem)
-			if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
-				cmds = append(cmds, cmd)
+			if atBottom {
+				if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			}
 		}
 	case message.Tool:
@@ -879,10 +892,33 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 			}
 			if toolMsgItem, ok := toolItem.(chat.ToolMessageItem); ok {
 				toolMsgItem.SetResult(&tr)
+				if atBottom {
+					if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+				}
 			}
 		}
 	}
 	return tea.Batch(cmds...)
+}
+
+func (m *UI) handleClickFocus(msg tea.MouseClickMsg) (cmd tea.Cmd) {
+	switch {
+	case m.state != uiChat:
+		return nil
+	case image.Pt(msg.X, msg.Y).In(m.layout.sidebar):
+		return nil
+	case m.focus != uiFocusEditor && image.Pt(msg.X, msg.Y).In(m.layout.editor):
+		m.focus = uiFocusEditor
+		cmd = m.textarea.Focus()
+		m.chat.Blur()
+	case m.focus != uiFocusMain && image.Pt(msg.X, msg.Y).In(m.layout.main):
+		m.focus = uiFocusMain
+		m.textarea.Blur()
+		m.chat.Focus()
+	}
+	return cmd
 }
 
 // updateSessionMessage updates an existing message in the current session in the chat
@@ -1389,14 +1425,14 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				return true
 			}
 		case key.Matches(msg, m.keyMap.Chat.PillLeft):
-			if m.state == uiChat && m.hasSession() && m.pillsExpanded {
+			if m.state == uiChat && m.hasSession() && m.pillsExpanded && m.focus != uiFocusEditor {
 				if cmd := m.switchPillSection(-1); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
 				return true
 			}
 		case key.Matches(msg, m.keyMap.Chat.PillRight):
-			if m.state == uiChat && m.hasSession() && m.pillsExpanded {
+			if m.state == uiChat && m.hasSession() && m.pillsExpanded && m.focus != uiFocusEditor {
 				if cmd := m.switchPillSection(1); cmd != nil {
 					cmds = append(cmds, cmd)
 				}

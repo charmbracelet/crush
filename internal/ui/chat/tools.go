@@ -1119,7 +1119,7 @@ func (t *baseToolMessageItem) formatViewResultForCopy() string {
 
 	var result strings.Builder
 	if lang != "" {
-		result.WriteString(fmt.Sprintf("```%s\n", lang))
+		fmt.Fprintf(&result, "```%s\n", lang)
 	} else {
 		result.WriteString("```\n")
 	}
@@ -1155,7 +1155,7 @@ func (t *baseToolMessageItem) formatEditResultForCopy() string {
 		}
 		diffContent, additions, removals := diff.GenerateDiff(meta.OldContent, meta.NewContent, fileName)
 
-		result.WriteString(fmt.Sprintf("Changes: +%d -%d\n", additions, removals))
+		fmt.Fprintf(&result, "Changes: +%d -%d\n", additions, removals)
 		result.WriteString("```diff\n")
 		result.WriteString(diffContent)
 		result.WriteString("\n```")
@@ -1189,7 +1189,7 @@ func (t *baseToolMessageItem) formatMultiEditResultForCopy() string {
 		}
 		diffContent, additions, removals := diff.GenerateDiff(meta.OldContent, meta.NewContent, fileName)
 
-		result.WriteString(fmt.Sprintf("Changes: +%d -%d\n", additions, removals))
+		fmt.Fprintf(&result, "Changes: +%d -%d\n", additions, removals)
 		result.WriteString("```diff\n")
 		result.WriteString(diffContent)
 		result.WriteString("\n```")
@@ -1247,9 +1247,9 @@ func (t *baseToolMessageItem) formatWriteResultForCopy() string {
 	}
 
 	var result strings.Builder
-	result.WriteString(fmt.Sprintf("File: %s\n", fsext.PrettyPath(params.FilePath)))
+	fmt.Fprintf(&result, "File: %s\n", fsext.PrettyPath(params.FilePath))
 	if lang != "" {
-		result.WriteString(fmt.Sprintf("```%s\n", lang))
+		fmt.Fprintf(&result, "```%s\n", lang)
 	} else {
 		result.WriteString("```\n")
 	}
@@ -1272,13 +1272,13 @@ func (t *baseToolMessageItem) formatFetchResultForCopy() string {
 
 	var result strings.Builder
 	if params.URL != "" {
-		result.WriteString(fmt.Sprintf("URL: %s\n", params.URL))
+		fmt.Fprintf(&result, "URL: %s\n", params.URL)
 	}
 	if params.Format != "" {
-		result.WriteString(fmt.Sprintf("Format: %s\n", params.Format))
+		fmt.Fprintf(&result, "Format: %s\n", params.Format)
 	}
 	if params.Timeout > 0 {
-		result.WriteString(fmt.Sprintf("Timeout: %ds\n", params.Timeout))
+		fmt.Fprintf(&result, "Timeout: %ds\n", params.Timeout)
 	}
 	result.WriteString("\n")
 
@@ -1300,10 +1300,10 @@ func (t *baseToolMessageItem) formatAgenticFetchResultForCopy() string {
 
 	var result strings.Builder
 	if params.URL != "" {
-		result.WriteString(fmt.Sprintf("URL: %s\n", params.URL))
+		fmt.Fprintf(&result, "URL: %s\n", params.URL)
 	}
 	if params.Prompt != "" {
-		result.WriteString(fmt.Sprintf("Prompt: %s\n\n", params.Prompt))
+		fmt.Fprintf(&result, "Prompt: %s\n\n", params.Prompt)
 	}
 
 	result.WriteString("```markdown\n")

@@ -15,8 +15,8 @@ import (
 	"slices"
 	"strings"
 
+	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
-	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
@@ -177,7 +177,7 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	mergedOptions, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(model, providerCfg)
 
 	if providerCfg.OAuthToken != nil && providerCfg.OAuthToken.IsExpired() {
-		slog.Info("Token needs to be refreshed", "provider", providerCfg.ID)
+		slog.Debug("Token needs to be refreshed", "provider", providerCfg.ID)
 		if err := c.refreshOAuth2Token(ctx, providerCfg); err != nil {
 			return nil, err
 		}
@@ -202,18 +202,18 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	if c.isUnauthorized(originalErr) {
 		switch {
 		case providerCfg.OAuthToken != nil:
-			slog.Info("Received 401. Refreshing token and retrying", "provider", providerCfg.ID)
+			slog.Debug("Received 401. Refreshing token and retrying", "provider", providerCfg.ID)
 			if err := c.refreshOAuth2Token(ctx, providerCfg); err != nil {
 				return nil, originalErr
 			}
-			slog.Info("Retrying request with refreshed OAuth token", "provider", providerCfg.ID)
+			slog.Debug("Retrying request with refreshed OAuth token", "provider", providerCfg.ID)
 			return run()
 		case strings.Contains(providerCfg.APIKeyTemplate, "$"):
-			slog.Info("Received 401. Refreshing API Key template and retrying", "provider", providerCfg.ID)
+			slog.Debug("Received 401. Refreshing API Key template and retrying", "provider", providerCfg.ID)
 			if err := c.refreshApiKeyTemplate(ctx, providerCfg); err != nil {
 				return nil, originalErr
 			}
-			slog.Info("Retrying request with refreshed API key", "provider", providerCfg.ID)
+			slog.Debug("Retrying request with refreshed API key", "provider", providerCfg.ID)
 			return run()
 		}
 	}
@@ -455,7 +455,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		}
 		if len(agent.AllowedMCP) == 0 {
 			// No MCPs allowed
-			slog.Debug("no MCPs allowed", "tool", tool.Name(), "agent", agent.Name)
+			slog.Debug("No MCPs allowed", "tool", tool.Name(), "agent", agent.Name)
 			break
 		}
 

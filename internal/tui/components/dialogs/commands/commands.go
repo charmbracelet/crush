@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"slices"
 	"strings"
 
@@ -82,6 +83,7 @@ type (
 	CompactMsg             struct {
 		SessionID string
 	}
+	SecurityReviewMsg struct{}
 )
 
 func NewCommandDialog(sessionID string) CommandsDialog {
@@ -430,6 +432,18 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 		})
 	}
 
+	// Only show security review command if there are pending git changes
+	if hasGitChanges() {
+		commands = append(commands, Command{
+			ID:          "security_review",
+			Title:       "Security Review",
+			Description: "Review security of pending changes",
+			Handler: func(cmd Command) tea.Cmd {
+				return performSecurityReview()
+			},
+		})
+	}
+
 	return append(commands, []Command{
 		{
 			ID:          "toggle_yolo",
@@ -472,6 +486,57 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 			},
 		},
 	}...)
+}
+
+// hasGitChanges checks if there are uncommitted changes in the git repository
+func hasGitChanges() bool {
+	cmd := exec.Command("git", "status", "--porcelain")
+	output, err := cmd.Output()
+	return err == nil && len(strings.TrimSpace(string(output))) > 0
+}
+
+// performSecurityReview performs a security review of pending git changes
+func performSecurityReview() tea.Cmd {
+	return func() tea.Msg {
+		// Get the current branch
+		branchCmd := exec.Command("git", "branch", "--show-current")
+		branchOutput, err := branchCmd.Output()
+		if err != nil {
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
+				Msg:  "Failed to get current branch: " + err.Error(),
+			}
+		}
+		branch := strings.TrimSpace(string(branchOutput))
+
+		// Get the diff
+		diffCmd := exec.Command("git", "diff", "--no-color")
+		diffOutput, err := diffCmd.Output()
+		if err != nil {
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
+				Msg:  "Failed to get git diff: " + err.Error(),
+			}
+		}
+
+		// Create security review prompt
+		prompt := fmt.Sprintf("Please perform a security review of the following changes from branch \"%s\":\n\n"+
+			"```diff\n"+
+			"%s\n"+
+			"```\n\n"+
+			"Analyze this code for:\n"+
+			"1. Security vulnerabilities (SQL injection, XSS, CSRF, command injection, etc.)\n"+
+			"2. Insecure dependencies or configurations\n"+
+			"3. Hardcoded secrets, credentials, or API keys\n"+
+			"4. Permission or access control issues\n"+
+			"5. Logging of sensitive data\n"+
+			"6. Any other security concerns\n\n"+
+			"Provide a detailed analysis with specific line numbers if applicable.", branch, string(diffOutput))
+
+		return chat.SendMsg{
+			Text: prompt,
+		}
+	}
 }
 
 func (c *commandDialogCmp) ID() dialogs.DialogID {

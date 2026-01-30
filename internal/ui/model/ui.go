@@ -2901,6 +2901,9 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 	// all files exist and are valid, add as attachments.
 	// Otherwise, paste as text.
 	paths := fsext.PasteStringToPaths(msg.Content)
+	for _, path := range paths {
+		slog.Info("Handling pasted file", "path", path)
+	}
 	allExistsAndValid := func() bool {
 		for _, path := range paths {
 			if _, err := os.Stat(path); os.IsNotExist(err) {

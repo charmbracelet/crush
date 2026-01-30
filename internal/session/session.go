@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
 )
@@ -42,6 +43,11 @@ type Session struct {
 	UpdatedAt        int64
 }
 
+type ForkMessageService interface {
+	List(ctx context.Context, sessionID string) ([]message.Message, error)
+	Copy(ctx context.Context, sessionID string, message message.Message) (message.Message, error)
+}
+
 type Service interface {
 	pubsub.Subscriber[Session]
 	Create(ctx context.Context, title string) (Session, error)
@@ -52,6 +58,7 @@ type Service interface {
 	Save(ctx context.Context, session Session) (Session, error)
 	UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error
 	Delete(ctx context.Context, id string) error
+	Fork(ctx context.Context, sourceSessionID, upToMessageID string, messageSvc ForkMessageService) (Session, error)
 
 	// Agent tool session management
 	CreateAgentToolSessionID(messageID, toolCallID string) string
@@ -137,6 +144,44 @@ func (s *service) Delete(ctx context.Context, id string) error {
 	s.Publish(pubsub.DeletedEvent, session)
 	event.SessionDeleted()
 	return nil
+}
+
+func (s *service) Fork(ctx context.Context, sourceSessionID, upToMessageID string, messageSvc ForkMessageService) (Session, error) {
+	messages, err := messageSvc.List(ctx, sourceSessionID)
+	if err != nil {
+		return Session{}, fmt.Errorf("listing messages: %w", err)
+	}
+
+	targetIndex := -1
+	for i, msg := range messages {
+		if msg.ID == upToMessageID {
+			targetIndex = i
+			break
+		}
+	}
+	if targetIndex == -1 {
+		return Session{}, fmt.Errorf("message not found: %s", upToMessageID)
+	}
+
+	sourceSession, err := s.Get(ctx, sourceSessionID)
+	if err != nil {
+		return Session{}, fmt.Errorf("getting source session: %w", err)
+	}
+
+	newSession, err := s.Create(ctx, "Forked: "+sourceSession.Title)
+	if err != nil {
+		return Session{}, fmt.Errorf("creating session: %w", err)
+	}
+
+	for i := 0; i < targetIndex; i++ {
+		_, err = messageSvc.Copy(ctx, newSession.ID, messages[i])
+		if err != nil {
+			_ = s.Delete(ctx, newSession.ID)
+			return Session{}, fmt.Errorf("copying message: %w", err)
+		}
+	}
+
+	return newSession, nil
 }
 
 func (s *service) Get(ctx context.Context, id string) (Session, error) {

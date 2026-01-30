@@ -28,8 +28,10 @@ type Service interface {
 	List(ctx context.Context, sessionID string) ([]Message, error)
 	ListUserMessages(ctx context.Context, sessionID string) ([]Message, error)
 	ListAllUserMessages(ctx context.Context) ([]Message, error)
+	Copy(ctx context.Context, sessionID string, message Message) (Message, error)
 	Delete(ctx context.Context, id string) error
 	DeleteSessionMessages(ctx context.Context, sessionID string) error
+	DeleteMessagesFrom(ctx context.Context, sessionID, messageID string) error
 }
 
 type service struct {
@@ -95,6 +97,17 @@ func (s *service) Create(ctx context.Context, sessionID string, params CreateMes
 	return message, nil
 }
 
+func (s *service) Copy(ctx context.Context, sessionID string, message Message) (Message, error) {
+	params := CreateMessageParams{
+		Role:             message.Role,
+		Parts:            message.Parts,
+		Model:            message.Model,
+		Provider:         message.Provider,
+		IsSummaryMessage: message.IsSummaryMessage,
+	}
+	return s.Create(ctx, sessionID, params)
+}
+
 func (s *service) DeleteSessionMessages(ctx context.Context, sessionID string) error {
 	messages, err := s.List(ctx, sessionID)
 	if err != nil {
@@ -106,6 +119,29 @@ func (s *service) DeleteSessionMessages(ctx context.Context, sessionID string) e
 			if err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+func (s *service) DeleteMessagesFrom(ctx context.Context, sessionID, messageID string) error {
+	allMessages, err := s.List(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	targetIndex := -1
+	for i, msg := range allMessages {
+		if msg.ID == messageID {
+			targetIndex = i
+			break
+		}
+	}
+	if targetIndex == -1 {
+		return fmt.Errorf("message not found: %s", messageID)
+	}
+	for i := len(allMessages) - 1; i >= targetIndex; i-- {
+		if err := s.Delete(ctx, allMessages[i].ID); err != nil {
+			return err
 		}
 	}
 	return nil

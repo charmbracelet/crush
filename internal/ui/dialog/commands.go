@@ -63,20 +63,22 @@ type Commands struct {
 
 	windowWidth int
 
-	customCommands []commands.CustomCommand
-	mcpPrompts     []commands.MCPPrompt
+	customCommands        []commands.CustomCommand
+	mcpPrompts            []commands.MCPPrompt
+	isUserMessageSelected bool // whether a user message is selected in chat
 }
 
 var _ Dialog = (*Commands)(nil)
 
 // NewCommands creates a new commands dialog.
-func NewCommands(com *common.Common, sessionID string, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) (*Commands, error) {
+func NewCommands(com *common.Common, sessionID string, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt, isUserMessageSelected bool) (*Commands, error) {
 	c := &Commands{
-		com:            com,
-		selected:       SystemCommands,
-		sessionID:      sessionID,
-		customCommands: customCommands,
-		mcpPrompts:     mcpPrompts,
+		com:                   com,
+		selected:              SystemCommands,
+		sessionID:             sessionID,
+		customCommands:        customCommands,
+		mcpPrompts:            mcpPrompts,
+		isUserMessageSelected: isUserMessageSelected,
 	}
 
 	help := help.New()
@@ -386,9 +388,19 @@ func (c *Commands) setCommandItems(commandType CommandType) {
 func (c *Commands) defaultCommands() []*CommandItem {
 	commands := []*CommandItem{
 		NewCommandItem(c.com.Styles, "new_session", "New Session", "ctrl+n", ActionNewSession{}),
+	}
+
+	if c.isUserMessageSelected {
+		commands = append(commands,
+			NewCommandItem(c.com.Styles, "fork_conversation", "Fork Conversation", "", ActionForkConversation{}),
+			NewCommandItem(c.com.Styles, "delete_messages", "Delete Bellow", "", ActionDeleteMessages{}),
+		)
+	}
+
+	commands = append(commands,
 		NewCommandItem(c.com.Styles, "switch_session", "Sessions", "ctrl+s", ActionOpenDialog{SessionsID}),
 		NewCommandItem(c.com.Styles, "switch_model", "Switch Model", "ctrl+l", ActionOpenDialog{ModelsID}),
-	}
+	)
 
 	// Only show compact command if there's an active session
 	if c.sessionID != "" {

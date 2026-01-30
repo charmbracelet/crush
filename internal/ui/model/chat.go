@@ -246,6 +246,11 @@ func (m *Chat) SelectedItemInView() bool {
 	return m.list.SelectedItemInView()
 }
 
+// SelectedItem returns the currently selected item in the chat list.
+func (m *Chat) SelectedItem() list.Item {
+	return m.list.SelectedItem()
+}
+
 func (m *Chat) isSelectable(index int) bool {
 	item := m.list.ItemAt(index)
 	if item == nil {

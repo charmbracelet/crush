@@ -540,13 +540,18 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.dialog.Update(msg)
 			return m, tea.Batch(cmds...)
 		}
+
+		if cmd := m.handleClickFocus(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+
 		switch m.state {
 		case uiChat:
 			x, y := msg.X, msg.Y
 			// Adjust for chat area position
 			x -= m.layout.main.Min.X
 			y -= m.layout.main.Min.Y
-			if m.chat.HandleMouseDown(x, y) {
+			if !image.Pt(msg.X, msg.Y).In(m.layout.sidebar) && m.chat.HandleMouseDown(x, y) {
 				m.lastClickTime = time.Now()
 			}
 		}
@@ -906,6 +911,24 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 		}
 	}
 	return tea.Batch(cmds...)
+}
+
+func (m *UI) handleClickFocus(msg tea.MouseClickMsg) (cmd tea.Cmd) {
+	switch {
+	case m.state != uiChat:
+		return nil
+	case image.Pt(msg.X, msg.Y).In(m.layout.sidebar):
+		return nil
+	case m.focus != uiFocusEditor && image.Pt(msg.X, msg.Y).In(m.layout.editor):
+		m.focus = uiFocusEditor
+		cmd = m.textarea.Focus()
+		m.chat.Blur()
+	case m.focus != uiFocusMain && image.Pt(msg.X, msg.Y).In(m.layout.main):
+		m.focus = uiFocusMain
+		m.textarea.Blur()
+		m.chat.Focus()
+	}
+	return cmd
 }
 
 // updateSessionMessage updates an existing message in the current session in the chat

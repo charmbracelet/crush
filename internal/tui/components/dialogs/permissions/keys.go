@@ -7,6 +7,8 @@ import (
 type KeyMap struct {
 	Left,
 	Right,
+	Up,
+	Down,
 	Tab,
 	Select,
 	Allow,
@@ -28,6 +30,14 @@ func DefaultKeyMap() KeyMap {
 		Right: key.NewBinding(
 			key.WithKeys("right", "l"),
 			key.WithHelp("→", "next"),
+		),
+		Up: key.NewBinding(
+			key.WithKeys("up", "k"),
+			key.WithHelp("↑", "previous"),
+		),
+		Down: key.NewBinding(
+			key.WithKeys("down", "j"),
+			key.WithHelp("↓", "next"),
 		),
 		Tab: key.NewBinding(
 			key.WithKeys("tab"),
@@ -77,6 +87,8 @@ func (k KeyMap) KeyBindings() []key.Binding {
 	return []key.Binding{
 		k.Left,
 		k.Right,
+		k.Up,
+		k.Down,
 		k.Tab,
 		k.Select,
 		k.Allow,

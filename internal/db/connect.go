@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"sync"
 
 	"github.com/pressly/goose/v3"
 )
+
+var gooseSetup sync.Once
 
 // Connect opens a SQLite database connection and runs migrations.
 func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
@@ -27,11 +30,16 @@ func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	goose.SetBaseFS(FS)
-
-	if err := goose.SetDialect("sqlite3"); err != nil {
-		slog.Error("Failed to set dialect", "error", err)
-		return nil, fmt.Errorf("failed to set dialect: %w", err)
+	var gooseErr error
+	gooseSetup.Do(func() {
+		goose.SetBaseFS(FS)
+		if err := goose.SetDialect("sqlite3"); err != nil {
+			slog.Error("Failed to set dialect", "error", err)
+			gooseErr = fmt.Errorf("failed to set dialect: %w", err)
+		}
+	})
+	if gooseErr != nil {
+		return nil, gooseErr
 	}
 
 	if err := goose.Up(db, "migrations"); err != nil {

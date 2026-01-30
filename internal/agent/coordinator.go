@@ -21,7 +21,6 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/plugin"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/log"
@@ -30,6 +29,7 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/plugin"
 	"golang.org/x/sync/errgroup"
 
 	"charm.land/fantasy/providers/anthropic"
@@ -57,6 +57,7 @@ type Coordinator interface {
 	Summarize(context.Context, string) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
+	PluginApp() *plugin.App
 }
 
 type coordinator struct {
@@ -70,10 +71,10 @@ type coordinator struct {
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
 
-	pluginApp               *plugin.App
-	hooks                   []plugin.Hook
-	sessionInfoAdapter      *SessionInfoAdapter
-	promptSubmitterAdapter  *PromptSubmitterAdapter
+	pluginApp              *plugin.App
+	hooks                  []plugin.Hook
+	sessionInfoAdapter     *SessionInfoAdapter
+	promptSubmitterAdapter *PromptSubmitterAdapter
 
 	readyWg errgroup.Group
 }
@@ -916,6 +917,11 @@ func (c *coordinator) refreshApiKeyTemplate(ctx context.Context, providerCfg con
 		return err
 	}
 	return nil
+}
+
+// PluginApp returns the plugin app for accessing plugin services.
+func (c *coordinator) PluginApp() *plugin.App {
+	return c.pluginApp
 }
 
 // initPluginHooks initializes plugin hooks and starts them in background goroutines.

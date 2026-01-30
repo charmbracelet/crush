@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/crush/plugin"
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
@@ -24,7 +25,7 @@ const CommandsID = "commands"
 type CommandType uint
 
 // String returns the string representation of the CommandType.
-func (c CommandType) String() string { return []string{"System", "User", "MCP"}[c] }
+func (c CommandType) String() string { return []string{"System", "User", "MCP", "Plugin"}[c] }
 
 const (
 	sidebarCompactModeBreakpoint  = 120
@@ -35,6 +36,7 @@ const (
 	SystemCommands CommandType = iota
 	UserCommands
 	MCPPrompts
+	PluginCommands
 )
 
 // Commands represents a dialog that shows available commands.
@@ -64,18 +66,22 @@ type Commands struct {
 
 	customCommands []commands.CustomCommand
 	mcpPrompts     []commands.MCPPrompt
+	pluginCommands []plugin.PluginCommandRegistration
+	pluginApp      *plugin.App
 }
 
 var _ Dialog = (*Commands)(nil)
 
 // NewCommands creates a new commands dialog.
-func NewCommands(com *common.Common, sessionID string, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) (*Commands, error) {
+func NewCommands(com *common.Common, sessionID string, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt, pluginCommands []plugin.PluginCommandRegistration, pluginApp *plugin.App) (*Commands, error) {
 	c := &Commands{
 		com:            com,
 		selected:       SystemCommands,
 		sessionID:      sessionID,
 		customCommands: customCommands,
 		mcpPrompts:     mcpPrompts,
+		pluginCommands: pluginCommands,
+		pluginApp:      pluginApp,
 	}
 
 	help := help.New()
@@ -175,12 +181,12 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 				}
 			}
 		case key.Matches(msg, c.keyMap.Tab):
-			if len(c.customCommands) > 0 || len(c.mcpPrompts) > 0 {
+			if len(c.customCommands) > 0 || len(c.mcpPrompts) > 0 || len(c.pluginCommands) > 0 {
 				c.selected = c.nextCommandType()
 				c.setCommandItems(c.selected)
 			}
 		case key.Matches(msg, c.keyMap.ShiftTab):
-			if len(c.customCommands) > 0 || len(c.mcpPrompts) > 0 {
+			if len(c.customCommands) > 0 || len(c.mcpPrompts) > 0 || len(c.pluginCommands) > 0 {
 				c.selected = c.previousCommandType()
 				c.setCommandItems(c.selected)
 			}
@@ -210,8 +216,8 @@ func (c *Commands) Cursor() *tea.Cursor {
 }
 
 // commandsRadioView generates the command type selector radio buttons.
-func commandsRadioView(sty *styles.Styles, selected CommandType, hasUserCmds bool, hasMCPPrompts bool) string {
-	if !hasUserCmds && !hasMCPPrompts {
+func commandsRadioView(sty *styles.Styles, selected CommandType, hasUserCmds bool, hasMCPPrompts bool, hasPluginCmds bool) string {
+	if !hasUserCmds && !hasMCPPrompts && !hasPluginCmds {
 		return ""
 	}
 
@@ -231,6 +237,9 @@ func commandsRadioView(sty *styles.Styles, selected CommandType, hasUserCmds boo
 	}
 	if hasMCPPrompts {
 		parts = append(parts, selectedFn(MCPPrompts))
+	}
+	if hasPluginCmds {
+		parts = append(parts, selectedFn(PluginCommands))
 	}
 
 	return strings.Join(parts, " ")
@@ -261,7 +270,7 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Commands"
-	rc.TitleInfo = commandsRadioView(t, c.selected, len(c.customCommands) > 0, len(c.mcpPrompts) > 0)
+	rc.TitleInfo = commandsRadioView(t, c.selected, len(c.customCommands) > 0, len(c.mcpPrompts) > 0, len(c.pluginCommands) > 0)
 	inputView := t.Dialog.InputPrompt.Render(c.input.View())
 	rc.AddPart(inputView)
 	listView := t.Dialog.List.Height(c.list.Height()).Render(c.list.Render())
@@ -307,13 +316,24 @@ func (c *Commands) nextCommandType() CommandType {
 		if len(c.mcpPrompts) > 0 {
 			return MCPPrompts
 		}
+		if len(c.pluginCommands) > 0 {
+			return PluginCommands
+		}
 		fallthrough
 	case UserCommands:
 		if len(c.mcpPrompts) > 0 {
 			return MCPPrompts
 		}
+		if len(c.pluginCommands) > 0 {
+			return PluginCommands
+		}
 		fallthrough
 	case MCPPrompts:
+		if len(c.pluginCommands) > 0 {
+			return PluginCommands
+		}
+		fallthrough
+	case PluginCommands:
 		return SystemCommands
 	default:
 		return SystemCommands
@@ -324,6 +344,9 @@ func (c *Commands) nextCommandType() CommandType {
 func (c *Commands) previousCommandType() CommandType {
 	switch c.selected {
 	case SystemCommands:
+		if len(c.pluginCommands) > 0 {
+			return PluginCommands
+		}
 		if len(c.mcpPrompts) > 0 {
 			return MCPPrompts
 		}
@@ -334,6 +357,14 @@ func (c *Commands) previousCommandType() CommandType {
 	case UserCommands:
 		return SystemCommands
 	case MCPPrompts:
+		if len(c.customCommands) > 0 {
+			return UserCommands
+		}
+		return SystemCommands
+	case PluginCommands:
+		if len(c.mcpPrompts) > 0 {
+			return MCPPrompts
+		}
 		if len(c.customCommands) > 0 {
 			return UserCommands
 		}
@@ -371,6 +402,15 @@ func (c *Commands) setCommandItems(commandType CommandType) {
 				Arguments:   cmd.Arguments,
 			}
 			commandItems = append(commandItems, NewCommandItem(c.com.Styles, "mcp_"+cmd.ID, cmd.PromptID, "", action))
+		}
+	case PluginCommands:
+		for _, reg := range c.pluginCommands {
+			action := ActionRunPluginCommand{
+				Command:   reg.Command,
+				Handler:   reg.Handler,
+				PluginApp: c.pluginApp,
+			}
+			commandItems = append(commandItems, NewCommandItem(c.com.Styles, "plugin_"+reg.Command.ID, reg.Command.Title, reg.Command.Shortcut, action))
 		}
 	}
 
@@ -460,6 +500,15 @@ func (c *Commands) SetCustomCommands(customCommands []commands.CustomCommand) {
 func (c *Commands) SetMCPPrompts(mcpPrompts []commands.MCPPrompt) {
 	c.mcpPrompts = mcpPrompts
 	if c.selected == MCPPrompts {
+		c.setCommandItems(c.selected)
+	}
+}
+
+// SetPluginCommands sets the plugin commands and refreshes the view if plugin commands are currently displayed.
+func (c *Commands) SetPluginCommands(pluginCommands []plugin.PluginCommandRegistration, pluginApp *plugin.App) {
+	c.pluginCommands = pluginCommands
+	c.pluginApp = pluginApp
+	if c.selected == PluginCommands {
 		c.setCommandItems(c.selected)
 	}
 }

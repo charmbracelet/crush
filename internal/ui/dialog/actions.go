@@ -49,6 +49,7 @@ type (
 	ActionToggleThinking    struct{}
 	ActionExternalEditor    struct{}
 	ActionToggleYoloMode    struct{}
+	ActionCycleMode         struct{}
 	// ActionInitializeProject is a message to initialize a project.
 	ActionInitializeProject struct{}
 	ActionSummarize         struct {

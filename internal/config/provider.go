@@ -140,6 +140,9 @@ var (
 // 3. try to get the fresh list of providers, and return either this new list,
 // the cached list, or the embedded list if all others fail.
 func Providers(cfg *Config) ([]catwalk.Provider, error) {
+	if cfg.Options.DisableDefaultProviders {
+		return nil, nil
+	}
 	providerOnce.Do(func() {
 		var wg sync.WaitGroup
 		var errs []error

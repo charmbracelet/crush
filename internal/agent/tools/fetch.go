@@ -165,7 +165,7 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 				content += fmt.Sprintf("\n\n[Content truncated to %d bytes]", MaxReadSize)
 			}
 
-			return fantasy.NewTextResponse(content), nil
+			return fantasy.NewTextResponse(TruncateOutputCtx(ctx, content)), nil
 		})
 }
 

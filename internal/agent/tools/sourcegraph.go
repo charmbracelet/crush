@@ -132,7 +132,7 @@ func NewSourcegraphTool(client *http.Client) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse("Failed to format results: " + err.Error()), nil
 			}
 
-			return fantasy.NewTextResponse(formattedResults), nil
+			return fantasy.NewTextResponse(TruncateOutputCtx(ctx, formattedResults)), nil
 		})
 }
 

@@ -47,7 +47,7 @@ const (
 	BashToolName = "bash"
 
 	AutoBackgroundThreshold = 1 * time.Minute // Commands taking longer automatically become background jobs
-	MaxOutputLength         = 30000
+	BashMaxOutputLength     = 30000
 	BashNoOutput            = "no output"
 )
 
@@ -144,7 +144,7 @@ func bashDescription(attribution *config.Attribution, modelName string) string {
 	var out bytes.Buffer
 	if err := bashDescriptionTpl.Execute(&out, bashDescriptionData{
 		BannedCommands:  bannedCommandsStr,
-		MaxOutputLength: MaxOutputLength,
+		MaxOutputLength: BashMaxOutputLength,
 		Attribution:     *attribution,
 		ModelName:       modelName,
 	}); err != nil {
@@ -410,11 +410,11 @@ func formatOutput(stdout, stderr string, execErr error) string {
 }
 
 func truncateOutput(content string) string {
-	if len(content) <= MaxOutputLength {
+	if len(content) <= BashMaxOutputLength {
 		return content
 	}
 
-	halfLength := MaxOutputLength / 2
+	halfLength := BashMaxOutputLength / 2
 	start := content[:halfLength]
 	end := content[len(content)-halfLength:]
 

@@ -61,6 +61,11 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error creating session: %s", err)
 			}
+
+			// Auto-approve permissions for subagent sessions to prevent blocking
+			// on permission dialogs that would never be shown to the user.
+			c.permissions.AutoApproveSession(session.ID)
+
 			model := agent.Model()
 			maxTokens := model.CatwalkCfg.DefaultMaxTokens
 			if model.ModelCfg.MaxTokens != 0 {

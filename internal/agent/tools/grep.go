@@ -173,7 +173,7 @@ func NewGrepTool(workingDir string) fantasy.AgentTool {
 			}
 
 			return fantasy.WithResponseMetadata(
-				fantasy.NewTextResponse(output.String()),
+				fantasy.NewTextResponse(TruncateOutputCtx(ctx, output.String())),
 				GrepResponseMetadata{
 					NumberOfMatches: len(matches),
 					Truncated:       truncated,

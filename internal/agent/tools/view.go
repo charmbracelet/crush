@@ -198,7 +198,7 @@ func NewViewTool(
 			output += getDiagnostics(filePath, lspClients)
 			filetracker.RecordRead(ctx, sessionID, filePath)
 			return fantasy.WithResponseMetadata(
-				fantasy.NewTextResponse(output),
+				fantasy.NewTextResponse(TruncateOutputCtx(ctx, output)),
 				ViewResponseMetadata{
 					FilePath: filePath,
 					Content:  content,

@@ -168,6 +168,13 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, handleMCPToolsEvent(context.Background(), msg.Payload.Name)
 		}
 
+	case pubsub.MessageDroppedMsg:
+		return a, util.CmdHandler(util.InfoMsg{
+			Type: util.InfoTypeWarn,
+			Msg:  fmt.Sprintf("System is busy: Dropped messages from %s. Some updates may be missing.", msg.Name),
+			TTL:  10 * time.Second,
+		})
+
 	// Completions messages
 	case completions.OpenCompletionsMsg, completions.FilterCompletionsMsg,
 		completions.CloseCompletionsMsg, completions.RepositionCompletionsMsg:

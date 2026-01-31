@@ -95,10 +95,6 @@ type GrepToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (g *GrepToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if opts.IsPending() {
-		return pendingTool(sty, "Grep", opts.Anim, opts.Compact)
-	}
-
 	var params tools.GrepParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
 		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
@@ -113,6 +109,15 @@ func (g *GrepToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	}
 	if params.LiteralText {
 		toolParams = append(toolParams, "literal", "true")
+	}
+
+	if opts.IsPending() {
+		header := toolHeader(sty, opts.Status, "Grep", cappedWidth, opts, toolParams...)
+		var animView string
+		if opts.Anim != nil {
+			animView = opts.Anim.Render()
+		}
+		return header + " " + animView
 	}
 
 	header := toolHeader(sty, opts.Status, "Grep", cappedWidth, opts, toolParams...)

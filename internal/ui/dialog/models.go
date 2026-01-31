@@ -514,12 +514,13 @@ func getFilteredProviders(cfg *config.Config) ([]catwalk.Provider, error) {
 	for _, p := range providers {
 		var (
 			isAzure         = p.ID == catwalk.InferenceProviderAzure
+			isAnthropic     = p.ID == catwalk.InferenceProviderAnthropic
 			isCopilot       = p.ID == catwalk.InferenceProviderCopilot
 			isHyper         = string(p.ID) == "hyper"
 			hasAPIKeyEnv    = strings.HasPrefix(p.APIKey, "$")
 			_, isConfigured = cfg.Providers.Get(string(p.ID))
 		)
-		if isAzure || isCopilot || isHyper || hasAPIKeyEnv || isConfigured {
+		if isAzure || isAnthropic || isCopilot || isHyper || hasAPIKeyEnv || isConfigured {
 			filteredProviders = append(filteredProviders, p)
 		}
 	}

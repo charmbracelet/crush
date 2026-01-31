@@ -349,6 +349,19 @@ permissions. Use this with care.
 You can also skip all permission prompts entirely by running Crush with the
 `--yolo` flag. Be very, very careful with this feature.
 
+### Plan Mode
+
+Plan mode is a read-only mode where Crush can explore your codebase and create
+implementation plans without making any changes. This is useful for:
+
+- Designing implementation plans before executing
+- Safe codebase exploration
+- Review workflows
+
+In plan mode, write tools (Edit, Write, MultiEdit) are disabled and the agent
+is instructed to only use read-only operations. Press `shift+tab` to cycle
+between Regular, Yolo, and Plan modes.
+
 ### Disabling Built-In Tools
 
 If you'd like to prevent Crush from using certain built-in tools entirely, you

@@ -10,6 +10,7 @@ type EditorKeyMap struct {
 	OpenEditor  key.Binding
 	Newline     key.Binding
 	PasteImage  key.Binding
+	CycleMode   key.Binding
 }
 
 func DefaultEditorKeyMap() EditorKeyMap {
@@ -37,6 +38,10 @@ func DefaultEditorKeyMap() EditorKeyMap {
 			key.WithKeys("ctrl+v"),
 			key.WithHelp("ctrl+v", "paste image from clipboard"),
 		),
+		CycleMode: key.NewBinding(
+			key.WithKeys("shift+tab"),
+			key.WithHelp("shift+tab", "cycle mode"),
+		),
 	}
 }
 
@@ -48,6 +53,7 @@ func (k EditorKeyMap) KeyBindings() []key.Binding {
 		k.OpenEditor,
 		k.Newline,
 		k.PasteImage,
+		k.CycleMode,
 		AttachmentsKeyMaps.AttachmentDeleteMode,
 		AttachmentsKeyMaps.DeleteAllAttachments,
 		AttachmentsKeyMaps.Escape,

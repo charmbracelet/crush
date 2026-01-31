@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
@@ -54,6 +55,7 @@ type Editor interface {
 	HasAttachments() bool
 	IsEmpty() bool
 	Cursor() *tea.Cursor
+	GetMode() commands.EditorMode
 }
 
 type FileCompletionItem struct {
@@ -72,6 +74,7 @@ type editorCmp struct {
 	deleteMode         bool
 	readyPlaceholder   string
 	workingPlaceholder string
+	mode               commands.EditorMode
 
 	keyMap EditorKeyMap
 
@@ -169,6 +172,7 @@ func (m *editorCmp) send() tea.Cmd {
 		util.CmdHandler(chat.SendMsg{
 			Text:        value,
 			Attachments: attachments,
+			IsPlanMode:  m.mode == commands.PlanMode,
 		}),
 	)
 }
@@ -299,7 +303,21 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		})
 
 	case commands.ToggleYoloModeMsg:
+		// Sync yolo mode with the 3-phase system
+		if m.mode == commands.YoloMode {
+			m.mode = commands.RegularMode
+		} else {
+			m.mode = commands.YoloMode
+		}
 		m.setEditorPrompt()
+		m.syncModeToPermissions()
+		// Don't forward - parent will handle permission toggle
+		return m, nil
+	case commands.CycleModeMsg:
+		m.mode = (m.mode + 1) % 3
+		m.setEditorPrompt()
+		// Sync permissions with new mode
+		m.syncModeToPermissions()
 		return m, nil
 	case tea.KeyPressMsg:
 		cur := m.textarea.Cursor()
@@ -348,6 +366,12 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				return m, util.ReportWarn("Agent is working, please wait...")
 			}
 			return m, m.openEditor(m.textarea.Value())
+		}
+		if key.Matches(msg, m.keyMap.CycleMode) {
+			m.mode = (m.mode + 1) % 3
+			m.setEditorPrompt()
+			m.syncModeToPermissions()
+			return m, nil
 		}
 		if key.Matches(msg, DeleteKeyMaps.Escape) {
 			m.deleteMode = false
@@ -490,11 +514,14 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 }
 
 func (m *editorCmp) setEditorPrompt() {
-	if m.app.Permissions.SkipRequests() {
+	switch m.mode {
+	case commands.YoloMode:
 		m.textarea.SetPromptFunc(4, yoloPromptFunc)
-		return
+	case commands.PlanMode:
+		m.textarea.SetPromptFunc(4, planPromptFunc)
+	default:
+		m.textarea.SetPromptFunc(4, normalPromptFunc)
 	}
-	m.textarea.SetPromptFunc(4, normalPromptFunc)
 }
 
 func (m *editorCmp) completionsPosition() (int, int) {
@@ -543,10 +570,14 @@ func (m *editorCmp) View() string {
 	if m.app.AgentCoordinator != nil && m.app.AgentCoordinator.IsBusy() {
 		m.textarea.Placeholder = m.workingPlaceholder
 	} else {
-		m.textarea.Placeholder = m.readyPlaceholder
-	}
-	if m.app.Permissions.SkipRequests() {
-		m.textarea.Placeholder = "Yolo mode!"
+		switch m.mode {
+		case commands.YoloMode:
+			m.textarea.Placeholder = "Yolo mode!"
+		case commands.PlanMode:
+			m.textarea.Placeholder = "Plan mode!"
+		default:
+			m.textarea.Placeholder = m.readyPlaceholder
+		}
 	}
 	if len(m.attachments) == 0 {
 		return t.S().Base.Padding(1).Render(
@@ -692,6 +723,24 @@ func (c *editorCmp) IsEmpty() bool {
 	return strings.TrimSpace(c.textarea.Value()) == ""
 }
 
+func (m *editorCmp) GetMode() commands.EditorMode {
+	return m.mode
+}
+
+// syncModeToPermissions updates the permission service to match the editor mode.
+func (m *editorCmp) syncModeToPermissions() {
+	var permMode permission.PermissionMode
+	switch m.mode {
+	case commands.RegularMode:
+		permMode = permission.ModeRegular
+	case commands.YoloMode:
+		permMode = permission.ModeYolo
+	case commands.PlanMode:
+		permMode = permission.ModePlan
+	}
+	m.app.Permissions.SetMode(permMode)
+}
+
 func normalPromptFunc(info textarea.PromptInfo) string {
 	t := styles.CurrentTheme()
 	if info.LineNumber == 0 {
@@ -721,6 +770,21 @@ func yoloPromptFunc(info textarea.PromptInfo) string {
 	return fmt.Sprintf("%s ", t.YoloDotsBlurred)
 }
 
+func planPromptFunc(info textarea.PromptInfo) string {
+	t := styles.CurrentTheme()
+	if info.LineNumber == 0 {
+		if info.Focused {
+			return fmt.Sprintf("%s ", t.PlanIconFocused)
+		} else {
+			return fmt.Sprintf("%s ", t.PlanIconBlurred)
+		}
+	}
+	if info.Focused {
+		return fmt.Sprintf("%s ", t.PlanDotsFocused)
+	}
+	return fmt.Sprintf("%s ", t.PlanDotsBlurred)
+}
+
 func New(app *app.App) Editor {
 	t := styles.CurrentTheme()
 	ta := textarea.New()
@@ -729,11 +793,25 @@ func New(app *app.App) Editor {
 	ta.CharLimit = -1
 	ta.SetVirtualCursor(false)
 	ta.Focus()
+
+	// Initialize mode based on current permissions state.
+	initialMode := commands.RegularMode
+	permMode := app.Permissions.GetMode()
+	switch permMode {
+	case permission.ModeYolo:
+		initialMode = commands.YoloMode
+	case permission.ModePlan:
+		initialMode = commands.PlanMode
+	case permission.ModeRegular:
+		initialMode = commands.RegularMode
+	}
+
 	e := &editorCmp{
 		// TODO: remove the app instance from here
 		app:      app,
 		textarea: ta,
 		keyMap:   DefaultEditorKeyMap(),
+		mode:     initialMode,
 	}
 	e.setEditorPrompt()
 

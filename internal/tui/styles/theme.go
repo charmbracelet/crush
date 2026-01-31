@@ -92,6 +92,12 @@ type Theme struct {
 	YoloDotsFocused lipgloss.Style
 	YoloDotsBlurred lipgloss.Style
 
+	// Editor: Plan Mode.
+	PlanIconFocused lipgloss.Style
+	PlanIconBlurred lipgloss.Style
+	PlanDotsFocused lipgloss.Style
+	PlanDotsBlurred lipgloss.Style
+
 	// oAuth Chooser.
 	AuthBorderSelected   lipgloss.Style
 	AuthTextSelected     lipgloss.Style

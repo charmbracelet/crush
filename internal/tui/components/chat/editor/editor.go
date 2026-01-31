@@ -301,6 +301,15 @@ func (m *editorCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	case commands.ToggleYoloModeMsg:
 		m.setEditorPrompt()
 		return m, nil
+	case tea.MouseClickMsg:
+		// Handle middle-click paste from X11 PRIMARY selection.
+		if msg.Button == tea.MouseMiddle {
+			if text := readPrimarySelection(); text != "" {
+				// Re-use paste handling by converting to a PasteMsg.
+				return m.Update(tea.PasteMsg{Content: text})
+			}
+		}
+		return m, nil
 	case tea.KeyPressMsg:
 		cur := m.textarea.Cursor()
 		curIdx := m.textarea.Width()*cur.Y + cur.X

@@ -29,6 +29,7 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/ui/notification"
 	"golang.org/x/sync/errgroup"
 
 	"charm.land/fantasy/providers/anthropic"
@@ -67,6 +68,7 @@ type coordinator struct {
 	history     history.Service
 	filetracker filetracker.Service
 	lspManager  *lsp.Manager
+	notify      notification.Sink
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
@@ -83,6 +85,7 @@ func NewCoordinator(
 	history history.Service,
 	filetracker filetracker.Service,
 	lspManager *lsp.Manager,
+	notify notification.Sink,
 ) (Coordinator, error) {
 	c := &coordinator{
 		cfg:         cfg,
@@ -92,6 +95,7 @@ func NewCoordinator(
 		history:     history,
 		filetracker: filetracker,
 		lspManager:  lspManager,
+		notify:      notify,
 		agents:      make(map[string]SessionAgent),
 	}
 
@@ -358,16 +362,17 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 
 	largeProviderCfg, _ := c.cfg.Providers.Get(large.ModelCfg.Provider)
 	result := NewSessionAgent(SessionAgentOptions{
-		large,
-		small,
-		largeProviderCfg.SystemPromptPrefix,
-		"",
-		isSubAgent,
-		c.cfg.Options.DisableAutoSummarize,
-		c.permissions.SkipRequests(),
-		c.sessions,
-		c.messages,
-		nil,
+		LargeModel:           large,
+		SmallModel:           small,
+		SystemPromptPrefix:   largeProviderCfg.SystemPromptPrefix,
+		SystemPrompt:         "",
+		IsSubAgent:           isSubAgent,
+		DisableAutoSummarize: c.cfg.Options.DisableAutoSummarize,
+		IsYolo:               c.permissions.SkipRequests(),
+		Sessions:             c.sessions,
+		Messages:             c.messages,
+		Tools:                nil,
+		Notify:               c.notify,
 	})
 
 	c.readyWg.Go(func() error {

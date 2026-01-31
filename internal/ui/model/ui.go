@@ -44,12 +44,14 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/dialog"
 	fimage "github.com/charmbracelet/crush/internal/ui/image"
 	"github.com/charmbracelet/crush/internal/ui/logo"
+	"github.com/charmbracelet/crush/internal/ui/notification"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/version"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/layout"
 	"github.com/charmbracelet/ultraviolet/screen"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/editor"
 )
 
@@ -125,6 +127,9 @@ type (
 	sessionFilesUpdatesMsg struct {
 		sessionFiles []SessionFile
 	}
+
+	// notificationRequestMsg is sent when a notification request arrives.
+	notificationRequestMsg notification.Notification
 )
 
 // UI represents the main user interface model.
@@ -200,6 +205,10 @@ type UI struct {
 	// sidebarLogo keeps a cached version of the sidebar sidebarLogo.
 	sidebarLogo string
 
+	// Notification state
+	notifyBackend       notification.Backend
+	notifyWindowFocused bool
+	notifyCh            <-chan notification.Notification
 	// custom commands & mcp commands
 	customCommands []commands.CustomCommand
 	mcpPrompts     []commands.MCPPrompt
@@ -279,17 +288,20 @@ func New(com *common.Common) *UI {
 	header := newHeader(com)
 
 	ui := &UI{
-		com:         com,
-		dialog:      dialog.NewOverlay(),
-		keyMap:      keyMap,
-		textarea:    ta,
-		chat:        ch,
-		header:      header,
-		completions: comp,
-		attachments: attachments,
-		todoSpinner: todoSpinner,
-		lspStates:   make(map[string]app.LSPClientInfo),
-		mcpStates:   make(map[string]mcp.ClientInfo),
+		com:                 com,
+		dialog:              dialog.NewOverlay(),
+		keyMap:              keyMap,
+		textarea:            ta,
+		chat:                ch,
+		header:              header,
+		completions:         comp,
+		attachments:         attachments,
+		todoSpinner:         todoSpinner,
+		lspStates:           make(map[string]app.LSPClientInfo),
+		mcpStates:           make(map[string]mcp.ClientInfo),
+		notifyBackend:       notification.NoopBackend{},
+		notifyWindowFocused: true,
+		notifyCh:            com.App.Notifications(),
 	}
 
 	status := NewStatus(com, ui)
@@ -338,7 +350,46 @@ func (m *UI) Init() tea.Cmd {
 	cmds = append(cmds, m.loadCustomCommands())
 	// load prompt history async
 	cmds = append(cmds, m.loadPromptHistory())
+	// start listening for notification requests
+	cmds = append(cmds, m.waitForNotification())
 	return tea.Batch(cmds...)
+}
+
+// waitForNotification returns a command that waits for the next notification request.
+func (m *UI) waitForNotification() tea.Cmd {
+	return func() tea.Msg {
+		n, ok := <-m.notifyCh
+		if !ok {
+			return nil
+		}
+		return notificationRequestMsg(n)
+	}
+}
+
+// sendNotification returns a command that sends a notification if allowed by policy.
+func (m *UI) sendNotification(n notification.Notification) tea.Cmd {
+	if !m.shouldSendNotification() {
+		return nil
+	}
+
+	backend := m.notifyBackend
+	return func() tea.Msg {
+		if err := backend.Send(n); err != nil {
+			slog.Error("failed to send notification", "error", err)
+		}
+		return nil
+	}
+}
+
+// shouldSendNotification returns true if notifications should be sent based on
+// current state. Focus reporting must be supported, window must not focused,
+// and notifications must not be disabled in config.
+func (m *UI) shouldSendNotification() bool {
+	cfg := m.com.Config()
+	if cfg != nil && cfg.Options != nil && cfg.Options.DisableNotifications {
+		return false
+	}
+	return m.caps.ReportFocusEvents && !m.notifyWindowFocused
 }
 
 // setState changes the UI state and focus.
@@ -396,6 +447,20 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sendProgressBar = slices.Contains(msg, "WT_SESSION")
 		}
 		cmds = append(cmds, common.QueryCmd(uv.Environ(msg)))
+	case tea.ModeReportMsg:
+		if msg.Mode == ansi.ModeFocusEvent && m.caps.ReportFocusEvents {
+			m.notifyBackend = notification.NewNativeBackend(notification.Icon)
+		}
+	case tea.FocusMsg:
+		m.notifyWindowFocused = true
+	case tea.BlurMsg:
+		m.notifyWindowFocused = false
+	case notificationRequestMsg:
+		// Re-subscribe for next notification.
+		cmds = append(cmds, m.waitForNotification())
+		if cmd := m.sendNotification(notification.Notification(msg)); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case loadSessionMsg:
 		if m.forceCompactMode {
 			m.isCompact = true
@@ -539,6 +604,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case pubsub.Event[permission.PermissionRequest]:
 		if cmd := m.openPermissionsDialog(msg.Payload); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		if cmd := m.sendNotification(notification.Notification{
+			Title:   "Crush is waiting...",
+			Message: fmt.Sprintf("Permission required to execute \"%s\"", msg.Payload.ToolName),
+		}); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case pubsub.Event[permission.PermissionNotification]:
@@ -1951,6 +2022,7 @@ func (m *UI) View() tea.View {
 		v.BackgroundColor = m.com.Styles.Background
 	}
 	v.MouseMode = tea.MouseModeCellMotion
+	v.ReportFocus = m.caps.ReportFocusEvents
 	v.WindowTitle = "crush " + home.Short(m.com.Config().WorkingDir())
 
 	canvas := uv.NewScreenBuffer(m.width, m.height)

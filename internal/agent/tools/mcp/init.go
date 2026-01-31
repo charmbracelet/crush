@@ -353,7 +353,7 @@ func maybeTimeoutErr(err error, timeout time.Duration) error {
 
 func createTransport(ctx context.Context, m config.MCPConfig, resolver config.VariableResolver) (mcp.Transport, error) {
 	switch m.Type {
-	case config.MCPStdio:
+	case config.MCPStdio, "":
 		command, err := resolver.ResolveValue(m.Command)
 		if err != nil {
 			return nil, fmt.Errorf("invalid mcp command: %w", err)

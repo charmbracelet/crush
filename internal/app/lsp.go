@@ -71,6 +71,30 @@ func (app *App) initLSPClients(ctx context.Context) {
 	}
 }
 
+func (app *App) refreshLSPTools(ctx context.Context) {
+	if app.AgentCoordinator == nil {
+		return
+	}
+	if app.LSPClients.Len() == 0 {
+		return
+	}
+
+	app.lspToolsMu.Lock()
+	if app.lspToolsReady {
+		app.lspToolsMu.Unlock()
+		return
+	}
+	app.lspToolsReady = true
+	app.lspToolsMu.Unlock()
+
+	if err := app.AgentCoordinator.UpdateModels(ctx); err != nil {
+		slog.Error("Failed to refresh tools after LSP startup", "error", err)
+		app.lspToolsMu.Lock()
+		app.lspToolsReady = false
+		app.lspToolsMu.Unlock()
+	}
+}
+
 func toOurConfig(in *powernapconfig.ServerConfig) config.LSPConfig {
 	return config.LSPConfig{
 		Command:     in.Command,
@@ -144,4 +168,5 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, config
 
 	// Add to map with mutex protection before starting goroutine
 	app.LSPClients.Set(name, lspClient)
+	app.refreshLSPTools(ctx)
 }

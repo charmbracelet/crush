@@ -62,6 +62,9 @@ type App struct {
 
 	config *config.Config
 
+	lspToolsMu    sync.Mutex
+	lspToolsReady bool
+
 	serviceEventsWG *sync.WaitGroup
 	eventsCtx       context.Context
 	events          chan tea.Msg
@@ -477,6 +480,7 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		slog.Error("Failed to create coder agent", "err", err)
 		return err
 	}
+	app.refreshLSPTools(ctx)
 	return nil
 }
 

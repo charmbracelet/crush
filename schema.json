@@ -156,6 +156,15 @@
         "options": {
           "type": "object",
           "description": "LSP server-specific settings passed during initialization"
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Timeout in seconds for LSP server initialization",
+          "default": 30,
+          "examples": [
+            60,
+            120
+          ]
         }
       },
       "additionalProperties": false,

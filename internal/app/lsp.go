@@ -125,8 +125,12 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, config
 	// Set diagnostics callback
 	lspClient.SetDiagnosticsCallback(updateLSPDiagnostics)
 
-	// Increase initialization timeout as some servers take more time to start.
-	initCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	// Get timeout from config, default to 30 seconds if not specified.
+	timeout := 30
+	if config.Timeout > 0 {
+		timeout = config.Timeout
+	}
+	initCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
 
 	// Initialize LSP client.

@@ -594,6 +594,7 @@ func (a *appModel) View() tea.View {
 	view.MouseMode = tea.MouseModeCellMotion
 	view.BackgroundColor = t.BgBase
 	view.WindowTitle = "crush " + home.Short(config.Get().WorkingDir())
+	view.ReportFocus = true
 	if a.wWidth < 25 || a.wHeight < 15 {
 		view.Content = t.S().Base.Width(a.wWidth).Height(a.wHeight).
 			Align(lipgloss.Center, lipgloss.Center).

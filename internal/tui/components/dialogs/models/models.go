@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/copilot"
 	"github.com/charmbracelet/crush/internal/tui/components/dialogs/hyper"
+	openaidialog "github.com/charmbracelet/crush/internal/tui/components/dialogs/openai"
 	"github.com/charmbracelet/crush/internal/tui/exp/list"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
@@ -79,6 +80,10 @@ type modelDialogCmp struct {
 	// Copilot device flow state
 	copilotDeviceFlow     *copilot.DeviceFlow
 	showCopilotDeviceFlow bool
+
+	// OpenAI Codex OAuth state
+	openAIAuthFlow     *openaidialog.AuthFlow
+	showOpenAIAuthFlow bool
 }
 
 func NewModelDialogCmp() ModelDialog {
@@ -143,6 +148,15 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		return m, nil
 	case copilot.DeviceFlowCompletedMsg:
 		return m, m.saveOauthTokenAndContinue(msg.Token, true)
+	case openaidialog.AuthInitiatedMsg, openaidialog.AuthErrorMsg:
+		if m.openAIAuthFlow != nil {
+			u, cmd := m.openAIAuthFlow.Update(msg)
+			m.openAIAuthFlow = u.(*openaidialog.AuthFlow)
+			return m, cmd
+		}
+		return m, nil
+	case openaidialog.AuthCompletedMsg:
+		return m, m.saveOauthTokenAndContinue(msg.Token, true)
 	case tea.KeyPressMsg:
 		switch {
 		// Handle Hyper device flow keys
@@ -150,6 +164,8 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			return m, m.hyperDeviceFlow.CopyCode()
 		case key.Matches(msg, key.NewBinding(key.WithKeys("c", "C"))) && m.showCopilotDeviceFlow:
 			return m, m.copilotDeviceFlow.CopyCode()
+		case key.Matches(msg, key.NewBinding(key.WithKeys("c", "C"))) && m.showOpenAIAuthFlow:
+			return m, m.openAIAuthFlow.CopyURL()
 		case key.Matches(msg, m.keyMap.Select):
 			// If showing device flow, enter copies code and opens URL
 			if m.showHyperDeviceFlow && m.hyperDeviceFlow != nil {
@@ -157,6 +173,9 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			}
 			if m.showCopilotDeviceFlow && m.copilotDeviceFlow != nil {
 				return m, m.copilotDeviceFlow.CopyCodeAndOpenURL()
+			}
+			if m.showOpenAIAuthFlow && m.openAIAuthFlow != nil {
+				return m, m.openAIAuthFlow.OpenURL()
 			}
 			selectedItem := m.modelList.SelectedModel()
 			if selectedItem == nil {
@@ -255,6 +274,13 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				m.copilotDeviceFlow = copilot.NewDeviceFlow()
 				m.copilotDeviceFlow.SetWidth(m.width - 2)
 				return m, m.copilotDeviceFlow.Init()
+			case catwalk.InferenceProvider(config.OpenAICodexProviderID):
+				m.showOpenAIAuthFlow = true
+				m.selectedModel = selectedItem
+				m.selectedModelType = modelType
+				m.openAIAuthFlow = openaidialog.NewAuthFlow()
+				m.openAIAuthFlow.SetWidth(m.width - 2)
+				return m, m.openAIAuthFlow.Init()
 			}
 			// For other providers, show API key input
 			askForApiKey()
@@ -285,6 +311,12 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 					m.copilotDeviceFlow.Cancel()
 				}
 				m.showCopilotDeviceFlow = false
+				m.selectedModel = nil
+			case m.showOpenAIAuthFlow:
+				if m.openAIAuthFlow != nil {
+					m.openAIAuthFlow.Cancel()
+				}
+				m.showOpenAIAuthFlow = false
 				m.selectedModel = nil
 			case m.needsAPIKey:
 				if m.isAPIKeyValid {
@@ -334,6 +366,10 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			u, cmd = m.copilotDeviceFlow.Update(msg)
 			m.copilotDeviceFlow = u.(*copilot.DeviceFlow)
 		}
+		if m.showOpenAIAuthFlow && m.openAIAuthFlow != nil {
+			u, cmd = m.openAIAuthFlow.Update(msg)
+			m.openAIAuthFlow = u.(*openaidialog.AuthFlow)
+		}
 		return m, cmd
 	default:
 		// Pass all other messages to the device flow for spinner animation
@@ -345,6 +381,10 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		case m.showCopilotDeviceFlow && m.copilotDeviceFlow != nil:
 			u, cmd := m.copilotDeviceFlow.Update(msg)
 			m.copilotDeviceFlow = u.(*copilot.DeviceFlow)
+			return m, cmd
+		case m.showOpenAIAuthFlow && m.openAIAuthFlow != nil:
+			u, cmd := m.openAIAuthFlow.Update(msg)
+			m.openAIAuthFlow = u.(*openaidialog.AuthFlow)
 			return m, cmd
 		default:
 			u, cmd := m.apiKeyInput.Update(msg)
@@ -385,11 +425,24 @@ func (m *modelDialogCmp) View() string {
 		)
 		return m.style().Render(content)
 	}
+	if m.showOpenAIAuthFlow && m.openAIAuthFlow != nil {
+		m.keyMap.isOpenAICodexFlow = true
+		deviceFlowView := m.openAIAuthFlow.View()
+		content := lipgloss.JoinVertical(
+			lipgloss.Left,
+			t.S().Base.Padding(0, 1, 1, 1).Render(core.Title("Authenticate with OpenAI Codex", m.width-4)),
+			deviceFlowView,
+			"",
+			t.S().Base.Width(m.width-2).PaddingLeft(1).AlignHorizontal(lipgloss.Left).Render(m.help.View(m.keyMap)),
+		)
+		return m.style().Render(content)
+	}
 
 	// Reset the flags when not showing device flow
 	m.keyMap.isHyperDeviceFlow = false
 	m.keyMap.isCopilotDeviceFlow = false
 	m.keyMap.isCopilotUnavailable = false
+	m.keyMap.isOpenAICodexFlow = false
 
 	switch {
 	case m.needsAPIKey:
@@ -427,6 +480,9 @@ func (m *modelDialogCmp) Cursor() *tea.Cursor {
 	}
 	if m.showCopilotDeviceFlow && m.copilotDeviceFlow != nil {
 		return m.copilotDeviceFlow.Cursor()
+	}
+	if m.showOpenAIAuthFlow && m.openAIAuthFlow != nil {
+		return m.openAIAuthFlow.Cursor()
 	}
 	if m.needsAPIKey {
 		cursor := m.apiKeyInput.Cursor()

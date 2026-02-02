@@ -516,10 +516,11 @@ func getFilteredProviders(cfg *config.Config) ([]catwalk.Provider, error) {
 			isAzure         = p.ID == catwalk.InferenceProviderAzure
 			isCopilot       = p.ID == catwalk.InferenceProviderCopilot
 			isHyper         = string(p.ID) == "hyper"
+			isOpenAICodex   = string(p.ID) == config.OpenAICodexProviderID
 			hasAPIKeyEnv    = strings.HasPrefix(p.APIKey, "$")
 			_, isConfigured = cfg.Providers.Get(string(p.ID))
 		)
-		if isAzure || isCopilot || isHyper || hasAPIKeyEnv || isConfigured {
+		if isAzure || isCopilot || isHyper || isOpenAICodex || hasAPIKeyEnv || isConfigured {
 			filteredProviders = append(filteredProviders, p)
 		}
 	}

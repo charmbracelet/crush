@@ -1039,7 +1039,7 @@ func (p *chatPage) Help() help.KeyMap {
 	switch {
 	case p.isOnboarding:
 		switch {
-		case p.splash.IsShowingHyperOAuth2() || p.splash.IsShowingCopilotOAuth2():
+		case p.splash.IsShowingHyperOAuth2() || p.splash.IsShowingCopilotOAuth2() || p.splash.IsShowingOpenAICodexOAuth2():
 			shortList = append(shortList,
 				key.NewBinding(
 					key.WithKeys("enter"),

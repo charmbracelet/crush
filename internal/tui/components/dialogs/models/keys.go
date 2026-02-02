@@ -18,6 +18,7 @@ type KeyMap struct {
 	isHyperDeviceFlow    bool
 	isCopilotDeviceFlow  bool
 	isCopilotUnavailable bool
+	isOpenAICodexFlow    bool
 }
 
 func DefaultKeyMap() KeyMap {
@@ -82,6 +83,19 @@ func (k KeyMap) ShortHelp() []key.Binding {
 			key.NewBinding(
 				key.WithKeys("enter"),
 				key.WithHelp("enter", "copy & open"),
+			),
+			k.Close,
+		}
+	}
+	if k.isOpenAICodexFlow {
+		return []key.Binding{
+			key.NewBinding(
+				key.WithKeys("c"),
+				key.WithHelp("c", "copy url"),
+			),
+			key.NewBinding(
+				key.WithKeys("enter"),
+				key.WithHelp("enter", "open browser"),
 			),
 			k.Close,
 		}

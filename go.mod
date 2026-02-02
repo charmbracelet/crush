@@ -33,8 +33,8 @@ require (
 	github.com/charmbracelet/x/exp/strings v0.1.0
 	github.com/charmbracelet/x/powernap v0.0.0-20260127155452-b72a9a918687
 	github.com/charmbracelet/x/term v0.2.2
-	github.com/clipperhouse/displaywidth v0.7.0
-	github.com/clipperhouse/uax29/v2 v2.3.1
+	github.com/clipperhouse/displaywidth v0.9.0
+	github.com/clipperhouse/uax29/v2 v2.5.0
 	github.com/denisbrodbeck/machineid v1.0.1
 	github.com/disintegration/imageorient v0.0.0-20180920195336-8147d86e83ec
 	github.com/disintegration/imaging v1.6.2

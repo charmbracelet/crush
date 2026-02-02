@@ -182,6 +182,11 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 		wg.Wait()
 
 		providerList = slices.Collect(providers.Seq())
+		if !slices.ContainsFunc(providerList, func(p catwalk.Provider) bool {
+			return p.ID == catwalk.InferenceProvider(OpenAICodexProviderID)
+		}) {
+			providerList = append(providerList, OpenAICodexProvider())
+		}
 		providerErr = errors.Join(errs...)
 	})
 	return providerList, providerErr

@@ -1305,6 +1305,36 @@ func TestConfig_setDefaultsDisableDefaultProvidersEnvVar(t *testing.T) {
 	})
 }
 
+func TestConfig_configureProvidersOpenAICodex(t *testing.T) {
+	knownProviders := []catwalk.Provider{
+		OpenAICodexProvider(),
+	}
+
+	cfg := &Config{
+		Providers: csync.NewMapFrom(map[string]ProviderConfig{
+			"openai-codex": {
+				APIKey: "test-key",
+			},
+		}),
+	}
+	cfg.setDefaults(t.TempDir(), "")
+
+	env := env.NewFromMap(map[string]string{})
+	resolver := NewEnvironmentVariableResolver(env)
+	err := cfg.configureProviders(env, resolver, knownProviders)
+	require.NoError(t, err)
+
+	require.Equal(t, 1, cfg.Providers.Len())
+	provider, ok := cfg.Providers.Get("openai-codex")
+	require.True(t, ok)
+	require.Equal(t, "test-key", provider.APIKey)
+	require.NotContains(t, provider.ExtraHeaders, "chatgpt-account-id")
+	require.Equal(t, "responses=experimental", provider.ExtraHeaders["OpenAI-Beta"])
+	require.Equal(t, "codex_cli_rs", provider.ExtraHeaders["originator"])
+	require.False(t, provider.ExtraBody["store"])
+	require.Equal(t, "You are a helpful coding assistant.", provider.ExtraBody["instructions"])
+}
+
 func TestConfig_configureSelectedModels(t *testing.T) {
 	t.Run("should override defaults", func(t *testing.T) {
 		knownProviders := []catwalk.Provider{

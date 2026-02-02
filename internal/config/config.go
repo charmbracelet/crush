@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/oauth/hyper"
+	openaioauth "github.com/charmbracelet/crush/internal/oauth/openai"
 	"github.com/invopop/jsonschema"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -161,6 +162,31 @@ func (pc *ProviderConfig) ToProvider() catwalk.Provider {
 
 func (pc *ProviderConfig) SetupGitHubCopilot() {
 	maps.Copy(pc.ExtraHeaders, copilot.Headers())
+}
+
+func (pc *ProviderConfig) SetupOpenAICodex(accountID string) {
+	if pc.ExtraHeaders == nil {
+		pc.ExtraHeaders = make(map[string]string)
+	}
+	if pc.ExtraBody == nil {
+		pc.ExtraBody = make(map[string]any)
+	}
+	if _, ok := pc.ExtraHeaders[openaioauth.HeaderOpenAIBeta]; !ok {
+		pc.ExtraHeaders[openaioauth.HeaderOpenAIBeta] = openaioauth.HeaderOpenAIBetaVal
+	}
+	if _, ok := pc.ExtraHeaders[openaioauth.HeaderOriginator]; !ok {
+		pc.ExtraHeaders[openaioauth.HeaderOriginator] = openaioauth.HeaderOriginatorVal
+	}
+	if accountID != "" {
+		pc.ExtraHeaders[openaioauth.HeaderAccountID] = accountID
+	}
+	if _, ok := pc.ExtraBody["store"]; !ok {
+		pc.ExtraBody["store"] = false
+	}
+	if _, ok := pc.ExtraBody["instructions"]; !ok {
+		pc.ExtraBody["instructions"] = openAICodexInstructions
+	}
+	pc.ExtraBody["include"] = ensureReasoningInclude(pc.ExtraBody["include"])
 }
 
 type MCPType string
@@ -552,6 +578,8 @@ func (c *Config) RefreshOAuthToken(ctx context.Context, providerID string) error
 		newToken, refreshErr = copilot.RefreshToken(ctx, providerConfig.OAuthToken.RefreshToken)
 	case hyperp.Name:
 		newToken, refreshErr = hyper.ExchangeToken(ctx, providerConfig.OAuthToken.RefreshToken)
+	case OpenAICodexProviderID:
+		newToken, refreshErr = openaioauth.RefreshToken(ctx, providerConfig.OAuthToken.RefreshToken)
 	default:
 		return fmt.Errorf("OAuth refresh not supported for provider %s", providerID)
 	}
@@ -566,6 +594,12 @@ func (c *Config) RefreshOAuthToken(ctx context.Context, providerID string) error
 	switch providerID {
 	case string(catwalk.InferenceProviderCopilot):
 		providerConfig.SetupGitHubCopilot()
+	case OpenAICodexProviderID:
+		accountID, err := openaioauth.ExtractAccountID(newToken.AccessToken)
+		if err != nil {
+			slog.Warn("Failed to parse ChatGPT account id", "error", err)
+		}
+		providerConfig.SetupOpenAICodex(accountID)
 	}
 
 	c.Providers.Set(providerID, providerConfig)
@@ -575,6 +609,11 @@ func (c *Config) RefreshOAuthToken(ctx context.Context, providerID string) error
 		c.SetConfigField(fmt.Sprintf("providers.%s.oauth", providerID), newToken),
 	); err != nil {
 		return fmt.Errorf("failed to persist refreshed token: %w", err)
+	}
+	if providerID == OpenAICodexProviderID {
+		if err := c.persistOpenAICodexConfig(providerID, providerConfig); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -611,6 +650,11 @@ func (c *Config) SetProviderAPIKey(providerID string, apiKey any) error {
 	providerConfig, exists = c.Providers.Get(providerID)
 	if exists {
 		setKeyOrToken()
+		if providerID == OpenAICodexProviderID {
+			if err := c.applyOpenAICodex(providerID, &providerConfig); err != nil {
+				return err
+			}
+		}
 		c.Providers.Set(providerID, providerConfig)
 		return nil
 	}
@@ -636,11 +680,47 @@ func (c *Config) SetProviderAPIKey(providerID string, apiKey any) error {
 			Models:       foundProvider.Models,
 		}
 		setKeyOrToken()
+		if providerID == OpenAICodexProviderID {
+			if err := c.applyOpenAICodex(providerID, &providerConfig); err != nil {
+				return err
+			}
+		}
 	} else {
 		return fmt.Errorf("provider with ID %s not found in known providers", providerID)
 	}
 	// Store the updated provider config
 	c.Providers.Set(providerID, providerConfig)
+	return nil
+}
+
+func (c *Config) applyOpenAICodex(providerID string, providerConfig *ProviderConfig) error {
+	accessToken := providerConfig.APIKey
+	if providerConfig.OAuthToken != nil && providerConfig.OAuthToken.AccessToken != "" {
+		accessToken = providerConfig.OAuthToken.AccessToken
+	}
+	accountID := ""
+	if accessToken != "" {
+		parsed, err := openaioauth.ExtractAccountID(accessToken)
+		if err != nil {
+			slog.Warn("Failed to parse ChatGPT account id", "error", err)
+		} else {
+			accountID = parsed
+		}
+	}
+	providerConfig.SetupOpenAICodex(accountID)
+	return c.persistOpenAICodexConfig(providerID, *providerConfig)
+}
+
+func (c *Config) persistOpenAICodexConfig(providerID string, providerConfig ProviderConfig) error {
+	if providerID != OpenAICodexProviderID {
+		return nil
+	}
+	if err := cmp.Or(
+		c.SetConfigField(fmt.Sprintf("providers.%s.extra_headers", providerID), providerConfig.ExtraHeaders),
+		c.SetConfigField(fmt.Sprintf("providers.%s.extra_body", providerID), providerConfig.ExtraBody),
+	); err != nil {
+		return fmt.Errorf("failed to persist OpenAI Codex defaults: %w", err)
+	}
 	return nil
 }
 
@@ -735,6 +815,33 @@ func filterSlice(data []string, mask []string, include bool) []string {
 		}
 	}
 	return filtered
+}
+
+func ensureReasoningInclude(value any) []string {
+	items := []string{}
+	switch v := value.(type) {
+	case []string:
+		items = append(items, v...)
+	case []any:
+		for _, entry := range v {
+			if s, ok := entry.(string); ok {
+				items = append(items, s)
+			}
+		}
+	}
+	seen := map[string]bool{}
+	result := []string{}
+	for _, item := range items {
+		if item == "" || seen[item] {
+			continue
+		}
+		seen[item] = true
+		result = append(result, item)
+	}
+	if !seen["reasoning.encrypted_content"] {
+		result = append(result, "reasoning.encrypted_content")
+	}
+	return result
 }
 
 func (c *Config) SetupAgents() {

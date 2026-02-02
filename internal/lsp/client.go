@@ -591,12 +591,17 @@ func FilterMatching(dir string, servers map[string]*powernapconfig.ServerConfig)
 	}
 	normalized := make(map[string]serverPatterns, len(servers))
 	for name, server := range servers {
-		if len(server.RootMarkers) == 0 {
-			continue
+		var patterns []string
+		for _, p := range server.RootMarkers {
+			if p == ".git" {
+				// ignore .git for discovery
+				continue
+			}
+			patterns = append(patterns, filepath.ToSlash(p))
 		}
-		patterns := make([]string, len(server.RootMarkers))
-		for i, p := range server.RootMarkers {
-			patterns[i] = filepath.ToSlash(p)
+		if len(patterns) == 0 {
+			slog.Debug("ignoring lsp with no root markers", "name", name)
+			continue
 		}
 		normalized[name] = serverPatterns{server: server, patterns: patterns}
 	}

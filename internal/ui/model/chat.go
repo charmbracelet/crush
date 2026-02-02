@@ -18,7 +18,7 @@ import (
 
 // Constants for multi-click detection.
 const (
-	doubleClickThreshold = 500 * time.Millisecond // 0.5s is typical double-click threshold
+	doubleClickThreshold = 400 * time.Millisecond // 0.4s is typical double-click threshold
 	clickTolerance       = 2                      // x,y tolerance for double/tripple click
 )
 

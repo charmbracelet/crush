@@ -157,6 +157,8 @@ type baseToolMessageItem struct {
 	expandedContent bool
 }
 
+var _ Expandable = (*baseToolMessageItem)(nil)
+
 // newBaseToolMessageItem is the internal constructor for base tool message items.
 func newBaseToolMessageItem(
 	sty *styles.Styles,
@@ -398,18 +400,15 @@ func (t *baseToolMessageItem) SetSpinningFunc(fn SpinningFunc) {
 }
 
 // ToggleExpanded toggles the expanded state of the thinking box.
-func (t *baseToolMessageItem) ToggleExpanded() {
+func (t *baseToolMessageItem) ToggleExpanded() bool {
 	t.expandedContent = !t.expandedContent
 	t.clearCache()
+	return t.expandedContent
 }
 
 // HandleMouseClick implements MouseClickable.
 func (t *baseToolMessageItem) HandleMouseClick(btn ansi.MouseButton, x, y int) bool {
-	if btn != ansi.MouseLeft {
-		return false
-	}
-	t.ToggleExpanded()
-	return true
+	return btn == ansi.MouseLeft
 }
 
 // HandleKeyEvent implements KeyEventHandler.

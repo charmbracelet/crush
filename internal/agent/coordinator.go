@@ -39,6 +39,7 @@ import (
 	"charm.land/fantasy/providers/openai"
 	"charm.land/fantasy/providers/openaicompat"
 	"charm.land/fantasy/providers/openrouter"
+	"charm.land/fantasy/providers/vercel"
 	openaisdk "github.com/openai/openai-go/v2/option"
 	"github.com/qjebbs/go-jsons"
 )
@@ -269,7 +270,20 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		return options
 	}
 
-	switch providerCfg.Type {
+	providerType := providerCfg.Type
+	if providerType == "hyper" {
+		if strings.Contains(model.CatwalkCfg.ID, "claude") {
+			providerType = anthropic.Name
+		} else if strings.Contains(model.CatwalkCfg.ID, "gpt") {
+			providerType = openai.Name
+		} else if strings.Contains(model.CatwalkCfg.ID, "gemini") {
+			providerType = google.Name
+		} else {
+			providerType = openaicompat.Name
+		}
+	}
+
+	switch providerType {
 	case openai.Name, azure.Name:
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
 		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
@@ -314,6 +328,18 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		parsed, err := openrouter.ParseOptions(mergedOptions)
 		if err == nil {
 			options[openrouter.Name] = parsed
+		}
+	case vercel.Name:
+		_, hasReasoning := mergedOptions["reasoning"]
+		if !hasReasoning && model.ModelCfg.ReasoningEffort != "" {
+			mergedOptions["reasoning"] = map[string]any{
+				"enabled": true,
+				"effort":  model.ModelCfg.ReasoningEffort,
+			}
+		}
+		parsed, err := vercel.ParseOptions(mergedOptions)
+		if err == nil {
+			options[vercel.Name] = parsed
 		}
 	case google.Name:
 		_, hasReasoning := mergedOptions["thinking_config"]
@@ -436,7 +462,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		tools.NewWriteTool(c.lspClients, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 	)
 
-	if len(c.cfg.LSP) > 0 {
+	if c.lspClients.Len() > 0 {
 		allTools = append(allTools, tools.NewDiagnosticsTool(c.lspClients), tools.NewReferencesTool(c.lspClients), tools.NewLSPRestartTool(c.lspClients))
 	}
 
@@ -618,6 +644,20 @@ func (c *coordinator) buildOpenrouterProvider(_, apiKey string, headers map[stri
 	return openrouter.New(opts...)
 }
 
+func (c *coordinator) buildVercelProvider(_, apiKey string, headers map[string]string) (fantasy.Provider, error) {
+	opts := []vercel.Option{
+		vercel.WithAPIKey(apiKey),
+	}
+	if c.cfg.Options.Debug {
+		httpClient := log.NewHTTPClient()
+		opts = append(opts, vercel.WithHTTPClient(httpClient))
+	}
+	if len(headers) > 0 {
+		opts = append(opts, vercel.WithHeaders(headers))
+	}
+	return vercel.New(opts...)
+}
+
 func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers map[string]string, extraBody map[string]any, providerID string, isSubAgent bool) (fantasy.Provider, error) {
 	opts := []openaicompat.Option{
 		openaicompat.WithBaseURL(baseURL),
@@ -775,6 +815,8 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		return c.buildAnthropicProvider(baseURL, apiKey, headers)
 	case openrouter.Name:
 		return c.buildOpenrouterProvider(baseURL, apiKey, headers)
+	case vercel.Name:
+		return c.buildVercelProvider(baseURL, apiKey, headers)
 	case azure.Name:
 		return c.buildAzureProvider(baseURL, apiKey, headers, providerCfg.ExtraParams)
 	case bedrock.Name:

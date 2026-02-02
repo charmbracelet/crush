@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"os"
@@ -62,71 +61,84 @@ crush login copilot
 }
 
 func loginHyper() error {
-	cfg := config.Get()
 	if !hyperp.Enabled() {
 		return fmt.Errorf("hyper not enabled")
 	}
+	return loginOAuth(
+		hyperp.Name,
+		"Hyper",
+		func(ctx context.Context) (*oauth.Token, error) {
+			resp, err := hyper.InitiateDeviceAuth(ctx)
+			if err != nil {
+				return nil, err
+			}
+
+			if clipboard.WriteAll(resp.UserCode) == nil {
+				fmt.Println("The following code should be on clipboard already:")
+			} else {
+				fmt.Println("Copy the following code:")
+			}
+
+			fmt.Println()
+			fmt.Println(lipgloss.NewStyle().Bold(true).Render(resp.UserCode))
+			fmt.Println()
+			fmt.Println("Press enter to open this URL, and then paste it there:")
+			fmt.Println()
+			fmt.Println(lipgloss.NewStyle().Hyperlink(resp.VerificationURL, "id=hyper").Render(resp.VerificationURL))
+			fmt.Println()
+			waitEnter()
+			if err := browser.OpenURL(resp.VerificationURL); err != nil {
+				fmt.Println("Could not open the URL. You'll need to manually open the URL in your browser.")
+			}
+
+			fmt.Println("Exchanging authorization code...")
+			refreshToken, err := hyper.PollForToken(ctx, resp.DeviceCode, resp.ExpiresIn)
+			if err != nil {
+				return nil, err
+			}
+
+			fmt.Println("Exchanging refresh token for access token...")
+			token, err := hyper.ExchangeToken(ctx, refreshToken)
+			if err != nil {
+				return nil, err
+			}
+
+			fmt.Println("Verifying access token...")
+			introspect, err := hyper.IntrospectToken(ctx, token.AccessToken)
+			if err != nil {
+				return nil, fmt.Errorf("token introspection failed: %w", err)
+			}
+			if !introspect.Active {
+				return nil, fmt.Errorf("access token is not active")
+			}
+			return token, nil
+		},
+	)
+}
+
+func loginOAuth(providerID, providerName string, authFunc func(context.Context) (*oauth.Token, error)) error {
+	cfg := config.Get()
+	if cfg.HasConfigField(fmt.Sprintf("providers.%s.oauth", providerID)) {
+		fmt.Printf("You are already logged in to %s.\n", providerName)
+		return nil
+	}
+
 	ctx := getLoginContext()
-
-	resp, err := hyper.InitiateDeviceAuth(ctx)
+	token, err := authFunc(ctx)
 	if err != nil {
 		return err
 	}
 
-	if clipboard.WriteAll(resp.UserCode) == nil {
-		fmt.Println("The following code should be on clipboard already:")
-	} else {
-		fmt.Println("Copy the following code:")
-	}
-
-	fmt.Println()
-	fmt.Println(lipgloss.NewStyle().Bold(true).Render(resp.UserCode))
-	fmt.Println()
-	fmt.Println("Press enter to open this URL, and then paste it there:")
-	fmt.Println()
-	fmt.Println(lipgloss.NewStyle().Hyperlink(resp.VerificationURL, "id=hyper").Render(resp.VerificationURL))
-	fmt.Println()
-	waitEnter()
-	if err := browser.OpenURL(resp.VerificationURL); err != nil {
-		fmt.Println("Could not open the URL. You'll need to manually open the URL in your browser.")
-	}
-
-	fmt.Println("Exchanging authorization code...")
-	refreshToken, err := hyper.PollForToken(ctx, resp.DeviceCode, resp.ExpiresIn)
-	if err != nil {
-		return err
-	}
-
-	fmt.Println("Exchanging refresh token for access token...")
-	token, err := hyper.ExchangeToken(ctx, refreshToken)
-	if err != nil {
-		return err
-	}
-
-	fmt.Println("Verifying access token...")
-	introspect, err := hyper.IntrospectToken(ctx, token.AccessToken)
-	if err != nil {
-		return fmt.Errorf("token introspection failed: %w", err)
-	}
-	if !introspect.Active {
-		return fmt.Errorf("access token is not active")
-	}
-
-	if err := cmp.Or(
-		cfg.SetConfigField("providers.hyper.api_key", token.AccessToken),
-		cfg.SetConfigField("providers.hyper.oauth", token),
-	); err != nil {
+	if err := cfg.SetProviderAPIKey(providerID, token); err != nil {
 		return err
 	}
 
 	fmt.Println()
-	fmt.Println("You're now authenticated with Hyper!")
+	fmt.Printf("You're now authenticated with %s!\n", providerName)
 	return nil
 }
 
 func loginCopilot() error {
-	ctx := getLoginContext()
-
 	cfg := config.Get()
 	if cfg.HasConfigField("providers.copilot.oauth") {
 		fmt.Println("You are already logged in to GitHub Copilot.")
@@ -134,60 +146,57 @@ func loginCopilot() error {
 	}
 
 	diskToken, hasDiskToken := copilot.RefreshTokenFromDisk()
-	var token *oauth.Token
+	return loginOAuth(
+		"copilot",
+		"GitHub Copilot",
+		func(ctx context.Context) (*oauth.Token, error) {
+			if hasDiskToken {
+				fmt.Println("Found existing GitHub Copilot token on disk. Using it to authenticate...")
+				token, err := copilot.RefreshToken(ctx, diskToken)
+				if err != nil {
+					return nil, fmt.Errorf("unable to refresh token from disk: %w", err)
+				}
+				return token, nil
+			}
+			return loginCopilotWithDeviceFlow(ctx)
+		},
+	)
+}
 
-	switch {
-	case hasDiskToken:
-		fmt.Println("Found existing GitHub Copilot token on disk. Using it to authenticate...")
+func loginCopilotWithDeviceFlow(ctx context.Context) (*oauth.Token, error) {
+	fmt.Println("Requesting device code from GitHub...")
 
-		t, err := copilot.RefreshToken(ctx, diskToken)
-		if err != nil {
-			return fmt.Errorf("unable to refresh token from disk: %w", err)
-		}
-		token = t
-	default:
-		fmt.Println("Requesting device code from GitHub...")
-		dc, err := copilot.RequestDeviceCode(ctx)
-		if err != nil {
-			return err
-		}
-
-		fmt.Println()
-		fmt.Println("Open the following URL and follow the instructions to authenticate with GitHub Copilot:")
-		fmt.Println()
-		fmt.Println(lipgloss.NewStyle().Hyperlink(dc.VerificationURI, "id=copilot").Render(dc.VerificationURI))
-		fmt.Println()
-		fmt.Println("Code:", lipgloss.NewStyle().Bold(true).Render(dc.UserCode))
-		fmt.Println()
-		fmt.Println("Waiting for authorization...")
-
-		t, err := copilot.PollForToken(ctx, dc)
-		if err == copilot.ErrNotAvailable {
-			fmt.Println()
-			fmt.Println("GitHub Copilot is unavailable for this account. To signup, go to the following page:")
-			fmt.Println()
-			fmt.Println(lipgloss.NewStyle().Hyperlink(copilot.SignupURL, "id=copilot-signup").Render(copilot.SignupURL))
-			fmt.Println()
-			fmt.Println("You may be able to request free access if eligible. For more information, see:")
-			fmt.Println()
-			fmt.Println(lipgloss.NewStyle().Hyperlink(copilot.FreeURL, "id=copilot-free").Render(copilot.FreeURL))
-		}
-		if err != nil {
-			return err
-		}
-		token = t
-	}
-
-	if err := cmp.Or(
-		cfg.SetConfigField("providers.copilot.api_key", token.AccessToken),
-		cfg.SetConfigField("providers.copilot.oauth", token),
-	); err != nil {
-		return err
+	dc, err := copilot.RequestDeviceCode(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	fmt.Println()
-	fmt.Println("You're now authenticated with GitHub Copilot!")
-	return nil
+	fmt.Println("Open the following URL and follow the instructions to authenticate with GitHub Copilot:")
+	fmt.Println()
+	fmt.Println(lipgloss.NewStyle().Hyperlink(dc.VerificationURI, "id=copilot").Render(dc.VerificationURI))
+	fmt.Println()
+	fmt.Println("Code:", lipgloss.NewStyle().Bold(true).Render(dc.UserCode))
+	fmt.Println()
+	fmt.Println("Waiting for authorization...")
+
+	token, err := copilot.PollForToken(ctx, dc)
+	if err == copilot.ErrNotAvailable {
+		fmt.Println()
+		fmt.Println("GitHub Copilot is unavailable for this account. To signup, go to the following page:")
+		fmt.Println()
+		fmt.Println(lipgloss.NewStyle().Hyperlink(copilot.SignupURL, "id=copilot-signup").Render(copilot.SignupURL))
+		fmt.Println()
+		fmt.Println("You may be able to request free access if eligible. For more information, see:")
+		fmt.Println()
+		fmt.Println(lipgloss.NewStyle().Hyperlink(copilot.FreeURL, "id=copilot-free").Render(copilot.FreeURL))
+		return nil, err
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return token, nil
 }
 
 func getLoginContext() context.Context {

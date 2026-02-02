@@ -3,41 +3,108 @@ package app
 import (
 	"context"
 	"log/slog"
+	"os/exec"
+	"slices"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/lsp"
+	powernapconfig "github.com/charmbracelet/x/powernap/pkg/config"
 )
 
 // initLSPClients initializes LSP clients.
 func (app *App) initLSPClients(ctx context.Context) {
+	slog.Info("LSP clients initialization started")
+
+	manager := powernapconfig.NewManager()
+	manager.LoadDefaults()
+
+	var userConfiguredLSPs []string
 	for name, clientConfig := range app.config.LSP {
 		if clientConfig.Disabled {
 			slog.Info("Skipping disabled LSP client", "name", name)
+			manager.RemoveServer(name)
 			continue
 		}
-		go app.createAndStartLSPClient(ctx, name, clientConfig)
+
+		// HACK: the user might have the command name in their config, instead
+		// of the actual name. This finds out these cases, and adjusts the name
+		// accordingly.
+		if _, ok := manager.GetServer(name); !ok {
+			for sname, server := range manager.GetServers() {
+				if server.Command == name {
+					name = sname
+					break
+				}
+			}
+		}
+		userConfiguredLSPs = append(userConfiguredLSPs, name)
+		manager.AddServer(name, &powernapconfig.ServerConfig{
+			Command:     clientConfig.Command,
+			Args:        clientConfig.Args,
+			Environment: clientConfig.Env,
+			FileTypes:   clientConfig.FileTypes,
+			RootMarkers: clientConfig.RootMarkers,
+			InitOptions: clientConfig.InitOptions,
+			Settings:    clientConfig.Options,
+		})
 	}
-	slog.Info("LSP clients initialization started in background")
+
+	servers := manager.GetServers()
+	filtered := lsp.FilterMatching(app.config.WorkingDir(), servers)
+
+	for _, name := range userConfiguredLSPs {
+		if _, ok := filtered[name]; !ok {
+			updateLSPState(name, lsp.StateDisabled, nil, nil, 0)
+		}
+	}
+	for name, server := range filtered {
+		if app.config.Options.AutoLSP != nil && !*app.config.Options.AutoLSP && !slices.Contains(userConfiguredLSPs, name) {
+			slog.Debug("Ignoring non user-define LSP client due to AutoLSP being disabled", "name", name)
+			continue
+		}
+		go app.createAndStartLSPClient(
+			ctx, name,
+			toOurConfig(server),
+			slices.Contains(userConfiguredLSPs, name),
+		)
+	}
 }
 
-// createAndStartLSPClient creates a new LSP client, initializes it, and starts its workspace watcher
-func (app *App) createAndStartLSPClient(ctx context.Context, name string, config config.LSPConfig) {
-	slog.Debug("Creating LSP client", "name", name, "command", config.Command, "fileTypes", config.FileTypes, "args", config.Args)
+func toOurConfig(in *powernapconfig.ServerConfig) config.LSPConfig {
+	return config.LSPConfig{
+		Command:     in.Command,
+		Args:        in.Args,
+		Env:         in.Environment,
+		FileTypes:   in.FileTypes,
+		RootMarkers: in.RootMarkers,
+		InitOptions: in.InitOptions,
+		Options:     in.Settings,
+	}
+}
 
-	// Check if any root markers exist in the working directory (config now has defaults)
-	if !lsp.HasRootMarkers(app.config.WorkingDir(), config.RootMarkers) {
-		slog.Debug("Skipping LSP client: no root markers found", "name", name, "rootMarkers", config.RootMarkers)
-		updateLSPState(name, lsp.StateDisabled, nil, nil, 0)
-		return
+// createAndStartLSPClient creates a new LSP client, initializes it, and starts its workspace watcher.
+func (app *App) createAndStartLSPClient(ctx context.Context, name string, config config.LSPConfig, userConfigured bool) {
+	if !userConfigured {
+		if _, err := exec.LookPath(config.Command); err != nil {
+			slog.Warn("Default LSP config skipped: server not installed", "name", name, "error", err)
+			return
+		}
 	}
 
-	// Update state to starting
+	slog.Debug("Creating LSP client", "name", name, "command", config.Command, "fileTypes", config.FileTypes, "args", config.Args)
+
+	// Update state to starting.
 	updateLSPState(name, lsp.StateStarting, nil, nil, 0)
 
 	// Create LSP client.
 	lspClient, err := lsp.New(ctx, name, config, app.config.Resolver())
 	if err != nil {
+		if !userConfigured {
+			slog.Warn("Default LSP config skipped due to error", "name", name, "error", err)
+			updateLSPState(name, lsp.StateDisabled, nil, nil, 0)
+			return
+		}
 		slog.Error("Failed to create LSP client for", "name", name, "error", err)
 		updateLSPState(name, lsp.StateError, err, nil, 0)
 		return
@@ -73,7 +140,7 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, config
 		updateLSPState(name, lsp.StateReady, nil, lspClient, 0)
 	}
 
-	slog.Info("LSP client initialized", "name", name)
+	slog.Debug("LSP client initialized", "name", name)
 
 	// Add to map with mutex protection before starting goroutine
 	app.LSPClients.Set(name, lspClient)

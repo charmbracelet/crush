@@ -23,9 +23,15 @@ tasks:
   lint:
     desc: Run base linters
     cmds:
+      - task: lint:log
       - golangci-lint run --path-mode=abs --config=".golangci.yml" --timeout=5m
     env:
       GOEXPERIMENT: null
+
+  lint:log:
+    desc: Check that log messages start with capital letters
+    cmds:
+      - ./scripts/check_log_capitalization.sh
 
   lint:fix:
     desc: Run base linters and fix issues
@@ -65,6 +71,11 @@ tasks:
     desc: Run gofumpt
     cmds:
       - gofumpt -w .
+
+  fmt:html:
+    desc: Run prettier on HTML/CSS/JS files
+    cmds:
+      - prettier --write internal/cmd/stats/index.html internal/cmd/stats/index.css internal/cmd/stats/index.js
 
   dev:
     desc: Run with profiling enabled
@@ -142,5 +153,5 @@ tasks:
     desc: Update Fantasy and Catwalk
     cmds:
       - go get charm.land/fantasy
-      - go get github.com/charmbracelet/catwalk
+      - go get charm.land/catwalk
       - go mod tidy

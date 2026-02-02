@@ -20,7 +20,6 @@ import (
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/projects"
-	"github.com/charmbracelet/crush/internal/stringext"
 	"github.com/charmbracelet/crush/internal/tui"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	ui "github.com/charmbracelet/crush/internal/ui/model"
@@ -29,6 +28,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
+	xstrings "github.com/charmbracelet/x/exp/strings"
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 )
@@ -51,6 +51,7 @@ func init() {
 		logsCmd,
 		schemaCmd,
 		loginCmd,
+		statsCmd,
 	)
 }
 
@@ -97,7 +98,6 @@ crush -y
 			slog.Info("New UI in control!")
 			com := common.DefaultCommon(app)
 			ui := ui.New(com)
-			ui.QueryCapabilities = shouldQueryCapabilities(env)
 			model = ui
 		} else {
 			ui := tui.New(app)
@@ -179,12 +179,19 @@ func supportsProgressBar() bool {
 }
 
 func setupAppWithProgressBar(cmd *cobra.Command) (*app.App, error) {
-	if supportsProgressBar() {
+	app, err := setupApp(cmd)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check if progress bar is enabled in config (defaults to true if nil)
+	progressEnabled := app.Config().Options.Progress == nil || *app.Config().Options.Progress
+	if progressEnabled && supportsProgressBar() {
 		_, _ = fmt.Fprintf(os.Stderr, ansi.SetIndeterminateProgressBar)
 		defer func() { _, _ = fmt.Fprintf(os.Stderr, ansi.ResetProgressBar) }()
 	}
 
-	return setupApp(cmd)
+	return app, nil
 }
 
 // setupApp handles the common setup logic for both interactive and non-interactive modes.
@@ -302,6 +309,7 @@ func createDotCrushDir(dir string) error {
 	return nil
 }
 
+// TODO: Remove me after dropping the old TUI.
 func shouldQueryCapabilities(env uv.Environ) bool {
 	const osVendorTypeApple = "Apple"
 	termType := env.Getenv("TERM")
@@ -313,5 +321,5 @@ func shouldQueryCapabilities(env uv.Environ) bool {
 	return (!okTermProg && !okSSHTTY) ||
 		(!strings.Contains(termProg, osVendorTypeApple) && !okSSHTTY) ||
 		// Terminals that do support XTVERSION.
-		stringext.ContainsAny(termType, kittyTerminals...)
+		xstrings.ContainsAnyOf(termType, kittyTerminals...)
 }

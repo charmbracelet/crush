@@ -75,30 +75,26 @@ func (l *List) Gap() int {
 	return l.gap
 }
 
-// AtBottom returns whether the list is scrolled to the bottom.
+// AtBottom returns whether the list is showing the last item at the bottom.
 func (l *List) AtBottom() bool {
+	const margin = 2
+
 	if len(l.items) == 0 {
 		return true
 	}
 
-	// Calculate total height of all items from the bottom.
+	// Calculate the height from offsetIdx to the end.
 	var totalHeight int
-	for i := len(l.items) - 1; i >= 0; i-- {
-		item := l.getItem(i)
-		totalHeight += item.height
-		if l.gap > 0 && i < len(l.items)-1 {
-			totalHeight += l.gap
+	for idx := l.offsetIdx; idx < len(l.items); idx++ {
+		item := l.getItem(idx)
+		itemHeight := item.height
+		if l.gap > 0 && idx > l.offsetIdx {
+			itemHeight += l.gap
 		}
-		if totalHeight >= l.height {
-			// This is the expected bottom position.
-			expectedIdx := i
-			expectedLine := totalHeight - l.height
-			return l.offsetIdx == expectedIdx && l.offsetLine >= expectedLine
-		}
+		totalHeight += itemHeight
 	}
 
-	// All items fit in viewport - we're at bottom if at top.
-	return l.offsetIdx == 0 && l.offsetLine == 0
+	return totalHeight-l.offsetLine-margin <= l.height
 }
 
 // SetReverse shows the list in reverse order.
@@ -119,6 +115,30 @@ func (l *List) Height() int {
 // Len returns the number of items in the list.
 func (l *List) Len() int {
 	return len(l.items)
+}
+
+// lastOffsetItem returns the index and line offsets of the last item that can
+// be partially visible in the viewport.
+func (l *List) lastOffsetItem() (int, int, int) {
+	var totalHeight int
+	var idx int
+	for idx = len(l.items) - 1; idx >= 0; idx-- {
+		item := l.getItem(idx)
+		itemHeight := item.height
+		if l.gap > 0 && idx < len(l.items)-1 {
+			itemHeight += l.gap
+		}
+		totalHeight += itemHeight
+		if totalHeight > l.height {
+			break
+		}
+	}
+
+	// Calculate line offset within the item
+	lineOffset := max(totalHeight-l.height, 0)
+	idx = max(idx, 0)
+
+	return idx, lineOffset, totalHeight
 }
 
 // getItem renders (if needed) and returns the item at the given index.
@@ -171,44 +191,29 @@ func (l *List) ScrollBy(lines int) {
 
 	if lines > 0 {
 		// Scroll down
-		// Calculate from the bottom how many lines needed to anchor the last
-		// item to the bottom
-		var totalLines int
-		var lastItemIdx int // the last item that can be partially visible
-		for i := len(l.items) - 1; i >= 0; i-- {
-			item := l.getItem(i)
-			totalLines += item.height
-			if l.gap > 0 && i < len(l.items)-1 {
-				totalLines += l.gap
-			}
-			if totalLines > l.height-1 {
-				lastItemIdx = i
-				break
-			}
-		}
-
-		// Now scroll down by lines
-		var item renderedItem
 		l.offsetLine += lines
-		for {
-			item = l.getItem(l.offsetIdx)
-			totalHeight := item.height
+		currentItem := l.getItem(l.offsetIdx)
+		for l.offsetLine >= currentItem.height {
+			l.offsetLine -= currentItem.height
 			if l.gap > 0 {
-				totalHeight += l.gap
-			}
-
-			if l.offsetIdx >= lastItemIdx || l.offsetLine < totalHeight {
-				// Valid offset
-				break
+				l.offsetLine -= l.gap
 			}
 
 			// Move to next item
-			l.offsetLine -= totalHeight
 			l.offsetIdx++
+			if l.offsetIdx > len(l.items)-1 {
+				// Reached bottom
+				l.ScrollToBottom()
+				return
+			}
+			currentItem = l.getItem(l.offsetIdx)
 		}
 
-		if l.offsetLine >= item.height {
-			l.offsetLine = item.height
+		lastOffsetIdx, lastOffsetLine, _ := l.lastOffsetItem()
+		if l.offsetIdx > lastOffsetIdx || (l.offsetIdx == lastOffsetIdx && l.offsetLine > lastOffsetLine) {
+			// Clamp to bottom
+			l.offsetIdx = lastOffsetIdx
+			l.offsetLine = lastOffsetLine
 		}
 	} else if lines < 0 {
 		// Scroll up
@@ -408,24 +413,9 @@ func (l *List) ScrollToBottom() {
 		return
 	}
 
-	// Scroll to the last item
-	var totalHeight int
-	for i := len(l.items) - 1; i >= 0; i-- {
-		item := l.getItem(i)
-		totalHeight += item.height
-		if l.gap > 0 && i < len(l.items)-1 {
-			totalHeight += l.gap
-		}
-		if totalHeight >= l.height {
-			l.offsetIdx = i
-			l.offsetLine = totalHeight - l.height
-			break
-		}
-	}
-	if totalHeight < l.height {
-		// All items fit in the viewport
-		l.ScrollToTop()
-	}
+	lastOffsetIdx, lastOffsetLine, _ := l.lastOffsetItem()
+	l.offsetIdx = lastOffsetIdx
+	l.offsetLine = lastOffsetLine
 }
 
 // ScrollToSelected scrolls the list to the selected item.

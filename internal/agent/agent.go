@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/bedrock"
@@ -29,9 +30,9 @@ import (
 	"charm.land/fantasy/providers/openai"
 	"charm.land/fantasy/providers/openrouter"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
@@ -167,6 +168,21 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	largeModel := a.largeModel.Get()
 	systemPrompt := a.systemPrompt.Get()
 	promptPrefix := a.systemPromptPrefix.Get()
+	var instructions strings.Builder
+
+	for _, server := range mcp.GetStates() {
+		if server.State != mcp.StateConnected {
+			continue
+		}
+		if s := server.Client.InitializeResult().Instructions; s != "" {
+			instructions.WriteString(s)
+			instructions.WriteString("\n\n")
+		}
+	}
+
+	if s := instructions.String(); s != "" {
+		systemPrompt += "\n\n<mcp-instructions>\n" + s + "\n</mcp-instructions>"
+	}
 
 	if len(agentTools) > 0 {
 		// Add Anthropic caching to the last tool.
@@ -372,17 +388,18 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			}
 			currentAssistant.AddFinish(finishReason, "", "")
 			sessionLock.Lock()
-			updatedSession, getSessionErr := a.sessions.Get(genCtx, call.SessionID)
+			defer sessionLock.Unlock()
+
+			updatedSession, getSessionErr := a.sessions.Get(ctx, call.SessionID)
 			if getSessionErr != nil {
-				sessionLock.Unlock()
 				return getSessionErr
 			}
 			a.updateSessionUsage(largeModel, &updatedSession, stepResult.Usage, a.openrouterCost(stepResult.ProviderMetadata))
-			_, sessionErr := a.sessions.Save(genCtx, updatedSession)
-			sessionLock.Unlock()
+			_, sessionErr := a.sessions.Save(ctx, updatedSession)
 			if sessionErr != nil {
 				return sessionErr
 			}
+			currentSession = updatedSession
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		StopWhen: []fantasy.StopCondition{
@@ -785,22 +802,22 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	resp, err := agent.Stream(ctx, streamCall)
 	if err == nil {
 		// We successfully generated a title with the small model.
-		slog.Info("generated title with small model")
+		slog.Debug("Generated title with small model")
 	} else {
 		// It didn't work. Let's try with the big model.
-		slog.Error("error generating title with small model; trying big model", "err", err)
+		slog.Error("Error generating title with small model; trying big model", "err", err)
 		model = largeModel
 		agent = newAgent(model.Model, titlePrompt, maxOutputTokens)
 		resp, err = agent.Stream(ctx, streamCall)
 		if err == nil {
-			slog.Info("generated title with large model")
+			slog.Debug("Generated title with large model")
 		} else {
 			// Welp, the large model didn't work either. Use the default
 			// session name and return.
-			slog.Error("error generating title with large model", "err", err)
+			slog.Error("Error generating title with large model", "err", err)
 			saveErr := a.sessions.UpdateTitleAndUsage(ctx, sessionID, defaultSessionName, 0, 0, 0)
 			if saveErr != nil {
-				slog.Error("failed to save session title and usage", "error", saveErr)
+				slog.Error("Failed to save session title and usage", "error", saveErr)
 			}
 			return
 		}
@@ -809,10 +826,10 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	if resp == nil {
 		// Actually, we didn't get a response so we can't. Use the default
 		// session name and return.
-		slog.Error("response is nil; can't generate title")
+		slog.Error("Response is nil; can't generate title")
 		saveErr := a.sessions.UpdateTitleAndUsage(ctx, sessionID, defaultSessionName, 0, 0, 0)
 		if saveErr != nil {
-			slog.Error("failed to save session title and usage", "error", saveErr)
+			slog.Error("Failed to save session title and usage", "error", saveErr)
 		}
 		return
 	}
@@ -826,7 +843,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 
 	title = strings.TrimSpace(title)
 	if title == "" {
-		slog.Warn("empty title; using fallback")
+		slog.Debug("Empty title; using fallback")
 		title = defaultSessionName
 	}
 
@@ -855,13 +872,13 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	}
 
 	promptTokens := resp.TotalUsage.InputTokens + resp.TotalUsage.CacheCreationTokens
-	completionTokens := resp.TotalUsage.OutputTokens + resp.TotalUsage.CacheReadTokens
+	completionTokens := resp.TotalUsage.OutputTokens
 
 	// Atomically update only title and usage fields to avoid overriding other
 	// concurrent session updates.
 	saveErr := a.sessions.UpdateTitleAndUsage(ctx, sessionID, title, promptTokens, completionTokens, cost)
 	if saveErr != nil {
-		slog.Error("failed to save session title and usage", "error", saveErr)
+		slog.Error("Failed to save session title and usage", "error", saveErr)
 		return
 	}
 }
@@ -894,8 +911,8 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 		session.Cost += cost
 	}
 
-	session.CompletionTokens = usage.OutputTokens + usage.CacheReadTokens
-	session.PromptTokens = usage.InputTokens + usage.CacheCreationTokens
+	session.CompletionTokens = usage.OutputTokens
+	session.PromptTokens = usage.InputTokens + usage.CacheReadTokens
 }
 
 func (a *sessionAgent) Cancel(sessionID string) {
@@ -904,25 +921,25 @@ func (a *sessionAgent) Cancel(sessionID string) {
 	// fully completes (including error handling that may access the DB).
 	// The defer in processRequest will clean up the entry.
 	if cancel, ok := a.activeRequests.Get(sessionID); ok && cancel != nil {
-		slog.Info("Request cancellation initiated", "session_id", sessionID)
+		slog.Debug("Request cancellation initiated", "session_id", sessionID)
 		cancel()
 	}
 
 	// Also check for summarize requests.
 	if cancel, ok := a.activeRequests.Get(sessionID + "-summarize"); ok && cancel != nil {
-		slog.Info("Summarize cancellation initiated", "session_id", sessionID)
+		slog.Debug("Summarize cancellation initiated", "session_id", sessionID)
 		cancel()
 	}
 
 	if a.QueuedPrompts(sessionID) > 0 {
-		slog.Info("Clearing queued prompts", "session_id", sessionID)
+		slog.Debug("Clearing queued prompts", "session_id", sessionID)
 		a.messageQueue.Del(sessionID)
 	}
 }
 
 func (a *sessionAgent) ClearQueue(sessionID string) {
 	if a.QueuedPrompts(sessionID) > 0 {
-		slog.Info("Clearing queued prompts", "session_id", sessionID)
+		slog.Debug("Clearing queued prompts", "session_id", sessionID)
 		a.messageQueue.Del(sessionID)
 	}
 }
@@ -1082,7 +1099,7 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 			if media, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentMedia](toolResult.Output); ok {
 				decoded, err := base64.StdEncoding.DecodeString(media.Data)
 				if err != nil {
-					slog.Warn("failed to decode media data", "error", err)
+					slog.Warn("Failed to decode media data", "error", err)
 					textParts = append(textParts, part)
 					continue
 				}

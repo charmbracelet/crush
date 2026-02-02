@@ -2,6 +2,8 @@ package lsp
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -35,32 +37,32 @@ func RenderLSPList(lspClients *csync.Map[string, *lsp.Client], opts RenderOption
 		lspList = append(lspList, section, "")
 	}
 
-	lspConfigs := config.Get().LSP.Sorted()
-	if len(lspConfigs) == 0 {
+	// Get LSP states
+	lsps := slices.SortedFunc(maps.Values(app.GetLSPStates()), func(a, b app.LSPClientInfo) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+	if len(lsps) == 0 {
 		lspList = append(lspList, t.S().Base.Foreground(t.Border).Render("None"))
 		return lspList
 	}
 
-	// Get LSP states
-	lspStates := app.GetLSPStates()
-
 	// Determine how many items to show
-	maxItems := len(lspConfigs)
+	maxItems := len(lsps)
 	if opts.MaxItems > 0 {
-		maxItems = min(opts.MaxItems, len(lspConfigs))
+		maxItems = min(opts.MaxItems, len(lsps))
 	}
 
-	for i, l := range lspConfigs {
+	for i, info := range lsps {
 		if i >= maxItems {
 			break
 		}
 
-		icon, description := iconAndDescription(l, t, lspStates)
+		icon, description := iconAndDescription(t, info)
 
 		// Calculate diagnostic counts if we have LSP clients
 		var extraContent string
 		if lspClients != nil {
-			if client, ok := lspClients.Get(l.Name); ok {
+			if client, ok := lspClients.Get(info.Name); ok {
 				counts := client.GetDiagnosticCounts()
 				errs := []string{}
 				if counts.Error > 0 {
@@ -83,7 +85,7 @@ func RenderLSPList(lspClients *csync.Map[string, *lsp.Client], opts RenderOption
 			core.Status(
 				core.StatusOpts{
 					Icon:         icon.String(),
-					Title:        l.Name,
+					Title:        info.Name,
 					Description:  description,
 					ExtraContent: extraContent,
 				},
@@ -95,12 +97,7 @@ func RenderLSPList(lspClients *csync.Map[string, *lsp.Client], opts RenderOption
 	return lspList
 }
 
-func iconAndDescription(l config.LSP, t *styles.Theme, states map[string]app.LSPClientInfo) (lipgloss.Style, string) {
-	if l.LSP.Disabled {
-		return t.ItemOfflineIcon.Foreground(t.FgMuted), t.S().Subtle.Render("disabled")
-	}
-
-	info := states[l.Name]
+func iconAndDescription(t *styles.Theme, info app.LSPClientInfo) (lipgloss.Style, string) {
 	switch info.State {
 	case lsp.StateStarting:
 		return t.ItemBusyIcon, t.S().Subtle.Render("starting...")

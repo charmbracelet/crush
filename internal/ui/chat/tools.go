@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/stringext"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -255,14 +256,7 @@ func NewToolMessageItem(
 		if strings.HasPrefix(toolCall.Name, "mcp_") {
 			item = NewMCPToolMessageItem(sty, toolCall, result, canceled)
 		} else {
-			// TODO: Implement other tool items
-			item = newBaseToolMessageItem(
-				sty,
-				toolCall,
-				result,
-				&DefaultToolRenderContext{},
-				canceled,
-			)
+			item = NewGenericToolMessageItem(sty, toolCall, result, canceled)
 		}
 	}
 	item.SetMessageID(messageID)
@@ -420,7 +414,7 @@ func (t *baseToolMessageItem) HandleMouseClick(btn ansi.MouseButton, x, y int) b
 
 // HandleKeyEvent implements KeyEventHandler.
 func (t *baseToolMessageItem) HandleKeyEvent(key tea.KeyMsg) (bool, tea.Cmd) {
-	if key.String() == "c" {
+	if k := key.String(); k == "c" || k == "y" {
 		text := t.formatToolForCopy()
 		return true, common.CopyToClipboard(text, "Tool content copied to clipboard")
 	}
@@ -538,9 +532,7 @@ func toolHeader(sty *styles.Styles, status ToolStatus, name string, width int, n
 
 // toolOutputPlainContent renders plain text with optional expansion support.
 func toolOutputPlainContent(sty *styles.Styles, content string, width int, expanded bool) string {
-	content = strings.ReplaceAll(content, "\r\n", "\n")
-	content = strings.ReplaceAll(content, "\t", "    ")
-	content = strings.TrimSpace(content)
+	content = stringext.NormalizeSpace(content)
 	lines := strings.Split(content, "\n")
 
 	maxLines := responseContextHeight
@@ -573,8 +565,7 @@ func toolOutputPlainContent(sty *styles.Styles, content string, width int, expan
 
 // toolOutputCodeContent renders code with syntax highlighting and line numbers.
 func toolOutputCodeContent(sty *styles.Styles, path, content string, offset, width int, expanded bool) string {
-	content = strings.ReplaceAll(content, "\r\n", "\n")
-	content = strings.ReplaceAll(content, "\t", "    ")
+	content = stringext.NormalizeSpace(content)
 
 	lines := strings.Split(content, "\n")
 	maxLines := responseContextHeight
@@ -699,7 +690,7 @@ func toolOutputDiffContent(sty *styles.Styles, file, oldContent, newContent stri
 		truncMsg := sty.Tool.DiffTruncation.
 			Width(bodyWidth).
 			Render(fmt.Sprintf(assistantMessageTruncateFormat, len(lines)-maxLines))
-		formatted = truncMsg + "\n" + strings.Join(lines[:maxLines], "\n")
+		formatted = strings.Join(lines[:maxLines], "\n") + "\n" + truncMsg
 	}
 
 	return sty.Tool.Body.Render(formatted)
@@ -783,9 +774,7 @@ func roundedEnumerator(lPadding, width int) tree.Enumerator {
 
 // toolOutputMarkdownContent renders markdown content with optional truncation.
 func toolOutputMarkdownContent(sty *styles.Styles, content string, width int, expanded bool) string {
-	content = strings.ReplaceAll(content, "\r\n", "\n")
-	content = strings.ReplaceAll(content, "\t", "    ")
-	content = strings.TrimSpace(content)
+	content = stringext.NormalizeSpace(content)
 
 	// Cap width for readability.
 	if width > maxTextWidth {
@@ -1130,7 +1119,7 @@ func (t *baseToolMessageItem) formatViewResultForCopy() string {
 
 	var result strings.Builder
 	if lang != "" {
-		result.WriteString(fmt.Sprintf("```%s\n", lang))
+		fmt.Fprintf(&result, "```%s\n", lang)
 	} else {
 		result.WriteString("```\n")
 	}
@@ -1166,7 +1155,7 @@ func (t *baseToolMessageItem) formatEditResultForCopy() string {
 		}
 		diffContent, additions, removals := diff.GenerateDiff(meta.OldContent, meta.NewContent, fileName)
 
-		result.WriteString(fmt.Sprintf("Changes: +%d -%d\n", additions, removals))
+		fmt.Fprintf(&result, "Changes: +%d -%d\n", additions, removals)
 		result.WriteString("```diff\n")
 		result.WriteString(diffContent)
 		result.WriteString("\n```")
@@ -1200,7 +1189,7 @@ func (t *baseToolMessageItem) formatMultiEditResultForCopy() string {
 		}
 		diffContent, additions, removals := diff.GenerateDiff(meta.OldContent, meta.NewContent, fileName)
 
-		result.WriteString(fmt.Sprintf("Changes: +%d -%d\n", additions, removals))
+		fmt.Fprintf(&result, "Changes: +%d -%d\n", additions, removals)
 		result.WriteString("```diff\n")
 		result.WriteString(diffContent)
 		result.WriteString("\n```")
@@ -1258,9 +1247,9 @@ func (t *baseToolMessageItem) formatWriteResultForCopy() string {
 	}
 
 	var result strings.Builder
-	result.WriteString(fmt.Sprintf("File: %s\n", fsext.PrettyPath(params.FilePath)))
+	fmt.Fprintf(&result, "File: %s\n", fsext.PrettyPath(params.FilePath))
 	if lang != "" {
-		result.WriteString(fmt.Sprintf("```%s\n", lang))
+		fmt.Fprintf(&result, "```%s\n", lang)
 	} else {
 		result.WriteString("```\n")
 	}
@@ -1283,13 +1272,13 @@ func (t *baseToolMessageItem) formatFetchResultForCopy() string {
 
 	var result strings.Builder
 	if params.URL != "" {
-		result.WriteString(fmt.Sprintf("URL: %s\n", params.URL))
+		fmt.Fprintf(&result, "URL: %s\n", params.URL)
 	}
 	if params.Format != "" {
-		result.WriteString(fmt.Sprintf("Format: %s\n", params.Format))
+		fmt.Fprintf(&result, "Format: %s\n", params.Format)
 	}
 	if params.Timeout > 0 {
-		result.WriteString(fmt.Sprintf("Timeout: %ds\n", params.Timeout))
+		fmt.Fprintf(&result, "Timeout: %ds\n", params.Timeout)
 	}
 	result.WriteString("\n")
 
@@ -1311,10 +1300,10 @@ func (t *baseToolMessageItem) formatAgenticFetchResultForCopy() string {
 
 	var result strings.Builder
 	if params.URL != "" {
-		result.WriteString(fmt.Sprintf("URL: %s\n", params.URL))
+		fmt.Fprintf(&result, "URL: %s\n", params.URL)
 	}
 	if params.Prompt != "" {
-		result.WriteString(fmt.Sprintf("Prompt: %s\n\n", params.Prompt))
+		fmt.Fprintf(&result, "Prompt: %s\n\n", params.Prompt)
 	}
 
 	result.WriteString("```markdown\n")
@@ -1399,6 +1388,6 @@ func prettifyToolName(name string) string {
 	case tools.WriteToolName:
 		return "Write"
 	default:
-		return name
+		return genericPrettyName(name)
 	}
 }

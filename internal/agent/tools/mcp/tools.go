@@ -111,7 +111,7 @@ func RunTool(ctx context.Context, name, toolName string, input string) (ToolResu
 func RefreshTools(ctx context.Context, name string) {
 	session, ok := sessions.Get(name)
 	if !ok {
-		slog.Warn("refresh tools: no session", "name", name)
+		slog.Warn("Refresh tools: no session", "name", name)
 		return
 	}
 

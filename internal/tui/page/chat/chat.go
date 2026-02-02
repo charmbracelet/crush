@@ -327,6 +327,9 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		u, cmd = p.chat.Update(msg)
 		p.chat = u.(chat.MessageListCmp)
 		cmds = append(cmds, cmd)
+		u, cmd = p.editor.Update(msg)
+		p.editor = u.(editor.Editor)
+		cmds = append(cmds, cmd)
 		return p, tea.Batch(cmds...)
 	case filepicker.FilePickedMsg,
 		completions.CompletionsClosedMsg,

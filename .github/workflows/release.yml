@@ -17,6 +17,8 @@ jobs:
     with:
       go_version: "1.25"
       macos_sign_entitlements: "./.github/entitlements.plist"
+      # XXX: remove it after goreleaser 2.14.
+      goreleaser_version: nightly
     secrets:
       docker_username: ${{ secrets.DOCKERHUB_USERNAME }}
       docker_token: ${{ secrets.DOCKERHUB_TOKEN }}

@@ -19,7 +19,6 @@ import (
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/crush/internal/stringext"
 	cmpChat "github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/chat/splash"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
@@ -37,6 +36,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/page/chat"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
+	xstrings "github.com/charmbracelet/x/exp/strings"
 	"golang.org/x/mod/semver"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -129,7 +129,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		termVersion := strings.ToLower(msg.Name)
 		switch {
-		case stringext.ContainsAny(termVersion, "ghostty", "rio"):
+		case xstrings.ContainsAnyOf(termVersion, "ghostty", "rio"):
 			a.sendProgressBar = true
 		case strings.Contains(termVersion, "iterm2"):
 			// iTerm2 supports progress bars from version v3.6.6

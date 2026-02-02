@@ -13,10 +13,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/home"
+	powernapconfig "github.com/charmbracelet/x/powernap/pkg/config"
 	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/charmbracelet/x/powernap/pkg/transport"
@@ -33,6 +35,9 @@ type DiagnosticCounts struct {
 type Client struct {
 	client *powernap.Client
 	name   string
+
+	// Working directory this LSP is scoped to.
+	workDir string
 
 	// File types this LSP server handles (e.g., .go, .rs, .py)
 	fileTypes []string
@@ -133,6 +138,7 @@ func (c *Client) createPowernapClient() error {
 	}
 
 	rootURI := string(protocol.URIFromPath(workDir))
+	c.workDir = workDir
 
 	command, err := c.resolver.ResolveValue(c.config.Command)
 	if err != nil {
@@ -305,25 +311,39 @@ type OpenFileInfo struct {
 	URI     protocol.DocumentURI
 }
 
-// HandlesFile checks if this LSP client handles the given file based on its extension.
+// HandlesFile checks if this LSP client handles the given file based on its
+// extension and whether it's within the working directory.
 func (c *Client) HandlesFile(path string) bool {
-	// If no file types are specified, handle all files (backward compatibility)
+	// Check if file is within working directory.
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		slog.Debug("Cannot resolve path", "name", c.name, "file", path, "error", err)
+		return false
+	}
+	relPath, err := filepath.Rel(c.workDir, absPath)
+	if err != nil || strings.HasPrefix(relPath, "..") {
+		slog.Debug("File outside workspace", "name", c.name, "file", path, "workDir", c.workDir)
+		return false
+	}
+
+	// If no file types are specified, handle all files (backward compatibility).
 	if len(c.fileTypes) == 0 {
 		return true
 	}
 
+	kind := powernap.DetectLanguage(path)
 	name := strings.ToLower(filepath.Base(path))
 	for _, filetype := range c.fileTypes {
 		suffix := strings.ToLower(filetype)
 		if !strings.HasPrefix(suffix, ".") {
 			suffix = "." + suffix
 		}
-		if strings.HasSuffix(name, suffix) {
-			slog.Debug("handles file", "name", c.name, "file", name, "filetype", filetype)
+		if strings.HasSuffix(name, suffix) || filetype == string(kind) {
+			slog.Debug("Handles file", "name", c.name, "file", name, "filetype", filetype, "kind", kind)
 			return true
 		}
 	}
-	slog.Debug("doesn't handle file", "name", c.name, "file", name)
+	slog.Debug("Doesn't handle file", "name", c.name, "file", name)
 	return false
 }
 
@@ -346,7 +366,7 @@ func (c *Client) OpenFile(ctx context.Context, filepath string) error {
 	}
 
 	// Notify the server about the opened document
-	if err = c.client.NotifyDidOpenTextDocument(ctx, uri, string(DetectLanguageID(uri)), 1, string(content)); err != nil {
+	if err = c.client.NotifyDidOpenTextDocument(ctx, uri, string(powernap.DetectLanguage(filepath)), 1, string(content)); err != nil {
 		return err
 	}
 
@@ -557,18 +577,66 @@ func (c *Client) FindReferences(ctx context.Context, filepath string, line, char
 	return c.client.FindReferences(ctx, filepath, line-1, character-1, includeDeclaration)
 }
 
-// HasRootMarkers checks if any of the specified root marker patterns exist in the given directory.
-// Uses glob patterns to match files, allowing for more flexible matching.
-func HasRootMarkers(dir string, rootMarkers []string) bool {
-	if len(rootMarkers) == 0 {
-		return true
+// FilterMatching gets a list of configs and only returns the ones with
+// matching root markers.
+func FilterMatching(dir string, servers map[string]*powernapconfig.ServerConfig) map[string]*powernapconfig.ServerConfig {
+	result := map[string]*powernapconfig.ServerConfig{}
+	if len(servers) == 0 {
+		return result
 	}
-	for _, pattern := range rootMarkers {
-		// Use fsext.GlobWithDoubleStar to find matches
-		matches, _, err := fsext.GlobWithDoubleStar(pattern, dir, 1)
-		if err == nil && len(matches) > 0 {
-			return true
+
+	type serverPatterns struct {
+		server   *powernapconfig.ServerConfig
+		patterns []string
+	}
+	normalized := make(map[string]serverPatterns, len(servers))
+	for name, server := range servers {
+		if len(server.RootMarkers) == 0 {
+			continue
 		}
+		patterns := make([]string, len(server.RootMarkers))
+		for i, p := range server.RootMarkers {
+			patterns[i] = filepath.ToSlash(p)
+		}
+		normalized[name] = serverPatterns{server: server, patterns: patterns}
 	}
-	return false
+
+	walker := fsext.NewFastGlobWalker(dir)
+	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+
+		if walker.ShouldSkip(path) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		relPath, err := filepath.Rel(dir, path)
+		if err != nil {
+			return nil
+		}
+		relPath = filepath.ToSlash(relPath)
+
+		for name, sp := range normalized {
+			for _, pattern := range sp.patterns {
+				matched, err := doublestar.Match(pattern, relPath)
+				if err != nil || !matched {
+					continue
+				}
+				result[name] = sp.server
+				delete(normalized, name)
+				break
+			}
+		}
+
+		if len(normalized) == 0 {
+			return filepath.SkipAll
+		}
+		return nil
+	})
+
+	return result
 }

@@ -29,7 +29,7 @@ type FilePicker struct {
 
 	imgEnc                      fimage.Encoding
 	imgPrevWidth, imgPrevHeight int
-	cellSize                    fimage.CellSize
+	cellSizeW, cellSizeH        int
 
 	fp              filepicker.Model
 	help            help.Model
@@ -44,6 +44,14 @@ type FilePicker struct {
 		Backward,
 		Navigate,
 		Close key.Binding
+	}
+}
+
+// CellSize returns the cell size used for image rendering.
+func (f *FilePicker) CellSize() fimage.CellSize {
+	return fimage.CellSize{
+		Width:  f.cellSizeW,
+		Height: f.cellSizeH,
 	}
 }
 
@@ -103,12 +111,12 @@ func NewFilePicker(com *common.Common) (*FilePicker, tea.Cmd) {
 }
 
 // SetImageCapabilities sets the image capabilities for the [FilePicker].
-func (f *FilePicker) SetImageCapabilities(caps *fimage.Capabilities) {
+func (f *FilePicker) SetImageCapabilities(caps *common.Capabilities) {
 	if caps != nil {
-		if caps.SupportsKittyGraphics {
+		if caps.SupportsKittyGraphics() {
 			f.imgEnc = fimage.EncodingKitty
 		}
-		f.cellSize = caps.CellSize()
+		f.cellSizeW, f.cellSizeH = caps.CellSize()
 		_, f.isTmux = caps.Env.LookupEnv("TMUX")
 	}
 }
@@ -186,7 +194,7 @@ func (f *FilePicker) HandleMsg(msg tea.Msg) Action {
 			img, err := loadImage(selFile)
 			if err == nil {
 				cmds = append(cmds, tea.Sequence(
-					f.imgEnc.Transmit(selFile, img, f.cellSize, f.imgPrevWidth, f.imgPrevHeight, f.isTmux),
+					f.imgEnc.Transmit(selFile, img, f.CellSize(), f.imgPrevWidth, f.imgPrevHeight, f.isTmux),
 					func() tea.Msg {
 						f.previewingImage = true
 						return nil

@@ -1,7 +1,6 @@
 package app
 
 import (
-	"cmp"
 	"context"
 	"log/slog"
 	"os/exec"
@@ -68,11 +67,7 @@ func (app *App) initLSPClients(ctx context.Context) {
 			continue
 		}
 		wg.Go(func() {
-			app.createAndStartLSPClient(
-				ctx, name,
-				toOurConfig(server, app.config.LSP[name]),
-				slices.Contains(userConfiguredLSPs, name),
-			)
+			app.registerStandbyLSPClient(ctx, name, toOurConfig(server), slices.Contains(userConfiguredLSPs, name))
 		})
 	}
 	wg.Wait()
@@ -84,9 +79,29 @@ func (app *App) initLSPClients(ctx context.Context) {
 	}
 }
 
-// toOurConfig merges powernap default config with user config.
-// If user config is zero value, it means no user override exists.
-func toOurConfig(in *powernapconfig.ServerConfig, user config.LSPConfig) config.LSPConfig {
+// registerStandbyLSPClient creates an LSP client in standby mode.
+func (app *App) registerStandbyLSPClient(ctx context.Context, name string, cfg config.LSPConfig, userConfigured bool) {
+	if !userConfigured {
+		if _, err := exec.LookPath(cfg.Command); err != nil {
+			slog.Warn("Default LSP config skipped: server not installed", "name", name, "error", err)
+			return
+		}
+	}
+
+	slog.Debug("Registering LSP client in standby", "name", name, "command", cfg.Command, "fileTypes", cfg.FileTypes)
+
+	client := lsp.NewStandby(ctx, name, cfg, app.config.Resolver())
+	client.SetDiagnosticsCallback(updateLSPDiagnostics)
+	client.SetStateChangeCallback(func(name string, state lsp.ServerState, err error) {
+		info, _ := app.LSPClients.Get(name)
+		updateLSPState(name, state, err, info, 0)
+	})
+
+	app.LSPClients.Set(name, client)
+	updateLSPState(name, lsp.StateStandby, nil, client, 0)
+}
+
+func toOurConfig(in *powernapconfig.ServerConfig) config.LSPConfig {
 	return config.LSPConfig{
 		Command:     in.Command,
 		Args:        in.Args,
@@ -95,7 +110,6 @@ func toOurConfig(in *powernapconfig.ServerConfig, user config.LSPConfig) config.
 		RootMarkers: in.RootMarkers,
 		InitOptions: in.InitOptions,
 		Options:     in.Settings,
-		Timeout:     user.Timeout,
 	}
 }
 
@@ -130,7 +144,7 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, config
 	lspClient.SetDiagnosticsCallback(updateLSPDiagnostics)
 
 	// Increase initialization timeout as some servers take more time to start.
-	initCtx, cancel := context.WithTimeout(ctx, time.Duration(cmp.Or(config.Timeout, 30))*time.Second)
+	initCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	// Initialize LSP client.

@@ -89,6 +89,9 @@ func lspList(t *styles.Styles, lsps []LSPInfo, width, maxItems int) string {
 		var description string
 		var diagnostics string
 		switch l.State {
+		case lsp.StateStandby:
+			icon = t.ItemOfflineIcon.String()
+			description = t.Subtle.Render("standby")
 		case lsp.StateStarting:
 			icon = t.ItemBusyIcon.String()
 			description = t.Subtle.Render("starting...")

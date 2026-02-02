@@ -52,6 +52,9 @@ type Client struct {
 	// Diagnostic change callback
 	onDiagnosticsChanged func(name string, count int)
 
+	// State change callback
+	onStateChange func(name string, state ServerState, err error)
+
 	// Diagnostic cache
 	diagnostics *csync.VersionedMap[protocol.DocumentURI, []protocol.Diagnostic]
 
@@ -63,8 +66,8 @@ type Client struct {
 	// Files are currently opened by the LSP
 	openFiles *csync.Map[string, *OpenFileInfo]
 
-	// Server state
-	serverState atomic.Value
+	// Server state (stores int32 for atomic operations)
+	serverState atomic.Int32
 }
 
 // New creates a new LSP client using the powernap implementation.
@@ -78,13 +81,75 @@ func New(ctx context.Context, name string, cfg config.LSPConfig, resolver config
 		ctx:         ctx,
 		resolver:    resolver,
 	}
-	client.serverState.Store(StateStarting)
+	client.SetServerState(StateStarting)
 
 	if err := client.createPowernapClient(); err != nil {
 		return nil, err
 	}
 
 	return client, nil
+}
+
+// NewStandby creates an LSP client in standby mode without starting the server.
+func NewStandby(ctx context.Context, name string, cfg config.LSPConfig, resolver config.VariableResolver) *Client {
+	workDir, _ := os.Getwd()
+	client := &Client{
+		name:        name,
+		fileTypes:   cfg.FileTypes,
+		diagnostics: csync.NewVersionedMap[protocol.DocumentURI, []protocol.Diagnostic](),
+		openFiles:   csync.NewMap[string, *OpenFileInfo](),
+		config:      cfg,
+		ctx:         ctx,
+		resolver:    resolver,
+		workDir:     workDir,
+	}
+	client.serverState.Store(int32(StateStandby))
+	return client
+}
+
+// Start starts a standby LSP client. Thread-safe via atomic state transition.
+func (c *Client) Start() error {
+	if !c.serverState.CompareAndSwap(int32(StateStandby), int32(StateStarting)) {
+		return nil
+	}
+	c.notifyStateChange(StateStarting, nil)
+
+	if err := c.createPowernapClient(); err != nil {
+		c.serverState.Store(int32(StateError))
+		c.notifyStateChange(StateError, err)
+		return err
+	}
+	return nil
+}
+
+// InitializeAndWait initializes the LSP client and waits for it to be ready.
+func (c *Client) InitializeAndWait(ctx context.Context) error {
+	if _, err := c.Initialize(ctx, c.workDir); err != nil {
+		c.SetServerState(StateError)
+		c.notifyStateChange(StateError, err)
+		return fmt.Errorf("failed to initialize lsp client: %w", err)
+	}
+
+	if err := c.WaitForServerReady(ctx); err != nil {
+		c.SetServerState(StateError)
+		c.notifyStateChange(StateError, err)
+		return err
+	}
+
+	c.SetServerState(StateReady)
+	c.notifyStateChange(StateReady, nil)
+	return nil
+}
+
+// SetStateChangeCallback sets the callback for state transitions.
+func (c *Client) SetStateChangeCallback(fn func(string, ServerState, error)) {
+	c.onStateChange = fn
+}
+
+func (c *Client) notifyStateChange(state ServerState, err error) {
+	if c.onStateChange != nil {
+		c.onStateChange(c.name, state, err)
+	}
 }
 
 // Initialize initializes the LSP client and returns the server capabilities.
@@ -120,9 +185,12 @@ func (c *Client) Initialize(ctx context.Context, workspaceDir string) (*protocol
 
 // Close closes the LSP client.
 func (c *Client) Close(ctx context.Context) error {
+	if c.client == nil {
+		return nil
+	}
+
 	c.CloseAllFiles(ctx)
 
-	// Shutdown and exit the client
 	if err := c.client.Shutdown(ctx); err != nil {
 		slog.Warn("Failed to shutdown LSP client", "error", err)
 	}
@@ -182,6 +250,10 @@ func (c *Client) registerHandlers() {
 
 // Restart closes the current LSP client and creates a new one with the same configuration.
 func (c *Client) Restart() error {
+	if c.GetServerState() == StateStandby {
+		return nil
+	}
+
 	var openFiles []string
 	for uri := range c.openFiles.Seq2() {
 		openFiles = append(openFiles, string(uri))
@@ -231,7 +303,8 @@ func (c *Client) Restart() error {
 type ServerState int
 
 const (
-	StateStarting ServerState = iota
+	StateStandby ServerState = iota
+	StateStarting
 	StateReady
 	StateError
 	StateDisabled
@@ -239,15 +312,12 @@ const (
 
 // GetServerState returns the current state of the LSP server
 func (c *Client) GetServerState() ServerState {
-	if val := c.serverState.Load(); val != nil {
-		return val.(ServerState)
-	}
-	return StateStarting
+	return ServerState(c.serverState.Load())
 }
 
 // SetServerState sets the current state of the LSP server
 func (c *Client) SetServerState(state ServerState) {
-	c.serverState.Store(state)
+	c.serverState.Store(int32(state))
 }
 
 // GetName returns the name of the LSP client
@@ -416,6 +486,9 @@ func (c *Client) IsFileOpen(filepath string) bool {
 
 // CloseAllFiles closes all currently open files.
 func (c *Client) CloseAllFiles(ctx context.Context) {
+	if c.client == nil {
+		return
+	}
 	cfg := config.Get()
 	debugLSP := cfg != nil && cfg.Options.DebugLSP
 	for uri := range c.openFiles.Seq2() {

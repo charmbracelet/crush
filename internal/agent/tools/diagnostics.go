@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"charm.land/fantasy"
@@ -42,14 +43,43 @@ func notifyLSPs(ctx context.Context, lsps *csync.Map[string, *lsp.Client], filep
 	if filepath == "" {
 		return
 	}
+
+	var wg sync.WaitGroup
 	for client := range lsps.Seq() {
 		if !client.HandlesFile(filepath) {
 			continue
 		}
-		_ = client.OpenFileOnDemand(ctx, filepath)
-		_ = client.NotifyChange(ctx, filepath)
-		client.WaitForDiagnostics(ctx, 5*time.Second)
+		wg.Add(1)
+		go func(c *lsp.Client) {
+			defer wg.Done()
+			notifyLSP(ctx, c, filepath)
+		}(client)
 	}
+	wg.Wait()
+}
+
+func notifyLSP(ctx context.Context, client *lsp.Client, filepath string) {
+	if client.GetServerState() == lsp.StateStandby {
+		if err := client.Start(); err != nil {
+			slog.Warn("LSP start failed", "name", client.GetName(), "error", err)
+			return
+		}
+		initCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		if err := client.InitializeAndWait(initCtx); err != nil {
+			cancel()
+			slog.Warn("LSP init failed", "name", client.GetName(), "error", err)
+			return
+		}
+		cancel()
+	}
+
+	if client.GetServerState() != lsp.StateReady {
+		return
+	}
+
+	_ = client.OpenFileOnDemand(ctx, filepath)
+	_ = client.NotifyChange(ctx, filepath)
+	client.WaitForDiagnostics(ctx, 5*time.Second)
 }
 
 func getDiagnostics(filePath string, lsps *csync.Map[string, *lsp.Client]) string {

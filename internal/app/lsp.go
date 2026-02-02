@@ -76,8 +76,10 @@ func (app *App) initLSPClients(ctx context.Context) {
 	}
 	wg.Wait()
 
-	if err := app.AgentCoordinator.UpdateModels(ctx); err != nil {
-		slog.Error("Failed to refresh tools after LSP startup", "error", err)
+	if app.AgentCoordinator != nil {
+		if err := app.AgentCoordinator.UpdateModels(ctx); err != nil {
+			slog.Error("Failed to refresh tools after LSP startup", "error", err)
+		}
 	}
 }
 

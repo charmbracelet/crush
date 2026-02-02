@@ -482,12 +482,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mcpStates = mcp.GetStates()
 		// Refresh agent tools when MCP tools change.
 		if msg.Payload.Type == mcp.EventToolsListChanged {
-			mcp.RefreshTools(context.Background(), msg.Payload.Name)
-			if m.com.App.AgentCoordinator != nil {
-				if err := m.com.App.AgentCoordinator.RefreshTools(context.Background()); err != nil {
-					slog.Error("failed to refresh agent tools", "error", err)
-				}
-			}
+			cmds = append(cmds, m.refreshMCPTools(msg.Payload.Name))
 		}
 		// check if all mcps are initialized
 		initialized := true
@@ -1159,36 +1154,10 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		cmds = append(cmds, tea.Quit)
 	case dialog.ActionEnableDockerMCP:
 		m.dialog.CloseDialog(dialog.CommandsID)
-		cmds = append(cmds, func() tea.Msg {
-			cfg := m.com.Config()
-			if err := cfg.EnableDockerMCP(); err != nil {
-				return uiutil.ReportError(err)()
-			}
-
-			// Initialize the Docker MCP client immediately.
-			ctx := context.Background()
-			if err := mcp.InitializeSingle(ctx, config.DockerMCPName, cfg); err != nil {
-				return uiutil.ReportError(fmt.Errorf("docker MCP enabled but failed to start: %w", err))()
-			}
-
-			return uiutil.NewInfoMsg("Docker MCP enabled and started successfully")
-		})
+		cmds = append(cmds, m.enableDockerMCP)
 	case dialog.ActionDisableDockerMCP:
 		m.dialog.CloseDialog(dialog.CommandsID)
-		cmds = append(cmds, func() tea.Msg {
-			// Close the Docker MCP client.
-			if err := mcp.DisableSingle(config.DockerMCPName); err != nil {
-				return uiutil.ReportError(fmt.Errorf("failed to disable docker MCP: %w", err))()
-			}
-
-			// Remove from config and persist.
-			cfg := m.com.Config()
-			if err := cfg.DisableDockerMCP(); err != nil {
-				return uiutil.ReportError(err)()
-			}
-
-			return uiutil.NewInfoMsg("Docker MCP disabled successfully")
-		})
+		cmds = append(cmds, m.disableDockerMCP)
 	case dialog.ActionInitializeProject:
 		if m.isAgentBusy() {
 			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait before summarizing session..."))
@@ -3050,6 +3019,48 @@ func (m *UI) copyChatHighlight() tea.Cmd {
 			return nil
 		},
 	)
+}
+
+func (m *UI) enableDockerMCP() tea.Msg {
+	cfg := m.com.Config()
+	if err := cfg.EnableDockerMCP(); err != nil {
+		return uiutil.ReportError(err)()
+	}
+
+	// Initialize the Docker MCP client immediately.
+	ctx := context.Background()
+	if err := mcp.InitializeSingle(ctx, config.DockerMCPName, cfg); err != nil {
+		return uiutil.ReportError(fmt.Errorf("docker MCP enabled but failed to start: %w", err))()
+	}
+
+	return uiutil.NewInfoMsg("Docker MCP enabled and started successfully")
+}
+
+func (m *UI) disableDockerMCP() tea.Msg {
+	// Close the Docker MCP client.
+	if err := mcp.DisableSingle(config.DockerMCPName); err != nil {
+		return uiutil.ReportError(fmt.Errorf("failed to disable docker MCP: %w", err))()
+	}
+
+	// Remove from config and persist.
+	cfg := m.com.Config()
+	if err := cfg.DisableDockerMCP(); err != nil {
+		return uiutil.ReportError(err)()
+	}
+
+	return uiutil.NewInfoMsg("Docker MCP disabled successfully")
+}
+
+func (m *UI) refreshMCPTools(mcpName string) tea.Cmd {
+	return func() tea.Msg {
+		mcp.RefreshTools(context.Background(), mcpName)
+		if m.com.App.AgentCoordinator != nil {
+			if err := m.com.App.AgentCoordinator.RefreshTools(context.Background()); err != nil {
+				slog.Error("failed to refresh agent tools", "error", err)
+			}
+		}
+		return nil
+	}
 }
 
 // renderLogo renders the Crush logo with the given styles and dimensions.

@@ -59,3 +59,4 @@ Use struct embedding for shared behaviors. See `chat/messages.go` for examples o
 - Always account for padding/borders in width calculations
 - Use `tea.Batch()` when returning multiple commands
 - Pass `*common.Common` to components that need styles or app access
+- When writing tea.Cmd's prefer creating methods in the model instead of writing inline functions

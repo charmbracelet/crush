@@ -1331,7 +1331,7 @@ func TestConfig_configureProvidersOpenAICodex(t *testing.T) {
 	require.NotContains(t, provider.ExtraHeaders, "chatgpt-account-id")
 	require.Equal(t, "responses=experimental", provider.ExtraHeaders["OpenAI-Beta"])
 	require.Equal(t, "codex_cli_rs", provider.ExtraHeaders["originator"])
-	require.False(t, provider.ExtraBody["store"])
+	require.Equal(t, false, provider.ExtraBody["store"])
 	require.Equal(t, "You are a helpful coding assistant.", provider.ExtraBody["instructions"])
 }
 

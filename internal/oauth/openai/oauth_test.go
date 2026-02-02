@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -20,14 +21,24 @@ func TestCreateAuthorizationFlow(t *testing.T) {
 	require.NotEmpty(t, flow.URL)
 	require.NotEmpty(t, flow.State)
 	require.NotEmpty(t, flow.Verifier)
-	require.Contains(t, flow.URL, "https://auth.openai.com/oauth/authorize")
-	require.Contains(t, flow.URL, "response_type=code")
-	require.Contains(t, flow.URL, "client_id="+oauthClientID)
-	require.Contains(t, flow.URL, "redirect_uri="+RedirectURL)
-	require.Contains(t, flow.URL, "scope="+Scope)
-	require.Contains(t, flow.URL, "code_challenge=")
-	require.Contains(t, flow.URL, "code_challenge_method=S256")
-	require.Contains(t, flow.URL, "state="+flow.State)
+
+	parsed, err := url.Parse(flow.URL)
+	require.NoError(t, err)
+	require.Equal(t, "https", parsed.Scheme)
+	require.Equal(t, "auth.openai.com", parsed.Host)
+	require.Equal(t, "/oauth/authorize", parsed.Path)
+
+	query := parsed.Query()
+	require.Equal(t, "code", query.Get("response_type"))
+	require.Equal(t, oauthClientID, query.Get("client_id"))
+	require.Equal(t, RedirectURL, query.Get("redirect_uri"))
+	require.Equal(t, Scope, query.Get("scope"))
+	require.NotEmpty(t, query.Get("code_challenge"))
+	require.Equal(t, "S256", query.Get("code_challenge_method"))
+	require.Equal(t, flow.State, query.Get("state"))
+	require.Equal(t, "true", query.Get("id_token_add_organizations"))
+	require.Equal(t, "true", query.Get("codex_cli_simplified_flow"))
+	require.Equal(t, HeaderOriginatorVal, query.Get("originator"))
 }
 
 func TestExchangeAuthorizationCode(t *testing.T) {
@@ -115,5 +126,5 @@ func TestSetExpiresAt(t *testing.T) {
 		ExpiresIn: 3600,
 	}
 	token.SetExpiresAt()
-	require.WithinDuration(t, time.Now().Add(time.Hour), token.ExpiresAt, time.Second)
+	require.WithinDuration(t, time.Now().Add(time.Hour), time.Unix(token.ExpiresAt, 0), time.Second)
 }

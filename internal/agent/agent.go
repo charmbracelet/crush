@@ -239,12 +239,17 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	var currentAssistant *message.Message
 	var shouldSummarize bool
+	maxOutputTokens := &call.MaxOutputTokens
+	if largeModel.ModelCfg.Provider == config.OpenAICodexProviderID {
+		maxOutputTokens = nil
+	}
+
 	result, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
 		Files:            files,
 		Messages:         history,
 		ProviderOptions:  call.ProviderOptions,
-		MaxOutputTokens:  &call.MaxOutputTokens,
+		MaxOutputTokens:  maxOutputTokens,
 		TopP:             call.TopP,
 		Temperature:      call.Temperature,
 		PresencePenalty:  call.PresencePenalty,

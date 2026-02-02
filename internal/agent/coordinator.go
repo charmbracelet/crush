@@ -642,6 +642,8 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 	if providerID == string(catwalk.InferenceProviderCopilot) {
 		opts = append(opts, openaicompat.WithUseResponsesAPI())
 		httpClient = copilot.NewClient(isSubAgent, c.cfg.Options.Debug)
+	} else if providerID == config.OpenAICodexProviderID {
+		opts = append(opts, openaicompat.WithUseResponsesAPI())
 	} else if c.cfg.Options.Debug {
 		httpClient = log.NewHTTPClient()
 	}

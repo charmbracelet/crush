@@ -127,6 +127,8 @@ type UI struct {
 	height int
 	layout layout
 
+	isTransparent bool
+
 	focus uiFocusState
 	state uiState
 
@@ -296,8 +298,12 @@ func New(com *common.Common) *UI {
 	// set initial state
 	ui.setState(desiredState, desiredFocus)
 
+	opts := com.Config().Options
+
 	// disable indeterminate progress bar
-	ui.progressBarEnabled = com.Config().Options.Progress == nil || *com.Config().Options.Progress
+	ui.progressBarEnabled = opts.Progress == nil || *opts.Progress
+	// enable transparent mode
+	ui.isTransparent = opts.TUI.Transparent != nil && *opts.TUI.Transparent
 
 	return ui
 }
@@ -1884,7 +1890,9 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 func (m *UI) View() tea.View {
 	var v tea.View
 	v.AltScreen = true
-	v.BackgroundColor = m.com.Styles.Background
+	if !m.isTransparent {
+		v.BackgroundColor = m.com.Styles.Background
+	}
 	v.MouseMode = tea.MouseModeCellMotion
 	v.WindowTitle = "crush " + home.Short(m.com.Config().WorkingDir())
 

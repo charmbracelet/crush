@@ -203,6 +203,7 @@ type TUIOptions struct {
 	//
 
 	Completions Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
+	Transparent *bool       `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
 }
 
 // Completions defines options for the completions UI.

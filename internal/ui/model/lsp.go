@@ -25,6 +25,20 @@ type LSPInfo struct {
 func (m *UI) lspInfo(width, maxItems int, isSection bool) string {
 	t := m.com.Styles
 
+	title := t.Subtle.Render("LSPs")
+	if isSection {
+		title = common.Section(t, title, width)
+	}
+
+	// Check if LSP discovery is in progress
+	if app.IsLSPDiscovering() {
+		discovering := common.Status(t, common.StatusOpts{
+			Icon:  t.ItemBusyIcon.String(),
+			Title: "Discovering...",
+		}, width)
+		return lipgloss.NewStyle().Width(width).Render(fmt.Sprintf("%s\n\n%s", title, discovering))
+	}
+
 	states := slices.SortedFunc(maps.Values(m.lspStates), func(a, b app.LSPClientInfo) int {
 		return strings.Compare(a.Name, b.Name)
 	})
@@ -46,10 +60,6 @@ func (m *UI) lspInfo(width, maxItems int, isSection bool) string {
 		lsps = append(lsps, LSPInfo{LSPClientInfo: state, Diagnostics: lspErrs})
 	}
 
-	title := t.Subtle.Render("LSPs")
-	if isSection {
-		title = common.Section(t, title, width)
-	}
 	list := t.Subtle.Render("None")
 	if len(lsps) > 0 {
 		list = lspList(t, lsps, width, maxItems)

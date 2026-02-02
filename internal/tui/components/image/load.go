@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"fmt"
 	"image"
 	"image/png"
 	"io"
@@ -27,24 +28,39 @@ type loadMsg struct {
 }
 
 func loadURL(url string) tea.Cmd {
-	var r io.ReadCloser
 	var err error
 
-	if strings.HasPrefix(url, "http") {
-		var resp *http.Request
-		resp, err = http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
-		r = resp.Body
-	} else {
-		r, err = os.Open(url)
-	}
+	switch {
+	case strings.HasPrefix(url, "http"):
+		var req *http.Request
+		req, err = http.NewRequestWithContext(context.TODO(), http.MethodGet, url, nil)
+		if err != nil {
+			break
+		}
 
-	if err != nil {
-		return func() tea.Msg {
-			return errMsg{err}
+		var res *http.Response
+		res, err = http.DefaultClient.Do(req)
+		if err != nil {
+			break
+		}
+
+		if res.StatusCode < 200 || res.StatusCode >= 300 {
+			res.Body.Close()
+			err = fmt.Errorf("HTTP %d: %s", res.StatusCode, res.Status)
+			break
+		}
+
+		return load(res.Body)
+	default:
+		var r io.ReadCloser
+		if r, err = os.Open(url); err == nil {
+			return load(r)
 		}
 	}
 
-	return load(r)
+	return func() tea.Msg {
+		return errMsg{err}
+	}
 }
 
 func load(r io.ReadCloser) tea.Cmd {

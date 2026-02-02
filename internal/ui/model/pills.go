@@ -66,7 +66,8 @@ func queuePill(queue int, focused, panelFocused bool, t *styles.Styles) string {
 		triangles = triangles[:queue]
 	}
 
-	content := fmt.Sprintf("%s %d Queued", strings.Join(triangles, ""), queue)
+	text := t.Base.Render(fmt.Sprintf("%d Queued", queue))
+	content := fmt.Sprintf("%s %s", strings.Join(triangles, ""), text)
 	return pillStyle(focused, panelFocused, t).Render(content)
 }
 

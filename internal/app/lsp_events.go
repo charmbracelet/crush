@@ -17,6 +17,9 @@ const (
 	LSPEventDiagnosticsChanged LSPEventType = "diagnostics_changed"
 )
 
+// lspDiscoveryKey is a sentinel key used to track the discovery state
+const lspDiscoveryKey = "_discovery"
+
 // LSPEvent represents an event in the LSP system
 type LSPEvent struct {
 	Type            LSPEventType
@@ -46,14 +49,37 @@ func SubscribeLSPEvents(ctx context.Context) <-chan pubsub.Event[LSPEvent] {
 	return lspBroker.Subscribe(ctx)
 }
 
-// GetLSPStates returns the current state of all LSP clients
+// GetLSPStates returns the current state of all LSP clients (excluding internal sentinel keys)
 func GetLSPStates() map[string]LSPClientInfo {
-	return lspStates.Copy()
+	states := lspStates.Copy()
+	delete(states, lspDiscoveryKey)
+	return states
 }
 
 // GetLSPState returns the state of a specific LSP client
 func GetLSPState(name string) (LSPClientInfo, bool) {
 	return lspStates.Get(name)
+}
+
+// IsLSPDiscovering returns true if LSP discovery is in progress
+func IsLSPDiscovering() bool {
+	info, exists := lspStates.Get(lspDiscoveryKey)
+	return exists && info.State == lsp.StateDiscovering
+}
+
+// setLSPDiscovering sets the LSP discovery state using the state machine
+func setLSPDiscovering(discovering bool) {
+	if discovering {
+		updateLSPState(lspDiscoveryKey, lsp.StateDiscovering, nil, nil, 0)
+	} else {
+		lspStates.Del(lspDiscoveryKey)
+		// Publish event to trigger UI update
+		lspBroker.Publish(pubsub.UpdatedEvent, LSPEvent{
+			Type:  LSPEventStateChanged,
+			Name:  lspDiscoveryKey,
+			State: lsp.StateDisabled,
+		})
+	}
 }
 
 // updateLSPState updates the state of an LSP client and publishes an event

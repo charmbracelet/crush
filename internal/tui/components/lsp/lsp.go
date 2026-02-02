@@ -37,6 +37,21 @@ func RenderLSPList(lspClients *csync.Map[string, *lsp.Client], opts RenderOption
 		lspList = append(lspList, section, "")
 	}
 
+	// Check if LSP discovery is in progress
+	if app.IsLSPDiscovering() {
+		lspList = append(lspList,
+			core.Status(
+				core.StatusOpts{
+					Icon:        t.ItemBusyIcon.String(),
+					Title:       "Discovering...",
+					Description: "",
+				},
+				opts.MaxWidth,
+			),
+		)
+		return lspList
+	}
+
 	// Get LSP states
 	lsps := slices.SortedFunc(maps.Values(app.GetLSPStates()), func(a, b app.LSPClientInfo) int {
 		return strings.Compare(a.Name, b.Name)

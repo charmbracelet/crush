@@ -17,6 +17,9 @@ import (
 func (app *App) initLSPClients(ctx context.Context) {
 	slog.Info("LSP clients initialization started")
 
+	// Signal that we're discovering LSPs
+	setLSPDiscovering(true)
+
 	manager := powernapconfig.NewManager()
 	manager.LoadDefaults()
 
@@ -53,6 +56,9 @@ func (app *App) initLSPClients(ctx context.Context) {
 
 	servers := manager.GetServers()
 	filtered := lsp.FilterMatching(app.config.WorkingDir(), servers)
+
+	// Discovery complete
+	setLSPDiscovering(false)
 
 	for _, name := range userConfiguredLSPs {
 		if _, ok := filtered[name]; !ok {

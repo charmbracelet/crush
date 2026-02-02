@@ -168,6 +168,10 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, handleMCPToolsEvent(context.Background(), msg.Payload.Name)
 		}
 
+	case pubsub.Event[app.LSPEvent]:
+		// LSP state changed - the view will re-render with fresh state from app.GetLSPStates()
+		return a, nil
+
 	// Completions messages
 	case completions.OpenCompletionsMsg, completions.FilterCompletionsMsg,
 		completions.CloseCompletionsMsg, completions.RepositionCompletionsMsg:

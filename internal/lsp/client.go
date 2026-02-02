@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/bmatcuk/doublestar/v4"
+	"github.com/charlievieth/fastwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/fsext"
@@ -231,10 +232,11 @@ func (c *Client) Restart() error {
 type ServerState int
 
 const (
-	StateStarting ServerState = iota
-	StateReady
-	StateError
-	StateDisabled
+	StateDiscovering ServerState = iota // Discovering available LSPs by scanning project
+	StateStarting                       // LSP server is starting up
+	StateReady                          // LSP server is ready
+	StateError                          // LSP server encountered an error
+	StateDisabled                       // LSP server is disabled
 )
 
 // GetServerState returns the current state of the LSP server
@@ -578,18 +580,22 @@ func (c *Client) FindReferences(ctx context.Context, filepath string, line, char
 }
 
 // FilterMatching gets a list of configs and only returns the ones with
-// matching root markers.
+// matching root markers. Uses concurrent directory traversal for better
+// performance on large repositories.
 func FilterMatching(dir string, servers map[string]*powernapconfig.ServerConfig) map[string]*powernapconfig.ServerConfig {
-	result := map[string]*powernapconfig.ServerConfig{}
+	result := csync.NewMap[string, *powernapconfig.ServerConfig]()
 	if len(servers) == 0 {
-		return result
+		return result.Copy()
 	}
 
 	type serverPatterns struct {
 		server   *powernapconfig.ServerConfig
 		patterns []string
 	}
-	normalized := make(map[string]serverPatterns, len(servers))
+
+	// Build normalized map and track count for early termination
+	normalized := csync.NewMap[string, serverPatterns]()
+	var remaining atomic.Int64
 	for name, server := range servers {
 		var patterns []string
 		for _, p := range server.RootMarkers {
@@ -603,13 +609,24 @@ func FilterMatching(dir string, servers map[string]*powernapconfig.ServerConfig)
 			slog.Debug("ignoring lsp with no root markers", "name", name)
 			continue
 		}
-		normalized[name] = serverPatterns{server: server, patterns: patterns}
+		normalized.Set(name, serverPatterns{server: server, patterns: patterns})
+		remaining.Add(1)
 	}
 
 	walker := fsext.NewFastGlobWalker(dir)
-	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+	conf := fastwalk.Config{
+		Follow:  true,
+		ToSlash: fastwalk.DefaultToSlash(),
+	}
+
+	_ = fastwalk.Walk(&conf, dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
+		}
+
+		// Check for early termination - all servers matched
+		if remaining.Load() == 0 {
+			return filepath.SkipAll
 		}
 
 		if walker.ShouldSkip(path) {
@@ -625,23 +642,24 @@ func FilterMatching(dir string, servers map[string]*powernapconfig.ServerConfig)
 		}
 		relPath = filepath.ToSlash(relPath)
 
-		for name, sp := range normalized {
+		for name, sp := range normalized.Seq2() {
 			for _, pattern := range sp.patterns {
 				matched, err := doublestar.Match(pattern, relPath)
 				if err != nil || !matched {
 					continue
 				}
-				result[name] = sp.server
-				delete(normalized, name)
+				// Use GetOrSet pattern to handle concurrent matches for same server
+				result.GetOrSet(name, func() *powernapconfig.ServerConfig {
+					normalized.Del(name)
+					remaining.Add(-1)
+					return sp.server
+				})
 				break
 			}
 		}
 
-		if len(normalized) == 0 {
-			return filepath.SkipAll
-		}
 		return nil
 	})
 
-	return result
+	return result.Copy()
 }

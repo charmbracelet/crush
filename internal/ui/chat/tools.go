@@ -292,7 +292,7 @@ func (t *baseToolMessageItem) Animate(msg anim.StepMsg) tea.Cmd {
 
 // RawRender implements [MessageItem].
 func (t *baseToolMessageItem) RawRender(width int) string {
-	toolItemWidth := width - messageLeftPaddingTotal
+	toolItemWidth := width - MessageLeftPaddingTotal
 	if t.hasCappedWidth {
 		toolItemWidth = cappedMessageWidth(width)
 	}
@@ -690,7 +690,7 @@ func toolOutputDiffContent(sty *styles.Styles, file, oldContent, newContent stri
 		truncMsg := sty.Tool.DiffTruncation.
 			Width(bodyWidth).
 			Render(fmt.Sprintf(assistantMessageTruncateFormat, len(lines)-maxLines))
-		formatted = truncMsg + "\n" + strings.Join(lines[:maxLines], "\n")
+		formatted = strings.Join(lines[:maxLines], "\n") + "\n" + truncMsg
 	}
 
 	return sty.Tool.Body.Render(formatted)

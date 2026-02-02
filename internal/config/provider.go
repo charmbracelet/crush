@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/catwalk/pkg/embedded"
+	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/catwalk/pkg/embedded"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/home"

@@ -168,7 +168,7 @@ func (e Encoding) Transmit(id string, img image.Image, cs CellSize, cols, rows i
 				return chunk
 			},
 		}); err != nil {
-			slog.Error("failed to encode image for kitty graphics", "err", err)
+			slog.Error("Failed to encode image for kitty graphics", "err", err)
 			return uiutil.InfoMsg{
 				Type: uiutil.InfoTypeError,
 				Msg:  "failed to encode image",

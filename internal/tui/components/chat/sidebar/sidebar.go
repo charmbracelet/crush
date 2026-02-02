@@ -8,7 +8,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/diff"
@@ -548,7 +547,6 @@ func (s *sidebarCmp) currentModelBlock() string {
 	selectedModel := cfg.Models[agentCfg.Model]
 
 	model := config.Get().GetModelByType(agentCfg.Model)
-	modelProvider := config.Get().GetProviderForModel(agentCfg.Model)
 
 	t := styles.CurrentTheme()
 
@@ -560,15 +558,14 @@ func (s *sidebarCmp) currentModelBlock() string {
 	}
 	if model.CanReason {
 		reasoningInfoStyle := t.S().Subtle.PaddingLeft(2)
-		switch modelProvider.Type {
-		case catwalk.TypeAnthropic:
+		if len(model.ReasoningLevels) == 0 {
 			formatter := cases.Title(language.English, cases.NoLower)
 			if selectedModel.Think {
 				parts = append(parts, reasoningInfoStyle.Render(formatter.String("Thinking on")))
 			} else {
 				parts = append(parts, reasoningInfoStyle.Render(formatter.String("Thinking off")))
 			}
-		default:
+		} else {
 			reasoningEffort := model.DefaultReasoningEffort
 			if selectedModel.ReasoningEffort != "" {
 				reasoningEffort = selectedModel.ReasoningEffort

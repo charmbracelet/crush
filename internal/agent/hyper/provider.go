@@ -21,9 +21,9 @@ import (
 	"sync"
 	"time"
 
+	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"charm.land/fantasy/object"
-	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/event"
 )
 
@@ -49,7 +49,10 @@ var Enabled = sync.OnceValue(func() bool {
 var Embedded = sync.OnceValue(func() catwalk.Provider {
 	var provider catwalk.Provider
 	if err := json.Unmarshal(embedded, &provider); err != nil {
-		slog.Error("could not use embedded provider data", "err", err)
+		slog.Error("Could not use embedded provider data", "err", err)
+	}
+	if e := os.Getenv("HYPER_URL"); e != "" {
+		provider.APIEndpoint = e + "/api/v1/fantasy"
 	}
 	return provider
 })

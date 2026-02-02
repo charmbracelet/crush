@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os/exec"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
@@ -58,16 +59,25 @@ func (app *App) initLSPClients(ctx context.Context) {
 			updateLSPState(name, lsp.StateDisabled, nil, nil, 0)
 		}
 	}
+
+	var wg sync.WaitGroup
 	for name, server := range filtered {
 		if app.config.Options.AutoLSP != nil && !*app.config.Options.AutoLSP && !slices.Contains(userConfiguredLSPs, name) {
 			slog.Debug("Ignoring non user-define LSP client due to AutoLSP being disabled", "name", name)
 			continue
 		}
-		go app.createAndStartLSPClient(
-			ctx, name,
-			toOurConfig(server),
-			slices.Contains(userConfiguredLSPs, name),
-		)
+		wg.Go(func() {
+			app.createAndStartLSPClient(
+				ctx, name,
+				toOurConfig(server),
+				slices.Contains(userConfiguredLSPs, name),
+			)
+		})
+	}
+	wg.Wait()
+
+	if err := app.AgentCoordinator.UpdateModels(ctx); err != nil {
+		slog.Error("Failed to refresh tools after LSP startup", "error", err)
 	}
 }
 

@@ -109,10 +109,7 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	// Check for updates in the background.
 	go app.checkForUpdates(ctx)
 
-	go func() {
-		slog.Info("Initializing MCP clients")
-		mcp.Initialize(ctx, app.Permissions, cfg)
-	}()
+	go mcp.Initialize(ctx, app.Permissions, cfg)
 
 	// cleanup database upon app shutdown
 	app.cleanupFuncs = append(app.cleanupFuncs, conn.Close, mcp.Close)

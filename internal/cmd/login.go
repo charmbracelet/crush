@@ -1,10 +1,15 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
+	"strings"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
@@ -13,6 +18,7 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/oauth/hyper"
+	openaioauth "github.com/charmbracelet/crush/internal/oauth/openai"
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
 )
@@ -23,17 +29,24 @@ var loginCmd = &cobra.Command{
 	Short:   "Login Crush to a platform",
 	Long: `Login Crush to a specified platform.
 The platform should be provided as an argument.
-Available platforms are: hyper, copilot.`,
+Available platforms are: hyper, copilot, openai-codex.`,
 	Example: `
 # Authenticate with Charm Hyper
 crush login
 
 # Authenticate with GitHub Copilot
 crush login copilot
+
+# Authenticate with OpenAI Codex (ChatGPT OAuth)
+crush login openai-codex
   `,
 	ValidArgs: []cobra.Completion{
 		"hyper",
 		"copilot",
+		"openai",
+		"openai-codex",
+		"codex",
+		"chatgpt",
 		"github",
 		"github-copilot",
 	},
@@ -54,6 +67,8 @@ crush login copilot
 			return loginHyper()
 		case "copilot", "github", "github-copilot":
 			return loginCopilot()
+		case "openai", "openai-codex", "codex", "chatgpt":
+			return loginOpenAICodex()
 		default:
 			return fmt.Errorf("unknown platform: %s", args[0])
 		}
@@ -197,6 +212,74 @@ func loginCopilotWithDeviceFlow(ctx context.Context) (*oauth.Token, error) {
 	}
 
 	return token, nil
+}
+
+func loginOpenAICodex() error {
+	return loginOAuth(
+		config.OpenAICodexProviderID,
+		"OpenAI Codex",
+		func(ctx context.Context) (*oauth.Token, error) {
+			flow, err := openaioauth.CreateAuthorizationFlow()
+			if err != nil {
+				return nil, err
+			}
+
+			server, err := openaioauth.StartLocalServer(flow.State)
+			if err != nil {
+				fmt.Println("Could not start local callback server; falling back to manual login.")
+				return loginOpenAICodexManual(ctx, flow)
+			}
+			defer server.Close()
+
+			fmt.Println("Opening browser for OpenAI Codex authentication...")
+			if err := browser.OpenURL(flow.URL); err != nil {
+				fmt.Println("Could not open the browser. Use this URL to continue:")
+				fmt.Println(flow.URL)
+			}
+
+			code, err := waitForOpenAICodexCode(ctx, server)
+			if err != nil {
+				fmt.Println("Timed out waiting for the OAuth callback; falling back to manual login.")
+				return loginOpenAICodexManual(ctx, flow)
+			}
+			return openaioauth.ExchangeAuthorizationCode(ctx, code, flow.Verifier)
+		},
+	)
+}
+
+func waitForOpenAICodexCode(ctx context.Context, server *openaioauth.LocalServer) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+	return server.WaitForCode(ctx)
+}
+
+func loginOpenAICodexManual(ctx context.Context, flow openaioauth.AuthFlow) (*oauth.Token, error) {
+	fmt.Println("Open the following URL in your browser and complete the login:")
+	fmt.Println()
+	fmt.Println(flow.URL)
+	fmt.Println()
+	fmt.Println("Paste the full redirect URL (or just the code) and press enter:")
+	codeInput, err := readLine()
+	if err != nil {
+		return nil, err
+	}
+	code, state := openaioauth.ParseAuthorizationInput(codeInput)
+	if code == "" {
+		return nil, fmt.Errorf("authorization code not provided")
+	}
+	if state != "" && state != flow.State {
+		return nil, fmt.Errorf("authorization state does not match, please retry")
+	}
+	return openaioauth.ExchangeAuthorizationCode(ctx, code, flow.Verifier)
+}
+
+func readLine() (string, error) {
+	reader := bufio.NewReader(os.Stdin)
+	value, err := reader.ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", fmt.Errorf("failed to read input: %w", err)
+	}
+	return strings.TrimSpace(value), nil
 }
 
 func getLoginContext() context.Context {

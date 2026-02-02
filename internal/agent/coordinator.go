@@ -30,6 +30,7 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/plugin"
 	"golang.org/x/sync/errgroup"
 
 	"charm.land/fantasy/providers/anthropic"
@@ -58,6 +59,7 @@ type Coordinator interface {
 	Summarize(context.Context, string) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
+	PluginApp() *plugin.App
 }
 
 type coordinator struct {
@@ -71,6 +73,11 @@ type coordinator struct {
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
+
+	pluginApp              *plugin.App
+	hooks                  []plugin.Hook
+	sessionInfoAdapter     *SessionInfoAdapter
+	promptSubmitterAdapter *PromptSubmitterAdapter
 
 	readyWg errgroup.Group
 }
@@ -96,6 +103,11 @@ func NewCoordinator(
 		agents:      make(map[string]SessionAgent),
 	}
 
+	// Initialize plugin hooks.
+	if err := c.initPluginHooks(ctx); err != nil {
+		return nil, fmt.Errorf("failed to initialize plugin hooks: %w", err)
+	}
+
 	agentCfg, ok := cfg.Agents[config.AgentCoder]
 	if !ok {
 		return nil, errors.New("coder agent not configured")
@@ -113,6 +125,13 @@ func NewCoordinator(
 	}
 	c.currentAgent = agent
 	c.agents[config.AgentCoder] = agent
+
+	// Set the coordinator reference on the prompt submitter adapter.
+	// This must be done after the coordinator is fully initialized.
+	if c.promptSubmitterAdapter != nil {
+		c.promptSubmitterAdapter.SetCoordinator(c)
+	}
+
 	return c, nil
 }
 
@@ -150,6 +169,17 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	}
 
 	mergedOptions, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(model, providerCfg)
+
+	// Update session info adapter for plugins.
+	if c.sessionInfoAdapter != nil {
+		c.sessionInfoAdapter.SetSessionID(sessionID)
+		c.sessionInfoAdapter.SetModel(model.CatwalkCfg.ID, model.ModelCfg.Provider)
+	}
+
+	// Update prompt submitter adapter with current session.
+	if c.promptSubmitterAdapter != nil {
+		c.promptSubmitterAdapter.SetSessionID(sessionID)
+	}
 
 	if providerCfg.OAuthToken != nil && providerCfg.OAuthToken.IsExpired() {
 		slog.Debug("Token needs to be refreshed", "provider", providerCfg.ID)
@@ -437,6 +467,24 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 
 	if c.lspClients.Len() > 0 {
 		allTools = append(allTools, tools.NewDiagnosticsTool(c.lspClients), tools.NewReferencesTool(c.lspClients), tools.NewLSPRestartTool(c.lspClients))
+	}
+
+	// Add plugin tools.
+	for _, name := range plugin.RegisteredTools() {
+		if c.pluginApp.IsPluginDisabled(name) {
+			slog.Debug("skipping disabled plugin", "name", name)
+			continue
+		}
+		factory, ok := plugin.GetToolFactory(name)
+		if !ok {
+			continue
+		}
+		tool, err := factory(ctx, c.pluginApp)
+		if err != nil {
+			slog.Error("failed to create plugin tool", "name", name, "error", err)
+			continue
+		}
+		allTools = append(allTools, tool)
 	}
 
 	var filteredTools []fantasy.AgentTool
@@ -914,5 +962,70 @@ func (c *coordinator) refreshApiKeyTemplate(ctx context.Context, providerCfg con
 	if err := c.UpdateModels(ctx); err != nil {
 		return err
 	}
+	return nil
+}
+
+// PluginApp returns the plugin app for accessing plugin services.
+func (c *coordinator) PluginApp() *plugin.App {
+	return c.pluginApp
+}
+
+// initPluginHooks initializes plugin hooks and starts them in background goroutines.
+func (c *coordinator) initPluginHooks(ctx context.Context) error {
+	var disabledPlugins []string
+	var pluginConfig map[string]map[string]any
+	if c.cfg.Options != nil {
+		disabledPlugins = c.cfg.Options.DisabledPlugins
+		pluginConfig = c.cfg.Options.Plugins
+	}
+
+	// Create message subscriber adapter for hooks.
+	messageAdapter := NewMessageSubscriberAdapter(c.messages)
+
+	// Create session info adapter for hooks.
+	c.sessionInfoAdapter = NewSessionInfoAdapter(c.sessions)
+
+	// Create prompt submitter adapter for hooks.
+	// The coordinator reference will be set after NewCoordinator returns.
+	c.promptSubmitterAdapter = NewPromptSubmitterAdapter()
+
+	// Create shared plugin app for both tools and hooks.
+	c.pluginApp = plugin.NewApp(
+		plugin.WithWorkingDir(c.cfg.WorkingDir()),
+		plugin.WithPermissions(c.permissions),
+		plugin.WithPluginConfig(pluginConfig),
+		plugin.WithDisabledPlugins(disabledPlugins),
+		plugin.WithMessageSubscriber(messageAdapter),
+		plugin.WithSessionInfoProvider(c.sessionInfoAdapter),
+		plugin.WithPromptSubmitter(c.promptSubmitterAdapter),
+	)
+
+	// Initialize registered hooks.
+	for _, name := range plugin.RegisteredHooks() {
+		if c.pluginApp.IsPluginDisabled(name) {
+			slog.Debug("skipping disabled hook", "name", name)
+			continue
+		}
+		factory, ok := plugin.GetHookFactory(name)
+		if !ok {
+			continue
+		}
+		hook, err := factory(ctx, c.pluginApp)
+		if err != nil {
+			slog.Error("failed to create plugin hook", "name", name, "error", err)
+			continue
+		}
+		c.hooks = append(c.hooks, hook)
+
+		// Start hook in background.
+		go func(h plugin.Hook) {
+			if err := h.Start(ctx); err != nil {
+				slog.Error("hook error", "name", h.Name(), "error", err)
+			}
+		}(hook)
+
+		slog.Debug("started plugin hook", "name", name)
+	}
+
 	return nil
 }

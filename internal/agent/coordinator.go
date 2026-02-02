@@ -78,6 +78,7 @@ type coordinator struct {
 	hooks                  []plugin.Hook
 	sessionInfoAdapter     *SessionInfoAdapter
 	promptSubmitterAdapter *PromptSubmitterAdapter
+	subAgentRunnerAdapter  *SubAgentRunnerAdapter
 
 	readyWg errgroup.Group
 }
@@ -130,6 +131,12 @@ func NewCoordinator(
 	// This must be done after the coordinator is fully initialized.
 	if c.promptSubmitterAdapter != nil {
 		c.promptSubmitterAdapter.SetCoordinator(c)
+	}
+
+	// Set the coordinator reference on the sub-agent runner adapter.
+	// This must be done after the coordinator is fully initialized.
+	if c.subAgentRunnerAdapter != nil {
+		c.subAgentRunnerAdapter.SetCoordinator(c)
 	}
 
 	return c, nil
@@ -989,6 +996,10 @@ func (c *coordinator) initPluginHooks(ctx context.Context) error {
 	// The coordinator reference will be set after NewCoordinator returns.
 	c.promptSubmitterAdapter = NewPromptSubmitterAdapter()
 
+	// Create sub-agent runner adapter for plugins.
+	// The coordinator reference will be set after NewCoordinator returns.
+	c.subAgentRunnerAdapter = NewSubAgentRunnerAdapter()
+
 	// Create shared plugin app for both tools and hooks.
 	c.pluginApp = plugin.NewApp(
 		plugin.WithWorkingDir(c.cfg.WorkingDir()),
@@ -998,6 +1009,7 @@ func (c *coordinator) initPluginHooks(ctx context.Context) error {
 		plugin.WithMessageSubscriber(messageAdapter),
 		plugin.WithSessionInfoProvider(c.sessionInfoAdapter),
 		plugin.WithPromptSubmitter(c.promptSubmitterAdapter),
+		plugin.WithSubAgentRunner(c.subAgentRunnerAdapter),
 	)
 
 	// Initialize registered hooks.

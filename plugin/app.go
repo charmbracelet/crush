@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -8,6 +9,30 @@ import (
 
 	"github.com/charmbracelet/crush/internal/permission"
 )
+
+// SubAgentOptions configures a sub-agent invocation.
+type SubAgentOptions struct {
+	// Name is an identifier for the sub-agent (for logging/tracing).
+	Name string
+	// SystemPrompt is the custom system prompt for this sub-agent.
+	SystemPrompt string
+	// Prompt is the task/query to execute.
+	Prompt string
+	// AllowedTools lists tools the sub-agent can use (nil = inherit all).
+	AllowedTools []string
+	// DisallowedTools lists tools the sub-agent cannot use.
+	DisallowedTools []string
+	// Model specifies which model to use ("inherit", "sonnet", "opus", "haiku").
+	Model string
+}
+
+// SubAgentRunner executes sub-agents within the current session context.
+type SubAgentRunner interface {
+	// RunSubAgent executes a sub-agent with the given options.
+	// The context should contain session and message IDs from the parent call.
+	// Returns the sub-agent's text response or an error.
+	RunSubAgent(ctx context.Context, opts SubAgentOptions) (string, error)
+}
 
 // App provides access to application services for plugins.
 // It is passed to tool factories during initialization.
@@ -19,6 +44,7 @@ type App struct {
 	messageSubscriber   MessageSubscriber
 	sessionInfoProvider SessionInfoProvider
 	promptSubmitter     PromptSubmitter
+	subAgentRunner      SubAgentRunner
 	logger              *slog.Logger
 	cleanupFuncs        []func() error
 }
@@ -98,6 +124,13 @@ func WithSessionInfoProvider(sip SessionInfoProvider) AppOption {
 func WithPromptSubmitter(ps PromptSubmitter) AppOption {
 	return func(a *App) {
 		a.promptSubmitter = ps
+	}
+}
+
+// WithSubAgentRunner sets the sub-agent runner for plugins to execute sub-agents.
+func WithSubAgentRunner(sar SubAgentRunner) AppOption {
+	return func(a *App) {
+		a.subAgentRunner = sar
 	}
 }
 
@@ -199,6 +232,12 @@ func (a *App) SessionInfo() SessionInfoProvider {
 // Returns nil if no prompt submitter is configured.
 func (a *App) PromptSubmitter() PromptSubmitter {
 	return a.promptSubmitter
+}
+
+// SubAgentRunner returns the sub-agent runner for executing sub-agents.
+// Returns nil if no sub-agent runner is configured.
+func (a *App) SubAgentRunner() SubAgentRunner {
+	return a.subAgentRunner
 }
 
 // Logger returns a structured logger.

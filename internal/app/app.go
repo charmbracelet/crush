@@ -403,16 +403,18 @@ func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
 	}
 }
 
+const subscriberSendTimeout = 2 * time.Second
+
 func (app *App) setupEvents() {
 	ctx, cancel := context.WithCancel(app.globalCtx)
 	app.eventsCtx = ctx
-	setupSubscriber(ctx, app.serviceEventsWG, "sessions", app.Sessions.Subscribe, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "messages", app.Messages.Subscribe, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "permissions", app.Permissions.Subscribe, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "permissions-notifications", app.Permissions.SubscribeNotifications, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "history", app.History.Subscribe, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "mcp", mcp.SubscribeEvents, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "lsp", SubscribeLSPEvents, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "sessions", app.Sessions.Subscribe, app.events, subscriberSendTimeout)
+	setupSubscriber(ctx, app.serviceEventsWG, "messages", app.Messages.Subscribe, app.events, subscriberSendTimeout)
+	setupSubscriber(ctx, app.serviceEventsWG, "permissions", app.Permissions.Subscribe, app.events, subscriberSendTimeout)
+	setupSubscriber(ctx, app.serviceEventsWG, "permissions-notifications", app.Permissions.SubscribeNotifications, app.events, subscriberSendTimeout)
+	setupSubscriber(ctx, app.serviceEventsWG, "history", app.History.Subscribe, app.events, subscriberSendTimeout)
+	setupSubscriber(ctx, app.serviceEventsWG, "mcp", mcp.SubscribeEvents, app.events, subscriberSendTimeout)
+	setupSubscriber(ctx, app.serviceEventsWG, "lsp", SubscribeLSPEvents, app.events, subscriberSendTimeout)
 	cleanupFunc := func() error {
 		cancel()
 		app.serviceEventsWG.Wait()
@@ -427,9 +429,14 @@ func setupSubscriber[T any](
 	name string,
 	subscriber func(context.Context) <-chan pubsub.Event[T],
 	outputCh chan<- tea.Msg,
+	sendTimeout time.Duration,
 ) {
 	wg.Go(func() {
 		subCh := subscriber(ctx)
+		sendTimer := time.NewTimer(0)
+		<-sendTimer.C
+		defer sendTimer.Stop()
+
 		for {
 			select {
 			case event, ok := <-subCh:
@@ -438,9 +445,17 @@ func setupSubscriber[T any](
 					return
 				}
 				var msg tea.Msg = event
+				if !sendTimer.Stop() {
+					select {
+					case <-sendTimer.C:
+					default:
+					}
+				}
+				sendTimer.Reset(sendTimeout)
+
 				select {
 				case outputCh <- msg:
-				case <-time.After(2 * time.Second):
+				case <-sendTimer.C:
 					slog.Debug("Message dropped due to slow consumer", "name", name)
 				case <-ctx.Done():
 					slog.Debug("Subscription cancelled", "name", name)

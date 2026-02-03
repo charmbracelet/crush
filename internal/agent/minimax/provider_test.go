@@ -50,10 +50,14 @@ func TestBaseURL(t *testing.T) {
 		require.Equal(t, "https://api.minimax.io/anthropic", BaseURL())
 	})
 
-	t.Run("custom base URL from env", func(t *testing.T) {
-		customURL := "https://custom.minimax.io"
-		t.Setenv("MINIMAX_URL", customURL)
-		// Note: BaseURL is cached, so we can't test this reliably
-		// This test documents the expected behavior
+	// Note: BaseURL uses sync.OnceValue which caches the result on first call.
+	// To test custom URLs, integration tests should be used where the process
+	// is started with the environment variable already set.
+	t.Run("custom base URL behavior", func(t *testing.T) {
+		// This test documents the expected behavior when MINIMAX_URL is set
+		// before the application starts. The actual URL used will be determined
+		// at the time BaseURL is first called, so environment changes after
+		// that point will not affect the cached value.
+		t.Skip("BaseURL uses sync.OnceValue and is cached - tested via integration")
 	})
 }

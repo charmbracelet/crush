@@ -387,6 +387,7 @@ type Styles struct {
 			UpdatingMessage                lipgloss.Style
 			UpdatingTitleGradientFromColor color.Color
 			UpdatingTitleGradientToColor   color.Color
+			UpdatingPlaceholder            lipgloss.Style
 		}
 	}
 
@@ -1305,6 +1306,7 @@ func DefaultStyles() Styles {
 	s.Dialog.Sessions.UpdatingTitleGradientToColor = charmtone.Bok
 	s.Dialog.Sessions.UpdatingItemBlurred = s.Dialog.NormalItem.Foreground(fgSubtle)
 	s.Dialog.Sessions.UpdatingItemFocused = s.Dialog.SelectedItem.UnsetBackground().UnsetForeground()
+	s.Dialog.Sessions.UpdatingPlaceholder = base.Foreground(charmtone.Squid)
 
 	s.Status.Help = lipgloss.NewStyle().Padding(0, 1)
 	s.Status.SuccessIndicator = base.Foreground(bgSubtle).Background(green).Padding(0, 1).Bold(true).SetString("OKAY!")

@@ -1115,7 +1115,7 @@ func DefaultStyles() Styles {
 	// Content rendering - prepared styles that accept width parameter
 	s.Tool.ContentLine = s.Muted.Background(bgBaseLighter)
 	s.Tool.ContentTruncation = s.Muted.Background(bgBaseLighter)
-	s.Tool.ContentCodeLine = s.Base.Background(bgBase)
+	s.Tool.ContentCodeLine = s.Base.Background(bgBase).PaddingLeft(2)
 	s.Tool.ContentCodeTruncation = s.Muted.Background(bgBase).PaddingLeft(2)
 	s.Tool.ContentCodeBg = bgBase
 	s.Tool.Body = base.PaddingLeft(2)

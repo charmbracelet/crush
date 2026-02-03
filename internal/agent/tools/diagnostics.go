@@ -32,16 +32,26 @@ func NewDiagnosticsTool(lspClients *csync.Map[string, *lsp.Client]) fantasy.Agen
 			if lspClients.Len() == 0 {
 				return fantasy.NewTextErrorResponse("no LSP clients available"), nil
 			}
-			notifyLSPs(ctx, lspClients, params.FilePath)
+			notifyLSPs(ctx, lspClients, nil, params.FilePath)
 			output := getDiagnostics(params.FilePath, lspClients)
 			return fantasy.NewTextResponse(output), nil
 		})
 }
 
-func notifyLSPs(ctx context.Context, lsps *csync.Map[string, *lsp.Client], filepath string) {
+func notifyLSPs(
+	ctx context.Context,
+	lsps *csync.Map[string, *lsp.Client],
+	starter *lsp.Starter,
+	filepath string,
+) {
 	if filepath == "" {
 		return
 	}
+
+	if starter != nil {
+		starter.StartForFile(ctx, filepath)
+	}
+
 	for client := range lsps.Seq() {
 		if !client.HandlesFile(filepath) {
 			continue

@@ -49,6 +49,7 @@ const (
 
 func NewViewTool(
 	lspClients *csync.Map[string, *lsp.Client],
+	lspStarter *lsp.Starter,
 	permissions permission.Service,
 	filetracker filetracker.Service,
 	workingDir string,
@@ -184,7 +185,7 @@ func NewViewTool(
 				return fantasy.ToolResponse{}, fmt.Errorf("error reading file: %w", err)
 			}
 
-			notifyLSPs(ctx, lspClients, filePath)
+			notifyLSPs(ctx, lspClients, lspStarter, filePath)
 			output := "<file>\n"
 			// Format the output with line numbers
 			output += addLineNumbers(content, params.Offset+1)

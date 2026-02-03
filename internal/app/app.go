@@ -59,6 +59,7 @@ type App struct {
 	AgentCoordinator agent.Coordinator
 
 	LSPClients *csync.Map[string, *lsp.Client]
+	LSPStarter *lsp.Starter
 
 	config *config.Config
 
@@ -84,13 +85,16 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 		allowedTools = cfg.Permissions.AllowedTools
 	}
 
+	lspClients := csync.NewMap[string, *lsp.Client]()
+
 	app := &App{
 		Sessions:    sessions,
 		Messages:    messages,
 		History:     files,
 		Permissions: permission.NewPermissionService(cfg.WorkingDir(), skipPermissionsRequests, allowedTools),
 		FileTracker: filetracker.NewService(q),
-		LSPClients:  csync.NewMap[string, *lsp.Client](),
+		LSPClients:  lspClients,
+		LSPStarter:  lsp.NewStarter(lspClients, cfg),
 
 		globalCtx: ctx,
 
@@ -102,9 +106,6 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	}
 
 	app.setupEvents()
-
-	// Initialize LSP clients in the background.
-	go app.initLSPClients(ctx)
 
 	// Check for updates in the background.
 	go app.checkForUpdates(ctx)
@@ -122,6 +123,13 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	if err := app.InitCoderAgent(ctx); err != nil {
 		return nil, fmt.Errorf("failed to initialize coder agent: %w", err)
 	}
+
+	// Set up callback for LSP state updates.
+	app.LSPStarter.SetClientStartedCallback(func(name string, client *lsp.Client) {
+		client.SetDiagnosticsCallback(updateLSPDiagnostics)
+		updateLSPState(name, client.GetServerState(), nil, client, 0)
+	})
+
 	return app, nil
 }
 
@@ -469,6 +477,7 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.History,
 		app.FileTracker,
 		app.LSPClients,
+		app.LSPStarter,
 	)
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)

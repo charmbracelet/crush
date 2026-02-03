@@ -2614,8 +2614,10 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 		m.setState(uiChat, m.focus)
 	}
 
+	ctx := context.Background()
 	for _, path := range m.sessionFileReads {
-		m.com.App.FileTracker.RecordRead(context.Background(), m.session.ID, path)
+		m.com.App.FileTracker.RecordRead(ctx, m.session.ID, path)
+		m.com.App.LSPStarter.StartForFile(ctx, path)
 	}
 
 	// Capture session ID to avoid race with main goroutine updating m.session.

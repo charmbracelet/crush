@@ -68,6 +68,7 @@ type coordinator struct {
 	history     history.Service
 	filetracker filetracker.Service
 	lspClients  *csync.Map[string, *lsp.Client]
+	lspStarter  *lsp.Starter
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
@@ -84,6 +85,7 @@ func NewCoordinator(
 	history history.Service,
 	filetracker filetracker.Service,
 	lspClients *csync.Map[string, *lsp.Client],
+	lspStarter *lsp.Starter,
 ) (Coordinator, error) {
 	c := &coordinator{
 		cfg:         cfg,
@@ -93,6 +95,7 @@ func NewCoordinator(
 		history:     history,
 		filetracker: filetracker,
 		lspClients:  lspClients,
+		lspStarter:  lspStarter,
 		agents:      make(map[string]SessionAgent),
 	}
 
@@ -423,19 +426,20 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		tools.NewJobOutputTool(),
 		tools.NewJobKillTool(),
 		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),
-		tools.NewEditTool(c.lspClients, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
-		tools.NewMultiEditTool(c.lspClients, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
+		tools.NewEditTool(c.lspClients, c.lspStarter, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
+		tools.NewMultiEditTool(c.lspClients, c.lspStarter, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 		tools.NewFetchTool(c.permissions, c.cfg.WorkingDir(), nil),
 		tools.NewGlobTool(c.cfg.WorkingDir()),
 		tools.NewGrepTool(c.cfg.WorkingDir()),
 		tools.NewLsTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Tools.Ls),
 		tools.NewSourcegraphTool(nil),
 		tools.NewTodosTool(c.sessions),
-		tools.NewViewTool(c.lspClients, c.permissions, c.filetracker, c.cfg.WorkingDir(), c.cfg.Options.SkillsPaths...),
-		tools.NewWriteTool(c.lspClients, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
+		tools.NewViewTool(c.lspClients, c.lspStarter, c.permissions, c.filetracker, c.cfg.WorkingDir(), c.cfg.Options.SkillsPaths...),
+		tools.NewWriteTool(c.lspClients, c.lspStarter, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 	)
 
-	if c.lspClients.Len() > 0 {
+	// Add LSP tools if user has configured LSPs or auto_lsp is enabled (nil or true).
+	if len(c.cfg.LSP) > 0 || c.cfg.Options.AutoLSP == nil || *c.cfg.Options.AutoLSP {
 		allTools = append(allTools, tools.NewDiagnosticsTool(c.lspClients), tools.NewReferencesTool(c.lspClients), tools.NewLSPRestartTool(c.lspClients))
 	}
 

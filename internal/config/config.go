@@ -524,6 +524,11 @@ func (c Config) merge(t Config) Config {
 	}
 	c.Tools = c.Tools.merge(t.Tools)
 
+	// RecentModels are not merged - use whichever is not empty
+	if len(t.RecentModels) > 0 {
+		c.RecentModels = t.RecentModels
+	}
+
 	return c
 }
 

@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"log/slog"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -19,12 +20,11 @@ import (
 
 // Starter handles lazy initialization of LSP clients based on file types.
 type Starter struct {
-	clients             *csync.Map[string, *Client]
-	cfg                 *config.Config
-	manager             *powernapconfig.Manager
-	onClientStarted     func(name string, client *Client)
-	onClientStartedOnce sync.Once
-	mu                  sync.Mutex
+	clients  *csync.Map[string, *Client]
+	cfg      *config.Config
+	manager  *powernapconfig.Manager
+	callback func(name string, client *Client)
+	mu       sync.Mutex
 }
 
 // NewStarter creates a new LSP starter service.
@@ -64,25 +64,22 @@ func NewStarter(
 	}
 }
 
-// SetClientStartedCallback sets a callback that is invoked when a new LSP
+// SetCallback sets a callback that is invoked when a new LSP
 // client is successfully started. This allows the coordinator to add LSP tools.
-func (s *Starter) SetClientStartedCallback(cb func(name string, client *Client)) {
-	s.onClientStartedOnce.Do(func() {
-		s.onClientStarted = cb
-	})
+func (s *Starter) SetCallback(cb func(name string, client *Client)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.callback = cb
 }
 
-// StartForFile starts an LSP server that can handle the given file path.
+// Start starts an LSP server that can handle the given file path.
 // If an appropriate LSP is already running, this is a no-op.
-func (s *Starter) StartForFile(ctx context.Context, filePath string) {
+func (s *Starter) Start(ctx context.Context, filePath string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	language := lsp.DetectLanguage(filePath)
-	ext := filepath.Ext(filePath)
-
 	for name, server := range s.manager.GetServers() {
-		if !handles(server, ext, language) {
+		if !handles(server, filePath, s.cfg.WorkingDir()) {
 			continue
 		}
 		if _, exists := s.clients.Get(name); exists {
@@ -164,7 +161,7 @@ func (s *Starter) startServer(ctx context.Context, name string, server *powernap
 	}
 
 	s.clients.Set(name, client)
-	s.onClientStarted(name, client)
+	s.callback(name, client)
 	slog.Info("LSP client started", "name", name)
 }
 
@@ -201,11 +198,25 @@ func resolveServerName(manager *powernapconfig.Manager, name string) string {
 	return name
 }
 
-func handles(server *powernapconfig.ServerConfig, ext string, language protocol.LanguageKind) bool {
+func handlesFiletype(server *powernapconfig.ServerConfig, ext string, language protocol.LanguageKind) bool {
 	for _, ft := range server.FileTypes {
 		if protocol.LanguageKind(ft) == language ||
 			ft == strings.TrimPrefix(ext, ".") ||
 			"."+ft == ext {
+			return true
+		}
+	}
+	return false
+}
+
+func handles(server *powernapconfig.ServerConfig, filePath, workDir string) bool {
+	language := lsp.DetectLanguage(filePath)
+	ext := filepath.Ext(filePath)
+	if !handlesFiletype(server, ext, language) {
+		return false
+	}
+	for _, marker := range server.RootMarkers {
+		if _, err := os.Stat(filepath.Join(workDir, marker)); err == nil {
 			return true
 		}
 	}

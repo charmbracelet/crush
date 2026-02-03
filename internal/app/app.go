@@ -125,7 +125,7 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	}
 
 	// Set up callback for LSP state updates.
-	app.LSPStarter.SetClientStartedCallback(func(name string, client *lsp.Client) {
+	app.LSPStarter.SetCallback(func(name string, client *lsp.Client) {
 		client.SetDiagnosticsCallback(updateLSPDiagnostics)
 		updateLSPState(name, client.GetServerState(), nil, client, 0)
 	})

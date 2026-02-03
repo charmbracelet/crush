@@ -49,7 +49,7 @@ func notifyLSPs(
 	}
 
 	if starter != nil {
-		starter.StartForFile(ctx, filepath)
+		starter.Start(ctx, filepath)
 	}
 
 	for client := range lsps.Seq() {

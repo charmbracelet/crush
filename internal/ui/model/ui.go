@@ -2617,7 +2617,7 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 	ctx := context.Background()
 	for _, path := range m.sessionFileReads {
 		m.com.App.FileTracker.RecordRead(ctx, m.session.ID, path)
-		m.com.App.LSPStarter.StartForFile(ctx, path)
+		m.com.App.LSPStarter.Start(ctx, path)
 	}
 
 	// Capture session ID to avoid race with main goroutine updating m.session.

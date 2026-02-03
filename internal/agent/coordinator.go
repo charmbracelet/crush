@@ -1,13 +1,10 @@
 package agent
 
 import (
-	"bytes"
 	"cmp"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"maps"
 	"net/http"
@@ -41,7 +38,6 @@ import (
 	"charm.land/fantasy/providers/openrouter"
 	"charm.land/fantasy/providers/vercel"
 	openaisdk "github.com/openai/openai-go/v2/option"
-	"github.com/qjebbs/go-jsons"
 )
 
 type Coordinator interface {
@@ -199,49 +195,16 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.ProviderOptions {
 	options := fantasy.ProviderOptions{}
 
-	cfgOpts := []byte("{}")
-	providerCfgOpts := []byte("{}")
-	catwalkOpts := []byte("{}")
-
-	if model.ModelCfg.ProviderOptions != nil {
-		data, err := json.Marshal(model.ModelCfg.ProviderOptions)
-		if err == nil {
-			cfgOpts = data
-		}
-	}
-
-	if providerCfg.ProviderOptions != nil {
-		data, err := json.Marshal(providerCfg.ProviderOptions)
-		if err == nil {
-			providerCfgOpts = data
-		}
-	}
-
-	if model.CatwalkCfg.Options.ProviderOptions != nil {
-		data, err := json.Marshal(model.CatwalkCfg.Options.ProviderOptions)
-		if err == nil {
-			catwalkOpts = data
-		}
-	}
-
-	readers := []io.Reader{
-		bytes.NewReader(catwalkOpts),
-		bytes.NewReader(providerCfgOpts),
-		bytes.NewReader(cfgOpts),
-	}
-
-	got, err := jsons.Merge(readers)
-	if err != nil {
-		slog.Error("Could not merge call config", "err", err)
-		return options
-	}
-
+	// Merge provider options: catwalk (base) -> provider config -> model config (highest priority)
 	mergedOptions := make(map[string]any)
-
-	err = json.Unmarshal([]byte(got), &mergedOptions)
-	if err != nil {
-		slog.Error("Could not create config for call", "err", err)
-		return options
+	if model.CatwalkCfg.Options.ProviderOptions != nil {
+		maps.Copy(mergedOptions, model.CatwalkCfg.Options.ProviderOptions)
+	}
+	if providerCfg.ProviderOptions != nil {
+		maps.Copy(mergedOptions, providerCfg.ProviderOptions)
+	}
+	if model.ModelCfg.ProviderOptions != nil {
+		maps.Copy(mergedOptions, model.ModelCfg.ProviderOptions)
 	}
 
 	providerType := providerCfg.Type

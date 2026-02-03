@@ -24,7 +24,6 @@ import (
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/log"
 	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
-	"github.com/qjebbs/go-jsons"
 )
 
 const defaultCatwalkURL = "https://catwalk.charm.sh"
@@ -675,15 +674,15 @@ func loadFromBytes(configs [][]byte) (*Config, error) {
 		return &Config{}, nil
 	}
 
-	data, err := jsons.Merge(configs)
-	if err != nil {
-		return nil, err
+	result := newConfig()
+	for _, bts := range configs {
+		config := newConfig()
+		if err := json.Unmarshal(bts, &config); err != nil {
+			return nil, err
+		}
+		*result = result.merge(*config)
 	}
-	var config Config
-	if err := json.Unmarshal(data, &config); err != nil {
-		return nil, err
-	}
-	return &config, nil
+	return result, nil
 }
 
 func hasVertexCredentials(env env.Env) bool {
@@ -799,3 +798,18 @@ func GlobalSkillsDirs() []string {
 }
 
 func isAppleTerminal() bool { return os.Getenv("TERM_PROGRAM") == "Apple_Terminal" }
+
+func newConfig() *Config {
+	return &Config{
+		Agents:       map[string]Agent{},
+		MCP:          map[string]MCPConfig{},
+		LSP:          map[string]LSPConfig{},
+		Models:       map[SelectedModelType]SelectedModel{},
+		RecentModels: map[SelectedModelType][]SelectedModel{},
+		Options: &Options{
+			TUI: &TUIOptions{},
+		},
+		Permissions: &Permissions{},
+		Providers:   csync.NewMap[string, ProviderConfig](),
+	}
+}

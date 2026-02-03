@@ -163,6 +163,26 @@ func (pc *ProviderConfig) SetupGitHubCopilot() {
 	maps.Copy(pc.ExtraHeaders, copilot.Headers())
 }
 
+func (pc ProviderConfig) merge(t ProviderConfig) ProviderConfig {
+	pc.ID = cmp.Or(t.ID, pc.ID)
+	pc.Name = cmp.Or(t.Name, pc.Name)
+	pc.BaseURL = cmp.Or(t.BaseURL, pc.BaseURL)
+	pc.Type = cmp.Or(t.Type, pc.Type)
+	pc.APIKey = cmp.Or(t.APIKey, pc.APIKey)
+	pc.APIKeyTemplate = cmp.Or(t.APIKeyTemplate, pc.APIKeyTemplate)
+	pc.OAuthToken = cmp.Or(t.OAuthToken, pc.OAuthToken)
+	pc.Disable = pc.Disable || t.Disable
+	pc.SystemPromptPrefix = cmp.Or(t.SystemPromptPrefix, pc.SystemPromptPrefix)
+	pc.ExtraHeaders = mergeMaps(pc.ExtraHeaders, t.ExtraHeaders)
+	pc.ExtraBody = mergeMaps(pc.ExtraBody, t.ExtraBody)
+	pc.ProviderOptions = mergeMaps(pc.ProviderOptions, t.ProviderOptions)
+	pc.ExtraParams = mergeMaps(pc.ExtraParams, t.ExtraParams)
+	if len(t.Models) > 0 {
+		pc.Models = t.Models
+	}
+	return pc
+}
+
 type MCPType string
 
 const (
@@ -185,6 +205,21 @@ type MCPConfig struct {
 	Headers map[string]string `json:"headers,omitempty" jsonschema:"description=HTTP headers for HTTP/SSE MCP servers"`
 }
 
+func (m MCPConfig) merge(o MCPConfig) MCPConfig {
+	m.Env = mergeMaps(m.Env, o.Env)
+	m.Headers = mergeMaps(m.Headers, o.Headers)
+	m.Disabled = m.Disabled || o.Disabled
+	m.DisabledTools = append(m.DisabledTools, o.DisabledTools...)
+	m.Timeout = max(m.Timeout, o.Timeout)
+	m.Command = cmp.Or(o.Command, m.Command)
+	if len(o.Args) > 0 {
+		m.Args = o.Args
+	}
+	m.Type = cmp.Or(o.Type, m.Type)
+	m.URL = cmp.Or(o.URL, m.URL)
+	return m
+}
+
 type LSPConfig struct {
 	Disabled    bool              `json:"disabled,omitempty" jsonschema:"description=Whether this LSP server is disabled,default=false"`
 	Command     string            `json:"command,omitempty" jsonschema:"description=Command to execute for the LSP server,example=gopls"`
@@ -197,6 +232,21 @@ type LSPConfig struct {
 	Timeout     int               `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for LSP server initialization,default=30,example=60,example=120"`
 }
 
+func (l LSPConfig) merge(o LSPConfig) LSPConfig {
+	l.Env = mergeMaps(l.Env, o.Env)
+	l.InitOptions = mergeMaps(l.InitOptions, o.InitOptions)
+	l.Options = mergeMaps(l.Options, o.Options)
+	l.RootMarkers = sortedCompact(append(l.RootMarkers, o.RootMarkers...))
+	l.FileTypes = sortedCompact(append(l.FileTypes, o.FileTypes...))
+	l.Disabled = l.Disabled || o.Disabled
+	l.Timeout = max(l.Timeout, o.Timeout)
+	if len(o.Args) > 0 {
+		l.Args = o.Args
+	}
+	l.Command = cmp.Or(o.Command, l.Command)
+	return l
+}
+
 type TUIOptions struct {
 	CompactMode bool   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
 	DiffMode    string `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
@@ -205,6 +255,15 @@ type TUIOptions struct {
 
 	Completions Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
 	Transparent *bool       `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
+}
+
+func (o TUIOptions) merge(t TUIOptions) TUIOptions {
+	o.CompactMode = o.CompactMode || t.CompactMode
+	o.DiffMode = cmp.Or(t.DiffMode, o.DiffMode)
+	o.Completions.MaxDepth = cmp.Or(t.Completions.MaxDepth, o.Completions.MaxDepth)
+	o.Completions.MaxItems = cmp.Or(t.Completions.MaxItems, o.Completions.MaxItems)
+	o.Transparent = cmp.Or(t.Transparent, o.Transparent)
+	return o
 }
 
 // Completions defines options for the completions UI.
@@ -261,6 +320,32 @@ type Options struct {
 	InitializeAs              string       `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
 	AutoLSP                   *bool        `json:"auto_lsp,omitempty" jsonschema:"description=Automatically setup LSPs based on root markers,default=true"`
 	Progress                  *bool        `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
+}
+
+func (o Options) merge(t Options) Options {
+	o.ContextPaths = append(o.ContextPaths, t.ContextPaths...)
+	o.SkillsPaths = append(o.SkillsPaths, t.SkillsPaths...)
+	o.Debug = o.Debug || t.Debug
+	o.DebugLSP = o.DebugLSP || t.DebugLSP
+	o.DisableAutoSummarize = o.DisableAutoSummarize || t.DisableAutoSummarize
+	o.DisableProviderAutoUpdate = o.DisableProviderAutoUpdate || t.DisableProviderAutoUpdate
+	o.DisableDefaultProviders = o.DisableDefaultProviders || t.DisableDefaultProviders
+	o.DisableMetrics = o.DisableMetrics || t.DisableMetrics
+	o.DataDirectory = cmp.Or(t.DataDirectory, o.DataDirectory)
+	o.InitializeAs = cmp.Or(t.InitializeAs, o.InitializeAs)
+	o.DisabledTools = append(o.DisabledTools, t.DisabledTools...)
+	o.AutoLSP = cmp.Or(t.AutoLSP, o.AutoLSP)
+	o.Progress = cmp.Or(t.Progress, o.Progress)
+	*o.TUI = o.TUI.merge(*t.TUI)
+	if t.Attribution != nil {
+		if o.Attribution == nil {
+			o.Attribution = &Attribution{}
+		}
+		o.Attribution.TrailerStyle = cmp.Or(t.Attribution.TrailerStyle, o.Attribution.TrailerStyle)
+		o.Attribution.CoAuthoredBy = cmp.Or(t.Attribution.CoAuthoredBy, o.Attribution.CoAuthoredBy)
+		o.Attribution.GeneratedWith = o.Attribution.GeneratedWith || t.Attribution.GeneratedWith
+	}
+	return o
 }
 
 type MCPs map[string]MCPConfig
@@ -353,6 +438,12 @@ type Tools struct {
 	Ls ToolLs `json:"ls,omitempty"`
 }
 
+func (o Tools) merge(t Tools) Tools {
+	o.Ls.MaxDepth = cmp.Or(t.Ls.MaxDepth, o.Ls.MaxDepth)
+	o.Ls.MaxItems = cmp.Or(t.Ls.MaxItems, o.Ls.MaxItems)
+	return o
+}
+
 type ToolLs struct {
 	MaxDepth *int `json:"max_depth,omitempty" jsonschema:"description=Maximum depth for the ls tool,default=0,example=10"`
 	MaxItems *int `json:"max_items,omitempty" jsonschema:"description=Maximum number of items to return for the ls tool,default=1000,example=100"`
@@ -393,6 +484,47 @@ type Config struct {
 	resolver       VariableResolver
 	dataConfigDir  string             `json:"-"`
 	knownProviders []catwalk.Provider `json:"-"`
+}
+
+func (c Config) merge(t Config) Config {
+	for name, mcp := range t.MCP {
+		existing, ok := c.MCP[name]
+		if !ok {
+			c.MCP[name] = mcp
+			continue
+		}
+		c.MCP[name] = existing.merge(mcp)
+	}
+	for name, lsp := range t.LSP {
+		existing, ok := c.LSP[name]
+		if !ok {
+			c.LSP[name] = lsp
+			continue
+		}
+		c.LSP[name] = existing.merge(lsp)
+	}
+	// simple override
+	maps.Copy(c.Models, t.Models)
+	c.Schema = cmp.Or(c.Schema, t.Schema)
+	if t.Options != nil {
+		*c.Options = c.Options.merge(*t.Options)
+	}
+	if t.Permissions != nil {
+		c.Permissions.AllowedTools = append(c.Permissions.AllowedTools, t.Permissions.AllowedTools...)
+	}
+	if c.Providers != nil {
+		for key, value := range t.Providers.Seq2() {
+			existing, ok := c.Providers.Get(key)
+			if !ok {
+				c.Providers.Set(key, value)
+				continue
+			}
+			c.Providers.Set(key, existing.merge(value))
+		}
+	}
+	c.Tools = c.Tools.merge(t.Tools)
+
+	return c
 }
 
 func (c *Config) WorkingDir() string {
@@ -859,4 +991,17 @@ func ptrValOr[T any](t *T, el T) T {
 		return el
 	}
 	return *t
+}
+
+func mergeMaps[K comparable, V any](base, overlay map[K]V) map[K]V {
+	if base == nil {
+		base = make(map[K]V)
+	}
+	maps.Copy(base, overlay)
+	return base
+}
+
+func sortedCompact[S ~[]E, E cmp.Ordered](s S) S {
+	slices.Sort(s)
+	return slices.Compact(s)
 }

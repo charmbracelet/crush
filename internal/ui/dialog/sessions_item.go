@@ -88,8 +88,8 @@ func (s *SessionItem) Render(width int) string {
 		styles.ItemBlurred = s.t.Dialog.Sessions.DeletingItemBlurred
 		styles.ItemFocused = s.t.Dialog.Sessions.DeletingItemFocused
 	case sessionsModeUpdating:
-		styles.ItemBlurred = s.t.Dialog.Sessions.UpdatingItemBlurred
-		styles.ItemFocused = s.t.Dialog.Sessions.UpdatingItemFocused
+		styles.ItemBlurred = s.t.Dialog.Sessions.RenamingItemBlurred
+		styles.ItemFocused = s.t.Dialog.Sessions.RenamingingItemFocused
 		if s.focused {
 			inputWidth := width - styles.InfoTextFocused.GetHorizontalFrameSize()
 			s.updateTitleInput.SetWidth(inputWidth)
@@ -193,7 +193,7 @@ func sessionItems(t *styles.Styles, mode sessionsMode, sessions ...session.Sessi
 			item.updateTitleInput.SetVirtualCursor(false)
 			item.updateTitleInput.Prompt = ""
 			inputStyle := t.TextInput
-			inputStyle.Focused.Placeholder = t.Dialog.Sessions.UpdatingPlaceholder
+			inputStyle.Focused.Placeholder = t.Dialog.Sessions.RenamingPlaceholder
 			item.updateTitleInput.SetStyles(inputStyle)
 			item.updateTitleInput.Focus()
 		}

@@ -380,14 +380,14 @@ type Styles struct {
 			DeletingTitleGradientToColor   color.Color
 
 			// styles for when we are in update mode
-			UpdatingView                   lipgloss.Style
-			UpdatingItemFocused            lipgloss.Style
-			UpdatingItemBlurred            lipgloss.Style
-			UpdatingTitle                  lipgloss.Style
-			UpdatingMessage                lipgloss.Style
-			UpdatingTitleGradientFromColor color.Color
-			UpdatingTitleGradientToColor   color.Color
-			UpdatingPlaceholder            lipgloss.Style
+			RenamingView                   lipgloss.Style
+			RenamingingItemFocused         lipgloss.Style
+			RenamingItemBlurred            lipgloss.Style
+			RenamingingTitle               lipgloss.Style
+			RenamingingMessage             lipgloss.Style
+			RenamingTitleGradientFromColor color.Color
+			RenamingTitleGradientToColor   color.Color
+			RenamingPlaceholder            lipgloss.Style
 		}
 	}
 
@@ -1299,14 +1299,14 @@ func DefaultStyles() Styles {
 	s.Dialog.Sessions.DeletingItemBlurred = s.Dialog.NormalItem.Foreground(fgSubtle)
 	s.Dialog.Sessions.DeletingItemFocused = s.Dialog.SelectedItem.Background(red).Foreground(charmtone.Butter)
 
-	s.Dialog.Sessions.UpdatingTitle = s.Dialog.Title.Foreground(charmtone.Zest)
-	s.Dialog.Sessions.UpdatingView = s.Dialog.View.BorderForeground(charmtone.Zest)
-	s.Dialog.Sessions.UpdatingMessage = s.Base.Padding(1)
-	s.Dialog.Sessions.UpdatingTitleGradientFromColor = charmtone.Zest
-	s.Dialog.Sessions.UpdatingTitleGradientToColor = charmtone.Bok
-	s.Dialog.Sessions.UpdatingItemBlurred = s.Dialog.NormalItem.Foreground(fgSubtle)
-	s.Dialog.Sessions.UpdatingItemFocused = s.Dialog.SelectedItem.UnsetBackground().UnsetForeground()
-	s.Dialog.Sessions.UpdatingPlaceholder = base.Foreground(charmtone.Squid)
+	s.Dialog.Sessions.RenamingingTitle = s.Dialog.Title.Foreground(charmtone.Zest)
+	s.Dialog.Sessions.RenamingView = s.Dialog.View.BorderForeground(charmtone.Zest)
+	s.Dialog.Sessions.RenamingingMessage = s.Base.Padding(1)
+	s.Dialog.Sessions.RenamingTitleGradientFromColor = charmtone.Zest
+	s.Dialog.Sessions.RenamingTitleGradientToColor = charmtone.Bok
+	s.Dialog.Sessions.RenamingItemBlurred = s.Dialog.NormalItem.Foreground(fgSubtle)
+	s.Dialog.Sessions.RenamingingItemFocused = s.Dialog.SelectedItem.UnsetBackground().UnsetForeground()
+	s.Dialog.Sessions.RenamingPlaceholder = base.Foreground(charmtone.Squid)
 
 	s.Status.Help = lipgloss.NewStyle().Padding(0, 1)
 	s.Status.SuccessIndicator = base.Foreground(bgSubtle).Background(green).Padding(0, 1).Bold(true).SetString("OKAY!")

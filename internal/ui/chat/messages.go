@@ -38,7 +38,9 @@ type Animatable interface {
 
 // Expandable is an interface for items that can be expanded or collapsed.
 type Expandable interface {
-	ToggleExpanded()
+	// ToggleExpanded toggles the expanded state of the item. It returns
+	// whether the item is now expanded.
+	ToggleExpanded() bool
 }
 
 // KeyEventHandler is an interface for items that can handle key events.

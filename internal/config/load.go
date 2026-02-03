@@ -186,19 +186,20 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 			headers[k] = resolved
 		}
 		prepared := ProviderConfig{
-			ID:                 string(p.ID),
-			Name:               p.Name,
-			BaseURL:            p.APIEndpoint,
-			APIKey:             p.APIKey,
-			APIKeyTemplate:     p.APIKey, // Store original template for re-resolution
-			OAuthToken:         config.OAuthToken,
-			Type:               p.Type,
-			Disable:            config.Disable,
-			SystemPromptPrefix: config.SystemPromptPrefix,
-			ExtraHeaders:       headers,
-			ExtraBody:          config.ExtraBody,
-			ExtraParams:        make(map[string]string),
-			Models:             p.Models,
+			ID:                     string(p.ID),
+			Name:                   p.Name,
+			BaseURL:                p.APIEndpoint,
+			APIKey:                 p.APIKey,
+			APIKeyTemplate:         p.APIKey, // Store original template for re-resolution
+			OAuthToken:             config.OAuthToken,
+			Type:                   p.Type,
+			Disable:                config.Disable,
+			SystemPromptPrefix:     config.SystemPromptPrefix,
+			ExtraHeaders:           headers,
+			ExtraBody:              config.ExtraBody,
+			ExtraParams:            make(map[string]string),
+			Models:                 p.Models,
+			ModelConcurrencyLevels: config.ModelConcurrencyLevels,
 		}
 
 		switch {
@@ -479,6 +480,9 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 			MaxTokens:       defaultLargeModel.DefaultMaxTokens,
 			ReasoningEffort: defaultLargeModel.DefaultReasoningEffort,
 		}
+		if cl, ok := providerConfig.ModelConcurrencyLevels[defaultLargeModel.ID]; ok {
+			largeModel.ConcurrencyLevel = cl
+		}
 
 		defaultSmallModel := c.GetModel(string(p.ID), p.DefaultSmallModelID)
 		if defaultSmallModel == nil {
@@ -490,6 +494,9 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 			Model:           defaultSmallModel.ID,
 			MaxTokens:       defaultSmallModel.DefaultMaxTokens,
 			ReasoningEffort: defaultSmallModel.DefaultReasoningEffort,
+		}
+		if cl, ok := providerConfig.ModelConcurrencyLevels[defaultSmallModel.ID]; ok {
+			smallModel.ConcurrencyLevel = cl
 		}
 		return largeModel, smallModel, err
 	}
@@ -515,11 +522,17 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 		Model:     defaultLargeModel.ID,
 		MaxTokens: defaultLargeModel.DefaultMaxTokens,
 	}
+	if cl, ok := providerConfig.ModelConcurrencyLevels[defaultLargeModel.ID]; ok {
+		largeModel.ConcurrencyLevel = cl
+	}
 	defaultSmallModel := c.GetModel(providerConfig.ID, providerConfig.Models[0].ID)
 	smallModel = SelectedModel{
 		Provider:  providerConfig.ID,
 		Model:     defaultSmallModel.ID,
 		MaxTokens: defaultSmallModel.DefaultMaxTokens,
+	}
+	if cl, ok := providerConfig.ModelConcurrencyLevels[defaultSmallModel.ID]; ok {
+		smallModel.ConcurrencyLevel = cl
 	}
 	return largeModel, smallModel, err
 }
@@ -572,6 +585,9 @@ func (c *Config) configureSelectedModels(knownProviders []catwalk.Provider) erro
 			if largeModelSelected.PresencePenalty != nil {
 				large.PresencePenalty = largeModelSelected.PresencePenalty
 			}
+			if largeModelSelected.ConcurrencyLevel > 0 {
+				large.ConcurrencyLevel = largeModelSelected.ConcurrencyLevel
+			}
 		}
 	}
 	smallModelSelected, smallModelConfigured := c.Models[SelectedModelTypeSmall]
@@ -614,6 +630,9 @@ func (c *Config) configureSelectedModels(knownProviders []catwalk.Provider) erro
 			}
 			if smallModelSelected.PresencePenalty != nil {
 				small.PresencePenalty = smallModelSelected.PresencePenalty
+			}
+			if smallModelSelected.ConcurrencyLevel > 0 {
+				small.ConcurrencyLevel = smallModelSelected.ConcurrencyLevel
 			}
 			small.Think = smallModelSelected.Think
 		}

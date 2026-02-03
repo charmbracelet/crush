@@ -1296,7 +1296,7 @@ func DefaultStyles() Styles {
 	s.Dialog.Sessions.DeletingTitleGradientFromColor = red
 	s.Dialog.Sessions.DeletingTitleGradientToColor = s.Primary
 	s.Dialog.Sessions.DeletingItemBlurred = s.Dialog.NormalItem.Foreground(fgSubtle)
-	s.Dialog.Sessions.DeletingItemFocused = s.Dialog.SelectedItem.Background(red)
+	s.Dialog.Sessions.DeletingItemFocused = s.Dialog.SelectedItem.Background(red).Foreground(charmtone.Butter)
 
 	s.Dialog.Sessions.UpdatingTitle = s.Dialog.Title.Foreground(charmtone.Zest)
 	s.Dialog.Sessions.UpdatingView = s.Dialog.View.BorderForeground(charmtone.Zest)

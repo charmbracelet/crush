@@ -18,6 +18,7 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/catwalk/pkg/embedded"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
+	"github.com/charmbracelet/crush/internal/agent/minimax"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/x/etag"
@@ -125,9 +126,39 @@ func UpdateHyper(pathOrURL string) error {
 	return nil
 }
 
+// UpdateMiniMax updates the MiniMax provider information from a specified path.
+func UpdateMiniMax(pathOrURL string) error {
+	if !minimax.Enabled() {
+		return fmt.Errorf("minimax not enabled")
+	}
+	var provider catwalk.Provider
+	pathOrURL = cmp.Or(pathOrURL, "embedded")
+
+	switch {
+	case pathOrURL == "embedded":
+		provider = minimax.Embedded()
+	default:
+		content, err := os.ReadFile(pathOrURL)
+		if err != nil {
+			return fmt.Errorf("failed to read file: %w", err)
+		}
+		if err := json.Unmarshal(content, &provider); err != nil {
+			return fmt.Errorf("failed to unmarshal provider data: %w", err)
+		}
+	}
+
+	if err := newCache[catwalk.Provider](cachePathFor("minimax")).Store(provider); err != nil {
+		return fmt.Errorf("failed to save MiniMax provider to cache: %w", err)
+	}
+
+	slog.Info("MiniMax provider updated successfully", "from", pathOrURL, "to", cachePathFor("minimax"))
+	return nil
+}
+
 var (
 	catwalkSyncer = &catwalkSync{}
 	hyperSyncer   = &hyperSync{}
+	minimaxSyncer = &minimaxSync{}
 )
 
 // Providers returns the list of providers, taking into account cached results
@@ -174,6 +205,21 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 			item, err := hyperSyncer.Get(ctx)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("Crush was unable to fetch updated information from Hyper: %w", err)) //nolint:staticcheck
+				return
+			}
+			providers.Append(item)
+		})
+
+		wg.Go(func() {
+			if !minimax.Enabled() {
+				return
+			}
+			path := cachePathFor("minimax")
+			minimaxSyncer.Init(path, autoupdate)
+
+			item, err := minimaxSyncer.Get(ctx)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("Crush was unable to fetch updated information from MiniMax: %w", err)) //nolint:staticcheck
 				return
 			}
 			providers.Append(item)

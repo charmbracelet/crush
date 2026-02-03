@@ -2915,7 +2915,7 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 	// Attempt to parse pasted content as file paths. If possible to parse,
 	// all files exist and are valid, add as attachments.
 	// Otherwise, paste as text.
-	paths := fsext.PasteStringToPaths(msg.Content)
+	paths := fsext.ParsePastedFiles(msg.Content)
 	allExistsAndValid := func() bool {
 		for _, path := range paths {
 			if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -2955,6 +2955,9 @@ func (m *UI) handleFilePathPaste(path string) tea.Cmd {
 		fileInfo, err := os.Stat(path)
 		if err != nil {
 			return uiutil.ReportError(err)
+		}
+		if fileInfo.IsDir() {
+			return uiutil.ReportWarn("Cannot attach a directory")
 		}
 		if fileInfo.Size() > common.MaxAttachmentSize {
 			return uiutil.ReportWarn("File is too big (>5mb)")

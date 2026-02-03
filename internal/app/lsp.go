@@ -1,6 +1,7 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"log/slog"
 	"os/exec"
@@ -69,7 +70,7 @@ func (app *App) initLSPClients(ctx context.Context) {
 		wg.Go(func() {
 			app.createAndStartLSPClient(
 				ctx, name,
-				toOurConfig(server),
+				toOurConfig(server, app.config.LSP[name]),
 				slices.Contains(userConfiguredLSPs, name),
 			)
 		})
@@ -83,7 +84,9 @@ func (app *App) initLSPClients(ctx context.Context) {
 	}
 }
 
-func toOurConfig(in *powernapconfig.ServerConfig) config.LSPConfig {
+// toOurConfig merges powernap default config with user config.
+// If user config is zero value, it means no user override exists.
+func toOurConfig(in *powernapconfig.ServerConfig, user config.LSPConfig) config.LSPConfig {
 	return config.LSPConfig{
 		Command:     in.Command,
 		Args:        in.Args,
@@ -92,6 +95,7 @@ func toOurConfig(in *powernapconfig.ServerConfig) config.LSPConfig {
 		RootMarkers: in.RootMarkers,
 		InitOptions: in.InitOptions,
 		Options:     in.Settings,
+		Timeout:     user.Timeout,
 	}
 }
 
@@ -125,12 +129,8 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, config
 	// Set diagnostics callback
 	lspClient.SetDiagnosticsCallback(updateLSPDiagnostics)
 
-	// Get timeout from config, default to 30 seconds if not specified.
-	timeout := 30
-	if config.Timeout > 0 {
-		timeout = config.Timeout
-	}
-	initCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
+	// Increase initialization timeout as some servers take more time to start.
+	initCtx, cancel := context.WithTimeout(ctx, time.Duration(cmp.Or(config.Timeout, 30))*time.Second)
 	defer cancel()
 
 	// Initialize LSP client.

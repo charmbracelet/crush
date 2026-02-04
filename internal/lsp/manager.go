@@ -19,6 +19,7 @@ import (
 	powernapconfig "github.com/charmbracelet/x/powernap/pkg/config"
 	"github.com/charmbracelet/x/powernap/pkg/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+	"github.com/sourcegraph/jsonrpc2"
 )
 
 // Manager handles lazy initialization of LSP clients based on file types.
@@ -147,16 +148,27 @@ func (s *Manager) startServer(ctx context.Context, name string, server *powernap
 	slog.Debug("Starting LSP client on demand", "name", name, "command", server.Command)
 	cfg := s.buildConfig(name, server)
 
-	client, err := New(ctx, name, cfg, s.cfg.Resolver())
-	if err != nil {
-		slog.Error("Failed to create LSP client", "name", name, "error", err)
-		return
+	client, ok := s.clients.Get(name)
+	if ok {
+		switch client.GetServerState() {
+		case StateReady, StateStarting:
+			return
+		case StateDisabled, StateError:
+			// continue
+		}
+	} else {
+		var err error
+		client, err = New(ctx, name, cfg, s.cfg.Resolver())
+		if err != nil {
+			slog.Error("Failed to create LSP client", "name", name, "error", err)
+			return
+		}
 	}
 
 	initCtx, cancel := context.WithTimeout(ctx, time.Duration(cmp.Or(cfg.Timeout, 30))*time.Second)
 	defer cancel()
 
-	if _, err = client.Initialize(initCtx, s.cfg.WorkingDir()); err != nil {
+	if _, err := client.Initialize(initCtx, s.cfg.WorkingDir()); err != nil {
 		slog.Error("LSP client initialization failed", "name", name, "error", err)
 		client.Close(ctx)
 		return
@@ -239,18 +251,18 @@ func (s *Manager) StopAll(ctx context.Context) {
 
 	var wg sync.WaitGroup
 	for name, client := range s.clients.Seq2() {
-		wg.Add(1)
-		go func(name string, client *Client) {
-			defer wg.Done()
+		wg.Go(func() {
 			if err := client.Close(ctx); err != nil &&
 				!errors.Is(err, io.EOF) &&
 				!errors.Is(err, context.Canceled) &&
+				!errors.Is(err, jsonrpc2.ErrClosed) &&
 				err.Error() != "signal: killed" {
 				slog.Warn("Failed to stop LSP client", "name", name, "error", err)
 			}
-			s.clients.Del(name)
+			client.SetServerState(StateDisabled)
+			s.callback(name, client)
 			slog.Debug("Stopped LSP client", "name", name)
-		}(name, client)
+		})
 	}
 	wg.Wait()
 }

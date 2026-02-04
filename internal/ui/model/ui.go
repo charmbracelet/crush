@@ -327,6 +327,10 @@ func (m *UI) Init() tea.Cmd {
 
 // setState changes the UI state and focus.
 func (m *UI) setState(state uiState, focus uiFocusState) {
+	if state == uiLanding {
+		// Always turn off compact mode when going to landing
+		m.isCompact = false
+	}
 	m.state = state
 	m.focus = focus
 	// Changing the state may change layout, so update it.

@@ -31,7 +31,6 @@ type ReferencesToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (r *ReferencesToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
 		return pendingTool(sty, "Find References", opts.Anim)
 	}
@@ -44,12 +43,12 @@ func (r *ReferencesToolRenderContext) RenderTool(sty *styles.Styles, width int, 
 		toolParams = append(toolParams, "path", fsext.PrettyPath(params.Path))
 	}
 
-	header := toolHeader(sty, opts.Status, "Find References", cappedWidth, opts.Compact, toolParams...)
+	header := toolHeader(sty, opts.Status, "Find References", width, opts.Compact, toolParams...)
 	if opts.Compact {
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
+	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
 		return joinToolParts(header, earlyState)
 	}
 
@@ -57,7 +56,7 @@ func (r *ReferencesToolRenderContext) RenderTool(sty *styles.Styles, width int, 
 		return header
 	}
 
-	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
+	bodyWidth := width - toolBodyLeftPaddingTotal
 	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
 	return joinToolParts(header, body)
 }

@@ -35,7 +35,6 @@ type DiagnosticsToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (d *DiagnosticsToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
 		return pendingTool(sty, "Diagnostics", opts.Anim)
 	}
@@ -49,12 +48,12 @@ func (d *DiagnosticsToolRenderContext) RenderTool(sty *styles.Styles, width int,
 		mainParam = fsext.PrettyPath(params.FilePath)
 	}
 
-	header := toolHeader(sty, opts.Status, "Diagnostics", cappedWidth, opts.Compact, mainParam)
+	header := toolHeader(sty, opts.Status, "Diagnostics", width, opts.Compact, mainParam)
 	if opts.Compact {
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
+	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
 		return joinToolParts(header, earlyState)
 	}
 
@@ -62,7 +61,7 @@ func (d *DiagnosticsToolRenderContext) RenderTool(sty *styles.Styles, width int,
 		return header
 	}
 
-	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
+	bodyWidth := width - toolBodyLeftPaddingTotal
 	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
 	return joinToolParts(header, body)
 }

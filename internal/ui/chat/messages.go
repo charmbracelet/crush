@@ -245,13 +245,6 @@ func (a *AssistantInfoItem) renderContent(width int) string {
 	return common.Section(a.sty, assistant, width)
 }
 
-// cappedMessageWidth returns the width for message content.
-// Note: For tool renderers, width is already adjusted by RawRender, so this
-// just returns the input. For message items (user/assistant), it subtracts padding.
-func cappedMessageWidth(availableWidth int) int {
-	return max(0, availableWidth)
-}
-
 // ExtractMessageItems extracts [MessageItem]s from a [message.Message]. It
 // returns all parts of the message as [MessageItem]s.
 //

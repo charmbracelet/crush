@@ -295,9 +295,6 @@ func (t *baseToolMessageItem) Animate(msg anim.StepMsg) tea.Cmd {
 // RawRender implements [MessageItem].
 func (t *baseToolMessageItem) RawRender(width int) string {
 	toolItemWidth := width - MessageLeftPaddingTotal
-	if t.hasCappedWidth {
-		toolItemWidth = cappedMessageWidth(width)
-	}
 
 	content, height, ok := t.getCachedRender(toolItemWidth)
 	// if we are spinning or there is no cache rerender

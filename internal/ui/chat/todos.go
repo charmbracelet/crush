@@ -39,7 +39,6 @@ type TodosToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (t *TodosToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
 		return pendingTool(sty, "To-Do", opts.Anim)
 	}
@@ -82,7 +81,7 @@ func (t *TodosToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 					} else {
 						headerText = fmt.Sprintf("created %d todos", meta.Total)
 					}
-					body = FormatTodosList(sty, meta.Todos, styles.ArrowRightIcon, cappedWidth)
+					body = FormatTodosList(sty, meta.Todos, styles.ArrowRightIcon, width)
 				} else {
 					// Build header based on what changed.
 					hasCompleted := len(meta.JustCompleted) > 0
@@ -108,7 +107,7 @@ func (t *TodosToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 					// Build body with details.
 					if allCompleted {
 						// Show all todos when all are completed, like when created.
-						body = FormatTodosList(sty, meta.Todos, styles.ArrowRightIcon, cappedWidth)
+						body = FormatTodosList(sty, meta.Todos, styles.ArrowRightIcon, width)
 					} else if meta.JustStarted != "" {
 						body = sty.Tool.TodoInProgressIcon.Render(styles.ArrowRightIcon+" ") +
 							sty.Base.Render(meta.JustStarted)
@@ -119,12 +118,12 @@ func (t *TodosToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	}
 
 	toolParams := []string{headerText}
-	header := toolHeader(sty, opts.Status, "To-Do", cappedWidth, opts.Compact, toolParams...)
+	header := toolHeader(sty, opts.Status, "To-Do", width, opts.Compact, toolParams...)
 	if opts.Compact {
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
+	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
 		return joinToolParts(header, earlyState)
 	}
 

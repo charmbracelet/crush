@@ -33,14 +33,6 @@ func parseLevel(level mcp.LoggingLevel) slog.Level {
 		return slog.LevelInfo
 	case "warning":
 		return slog.LevelWarn
-	case "error":
-		return slog.LevelError
-	case "critical":
-		return slog.LevelError + 4
-	case "alert":
-		return slog.LevelError + 8
-	case "emergency":
-		return slog.LevelError + 12
 	default:
 		return slog.LevelDebug
 	}
@@ -342,9 +334,9 @@ func createSession(ctx context.Context, name string, m config.MCPConfig, resolve
 					Name: name,
 				})
 			},
-			LoggingMessageHandler: func(_ context.Context, req *mcp.LoggingMessageRequest) {
+			LoggingMessageHandler: func(ctx context.Context, req *mcp.LoggingMessageRequest) {
 				level := parseLevel(req.Params.Level)
-				slog.Log(context.Background(), level, "MCP log", "name", name, "logger", req.Params.Logger, "data", req.Params.Data)
+				slog.Log(ctx, level, "MCP log", "name", name, "logger", req.Params.Logger, "data", req.Params.Data)
 			},
 		},
 	)

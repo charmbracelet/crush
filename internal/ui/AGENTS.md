@@ -5,7 +5,6 @@
 - Keep things simple; do not overcomplicate.
 - Create files if needed to separate logic; do not nest models.
 - Never do IO or expensive work in `Update`; always use a `tea.Cmd`.
-- Always do IO in commands
 - Never change the model state inside of a command use messages and than update the state in the main loop
 
 ## Architecture

@@ -128,16 +128,7 @@ func (c *Completions) SetFiles(files []string) {
 	c.list.SelectFirst()
 	c.list.ScrollToSelected()
 
-	// recalculate width by using just the visible items
-	start, end := c.list.VisibleItemIndices()
-	width := 0
-	if end != 0 {
-		for _, file := range files[start : end+1] {
-			width = max(width, ansi.StringWidth(file))
-		}
-	}
-	c.width = ordered.Clamp(width+2, int(minWidth), int(maxWidth))
-	c.list.SetSize(c.width, c.height)
+	c.updateSize()
 }
 
 // Close closes the completions popup.
@@ -158,14 +149,17 @@ func (c *Completions) Filter(query string) {
 	c.query = query
 	c.list.SetFilter(query)
 
-	// recalculate width by using just the visible items
+	c.updateSize()
+}
+
+func (c *Completions) updateSize() {
 	items := c.list.FilteredItems()
 	start, end := c.list.VisibleItemIndices()
 	width := 0
-	if end != 0 {
-		for _, item := range items[start : end+1] {
-			width = max(width, ansi.StringWidth(item.(interface{ Text() string }).Text()))
-		}
+	for i := start; i <= end; i++ {
+		item := c.list.ItemAt(i)
+		s := item.(interface{ Text() string }).Text()
+		width = max(width, ansi.StringWidth(s))
 	}
 	c.width = ordered.Clamp(width+2, int(minWidth), int(maxWidth))
 	c.height = ordered.Clamp(len(items), int(minHeight), int(maxHeight))

@@ -89,9 +89,6 @@ func (s *Manager) Start(ctx context.Context, filePath string) {
 		if !handles(server, filePath, s.cfg.WorkingDir()) {
 			continue
 		}
-		if _, exists := s.clients.Get(name); exists {
-			return
-		}
 		wg.Go(func() {
 			s.startServer(ctx, name, server)
 		})
@@ -145,25 +142,26 @@ func (s *Manager) startServer(ctx context.Context, name string, server *powernap
 		}
 	}
 
-	slog.Debug("Starting LSP client on demand", "name", name, "command", server.Command)
 	cfg := s.buildConfig(name, server)
-
-	client, ok := s.clients.Get(name)
-	if ok {
+	if client, ok := s.clients.Get(name); ok {
 		switch client.GetServerState() {
 		case StateReady, StateStarting:
-			return
-		case StateDisabled, StateError:
-			// continue
-		}
-	} else {
-		var err error
-		client, err = New(ctx, name, cfg, s.cfg.Resolver())
-		if err != nil {
-			slog.Error("Failed to create LSP client", "name", name, "error", err)
+			s.callback(name, client)
+			// already done, return
 			return
 		}
 	}
+	client, err := New(ctx, name, cfg, s.cfg.Resolver())
+	if err != nil {
+		slog.Error("Failed to create LSP client", "name", name, "error", err)
+		return
+	}
+	s.callback(name, client)
+
+	defer func() {
+		s.clients.Set(name, client)
+		s.callback(name, client)
+	}()
 
 	initCtx, cancel := context.WithTimeout(ctx, time.Duration(cmp.Or(cfg.Timeout, 30))*time.Second)
 	defer cancel()
@@ -181,8 +179,6 @@ func (s *Manager) startServer(ctx context.Context, name string, server *powernap
 		client.SetServerState(StateReady)
 	}
 
-	s.clients.Set(name, client)
-	s.callback(name, client)
 	slog.Debug("LSP client started", "name", name)
 }
 
@@ -252,6 +248,7 @@ func (s *Manager) StopAll(ctx context.Context) {
 	var wg sync.WaitGroup
 	for name, client := range s.clients.Seq2() {
 		wg.Go(func() {
+			defer func() { s.callback(name, client) }()
 			if err := client.Close(ctx); err != nil &&
 				!errors.Is(err, io.EOF) &&
 				!errors.Is(err, context.Canceled) &&
@@ -260,7 +257,6 @@ func (s *Manager) StopAll(ctx context.Context) {
 				slog.Warn("Failed to stop LSP client", "name", name, "error", err)
 			}
 			client.SetServerState(StateDisabled)
-			s.callback(name, client)
 			slog.Debug("Stopped LSP client", "name", name)
 		})
 	}

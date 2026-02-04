@@ -349,18 +349,16 @@ func (m *UI) loadCustomCommands() tea.Cmd {
 }
 
 // loadMCPrompts loads the MCP prompts asynchronously.
-func (m *UI) loadMCPrompts() tea.Cmd {
-	return func() tea.Msg {
-		prompts, err := commands.LoadMCPPrompts()
-		if err != nil {
-			slog.Error("Failed to load MCP prompts", "error", err)
-		}
-		if prompts == nil {
-			// flag them as loaded even if there is none or an error
-			prompts = []commands.MCPPrompt{}
-		}
-		return mcpPromptsLoadedMsg{Prompts: prompts}
+func (m *UI) loadMCPrompts() tea.Msg {
+	prompts, err := commands.LoadMCPPrompts()
+	if err != nil {
+		slog.Error("Failed to load MCP prompts", "error", err)
 	}
+	if prompts == nil {
+		// flag them as loaded even if there is none or an error
+		prompts = []commands.MCPPrompt{}
+	}
+	return mcpPromptsLoadedMsg{Prompts: prompts}
 }
 
 // Update handles updates to the UI model.
@@ -498,21 +496,18 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pubsub.Event[app.LSPEvent]:
 		m.lspStates = app.GetLSPStates()
 	case pubsub.Event[mcp.Event]:
-		m.mcpStates = mcp.GetStates()
-		// Check if all mcps are initialized.
-		initialized := true
-		for _, state := range m.mcpStates {
-			if state.State == mcp.StateStarting {
-				initialized = false
-				break
-			}
-		}
-		if initialized && m.mcpPrompts == nil {
-			cmds = append(cmds, m.loadMCPrompts())
-		}
-		// Handle resources list changed event.
-		if msg.Payload.Type == mcp.EventResourcesListChanged {
-			go mcp.RefreshResources(context.Background(), msg.Payload.Name)
+		switch msg.Payload.Type {
+		case mcp.EventStateChanged:
+			return m, tea.Batch(
+				m.handleStateChanged(),
+				m.loadMCPrompts,
+			)
+		case mcp.EventPromptsListChanged:
+			return m, handleMCPPromptsEvent(msg.Payload.Name)
+		case mcp.EventToolsListChanged:
+			return m, handleMCPToolsEvent(msg.Payload.Name)
+		case mcp.EventResourcesListChanged:
+			return m, handleMCPResourcesEvent(msg.Payload.Name)
 		}
 	case pubsub.Event[permission.PermissionRequest]:
 		if cmd := m.openPermissionsDialog(msg.Payload); cmd != nil {
@@ -1642,7 +1637,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 						m.completionsStartIndex = curIdx
 						m.completionsPositionStart = m.completionsPosition()
 						depth, limit := m.com.Config().Options.TUI.Completions.Limits()
-						cmds = append(cmds, m.completions.OpenWithFiles(depth, limit), m.loadMCPResources())
+						cmds = append(cmds, m.completions.OpenWithFiles(depth, limit), m.loadMCPResources)
 					}
 				}
 
@@ -2589,21 +2584,19 @@ func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValu
 }
 
 // loadMCPResources loads available MCP resources for completions.
-func (m *UI) loadMCPResources() tea.Cmd {
-	return func() tea.Msg {
-		var resources []completions.ResourceCompletionValue
-		for mcpName, mcpResources := range mcp.Resources() {
-			for _, r := range mcpResources {
-				resources = append(resources, completions.ResourceCompletionValue{
-					MCPName:  mcpName,
-					URI:      r.URI,
-					Title:    r.Name,
-					MIMEType: r.MIMEType,
-				})
-			}
+func (m *UI) loadMCPResources() tea.Msg {
+	var resources []completions.ResourceCompletionValue
+	for mcpName, mcpResources := range mcp.Resources() {
+		for _, r := range mcpResources {
+			resources = append(resources, completions.ResourceCompletionValue{
+				MCPName:  mcpName,
+				URI:      r.URI,
+				Title:    r.Name,
+				MIMEType: r.MIMEType,
+			})
 		}
-		return completions.ResourcesLoadedMsg{Resources: resources}
 	}
+	return completions.ResourcesLoadedMsg{Resources: resources}
 }
 
 // completionsPosition returns the X and Y position for the completions popup.
@@ -3162,6 +3155,39 @@ func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string
 	})
 
 	return tea.Sequence(cmds...)
+}
+
+func (m *UI) handleStateChanged() tea.Cmd {
+	slog.Warn("handleStateChanged")
+	return func() tea.Msg {
+		m.com.App.UpdateAgentModel(context.Background())
+		m.mcpStates = mcp.GetStates()
+		return nil
+	}
+}
+
+func handleMCPPromptsEvent(name string) tea.Cmd {
+	slog.Warn("handleMCPPromptsEvent")
+	return func() tea.Msg {
+		mcp.RefreshPrompts(context.Background(), name)
+		return nil
+	}
+}
+
+func handleMCPToolsEvent(name string) tea.Cmd {
+	slog.Warn("handleMCPToolsEvent")
+	return func() tea.Msg {
+		mcp.RefreshTools(context.Background(), name)
+		return nil
+	}
+}
+
+func handleMCPResourcesEvent(name string) tea.Cmd {
+	slog.Warn("handleMCPResourcesEvent")
+	return func() tea.Msg {
+		mcp.RefreshResources(context.Background(), name)
+		return nil
+	}
 }
 
 func (m *UI) copyChatHighlight() tea.Cmd {

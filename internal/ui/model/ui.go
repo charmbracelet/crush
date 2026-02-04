@@ -141,8 +141,7 @@ type UI struct {
 	// isCanceling tracks whether the user has pressed escape once to cancel.
 	isCanceling bool
 
-	// header is the last cached header logo
-	header string
+	header *header
 
 	// sendProgressBar instructs the TUI to send progress bar updates to the
 	// terminal.
@@ -261,12 +260,15 @@ func New(com *common.Common) *UI {
 		},
 	)
 
+	header := newHeader(com)
+
 	ui := &UI{
 		com:         com,
 		dialog:      dialog.NewOverlay(),
 		keyMap:      keyMap,
 		textarea:    ta,
 		chat:        ch,
+		header:      header,
 		completions: comp,
 		attachments: attachments,
 		todoSpinner: todoSpinner,
@@ -1761,6 +1763,18 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// drawHeader draws the header section of the UI.
+func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
+	m.header.drawHeader(
+		scr,
+		area,
+		m.session,
+		m.isCompact,
+		m.detailsOpen,
+		m.width,
+	)
+}
+
 // Draw implements [uv.Drawable] and draws the UI model.
 func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	layout := m.generateLayout(area.Dx(), area.Dy())
@@ -1775,22 +1789,19 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	switch m.state {
 	case uiOnboarding:
-		header := uv.NewStyledString(m.header)
-		header.Draw(scr, layout.header)
+		m.drawHeader(scr, layout.header)
 
 		// NOTE: Onboarding flow will be rendered as dialogs below, but
 		// positioned at the bottom left of the screen.
 
 	case uiInitialize:
-		header := uv.NewStyledString(m.header)
-		header.Draw(scr, layout.header)
+		m.drawHeader(scr, layout.header)
 
 		main := uv.NewStyledString(m.initializeView())
 		main.Draw(scr, layout.main)
 
 	case uiLanding:
-		header := uv.NewStyledString(m.header)
-		header.Draw(scr, layout.header)
+		m.drawHeader(scr, layout.header)
 		main := uv.NewStyledString(m.landingView())
 		main.Draw(scr, layout.main)
 
@@ -1799,8 +1810,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	case uiChat:
 		if m.isCompact {
-			header := uv.NewStyledString(m.header)
-			header.Draw(scr, layout.header)
+			m.drawHeader(scr, layout.header)
 		} else {
 			m.drawSidebar(scr, layout.sidebar)
 		}
@@ -2177,14 +2187,9 @@ func (m *UI) updateSize() {
 
 	// Handle different app states
 	switch m.state {
-	case uiOnboarding, uiInitialize, uiLanding:
-		m.renderHeader(false, m.layout.header.Dx())
-
 	case uiChat:
-		if m.isCompact {
-			m.renderHeader(true, m.layout.header.Dx())
-		} else {
-			m.renderSidebarLogo(m.layout.sidebar.Dx())
+		if !m.isCompact {
+			m.cacheSidebarLogo(m.layout.sidebar.Dx())
 		}
 	}
 }
@@ -2590,18 +2595,8 @@ func (m *UI) renderEditorView(width int) string {
 	)
 }
 
-// renderHeader renders and caches the header logo at the specified width.
-func (m *UI) renderHeader(compact bool, width int) {
-	if compact && m.session != nil && m.com.App != nil {
-		m.header = renderCompactHeader(m.com, m.session, m.com.App.LSPClients, m.detailsOpen, width)
-	} else {
-		m.header = renderLogo(m.com.Styles, compact, width)
-	}
-}
-
-// renderSidebarLogo renders and caches the sidebar logo at the specified
-// width.
-func (m *UI) renderSidebarLogo(width int) {
+// cacheSidebarLogo renders and caches the sidebar logo at the specified width.
+func (m *UI) cacheSidebarLogo(width int) {
 	m.sidebarLogo = renderLogo(m.com.Styles, true, width)
 }
 

@@ -17,6 +17,7 @@ func resetProviderState() {
 	providerErr = nil
 	catwalkSyncer = &catwalkSync{}
 	hyperSyncer = &hyperSync{}
+	minimaxSyncer = &minimaxSync{}
 }
 
 func TestProviders_Integration_AutoUpdateDisabled(t *testing.T) {

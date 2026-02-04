@@ -2921,6 +2921,9 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 	// Otherwise, paste as text.
 	paths := fsext.ParsePastedFiles(msg.Content)
 	allExistsAndValid := func() bool {
+		if len(paths) == 0 {
+			return false
+		}
 		for _, path := range paths {
 			if _, err := os.Stat(path); os.IsNotExist(err) {
 				return false

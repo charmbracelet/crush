@@ -499,7 +499,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lspStates = app.GetLSPStates()
 	case pubsub.Event[mcp.Event]:
 		m.mcpStates = mcp.GetStates()
-		// check if all mcps are initialized
+		// Check if all mcps are initialized.
 		initialized := true
 		for _, state := range m.mcpStates {
 			if state.State == mcp.StateStarting {
@@ -509,6 +509,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if initialized && m.mcpPrompts == nil {
 			cmds = append(cmds, m.loadMCPrompts())
+		}
+		// Handle resources list changed event.
+		if msg.Payload.Type == mcp.EventResourcesListChanged {
+			go mcp.RefreshResources(context.Background(), msg.Payload.Name)
 		}
 	case pubsub.Event[permission.PermissionRequest]:
 		if cmd := m.openPermissionsDialog(msg.Payload); cmd != nil {
@@ -710,6 +714,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle async file loading for completions.
 		if m.completionsOpen {
 			m.completions.SetFiles(msg.Files)
+		}
+	case completions.ResourcesLoadedMsg:
+		// Handle async MCP resource loading for completions.
+		if m.completionsOpen {
+			m.completions.SetResources(msg.Resources)
 		}
 	case uv.KittyGraphicsEvent:
 		if !bytes.HasPrefix(msg.Payload, []byte("OK")) {
@@ -1515,6 +1524,10 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 						if item, ok := msg.Value.(completions.FileCompletionValue); ok {
 							cmds = append(cmds, m.insertFileCompletion(item.Path))
 						}
+						// Handle resource completion selection.
+						if item, ok := msg.Value.(completions.ResourceCompletionValue); ok {
+							cmds = append(cmds, m.insertMCPResourceCompletion(item))
+						}
 						if !msg.Insert {
 							m.closeCompletions()
 						}
@@ -1629,7 +1642,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 						m.completionsStartIndex = curIdx
 						m.completionsPositionStart = m.completionsPosition()
 						depth, limit := m.com.Config().Options.TUI.Completions.Limits()
-						cmds = append(cmds, m.completions.OpenWithFiles(depth, limit))
+						cmds = append(cmds, m.completions.OpenWithFiles(depth, limit), m.loadMCPResources())
 					}
 				}
 
@@ -2468,24 +2481,29 @@ func (m *UI) closeCompletions() {
 	m.completions.Close()
 }
 
-// insertFileCompletion inserts the selected file path into the textarea,
-// replacing the @query, and adds the file as an attachment.
-func (m *UI) insertFileCompletion(path string) tea.Cmd {
+// insertCompletionText replaces the @query in the textarea with the given text.
+// Returns false if the replacement cannot be performed.
+func (m *UI) insertCompletionText(text string) bool {
 	value := m.textarea.Value()
-	word := m.textareaWord()
-
-	// Find the @ and query to replace.
 	if m.completionsStartIndex > len(value) {
-		return nil
+		return false
 	}
 
-	// Build the new value: everything before @, the path, everything after query.
+	word := m.textareaWord()
 	endIdx := min(m.completionsStartIndex+len(word), len(value))
-
-	newValue := value[:m.completionsStartIndex] + path + value[endIdx:]
+	newValue := value[:m.completionsStartIndex] + text + value[endIdx:]
 	m.textarea.SetValue(newValue)
 	m.textarea.MoveToEnd()
 	m.textarea.InsertRune(' ')
+	return true
+}
+
+// insertFileCompletion inserts the selected file path into the textarea,
+// replacing the @query, and adds the file as an attachment.
+func (m *UI) insertFileCompletion(path string) tea.Cmd {
+	if !m.insertCompletionText(path) {
+		return nil
+	}
 
 	return func() tea.Msg {
 		absPath, _ := filepath.Abs(path)
@@ -2517,6 +2535,74 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 			MimeType: mimeOf(content),
 			Content:  content,
 		}
+	}
+}
+
+// insertMCPResourceCompletion inserts the selected resource into the textarea,
+// replacing the @query, and adds the resource as an attachment.
+func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValue) tea.Cmd {
+	displayText := item.Title
+	if displayText == "" {
+		displayText = item.URI
+	}
+
+	if !m.insertCompletionText(displayText) {
+		return nil
+	}
+
+	return func() tea.Msg {
+		contents, err := mcp.ReadResource(context.Background(), item.MCPName, item.URI)
+		if err != nil {
+			slog.Warn("Failed to read MCP resource", "uri", item.URI, "error", err)
+			return nil
+		}
+		if len(contents) == 0 {
+			return nil
+		}
+
+		content := contents[0]
+		var data []byte
+		if content.Text != "" {
+			data = []byte(content.Text)
+		} else if len(content.Blob) > 0 {
+			data = content.Blob
+		}
+		if len(data) == 0 {
+			return nil
+		}
+
+		mimeType := item.MIMEType
+		if mimeType == "" && content.MIMEType != "" {
+			mimeType = content.MIMEType
+		}
+		if mimeType == "" {
+			mimeType = "text/plain"
+		}
+
+		return message.Attachment{
+			FilePath: item.URI,
+			FileName: displayText,
+			MimeType: mimeType,
+			Content:  data,
+		}
+	}
+}
+
+// loadMCPResources loads available MCP resources for completions.
+func (m *UI) loadMCPResources() tea.Cmd {
+	return func() tea.Msg {
+		var resources []completions.ResourceCompletionValue
+		for mcpName, mcpResources := range mcp.Resources() {
+			for _, r := range mcpResources {
+				resources = append(resources, completions.ResourceCompletionValue{
+					MCPName:  mcpName,
+					URI:      r.URI,
+					Title:    r.Name,
+					MIMEType: r.MIMEType,
+				})
+			}
+		}
+		return completions.ResourcesLoadedMsg{Resources: resources}
 	}
 }
 

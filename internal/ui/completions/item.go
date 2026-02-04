@@ -13,6 +13,13 @@ type FileCompletionValue struct {
 	Path string
 }
 
+type ResourceCompletionValue struct {
+	MCPName  string
+	URI      string
+	Title    string
+	MIMEType string
+}
+
 // CompletionItem represents an item in the completions list.
 type CompletionItem struct {
 	text    string

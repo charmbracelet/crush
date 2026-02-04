@@ -25,6 +25,27 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+func parseLevel(level mcp.LoggingLevel) slog.Level {
+	switch level {
+	case "info":
+		return slog.LevelInfo
+	case "notice":
+		return slog.LevelInfo
+	case "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	case "critical":
+		return slog.LevelError + 4
+	case "alert":
+		return slog.LevelError + 8
+	case "emergency":
+		return slog.LevelError + 12
+	default:
+		return slog.LevelDebug
+	}
+}
+
 var (
 	sessions = csync.NewMap[string, *mcp.ClientSession]()
 	states   = csync.NewMap[string, ClientInfo]()
@@ -65,6 +86,7 @@ const (
 	EventStateChanged EventType = iota
 	EventToolsListChanged
 	EventPromptsListChanged
+	EventResourcesListChanged
 )
 
 // Event represents an event in the MCP system
@@ -78,8 +100,9 @@ type Event struct {
 
 // Counts number of available tools, prompts, etc.
 type Counts struct {
-	Tools   int
-	Prompts int
+	Tools     int
+	Prompts   int
+	Resources int
 }
 
 // ClientInfo holds information about an MCP client's state
@@ -189,13 +212,23 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 				return
 			}
 
+			resources, err := getResources(ctx, session)
+			if err != nil {
+				slog.Error("Error listing resources", "error", err)
+				updateState(name, StateError, err, nil, Counts{})
+				session.Close()
+				return
+			}
+
 			toolCount := updateTools(name, tools)
 			updatePrompts(name, prompts)
+			resourceCount := updateResources(name, resources)
 			sessions.Set(name, session)
 
 			updateState(name, StateConnected, nil, session, Counts{
-				Tools:   toolCount,
-				Prompts: len(prompts),
+				Tools:     toolCount,
+				Prompts:   len(prompts),
+				Resources: resourceCount,
 			})
 		}(name, m)
 	}
@@ -303,8 +336,15 @@ func createSession(ctx context.Context, name string, m config.MCPConfig, resolve
 					Name: name,
 				})
 			},
+			ResourceListChangedHandler: func(context.Context, *mcp.ResourceListChangedRequest) {
+				broker.Publish(pubsub.UpdatedEvent, Event{
+					Type: EventResourcesListChanged,
+					Name: name,
+				})
+			},
 			LoggingMessageHandler: func(_ context.Context, req *mcp.LoggingMessageRequest) {
-				slog.Info("MCP log", "name", name, "data", req.Params.Data)
+				level := parseLevel(req.Params.Level)
+				slog.Log(context.Background(), level, "MCP log", "name", name, "logger", req.Params.Logger, "data", req.Params.Data)
 			},
 		},
 	)

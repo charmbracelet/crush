@@ -34,6 +34,11 @@ type FilesLoadedMsg struct {
 	Files []string
 }
 
+// ResourcesLoadedMsg is sent when MCP resources have been loaded for completions.
+type ResourcesLoadedMsg struct {
+	Resources []ResourceCompletionValue
+}
+
 // Completions represents the completions popup component.
 type Completions struct {
 	// Popup dimensions
@@ -43,6 +48,10 @@ type Completions struct {
 	// State
 	open  bool
 	query string
+
+	// Cached items for merging.
+	files     []string
+	resources []ResourceCompletionValue
 
 	// Key bindings
 	keyMap KeyMap
@@ -101,10 +110,24 @@ func (c *Completions) OpenWithFiles(depth, limit int) tea.Cmd {
 	}
 }
 
-// SetFiles sets the file items on the completions popup.
+// SetFiles sets the file items and rebuilds the merged list.
 func (c *Completions) SetFiles(files []string) {
-	items := make([]list.FilterableItem, 0, len(files))
-	for _, file := range files {
+	c.files = files
+	c.rebuildItems()
+}
+
+// SetResources sets the MCP resources and rebuilds the merged list.
+func (c *Completions) SetResources(resources []ResourceCompletionValue) {
+	c.resources = resources
+	c.rebuildItems()
+}
+
+// rebuildItems merges files and resources into a single list.
+func (c *Completions) rebuildItems() {
+	items := make([]list.FilterableItem, 0, len(c.files)+len(c.resources))
+
+	// Add files first.
+	for _, file := range c.files {
 		file = strings.TrimPrefix(file, "./")
 		item := NewCompletionItem(
 			file,
@@ -116,10 +139,27 @@ func (c *Completions) SetFiles(files []string) {
 		items = append(items, item)
 	}
 
+	// Add MCP resources.
+	for _, resource := range c.resources {
+		label := resource.Title
+		if label == "" {
+			label = resource.URI
+		}
+		label = resource.MCPName + "/" + label
+		item := NewCompletionItem(
+			label,
+			resource,
+			c.normalStyle,
+			c.focusedStyle,
+			c.matchStyle,
+		)
+		items = append(items, item)
+	}
+
 	c.open = true
 	c.query = ""
 	c.list.SetItems(items...)
-	c.list.SetFilter("") // Clear any previous filter.
+	c.list.SetFilter("")
 	c.list.Focus()
 
 	c.width = maxWidth
@@ -128,12 +168,12 @@ func (c *Completions) SetFiles(files []string) {
 	c.list.SelectFirst()
 	c.list.ScrollToSelected()
 
-	// recalculate width by using just the visible items
+	// Recalculate width by using just the visible items.
 	start, end := c.list.VisibleItemIndices()
 	width := 0
 	if end != 0 {
-		for _, file := range files[start : end+1] {
-			width = max(width, ansi.StringWidth(file))
+		for _, item := range items[start : end+1] {
+			width = max(width, ansi.StringWidth(item.(interface{ Text() string }).Text()))
 		}
 	}
 	c.width = ordered.Clamp(width+2, int(minWidth), int(maxWidth))
@@ -143,6 +183,8 @@ func (c *Completions) SetFiles(files []string) {
 // Close closes the completions popup.
 func (c *Completions) Close() {
 	c.open = false
+	c.files = nil
+	c.resources = nil
 }
 
 // Filter filters the completions with the given query.

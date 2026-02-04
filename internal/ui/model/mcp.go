@@ -34,7 +34,7 @@ func (m *UI) mcpInfo(width, maxItems int, isSection bool) string {
 	return lipgloss.NewStyle().Width(width).Render(fmt.Sprintf("%s\n\n%s", title, list))
 }
 
-// mcpCounts formats tool and prompt counts for display.
+// mcpCounts formats tool, prompt, and resource counts for display.
 func mcpCounts(t *styles.Styles, counts mcp.Counts) string {
 	parts := []string{}
 	if counts.Tools > 0 {
@@ -42,6 +42,9 @@ func mcpCounts(t *styles.Styles, counts mcp.Counts) string {
 	}
 	if counts.Prompts > 0 {
 		parts = append(parts, t.Subtle.Render(fmt.Sprintf("%d prompts", counts.Prompts)))
+	}
+	if counts.Resources > 0 {
+		parts = append(parts, t.Subtle.Render(fmt.Sprintf("%d resources", counts.Resources)))
 	}
 	return strings.Join(parts, " ")
 }

@@ -27,7 +27,7 @@ import (
 	"github.com/charmbracelet/crush/internal/event"
 )
 
-//go:generate wget -O provider.json https://console.charm.land/api/v1/provider
+//go:generate wget -O provider.json https://hyper.charm.land/api/v1/provider
 
 //go:embed provider.json
 var embedded []byte
@@ -61,8 +61,7 @@ const (
 	// Name is the default name of this meta provider.
 	Name = "hyper"
 	// defaultBaseURL is the default proxy URL.
-	// TODO: change this to production URL when ready.
-	defaultBaseURL = "https://console.charm.land"
+	defaultBaseURL = "https://hyper.charm.land"
 )
 
 // BaseURL returns the base URL, which is either $HYPER_URL or the default.

@@ -82,6 +82,11 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 		return nil, fmt.Errorf("failed to configure providers: %w", err)
 	}
 
+	// Set environment variables from config
+	if err := cfg.setEnvVars(); err != nil {
+		slog.Warn("Failed to set environment variables from config", "error", err)
+	}
+
 	if !cfg.IsConfigured() {
 		slog.Warn("No providers configured")
 		return cfg, nil
@@ -760,6 +765,30 @@ func assignIfNil[T any](ptr **T, val T) {
 	if *ptr == nil {
 		*ptr = &val
 	}
+}
+
+func (c *Config) setEnvVars() error {
+	if c.Env == nil {
+		c.Env = make(map[string]string)
+	}
+	
+	// Validate environment variables before setting them
+	for key := range c.Env {
+		if err := validateEnvVarName(key); err != nil {
+			slog.Warn("Invalid environment variable name in config", "key", key, "error", err)
+			return fmt.Errorf("invalid environment variable name %q: %w", key, err)
+		}
+	}
+
+	// Set all environment variables
+	for key, value := range c.Env {
+		if err := os.Setenv(key, value); err != nil {
+			slog.Warn("Failed to set environment variable from config", "key", key, "error", err)
+			return fmt.Errorf("failed to set environment variable %q: %w", key, err)
+		}
+	}
+
+	return nil
 }
 
 func isInsideWorktree() bool {

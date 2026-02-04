@@ -1458,3 +1458,161 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		require.Equal(t, int64(100), large.MaxTokens)
 	})
 }
+
+// Add test for environment variable configuration parsing and setting
+func TestConfig_setEnvVars(t *testing.T) {
+	t.Run("sets environment variables correctly", func(t *testing.T) {
+		// Clean up any existing TEST_VAR and ANOTHER env vars first
+		os.Unsetenv("TEST_VAR")
+		os.Unsetenv("ANOTHER")
+
+		cfg := &Config{
+			Env: map[string]string{
+				"TEST_VAR": "test_value",
+				"ANOTHER":  "another_value",
+			},
+		}
+
+		err := cfg.setEnvVars()
+		require.NoError(t, err)
+
+		assert.Equal(t, "test_value", os.Getenv("TEST_VAR"))
+		assert.Equal(t, "another_value", os.Getenv("ANOTHER"))
+	})
+
+	t.Run("handles empty environment map", func(t *testing.T) {
+		// Clean up any existing TEST_VAR env var first
+		os.Unsetenv("TEST_VAR")
+
+		cfg := &Config{
+			Env: nil,
+		}
+
+		err := cfg.setEnvVars()
+		require.NoError(t, err)
+
+		// Should not error and should have no env vars set
+		assert.Equal(t, "", os.Getenv("TEST_VAR"))
+	})
+
+	t.Run("validates environment variable names", func(t *testing.T) {
+		cfg := &Config{
+			Env: map[string]string{
+				"VALID_VAR":  "value",
+				"123INVALID": "should_fail",
+			},
+		}
+
+		err := cfg.setEnvVars()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "environment variable name cannot start with a digit")
+	})
+
+	t.Run("handles invalid environment variable names", func(t *testing.T) {
+		cfg := &Config{
+			Env: map[string]string{
+				"VALID_VAR":   "value",
+				"INVALID-VAR": "should_fail",
+			},
+		}
+
+		err := cfg.setEnvVars()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid character")
+	})
+}
+
+func TestConfig_LoadWithEnv(t *testing.T) {
+	t.Run("loads environment variables from config", func(t *testing.T) {
+		// Clean up any existing TEST_ENV_VAR and ANOTHER_VAR env vars first
+		os.Unsetenv("TEST_ENV_VAR")
+		os.Unsetenv("ANOTHER_VAR")
+		t.Cleanup(func() {
+			os.Unsetenv("TEST_ENV_VAR")
+			os.Unsetenv("ANOTHER_VAR")
+		})
+
+		configContent := []byte(`{
+			"env": {
+				"TEST_ENV_VAR": "test_value",
+				"ANOTHER_VAR": "another_value"
+			}
+		}`)
+
+		// Use loadFromBytes to avoid log.Setup which opens files that can't be
+		// cleaned up on Windows
+		cfg, err := loadFromBytes([][]byte{configContent})
+		require.NoError(t, err)
+
+		// setDefaults initializes Env map if nil
+		cfg.setDefaults(t.TempDir(), "")
+
+		// Check that env vars were loaded from config
+		assert.Equal(t, "test_value", cfg.Env["TEST_ENV_VAR"])
+		assert.Equal(t, "another_value", cfg.Env["ANOTHER_VAR"])
+
+		// Test that setEnvVars actually sets them in the environment
+		err = cfg.setEnvVars()
+		require.NoError(t, err)
+
+		assert.Equal(t, "test_value", os.Getenv("TEST_ENV_VAR"))
+		assert.Equal(t, "another_value", os.Getenv("ANOTHER_VAR"))
+	})
+
+	t.Run("handles missing env section gracefully", func(t *testing.T) {
+		configContent := []byte(`{
+			"providers": {
+				"openai": {
+					"api_key": "test-key"
+				}
+			}
+		}`)
+
+		cfg, err := loadFromBytes([][]byte{configContent})
+		require.NoError(t, err)
+
+		cfg.setDefaults(t.TempDir(), "")
+
+		// setEnvVars initializes Env map if nil
+		err = cfg.setEnvVars()
+		require.NoError(t, err)
+
+		assert.NotNil(t, cfg.Env)
+		assert.Empty(t, cfg.Env)
+	})
+}
+
+func TestValidateEnvVarName(t *testing.T) {
+	t.Run("valid environment variable names", func(t *testing.T) {
+		validNames := []string{
+			"VALID_VAR",
+			"Valid123_Var",
+			"_UNDERSCORE_START",
+			"VAR_WITH_123_NUMBERS",
+		}
+
+		for _, name := range validNames {
+			err := validateEnvVarName(name)
+			assert.NoError(t, err, "Expected %q to be valid", name)
+		}
+	})
+
+	t.Run("invalid environment variable names", func(t *testing.T) {
+		invalidNames := []struct {
+			name    string
+			wantErr string
+		}{
+			{"", "environment variable name cannot be empty"},
+			{"123INVALID", "environment variable name cannot start with a digit"},
+			{"INVALID-NAME", "invalid character"},
+			{"INVALID NAME", "invalid character"},
+			{"INVALID@NAME", "invalid character"},
+		}
+
+		for _, tc := range invalidNames {
+			err := validateEnvVarName(tc.name)
+			assert.Error(t, err, "Expected %q to be invalid", tc.name)
+			assert.Contains(t, err.Error(), tc.wantErr)
+		}
+	})
+}

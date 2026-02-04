@@ -375,6 +375,9 @@ type Config struct {
 	// The providers that are configured
 	Providers *csync.Map[string, ProviderConfig] `json:"providers,omitempty" jsonschema:"description=AI provider configurations"`
 
+	// Environment variables to set for the application.
+	Env map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set for the application,example={\"MY_VAR\":\"value\",\"ANOTHER_VAR\":\"another_value\"}"`
+
 	MCP MCPs `json:"mcp,omitempty" jsonschema:"description=Model Context Protocol server configurations"`
 
 	LSP LSPs `json:"lsp,omitempty" jsonschema:"description=Language Server Protocol configurations"`

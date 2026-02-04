@@ -2879,9 +2879,6 @@ func (m *UI) newSession() tea.Cmd {
 		return nil
 	}
 
-	// Stop all LSPs when unloading a session.
-	m.com.App.LSPManager.StopAll(context.Background())
-
 	m.session = nil
 	m.sessionFiles = nil
 	m.sessionFileReads = nil
@@ -2893,7 +2890,13 @@ func (m *UI) newSession() tea.Cmd {
 	m.promptQueue = 0
 	m.pillsView = ""
 	m.historyReset()
-	return m.loadPromptHistory()
+	return tea.Batch(
+		func() tea.Msg {
+			m.com.App.LSPManager.StopAll(context.Background())
+			return nil
+		},
+		m.loadPromptHistory(),
+	)
 }
 
 // handlePasteMsg handles a paste message.

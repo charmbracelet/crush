@@ -3,6 +3,8 @@ package lsp
 import (
 	"cmp"
 	"context"
+	"errors"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -18,8 +20,8 @@ import (
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
-// Starter handles lazy initialization of LSP clients based on file types.
-type Starter struct {
+// Manager handles lazy initialization of LSP clients based on file types.
+type Manager struct {
 	clients  *csync.Map[string, *Client]
 	cfg      *config.Config
 	manager  *powernapconfig.Manager
@@ -27,11 +29,11 @@ type Starter struct {
 	mu       sync.Mutex
 }
 
-// NewStarter creates a new LSP starter service.
-func NewStarter(
+// NewManager creates a new LSP manager service.
+func NewManager(
 	clients *csync.Map[string, *Client],
 	cfg *config.Config,
-) *Starter {
+) *Manager {
 	manager := powernapconfig.NewManager()
 	manager.LoadDefaults()
 
@@ -57,7 +59,7 @@ func NewStarter(
 		})
 	}
 
-	return &Starter{
+	return &Manager{
 		clients: clients,
 		cfg:     cfg,
 		manager: manager,
@@ -66,7 +68,7 @@ func NewStarter(
 
 // SetCallback sets a callback that is invoked when a new LSP
 // client is successfully started. This allows the coordinator to add LSP tools.
-func (s *Starter) SetCallback(cb func(name string, client *Client)) {
+func (s *Manager) SetCallback(cb func(name string, client *Client)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.callback = cb
@@ -74,7 +76,7 @@ func (s *Starter) SetCallback(cb func(name string, client *Client)) {
 
 // Start starts an LSP server that can handle the given file path.
 // If an appropriate LSP is already running, this is a no-op.
-func (s *Starter) Start(ctx context.Context, filePath string) {
+func (s *Manager) Start(ctx context.Context, filePath string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -121,7 +123,7 @@ var skipAutoStartCommands = map[string]bool{
 	"tflint":  true,
 }
 
-func (s *Starter) startServer(ctx context.Context, name string, server *powernapconfig.ServerConfig) {
+func (s *Manager) startServer(ctx context.Context, name string, server *powernapconfig.ServerConfig) {
 	userConfigured := s.isUserConfigured(name)
 
 	if !userConfigured {
@@ -165,12 +167,12 @@ func (s *Starter) startServer(ctx context.Context, name string, server *powernap
 	slog.Info("LSP client started", "name", name)
 }
 
-func (s *Starter) isUserConfigured(name string) bool {
+func (s *Manager) isUserConfigured(name string) bool {
 	cfg, ok := s.cfg.LSP[name]
 	return ok && !cfg.Disabled
 }
 
-func (s *Starter) buildConfig(name string, server *powernapconfig.ServerConfig) config.LSPConfig {
+func (s *Manager) buildConfig(name string, server *powernapconfig.ServerConfig) config.LSPConfig {
 	cfg := config.LSPConfig{
 		Command:     server.Command,
 		Args:        server.Args,
@@ -221,4 +223,27 @@ func handles(server *powernapconfig.ServerConfig, filePath, workDir string) bool
 		}
 	}
 	return false
+}
+
+// StopAll stops all running LSP clients and clears the client map.
+func (s *Manager) StopAll(ctx context.Context) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var wg sync.WaitGroup
+	for name, client := range s.clients.Seq2() {
+		wg.Add(1)
+		go func(name string, client *Client) {
+			defer wg.Done()
+			if err := client.Close(ctx); err != nil &&
+				!errors.Is(err, io.EOF) &&
+				!errors.Is(err, context.Canceled) &&
+				err.Error() != "signal: killed" {
+				slog.Warn("Failed to stop LSP client", "name", name, "error", err)
+			}
+			s.clients.Del(name)
+			slog.Debug("Stopped LSP client", "name", name)
+		}(name, client)
+	}
+	wg.Wait()
 }

@@ -410,6 +410,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.loadPromptHistory())
 		m.updateLayoutAndSize()
 
+		// Start LSPs for files that were in the previous session.
+		cmds = append(cmds, m.startLSPsForSessionFiles(msg.files))
+
 	case sendMessageMsg:
 		cmds = append(cmds, m.sendMessage(msg.Content, msg.Attachments...))
 
@@ -2629,7 +2632,7 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 	ctx := context.Background()
 	for _, path := range m.sessionFileReads {
 		m.com.App.FileTracker.RecordRead(ctx, m.session.ID, path)
-		m.com.App.LSPStarter.Start(ctx, path)
+		m.com.App.LSPManager.Start(ctx, path)
 	}
 
 	// Capture session ID to avoid race with main goroutine updating m.session.
@@ -2875,6 +2878,9 @@ func (m *UI) newSession() tea.Cmd {
 	if !m.hasSession() {
 		return nil
 	}
+
+	// Stop all LSPs when unloading a session.
+	m.com.App.LSPManager.StopAll(context.Background())
 
 	m.session = nil
 	m.sessionFiles = nil

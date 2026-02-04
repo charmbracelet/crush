@@ -46,7 +46,7 @@ const WriteToolName = "write"
 
 func NewWriteTool(
 	lspClients *csync.Map[string, *lsp.Client],
-	lspStarter *lsp.Starter,
+	lspManager *lsp.Manager,
 	permissions permission.Service,
 	files history.Service,
 	filetracker filetracker.Service,
@@ -162,7 +162,7 @@ func NewWriteTool(
 
 			filetracker.RecordRead(ctx, sessionID, filePath)
 
-			notifyLSPs(ctx, lspClients, lspStarter, params.FilePath)
+			notifyLSPs(ctx, lspClients, lspManager, params.FilePath)
 
 			result := fmt.Sprintf("File successfully written: %s", filePath)
 			result = fmt.Sprintf("<result>\n%s\n</result>", result)

@@ -41,15 +41,15 @@ func NewDiagnosticsTool(lspClients *csync.Map[string, *lsp.Client]) fantasy.Agen
 func notifyLSPs(
 	ctx context.Context,
 	lsps *csync.Map[string, *lsp.Client],
-	starter *lsp.Starter,
+	manager *lsp.Manager,
 	filepath string,
 ) {
 	if filepath == "" {
 		return
 	}
 
-	if starter != nil {
-		starter.Start(ctx, filepath)
+	if manager != nil {
+		manager.Start(ctx, filepath)
 	}
 
 	for client := range lsps.Seq() {

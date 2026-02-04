@@ -59,7 +59,7 @@ type App struct {
 	AgentCoordinator agent.Coordinator
 
 	LSPClients *csync.Map[string, *lsp.Client]
-	LSPStarter *lsp.Starter
+	LSPManager *lsp.Manager
 
 	config *config.Config
 
@@ -94,7 +94,7 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 		Permissions: permission.NewPermissionService(cfg.WorkingDir(), skipPermissionsRequests, allowedTools),
 		FileTracker: filetracker.NewService(q),
 		LSPClients:  lspClients,
-		LSPStarter:  lsp.NewStarter(lspClients, cfg),
+		LSPManager:  lsp.NewManager(lspClients, cfg),
 
 		globalCtx: ctx,
 
@@ -125,7 +125,7 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	}
 
 	// Set up callback for LSP state updates.
-	app.LSPStarter.SetCallback(func(name string, client *lsp.Client) {
+	app.LSPManager.SetCallback(func(name string, client *lsp.Client) {
 		client.SetDiagnosticsCallback(updateLSPDiagnostics)
 		updateLSPState(name, client.GetServerState(), nil, client, 0)
 	})
@@ -477,7 +477,7 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.History,
 		app.FileTracker,
 		app.LSPClients,
-		app.LSPStarter,
+		app.LSPManager,
 	)
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)
@@ -540,16 +540,9 @@ func (app *App) Shutdown() {
 	// Shutdown all LSP clients.
 	shutdownCtx, cancel := context.WithTimeout(app.globalCtx, 5*time.Second)
 	defer cancel()
-	for name, client := range app.LSPClients.Seq2() {
-		wg.Go(func() {
-			if err := client.Close(shutdownCtx); err != nil &&
-				!errors.Is(err, io.EOF) &&
-				!errors.Is(err, context.Canceled) &&
-				err.Error() != "signal: killed" {
-				slog.Warn("Failed to shutdown LSP client", "name", name, "error", err)
-			}
-		})
-	}
+	wg.Go(func() {
+		app.LSPManager.StopAll(shutdownCtx)
+	})
 
 	// Call all cleanup functions.
 	for _, cleanup := range app.cleanupFuncs {

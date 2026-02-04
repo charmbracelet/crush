@@ -62,7 +62,7 @@ type editContext struct {
 
 func NewEditTool(
 	lspClients *csync.Map[string, *lsp.Client],
-	lspStarter *lsp.Starter,
+	lspManager *lsp.Manager,
 	permissions permission.Service,
 	files history.Service,
 	filetracker filetracker.Service,
@@ -100,7 +100,7 @@ func NewEditTool(
 				return response, nil
 			}
 
-			notifyLSPs(ctx, lspClients, lspStarter, params.FilePath)
+			notifyLSPs(ctx, lspClients, lspManager, params.FilePath)
 
 			text := fmt.Sprintf("<result>\n%s\n</result>\n", response.Content)
 			text += getDiagnostics(params.FilePath, lspClients)

@@ -60,7 +60,7 @@ var multieditDescription []byte
 
 func NewMultiEditTool(
 	lspClients *csync.Map[string, *lsp.Client],
-	lspStarter *lsp.Starter,
+	lspManager *lsp.Manager,
 	permissions permission.Service,
 	files history.Service,
 	filetracker filetracker.Service,
@@ -105,7 +105,7 @@ func NewMultiEditTool(
 			}
 
 			// Notify LSP clients about the change
-			notifyLSPs(ctx, lspClients, lspStarter, params.FilePath)
+			notifyLSPs(ctx, lspClients, lspManager, params.FilePath)
 
 			// Wait for LSP diagnostics and add them to the response
 			text := fmt.Sprintf("<result>\n%s\n</result>\n", response.Content)

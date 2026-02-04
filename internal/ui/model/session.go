@@ -242,3 +242,18 @@ func fileList(t *styles.Styles, cwd string, files []SessionFile, width, maxItems
 
 	return lipgloss.JoinVertical(lipgloss.Left, renderedFiles...)
 }
+
+// startLSPsForSessionFiles starts LSP servers for the files in the loaded session.
+func (m *UI) startLSPsForSessionFiles(files []SessionFile) tea.Cmd {
+	if len(files) == 0 {
+		return nil
+	}
+
+	return func() tea.Msg {
+		ctx := context.Background()
+		for _, f := range files {
+			m.com.App.LSPManager.Start(ctx, f.LatestVersion.Path)
+		}
+		return nil
+	}
+}

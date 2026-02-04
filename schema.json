@@ -650,6 +650,11 @@
         "completions": {
           "$ref": "#/$defs/Completions",
           "description": "Completions UI options"
+        },
+        "transparent": {
+          "type": "boolean",
+          "description": "Enable transparent background for the TUI interface",
+          "default": false
         }
       },
       "additionalProperties": false,

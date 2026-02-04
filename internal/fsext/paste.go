@@ -1,20 +1,36 @@
 package fsext
 
 import (
-	"runtime"
+	"os"
 	"strings"
 )
 
-func PasteStringToPaths(s string) []string {
-	switch runtime.GOOS {
-	case "windows":
-		return windowsPasteStringToPaths(s)
+func ParsePastedFiles(s string) []string {
+	s = strings.TrimSpace(s)
+
+	// NOTE: Rio on Windows adds NULL chars for some reason.
+	s = strings.ReplaceAll(s, "\x00", "")
+
+	switch {
+	case attemptStat(s):
+		return strings.Split(s, "\n")
+	case os.Getenv("WT_SESSION") != "":
+		return windowsTerminalParsePastedFiles(s)
 	default:
-		return unixPasteStringToPaths(s)
+		return unixParsePastedFiles(s)
 	}
 }
 
-func windowsPasteStringToPaths(s string) []string {
+func attemptStat(s string) bool {
+	for path := range strings.SplitSeq(s, "\n") {
+		if info, err := os.Stat(path); err != nil || info.IsDir() {
+			return false
+		}
+	}
+	return true
+}
+
+func windowsTerminalParsePastedFiles(s string) []string {
 	if strings.TrimSpace(s) == "" {
 		return nil
 	}
@@ -42,8 +58,10 @@ func windowsPasteStringToPaths(s string) []string {
 			}
 		case inQuotes:
 			current.WriteByte(ch)
+		case ch != ' ':
+			// Text outside quotes is not allowed
+			return nil
 		}
-		// Skip characters outside quotes and spaces between quoted sections
 	}
 
 	// Add any remaining content if quotes were properly closed
@@ -59,7 +77,7 @@ func windowsPasteStringToPaths(s string) []string {
 	return paths
 }
 
-func unixPasteStringToPaths(s string) []string {
+func unixParsePastedFiles(s string) []string {
 	if strings.TrimSpace(s) == "" {
 		return nil
 	}

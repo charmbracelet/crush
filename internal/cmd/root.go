@@ -93,8 +93,13 @@ crush -y
 		// Set up the TUI.
 		var env uv.Environ = os.Environ()
 
+		newUI := true
+		if v, err := strconv.ParseBool(env.Getenv("CRUSH_NEW_UI")); err == nil {
+			newUI = v
+		}
+
 		var model tea.Model
-		if v, _ := strconv.ParseBool(env.Getenv("CRUSH_NEW_UI")); v {
+		if newUI {
 			slog.Info("New UI in control!")
 			com := common.DefaultCommon(app)
 			ui := ui.New(com)

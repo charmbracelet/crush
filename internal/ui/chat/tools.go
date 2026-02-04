@@ -773,11 +773,6 @@ func roundedEnumerator(lPadding, width int) tree.Enumerator {
 func toolOutputMarkdownContent(sty *styles.Styles, content string, width int, expanded bool) string {
 	content = stringext.NormalizeSpace(content)
 
-	// Cap width for readability.
-	if width > maxTextWidth {
-		width = maxTextWidth
-	}
-
 	renderer := common.PlainMarkdownRenderer(sty, width)
 	rendered, err := renderer.Render(content)
 	if err != nil {

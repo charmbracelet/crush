@@ -46,9 +46,11 @@ func notifyLSPs(
 		return
 	}
 
-	if manager != nil {
-		manager.Start(ctx, filepath)
+	if manager == nil {
+		return
 	}
+
+	manager.Start(ctx, filepath)
 
 	for client := range manager.Clients().Seq() {
 		if !client.HandlesFile(filepath) {
@@ -61,6 +63,10 @@ func notifyLSPs(
 }
 
 func getDiagnostics(filePath string, manager *lsp.Manager) string {
+	if manager == nil {
+		return ""
+	}
+
 	fileDiagnostics := []string{}
 	projectDiagnostics := []string{}
 

@@ -9,8 +9,6 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
@@ -29,8 +27,9 @@ type CommandType uint
 func (c CommandType) String() string { return []string{"System", "User", "MCP"}[c] }
 
 const (
-	sidebarCompactModeBreakpoint  = 120
-	defaultCommandsDialogMaxWidth = 70
+	sidebarCompactModeBreakpoint   = 120
+	defaultCommandsDialogMaxHeight = 20
+	defaultCommandsDialogMaxWidth  = 70
 )
 
 const (
@@ -241,8 +240,8 @@ func commandsRadioView(sty *styles.Styles, selected CommandType, hasUserCmds boo
 // Draw implements [Dialog].
 func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := c.com.Styles
-	width := max(0, min(defaultCommandsDialogMaxWidth, area.Dx()))
-	height := max(0, min(defaultDialogHeight, area.Dy()))
+	width := max(0, min(defaultCommandsDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
+	height := max(0, min(defaultCommandsDialogMaxHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
 	if area.Dx() != c.windowWidth && c.selected == SystemCommands {
 		c.windowWidth = area.Dx()
 		// since some items in the list depend on width (e.g. toggle sidebar command),
@@ -405,7 +404,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 			selectedModel := cfg.Models[agentCfg.Model]
 
 			// Anthropic models: thinking toggle
-			if providerCfg.Type == catwalk.TypeAnthropic || providerCfg.Type == catwalk.Type(hyper.Name) {
+			if model.CanReason && len(model.ReasoningLevels) == 0 {
 				status := "Enable"
 				if selectedModel.Think {
 					status = "Disable"
@@ -422,7 +421,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		}
 	}
 	// Only show toggle compact mode command if window width is larger than compact breakpoint (120)
-	if c.windowWidth > sidebarCompactModeBreakpoint && c.sessionID != "" {
+	if c.windowWidth >= sidebarCompactModeBreakpoint && c.sessionID != "" {
 		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_sidebar", "Toggle Sidebar", "", ActionToggleCompactMode{}))
 	}
 	if c.sessionID != "" {

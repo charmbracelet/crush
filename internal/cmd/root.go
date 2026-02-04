@@ -93,12 +93,16 @@ crush -y
 		// Set up the TUI.
 		var env uv.Environ = os.Environ()
 
+		newUI := true
+		if v, err := strconv.ParseBool(env.Getenv("CRUSH_NEW_UI")); err == nil {
+			newUI = v
+		}
+
 		var model tea.Model
-		if v, _ := strconv.ParseBool(env.Getenv("CRUSH_NEW_UI")); v {
+		if newUI {
 			slog.Info("New UI in control!")
 			com := common.DefaultCommon(app)
 			ui := ui.New(com)
-			ui.QueryCapabilities = shouldQueryCapabilities(env)
 			model = ui
 		} else {
 			ui := tui.New(app)
@@ -180,12 +184,19 @@ func supportsProgressBar() bool {
 }
 
 func setupAppWithProgressBar(cmd *cobra.Command) (*app.App, error) {
-	if supportsProgressBar() {
+	app, err := setupApp(cmd)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check if progress bar is enabled in config (defaults to true if nil)
+	progressEnabled := app.Config().Options.Progress == nil || *app.Config().Options.Progress
+	if progressEnabled && supportsProgressBar() {
 		_, _ = fmt.Fprintf(os.Stderr, ansi.SetIndeterminateProgressBar)
 		defer func() { _, _ = fmt.Fprintf(os.Stderr, ansi.ResetProgressBar) }()
 	}
 
-	return setupApp(cmd)
+	return app, nil
 }
 
 // setupApp handles the common setup logic for both interactive and non-interactive modes.
@@ -303,6 +314,7 @@ func createDotCrushDir(dir string) error {
 	return nil
 }
 
+// TODO: Remove me after dropping the old TUI.
 func shouldQueryCapabilities(env uv.Environ) bool {
 	const osVendorTypeApple = "Apple"
 	termType := env.Getenv("TERM")

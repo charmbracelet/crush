@@ -2,6 +2,7 @@ package model
 
 import (
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -11,7 +12,23 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/list"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/clipperhouse/displaywidth"
+	"github.com/clipperhouse/uax29/v2/words"
 )
+
+// Constants for multi-click detection.
+const (
+	doubleClickThreshold = 400 * time.Millisecond // 0.4s is typical double-click threshold
+	clickTolerance       = 2                      // x,y tolerance for double/tripple click
+)
+
+// DelayedClickMsg is sent after the double-click threshold to trigger a
+// single-click action (like expansion) if no double-click occurred.
+type DelayedClickMsg struct {
+	ClickID int
+	ItemIdx int
+	X, Y    int
+}
 
 // Chat represents the chat UI model that handles chat interactions and
 // messages.
@@ -33,6 +50,15 @@ type Chat struct {
 	mouseDragItem int // Current item index being dragged over
 	mouseDragX    int // Current X in item content
 	mouseDragY    int // Current Y in item
+
+	// Click tracking for double/triple clicks
+	lastClickTime time.Time
+	lastClickX    int
+	lastClickY    int
+	clickCount    int
+
+	// Pending single click action (delayed to detect double-click)
+	pendingClickID int // Incremented on each click to invalidate old pending clicks
 }
 
 // NewChat creates a new instance of [Chat] that handles chat interactions and
@@ -66,6 +92,10 @@ func (m *Chat) Draw(scr uv.Screen, area uv.Rectangle) {
 // SetSize sets the size of the chat view port.
 func (m *Chat) SetSize(width, height int) {
 	m.list.SetSize(width, height)
+	// Anchor to bottom if we were at the bottom.
+	if m.list.AtBottom() {
+		m.list.ScrollToBottom()
+	}
 }
 
 // Len returns the number of items in the chat list.
@@ -408,6 +438,7 @@ func (m *Chat) MessageItem(id string) chat.MessageItem {
 func (m *Chat) ToggleExpandedSelectedItem() {
 	if expandable, ok := m.list.SelectedItem().(chat.Expandable); ok {
 		expandable.ToggleExpanded()
+		m.list.ScrollToIndex(m.list.Selected())
 	}
 }
 
@@ -422,35 +453,104 @@ func (m *Chat) HandleKeyMsg(key tea.KeyMsg) (bool, tea.Cmd) {
 }
 
 // HandleMouseDown handles mouse down events for the chat component.
-func (m *Chat) HandleMouseDown(x, y int) bool {
+// It detects single, double, and triple clicks for text selection.
+// Returns whether the click was handled and an optional command for delayed
+// single-click actions.
+func (m *Chat) HandleMouseDown(x, y int) (bool, tea.Cmd) {
 	if m.list.Len() == 0 {
-		return false
+		return false, nil
 	}
 
 	itemIdx, itemY := m.list.ItemIndexAtPosition(x, y)
 	if itemIdx < 0 {
-		return false
+		return false, nil
 	}
 	if !m.isSelectable(itemIdx) {
-		return false
+		return false, nil
 	}
 
-	m.mouseDown = true
-	m.mouseDownItem = itemIdx
-	m.mouseDownX = x
-	m.mouseDownY = itemY
-	m.mouseDragItem = itemIdx
-	m.mouseDragX = x
-	m.mouseDragY = itemY
+	// Increment pending click ID to invalidate any previous pending clicks.
+	m.pendingClickID++
+	clickID := m.pendingClickID
+
+	// Detect multi-click (double/triple)
+	now := time.Now()
+	if now.Sub(m.lastClickTime) <= doubleClickThreshold &&
+		abs(x-m.lastClickX) <= clickTolerance &&
+		abs(y-m.lastClickY) <= clickTolerance {
+		m.clickCount++
+	} else {
+		m.clickCount = 1
+	}
+	m.lastClickTime = now
+	m.lastClickX = x
+	m.lastClickY = y
 
 	// Select the item that was clicked
 	m.list.SetSelected(itemIdx)
 
-	if clickable, ok := m.list.SelectedItem().(list.MouseClickable); ok {
-		return clickable.HandleMouseClick(ansi.MouseButton1, x, itemY)
+	var cmd tea.Cmd
+
+	switch m.clickCount {
+	case 1:
+		// Single click - start selection and schedule delayed click action.
+		m.mouseDown = true
+		m.mouseDownItem = itemIdx
+		m.mouseDownX = x
+		m.mouseDownY = itemY
+		m.mouseDragItem = itemIdx
+		m.mouseDragX = x
+		m.mouseDragY = itemY
+
+		// Schedule delayed click action (e.g., expansion) after a short delay.
+		// If a double-click occurs, the clickID will be invalidated.
+		cmd = tea.Tick(doubleClickThreshold, func(t time.Time) tea.Msg {
+			return DelayedClickMsg{
+				ClickID: clickID,
+				ItemIdx: itemIdx,
+				X:       x,
+				Y:       itemY,
+			}
+		})
+	case 2:
+		// Double click - select word (no delayed action)
+		m.selectWord(itemIdx, x, itemY)
+	case 3:
+		// Triple click - select line (no delayed action)
+		m.selectLine(itemIdx, itemY)
+		m.clickCount = 0 // Reset after triple click
 	}
 
-	return true
+	return true, cmd
+}
+
+// HandleDelayedClick handles a delayed single-click action (like expansion).
+// It only executes if the click ID matches (i.e., no double-click occurred)
+// and no text selection was made (drag to select).
+func (m *Chat) HandleDelayedClick(msg DelayedClickMsg) bool {
+	// Ignore if this click was superseded by a newer click (double/triple).
+	if msg.ClickID != m.pendingClickID {
+		return false
+	}
+
+	// Don't expand if user dragged to select text.
+	if m.HasHighlight() {
+		return false
+	}
+
+	// Execute the click action (e.g., expansion).
+	selectedItem := m.list.SelectedItem()
+	if clickable, ok := selectedItem.(list.MouseClickable); ok {
+		handled := clickable.HandleMouseClick(ansi.MouseButton1, msg.X, msg.Y)
+		// Toggle expansion if applicable.
+		if expandable, ok := selectedItem.(chat.Expandable); ok {
+			expandable.ToggleExpanded()
+		}
+		m.list.ScrollToIndex(m.list.Selected())
+		return handled
+	}
+
+	return false
 }
 
 // HandleMouseUp handles mouse up events for the chat component.
@@ -531,6 +631,11 @@ func (m *Chat) ClearMouse() {
 	m.mouseDown = false
 	m.mouseDownItem = -1
 	m.mouseDragItem = -1
+	m.lastClickTime = time.Time{}
+	m.lastClickX = 0
+	m.lastClickY = 0
+	m.clickCount = 0
+	m.pendingClickID++ // Invalidate any pending delayed click
 }
 
 // applyHighlightRange applies the current highlight range to the chat items.
@@ -607,4 +712,145 @@ func (m *Chat) getHighlightRange() (startItemIdx, startLine, startCol, endItemId
 	}
 
 	return startItemIdx, startLine, startCol, endItemIdx, endLine, endCol
+}
+
+// selectWord selects the word at the given position within an item.
+func (m *Chat) selectWord(itemIdx, x, itemY int) {
+	item := m.list.ItemAt(itemIdx)
+	if item == nil {
+		return
+	}
+
+	// Get the rendered content for this item
+	var rendered string
+	if rr, ok := item.(list.RawRenderable); ok {
+		rendered = rr.RawRender(m.list.Width())
+	} else {
+		rendered = item.Render(m.list.Width())
+	}
+
+	lines := strings.Split(rendered, "\n")
+	if itemY < 0 || itemY >= len(lines) {
+		return
+	}
+
+	// Adjust x for the item's left padding (border + padding) to get content column.
+	// The mouse x is in viewport space, but we need content space for boundary detection.
+	offset := chat.MessageLeftPaddingTotal
+	contentX := x - offset
+	if contentX < 0 {
+		contentX = 0
+	}
+
+	line := ansi.Strip(lines[itemY])
+	startCol, endCol := findWordBoundaries(line, contentX)
+	if startCol == endCol {
+		// No word found at position, fallback to single click behavior
+		m.mouseDown = true
+		m.mouseDownItem = itemIdx
+		m.mouseDownX = x
+		m.mouseDownY = itemY
+		m.mouseDragItem = itemIdx
+		m.mouseDragX = x
+		m.mouseDragY = itemY
+		return
+	}
+
+	// Set selection to the word boundaries (convert back to viewport space).
+	// Keep mouseDown true so HandleMouseUp triggers the copy.
+	m.mouseDown = true
+	m.mouseDownItem = itemIdx
+	m.mouseDownX = startCol + offset
+	m.mouseDownY = itemY
+	m.mouseDragItem = itemIdx
+	m.mouseDragX = endCol + offset
+	m.mouseDragY = itemY
+}
+
+// selectLine selects the entire line at the given position within an item.
+func (m *Chat) selectLine(itemIdx, itemY int) {
+	item := m.list.ItemAt(itemIdx)
+	if item == nil {
+		return
+	}
+
+	// Get the rendered content for this item
+	var rendered string
+	if rr, ok := item.(list.RawRenderable); ok {
+		rendered = rr.RawRender(m.list.Width())
+	} else {
+		rendered = item.Render(m.list.Width())
+	}
+
+	lines := strings.Split(rendered, "\n")
+	if itemY < 0 || itemY >= len(lines) {
+		return
+	}
+
+	// Get line length (stripped of ANSI codes) and account for padding.
+	// SetHighlight will subtract the offset, so we need to add it here.
+	offset := chat.MessageLeftPaddingTotal
+	lineLen := ansi.StringWidth(lines[itemY])
+
+	// Set selection to the entire line.
+	// Keep mouseDown true so HandleMouseUp triggers the copy.
+	m.mouseDown = true
+	m.mouseDownItem = itemIdx
+	m.mouseDownX = 0
+	m.mouseDownY = itemY
+	m.mouseDragItem = itemIdx
+	m.mouseDragX = lineLen + offset
+	m.mouseDragY = itemY
+}
+
+// findWordBoundaries finds the start and end column of the word at the given column.
+// Returns (startCol, endCol) where endCol is exclusive.
+func findWordBoundaries(line string, col int) (startCol, endCol int) {
+	if line == "" || col < 0 {
+		return 0, 0
+	}
+
+	i := displaywidth.StringGraphemes(line)
+	for i.Next() {
+	}
+
+	// Segment the line into words using UAX#29.
+	lineCol := 0 // tracks the visited column widths
+	lastCol := 0 // tracks the start of the current token
+	iter := words.FromString(line)
+	for iter.Next() {
+		token := iter.Value()
+		tokenWidth := displaywidth.String(token)
+
+		graphemeStart := lineCol
+		graphemeEnd := lineCol + tokenWidth
+		lineCol += tokenWidth
+
+		// If clicked before this token, return the previous token boundaries.
+		if col < graphemeStart {
+			return lastCol, lastCol
+		}
+
+		// Update lastCol to the end of this token for next iteration.
+		lastCol = graphemeEnd
+
+		// If clicked within this token, return its boundaries.
+		if col >= graphemeStart && col < graphemeEnd {
+			// If clicked on whitespace, return empty selection.
+			if strings.TrimSpace(token) == "" {
+				return col, col
+			}
+			return graphemeStart, graphemeEnd
+		}
+	}
+
+	return col, col
+}
+
+// abs returns the absolute value of an integer.
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
 }

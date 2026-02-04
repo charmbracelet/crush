@@ -2,6 +2,8 @@ package model
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -21,16 +23,14 @@ type LSPInfo struct {
 // lspInfo renders the LSP status section showing active LSP clients and their
 // diagnostic counts.
 func (m *UI) lspInfo(width, maxItems int, isSection bool) string {
-	var lsps []LSPInfo
 	t := m.com.Styles
-	lspConfigs := m.com.Config().LSP.Sorted()
 
-	for _, cfg := range lspConfigs {
-		state, ok := m.lspStates[cfg.Name]
-		if !ok {
-			continue
-		}
+	states := slices.SortedFunc(maps.Values(m.lspStates), func(a, b app.LSPClientInfo) int {
+		return strings.Compare(a.Name, b.Name)
+	})
 
+	var lsps []LSPInfo
+	for _, state := range states {
 		client, ok := m.com.App.LSPClients.Get(state.Name)
 		if !ok {
 			continue

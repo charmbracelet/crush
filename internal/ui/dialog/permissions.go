@@ -48,7 +48,7 @@ const (
 	// layoutSpacingLines is the number of empty lines used for layout spacing.
 	layoutSpacingLines = 4
 	// minWindowWidth is the minimum window width before forcing fullscreen.
-	minWindowWidth = 60
+	minWindowWidth = 77
 	// minWindowHeight is the minimum window height before forcing fullscreen.
 	minWindowHeight = 20
 )
@@ -392,6 +392,7 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		} else {
 			availableHeight = maxHeight - fixedHeight
 		}
+		availableHeight = max(availableHeight, 3)
 	} else {
 		availableHeight = maxHeight - headerHeight - buttonsHeight - helpHeight - frameHeight
 	}

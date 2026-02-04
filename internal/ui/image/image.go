@@ -13,61 +13,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/uiutil"
-	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/ansi/kitty"
 	"github.com/disintegration/imaging"
 	paintbrush "github.com/jordanella/go-ansi-paintbrush"
 )
-
-// Capabilities represents the capabilities of displaying images on the
-// terminal.
-type Capabilities struct {
-	// Columns is the number of character columns in the terminal.
-	Columns int
-	// Rows is the number of character rows in the terminal.
-	Rows int
-	// PixelWidth is the width of the terminal in pixels.
-	PixelWidth int
-	// PixelHeight is the height of the terminal in pixels.
-	PixelHeight int
-	// SupportsKittyGraphics indicates whether the terminal supports the Kitty
-	// graphics protocol.
-	SupportsKittyGraphics bool
-	// Env is the terminal environment variables.
-	Env uv.Environ
-}
-
-// CellSize returns the size of a single terminal cell in pixels.
-func (c Capabilities) CellSize() CellSize {
-	return CalculateCellSize(c.PixelWidth, c.PixelHeight, c.Columns, c.Rows)
-}
-
-// CalculateCellSize calculates the size of a single terminal cell in pixels
-// based on the terminal's pixel dimensions and character dimensions.
-func CalculateCellSize(pixelWidth, pixelHeight, charWidth, charHeight int) CellSize {
-	if charWidth == 0 || charHeight == 0 {
-		return CellSize{}
-	}
-
-	return CellSize{
-		Width:  pixelWidth / charWidth,
-		Height: pixelHeight / charHeight,
-	}
-}
-
-// RequestCapabilities is a [tea.Cmd] that requests the terminal to report
-// its image related capabilities to the program.
-func RequestCapabilities(env uv.Environ) tea.Cmd {
-	winOpReq := ansi.WindowOp(14) // Window size in pixels
-	// ID 31 is just a random ID used to detect Kitty graphics support.
-	kittyReq := ansi.KittyGraphics([]byte("AAAA"), "i=31", "s=1", "v=1", "a=q", "t=d", "f=24")
-	if _, isTmux := env.LookupEnv("TMUX"); isTmux {
-		kittyReq = ansi.TmuxPassthrough(kittyReq)
-	}
-
-	return tea.Raw(winOpReq + kittyReq)
-}
 
 // TransmittedMsg is a message indicating that an image has been transmitted to
 // the terminal.
@@ -218,7 +168,7 @@ func (e Encoding) Transmit(id string, img image.Image, cs CellSize, cols, rows i
 				return chunk
 			},
 		}); err != nil {
-			slog.Error("failed to encode image for kitty graphics", "err", err)
+			slog.Error("Failed to encode image for kitty graphics", "err", err)
 			return uiutil.InfoMsg{
 				Type: uiutil.InfoTypeError,
 				Msg:  "failed to encode image",

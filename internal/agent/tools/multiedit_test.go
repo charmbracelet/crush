@@ -6,10 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/history"
-	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/stretchr/testify/require"
@@ -110,17 +107,6 @@ func TestMultiEditSequentialApplication(t *testing.T) {
 	content := "line 1\nline 2\nline 3\nline 4\n"
 	err := os.WriteFile(testFile, []byte(content), 0o644)
 	require.NoError(t, err)
-
-	// Mock components.
-	lspClients := csync.NewMap[string, *lsp.Client]()
-	permissions := &mockPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
-	files := &mockHistoryService{Broker: pubsub.NewBroker[history.File]()}
-
-	// Create multiedit tool.
-	_ = NewMultiEditTool(lspClients, permissions, files, tmpDir)
-
-	// Simulate reading the file first.
-	filetracker.RecordRead(testFile)
 
 	// Manually test the sequential application logic.
 	currentContent := content

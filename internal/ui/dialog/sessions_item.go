@@ -76,7 +76,7 @@ func (s *SessionItem) Cursor() *tea.Cursor {
 // Render returns the string representation of the session item.
 func (s *SessionItem) Render(width int) string {
 	info := humanize.Time(time.Unix(s.UpdatedAt, 0))
-	styles := ListIemStyles{
+	styles := ListItemStyles{
 		ItemBlurred:     s.t.Dialog.NormalItem,
 		ItemFocused:     s.t.Dialog.SelectedItem,
 		InfoTextBlurred: s.t.Subtle,
@@ -88,8 +88,8 @@ func (s *SessionItem) Render(width int) string {
 		styles.ItemBlurred = s.t.Dialog.Sessions.DeletingItemBlurred
 		styles.ItemFocused = s.t.Dialog.Sessions.DeletingItemFocused
 	case sessionsModeUpdating:
-		styles.ItemBlurred = s.t.Dialog.Sessions.UpdatingItemBlurred
-		styles.ItemFocused = s.t.Dialog.Sessions.UpdatingItemFocused
+		styles.ItemBlurred = s.t.Dialog.Sessions.RenamingItemBlurred
+		styles.ItemFocused = s.t.Dialog.Sessions.RenamingingItemFocused
 		if s.focused {
 			inputWidth := width - styles.InfoTextFocused.GetHorizontalFrameSize()
 			s.updateTitleInput.SetWidth(inputWidth)
@@ -101,14 +101,14 @@ func (s *SessionItem) Render(width int) string {
 	return renderItem(styles, s.Title, info, s.focused, width, s.cache, &s.m)
 }
 
-type ListIemStyles struct {
+type ListItemStyles struct {
 	ItemBlurred     lipgloss.Style
 	ItemFocused     lipgloss.Style
 	InfoTextBlurred lipgloss.Style
 	InfoTextFocused lipgloss.Style
 }
 
-func renderItem(t ListIemStyles, title string, info string, focused bool, width int, cache map[int]string, m *fuzzy.Match) string {
+func renderItem(t ListItemStyles, title string, info string, focused bool, width int, cache map[int]string, m *fuzzy.Match) string {
 	if cache == nil {
 		cache = make(map[int]string)
 	}
@@ -141,14 +141,14 @@ func renderItem(t ListIemStyles, title string, info string, focused bool, width 
 	titleWidth := lipgloss.Width(title)
 	gap := strings.Repeat(" ", max(0, lineWidth-titleWidth-infoWidth))
 	content := title
-	if matches := len(m.MatchedIndexes); matches > 0 {
+	if m != nil && len(m.MatchedIndexes) > 0 {
 		var lastPos int
 		parts := make([]string, 0)
 		ranges := matchedRanges(m.MatchedIndexes)
 		for _, rng := range ranges {
 			start, stop := bytePosToVisibleCharPos(title, rng)
 			if start > lastPos {
-				parts = append(parts, title[lastPos:start])
+				parts = append(parts, ansi.Cut(title, lastPos, start))
 			}
 			// NOTE: We're using [ansi.Style] here instead of [lipglosStyle]
 			// because we can control the underline start and stop more
@@ -157,13 +157,13 @@ func renderItem(t ListIemStyles, title string, info string, focused bool, width 
 			// with other style
 			parts = append(parts,
 				ansi.NewStyle().Underline(true).String(),
-				title[start:stop+1],
+				ansi.Cut(title, start, stop+1),
 				ansi.NewStyle().Underline(false).String(),
 			)
 			lastPos = stop + 1
 		}
-		if lastPos < len(title) {
-			parts = append(parts, title[lastPos:])
+		if lastPos < ansi.StringWidth(title) {
+			parts = append(parts, ansi.Cut(title, lastPos, ansi.StringWidth(title)))
 		}
 
 		content = strings.Join(parts, "")
@@ -193,7 +193,7 @@ func sessionItems(t *styles.Styles, mode sessionsMode, sessions ...session.Sessi
 			item.updateTitleInput.SetVirtualCursor(false)
 			item.updateTitleInput.Prompt = ""
 			inputStyle := t.TextInput
-			inputStyle.Focused.Placeholder = inputStyle.Focused.Placeholder.Foreground(t.FgHalfMuted)
+			inputStyle.Focused.Placeholder = t.Dialog.Sessions.RenamingPlaceholder
 			item.updateTitleInput.SetStyles(inputStyle)
 			item.updateTitleInput.Focus()
 		}

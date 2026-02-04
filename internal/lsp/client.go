@@ -191,6 +191,8 @@ func (c *Client) Restart() error {
 		slog.Warn("Error closing client during restart", "name", c.name, "error", err)
 	}
 
+	c.SetServerState(StateStopped)
+
 	c.diagCountsCache = DiagnosticCounts{}
 	c.diagCountsVersion = 0
 
@@ -228,7 +230,8 @@ func (c *Client) Restart() error {
 type ServerState int
 
 const (
-	StateStarting ServerState = iota
+	StateStopped ServerState = iota
+	StateStarting
 	StateReady
 	StateError
 	StateDisabled

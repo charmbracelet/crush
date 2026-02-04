@@ -141,9 +141,6 @@ type UI struct {
 	// isCanceling tracks whether the user has pressed escape once to cancel.
 	isCanceling bool
 
-	// header is the last cached header logo
-	header string
-
 	// sendProgressBar instructs the TUI to send progress bar updates to the
 	// terminal.
 	sendProgressBar    bool
@@ -1770,22 +1767,19 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	switch m.state {
 	case uiOnboarding:
-		header := uv.NewStyledString(m.header)
-		header.Draw(scr, layout.header)
+		m.drawHeader(scr, layout.header)
 
 		// NOTE: Onboarding flow will be rendered as dialogs below, but
 		// positioned at the bottom left of the screen.
 
 	case uiInitialize:
-		header := uv.NewStyledString(m.header)
-		header.Draw(scr, layout.header)
+		m.drawHeader(scr, layout.header)
 
 		main := uv.NewStyledString(m.initializeView())
 		main.Draw(scr, layout.main)
 
 	case uiLanding:
-		header := uv.NewStyledString(m.header)
-		header.Draw(scr, layout.header)
+		m.drawHeader(scr, layout.header)
 		main := uv.NewStyledString(m.landingView())
 		main.Draw(scr, layout.main)
 
@@ -1794,8 +1788,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	case uiChat:
 		if m.isCompact {
-			header := uv.NewStyledString(m.header)
-			header.Draw(scr, layout.header)
+			m.drawHeader(scr, layout.header)
 		} else {
 			m.drawSidebar(scr, layout.sidebar)
 		}
@@ -2172,13 +2165,8 @@ func (m *UI) updateSize() {
 
 	// Handle different app states
 	switch m.state {
-	case uiOnboarding, uiInitialize, uiLanding:
-		m.renderHeader(false, m.layout.header.Dx())
-
 	case uiChat:
-		if m.isCompact {
-			m.renderHeader(true, m.layout.header.Dx())
-		} else {
+		if !m.isCompact {
 			m.renderSidebarLogo(m.layout.sidebar.Dx())
 		}
 	}
@@ -2585,12 +2573,11 @@ func (m *UI) renderEditorView(width int) string {
 	)
 }
 
-// renderHeader renders and caches the header logo at the specified width.
-func (m *UI) renderHeader(compact bool, width int) {
-	if compact && m.session != nil && m.com.App != nil {
-		m.header = renderCompactHeader(m.com, m.session, m.com.App.LSPClients, m.detailsOpen, width)
+func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
+	if m.isCompact && m.session != nil && m.com.App != nil {
+		uv.NewStyledString(renderCompactHeader(m.com, m.session, m.com.App.LSPClients, m.detailsOpen, area.Dx())).Draw(scr, area)
 	} else {
-		m.header = renderLogo(m.com.Styles, compact, width)
+		uv.NewStyledString(renderLogo(m.com.Styles, false, area.Dx())).Draw(scr, area)
 	}
 }
 

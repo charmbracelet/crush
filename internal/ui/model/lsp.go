@@ -31,7 +31,7 @@ func (m *UI) lspInfo(width, maxItems int, isSection bool) string {
 
 	var lsps []LSPInfo
 	for _, state := range states {
-		client, ok := m.com.App.LSPClients.Get(state.Name)
+		client, ok := m.com.App.LSPManager.Clients().Get(state.Name)
 		if !ok {
 			continue
 		}

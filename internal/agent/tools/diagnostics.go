@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
@@ -24,23 +23,22 @@ const DiagnosticsToolName = "lsp_diagnostics"
 //go:embed diagnostics.md
 var diagnosticsDescription []byte
 
-func NewDiagnosticsTool(lspClients *csync.Map[string, *lsp.Client]) fantasy.AgentTool {
+func NewDiagnosticsTool(lspManager *lsp.Manager) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		DiagnosticsToolName,
 		string(diagnosticsDescription),
 		func(ctx context.Context, params DiagnosticsParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			if lspClients.Len() == 0 {
+			if lspManager.Clients().Len() == 0 {
 				return fantasy.NewTextErrorResponse("no LSP clients available"), nil
 			}
-			notifyLSPs(ctx, lspClients, nil, params.FilePath)
-			output := getDiagnostics(params.FilePath, lspClients)
+			notifyLSPs(ctx, lspManager, params.FilePath)
+			output := getDiagnostics(params.FilePath, lspManager)
 			return fantasy.NewTextResponse(output), nil
 		})
 }
 
 func notifyLSPs(
 	ctx context.Context,
-	lsps *csync.Map[string, *lsp.Client],
 	manager *lsp.Manager,
 	filepath string,
 ) {
@@ -52,7 +50,7 @@ func notifyLSPs(
 		manager.Start(ctx, filepath)
 	}
 
-	for client := range lsps.Seq() {
+	for client := range manager.Clients().Seq() {
 		if !client.HandlesFile(filepath) {
 			continue
 		}
@@ -62,11 +60,11 @@ func notifyLSPs(
 	}
 }
 
-func getDiagnostics(filePath string, lsps *csync.Map[string, *lsp.Client]) string {
+func getDiagnostics(filePath string, manager *lsp.Manager) string {
 	fileDiagnostics := []string{}
 	projectDiagnostics := []string{}
 
-	for lspName, client := range lsps.Seq2() {
+	for lspName, client := range manager.Clients().Seq2() {
 		for location, diags := range client.GetDiagnostics() {
 			path, err := location.Path()
 			if err != nil {

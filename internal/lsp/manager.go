@@ -1,3 +1,4 @@
+// Package lsp provides a manager for Language Server Protocol (LSP) clients.
 package lsp
 
 import (
@@ -30,10 +31,7 @@ type Manager struct {
 }
 
 // NewManager creates a new LSP manager service.
-func NewManager(
-	clients *csync.Map[string, *Client],
-	cfg *config.Config,
-) *Manager {
+func NewManager(cfg *config.Config) *Manager {
 	manager := powernapconfig.NewManager()
 	manager.LoadDefaults()
 
@@ -60,10 +58,15 @@ func NewManager(
 	}
 
 	return &Manager{
-		clients: clients,
+		clients: csync.NewMap[string, *Client](),
 		cfg:     cfg,
 		manager: manager,
 	}
+}
+
+// Clients returns the map of LSP clients.
+func (m *Manager) Clients() *csync.Map[string, *Client] {
+	return m.clients
 }
 
 // SetCallback sets a callback that is invoked when a new LSP
@@ -80,6 +83,7 @@ func (s *Manager) Start(ctx context.Context, filePath string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	var wg sync.WaitGroup
 	for name, server := range s.manager.GetServers() {
 		if !handles(server, filePath, s.cfg.WorkingDir()) {
 			continue
@@ -87,8 +91,11 @@ func (s *Manager) Start(ctx context.Context, filePath string) {
 		if _, exists := s.clients.Get(name); exists {
 			return
 		}
-		go s.startServer(ctx, name, server)
+		wg.Go(func() {
+			s.startServer(ctx, name, server)
+		})
 	}
+	wg.Wait()
 }
 
 // skipAutoStartCommands contains commands that are too generic or ambiguous to
@@ -164,7 +171,7 @@ func (s *Manager) startServer(ctx context.Context, name string, server *powernap
 
 	s.clients.Set(name, client)
 	s.callback(name, client)
-	slog.Info("LSP client started", "name", name)
+	slog.Debug("LSP client started", "name", name)
 }
 
 func (s *Manager) isUserConfigured(name string) bool {

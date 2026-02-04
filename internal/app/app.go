@@ -21,7 +21,6 @@ import (
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/format"
@@ -58,7 +57,6 @@ type App struct {
 
 	AgentCoordinator agent.Coordinator
 
-	LSPClients *csync.Map[string, *lsp.Client]
 	LSPManager *lsp.Manager
 
 	config *config.Config
@@ -85,16 +83,13 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 		allowedTools = cfg.Permissions.AllowedTools
 	}
 
-	lspClients := csync.NewMap[string, *lsp.Client]()
-
 	app := &App{
 		Sessions:    sessions,
 		Messages:    messages,
 		History:     files,
 		Permissions: permission.NewPermissionService(cfg.WorkingDir(), skipPermissionsRequests, allowedTools),
 		FileTracker: filetracker.NewService(q),
-		LSPClients:  lspClients,
-		LSPManager:  lsp.NewManager(lspClients, cfg),
+		LSPManager:  lsp.NewManager(cfg),
 
 		globalCtx: ctx,
 
@@ -476,7 +471,6 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.Permissions,
 		app.History,
 		app.FileTracker,
-		app.LSPClients,
 		app.LSPManager,
 	)
 	if err != nil {

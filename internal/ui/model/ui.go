@@ -684,8 +684,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case openEditorMsg:
+		var cmd tea.Cmd
 		m.textarea.SetValue(msg.Text)
 		m.textarea.MoveToEnd()
+		m.textarea, cmd = m.textarea.Update(msg)
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case uiutil.InfoMsg:
 		m.status.SetInfoMsg(msg)
 		ttl := msg.TTL

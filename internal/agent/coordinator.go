@@ -56,6 +56,7 @@ type Coordinator interface {
 	QueuedPromptsList(sessionID string) []string
 	ClearQueue(sessionID string)
 	Summarize(context.Context, string) error
+	RecoverSession(ctx context.Context, sessionID string) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
 }
@@ -883,6 +884,37 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 		return errors.New("model provider not configured")
 	}
 	return c.currentAgent.Summarize(ctx, sessionID, getProviderOptions(c.currentAgent.Model(), providerCfg))
+}
+
+func (c *coordinator) RecoverSession(ctx context.Context, sessionID string) error {
+	if c.currentAgent != nil && c.currentAgent.IsSessionBusy(sessionID) {
+		return nil
+	}
+
+	msgs, err := c.messages.List(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to list messages: %w", err)
+	}
+
+	for _, msg := range msgs {
+		if msg.IsFinished() {
+			continue
+		}
+
+		msg.FinishThinking()
+		for _, tc := range msg.ToolCalls() {
+			if !tc.Finished {
+				msg.FinishToolCall(tc.ID)
+			}
+		}
+
+		msg.AddFinish(message.FinishReasonError, "Session interrupted", "The session was previously interrupted")
+		if updateErr := c.messages.Update(ctx, msg); updateErr != nil {
+			slog.Error("Failed to recover message", "message_id", msg.ID, "error", updateErr)
+		}
+	}
+
+	return nil
 }
 
 func (c *coordinator) isUnauthorized(err error) bool {

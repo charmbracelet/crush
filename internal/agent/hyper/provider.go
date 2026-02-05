@@ -252,10 +252,16 @@ func (m *languageModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.
 				continue
 			}
 		}
-		if err := scanner.Err(); err != nil &&
-			!errors.Is(err, context.Canceled) &&
-			!errors.Is(err, context.DeadlineExceeded) {
-			yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeError, Error: err})
+		if err := scanner.Err(); err != nil {
+			if sawFinish && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+				// If we already saw an explicit finish event, treat cancellation as a no-op.
+			} else {
+				_ = yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeError, Error: err})
+				return
+			}
+		}
+		if err := ctx.Err(); err != nil && !sawFinish {
+			_ = yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeError, Error: err})
 			return
 		}
 		// flush any pending data

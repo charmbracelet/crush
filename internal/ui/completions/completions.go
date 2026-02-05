@@ -1,6 +1,7 @@
 package completions
 
 import (
+	"cmp"
 	"slices"
 	"strings"
 	"sync"
@@ -23,9 +24,9 @@ const (
 )
 
 // SelectionMsg is sent when a completion is selected.
-type SelectionMsg struct {
-	Value  any
-	Insert bool // If true, insert without closing.
+type SelectionMsg[T any] struct {
+	Value    T
+	KeepOpen bool // If true, insert without closing.
 }
 
 // ClosedMsg is sent when the completions are closed.
@@ -33,8 +34,8 @@ type ClosedMsg struct{}
 
 // CompletionItemsLoadedMsg is sent when files have been loaded for completions.
 type CompletionItemsLoadedMsg struct {
-	Files     []string
-	Resources []Resource
+	Files     []FileCompletionValue
+	Resources []ResourceCompletionValue
 }
 
 // Completions represents the completions popup component.
@@ -46,10 +47,6 @@ type Completions struct {
 	// State
 	open  bool
 	query string
-
-	// Cached items for merging.
-	files     []string
-	resources []Resource
 
 	// Key bindings
 	keyMap KeyMap
@@ -102,38 +99,28 @@ func (c *Completions) KeyMap() KeyMap {
 // Open opens the completions with file items from the filesystem.
 func (c *Completions) Open(depth, limit int) tea.Cmd {
 	return func() tea.Msg {
-		var files []string
-		var resources []Resource
-
+		var msg CompletionItemsLoadedMsg
 		var wg sync.WaitGroup
 		wg.Go(func() {
-			files = loadFiles(depth, limit)
+			msg.Files = loadFiles(depth, limit)
 		})
 		wg.Go(func() {
-			resources = loadMCPResources()
+			msg.Resources = loadMCPResources()
 		})
 		wg.Wait()
-
-		return CompletionItemsLoadedMsg{
-			Files:     files,
-			Resources: resources,
-		}
+		return msg
 	}
 }
 
 // SetItems sets the files and MCP resources and rebuilds the merged list.
-func (c *Completions) SetItems(files []string, resources []Resource) {
-	c.files = files
-	c.resources = resources
-
-	items := make([]list.FilterableItem, 0, len(c.files)+len(c.resources))
+func (c *Completions) SetItems(files []FileCompletionValue, resources []ResourceCompletionValue) {
+	items := make([]list.FilterableItem, 0, len(files)+len(resources))
 
 	// Add files first.
-	for _, file := range c.files {
-		file = strings.TrimPrefix(file, "./")
+	for _, file := range files {
 		item := NewCompletionItem(
+			file.Path,
 			file,
-			FileCompletionValue{Path: file},
 			c.normalStyle,
 			c.focusedStyle,
 			c.matchStyle,
@@ -142,14 +129,9 @@ func (c *Completions) SetItems(files []string, resources []Resource) {
 	}
 
 	// Add MCP resources.
-	for _, resource := range c.resources {
-		label := resource.Title
-		if label == "" {
-			label = resource.URI
-		}
-		label = resource.MCPName + "/" + label
+	for _, resource := range resources {
 		item := NewCompletionItem(
-			label,
+			resource.MCPName+"/"+cmp.Or(resource.Title, resource.URI),
 			resource,
 			c.normalStyle,
 			c.focusedStyle,
@@ -176,8 +158,6 @@ func (c *Completions) SetItems(files []string, resources []Resource) {
 // Close closes the completions popup.
 func (c *Completions) Close() {
 	c.open = false
-	c.files = nil
-	c.resources = nil
 }
 
 // Filter filters the completions with the given query.
@@ -276,7 +256,7 @@ func (c *Completions) selectNext() {
 }
 
 // selectCurrent returns a command with the currently selected item.
-func (c *Completions) selectCurrent(insert bool) tea.Msg {
+func (c *Completions) selectCurrent(keepOpen bool) tea.Msg {
 	items := c.list.FilteredItems()
 	if len(items) == 0 {
 		return nil
@@ -292,13 +272,23 @@ func (c *Completions) selectCurrent(insert bool) tea.Msg {
 		return nil
 	}
 
-	if !insert {
+	if !keepOpen {
 		c.open = false
 	}
 
-	return SelectionMsg{
-		Value:  item.Value(),
-		Insert: insert,
+	switch item := item.Value().(type) {
+	case ResourceCompletionValue:
+		return SelectionMsg[ResourceCompletionValue]{
+			Value:    item,
+			KeepOpen: keepOpen,
+		}
+	case FileCompletionValue:
+		return SelectionMsg[FileCompletionValue]{
+			Value:    item,
+			KeepOpen: keepOpen,
+		}
+	default:
+		return nil
 	}
 }
 
@@ -316,17 +306,23 @@ func (c *Completions) Render() string {
 	return c.list.Render()
 }
 
-func loadFiles(depth, limit int) []string {
+func loadFiles(depth, limit int) []FileCompletionValue {
 	files, _, _ := fsext.ListDirectory(".", nil, depth, limit)
 	slices.Sort(files)
-	return files
+	result := make([]FileCompletionValue, 0, len(files))
+	for _, file := range files {
+		result = append(result, FileCompletionValue{
+			Path: strings.TrimPrefix(file, "./"),
+		})
+	}
+	return result
 }
 
-func loadMCPResources() []Resource {
-	var resources []Resource
+func loadMCPResources() []ResourceCompletionValue {
+	var resources []ResourceCompletionValue
 	for mcpName, mcpResources := range mcp.Resources() {
 		for _, r := range mcpResources {
-			resources = append(resources, Resource{
+			resources = append(resources, ResourceCompletionValue{
 				MCPName:  mcpName,
 				URI:      r.URI,
 				Title:    r.Name,

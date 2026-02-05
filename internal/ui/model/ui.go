@@ -1515,16 +1515,14 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			if m.completionsOpen {
 				if msg, ok := m.completions.Update(msg); ok {
 					switch msg := msg.(type) {
-					case completions.SelectionMsg:
-						// Handle file completion selection.
-						if item, ok := msg.Value.(completions.FileCompletionValue); ok {
-							cmds = append(cmds, m.insertFileCompletion(item.Path))
+					case completions.SelectionMsg[completions.FileCompletionValue]:
+						cmds = append(cmds, m.insertFileCompletion(msg.Value.Path))
+						if !msg.KeepOpen {
+							m.closeCompletions()
 						}
-						// Handle resource completion selection.
-						if item, ok := msg.Value.(completions.Resource); ok {
-							cmds = append(cmds, m.insertMCPResourceCompletion(item))
-						}
-						if !msg.Insert {
+					case completions.SelectionMsg[completions.ResourceCompletionValue]:
+						cmds = append(cmds, m.insertMCPResourceCompletion(msg.Value))
+						if !msg.KeepOpen {
 							m.closeCompletions()
 						}
 					case completions.ClosedMsg:
@@ -2536,7 +2534,7 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 
 // insertMCPResourceCompletion inserts the selected resource into the textarea,
 // replacing the @query, and adds the resource as an attachment.
-func (m *UI) insertMCPResourceCompletion(item completions.Resource) tea.Cmd {
+func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValue) tea.Cmd {
 	displayText := item.Title
 	if displayText == "" {
 		displayText = item.URI

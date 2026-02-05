@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/fsext"
 	powernapconfig "github.com/charmbracelet/x/powernap/pkg/config"
 	"github.com/charmbracelet/x/powernap/pkg/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
@@ -226,18 +226,25 @@ func handlesFiletype(server *powernapconfig.ServerConfig, ext string, language p
 	return false
 }
 
-func handles(server *powernapconfig.ServerConfig, filePath, workDir string) bool {
-	language := lsp.DetectLanguage(filePath)
-	ext := filepath.Ext(filePath)
-	if !handlesFiletype(server, ext, language) {
-		return false
+func hasRootMarkers(dir string, markers []string) bool {
+	if len(markers) == 0 {
+		return true
 	}
-	for _, marker := range server.RootMarkers {
-		if _, err := os.Stat(filepath.Join(workDir, marker)); err == nil {
+	for _, pattern := range markers {
+		// Use fsext.GlobWithDoubleStar to find matches
+		matches, _, err := fsext.GlobWithDoubleStar(pattern, dir, 1)
+		if err == nil && len(matches) > 0 {
 			return true
 		}
 	}
 	return false
+}
+
+func handles(server *powernapconfig.ServerConfig, filePath, workDir string) bool {
+	language := lsp.DetectLanguage(filePath)
+	ext := filepath.Ext(filePath)
+	return handlesFiletype(server, ext, language) &&
+		hasRootMarkers(workDir, server.RootMarkers)
 }
 
 // StopAll stops all running LSP clients and clears the client map.

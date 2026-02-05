@@ -293,7 +293,7 @@ func New(com *common.Common) *UI {
 	desiredFocus := uiFocusEditor
 	if !com.Config().IsConfigured() {
 		desiredState = uiOnboarding
-	} else if n, _ := config.ProjectNeedsInitialization(); n {
+	} else if n, _ := config.ProjectNeedsInitialization(com.Config()); n {
 		desiredState = uiInitialize
 	}
 
@@ -3056,7 +3056,7 @@ func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
 
 func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string) tea.Cmd {
 	load := func() tea.Msg {
-		prompt, err := commands.GetMCPPrompt(clientID, promptID, arguments)
+		prompt, err := commands.GetMCPPrompt(m.com.Config(), clientID, promptID, arguments)
 		if err != nil {
 			// TODO: make this better
 			return util.ReportError(err)()

@@ -62,16 +62,16 @@ func (m *UI) lspInfo(width, maxItems int, isSection bool) string {
 func lspDiagnostics(t *styles.Styles, diagnostics map[protocol.DiagnosticSeverity]int) string {
 	errs := []string{}
 	if diagnostics[protocol.SeverityError] > 0 {
-		errs = append(errs, t.LSP.ErrorDiagnostic.Render(fmt.Sprintf("E%d", diagnostics[protocol.SeverityError])))
+		errs = append(errs, t.LSP.ErrorDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPErrorIcon, diagnostics[protocol.SeverityError])))
 	}
 	if diagnostics[protocol.SeverityWarning] > 0 {
-		errs = append(errs, t.LSP.WarningDiagnostic.Render(fmt.Sprintf("W%d", diagnostics[protocol.SeverityWarning])))
+		errs = append(errs, t.LSP.WarningDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPWarningIcon, diagnostics[protocol.SeverityWarning])))
 	}
 	if diagnostics[protocol.SeverityHint] > 0 {
-		errs = append(errs, t.LSP.HintDiagnostic.Render(fmt.Sprintf("H%d", diagnostics[protocol.SeverityHint])))
+		errs = append(errs, t.LSP.HintDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPHintIcon, diagnostics[protocol.SeverityHint])))
 	}
 	if diagnostics[protocol.SeverityInformation] > 0 {
-		errs = append(errs, t.LSP.InfoDiagnostic.Render(fmt.Sprintf("I%d", diagnostics[protocol.SeverityInformation])))
+		errs = append(errs, t.LSP.InfoDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPInfoIcon, diagnostics[protocol.SeverityInformation])))
 	}
 	return strings.Join(errs, " ")
 }

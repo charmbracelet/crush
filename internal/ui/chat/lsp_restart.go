@@ -30,6 +30,7 @@ type LSPRestartToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (r *LSPRestartToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
+	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
 		return pendingTool(sty, "Restart LSP", opts.Anim)
 	}
@@ -42,12 +43,12 @@ func (r *LSPRestartToolRenderContext) RenderTool(sty *styles.Styles, width int, 
 		toolParams = append(toolParams, params.Name)
 	}
 
-	header := toolHeader(sty, opts.Status, "Restart LSP", width, opts.Compact, toolParams...)
+	header := toolHeader(sty, opts.Status, "Restart LSP", cappedWidth, opts.Compact, toolParams...)
 	if opts.Compact {
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
+	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
 		return joinToolParts(header, earlyState)
 	}
 
@@ -55,7 +56,7 @@ func (r *LSPRestartToolRenderContext) RenderTool(sty *styles.Styles, width int, 
 		return header
 	}
 
-	bodyWidth := width - toolBodyLeftPaddingTotal
+	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
 	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
 	return joinToolParts(header, body)
 }

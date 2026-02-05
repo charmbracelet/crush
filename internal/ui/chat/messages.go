@@ -245,6 +245,11 @@ func (a *AssistantInfoItem) renderContent(width int) string {
 	return common.Section(a.sty, assistant, width)
 }
 
+// cappedMessageWidth returns the maximum width for message content for readability.
+func cappedMessageWidth(availableWidth int) int {
+	return min(availableWidth-MessageLeftPaddingTotal, maxTextWidth)
+}
+
 // ExtractMessageItems extracts [MessageItem]s from a [message.Message]. It
 // returns all parts of the message as [MessageItem]s.
 //

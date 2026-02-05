@@ -12,16 +12,12 @@ import (
 	"charm.land/glamour/v2/ansi"
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
-	"github.com/charmbracelet/crush/internal/tui/exp/diffview"
+	"github.com/charmbracelet/crush/internal/ui/diffview"
 	"github.com/charmbracelet/x/exp/charmtone"
 )
 
 const (
 	CheckIcon   string = "✓"
-	ErrorIcon   string = "×"
-	WarningIcon string = "⚠"
-	InfoIcon    string = "ⓘ"
-	HintIcon    string = "∵"
 	SpinnerIcon string = "⋯"
 	LoadingIcon string = "⟳"
 	ModelIcon   string = "◇"
@@ -49,6 +45,11 @@ const (
 
 	ScrollbarThumb string = "┃"
 	ScrollbarTrack string = "│"
+
+	LSPErrorIcon   string = "E"
+	LSPWarningIcon string = "W"
+	LSPInfoIcon    string = "I"
+	LSPHintIcon    string = "H"
 )
 
 const (

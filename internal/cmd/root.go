@@ -20,7 +20,6 @@ import (
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/projects"
-	"github.com/charmbracelet/crush/internal/tui"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	ui "github.com/charmbracelet/crush/internal/ui/model"
 	"github.com/charmbracelet/crush/internal/version"
@@ -28,13 +27,9 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
-	xstrings "github.com/charmbracelet/x/exp/strings"
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 )
-
-// kittyTerminals defines terminals supporting querying capabilities.
-var kittyTerminals = []string{"alacritty", "ghostty", "kitty", "rio", "wezterm"}
 
 func init() {
 	rootCmd.PersistentFlags().StringP("cwd", "c", "", "Current working directory")
@@ -93,27 +88,15 @@ crush -y
 		// Set up the TUI.
 		var env uv.Environ = os.Environ()
 
-		newUI := true
-		if v, err := strconv.ParseBool(env.Getenv("CRUSH_NEW_UI")); err == nil {
-			newUI = v
-		}
+		com := common.DefaultCommon(app)
+		model := ui.New(com)
 
-		var model tea.Model
-		if newUI {
-			slog.Info("New UI in control!")
-			com := common.DefaultCommon(app)
-			ui := ui.New(com)
-			model = ui
-		} else {
-			ui := tui.New(app)
-			ui.QueryVersion = shouldQueryCapabilities(env)
-			model = ui
-		}
 		program := tea.NewProgram(
 			model,
 			tea.WithEnvironment(env),
 			tea.WithContext(cmd.Context()),
-			tea.WithFilter(tui.MouseEventFilter)) // Filter mouse events based on focus state
+			tea.WithFilter(ui.MouseEventFilter), // Filter mouse events based on focus state
+		)
 		go app.Subscribe(program)
 
 		if _, err := program.Run(); err != nil {
@@ -312,19 +295,4 @@ func createDotCrushDir(dir string) error {
 	}
 
 	return nil
-}
-
-// TODO: Remove me after dropping the old TUI.
-func shouldQueryCapabilities(env uv.Environ) bool {
-	const osVendorTypeApple = "Apple"
-	termType := env.Getenv("TERM")
-	termProg, okTermProg := env.LookupEnv("TERM_PROGRAM")
-	_, okSSHTTY := env.LookupEnv("SSH_TTY")
-	if okTermProg && strings.Contains(termProg, osVendorTypeApple) {
-		return false
-	}
-	return (!okTermProg && !okSSHTTY) ||
-		(!strings.Contains(termProg, osVendorTypeApple) && !okSSHTTY) ||
-		// Terminals that do support XTVERSION.
-		xstrings.ContainsAnyOf(termType, kittyTerminals...)
 }

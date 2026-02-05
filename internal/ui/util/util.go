@@ -1,7 +1,5 @@
-// Package uiutil provides utility functions for UI message handling.
-// TODO: Move to internal/ui/<appropriate_location> once the new UI migration
-// is finalized.
-package uiutil
+// Package util provides utility functions for UI message handling.
+package util
 
 import (
 	"context"

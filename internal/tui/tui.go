@@ -16,9 +16,9 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/event"
+	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/crush/internal/stringext"
 	cmpChat "github.com/charmbracelet/crush/internal/tui/components/chat"
 	"github.com/charmbracelet/crush/internal/tui/components/chat/splash"
 	"github.com/charmbracelet/crush/internal/tui/components/completions"
@@ -36,6 +36,7 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/page/chat"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
+	xstrings "github.com/charmbracelet/x/exp/strings"
 	"golang.org/x/mod/semver"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -128,7 +129,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		termVersion := strings.ToLower(msg.Name)
 		switch {
-		case stringext.ContainsAny(termVersion, "ghostty", "rio"):
+		case xstrings.ContainsAnyOf(termVersion, "ghostty", "rio"):
 			a.sendProgressBar = true
 		case strings.Contains(termVersion, "iterm2"):
 			// iTerm2 supports progress bars from version v3.6.6
@@ -385,7 +386,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, tea.Batch(cmds...)
 	// Update Available
-	case pubsub.UpdateAvailableMsg:
+	case app.UpdateAvailableMsg:
 		// Show update notification in status bar
 		statusMsg := fmt.Sprintf("Crush update available: v%s → v%s.", msg.CurrentVersion, msg.LatestVersion)
 		if msg.IsDevelopment {
@@ -592,6 +593,7 @@ func (a *appModel) View() tea.View {
 	view.AltScreen = true
 	view.MouseMode = tea.MouseModeCellMotion
 	view.BackgroundColor = t.BgBase
+	view.WindowTitle = "crush " + home.Short(config.Get().WorkingDir())
 	if a.wWidth < 25 || a.wHeight < 15 {
 		view.Content = t.S().Base.Width(a.wWidth).Height(a.wHeight).
 			Align(lipgloss.Center, lipgloss.Center).

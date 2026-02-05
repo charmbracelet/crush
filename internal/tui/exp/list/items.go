@@ -323,6 +323,7 @@ type ItemSection interface {
 	layout.Sizeable
 	Indexable
 	SetInfo(info string)
+	Title() string
 }
 type itemSectionModel struct {
 	width int
@@ -335,6 +336,11 @@ type itemSectionModel struct {
 // ID implements ItemSection.
 func (m *itemSectionModel) ID() string {
 	return m.id
+}
+
+// Title implements ItemSection.
+func (m *itemSectionModel) Title() string {
+	return m.title
 }
 
 func NewItemSection(title string) ItemSection {

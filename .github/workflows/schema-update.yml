@@ -1,25 +1,27 @@
-name: Update Schema
+name: Update files
 
 on:
   push:
     branches: [main]
     paths:
       - "internal/config/**"
+      - "internal/agent/hyper/**"
 
 jobs:
   update-schema:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
-      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+      - uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
         with:
           go-version-file: go.mod
       - run: go run . schema > ./schema.json
-      - uses: stefanzweifel/git-auto-commit-action@28e16e81777b558cc906c8750092100bbb34c5e3 # v5
+      - run: go generate ./internal/agent/hyper/...
+      - uses: stefanzweifel/git-auto-commit-action@04702edda442b2e678b25b537cec683a1493fcb9 # v5
         with:
-          commit_message: "chore: auto-update generated files"
+          commit_message: "chore: auto-update files"
           branch: main
           commit_user_name: Charm
           commit_user_email: 124303983+charmcli@users.noreply.github.com

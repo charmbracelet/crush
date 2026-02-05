@@ -12,7 +12,7 @@ var homedir, homedirErr = os.UserHomeDir()
 
 func init() {
 	if homedirErr != nil {
-		slog.Error("failed to get user home directory", "error", homedirErr)
+		slog.Error("Failed to get user home directory", "error", homedirErr)
 	}
 }
 

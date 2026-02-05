@@ -31,6 +31,12 @@ type Message struct {
 	IsSummaryMessage int64          `json:"is_summary_message"`
 }
 
+type ReadFile struct {
+	SessionID string `json:"session_id"`
+	Path      string `json:"path"`
+	ReadAt    int64  `json:"read_at"` // Unix timestamp when file was last read
+}
+
 type Session struct {
 	ID               string         `json:"id"`
 	ParentSessionID  sql.NullString `json:"parent_session_id"`
@@ -42,4 +48,5 @@ type Session struct {
 	UpdatedAt        int64          `json:"updated_at"`
 	CreatedAt        int64          `json:"created_at"`
 	SummaryMessageID sql.NullString `json:"summary_message_id"`
+	Todos            sql.NullString `json:"todos"`
 }

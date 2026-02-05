@@ -1,15 +1,11 @@
 package util
 
 import (
-	"log/slog"
-	"time"
-
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/uiutil"
 )
 
-type Cursor interface {
-	Cursor() *tea.Cursor
-}
+type Cursor = uiutil.Cursor
 
 type Model interface {
 	Init() tea.Cmd
@@ -18,48 +14,32 @@ type Model interface {
 }
 
 func CmdHandler(msg tea.Msg) tea.Cmd {
-	return func() tea.Msg {
-		return msg
-	}
+	return uiutil.CmdHandler(msg)
 }
 
 func ReportError(err error) tea.Cmd {
-	slog.Error("Error reported", "error", err)
-	return CmdHandler(InfoMsg{
-		Type: InfoTypeError,
-		Msg:  err.Error(),
-	})
+	return uiutil.ReportError(err)
 }
 
-type InfoType int
+type InfoType = uiutil.InfoType
 
 const (
-	InfoTypeInfo InfoType = iota
-	InfoTypeSuccess
-	InfoTypeWarn
-	InfoTypeError
-	InfoTypeUpdate
+	InfoTypeInfo    = uiutil.InfoTypeInfo
+	InfoTypeSuccess = uiutil.InfoTypeSuccess
+	InfoTypeWarn    = uiutil.InfoTypeWarn
+	InfoTypeError   = uiutil.InfoTypeError
+	InfoTypeUpdate  = uiutil.InfoTypeUpdate
 )
 
 func ReportInfo(info string) tea.Cmd {
-	return CmdHandler(InfoMsg{
-		Type: InfoTypeInfo,
-		Msg:  info,
-	})
+	return uiutil.ReportInfo(info)
 }
 
 func ReportWarn(warn string) tea.Cmd {
-	return CmdHandler(InfoMsg{
-		Type: InfoTypeWarn,
-		Msg:  warn,
-	})
+	return uiutil.ReportWarn(warn)
 }
 
 type (
-	InfoMsg struct {
-		Type InfoType
-		Msg  string
-		TTL  time.Duration
-	}
-	ClearStatusMsg struct{}
+	InfoMsg        = uiutil.InfoMsg
+	ClearStatusMsg = uiutil.ClearStatusMsg
 )

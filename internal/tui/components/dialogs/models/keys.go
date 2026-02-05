@@ -15,10 +15,9 @@ type KeyMap struct {
 	isAPIKeyHelp  bool
 	isAPIKeyValid bool
 
-	isClaudeAuthChoiceHelp    bool
-	isClaudeOAuthHelp         bool
-	isClaudeOAuthURLState     bool
-	isClaudeOAuthHelpComplete bool
+	isHyperDeviceFlow    bool
+	isCopilotDeviceFlow  bool
+	isCopilotUnavailable bool
 }
 
 func DefaultKeyMap() KeyMap {
@@ -74,57 +73,27 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 
 // ShortHelp implements help.KeyMap.
 func (k KeyMap) ShortHelp() []key.Binding {
-	if k.isClaudeAuthChoiceHelp {
+	if k.isHyperDeviceFlow || k.isCopilotDeviceFlow {
 		return []key.Binding{
 			key.NewBinding(
-				key.WithKeys("left", "right", "h", "l"),
-				key.WithHelp("←→", "choose"),
+				key.WithKeys("c"),
+				key.WithHelp("c", "copy code"),
 			),
 			key.NewBinding(
 				key.WithKeys("enter"),
-				key.WithHelp("enter", "accept"),
+				key.WithHelp("enter", "copy & open"),
 			),
-			key.NewBinding(
-				key.WithKeys("esc"),
-				key.WithHelp("esc", "back"),
-			),
+			k.Close,
 		}
 	}
-	if k.isClaudeOAuthHelp {
-		if k.isClaudeOAuthHelpComplete {
-			return []key.Binding{
-				key.NewBinding(
-					key.WithKeys("enter"),
-					key.WithHelp("enter", "close"),
-				),
-			}
-		}
-
-		enterHelp := "submit"
-		if k.isClaudeOAuthURLState {
-			enterHelp = "open"
-		}
-
-		bindings := []key.Binding{
+	if k.isCopilotUnavailable {
+		return []key.Binding{
 			key.NewBinding(
 				key.WithKeys("enter"),
-				key.WithHelp("enter", enterHelp),
+				key.WithHelp("enter", "open signup"),
 			),
+			k.Close,
 		}
-
-		if k.isClaudeOAuthURLState {
-			bindings = append(bindings, key.NewBinding(
-				key.WithKeys("c"),
-				key.WithHelp("c", "copy url"),
-			))
-		}
-
-		bindings = append(bindings, key.NewBinding(
-			key.WithKeys("esc"),
-			key.WithHelp("esc", "back"),
-		))
-
-		return bindings
 	}
 	if k.isAPIKeyHelp && !k.isAPIKeyValid {
 		return []key.Binding{

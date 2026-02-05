@@ -41,9 +41,19 @@ SET
     prompt_tokens = ?,
     completion_tokens = ?,
     summary_message_id = ?,
-    cost = ?
+    cost = ?,
+    todos = ?
 WHERE id = ?
 RETURNING *;
+
+-- name: UpdateSessionTitleAndUsage :exec
+UPDATE sessions
+SET
+    title = ?,
+    prompt_tokens = prompt_tokens + ?,
+    completion_tokens = completion_tokens + ?,
+    cost = cost + ?
+WHERE id = ?;
 
 
 -- name: DeleteSession :exec

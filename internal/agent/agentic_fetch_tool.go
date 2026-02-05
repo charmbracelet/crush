@@ -52,13 +52,14 @@ var agenticFetchPromptTmpl []byte
 
 func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (fantasy.AgentTool, error) {
 	if client == nil {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.MaxIdleConns = 100
+		transport.MaxIdleConnsPerHost = 10
+		transport.IdleConnTimeout = 90 * time.Second
+
 		client = &http.Client{
-			Timeout: 30 * time.Second,
-			Transport: &http.Transport{
-				MaxIdleConns:        100,
-				MaxIdleConnsPerHost: 10,
-				IdleConnTimeout:     90 * time.Second,
-			},
+			Timeout:   30 * time.Second,
+			Transport: transport,
 		}
 	}
 
@@ -79,7 +80,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				description = "Search the web and analyze results"
 			}
 
-			p := c.permissions.Request(
+			p, err := c.permissions.Request(ctx,
 				permission.CreatePermissionRequest{
 					SessionID:   validationResult.SessionID,
 					Path:        c.cfg.WorkingDir(),
@@ -90,7 +91,9 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 					Params:      tools.AgenticFetchPermissionsParams(params),
 				},
 			)
-
+			if err != nil {
+				return fantasy.ToolResponse{}, err
+			}
 			if !p {
 				return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 			}
@@ -143,7 +146,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				return fantasy.ToolResponse{}, fmt.Errorf("error creating prompt: %s", err)
 			}
 
-			_, small, err := c.buildAgentModels(ctx)
+			_, small, err := c.buildAgentModels(ctx, true)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error building models: %s", err)
 			}
@@ -166,7 +169,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				tools.NewGlobTool(tmpDir),
 				tools.NewGrepTool(tmpDir),
 				tools.NewSourcegraphTool(client),
-				tools.NewViewTool(c.lspClients, c.permissions, tmpDir),
+				tools.NewViewTool(c.lspClients, c.permissions, c.filetracker, tmpDir),
 			}
 
 			agent := NewSessionAgent(SessionAgentOptions{

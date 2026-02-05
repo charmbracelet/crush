@@ -2,7 +2,6 @@ package chat
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/key"
@@ -73,7 +72,6 @@ type messageListCmp struct {
 	lastClickX    int
 	lastClickY    int
 	clickCount    int
-	promptQueue   int
 }
 
 // New creates a new message list component with custom keybindings
@@ -104,13 +102,6 @@ func (m *messageListCmp) Init() tea.Cmd {
 // Update handles incoming messages and updates the component state.
 func (m *messageListCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	var cmds []tea.Cmd
-	if m.session.ID != "" && m.app.AgentCoordinator != nil {
-		queueSize := m.app.AgentCoordinator.QueuedPrompts(m.session.ID)
-		if queueSize != m.promptQueue {
-			m.promptQueue = queueSize
-			cmds = append(cmds, m.SetSize(m.width, m.height))
-		}
-	}
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		if m.listCmp.IsFocused() && m.listCmp.HasSelection() {
@@ -223,24 +214,11 @@ func (m *messageListCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 // View renders the message list or an initial screen if empty.
 func (m *messageListCmp) View() string {
 	t := styles.CurrentTheme()
-	height := m.height
-	if m.promptQueue > 0 {
-		height -= 4 // pill height and padding
-	}
-	view := []string{
-		t.S().Base.
-			Padding(1, 1, 0, 1).
-			Width(m.width).
-			Height(height).
-			Render(
-				m.listCmp.View(),
-			),
-	}
-	if m.app.AgentCoordinator != nil && m.promptQueue > 0 {
-		queuePill := queuePill(m.promptQueue, t)
-		view = append(view, t.S().Base.PaddingLeft(4).PaddingTop(1).Render(queuePill))
-	}
-	return strings.Join(view, "\n")
+	return t.S().Base.
+		Padding(1, 1, 0, 1).
+		Width(m.width).
+		Height(m.height).
+		Render(m.listCmp.View())
 }
 
 func (m *messageListCmp) handlePermissionRequest(permission permission.PermissionNotification) tea.Cmd {
@@ -682,11 +660,6 @@ func (m *messageListCmp) GetSize() (int, int) {
 func (m *messageListCmp) SetSize(width int, height int) tea.Cmd {
 	m.width = width
 	m.height = height
-	if m.promptQueue > 0 {
-		queueHeight := 3 + 1 // 1 for padding top
-		lHight := max(0, height-(1+queueHeight))
-		return m.listCmp.SetSize(width-2, lHight)
-	}
 	return m.listCmp.SetSize(width-2, max(0, height-1)) // for padding
 }
 
@@ -783,11 +756,7 @@ func (m *messageListCmp) CopySelectedText(clear bool) tea.Cmd {
 		return util.ReportInfo("No text selected")
 	}
 
-	if clear {
-		defer func() { m.SelectionClear() }()
-	}
-
-	return tea.Sequence(
+	cmds := []tea.Cmd{
 		// We use both OSC 52 and native clipboard for compatibility with different
 		// terminal emulators and environments.
 		tea.SetClipboard(selectedText),
@@ -796,7 +765,12 @@ func (m *messageListCmp) CopySelectedText(clear bool) tea.Cmd {
 			return nil
 		},
 		util.ReportInfo("Selected text copied to clipboard"),
-	)
+	}
+	if clear {
+		cmds = append(cmds, m.SelectionClear())
+	}
+
+	return tea.Sequence(cmds...)
 }
 
 // abs returns the absolute value of an integer.

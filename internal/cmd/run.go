@@ -8,6 +8,8 @@ import (
 	"os/signal"
 	"strings"
 
+	"charm.land/log/v2"
+	"github.com/charmbracelet/crush/internal/event"
 	"github.com/spf13/cobra"
 )
 
@@ -28,9 +30,15 @@ crush run "What is this code doing?" <<< prrr.go
 
 # Run in quiet mode (hide the spinner)
 crush run --quiet "Generate a README for this project"
+
+# Run in verbose mode
+crush run --verbose "Generate a README for this project"
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		quiet, _ := cmd.Flags().GetBool("quiet")
+		verbose, _ := cmd.Flags().GetBool("verbose")
+		largeModel, _ := cmd.Flags().GetString("model")
+		smallModel, _ := cmd.Flags().GetString("small-model")
 
 		// Cancel on SIGINT or SIGTERM.
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
@@ -46,6 +54,10 @@ crush run --quiet "Generate a README for this project"
 			return fmt.Errorf("no providers configured - please run 'crush' to set up a provider interactively")
 		}
 
+		if verbose {
+			slog.SetDefault(slog.New(log.New(os.Stderr)))
+		}
+
 		prompt := strings.Join(args, " ")
 
 		prompt, err = MaybePrependStdin(prompt)
@@ -58,15 +70,19 @@ crush run --quiet "Generate a README for this project"
 			return fmt.Errorf("no prompt provided")
 		}
 
-		// TODO: Make this work when redirected to something other than stdout.
-		// For example:
-		//     crush run "Do something fancy" > output.txt
-		//     echo "Do something fancy" | crush run > output.txt
-		//
-		return app.RunNonInteractive(ctx, os.Stdout, prompt, quiet)
+		event.SetNonInteractive(true)
+		event.AppInitialized()
+
+		return app.RunNonInteractive(ctx, os.Stdout, prompt, largeModel, smallModel, quiet || verbose)
+	},
+	PostRun: func(cmd *cobra.Command, args []string) {
+		event.AppExited()
 	},
 }
 
 func init() {
 	runCmd.Flags().BoolP("quiet", "q", false, "Hide spinner")
+	runCmd.Flags().BoolP("verbose", "v", false, "Show logs")
+	runCmd.Flags().StringP("model", "m", "", "Model to use. Accepts 'model' or 'provider/model' to disambiguate models with the same name across providers")
+	runCmd.Flags().String("small-model", "", "Small model to use. If not provided, uses the default small model for the provider")
 }

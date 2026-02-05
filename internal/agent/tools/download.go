@@ -36,13 +36,14 @@ var downloadDescription []byte
 
 func NewDownloadTool(permissions permission.Service, workingDir string, client *http.Client) fantasy.AgentTool {
 	if client == nil {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.MaxIdleConns = 100
+		transport.MaxIdleConnsPerHost = 10
+		transport.IdleConnTimeout = 90 * time.Second
+
 		client = &http.Client{
-			Timeout: 5 * time.Minute, // Default 5 minute timeout for downloads
-			Transport: &http.Transport{
-				MaxIdleConns:        100,
-				MaxIdleConnsPerHost: 10,
-				IdleConnTimeout:     90 * time.Second,
-			},
+			Timeout:   5 * time.Minute, // Default 5 minute timeout for downloads
+			Transport: transport,
 		}
 	}
 	return fantasy.NewParallelAgentTool(
@@ -70,7 +71,7 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for downloading files")
 			}
 
-			p := permissions.Request(
+			p, err := permissions.Request(ctx,
 				permission.CreatePermissionRequest{
 					SessionID:   sessionID,
 					Path:        filePath,
@@ -80,7 +81,9 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 					Params:      DownloadPermissionsParams(params),
 				},
 			)
-
+			if err != nil {
+				return fantasy.ToolResponse{}, err
+			}
 			if !p {
 				return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 			}
@@ -114,12 +117,6 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("Request failed with status code: %d", resp.StatusCode)), nil
 			}
 
-			// Check content length if available
-			maxSize := int64(100 * 1024 * 1024) // 100MB
-			if resp.ContentLength > maxSize {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("File too large: %d bytes (max %d bytes)", resp.ContentLength, maxSize)), nil
-			}
-
 			// Create parent directories if they don't exist
 			if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("failed to create parent directories: %w", err)
@@ -132,18 +129,12 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 			}
 			defer outFile.Close()
 
-			// Copy data with size limit
-			limitedReader := io.LimitReader(resp.Body, maxSize)
-			bytesWritten, err := io.Copy(outFile, limitedReader)
+			// Copy data without an explicit size limit.
+			// The overall download is still constrained by the HTTP client's timeout
+			// and any upstream server limits.
+			bytesWritten, err := io.Copy(outFile, resp.Body)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
-			}
-
-			// Check if we hit the size limit
-			if bytesWritten == maxSize {
-				// Clean up the file since it might be incomplete
-				os.Remove(filePath)
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("File too large: exceeded %d bytes limit", maxSize)), nil
 			}
 
 			contentType := resp.Header.Get("Content-Type")

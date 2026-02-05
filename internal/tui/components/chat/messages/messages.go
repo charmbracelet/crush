@@ -9,8 +9,8 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/ordered"
 	"github.com/google/uuid"
@@ -223,27 +223,42 @@ func (m *messageCmp) renderAssistantMessage() string {
 // message content and any attached files with appropriate icons.
 func (m *messageCmp) renderUserMessage() string {
 	t := styles.CurrentTheme()
-	parts := []string{
-		m.toMarkdown(m.message.Content().String()),
+	var parts []string
+
+	if s := m.message.Content().String(); s != "" {
+		parts = append(parts, m.toMarkdown(s))
 	}
 
-	attachmentStyles := t.S().Text.
-		MarginLeft(1).
-		Background(t.BgSubtle)
+	attachmentStyle := t.S().Base.
+		Padding(0, 1).
+		MarginRight(1).
+		Background(t.FgMuted).
+		Foreground(t.FgBase).
+		Render
+	iconStyle := t.S().Base.
+		Foreground(t.BgSubtle).
+		Background(t.Green).
+		Padding(0, 1).
+		Bold(true).
+		Render
 
 	attachments := make([]string, len(m.message.BinaryContent()))
 	for i, attachment := range m.message.BinaryContent() {
 		const maxFilenameWidth = 10
-		filename := filepath.Base(attachment.Path)
-		attachments[i] = attachmentStyles.Render(fmt.Sprintf(
-			" %s %s ",
-			styles.DocumentIcon,
-			ansi.Truncate(filename, maxFilenameWidth, "..."),
-		))
+		filename := ansi.Truncate(filepath.Base(attachment.Path), 10, "...")
+		icon := styles.ImageIcon
+		if strings.HasPrefix(attachment.MIMEType, "text/") {
+			icon = styles.TextIcon
+		}
+		attachments[i] = lipgloss.JoinHorizontal(
+			lipgloss.Left,
+			iconStyle(icon),
+			attachmentStyle(filename),
+		)
 	}
 
 	if len(attachments) > 0 {
-		parts = append(parts, "", strings.Join(attachments, ""))
+		parts = append(parts, strings.Join(attachments, ""))
 	}
 
 	joined := lipgloss.JoinVertical(lipgloss.Left, parts...)
@@ -311,7 +326,7 @@ func (m *messageCmp) renderThinkingContent() string {
 		}
 	}
 	lineStyle := t.S().Subtle.Background(t.BgBaseLighter)
-	result := lineStyle.Width(m.textWidth()).Padding(0, 1).Render(m.thinkingViewport.View())
+	result := lineStyle.Width(m.textWidth()).Padding(0, 1, 0, 0).Render(m.thinkingViewport.View())
 	if footer != "" {
 		result += "\n\n" + footer
 	}

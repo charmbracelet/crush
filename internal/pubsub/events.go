@@ -8,7 +8,7 @@ const (
 	DeletedEvent EventType = "deleted"
 )
 
-type Suscriber[T any] interface {
+type Subscriber[T any] interface {
 	Subscribe(context.Context) <-chan Event[T]
 }
 
@@ -26,10 +26,3 @@ type (
 		Publish(EventType, T)
 	}
 )
-
-// UpdateAvailableMsg is sent when a new version is available.
-type UpdateAvailableMsg struct {
-	CurrentVersion string
-	LatestVersion  string
-	IsDevelopment  bool
-}

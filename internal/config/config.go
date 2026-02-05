@@ -5,19 +5,24 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/catwalk/pkg/catwalk"
+	"charm.land/catwalk/pkg/catwalk"
+	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/oauth"
-	"github.com/charmbracelet/crush/internal/oauth/claude"
+	"github.com/charmbracelet/crush/internal/oauth/copilot"
+	"github.com/charmbracelet/crush/internal/oauth/hyper"
 	"github.com/invopop/jsonschema"
+	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
@@ -47,6 +52,11 @@ var defaultContextPaths = []string{
 }
 
 type SelectedModelType string
+
+// String returns the string representation of the [SelectedModelType].
+func (s SelectedModelType) String() string {
+	return string(s)
+}
 
 const (
 	SelectedModelTypeLarge SelectedModelType = "large"
@@ -119,20 +129,38 @@ type ProviderConfig struct {
 	Models []catwalk.Model `json:"models,omitempty" jsonschema:"description=List of models available from this provider"`
 }
 
-func (pc *ProviderConfig) SetupClaudeCode() {
-	pc.APIKey = fmt.Sprintf("Bearer %s", pc.OAuthToken.AccessToken)
-	pc.SystemPromptPrefix = "You are Claude Code, Anthropic's official CLI for Claude."
-	pc.ExtraHeaders["anthropic-version"] = "2023-06-01"
-
-	value := pc.ExtraHeaders["anthropic-beta"]
-	const want = "oauth-2025-04-20"
-	if !strings.Contains(value, want) {
-		if value != "" {
-			value += ","
-		}
-		value += want
+// ToProvider converts the [ProviderConfig] to a [catwalk.Provider].
+func (pc *ProviderConfig) ToProvider() catwalk.Provider {
+	// Convert config provider to provider.Provider format
+	provider := catwalk.Provider{
+		Name:   pc.Name,
+		ID:     catwalk.InferenceProvider(pc.ID),
+		Models: make([]catwalk.Model, len(pc.Models)),
 	}
-	pc.ExtraHeaders["anthropic-beta"] = value
+
+	// Convert models
+	for i, model := range pc.Models {
+		provider.Models[i] = catwalk.Model{
+			ID:                     model.ID,
+			Name:                   model.Name,
+			CostPer1MIn:            model.CostPer1MIn,
+			CostPer1MOut:           model.CostPer1MOut,
+			CostPer1MInCached:      model.CostPer1MInCached,
+			CostPer1MOutCached:     model.CostPer1MOutCached,
+			ContextWindow:          model.ContextWindow,
+			DefaultMaxTokens:       model.DefaultMaxTokens,
+			CanReason:              model.CanReason,
+			ReasoningLevels:        model.ReasoningLevels,
+			DefaultReasoningEffort: model.DefaultReasoningEffort,
+			SupportsImages:         model.SupportsImages,
+		}
+	}
+
+	return provider
+}
+
+func (pc *ProviderConfig) SetupGitHubCopilot() {
+	maps.Copy(pc.ExtraHeaders, copilot.Headers())
 }
 
 type MCPType string
@@ -159,13 +187,14 @@ type MCPConfig struct {
 
 type LSPConfig struct {
 	Disabled    bool              `json:"disabled,omitempty" jsonschema:"description=Whether this LSP server is disabled,default=false"`
-	Command     string            `json:"command,omitempty" jsonschema:"required,description=Command to execute for the LSP server,example=gopls"`
+	Command     string            `json:"command,omitempty" jsonschema:"description=Command to execute for the LSP server,example=gopls"`
 	Args        []string          `json:"args,omitempty" jsonschema:"description=Arguments to pass to the LSP server command"`
 	Env         map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set to the LSP server command"`
 	FileTypes   []string          `json:"filetypes,omitempty" jsonschema:"description=File types this LSP server handles,example=go,example=mod,example=rs,example=c,example=js,example=ts"`
 	RootMarkers []string          `json:"root_markers,omitempty" jsonschema:"description=Files or directories that indicate the project root,example=go.mod,example=package.json,example=Cargo.toml"`
 	InitOptions map[string]any    `json:"init_options,omitempty" jsonschema:"description=Initialization options passed to the LSP server during initialize request"`
 	Options     map[string]any    `json:"options,omitempty" jsonschema:"description=LSP server-specific settings passed during initialization"`
+	Timeout     int               `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for LSP server initialization,default=30,example=60,example=120"`
 }
 
 type TUIOptions struct {
@@ -175,6 +204,7 @@ type TUIOptions struct {
 	//
 
 	Completions Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
+	Transparent *bool       `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
 }
 
 // Completions defines options for the completions UI.
@@ -217,6 +247,7 @@ func (Attribution) JSONSchemaExtend(schema *jsonschema.Schema) {
 
 type Options struct {
 	ContextPaths              []string     `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=CRUSH.md"`
+	SkillsPaths               []string     `json:"skills_paths,omitempty" jsonschema:"description=Paths to directories containing Agent Skills (folders with SKILL.md files),example=~/.config/crush/skills,example=./skills"`
 	TUI                       *TUIOptions  `json:"tui,omitempty" jsonschema:"description=Terminal user interface options"`
 	Debug                     bool         `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
 	DebugLSP                  bool         `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
@@ -224,9 +255,12 @@ type Options struct {
 	DataDirectory             string       `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data (relative to working directory),default=.crush,example=.crush"` // Relative to the cwd
 	DisabledTools             []string     `json:"disabled_tools,omitempty" jsonschema:"description=List of built-in tools to disable and hide from the agent,example=bash,example=sourcegraph"`
 	DisableProviderAutoUpdate bool         `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`
+	DisableDefaultProviders   bool         `json:"disable_default_providers,omitempty" jsonschema:"description=Ignore all default/embedded providers. When enabled, providers must be fully specified in the config file with base_url, models, and api_key - no merging with defaults occurs,default=false"`
 	Attribution               *Attribution `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
 	DisableMetrics            bool         `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
 	InitializeAs              string       `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
+	AutoLSP                   *bool        `json:"auto_lsp,omitempty" jsonschema:"description=Automatically setup LSPs based on root markers,default=true"`
+	Progress                  *bool        `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
 }
 
 type MCPs map[string]MCPConfig
@@ -285,7 +319,7 @@ func (m MCPConfig) ResolvedHeaders() map[string]string {
 		var err error
 		m.Headers[e], err = resolver.ResolveValue(v)
 		if err != nil {
-			slog.Error("error resolving header variable", "error", err, "variable", e, "value", v)
+			slog.Error("Error resolving header variable", "error", err, "variable", e, "value", v)
 			continue
 		}
 	}
@@ -316,7 +350,7 @@ type Agent struct {
 }
 
 type Tools struct {
-	Ls ToolLs `json:"ls,omitzero"`
+	Ls ToolLs `json:"ls,omitempty"`
 }
 
 type ToolLs struct {
@@ -334,8 +368,9 @@ type Config struct {
 
 	// We currently only support large/small as values here.
 	Models map[SelectedModelType]SelectedModel `json:"models,omitempty" jsonschema:"description=Model configurations for different model types,example={\"large\":{\"model\":\"gpt-4o\",\"provider\":\"openai\"}}"`
+
 	// Recently used models stored in the data directory config.
-	RecentModels map[SelectedModelType][]SelectedModel `json:"recent_models,omitempty" jsonschema:"description=Recently used models sorted by most recent first"`
+	RecentModels map[SelectedModelType][]SelectedModel `json:"recent_models,omitempty" jsonschema:"-"`
 
 	// The providers that are configured
 	Providers *csync.Map[string, ProviderConfig] `json:"providers,omitempty" jsonschema:"description=AI provider configurations"`
@@ -348,7 +383,7 @@ type Config struct {
 
 	Permissions *Permissions `json:"permissions,omitempty" jsonschema:"description=Permission settings for tool usage"`
 
-	Tools Tools `json:"tools,omitzero" jsonschema:"description=Tool configurations"`
+	Tools Tools `json:"tools,omitempty" jsonschema:"description=Tool configurations"`
 
 	Agents map[string]Agent `json:"-"`
 
@@ -451,8 +486,15 @@ func (c *Config) UpdatePreferredModel(modelType SelectedModelType, model Selecte
 	return nil
 }
 
+func (c *Config) HasConfigField(key string) bool {
+	data, err := os.ReadFile(c.dataConfigDir)
+	if err != nil {
+		return false
+	}
+	return gjson.Get(string(data), key).Exists()
+}
+
 func (c *Config) SetConfigField(key string, value any) error {
-	// read the data
 	data, err := os.ReadFile(c.dataConfigDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -465,6 +507,28 @@ func (c *Config) SetConfigField(key string, value any) error {
 	newValue, err := sjson.Set(string(data), key, value)
 	if err != nil {
 		return fmt.Errorf("failed to set config field %s: %w", key, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(c.dataConfigDir), 0o755); err != nil {
+		return fmt.Errorf("failed to create config directory %q: %w", c.dataConfigDir, err)
+	}
+	if err := os.WriteFile(c.dataConfigDir, []byte(newValue), 0o600); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+	return nil
+}
+
+func (c *Config) RemoveConfigField(key string) error {
+	data, err := os.ReadFile(c.dataConfigDir)
+	if err != nil {
+		return fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	newValue, err := sjson.Delete(string(data), key)
+	if err != nil {
+		return fmt.Errorf("failed to delete config field %s: %w", key, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(c.dataConfigDir), 0o755); err != nil {
+		return fmt.Errorf("failed to create config directory %q: %w", c.dataConfigDir, err)
 	}
 	if err := os.WriteFile(c.dataConfigDir, []byte(newValue), 0o600); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
@@ -483,20 +547,28 @@ func (c *Config) RefreshOAuthToken(ctx context.Context, providerID string) error
 		return fmt.Errorf("provider %s does not have an OAuth token", providerID)
 	}
 
-	// Only Anthropic provider uses OAuth for now.
-	if providerID != string(catwalk.InferenceProviderAnthropic) {
+	var newToken *oauth.Token
+	var refreshErr error
+	switch providerID {
+	case string(catwalk.InferenceProviderCopilot):
+		newToken, refreshErr = copilot.RefreshToken(ctx, providerConfig.OAuthToken.RefreshToken)
+	case hyperp.Name:
+		newToken, refreshErr = hyper.ExchangeToken(ctx, providerConfig.OAuthToken.RefreshToken)
+	default:
 		return fmt.Errorf("OAuth refresh not supported for provider %s", providerID)
 	}
-
-	newToken, err := claude.RefreshToken(ctx, providerConfig.OAuthToken.RefreshToken)
-	if err != nil {
-		return fmt.Errorf("failed to refresh OAuth token for provider %s: %w", providerID, err)
+	if refreshErr != nil {
+		return fmt.Errorf("failed to refresh OAuth token for provider %s: %w", providerID, refreshErr)
 	}
 
 	slog.Info("Successfully refreshed OAuth token", "provider", providerID)
 	providerConfig.OAuthToken = newToken
-	providerConfig.APIKey = fmt.Sprintf("Bearer %s", newToken.AccessToken)
-	providerConfig.SetupClaudeCode()
+	providerConfig.APIKey = newToken.AccessToken
+
+	switch providerID {
+	case string(catwalk.InferenceProviderCopilot):
+		providerConfig.SetupGitHubCopilot()
+	}
 
 	c.Providers.Set(providerID, providerConfig)
 
@@ -531,7 +603,10 @@ func (c *Config) SetProviderAPIKey(providerID string, apiKey any) error {
 		setKeyOrToken = func() {
 			providerConfig.APIKey = v.AccessToken
 			providerConfig.OAuthToken = v
-			providerConfig.SetupClaudeCode()
+			switch providerID {
+			case string(catwalk.InferenceProviderCopilot):
+				providerConfig.SetupGitHubCopilot()
+			}
 		}
 	}
 
@@ -625,12 +700,14 @@ func allToolNames() []string {
 		"multiedit",
 		"lsp_diagnostics",
 		"lsp_references",
+		"lsp_restart",
 		"fetch",
 		"agentic_fetch",
 		"glob",
 		"grep",
 		"ls",
 		"sourcegraph",
+		"todos",
 		"view",
 		"write",
 	}
@@ -741,21 +818,21 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	for k, v := range c.ExtraHeaders {
 		req.Header.Set(k, v)
 	}
-	b, err := client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to create request for provider %s: %w", c.ID, err)
 	}
+	defer resp.Body.Close()
 	if c.ID == string(catwalk.InferenceProviderZAI) {
-		if b.StatusCode == http.StatusUnauthorized {
-			// for z.ai just check if the http response is not 401
-			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, b.Status)
+		if resp.StatusCode == http.StatusUnauthorized {
+			// For z.ai just check if the http response is not 401.
+			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, resp.Status)
 		}
 	} else {
-		if b.StatusCode != http.StatusOK {
-			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, b.Status)
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, resp.Status)
 		}
 	}
-	_ = b.Body.Close()
 	return nil
 }
 
@@ -765,7 +842,7 @@ func resolveEnvs(envs map[string]string) []string {
 		var err error
 		envs[e], err = resolver.ResolveValue(v)
 		if err != nil {
-			slog.Error("error resolving environment variable", "error", err, "variable", e, "value", v)
+			slog.Error("Error resolving environment variable", "error", err, "variable", e, "value", v)
 			continue
 		}
 	}

@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/shell"
+	"github.com/charmbracelet/crush/internal/skills"
 )
 
 // Prompt represents a template-based prompt generator.
@@ -26,15 +27,16 @@ type Prompt struct {
 }
 
 type PromptDat struct {
-	Provider     string
-	Model        string
-	Config       config.Config
-	WorkingDir   string
-	IsGitRepo    bool
-	Platform     string
-	Date         string
-	GitStatus    string
-	ContextFiles []ContextFile
+	Provider      string
+	Model         string
+	Config        config.Config
+	WorkingDir    string
+	IsGitRepo     bool
+	Platform      string
+	Date          string
+	GitStatus     string
+	ContextFiles  []ContextFile
+	AvailSkillXML string
 }
 
 type ContextFile struct {
@@ -162,15 +164,28 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, cfg con
 		files[pathKey] = content
 	}
 
+	// Discover and load skills metadata.
+	var availSkillXML string
+	if len(cfg.Options.SkillsPaths) > 0 {
+		expandedPaths := make([]string, 0, len(cfg.Options.SkillsPaths))
+		for _, pth := range cfg.Options.SkillsPaths {
+			expandedPaths = append(expandedPaths, expandPath(pth, cfg))
+		}
+		if discoveredSkills := skills.Discover(expandedPaths); len(discoveredSkills) > 0 {
+			availSkillXML = skills.ToPromptXML(discoveredSkills)
+		}
+	}
+
 	isGit := isGitRepo(cfg.WorkingDir())
 	data := PromptDat{
-		Provider:   provider,
-		Model:      model,
-		Config:     cfg,
-		WorkingDir: filepath.ToSlash(workingDir),
-		IsGitRepo:  isGit,
-		Platform:   platform,
-		Date:       p.now().Format("1/2/2006"),
+		Provider:      provider,
+		Model:         model,
+		Config:        cfg,
+		WorkingDir:    filepath.ToSlash(workingDir),
+		IsGitRepo:     isGit,
+		Platform:      platform,
+		Date:          p.now().Format("1/2/2006"),
+		AvailSkillXML: availSkillXML,
 	}
 	if isGit {
 		var err error

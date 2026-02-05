@@ -63,16 +63,6 @@
           "type": "object",
           "description": "Model configurations for different model types"
         },
-        "recent_models": {
-          "additionalProperties": {
-            "items": {
-              "$ref": "#/$defs/SelectedModel"
-            },
-            "type": "array"
-          },
-          "type": "object",
-          "description": "Recently used models sorted by most recent first"
-        },
         "providers": {
           "additionalProperties": {
             "$ref": "#/$defs/ProviderConfig"
@@ -102,10 +92,7 @@
         }
       },
       "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "tools"
-      ]
+      "type": "object"
     },
     "LSPConfig": {
       "properties": {
@@ -169,13 +156,19 @@
         "options": {
           "type": "object",
           "description": "LSP server-specific settings passed during initialization"
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Timeout in seconds for LSP server initialization",
+          "default": 30,
+          "examples": [
+            60,
+            120
+          ]
         }
       },
       "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "command"
-      ]
+      "type": "object"
     },
     "LSPs": {
       "additionalProperties": {
@@ -367,6 +360,17 @@
           "type": "array",
           "description": "Paths to files containing context information for the AI"
         },
+        "skills_paths": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "~/.config/crush/skills",
+              "./skills"
+            ]
+          },
+          "type": "array",
+          "description": "Paths to directories containing Agent Skills (folders with SKILL.md files)"
+        },
         "tui": {
           "$ref": "#/$defs/TUIOptions",
           "description": "Terminal user interface options"
@@ -410,6 +414,11 @@
           "description": "Disable providers auto-update",
           "default": false
         },
+        "disable_default_providers": {
+          "type": "boolean",
+          "description": "Ignore all default/embedded providers. When enabled",
+          "default": false
+        },
         "attribution": {
           "$ref": "#/$defs/Attribution",
           "description": "Attribution settings for generated content"
@@ -429,6 +438,16 @@
             "CLAUDE.md",
             "docs/LLMs.md"
           ]
+        },
+        "auto_lsp": {
+          "type": "boolean",
+          "description": "Automatically setup LSPs based on root markers",
+          "default": true
+        },
+        "progress": {
+          "type": "boolean",
+          "description": "Show indeterminate progress updates during long operations",
+          "default": true
         }
       },
       "additionalProperties": false,
@@ -631,6 +650,11 @@
         "completions": {
           "$ref": "#/$defs/Completions",
           "description": "Completions UI options"
+        },
+        "transparent": {
+          "type": "boolean",
+          "description": "Enable transparent background for the TUI interface",
+          "default": false
         }
       },
       "additionalProperties": false,
@@ -692,10 +716,7 @@
         }
       },
       "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "ls"
-      ]
+      "type": "object"
     }
   }
 }

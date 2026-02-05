@@ -114,7 +114,7 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, config
 	updateLSPState(name, lsp.StateStarting, nil, nil, 0)
 
 	// Create LSP client.
-	lspClient, err := lsp.New(ctx, name, config, app.config.Resolver())
+	lspClient, err := lsp.New(ctx, name, config, app.config.Resolver(), app.config.Options.DebugLSP)
 	if err != nil {
 		if !userConfigured {
 			slog.Warn("Default LSP config skipped due to error", "name", name, "error", err)

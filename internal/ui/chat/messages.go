@@ -186,16 +186,18 @@ type AssistantInfoItem struct {
 	id                  string
 	message             *message.Message
 	sty                 *styles.Styles
+	cfg                 *config.Config
 	lastUserMessageTime time.Time
 }
 
 // NewAssistantInfoItem creates a new AssistantInfoItem.
-func NewAssistantInfoItem(sty *styles.Styles, message *message.Message, lastUserMessageTime time.Time) MessageItem {
+func NewAssistantInfoItem(sty *styles.Styles, message *message.Message, cfg *config.Config, lastUserMessageTime time.Time) MessageItem {
 	return &AssistantInfoItem{
 		cachedMessageItem:   &cachedMessageItem{},
 		id:                  AssistantInfoID(message.ID),
 		message:             message,
 		sty:                 sty,
+		cfg:                 cfg,
 		lastUserMessageTime: lastUserMessageTime,
 	}
 }
@@ -231,13 +233,13 @@ func (a *AssistantInfoItem) renderContent(width int) string {
 	duration := finishTime.Sub(a.lastUserMessageTime)
 	infoMsg := a.sty.Chat.Message.AssistantInfoDuration.Render(duration.String())
 	icon := a.sty.Chat.Message.AssistantInfoIcon.Render(styles.ModelIcon)
-	model := config.Get().GetModel(a.message.Provider, a.message.Model)
+	model := a.cfg.GetModel(a.message.Provider, a.message.Model)
 	if model == nil {
 		model = &catwalk.Model{Name: "Unknown Model"}
 	}
 	modelFormatted := a.sty.Chat.Message.AssistantInfoModel.Render(model.Name)
 	providerName := a.message.Provider
-	if providerConfig, ok := config.Get().Providers.Get(a.message.Provider); ok {
+	if providerConfig, ok := a.cfg.Providers.Get(a.message.Provider); ok {
 		providerName = providerConfig.Name
 	}
 	provider := a.sty.Chat.Message.AssistantInfoProvider.Render(fmt.Sprintf("via %s", providerName))

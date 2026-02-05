@@ -27,7 +27,6 @@ jobs:
       fury_token: ${{ secrets.FURY_TOKEN }}
       nfpm_gpg_key: ${{ secrets.NFPM_GPG_KEY }}
       nfpm_passphrase: ${{ secrets.NFPM_PASSPHRASE }}
-      npm_token: ${{ secrets.NPM_TOKEN }}
       snapcraft_token: ${{ secrets.SNAPCRAFT_TOKEN }}
       aur_key: ${{ secrets.AUR_KEY }}
       macos_sign_p12: ${{ secrets.MACOS_SIGN_P12 }}

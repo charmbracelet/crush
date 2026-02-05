@@ -16,7 +16,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/catwalk/pkg/catwalk"
+	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
@@ -60,6 +60,11 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 		assignIfNil(&cfg.Tools.Ls.MaxItems, items)
 		assignIfNil(&cfg.Options.TUI.Completions.MaxDepth, depth)
 		assignIfNil(&cfg.Options.TUI.Completions.MaxItems, items)
+	}
+
+	if isAppleTerminal() {
+		slog.Warn("Detected Apple Terminal, enabling transparent mode")
+		assignIfNil(&cfg.Options.TUI.Transparent, true)
 	}
 
 	// Load known providers, this loads the config from catwalk
@@ -792,3 +797,5 @@ func GlobalSkillsDirs() []string {
 		filepath.Join(configBase, "agents", "skills"),
 	}
 }
+
+func isAppleTerminal() bool { return os.Getenv("TERM_PROGRAM") == "Apple_Terminal" }

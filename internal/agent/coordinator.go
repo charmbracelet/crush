@@ -15,13 +15,14 @@ import (
 	"slices"
 	"strings"
 
+	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
-	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
@@ -38,6 +39,7 @@ import (
 	"charm.land/fantasy/providers/openai"
 	"charm.land/fantasy/providers/openaicompat"
 	"charm.land/fantasy/providers/openrouter"
+	"charm.land/fantasy/providers/vercel"
 	openaisdk "github.com/openai/openai-go/v2/option"
 	"github.com/qjebbs/go-jsons"
 )
@@ -64,6 +66,7 @@ type coordinator struct {
 	messages    message.Service
 	permissions permission.Service
 	history     history.Service
+	filetracker filetracker.Service
 	lspClients  *csync.Map[string, *lsp.Client]
 
 	currentAgent SessionAgent
@@ -79,6 +82,7 @@ func NewCoordinator(
 	messages message.Service,
 	permissions permission.Service,
 	history history.Service,
+	filetracker filetracker.Service,
 	lspClients *csync.Map[string, *lsp.Client],
 ) (Coordinator, error) {
 	c := &coordinator{
@@ -87,6 +91,7 @@ func NewCoordinator(
 		messages:    messages,
 		permissions: permissions,
 		history:     history,
+		filetracker: filetracker,
 		lspClients:  lspClients,
 		agents:      make(map[string]SessionAgent),
 	}
@@ -147,7 +152,7 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	mergedOptions, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(model, providerCfg)
 
 	if providerCfg.OAuthToken != nil && providerCfg.OAuthToken.IsExpired() {
-		slog.Info("Token needs to be refreshed", "provider", providerCfg.ID)
+		slog.Debug("Token needs to be refreshed", "provider", providerCfg.ID)
 		if err := c.refreshOAuth2Token(ctx, providerCfg); err != nil {
 			return nil, err
 		}
@@ -172,18 +177,18 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	if c.isUnauthorized(originalErr) {
 		switch {
 		case providerCfg.OAuthToken != nil:
-			slog.Info("Received 401. Refreshing token and retrying", "provider", providerCfg.ID)
+			slog.Debug("Received 401. Refreshing token and retrying", "provider", providerCfg.ID)
 			if err := c.refreshOAuth2Token(ctx, providerCfg); err != nil {
 				return nil, originalErr
 			}
-			slog.Info("Retrying request with refreshed OAuth token", "provider", providerCfg.ID)
+			slog.Debug("Retrying request with refreshed OAuth token", "provider", providerCfg.ID)
 			return run()
 		case strings.Contains(providerCfg.APIKeyTemplate, "$"):
-			slog.Info("Received 401. Refreshing API Key template and retrying", "provider", providerCfg.ID)
+			slog.Debug("Received 401. Refreshing API Key template and retrying", "provider", providerCfg.ID)
 			if err := c.refreshApiKeyTemplate(ctx, providerCfg); err != nil {
 				return nil, originalErr
 			}
-			slog.Info("Retrying request with refreshed API key", "provider", providerCfg.ID)
+			slog.Debug("Retrying request with refreshed API key", "provider", providerCfg.ID)
 			return run()
 		}
 	}
@@ -239,7 +244,20 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		return options
 	}
 
-	switch providerCfg.Type {
+	providerType := providerCfg.Type
+	if providerType == "hyper" {
+		if strings.Contains(model.CatwalkCfg.ID, "claude") {
+			providerType = anthropic.Name
+		} else if strings.Contains(model.CatwalkCfg.ID, "gpt") {
+			providerType = openai.Name
+		} else if strings.Contains(model.CatwalkCfg.ID, "gemini") {
+			providerType = google.Name
+		} else {
+			providerType = openaicompat.Name
+		}
+	}
+
+	switch providerType {
 	case openai.Name, azure.Name:
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
 		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
@@ -284,6 +302,18 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		parsed, err := openrouter.ParseOptions(mergedOptions)
 		if err == nil {
 			options[openrouter.Name] = parsed
+		}
+	case vercel.Name:
+		_, hasReasoning := mergedOptions["reasoning"]
+		if !hasReasoning && model.ModelCfg.ReasoningEffort != "" {
+			mergedOptions["reasoning"] = map[string]any{
+				"enabled": true,
+				"effort":  model.ModelCfg.ReasoningEffort,
+			}
+		}
+		parsed, err := vercel.ParseOptions(mergedOptions)
+		if err == nil {
+			options[vercel.Name] = parsed
 		}
 	case google.Name:
 		_, hasReasoning := mergedOptions["thinking_config"]
@@ -393,19 +423,19 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		tools.NewJobOutputTool(),
 		tools.NewJobKillTool(),
 		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),
-		tools.NewEditTool(c.lspClients, c.permissions, c.history, c.cfg.WorkingDir()),
-		tools.NewMultiEditTool(c.lspClients, c.permissions, c.history, c.cfg.WorkingDir()),
+		tools.NewEditTool(c.lspClients, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
+		tools.NewMultiEditTool(c.lspClients, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 		tools.NewFetchTool(c.permissions, c.cfg.WorkingDir(), nil),
 		tools.NewGlobTool(c.cfg.WorkingDir()),
 		tools.NewGrepTool(c.cfg.WorkingDir()),
 		tools.NewLsTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Tools.Ls),
 		tools.NewSourcegraphTool(nil),
 		tools.NewTodosTool(c.sessions),
-		tools.NewViewTool(c.lspClients, c.permissions, c.cfg.WorkingDir(), c.cfg.Options.SkillsPaths...),
-		tools.NewWriteTool(c.lspClients, c.permissions, c.history, c.cfg.WorkingDir()),
+		tools.NewViewTool(c.lspClients, c.permissions, c.filetracker, c.cfg.WorkingDir(), c.cfg.Options.SkillsPaths...),
+		tools.NewWriteTool(c.lspClients, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 	)
 
-	if len(c.cfg.LSP) > 0 {
+	if c.lspClients.Len() > 0 {
 		allTools = append(allTools, tools.NewDiagnosticsTool(c.lspClients), tools.NewReferencesTool(c.lspClients), tools.NewLSPRestartTool(c.lspClients))
 	}
 
@@ -424,7 +454,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		}
 		if len(agent.AllowedMCP) == 0 {
 			// No MCPs allowed
-			slog.Debug("no MCPs allowed", "tool", tool.Name(), "agent", agent.Name)
+			slog.Debug("No MCPs allowed", "tool", tool.Name(), "agent", agent.Name)
 			break
 		}
 
@@ -587,6 +617,20 @@ func (c *coordinator) buildOpenrouterProvider(_, apiKey string, headers map[stri
 	return openrouter.New(opts...)
 }
 
+func (c *coordinator) buildVercelProvider(_, apiKey string, headers map[string]string) (fantasy.Provider, error) {
+	opts := []vercel.Option{
+		vercel.WithAPIKey(apiKey),
+	}
+	if c.cfg.Options.Debug {
+		httpClient := log.NewHTTPClient()
+		opts = append(opts, vercel.WithHTTPClient(httpClient))
+	}
+	if len(headers) > 0 {
+		opts = append(opts, vercel.WithHeaders(headers))
+	}
+	return vercel.New(opts...)
+}
+
 func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers map[string]string, extraBody map[string]any, providerID string, isSubAgent bool) (fantasy.Provider, error) {
 	opts := []openaicompat.Option{
 		openaicompat.WithBaseURL(baseURL),
@@ -744,6 +788,8 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		return c.buildAnthropicProvider(baseURL, apiKey, headers)
 	case openrouter.Name:
 		return c.buildOpenrouterProvider(baseURL, apiKey, headers)
+	case vercel.Name:
+		return c.buildVercelProvider(baseURL, apiKey, headers)
 	case azure.Name:
 		return c.buildAzureProvider(baseURL, apiKey, headers, providerCfg.ExtraParams)
 	case bedrock.Name:

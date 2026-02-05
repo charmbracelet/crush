@@ -261,11 +261,11 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		rc.ViewStyle = t.Dialog.Sessions.DeletingView
 		rc.AddPart(t.Dialog.Sessions.DeletingMessage.Render("Delete this session?"))
 	case sessionsModeUpdating:
-		rc.TitleStyle = t.Dialog.Sessions.UpdatingTitle
-		rc.TitleGradientFromColor = t.Dialog.Sessions.UpdatingTitleGradientFromColor
-		rc.TitleGradientToColor = t.Dialog.Sessions.UpdatingTitleGradientToColor
-		rc.ViewStyle = t.Dialog.Sessions.UpdatingView
-		message := t.Dialog.Sessions.UpdatingMessage.Render("Rename this session?")
+		rc.TitleStyle = t.Dialog.Sessions.RenamingingTitle
+		rc.TitleGradientFromColor = t.Dialog.Sessions.RenamingTitleGradientFromColor
+		rc.TitleGradientToColor = t.Dialog.Sessions.RenamingTitleGradientToColor
+		rc.ViewStyle = t.Dialog.Sessions.RenamingView
+		message := t.Dialog.Sessions.RenamingingMessage.Render("Rename this session?")
 		rc.AddPart(message)
 		item := s.selectedSessionItem()
 		if item == nil {
@@ -279,8 +279,8 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		start, end := s.list.VisibleItemIndices()
 		selectedIndex := s.list.Selected()
 
-		titleStyle := t.Dialog.Sessions.UpdatingTitle
-		dialogStyle := t.Dialog.Sessions.UpdatingView
+		titleStyle := t.Dialog.Sessions.RenamingingTitle
+		dialogStyle := t.Dialog.Sessions.RenamingView
 		inputStyle := t.Dialog.InputPrompt
 
 		// Adjust cursor position to account for dialog layout + message

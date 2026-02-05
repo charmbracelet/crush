@@ -27,13 +27,9 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
-	xstrings "github.com/charmbracelet/x/exp/strings"
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 )
-
-// kittyTerminals defines terminals supporting querying capabilities.
-var kittyTerminals = []string{"alacritty", "ghostty", "kitty", "rio", "wezterm"}
 
 func init() {
 	rootCmd.PersistentFlags().StringP("cwd", "c", "", "Current working directory")
@@ -94,7 +90,7 @@ crush -y
 
 		com := common.DefaultCommon(app)
 		model := ui.New(com)
-		model.QueryCapabilities = shouldQueryCapabilities(env)
+
 		program := tea.NewProgram(
 			model,
 			tea.WithEnvironment(env),
@@ -171,12 +167,19 @@ func supportsProgressBar() bool {
 }
 
 func setupAppWithProgressBar(cmd *cobra.Command) (*app.App, error) {
-	if supportsProgressBar() {
+	app, err := setupApp(cmd)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check if progress bar is enabled in config (defaults to true if nil)
+	progressEnabled := app.Config().Options.Progress == nil || *app.Config().Options.Progress
+	if progressEnabled && supportsProgressBar() {
 		_, _ = fmt.Fprintf(os.Stderr, ansi.SetIndeterminateProgressBar)
 		defer func() { _, _ = fmt.Fprintf(os.Stderr, ansi.ResetProgressBar) }()
 	}
 
-	return setupApp(cmd)
+	return app, nil
 }
 
 // setupApp handles the common setup logic for both interactive and non-interactive modes.
@@ -292,18 +295,4 @@ func createDotCrushDir(dir string) error {
 	}
 
 	return nil
-}
-
-func shouldQueryCapabilities(env uv.Environ) bool {
-	const osVendorTypeApple = "Apple"
-	termType := env.Getenv("TERM")
-	termProg, okTermProg := env.LookupEnv("TERM_PROGRAM")
-	_, okSSHTTY := env.LookupEnv("SSH_TTY")
-	if okTermProg && strings.Contains(termProg, osVendorTypeApple) {
-		return false
-	}
-	return (!okTermProg && !okSSHTTY) ||
-		(!strings.Contains(termProg, osVendorTypeApple) && !okSSHTTY) ||
-		// Terminals that do support XTVERSION.
-		xstrings.ContainsAnyOf(termType, kittyTerminals...)
 }

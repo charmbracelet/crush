@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/logo"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -28,14 +27,13 @@ func (m *UI) modelInfo(width int) string {
 
 			// Only check reasoning if model can reason
 			if model.CatwalkCfg.CanReason {
-				switch providerConfig.Type {
-				case catwalk.TypeAnthropic:
+				if model.ModelCfg.ReasoningEffort == "" {
 					if model.ModelCfg.Think {
 						reasoningInfo = "Thinking On"
 					} else {
 						reasoningInfo = "Thinking Off"
 					}
-				default:
+				} else {
 					formatter := cases.Title(language.English, cases.NoLower)
 					reasoningEffort := cmp.Or(model.ModelCfg.ReasoningEffort, model.CatwalkCfg.DefaultReasoningEffort)
 					reasoningInfo = formatter.String(fmt.Sprintf("Reasoning %s", reasoningEffort))

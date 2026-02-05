@@ -21,13 +21,13 @@ import (
 	"sync"
 	"time"
 
+	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"charm.land/fantasy/object"
-	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/event"
 )
 
-//go:generate wget -O provider.json https://console.charm.land/api/v1/provider
+//go:generate wget -O provider.json https://hyper.charm.land/api/v1/provider
 
 //go:embed provider.json
 var embedded []byte
@@ -49,7 +49,10 @@ var Enabled = sync.OnceValue(func() bool {
 var Embedded = sync.OnceValue(func() catwalk.Provider {
 	var provider catwalk.Provider
 	if err := json.Unmarshal(embedded, &provider); err != nil {
-		slog.Error("could not use embedded provider data", "err", err)
+		slog.Error("Could not use embedded provider data", "err", err)
+	}
+	if e := os.Getenv("HYPER_URL"); e != "" {
+		provider.APIEndpoint = e + "/api/v1/fantasy"
 	}
 	return provider
 })
@@ -58,8 +61,7 @@ const (
 	// Name is the default name of this meta provider.
 	Name = "hyper"
 	// defaultBaseURL is the default proxy URL.
-	// TODO: change this to production URL when ready.
-	defaultBaseURL = "https://console.charm.land"
+	defaultBaseURL = "https://hyper.charm.land"
 )
 
 // BaseURL returns the base URL, which is either $HYPER_URL or the default.

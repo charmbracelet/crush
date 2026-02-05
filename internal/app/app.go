@@ -35,6 +35,7 @@ import (
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/tui/components/anim"
 	"github.com/charmbracelet/crush/internal/tui/styles"
+	"github.com/charmbracelet/crush/internal/tui/util"
 	"github.com/charmbracelet/crush/internal/update"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/x/ansi"
@@ -460,6 +461,21 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		return fmt.Errorf("coder agent configuration is missing")
 	}
 	var err error
+	onRetry := func(statusCode int, title string, delay time.Duration) {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("Panic in onRetry callback", "panic", r)
+			}
+		}()
+		msg := util.InfoMsg{
+			Type: util.InfoTypeWarn,
+			Msg:  fmt.Sprintf("Rate limited. Retrying in %v (%s)", delay.Round(time.Second), title),
+		}
+		select {
+		case app.events <- msg:
+		default:
+		}
+	}
 	app.AgentCoordinator, err = agent.NewCoordinator(
 		ctx,
 		app.config,
@@ -469,6 +485,7 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.History,
 		app.FileTracker,
 		app.LSPClients,
+		onRetry,
 	)
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)

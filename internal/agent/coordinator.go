@@ -14,6 +14,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
@@ -73,6 +74,7 @@ type coordinator struct {
 	agents       map[string]SessionAgent
 
 	readyWg errgroup.Group
+	onRetry func(int, string, time.Duration)
 }
 
 func NewCoordinator(
@@ -84,6 +86,7 @@ func NewCoordinator(
 	history history.Service,
 	filetracker filetracker.Service,
 	lspClients *csync.Map[string, *lsp.Client],
+	onRetry func(int, string, time.Duration),
 ) (Coordinator, error) {
 	c := &coordinator{
 		cfg:         cfg,
@@ -94,6 +97,7 @@ func NewCoordinator(
 		filetracker: filetracker,
 		lspClients:  lspClients,
 		agents:      make(map[string]SessionAgent),
+		onRetry:     onRetry,
 	}
 
 	agentCfg, ok := cfg.Agents[config.AgentCoder]
@@ -359,16 +363,17 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 
 	largeProviderCfg, _ := c.cfg.Providers.Get(large.ModelCfg.Provider)
 	result := NewSessionAgent(SessionAgentOptions{
-		large,
-		small,
-		largeProviderCfg.SystemPromptPrefix,
-		"",
-		isSubAgent,
-		c.cfg.Options.DisableAutoSummarize,
-		c.permissions.SkipRequests(),
-		c.sessions,
-		c.messages,
-		nil,
+		LargeModel:           large,
+		SmallModel:           small,
+		SystemPromptPrefix:   largeProviderCfg.SystemPromptPrefix,
+		SystemPrompt:         "",
+		IsSubAgent:           isSubAgent,
+		DisableAutoSummarize: c.cfg.Options.DisableAutoSummarize,
+		IsYolo:               c.permissions.SkipRequests(),
+		Sessions:             c.sessions,
+		Messages:             c.messages,
+		Tools:                nil,
+		OnRetry:              c.onRetry,
 	})
 
 	c.readyWg.Go(func() error {

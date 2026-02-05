@@ -109,6 +109,11 @@ type (
 
 	// copyChatHighlightMsg is sent to copy the current chat highlight to clipboard.
 	copyChatHighlightMsg struct{}
+
+	// sessionFilesUpdatesMsg is sent when the files for this session have been updated
+	sessionFilesUpdatesMsg struct {
+		sessionFiles []SessionFile
+	}
 )
 
 // UI represents the main user interface model.
@@ -409,6 +414,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.historyReset()
 		cmds = append(cmds, m.loadPromptHistory())
 		m.updateLayoutAndSize()
+	case sessionFilesUpdatesMsg:
+		m.sessionFiles = msg.sessionFiles
 
 	case sendMessageMsg:
 		cmds = append(cmds, m.sendMessage(msg.Content, msg.Attachments...))

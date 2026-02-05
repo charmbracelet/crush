@@ -360,7 +360,14 @@ func (bor bashOutputRenderer) Render(v *toolCallCmp) string {
 	if v.isNested {
 		width -= 4 // Adjust for nested tool call indentation
 	}
-	header := makeJobHeader(v, "Output", fmt.Sprintf("PID %s", params.ShellID), description, width)
+
+	// Build additional info for max_wait_time if present
+	pidInfo := fmt.Sprintf("PID %s", params.ShellID)
+	if params.MaxWaitTime != nil && *params.MaxWaitTime > 0 {
+		pidInfo += fmt.Sprintf(" (wait %ds)", *params.MaxWaitTime)
+	}
+
+	header := makeJobHeader(v, "Output", pidInfo, description, width)
 	if v.isNested {
 		return v.style().Render(header)
 	}

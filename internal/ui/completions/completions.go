@@ -3,10 +3,12 @@ package completions
 import (
 	"slices"
 	"strings"
+	"sync"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/x/ansi"
@@ -29,14 +31,10 @@ type SelectionMsg struct {
 // ClosedMsg is sent when the completions are closed.
 type ClosedMsg struct{}
 
-// FilesLoadedMsg is sent when files have been loaded for completions.
-type FilesLoadedMsg struct {
-	Files []string
-}
-
-// ResourcesLoadedMsg is sent when MCP resources have been loaded for completions.
-type ResourcesLoadedMsg struct {
-	Resources []ResourceCompletionValue
+// CompletionItemsLoadedMsg is sent when files have been loaded for completions.
+type CompletionItemsLoadedMsg struct {
+	Files     []string
+	Resources []Resource
 }
 
 // Completions represents the completions popup component.
@@ -51,7 +49,7 @@ type Completions struct {
 
 	// Cached items for merging.
 	files     []string
-	resources []ResourceCompletionValue
+	resources []Resource
 
 	// Key bindings
 	keyMap KeyMap
@@ -101,29 +99,33 @@ func (c *Completions) KeyMap() KeyMap {
 	return c.keyMap
 }
 
-// OpenWithFiles opens the completions with file items from the filesystem.
-func (c *Completions) OpenWithFiles(depth, limit int) tea.Cmd {
+// Open opens the completions with file items from the filesystem.
+func (c *Completions) Open(depth, limit int) tea.Cmd {
 	return func() tea.Msg {
-		files, _, _ := fsext.ListDirectory(".", nil, depth, limit)
-		slices.Sort(files)
-		return FilesLoadedMsg{Files: files}
+		var files []string
+		var resources []Resource
+
+		var wg sync.WaitGroup
+		wg.Go(func() {
+			files = loadFiles(depth, limit)
+		})
+		wg.Go(func() {
+			resources = loadMCPResources()
+		})
+		wg.Wait()
+
+		return CompletionItemsLoadedMsg{
+			Files:     files,
+			Resources: resources,
+		}
 	}
 }
 
-// SetFiles sets the file items and rebuilds the merged list.
-func (c *Completions) SetFiles(files []string) {
+// SetItems sets the files and MCP resources and rebuilds the merged list.
+func (c *Completions) SetItems(files []string, resources []Resource) {
 	c.files = files
-	c.rebuildItems()
-}
-
-// SetResources sets the MCP resources and rebuilds the merged list.
-func (c *Completions) SetResources(resources []ResourceCompletionValue) {
 	c.resources = resources
-	c.rebuildItems()
-}
 
-// rebuildItems merges files and resources into a single list.
-func (c *Completions) rebuildItems() {
 	items := make([]list.FilterableItem, 0, len(c.files)+len(c.resources))
 
 	// Add files first.
@@ -168,16 +170,7 @@ func (c *Completions) rebuildItems() {
 	c.list.SelectFirst()
 	c.list.ScrollToSelected()
 
-	// Recalculate width by using just the visible items.
-	start, end := c.list.VisibleItemIndices()
-	width := 0
-	if end != 0 {
-		for _, item := range items[start : end+1] {
-			width = max(width, ansi.StringWidth(item.(interface{ Text() string }).Text()))
-		}
-	}
-	c.width = ordered.Clamp(width+2, int(minWidth), int(maxWidth))
-	c.list.SetSize(c.width, c.height)
+	c.updateSize()
 }
 
 // Close closes the completions popup.
@@ -200,14 +193,17 @@ func (c *Completions) Filter(query string) {
 	c.query = query
 	c.list.SetFilter(query)
 
-	// recalculate width by using just the visible items
+	c.updateSize()
+}
+
+func (c *Completions) updateSize() {
 	items := c.list.FilteredItems()
 	start, end := c.list.VisibleItemIndices()
 	width := 0
-	if end != 0 {
-		for _, item := range items[start : end+1] {
-			width = max(width, ansi.StringWidth(item.(interface{ Text() string }).Text()))
-		}
+	for i := start; i <= end; i++ {
+		item := c.list.ItemAt(i)
+		s := item.(interface{ Text() string }).Text()
+		width = max(width, ansi.StringWidth(s))
 	}
 	c.width = ordered.Clamp(width+2, int(minWidth), int(maxWidth))
 	c.height = ordered.Clamp(len(items), int(minHeight), int(maxHeight))
@@ -318,4 +314,25 @@ func (c *Completions) Render() string {
 	}
 
 	return c.list.Render()
+}
+
+func loadFiles(depth, limit int) []string {
+	files, _, _ := fsext.ListDirectory(".", nil, depth, limit)
+	slices.Sort(files)
+	return files
+}
+
+func loadMCPResources() []Resource {
+	var resources []Resource
+	for mcpName, mcpResources := range mcp.Resources() {
+		for _, r := range mcpResources {
+			resources = append(resources, Resource{
+				MCPName:  mcpName,
+				URI:      r.URI,
+				Title:    r.Name,
+				MIMEType: r.MIMEType,
+			})
+		}
+	}
+	return resources
 }

@@ -114,7 +114,7 @@ func renderHeaderDetails(
 	}
 
 	if errorCount > 0 {
-		parts = append(parts, t.LSP.ErrorDiagnostic.Render(fmt.Sprintf("%s%d", styles.ErrorIcon, errorCount)))
+		parts = append(parts, t.LSP.ErrorDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPErrorIcon, errorCount)))
 	}
 
 	agentCfg := config.Get().Agents[config.AgentCoder]

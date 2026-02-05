@@ -76,7 +76,7 @@ func NewAPIKeyInput(
 
 	m.input = textinput.New()
 	m.input.SetVirtualCursor(false)
-	m.input.Placeholder = "Enter you API key..."
+	m.input.Placeholder = "Enter your API key..."
 	m.input.SetStyles(com.Styles.TextInput)
 	m.input.Focus()
 	m.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding

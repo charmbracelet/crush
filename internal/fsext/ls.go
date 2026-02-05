@@ -144,20 +144,20 @@ func (dl *directoryLister) shouldIgnore(path string, ignorePatterns []string) bo
 	}
 
 	if commonIgnorePatterns().MatchesPath(relPath) {
-		slog.Debug("ignoring common pattern", "path", relPath)
+		slog.Debug("Ignoring common pattern", "path", relPath)
 		return true
 	}
 
 	parentDir := filepath.Dir(path)
 	ignoreParser := dl.getIgnore(parentDir)
 	if ignoreParser.MatchesPath(relPath) {
-		slog.Debug("ignoring dir pattern", "path", relPath, "dir", parentDir)
+		slog.Debug("Ignoring dir pattern", "path", relPath, "dir", parentDir)
 		return true
 	}
 
 	// For directories, also check with trailing slash (gitignore convention)
 	if ignoreParser.MatchesPath(relPath + "/") {
-		slog.Debug("ignoring dir pattern with slash", "path", relPath+"/", "dir", parentDir)
+		slog.Debug("Ignoring dir pattern with slash", "path", relPath+"/", "dir", parentDir)
 		return true
 	}
 
@@ -166,7 +166,7 @@ func (dl *directoryLister) shouldIgnore(path string, ignorePatterns []string) bo
 	}
 
 	if homeIgnore().MatchesPath(relPath) {
-		slog.Debug("ignoring home dir pattern", "path", relPath)
+		slog.Debug("Ignoring home dir pattern", "path", relPath)
 		return true
 	}
 
@@ -177,7 +177,7 @@ func (dl *directoryLister) checkParentIgnores(path string) bool {
 	parent := filepath.Dir(filepath.Dir(path))
 	for parent != "." && path != "." {
 		if dl.getIgnore(parent).MatchesPath(path) {
-			slog.Debug("ingoring parent dir pattern", "path", path, "dir", parent)
+			slog.Debug("Ignoring parent dir pattern", "path", path, "dir", parent)
 			return true
 		}
 		if parent == dl.rootPath {
@@ -210,7 +210,7 @@ func ListDirectory(initialPath string, ignorePatterns []string, depth, limit int
 	found := csync.NewSlice[string]()
 	dl := NewDirectoryLister(initialPath)
 
-	slog.Debug("listing directory", "path", initialPath, "depth", depth, "limit", limit, "ignorePatterns", ignorePatterns)
+	slog.Debug("Listing directory", "path", initialPath, "depth", depth, "limit", limit, "ignorePatterns", ignorePatterns)
 
 	conf := fastwalk.Config{
 		Follow:   true,

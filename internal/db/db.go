@@ -48,17 +48,50 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.deleteSessionMessagesStmt, err = db.PrepareContext(ctx, deleteSessionMessages); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteSessionMessages: %w", err)
 	}
+	if q.getAverageResponseTimeStmt, err = db.PrepareContext(ctx, getAverageResponseTime); err != nil {
+		return nil, fmt.Errorf("error preparing query GetAverageResponseTime: %w", err)
+	}
 	if q.getFileStmt, err = db.PrepareContext(ctx, getFile); err != nil {
 		return nil, fmt.Errorf("error preparing query GetFile: %w", err)
 	}
 	if q.getFileByPathAndSessionStmt, err = db.PrepareContext(ctx, getFileByPathAndSession); err != nil {
 		return nil, fmt.Errorf("error preparing query GetFileByPathAndSession: %w", err)
 	}
+	if q.getFileReadStmt, err = db.PrepareContext(ctx, getFileRead); err != nil {
+		return nil, fmt.Errorf("error preparing query GetFileRead: %w", err)
+	}
+	if q.getHourDayHeatmapStmt, err = db.PrepareContext(ctx, getHourDayHeatmap); err != nil {
+		return nil, fmt.Errorf("error preparing query GetHourDayHeatmap: %w", err)
+	}
 	if q.getMessageStmt, err = db.PrepareContext(ctx, getMessage); err != nil {
 		return nil, fmt.Errorf("error preparing query GetMessage: %w", err)
 	}
+	if q.getRecentActivityStmt, err = db.PrepareContext(ctx, getRecentActivity); err != nil {
+		return nil, fmt.Errorf("error preparing query GetRecentActivity: %w", err)
+	}
 	if q.getSessionByIDStmt, err = db.PrepareContext(ctx, getSessionByID); err != nil {
 		return nil, fmt.Errorf("error preparing query GetSessionByID: %w", err)
+	}
+	if q.getToolUsageStmt, err = db.PrepareContext(ctx, getToolUsage); err != nil {
+		return nil, fmt.Errorf("error preparing query GetToolUsage: %w", err)
+	}
+	if q.getTotalStatsStmt, err = db.PrepareContext(ctx, getTotalStats); err != nil {
+		return nil, fmt.Errorf("error preparing query GetTotalStats: %w", err)
+	}
+	if q.getUsageByDayStmt, err = db.PrepareContext(ctx, getUsageByDay); err != nil {
+		return nil, fmt.Errorf("error preparing query GetUsageByDay: %w", err)
+	}
+	if q.getUsageByDayOfWeekStmt, err = db.PrepareContext(ctx, getUsageByDayOfWeek); err != nil {
+		return nil, fmt.Errorf("error preparing query GetUsageByDayOfWeek: %w", err)
+	}
+	if q.getUsageByHourStmt, err = db.PrepareContext(ctx, getUsageByHour); err != nil {
+		return nil, fmt.Errorf("error preparing query GetUsageByHour: %w", err)
+	}
+	if q.getUsageByModelStmt, err = db.PrepareContext(ctx, getUsageByModel); err != nil {
+		return nil, fmt.Errorf("error preparing query GetUsageByModel: %w", err)
+	}
+	if q.listAllUserMessagesStmt, err = db.PrepareContext(ctx, listAllUserMessages); err != nil {
+		return nil, fmt.Errorf("error preparing query ListAllUserMessages: %w", err)
 	}
 	if q.listFilesByPathStmt, err = db.PrepareContext(ctx, listFilesByPath); err != nil {
 		return nil, fmt.Errorf("error preparing query ListFilesByPath: %w", err)
@@ -77,6 +110,12 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.listSessionsStmt, err = db.PrepareContext(ctx, listSessions); err != nil {
 		return nil, fmt.Errorf("error preparing query ListSessions: %w", err)
+	}
+	if q.listUserMessagesBySessionStmt, err = db.PrepareContext(ctx, listUserMessagesBySession); err != nil {
+		return nil, fmt.Errorf("error preparing query ListUserMessagesBySession: %w", err)
+	}
+	if q.recordFileReadStmt, err = db.PrepareContext(ctx, recordFileRead); err != nil {
+		return nil, fmt.Errorf("error preparing query RecordFileRead: %w", err)
 	}
 	if q.updateMessageStmt, err = db.PrepareContext(ctx, updateMessage); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateMessage: %w", err)
@@ -132,6 +171,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing deleteSessionMessagesStmt: %w", cerr)
 		}
 	}
+	if q.getAverageResponseTimeStmt != nil {
+		if cerr := q.getAverageResponseTimeStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getAverageResponseTimeStmt: %w", cerr)
+		}
+	}
 	if q.getFileStmt != nil {
 		if cerr := q.getFileStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getFileStmt: %w", cerr)
@@ -142,14 +186,64 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing getFileByPathAndSessionStmt: %w", cerr)
 		}
 	}
+	if q.getFileReadStmt != nil {
+		if cerr := q.getFileReadStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getFileReadStmt: %w", cerr)
+		}
+	}
+	if q.getHourDayHeatmapStmt != nil {
+		if cerr := q.getHourDayHeatmapStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getHourDayHeatmapStmt: %w", cerr)
+		}
+	}
 	if q.getMessageStmt != nil {
 		if cerr := q.getMessageStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getMessageStmt: %w", cerr)
 		}
 	}
+	if q.getRecentActivityStmt != nil {
+		if cerr := q.getRecentActivityStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getRecentActivityStmt: %w", cerr)
+		}
+	}
 	if q.getSessionByIDStmt != nil {
 		if cerr := q.getSessionByIDStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getSessionByIDStmt: %w", cerr)
+		}
+	}
+	if q.getToolUsageStmt != nil {
+		if cerr := q.getToolUsageStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getToolUsageStmt: %w", cerr)
+		}
+	}
+	if q.getTotalStatsStmt != nil {
+		if cerr := q.getTotalStatsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getTotalStatsStmt: %w", cerr)
+		}
+	}
+	if q.getUsageByDayStmt != nil {
+		if cerr := q.getUsageByDayStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getUsageByDayStmt: %w", cerr)
+		}
+	}
+	if q.getUsageByDayOfWeekStmt != nil {
+		if cerr := q.getUsageByDayOfWeekStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getUsageByDayOfWeekStmt: %w", cerr)
+		}
+	}
+	if q.getUsageByHourStmt != nil {
+		if cerr := q.getUsageByHourStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getUsageByHourStmt: %w", cerr)
+		}
+	}
+	if q.getUsageByModelStmt != nil {
+		if cerr := q.getUsageByModelStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getUsageByModelStmt: %w", cerr)
+		}
+	}
+	if q.listAllUserMessagesStmt != nil {
+		if cerr := q.listAllUserMessagesStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listAllUserMessagesStmt: %w", cerr)
 		}
 	}
 	if q.listFilesByPathStmt != nil {
@@ -180,6 +274,16 @@ func (q *Queries) Close() error {
 	if q.listSessionsStmt != nil {
 		if cerr := q.listSessionsStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listSessionsStmt: %w", cerr)
+		}
+	}
+	if q.listUserMessagesBySessionStmt != nil {
+		if cerr := q.listUserMessagesBySessionStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listUserMessagesBySessionStmt: %w", cerr)
+		}
+	}
+	if q.recordFileReadStmt != nil {
+		if cerr := q.recordFileReadStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing recordFileReadStmt: %w", cerr)
 		}
 	}
 	if q.updateMessageStmt != nil {
@@ -244,16 +348,29 @@ type Queries struct {
 	deleteSessionStmt              *sql.Stmt
 	deleteSessionFilesStmt         *sql.Stmt
 	deleteSessionMessagesStmt      *sql.Stmt
+	getAverageResponseTimeStmt     *sql.Stmt
 	getFileStmt                    *sql.Stmt
 	getFileByPathAndSessionStmt    *sql.Stmt
+	getFileReadStmt                *sql.Stmt
+	getHourDayHeatmapStmt          *sql.Stmt
 	getMessageStmt                 *sql.Stmt
+	getRecentActivityStmt          *sql.Stmt
 	getSessionByIDStmt             *sql.Stmt
+	getToolUsageStmt               *sql.Stmt
+	getTotalStatsStmt              *sql.Stmt
+	getUsageByDayStmt              *sql.Stmt
+	getUsageByDayOfWeekStmt        *sql.Stmt
+	getUsageByHourStmt             *sql.Stmt
+	getUsageByModelStmt            *sql.Stmt
+	listAllUserMessagesStmt        *sql.Stmt
 	listFilesByPathStmt            *sql.Stmt
 	listFilesBySessionStmt         *sql.Stmt
 	listLatestSessionFilesStmt     *sql.Stmt
 	listMessagesBySessionStmt      *sql.Stmt
 	listNewFilesStmt               *sql.Stmt
 	listSessionsStmt               *sql.Stmt
+	listUserMessagesBySessionStmt  *sql.Stmt
+	recordFileReadStmt             *sql.Stmt
 	updateMessageStmt              *sql.Stmt
 	updateSessionStmt              *sql.Stmt
 	updateSessionTitleAndUsageStmt *sql.Stmt
@@ -271,16 +388,29 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		deleteSessionStmt:              q.deleteSessionStmt,
 		deleteSessionFilesStmt:         q.deleteSessionFilesStmt,
 		deleteSessionMessagesStmt:      q.deleteSessionMessagesStmt,
+		getAverageResponseTimeStmt:     q.getAverageResponseTimeStmt,
 		getFileStmt:                    q.getFileStmt,
 		getFileByPathAndSessionStmt:    q.getFileByPathAndSessionStmt,
+		getFileReadStmt:                q.getFileReadStmt,
+		getHourDayHeatmapStmt:          q.getHourDayHeatmapStmt,
 		getMessageStmt:                 q.getMessageStmt,
+		getRecentActivityStmt:          q.getRecentActivityStmt,
 		getSessionByIDStmt:             q.getSessionByIDStmt,
+		getToolUsageStmt:               q.getToolUsageStmt,
+		getTotalStatsStmt:              q.getTotalStatsStmt,
+		getUsageByDayStmt:              q.getUsageByDayStmt,
+		getUsageByDayOfWeekStmt:        q.getUsageByDayOfWeekStmt,
+		getUsageByHourStmt:             q.getUsageByHourStmt,
+		getUsageByModelStmt:            q.getUsageByModelStmt,
+		listAllUserMessagesStmt:        q.listAllUserMessagesStmt,
 		listFilesByPathStmt:            q.listFilesByPathStmt,
 		listFilesBySessionStmt:         q.listFilesBySessionStmt,
 		listLatestSessionFilesStmt:     q.listLatestSessionFilesStmt,
 		listMessagesBySessionStmt:      q.listMessagesBySessionStmt,
 		listNewFilesStmt:               q.listNewFilesStmt,
 		listSessionsStmt:               q.listSessionsStmt,
+		listUserMessagesBySessionStmt:  q.listUserMessagesBySessionStmt,
+		recordFileReadStmt:             q.recordFileReadStmt,
 		updateMessageStmt:              q.updateMessageStmt,
 		updateSessionStmt:              q.updateSessionStmt,
 		updateSessionTitleAndUsageStmt: q.updateSessionTitleAndUsageStmt,

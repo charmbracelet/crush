@@ -26,6 +26,8 @@ type Service interface {
 	Update(ctx context.Context, message Message) error
 	Get(ctx context.Context, id string) (Message, error)
 	List(ctx context.Context, sessionID string) ([]Message, error)
+	ListUserMessages(ctx context.Context, sessionID string) ([]Message, error)
+	ListAllUserMessages(ctx context.Context) ([]Message, error)
 	Delete(ctx context.Context, id string) error
 	DeleteSessionMessages(ctx context.Context, sessionID string) error
 }
@@ -63,7 +65,7 @@ func (s *service) Create(ctx context.Context, sessionID string, params CreateMes
 			Reason: "stop",
 		})
 	}
-	partsJSON, err := marshallParts(params.Parts)
+	partsJSON, err := marshalParts(params.Parts)
 	if err != nil {
 		return Message{}, err
 	}
@@ -110,7 +112,7 @@ func (s *service) DeleteSessionMessages(ctx context.Context, sessionID string) e
 }
 
 func (s *service) Update(ctx context.Context, message Message) error {
-	parts, err := marshallParts(message.Parts)
+	parts, err := marshalParts(message.Parts)
 	if err != nil {
 		return err
 	}
@@ -157,8 +159,38 @@ func (s *service) List(ctx context.Context, sessionID string) ([]Message, error)
 	return messages, nil
 }
 
+func (s *service) ListUserMessages(ctx context.Context, sessionID string) ([]Message, error) {
+	dbMessages, err := s.q.ListUserMessagesBySession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	messages := make([]Message, len(dbMessages))
+	for i, dbMessage := range dbMessages {
+		messages[i], err = s.fromDBItem(dbMessage)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return messages, nil
+}
+
+func (s *service) ListAllUserMessages(ctx context.Context) ([]Message, error) {
+	dbMessages, err := s.q.ListAllUserMessages(ctx)
+	if err != nil {
+		return nil, err
+	}
+	messages := make([]Message, len(dbMessages))
+	for i, dbMessage := range dbMessages {
+		messages[i], err = s.fromDBItem(dbMessage)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return messages, nil
+}
+
 func (s *service) fromDBItem(item db.Message) (Message, error) {
-	parts, err := unmarshallParts([]byte(item.Parts))
+	parts, err := unmarshalParts([]byte(item.Parts))
 	if err != nil {
 		return Message{}, err
 	}
@@ -192,7 +224,7 @@ type partWrapper struct {
 	Data ContentPart `json:"data"`
 }
 
-func marshallParts(parts []ContentPart) ([]byte, error) {
+func marshalParts(parts []ContentPart) ([]byte, error) {
 	wrappedParts := make([]partWrapper, len(parts))
 
 	for i, part := range parts {
@@ -225,7 +257,7 @@ func marshallParts(parts []ContentPart) ([]byte, error) {
 	return json.Marshal(wrappedParts)
 }
 
-func unmarshallParts(data []byte) ([]ContentPart, error) {
+func unmarshalParts(data []byte) ([]ContentPart, error) {
 	temp := []json.RawMessage{}
 
 	if err := json.Unmarshal(data, &temp); err != nil {

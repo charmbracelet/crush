@@ -8,18 +8,19 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/openai"
 	"charm.land/fantasy/providers/openaicompat"
 	"charm.land/fantasy/providers/openrouter"
 	"charm.land/x/vcr"
-	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
@@ -37,6 +38,7 @@ type fakeEnv struct {
 	messages    message.Service
 	permissions permission.Service
 	history     history.Service
+	filetracker *filetracker.Service
 	lspClients  *csync.Map[string, *lsp.Client]
 }
 
@@ -112,11 +114,12 @@ func testEnv(t *testing.T) fakeEnv {
 	require.NoError(t, err)
 
 	q := db.New(conn)
-	sessions := session.NewService(q)
+	sessions := session.NewService(q, conn)
 	messages := message.NewService(q)
 
 	permissions := permission.NewPermissionService(workingDir, true, []string{})
 	history := history.NewService(q, conn)
+	filetrackerService := filetracker.NewService(q)
 	lspClients := csync.NewMap[string, *lsp.Client]()
 
 	t.Cleanup(func() {
@@ -130,6 +133,7 @@ func testEnv(t *testing.T) fakeEnv {
 		messages,
 		permissions,
 		history,
+		&filetrackerService,
 		lspClients,
 	}
 }
@@ -200,15 +204,15 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 	allTools := []fantasy.AgentTool{
 		tools.NewBashTool(env.permissions, env.workingDir, cfg.Options.Attribution, modelName),
 		tools.NewDownloadTool(env.permissions, env.workingDir, r.GetDefaultClient()),
-		tools.NewEditTool(env.lspClients, env.permissions, env.history, env.workingDir),
-		tools.NewMultiEditTool(env.lspClients, env.permissions, env.history, env.workingDir),
+		tools.NewEditTool(env.lspClients, env.permissions, env.history, *env.filetracker, env.workingDir),
+		tools.NewMultiEditTool(env.lspClients, env.permissions, env.history, *env.filetracker, env.workingDir),
 		tools.NewFetchTool(env.permissions, env.workingDir, r.GetDefaultClient()),
 		tools.NewGlobTool(env.workingDir),
 		tools.NewGrepTool(env.workingDir),
 		tools.NewLsTool(env.permissions, env.workingDir, cfg.Tools.Ls),
 		tools.NewSourcegraphTool(r.GetDefaultClient()),
-		tools.NewViewTool(env.lspClients, env.permissions, env.workingDir),
-		tools.NewWriteTool(env.lspClients, env.permissions, env.history, env.workingDir),
+		tools.NewViewTool(env.lspClients, env.permissions, *env.filetracker, env.workingDir),
+		tools.NewWriteTool(env.lspClients, env.permissions, env.history, *env.filetracker, env.workingDir),
 	}
 
 	return testSessionAgent(env, large, small, systemPrompt, allTools...), nil

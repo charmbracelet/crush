@@ -137,11 +137,9 @@ func formatDiagnostic(pth string, diagnostic protocol.Diagnostic, source string)
 
 	location := fmt.Sprintf("%s:%d:%d", pth, diagnostic.Range.Start.Line+1, diagnostic.Range.Start.Character+1)
 
-	sourceInfo := ""
+	sourceInfo := source
 	if diagnostic.Source != "" {
-		sourceInfo = diagnostic.Source
-	} else if source != "" {
-		sourceInfo = source
+		sourceInfo += " " + diagnostic.Source
 	}
 
 	codeInfo := ""

@@ -56,10 +56,17 @@ type editContext struct {
 	ctx         context.Context
 	permissions permission.Service
 	files       history.Service
+	filetracker filetracker.Service
 	workingDir  string
 }
 
-func NewEditTool(lspClients *csync.Map[string, *lsp.Client], permissions permission.Service, files history.Service, workingDir string) fantasy.AgentTool {
+func NewEditTool(
+	lspClients *csync.Map[string, *lsp.Client],
+	permissions permission.Service,
+	files history.Service,
+	filetracker filetracker.Service,
+	workingDir string,
+) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		EditToolName,
 		string(editDescription),
@@ -73,7 +80,7 @@ func NewEditTool(lspClients *csync.Map[string, *lsp.Client], permissions permiss
 			var response fantasy.ToolResponse
 			var err error
 
-			editCtx := editContext{ctx, permissions, files, workingDir}
+			editCtx := editContext{ctx, permissions, files, filetracker, workingDir}
 
 			if params.OldString == "" {
 				response, err = createNewFile(editCtx, params.FilePath, params.NewString, call)
@@ -168,8 +175,7 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 		slog.Error("Error creating file history version", "error", err)
 	}
 
-	filetracker.RecordWrite(filePath)
-	filetracker.RecordRead(filePath)
+	edit.filetracker.RecordRead(edit.ctx, sessionID, filePath)
 
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse("File created: "+filePath),
@@ -195,12 +201,17 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 		return fantasy.NewTextErrorResponse(fmt.Sprintf("path is a directory, not a file: %s", filePath)), nil
 	}
 
-	if filetracker.LastReadTime(filePath).IsZero() {
+	sessionID := GetSessionFromContext(edit.ctx)
+	if sessionID == "" {
+		return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for deleting content")
+	}
+
+	lastRead := edit.filetracker.LastReadTime(edit.ctx, sessionID, filePath)
+	if lastRead.IsZero() {
 		return fantasy.NewTextErrorResponse("you must read the file before editing it. Use the View tool first"), nil
 	}
 
-	modTime := fileInfo.ModTime()
-	lastRead := filetracker.LastReadTime(filePath)
+	modTime := fileInfo.ModTime().Truncate(time.Second)
 	if modTime.After(lastRead) {
 		return fantasy.NewTextErrorResponse(
 			fmt.Sprintf("file %s has been modified since it was last read (mod time: %s, last read: %s)",
@@ -234,12 +245,6 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 		}
 
 		newContent = oldContent[:index] + oldContent[index+len(oldString):]
-	}
-
-	sessionID := GetSessionFromContext(edit.ctx)
-
-	if sessionID == "" {
-		return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for deleting content")
 	}
 
 	_, additions, removals := diff.GenerateDiff(
@@ -301,8 +306,7 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 		slog.Error("Error creating file history version", "error", err)
 	}
 
-	filetracker.RecordWrite(filePath)
-	filetracker.RecordRead(filePath)
+	edit.filetracker.RecordRead(edit.ctx, sessionID, filePath)
 
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse("Content deleted from file: "+filePath),
@@ -328,12 +332,17 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 		return fantasy.NewTextErrorResponse(fmt.Sprintf("path is a directory, not a file: %s", filePath)), nil
 	}
 
-	if filetracker.LastReadTime(filePath).IsZero() {
+	sessionID := GetSessionFromContext(edit.ctx)
+	if sessionID == "" {
+		return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for edit a file")
+	}
+
+	lastRead := edit.filetracker.LastReadTime(edit.ctx, sessionID, filePath)
+	if lastRead.IsZero() {
 		return fantasy.NewTextErrorResponse("you must read the file before editing it. Use the View tool first"), nil
 	}
 
-	modTime := fileInfo.ModTime()
-	lastRead := filetracker.LastReadTime(filePath)
+	modTime := fileInfo.ModTime().Truncate(time.Second)
 	if modTime.After(lastRead) {
 		return fantasy.NewTextErrorResponse(
 			fmt.Sprintf("file %s has been modified since it was last read (mod time: %s, last read: %s)",
@@ -368,11 +377,6 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 
 	if oldContent == newContent {
 		return fantasy.NewTextErrorResponse("new content is the same as old content. No changes made."), nil
-	}
-	sessionID := GetSessionFromContext(edit.ctx)
-
-	if sessionID == "" {
-		return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for creating a new file")
 	}
 	_, additions, removals := diff.GenerateDiff(
 		oldContent,
@@ -433,8 +437,7 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 		slog.Error("Error creating file history version", "error", err)
 	}
 
-	filetracker.RecordWrite(filePath)
-	filetracker.RecordRead(filePath)
+	edit.filetracker.RecordRead(edit.ctx, sessionID, filePath)
 
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse("Content replaced in file: "+filePath),

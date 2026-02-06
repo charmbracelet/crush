@@ -5,6 +5,7 @@ import (
 	"iter"
 	"log/slog"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -21,8 +22,8 @@ func Resources() iter.Seq2[string, []*Resource] {
 }
 
 // ListResources returns the current resources for an MCP server.
-func ListResources(ctx context.Context, name string) ([]*Resource, error) {
-	session, err := getOrRenewClient(ctx, name)
+func ListResources(ctx context.Context, cfg *config.Config, name string) ([]*Resource, error) {
+	session, err := getOrRenewClient(ctx, cfg, name)
 	if err != nil {
 		return nil, err
 	}
@@ -40,8 +41,8 @@ func ListResources(ctx context.Context, name string) ([]*Resource, error) {
 }
 
 // ReadResource reads the contents of a resource from an MCP server.
-func ReadResource(ctx context.Context, name, uri string) ([]*ResourceContents, error) {
-	session, err := getOrRenewClient(ctx, name)
+func ReadResource(ctx context.Context, cfg *config.Config, name, uri string) ([]*ResourceContents, error) {
+	session, err := getOrRenewClient(ctx, cfg, name)
 	if err != nil {
 		return nil, err
 	}

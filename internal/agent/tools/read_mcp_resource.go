@@ -10,6 +10,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/permission"
 )
@@ -29,7 +30,7 @@ const ReadMCPResourceToolName = "read_mcp_resource"
 //go:embed read_mcp_resource.md
 var readMCPResourceDescription []byte
 
-func NewReadMCPResourceTool(permissions permission.Service, workingDir string) fantasy.AgentTool {
+func NewReadMCPResourceTool(cfg *config.Config, permissions permission.Service) fantasy.AgentTool {
 	return fantasy.NewParallelAgentTool(
 		ReadMCPResourceToolName,
 		string(readMCPResourceDescription),
@@ -48,7 +49,7 @@ func NewReadMCPResourceTool(permissions permission.Service, workingDir string) f
 				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for reading MCP resources")
 			}
 
-			relPath := filepathext.SmartJoin(workingDir, cmp.Or(params.URI, "mcp-resource"))
+			relPath := filepathext.SmartJoin(cfg.WorkingDir(), cmp.Or(params.URI, "mcp-resource"))
 			p, err := permissions.Request(ctx,
 				permission.CreatePermissionRequest{
 					SessionID:   sessionID,
@@ -67,7 +68,7 @@ func NewReadMCPResourceTool(permissions permission.Service, workingDir string) f
 				return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 			}
 
-			contents, err := mcp.ReadResource(ctx, params.MCPName, params.URI)
+			contents, err := mcp.ReadResource(ctx, cfg, params.MCPName, params.URI)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}

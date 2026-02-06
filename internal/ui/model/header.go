@@ -117,8 +117,8 @@ func renderHeaderDetails(
 		parts = append(parts, t.LSP.ErrorDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPErrorIcon, errorCount)))
 	}
 
-	agentCfg := config.Get().Agents[config.AgentCoder]
-	model := config.Get().GetModelByType(agentCfg.Model)
+	agentCfg := com.Config().Agents[config.AgentCoder]
+	model := com.Config().GetModelByType(agentCfg.Model)
 	percentage := (float64(session.CompletionTokens+session.PromptTokens) / float64(model.ContextWindow)) * 100
 	formattedPercentage := t.Header.Percentage.Render(fmt.Sprintf("%d%%", int(percentage)))
 	parts = append(parts, formattedPercentage)

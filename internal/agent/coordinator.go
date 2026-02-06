@@ -442,8 +442,8 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 	if len(c.cfg.MCP) > 0 {
 		allTools = append(
 			allTools,
-			tools.NewListMCPResourcesTool(c.permissions, c.cfg.WorkingDir()),
-			tools.NewReadMCPResourceTool(c.permissions, c.cfg.WorkingDir()),
+			tools.NewListMCPResourcesTool(c.cfg, c.permissions),
+			tools.NewReadMCPResourceTool(c.cfg, c.permissions),
 		)
 	}
 
@@ -454,7 +454,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		}
 	}
 
-	for _, tool := range tools.GetMCPTools(c.permissions, c.cfg.WorkingDir()) {
+	for _, tool := range tools.GetMCPTools(c.permissions, c.cfg, c.cfg.WorkingDir()) {
 		if agent.AllowedMCP == nil {
 			// No MCP restrictions
 			filteredTools = append(filteredTools, tool)

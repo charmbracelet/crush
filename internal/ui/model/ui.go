@@ -298,7 +298,7 @@ func New(com *common.Common) *UI {
 	desiredFocus := uiFocusEditor
 	if !com.Config().IsConfigured() {
 		desiredState = uiOnboarding
-	} else if n, _ := config.ProjectNeedsInitialization(); n {
+	} else if n, _ := config.ProjectNeedsInitialization(com.Config()); n {
 		desiredState = uiInitialize
 	}
 
@@ -512,7 +512,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case mcp.EventPromptsListChanged:
 			return m, handleMCPPromptsEvent(msg.Payload.Name)
 		case mcp.EventToolsListChanged:
-			return m, handleMCPToolsEvent(msg.Payload.Name)
+			return m, handleMCPToolsEvent(m.com.Config(), msg.Payload.Name)
 		case mcp.EventResourcesListChanged:
 			return m, handleMCPResourcesEvent(msg.Payload.Name)
 		}
@@ -774,7 +774,7 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 		case message.Assistant:
 			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap)...)
 			if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
-				infoItem := chat.NewAssistantInfoItem(m.com.Styles, msg, time.Unix(m.lastUserMessageTime, 0))
+				infoItem := chat.NewAssistantInfoItem(m.com.Styles, msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
 				items = append(items, infoItem)
 			}
 		default:
@@ -904,7 +904,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 			}
 		}
 		if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
-			infoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, time.Unix(m.lastUserMessageTime, 0))
+			infoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
 			m.chat.AppendMessages(infoItem)
 			if atBottom {
 				if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
@@ -975,7 +975,7 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 
 	if shouldRenderAssistant && msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
 		if infoItem := m.chat.MessageItem(chat.AssistantInfoID(msg.ID)); infoItem == nil {
-			newInfoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, time.Unix(m.lastUserMessageTime, 0))
+			newInfoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
 			m.chat.AppendMessages(newInfoItem)
 		}
 	}
@@ -1247,7 +1247,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 		// Attempt to import GitHub Copilot tokens from VSCode if available.
 		if isCopilot && !isConfigured() {
-			config.Get().ImportCopilot()
+			m.com.Config().ImportCopilot()
 		}
 
 		if !isConfigured() {
@@ -2545,7 +2545,12 @@ func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValu
 	}
 
 	return func() tea.Msg {
-		contents, err := mcp.ReadResource(context.Background(), item.MCPName, item.URI)
+		contents, err := mcp.ReadResource(
+			context.Background(),
+			m.com.Config(),
+			item.MCPName,
+			item.URI,
+		)
 		if err != nil {
 			slog.Warn("Failed to read MCP resource", "uri", item.URI, "error", err)
 			return nil
@@ -3118,7 +3123,7 @@ func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
 
 func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string) tea.Cmd {
 	load := func() tea.Msg {
-		prompt, err := commands.GetMCPPrompt(clientID, promptID, arguments)
+		prompt, err := commands.GetMCPPrompt(m.com.Config(), clientID, promptID, arguments)
 		if err != nil {
 			// TODO: make this better
 			return util.ReportError(err)()
@@ -3160,10 +3165,14 @@ func handleMCPPromptsEvent(name string) tea.Cmd {
 	}
 }
 
-func handleMCPToolsEvent(name string) tea.Cmd {
+func handleMCPToolsEvent(cfg *config.Config, name string) tea.Cmd {
 	slog.Warn("handleMCPToolsEvent")
 	return func() tea.Msg {
-		mcp.RefreshTools(context.Background(), name)
+		mcp.RefreshTools(
+			context.Background(),
+			cfg,
+			name,
+		)
 		return nil
 	}
 }

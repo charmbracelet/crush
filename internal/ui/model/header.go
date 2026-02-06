@@ -118,7 +118,7 @@ func renderHeaderDetails(
 	}
 
 	agentCfg := com.Config().Agents[config.AgentCoder]
-	model := com.Config().GetModelByType(agentCfg.Model)
+	model := com.ConfigService().GetModelByType(agentCfg.Model)
 	percentage := (float64(session.CompletionTokens+session.PromptTokens) / float64(model.ContextWindow)) * 100
 	formattedPercentage := t.Header.Percentage.Render(fmt.Sprintf("%d%%", int(percentage)))
 	parts = append(parts, formattedPercentage)
@@ -135,8 +135,7 @@ func renderHeaderDetails(
 	metadata = dot + metadata
 
 	const dirTrimLimit = 4
-	cfg := com.Config()
-	cwd := fsext.DirTrim(fsext.PrettyPath(cfg.WorkingDir()), dirTrimLimit)
+	cwd := fsext.DirTrim(fsext.PrettyPath(com.ConfigService().WorkingDir()), dirTrimLimit)
 	cwd = ansi.Truncate(cwd, max(0, availWidth-lipgloss.Width(metadata)), "…")
 	cwd = t.Header.WorkingDir.Render(cwd)
 

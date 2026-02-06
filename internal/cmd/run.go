@@ -50,7 +50,7 @@ crush run --verbose "Generate a README for this project"
 		}
 		defer app.Shutdown()
 
-		if !app.Config().IsConfigured() {
+		if !app.ConfigService().IsConfigured() {
 			return fmt.Errorf("no providers configured - please run 'crush' to set up a provider interactively")
 		}
 

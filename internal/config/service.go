@@ -34,6 +34,62 @@ func (s *Service) Config() *Config {
 	return s.cfg
 }
 
+// WorkingDir returns the working directory.
+func (s *Service) WorkingDir() string {
+	return s.workingDir
+}
+
+// EnabledProviders returns all non-disabled provider configs.
+func (s *Service) EnabledProviders() []ProviderConfig {
+	return s.cfg.EnabledProviders()
+}
+
+// IsConfigured returns true if at least one provider is enabled.
+func (s *Service) IsConfigured() bool {
+	return s.cfg.IsConfigured()
+}
+
+// GetModel returns the catwalk model for the given provider and model
+// ID, or nil if not found.
+func (s *Service) GetModel(provider, model string) *catwalk.Model {
+	return s.cfg.GetModel(provider, model)
+}
+
+// GetProviderForModel returns the provider config for the given model
+// type, or nil.
+func (s *Service) GetProviderForModel(modelType SelectedModelType) *ProviderConfig {
+	return s.cfg.GetProviderForModel(modelType)
+}
+
+// GetModelByType returns the catwalk model for the given model type,
+// or nil.
+func (s *Service) GetModelByType(modelType SelectedModelType) *catwalk.Model {
+	return s.cfg.GetModelByType(modelType)
+}
+
+// LargeModel returns the catwalk model for the large model type.
+func (s *Service) LargeModel() *catwalk.Model {
+	return s.cfg.LargeModel()
+}
+
+// SmallModel returns the catwalk model for the small model type.
+func (s *Service) SmallModel() *catwalk.Model {
+	return s.cfg.SmallModel()
+}
+
+// Resolve resolves a variable value using the configured resolver.
+func (s *Service) Resolve(key string) (string, error) {
+	if s.resolver == nil {
+		return "", fmt.Errorf("no variable resolver configured")
+	}
+	return s.resolver.ResolveValue(key)
+}
+
+// Resolver returns the variable resolver.
+func (s *Service) Resolver() VariableResolver {
+	return s.resolver
+}
+
 // HasConfigField returns true if the given dotted key path exists in
 // the persisted config data.
 func (s *Service) HasConfigField(key string) bool {

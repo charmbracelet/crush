@@ -38,7 +38,7 @@ crush models gpt5`,
 			return err
 		}
 
-		if !cfg.Config().IsConfigured() {
+		if !cfg.IsConfigured() {
 			return fmt.Errorf("no providers configured - please run 'crush' to set up a provider interactively")
 		}
 

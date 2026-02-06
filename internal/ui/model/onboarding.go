@@ -79,7 +79,7 @@ func (m *UI) skipInitializeProject() tea.Cmd {
 func (m *UI) initializeView() string {
 	cfg := m.com.Config()
 	s := m.com.Styles.Initialize
-	cwd := home.Short(cfg.WorkingDir())
+	cwd := home.Short(m.com.ConfigService().WorkingDir())
 	initFile := cfg.Options.InitializeAs
 
 	header := s.Header.Render("Would you like to initialize this project?")

@@ -105,7 +105,7 @@ func NewCoordinator(
 	}
 
 	// TODO: make this dynamic when we support multiple agents
-	prompt, err := coderPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	prompt, err := coderPrompt(prompt.WithWorkingDir(c.cfgSvc.WorkingDir()))
 	if err != nil {
 		return nil, err
 	}
@@ -416,26 +416,26 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 	// Get the model name for the agent
 	modelName := ""
 	if modelCfg, ok := c.cfg.Models[agent.Model]; ok {
-		if model := c.cfg.GetModel(modelCfg.Provider, modelCfg.Model); model != nil {
+		if model := c.cfgSvc.GetModel(modelCfg.Provider, modelCfg.Model); model != nil {
 			modelName = model.Name
 		}
 	}
 
 	allTools = append(allTools,
-		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Options.Attribution, modelName),
+		tools.NewBashTool(c.permissions, c.cfgSvc.WorkingDir(), c.cfg.Options.Attribution, modelName),
 		tools.NewJobOutputTool(),
 		tools.NewJobKillTool(),
-		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),
-		tools.NewEditTool(c.lspClients, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
-		tools.NewMultiEditTool(c.lspClients, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
-		tools.NewFetchTool(c.permissions, c.cfg.WorkingDir(), nil),
-		tools.NewGlobTool(c.cfg.WorkingDir()),
-		tools.NewGrepTool(c.cfg.WorkingDir()),
-		tools.NewLsTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Tools.Ls),
+		tools.NewDownloadTool(c.permissions, c.cfgSvc.WorkingDir(), nil),
+		tools.NewEditTool(c.lspClients, c.permissions, c.history, c.filetracker, c.cfgSvc.WorkingDir()),
+		tools.NewMultiEditTool(c.lspClients, c.permissions, c.history, c.filetracker, c.cfgSvc.WorkingDir()),
+		tools.NewFetchTool(c.permissions, c.cfgSvc.WorkingDir(), nil),
+		tools.NewGlobTool(c.cfgSvc.WorkingDir()),
+		tools.NewGrepTool(c.cfgSvc.WorkingDir()),
+		tools.NewLsTool(c.permissions, c.cfgSvc.WorkingDir(), c.cfg.Tools.Ls),
 		tools.NewSourcegraphTool(nil),
 		tools.NewTodosTool(c.sessions),
-		tools.NewViewTool(c.lspClients, c.permissions, c.filetracker, c.cfg.WorkingDir(), c.cfg.Options.SkillsPaths...),
-		tools.NewWriteTool(c.lspClients, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
+		tools.NewViewTool(c.lspClients, c.permissions, c.filetracker, c.cfgSvc.WorkingDir(), c.cfg.Options.SkillsPaths...),
+		tools.NewWriteTool(c.lspClients, c.permissions, c.history, c.filetracker, c.cfgSvc.WorkingDir()),
 	)
 
 	if c.lspClients.Len() > 0 {
@@ -449,7 +449,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		}
 	}
 
-	for _, tool := range tools.GetMCPTools(c.permissions, c.cfg, c.cfg.WorkingDir()) {
+	for _, tool := range tools.GetMCPTools(c.permissions, c.cfg, c.cfgSvc.WorkingDir()) {
 		if agent.AllowedMCP == nil {
 			// No MCP restrictions
 			filteredTools = append(filteredTools, tool)
@@ -781,8 +781,8 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		}
 	}
 
-	apiKey, _ := c.cfg.Resolve(providerCfg.APIKey)
-	baseURL, _ := c.cfg.Resolve(providerCfg.BaseURL)
+	apiKey, _ := c.cfgSvc.Resolve(providerCfg.APIKey)
+	baseURL, _ := c.cfgSvc.Resolve(providerCfg.BaseURL)
 
 	switch providerCfg.Type {
 	case openai.Name:
@@ -905,7 +905,7 @@ func (c *coordinator) refreshOAuth2Token(ctx context.Context, providerCfg config
 }
 
 func (c *coordinator) refreshApiKeyTemplate(ctx context.Context, providerCfg config.ProviderConfig) error {
-	newAPIKey, err := c.cfg.Resolve(providerCfg.APIKeyTemplate)
+	newAPIKey, err := c.cfgSvc.Resolve(providerCfg.APIKeyTemplate)
 	if err != nil {
 		slog.Error("Failed to re-resolve API key after 401 error", "provider", providerCfg.ID, "error", err)
 		return err

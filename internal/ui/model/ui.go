@@ -296,7 +296,7 @@ func New(com *common.Common) *UI {
 
 	desiredState := uiLanding
 	desiredFocus := uiFocusEditor
-	if !com.Config().IsConfigured() {
+	if !com.ConfigService().IsConfigured() {
 		desiredState = uiOnboarding
 	} else if n, _ := config.ProjectNeedsInitialization(com.Config()); n {
 		desiredState = uiInitialize
@@ -1920,7 +1920,7 @@ func (m *UI) View() tea.View {
 		v.BackgroundColor = m.com.Styles.Background
 	}
 	v.MouseMode = tea.MouseModeCellMotion
-	v.WindowTitle = "crush " + home.Short(m.com.Config().WorkingDir())
+	v.WindowTitle = "crush " + home.Short(m.com.ConfigService().WorkingDir())
 
 	canvas := uv.NewScreenBuffer(m.width, m.height)
 	v.Cursor = m.Draw(canvas, canvas.Bounds())
@@ -3045,7 +3045,7 @@ func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
 
 	lspSection := m.lspInfo(sectionWidth, maxItemsPerSection, false)
 	mcpSection := m.mcpInfo(sectionWidth, maxItemsPerSection, false)
-	filesSection := m.filesInfo(m.com.Config().WorkingDir(), sectionWidth, maxItemsPerSection, false)
+	filesSection := m.filesInfo(m.com.ConfigService().WorkingDir(), sectionWidth, maxItemsPerSection, false)
 	sections := lipgloss.JoinHorizontal(lipgloss.Top, filesSection, " ", lspSection, " ", mcpSection)
 	uv.NewStyledString(
 		s.CompactDetails.View.

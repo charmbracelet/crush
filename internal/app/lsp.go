@@ -53,7 +53,7 @@ func (app *App) initLSPClients(ctx context.Context) {
 	}
 
 	servers := manager.GetServers()
-	filtered := lsp.FilterMatching(app.config.WorkingDir(), servers)
+	filtered := lsp.FilterMatching(app.configService.WorkingDir(), servers)
 
 	for _, name := range userConfiguredLSPs {
 		if _, ok := filtered[name]; !ok {
@@ -114,7 +114,7 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, config
 	updateLSPState(name, lsp.StateStarting, nil, nil, 0)
 
 	// Create LSP client.
-	lspClient, err := lsp.New(ctx, name, config, app.config.Resolver(), app.config.Options.DebugLSP)
+	lspClient, err := lsp.New(ctx, name, config, app.configService.Resolver(), app.config.Options.DebugLSP)
 	if err != nil {
 		if !userConfigured {
 			slog.Warn("Default LSP config skipped due to error", "name", name, "error", err)
@@ -134,7 +134,7 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, config
 	defer cancel()
 
 	// Initialize LSP client.
-	_, err = lspClient.Initialize(initCtx, app.config.WorkingDir())
+	_, err = lspClient.Initialize(initCtx, app.configService.WorkingDir())
 	if err != nil {
 		slog.Error("LSP client initialization failed", "name", name, "error", err)
 		updateLSPState(name, lsp.StateError, err, lspClient, 0)

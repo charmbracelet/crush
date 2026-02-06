@@ -227,7 +227,7 @@ func (r *Reasoning) setReasoningItems() error {
 	}
 
 	selectedModel := cfg.Models[agentCfg.Model]
-	model := cfg.GetModelByType(agentCfg.Model)
+	model := r.com.ConfigService().GetModelByType(agentCfg.Model)
 	if model == nil {
 		return errors.New("model configuration not found")
 	}

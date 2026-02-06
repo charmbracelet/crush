@@ -90,7 +90,7 @@ func New(ctx context.Context, conn *sql.DB, cfgSvc *config.Service) (*App, error
 		Sessions:    sessions,
 		Messages:    messages,
 		History:     files,
-		Permissions: permission.NewPermissionService(cfg.WorkingDir(), skipPermissionsRequests, allowedTools),
+		Permissions: permission.NewPermissionService(cfgSvc.WorkingDir(), skipPermissionsRequests, allowedTools),
 		FileTracker: filetracker.NewService(q),
 		LSPClients:  csync.NewMap[string, *lsp.Client](),
 
@@ -118,7 +118,7 @@ func New(ctx context.Context, conn *sql.DB, cfgSvc *config.Service) (*App, error
 	app.cleanupFuncs = append(app.cleanupFuncs, conn.Close, mcp.Close)
 
 	// TODO: remove the concept of agent config, most likely.
-	if !cfg.IsConfigured() {
+	if !cfgSvc.IsConfigured() {
 		slog.Warn("No agent configuration found")
 		return app, nil
 	}

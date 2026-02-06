@@ -398,8 +398,8 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	// Add reasoning toggle for models that support it
 	cfg := c.com.Config()
 	if agentCfg, ok := cfg.Agents[config.AgentCoder]; ok {
-		providerCfg := cfg.GetProviderForModel(agentCfg.Model)
-		model := cfg.GetModelByType(agentCfg.Model)
+		providerCfg := c.com.ConfigService().GetProviderForModel(agentCfg.Model)
+		model := c.com.ConfigService().GetModelByType(agentCfg.Model)
 		if providerCfg != nil && model != nil && model.CanReason {
 			selectedModel := cfg.Models[agentCfg.Model]
 
@@ -427,7 +427,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	if c.sessionID != "" {
 		cfg := c.com.Config()
 		agentCfg := cfg.Agents[config.AgentCoder]
-		model := cfg.GetModelByType(agentCfg.Model)
+		model := c.com.ConfigService().GetModelByType(agentCfg.Model)
 		if model != nil && model.SupportsImages {
 			commands = append(commands, NewCommandItem(c.com.Styles, "file_picker", "Open File Picker", "ctrl+f", ActionOpenDialog{
 				// TODO: Pass in the file picker dialog id

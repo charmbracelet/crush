@@ -27,7 +27,7 @@ func (m *UI) modelInfo(width int) string {
 
 			// Only check reasoning if model can reason
 			if model.CatwalkCfg.CanReason {
-				if model.ModelCfg.ReasoningEffort == "" {
+				if len(model.CatwalkCfg.ReasoningLevels) == 0 {
 					if model.ModelCfg.Think {
 						reasoningInfo = "Thinking On"
 					} else {

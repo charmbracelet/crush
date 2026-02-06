@@ -384,8 +384,6 @@ type Config struct {
 	workingDir string `json:"-"`
 	// TODO: find a better way to do this this should probably not be part of the config
 	resolver       VariableResolver
-	store          Store              `json:"-"`
-	dataConfigDir  string             `json:"-"`
 	knownProviders []catwalk.Provider `json:"-"`
 }
 
@@ -459,21 +457,6 @@ func (c *Config) Resolve(key string) (string, error) {
 		return "", fmt.Errorf("no variable resolver configured")
 	}
 	return c.resolver.ResolveValue(key)
-}
-
-func (c *Config) setConfigField(key string, value any) error {
-	return SetField(c.configStore(), key, value)
-}
-
-func (c *Config) removeConfigField(key string) error {
-	return RemoveField(c.configStore(), key)
-}
-
-func (c *Config) configStore() Store {
-	if c.store == nil {
-		c.store = NewFileStore(c.dataConfigDir)
-	}
-	return c.store
 }
 
 func allToolNames() []string {

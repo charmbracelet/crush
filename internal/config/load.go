@@ -46,9 +46,6 @@ func Load(workingDir, dataDir string, debug bool) (*Service, error) {
 		workingDir: workingDir,
 	}
 
-	// Keep dataConfigDir in sync for the transitional configStore() accessor.
-	cfg.dataConfigDir = GlobalConfigData()
-
 	cfg.setDefaults(workingDir, dataDir)
 
 	if debug {
@@ -562,7 +559,7 @@ func (s *Service) configureSelectedModels(knownProviders []catwalk.Provider) err
 		if model == nil {
 			large = defaultLarge
 			c.Models[SelectedModelTypeLarge] = large
-			if err := c.setConfigField(fmt.Sprintf("models.%s", SelectedModelTypeLarge), large); err != nil {
+			if err := s.SetConfigField(fmt.Sprintf("models.%s", SelectedModelTypeLarge), large); err != nil {
 				return fmt.Errorf("failed to update preferred large model: %w", err)
 			}
 		} else {
@@ -605,7 +602,7 @@ func (s *Service) configureSelectedModels(knownProviders []catwalk.Provider) err
 		if model == nil {
 			small = defaultSmall
 			c.Models[SelectedModelTypeSmall] = small
-			if err := c.setConfigField(fmt.Sprintf("models.%s", SelectedModelTypeSmall), small); err != nil {
+			if err := s.SetConfigField(fmt.Sprintf("models.%s", SelectedModelTypeSmall), small); err != nil {
 				return fmt.Errorf("failed to update preferred small model: %w", err)
 			}
 		} else {

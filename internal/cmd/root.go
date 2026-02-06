@@ -199,12 +199,11 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg := svc.Config()
-
-	if cfg.Permissions == nil {
-		cfg.Permissions = &config.Permissions{}
+	if svc.Permissions() == nil {
+		svc.SetPermissions(&config.Permissions{})
 	}
-	cfg.Permissions.SkipRequests = yolo
+	p := svc.Permissions()
+	p.SkipRequests = yolo
 
 	if err := createDotCrushDir(svc.DataDirectory()); err != nil {
 		return nil, err

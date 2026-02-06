@@ -204,6 +204,12 @@ func (s *Service) SetPermissions(p *Permissions) {
 	s.cfg.Permissions = p
 }
 
+// OverrideModel overrides the in-memory model for the given type
+// without persisting. Used for non-interactive model overrides.
+func (s *Service) OverrideModel(modelType SelectedModelType, model SelectedModel) {
+	s.cfg.Models[modelType] = model
+}
+
 // ToolLsConfig returns the ls tool configuration.
 func (s *Service) ToolLsConfig() ToolLs {
 	return s.cfg.Tools.Ls

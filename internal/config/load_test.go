@@ -513,7 +513,7 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
-	assert.Equal(t, []string{}, taskAgent.AllowedTools)
+	assert.Len(t, taskAgent.AllowedTools, 0)
 }
 
 func TestConfig_configureProvidersWithDisabledProvider(t *testing.T) {

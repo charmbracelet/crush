@@ -137,7 +137,7 @@ func Status(t *styles.Styles, opts StatusOpts, width int) string {
 		description = t.Base.Foreground(descriptionColor).Render(description)
 	}
 
-	content := []string{}
+	var content []string
 	if icon != "" {
 		content = append(content, icon)
 	}

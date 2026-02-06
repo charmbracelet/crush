@@ -730,7 +730,7 @@ func resolveReadOnlyTools(tools []string) []string {
 }
 
 func filterSlice(data []string, mask []string, include bool) []string {
-	filtered := []string{}
+	var filtered []string
 	for _, s := range data {
 		// if include is true, we include items that ARE in the mask
 		// if include is false, we include items that are NOT in the mask

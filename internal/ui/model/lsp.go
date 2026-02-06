@@ -60,7 +60,7 @@ func (m *UI) lspInfo(width, maxItems int, isSection bool) string {
 
 // lspDiagnostics formats diagnostic counts with appropriate icons and colors.
 func lspDiagnostics(t *styles.Styles, diagnostics map[protocol.DiagnosticSeverity]int) string {
-	errs := []string{}
+	var errs []string
 	if diagnostics[protocol.SeverityError] > 0 {
 		errs = append(errs, t.LSP.ErrorDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPErrorIcon, diagnostics[protocol.SeverityError])))
 	}

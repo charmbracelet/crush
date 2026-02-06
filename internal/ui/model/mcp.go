@@ -36,7 +36,7 @@ func (m *UI) mcpInfo(width, maxItems int, isSection bool) string {
 
 // mcpCounts formats tool, prompt, and resource counts for display.
 func mcpCounts(t *styles.Styles, counts mcp.Counts) string {
-	parts := []string{}
+	var parts []string
 	if counts.Tools > 0 {
 		parts = append(parts, t.Subtle.Render(fmt.Sprintf("%d tools", counts.Tools)))
 	}

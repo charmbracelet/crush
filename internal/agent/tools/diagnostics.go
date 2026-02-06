@@ -34,7 +34,7 @@ func NewDiagnosticsTool(lspClients *csync.Map[string, *lsp.Client]) fantasy.Agen
 			}
 			notifyLSPs(ctx, lspClients, params.FilePath)
 			output := getDiagnostics(params.FilePath, lspClients)
-			return fantasy.NewTextResponse(output), nil
+			return fantasy.NewTextResponse(TruncateOutputCtx(ctx, output)), nil
 		})
 }
 

@@ -68,6 +68,6 @@ func NewWebFetchTool(workingDir string, client *http.Client) fantasy.AgentTool {
 				result.WriteString(content)
 			}
 
-			return fantasy.NewTextResponse(result.String()), nil
+			return fantasy.NewTextResponse(TruncateOutputCtx(ctx, result.String())), nil
 		})
 }

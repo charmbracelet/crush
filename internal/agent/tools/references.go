@@ -77,7 +77,7 @@ func NewReferencesTool(lspClients *csync.Map[string, *lsp.Client]) fantasy.Agent
 
 			if len(allLocations) > 0 {
 				output := formatReferences(cleanupLocations(allLocations))
-				return fantasy.NewTextResponse(output), nil
+				return fantasy.NewTextResponse(TruncateOutputCtx(ctx, output)), nil
 			}
 
 			if allErrs != nil {

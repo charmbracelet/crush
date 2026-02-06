@@ -651,3 +651,64 @@ func BenchmarkBuildSummaryPrompt(b *testing.B) {
 		})
 	}
 }
+
+func TestTruncateToolResult(t *testing.T) {
+	t.Parallel()
+
+	t.Run("short content unchanged", func(t *testing.T) {
+		t.Parallel()
+		content := "This is a short tool result"
+		result := truncateToolResult(content)
+		assert.Equal(t, content, result)
+	})
+
+	t.Run("exact limit unchanged", func(t *testing.T) {
+		t.Parallel()
+		content := strings.Repeat("a", maxToolResultLength)
+		result := truncateToolResult(content)
+		assert.Equal(t, content, result)
+	})
+
+	t.Run("long content truncated", func(t *testing.T) {
+		t.Parallel()
+		// Create content longer than the limit.
+		content := strings.Repeat("line\n", maxToolResultLength)
+		result := truncateToolResult(content)
+
+		// Result should be shorter than original.
+		assert.Less(t, len(result), len(content))
+		// Should contain truncation message.
+		assert.Contains(t, result, "truncated to fit context window")
+		// Should contain start of original content.
+		assert.True(t, strings.HasPrefix(result, "line\n"))
+		// Should contain end of original content.
+		assert.True(t, strings.HasSuffix(result, "line\n"))
+	})
+
+	t.Run("truncation preserves start and end", func(t *testing.T) {
+		t.Parallel()
+		// Create identifiable start and end content.
+		start := "START_MARKER_" + strings.Repeat("a", 1000)
+		middle := strings.Repeat("m", maxToolResultLength)
+		end := strings.Repeat("z", 1000) + "_END_MARKER"
+		content := start + middle + end
+
+		result := truncateToolResult(content)
+
+		// Should contain start marker.
+		assert.Contains(t, result, "START_MARKER")
+		// Should contain end marker.
+		assert.Contains(t, result, "END_MARKER")
+		// Should contain truncation message.
+		assert.Contains(t, result, "truncated")
+	})
+
+	t.Run("truncation message includes byte count", func(t *testing.T) {
+		t.Parallel()
+		content := strings.Repeat("x", maxToolResultLength+10000)
+		result := truncateToolResult(content)
+
+		// Should mention bytes in truncation message.
+		assert.Contains(t, result, "bytes")
+	})
+}

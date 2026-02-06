@@ -50,6 +50,11 @@ const (
 	largeContextWindowThreshold = 200_000
 	largeContextWindowBuffer    = 20_000
 	smallContextWindowRatio     = 0.2
+
+	// maxToolResultLength is the maximum length of a tool result before
+	// truncation. This prevents tool results from blowing out the context
+	// window. ~30KB is roughly 7500-10000 tokens depending on content.
+	maxToolResultLength = 30_000
 )
 
 //go:embed templates/title.md
@@ -301,6 +306,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			callContext = context.WithValue(callContext, tools.MessageIDContextKey, assistantMsg.ID)
 			callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatwalkCfg.SupportsImages)
 			callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatwalkCfg.Name)
+
+			// Calculate available context window for tool output truncation.
+			// Use current session's token usage to estimate remaining space.
+			contextWindow := largeModel.CatwalkCfg.ContextWindow
+			usedTokens := currentSession.CompletionTokens + currentSession.PromptTokens
+			remainingTokens := max(int64(contextWindow)-usedTokens, 0)
+			// Convert tokens to approximate chars (4 chars per token estimate).
+			availableChars := int(remainingTokens * tools.CharsPerToken)
+			callContext = context.WithValue(callContext, tools.ContextWindowAvailableKey, availableChars)
+
 			currentAssistant = &assistantMsg
 			return callContext, prepared, err
 		},
@@ -1021,6 +1036,7 @@ func (a *sessionAgent) Model() Model {
 }
 
 // convertToToolResult converts a fantasy tool result to a message tool result.
+// Large tool results are truncated to prevent context window overflow.
 func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) message.ToolResult {
 	baseResult := message.ToolResult{
 		ToolCallID: result.ToolCallID,
@@ -1031,7 +1047,7 @@ func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) mes
 	switch result.Result.GetType() {
 	case fantasy.ToolResultContentTypeText:
 		if r, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentText](result.Result); ok {
-			baseResult.Content = r.Text
+			baseResult.Content = truncateToolResult(r.Text)
 		}
 	case fantasy.ToolResultContentTypeError:
 		if r, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentError](result.Result); ok {
@@ -1044,13 +1060,35 @@ func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) mes
 			if content == "" {
 				content = fmt.Sprintf("Loaded %s content", r.MediaType)
 			}
-			baseResult.Content = content
+			baseResult.Content = truncateToolResult(content)
 			baseResult.Data = r.Data
 			baseResult.MIMEType = r.MediaType
 		}
 	}
 
 	return baseResult
+}
+
+// truncateToolResult truncates tool output that exceeds maxToolResultLength,
+// keeping the beginning and end to preserve context while reducing token count.
+func truncateToolResult(content string) string {
+	if len(content) <= maxToolResultLength {
+		return content
+	}
+
+	halfLength := maxToolResultLength / 2
+	start := content[:halfLength]
+	end := content[len(content)-halfLength:]
+
+	// Count lines in the truncated middle section.
+	middle := content[halfLength : len(content)-halfLength]
+	truncatedLines := strings.Count(middle, "\n") + 1
+	truncatedBytes := len(middle)
+
+	return fmt.Sprintf(
+		"%s\n\n[... %d lines (%d bytes) truncated to fit context window ...]\n\n%s",
+		start, truncatedLines, truncatedBytes, end,
+	)
 }
 
 // workaroundProviderMediaLimitations converts media content in tool results to

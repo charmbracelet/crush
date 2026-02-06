@@ -111,7 +111,7 @@ func NewLsTool(permissions permission.Service, workingDir string, lsConfig confi
 			}
 
 			return fantasy.WithResponseMetadata(
-				fantasy.NewTextResponse(output),
+				fantasy.NewTextResponse(TruncateOutputCtx(ctx, output)),
 				metadata,
 			), nil
 		})

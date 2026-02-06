@@ -61,7 +61,7 @@ func NewGlobTool(workingDir string) fantasy.AgentTool {
 			}
 
 			return fantasy.WithResponseMetadata(
-				fantasy.NewTextResponse(output),
+				fantasy.NewTextResponse(TruncateOutputCtx(ctx, output)),
 				GlobResponseMetadata{
 					NumberOfFiles: len(files),
 					Truncated:     truncated,

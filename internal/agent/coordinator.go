@@ -358,13 +358,19 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	}
 
 	largeProviderCfg, _ := c.cfg.Providers.Get(large.ModelCfg.Provider)
+
+	// Subagents should always disable auto-summarize to prevent infinite loops.
+	// When a subagent's context fills up, it should return a partial result
+	// rather than summarizing and re-queueing the task.
+	disableAutoSummarize := c.cfg.Options.DisableAutoSummarize || isSubAgent
+
 	result := NewSessionAgent(SessionAgentOptions{
 		large,
 		small,
 		largeProviderCfg.SystemPromptPrefix,
 		"",
 		isSubAgent,
-		c.cfg.Options.DisableAutoSummarize,
+		disableAutoSummarize,
 		c.permissions.SkipRequests(),
 		c.sessions,
 		c.messages,

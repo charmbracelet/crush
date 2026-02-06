@@ -9,7 +9,6 @@ type KeyMap struct {
 		OpenEditor  key.Binding
 		Newline     key.Binding
 		AddImage    key.Binding
-		PasteImage  key.Binding
 		MentionFile key.Binding
 		Commands    key.Binding
 
@@ -120,10 +119,6 @@ func DefaultKeyMap() KeyMap {
 	km.Editor.AddImage = key.NewBinding(
 		key.WithKeys("ctrl+f"),
 		key.WithHelp("ctrl+f", "add image"),
-	)
-	km.Editor.PasteImage = key.NewBinding(
-		key.WithKeys("ctrl+v"),
-		key.WithHelp("ctrl+v", "paste image from clipboard"),
 	)
 	km.Editor.MentionFile = key.NewBinding(
 		key.WithKeys("@"),

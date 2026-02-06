@@ -780,6 +780,16 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 		apiKey, _  = resolver.ResolveValue(c.APIKey)
 	)
 
+	switch providerID {
+	case catwalk.InferenceProviderMiniMax:
+		// NOTE: MiniMax has no good endpoint we can use to validate the API key.
+		// Let's at least check the pattern.
+		if !strings.HasPrefix(apiKey, "sk-") {
+			return fmt.Errorf("invalid API key format for provider %s", c.ID)
+		}
+		return nil
+	}
+
 	switch c.Type {
 	case catwalk.TypeOpenAI, catwalk.TypeOpenAICompat, catwalk.TypeOpenRouter:
 		baseURL, _ := resolver.ResolveValue(c.BaseURL)

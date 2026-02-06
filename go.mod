@@ -16,6 +16,7 @@ require (
 	github.com/PuerkitoBio/goquery v1.11.0
 	github.com/alecthomas/chroma/v2 v2.23.1
 	github.com/atotto/clipboard v0.1.4
+	github.com/aymanbagabas/go-nativeclipboard v0.1.2
 	github.com/aymanbagabas/go-udiff v0.3.1
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/charlievieth/fastwalk v1.0.14
@@ -104,6 +105,7 @@ require (
 	github.com/clipperhouse/stringish v0.1.1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
+	github.com/ebitengine/purego v0.10.0-alpha.3.0.20260102153238-200df6041cff // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-json-experiment/json v0.0.0-20251027170946-4849db3c2f7e // indirect

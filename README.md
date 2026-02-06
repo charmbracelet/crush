@@ -187,6 +187,7 @@ That said, you can also set environment variables for preferred providers.
 | `GEMINI_API_KEY`            | Google Gemini                                      |
 | `SYNTHETIC_API_KEY`         | Synthetic                                          |
 | `ZAI_API_KEY`               | Z.ai                                               |
+| `MINIMAX_API_KEY`           | MiniMax                                            |
 | `HF_TOKEN`                  | Hugging Face Inference                             |
 | `CEREBRAS_API_KEY`          | Cerebras                                           |
 | `OPENROUTER_API_KEY`        | OpenRouter                                         |

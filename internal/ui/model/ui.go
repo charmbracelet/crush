@@ -43,7 +43,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/dialog"
 	"github.com/charmbracelet/crush/internal/ui/logo"
 	"github.com/charmbracelet/crush/internal/ui/styles"
-	"github.com/charmbracelet/crush/internal/uiutil"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/version"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/screen"
@@ -109,6 +109,11 @@ type (
 
 	// copyChatHighlightMsg is sent to copy the current chat highlight to clipboard.
 	copyChatHighlightMsg struct{}
+
+	// sessionFilesUpdatesMsg is sent when the files for this session have been updated
+	sessionFilesUpdatesMsg struct {
+		sessionFiles []SessionFile
+	}
 )
 
 // UI represents the main user interface model.
@@ -127,6 +132,8 @@ type UI struct {
 	height int
 	layout layout
 
+	isTransparent bool
+
 	focus uiFocusState
 	state uiState
 
@@ -139,8 +146,7 @@ type UI struct {
 	// isCanceling tracks whether the user has pressed escape once to cancel.
 	isCanceling bool
 
-	// header is the last cached header logo
-	header string
+	header *header
 
 	// sendProgressBar instructs the TUI to send progress bar updates to the
 	// terminal.
@@ -259,12 +265,15 @@ func New(com *common.Common) *UI {
 		},
 	)
 
+	header := newHeader(com)
+
 	ui := &UI{
 		com:         com,
 		dialog:      dialog.NewOverlay(),
 		keyMap:      keyMap,
 		textarea:    ta,
 		chat:        ch,
+		header:      header,
 		completions: comp,
 		attachments: attachments,
 		todoSpinner: todoSpinner,
@@ -289,15 +298,19 @@ func New(com *common.Common) *UI {
 	desiredFocus := uiFocusEditor
 	if !com.Config().IsConfigured() {
 		desiredState = uiOnboarding
-	} else if n, _ := config.ProjectNeedsInitialization(); n {
+	} else if n, _ := config.ProjectNeedsInitialization(com.Config()); n {
 		desiredState = uiInitialize
 	}
 
 	// set initial state
 	ui.setState(desiredState, desiredFocus)
 
+	opts := com.Config().Options
+
 	// disable indeterminate progress bar
-	ui.progressBarEnabled = com.Config().Options.Progress == nil || *com.Config().Options.Progress
+	ui.progressBarEnabled = opts.Progress == nil || *opts.Progress
+	// enable transparent mode
+	ui.isTransparent = opts.TUI.Transparent != nil && *opts.TUI.Transparent
 
 	return ui
 }
@@ -319,6 +332,10 @@ func (m *UI) Init() tea.Cmd {
 
 // setState changes the UI state and focus.
 func (m *UI) setState(state uiState, focus uiFocusState) {
+	if state == uiLanding {
+		// Always turn off compact mode when going to landing
+		m.isCompact = false
+	}
 	m.state = state
 	m.focus = focus
 	// Changing the state may change layout, so update it.
@@ -337,18 +354,16 @@ func (m *UI) loadCustomCommands() tea.Cmd {
 }
 
 // loadMCPrompts loads the MCP prompts asynchronously.
-func (m *UI) loadMCPrompts() tea.Cmd {
-	return func() tea.Msg {
-		prompts, err := commands.LoadMCPPrompts()
-		if err != nil {
-			slog.Error("Failed to load MCP prompts", "error", err)
-		}
-		if prompts == nil {
-			// flag them as loaded even if there is none or an error
-			prompts = []commands.MCPPrompt{}
-		}
-		return mcpPromptsLoadedMsg{Prompts: prompts}
+func (m *UI) loadMCPrompts() tea.Msg {
+	prompts, err := commands.LoadMCPPrompts()
+	if err != nil {
+		slog.Error("Failed to load MCP prompts", "error", err)
 	}
+	if prompts == nil {
+		// flag them as loaded even if there is none or an error
+		prompts = []commands.MCPPrompt{}
+	}
+	return mcpPromptsLoadedMsg{Prompts: prompts}
 }
 
 // Update handles updates to the UI model.
@@ -379,7 +394,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sessionFiles = msg.files
 		msgs, err := m.com.App.Messages.List(context.Background(), m.session.ID)
 		if err != nil {
-			cmds = append(cmds, uiutil.ReportError(err))
+			cmds = append(cmds, util.ReportError(err))
 			break
 		}
 		if cmd := m.setSessionMessages(msgs); cmd != nil {
@@ -397,6 +412,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.historyReset()
 		cmds = append(cmds, m.loadPromptHistory())
 		m.updateLayoutAndSize()
+	case sessionFilesUpdatesMsg:
+		m.sessionFiles = msg.sessionFiles
 
 	case sendMessageMsg:
 		cmds = append(cmds, m.sendMessage(msg.Content, msg.Attachments...))
@@ -486,17 +503,18 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pubsub.Event[app.LSPEvent]:
 		m.lspStates = app.GetLSPStates()
 	case pubsub.Event[mcp.Event]:
-		m.mcpStates = mcp.GetStates()
-		// check if all mcps are initialized
-		initialized := true
-		for _, state := range m.mcpStates {
-			if state.State == mcp.StateStarting {
-				initialized = false
-				break
-			}
-		}
-		if initialized && m.mcpPrompts == nil {
-			cmds = append(cmds, m.loadMCPrompts())
+		switch msg.Payload.Type {
+		case mcp.EventStateChanged:
+			return m, tea.Batch(
+				m.handleStateChanged(),
+				m.loadMCPrompts,
+			)
+		case mcp.EventPromptsListChanged:
+			return m, handleMCPPromptsEvent(msg.Payload.Name)
+		case mcp.EventToolsListChanged:
+			return m, handleMCPToolsEvent(m.com.Config(), msg.Payload.Name)
+		case mcp.EventResourcesListChanged:
+			return m, handleMCPResourcesEvent(msg.Payload.Name)
 		}
 	case pubsub.Event[permission.PermissionRequest]:
 		if cmd := m.openPermissionsDialog(msg.Payload); cmd != nil {
@@ -678,21 +696,25 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case openEditorMsg:
+		var cmd tea.Cmd
 		m.textarea.SetValue(msg.Text)
 		m.textarea.MoveToEnd()
-	case uiutil.InfoMsg:
+		m.textarea, cmd = m.textarea.Update(msg)
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case util.InfoMsg:
 		m.status.SetInfoMsg(msg)
 		ttl := msg.TTL
 		if ttl <= 0 {
 			ttl = DefaultStatusTTL
 		}
 		cmds = append(cmds, clearInfoMsgCmd(ttl))
-	case uiutil.ClearStatusMsg:
+	case util.ClearStatusMsg:
 		m.status.ClearInfoMsg()
-	case completions.FilesLoadedMsg:
-		// Handle async file loading for completions.
+	case completions.CompletionItemsLoadedMsg:
 		if m.completionsOpen {
-			m.completions.SetFiles(msg.Files)
+			m.completions.SetItems(msg.Files, msg.Resources)
 		}
 	case uv.KittyGraphicsEvent:
 		if !bytes.HasPrefix(msg.Payload, []byte("OK")) {
@@ -752,7 +774,7 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 		case message.Assistant:
 			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap)...)
 			if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
-				infoItem := chat.NewAssistantInfoItem(m.com.Styles, msg, time.Unix(m.lastUserMessageTime, 0))
+				infoItem := chat.NewAssistantInfoItem(m.com.Styles, msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
 				items = append(items, infoItem)
 			}
 		default:
@@ -882,7 +904,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 			}
 		}
 		if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
-			infoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, time.Unix(m.lastUserMessageTime, 0))
+			infoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
 			m.chat.AppendMessages(infoItem)
 			if atBottom {
 				if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
@@ -953,7 +975,7 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 
 	if shouldRenderAssistant && msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
 		if infoItem := m.chat.MessageItem(chat.AssistantInfoID(msg.ID)); infoItem == nil {
-			newInfoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, time.Unix(m.lastUserMessageTime, 0))
+			newInfoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
 			m.chat.AppendMessages(newInfoItem)
 		}
 	}
@@ -1137,7 +1159,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionNewSession:
 		if m.isAgentBusy() {
-			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait before starting a new session..."))
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
 			break
 		}
 		if cmd := m.newSession(); cmd != nil {
@@ -1146,13 +1168,13 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSummarize:
 		if m.isAgentBusy() {
-			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait before summarizing session..."))
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
 			break
 		}
 		cmds = append(cmds, func() tea.Msg {
 			err := m.com.App.AgentCoordinator.Summarize(context.Background(), msg.SessionID)
 			if err != nil {
-				return uiutil.ReportError(err)()
+				return util.ReportError(err)()
 			}
 			return nil
 		})
@@ -1162,7 +1184,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionExternalEditor:
 		if m.isAgentBusy() {
-			cmds = append(cmds, uiutil.ReportWarn("Agent is working, please wait..."))
+			cmds = append(cmds, util.ReportWarn("Agent is working, please wait..."))
 			break
 		}
 		cmds = append(cmds, m.openEditor(m.textarea.Value()))
@@ -1174,32 +1196,32 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		cmds = append(cmds, func() tea.Msg {
 			cfg := m.com.Config()
 			if cfg == nil {
-				return uiutil.ReportError(errors.New("configuration not found"))()
+				return util.ReportError(errors.New("configuration not found"))()
 			}
 
 			agentCfg, ok := cfg.Agents[config.AgentCoder]
 			if !ok {
-				return uiutil.ReportError(errors.New("agent configuration not found"))()
+				return util.ReportError(errors.New("agent configuration not found"))()
 			}
 
 			currentModel := cfg.Models[agentCfg.Model]
 			currentModel.Think = !currentModel.Think
 			if err := cfg.UpdatePreferredModel(agentCfg.Model, currentModel); err != nil {
-				return uiutil.ReportError(err)()
+				return util.ReportError(err)()
 			}
 			m.com.App.UpdateAgentModel(context.TODO())
 			status := "disabled"
 			if currentModel.Think {
 				status = "enabled"
 			}
-			return uiutil.NewInfoMsg("Thinking mode " + status)
+			return util.NewInfoMsg("Thinking mode " + status)
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionQuit:
 		cmds = append(cmds, tea.Quit)
 	case dialog.ActionInitializeProject:
 		if m.isAgentBusy() {
-			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait before summarizing session..."))
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
 			break
 		}
 		cmds = append(cmds, m.initializeProject())
@@ -1207,13 +1229,13 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 	case dialog.ActionSelectModel:
 		if m.isAgentBusy() {
-			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait..."))
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
 			break
 		}
 
 		cfg := m.com.Config()
 		if cfg == nil {
-			cmds = append(cmds, uiutil.ReportError(errors.New("configuration not found")))
+			cmds = append(cmds, util.ReportError(errors.New("configuration not found")))
 			break
 		}
 
@@ -1225,7 +1247,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 		// Attempt to import GitHub Copilot tokens from VSCode if available.
 		if isCopilot && !isConfigured() {
-			config.Get().ImportCopilot()
+			m.com.Config().ImportCopilot()
 		}
 
 		if !isConfigured() {
@@ -1237,23 +1259,23 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 
 		if err := cfg.UpdatePreferredModel(msg.ModelType, msg.Model); err != nil {
-			cmds = append(cmds, uiutil.ReportError(err))
+			cmds = append(cmds, util.ReportError(err))
 		} else if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
 			// Ensure small model is set is unset.
 			smallModel := m.com.App.GetDefaultSmallModel(providerID)
 			if err := cfg.UpdatePreferredModel(config.SelectedModelTypeSmall, smallModel); err != nil {
-				cmds = append(cmds, uiutil.ReportError(err))
+				cmds = append(cmds, util.ReportError(err))
 			}
 		}
 
 		cmds = append(cmds, func() tea.Msg {
 			if err := m.com.App.UpdateAgentModel(context.TODO()); err != nil {
-				return uiutil.ReportError(err)
+				return util.ReportError(err)
 			}
 
 			modelMsg := fmt.Sprintf("%s model changed to %s", msg.ModelType, msg.Model.Model)
 
-			return uiutil.NewInfoMsg(modelMsg)
+			return util.NewInfoMsg(modelMsg)
 		})
 
 		m.dialog.CloseDialog(dialog.APIKeyInputID)
@@ -1264,37 +1286,37 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			m.setState(uiLanding, uiFocusEditor)
 			m.com.Config().SetupAgents()
 			if err := m.com.App.InitCoderAgent(context.TODO()); err != nil {
-				cmds = append(cmds, uiutil.ReportError(err))
+				cmds = append(cmds, util.ReportError(err))
 			}
 		}
 	case dialog.ActionSelectReasoningEffort:
 		if m.isAgentBusy() {
-			cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait..."))
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
 			break
 		}
 
 		cfg := m.com.Config()
 		if cfg == nil {
-			cmds = append(cmds, uiutil.ReportError(errors.New("configuration not found")))
+			cmds = append(cmds, util.ReportError(errors.New("configuration not found")))
 			break
 		}
 
 		agentCfg, ok := cfg.Agents[config.AgentCoder]
 		if !ok {
-			cmds = append(cmds, uiutil.ReportError(errors.New("agent configuration not found")))
+			cmds = append(cmds, util.ReportError(errors.New("agent configuration not found")))
 			break
 		}
 
 		currentModel := cfg.Models[agentCfg.Model]
 		currentModel.ReasoningEffort = msg.Effort
 		if err := cfg.UpdatePreferredModel(agentCfg.Model, currentModel); err != nil {
-			cmds = append(cmds, uiutil.ReportError(err))
+			cmds = append(cmds, util.ReportError(err))
 			break
 		}
 
 		cmds = append(cmds, func() tea.Msg {
 			m.com.App.UpdateAgentModel(context.TODO())
-			return uiutil.NewInfoMsg("Reasoning effort set to " + msg.Effort)
+			return util.NewInfoMsg("Reasoning effort set to " + msg.Effort)
 		})
 		m.dialog.CloseDialog(dialog.ReasoningID)
 	case dialog.ActionPermissionResponse:
@@ -1355,7 +1377,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		cmds = append(cmds, m.runMCPPrompt(msg.ClientID, msg.PromptID, msg.Args))
 	default:
-		cmds = append(cmds, uiutil.CmdHandler(msg))
+		cmds = append(cmds, util.CmdHandler(msg))
 	}
 
 	return tea.Batch(cmds...)
@@ -1447,7 +1469,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			}
 		case key.Matches(msg, m.keyMap.Suspend):
 			if m.isAgentBusy() {
-				cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait..."))
+				cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
 				return true
 			}
 			cmds = append(cmds, tea.Suspend)
@@ -1493,12 +1515,14 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			if m.completionsOpen {
 				if msg, ok := m.completions.Update(msg); ok {
 					switch msg := msg.(type) {
-					case completions.SelectionMsg:
-						// Handle file completion selection.
-						if item, ok := msg.Value.(completions.FileCompletionValue); ok {
-							cmds = append(cmds, m.insertFileCompletion(item.Path))
+					case completions.SelectionMsg[completions.FileCompletionValue]:
+						cmds = append(cmds, m.insertFileCompletion(msg.Value.Path))
+						if !msg.KeepOpen {
+							m.closeCompletions()
 						}
-						if !msg.Insert {
+					case completions.SelectionMsg[completions.ResourceCompletionValue]:
+						cmds = append(cmds, m.insertMCPResourceCompletion(msg.Value))
+						if !msg.KeepOpen {
 							m.closeCompletions()
 						}
 					case completions.ClosedMsg:
@@ -1549,7 +1573,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					break
 				}
 				if m.isAgentBusy() {
-					cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait before starting a new session..."))
+					cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
 					break
 				}
 				if cmd := m.newSession(); cmd != nil {
@@ -1564,7 +1588,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 			case key.Matches(msg, m.keyMap.Editor.OpenEditor):
 				if m.isAgentBusy() {
-					cmds = append(cmds, uiutil.ReportWarn("Agent is working, please wait..."))
+					cmds = append(cmds, util.ReportWarn("Agent is working, please wait..."))
 					break
 				}
 				cmds = append(cmds, m.openEditor(m.textarea.Value()))
@@ -1612,7 +1636,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 						m.completionsStartIndex = curIdx
 						m.completionsPositionStart = m.completionsPosition()
 						depth, limit := m.com.Config().Options.TUI.Completions.Limits()
-						cmds = append(cmds, m.completions.OpenWithFiles(depth, limit))
+						cmds = append(cmds, m.completions.Open(depth, limit))
 					}
 				}
 
@@ -1664,7 +1688,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					break
 				}
 				if m.isAgentBusy() {
-					cmds = append(cmds, uiutil.ReportWarn("Agent is busy, please wait before starting a new session..."))
+					cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
 					break
 				}
 				m.focus = uiFocusEditor
@@ -1750,6 +1774,18 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// drawHeader draws the header section of the UI.
+func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
+	m.header.drawHeader(
+		scr,
+		area,
+		m.session,
+		m.isCompact,
+		m.detailsOpen,
+		m.width,
+	)
+}
+
 // Draw implements [uv.Drawable] and draws the UI model.
 func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	layout := m.generateLayout(area.Dx(), area.Dy())
@@ -1764,22 +1800,19 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	switch m.state {
 	case uiOnboarding:
-		header := uv.NewStyledString(m.header)
-		header.Draw(scr, layout.header)
+		m.drawHeader(scr, layout.header)
 
 		// NOTE: Onboarding flow will be rendered as dialogs below, but
 		// positioned at the bottom left of the screen.
 
 	case uiInitialize:
-		header := uv.NewStyledString(m.header)
-		header.Draw(scr, layout.header)
+		m.drawHeader(scr, layout.header)
 
 		main := uv.NewStyledString(m.initializeView())
 		main.Draw(scr, layout.main)
 
 	case uiLanding:
-		header := uv.NewStyledString(m.header)
-		header.Draw(scr, layout.header)
+		m.drawHeader(scr, layout.header)
 		main := uv.NewStyledString(m.landingView())
 		main.Draw(scr, layout.main)
 
@@ -1788,8 +1821,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	case uiChat:
 		if m.isCompact {
-			header := uv.NewStyledString(m.header)
-			header.Draw(scr, layout.header)
+			m.drawHeader(scr, layout.header)
 		} else {
 			m.drawSidebar(scr, layout.sidebar)
 		}
@@ -1884,7 +1916,9 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 func (m *UI) View() tea.View {
 	var v tea.View
 	v.AltScreen = true
-	v.BackgroundColor = m.com.Styles.Background
+	if !m.isTransparent {
+		v.BackgroundColor = m.com.Styles.Background
+	}
 	v.MouseMode = tea.MouseModeCellMotion
 	v.WindowTitle = "crush " + home.Short(m.com.Config().WorkingDir())
 
@@ -2125,7 +2159,7 @@ func (m *UI) toggleCompactMode() tea.Cmd {
 
 	err := m.com.Config().SetCompactMode(m.forceCompactMode)
 	if err != nil {
-		return uiutil.ReportError(err)
+		return util.ReportError(err)
 	}
 
 	m.updateLayoutAndSize()
@@ -2164,14 +2198,9 @@ func (m *UI) updateSize() {
 
 	// Handle different app states
 	switch m.state {
-	case uiOnboarding, uiInitialize, uiLanding:
-		m.renderHeader(false, m.layout.header.Dx())
-
 	case uiChat:
-		if m.isCompact {
-			m.renderHeader(true, m.layout.header.Dx())
-		} else {
-			m.renderSidebarLogo(m.layout.sidebar.Dx())
+		if !m.isCompact {
+			m.cacheSidebarLogo(m.layout.sidebar.Dx())
 		}
 	}
 }
@@ -2360,11 +2389,11 @@ type layout struct {
 func (m *UI) openEditor(value string) tea.Cmd {
 	tmpfile, err := os.CreateTemp("", "msg_*.md")
 	if err != nil {
-		return uiutil.ReportError(err)
+		return util.ReportError(err)
 	}
 	defer tmpfile.Close() //nolint:errcheck
 	if _, err := tmpfile.WriteString(value); err != nil {
-		return uiutil.ReportError(err)
+		return util.ReportError(err)
 	}
 	cmd, err := editor.Command(
 		"crush",
@@ -2375,18 +2404,18 @@ func (m *UI) openEditor(value string) tea.Cmd {
 		),
 	)
 	if err != nil {
-		return uiutil.ReportError(err)
+		return util.ReportError(err)
 	}
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		if err != nil {
-			return uiutil.ReportError(err)
+			return util.ReportError(err)
 		}
 		content, err := os.ReadFile(tmpfile.Name())
 		if err != nil {
-			return uiutil.ReportError(err)
+			return util.ReportError(err)
 		}
 		if len(content) == 0 {
-			return uiutil.ReportWarn("Message is empty")
+			return util.ReportWarn("Message is empty")
 		}
 		os.Remove(tmpfile.Name())
 		return openEditorMsg{
@@ -2446,24 +2475,29 @@ func (m *UI) closeCompletions() {
 	m.completions.Close()
 }
 
-// insertFileCompletion inserts the selected file path into the textarea,
-// replacing the @query, and adds the file as an attachment.
-func (m *UI) insertFileCompletion(path string) tea.Cmd {
+// insertCompletionText replaces the @query in the textarea with the given text.
+// Returns false if the replacement cannot be performed.
+func (m *UI) insertCompletionText(text string) bool {
 	value := m.textarea.Value()
-	word := m.textareaWord()
-
-	// Find the @ and query to replace.
 	if m.completionsStartIndex > len(value) {
-		return nil
+		return false
 	}
 
-	// Build the new value: everything before @, the path, everything after query.
+	word := m.textareaWord()
 	endIdx := min(m.completionsStartIndex+len(word), len(value))
-
-	newValue := value[:m.completionsStartIndex] + path + value[endIdx:]
+	newValue := value[:m.completionsStartIndex] + text + value[endIdx:]
 	m.textarea.SetValue(newValue)
 	m.textarea.MoveToEnd()
 	m.textarea.InsertRune(' ')
+	return true
+}
+
+// insertFileCompletion inserts the selected file path into the textarea,
+// replacing the @query, and adds the file as an attachment.
+func (m *UI) insertFileCompletion(path string) tea.Cmd {
+	if !m.insertCompletionText(path) {
+		return nil
+	}
 
 	return func() tea.Msg {
 		absPath, _ := filepath.Abs(path)
@@ -2494,6 +2528,61 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 			FileName: filepath.Base(path),
 			MimeType: mimeOf(content),
 			Content:  content,
+		}
+	}
+}
+
+// insertMCPResourceCompletion inserts the selected resource into the textarea,
+// replacing the @query, and adds the resource as an attachment.
+func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValue) tea.Cmd {
+	displayText := item.Title
+	if displayText == "" {
+		displayText = item.URI
+	}
+
+	if !m.insertCompletionText(displayText) {
+		return nil
+	}
+
+	return func() tea.Msg {
+		contents, err := mcp.ReadResource(
+			context.Background(),
+			m.com.Config(),
+			item.MCPName,
+			item.URI,
+		)
+		if err != nil {
+			slog.Warn("Failed to read MCP resource", "uri", item.URI, "error", err)
+			return nil
+		}
+		if len(contents) == 0 {
+			return nil
+		}
+
+		content := contents[0]
+		var data []byte
+		if content.Text != "" {
+			data = []byte(content.Text)
+		} else if len(content.Blob) > 0 {
+			data = content.Blob
+		}
+		if len(data) == 0 {
+			return nil
+		}
+
+		mimeType := item.MIMEType
+		if mimeType == "" && content.MIMEType != "" {
+			mimeType = content.MIMEType
+		}
+		if mimeType == "" {
+			mimeType = "text/plain"
+		}
+
+		return message.Attachment{
+			FilePath: item.URI,
+			FileName: displayText,
+			MimeType: mimeType,
+			Content:  data,
 		}
 	}
 }
@@ -2577,32 +2666,22 @@ func (m *UI) renderEditorView(width int) string {
 	)
 }
 
-// renderHeader renders and caches the header logo at the specified width.
-func (m *UI) renderHeader(compact bool, width int) {
-	if compact && m.session != nil && m.com.App != nil {
-		m.header = renderCompactHeader(m.com, m.session, m.com.App.LSPClients, m.detailsOpen, width)
-	} else {
-		m.header = renderLogo(m.com.Styles, compact, width)
-	}
-}
-
-// renderSidebarLogo renders and caches the sidebar logo at the specified
-// width.
-func (m *UI) renderSidebarLogo(width int) {
+// cacheSidebarLogo renders and caches the sidebar logo at the specified width.
+func (m *UI) cacheSidebarLogo(width int) {
 	m.sidebarLogo = renderLogo(m.com.Styles, true, width)
 }
 
 // sendMessage sends a message with the given content and attachments.
 func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.Cmd {
 	if m.com.App.AgentCoordinator == nil {
-		return uiutil.ReportError(fmt.Errorf("coder agent is not initialized"))
+		return util.ReportError(fmt.Errorf("coder agent is not initialized"))
 	}
 
 	var cmds []tea.Cmd
 	if !m.hasSession() {
 		newSession, err := m.com.App.Sessions.Create(context.Background(), "New Session")
 		if err != nil {
-			return uiutil.ReportError(err)
+			return util.ReportError(err)
 		}
 		if m.forceCompactMode {
 			m.isCompact = true
@@ -2628,8 +2707,8 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 			if isCancelErr || isPermissionErr {
 				return nil
 			}
-			return uiutil.InfoMsg{
-				Type: uiutil.InfoTypeError,
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
 				Msg:  err.Error(),
 			}
 		}
@@ -2736,7 +2815,7 @@ func (m *UI) openModelsDialog() tea.Cmd {
 	isOnboarding := m.state == uiOnboarding
 	modelsDialog, err := dialog.NewModels(m.com, isOnboarding)
 	if err != nil {
-		return uiutil.ReportError(err)
+		return util.ReportError(err)
 	}
 
 	m.dialog.OpenDialog(modelsDialog)
@@ -2759,7 +2838,7 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 
 	commands, err := dialog.NewCommands(m.com, sessionID, m.customCommands, m.mcpPrompts)
 	if err != nil {
-		return uiutil.ReportError(err)
+		return util.ReportError(err)
 	}
 
 	m.dialog.OpenDialog(commands)
@@ -2776,7 +2855,7 @@ func (m *UI) openReasoningDialog() tea.Cmd {
 
 	reasoningDialog, err := dialog.NewReasoning(m.com)
 	if err != nil {
-		return uiutil.ReportError(err)
+		return util.ReportError(err)
 	}
 
 	m.dialog.OpenDialog(reasoningDialog)
@@ -2800,7 +2879,7 @@ func (m *UI) openSessionsDialog() tea.Cmd {
 
 	dialog, err := dialog.NewSessions(m.com, selectedSessionID)
 	if err != nil {
-		return uiutil.ReportError(err)
+		return util.ReportError(err)
 	}
 
 	m.dialog.OpenDialog(dialog)
@@ -2890,7 +2969,7 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 		return func() tea.Msg {
 			content := []byte(msg.Content)
 			if int64(len(content)) > common.MaxAttachmentSize {
-				return uiutil.ReportWarn("Paste is too big (>5mb)")
+				return util.ReportWarn("Paste is too big (>5mb)")
 			}
 			name := fmt.Sprintf("paste_%d.txt", m.pasteIdx())
 			mimeBufferSize := min(512, len(content))
@@ -2907,8 +2986,11 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 	// Attempt to parse pasted content as file paths. If possible to parse,
 	// all files exist and are valid, add as attachments.
 	// Otherwise, paste as text.
-	paths := fsext.PasteStringToPaths(msg.Content)
+	paths := fsext.ParsePastedFiles(msg.Content)
 	allExistsAndValid := func() bool {
+		if len(paths) == 0 {
+			return false
+		}
 		for _, path := range paths {
 			if _, err := os.Stat(path); os.IsNotExist(err) {
 				return false
@@ -2946,15 +3028,18 @@ func (m *UI) handleFilePathPaste(path string) tea.Cmd {
 	return func() tea.Msg {
 		fileInfo, err := os.Stat(path)
 		if err != nil {
-			return uiutil.ReportError(err)
+			return util.ReportError(err)
+		}
+		if fileInfo.IsDir() {
+			return util.ReportWarn("Cannot attach a directory")
 		}
 		if fileInfo.Size() > common.MaxAttachmentSize {
-			return uiutil.ReportWarn("File is too big (>5mb)")
+			return util.ReportWarn("File is too big (>5mb)")
 		}
 
 		content, err := os.ReadFile(path)
 		if err != nil {
-			return uiutil.ReportError(err)
+			return util.ReportError(err)
 		}
 
 		mimeBufferSize := min(512, len(content))
@@ -3038,10 +3123,10 @@ func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
 
 func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string) tea.Cmd {
 	load := func() tea.Msg {
-		prompt, err := commands.GetMCPPrompt(clientID, promptID, arguments)
+		prompt, err := commands.GetMCPPrompt(m.com.Config(), clientID, promptID, arguments)
 		if err != nil {
 			// TODO: make this better
-			return uiutil.ReportError(err)()
+			return util.ReportError(err)()
 		}
 
 		if prompt == "" {
@@ -3063,6 +3148,43 @@ func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string
 	return tea.Sequence(cmds...)
 }
 
+func (m *UI) handleStateChanged() tea.Cmd {
+	slog.Warn("handleStateChanged")
+	return func() tea.Msg {
+		m.com.App.UpdateAgentModel(context.Background())
+		m.mcpStates = mcp.GetStates()
+		return nil
+	}
+}
+
+func handleMCPPromptsEvent(name string) tea.Cmd {
+	slog.Warn("handleMCPPromptsEvent")
+	return func() tea.Msg {
+		mcp.RefreshPrompts(context.Background(), name)
+		return nil
+	}
+}
+
+func handleMCPToolsEvent(cfg *config.Config, name string) tea.Cmd {
+	slog.Warn("handleMCPToolsEvent")
+	return func() tea.Msg {
+		mcp.RefreshTools(
+			context.Background(),
+			cfg,
+			name,
+		)
+		return nil
+	}
+}
+
+func handleMCPResourcesEvent(name string) tea.Cmd {
+	slog.Warn("handleMCPResourcesEvent")
+	return func() tea.Msg {
+		mcp.RefreshResources(context.Background(), name)
+		return nil
+	}
+}
+
 func (m *UI) copyChatHighlight() tea.Cmd {
 	text := m.chat.HighlightContent()
 	return common.CopyToClipboardWithCallback(
@@ -3077,7 +3199,7 @@ func (m *UI) copyChatHighlight() tea.Cmd {
 
 // renderLogo renders the Crush logo with the given styles and dimensions.
 func renderLogo(t *styles.Styles, compact bool, width int) string {
-	return logo.Render(version.Version, compact, logo.Opts{
+	return logo.Render(t, version.Version, compact, logo.Opts{
 		FieldColor:   t.LogoFieldColor,
 		TitleColorA:  t.LogoTitleColorA,
 		TitleColorB:  t.LogoTitleColorB,

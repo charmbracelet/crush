@@ -33,8 +33,8 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
-	"github.com/charmbracelet/crush/internal/tui/components/anim"
-	"github.com/charmbracelet/crush/internal/tui/styles"
+	"github.com/charmbracelet/crush/internal/ui/anim"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/update"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/x/ansi"
@@ -160,7 +160,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	progress = app.config.Options.Progress == nil || *app.config.Options.Progress
 
 	if !hideSpinner && stderrTTY {
-		t := styles.CurrentTheme()
+		t := styles.DefaultStyles()
 
 		// Detect background color to set the appropriate color for the
 		// spinner's 'Generating...' text. Without this, that text would be

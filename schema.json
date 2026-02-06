@@ -156,6 +156,15 @@
         "options": {
           "type": "object",
           "description": "LSP server-specific settings passed during initialization"
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Timeout in seconds for LSP server initialization",
+          "default": 30,
+          "examples": [
+            60,
+            120
+          ]
         }
       },
       "additionalProperties": false,
@@ -641,6 +650,11 @@
         "completions": {
           "$ref": "#/$defs/Completions",
           "description": "Completions UI options"
+        },
+        "transparent": {
+          "type": "boolean",
+          "description": "Enable transparent background for the TUI interface",
+          "default": false
         }
       },
       "additionalProperties": false,

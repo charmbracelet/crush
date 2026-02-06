@@ -14,7 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
-	"github.com/charmbracelet/crush/internal/uiutil"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/exp/charmtone"
 )
@@ -76,7 +76,7 @@ func NewAPIKeyInput(
 
 	m.input = textinput.New()
 	m.input.SetVirtualCursor(false)
-	m.input.Placeholder = "Enter you API key..."
+	m.input.Placeholder = "Enter your API key..."
 	m.input.SetStyles(com.Styles.TextInput)
 	m.input.Focus()
 	m.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding
@@ -256,7 +256,7 @@ func (m *APIKeyInput) inputView() string {
 		ts := t.TextInput
 		ts.Focused.Prompt = ts.Focused.Prompt.Foreground(charmtone.Cherry)
 
-		m.input.Prompt = styles.ErrorIcon + " "
+		m.input.Prompt = styles.LSPErrorIcon + " "
 		m.input.SetStyles(ts)
 		m.input.Focus()
 	}
@@ -296,7 +296,7 @@ func (m *APIKeyInput) verifyAPIKey() tea.Msg {
 		Type:    m.provider.Type,
 		BaseURL: m.provider.APIEndpoint,
 	}
-	err := providerConfig.TestConnection(config.Get().Resolver())
+	err := providerConfig.TestConnection(m.com.Config().Resolver())
 
 	// intentionally wait for at least 750ms to make sure the user sees the spinner
 	elapsed := time.Since(start)
@@ -316,7 +316,7 @@ func (m *APIKeyInput) saveKeyAndContinue() Action {
 
 	err := cfg.SetProviderAPIKey(string(m.provider.ID), m.input.Value())
 	if err != nil {
-		return ActionCmd{uiutil.ReportError(fmt.Errorf("failed to save API key: %w", err))}
+		return ActionCmd{util.ReportError(fmt.Errorf("failed to save API key: %w", err))}
 	}
 
 	return ActionSelectModel{

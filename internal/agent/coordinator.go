@@ -439,6 +439,14 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		allTools = append(allTools, tools.NewDiagnosticsTool(c.lspClients), tools.NewReferencesTool(c.lspClients), tools.NewLSPRestartTool(c.lspClients))
 	}
 
+	if len(c.cfg.MCP) > 0 {
+		allTools = append(
+			allTools,
+			tools.NewListMCPResourcesTool(c.cfg, c.permissions),
+			tools.NewReadMCPResourceTool(c.cfg, c.permissions),
+		)
+	}
+
 	var filteredTools []fantasy.AgentTool
 	for _, tool := range allTools {
 		if slices.Contains(agent.AllowedTools, tool.Info().Name) {
@@ -446,7 +454,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		}
 	}
 
-	for _, tool := range tools.GetMCPTools(c.permissions, c.cfg.WorkingDir()) {
+	for _, tool := range tools.GetMCPTools(c.permissions, c.cfg, c.cfg.WorkingDir()) {
 		if agent.AllowedMCP == nil {
 			// No MCP restrictions
 			filteredTools = append(filteredTools, tool)

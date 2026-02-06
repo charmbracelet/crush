@@ -376,8 +376,6 @@ type Config struct {
 	Permissions *Permissions `json:"permissions,omitempty" jsonschema:"description=Permission settings for tool usage"`
 
 	Tools Tools `json:"tools,omitempty" jsonschema:"description=Tool configurations"`
-
-	Agents map[string]Agent `json:"-"`
 }
 
 func (c *Config) EnabledProviders() []ProviderConfig {

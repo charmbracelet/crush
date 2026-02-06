@@ -75,15 +75,15 @@ type App struct {
 
 // New initializes a new application instance.
 func New(ctx context.Context, conn *sql.DB, cfgSvc *config.Service) (*App, error) {
-	cfg := cfgSvc.Config()
 	q := db.New(conn)
 	sessions := session.NewService(q, conn)
 	messages := message.NewService(q)
 	files := history.NewService(q, conn)
-	skipPermissionsRequests := cfg.Permissions != nil && cfg.Permissions.SkipRequests
+	perms := cfgSvc.Permissions()
+	skipPermissionsRequests := perms != nil && perms.SkipRequests
 	var allowedTools []string
-	if cfg.Permissions != nil && cfg.Permissions.AllowedTools != nil {
-		allowedTools = cfg.Permissions.AllowedTools
+	if perms != nil && perms.AllowedTools != nil {
+		allowedTools = perms.AllowedTools
 	}
 
 	app := &App{
@@ -322,7 +322,7 @@ func (app *App) UpdateAgentModel(ctx context.Context) error {
 // If largeModel is provided but smallModel is not, the small model defaults to
 // the provider's default small model.
 func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel, smallModel string) error {
-	providers := maps.Clone(app.configService.Config().Providers)
+	providers := maps.Clone(app.configService.AllProviders())
 
 	largeMatches, smallMatches, err := findModels(providers, largeModel, smallModel)
 	if err != nil {
@@ -370,11 +370,11 @@ func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel,
 // GetDefaultSmallModel returns the default small model for the given
 // provider. Falls back to the large model if no default is found.
 func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
-	cfg := app.configService.Config()
-	largeModelCfg := cfg.Models[config.SelectedModelTypeLarge]
+	svc := app.configService
+	largeModelCfg, _ := svc.SelectedModel(config.SelectedModelTypeLarge)
 
 	// Find the provider in the known providers list to get its default small model.
-	knownProviders, _ := config.Providers(cfg)
+	knownProviders, _ := config.Providers(svc)
 	var knownProvider *catwalk.Provider
 	for _, p := range knownProviders {
 		if string(p.ID) == providerID {
@@ -390,7 +390,7 @@ func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
 	}
 
 	defaultSmallModelID := knownProvider.DefaultSmallModelID
-	model := cfg.GetModel(providerID, defaultSmallModelID)
+	model := svc.GetModel(providerID, defaultSmallModelID)
 	if model == nil {
 		slog.Warn("Default small model not found, using large model", "provider", providerID, "model", largeModelCfg.Model)
 		return largeModelCfg

@@ -336,7 +336,6 @@ func (m *Models) FullHelp() [][]key.Binding {
 func (m *Models) setProviderItems() error {
 	t := m.com.Styles
 	svc := m.com.ConfigService()
-	cfg := svc.Config()
 
 	var selectedItemID string
 	selectedType := m.modelType.Config()
@@ -347,7 +346,7 @@ func (m *Models) setProviderItems() error {
 	addedProviders := make(map[string]bool)
 
 	// Get a list of known providers to compare against
-	knownProviders, err := config.Providers(cfg)
+	knownProviders, err := config.Providers(svc)
 	if err != nil {
 		return fmt.Errorf("failed to get providers: %w", err)
 	}
@@ -361,7 +360,7 @@ func (m *Models) setProviderItems() error {
 	// itemsMap contains the keys of added model items.
 	itemsMap := make(map[string]*ModelItem)
 	groups := []ModelGroup{}
-	for id, p := range cfg.Providers {
+	for id, p := range svc.AllProviders() {
 		if p.Disable {
 			continue
 		}
@@ -411,7 +410,7 @@ func (m *Models) setProviderItems() error {
 			continue
 		}
 
-		providerConfig, providerConfigured := cfg.Providers[providerID]
+		providerConfig, providerConfigured := svc.Provider(providerID)
 		if providerConfigured && providerConfig.Disable {
 			continue
 		}
@@ -507,8 +506,7 @@ func (m *Models) setProviderItems() error {
 }
 
 func getFilteredProviders(svc *config.Service) ([]catwalk.Provider, error) {
-	cfg := svc.Config()
-	providers, err := config.Providers(cfg)
+	providers, err := config.Providers(svc)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get providers: %w", err)
 	}
@@ -519,7 +517,7 @@ func getFilteredProviders(svc *config.Service) ([]catwalk.Provider, error) {
 			isCopilot       = p.ID == catwalk.InferenceProviderCopilot
 			isHyper         = string(p.ID) == "hyper"
 			hasAPIKeyEnv    = strings.HasPrefix(p.APIKey, "$")
-			_, isConfigured = cfg.Providers[string(p.ID)]
+			_, isConfigured = svc.Provider(string(p.ID))
 		)
 		if isAzure || isCopilot || isHyper || hasAPIKeyEnv || isConfigured {
 			filteredProviders = append(filteredProviders, p)

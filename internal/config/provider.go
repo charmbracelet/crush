@@ -139,12 +139,12 @@ var (
 // 2. load the cached providers
 // 3. try to get the fresh list of providers, and return either this new list,
 // the cached list, or the embedded list if all others fail.
-func Providers(cfg *Config) ([]catwalk.Provider, error) {
+func Providers(svc *Service) ([]catwalk.Provider, error) {
 	providerOnce.Do(func() {
 		var wg sync.WaitGroup
 		var errs []error
 		providers := csync.NewSlice[catwalk.Provider]()
-		autoupdate := !cfg.Options.DisableProviderAutoUpdate
+		autoupdate := !svc.DisableProviderAutoUpdate()
 
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		defer cancel()

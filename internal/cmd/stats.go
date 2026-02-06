@@ -128,7 +128,7 @@ func runStats(cmd *cobra.Command, _ []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to initialize config: %w", err)
 		}
-		dataDir = svc.Config().Options.DataDirectory
+		dataDir = svc.DataDirectory()
 	}
 
 	conn, err := db.Connect(ctx, dataDir)

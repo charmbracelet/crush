@@ -46,7 +46,7 @@ func TestProviders_Integration_AutoUpdateDisabled(t *testing.T) {
 		},
 	}
 
-	providers, err := Providers(cfg)
+	providers, err := Providers(serviceFor(cfg))
 	require.NoError(t, err)
 	require.NotNil(t, providers)
 	require.Greater(t, len(providers), 5, "Expected embedded providers")

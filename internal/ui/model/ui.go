@@ -776,7 +776,7 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 		case message.Assistant:
 			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap)...)
 			if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
-				infoItem := chat.NewAssistantInfoItem(m.com.Styles, msg, m.com.ConfigService().Config(), time.Unix(m.lastUserMessageTime, 0))
+				infoItem := chat.NewAssistantInfoItem(m.com.Styles, msg, m.com.ConfigService(), time.Unix(m.lastUserMessageTime, 0))
 				items = append(items, infoItem)
 			}
 		default:
@@ -906,7 +906,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 			}
 		}
 		if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
-			infoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, m.com.ConfigService().Config(), time.Unix(m.lastUserMessageTime, 0))
+			infoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, m.com.ConfigService(), time.Unix(m.lastUserMessageTime, 0))
 			m.chat.AppendMessages(infoItem)
 			if atBottom {
 				if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
@@ -977,7 +977,7 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 
 	if shouldRenderAssistant && msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
 		if infoItem := m.chat.MessageItem(chat.AssistantInfoID(msg.ID)); infoItem == nil {
-			newInfoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, m.com.ConfigService().Config(), time.Unix(m.lastUserMessageTime, 0))
+			newInfoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, m.com.ConfigService(), time.Unix(m.lastUserMessageTime, 0))
 			m.chat.AppendMessages(newInfoItem)
 		}
 	}
@@ -1196,17 +1196,17 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleThinking:
 		cmds = append(cmds, func() tea.Msg {
-			cfg := m.com.ConfigService().Config()
+			cfg := m.com.ConfigService()
 			if cfg == nil {
 				return util.ReportError(errors.New("configuration not found"))()
 			}
 
-			agentCfg, ok := cfg.Agents[config.AgentCoder]
+			agentCfg, ok := m.com.ConfigService().Agent(config.AgentCoder)
 			if !ok {
 				return util.ReportError(errors.New("agent configuration not found"))()
 			}
 
-			currentModel := cfg.Models[agentCfg.Model]
+			currentModel, _ := cfg.SelectedModel(agentCfg.Model)
 			currentModel.Think = !currentModel.Think
 			if err := m.com.ConfigService().UpdatePreferredModel(agentCfg.Model, currentModel); err != nil {
 				return util.ReportError(err)()
@@ -1235,7 +1235,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 
-		cfg := m.com.ConfigService().Config()
+		cfg := m.com.ConfigService()
 		if cfg == nil {
 			cmds = append(cmds, util.ReportError(errors.New("configuration not found")))
 			break
@@ -1244,7 +1244,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		var (
 			providerID   = msg.Model.Provider
 			isCopilot    = providerID == string(catwalk.InferenceProviderCopilot)
-			isConfigured = func() bool { _, ok := cfg.Providers[providerID]; return ok }
+			isConfigured = func() bool { _, ok := cfg.Provider(providerID); return ok }
 		)
 
 		// Attempt to import GitHub Copilot tokens from VSCode if available.
@@ -1262,7 +1262,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 		if err := m.com.ConfigService().UpdatePreferredModel(msg.ModelType, msg.Model); err != nil {
 			cmds = append(cmds, util.ReportError(err))
-		} else if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
+		} else if _, ok := cfg.SelectedModel(config.SelectedModelTypeSmall); !ok {
 			// Ensure small model is set is unset.
 			smallModel := m.com.App.GetDefaultSmallModel(providerID)
 			if err := m.com.ConfigService().UpdatePreferredModel(config.SelectedModelTypeSmall, smallModel); err != nil {
@@ -1297,19 +1297,19 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 
-		cfg := m.com.ConfigService().Config()
+		cfg := m.com.ConfigService()
 		if cfg == nil {
 			cmds = append(cmds, util.ReportError(errors.New("configuration not found")))
 			break
 		}
 
-		agentCfg, ok := cfg.Agents[config.AgentCoder]
+		agentCfg, ok := m.com.ConfigService().Agent(config.AgentCoder)
 		if !ok {
 			cmds = append(cmds, util.ReportError(errors.New("agent configuration not found")))
 			break
 		}
 
-		currentModel := cfg.Models[agentCfg.Model]
+		currentModel, _ := cfg.SelectedModel(agentCfg.Model)
 		currentModel.ReasoningEffort = msg.Effort
 		if err := m.com.ConfigService().UpdatePreferredModel(agentCfg.Model, currentModel); err != nil {
 			cmds = append(cmds, util.ReportError(err))

@@ -98,7 +98,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 			}
 
-			tmpDir, err := os.MkdirTemp(c.cfgSvc.Config().Options.DataDirectory, "crush-fetch-*")
+			tmpDir, err := os.MkdirTemp(c.cfgSvc.DataDirectory(), "crush-fetch-*")
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to create temporary directory: %s", err)), nil
 			}
@@ -156,7 +156,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				return fantasy.ToolResponse{}, fmt.Errorf("error building system prompt: %s", err)
 			}
 
-			smallProviderCfg, ok := c.cfgSvc.Config().Providers[small.ModelCfg.Provider]
+			smallProviderCfg, ok := c.cfgSvc.Provider(small.ModelCfg.Provider)
 			if !ok {
 				return fantasy.ToolResponse{}, errors.New("small model provider not configured")
 			}
@@ -177,7 +177,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				SmallModel:           small,
 				SystemPromptPrefix:   smallProviderCfg.SystemPromptPrefix,
 				SystemPrompt:         systemPrompt,
-				DisableAutoSummarize: c.cfgSvc.Config().Options.DisableAutoSummarize,
+				DisableAutoSummarize: c.cfgSvc.DisableAutoSummarize(),
 				IsYolo:               c.permissions.SkipRequests(),
 				Sessions:             c.sessions,
 				Messages:             c.messages,

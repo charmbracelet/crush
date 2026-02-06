@@ -61,7 +61,6 @@ type Coordinator interface {
 }
 
 type coordinator struct {
-	cfg         *config.Config
 	cfgSvc      *config.Service
 	sessions    session.Service
 	messages    message.Service
@@ -86,9 +85,7 @@ func NewCoordinator(
 	filetracker filetracker.Service,
 	lspClients *csync.Map[string, *lsp.Client],
 ) (Coordinator, error) {
-	cfg := cfgSvc.Config()
 	c := &coordinator{
-		cfg:         cfg,
 		cfgSvc:      cfgSvc,
 		sessions:    sessions,
 		messages:    messages,
@@ -99,7 +96,7 @@ func NewCoordinator(
 		agents:      make(map[string]SessionAgent),
 	}
 
-	agentCfg, ok := cfg.Agents[config.AgentCoder]
+	agentCfg, ok := cfgSvc.Agent(config.AgentCoder)
 	if !ok {
 		return nil, errors.New("coder agent not configured")
 	}
@@ -147,7 +144,7 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 		attachments = filteredAttachments
 	}
 
-	providerCfg, ok := c.cfgSvc.Config().Providers[model.ModelCfg.Provider]
+	providerCfg, ok := c.cfgSvc.Provider(model.ModelCfg.Provider)
 	if !ok {
 		return nil, errors.New("model provider not configured")
 	}
@@ -360,7 +357,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		return nil, err
 	}
 
-	largeProviderCfg, _ := c.cfgSvc.Config().Providers[large.ModelCfg.Provider]
+	largeProviderCfg, _ := c.cfgSvc.Provider(large.ModelCfg.Provider)
 	result := NewSessionAgent(SessionAgentOptions{
 		large,
 		small,
@@ -415,7 +412,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 
 	// Get the model name for the agent
 	modelName := ""
-	if modelCfg, ok := c.cfgSvc.Config().Models[agent.Model]; ok {
+	if modelCfg, ok := c.cfgSvc.SelectedModel(agent.Model); ok {
 		if model := c.cfgSvc.GetModel(modelCfg.Provider, modelCfg.Model); model != nil {
 			modelName = model.Name
 		}
@@ -479,16 +476,16 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 
 // TODO: when we support multiple agents we need to change this so that we pass in the agent specific model config
 func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Model, Model, error) {
-	largeModelCfg, ok := c.cfgSvc.Config().Models[config.SelectedModelTypeLarge]
+	largeModelCfg, ok := c.cfgSvc.SelectedModel(config.SelectedModelTypeLarge)
 	if !ok {
 		return Model{}, Model{}, errors.New("large model not selected")
 	}
-	smallModelCfg, ok := c.cfgSvc.Config().Models[config.SelectedModelTypeSmall]
+	smallModelCfg, ok := c.cfgSvc.SelectedModel(config.SelectedModelTypeSmall)
 	if !ok {
 		return Model{}, Model{}, errors.New("small model not selected")
 	}
 
-	largeProviderCfg, ok := c.cfgSvc.Config().Providers[largeModelCfg.Provider]
+	largeProviderCfg, ok := c.cfgSvc.Provider(largeModelCfg.Provider)
 	if !ok {
 		return Model{}, Model{}, errors.New("large model provider not configured")
 	}
@@ -498,7 +495,7 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 		return Model{}, Model{}, err
 	}
 
-	smallProviderCfg, ok := c.cfgSvc.Config().Providers[smallModelCfg.Provider]
+	smallProviderCfg, ok := c.cfgSvc.Provider(smallModelCfg.Provider)
 	if !ok {
 		return Model{}, Model{}, errors.New("large model provider not configured")
 	}
@@ -881,7 +878,7 @@ func (c *coordinator) QueuedPromptsList(sessionID string) []string {
 }
 
 func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
-	providerCfg, ok := c.cfgSvc.Config().Providers[c.currentAgent.Model().ModelCfg.Provider]
+	providerCfg, ok := c.cfgSvc.Provider(c.currentAgent.Model().ModelCfg.Provider)
 	if !ok {
 		return errors.New("model provider not configured")
 	}
@@ -912,7 +909,7 @@ func (c *coordinator) refreshApiKeyTemplate(ctx context.Context, providerCfg con
 	}
 
 	providerCfg.APIKey = newAPIKey
-	c.cfgSvc.Config().Providers[providerCfg.ID] = providerCfg
+	c.cfgSvc.SetProvider(providerCfg.ID, providerCfg)
 
 	if err := c.UpdateModels(ctx); err != nil {
 		return err

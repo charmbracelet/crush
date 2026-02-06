@@ -77,10 +77,10 @@ func (m *UI) skipInitializeProject() tea.Cmd {
 
 // initializeView renders the project initialization prompt with Yes/No buttons.
 func (m *UI) initializeView() string {
-	cfg := m.com.ConfigService().Config()
+	cfg := m.com.ConfigService()
 	s := m.com.Styles.Initialize
 	cwd := home.Short(m.com.ConfigService().WorkingDir())
-	initFile := cfg.Options.InitializeAs
+	initFile := cfg.InitializeAs()
 
 	header := s.Header.Render("Would you like to initialize this project?")
 	path := s.Accent.PaddingLeft(2).Render(cwd)

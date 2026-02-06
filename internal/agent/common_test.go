@@ -177,18 +177,18 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 
 	// NOTE(@andreynering): Set a fixed config to ensure cassettes match
 	// independently of user config on `$HOME/.config/crush/crush.json`.
-	cfg.Config().Options.Attribution = &config.Attribution{
+	cfg.SetAttribution(&config.Attribution{
 		TrailerStyle:  "co-authored-by",
 		GeneratedWith: true,
-	}
+	})
 
 	// Clear skills paths to ensure test reproducibility - user's skills
 	// would be included in prompt and break VCR cassette matching.
-	cfg.Config().Options.SkillsPaths = []string{}
+	cfg.SetSkillsPaths([]string{})
 
 	// Clear LSP config to ensure test reproducibility - user's LSP config
 	// would be included in prompt and break VCR cassette matching.
-	cfg.Config().LSP = nil
+	cfg.SetLSP(nil)
 
 	systemPrompt, err := prompt.Build(context.TODO(), large.Provider(), large.Model(), cfg)
 	if err != nil {
@@ -197,19 +197,19 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 
 	// Get the model name for the bash tool
 	modelName := large.Model() // fallback to ID if Name not available
-	if model := cfg.Config().GetModel(large.Provider(), large.Model()); model != nil {
+	if model := cfg.GetModel(large.Provider(), large.Model()); model != nil {
 		modelName = model.Name
 	}
 
 	allTools := []fantasy.AgentTool{
-		tools.NewBashTool(env.permissions, env.workingDir, cfg.Config().Options.Attribution, modelName),
+		tools.NewBashTool(env.permissions, env.workingDir, cfg.Attribution(), modelName),
 		tools.NewDownloadTool(env.permissions, env.workingDir, r.GetDefaultClient()),
 		tools.NewEditTool(env.lspClients, env.permissions, env.history, *env.filetracker, env.workingDir),
 		tools.NewMultiEditTool(env.lspClients, env.permissions, env.history, *env.filetracker, env.workingDir),
 		tools.NewFetchTool(env.permissions, env.workingDir, r.GetDefaultClient()),
 		tools.NewGlobTool(env.workingDir),
 		tools.NewGrepTool(env.workingDir),
-		tools.NewLsTool(env.permissions, env.workingDir, cfg.Config().Tools.Ls),
+		tools.NewLsTool(env.permissions, env.workingDir, cfg.ToolLsConfig()),
 		tools.NewSourcegraphTool(r.GetDefaultClient()),
 		tools.NewViewTool(env.lspClients, env.permissions, *env.filetracker, env.workingDir),
 		tools.NewWriteTool(env.lspClients, env.permissions, env.history, *env.filetracker, env.workingDir),

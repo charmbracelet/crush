@@ -73,7 +73,7 @@ func Load(workingDir, dataDir string, debug bool) (*Service, error) {
 	}
 
 	// Load known providers, this loads the config from catwalk
-	providers, err := Providers(cfg)
+	providers, err := Providers(svc)
 	if err != nil {
 		return nil, err
 	}

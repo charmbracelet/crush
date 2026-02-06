@@ -28,13 +28,6 @@ type Service struct {
 	agents         map[string]Agent
 }
 
-// Config returns the underlying Config struct. This is a temporary
-// escape hatch that will be removed once all callers migrate to
-// Service getter methods.
-func (s *Service) Config() *Config {
-	return s.cfg
-}
-
 // WorkingDir returns the working directory.
 func (s *Service) WorkingDir() string {
 	return s.workingDir
@@ -116,7 +109,6 @@ func (s *Service) SetupAgents() {
 			AllowedMCP:   map[string][]string{},
 		},
 	}
-	s.cfg.Agents = s.agents
 }
 
 // Agents returns the agent configuration map.
@@ -184,6 +176,23 @@ func (s *Service) SelectedModel(modelType SelectedModelType) (SelectedModel, boo
 	return m, ok
 }
 
+// Provider returns the provider config for the given ID and whether
+// it exists.
+func (s *Service) Provider(id string) (ProviderConfig, bool) {
+	p, ok := s.cfg.Providers[id]
+	return p, ok
+}
+
+// SetProvider sets the provider config for the given ID.
+func (s *Service) SetProvider(id string, p ProviderConfig) {
+	s.cfg.Providers[id] = p
+}
+
+// Providers returns all provider configs.
+func (s *Service) AllProviders() map[string]ProviderConfig {
+	return s.cfg.Providers
+}
+
 // MCP returns the MCP configurations.
 func (s *Service) MCP() MCPs {
 	return s.cfg.MCP
@@ -197,6 +206,21 @@ func (s *Service) LSP() LSPs {
 // Permissions returns the permissions configuration.
 func (s *Service) Permissions() *Permissions {
 	return s.cfg.Permissions
+}
+
+// SetAttribution sets the attribution settings.
+func (s *Service) SetAttribution(a *Attribution) {
+	s.cfg.Options.Attribution = a
+}
+
+// SetSkillsPaths sets the skills paths.
+func (s *Service) SetSkillsPaths(paths []string) {
+	s.cfg.Options.SkillsPaths = paths
+}
+
+// SetLSP sets the LSP configurations.
+func (s *Service) SetLSP(lsp LSPs) {
+	s.cfg.LSP = lsp
 }
 
 // SetPermissions sets the permissions configuration.

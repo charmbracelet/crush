@@ -67,7 +67,7 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 				maxTokens = model.ModelCfg.MaxTokens
 			}
 
-			providerCfg, ok := c.cfgSvc.Config().Providers[model.ModelCfg.Provider]
+			providerCfg, ok := c.cfgSvc.Provider(model.ModelCfg.Provider)
 			if !ok {
 				return fantasy.ToolResponse{}, errors.New("model provider not configured")
 			}

@@ -60,7 +60,8 @@ type App struct {
 
 	LSPClients *csync.Map[string, *lsp.Client]
 
-	config *config.Config
+	configService *config.Service
+	config        *config.Config
 
 	serviceEventsWG *sync.WaitGroup
 	eventsCtx       context.Context
@@ -73,7 +74,8 @@ type App struct {
 }
 
 // New initializes a new application instance.
-func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
+func New(ctx context.Context, conn *sql.DB, cfgSvc *config.Service) (*App, error) {
+	cfg := cfgSvc.Config()
 	q := db.New(conn)
 	sessions := session.NewService(q, conn)
 	messages := message.NewService(q)
@@ -94,7 +96,8 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 
 		globalCtx: ctx,
 
-		config: cfg,
+		configService: cfgSvc,
+		config:        cfg,
 
 		events:          make(chan tea.Msg, 100),
 		serviceEventsWG: &sync.WaitGroup{},
@@ -123,6 +126,11 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("failed to initialize coder agent: %w", err)
 	}
 	return app, nil
+}
+
+// ConfigService returns the config service.
+func (app *App) ConfigService() *config.Service {
+	return app.configService
 }
 
 // Config returns the application configuration.
@@ -462,7 +470,7 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 	var err error
 	app.AgentCoordinator, err = agent.NewCoordinator(
 		ctx,
-		app.config,
+		app.configService,
 		app.Sessions,
 		app.Messages,
 		app.Permissions,

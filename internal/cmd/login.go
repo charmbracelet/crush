@@ -52,16 +52,16 @@ crush login copilot
 		}
 		switch provider {
 		case "hyper":
-			return loginHyper(app.Config())
+			return loginHyper(app.ConfigService())
 		case "copilot", "github", "github-copilot":
-			return loginCopilot(app.Config())
+			return loginCopilot(app.ConfigService())
 		default:
 			return fmt.Errorf("unknown platform: %s", args[0])
 		}
 	},
 }
 
-func loginHyper(cfg *config.Config) error {
+func loginHyper(cfg *config.Service) error {
 	if !hyperp.Enabled() {
 		return fmt.Errorf("hyper not enabled")
 	}
@@ -123,7 +123,7 @@ func loginHyper(cfg *config.Config) error {
 	return nil
 }
 
-func loginCopilot(cfg *config.Config) error {
+func loginCopilot(cfg *config.Service) error {
 	ctx := getLoginContext()
 
 	if cfg.HasConfigField("providers.copilot.oauth") {

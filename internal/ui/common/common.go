@@ -31,6 +31,11 @@ func (c *Common) Config() *config.Config {
 	return c.App.Config()
 }
 
+// ConfigService returns the config service associated with this [Common] instance.
+func (c *Common) ConfigService() *config.Service {
+	return c.App.ConfigService()
+}
+
 // DefaultCommon returns the default common UI configurations.
 func DefaultCommon(app *app.App) *Common {
 	s := styles.DefaultStyles()

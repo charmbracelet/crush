@@ -62,6 +62,7 @@ type Coordinator interface {
 
 type coordinator struct {
 	cfg         *config.Config
+	cfgSvc      *config.Service
 	sessions    session.Service
 	messages    message.Service
 	permissions permission.Service
@@ -77,7 +78,7 @@ type coordinator struct {
 
 func NewCoordinator(
 	ctx context.Context,
-	cfg *config.Config,
+	cfgSvc *config.Service,
 	sessions session.Service,
 	messages message.Service,
 	permissions permission.Service,
@@ -85,8 +86,10 @@ func NewCoordinator(
 	filetracker filetracker.Service,
 	lspClients *csync.Map[string, *lsp.Client],
 ) (Coordinator, error) {
+	cfg := cfgSvc.Config()
 	c := &coordinator{
 		cfg:         cfg,
+		cfgSvc:      cfgSvc,
 		sessions:    sessions,
 		messages:    messages,
 		permissions: permissions,
@@ -891,7 +894,7 @@ func (c *coordinator) isUnauthorized(err error) bool {
 }
 
 func (c *coordinator) refreshOAuth2Token(ctx context.Context, providerCfg config.ProviderConfig) error {
-	if err := c.cfg.RefreshOAuthToken(ctx, providerCfg.ID); err != nil {
+	if err := c.cfgSvc.RefreshOAuthToken(ctx, providerCfg.ID); err != nil {
 		slog.Error("Failed to refresh OAuth token after 401 error", "provider", providerCfg.ID, "error", err)
 		return err
 	}

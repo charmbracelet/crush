@@ -1208,7 +1208,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 			currentModel := cfg.Models[agentCfg.Model]
 			currentModel.Think = !currentModel.Think
-			if err := cfg.UpdatePreferredModel(agentCfg.Model, currentModel); err != nil {
+			if err := m.com.ConfigService().UpdatePreferredModel(agentCfg.Model, currentModel); err != nil {
 				return util.ReportError(err)()
 			}
 			m.com.App.UpdateAgentModel(context.TODO())
@@ -1249,7 +1249,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 		// Attempt to import GitHub Copilot tokens from VSCode if available.
 		if isCopilot && !isConfigured() {
-			m.com.Config().ImportCopilot()
+			m.com.ConfigService().ImportCopilot()
 		}
 
 		if !isConfigured() {
@@ -1260,12 +1260,12 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 
-		if err := cfg.UpdatePreferredModel(msg.ModelType, msg.Model); err != nil {
+		if err := m.com.ConfigService().UpdatePreferredModel(msg.ModelType, msg.Model); err != nil {
 			cmds = append(cmds, util.ReportError(err))
 		} else if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
 			// Ensure small model is set is unset.
 			smallModel := m.com.App.GetDefaultSmallModel(providerID)
-			if err := cfg.UpdatePreferredModel(config.SelectedModelTypeSmall, smallModel); err != nil {
+			if err := m.com.ConfigService().UpdatePreferredModel(config.SelectedModelTypeSmall, smallModel); err != nil {
 				cmds = append(cmds, util.ReportError(err))
 			}
 		}
@@ -1311,7 +1311,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 		currentModel := cfg.Models[agentCfg.Model]
 		currentModel.ReasoningEffort = msg.Effort
-		if err := cfg.UpdatePreferredModel(agentCfg.Model, currentModel); err != nil {
+		if err := m.com.ConfigService().UpdatePreferredModel(agentCfg.Model, currentModel); err != nil {
 			cmds = append(cmds, util.ReportError(err))
 			break
 		}
@@ -2157,7 +2157,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 func (m *UI) toggleCompactMode() tea.Cmd {
 	m.forceCompactMode = !m.forceCompactMode
 
-	err := m.com.Config().SetCompactMode(m.forceCompactMode)
+	err := m.com.ConfigService().SetCompactMode(m.forceCompactMode)
 	if err != nil {
 		return util.ReportError(err)
 	}

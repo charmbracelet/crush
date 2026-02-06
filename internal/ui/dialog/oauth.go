@@ -373,9 +373,7 @@ func (d *OAuth) copyCodeAndOpenURL() tea.Cmd {
 }
 
 func (m *OAuth) saveKeyAndContinue() Action {
-	cfg := m.com.Config()
-
-	err := cfg.SetProviderAPIKey(string(m.provider.ID), m.token)
+	err := m.com.ConfigService().SetProviderAPIKey(string(m.provider.ID), m.token)
 	if err != nil {
 		return ActionCmd{util.ReportError(fmt.Errorf("failed to save API key: %w", err))}
 	}

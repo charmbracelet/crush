@@ -220,7 +220,7 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 		switch {
 		case p.ID == catwalk.InferenceProviderAnthropic && config.OAuthToken != nil:
 			// Claude Code subscription is not supported anymore. Remove to show onboarding.
-			c.RemoveConfigField("providers.anthropic")
+			c.removeConfigField("providers.anthropic")
 			c.Providers.Del(string(p.ID))
 			continue
 		case p.ID == catwalk.InferenceProviderCopilot && config.OAuthToken != nil:
@@ -558,9 +558,8 @@ func (c *Config) configureSelectedModels(knownProviders []catwalk.Provider) erro
 		model := c.GetModel(large.Provider, large.Model)
 		if model == nil {
 			large = defaultLarge
-			// override the model type to large
-			err := c.UpdatePreferredModel(SelectedModelTypeLarge, large)
-			if err != nil {
+			c.Models[SelectedModelTypeLarge] = large
+			if err := c.setConfigField(fmt.Sprintf("models.%s", SelectedModelTypeLarge), large); err != nil {
 				return fmt.Errorf("failed to update preferred large model: %w", err)
 			}
 		} else {
@@ -602,9 +601,8 @@ func (c *Config) configureSelectedModels(knownProviders []catwalk.Provider) erro
 		model := c.GetModel(small.Provider, small.Model)
 		if model == nil {
 			small = defaultSmall
-			// override the model type to small
-			err := c.UpdatePreferredModel(SelectedModelTypeSmall, small)
-			if err != nil {
+			c.Models[SelectedModelTypeSmall] = small
+			if err := c.setConfigField(fmt.Sprintf("models.%s", SelectedModelTypeSmall), small); err != nil {
 				return fmt.Errorf("failed to update preferred small model: %w", err)
 			}
 		} else {

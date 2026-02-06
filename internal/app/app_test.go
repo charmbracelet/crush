@@ -13,8 +13,6 @@ import (
 	"go.uber.org/goleak"
 )
 
-const testSendTimeout = 50 * time.Millisecond
-
 func TestSetupSubscriber_NormalFlow(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
@@ -25,7 +23,6 @@ func TestSetupSubscriber_NormalFlow(t *testing.T) {
 		defer broker.Shutdown()
 
 		outputCh := make(chan tea.Msg, 10)
-		defer close(outputCh)
 
 		subscriber := func(ctx context.Context) <-chan pubsub.Event[string] {
 			return broker.Subscribe(ctx)
@@ -72,7 +69,6 @@ func TestSetupSubscriber_SlowConsumer(t *testing.T) {
 		defer broker.Shutdown()
 
 		slowOutputCh := make(chan tea.Msg)
-		defer close(slowOutputCh)
 
 		subscriber := func(ctx context.Context) <-chan pubsub.Event[string] {
 			return broker.Subscribe(ctx)
@@ -82,7 +78,8 @@ func TestSetupSubscriber_SlowConsumer(t *testing.T) {
 
 		setupSubscriber(ctx, &wg, "test", subscriber, slowOutputCh)
 
-		wg.Go(func() {
+		var pubWg sync.WaitGroup
+		pubWg.Go(func() {
 			for range numEvents {
 				broker.Publish(pubsub.CreatedEvent, "event")
 				time.Sleep(10 * time.Millisecond)
@@ -91,7 +88,7 @@ func TestSetupSubscriber_SlowConsumer(t *testing.T) {
 		})
 
 		// Let all events be published and timeouts fire.
-		time.Sleep(time.Duration(numEvents) * (testSendTimeout + 20*time.Millisecond))
+		time.Sleep(time.Duration(numEvents) * (subscriberSendTimeout + 20*time.Millisecond))
 		synctest.Wait()
 
 		// Drain whatever made it through.
@@ -106,6 +103,7 @@ func TestSetupSubscriber_SlowConsumer(t *testing.T) {
 			}
 		}
 
+		pubWg.Wait()
 		cancel()
 		wg.Wait()
 
@@ -123,7 +121,6 @@ func TestSetupSubscriber_ContextCancellation(t *testing.T) {
 		defer broker.Shutdown()
 
 		outputCh := make(chan tea.Msg, 10)
-		defer close(outputCh)
 
 		subscriber := func(ctx context.Context) <-chan pubsub.Event[string] {
 			return broker.Subscribe(ctx)
@@ -151,7 +148,6 @@ func TestSetupSubscriber_DrainAfterDrop(t *testing.T) {
 
 		// Unbuffered channel forces drops when consumer isn't reading.
 		outputCh := make(chan tea.Msg)
-		defer close(outputCh)
 
 		subscriber := func(ctx context.Context) <-chan pubsub.Event[string] {
 			return broker.Subscribe(ctx)
@@ -165,13 +161,15 @@ func TestSetupSubscriber_DrainAfterDrop(t *testing.T) {
 
 		// First event: nobody reads outputCh so the timer fires (message dropped).
 		broker.Publish(pubsub.CreatedEvent, "event1")
-		time.Sleep(testSendTimeout + 25*time.Millisecond)
+		time.Sleep(subscriberSendTimeout + 25*time.Millisecond)
 		synctest.Wait()
 
 		// Second event: triggers Stop()==false path; without the fix this deadlocks.
 		broker.Publish(pubsub.CreatedEvent, "event2")
 
 		// Cancel and wait — if the drain deadlocks, wg.Wait never returns.
+		// The goroutine below is spawned only for timeout orchestration;
+		// it completes before the synctest bubble exits.
 		done := make(chan struct{})
 		go func() {
 			cancel()
@@ -199,7 +197,6 @@ func TestSetupSubscriber_NoTimerLeak(t *testing.T) {
 		defer broker.Shutdown()
 
 		outputCh := make(chan tea.Msg, 100)
-		defer close(outputCh)
 
 		subscriber := func(ctx context.Context) <-chan pubsub.Event[string] {
 			return broker.Subscribe(ctx)

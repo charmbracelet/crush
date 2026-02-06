@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
@@ -366,7 +365,7 @@ type Config struct {
 	RecentModels map[SelectedModelType][]SelectedModel `json:"recent_models,omitempty" jsonschema:"-"`
 
 	// The providers that are configured
-	Providers *csync.Map[string, ProviderConfig] `json:"providers,omitempty" jsonschema:"description=AI provider configurations"`
+	Providers map[string]ProviderConfig `json:"providers,omitempty" jsonschema:"description=AI provider configurations"`
 
 	MCP MCPs `json:"mcp,omitempty" jsonschema:"description=Model Context Protocol server configurations"`
 
@@ -383,7 +382,7 @@ type Config struct {
 
 func (c *Config) EnabledProviders() []ProviderConfig {
 	var enabled []ProviderConfig
-	for p := range c.Providers.Seq() {
+	for _, p := range c.Providers {
 		if !p.Disable {
 			enabled = append(enabled, p)
 		}
@@ -397,7 +396,7 @@ func (c *Config) IsConfigured() bool {
 }
 
 func (c *Config) GetModel(provider, model string) *catwalk.Model {
-	if providerConfig, ok := c.Providers.Get(provider); ok {
+	if providerConfig, ok := c.Providers[provider]; ok {
 		for _, m := range providerConfig.Models {
 			if m.ID == model {
 				return &m
@@ -412,7 +411,7 @@ func (c *Config) GetProviderForModel(modelType SelectedModelType) *ProviderConfi
 	if !ok {
 		return nil
 	}
-	if providerConfig, ok := c.Providers.Get(model.Provider); ok {
+	if providerConfig, ok := c.Providers[model.Provider]; ok {
 		return &providerConfig
 	}
 	return nil

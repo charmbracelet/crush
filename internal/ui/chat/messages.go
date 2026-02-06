@@ -239,7 +239,7 @@ func (a *AssistantInfoItem) renderContent(width int) string {
 	}
 	modelFormatted := a.sty.Chat.Message.AssistantInfoModel.Render(model.Name)
 	providerName := a.message.Provider
-	if providerConfig, ok := a.cfg.Providers.Get(a.message.Provider); ok {
+	if providerConfig, ok := a.cfg.Providers[a.message.Provider]; ok {
 		providerName = providerConfig.Name
 	}
 	provider := a.sty.Chat.Message.AssistantInfoProvider.Render(fmt.Sprintf("via %s", providerName))

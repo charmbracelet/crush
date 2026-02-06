@@ -361,7 +361,7 @@ func (m *Models) setProviderItems() error {
 	// itemsMap contains the keys of added model items.
 	itemsMap := make(map[string]*ModelItem)
 	groups := []ModelGroup{}
-	for id, p := range cfg.Providers.Seq2() {
+	for id, p := range cfg.Providers {
 		if p.Disable {
 			continue
 		}
@@ -411,7 +411,7 @@ func (m *Models) setProviderItems() error {
 			continue
 		}
 
-		providerConfig, providerConfigured := cfg.Providers.Get(providerID)
+		providerConfig, providerConfigured := cfg.Providers[providerID]
 		if providerConfigured && providerConfig.Disable {
 			continue
 		}
@@ -519,7 +519,7 @@ func getFilteredProviders(svc *config.Service) ([]catwalk.Provider, error) {
 			isCopilot       = p.ID == catwalk.InferenceProviderCopilot
 			isHyper         = string(p.ID) == "hyper"
 			hasAPIKeyEnv    = strings.HasPrefix(p.APIKey, "$")
-			_, isConfigured = cfg.Providers.Get(string(p.ID))
+			_, isConfigured = cfg.Providers[string(p.ID)]
 		)
 		if isAzure || isCopilot || isHyper || hasAPIKeyEnv || isConfigured {
 			filteredProviders = append(filteredProviders, p)

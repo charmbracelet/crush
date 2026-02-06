@@ -156,7 +156,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				return fantasy.ToolResponse{}, fmt.Errorf("error building system prompt: %s", err)
 			}
 
-			smallProviderCfg, ok := c.cfgSvc.Config().Providers.Get(small.ModelCfg.Provider)
+			smallProviderCfg, ok := c.cfgSvc.Config().Providers[small.ModelCfg.Provider]
 			if !ok {
 				return fantasy.ToolResponse{}, errors.New("small model provider not configured")
 			}

@@ -364,7 +364,7 @@ func (s *Service) recordRecentModel(modelType SelectedModelType, model SelectedM
 // RefreshOAuthToken refreshes the OAuth token for the given provider.
 func (s *Service) RefreshOAuthToken(ctx context.Context, providerID string) error {
 	cfg := s.cfg
-	providerConfig, exists := cfg.Providers.Get(providerID)
+	providerConfig, exists := cfg.Providers[providerID]
 	if !exists {
 		return fmt.Errorf("provider %s not found", providerID)
 	}
@@ -396,7 +396,7 @@ func (s *Service) RefreshOAuthToken(ctx context.Context, providerID string) erro
 		providerConfig.SetupGitHubCopilot()
 	}
 
-	cfg.Providers.Set(providerID, providerConfig)
+	cfg.Providers[providerID] = providerConfig
 
 	if err := cmp.Or(
 		s.SetConfigField(fmt.Sprintf("providers.%s.api_key", providerID), newToken.AccessToken),
@@ -439,10 +439,10 @@ func (s *Service) SetProviderAPIKey(providerID string, apiKey any) error {
 		}
 	}
 
-	providerConfig, exists = cfg.Providers.Get(providerID)
+	providerConfig, exists = cfg.Providers[providerID]
 	if exists {
 		setKeyOrToken()
-		cfg.Providers.Set(providerID, providerConfig)
+		cfg.Providers[providerID] = providerConfig
 		return nil
 	}
 
@@ -469,7 +469,7 @@ func (s *Service) SetProviderAPIKey(providerID string, apiKey any) error {
 	} else {
 		return fmt.Errorf("provider with ID %s not found in known providers", providerID)
 	}
-	cfg.Providers.Set(providerID, providerConfig)
+	cfg.Providers[providerID] = providerConfig
 	return nil
 }
 

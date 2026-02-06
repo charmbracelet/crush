@@ -1244,7 +1244,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		var (
 			providerID   = msg.Model.Provider
 			isCopilot    = providerID == string(catwalk.InferenceProviderCopilot)
-			isConfigured = func() bool { _, ok := cfg.Providers.Get(providerID); return ok }
+			isConfigured = func() bool { _, ok := cfg.Providers[providerID]; return ok }
 		)
 
 		// Attempt to import GitHub Copilot tokens from VSCode if available.

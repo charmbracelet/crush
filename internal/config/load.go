@@ -18,7 +18,6 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
-	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/home"
@@ -143,7 +142,7 @@ func (s *Service) configureProviders(env env.Env, resolver VariableResolver, kno
 
 	for _, p := range knownProviders {
 		knownProviderNames[string(p.ID)] = true
-		config, configExists := c.Providers.Get(string(p.ID))
+		config, configExists := c.Providers[string(p.ID)]
 		// if the user configured a known provider we need to allow it to override a couple of parameters
 		if configExists {
 			if config.BaseURL != "" {
@@ -216,7 +215,7 @@ func (s *Service) configureProviders(env env.Env, resolver VariableResolver, kno
 		case p.ID == catwalk.InferenceProviderAnthropic && config.OAuthToken != nil:
 			// Claude Code subscription is not supported anymore. Remove to show onboarding.
 			s.RemoveConfigField("providers.anthropic")
-			c.Providers.Del(string(p.ID))
+			delete(c.Providers, string(p.ID))
 			continue
 		case p.ID == catwalk.InferenceProviderCopilot && config.OAuthToken != nil:
 			prepared.SetupGitHubCopilot()
@@ -228,7 +227,7 @@ func (s *Service) configureProviders(env env.Env, resolver VariableResolver, kno
 			if !hasVertexCredentials(env) {
 				if configExists {
 					slog.Warn("Skipping Vertex AI provider due to missing credentials")
-					c.Providers.Del(string(p.ID))
+					delete(c.Providers, string(p.ID))
 				}
 				continue
 			}
@@ -239,7 +238,7 @@ func (s *Service) configureProviders(env env.Env, resolver VariableResolver, kno
 			if err != nil || endpoint == "" {
 				if configExists {
 					slog.Warn("Skipping Azure provider due to missing API endpoint", "provider", p.ID, "error", err)
-					c.Providers.Del(string(p.ID))
+					delete(c.Providers, string(p.ID))
 				}
 				continue
 			}
@@ -249,7 +248,7 @@ func (s *Service) configureProviders(env env.Env, resolver VariableResolver, kno
 			if !hasAWSCredentials(env) {
 				if configExists {
 					slog.Warn("Skipping Bedrock provider due to missing AWS credentials")
-					c.Providers.Del(string(p.ID))
+					delete(c.Providers, string(p.ID))
 				}
 				continue
 			}
@@ -268,16 +267,16 @@ func (s *Service) configureProviders(env env.Env, resolver VariableResolver, kno
 			if v == "" || err != nil {
 				if configExists {
 					slog.Warn("Skipping provider due to missing API key", "provider", p.ID)
-					c.Providers.Del(string(p.ID))
+					delete(c.Providers, string(p.ID))
 				}
 				continue
 			}
 		}
-		c.Providers.Set(string(p.ID), prepared)
+		c.Providers[string(p.ID)] = prepared
 	}
 
 	// validate the custom providers
-	for id, providerConfig := range c.Providers.Seq2() {
+	for id, providerConfig := range c.Providers {
 		if knownProviderNames[id] {
 			continue
 		}
@@ -293,13 +292,13 @@ func (s *Service) configureProviders(env env.Env, resolver VariableResolver, kno
 		}
 		if !slices.Contains(catwalk.KnownProviderTypes(), providerConfig.Type) && providerConfig.Type != hyper.Name {
 			slog.Warn("Skipping custom provider due to unsupported provider type", "provider", id)
-			c.Providers.Del(id)
+			delete(c.Providers, id)
 			continue
 		}
 
 		if providerConfig.Disable {
 			slog.Debug("Skipping custom provider due to disable flag", "provider", id)
-			c.Providers.Del(id)
+			delete(c.Providers, id)
 			continue
 		}
 		if providerConfig.APIKey == "" {
@@ -307,12 +306,12 @@ func (s *Service) configureProviders(env env.Env, resolver VariableResolver, kno
 		}
 		if providerConfig.BaseURL == "" {
 			slog.Warn("Skipping custom provider due to missing API endpoint", "provider", id)
-			c.Providers.Del(id)
+			delete(c.Providers, id)
 			continue
 		}
 		if len(providerConfig.Models) == 0 {
 			slog.Warn("Skipping custom provider because the provider has no models", "provider", id)
-			c.Providers.Del(id)
+			delete(c.Providers, id)
 			continue
 		}
 		apiKey, err := resolver.ResolveValue(providerConfig.APIKey)
@@ -322,7 +321,7 @@ func (s *Service) configureProviders(env env.Env, resolver VariableResolver, kno
 		baseURL, err := resolver.ResolveValue(providerConfig.BaseURL)
 		if baseURL == "" || err != nil {
 			slog.Warn("Skipping custom provider due to missing API endpoint", "provider", id, "error", err)
-			c.Providers.Del(id)
+			delete(c.Providers, id)
 			continue
 		}
 
@@ -335,7 +334,7 @@ func (s *Service) configureProviders(env env.Env, resolver VariableResolver, kno
 			providerConfig.ExtraHeaders[k] = resolved
 		}
 
-		c.Providers.Set(id, providerConfig)
+		c.Providers[id] = providerConfig
 	}
 	return nil
 }
@@ -363,7 +362,7 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 		}
 	}
 	if c.Providers == nil {
-		c.Providers = csync.NewMap[string, ProviderConfig]()
+		c.Providers = make(map[string]ProviderConfig)
 	}
 	if c.Models == nil {
 		c.Models = make(map[SelectedModelType]SelectedModel)
@@ -467,7 +466,7 @@ func (c *Config) applyLSPDefaults() {
 
 func (s *Service) defaultModelSelection(knownProviders []catwalk.Provider) (largeModel SelectedModel, smallModel SelectedModel, err error) {
 	c := s.cfg
-	if len(knownProviders) == 0 && c.Providers.Len() == 0 {
+	if len(knownProviders) == 0 && len(c.Providers) == 0 {
 		err = fmt.Errorf("no providers configured, please configure at least one provider")
 		return largeModel, smallModel, err
 	}
@@ -475,7 +474,7 @@ func (s *Service) defaultModelSelection(knownProviders []catwalk.Provider) (larg
 	// Use the first provider enabled based on the known providers order
 	// if no provider found that is known use the first provider configured
 	for _, p := range knownProviders {
-		providerConfig, ok := c.Providers.Get(string(p.ID))
+		providerConfig, ok := c.Providers[string(p.ID)]
 		if !ok || providerConfig.Disable {
 			continue
 		}

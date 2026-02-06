@@ -55,7 +55,7 @@ crush models gpt5`,
 		var providerIDs []string
 		providerModels := make(map[string][]string)
 
-		for providerID, provider := range cfg.Config().Providers.Seq2() {
+		for providerID, provider := range cfg.Config().Providers {
 			if provider.Disable {
 				continue
 			}

@@ -147,7 +147,7 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 		attachments = filteredAttachments
 	}
 
-	providerCfg, ok := c.cfgSvc.Config().Providers.Get(model.ModelCfg.Provider)
+	providerCfg, ok := c.cfgSvc.Config().Providers[model.ModelCfg.Provider]
 	if !ok {
 		return nil, errors.New("model provider not configured")
 	}
@@ -360,7 +360,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		return nil, err
 	}
 
-	largeProviderCfg, _ := c.cfgSvc.Config().Providers.Get(large.ModelCfg.Provider)
+	largeProviderCfg, _ := c.cfgSvc.Config().Providers[large.ModelCfg.Provider]
 	result := NewSessionAgent(SessionAgentOptions{
 		large,
 		small,
@@ -488,7 +488,7 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 		return Model{}, Model{}, errors.New("small model not selected")
 	}
 
-	largeProviderCfg, ok := c.cfgSvc.Config().Providers.Get(largeModelCfg.Provider)
+	largeProviderCfg, ok := c.cfgSvc.Config().Providers[largeModelCfg.Provider]
 	if !ok {
 		return Model{}, Model{}, errors.New("large model provider not configured")
 	}
@@ -498,7 +498,7 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 		return Model{}, Model{}, err
 	}
 
-	smallProviderCfg, ok := c.cfgSvc.Config().Providers.Get(smallModelCfg.Provider)
+	smallProviderCfg, ok := c.cfgSvc.Config().Providers[smallModelCfg.Provider]
 	if !ok {
 		return Model{}, Model{}, errors.New("large model provider not configured")
 	}
@@ -881,7 +881,7 @@ func (c *coordinator) QueuedPromptsList(sessionID string) []string {
 }
 
 func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
-	providerCfg, ok := c.cfgSvc.Config().Providers.Get(c.currentAgent.Model().ModelCfg.Provider)
+	providerCfg, ok := c.cfgSvc.Config().Providers[c.currentAgent.Model().ModelCfg.Provider]
 	if !ok {
 		return errors.New("model provider not configured")
 	}
@@ -912,7 +912,7 @@ func (c *coordinator) refreshApiKeyTemplate(ctx context.Context, providerCfg con
 	}
 
 	providerCfg.APIKey = newAPIKey
-	c.cfgSvc.Config().Providers.Set(providerCfg.ID, providerCfg)
+	c.cfgSvc.Config().Providers[providerCfg.ID] = providerCfg
 
 	if err := c.UpdateModels(ctx); err != nil {
 		return err

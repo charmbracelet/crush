@@ -39,6 +39,7 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 	}
 
 	cfg.dataConfigDir = GlobalConfigData()
+	cfg.store = NewFileStore(cfg.dataConfigDir)
 
 	cfg.setDefaults(workingDir, dataDir)
 

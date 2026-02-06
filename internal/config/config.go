@@ -8,8 +8,6 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -22,8 +20,6 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/oauth/hyper"
 	"github.com/invopop/jsonschema"
-	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 )
 
 const (
@@ -391,6 +387,7 @@ type Config struct {
 	workingDir string `json:"-"`
 	// TODO: find a better way to do this this should probably not be part of the config
 	resolver       VariableResolver
+	store          Store              `json:"-"`
 	dataConfigDir  string             `json:"-"`
 	knownProviders []catwalk.Provider `json:"-"`
 }
@@ -486,54 +483,23 @@ func (c *Config) UpdatePreferredModel(modelType SelectedModelType, model Selecte
 	return nil
 }
 
-func (c *Config) HasConfigField(key string) bool {
-	data, err := os.ReadFile(c.dataConfigDir)
-	if err != nil {
-		return false
+func (c *Config) configStore() Store {
+	if c.store == nil {
+		c.store = NewFileStore(c.dataConfigDir)
 	}
-	return gjson.Get(string(data), key).Exists()
+	return c.store
+}
+
+func (c *Config) HasConfigField(key string) bool {
+	return HasField(c.configStore(), key)
 }
 
 func (c *Config) SetConfigField(key string, value any) error {
-	data, err := os.ReadFile(c.dataConfigDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			data = []byte("{}")
-		} else {
-			return fmt.Errorf("failed to read config file: %w", err)
-		}
-	}
-
-	newValue, err := sjson.Set(string(data), key, value)
-	if err != nil {
-		return fmt.Errorf("failed to set config field %s: %w", key, err)
-	}
-	if err := os.MkdirAll(filepath.Dir(c.dataConfigDir), 0o755); err != nil {
-		return fmt.Errorf("failed to create config directory %q: %w", c.dataConfigDir, err)
-	}
-	if err := os.WriteFile(c.dataConfigDir, []byte(newValue), 0o600); err != nil {
-		return fmt.Errorf("failed to write config file: %w", err)
-	}
-	return nil
+	return SetField(c.configStore(), key, value)
 }
 
 func (c *Config) RemoveConfigField(key string) error {
-	data, err := os.ReadFile(c.dataConfigDir)
-	if err != nil {
-		return fmt.Errorf("failed to read config file: %w", err)
-	}
-
-	newValue, err := sjson.Delete(string(data), key)
-	if err != nil {
-		return fmt.Errorf("failed to delete config field %s: %w", key, err)
-	}
-	if err := os.MkdirAll(filepath.Dir(c.dataConfigDir), 0o755); err != nil {
-		return fmt.Errorf("failed to create config directory %q: %w", c.dataConfigDir, err)
-	}
-	if err := os.WriteFile(c.dataConfigDir, []byte(newValue), 0o600); err != nil {
-		return fmt.Errorf("failed to write config file: %w", err)
-	}
-	return nil
+	return RemoveField(c.configStore(), key)
 }
 
 // RefreshOAuthToken refreshes the OAuth token for the given provider.

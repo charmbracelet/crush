@@ -375,7 +375,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	})
 
 	c.readyWg.Go(func() error {
-		systemPrompt, err := prompt.Build(ctx, large.Model.Provider(), large.Model.Model(), *c.cfg)
+		systemPrompt, err := prompt.Build(ctx, large.Model.Provider(), large.Model.Model(), c.cfgSvc)
 		if err != nil {
 			return err
 		}
@@ -449,7 +449,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		}
 	}
 
-	for _, tool := range tools.GetMCPTools(c.permissions, c.cfg, c.cfgSvc.WorkingDir()) {
+	for _, tool := range tools.GetMCPTools(c.permissions, c.cfgSvc, c.cfgSvc.WorkingDir()) {
 		if agent.AllowedMCP == nil {
 			// No MCP restrictions
 			filteredTools = append(filteredTools, tool)

@@ -26,12 +26,12 @@ func Init(workingDir, dataDir string, debug bool) (*Service, error) {
 	return svc, nil
 }
 
-func ProjectNeedsInitialization(cfg *Config) (bool, error) {
-	if cfg == nil {
+func ProjectNeedsInitialization(svc *Service) (bool, error) {
+	if svc == nil {
 		return false, fmt.Errorf("config not loaded")
 	}
 
-	flagFilePath := filepath.Join(cfg.Options.DataDirectory, InitFlagFilename)
+	flagFilePath := filepath.Join(svc.DataDirectory(), InitFlagFilename)
 
 	_, err := os.Stat(flagFilePath)
 	if err == nil {
@@ -42,7 +42,7 @@ func ProjectNeedsInitialization(cfg *Config) (bool, error) {
 		return false, fmt.Errorf("failed to check init flag file: %w", err)
 	}
 
-	someContextFileExists, err := contextPathsExist(cfg.WorkingDir())
+	someContextFileExists, err := contextPathsExist(svc.WorkingDir())
 	if err != nil {
 		return false, fmt.Errorf("failed to check for context files: %w", err)
 	}
@@ -50,8 +50,7 @@ func ProjectNeedsInitialization(cfg *Config) (bool, error) {
 		return false, nil
 	}
 
-	// If the working directory has no non-ignored files, skip initialization step
-	empty, err := dirHasNoVisibleFiles(cfg.WorkingDir())
+	empty, err := dirHasNoVisibleFiles(svc.WorkingDir())
 	if err != nil {
 		return false, fmt.Errorf("failed to check if directory is empty: %w", err)
 	}
@@ -99,11 +98,11 @@ func dirHasNoVisibleFiles(dir string) (bool, error) {
 	return len(files) == 0, nil
 }
 
-func MarkProjectInitialized(cfg *Config) error {
-	if cfg == nil {
+func MarkProjectInitialized(svc *Service) error {
+	if svc == nil {
 		return fmt.Errorf("config not loaded")
 	}
-	flagFilePath := filepath.Join(cfg.Options.DataDirectory, InitFlagFilename)
+	flagFilePath := filepath.Join(svc.DataDirectory(), InitFlagFilename)
 
 	file, err := os.Create(flagFilePath)
 	if err != nil {
@@ -114,13 +113,13 @@ func MarkProjectInitialized(cfg *Config) error {
 	return nil
 }
 
-func HasInitialDataConfig(cfg *Config) bool {
-	if cfg == nil {
+func HasInitialDataConfig(svc *Service) bool {
+	if svc == nil {
 		return false
 	}
 	cfgPath := GlobalConfigData()
 	if _, err := os.Stat(cfgPath); err != nil {
 		return false
 	}
-	return cfg.IsConfigured()
+	return svc.IsConfigured()
 }

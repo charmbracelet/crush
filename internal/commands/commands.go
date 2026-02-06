@@ -53,7 +53,7 @@ type commandSource struct {
 
 // LoadCustomCommands loads custom commands from multiple sources including
 // XDG config directory, home directory, and project directory.
-func LoadCustomCommands(cfg *config.Config) ([]CustomCommand, error) {
+func LoadCustomCommands(cfg *config.Service) ([]CustomCommand, error) {
 	return loadAll(buildCommandSources(cfg))
 }
 
@@ -89,7 +89,7 @@ func LoadMCPPrompts() ([]MCPPrompt, error) {
 	return commands, nil
 }
 
-func buildCommandSources(cfg *config.Config) []commandSource {
+func buildCommandSources(cfg *config.Service) []commandSource {
 	var sources []commandSource
 
 	// XDG config directory
@@ -110,7 +110,7 @@ func buildCommandSources(cfg *config.Config) []commandSource {
 
 	// Project directory
 	sources = append(sources, commandSource{
-		path:   filepath.Join(cfg.Options.DataDirectory, "commands"),
+		path:   filepath.Join(cfg.DataDirectory(), "commands"),
 		prefix: projectCommandPrefix,
 	})
 
@@ -227,7 +227,7 @@ func isMarkdownFile(name string) bool {
 	return strings.HasSuffix(strings.ToLower(name), ".md")
 }
 
-func GetMCPPrompt(cfg *config.Config, clientID, promptID string, args map[string]string) (string, error) {
+func GetMCPPrompt(cfg *config.Service, clientID, promptID string, args map[string]string) (string, error) {
 	// TODO: we should pass the context down
 	result, err := mcp.GetPromptMessages(context.Background(), cfg, clientID, promptID, args)
 	if err != nil {

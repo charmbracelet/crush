@@ -379,16 +379,6 @@ type Config struct {
 	Tools Tools `json:"tools,omitempty" jsonschema:"description=Tool configurations"`
 
 	Agents map[string]Agent `json:"-"`
-
-	// Internal
-	workingDir string `json:"-"`
-	// TODO: find a better way to do this this should probably not be part of the config
-	resolver       VariableResolver
-	knownProviders []catwalk.Provider `json:"-"`
-}
-
-func (c *Config) WorkingDir() string {
-	return c.workingDir
 }
 
 func (c *Config) EnabledProviders() []ProviderConfig {
@@ -452,13 +442,6 @@ func (c *Config) SmallModel() *catwalk.Model {
 	return c.GetModel(model.Provider, model.Model)
 }
 
-func (c *Config) Resolve(key string) (string, error) {
-	if c.resolver == nil {
-		return "", fmt.Errorf("no variable resolver configured")
-	}
-	return c.resolver.ResolveValue(key)
-}
-
 func allToolNames() []string {
 	return []string{
 		"agent",
@@ -507,10 +490,6 @@ func filterSlice(data []string, mask []string, include bool) []string {
 		}
 	}
 	return filtered
-}
-
-func (c *Config) Resolver() VariableResolver {
-	return c.resolver
 }
 
 func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {

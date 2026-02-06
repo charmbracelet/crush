@@ -110,7 +110,7 @@ func New(ctx context.Context, conn *sql.DB, cfgSvc *config.Service) (*App, error
 	// Check for updates in the background.
 	go app.checkForUpdates(ctx)
 
-	go mcp.Initialize(ctx, app.Permissions, cfg)
+	go mcp.Initialize(ctx, app.Permissions, cfgSvc)
 
 	// cleanup database upon app shutdown
 	app.cleanupFuncs = append(app.cleanupFuncs, conn.Close, mcp.Close)

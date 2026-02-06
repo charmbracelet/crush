@@ -190,7 +190,7 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 	// would be included in prompt and break VCR cassette matching.
 	cfg.Config().LSP = nil
 
-	systemPrompt, err := prompt.Build(context.TODO(), large.Provider(), large.Model(), *cfg.Config())
+	systemPrompt, err := prompt.Build(context.TODO(), large.Provider(), large.Model(), cfg)
 	if err != nil {
 		return nil, err
 	}

@@ -79,13 +79,10 @@ func Load(workingDir, dataDir string, debug bool) (*Service, error) {
 		return nil, err
 	}
 	svc.knownProviders = providers
-	cfg.knownProviders = providers
 
 	env := env.New()
-	// Configure providers
 	valueResolver := NewShellVariableResolver(env)
 	svc.resolver = valueResolver
-	cfg.resolver = valueResolver
 	if err := svc.configureProviders(env, valueResolver, svc.knownProviders); err != nil {
 		return nil, fmt.Errorf("failed to configure providers: %w", err)
 	}
@@ -344,7 +341,6 @@ func (s *Service) configureProviders(env env.Env, resolver VariableResolver, kno
 }
 
 func (c *Config) setDefaults(workingDir, dataDir string) {
-	c.workingDir = workingDir
 	if c.Options == nil {
 		c.Options = &Options{}
 	}

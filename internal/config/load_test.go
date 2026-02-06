@@ -57,7 +57,6 @@ func TestConfig_setDefaults(t *testing.T) {
 	for _, path := range defaultContextPaths {
 		require.Contains(t, cfg.Options.ContextPaths, path)
 	}
-	require.Equal(t, "/tmp", cfg.workingDir)
 }
 
 func TestConfig_configureProviders(t *testing.T) {

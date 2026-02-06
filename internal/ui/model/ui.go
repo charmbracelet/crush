@@ -298,7 +298,7 @@ func New(com *common.Common) *UI {
 	desiredFocus := uiFocusEditor
 	if !com.ConfigService().IsConfigured() {
 		desiredState = uiOnboarding
-	} else if n, _ := config.ProjectNeedsInitialization(com.ConfigService().Config()); n {
+	} else if n, _ := config.ProjectNeedsInitialization(com.ConfigService()); n {
 		desiredState = uiInitialize
 	}
 
@@ -345,7 +345,7 @@ func (m *UI) setState(state uiState, focus uiFocusState) {
 // loadCustomCommands loads the custom commands asynchronously.
 func (m *UI) loadCustomCommands() tea.Cmd {
 	return func() tea.Msg {
-		customCommands, err := commands.LoadCustomCommands(m.com.ConfigService().Config())
+		customCommands, err := commands.LoadCustomCommands(m.com.ConfigService())
 		if err != nil {
 			slog.Error("Failed to load custom commands", "error", err)
 		}
@@ -3063,7 +3063,7 @@ func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
 
 func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string) tea.Cmd {
 	load := func() tea.Msg {
-		prompt, err := commands.GetMCPPrompt(m.com.ConfigService().Config(), clientID, promptID, arguments)
+		prompt, err := commands.GetMCPPrompt(m.com.ConfigService(), clientID, promptID, arguments)
 		if err != nil {
 			// TODO: make this better
 			return util.ReportError(err)()

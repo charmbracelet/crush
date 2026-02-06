@@ -32,7 +32,7 @@ func Tools() iter.Seq2[string, []*Tool] {
 }
 
 // RunTool runs an MCP tool with the given input parameters.
-func RunTool(ctx context.Context, cfg *config.Config, name, toolName string, input string) (ToolResult, error) {
+func RunTool(ctx context.Context, cfg *config.Service, name, toolName string, input string) (ToolResult, error) {
 	var args map[string]any
 	if err := json.Unmarshal([]byte(input), &args); err != nil {
 		return ToolResult{}, fmt.Errorf("error parsing parameters: %s", err)
@@ -108,7 +108,7 @@ func RunTool(ctx context.Context, cfg *config.Config, name, toolName string, inp
 
 // RefreshTools gets the updated list of tools from the MCP and updates the
 // global state.
-func RefreshTools(ctx context.Context, cfg *config.Config, name string) {
+func RefreshTools(ctx context.Context, cfg *config.Service, name string) {
 	session, ok := sessions.Get(name)
 	if !ok {
 		slog.Warn("Refresh tools: no session", "name", name)
@@ -139,7 +139,7 @@ func getTools(ctx context.Context, session *mcp.ClientSession) ([]*Tool, error) 
 	return result.Tools, nil
 }
 
-func updateTools(cfg *config.Config, name string, tools []*Tool) int {
+func updateTools(cfg *config.Service, name string, tools []*Tool) int {
 	tools = filterDisabledTools(cfg, name, tools)
 	if len(tools) == 0 {
 		allTools.Del(name)
@@ -150,8 +150,8 @@ func updateTools(cfg *config.Config, name string, tools []*Tool) int {
 }
 
 // filterDisabledTools removes tools that are disabled via config.
-func filterDisabledTools(cfg *config.Config, mcpName string, tools []*Tool) []*Tool {
-	mcpCfg, ok := cfg.MCP[mcpName]
+func filterDisabledTools(cfg *config.Service, mcpName string, tools []*Tool) []*Tool {
+	mcpCfg, ok := cfg.MCP()[mcpName]
 	if !ok || len(mcpCfg.DisabledTools) == 0 {
 		return tools
 	}

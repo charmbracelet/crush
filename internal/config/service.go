@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"sync"
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -20,6 +21,7 @@ import (
 // as unexported fields on Config (resolver, store, known providers,
 // working directory).
 type Service struct {
+	mu             sync.RWMutex
 	cfg            *Config
 	store          Store
 	resolver       VariableResolver
@@ -35,39 +37,53 @@ func (s *Service) WorkingDir() string {
 
 // EnabledProviders returns all non-disabled provider configs.
 func (s *Service) EnabledProviders() []ProviderConfig {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.cfg.EnabledProviders()
 }
 
 // IsConfigured returns true if at least one provider is enabled.
 func (s *Service) IsConfigured() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.cfg.IsConfigured()
 }
 
 // GetModel returns the catwalk model for the given provider and model
 // ID, or nil if not found.
 func (s *Service) GetModel(provider, model string) *catwalk.Model {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.cfg.GetModel(provider, model)
 }
 
 // GetProviderForModel returns the provider config for the given model
 // type, or nil.
 func (s *Service) GetProviderForModel(modelType SelectedModelType) *ProviderConfig {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.cfg.GetProviderForModel(modelType)
 }
 
 // GetModelByType returns the catwalk model for the given model type,
 // or nil.
 func (s *Service) GetModelByType(modelType SelectedModelType) *catwalk.Model {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.cfg.GetModelByType(modelType)
 }
 
 // LargeModel returns the catwalk model for the large model type.
 func (s *Service) LargeModel() *catwalk.Model {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.cfg.LargeModel()
 }
 
 // SmallModel returns the catwalk model for the small model type.
 func (s *Service) SmallModel() *catwalk.Model {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.cfg.SmallModel()
 }
 
@@ -87,6 +103,8 @@ func (s *Service) Resolver() VariableResolver {
 // SetupAgents builds the agent configurations from the current config
 // options.
 func (s *Service) SetupAgents() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	allowedTools := resolveAllowedTools(allToolNames(), s.cfg.Options.DisabledTools)
 
 	s.agents = map[string]Agent{
@@ -113,12 +131,16 @@ func (s *Service) SetupAgents() {
 
 // Agents returns the agent configuration map.
 func (s *Service) Agents() map[string]Agent {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.agents
 }
 
 // Agent returns the agent configuration for the given name and
 // whether it exists.
 func (s *Service) Agent(name string) (Agent, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	a, ok := s.agents[name]
 	return a, ok
 }
@@ -146,6 +168,8 @@ func (s *Service) DisableAutoSummarize() bool {
 
 // Attribution returns the attribution settings.
 func (s *Service) Attribution() *Attribution {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.cfg.Options.Attribution
 }
 
@@ -156,6 +180,8 @@ func (s *Service) ContextPaths() []string {
 
 // SkillsPaths returns the configured skills paths.
 func (s *Service) SkillsPaths() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.cfg.Options.SkillsPaths
 }
 
@@ -172,6 +198,8 @@ func (s *Service) DisableMetrics() bool {
 // SelectedModel returns the selected model for the given type and
 // whether it exists.
 func (s *Service) SelectedModel(modelType SelectedModelType) (SelectedModel, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	m, ok := s.cfg.Models[modelType]
 	return m, ok
 }
@@ -179,17 +207,23 @@ func (s *Service) SelectedModel(modelType SelectedModelType) (SelectedModel, boo
 // Provider returns the provider config for the given ID and whether
 // it exists.
 func (s *Service) Provider(id string) (ProviderConfig, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	p, ok := s.cfg.Providers[id]
 	return p, ok
 }
 
 // SetProvider sets the provider config for the given ID.
 func (s *Service) SetProvider(id string, p ProviderConfig) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.cfg.Providers[id] = p
 }
 
 // Providers returns all provider configs.
 func (s *Service) AllProviders() map[string]ProviderConfig {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.cfg.Providers
 }
 
@@ -200,37 +234,51 @@ func (s *Service) MCP() MCPs {
 
 // LSP returns the LSP configurations.
 func (s *Service) LSP() LSPs {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.cfg.LSP
 }
 
 // Permissions returns the permissions configuration.
 func (s *Service) Permissions() *Permissions {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.cfg.Permissions
 }
 
 // SetAttribution sets the attribution settings.
 func (s *Service) SetAttribution(a *Attribution) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.cfg.Options.Attribution = a
 }
 
 // SetSkillsPaths sets the skills paths.
 func (s *Service) SetSkillsPaths(paths []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.cfg.Options.SkillsPaths = paths
 }
 
 // SetLSP sets the LSP configurations.
 func (s *Service) SetLSP(lsp LSPs) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.cfg.LSP = lsp
 }
 
 // SetPermissions sets the permissions configuration.
 func (s *Service) SetPermissions(p *Permissions) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.cfg.Permissions = p
 }
 
 // OverrideModel overrides the in-memory model for the given type
 // without persisting. Used for non-interactive model overrides.
 func (s *Service) OverrideModel(modelType SelectedModelType, model SelectedModel) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.cfg.Models[modelType] = model
 }
 
@@ -241,6 +289,8 @@ func (s *Service) ToolLsConfig() ToolLs {
 
 // CompactMode returns whether compact mode is enabled.
 func (s *Service) CompactMode() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if s.cfg.Options.TUI == nil {
 		return false
 	}
@@ -287,6 +337,8 @@ func (s *Service) AutoLSP() *bool {
 
 // RecentModels returns recent models for the given type.
 func (s *Service) RecentModels(modelType SelectedModelType) []SelectedModel {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.cfg.RecentModels[modelType]
 }
 
@@ -316,6 +368,8 @@ func (s *Service) RemoveConfigField(key string) error {
 
 // SetCompactMode toggles compact mode and persists the change.
 func (s *Service) SetCompactMode(enabled bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	cfg := s.cfg
 	if cfg.Options == nil {
 		cfg.Options = &Options{}
@@ -331,6 +385,8 @@ func (s *Service) SetCompactMode(enabled bool) error {
 // and persists the change, also recording it in the recent models
 // list.
 func (s *Service) UpdatePreferredModel(modelType SelectedModelType, model SelectedModel) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.cfg.Models[modelType] = model
 	if err := s.SetConfigField(fmt.Sprintf("models.%s", modelType), model); err != nil {
 		return fmt.Errorf("failed to update preferred model: %w", err)
@@ -387,6 +443,8 @@ func (s *Service) recordRecentModel(modelType SelectedModelType, model SelectedM
 
 // RefreshOAuthToken refreshes the OAuth token for the given provider.
 func (s *Service) RefreshOAuthToken(ctx context.Context, providerID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	cfg := s.cfg
 	providerConfig, exists := cfg.Providers[providerID]
 	if !exists {
@@ -435,6 +493,8 @@ func (s *Service) RefreshOAuthToken(ctx context.Context, providerID string) erro
 // SetProviderAPIKey sets the API key (string or *oauth.Token) for a
 // provider and persists the change.
 func (s *Service) SetProviderAPIKey(providerID string, apiKey any) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	cfg := s.cfg
 	var providerConfig ProviderConfig
 	var exists bool
@@ -500,6 +560,8 @@ func (s *Service) SetProviderAPIKey(providerID string, apiKey any) error {
 // ImportCopilot imports an existing GitHub Copilot token from disk if
 // available and not already configured.
 func (s *Service) ImportCopilot() (*oauth.Token, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if testing.Testing() {
 		return nil, false
 	}

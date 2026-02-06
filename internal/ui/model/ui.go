@@ -1120,7 +1120,7 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	var cmds []tea.Cmd
 	action := m.dialog.Update(msg)
-	slog.Info("handleDialogMsg", "action", fmt.Sprintf("%T", action), "msg", fmt.Sprintf("%T", msg))
+	slog.Info("HandleDialogMsg", "action", fmt.Sprintf("%T", action), "msg", fmt.Sprintf("%T", msg))
 	if action == nil {
 		return tea.Batch(cmds...)
 	}

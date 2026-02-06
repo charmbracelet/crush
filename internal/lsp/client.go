@@ -602,7 +602,7 @@ func FilterMatching(dir string, servers map[string]*powernapconfig.ServerConfig)
 			patterns = append(patterns, filepath.ToSlash(p))
 		}
 		if len(patterns) == 0 {
-			slog.Debug("ignoring lsp with no root markers", "name", name)
+			slog.Debug("Ignoring lsp with no root markers", "name", name)
 			continue
 		}
 		normalized[name] = serverPatterns{server: server, patterns: patterns}

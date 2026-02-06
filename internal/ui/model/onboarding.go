@@ -19,7 +19,7 @@ import (
 // markProjectInitialized marks the current project as initialized in the config.
 func (m *UI) markProjectInitialized() tea.Msg {
 	// TODO: handle error so we show it in the tui footer
-	err := config.MarkProjectInitialized()
+	err := config.MarkProjectInitialized(m.com.Config())
 	if err != nil {
 		slog.Error(err.Error())
 	}

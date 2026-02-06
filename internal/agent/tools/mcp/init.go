@@ -189,7 +189,7 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 				return
 			}
 
-			toolCount := updateTools(name, tools)
+			toolCount := updateTools(cfg, name, tools)
 			updatePrompts(name, prompts)
 			sessions.Set(name, session)
 
@@ -214,13 +214,12 @@ func WaitForInit(ctx context.Context) error {
 	}
 }
 
-func getOrRenewClient(ctx context.Context, name string) (*mcp.ClientSession, error) {
+func getOrRenewClient(ctx context.Context, cfg *config.Config, name string) (*mcp.ClientSession, error) {
 	sess, ok := sessions.Get(name)
 	if !ok {
 		return nil, fmt.Errorf("mcp '%s' not available", name)
 	}
 
-	cfg := config.Get()
 	m := cfg.MCP[name]
 	state, _ := states.Get(name)
 

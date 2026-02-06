@@ -32,6 +32,7 @@ type DiagnosticCounts struct {
 type Client struct {
 	client *powernap.Client
 	name   string
+	debug  bool
 
 	// Working directory this LSP is scoped to.
 	workDir string
@@ -65,7 +66,7 @@ type Client struct {
 }
 
 // New creates a new LSP client using the powernap implementation.
-func New(ctx context.Context, name string, cfg config.LSPConfig, resolver config.VariableResolver) (*Client, error) {
+func New(ctx context.Context, name string, cfg config.LSPConfig, resolver config.VariableResolver, debug bool) (*Client, error) {
 	client := &Client{
 		name:        name,
 		fileTypes:   cfg.FileTypes,
@@ -73,6 +74,7 @@ func New(ctx context.Context, name string, cfg config.LSPConfig, resolver config
 		openFiles:   csync.NewMap[string, *OpenFileInfo](),
 		config:      cfg,
 		ctx:         ctx,
+		debug:       debug,
 		resolver:    resolver,
 	}
 	client.serverState.Store(StateStarting)
@@ -171,7 +173,11 @@ func (c *Client) registerHandlers() {
 	c.RegisterServerRequestHandler("workspace/applyEdit", HandleApplyEdit)
 	c.RegisterServerRequestHandler("workspace/configuration", HandleWorkspaceConfiguration)
 	c.RegisterServerRequestHandler("client/registerCapability", HandleRegisterCapability)
-	c.RegisterNotificationHandler("window/showMessage", HandleServerMessage)
+	c.RegisterNotificationHandler("window/showMessage", func(ctx context.Context, method string, params json.RawMessage) {
+		if c.debug {
+			HandleServerMessage(ctx, method, params)
+		}
+	})
 	c.RegisterNotificationHandler("textDocument/publishDiagnostics", func(_ context.Context, _ string, params json.RawMessage) {
 		HandleDiagnostics(c, params)
 	})
@@ -262,8 +268,6 @@ func (c *Client) SetDiagnosticsCallback(callback func(name string, count int)) {
 
 // WaitForServerReady waits for the server to be ready
 func (c *Client) WaitForServerReady(ctx context.Context) error {
-	cfg := config.Get()
-
 	// Set initial state
 	c.SetServerState(StateStarting)
 
@@ -275,7 +279,7 @@ func (c *Client) WaitForServerReady(ctx context.Context) error {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
-	if cfg != nil && cfg.Options.DebugLSP {
+	if c.debug {
 		slog.Debug("Waiting for LSP server to be ready...")
 	}
 
@@ -289,7 +293,7 @@ func (c *Client) WaitForServerReady(ctx context.Context) error {
 		case <-ticker.C:
 			// Check if client is running
 			if !c.client.IsRunning() {
-				if cfg != nil && cfg.Options.DebugLSP {
+				if c.debug {
 					slog.Debug("LSP server not ready yet", "server", c.name)
 				}
 				continue
@@ -297,7 +301,7 @@ func (c *Client) WaitForServerReady(ctx context.Context) error {
 
 			// Server is ready
 			c.SetServerState(StateReady)
-			if cfg != nil && cfg.Options.DebugLSP {
+			if c.debug {
 				slog.Debug("LSP server is ready")
 			}
 			return nil
@@ -416,10 +420,8 @@ func (c *Client) IsFileOpen(filepath string) bool {
 
 // CloseAllFiles closes all currently open files.
 func (c *Client) CloseAllFiles(ctx context.Context) {
-	cfg := config.Get()
-	debugLSP := cfg != nil && cfg.Options.DebugLSP
 	for uri := range c.openFiles.Seq2() {
-		if debugLSP {
+		if c.debug {
 			slog.Debug("Closing file", "file", uri)
 		}
 		if err := c.client.NotifyDidCloseTextDocument(ctx, uri); err != nil {

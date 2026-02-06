@@ -151,7 +151,7 @@ func (s *Manager) startServer(ctx context.Context, name string, server *powernap
 			return
 		}
 	}
-	client, err := New(ctx, name, cfg, s.cfg.Resolver())
+	client, err := New(ctx, name, cfg, s.cfg.Resolver(), s.cfg.Options.DebugLSP)
 	if err != nil {
 		slog.Error("Failed to create LSP client", "name", name, "error", err)
 		return

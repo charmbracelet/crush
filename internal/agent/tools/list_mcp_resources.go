@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"cmp"
 	"context"
 	_ "embed"
 	"fmt"
@@ -43,7 +42,7 @@ func NewListMCPResourcesTool(cfg *config.Config, permissions permission.Service)
 				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for listing MCP resources")
 			}
 
-			relPath := filepathext.SmartJoin(cfg.WorkingDir(), cmp.Or(params.MCPName, "mcp-resources"))
+			relPath := filepathext.SmartJoin(cfg.WorkingDir(), params.MCPName)
 			p, err := permissions.Request(ctx,
 				permission.CreatePermissionRequest{
 					SessionID:   sessionID,

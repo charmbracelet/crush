@@ -38,6 +38,7 @@ type Session struct {
 	SummaryMessageID string
 	Cost             float64
 	Todos            []Todo
+	PastMemory       string
 	CreatedAt        int64
 	UpdatedAt        int64
 }
@@ -167,6 +168,10 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 			String: todosJSON,
 			Valid:  todosJSON != "",
 		},
+		PastMemory: sql.NullString{
+			String: session.PastMemory,
+			Valid:  session.PastMemory != "",
+		},
 	})
 	if err != nil {
 		return Session{}, err
@@ -215,6 +220,7 @@ func (s service) fromDBItem(item db.Session) Session {
 		SummaryMessageID: item.SummaryMessageID.String,
 		Cost:             item.Cost,
 		Todos:            todos,
+		PastMemory:       item.PastMemory.String,
 		CreatedAt:        item.CreatedAt,
 		UpdatedAt:        item.UpdatedAt,
 	}

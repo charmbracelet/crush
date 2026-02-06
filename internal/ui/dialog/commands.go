@@ -392,7 +392,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 
 	// Only show compact command if there's an active session
 	if c.sessionID != "" {
-		commands = append(commands, NewCommandItem(c.com.Styles, "summarize", "Summarize Session", "", ActionSummarize{SessionID: c.sessionID}))
+		commands = append(commands, NewCommandItem(c.com.Styles, "handoff", "Create focused summary for next task", "", ActionSummarize{SessionID: c.sessionID}))
 	}
 
 	// Add reasoning toggle for models that support it

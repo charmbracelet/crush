@@ -55,8 +55,8 @@ const (
 //go:embed templates/title.md
 var titlePrompt []byte
 
-//go:embed templates/summary.md
-var summaryPrompt []byte
+//go:embed templates/handoff_summary.md
+var handoffSummaryPrompt []byte
 
 // Used to remove <think> tags from generated titles.
 var thinkTagRegex = regexp.MustCompile(`<think>.*?</think>`)
@@ -86,7 +86,7 @@ type SessionAgent interface {
 	QueuedPrompts(sessionID string) int
 	QueuedPromptsList(sessionID string) []string
 	ClearQueue(sessionID string)
-	Summarize(context.Context, string, fantasy.ProviderOptions) error
+	SummarizeWithTask(context.Context, string, string, fantasy.ProviderOptions) error
 	Model() Model
 }
 
@@ -232,7 +232,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	defer cancel()
 	defer a.activeRequests.Del(call.SessionID)
 
-	history, files := a.preparePrompt(msgs, call.Attachments...)
+	history, files := a.preparePrompt(msgs, currentSession, call.Attachments...)
 
 	startTime := time.Now()
 	a.eventPromptSent(call.SessionID)
@@ -529,7 +529,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
-		if summarizeErr := a.Summarize(genCtx, call.SessionID, call.ProviderOptions); summarizeErr != nil {
+		if summarizeErr := a.SummarizeWithTask(genCtx, call.SessionID, "Continue working on the current task", call.ProviderOptions); summarizeErr != nil {
 			return nil, summarizeErr
 		}
 		// If the agent wasn't done...
@@ -558,7 +558,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	return a.Run(ctx, firstQueuedMessage)
 }
 
-func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions) error {
+func (a *sessionAgent) SummarizeWithTask(ctx context.Context, sessionID string, task string, opts fantasy.ProviderOptions) error {
 	if a.IsSessionBusy(sessionID) {
 		return ErrSessionBusy
 	}
@@ -580,15 +580,26 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return nil
 	}
 
-	aiMsgs, _ := a.preparePrompt(msgs)
+	// Archive the conversation as PAST_MEMORY before summarizing.
+	pastMemory := a.serializeMessagesForPastMemory(msgs)
+	currentSession.PastMemory = pastMemory
+	_, err = a.sessions.Save(ctx, currentSession)
+	if err != nil {
+		return fmt.Errorf("failed to save session with past memory: %w", err)
+	}
+
+	aiMsgs, _ := a.preparePrompt(msgs, currentSession)
 
 	genCtx, cancel := context.WithCancel(ctx)
 	a.activeRequests.Set(sessionID, cancel)
 	defer a.activeRequests.Del(sessionID)
 	defer cancel()
 
+	// Build the focused summary prompt with the task and todos
+	focusedPrompt := buildHandoffSummaryPrompt(task, currentSession.Todos)
+
 	agent := fantasy.NewAgent(largeModel.Model,
-		fantasy.WithSystemPrompt(string(summaryPrompt)),
+		fantasy.WithSystemPrompt(focusedPrompt),
 	)
 	summaryMessage, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
 		Role:             message.Assistant,
@@ -600,10 +611,8 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return err
 	}
 
-	summaryPromptText := buildSummaryPrompt(currentSession.Todos)
-
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
-		Prompt:          summaryPromptText,
+		Prompt:          "Summarize the conversation focusing on the task described in your system prompt.",
 		Messages:        aiMsgs,
 		ProviderOptions: opts,
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
@@ -671,6 +680,27 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	return err
 }
 
+func buildHandoffSummaryPrompt(task string, todos []session.Todo) string {
+	prompt := string(handoffSummaryPrompt)
+	prompt = strings.ReplaceAll(prompt, "{{TASK}}", task)
+	prompt = strings.ReplaceAll(prompt, "{{TODOS}}", buildTodosPrompt(todos))
+	return prompt
+}
+
+func buildTodosPrompt(todos []session.Todo) string {
+	if len(todos) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("\n**Current Todo List**:\n\n")
+	for _, t := range todos {
+		fmt.Fprintf(&sb, "- [%s] %s\n", t.Status, t.Content)
+	}
+	sb.WriteString("\nInclude these tasks and their statuses in your summary. ")
+	sb.WriteString("Instruct the resuming assistant to use the `todos` tool to continue tracking progress on these tasks.")
+	return sb.String()
+}
+
 func (a *sessionAgent) getCacheControlOptions() fantasy.ProviderOptions {
 	if t, _ := strconv.ParseBool(os.Getenv("CRUSH_DISABLE_ANTHROPIC_CACHE")); t {
 		return fantasy.ProviderOptions{}
@@ -705,15 +735,23 @@ func (a *sessionAgent) createUserMessage(ctx context.Context, call SessionAgentC
 	return msg, nil
 }
 
-func (a *sessionAgent) preparePrompt(msgs []message.Message, attachments ...message.Attachment) ([]fantasy.Message, []fantasy.FilePart) {
+func (a *sessionAgent) preparePrompt(msgs []message.Message, session session.Session, attachments ...message.Attachment) ([]fantasy.Message, []fantasy.FilePart) {
 	var history []fantasy.Message
 	if !a.isSubAgent {
-		history = append(history, fantasy.NewUserMessage(
-			fmt.Sprintf("<system_reminder>%s</system_reminder>",
-				`This is a reminder that your todo list is currently empty. DO NOT mention this to the user explicitly because they are already aware.
+		var reminders []string
+
+		// Todo list reminder
+		reminders = append(reminders, `This is a reminder that your todo list is currently empty. DO NOT mention this to the user explicitly because they are already aware.
 If you are working on tasks that would benefit from a todo list please use the "todos" tool to create one.
-If not, please feel free to ignore. Again do not mention this message to the user.`,
-			),
+If not, please feel free to ignore. Again do not mention this message to the user.`)
+
+		// Past memory reminder
+		if session.PastMemory != "" {
+			reminders = append(reminders, `You have access to PAST_MEMORY from a previous session. If you need to search this archived conversation for specific details, use the "past_memory_search" tool.`)
+		}
+
+		history = append(history, fantasy.NewUserMessage(
+			fmt.Sprintf("<system_reminder>%s</system_reminder>", strings.Join(reminders, "\n\n")),
 		))
 	}
 	for _, m := range msgs {
@@ -1074,6 +1112,39 @@ func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) mes
 //
 //	BEFORE: [tool result: image data]
 //	AFTER:  [tool result: "Image loaded - see attached"], [user: image attachment]
+// serializeMessagesForPastMemory converts messages to a text format for PAST_MEMORY archiving.
+func (a *sessionAgent) serializeMessagesForPastMemory(msgs []message.Message) string {
+	var sb strings.Builder
+	for _, m := range msgs {
+		switch m.Role {
+		case message.User:
+			sb.WriteString("USER: ")
+		case message.Assistant:
+			sb.WriteString("ASSISTANT: ")
+		case message.Tool:
+			sb.WriteString("TOOL: ")
+		}
+		// Include message content
+		content := m.Content().Text
+		if content != "" {
+			sb.WriteString(content)
+		}
+		// Include tool calls and results
+		for _, tc := range m.ToolCalls() {
+			fmt.Fprintf(&sb, "\n[Tool Call: %s] Input: %s", tc.Name, tc.Input)
+		}
+		for _, tr := range m.ToolResults() {
+			content := tr.Content
+			if len(content) > 500 {
+				content = content[:500] + "... [truncated]"
+			}
+			fmt.Fprintf(&sb, "\n[Tool Result: %s] %s", tr.Name, content)
+		}
+		sb.WriteString("\n\n")
+	}
+	return sb.String()
+}
+
 func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Message, largeModel Model) []fantasy.Message {
 	providerSupportsMedia := largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderAnthropic) ||
 		largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderBedrock)
@@ -1142,17 +1213,4 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 	return convertedMessages
 }
 
-// buildSummaryPrompt constructs the prompt text for session summarization.
-func buildSummaryPrompt(todos []session.Todo) string {
-	var sb strings.Builder
-	sb.WriteString("Provide a detailed summary of our conversation above.")
-	if len(todos) > 0 {
-		sb.WriteString("\n\n## Current Todo List\n\n")
-		for _, t := range todos {
-			fmt.Fprintf(&sb, "- [%s] %s\n", t.Status, t.Content)
-		}
-		sb.WriteString("\nInclude these tasks and their statuses in your summary. ")
-		sb.WriteString("Instruct the resuming assistant to use the `todos` tool to continue tracking progress on these tasks.")
-	}
-	return sb.String()
-}
+

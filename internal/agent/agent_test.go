@@ -629,7 +629,7 @@ func makeTestTodos(n int) []session.Todo {
 	return todos
 }
 
-func BenchmarkBuildSummaryPrompt(b *testing.B) {
+func BenchmarkBuildHandoffSummaryPrompt(b *testing.B) {
 	cases := []struct {
 		name     string
 		numTodos int
@@ -646,7 +646,7 @@ func BenchmarkBuildSummaryPrompt(b *testing.B) {
 		b.Run(tc.name, func(b *testing.B) {
 			b.ReportAllocs()
 			for range b.N {
-				_ = buildSummaryPrompt(todos)
+				_ = buildHandoffSummaryPrompt("Continue working on the current task", todos)
 			}
 		})
 	}

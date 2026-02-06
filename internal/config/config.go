@@ -706,6 +706,7 @@ func allToolNames() []string {
 		"glob",
 		"grep",
 		"ls",
+		"past_memory_search",
 		"sourcegraph",
 		"todos",
 		"view",

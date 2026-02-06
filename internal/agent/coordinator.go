@@ -55,7 +55,7 @@ type Coordinator interface {
 	QueuedPrompts(sessionID string) int
 	QueuedPromptsList(sessionID string) []string
 	ClearQueue(sessionID string)
-	Summarize(context.Context, string) error
+	SummarizeWithTask(context.Context, string, string) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
 }
@@ -408,6 +408,14 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 			return nil, err
 		}
 		allTools = append(allTools, agenticFetchTool)
+	}
+
+	if slices.Contains(agent.AllowedTools, PastMemorySearchToolName) {
+		pastMemoryTool, err := c.pastMemorySearchTool(ctx)
+		if err != nil {
+			return nil, err
+		}
+		allTools = append(allTools, pastMemoryTool)
 	}
 
 	// Get the model name for the agent
@@ -877,12 +885,12 @@ func (c *coordinator) QueuedPromptsList(sessionID string) []string {
 	return c.currentAgent.QueuedPromptsList(sessionID)
 }
 
-func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
+func (c *coordinator) SummarizeWithTask(ctx context.Context, sessionID string, task string) error {
 	providerCfg, ok := c.cfg.Providers.Get(c.currentAgent.Model().ModelCfg.Provider)
 	if !ok {
 		return errors.New("model provider not configured")
 	}
-	return c.currentAgent.Summarize(ctx, sessionID, getProviderOptions(c.currentAgent.Model(), providerCfg))
+	return c.currentAgent.SummarizeWithTask(ctx, sessionID, task, getProviderOptions(c.currentAgent.Model(), providerCfg))
 }
 
 func (c *coordinator) isUnauthorized(err error) bool {

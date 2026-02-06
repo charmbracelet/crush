@@ -421,6 +421,8 @@ func (app *App) setupEvents() {
 	app.cleanupFuncs = append(app.cleanupFuncs, cleanupFunc)
 }
 
+const subscriberSendTimeout = 2 * time.Second
+
 func setupSubscriber[T any](
 	ctx context.Context,
 	wg *sync.WaitGroup,
@@ -430,6 +432,10 @@ func setupSubscriber[T any](
 ) {
 	wg.Go(func() {
 		subCh := subscriber(ctx)
+		sendTimer := time.NewTimer(0)
+		<-sendTimer.C
+		defer sendTimer.Stop()
+
 		for {
 			select {
 			case event, ok := <-subCh:
@@ -438,9 +444,17 @@ func setupSubscriber[T any](
 					return
 				}
 				var msg tea.Msg = event
+				if !sendTimer.Stop() {
+					select {
+					case <-sendTimer.C:
+					default:
+					}
+				}
+				sendTimer.Reset(subscriberSendTimeout)
+
 				select {
 				case outputCh <- msg:
-				case <-time.After(2 * time.Second):
+				case <-sendTimer.C:
 					slog.Debug("Message dropped due to slow consumer", "name", name)
 				case <-ctx.Done():
 					slog.Debug("Subscription cancelled", "name", name)

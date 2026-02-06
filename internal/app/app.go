@@ -403,18 +403,16 @@ func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
 	}
 }
 
-const subscriberSendTimeout = 2 * time.Second
-
 func (app *App) setupEvents() {
 	ctx, cancel := context.WithCancel(app.globalCtx)
 	app.eventsCtx = ctx
-	setupSubscriber(ctx, app.serviceEventsWG, "sessions", app.Sessions.Subscribe, app.events, subscriberSendTimeout)
-	setupSubscriber(ctx, app.serviceEventsWG, "messages", app.Messages.Subscribe, app.events, subscriberSendTimeout)
-	setupSubscriber(ctx, app.serviceEventsWG, "permissions", app.Permissions.Subscribe, app.events, subscriberSendTimeout)
-	setupSubscriber(ctx, app.serviceEventsWG, "permissions-notifications", app.Permissions.SubscribeNotifications, app.events, subscriberSendTimeout)
-	setupSubscriber(ctx, app.serviceEventsWG, "history", app.History.Subscribe, app.events, subscriberSendTimeout)
-	setupSubscriber(ctx, app.serviceEventsWG, "mcp", mcp.SubscribeEvents, app.events, subscriberSendTimeout)
-	setupSubscriber(ctx, app.serviceEventsWG, "lsp", SubscribeLSPEvents, app.events, subscriberSendTimeout)
+	setupSubscriber(ctx, app.serviceEventsWG, "sessions", app.Sessions.Subscribe, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "messages", app.Messages.Subscribe, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "permissions", app.Permissions.Subscribe, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "permissions-notifications", app.Permissions.SubscribeNotifications, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "history", app.History.Subscribe, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "mcp", mcp.SubscribeEvents, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "lsp", SubscribeLSPEvents, app.events)
 	cleanupFunc := func() error {
 		cancel()
 		app.serviceEventsWG.Wait()
@@ -423,13 +421,14 @@ func (app *App) setupEvents() {
 	app.cleanupFuncs = append(app.cleanupFuncs, cleanupFunc)
 }
 
+const subscriberSendTimeout = 2 * time.Second
+
 func setupSubscriber[T any](
 	ctx context.Context,
 	wg *sync.WaitGroup,
 	name string,
 	subscriber func(context.Context) <-chan pubsub.Event[T],
 	outputCh chan<- tea.Msg,
-	sendTimeout time.Duration,
 ) {
 	wg.Go(func() {
 		subCh := subscriber(ctx)
@@ -451,7 +450,7 @@ func setupSubscriber[T any](
 					default:
 					}
 				}
-				sendTimer.Reset(sendTimeout)
+				sendTimer.Reset(subscriberSendTimeout)
 
 				select {
 				case outputCh <- msg:

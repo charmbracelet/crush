@@ -97,6 +97,10 @@ type (
 	mcpPromptsLoadedMsg struct {
 		Prompts []commands.MCPPrompt
 	}
+	// mcpStateChangedMsg is sent when there is a change in MCP client states.
+	mcpStateChangedMsg struct {
+		states map[string]mcp.ClientInfo
+	}
 	// sendMessageMsg is sent to send a message.
 	// currently only used for mcp prompts.
 	sendMessageMsg struct {
@@ -429,6 +433,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if ok {
 			commands.SetCustomCommands(m.customCommands)
 		}
+
+	case mcpStateChangedMsg:
+		m.mcpStates = msg.states
 	case mcpPromptsLoadedMsg:
 		m.mcpPrompts = msg.Prompts
 		dia := m.dialog.Dialog(dialog.CommandsID)
@@ -3149,16 +3156,15 @@ func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string
 }
 
 func (m *UI) handleStateChanged() tea.Cmd {
-	slog.Warn("handleStateChanged")
 	return func() tea.Msg {
 		m.com.App.UpdateAgentModel(context.Background())
-		m.mcpStates = mcp.GetStates()
-		return nil
+		return mcpStateChangedMsg{
+			states: mcp.GetStates(),
+		}
 	}
 }
 
 func handleMCPPromptsEvent(name string) tea.Cmd {
-	slog.Warn("handleMCPPromptsEvent")
 	return func() tea.Msg {
 		mcp.RefreshPrompts(context.Background(), name)
 		return nil
@@ -3166,7 +3172,6 @@ func handleMCPPromptsEvent(name string) tea.Cmd {
 }
 
 func handleMCPToolsEvent(cfg *config.Config, name string) tea.Cmd {
-	slog.Warn("handleMCPToolsEvent")
 	return func() tea.Msg {
 		mcp.RefreshTools(
 			context.Background(),
@@ -3178,7 +3183,6 @@ func handleMCPToolsEvent(cfg *config.Config, name string) tea.Cmd {
 }
 
 func handleMCPResourcesEvent(name string) tea.Cmd {
-	slog.Warn("handleMCPResourcesEvent")
 	return func() tea.Msg {
 		mcp.RefreshResources(context.Background(), name)
 		return nil

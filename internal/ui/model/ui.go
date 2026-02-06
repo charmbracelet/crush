@@ -1175,6 +1175,8 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		// Start handoff flow: ask user what they want to work on next
 		m.handoff.waiting = true
 		m.handoff.sessionID = msg.SessionID
+		// Show instruction in status bar
+		cmds = append(cmds, util.ReportInfo("Write your next session task and press enter to create a focused handoff"))
 		// Insert handoff prompt message into chat
 		handoffMsg := message.Message{
 			ID:    "handoff-" + msg.SessionID,

@@ -54,11 +54,6 @@ type (
 	ActionSummarize         struct {
 		SessionID string
 	}
-	// ActionHandoff is triggered when the user submits their next task during handoff.
-	ActionHandoff struct {
-		SessionID string
-		Task      string
-	}
 	// ActionSelectReasoningEffort is a message indicating a reasoning effort has been selected.
 	ActionSelectReasoningEffort struct {
 		Effort string

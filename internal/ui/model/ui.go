@@ -1177,9 +1177,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.handoff.sessionID = msg.SessionID
 		// Insert handoff prompt message into chat
 		handoffMsg := message.Message{
-			ID:      "handoff-" + msg.SessionID,
-			Role:    message.Assistant,
-			Parts:   []message.ContentPart{message.TextContent{Text: "**Handoff**: What would you like to work on next?"}},
+			ID:    "handoff-" + msg.SessionID,
+			Role:  message.Assistant,
+			Parts: []message.ContentPart{message.TextContent{Text: "**Handoff**: What would you like to work on next?"}},
 		}
 		items := chat.ExtractMessageItems(m.com.Styles, &handoffMsg, nil)
 		m.chat.AppendMessages(items...)
@@ -1187,21 +1187,6 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)
-	case dialog.ActionHandoff:
-		if m.isAgentBusy() {
-			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
-			break
-		}
-		// Reset handoff state
-		m.handoff.waiting = false
-		m.handoff.sessionID = ""
-		cmds = append(cmds, func() tea.Msg {
-			err := m.com.App.AgentCoordinator.SummarizeWithTask(context.Background(), msg.SessionID, msg.Task)
-			if err != nil {
-				return util.ReportError(err)()
-			}
-			return nil
-		})
 	case dialog.ActionToggleHelp:
 		m.status.ToggleHelp()
 		m.dialog.CloseDialog(dialog.CommandsID)
@@ -2683,6 +2668,17 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 	return tea.Batch(cmds...)
 }
 
+// summarizeWithTaskCmd creates a command to summarize a session with a task.
+func (m *UI) summarizeWithTaskCmd(sessionID, task string) tea.Cmd {
+	return func() tea.Msg {
+		err := m.com.App.AgentCoordinator.SummarizeWithTask(context.Background(), sessionID, task)
+		if err != nil {
+			return util.ReportError(err)()
+		}
+		return nil
+	}
+}
+
 // handleHandoffSubmit handles the user submitting their next task during handoff.
 func (m *UI) handleHandoffSubmit(task string) tea.Cmd {
 	if !m.handoff.waiting {
@@ -2695,14 +2691,7 @@ func (m *UI) handleHandoffSubmit(task string) tea.Cmd {
 	m.handoff.waiting = false
 	m.handoff.sessionID = ""
 
-	// Send the task to trigger focused summarization
-	return func() tea.Msg {
-		err := m.com.App.AgentCoordinator.SummarizeWithTask(context.Background(), sessionID, task)
-		if err != nil {
-			return util.ReportError(err)()
-		}
-		return nil
-	}
+	return m.summarizeWithTaskCmd(sessionID, task)
 }
 
 const cancelTimerDuration = 2 * time.Second

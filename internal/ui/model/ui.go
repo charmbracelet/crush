@@ -354,18 +354,16 @@ func (m *UI) loadCustomCommands() tea.Cmd {
 }
 
 // loadMCPrompts loads the MCP prompts asynchronously.
-func (m *UI) loadMCPrompts() tea.Cmd {
-	return func() tea.Msg {
-		prompts, err := commands.LoadMCPPrompts()
-		if err != nil {
-			slog.Error("Failed to load MCP prompts", "error", err)
-		}
-		if prompts == nil {
-			// flag them as loaded even if there is none or an error
-			prompts = []commands.MCPPrompt{}
-		}
-		return mcpPromptsLoadedMsg{Prompts: prompts}
+func (m *UI) loadMCPrompts() tea.Msg {
+	prompts, err := commands.LoadMCPPrompts()
+	if err != nil {
+		slog.Error("Failed to load MCP prompts", "error", err)
 	}
+	if prompts == nil {
+		// flag them as loaded even if there is none or an error
+		prompts = []commands.MCPPrompt{}
+	}
+	return mcpPromptsLoadedMsg{Prompts: prompts}
 }
 
 // Update handles updates to the UI model.
@@ -505,17 +503,18 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pubsub.Event[app.LSPEvent]:
 		m.lspStates = app.GetLSPStates()
 	case pubsub.Event[mcp.Event]:
-		m.mcpStates = mcp.GetStates()
-		// check if all mcps are initialized
-		initialized := true
-		for _, state := range m.mcpStates {
-			if state.State == mcp.StateStarting {
-				initialized = false
-				break
-			}
-		}
-		if initialized && m.mcpPrompts == nil {
-			cmds = append(cmds, m.loadMCPrompts())
+		switch msg.Payload.Type {
+		case mcp.EventStateChanged:
+			return m, tea.Batch(
+				m.handleStateChanged(),
+				m.loadMCPrompts,
+			)
+		case mcp.EventPromptsListChanged:
+			return m, handleMCPPromptsEvent(msg.Payload.Name)
+		case mcp.EventToolsListChanged:
+			return m, handleMCPToolsEvent(m.com.Config(), msg.Payload.Name)
+		case mcp.EventResourcesListChanged:
+			return m, handleMCPResourcesEvent(msg.Payload.Name)
 		}
 	case pubsub.Event[permission.PermissionRequest]:
 		if cmd := m.openPermissionsDialog(msg.Payload); cmd != nil {
@@ -713,10 +712,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, clearInfoMsgCmd(ttl))
 	case util.ClearStatusMsg:
 		m.status.ClearInfoMsg()
-	case completions.FilesLoadedMsg:
-		// Handle async file loading for completions.
+	case completions.CompletionItemsLoadedMsg:
 		if m.completionsOpen {
-			m.completions.SetFiles(msg.Files)
+			m.completions.SetItems(msg.Files, msg.Resources)
 		}
 	case uv.KittyGraphicsEvent:
 		if !bytes.HasPrefix(msg.Payload, []byte("OK")) {
@@ -1517,12 +1515,14 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			if m.completionsOpen {
 				if msg, ok := m.completions.Update(msg); ok {
 					switch msg := msg.(type) {
-					case completions.SelectionMsg:
-						// Handle file completion selection.
-						if item, ok := msg.Value.(completions.FileCompletionValue); ok {
-							cmds = append(cmds, m.insertFileCompletion(item.Path))
+					case completions.SelectionMsg[completions.FileCompletionValue]:
+						cmds = append(cmds, m.insertFileCompletion(msg.Value.Path))
+						if !msg.KeepOpen {
+							m.closeCompletions()
 						}
-						if !msg.Insert {
+					case completions.SelectionMsg[completions.ResourceCompletionValue]:
+						cmds = append(cmds, m.insertMCPResourceCompletion(msg.Value))
+						if !msg.KeepOpen {
 							m.closeCompletions()
 						}
 					case completions.ClosedMsg:
@@ -1636,7 +1636,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 						m.completionsStartIndex = curIdx
 						m.completionsPositionStart = m.completionsPosition()
 						depth, limit := m.com.Config().Options.TUI.Completions.Limits()
-						cmds = append(cmds, m.completions.OpenWithFiles(depth, limit))
+						cmds = append(cmds, m.completions.Open(depth, limit))
 					}
 				}
 
@@ -2475,24 +2475,29 @@ func (m *UI) closeCompletions() {
 	m.completions.Close()
 }
 
-// insertFileCompletion inserts the selected file path into the textarea,
-// replacing the @query, and adds the file as an attachment.
-func (m *UI) insertFileCompletion(path string) tea.Cmd {
+// insertCompletionText replaces the @query in the textarea with the given text.
+// Returns false if the replacement cannot be performed.
+func (m *UI) insertCompletionText(text string) bool {
 	value := m.textarea.Value()
-	word := m.textareaWord()
-
-	// Find the @ and query to replace.
 	if m.completionsStartIndex > len(value) {
-		return nil
+		return false
 	}
 
-	// Build the new value: everything before @, the path, everything after query.
+	word := m.textareaWord()
 	endIdx := min(m.completionsStartIndex+len(word), len(value))
-
-	newValue := value[:m.completionsStartIndex] + path + value[endIdx:]
+	newValue := value[:m.completionsStartIndex] + text + value[endIdx:]
 	m.textarea.SetValue(newValue)
 	m.textarea.MoveToEnd()
 	m.textarea.InsertRune(' ')
+	return true
+}
+
+// insertFileCompletion inserts the selected file path into the textarea,
+// replacing the @query, and adds the file as an attachment.
+func (m *UI) insertFileCompletion(path string) tea.Cmd {
+	if !m.insertCompletionText(path) {
+		return nil
+	}
 
 	return func() tea.Msg {
 		absPath, _ := filepath.Abs(path)
@@ -2523,6 +2528,61 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 			FileName: filepath.Base(path),
 			MimeType: mimeOf(content),
 			Content:  content,
+		}
+	}
+}
+
+// insertMCPResourceCompletion inserts the selected resource into the textarea,
+// replacing the @query, and adds the resource as an attachment.
+func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValue) tea.Cmd {
+	displayText := item.Title
+	if displayText == "" {
+		displayText = item.URI
+	}
+
+	if !m.insertCompletionText(displayText) {
+		return nil
+	}
+
+	return func() tea.Msg {
+		contents, err := mcp.ReadResource(
+			context.Background(),
+			m.com.Config(),
+			item.MCPName,
+			item.URI,
+		)
+		if err != nil {
+			slog.Warn("Failed to read MCP resource", "uri", item.URI, "error", err)
+			return nil
+		}
+		if len(contents) == 0 {
+			return nil
+		}
+
+		content := contents[0]
+		var data []byte
+		if content.Text != "" {
+			data = []byte(content.Text)
+		} else if len(content.Blob) > 0 {
+			data = content.Blob
+		}
+		if len(data) == 0 {
+			return nil
+		}
+
+		mimeType := item.MIMEType
+		if mimeType == "" && content.MIMEType != "" {
+			mimeType = content.MIMEType
+		}
+		if mimeType == "" {
+			mimeType = "text/plain"
+		}
+
+		return message.Attachment{
+			FilePath: item.URI,
+			FileName: displayText,
+			MimeType: mimeType,
+			Content:  data,
 		}
 	}
 }
@@ -3086,6 +3146,43 @@ func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string
 	})
 
 	return tea.Sequence(cmds...)
+}
+
+func (m *UI) handleStateChanged() tea.Cmd {
+	slog.Warn("handleStateChanged")
+	return func() tea.Msg {
+		m.com.App.UpdateAgentModel(context.Background())
+		m.mcpStates = mcp.GetStates()
+		return nil
+	}
+}
+
+func handleMCPPromptsEvent(name string) tea.Cmd {
+	slog.Warn("handleMCPPromptsEvent")
+	return func() tea.Msg {
+		mcp.RefreshPrompts(context.Background(), name)
+		return nil
+	}
+}
+
+func handleMCPToolsEvent(cfg *config.Config, name string) tea.Cmd {
+	slog.Warn("handleMCPToolsEvent")
+	return func() tea.Msg {
+		mcp.RefreshTools(
+			context.Background(),
+			cfg,
+			name,
+		)
+		return nil
+	}
+}
+
+func handleMCPResourcesEvent(name string) tea.Cmd {
+	slog.Warn("handleMCPResourcesEvent")
+	return func() tea.Msg {
+		mcp.RefreshResources(context.Background(), name)
+		return nil
+	}
 }
 
 func (m *UI) copyChatHighlight() tea.Cmd {

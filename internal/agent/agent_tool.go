@@ -25,11 +25,11 @@ const (
 )
 
 func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) {
-	agentCfg, ok := c.cfg.Agents[config.AgentTask]
+	agentCfg, ok := c.cfgSvc.Agents()[config.AgentTask]
 	if !ok {
 		return nil, errors.New("task agent not configured")
 	}
-	prompt, err := taskPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	prompt, err := taskPrompt(prompt.WithWorkingDir(c.cfgSvc.WorkingDir()))
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +67,7 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 				maxTokens = model.ModelCfg.MaxTokens
 			}
 
-			providerCfg, ok := c.cfg.Providers.Get(model.ModelCfg.Provider)
+			providerCfg, ok := c.cfgSvc.Config().Providers.Get(model.ModelCfg.Provider)
 			if !ok {
 				return fantasy.ToolResponse{}, errors.New("model provider not configured")
 			}

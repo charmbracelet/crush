@@ -173,7 +173,7 @@ func setupAppWithProgressBar(cmd *cobra.Command) (*app.App, error) {
 	}
 
 	// Check if progress bar is enabled in config (defaults to true if nil)
-	progressEnabled := app.Config().Options.Progress == nil || *app.Config().Options.Progress
+	progressEnabled := app.ConfigService().Progress() == nil || *app.ConfigService().Progress()
 	if progressEnabled && supportsProgressBar() {
 		_, _ = fmt.Fprintf(os.Stderr, ansi.SetIndeterminateProgressBar)
 		defer func() { _, _ = fmt.Fprintf(os.Stderr, ansi.ResetProgressBar) }()
@@ -206,18 +206,18 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 	}
 	cfg.Permissions.SkipRequests = yolo
 
-	if err := createDotCrushDir(cfg.Options.DataDirectory); err != nil {
+	if err := createDotCrushDir(svc.DataDirectory()); err != nil {
 		return nil, err
 	}
 
 	// Register this project in the centralized projects list.
-	if err := projects.Register(cwd, cfg.Options.DataDirectory); err != nil {
+	if err := projects.Register(cwd, svc.DataDirectory()); err != nil {
 		slog.Warn("Failed to register project", "error", err)
 		// Non-fatal: continue even if registration fails
 	}
 
 	// Connect to DB; this will also run migrations.
-	conn, err := db.Connect(ctx, cfg.Options.DataDirectory)
+	conn, err := db.Connect(ctx, svc.DataDirectory())
 	if err != nil {
 		return nil, err
 	}
@@ -228,21 +228,21 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 		return nil, err
 	}
 
-	if shouldEnableMetrics(cfg) {
+	if shouldEnableMetrics(svc) {
 		event.Init()
 	}
 
 	return appInstance, nil
 }
 
-func shouldEnableMetrics(cfg *config.Config) bool {
+func shouldEnableMetrics(svc *config.Service) bool {
 	if v, _ := strconv.ParseBool(os.Getenv("CRUSH_DISABLE_METRICS")); v {
 		return false
 	}
 	if v, _ := strconv.ParseBool(os.Getenv("DO_NOT_TRACK")); v {
 		return false
 	}
-	if cfg.Options.DisableMetrics {
+	if svc.DisableMetrics() {
 		return false
 	}
 	return true

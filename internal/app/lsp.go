@@ -63,7 +63,7 @@ func (app *App) initLSPClients(ctx context.Context) {
 
 	var wg sync.WaitGroup
 	for name, server := range filtered {
-		if app.config.Options.AutoLSP != nil && !*app.config.Options.AutoLSP && !slices.Contains(userConfiguredLSPs, name) {
+		if app.configService.AutoLSP() != nil && !*app.configService.AutoLSP() && !slices.Contains(userConfiguredLSPs, name) {
 			slog.Debug("Ignoring non user-define LSP client due to AutoLSP being disabled", "name", name)
 			continue
 		}
@@ -114,7 +114,7 @@ func (app *App) createAndStartLSPClient(ctx context.Context, name string, config
 	updateLSPState(name, lsp.StateStarting, nil, nil, 0)
 
 	// Create LSP client.
-	lspClient, err := lsp.New(ctx, name, config, app.configService.Resolver(), app.config.Options.DebugLSP)
+	lspClient, err := lsp.New(ctx, name, config, app.configService.Resolver(), app.configService.DebugLSP())
 	if err != nil {
 		if !userConfigured {
 			slog.Warn("Default LSP config skipped due to error", "name", name, "error", err)

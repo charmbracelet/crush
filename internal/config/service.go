@@ -124,6 +124,148 @@ func (s *Service) Agents() map[string]Agent {
 	return s.agents
 }
 
+// Agent returns the agent configuration for the given name and
+// whether it exists.
+func (s *Service) Agent(name string) (Agent, bool) {
+	a, ok := s.agents[name]
+	return a, ok
+}
+
+// DataDirectory returns the data directory path.
+func (s *Service) DataDirectory() string {
+	return s.cfg.Options.DataDirectory
+}
+
+// Debug returns whether debug mode is enabled.
+func (s *Service) Debug() bool {
+	return s.cfg.Options.Debug
+}
+
+// DebugLSP returns whether LSP debug mode is enabled.
+func (s *Service) DebugLSP() bool {
+	return s.cfg.Options.DebugLSP
+}
+
+// DisableAutoSummarize returns whether auto-summarization is
+// disabled.
+func (s *Service) DisableAutoSummarize() bool {
+	return s.cfg.Options.DisableAutoSummarize
+}
+
+// Attribution returns the attribution settings.
+func (s *Service) Attribution() *Attribution {
+	return s.cfg.Options.Attribution
+}
+
+// ContextPaths returns the configured context paths.
+func (s *Service) ContextPaths() []string {
+	return s.cfg.Options.ContextPaths
+}
+
+// SkillsPaths returns the configured skills paths.
+func (s *Service) SkillsPaths() []string {
+	return s.cfg.Options.SkillsPaths
+}
+
+// Progress returns the progress setting pointer.
+func (s *Service) Progress() *bool {
+	return s.cfg.Options.Progress
+}
+
+// DisableMetrics returns whether metrics are disabled.
+func (s *Service) DisableMetrics() bool {
+	return s.cfg.Options.DisableMetrics
+}
+
+// SelectedModel returns the selected model for the given type and
+// whether it exists.
+func (s *Service) SelectedModel(modelType SelectedModelType) (SelectedModel, bool) {
+	m, ok := s.cfg.Models[modelType]
+	return m, ok
+}
+
+// MCP returns the MCP configurations.
+func (s *Service) MCP() MCPs {
+	return s.cfg.MCP
+}
+
+// LSP returns the LSP configurations.
+func (s *Service) LSP() LSPs {
+	return s.cfg.LSP
+}
+
+// Permissions returns the permissions configuration.
+func (s *Service) Permissions() *Permissions {
+	return s.cfg.Permissions
+}
+
+// SetPermissions sets the permissions configuration.
+func (s *Service) SetPermissions(p *Permissions) {
+	s.cfg.Permissions = p
+}
+
+// ToolLsConfig returns the ls tool configuration.
+func (s *Service) ToolLsConfig() ToolLs {
+	return s.cfg.Tools.Ls
+}
+
+// CompactMode returns whether compact mode is enabled.
+func (s *Service) CompactMode() bool {
+	if s.cfg.Options.TUI == nil {
+		return false
+	}
+	return s.cfg.Options.TUI.CompactMode
+}
+
+// DiffMode returns the diff mode setting.
+func (s *Service) DiffMode() string {
+	if s.cfg.Options.TUI == nil {
+		return ""
+	}
+	return s.cfg.Options.TUI.DiffMode
+}
+
+// CompletionLimits returns the completion depth and items limits.
+func (s *Service) CompletionLimits() (depth, items int) {
+	if s.cfg.Options.TUI == nil {
+		return 0, 0
+	}
+	return s.cfg.Options.TUI.Completions.Limits()
+}
+
+// DisableDefaultProviders returns whether default providers are
+// disabled.
+func (s *Service) DisableDefaultProviders() bool {
+	return s.cfg.Options.DisableDefaultProviders
+}
+
+// DisableProviderAutoUpdate returns whether provider auto-update is
+// disabled.
+func (s *Service) DisableProviderAutoUpdate() bool {
+	return s.cfg.Options.DisableProviderAutoUpdate
+}
+
+// InitializeAs returns the initialization file name.
+func (s *Service) InitializeAs() string {
+	return s.cfg.Options.InitializeAs
+}
+
+// AutoLSP returns the auto-LSP setting pointer.
+func (s *Service) AutoLSP() *bool {
+	return s.cfg.Options.AutoLSP
+}
+
+// RecentModels returns recent models for the given type.
+func (s *Service) RecentModels(modelType SelectedModelType) []SelectedModel {
+	return s.cfg.RecentModels[modelType]
+}
+
+// Options returns the full options struct. This is a temporary
+// accessor for callers that need multiple option fields.
+func (s *Service) Options() *Options {
+	return s.cfg.Options
+}
+
 // HasConfigField returns true if the given dotted key path exists in
 // the persisted config data.
 func (s *Service) HasConfigField(key string) bool {

@@ -289,7 +289,7 @@ func New(com *common.Common) *UI {
 	ui.status = status
 
 	// Initialize compact mode from config
-	ui.forceCompactMode = com.Config().Options.TUI.CompactMode
+	ui.forceCompactMode = com.ConfigService().Options().TUI.CompactMode
 
 	// set onboarding state defaults
 	ui.onboarding.yesInitializeSelected = true
@@ -305,7 +305,7 @@ func New(com *common.Common) *UI {
 	// set initial state
 	ui.setState(desiredState, desiredFocus)
 
-	opts := com.Config().Options
+	opts := com.ConfigService().Options()
 
 	// disable indeterminate progress bar
 	ui.progressBarEnabled = opts.Progress == nil || *opts.Progress
@@ -1635,7 +1635,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 						m.completionsQuery = ""
 						m.completionsStartIndex = curIdx
 						m.completionsPositionStart = m.completionsPosition()
-						depth, limit := m.com.Config().Options.TUI.Completions.Limits()
+						depth, limit := m.com.ConfigService().Options().TUI.Completions.Limits()
 						cmds = append(cmds, m.completions.OpenWithFiles(depth, limit))
 					}
 				}
@@ -2848,7 +2848,7 @@ func (m *UI) openPermissionsDialog(perm permission.PermissionRequest) tea.Cmd {
 
 	// Get diff mode from config.
 	var opts []dialog.PermissionsOption
-	if diffMode := m.com.Config().Options.TUI.DiffMode; diffMode != "" {
+	if diffMode := m.com.ConfigService().Options().TUI.DiffMode; diffMode != "" {
 		opts = append(opts, dialog.WithDiffMode(diffMode == "split"))
 	}
 

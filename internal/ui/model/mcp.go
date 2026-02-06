@@ -16,7 +16,7 @@ func (m *UI) mcpInfo(width, maxItems int, isSection bool) string {
 	var mcps []mcp.ClientInfo
 	t := m.com.Styles
 
-	for _, mcp := range m.com.Config().MCP.Sorted() {
+	for _, mcp := range m.com.ConfigService().MCP().Sorted() {
 		if state, ok := m.mcpStates[mcp.Name]; ok {
 			mcps = append(mcps, state)
 		}

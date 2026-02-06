@@ -21,7 +21,7 @@ func (m *UI) modelInfo(width int) string {
 
 	if model != nil {
 		// Get provider name first
-		providerConfig, ok := m.com.Config().Providers.Get(model.ModelCfg.Provider)
+		providerConfig, ok := m.com.ConfigService().Config().Providers.Get(model.ModelCfg.Provider)
 		if ok {
 			providerName = providerConfig.Name
 

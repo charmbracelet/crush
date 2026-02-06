@@ -165,7 +165,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	}
 	stderrTTY = term.IsTerminal(os.Stderr.Fd())
 	stdinTTY = term.IsTerminal(os.Stdin.Fd())
-	progress = app.config.Options.Progress == nil || *app.config.Options.Progress
+	progress = app.configService.Progress() == nil || *app.configService.Progress()
 
 	if !hideSpinner && stderrTTY {
 		t := styles.DefaultStyles()
@@ -463,7 +463,7 @@ func setupSubscriber[T any](
 }
 
 func (app *App) InitCoderAgent(ctx context.Context) error {
-	coderAgentCfg := app.config.Agents[config.AgentCoder]
+	coderAgentCfg := app.configService.Agents()[config.AgentCoder]
 	if coderAgentCfg.ID == "" {
 		return fmt.Errorf("coder agent configuration is missing")
 	}

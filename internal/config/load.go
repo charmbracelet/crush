@@ -89,7 +89,7 @@ func Load(workingDir, dataDir string, debug bool) (*Service, error) {
 	valueResolver := NewShellVariableResolver(env)
 	svc.resolver = valueResolver
 	cfg.resolver = valueResolver
-	if err := cfg.configureProviders(env, valueResolver, svc.knownProviders); err != nil {
+	if err := svc.configureProviders(env, valueResolver, svc.knownProviders); err != nil {
 		return nil, fmt.Errorf("failed to configure providers: %w", err)
 	}
 
@@ -98,7 +98,7 @@ func Load(workingDir, dataDir string, debug bool) (*Service, error) {
 		return svc, nil
 	}
 
-	if err := cfg.configureSelectedModels(svc.knownProviders); err != nil {
+	if err := svc.configureSelectedModels(svc.knownProviders); err != nil {
 		return nil, fmt.Errorf("failed to configure selected models: %w", err)
 	}
 	cfg.SetupAgents()
@@ -133,7 +133,8 @@ func PushPopCrushEnv() func() {
 	return restore
 }
 
-func (c *Config) configureProviders(env env.Env, resolver VariableResolver, knownProviders []catwalk.Provider) error {
+func (s *Service) configureProviders(env env.Env, resolver VariableResolver, knownProviders []catwalk.Provider) error {
+	c := s.cfg
 	knownProviderNames := make(map[string]bool)
 	restore := PushPopCrushEnv()
 	defer restore()
@@ -220,7 +221,7 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 		switch {
 		case p.ID == catwalk.InferenceProviderAnthropic && config.OAuthToken != nil:
 			// Claude Code subscription is not supported anymore. Remove to show onboarding.
-			c.removeConfigField("providers.anthropic")
+			s.RemoveConfigField("providers.anthropic")
 			c.Providers.Del(string(p.ID))
 			continue
 		case p.ID == catwalk.InferenceProviderCopilot && config.OAuthToken != nil:
@@ -471,7 +472,8 @@ func (c *Config) applyLSPDefaults() {
 	}
 }
 
-func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (largeModel SelectedModel, smallModel SelectedModel, err error) {
+func (s *Service) defaultModelSelection(knownProviders []catwalk.Provider) (largeModel SelectedModel, smallModel SelectedModel, err error) {
+	c := s.cfg
 	if len(knownProviders) == 0 && c.Providers.Len() == 0 {
 		err = fmt.Errorf("no providers configured, please configure at least one provider")
 		return largeModel, smallModel, err
@@ -540,8 +542,9 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 	return largeModel, smallModel, err
 }
 
-func (c *Config) configureSelectedModels(knownProviders []catwalk.Provider) error {
-	defaultLarge, defaultSmall, err := c.defaultModelSelection(knownProviders)
+func (s *Service) configureSelectedModels(knownProviders []catwalk.Provider) error {
+	c := s.cfg
+	defaultLarge, defaultSmall, err := s.defaultModelSelection(knownProviders)
 	if err != nil {
 		return fmt.Errorf("failed to select default models: %w", err)
 	}

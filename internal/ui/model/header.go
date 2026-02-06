@@ -74,7 +74,13 @@ func (h *header) drawHeader(
 	b.WriteString(h.compactLogo)
 
 	availDetailWidth := width - leftPadding - rightPadding - lipgloss.Width(b.String()) - minHeaderDiags
-	details := renderHeaderDetails(h.com, session, h.com.App.LSPClients, detailsOpen, availDetailWidth)
+	details := renderHeaderDetails(
+		h.com,
+		session,
+		h.com.App.LSPManager.Clients(),
+		detailsOpen,
+		availDetailWidth,
+	)
 
 	remainingWidth := width -
 		lipgloss.Width(b.String()) -

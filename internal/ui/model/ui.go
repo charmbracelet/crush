@@ -397,6 +397,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setState(uiChat, m.focus)
 		m.session = msg.session
 		m.sessionFiles = msg.files
+		cmds = append(cmds, m.startLSPs(msg.lspFilePaths()))
 		msgs, err := m.com.App.Messages.List(context.Background(), m.session.ID)
 		if err != nil {
 			cmds = append(cmds, util.ReportError(err))
@@ -417,8 +418,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.historyReset()
 		cmds = append(cmds, m.loadPromptHistory())
 		m.updateLayoutAndSize()
+
 	case sessionFilesUpdatesMsg:
 		m.sessionFiles = msg.sessionFiles
+		var paths []string
+		for _, f := range msg.sessionFiles {
+			paths = append(paths, f.LatestVersion.Path)
+		}
+		cmds = append(cmds, m.startLSPs(paths))
 
 	case sendMessageMsg:
 		cmds = append(cmds, m.sendMessage(msg.Content, msg.Attachments...))
@@ -2706,8 +2713,10 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 		m.setState(uiChat, m.focus)
 	}
 
+	ctx := context.Background()
 	for _, path := range m.sessionFileReads {
-		m.com.App.FileTracker.RecordRead(context.Background(), m.session.ID, path)
+		m.com.App.FileTracker.RecordRead(ctx, m.session.ID, path)
+		m.com.App.LSPManager.Start(ctx, path)
 	}
 
 	// Capture session ID to avoid race with main goroutine updating m.session.
@@ -2965,7 +2974,13 @@ func (m *UI) newSession() tea.Cmd {
 	m.promptQueue = 0
 	m.pillsView = ""
 	m.historyReset()
-	return m.loadPromptHistory()
+	return tea.Batch(
+		func() tea.Msg {
+			m.com.App.LSPManager.StopAll(context.Background())
+			return nil
+		},
+		m.loadPromptHistory(),
+	)
 }
 
 // handlePasteMsg handles a paste message.

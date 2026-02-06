@@ -31,7 +31,7 @@ func (m *UI) lspInfo(width, maxItems int, isSection bool) string {
 
 	var lsps []LSPInfo
 	for _, state := range states {
-		client, ok := m.com.App.LSPClients.Get(state.Name)
+		client, ok := m.com.App.LSPManager.Clients().Get(state.Name)
 		if !ok {
 			continue
 		}
@@ -89,6 +89,9 @@ func lspList(t *styles.Styles, lsps []LSPInfo, width, maxItems int) string {
 		var description string
 		var diagnostics string
 		switch l.State {
+		case lsp.StateStopped:
+			icon = t.ItemOfflineIcon.Foreground(t.Muted.GetBackground()).String()
+			description = t.Subtle.Render("stopped")
 		case lsp.StateStarting:
 			icon = t.ItemBusyIcon.String()
 			description = t.Subtle.Render("starting...")
@@ -103,7 +106,7 @@ func lspList(t *styles.Styles, lsps []LSPInfo, width, maxItems int) string {
 			}
 		case lsp.StateDisabled:
 			icon = t.ItemOfflineIcon.Foreground(t.Muted.GetBackground()).String()
-			description = t.Subtle.Render("inactive")
+			description = t.Subtle.Render("disabled")
 		default:
 			icon = t.ItemOfflineIcon.String()
 		}

@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -22,8 +23,32 @@ import (
 // loadSessionMsg is a message indicating that a session and its files have
 // been loaded.
 type loadSessionMsg struct {
-	session *session.Session
-	files   []SessionFile
+	session   *session.Session
+	files     []SessionFile
+	readFiles []string
+}
+
+// lspFilePaths returns deduplicated file paths from both modified and read
+// files for starting LSP servers.
+func (msg loadSessionMsg) lspFilePaths() []string {
+	seen := make(map[string]struct{}, len(msg.files)+len(msg.readFiles))
+	paths := make([]string, 0, len(msg.files)+len(msg.readFiles))
+	for _, f := range msg.files {
+		p := f.LatestVersion.Path
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		paths = append(paths, p)
+	}
+	for _, p := range msg.readFiles {
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		paths = append(paths, p)
+	}
+	return paths
 }
 
 // SessionFile tracks the first and latest versions of a file in a session,
@@ -51,9 +76,15 @@ func (m *UI) loadSession(sessionID string) tea.Cmd {
 			return util.ReportError(err)
 		}
 
+		readFiles, err := m.com.App.FileTracker.ListReadFiles(context.Background(), sessionID)
+		if err != nil {
+			slog.Error("Failed to load read files for session", "error", err)
+		}
+
 		return loadSessionMsg{
-			session: &session,
-			files:   sessionFiles,
+			session:   &session,
+			files:     sessionFiles,
+			readFiles: readFiles,
 		}
 	}
 }
@@ -199,4 +230,19 @@ func fileList(t *styles.Styles, cwd string, filesWithChanges []SessionFile, widt
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, renderedFiles...)
+}
+
+// startLSPs starts LSP servers for the given file paths.
+func (m *UI) startLSPs(paths []string) tea.Cmd {
+	if len(paths) == 0 {
+		return nil
+	}
+
+	return func() tea.Msg {
+		ctx := context.Background()
+		for _, path := range paths {
+			m.com.App.LSPManager.Start(ctx, path)
+		}
+		return nil
+	}
 }

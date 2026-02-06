@@ -67,8 +67,8 @@ func getDiagnostics(filePath string, manager *lsp.Manager) string {
 		return ""
 	}
 
-	fileDiagnostics := []string{}
-	projectDiagnostics := []string{}
+	var fileDiagnostics []string
+	var projectDiagnostics []string
 
 	for lspName, client := range manager.Clients().Seq2() {
 		for location, diags := range client.GetDiagnostics() {
@@ -163,7 +163,7 @@ func formatDiagnostic(pth string, diagnostic protocol.Diagnostic, source string)
 
 	tagsInfo := ""
 	if len(diagnostic.Tags) > 0 {
-		tags := []string{}
+		var tags []string
 		for _, tag := range diagnostic.Tags {
 			switch tag {
 			case protocol.Unnecessary:

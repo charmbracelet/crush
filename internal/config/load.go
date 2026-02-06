@@ -350,6 +350,8 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	}
 	if dataDir != "" {
 		c.Options.DataDirectory = dataDir
+	} else if envDir, ok := os.LookupEnv("CRUSH_DATA_DIRECTORY"); ok && envDir != "" {
+		c.Options.DataDirectory = envDir
 	} else if c.Options.DataDirectory == "" {
 		if path, ok := fsext.LookupClosest(workingDir, defaultDataDirectory); ok {
 			c.Options.DataDirectory = path

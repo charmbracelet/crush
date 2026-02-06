@@ -56,6 +56,24 @@ func TestConfig_setDefaults(t *testing.T) {
 	require.Equal(t, "/tmp", cfg.workingDir)
 }
 
+func TestConfig_setDefaults_dataDirEnvVar(t *testing.T) {
+	t.Setenv("CRUSH_DATA_DIRECTORY", "/custom/data")
+
+	cfg := &Config{}
+	cfg.setDefaults("/tmp", "")
+
+	require.Equal(t, "/custom/data", cfg.Options.DataDirectory)
+}
+
+func TestConfig_setDefaults_dataDirFlagOverridesEnv(t *testing.T) {
+	t.Setenv("CRUSH_DATA_DIRECTORY", "/from/env")
+
+	cfg := &Config{}
+	cfg.setDefaults("/tmp", "/from/flag")
+
+	require.Equal(t, "/from/flag", cfg.Options.DataDirectory)
+}
+
 func TestConfig_configureProviders(t *testing.T) {
 	knownProviders := []catwalk.Provider{
 		{

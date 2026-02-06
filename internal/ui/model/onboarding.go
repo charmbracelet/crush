@@ -19,7 +19,7 @@ import (
 // markProjectInitialized marks the current project as initialized in the config.
 func (m *UI) markProjectInitialized() tea.Msg {
 	// TODO: handle error so we show it in the tui footer
-	err := config.MarkProjectInitialized(m.com.Config())
+	err := config.MarkProjectInitialized(m.com.ConfigService().Config())
 	if err != nil {
 		slog.Error(err.Error())
 	}
@@ -52,7 +52,7 @@ func (m *UI) initializeProject() tea.Cmd {
 	if cmd := m.newSession(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
-	cfg := m.com.Config()
+	cfg := m.com.ConfigService().Config()
 
 	initialize := func() tea.Msg {
 		initPrompt, err := agent.InitializePrompt(*cfg)
@@ -77,7 +77,7 @@ func (m *UI) skipInitializeProject() tea.Cmd {
 
 // initializeView renders the project initialization prompt with Yes/No buttons.
 func (m *UI) initializeView() string {
-	cfg := m.com.Config()
+	cfg := m.com.ConfigService().Config()
 	s := m.com.Styles.Initialize
 	cwd := home.Short(m.com.ConfigService().WorkingDir())
 	initFile := cfg.Options.InitializeAs

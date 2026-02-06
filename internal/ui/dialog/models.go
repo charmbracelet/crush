@@ -138,7 +138,7 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 	)
 	m.keyMap.Close = CloseKey
 
-	providers, err := getFilteredProviders(com.Config())
+	providers, err := getFilteredProviders(com.ConfigService())
 	if err != nil {
 		return nil, fmt.Errorf("failed to get providers: %w", err)
 	}
@@ -335,12 +335,13 @@ func (m *Models) FullHelp() [][]key.Binding {
 // setProviderItems sets the provider items in the list.
 func (m *Models) setProviderItems() error {
 	t := m.com.Styles
-	cfg := m.com.Config()
+	svc := m.com.ConfigService()
+	cfg := svc.Config()
 
 	var selectedItemID string
 	selectedType := m.modelType.Config()
-	currentModel := cfg.Models[selectedType]
-	recentItems := cfg.RecentModels[selectedType]
+	currentModel, _ := svc.SelectedModel(selectedType)
+	recentItems := svc.RecentModels(selectedType)
 
 	// Track providers already added to avoid duplicates
 	addedProviders := make(map[string]bool)
@@ -505,7 +506,8 @@ func (m *Models) setProviderItems() error {
 	return nil
 }
 
-func getFilteredProviders(cfg *config.Config) ([]catwalk.Provider, error) {
+func getFilteredProviders(svc *config.Service) ([]catwalk.Provider, error) {
+	cfg := svc.Config()
 	providers, err := config.Providers(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get providers: %w", err)

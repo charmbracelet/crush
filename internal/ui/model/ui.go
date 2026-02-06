@@ -298,7 +298,7 @@ func New(com *common.Common) *UI {
 	desiredFocus := uiFocusEditor
 	if !com.ConfigService().IsConfigured() {
 		desiredState = uiOnboarding
-	} else if n, _ := config.ProjectNeedsInitialization(com.Config()); n {
+	} else if n, _ := config.ProjectNeedsInitialization(com.ConfigService().Config()); n {
 		desiredState = uiInitialize
 	}
 
@@ -345,7 +345,7 @@ func (m *UI) setState(state uiState, focus uiFocusState) {
 // loadCustomCommands loads the custom commands asynchronously.
 func (m *UI) loadCustomCommands() tea.Cmd {
 	return func() tea.Msg {
-		customCommands, err := commands.LoadCustomCommands(m.com.Config())
+		customCommands, err := commands.LoadCustomCommands(m.com.ConfigService().Config())
 		if err != nil {
 			slog.Error("Failed to load custom commands", "error", err)
 		}
@@ -776,7 +776,7 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 		case message.Assistant:
 			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap)...)
 			if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
-				infoItem := chat.NewAssistantInfoItem(m.com.Styles, msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
+				infoItem := chat.NewAssistantInfoItem(m.com.Styles, msg, m.com.ConfigService().Config(), time.Unix(m.lastUserMessageTime, 0))
 				items = append(items, infoItem)
 			}
 		default:
@@ -906,7 +906,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 			}
 		}
 		if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
-			infoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
+			infoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, m.com.ConfigService().Config(), time.Unix(m.lastUserMessageTime, 0))
 			m.chat.AppendMessages(infoItem)
 			if atBottom {
 				if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
@@ -977,7 +977,7 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 
 	if shouldRenderAssistant && msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
 		if infoItem := m.chat.MessageItem(chat.AssistantInfoID(msg.ID)); infoItem == nil {
-			newInfoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
+			newInfoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, m.com.ConfigService().Config(), time.Unix(m.lastUserMessageTime, 0))
 			m.chat.AppendMessages(newInfoItem)
 		}
 	}
@@ -1196,7 +1196,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleThinking:
 		cmds = append(cmds, func() tea.Msg {
-			cfg := m.com.Config()
+			cfg := m.com.ConfigService().Config()
 			if cfg == nil {
 				return util.ReportError(errors.New("configuration not found"))()
 			}
@@ -1235,7 +1235,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 
-		cfg := m.com.Config()
+		cfg := m.com.ConfigService().Config()
 		if cfg == nil {
 			cmds = append(cmds, util.ReportError(errors.New("configuration not found")))
 			break
@@ -1297,7 +1297,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 
-		cfg := m.com.Config()
+		cfg := m.com.ConfigService().Config()
 		if cfg == nil {
 			cmds = append(cmds, util.ReportError(errors.New("configuration not found")))
 			break
@@ -3063,7 +3063,7 @@ func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
 
 func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string) tea.Cmd {
 	load := func() tea.Msg {
-		prompt, err := commands.GetMCPPrompt(m.com.Config(), clientID, promptID, arguments)
+		prompt, err := commands.GetMCPPrompt(m.com.ConfigService().Config(), clientID, promptID, arguments)
 		if err != nil {
 			// TODO: make this better
 			return util.ReportError(err)()

@@ -22,7 +22,7 @@ func (app *App) initLSPClients(ctx context.Context) {
 	manager.LoadDefaults()
 
 	var userConfiguredLSPs []string
-	for name, clientConfig := range app.config.LSP {
+	for name, clientConfig := range app.configService.LSP() {
 		if clientConfig.Disabled {
 			slog.Info("Skipping disabled LSP client", "name", name)
 			manager.RemoveServer(name)
@@ -70,7 +70,7 @@ func (app *App) initLSPClients(ctx context.Context) {
 		wg.Go(func() {
 			app.createAndStartLSPClient(
 				ctx, name,
-				toOurConfig(server, app.config.LSP[name]),
+				toOurConfig(server, app.configService.LSP()[name]),
 				slices.Contains(userConfiguredLSPs, name),
 			)
 		})

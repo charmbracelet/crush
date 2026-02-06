@@ -396,12 +396,12 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	}
 
 	// Add reasoning toggle for models that support it
-	cfg := c.com.Config()
-	if agentCfg, ok := cfg.Agents[config.AgentCoder]; ok {
-		providerCfg := c.com.ConfigService().GetProviderForModel(agentCfg.Model)
-		model := c.com.ConfigService().GetModelByType(agentCfg.Model)
+	svc := c.com.ConfigService()
+	if agentCfg, ok := svc.Agent(config.AgentCoder); ok {
+		providerCfg := svc.GetProviderForModel(agentCfg.Model)
+		model := svc.GetModelByType(agentCfg.Model)
 		if providerCfg != nil && model != nil && model.CanReason {
-			selectedModel := cfg.Models[agentCfg.Model]
+			selectedModel, _ := svc.SelectedModel(agentCfg.Model)
 
 			// Anthropic models: thinking toggle
 			if model.CanReason && len(model.ReasoningLevels) == 0 {
@@ -425,9 +425,9 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_sidebar", "Toggle Sidebar", "", ActionToggleCompactMode{}))
 	}
 	if c.sessionID != "" {
-		cfg := c.com.Config()
-		agentCfg := cfg.Agents[config.AgentCoder]
-		model := c.com.ConfigService().GetModelByType(agentCfg.Model)
+		svc := c.com.ConfigService()
+		agentCfg, _ := svc.Agent(config.AgentCoder)
+		model := svc.GetModelByType(agentCfg.Model)
 		if model != nil && model.SupportsImages {
 			commands = append(commands, NewCommandItem(c.com.Styles, "file_picker", "Open File Picker", "ctrl+f", ActionOpenDialog{
 				// TODO: Pass in the file picker dialog id

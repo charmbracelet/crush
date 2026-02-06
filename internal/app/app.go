@@ -61,7 +61,6 @@ type App struct {
 	LSPClients *csync.Map[string, *lsp.Client]
 
 	configService *config.Service
-	config        *config.Config
 
 	serviceEventsWG *sync.WaitGroup
 	eventsCtx       context.Context
@@ -97,7 +96,6 @@ func New(ctx context.Context, conn *sql.DB, cfgSvc *config.Service) (*App, error
 		globalCtx: ctx,
 
 		configService: cfgSvc,
-		config:        cfg,
 
 		events:          make(chan tea.Msg, 100),
 		serviceEventsWG: &sync.WaitGroup{},
@@ -131,11 +129,6 @@ func New(ctx context.Context, conn *sql.DB, cfgSvc *config.Service) (*App, error
 // ConfigService returns the config service.
 func (app *App) ConfigService() *config.Service {
 	return app.configService
-}
-
-// Config returns the application configuration.
-func (app *App) Config() *config.Config {
-	return app.config
 }
 
 // RunNonInteractive runs the application in non-interactive mode with the
@@ -328,7 +321,7 @@ func (app *App) UpdateAgentModel(ctx context.Context) error {
 // If largeModel is provided but smallModel is not, the small model defaults to
 // the provider's default small model.
 func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel, smallModel string) error {
-	providers := app.config.Providers.Copy()
+	providers := app.configService.Config().Providers.Copy()
 
 	largeMatches, smallMatches, err := findModels(providers, largeModel, smallModel)
 	if err != nil {
@@ -376,7 +369,7 @@ func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel,
 // GetDefaultSmallModel returns the default small model for the given
 // provider. Falls back to the large model if no default is found.
 func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
-	cfg := app.config
+	cfg := app.configService.Config()
 	largeModelCfg := cfg.Models[config.SelectedModelTypeLarge]
 
 	// Find the provider in the known providers list to get its default small model.

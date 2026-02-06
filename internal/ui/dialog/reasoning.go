@@ -220,14 +220,14 @@ func (r *Reasoning) FullHelp() [][]key.Binding {
 }
 
 func (r *Reasoning) setReasoningItems() error {
-	cfg := r.com.Config()
-	agentCfg, ok := cfg.Agents[config.AgentCoder]
+	svc := r.com.ConfigService()
+	agentCfg, ok := svc.Agent(config.AgentCoder)
 	if !ok {
 		return errors.New("agent configuration not found")
 	}
 
-	selectedModel := cfg.Models[agentCfg.Model]
-	model := r.com.ConfigService().GetModelByType(agentCfg.Model)
+	selectedModel, _ := svc.SelectedModel(agentCfg.Model)
+	model := svc.GetModelByType(agentCfg.Model)
 	if model == nil {
 		return errors.New("model configuration not found")
 	}

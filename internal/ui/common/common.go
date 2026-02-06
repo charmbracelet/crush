@@ -26,11 +26,6 @@ type Common struct {
 	Styles *styles.Styles
 }
 
-// Config returns the configuration associated with this [Common] instance.
-func (c *Common) Config() *config.Config {
-	return c.App.Config()
-}
-
 // ConfigService returns the config service associated with this [Common] instance.
 func (c *Common) ConfigService() *config.Service {
 	return c.App.ConfigService()

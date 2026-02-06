@@ -24,7 +24,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
-	nativeclipboard "github.com/aymanbagabas/go-nativeclipboard"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/commands"
@@ -3086,7 +3085,7 @@ func (m *UI) handleFilePathPaste(path string) tea.Cmd {
 // creates an attachment. If no image data is found, it falls back to
 // interpreting clipboard text as a file path.
 func (m *UI) pasteImageFromClipboard() tea.Msg {
-	imageData, err := nativeclipboard.Image.Read()
+	imageData, err := readClipboard(clipboardFormatImage)
 	if int64(len(imageData)) > common.MaxAttachmentSize {
 		return util.InfoMsg{
 			Type: util.InfoTypeError,
@@ -3103,7 +3102,7 @@ func (m *UI) pasteImageFromClipboard() tea.Msg {
 		}
 	}
 
-	textData, textErr := nativeclipboard.Text.Read()
+	textData, textErr := readClipboard(clipboardFormatText)
 	if textErr != nil || len(textData) == 0 {
 		return util.NewInfoMsg("Clipboard is empty or does not contain an image")
 	}

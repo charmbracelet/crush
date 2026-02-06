@@ -5,6 +5,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/event"
+	"github.com/charmbracelet/crush/internal/permission"
 )
 
 func (a *sessionAgent) eventPromptSent(sessionID string) {
@@ -40,12 +41,22 @@ func (a *sessionAgent) eventTokensUsed(sessionID string, model Model, usage fant
 func (a *sessionAgent) eventCommon(sessionID string, model Model) []any {
 	m := model.ModelCfg
 
+	mode := "regular"
+	if a.permissions != nil {
+		switch a.permissions.GetMode() {
+		case permission.ModeYolo:
+			mode = "yolo"
+		case permission.ModePlan:
+			mode = "plan"
+		}
+	}
+
 	return []any{
 		"session id", sessionID,
 		"provider", m.Provider,
 		"model", m.Model,
 		"reasoning effort", m.ReasoningEffort,
 		"thinking mode", m.Think,
-		"yolo mode", a.isYolo,
+		"permission mode", mode,
 	}
 }

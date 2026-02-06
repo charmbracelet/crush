@@ -747,8 +747,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.textarea.Placeholder = m.readyPlaceholder
 		}
-		if m.com.App.Permissions.SkipRequests() {
+		switch m.com.App.Permissions.GetMode() {
+		case permission.ModeYolo:
 			m.textarea.Placeholder = "Yolo mode!"
+		case permission.ModePlan:
+			m.textarea.Placeholder = "Plan mode!"
 		}
 	}
 
@@ -1117,6 +1120,7 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	var cmds []tea.Cmd
 	action := m.dialog.Update(msg)
+	slog.Info("HandleDialogMsg", "action", fmt.Sprintf("%T", action), "msg", fmt.Sprintf("%T", msg))
 	if action == nil {
 		return tea.Batch(cmds...)
 	}
@@ -1160,9 +1164,19 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 	// Command dialog messages
 	case dialog.ActionToggleYoloMode:
-		yolo := !m.com.App.Permissions.SkipRequests()
-		m.com.App.Permissions.SetSkipRequests(yolo)
-		m.setEditorPrompt(yolo)
+		isYolo := m.com.App.Permissions.GetMode() == permission.ModeYolo
+		if isYolo {
+			m.com.App.Permissions.SetMode(permission.ModeRegular)
+		} else {
+			m.com.App.Permissions.SetMode(permission.ModeYolo)
+		}
+		m.setEditorPrompt(!isYolo)
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionCycleMode:
+		mode := m.com.App.Permissions.GetMode()
+		newMode := (mode + 1) % 3
+		m.com.App.Permissions.SetMode(newMode)
+		m.updatePlaceholderForMode()
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionNewSession:
 		if m.isAgentBusy() {
@@ -1620,6 +1634,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if cmd != nil {
 					cmds = append(cmds, cmd)
 				}
+			case key.Matches(msg, m.keyMap.Editor.CycleMode):
+				mode := m.com.App.Permissions.GetMode()
+				newMode := (mode + 1) % 3
+				m.com.App.Permissions.SetMode(newMode)
+				m.updatePlaceholderForMode()
 			case key.Matches(msg, m.keyMap.Editor.Commands) && m.textarea.Value() == "":
 				if cmd := m.openCommandsDialog(); cmd != nil {
 					cmds = append(cmds, cmd)
@@ -2472,6 +2491,37 @@ func (m *UI) yoloPromptFunc(info textarea.PromptInfo) string {
 		return t.EditorPromptYoloDotsFocused.Render()
 	}
 	return t.EditorPromptYoloDotsBlurred.Render()
+}
+
+// planPromptFunc returns the plan mode editor prompt style.
+func (m *UI) planPromptFunc(info textarea.PromptInfo) string {
+	t := m.com.Styles
+	if info.LineNumber == 0 {
+		if info.Focused {
+			return t.EditorPromptPlanIconFocused.Render()
+		}
+		return t.EditorPromptPlanIconBlurred.Render()
+	}
+	if info.Focused {
+		return t.EditorPromptPlanDotsFocused.Render()
+	}
+	return t.EditorPromptPlanDotsBlurred.Render()
+}
+
+// updatePlaceholderForMode updates the editor prompt based on the current
+// permission mode.
+func (m *UI) updatePlaceholderForMode() {
+	switch m.com.App.Permissions.GetMode() {
+	case permission.ModeYolo:
+		m.textarea.SetPromptFunc(4, m.yoloPromptFunc)
+		m.textarea.Placeholder = "Yolo mode!"
+	case permission.ModePlan:
+		m.textarea.SetPromptFunc(4, m.planPromptFunc)
+		m.textarea.Placeholder = "Plan mode!"
+	default:
+		m.textarea.SetPromptFunc(4, m.normalPromptFunc)
+		m.textarea.Placeholder = m.readyPlaceholder
+	}
 }
 
 // closeCompletions closes the completions popup and resets state.

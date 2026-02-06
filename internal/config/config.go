@@ -526,33 +526,6 @@ func filterSlice(data []string, mask []string, include bool) []string {
 	return filtered
 }
 
-func (c *Config) SetupAgents() {
-	allowedTools := resolveAllowedTools(allToolNames(), c.Options.DisabledTools)
-
-	agents := map[string]Agent{
-		AgentCoder: {
-			ID:           AgentCoder,
-			Name:         "Coder",
-			Description:  "An agent that helps with executing coding tasks.",
-			Model:        SelectedModelTypeLarge,
-			ContextPaths: c.Options.ContextPaths,
-			AllowedTools: allowedTools,
-		},
-
-		AgentTask: {
-			ID:           AgentCoder,
-			Name:         "Task",
-			Description:  "An agent that helps with searching for context and finding implementation details.",
-			Model:        SelectedModelTypeLarge,
-			ContextPaths: c.Options.ContextPaths,
-			AllowedTools: resolveReadOnlyTools(allowedTools),
-			// NO MCPs or LSPs by default
-			AllowedMCP: map[string][]string{},
-		},
-	}
-	c.Agents = agents
-}
-
 func (c *Config) Resolver() VariableResolver {
 	return c.resolver
 }

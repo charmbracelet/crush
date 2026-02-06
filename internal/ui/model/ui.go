@@ -1286,7 +1286,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 		if isOnboarding {
 			m.setState(uiLanding, uiFocusEditor)
-			m.com.Config().SetupAgents()
+			m.com.ConfigService().SetupAgents()
 			if err := m.com.App.InitCoderAgent(context.TODO()); err != nil {
 				cmds = append(cmds, util.ReportError(err))
 			}

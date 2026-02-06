@@ -101,7 +101,7 @@ func Load(workingDir, dataDir string, debug bool) (*Service, error) {
 	if err := svc.configureSelectedModels(svc.knownProviders); err != nil {
 		return nil, fmt.Errorf("failed to configure selected models: %w", err)
 	}
-	cfg.SetupAgents()
+	svc.SetupAgents()
 	return svc, nil
 }
 

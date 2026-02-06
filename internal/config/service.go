@@ -25,6 +25,7 @@ type Service struct {
 	resolver       VariableResolver
 	workingDir     string
 	knownProviders []catwalk.Provider
+	agents         map[string]Agent
 }
 
 // Config returns the underlying Config struct. This is a temporary
@@ -88,6 +89,39 @@ func (s *Service) Resolve(key string) (string, error) {
 // Resolver returns the variable resolver.
 func (s *Service) Resolver() VariableResolver {
 	return s.resolver
+}
+
+// SetupAgents builds the agent configurations from the current config
+// options.
+func (s *Service) SetupAgents() {
+	allowedTools := resolveAllowedTools(allToolNames(), s.cfg.Options.DisabledTools)
+
+	s.agents = map[string]Agent{
+		AgentCoder: {
+			ID:           AgentCoder,
+			Name:         "Coder",
+			Description:  "An agent that helps with executing coding tasks.",
+			Model:        SelectedModelTypeLarge,
+			ContextPaths: s.cfg.Options.ContextPaths,
+			AllowedTools: allowedTools,
+		},
+
+		AgentTask: {
+			ID:           AgentCoder,
+			Name:         "Task",
+			Description:  "An agent that helps with searching for context and finding implementation details.",
+			Model:        SelectedModelTypeLarge,
+			ContextPaths: s.cfg.Options.ContextPaths,
+			AllowedTools: resolveReadOnlyTools(allowedTools),
+			AllowedMCP:   map[string][]string{},
+		},
+	}
+	s.cfg.Agents = s.agents
+}
+
+// Agents returns the agent configuration map.
+func (s *Service) Agents() map[string]Agent {
+	return s.agents
 }
 
 // HasConfigField returns true if the given dotted key path exists in

@@ -220,7 +220,7 @@ func (r *Reasoning) FullHelp() [][]key.Binding {
 }
 
 func (r *Reasoning) setReasoningItems() error {
-	svc := r.com.ConfigService()
+	svc := r.com.Config()
 	agentCfg, ok := svc.Agent(config.AgentCoder)
 	if !ok {
 		return errors.New("agent configuration not found")

@@ -138,7 +138,7 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 	)
 	m.keyMap.Close = CloseKey
 
-	providers, err := getFilteredProviders(com.ConfigService())
+	providers, err := getFilteredProviders(com.Config())
 	if err != nil {
 		return nil, fmt.Errorf("failed to get providers: %w", err)
 	}
@@ -335,7 +335,7 @@ func (m *Models) FullHelp() [][]key.Binding {
 // setProviderItems sets the provider items in the list.
 func (m *Models) setProviderItems() error {
 	t := m.com.Styles
-	svc := m.com.ConfigService()
+	svc := m.com.Config()
 
 	var selectedItemID string
 	selectedType := m.modelType.Config()
@@ -482,7 +482,7 @@ func (m *Models) setProviderItems() error {
 
 		if len(validRecentItems) != len(recentItems) {
 			// FIXME: Does this need to be here? Is it mutating the config during a read?
-			if err := m.com.ConfigService().SetConfigField(fmt.Sprintf("recent_models.%s", selectedType), validRecentItems); err != nil {
+			if err := m.com.Config().SetConfigField(fmt.Sprintf("recent_models.%s", selectedType), validRecentItems); err != nil {
 				return fmt.Errorf("failed to update recent models: %w", err)
 			}
 		}

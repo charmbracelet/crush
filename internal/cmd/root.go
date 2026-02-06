@@ -173,7 +173,7 @@ func setupAppWithProgressBar(cmd *cobra.Command) (*app.App, error) {
 	}
 
 	// Check if progress bar is enabled in config (defaults to true if nil)
-	progressEnabled := app.ConfigService().Progress() == nil || *app.ConfigService().Progress()
+	progressEnabled := app.Config().Progress() == nil || *app.Config().Progress()
 	if progressEnabled && supportsProgressBar() {
 		_, _ = fmt.Fprintf(os.Stderr, ansi.SetIndeterminateProgressBar)
 		defer func() { _, _ = fmt.Fprintf(os.Stderr, ansi.ResetProgressBar) }()

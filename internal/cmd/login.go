@@ -52,9 +52,9 @@ crush login copilot
 		}
 		switch provider {
 		case "hyper":
-			return loginHyper(app.ConfigService())
+			return loginHyper(app.Config())
 		case "copilot", "github", "github-copilot":
-			return loginCopilot(app.ConfigService())
+			return loginCopilot(app.Config())
 		default:
 			return fmt.Errorf("unknown platform: %s", args[0])
 		}

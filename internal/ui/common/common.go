@@ -26,9 +26,9 @@ type Common struct {
 	Styles *styles.Styles
 }
 
-// ConfigService returns the config service associated with this [Common] instance.
-func (c *Common) ConfigService() *config.Service {
-	return c.App.ConfigService()
+// Config returns the config service associated with this [Common] instance.
+func (c *Common) Config() *config.Service {
+	return c.App.Config()
 }
 
 // DefaultCommon returns the default common UI configurations.

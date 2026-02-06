@@ -22,7 +22,7 @@ func (m *UI) selectedLargeModel() *agent.Model {
 func (m *UI) landingView() string {
 	t := m.com.Styles
 	width := m.layout.main.Dx()
-	cwd := common.PrettyPath(t, m.com.ConfigService().WorkingDir(), width)
+	cwd := common.PrettyPath(t, m.com.Config().WorkingDir(), width)
 
 	parts := []string{
 		cwd,

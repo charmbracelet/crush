@@ -61,7 +61,7 @@ type App struct {
 
 	LSPClients *csync.Map[string, *lsp.Client]
 
-	configService *config.Service
+	cfg *config.Service
 
 	serviceEventsWG *sync.WaitGroup
 	eventsCtx       context.Context
@@ -96,7 +96,7 @@ func New(ctx context.Context, conn *sql.DB, cfgSvc *config.Service) (*App, error
 
 		globalCtx: ctx,
 
-		configService: cfgSvc,
+		cfg: cfgSvc,
 
 		events:          make(chan tea.Msg, 100),
 		serviceEventsWG: &sync.WaitGroup{},
@@ -127,9 +127,9 @@ func New(ctx context.Context, conn *sql.DB, cfgSvc *config.Service) (*App, error
 	return app, nil
 }
 
-// ConfigService returns the config service.
-func (app *App) ConfigService() *config.Service {
-	return app.configService
+// Config returns the config service.
+func (app *App) Config() *config.Service {
+	return app.cfg
 }
 
 // RunNonInteractive runs the application in non-interactive mode with the
@@ -159,7 +159,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	}
 	stderrTTY = term.IsTerminal(os.Stderr.Fd())
 	stdinTTY = term.IsTerminal(os.Stdin.Fd())
-	progress = app.configService.Progress() == nil || *app.configService.Progress()
+	progress = app.cfg.Progress() == nil || *app.cfg.Progress()
 
 	if !hideSpinner && stderrTTY {
 		t := styles.DefaultStyles()
@@ -322,7 +322,7 @@ func (app *App) UpdateAgentModel(ctx context.Context) error {
 // If largeModel is provided but smallModel is not, the small model defaults to
 // the provider's default small model.
 func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel, smallModel string) error {
-	providers := maps.Clone(app.configService.AllProviders())
+	providers := maps.Clone(app.cfg.AllProviders())
 
 	largeMatches, smallMatches, err := findModels(providers, largeModel, smallModel)
 	if err != nil {
@@ -339,7 +339,7 @@ func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel,
 		}
 		largeProviderID = found.provider
 		slog.Info("Overriding large model for non-interactive run", "provider", found.provider, "model", found.modelID)
-		app.configService.OverrideModel(config.SelectedModelTypeLarge, config.SelectedModel{
+		app.cfg.OverrideModel(config.SelectedModelTypeLarge, config.SelectedModel{
 			Provider: found.provider,
 			Model:    found.modelID,
 		})
@@ -353,7 +353,7 @@ func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel,
 			return err
 		}
 		slog.Info("Overriding small model for non-interactive run", "provider", found.provider, "model", found.modelID)
-		app.configService.OverrideModel(config.SelectedModelTypeSmall, config.SelectedModel{
+		app.cfg.OverrideModel(config.SelectedModelTypeSmall, config.SelectedModel{
 			Provider: found.provider,
 			Model:    found.modelID,
 		})
@@ -361,7 +361,7 @@ func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel,
 	case largeModel != "":
 		// No small model specified, but large model was - use provider's default.
 		smallCfg := app.GetDefaultSmallModel(largeProviderID)
-		app.configService.OverrideModel(config.SelectedModelTypeSmall, smallCfg)
+		app.cfg.OverrideModel(config.SelectedModelTypeSmall, smallCfg)
 	}
 
 	return app.AgentCoordinator.UpdateModels(ctx)
@@ -370,7 +370,7 @@ func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel,
 // GetDefaultSmallModel returns the default small model for the given
 // provider. Falls back to the large model if no default is found.
 func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
-	svc := app.configService
+	svc := app.cfg
 	largeModelCfg, _ := svc.SelectedModel(config.SelectedModelTypeLarge)
 
 	// Find the provider in the known providers list to get its default small model.
@@ -457,14 +457,14 @@ func setupSubscriber[T any](
 }
 
 func (app *App) InitCoderAgent(ctx context.Context) error {
-	coderAgentCfg := app.configService.Agents()[config.AgentCoder]
+	coderAgentCfg := app.cfg.Agents()[config.AgentCoder]
 	if coderAgentCfg.ID == "" {
 		return fmt.Errorf("coder agent configuration is missing")
 	}
 	var err error
 	app.AgentCoordinator, err = agent.NewCoordinator(
 		ctx,
-		app.configService,
+		app.cfg,
 		app.Sessions,
 		app.Messages,
 		app.Permissions,

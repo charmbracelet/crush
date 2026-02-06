@@ -396,7 +396,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	}
 
 	// Add reasoning toggle for models that support it
-	svc := c.com.ConfigService()
+	svc := c.com.Config()
 	if agentCfg, ok := svc.Agent(config.AgentCoder); ok {
 		providerCfg := svc.GetProviderForModel(agentCfg.Model)
 		model := svc.GetModelByType(agentCfg.Model)
@@ -425,7 +425,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_sidebar", "Toggle Sidebar", "", ActionToggleCompactMode{}))
 	}
 	if c.sessionID != "" {
-		svc := c.com.ConfigService()
+		svc := c.com.Config()
 		agentCfg, _ := svc.Agent(config.AgentCoder)
 		model := svc.GetModelByType(agentCfg.Model)
 		if model != nil && model.SupportsImages {

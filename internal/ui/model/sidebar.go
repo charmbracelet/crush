@@ -21,7 +21,7 @@ func (m *UI) modelInfo(width int) string {
 
 	if model != nil {
 		// Get provider name first
-		providerConfig, ok := m.com.ConfigService().Provider(model.ModelCfg.Provider)
+		providerConfig, ok := m.com.Config().Provider(model.ModelCfg.Provider)
 		if ok {
 			providerName = providerConfig.Name
 
@@ -114,7 +114,7 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	height := area.Dy()
 
 	title := t.Muted.Width(width).MaxHeight(2).Render(m.session.Title)
-	cwd := common.PrettyPath(t, m.com.ConfigService().WorkingDir(), width)
+	cwd := common.PrettyPath(t, m.com.Config().WorkingDir(), width)
 	sidebarLogo := m.sidebarLogo
 	if height < logoHeightBreakpoint {
 		sidebarLogo = logo.SmallRender(m.com.Styles, width)
@@ -140,7 +140,7 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 
 	lspSection := m.lspInfo(width, maxLSPs, true)
 	mcpSection := m.mcpInfo(width, maxMCPs, true)
-	filesSection := m.filesInfo(m.com.ConfigService().WorkingDir(), width, maxFiles, true)
+	filesSection := m.filesInfo(m.com.Config().WorkingDir(), width, maxFiles, true)
 
 	uv.NewStyledString(
 		lipgloss.NewStyle().

@@ -289,23 +289,23 @@ func New(com *common.Common) *UI {
 	ui.status = status
 
 	// Initialize compact mode from config
-	ui.forceCompactMode = com.ConfigService().Options().TUI.CompactMode
+	ui.forceCompactMode = com.Config().Options().TUI.CompactMode
 
 	// set onboarding state defaults
 	ui.onboarding.yesInitializeSelected = true
 
 	desiredState := uiLanding
 	desiredFocus := uiFocusEditor
-	if !com.ConfigService().IsConfigured() {
+	if !com.Config().IsConfigured() {
 		desiredState = uiOnboarding
-	} else if n, _ := config.ProjectNeedsInitialization(com.ConfigService()); n {
+	} else if n, _ := config.ProjectNeedsInitialization(com.Config()); n {
 		desiredState = uiInitialize
 	}
 
 	// set initial state
 	ui.setState(desiredState, desiredFocus)
 
-	opts := com.ConfigService().Options()
+	opts := com.Config().Options()
 
 	// disable indeterminate progress bar
 	ui.progressBarEnabled = opts.Progress == nil || *opts.Progress
@@ -345,7 +345,7 @@ func (m *UI) setState(state uiState, focus uiFocusState) {
 // loadCustomCommands loads the custom commands asynchronously.
 func (m *UI) loadCustomCommands() tea.Cmd {
 	return func() tea.Msg {
-		customCommands, err := commands.LoadCustomCommands(m.com.ConfigService())
+		customCommands, err := commands.LoadCustomCommands(m.com.Config())
 		if err != nil {
 			slog.Error("Failed to load custom commands", "error", err)
 		}
@@ -776,7 +776,7 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 		case message.Assistant:
 			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap)...)
 			if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
-				infoItem := chat.NewAssistantInfoItem(m.com.Styles, msg, m.com.ConfigService(), time.Unix(m.lastUserMessageTime, 0))
+				infoItem := chat.NewAssistantInfoItem(m.com.Styles, msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
 				items = append(items, infoItem)
 			}
 		default:
@@ -906,7 +906,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 			}
 		}
 		if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
-			infoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, m.com.ConfigService(), time.Unix(m.lastUserMessageTime, 0))
+			infoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
 			m.chat.AppendMessages(infoItem)
 			if atBottom {
 				if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
@@ -977,7 +977,7 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 
 	if shouldRenderAssistant && msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
 		if infoItem := m.chat.MessageItem(chat.AssistantInfoID(msg.ID)); infoItem == nil {
-			newInfoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, m.com.ConfigService(), time.Unix(m.lastUserMessageTime, 0))
+			newInfoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
 			m.chat.AppendMessages(newInfoItem)
 		}
 	}
@@ -1196,19 +1196,19 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleThinking:
 		cmds = append(cmds, func() tea.Msg {
-			cfg := m.com.ConfigService()
+			cfg := m.com.Config()
 			if cfg == nil {
 				return util.ReportError(errors.New("configuration not found"))()
 			}
 
-			agentCfg, ok := m.com.ConfigService().Agent(config.AgentCoder)
+			agentCfg, ok := m.com.Config().Agent(config.AgentCoder)
 			if !ok {
 				return util.ReportError(errors.New("agent configuration not found"))()
 			}
 
 			currentModel, _ := cfg.SelectedModel(agentCfg.Model)
 			currentModel.Think = !currentModel.Think
-			if err := m.com.ConfigService().UpdatePreferredModel(agentCfg.Model, currentModel); err != nil {
+			if err := m.com.Config().UpdatePreferredModel(agentCfg.Model, currentModel); err != nil {
 				return util.ReportError(err)()
 			}
 			m.com.App.UpdateAgentModel(context.TODO())
@@ -1235,7 +1235,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 
-		cfg := m.com.ConfigService()
+		cfg := m.com.Config()
 		if cfg == nil {
 			cmds = append(cmds, util.ReportError(errors.New("configuration not found")))
 			break
@@ -1249,7 +1249,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 		// Attempt to import GitHub Copilot tokens from VSCode if available.
 		if isCopilot && !isConfigured() {
-			m.com.ConfigService().ImportCopilot()
+			m.com.Config().ImportCopilot()
 		}
 
 		if !isConfigured() {
@@ -1260,12 +1260,12 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 
-		if err := m.com.ConfigService().UpdatePreferredModel(msg.ModelType, msg.Model); err != nil {
+		if err := m.com.Config().UpdatePreferredModel(msg.ModelType, msg.Model); err != nil {
 			cmds = append(cmds, util.ReportError(err))
 		} else if _, ok := cfg.SelectedModel(config.SelectedModelTypeSmall); !ok {
 			// Ensure small model is set is unset.
 			smallModel := m.com.App.GetDefaultSmallModel(providerID)
-			if err := m.com.ConfigService().UpdatePreferredModel(config.SelectedModelTypeSmall, smallModel); err != nil {
+			if err := m.com.Config().UpdatePreferredModel(config.SelectedModelTypeSmall, smallModel); err != nil {
 				cmds = append(cmds, util.ReportError(err))
 			}
 		}
@@ -1286,7 +1286,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 		if isOnboarding {
 			m.setState(uiLanding, uiFocusEditor)
-			m.com.ConfigService().SetupAgents()
+			m.com.Config().SetupAgents()
 			if err := m.com.App.InitCoderAgent(context.TODO()); err != nil {
 				cmds = append(cmds, util.ReportError(err))
 			}
@@ -1297,13 +1297,13 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 
-		cfg := m.com.ConfigService()
+		cfg := m.com.Config()
 		if cfg == nil {
 			cmds = append(cmds, util.ReportError(errors.New("configuration not found")))
 			break
 		}
 
-		agentCfg, ok := m.com.ConfigService().Agent(config.AgentCoder)
+		agentCfg, ok := m.com.Config().Agent(config.AgentCoder)
 		if !ok {
 			cmds = append(cmds, util.ReportError(errors.New("agent configuration not found")))
 			break
@@ -1311,7 +1311,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 		currentModel, _ := cfg.SelectedModel(agentCfg.Model)
 		currentModel.ReasoningEffort = msg.Effort
-		if err := m.com.ConfigService().UpdatePreferredModel(agentCfg.Model, currentModel); err != nil {
+		if err := m.com.Config().UpdatePreferredModel(agentCfg.Model, currentModel); err != nil {
 			cmds = append(cmds, util.ReportError(err))
 			break
 		}
@@ -1635,7 +1635,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 						m.completionsQuery = ""
 						m.completionsStartIndex = curIdx
 						m.completionsPositionStart = m.completionsPosition()
-						depth, limit := m.com.ConfigService().Options().TUI.Completions.Limits()
+						depth, limit := m.com.Config().Options().TUI.Completions.Limits()
 						cmds = append(cmds, m.completions.OpenWithFiles(depth, limit))
 					}
 				}
@@ -1920,7 +1920,7 @@ func (m *UI) View() tea.View {
 		v.BackgroundColor = m.com.Styles.Background
 	}
 	v.MouseMode = tea.MouseModeCellMotion
-	v.WindowTitle = "crush " + home.Short(m.com.ConfigService().WorkingDir())
+	v.WindowTitle = "crush " + home.Short(m.com.Config().WorkingDir())
 
 	canvas := uv.NewScreenBuffer(m.width, m.height)
 	v.Cursor = m.Draw(canvas, canvas.Bounds())
@@ -2157,7 +2157,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 func (m *UI) toggleCompactMode() tea.Cmd {
 	m.forceCompactMode = !m.forceCompactMode
 
-	err := m.com.ConfigService().SetCompactMode(m.forceCompactMode)
+	err := m.com.Config().SetCompactMode(m.forceCompactMode)
 	if err != nil {
 		return util.ReportError(err)
 	}
@@ -2848,7 +2848,7 @@ func (m *UI) openPermissionsDialog(perm permission.PermissionRequest) tea.Cmd {
 
 	// Get diff mode from config.
 	var opts []dialog.PermissionsOption
-	if diffMode := m.com.ConfigService().Options().TUI.DiffMode; diffMode != "" {
+	if diffMode := m.com.Config().Options().TUI.DiffMode; diffMode != "" {
 		opts = append(opts, dialog.WithDiffMode(diffMode == "split"))
 	}
 
@@ -3045,7 +3045,7 @@ func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
 
 	lspSection := m.lspInfo(sectionWidth, maxItemsPerSection, false)
 	mcpSection := m.mcpInfo(sectionWidth, maxItemsPerSection, false)
-	filesSection := m.filesInfo(m.com.ConfigService().WorkingDir(), sectionWidth, maxItemsPerSection, false)
+	filesSection := m.filesInfo(m.com.Config().WorkingDir(), sectionWidth, maxItemsPerSection, false)
 	sections := lipgloss.JoinHorizontal(lipgloss.Top, filesSection, " ", lspSection, " ", mcpSection)
 	uv.NewStyledString(
 		s.CompactDetails.View.
@@ -3063,7 +3063,7 @@ func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
 
 func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string) tea.Cmd {
 	load := func() tea.Msg {
-		prompt, err := commands.GetMCPPrompt(m.com.ConfigService(), clientID, promptID, arguments)
+		prompt, err := commands.GetMCPPrompt(m.com.Config(), clientID, promptID, arguments)
 		if err != nil {
 			// TODO: make this better
 			return util.ReportError(err)()

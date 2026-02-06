@@ -123,7 +123,7 @@ func (f *FilePicker) SetImageCapabilities(caps *common.Capabilities) {
 
 // WorkingDir returns the current working directory of the [FilePicker].
 func (f *FilePicker) WorkingDir() string {
-	wd := f.com.ConfigService().WorkingDir()
+	wd := f.com.Config().WorkingDir()
 	if len(wd) > 0 {
 		return wd
 	}

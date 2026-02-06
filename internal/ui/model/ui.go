@@ -24,6 +24,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
+	nativeclipboard "github.com/aymanbagabas/go-nativeclipboard"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/commands"
@@ -1542,6 +1543,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					cmds = append(cmds, cmd)
 				}
 
+			case key.Matches(msg, m.keyMap.Editor.PasteImage):
+				cmds = append(cmds, m.pasteImageFromClipboard())
+
 			case key.Matches(msg, m.keyMap.Editor.SendMessage):
 				value := m.textarea.Value()
 				if before, ok := strings.CutSuffix(value, "\\"); ok {
@@ -2074,6 +2078,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 				[]key.Binding{
 					k.Editor.Newline,
 					k.Editor.AddImage,
+					k.Editor.PasteImage,
 					k.Editor.MentionFile,
 					k.Editor.OpenEditor,
 				},
@@ -2122,6 +2127,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 				[]key.Binding{
 					k.Editor.Newline,
 					k.Editor.AddImage,
+					k.Editor.PasteImage,
 					k.Editor.MentionFile,
 					k.Editor.OpenEditor,
 				},
@@ -3050,6 +3056,95 @@ func (m *UI) handleFilePathPaste(path string) tea.Cmd {
 			FileName: fileName,
 			MimeType: mimeType,
 			Content:  content,
+		}
+	}
+}
+
+// pasteImageFromClipboard reads image data from the system clipboard and
+// creates an attachment. If no image data is found, it falls back to
+// interpreting clipboard text as a file path.
+func (m *UI) pasteImageFromClipboard() tea.Cmd {
+	return func() tea.Msg {
+		imageData, err := nativeclipboard.Image.Read()
+		if err != nil || len(imageData) == 0 {
+			// Fall back to text clipboard — user may have copied a file path.
+			textData, textErr := nativeclipboard.Text.Read()
+			if textErr != nil || len(textData) == 0 {
+				return util.NewInfoMsg("Clipboard is empty or does not contain an image")
+			}
+
+			path := strings.TrimSpace(string(textData))
+			path = strings.ReplaceAll(path, "\\ ", " ")
+			if _, statErr := os.Stat(path); statErr != nil {
+				return util.NewInfoMsg("Clipboard does not contain an image or valid file path")
+			}
+
+			lowerPath := strings.ToLower(path)
+			isAllowed := false
+			for _, ext := range common.AllowedImageTypes {
+				if strings.HasSuffix(lowerPath, ext) {
+					isAllowed = true
+					break
+				}
+			}
+			if !isAllowed {
+				return util.NewInfoMsg("File type is not a supported image format")
+			}
+
+			fileInfo, statErr := os.Stat(path)
+			if statErr != nil {
+				return util.InfoMsg{
+					Type: util.InfoTypeError,
+					Msg:  fmt.Sprintf("Unable to read file: %v", statErr),
+				}
+			}
+			if fileInfo.Size() > common.MaxAttachmentSize {
+				return util.InfoMsg{
+					Type: util.InfoTypeError,
+					Msg:  "File too large, max 5MB",
+				}
+			}
+
+			content, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return util.InfoMsg{
+					Type: util.InfoTypeError,
+					Msg:  fmt.Sprintf("Unable to read file: %v", readErr),
+				}
+			}
+
+			return message.Attachment{
+				FilePath: path,
+				FileName: filepath.Base(path),
+				MimeType: mimeOf(content),
+				Content:  content,
+			}
+		}
+
+		tmpFile, tmpErr := os.CreateTemp("", "clipboard_image_crush_*")
+		if tmpErr != nil {
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
+				Msg:  fmt.Sprintf("Unable to create temp file: %v", tmpErr),
+			}
+		}
+
+		if _, writeErr := tmpFile.Write(imageData); writeErr != nil {
+			tmpFile.Close()
+			os.Remove(tmpFile.Name())
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
+				Msg:  fmt.Sprintf("Unable to write clipboard image: %v", writeErr),
+			}
+		}
+		tmpFile.Close()
+
+		mimeType := mimeOf(imageData)
+		return message.Attachment{
+			FilePath: tmpFile.Name(),
+			FileName: filepath.Base(tmpFile.Name()),
+			MimeType: mimeType,
+			Content:  imageData,
 		}
 	}
 }

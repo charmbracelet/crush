@@ -124,11 +124,11 @@ func runStats(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 
 	if dataDir == "" {
-		cfg, err := config.Init("", "", false)
+		svc, err := config.Init("", "", false)
 		if err != nil {
 			return fmt.Errorf("failed to initialize config: %w", err)
 		}
-		dataDir = cfg.Options.DataDirectory
+		dataDir = svc.Config().Options.DataDirectory
 	}
 
 	conn, err := db.Connect(ctx, dataDir)

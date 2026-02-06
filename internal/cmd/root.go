@@ -195,10 +195,11 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 		return nil, err
 	}
 
-	cfg, err := config.Init(cwd, dataDir, debug)
+	svc, err := config.Init(cwd, dataDir, debug)
 	if err != nil {
 		return nil, err
 	}
+	cfg := svc.Config()
 
 	if cfg.Permissions == nil {
 		cfg.Permissions = &config.Permissions{}

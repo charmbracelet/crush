@@ -30,7 +30,7 @@ import (
 const defaultCatwalkURL = "https://catwalk.charm.sh"
 
 // Load loads the configuration from the default paths.
-func Load(workingDir, dataDir string, debug bool) (*Config, error) {
+func Load(workingDir, dataDir string, debug bool) (*Service, error) {
 	configPaths := lookupConfigs(workingDir)
 
 	cfg, err := loadFromConfigPaths(configPaths)
@@ -38,8 +38,16 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 		return nil, fmt.Errorf("failed to load config from paths %v: %w", configPaths, err)
 	}
 
+	store := NewFileStore(GlobalConfigData())
+
+	svc := &Service{
+		cfg:        cfg,
+		store:      store,
+		workingDir: workingDir,
+	}
+
+	// Keep dataConfigDir in sync for the transitional configStore() accessor.
 	cfg.dataConfigDir = GlobalConfigData()
-	cfg.store = NewFileStore(cfg.dataConfigDir)
 
 	cfg.setDefaults(workingDir, dataDir)
 
@@ -73,26 +81,28 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	svc.knownProviders = providers
 	cfg.knownProviders = providers
 
 	env := env.New()
 	// Configure providers
 	valueResolver := NewShellVariableResolver(env)
+	svc.resolver = valueResolver
 	cfg.resolver = valueResolver
-	if err := cfg.configureProviders(env, valueResolver, cfg.knownProviders); err != nil {
+	if err := cfg.configureProviders(env, valueResolver, svc.knownProviders); err != nil {
 		return nil, fmt.Errorf("failed to configure providers: %w", err)
 	}
 
 	if !cfg.IsConfigured() {
 		slog.Warn("No providers configured")
-		return cfg, nil
+		return svc, nil
 	}
 
-	if err := cfg.configureSelectedModels(cfg.knownProviders); err != nil {
+	if err := cfg.configureSelectedModels(svc.knownProviders); err != nil {
 		return nil, fmt.Errorf("failed to configure selected models: %w", err)
 	}
 	cfg.SetupAgents()
-	return cfg, nil
+	return svc, nil
 }
 
 func PushPopCrushEnv() func() {

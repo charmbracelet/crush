@@ -18,12 +18,12 @@ type ProjectInitFlag struct {
 	Initialized bool `json:"initialized"`
 }
 
-func Init(workingDir, dataDir string, debug bool) (*Config, error) {
-	cfg, err := Load(workingDir, dataDir, debug)
+func Init(workingDir, dataDir string, debug bool) (*Service, error) {
+	svc, err := Load(workingDir, dataDir, debug)
 	if err != nil {
 		return nil, err
 	}
-	return cfg, nil
+	return svc, nil
 }
 
 func ProjectNeedsInitialization(cfg *Config) (bool, error) {

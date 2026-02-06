@@ -38,7 +38,7 @@ crush models gpt5`,
 			return err
 		}
 
-		if !cfg.IsConfigured() {
+		if !cfg.Config().IsConfigured() {
 			return fmt.Errorf("no providers configured - please run 'crush' to set up a provider interactively")
 		}
 
@@ -55,7 +55,7 @@ crush models gpt5`,
 		var providerIDs []string
 		providerModels := make(map[string][]string)
 
-		for providerID, provider := range cfg.Providers.Seq2() {
+		for providerID, provider := range cfg.Config().Providers.Seq2() {
 			if provider.Disable {
 				continue
 			}

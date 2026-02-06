@@ -394,6 +394,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setState(uiChat, m.focus)
 		m.session = msg.session
 		m.sessionFiles = msg.files
+		cmds = append(cmds, m.startLSPs(msg.lspFilePaths()))
 		msgs, err := m.com.App.Messages.List(context.Background(), m.session.ID)
 		if err != nil {
 			cmds = append(cmds, util.ReportError(err))
@@ -417,7 +418,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case sessionFilesUpdatesMsg:
 		m.sessionFiles = msg.sessionFiles
-		cmds = append(cmds, m.startLSPsForSessionFiles(msg.sessionFiles))
+		var paths []string
+		for _, f := range msg.sessionFiles {
+			paths = append(paths, f.LatestVersion.Path)
+		}
+		cmds = append(cmds, m.startLSPs(paths))
 
 	case sendMessageMsg:
 		cmds = append(cmds, m.sendMessage(msg.Content, msg.Attachments...))

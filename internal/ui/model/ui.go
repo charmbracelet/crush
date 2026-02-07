@@ -1139,7 +1139,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 
 		if m.dialog.ContainsDialog(dialog.FilePickerID) {
-			fimage.Reset()
+			defer fimage.Reset()
 		}
 
 		m.dialog.CloseFrontDialog()

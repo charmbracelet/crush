@@ -67,7 +67,7 @@ func RefreshPrompts(ctx context.Context, name string) {
 	updateState(name, StateConnected, nil, session, prev.Counts)
 }
 
-func getPrompts(ctx context.Context, c *mcp.ClientSession) ([]*Prompt, error) {
+func getPrompts(ctx context.Context, c *mcpSession) ([]*Prompt, error) {
 	if c.InitializeResult().Capabilities.Prompts == nil {
 		return nil, nil
 	}

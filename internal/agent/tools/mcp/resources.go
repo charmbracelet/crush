@@ -75,7 +75,7 @@ func RefreshResources(ctx context.Context, name string) {
 	updateState(name, StateConnected, nil, session, prev.Counts)
 }
 
-func getResources(ctx context.Context, c *mcp.ClientSession) ([]*Resource, error) {
+func getResources(ctx context.Context, c *mcpSession) ([]*Resource, error) {
 	if c.InitializeResult().Capabilities.Resources == nil {
 		return nil, nil
 	}

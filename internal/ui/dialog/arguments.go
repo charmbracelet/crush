@@ -15,7 +15,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/uiutil"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
@@ -202,7 +202,7 @@ func (a *Arguments) HandleMsg(msg tea.Msg) Action {
 				for i, arg := range a.arguments {
 					args[arg.ID] = a.inputs[i].Value()
 					if arg.Required && strings.TrimSpace(a.inputs[i].Value()) == "" {
-						warning = uiutil.ReportWarn("Required argument '" + arg.Title + "' is missing.")
+						warning = util.ReportWarn("Required argument '" + arg.Title + "' is missing.")
 						break
 					}
 				}
@@ -342,7 +342,7 @@ func (a *Arguments) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	if scrollbar != "" {
 		content = lipgloss.JoinHorizontal(lipgloss.Top, content, scrollbar)
 	}
-	contentParts := []string{}
+	var contentParts []string
 	if description != "" {
 		contentParts = append(contentParts, description)
 	}

@@ -227,9 +227,9 @@ func isMarkdownFile(name string) bool {
 	return strings.HasSuffix(strings.ToLower(name), ".md")
 }
 
-func GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error) {
+func GetMCPPrompt(cfg *config.Config, clientID, promptID string, args map[string]string) (string, error) {
 	// TODO: we should pass the context down
-	result, err := mcp.GetPromptMessages(context.Background(), clientID, promptID, args)
+	result, err := mcp.GetPromptMessages(context.Background(), cfg, clientID, promptID, args)
 	if err != nil {
 		return "", err
 	}

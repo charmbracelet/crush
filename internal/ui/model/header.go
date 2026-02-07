@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -22,29 +23,64 @@ const (
 	rightPadding   = 1
 )
 
-// renderCompactHeader renders the compact header for the given session.
-func renderCompactHeader(
-	com *common.Common,
+type header struct {
+	// cached logo and compact logo
+	logo        string
+	compactLogo string
+
+	com     *common.Common
+	width   int
+	compact bool
+}
+
+// newHeader creates a new header model.
+func newHeader(com *common.Common) *header {
+	h := &header{
+		com: com,
+	}
+	t := com.Styles
+	h.compactLogo = t.Header.Charm.Render("Charm™") + " " +
+		styles.ApplyBoldForegroundGrad(t, "CRUSH", t.Secondary, t.Primary) + " "
+	return h
+}
+
+// drawHeader draws the header for the given session.
+func (h *header) drawHeader(
+	scr uv.Screen,
+	area uv.Rectangle,
 	session *session.Session,
-	lspClients *csync.Map[string, *lsp.Client],
+	compact bool,
 	detailsOpen bool,
 	width int,
-) string {
-	if session == nil || session.ID == "" {
-		return ""
+) {
+	t := h.com.Styles
+	if width != h.width || compact != h.compact {
+		h.logo = renderLogo(h.com.Styles, compact, width)
 	}
 
-	t := com.Styles
+	h.width = width
+	h.compact = compact
+
+	if !compact || session == nil || h.com.App == nil {
+		uv.NewStyledString(h.logo).Draw(scr, area)
+		return
+	}
+
+	if session.ID == "" {
+		return
+	}
 
 	var b strings.Builder
-
-	b.WriteString(t.Header.Charm.Render("Charm™"))
-	b.WriteString(" ")
-	b.WriteString(styles.ApplyBoldForegroundGrad(t, "CRUSH", t.Secondary, t.Primary))
-	b.WriteString(" ")
+	b.WriteString(h.compactLogo)
 
 	availDetailWidth := width - leftPadding - rightPadding - lipgloss.Width(b.String()) - minHeaderDiags
-	details := renderHeaderDetails(com, session, lspClients, detailsOpen, availDetailWidth)
+	details := renderHeaderDetails(
+		h.com,
+		session,
+		h.com.App.LSPManager.Clients(),
+		detailsOpen,
+		availDetailWidth,
+	)
 
 	remainingWidth := width -
 		lipgloss.Width(b.String()) -
@@ -61,7 +97,9 @@ func renderCompactHeader(
 
 	b.WriteString(details)
 
-	return t.Base.Padding(0, rightPadding, 0, leftPadding).Render(b.String())
+	view := uv.NewStyledString(
+		t.Base.Padding(0, rightPadding, 0, leftPadding).Render(b.String()))
+	view.Draw(scr, area)
 }
 
 // renderHeaderDetails renders the details section of the header.
@@ -82,11 +120,11 @@ func renderHeaderDetails(
 	}
 
 	if errorCount > 0 {
-		parts = append(parts, t.LSP.ErrorDiagnostic.Render(fmt.Sprintf("%s%d", styles.ErrorIcon, errorCount)))
+		parts = append(parts, t.LSP.ErrorDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPErrorIcon, errorCount)))
 	}
 
-	agentCfg := config.Get().Agents[config.AgentCoder]
-	model := config.Get().GetModelByType(agentCfg.Model)
+	agentCfg := com.Config().Agents[config.AgentCoder]
+	model := com.Config().GetModelByType(agentCfg.Model)
 	percentage := (float64(session.CompletionTokens+session.PromptTokens) / float64(model.ContextWindow)) * 100
 	formattedPercentage := t.Header.Percentage.Render(fmt.Sprintf("%d%%", int(percentage)))
 	parts = append(parts, formattedPercentage)

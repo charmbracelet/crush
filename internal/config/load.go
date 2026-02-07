@@ -95,7 +95,7 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 }
 
 func PushPopCrushEnv() func() {
-	found := []string{}
+	var found []string
 	for _, ev := range os.Environ() {
 		if strings.HasPrefix(ev, "CRUSH_") {
 			pair := strings.SplitN(ev, "=", 2)
@@ -342,12 +342,6 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	}
 	if c.Options.TUI == nil {
 		c.Options.TUI = &TUIOptions{}
-	}
-	if c.Options.ContextPaths == nil {
-		c.Options.ContextPaths = []string{}
-	}
-	if c.Options.SkillsPaths == nil {
-		c.Options.SkillsPaths = []string{}
 	}
 	if dataDir != "" {
 		c.Options.DataDirectory = dataDir

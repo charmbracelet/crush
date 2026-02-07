@@ -437,8 +437,12 @@ func (m *Chat) MessageItem(id string) chat.MessageItem {
 // ToggleExpandedSelectedItem expands the selected message item if it is expandable.
 func (m *Chat) ToggleExpandedSelectedItem() {
 	if expandable, ok := m.list.SelectedItem().(chat.Expandable); ok {
-		expandable.ToggleExpanded()
-		m.list.ScrollToIndex(m.list.Selected())
+		if !expandable.ToggleExpanded() {
+			m.list.ScrollToIndex(m.list.Selected())
+		}
+		if m.list.AtBottom() {
+			m.list.ScrollToBottom()
+		}
 	}
 }
 
@@ -544,9 +548,13 @@ func (m *Chat) HandleDelayedClick(msg DelayedClickMsg) bool {
 		handled := clickable.HandleMouseClick(ansi.MouseButton1, msg.X, msg.Y)
 		// Toggle expansion if applicable.
 		if expandable, ok := selectedItem.(chat.Expandable); ok {
-			expandable.ToggleExpanded()
+			if !expandable.ToggleExpanded() {
+				m.list.ScrollToIndex(m.list.Selected())
+			}
 		}
-		m.list.ScrollToIndex(m.list.Selected())
+		if m.list.AtBottom() {
+			m.list.ScrollToBottom()
+		}
 		return handled
 	}
 

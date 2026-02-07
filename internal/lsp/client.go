@@ -13,12 +13,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/bmatcuk/doublestar/v4"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/home"
-	powernapconfig "github.com/charmbracelet/x/powernap/pkg/config"
 	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/charmbracelet/x/powernap/pkg/transport"
@@ -35,6 +32,7 @@ type DiagnosticCounts struct {
 type Client struct {
 	client *powernap.Client
 	name   string
+	debug  bool
 
 	// Working directory this LSP is scoped to.
 	workDir string
@@ -68,7 +66,7 @@ type Client struct {
 }
 
 // New creates a new LSP client using the powernap implementation.
-func New(ctx context.Context, name string, cfg config.LSPConfig, resolver config.VariableResolver) (*Client, error) {
+func New(ctx context.Context, name string, cfg config.LSPConfig, resolver config.VariableResolver, debug bool) (*Client, error) {
 	client := &Client{
 		name:        name,
 		fileTypes:   cfg.FileTypes,
@@ -76,6 +74,7 @@ func New(ctx context.Context, name string, cfg config.LSPConfig, resolver config
 		openFiles:   csync.NewMap[string, *OpenFileInfo](),
 		config:      cfg,
 		ctx:         ctx,
+		debug:       debug,
 		resolver:    resolver,
 	}
 	client.serverState.Store(StateStarting)
@@ -174,7 +173,11 @@ func (c *Client) registerHandlers() {
 	c.RegisterServerRequestHandler("workspace/applyEdit", HandleApplyEdit)
 	c.RegisterServerRequestHandler("workspace/configuration", HandleWorkspaceConfiguration)
 	c.RegisterServerRequestHandler("client/registerCapability", HandleRegisterCapability)
-	c.RegisterNotificationHandler("window/showMessage", HandleServerMessage)
+	c.RegisterNotificationHandler("window/showMessage", func(ctx context.Context, method string, params json.RawMessage) {
+		if c.debug {
+			HandleServerMessage(ctx, method, params)
+		}
+	})
 	c.RegisterNotificationHandler("textDocument/publishDiagnostics", func(_ context.Context, _ string, params json.RawMessage) {
 		HandleDiagnostics(c, params)
 	})
@@ -193,6 +196,8 @@ func (c *Client) Restart() error {
 	if err := c.Close(closeCtx); err != nil {
 		slog.Warn("Error closing client during restart", "name", c.name, "error", err)
 	}
+
+	c.SetServerState(StateStopped)
 
 	c.diagCountsCache = DiagnosticCounts{}
 	c.diagCountsVersion = 0
@@ -231,7 +236,8 @@ func (c *Client) Restart() error {
 type ServerState int
 
 const (
-	StateStarting ServerState = iota
+	StateStopped ServerState = iota
+	StateStarting
 	StateReady
 	StateError
 	StateDisabled
@@ -262,8 +268,6 @@ func (c *Client) SetDiagnosticsCallback(callback func(name string, count int)) {
 
 // WaitForServerReady waits for the server to be ready
 func (c *Client) WaitForServerReady(ctx context.Context) error {
-	cfg := config.Get()
-
 	// Set initial state
 	c.SetServerState(StateStarting)
 
@@ -275,7 +279,7 @@ func (c *Client) WaitForServerReady(ctx context.Context) error {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
-	if cfg != nil && cfg.Options.DebugLSP {
+	if c.debug {
 		slog.Debug("Waiting for LSP server to be ready...")
 	}
 
@@ -289,7 +293,7 @@ func (c *Client) WaitForServerReady(ctx context.Context) error {
 		case <-ticker.C:
 			// Check if client is running
 			if !c.client.IsRunning() {
-				if cfg != nil && cfg.Options.DebugLSP {
+				if c.debug {
 					slog.Debug("LSP server not ready yet", "server", c.name)
 				}
 				continue
@@ -297,7 +301,7 @@ func (c *Client) WaitForServerReady(ctx context.Context) error {
 
 			// Server is ready
 			c.SetServerState(StateReady)
-			if cfg != nil && cfg.Options.DebugLSP {
+			if c.debug {
 				slog.Debug("LSP server is ready")
 			}
 			return nil
@@ -416,10 +420,8 @@ func (c *Client) IsFileOpen(filepath string) bool {
 
 // CloseAllFiles closes all currently open files.
 func (c *Client) CloseAllFiles(ctx context.Context) {
-	cfg := config.Get()
-	debugLSP := cfg != nil && cfg.Options.DebugLSP
 	for uri := range c.openFiles.Seq2() {
-		if debugLSP {
+		if c.debug {
 			slog.Debug("Closing file", "file", uri)
 		}
 		if err := c.client.NotifyDidCloseTextDocument(ctx, uri); err != nil {
@@ -575,73 +577,4 @@ func (c *Client) FindReferences(ctx context.Context, filepath string, line, char
 	// NOTE: line and character should be 0-based.
 	// See: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#position
 	return c.client.FindReferences(ctx, filepath, line-1, character-1, includeDeclaration)
-}
-
-// FilterMatching gets a list of configs and only returns the ones with
-// matching root markers.
-func FilterMatching(dir string, servers map[string]*powernapconfig.ServerConfig) map[string]*powernapconfig.ServerConfig {
-	result := map[string]*powernapconfig.ServerConfig{}
-	if len(servers) == 0 {
-		return result
-	}
-
-	type serverPatterns struct {
-		server   *powernapconfig.ServerConfig
-		patterns []string
-	}
-	normalized := make(map[string]serverPatterns, len(servers))
-	for name, server := range servers {
-		var patterns []string
-		for _, p := range server.RootMarkers {
-			if p == ".git" {
-				// ignore .git for discovery
-				continue
-			}
-			patterns = append(patterns, filepath.ToSlash(p))
-		}
-		if len(patterns) == 0 {
-			slog.Debug("ignoring lsp with no root markers", "name", name)
-			continue
-		}
-		normalized[name] = serverPatterns{server: server, patterns: patterns}
-	}
-
-	walker := fsext.NewFastGlobWalker(dir)
-	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-
-		if walker.ShouldSkip(path) {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		relPath, err := filepath.Rel(dir, path)
-		if err != nil {
-			return nil
-		}
-		relPath = filepath.ToSlash(relPath)
-
-		for name, sp := range normalized {
-			for _, pattern := range sp.patterns {
-				matched, err := doublestar.Match(pattern, relPath)
-				if err != nil || !matched {
-					continue
-				}
-				result[name] = sp.server
-				delete(normalized, name)
-				break
-			}
-		}
-
-		if len(normalized) == 0 {
-			return filepath.SkipAll
-		}
-		return nil
-	})
-
-	return result
 }

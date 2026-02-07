@@ -588,19 +588,17 @@ func toolOutputCodeContent(sty *styles.Styles, path, content string, offset, wid
 	numFmt := fmt.Sprintf("%%%dd", maxDigits)
 
 	bodyWidth := width - toolBodyLeftPaddingTotal
-	codeWidth := bodyWidth - maxDigits - 4 // -4 for line number padding
+	codeWidth := bodyWidth - maxDigits
 
 	var out []string
 	for i, ln := range highlightedLines {
 		lineNum := sty.Tool.ContentLineNumber.Render(fmt.Sprintf(numFmt, i+1+offset))
 
-		if lipgloss.Width(ln) > codeWidth {
-			ln = ansi.Truncate(ln, codeWidth, "…")
-		}
+		// Truncate accounting for padding that will be added.
+		ln = ansi.Truncate(ln, codeWidth-sty.Tool.ContentCodeLine.GetHorizontalPadding(), "…")
 
 		codeLine := sty.Tool.ContentCodeLine.
 			Width(codeWidth).
-			PaddingLeft(2).
 			Render(ln)
 
 		out = append(out, lipgloss.JoinHorizontal(lipgloss.Left, lineNum, codeLine))
@@ -609,7 +607,7 @@ func toolOutputCodeContent(sty *styles.Styles, path, content string, offset, wid
 	// Add truncation message if needed.
 	if len(lines) > maxLines && !expanded {
 		out = append(out, sty.Tool.ContentCodeTruncation.
-			Width(bodyWidth).
+			Width(width).
 			Render(fmt.Sprintf(assistantMessageTruncateFormat, len(lines)-maxLines)),
 		)
 	}

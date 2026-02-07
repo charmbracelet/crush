@@ -21,7 +21,6 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/log"
@@ -67,7 +66,7 @@ type coordinator struct {
 	permissions permission.Service
 	history     history.Service
 	filetracker filetracker.Service
-	lspClients  *csync.Map[string, *lsp.Client]
+	lspManager  *lsp.Manager
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
@@ -83,7 +82,7 @@ func NewCoordinator(
 	permissions permission.Service,
 	history history.Service,
 	filetracker filetracker.Service,
-	lspClients *csync.Map[string, *lsp.Client],
+	lspManager *lsp.Manager,
 ) (Coordinator, error) {
 	c := &coordinator{
 		cfg:         cfg,
@@ -92,7 +91,7 @@ func NewCoordinator(
 		permissions: permissions,
 		history:     history,
 		filetracker: filetracker,
-		lspClients:  lspClients,
+		lspManager:  lspManager,
 		agents:      make(map[string]SessionAgent),
 	}
 
@@ -423,20 +422,29 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		tools.NewJobOutputTool(),
 		tools.NewJobKillTool(),
 		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),
-		tools.NewEditTool(c.lspClients, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
-		tools.NewMultiEditTool(c.lspClients, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
+		tools.NewEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
+		tools.NewMultiEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 		tools.NewFetchTool(c.permissions, c.cfg.WorkingDir(), nil),
 		tools.NewGlobTool(c.cfg.WorkingDir()),
 		tools.NewGrepTool(c.cfg.WorkingDir()),
 		tools.NewLsTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Tools.Ls),
 		tools.NewSourcegraphTool(nil),
 		tools.NewTodosTool(c.sessions),
-		tools.NewViewTool(c.lspClients, c.permissions, c.filetracker, c.cfg.WorkingDir(), c.cfg.Options.SkillsPaths...),
-		tools.NewWriteTool(c.lspClients, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
+		tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, c.cfg.WorkingDir(), c.cfg.Options.SkillsPaths...),
+		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 	)
 
-	if c.lspClients.Len() > 0 {
-		allTools = append(allTools, tools.NewDiagnosticsTool(c.lspClients), tools.NewReferencesTool(c.lspClients), tools.NewLSPRestartTool(c.lspClients))
+	// Add LSP tools if user has configured LSPs or auto_lsp is enabled (nil or true).
+	if len(c.cfg.LSP) > 0 || c.cfg.Options.AutoLSP == nil || *c.cfg.Options.AutoLSP {
+		allTools = append(allTools, tools.NewDiagnosticsTool(c.lspManager), tools.NewReferencesTool(c.lspManager), tools.NewLSPRestartTool(c.lspManager))
+	}
+
+	if len(c.cfg.MCP) > 0 {
+		allTools = append(
+			allTools,
+			tools.NewListMCPResourcesTool(c.cfg, c.permissions),
+			tools.NewReadMCPResourceTool(c.cfg, c.permissions),
+		)
 	}
 
 	var filteredTools []fantasy.AgentTool
@@ -446,7 +454,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		}
 	}
 
-	for _, tool := range tools.GetMCPTools(c.permissions, c.cfg.WorkingDir()) {
+	for _, tool := range tools.GetMCPTools(c.permissions, c.cfg, c.cfg.WorkingDir()) {
 		if agent.AllowedMCP == nil {
 			// No MCP restrictions
 			filteredTools = append(filteredTools, tool)

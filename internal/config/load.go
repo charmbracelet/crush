@@ -62,6 +62,11 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 		assignIfNil(&cfg.Options.TUI.Completions.MaxItems, items)
 	}
 
+	if isAppleTerminal() {
+		slog.Warn("Detected Apple Terminal, enabling transparent mode")
+		assignIfNil(&cfg.Options.TUI.Transparent, true)
+	}
+
 	// Load known providers, this loads the config from catwalk
 	providers, err := Providers(cfg)
 	if err != nil {
@@ -90,7 +95,7 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 }
 
 func PushPopCrushEnv() func() {
-	found := []string{}
+	var found []string
 	for _, ev := range os.Environ() {
 		if strings.HasPrefix(ev, "CRUSH_") {
 			pair := strings.SplitN(ev, "=", 2)
@@ -336,12 +341,6 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	}
 	if c.Options.TUI == nil {
 		c.Options.TUI = &TUIOptions{}
-	}
-	if c.Options.ContextPaths == nil {
-		c.Options.ContextPaths = []string{}
-	}
-	if c.Options.SkillsPaths == nil {
-		c.Options.SkillsPaths = []string{}
 	}
 	if dataDir != "" {
 		c.Options.DataDirectory = dataDir
@@ -792,3 +791,5 @@ func GlobalSkillsDirs() []string {
 		filepath.Join(configBase, "agents", "skills"),
 	}
 }
+
+func isAppleTerminal() bool { return os.Getenv("TERM_PROGRAM") == "Apple_Terminal" }

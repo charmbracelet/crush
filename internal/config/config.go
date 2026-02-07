@@ -194,6 +194,7 @@ type LSPConfig struct {
 	RootMarkers []string          `json:"root_markers,omitempty" jsonschema:"description=Files or directories that indicate the project root,example=go.mod,example=package.json,example=Cargo.toml"`
 	InitOptions map[string]any    `json:"init_options,omitempty" jsonschema:"description=Initialization options passed to the LSP server during initialize request"`
 	Options     map[string]any    `json:"options,omitempty" jsonschema:"description=LSP server-specific settings passed during initialization"`
+	Timeout     int               `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for LSP server initialization,default=30,example=60,example=120"`
 }
 
 type TUIOptions struct {
@@ -203,6 +204,7 @@ type TUIOptions struct {
 	//
 
 	Completions Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
+	Transparent *bool       `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
 }
 
 // Completions defines options for the completions UI.
@@ -708,6 +710,8 @@ func allToolNames() []string {
 		"todos",
 		"view",
 		"write",
+		"list_mcp_resources",
+		"read_mcp_resource",
 	}
 }
 
@@ -726,7 +730,7 @@ func resolveReadOnlyTools(tools []string) []string {
 }
 
 func filterSlice(data []string, mask []string, include bool) []string {
-	filtered := []string{}
+	var filtered []string
 	for _, s := range data {
 		// if include is true, we include items that ARE in the mask
 		// if include is false, we include items that are NOT in the mask
@@ -769,42 +773,58 @@ func (c *Config) Resolver() VariableResolver {
 }
 
 func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
-	testURL := ""
-	headers := make(map[string]string)
-	apiKey, _ := resolver.ResolveValue(c.APIKey)
+	var (
+		providerID = catwalk.InferenceProvider(c.ID)
+		testURL    = ""
+		headers    = make(map[string]string)
+		apiKey, _  = resolver.ResolveValue(c.APIKey)
+	)
+
+	switch providerID {
+	case catwalk.InferenceProviderMiniMax:
+		// NOTE: MiniMax has no good endpoint we can use to validate the API key.
+		// Let's at least check the pattern.
+		if !strings.HasPrefix(apiKey, "sk-") {
+			return fmt.Errorf("invalid API key format for provider %s", c.ID)
+		}
+		return nil
+	}
+
 	switch c.Type {
 	case catwalk.TypeOpenAI, catwalk.TypeOpenAICompat, catwalk.TypeOpenRouter:
 		baseURL, _ := resolver.ResolveValue(c.BaseURL)
-		if baseURL == "" {
-			baseURL = "https://api.openai.com/v1"
-		}
-		if c.ID == string(catwalk.InferenceProviderOpenRouter) {
+		baseURL = cmp.Or(baseURL, "https://api.openai.com/v1")
+
+		switch providerID {
+		case catwalk.InferenceProviderOpenRouter:
 			testURL = baseURL + "/credits"
-		} else {
+		default:
 			testURL = baseURL + "/models"
 		}
+
 		headers["Authorization"] = "Bearer " + apiKey
 	case catwalk.TypeAnthropic:
 		baseURL, _ := resolver.ResolveValue(c.BaseURL)
-		if baseURL == "" {
-			baseURL = "https://api.anthropic.com/v1"
-		}
-		testURL = baseURL + "/models"
-		// TODO: replace with const when catwalk is released
-		if c.ID == "kimi-coding" {
+		baseURL = cmp.Or(baseURL, "https://api.anthropic.com/v1")
+
+		switch providerID {
+		case catwalk.InferenceKimiCoding:
 			testURL = baseURL + "/v1/models"
+		default:
+			testURL = baseURL + "/models"
 		}
+
 		headers["x-api-key"] = apiKey
 		headers["anthropic-version"] = "2023-06-01"
 	case catwalk.TypeGoogle:
 		baseURL, _ := resolver.ResolveValue(c.BaseURL)
-		if baseURL == "" {
-			baseURL = "https://generativelanguage.googleapis.com"
-		}
+		baseURL = cmp.Or(baseURL, "https://generativelanguage.googleapis.com")
 		testURL = baseURL + "/v1beta/models?key=" + url.QueryEscape(apiKey)
 	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
 	client := &http.Client{}
 	req, err := http.NewRequestWithContext(ctx, "GET", testURL, nil)
 	if err != nil {
@@ -816,17 +836,19 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	for k, v := range c.ExtraHeaders {
 		req.Header.Set(k, v)
 	}
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to create request for provider %s: %w", c.ID, err)
 	}
 	defer resp.Body.Close()
-	if c.ID == string(catwalk.InferenceProviderZAI) {
+
+	switch providerID {
+	case catwalk.InferenceProviderZAI:
 		if resp.StatusCode == http.StatusUnauthorized {
-			// For z.ai just check if the http response is not 401.
 			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, resp.Status)
 		}
-	} else {
+	default:
 		if resp.StatusCode != http.StatusOK {
 			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, resp.Status)
 		}

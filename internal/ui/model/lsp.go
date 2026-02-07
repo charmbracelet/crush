@@ -31,7 +31,7 @@ func (m *UI) lspInfo(width, maxItems int, isSection bool) string {
 
 	var lsps []LSPInfo
 	for _, state := range states {
-		client, ok := m.com.App.LSPClients.Get(state.Name)
+		client, ok := m.com.App.LSPManager.Clients().Get(state.Name)
 		if !ok {
 			continue
 		}
@@ -60,18 +60,18 @@ func (m *UI) lspInfo(width, maxItems int, isSection bool) string {
 
 // lspDiagnostics formats diagnostic counts with appropriate icons and colors.
 func lspDiagnostics(t *styles.Styles, diagnostics map[protocol.DiagnosticSeverity]int) string {
-	errs := []string{}
+	var errs []string
 	if diagnostics[protocol.SeverityError] > 0 {
-		errs = append(errs, t.LSP.ErrorDiagnostic.Render(fmt.Sprintf("%s %d", styles.ErrorIcon, diagnostics[protocol.SeverityError])))
+		errs = append(errs, t.LSP.ErrorDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPErrorIcon, diagnostics[protocol.SeverityError])))
 	}
 	if diagnostics[protocol.SeverityWarning] > 0 {
-		errs = append(errs, t.LSP.WarningDiagnostic.Render(fmt.Sprintf("%s %d", styles.WarningIcon, diagnostics[protocol.SeverityWarning])))
+		errs = append(errs, t.LSP.WarningDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPWarningIcon, diagnostics[protocol.SeverityWarning])))
 	}
 	if diagnostics[protocol.SeverityHint] > 0 {
-		errs = append(errs, t.LSP.HintDiagnostic.Render(fmt.Sprintf("%s %d", styles.HintIcon, diagnostics[protocol.SeverityHint])))
+		errs = append(errs, t.LSP.HintDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPHintIcon, diagnostics[protocol.SeverityHint])))
 	}
 	if diagnostics[protocol.SeverityInformation] > 0 {
-		errs = append(errs, t.LSP.InfoDiagnostic.Render(fmt.Sprintf("%s %d", styles.InfoIcon, diagnostics[protocol.SeverityInformation])))
+		errs = append(errs, t.LSP.InfoDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPInfoIcon, diagnostics[protocol.SeverityInformation])))
 	}
 	return strings.Join(errs, " ")
 }
@@ -89,6 +89,9 @@ func lspList(t *styles.Styles, lsps []LSPInfo, width, maxItems int) string {
 		var description string
 		var diagnostics string
 		switch l.State {
+		case lsp.StateStopped:
+			icon = t.ItemOfflineIcon.Foreground(t.Muted.GetBackground()).String()
+			description = t.Subtle.Render("stopped")
 		case lsp.StateStarting:
 			icon = t.ItemBusyIcon.String()
 			description = t.Subtle.Render("starting...")
@@ -103,7 +106,7 @@ func lspList(t *styles.Styles, lsps []LSPInfo, width, maxItems int) string {
 			}
 		case lsp.StateDisabled:
 			icon = t.ItemOfflineIcon.Foreground(t.Muted.GetBackground()).String()
-			description = t.Subtle.Render("inactive")
+			description = t.Subtle.Render("disabled")
 		default:
 			icon = t.ItemOfflineIcon.String()
 		}

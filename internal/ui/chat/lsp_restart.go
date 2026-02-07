@@ -38,7 +38,7 @@ func (r *LSPRestartToolRenderContext) RenderTool(sty *styles.Styles, width int, 
 	var params tools.LSPRestartParams
 	_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
 
-	toolParams := []string{}
+	var toolParams []string
 	if params.Name != "" {
 		toolParams = append(toolParams, params.Name)
 	}

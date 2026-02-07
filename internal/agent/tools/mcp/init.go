@@ -25,6 +25,19 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+func parseLevel(level mcp.LoggingLevel) slog.Level {
+	switch level {
+	case "info":
+		return slog.LevelInfo
+	case "notice":
+		return slog.LevelInfo
+	case "warning":
+		return slog.LevelWarn
+	default:
+		return slog.LevelDebug
+	}
+}
+
 var (
 	sessions = csync.NewMap[string, *mcp.ClientSession]()
 	states   = csync.NewMap[string, ClientInfo]()
@@ -65,6 +78,7 @@ const (
 	EventStateChanged EventType = iota
 	EventToolsListChanged
 	EventPromptsListChanged
+	EventResourcesListChanged
 )
 
 // Event represents an event in the MCP system
@@ -78,8 +92,9 @@ type Event struct {
 
 // Counts number of available tools, prompts, etc.
 type Counts struct {
-	Tools   int
-	Prompts int
+	Tools     int
+	Prompts   int
+	Resources int
 }
 
 // ClientInfo holds information about an MCP client's state
@@ -189,13 +204,23 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 				return
 			}
 
-			toolCount := updateTools(name, tools)
+			resources, err := getResources(ctx, session)
+			if err != nil {
+				slog.Error("Error listing resources", "error", err)
+				updateState(name, StateError, err, nil, Counts{})
+				session.Close()
+				return
+			}
+
+			toolCount := updateTools(cfg, name, tools)
 			updatePrompts(name, prompts)
+			resourceCount := updateResources(name, resources)
 			sessions.Set(name, session)
 
 			updateState(name, StateConnected, nil, session, Counts{
-				Tools:   toolCount,
-				Prompts: len(prompts),
+				Tools:     toolCount,
+				Prompts:   len(prompts),
+				Resources: resourceCount,
 			})
 		}(name, m)
 	}
@@ -214,13 +239,12 @@ func WaitForInit(ctx context.Context) error {
 	}
 }
 
-func getOrRenewClient(ctx context.Context, name string) (*mcp.ClientSession, error) {
+func getOrRenewClient(ctx context.Context, cfg *config.Config, name string) (*mcp.ClientSession, error) {
 	sess, ok := sessions.Get(name)
 	if !ok {
 		return nil, fmt.Errorf("mcp '%s' not available", name)
 	}
 
-	cfg := config.Get()
 	m := cfg.MCP[name]
 	state, _ := states.Get(name)
 
@@ -303,8 +327,15 @@ func createSession(ctx context.Context, name string, m config.MCPConfig, resolve
 					Name: name,
 				})
 			},
-			LoggingMessageHandler: func(_ context.Context, req *mcp.LoggingMessageRequest) {
-				slog.Info("MCP log", "name", name, "data", req.Params.Data)
+			ResourceListChangedHandler: func(context.Context, *mcp.ResourceListChangedRequest) {
+				broker.Publish(pubsub.UpdatedEvent, Event{
+					Type: EventResourcesListChanged,
+					Name: name,
+				})
+			},
+			LoggingMessageHandler: func(ctx context.Context, req *mcp.LoggingMessageRequest) {
+				level := parseLevel(req.Params.Level)
+				slog.Log(ctx, level, "MCP log", "name", name, "logger", req.Params.Logger, "data", req.Params.Data)
 			},
 		},
 	)

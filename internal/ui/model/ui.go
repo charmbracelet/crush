@@ -1350,11 +1350,14 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 
 	case dialog.ActionFilePickerSelected:
-		fimage.Reset()
 		cmds = append(cmds, tea.Sequence(
 			msg.Cmd(),
 			func() tea.Msg {
 				m.dialog.CloseDialog(dialog.FilePickerID)
+				return nil
+			},
+			func() tea.Msg {
+				fimage.Reset()
 				return nil
 			},
 		))
@@ -2968,7 +2971,6 @@ func (m *UI) newSession() tea.Cmd {
 		return nil
 	}
 
-	fimage.Reset()
 	m.session = nil
 	m.sessionFiles = nil
 	m.sessionFileReads = nil

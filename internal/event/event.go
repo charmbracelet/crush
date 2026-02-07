@@ -39,8 +39,9 @@ func SetNonInteractive(nonInteractive bool) {
 
 func Init() {
 	c, err := posthog.NewWithConfig(key, posthog.Config{
-		Endpoint: endpoint,
-		Logger:   logger{},
+		Endpoint:        endpoint,
+		Logger:          logger{},
+		ShutdownTimeout: 500 * time.Millisecond,
 	})
 	if err != nil {
 		slog.Error("Failed to initialize PostHog client", "error", err)

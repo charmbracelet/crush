@@ -227,21 +227,21 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 		return nil, err
 	}
 
-	if shouldEnableMetrics() {
+	if shouldEnableMetrics(cfg) {
 		event.Init()
 	}
 
 	return appInstance, nil
 }
 
-func shouldEnableMetrics() bool {
+func shouldEnableMetrics(cfg *config.Config) bool {
 	if v, _ := strconv.ParseBool(os.Getenv("CRUSH_DISABLE_METRICS")); v {
 		return false
 	}
 	if v, _ := strconv.ParseBool(os.Getenv("DO_NOT_TRACK")); v {
 		return false
 	}
-	if config.Get().Options.DisableMetrics {
+	if cfg.Options.DisableMetrics {
 		return false
 	}
 	return true

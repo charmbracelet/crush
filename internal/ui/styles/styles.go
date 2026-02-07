@@ -18,10 +18,6 @@ import (
 
 const (
 	CheckIcon   string = "✓"
-	ErrorIcon   string = "×"
-	WarningIcon string = "⚠"
-	InfoIcon    string = "ⓘ"
-	HintIcon    string = "∵"
 	SpinnerIcon string = "⋯"
 	LoadingIcon string = "⟳"
 	ModelIcon   string = "◇"
@@ -49,6 +45,11 @@ const (
 
 	ScrollbarThumb string = "┃"
 	ScrollbarTrack string = "│"
+
+	LSPErrorIcon   string = "E"
+	LSPWarningIcon string = "W"
+	LSPInfoIcon    string = "I"
+	LSPHintIcon    string = "H"
 )
 
 const (

@@ -342,7 +342,7 @@ func (a *Arguments) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	if scrollbar != "" {
 		content = lipgloss.JoinHorizontal(lipgloss.Top, content, scrollbar)
 	}
-	contentParts := []string{}
+	var contentParts []string
 	if description != "" {
 		contentParts = append(contentParts, description)
 	}

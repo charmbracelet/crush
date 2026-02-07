@@ -36,13 +36,15 @@ func NewUserMessageItem(sty *styles.Styles, message *message.Message, attachment
 
 // RawRender implements [MessageItem].
 func (m *UserMessageItem) RawRender(width int) string {
-	content, height, ok := m.getCachedRender(width)
+	cappedWidth := cappedMessageWidth(width)
+
+	content, height, ok := m.getCachedRender(cappedWidth)
 	// cache hit
 	if ok {
-		return m.renderHighlighted(content, width, height)
+		return m.renderHighlighted(content, cappedWidth, height)
 	}
 
-	renderer := common.MarkdownRenderer(m.sty, width)
+	renderer := common.MarkdownRenderer(m.sty, cappedWidth)
 
 	msgContent := strings.TrimSpace(m.message.Content().Text)
 	result, err := renderer.Render(msgContent)
@@ -53,7 +55,7 @@ func (m *UserMessageItem) RawRender(width int) string {
 	}
 
 	if len(m.message.BinaryContent()) > 0 {
-		attachmentsStr := m.renderAttachments(width)
+		attachmentsStr := m.renderAttachments(cappedWidth)
 		if content == "" {
 			content = attachmentsStr
 		} else {
@@ -62,8 +64,8 @@ func (m *UserMessageItem) RawRender(width int) string {
 	}
 
 	height = lipgloss.Height(content)
-	m.setCachedRender(content, width, height)
-	return m.renderHighlighted(content, width, height)
+	m.setCachedRender(content, cappedWidth, height)
+	return m.renderHighlighted(content, cappedWidth, height)
 }
 
 // Render implements MessageItem.

@@ -97,6 +97,10 @@ type (
 	mcpPromptsLoadedMsg struct {
 		Prompts []commands.MCPPrompt
 	}
+	// mcpStateChangedMsg is sent when there is a change in MCP client states.
+	mcpStateChangedMsg struct {
+		states map[string]mcp.ClientInfo
+	}
 	// sendMessageMsg is sent to send a message.
 	// currently only used for mcp prompts.
 	sendMessageMsg struct {
@@ -109,6 +113,11 @@ type (
 
 	// copyChatHighlightMsg is sent to copy the current chat highlight to clipboard.
 	copyChatHighlightMsg struct{}
+
+	// sessionFilesUpdatesMsg is sent when the files for this session have been updated
+	sessionFilesUpdatesMsg struct {
+		sessionFiles []SessionFile
+	}
 )
 
 // UI represents the main user interface model.
@@ -299,7 +308,7 @@ func New(com *common.Common) *UI {
 	desiredFocus := uiFocusEditor
 	if !com.Config().IsConfigured() {
 		desiredState = uiOnboarding
-	} else if n, _ := config.ProjectNeedsInitialization(); n {
+	} else if n, _ := config.ProjectNeedsInitialization(com.Config()); n {
 		desiredState = uiInitialize
 	}
 
@@ -355,18 +364,16 @@ func (m *UI) loadCustomCommands() tea.Cmd {
 }
 
 // loadMCPrompts loads the MCP prompts asynchronously.
-func (m *UI) loadMCPrompts() tea.Cmd {
-	return func() tea.Msg {
-		prompts, err := commands.LoadMCPPrompts()
-		if err != nil {
-			slog.Error("Failed to load MCP prompts", "error", err)
-		}
-		if prompts == nil {
-			// flag them as loaded even if there is none or an error
-			prompts = []commands.MCPPrompt{}
-		}
-		return mcpPromptsLoadedMsg{Prompts: prompts}
+func (m *UI) loadMCPrompts() tea.Msg {
+	prompts, err := commands.LoadMCPPrompts()
+	if err != nil {
+		slog.Error("Failed to load MCP prompts", "error", err)
 	}
+	if prompts == nil {
+		// flag them as loaded even if there is none or an error
+		prompts = []commands.MCPPrompt{}
+	}
+	return mcpPromptsLoadedMsg{Prompts: prompts}
 }
 
 // Update handles updates to the UI model.
@@ -395,6 +402,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setState(uiChat, m.focus)
 		m.session = msg.session
 		m.sessionFiles = msg.files
+		cmds = append(cmds, m.startLSPs(msg.lspFilePaths()))
 		msgs, err := m.com.App.Messages.List(context.Background(), m.session.ID)
 		if err != nil {
 			cmds = append(cmds, util.ReportError(err))
@@ -416,6 +424,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.loadPromptHistory())
 		m.updateLayoutAndSize()
 
+	case sessionFilesUpdatesMsg:
+		m.sessionFiles = msg.sessionFiles
+		var paths []string
+		for _, f := range msg.sessionFiles {
+			paths = append(paths, f.LatestVersion.Path)
+		}
+		cmds = append(cmds, m.startLSPs(paths))
+
 	case sendMessageMsg:
 		cmds = append(cmds, m.sendMessage(msg.Content, msg.Attachments...))
 
@@ -430,6 +446,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if ok {
 			commands.SetCustomCommands(m.customCommands)
 		}
+
+	case mcpStateChangedMsg:
+		m.mcpStates = msg.states
 	case mcpPromptsLoadedMsg:
 		m.mcpPrompts = msg.Prompts
 		dia := m.dialog.Dialog(dialog.CommandsID)
@@ -504,17 +523,18 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pubsub.Event[app.LSPEvent]:
 		m.lspStates = app.GetLSPStates()
 	case pubsub.Event[mcp.Event]:
-		m.mcpStates = mcp.GetStates()
-		// check if all mcps are initialized
-		initialized := true
-		for _, state := range m.mcpStates {
-			if state.State == mcp.StateStarting {
-				initialized = false
-				break
-			}
-		}
-		if initialized && m.mcpPrompts == nil {
-			cmds = append(cmds, m.loadMCPrompts())
+		switch msg.Payload.Type {
+		case mcp.EventStateChanged:
+			return m, tea.Batch(
+				m.handleStateChanged(),
+				m.loadMCPrompts,
+			)
+		case mcp.EventPromptsListChanged:
+			return m, handleMCPPromptsEvent(msg.Payload.Name)
+		case mcp.EventToolsListChanged:
+			return m, handleMCPToolsEvent(m.com.Config(), msg.Payload.Name)
+		case mcp.EventResourcesListChanged:
+			return m, handleMCPResourcesEvent(msg.Payload.Name)
 		}
 	case pubsub.Event[permission.PermissionRequest]:
 		if cmd := m.openPermissionsDialog(msg.Payload); cmd != nil {
@@ -712,10 +732,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, clearInfoMsgCmd(ttl))
 	case util.ClearStatusMsg:
 		m.status.ClearInfoMsg()
-	case completions.FilesLoadedMsg:
-		// Handle async file loading for completions.
+	case completions.CompletionItemsLoadedMsg:
 		if m.completionsOpen {
-			m.completions.SetFiles(msg.Files)
+			m.completions.SetItems(msg.Files, msg.Resources)
 		}
 	case uv.KittyGraphicsEvent:
 		if !bytes.HasPrefix(msg.Payload, []byte("OK")) {
@@ -775,7 +794,7 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 		case message.Assistant:
 			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap)...)
 			if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
-				infoItem := chat.NewAssistantInfoItem(m.com.Styles, msg, time.Unix(m.lastUserMessageTime, 0))
+				infoItem := chat.NewAssistantInfoItem(m.com.Styles, msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
 				items = append(items, infoItem)
 			}
 		default:
@@ -905,7 +924,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 			}
 		}
 		if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
-			infoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, time.Unix(m.lastUserMessageTime, 0))
+			infoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
 			m.chat.AppendMessages(infoItem)
 			if atBottom {
 				if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
@@ -976,7 +995,7 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 
 	if shouldRenderAssistant && msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
 		if infoItem := m.chat.MessageItem(chat.AssistantInfoID(msg.ID)); infoItem == nil {
-			newInfoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, time.Unix(m.lastUserMessageTime, 0))
+			newInfoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
 			m.chat.AppendMessages(newInfoItem)
 		}
 	}
@@ -1257,7 +1276,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 		// Attempt to import GitHub Copilot tokens from VSCode if available.
 		if isCopilot && !isConfigured() {
-			config.Get().ImportCopilot()
+			m.com.Config().ImportCopilot()
 		}
 
 		if !isConfigured() {
@@ -1525,12 +1544,14 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			if m.completionsOpen {
 				if msg, ok := m.completions.Update(msg); ok {
 					switch msg := msg.(type) {
-					case completions.SelectionMsg:
-						// Handle file completion selection.
-						if item, ok := msg.Value.(completions.FileCompletionValue); ok {
-							cmds = append(cmds, m.insertFileCompletion(item.Path))
+					case completions.SelectionMsg[completions.FileCompletionValue]:
+						cmds = append(cmds, m.insertFileCompletion(msg.Value.Path))
+						if !msg.KeepOpen {
+							m.closeCompletions()
 						}
-						if !msg.Insert {
+					case completions.SelectionMsg[completions.ResourceCompletionValue]:
+						cmds = append(cmds, m.insertMCPResourceCompletion(msg.Value))
+						if !msg.KeepOpen {
 							m.closeCompletions()
 						}
 					case completions.ClosedMsg:
@@ -1549,6 +1570,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if cmd := m.openFilesDialog(); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
+
+			case key.Matches(msg, m.keyMap.Editor.PasteImage):
+				cmds = append(cmds, m.pasteImageFromClipboard)
 
 			case key.Matches(msg, m.keyMap.Editor.SendMessage):
 				value := m.textarea.Value()
@@ -1649,7 +1673,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 						m.completionsStartIndex = curIdx
 						m.completionsPositionStart = m.completionsPosition()
 						depth, limit := m.com.Config().Options.TUI.Completions.Limits()
-						cmds = append(cmds, m.completions.OpenWithFiles(depth, limit))
+						cmds = append(cmds, m.completions.Open(depth, limit))
 					}
 				}
 
@@ -2087,6 +2111,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 				[]key.Binding{
 					k.Editor.Newline,
 					k.Editor.AddImage,
+					k.Editor.PasteImage,
 					k.Editor.MentionFile,
 					k.Editor.OpenEditor,
 				},
@@ -2135,6 +2160,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 				[]key.Binding{
 					k.Editor.Newline,
 					k.Editor.AddImage,
+					k.Editor.PasteImage,
 					k.Editor.MentionFile,
 					k.Editor.OpenEditor,
 				},
@@ -2488,24 +2514,29 @@ func (m *UI) closeCompletions() {
 	m.completions.Close()
 }
 
-// insertFileCompletion inserts the selected file path into the textarea,
-// replacing the @query, and adds the file as an attachment.
-func (m *UI) insertFileCompletion(path string) tea.Cmd {
+// insertCompletionText replaces the @query in the textarea with the given text.
+// Returns false if the replacement cannot be performed.
+func (m *UI) insertCompletionText(text string) bool {
 	value := m.textarea.Value()
-	word := m.textareaWord()
-
-	// Find the @ and query to replace.
 	if m.completionsStartIndex > len(value) {
-		return nil
+		return false
 	}
 
-	// Build the new value: everything before @, the path, everything after query.
+	word := m.textareaWord()
 	endIdx := min(m.completionsStartIndex+len(word), len(value))
-
-	newValue := value[:m.completionsStartIndex] + path + value[endIdx:]
+	newValue := value[:m.completionsStartIndex] + text + value[endIdx:]
 	m.textarea.SetValue(newValue)
 	m.textarea.MoveToEnd()
 	m.textarea.InsertRune(' ')
+	return true
+}
+
+// insertFileCompletion inserts the selected file path into the textarea,
+// replacing the @query, and adds the file as an attachment.
+func (m *UI) insertFileCompletion(path string) tea.Cmd {
+	if !m.insertCompletionText(path) {
+		return nil
+	}
 
 	return func() tea.Msg {
 		absPath, _ := filepath.Abs(path)
@@ -2536,6 +2567,61 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 			FileName: filepath.Base(path),
 			MimeType: mimeOf(content),
 			Content:  content,
+		}
+	}
+}
+
+// insertMCPResourceCompletion inserts the selected resource into the textarea,
+// replacing the @query, and adds the resource as an attachment.
+func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValue) tea.Cmd {
+	displayText := item.Title
+	if displayText == "" {
+		displayText = item.URI
+	}
+
+	if !m.insertCompletionText(displayText) {
+		return nil
+	}
+
+	return func() tea.Msg {
+		contents, err := mcp.ReadResource(
+			context.Background(),
+			m.com.Config(),
+			item.MCPName,
+			item.URI,
+		)
+		if err != nil {
+			slog.Warn("Failed to read MCP resource", "uri", item.URI, "error", err)
+			return nil
+		}
+		if len(contents) == 0 {
+			return nil
+		}
+
+		content := contents[0]
+		var data []byte
+		if content.Text != "" {
+			data = []byte(content.Text)
+		} else if len(content.Blob) > 0 {
+			data = content.Blob
+		}
+		if len(data) == 0 {
+			return nil
+		}
+
+		mimeType := item.MIMEType
+		if mimeType == "" && content.MIMEType != "" {
+			mimeType = content.MIMEType
+		}
+		if mimeType == "" {
+			mimeType = "text/plain"
+		}
+
+		return message.Attachment{
+			FilePath: item.URI,
+			FileName: displayText,
+			MimeType: mimeType,
+			Content:  data,
 		}
 	}
 }
@@ -2646,8 +2732,10 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 		m.setState(uiChat, m.focus)
 	}
 
+	ctx := context.Background()
 	for _, path := range m.sessionFileReads {
-		m.com.App.FileTracker.RecordRead(context.Background(), m.session.ID, path)
+		m.com.App.FileTracker.RecordRead(ctx, m.session.ID, path)
+		m.com.App.LSPManager.Start(ctx, path)
 	}
 
 	// Capture session ID to avoid race with main goroutine updating m.session.
@@ -2931,7 +3019,13 @@ func (m *UI) newSession() tea.Cmd {
 	m.promptQueue = 0
 	m.pillsView = ""
 	m.historyReset()
-	return m.loadPromptHistory()
+	return tea.Batch(
+		func() tea.Msg {
+			m.com.App.LSPManager.StopAll(context.Background())
+			return nil
+		},
+		m.loadPromptHistory(),
+	)
 }
 
 // handlePasteMsg handles a paste message.
@@ -3033,6 +3127,80 @@ func (m *UI) handleFilePathPaste(path string) tea.Cmd {
 	}
 }
 
+// pasteImageFromClipboard reads image data from the system clipboard and
+// creates an attachment. If no image data is found, it falls back to
+// interpreting clipboard text as a file path.
+func (m *UI) pasteImageFromClipboard() tea.Msg {
+	imageData, err := readClipboard(clipboardFormatImage)
+	if int64(len(imageData)) > common.MaxAttachmentSize {
+		return util.InfoMsg{
+			Type: util.InfoTypeError,
+			Msg:  "File too large, max 5MB",
+		}
+	}
+	name := fmt.Sprintf("paste_%d.png", m.pasteIdx())
+	if err == nil {
+		return message.Attachment{
+			FilePath: name,
+			FileName: name,
+			MimeType: mimeOf(imageData),
+			Content:  imageData,
+		}
+	}
+
+	textData, textErr := readClipboard(clipboardFormatText)
+	if textErr != nil || len(textData) == 0 {
+		return util.NewInfoMsg("Clipboard is empty or does not contain an image")
+	}
+
+	path := strings.TrimSpace(string(textData))
+	path = strings.ReplaceAll(path, "\\ ", " ")
+	if _, statErr := os.Stat(path); statErr != nil {
+		return util.NewInfoMsg("Clipboard does not contain an image or valid file path")
+	}
+
+	lowerPath := strings.ToLower(path)
+	isAllowed := false
+	for _, ext := range common.AllowedImageTypes {
+		if strings.HasSuffix(lowerPath, ext) {
+			isAllowed = true
+			break
+		}
+	}
+	if !isAllowed {
+		return util.NewInfoMsg("File type is not a supported image format")
+	}
+
+	fileInfo, statErr := os.Stat(path)
+	if statErr != nil {
+		return util.InfoMsg{
+			Type: util.InfoTypeError,
+			Msg:  fmt.Sprintf("Unable to read file: %v", statErr),
+		}
+	}
+	if fileInfo.Size() > common.MaxAttachmentSize {
+		return util.InfoMsg{
+			Type: util.InfoTypeError,
+			Msg:  "File too large, max 5MB",
+		}
+	}
+
+	content, readErr := os.ReadFile(path)
+	if readErr != nil {
+		return util.InfoMsg{
+			Type: util.InfoTypeError,
+			Msg:  fmt.Sprintf("Unable to read file: %v", readErr),
+		}
+	}
+
+	return message.Attachment{
+		FilePath: path,
+		FileName: filepath.Base(path),
+		MimeType: mimeOf(content),
+		Content:  content,
+	}
+}
+
 var pasteRE = regexp.MustCompile(`paste_(\d+).txt`)
 
 func (m *UI) pasteIdx() int {
@@ -3102,7 +3270,7 @@ func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
 
 func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string) tea.Cmd {
 	load := func() tea.Msg {
-		prompt, err := commands.GetMCPPrompt(clientID, promptID, arguments)
+		prompt, err := commands.GetMCPPrompt(m.com.Config(), clientID, promptID, arguments)
 		if err != nil {
 			// TODO: make this better
 			return util.ReportError(err)()
@@ -3125,6 +3293,40 @@ func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string
 	})
 
 	return tea.Sequence(cmds...)
+}
+
+func (m *UI) handleStateChanged() tea.Cmd {
+	return func() tea.Msg {
+		m.com.App.UpdateAgentModel(context.Background())
+		return mcpStateChangedMsg{
+			states: mcp.GetStates(),
+		}
+	}
+}
+
+func handleMCPPromptsEvent(name string) tea.Cmd {
+	return func() tea.Msg {
+		mcp.RefreshPrompts(context.Background(), name)
+		return nil
+	}
+}
+
+func handleMCPToolsEvent(cfg *config.Config, name string) tea.Cmd {
+	return func() tea.Msg {
+		mcp.RefreshTools(
+			context.Background(),
+			cfg,
+			name,
+		)
+		return nil
+	}
+}
+
+func handleMCPResourcesEvent(name string) tea.Cmd {
+	return func() tea.Msg {
+		mcp.RefreshResources(context.Background(), name)
+		return nil
+	}
 }
 
 func (m *UI) copyChatHighlight() tea.Cmd {

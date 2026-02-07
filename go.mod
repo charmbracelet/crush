@@ -5,8 +5,8 @@ go 1.25.5
 require (
 	charm.land/bubbles/v2 v2.0.0-rc.1.0.20260109112849-ae99f46cec66
 	charm.land/bubbletea/v2 v2.0.0-rc.2.0.20251216153312-819e2e89c62e
-	charm.land/catwalk v0.16.1
-	charm.land/fantasy v0.7.0
+	charm.land/catwalk v0.17.1
+	charm.land/fantasy v0.7.1
 	charm.land/glamour/v2 v2.0.0-20260123212943-6014aa153a9b
 	charm.land/lipgloss/v2 v2.0.0-beta.3.0.20251205162909-7869489d8971
 	charm.land/log/v2 v2.0.0-20251110204020-529bb77f35da
@@ -16,6 +16,7 @@ require (
 	github.com/PuerkitoBio/goquery v1.11.0
 	github.com/alecthomas/chroma/v2 v2.23.1
 	github.com/atotto/clipboard v0.1.4
+	github.com/aymanbagabas/go-nativeclipboard v0.1.2
 	github.com/aymanbagabas/go-udiff v0.3.1
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/charlievieth/fastwalk v1.0.14
@@ -54,11 +55,13 @@ require (
 	github.com/rivo/uniseg v0.4.7
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06
 	github.com/sahilm/fuzzy v0.1.1
+	github.com/sourcegraph/jsonrpc2 v0.2.1
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 	github.com/tidwall/gjson v1.18.0
 	github.com/tidwall/sjson v1.2.5
 	github.com/zeebo/xxh3 v1.1.0
+	go.uber.org/goleak v1.3.0
 	golang.org/x/net v0.49.0
 	golang.org/x/sync v0.19.0
 	golang.org/x/text v0.33.0
@@ -104,6 +107,7 @@ require (
 	github.com/clipperhouse/stringish v0.1.1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
+	github.com/ebitengine/purego v0.10.0-alpha.3.0.20260102153238-200df6041cff // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-json-experiment/json v0.0.0-20251027170946-4849db3c2f7e // indirect
@@ -147,7 +151,6 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/sergi/go-diff v1.3.2-0.20230802210424-5b0b94c5c0d3 // indirect
 	github.com/sethvargo/go-retry v0.3.0 // indirect
-	github.com/sourcegraph/jsonrpc2 v0.2.1 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/tetratelabs/wazero v1.11.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect

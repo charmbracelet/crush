@@ -35,13 +35,14 @@ type GlobToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (g *GlobToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
+	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
 		return pendingTool(sty, "Glob", opts.Anim)
 	}
 
 	var params tools.GlobParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
+		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
 	}
 
 	toolParams := []string{params.Pattern}
@@ -49,12 +50,12 @@ func (g *GlobToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		toolParams = append(toolParams, "path", params.Path)
 	}
 
-	header := toolHeader(sty, opts.Status, "Glob", width, opts.Compact, toolParams...)
+	header := toolHeader(sty, opts.Status, "Glob", cappedWidth, opts.Compact, toolParams...)
 	if opts.Compact {
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
+	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
 		return joinToolParts(header, earlyState)
 	}
 
@@ -62,7 +63,7 @@ func (g *GlobToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		return header
 	}
 
-	bodyWidth := width - toolBodyLeftPaddingTotal
+	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
 	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
 	return joinToolParts(header, body)
 }
@@ -93,13 +94,14 @@ type GrepToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (g *GrepToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
+	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
 		return pendingTool(sty, "Grep", opts.Anim)
 	}
 
 	var params tools.GrepParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
+		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
 	}
 
 	toolParams := []string{params.Pattern}
@@ -113,12 +115,12 @@ func (g *GrepToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		toolParams = append(toolParams, "literal", "true")
 	}
 
-	header := toolHeader(sty, opts.Status, "Grep", width, opts.Compact, toolParams...)
+	header := toolHeader(sty, opts.Status, "Grep", cappedWidth, opts.Compact, toolParams...)
 	if opts.Compact {
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
+	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
 		return joinToolParts(header, earlyState)
 	}
 
@@ -126,7 +128,7 @@ func (g *GrepToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		return header
 	}
 
-	bodyWidth := width - toolBodyLeftPaddingTotal
+	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
 	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
 	return joinToolParts(header, body)
 }
@@ -157,13 +159,14 @@ type LSToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (l *LSToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
+	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
 		return pendingTool(sty, "List", opts.Anim)
 	}
 
 	var params tools.LSParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
+		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
 	}
 
 	path := params.Path
@@ -172,12 +175,12 @@ func (l *LSToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *To
 	}
 	path = fsext.PrettyPath(path)
 
-	header := toolHeader(sty, opts.Status, "List", width, opts.Compact, path)
+	header := toolHeader(sty, opts.Status, "List", cappedWidth, opts.Compact, path)
 	if opts.Compact {
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
+	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
 		return joinToolParts(header, earlyState)
 	}
 
@@ -185,7 +188,7 @@ func (l *LSToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *To
 		return header
 	}
 
-	bodyWidth := width - toolBodyLeftPaddingTotal
+	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
 	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
 	return joinToolParts(header, body)
 }
@@ -216,13 +219,14 @@ type SourcegraphToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (s *SourcegraphToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
+	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
 		return pendingTool(sty, "Sourcegraph", opts.Anim)
 	}
 
 	var params tools.SourcegraphParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
+		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
 	}
 
 	toolParams := []string{params.Query}
@@ -233,12 +237,12 @@ func (s *SourcegraphToolRenderContext) RenderTool(sty *styles.Styles, width int,
 		toolParams = append(toolParams, "context", formatNonZero(params.ContextWindow))
 	}
 
-	header := toolHeader(sty, opts.Status, "Sourcegraph", width, opts.Compact, toolParams...)
+	header := toolHeader(sty, opts.Status, "Sourcegraph", cappedWidth, opts.Compact, toolParams...)
 	if opts.Compact {
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
+	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
 		return joinToolParts(header, earlyState)
 	}
 
@@ -246,7 +250,7 @@ func (s *SourcegraphToolRenderContext) RenderTool(sty *styles.Styles, width int,
 		return header
 	}
 
-	bodyWidth := width - toolBodyLeftPaddingTotal
+	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
 	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
 	return joinToolParts(header, body)
 }

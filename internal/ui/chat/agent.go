@@ -99,6 +99,7 @@ type AgentToolRenderContext struct {
 
 // RenderTool implements the [ToolRenderer] interface.
 func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
+	cappedWidth := cappedMessageWidth(width)
 	if !opts.ToolCall.Finished && !opts.IsCanceled() && len(r.agent.nestedTools) == 0 {
 		return pendingTool(sty, "Agent", opts.Anim)
 	}
@@ -109,7 +110,7 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	prompt := params.Prompt
 	prompt = strings.ReplaceAll(prompt, "\n", " ")
 
-	header := toolHeader(sty, opts.Status, "Agent", width, opts.Compact)
+	header := toolHeader(sty, opts.Status, "Agent", cappedWidth, opts.Compact)
 	if opts.Compact {
 		return header
 	}
@@ -119,7 +120,7 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	taskTagWidth := lipgloss.Width(taskTag)
 
 	// Calculate remaining width for prompt.
-	remainingWidth := width - taskTagWidth - 3 // -3 for spacing
+	remainingWidth := min(cappedWidth-taskTagWidth-3, maxTextWidth-taskTagWidth-3) // -3 for spacing
 
 	promptText := sty.Tool.AgentPrompt.Width(remainingWidth).Render(prompt)
 
@@ -156,7 +157,7 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 
 	// Add body content when completed.
 	if opts.HasResult() && opts.Result.Content != "" {
-		body := toolOutputMarkdownContent(sty, opts.Result.Content, width-toolBodyLeftPaddingTotal, opts.ExpandedContent)
+		body := toolOutputMarkdownContent(sty, opts.Result.Content, cappedWidth-toolBodyLeftPaddingTotal, opts.ExpandedContent)
 		return joinToolParts(result, body)
 	}
 
@@ -229,6 +230,7 @@ type agenticFetchParams struct {
 
 // RenderTool implements the [ToolRenderer] interface.
 func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
+	cappedWidth := cappedMessageWidth(width)
 	if !opts.ToolCall.Finished && !opts.IsCanceled() && len(r.fetch.nestedTools) == 0 {
 		return pendingTool(sty, "Agentic Fetch", opts.Anim)
 	}
@@ -240,12 +242,12 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 	prompt = strings.ReplaceAll(prompt, "\n", " ")
 
 	// Build header with optional URL param.
-	toolParams := []string{}
+	var toolParams []string
 	if params.URL != "" {
 		toolParams = append(toolParams, params.URL)
 	}
 
-	header := toolHeader(sty, opts.Status, "Agentic Fetch", width, opts.Compact, toolParams...)
+	header := toolHeader(sty, opts.Status, "Agentic Fetch", cappedWidth, opts.Compact, toolParams...)
 	if opts.Compact {
 		return header
 	}
@@ -255,7 +257,7 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 	promptTagWidth := lipgloss.Width(promptTag)
 
 	// Calculate remaining width for prompt text.
-	remainingWidth := width - promptTagWidth - 3 // -3 for spacing
+	remainingWidth := min(cappedWidth-promptTagWidth-3, maxTextWidth-promptTagWidth-3) // -3 for spacing
 
 	promptText := sty.Tool.AgentPrompt.Width(remainingWidth).Render(prompt)
 
@@ -292,7 +294,7 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 
 	// Add body content when completed.
 	if opts.HasResult() && opts.Result.Content != "" {
-		body := toolOutputMarkdownContent(sty, opts.Result.Content, width-toolBodyLeftPaddingTotal, opts.ExpandedContent)
+		body := toolOutputMarkdownContent(sty, opts.Result.Content, cappedWidth-toolBodyLeftPaddingTotal, opts.ExpandedContent)
 		return joinToolParts(result, body)
 	}
 

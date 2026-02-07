@@ -79,20 +79,22 @@ func (a *AssistantMessageItem) ID() string {
 
 // RawRender implements [MessageItem].
 func (a *AssistantMessageItem) RawRender(width int) string {
+	cappedWidth := cappedMessageWidth(width)
+
 	var spinner string
 	if a.isSpinning() {
 		spinner = a.renderSpinning()
 	}
 
-	content, height, ok := a.getCachedRender(width)
+	content, height, ok := a.getCachedRender(cappedWidth)
 	if !ok {
-		content = a.renderMessageContent(width)
+		content = a.renderMessageContent(cappedWidth)
 		height = lipgloss.Height(content)
 		// cache the rendered content
-		a.setCachedRender(content, width, height)
+		a.setCachedRender(content, cappedWidth, height)
 	}
 
-	highlightedContent := a.renderHighlighted(content, width, height)
+	highlightedContent := a.renderHighlighted(content, cappedWidth, height)
 	if spinner != "" {
 		if highlightedContent != "" {
 			highlightedContent += "\n\n"

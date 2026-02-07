@@ -2,10 +2,10 @@ charm.land/bubbles/v2 v2.0.0-rc.1.0.20260109112849-ae99f46cec66 h1:2BdJynsAW+8rv
 charm.land/bubbles/v2 v2.0.0-rc.1.0.20260109112849-ae99f46cec66/go.mod h1:5AbN6cEd/47gkEf8TgiQ2O3RZ5QxMS14l9W+7F9fPC4=
 charm.land/bubbletea/v2 v2.0.0-rc.2.0.20251216153312-819e2e89c62e h1:tXwTmgGpwZT7ParKF5xbEQBVjM2e1uKhKi/GpfU3mYQ=
 charm.land/bubbletea/v2 v2.0.0-rc.2.0.20251216153312-819e2e89c62e/go.mod h1:pDM18flq3Z4njKZPA3zCvyVSSIJbMcoqlE82BdGUtL8=
-charm.land/catwalk v0.16.1 h1:4Z4uCxqdAaVHeSX5dDDOkOg8sm7krFqJSaNBMZhE7Ao=
-charm.land/catwalk v0.16.1/go.mod h1:kAdk/GjAJbl1AjRjmfU5c9lZfs7PeC3Uy9TgaVtlN64=
-charm.land/fantasy v0.7.0 h1:qsSKJF07B+mimpPaC61Zyu3N+A9l2Lbs6T3txlP5In8=
-charm.land/fantasy v0.7.0/go.mod h1:zv8Utaob4b9rSPp2ruH515rx7oN+l66gv6RshvwHnww=
+charm.land/catwalk v0.17.1 h1:UsHvBi3S7CxONiIZTWKTXM+H9qla8I0fCb/SVru33ms=
+charm.land/catwalk v0.17.1/go.mod h1:kAdk/GjAJbl1AjRjmfU5c9lZfs7PeC3Uy9TgaVtlN64=
+charm.land/fantasy v0.7.1 h1:JOCYeLz32PM11y1u08/YgWl3LfPwhjOIuoyjBXjFofI=
+charm.land/fantasy v0.7.1/go.mod h1:zv8Utaob4b9rSPp2ruH515rx7oN+l66gv6RshvwHnww=
 charm.land/glamour/v2 v2.0.0-20260123212943-6014aa153a9b h1:A6IUUyChZDWP16RUdRJCfmYISAKWQGyIcfhZJUCViQ0=
 charm.land/glamour/v2 v2.0.0-20260123212943-6014aa153a9b/go.mod h1:J3kVhY6oHXZq5f+8vC3hmDO95fEvbqj3z7xDwxrfzU8=
 charm.land/lipgloss/v2 v2.0.0-beta.3.0.20251205162909-7869489d8971 h1:xZFcNsJMiIDbFtWRyDmkKNk1sjojfaom4Zoe0cyH/8c=
@@ -80,6 +80,8 @@ github.com/aws/aws-sdk-go-v2/service/sts v1.41.6 h1:5fFjR/ToSOzB2OQ/XqWpZBmNvmP/
 github.com/aws/aws-sdk-go-v2/service/sts v1.41.6/go.mod h1:qgFDZQSD/Kys7nJnVqYlWKnh0SSdMjAi0uSwON4wgYQ=
 github.com/aws/smithy-go v1.24.0 h1:LpilSUItNPFr1eY85RYgTIg5eIEPtvFbskaFcmmIUnk=
 github.com/aws/smithy-go v1.24.0/go.mod h1:LEj2LM3rBRQJxPZTB4KuzZkaZYnZPnvgIhb4pu07mx0=
+github.com/aymanbagabas/go-nativeclipboard v0.1.2 h1:Z2iVRWQ4IynMLWM6a+lWH2Nk5gPyEtPRMuBIyZ2dECM=
+github.com/aymanbagabas/go-nativeclipboard v0.1.2/go.mod h1:BVJhN7hs5DieCzUB2Atf4Yk9Y9kFe62E95+gOjpJq6Q=
 github.com/aymanbagabas/go-udiff v0.3.1 h1:LV+qyBQ2pqe0u42ZsUEtPiCaUoqgA9gYRDs3vj1nolY=
 github.com/aymanbagabas/go-udiff v0.3.1/go.mod h1:G0fsKmG+P6ylD0r6N/KgQD/nWzgfnl8ZBcNLgcbrw8E=
 github.com/aymerick/douceur v0.2.0 h1:Mv+mAeH1Q+n9Fr+oyamOlAkUNPWPlA8PPGR0QAaYuPk=
@@ -150,6 +152,8 @@ github.com/dlclark/regexp2 v1.11.5 h1:Q/sSnsKerHeCkc/jSTNq1oCm7KiVgUMZRDUoRu0JQZ
 github.com/dlclark/regexp2 v1.11.5/go.mod h1:DHkYz0B9wPfa6wondMfaivmHpzrQ3v9q8cnmRbL6yW8=
 github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=
 github.com/dustin/go-humanize v1.0.1/go.mod h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=
+github.com/ebitengine/purego v0.10.0-alpha.3.0.20260102153238-200df6041cff h1:vAcU1VsCRstZ9ty11yD/L0WDyT73S/gVfmuWvcWX5DA=
+github.com/ebitengine/purego v0.10.0-alpha.3.0.20260102153238-200df6041cff/go.mod h1:iIjxzd6CiRiOG0UyXP+V1+jWqUXVjPKLAI0mRfJZTmQ=
 github.com/envoyproxy/go-control-plane v0.13.4 h1:zEqyPVyku6IvWCFwux4x9RxkLOMUL+1vC9xUFv5l2/M=
 github.com/envoyproxy/go-control-plane/envoy v1.32.4 h1:jb83lalDRZSpPWW2Z7Mck/8kXZ5CQAFYVjQcdVIr83A=
 github.com/envoyproxy/go-control-plane/envoy v1.32.4/go.mod h1:Gzjc5k8JcJswLjAx1Zm+wSYE20UrLtt7JZMWiWQXQEw=
@@ -371,6 +375,8 @@ go.opentelemetry.io/otel/sdk/metric v1.37.0 h1:90lI228XrB9jCMuSdA0673aubgRobVZFh
 go.opentelemetry.io/otel/sdk/metric v1.37.0/go.mod h1:cNen4ZWfiD37l5NhS+Keb5RXVWZWpRE+9WyVCpbo5ps=
 go.opentelemetry.io/otel/trace v1.39.0 h1:2d2vfpEDmCJ5zVYz7ijaJdOF59xLomrvj7bjt6/qCJI=
 go.opentelemetry.io/otel/trace v1.39.0/go.mod h1:88w4/PnZSazkGzz/w84VHpQafiU4EtqqlVdxWy+rNOA=
+go.uber.org/goleak v1.3.0 h1:2K3zAYmnTNqV73imy9J1T3WC+gmCePx2hEGkimedGto=
+go.uber.org/goleak v1.3.0/go.mod h1:CoHD4mav9JJNrW/WLlf7HGZPjdw8EucARQHekz1X6bE=
 go.uber.org/multierr v1.11.0 h1:blXXJkSxSSfBVBlC76pxqeO+LN3aDfLQo+309xJstO0=
 go.uber.org/multierr v1.11.0/go.mod h1:20+QtiLqy0Nd6FdQB9TLXag12DsQkrbs3htMFfDN80Y=
 go.yaml.in/yaml/v3 v3.0.4/go.mod h1:DhzuOOF2ATzADvBadXxruRBLzYTpT36CKvDb3+aBEFg=

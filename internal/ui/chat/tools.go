@@ -295,6 +295,9 @@ func (t *baseToolMessageItem) Animate(msg anim.StepMsg) tea.Cmd {
 // RawRender implements [MessageItem].
 func (t *baseToolMessageItem) RawRender(width int) string {
 	toolItemWidth := width - MessageLeftPaddingTotal
+	if t.hasCappedWidth {
+		toolItemWidth = cappedMessageWidth(width)
+	}
 
 	content, height, ok := t.getCachedRender(toolItemWidth)
 	// if we are spinning or there is no cache rerender
@@ -769,6 +772,11 @@ func roundedEnumerator(lPadding, width int) tree.Enumerator {
 // toolOutputMarkdownContent renders markdown content with optional truncation.
 func toolOutputMarkdownContent(sty *styles.Styles, content string, width int, expanded bool) string {
 	content = stringext.NormalizeSpace(content)
+
+	// Cap width for readability.
+	if width > maxTextWidth {
+		width = maxTextWidth
+	}
 
 	renderer := common.PlainMarkdownRenderer(sty, width)
 	rendered, err := renderer.Render(content)

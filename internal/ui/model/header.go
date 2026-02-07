@@ -74,7 +74,13 @@ func (h *header) drawHeader(
 	b.WriteString(h.compactLogo)
 
 	availDetailWidth := width - leftPadding - rightPadding - lipgloss.Width(b.String()) - minHeaderDiags
-	details := renderHeaderDetails(h.com, session, h.com.App.LSPClients, detailsOpen, availDetailWidth)
+	details := renderHeaderDetails(
+		h.com,
+		session,
+		h.com.App.LSPManager.Clients(),
+		detailsOpen,
+		availDetailWidth,
+	)
 
 	remainingWidth := width -
 		lipgloss.Width(b.String()) -
@@ -114,11 +120,11 @@ func renderHeaderDetails(
 	}
 
 	if errorCount > 0 {
-		parts = append(parts, t.LSP.ErrorDiagnostic.Render(fmt.Sprintf("%s%d", styles.ErrorIcon, errorCount)))
+		parts = append(parts, t.LSP.ErrorDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPErrorIcon, errorCount)))
 	}
 
-	agentCfg := config.Get().Agents[config.AgentCoder]
-	model := config.Get().GetModelByType(agentCfg.Model)
+	agentCfg := com.Config().Agents[config.AgentCoder]
+	model := com.Config().GetModelByType(agentCfg.Model)
 	percentage := (float64(session.CompletionTokens+session.PromptTokens) / float64(model.ContextWindow)) * 100
 	formattedPercentage := t.Header.Percentage.Render(fmt.Sprintf("%d%%", int(percentage)))
 	parts = append(parts, formattedPercentage)

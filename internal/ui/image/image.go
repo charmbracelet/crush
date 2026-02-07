@@ -68,6 +68,13 @@ var (
 	cachedMutex  sync.RWMutex
 )
 
+// Reset clears the image cache, freeing all cached decoded images.
+func Reset() {
+	cachedMutex.Lock()
+	clear(cachedImages)
+	cachedMutex.Unlock()
+}
+
 // fitImage resizes the image to fit within the specified dimensions in
 // terminal cells, maintaining the aspect ratio.
 func fitImage(id string, img image.Image, cs CellSize, cols, rows int) image.Image {

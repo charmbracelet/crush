@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestReset(t *testing.T) {
+func TestResetCache(t *testing.T) {
 	t.Parallel()
 
 	cachedMutex.Lock()
@@ -23,7 +23,7 @@ func TestReset(t *testing.T) {
 	}
 	cachedMutex.Unlock()
 
-	Reset()
+	ResetCache()
 
 	cachedMutex.RLock()
 	length := len(cachedImages)
@@ -36,7 +36,7 @@ func TestResetIdempotent(t *testing.T) {
 	t.Parallel()
 
 	// Calling Reset on an empty cache should not panic.
-	Reset()
+	ResetCache()
 
 	cachedMutex.RLock()
 	length := len(cachedImages)

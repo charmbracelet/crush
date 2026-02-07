@@ -1139,7 +1139,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 
 		if m.dialog.ContainsDialog(dialog.FilePickerID) {
-			defer fimage.Reset()
+			defer fimage.ResetCache()
 		}
 
 		m.dialog.CloseFrontDialog()
@@ -1357,7 +1357,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 				return nil
 			},
 			func() tea.Msg {
-				fimage.Reset()
+				fimage.ResetCache()
 				return nil
 			},
 		))

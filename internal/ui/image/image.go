@@ -68,8 +68,8 @@ var (
 	cachedMutex  sync.RWMutex
 )
 
-// Reset clears the image cache, freeing all cached decoded images.
-func Reset() {
+// ResetCache clears the image cache, freeing all cached decoded images.
+func ResetCache() {
 	cachedMutex.Lock()
 	clear(cachedImages)
 	cachedMutex.Unlock()

@@ -17,8 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/fsext"
 	powernapconfig "github.com/charmbracelet/x/powernap/pkg/config"
-	"github.com/charmbracelet/x/powernap/pkg/lsp"
-	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
 	"github.com/sourcegraph/jsonrpc2"
 )
 
@@ -215,14 +214,25 @@ func resolveServerName(manager *powernapconfig.Manager, name string) string {
 	return name
 }
 
-func handlesFiletype(server *powernapconfig.ServerConfig, ext string, language protocol.LanguageKind) bool {
-	for _, ft := range server.FileTypes {
-		if protocol.LanguageKind(ft) == language ||
-			ft == strings.TrimPrefix(ext, ".") ||
-			"."+ft == ext {
+func handlesFiletype(sname string, fileTypes []string, filePath string) bool {
+	if len(fileTypes) == 0 {
+		return true
+	}
+
+	kind := powernap.DetectLanguage(filePath)
+	name := strings.ToLower(filepath.Base(filePath))
+	for _, filetype := range fileTypes {
+		suffix := strings.ToLower(filetype)
+		if !strings.HasPrefix(suffix, ".") {
+			suffix = "." + suffix
+		}
+		if strings.HasSuffix(name, suffix) || filetype == string(kind) {
+			slog.Debug("Handles file", "name", sname, "file", name, "filetype", filetype, "kind", kind)
 			return true
 		}
 	}
+
+	slog.Debug("Doesn't handle file", "name", sname, "file", name)
 	return false
 }
 
@@ -241,9 +251,7 @@ func hasRootMarkers(dir string, markers []string) bool {
 }
 
 func handles(server *powernapconfig.ServerConfig, filePath, workDir string) bool {
-	language := lsp.DetectLanguage(filePath)
-	ext := filepath.Ext(filePath)
-	return handlesFiletype(server, ext, language) &&
+	return handlesFiletype(server.Command, server.FileTypes, filePath) &&
 		hasRootMarkers(workDir, server.RootMarkers)
 }
 

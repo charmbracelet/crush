@@ -182,8 +182,11 @@ func (c *Completions) updateSize() {
 	width := 0
 	for i := start; i <= end; i++ {
 		item := c.list.ItemAt(i)
-		s := item.(interface{ Text() string }).Text()
-		width = max(width, ansi.StringWidth(s))
+		s, ok := item.(interface{ Text() string })
+		if !ok {
+			continue
+		}
+		width = max(width, ansi.StringWidth(s.Text()))
 	}
 	c.width = ordered.Clamp(width+2, int(minWidth), int(maxWidth))
 	c.height = ordered.Clamp(len(items), int(minHeight), int(maxHeight))

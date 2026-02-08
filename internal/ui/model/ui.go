@@ -41,6 +41,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/completions"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
+	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/logo"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/util"
@@ -344,6 +345,13 @@ func (m *UI) setState(state uiState, focus uiFocusState) {
 	m.focus = focus
 	// Changing the state may change layout, so update it.
 	m.updateLayoutAndSize()
+}
+
+// focusEditor focuses the editor and blurs the chat list.
+func (m *UI) focusEditor() tea.Cmd {
+	m.chat.list.Blur()
+	m.focus = uiFocusEditor
+	return m.textarea.Focus()
 }
 
 // loadCustomCommands loads the custom commands asynchronously.
@@ -1240,7 +1248,12 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		cmds = append(cmds, m.initializeProject())
 		m.dialog.CloseDialog(dialog.CommandsID)
-
+	case dialog.ActionForkConversation:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		cmds = append(cmds, m.forkConversation, m.focusEditor())
+	case dialog.ActionDeleteMessages:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		cmds = append(cmds, m.deleteBellow, m.focusEditor())
 	case dialog.ActionSelectModel:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
@@ -2644,6 +2657,74 @@ func (m *UI) hasSession() bool {
 	return m.session != nil && m.session.ID != ""
 }
 
+// getMessageIDFromItem gets the message ID from a selected chat item.
+func (m *UI) getMessageIDFromItem(item list.Item) (string, bool) {
+	if toolMsg, ok := item.(chat.ToolMessageItem); ok {
+		return toolMsg.MessageID(), true
+	}
+	if msgItem, ok := item.(chat.MessageItem); ok {
+		itemID := msgItem.ID()
+		if before, ok := strings.CutSuffix(itemID, ":assistant-info"); ok {
+			baseID := before
+			return baseID, true
+		}
+		return itemID, true
+	}
+	return "", false
+}
+
+// forkConversation a conversation.
+func (m *UI) forkConversation() tea.Msg {
+	if m.isAgentBusy() {
+		return uiutil.ReportWarn("Agent is busy, please wait...")()
+	}
+	if m.session == nil {
+		return uiutil.ReportWarn("No session to fork...")()
+	}
+	selectedItem := m.chat.SelectedItem()
+	if selectedItem == nil {
+		return uiutil.ReportWarn("No message selected...")()
+	}
+	messageID, ok := m.getMessageIDFromItem(selectedItem)
+	if !ok {
+		return uiutil.ReportWarn("Cannot fork from selected item...")()
+	}
+	newSession, err := m.com.App.Sessions.Fork(context.Background(), m.session.ID, messageID, m.com.App.Messages)
+	if err != nil {
+		return uiutil.ReportError(err)()
+	}
+	return loadSessionMsg{
+		session: &newSession,
+		files:   []SessionFile{},
+	}
+}
+
+// deleteBellow messages bellow the selected one.
+func (m *UI) deleteBellow() tea.Msg {
+	if m.isAgentBusy() {
+		return uiutil.ReportWarn("Agent is busy, please wait...")()
+	}
+	if m.session == nil {
+		return uiutil.ReportWarn("No session to delete from...")()
+	}
+	selectedItem := m.chat.SelectedItem()
+	if selectedItem == nil {
+		return uiutil.ReportWarn("No message selected...")()
+	}
+	if _, ok := selectedItem.(*chat.UserMessageItem); !ok {
+		return uiutil.ReportWarn("Can only delete from user messages...")()
+	}
+	messageID, ok := m.getMessageIDFromItem(selectedItem)
+	if !ok {
+		return uiutil.ReportWarn("Cannot get message ID from selected item...")()
+	}
+	err := m.com.App.Messages.DeleteMessagesFrom(context.Background(), m.session.ID, messageID)
+	if err != nil {
+		return uiutil.ReportError(err)()
+	}
+	return m.loadSession(m.session.ID)()
+}
+
 // mimeOf detects the MIME type of the given content.
 func mimeOf(content []byte) string {
 	mimeBufferSize := min(512, len(content))
@@ -2846,10 +2927,15 @@ func (m *UI) openModelsDialog() tea.Cmd {
 
 // openCommandsDialog opens the commands dialog.
 func (m *UI) openCommandsDialog() tea.Cmd {
+	isUserMessageSelected := false
+	selectedItem := m.chat.SelectedItem()
+	if _, ok := selectedItem.(*chat.UserMessageItem); ok {
+		isUserMessageSelected = true
+	}
+
 	if m.dialog.ContainsDialog(dialog.CommandsID) {
-		// Bring to front
-		m.dialog.BringToFront(dialog.CommandsID)
-		return nil
+		// Close and reopen to refresh state
+		m.dialog.CloseDialog(dialog.CommandsID)
 	}
 
 	sessionID := ""
@@ -2857,7 +2943,7 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 		sessionID = m.session.ID
 	}
 
-	commands, err := dialog.NewCommands(m.com, sessionID, m.customCommands, m.mcpPrompts)
+	commands, err := dialog.NewCommands(m.com, sessionID, m.customCommands, m.mcpPrompts, isUserMessageSelected)
 	if err != nil {
 		return util.ReportError(err)
 	}

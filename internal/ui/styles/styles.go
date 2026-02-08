@@ -422,10 +422,11 @@ type Styles struct {
 
 	// Attachments styles
 	Attachments struct {
-		Normal   lipgloss.Style
-		Image    lipgloss.Style
-		Text     lipgloss.Style
-		Deleting lipgloss.Style
+		Normal        lipgloss.Style
+		Image         lipgloss.Style
+		Text          lipgloss.Style
+		Deleting      lipgloss.Style
+		CopySelecting lipgloss.Style
 	}
 
 	// Pills styles for todo/queue pills
@@ -1340,6 +1341,7 @@ func DefaultStyles() Styles {
 	s.Attachments.Text = attachmentIconStyle.SetString(TextIcon)
 	s.Attachments.Normal = base.Padding(0, 1).MarginRight(1).Background(fgMuted).Foreground(fgBase)
 	s.Attachments.Deleting = base.Padding(0, 1).Bold(true).Background(red).Foreground(fgBase)
+	s.Attachments.CopySelecting = base.Padding(0, 1).Bold(true).Background(primary).Foreground(fgBase)
 
 	// Pills styles
 	s.Pills.Base = base.Padding(0, 1)

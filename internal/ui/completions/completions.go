@@ -180,10 +180,14 @@ func (c *Completions) updateSize() {
 	items := c.list.FilteredItems()
 	start, end := c.list.VisibleItemIndices()
 	width := 0
-	for i := start; i <= end; i++ {
-		item := c.list.ItemAt(i)
-		s := item.(interface{ Text() string }).Text()
-		width = max(width, ansi.StringWidth(s))
+
+	// Calculate the maximum width of visible items.
+	if len(items) > 0 {
+		for i := start; i <= end; i++ {
+			item := c.list.ItemAt(i)
+			s := item.(interface{ Text() string }).Text()
+			width = max(width, ansi.StringWidth(s))
+		}
 	}
 	c.width = ordered.Clamp(width+2, int(minWidth), int(maxWidth))
 	c.height = ordered.Clamp(len(items), int(minHeight), int(maxHeight))

@@ -243,13 +243,14 @@ func (l *List) ScrollBy(lines int) {
 
 // VisibleItemIndices finds the range of items that are visible in the viewport.
 // This is used for checking if selected item is in view.
-func (l *List) VisibleItemIndices() (startIdx, endIdx int) {
+// It returns the start and end indices of the visible items (inclusive).
+func (l *List) VisibleItemIndices() (startIdxInclusive, endIdxInclusive int) {
 	if len(l.items) == 0 {
 		return 0, 0
 	}
 
-	startIdx = l.offsetIdx
-	currentIdx := startIdx
+	startIdxInclusive = l.offsetIdx
+	currentIdx := startIdxInclusive
 	visibleHeight := -l.offsetLine
 
 	for currentIdx < len(l.items) {
@@ -265,12 +266,12 @@ func (l *List) VisibleItemIndices() (startIdx, endIdx int) {
 		currentIdx++
 	}
 
-	endIdx = currentIdx
-	if endIdx >= len(l.items) {
-		endIdx = len(l.items) - 1
+	endIdxInclusive = currentIdx
+	if endIdxInclusive >= len(l.items) {
+		endIdxInclusive = len(l.items) - 1
 	}
 
-	return startIdx, endIdx
+	return startIdxInclusive, endIdxInclusive
 }
 
 // Render renders the list and returns the visible lines.

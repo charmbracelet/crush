@@ -3,8 +3,8 @@ package dialog
 import (
 	"cmp"
 	"fmt"
+	"iter"
 	"slices"
-	"strings"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
@@ -138,12 +138,14 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 	)
 	m.keyMap.Close = CloseKey
 
-	providers, err := getFilteredProviders(com.Config())
-	if err != nil {
-		return nil, fmt.Errorf("failed to get providers: %w", err)
-	}
-
-	m.providers = providers
+	m.providers = slices.Collect(
+		Map(
+			com.Config().Providers.Seq(),
+			func(pc config.ProviderConfig) catwalk.Provider {
+				return pc.ToProvider()
+			},
+		),
+	)
 	if err := m.setProviderItems(); err != nil {
 		return nil, fmt.Errorf("failed to set provider items: %w", err)
 	}
@@ -505,30 +507,20 @@ func (m *Models) setProviderItems() error {
 	return nil
 }
 
-func getFilteredProviders(cfg *config.Config) ([]catwalk.Provider, error) {
-	providers, err := config.Providers(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get providers: %w", err)
-	}
-	var filteredProviders []catwalk.Provider
-	for _, p := range providers {
-		var (
-			isAzure         = p.ID == catwalk.InferenceProviderAzure
-			isCopilot       = p.ID == catwalk.InferenceProviderCopilot
-			isHyper         = string(p.ID) == "hyper"
-			hasAPIKeyEnv    = strings.HasPrefix(p.APIKey, "$")
-			_, isConfigured = cfg.Providers.Get(string(p.ID))
-		)
-		if isAzure || isCopilot || isHyper || hasAPIKeyEnv || isConfigured {
-			filteredProviders = append(filteredProviders, p)
-		}
-	}
-	return filteredProviders, nil
-}
-
 func modelKey(providerID, modelID string) string {
 	if providerID == "" || modelID == "" {
 		return ""
 	}
 	return providerID + ":" + modelID
+}
+
+// Map takes an iterator of type E and a mapping function, and returns an iterator of type F.
+//
+// see: https://github.com/charmbracelet/x/pull/773
+func Map[E any, F any](seq iter.Seq[E], fn func(e E) F) iter.Seq[F] {
+	return func(yield func(F) bool) {
+		for e := range seq {
+			yield(fn(e))
+		}
+	}
 }

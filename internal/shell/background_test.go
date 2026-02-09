@@ -5,7 +5,6 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -287,26 +286,24 @@ func TestBackgroundShellManager_KillAll(t *testing.T) {
 func TestBackgroundShellManager_KillAll_Timeout(t *testing.T) {
 	t.Parallel()
 
-	synctest.Test(t, func(t *testing.T) {
-		workingDir := t.TempDir()
-		manager := newBackgroundShellManager()
+	// XXX: can't use synctest here - causes --race to trip.
 
-		// Start a shell that traps signals and ignores cancellation.
-		_, err := manager.Start(t.Context(), workingDir, nil, "trap '' TERM INT; sleep 60", "")
-		require.NoError(t, err)
+	workingDir := t.TempDir()
+	manager := newBackgroundShellManager()
 
-		// Short timeout to test the timeout path.
-		ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
-		t.Cleanup(cancel)
+	// Start a shell that traps signals and ignores cancellation.
+	_, err := manager.Start(t.Context(), workingDir, nil, "trap '' TERM INT; sleep 60", "")
+	require.NoError(t, err)
 
-		start := time.Now()
-		manager.KillAll(ctx)
-		synctest.Wait()
+	// Short timeout to test the timeout path.
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	t.Cleanup(cancel)
 
-		elapsed := time.Since(start)
-		synctest.Wait()
+	start := time.Now()
+	manager.KillAll(ctx)
 
-		// Must return promptly after timeout, not hang for 60 seconds.
-		require.Less(t, elapsed, 2*time.Second)
-	})
+	elapsed := time.Since(start)
+
+	// Must return promptly after timeout, not hang for 60 seconds.
+	require.Less(t, elapsed, 2*time.Second)
 }

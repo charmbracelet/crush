@@ -287,10 +287,10 @@ func TestBackgroundShellManager_KillAll(t *testing.T) {
 func TestBackgroundShellManager_KillAll_Timeout(t *testing.T) {
 	t.Parallel()
 
-	workingDir := t.TempDir()
-	manager := newBackgroundShellManager()
-
 	synctest.Test(t, func(t *testing.T) {
+		workingDir := t.TempDir()
+		manager := newBackgroundShellManager()
+
 		// Start a shell that traps signals and ignores cancellation.
 		_, err := manager.Start(t.Context(), workingDir, nil, "trap '' TERM INT; sleep 60", "")
 		require.NoError(t, err)
@@ -304,6 +304,7 @@ func TestBackgroundShellManager_KillAll_Timeout(t *testing.T) {
 		synctest.Wait()
 
 		elapsed := time.Since(start)
+		synctest.Wait()
 
 		// Must return promptly after timeout, not hang for 60 seconds.
 		require.Less(t, elapsed, 2*time.Second)

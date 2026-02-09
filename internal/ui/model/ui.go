@@ -357,7 +357,7 @@ func (m *UI) sendNotification(n notification.Notification) tea.Cmd {
 	backend := m.notifyBackend
 	return func() tea.Msg {
 		if err := backend.Send(n); err != nil {
-			slog.Error("failed to send notification", "error", err)
+			slog.Error("Failed to send notification", "error", err)
 		}
 		return nil
 	}

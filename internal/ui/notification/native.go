@@ -26,13 +26,13 @@ func NewNativeBackend(icon any) *NativeBackend {
 
 // Send sends a desktop notification using the native OS notification system.
 func (b *NativeBackend) Send(n Notification) error {
-	slog.Debug("sending native notification", "title", n.Title, "message", n.Message)
+	slog.Debug("Sending native notification", "title", n.Title, "message", n.Message)
 
 	err := b.notifyFunc(n.Title, n.Message, b.icon)
 	if err != nil {
-		slog.Error("failed to send notification", "error", err)
+		slog.Error("Failed to send notification", "error", err)
 	} else {
-		slog.Debug("notification sent successfully")
+		slog.Debug("Notification sent successfully")
 	}
 
 	return err

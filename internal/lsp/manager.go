@@ -65,8 +65,8 @@ func NewManager(cfg *config.Config) *Manager {
 }
 
 // Clients returns the map of LSP clients.
-func (m *Manager) Clients() *csync.Map[string, *Client] {
-	return m.clients
+func (s *Manager) Clients() *csync.Map[string, *Client] {
+	return s.clients
 }
 
 // SetCallback sets a callback that is invoked when a new LSP
@@ -79,13 +79,17 @@ func (s *Manager) SetCallback(cb func(name string, client *Client)) {
 
 // Start starts an LSP server that can handle the given file path.
 // If an appropriate LSP is already running, this is a no-op.
-func (s *Manager) Start(ctx context.Context, filePath string) {
+func (s *Manager) Start(ctx context.Context, path string) {
+	if !fsext.HasPrefix(path, s.cfg.WorkingDir()) {
+		return
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	var wg sync.WaitGroup
 	for name, server := range s.manager.GetServers() {
-		if !handles(server, filePath, s.cfg.WorkingDir()) {
+		if !handles(server, path, s.cfg.WorkingDir()) {
 			continue
 		}
 		wg.Go(func() {
@@ -150,7 +154,14 @@ func (s *Manager) startServer(ctx context.Context, name string, server *powernap
 			return
 		}
 	}
-	client, err := New(ctx, name, cfg, s.cfg.Resolver(), s.cfg.Options.DebugLSP)
+	client, err := New(
+		ctx,
+		name,
+		cfg,
+		s.cfg.Resolver(),
+		s.cfg.WorkingDir(),
+		s.cfg.Options.DebugLSP,
+	)
 	if err != nil {
 		slog.Error("Failed to create LSP client", "name", name, "error", err)
 		return

@@ -70,7 +70,7 @@ const (
 // ModelsID is the identifier for the model selection dialog.
 const ModelsID = "models"
 
-const defaultModelsDialogMaxWidth = 70
+const defaultModelsDialogMaxWidth = 73
 
 // Models represents a model selection dialog.
 type Models struct {
@@ -84,6 +84,7 @@ type Models struct {
 		Tab      key.Binding
 		UpDown   key.Binding
 		Select   key.Binding
+		Edit     key.Binding
 		Next     key.Binding
 		Previous key.Binding
 		Close    key.Binding
@@ -123,6 +124,10 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 	m.keyMap.Select = key.NewBinding(
 		key.WithKeys("enter", "ctrl+y"),
 		key.WithHelp("enter", "confirm"),
+	)
+	m.keyMap.Edit = key.NewBinding(
+		key.WithKeys("ctrl+e"),
+		key.WithHelp("ctrl+e", "edit"),
 	)
 	m.keyMap.UpDown = key.NewBinding(
 		key.WithKeys("up", "down"),
@@ -181,7 +186,7 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 			}
 			m.list.SelectNext()
 			m.list.ScrollToSelected()
-		case key.Matches(msg, m.keyMap.Select):
+		case key.Matches(msg, m.keyMap.Select, m.keyMap.Edit):
 			selectedItem := m.list.SelectedItem()
 			if selectedItem == nil {
 				break
@@ -192,10 +197,13 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 				break
 			}
 
+			isEdit := key.Matches(msg, m.keyMap.Edit)
+
 			return ActionSelectModel{
-				Provider:  modelItem.prov,
-				Model:     modelItem.SelectedModel(),
-				ModelType: modelItem.SelectedModelType(),
+				Provider:       modelItem.prov,
+				Model:          modelItem.SelectedModel(),
+				ModelType:      modelItem.SelectedModelType(),
+				ReAuthenticate: isEdit,
 			}
 		case key.Matches(msg, m.keyMap.Tab):
 			if m.isOnboarding {
@@ -309,27 +317,35 @@ func (m *Models) ShortHelp() []key.Binding {
 			m.keyMap.Select,
 		}
 	}
-	return []key.Binding{
+	h := []key.Binding{
 		m.keyMap.UpDown,
 		m.keyMap.Tab,
 		m.keyMap.Select,
-		m.keyMap.Close,
 	}
+	if m.isSelectedConfigured() {
+		h = append(h, m.keyMap.Edit)
+	}
+	h = append(h, m.keyMap.Close)
+	return h
 }
 
 // FullHelp returns the full help view.
 func (m *Models) FullHelp() [][]key.Binding {
-	return [][]key.Binding{
-		{
-			m.keyMap.Select,
-			m.keyMap.Next,
-			m.keyMap.Previous,
-			m.keyMap.Tab,
-		},
-		{
-			m.keyMap.Close,
-		},
+	return [][]key.Binding{m.ShortHelp()}
+}
+
+func (m *Models) isSelectedConfigured() bool {
+	selectedItem := m.list.SelectedItem()
+	if selectedItem == nil {
+		return false
 	}
+	modelItem, ok := selectedItem.(*ModelItem)
+	if !ok {
+		return false
+	}
+	providerID := string(modelItem.prov.ID)
+	_, isConfigured := m.com.Config().Providers.Get(providerID)
+	return isConfigured
 }
 
 // setProviderItems sets the provider items in the list.

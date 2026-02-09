@@ -33,8 +33,8 @@ require (
 	github.com/charmbracelet/x/exp/strings v0.1.0
 	github.com/charmbracelet/x/powernap v0.0.0-20260127155452-b72a9a918687
 	github.com/charmbracelet/x/term v0.2.2
-	github.com/clipperhouse/displaywidth v0.9.0
-	github.com/clipperhouse/uax29/v2 v2.5.0
+	github.com/clipperhouse/displaywidth v0.10.0
+	github.com/clipperhouse/uax29/v2 v2.6.0
 	github.com/denisbrodbeck/machineid v1.0.1
 	github.com/disintegration/imaging v1.6.2
 	github.com/dustin/go-humanize v1.0.1
@@ -49,7 +49,7 @@ require (
 	github.com/nxadm/tail v1.4.11
 	github.com/openai/openai-go/v2 v2.7.1
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
-	github.com/posthog/posthog-go v1.9.1
+	github.com/posthog/posthog-go v1.10.0
 	github.com/pressly/goose/v3 v3.26.0
 	github.com/qjebbs/go-jsons v1.0.0-alpha.4
 	github.com/rivo/uniseg v0.4.7

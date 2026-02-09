@@ -14,7 +14,7 @@ func TestBackgroundShellManager_Start(t *testing.T) {
 	t.Skip("Skipping this until I figure out why its flaky")
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	workingDir := t.TempDir()
 	manager := newBackgroundShellManager()
 
@@ -51,7 +51,7 @@ func TestBackgroundShellManager_Start(t *testing.T) {
 func TestBackgroundShellManager_Get(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	workingDir := t.TempDir()
 	manager := newBackgroundShellManager()
 
@@ -77,7 +77,7 @@ func TestBackgroundShellManager_Get(t *testing.T) {
 func TestBackgroundShellManager_Kill(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	workingDir := t.TempDir()
 	manager := newBackgroundShellManager()
 
@@ -119,7 +119,7 @@ func TestBackgroundShellManager_KillNonExistent(t *testing.T) {
 func TestBackgroundShell_IsDone(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	workingDir := t.TempDir()
 	manager := newBackgroundShellManager()
 
@@ -142,7 +142,7 @@ func TestBackgroundShell_IsDone(t *testing.T) {
 func TestBackgroundShell_WithBlockFuncs(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	workingDir := t.TempDir()
 	manager := newBackgroundShellManager()
 
@@ -180,7 +180,7 @@ func TestBackgroundShellManager_List(t *testing.T) {
 
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	workingDir := t.TempDir()
 	manager := newBackgroundShellManager()
 
@@ -224,7 +224,7 @@ func TestBackgroundShellManager_List(t *testing.T) {
 func TestBackgroundShellManager_KillAll(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	workingDir := t.TempDir()
 	manager := newBackgroundShellManager()
 
@@ -250,7 +250,7 @@ func TestBackgroundShellManager_KillAll(t *testing.T) {
 	}
 
 	// Kill all shells
-	manager.KillAll(context.Background())
+	manager.KillAll(t.Context())
 
 	// Verify all shells are done
 	if !shell1.IsDone() {
@@ -286,19 +286,22 @@ func TestBackgroundShellManager_KillAll(t *testing.T) {
 func TestBackgroundShellManager_KillAll_Timeout(t *testing.T) {
 	t.Parallel()
 
+	// XXX: can't use synctest here - causes --race to trip.
+
 	workingDir := t.TempDir()
 	manager := newBackgroundShellManager()
 
 	// Start a shell that traps signals and ignores cancellation.
-	_, err := manager.Start(context.Background(), workingDir, nil, "trap '' TERM INT; sleep 60", "")
+	_, err := manager.Start(t.Context(), workingDir, nil, "trap '' TERM INT; sleep 60", "")
 	require.NoError(t, err)
 
 	// Short timeout to test the timeout path.
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	t.Cleanup(cancel)
 
 	start := time.Now()
 	manager.KillAll(ctx)
+
 	elapsed := time.Since(start)
 
 	// Must return promptly after timeout, not hang for 60 seconds.

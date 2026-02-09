@@ -117,7 +117,10 @@ func (c *Client) Initialize(ctx context.Context, workspaceDir string) (*protocol
 	return result, nil
 }
 
-// Close closes the LSP client.
+// Kill kills the client without doing anything else.
+func (c *Client) Kill() { c.client.Kill() }
+
+// Close closes all open files in the client, then the client.
 func (c *Client) Close(ctx context.Context) error {
 	c.CloseAllFiles(ctx)
 

@@ -22,6 +22,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/format"
 	"github.com/charmbracelet/crush/internal/history"
@@ -68,7 +69,7 @@ type App struct {
 
 	// global context and cleanup functions
 	globalCtx    context.Context
-	cleanupFuncs []func() error
+	cleanupFuncs []func(context.Context) error
 }
 
 // New initializes a new application instance.
@@ -108,7 +109,11 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	go mcp.Initialize(ctx, app.Permissions, cfg)
 
 	// cleanup database upon app shutdown
-	app.cleanupFuncs = append(app.cleanupFuncs, conn.Close, mcp.Close)
+	app.cleanupFuncs = append(
+		app.cleanupFuncs,
+		func(context.Context) error { return conn.Close() },
+		mcp.Close,
+	)
 
 	// TODO: remove the concept of agent config, most likely.
 	if !cfg.IsConfigured() {
@@ -416,7 +421,7 @@ func (app *App) setupEvents() {
 	setupSubscriber(ctx, app.serviceEventsWG, "history", app.History.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "mcp", mcp.SubscribeEvents, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "lsp", SubscribeLSPEvents, app.events)
-	cleanupFunc := func() error {
+	cleanupFunc := func(context.Context) error {
 		cancel()
 		app.serviceEventsWG.Wait()
 		return nil
@@ -503,7 +508,7 @@ func (app *App) Subscribe(program *tea.Program) {
 
 	app.tuiWG.Add(1)
 	tuiCtx, tuiCancel := context.WithCancel(app.globalCtx)
-	app.cleanupFuncs = append(app.cleanupFuncs, func() error {
+	app.cleanupFuncs = append(app.cleanupFuncs, func(context.Context) error {
 		slog.Debug("Cancelling TUI message handler")
 		tuiCancel()
 		app.tuiWG.Wait()
@@ -544,6 +549,11 @@ func (app *App) Shutdown() {
 	shutdownCtx, cancel := context.WithTimeout(app.globalCtx, 5*time.Second)
 	defer cancel()
 
+	// Send exit event
+	wg.Go(func() {
+		event.AppExited()
+	})
+
 	// Kill all background shells.
 	wg.Go(func() {
 		shell.GetBackgroundShellManager().KillAll(shutdownCtx)
@@ -551,14 +561,14 @@ func (app *App) Shutdown() {
 
 	// Shutdown all LSP clients.
 	wg.Go(func() {
-		app.LSPManager.StopAll(shutdownCtx)
+		app.LSPManager.KillAll(shutdownCtx)
 	})
 
 	// Call all cleanup functions.
 	for _, cleanup := range app.cleanupFuncs {
 		if cleanup != nil {
 			wg.Go(func() {
-				if err := cleanup(); err != nil {
+				if err := cleanup(shutdownCtx); err != nil {
 					slog.Error("Failed to cleanup app properly on shutdown", "error", err)
 				}
 			})

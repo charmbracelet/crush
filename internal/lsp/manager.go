@@ -255,6 +255,28 @@ func handles(server *powernapconfig.ServerConfig, filePath, workDir string) bool
 		hasRootMarkers(workDir, server.RootMarkers)
 }
 
+// KillAll force-kills all the LSP clients.
+//
+// This is generally faster than [Manager.StopAll] because it doesn't wait for
+// the server to exit gracefully, but it can lead to data loss if the server is
+// in the middle of writing something.
+// Generally it doesn't matter when shutting down Crush, though.
+func (s *Manager) KillAll(context.Context) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var wg sync.WaitGroup
+	for name, client := range s.clients.Seq2() {
+		wg.Go(func() {
+			defer func() { s.callback(name, client) }()
+			client.client.Kill()
+			client.SetServerState(StateStopped)
+			slog.Debug("Killed LSP client", "name", name)
+		})
+	}
+	wg.Wait()
+}
+
 // StopAll stops all running LSP clients and clears the client map.
 func (s *Manager) StopAll(ctx context.Context) {
 	s.mu.Lock()

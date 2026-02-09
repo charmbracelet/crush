@@ -51,7 +51,6 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/layout"
 	"github.com/charmbracelet/ultraviolet/screen"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/editor"
 )
 
@@ -448,7 +447,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmds = append(cmds, common.QueryCmd(uv.Environ(msg)))
 	case tea.ModeReportMsg:
-		if msg.Mode == ansi.ModeFocusEvent && m.caps.ReportFocusEvents {
+		if m.caps.ReportFocusEvents {
 			m.notifyBackend = notification.NewNativeBackend(notification.Icon)
 		}
 	case tea.FocusMsg:

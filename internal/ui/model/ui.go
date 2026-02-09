@@ -24,6 +24,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/agent/notify"
 	agenttools "github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
@@ -126,9 +127,6 @@ type (
 	sessionFilesUpdatesMsg struct {
 		sessionFiles []SessionFile
 	}
-
-	// notificationRequestMsg is sent when a notification request arrives.
-	notificationRequestMsg notification.Notification
 )
 
 // UI represents the main user interface model.
@@ -207,7 +205,6 @@ type UI struct {
 	// Notification state
 	notifyBackend       notification.Backend
 	notifyWindowFocused bool
-	notifyCh            <-chan notification.Notification
 	// custom commands & mcp commands
 	customCommands []commands.CustomCommand
 	mcpPrompts     []commands.MCPPrompt
@@ -300,7 +297,6 @@ func New(com *common.Common) *UI {
 		mcpStates:           make(map[string]mcp.ClientInfo),
 		notifyBackend:       notification.NoopBackend{},
 		notifyWindowFocused: true,
-		notifyCh:            com.App.Notifications(),
 	}
 
 	status := NewStatus(com, ui)
@@ -349,20 +345,7 @@ func (m *UI) Init() tea.Cmd {
 	cmds = append(cmds, m.loadCustomCommands())
 	// load prompt history async
 	cmds = append(cmds, m.loadPromptHistory())
-	// start listening for notification requests
-	cmds = append(cmds, m.waitForNotification())
 	return tea.Batch(cmds...)
-}
-
-// waitForNotification returns a command that waits for the next notification request.
-func (m *UI) waitForNotification() tea.Cmd {
-	return func() tea.Msg {
-		n, ok := <-m.notifyCh
-		if !ok {
-			return nil
-		}
-		return notificationRequestMsg(n)
-	}
 }
 
 // sendNotification returns a command that sends a notification if allowed by policy.
@@ -454,10 +437,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.notifyWindowFocused = true
 	case tea.BlurMsg:
 		m.notifyWindowFocused = false
-	case notificationRequestMsg:
-		// Re-subscribe for next notification.
-		cmds = append(cmds, m.waitForNotification())
-		if cmd := m.sendNotification(notification.Notification(msg)); cmd != nil {
+	case pubsub.Event[notify.Notification]:
+		if cmd := m.handleAgentNotification(msg.Payload); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case loadSessionMsg:
@@ -3038,6 +3019,20 @@ func (m *UI) handlePermissionNotification(notification permission.PermissionNoti
 		} else {
 			permItem.SetStatus(chat.ToolStatusAwaitingPermission)
 		}
+	}
+}
+
+// handleAgentNotification translates domain agent events into desktop
+// notifications using the UI notification backend.
+func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
+	switch n.Type {
+	case notify.TypeAgentFinished:
+		return m.sendNotification(notification.Notification{
+			Title:   "Crush is waiting...",
+			Message: fmt.Sprintf("Agent's turn completed in \"%s\"", n.SessionTitle),
+		})
+	default:
+		return nil
 	}
 }
 

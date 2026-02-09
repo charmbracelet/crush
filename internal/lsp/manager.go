@@ -17,8 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/fsext"
 	powernapconfig "github.com/charmbracelet/x/powernap/pkg/config"
-	"github.com/charmbracelet/x/powernap/pkg/lsp"
-	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
 	"github.com/sourcegraph/jsonrpc2"
 )
 
@@ -215,14 +214,25 @@ func resolveServerName(manager *powernapconfig.Manager, name string) string {
 	return name
 }
 
-func handlesFiletype(server *powernapconfig.ServerConfig, ext string, language protocol.LanguageKind) bool {
-	for _, ft := range server.FileTypes {
-		if protocol.LanguageKind(ft) == language ||
-			ft == strings.TrimPrefix(ext, ".") ||
-			"."+ft == ext {
+func handlesFiletype(sname string, fileTypes []string, filePath string) bool {
+	if len(fileTypes) == 0 {
+		return true
+	}
+
+	kind := powernap.DetectLanguage(filePath)
+	name := strings.ToLower(filepath.Base(filePath))
+	for _, filetype := range fileTypes {
+		suffix := strings.ToLower(filetype)
+		if !strings.HasPrefix(suffix, ".") {
+			suffix = "." + suffix
+		}
+		if strings.HasSuffix(name, suffix) || filetype == string(kind) {
+			slog.Debug("Handles file", "name", sname, "file", name, "filetype", filetype, "kind", kind)
 			return true
 		}
 	}
+
+	slog.Debug("Doesn't handle file", "name", sname, "file", name)
 	return false
 }
 
@@ -241,10 +251,30 @@ func hasRootMarkers(dir string, markers []string) bool {
 }
 
 func handles(server *powernapconfig.ServerConfig, filePath, workDir string) bool {
-	language := lsp.DetectLanguage(filePath)
-	ext := filepath.Ext(filePath)
-	return handlesFiletype(server, ext, language) &&
+	return handlesFiletype(server.Command, server.FileTypes, filePath) &&
 		hasRootMarkers(workDir, server.RootMarkers)
+}
+
+// KillAll force-kills all the LSP clients.
+//
+// This is generally faster than [Manager.StopAll] because it doesn't wait for
+// the server to exit gracefully, but it can lead to data loss if the server is
+// in the middle of writing something.
+// Generally it doesn't matter when shutting down Crush, though.
+func (s *Manager) KillAll(context.Context) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var wg sync.WaitGroup
+	for name, client := range s.clients.Seq2() {
+		wg.Go(func() {
+			defer func() { s.callback(name, client) }()
+			client.client.Kill()
+			client.SetServerState(StateStopped)
+			slog.Debug("Killed LSP client", "name", name)
+		})
+	}
+	wg.Wait()
 }
 
 // StopAll stops all running LSP clients and clears the client map.

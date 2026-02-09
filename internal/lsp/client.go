@@ -117,7 +117,10 @@ func (c *Client) Initialize(ctx context.Context, workspaceDir string) (*protocol
 	return result, nil
 }
 
-// Close closes the LSP client.
+// Kill kills the client without doing anything else.
+func (c *Client) Kill() { c.client.Kill() }
+
+// Close closes all open files in the client, then the client.
 func (c *Client) Close(ctx context.Context) error {
 	c.CloseAllFiles(ctx)
 
@@ -329,26 +332,7 @@ func (c *Client) HandlesFile(path string) bool {
 		slog.Debug("File outside workspace", "name", c.name, "file", path, "workDir", c.workDir)
 		return false
 	}
-
-	// If no file types are specified, handle all files (backward compatibility).
-	if len(c.fileTypes) == 0 {
-		return true
-	}
-
-	kind := powernap.DetectLanguage(path)
-	name := strings.ToLower(filepath.Base(path))
-	for _, filetype := range c.fileTypes {
-		suffix := strings.ToLower(filetype)
-		if !strings.HasPrefix(suffix, ".") {
-			suffix = "." + suffix
-		}
-		if strings.HasSuffix(name, suffix) || filetype == string(kind) {
-			slog.Debug("Handles file", "name", c.name, "file", name, "filetype", filetype, "kind", kind)
-			return true
-		}
-	}
-	slog.Debug("Doesn't handle file", "name", c.name, "file", name)
-	return false
+	return handlesFiletype(c.name, c.fileTypes, path)
 }
 
 // OpenFile opens a file in the LSP server.

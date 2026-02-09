@@ -22,6 +22,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/format"
 	"github.com/charmbracelet/crush/internal/history"
@@ -547,6 +548,11 @@ func (app *App) Shutdown() {
 	// Shared shutdown context for all timeout-bounded cleanup.
 	shutdownCtx, cancel := context.WithTimeout(app.globalCtx, 5*time.Second)
 	defer cancel()
+
+	// Send exit event
+	wg.Go(func() {
+		event.AppExited()
+	})
 
 	// Kill all background shells.
 	wg.Go(func() {

@@ -3,7 +3,6 @@ package dialog
 import (
 	"cmp"
 	"fmt"
-	"iter"
 	"slices"
 
 	"charm.land/bubbles/v2/help"
@@ -15,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
+	xslice "github.com/charmbracelet/x/exp/slice"
 )
 
 // ModelType represents the type of model to select.
@@ -139,7 +139,7 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 	m.keyMap.Close = CloseKey
 
 	m.providers = slices.Collect(
-		Map(
+		xslice.Map(
 			com.Config().Providers.Seq(),
 			func(pc config.ProviderConfig) catwalk.Provider {
 				return pc.ToProvider()
@@ -512,15 +512,4 @@ func modelKey(providerID, modelID string) string {
 		return ""
 	}
 	return providerID + ":" + modelID
-}
-
-// Map takes an iterator of type E and a mapping function, and returns an iterator of type F.
-//
-// see: https://github.com/charmbracelet/x/pull/773
-func Map[E any, F any](seq iter.Seq[E], fn func(e E) F) iter.Seq[F] {
-	return func(yield func(F) bool) {
-		for e := range seq {
-			yield(fn(e))
-		}
-	}
 }

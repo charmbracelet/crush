@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestBackgroundShellManager_Start(t *testing.T) {
@@ -248,7 +250,7 @@ func TestBackgroundShellManager_KillAll(t *testing.T) {
 	}
 
 	// Kill all shells
-	manager.KillAll()
+	manager.KillAll(context.Background())
 
 	// Verify all shells are done
 	if !shell1.IsDone() {
@@ -279,4 +281,26 @@ func TestBackgroundShellManager_KillAll(t *testing.T) {
 			t.Errorf("shell %s should not be in list after KillAll", id)
 		}
 	}
+}
+
+func TestBackgroundShellManager_KillAll_Timeout(t *testing.T) {
+	t.Parallel()
+
+	workingDir := t.TempDir()
+	manager := newBackgroundShellManager()
+
+	// Start a shell that traps signals and ignores cancellation.
+	_, err := manager.Start(context.Background(), workingDir, nil, "trap '' TERM INT; sleep 60", "")
+	require.NoError(t, err)
+
+	// Short timeout to test the timeout path.
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	manager.KillAll(ctx)
+	elapsed := time.Since(start)
+
+	// Must return promptly after timeout, not hang for 60 seconds.
+	require.Less(t, elapsed, 2*time.Second)
 }

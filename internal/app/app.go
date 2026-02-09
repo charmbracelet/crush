@@ -540,14 +540,16 @@ func (app *App) Shutdown() {
 	// Now run remaining cleanup tasks in parallel.
 	var wg sync.WaitGroup
 
+	// Shared shutdown context for all timeout-bounded cleanup.
+	shutdownCtx, cancel := context.WithTimeout(app.globalCtx, 5*time.Second)
+	defer cancel()
+
 	// Kill all background shells.
 	wg.Go(func() {
-		shell.GetBackgroundShellManager().KillAll()
+		shell.GetBackgroundShellManager().KillAll(shutdownCtx)
 	})
 
 	// Shutdown all LSP clients.
-	shutdownCtx, cancel := context.WithTimeout(app.globalCtx, 5*time.Second)
-	defer cancel()
 	wg.Go(func() {
 		app.LSPManager.StopAll(shutdownCtx)
 	})

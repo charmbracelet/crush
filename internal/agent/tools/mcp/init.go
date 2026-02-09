@@ -124,26 +124,29 @@ func GetState(name string) (ClientInfo, bool) {
 
 // Close closes all MCP clients. This should be called during application shutdown.
 func Close() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	var wg sync.WaitGroup
-	done := make(chan struct{}, 1)
-	go func() {
-		for name, session := range sessions.Seq2() {
-			wg.Go(func() {
-				if err := session.Close(); err != nil &&
+	for name, session := range sessions.Seq2() {
+		wg.Go(func() {
+			done := make(chan error, 1)
+			go func() {
+				done <- session.Close()
+			}()
+			select {
+			case err := <-done:
+				if err != nil &&
 					!errors.Is(err, io.EOF) &&
 					!errors.Is(err, context.Canceled) &&
 					err.Error() != "signal: killed" {
 					slog.Warn("Failed to shutdown MCP client", "name", name, "error", err)
 				}
-			})
-		}
-		wg.Wait()
-		done <- struct{}{}
-	}()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
+			case <-ctx.Done():
+			}
+		})
 	}
+	wg.Wait()
 	broker.Shutdown()
 	return nil
 }

@@ -297,7 +297,7 @@ func TestBackgroundShellManager_KillAll_Timeout(t *testing.T) {
 
 		// Short timeout to test the timeout path.
 		ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
-		defer cancel()
+		t.Cleanup(cancel)
 
 		start := time.Now()
 		manager.KillAll(ctx)

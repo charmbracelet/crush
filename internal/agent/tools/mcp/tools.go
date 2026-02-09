@@ -128,7 +128,7 @@ func RefreshTools(ctx context.Context, cfg *config.Config, name string) {
 	updateState(name, StateConnected, nil, session, prev.Counts)
 }
 
-func getTools(ctx context.Context, session *mcpSession) ([]*Tool, error) {
+func getTools(ctx context.Context, session *ClientSession) ([]*Tool, error) {
 	// Always call ListTools to get the actual available tools.
 	// The InitializeResult Capabilities.Tools field may be an empty object {},
 	// which is valid per MCP spec, but we still need to call ListTools to discover tools.

@@ -25,7 +25,7 @@ func TestMCPSession_CancelOnClose(t *testing.T) {
 	clientSession, err := client.Connect(ctx, clientTransport, nil)
 	require.NoError(t, err)
 
-	sess := &mcpSession{clientSession, cancel}
+	sess := &ClientSession{clientSession, cancel}
 
 	// Verify the context is not cancelled before close.
 	require.NoError(t, ctx.Err())

@@ -136,9 +136,10 @@ func (rc *RenderContext) Render() string {
 		if rc.Gap > 0 {
 			parts = append(parts, make([]string, rc.Gap)...)
 		}
+		helpWidth := rc.Width - dialogStyle.GetHorizontalFrameSize()
 		helpStyle := rc.Styles.Dialog.HelpView
-		helpStyle = helpStyle.Width(rc.Width - dialogStyle.GetHorizontalFrameSize())
-		helpView := ansi.Truncate(helpStyle.Render(rc.Help), rc.Width, "")
+		helpStyle = helpStyle.Width(helpWidth)
+		helpView := ansi.Truncate(helpStyle.Render(rc.Help), helpWidth-1, "")
 		parts = append(parts, helpView)
 	}
 

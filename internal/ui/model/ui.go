@@ -41,6 +41,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/completions"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
+	fimage "github.com/charmbracelet/crush/internal/ui/image"
 	"github.com/charmbracelet/crush/internal/ui/logo"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/util"
@@ -1137,6 +1138,10 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 
+		if m.dialog.ContainsDialog(dialog.FilePickerID) {
+			defer fimage.ResetCache()
+		}
+
 		m.dialog.CloseFrontDialog()
 
 		if isOnboarding {
@@ -1349,6 +1354,10 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			msg.Cmd(),
 			func() tea.Msg {
 				m.dialog.CloseDialog(dialog.FilePickerID)
+				return nil
+			},
+			func() tea.Msg {
+				fimage.ResetCache()
 				return nil
 			},
 		))

@@ -92,7 +92,10 @@
         }
       },
       "additionalProperties": false,
-      "type": "object"
+      "type": "object",
+      "required": [
+        "tools"
+      ]
     },
     "LSPConfig": {
       "properties": {
@@ -716,7 +719,10 @@
         }
       },
       "additionalProperties": false,
-      "type": "object"
+      "type": "object",
+      "required": [
+        "ls"
+      ]
     }
   }
 }

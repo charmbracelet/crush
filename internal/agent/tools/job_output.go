@@ -46,7 +46,7 @@ func NewJobOutputTool() fantasy.AgentTool {
 			}
 
 			if params.Wait {
-				bgShell.Wait()
+				bgShell.WaitContext(ctx)
 			}
 
 			stdout, stderr, done, err := bgShell.GetOutput()

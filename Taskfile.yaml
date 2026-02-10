@@ -88,6 +88,11 @@ tasks:
     cmds:
       - prettier --write internal/cmd/stats/index.html internal/cmd/stats/index.css internal/cmd/stats/index.js
 
+  modernize:
+    desc: Run modernize
+    cmds:
+      - go run golang.org/x/tools/go/analysis/passes/modernize/cmd/modernize@latest -fix -test ./...
+
   dev:
     desc: Run with profiling enabled
     env:

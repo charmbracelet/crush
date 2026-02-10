@@ -745,10 +745,7 @@ func (m *Chat) selectWord(itemIdx, x, itemY int) {
 	// Adjust x for the item's left padding (border + padding) to get content column.
 	// The mouse x is in viewport space, but we need content space for boundary detection.
 	offset := chat.MessageLeftPaddingTotal
-	contentX := x - offset
-	if contentX < 0 {
-		contentX = 0
-	}
+	contentX := max(x-offset, 0)
 
 	line := ansi.Strip(lines[itemY])
 	startCol, endCol := findWordBoundaries(line, contentX)

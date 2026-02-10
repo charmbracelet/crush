@@ -205,14 +205,13 @@ That said, you can also set environment variables for preferred providers.
 
 ### Subscriptions
 
-If you prefer to pay a monthly subscription instead of per token usage, here's
-a small list of subscriptions from providers that are officially supported in
+If you prefer subscription-based usage, here are some plans that work well in
 Crush:
 
-* [Synthetic](https://synthetic.new/pricing)
-* [GLM Coding Plan](https://z.ai/subscribe)
-* [MiniMax Coding Plan](https://platform.minimax.io/subscribe/coding-plan)
-* [Kimi](https://www.kimi.com/membership/pricing)
+- [Synthetic](https://synthetic.new/pricing)
+- [GLM Coding Plan](https://z.ai/subscribe)
+- [Kimi Code](https://www.kimi.com/membership/pricing)
+- [MiniMax Coding Plan](https://platform.minimax.io/subscribe/coding-plan)
 
 ### By the Way
 

@@ -46,8 +46,11 @@ tasks:
       LDFLAGS: '{{if .VERSION}}-ldflags="-X github.com/charmbracelet/crush/internal/version.Version={{.VERSION}}"{{end}}'
     cmds:
       - "go build {{if .RACE}}-race{{end}} {{.LDFLAGS}} ."
+    sources:
+      - ./**/*.go
+      - go.mod
     generates:
-      - crush
+      - crush{{exeExt}}
 
   run:
     desc: Run build
@@ -91,6 +94,9 @@ tasks:
     cmds:
       - task: fetch-tags
       - go install {{.LDFLAGS}} -v .
+    sources:
+      - ./**/*.go
+      - go.mod
 
   profile:cpu:
     desc: 10s CPU profile

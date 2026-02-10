@@ -8,13 +8,13 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/home"
 	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
@@ -35,7 +35,7 @@ type Client struct {
 	debug  bool
 
 	// Working directory this LSP is scoped to.
-	workDir string
+	cwd string
 
 	// File types this LSP server handles (e.g., .go, .rs, .py)
 	fileTypes []string
@@ -66,7 +66,14 @@ type Client struct {
 }
 
 // New creates a new LSP client using the powernap implementation.
-func New(ctx context.Context, name string, cfg config.LSPConfig, resolver config.VariableResolver, debug bool) (*Client, error) {
+func New(
+	ctx context.Context,
+	name string,
+	cfg config.LSPConfig,
+	resolver config.VariableResolver,
+	cwd string,
+	debug bool,
+) (*Client, error) {
 	client := &Client{
 		name:        name,
 		fileTypes:   cfg.FileTypes,
@@ -76,6 +83,7 @@ func New(ctx context.Context, name string, cfg config.LSPConfig, resolver config
 		ctx:         ctx,
 		debug:       debug,
 		resolver:    resolver,
+		cwd:         cwd,
 	}
 	client.serverState.Store(StateStarting)
 
@@ -134,13 +142,7 @@ func (c *Client) Close(ctx context.Context) error {
 
 // createPowernapClient creates a new powernap client with the current configuration.
 func (c *Client) createPowernapClient() error {
-	workDir, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("failed to get working directory: %w", err)
-	}
-
-	rootURI := string(protocol.URIFromPath(workDir))
-	c.workDir = workDir
+	rootURI := string(protocol.URIFromPath(c.cwd))
 
 	command, err := c.resolver.ResolveValue(c.config.Command)
 	if err != nil {
@@ -157,7 +159,7 @@ func (c *Client) createPowernapClient() error {
 		WorkspaceFolders: []protocol.WorkspaceFolder{
 			{
 				URI:  rootURI,
-				Name: filepath.Base(workDir),
+				Name: filepath.Base(c.cwd),
 			},
 		},
 	}
@@ -321,15 +323,8 @@ type OpenFileInfo struct {
 // HandlesFile checks if this LSP client handles the given file based on its
 // extension and whether it's within the working directory.
 func (c *Client) HandlesFile(path string) bool {
-	// Check if file is within working directory.
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		slog.Debug("Cannot resolve path", "name", c.name, "file", path, "error", err)
-		return false
-	}
-	relPath, err := filepath.Rel(c.workDir, absPath)
-	if err != nil || strings.HasPrefix(relPath, "..") {
-		slog.Debug("File outside workspace", "name", c.name, "file", path, "workDir", c.workDir)
+	if !fsext.HasPrefix(path, c.cwd) {
+		slog.Debug("File outside workspace", "name", c.name, "file", path, "workDir", c.cwd)
 		return false
 	}
 	return handlesFiletype(c.name, c.fileTypes, path)
@@ -472,31 +467,6 @@ func (c *Client) OpenFileOnDemand(ctx context.Context, filepath string) error {
 	return c.OpenFile(ctx, filepath)
 }
 
-// GetDiagnosticsForFile ensures a file is open and returns its diagnostics.
-func (c *Client) GetDiagnosticsForFile(ctx context.Context, filepath string) ([]protocol.Diagnostic, error) {
-	documentURI := protocol.URIFromPath(filepath)
-
-	// Make sure the file is open
-	if !c.IsFileOpen(filepath) {
-		if err := c.OpenFile(ctx, filepath); err != nil {
-			return nil, fmt.Errorf("failed to open file for diagnostics: %w", err)
-		}
-
-		// Give the LSP server a moment to process the file
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	// Get diagnostics
-	diagnostics, _ := c.diagnostics.Get(documentURI)
-
-	return diagnostics, nil
-}
-
-// ClearDiagnosticsForURI removes diagnostics for a specific URI from the cache.
-func (c *Client) ClearDiagnosticsForURI(uri protocol.DocumentURI) {
-	c.diagnostics.Del(uri)
-}
-
 // RegisterNotificationHandler registers a notification handler.
 func (c *Client) RegisterNotificationHandler(method string, handler transport.NotificationHandler) {
 	c.client.RegisterNotificationHandler(method, handler)
@@ -505,11 +475,6 @@ func (c *Client) RegisterNotificationHandler(method string, handler transport.No
 // RegisterServerRequestHandler handles server requests.
 func (c *Client) RegisterServerRequestHandler(method string, handler transport.Handler) {
 	c.client.RegisterHandler(method, handler)
-}
-
-// DidChangeWatchedFiles sends a workspace/didChangeWatchedFiles notification to the server.
-func (c *Client) DidChangeWatchedFiles(ctx context.Context, params protocol.DidChangeWatchedFilesParams) error {
-	return c.client.NotifyDidChangeWatchedFiles(ctx, params.Changes)
 }
 
 // openKeyConfigFiles opens important configuration files that help initialize the server.

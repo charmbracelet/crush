@@ -350,7 +350,7 @@ type Agent struct {
 }
 
 type Tools struct {
-	Ls ToolLs `json:"ls,omitempty"`
+	Ls ToolLs `json:"ls"`
 }
 
 type ToolLs struct {
@@ -383,7 +383,7 @@ type Config struct {
 
 	Permissions *Permissions `json:"permissions,omitempty" jsonschema:"description=Permission settings for tool usage"`
 
-	Tools Tools `json:"tools,omitempty" jsonschema:"description=Tool configurations"`
+	Tools Tools `json:"tools" jsonschema:"description=Tool configurations"`
 
 	Agents map[string]Agent `json:"-"`
 

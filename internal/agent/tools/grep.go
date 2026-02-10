@@ -15,64 +15,41 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/fsext"
 )
 
 // regexCache provides thread-safe caching of compiled regex patterns
 type regexCache struct {
-	cache map[string]*regexp.Regexp
-	mu    sync.RWMutex
+	*csync.Map[string, *regexp.Regexp]
 }
 
 // newRegexCache creates a new regex cache
 func newRegexCache() *regexCache {
 	return &regexCache{
-		cache: make(map[string]*regexp.Regexp),
+		Map: csync.NewMap[string, *regexp.Regexp](),
 	}
 }
 
 // get retrieves a compiled regex from cache or compiles and caches it
 func (rc *regexCache) get(pattern string) (*regexp.Regexp, error) {
-	// Try to get from cache first (read lock)
-	rc.mu.RLock()
-	if regex, exists := rc.cache[pattern]; exists {
-		rc.mu.RUnlock()
-		return regex, nil
-	}
-	rc.mu.RUnlock()
-
-	// Compile the regex (write lock)
-	rc.mu.Lock()
-	defer rc.mu.Unlock()
-
-	// Double-check in case another goroutine compiled it while we waited
-	if regex, exists := rc.cache[pattern]; exists {
-		return regex, nil
-	}
-
-	// Compile and cache the regex
-	regex, err := regexp.Compile(pattern)
-	if err != nil {
-		return nil, err
-	}
-
-	rc.cache[pattern] = regex
-	return regex, nil
+	var rerr error
+	return rc.GetOrSet(pattern, func() *regexp.Regexp {
+		regex, err := regexp.Compile(pattern)
+		if err != nil {
+			rerr = err
+		}
+		return regex
+	}), rerr
 }
 
 // ResetCache clears compiled regex caches to prevent unbounded growth across sessions.
 func ResetCache() {
-	searchRegexCache.mu.Lock()
-	clear(searchRegexCache.cache)
-	searchRegexCache.mu.Unlock()
-
-	globRegexCache.mu.Lock()
-	clear(globRegexCache.cache)
-	globRegexCache.mu.Unlock()
+	searchRegexCache.Map.Reset(map[string]*regexp.Regexp{})
+	globRegexCache.Map.Reset(map[string]*regexp.Regexp{})
 }
 
 // Global regex cache instances

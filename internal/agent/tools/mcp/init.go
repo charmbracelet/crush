@@ -38,8 +38,22 @@ func parseLevel(level mcp.LoggingLevel) slog.Level {
 	}
 }
 
+// ClientSession wraps an mcp.ClientSession with a context cancel function so
+// that the context created during session establishment is properly cleaned up
+// on close.
+type ClientSession struct {
+	*mcp.ClientSession
+	cancel context.CancelFunc
+}
+
+// Close cancels the session context and then closes the underlying session.
+func (s *ClientSession) Close() error {
+	s.cancel()
+	return s.ClientSession.Close()
+}
+
 var (
-	sessions = csync.NewMap[string, *mcp.ClientSession]()
+	sessions = csync.NewMap[string, *ClientSession]()
 	states   = csync.NewMap[string, ClientInfo]()
 	broker   = pubsub.NewBroker[Event]()
 	initOnce sync.Once
@@ -102,7 +116,7 @@ type ClientInfo struct {
 	Name        string
 	State       State
 	Error       error
-	Client      *mcp.ClientSession
+	Client      *ClientSession
 	Counts      Counts
 	ConnectedAt time.Time
 }
@@ -239,7 +253,7 @@ func WaitForInit(ctx context.Context) error {
 	}
 }
 
-func getOrRenewClient(ctx context.Context, cfg *config.Config, name string) (*mcp.ClientSession, error) {
+func getOrRenewClient(ctx context.Context, cfg *config.Config, name string) (*ClientSession, error) {
 	sess, ok := sessions.Get(name)
 	if !ok {
 		return nil, fmt.Errorf("mcp '%s' not available", name)
@@ -268,7 +282,7 @@ func getOrRenewClient(ctx context.Context, cfg *config.Config, name string) (*mc
 }
 
 // updateState updates the state of an MCP client and publishes an event
-func updateState(name string, state State, err error, client *mcp.ClientSession, counts Counts) {
+func updateState(name string, state State, err error, client *ClientSession, counts Counts) {
 	info := ClientInfo{
 		Name:   name,
 		State:  state,
@@ -294,7 +308,7 @@ func updateState(name string, state State, err error, client *mcp.ClientSession,
 	})
 }
 
-func createSession(ctx context.Context, name string, m config.MCPConfig, resolver config.VariableResolver) (*mcp.ClientSession, error) {
+func createSession(ctx context.Context, name string, m config.MCPConfig, resolver config.VariableResolver) (*ClientSession, error) {
 	timeout := mcpTimeout(m)
 	mcpCtx, cancel := context.WithCancel(ctx)
 	cancelTimer := time.AfterFunc(timeout, cancel)
@@ -352,7 +366,7 @@ func createSession(ctx context.Context, name string, m config.MCPConfig, resolve
 
 	cancelTimer.Stop()
 	slog.Debug("MCP client initialized", "name", name)
-	return session, nil
+	return &ClientSession{session, cancel}, nil
 }
 
 // maybeStdioErr if a stdio mcp prints an error in non-json format, it'll fail

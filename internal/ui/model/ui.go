@@ -1266,11 +1266,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		)
 
 		// Attempt to import GitHub Copilot tokens from VSCode if available.
-		if isCopilot && !isConfigured() {
+		if isCopilot && !isConfigured() && !msg.ReAuthenticate {
 			m.com.Config().ImportCopilot()
 		}
 
-		if !isConfigured() {
+		if !isConfigured() || msg.ReAuthenticate {
 			m.dialog.CloseDialog(dialog.ModelsID)
 			if cmd := m.openAuthenticationDialog(msg.Provider, msg.Model, msg.ModelType); cmd != nil {
 				cmds = append(cmds, cmd)
@@ -2723,10 +2723,13 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 	}
 
 	ctx := context.Background()
-	for _, path := range m.sessionFileReads {
-		m.com.App.FileTracker.RecordRead(ctx, m.session.ID, path)
-		m.com.App.LSPManager.Start(ctx, path)
-	}
+	cmds = append(cmds, func() tea.Msg {
+		for _, path := range m.sessionFileReads {
+			m.com.App.FileTracker.RecordRead(ctx, m.session.ID, path)
+			m.com.App.LSPManager.Start(ctx, path)
+		}
+		return nil
+	})
 
 	// Capture session ID to avoid race with main goroutine updating m.session.
 	sessionID := m.session.ID

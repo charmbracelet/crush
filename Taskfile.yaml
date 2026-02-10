@@ -58,6 +58,14 @@ tasks:
       - task: build
       - "./crush {{.CLI_ARGS}} {{if .RACE}}2>race.log{{end}}"
 
+  run:catwalk:
+    desc: Run build with local Catwalk
+    env:
+      CATWALK_URL: http://localhost:8080
+    cmds:
+      - task: build
+      - ./crush {{.CLI_ARGS}}
+
   test:
     desc: Run tests
     cmds:

@@ -46,7 +46,7 @@ func TestBashTool_DefaultAutoBackgroundThreshold(t *testing.T) {
 
 	resp := runBashTool(t, tool, ctx, BashParams{
 		Description: "default threshold",
-		Command:     "sleep 1 && echo done",
+		Command:     "echo done",
 	})
 
 	require.False(t, resp.IsError)
@@ -64,7 +64,7 @@ func TestBashTool_CustomAutoBackgroundThreshold(t *testing.T) {
 
 	resp := runBashTool(t, tool, ctx, BashParams{
 		Description:         "custom threshold",
-		Command:             "sleep 2 && echo done",
+		Command:             "sleep 1.5 && echo done",
 		AutoBackgroundAfter: 1,
 	})
 

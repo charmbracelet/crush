@@ -66,6 +66,16 @@ tasks:
       - task: build
       - ./crush {{.CLI_ARGS}}
 
+  run:onboarding:
+    desc: Run build with custom config to test onboarding
+    env:
+      CRUSH_GLOBAL_DATA: tmp/onboarding/data
+      CRUSH_GLOBAL_CONFIG: tmp/onboarding/config
+    cmds:
+      - task: build
+      - rm -rf tmp/onboarding
+      - ./crush {{.CLI_ARGS}}
+
   test:
     desc: Run tests
     cmds:

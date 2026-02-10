@@ -132,7 +132,6 @@ func NewGrepTool(workingDir string) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse("pattern is required"), nil
 			}
 
-			// If literal_text is true, escape the pattern
 			searchPattern := params.Pattern
 			if params.LiteralText {
 				searchPattern = escapeRegexPattern(params.Pattern)
@@ -143,7 +142,14 @@ func NewGrepTool(workingDir string) fantasy.AgentTool {
 				searchPath = workingDir
 			}
 
-			matches, truncated, err := searchFiles(ctx, searchPattern, searchPath, params.Include, 100)
+			if !fsext.HasPrefix(searchPath, workingDir) {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("path must be within working directory: %s", workingDir)), nil
+			}
+
+			searchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+
+			matches, truncated, err := searchFiles(searchCtx, searchPattern, searchPath, params.Include, 100)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("error searching files: %v", err)), nil
 			}

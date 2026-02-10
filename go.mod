@@ -6,7 +6,7 @@ require (
 	charm.land/bubbles/v2 v2.0.0-rc.1.0.20260109112849-ae99f46cec66
 	charm.land/bubbletea/v2 v2.0.0-rc.2.0.20260209074636-30878e43d7b0
 	charm.land/catwalk v0.17.1
-	charm.land/fantasy v0.7.1
+	charm.land/fantasy v0.7.2
 	charm.land/glamour/v2 v2.0.0-20260123212943-6014aa153a9b
 	charm.land/lipgloss/v2 v2.0.0-beta.3.0.20251205162909-7869489d8971
 	charm.land/log/v2 v2.0.0-20251110204020-529bb77f35da
@@ -129,7 +129,7 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/kaptinlin/go-i18n v0.2.3 // indirect
 	github.com/kaptinlin/jsonpointer v0.4.9 // indirect
-	github.com/kaptinlin/jsonschema v0.6.9 // indirect
+	github.com/kaptinlin/jsonschema v0.6.10 // indirect
 	github.com/kaptinlin/messageformat-go v0.4.9 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
@@ -174,12 +174,12 @@ require (
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
 	golang.org/x/image v0.34.0 // indirect
 	golang.org/x/mod v0.32.0 // indirect
-	golang.org/x/oauth2 v0.34.0 // indirect
+	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/term v0.39.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 	google.golang.org/api v0.239.0 // indirect
-	google.golang.org/genai v1.44.0 // indirect
+	google.golang.org/genai v1.45.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250804133106-a7a43d27e69b // indirect
 	google.golang.org/grpc v1.76.0 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect

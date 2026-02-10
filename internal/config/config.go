@@ -350,7 +350,7 @@ type Agent struct {
 }
 
 type Tools struct {
-	Ls ToolLs `json:"ls,omitempty"`
+	Ls ToolLs `json:"ls,omitzero"`
 }
 
 type ToolLs struct {
@@ -383,7 +383,7 @@ type Config struct {
 
 	Permissions *Permissions `json:"permissions,omitempty" jsonschema:"description=Permission settings for tool usage"`
 
-	Tools Tools `json:"tools,omitempty" jsonschema:"description=Tool configurations"`
+	Tools Tools `json:"tools,omitzero" jsonschema:"description=Tool configurations"`
 
 	Agents map[string]Agent `json:"-"`
 
@@ -755,7 +755,7 @@ func (c *Config) SetupAgents() {
 		},
 
 		AgentTask: {
-			ID:           AgentCoder,
+			ID:           AgentTask,
 			Name:         "Task",
 			Description:  "An agent that helps with searching for context and finding implementation details.",
 			Model:        SelectedModelTypeLarge,

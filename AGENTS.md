@@ -7,17 +7,18 @@
 - **Update Golden Files**: `go test ./... -update` (regenerates .golden files when test output changes)
   - Update specific package: `go test ./internal/tui/components/core -update` (in this case, we're updating "core")
 - **Lint**: `task lint:fix`
-- **Format**: `task fmt` (gofumpt -w .)
+- **Format**: `task fmt` (`gofumpt -w .`)
+- **Modernize**: `task modernize` (runs `modernize` which make code simplifications)
 - **Dev**: `task dev` (runs with profiling enabled)
 
 ## Code Style Guidelines
 
-- **Imports**: Use goimports formatting, group stdlib, external, internal packages
+- **Imports**: Use `goimports` formatting, group stdlib, external, internal packages
 - **Formatting**: Use gofumpt (stricter than gofmt), enabled in golangci-lint
 - **Naming**: Standard Go conventions - PascalCase for exported, camelCase for unexported
 - **Types**: Prefer explicit types, use type aliases for clarity (e.g., `type AgentName string`)
 - **Error handling**: Return errors explicitly, use `fmt.Errorf` for wrapping
-- **Context**: Always pass context.Context as first parameter for operations
+- **Context**: Always pass `context.Context` as first parameter for operations
 - **Interfaces**: Define interfaces in consuming packages, keep them small and focused
 - **Structs**: Use struct embedding for composition, group related fields
 - **Constants**: Use typed constants with iota for enums, group in const blocks

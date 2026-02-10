@@ -207,8 +207,8 @@ func splitArgsFlags(parts []string) (args []string, flags []string) {
 		if strings.HasPrefix(part, "-") {
 			// Extract flag name before '=' if present
 			flag := part
-			if idx := strings.IndexByte(part, '='); idx != -1 {
-				flag = part[:idx]
+			if before, _, ok := strings.Cut(part, "="); ok {
+				flag = before
 			}
 			flags = append(flags, flag)
 		} else {

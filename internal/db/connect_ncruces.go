@@ -12,21 +12,12 @@ import (
 )
 
 func openDB(dbPath string) (*sql.DB, error) {
-	// Set pragmas for better performance.
-	pragmas := []string{
-		"PRAGMA foreign_keys = ON;",
-		"PRAGMA journal_mode = WAL;",
-		"PRAGMA page_size = 4096;",
-		"PRAGMA cache_size = -8000;",
-		"PRAGMA synchronous = NORMAL;",
-		"PRAGMA secure_delete = ON;",
-		"PRAGMA busy_timeout = 5000;",
-	}
-
 	db, err := driver.Open(dbPath, func(c *sqlite3.Conn) error {
-		for _, pragma := range pragmas {
-			if err := c.Exec(pragma); err != nil {
-				return fmt.Errorf("failed to set pragma %q: %w", pragma, err)
+		// Set pragmas for better performance via _pragma query params.
+		// Format: PRAGMA name = value;
+		for name, value := range pragmas {
+			if err := c.Exec(fmt.Sprintf("PRAGMA %s = %s;", name, value)); err != nil {
+				return fmt.Errorf("failed to set pragma %q: %w", name, err)
 			}
 		}
 		return nil
@@ -34,5 +25,6 @@ func openDB(dbPath string) (*sql.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
+
 	return db, nil
 }

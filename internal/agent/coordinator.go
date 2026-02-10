@@ -598,6 +598,9 @@ func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[st
 		openai.WithAPIKey(apiKey),
 		openai.WithUseResponsesAPI(),
 	}
+	if strings.Contains(baseURL, "/backend-api/codex") {
+		opts = append(opts, openai.WithIsCodex())
+	}
 	if c.cfg.Options.Debug {
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, openai.WithHTTPClient(httpClient))

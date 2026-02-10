@@ -86,7 +86,7 @@ type BinaryContent struct {
 
 func (bc BinaryContent) String(p catwalk.InferenceProvider) string {
 	base64Encoded := base64.StdEncoding.EncodeToString(bc.Data)
-	if p == catwalk.InferenceProviderOpenAI {
+	if p == catwalk.InferenceProviderOpenAI || p == catwalk.InferenceProviderOpenAICodex {
 		return "data:" + bc.MIMEType + ";base64," + base64Encoded
 	}
 	return base64Encoded

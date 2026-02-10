@@ -24,10 +24,35 @@ func NewOAuthCopilot(
 
 type OAuthCopilot struct {
 	deviceCode *copilot.DeviceCode
-	cancelFunc func()
+	cancelFunc context.CancelFunc
 }
 
 var _ OAuthProvider = (*OAuthCopilot)(nil)
+
+type copilotOAuthStep struct {
+	url  string
+	code string
+}
+
+func (s copilotOAuthStep) instructions() string {
+	return "copy the code below and open the browser."
+}
+
+func (s copilotOAuthStep) verificationURL() string {
+	return s.url
+}
+
+func (s copilotOAuthStep) hyperlinkID() string {
+	return "id=copilot-verify"
+}
+
+func (s copilotOAuthStep) userCode() string {
+	return s.code
+}
+
+func (s copilotOAuthStep) copyValue() string {
+	return s.code
+}
 
 func (m *OAuthCopilot) name() string {
 	return "GitHub Copilot"
@@ -44,24 +69,25 @@ func (m *OAuthCopilot) initiateAuth() tea.Msg {
 
 	m.deviceCode = deviceCode
 
-	return ActionInitiateOAuth{
-		DeviceCode:      deviceCode.DeviceCode,
-		UserCode:        deviceCode.UserCode,
-		VerificationURL: deviceCode.VerificationURI,
-		ExpiresIn:       deviceCode.ExpiresIn,
-		Interval:        deviceCode.Interval,
-	}
+	return ActionInitiateOAuth{Step: copilotOAuthStep{
+		url:  deviceCode.VerificationURI,
+		code: deviceCode.UserCode,
+	}}
 }
 
-func (m *OAuthCopilot) startPolling(deviceCode string, expiresIn int) tea.Cmd {
+func (m *OAuthCopilot) waitForAuthorization(ctx context.Context) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithCancel(context.Background())
+		if m.deviceCode == nil {
+			return ActionOAuthErrored{Error: fmt.Errorf("device code is not initialized")}
+		}
+
+		ctx, cancel := context.WithCancel(ctx)
 		m.cancelFunc = cancel
 
 		token, err := copilot.PollForToken(ctx, m.deviceCode)
 		if err != nil {
 			if ctx.Err() != nil {
-				return nil // cancelled, don't report error.
+				return nil
 			}
 			return ActionOAuthErrored{Error: err}
 		}
@@ -70,9 +96,10 @@ func (m *OAuthCopilot) startPolling(deviceCode string, expiresIn int) tea.Cmd {
 	}
 }
 
-func (m *OAuthCopilot) stopPolling() tea.Msg {
+func (m *OAuthCopilot) stopAuthorization() tea.Msg {
 	if m.cancelFunc != nil {
 		m.cancelFunc()
+		m.cancelFunc = nil
 	}
 	return nil
 }

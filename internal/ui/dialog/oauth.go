@@ -3,6 +3,7 @@ package dialog
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"charm.land/bubbles/v2/help"
@@ -16,17 +17,30 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/pkg/browser"
 )
 
 type OAuthProvider interface {
 	name() string
 	initiateAuth() tea.Msg
-	startPolling(deviceCode string, expiresIn int) tea.Cmd
-	stopPolling() tea.Msg
+	waitForAuthorization(ctx context.Context) tea.Cmd
+	stopAuthorization() tea.Msg
 }
 
-// OAuthState represents the current state of the device flow.
+type OAuthStep interface {
+	instructions() string
+	verificationURL() string
+	hyperlinkID() string
+}
+
+type OAuthStepCode interface {
+	OAuthStep
+	userCode() string
+	copyValue() string
+}
+
+// OAuthState represents the current state of the OAuth flow.
 type OAuthState int
 
 const (
@@ -59,19 +73,15 @@ type OAuth struct {
 		Close  key.Binding
 	}
 
-	width           int
-	deviceCode      string
-	userCode        string
-	verificationURL string
-	expiresIn       int
-	interval        int
-	token           *oauth.Token
-	cancelFunc      context.CancelFunc
+	width      int
+	step       OAuthStep
+	token      *oauth.Token
+	cancelFunc context.CancelFunc
 }
 
 var _ Dialog = (*OAuth)(nil)
 
-// newOAuth creates a new device flow component.
+// newOAuth creates a new OAuth authentication component.
 func newOAuth(
 	com *common.Common,
 	isOnboarding bool,
@@ -102,11 +112,11 @@ func newOAuth(
 
 	m.keyMap.Copy = key.NewBinding(
 		key.WithKeys("c"),
-		key.WithHelp("c", "copy code"),
+		key.WithHelp("c", "copy"),
 	)
 	m.keyMap.Submit = key.NewBinding(
-		key.WithKeys("enter", "ctrl+y"),
-		key.WithHelp("enter", "copy & open"),
+		key.WithKeys("enter", "ctrl+y", "o"),
+		key.WithHelp("enter/o", "open"),
 	)
 	m.keyMap.Close = CloseKey
 
@@ -153,27 +163,35 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 				return m.saveKeyAndContinue()
 
 			default:
-				return ActionClose{}
+				return ActionCmd{
+					Cmd: tea.Sequence(
+						m.stopAuthorization(),
+						func() tea.Msg { return ActionClose{} },
+					),
+				}
 			}
 		}
 
 	case ActionInitiateOAuth:
-		m.deviceCode = msg.DeviceCode
-		m.userCode = msg.UserCode
-		m.expiresIn = msg.ExpiresIn
-		m.verificationURL = msg.VerificationURL
-		m.interval = msg.Interval
+		if msg.Step == nil {
+			m.State = OAuthStateError
+			return ActionCmd{util.ReportError(fmt.Errorf("oauth initiation returned no flow step"))}
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		m.cancelFunc = cancel
+		m.step = msg.Step
 		m.State = OAuthStateDisplay
-		return ActionCmd{m.oAuthProvider.startPolling(msg.DeviceCode, msg.ExpiresIn)}
+		return ActionCmd{m.oAuthProvider.waitForAuthorization(ctx)}
 
 	case ActionCompleteOAuth:
 		m.State = OAuthStateSuccess
 		m.token = msg.Token
-		return ActionCmd{m.oAuthProvider.stopPolling}
+		return ActionCmd{m.stopAuthorization()}
 
 	case ActionOAuthErrored:
 		m.State = OAuthStateError
-		cmd := tea.Batch(m.oAuthProvider.stopPolling, util.ReportError(msg.Error))
+		cmd := tea.Batch(m.stopAuthorization(), util.ReportError(msg.Error))
 		return ActionCmd{cmd}
 	}
 	return nil
@@ -253,33 +271,52 @@ func (m *OAuth) innerDialogContent() string {
 			)
 
 	case OAuthStateDisplay:
+		if m.step == nil {
+			return lipgloss.NewStyle().
+				Margin(1).
+				Width(m.width - 2).
+				Render(errorStyle.Render("Authentication flow is not available."))
+		}
+
 		instructions := lipgloss.NewStyle().
 			Margin(0, 1).
 			Width(m.width - 2).
 			Render(
 				whiteStyle.Render("Press ") +
 					primaryStyle.Render("enter") +
-					whiteStyle.Render(" to copy the code below and open the browser."),
+					whiteStyle.Render(" to "+m.step.instructions()) + "\n" +
+					whiteStyle.Render("Press ") +
+					primaryStyle.Render("c") +
+					whiteStyle.Render(" to copy "+m.copyTargetLabel()+"."),
 			)
 
-		codeBox := lipgloss.NewStyle().
-			Width(m.width-2).
-			Height(7).
-			Align(lipgloss.Center, lipgloss.Center).
-			Background(t.BgBaseLighter).
-			Margin(0, 1).
-			Render(
-				lipgloss.NewStyle().
-					Bold(true).
-					Foreground(t.White).
-					Render(m.userCode),
-			)
+		elements := []string{"", instructions}
+		if step, ok := m.stepCode(); ok {
+			codeBox := lipgloss.NewStyle().
+				Width(m.width-2).
+				Height(7).
+				Align(lipgloss.Center, lipgloss.Center).
+				Background(t.BgBaseLighter).
+				Margin(0, 1).
+				Render(
+					lipgloss.NewStyle().
+						Bold(true).
+						Foreground(t.White).
+						Render(step.userCode()),
+				)
+			elements = append(elements, "", codeBox)
+		}
 
-		link := linkStyle.Hyperlink(m.verificationURL, "id=oauth-verify").Render(m.verificationURL)
+		rawURL := m.step.verificationURL()
+		displayURL := m.displayVerificationURL(rawURL, m.width-4)
+		link := linkStyle.Hyperlink(rawURL).Render(displayURL)
+		if displayURL != rawURL {
+			link += "\n" + mutedStyle.Render("(truncated for display)")
+		}
 		url := mutedStyle.
 			Margin(0, 1).
 			Width(m.width - 2).
-			Render("Browser not opening? Refer to\n" + link)
+			Render("Verification URL\n" + link)
 
 		waiting := lipgloss.NewStyle().
 			Margin(0, 1).
@@ -288,18 +325,8 @@ func (m *OAuth) innerDialogContent() string {
 				greenStyle.Render(m.spinner.View()) + mutedStyle.Render("Verifying..."),
 			)
 
-		return lipgloss.JoinVertical(
-			lipgloss.Left,
-			"",
-			instructions,
-			"",
-			codeBox,
-			"",
-			url,
-			"",
-			waiting,
-			"",
-		)
+		elements = append(elements, "", url, "", waiting, "")
+		return lipgloss.JoinVertical(lipgloss.Left, elements...)
 
 	case OAuthStateSuccess:
 		return greenStyle.
@@ -338,37 +365,54 @@ func (m *OAuth) ShortHelp() []key.Binding {
 		}
 
 	default:
-		return []key.Binding{
-			m.keyMap.Copy,
-			m.keyMap.Submit,
-			m.keyMap.Close,
+		bindings := []key.Binding{m.keyMap.Submit, m.keyMap.Close}
+		if m.step != nil {
+			bindings = append([]key.Binding{m.copyHelpBinding()}, bindings...)
 		}
+		return bindings
 	}
 }
 
-func (d *OAuth) copyCode() tea.Cmd {
-	if d.State != OAuthStateDisplay {
+func (m *OAuth) copyCode() tea.Cmd {
+	if m.State != OAuthStateDisplay {
 		return nil
 	}
+
+	copyValue, label := m.copyContent()
+	if copyValue == "" {
+		return nil
+	}
+
 	return tea.Sequence(
-		tea.SetClipboard(d.userCode),
-		util.ReportInfo("Code copied to clipboard"),
+		tea.SetClipboard(copyValue),
+		util.ReportInfo(fmt.Sprintf("%s copied to clipboard", label)),
 	)
 }
 
-func (d *OAuth) copyCodeAndOpenURL() tea.Cmd {
-	if d.State != OAuthStateDisplay {
+func (m *OAuth) copyCodeAndOpenURL() tea.Cmd {
+	if m.State != OAuthStateDisplay || m.step == nil {
 		return nil
 	}
+
+	openURL := func() tea.Msg {
+		if err := browser.OpenURL(m.step.verificationURL()); err != nil {
+			return ActionOAuthErrored{fmt.Errorf("failed to open browser: %w", err)}
+		}
+		return nil
+	}
+
+	copyValue, label := m.copyContent()
+	if copyValue == "" {
+		return tea.Sequence(
+			openURL,
+			util.ReportInfo("URL opened"),
+		)
+	}
+
 	return tea.Sequence(
-		tea.SetClipboard(d.userCode),
-		func() tea.Msg {
-			if err := browser.OpenURL(d.verificationURL); err != nil {
-				return ActionOAuthErrored{fmt.Errorf("failed to open browser: %w", err)}
-			}
-			return nil
-		},
-		util.ReportInfo("Code copied and URL opened"),
+		tea.SetClipboard(copyValue),
+		openURL,
+		util.ReportInfo(fmt.Sprintf("%s copied and URL opened", label)),
 	)
 }
 
@@ -385,4 +429,67 @@ func (m *OAuth) saveKeyAndContinue() Action {
 		Model:     m.model,
 		ModelType: m.modelType,
 	}
+}
+
+func (m *OAuth) stopAuthorization() tea.Cmd {
+	if m.cancelFunc != nil {
+		m.cancelFunc()
+		m.cancelFunc = nil
+	}
+	return m.oAuthProvider.stopAuthorization
+}
+
+func (m *OAuth) stepCode() (OAuthStepCode, bool) {
+	step, ok := m.step.(OAuthStepCode)
+	return step, ok
+}
+
+func (m *OAuth) copyContent() (string, string) {
+	if step, ok := m.stepCode(); ok {
+		return step.copyValue(), "Code"
+	}
+	if m.step != nil {
+		return m.step.verificationURL(), "URL"
+	}
+	return "", ""
+}
+
+func (m *OAuth) copyHelpBinding() key.Binding {
+	label := "copy"
+	if _, ok := m.stepCode(); ok {
+		label = "copy code"
+	} else if m.step != nil {
+		label = "copy url"
+	}
+	return key.NewBinding(
+		key.WithKeys("c"),
+		key.WithHelp("c", label),
+	)
+}
+
+func (m *OAuth) copyTargetLabel() string {
+	if _, ok := m.stepCode(); ok {
+		return "the code"
+	}
+	return "the full URL"
+}
+
+func (m *OAuth) displayVerificationURL(rawURL string, maxWidth int) string {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return rawURL
+	}
+
+	displayURL := rawURL
+	if parsed, err := url.Parse(rawURL); err == nil && parsed.Scheme != "" && parsed.Host != "" {
+		displayURL = parsed.Scheme + "://" + parsed.Host + parsed.EscapedPath()
+		if parsed.RawQuery != "" {
+			displayURL += "?…"
+		}
+	}
+
+	if maxWidth <= 0 {
+		return displayURL
+	}
+	return ansi.Truncate(displayURL, maxWidth, "…")
 }

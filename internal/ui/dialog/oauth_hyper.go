@@ -23,10 +23,37 @@ func NewOAuthHyper(
 }
 
 type OAuthHyper struct {
-	cancelFunc func()
+	deviceCode string
+	expiresIn  int
+	cancelFunc context.CancelFunc
 }
 
 var _ OAuthProvider = (*OAuthHyper)(nil)
+
+type hyperOAuthStep struct {
+	url  string
+	code string
+}
+
+func (s hyperOAuthStep) instructions() string {
+	return "copy the code below and open the browser."
+}
+
+func (s hyperOAuthStep) verificationURL() string {
+	return s.url
+}
+
+func (s hyperOAuthStep) hyperlinkID() string {
+	return "id=hyper-verify"
+}
+
+func (s hyperOAuthStep) userCode() string {
+	return s.code
+}
+
+func (s hyperOAuthStep) copyValue() string {
+	return s.code
+}
 
 func (m *OAuthHyper) name() string {
 	return "Hyper"
@@ -41,29 +68,34 @@ func (m *OAuthHyper) initiateAuth() tea.Msg {
 
 	authResp, err := hyper.InitiateDeviceAuth(ctx)
 
-	ellapsed := time.Since(startTime)
-	if ellapsed < minimumWait {
-		time.Sleep(minimumWait - ellapsed)
+	elapsed := time.Since(startTime)
+	if elapsed < minimumWait {
+		time.Sleep(minimumWait - elapsed)
 	}
 
 	if err != nil {
 		return ActionOAuthErrored{fmt.Errorf("failed to initiate device auth: %w", err)}
 	}
 
-	return ActionInitiateOAuth{
-		DeviceCode:      authResp.DeviceCode,
-		UserCode:        authResp.UserCode,
-		ExpiresIn:       authResp.ExpiresIn,
-		VerificationURL: authResp.VerificationURL,
-	}
+	m.deviceCode = authResp.DeviceCode
+	m.expiresIn = authResp.ExpiresIn
+
+	return ActionInitiateOAuth{Step: hyperOAuthStep{
+		url:  authResp.VerificationURL,
+		code: authResp.UserCode,
+	}}
 }
 
-func (m *OAuthHyper) startPolling(deviceCode string, expiresIn int) tea.Cmd {
+func (m *OAuthHyper) waitForAuthorization(ctx context.Context) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithCancel(context.Background())
+		if m.deviceCode == "" {
+			return ActionOAuthErrored{fmt.Errorf("device code is not initialized")}
+		}
+
+		ctx, cancel := context.WithCancel(ctx)
 		m.cancelFunc = cancel
 
-		refreshToken, err := hyper.PollForToken(ctx, deviceCode, expiresIn)
+		refreshToken, err := hyper.PollForToken(ctx, m.deviceCode, m.expiresIn)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
@@ -88,9 +120,10 @@ func (m *OAuthHyper) startPolling(deviceCode string, expiresIn int) tea.Cmd {
 	}
 }
 
-func (m *OAuthHyper) stopPolling() tea.Msg {
+func (m *OAuthHyper) stopAuthorization() tea.Msg {
 	if m.cancelFunc != nil {
 		m.cancelFunc()
+		m.cancelFunc = nil
 	}
 	return nil
 }

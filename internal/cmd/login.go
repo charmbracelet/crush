@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"time"
 
+	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
 	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
@@ -14,6 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/oauth/hyper"
+	"github.com/charmbracelet/crush/internal/oauth/openai"
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
 )
@@ -37,6 +40,7 @@ crush login copilot
 		"copilot",
 		"github",
 		"github-copilot",
+		"openai",
 	},
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -55,6 +59,8 @@ crush login copilot
 			return loginHyper(app.Config())
 		case "copilot", "github", "github-copilot":
 			return loginCopilot(app.Config())
+		case "openai":
+			return loginOpenAI(app.Config())
 		default:
 			return fmt.Errorf("unknown platform: %s", args[0])
 		}
@@ -120,6 +126,65 @@ func loginHyper(cfg *config.Config) error {
 
 	fmt.Println()
 	fmt.Println("You're now authenticated with Hyper!")
+	return nil
+}
+
+func loginOpenAI(cfg *config.Config) error {
+	ctx := getOpenAILoginContext()
+	providerID := string(catwalk.InferenceProviderOpenAICodex)
+
+	if existing, ok := cfg.Providers.Get(providerID); ok && existing.OAuthToken != nil {
+		if openai.NormalizeToken(existing.OAuthToken) {
+			if err := cfg.SetProviderAPIKey(providerID, existing.OAuthToken); err != nil {
+				return fmt.Errorf("failed to update stored OpenAI OAuth token expiry: %w", err)
+			}
+		}
+		fmt.Println("You are already logged in with OpenAI Codex.")
+		return nil
+	}
+
+	oauthServer, err := openai.NewOAuthServer()
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		oauthServer.Start()
+	}()
+
+	url := oauthServer.AuthURL()
+
+	fmt.Println()
+	fmt.Println("Open the following URL and follow the instructions to authenticate with OpenAI:")
+	fmt.Println()
+	fmt.Println(lipgloss.NewStyle().Hyperlink(url, "id=openai").Render(url))
+	fmt.Println()
+	fmt.Println("Waiting for authorization...")
+
+	if err := oauthServer.WaitForAuthorization(ctx); err != nil {
+		if err == openai.ErrAuthorizationTimedOut {
+			fmt.Println("Authorization timed out. Please try again.")
+		}
+
+		return err
+	}
+
+	bundle := oauthServer.AuthBundle()
+	if bundle == nil {
+		return fmt.Errorf("authorization failed")
+	}
+
+	token := bundle.TokenData.ToOAuthToken(bundle.APIKey)
+
+	if err := cmp.Or(
+		cfg.SetConfigField("providers."+providerID+".api_key", token.AccessToken),
+		cfg.SetConfigField("providers."+providerID+".oauth", token),
+	); err != nil {
+		return err
+	}
+
+	fmt.Println()
+	fmt.Println("You're now authenticated with OpenAI!")
 	return nil
 }
 
@@ -200,4 +265,15 @@ func getLoginContext() context.Context {
 
 func waitEnter() {
 	_, _ = fmt.Scanln()
+}
+
+func getOpenAILoginContext() context.Context {
+	ctxWithTimeout, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := signal.NotifyContext(ctxWithTimeout, os.Interrupt, os.Kill)
+	go func() {
+		<-ctx.Done()
+		cancel()
+		os.Exit(1)
+	}()
+	return ctx
 }

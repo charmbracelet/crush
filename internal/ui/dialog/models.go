@@ -444,10 +444,9 @@ func (m *Models) setProviderItems() error {
 		if name == "" {
 			name = providerID
 		}
-
 		group := NewModelGroup(t, name, providerConfigured)
 		for _, model := range displayProvider.Models {
-			item := NewModelItem(t, provider, model, m.modelType, false)
+			item := NewModelItem(t, displayProvider, model, m.modelType, false)
 			group.AppendItems(item)
 			itemsMap[item.ID()] = item
 			if model.ID == currentModel.Model && string(provider.ID) == currentModel.Provider {
@@ -516,13 +515,16 @@ func getFilteredProviders(cfg *config.Config) ([]catwalk.Provider, error) {
 			isAzure         = p.ID == catwalk.InferenceProviderAzure
 			isCopilot       = p.ID == catwalk.InferenceProviderCopilot
 			isHyper         = string(p.ID) == "hyper"
+			isOpenAI        = p.ID == catwalk.InferenceProviderOpenAI
+			isOpenAICodex   = p.ID == catwalk.InferenceProviderOpenAICodex
 			hasAPIKeyEnv    = strings.HasPrefix(p.APIKey, "$")
 			_, isConfigured = cfg.Providers.Get(string(p.ID))
 		)
-		if isAzure || isCopilot || isHyper || hasAPIKeyEnv || isConfigured {
+		if isAzure || isCopilot || isHyper || isOpenAI || isOpenAICodex || hasAPIKeyEnv || isConfigured {
 			filteredProviders = append(filteredProviders, p)
 		}
 	}
+
 	return filteredProviders, nil
 }
 

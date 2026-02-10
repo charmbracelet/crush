@@ -86,24 +86,19 @@ type (
 	}
 )
 
-// Messages for OAuth2 device flow dialog.
+// Messages for OAuth2 authentication dialog.
 type (
-	// ActionInitiateOAuth is sent when the device auth is initiated
-	// successfully.
+	// ActionInitiateOAuth is sent when OAuth initiation returns a display step.
 	ActionInitiateOAuth struct {
-		DeviceCode      string
-		UserCode        string
-		ExpiresIn       int
-		VerificationURL string
-		Interval        int
+		Step OAuthStep
 	}
 
-	// ActionCompleteOAuth is sent when the device flow completes successfully.
+	// ActionCompleteOAuth is sent when the OAuth flow completes successfully.
 	ActionCompleteOAuth struct {
 		Token *oauth.Token
 	}
 
-	// ActionOAuthErrored is sent when the device flow encounters an error.
+	// ActionOAuthErrored is sent when the OAuth flow encounters an error.
 	ActionOAuthErrored struct {
 		Error error
 	}

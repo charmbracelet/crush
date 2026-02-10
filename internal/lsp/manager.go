@@ -17,8 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/fsext"
 	powernapconfig "github.com/charmbracelet/x/powernap/pkg/config"
-	"github.com/charmbracelet/x/powernap/pkg/lsp"
-	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
 	"github.com/sourcegraph/jsonrpc2"
 )
 
@@ -66,8 +65,8 @@ func NewManager(cfg *config.Config) *Manager {
 }
 
 // Clients returns the map of LSP clients.
-func (m *Manager) Clients() *csync.Map[string, *Client] {
-	return m.clients
+func (s *Manager) Clients() *csync.Map[string, *Client] {
+	return s.clients
 }
 
 // SetCallback sets a callback that is invoked when a new LSP
@@ -80,13 +79,17 @@ func (s *Manager) SetCallback(cb func(name string, client *Client)) {
 
 // Start starts an LSP server that can handle the given file path.
 // If an appropriate LSP is already running, this is a no-op.
-func (s *Manager) Start(ctx context.Context, filePath string) {
+func (s *Manager) Start(ctx context.Context, path string) {
+	if !fsext.HasPrefix(path, s.cfg.WorkingDir()) {
+		return
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	var wg sync.WaitGroup
 	for name, server := range s.manager.GetServers() {
-		if !handles(server, filePath, s.cfg.WorkingDir()) {
+		if !handles(server, path, s.cfg.WorkingDir()) {
 			continue
 		}
 		wg.Go(func() {
@@ -151,7 +154,14 @@ func (s *Manager) startServer(ctx context.Context, name string, server *powernap
 			return
 		}
 	}
-	client, err := New(ctx, name, cfg, s.cfg.Resolver(), s.cfg.Options.DebugLSP)
+	client, err := New(
+		ctx,
+		name,
+		cfg,
+		s.cfg.Resolver(),
+		s.cfg.WorkingDir(),
+		s.cfg.Options.DebugLSP,
+	)
 	if err != nil {
 		slog.Error("Failed to create LSP client", "name", name, "error", err)
 		return
@@ -215,14 +225,25 @@ func resolveServerName(manager *powernapconfig.Manager, name string) string {
 	return name
 }
 
-func handlesFiletype(server *powernapconfig.ServerConfig, ext string, language protocol.LanguageKind) bool {
-	for _, ft := range server.FileTypes {
-		if protocol.LanguageKind(ft) == language ||
-			ft == strings.TrimPrefix(ext, ".") ||
-			"."+ft == ext {
+func handlesFiletype(sname string, fileTypes []string, filePath string) bool {
+	if len(fileTypes) == 0 {
+		return true
+	}
+
+	kind := powernap.DetectLanguage(filePath)
+	name := strings.ToLower(filepath.Base(filePath))
+	for _, filetype := range fileTypes {
+		suffix := strings.ToLower(filetype)
+		if !strings.HasPrefix(suffix, ".") {
+			suffix = "." + suffix
+		}
+		if strings.HasSuffix(name, suffix) || filetype == string(kind) {
+			slog.Debug("Handles file", "name", sname, "file", name, "filetype", filetype, "kind", kind)
 			return true
 		}
 	}
+
+	slog.Debug("Doesn't handle file", "name", sname, "file", name)
 	return false
 }
 
@@ -241,10 +262,30 @@ func hasRootMarkers(dir string, markers []string) bool {
 }
 
 func handles(server *powernapconfig.ServerConfig, filePath, workDir string) bool {
-	language := lsp.DetectLanguage(filePath)
-	ext := filepath.Ext(filePath)
-	return handlesFiletype(server, ext, language) &&
+	return handlesFiletype(server.Command, server.FileTypes, filePath) &&
 		hasRootMarkers(workDir, server.RootMarkers)
+}
+
+// KillAll force-kills all the LSP clients.
+//
+// This is generally faster than [Manager.StopAll] because it doesn't wait for
+// the server to exit gracefully, but it can lead to data loss if the server is
+// in the middle of writing something.
+// Generally it doesn't matter when shutting down Crush, though.
+func (s *Manager) KillAll(context.Context) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var wg sync.WaitGroup
+	for name, client := range s.clients.Seq2() {
+		wg.Go(func() {
+			defer func() { s.callback(name, client) }()
+			client.client.Kill()
+			client.SetServerState(StateStopped)
+			slog.Debug("Killed LSP client", "name", name)
+		})
+	}
+	wg.Wait()
 }
 
 // StopAll stops all running LSP clients and clears the client map.

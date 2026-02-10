@@ -182,6 +182,9 @@ func (c *Completions) updateSize() {
 	width := 0
 	for i := start; i <= end; i++ {
 		item := c.list.ItemAt(i)
+		if item == nil {
+			continue
+		}
 		s := item.(interface{ Text() string }).Text()
 		width = max(width, ansi.StringWidth(s))
 	}

@@ -1213,6 +1213,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionToggleCompactMode:
 		cmds = append(cmds, m.toggleCompactMode())
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionTogglePills:
+		if cmd := m.togglePillsExpanded(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleThinking:
 		cmds = append(cmds, func() tea.Msg {
 			cfg := m.com.Config()
@@ -2858,12 +2863,15 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 		return nil
 	}
 
-	sessionID := ""
-	if m.session != nil {
+	var sessionID string
+	hasSession := m.session != nil
+	if hasSession {
 		sessionID = m.session.ID
 	}
+	hasTodos := hasSession && hasIncompleteTodos(m.session.Todos)
+	hasQueue := m.promptQueue > 0
 
-	commands, err := dialog.NewCommands(m.com, sessionID, m.customCommands, m.mcpPrompts)
+	commands, err := dialog.NewCommands(m.com, sessionID, hasSession, hasTodos, hasQueue, m.customCommands, m.mcpPrompts)
 	if err != nil {
 		return util.ReportError(err)
 	}

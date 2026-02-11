@@ -38,12 +38,7 @@ const (
 
 // hasIncompleteTodos returns true if there are any non-completed todos.
 func hasIncompleteTodos(todos []session.Todo) bool {
-	for _, todo := range todos {
-		if todo.Status != session.TodoStatusCompleted {
-			return true
-		}
-	}
-	return false
+	return session.HasIncompleteTodos(todos)
 }
 
 // hasInProgressTodo returns true if there is at least one in-progress todo.

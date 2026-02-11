@@ -137,7 +137,7 @@ func renderItem(t ListItemStyles, title string, info string, focused bool, width
 		infoWidth = lipgloss.Width(infoText)
 	}
 
-	title = ansi.Truncate(title, max(0, lineWidth-infoWidth), "")
+	title = ansi.Truncate(title, max(0, lineWidth-infoWidth), "…")
 	titleWidth := lipgloss.Width(title)
 	gap := strings.Repeat(" ", max(0, lineWidth-titleWidth-infoWidth))
 	content := title

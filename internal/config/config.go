@@ -909,12 +909,12 @@ func (c *Config) Resolver() VariableResolver {
 	return c.resolver
 }
 
-func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
+func (pc *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	var (
-		providerID = catwalk.InferenceProvider(c.ID)
+		providerID = catwalk.InferenceProvider(pc.ID)
 		testURL    = ""
 		headers    = make(map[string]string)
-		apiKey, _  = resolver.ResolveValue(c.APIKey)
+		apiKey, _  = resolver.ResolveValue(pc.APIKey)
 	)
 
 	switch providerID {
@@ -922,14 +922,14 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 		// NOTE: MiniMax has no good endpoint we can use to validate the API key.
 		// Let's at least check the pattern.
 		if !strings.HasPrefix(apiKey, "sk-") {
-			return fmt.Errorf("invalid API key format for provider %s", c.ID)
+			return fmt.Errorf("invalid API key format for provider %s", pc.ID)
 		}
 		return nil
 	}
 
-	switch c.Type {
+	switch pc.Type {
 	case catwalk.TypeOpenAI, catwalk.TypeOpenAICompat, catwalk.TypeOpenRouter:
-		baseURL, _ := resolver.ResolveValue(c.BaseURL)
+		baseURL, _ := resolver.ResolveValue(pc.BaseURL)
 		baseURL = cmp.Or(baseURL, "https://api.openai.com/v1")
 
 		switch providerID {
@@ -941,7 +941,7 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 
 		headers["Authorization"] = "Bearer " + apiKey
 	case catwalk.TypeAnthropic:
-		baseURL, _ := resolver.ResolveValue(c.BaseURL)
+		baseURL, _ := resolver.ResolveValue(pc.BaseURL)
 		baseURL = cmp.Or(baseURL, "https://api.anthropic.com/v1")
 
 		switch providerID {
@@ -954,7 +954,7 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 		headers["x-api-key"] = apiKey
 		headers["anthropic-version"] = "2023-06-01"
 	case catwalk.TypeGoogle:
-		baseURL, _ := resolver.ResolveValue(c.BaseURL)
+		baseURL, _ := resolver.ResolveValue(pc.BaseURL)
 		baseURL = cmp.Or(baseURL, "https://generativelanguage.googleapis.com")
 		testURL = baseURL + "/v1beta/models?key=" + url.QueryEscape(apiKey)
 	}
@@ -965,29 +965,29 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	client := &http.Client{}
 	req, err := http.NewRequestWithContext(ctx, "GET", testURL, nil)
 	if err != nil {
-		return fmt.Errorf("failed to create request for provider %s: %w", c.ID, err)
+		return fmt.Errorf("failed to create request for provider %s: %w", pc.ID, err)
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
-	for k, v := range c.ExtraHeaders {
+	for k, v := range pc.ExtraHeaders {
 		req.Header.Set(k, v)
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to create request for provider %s: %w", c.ID, err)
+		return fmt.Errorf("failed to create request for provider %s: %w", pc.ID, err)
 	}
 	defer resp.Body.Close()
 
 	switch providerID {
 	case catwalk.InferenceProviderZAI:
 		if resp.StatusCode == http.StatusUnauthorized {
-			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, resp.Status)
+			return fmt.Errorf("failed to connect to provider %s: %s", pc.ID, resp.Status)
 		}
 	default:
 		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, resp.Status)
+			return fmt.Errorf("failed to connect to provider %s: %s", pc.ID, resp.Status)
 		}
 	}
 	return nil

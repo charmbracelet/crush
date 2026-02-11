@@ -190,19 +190,17 @@ func (s *Session) HandleMsg(msg tea.Msg) Action {
 				s.list.Focus()
 				if s.list.IsSelectedFirst() {
 					s.list.SelectLast()
-					s.list.ScrollToBottom()
-					break
+				} else {
+					s.list.SelectPrev()
 				}
-				s.list.SelectPrev()
 				s.list.ScrollToSelected()
 			case key.Matches(msg, s.keyMap.Next):
 				s.list.Focus()
 				if s.list.IsSelectedLast() {
 					s.list.SelectFirst()
-					s.list.ScrollToTop()
-					break
+				} else {
+					s.list.SelectNext()
 				}
-				s.list.SelectNext()
 				s.list.ScrollToSelected()
 			case key.Matches(msg, s.keyMap.Select):
 				if item := s.list.SelectedItem(); item != nil {

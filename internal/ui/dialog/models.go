@@ -14,7 +14,6 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
-	xslice "github.com/charmbracelet/x/exp/slice"
 )
 
 // ModelType represents the type of model to select.
@@ -143,14 +142,12 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 	)
 	m.keyMap.Close = CloseKey
 
-	m.providers = slices.Collect(
-		xslice.Map(
-			com.Config().Providers.Seq(),
-			func(pc config.ProviderConfig) catwalk.Provider {
-				return pc.ToProvider()
-			},
-		),
-	)
+	var err error
+	m.providers, err = config.Providers(m.com.Config())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get providers: %w", err)
+	}
+
 	if err := m.setProviderItems(); err != nil {
 		return nil, fmt.Errorf("failed to set provider items: %w", err)
 	}

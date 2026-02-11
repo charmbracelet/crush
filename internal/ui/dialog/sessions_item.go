@@ -154,7 +154,7 @@ func renderItem(t ListItemStyles, title string, info string, focused bool, width
 			// because we can control the underline start and stop more
 			// precisely via [ansi.AttrUnderline] and [ansi.AttrNoUnderline]
 			// which only affect the underline attribute without interfering
-			// with other style
+			// with other style attributes.
 			parts = append(parts,
 				ansi.NewStyle().Underline(true).String(),
 				ansi.Cut(title, start, stop+1),

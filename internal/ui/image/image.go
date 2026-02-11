@@ -12,7 +12,7 @@ import (
 	"sync"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/uiutil"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/ansi/kitty"
 	"github.com/disintegration/imaging"
@@ -67,6 +67,13 @@ var (
 	cachedImages = map[imageKey]cachedImage{}
 	cachedMutex  sync.RWMutex
 )
+
+// ResetCache clears the image cache, freeing all cached decoded images.
+func ResetCache() {
+	cachedMutex.Lock()
+	clear(cachedImages)
+	cachedMutex.Unlock()
+}
 
 // fitImage resizes the image to fit within the specified dimensions in
 // terminal cells, maintaining the aspect ratio.
@@ -169,8 +176,8 @@ func (e Encoding) Transmit(id string, img image.Image, cs CellSize, cols, rows i
 			},
 		}); err != nil {
 			slog.Error("Failed to encode image for kitty graphics", "err", err)
-			return uiutil.InfoMsg{
-				Type: uiutil.InfoTypeError,
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
 				Msg:  "failed to encode image",
 			}
 		}

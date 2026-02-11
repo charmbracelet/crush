@@ -47,7 +47,7 @@ func (c *Capabilities) Update(msg any) {
 	case tea.WindowSizeMsg:
 		c.Columns = m.Width
 		c.Rows = m.Height
-	case uv.WindowPixelSizeEvent:
+	case uv.PixelSizeEvent:
 		c.PixelX = m.Width
 		c.PixelY = m.Height
 	case uv.KittyGraphicsEvent:
@@ -71,6 +71,7 @@ func (c *Capabilities) Update(msg any) {
 func QueryCmd(env uv.Environ) tea.Cmd {
 	var sb strings.Builder
 	sb.WriteString(ansi.RequestPrimaryDeviceAttributes)
+	sb.WriteString(ansi.QueryModifyOtherKeys)
 
 	// Queries that should only be sent to "smart" normal terminals.
 	shouldQueryFor := shouldQueryCapabilities(env)

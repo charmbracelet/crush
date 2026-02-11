@@ -6,8 +6,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestPasteStringToPaths(t *testing.T) {
-	t.Run("Windows", func(t *testing.T) {
+func TestParsePastedFiles(t *testing.T) {
+	t.Run("WindowsTerminal", func(t *testing.T) {
 		tests := []struct {
 			name     string
 			input    string
@@ -24,7 +24,7 @@ func TestPasteStringToPaths(t *testing.T) {
 				expected: []string{`C:\path\my-screenshot-one.png`, `C:\path\my-screenshot-two.png`, `C:\path\my-screenshot-three.png`},
 			},
 			{
-				name:     "sigle with spaces",
+				name:     "single with spaces",
 				input:    `"C:\path\my screenshot one.png"`,
 				expected: []string{`C:\path\my screenshot one.png`},
 			},
@@ -46,7 +46,7 @@ func TestPasteStringToPaths(t *testing.T) {
 			{
 				name:     "text outside quotes",
 				input:    `"C:\path\file.png" some random text "C:\path\file2.png"`,
-				expected: []string{`C:\path\file.png`, `C:\path\file2.png`},
+				expected: nil,
 			},
 			{
 				name:     "multiple spaces between paths",
@@ -66,7 +66,7 @@ func TestPasteStringToPaths(t *testing.T) {
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				result := windowsPasteStringToPaths(tt.input)
+				result := windowsTerminalParsePastedFiles(tt.input)
 				require.Equal(t, tt.expected, result)
 			})
 		}
@@ -141,7 +141,7 @@ func TestPasteStringToPaths(t *testing.T) {
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				result := unixPasteStringToPaths(tt.input)
+				result := unixParsePastedFiles(tt.input)
 				require.Equal(t, tt.expected, result)
 			})
 		}

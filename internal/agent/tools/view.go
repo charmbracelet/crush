@@ -13,7 +13,6 @@ import (
 	"unicode/utf8"
 
 	"charm.land/fantasy"
-	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/lsp"
@@ -48,7 +47,7 @@ const (
 )
 
 func NewViewTool(
-	lspClients *csync.Map[string, *lsp.Client],
+	lspManager *lsp.Manager,
 	permissions permission.Service,
 	filetracker filetracker.Service,
 	workingDir string,
@@ -184,7 +183,7 @@ func NewViewTool(
 				return fantasy.ToolResponse{}, fmt.Errorf("error reading file: %w", err)
 			}
 
-			notifyLSPs(ctx, lspClients, filePath)
+			notifyLSPs(ctx, lspManager, filePath)
 			output := "<file>\n"
 			// Format the output with line numbers
 			output += addLineNumbers(content, params.Offset+1)
@@ -195,7 +194,7 @@ func NewViewTool(
 					params.Offset+len(strings.Split(content, "\n")))
 			}
 			output += "\n</file>\n"
-			output += getDiagnostics(filePath, lspClients)
+			output += getDiagnostics(filePath, lspManager)
 			filetracker.RecordRead(ctx, sessionID, filePath)
 			return fantasy.WithResponseMetadata(
 				fantasy.NewTextResponse(output),

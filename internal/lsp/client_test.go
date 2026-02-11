@@ -23,7 +23,7 @@ func TestClient(t *testing.T) {
 	// but we can still test the basic structure
 	client, err := New(ctx, "test", cfg, config.NewEnvironmentVariableResolver(env.NewFromMap(map[string]string{
 		"THE_CMD": "echo",
-	})))
+	})), ".", false)
 	if err != nil {
 		// Expected to fail with echo command, skip the rest
 		t.Skipf("Powernap client creation failed as expected with dummy command: %v", err)

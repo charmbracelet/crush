@@ -8,17 +8,14 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/bmatcuk/doublestar/v4"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/home"
-	powernapconfig "github.com/charmbracelet/x/powernap/pkg/config"
 	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/charmbracelet/x/powernap/pkg/transport"
@@ -35,9 +32,10 @@ type DiagnosticCounts struct {
 type Client struct {
 	client *powernap.Client
 	name   string
+	debug  bool
 
 	// Working directory this LSP is scoped to.
-	workDir string
+	cwd string
 
 	// File types this LSP server handles (e.g., .go, .rs, .py)
 	fileTypes []string
@@ -68,7 +66,14 @@ type Client struct {
 }
 
 // New creates a new LSP client using the powernap implementation.
-func New(ctx context.Context, name string, cfg config.LSPConfig, resolver config.VariableResolver) (*Client, error) {
+func New(
+	ctx context.Context,
+	name string,
+	cfg config.LSPConfig,
+	resolver config.VariableResolver,
+	cwd string,
+	debug bool,
+) (*Client, error) {
 	client := &Client{
 		name:        name,
 		fileTypes:   cfg.FileTypes,
@@ -76,7 +81,9 @@ func New(ctx context.Context, name string, cfg config.LSPConfig, resolver config
 		openFiles:   csync.NewMap[string, *OpenFileInfo](),
 		config:      cfg,
 		ctx:         ctx,
+		debug:       debug,
 		resolver:    resolver,
+		cwd:         cwd,
 	}
 	client.serverState.Store(StateStarting)
 
@@ -118,7 +125,10 @@ func (c *Client) Initialize(ctx context.Context, workspaceDir string) (*protocol
 	return result, nil
 }
 
-// Close closes the LSP client.
+// Kill kills the client without doing anything else.
+func (c *Client) Kill() { c.client.Kill() }
+
+// Close closes all open files in the client, then the client.
 func (c *Client) Close(ctx context.Context) error {
 	c.CloseAllFiles(ctx)
 
@@ -132,13 +142,7 @@ func (c *Client) Close(ctx context.Context) error {
 
 // createPowernapClient creates a new powernap client with the current configuration.
 func (c *Client) createPowernapClient() error {
-	workDir, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("failed to get working directory: %w", err)
-	}
-
-	rootURI := string(protocol.URIFromPath(workDir))
-	c.workDir = workDir
+	rootURI := string(protocol.URIFromPath(c.cwd))
 
 	command, err := c.resolver.ResolveValue(c.config.Command)
 	if err != nil {
@@ -155,7 +159,7 @@ func (c *Client) createPowernapClient() error {
 		WorkspaceFolders: []protocol.WorkspaceFolder{
 			{
 				URI:  rootURI,
-				Name: filepath.Base(workDir),
+				Name: filepath.Base(c.cwd),
 			},
 		},
 	}
@@ -174,7 +178,11 @@ func (c *Client) registerHandlers() {
 	c.RegisterServerRequestHandler("workspace/applyEdit", HandleApplyEdit)
 	c.RegisterServerRequestHandler("workspace/configuration", HandleWorkspaceConfiguration)
 	c.RegisterServerRequestHandler("client/registerCapability", HandleRegisterCapability)
-	c.RegisterNotificationHandler("window/showMessage", HandleServerMessage)
+	c.RegisterNotificationHandler("window/showMessage", func(ctx context.Context, method string, params json.RawMessage) {
+		if c.debug {
+			HandleServerMessage(ctx, method, params)
+		}
+	})
 	c.RegisterNotificationHandler("textDocument/publishDiagnostics", func(_ context.Context, _ string, params json.RawMessage) {
 		HandleDiagnostics(c, params)
 	})
@@ -193,6 +201,8 @@ func (c *Client) Restart() error {
 	if err := c.Close(closeCtx); err != nil {
 		slog.Warn("Error closing client during restart", "name", c.name, "error", err)
 	}
+
+	c.SetServerState(StateStopped)
 
 	c.diagCountsCache = DiagnosticCounts{}
 	c.diagCountsVersion = 0
@@ -231,7 +241,8 @@ func (c *Client) Restart() error {
 type ServerState int
 
 const (
-	StateStarting ServerState = iota
+	StateStopped ServerState = iota
+	StateStarting
 	StateReady
 	StateError
 	StateDisabled
@@ -262,8 +273,6 @@ func (c *Client) SetDiagnosticsCallback(callback func(name string, count int)) {
 
 // WaitForServerReady waits for the server to be ready
 func (c *Client) WaitForServerReady(ctx context.Context) error {
-	cfg := config.Get()
-
 	// Set initial state
 	c.SetServerState(StateStarting)
 
@@ -275,7 +284,7 @@ func (c *Client) WaitForServerReady(ctx context.Context) error {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
-	if cfg != nil && cfg.Options.DebugLSP {
+	if c.debug {
 		slog.Debug("Waiting for LSP server to be ready...")
 	}
 
@@ -289,7 +298,7 @@ func (c *Client) WaitForServerReady(ctx context.Context) error {
 		case <-ticker.C:
 			// Check if client is running
 			if !c.client.IsRunning() {
-				if cfg != nil && cfg.Options.DebugLSP {
+				if c.debug {
 					slog.Debug("LSP server not ready yet", "server", c.name)
 				}
 				continue
@@ -297,7 +306,7 @@ func (c *Client) WaitForServerReady(ctx context.Context) error {
 
 			// Server is ready
 			c.SetServerState(StateReady)
-			if cfg != nil && cfg.Options.DebugLSP {
+			if c.debug {
 				slog.Debug("LSP server is ready")
 			}
 			return nil
@@ -314,37 +323,11 @@ type OpenFileInfo struct {
 // HandlesFile checks if this LSP client handles the given file based on its
 // extension and whether it's within the working directory.
 func (c *Client) HandlesFile(path string) bool {
-	// Check if file is within working directory.
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		slog.Debug("Cannot resolve path", "name", c.name, "file", path, "error", err)
+	if !fsext.HasPrefix(path, c.cwd) {
+		slog.Debug("File outside workspace", "name", c.name, "file", path, "workDir", c.cwd)
 		return false
 	}
-	relPath, err := filepath.Rel(c.workDir, absPath)
-	if err != nil || strings.HasPrefix(relPath, "..") {
-		slog.Debug("File outside workspace", "name", c.name, "file", path, "workDir", c.workDir)
-		return false
-	}
-
-	// If no file types are specified, handle all files (backward compatibility).
-	if len(c.fileTypes) == 0 {
-		return true
-	}
-
-	kind := powernap.DetectLanguage(path)
-	name := strings.ToLower(filepath.Base(path))
-	for _, filetype := range c.fileTypes {
-		suffix := strings.ToLower(filetype)
-		if !strings.HasPrefix(suffix, ".") {
-			suffix = "." + suffix
-		}
-		if strings.HasSuffix(name, suffix) || filetype == string(kind) {
-			slog.Debug("Handles file", "name", c.name, "file", name, "filetype", filetype, "kind", kind)
-			return true
-		}
-	}
-	slog.Debug("Doesn't handle file", "name", c.name, "file", name)
-	return false
+	return handlesFiletype(c.name, c.fileTypes, path)
 }
 
 // OpenFile opens a file in the LSP server.
@@ -416,10 +399,8 @@ func (c *Client) IsFileOpen(filepath string) bool {
 
 // CloseAllFiles closes all currently open files.
 func (c *Client) CloseAllFiles(ctx context.Context) {
-	cfg := config.Get()
-	debugLSP := cfg != nil && cfg.Options.DebugLSP
 	for uri := range c.openFiles.Seq2() {
-		if debugLSP {
+		if c.debug {
 			slog.Debug("Closing file", "file", uri)
 		}
 		if err := c.client.NotifyDidCloseTextDocument(ctx, uri); err != nil {
@@ -486,31 +467,6 @@ func (c *Client) OpenFileOnDemand(ctx context.Context, filepath string) error {
 	return c.OpenFile(ctx, filepath)
 }
 
-// GetDiagnosticsForFile ensures a file is open and returns its diagnostics.
-func (c *Client) GetDiagnosticsForFile(ctx context.Context, filepath string) ([]protocol.Diagnostic, error) {
-	documentURI := protocol.URIFromPath(filepath)
-
-	// Make sure the file is open
-	if !c.IsFileOpen(filepath) {
-		if err := c.OpenFile(ctx, filepath); err != nil {
-			return nil, fmt.Errorf("failed to open file for diagnostics: %w", err)
-		}
-
-		// Give the LSP server a moment to process the file
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	// Get diagnostics
-	diagnostics, _ := c.diagnostics.Get(documentURI)
-
-	return diagnostics, nil
-}
-
-// ClearDiagnosticsForURI removes diagnostics for a specific URI from the cache.
-func (c *Client) ClearDiagnosticsForURI(uri protocol.DocumentURI) {
-	c.diagnostics.Del(uri)
-}
-
 // RegisterNotificationHandler registers a notification handler.
 func (c *Client) RegisterNotificationHandler(method string, handler transport.NotificationHandler) {
 	c.client.RegisterNotificationHandler(method, handler)
@@ -519,11 +475,6 @@ func (c *Client) RegisterNotificationHandler(method string, handler transport.No
 // RegisterServerRequestHandler handles server requests.
 func (c *Client) RegisterServerRequestHandler(method string, handler transport.Handler) {
 	c.client.RegisterHandler(method, handler)
-}
-
-// DidChangeWatchedFiles sends a workspace/didChangeWatchedFiles notification to the server.
-func (c *Client) DidChangeWatchedFiles(ctx context.Context, params protocol.DidChangeWatchedFilesParams) error {
-	return c.client.NotifyDidChangeWatchedFiles(ctx, params.Changes)
 }
 
 // openKeyConfigFiles opens important configuration files that help initialize the server.
@@ -575,73 +526,4 @@ func (c *Client) FindReferences(ctx context.Context, filepath string, line, char
 	// NOTE: line and character should be 0-based.
 	// See: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#position
 	return c.client.FindReferences(ctx, filepath, line-1, character-1, includeDeclaration)
-}
-
-// FilterMatching gets a list of configs and only returns the ones with
-// matching root markers.
-func FilterMatching(dir string, servers map[string]*powernapconfig.ServerConfig) map[string]*powernapconfig.ServerConfig {
-	result := map[string]*powernapconfig.ServerConfig{}
-	if len(servers) == 0 {
-		return result
-	}
-
-	type serverPatterns struct {
-		server   *powernapconfig.ServerConfig
-		patterns []string
-	}
-	normalized := make(map[string]serverPatterns, len(servers))
-	for name, server := range servers {
-		var patterns []string
-		for _, p := range server.RootMarkers {
-			if p == ".git" {
-				// ignore .git for discovery
-				continue
-			}
-			patterns = append(patterns, filepath.ToSlash(p))
-		}
-		if len(patterns) == 0 {
-			slog.Debug("ignoring lsp with no root markers", "name", name)
-			continue
-		}
-		normalized[name] = serverPatterns{server: server, patterns: patterns}
-	}
-
-	walker := fsext.NewFastGlobWalker(dir)
-	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-
-		if walker.ShouldSkip(path) {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		relPath, err := filepath.Rel(dir, path)
-		if err != nil {
-			return nil
-		}
-		relPath = filepath.ToSlash(relPath)
-
-		for name, sp := range normalized {
-			for _, pattern := range sp.patterns {
-				matched, err := doublestar.Match(pattern, relPath)
-				if err != nil || !matched {
-					continue
-				}
-				result[name] = sp.server
-				delete(normalized, name)
-				break
-			}
-		}
-
-		if len(normalized) == 0 {
-			return filepath.SkipAll
-		}
-		return nil
-	})
-
-	return result
 }

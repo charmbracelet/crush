@@ -99,7 +99,7 @@ func formatTokensAndCost(t *styles.Styles, tokens, contextWindow int64, cost flo
 	formattedPercentage := t.Muted.Render(fmt.Sprintf("%d%%", int(percentage)))
 	formattedTokens = fmt.Sprintf("%s %s", formattedPercentage, formattedTokens)
 	if percentage > 80 {
-		formattedTokens = fmt.Sprintf("%s %s", styles.WarningIcon, formattedTokens)
+		formattedTokens = fmt.Sprintf("%s %s", styles.LSPWarningIcon, formattedTokens)
 	}
 
 	return fmt.Sprintf("%s %s", formattedTokens, formattedCost)
@@ -137,7 +137,7 @@ func Status(t *styles.Styles, opts StatusOpts, width int) string {
 		description = t.Base.Foreground(descriptionColor).Render(description)
 	}
 
-	content := []string{}
+	var content []string
 	if icon != "" {
 		content = append(content, icon)
 	}

@@ -5,6 +5,7 @@ import (
 	"iter"
 	"log/slog"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -19,8 +20,8 @@ func Prompts() iter.Seq2[string, []*Prompt] {
 }
 
 // GetPromptMessages retrieves the content of an MCP prompt with the given arguments.
-func GetPromptMessages(ctx context.Context, clientName, promptName string, args map[string]string) ([]string, error) {
-	c, err := getOrRenewClient(ctx, clientName)
+func GetPromptMessages(ctx context.Context, cfg *config.Config, clientName, promptName string, args map[string]string) ([]string, error) {
+	c, err := getOrRenewClient(ctx, cfg, clientName)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +67,7 @@ func RefreshPrompts(ctx context.Context, name string) {
 	updateState(name, StateConnected, nil, session, prev.Counts)
 }
 
-func getPrompts(ctx context.Context, c *mcp.ClientSession) ([]*Prompt, error) {
+func getPrompts(ctx context.Context, c *ClientSession) ([]*Prompt, error) {
 	if c.InitializeResult().Capabilities.Prompts == nil {
 		return nil, nil
 	}

@@ -242,7 +242,7 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 	prompt = strings.ReplaceAll(prompt, "\n", " ")
 
 	// Build header with optional URL param.
-	toolParams := []string{}
+	var toolParams []string
 	if params.URL != "" {
 		toolParams = append(toolParams, params.URL)
 	}

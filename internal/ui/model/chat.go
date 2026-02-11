@@ -437,8 +437,12 @@ func (m *Chat) MessageItem(id string) chat.MessageItem {
 // ToggleExpandedSelectedItem expands the selected message item if it is expandable.
 func (m *Chat) ToggleExpandedSelectedItem() {
 	if expandable, ok := m.list.SelectedItem().(chat.Expandable); ok {
-		expandable.ToggleExpanded()
-		m.list.ScrollToIndex(m.list.Selected())
+		if !expandable.ToggleExpanded() {
+			m.list.ScrollToIndex(m.list.Selected())
+		}
+		if m.list.AtBottom() {
+			m.list.ScrollToBottom()
+		}
 	}
 }
 
@@ -544,9 +548,13 @@ func (m *Chat) HandleDelayedClick(msg DelayedClickMsg) bool {
 		handled := clickable.HandleMouseClick(ansi.MouseButton1, msg.X, msg.Y)
 		// Toggle expansion if applicable.
 		if expandable, ok := selectedItem.(chat.Expandable); ok {
-			expandable.ToggleExpanded()
+			if !expandable.ToggleExpanded() {
+				m.list.ScrollToIndex(m.list.Selected())
+			}
 		}
-		m.list.ScrollToIndex(m.list.Selected())
+		if m.list.AtBottom() {
+			m.list.ScrollToBottom()
+		}
 		return handled
 	}
 
@@ -737,10 +745,7 @@ func (m *Chat) selectWord(itemIdx, x, itemY int) {
 	// Adjust x for the item's left padding (border + padding) to get content column.
 	// The mouse x is in viewport space, but we need content space for boundary detection.
 	offset := chat.MessageLeftPaddingTotal
-	contentX := x - offset
-	if contentX < 0 {
-		contentX = 0
-	}
+	contentX := max(x-offset, 0)
 
 	line := ansi.Strip(lines[itemY])
 	startCol, endCol := findWordBoundaries(line, contentX)

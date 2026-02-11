@@ -6,11 +6,12 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/permission"
 )
 
 // GetMCPTools gets all the currently available MCP tools.
-func GetMCPTools(permissions permission.Service, wd string) []*Tool {
+func GetMCPTools(permissions permission.Service, cfg *config.Config, wd string) []*Tool {
 	var result []*Tool
 	for mcpName, tools := range mcp.Tools() {
 		for _, tool := range tools {
@@ -19,6 +20,7 @@ func GetMCPTools(permissions permission.Service, wd string) []*Tool {
 				tool:        tool,
 				permissions: permissions,
 				workingDir:  wd,
+				cfg:         cfg,
 			})
 		}
 	}
@@ -29,6 +31,7 @@ func GetMCPTools(permissions permission.Service, wd string) []*Tool {
 type Tool struct {
 	mcpName         string
 	tool            *mcp.Tool
+	cfg             *config.Config
 	permissions     permission.Service
 	workingDir      string
 	providerOptions fantasy.ProviderOptions
@@ -107,7 +110,7 @@ func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolRe
 		return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
-	result, err := mcp.RunTool(ctx, m.mcpName, m.tool.Name, params.Input)
+	result, err := mcp.RunTool(ctx, m.cfg, m.mcpName, m.tool.Name, params.Input)
 	if err != nil {
 		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}

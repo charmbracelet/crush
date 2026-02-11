@@ -45,7 +45,7 @@ tasks:
     vars:
       LDFLAGS: '{{if .VERSION}}-ldflags="-X github.com/charmbracelet/crush/internal/version.Version={{.VERSION}}"{{end}}'
     cmds:
-      - "go build {{if .RACE}}-race{{end}} {{.LDFLAGS}} ."
+      - "go build -v {{if .RACE}}-race{{end}} {{.LDFLAGS}} ."
     sources:
       - ./**/*.go
       - go.mod

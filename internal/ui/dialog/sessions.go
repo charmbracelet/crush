@@ -190,19 +190,17 @@ func (s *Session) HandleMsg(msg tea.Msg) Action {
 				s.list.Focus()
 				if s.list.IsSelectedFirst() {
 					s.list.SelectLast()
-					s.list.ScrollToBottom()
-					break
+				} else {
+					s.list.SelectPrev()
 				}
-				s.list.SelectPrev()
 				s.list.ScrollToSelected()
 			case key.Matches(msg, s.keyMap.Next):
 				s.list.Focus()
 				if s.list.IsSelectedLast() {
 					s.list.SelectFirst()
-					s.list.ScrollToTop()
-					break
+				} else {
+					s.list.SelectNext()
 				}
-				s.list.SelectNext()
 				s.list.ScrollToSelected()
 			case key.Matches(msg, s.keyMap.Select):
 				if item := s.list.SelectedItem(); item != nil {
@@ -231,9 +229,9 @@ func (s *Session) Cursor() *tea.Cursor {
 // Draw implements [Dialog].
 func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := s.com.Styles
-	width := max(0, min(defaultDialogMaxWidth, area.Dx()))
-	height := max(0, min(defaultDialogHeight, area.Dy()))
-	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize() - 2
+	width := max(0, min(defaultDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
+	height := max(0, min(defaultDialogHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
+	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
 	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
 		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
 		t.Dialog.HelpView.GetVerticalFrameSize() +

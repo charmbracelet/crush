@@ -27,9 +27,7 @@ type CommandType uint
 func (c CommandType) String() string { return []string{"System", "User", "MCP"}[c] }
 
 const (
-	sidebarCompactModeBreakpoint   = 120
-	defaultCommandsDialogMaxHeight = 20
-	defaultCommandsDialogMaxWidth  = 70
+	sidebarCompactModeBreakpoint = 120
 )
 
 const (
@@ -155,19 +153,17 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 			c.list.Focus()
 			if c.list.IsSelectedFirst() {
 				c.list.SelectLast()
-				c.list.ScrollToBottom()
-				break
+			} else {
+				c.list.SelectPrev()
 			}
-			c.list.SelectPrev()
 			c.list.ScrollToSelected()
 		case key.Matches(msg, c.keyMap.Next):
 			c.list.Focus()
 			if c.list.IsSelectedLast() {
 				c.list.SelectFirst()
-				c.list.ScrollToTop()
-				break
+			} else {
+				c.list.SelectNext()
 			}
-			c.list.SelectNext()
 			c.list.ScrollToSelected()
 		case key.Matches(msg, c.keyMap.Select):
 			if selectedItem := c.list.SelectedItem(); selectedItem != nil {
@@ -240,8 +236,8 @@ func commandsRadioView(sty *styles.Styles, selected CommandType, hasUserCmds boo
 // Draw implements [Dialog].
 func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := c.com.Styles
-	width := max(0, min(defaultCommandsDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	height := max(0, min(defaultCommandsDialogMaxHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
+	width := max(0, min(defaultDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
+	height := max(0, min(defaultDialogHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
 	if area.Dx() != c.windowWidth && c.selected == SystemCommands {
 		c.windowWidth = area.Dx()
 		// since some items in the list depend on width (e.g. toggle sidebar command),

@@ -174,19 +174,17 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 			m.list.Focus()
 			if m.list.IsSelectedFirst() {
 				m.list.SelectLast()
-				m.list.ScrollToBottom()
-				break
+			} else {
+				m.list.SelectPrev()
 			}
-			m.list.SelectPrev()
 			m.list.ScrollToSelected()
 		case key.Matches(msg, m.keyMap.Next):
 			m.list.Focus()
 			if m.list.IsSelectedLast() {
 				m.list.SelectFirst()
-				m.list.ScrollToTop()
-				break
+			} else {
+				m.list.SelectNext()
 			}
-			m.list.SelectNext()
 			m.list.ScrollToSelected()
 		case key.Matches(msg, m.keyMap.Select, m.keyMap.Edit):
 			selectedItem := m.list.SelectedItem()

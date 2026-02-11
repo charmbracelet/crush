@@ -31,16 +31,13 @@ func (m *UI) lspInfo(width, maxItems int, isSection bool) string {
 
 	var lsps []LSPInfo
 	for _, state := range states {
-		client, ok := m.com.App.LSPManager.Clients().Get(state.Name)
-		if !ok {
-			continue
-		}
-		counts := client.GetDiagnosticCounts()
-		lspErrs := map[protocol.DiagnosticSeverity]int{
-			protocol.SeverityError:       counts.Error,
-			protocol.SeverityWarning:     counts.Warning,
-			protocol.SeverityHint:        counts.Hint,
-			protocol.SeverityInformation: counts.Information,
+		lspErrs := map[protocol.DiagnosticSeverity]int{}
+		if client, ok := m.com.App.LSPManager.Clients().Get(state.Name); ok {
+			counts := client.GetDiagnosticCounts()
+			lspErrs[protocol.SeverityError] = counts.Error
+			lspErrs[protocol.SeverityWarning] = counts.Warning
+			lspErrs[protocol.SeverityHint] = counts.Hint
+			lspErrs[protocol.SeverityInformation] = counts.Information
 		}
 
 		lsps = append(lsps, LSPInfo{LSPClientInfo: state, Diagnostics: lspErrs})

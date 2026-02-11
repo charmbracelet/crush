@@ -5,7 +5,7 @@ go 1.25.5
 require (
 	charm.land/bubbles/v2 v2.0.0-rc.1.0.20260109112849-ae99f46cec66
 	charm.land/bubbletea/v2 v2.0.0-rc.2.0.20260209074636-30878e43d7b0
-	charm.land/catwalk v0.17.1
+	charm.land/catwalk v0.18.0
 	charm.land/fantasy v0.7.2
 	charm.land/glamour/v2 v2.0.0-20260123212943-6014aa153a9b
 	charm.land/lipgloss/v2 v2.0.0-beta.3.0.20251205162909-7869489d8971

@@ -241,10 +241,11 @@ func (c *Client) Restart() error {
 type ServerState int
 
 const (
-	StateStopped ServerState = iota
+	StateUnstarted ServerState = iota
 	StateStarting
 	StateReady
 	StateError
+	StateStopped
 	StateDisabled
 )
 

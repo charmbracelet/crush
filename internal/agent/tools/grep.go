@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/fsext"
 )
@@ -100,7 +101,7 @@ func escapeRegexPattern(pattern string) string {
 	return escaped
 }
 
-func NewGrepTool(workingDir string) fantasy.AgentTool {
+func NewGrepTool(workingDir string, config config.ToolGrep) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		GrepToolName,
 		string(grepDescription),
@@ -119,11 +120,7 @@ func NewGrepTool(workingDir string) fantasy.AgentTool {
 				searchPath = workingDir
 			}
 
-			if !fsext.HasPrefix(searchPath, workingDir) {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("path must be within working directory: %s", workingDir)), nil
-			}
-
-			searchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			searchCtx, cancel := context.WithTimeout(ctx, config.GetTimeout())
 			defer cancel()
 
 			matches, truncated, err := searchFiles(searchCtx, searchPattern, searchPath, params.Include, 100)

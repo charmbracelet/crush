@@ -150,6 +150,9 @@ type UI struct {
 	dialog *dialog.Overlay
 	status *Status
 
+	permissionDialogHidden    bool
+	permissionDialogPrevFocus uiFocusState
+
 	// isCanceling tracks whether the user has pressed escape once to cancel.
 	isCanceling bool
 
@@ -171,6 +174,7 @@ type UI struct {
 
 	readyPlaceholder   string
 	workingPlaceholder string
+	editorPlaceholder  string
 
 	// Completions state
 	completions              *completions.Completions
@@ -652,8 +656,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseWheelMsg:
 		// Pass mouse events to dialogs first if any are open.
 		if m.dialog.HasDialogs() {
-			m.dialog.Update(msg)
-			return m, tea.Batch(cmds...)
+			if !m.isPermissionDialogFrontHidden() {
+				m.dialog.Update(msg)
+				return m, tea.Batch(cmds...)
+			}
 		}
 
 		// Otherwise handle mouse wheel for chat.
@@ -1342,6 +1348,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.ReasoningID)
 	case dialog.ActionPermissionResponse:
 		m.dialog.CloseDialog(dialog.PermissionsID)
+		m.permissionDialogHidden = false
 		switch msg.Action {
 		case dialog.PermissionAllow:
 			m.com.App.Permissions.Grant(msg.Permission)
@@ -1512,9 +1519,45 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		return tea.Batch(cmds...)
 	}
 
+	// Handle Ctrl+H to toggle permission dialog visibility
+	if key.Matches(msg, m.keyMap.HidePermissionDialog) {
+		if m.dialog.FrontDialogID() == dialog.PermissionsID {
+			m.permissionDialogHidden = !m.permissionDialogHidden
+			if m.permissionDialogHidden {
+				// Store focus and placeholder, switch to main (chat)
+				m.permissionDialogPrevFocus = m.focus
+				m.editorPlaceholder = m.textarea.Placeholder
+				m.focus = uiFocusMain
+				m.textarea.Blur()
+				m.chat.Focus()
+			} else {
+				// Restore previous focus and placeholder
+				m.focus = m.permissionDialogPrevFocus
+				if m.editorPlaceholder != "" {
+					m.textarea.Placeholder = m.editorPlaceholder
+					m.editorPlaceholder = ""
+				}
+				if m.focus == uiFocusEditor {
+					cmds = append(cmds, m.textarea.Focus())
+				}
+			}
+			return tea.Batch(cmds...)
+		}
+	}
+
 	// Route all messages to dialog if one is open.
-	if m.dialog.HasDialogs() {
+	if m.dialog.HasDialogs() && !m.isPermissionDialogFrontHidden() {
 		return m.handleDialogMsg(msg)
+	}
+
+	// When permission dialog is hidden, suppress focus switching keys
+	if m.isPermissionDialogFrontHidden() {
+		switch {
+		case key.Matches(msg, m.keyMap.Tab):
+			return nil
+		case key.Matches(msg, m.keyMap.Chat.Cancel):
+			return nil
+		}
 	}
 
 	// Handle cancel key when agent is busy.
@@ -1911,8 +1954,17 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	// This needs to come last to overlay on top of everything. We always pass
 	// the full screen bounds because the dialogs will position themselves
 	// accordingly.
-	if m.dialog.HasDialogs() {
+	hasDialogs := m.dialog.HasDialogs()
+	if m.permissionDialogHidden {
+		hasDialogs = m.dialog.HasDialogsExcept(dialog.PermissionsID)
+	}
+	if hasDialogs {
+		if m.permissionDialogHidden {
+			return m.dialog.DrawExcept(dialog.PermissionsID, scr, scr.Bounds())
+		}
 		return m.dialog.Draw(scr, scr.Bounds())
+	} else if m.dialog.HasDialogs() {
+		m.dialog.DrawExcept(dialog.PermissionsID, scr, scr.Bounds())
 	}
 
 	switch m.focus {
@@ -1978,6 +2030,7 @@ func (m *UI) ShortHelp() []key.Binding {
 	k := &m.keyMap
 	tab := k.Tab
 	commands := k.Commands
+	permissionDialogHidden := m.isPermissionDialogFrontHidden()
 	if m.focus == uiFocusEditor && m.textarea.Value() == "" {
 		commands.SetHelp("/ or ctrl+p", "commands")
 	}
@@ -1987,7 +2040,7 @@ func (m *UI) ShortHelp() []key.Binding {
 		binds = append(binds, k.Quit)
 	case uiChat:
 		// Show cancel binding if agent is busy.
-		if m.isAgentBusy() {
+		if m.isAgentBusy() && !permissionDialogHidden {
 			cancelBinding := k.Chat.Cancel
 			if m.isCanceling {
 				cancelBinding.SetHelp("esc", "press again to cancel")
@@ -2003,8 +2056,10 @@ func (m *UI) ShortHelp() []key.Binding {
 			tab.SetHelp("tab", "focus editor")
 		}
 
+		if !permissionDialogHidden {
+			binds = append(binds, tab)
+		}
 		binds = append(binds,
-			tab,
 			commands,
 			k.Models,
 		)
@@ -2054,6 +2109,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 	hasAttachments := len(m.attachments.List()) > 0
 	hasSession := m.hasSession()
 	commands := k.Commands
+	permissionDialogHidden := m.isPermissionDialogFrontHidden()
 	if m.focus == uiFocusEditor && m.textarea.Value() == "" {
 		commands.SetHelp("/ or ctrl+p", "commands")
 	}
@@ -2066,7 +2122,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 			})
 	case uiChat:
 		// Show cancel binding if agent is busy.
-		if m.isAgentBusy() {
+		if m.isAgentBusy() && !permissionDialogHidden {
 			cancelBinding := k.Chat.Cancel
 			if m.isCanceling {
 				cancelBinding.SetHelp("esc", "press again to cancel")
@@ -2084,8 +2140,10 @@ func (m *UI) FullHelp() [][]key.Binding {
 			tab.SetHelp("tab", "focus editor")
 		}
 
+		if !permissionDialogHidden {
+			mainBinds = append(mainBinds, tab)
+		}
 		mainBinds = append(mainBinds,
-			tab,
 			commands,
 			k.Models,
 			k.Sessions,
@@ -2655,6 +2713,10 @@ func (m *UI) hasSession() bool {
 	return m.session != nil && m.session.ID != ""
 }
 
+func (m *UI) isPermissionDialogFrontHidden() bool {
+	return m.permissionDialogHidden && m.dialog.FrontDialogID() == dialog.PermissionsID
+}
+
 // mimeOf detects the MIME type of the given content.
 func mimeOf(content []byte) string {
 	mimeBufferSize := min(512, len(content))
@@ -2686,6 +2748,10 @@ func (m *UI) randomizePlaceholders() {
 
 // renderEditorView renders the editor view with attachments if any.
 func (m *UI) renderEditorView(width int) string {
+	if m.permissionDialogHidden {
+		m.textarea.Placeholder = "Prompt input disabled while permissions pending (ctrl+h to show)"
+	}
+
 	if len(m.attachments.List()) == 0 {
 		return m.textarea.View()
 	}

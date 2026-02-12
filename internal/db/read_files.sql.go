@@ -48,6 +48,39 @@ type RecordFileReadParams struct {
 	Path      string `json:"path"`
 }
 
+const listSessionReadFiles = `-- name: ListSessionReadFiles :many
+SELECT session_id, path, read_at FROM read_files
+WHERE session_id = ?
+ORDER BY read_at DESC
+`
+
+func (q *Queries) ListSessionReadFiles(ctx context.Context, sessionID string) ([]ReadFile, error) {
+	rows, err := q.query(ctx, q.listSessionReadFilesStmt, listSessionReadFiles, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReadFile{}
+	for rows.Next() {
+		var i ReadFile
+		if err := rows.Scan(
+			&i.SessionID,
+			&i.Path,
+			&i.ReadAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 func (q *Queries) RecordFileRead(ctx context.Context, arg RecordFileReadParams) error {
 	_, err := q.exec(ctx, q.recordFileReadStmt, recordFileRead,
 		arg.SessionID,

@@ -187,6 +187,7 @@ That said, you can also set environment variables for preferred providers.
 | `GEMINI_API_KEY`            | Google Gemini                                      |
 | `SYNTHETIC_API_KEY`         | Synthetic                                          |
 | `ZAI_API_KEY`               | Z.ai                                               |
+| `MINIMAX_API_KEY`           | MiniMax                                            |
 | `HF_TOKEN`                  | Hugging Face Inference                             |
 | `CEREBRAS_API_KEY`          | Cerebras                                           |
 | `OPENROUTER_API_KEY`        | OpenRouter                                         |
@@ -201,6 +202,16 @@ That said, you can also set environment variables for preferred providers.
 | `AZURE_OPENAI_API_ENDPOINT` | Azure OpenAI models                                |
 | `AZURE_OPENAI_API_KEY`      | Azure OpenAI models (optional when using Entra ID) |
 | `AZURE_OPENAI_API_VERSION`  | Azure OpenAI models                                |
+
+### Subscriptions
+
+If you prefer subscription-based usage, here are some plans that work well in
+Crush:
+
+- [Synthetic](https://synthetic.new/pricing)
+- [GLM Coding Plan](https://z.ai/subscribe)
+- [Kimi Code](https://www.kimi.com/membership/pricing)
+- [MiniMax Coding Plan](https://platform.minimax.io/subscribe/coding-plan)
 
 ### By the Way
 

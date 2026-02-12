@@ -171,8 +171,8 @@ func printLogLine(lineText string) {
 	}
 	msg := data["msg"]
 	level := data["level"]
-	otherData := []any{}
-	keys := []string{}
+	var otherData []any
+	var keys []string
 	for k := range data {
 		keys = append(keys, k)
 	}

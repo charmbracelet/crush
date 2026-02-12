@@ -52,13 +52,14 @@ var agenticFetchPromptTmpl []byte
 
 func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (fantasy.AgentTool, error) {
 	if client == nil {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.MaxIdleConns = 100
+		transport.MaxIdleConnsPerHost = 10
+		transport.IdleConnTimeout = 90 * time.Second
+
 		client = &http.Client{
-			Timeout: 30 * time.Second,
-			Transport: &http.Transport{
-				MaxIdleConns:        100,
-				MaxIdleConnsPerHost: 10,
-				IdleConnTimeout:     90 * time.Second,
-			},
+			Timeout:   30 * time.Second,
+			Transport: transport,
 		}
 	}
 
@@ -166,9 +167,9 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				webFetchTool,
 				webSearchTool,
 				tools.NewGlobTool(tmpDir),
-				tools.NewGrepTool(tmpDir),
+				tools.NewGrepTool(tmpDir, c.cfg.Tools.Grep),
 				tools.NewSourcegraphTool(client),
-				tools.NewViewTool(c.lspClients, c.permissions, c.filetracker, tmpDir),
+				tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, tmpDir),
 			}
 
 			agent := NewSessionAgent(SessionAgentOptions{

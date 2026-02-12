@@ -11,9 +11,9 @@ import (
 // Dialog sizing constants.
 const (
 	// defaultDialogMaxWidth is the maximum width for standard dialogs.
-	defaultDialogMaxWidth = 120
+	defaultDialogMaxWidth = 70
 	// defaultDialogHeight is the default height for standard dialogs.
-	defaultDialogHeight = 30
+	defaultDialogHeight = 20
 	// titleContentHeight is the height of the title content line.
 	titleContentHeight = 1
 	// inputContentHeight is the height of the input content line.

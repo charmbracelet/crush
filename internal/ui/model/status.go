@@ -7,7 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/uiutil"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -21,7 +21,7 @@ type Status struct {
 	hideHelp bool
 	help     help.Model
 	helpKm   help.KeyMap
-	msg      uiutil.InfoMsg
+	msg      util.InfoMsg
 }
 
 // NewStatus creates a new status bar and help model.
@@ -35,13 +35,13 @@ func NewStatus(com *common.Common, km help.KeyMap) *Status {
 }
 
 // SetInfoMsg sets the status info message.
-func (s *Status) SetInfoMsg(msg uiutil.InfoMsg) {
+func (s *Status) SetInfoMsg(msg util.InfoMsg) {
 	s.msg = msg
 }
 
 // ClearInfoMsg clears the status info message.
 func (s *Status) ClearInfoMsg() {
-	s.msg = uiutil.InfoMsg{}
+	s.msg = util.InfoMsg{}
 }
 
 // SetWidth sets the width of the status bar and help view.
@@ -79,19 +79,19 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 	var indStyle lipgloss.Style
 	var msgStyle lipgloss.Style
 	switch s.msg.Type {
-	case uiutil.InfoTypeError:
+	case util.InfoTypeError:
 		indStyle = s.com.Styles.Status.ErrorIndicator
 		msgStyle = s.com.Styles.Status.ErrorMessage
-	case uiutil.InfoTypeWarn:
+	case util.InfoTypeWarn:
 		indStyle = s.com.Styles.Status.WarnIndicator
 		msgStyle = s.com.Styles.Status.WarnMessage
-	case uiutil.InfoTypeUpdate:
+	case util.InfoTypeUpdate:
 		indStyle = s.com.Styles.Status.UpdateIndicator
 		msgStyle = s.com.Styles.Status.UpdateMessage
-	case uiutil.InfoTypeInfo:
+	case util.InfoTypeInfo:
 		indStyle = s.com.Styles.Status.InfoIndicator
 		msgStyle = s.com.Styles.Status.InfoMessage
-	case uiutil.InfoTypeSuccess:
+	case util.InfoTypeSuccess:
 		indStyle = s.com.Styles.Status.SuccessIndicator
 		msgStyle = s.com.Styles.Status.SuccessMessage
 	}
@@ -109,6 +109,6 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 // given TTL.
 func clearInfoMsgCmd(ttl time.Duration) tea.Cmd {
 	return tea.Tick(ttl, func(time.Time) tea.Msg {
-		return uiutil.ClearStatusMsg{}
+		return util.ClearStatusMsg{}
 	})
 }

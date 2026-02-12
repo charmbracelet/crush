@@ -12,7 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
-	"github.com/charmbracelet/crush/internal/uiutil"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
@@ -182,7 +182,7 @@ func (s *Session) HandleMsg(msg tea.Msg) Action {
 				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeUpdating, s.sessions...)...)
 			case key.Matches(msg, s.keyMap.Delete):
 				if s.isCurrentSessionBusy() {
-					return ActionCmd{uiutil.ReportWarn("Agent is busy, please wait...")}
+					return ActionCmd{util.ReportWarn("Agent is busy, please wait...")}
 				}
 				s.sessionsMode = sessionsModeDeleting
 				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeDeleting, s.sessions...)...)
@@ -190,19 +190,17 @@ func (s *Session) HandleMsg(msg tea.Msg) Action {
 				s.list.Focus()
 				if s.list.IsSelectedFirst() {
 					s.list.SelectLast()
-					s.list.ScrollToBottom()
-					break
+				} else {
+					s.list.SelectPrev()
 				}
-				s.list.SelectPrev()
 				s.list.ScrollToSelected()
 			case key.Matches(msg, s.keyMap.Next):
 				s.list.Focus()
 				if s.list.IsSelectedLast() {
 					s.list.SelectFirst()
-					s.list.ScrollToTop()
-					break
+				} else {
+					s.list.SelectNext()
 				}
-				s.list.SelectNext()
 				s.list.ScrollToSelected()
 			case key.Matches(msg, s.keyMap.Select):
 				if item := s.list.SelectedItem(); item != nil {
@@ -231,9 +229,9 @@ func (s *Session) Cursor() *tea.Cursor {
 // Draw implements [Dialog].
 func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := s.com.Styles
-	width := max(0, min(defaultDialogMaxWidth, area.Dx()))
-	height := max(0, min(defaultDialogHeight, area.Dy()))
-	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize() - 2
+	width := max(0, min(defaultDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
+	height := max(0, min(defaultDialogHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
+	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
 	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
 		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
 		t.Dialog.HelpView.GetVerticalFrameSize() +
@@ -261,11 +259,11 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		rc.ViewStyle = t.Dialog.Sessions.DeletingView
 		rc.AddPart(t.Dialog.Sessions.DeletingMessage.Render("Delete this session?"))
 	case sessionsModeUpdating:
-		rc.TitleStyle = t.Dialog.Sessions.UpdatingTitle
-		rc.TitleGradientFromColor = t.Dialog.Sessions.UpdatingTitleGradientFromColor
-		rc.TitleGradientToColor = t.Dialog.Sessions.UpdatingTitleGradientToColor
-		rc.ViewStyle = t.Dialog.Sessions.UpdatingView
-		message := t.Dialog.Sessions.UpdatingMessage.Render("Rename this session?")
+		rc.TitleStyle = t.Dialog.Sessions.RenamingingTitle
+		rc.TitleGradientFromColor = t.Dialog.Sessions.RenamingTitleGradientFromColor
+		rc.TitleGradientToColor = t.Dialog.Sessions.RenamingTitleGradientToColor
+		rc.ViewStyle = t.Dialog.Sessions.RenamingView
+		message := t.Dialog.Sessions.RenamingingMessage.Render("Rename this session?")
 		rc.AddPart(message)
 		item := s.selectedSessionItem()
 		if item == nil {
@@ -279,8 +277,8 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		start, end := s.list.VisibleItemIndices()
 		selectedIndex := s.list.Selected()
 
-		titleStyle := t.Dialog.Sessions.UpdatingTitle
-		dialogStyle := t.Dialog.Sessions.UpdatingView
+		titleStyle := t.Dialog.Sessions.RenamingingTitle
+		dialogStyle := t.Dialog.Sessions.RenamingView
 		inputStyle := t.Dialog.InputPrompt
 
 		// Adjust cursor position to account for dialog layout + message
@@ -353,7 +351,7 @@ func (s *Session) deleteSessionCmd(id string) tea.Cmd {
 	return func() tea.Msg {
 		err := s.com.App.Sessions.Delete(context.TODO(), id)
 		if err != nil {
-			return uiutil.NewErrorMsg(err)
+			return util.NewErrorMsg(err)
 		}
 		return nil
 	}
@@ -389,7 +387,7 @@ func (s *Session) updateSessionCmd(session session.Session) tea.Cmd {
 	return func() tea.Msg {
 		_, err := s.com.App.Sessions.Save(context.TODO(), session)
 		if err != nil {
-			return uiutil.NewErrorMsg(err)
+			return util.NewErrorMsg(err)
 		}
 		return nil
 	}

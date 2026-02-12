@@ -172,8 +172,8 @@ func getTextContent(n *html.Node) string {
 
 func cleanDuckDuckGoURL(rawURL string) string {
 	if strings.HasPrefix(rawURL, "//duckduckgo.com/l/?uddg=") {
-		if idx := strings.Index(rawURL, "uddg="); idx != -1 {
-			encoded := rawURL[idx+5:]
+		if _, after, ok := strings.Cut(rawURL, "uddg="); ok {
+			encoded := after
 			if ampIdx := strings.Index(encoded, "&"); ampIdx != -1 {
 				encoded = encoded[:ampIdx]
 			}

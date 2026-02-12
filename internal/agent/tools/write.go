@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/filetracker"
@@ -45,7 +44,7 @@ type WriteResponseMetadata struct {
 const WriteToolName = "write"
 
 func NewWriteTool(
-	lspClients *csync.Map[string, *lsp.Client],
+	lspManager *lsp.Manager,
 	permissions permission.Service,
 	files history.Service,
 	filetracker filetracker.Service,
@@ -161,11 +160,11 @@ func NewWriteTool(
 
 			filetracker.RecordRead(ctx, sessionID, filePath)
 
-			notifyLSPs(ctx, lspClients, params.FilePath)
+			notifyLSPs(ctx, lspManager, params.FilePath)
 
 			result := fmt.Sprintf("File successfully written: %s", filePath)
 			result = fmt.Sprintf("<result>\n%s\n</result>", result)
-			result += getDiagnostics(filePath, lspClients)
+			result += getDiagnostics(filePath, lspManager)
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(result),
 				WriteResponseMetadata{
 					Diff:      diff,

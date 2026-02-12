@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/filetracker"
@@ -59,7 +58,7 @@ const MultiEditToolName = "multiedit"
 var multieditDescription []byte
 
 func NewMultiEditTool(
-	lspClients *csync.Map[string, *lsp.Client],
+	lspManager *lsp.Manager,
 	permissions permission.Service,
 	files history.Service,
 	filetracker filetracker.Service,
@@ -104,11 +103,11 @@ func NewMultiEditTool(
 			}
 
 			// Notify LSP clients about the change
-			notifyLSPs(ctx, lspClients, params.FilePath)
+			notifyLSPs(ctx, lspManager, params.FilePath)
 
 			// Wait for LSP diagnostics and add them to the response
 			text := fmt.Sprintf("<result>\n%s\n</result>\n", response.Content)
-			text += getDiagnostics(params.FilePath, lspClients)
+			text += getDiagnostics(params.FilePath, lspManager)
 			response.Content = text
 			return response, nil
 		})

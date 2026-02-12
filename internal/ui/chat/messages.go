@@ -18,9 +18,9 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/styles"
 )
 
-// this is the total width that is taken up by the border + padding
-// we also cap the width so text is readable to the maxTextWidth(120)
-const messageLeftPaddingTotal = 2
+// MessageLeftPaddingTotal is the total width that is taken up by the border +
+// padding. We also cap the width so text is readable to the maxTextWidth(120).
+const MessageLeftPaddingTotal = 2
 
 // maxTextWidth is the maximum width text messages can be
 const maxTextWidth = 120
@@ -38,7 +38,9 @@ type Animatable interface {
 
 // Expandable is an interface for items that can be expanded or collapsed.
 type Expandable interface {
-	ToggleExpanded()
+	// ToggleExpanded toggles the expanded state of the item. It returns
+	// whether the item is now expanded.
+	ToggleExpanded() bool
 }
 
 // KeyEventHandler is an interface for items that can handle key events.
@@ -100,7 +102,7 @@ func (h *highlightableMessageItem) renderHighlighted(content string, width, heig
 func (h *highlightableMessageItem) SetHighlight(startLine int, startCol int, endLine int, endCol int) {
 	// Adjust columns for the style's left inset (border + padding) since we
 	// highlight the content only.
-	offset := messageLeftPaddingTotal
+	offset := MessageLeftPaddingTotal
 	h.startLine = startLine
 	h.startCol = max(0, startCol-offset)
 	h.endLine = endLine
@@ -184,16 +186,18 @@ type AssistantInfoItem struct {
 	id                  string
 	message             *message.Message
 	sty                 *styles.Styles
+	cfg                 *config.Config
 	lastUserMessageTime time.Time
 }
 
 // NewAssistantInfoItem creates a new AssistantInfoItem.
-func NewAssistantInfoItem(sty *styles.Styles, message *message.Message, lastUserMessageTime time.Time) MessageItem {
+func NewAssistantInfoItem(sty *styles.Styles, message *message.Message, cfg *config.Config, lastUserMessageTime time.Time) MessageItem {
 	return &AssistantInfoItem{
 		cachedMessageItem:   &cachedMessageItem{},
 		id:                  AssistantInfoID(message.ID),
 		message:             message,
 		sty:                 sty,
+		cfg:                 cfg,
 		lastUserMessageTime: lastUserMessageTime,
 	}
 }
@@ -205,7 +209,7 @@ func (a *AssistantInfoItem) ID() string {
 
 // RawRender implements MessageItem.
 func (a *AssistantInfoItem) RawRender(width int) string {
-	innerWidth := max(0, width-messageLeftPaddingTotal)
+	innerWidth := max(0, width-MessageLeftPaddingTotal)
 	content, _, ok := a.getCachedRender(innerWidth)
 	if !ok {
 		content = a.renderContent(innerWidth)
@@ -229,13 +233,13 @@ func (a *AssistantInfoItem) renderContent(width int) string {
 	duration := finishTime.Sub(a.lastUserMessageTime)
 	infoMsg := a.sty.Chat.Message.AssistantInfoDuration.Render(duration.String())
 	icon := a.sty.Chat.Message.AssistantInfoIcon.Render(styles.ModelIcon)
-	model := config.Get().GetModel(a.message.Provider, a.message.Model)
+	model := a.cfg.GetModel(a.message.Provider, a.message.Model)
 	if model == nil {
 		model = &catwalk.Model{Name: "Unknown Model"}
 	}
 	modelFormatted := a.sty.Chat.Message.AssistantInfoModel.Render(model.Name)
 	providerName := a.message.Provider
-	if providerConfig, ok := config.Get().Providers.Get(a.message.Provider); ok {
+	if providerConfig, ok := a.cfg.Providers.Get(a.message.Provider); ok {
 		providerName = providerConfig.Name
 	}
 	provider := a.sty.Chat.Message.AssistantInfoProvider.Render(fmt.Sprintf("via %s", providerName))
@@ -245,7 +249,7 @@ func (a *AssistantInfoItem) renderContent(width int) string {
 
 // cappedMessageWidth returns the maximum width for message content for readability.
 func cappedMessageWidth(availableWidth int) int {
-	return min(availableWidth-messageLeftPaddingTotal, maxTextWidth)
+	return min(availableWidth-MessageLeftPaddingTotal, maxTextWidth)
 }
 
 // ExtractMessageItems extracts [MessageItem]s from a [message.Message]. It

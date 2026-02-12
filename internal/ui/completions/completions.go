@@ -1,12 +1,15 @@
 package completions
 
 import (
+	"cmp"
 	"slices"
 	"strings"
+	"sync"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/x/ansi"
@@ -21,17 +24,18 @@ const (
 )
 
 // SelectionMsg is sent when a completion is selected.
-type SelectionMsg struct {
-	Value  any
-	Insert bool // If true, insert without closing.
+type SelectionMsg[T any] struct {
+	Value    T
+	KeepOpen bool // If true, insert without closing.
 }
 
 // ClosedMsg is sent when the completions are closed.
 type ClosedMsg struct{}
 
-// FilesLoadedMsg is sent when files have been loaded for completions.
-type FilesLoadedMsg struct {
-	Files []string
+// CompletionItemsLoadedMsg is sent when files have been loaded for completions.
+type CompletionItemsLoadedMsg struct {
+	Files     []FileCompletionValue
+	Resources []ResourceCompletionValue
 }
 
 // Completions represents the completions popup component.
@@ -92,23 +96,43 @@ func (c *Completions) KeyMap() KeyMap {
 	return c.keyMap
 }
 
-// OpenWithFiles opens the completions with file items from the filesystem.
-func (c *Completions) OpenWithFiles(depth, limit int) tea.Cmd {
+// Open opens the completions with file items from the filesystem.
+func (c *Completions) Open(depth, limit int) tea.Cmd {
 	return func() tea.Msg {
-		files, _, _ := fsext.ListDirectory(".", nil, depth, limit)
-		slices.Sort(files)
-		return FilesLoadedMsg{Files: files}
+		var msg CompletionItemsLoadedMsg
+		var wg sync.WaitGroup
+		wg.Go(func() {
+			msg.Files = loadFiles(depth, limit)
+		})
+		wg.Go(func() {
+			msg.Resources = loadMCPResources()
+		})
+		wg.Wait()
+		return msg
 	}
 }
 
-// SetFiles sets the file items on the completions popup.
-func (c *Completions) SetFiles(files []string) {
-	items := make([]list.FilterableItem, 0, len(files))
+// SetItems sets the files and MCP resources and rebuilds the merged list.
+func (c *Completions) SetItems(files []FileCompletionValue, resources []ResourceCompletionValue) {
+	items := make([]list.FilterableItem, 0, len(files)+len(resources))
+
+	// Add files first.
 	for _, file := range files {
-		file = strings.TrimPrefix(file, "./")
 		item := NewCompletionItem(
+			file.Path,
 			file,
-			FileCompletionValue{Path: file},
+			c.normalStyle,
+			c.focusedStyle,
+			c.matchStyle,
+		)
+		items = append(items, item)
+	}
+
+	// Add MCP resources.
+	for _, resource := range resources {
+		item := NewCompletionItem(
+			resource.MCPName+"/"+cmp.Or(resource.Title, resource.URI),
+			resource,
 			c.normalStyle,
 			c.focusedStyle,
 			c.matchStyle,
@@ -119,7 +143,7 @@ func (c *Completions) SetFiles(files []string) {
 	c.open = true
 	c.query = ""
 	c.list.SetItems(items...)
-	c.list.SetFilter("") // Clear any previous filter.
+	c.list.SetFilter("")
 	c.list.Focus()
 
 	c.width = maxWidth
@@ -128,16 +152,7 @@ func (c *Completions) SetFiles(files []string) {
 	c.list.SelectFirst()
 	c.list.ScrollToSelected()
 
-	// recalculate width by using just the visible items
-	start, end := c.list.VisibleItemIndices()
-	width := 0
-	if end != 0 {
-		for _, file := range files[start : end+1] {
-			width = max(width, ansi.StringWidth(file))
-		}
-	}
-	c.width = ordered.Clamp(width+2, int(minWidth), int(maxWidth))
-	c.list.SetSize(c.width, c.height)
+	c.updateSize()
 }
 
 // Close closes the completions popup.
@@ -158,14 +173,20 @@ func (c *Completions) Filter(query string) {
 	c.query = query
 	c.list.SetFilter(query)
 
-	// recalculate width by using just the visible items
+	c.updateSize()
+}
+
+func (c *Completions) updateSize() {
 	items := c.list.FilteredItems()
 	start, end := c.list.VisibleItemIndices()
 	width := 0
-	if end != 0 {
-		for _, item := range items[start : end+1] {
-			width = max(width, ansi.StringWidth(item.(interface{ Text() string }).Text()))
+	for i := start; i <= end; i++ {
+		item := c.list.ItemAt(i)
+		if item == nil {
+			continue
 		}
+		s := item.(interface{ Text() string }).Text()
+		width = max(width, ansi.StringWidth(s))
 	}
 	c.width = ordered.Clamp(width+2, int(minWidth), int(maxWidth))
 	c.height = ordered.Clamp(len(items), int(minHeight), int(maxHeight))
@@ -238,7 +259,7 @@ func (c *Completions) selectNext() {
 }
 
 // selectCurrent returns a command with the currently selected item.
-func (c *Completions) selectCurrent(insert bool) tea.Msg {
+func (c *Completions) selectCurrent(keepOpen bool) tea.Msg {
 	items := c.list.FilteredItems()
 	if len(items) == 0 {
 		return nil
@@ -254,13 +275,23 @@ func (c *Completions) selectCurrent(insert bool) tea.Msg {
 		return nil
 	}
 
-	if !insert {
+	if !keepOpen {
 		c.open = false
 	}
 
-	return SelectionMsg{
-		Value:  item.Value(),
-		Insert: insert,
+	switch item := item.Value().(type) {
+	case ResourceCompletionValue:
+		return SelectionMsg[ResourceCompletionValue]{
+			Value:    item,
+			KeepOpen: keepOpen,
+		}
+	case FileCompletionValue:
+		return SelectionMsg[FileCompletionValue]{
+			Value:    item,
+			KeepOpen: keepOpen,
+		}
+	default:
+		return nil
 	}
 }
 
@@ -276,4 +307,31 @@ func (c *Completions) Render() string {
 	}
 
 	return c.list.Render()
+}
+
+func loadFiles(depth, limit int) []FileCompletionValue {
+	files, _, _ := fsext.ListDirectory(".", nil, depth, limit)
+	slices.Sort(files)
+	result := make([]FileCompletionValue, 0, len(files))
+	for _, file := range files {
+		result = append(result, FileCompletionValue{
+			Path: strings.TrimPrefix(file, "./"),
+		})
+	}
+	return result
+}
+
+func loadMCPResources() []ResourceCompletionValue {
+	var resources []ResourceCompletionValue
+	for mcpName, mcpResources := range mcp.Resources() {
+		for _, r := range mcpResources {
+			resources = append(resources, ResourceCompletionValue{
+				MCPName:  mcpName,
+				URI:      r.URI,
+				Title:    r.Name,
+				MIMEType: r.MIMEType,
+			})
+		}
+	}
+	return resources
 }

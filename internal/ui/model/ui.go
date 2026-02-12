@@ -661,24 +661,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case uiChat:
 			switch msg.Button {
 			case tea.MouseWheelUp:
-				if cmd := m.chat.ScrollByAndAnimate(-5); cmd != nil {
+				if cmd := m.chat.ScrollByAndAnimate(-3); cmd != nil {
 					cmds = append(cmds, cmd)
-				}
-				if !m.chat.SelectedItemInView() {
-					m.chat.SelectPrev()
-					if cmd := m.chat.ScrollToSelectedAndAnimate(); cmd != nil {
-						cmds = append(cmds, cmd)
-					}
 				}
 			case tea.MouseWheelDown:
-				if cmd := m.chat.ScrollByAndAnimate(5); cmd != nil {
+				if cmd := m.chat.ScrollByAndAnimate(3); cmd != nil {
 					cmds = append(cmds, cmd)
-				}
-				if !m.chat.SelectedItemInView() {
-					m.chat.SelectNext()
-					if cmd := m.chat.ScrollToSelectedAndAnimate(); cmd != nil {
-						cmds = append(cmds, cmd)
-					}
 				}
 			}
 		}

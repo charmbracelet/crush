@@ -77,9 +77,7 @@ func (l *List) Gap() int {
 
 // AtBottom returns whether the list is showing the last item at the bottom.
 func (l *List) AtBottom() bool {
-	const margin = 2
-
-	if len(l.items) == 0 || l.offsetIdx >= len(l.items)-1 {
+	if len(l.items) == 0 {
 		return true
 	}
 
@@ -94,7 +92,7 @@ func (l *List) AtBottom() bool {
 		totalHeight += itemHeight
 	}
 
-	return totalHeight-l.offsetLine-margin <= l.height
+	return totalHeight-l.offsetLine <= l.height
 }
 
 // SetReverse shows the list in reverse order.

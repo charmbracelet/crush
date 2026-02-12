@@ -79,7 +79,7 @@ func (l *List) Gap() int {
 func (l *List) AtBottom() bool {
 	const margin = 2
 
-	if len(l.items) == 0 || l.offsetIdx >= len(l.items)-1 {
+	if len(l.items) == 0 {
 		return true
 	}
 

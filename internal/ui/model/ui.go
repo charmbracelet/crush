@@ -1928,8 +1928,8 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 		if m.textarea.Focused() {
 			cur := m.textarea.Cursor()
-			cur.X++                            // Adjust for app margins
-			cur.Y += m.layout.editor.Min.Y + 1 // Offset for attachments row
+			cur.X++ // Adjust for app margins
+			cur.Y += m.layout.editor.Min.Y
 			return cur
 		}
 	}
@@ -2682,8 +2682,8 @@ func (m *UI) renderEditorView(width int) string {
 		attachmentsView = m.attachments.Render(width)
 	}
 	return strings.Join([]string{
-		attachmentsView,
 		m.textarea.View(),
+		attachmentsView,
 		"", // margin at bottom of editor
 	}, "\n")
 }

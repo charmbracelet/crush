@@ -92,7 +92,10 @@
         }
       },
       "additionalProperties": false,
-      "type": "object"
+      "type": "object",
+      "required": [
+        "tools"
+      ]
     },
     "LSPConfig": {
       "properties": {
@@ -687,6 +690,16 @@
         "expires_at"
       ]
     },
+    "ToolGrep": {
+      "properties": {
+        "timeout": {
+          "type": "integer",
+          "description": "Timeout for the grep tool call"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "ToolLs": {
       "properties": {
         "max_depth": {
@@ -713,10 +726,17 @@
       "properties": {
         "ls": {
           "$ref": "#/$defs/ToolLs"
+        },
+        "grep": {
+          "$ref": "#/$defs/ToolGrep"
         }
       },
       "additionalProperties": false,
-      "type": "object"
+      "type": "object",
+      "required": [
+        "ls",
+        "grep"
+      ]
     }
   }
 }

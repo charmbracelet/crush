@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/logo"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/ultraviolet/layout"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
@@ -134,7 +135,7 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 		blocks...,
 	)
 
-	_, remainingHeightArea := uv.SplitVertical(m.layout.sidebar, uv.Fixed(lipgloss.Height(sidebarHeader)))
+	_, remainingHeightArea := layout.SplitVertical(m.layout.sidebar, layout.Fixed(lipgloss.Height(sidebarHeader)))
 	remainingHeight := remainingHeightArea.Dy() - 10
 	maxFiles, maxLSPs, maxMCPs := getDynamicHeightLimits(remainingHeight)
 

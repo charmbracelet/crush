@@ -203,6 +203,16 @@ That said, you can also set environment variables for preferred providers.
 | `AZURE_OPENAI_API_KEY`      | Azure OpenAI models (optional when using Entra ID) |
 | `AZURE_OPENAI_API_VERSION`  | Azure OpenAI models                                |
 
+### Subscriptions
+
+If you prefer subscription-based usage, here are some plans that work well in
+Crush:
+
+- [Synthetic](https://synthetic.new/pricing)
+- [GLM Coding Plan](https://z.ai/subscribe)
+- [Kimi Code](https://www.kimi.com/membership/pricing)
+- [MiniMax Coding Plan](https://platform.minimax.io/subscribe/coding-plan)
+
 ### By the Way
 
 Is there a provider you’d like to see in Crush? Is there an existing model that needs an update?

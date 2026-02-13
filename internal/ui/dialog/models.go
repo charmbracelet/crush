@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"fmt"
 	"slices"
-	"strings"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
@@ -70,7 +69,7 @@ const (
 // ModelsID is the identifier for the model selection dialog.
 const ModelsID = "models"
 
-const defaultModelsDialogMaxWidth = 70
+const defaultModelsDialogMaxWidth = 73
 
 // Models represents a model selection dialog.
 type Models struct {
@@ -84,6 +83,7 @@ type Models struct {
 		Tab      key.Binding
 		UpDown   key.Binding
 		Select   key.Binding
+		Edit     key.Binding
 		Next     key.Binding
 		Previous key.Binding
 		Close    key.Binding
@@ -124,6 +124,10 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 		key.WithKeys("enter", "ctrl+y"),
 		key.WithHelp("enter", "confirm"),
 	)
+	m.keyMap.Edit = key.NewBinding(
+		key.WithKeys("ctrl+e"),
+		key.WithHelp("ctrl+e", "edit"),
+	)
 	m.keyMap.UpDown = key.NewBinding(
 		key.WithKeys("up", "down"),
 		key.WithHelp("↑/↓", "choose"),
@@ -138,12 +142,12 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 	)
 	m.keyMap.Close = CloseKey
 
-	providers, err := getFilteredProviders(com.Config())
+	var err error
+	m.providers, err = config.Providers(m.com.Config())
 	if err != nil {
 		return nil, fmt.Errorf("failed to get providers: %w", err)
 	}
 
-	m.providers = providers
 	if err := m.setProviderItems(); err != nil {
 		return nil, fmt.Errorf("failed to set provider items: %w", err)
 	}
@@ -167,21 +171,19 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 			m.list.Focus()
 			if m.list.IsSelectedFirst() {
 				m.list.SelectLast()
-				m.list.ScrollToBottom()
-				break
+			} else {
+				m.list.SelectPrev()
 			}
-			m.list.SelectPrev()
 			m.list.ScrollToSelected()
 		case key.Matches(msg, m.keyMap.Next):
 			m.list.Focus()
 			if m.list.IsSelectedLast() {
 				m.list.SelectFirst()
-				m.list.ScrollToTop()
-				break
+			} else {
+				m.list.SelectNext()
 			}
-			m.list.SelectNext()
 			m.list.ScrollToSelected()
-		case key.Matches(msg, m.keyMap.Select):
+		case key.Matches(msg, m.keyMap.Select, m.keyMap.Edit):
 			selectedItem := m.list.SelectedItem()
 			if selectedItem == nil {
 				break
@@ -192,10 +194,13 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 				break
 			}
 
+			isEdit := key.Matches(msg, m.keyMap.Edit)
+
 			return ActionSelectModel{
-				Provider:  modelItem.prov,
-				Model:     modelItem.SelectedModel(),
-				ModelType: modelItem.SelectedModelType(),
+				Provider:       modelItem.prov,
+				Model:          modelItem.SelectedModel(),
+				ModelType:      modelItem.SelectedModelType(),
+				ReAuthenticate: isEdit,
 			}
 		case key.Matches(msg, m.keyMap.Tab):
 			if m.isOnboarding {
@@ -309,27 +314,35 @@ func (m *Models) ShortHelp() []key.Binding {
 			m.keyMap.Select,
 		}
 	}
-	return []key.Binding{
+	h := []key.Binding{
 		m.keyMap.UpDown,
 		m.keyMap.Tab,
 		m.keyMap.Select,
-		m.keyMap.Close,
 	}
+	if m.isSelectedConfigured() {
+		h = append(h, m.keyMap.Edit)
+	}
+	h = append(h, m.keyMap.Close)
+	return h
 }
 
 // FullHelp returns the full help view.
 func (m *Models) FullHelp() [][]key.Binding {
-	return [][]key.Binding{
-		{
-			m.keyMap.Select,
-			m.keyMap.Next,
-			m.keyMap.Previous,
-			m.keyMap.Tab,
-		},
-		{
-			m.keyMap.Close,
-		},
+	return [][]key.Binding{m.ShortHelp()}
+}
+
+func (m *Models) isSelectedConfigured() bool {
+	selectedItem := m.list.SelectedItem()
+	if selectedItem == nil {
+		return false
 	}
+	modelItem, ok := selectedItem.(*ModelItem)
+	if !ok {
+		return false
+	}
+	providerID := string(modelItem.prov.ID)
+	_, isConfigured := m.com.Config().Providers.Get(providerID)
+	return isConfigured
 }
 
 // setProviderItems sets the provider items in the list.
@@ -503,27 +516,6 @@ func (m *Models) setProviderItems() error {
 	}
 
 	return nil
-}
-
-func getFilteredProviders(cfg *config.Config) ([]catwalk.Provider, error) {
-	providers, err := config.Providers(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get providers: %w", err)
-	}
-	var filteredProviders []catwalk.Provider
-	for _, p := range providers {
-		var (
-			isAzure         = p.ID == catwalk.InferenceProviderAzure
-			isCopilot       = p.ID == catwalk.InferenceProviderCopilot
-			isHyper         = string(p.ID) == "hyper"
-			hasAPIKeyEnv    = strings.HasPrefix(p.APIKey, "$")
-			_, isConfigured = cfg.Providers.Get(string(p.ID))
-		)
-		if isAzure || isCopilot || isHyper || hasAPIKeyEnv || isConfigured {
-			filteredProviders = append(filteredProviders, p)
-		}
-	}
-	return filteredProviders, nil
 }
 
 func modelKey(providerID, modelID string) string {

@@ -106,9 +106,6 @@ crush -y
 		}
 		return nil
 	},
-	PostRun: func(cmd *cobra.Command, args []string) {
-		event.AppExited()
-	},
 }
 
 var heartbit = lipgloss.NewStyle().Foreground(charmtone.Dolly).SetString(`

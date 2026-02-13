@@ -12,29 +12,45 @@ import (
 	"github.com/charlievieth/fastwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/home"
-	ignore "github.com/sabhiram/go-gitignore"
+	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
 )
 
-// commonIgnorePatterns contains commonly ignored files and directories
-var commonIgnorePatterns = sync.OnceValue(func() ignore.IgnoreParser {
-	return ignore.CompileIgnoreLines(
-		// Version control
-		".git",
-		".svn",
-		".hg",
-		".bzr",
+// fastIgnoreDirs is a set of directory names that are always ignored.
+// This provides O(1) lookup for common cases to avoid expensive pattern matching.
+var fastIgnoreDirs = map[string]bool{
+	".git":            true,
+	".svn":            true,
+	".hg":             true,
+	".bzr":            true,
+	".vscode":         true,
+	".idea":           true,
+	"node_modules":    true,
+	"__pycache__":     true,
+	".pytest_cache":   true,
+	".cache":          true,
+	".tmp":            true,
+	".Trash":          true,
+	".Spotlight-V100": true,
+	".fseventsd":      true,
+	".crush":          true,
+	"OrbStack":        true,
+	".local":          true,
+	".share":          true,
+}
 
-		// IDE and editor files
-		".vscode",
-		".idea",
+// commonIgnorePatterns contains commonly ignored files and directories.
+// Note: Exact directory names that are in fastIgnoreDirs are handled there for O(1) lookup.
+// This list contains wildcard patterns and file-specific patterns.
+var commonIgnorePatterns = sync.OnceValue(func() []gitignore.Pattern {
+	patterns := []string{
+		// IDE and editor files (wildcards)
 		"*.swp",
 		"*.swo",
 		"*~",
 		".DS_Store",
 		"Thumbs.db",
 
-		// Build artifacts and dependencies
-		"node_modules",
+		// Build artifacts (non-fastIgnoreDirs)
 		"target",
 		"build",
 		"dist",
@@ -47,84 +63,147 @@ var commonIgnorePatterns = sync.OnceValue(func() ignore.IgnoreParser {
 		"*.dll",
 		"*.exe",
 
-		// Logs and temporary files
+		// Logs and temporary files (wildcards)
 		"*.log",
 		"*.tmp",
 		"*.temp",
-		".cache",
-		".tmp",
 
-		// Language-specific
-		"__pycache__",
+		// Language-specific (wildcards and non-fastIgnoreDirs)
 		"*.pyc",
 		"*.pyo",
-		".pytest_cache",
 		"vendor",
 		"Cargo.lock",
 		"package-lock.json",
 		"yarn.lock",
 		"pnpm-lock.yaml",
-
-		// OS generated files
-		".Trash",
-		".Spotlight-V100",
-		".fseventsd",
-
-		// Crush
-		".crush",
-
-		// macOS stuff
-		"OrbStack",
-		".local",
-		".share",
-	)
+	}
+	return parsePatterns(patterns, nil)
 })
 
-var homeIgnore = sync.OnceValue(func() ignore.IgnoreParser {
-	home := home.Dir()
+var homeIgnorePatterns = sync.OnceValue(func() []gitignore.Pattern {
+	homeDir := home.Dir()
 	var lines []string
 	for _, name := range []string{
-		filepath.Join(home, ".gitignore"),
-		filepath.Join(home, ".config", "git", "ignore"),
-		filepath.Join(home, ".config", "crush", "ignore"),
+		filepath.Join(homeDir, ".gitignore"),
+		filepath.Join(homeDir, ".config", "git", "ignore"),
+		filepath.Join(homeDir, ".config", "crush", "ignore"),
 	} {
 		if bts, err := os.ReadFile(name); err == nil {
 			lines = append(lines, strings.Split(string(bts), "\n")...)
 		}
 	}
-	return ignore.CompileIgnoreLines(lines...)
+	return parsePatterns(lines, nil)
 })
 
+// parsePatterns parses gitignore pattern strings into Pattern objects.
+// domain is the path components where the patterns are defined (nil for global).
+func parsePatterns(lines []string, domain []string) []gitignore.Pattern {
+	var patterns []gitignore.Pattern
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		patterns = append(patterns, gitignore.ParsePattern(line, domain))
+	}
+	return patterns
+}
+
 type directoryLister struct {
-	ignores  *csync.Map[string, ignore.IgnoreParser]
-	rootPath string
+	// dirPatterns caches parsed patterns from .gitignore/.crushignore for each directory.
+	// This avoids re-reading files when building combined matchers.
+	dirPatterns *csync.Map[string, []gitignore.Pattern]
+	// combinedMatchers caches a combined matcher for each directory that includes
+	// all ancestor patterns. This allows O(1) matching per file.
+	combinedMatchers *csync.Map[string, gitignore.Matcher]
+	rootPath         string
 }
 
 func NewDirectoryLister(rootPath string) *directoryLister {
-	dl := &directoryLister{
-		rootPath: rootPath,
-		ignores:  csync.NewMap[string, ignore.IgnoreParser](),
+	return &directoryLister{
+		rootPath:         rootPath,
+		dirPatterns:      csync.NewMap[string, []gitignore.Pattern](),
+		combinedMatchers: csync.NewMap[string, gitignore.Matcher](),
 	}
-	dl.getIgnore(rootPath)
-	return dl
 }
 
-// git checks, in order:
-// - ./.gitignore, ../.gitignore, etc, until repo root
-// ~/.config/git/ignore
-// ~/.gitignore
-//
-// This will do the following:
-// - the given ignorePatterns
-// - [commonIgnorePatterns]
-// - ./.gitignore, ../.gitignore, etc, until dl.rootPath
-// - ./.crushignore, ../.crushignore, etc, until dl.rootPath
-// ~/.config/git/ignore
-// ~/.gitignore
-// ~/.config/crush/ignore
-func (dl *directoryLister) shouldIgnore(path string, ignorePatterns []string) bool {
+// pathToComponents splits a path into its components for gitignore matching.
+func pathToComponents(path string) []string {
+	path = filepath.ToSlash(path)
+	if path == "" || path == "." {
+		return nil
+	}
+	return strings.Split(path, "/")
+}
+
+// getDirPatterns returns the parsed patterns for a specific directory's
+// .gitignore and .crushignore files. Results are cached.
+func (dl *directoryLister) getDirPatterns(dir string) []gitignore.Pattern {
+	return dl.dirPatterns.GetOrSet(dir, func() []gitignore.Pattern {
+		var allPatterns []gitignore.Pattern
+
+		relPath, _ := filepath.Rel(dl.rootPath, dir)
+		var domain []string
+		if relPath != "" && relPath != "." {
+			domain = pathToComponents(relPath)
+		}
+
+		for _, ignoreFile := range []string{".gitignore", ".crushignore"} {
+			ignPath := filepath.Join(dir, ignoreFile)
+			if content, err := os.ReadFile(ignPath); err == nil {
+				lines := strings.Split(string(content), "\n")
+				allPatterns = append(allPatterns, parsePatterns(lines, domain)...)
+			}
+		}
+		return allPatterns
+	})
+}
+
+// getCombinedMatcher returns a matcher that combines all gitignore patterns
+// from the root to the given directory, plus common patterns and home patterns.
+// Results are cached per directory, and we reuse parent directory matchers.
+func (dl *directoryLister) getCombinedMatcher(dir string) gitignore.Matcher {
+	return dl.combinedMatchers.GetOrSet(dir, func() gitignore.Matcher {
+		var allPatterns []gitignore.Pattern
+
+		// Add common patterns first (lowest priority).
+		allPatterns = append(allPatterns, commonIgnorePatterns()...)
+
+		// Add home ignore patterns.
+		allPatterns = append(allPatterns, homeIgnorePatterns()...)
+
+		// Collect patterns from root to this directory.
+		relDir, _ := filepath.Rel(dl.rootPath, dir)
+		var pathParts []string
+		if relDir != "" && relDir != "." {
+			pathParts = pathToComponents(relDir)
+		}
+
+		// Add patterns from each directory from root to current.
+		currentPath := dl.rootPath
+		allPatterns = append(allPatterns, dl.getDirPatterns(currentPath)...)
+
+		for _, part := range pathParts {
+			currentPath = filepath.Join(currentPath, part)
+			allPatterns = append(allPatterns, dl.getDirPatterns(currentPath)...)
+		}
+
+		return gitignore.NewMatcher(allPatterns)
+	})
+}
+
+// shouldIgnore checks if a path should be ignored based on gitignore rules.
+// This uses a combined matcher that includes all ancestor patterns for O(1) matching.
+func (dl *directoryLister) shouldIgnore(path string, ignorePatterns []string, isDir bool) bool {
+	base := filepath.Base(path)
+
+	// Fast path: O(1) lookup for commonly ignored directories.
+	if isDir && fastIgnoreDirs[base] {
+		return true
+	}
+
+	// Check explicit ignore patterns.
 	if len(ignorePatterns) > 0 {
-		base := filepath.Base(path)
 		for _, pattern := range ignorePatterns {
 			if matched, err := filepath.Match(pattern, base); err == nil && matched {
 				return true
@@ -132,8 +211,7 @@ func (dl *directoryLister) shouldIgnore(path string, ignorePatterns []string) bo
 		}
 	}
 
-	// Don't apply gitignore rules to the root directory itself
-	// In gitignore semantics, patterns don't apply to the repo root
+	// Don't apply gitignore rules to the root directory itself.
 	if path == dl.rootPath {
 		return false
 	}
@@ -143,69 +221,24 @@ func (dl *directoryLister) shouldIgnore(path string, ignorePatterns []string) bo
 		relPath = path
 	}
 
-	if commonIgnorePatterns().MatchesPath(relPath) {
-		slog.Debug("Ignoring common pattern", "path", relPath)
-		return true
+	pathComponents := pathToComponents(relPath)
+	if len(pathComponents) == 0 {
+		return false
 	}
 
+	// Get the combined matcher for the parent directory.
 	parentDir := filepath.Dir(path)
-	ignoreParser := dl.getIgnore(parentDir)
-	if ignoreParser.MatchesPath(relPath) {
-		slog.Debug("Ignoring dir pattern", "path", relPath, "dir", parentDir)
-		return true
-	}
+	matcher := dl.getCombinedMatcher(parentDir)
 
-	// For directories, also check with trailing slash (gitignore convention)
-	if ignoreParser.MatchesPath(relPath + "/") {
-		slog.Debug("Ignoring dir pattern with slash", "path", relPath+"/", "dir", parentDir)
-		return true
-	}
-
-	if dl.checkParentIgnores(relPath) {
-		return true
-	}
-
-	if homeIgnore().MatchesPath(relPath) {
-		slog.Debug("Ignoring home dir pattern", "path", relPath)
+	if matcher.Match(pathComponents, isDir) {
+		slog.Debug("Ignoring path", "path", relPath)
 		return true
 	}
 
 	return false
 }
 
-func (dl *directoryLister) checkParentIgnores(path string) bool {
-	parent := filepath.Dir(filepath.Dir(path))
-	for parent != "." && path != "." {
-		if dl.getIgnore(parent).MatchesPath(path) {
-			slog.Debug("Ignoring parent dir pattern", "path", path, "dir", parent)
-			return true
-		}
-		if parent == dl.rootPath {
-			break
-		}
-		parent = filepath.Dir(parent)
-	}
-	return false
-}
-
-func (dl *directoryLister) getIgnore(path string) ignore.IgnoreParser {
-	return dl.ignores.GetOrSet(path, func() ignore.IgnoreParser {
-		var lines []string
-		for _, ign := range []string{".crushignore", ".gitignore"} {
-			name := filepath.Join(path, ign)
-			if content, err := os.ReadFile(name); err == nil {
-				lines = append(lines, strings.Split(string(content), "\n")...)
-			}
-		}
-		if len(lines) == 0 {
-			// Return a no-op parser to avoid nil checks
-			return ignore.CompileIgnoreLines()
-		}
-		return ignore.CompileIgnoreLines(lines...)
-	})
-}
-
-// ListDirectory lists files and directories in the specified path,
+// ListDirectory lists files and directories in the specified path.
 func ListDirectory(initialPath string, ignorePatterns []string, depth, limit int) ([]string, bool, error) {
 	found := csync.NewSlice[string]()
 	dl := NewDirectoryLister(initialPath)
@@ -224,15 +257,16 @@ func ListDirectory(initialPath string, ignorePatterns []string, depth, limit int
 			return nil // Skip files we don't have permission to access
 		}
 
-		if dl.shouldIgnore(path, ignorePatterns) {
-			if d.IsDir() {
+		isDir := d.IsDir()
+		if dl.shouldIgnore(path, ignorePatterns, isDir) {
+			if isDir {
 				return filepath.SkipDir
 			}
 			return nil
 		}
 
 		if path != initialPath {
-			if d.IsDir() {
+			if isDir {
 				path = path + string(filepath.Separator)
 			}
 			found.Append(path)

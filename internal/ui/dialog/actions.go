@@ -36,9 +36,10 @@ type ActionSelectSession struct {
 
 // ActionSelectModel is a message indicating a model has been selected.
 type ActionSelectModel struct {
-	Provider  catwalk.Provider
-	Model     config.SelectedModel
-	ModelType config.SelectedModelType
+	Provider       catwalk.Provider
+	Model          config.SelectedModel
+	ModelType      config.SelectedModelType
+	ReAuthenticate bool
 }
 
 // Messages for commands
@@ -47,6 +48,7 @@ type (
 	ActionToggleHelp        struct{}
 	ActionToggleCompactMode struct{}
 	ActionToggleThinking    struct{}
+	ActionTogglePills       struct{}
 	ActionExternalEditor    struct{}
 	ActionToggleYoloMode    struct{}
 	// ActionInitializeProject is a message to initialize a project.

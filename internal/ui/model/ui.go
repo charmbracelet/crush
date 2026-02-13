@@ -24,6 +24,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
+	agenttools "github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/commands"
@@ -41,11 +42,13 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/completions"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
+	fimage "github.com/charmbracelet/crush/internal/ui/image"
 	"github.com/charmbracelet/crush/internal/ui/logo"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/version"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/ultraviolet/layout"
 	"github.com/charmbracelet/ultraviolet/screen"
 	"github.com/charmbracelet/x/editor"
 )
@@ -134,7 +137,7 @@ type UI struct {
 	// The width and height of the terminal in cells.
 	width  int
 	height int
-	layout layout
+	layout uiLayout
 
 	isTransparent bool
 
@@ -1143,6 +1146,10 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 
+		if m.dialog.ContainsDialog(dialog.FilePickerID) {
+			defer fimage.ResetCache()
+		}
+
 		m.dialog.CloseFrontDialog()
 
 		if isOnboarding {
@@ -1221,6 +1228,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionToggleCompactMode:
 		cmds = append(cmds, m.toggleCompactMode())
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionTogglePills:
+		if cmd := m.togglePillsExpanded(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleThinking:
 		cmds = append(cmds, func() tea.Msg {
 			cfg := m.com.Config()
@@ -1275,11 +1287,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		)
 
 		// Attempt to import GitHub Copilot tokens from VSCode if available.
-		if isCopilot && !isConfigured() {
+		if isCopilot && !isConfigured() && !msg.ReAuthenticate {
 			m.com.Config().ImportCopilot()
 		}
 
-		if !isConfigured() {
+		if !isConfigured() || msg.ReAuthenticate {
 			m.dialog.CloseDialog(dialog.ModelsID)
 			if cmd := m.openAuthenticationDialog(msg.Provider, msg.Model, msg.ModelType); cmd != nil {
 				cmds = append(cmds, cmd)
@@ -1364,6 +1376,10 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			msg.Cmd(),
 			func() tea.Msg {
 				m.dialog.CloseDialog(dialog.FilePickerID)
+				return nil
+			},
+			func() tea.Msg {
+				fimage.ResetCache()
 				return nil
 			},
 		))
@@ -1898,7 +1914,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			x = screenW - w
 		}
 		x = max(0, x)
-		y = max(0, y)
+		y = max(0, y+1) // Offset for attachments row
 
 		completionsView := uv.NewStyledString(m.completions.Render())
 		completionsView.Draw(scr, image.Rectangle{
@@ -1937,12 +1953,8 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 		if m.textarea.Focused() {
 			cur := m.textarea.Cursor()
-			cur.X++ // Adjust for app margins
-			cur.Y += m.layout.editor.Min.Y
-			// Offset for attachment row if present.
-			if len(m.attachments.List()) > 0 {
-				cur.Y++
-			}
+			cur.X++                            // Adjust for app margins
+			cur.Y += m.layout.editor.Min.Y + 1 // Offset for attachments row
 			return cur
 		}
 	}
@@ -2232,7 +2244,10 @@ func (m *UI) updateSize() {
 
 	m.chat.SetSize(m.layout.main.Dx(), m.layout.main.Dy())
 	m.textarea.SetWidth(m.layout.editor.Dx())
-	m.textarea.SetHeight(m.layout.editor.Dy())
+	// TODO: Abstract the textarea and attachments into a single editor
+	// component so we don't have to manually account for the attachments
+	// height here.
+	m.textarea.SetHeight(m.layout.editor.Dy() - 2) // Account for top margin/attachments and bottom margin
 	m.renderPills()
 
 	// Handle different app states
@@ -2246,7 +2261,7 @@ func (m *UI) updateSize() {
 
 // generateLayout calculates the layout rectangles for all UI components based
 // on the current UI state and terminal dimensions.
-func (m *UI) generateLayout(w, h int) layout {
+func (m *UI) generateLayout(w, h int) uiLayout {
 	// The screen area we're working with
 	area := image.Rect(0, 0, w, h)
 
@@ -2267,7 +2282,7 @@ func (m *UI) generateLayout(w, h int) layout {
 	}
 
 	// Add app margins
-	appRect, helpRect := uv.SplitVertical(area, uv.Fixed(area.Dy()-helpHeight))
+	appRect, helpRect := layout.SplitVertical(area, layout.Fixed(area.Dy()-helpHeight))
 	appRect.Min.Y += 1
 	appRect.Max.Y -= 1
 	helpRect.Min.Y -= 1
@@ -2280,7 +2295,7 @@ func (m *UI) generateLayout(w, h int) layout {
 		appRect.Max.X -= 1
 	}
 
-	layout := layout{
+	uiLayout := uiLayout{
 		area:   area,
 		status: helpRect,
 	}
@@ -2296,9 +2311,9 @@ func (m *UI) generateLayout(w, h int) layout {
 		// ------
 		// help
 
-		headerRect, mainRect := uv.SplitVertical(appRect, uv.Fixed(landingHeaderHeight))
-		layout.header = headerRect
-		layout.main = mainRect
+		headerRect, mainRect := layout.SplitVertical(appRect, layout.Fixed(landingHeaderHeight))
+		uiLayout.header = headerRect
+		uiLayout.main = mainRect
 
 	case uiLanding:
 		// Layout
@@ -2310,14 +2325,14 @@ func (m *UI) generateLayout(w, h int) layout {
 		// editor
 		// ------
 		// help
-		headerRect, mainRect := uv.SplitVertical(appRect, uv.Fixed(landingHeaderHeight))
-		mainRect, editorRect := uv.SplitVertical(mainRect, uv.Fixed(mainRect.Dy()-editorHeight))
+		headerRect, mainRect := layout.SplitVertical(appRect, layout.Fixed(landingHeaderHeight))
+		mainRect, editorRect := layout.SplitVertical(mainRect, layout.Fixed(mainRect.Dy()-editorHeight))
 		// Remove extra padding from editor (but keep it for header and main)
 		editorRect.Min.X -= 1
 		editorRect.Max.X += 1
-		layout.header = headerRect
-		layout.main = mainRect
-		layout.editor = editorRect
+		uiLayout.header = headerRect
+		uiLayout.main = mainRect
+		uiLayout.editor = editorRect
 
 	case uiChat:
 		if m.isCompact {
@@ -2331,28 +2346,28 @@ func (m *UI) generateLayout(w, h int) layout {
 			// ------
 			// help
 			const compactHeaderHeight = 1
-			headerRect, mainRect := uv.SplitVertical(appRect, uv.Fixed(compactHeaderHeight))
+			headerRect, mainRect := layout.SplitVertical(appRect, layout.Fixed(compactHeaderHeight))
 			detailsHeight := min(sessionDetailsMaxHeight, area.Dy()-1) // One row for the header
-			sessionDetailsArea, _ := uv.SplitVertical(appRect, uv.Fixed(detailsHeight))
-			layout.sessionDetails = sessionDetailsArea
-			layout.sessionDetails.Min.Y += compactHeaderHeight // adjust for header
+			sessionDetailsArea, _ := layout.SplitVertical(appRect, layout.Fixed(detailsHeight))
+			uiLayout.sessionDetails = sessionDetailsArea
+			uiLayout.sessionDetails.Min.Y += compactHeaderHeight // adjust for header
 			// Add one line gap between header and main content
 			mainRect.Min.Y += 1
-			mainRect, editorRect := uv.SplitVertical(mainRect, uv.Fixed(mainRect.Dy()-editorHeight))
+			mainRect, editorRect := layout.SplitVertical(mainRect, layout.Fixed(mainRect.Dy()-editorHeight))
 			mainRect.Max.X -= 1 // Add padding right
-			layout.header = headerRect
+			uiLayout.header = headerRect
 			pillsHeight := m.pillsAreaHeight()
 			if pillsHeight > 0 {
 				pillsHeight = min(pillsHeight, mainRect.Dy())
-				chatRect, pillsRect := uv.SplitVertical(mainRect, uv.Fixed(mainRect.Dy()-pillsHeight))
-				layout.main = chatRect
-				layout.pills = pillsRect
+				chatRect, pillsRect := layout.SplitVertical(mainRect, layout.Fixed(mainRect.Dy()-pillsHeight))
+				uiLayout.main = chatRect
+				uiLayout.pills = pillsRect
 			} else {
-				layout.main = mainRect
+				uiLayout.main = mainRect
 			}
 			// Add bottom margin to main
-			layout.main.Max.Y -= 1
-			layout.editor = editorRect
+			uiLayout.main.Max.Y -= 1
+			uiLayout.editor = editorRect
 		} else {
 			// Layout
 			//
@@ -2363,40 +2378,32 @@ func (m *UI) generateLayout(w, h int) layout {
 			// ----------
 			// help
 
-			mainRect, sideRect := uv.SplitHorizontal(appRect, uv.Fixed(appRect.Dx()-sidebarWidth))
+			mainRect, sideRect := layout.SplitHorizontal(appRect, layout.Fixed(appRect.Dx()-sidebarWidth))
 			// Add padding left
 			sideRect.Min.X += 1
-			mainRect, editorRect := uv.SplitVertical(mainRect, uv.Fixed(mainRect.Dy()-editorHeight))
+			mainRect, editorRect := layout.SplitVertical(mainRect, layout.Fixed(mainRect.Dy()-editorHeight))
 			mainRect.Max.X -= 1 // Add padding right
-			layout.sidebar = sideRect
+			uiLayout.sidebar = sideRect
 			pillsHeight := m.pillsAreaHeight()
 			if pillsHeight > 0 {
 				pillsHeight = min(pillsHeight, mainRect.Dy())
-				chatRect, pillsRect := uv.SplitVertical(mainRect, uv.Fixed(mainRect.Dy()-pillsHeight))
-				layout.main = chatRect
-				layout.pills = pillsRect
+				chatRect, pillsRect := layout.SplitVertical(mainRect, layout.Fixed(mainRect.Dy()-pillsHeight))
+				uiLayout.main = chatRect
+				uiLayout.pills = pillsRect
 			} else {
-				layout.main = mainRect
+				uiLayout.main = mainRect
 			}
 			// Add bottom margin to main
-			layout.main.Max.Y -= 1
-			layout.editor = editorRect
+			uiLayout.main.Max.Y -= 1
+			uiLayout.editor = editorRect
 		}
 	}
 
-	if !layout.editor.Empty() {
-		// Add editor margins 1 top and bottom
-		if len(m.attachments.List()) == 0 {
-			layout.editor.Min.Y += 1
-		}
-		layout.editor.Max.Y -= 1
-	}
-
-	return layout
+	return uiLayout
 }
 
-// layout defines the positioning of UI elements.
-type layout struct {
+// uiLayout defines the positioning of UI elements.
+type uiLayout struct {
 	// area is the overall available area.
 	area uv.Rectangle
 
@@ -2695,14 +2702,15 @@ func (m *UI) randomizePlaceholders() {
 
 // renderEditorView renders the editor view with attachments if any.
 func (m *UI) renderEditorView(width int) string {
-	if len(m.attachments.List()) == 0 {
-		return m.textarea.View()
+	var attachmentsView string
+	if len(m.attachments.List()) > 0 {
+		attachmentsView = m.attachments.Render(width)
 	}
-	return lipgloss.JoinVertical(
-		lipgloss.Top,
-		m.attachments.Render(width),
+	return strings.Join([]string{
+		attachmentsView,
 		m.textarea.View(),
-	)
+		"", // margin at bottom of editor
+	}, "\n")
 }
 
 // cacheSidebarLogo renders and caches the sidebar logo at the specified width.
@@ -2733,10 +2741,13 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 	}
 
 	ctx := context.Background()
-	for _, path := range m.sessionFileReads {
-		m.com.App.FileTracker.RecordRead(ctx, m.session.ID, path)
-		m.com.App.LSPManager.Start(ctx, path)
-	}
+	cmds = append(cmds, func() tea.Msg {
+		for _, path := range m.sessionFileReads {
+			m.com.App.FileTracker.RecordRead(ctx, m.session.ID, path)
+			m.com.App.LSPManager.Start(ctx, path)
+		}
+		return nil
+	})
 
 	// Capture session ID to avoid race with main goroutine updating m.session.
 	sessionID := m.session.ID
@@ -2898,12 +2909,15 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 		return nil
 	}
 
-	sessionID := ""
-	if m.session != nil {
+	var sessionID string
+	hasSession := m.session != nil
+	if hasSession {
 		sessionID = m.session.ID
 	}
+	hasTodos := hasSession && hasIncompleteTodos(m.session.Todos)
+	hasQueue := m.promptQueue > 0
 
-	commands, err := dialog.NewCommands(m.com, sessionID, m.customCommands, m.mcpPrompts)
+	commands, err := dialog.NewCommands(m.com, sessionID, hasSession, hasTodos, hasQueue, m.customCommands, m.mcpPrompts)
 	if err != nil {
 		return util.ReportError(err)
 	}
@@ -3019,6 +3033,7 @@ func (m *UI) newSession() tea.Cmd {
 	m.promptQueue = 0
 	m.pillsView = ""
 	m.historyReset()
+	agenttools.ResetCache()
 	return tea.Batch(
 		func() tea.Msg {
 			m.com.App.LSPManager.StopAll(context.Background())

@@ -70,10 +70,16 @@ func NewFastGlobWalker(searchPath string) *FastGlobWalker {
 	}
 }
 
-// ShouldSkip checks if a path should be skipped based on hierarchical gitignore,
-// crushignore, and hidden file rules
+// ShouldSkip checks if a file path should be skipped based on hierarchical gitignore,
+// crushignore, and hidden file rules.
 func (w *FastGlobWalker) ShouldSkip(path string) bool {
-	return w.directoryLister.shouldIgnore(path, nil)
+	return w.directoryLister.shouldIgnore(path, nil, false)
+}
+
+// ShouldSkipDir checks if a directory path should be skipped based on hierarchical
+// gitignore, crushignore, and hidden file rules.
+func (w *FastGlobWalker) ShouldSkipDir(path string) bool {
+	return w.directoryLister.shouldIgnore(path, nil, true)
 }
 
 func GlobWithDoubleStar(pattern, searchPath string, limit int) ([]string, bool, error) {
@@ -93,14 +99,15 @@ func GlobWithDoubleStar(pattern, searchPath string, limit int) ([]string, bool, 
 			return nil // Skip files we can't access
 		}
 
-		if d.IsDir() {
-			if walker.ShouldSkip(path) {
+		isDir := d.IsDir()
+		if isDir {
+			if walker.ShouldSkipDir(path) {
 				return filepath.SkipDir
 			}
-		}
-
-		if walker.ShouldSkip(path) {
-			return nil
+		} else {
+			if walker.ShouldSkip(path) {
+				return nil
+			}
 		}
 
 		relPath, err := filepath.Rel(searchPath, path)
@@ -145,10 +152,12 @@ func GlobWithDoubleStar(pattern, searchPath string, limit int) ([]string, bool, 
 }
 
 // ShouldExcludeFile checks if a file should be excluded from processing
-// based on common patterns and ignore rules
+// based on common patterns and ignore rules.
 func ShouldExcludeFile(rootPath, filePath string) bool {
+	info, err := os.Stat(filePath)
+	isDir := err == nil && info.IsDir()
 	return NewDirectoryLister(rootPath).
-		shouldIgnore(filePath, nil)
+		shouldIgnore(filePath, nil, isDir)
 }
 
 func PrettyPath(path string) string {

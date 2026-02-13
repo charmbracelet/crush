@@ -4,11 +4,11 @@ go 1.25.5
 
 require (
 	charm.land/bubbles/v2 v2.0.0-rc.1.0.20260109112849-ae99f46cec66
-	charm.land/bubbletea/v2 v2.0.0-rc.2.0.20251216153312-819e2e89c62e
-	charm.land/catwalk v0.17.1
-	charm.land/fantasy v0.7.1
+	charm.land/bubbletea/v2 v2.0.0-rc.2.0.20260209074636-30878e43d7b0
+	charm.land/catwalk v0.18.0
+	charm.land/fantasy v0.7.2
 	charm.land/glamour/v2 v2.0.0-20260123212943-6014aa153a9b
-	charm.land/lipgloss/v2 v2.0.0-beta.3.0.20251205162909-7869489d8971
+	charm.land/lipgloss/v2 v2.0.0-beta.3.0.20260212100304-e18737634dea
 	charm.land/log/v2 v2.0.0-20251110204020-529bb77f35da
 	charm.land/x/vcr v0.1.1
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
@@ -20,24 +20,25 @@ require (
 	github.com/aymanbagabas/go-udiff v0.3.1
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/charlievieth/fastwalk v1.0.14
-	github.com/charmbracelet/colorprofile v0.4.1
+	github.com/charmbracelet/colorprofile v0.4.2
 	github.com/charmbracelet/fang v0.4.4
-	github.com/charmbracelet/ultraviolet v0.0.0-20251212194010-b927aa605560
-	github.com/charmbracelet/x/ansi v0.11.4
+	github.com/charmbracelet/ultraviolet v0.0.0-20260205113103-524a6607adb8
+	github.com/charmbracelet/x/ansi v0.11.6
 	github.com/charmbracelet/x/editor v0.2.0
 	github.com/charmbracelet/x/etag v0.2.0
 	github.com/charmbracelet/x/exp/charmtone v0.0.0-20260109001716-2fbdffcb221f
 	github.com/charmbracelet/x/exp/golden v0.0.0-20250806222409-83e3a29d542f
 	github.com/charmbracelet/x/exp/ordered v0.1.0
-	github.com/charmbracelet/x/exp/slice v0.0.0-20251201173703-9f73bfd934ff
+	github.com/charmbracelet/x/exp/slice v0.0.0-20260209194814-eeb2896ac759
 	github.com/charmbracelet/x/exp/strings v0.1.0
-	github.com/charmbracelet/x/powernap v0.0.0-20260127155452-b72a9a918687
+	github.com/charmbracelet/x/powernap v0.0.0-20260209132835-6b065b8ba62c
 	github.com/charmbracelet/x/term v0.2.2
-	github.com/clipperhouse/displaywidth v0.9.0
-	github.com/clipperhouse/uax29/v2 v2.5.0
+	github.com/clipperhouse/displaywidth v0.10.0
+	github.com/clipperhouse/uax29/v2 v2.6.0
 	github.com/denisbrodbeck/machineid v1.0.1
 	github.com/disintegration/imaging v1.6.2
 	github.com/dustin/go-humanize v1.0.1
+	github.com/go-git/go-git/v5 v5.16.5
 	github.com/google/uuid v1.6.0
 	github.com/invopop/jsonschema v0.13.0
 	github.com/joho/godotenv v1.5.1
@@ -49,11 +50,10 @@ require (
 	github.com/nxadm/tail v1.4.11
 	github.com/openai/openai-go/v2 v2.7.1
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
-	github.com/posthog/posthog-go v1.9.1
+	github.com/posthog/posthog-go v1.10.0
 	github.com/pressly/goose/v3 v3.26.0
 	github.com/qjebbs/go-jsons v1.0.0-alpha.4
 	github.com/rivo/uniseg v0.4.7
-	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06
 	github.com/sahilm/fuzzy v0.1.1
 	github.com/sourcegraph/jsonrpc2 v0.2.1
 	github.com/spf13/cobra v1.10.2
@@ -110,6 +110,8 @@ require (
 	github.com/ebitengine/purego v0.10.0-alpha.3.0.20260102153238-200df6041cff // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
+	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
+	github.com/go-git/go-billy/v5 v5.6.2 // indirect
 	github.com/go-json-experiment/json v0.0.0-20251027170946-4849db3c2f7e // indirect
 	github.com/go-logfmt/logfmt v0.6.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
@@ -127,9 +129,10 @@ require (
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
 	github.com/kaptinlin/go-i18n v0.2.3 // indirect
 	github.com/kaptinlin/jsonpointer v0.4.9 // indirect
-	github.com/kaptinlin/jsonschema v0.6.9 // indirect
+	github.com/kaptinlin/jsonschema v0.6.10 // indirect
 	github.com/kaptinlin/messageformat-go v0.4.9 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
@@ -149,7 +152,6 @@ require (
 	github.com/pierrec/lz4/v4 v4.1.22 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
-	github.com/sergi/go-diff v1.3.2-0.20230802210424-5b0b94c5c0d3 // indirect
 	github.com/sethvargo/go-retry v0.3.0 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/tetratelabs/wazero v1.11.0 // indirect
@@ -174,17 +176,18 @@ require (
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
 	golang.org/x/image v0.34.0 // indirect
 	golang.org/x/mod v0.32.0 // indirect
-	golang.org/x/oauth2 v0.34.0 // indirect
-	golang.org/x/sys v0.40.0 // indirect
+	golang.org/x/oauth2 v0.35.0 // indirect
+	golang.org/x/sys v0.41.0 // indirect
 	golang.org/x/term v0.39.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 	google.golang.org/api v0.239.0 // indirect
-	google.golang.org/genai v1.44.0 // indirect
+	google.golang.org/genai v1.45.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250804133106-a7a43d27e69b // indirect
 	google.golang.org/grpc v1.76.0 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect
 	gopkg.in/dnaeon/go-vcr.v4 v4.0.6-0.20251110073552-01de4eb40290 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
+	gopkg.in/warnings.v0 v0.1.2 // indirect
 	modernc.org/libc v1.67.6 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect

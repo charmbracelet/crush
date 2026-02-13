@@ -350,7 +350,8 @@ type Agent struct {
 }
 
 type Tools struct {
-	Ls ToolLs `json:"ls,omitempty"`
+	Ls   ToolLs   `json:"ls,omitzero"`
+	Grep ToolGrep `json:"grep,omitzero"`
 }
 
 type ToolLs struct {
@@ -358,8 +359,18 @@ type ToolLs struct {
 	MaxItems *int `json:"max_items,omitempty" jsonschema:"description=Maximum number of items to return for the ls tool,default=1000,example=100"`
 }
 
+// Limits returns the user-defined max-depth and max-items, or their defaults.
 func (t ToolLs) Limits() (depth, items int) {
 	return ptrValOr(t.MaxDepth, 0), ptrValOr(t.MaxItems, 0)
+}
+
+type ToolGrep struct {
+	Timeout *time.Duration `json:"timeout,omitempty" jsonschema:"description=Timeout for the grep tool call,default=5s,example=10s"`
+}
+
+// GetTimeout returns the user-defined timeout or the default.
+func (t ToolGrep) GetTimeout() time.Duration {
+	return ptrValOr(t.Timeout, 5*time.Second)
 }
 
 // Config holds the configuration for crush.
@@ -383,7 +394,7 @@ type Config struct {
 
 	Permissions *Permissions `json:"permissions,omitempty" jsonschema:"description=Permission settings for tool usage"`
 
-	Tools Tools `json:"tools,omitempty" jsonschema:"description=Tool configurations"`
+	Tools Tools `json:"tools,omitzero" jsonschema:"description=Tool configurations"`
 
 	Agents map[string]Agent `json:"-"`
 
@@ -756,7 +767,7 @@ func (c *Config) SetupAgents() {
 		},
 
 		AgentTask: {
-			ID:           AgentCoder,
+			ID:           AgentTask,
 			Name:         "Task",
 			Description:  "An agent that helps with searching for context and finding implementation details.",
 			Model:        SelectedModelTypeLarge,

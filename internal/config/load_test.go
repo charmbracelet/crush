@@ -1127,7 +1127,7 @@ func TestConfig_configureProvidersDisableDefaultProviders(t *testing.T) {
 		})
 		resolver := NewEnvironmentVariableResolver(env)
 		err := cfg.configureProviders(env, resolver, knownProviders)
-		require.NoError(t, err)
+		require.ErrorContains(t, err, "no custom providers")
 
 		// openai should NOT be present because it lacks base_url and models.
 		require.Equal(t, 0, cfg.Providers.Len())
@@ -1252,7 +1252,7 @@ func TestConfig_configureProvidersDisableDefaultProviders(t *testing.T) {
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewEnvironmentVariableResolver(env)
 		err := cfg.configureProviders(env, resolver, []catwalk.Provider{})
-		require.NoError(t, err)
+		require.ErrorContains(t, err, "no custom providers")
 
 		// Provider should be rejected for missing models.
 		require.Equal(t, 0, cfg.Providers.Len())
@@ -1276,7 +1276,7 @@ func TestConfig_configureProvidersDisableDefaultProviders(t *testing.T) {
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewEnvironmentVariableResolver(env)
 		err := cfg.configureProviders(env, resolver, []catwalk.Provider{})
-		require.NoError(t, err)
+		require.ErrorContains(t, err, "no custom providers")
 
 		// Provider should be rejected for missing base_url.
 		require.Equal(t, 0, cfg.Providers.Len())

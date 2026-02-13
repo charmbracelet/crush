@@ -207,8 +207,8 @@ func splitArgsFlags(parts []string) (args []string, flags []string) {
 		if strings.HasPrefix(part, "-") {
 			// Extract flag name before '=' if present
 			flag := part
-			if idx := strings.IndexByte(part, '='); idx != -1 {
-				flag = part[:idx]
+			if before, _, ok := strings.Cut(part, "="); ok {
+				flag = before
 			}
 			flags = append(flags, flag)
 		} else {
@@ -259,20 +259,29 @@ func (s *Shell) updateShellFromRunner(runner *interp.Runner) {
 }
 
 // execCommon is the shared implementation for executing commands
-func (s *Shell) execCommon(ctx context.Context, command string, stdout, stderr io.Writer) error {
+func (s *Shell) execCommon(ctx context.Context, command string, stdout, stderr io.Writer) (err error) {
+	var runner *interp.Runner
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("command execution panic: %v", r)
+		}
+		if runner != nil {
+			s.updateShellFromRunner(runner)
+		}
+		s.logger.InfoPersist("command finished", "command", command, "err", err)
+	}()
+
 	line, err := syntax.NewParser().Parse(strings.NewReader(command), "")
 	if err != nil {
 		return fmt.Errorf("could not parse command: %w", err)
 	}
 
-	runner, err := s.newInterp(stdout, stderr)
+	runner, err = s.newInterp(stdout, stderr)
 	if err != nil {
 		return fmt.Errorf("could not run command: %w", err)
 	}
 
 	err = runner.Run(ctx, line)
-	s.updateShellFromRunner(runner)
-	s.logger.InfoPersist("command finished", "command", command, "err", err)
 	return err
 }
 

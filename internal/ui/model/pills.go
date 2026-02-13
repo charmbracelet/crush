@@ -38,12 +38,7 @@ const (
 
 // hasIncompleteTodos returns true if there are any non-completed todos.
 func hasIncompleteTodos(todos []session.Todo) bool {
-	for _, todo := range todos {
-		if todo.Status != session.TodoStatusCompleted {
-			return true
-		}
-	}
-	return false
+	return session.HasIncompleteTodos(todos)
 }
 
 // hasInProgressTodo returns true if there is at least one in-progress todo.
@@ -270,7 +265,7 @@ func (m *UI) renderPills() {
 	if m.pillsExpanded {
 		helpDesc = "close"
 	}
-	helpKey := t.Pills.HelpKey.Render("ctrl+space")
+	helpKey := t.Pills.HelpKey.Render("ctrl+t")
 	helpText := t.Pills.HelpText.Render(helpDesc)
 	helpHint := lipgloss.JoinHorizontal(lipgloss.Center, helpKey, " ", helpText)
 	pillsRow = lipgloss.JoinHorizontal(lipgloss.Center, pillsRow, " ", helpHint)

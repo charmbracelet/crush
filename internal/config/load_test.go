@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"io"
 	"log/slog"
 	"os"
@@ -1456,5 +1457,204 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		require.Equal(t, "large-model", large.Model)
 		require.Equal(t, "openai", large.Provider)
 		require.Equal(t, int64(100), large.MaxTokens)
+	})
+}
+
+func TestProviderConfig_UnmarshalJSON_ConcurrencyLevel(t *testing.T) {
+	t.Run("extracts concurrency_level from models", func(t *testing.T) {
+		data := []byte(`{
+			"api_key": "test-key",
+			"base_url": "https://api.example.com/v1",
+			"models": [
+				{"id": "model-a", "concurrency_level": 4},
+				{"id": "model-b", "concurrency_level": 1},
+				{"id": "model-c"}
+			]
+		}`)
+
+		var pc ProviderConfig
+		err := json.Unmarshal(data, &pc)
+		require.NoError(t, err)
+		require.Equal(t, "test-key", pc.APIKey)
+		require.Len(t, pc.Models, 3)
+		require.Len(t, pc.ModelConcurrencyLevels, 2)
+		require.Equal(t, int64(4), pc.ModelConcurrencyLevels["model-a"])
+		require.Equal(t, int64(1), pc.ModelConcurrencyLevels["model-b"])
+	})
+
+	t.Run("no models results in nil map", func(t *testing.T) {
+		data := []byte(`{"api_key": "test-key"}`)
+
+		var pc ProviderConfig
+		err := json.Unmarshal(data, &pc)
+		require.NoError(t, err)
+		require.Nil(t, pc.ModelConcurrencyLevels)
+	})
+
+	t.Run("zero concurrency_level is ignored", func(t *testing.T) {
+		data := []byte(`{
+			"models": [{"id": "model-a", "concurrency_level": 0}]
+		}`)
+
+		var pc ProviderConfig
+		err := json.Unmarshal(data, &pc)
+		require.NoError(t, err)
+		require.Nil(t, pc.ModelConcurrencyLevels)
+	})
+}
+
+func TestDefaultModelSelection_ConcurrencyLevel(t *testing.T) {
+	t.Run("concurrency propagated from known provider sidecar", func(t *testing.T) {
+		knownProviders := []catwalk.Provider{
+			{
+				ID:                  "openai",
+				APIKey:              "abc",
+				DefaultLargeModelID: "large-model",
+				DefaultSmallModelID: "small-model",
+				Models: []catwalk.Model{
+					{ID: "large-model", DefaultMaxTokens: 1000},
+					{ID: "small-model", DefaultMaxTokens: 500},
+				},
+			},
+		}
+
+		cfg := &Config{
+			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+				"openai": {
+					ModelConcurrencyLevels: map[string]int64{
+						"large-model": 4,
+						"small-model": 2,
+					},
+				},
+			}),
+		}
+		cfg.setDefaults("/tmp", "")
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(env, resolver, knownProviders)
+		require.NoError(t, err)
+
+		large, small, err := cfg.defaultModelSelection(knownProviders)
+		require.NoError(t, err)
+		require.Equal(t, int64(4), large.ConcurrencyLevel)
+		require.Equal(t, int64(2), small.ConcurrencyLevel)
+	})
+
+	t.Run("concurrency propagated from custom provider fallback", func(t *testing.T) {
+		cfg := &Config{
+			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+				"custom": {
+					APIKey:  "test-key",
+					BaseURL: "https://api.custom.com/v1",
+					Models: []catwalk.Model{
+						{ID: "model", DefaultMaxTokens: 600},
+					},
+					ModelConcurrencyLevels: map[string]int64{
+						"model": 3,
+					},
+				},
+			}),
+		}
+		cfg.setDefaults("/tmp", "")
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(env, resolver, []catwalk.Provider{})
+		require.NoError(t, err)
+
+		large, small, err := cfg.defaultModelSelection([]catwalk.Provider{})
+		require.NoError(t, err)
+		require.Equal(t, int64(3), large.ConcurrencyLevel)
+		require.Equal(t, int64(3), small.ConcurrencyLevel)
+	})
+}
+
+func TestConfigureSelectedModels_ConcurrencyLevel(t *testing.T) {
+	t.Run("selected model concurrency overrides default", func(t *testing.T) {
+		knownProviders := []catwalk.Provider{
+			{
+				ID:                  "openai",
+				APIKey:              "abc",
+				DefaultLargeModelID: "large-model",
+				DefaultSmallModelID: "small-model",
+				Models: []catwalk.Model{
+					{ID: "large-model", DefaultMaxTokens: 1000},
+					{ID: "small-model", DefaultMaxTokens: 500},
+				},
+			},
+		}
+
+		cfg := &Config{
+			Models: map[SelectedModelType]SelectedModel{
+				"large": {
+					ConcurrencyLevel: 7,
+				},
+				"small": {
+					ConcurrencyLevel: 3,
+				},
+			},
+			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+				"openai": {
+					ModelConcurrencyLevels: map[string]int64{
+						"large-model": 4,
+						"small-model": 2,
+					},
+				},
+			}),
+		}
+		cfg.setDefaults("/tmp", "")
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(env, resolver, knownProviders)
+		require.NoError(t, err)
+
+		err = cfg.configureSelectedModels(knownProviders)
+		require.NoError(t, err)
+
+		large := cfg.Models[SelectedModelTypeLarge]
+		small := cfg.Models[SelectedModelTypeSmall]
+		require.Equal(t, int64(7), large.ConcurrencyLevel)
+		require.Equal(t, int64(3), small.ConcurrencyLevel)
+	})
+
+	t.Run("default concurrency preserved when selected model has none", func(t *testing.T) {
+		knownProviders := []catwalk.Provider{
+			{
+				ID:                  "openai",
+				APIKey:              "abc",
+				DefaultLargeModelID: "large-model",
+				DefaultSmallModelID: "small-model",
+				Models: []catwalk.Model{
+					{ID: "large-model", DefaultMaxTokens: 1000},
+					{ID: "small-model", DefaultMaxTokens: 500},
+				},
+			},
+		}
+
+		cfg := &Config{
+			Models: map[SelectedModelType]SelectedModel{
+				"large": {
+					MaxTokens: 2000,
+				},
+			},
+			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+				"openai": {
+					ModelConcurrencyLevels: map[string]int64{
+						"large-model": 4,
+					},
+				},
+			}),
+		}
+		cfg.setDefaults("/tmp", "")
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(env, resolver, knownProviders)
+		require.NoError(t, err)
+
+		err = cfg.configureSelectedModels(knownProviders)
+		require.NoError(t, err)
+
+		large := cfg.Models[SelectedModelTypeLarge]
+		require.Equal(t, int64(4), large.ConcurrencyLevel)
+		require.Equal(t, int64(2000), large.MaxTokens)
 	})
 }

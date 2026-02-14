@@ -2563,12 +2563,7 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 // insertMCPResourceCompletion inserts the selected resource into the textarea,
 // replacing the @query, and adds the resource as an attachment.
 func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValue) tea.Cmd {
-	displayText := item.Title
-	if displayText == "" {
-		displayText = item.URI
-	}
-
-	if !m.insertCompletionText(displayText) {
+	if !m.insertCompletionText(item.URI) {
 		return nil
 	}
 
@@ -2608,7 +2603,7 @@ func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValu
 
 		return message.Attachment{
 			FilePath: item.URI,
-			FileName: displayText,
+			FileName: item.URI,
 			MimeType: mimeType,
 			Content:  data,
 		}

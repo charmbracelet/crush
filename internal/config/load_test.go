@@ -1458,3 +1458,99 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		require.Equal(t, int64(100), large.MaxTokens)
 	})
 }
+
+func TestConfig_configureProvidersZAICodingPlan(t *testing.T) {
+	t.Run("should set costs to 0 for Z.AI Coding Plan endpoint", func(t *testing.T) {
+		knownProviders := []catwalk.Provider{
+			{
+				ID:          catwalk.InferenceProviderZAI,
+				Name:        "Z.AI",
+				APIKey:      "$ZAI_API_KEY",
+				APIEndpoint: "https://api.z.ai/api/coding/paas/v4", // Coding Plan endpoint
+				Type:        catwalk.TypeOpenAICompat,
+				Models: []catwalk.Model{
+					{
+						ID:                 "glm-4.7",
+						Name:               "GLM-4.7",
+						CostPer1MIn:        0.6,
+						CostPer1MOut:       2.2,
+						CostPer1MInCached:  0.11,
+						CostPer1MOutCached: 0,
+					},
+					{
+						ID:                 "glm-4.5",
+						Name:               "GLM-4.5",
+						CostPer1MIn:        0.6,
+						CostPer1MOut:       2.2,
+						CostPer1MInCached:  0.11,
+						CostPer1MOutCached: 0,
+					},
+				},
+			},
+		}
+
+		cfg := &Config{}
+		cfg.setDefaults("/tmp", "")
+		env := env.NewFromMap(map[string]string{
+			"ZAI_API_KEY": "test-key",
+		})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(env, resolver, knownProviders)
+		require.NoError(t, err)
+		require.Equal(t, 1, cfg.Providers.Len())
+
+		pc, _ := cfg.Providers.Get("zai")
+		require.Equal(t, "$ZAI_API_KEY", pc.APIKey)
+		require.Equal(t, "https://api.z.ai/api/coding/paas/v4", pc.BaseURL)
+
+		// Verify all costs are set to 0 for Coding Plan
+		for _, model := range pc.Models {
+			assert.Equal(t, 0.0, model.CostPer1MIn, "CostPer1MIn should be 0 for model %s", model.ID)
+			assert.Equal(t, 0.0, model.CostPer1MOut, "CostPer1MOut should be 0 for model %s", model.ID)
+			assert.Equal(t, 0.0, model.CostPer1MInCached, "CostPer1MInCached should be 0 for model %s", model.ID)
+			assert.Equal(t, 0.0, model.CostPer1MOutCached, "CostPer1MOutCached should be 0 for model %s", model.ID)
+		}
+	})
+
+	t.Run("should keep costs for Z.AI pay-as-you-go endpoint", func(t *testing.T) {
+		knownProviders := []catwalk.Provider{
+			{
+				ID:          catwalk.InferenceProviderZAI,
+				Name:        "Z.AI",
+				APIKey:      "$ZAI_API_KEY",
+				APIEndpoint: "https://api.z.ai/api/paas/v4", // Pay-as-you-go endpoint
+				Type:        catwalk.TypeOpenAICompat,
+				Models: []catwalk.Model{
+					{
+						ID:                 "glm-4.7",
+						Name:               "GLM-4.7",
+						CostPer1MIn:        0.6,
+						CostPer1MOut:       2.2,
+						CostPer1MInCached:  0.11,
+						CostPer1MOutCached: 0,
+					},
+				},
+			},
+		}
+
+		cfg := &Config{}
+		cfg.setDefaults("/tmp", "")
+		env := env.NewFromMap(map[string]string{
+			"ZAI_API_KEY": "test-key",
+		})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(env, resolver, knownProviders)
+		require.NoError(t, err)
+
+		pc, _ := cfg.Providers.Get("zai")
+		require.Equal(t, "https://api.z.ai/api/paas/v4", pc.BaseURL)
+
+		// Verify costs are NOT set to 0 for pay-as-you-go
+		for _, model := range pc.Models {
+			assert.Equal(t, 0.6, model.CostPer1MIn, "CostPer1MIn should be 0.6 for model %s", model.ID)
+			assert.Equal(t, 2.2, model.CostPer1MOut, "CostPer1MOut should be 2.2 for model %s", model.ID)
+			assert.Equal(t, 0.11, model.CostPer1MInCached, "CostPer1MInCached should be 0.11 for model %s", model.ID)
+			assert.Equal(t, 0.0, model.CostPer1MOutCached, "CostPer1MOutCached should be 0 for model %s", model.ID)
+		}
+	})
+}

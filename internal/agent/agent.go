@@ -769,8 +769,8 @@ func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.S
 }
 
 // generateTitle generates a session titled based on the initial prompt.
-func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, userPrompt string) {
-	if userPrompt == "" {
+func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, initialUserPrompt string) {
+	if initialUserPrompt == "" {
 		return
 	}
 
@@ -778,20 +778,33 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	largeModel := a.largeModel.Get()
 	systemPromptPrefix := a.systemPromptPrefix.Get()
 
-	var maxOutputTokens int64 = 40
-	if smallModel.CatwalkCfg.CanReason {
-		maxOutputTokens = smallModel.CatwalkCfg.DefaultMaxTokens
+	// buildConfig constructs the system prompt, user prompt, and max tokens
+	// based on the model's reasoning capability.
+	buildConfig := func(m Model) (systemPrompt string, userPrompt string, maxTokens int64) {
+		if m.CatwalkCfg.CanReason {
+			// Reasoning models: allow reasoning, provide think tags.
+			return string(titlePrompt),
+				fmt.Sprintf("Generate a concise title for the following content:\n\n%s\n<think>\n\n</think>", initialUserPrompt),
+				m.CatwalkCfg.DefaultMaxTokens
+		}
+		// Non-reasoning models: direct output, add /no_think directive.
+		return string(titlePrompt) + "\n/no_think",
+			fmt.Sprintf("Generate a concise title for the following content:\n\n%s", initialUserPrompt),
+			40
 	}
 
-	newAgent := func(m fantasy.LanguageModel, p []byte, tok int64) fantasy.Agent {
+	// Build configuration for the small model.
+	systemPrompt, userPrompt, maxOutputTokens := buildConfig(smallModel)
+
+	newAgent := func(m fantasy.LanguageModel, sysPrompt string, tok int64) fantasy.Agent {
 		return fantasy.NewAgent(m,
-			fantasy.WithSystemPrompt(string(p)+"\n /no_think"),
+			fantasy.WithSystemPrompt(sysPrompt),
 			fantasy.WithMaxOutputTokens(tok),
 		)
 	}
 
 	streamCall := fantasy.AgentStreamCall{
-		Prompt: fmt.Sprintf("Generate a concise title for the following content:\n\n%s\n <think>\n\n</think>", userPrompt),
+		Prompt: userPrompt,
 		PrepareStep: func(callCtx context.Context, opts fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = opts.Messages
 			if systemPromptPrefix != "" {
@@ -805,7 +818,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 
 	// Use the small model to generate the title.
 	model := smallModel
-	agent := newAgent(model.Model, titlePrompt, maxOutputTokens)
+	agent := newAgent(model.Model, systemPrompt, maxOutputTokens)
 	resp, err := agent.Stream(ctx, streamCall)
 	if err == nil {
 		// We successfully generated a title with the small model.
@@ -814,7 +827,11 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		// It didn't work. Let's try with the big model.
 		slog.Error("Error generating title with small model; trying big model", "err", err)
 		model = largeModel
-		agent = newAgent(model.Model, titlePrompt, maxOutputTokens)
+
+		// Rebuild configuration for the large model.
+		systemPrompt, streamCall.Prompt, maxOutputTokens = buildConfig(largeModel)
+
+		agent = newAgent(model.Model, systemPrompt, maxOutputTokens)
 		resp, err = agent.Stream(ctx, streamCall)
 		if err == nil {
 			slog.Debug("Generated title with large model")

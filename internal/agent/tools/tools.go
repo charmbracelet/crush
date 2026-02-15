@@ -22,53 +22,35 @@ const (
 	ModelNameContextKey modelNameKey = "model_name"
 )
 
+// getContextValue is a generic helper that retrieves a typed value from context.
+// If the value is not found or has the wrong type, it returns the default value.
+func getContextValue[T any](ctx context.Context, key any, defaultValue T) T {
+	value := ctx.Value(key)
+	if value == nil {
+		return defaultValue
+	}
+	if typedValue, ok := value.(T); ok {
+		return typedValue
+	}
+	return defaultValue
+}
+
 // GetSessionFromContext retrieves the session ID from the context.
 func GetSessionFromContext(ctx context.Context) string {
-	sessionID := ctx.Value(SessionIDContextKey)
-	if sessionID == nil {
-		return ""
-	}
-	s, ok := sessionID.(string)
-	if !ok {
-		return ""
-	}
-	return s
+	return getContextValue(ctx, SessionIDContextKey, "")
 }
 
 // GetMessageFromContext retrieves the message ID from the context.
 func GetMessageFromContext(ctx context.Context) string {
-	messageID := ctx.Value(MessageIDContextKey)
-	if messageID == nil {
-		return ""
-	}
-	s, ok := messageID.(string)
-	if !ok {
-		return ""
-	}
-	return s
+	return getContextValue(ctx, MessageIDContextKey, "")
 }
 
 // GetSupportsImagesFromContext retrieves whether the model supports images from the context.
 func GetSupportsImagesFromContext(ctx context.Context) bool {
-	supportsImages := ctx.Value(SupportsImagesContextKey)
-	if supportsImages == nil {
-		return false
-	}
-	if supports, ok := supportsImages.(bool); ok {
-		return supports
-	}
-	return false
+	return getContextValue(ctx, SupportsImagesContextKey, false)
 }
 
 // GetModelNameFromContext retrieves the model name from the context.
 func GetModelNameFromContext(ctx context.Context) string {
-	modelName := ctx.Value(ModelNameContextKey)
-	if modelName == nil {
-		return ""
-	}
-	s, ok := modelName.(string)
-	if !ok {
-		return ""
-	}
-	return s
+	return getContextValue(ctx, ModelNameContextKey, "")
 }

@@ -21,13 +21,14 @@ import (
 	"github.com/sourcegraph/jsonrpc2"
 )
 
+var unavailable = csync.NewMap[string, struct{}]()
+
 // Manager handles lazy initialization of LSP clients based on file types.
 type Manager struct {
 	clients  *csync.Map[string, *Client]
 	cfg      *config.Config
 	manager  *powernapconfig.Manager
 	callback func(name string, client *Client)
-	mu       sync.Mutex
 }
 
 // NewManager creates a new LSP manager service.
@@ -72,17 +73,12 @@ func (s *Manager) Clients() *csync.Map[string, *Client] {
 // SetCallback sets a callback that is invoked when a new LSP
 // client is successfully started. This allows the coordinator to add LSP tools.
 func (s *Manager) SetCallback(cb func(name string, client *Client)) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.callback = cb
 }
 
 // TrackConfigured will callback the user-configured LSPs, but will not create
 // any clients.
 func (s *Manager) TrackConfigured() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	var wg sync.WaitGroup
 	for name := range s.manager.GetServers() {
 		if !s.isUserConfigured(name) {
@@ -102,16 +98,10 @@ func (s *Manager) Start(ctx context.Context, path string) {
 		return
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	var wg sync.WaitGroup
 	for name, server := range s.manager.GetServers() {
-		if !handles(server, path, s.cfg.WorkingDir()) {
-			continue
-		}
 		wg.Go(func() {
-			s.startServer(ctx, name, server)
+			s.startServer(ctx, name, path, server)
 		})
 	}
 	wg.Wait()
@@ -149,12 +139,31 @@ var skipAutoStartCommands = map[string]bool{
 	"tflint":  true,
 }
 
-func (s *Manager) startServer(ctx context.Context, name string, server *powernapconfig.ServerConfig) {
+func (s *Manager) startServer(ctx context.Context, name, filepath string, server *powernapconfig.ServerConfig) {
+	cfg := s.buildConfig(name, server)
+	if cfg.Disabled {
+		return
+	}
+
+	if _, exists := unavailable.Get(name); exists {
+		return
+	}
+
+	if client, ok := s.clients.Get(name); ok {
+		switch client.GetServerState() {
+		case StateReady, StateStarting, StateDisabled:
+			s.callback(name, client)
+			// already done, return
+			return
+		}
+	}
+
 	userConfigured := s.isUserConfigured(name)
 
 	if !userConfigured {
 		if _, err := exec.LookPath(server.Command); err != nil {
 			slog.Debug("LSP server not installed, skipping", "name", name, "command", server.Command)
+			unavailable.Set(name, struct{}{})
 			return
 		}
 		if skipAutoStartCommands[server.Command] {
@@ -163,33 +172,42 @@ func (s *Manager) startServer(ctx context.Context, name string, server *powernap
 		}
 	}
 
-	cfg := s.buildConfig(name, server)
-	if client, ok := s.clients.Get(name); ok {
-		switch client.GetServerState() {
-		case StateReady, StateStarting:
-			s.callback(name, client)
-			// already done, return
-			return
-		}
+	// this is the slowest bit, so we do it last.
+	if !handles(server, filepath, s.cfg.WorkingDir()) {
+		// nothing to do
+		return
 	}
-	client, err := New(
-		ctx,
-		name,
-		cfg,
-		s.cfg.Resolver(),
-		s.cfg.WorkingDir(),
-		s.cfg.Options.DebugLSP,
-	)
+
+	// check again in case another goroutine started it in the meantime
+	var err error
+	client := s.clients.GetOrSet(name, func() *Client {
+		var cli *Client
+		cli, err = New(
+			ctx,
+			name,
+			cfg,
+			s.cfg.Resolver(),
+			s.cfg.WorkingDir(),
+			s.cfg.Options.DebugLSP,
+		)
+		return cli
+	})
 	if err != nil {
 		slog.Error("Failed to create LSP client", "name", name, "error", err)
 		return
 	}
-	s.callback(name, client)
-
 	defer func() {
-		s.clients.Set(name, client)
 		s.callback(name, client)
 	}()
+
+	switch client.GetServerState() {
+	case StateReady, StateStarting:
+		// already done, return
+		return
+	}
+
+	client.serverState.Store(StateStarting)
+	s.callback(name, client)
 
 	initCtx, cancel := context.WithTimeout(ctx, time.Duration(cmp.Or(cfg.Timeout, 30))*time.Second)
 	defer cancel()
@@ -271,7 +289,7 @@ func hasRootMarkers(dir string, markers []string) bool {
 	}
 	for _, pattern := range markers {
 		// Use fsext.GlobWithDoubleStar to find matches
-		matches, _, err := fsext.GlobWithDoubleStar(pattern, dir, 1)
+		matches, _, err := fsext.Glob(pattern, dir, 1)
 		if err == nil && len(matches) > 0 {
 			return true
 		}
@@ -291,9 +309,6 @@ func handles(server *powernapconfig.ServerConfig, filePath, workDir string) bool
 // in the middle of writing something.
 // Generally it doesn't matter when shutting down Crush, though.
 func (s *Manager) KillAll(context.Context) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	var wg sync.WaitGroup
 	for name, client := range s.clients.Seq2() {
 		wg.Go(func() {
@@ -308,9 +323,6 @@ func (s *Manager) KillAll(context.Context) {
 
 // StopAll stops all running LSP clients and clears the client map.
 func (s *Manager) StopAll(ctx context.Context) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	var wg sync.WaitGroup
 	for name, client := range s.clients.Seq2() {
 		wg.Go(func() {

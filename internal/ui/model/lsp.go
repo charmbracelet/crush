@@ -108,7 +108,7 @@ func lspList(t *styles.Styles, lsps []LSPInfo, width, maxItems int) string {
 			icon = t.ResourceOfflineIcon.Foreground(t.Muted.GetBackground()).String()
 			description = t.ResourceStatus.Render("disabled")
 		default:
-			icon = t.ResourceOfflineIcon.String()
+			continue
 		}
 		renderedLsps = append(renderedLsps, common.Status(t, common.StatusOpts{
 			Icon:         icon,

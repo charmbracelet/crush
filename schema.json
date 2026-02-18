@@ -422,6 +422,11 @@
           "description": "Ignore all default/embedded providers. When enabled",
           "default": false
         },
+        "disable_non_configured_providers": {
+          "type": "boolean",
+          "description": "Disable providers that are not (implicitly) configured",
+          "default": false
+        },
         "attribution": {
           "$ref": "#/$defs/Attribution",
           "description": "Attribution settings for generated content"

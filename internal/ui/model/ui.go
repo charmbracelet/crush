@@ -207,6 +207,9 @@ type UI struct {
 	// forceCompactMode tracks whether compact mode is forced by user toggle
 	forceCompactMode bool
 
+	// hideStatusBar tracks whether the status bar is hidden by user toggle
+	hideStatusBar bool
+
 	// isCompact tracks whether we're currently in compact layout mode (either
 	// by user toggle or auto-switch based on window size)
 	isCompact bool
@@ -301,6 +304,9 @@ func New(com *common.Common) *UI {
 
 	// Initialize compact mode from config
 	ui.forceCompactMode = com.Config().Options.TUI.CompactMode
+
+	// Initialize status bar visibility from config
+	ui.hideStatusBar = com.Config().Options.TUI.HideStatus
 
 	// set onboarding state defaults
 	ui.onboarding.yesInitializeSelected = true
@@ -1215,6 +1221,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionToggleCompactMode:
 		cmds = append(cmds, m.toggleCompactMode())
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionToggleStatusBar:
+		cmds = append(cmds, m.toggleStatusBar())
+		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionTogglePills:
 		if cmd := m.togglePillsExpanded(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -1882,8 +1891,10 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	isOnboarding := m.state == uiOnboarding
 
 	// Add status and help layer
-	m.status.SetHideHelp(isOnboarding)
-	m.status.Draw(scr, layout.status)
+	if !m.hideStatusBar {
+		m.status.SetHideHelp(isOnboarding)
+		m.status.Draw(scr, layout.status)
+	}
 
 	// Draw completions popup if open
 	if !isOnboarding && m.completionsOpen && m.completions.HasItems() {
@@ -2200,6 +2211,19 @@ func (m *UI) toggleCompactMode() tea.Cmd {
 	return nil
 }
 
+func (m *UI) toggleStatusBar() tea.Cmd {
+	m.hideStatusBar = !m.hideStatusBar
+
+	err := m.com.Config().SetHideStatus(m.hideStatusBar)
+	if err != nil {
+		return util.ReportError(err)
+	}
+
+	m.updateLayoutAndSize()
+
+	return nil
+}
+
 // updateLayoutAndSize updates the layout and sizes of UI components.
 func (m *UI) updateLayoutAndSize() {
 	// Determine if we should be in compact mode
@@ -2256,10 +2280,14 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 	// The header height
 	const landingHeaderHeight = 4
 
-	var helpKeyMap help.KeyMap = m
-	if m.status != nil && m.status.ShowingAll() {
-		for _, row := range helpKeyMap.FullHelp() {
-			helpHeight = max(helpHeight, len(row))
+	if m.hideStatusBar {
+		helpHeight = 0
+	} else {
+		var helpKeyMap help.KeyMap = m
+		if m.status != nil && m.status.ShowingAll() {
+			for _, row := range helpKeyMap.FullHelp() {
+				helpHeight = max(helpHeight, len(row))
+			}
 		}
 	}
 

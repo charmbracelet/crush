@@ -27,6 +27,8 @@ type AssistantMessageItem struct {
 	*highlightableMessageItem
 	*cachedMessageItem
 	*focusableMessageItem
+	blurredCache *cachedMessageItem
+	focusedCache *cachedMessageItem
 
 	message           *message.Message
 	sty               *styles.Styles
@@ -40,6 +42,8 @@ func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) Messa
 	a := &AssistantMessageItem{
 		highlightableMessageItem: defaultHighlighter(sty),
 		cachedMessageItem:        &cachedMessageItem{},
+		blurredCache:             &cachedMessageItem{},
+		focusedCache:             &cachedMessageItem{},
 		focusableMessageItem:     &focusableMessageItem{},
 		message:                  message,
 		sty:                      sty,
@@ -107,11 +111,22 @@ func (a *AssistantMessageItem) RawRender(width int) string {
 
 // Render implements MessageItem.
 func (a *AssistantMessageItem) Render(width int) string {
-	style := a.sty.Chat.Message.AssistantBlurred
+	cache := a.blurredCache
 	if a.focused {
-		style = a.sty.Chat.Message.AssistantFocused
+		cache = a.focusedCache
 	}
-	return style.Render(a.RawRender(width))
+
+	content, _, ok := cache.getCachedRender(width)
+	if !ok {
+		style := a.sty.Chat.Message.AssistantBlurred
+		if a.focused {
+			style = a.sty.Chat.Message.AssistantFocused
+		}
+		content = style.Render(a.RawRender(width))
+		cache.setCachedRender(content, width, lipgloss.Height(content))
+	}
+
+	return content
 }
 
 // renderMessageContent renders the message content including thinking, main content, and finish reason.

@@ -85,7 +85,7 @@ func New(
 		resolver:    resolver,
 		cwd:         cwd,
 	}
-	client.serverState.Store(StateStarting)
+	client.serverState.Store(StateStopped)
 
 	if err := client.createPowernapClient(); err != nil {
 		return nil, err

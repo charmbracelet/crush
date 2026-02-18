@@ -20,8 +20,8 @@ import (
 const (
 	// ReasoningID is the identifier for the reasoning effort dialog.
 	ReasoningID              = "reasoning"
-	reasoningDialogMaxWidth  = 80
-	reasoningDialogMaxHeight = 12
+	reasoningDialogMaxWidth  = 50
+	reasoningDialogMaxHeight = 10
 )
 
 // Reasoning represents a dialog for selecting reasoning effort.

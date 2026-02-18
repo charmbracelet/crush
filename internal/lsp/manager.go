@@ -201,13 +201,12 @@ func (s *Manager) startServer(ctx context.Context, name, filepath string, server
 	}()
 
 	switch client.GetServerState() {
-	case StateReady, StateStarting:
+	case StateReady, StateStarting, StateDisabled:
 		// already done, return
 		return
 	}
 
 	client.serverState.Store(StateStarting)
-	s.callback(name, client)
 
 	initCtx, cancel := context.WithTimeout(ctx, time.Duration(cmp.Or(cfg.Timeout, 30))*time.Second)
 	defer cancel()
@@ -315,6 +314,7 @@ func (s *Manager) KillAll(context.Context) {
 			defer func() { s.callback(name, client) }()
 			client.client.Kill()
 			client.SetServerState(StateStopped)
+			s.clients.Del(name)
 			slog.Debug("Killed LSP client", "name", name)
 		})
 	}
@@ -335,6 +335,7 @@ func (s *Manager) StopAll(ctx context.Context) {
 				slog.Warn("Failed to stop LSP client", "name", name, "error", err)
 			}
 			client.SetServerState(StateStopped)
+			s.clients.Del(name)
 			slog.Debug("Stopped LSP client", "name", name)
 		})
 	}

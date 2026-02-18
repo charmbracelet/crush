@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"cmp"
 	"context"
 	_ "embed"
 	"fmt"
@@ -74,13 +75,7 @@ func NewListMCPResourcesTool(cfg *config.Config, permissions permission.Service)
 				if resource == nil {
 					continue
 				}
-				title := resource.Title
-				if title == "" {
-					title = resource.Name
-				}
-				if title == "" {
-					title = resource.URI
-				}
+				title := cmp.Or(resource.Title, resource.Name, resource.URI)
 				line := fmt.Sprintf("- %s", title)
 				if resource.URI != "" {
 					line = fmt.Sprintf("%s (%s)", line, resource.URI)

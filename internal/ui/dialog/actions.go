@@ -15,7 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/uiutil"
+	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/plugin"
 )
 
@@ -37,9 +37,10 @@ type ActionSelectSession struct {
 
 // ActionSelectModel is a message indicating a model has been selected.
 type ActionSelectModel struct {
-	Provider  catwalk.Provider
-	Model     config.SelectedModel
-	ModelType config.SelectedModelType
+	Provider       catwalk.Provider
+	Model          config.SelectedModel
+	ModelType      config.SelectedModelType
+	ReAuthenticate bool
 }
 
 // Messages for commands
@@ -48,6 +49,7 @@ type (
 	ActionToggleHelp        struct{}
 	ActionToggleCompactMode struct{}
 	ActionToggleThinking    struct{}
+	ActionTogglePills       struct{}
 	ActionExternalEditor    struct{}
 	ActionToggleYoloMode    struct{}
 	// ActionInitializeProject is a message to initialize a project.
@@ -138,22 +140,22 @@ func (a ActionFilePickerSelected) Cmd() tea.Cmd {
 	return func() tea.Msg {
 		isFileLarge, err := common.IsFileTooBig(path, common.MaxAttachmentSize)
 		if err != nil {
-			return uiutil.InfoMsg{
-				Type: uiutil.InfoTypeError,
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
 				Msg:  fmt.Sprintf("unable to read the image: %v", err),
 			}
 		}
 		if isFileLarge {
-			return uiutil.InfoMsg{
-				Type: uiutil.InfoTypeError,
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
 				Msg:  "file too large, max 5MB",
 			}
 		}
 
 		content, err := os.ReadFile(path)
 		if err != nil {
-			return uiutil.InfoMsg{
-				Type: uiutil.InfoTypeError,
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
 				Msg:  fmt.Sprintf("unable to read the image: %v", err),
 			}
 		}

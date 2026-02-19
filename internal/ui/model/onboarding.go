@@ -13,13 +13,13 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/uiutil"
+	"github.com/charmbracelet/crush/internal/ui/util"
 )
 
 // markProjectInitialized marks the current project as initialized in the config.
 func (m *UI) markProjectInitialized() tea.Msg {
 	// TODO: handle error so we show it in the tui footer
-	err := config.MarkProjectInitialized()
+	err := config.MarkProjectInitialized(m.com.Config())
 	if err != nil {
 		slog.Error(err.Error())
 	}
@@ -57,7 +57,7 @@ func (m *UI) initializeProject() tea.Cmd {
 	initialize := func() tea.Msg {
 		initPrompt, err := agent.InitializePrompt(*cfg)
 		if err != nil {
-			return uiutil.InfoMsg{Type: uiutil.InfoTypeError, Msg: err.Error()}
+			return util.InfoMsg{Type: util.InfoTypeError, Msg: err.Error()}
 		}
 		return sendMessageMsg{Content: initPrompt}
 	}

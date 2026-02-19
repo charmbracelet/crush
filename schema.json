@@ -92,7 +92,10 @@
         }
       },
       "additionalProperties": false,
-      "type": "object"
+      "type": "object",
+      "required": [
+        "tools"
+      ]
     },
     "LSPConfig": {
       "properties": {
@@ -156,6 +159,15 @@
         "options": {
           "type": "object",
           "description": "LSP server-specific settings passed during initialization"
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Timeout in seconds for LSP server initialization",
+          "default": 30,
+          "examples": [
+            60,
+            120
+          ]
         }
       },
       "additionalProperties": false,
@@ -641,6 +653,11 @@
         "completions": {
           "$ref": "#/$defs/Completions",
           "description": "Completions UI options"
+        },
+        "transparent": {
+          "type": "boolean",
+          "description": "Enable transparent background for the TUI interface",
+          "default": false
         }
       },
       "additionalProperties": false,
@@ -673,6 +690,16 @@
         "expires_at"
       ]
     },
+    "ToolGrep": {
+      "properties": {
+        "timeout": {
+          "type": "integer",
+          "description": "Timeout for the grep tool call"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "ToolLs": {
       "properties": {
         "max_depth": {
@@ -699,10 +726,17 @@
       "properties": {
         "ls": {
           "$ref": "#/$defs/ToolLs"
+        },
+        "grep": {
+          "$ref": "#/$defs/ToolGrep"
         }
       },
       "additionalProperties": false,
-      "type": "object"
+      "type": "object",
+      "required": [
+        "ls",
+        "grep"
+      ]
     }
   }
 }

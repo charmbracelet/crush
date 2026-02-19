@@ -12,16 +12,12 @@ import (
 	"charm.land/glamour/v2/ansi"
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
-	"github.com/charmbracelet/crush/internal/tui/exp/diffview"
+	"github.com/charmbracelet/crush/internal/ui/diffview"
 	"github.com/charmbracelet/x/exp/charmtone"
 )
 
 const (
 	CheckIcon   string = "✓"
-	ErrorIcon   string = "×"
-	WarningIcon string = "⚠"
-	InfoIcon    string = "ⓘ"
-	HintIcon    string = "∵"
 	SpinnerIcon string = "⋯"
 	LoadingIcon string = "⟳"
 	ModelIcon   string = "◇"
@@ -49,6 +45,11 @@ const (
 
 	ScrollbarThumb string = "┃"
 	ScrollbarTrack string = "│"
+
+	LSPErrorIcon   string = "E"
+	LSPWarningIcon string = "W"
+	LSPInfoIcon    string = "I"
+	LSPHintIcon    string = "H"
 )
 
 const (
@@ -108,10 +109,14 @@ type Styles struct {
 	TextSelection lipgloss.Style
 
 	// LSP and MCP status indicators
-	ItemOfflineIcon lipgloss.Style
-	ItemBusyIcon    lipgloss.Style
-	ItemErrorIcon   lipgloss.Style
-	ItemOnlineIcon  lipgloss.Style
+	ResourceGroupTitle     lipgloss.Style
+	ResourceOfflineIcon    lipgloss.Style
+	ResourceBusyIcon       lipgloss.Style
+	ResourceErrorIcon      lipgloss.Style
+	ResourceOnlineIcon     lipgloss.Style
+	ResourceName           lipgloss.Style
+	ResourceStatus         lipgloss.Style
+	ResourceAdditionalText lipgloss.Style
 
 	// Markdown & Chroma
 	Markdown      ansi.StyleConfig
@@ -380,13 +385,14 @@ type Styles struct {
 			DeletingTitleGradientToColor   color.Color
 
 			// styles for when we are in update mode
-			UpdatingView                   lipgloss.Style
-			UpdatingItemFocused            lipgloss.Style
-			UpdatingItemBlurred            lipgloss.Style
-			UpdatingTitle                  lipgloss.Style
-			UpdatingMessage                lipgloss.Style
-			UpdatingTitleGradientFromColor color.Color
-			UpdatingTitleGradientToColor   color.Color
+			RenamingView                   lipgloss.Style
+			RenamingingItemFocused         lipgloss.Style
+			RenamingItemBlurred            lipgloss.Style
+			RenamingingTitle               lipgloss.Style
+			RenamingingMessage             lipgloss.Style
+			RenamingTitleGradientFromColor color.Color
+			RenamingTitleGradientToColor   color.Color
+			RenamingPlaceholder            lipgloss.Style
 		}
 	}
 
@@ -1114,7 +1120,7 @@ func DefaultStyles() Styles {
 	// Content rendering - prepared styles that accept width parameter
 	s.Tool.ContentLine = s.Muted.Background(bgBaseLighter)
 	s.Tool.ContentTruncation = s.Muted.Background(bgBaseLighter)
-	s.Tool.ContentCodeLine = s.Base.Background(bgBase)
+	s.Tool.ContentCodeLine = s.Base.Background(bgBase).PaddingLeft(2)
 	s.Tool.ContentCodeTruncation = s.Muted.Background(bgBase).PaddingLeft(2)
 	s.Tool.ContentCodeBg = bgBase
 	s.Tool.Body = base.PaddingLeft(2)
@@ -1197,10 +1203,14 @@ func DefaultStyles() Styles {
 	s.Initialize.Accent = s.Base.Foreground(greenDark)
 
 	// LSP and MCP status.
-	s.ItemOfflineIcon = lipgloss.NewStyle().Foreground(charmtone.Squid).SetString("●")
-	s.ItemBusyIcon = s.ItemOfflineIcon.Foreground(charmtone.Citron)
-	s.ItemErrorIcon = s.ItemOfflineIcon.Foreground(charmtone.Coral)
-	s.ItemOnlineIcon = s.ItemOfflineIcon.Foreground(charmtone.Guac)
+	s.ResourceGroupTitle = lipgloss.NewStyle().Foreground(charmtone.Oyster)
+	s.ResourceOfflineIcon = lipgloss.NewStyle().Foreground(charmtone.Iron).SetString("●")
+	s.ResourceBusyIcon = s.ResourceOfflineIcon.Foreground(charmtone.Citron)
+	s.ResourceErrorIcon = s.ResourceOfflineIcon.Foreground(charmtone.Coral)
+	s.ResourceOnlineIcon = s.ResourceOfflineIcon.Foreground(charmtone.Guac)
+	s.ResourceName = lipgloss.NewStyle().Foreground(charmtone.Squid)
+	s.ResourceStatus = lipgloss.NewStyle().Foreground(charmtone.Oyster)
+	s.ResourceAdditionalText = lipgloss.NewStyle().Foreground(charmtone.Oyster)
 
 	// LSP
 	s.LSP.ErrorDiagnostic = s.Base.Foreground(redDark)
@@ -1296,15 +1306,16 @@ func DefaultStyles() Styles {
 	s.Dialog.Sessions.DeletingTitleGradientFromColor = red
 	s.Dialog.Sessions.DeletingTitleGradientToColor = s.Primary
 	s.Dialog.Sessions.DeletingItemBlurred = s.Dialog.NormalItem.Foreground(fgSubtle)
-	s.Dialog.Sessions.DeletingItemFocused = s.Dialog.SelectedItem.Background(red)
+	s.Dialog.Sessions.DeletingItemFocused = s.Dialog.SelectedItem.Background(red).Foreground(charmtone.Butter)
 
-	s.Dialog.Sessions.UpdatingTitle = s.Dialog.Title.Foreground(charmtone.Zest)
-	s.Dialog.Sessions.UpdatingView = s.Dialog.View.BorderForeground(charmtone.Zest)
-	s.Dialog.Sessions.UpdatingMessage = s.Base.Padding(1)
-	s.Dialog.Sessions.UpdatingTitleGradientFromColor = charmtone.Zest
-	s.Dialog.Sessions.UpdatingTitleGradientToColor = charmtone.Bok
-	s.Dialog.Sessions.UpdatingItemBlurred = s.Dialog.NormalItem.Foreground(fgSubtle)
-	s.Dialog.Sessions.UpdatingItemFocused = s.Dialog.SelectedItem.UnsetBackground().UnsetForeground()
+	s.Dialog.Sessions.RenamingingTitle = s.Dialog.Title.Foreground(charmtone.Zest)
+	s.Dialog.Sessions.RenamingView = s.Dialog.View.BorderForeground(charmtone.Zest)
+	s.Dialog.Sessions.RenamingingMessage = s.Base.Padding(1)
+	s.Dialog.Sessions.RenamingTitleGradientFromColor = charmtone.Zest
+	s.Dialog.Sessions.RenamingTitleGradientToColor = charmtone.Bok
+	s.Dialog.Sessions.RenamingItemBlurred = s.Dialog.NormalItem.Foreground(fgSubtle)
+	s.Dialog.Sessions.RenamingingItemFocused = s.Dialog.SelectedItem.UnsetBackground().UnsetForeground()
+	s.Dialog.Sessions.RenamingPlaceholder = base.Foreground(charmtone.Squid)
 
 	s.Status.Help = lipgloss.NewStyle().Padding(0, 1)
 	s.Status.SuccessIndicator = base.Foreground(bgSubtle).Background(green).Padding(0, 1).Bold(true).SetString("OKAY!")

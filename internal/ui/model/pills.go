@@ -38,12 +38,7 @@ const (
 
 // hasIncompleteTodos returns true if there are any non-completed todos.
 func hasIncompleteTodos(todos []session.Todo) bool {
-	for _, todo := range todos {
-		if todo.Status != session.TodoStatusCompleted {
-			return true
-		}
-	}
-	return false
+	return session.HasIncompleteTodos(todos)
 }
 
 // hasInProgressTodo returns true if there is at least one in-progress todo.
@@ -66,7 +61,8 @@ func queuePill(queue int, focused, panelFocused bool, t *styles.Styles) string {
 		triangles = triangles[:queue]
 	}
 
-	content := fmt.Sprintf("%s %d Queued", strings.Join(triangles, ""), queue)
+	text := t.Base.Render(fmt.Sprintf("%d Queued", queue))
+	content := fmt.Sprintf("%s %s", strings.Join(triangles, ""), text)
 	return pillStyle(focused, panelFocused, t).Render(content)
 }
 
@@ -143,11 +139,6 @@ func (m *UI) togglePillsExpanded() tea.Cmd {
 	if !m.hasSession() {
 		return nil
 	}
-	if m.layout.pills.Dy() > 0 {
-		if cmd := m.chat.ScrollByAndAnimate(0); cmd != nil {
-			return cmd
-		}
-	}
 	hasPills := hasIncompleteTodos(m.session.Todos) || m.promptQueue > 0
 	if !hasPills {
 		return nil
@@ -161,6 +152,12 @@ func (m *UI) togglePillsExpanded() tea.Cmd {
 		}
 	}
 	m.updateLayoutAndSize()
+
+	// Make sure to follow scroll if follow is enabled when toggling pills.
+	if m.chat.Follow() {
+		m.chat.ScrollToBottom()
+	}
+
 	return nil
 }
 
@@ -269,7 +266,7 @@ func (m *UI) renderPills() {
 	if m.pillsExpanded {
 		helpDesc = "close"
 	}
-	helpKey := t.Pills.HelpKey.Render("ctrl+space")
+	helpKey := t.Pills.HelpKey.Render("ctrl+t")
 	helpText := t.Pills.HelpText.Render(helpDesc)
 	helpHint := lipgloss.JoinHorizontal(lipgloss.Center, helpKey, " ", helpText)
 	pillsRow = lipgloss.JoinHorizontal(lipgloss.Center, pillsRow, " ", helpHint)

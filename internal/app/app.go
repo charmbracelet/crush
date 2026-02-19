@@ -21,8 +21,8 @@ import (
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/format"
 	"github.com/charmbracelet/crush/internal/history"
@@ -33,8 +33,8 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
-	"github.com/charmbracelet/crush/internal/tui/components/anim"
-	"github.com/charmbracelet/crush/internal/tui/styles"
+	"github.com/charmbracelet/crush/internal/ui/anim"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/update"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/x/ansi"
@@ -58,7 +58,7 @@ type App struct {
 
 	AgentCoordinator agent.Coordinator
 
-	LSPClients *csync.Map[string, *lsp.Client]
+	LSPManager *lsp.Manager
 
 	config *config.Config
 
@@ -69,7 +69,7 @@ type App struct {
 
 	// global context and cleanup functions
 	globalCtx    context.Context
-	cleanupFuncs []func() error
+	cleanupFuncs []func(context.Context) error
 }
 
 // New initializes a new application instance.
@@ -90,7 +90,7 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 		History:     files,
 		Permissions: permission.NewPermissionService(cfg.WorkingDir(), skipPermissionsRequests, allowedTools),
 		FileTracker: filetracker.NewService(q),
-		LSPClients:  csync.NewMap[string, *lsp.Client](),
+		LSPManager:  lsp.NewManager(cfg),
 
 		globalCtx: ctx,
 
@@ -103,16 +103,17 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 
 	app.setupEvents()
 
-	// Initialize LSP clients in the background.
-	go app.initLSPClients(ctx)
-
 	// Check for updates in the background.
 	go app.checkForUpdates(ctx)
 
 	go mcp.Initialize(ctx, app.Permissions, cfg)
 
 	// cleanup database upon app shutdown
-	app.cleanupFuncs = append(app.cleanupFuncs, conn.Close, mcp.Close)
+	app.cleanupFuncs = append(
+		app.cleanupFuncs,
+		func(context.Context) error { return conn.Close() },
+		mcp.Close,
+	)
 
 	// TODO: remove the concept of agent config, most likely.
 	if !cfg.IsConfigured() {
@@ -122,6 +123,18 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	if err := app.InitCoderAgent(ctx); err != nil {
 		return nil, fmt.Errorf("failed to initialize coder agent: %w", err)
 	}
+
+	// Set up callback for LSP state updates.
+	app.LSPManager.SetCallback(func(name string, client *lsp.Client) {
+		if client == nil {
+			updateLSPState(name, lsp.StateUnstarted, nil, nil, 0)
+			return
+		}
+		client.SetDiagnosticsCallback(updateLSPDiagnostics)
+		updateLSPState(name, client.GetServerState(), nil, client, 0)
+	})
+	go app.LSPManager.TrackConfigured()
+
 	return app, nil
 }
 
@@ -160,7 +173,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	progress = app.config.Options.Progress == nil || *app.config.Options.Progress
 
 	if !hideSpinner && stderrTTY {
-		t := styles.CurrentTheme()
+		t := styles.DefaultStyles()
 
 		// Detect background color to set the appropriate color for the
 		// spinner's 'Generating...' text. Without this, that text would be
@@ -413,13 +426,15 @@ func (app *App) setupEvents() {
 	setupSubscriber(ctx, app.serviceEventsWG, "history", app.History.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "mcp", mcp.SubscribeEvents, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "lsp", SubscribeLSPEvents, app.events)
-	cleanupFunc := func() error {
+	cleanupFunc := func(context.Context) error {
 		cancel()
 		app.serviceEventsWG.Wait()
 		return nil
 	}
 	app.cleanupFuncs = append(app.cleanupFuncs, cleanupFunc)
 }
+
+const subscriberSendTimeout = 2 * time.Second
 
 func setupSubscriber[T any](
 	ctx context.Context,
@@ -430,6 +445,10 @@ func setupSubscriber[T any](
 ) {
 	wg.Go(func() {
 		subCh := subscriber(ctx)
+		sendTimer := time.NewTimer(0)
+		<-sendTimer.C
+		defer sendTimer.Stop()
+
 		for {
 			select {
 			case event, ok := <-subCh:
@@ -438,9 +457,17 @@ func setupSubscriber[T any](
 					return
 				}
 				var msg tea.Msg = event
+				if !sendTimer.Stop() {
+					select {
+					case <-sendTimer.C:
+					default:
+					}
+				}
+				sendTimer.Reset(subscriberSendTimeout)
+
 				select {
 				case outputCh <- msg:
-				case <-time.After(2 * time.Second):
+				case <-sendTimer.C:
 					slog.Debug("Message dropped due to slow consumer", "name", name)
 				case <-ctx.Done():
 					slog.Debug("Subscription cancelled", "name", name)
@@ -468,7 +495,7 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.Permissions,
 		app.History,
 		app.FileTracker,
-		app.LSPClients,
+		app.LSPManager,
 	)
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)
@@ -486,7 +513,7 @@ func (app *App) Subscribe(program *tea.Program) {
 
 	app.tuiWG.Add(1)
 	tuiCtx, tuiCancel := context.WithCancel(app.globalCtx)
-	app.cleanupFuncs = append(app.cleanupFuncs, func() error {
+	app.cleanupFuncs = append(app.cleanupFuncs, func(context.Context) error {
 		slog.Debug("Cancelling TUI message handler")
 		tuiCancel()
 		app.tuiWG.Wait()
@@ -523,30 +550,30 @@ func (app *App) Shutdown() {
 	// Now run remaining cleanup tasks in parallel.
 	var wg sync.WaitGroup
 
+	// Shared shutdown context for all timeout-bounded cleanup.
+	shutdownCtx, cancel := context.WithTimeout(app.globalCtx, 5*time.Second)
+	defer cancel()
+
+	// Send exit event
+	wg.Go(func() {
+		event.AppExited()
+	})
+
 	// Kill all background shells.
 	wg.Go(func() {
-		shell.GetBackgroundShellManager().KillAll()
+		shell.GetBackgroundShellManager().KillAll(shutdownCtx)
 	})
 
 	// Shutdown all LSP clients.
-	shutdownCtx, cancel := context.WithTimeout(app.globalCtx, 5*time.Second)
-	defer cancel()
-	for name, client := range app.LSPClients.Seq2() {
-		wg.Go(func() {
-			if err := client.Close(shutdownCtx); err != nil &&
-				!errors.Is(err, io.EOF) &&
-				!errors.Is(err, context.Canceled) &&
-				err.Error() != "signal: killed" {
-				slog.Warn("Failed to shutdown LSP client", "name", name, "error", err)
-			}
-		})
-	}
+	wg.Go(func() {
+		app.LSPManager.KillAll(shutdownCtx)
+	})
 
 	// Call all cleanup functions.
 	for _, cleanup := range app.cleanupFuncs {
 		if cleanup != nil {
 			wg.Go(func() {
-				if err := cleanup(); err != nil {
+				if err := cleanup(shutdownCtx); err != nil {
 					slog.Error("Failed to cleanup app properly on shutdown", "error", err)
 				}
 			})

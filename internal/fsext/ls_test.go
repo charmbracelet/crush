@@ -31,11 +31,12 @@ func TestListDirectory(t *testing.T) {
 		files, truncated, err := ListDirectory(tmp, nil, -1, -1)
 		require.NoError(t, err)
 		require.False(t, truncated)
-		require.Len(t, files, 4)
+		// The .gitignore has ".*" pattern which ignores hidden files anywhere
+		// (like real git does), so subdir/.another is ignored.
+		require.Len(t, files, 3)
 		require.ElementsMatch(t, []string{
 			"regular.txt",
 			"subdir",
-			"subdir/.another",
 			"subdir/file.go",
 		}, relPaths(t, files, tmp))
 	})

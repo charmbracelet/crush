@@ -2,6 +2,7 @@ package model
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -1444,10 +1445,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionRunMCPPrompt:
 		if len(msg.Arguments) > 0 && msg.Args == nil {
 			m.dialog.CloseFrontDialog()
-			title := msg.Title
-			if title == "" {
-				title = "MCP Prompt Arguments"
-			}
+			title := cmp.Or(msg.Title, "MCP Prompt Arguments")
 			argsDialog := dialog.NewArguments(
 				m.com,
 				title,
@@ -2615,10 +2613,7 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 // insertMCPResourceCompletion inserts the selected resource into the textarea,
 // replacing the @query, and adds the resource as an attachment.
 func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValue) tea.Cmd {
-	displayText := item.Title
-	if displayText == "" {
-		displayText = item.URI
-	}
+	displayText := cmp.Or(item.Title, item.URI)
 
 	if !m.insertCompletionText(displayText) {
 		return nil

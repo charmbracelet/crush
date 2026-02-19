@@ -865,10 +865,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	title = thinkTagRegex.ReplaceAllString(title, "")
 
 	title = strings.TrimSpace(title)
-	if title == "" {
-		slog.Debug("Empty title; using fallback")
-		title = defaultSessionName
-	}
+	title = cmp.Or(title, defaultSessionName)
 
 	// Calculate usage and cost.
 	var openrouterCost *float64

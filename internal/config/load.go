@@ -278,13 +278,9 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 
 		// Make sure the provider ID is set
 		providerConfig.ID = id
-		if providerConfig.Name == "" {
-			providerConfig.Name = id // Use ID as name if not set
-		}
+		providerConfig.Name = cmp.Or(providerConfig.Name, id) // Use ID as name if not set
 		// default to OpenAI if not set
-		if providerConfig.Type == "" {
-			providerConfig.Type = catwalk.TypeOpenAICompat
-		}
+		providerConfig.Type = cmp.Or(providerConfig.Type, catwalk.TypeOpenAICompat)
 		if !slices.Contains(catwalk.KnownProviderTypes(), providerConfig.Type) && providerConfig.Type != hyper.Name {
 			slog.Warn("Skipping custom provider due to unsupported provider type", "provider", id)
 			c.Providers.Del(id)
@@ -412,9 +408,7 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 			c.Options.Attribution.TrailerStyle = TrailerStyleAssistedBy
 		}
 	}
-	if c.Options.InitializeAs == "" {
-		c.Options.InitializeAs = defaultInitializeAs
-	}
+	c.Options.InitializeAs = cmp.Or(c.Options.InitializeAs, defaultInitializeAs)
 }
 
 // applyLSPDefaults applies default values from powernap to LSP configurations
@@ -445,9 +439,7 @@ func (c *Config) applyLSPDefaults() {
 		if len(cfg.RootMarkers) == 0 {
 			cfg.RootMarkers = base.RootMarkers
 		}
-		if cfg.Command == "" {
-			cfg.Command = base.Command
-		}
+		cfg.Command = cmp.Or(cfg.Command, base.Command)
 		if len(cfg.Args) == 0 {
 			cfg.Args = base.Args
 		}

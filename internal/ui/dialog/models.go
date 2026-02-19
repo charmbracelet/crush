@@ -446,18 +446,13 @@ func (m *Models) setProviderItems() error {
 					}
 					continue
 				}
-				if model.Name == "" {
-					model.Name = model.ID
-				}
+				model.Name = cmp.Or(model.Name, model.ID)
 				displayProvider.Models = append(displayProvider.Models, model)
 				modelIndex[model.ID] = len(displayProvider.Models) - 1
 			}
 		}
 
-		name := displayProvider.Name
-		if name == "" {
-			name = providerID
-		}
+		name := cmp.Or(displayProvider.Name, providerID)
 
 		group := NewModelGroup(t, name, providerConfigured)
 		for _, model := range displayProvider.Models {

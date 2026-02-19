@@ -57,6 +57,8 @@
   - "/vertex/i"
 "provider: kimi":
   - "/kimi/i"
+"provider: minimax":
+  - "/minimax/i"
 "provider: ollama":
   - "/llama/i"
 "provider: openai chatgpt":

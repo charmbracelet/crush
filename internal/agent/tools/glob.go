@@ -2,6 +2,7 @@ package tools
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	_ "embed"
 	"fmt"
@@ -39,10 +40,7 @@ func NewGlobTool(workingDir string) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse("pattern is required"), nil
 			}
 
-			searchPath := params.Path
-			if searchPath == "" {
-				searchPath = workingDir
-			}
+			searchPath := cmp.Or(params.Path, workingDir)
 
 			files, truncated, err := globFiles(ctx, params.Pattern, searchPath, 100)
 			if err != nil {
@@ -81,7 +79,7 @@ func globFiles(ctx context.Context, pattern, searchPath string, limit int) ([]st
 		slog.Warn("Ripgrep execution failed, falling back to doublestar", "error", err)
 	}
 
-	return fsext.GlobWithDoubleStar(pattern, searchPath, limit)
+	return fsext.GlobGitignoreAware(pattern, searchPath, limit)
 }
 
 func runRipgrep(cmd *exec.Cmd, searchRoot string, limit int) ([]string, error) {

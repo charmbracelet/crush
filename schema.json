@@ -451,6 +451,11 @@
           "type": "boolean",
           "description": "Show indeterminate progress updates during long operations",
           "default": true
+        },
+        "disable_notifications": {
+          "type": "boolean",
+          "description": "Disable desktop notifications",
+          "default": false
         }
       },
       "additionalProperties": false,

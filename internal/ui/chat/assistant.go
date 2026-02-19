@@ -27,8 +27,6 @@ type AssistantMessageItem struct {
 	*highlightableMessageItem
 	*cachedMessageItem
 	*focusableMessageItem
-	blurredCache *cachedMessageItem
-	focusedCache *cachedMessageItem
 
 	message           *message.Message
 	sty               *styles.Styles
@@ -42,8 +40,6 @@ func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) Messa
 	a := &AssistantMessageItem{
 		highlightableMessageItem: defaultHighlighter(sty),
 		cachedMessageItem:        &cachedMessageItem{},
-		blurredCache:             &cachedMessageItem{},
-		focusedCache:             &cachedMessageItem{},
 		focusableMessageItem:     &focusableMessageItem{},
 		message:                  message,
 		sty:                      sty,
@@ -111,22 +107,23 @@ func (a *AssistantMessageItem) RawRender(width int) string {
 
 // Render implements MessageItem.
 func (a *AssistantMessageItem) Render(width int) string {
-	cache := a.blurredCache
-	if a.focused {
-		cache = a.focusedCache
-	}
-
-	content, _, ok := cache.getCachedRender(width)
-	if !ok {
-		style := a.sty.Chat.Message.AssistantBlurred
+	// XXX: Here, we're manually applying the focused/blurred styles because
+	// using lipgloss.Render can degrade performance for long messages due to
+	// it's wrapping logic.
+	// We already know that the content is wrapped to the correct width in
+	// RawRender, so we can just apply the styles directly to each line.
+	focused := a.sty.Chat.Message.AssistantFocused.Render()
+	blurred := a.sty.Chat.Message.AssistantBlurred.Render()
+	rendered := a.RawRender(width)
+	lines := strings.Split(rendered, "\n")
+	for i, line := range lines {
 		if a.focused {
-			style = a.sty.Chat.Message.AssistantFocused
+			lines[i] = focused + line
+		} else {
+			lines[i] = blurred + line
 		}
-		content = style.Render(a.RawRender(width))
-		cache.setCachedRender(content, width, lipgloss.Height(content))
 	}
-
-	return content
+	return strings.Join(lines, "\n")
 }
 
 // renderMessageContent renders the message content including thinking, main content, and finish reason.

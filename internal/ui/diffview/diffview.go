@@ -10,6 +10,7 @@ import (
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/aymanbagabas/go-udiff"
+	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/zeebo/xxh3"
 )
@@ -50,7 +51,6 @@ type DiffView struct {
 	isComputed bool
 	err        error
 	unified    udiff.UnifiedDiff
-	edits      []udiff.Edit
 
 	splitHunks []splitHunk
 
@@ -248,15 +248,11 @@ func (dv *DiffView) computeDiff() error {
 		return dv.err
 	}
 	dv.isComputed = true
-	dv.edits = udiff.Strings(
+	dv.unified = diff.GenerateUnifiedDiff(
 		dv.before.content,
 		dv.after.content,
-	)
-	dv.unified, dv.err = udiff.ToUnifiedDiff(
 		dv.before.path,
 		dv.after.path,
-		dv.before.content,
-		dv.edits,
 		dv.contextLines,
 	)
 	return dv.err

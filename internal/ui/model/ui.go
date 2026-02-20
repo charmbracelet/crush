@@ -1546,9 +1546,13 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if msg, ok := m.completions.Update(msg); ok {
 					switch msg := msg.(type) {
 					case completions.SelectionMsg[completions.FileCompletionValue]:
-						cmds = append(cmds, m.insertFileCompletion(msg.Value.Path))
+						cmds = append(cmds, m.insertFileCompletion(msg.Value.Path, msg.Continue))
 						if !msg.KeepOpen {
 							m.closeCompletions()
+						} else if msg.Continue {
+							// Update query to continue completing from selected path.
+							m.completionsQuery = msg.Value.Path
+							m.completions.Filter(m.completionsQuery)
 						}
 					case completions.SelectionMsg[completions.ResourceCompletionValue]:
 						cmds = append(cmds, m.insertMCPResourceCompletion(msg.Value))
@@ -1699,12 +1703,14 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 						// Close on space.
 						m.closeCompletions()
 					} else {
-						// Extract current word and filter.
-						word := m.textareaWord()
-						if strings.HasPrefix(word, "@") {
-							m.completionsQuery = word[1:]
+						// Extract query from @ to cursor position.
+						value := m.textarea.Value()
+						cursorPos := len(value)
+						if cursorPos > m.completionsStartIndex {
+							query := value[m.completionsStartIndex+1 : cursorPos]
+							m.completionsQuery = query
 							m.completions.Filter(m.completionsQuery)
-						} else if m.completionsOpen {
+						} else {
 							m.closeCompletions()
 						}
 					}
@@ -2503,7 +2509,7 @@ func (m *UI) closeCompletions() {
 
 // insertCompletionText replaces the @query in the textarea with the given text.
 // Returns false if the replacement cannot be performed.
-func (m *UI) insertCompletionText(text string) bool {
+func (m *UI) insertCompletionText(text string, addSpace bool) bool {
 	value := m.textarea.Value()
 	if m.completionsStartIndex > len(value) {
 		return false
@@ -2514,14 +2520,22 @@ func (m *UI) insertCompletionText(text string) bool {
 	newValue := value[:m.completionsStartIndex] + text + value[endIdx:]
 	m.textarea.SetValue(newValue)
 	m.textarea.MoveToEnd()
-	m.textarea.InsertRune(' ')
+	if addSpace {
+		m.textarea.InsertRune(' ')
+	}
 	return true
 }
 
 // insertFileCompletion inserts the selected file path into the textarea,
 // replacing the @query, and adds the file as an attachment.
-func (m *UI) insertFileCompletion(path string) tea.Cmd {
-	if !m.insertCompletionText(path) {
+// If continueMode is true, no trailing space is added and the file is not attached.
+func (m *UI) insertFileCompletion(path string, continueMode bool) tea.Cmd {
+	if !m.insertCompletionText(path, !continueMode) {
+		return nil
+	}
+
+	// In continue mode, we don't add the file as an attachment yet.
+	if continueMode {
 		return nil
 	}
 
@@ -2563,7 +2577,7 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValue) tea.Cmd {
 	displayText := cmp.Or(item.Title, item.URI)
 
-	if !m.insertCompletionText(displayText) {
+	if !m.insertCompletionText(displayText, true) {
 		return nil
 	}
 

@@ -184,51 +184,17 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				Tools:                fetchTools,
 			})
 
-			agentToolSessionID := c.sessions.CreateAgentToolSessionID(validationResult.AgentMessageID, call.ID)
-			session, err := c.sessions.CreateTaskSession(ctx, agentToolSessionID, validationResult.SessionID, "Fetch Analysis")
-			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error creating session: %s", err)
-			}
-
-			c.permissions.AutoApproveSession(session.ID)
-
-			// Use small model for web content analysis (faster and cheaper)
-			maxTokens := small.CatwalkCfg.DefaultMaxTokens
-			if small.ModelCfg.MaxTokens != 0 {
-				maxTokens = small.ModelCfg.MaxTokens
-			}
-
-			result, err := agent.Run(ctx, SessionAgentCall{
-				SessionID:        session.ID,
-				Prompt:           fullPrompt,
-				MaxOutputTokens:  maxTokens,
-				ProviderOptions:  getProviderOptions(small, smallProviderCfg),
-				Temperature:      small.ModelCfg.Temperature,
-				TopP:             small.ModelCfg.TopP,
-				TopK:             small.ModelCfg.TopK,
-				FrequencyPenalty: small.ModelCfg.FrequencyPenalty,
-				PresencePenalty:  small.ModelCfg.PresencePenalty,
-			})
-			if err != nil {
-				return fantasy.NewTextErrorResponse("error generating response"), nil
-			}
-
-			updatedSession, err := c.sessions.Get(ctx, session.ID)
-			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error getting session: %s", err)
-			}
-			parentSession, err := c.sessions.Get(ctx, validationResult.SessionID)
-			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error getting parent session: %s", err)
-			}
-
-			parentSession.Cost += updatedSession.Cost
-
-			_, err = c.sessions.Save(ctx, parentSession)
-			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error saving parent session: %s", err)
-			}
-
-			return fantasy.NewTextResponse(result.Response.Content.Text()), nil
+			return c.runSubAgentWithOptions(
+				ctx,
+				agent,
+				validationResult.SessionID,
+				validationResult.AgentMessageID,
+				call.ID,
+				fullPrompt,
+				"Fetch Analysis",
+				func(sessionID string) {
+					c.permissions.AutoApproveSession(sessionID)
+				},
+			)
 		}), nil
 }

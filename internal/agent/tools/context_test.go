@@ -5,6 +5,20 @@ import (
 	"testing"
 )
 
+// Test-specific context key types to avoid collisions
+type (
+	testStringKey string
+	testBoolKey   string
+	testIntKey    string
+)
+
+const (
+	testKey     testStringKey = "testKey"
+	missingKey  testStringKey = "missingKey"
+	boolTestKey testBoolKey   = "boolKey"
+	intTestKey  testIntKey    = "intKey"
+)
+
 func TestGetContextValue(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -16,9 +30,9 @@ func TestGetContextValue(t *testing.T) {
 		{
 			name: "returns string value",
 			setup: func(ctx context.Context) context.Context {
-				return context.WithValue(ctx, "testKey", "testValue")
+				return context.WithValue(ctx, testKey, "testValue")
 			},
-			key:          "testKey",
+			key:          testKey,
 			defaultValue: "",
 			want:         "testValue",
 		},
@@ -27,34 +41,34 @@ func TestGetContextValue(t *testing.T) {
 			setup: func(ctx context.Context) context.Context {
 				return ctx
 			},
-			key:          "missingKey",
+			key:          missingKey,
 			defaultValue: "default",
 			want:         "default",
 		},
 		{
 			name: "returns default when type mismatch",
 			setup: func(ctx context.Context) context.Context {
-				return context.WithValue(ctx, "testKey", 123) // int, not string
+				return context.WithValue(ctx, testKey, 123) // int, not string
 			},
-			key:          "testKey",
+			key:          testKey,
 			defaultValue: "default",
 			want:         "default",
 		},
 		{
 			name: "returns bool value",
 			setup: func(ctx context.Context) context.Context {
-				return context.WithValue(ctx, "boolKey", true)
+				return context.WithValue(ctx, boolTestKey, true)
 			},
-			key:          "boolKey",
+			key:          boolTestKey,
 			defaultValue: false,
 			want:         true,
 		},
 		{
 			name: "returns int value",
 			setup: func(ctx context.Context) context.Context {
-				return context.WithValue(ctx, "intKey", 42)
+				return context.WithValue(ctx, intTestKey, 42)
 			},
-			key:          "intKey",
+			key:          intTestKey,
 			defaultValue: 0,
 			want:         42,
 		},

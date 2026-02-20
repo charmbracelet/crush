@@ -799,11 +799,6 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 			return fmt.Errorf("invalid API key format for provider %s", c.ID)
 		}
 		return nil
-	case catwalk.InferenceProviderIoNet:
-		if !strings.HasPrefix(apiKey, "io-") {
-			return fmt.Errorf("invalid API key format for provider %s", c.ID)
-		}
-		return nil
 	}
 
 	switch c.Type {

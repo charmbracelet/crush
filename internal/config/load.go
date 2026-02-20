@@ -219,15 +219,19 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 		switch p.ID {
 		// Handle specific providers that require additional configuration
 		case catwalk.InferenceProviderVertexAI:
-			if !hasVertexCredentials(env) {
+			var (
+				project  = env.Get("VERTEXAI_PROJECT")
+				location = env.Get("VERTEXAI_LOCATION")
+			)
+			if project == "" || location == "" {
 				if configExists {
 					slog.Warn("Skipping Vertex AI provider due to missing credentials")
 					c.Providers.Del(string(p.ID))
 				}
 				continue
 			}
-			prepared.ExtraParams["project"] = env.Get("VERTEXAI_PROJECT")
-			prepared.ExtraParams["location"] = env.Get("VERTEXAI_LOCATION")
+			prepared.ExtraParams["project"] = project
+			prepared.ExtraParams["location"] = location
 		case catwalk.InferenceProviderAzure:
 			endpoint, err := resolver.ResolveValue(p.APIEndpoint)
 			if err != nil || endpoint == "" {
@@ -675,12 +679,6 @@ func loadFromBytes(configs [][]byte) (*Config, error) {
 		return nil, err
 	}
 	return &config, nil
-}
-
-func hasVertexCredentials(env env.Env) bool {
-	hasProject := env.Get("VERTEXAI_PROJECT") != ""
-	hasLocation := env.Get("VERTEXAI_LOCATION") != ""
-	return hasProject && hasLocation
 }
 
 func hasAWSCredentials(env env.Env) bool {

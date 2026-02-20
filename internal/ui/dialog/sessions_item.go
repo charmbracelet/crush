@@ -137,7 +137,7 @@ func renderItem(t ListItemStyles, title string, info string, focused bool, width
 		infoWidth = lipgloss.Width(infoText)
 	}
 
-	title = ansi.Truncate(title, max(0, lineWidth-infoWidth), "")
+	title = ansi.Truncate(title, max(0, lineWidth-infoWidth), "…")
 	titleWidth := lipgloss.Width(title)
 	gap := strings.Repeat(" ", max(0, lineWidth-titleWidth-infoWidth))
 	content := title
@@ -154,7 +154,7 @@ func renderItem(t ListItemStyles, title string, info string, focused bool, width
 			// because we can control the underline start and stop more
 			// precisely via [ansi.AttrUnderline] and [ansi.AttrNoUnderline]
 			// which only affect the underline attribute without interfering
-			// with other style
+			// with other style attributes.
 			parts = append(parts,
 				ansi.NewStyle().Underline(true).String(),
 				ansi.Cut(title, start, stop+1),

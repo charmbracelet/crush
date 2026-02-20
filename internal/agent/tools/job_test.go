@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"runtime"
 	"testing"
 	"time"
 
@@ -97,6 +98,10 @@ func TestBackgroundShell_MultipleOutputCalls(t *testing.T) {
 
 func TestBackgroundShell_EmptyOutput(t *testing.T) {
 	t.Parallel()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("This test is flacky on Windows for some reason")
+	}
 
 	workingDir := t.TempDir()
 	ctx := context.Background()

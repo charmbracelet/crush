@@ -2,6 +2,7 @@ package model
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -52,6 +53,10 @@ import (
 	"github.com/charmbracelet/ultraviolet/screen"
 	"github.com/charmbracelet/x/editor"
 )
+
+// MouseScrollThreshold defines how many lines to scroll the chat when a mouse
+// wheel event occurs.
+const MouseScrollThreshold = 5
 
 // Compact mode breakpoints.
 const (
@@ -661,7 +666,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case uiChat:
 			switch msg.Button {
 			case tea.MouseWheelUp:
-				if cmd := m.chat.ScrollByAndAnimate(-5); cmd != nil {
+				if cmd := m.chat.ScrollByAndAnimate(-MouseScrollThreshold); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
 				if !m.chat.SelectedItemInView() {
@@ -671,7 +676,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			case tea.MouseWheelDown:
-				if cmd := m.chat.ScrollByAndAnimate(5); cmd != nil {
+				if cmd := m.chat.ScrollByAndAnimate(MouseScrollThreshold); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
 				if !m.chat.SelectedItemInView() {
@@ -882,7 +887,6 @@ func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
 // if the message is a tool result it will update the corresponding tool call message
 func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 	var cmds []tea.Cmd
-	atBottom := m.chat.list.AtBottom()
 
 	existing := m.chat.MessageItem(msg.ID)
 	if existing != nil {
@@ -915,7 +919,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 			}
 		}
 		m.chat.AppendMessages(items...)
-		if atBottom {
+		if m.chat.Follow() {
 			if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
@@ -923,7 +927,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 		if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
 			infoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
 			m.chat.AppendMessages(infoItem)
-			if atBottom {
+			if m.chat.Follow() {
 				if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
@@ -938,7 +942,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 			}
 			if toolMsgItem, ok := toolItem.(chat.ToolMessageItem); ok {
 				toolMsgItem.SetResult(&tr)
-				if atBottom {
+				if m.chat.Follow() {
 					if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
 						cmds = append(cmds, cmd)
 					}
@@ -973,7 +977,6 @@ func (m *UI) handleClickFocus(msg tea.MouseClickMsg) (cmd tea.Cmd) {
 func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 	var cmds []tea.Cmd
 	existingItem := m.chat.MessageItem(msg.ID)
-	atBottom := m.chat.list.AtBottom()
 
 	if existingItem != nil {
 		if assistantItem, ok := existingItem.(*chat.AssistantMessageItem); ok {
@@ -1022,7 +1025,7 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 	}
 
 	m.chat.AppendMessages(items...)
-	if atBottom {
+	if m.chat.Follow() {
 		if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -1035,7 +1038,7 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.Cmd {
 	var cmds []tea.Cmd
 
-	atBottom := m.chat.list.AtBottom()
+	atBottom := m.chat.AtBottom()
 	// Only process messages with tool calls or results.
 	if len(event.Payload.ToolCalls()) == 0 && len(event.Payload.ToolResults()) == 0 {
 		return nil
@@ -1213,6 +1216,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionToggleCompactMode:
 		cmds = append(cmds, m.toggleCompactMode())
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionTogglePills:
+		if cmd := m.togglePillsExpanded(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleThinking:
 		cmds = append(cmds, func() tea.Msg {
 			cfg := m.com.Config()
@@ -1386,10 +1394,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionRunMCPPrompt:
 		if len(msg.Arguments) > 0 && msg.Args == nil {
 			m.dialog.CloseFrontDialog()
-			title := msg.Title
-			if title == "" {
-				title = "MCP Prompt Arguments"
-			}
+			title := cmp.Or(msg.Title, "MCP Prompt Arguments")
 			argsDialog := dialog.NewArguments(
 				m.com,
 				title,
@@ -1889,7 +1894,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			x = screenW - w
 		}
 		x = max(0, x)
-		y = max(0, y)
+		y = max(0, y+1) // Offset for attachments row
 
 		completionsView := uv.NewStyledString(m.completions.Render())
 		completionsView.Draw(scr, image.Rectangle{
@@ -1928,12 +1933,8 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 		if m.textarea.Focused() {
 			cur := m.textarea.Cursor()
-			cur.X++ // Adjust for app margins
-			cur.Y += m.layout.editor.Min.Y
-			// Offset for attachment row if present.
-			if len(m.attachments.List()) > 0 {
-				cur.Y++
-			}
+			cur.X++                            // Adjust for app margins
+			cur.Y += m.layout.editor.Min.Y + 1 // Offset for attachments row
 			return cur
 		}
 	}
@@ -2223,7 +2224,10 @@ func (m *UI) updateSize() {
 
 	m.chat.SetSize(m.layout.main.Dx(), m.layout.main.Dy())
 	m.textarea.SetWidth(m.layout.editor.Dx())
-	m.textarea.SetHeight(m.layout.editor.Dy())
+	// TODO: Abstract the textarea and attachments into a single editor
+	// component so we don't have to manually account for the attachments
+	// height here.
+	m.textarea.SetHeight(m.layout.editor.Dy() - 2) // Account for top margin/attachments and bottom margin
 	m.renderPills()
 
 	// Handle different app states
@@ -2373,14 +2377,6 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 			uiLayout.main.Max.Y -= 1
 			uiLayout.editor = editorRect
 		}
-	}
-
-	if !uiLayout.editor.Empty() {
-		// Add editor margins 1 top and bottom
-		if len(m.attachments.List()) == 0 {
-			uiLayout.editor.Min.Y += 1
-		}
-		uiLayout.editor.Max.Y -= 1
 	}
 
 	return uiLayout
@@ -2565,10 +2561,7 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 // insertMCPResourceCompletion inserts the selected resource into the textarea,
 // replacing the @query, and adds the resource as an attachment.
 func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValue) tea.Cmd {
-	displayText := item.Title
-	if displayText == "" {
-		displayText = item.URI
-	}
+	displayText := cmp.Or(item.Title, item.URI)
 
 	if !m.insertCompletionText(displayText) {
 		return nil
@@ -2686,14 +2679,15 @@ func (m *UI) randomizePlaceholders() {
 
 // renderEditorView renders the editor view with attachments if any.
 func (m *UI) renderEditorView(width int) string {
-	if len(m.attachments.List()) == 0 {
-		return m.textarea.View()
+	var attachmentsView string
+	if len(m.attachments.List()) > 0 {
+		attachmentsView = m.attachments.Render(width)
 	}
-	return lipgloss.JoinVertical(
-		lipgloss.Top,
-		m.attachments.Render(width),
+	return strings.Join([]string{
+		attachmentsView,
 		m.textarea.View(),
-	)
+		"", // margin at bottom of editor
+	}, "\n")
 }
 
 // cacheSidebarLogo renders and caches the sidebar logo at the specified width.
@@ -2866,12 +2860,15 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 		return nil
 	}
 
-	sessionID := ""
-	if m.session != nil {
+	var sessionID string
+	hasSession := m.session != nil
+	if hasSession {
 		sessionID = m.session.ID
 	}
+	hasTodos := hasSession && hasIncompleteTodos(m.session.Todos)
+	hasQueue := m.promptQueue > 0
 
-	commands, err := dialog.NewCommands(m.com, sessionID, m.customCommands, m.mcpPrompts)
+	commands, err := dialog.NewCommands(m.com, sessionID, hasSession, hasTodos, hasQueue, m.customCommands, m.mcpPrompts)
 	if err != nil {
 		return util.ReportError(err)
 	}

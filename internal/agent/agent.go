@@ -420,6 +420,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				}
 				return false
 			},
+			func(steps []fantasy.StepResult) bool {
+				return hasRepeatedToolCalls(steps, loopDetectionWindowSize, loopDetectionMaxRepeats)
+			},
 		},
 	})
 
@@ -846,10 +849,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	title = thinkTagRegex.ReplaceAllString(title, "")
 
 	title = strings.TrimSpace(title)
-	if title == "" {
-		slog.Debug("Empty title; using fallback")
-		title = defaultSessionName
-	}
+	title = cmp.Or(title, defaultSessionName)
 
 	// Calculate usage and cost.
 	var openrouterCost *float64

@@ -30,11 +30,11 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - uses: github/codeql-action/init@45cbd0c69e560cd9e7cd7f8c32362050c9b7ded2 # v4.32.2
+      - uses: github/codeql-action/init@9e907b5e64f6b83e7804b09294d44122997950d6 # v4.32.3
         with:
           languages: ${{ matrix.language }}
-      - uses: github/codeql-action/autobuild@45cbd0c69e560cd9e7cd7f8c32362050c9b7ded2 # v4.32.2
-      - uses: github/codeql-action/analyze@45cbd0c69e560cd9e7cd7f8c32362050c9b7ded2 # v4.32.2
+      - uses: github/codeql-action/autobuild@9e907b5e64f6b83e7804b09294d44122997950d6 # v4.32.3
+      - uses: github/codeql-action/analyze@9e907b5e64f6b83e7804b09294d44122997950d6 # v4.32.3
 
   grype:
     runs-on: ubuntu-latest
@@ -52,7 +52,7 @@ jobs:
           path: "."
           fail-build: true
           severity-cutoff: critical
-      - uses: github/codeql-action/upload-sarif@45cbd0c69e560cd9e7cd7f8c32362050c9b7ded2 # v4.32.2
+      - uses: github/codeql-action/upload-sarif@9e907b5e64f6b83e7804b09294d44122997950d6 # v4.32.3
         with:
           sarif_file: ${{ steps.scan.outputs.sarif }}
 
@@ -73,7 +73,7 @@ jobs:
       - name: Run govulncheck
         run: |
           govulncheck -C . -format sarif ./... > results.sarif
-      - uses: github/codeql-action/upload-sarif@45cbd0c69e560cd9e7cd7f8c32362050c9b7ded2 # v4.32.2
+      - uses: github/codeql-action/upload-sarif@9e907b5e64f6b83e7804b09294d44122997950d6 # v4.32.3
         with:
           sarif_file: results.sarif
 
@@ -89,4 +89,4 @@ jobs:
       - uses: actions/dependency-review-action@3c4e3dcb1aa7874d2c16be7d79418e9b7efd6261 # v4.8.2
         with:
           fail-on-severity: critical
-          allow-licenses: BSD-2-Clause, BSD-3-Clause, MIT, Apache-2.0, MPL-2.0, ISC, LicenseRef-scancode-google-patent-license-golang
+          allow-licenses: BSD-2-Clause, BSD-3-Clause, MIT, Apache-2.0, MPL-2.0, ISC, LicenseRef-scancode-google-patent-license-golang, Unlicense

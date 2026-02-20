@@ -28,6 +28,16 @@ type Todo struct {
 	ActiveForm string     `json:"active_form"`
 }
 
+// HasIncompleteTodos returns true if there are any non-completed todos.
+func HasIncompleteTodos(todos []Todo) bool {
+	for _, todo := range todos {
+		if todo.Status != TodoStatusCompleted {
+			return true
+		}
+	}
+	return false
+}
+
 type Session struct {
 	ID               string
 	ParentSessionID  string

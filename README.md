@@ -191,6 +191,7 @@ That said, you can also set environment variables for preferred providers.
 | `HF_TOKEN`                  | Hugging Face Inference                             |
 | `CEREBRAS_API_KEY`          | Cerebras                                           |
 | `OPENROUTER_API_KEY`        | OpenRouter                                         |
+| `IONET_API_KEY`             | io.net                                             |
 | `GROQ_API_KEY`              | Groq                                               |
 | `VERTEXAI_PROJECT`          | Google Cloud VertexAI (Gemini)                     |
 | `VERTEXAI_LOCATION`         | Google Cloud VertexAI (Gemini)                     |

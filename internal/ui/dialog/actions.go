@@ -48,6 +48,7 @@ type (
 	ActionToggleHelp        struct{}
 	ActionToggleCompactMode struct{}
 	ActionToggleThinking    struct{}
+	ActionTogglePills       struct{}
 	ActionExternalEditor    struct{}
 	ActionToggleYoloMode    struct{}
 	// ActionInitializeProject is a message to initialize a project.

@@ -77,15 +77,17 @@ func (l *List) Gap() int {
 
 // AtBottom returns whether the list is showing the last item at the bottom.
 func (l *List) AtBottom() bool {
-	const margin = 2
-
-	if len(l.items) == 0 || l.offsetIdx >= len(l.items)-1 {
+	if len(l.items) == 0 {
 		return true
 	}
 
 	// Calculate the height from offsetIdx to the end.
 	var totalHeight int
 	for idx := l.offsetIdx; idx < len(l.items); idx++ {
+		if totalHeight > l.height {
+			// No need to calculate further, we're already past the viewport height
+			return false
+		}
 		item := l.getItem(idx)
 		itemHeight := item.height
 		if l.gap > 0 && idx > l.offsetIdx {
@@ -94,7 +96,7 @@ func (l *List) AtBottom() bool {
 		totalHeight += itemHeight
 	}
 
-	return totalHeight-l.offsetLine-margin <= l.height
+	return totalHeight-l.offsetLine <= l.height
 }
 
 // SetReverse shows the list in reverse order.

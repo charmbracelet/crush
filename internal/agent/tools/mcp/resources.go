@@ -2,11 +2,13 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"iter"
 	"log/slog"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -81,9 +83,20 @@ func getResources(ctx context.Context, c *ClientSession) ([]*Resource, error) {
 	}
 	result, err := c.ListResources(ctx, &mcp.ListResourcesParams{})
 	if err != nil {
+		// Handle "Method not found" errors from MCP servers that don't support resources/list
+		if isMethodNotFoundError(err) {
+			slog.Warn("MCP server does not support resources/list", "error", err)
+			return nil, nil
+		}
 		return nil, err
 	}
 	return result.Resources, nil
+}
+
+// isMethodNotFoundError checks if the error is a JSON-RPC "Method not found" error.
+func isMethodNotFoundError(err error) bool {
+	var rpcErr *jsonrpc.Error
+	return errors.As(err, &rpcErr) && rpcErr != nil && rpcErr.Code == jsonrpc.CodeMethodNotFound
 }
 
 func updateResources(name string, resources []*Resource) int {

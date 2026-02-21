@@ -1815,7 +1815,7 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 		m.session,
 		m.isCompact,
 		m.detailsOpen,
-		m.width,
+		area.Dx(),
 	)
 }
 

@@ -650,6 +650,11 @@
           ],
           "description": "Diff mode for the TUI interface"
         },
+        "hide_status": {
+          "type": "boolean",
+          "description": "Hide the status bar (help keybindings and notifications) at the bottom of the TUI",
+          "default": false
+        },
         "completions": {
           "$ref": "#/$defs/Completions",
           "description": "Completions UI options"

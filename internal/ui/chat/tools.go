@@ -321,16 +321,19 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 
 // Render renders the tool message item at the given width.
 func (t *baseToolMessageItem) Render(width int) string {
-	style := t.sty.Chat.Message.ToolCallBlurred
-	if t.focused {
-		style = t.sty.Chat.Message.ToolCallFocused
-	}
-
+	var prefix string
 	if t.isCompact {
-		style = t.sty.Chat.Message.ToolCallCompact
+		prefix = t.sty.Chat.Message.ToolCallCompact.Render()
+	} else if t.focused {
+		prefix = t.sty.Chat.Message.ToolCallFocused.Render()
+	} else {
+		prefix = t.sty.Chat.Message.ToolCallBlurred.Render()
 	}
-
-	return style.Render(t.RawRender(width))
+	lines := strings.Split(t.RawRender(width), "\n")
+	for i, ln := range lines {
+		lines[i] = prefix + ln
+	}
+	return strings.Join(lines, "\n")
 }
 
 // ToolCall returns the tool call associated with this message item.

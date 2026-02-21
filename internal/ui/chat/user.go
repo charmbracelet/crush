@@ -70,11 +70,17 @@ func (m *UserMessageItem) RawRender(width int) string {
 
 // Render implements MessageItem.
 func (m *UserMessageItem) Render(width int) string {
-	style := m.sty.Chat.Message.UserBlurred
+	var prefix string
 	if m.focused {
-		style = m.sty.Chat.Message.UserFocused
+		prefix = m.sty.Chat.Message.UserFocused.Render()
+	} else {
+		prefix = m.sty.Chat.Message.UserBlurred.Render()
 	}
-	return style.Render(m.RawRender(width))
+	lines := strings.Split(m.RawRender(width), "\n")
+	for i, line := range lines {
+		lines[i] = prefix + line
+	}
+	return strings.Join(lines, "\n")
 }
 
 // ID implements MessageItem.

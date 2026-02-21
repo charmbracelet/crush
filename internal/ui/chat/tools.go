@@ -625,10 +625,21 @@ func toolOutputImageContent(sty *styles.Styles, data, mediaType string) string {
 
 	return sty.Tool.Body.Render(fmt.Sprintf(
 		"%s %s %s %s",
-		sty.Tool.ResourceLoadedText.String(),
-		sty.Tool.ResourceLoadedIndicator.String(),
-		sty.Base.Render(mediaType),
-		sty.Subtle.Render(sizeStr),
+		sty.Tool.ResourceLoadedText.Render("Loaded Image"),
+		sty.Tool.ResourceLoadedIndicator.Render(styles.ArrowRightIcon),
+		sty.Tool.MediaType.Render(mediaType),
+		sty.Tool.ResourceSize.Render(sizeStr),
+	))
+}
+
+// toolOutputSkillContent renders a skill loaded indicator.
+func toolOutputSkillContent(sty *styles.Styles, name, description string) string {
+	return sty.Tool.Body.Render(fmt.Sprintf(
+		"%s %s %s %s",
+		sty.Tool.ResourceLoadedText.Render("Loaded Skill"),
+		sty.Tool.ResourceLoadedIndicator.Render(styles.ArrowRightIcon),
+		sty.Tool.ResourceName.Render(name),
+		sty.Tool.ResourceSize.Render(description),
 	))
 }
 

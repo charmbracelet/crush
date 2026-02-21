@@ -623,12 +623,13 @@ func toolOutputImageContent(sty *styles.Styles, data, mediaType string) string {
 	dataSize := len(data) * 3 / 4
 	sizeStr := formatSize(dataSize)
 
-	loaded := sty.Base.Foreground(sty.Green).Render("Loaded")
-	arrow := sty.Base.Foreground(sty.GreenDark).Render("→")
-	typeStyled := sty.Base.Render(mediaType)
-	sizeStyled := sty.Subtle.Render(sizeStr)
-
-	return sty.Tool.Body.Render(fmt.Sprintf("%s %s %s %s", loaded, arrow, typeStyled, sizeStyled))
+	return sty.Tool.Body.Render(fmt.Sprintf(
+		"%s %s %s %s",
+		sty.Tool.ResourceLoadedText.String(),
+		sty.Tool.ResourceLoadedIndicator.String(),
+		sty.Base.Render(mediaType),
+		sty.Subtle.Render(sizeStr),
+	))
 }
 
 // getDigits returns the number of digits in a number.

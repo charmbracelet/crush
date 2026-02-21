@@ -321,6 +321,12 @@ type Styles struct {
 		MCPName     lipgloss.Style // The mcp name
 		MCPToolName lipgloss.Style // The mcp tool name
 		MCPArrow    lipgloss.Style // The mcp arrow icon
+
+		// Images and external resources
+		ResourceLoadedText      lipgloss.Style
+		ResourceLoadedIndicator lipgloss.Style
+		ResourceSize            lipgloss.Style
+		MediaType               lipgloss.Style
 	}
 
 	// Dialog styles
@@ -1167,6 +1173,12 @@ func DefaultStyles() Styles {
 	s.Tool.MCPName = base.Foreground(blue)
 	s.Tool.MCPToolName = base.Foreground(blueDark)
 	s.Tool.MCPArrow = base.Foreground(blue).SetString(ArrowRightIcon)
+
+	// Loading indicators for images, skills
+	s.Tool.ResourceLoadedText = base.Foreground(green).SetString("Loaded")
+	s.Tool.ResourceLoadedIndicator = base.Foreground(greenDark).SetString(ArrowRightIcon)
+	s.Tool.MediaType = base
+	s.Tool.ResourceSize = base.Foreground(fgMuted)
 
 	// Buttons
 	s.ButtonFocus = lipgloss.NewStyle().Foreground(white).Background(secondary)

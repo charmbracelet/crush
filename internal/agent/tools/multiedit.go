@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/diff"
@@ -215,7 +214,13 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 		slog.Error("Error creating file history version", "error", err)
 	}
 
-	edit.filetracker.RecordRead(edit.ctx, sessionID, params.FilePath)
+	snapshot, snapErr := filetracker.SnapshotFromPath(params.FilePath)
+	if snapErr != nil {
+		return fantasy.ToolResponse{}, fmt.Errorf("failed to snapshot file after create: %w", snapErr)
+	}
+	if err := edit.filetracker.RecordRead(edit.ctx, sessionID, params.FilePath, snapshot); err != nil {
+		return fantasy.ToolResponse{}, fmt.Errorf("failed to record file read: %w", err)
+	}
 
 	var message string
 	if len(failedEdits) > 0 {
@@ -257,18 +262,12 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 	}
 
 	// Check if file was read before editing
-	lastRead := edit.filetracker.LastReadTime(edit.ctx, sessionID, params.FilePath)
-	if lastRead.IsZero() {
-		return fantasy.NewTextErrorResponse("you must read the file before editing it. Use the View tool first"), nil
+	changed, changedErr := edit.filetracker.ChangedSinceRead(edit.ctx, sessionID, params.FilePath)
+	if changedErr != nil {
+		return fantasy.ToolResponse{}, fmt.Errorf("failed to check file freshness: %w", changedErr)
 	}
-
-	// Check if file was modified since last read.
-	modTime := fileInfo.ModTime().Truncate(time.Second)
-	if modTime.After(lastRead) {
-		return fantasy.NewTextErrorResponse(
-			fmt.Sprintf("file %s has been modified since it was last read (mod time: %s, last read: %s)",
-				params.FilePath, modTime.Format(time.RFC3339), lastRead.Format(time.RFC3339),
-			)), nil
+	if changed {
+		return fantasy.NewTextErrorResponse("you must read the file before editing it. Use the View tool first"), nil
 	}
 
 	// Read current file content
@@ -372,7 +371,13 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 		slog.Error("Error creating file history version", "error", err)
 	}
 
-	edit.filetracker.RecordRead(edit.ctx, sessionID, params.FilePath)
+	snapshot, snapErr := filetracker.SnapshotFromPath(params.FilePath)
+	if snapErr != nil {
+		return fantasy.ToolResponse{}, fmt.Errorf("failed to snapshot file after multi edit: %w", snapErr)
+	}
+	if err := edit.filetracker.RecordRead(edit.ctx, sessionID, params.FilePath, snapshot); err != nil {
+		return fantasy.ToolResponse{}, fmt.Errorf("failed to record file read: %w", err)
+	}
 
 	var message string
 	if len(failedEdits) > 0 {

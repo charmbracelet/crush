@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/diff"
@@ -47,7 +46,7 @@ func NewWriteTool(
 	lspManager *lsp.Manager,
 	permissions permission.Service,
 	files history.Service,
-	filetracker filetracker.Service,
+	tracker filetracker.Service,
 	workingDir string,
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
@@ -75,11 +74,12 @@ func NewWriteTool(
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("Path is a directory, not a file: %s", filePath)), nil
 				}
 
-				modTime := fileInfo.ModTime().Truncate(time.Second)
-				lastRead := filetracker.LastReadTime(ctx, sessionID, filePath)
-				if modTime.After(lastRead) {
-					return fantasy.NewTextErrorResponse(fmt.Sprintf("File %s has been modified since it was last read.\nLast modification: %s\nLast read: %s\n\nPlease read the file again before modifying it.",
-						filePath, modTime.Format(time.RFC3339), lastRead.Format(time.RFC3339))), nil
+				changed, changedErr := tracker.ChangedSinceRead(ctx, sessionID, filePath)
+				if changedErr != nil {
+					return fantasy.ToolResponse{}, fmt.Errorf("failed to check file freshness: %w", changedErr)
+				}
+				if changed {
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("File %s has been modified since it was last read. Please read the file again before modifying it.", filePath)), nil
 				}
 
 				oldContent, readErr := os.ReadFile(filePath)
@@ -158,7 +158,13 @@ func NewWriteTool(
 				slog.Error("Error creating file history version", "error", err)
 			}
 
-			filetracker.RecordRead(ctx, sessionID, filePath)
+			snapshot, snapErr := filetracker.SnapshotFromPath(filePath)
+			if snapErr != nil {
+				return fantasy.ToolResponse{}, fmt.Errorf("failed to snapshot file after write: %w", snapErr)
+			}
+			if err := tracker.RecordRead(ctx, sessionID, filePath, snapshot); err != nil {
+				return fantasy.ToolResponse{}, fmt.Errorf("failed to record file read: %w", err)
+			}
 
 			notifyLSPs(ctx, lspManager, params.FilePath)
 

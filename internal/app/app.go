@@ -89,7 +89,7 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 		Messages:    messages,
 		History:     files,
 		Permissions: permission.NewPermissionService(cfg.WorkingDir(), skipPermissionsRequests, allowedTools),
-		FileTracker: filetracker.NewService(q),
+		FileTracker: filetracker.NewService(q, sessions, cfg.WorkingDir()),
 		LSPManager:  lsp.NewManager(cfg),
 
 		globalCtx: ctx,

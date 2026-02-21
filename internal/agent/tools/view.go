@@ -49,7 +49,7 @@ const (
 func NewViewTool(
 	lspManager *lsp.Manager,
 	permissions permission.Service,
-	filetracker filetracker.Service,
+	tracker filetracker.Service,
 	workingDir string,
 	skillsPaths ...string,
 ) fantasy.AgentTool {
@@ -195,7 +195,13 @@ func NewViewTool(
 			}
 			output += "\n</file>\n"
 			output += getDiagnostics(filePath, lspManager)
-			filetracker.RecordRead(ctx, sessionID, filePath)
+			snapshot, snapErr := filetracker.SnapshotFromPath(filePath)
+			if snapErr != nil {
+				return fantasy.ToolResponse{}, fmt.Errorf("error snapshotting file: %w", snapErr)
+			}
+			if err := tracker.RecordRead(ctx, sessionID, filePath, snapshot); err != nil {
+				return fantasy.ToolResponse{}, fmt.Errorf("error recording file read: %w", err)
+			}
 			return fantasy.WithResponseMetadata(
 				fantasy.NewTextResponse(output),
 				ViewResponseMetadata{

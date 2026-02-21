@@ -7,6 +7,7 @@ INSERT INTO sessions (
     prompt_tokens,
     completion_tokens,
     cost,
+    context_epoch,
     summary_message_id,
     updated_at,
     created_at
@@ -18,6 +19,7 @@ INSERT INTO sessions (
     ?,
     ?,
     ?,
+    0,
     null,
     strftime('%s', 'now'),
     strftime('%s', 'now')
@@ -42,6 +44,7 @@ SET
     completion_tokens = ?,
     summary_message_id = ?,
     cost = ?,
+    context_epoch = ?,
     todos = ?
 WHERE id = ?
 RETURNING *;

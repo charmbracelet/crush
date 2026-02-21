@@ -9,6 +9,7 @@ import (
 	"image"
 	"log/slog"
 	"math/rand"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -30,6 +31,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/home"
@@ -133,9 +135,6 @@ type UI struct {
 	com          *common.Common
 	session      *session.Session
 	sessionFiles []SessionFile
-
-	// keeps track of read files while we don't have a session id
-	sessionFileReads []string
 
 	lastUserMessageTime int64
 
@@ -2526,34 +2525,29 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 	}
 
 	return func() tea.Msg {
-		absPath, _ := filepath.Abs(path)
-
-		if m.hasSession() {
-			// Skip attachment if file was already read and hasn't been modified.
-			lastRead := m.com.App.FileTracker.LastReadTime(context.Background(), m.session.ID, absPath)
-			if !lastRead.IsZero() {
-				if info, err := os.Stat(path); err == nil && !info.ModTime().After(lastRead) {
-					return nil
-				}
-			}
-		} else if slices.Contains(m.sessionFileReads, absPath) {
+		absPath, err := filepath.Abs(path)
+		if err != nil {
 			return nil
 		}
 
-		m.sessionFileReads = append(m.sessionFileReads, absPath)
-
-		// Add file as attachment.
-		content, err := os.ReadFile(path)
-		if err != nil {
-			// If it fails, let the LLM handle it later.
+		if slices.ContainsFunc(m.attachments.List(), func(att message.Attachment) bool {
+			otherAbs, absErr := filepath.Abs(att.FilePath)
+			return absErr == nil && otherAbs == absPath
+		}) {
 			return nil
+		}
+
+		if m.hasSession() {
+			inContext, inContextErr := m.com.App.FileTracker.InCurrentContext(context.Background(), m.session.ID, absPath)
+			if inContextErr == nil && inContext {
+				return nil
+			}
 		}
 
 		return message.Attachment{
 			FilePath: path,
 			FileName: filepath.Base(path),
-			MimeType: mimeOf(content),
-			Content:  content,
+			MimeType: mimeOfFile(path),
 		}
 	}
 }
@@ -2654,6 +2648,22 @@ func mimeOf(content []byte) string {
 	return http.DetectContentType(content[:mimeBufferSize])
 }
 
+func mimeOfFile(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return cmp.Or(mime.TypeByExtension(filepath.Ext(path)), "application/octet-stream")
+	}
+	defer f.Close()
+
+	buf := make([]byte, 512)
+	n, readErr := f.Read(buf)
+	if readErr == nil && n > 0 {
+		return http.DetectContentType(buf[:n])
+	}
+
+	return cmp.Or(mime.TypeByExtension(filepath.Ext(path)), "application/octet-stream")
+}
+
 var readyPlaceholders = [...]string{
 	"Ready!",
 	"Ready...",
@@ -2718,18 +2728,27 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 	}
 
 	ctx := context.Background()
-	cmds = append(cmds, func() tea.Msg {
-		for _, path := range m.sessionFileReads {
-			m.com.App.FileTracker.RecordRead(ctx, m.session.ID, path)
-			m.com.App.LSPManager.Start(ctx, path)
-		}
-		return nil
-	})
-
 	// Capture session ID to avoid race with main goroutine updating m.session.
 	sessionID := m.session.ID
 	cmds = append(cmds, func() tea.Msg {
-		_, err := m.com.App.AgentCoordinator.Run(context.Background(), sessionID, content, attachments...)
+		materialized := make([]message.Attachment, 0, len(attachments))
+		snapshots := make(map[string]filetracker.Snapshot, len(attachments))
+		for _, att := range attachments {
+			if len(att.Content) == 0 {
+				fileContent, snapshot, readErr := filetracker.ReadFileWithSnapshot(att.FilePath)
+				if readErr != nil {
+					return util.InfoMsg{Type: util.InfoTypeError, Msg: readErr.Error()}
+				}
+				att.Content = fileContent
+				if att.MimeType == "" {
+					att.MimeType = mimeOf(fileContent)
+				}
+				snapshots[att.FilePath] = snapshot
+			}
+			materialized = append(materialized, att)
+		}
+
+		_, err := m.com.App.AgentCoordinator.Run(context.Background(), sessionID, content, materialized...)
 		if err != nil {
 			isCancelErr := errors.Is(err, context.Canceled)
 			isPermissionErr := errors.Is(err, permission.ErrorPermissionDenied)
@@ -2740,6 +2759,25 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 				Type: util.InfoTypeError,
 				Msg:  err.Error(),
 			}
+		}
+		for _, att := range materialized {
+			snapshot, ok := snapshots[att.FilePath]
+			if !ok {
+				var snapErr error
+				snapshot, snapErr = filetracker.SnapshotFromPath(att.FilePath)
+				if snapErr != nil {
+					continue
+				}
+			}
+			if readErr := m.com.App.FileTracker.RecordRead(ctx, sessionID, att.FilePath, snapshot); readErr != nil {
+				slog.Error("Failed to record attachment read", "error", readErr, "path", att.FilePath)
+				continue
+			}
+			if includeErr := m.com.App.FileTracker.RecordIncludedInContext(ctx, sessionID, att.FilePath, snapshot); includeErr != nil {
+				slog.Error("Failed to record included attachment", "error", includeErr, "path", att.FilePath)
+				continue
+			}
+			m.com.App.LSPManager.Start(ctx, att.FilePath)
 		}
 		return nil
 	})
@@ -2975,7 +3013,6 @@ func (m *UI) newSession() tea.Cmd {
 
 	m.session = nil
 	m.sessionFiles = nil
-	m.sessionFileReads = nil
 	m.setState(uiLanding, uiFocusEditor)
 	m.textarea.Focus()
 	m.chat.Blur()
@@ -3076,19 +3113,12 @@ func (m *UI) handleFilePathPaste(path string) tea.Cmd {
 			return util.ReportWarn("File is too big (>5mb)")
 		}
 
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return util.ReportError(err)
-		}
-
-		mimeBufferSize := min(512, len(content))
-		mimeType := http.DetectContentType(content[:mimeBufferSize])
+		mimeType := mimeOfFile(path)
 		fileName := filepath.Base(path)
 		return message.Attachment{
 			FilePath: path,
 			FileName: fileName,
 			MimeType: mimeType,
-			Content:  content,
 		}
 	}
 }
@@ -3151,19 +3181,10 @@ func (m *UI) pasteImageFromClipboard() tea.Msg {
 		}
 	}
 
-	content, readErr := os.ReadFile(path)
-	if readErr != nil {
-		return util.InfoMsg{
-			Type: util.InfoTypeError,
-			Msg:  fmt.Sprintf("Unable to read file: %v", readErr),
-		}
-	}
-
 	return message.Attachment{
 		FilePath: path,
 		FileName: filepath.Base(path),
-		MimeType: mimeOf(content),
-		Content:  content,
+		MimeType: mimeOfFile(path),
 	}
 }
 

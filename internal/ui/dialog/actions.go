@@ -2,8 +2,7 @@ package dialog
 
 import (
 	"fmt"
-	"net/http"
-	"os"
+	"mime"
 	"path/filepath"
 
 	tea "charm.land/bubbletea/v2"
@@ -145,23 +144,16 @@ func (a ActionFilePickerSelected) Cmd() tea.Cmd {
 			}
 		}
 
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return util.InfoMsg{
-				Type: util.InfoTypeError,
-				Msg:  fmt.Sprintf("unable to read the image: %v", err),
-			}
+		mimeType := mime.TypeByExtension(filepath.Ext(path))
+		if mimeType == "" {
+			mimeType = "application/octet-stream"
 		}
-
-		mimeBufferSize := min(512, len(content))
-		mimeType := http.DetectContentType(content[:mimeBufferSize])
 		fileName := filepath.Base(path)
 
 		return message.Attachment{
 			FilePath: path,
 			FileName: fileName,
 			MimeType: mimeType,
-			Content:  content,
 		}
 	}
 }

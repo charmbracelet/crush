@@ -325,6 +325,7 @@ type Styles struct {
 		// Images and external resources
 		ResourceLoadedText      lipgloss.Style
 		ResourceLoadedIndicator lipgloss.Style
+		ResourceName            lipgloss.Style
 		ResourceSize            lipgloss.Style
 		MediaType               lipgloss.Style
 	}
@@ -1175,8 +1176,9 @@ func DefaultStyles() Styles {
 	s.Tool.MCPArrow = base.Foreground(blue).SetString(ArrowRightIcon)
 
 	// Loading indicators for images, skills
-	s.Tool.ResourceLoadedText = base.Foreground(green).SetString("Loaded")
-	s.Tool.ResourceLoadedIndicator = base.Foreground(greenDark).SetString(ArrowRightIcon)
+	s.Tool.ResourceLoadedText = base.Foreground(green)
+	s.Tool.ResourceLoadedIndicator = base.Foreground(greenDark)
+	s.Tool.ResourceName = base
 	s.Tool.MediaType = base
 	s.Tool.ResourceSize = base.Foreground(fgMuted)
 

@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/diff"
@@ -174,7 +173,13 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 		slog.Error("Error creating file history version", "error", err)
 	}
 
-	edit.filetracker.RecordRead(edit.ctx, sessionID, filePath)
+	snapshot, snapErr := filetracker.SnapshotFromPath(filePath)
+	if snapErr != nil {
+		return fantasy.ToolResponse{}, fmt.Errorf("failed to snapshot file after create: %w", snapErr)
+	}
+	if err := edit.filetracker.RecordRead(edit.ctx, sessionID, filePath, snapshot); err != nil {
+		return fantasy.ToolResponse{}, fmt.Errorf("failed to record file read: %w", err)
+	}
 
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse("File created: "+filePath),
@@ -205,17 +210,12 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 		return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for deleting content")
 	}
 
-	lastRead := edit.filetracker.LastReadTime(edit.ctx, sessionID, filePath)
-	if lastRead.IsZero() {
-		return fantasy.NewTextErrorResponse("you must read the file before editing it. Use the View tool first"), nil
+	changed, changedErr := edit.filetracker.ChangedSinceRead(edit.ctx, sessionID, filePath)
+	if changedErr != nil {
+		return fantasy.ToolResponse{}, fmt.Errorf("failed to check file freshness: %w", changedErr)
 	}
-
-	modTime := fileInfo.ModTime().Truncate(time.Second)
-	if modTime.After(lastRead) {
-		return fantasy.NewTextErrorResponse(
-			fmt.Sprintf("file %s has been modified since it was last read (mod time: %s, last read: %s)",
-				filePath, modTime.Format(time.RFC3339), lastRead.Format(time.RFC3339),
-			)), nil
+	if changed {
+		return fantasy.NewTextErrorResponse("you must read the file before editing it. Use the View tool first"), nil
 	}
 
 	content, err := os.ReadFile(filePath)
@@ -305,7 +305,13 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 		slog.Error("Error creating file history version", "error", err)
 	}
 
-	edit.filetracker.RecordRead(edit.ctx, sessionID, filePath)
+	snapshot, snapErr := filetracker.SnapshotFromPath(filePath)
+	if snapErr != nil {
+		return fantasy.ToolResponse{}, fmt.Errorf("failed to snapshot file after delete edit: %w", snapErr)
+	}
+	if err := edit.filetracker.RecordRead(edit.ctx, sessionID, filePath, snapshot); err != nil {
+		return fantasy.ToolResponse{}, fmt.Errorf("failed to record file read: %w", err)
+	}
 
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse("Content deleted from file: "+filePath),
@@ -336,17 +342,12 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 		return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for edit a file")
 	}
 
-	lastRead := edit.filetracker.LastReadTime(edit.ctx, sessionID, filePath)
-	if lastRead.IsZero() {
-		return fantasy.NewTextErrorResponse("you must read the file before editing it. Use the View tool first"), nil
+	changed, changedErr := edit.filetracker.ChangedSinceRead(edit.ctx, sessionID, filePath)
+	if changedErr != nil {
+		return fantasy.ToolResponse{}, fmt.Errorf("failed to check file freshness: %w", changedErr)
 	}
-
-	modTime := fileInfo.ModTime().Truncate(time.Second)
-	if modTime.After(lastRead) {
-		return fantasy.NewTextErrorResponse(
-			fmt.Sprintf("file %s has been modified since it was last read (mod time: %s, last read: %s)",
-				filePath, modTime.Format(time.RFC3339), lastRead.Format(time.RFC3339),
-			)), nil
+	if changed {
+		return fantasy.NewTextErrorResponse("you must read the file before editing it. Use the View tool first"), nil
 	}
 
 	content, err := os.ReadFile(filePath)
@@ -436,7 +437,13 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 		slog.Error("Error creating file history version", "error", err)
 	}
 
-	edit.filetracker.RecordRead(edit.ctx, sessionID, filePath)
+	snapshot, snapErr := filetracker.SnapshotFromPath(filePath)
+	if snapErr != nil {
+		return fantasy.ToolResponse{}, fmt.Errorf("failed to snapshot file after replace edit: %w", snapErr)
+	}
+	if err := edit.filetracker.RecordRead(edit.ctx, sessionID, filePath, snapshot); err != nil {
+		return fantasy.ToolResponse{}, fmt.Errorf("failed to record file read: %w", err)
+	}
 
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse("Content replaced in file: "+filePath),

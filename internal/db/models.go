@@ -32,9 +32,16 @@ type Message struct {
 }
 
 type ReadFile struct {
-	SessionID string `json:"session_id"`
-	Path      string `json:"path"`
-	ReadAt    int64  `json:"read_at"` // Unix timestamp when file was last read
+	SessionID           string `json:"session_id"`
+	Path                string `json:"path"`
+	ReadAt              int64  `json:"read_at"`
+	LastReadAt          int64  `json:"last_read_at"`
+	LastReadMtimeNs     int64  `json:"last_read_mtime_ns"`
+	LastReadSize        int64  `json:"last_read_size"`
+	LastIncludedAt      int64  `json:"last_included_at"`
+	LastIncludedMtimeNs int64  `json:"last_included_mtime_ns"`
+	LastIncludedSize    int64  `json:"last_included_size"`
+	LastIncludedEpoch   int64  `json:"last_included_epoch"`
 }
 
 type Session struct {
@@ -49,4 +56,5 @@ type Session struct {
 	CreatedAt        int64          `json:"created_at"`
 	SummaryMessageID sql.NullString `json:"summary_message_id"`
 	Todos            sql.NullString `json:"todos"`
+	ContextEpoch     int64          `json:"context_epoch"`
 }

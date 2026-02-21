@@ -1,116 +1,130 @@
 package filetracker
 
 import (
-	"context"
+	"os"
+	"path/filepath"
 	"testing"
-	"testing/synctest"
-	"time"
 
 	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/session"
 	"github.com/stretchr/testify/require"
 )
 
 type testEnv struct {
-	ctx context.Context
-	q   *db.Queries
-	svc Service
+	q        *db.Queries
+	sessions session.Service
+	svc      Service
 }
 
 func setupTest(t *testing.T) *testEnv {
 	t.Helper()
 
+	workingDir := t.TempDir()
 	conn, err := db.Connect(t.Context(), t.TempDir())
 	require.NoError(t, err)
 	t.Cleanup(func() { conn.Close() })
 
 	q := db.New(conn)
+	sessions := session.NewService(q, conn)
+
 	return &testEnv{
-		ctx: t.Context(),
-		q:   q,
-		svc: NewService(q),
+		q:        q,
+		sessions: sessions,
+		svc:      NewService(q, sessions, workingDir),
 	}
 }
 
 func (e *testEnv) createSession(t *testing.T, sessionID string) {
 	t.Helper()
-	_, err := e.q.CreateSession(e.ctx, db.CreateSessionParams{
+	_, err := e.q.CreateSession(t.Context(), db.CreateSessionParams{
 		ID:    sessionID,
 		Title: "Test Session",
 	})
 	require.NoError(t, err)
 }
 
-func TestService_RecordRead(t *testing.T) {
-	env := setupTest(t)
+func createFile(t *testing.T, dir, relPath, content string) string {
+	t.Helper()
+	absPath := filepath.Join(dir, relPath)
+	require.NoError(t, os.MkdirAll(filepath.Dir(absPath), 0o755))
+	require.NoError(t, os.WriteFile(absPath, []byte(content), 0o644))
+	return absPath
+}
 
-	sessionID := "test-session-1"
-	path := "/path/to/file.go"
+func TestChangedSinceRead(t *testing.T) {
+	env := setupTest(t)
+	sessionID := "test-session"
 	env.createSession(t, sessionID)
 
-	env.svc.RecordRead(env.ctx, sessionID, path)
+	workingDir := t.TempDir()
+	tracker := NewService(env.q, env.sessions, workingDir)
+	filePath := createFile(t, workingDir, "a.txt", "hello")
 
-	lastRead := env.svc.LastReadTime(env.ctx, sessionID, path)
-	require.False(t, lastRead.IsZero(), "expected non-zero time after recording read")
-	require.WithinDuration(t, time.Now(), lastRead, 2*time.Second)
+	snapshot, err := SnapshotFromPath(filePath)
+	require.NoError(t, err)
+	require.NoError(t, tracker.RecordRead(t.Context(), sessionID, filePath, snapshot))
+
+	changed, err := tracker.ChangedSinceRead(t.Context(), sessionID, filePath)
+	require.NoError(t, err)
+	require.False(t, changed)
+
+	require.NoError(t, os.WriteFile(filePath, []byte("changed"), 0o644))
+	changed, err = tracker.ChangedSinceRead(t.Context(), sessionID, filePath)
+	require.NoError(t, err)
+	require.True(t, changed)
 }
 
-func TestService_LastReadTime_NotFound(t *testing.T) {
+func TestInCurrentContext(t *testing.T) {
 	env := setupTest(t)
-
-	lastRead := env.svc.LastReadTime(env.ctx, "nonexistent-session", "/nonexistent/path")
-	require.True(t, lastRead.IsZero(), "expected zero time for unread file")
-}
-
-func TestService_RecordRead_UpdatesTimestamp(t *testing.T) {
-	env := setupTest(t)
-
-	sessionID := "test-session-2"
-	path := "/path/to/file.go"
+	sessionID := "test-session-context"
 	env.createSession(t, sessionID)
 
-	env.svc.RecordRead(env.ctx, sessionID, path)
-	firstRead := env.svc.LastReadTime(env.ctx, sessionID, path)
-	require.False(t, firstRead.IsZero())
+	workingDir := t.TempDir()
+	tracker := NewService(env.q, env.sessions, workingDir)
+	filePath := createFile(t, workingDir, "a.txt", "hello")
 
-	synctest.Test(t, func(t *testing.T) {
-		time.Sleep(100 * time.Millisecond)
-		synctest.Wait()
-		env.svc.RecordRead(env.ctx, sessionID, path)
-		secondRead := env.svc.LastReadTime(env.ctx, sessionID, path)
+	inCtx, err := tracker.InCurrentContext(t.Context(), sessionID, filePath)
+	require.NoError(t, err)
+	require.False(t, inCtx)
 
-		require.False(t, secondRead.Before(firstRead), "second read time should not be before first")
-	})
+	snapshot, err := SnapshotFromPath(filePath)
+	require.NoError(t, err)
+	require.NoError(t, tracker.RecordIncludedInContext(t.Context(), sessionID, filePath, snapshot))
+
+	inCtx, err = tracker.InCurrentContext(t.Context(), sessionID, filePath)
+	require.NoError(t, err)
+	require.True(t, inCtx)
+
+	sess, err := env.sessions.Get(t.Context(), sessionID)
+	require.NoError(t, err)
+	sess.ContextEpoch++
+	_, err = env.sessions.Save(t.Context(), sess)
+	require.NoError(t, err)
+
+	inCtx, err = tracker.InCurrentContext(t.Context(), sessionID, filePath)
+	require.NoError(t, err)
+	require.False(t, inCtx)
 }
 
-func TestService_RecordRead_DifferentSessions(t *testing.T) {
+func TestCanonicalPathSameForRelativeAndAbsolute(t *testing.T) {
 	env := setupTest(t)
-
-	path := "/shared/file.go"
-	session1, session2 := "session-1", "session-2"
-	env.createSession(t, session1)
-	env.createSession(t, session2)
-
-	env.svc.RecordRead(env.ctx, session1, path)
-
-	lastRead1 := env.svc.LastReadTime(env.ctx, session1, path)
-	require.False(t, lastRead1.IsZero())
-
-	lastRead2 := env.svc.LastReadTime(env.ctx, session2, path)
-	require.True(t, lastRead2.IsZero(), "session 2 should not see session 1's read")
-}
-
-func TestService_RecordRead_DifferentPaths(t *testing.T) {
-	env := setupTest(t)
-
-	sessionID := "test-session-3"
-	path1, path2 := "/path/to/file1.go", "/path/to/file2.go"
+	sessionID := "test-session-canonical"
 	env.createSession(t, sessionID)
 
-	env.svc.RecordRead(env.ctx, sessionID, path1)
+	workingDir := t.TempDir()
+	tracker := NewService(env.q, env.sessions, workingDir)
+	filePath := createFile(t, workingDir, filepath.Join("dir", "a.txt"), "hello")
 
-	lastRead1 := env.svc.LastReadTime(env.ctx, sessionID, path1)
-	require.False(t, lastRead1.IsZero())
+	absSnapshot, err := SnapshotFromPath(filePath)
+	require.NoError(t, err)
+	require.NoError(t, tracker.RecordRead(t.Context(), sessionID, filePath, absSnapshot))
 
-	lastRead2 := env.svc.LastReadTime(env.ctx, sessionID, path2)
-	require.True(t, lastRead2.IsZero(), "path2 should not be recorded")
+	relSnapshot, err := SnapshotFromPath(filePath)
+	require.NoError(t, err)
+	require.NoError(t, tracker.RecordRead(t.Context(), sessionID, filepath.Join("dir", "a.txt"), relSnapshot))
+
+	files, err := tracker.ListReadFiles(t.Context(), sessionID)
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	require.Equal(t, filepath.Clean(filePath), filepath.Clean(files[0]))
 }

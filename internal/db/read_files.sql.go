@@ -10,7 +10,7 @@ import (
 )
 
 const getFileRead = `-- name: GetFileRead :one
-SELECT session_id, path, read_at FROM read_files
+SELECT session_id, path, read_at, last_read_at, last_read_mtime_ns, last_read_size, last_included_at, last_included_mtime_ns, last_included_size, last_included_epoch FROM read_files
 WHERE session_id = ? AND path = ? LIMIT 1
 `
 
@@ -26,32 +26,22 @@ func (q *Queries) GetFileRead(ctx context.Context, arg GetFileReadParams) (ReadF
 		&i.SessionID,
 		&i.Path,
 		&i.ReadAt,
+		&i.LastReadAt,
+		&i.LastReadMtimeNs,
+		&i.LastReadSize,
+		&i.LastIncludedAt,
+		&i.LastIncludedMtimeNs,
+		&i.LastIncludedSize,
+		&i.LastIncludedEpoch,
 	)
 	return i, err
 }
 
-const recordFileRead = `-- name: RecordFileRead :exec
-INSERT INTO read_files (
-    session_id,
-    path,
-    read_at
-) VALUES (
-    ?,
-    ?,
-    strftime('%s', 'now')
-) ON CONFLICT(path, session_id) DO UPDATE SET
-    read_at = excluded.read_at
-`
-
-type RecordFileReadParams struct {
-	SessionID string `json:"session_id"`
-	Path      string `json:"path"`
-}
-
 const listSessionReadFiles = `-- name: ListSessionReadFiles :many
-SELECT session_id, path, read_at FROM read_files
+SELECT session_id, path, read_at, last_read_at, last_read_mtime_ns, last_read_size, last_included_at, last_included_mtime_ns, last_included_size, last_included_epoch FROM read_files
 WHERE session_id = ?
-ORDER BY read_at DESC
+  AND (last_read_at > 0 OR last_included_at > 0)
+ORDER BY MAX(last_read_at, last_included_at) DESC
 `
 
 func (q *Queries) ListSessionReadFiles(ctx context.Context, sessionID string) ([]ReadFile, error) {
@@ -67,6 +57,13 @@ func (q *Queries) ListSessionReadFiles(ctx context.Context, sessionID string) ([
 			&i.SessionID,
 			&i.Path,
 			&i.ReadAt,
+			&i.LastReadAt,
+			&i.LastReadMtimeNs,
+			&i.LastReadSize,
+			&i.LastIncludedAt,
+			&i.LastIncludedMtimeNs,
+			&i.LastIncludedSize,
+			&i.LastIncludedEpoch,
 		); err != nil {
 			return nil, err
 		}
@@ -81,10 +78,85 @@ func (q *Queries) ListSessionReadFiles(ctx context.Context, sessionID string) ([
 	return items, nil
 }
 
+const recordFileIncludedInContext = `-- name: RecordFileIncludedInContext :exec
+INSERT INTO read_files (
+    session_id,
+    path,
+    read_at,
+    last_included_at,
+    last_included_mtime_ns,
+    last_included_size,
+    last_included_epoch
+) VALUES (
+    ?,
+    ?,
+    strftime('%s', 'now'),
+    strftime('%s', 'now'),
+    ?,
+    ?,
+    ?
+) ON CONFLICT(path, session_id) DO UPDATE SET
+    read_at = excluded.read_at,
+    last_included_at = excluded.last_included_at,
+    last_included_mtime_ns = excluded.last_included_mtime_ns,
+    last_included_size = excluded.last_included_size,
+    last_included_epoch = excluded.last_included_epoch
+`
+
+type RecordFileIncludedInContextParams struct {
+	SessionID           string `json:"session_id"`
+	Path                string `json:"path"`
+	LastIncludedMtimeNs int64  `json:"last_included_mtime_ns"`
+	LastIncludedSize    int64  `json:"last_included_size"`
+	LastIncludedEpoch   int64  `json:"last_included_epoch"`
+}
+
+func (q *Queries) RecordFileIncludedInContext(ctx context.Context, arg RecordFileIncludedInContextParams) error {
+	_, err := q.exec(ctx, q.recordFileIncludedInContextStmt, recordFileIncludedInContext,
+		arg.SessionID,
+		arg.Path,
+		arg.LastIncludedMtimeNs,
+		arg.LastIncludedSize,
+		arg.LastIncludedEpoch,
+	)
+	return err
+}
+
+const recordFileRead = `-- name: RecordFileRead :exec
+INSERT INTO read_files (
+    session_id,
+    path,
+    read_at,
+    last_read_at,
+    last_read_mtime_ns,
+    last_read_size
+) VALUES (
+    ?,
+    ?,
+    strftime('%s', 'now'),
+    strftime('%s', 'now'),
+    ?,
+    ?
+) ON CONFLICT(path, session_id) DO UPDATE SET
+    read_at = excluded.read_at,
+    last_read_at = excluded.last_read_at,
+    last_read_mtime_ns = excluded.last_read_mtime_ns,
+    last_read_size = excluded.last_read_size
+`
+
+type RecordFileReadParams struct {
+	SessionID       string `json:"session_id"`
+	Path            string `json:"path"`
+	LastReadMtimeNs int64  `json:"last_read_mtime_ns"`
+	LastReadSize    int64  `json:"last_read_size"`
+}
+
 func (q *Queries) RecordFileRead(ctx context.Context, arg RecordFileReadParams) error {
 	_, err := q.exec(ctx, q.recordFileReadStmt, recordFileRead,
 		arg.SessionID,
 		arg.Path,
+		arg.LastReadMtimeNs,
+		arg.LastReadSize,
 	)
 	return err
 }

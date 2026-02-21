@@ -670,6 +670,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	currentSession.SummaryMessageID = summaryMessage.ID
 	currentSession.CompletionTokens = usage.OutputTokens
 	currentSession.PromptTokens = 0
+	currentSession.ContextEpoch++
 	_, err = a.sessions.Save(genCtx, currentSession)
 	return err
 }

@@ -184,17 +184,16 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				Tools:                fetchTools,
 			})
 
-			return c.runSubAgentWithOptions(
-				ctx,
-				agent,
-				validationResult.SessionID,
-				validationResult.AgentMessageID,
-				call.ID,
-				fullPrompt,
-				"Fetch Analysis",
-				func(sessionID string) {
+			return c.runSubAgent(ctx, subAgentParams{
+				Agent:          agent,
+				SessionID:      validationResult.SessionID,
+				AgentMessageID: validationResult.AgentMessageID,
+				ToolCallID:     call.ID,
+				Prompt:         fullPrompt,
+				SessionTitle:   "Fetch Analysis",
+				SessionSetup: func(sessionID string) {
 					c.permissions.AutoApproveSession(sessionID)
 				},
-			)
+			})
 		}), nil
 }

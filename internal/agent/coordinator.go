@@ -941,43 +941,37 @@ func (c *coordinator) refreshApiKeyTemplate(ctx context.Context, providerCfg con
 	return nil
 }
 
+// subAgentParams holds the parameters for running a sub-agent.
+type subAgentParams struct {
+	Agent          SessionAgent
+	SessionID      string
+	AgentMessageID string
+	ToolCallID     string
+	Prompt         string
+	SessionTitle   string
+	// SessionSetup is an optional callback invoked after session creation
+	// but before agent execution, for custom session configuration.
+	SessionSetup func(sessionID string)
+}
+
 // runSubAgent runs a sub-agent and handles session management and cost accumulation.
 // It creates a sub-session, runs the agent with the given prompt, and propagates
 // the cost to the parent session.
-func (c *coordinator) runSubAgent(
-	ctx context.Context,
-	agent SessionAgent,
-	sessionID, agentMessageID, toolCallID string,
-	prompt string,
-	sessionTitle string,
-) (fantasy.ToolResponse, error) {
-	return c.runSubAgentWithOptions(ctx, agent, sessionID, agentMessageID, toolCallID, prompt, sessionTitle, nil)
-}
-
-// runSubAgentWithOptions runs a sub-agent with additional session configuration options.
-// The sessionSetup function is called after session creation but before agent execution.
-func (c *coordinator) runSubAgentWithOptions(
-	ctx context.Context,
-	agent SessionAgent,
-	sessionID, agentMessageID, toolCallID string,
-	prompt string,
-	sessionTitle string,
-	sessionSetup func(sessionID string),
-) (fantasy.ToolResponse, error) {
+func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (fantasy.ToolResponse, error) {
 	// Create sub-session
-	agentToolSessionID := c.sessions.CreateAgentToolSessionID(agentMessageID, toolCallID)
-	session, err := c.sessions.CreateTaskSession(ctx, agentToolSessionID, sessionID, sessionTitle)
+	agentToolSessionID := c.sessions.CreateAgentToolSessionID(params.AgentMessageID, params.ToolCallID)
+	session, err := c.sessions.CreateTaskSession(ctx, agentToolSessionID, params.SessionID, params.SessionTitle)
 	if err != nil {
 		return fantasy.ToolResponse{}, fmt.Errorf("create session: %w", err)
 	}
 
 	// Call session setup function if provided
-	if sessionSetup != nil {
-		sessionSetup(session.ID)
+	if params.SessionSetup != nil {
+		params.SessionSetup(session.ID)
 	}
 
 	// Get model configuration
-	model := agent.Model()
+	model := params.Agent.Model()
 	maxTokens := model.CatwalkCfg.DefaultMaxTokens
 	if model.ModelCfg.MaxTokens != 0 {
 		maxTokens = model.ModelCfg.MaxTokens
@@ -989,9 +983,9 @@ func (c *coordinator) runSubAgentWithOptions(
 	}
 
 	// Run the agent
-	result, err := agent.Run(ctx, SessionAgentCall{
+	result, err := params.Agent.Run(ctx, SessionAgentCall{
 		SessionID:        session.ID,
-		Prompt:           prompt,
+		Prompt:           params.Prompt,
 		MaxOutputTokens:  maxTokens,
 		ProviderOptions:  getProviderOptions(model, providerCfg),
 		Temperature:      model.ModelCfg.Temperature,
@@ -1005,7 +999,7 @@ func (c *coordinator) runSubAgentWithOptions(
 	}
 
 	// Update parent session cost
-	if err := c.updateParentSessionCost(ctx, session.ID, sessionID); err != nil {
+	if err := c.updateParentSessionCost(ctx, session.ID, params.SessionID); err != nil {
 		return fantasy.ToolResponse{}, err
 	}
 

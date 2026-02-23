@@ -186,12 +186,12 @@ func NewViewTool(
 
 			// Read the file content
 			content, lineCount, err := readTextFile(filePath, params.Offset, params.Limit)
+			if err != nil {
+				return fantasy.ToolResponse{}, fmt.Errorf("error reading file: %w", err)
+			}
 			isValidUt8 := utf8.ValidString(content)
 			if !isValidUt8 {
 				return fantasy.NewTextErrorResponse("File content is not valid UTF-8"), nil
-			}
-			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error reading file: %w", err)
 			}
 
 			notifyLSPs(ctx, lspManager, filePath)

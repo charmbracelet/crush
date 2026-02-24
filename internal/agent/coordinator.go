@@ -317,9 +317,16 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 	case google.Name:
 		_, hasReasoning := mergedOptions["thinking_config"]
 		if !hasReasoning {
-			mergedOptions["thinking_config"] = map[string]any{
-				"thinking_budget":  2000,
-				"include_thoughts": true,
+			if strings.HasPrefix(model.CatwalkCfg.ID, "gemini-2") {
+				mergedOptions["thinking_config"] = map[string]any{
+					"thinking_budget":  2000,
+					"include_thoughts": true,
+				}
+			} else {
+				mergedOptions["thinking_config"] = map[string]any{
+					"thinking_level":   model.ModelCfg.ReasoningEffort,
+					"include_thoughts": true,
+				}
 			}
 		}
 		parsed, err := google.ParseOptions(mergedOptions)

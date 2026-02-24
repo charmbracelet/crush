@@ -82,7 +82,19 @@ func (w *FastGlobWalker) ShouldSkipDir(path string) bool {
 	return w.directoryLister.shouldIgnore(path, nil, true)
 }
 
-func GlobWithDoubleStar(pattern, searchPath string, limit int) ([]string, bool, error) {
+// Glob globs files.
+//
+// Does not respect gitignore.
+func Glob(pattern string, cwd string, limit int) ([]string, bool, error) {
+	return globWithDoubleStar(pattern, cwd, limit, false)
+}
+
+// GlobGitignoreAware globs files respecting gitignore.
+func GlobGitignoreAware(pattern string, cwd string, limit int) ([]string, bool, error) {
+	return globWithDoubleStar(pattern, cwd, limit, true)
+}
+
+func globWithDoubleStar(pattern, searchPath string, limit int, gitignore bool) ([]string, bool, error) {
 	// Normalize pattern to forward slashes on Windows so their config can use
 	// backslashes
 	pattern = filepath.ToSlash(pattern)
@@ -101,11 +113,11 @@ func GlobWithDoubleStar(pattern, searchPath string, limit int) ([]string, bool, 
 
 		isDir := d.IsDir()
 		if isDir {
-			if walker.ShouldSkipDir(path) {
+			if gitignore && walker.ShouldSkipDir(path) {
 				return filepath.SkipDir
 			}
 		} else {
-			if walker.ShouldSkip(path) {
+			if gitignore && walker.ShouldSkip(path) {
 				return nil
 			}
 		}

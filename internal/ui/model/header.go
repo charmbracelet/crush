@@ -17,10 +17,11 @@ import (
 )
 
 const (
-	headerDiag     = "╱"
-	minHeaderDiags = 3
-	leftPadding    = 1
-	rightPadding   = 1
+	headerDiag           = "╱"
+	minHeaderDiags       = 3
+	leftPadding          = 1
+	rightPadding         = 1
+	diagToDetailsSpacing = 1 // space between diagonal pattern and details section
 )
 
 type header struct {
@@ -73,7 +74,7 @@ func (h *header) drawHeader(
 	var b strings.Builder
 	b.WriteString(h.compactLogo)
 
-	availDetailWidth := width - leftPadding - rightPadding - lipgloss.Width(b.String()) - minHeaderDiags
+	availDetailWidth := width - leftPadding - rightPadding - lipgloss.Width(b.String()) - minHeaderDiags - diagToDetailsSpacing
 	details := renderHeaderDetails(
 		h.com,
 		session,
@@ -86,7 +87,8 @@ func (h *header) drawHeader(
 		lipgloss.Width(b.String()) -
 		lipgloss.Width(details) -
 		leftPadding -
-		rightPadding
+		rightPadding -
+		diagToDetailsSpacing
 
 	if remainingWidth > 0 {
 		b.WriteString(t.Header.Diagonals.Render(
@@ -143,8 +145,8 @@ func renderHeaderDetails(
 	const dirTrimLimit = 4
 	cfg := com.Config()
 	cwd := fsext.DirTrim(fsext.PrettyPath(cfg.WorkingDir()), dirTrimLimit)
-	cwd = ansi.Truncate(cwd, max(0, availWidth-lipgloss.Width(metadata)), "…")
 	cwd = t.Header.WorkingDir.Render(cwd)
 
-	return cwd + metadata
+	result := cwd + metadata
+	return ansi.Truncate(result, max(0, availWidth), "…")
 }

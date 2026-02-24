@@ -219,15 +219,19 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 		switch p.ID {
 		// Handle specific providers that require additional configuration
 		case catwalk.InferenceProviderVertexAI:
-			if !hasVertexCredentials(env) {
+			var (
+				project  = env.Get("VERTEXAI_PROJECT")
+				location = env.Get("VERTEXAI_LOCATION")
+			)
+			if project == "" || location == "" {
 				if configExists {
 					slog.Warn("Skipping Vertex AI provider due to missing credentials")
 					c.Providers.Del(string(p.ID))
 				}
 				continue
 			}
-			prepared.ExtraParams["project"] = env.Get("VERTEXAI_PROJECT")
-			prepared.ExtraParams["location"] = env.Get("VERTEXAI_LOCATION")
+			prepared.ExtraParams["project"] = project
+			prepared.ExtraParams["location"] = location
 		case catwalk.InferenceProviderAzure:
 			endpoint, err := resolver.ResolveValue(p.APIEndpoint)
 			if err != nil || endpoint == "" {
@@ -278,13 +282,9 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 
 		// Make sure the provider ID is set
 		providerConfig.ID = id
-		if providerConfig.Name == "" {
-			providerConfig.Name = id // Use ID as name if not set
-		}
+		providerConfig.Name = cmp.Or(providerConfig.Name, id) // Use ID as name if not set
 		// default to OpenAI if not set
-		if providerConfig.Type == "" {
-			providerConfig.Type = catwalk.TypeOpenAICompat
-		}
+		providerConfig.Type = cmp.Or(providerConfig.Type, catwalk.TypeOpenAICompat)
 		if !slices.Contains(catwalk.KnownProviderTypes(), providerConfig.Type) && providerConfig.Type != hyper.Name {
 			slog.Warn("Skipping custom provider due to unsupported provider type", "provider", id)
 			c.Providers.Del(id)
@@ -412,9 +412,7 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 			c.Options.Attribution.TrailerStyle = TrailerStyleAssistedBy
 		}
 	}
-	if c.Options.InitializeAs == "" {
-		c.Options.InitializeAs = defaultInitializeAs
-	}
+	c.Options.InitializeAs = cmp.Or(c.Options.InitializeAs, defaultInitializeAs)
 }
 
 // applyLSPDefaults applies default values from powernap to LSP configurations
@@ -445,9 +443,7 @@ func (c *Config) applyLSPDefaults() {
 		if len(cfg.RootMarkers) == 0 {
 			cfg.RootMarkers = base.RootMarkers
 		}
-		if cfg.Command == "" {
-			cfg.Command = base.Command
-		}
+		cfg.Command = cmp.Or(cfg.Command, base.Command)
 		if len(cfg.Args) == 0 {
 			cfg.Args = base.Args
 		}
@@ -683,12 +679,6 @@ func loadFromBytes(configs [][]byte) (*Config, error) {
 		return nil, err
 	}
 	return &config, nil
-}
-
-func hasVertexCredentials(env env.Env) bool {
-	hasProject := env.Get("VERTEXAI_PROJECT") != ""
-	hasLocation := env.Get("VERTEXAI_LOCATION") != ""
-	return hasProject && hasLocation
 }
 
 func hasAWSCredentials(env env.Env) bool {

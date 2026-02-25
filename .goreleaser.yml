@@ -297,6 +297,8 @@ winget:
           owner: microsoft
           name: winget-pkgs
           branch: master
+        body: |
+          /cc @andreynering
 
 changelog:
   sort: asc

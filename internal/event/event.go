@@ -84,7 +84,7 @@ func send(event string, props ...any) {
 
 // Error logs an error event to PostHog with the error type and message.
 func Error(errToLog any, props ...any) {
-	if client == nil {
+	if client == nil || errToLog == nil {
 		return
 	}
 	posthogErr := client.Enqueue(posthog.NewDefaultException(

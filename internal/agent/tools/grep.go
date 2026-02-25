@@ -3,6 +3,7 @@ package tools
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -15,53 +16,42 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/fsext"
 )
 
 // regexCache provides thread-safe caching of compiled regex patterns
 type regexCache struct {
-	cache map[string]*regexp.Regexp
-	mu    sync.RWMutex
+	*csync.Map[string, *regexp.Regexp]
 }
 
 // newRegexCache creates a new regex cache
 func newRegexCache() *regexCache {
 	return &regexCache{
-		cache: make(map[string]*regexp.Regexp),
+		Map: csync.NewMap[string, *regexp.Regexp](),
 	}
 }
 
 // get retrieves a compiled regex from cache or compiles and caches it
 func (rc *regexCache) get(pattern string) (*regexp.Regexp, error) {
-	// Try to get from cache first (read lock)
-	rc.mu.RLock()
-	if regex, exists := rc.cache[pattern]; exists {
-		rc.mu.RUnlock()
-		return regex, nil
-	}
-	rc.mu.RUnlock()
+	var rerr error
+	return rc.GetOrSet(pattern, func() *regexp.Regexp {
+		regex, err := regexp.Compile(pattern)
+		if err != nil {
+			rerr = err
+		}
+		return regex
+	}), rerr
+}
 
-	// Compile the regex (write lock)
-	rc.mu.Lock()
-	defer rc.mu.Unlock()
-
-	// Double-check in case another goroutine compiled it while we waited
-	if regex, exists := rc.cache[pattern]; exists {
-		return regex, nil
-	}
-
-	// Compile and cache the regex
-	regex, err := regexp.Compile(pattern)
-	if err != nil {
-		return nil, err
-	}
-
-	rc.cache[pattern] = regex
-	return regex, nil
+// ResetCache clears compiled regex caches to prevent unbounded growth across sessions.
+func ResetCache() {
+	searchRegexCache.Reset(map[string]*regexp.Regexp{})
+	globRegexCache.Reset(map[string]*regexp.Regexp{})
 }
 
 // Global regex cache instances
@@ -112,7 +102,7 @@ func escapeRegexPattern(pattern string) string {
 	return escaped
 }
 
-func NewGrepTool(workingDir string) fantasy.AgentTool {
+func NewGrepTool(workingDir string, config config.ToolGrep) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		GrepToolName,
 		string(grepDescription),
@@ -121,18 +111,17 @@ func NewGrepTool(workingDir string) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse("pattern is required"), nil
 			}
 
-			// If literal_text is true, escape the pattern
 			searchPattern := params.Pattern
 			if params.LiteralText {
 				searchPattern = escapeRegexPattern(params.Pattern)
 			}
 
-			searchPath := params.Path
-			if searchPath == "" {
-				searchPath = workingDir
-			}
+			searchPath := cmp.Or(params.Path, workingDir)
 
-			matches, truncated, err := searchFiles(ctx, searchPattern, searchPath, params.Include, 100)
+			searchCtx, cancel := context.WithTimeout(ctx, config.GetTimeout())
+			defer cancel()
+
+			matches, truncated, err := searchFiles(searchCtx, searchPattern, searchPath, params.Include, 100)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("error searching files: %v", err)), nil
 			}

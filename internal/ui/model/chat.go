@@ -59,6 +59,10 @@ type Chat struct {
 
 	// Pending single click action (delayed to detect double-click)
 	pendingClickID int // Incremented on each click to invalidate old pending clicks
+
+	// follow is a flag to indicate whether the view should auto-scroll to
+	// bottom on new messages.
+	follow bool
 }
 
 // NewChat creates a new instance of [Chat] that handles chat interactions and
@@ -93,8 +97,8 @@ func (m *Chat) Draw(scr uv.Screen, area uv.Rectangle) {
 func (m *Chat) SetSize(width, height int) {
 	m.list.SetSize(width, height)
 	// Anchor to bottom if we were at the bottom.
-	if m.list.AtBottom() {
-		m.list.ScrollToBottom()
+	if m.AtBottom() {
+		m.ScrollToBottom()
 	}
 }
 
@@ -120,7 +124,7 @@ func (m *Chat) SetMessages(msgs ...chat.MessageItem) {
 		items[i] = msg
 	}
 	m.list.SetItems(items...)
-	m.list.ScrollToBottom()
+	m.ScrollToBottom()
 }
 
 // AppendMessages appends a new message item to the chat list.
@@ -239,31 +243,72 @@ func (m *Chat) Blur() {
 	m.list.Blur()
 }
 
+// AtBottom returns whether the chat list is currently scrolled to the bottom.
+func (m *Chat) AtBottom() bool {
+	return m.list.AtBottom()
+}
+
+// Follow returns whether the chat view is in follow mode (auto-scroll to
+// bottom on new messages).
+func (m *Chat) Follow() bool {
+	return m.follow
+}
+
+// ScrollToBottom scrolls the chat view to the bottom.
+func (m *Chat) ScrollToBottom() {
+	m.list.ScrollToBottom()
+	m.follow = true // Enable follow mode when user scrolls to bottom
+}
+
+// ScrollToTop scrolls the chat view to the top.
+func (m *Chat) ScrollToTop() {
+	m.list.ScrollToTop()
+	m.follow = false // Disable follow mode when user scrolls up
+}
+
+// ScrollBy scrolls the chat view by the given number of line deltas.
+func (m *Chat) ScrollBy(lines int) {
+	m.list.ScrollBy(lines)
+	m.follow = lines > 0 && m.AtBottom() // Disable follow mode if user scrolls up
+}
+
+// ScrollToSelected scrolls the chat view to the selected item.
+func (m *Chat) ScrollToSelected() {
+	m.list.ScrollToSelected()
+	m.follow = m.AtBottom() // Disable follow mode if user scrolls up
+}
+
+// ScrollToIndex scrolls the chat view to the item at the given index.
+func (m *Chat) ScrollToIndex(index int) {
+	m.list.ScrollToIndex(index)
+	m.follow = m.AtBottom() // Disable follow mode if user scrolls up
+}
+
 // ScrollToTopAndAnimate scrolls the chat view to the top and returns a command to restart
 // any paused animations that are now visible.
 func (m *Chat) ScrollToTopAndAnimate() tea.Cmd {
-	m.list.ScrollToTop()
+	m.ScrollToTop()
 	return m.RestartPausedVisibleAnimations()
 }
 
 // ScrollToBottomAndAnimate scrolls the chat view to the bottom and returns a command to
 // restart any paused animations that are now visible.
 func (m *Chat) ScrollToBottomAndAnimate() tea.Cmd {
-	m.list.ScrollToBottom()
+	m.ScrollToBottom()
 	return m.RestartPausedVisibleAnimations()
 }
 
 // ScrollByAndAnimate scrolls the chat view by the given number of line deltas and returns
 // a command to restart any paused animations that are now visible.
 func (m *Chat) ScrollByAndAnimate(lines int) tea.Cmd {
-	m.list.ScrollBy(lines)
+	m.ScrollBy(lines)
 	return m.RestartPausedVisibleAnimations()
 }
 
 // ScrollToSelectedAndAnimate scrolls the chat view to the selected item and returns a
 // command to restart any paused animations that are now visible.
 func (m *Chat) ScrollToSelectedAndAnimate() tea.Cmd {
-	m.list.ScrollToSelected()
+	m.ScrollToSelected()
 	return m.RestartPausedVisibleAnimations()
 }
 
@@ -438,10 +483,10 @@ func (m *Chat) MessageItem(id string) chat.MessageItem {
 func (m *Chat) ToggleExpandedSelectedItem() {
 	if expandable, ok := m.list.SelectedItem().(chat.Expandable); ok {
 		if !expandable.ToggleExpanded() {
-			m.list.ScrollToIndex(m.list.Selected())
+			m.ScrollToIndex(m.list.Selected())
 		}
-		if m.list.AtBottom() {
-			m.list.ScrollToBottom()
+		if m.AtBottom() {
+			m.ScrollToBottom()
 		}
 	}
 }
@@ -549,11 +594,11 @@ func (m *Chat) HandleDelayedClick(msg DelayedClickMsg) bool {
 		// Toggle expansion if applicable.
 		if expandable, ok := selectedItem.(chat.Expandable); ok {
 			if !expandable.ToggleExpanded() {
-				m.list.ScrollToIndex(m.list.Selected())
+				m.ScrollToIndex(m.list.Selected())
 			}
 		}
-		if m.list.AtBottom() {
-			m.list.ScrollToBottom()
+		if m.AtBottom() {
+			m.ScrollToBottom()
 		}
 		return handled
 	}
@@ -745,10 +790,7 @@ func (m *Chat) selectWord(itemIdx, x, itemY int) {
 	// Adjust x for the item's left padding (border + padding) to get content column.
 	// The mouse x is in viewport space, but we need content space for boundary detection.
 	offset := chat.MessageLeftPaddingTotal
-	contentX := x - offset
-	if contentX < 0 {
-		contentX = 0
-	}
+	contentX := max(x-offset, 0)
 
 	line := ansi.Strip(lines[itemY])
 	startCol, endCol := findWordBoundaries(line, contentX)

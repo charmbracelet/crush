@@ -27,9 +27,7 @@ type CommandType uint
 func (c CommandType) String() string { return []string{"System", "User", "MCP"}[c] }
 
 const (
-	sidebarCompactModeBreakpoint   = 120
-	defaultCommandsDialogMaxHeight = 20
-	defaultCommandsDialogMaxWidth  = 70
+	sidebarCompactModeBreakpoint = 120
 )
 
 const (
@@ -51,8 +49,11 @@ type Commands struct {
 		Close key.Binding
 	}
 
-	sessionID string // can be empty for non-session-specific commands
-	selected  CommandType
+	sessionID  string
+	hasSession bool
+	hasTodos   bool
+	hasQueue   bool
+	selected   CommandType
 
 	spinner spinner.Model
 	loading bool
@@ -70,11 +71,14 @@ type Commands struct {
 var _ Dialog = (*Commands)(nil)
 
 // NewCommands creates a new commands dialog.
-func NewCommands(com *common.Common, sessionID string, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) (*Commands, error) {
+func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, hasQueue bool, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) (*Commands, error) {
 	c := &Commands{
 		com:            com,
 		selected:       SystemCommands,
 		sessionID:      sessionID,
+		hasSession:     hasSession,
+		hasTodos:       hasTodos,
+		hasQueue:       hasQueue,
 		customCommands: customCommands,
 		mcpPrompts:     mcpPrompts,
 	}
@@ -155,19 +159,17 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 			c.list.Focus()
 			if c.list.IsSelectedFirst() {
 				c.list.SelectLast()
-				c.list.ScrollToBottom()
-				break
+			} else {
+				c.list.SelectPrev()
 			}
-			c.list.SelectPrev()
 			c.list.ScrollToSelected()
 		case key.Matches(msg, c.keyMap.Next):
 			c.list.Focus()
 			if c.list.IsSelectedLast() {
 				c.list.SelectFirst()
-				c.list.ScrollToTop()
-				break
+			} else {
+				c.list.SelectNext()
 			}
-			c.list.SelectNext()
 			c.list.ScrollToSelected()
 		case key.Matches(msg, c.keyMap.Select):
 			if selectedItem := c.list.SelectedItem(); selectedItem != nil {
@@ -240,8 +242,8 @@ func commandsRadioView(sty *styles.Styles, selected CommandType, hasUserCmds boo
 // Draw implements [Dialog].
 func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := c.com.Styles
-	width := max(0, min(defaultCommandsDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	height := max(0, min(defaultCommandsDialogMaxHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
+	width := max(0, min(defaultDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
+	height := max(0, min(defaultDialogHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
 	if area.Dx() != c.windowWidth && c.selected == SystemCommands {
 		c.windowWidth = area.Dx()
 		// since some items in the list depend on width (e.g. toggle sidebar command),
@@ -391,7 +393,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	}
 
 	// Only show compact command if there's an active session
-	if c.sessionID != "" {
+	if c.hasSession {
 		commands = append(commands, NewCommandItem(c.com.Styles, "summarize", "Summarize Session", "", ActionSummarize{SessionID: c.sessionID}))
 	}
 
@@ -421,10 +423,10 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		}
 	}
 	// Only show toggle compact mode command if window width is larger than compact breakpoint (120)
-	if c.windowWidth >= sidebarCompactModeBreakpoint && c.sessionID != "" {
+	if c.windowWidth >= sidebarCompactModeBreakpoint && c.hasSession {
 		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_sidebar", "Toggle Sidebar", "", ActionToggleCompactMode{}))
 	}
-	if c.sessionID != "" {
+	if c.hasSession {
 		cfg := c.com.Config()
 		agentCfg := cfg.Agents[config.AgentCoder]
 		model := cfg.GetModelByType(agentCfg.Model)
@@ -441,12 +443,27 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		commands = append(commands, NewCommandItem(c.com.Styles, "open_external_editor", "Open External Editor", "ctrl+o", ActionExternalEditor{}))
 	}
 
-	return append(commands,
+	if c.hasTodos || c.hasQueue {
+		var label string
+		switch {
+		case c.hasTodos && c.hasQueue:
+			label = "Toggle To-Dos/Queue"
+		case c.hasQueue:
+			label = "Toggle Queue"
+		default:
+			label = "Toggle To-Dos"
+		}
+		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_pills", label, "ctrl+t", ActionTogglePills{}))
+	}
+
+	commands = append(commands,
 		NewCommandItem(c.com.Styles, "toggle_yolo", "Toggle Yolo Mode", "", ActionToggleYoloMode{}),
 		NewCommandItem(c.com.Styles, "toggle_help", "Toggle Help", "ctrl+g", ActionToggleHelp{}),
 		NewCommandItem(c.com.Styles, "init", "Initialize Project", "", ActionInitializeProject{}),
 		NewCommandItem(c.com.Styles, "quit", "Quit", "ctrl+c", tea.QuitMsg{}),
 	)
+
+	return commands
 }
 
 // SetCustomCommands sets the custom commands and refreshes the view if user commands are currently displayed.

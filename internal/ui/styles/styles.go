@@ -109,10 +109,14 @@ type Styles struct {
 	TextSelection lipgloss.Style
 
 	// LSP and MCP status indicators
-	ItemOfflineIcon lipgloss.Style
-	ItemBusyIcon    lipgloss.Style
-	ItemErrorIcon   lipgloss.Style
-	ItemOnlineIcon  lipgloss.Style
+	ResourceGroupTitle     lipgloss.Style
+	ResourceOfflineIcon    lipgloss.Style
+	ResourceBusyIcon       lipgloss.Style
+	ResourceErrorIcon      lipgloss.Style
+	ResourceOnlineIcon     lipgloss.Style
+	ResourceName           lipgloss.Style
+	ResourceStatus         lipgloss.Style
+	ResourceAdditionalText lipgloss.Style
 
 	// Markdown & Chroma
 	Markdown      ansi.StyleConfig
@@ -317,6 +321,13 @@ type Styles struct {
 		MCPName     lipgloss.Style // The mcp name
 		MCPToolName lipgloss.Style // The mcp tool name
 		MCPArrow    lipgloss.Style // The mcp arrow icon
+
+		// Images and external resources
+		ResourceLoadedText      lipgloss.Style
+		ResourceLoadedIndicator lipgloss.Style
+		ResourceName            lipgloss.Style
+		ResourceSize            lipgloss.Style
+		MediaType               lipgloss.Style
 	}
 
 	// Dialog styles
@@ -1164,6 +1175,13 @@ func DefaultStyles() Styles {
 	s.Tool.MCPToolName = base.Foreground(blueDark)
 	s.Tool.MCPArrow = base.Foreground(blue).SetString(ArrowRightIcon)
 
+	// Loading indicators for images, skills
+	s.Tool.ResourceLoadedText = base.Foreground(green)
+	s.Tool.ResourceLoadedIndicator = base.Foreground(greenDark)
+	s.Tool.ResourceName = base
+	s.Tool.MediaType = base
+	s.Tool.ResourceSize = base.Foreground(fgMuted)
+
 	// Buttons
 	s.ButtonFocus = lipgloss.NewStyle().Foreground(white).Background(secondary)
 	s.ButtonBlur = s.Base.Background(bgSubtle)
@@ -1199,10 +1217,14 @@ func DefaultStyles() Styles {
 	s.Initialize.Accent = s.Base.Foreground(greenDark)
 
 	// LSP and MCP status.
-	s.ItemOfflineIcon = lipgloss.NewStyle().Foreground(charmtone.Squid).SetString("●")
-	s.ItemBusyIcon = s.ItemOfflineIcon.Foreground(charmtone.Citron)
-	s.ItemErrorIcon = s.ItemOfflineIcon.Foreground(charmtone.Coral)
-	s.ItemOnlineIcon = s.ItemOfflineIcon.Foreground(charmtone.Guac)
+	s.ResourceGroupTitle = lipgloss.NewStyle().Foreground(charmtone.Oyster)
+	s.ResourceOfflineIcon = lipgloss.NewStyle().Foreground(charmtone.Iron).SetString("●")
+	s.ResourceBusyIcon = s.ResourceOfflineIcon.Foreground(charmtone.Citron)
+	s.ResourceErrorIcon = s.ResourceOfflineIcon.Foreground(charmtone.Coral)
+	s.ResourceOnlineIcon = s.ResourceOfflineIcon.Foreground(charmtone.Guac)
+	s.ResourceName = lipgloss.NewStyle().Foreground(charmtone.Squid)
+	s.ResourceStatus = lipgloss.NewStyle().Foreground(charmtone.Oyster)
+	s.ResourceAdditionalText = lipgloss.NewStyle().Foreground(charmtone.Oyster)
 
 	// LSP
 	s.LSP.ErrorDiagnostic = s.Base.Foreground(redDark)

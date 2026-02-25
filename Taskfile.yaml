@@ -45,15 +45,36 @@ tasks:
     vars:
       LDFLAGS: '{{if .VERSION}}-ldflags="-X github.com/charmbracelet/crush/internal/version.Version={{.VERSION}}"{{end}}'
     cmds:
-      - "go build {{if .RACE}}-race{{end}} {{.LDFLAGS}} ."
+      - "go build -v {{if .RACE}}-race{{end}} {{.LDFLAGS}} ."
+    sources:
+      - ./**/*.go
+      - go.mod
     generates:
-      - crush
+      - crush{{exeExt}}
 
   run:
     desc: Run build
     cmds:
       - task: build
-      - "./crush {{.CLI_ARGS}} {{if .RACE}}2>race.log{{end}}"
+      - "./crush{{exeExt}} {{.CLI_ARGS}} {{if .RACE}}2>race.log{{end}}"
+
+  run:catwalk:
+    desc: Run build with local Catwalk
+    env:
+      CATWALK_URL: http://localhost:8080
+    cmds:
+      - task: build
+      - ./crush{{exeExt}} {{.CLI_ARGS}}
+
+  run:onboarding:
+    desc: Run build with custom config to test onboarding
+    env:
+      CRUSH_GLOBAL_DATA: tmp/onboarding/data
+      CRUSH_GLOBAL_CONFIG: tmp/onboarding/config
+    cmds:
+      - task: build
+      - rm -rf tmp/onboarding
+      - ./crush{exeExt} {{.CLI_ARGS}}
 
   test:
     desc: Run tests
@@ -77,6 +98,11 @@ tasks:
     cmds:
       - prettier --write internal/cmd/stats/index.html internal/cmd/stats/index.css internal/cmd/stats/index.js
 
+  modernize:
+    desc: Run modernize
+    cmds:
+      - go run golang.org/x/tools/go/analysis/passes/modernize/cmd/modernize@latest -fix -test ./...
+
   dev:
     desc: Run with profiling enabled
     env:
@@ -91,6 +117,9 @@ tasks:
     cmds:
       - task: fetch-tags
       - go install {{.LDFLAGS}} -v .
+    sources:
+      - ./**/*.go
+      - go.mod
 
   profile:cpu:
     desc: 10s CPU profile

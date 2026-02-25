@@ -3,9 +3,11 @@ package lsp
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/stretchr/testify/require"
 )
 
 func TestClient(t *testing.T) {
@@ -23,7 +25,7 @@ func TestClient(t *testing.T) {
 	// but we can still test the basic structure
 	client, err := New(ctx, "test", cfg, config.NewEnvironmentVariableResolver(env.NewFromMap(map[string]string{
 		"THE_CMD": "echo",
-	})), false)
+	})), ".", false)
 	if err != nil {
 		// Expected to fail with echo command, skip the rest
 		t.Skipf("Powernap client creation failed as expected with dummy command: %v", err)
@@ -54,4 +56,17 @@ func TestClient(t *testing.T) {
 		// Expected to fail with echo command
 		t.Logf("Close failed as expected with dummy command: %v", err)
 	}
+}
+
+func TestNilClient(t *testing.T) {
+	t.Parallel()
+
+	var c *Client
+
+	require.False(t, c.HandlesFile("/some/file.go"))
+	require.Equal(t, DiagnosticCounts{}, c.GetDiagnosticCounts())
+	require.Nil(t, c.GetDiagnostics())
+	require.Nil(t, c.OpenFileOnDemand(context.Background(), "/some/file.go"))
+	require.Nil(t, c.NotifyChange(context.Background(), "/some/file.go"))
+	c.WaitForDiagnostics(context.Background(), time.Second)
 }

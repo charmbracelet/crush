@@ -173,8 +173,8 @@ func DefaultKeyMap() KeyMap {
 		key.WithHelp("ctrl+d", "toggle details"),
 	)
 	km.Chat.TogglePills = key.NewBinding(
-		key.WithKeys("ctrl+space"),
-		key.WithHelp("ctrl+space", "toggle tasks"),
+		key.WithKeys("ctrl+t", "ctrl+space"),
+		key.WithHelp("ctrl+t", "toggle tasks"),
 	)
 	km.Chat.PillLeft = key.NewBinding(
 		key.WithKeys("left"),

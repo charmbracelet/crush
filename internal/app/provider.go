@@ -70,8 +70,8 @@ func findModels(providers map[string]config.ProviderConfig, largeModel, smallMod
 }
 
 func filter(modelFilter, providerFilter, model, provider string) bool {
-	return modelFilter != "" && model == modelFilter &&
-		(providerFilter == "" || provider == providerFilter)
+	return modelFilter != "" && strings.EqualFold(model, modelFilter) &&
+		(providerFilter == "" || strings.EqualFold(provider, providerFilter))
 }
 
 // Validate and return a single match.

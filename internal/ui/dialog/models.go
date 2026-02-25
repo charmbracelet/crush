@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"fmt"
 	"slices"
-	"strings"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
@@ -143,12 +142,12 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 	)
 	m.keyMap.Close = CloseKey
 
-	providers, err := getFilteredProviders(com.Config())
+	var err error
+	m.providers, err = config.Providers(m.com.Config())
 	if err != nil {
 		return nil, fmt.Errorf("failed to get providers: %w", err)
 	}
 
-	m.providers = providers
 	if err := m.setProviderItems(); err != nil {
 		return nil, fmt.Errorf("failed to set provider items: %w", err)
 	}
@@ -172,19 +171,17 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 			m.list.Focus()
 			if m.list.IsSelectedFirst() {
 				m.list.SelectLast()
-				m.list.ScrollToBottom()
-				break
+			} else {
+				m.list.SelectPrev()
 			}
-			m.list.SelectPrev()
 			m.list.ScrollToSelected()
 		case key.Matches(msg, m.keyMap.Next):
 			m.list.Focus()
 			if m.list.IsSelectedLast() {
 				m.list.SelectFirst()
-				m.list.ScrollToTop()
-				break
+			} else {
+				m.list.SelectNext()
 			}
-			m.list.SelectNext()
 			m.list.ScrollToSelected()
 		case key.Matches(msg, m.keyMap.Select, m.keyMap.Edit):
 			selectedItem := m.list.SelectedItem()
@@ -448,18 +445,13 @@ func (m *Models) setProviderItems() error {
 					}
 					continue
 				}
-				if model.Name == "" {
-					model.Name = model.ID
-				}
+				model.Name = cmp.Or(model.Name, model.ID)
 				displayProvider.Models = append(displayProvider.Models, model)
 				modelIndex[model.ID] = len(displayProvider.Models) - 1
 			}
 		}
 
-		name := displayProvider.Name
-		if name == "" {
-			name = providerID
-		}
+		name := cmp.Or(displayProvider.Name, providerID)
 
 		group := NewModelGroup(t, name, providerConfigured)
 		for _, model := range displayProvider.Models {
@@ -519,27 +511,6 @@ func (m *Models) setProviderItems() error {
 	}
 
 	return nil
-}
-
-func getFilteredProviders(cfg *config.Config) ([]catwalk.Provider, error) {
-	providers, err := config.Providers(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get providers: %w", err)
-	}
-	var filteredProviders []catwalk.Provider
-	for _, p := range providers {
-		var (
-			isAzure         = p.ID == catwalk.InferenceProviderAzure
-			isCopilot       = p.ID == catwalk.InferenceProviderCopilot
-			isHyper         = string(p.ID) == "hyper"
-			hasAPIKeyEnv    = strings.HasPrefix(p.APIKey, "$")
-			_, isConfigured = cfg.Providers.Get(string(p.ID))
-		)
-		if isAzure || isCopilot || isHyper || hasAPIKeyEnv || isConfigured {
-			filteredProviders = append(filteredProviders, p)
-		}
-	}
-	return filteredProviders, nil
 }
 
 func modelKey(providerID, modelID string) string {

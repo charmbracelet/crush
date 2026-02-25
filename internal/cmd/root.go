@@ -100,6 +100,11 @@ crush -y
 		go app.Subscribe(program)
 
 		if _, err := program.Run(); err != nil {
+			// ErrProgramKilled is returned when the program is terminated externally
+			// (e.g., terminal closed, parent process died). This is not a crash.
+			if errors.Is(err, tea.ErrProgramKilled) {
+				return nil
+			}
 			event.Error(err)
 			slog.Error("TUI run error", "error", err)
 			return errors.New("Crush crashed. If metrics are enabled, we were notified about it. If you'd like to report it, please copy the stacktrace above and open an issue at https://github.com/charmbracelet/crush/issues/new?template=bug.yml") //nolint:staticcheck

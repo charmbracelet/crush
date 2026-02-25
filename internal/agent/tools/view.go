@@ -189,8 +189,7 @@ func NewViewTool(
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error reading file: %w", err)
 			}
-			isValidUt8 := utf8.ValidString(content)
-			if !isValidUt8 {
+			if !utf8.ValidString(content) {
 				return fantasy.NewTextErrorResponse("File content is not valid UTF-8"), nil
 			}
 

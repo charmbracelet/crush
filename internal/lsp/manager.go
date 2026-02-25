@@ -59,9 +59,10 @@ func NewManager(cfg *config.Config) *Manager {
 	}
 
 	return &Manager{
-		clients: csync.NewMap[string, *Client](),
-		cfg:     cfg,
-		manager: manager,
+		clients:  csync.NewMap[string, *Client](),
+		cfg:      cfg,
+		manager:  manager,
+		callback: func(string, *Client) {}, // default no-op callback
 	}
 }
 
@@ -228,6 +229,7 @@ func (s *Manager) startServer(ctx context.Context, name, filepath string, server
 	if _, err := client.Initialize(initCtx, s.cfg.WorkingDir()); err != nil {
 		slog.Error("LSP client initialization failed", "name", name, "error", err)
 		client.Close(ctx)
+		s.clients.Del(name)
 		return
 	}
 

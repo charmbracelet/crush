@@ -317,9 +317,16 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 	case google.Name:
 		_, hasReasoning := mergedOptions["thinking_config"]
 		if !hasReasoning {
-			mergedOptions["thinking_config"] = map[string]any{
-				"thinking_budget":  2000,
-				"include_thoughts": true,
+			if strings.HasPrefix(model.CatwalkCfg.ID, "gemini-2") {
+				mergedOptions["thinking_config"] = map[string]any{
+					"thinking_budget":  2000,
+					"include_thoughts": true,
+				}
+			} else {
+				mergedOptions["thinking_config"] = map[string]any{
+					"thinking_level":   model.ModelCfg.ReasoningEffort,
+					"include_thoughts": true,
+				}
 			}
 		}
 		parsed, err := google.ParseOptions(mergedOptions)
@@ -472,9 +479,10 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 			}
 			if len(tools) == 0 || slices.Contains(tools, tool.MCPToolName()) {
 				filteredTools = append(filteredTools, tool)
+				break
 			}
+			slog.Debug("MCP not allowed", "tool", tool.Name(), "agent", agent.Name)
 		}
-		slog.Debug("MCP not allowed", "tool", tool.Name(), "agent", agent.Name)
 	}
 	slices.SortFunc(filteredTools, func(a, b fantasy.AgentTool) int {
 		return strings.Compare(a.Info().Name, b.Info().Name)
@@ -505,7 +513,7 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 
 	smallProviderCfg, ok := c.cfg.Providers.Get(smallModelCfg.Provider)
 	if !ok {
-		return Model{}, Model{}, errors.New("large model provider not configured")
+		return Model{}, Model{}, errors.New("small model provider not configured")
 	}
 
 	smallProvider, err := c.buildProvider(smallProviderCfg, smallModelCfg, true)

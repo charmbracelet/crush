@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/help"
@@ -99,9 +100,10 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 	}
 
 	ind := indStyle.String()
-	messageWidth := area.Dx() - lipgloss.Width(ind)
+	messageWidth := max(0, area.Dx()-lipgloss.Width(ind)-msgStyle.GetHorizontalPadding())
 	msg := ansi.Truncate(s.msg.Msg, messageWidth, "…")
-	info := msgStyle.Width(messageWidth).Render(msg)
+	msg += strings.Repeat(" ", max(0, messageWidth-lipgloss.Width(msg)))
+	info := msgStyle.Render(msg)
 
 	// Draw the info message over the help view
 	uv.NewStyledString(ind+info).Draw(scr, area)

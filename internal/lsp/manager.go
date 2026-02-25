@@ -59,9 +59,10 @@ func NewManager(cfg *config.Config) *Manager {
 	}
 
 	return &Manager{
-		clients: csync.NewMap[string, *Client](),
-		cfg:     cfg,
-		manager: manager,
+		clients:  csync.NewMap[string, *Client](),
+		cfg:      cfg,
+		manager:  manager,
+		callback: func(string, *Client) {}, // default no-op callback
 	}
 }
 

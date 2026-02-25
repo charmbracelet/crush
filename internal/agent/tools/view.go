@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/skills"
 )
 
 //go:embed view.md
@@ -34,9 +35,19 @@ type ViewPermissionsParams struct {
 	Limit    int    `json:"limit"`
 }
 
+type ViewResourceType string
+
+const (
+	ViewResourceUnset ViewResourceType = ""
+	ViewResourceSkill ViewResourceType = "skill"
+)
+
 type ViewResponseMetadata struct {
-	FilePath string `json:"file_path"`
-	Content  string `json:"content"`
+	FilePath            string           `json:"file_path"`
+	Content             string           `json:"content"`
+	ResourceType        ViewResourceType `json:"resource_type,omitempty"`
+	ResourceName        string           `json:"resource_name,omitempty"`
+	ResourceDescription string           `json:"resource_description,omitempty"`
 }
 
 const (
@@ -175,12 +186,12 @@ func NewViewTool(
 
 			// Read the file content
 			content, lineCount, err := readTextFile(filePath, params.Offset, params.Limit)
+			if err != nil {
+				return fantasy.ToolResponse{}, fmt.Errorf("error reading file: %w", err)
+			}
 			isValidUt8 := utf8.ValidString(content)
 			if !isValidUt8 {
 				return fantasy.NewTextErrorResponse("File content is not valid UTF-8"), nil
-			}
-			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error reading file: %w", err)
 			}
 
 			notifyLSPs(ctx, lspManager, filePath)
@@ -196,12 +207,22 @@ func NewViewTool(
 			output += "\n</file>\n"
 			output += getDiagnostics(filePath, lspManager)
 			filetracker.RecordRead(ctx, sessionID, filePath)
+
+			meta := ViewResponseMetadata{
+				FilePath: filePath,
+				Content:  content,
+			}
+			if isSkillFile {
+				if skill, err := skills.Parse(filePath); err == nil {
+					meta.ResourceType = ViewResourceSkill
+					meta.ResourceName = skill.Name
+					meta.ResourceDescription = skill.Description
+				}
+			}
+
 			return fantasy.WithResponseMetadata(
 				fantasy.NewTextResponse(output),
-				ViewResponseMetadata{
-					FilePath: filePath,
-					Content:  content,
-				},
+				meta,
 			), nil
 		})
 }

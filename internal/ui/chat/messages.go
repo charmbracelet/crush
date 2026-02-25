@@ -221,7 +221,12 @@ func (a *AssistantInfoItem) RawRender(width int) string {
 
 // Render implements MessageItem.
 func (a *AssistantInfoItem) Render(width int) string {
-	return a.sty.Chat.Message.SectionHeader.Render(a.RawRender(width))
+	prefix := a.sty.Chat.Message.SectionHeader.Render()
+	lines := strings.Split(a.RawRender(width), "\n")
+	for i, line := range lines {
+		lines[i] = prefix + line
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (a *AssistantInfoItem) renderContent(width int) string {

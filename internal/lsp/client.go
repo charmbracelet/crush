@@ -277,10 +277,6 @@ func (c *Client) WaitForServerReady(ctx context.Context) error {
 	// Set initial state
 	c.SetServerState(StateStarting)
 
-	// Create a context with timeout
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
 	// Try to ping the server with a simple request
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
@@ -495,14 +491,9 @@ func (c *Client) RegisterServerRequestHandler(method string, handler transport.H
 
 // openKeyConfigFiles opens important configuration files that help initialize the server.
 func (c *Client) openKeyConfigFiles(ctx context.Context) {
-	wd, err := os.Getwd()
-	if err != nil {
-		return
-	}
-
 	// Try to open each file, ignoring errors if they don't exist
 	for _, file := range c.config.RootMarkers {
-		file = filepath.Join(wd, file)
+		file = filepath.Join(c.cwd, file)
 		if _, err := os.Stat(file); err == nil {
 			// File exists, try to open it
 			if err := c.OpenFile(ctx, file); err != nil {

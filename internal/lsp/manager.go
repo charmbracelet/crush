@@ -229,6 +229,7 @@ func (s *Manager) startServer(ctx context.Context, name, filepath string, server
 	if _, err := client.Initialize(initCtx, s.cfg.WorkingDir()); err != nil {
 		slog.Error("LSP client initialization failed", "name", name, "error", err)
 		client.Close(ctx)
+		s.clients.Del(name)
 		return
 	}
 

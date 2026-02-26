@@ -48,6 +48,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/version"
+	"github.com/charmbracelet/crush/plugin"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/layout"
 	"github.com/charmbracelet/ultraviolet/screen"
@@ -568,6 +569,16 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle delayed single-click action (e.g., expansion).
 		m.chat.HandleDelayedClick(msg)
 	case tea.MouseClickMsg:
+		// Handle middle-click paste from X11 PRIMARY selection.
+		if msg.Button == tea.MouseMiddle {
+			if text := readPrimarySelection(); text != "" {
+				// Re-use paste handling by converting to a PasteMsg.
+				if cmd := m.handlePasteMsg(tea.PasteMsg{Content: text}); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				return m, tea.Batch(cmds...)
+			}
+		}
 		// Pass mouse events to dialogs first if any are open.
 		if m.dialog.HasDialogs() {
 			m.dialog.Update(msg)
@@ -887,6 +898,7 @@ func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
 // if the message is a tool result it will update the corresponding tool call message
 func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 	var cmds []tea.Cmd
+
 
 	existing := m.chat.MessageItem(msg.ID)
 	if existing != nil {
@@ -1406,6 +1418,21 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 		cmds = append(cmds, m.runMCPPrompt(msg.ClientID, msg.PromptID, msg.Args))
+	case dialog.ActionRunPluginCommand:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		// Invoke the plugin command handler
+		action := msg.Handler(msg.Command)
+		if cmd := m.handlePluginAction(action, msg.PluginApp); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.ActionOpenPluginDialog:
+		m.dialog.CloseFrontDialog()
+		if cmd := m.openPluginDialog(msg.DialogID); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.ActionPluginSendPrompt:
+		m.dialog.CloseFrontDialog()
+		cmds = append(cmds, m.sendMessage(msg.Prompt))
 	default:
 		cmds = append(cmds, util.CmdHandler(msg))
 	}
@@ -2814,8 +2841,12 @@ func (m *UI) openDialog(id string) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	default:
-		// Unknown dialog
-		break
+		// Try to open as a plugin dialog
+		if _, ok := plugin.GetDialogFactory(id); ok {
+			if cmd := m.openPluginDialog(id); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
 	}
 	return tea.Batch(cmds...)
 }
@@ -2868,7 +2899,14 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 	hasTodos := hasSession && hasIncompleteTodos(m.session.Todos)
 	hasQueue := m.promptQueue > 0
 
-	commands, err := dialog.NewCommands(m.com, sessionID, hasSession, hasTodos, hasQueue, m.customCommands, m.mcpPrompts)
+	// Get plugin commands and app.
+	pluginCommands := plugin.RegisteredCommands()
+	var pluginApp *plugin.App
+	if m.com.App.AgentCoordinator != nil {
+		pluginApp = m.com.App.AgentCoordinator.PluginApp()
+	}
+
+	commands, err := dialog.NewCommands(m.com, sessionID, hasSession, hasTodos, hasQueue, m.customCommands, m.mcpPrompts, pluginCommands, pluginApp)
 	if err != nil {
 		return util.ReportError(err)
 	}
@@ -2946,6 +2984,47 @@ func (m *UI) openPermissionsDialog(perm permission.PermissionRequest) tea.Cmd {
 
 	permDialog := dialog.NewPermissions(m.com, perm, opts...)
 	m.dialog.OpenDialog(permDialog)
+	return nil
+}
+
+// openPluginDialog opens a plugin dialog by its ID.
+func (m *UI) openPluginDialog(dialogID string) tea.Cmd {
+	fullID := dialog.PluginAdapterID + dialogID
+	if m.dialog.ContainsDialog(fullID) {
+		m.dialog.BringToFront(fullID)
+		return nil
+	}
+
+	factory, ok := plugin.GetDialogFactory(dialogID)
+	if !ok {
+		return util.ReportError(fmt.Errorf("unknown plugin dialog: %s", dialogID))
+	}
+
+	var pluginApp *plugin.App
+	if m.com.App.AgentCoordinator != nil {
+		pluginApp = m.com.App.AgentCoordinator.PluginApp()
+	}
+
+	pluginDialog, err := factory(pluginApp)
+	if err != nil {
+		return util.ReportError(err)
+	}
+
+	adapter := dialog.NewPluginDialogAdapter(m.com, pluginDialog, pluginApp)
+	m.dialog.OpenDialog(adapter)
+	return nil
+}
+
+// handlePluginAction processes a plugin action returned from a command handler.
+func (m *UI) handlePluginAction(action plugin.PluginAction, pluginApp *plugin.App) tea.Cmd {
+	switch act := action.(type) {
+	case plugin.OpenDialogAction:
+		return m.openPluginDialog(act.DialogID)
+	case plugin.SendPromptAction:
+		return m.sendMessage(act.Prompt)
+	case plugin.NoAction:
+		return nil
+	}
 	return nil
 }
 

@@ -537,3 +537,4 @@ func (c *Client) FindReferences(ctx context.Context, filepath string, line, char
 	// See: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#position
 	return c.client.FindReferences(ctx, filepath, line-1, character-1, includeDeclaration)
 }
+

@@ -59,6 +59,27 @@ func openInLSPs(
 	}
 }
 
+// waitForLSPDiagnostics waits briefly for diagnostics publication after a file
+// has been opened. Intended for read-only situations where viewing up-to-date
+// files matters but latency should remain low (i.e. when using the view tool).
+func waitForLSPDiagnostics(
+	ctx context.Context,
+	manager *lsp.Manager,
+	filepath string,
+	timeout time.Duration,
+) {
+	if filepath == "" || manager == nil || timeout <= 0 {
+		return
+	}
+
+	for client := range manager.Clients().Seq() {
+		if !client.HandlesFile(filepath) {
+			continue
+		}
+		client.WaitForDiagnostics(ctx, timeout)
+	}
+}
+
 // notifyLSPs notifies LSP servers that a file has changed and waits for
 // updated diagnostics. Use this after edit/multiedit operations.
 func notifyLSPs(

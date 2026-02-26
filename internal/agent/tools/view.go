@@ -272,7 +272,7 @@ func readTextFile(filePath string, offset, limit int) (string, bool, error) {
 	// Pre-allocate slice with expected capacity.
 	lines := make([]string, 0, limit)
 
-	for scanner.Scan() && len(lines) < limit {
+	for len(lines) < limit && scanner.Scan() {
 		lineText := scanner.Text()
 		if len(lineText) > MaxLineLength {
 			lineText = lineText[:MaxLineLength] + "..."
@@ -280,8 +280,8 @@ func readTextFile(filePath string, offset, limit int) (string, bool, error) {
 		lines = append(lines, lineText)
 	}
 
-	// Peek one more line to determine if the file has more content.
-	hasMore := scanner.Scan()
+	// Peek one more line only when we filled the limit.
+	hasMore := len(lines) == limit && scanner.Scan()
 
 	if err := scanner.Err(); err != nil {
 		return "", false, err

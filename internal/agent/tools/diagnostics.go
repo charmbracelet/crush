@@ -37,16 +37,36 @@ func NewDiagnosticsTool(lspManager *lsp.Manager) fantasy.AgentTool {
 		})
 }
 
+// openInLSPs ensures LSP servers are running and aware of the file, but does
+// not notify changes or wait for fresh diagnostics. Use this for read-only
+// operations like view where the file content hasn't changed.
+func openInLSPs(
+	ctx context.Context,
+	manager *lsp.Manager,
+	filepath string,
+) {
+	if filepath == "" || manager == nil {
+		return
+	}
+
+	manager.Start(ctx, filepath)
+
+	for client := range manager.Clients().Seq() {
+		if !client.HandlesFile(filepath) {
+			continue
+		}
+		_ = client.OpenFileOnDemand(ctx, filepath)
+	}
+}
+
+// notifyLSPs notifies LSP servers that a file has changed and waits for
+// updated diagnostics. Use this after edit/multiedit operations.
 func notifyLSPs(
 	ctx context.Context,
 	manager *lsp.Manager,
 	filepath string,
 ) {
-	if filepath == "" {
-		return
-	}
-
-	if manager == nil {
+	if filepath == "" || manager == nil {
 		return
 	}
 

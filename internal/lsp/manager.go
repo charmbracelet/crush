@@ -303,8 +303,10 @@ func hasRootMarkers(dir string, markers []string) bool {
 		return true
 	}
 	for _, pattern := range markers {
-		// Use fsext.GlobWithDoubleStar to find matches
-		matches, _, err := fsext.Glob(pattern, dir, 1)
+		// Use filepath.Glob for a non-recursive check in the root
+		// directory. This avoids walking the entire tree (which is
+		// catastrophic in large monorepos with node_modules, etc.).
+		matches, err := filepath.Glob(filepath.Join(dir, pattern))
 		if err == nil && len(matches) > 0 {
 			return true
 		}

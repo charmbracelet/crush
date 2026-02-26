@@ -185,7 +185,7 @@ func NewViewTool(
 			}
 
 			// Read the file content
-			content, lineCount, err := readTextFile(filePath, params.Offset, params.Limit)
+			content, hasMore, err := readTextFile(filePath, params.Offset, params.Limit)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error reading file: %w", err)
 			}
@@ -196,11 +196,9 @@ func NewViewTool(
 
 			notifyLSPs(ctx, lspManager, filePath)
 			output := "<file>\n"
-			// Format the output with line numbers
 			output += addLineNumbers(content, params.Offset+1)
 
-			// Add a note if the content was truncated
-			if lineCount > params.Offset+len(strings.Split(content, "\n")) {
+			if hasMore {
 				output += fmt.Sprintf("\n\n(File has more lines. Use 'offset' parameter to read beyond line %d)",
 					params.Offset+len(strings.Split(content, "\n")))
 			}
@@ -252,38 +250,28 @@ func addLineNumbers(content string, startLine int) string {
 	return strings.Join(result, "\n")
 }
 
-func readTextFile(filePath string, offset, limit int) (string, int, error) {
+func readTextFile(filePath string, offset, limit int) (string, bool, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
-		return "", 0, err
+		return "", false, err
 	}
 	defer file.Close()
 
-	lineCount := 0
-
 	scanner := NewLineScanner(file)
 	if offset > 0 {
-		for lineCount < offset && scanner.Scan() {
-			lineCount++
+		skipped := 0
+		for skipped < offset && scanner.Scan() {
+			skipped++
 		}
 		if err = scanner.Err(); err != nil {
-			return "", 0, err
+			return "", false, err
 		}
 	}
 
-	if offset == 0 {
-		_, err = file.Seek(0, io.SeekStart)
-		if err != nil {
-			return "", 0, err
-		}
-	}
-
-	// Pre-allocate slice with expected capacity
+	// Pre-allocate slice with expected capacity.
 	lines := make([]string, 0, limit)
-	lineCount = offset
 
 	for scanner.Scan() && len(lines) < limit {
-		lineCount++
 		lineText := scanner.Text()
 		if len(lineText) > MaxLineLength {
 			lineText = lineText[:MaxLineLength] + "..."
@@ -291,16 +279,14 @@ func readTextFile(filePath string, offset, limit int) (string, int, error) {
 		lines = append(lines, lineText)
 	}
 
-	// Continue scanning to get total line count
-	for scanner.Scan() {
-		lineCount++
-	}
+	// Peek one more line to determine if the file has more content.
+	hasMore := scanner.Scan()
 
 	if err := scanner.Err(); err != nil {
-		return "", 0, err
+		return "", false, err
 	}
 
-	return strings.Join(lines, "\n"), lineCount, nil
+	return strings.Join(lines, "\n"), hasMore, nil
 }
 
 func getImageMimeType(filePath string) (bool, string) {

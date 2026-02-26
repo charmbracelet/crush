@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"charm.land/fantasy"
@@ -72,12 +73,21 @@ func waitForLSPDiagnostics(
 		return
 	}
 
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	var wg sync.WaitGroup
 	for client := range manager.Clients().Seq() {
 		if !client.HandlesFile(filepath) {
 			continue
 		}
-		client.WaitForDiagnostics(ctx, timeout)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			client.WaitForDiagnostics(waitCtx, timeout)
+		}()
 	}
+	wg.Wait()
 }
 
 // notifyLSPs notifies LSP servers that a file has changed and waits for

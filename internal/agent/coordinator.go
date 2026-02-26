@@ -582,7 +582,7 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 		// NOTE: Prevent the SDK from picking up the API key from env.
 		os.Setenv("ANTHROPIC_API_KEY", "")
 		headers["Authorization"] = apiKey
-	case providerID == string(catwalk.InferenceProviderMiniMax):
+	case providerID == string(catwalk.InferenceProviderMiniMax) || providerID == string(catwalk.InferenceProviderMiniMaxChina):
 		// NOTE: Prevent the SDK from picking up the API key from env.
 		os.Setenv("ANTHROPIC_API_KEY", "")
 		headers["Authorization"] = "Bearer " + apiKey

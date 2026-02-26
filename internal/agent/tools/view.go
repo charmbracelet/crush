@@ -98,7 +98,7 @@ func NewViewTool(
 
 			// Request permission for files outside working directory, unless it's a skill file.
 			if isOutsideWorkDir && !isSkillFile {
-				granted, err := permissions.Request(ctx,
+				granted, permReqErr := permissions.Request(ctx,
 					permission.CreatePermissionRequest{
 						SessionID:   sessionID,
 						Path:        absFilePath,
@@ -109,8 +109,8 @@ func NewViewTool(
 						Params:      ViewPermissionsParams(params),
 					},
 				)
-				if err != nil {
-					return fantasy.ToolResponse{}, err
+				if permReqErr != nil {
+					return fantasy.ToolResponse{}, permReqErr
 				}
 				if !granted {
 					return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
@@ -176,9 +176,9 @@ func NewViewTool(
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("This model (%s) does not support image data.", modelName)), nil
 				}
 
-				imageData, err := os.ReadFile(filePath)
-				if err != nil {
-					return fantasy.ToolResponse{}, fmt.Errorf("error reading image file: %w", err)
+				imageData, readErr := os.ReadFile(filePath)
+				if readErr != nil {
+					return fantasy.ToolResponse{}, fmt.Errorf("error reading image file: %w", readErr)
 				}
 
 				encoded := base64.StdEncoding.EncodeToString(imageData)

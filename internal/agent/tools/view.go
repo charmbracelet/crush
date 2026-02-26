@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"charm.land/fantasy"
@@ -194,6 +195,7 @@ func NewViewTool(
 			}
 
 			openInLSPs(ctx, lspManager, filePath)
+			waitForLSPDiagnostics(ctx, lspManager, filePath, 300*time.Millisecond)
 			output := "<file>\n"
 			output += addLineNumbers(content, params.Offset+1)
 

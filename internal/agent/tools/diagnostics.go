@@ -73,16 +73,13 @@ func waitForLSPDiagnostics(
 		return
 	}
 
-	waitCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
 	var wg sync.WaitGroup
 	for client := range manager.Clients().Seq() {
 		if !client.HandlesFile(filepath) {
 			continue
 		}
 		wg.Go(func() {
-			client.WaitForDiagnostics(waitCtx, timeout)
+			client.WaitForDiagnostics(ctx, timeout)
 		})
 	}
 	wg.Wait()

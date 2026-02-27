@@ -7,10 +7,11 @@ import (
 	"sort"
 	"strings"
 
+	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
-func applyTextEdits(uri protocol.DocumentURI, edits []protocol.TextEdit) error {
+func applyTextEdits(uri protocol.DocumentURI, edits []protocol.TextEdit, encoding powernap.OffsetEncoding) error {
 	path, err := uri.Path()
 	if err != nil {
 		return fmt.Errorf("invalid URI: %w", err)
@@ -57,7 +58,7 @@ func applyTextEdits(uri protocol.DocumentURI, edits []protocol.TextEdit) error {
 
 	// Apply each edit
 	for _, edit := range sortedEdits {
-		newLines, err := applyTextEdit(lines, edit)
+		newLines, err := applyTextEdit(lines, edit, encoding)
 		if err != nil {
 			return fmt.Errorf("failed to apply edit: %w", err)
 		}
@@ -85,11 +86,22 @@ func applyTextEdits(uri protocol.DocumentURI, edits []protocol.TextEdit) error {
 	return nil
 }
 
-func applyTextEdit(lines []string, edit protocol.TextEdit) ([]string, error) {
+func applyTextEdit(lines []string, edit protocol.TextEdit, encoding powernap.OffsetEncoding) ([]string, error) {
 	startLine := int(edit.Range.Start.Line)
 	endLine := int(edit.Range.End.Line)
-	startChar := int(edit.Range.Start.Character)
-	endChar := int(edit.Range.End.Character)
+
+	var startChar, endChar int
+	if encoding == powernap.UTF8 {
+		// UTF-8: Character offset is already a byte offset
+		startChar = int(edit.Range.Start.Character)
+		endChar = int(edit.Range.End.Character)
+	} else {
+		// UTF-16 (default) or UTF-32: Convert to byte offset
+		startLineContent := lines[startLine]
+		endLineContent := lines[endLine]
+		startChar = positionToByteOffset(startLineContent, edit.Range.Start.Character)
+		endChar = positionToByteOffset(endLineContent, edit.Range.End.Character)
+	}
 
 	// Validate positions
 	if startLine < 0 || startLine >= len(lines) {
@@ -149,7 +161,7 @@ func applyTextEdit(lines []string, edit protocol.TextEdit) ([]string, error) {
 }
 
 // applyDocumentChange applies a DocumentChange (create/rename/delete operations)
-func applyDocumentChange(change protocol.DocumentChange) error {
+func applyDocumentChange(change protocol.DocumentChange, encoding powernap.OffsetEncoding) error {
 	if change.CreateFile != nil {
 		path, err := change.CreateFile.URI.Path()
 		if err != nil {
@@ -222,24 +234,54 @@ func applyDocumentChange(change protocol.DocumentChange) error {
 				return fmt.Errorf("invalid edit type: %w", err)
 			}
 		}
-		return applyTextEdits(change.TextDocumentEdit.TextDocument.URI, textEdits)
+		return applyTextEdits(change.TextDocumentEdit.TextDocument.URI, textEdits, encoding)
 	}
 
 	return nil
 }
 
-// ApplyWorkspaceEdit applies the given WorkspaceEdit to the filesystem
-func ApplyWorkspaceEdit(edit protocol.WorkspaceEdit) error {
+// PositionToByteOffset converts a UTF-16 character offset to a byte offset.
+// This is a wrapper around the powernap function to ensure it's available.
+func PositionToByteOffset(lineText string, utf16Char uint32) int {
+	return positionToByteOffset(lineText, utf16Char)
+}
+
+// positionToByteOffset is the internal implementation.
+func positionToByteOffset(lineText string, utf16Char uint32) int {
+	if utf16Char == 0 {
+		return 0
+	}
+
+	var utf16Count uint32
+	for byteOffset, r := range lineText {
+		if utf16Count >= utf16Char {
+			return byteOffset
+		}
+		// Characters outside BMP (U+10000+) are represented as
+		// surrogate pairs in UTF-16, counting as 2 code units.
+		if r >= 0x10000 {
+			utf16Count += 2
+		} else {
+			utf16Count++
+		}
+	}
+	return len(lineText)
+}
+
+// ApplyWorkspaceEdit applies the given WorkspaceEdit to the filesystem.
+// The encoding parameter specifies the position encoding used by the LSP server
+// (UTF8, UTF16, or UTF32). This affects how character offsets are interpreted.
+func ApplyWorkspaceEdit(edit protocol.WorkspaceEdit, encoding powernap.OffsetEncoding) error {
 	// Handle Changes field
 	for uri, textEdits := range edit.Changes {
-		if err := applyTextEdits(uri, textEdits); err != nil {
+		if err := applyTextEdits(uri, textEdits, encoding); err != nil {
 			return fmt.Errorf("failed to apply text edits: %w", err)
 		}
 	}
 
 	// Handle DocumentChanges field
 	for _, change := range edit.DocumentChanges {
-		if err := applyDocumentChange(change); err != nil {
+		if err := applyDocumentChange(change, encoding); err != nil {
 			return fmt.Errorf("failed to apply document change: %w", err)
 		}
 	}

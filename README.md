@@ -367,6 +367,8 @@ If you'd like to prevent Crush from using certain built-in tools entirely, you
 can disable them via the `options.disabled_tools` list. Disabled tools are
 completely hidden from the agent.
 
+You can use local AI with `ollama` but take good care that the model you use supports tools.
+
 ```json
 {
   "$schema": "https://charm.land/crush.json",

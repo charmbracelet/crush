@@ -277,7 +277,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 				options[openai.Name] = parsed
 			}
 		}
-	case anthropic.Name:
+	case anthropic.Name, bedrock.Name:
 		var (
 			_, hasEffort = mergedOptions["effort"]
 			_, hasThink  = mergedOptions["thinking"]
@@ -287,6 +287,12 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			mergedOptions["effort"] = model.ModelCfg.ReasoningEffort
 		case !hasThink && model.ModelCfg.Think:
 			mergedOptions["thinking"] = map[string]any{"budget_tokens": 2000}
+		}
+		// Add betas from catwalk model config (e.g., for 1M context on Bedrock)
+		if len(model.CatwalkCfg.Betas) > 0 {
+			if _, hasBetas := mergedOptions["betas"]; !hasBetas {
+				mergedOptions["betas"] = model.CatwalkCfg.Betas
+			}
 		}
 		parsed, err := anthropic.ParseOptions(mergedOptions)
 		if err == nil {

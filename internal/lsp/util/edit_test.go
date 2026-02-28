@@ -108,9 +108,9 @@ func TestPositionToByteOffset(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := positionToByteOffset(tt.lineText, tt.utf16Char)
+			result := powernap.PositionToByteOffset(tt.lineText, tt.utf16Char)
 			if result != tt.expected {
-				t.Errorf("positionToByteOffset(%q, %d) = %d, want %d",
+				t.Errorf("PositionToByteOffset(%q, %d) = %d, want %d",
 					tt.lineText, tt.utf16Char, result, tt.expected)
 			}
 		})

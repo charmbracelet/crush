@@ -90,25 +90,31 @@ func applyTextEdit(lines []string, edit protocol.TextEdit, encoding powernap.Off
 	startLine := int(edit.Range.Start.Line)
 	endLine := int(edit.Range.End.Line)
 
-	var startChar, endChar int
-	if encoding == powernap.UTF8 {
-		// UTF-8: Character offset is already a byte offset
-		startChar = int(edit.Range.Start.Character)
-		endChar = int(edit.Range.End.Character)
-	} else {
-		// UTF-16 (default) or UTF-32: Convert to byte offset
-		startLineContent := lines[startLine]
-		endLineContent := lines[endLine]
-		startChar = positionToByteOffset(startLineContent, edit.Range.Start.Character)
-		endChar = positionToByteOffset(endLineContent, edit.Range.End.Character)
-	}
-
-	// Validate positions
+	// Validate positions before accessing lines.
 	if startLine < 0 || startLine >= len(lines) {
 		return nil, fmt.Errorf("invalid start line: %d", startLine)
 	}
 	if endLine < 0 || endLine >= len(lines) {
 		endLine = len(lines) - 1
+	}
+
+	var startChar, endChar int
+	if encoding == powernap.UTF8 {
+		// UTF-8: Character offset is already a byte offset
+		startChar = int(edit.Range.Start.Character)
+		endChar = int(edit.Range.End.Character)
+	} else if encoding == powernap.UTF16 {
+		// UTF-16 (default): Convert to byte offset
+		startLineContent := lines[startLine]
+		endLineContent := lines[endLine]
+		startChar = powernap.PositionToByteOffset(startLineContent, edit.Range.Start.Character)
+		endChar = powernap.PositionToByteOffset(endLineContent, edit.Range.End.Character)
+	} else {
+		// UTF-32: Character offset is codepoint count, convert to byte offset
+		startLineContent := lines[startLine]
+		endLineContent := lines[endLine]
+		startChar = utf32ToByteOffset(startLineContent, edit.Range.Start.Character)
+		endChar = utf32ToByteOffset(endLineContent, edit.Range.End.Character)
 	}
 
 	// Create result slice with initial capacity
@@ -240,30 +246,18 @@ func applyDocumentChange(change protocol.DocumentChange, encoding powernap.Offse
 	return nil
 }
 
-// PositionToByteOffset converts a UTF-16 character offset to a byte offset.
-// This is a wrapper around the powernap function to ensure it's available.
-func PositionToByteOffset(lineText string, utf16Char uint32) int {
-	return positionToByteOffset(lineText, utf16Char)
-}
-
-// positionToByteOffset is the internal implementation.
-func positionToByteOffset(lineText string, utf16Char uint32) int {
-	if utf16Char == 0 {
+// utf32ToByteOffset converts a UTF-32 codepoint offset to a byte offset.
+func utf32ToByteOffset(lineText string, codepointOffset uint32) int {
+	if codepointOffset == 0 {
 		return 0
 	}
 
-	var utf16Count uint32
-	for byteOffset, r := range lineText {
-		if utf16Count >= utf16Char {
+	var codepointCount uint32
+	for byteOffset := range lineText {
+		if codepointCount >= codepointOffset {
 			return byteOffset
 		}
-		// Characters outside BMP (U+10000+) are represented as
-		// surrogate pairs in UTF-16, counting as 2 code units.
-		if r >= 0x10000 {
-			utf16Count += 2
-		} else {
-			utf16Count++
-		}
+		codepointCount++
 	}
 	return len(lineText)
 }

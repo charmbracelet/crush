@@ -74,6 +74,36 @@ func TestPositionToByteOffset(t *testing.T) {
 			utf16Char: 2,
 			expected:  4,
 		},
+		{
+			name:      "ZWJ family emoji (1 grapheme, 7 runes, 11 UTF-16 units)",
+			lineText:  "hello👨\u200d👩\u200d👧\u200d👦world",
+			utf16Char: 16,
+			expected:  30,
+		},
+		{
+			name:      "ZWJ family emoji - offset into middle of grapheme cluster",
+			lineText:  "hello👨\u200d👩\u200d👧\u200d👦world",
+			utf16Char: 8,
+			expected:  12,
+		},
+		{
+			name:      "Flag emoji (1 grapheme, 2 runes, 4 UTF-16 units)",
+			lineText:  "hello🇺🇸world",
+			utf16Char: 9,
+			expected:  13,
+		},
+		{
+			name:      "Combining character (1 grapheme, 2 runes, 2 UTF-16 units)",
+			lineText:  "caf\u0065\u0301!",
+			utf16Char: 5,
+			expected:  6,
+		},
+		{
+			name:      "Skin tone modifier (1 grapheme, 2 runes, 4 UTF-16 units)",
+			lineText:  "hi👋🏽bye",
+			utf16Char: 6,
+			expected:  10,
+		},
 	}
 
 	for _, tt := range tests {
@@ -134,6 +164,81 @@ func TestApplyTextEdit_UTF16(t *testing.T) {
 				NewText: "world",
 			},
 			expected: []string{`fmt.Println("👋world")`},
+		},
+		{
+			name: "ZWJ family emoji - edit after grapheme cluster",
+			// "hello👨‍👩‍👧‍👦world" — family is 1 grapheme but 11 UTF-16 units
+			lines: []string{"hello\U0001F468\u200d\U0001F469\u200d\U0001F467\u200d\U0001F466world"},
+			edit: protocol.TextEdit{
+				Range: protocol.Range{
+					// "hello" = 5 UTF-16 units, family = 11 UTF-16 units
+					// "world" starts at UTF-16 offset 16
+					Start: protocol.Position{Line: 0, Character: 16},
+					End:   protocol.Position{Line: 0, Character: 21},
+				},
+				NewText: "earth",
+			},
+			expected: []string{"hello\U0001F468\u200d\U0001F469\u200d\U0001F467\u200d\U0001F466earth"},
+		},
+		{
+			name: "ZWJ family emoji - edit splits grapheme cluster in half",
+			// LSP servers can position into the middle of a grapheme cluster.
+			// After "hello" (5 UTF-16 units), the ZWJ family emoji starts.
+			// UTF-16 offset 7 lands between 👨 (2 units) and ZWJ, inside
+			// the grapheme cluster. The byte offset for position 7 is 9
+			// (5 bytes for "hello" + 4 bytes for 👨).
+			lines: []string{"hello\U0001F468\u200d\U0001F469\u200d\U0001F467\u200d\U0001F466world"},
+			edit: protocol.TextEdit{
+				Range: protocol.Range{
+					Start: protocol.Position{Line: 0, Character: 7},
+					End:   protocol.Position{Line: 0, Character: 16},
+				},
+				NewText: "",
+			},
+			// Keeps "hello" + 👨 (first rune of cluster) then removes
+			// the rest of the cluster, leaving "hello👨world".
+			expected: []string{"hello\U0001F468world"},
+		},
+		{
+			name: "Flag emoji - edit after flag",
+			// 🇺🇸 = 2 regional indicator runes, 4 UTF-16 units, 8 bytes
+			lines: []string{"hello🇺🇸world"},
+			edit: protocol.TextEdit{
+				Range: protocol.Range{
+					Start: protocol.Position{Line: 0, Character: 9},
+					End:   protocol.Position{Line: 0, Character: 14},
+				},
+				NewText: "earth",
+			},
+			expected: []string{"hello🇺🇸earth"},
+		},
+		{
+			name: "Combining accent - edit after composed character",
+			// "café!" where é = e + U+0301 (2 code points, 2 UTF-16 units)
+			lines: []string{"caf\u0065\u0301!"},
+			edit: protocol.TextEdit{
+				Range: protocol.Range{
+					// "caf" = 3, "e" = 1, U+0301 = 1, total = 5 UTF-16 units
+					Start: protocol.Position{Line: 0, Character: 5},
+					End:   protocol.Position{Line: 0, Character: 6},
+				},
+				NewText: "?",
+			},
+			expected: []string{"caf\u0065\u0301?"},
+		},
+		{
+			name: "Skin tone modifier - edit after modified emoji",
+			// 👋🏽 = U+1F44B U+1F3FD = 2 runes, 4 UTF-16 units, 8 bytes
+			lines: []string{"hi👋🏽bye"},
+			edit: protocol.TextEdit{
+				Range: protocol.Range{
+					// "hi" = 2, 👋🏽 = 4, total = 6 UTF-16 units
+					Start: protocol.Position{Line: 0, Character: 6},
+					End:   protocol.Position{Line: 0, Character: 9},
+				},
+				NewText: "later",
+			},
+			expected: []string{"hi👋🏽later"},
 		},
 	}
 

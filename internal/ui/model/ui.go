@@ -101,6 +101,10 @@ type (
 	userCommandsLoadedMsg struct {
 		Commands []commands.CustomCommand
 	}
+	// configReloadedMsg is sent after config is successfully reloaded.
+	configReloadedMsg struct {
+		Commands []commands.CustomCommand
+	}
 	// mcpPromptsLoadedMsg is sent when mcp prompts are loaded.
 	mcpPromptsLoadedMsg struct {
 		Prompts []commands.MCPPrompt
@@ -448,6 +452,16 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if ok {
 			commands.SetCustomCommands(m.customCommands)
 		}
+
+	case configReloadedMsg:
+		m.customCommands = msg.Commands
+		dia := m.dialog.Dialog(dialog.CommandsID)
+		if dia != nil {
+			if commandsDia, ok := dia.(*dialog.Commands); ok {
+				commandsDia.SetCustomCommands(m.customCommands)
+			}
+		}
+		cmds = append(cmds, func() tea.Msg { return util.NewInfoMsg("Config reloaded") })
 
 	case mcpStateChangedMsg:
 		m.mcpStates = msg.states
@@ -1256,6 +1270,16 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		cmds = append(cmds, m.initializeProject())
 		m.dialog.CloseDialog(dialog.CommandsID)
 
+	case dialog.ActionReloadConfig:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		cmds = append(cmds, func() tea.Msg {
+			if err := m.com.App.ReloadConfig(context.Background()); err != nil {
+				return util.ReportError(err)
+			}
+			customCommands, _ := commands.LoadCustomCommands(m.com.Config())
+			return configReloadedMsg{Commands: customCommands}
+		})
+
 	case dialog.ActionSelectModel:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
@@ -1515,6 +1539,20 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		}
 
 		return tea.Batch(cmds...)
+	}
+
+	// Reload config from anywhere (e.g. when a dialog is open).
+	if key.Matches(msg, m.keyMap.ReloadConfig) {
+		if m.dialog.ContainsDialog(dialog.CommandsID) {
+			m.dialog.CloseDialog(dialog.CommandsID)
+		}
+		return func() tea.Msg {
+			if err := m.com.App.ReloadConfig(context.Background()); err != nil {
+				return util.ReportError(err)
+			}
+			customCommands, _ := commands.LoadCustomCommands(m.com.Config())
+			return configReloadedMsg{Commands: customCommands}
+		}
 	}
 
 	// Route all messages to dialog if one is open.
@@ -2039,6 +2077,7 @@ func (m *UI) ShortHelp() []key.Binding {
 	}
 
 	binds = append(binds,
+		k.ReloadConfig,
 		k.Quit,
 		k.Help,
 	)
@@ -2177,6 +2216,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 	binds = append(binds,
 		[]key.Binding{
 			help,
+			k.ReloadConfig,
 			k.Quit,
 		},
 	)

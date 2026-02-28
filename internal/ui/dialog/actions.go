@@ -51,6 +51,17 @@ type (
 	ActionTogglePills       struct{}
 	ActionExternalEditor    struct{}
 	ActionToggleYoloMode    struct{}
+	ActionToggleMuse        struct{}
+	// ActionMuseSetting is a message to change a Muse setting.
+	ActionMuseSetting struct {
+		Setting string
+	}
+	// ActionEditMusePrompt is a message to open the Muse prompt editor.
+	ActionEditMusePrompt struct{}
+	// ActionEditMuseTimeout is a message to edit the Muse timeout.
+	ActionEditMuseTimeout struct{}
+	// ActionEditMuseInterval is a message to edit the Muse interval.
+	ActionEditMuseInterval struct{}
 	// ActionInitializeProject is a message to initialize a project.
 	ActionInitializeProject struct{}
 	ActionSummarize         struct {

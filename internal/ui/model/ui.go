@@ -378,6 +378,10 @@ func (m *UI) loadMCPrompts() tea.Msg {
 	return mcpPromptsLoadedMsg{Prompts: prompts}
 }
 
+type newSessionMsg struct {
+	Summary string
+}
+
 // Update handles updates to the UI model.
 func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
@@ -436,6 +440,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case sendMessageMsg:
 		cmds = append(cmds, m.sendMessage(msg.Content, msg.Attachments...))
+
+	case newSessionMsg:
+		cmds = append(cmds, m.newSession(), func() tea.Msg {
+			return sendMessageMsg{Content: msg.Summary}
+		})
 
 	case userCommandsLoadedMsg:
 		m.customCommands = msg.Commands
@@ -2731,6 +2740,10 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 	cmds = append(cmds, func() tea.Msg {
 		_, err := m.com.App.AgentCoordinator.Run(context.Background(), sessionID, content, attachments...)
 		if err != nil {
+			var nse *agenttools.NewSessionError
+			if errors.As(err, &nse) {
+				return newSessionMsg{Summary: nse.Summary}
+			}
 			isCancelErr := errors.Is(err, context.Canceled)
 			isPermissionErr := errors.Is(err, permission.ErrorPermissionDenied)
 			if isCancelErr || isPermissionErr {

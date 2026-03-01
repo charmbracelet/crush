@@ -717,6 +717,7 @@ func allToolNames() []string {
 		"glob",
 		"grep",
 		"ls",
+		"new_session",
 		"sourcegraph",
 		"todos",
 		"view",

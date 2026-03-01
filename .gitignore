@@ -51,3 +51,6 @@ manpages/
 completions/crush.*sh
 .prettierignore
 .task
+/.agents/
+/.tldr/
+/.tldrignore

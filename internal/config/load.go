@@ -27,7 +27,13 @@ import (
 	"github.com/qjebbs/go-jsons"
 )
 
-const defaultCatwalkURL = "https://catwalk.charm.sh"
+const (
+	defaultCatwalkURL = "https://catwalk.charm.sh"
+
+	// Z.AI API endpoints
+	zaiCodingPlanEndpointPath = "/api/coding/paas/v4" // Flat-rate subscription
+	zaiPayAsYouGoEndpointPath = "/api/paas/v4"        // Per-token pricing
+)
 
 // Load loads the configuration from the default paths.
 func Load(workingDir, dataDir string, debug bool) (*Config, error) {
@@ -260,6 +266,19 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 					return fmt.Errorf("bedrock provider only supports anthropic models for now, found: %s", model.ID)
 				}
 			}
+		case catwalk.InferenceProviderZAI:
+			// Z.AI Coding Plan uses a flat-rate subscription, not per-token pricing.
+			// If using the coding plan endpoint, set all costs to 0.
+			// See: https://github.com/charmbracelet/crush/issues/1096
+			if strings.Contains(prepared.BaseURL, zaiCodingPlanEndpointPath) {
+				for i := range prepared.Models {
+					prepared.Models[i].CostPer1MIn = 0
+					prepared.Models[i].CostPer1MOut = 0
+					prepared.Models[i].CostPer1MInCached = 0
+					prepared.Models[i].CostPer1MOutCached = 0
+				}
+			}
+			fallthrough
 		default:
 			// if the provider api or endpoint are missing we skip them
 			v, err := resolver.ResolveValue(p.APIKey)

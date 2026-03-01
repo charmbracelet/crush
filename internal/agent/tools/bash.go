@@ -20,17 +20,19 @@ import (
 )
 
 type BashParams struct {
-	Description     string `json:"description" description:"A brief description of what the command does, try to keep it under 30 characters or so"`
-	Command         string `json:"command" description:"The command to execute"`
-	WorkingDir      string `json:"working_dir,omitempty" description:"The working directory to execute the command in (defaults to current directory)"`
-	RunInBackground bool   `json:"run_in_background,omitempty" description:"Set to true (boolean) to run this command in the background. Use job_output to read the output later."`
+	Description         string `json:"description" description:"A brief description of what the command does, try to keep it under 30 characters or so"`
+	Command             string `json:"command" description:"The command to execute"`
+	WorkingDir          string `json:"working_dir,omitempty" description:"The working directory to execute the command in (defaults to current directory)"`
+	RunInBackground     bool   `json:"run_in_background,omitempty" description:"Set to true (boolean) to run this command in the background. Use job_output to read the output later."`
+	AutoBackgroundAfter int    `json:"auto_background_after,omitempty" description:"Seconds to wait before automatically moving the command to a background job (default: 60)"`
 }
 
 type BashPermissionsParams struct {
-	Description     string `json:"description"`
-	Command         string `json:"command"`
-	WorkingDir      string `json:"working_dir"`
-	RunInBackground bool   `json:"run_in_background"`
+	Description         string `json:"description"`
+	Command             string `json:"command"`
+	WorkingDir          string `json:"working_dir"`
+	RunInBackground     bool   `json:"run_in_background"`
+	AutoBackgroundAfter int    `json:"auto_background_after"`
 }
 
 type BashResponseMetadata struct {
@@ -303,7 +305,11 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			// Wait for either completion, auto-background threshold, or context cancellation
 			ticker := time.NewTicker(100 * time.Millisecond)
 			defer ticker.Stop()
-			timeout := time.After(AutoBackgroundThreshold)
+			autoBackgroundThreshold := AutoBackgroundThreshold
+			if params.AutoBackgroundAfter > 0 {
+				autoBackgroundThreshold = time.Duration(params.AutoBackgroundAfter) * time.Second
+			}
+			timeout := time.After(autoBackgroundThreshold)
 
 			var stdout, stderr string
 			var done bool

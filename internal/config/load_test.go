@@ -1305,6 +1305,28 @@ func TestConfig_setDefaultsDisableDefaultProvidersEnvVar(t *testing.T) {
 	})
 }
 
+func TestConfig_setDefaultsDisableNonConfiguredProvidersEnvVar(t *testing.T) {
+	t.Run("sets option from environment variable", func(t *testing.T) {
+		t.Setenv("CRUSH_DISABLE_NON_CONFIGURED_PROVIDERS", "true")
+
+		cfg := &Config{}
+		cfg.setDefaults("/tmp", "")
+
+		require.False(t, cfg.Options.DisableNonConfiguredProviders)
+	})
+
+	t.Run("does not override when env var is not set", func(t *testing.T) {
+		cfg := &Config{
+			Options: &Options{
+				DisableNonConfiguredProviders: true,
+			},
+		}
+		cfg.setDefaults("/tmp", "")
+
+		require.True(t, cfg.Options.DisableNonConfiguredProviders)
+	})
+}
+
 func TestConfig_configureSelectedModels(t *testing.T) {
 	t.Run("should override defaults", func(t *testing.T) {
 		knownProviders := []catwalk.Provider{

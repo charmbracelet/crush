@@ -373,6 +373,7 @@ func (m *Models) setProviderItems() error {
 	// itemsMap contains the keys of added model items.
 	itemsMap := make(map[string]*ModelItem)
 	groups := []ModelGroup{}
+
 	for id, p := range cfg.Providers.Seq2() {
 		if p.Disable {
 			continue
@@ -424,7 +425,7 @@ func (m *Models) setProviderItems() error {
 		}
 
 		providerConfig, providerConfigured := cfg.Providers.Get(providerID)
-		if providerConfigured && providerConfig.Disable {
+		if (providerConfigured && providerConfig.Disable) || (!providerConfigured && cfg.Options.DisableNonConfiguredProviders) {
 			continue
 		}
 

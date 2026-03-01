@@ -21,14 +21,16 @@ func FormatCountdown(d time.Duration) string {
 
 // PlaceholderText generates the placeholder text for the textarea.
 // It shows countdown to next Muse trigger and Yolo status.
-func (m *Muse) PlaceholderText(elapsed time.Duration, yoloEnabled bool, defaultPlaceholder string) string {
+// hasSession is required - countdown is only shown when there's an active session.
+func (m *Muse) PlaceholderText(elapsed time.Duration, yoloEnabled, hasSession bool, defaultPlaceholder string) string {
 	var placeholder string
 
 	if yoloEnabled {
 		placeholder = "Yolo mode!"
 	}
 
-	if m.enabled {
+	// Only show Muse countdown if there's an active session
+	if m.enabled && hasSession {
 		var remaining time.Duration
 		if m.lastTrigger.IsZero() {
 			// Before first trigger: countdown to timeout

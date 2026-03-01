@@ -183,7 +183,7 @@ func TestMuse_PlaceholderText(t *testing.T) {
 
 	t.Run("shows countdown before first trigger", func(t *testing.T) {
 		m.lastTrigger = time.Time{}
-		result := m.PlaceholderText(60*time.Second, false, "Ready")
+		result := m.PlaceholderText(60*time.Second, false, true, "Ready")
 		expected := "Muse in 1:00"
 		if result != expected {
 			t.Errorf("PlaceholderText() = %q, want %q", result, expected)
@@ -192,7 +192,7 @@ func TestMuse_PlaceholderText(t *testing.T) {
 
 	t.Run("shows Yolo and countdown", func(t *testing.T) {
 		m.lastTrigger = time.Time{}
-		result := m.PlaceholderText(60*time.Second, true, "Ready")
+		result := m.PlaceholderText(60*time.Second, true, true, "Ready")
 		expected := "Yolo mode! Muse in 1:00"
 		if result != expected {
 			t.Errorf("PlaceholderText() = %q, want %q", result, expected)
@@ -201,7 +201,7 @@ func TestMuse_PlaceholderText(t *testing.T) {
 
 	t.Run("shows default when disabled", func(t *testing.T) {
 		m.enabled = false
-		result := m.PlaceholderText(60*time.Second, false, "Ready")
+		result := m.PlaceholderText(60*time.Second, false, true, "Ready")
 		if result != "Ready" {
 			t.Errorf("PlaceholderText() = %q, want %q", result, "Ready")
 		}
@@ -210,8 +210,17 @@ func TestMuse_PlaceholderText(t *testing.T) {
 
 	t.Run("shows default when countdown reaches zero", func(t *testing.T) {
 		m.lastTrigger = time.Time{}
-		result := m.PlaceholderText(130*time.Second, false, "Ready")
+		result := m.PlaceholderText(130*time.Second, false, true, "Ready")
 		// Countdown is negative, should show default
+		if result != "Ready" {
+			t.Errorf("PlaceholderText() = %q, want %q", result, "Ready")
+		}
+	})
+
+	t.Run("shows default when no session", func(t *testing.T) {
+		m.lastTrigger = time.Time{}
+		// hasSession = false should hide countdown even when enabled
+		result := m.PlaceholderText(60*time.Second, false, false, "Ready")
 		if result != "Ready" {
 			t.Errorf("PlaceholderText() = %q, want %q", result, "Ready")
 		}

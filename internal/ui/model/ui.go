@@ -759,7 +759,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Update Muse placeholder countdown (only when agent is not busy)
 		if m.muse.IsEnabled() && !isBusy {
 			yolo := m.com.App.Permissions.SkipRequests()
-			m.textarea.Placeholder = m.muse.PlaceholderText(elapsed, yolo, m.readyPlaceholder)
+			m.textarea.Placeholder = m.muse.PlaceholderText(elapsed, yolo, m.hasSession(), m.readyPlaceholder)
 		}
 		if m.muse.ShouldTrigger(elapsed, m.hasSession(), isBusy) {
 			// Mark triggered BEFORE dispatching command (state mutation in Update)
@@ -882,7 +882,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Show Muse countdown if enabled
 		if m.muse.IsEnabled() && !m.isAgentBusy() {
 			elapsed := time.Since(m.lastActivity)
-			m.textarea.Placeholder = m.muse.PlaceholderText(elapsed, yolo, m.readyPlaceholder)
+			m.textarea.Placeholder = m.muse.PlaceholderText(elapsed, yolo, m.hasSession(), m.readyPlaceholder)
 		} else if yolo {
 			m.textarea.Placeholder = "Yolo mode!"
 		}

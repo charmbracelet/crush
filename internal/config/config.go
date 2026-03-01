@@ -198,8 +198,9 @@ type LSPConfig struct {
 }
 
 type TUIOptions struct {
-	CompactMode bool   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
-	DiffMode    string `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
+	CompactMode  bool   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
+	DiffMode     string `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
+	QuickQuitKey string `json:"quick_quit_key,omitempty" jsonschema:"description=Keybinding for instant quit without confirmation (e.g. ctrl+q). Set to empty or disabled to turn off,default=ctrl+q"`
 	// Here we can add themes later or any TUI related options
 	//
 

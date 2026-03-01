@@ -208,6 +208,9 @@ type UI struct {
 	// forceCompactMode tracks whether compact mode is forced by user toggle
 	forceCompactMode bool
 
+	// quickQuitEnabled is true when the quick quit keybinding is active.
+	quickQuitEnabled bool
+
 	// isCompact tracks whether we're currently in compact layout mode (either
 	// by user toggle or auto-switch based on window size)
 	isCompact bool
@@ -250,6 +253,23 @@ func New(com *common.Common) *UI {
 
 	keyMap := DefaultKeyMap()
 
+	// Resolve quick quit key: env > config > default ctrl+q.
+	quickQuitKey := os.Getenv("CRUSH_QUICK_QUIT_KEY")
+	if quickQuitKey == "" && com.Config().Options.TUI != nil {
+		quickQuitKey = com.Config().Options.TUI.QuickQuitKey
+	}
+	if quickQuitKey == "" {
+		quickQuitKey = "ctrl+q"
+	}
+	quickQuitKey = strings.TrimSpace(strings.ToLower(quickQuitKey))
+	quickQuitEnabled := quickQuitKey != "" && quickQuitKey != "disabled" && quickQuitKey != "none"
+	if quickQuitEnabled {
+		keyMap.QuickQuit = key.NewBinding(
+			key.WithKeys(quickQuitKey),
+			key.WithHelp(quickQuitKey, "quick quit"),
+		)
+	}
+
 	// Completions component
 	comp := completions.New(
 		com.Styles.Completions.Normal,
@@ -280,17 +300,18 @@ func New(com *common.Common) *UI {
 	header := newHeader(com)
 
 	ui := &UI{
-		com:         com,
-		dialog:      dialog.NewOverlay(),
-		keyMap:      keyMap,
-		textarea:    ta,
-		chat:        ch,
-		header:      header,
-		completions: comp,
-		attachments: attachments,
-		todoSpinner: todoSpinner,
-		lspStates:   make(map[string]app.LSPClientInfo),
-		mcpStates:   make(map[string]mcp.ClientInfo),
+		com:              com,
+		dialog:           dialog.NewOverlay(),
+		keyMap:           keyMap,
+		quickQuitEnabled: quickQuitEnabled,
+		textarea:         ta,
+		chat:             ch,
+		header:           header,
+		completions:      comp,
+		attachments:      attachments,
+		todoSpinner:      todoSpinner,
+		lspStates:        make(map[string]app.LSPClientInfo),
+		mcpStates:        make(map[string]mcp.ClientInfo),
 	}
 
 	status := NewStatus(com, ui)
@@ -1451,6 +1472,11 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	var cmds []tea.Cmd
 
+	// Quick quit bypasses all dialogs and states.
+	if m.quickQuitEnabled && key.Matches(msg, m.keyMap.QuickQuit) {
+		return tea.Quit
+	}
+
 	handleGlobalKeys := func(msg tea.KeyPressMsg) bool {
 		switch {
 		case key.Matches(msg, m.keyMap.Help):
@@ -2038,6 +2064,9 @@ func (m *UI) ShortHelp() []key.Binding {
 		)
 	}
 
+	if m.quickQuitEnabled {
+		binds = append(binds, k.QuickQuit)
+	}
 	binds = append(binds,
 		k.Quit,
 		k.Help,
@@ -2174,12 +2203,12 @@ func (m *UI) FullHelp() [][]key.Binding {
 		}
 	}
 
-	binds = append(binds,
-		[]key.Binding{
-			help,
-			k.Quit,
-		},
-	)
+	quitRow := []key.Binding{help}
+	if m.quickQuitEnabled {
+		quitRow = append(quitRow, k.QuickQuit)
+	}
+	quitRow = append(quitRow, k.Quit)
+	binds = append(binds, quitRow)
 
 	return binds
 }

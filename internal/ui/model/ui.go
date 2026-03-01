@@ -420,6 +420,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.forceCompactMode {
 			m.isCompact = true
 		}
+		// Cancel any ongoing Muse request before switching sessions
+		m.cancelMuse()
+		m.muse.Reset()
+		m.lastActivity = time.Now()
 		m.setState(uiChat, m.focus)
 		m.session = msg.session
 		m.sessionFiles = msg.files
@@ -3360,6 +3364,8 @@ func (m *UI) newSession() tea.Cmd {
 	m.pillsView = ""
 	m.historyReset()
 	agenttools.ResetCache()
+	m.cancelMuse()
+	m.muse.Reset()
 	return tea.Batch(
 		func() tea.Msg {
 			m.com.App.LSPManager.StopAll(context.Background())

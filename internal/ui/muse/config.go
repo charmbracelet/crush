@@ -9,13 +9,13 @@ import (
 
 // Default configuration values.
 const (
-	DefaultTimeout  = 120 * time.Second
+	DefaultTimeout  = 300 * time.Second
 	DefaultInterval = 0 // trigger once
 	TickInterval    = 1 * time.Second
 )
 
 // DefaultPrompt is the default Muse prompt.
-const DefaultPrompt = "Take a quiet look at what I've been working on. Does anything look off? Any 'gotchas' I might have missed? Give me a quick, friendly tip or a 'looks great' before I get back to work."
+const DefaultPrompt = "Review the current file context and recent changes. Briefly identify any potential edge cases, logic gaps, or refactoring opportunities. If the code looks solid, suggest a single, high-impact next step or a relevant test case. Keep your response concise, friendly, and non-intrusive. Avoid repeating what is already obvious."
 
 // Config returns Muse configuration from the app config.
 type Config struct {

@@ -367,17 +367,21 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	}
 
 	largeProviderCfg, _ := c.cfg.Providers.Get(large.ModelCfg.Provider)
+
+	disableAutoSummarize, disableContextStatus := compactionFlags(c.cfg.Options.CompactionMethod, c.cfg.Options.DisableAutoSummarize)
+
 	result := NewSessionAgent(SessionAgentOptions{
-		large,
-		small,
-		largeProviderCfg.SystemPromptPrefix,
-		"",
-		isSubAgent,
-		c.cfg.Options.DisableAutoSummarize,
-		c.permissions.SkipRequests(),
-		c.sessions,
-		c.messages,
-		nil,
+		LargeModel:           large,
+		SmallModel:           small,
+		SystemPromptPrefix:   largeProviderCfg.SystemPromptPrefix,
+		SystemPrompt:         "",
+		IsSubAgent:           isSubAgent,
+		DisableAutoSummarize: disableAutoSummarize,
+		DisableContextStatus: disableContextStatus,
+		IsYolo:               c.permissions.SkipRequests(),
+		Sessions:             c.sessions,
+		Messages:             c.messages,
+		Tools:                nil,
 	})
 
 	c.readyWg.Go(func() error {
@@ -399,6 +403,18 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	})
 
 	return result, nil
+}
+
+// compactionFlags derives the DisableAutoSummarize and DisableContextStatus
+// flags from the configured CompactionMethod. The disableAutoSummarize
+// parameter acts as a legacy override from the config file.
+func compactionFlags(method config.CompactionMethod, disableAutoSummarize bool) (bool, bool) {
+	switch method {
+	case config.CompactionLLM:
+		return true, false
+	default:
+		return disableAutoSummarize, true
+	}
 }
 
 func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fantasy.AgentTool, error) {
@@ -443,6 +459,10 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, c.cfg.WorkingDir(), c.cfg.Options.SkillsPaths...),
 		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 	)
+
+	if c.cfg.Options.CompactionMethod == config.CompactionLLM {
+		allTools = append(allTools, tools.NewNewSessionTool())
+	}
 
 	// Add LSP tools if user has configured LSPs or auto_lsp is enabled (nil or true).
 	if len(c.cfg.LSP) > 0 || c.cfg.Options.AutoLSP == nil || *c.cfg.Options.AutoLSP {
@@ -890,6 +910,10 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 		return err
 	}
 	c.currentAgent.SetTools(tools)
+
+	disableAutoSummarize, disableContextStatus := compactionFlags(c.cfg.Options.CompactionMethod, c.cfg.Options.DisableAutoSummarize)
+	c.currentAgent.SetCompactionFlags(disableAutoSummarize, disableContextStatus)
+
 	return nil
 }
 

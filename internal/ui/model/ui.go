@@ -781,7 +781,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Clear cancel function after completion
 		m.museCancel = nil
 		if msg.Error != nil {
-			cmds = append(cmds, util.ReportError(msg.Error))
+			if errors.Is(msg.Error, context.Canceled) {
+				cmds = append(cmds, util.ReportInfo("Muse: interrupted"))
+			} else {
+				cmds = append(cmds, util.ReportError(msg.Error))
+			}
 		}
 
 	case tea.KeyPressMsg:
@@ -1304,27 +1308,10 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			} else {
 				m.cancelMuse()
 			}
+			yolo := m.com.App.Permissions.SkipRequests()
+			m.setEditorPrompt(yolo)
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)
-	case dialog.ActionMuseSetting:
-		if m.muse != nil {
-			switch msg.Setting {
-			case "toggle":
-				newEnabled := !m.muse.IsEnabled()
-				if cmd := m.muse.SetEnabled(newEnabled, m.com.Config()); cmd != nil {
-					cmds = append(cmds, cmd)
-				}
-				if newEnabled {
-					m.lastActivity = time.Now()
-				} else {
-					m.cancelMuse()
-				}
-				// Refresh dialog items
-				if d, ok := m.dialog.Dialog(dialog.MuseID).(*dialog.Muse); ok {
-					d.UpdateMuseItems()
-				}
-			}
-		}
 	case dialog.ActionEditMuseTimeout:
 		m.dialog.CloseDialog(dialog.MuseID)
 		cmds = append(cmds, m.openMuseTimeoutEditor())
@@ -2604,8 +2591,16 @@ func (m *UI) openEditor(value string) tea.Cmd {
 }
 
 // setEditorPrompt configures the textarea prompt function based on whether
-// yolo mode is enabled.
+// Muse or yolo mode is enabled.
 func (m *UI) setEditorPrompt(yolo bool) {
+	if m.muse.IsEnabled() && yolo {
+		m.textarea.SetPromptFunc(4, m.museYoloPromptFunc)
+		return
+	}
+	if m.muse.IsEnabled() {
+		m.textarea.SetPromptFunc(4, m.musePromptFunc)
+		return
+	}
 	if yolo {
 		m.textarea.SetPromptFunc(4, m.yoloPromptFunc)
 		return
@@ -2644,6 +2639,38 @@ func (m *UI) yoloPromptFunc(info textarea.PromptInfo) string {
 		return t.EditorPromptYoloDotsFocused.Render()
 	}
 	return t.EditorPromptYoloDotsBlurred.Render()
+}
+
+// musePromptFunc returns the Muse mode editor prompt style with Muse icon
+// and colored dots.
+func (m *UI) musePromptFunc(info textarea.PromptInfo) string {
+	t := m.com.Styles
+	if info.LineNumber == 0 {
+		if info.Focused {
+			return t.EditorPromptMuseIconFocused.Render()
+		}
+		return t.EditorPromptMuseIconBlurred.Render()
+	}
+	if info.Focused {
+		return t.EditorPromptMuseDotsFocused.Render()
+	}
+	return t.EditorPromptMuseDotsBlurred.Render()
+}
+
+// museYoloPromptFunc returns the combined Muse+Yolo mode editor prompt style
+// with M icon and Yolo (yellow) colors.
+func (m *UI) museYoloPromptFunc(info textarea.PromptInfo) string {
+	t := m.com.Styles
+	if info.LineNumber == 0 {
+		if info.Focused {
+			return t.EditorPromptMuseYoloIconFocused.Render()
+		}
+		return t.EditorPromptMuseYoloIconBlurred.Render()
+	}
+	if info.Focused {
+		return t.EditorPromptMuseYoloDotsFocused.Render()
+	}
+	return t.EditorPromptMuseYoloDotsBlurred.Render()
 }
 
 // closeCompletions closes the completions popup and resets state.

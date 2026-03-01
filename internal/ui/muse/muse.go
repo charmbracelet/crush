@@ -159,9 +159,9 @@ func (m *Muse) UpdateAgentBusy(busy bool) {
 }
 
 // UpdateConfig updates Muse settings from config.
+// Note: enabled is runtime state and is NOT updated from config.
 func (m *Muse) UpdateConfig(cfg *config.Config) tea.Cmd {
 	c := GetConfig(cfg)
-	m.enabled = c.Enabled
 	m.timeout = c.Timeout
 	m.interval = c.Interval
 	m.prompt = c.Prompt
@@ -174,12 +174,6 @@ func (m *Muse) UpdateConfig(cfg *config.Config) tea.Cmd {
 
 // SetEnabled toggles the enabled state.
 func (m *Muse) SetEnabled(enabled bool, cfg *config.Config) tea.Cmd {
-	if cfg.Options == nil {
-		cfg.Options = &config.Options{}
-	}
-	cfg.Options.MuseEnabled = &enabled
-	_ = cfg.SetConfigField("options.muse_enabled", enabled)
-
 	m.enabled = enabled
 	if enabled {
 		return m.Tick()

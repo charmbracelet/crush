@@ -152,6 +152,14 @@ type Styles struct {
 	EditorPromptYoloDotsBlurred lipgloss.Style
 	EditorPromptMuseIconFocused lipgloss.Style
 	EditorPromptMuseIconBlurred lipgloss.Style
+	EditorPromptMuseDotsFocused  lipgloss.Style
+	EditorPromptMuseDotsBlurred  lipgloss.Style
+
+	// Muse+Yolo combined mode
+	EditorPromptMuseYoloIconFocused lipgloss.Style
+	EditorPromptMuseYoloIconBlurred lipgloss.Style
+	EditorPromptMuseYoloDotsFocused lipgloss.Style
+	EditorPromptMuseYoloDotsBlurred lipgloss.Style
 
 	// Radio
 	RadioOn  lipgloss.Style
@@ -1200,6 +1208,13 @@ func DefaultStyles() Styles {
 	s.EditorPromptYoloDotsBlurred = s.EditorPromptYoloDotsFocused.Foreground(charmtone.Squid)
 	s.EditorPromptMuseIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(charmtone.Pepper).Background(charmtone.Mauve).Bold(true).SetString(" M ")
 	s.EditorPromptMuseIconBlurred = s.EditorPromptMuseIconFocused.Foreground(charmtone.Squid).Background(charmtone.Damson)
+	s.EditorPromptMuseDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(charmtone.Mauve).SetString(":::")
+	s.EditorPromptMuseDotsBlurred = s.EditorPromptMuseDotsFocused.Foreground(charmtone.Damson)
+	// Muse+Yolo: M icon with Yolo (yellow/Citron) colors
+	s.EditorPromptMuseYoloIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(charmtone.Oyster).Background(charmtone.Citron).Bold(true).SetString(" M ")
+	s.EditorPromptMuseYoloIconBlurred = s.EditorPromptMuseYoloIconFocused.Foreground(charmtone.Pepper).Background(charmtone.Squid)
+	s.EditorPromptMuseYoloDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(charmtone.Zest).SetString(":::")
+	s.EditorPromptMuseYoloDotsBlurred = s.EditorPromptMuseYoloDotsFocused.Foreground(charmtone.Squid)
 
 	s.RadioOn = s.HalfMuted.SetString(RadioOn)
 	s.RadioOff = s.HalfMuted.SetString(RadioOff)

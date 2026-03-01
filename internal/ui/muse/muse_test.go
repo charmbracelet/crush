@@ -149,10 +149,8 @@ func TestGetConfig(t *testing.T) {
 	})
 
 	t.Run("custom values", func(t *testing.T) {
-		enabled := true
 		cfg := &config.Config{
 			Options: &config.Options{
-				MuseEnabled:  &enabled,
 				MuseTimeout:  60,
 				MuseInterval: 300,
 				MusePrompt:   "Custom prompt",
@@ -160,8 +158,9 @@ func TestGetConfig(t *testing.T) {
 		}
 		c := GetConfig(cfg)
 
-		if !c.Enabled {
-			t.Error("Should be enabled")
+		// Enabled is always false from config - it's a runtime state
+		if c.Enabled {
+			t.Error("Should be disabled by default")
 		}
 		if c.Timeout != 60*time.Second {
 			t.Errorf("Timeout = %v, want %v", c.Timeout, 60*time.Second)
@@ -220,10 +219,8 @@ func TestMuse_PlaceholderText(t *testing.T) {
 }
 
 func TestMuse_New(t *testing.T) {
-	enabled := true
 	cfg := &config.Config{
 		Options: &config.Options{
-			MuseEnabled:  &enabled,
 			MuseTimeout:  60,
 			MuseInterval: 120,
 			MusePrompt:   "Test prompt",
@@ -231,8 +228,9 @@ func TestMuse_New(t *testing.T) {
 	}
 	m := New(cfg)
 
-	if !m.enabled {
-		t.Error("Should be enabled")
+	// Enabled is always false initially - it's a runtime state
+	if m.enabled {
+		t.Error("Should be disabled initially")
 	}
 	if m.timeout != 60*time.Second {
 		t.Errorf("Timeout = %v, want %v", m.timeout, 60*time.Second)
@@ -431,10 +429,8 @@ func TestMuse_MarkAgentFinished(t *testing.T) {
 }
 
 func TestMuse_UpdateConfig(t *testing.T) {
-	enabled := true
 	cfg := &config.Config{
 		Options: &config.Options{
-			MuseEnabled:  &enabled,
 			MuseTimeout:  45,
 			MuseInterval: 90,
 			MusePrompt:   "Updated prompt",
@@ -442,16 +438,17 @@ func TestMuse_UpdateConfig(t *testing.T) {
 	}
 
 	m := &Muse{
-		enabled:  false,
+		enabled:  true, // runtime state - should NOT be changed by UpdateConfig
 		timeout:  120 * time.Second,
 		interval: 0,
 		prompt:   "Old prompt",
 	}
 
-	cmd := m.UpdateConfig(cfg)
+	_ = m.UpdateConfig(cfg)
 
+	// Enabled is runtime state, not affected by config
 	if !m.enabled {
-		t.Error("enabled should be updated")
+		t.Error("enabled should remain unchanged (runtime state)")
 	}
 	if m.timeout != 45*time.Second {
 		t.Errorf("timeout = %v, want %v", m.timeout, 45*time.Second)
@@ -462,28 +459,7 @@ func TestMuse_UpdateConfig(t *testing.T) {
 	if m.prompt != "Updated prompt" {
 		t.Errorf("prompt = %q, want %q", m.prompt, "Updated prompt")
 	}
-	if cmd == nil {
-		t.Error("UpdateConfig should return tick command when enabled")
-	}
-}
-
-func TestMuse_UpdateConfig_Disabled(t *testing.T) {
-	disabled := false
-	cfg := &config.Config{
-		Options: &config.Options{
-			MuseEnabled: &disabled,
-		},
-	}
-
-	m := &Muse{enabled: true}
-	cmd := m.UpdateConfig(cfg)
-
-	if m.enabled {
-		t.Error("enabled should be false")
-	}
-	if cmd != nil {
-		t.Error("UpdateConfig should return nil when disabled")
-	}
+	// cmd is nil because enabled is already true (no tick needed)
 }
 
 func TestMuse_SetEnabled(t *testing.T) {
@@ -494,9 +470,6 @@ func TestMuse_SetEnabled(t *testing.T) {
 
 	if !m.enabled {
 		t.Error("enabled should be true")
-	}
-	if cfg.Options.MuseEnabled == nil || !*cfg.Options.MuseEnabled {
-		t.Error("config should be updated")
 	}
 	if cmd == nil {
 		t.Error("SetEnabled(true) should return tick command")
@@ -550,20 +523,6 @@ func TestMuse_SetPrompt(t *testing.T) {
 	}
 	if cfg.Options.MusePrompt != "New prompt" {
 		t.Errorf("config.MusePrompt = %q, want %q", cfg.Options.MusePrompt, "New prompt")
-	}
-}
-
-func TestMuse_SetEnabled_NilOptions(t *testing.T) {
-	cfg := &config.Config{Options: nil}
-	m := &Muse{enabled: false}
-
-	m.SetEnabled(true, cfg)
-
-	if !m.enabled {
-		t.Error("enabled should be true")
-	}
-	if cfg.Options == nil {
-		t.Error("Options should be created")
 	}
 }
 

@@ -142,7 +142,7 @@ func (m *Muse) HandleMsg(msg tea.Msg) Action {
 			case "edit_interval":
 				return ActionEditMuseInterval{}
 			}
-			return ActionMuseSetting{Setting: museItem.id}
+			return nil
 		default:
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
@@ -224,7 +224,6 @@ func (m *Muse) setMuseItems() {
 	cfg := m.com.Config()
 
 	// Get current values
-	isEnabled := cfg.Options != nil && cfg.Options.MuseEnabled != nil && *cfg.Options.MuseEnabled
 	timeout := 120
 	interval := 0
 	if cfg.Options != nil {
@@ -236,12 +235,6 @@ func (m *Muse) setMuseItems() {
 		}
 	}
 
-	// Build status strings
-	enabledStatus := "disabled"
-	if isEnabled {
-		enabledStatus = "enabled"
-	}
-
 	// Format interval display
 	intervalDisplay := "once (no repeat)"
 	if interval > 0 {
@@ -249,12 +242,6 @@ func (m *Muse) setMuseItems() {
 	}
 
 	items := []list.FilterableItem{
-		&MuseItem{
-			id:      "toggle",
-			title:   "Enable Muse",
-			info:    enabledStatus,
-			t:       m.com.Styles,
-		},
 		&MuseItem{
 			id:      "edit_timeout",
 			title:   "Edit Timeout",

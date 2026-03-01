@@ -28,7 +28,7 @@ type Config struct {
 // GetConfig extracts Muse configuration from app config.
 func GetConfig(cfg *config.Config) Config {
 	c := Config{
-		Enabled:  false,
+		Enabled:  false, // Always starts disabled - toggle at runtime
 		Timeout:  DefaultTimeout,
 		Interval: DefaultInterval,
 		Prompt:   DefaultPrompt,
@@ -38,9 +38,6 @@ func GetConfig(cfg *config.Config) Config {
 		return c
 	}
 
-	if cfg.Options.MuseEnabled != nil {
-		c.Enabled = *cfg.Options.MuseEnabled
-	}
 	if cfg.Options.MuseTimeout > 0 {
 		c.Timeout = time.Duration(cfg.Options.MuseTimeout) * time.Second
 	}

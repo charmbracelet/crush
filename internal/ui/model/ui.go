@@ -685,7 +685,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					cmds = append(cmds, cmd)
 				}
 				if !m.chat.SelectedItemInView() {
-					m.chat.SelectNext()
+					if m.chat.AtBottom() {
+						m.chat.SelectLast()
+					} else {
+						m.chat.SelectNext()
+					}
 					if cmd := m.chat.ScrollToSelectedAndAnimate(); cmd != nil {
 						cmds = append(cmds, cmd)
 					}

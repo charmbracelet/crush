@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -27,6 +28,41 @@ var writeDescription []byte
 type WriteParams struct {
 	FilePath string `json:"file_path" description:"The path to the file to write"`
 	Content  string `json:"content" description:"The content to write to the file"`
+}
+
+// UnmarshalJSON custom unmarshaler to handle both string and array of strings
+// This fixes compatibility with GLM 4.6 and Qwen 3 Coder 480B models that send content as arrays
+func (w *WriteParams) UnmarshalJSON(data []byte) error {
+	aux := &struct {
+		FilePath string      `json:"file_path"`
+		Content  interface{} `json:"content"`
+	}{}
+
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	w.FilePath = aux.FilePath
+
+	switch v := aux.Content.(type) {
+	case string:
+		w.Content = v
+	case []interface{}:
+		// Handle array of strings - join with newlines
+		var lines []string
+		for i, item := range v {
+			if str, ok := item.(string); ok {
+				lines = append(lines, str)
+			} else {
+				return fmt.Errorf("array element at index %d is not a string: got %T", i, item)
+			}
+		}
+		w.Content = strings.Join(lines, "\n")
+	default:
+		return fmt.Errorf("invalid type for content field: %T", v)
+	}
+
+	return nil
 }
 
 type WritePermissionsParams struct {

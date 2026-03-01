@@ -25,4 +25,5 @@ Fetches content from a web URL (for use by sub-agents).
 - For large pages saved to files, use grep to find relevant sections first
 - Don't fetch unnecessary pages - only when needed to answer the question
 - Focus on extracting specific information from the fetched content
+- For GitHub content (PRs, issues, repos, commits), prefer using gh CLI via the bash tool instead of web_fetch for better data quality. This tool should be used as a fallback for GitHub URLs when gh CLI is unavailable or fails.
 </tips>

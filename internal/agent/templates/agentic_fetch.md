@@ -52,6 +52,7 @@ DO NOT use this tool when:
 - For complex pages, ask the agent to focus on specific sections
 - The agent has access to web_search, web_fetch, grep, and view tools
 - If you just need raw content, use the fetch tool instead to save tokens
+- For GitHub content (PRs, issues, repos, commits), prefer using gh CLI via the bash tool instead of web_fetch for better data quality. This tool should be used as a fallback for GitHub URLs when gh CLI is unavailable or fails.
 </tips>
 
 <examples>

@@ -23,6 +23,7 @@ type CreatePermissionRequest struct {
 	Action      string `json:"action"`
 	Params      any    `json:"params"`
 	Path        string `json:"path"`
+	Dangerous   bool   `json:"dangerous"`
 }
 
 type PermissionNotification struct {
@@ -40,6 +41,7 @@ type PermissionRequest struct {
 	Action      string `json:"action"`
 	Params      any    `json:"params"`
 	Path        string `json:"path"`
+	Dangerous   bool   `json:"dangerous"`
 }
 
 type Service interface {
@@ -130,7 +132,8 @@ func (s *permissionService) Deny(permission PermissionRequest) {
 }
 
 func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRequest) (bool, error) {
-	if s.skip {
+	// Skip mode: auto-approve everything EXCEPT dangerous commands.
+	if s.skip && !opts.Dangerous {
 		return true, nil
 	}
 
@@ -181,6 +184,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		Description: opts.Description,
 		Action:      opts.Action,
 		Params:      opts.Params,
+		Dangerous:   opts.Dangerous,
 	}
 
 	s.sessionPermissionsMu.RLock()

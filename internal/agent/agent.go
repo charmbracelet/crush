@@ -256,6 +256,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				prepared.Messages[i].ProviderOptions = nil
 			}
 
+			// Use latest tools (updated by SetTools when MCP tools change).
+			prepared.Tools = a.tools.Copy()
+
 			queuedCalls, _ := a.messageQueue.Get(call.SessionID)
 			a.messageQueue.Del(call.SessionID)
 			for _, queued := range queuedCalls {

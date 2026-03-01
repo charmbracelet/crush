@@ -535,8 +535,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, handleMCPPromptsEvent(msg.Payload.Name)
 		case mcp.EventToolsListChanged:
 			return m, handleMCPToolsEvent(m.com.Config(), msg.Payload.Name)
-		case mcp.EventResourcesListChanged:
-			return m, handleMCPResourcesEvent(msg.Payload.Name)
 		}
 	case pubsub.Event[permission.PermissionRequest]:
 		if cmd := m.openPermissionsDialog(msg.Payload); cmd != nil {
@@ -1248,6 +1246,12 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionQuit:
 		cmds = append(cmds, tea.Quit)
+	case dialog.ActionEnableDockerMCP:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		cmds = append(cmds, m.enableDockerMCP)
+	case dialog.ActionDisableDockerMCP:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		cmds = append(cmds, m.disableDockerMCP)
 	case dialog.ActionInitializeProject:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
@@ -3305,6 +3309,36 @@ func (m *UI) copyChatHighlight() tea.Cmd {
 			return nil
 		},
 	)
+}
+
+func (m *UI) enableDockerMCP() tea.Msg {
+	cfg := m.com.Config()
+	if err := cfg.EnableDockerMCP(); err != nil {
+		return util.ReportError(err)()
+	}
+
+	// Initialize the Docker MCP client immediately.
+	ctx := context.Background()
+	if err := mcp.InitializeSingle(ctx, config.DockerMCPName, cfg); err != nil {
+		return util.ReportError(fmt.Errorf("docker MCP enabled but failed to start: %w", err))()
+	}
+
+	return util.NewInfoMsg("Docker MCP enabled and started successfully")
+}
+
+func (m *UI) disableDockerMCP() tea.Msg {
+	// Close the Docker MCP client.
+	if err := mcp.DisableSingle(m.com.Config(), config.DockerMCPName); err != nil {
+		return util.ReportError(fmt.Errorf("failed to disable docker MCP: %w", err))()
+	}
+
+	// Remove from config and persist.
+	cfg := m.com.Config()
+	if err := cfg.DisableDockerMCP(); err != nil {
+		return util.ReportError(err)()
+	}
+
+	return util.NewInfoMsg("Docker MCP disabled successfully")
 }
 
 // renderLogo renders the Crush logo with the given styles and dimensions.

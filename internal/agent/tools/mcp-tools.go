@@ -3,12 +3,22 @@ package tools
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/permission"
 )
+
+// whitelistDockerTools contains Docker MCP tools that don't require permission.
+var whitelistDockerTools = []string{
+	"mcp_docker_mcp-find",
+	"mcp_docker_mcp-add",
+	"mcp_docker_mcp-remove",
+	"mcp_docker_mcp-config-set",
+	"mcp_docker_code-mode",
+}
 
 // GetMCPTools gets all the currently available MCP tools.
 func GetMCPTools(permissions permission.Service, cfg *config.Config, wd string) []*Tool {
@@ -91,23 +101,27 @@ func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolRe
 	if sessionID == "" {
 		return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for creating a new file")
 	}
-	permissionDescription := fmt.Sprintf("execute %s with the following parameters:", m.Info().Name)
-	p, err := m.permissions.Request(ctx,
-		permission.CreatePermissionRequest{
-			SessionID:   sessionID,
-			ToolCallID:  params.ID,
-			Path:        m.workingDir,
-			ToolName:    m.Info().Name,
-			Action:      "execute",
-			Description: permissionDescription,
-			Params:      params.Input,
-		},
-	)
-	if err != nil {
-		return fantasy.ToolResponse{}, err
-	}
-	if !p {
-		return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
+
+	// Skip permission for whitelisted Docker MCP tools.
+	if !slices.Contains(whitelistDockerTools, params.Name) {
+		permissionDescription := fmt.Sprintf("execute %s with the following parameters:", m.Info().Name)
+		p, err := m.permissions.Request(ctx,
+			permission.CreatePermissionRequest{
+				SessionID:   sessionID,
+				ToolCallID:  params.ID,
+				Path:        m.workingDir,
+				ToolName:    m.Info().Name,
+				Action:      "execute",
+				Description: permissionDescription,
+				Params:      params.Input,
+			},
+		)
+		if err != nil {
+			return fantasy.ToolResponse{}, err
+		}
+		if !p {
+			return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
+		}
 	}
 
 	result, err := mcp.RunTool(ctx, m.cfg, m.mcpName, m.tool.Name, params.Input)

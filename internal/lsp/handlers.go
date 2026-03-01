@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	"github.com/charmbracelet/crush/internal/lsp/util"
+	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
@@ -44,19 +45,21 @@ func HandleRegisterCapability(_ context.Context, _ string, params json.RawMessag
 }
 
 // HandleApplyEdit handles workspace edit requests
-func HandleApplyEdit(_ context.Context, _ string, params json.RawMessage) (any, error) {
-	var edit protocol.ApplyWorkspaceEditParams
-	if err := json.Unmarshal(params, &edit); err != nil {
-		return nil, err
-	}
+func HandleApplyEdit(encoding powernap.OffsetEncoding) func(_ context.Context, _ string, params json.RawMessage) (any, error) {
+	return func(_ context.Context, _ string, params json.RawMessage) (any, error) {
+		var edit protocol.ApplyWorkspaceEditParams
+		if err := json.Unmarshal(params, &edit); err != nil {
+			return nil, err
+		}
 
-	err := util.ApplyWorkspaceEdit(edit.Edit)
-	if err != nil {
-		slog.Error("Error applying workspace edit", "error", err)
-		return protocol.ApplyWorkspaceEditResult{Applied: false, FailureReason: err.Error()}, nil
-	}
+		err := util.ApplyWorkspaceEdit(edit.Edit, encoding)
+		if err != nil {
+			slog.Error("Error applying workspace edit", "error", err)
+			return protocol.ApplyWorkspaceEditResult{Applied: false, FailureReason: err.Error()}, nil
+		}
 
-	return protocol.ApplyWorkspaceEditResult{Applied: true}, nil
+		return protocol.ApplyWorkspaceEditResult{Applied: true}, nil
+	}
 }
 
 // FileWatchRegistrationHandler is a function that will be called when file watch registrations are received

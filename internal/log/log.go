@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"regexp"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,14 +21,26 @@ var (
 	initialized atomic.Bool
 )
 
+const MaxAgeDays = 30
+
 func Setup(logFile string, debug bool) {
 	initOnce.Do(func() {
+		// Create a process-specific log file name to avoid conflicts between multiple processes
+		pid := os.Getpid()
+		dir := filepath.Dir(logFile)
+		ext := filepath.Ext(logFile)
+		name := strings.TrimSuffix(filepath.Base(logFile), ext)
+		processLogFile := filepath.Join(dir, fmt.Sprintf("%s-%d%s", name, pid, ext))
+
+		// Clean up old process log files on startup
+		cleanupOldProcessLogs(dir, name, ext)
+
 		logRotator := &lumberjack.Logger{
-			Filename:   logFile,
-			MaxSize:    10,    // Max size in MB
-			MaxBackups: 0,     // Number of backups
-			MaxAge:     30,    // Days
-			Compress:   false, // Enable compression
+			Filename:   processLogFile,
+			MaxSize:    10,         // Max size in MB
+			MaxBackups: 0,          // Number of backups
+			MaxAge:     MaxAgeDays, // Days
+			Compress:   false,      // Enable compression
 		}
 
 		level := slog.LevelInfo
@@ -41,6 +56,46 @@ func Setup(logFile string, debug bool) {
 		slog.SetDefault(slog.New(logger))
 		initialized.Store(true)
 	})
+}
+
+func cleanupOldProcessLogs(logsDir, baseName, ext string) {
+	// Find all process log files matching pattern <basename>-<pid>.<ext>
+	files, err := os.ReadDir(logsDir)
+	if err != nil {
+		// Log directory might not exist yet
+		return
+	}
+
+	// Match pattern like "crush-12345.log"
+	pattern := regexp.MustCompile(fmt.Sprintf(`^%s-(\d+)%s$`, regexp.QuoteMeta(baseName), regexp.QuoteMeta(ext)))
+
+	cutoffTime := time.Now().AddDate(0, 0, -MaxAgeDays)
+
+	for _, file := range files {
+		if file.IsDir() {
+			continue
+		}
+
+		if !pattern.MatchString(file.Name()) {
+			continue
+		}
+
+		filePath := filepath.Join(logsDir, file.Name())
+		info, err := os.Stat(filePath)
+		if err != nil {
+			continue
+		}
+
+		// Check if file is older than MaxAgeDays
+		if info.ModTime().Before(cutoffTime) {
+			if err := os.Remove(filePath); err == nil {
+				slog.Info("Cleaned up old process log file",
+					"file", file.Name(),
+					"age_days", int(time.Since(info.ModTime()).Hours()/24),
+				)
+			}
+		}
+	}
 }
 
 func Initialized() bool {

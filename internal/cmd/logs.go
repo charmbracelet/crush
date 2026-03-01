@@ -7,12 +7,16 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
+	"sort"
+	"sync"
 	"time"
 
 	"charm.land/log/v2"
 	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/crush/internal/config"
+	logconf "github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/x/term"
 	"github.com/nxadm/tail"
 	"github.com/spf13/cobra"
@@ -55,18 +59,43 @@ var logsCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("failed to load configuration: %v", err)
 		}
-		logsFile := filepath.Join(cfg.Options.DataDirectory, "logs", "crush.log")
-		_, err = os.Stat(logsFile)
-		if os.IsNotExist(err) {
-			log.Warn("Looks like you are not in a crush project. No logs found.")
-			return nil
+
+		logsDir := filepath.Join(cfg.Options.DataDirectory, "logs")
+		var logFiles []string
+
+		// Find all crush log files (including process-specific ones)
+		files, err := os.ReadDir(logsDir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				log.Warn("Looks like you are not in a crush project. No logs found.")
+				return nil
+			}
+			return fmt.Errorf("failed to read logs directory: %v", err)
+		}
+
+		// Match crush.log and crush-<pid>.log files
+		logFilePattern := regexp.MustCompile(`^crush(?:-\d+)?\.log$`)
+		for _, file := range files {
+			info, err := file.Info()
+			if err != nil {
+				continue
+			}
+
+			// Skip files older than MaxAgeDays
+			if time.Since(info.ModTime()) > logconf.MaxAgeDays*24*time.Hour {
+				continue
+			}
+
+			if !file.IsDir() && logFilePattern.MatchString(file.Name()) {
+				logFiles = append(logFiles, filepath.Join(logsDir, file.Name()))
+			}
 		}
 
 		if follow {
-			return followLogs(cmd.Context(), logsFile, tailLines)
+			return followLogs(cmd.Context(), logFiles, tailLines)
 		}
 
-		return showLogs(logsFile, tailLines)
+		return showLogs(logFiles, tailLines)
 	},
 }
 
@@ -75,51 +104,138 @@ func init() {
 	logsCmd.Flags().IntP("tail", "t", defaultTailLines, "Show only the last N lines default: 1000 for performance")
 }
 
-func followLogs(ctx context.Context, logsFile string, tailLines int) error {
-	t, err := tail.TailFile(logsFile, tail.Config{
-		Follow: false,
-		ReOpen: false,
-		Logger: tail.DiscardingLogger,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to tail log file: %v", err)
-	}
+type logHeap []string
 
-	var lines []string
-	for line := range t.Lines {
-		if line.Err != nil {
+func (h logHeap) Len() int { return len(h) }
+func (h logHeap) Less(i, j int) bool {
+	var dataI, dataJ map[string]any
+	json.Unmarshal([]byte(h[i]), &dataI)
+	json.Unmarshal([]byte(h[j]), &dataJ)
+
+	timeI, _ := time.Parse(time.RFC3339, fmt.Sprintf("%v", dataI["time"]))
+	timeJ, _ := time.Parse(time.RFC3339, fmt.Sprintf("%v", dataJ["time"]))
+	return timeI.Before(timeJ)
+}
+func (h logHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
+func (h *logHeap) Push(x any)   { *h = append(*h, x.(string)) }
+func (h *logHeap) Pop() any {
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	*h = old[0 : n-1]
+	return x
+}
+
+func printInitialLogs(logFiles []string, tailLines int) (int, error) {
+	// Collect initial lines from all files (only up to tailLines with priority queue)
+	h := &logHeap{}
+
+	for _, file := range logFiles {
+		t, err := tail.TailFile(file, tail.Config{
+			Follow:      false,
+			ReOpen:      false,
+			Logger:      tail.DiscardingLogger,
+			MaxLineSize: 0,
+		})
+		if err != nil {
 			continue
 		}
-		lines = append(lines, line.Text)
-		if len(lines) > tailLines {
-			lines = lines[len(lines)-tailLines:]
-		}
-	}
-	t.Stop()
 
-	for _, line := range lines {
+		for line := range t.Lines {
+			if line.Err != nil {
+				continue
+			}
+			// Push to heap
+			*h = append(*h, line.Text)
+			if h.Len() > tailLines {
+				// Pop the oldest line
+				h.Pop()
+			}
+		}
+		t.Stop()
+	}
+
+	if h.Len() == 0 {
+		return 0, nil
+	}
+
+	// Print initial lines
+	sort.Slice(*h, func(i, j int) bool {
+		var dataI, dataJ map[string]any
+		json.Unmarshal([]byte((*h)[i]), &dataI)
+		json.Unmarshal([]byte((*h)[j]), &dataJ)
+
+		timeI, _ := time.Parse(time.RFC3339, fmt.Sprintf("%v", dataI["time"]))
+		timeJ, _ := time.Parse(time.RFC3339, fmt.Sprintf("%v", dataJ["time"]))
+		return timeI.Before(timeJ)
+	})
+
+	for _, line := range *h {
 		printLogLine(line)
 	}
 
-	if len(lines) == tailLines {
-		fmt.Fprintf(os.Stderr, "\nShowing last %d lines. Full logs available at: %s\n", tailLines, logsFile)
-		fmt.Fprintf(os.Stderr, "Following new log entries...\n\n")
+	return h.Len(), nil
+}
+
+func followLogs(ctx context.Context, logFiles []string, tailLines int) error {
+	printedLines, err := printInitialLogs(logFiles, tailLines)
+	if err != nil {
+		return err
+	}
+	if printedLines == 0 {
+		fmt.Fprintln(os.Stderr, "No logs found")
+	} else {
+		fmt.Fprintf(os.Stderr, "\nShowing last %d lines from %d log file(s). Now following...\n", printedLines, len(logFiles))
 	}
 
-	t, err = tail.TailFile(logsFile, tail.Config{
-		Follow:   true,
-		ReOpen:   true,
-		Logger:   tail.DiscardingLogger,
-		Location: &tail.SeekInfo{Offset: 0, Whence: io.SeekEnd},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to tail log file: %v", err)
+	// Now follow all log files
+	tailers := make([]*tail.Tail, 0, len(logFiles))
+	for _, file := range logFiles {
+		t, err := tail.TailFile(file, tail.Config{
+			Follow:   true,
+			ReOpen:   true,
+			Logger:   tail.DiscardingLogger,
+			Location: &tail.SeekInfo{Offset: 0, Whence: io.SeekEnd},
+		})
+		if err != nil {
+			continue
+		}
+		tailers = append(tailers, t)
 	}
-	defer t.Stop()
+
+	if len(tailers) == 0 {
+		return nil
+	}
+
+	// Combine all tailers into a single channel
+	lineChan := make(chan *tail.Line, len(tailers)*10)
+	wg := sync.WaitGroup{}
+	for _, t := range tailers {
+		wg.Add(1)
+		go func(tailInstance *tail.Tail) {
+			defer wg.Done()
+			for line := range tailInstance.Lines {
+				if line != nil && line.Err == nil {
+					lineChan <- line
+				}
+			}
+		}(t)
+	}
+
+	defer func() {
+		for _, t := range tailers {
+			t.Stop()
+		}
+		wg.Wait()
+		close(lineChan)
+	}()
 
 	for {
 		select {
-		case line := <-t.Lines:
+		case line, ok := <-lineChan:
+			if !ok {
+				return nil
+			}
 			if line.Err != nil {
 				continue
 			}
@@ -130,35 +246,19 @@ func followLogs(ctx context.Context, logsFile string, tailLines int) error {
 	}
 }
 
-func showLogs(logsFile string, tailLines int) error {
-	t, err := tail.TailFile(logsFile, tail.Config{
-		Follow:      false,
-		ReOpen:      false,
-		Logger:      tail.DiscardingLogger,
-		MaxLineSize: 0,
-	})
+func showLogs(logFiles []string, tailLines int) error {
+	printedLines, err := printInitialLogs(logFiles, tailLines)
 	if err != nil {
-		return fmt.Errorf("failed to tail log file: %v", err)
-	}
-	defer t.Stop()
-
-	var lines []string
-	for line := range t.Lines {
-		if line.Err != nil {
-			continue
-		}
-		lines = append(lines, line.Text)
-		if len(lines) > tailLines {
-			lines = lines[len(lines)-tailLines:]
-		}
+		return err
 	}
 
-	for _, line := range lines {
-		printLogLine(line)
+	if printedLines == 0 {
+		fmt.Fprintln(os.Stderr, "No logs found")
+		return nil
 	}
 
-	if len(lines) == tailLines {
-		fmt.Fprintf(os.Stderr, "\nShowing last %d lines. Full logs available at: %s\n", tailLines, logsFile)
+	if printedLines == tailLines {
+		fmt.Fprintf(os.Stderr, "\nShowing last %d lines from %d log file(s).\n", tailLines, len(logFiles))
 	}
 
 	return nil

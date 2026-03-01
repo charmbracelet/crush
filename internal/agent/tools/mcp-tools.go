@@ -3,12 +3,30 @@ package tools
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/permission"
 )
+
+// LargeMCPContentThreshold is 3x the max of fetch, 5x the max of bash because it should be assumed that a large
+// MCP style request was made on purpose.
+const LargeMCPContentThreshold = 150000 // 150KB
+
+// mcpMaxOutputLength is the max output length for MCP tools, can be overridden by setting CRUSH_MCP_MAX_OUTPUT.
+var mcpMaxOutputLength int
+
+func init() {
+	mcpMaxOutputLength = LargeMCPContentThreshold
+	if v := os.Getenv("CRUSH_MCP_MAX_OUTPUT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			mcpMaxOutputLength = n
+		}
+	}
+}
 
 // GetMCPTools gets all the currently available MCP tools.
 func GetMCPTools(permissions permission.Service, cfg *config.Config, wd string) []*Tool {
@@ -131,6 +149,44 @@ func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolRe
 		response.Content = result.Content
 		return response, nil
 	default:
-		return fantasy.NewTextResponse(result.Content), nil
+		content := result.Content
+		if len(content) > mcpMaxOutputLength {
+			content = truncateMCPOutput(content)
+		}
+		return fantasy.NewTextResponse(content), nil
+	}
+}
+
+func truncateMCPOutput(content string) string {
+	if len(content) <= mcpMaxOutputLength {
+		return content
+	}
+
+	// truncate in bytes, add truncation language in characters
+	truncated := content[:mcpMaxOutputLength]
+
+	truncatedChars := len([]rune(content)) - len([]rune(truncated))
+	totalChars := len([]rune(content))
+	shownChars := len([]rune(truncated))
+
+	return fmt.Sprintf("%s\n\n... [truncated %s, showing first %s of %s total]",
+		truncated,
+		formatChars(truncatedChars),
+		formatChars(shownChars),
+		formatChars(totalChars))
+}
+
+func formatChars(chars int) string {
+	const (
+		K = 1000
+		M = 1000 * K
+	)
+	switch {
+	case chars >= M:
+		return fmt.Sprintf("%.1fM chars", float64(chars)/float64(M))
+	case chars >= K:
+		return fmt.Sprintf("%.1fK chars", float64(chars)/float64(K))
+	default:
+		return fmt.Sprintf("%d chars", chars)
 	}
 }

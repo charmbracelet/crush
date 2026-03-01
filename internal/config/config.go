@@ -183,6 +183,8 @@ type MCPConfig struct {
 
 	// TODO: maybe make it possible to get the value from the env
 	Headers map[string]string `json:"headers,omitempty" jsonschema:"description=HTTP headers for HTTP/SSE MCP servers"`
+
+	DisableStandaloneSSE bool `json:"disable_standalone_sse" jsonschema:"description=(HTTP only) Whether the client establishes a standalone SSE stream for receiving server-initiated messages,default=false"`
 }
 
 type LSPConfig struct {

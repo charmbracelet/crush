@@ -327,6 +327,31 @@ using `$(echo $VAR)` syntax.
 }
 ```
 
+### Memory files
+
+Crush automatically includes two files for cross-project instructions.
+
+- `~/.config/crush/CRUSH.md`: Crush-specific rules that would confuse other
+  agentic coding tools. If you only use Crush, this is the only one you need to
+  edit.
+- `~/.config/AGENTS.md`: generic instructions that other coding tools might
+  read. Avoid referring to Crush-specific tools or workflows here.
+
+You can customize these paths using the `memory_paths` option in your
+configuration:
+
+```jsonc
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "memory_paths": [
+      "~/path/to/custom/memory/file.md",
+      "/full/path/to/folder/of/files/" // recursively load all .md files in folder
+    ]
+  }
+}
+```
+
 ### Ignoring Files
 
 Crush respects `.gitignore` files by default, but you can also create a

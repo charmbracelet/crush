@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	_ "embed"
+	"strings"
 
 	"charm.land/fantasy"
 )
@@ -31,6 +32,12 @@ func NewNewSessionTool() fantasy.AgentTool {
 		NewSessionToolName,
 		string(newSessionDescription),
 		func(ctx context.Context, params NewSessionParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			if strings.TrimSpace(params.Summary) == "" {
+				return fantasy.ToolResponse{
+					Content: "A non-empty summary is required to create a new session.",
+					IsError: true,
+				}, nil
+			}
 			return fantasy.ToolResponse{}, &NewSessionError{Summary: params.Summary}
 		},
 	)

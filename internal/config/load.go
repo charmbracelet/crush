@@ -413,6 +413,9 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 		}
 	}
 	c.Options.InitializeAs = cmp.Or(c.Options.InitializeAs, defaultInitializeAs)
+	c.Options.CompactionMethod = CompactionMethod(
+		cmp.Or(string(c.Options.CompactionMethod), string(CompactionAuto)),
+	)
 }
 
 // applyLSPDefaults applies default values from powernap to LSP configurations

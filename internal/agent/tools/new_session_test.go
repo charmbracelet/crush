@@ -44,17 +44,31 @@ func TestNewSessionToolEmptySummary(t *testing.T) {
 
 	tool := NewNewSessionTool()
 
-	_, err := tool.Run(context.Background(), fantasy.ToolCall{
+	resp, err := tool.Run(context.Background(), fantasy.ToolCall{
 		ID:    "call_456",
 		Name:  NewSessionToolName,
 		Input: `{"summary":""}`,
 	})
 
-	require.Error(t, err)
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "non-empty summary")
+}
 
-	var nse *NewSessionError
-	require.True(t, errors.As(err, &nse))
-	require.Empty(t, nse.Summary)
+func TestNewSessionToolWhitespaceSummary(t *testing.T) {
+	t.Parallel()
+
+	tool := NewNewSessionTool()
+
+	resp, err := tool.Run(context.Background(), fantasy.ToolCall{
+		ID:    "call_789",
+		Name:  NewSessionToolName,
+		Input: `{"summary":"   "}`,
+	})
+
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "non-empty summary")
 }
 
 func TestNewSessionErrorMessage(t *testing.T) {

@@ -30,7 +30,7 @@ func TestContextStatusMessage(t *testing.T) {
 
 		msg, ok := agent.contextStatusMessage(s, model)
 		require.True(t, ok)
-		require.Equal(t, fantasy.MessageRoleUser, msg.Role)
+		require.Equal(t, fantasy.MessageRoleSystem, msg.Role)
 		require.Len(t, msg.Content, 1)
 
 		textPart, ok := fantasy.AsMessagePart[fantasy.TextPart](msg.Content[0])
@@ -94,7 +94,7 @@ func TestContextStatusMessage(t *testing.T) {
 		textPart, ok := fantasy.AsMessagePart[fantasy.TextPart](msg.Content[0])
 		require.True(t, ok)
 		require.Equal(t,
-			`<context_status>{"used_pct":125,"remaining_tokens":0,"context_window":200000}</context_status>`,
+			`<context_status>{"used_pct":100,"remaining_tokens":0,"context_window":200000}</context_status>`,
 			textPart.Text,
 		)
 	})
@@ -200,5 +200,5 @@ func TestContextStatusMessageNotInjectedForSubAgent(t *testing.T) {
 	// PrepareStep is the sole control point.
 	msg, ok := agent.contextStatusMessage(s, model)
 	require.True(t, ok)
-	require.Equal(t, fantasy.MessageRoleUser, msg.Role)
+	require.Equal(t, fantasy.MessageRoleSystem, msg.Role)
 }

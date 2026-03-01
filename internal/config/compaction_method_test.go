@@ -26,6 +26,24 @@ func TestSetCompactionMethod(t *testing.T) {
 	require.Equal(t, string(CompactionLLM), opts["compaction_method"])
 }
 
+func TestSetDefaults_NormalizesCompactionMethodZeroValue(t *testing.T) {
+	t.Parallel()
+
+	cfg := &Config{Options: &Options{}}
+	cfg.setDefaults(t.TempDir(), "")
+
+	require.Equal(t, CompactionAuto, cfg.Options.CompactionMethod)
+}
+
+func TestSetDefaults_PreservesExplicitCompactionMethod(t *testing.T) {
+	t.Parallel()
+
+	cfg := &Config{Options: &Options{CompactionMethod: CompactionLLM}}
+	cfg.setDefaults(t.TempDir(), "")
+
+	require.Equal(t, CompactionLLM, cfg.Options.CompactionMethod)
+}
+
 func TestSetCompactionMethod_NilOptions(t *testing.T) {
 	t.Parallel()
 

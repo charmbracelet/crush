@@ -104,12 +104,12 @@ type sessionAgent struct {
 	systemPrompt       *csync.Value[string]
 	tools              *csync.Slice[fantasy.AgentTool]
 
-	isSubAgent            bool
-	sessions              session.Service
-	messages              message.Service
-	disableAutoSummarize  *csync.Value[bool]
-	disableContextStatus  *csync.Value[bool]
-	isYolo                bool
+	isSubAgent           bool
+	sessions             session.Service
+	messages             message.Service
+	disableAutoSummarize *csync.Value[bool]
+	disableContextStatus *csync.Value[bool]
+	isYolo               bool
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, context.CancelFunc]
@@ -931,6 +931,10 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 
 // contextStatusMessage builds a compact context-usage system message so the
 // LLM knows how much of its context window has been consumed.
+//
+// Token counts reflect the previous step's usage because they are updated
+// after each step completes, while this message is injected before the
+// current step runs. On the first turn both values are 0.
 func (a *sessionAgent) contextStatusMessage(s session.Session, model Model) (fantasy.Message, bool) {
 	cw := model.CatwalkCfg.ContextWindow
 	if cw <= 0 {
@@ -938,13 +942,10 @@ func (a *sessionAgent) contextStatusMessage(s session.Session, model Model) (fan
 	}
 
 	used := s.PromptTokens + s.CompletionTokens
-	remaining := int64(cw) - used
-	if remaining < 0 {
-		remaining = 0
-	}
-	usedPct := int64(float64(used) / float64(cw) * 100)
+	remaining := max(int64(cw)-used, 0)
+	usedPct := min(int64(float64(used)/float64(cw)*100), 100)
 
-	msg := fantasy.NewUserMessage(
+	msg := fantasy.NewSystemMessage(
 		fmt.Sprintf(`<context_status>{"used_pct":%d,"remaining_tokens":%d,"context_window":%d}</context_status>`,
 			usedPct, remaining, cw),
 	)

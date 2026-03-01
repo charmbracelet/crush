@@ -45,6 +45,7 @@ func (sb *syncBuffer) String() string {
 
 // BackgroundShell represents a shell running in the background.
 type BackgroundShell struct {
+	completedAt int64 // Unix timestamp when job completed (0 if still running) - must be first for 64-bit alignment
 	ID          string
 	Command     string
 	Description string
@@ -56,7 +57,6 @@ type BackgroundShell struct {
 	stderr      *syncBuffer
 	done        chan struct{}
 	exitErr     error
-	completedAt int64 // Unix timestamp when job completed (0 if still running)
 }
 
 // BackgroundShellManager manages background shell instances.

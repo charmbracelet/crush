@@ -261,6 +261,12 @@ type Options struct {
 	InitializeAs              string       `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
 	AutoLSP                   *bool        `json:"auto_lsp,omitempty" jsonschema:"description=Automatically setup LSPs based on root markers,default=true"`
 	Progress                  *bool        `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
+
+	// Muse Mode - background thinking during user inactivity
+	MuseEnabled  bool   `json:"-"` // Muse mode - runtime only, toggled via CLI flag or command palette
+	MuseTimeout  int    `json:"muse_timeout,omitempty" jsonschema:"description=Inactivity timeout in seconds before Muse triggers,default=300,example=60,example=600"`
+	MuseInterval int    `json:"muse_interval,omitempty" jsonschema:"description=Interval in seconds between Muse triggers after the first (0 = trigger once),default=0,example=60,example=300"`
+	MusePrompt   string `json:"muse_prompt,omitempty" jsonschema:"description=Custom prompt for Muse thinking"`
 }
 
 type MCPs map[string]MCPConfig

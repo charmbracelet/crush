@@ -79,6 +79,7 @@ type SessionAgent interface {
 	SetModels(large Model, small Model)
 	SetTools(tools []fantasy.AgentTool)
 	SetSystemPrompt(systemPrompt string)
+	SetCompactionFlags(disableAutoSummarize, disableContextStatus bool)
 	Cancel(sessionID string)
 	CancelAll()
 	IsSessionBusy(sessionID string) bool
@@ -103,11 +104,12 @@ type sessionAgent struct {
 	systemPrompt       *csync.Value[string]
 	tools              *csync.Slice[fantasy.AgentTool]
 
-	isSubAgent           bool
-	sessions             session.Service
-	messages             message.Service
-	disableAutoSummarize bool
-	isYolo               bool
+	isSubAgent            bool
+	sessions              session.Service
+	messages              message.Service
+	disableAutoSummarize  *csync.Value[bool]
+	disableContextStatus  *csync.Value[bool]
+	isYolo                bool
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, context.CancelFunc]
@@ -120,6 +122,7 @@ type SessionAgentOptions struct {
 	SystemPrompt         string
 	IsSubAgent           bool
 	DisableAutoSummarize bool
+	DisableContextStatus bool
 	IsYolo               bool
 	Sessions             session.Service
 	Messages             message.Service
@@ -137,7 +140,8 @@ func NewSessionAgent(
 		isSubAgent:           opts.IsSubAgent,
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
-		disableAutoSummarize: opts.DisableAutoSummarize,
+		disableAutoSummarize: csync.NewValue(opts.DisableAutoSummarize),
+		disableContextStatus: csync.NewValue(opts.DisableContextStatus),
 		tools:                csync.NewSliceFrom(opts.Tools),
 		isYolo:               opts.IsYolo,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
@@ -288,6 +292,12 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(promptPrefix)}, prepared.Messages...)
 			}
 
+			if !a.isSubAgent && !a.disableContextStatus.Get() {
+				if statusMsg, ok := a.contextStatusMessage(currentSession, largeModel); ok {
+					prepared.Messages = append(prepared.Messages, statusMsg)
+				}
+			}
+
 			var assistantMsg message.Message
 			assistantMsg, err = a.messages.Create(callContext, call.SessionID, message.CreateMessageParams{
 				Role:     message.Assistant,
@@ -414,7 +424,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				} else {
 					threshold = int64(float64(cw) * smallContextWindowRatio)
 				}
-				if (remaining <= threshold) && !a.disableAutoSummarize {
+				if (remaining <= threshold) && !a.disableAutoSummarize.Get() {
 					shouldSummarize = true
 					return true
 				}
@@ -919,6 +929,28 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 	session.PromptTokens = usage.InputTokens + usage.CacheReadTokens
 }
 
+// contextStatusMessage builds a compact context-usage system message so the
+// LLM knows how much of its context window has been consumed.
+func (a *sessionAgent) contextStatusMessage(s session.Session, model Model) (fantasy.Message, bool) {
+	cw := model.CatwalkCfg.ContextWindow
+	if cw <= 0 {
+		return fantasy.Message{}, false
+	}
+
+	used := s.PromptTokens + s.CompletionTokens
+	remaining := int64(cw) - used
+	if remaining < 0 {
+		remaining = 0
+	}
+	usedPct := int64(float64(used) / float64(cw) * 100)
+
+	msg := fantasy.NewUserMessage(
+		fmt.Sprintf(`<context_status>{"used_pct":%d,"remaining_tokens":%d,"context_window":%d}</context_status>`,
+			usedPct, remaining, cw),
+	)
+	return msg, true
+}
+
 func (a *sessionAgent) Cancel(sessionID string) {
 	// Cancel regular requests. Don't use Take() here - we need the entry to
 	// remain in activeRequests so IsBusy() returns true until the goroutine
@@ -1014,6 +1046,11 @@ func (a *sessionAgent) SetTools(tools []fantasy.AgentTool) {
 
 func (a *sessionAgent) SetSystemPrompt(systemPrompt string) {
 	a.systemPrompt.Set(systemPrompt)
+}
+
+func (a *sessionAgent) SetCompactionFlags(disableAutoSummarize, disableContextStatus bool) {
+	a.disableAutoSummarize.Set(disableAutoSummarize)
+	a.disableContextStatus.Set(disableContextStatus)
 }
 
 func (a *sessionAgent) Model() Model {

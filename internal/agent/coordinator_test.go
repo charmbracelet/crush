@@ -14,9 +14,11 @@ import (
 
 // mockSessionAgent is a minimal mock for the SessionAgent interface.
 type mockSessionAgent struct {
-	model     Model
-	runFunc   func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error)
-	cancelled []string
+	model                    Model
+	runFunc                  func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error)
+	cancelled                []string
+	compactionFlagsCalls     [][2]bool
+	compactionFlagsCallCount int
 }
 
 func (m *mockSessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
@@ -27,6 +29,11 @@ func (m *mockSessionAgent) Model() Model                        { return m.model
 func (m *mockSessionAgent) SetModels(large, small Model)        {}
 func (m *mockSessionAgent) SetTools(tools []fantasy.AgentTool)  {}
 func (m *mockSessionAgent) SetSystemPrompt(systemPrompt string) {}
+func (m *mockSessionAgent) SetCompactionFlags(disableAutoSummarize, disableContextStatus bool) {
+	m.compactionFlagsCalls = append(m.compactionFlagsCalls, [2]bool{disableAutoSummarize, disableContextStatus})
+	m.compactionFlagsCallCount++
+}
+
 func (m *mockSessionAgent) Cancel(sessionID string) {
 	m.cancelled = append(m.cancelled, sessionID)
 }

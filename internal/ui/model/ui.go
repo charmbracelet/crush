@@ -1357,6 +1357,32 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			return util.NewInfoMsg("Reasoning effort set to " + msg.Effort)
 		})
 		m.dialog.CloseDialog(dialog.ReasoningID)
+	case dialog.ActionSelectCompactionMethod:
+		if m.isAgentBusy() {
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
+			break
+		}
+
+		cfg := m.com.Config()
+		if cfg == nil {
+			cmds = append(cmds, util.ReportError(errors.New("configuration not found")))
+			break
+		}
+
+		if err := cfg.SetCompactionMethod(config.CompactionMethod(msg.Method)); err != nil {
+			cmds = append(cmds, util.ReportError(fmt.Errorf("failed to persist compaction method: %w", err)))
+			break
+		}
+
+		cmds = append(cmds, func() tea.Msg {
+			m.com.App.UpdateAgentModel(context.TODO())
+			label := "Auto-compaction"
+			if msg.Method == string(config.CompactionLLM) {
+				label = "LLM/User-driven compaction"
+			}
+			return util.NewInfoMsg("Compaction method set to " + label)
+		})
+		m.dialog.CloseDialog(dialog.CompactionID)
 	case dialog.ActionPermissionResponse:
 		m.dialog.CloseDialog(dialog.PermissionsID)
 		switch msg.Action {
@@ -2822,6 +2848,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openReasoningDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.CompactionID:
+		if cmd := m.openCompactionDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.QuitID:
 		if cmd := m.openQuitDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -2904,6 +2934,18 @@ func (m *UI) openReasoningDialog() tea.Cmd {
 	}
 
 	m.dialog.OpenDialog(reasoningDialog)
+	return nil
+}
+
+// openCompactionDialog opens the compaction method dialog.
+func (m *UI) openCompactionDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.CompactionID) {
+		m.dialog.BringToFront(dialog.CompactionID)
+		return nil
+	}
+
+	compactionDialog := dialog.NewCompaction(m.com)
+	m.dialog.OpenDialog(compactionDialog)
 	return nil
 }
 

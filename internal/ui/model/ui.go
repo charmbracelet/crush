@@ -303,6 +303,11 @@ func New(com *common.Common) *UI {
 		lastActivity: time.Now(),
 	}
 
+	// Enable Muse if configured via CLI flag
+	if com.Config().Options.MuseEnabled {
+		ui.muse.SetEnabled(true, com.Config())
+	}
+
 	status := NewStatus(com, ui)
 
 	ui.setEditorPrompt(false)

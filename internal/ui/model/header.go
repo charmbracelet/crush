@@ -131,6 +131,13 @@ func renderHeaderDetails(
 	formattedPercentage := t.Header.Percentage.Render(fmt.Sprintf("%d%%", int(percentage)))
 	parts = append(parts, formattedPercentage)
 
+	// Show which agent context file crush is configured to initialize/update.
+	// This helps users understand whether their project uses AGENTS.md, CRUSH.md, etc.
+	initAs := com.Config().Options.InitializeAs
+	if initAs != "" {
+		parts = append(parts, t.Header.KeystrokeTip.Render("agent: "+initAs))
+	}
+
 	const keystroke = "ctrl+d"
 	if detailsOpen {
 		parts = append(parts, t.Header.Keystroke.Render(keystroke)+t.Header.KeystrokeTip.Render(" close"))

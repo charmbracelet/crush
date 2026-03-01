@@ -152,8 +152,8 @@ type Styles struct {
 	EditorPromptYoloDotsBlurred lipgloss.Style
 	EditorPromptMuseIconFocused lipgloss.Style
 	EditorPromptMuseIconBlurred lipgloss.Style
-	EditorPromptMuseDotsFocused  lipgloss.Style
-	EditorPromptMuseDotsBlurred  lipgloss.Style
+	EditorPromptMuseDotsFocused lipgloss.Style
+	EditorPromptMuseDotsBlurred lipgloss.Style
 
 	// Muse+Yolo combined mode
 	EditorPromptMuseYoloIconFocused lipgloss.Style

@@ -40,13 +40,13 @@ type Muse struct {
 
 // MuseItem represents a Muse settings list item.
 type MuseItem struct {
-	id        string
-	title     string
-	info      string
-	t         *styles.Styles
-	m         fuzzy.Match
-	cache     map[int]string
-	focused   bool
+	id      string
+	title   string
+	info    string
+	t       *styles.Styles
+	m       fuzzy.Match
+	cache   map[int]string
+	focused bool
 }
 
 var (
@@ -243,22 +243,22 @@ func (m *Muse) setMuseItems() {
 
 	items := []list.FilterableItem{
 		&MuseItem{
-			id:      "edit_timeout",
-			title:   "Edit Timeout",
-			info:    formatDuration(timeout),
-			t:       m.com.Styles,
+			id:    "edit_timeout",
+			title: "Edit Timeout",
+			info:  formatDuration(timeout),
+			t:     m.com.Styles,
 		},
 		&MuseItem{
-			id:      "edit_interval",
-			title:   "Edit Interval",
-			info:    intervalDisplay,
-			t:       m.com.Styles,
+			id:    "edit_interval",
+			title: "Edit Interval",
+			info:  intervalDisplay,
+			t:     m.com.Styles,
 		},
 		&MuseItem{
-			id:      "edit_prompt",
-			title:   "Edit Prompt",
-			info:    "open editor",
-			t:       m.com.Styles,
+			id:    "edit_prompt",
+			title: "Edit Prompt",
+			info:  "open editor",
+			t:     m.com.Styles,
 		},
 	}
 

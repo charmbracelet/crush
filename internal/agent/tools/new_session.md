@@ -1,7 +1,7 @@
 Creates a fresh session context to continue the current task with a clean slate.
 
 <when_to_use>
-A `<context_status>` block is injected on every turn containing `used_pct` and `remaining_tokens`.
+A `<context_status>` block is injected on every turn containing `used_pct`, `remaining_tokens`, and `context_window`.
 - By default, invoke `new_session` when `used_pct >= 75` (context is 75% full).
 - The user may override the conditions for when this tool is called (e.g. "start a new session when there's only 5000 tokens remaining").
 - The user may also override how the summary context that's passed in to this tool is generated.

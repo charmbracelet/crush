@@ -528,6 +528,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			}
 		} else if errors.As(err, &fantasyErr) {
 			currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(fantasyErr.Title), defaultTitle), fantasyErr.Message)
+		} else if isNewSessionErr(err) {
+			currentAssistant.AddFinish(message.FinishReasonEndTurn, "New session requested", "")
 		} else {
 			currentAssistant.AddFinish(message.FinishReasonError, defaultTitle, err.Error())
 		}
@@ -931,7 +933,11 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 
 // contextStatusMessage builds a compact context-usage system message so the
 // LLM knows how much of its context window has been consumed.
-//
+func isNewSessionErr(err error) bool {
+	var nse *tools.NewSessionError
+	return errors.As(err, &nse)
+}
+
 // Token counts reflect the previous step's usage because they are updated
 // after each step completes, while this message is injected before the
 // current step runs. On the first turn both values are 0.

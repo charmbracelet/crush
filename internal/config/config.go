@@ -3,6 +3,7 @@ package config
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -92,6 +93,18 @@ type SelectedModel struct {
 
 	// Override provider specific options.
 	ProviderOptions map[string]any `json:"provider_options,omitempty" jsonschema:"description=Additional provider-specific options for the model"`
+
+	// ConcurrencyLevel controls maximum number of concurrent requests
+	// for this model. 0 or missing means unlimited.
+	//
+	// Recommended values:
+	//   - 0 (or omit field): unlimited (default)
+	//   - 1-5: low to moderate concurrency
+	//   - 10-20: high concurrency (for powerful systems)
+	//
+	// Note: Setting too high may overwhelm rate limits or exhaust resources.
+	// Note: Negative values are invalid and will be treated as 0 (unlimited).
+	ConcurrencyLevel int64 `json:"concurrency_level,omitempty" jsonschema:"description=Maximum number of concurrent requests for this model (0 = unlimited),minimum=0,example=5"`
 }
 
 type ProviderConfig struct {
@@ -127,6 +140,40 @@ type ProviderConfig struct {
 
 	// The provider models
 	Models []catwalk.Model `json:"models,omitempty" jsonschema:"description=List of models available from this provider"`
+
+	// Sidecar map for per-model concurrency_level from JSON.
+	// catwalk.Model has no ConcurrencyLevel field so Go drops it during unmarshal.
+	// Keyed by model ID. Populated by UnmarshalJSON. Not serialized.
+	ModelConcurrencyLevels map[string]int64 `json:"-"`
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling for ProviderConfig.
+// It extracts concurrency_level from each model entry before standard unmarshal
+// (which would discard it since catwalk.Model has no such field).
+func (pc *ProviderConfig) UnmarshalJSON(data []byte) error {
+	// Use type alias to avoid infinite recursion.
+	type providerConfigAlias ProviderConfig
+	var alias providerConfigAlias
+	if err := json.Unmarshal(data, &alias); err != nil {
+		return err
+	}
+	*pc = ProviderConfig(alias)
+
+	// Extract concurrency_level from models array via gjson.
+	models := gjson.GetBytes(data, "models")
+	if models.Exists() && models.IsArray() {
+		for _, m := range models.Array() {
+			id := m.Get("id").String()
+			cl := m.Get("concurrency_level")
+			if id != "" && cl.Exists() && cl.Int() > 0 {
+				if pc.ModelConcurrencyLevels == nil {
+					pc.ModelConcurrencyLevels = make(map[string]int64)
+				}
+				pc.ModelConcurrencyLevels[id] = cl.Int()
+			}
+		}
+	}
+	return nil
 }
 
 // ToProvider converts the [ProviderConfig] to a [catwalk.Provider].

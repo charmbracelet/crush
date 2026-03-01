@@ -111,6 +111,7 @@ type sessionAgent struct {
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, context.CancelFunc]
+	modelSemaphore ModelSemaphore
 }
 
 type SessionAgentOptions struct {
@@ -124,6 +125,7 @@ type SessionAgentOptions struct {
 	Sessions             session.Service
 	Messages             message.Service
 	Tools                []fantasy.AgentTool
+	ModelSemaphore       ModelSemaphore
 }
 
 func NewSessionAgent(
@@ -142,6 +144,7 @@ func NewSessionAgent(
 		isYolo:               opts.IsYolo,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, context.CancelFunc](),
+		modelSemaphore:       opts.ModelSemaphore,
 	}
 }
 
@@ -239,6 +242,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	var currentAssistant *message.Message
 	var shouldSummarize bool
+	onStart, onFinish := a.acquireOnStream(genCtx, largeModel.ModelCfg)
 	result, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
 		Files:            files,
@@ -250,6 +254,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		PresencePenalty:  call.PresencePenalty,
 		TopK:             call.TopK,
 		FrequencyPenalty: call.FrequencyPenalty,
+		OnAgentStart:     onStart,
+		OnAgentFinish:    onFinish,
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = options.Messages
 			for i := range prepared.Messages {
@@ -354,7 +360,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		OnRetry: func(err *fantasy.ProviderError, delay time.Duration) {
-			// TODO: implement
+			slog.Warn("Provider request will be retried",
+				"error", err.Message,
+				"status_code", err.StatusCode,
+				"delay", delay,
+			)
 		},
 		OnToolCall: func(tc fantasy.ToolCallContent) error {
 			toolCall := message.ToolCall{
@@ -605,10 +615,13 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 
 	summaryPromptText := buildSummaryPrompt(currentSession.Todos)
 
+	onStart, onFinish := a.acquireOnStream(genCtx, largeModel.ModelCfg)
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:          summaryPromptText,
 		Messages:        aiMsgs,
 		ProviderOptions: opts,
+		OnAgentStart:    onStart,
+		OnAgentFinish:   onFinish,
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = options.Messages
 			if systemPromptPrefix != "" {
@@ -768,6 +781,39 @@ func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.S
 	return msgs, nil
 }
 
+// acquireOnStream returns OnAgentStart/OnAgentFinish callbacks that acquire
+// and release the model semaphore around the actual LLM streaming.
+func (a *sessionAgent) acquireOnStream(ctx context.Context, modelCfg config.SelectedModel) (onStart fantasy.OnAgentStartFunc, onFinish fantasy.OnAgentFinishFunc) {
+	if a.modelSemaphore == nil {
+		return nil, nil
+	}
+	var release func()
+	onStart = func() {
+		r, err := a.modelSemaphore.Acquire(ctx, modelCfg)
+		if err != nil {
+			return // context canceled — stream will fail naturally
+		}
+		release = r
+	}
+	onFinish = func(result *fantasy.AgentResult) error {
+		if release != nil {
+			release()
+		}
+		return nil
+	}
+	return onStart, onFinish
+}
+
+// tryGenerateTitleWithModel attempts to generate a title using the specified model.
+func (a *sessionAgent) tryGenerateTitleWithModel(ctx context.Context, model Model, newAgent func(fantasy.LanguageModel, []byte, int64) fantasy.Agent, streamCall fantasy.AgentStreamCall, maxOutputTokens int64) (*fantasy.AgentResult, Model, error) {
+	onStart, onFinish := a.acquireOnStream(ctx, model.ModelCfg)
+	streamCall.OnAgentStart = onStart
+	streamCall.OnAgentFinish = onFinish
+	agent := newAgent(model.Model, titlePrompt, maxOutputTokens)
+	resp, err := agent.Stream(ctx, streamCall)
+	return resp, model, err
+}
+
 // generateTitle generates a session titled based on the initial prompt.
 func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, userPrompt string) {
 	if userPrompt == "" {
@@ -803,24 +849,19 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		},
 	}
 
-	// Use the small model to generate the title.
-	model := smallModel
-	agent := newAgent(model.Model, titlePrompt, maxOutputTokens)
-	resp, err := agent.Stream(ctx, streamCall)
-	if err == nil {
-		// We successfully generated a title with the small model.
-		slog.Debug("Generated title with small model")
-	} else {
-		// It didn't work. Let's try with the big model.
+	// Try small model first.
+	var modelUsed Model
+	var resp *fantasy.AgentResult
+	var err error
+
+	resp, modelUsed, err = a.tryGenerateTitleWithModel(ctx, smallModel, newAgent, streamCall, maxOutputTokens)
+
+	if err != nil {
+		// Small model failed, try large model.
 		slog.Error("Error generating title with small model; trying big model", "err", err)
-		model = largeModel
-		agent = newAgent(model.Model, titlePrompt, maxOutputTokens)
-		resp, err = agent.Stream(ctx, streamCall)
-		if err == nil {
-			slog.Debug("Generated title with large model")
-		} else {
-			// Welp, the large model didn't work either. Use the default
-			// session name and return.
+
+		resp, modelUsed, err = a.tryGenerateTitleWithModel(ctx, largeModel, newAgent, streamCall, maxOutputTokens)
+		if err != nil {
 			slog.Error("Error generating title with large model", "err", err)
 			saveErr := a.sessions.UpdateTitleAndUsage(ctx, sessionID, defaultSessionName, 0, 0, 0)
 			if saveErr != nil {
@@ -828,6 +869,9 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 			}
 			return
 		}
+		slog.Debug("Generated title with large model")
+	} else {
+		slog.Debug("Generated title with small model")
 	}
 
 	if resp == nil {
@@ -864,7 +908,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		}
 	}
 
-	modelConfig := model.CatwalkCfg
+	modelConfig := modelUsed.CatwalkCfg
 	cost := modelConfig.CostPer1MInCached/1e6*float64(resp.TotalUsage.CacheCreationTokens) +
 		modelConfig.CostPer1MOutCached/1e6*float64(resp.TotalUsage.CacheReadTokens) +
 		modelConfig.CostPer1MIn/1e6*float64(resp.TotalUsage.InputTokens) +

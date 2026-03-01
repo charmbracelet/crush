@@ -59,6 +59,16 @@ type Coordinator interface {
 	UpdateModels(ctx context.Context) error
 }
 
+// CoordinatorOption is a function that modifies coordinator configuration
+type CoordinatorOption func(*coordinator)
+
+// WithModelSemaphore injects a ModelSemaphore for testing
+func WithModelSemaphore(ms ModelSemaphore) CoordinatorOption {
+	return func(c *coordinator) {
+		c.modelSemaphore = ms
+	}
+}
+
 type coordinator struct {
 	cfg         *config.Config
 	sessions    session.Service
@@ -70,6 +80,8 @@ type coordinator struct {
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
+
+	modelSemaphore ModelSemaphore // ModelSemaphore for concurrency control
 
 	readyWg errgroup.Group
 }
@@ -83,6 +95,8 @@ func NewCoordinator(
 	history history.Service,
 	filetracker filetracker.Service,
 	lspManager *lsp.Manager,
+	// Variadic options for configuration
+	opts ...CoordinatorOption,
 ) (Coordinator, error) {
 	c := &coordinator{
 		cfg:         cfg,
@@ -93,6 +107,18 @@ func NewCoordinator(
 		filetracker: filetracker,
 		lspManager:  lspManager,
 		agents:      make(map[string]SessionAgent),
+		// Default to nil, will be set by options
+		modelSemaphore: nil,
+	}
+
+	// Apply options
+	for _, opt := range opts {
+		opt(c)
+	}
+
+	// Use default ModelSemaphore if not injected
+	if c.modelSemaphore == nil {
+		c.modelSemaphore = DefaultModelSemaphore()
 	}
 
 	agentCfg, ok := cfg.Agents[config.AgentCoder]
@@ -368,16 +394,17 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 
 	largeProviderCfg, _ := c.cfg.Providers.Get(large.ModelCfg.Provider)
 	result := NewSessionAgent(SessionAgentOptions{
-		large,
-		small,
-		largeProviderCfg.SystemPromptPrefix,
-		"",
-		isSubAgent,
-		c.cfg.Options.DisableAutoSummarize,
-		c.permissions.SkipRequests(),
-		c.sessions,
-		c.messages,
-		nil,
+		LargeModel:           large,
+		SmallModel:           small,
+		SystemPromptPrefix:   largeProviderCfg.SystemPromptPrefix,
+		SystemPrompt:         "",
+		IsSubAgent:           isSubAgent,
+		DisableAutoSummarize: c.cfg.Options.DisableAutoSummarize,
+		IsYolo:               c.permissions.SkipRequests(),
+		Sessions:             c.sessions,
+		Messages:             c.messages,
+		Tools:                nil,
+		ModelSemaphore:       c.modelSemaphore,
 	})
 
 	c.readyWg.Go(func() error {

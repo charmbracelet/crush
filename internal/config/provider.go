@@ -18,6 +18,7 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/catwalk/pkg/embedded"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
+	"github.com/charmbracelet/crush/internal/config/qiniucloud"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/x/etag"
@@ -184,6 +185,11 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 		})
 
 		wg.Wait()
+
+		if !customProvidersOnly {
+			baseURL := cmp.Or(os.Getenv(qiniucloud.EnvBaseURL), qiniucloud.DefaultBaseURL)
+			providers.Append(qiniucloud.Provider(baseURL))
+		}
 
 		providerList = slices.Collect(providers.Seq())
 		providerErr = errors.Join(errs...)

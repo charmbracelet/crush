@@ -160,6 +160,49 @@ func (q *Queries) ListFilesByPath(ctx context.Context, path string) ([]File, err
 	return items, nil
 }
 
+const listFilesByPathAndSession = `-- name: ListFilesByPathAndSession :many
+SELECT id, session_id, path, content, version, created_at, updated_at
+FROM files
+WHERE path = ? AND session_id = ?
+ORDER BY version DESC, created_at DESC
+`
+
+type ListFilesByPathAndSessionParams struct {
+	Path      string `json:"path"`
+	SessionID string `json:"session_id"`
+}
+
+func (q *Queries) ListFilesByPathAndSession(ctx context.Context, arg ListFilesByPathAndSessionParams) ([]File, error) {
+	rows, err := q.query(ctx, q.listFilesByPathAndSessionStmt, listFilesByPathAndSession, arg.Path, arg.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []File{}
+	for rows.Next() {
+		var i File
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.Path,
+			&i.Content,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listFilesBySession = `-- name: ListFilesBySession :many
 SELECT id, session_id, path, content, version, created_at, updated_at
 FROM files

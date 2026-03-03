@@ -454,8 +454,6 @@
         },
         "muse_interval": {
           "type": "integer",
-          "maximum": 604800,
-          "minimum": 1,
           "description": "Inactivity interval in seconds before Muse triggers",
           "default": 300,
           "examples": [

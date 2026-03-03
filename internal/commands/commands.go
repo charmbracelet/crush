@@ -18,6 +18,7 @@ var namedArgPattern = regexp.MustCompile(`\$([A-Z][A-Z0-9_]*)`)
 const (
 	userCommandPrefix    = "user:"
 	projectCommandPrefix = "project:"
+	claudeCommandPrefix  = "claude:"
 )
 
 // Argument represents a command argument with its metadata.
@@ -47,8 +48,10 @@ type CustomCommand struct {
 }
 
 type commandSource struct {
-	path   string
-	prefix string
+	path        string
+	prefix      string
+	createDir   bool // Create directory if it doesn't exist.
+	frontmatter bool // Strip YAML frontmatter from command content.
 }
 
 // LoadCustomCommands loads custom commands from multiple sources including
@@ -92,26 +95,48 @@ func LoadMCPPrompts() ([]MCPPrompt, error) {
 func buildCommandSources(cfg *config.Config) []commandSource {
 	var sources []commandSource
 
+	homeDir := home.Dir()
+	projectDir := filepath.Dir(cfg.Options.DataDirectory)
+
 	// XDG config directory
 	if dir := getXDGCommandsDir(); dir != "" {
 		sources = append(sources, commandSource{
-			path:   dir,
-			prefix: userCommandPrefix,
+			path:      dir,
+			prefix:    userCommandPrefix,
+			createDir: true,
 		})
 	}
 
 	// Home directory
-	if home := home.Dir(); home != "" {
+	if homeDir != "" {
 		sources = append(sources, commandSource{
-			path:   filepath.Join(home, ".crush", "commands"),
-			prefix: userCommandPrefix,
+			path:      filepath.Join(homeDir, ".crush", "commands"),
+			prefix:    userCommandPrefix,
+			createDir: true,
 		})
 	}
 
 	// Project directory
 	sources = append(sources, commandSource{
-		path:   filepath.Join(cfg.Options.DataDirectory, "commands"),
-		prefix: projectCommandPrefix,
+		path:      filepath.Join(cfg.Options.DataDirectory, "commands"),
+		prefix:    projectCommandPrefix,
+		createDir: true,
+	})
+
+	// Claude Code global commands (~/.claude/commands)
+	if homeDir != "" {
+		sources = append(sources, commandSource{
+			path:        filepath.Join(homeDir, ".claude", "commands"),
+			prefix:      claudeCommandPrefix,
+			frontmatter: true,
+		})
+	}
+
+	// Claude Code project commands (<project>/.claude/commands)
+	sources = append(sources, commandSource{
+		path:        filepath.Join(projectDir, ".claude", "commands"),
+		prefix:      claudeCommandPrefix,
+		frontmatter: true,
 	})
 
 	return sources
@@ -130,8 +155,12 @@ func loadAll(sources []commandSource) ([]CustomCommand, error) {
 }
 
 func loadFromSource(source commandSource) ([]CustomCommand, error) {
-	if err := ensureDir(source.path); err != nil {
-		return nil, err
+	if source.createDir {
+		if err := ensureDir(source.path); err != nil {
+			return nil, err
+		}
+	} else if _, err := os.Stat(source.path); err != nil {
+		return nil, nil
 	}
 
 	var commands []CustomCommand
@@ -141,7 +170,7 @@ func loadFromSource(source commandSource) ([]CustomCommand, error) {
 			return err
 		}
 
-		cmd, err := loadCommand(path, source.path, source.prefix)
+		cmd, err := loadCommand(path, source)
 		if err != nil {
 			return nil // Skip invalid files
 		}
@@ -153,19 +182,24 @@ func loadFromSource(source commandSource) ([]CustomCommand, error) {
 	return commands, err
 }
 
-func loadCommand(path, baseDir, prefix string) (CustomCommand, error) {
-	content, err := os.ReadFile(path)
+func loadCommand(path string, source commandSource) (CustomCommand, error) {
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		return CustomCommand{}, err
 	}
 
-	id := buildCommandID(path, baseDir, prefix)
+	content := string(raw)
+	if source.frontmatter {
+		content = stripFrontmatter(content)
+	}
+
+	id := buildCommandID(path, source.path, source.prefix)
 
 	return CustomCommand{
 		ID:        id,
 		Name:      id,
-		Content:   string(content),
-		Arguments: extractArgNames(string(content)),
+		Content:   content,
+		Arguments: extractArgNames(content),
 	}, nil
 }
 
@@ -214,6 +248,18 @@ func getXDGCommandsDir() string {
 		return filepath.Join(xdgHome, "crush", "commands")
 	}
 	return ""
+}
+
+func stripFrontmatter(content string) string {
+	if !strings.HasPrefix(content, "---") {
+		return content
+	}
+	rest := content[3:]
+	end := strings.Index(rest, "\n---")
+	if end < 0 {
+		return content
+	}
+	return strings.TrimSpace(rest[end+4:])
 }
 
 func ensureDir(path string) error {

@@ -99,17 +99,18 @@ func applyTextEdit(lines []string, edit protocol.TextEdit, encoding powernap.Off
 	}
 
 	var startChar, endChar int
-	if encoding == powernap.UTF8 {
+	switch encoding {
+	case powernap.UTF8:
 		// UTF-8: Character offset is already a byte offset
 		startChar = int(edit.Range.Start.Character)
 		endChar = int(edit.Range.End.Character)
-	} else if encoding == powernap.UTF16 {
+	case powernap.UTF16:
 		// UTF-16 (default): Convert to byte offset
 		startLineContent := lines[startLine]
 		endLineContent := lines[endLine]
 		startChar = powernap.PositionToByteOffset(startLineContent, edit.Range.Start.Character)
 		endChar = powernap.PositionToByteOffset(endLineContent, edit.Range.End.Character)
-	} else {
+	default:
 		// UTF-32: Character offset is codepoint count, convert to byte offset
 		startLineContent := lines[startLine]
 		endLineContent := lines[endLine]

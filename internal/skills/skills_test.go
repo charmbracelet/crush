@@ -250,6 +250,7 @@ description: Name doesn't match directory.
 
 	skills := Discover([]string{tmpDir})
 	require.Len(t, skills, 2)
+	require.Equal(t, []string{"skill-two", "skill-one"}, []string{skills[0].Name, skills[1].Name})
 
 	names := make(map[string]bool)
 	for _, s := range skills {

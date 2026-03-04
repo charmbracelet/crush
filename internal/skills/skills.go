@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 
@@ -174,6 +175,16 @@ func Discover(paths []string) []*Skill {
 			slog.Warn("Failed to walk skills path", "path", base, "error", err)
 		}
 	}
+
+	// fastwalk traversal order is non-deterministic, so sort for stable output.
+	sort.SliceStable(skills, func(i, j int) bool {
+		left := strings.ToLower(skills[i].SkillFilePath)
+		right := strings.ToLower(skills[j].SkillFilePath)
+		if left == right {
+			return skills[i].SkillFilePath < skills[j].SkillFilePath
+		}
+		return left < right
+	})
 
 	return skills
 }

@@ -81,7 +81,7 @@ func notifyFileWatchRegistration(id string, watchers []protocol.FileSystemWatche
 func HandleServerMessage(_ context.Context, method string, params json.RawMessage) {
 	var msg protocol.ShowMessageParams
 	if err := json.Unmarshal(params, &msg); err != nil {
-		slog.Debug("Server message", "type", msg.Type, "message", msg.Message)
+		slog.Debug("Error unmarshal server message", "error", err)
 		return
 	}
 

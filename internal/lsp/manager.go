@@ -59,9 +59,10 @@ func NewManager(cfg *config.Config) *Manager {
 	}
 
 	return &Manager{
-		clients: csync.NewMap[string, *Client](),
-		cfg:     cfg,
-		manager: manager,
+		clients:  csync.NewMap[string, *Client](),
+		cfg:      cfg,
+		manager:  manager,
+		callback: func(string, *Client) {}, // default no-op callback
 	}
 }
 
@@ -178,24 +179,38 @@ func (s *Manager) startServer(ctx context.Context, name, filepath string, server
 		return
 	}
 
-	// check again in case another goroutine started it in the meantime
-	var err error
-	client := s.clients.GetOrSet(name, func() *Client {
-		var cli *Client
-		cli, err = New(
-			ctx,
-			name,
-			cfg,
-			s.cfg.Resolver(),
-			s.cfg.WorkingDir(),
-			s.cfg.Options.DebugLSP,
-		)
-		return cli
-	})
+	// Check again in case another goroutine started it in the meantime.
+	if client, ok := s.clients.Get(name); ok {
+		switch client.GetServerState() {
+		case StateReady, StateStarting, StateDisabled:
+			s.callback(name, client)
+			return
+		}
+	}
+
+	client, err := New(
+		ctx,
+		name,
+		cfg,
+		s.cfg.Resolver(),
+		s.cfg.WorkingDir(),
+		s.cfg.Options.DebugLSP,
+	)
 	if err != nil {
 		slog.Error("Failed to create LSP client", "name", name, "error", err)
 		return
 	}
+	// Only store non-nil clients. If another goroutine raced us,
+	// prefer the already-stored client.
+	if existing, ok := s.clients.Get(name); ok {
+		switch existing.GetServerState() {
+		case StateReady, StateStarting, StateDisabled:
+			_ = client.Close(ctx)
+			s.callback(name, existing)
+			return
+		}
+	}
+	s.clients.Set(name, client)
 	defer func() {
 		s.callback(name, client)
 	}()
@@ -213,7 +228,8 @@ func (s *Manager) startServer(ctx context.Context, name, filepath string, server
 
 	if _, err := client.Initialize(initCtx, s.cfg.WorkingDir()); err != nil {
 		slog.Error("LSP client initialization failed", "name", name, "error", err)
-		client.Close(ctx)
+		_ = client.Close(ctx)
+		s.clients.Del(name)
 		return
 	}
 
@@ -287,8 +303,10 @@ func hasRootMarkers(dir string, markers []string) bool {
 		return true
 	}
 	for _, pattern := range markers {
-		// Use fsext.GlobWithDoubleStar to find matches
-		matches, _, err := fsext.Glob(pattern, dir, 1)
+		// Use filepath.Glob for a non-recursive check in the root
+		// directory. This avoids walking the entire tree (which is
+		// catastrophic in large monorepos with node_modules, etc.).
+		matches, err := filepath.Glob(filepath.Join(dir, pattern))
 		if err == nil && len(matches) > 0 {
 			return true
 		}

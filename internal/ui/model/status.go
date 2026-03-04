@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/help"
@@ -46,7 +47,9 @@ func (s *Status) ClearInfoMsg() {
 
 // SetWidth sets the width of the status bar and help view.
 func (s *Status) SetWidth(width int) {
-	s.help.SetWidth(width)
+	helpStyle := s.com.Styles.Status.Help
+	horizontalPadding := helpStyle.GetPaddingLeft() + helpStyle.GetPaddingRight()
+	s.help.SetWidth(width - horizontalPadding)
 }
 
 // ShowingAll returns whether the full help view is shown.
@@ -97,9 +100,10 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 	}
 
 	ind := indStyle.String()
-	messageWidth := area.Dx() - lipgloss.Width(ind)
+	messageWidth := max(0, area.Dx()-lipgloss.Width(ind)-msgStyle.GetHorizontalPadding())
 	msg := ansi.Truncate(s.msg.Msg, messageWidth, "…")
-	info := msgStyle.Width(messageWidth).Render(msg)
+	msg += strings.Repeat(" ", max(0, messageWidth-lipgloss.Width(msg)))
+	info := msgStyle.Render(msg)
 
 	// Draw the info message over the help view
 	uv.NewStyledString(ind+info).Draw(scr, area)

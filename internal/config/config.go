@@ -18,10 +18,10 @@ import (
 	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
-	"github.com/charmbracelet/crush/plugin"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/oauth/hyper"
+	"github.com/charmbracelet/crush/plugin"
 	"github.com/invopop/jsonschema"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -799,15 +799,10 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	)
 
 	switch providerID {
-	case catwalk.InferenceProviderMiniMax:
+	case catwalk.InferenceProviderMiniMax, catwalk.InferenceProviderMiniMaxChina:
 		// NOTE: MiniMax has no good endpoint we can use to validate the API key.
 		// Let's at least check the pattern.
 		if !strings.HasPrefix(apiKey, "sk-") {
-			return fmt.Errorf("invalid API key format for provider %s", c.ID)
-		}
-		return nil
-	case catwalk.InferenceProviderIoNet:
-		if !strings.HasPrefix(apiKey, "io-") {
 			return fmt.Errorf("invalid API key format for provider %s", c.ID)
 		}
 		return nil

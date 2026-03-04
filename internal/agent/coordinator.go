@@ -561,6 +561,14 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 	if err != nil {
 		return Model{}, Model{}, err
 	}
+
+	// Wrap openai-compat models to detect tool calls emitted as plain text.
+	// Some local model servers (e.g. Ollama) return tool call JSON in the
+	// text content field instead of using the structured tool_calls field.
+	if largeProviderCfg.Type == openaicompat.Name {
+		largeModel = newToolCallDetectingModel(largeModel)
+	}
+
 	smallModel, err := smallProvider.LanguageModel(ctx, smallModelID)
 	if err != nil {
 		return Model{}, Model{}, err

@@ -772,19 +772,8 @@ func (c *coordinator) isAnthropicThinking(model config.SelectedModel) bool {
 	if model.Think {
 		return true
 	}
-
-	if model.ProviderOptions == nil {
-		return false
-	}
-
 	opts, err := anthropic.ParseOptions(model.ProviderOptions)
-	if err != nil {
-		return false
-	}
-	if opts.Thinking != nil {
-		return true
-	}
-	return false
+	return err == nil && opts.Thinking != nil
 }
 
 func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model config.SelectedModel, isSubAgent bool) (fantasy.Provider, error) {

@@ -64,6 +64,39 @@ Instructions here.
 			wantInstr: "# My Skill\n\nInstructions here.",
 		},
 		{
+			name: "frontmatter with utf8 bom",
+			content: "\uFEFF---\n" +
+				"name: bom-skill\n" +
+				"description: Skill with bom.\n" +
+				"---\n\n" +
+				"# BOM Skill\n",
+			wantName:  "bom-skill",
+			wantDesc:  "Skill with bom.",
+			wantInstr: "# BOM Skill",
+		},
+		{
+			name: "frontmatter with leading blank lines",
+			content: "\n\n---\n" +
+				"name: blank-prefix\n" +
+				"description: Skill with leading blank lines.\n" +
+				"---\n\n" +
+				"# Blank Prefix\n",
+			wantName:  "blank-prefix",
+			wantDesc:  "Skill with leading blank lines.",
+			wantInstr: "# Blank Prefix",
+		},
+		{
+			name: "frontmatter delimiter with trailing spaces",
+			content: "---   \n" +
+				"name: spaced-delimiter\n" +
+				"description: Delimiter has spaces.\n" +
+				"---   \n\n" +
+				"# Spaced Delimiter\n",
+			wantName:  "spaced-delimiter",
+			wantDesc:  "Delimiter has spaces.",
+			wantInstr: "# Spaced Delimiter",
+		},
+		{
 			name:    "no frontmatter",
 			content: "# Just Markdown\n\nNo frontmatter here.",
 			wantErr: true,
@@ -246,4 +279,32 @@ func TestToPromptXMLEmpty(t *testing.T) {
 	t.Parallel()
 	require.Empty(t, ToPromptXML(nil))
 	require.Empty(t, ToPromptXML([]*Skill{}))
+}
+
+func TestEscape(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "escape xml special chars",
+			in:   `<tag attr="x&y">'z'</tag>`,
+			want: `&lt;tag attr=&quot;x&amp;y&quot;&gt;&apos;z&apos;&lt;/tag&gt;`,
+		},
+		{
+			name: "plain text unchanged",
+			in:   "hello world",
+			want: "hello world",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tt.want, escape(tt.in))
+		})
+	}
 }

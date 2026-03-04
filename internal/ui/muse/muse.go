@@ -1,3 +1,28 @@
+// Package muse implements proactive thinking during user inactivity.
+//
+// It manages the state and triggers for proactive LLM prompts during user
+// inactivity, integrated with Bubble Tea's update cycle. The package
+// provides periodic tick messages, trigger validation, and placeholder text
+// generation. User activity monitoring is handled externally (by the UI model).
+//
+// The package consists of:
+//   - Muse: Core state holder and trigger logic
+//   - Config: Configuration from app config
+//   - Messages: Bubble Tea message types
+//   - Placeholder: UI placeholder text generation
+//
+// Example usage:
+//
+//	m := muse.New(cfg)
+//	cmd := m.Tick()  // Schedule periodic tick messages
+//	// In Update loop (with external activity tracking):
+//	case muse.TickMsg:
+//	    elapsed := time.Since(lastActivity)
+//	    if m.ShouldTrigger(elapsed, hasSession, isBusy) {
+//	        m.MarkTriggered()  // Update state before triggering
+//	        return m.Trigger(ctx, sessionID, runFunc)
+//	    }
+//	    return m, m.Tick()  // Reschedule next tick
 package muse
 
 import (
@@ -15,14 +40,14 @@ import (
 // The context should be respected for cancellation.
 type RunFunc func(ctx context.Context, sessionID, prompt string) error
 
-// Muse manages background thinking during user inactivity.
+// Muse manages proactive thinking during user inactivity.
 // It is a pure state holder - all state mutations happen via methods
 // that should only be called from Bubble Tea's Update() function.
 type Muse struct {
-	enabled bool
-	interval time.Duration
+	enabled    bool
+	interval   time.Duration
 	continuity bool // if true, keep triggering every interval
-	prompt   string
+	prompt     string
 
 	lastTrigger time.Time
 	lastReset   time.Time // tracks last user activity reset
@@ -36,7 +61,7 @@ func New(cfg *config.Config) *Muse {
 	c := GetConfig(cfg)
 	return &Muse{
 		enabled:    c.Enabled,
-		interval:    c.Interval,
+		interval:   c.Interval,
 		continuity: c.Continuity,
 		prompt:     c.Prompt,
 		now:        time.Now,
@@ -113,6 +138,20 @@ func (m *Muse) ShouldTrigger(elapsed time.Duration, hasSession, isBusy bool) boo
 	// Single mode: only trigger once per inactivity period
 	slog.Debug("Muse: already triggered (single mode)")
 	return false
+}
+
+// WillTrigger returns true if Muse can trigger in the future.
+// Used by PlaceholderText to decide whether to show countdown.
+// Returns false if already triggered in single mode (continuity=false).
+func (m *Muse) WillTrigger() bool {
+	if !m.enabled {
+		return false
+	}
+	// Single mode: already triggered this inactivity period
+	if !m.continuity && !m.lastTrigger.IsZero() {
+		return false
+	}
+	return true
 }
 
 // MarkTriggered records that a trigger has occurred.

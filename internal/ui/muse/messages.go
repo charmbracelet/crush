@@ -23,4 +23,3 @@ type PromptEditedMsg struct {
 type IntervalEditedMsg struct {
 	Value int
 }
-

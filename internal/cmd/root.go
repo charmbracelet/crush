@@ -37,7 +37,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Debug")
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
 	rootCmd.Flags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
-	rootCmd.Flags().BoolP("muse", "m", false, "Enable Muse Mode for background thinking during inactivity")
+	rootCmd.Flags().BoolP("muse", "m", false, "Enable Muse Mode for proactive thinking during inactivity")
 
 	rootCmd.AddCommand(
 		runCmd,
@@ -77,7 +77,7 @@ crush run "Explain the use of context in Go"
 # Run in dangerous mode (auto-accept all permissions)
 crush -y
 
-# Run with Muse Mode enabled for background thinking
+# Run with Muse Mode enabled for proactive thinking
 crush -m
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {

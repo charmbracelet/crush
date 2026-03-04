@@ -229,7 +229,7 @@ type UI struct {
 	// mouse highlighting related state
 	lastClickTime time.Time
 
-	// Muse - background thinking during inactivity
+	// Muse - proactive thinking during inactivity
 	muse         *muse.Muse
 	museCancel   context.CancelFunc
 	lastActivity time.Time
@@ -746,7 +746,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-	// Muse (background thinking) messages
+	// Muse (proactive thinking) messages
 	case muse.TickMsg:
 		// Calculate elapsed time since last user activity
 		elapsed := time.Since(m.lastActivity)
@@ -875,15 +875,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		yolo := m.com.App.Permissions.SkipRequests()
 		if m.isAgentBusy() {
 			m.textarea.Placeholder = m.workingPlaceholder
-		} else {
-			m.textarea.Placeholder = m.readyPlaceholder
-		}
-		// Show Muse countdown if enabled
-		if m.muse.IsEnabled() && !m.isAgentBusy() {
+		} else if m.muse.IsEnabled() {
 			elapsed := time.Since(m.lastActivity)
 			m.textarea.Placeholder = m.muse.PlaceholderText(elapsed, yolo, m.hasSession(), false, m.readyPlaceholder)
 		} else if yolo {
 			m.textarea.Placeholder = "Yolo mode!"
+		} else {
+			m.textarea.Placeholder = m.readyPlaceholder
 		}
 	}
 
@@ -3189,6 +3187,10 @@ func (m *UI) openMuseIntervalEditor() tea.Cmd {
 		if err := os.Remove(tmpfile.Name()); err != nil {
 			slog.Debug("Failed to remove temp file", "file", tmpfile.Name(), "error", err)
 		}
+		// Check for empty content (user cancelled without saving)
+		if len(content) == 0 {
+			return util.ReportWarn("Muse interval unchanged, keeping previous value")
+		}
 		// Parse last non-comment, non-empty line as value
 		lines := strings.Split(string(content), "\n")
 		value := 0
@@ -3208,6 +3210,11 @@ func (m *UI) openMuseIntervalEditor() tea.Cmd {
 		)
 		if value < minInterval || value > maxInterval {
 			return util.NewWarnMsg("Invalid interval value: must be between 1 and 604800 (1 week), keeping previous value")
+		}
+		// Check if value actually changed
+		currentSeconds := int(interval.Seconds())
+		if value == currentSeconds {
+			return util.ReportInfo("Muse interval unchanged")
 		}
 		return muse.IntervalEditedMsg{Value: value}
 	})

@@ -262,7 +262,7 @@ type Options struct {
 	AutoLSP                   *bool        `json:"auto_lsp,omitempty" jsonschema:"description=Automatically setup LSPs based on root markers,default=true"`
 	Progress                  *bool        `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
 
-	// Muse Mode - background thinking during user inactivity
+	// Muse Mode - proactive thinking during user inactivity
 	MuseEnabled    bool   `json:"-"` // Muse mode - runtime only, toggled via CLI flag or command palette
 	MuseInterval   int    `json:"muse_interval,omitempty" jsonschema:"description=Inactivity interval in seconds before Muse triggers,default=300,example=60,example=600,minimum=1,maximum=604800"`
 	MuseContinuity bool   `json:"muse_continuity,omitempty" jsonschema:"description=Enable continuous Muse triggers (repeat every interval),default=false"`

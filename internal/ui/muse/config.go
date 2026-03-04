@@ -1,4 +1,3 @@
-// Package muse implements background thinking during user inactivity.
 package muse
 
 import (
@@ -9,7 +8,7 @@ import (
 
 // Default configuration values.
 const (
-	DefaultInterval  = 300 * time.Second
+	DefaultInterval   = 300 * time.Second
 	TickInterval      = 1 * time.Second
 	DefaultContinuity = false // trigger once by default
 )

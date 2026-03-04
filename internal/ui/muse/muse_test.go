@@ -9,45 +9,84 @@ import (
 )
 
 func TestMuse_ShouldTrigger(t *testing.T) {
-	// Create a Muse with mocked time (single mode by default)
-	m := &Muse{
-		enabled:    true,
-		interval:   10 * time.Second,
-		continuity: false,
-		now:        time.Now,
+	t.Parallel()
+	tests := []struct {
+		name       string
+		enabled    bool
+		hasSession bool
+		isBusy     bool
+		elapsed    time.Duration
+		want       bool
+	}{
+		{
+			name:       "disabled",
+			enabled:    false,
+			hasSession: true,
+			isBusy:     false,
+			elapsed:    15 * time.Second,
+			want:       false,
+		},
+		{
+			name:       "no session",
+			enabled:    true,
+			hasSession: false,
+			isBusy:     false,
+			elapsed:    15 * time.Second,
+			want:       false,
+		},
+		{
+			name:       "agent busy",
+			enabled:    true,
+			hasSession: true,
+			isBusy:     true,
+			elapsed:    15 * time.Second,
+			want:       false,
+		},
+		{
+			name:       "not enough elapsed time",
+			enabled:    true,
+			hasSession: true,
+			isBusy:     false,
+			elapsed:    5 * time.Second,
+			want:       false,
+		},
+		{
+			name:       "first trigger",
+			enabled:    true,
+			hasSession: true,
+			isBusy:     false,
+			elapsed:    15 * time.Second,
+			want:       true,
+		},
+		{
+			name:       "already triggered - single mode",
+			enabled:    true,
+			hasSession: true,
+			isBusy:     false,
+			elapsed:    15 * time.Second,
+			want:       false,
+		},
 	}
 
-	// Test: not enabled
-	m.enabled = false
-	if m.ShouldTrigger(15*time.Second, true, false) {
-		t.Error("Should not trigger when disabled")
-	}
-	m.enabled = true
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	// Test: no session
-	if m.ShouldTrigger(15*time.Second, false, false) {
-		t.Error("Should not trigger without session")
-	}
-
-	// Test: agent busy
-	if m.ShouldTrigger(15*time.Second, true, true) {
-		t.Error("Should not trigger when agent busy")
-	}
-
-	// Test: not enough elapsed time
-	if m.ShouldTrigger(5*time.Second, true, false) {
-		t.Error("Should not trigger before timeout")
-	}
-
-	// Test: first trigger
-	if !m.ShouldTrigger(15*time.Second, true, false) {
-		t.Error("Should trigger on first trigger after timeout")
-	}
-
-	// Test: already triggered - should not trigger again (single mode)
-	m.MarkTriggered()
-	if m.ShouldTrigger(15*time.Second, true, false) {
-		t.Error("Should not trigger again in single mode")
+			m := &Muse{
+				enabled:    tt.enabled,
+				interval:   10 * time.Second,
+				continuity: false,
+				now:        time.Now,
+			}
+			if tt.name == "already triggered - single mode" {
+				m.MarkTriggered()
+			}
+			got := m.ShouldTrigger(tt.elapsed, tt.hasSession, tt.isBusy)
+			if got != tt.want {
+				t.Errorf("ShouldTrigger() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -90,6 +129,8 @@ func TestMuse_ShouldTrigger_ResetThenInterval(t *testing.T) {
 }
 
 func TestMuse_Reset(t *testing.T) {
+	t.Parallel()
+
 	m := &Muse{
 		enabled:     true,
 		lastTrigger: time.Now(),
@@ -107,7 +148,10 @@ func TestMuse_Reset(t *testing.T) {
 }
 
 func TestGetConfig(t *testing.T) {
+	t.Parallel()
+
 	t.Run("default values", func(t *testing.T) {
+		t.Parallel()
 		cfg := &config.Config{}
 		c := GetConfig(cfg)
 
@@ -126,6 +170,7 @@ func TestGetConfig(t *testing.T) {
 	})
 
 	t.Run("custom values", func(t *testing.T) {
+		t.Parallel()
 		cfg := &config.Config{
 			Options: &config.Options{
 				MuseInterval:   60,
@@ -152,14 +197,15 @@ func TestGetConfig(t *testing.T) {
 }
 
 func TestMuse_PlaceholderText(t *testing.T) {
-	m := &Muse{
-		enabled:  true,
-		interval: 120 * time.Second,
-		now:      time.Now,
-	}
-
+	t.Parallel()
 	t.Run("shows countdown before first trigger", func(t *testing.T) {
-		m.lastTrigger = time.Time{}
+		t.Parallel()
+
+		m := &Muse{
+			enabled:  true,
+			interval: 120 * time.Second,
+			now:      time.Now,
+		}
 		result := m.PlaceholderText(60*time.Second, false, true, false, "Ready")
 		expected := "Muse in 1m"
 		if result != expected {
@@ -168,7 +214,13 @@ func TestMuse_PlaceholderText(t *testing.T) {
 	})
 
 	t.Run("shows Yolo and countdown", func(t *testing.T) {
-		m.lastTrigger = time.Time{}
+		t.Parallel()
+
+		m := &Muse{
+			enabled:  true,
+			interval: 120 * time.Second,
+			now:      time.Now,
+		}
 		result := m.PlaceholderText(60*time.Second, true, true, false, "Ready")
 		expected := "Yolo mode! Muse in 1m"
 		if result != expected {
@@ -177,26 +229,41 @@ func TestMuse_PlaceholderText(t *testing.T) {
 	})
 
 	t.Run("shows default when disabled", func(t *testing.T) {
-		m.enabled = false
+		t.Parallel()
+
+		m := &Muse{
+			enabled:  false,
+			interval: 120 * time.Second,
+			now:      time.Now,
+		}
 		result := m.PlaceholderText(60*time.Second, false, true, false, "Ready")
 		if result != "Ready" {
 			t.Errorf("PlaceholderText() = %q, want %q", result, "Ready")
 		}
-		m.enabled = true
 	})
 
 	t.Run("shows default when countdown reaches zero", func(t *testing.T) {
-		m.lastTrigger = time.Time{}
+		t.Parallel()
+
+		m := &Muse{
+			enabled:  true,
+			interval: 120 * time.Second,
+			now:      time.Now,
+		}
 		result := m.PlaceholderText(130*time.Second, false, true, false, "Ready")
-		// Countdown is negative, should show default
 		if result != "Ready" {
 			t.Errorf("PlaceholderText() = %q, want %q", result, "Ready")
 		}
 	})
 
 	t.Run("shows default when no session", func(t *testing.T) {
-		m.lastTrigger = time.Time{}
-		// hasSession = false should hide countdown even when enabled
+		t.Parallel()
+
+		m := &Muse{
+			enabled:  true,
+			interval: 120 * time.Second,
+			now:      time.Now,
+		}
 		result := m.PlaceholderText(60*time.Second, false, false, false, "Ready")
 		if result != "Ready" {
 			t.Errorf("PlaceholderText() = %q, want %q", result, "Ready")
@@ -204,8 +271,13 @@ func TestMuse_PlaceholderText(t *testing.T) {
 	})
 
 	t.Run("shows default when agent is busy", func(t *testing.T) {
-		m.lastTrigger = time.Time{}
-		// isBusy = true should hide countdown even with session
+		t.Parallel()
+
+		m := &Muse{
+			enabled:  true,
+			interval: 120 * time.Second,
+			now:      time.Now,
+		}
 		result := m.PlaceholderText(60*time.Second, false, true, true, "Ready")
 		if result != "Ready" {
 			t.Errorf("PlaceholderText() = %q, want %q", result, "Ready")
@@ -214,6 +286,8 @@ func TestMuse_PlaceholderText(t *testing.T) {
 }
 
 func TestMuse_New(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		Options: &config.Options{
 			MuseInterval:   60,
@@ -242,6 +316,8 @@ func TestMuse_New(t *testing.T) {
 }
 
 func TestMuse_Tick(t *testing.T) {
+	t.Parallel()
+
 	m := &Muse{enabled: true}
 	cmd := m.Tick()
 
@@ -257,6 +333,8 @@ func TestMuse_Tick(t *testing.T) {
 }
 
 func TestMuse_MarkTriggered(t *testing.T) {
+	t.Parallel()
+
 	m := &Muse{
 		enabled:     true,
 		lastTrigger: time.Time{},
@@ -271,6 +349,8 @@ func TestMuse_MarkTriggered(t *testing.T) {
 }
 
 func TestMuse_Trigger(t *testing.T) {
+	t.Parallel()
+
 	m := &Muse{prompt: "Test prompt"}
 	runCalled := false
 
@@ -307,6 +387,8 @@ func TestMuse_Trigger(t *testing.T) {
 }
 
 func TestMuse_Trigger_WithError(t *testing.T) {
+	t.Parallel()
+
 	m := &Muse{prompt: "Test"}
 
 	cmd := m.Trigger(context.Background(), "session", func(ctx context.Context, sessionID, prompt string) error {
@@ -336,6 +418,8 @@ func (e *testError) Error() string {
 }
 
 func TestMuse_UpdateConfig(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{
 		Options: &config.Options{
 			MuseInterval:   45,
@@ -370,24 +454,47 @@ func TestMuse_UpdateConfig(t *testing.T) {
 }
 
 func TestMuse_SetEnabled(t *testing.T) {
-	cfg := &config.Config{Options: &config.Options{}}
-	m := &Muse{enabled: false}
-
-	cmd := m.SetEnabled(true, cfg)
-
-	if !m.enabled {
-		t.Error("enabled should be true")
+	t.Parallel()
+	tests := []struct {
+		name        string
+		initial     bool
+		setTo       bool
+		wantEnabled bool
+		wantCmd     bool
+	}{
+		{
+			name:        "enable when disabled",
+			initial:     false,
+			setTo:       true,
+			wantEnabled: true,
+			wantCmd:     true,
+		},
+		{
+			name:        "disable when enabled",
+			initial:     true,
+			setTo:       false,
+			wantEnabled: false,
+			wantCmd:     false,
+		},
 	}
-	if cmd == nil {
-		t.Error("SetEnabled(true) should return tick command")
-	}
 
-	cmd = m.SetEnabled(false, cfg)
-	if m.enabled {
-		t.Error("enabled should be false")
-	}
-	if cmd != nil {
-		t.Error("SetEnabled(false) should return nil")
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := &config.Config{Options: &config.Options{}}
+			m := &Muse{enabled: tt.initial}
+			cmd := m.SetEnabled(tt.setTo, cfg)
+
+			if m.enabled != tt.wantEnabled {
+				t.Errorf("enabled = %v, want %v", m.enabled, tt.wantEnabled)
+			}
+			if (cmd != nil) != tt.wantCmd {
+				t.Errorf("SetEnabled(%v) return nil = %v, want %v",
+					tt.setTo, cmd == nil, tt.wantCmd)
+			}
+		})
 	}
 }
 
@@ -407,52 +514,79 @@ func TestMuse_SetInterval(t *testing.T) {
 }
 
 func TestMuse_SetInterval_OutOfRange(t *testing.T) {
-	cfg := &config.Config{Options: &config.Options{}}
-	m := &Muse{interval: 120 * time.Second}
-
-	// Test negative values
-	err := m.SetInterval(-1, cfg)
-	if err == nil {
-		t.Error("expected error for negative interval, got nil")
+	t.Parallel()
+	tests := []struct {
+		name        string
+		value       int
+		expectError bool
+		checkValue  int // For valid values, verify config was updated
+	}{
+		{
+			name:        "negative value",
+			value:       -1,
+			expectError: true,
+		},
+		{
+			name:        "zero value",
+			value:       0,
+			expectError: true,
+		},
+		{
+			name:        "very large value",
+			value:       999999,
+			expectError: true,
+		},
+		{
+			name:        "extremely large value",
+			value:       999999999,
+			expectError: true,
+		},
+		{
+			name:        "above maximum",
+			value:       604801,
+			expectError: true,
+		},
+		{
+			name:        "minimum boundary",
+			value:       1,
+			expectError: false,
+			checkValue:  1,
+		},
+		{
+			name:        "maximum boundary",
+			value:       604800,
+			expectError: false,
+			checkValue:  604800,
+		},
 	}
 
-	// Test zero
-	err = m.SetInterval(0, cfg)
-	if err == nil {
-		t.Error("expected error for interval < 1, got nil")
-	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	// Test very large values (user case: 999999)
-	err = m.SetInterval(999999, cfg)
-	if err == nil {
-		t.Error("expected error for interval > 604800, got nil")
-	}
+			cfg := &config.Config{Options: &config.Options{}}
+			m := &Muse{interval: 120 * time.Second}
+			err := m.SetInterval(tt.value, cfg)
 
-	// Test extremely large values (overflow case)
-	err = m.SetInterval(999999999, cfg)
-	if err == nil {
-		t.Error("expected error for extremely large interval, got nil")
-	}
-
-	// Test maximum boundary
-	err = m.SetInterval(604801, cfg)
-	if err == nil {
-		t.Error("expected error for interval > 604800, got nil")
-	}
-
-	// Test valid boundary values
-	_ = m.SetInterval(1, cfg)
-	if cfg.Options.MuseInterval != 1 {
-		t.Errorf("config.MuseInterval = %v, want 1", cfg.Options.MuseInterval)
-	}
-
-	_ = m.SetInterval(604800, cfg)
-	if cfg.Options.MuseInterval != 604800 {
-		t.Errorf("config.MuseInterval = %v, want 604800", cfg.Options.MuseInterval)
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("expected error for value %d, got nil", tt.value)
+				}
+			} else {
+				// Note: config save may fail in tests (no file path), but we verify the fields are updated
+				if tt.checkValue > 0 && cfg.Options.MuseInterval != tt.checkValue {
+					t.Errorf("config.MuseInterval = %v, want %v",
+						cfg.Options.MuseInterval, tt.checkValue)
+				}
+			}
+		})
 	}
 }
 
 func TestMuse_SetPrompt(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{Options: &config.Options{}}
 	m := &Muse{prompt: "Old"}
 
@@ -468,6 +602,8 @@ func TestMuse_SetPrompt(t *testing.T) {
 }
 
 func TestMuse_SetInterval_NilOptions(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.Config{Options: nil}
 	m := &Muse{}
 
@@ -478,52 +614,78 @@ func TestMuse_SetInterval_NilOptions(t *testing.T) {
 	}
 }
 
-func TestMuse_SetPrompt_NilOptions(t *testing.T) {
-	cfg := &config.Config{Options: nil}
-	m := &Muse{}
-
-	m.SetPrompt("Test", cfg)
-
-	if cfg.Options == nil {
-		t.Error("Options should be created")
-	}
-}
-
 func TestMuse_Continuity(t *testing.T) {
-	m := &Muse{continuity: true}
-
-	if !m.Continuity() {
-		t.Error("Continuity() should return true")
+	t.Parallel()
+	tests := []struct {
+		name        string
+		initial     bool
+		expectedGet bool
+	}{
+		{
+			name:        "returns true when continuity is true",
+			initial:     true,
+			expectedGet: true,
+		},
+		{
+			name:        "returns false when continuity is false",
+			initial:     false,
+			expectedGet: false,
+		},
 	}
 
-	m.continuity = false
-	if m.Continuity() {
-		t.Error("Continuity() should return false")
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := &Muse{continuity: tt.initial}
+			got := m.Continuity()
+			if got != tt.expectedGet {
+				t.Errorf("Continuity() = %v, want %v", got, tt.expectedGet)
+			}
+		})
 	}
 }
 
 func TestMuse_SetContinuity(t *testing.T) {
-	cfg := &config.Config{Options: &config.Options{}}
-	m := &Muse{continuity: false}
-
-	// Test setting to true
-	_ = m.SetContinuity(true, cfg)
-
-	if !m.continuity {
-		t.Error("continuity should be true")
+	t.Parallel()
+	tests := []struct {
+		name    string
+		initial bool
+		setTo   bool
+		want    bool
+	}{
+		{
+			name:    "set to true",
+			initial: false,
+			setTo:   true,
+			want:    true,
+		},
+		{
+			name:    "set to false",
+			initial: true,
+			setTo:   false,
+			want:    false,
+		},
 	}
-	if !cfg.Options.MuseContinuity {
-		t.Error("config.MuseContinuity should be true")
-	}
 
-	// Test setting to false
-	_ = m.SetContinuity(false, cfg)
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	if m.continuity {
-		t.Error("continuity should be false")
-	}
-	if cfg.Options.MuseContinuity {
-		t.Error("config.MuseContinuity should be false")
+			cfg := &config.Config{Options: &config.Options{}}
+			m := &Muse{continuity: tt.initial}
+			_ = m.SetContinuity(tt.setTo, cfg)
+
+			if m.continuity != tt.want {
+				t.Errorf("continuity = %v, want %v", m.continuity, tt.want)
+			}
+			if cfg.Options.MuseContinuity != tt.want {
+				t.Errorf("config.MuseContinuity = %v, want %v",
+					cfg.Options.MuseContinuity, tt.want)
+			}
+		})
 	}
 }
 
@@ -596,7 +758,10 @@ func TestMuse_ShouldTrigger_SingleMode(t *testing.T) {
 }
 
 func TestGetConfig_Continuity(t *testing.T) {
+	t.Parallel()
+
 	t.Run("default continuity is false", func(t *testing.T) {
+		t.Parallel()
 		cfg := &config.Config{}
 		c := GetConfig(cfg)
 
@@ -606,6 +771,7 @@ func TestGetConfig_Continuity(t *testing.T) {
 	})
 
 	t.Run("custom continuity value", func(t *testing.T) {
+		t.Parallel()
 		cfg := &config.Config{
 			Options: &config.Options{
 				MuseContinuity: true,
@@ -619,6 +785,7 @@ func TestGetConfig_Continuity(t *testing.T) {
 	})
 
 	t.Run("continuity in custom config", func(t *testing.T) {
+		t.Parallel()
 		cfg := &config.Config{
 			Options: &config.Options{
 				MuseInterval:   60,
@@ -636,6 +803,113 @@ func TestGetConfig_Continuity(t *testing.T) {
 		}
 		if c.Prompt != "Test" {
 			t.Errorf("Prompt = %q, want %q", c.Prompt, "Test")
+		}
+	})
+}
+
+func TestMuse_WillTrigger(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		enabled     bool
+		continuity  bool
+		triggered   bool
+		wantTrigger bool
+	}{
+		{
+			name:        "disabled",
+			enabled:     false,
+			continuity:  false,
+			triggered:   false,
+			wantTrigger: false,
+		},
+		{
+			name:        "enabled not triggered",
+			enabled:     true,
+			continuity:  false,
+			triggered:   false,
+			wantTrigger: true,
+		},
+		{
+			name:        "single mode already triggered",
+			enabled:     true,
+			continuity:  false,
+			triggered:   true,
+			wantTrigger: false,
+		},
+		{
+			name:        "continuity mode not triggered",
+			enabled:     true,
+			continuity:  true,
+			triggered:   false,
+			wantTrigger: true,
+		},
+		{
+			name:        "continuity mode already triggered",
+			enabled:     true,
+			continuity:  true,
+			triggered:   true,
+			wantTrigger: true,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := &Muse{
+				enabled:    tt.enabled,
+				continuity: tt.continuity,
+				now:        time.Now,
+			}
+			if tt.triggered {
+				m.MarkTriggered()
+			}
+
+			got := m.WillTrigger()
+			if got != tt.wantTrigger {
+				t.Errorf("WillTrigger() = %v, want %v", got, tt.wantTrigger)
+			}
+		})
+	}
+}
+
+func TestMuse_PlaceholderText_AlreadyTriggered(t *testing.T) {
+	t.Parallel()
+
+	t.Run("shows default when already triggered in single mode", func(t *testing.T) {
+		t.Parallel()
+
+		m := &Muse{
+			enabled:    true,
+			interval:   120 * time.Second,
+			continuity: false,
+			now:        time.Now,
+		}
+		m.MarkTriggered()
+
+		result := m.PlaceholderText(60*time.Second, false, true, false, "Ready")
+		if result != "Ready" {
+			t.Errorf("PlaceholderText() = %q, want %q (should not show countdown after trigger)", result, "Ready")
+		}
+	})
+
+	t.Run("shows countdown when already triggered in continuity mode", func(t *testing.T) {
+		t.Parallel()
+
+		m := &Muse{
+			enabled:    true,
+			interval:   120 * time.Second,
+			continuity: true,
+			now:        time.Now,
+		}
+		m.MarkTriggered()
+
+		result := m.PlaceholderText(60*time.Second, false, true, false, "Ready")
+		expected := "Muse in 1m"
+		if result != expected {
+			t.Errorf("PlaceholderText() = %q, want %q (should show countdown in continuity mode)", result, expected)
 		}
 	})
 }

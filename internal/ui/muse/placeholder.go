@@ -17,8 +17,9 @@ func (m *Muse) PlaceholderText(elapsed time.Duration, yoloEnabled, hasSession, i
 		placeholder = "Yolo mode!"
 	}
 
-	// Only show Muse countdown if there's an active session and agent is not busy
-	if m.enabled && hasSession && !isBusy {
+	// Only show Muse countdown if there's an active session, agent is not busy,
+	// and Muse will actually trigger (not already triggered in single mode)
+	if m.enabled && hasSession && !isBusy && m.WillTrigger() {
 		// Countdown to interval
 		remaining := m.interval - elapsed
 		if remaining > 0 {

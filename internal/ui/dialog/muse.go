@@ -18,7 +18,7 @@ const (
 	MuseID              = "muse"
 	museDialogMaxWidth  = 70
 	museDialogMaxHeight = 18
-	museDescription     = "Muse triggers background thinking during inactivity,\nmaking Crush a living assistant that proactively works."
+	museDescription     = "Muse triggers proactive thinking during inactivity,\nmaking Crush a living assistant that stays ahead."
 )
 
 // Muse represents a dialog for configuring Muse settings.
@@ -223,7 +223,7 @@ func (m *Muse) setMuseItems() {
 	cfg := m.com.Config()
 
 	// Get current values
-	interval := 120
+	interval := 300 // Match DefaultInterval in muse/config.go
 	if cfg.Options != nil && cfg.Options.MuseInterval > 0 {
 		interval = cfg.Options.MuseInterval
 	}

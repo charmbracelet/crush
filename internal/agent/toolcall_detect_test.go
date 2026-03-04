@@ -115,7 +115,6 @@ func TestParseToolCallsFromText(t *testing.T) {
 			wantCount: 1,
 			wantNames: []string{"view"},
 		},
-		// Markdown code fence tests.
 		{
 			name:      "json code fence",
 			text:      "```json\n{\"name\":\"view\",\"arguments\":{\"file_path\":\"./go.mod\"}}\n```",
@@ -145,7 +144,6 @@ func TestParseToolCallsFromText(t *testing.T) {
 			wantCount: 2,
 			wantNames: []string{"view", "grep"},
 		},
-		// Case-insensitive tool name tests.
 		{
 			name:      "capitalized tool name",
 			text:      `{"name":"View","arguments":{"file_path":"main.go"}}`,
@@ -164,7 +162,6 @@ func TestParseToolCallsFromText(t *testing.T) {
 			wantCount: 1,
 			wantNames: []string{"view"},
 		},
-		// Description-based alias tests (model uses description verb as name).
 		{
 			name:      "description alias Read -> view",
 			text:      `{"name":"Read","arguments":{"file_path":"./go.mod"}}`,
@@ -291,7 +288,6 @@ func TestToolNameResolver(t *testing.T) {
 func TestToolNameResolver_DescriptionCollision(t *testing.T) {
 	t.Parallel()
 
-	// Both tools have descriptions starting with "Fast" — alias should be skipped.
 	resolver := newToolNameResolver(fantasy.Call{
 		Tools: []fantasy.Tool{
 			fantasy.FunctionTool{Name: "grep", Description: "Fast content search"},
@@ -299,9 +295,7 @@ func TestToolNameResolver_DescriptionCollision(t *testing.T) {
 		},
 	})
 
-	// "Fast" is ambiguous, should not resolve.
 	require.Equal(t, "", resolver.resolve("Fast"))
-	// Exact names still work.
 	require.Equal(t, "grep", resolver.resolve("grep"))
 	require.Equal(t, "glob", resolver.resolve("glob"))
 }
@@ -376,7 +370,6 @@ func TestNormalizeVerb(t *testing.T) {
 	}
 }
 
-// fakeLanguageModel is a minimal test double for fantasy.LanguageModel.
 type fakeLanguageModel struct {
 	generateResp *fantasy.Response
 	streamParts  []fantasy.StreamPart
@@ -531,7 +524,6 @@ func TestToolCallDetectingModel_Stream(t *testing.T) {
 			parts = append(parts, part)
 		}
 
-		// Should have: ToolInputStart, ToolInputDelta, ToolInputEnd, ToolCall, Finish.
 		require.Len(t, parts, 5)
 		require.Equal(t, fantasy.StreamPartTypeToolInputStart, parts[0].Type)
 		require.Equal(t, "view", parts[0].ToolCallName)

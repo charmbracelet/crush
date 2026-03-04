@@ -31,7 +31,7 @@ require (
 	github.com/charmbracelet/x/exp/ordered v0.1.0
 	github.com/charmbracelet/x/exp/slice v0.0.0-20260209194814-eeb2896ac759
 	github.com/charmbracelet/x/exp/strings v0.1.0
-	github.com/charmbracelet/x/powernap v0.1.0
+	github.com/charmbracelet/x/powernap v0.1.3
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/clipperhouse/displaywidth v0.11.0
 	github.com/clipperhouse/uax29/v2 v2.7.0
@@ -192,5 +192,3 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
-
-replace github.com/charmbracelet/x/powernap => github.com/charmbracelet/x/powernap unbyteslice

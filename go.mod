@@ -191,3 +191,5 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
+
+replace charm.land/fantasy => github.com/charmbracelet/fantasy v0.11.1-0.20260227204759-aaea4a25bc25

@@ -65,9 +65,10 @@ type SessionAgentCall struct {
 	SessionID        string
 	Prompt           string
 	ProviderOptions  fantasy.ProviderOptions
-	Attachments      []message.Attachment
-	MaxOutputTokens  int64
-	Temperature      *float64
+	Attachments        []message.Attachment
+	MaxOutputTokens    int64
+	ShowToolCalls      bool
+	Temperature        *float64
 	TopP             *float64
 	TopK             *int64
 	FrequencyPenalty *float64
@@ -357,6 +358,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			// TODO: implement
 		},
 		OnToolCall: func(tc fantasy.ToolCallContent) error {
+			if call.ShowToolCalls {
+				slog.Default().WithGroup("TOOL").Info("call", "name", tc.ToolName, "input", tc.Input)
+			}
 			toolCall := message.ToolCall{
 				ID:               tc.ToolCallID,
 				Name:             tc.ToolName,
@@ -368,6 +372,30 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		OnToolResult: func(result fantasy.ToolResultContent) error {
+			if call.ShowToolCalls {
+				content := ""
+				switch result.Result.GetType() {
+				case fantasy.ToolResultContentTypeText:
+					if r, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentText](result.Result); ok {
+						content = r.Text
+					}
+				case fantasy.ToolResultContentTypeError:
+					if r, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentError](result.Result); ok {
+						content = "Error: " + r.Error.Error()
+					}
+				case fantasy.ToolResultContentTypeMedia:
+					if r, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentMedia](result.Result); ok {
+						content = r.Text
+						if content == "" {
+							content = fmt.Sprintf("[%s content]", r.MediaType)
+						}
+					}
+				}
+				if len(content) > 200 {
+					content = content[:200] + "..."
+				}
+				slog.Default().WithGroup("TOOL").Info("result", "name", result.ToolName, "output", content)
+			}
 			toolResult := a.convertToToolResult(result)
 			_, createMsgErr := a.messages.Create(genCtx, currentAssistant.SessionID, message.CreateMessageParams{
 				Role: message.Tool,

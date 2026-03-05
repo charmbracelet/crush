@@ -58,32 +58,34 @@ func (m *UI) modelInfo(width int) string {
 
 // getDynamicHeightLimits will give us the num of items to show in each section based on the hight
 // some items are more important than others.
-func getDynamicHeightLimits(availableHeight int) (maxFiles, maxLSPs, maxMCPs int) {
+func getDynamicHeightLimits(availableHeight int) (maxFiles, maxLSPs, maxMCPs, maxSkills int) {
 	const (
 		minItemsPerSection      = 2
 		defaultMaxFilesShown    = 10
 		defaultMaxLSPsShown     = 8
 		defaultMaxMCPsShown     = 8
+		defaultMaxSkillsShown   = 8
 		minAvailableHeightLimit = 10
 	)
 
 	// If we have very little space, use minimum values
 	if availableHeight < minAvailableHeightLimit {
-		return minItemsPerSection, minItemsPerSection, minItemsPerSection
+		return minItemsPerSection, minItemsPerSection, minItemsPerSection, minItemsPerSection
 	}
 
-	// Distribute available height among the three sections
-	// Give priority to files, then LSPs, then MCPs
-	totalSections := 3
+	// Distribute available height among the sections.
+	// Give priority to files, then LSPs, then MCPs, then Skills.
+	totalSections := 4
 	heightPerSection := availableHeight / totalSections
 
 	// Calculate limits for each section, ensuring minimums
 	maxFiles = max(minItemsPerSection, min(defaultMaxFilesShown, heightPerSection))
 	maxLSPs = max(minItemsPerSection, min(defaultMaxLSPsShown, heightPerSection))
 	maxMCPs = max(minItemsPerSection, min(defaultMaxMCPsShown, heightPerSection))
+	maxSkills = max(minItemsPerSection, min(defaultMaxSkillsShown, heightPerSection))
 
 	// If we have extra space, give it to files first
-	remainingHeight := availableHeight - (maxFiles + maxLSPs + maxMCPs)
+	remainingHeight := availableHeight - (maxFiles + maxLSPs + maxMCPs + maxSkills)
 	if remainingHeight > 0 {
 		extraForFiles := min(remainingHeight, defaultMaxFilesShown-maxFiles)
 		maxFiles += extraForFiles
@@ -95,12 +97,18 @@ func getDynamicHeightLimits(availableHeight int) (maxFiles, maxLSPs, maxMCPs int
 			remainingHeight -= extraForLSPs
 
 			if remainingHeight > 0 {
-				maxMCPs += min(remainingHeight, defaultMaxMCPsShown-maxMCPs)
+				extraForMCPs := min(remainingHeight, defaultMaxMCPsShown-maxMCPs)
+				maxMCPs += extraForMCPs
+				remainingHeight -= extraForMCPs
+			}
+
+			if remainingHeight > 0 {
+				maxSkills += min(remainingHeight, defaultMaxSkillsShown-maxSkills)
 			}
 		}
 	}
 
-	return maxFiles, maxLSPs, maxMCPs
+	return maxFiles, maxLSPs, maxMCPs, maxSkills
 }
 
 // sidebar renders the chat sidebar containing session title, working
@@ -143,10 +151,11 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 		layout.Fill(1),
 	).Split(m.layout.sidebar).Assign(new(image.Rectangle), &remainingHeightArea)
 	remainingHeight := remainingHeightArea.Dy() - 10
-	maxFiles, maxLSPs, maxMCPs := getDynamicHeightLimits(remainingHeight)
+	maxFiles, maxLSPs, maxMCPs, maxSkills := getDynamicHeightLimits(remainingHeight)
 
 	lspSection := m.lspInfo(width, maxLSPs, true)
 	mcpSection := m.mcpInfo(width, maxMCPs, true)
+	skillsSection := m.skillsInfo(width, maxSkills, true)
 	filesSection := m.filesInfo(m.com.Workspace.WorkingDir(), width, maxFiles, true)
 
 	uv.NewStyledString(
@@ -162,6 +171,8 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 					lspSection,
 					"",
 					mcpSection,
+					"",
+					skillsSection,
 				),
 			),
 	).Draw(scr, area)

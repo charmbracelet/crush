@@ -374,7 +374,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 
 	primaryProviderCfg, _ := c.cfg.Providers.Get(primary.ModelCfg.Provider)
 	result := NewSessionAgent(SessionAgentOptions{
-		LargeModel:           large,
+		LargeModel:           primary,
 		SmallModel:           small,
 		SystemPromptPrefix:   primaryProviderCfg.SystemPromptPrefix,
 		IsSubAgent:           isSubAgent,

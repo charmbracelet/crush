@@ -65,7 +65,7 @@ func TestCompactionModeSwitchRoundTrip(t *testing.T) {
 		llmDisableAutoSummarize, llmDisableContextStatus := compactionFlags(config.CompactionLLM, false)
 		agent.SetCompactionFlags(llmDisableAutoSummarize, llmDisableContextStatus)
 
-		require.True(t, agent.disableAutoSummarize.Get())
+		require.False(t, agent.disableAutoSummarize.Get())
 		require.False(t, agent.disableContextStatus.Get())
 	})
 
@@ -79,7 +79,7 @@ func TestCompactionModeSwitchRoundTrip(t *testing.T) {
 			disableContextStatus: csync.NewValue(llmDisableContextStatus),
 		}
 
-		require.True(t, agent.disableAutoSummarize.Get())
+		require.False(t, agent.disableAutoSummarize.Get())
 		require.False(t, agent.disableContextStatus.Get())
 
 		autoDisableAutoSummarize, autoDisableContextStatus := compactionFlags(config.CompactionAuto, false)

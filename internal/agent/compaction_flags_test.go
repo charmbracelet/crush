@@ -18,11 +18,11 @@ func TestCompactionFlags(t *testing.T) {
 		require.True(t, disableContextStatus)
 	})
 
-	t.Run("llm mode enables context status and disables auto summarize", func(t *testing.T) {
+	t.Run("llm mode enables context status and keeps auto summarize as safety net", func(t *testing.T) {
 		t.Parallel()
 
 		disableAutoSummarize, disableContextStatus := compactionFlags(config.CompactionLLM, false)
-		require.True(t, disableAutoSummarize)
+		require.False(t, disableAutoSummarize)
 		require.False(t, disableContextStatus)
 	})
 
@@ -42,11 +42,11 @@ func TestCompactionFlags(t *testing.T) {
 		require.True(t, disableContextStatus)
 	})
 
-	t.Run("llm mode ignores legacy disable auto summarize override", func(t *testing.T) {
+	t.Run("llm mode ignores legacy disable auto summarize override and keeps safety net", func(t *testing.T) {
 		t.Parallel()
 
 		disableAutoSummarize, disableContextStatus := compactionFlags(config.CompactionLLM, true)
-		require.True(t, disableAutoSummarize)
+		require.False(t, disableAutoSummarize)
 		require.False(t, disableContextStatus)
 	})
 }

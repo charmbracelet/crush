@@ -407,11 +407,13 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 
 // compactionFlags derives the DisableAutoSummarize and DisableContextStatus
 // flags from the configured CompactionMethod. The disableAutoSummarize
-// parameter acts as a legacy override from the config file.
+// parameter acts as a legacy override from the config file. In LLM mode,
+// auto-summarize remains enabled as a safety net in case the LLM fails to
+// call new_session before the context window fills up.
 func compactionFlags(method config.CompactionMethod, disableAutoSummarize bool) (bool, bool) {
 	switch method {
 	case config.CompactionLLM:
-		return true, false
+		return false, false
 	default:
 		return disableAutoSummarize, true
 	}

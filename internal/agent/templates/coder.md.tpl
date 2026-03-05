@@ -296,6 +296,9 @@ After significant changes:
 - Summarize tool output for user (they don't see it)
 - Never use `curl` through the bash tool it is not allowed use the fetch tool instead.
 - Only use the tools you know exist.
+{{- $docker := index .Config.MCP "docker" -}}{{if and (ne $docker.Command "") (not $docker.Disabled)}}
+- For tasks involving databases, cloud infrastructure, Kubernetes, browsers, APIs, or containers, you must attempt Docker MCP discovery first (`mcp_docker_mcp-find`) and load a relevant MCP (`mcp_docker_mcp-add`) before proceeding with non-MCP tools.
+{{end}}
 
 <bash_commands>
 **CRITICAL**: The `description` parameter is REQUIRED for all bash tool calls. Always provide it.

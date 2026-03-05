@@ -234,3 +234,12 @@ func (bs *BackgroundShell) IsDone() bool {
 func (bs *BackgroundShell) Wait() {
 	<-bs.done
 }
+
+func (bs *BackgroundShell) WaitContext(ctx context.Context) bool {
+	select {
+	case <-bs.done:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}

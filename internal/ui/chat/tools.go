@@ -1339,7 +1339,7 @@ func (t *baseToolMessageItem) formatWebFetchResultForCopy() string {
 	}
 
 	var result strings.Builder
-	result.WriteString(fmt.Sprintf("URL: %s\n\n", params.URL))
+	fmt.Fprintf(&result, "URL: %s\n\n", params.URL)
 	result.WriteString("```markdown\n")
 	result.WriteString(t.result.Content)
 	result.WriteString("\n```")
@@ -1356,7 +1356,7 @@ func (t *baseToolMessageItem) formatAgentResultForCopy() string {
 	var result strings.Builder
 
 	if t.result.Content != "" {
-		result.WriteString(fmt.Sprintf("```markdown\n%s\n```", t.result.Content))
+		fmt.Fprintf(&result, "```markdown\n%s\n```", t.result.Content)
 	}
 
 	return result.String()

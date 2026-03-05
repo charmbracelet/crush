@@ -3,6 +3,7 @@
 package skills
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -13,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/charlievieth/fastwalk"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"gopkg.in/yaml.v3"
 )
 
@@ -35,6 +37,36 @@ type Skill struct {
 	Instructions  string            `yaml:"-" json:"instructions"`
 	Path          string            `yaml:"-" json:"path"`
 	SkillFilePath string            `yaml:"-" json:"skill_file_path"`
+}
+
+// DiscoveryState represents the outcome of discovering a single skill file.
+type DiscoveryState int
+
+const (
+	// StateNormal indicates the skill was parsed and validated successfully.
+	StateNormal DiscoveryState = iota
+	// StateError indicates discovery encountered a scan/parse/validate error.
+	StateError
+)
+
+// SkillState represents the latest discovery status of a skill file.
+type SkillState struct {
+	Name  string
+	Path  string
+	State DiscoveryState
+	Err   error
+}
+
+// Event is published when skill discovery completes.
+type Event struct {
+	States []*SkillState
+}
+
+var broker = pubsub.NewBroker[Event]()
+
+// SubscribeEvents returns a channel that receives events when skill discovery state changes.
+func SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {
+	return broker.Subscribe(ctx)
 }
 
 // Validate checks if the skill meets spec requirements.
@@ -112,8 +144,19 @@ func splitFrontmatter(content string) (frontmatter, body string, err error) {
 // Discover finds all valid skills in the given paths.
 func Discover(paths []string) []*Skill {
 	var skills []*Skill
+	var states []*SkillState
 	var mu sync.Mutex
 	seen := make(map[string]bool)
+	addState := func(name, path string, state DiscoveryState, err error) {
+		mu.Lock()
+		states = append(states, &SkillState{
+			Name:  name,
+			Path:  path,
+			State: state,
+			Err:   err,
+		})
+		mu.Unlock()
+	}
 
 	for _, base := range paths {
 		// We use fastwalk with Follow: true instead of filepath.WalkDir because
@@ -126,6 +169,7 @@ func Discover(paths []string) []*Skill {
 		}
 		fastwalk.Walk(&conf, base, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
+				addState("", path, StateError, err)
 				return nil
 			}
 			if d.IsDir() || d.Name() != SkillFileName {
@@ -141,20 +185,24 @@ func Discover(paths []string) []*Skill {
 			skill, err := Parse(path)
 			if err != nil {
 				slog.Warn("Failed to parse skill file", "path", path, "error", err)
+				addState("", path, StateError, err)
 				return nil
 			}
 			if err := skill.Validate(); err != nil {
 				slog.Warn("Skill validation failed", "path", path, "error", err)
+				addState(skill.Name, path, StateError, err)
 				return nil
 			}
 			slog.Debug("Successfully loaded skill", "name", skill.Name, "path", path)
 			mu.Lock()
 			skills = append(skills, skill)
 			mu.Unlock()
+			addState(skill.Name, path, StateNormal, nil)
 			return nil
 		})
 	}
 
+	broker.Publish(pubsub.UpdatedEvent, Event{States: states})
 	return skills
 }
 

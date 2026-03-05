@@ -880,6 +880,8 @@ func (c *coordinator) Model() Model {
 
 func (c *coordinator) UpdateModels(ctx context.Context) error {
 	// build the models again so we make sure we get the latest config
+	// isSubAgent is false here; sub-agents are rebuilt transitively
+	// via buildTools -> agentTool -> buildAgent below.
 	large, small, err := c.buildAgentModels(ctx, false)
 	if err != nil {
 		return err

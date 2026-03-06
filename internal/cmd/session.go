@@ -7,10 +7,12 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/spf13/cobra"
 )
 
@@ -20,6 +22,8 @@ var sessionCmd = &cobra.Command{
 	Short:   "Manage sessions",
 	Long:    "Manage Crush sessions including listing, viewing, and deleting sessions.",
 }
+
+var sessionListJSON bool
 
 var sessionListCmd = &cobra.Command{
 	Use:   "list",
@@ -61,6 +65,7 @@ var sessionRenameCmd = &cobra.Command{
 }
 
 func init() {
+	sessionListCmd.Flags().BoolVar(&sessionListJSON, "json", false, "output in JSON format")
 	sessionCmd.AddCommand(sessionListCmd)
 	sessionCmd.AddCommand(sessionShowCmd)
 	sessionCmd.AddCommand(sessionLastCmd)
@@ -94,19 +99,33 @@ func runSessionList(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("failed to list sessions: %w", err)
 	}
 
-	output := make([]sessionJSON, len(list))
-	for i, s := range list {
-		output[i] = sessionJSON{
-			ID:       session.HashID(s.ID),
-			UUID:     s.ID,
-			Title:    s.Title,
-			Created:  time.Unix(s.CreatedAt, 0).Format(time.RFC3339),
-			Modified: time.Unix(s.UpdatedAt, 0).Format(time.RFC3339),
+	out := cmd.OutOrStdout()
+
+	if sessionListJSON {
+		output := make([]sessionJSON, len(list))
+		for i, s := range list {
+			output[i] = sessionJSON{
+				ID:       session.HashID(s.ID),
+				UUID:     s.ID,
+				Title:    s.Title,
+				Created:  time.Unix(s.CreatedAt, 0).Format(time.RFC3339),
+				Modified: time.Unix(s.UpdatedAt, 0).Format(time.RFC3339),
+			}
 		}
+		enc := json.NewEncoder(out)
+		enc.SetEscapeHTML(false)
+		return enc.Encode(output)
 	}
-	enc := json.NewEncoder(cmd.OutOrStdout())
-	enc.SetEscapeHTML(false)
-	return enc.Encode(output)
+
+	hashStyle := lipgloss.NewStyle().Foreground(charmtone.Malibu)
+	dateStyle := lipgloss.NewStyle().Foreground(charmtone.Damson)
+
+	for _, s := range list {
+		hash := session.HashID(s.ID)[:7]
+		date := time.Unix(s.CreatedAt, 0).Format(time.RFC3339)
+		lipgloss.Println(hashStyle.Render(hash), dateStyle.Render(date), s.Title)
+	}
+	return nil
 }
 
 type sessionJSON struct {

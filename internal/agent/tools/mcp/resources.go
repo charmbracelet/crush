@@ -83,7 +83,7 @@ func getResources(ctx context.Context, c *ClientSession) ([]*Resource, error) {
 	}
 	result, err := c.ListResources(ctx, &mcp.ListResourcesParams{})
 	if err != nil {
-		// Handle "Method not found" errors from MCP servers that don't support resources/list
+		// Handle "Method not found" errors from MCP servers that don't support resources/list.
 		if isMethodNotFoundError(err) {
 			slog.Warn("MCP server does not support resources/list", "error", err)
 			return nil, nil

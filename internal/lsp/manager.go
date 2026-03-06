@@ -205,7 +205,7 @@ func (s *Manager) startServer(ctx context.Context, name, filepath string, server
 	if existing, ok := s.clients.Get(name); ok {
 		switch existing.GetServerState() {
 		case StateReady, StateStarting, StateDisabled:
-			client.Close(ctx)
+			_ = client.Close(ctx)
 			s.callback(name, existing)
 			return
 		}
@@ -228,7 +228,7 @@ func (s *Manager) startServer(ctx context.Context, name, filepath string, server
 
 	if _, err := client.Initialize(initCtx, s.cfg.WorkingDir()); err != nil {
 		slog.Error("LSP client initialization failed", "name", name, "error", err)
-		client.Close(ctx)
+		_ = client.Close(ctx)
 		s.clients.Del(name)
 		return
 	}
@@ -303,8 +303,10 @@ func hasRootMarkers(dir string, markers []string) bool {
 		return true
 	}
 	for _, pattern := range markers {
-		// Use fsext.GlobWithDoubleStar to find matches
-		matches, _, err := fsext.Glob(pattern, dir, 1)
+		// Use filepath.Glob for a non-recursive check in the root
+		// directory. This avoids walking the entire tree (which is
+		// catastrophic in large monorepos with node_modules, etc.).
+		matches, err := filepath.Glob(filepath.Join(dir, pattern))
 		if err == nil && len(matches) > 0 {
 			return true
 		}

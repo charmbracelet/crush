@@ -43,10 +43,20 @@ var sessionLastCmd = &cobra.Command{
 	RunE:  runSessionLast,
 }
 
+var sessionDeleteCmd = &cobra.Command{
+	Use:     "delete <id>",
+	Aliases: []string{"rm"},
+	Short:   "Delete a session",
+	Long:    "Delete a session by ID. ID can be a UUID, full hash, or hash prefix.",
+	Args:    cobra.ExactArgs(1),
+	RunE:    runSessionDelete,
+}
+
 func init() {
 	sessionCmd.AddCommand(sessionListCmd)
 	sessionCmd.AddCommand(sessionShowCmd)
 	sessionCmd.AddCommand(sessionLastCmd)
+	sessionCmd.AddCommand(sessionDeleteCmd)
 }
 
 func runSessionList(cmd *cobra.Command, _ []string) error {
@@ -201,6 +211,40 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 	enc := json.NewEncoder(cmd.OutOrStdout())
 	enc.SetEscapeHTML(false)
 	return enc.Encode(output)
+}
+
+func runSessionDelete(cmd *cobra.Command, args []string) error {
+	dataDir, _ := cmd.Flags().GetString("data-dir")
+	ctx := cmd.Context()
+
+	if dataDir == "" {
+		cfg, err := config.Init("", "", false)
+		if err != nil {
+			return fmt.Errorf("failed to initialize config: %w", err)
+		}
+		dataDir = cfg.Options.DataDirectory
+	}
+
+	conn, err := db.Connect(ctx, dataDir)
+	if err != nil {
+		return fmt.Errorf("failed to connect to database: %w", err)
+	}
+	defer conn.Close()
+
+	queries := db.New(conn)
+	sessions := session.NewService(queries, conn)
+
+	sess, err := resolveSessionID(ctx, sessions, args[0])
+	if err != nil {
+		return err
+	}
+
+	if err := sessions.Delete(ctx, sess.ID); err != nil {
+		return fmt.Errorf("failed to delete session: %w", err)
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "Deleted session %s\n", session.HashID(sess.ID)[:12])
+	return nil
 }
 
 func runSessionLast(cmd *cobra.Command, _ []string) error {

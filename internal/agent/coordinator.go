@@ -613,6 +613,7 @@ func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[st
 	opts := []openai.Option{
 		openai.WithAPIKey(apiKey),
 		openai.WithUseResponsesAPI(),
+		openai.WithWebSocket(),
 	}
 	if c.cfg.Options.Debug {
 		httpClient := log.NewHTTPClient()

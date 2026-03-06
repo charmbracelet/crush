@@ -111,6 +111,7 @@ type sessionAgent struct {
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, context.CancelFunc]
+	lastSessionID  *csync.Value[string] // Tracks last session for WebSocket chain reset.
 }
 
 type SessionAgentOptions struct {
@@ -142,6 +143,7 @@ func NewSessionAgent(
 		isYolo:               opts.IsYolo,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, context.CancelFunc](),
+		lastSessionID:        csync.NewValue(""),
 	}
 }
 
@@ -233,6 +235,27 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	defer a.activeRequests.Del(call.SessionID)
 
 	history, files := a.preparePrompt(msgs, call.Attachments...)
+
+	// Check if session changed and set ResetChain for WebSocket transport.
+	providerOptions := call.ProviderOptions
+	if providerOptions == nil {
+		providerOptions = make(fantasy.ProviderOptions)
+	}
+	lastSession := a.lastSessionID.Get()
+	if lastSession != "" && lastSession != call.SessionID {
+		// Session changed - reset WebSocket chain state.
+		resetChain := true
+		if existing, ok := providerOptions[openai.Name]; ok {
+			if opts, ok := existing.(*openai.ResponsesProviderOptions); ok {
+				opts.ResetChain = &resetChain
+			} else {
+				providerOptions[openai.Name] = &openai.ResponsesProviderOptions{ResetChain: &resetChain}
+			}
+		} else {
+			providerOptions[openai.Name] = &openai.ResponsesProviderOptions{ResetChain: &resetChain}
+		}
+	}
+	a.lastSessionID.Set(call.SessionID)
 
 	startTime := time.Now()
 	a.eventPromptSent(call.SessionID)
@@ -650,6 +673,9 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	if err != nil {
 		return err
 	}
+
+	// Reset WebSocket chain state after summarization since history is truncated.
+	a.lastSessionID.Set("")
 
 	var openrouterCost *float64
 	for _, step := range resp.Steps {

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -17,6 +18,8 @@ var sessionCmd = &cobra.Command{
 	Long:    "Manage Crush sessions including listing, viewing, and deleting sessions.",
 }
 
+var sessionListJSON bool
+
 var sessionListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all sessions",
@@ -25,6 +28,7 @@ var sessionListCmd = &cobra.Command{
 }
 
 func init() {
+	sessionListCmd.Flags().BoolVar(&sessionListJSON, "json", false, "Output in JSON format")
 	sessionCmd.AddCommand(sessionListCmd)
 }
 
@@ -54,14 +58,38 @@ func runSessionList(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("failed to list sessions: %w", err)
 	}
 
+	if sessionListJSON {
+		output := make([]sessionJSON, len(list))
+		for i, s := range list {
+			output[i] = sessionJSON{
+				ID:       session.HashID(s.ID),
+				UUID:     s.ID,
+				Title:    s.Title,
+				Created:  time.Unix(s.CreatedAt, 0).Format(time.RFC3339),
+				Modified: time.Unix(s.UpdatedAt, 0).Format(time.RFC3339),
+			}
+		}
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetEscapeHTML(false)
+		return enc.Encode(output)
+	}
+
 	for _, s := range list {
 		hash := session.HashID(s.ID)
 		createdAt := time.Unix(s.CreatedAt, 0)
 		relative := relativeTime(createdAt)
-		fmt.Printf("%s %q %s (%s)\n", hash, s.Title, createdAt.Format(time.RFC3339), relative)
+		fmt.Printf("%s %q %s (%s)\n", hash[:7], s.Title, createdAt.Format(time.RFC3339), relative)
 	}
 
 	return nil
+}
+
+type sessionJSON struct {
+	ID       string `json:"id"`
+	UUID     string `json:"uuid"`
+	Title    string `json:"title"`
+	Created  string `json:"created"`
+	Modified string `json:"modified"`
 }
 
 func relativeTime(t time.Time) string {

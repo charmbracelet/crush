@@ -52,11 +52,20 @@ var sessionDeleteCmd = &cobra.Command{
 	RunE:    runSessionDelete,
 }
 
+var sessionRenameCmd = &cobra.Command{
+	Use:   "rename <id> <title>",
+	Short: "Rename a session",
+	Long:  "Rename a session by ID. ID can be a UUID, full hash, or hash prefix.",
+	Args:  cobra.MinimumNArgs(2),
+	RunE:  runSessionRename,
+}
+
 func init() {
 	sessionCmd.AddCommand(sessionListCmd)
 	sessionCmd.AddCommand(sessionShowCmd)
 	sessionCmd.AddCommand(sessionLastCmd)
 	sessionCmd.AddCommand(sessionDeleteCmd)
+	sessionCmd.AddCommand(sessionRenameCmd)
 }
 
 func runSessionList(cmd *cobra.Command, _ []string) error {
@@ -244,6 +253,41 @@ func runSessionDelete(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "Deleted session %s\n", session.HashID(sess.ID)[:12])
+	return nil
+}
+
+func runSessionRename(cmd *cobra.Command, args []string) error {
+	dataDir, _ := cmd.Flags().GetString("data-dir")
+	ctx := cmd.Context()
+
+	if dataDir == "" {
+		cfg, err := config.Init("", "", false)
+		if err != nil {
+			return fmt.Errorf("failed to initialize config: %w", err)
+		}
+		dataDir = cfg.Options.DataDirectory
+	}
+
+	conn, err := db.Connect(ctx, dataDir)
+	if err != nil {
+		return fmt.Errorf("failed to connect to database: %w", err)
+	}
+	defer conn.Close()
+
+	queries := db.New(conn)
+	sessions := session.NewService(queries, conn)
+
+	sess, err := resolveSessionID(ctx, sessions, args[0])
+	if err != nil {
+		return err
+	}
+
+	newTitle := strings.Join(args[1:], " ")
+	if err := sessions.Rename(ctx, sess.ID, newTitle); err != nil {
+		return fmt.Errorf("failed to rename session: %w", err)
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "Renamed session %s to %q\n", session.HashID(sess.ID)[:12], newTitle)
 	return nil
 }
 

@@ -1,12 +1,15 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/spf13/cobra"
 )
@@ -27,9 +30,18 @@ var sessionListCmd = &cobra.Command{
 	RunE:  runSessionList,
 }
 
+var sessionShowCmd = &cobra.Command{
+	Use:   "show <id>",
+	Short: "Show session details",
+	Long:  "Show session details in JSON format. ID can be a UUID, full hash, or hash prefix.",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runSessionShow,
+}
+
 func init() {
 	sessionListCmd.Flags().BoolVar(&sessionListJSON, "json", false, "Output in JSON format")
 	sessionCmd.AddCommand(sessionListCmd)
+	sessionCmd.AddCommand(sessionShowCmd)
 }
 
 func runSessionList(cmd *cobra.Command, _ []string) error {
@@ -133,4 +145,223 @@ func relativeTime(t time.Time) string {
 		}
 		return fmt.Sprintf("%d years ago", years)
 	}
+}
+
+// resolveSessionID resolves a session ID that can be a UUID, full hash, or hash prefix.
+// Returns an error if the prefix is ambiguous (matches multiple sessions).
+func resolveSessionID(ctx context.Context, svc session.Service, id string) (session.Session, error) {
+	// Try direct UUID lookup first
+	if s, err := svc.Get(ctx, id); err == nil {
+		return s, nil
+	}
+
+	// List all sessions and check for hash matches
+	sessions, err := svc.List(ctx)
+	if err != nil {
+		return session.Session{}, err
+	}
+
+	var matches []session.Session
+	for _, s := range sessions {
+		hash := session.HashID(s.ID)
+		if hash == id || strings.HasPrefix(hash, id) {
+			matches = append(matches, s)
+		}
+	}
+
+	if len(matches) == 0 {
+		return session.Session{}, fmt.Errorf("session not found: %s", id)
+	}
+
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+
+	// Ambiguous - show matches like Git does
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "error: session ID '%s' is ambiguous. Matches:\n", id)
+	for _, m := range matches {
+		hash := session.HashID(m.ID)
+		created := time.Unix(m.CreatedAt, 0).Format("2006-01-02")
+		fmt.Fprintf(&sb, "  %s... %q (created %s)\n", hash[:12], m.Title, created)
+	}
+	sb.WriteString("Use more characters or the full hash.\n")
+	return session.Session{}, fmt.Errorf("%s", sb.String())
+}
+
+func runSessionShow(cmd *cobra.Command, args []string) error {
+	dataDir, _ := cmd.Flags().GetString("data-dir")
+	ctx := cmd.Context()
+
+	if dataDir == "" {
+		cfg, err := config.Init("", "", false)
+		if err != nil {
+			return fmt.Errorf("failed to initialize config: %w", err)
+		}
+		dataDir = cfg.Options.DataDirectory
+	}
+
+	conn, err := db.Connect(ctx, dataDir)
+	if err != nil {
+		return fmt.Errorf("failed to connect to database: %w", err)
+	}
+	defer conn.Close()
+
+	queries := db.New(conn)
+	sessions := session.NewService(queries, conn)
+	messages := message.NewService(queries)
+
+	sess, err := resolveSessionID(ctx, sessions, args[0])
+	if err != nil {
+		return err
+	}
+
+	msgs, err := messages.List(ctx, sess.ID)
+	if err != nil {
+		return fmt.Errorf("failed to list messages: %w", err)
+	}
+
+	output := sessionShowOutput{
+		Meta: sessionShowMeta{
+			ID:               session.HashID(sess.ID),
+			UUID:             sess.ID,
+			Title:            sess.Title,
+			Created:          time.Unix(sess.CreatedAt, 0).Format(time.RFC3339),
+			Modified:         time.Unix(sess.UpdatedAt, 0).Format(time.RFC3339),
+			Cost:             sess.Cost,
+			PromptTokens:     sess.PromptTokens,
+			CompletionTokens: sess.CompletionTokens,
+			TotalTokens:      sess.PromptTokens + sess.CompletionTokens,
+		},
+		Messages: make([]sessionShowMessage, len(msgs)),
+	}
+
+	for i, msg := range msgs {
+		output.Messages[i] = sessionShowMessage{
+			ID:       msg.ID,
+			Role:     string(msg.Role),
+			Created:  time.Unix(msg.CreatedAt, 0).Format(time.RFC3339),
+			Model:    msg.Model,
+			Provider: msg.Provider,
+			Parts:    convertParts(msg.Parts),
+		}
+	}
+
+	enc := json.NewEncoder(cmd.OutOrStdout())
+	enc.SetEscapeHTML(false)
+	return enc.Encode(output)
+}
+
+type sessionShowMeta struct {
+	ID               string  `json:"id"`
+	UUID             string  `json:"uuid"`
+	Title            string  `json:"title"`
+	Created          string  `json:"created"`
+	Modified         string  `json:"modified"`
+	Cost             float64 `json:"cost"`
+	PromptTokens     int64   `json:"prompt_tokens"`
+	CompletionTokens int64   `json:"completion_tokens"`
+	TotalTokens      int64   `json:"total_tokens"`
+}
+
+type sessionShowMessage struct {
+	ID       string            `json:"id"`
+	Role     string            `json:"role"`
+	Created  string            `json:"created"`
+	Model    string            `json:"model,omitempty"`
+	Provider string            `json:"provider,omitempty"`
+	Parts    []sessionShowPart `json:"parts"`
+}
+
+type sessionShowPart struct {
+	Type string `json:"type"`
+
+	// Text content
+	Text string `json:"text,omitempty"`
+
+	// Reasoning
+	Thinking   string `json:"thinking,omitempty"`
+	StartedAt  int64  `json:"started_at,omitempty"`
+	FinishedAt int64  `json:"finished_at,omitempty"`
+
+	// Tool call
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	Name       string `json:"name,omitempty"`
+	Input      string `json:"input,omitempty"`
+
+	// Tool result
+	Content  string `json:"content,omitempty"`
+	IsError  bool   `json:"is_error,omitempty"`
+	MIMEType string `json:"mime_type,omitempty"`
+
+	// Binary
+	Size int64 `json:"size,omitempty"`
+
+	// Image URL
+	URL    string `json:"url,omitempty"`
+	Detail string `json:"detail,omitempty"`
+
+	// Finish
+	Reason string `json:"reason,omitempty"`
+	Time   int64  `json:"time,omitempty"`
+}
+
+func convertParts(parts []message.ContentPart) []sessionShowPart {
+	result := make([]sessionShowPart, 0, len(parts))
+	for _, part := range parts {
+		switch p := part.(type) {
+		case message.TextContent:
+			result = append(result, sessionShowPart{
+				Type: "text",
+				Text: p.Text,
+			})
+		case message.ReasoningContent:
+			result = append(result, sessionShowPart{
+				Type:       "reasoning",
+				Thinking:   p.Thinking,
+				StartedAt:  p.StartedAt,
+				FinishedAt: p.FinishedAt,
+			})
+		case message.ToolCall:
+			result = append(result, sessionShowPart{
+				Type:       "tool_call",
+				ToolCallID: p.ID,
+				Name:       p.Name,
+				Input:      p.Input,
+			})
+		case message.ToolResult:
+			result = append(result, sessionShowPart{
+				Type:       "tool_result",
+				ToolCallID: p.ToolCallID,
+				Name:       p.Name,
+				Content:    p.Content,
+				IsError:    p.IsError,
+				MIMEType:   p.MIMEType,
+			})
+		case message.BinaryContent:
+			result = append(result, sessionShowPart{
+				Type:     "binary",
+				MIMEType: p.MIMEType,
+				Size:     int64(len(p.Data)),
+			})
+		case message.ImageURLContent:
+			result = append(result, sessionShowPart{
+				Type:   "image_url",
+				URL:    p.URL,
+				Detail: p.Detail,
+			})
+		case message.Finish:
+			result = append(result, sessionShowPart{
+				Type:   "finish",
+				Reason: string(p.Reason),
+				Time:   p.Time,
+			})
+		}
+	}
+	return result
+}
+
+type sessionShowOutput struct {
+	Meta     sessionShowMeta      `json:"meta"`
+	Messages []sessionShowMessage `json:"messages"`
 }

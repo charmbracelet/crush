@@ -205,7 +205,7 @@ func (s *Manager) startServer(ctx context.Context, name, filepath string, server
 	if existing, ok := s.clients.Get(name); ok {
 		switch existing.GetServerState() {
 		case StateReady, StateStarting, StateDisabled:
-			client.Close(ctx)
+			_ = client.Close(ctx)
 			s.callback(name, existing)
 			return
 		}
@@ -228,7 +228,7 @@ func (s *Manager) startServer(ctx context.Context, name, filepath string, server
 
 	if _, err := client.Initialize(initCtx, s.cfg.WorkingDir()); err != nil {
 		slog.Error("LSP client initialization failed", "name", name, "error", err)
-		client.Close(ctx)
+		_ = client.Close(ctx)
 		s.clients.Del(name)
 		return
 	}

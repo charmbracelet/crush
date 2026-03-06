@@ -4,15 +4,22 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
+	"os/exec"
 	"strings"
 	"time"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/ui/chat"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/exp/charmtone"
+	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 )
 
@@ -23,7 +30,10 @@ var sessionCmd = &cobra.Command{
 	Long:    "Manage Crush sessions including listing, viewing, and deleting sessions.",
 }
 
-var sessionListJSON bool
+var (
+	sessionListJSON bool
+	sessionShowJSON bool
+)
 
 var sessionListCmd = &cobra.Command{
 	Use:   "list",
@@ -35,7 +45,7 @@ var sessionListCmd = &cobra.Command{
 var sessionShowCmd = &cobra.Command{
 	Use:   "show <id>",
 	Short: "Show session details",
-	Long:  "Show session details in JSON format. ID can be a UUID, full hash, or hash prefix.",
+	Long:  "Show session details. Use --json for machine-readable output. ID can be a UUID, full hash, or hash prefix.",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runSessionShow,
 }
@@ -43,7 +53,7 @@ var sessionShowCmd = &cobra.Command{
 var sessionLastCmd = &cobra.Command{
 	Use:   "last",
 	Short: "Show most recent session",
-	Long:  "Show the most recently modified session in JSON format.",
+	Long:  "Show the most recently modified session. Use --json for machine-readable output.",
 	RunE:  runSessionLast,
 }
 
@@ -66,6 +76,8 @@ var sessionRenameCmd = &cobra.Command{
 
 func init() {
 	sessionListCmd.Flags().BoolVar(&sessionListJSON, "json", false, "output in JSON format")
+	sessionShowCmd.Flags().BoolVar(&sessionShowJSON, "json", false, "output in JSON format")
+	sessionLastCmd.Flags().BoolVar(&sessionShowJSON, "json", false, "output in JSON format")
 	sessionCmd.AddCommand(sessionListCmd)
 	sessionCmd.AddCommand(sessionShowCmd)
 	sessionCmd.AddCommand(sessionLastCmd)
@@ -210,35 +222,11 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to list messages: %w", err)
 	}
 
-	output := sessionShowOutput{
-		Meta: sessionShowMeta{
-			ID:               session.HashID(sess.ID),
-			UUID:             sess.ID,
-			Title:            sess.Title,
-			Created:          time.Unix(sess.CreatedAt, 0).Format(time.RFC3339),
-			Modified:         time.Unix(sess.UpdatedAt, 0).Format(time.RFC3339),
-			Cost:             sess.Cost,
-			PromptTokens:     sess.PromptTokens,
-			CompletionTokens: sess.CompletionTokens,
-			TotalTokens:      sess.PromptTokens + sess.CompletionTokens,
-		},
-		Messages: make([]sessionShowMessage, len(msgs)),
+	msgPtrs := messagePtrs(msgs)
+	if sessionShowJSON {
+		return outputSessionJSON(cmd.OutOrStdout(), sess, msgPtrs)
 	}
-
-	for i, msg := range msgs {
-		output.Messages[i] = sessionShowMessage{
-			ID:       msg.ID,
-			Role:     string(msg.Role),
-			Created:  time.Unix(msg.CreatedAt, 0).Format(time.RFC3339),
-			Model:    msg.Model,
-			Provider: msg.Provider,
-			Parts:    convertParts(msg.Parts),
-		}
-	}
-
-	enc := json.NewEncoder(cmd.OutOrStdout())
-	enc.SetEscapeHTML(false)
-	return enc.Encode(output)
+	return outputSessionHuman(sess, msgPtrs)
 }
 
 func runSessionDelete(cmd *cobra.Command, args []string) error {
@@ -348,6 +336,25 @@ func runSessionLast(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("failed to list messages: %w", err)
 	}
 
+	msgPtrs := messagePtrs(msgs)
+	if sessionShowJSON {
+		return outputSessionJSON(cmd.OutOrStdout(), sess, msgPtrs)
+	}
+	return outputSessionHuman(sess, msgPtrs)
+}
+
+const sessionOutputWidth = 80
+const sessionMaxContentWidth = 120
+
+func messagePtrs(msgs []message.Message) []*message.Message {
+	ptrs := make([]*message.Message, len(msgs))
+	for i := range msgs {
+		ptrs[i] = &msgs[i]
+	}
+	return ptrs
+}
+
+func outputSessionJSON(w io.Writer, sess session.Session, msgs []*message.Message) error {
 	output := sessionShowOutput{
 		Meta: sessionShowMeta{
 			ID:               session.HashID(sess.ID),
@@ -374,9 +381,89 @@ func runSessionLast(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	enc := json.NewEncoder(cmd.OutOrStdout())
+	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
 	return enc.Encode(output)
+}
+
+func outputSessionHuman(sess session.Session, msgs []*message.Message) error {
+	sty := styles.DefaultStyles()
+	toolResults := chat.BuildToolResultMap(msgs)
+
+	width := sessionOutputWidth
+	if w, _, err := term.GetSize(os.Stdout.Fd()); err == nil && w > 0 {
+		width = w
+	}
+	contentWidth := min(width, sessionMaxContentWidth)
+
+	profile := colorprofile.Detect(os.Stderr, os.Environ())
+	w, cleanup := sessionPager(profile)
+	defer cleanup()
+
+	keyStyle := lipgloss.NewStyle().Foreground(charmtone.Damson)
+	valStyle := lipgloss.NewStyle().Foreground(charmtone.Malibu)
+
+	hash := session.HashID(sess.ID)
+	created := time.Unix(sess.CreatedAt, 0).Format("Mon Jan 2 15:04:05 2006 -0700")
+
+	fmt.Fprintln(w, keyStyle.Render("ID:    ")+valStyle.Render(hash))
+	fmt.Fprintln(w, keyStyle.Render("Title: ")+valStyle.Render(sess.Title))
+	fmt.Fprintln(w, keyStyle.Render("Date:  ")+valStyle.Render(created))
+	fmt.Fprintln(w)
+
+	first := true
+	for _, msg := range msgs {
+		items := chat.ExtractMessageItems(&sty, msg, toolResults)
+		for _, item := range items {
+			if !first {
+				fmt.Fprintln(w)
+			}
+			first = false
+			fmt.Fprintln(w, item.Render(contentWidth))
+		}
+	}
+	fmt.Fprintln(w)
+
+	return nil
+}
+
+// sessionPager returns a writer and cleanup function. When stdout is a TTY,
+// it starts a pager process (respecting $PAGER, defaulting to "less -R")
+// and returns a colorprofile.Writer that preserves ANSI colors through
+// the pipe. When stdout is not a TTY, it returns os.Stdout directly.
+func sessionPager(profile colorprofile.Profile) (io.Writer, func()) {
+	if !term.IsTerminal(os.Stdout.Fd()) {
+		return os.Stdout, func() {}
+	}
+
+	pager := os.Getenv("PAGER")
+	if pager == "" {
+		pager = "less -R"
+	}
+
+	parts := strings.Fields(pager)
+	cmd := exec.Command(parts[0], parts[1:]...) //nolint:gosec
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	pipe, err := cmd.StdinPipe()
+	if err != nil {
+		return os.Stdout, func() {}
+	}
+
+	if err := cmd.Start(); err != nil {
+		return os.Stdout, func() {}
+	}
+
+	w := &colorprofile.Writer{
+		Forward: pipe,
+		Profile: profile,
+	}
+
+	return w, func() {
+		pipe.Close()
+		_ = cmd.Wait()
+	}
 }
 
 type sessionShowMeta struct {

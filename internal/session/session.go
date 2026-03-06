@@ -2,7 +2,9 @@ package session
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -21,6 +23,13 @@ const (
 	TodoStatusInProgress TodoStatus = "in_progress"
 	TodoStatusCompleted  TodoStatus = "completed"
 )
+
+// HashID returns a 7-character hash of a session ID (UUID).
+// The hash is the first 7 characters of the SHA-256 hash of the ID.
+func HashID(id string) string {
+	h := sha256.Sum256([]byte(id))
+	return hex.EncodeToString(h[:])[:7]
+}
 
 type Todo struct {
 	Content    string     `json:"content"`

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -432,7 +433,7 @@ func outputSessionHuman(sess session.Session, msgs []*message.Message) error {
 // and returns a colorprofile.Writer that preserves ANSI colors through
 // the pipe. When stdout is not a TTY, it returns os.Stdout directly.
 func sessionPager(profile colorprofile.Profile) (io.Writer, func()) {
-	if !term.IsTerminal(os.Stdout.Fd()) {
+	if runtime.GOOS == "windows" || !term.IsTerminal(os.Stdout.Fd()) {
 		return os.Stdout, func() {}
 	}
 

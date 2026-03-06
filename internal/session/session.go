@@ -69,6 +69,7 @@ type Service interface {
 	List(ctx context.Context) ([]Session, error)
 	Save(ctx context.Context, session Session) (Session, error)
 	UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error
+	Rename(ctx context.Context, id string, title string) error
 	Delete(ctx context.Context, id string) error
 
 	// Agent tool session management
@@ -203,6 +204,17 @@ func (s *service) UpdateTitleAndUsage(ctx context.Context, sessionID, title stri
 		PromptTokens:     promptTokens,
 		CompletionTokens: completionTokens,
 		Cost:             cost,
+	})
+}
+
+// Rename updates only the title of a session.
+func (s *service) Rename(ctx context.Context, id string, title string) error {
+	return s.q.UpdateSessionTitleAndUsage(ctx, db.UpdateSessionTitleAndUsageParams{
+		ID:               id,
+		Title:            title,
+		PromptTokens:     0,
+		CompletionTokens: 0,
+		Cost:             0,
 	})
 }
 

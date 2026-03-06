@@ -611,18 +611,24 @@ func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[st
 		openai.WithAPIKey(apiKey),
 		openai.WithUseResponsesAPI(),
 	}
-	if c.cfg.Options.Debug {
-		httpClient := log.NewHTTPClient()
+
+	// Set HTTP client based on provider and debug mode.
+	var httpClient *http.Client
+	if copilotService {
+		// Use billing client for Copilot service
+		httpClient = copilot.NewBillingClient(copilotService, c.cfg.Options.Debug)
+	} else if c.cfg.Options.Debug {
+		httpClient = log.NewHTTPClient()
+	}
+	if httpClient != nil {
 		opts = append(opts, openai.WithHTTPClient(httpClient))
 	}
+
 	if len(headers) > 0 {
 		opts = append(opts, openai.WithHeaders(headers))
 	}
 	if baseURL != "" {
 		opts = append(opts, openai.WithBaseURL(baseURL))
-	}
-	if copilotService {
-		opts = append(opts, openai.WithHTTPClient(copilot.NewBillingClient(copilotService, c.cfg.Options.Debug)))
 	}
 	return openai.New(opts...)
 }

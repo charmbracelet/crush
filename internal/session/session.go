@@ -24,11 +24,10 @@ const (
 	TodoStatusCompleted  TodoStatus = "completed"
 )
 
-// HashID returns a 7-character hash of a session ID (UUID).
-// The hash is the first 7 characters of the SHA-256 hash of the ID.
+// HashID returns the SHA-256 hash of a session ID (UUID) as a hex string.
 func HashID(id string) string {
 	h := sha256.Sum256([]byte(id))
-	return hex.EncodeToString(h[:])[:7]
+	return hex.EncodeToString(h[:])
 }
 
 type Todo struct {

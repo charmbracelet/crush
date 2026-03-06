@@ -122,6 +122,12 @@ type ProviderConfig struct {
 
 	ProviderOptions map[string]any `json:"provider_options,omitempty" jsonschema:"description=Additional provider-specific options for this provider"`
 
+	// CopilotService indicates if this provider follows GitHub Copilot billing rules.
+	// When true, X-Initiator header is set based on request type:
+	// - "user" for direct user prompts (billable)
+	// - "agent" for tool calls, sub-agents, auto-summaries (free)
+	CopilotService bool `json:"copilot_service,omitempty" jsonschema:"description=Enable GitHub Copilot billing rules with X-Initiator header. When true, only direct user prompts are billable (X-Initiator: user), while tool calls, sub-agents, and auto-summaries are free (X-Initiator: agent),default=false"`
+
 	// Used to pass extra parameters to the provider.
 	ExtraParams map[string]string `json:"-"`
 

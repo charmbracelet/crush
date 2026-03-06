@@ -10,6 +10,8 @@ import (
 
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/oauth/copilot"
+
 	"github.com/charmbracelet/crush/internal/config"
 )
 
@@ -71,7 +73,7 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 			if !ok {
 				return fantasy.ToolResponse{}, errors.New("model provider not configured")
 			}
-			result, err := agent.Run(ctx, SessionAgentCall{
+			result, err := agent.Run(copilot.ContextWithInitiatorType(ctx, copilot.InitiatorAgent), SessionAgentCall{
 				SessionID:        session.ID,
 				Prompt:           params.Prompt,
 				MaxOutputTokens:  maxTokens,

@@ -2,17 +2,12 @@
 package copilot
 
 import (
-	"bytes"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
-	"regexp"
 
 	"github.com/charmbracelet/crush/internal/log"
 )
-
-var assistantRolePattern = regexp.MustCompile(`"role"\s*:\s*"assistant"`)
 
 // NewClient creates a new HTTP client with a custom transport that adds the
 // X-Initiator header based on message history in the request body.
@@ -37,36 +32,48 @@ func (t *initiatorTransport) RoundTrip(req *http.Request) (*http.Response, error
 	if req == nil {
 		return nil, fmt.Errorf("HTTP request is nil")
 	}
-	if req.Body == http.NoBody {
-		// No body to inspect; default to user.
-		req.Header.Set(xInitiatorHeader, userInitiator)
-		slog.Debug("Setting X-Initiator header to user (no request body)")
+
+	// Priority 1: Check context value (allows explicit control)
+	if initiator, ok := contextInitiator(req.Context()); ok {
+		req.Header.Set(xInitiatorHeader, initiator)
+		if t.debug {
+			slog.Debug("Setting X-Initiator header from context", "value", initiator)
+		}
 		return t.roundTrip(req)
 	}
 
-	// Clone request to avoid modifying the original.
-	req = req.Clone(req.Context())
+	// Priority 2: Check isSubAgent flag (deprecated but kept for compatibility)
+	if t.isSubAgent {
+		req.Header.Set(xInitiatorHeader, agentInitiator)
+		if t.debug {
+			slog.Debug("Setting X-Initiator header to agent (isSubAgent flag)")
+		}
+		return t.roundTrip(req)
+	}
 
-	// Read the original body into bytes so we can examine it.
-	bodyBytes, err := io.ReadAll(req.Body)
+	if req.Body == nil || req.Body == http.NoBody {
+		// No body to inspect; default to user.
+		req.Header.Set(xInitiatorHeader, userInitiator)
+		if t.debug {
+			slog.Debug("Setting X-Initiator header to user (no request body)")
+		}
+		return t.roundTrip(req)
+	}
+
+	bodyBytes, err := readAndRestoreRequestBody(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read request body: %w", err)
 	}
-	defer req.Body.Close()
 
-	// Restore the original body using the preserved bytes.
-	req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-
-	// Check for assistant messages using regex to handle whitespace
-	// variations in the JSON while avoiding full unmarshalling overhead.
-	initiator := userInitiator
-	if assistantRolePattern.Match(bodyBytes) || t.isSubAgent {
-		slog.Debug("Setting X-Initiator header to agent (found assistant messages in history)")
-		initiator = agentInitiator
-	} else {
-		slog.Debug("Setting X-Initiator header to user (no assistant messages)")
+	initiator := detectInitiatorFromBody(bodyBytes)
+	if initiator == "" {
+		initiator = userInitiator
 	}
 	req.Header.Set(xInitiatorHeader, initiator)
+
+	if t.debug {
+		slog.Debug("Setting X-Initiator header from request body", "value", initiator)
+	}
 
 	return t.roundTrip(req)
 }

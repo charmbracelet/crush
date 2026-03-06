@@ -9,8 +9,6 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/logo"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/layout"
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 )
 
 // modelInfo renders the current model information including reasoning
@@ -35,9 +33,8 @@ func (m *UI) modelInfo(width int) string {
 						reasoningInfo = "Thinking Off"
 					}
 				} else {
-					formatter := cases.Title(language.English, cases.NoLower)
 					reasoningEffort := cmp.Or(model.ModelCfg.ReasoningEffort, model.CatwalkCfg.DefaultReasoningEffort)
-					reasoningInfo = formatter.String(fmt.Sprintf("Reasoning %s", reasoningEffort))
+					reasoningInfo = fmt.Sprintf("Reasoning %s", common.FormatReasoningEffort(reasoningEffort))
 				}
 			}
 		}

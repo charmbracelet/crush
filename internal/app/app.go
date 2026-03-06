@@ -143,6 +143,11 @@ func (app *App) Config() *config.Config {
 	return app.config
 }
 
+// GlobalCtx returns the global application context.
+func (app *App) GlobalCtx() context.Context {
+	return app.globalCtx
+}
+
 // RunNonInteractive runs the application in non-interactive mode with the
 // given prompt, printing to stdout.
 func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt, largeModel, smallModel string, hideSpinner bool) error {

@@ -451,6 +451,26 @@
           "type": "boolean",
           "description": "Show indeterminate progress updates during long operations",
           "default": true
+        },
+        "muse_interval": {
+          "type": "integer",
+          "maximum": 604800,
+          "minimum": 1,
+          "description": "Inactivity interval in seconds before Muse triggers",
+          "default": 300,
+          "examples": [
+            60,
+            600
+          ]
+        },
+        "muse_continuity": {
+          "type": "boolean",
+          "description": "Enable continuous Muse triggers (repeat every interval)",
+          "default": false
+        },
+        "muse_prompt": {
+          "type": "string",
+          "description": "Custom prompt for Muse thinking"
         }
       },
       "additionalProperties": false,

@@ -18,6 +18,7 @@
 - **Session-Based:** maintain multiple work sessions and contexts per project
 - **LSP-Enhanced:** Crush uses LSPs for additional context, just like you do
 - **Extensible:** add capabilities via MCPs (`http`, `stdio`, and `sse`)
+- **Muse Mode:** proactive thinking that triggers during inactivity, making Crush a living assistant that stays one step ahead
 - **Works Everywhere:** first-class support in every terminal on macOS, Linux, Windows (PowerShell and WSL), Android, FreeBSD, OpenBSD, and NetBSD
 - **Industrial Grade:** built on the Charm ecosystem, powering 25k+ applications, from leading open source projects to business-critical infrastructure
 
@@ -255,6 +256,37 @@ $HOME/.local/share/crush/crush.json
 > You can override the user and data config locations by setting:
 > * `CRUSH_GLOBAL_CONFIG`
 > * `CRUSH_GLOBAL_DATA`
+
+### Muse Mode
+
+Muse triggers proactive thinking after a period of inactivity, allowing Crush
+to work on your project while you're away or thinking. It's not background
+processing—it respects your workflow and cancels instantly when you type or paste.
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "muse_interval": 300,
+    "muse_continuity": false,
+    "muse_prompt": "Review recent changes and suggest improvements"
+  }
+}
+```
+
+**Options:**
+
+- `muse_interval`: Inactivity interval in seconds (1 to 604800, default: 300 = 5 minutes)
+- `muse_continuity`: If true, triggers repeatedly; if false, triggers once (default: false)
+- `muse_prompt`: Custom prompt for Muse thinking (default: review-focused prompt)
+
+> [!TIP]
+> Enable Muse Mode with `crush -m` or toggle via command palette (Ctrl+P > Muse)
+
+> [!NOTE]
+> Muse isn't background processing—it's proactive agent requests that run in the UI
+> thread. Input priority is instantaneous: typing, pasting, or switching sessions
+> cancels any ongoing Muse work.
 
 ### LSPs
 

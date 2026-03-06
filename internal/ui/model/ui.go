@@ -45,6 +45,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/dialog"
 	fimage "github.com/charmbracelet/crush/internal/ui/image"
 	"github.com/charmbracelet/crush/internal/ui/logo"
+	"github.com/charmbracelet/crush/internal/ui/muse"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/version"
@@ -228,6 +229,12 @@ type UI struct {
 	// mouse highlighting related state
 	lastClickTime time.Time
 
+	// Muse - proactive thinking during inactivity
+	muse         *muse.Muse
+	museCancel   context.CancelFunc
+	lastActivity time.Time
+	wasAgentBusy bool
+
 	// Prompt history for up/down navigation through previous messages.
 	promptHistory struct {
 		messages []string
@@ -280,17 +287,24 @@ func New(com *common.Common) *UI {
 	header := newHeader(com)
 
 	ui := &UI{
-		com:         com,
-		dialog:      dialog.NewOverlay(),
-		keyMap:      keyMap,
-		textarea:    ta,
-		chat:        ch,
-		header:      header,
-		completions: comp,
-		attachments: attachments,
-		todoSpinner: todoSpinner,
-		lspStates:   make(map[string]app.LSPClientInfo),
-		mcpStates:   make(map[string]mcp.ClientInfo),
+		com:          com,
+		dialog:       dialog.NewOverlay(),
+		keyMap:       keyMap,
+		textarea:     ta,
+		chat:         ch,
+		header:       header,
+		completions:  comp,
+		attachments:  attachments,
+		todoSpinner:  todoSpinner,
+		lspStates:    make(map[string]app.LSPClientInfo),
+		mcpStates:    make(map[string]mcp.ClientInfo),
+		muse:         muse.New(com.Config()),
+		lastActivity: time.Now(),
+	}
+
+	// Enable Muse if configured via CLI flag
+	if com.Config().Options.MuseEnabled {
+		ui.muse.SetEnabled(true, com.Config())
 	}
 
 	status := NewStatus(com, ui)
@@ -339,6 +353,10 @@ func (m *UI) Init() tea.Cmd {
 	cmds = append(cmds, m.loadCustomCommands())
 	// load prompt history async
 	cmds = append(cmds, m.loadPromptHistory())
+	// Start Muse tick if enabled
+	if m.muse.IsEnabled() {
+		cmds = append(cmds, m.muse.Tick())
+	}
 	return tea.Batch(cmds...)
 }
 
@@ -401,6 +419,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.forceCompactMode {
 			m.isCompact = true
 		}
+		// Cancel any ongoing Muse request before switching sessions
+		m.cancelMuse()
+		m.muse.Reset()
+		m.wasAgentBusy = false
+		m.lastActivity = time.Now()
 		m.setState(uiChat, m.focus)
 		m.session = msg.session
 		m.sessionFiles = msg.files
@@ -723,11 +746,77 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	// Muse (proactive thinking) messages
+	case muse.TickMsg:
+		// Calculate elapsed time since last user activity
+		elapsed := time.Since(m.lastActivity)
+		isBusy := m.isAgentBusy()
+
+		// Reset lastActivity when agent finishes work to prevent immediate trigger
+		if m.wasAgentBusy && !isBusy {
+			m.lastActivity = time.Now()
+			elapsed = 0
+		}
+		m.wasAgentBusy = isBusy
+
+		// Update Muse placeholder countdown (only when agent is not busy)
+		if m.muse.IsEnabled() && !isBusy {
+			yolo := m.com.App.Permissions.SkipRequests()
+			m.textarea.Placeholder = m.muse.PlaceholderText(elapsed, yolo, m.hasSession(), isBusy, m.readyPlaceholder)
+		}
+		if m.muse.ShouldTrigger(elapsed, m.hasSession(), isBusy) {
+			// Mark triggered BEFORE dispatching command (state mutation in Update)
+			m.muse.MarkTriggered()
+			// Create context with cancellation support
+			ctx, cancel := context.WithCancel(m.com.App.GlobalCtx())
+			m.museCancel = cancel
+			cmds = append(cmds, m.muse.Trigger(ctx, m.session.ID, func(ctx context.Context, sessionID, prompt string) error {
+				_, err := m.com.App.AgentCoordinator.Run(ctx, sessionID, prompt)
+				return err
+			}))
+		}
+		// Always reschedule tick if Muse is enabled
+		if m.muse.IsEnabled() {
+			cmds = append(cmds, m.muse.Tick())
+		}
+
+	case muse.TriggerStartMsg:
+		cmds = append(cmds, func() tea.Msg {
+			return util.NewInfoMsg("Muse is pondering...")
+		})
+
+	case muse.TriggerCompleteMsg:
+		// Clear cancel function after completion
+		m.museCancel = nil
+		if msg.Error != nil {
+			if errors.Is(msg.Error, context.Canceled) {
+				cmds = append(cmds, util.ReportInfo("Muse: interrupted"))
+			} else {
+				cmds = append(cmds, util.ReportError(msg.Error))
+			}
+		}
+
 	case tea.KeyPressMsg:
+		// Track user activity for Muse
+		m.lastActivity = time.Now()
+		// Only reset Muse if no dialog is open (user might be confirming commands)
+		if !m.dialog.HasDialogs() {
+			m.cancelMuse()
+			m.muse.Reset()
+			m.wasAgentBusy = false
+		}
 		if cmd := m.handleKeyPressMsg(msg); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case tea.PasteMsg:
+		// Track user activity for Muse
+		m.lastActivity = time.Now()
+		// Only reset Muse if no dialog is open (user might be in dialog)
+		if !m.dialog.HasDialogs() {
+			m.cancelMuse()
+			m.muse.Reset()
+			m.wasAgentBusy = false
+		}
 		if cmd := m.handlePasteMsg(msg); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -758,6 +847,18 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				"response", string(msg.Payload),
 				"options", msg.Options)
 		}
+	case muse.PromptEditedMsg:
+		if err := m.muse.SetPrompt(msg.Text, m.com.Config()); err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
+		cmds = append(cmds, util.ReportInfo("Muse prompt updated"))
+	case muse.IntervalEditedMsg:
+		if err := m.muse.SetInterval(msg.Value, m.com.Config()); err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
+		cmds = append(cmds, util.ReportInfo("Muse interval updated to "+util.FormatDuration(msg.Value)))
 	default:
 		if m.dialog.HasDialogs() {
 			if cmd := m.handleDialogMsg(msg); cmd != nil {
@@ -771,13 +872,16 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case uiFocusMain:
 	case uiFocusEditor:
 		// Textarea placeholder logic
+		yolo := m.com.App.Permissions.SkipRequests()
 		if m.isAgentBusy() {
 			m.textarea.Placeholder = m.workingPlaceholder
+		} else if m.muse.IsEnabled() {
+			elapsed := time.Since(m.lastActivity)
+			m.textarea.Placeholder = m.muse.PlaceholderText(elapsed, yolo, m.hasSession(), false, m.readyPlaceholder)
+		} else if yolo {
+			m.textarea.Placeholder = "Yolo mode!"
 		} else {
 			m.textarea.Placeholder = m.readyPlaceholder
-		}
-		if m.com.App.Permissions.SkipRequests() {
-			m.textarea.Placeholder = "Yolo mode!"
 		}
 	}
 
@@ -1196,6 +1300,39 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.com.App.Permissions.SetSkipRequests(yolo)
 		m.setEditorPrompt(yolo)
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionToggleMuse:
+		if m.muse != nil {
+			newEnabled := !m.muse.IsEnabled()
+			if cmd := m.muse.SetEnabled(newEnabled, m.com.Config()); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			if newEnabled {
+				m.lastActivity = time.Now()
+			} else {
+				m.cancelMuse()
+			}
+			yolo := m.com.App.Permissions.SkipRequests()
+			m.setEditorPrompt(yolo)
+		}
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionEditMuseInterval:
+		m.dialog.CloseDialog(dialog.MuseID)
+		cmds = append(cmds, m.openMuseIntervalEditor())
+	case dialog.ActionEditMusePrompt:
+		m.dialog.CloseDialog(dialog.MuseID)
+		cmds = append(cmds, m.openMusePromptEditor())
+	case dialog.ActionToggleMuseContinuity:
+		newContinuity := !m.muse.Continuity()
+		if err := m.muse.SetContinuity(newContinuity, m.com.Config()); err != nil {
+			cmds = append(cmds, util.ReportWarn(fmt.Sprintf("Failed to toggle continuity: %v", err)))
+			break
+		}
+		dia := m.dialog.Dialog(dialog.MuseID)
+		if dia != nil {
+			if md, ok := dia.(*dialog.Muse); ok {
+				md.UpdateMuseItems()
+			}
+		}
 	case dialog.ActionNewSession:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
@@ -2458,7 +2595,9 @@ func (m *UI) openEditor(value string) tea.Cmd {
 		if len(content) == 0 {
 			return util.ReportWarn("Message is empty")
 		}
-		os.Remove(tmpfile.Name())
+		if err := os.Remove(tmpfile.Name()); err != nil {
+			slog.Debug("Failed to remove temp file", "file", tmpfile.Name(), "error", err)
+		}
 		return openEditorMsg{
 			Text: strings.TrimSpace(string(content)),
 		}
@@ -2466,8 +2605,16 @@ func (m *UI) openEditor(value string) tea.Cmd {
 }
 
 // setEditorPrompt configures the textarea prompt function based on whether
-// yolo mode is enabled.
+// Muse or yolo mode is enabled.
 func (m *UI) setEditorPrompt(yolo bool) {
+	if m.muse.IsEnabled() && yolo {
+		m.textarea.SetPromptFunc(4, m.museYoloPromptFunc)
+		return
+	}
+	if m.muse.IsEnabled() {
+		m.textarea.SetPromptFunc(4, m.musePromptFunc)
+		return
+	}
 	if yolo {
 		m.textarea.SetPromptFunc(4, m.yoloPromptFunc)
 		return
@@ -2506,6 +2653,38 @@ func (m *UI) yoloPromptFunc(info textarea.PromptInfo) string {
 		return t.EditorPromptYoloDotsFocused.Render()
 	}
 	return t.EditorPromptYoloDotsBlurred.Render()
+}
+
+// musePromptFunc returns the Muse mode editor prompt style with Muse icon
+// and colored dots.
+func (m *UI) musePromptFunc(info textarea.PromptInfo) string {
+	t := m.com.Styles
+	if info.LineNumber == 0 {
+		if info.Focused {
+			return t.EditorPromptMuseIconFocused.Render()
+		}
+		return t.EditorPromptMuseIconBlurred.Render()
+	}
+	if info.Focused {
+		return t.EditorPromptMuseDotsFocused.Render()
+	}
+	return t.EditorPromptMuseDotsBlurred.Render()
+}
+
+// museYoloPromptFunc returns the combined Muse+Yolo mode editor prompt style
+// with M icon and Yolo (yellow) colors.
+func (m *UI) museYoloPromptFunc(info textarea.PromptInfo) string {
+	t := m.com.Styles
+	if info.LineNumber == 0 {
+		if info.Focused {
+			return t.EditorPromptMuseYoloIconFocused.Render()
+		}
+		return t.EditorPromptMuseYoloIconBlurred.Render()
+	}
+	if info.Focused {
+		return t.EditorPromptMuseYoloDotsFocused.Render()
+	}
+	return t.EditorPromptMuseYoloDotsBlurred.Render()
 }
 
 // closeCompletions closes the completions popup and resets state.
@@ -2663,6 +2842,15 @@ func (m *UI) hasSession() bool {
 	return m.session != nil && m.session.ID != ""
 }
 
+// cancelMuse cancels any ongoing Muse request.
+func (m *UI) cancelMuse() {
+	if m.museCancel != nil {
+		m.museCancel()
+		m.museCancel = nil
+	}
+}
+
+// formatDurationSeconds formats a duration in seconds to a human-readable string.
 // mimeOf detects the MIME type of the given content.
 func mimeOf(content []byte) string {
 	mimeBufferSize := min(512, len(content))
@@ -2824,6 +3012,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openReasoningDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.MuseID:
+		if cmd := m.openMuseDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.QuitID:
 		if cmd := m.openQuitDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -2907,6 +3099,125 @@ func (m *UI) openReasoningDialog() tea.Cmd {
 
 	m.dialog.OpenDialog(reasoningDialog)
 	return nil
+}
+
+// openMuseDialog opens the Muse settings dialog.
+func (m *UI) openMuseDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.MuseID) {
+		m.dialog.BringToFront(dialog.MuseID)
+		return nil
+	}
+
+	museDialog, err := dialog.NewMuse(m.com)
+	if err != nil {
+		return util.ReportError(err)
+	}
+
+	m.dialog.OpenDialog(museDialog)
+	return nil
+}
+
+// openMusePromptEditor opens an external editor to edit the Muse prompt.
+func (m *UI) openMusePromptEditor() tea.Cmd {
+	prompt := m.muse.Prompt()
+	tmpfile, err := os.CreateTemp("", "muse_prompt_*.md")
+	if err != nil {
+		return util.ReportError(err)
+	}
+	defer tmpfile.Close() //nolint:errcheck
+	if _, err := tmpfile.WriteString(prompt); err != nil {
+		return util.ReportError(err)
+	}
+	cmd, err := editor.Command("crush", tmpfile.Name())
+	if err != nil {
+		return util.ReportError(err)
+	}
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		if err != nil {
+			return util.ReportError(err)
+		}
+		content, err := os.ReadFile(tmpfile.Name())
+		if err != nil {
+			return util.ReportError(err)
+		}
+		if err := os.Remove(tmpfile.Name()); err != nil {
+			slog.Debug("Failed to remove temp file", "file", tmpfile.Name(), "error", err)
+		}
+		if len(content) == 0 {
+			return util.ReportWarn("Muse prompt is empty, keeping previous value")
+		}
+		return muse.PromptEditedMsg{
+			Text: strings.TrimSpace(string(content)),
+		}
+	})
+}
+
+// openMuseIntervalEditor opens an external editor to edit the Muse interval.
+func (m *UI) openMuseIntervalEditor() tea.Cmd {
+	interval := m.muse.Interval()
+	content := fmt.Sprintf(`# Muse Interval
+# Enter the inactivity interval in seconds before Muse triggers.
+# Examples: 30, 60, 120, 300 (30s, 1m, 2m, 5m)
+# Valid range: 1 to 604800 (1 week)
+# Current value: %s
+
+%d
+`, util.FormatDuration(int(interval.Seconds())), int(interval.Seconds()))
+
+	tmpfile, err := os.CreateTemp("", "muse_interval_*.txt")
+	if err != nil {
+		return util.ReportError(err)
+	}
+	defer tmpfile.Close() //nolint:errcheck
+	if _, err := tmpfile.WriteString(content); err != nil {
+		return util.ReportError(err)
+	}
+	cmd, err := editor.Command("crush", tmpfile.Name())
+	if err != nil {
+		return util.ReportError(err)
+	}
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		if err != nil {
+			return util.ReportError(err)
+		}
+		content, err := os.ReadFile(tmpfile.Name())
+		if err != nil {
+			return util.ReportError(err)
+		}
+		if err := os.Remove(tmpfile.Name()); err != nil {
+			slog.Debug("Failed to remove temp file", "file", tmpfile.Name(), "error", err)
+		}
+		// Check for empty content (user cancelled without saving)
+		if len(content) == 0 {
+			return util.ReportWarn("Muse interval unchanged, keeping previous value")
+		}
+		// Parse last non-comment, non-empty line as value
+		lines := strings.Split(string(content), "\n")
+		value := 0
+		for i := len(lines) - 1; i >= 0; i-- {
+			line := strings.TrimSpace(lines[i])
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			if _, err := fmt.Sscanf(line, "%d", &value); err == nil {
+				break
+			}
+		}
+		// Validate range: 1 second to 1 week
+		const (
+			minInterval = 1
+			maxInterval = 604800 // 7 days in seconds
+		)
+		if value < minInterval || value > maxInterval {
+			return util.NewWarnMsg("Invalid interval value: must be between 1 and 604800 (1 week), keeping previous value")
+		}
+		// Check if value actually changed
+		currentSeconds := int(interval.Seconds())
+		if value == currentSeconds {
+			return util.ReportInfo("Muse interval unchanged")
+		}
+		return muse.IntervalEditedMsg{Value: value}
+	})
 }
 
 // openSessionsDialog opens the sessions dialog. If the dialog is already open,
@@ -3000,6 +3311,9 @@ func (m *UI) newSession() tea.Cmd {
 	m.pillsView = ""
 	m.historyReset()
 	agenttools.ResetCache()
+	m.cancelMuse()
+	m.muse.Reset()
+	m.wasAgentBusy = false
 	return tea.Batch(
 		func() tea.Msg {
 			m.com.App.LSPManager.StopAll(context.Background())

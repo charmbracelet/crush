@@ -138,7 +138,7 @@ func TestBillingTransport_EdgeCases(t *testing.T) {
 	t.Run("invalid JSON", func(t *testing.T) {
 		t.Parallel()
 
-		req, _ := http.NewRequest("POST", "https://api.example.com/v1/chat/completions", strings.NewReader("invalid json"))
+		req, _ := http.NewRequestWithContext(context.Background(), "POST", "https://api.example.com/v1/chat/completions", strings.NewReader("invalid json"))
 		transport := &billingTransport{}
 		initiator := transport.getInitiatorType(req)
 		if initiator != InitiatorUser {
@@ -149,7 +149,7 @@ func TestBillingTransport_EdgeCases(t *testing.T) {
 	t.Run("nil body", func(t *testing.T) {
 		t.Parallel()
 
-		req, _ := http.NewRequest("POST", "https://api.example.com/v1/chat/completions", nil)
+		req, _ := http.NewRequestWithContext(context.Background(), "POST", "https://api.example.com/v1/chat/completions", nil)
 		transport := &billingTransport{}
 		initiator := transport.getInitiatorType(req)
 		if initiator != InitiatorUser {
@@ -168,7 +168,7 @@ func TestBillingTransport_ContextInitiator(t *testing.T) {
 			"messages": []map[string]any{{"role": "assistant", "content": "Tool call result"}},
 		}
 		bodyBytes, _ := json.Marshal(payload)
-		req, _ := http.NewRequest("POST", "https://api.example.com/v1/chat/completions", bytes.NewReader(bodyBytes))
+		req, _ := http.NewRequestWithContext(context.Background(), "POST", "https://api.example.com/v1/chat/completions", bytes.NewReader(bodyBytes))
 		req = req.WithContext(ContextWithInitiatorType(req.Context(), InitiatorUser))
 
 		transport := &billingTransport{}
@@ -185,7 +185,7 @@ func TestBillingTransport_ContextInitiator(t *testing.T) {
 			"messages": []map[string]any{{"role": "user", "content": "New request"}},
 		}
 		bodyBytes, _ := json.Marshal(payload)
-		req, _ := http.NewRequest("POST", "https://api.example.com/v1/chat/completions", bytes.NewReader(bodyBytes))
+		req, _ := http.NewRequestWithContext(context.Background(), "POST", "https://api.example.com/v1/chat/completions", bytes.NewReader(bodyBytes))
 		req = req.WithContext(ContextWithInitiatorType(req.Context(), InitiatorAgent))
 
 		transport := &billingTransport{}
@@ -202,7 +202,7 @@ func TestBillingTransport_ContextInitiator(t *testing.T) {
 			"messages": []map[string]any{{"role": "user", "content": "The previous session was interrupted because it got too long, the initial user request was: `test`"}},
 		}
 		bodyBytes, _ := json.Marshal(payload)
-		req, _ := http.NewRequest("POST", "https://api.example.com/v1/chat/completions", bytes.NewReader(bodyBytes))
+		req, _ := http.NewRequestWithContext(context.Background(), "POST", "https://api.example.com/v1/chat/completions", bytes.NewReader(bodyBytes))
 		req = req.WithContext(ContextWithInitiatorType(req.Context(), InitiatorAgent))
 
 		transport := &billingTransport{}
@@ -219,7 +219,7 @@ func TestBillingTransport_ContextInitiator(t *testing.T) {
 			"messages": []map[string]any{{"role": "assistant", "content": "Tool call"}},
 		}
 		bodyBytes, _ := json.Marshal(payload)
-		req, _ := http.NewRequest("POST", "https://api.example.com/v1/chat/completions", bytes.NewReader(bodyBytes))
+		req, _ := http.NewRequestWithContext(context.Background(), "POST", "https://api.example.com/v1/chat/completions", bytes.NewReader(bodyBytes))
 		req = req.WithContext(context.WithValue(req.Context(), InitiatorTypeKey, "invalid_value"))
 
 		transport := &billingTransport{}
@@ -238,7 +238,7 @@ func detectInitiator(t *testing.T, payload map[string]any) string {
 		t.Fatalf("Failed to marshal test data: %v", err)
 	}
 
-	req, err := http.NewRequest("POST", "https://api.example.com/v1/chat/completions", bytes.NewReader(bodyBytes))
+	req, err := http.NewRequestWithContext(context.Background(), "POST", "https://api.example.com/v1/chat/completions", bytes.NewReader(bodyBytes))
 	if err != nil {
 		t.Fatalf("Failed to create request: %v", err)
 	}

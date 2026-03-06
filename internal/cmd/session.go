@@ -28,18 +28,20 @@ var sessionCmd = &cobra.Command{
 	Use:     "session",
 	Aliases: []string{"sessions"},
 	Short:   "Manage sessions",
-	Long:    "Manage Crush sessions including listing, viewing, and deleting sessions.",
+	Long:    "Manage Crush sessions. Agents can use --json for machine-readable output.",
 }
 
 var (
-	sessionListJSON bool
-	sessionShowJSON bool
+	sessionListJSON   bool
+	sessionShowJSON   bool
+	sessionDeleteJSON bool
+	sessionRenameJSON bool
 )
 
 var sessionListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all sessions",
-	Long:  "List all sessions with their hash, title, and creation date.",
+	Long:  "List all sessions. Use --json for machine-readable output.",
 	RunE:  runSessionList,
 }
 
@@ -62,7 +64,7 @@ var sessionDeleteCmd = &cobra.Command{
 	Use:     "delete <id>",
 	Aliases: []string{"rm"},
 	Short:   "Delete a session",
-	Long:    "Delete a session by ID. ID can be a UUID, full hash, or hash prefix.",
+	Long:    "Delete a session by ID. Use --json for machine-readable output. ID can be a UUID, full hash, or hash prefix.",
 	Args:    cobra.ExactArgs(1),
 	RunE:    runSessionDelete,
 }
@@ -70,7 +72,7 @@ var sessionDeleteCmd = &cobra.Command{
 var sessionRenameCmd = &cobra.Command{
 	Use:   "rename <id> <title>",
 	Short: "Rename a session",
-	Long:  "Rename a session by ID. ID can be a UUID, full hash, or hash prefix.",
+	Long:  "Rename a session by ID. Use --json for machine-readable output. ID can be a UUID, full hash, or hash prefix.",
 	Args:  cobra.MinimumNArgs(2),
 	RunE:  runSessionRename,
 }
@@ -79,6 +81,8 @@ func init() {
 	sessionListCmd.Flags().BoolVar(&sessionListJSON, "json", false, "output in JSON format")
 	sessionShowCmd.Flags().BoolVar(&sessionShowJSON, "json", false, "output in JSON format")
 	sessionLastCmd.Flags().BoolVar(&sessionShowJSON, "json", false, "output in JSON format")
+	sessionDeleteCmd.Flags().BoolVar(&sessionDeleteJSON, "json", false, "output in JSON format")
+	sessionRenameCmd.Flags().BoolVar(&sessionRenameJSON, "json", false, "output in JSON format")
 	sessionCmd.AddCommand(sessionListCmd)
 	sessionCmd.AddCommand(sessionShowCmd)
 	sessionCmd.AddCommand(sessionLastCmd)
@@ -147,6 +151,14 @@ type sessionJSON struct {
 	Title    string `json:"title"`
 	Created  string `json:"created"`
 	Modified string `json:"modified"`
+}
+
+type sessionMutationResult struct {
+	ID      string `json:"id"`
+	UUID    string `json:"uuid"`
+	Title   string `json:"title"`
+	Deleted bool   `json:"deleted,omitempty"`
+	Renamed bool   `json:"renamed,omitempty"`
 }
 
 // resolveSessionID resolves a session ID that can be a UUID, full hash, or hash prefix.
@@ -260,7 +272,19 @@ func runSessionDelete(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to delete session: %w", err)
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "Deleted session %s\n", session.HashID(sess.ID)[:12])
+	out := cmd.OutOrStdout()
+	if sessionDeleteJSON {
+		enc := json.NewEncoder(out)
+		enc.SetEscapeHTML(false)
+		return enc.Encode(sessionMutationResult{
+			ID:      session.HashID(sess.ID),
+			UUID:    sess.ID,
+			Title:   sess.Title,
+			Deleted: true,
+		})
+	}
+
+	fmt.Fprintf(out, "Deleted session %s\n", session.HashID(sess.ID)[:12])
 	return nil
 }
 
@@ -295,7 +319,19 @@ func runSessionRename(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to rename session: %w", err)
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "Renamed session %s to %q\n", session.HashID(sess.ID)[:12], newTitle)
+	out := cmd.OutOrStdout()
+	if sessionRenameJSON {
+		enc := json.NewEncoder(out)
+		enc.SetEscapeHTML(false)
+		return enc.Encode(sessionMutationResult{
+			ID:      session.HashID(sess.ID),
+			UUID:    sess.ID,
+			Title:   newTitle,
+			Renamed: true,
+		})
+	}
+
+	fmt.Fprintf(out, "Renamed session %s to %q\n", session.HashID(sess.ID)[:12], newTitle)
 	return nil
 }
 
@@ -344,8 +380,10 @@ func runSessionLast(cmd *cobra.Command, _ []string) error {
 	return outputSessionHuman(sess, msgPtrs)
 }
 
-const sessionOutputWidth = 80
-const sessionMaxContentWidth = 120
+const (
+	sessionOutputWidth     = 80
+	sessionMaxContentWidth = 120
+)
 
 func messagePtrs(msgs []message.Message) []*message.Message {
 	ptrs := make([]*message.Message, len(msgs))

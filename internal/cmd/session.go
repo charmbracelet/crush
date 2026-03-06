@@ -38,10 +38,18 @@ var sessionShowCmd = &cobra.Command{
 	RunE:  runSessionShow,
 }
 
+var sessionLastCmd = &cobra.Command{
+	Use:   "last",
+	Short: "Show most recent session",
+	Long:  "Show the most recently modified session in JSON format.",
+	RunE:  runSessionLast,
+}
+
 func init() {
 	sessionListCmd.Flags().BoolVar(&sessionListJSON, "json", false, "Output in JSON format")
 	sessionCmd.AddCommand(sessionListCmd)
 	sessionCmd.AddCommand(sessionShowCmd)
+	sessionCmd.AddCommand(sessionLastCmd)
 }
 
 func runSessionList(cmd *cobra.Command, _ []string) error {
@@ -215,6 +223,75 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+
+	msgs, err := messages.List(ctx, sess.ID)
+	if err != nil {
+		return fmt.Errorf("failed to list messages: %w", err)
+	}
+
+	output := sessionShowOutput{
+		Meta: sessionShowMeta{
+			ID:               session.HashID(sess.ID),
+			UUID:             sess.ID,
+			Title:            sess.Title,
+			Created:          time.Unix(sess.CreatedAt, 0).Format(time.RFC3339),
+			Modified:         time.Unix(sess.UpdatedAt, 0).Format(time.RFC3339),
+			Cost:             sess.Cost,
+			PromptTokens:     sess.PromptTokens,
+			CompletionTokens: sess.CompletionTokens,
+			TotalTokens:      sess.PromptTokens + sess.CompletionTokens,
+		},
+		Messages: make([]sessionShowMessage, len(msgs)),
+	}
+
+	for i, msg := range msgs {
+		output.Messages[i] = sessionShowMessage{
+			ID:       msg.ID,
+			Role:     string(msg.Role),
+			Created:  time.Unix(msg.CreatedAt, 0).Format(time.RFC3339),
+			Model:    msg.Model,
+			Provider: msg.Provider,
+			Parts:    convertParts(msg.Parts),
+		}
+	}
+
+	enc := json.NewEncoder(cmd.OutOrStdout())
+	enc.SetEscapeHTML(false)
+	return enc.Encode(output)
+}
+
+func runSessionLast(cmd *cobra.Command, _ []string) error {
+	dataDir, _ := cmd.Flags().GetString("data-dir")
+	ctx := cmd.Context()
+
+	if dataDir == "" {
+		cfg, err := config.Init("", "", false)
+		if err != nil {
+			return fmt.Errorf("failed to initialize config: %w", err)
+		}
+		dataDir = cfg.Options.DataDirectory
+	}
+
+	conn, err := db.Connect(ctx, dataDir)
+	if err != nil {
+		return fmt.Errorf("failed to connect to database: %w", err)
+	}
+	defer conn.Close()
+
+	queries := db.New(conn)
+	sessions := session.NewService(queries, conn)
+	messages := message.NewService(queries)
+
+	list, err := sessions.List(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list sessions: %w", err)
+	}
+
+	if len(list) == 0 {
+		return fmt.Errorf("no sessions found")
+	}
+
+	sess := list[0]
 
 	msgs, err := messages.List(ctx, sess.ID)
 	if err != nil {

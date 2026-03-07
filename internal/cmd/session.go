@@ -422,6 +422,7 @@ func outputSessionHuman(sess session.Session, msgs []*message.Message) error {
 	var buf strings.Builder
 
 	fmt.Fprintln(&buf, keyStyle.Render("ID:    ")+valStyle.Render(hash))
+	fmt.Fprintln(&buf, keyStyle.Render("UUID:  ")+valStyle.Render(sess.ID))
 	fmt.Fprintln(&buf, keyStyle.Render("Title: ")+valStyle.Render(sess.Title))
 	fmt.Fprintln(&buf, keyStyle.Render("Date:  ")+valStyle.Render(created))
 	fmt.Fprintln(&buf)

@@ -75,9 +75,6 @@ crush run --verbose "Generate a README for this project"
 
 		return app.RunNonInteractive(ctx, os.Stdout, prompt, largeModel, smallModel, quiet || verbose)
 	},
-	PostRun: func(cmd *cobra.Command, args []string) {
-		event.AppExited()
-	},
 }
 
 func init() {

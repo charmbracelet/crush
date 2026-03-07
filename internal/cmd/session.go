@@ -94,28 +94,44 @@ func init() {
 	sessionCmd.AddCommand(sessionRenameCmd)
 }
 
-func runSessionList(cmd *cobra.Command, _ []string) error {
+type sessionServices struct {
+	sessions session.Service
+	messages message.Service
+}
+
+func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func(), error) {
 	dataDir, _ := cmd.Flags().GetString("data-dir")
 	ctx := cmd.Context()
 
 	if dataDir == "" {
 		cfg, err := config.Init("", "", false)
 		if err != nil {
-			return fmt.Errorf("failed to initialize config: %w", err)
+			return nil, nil, nil, fmt.Errorf("failed to initialize config: %w", err)
 		}
 		dataDir = cfg.Options.DataDirectory
 	}
 
 	conn, err := db.Connect(ctx, dataDir)
 	if err != nil {
-		return fmt.Errorf("failed to connect to database: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
-	defer conn.Close()
 
 	queries := db.New(conn)
-	sessions := session.NewService(queries, conn)
+	svc := &sessionServices{
+		sessions: session.NewService(queries, conn),
+		messages: message.NewService(queries),
+	}
+	return ctx, svc, func() { conn.Close() }, nil
+}
 
-	list, err := sessions.List(ctx)
+func runSessionList(cmd *cobra.Command, _ []string) error {
+	ctx, svc, cleanup, err := sessionSetup(cmd)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	list, err := svc.sessions.List(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to list sessions: %w", err)
 	}
@@ -222,33 +238,18 @@ func resolveSessionID(ctx context.Context, svc session.Service, id string) (sess
 }
 
 func runSessionShow(cmd *cobra.Command, args []string) error {
-	dataDir, _ := cmd.Flags().GetString("data-dir")
-	ctx := cmd.Context()
-
-	if dataDir == "" {
-		cfg, err := config.Init("", "", false)
-		if err != nil {
-			return fmt.Errorf("failed to initialize config: %w", err)
-		}
-		dataDir = cfg.Options.DataDirectory
-	}
-
-	conn, err := db.Connect(ctx, dataDir)
+	ctx, svc, cleanup, err := sessionSetup(cmd)
 	if err != nil {
-		return fmt.Errorf("failed to connect to database: %w", err)
+		return err
 	}
-	defer conn.Close()
+	defer cleanup()
 
-	queries := db.New(conn)
-	sessions := session.NewService(queries, conn)
-	messages := message.NewService(queries)
-
-	sess, err := resolveSessionID(ctx, sessions, args[0])
+	sess, err := resolveSessionID(ctx, svc.sessions, args[0])
 	if err != nil {
 		return err
 	}
 
-	msgs, err := messages.List(ctx, sess.ID)
+	msgs, err := svc.messages.List(ctx, sess.ID)
 	if err != nil {
 		return fmt.Errorf("failed to list messages: %w", err)
 	}
@@ -261,32 +262,18 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 }
 
 func runSessionDelete(cmd *cobra.Command, args []string) error {
-	dataDir, _ := cmd.Flags().GetString("data-dir")
-	ctx := cmd.Context()
-
-	if dataDir == "" {
-		cfg, err := config.Init("", "", false)
-		if err != nil {
-			return fmt.Errorf("failed to initialize config: %w", err)
-		}
-		dataDir = cfg.Options.DataDirectory
-	}
-
-	conn, err := db.Connect(ctx, dataDir)
+	ctx, svc, cleanup, err := sessionSetup(cmd)
 	if err != nil {
-		return fmt.Errorf("failed to connect to database: %w", err)
+		return err
 	}
-	defer conn.Close()
+	defer cleanup()
 
-	queries := db.New(conn)
-	sessions := session.NewService(queries, conn)
-
-	sess, err := resolveSessionID(ctx, sessions, args[0])
+	sess, err := resolveSessionID(ctx, svc.sessions, args[0])
 	if err != nil {
 		return err
 	}
 
-	if err := sessions.Delete(ctx, sess.ID); err != nil {
+	if err := svc.sessions.Delete(ctx, sess.ID); err != nil {
 		return fmt.Errorf("failed to delete session: %w", err)
 	}
 
@@ -307,33 +294,19 @@ func runSessionDelete(cmd *cobra.Command, args []string) error {
 }
 
 func runSessionRename(cmd *cobra.Command, args []string) error {
-	dataDir, _ := cmd.Flags().GetString("data-dir")
-	ctx := cmd.Context()
-
-	if dataDir == "" {
-		cfg, err := config.Init("", "", false)
-		if err != nil {
-			return fmt.Errorf("failed to initialize config: %w", err)
-		}
-		dataDir = cfg.Options.DataDirectory
-	}
-
-	conn, err := db.Connect(ctx, dataDir)
+	ctx, svc, cleanup, err := sessionSetup(cmd)
 	if err != nil {
-		return fmt.Errorf("failed to connect to database: %w", err)
+		return err
 	}
-	defer conn.Close()
+	defer cleanup()
 
-	queries := db.New(conn)
-	sessions := session.NewService(queries, conn)
-
-	sess, err := resolveSessionID(ctx, sessions, args[0])
+	sess, err := resolveSessionID(ctx, svc.sessions, args[0])
 	if err != nil {
 		return err
 	}
 
 	newTitle := strings.Join(args[1:], " ")
-	if err := sessions.Rename(ctx, sess.ID, newTitle); err != nil {
+	if err := svc.sessions.Rename(ctx, sess.ID, newTitle); err != nil {
 		return fmt.Errorf("failed to rename session: %w", err)
 	}
 
@@ -354,28 +327,13 @@ func runSessionRename(cmd *cobra.Command, args []string) error {
 }
 
 func runSessionLast(cmd *cobra.Command, _ []string) error {
-	dataDir, _ := cmd.Flags().GetString("data-dir")
-	ctx := cmd.Context()
-
-	if dataDir == "" {
-		cfg, err := config.Init("", "", false)
-		if err != nil {
-			return fmt.Errorf("failed to initialize config: %w", err)
-		}
-		dataDir = cfg.Options.DataDirectory
-	}
-
-	conn, err := db.Connect(ctx, dataDir)
+	ctx, svc, cleanup, err := sessionSetup(cmd)
 	if err != nil {
-		return fmt.Errorf("failed to connect to database: %w", err)
+		return err
 	}
-	defer conn.Close()
+	defer cleanup()
 
-	queries := db.New(conn)
-	sessions := session.NewService(queries, conn)
-	messages := message.NewService(queries)
-
-	list, err := sessions.List(ctx)
+	list, err := svc.sessions.List(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to list sessions: %w", err)
 	}
@@ -386,7 +344,7 @@ func runSessionLast(cmd *cobra.Command, _ []string) error {
 
 	sess := list[0]
 
-	msgs, err := messages.List(ctx, sess.ID)
+	msgs, err := svc.messages.List(ctx, sess.ID)
 	if err != nil {
 		return fmt.Errorf("failed to list messages: %w", err)
 	}
@@ -521,6 +479,7 @@ func sessionWriter(contentHeight int) (io.Writer, func(), bool) {
 		return colorprofile.NewWriter(os.Stdout, os.Environ()), func() {}, false
 	}
 
+	// Detect color profile from stderr since stdout is piped to the pager.
 	profile := colorprofile.Detect(os.Stderr, os.Environ())
 
 	pager := os.Getenv("PAGER")
@@ -543,12 +502,12 @@ func sessionWriter(contentHeight int) (io.Writer, func(), bool) {
 	}
 
 	return &colorprofile.Writer{
-		Forward: pipe,
-		Profile: profile,
-	}, func() {
-		pipe.Close()
-		_ = cmd.Wait()
-	}, true
+			Forward: pipe,
+			Profile: profile,
+		}, func() {
+			pipe.Close()
+			_ = cmd.Wait()
+		}, true
 }
 
 type sessionShowMeta struct {

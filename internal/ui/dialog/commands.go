@@ -426,6 +426,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	if c.windowWidth >= sidebarCompactModeBreakpoint && c.hasSession {
 		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_sidebar", "Toggle Sidebar", "", ActionToggleCompactMode{}))
 	}
+	commands = append(commands, NewCommandItem(c.com.Styles, "toggle_status_bar", "Toggle Status Bar", "", ActionToggleStatusBar{}))
 	if c.hasSession {
 		cfg := c.com.Config()
 		agentCfg := cfg.Agents[config.AgentCoder]

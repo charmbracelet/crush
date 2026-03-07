@@ -200,6 +200,7 @@ type LSPConfig struct {
 type TUIOptions struct {
 	CompactMode bool   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
 	DiffMode    string `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
+	HideStatus  bool   `json:"hide_status,omitempty" jsonschema:"description=Hide the status bar (help keybindings and notifications) at the bottom of the TUI,default=false"`
 	// Here we can add themes later or any TUI related options
 	//
 
@@ -477,6 +478,14 @@ func (c *Config) SetCompactMode(enabled bool) error {
 	}
 	c.Options.TUI.CompactMode = enabled
 	return c.SetConfigField("options.tui.compact_mode", enabled)
+}
+
+func (c *Config) SetHideStatus(enabled bool) error {
+	if c.Options == nil {
+		c.Options = &Options{}
+	}
+	c.Options.TUI.HideStatus = enabled
+	return c.SetConfigField("options.tui.hide_status", enabled)
 }
 
 func (c *Config) Resolve(key string) (string, error) {

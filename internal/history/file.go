@@ -55,26 +55,39 @@ func NewService(q *db.Queries, db *sql.DB) Service {
 	}
 }
 
+// Create delegates to CreateVersion so that version numbers are always
+// determined from the current session state. Previously Create always
+// inserted version 0, which caused UNIQUE constraint violations when
+// a file was tracked more than once in the same session (e.g. after
+// the new_session tool starts a fresh session that re-edits the same
+// files).
 func (s *service) Create(ctx context.Context, sessionID, path, content string) (File, error) {
-	return s.createWithVersion(ctx, sessionID, path, content, InitialVersion)
+	return s.CreateVersion(ctx, sessionID, path, content)
 }
 
 // CreateVersion creates a new version of a file with auto-incremented version
-// number. If no previous versions exist for the path, it creates the initial
-// version. The provided content is stored as the new version.
+// number. If no previous versions exist for the path in this session, it
+// creates the initial version (0). The provided content is stored as the new
+// version.
+//
+// Version numbers are scoped to the current session via
+// ListFilesByPathAndSession. The previous implementation used
+// ListFilesByPath (all sessions), which leaked version numbers across
+// sessions and caused UNIQUE constraint violations on
+// (path, session_id, version).
 func (s *service) CreateVersion(ctx context.Context, sessionID, path, content string) (File, error) {
-	// Get the latest version for this path
-	files, err := s.q.ListFilesByPath(ctx, path)
+	files, err := s.q.ListFilesByPathAndSession(ctx, db.ListFilesByPathAndSessionParams{
+		Path:      path,
+		SessionID: sessionID,
+	})
 	if err != nil {
 		return File{}, err
 	}
 
 	if len(files) == 0 {
-		// No previous versions, create initial
-		return s.Create(ctx, sessionID, path, content)
+		return s.createWithVersion(ctx, sessionID, path, content, InitialVersion)
 	}
 
-	// Get the latest version
 	latestFile := files[0] // Files are ordered by version DESC, created_at DESC
 	nextVersion := latestFile.Version + 1
 

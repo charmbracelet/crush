@@ -440,37 +440,39 @@ func outputSessionHuman(sess session.Session, msgs []*message.Message) error {
 	}
 	contentWidth := min(width, sessionMaxContentWidth)
 
-	// Estimate content height: header (4 lines) + blank lines between messages + message content
-	contentHeight := 5 + len(msgs)*3
-
-	w, cleanup := sessionWriter(contentHeight)
-	defer cleanup()
-
 	keyStyle := lipgloss.NewStyle().Foreground(charmtone.Damson)
 	valStyle := lipgloss.NewStyle().Foreground(charmtone.Malibu)
 
 	hash := session.HashID(sess.ID)
 	created := time.Unix(sess.CreatedAt, 0).Format("Mon Jan 2 15:04:05 2006 -0700")
 
-	fmt.Fprintln(w, keyStyle.Render("ID:    ")+valStyle.Render(hash))
-	fmt.Fprintln(w, keyStyle.Render("Title: ")+valStyle.Render(sess.Title))
-	fmt.Fprintln(w, keyStyle.Render("Date:  ")+valStyle.Render(created))
-	fmt.Fprintln(w)
+	// Render to buffer to determine actual height
+	var buf strings.Builder
+
+	fmt.Fprintln(&buf, keyStyle.Render("ID:    ")+valStyle.Render(hash))
+	fmt.Fprintln(&buf, keyStyle.Render("Title: ")+valStyle.Render(sess.Title))
+	fmt.Fprintln(&buf, keyStyle.Render("Date:  ")+valStyle.Render(created))
+	fmt.Fprintln(&buf)
 
 	first := true
 	for _, msg := range msgs {
 		items := chat.ExtractMessageItems(&sty, msg, toolResults)
 		for _, item := range items {
 			if !first {
-				fmt.Fprintln(w)
+				fmt.Fprintln(&buf)
 			}
 			first = false
-			fmt.Fprintln(w, item.Render(contentWidth))
+			fmt.Fprintln(&buf, item.Render(contentWidth))
 		}
 	}
-	fmt.Fprintln(w)
+	fmt.Fprintln(&buf)
 
-	return nil
+	contentHeight := strings.Count(buf.String(), "\n")
+	w, cleanup := sessionWriter(contentHeight)
+	defer cleanup()
+
+	_, err := io.WriteString(w, buf.String())
+	return err
 }
 
 // sessionWriter returns a writer and cleanup function based on content height.

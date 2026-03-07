@@ -206,7 +206,8 @@ SET
     title = ?,
     prompt_tokens = prompt_tokens + ?,
     completion_tokens = completion_tokens + ?,
-    cost = cost + ?
+    cost = cost + ?,
+    updated_at = strftime('%s', 'now')
 WHERE id = ?
 `
 

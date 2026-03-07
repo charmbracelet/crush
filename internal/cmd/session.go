@@ -198,13 +198,16 @@ func resolveSessionID(ctx context.Context, svc session.Service, id string) (sess
 
 	// Ambiguous - show matches like Git does
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "error: session ID '%s' is ambiguous. Matches:\n", id)
+	fmt.Fprintf(&sb, "session ID '%s' is ambiguous. Matches:\n\n", id)
 	for _, m := range matches {
 		hash := session.HashID(m.ID)
 		created := time.Unix(m.CreatedAt, 0).Format("2006-01-02")
-		fmt.Fprintf(&sb, "  %s... %q (created %s)\n", hash[:12], m.Title, created)
+		// Keep title on one line by replacing newlines with spaces, and truncate.
+		title := strings.ReplaceAll(m.Title, "\n", " ")
+		title = ansi.Truncate(title, 50, "…")
+		fmt.Fprintf(&sb, "  %s... %q (created %s)\n", hash[:12], title, created)
 	}
-	sb.WriteString("Use more characters or the full hash.\n")
+	sb.WriteString("\nUse more characters or the full hash")
 	return session.Session{}, fmt.Errorf("%s", sb.String())
 }
 

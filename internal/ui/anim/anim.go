@@ -75,6 +75,11 @@ type animCache struct {
 
 var animCacheMap = csync.NewMap[string, *animCache]()
 
+// ResetCache clears the animation frame cache, freeing all precomputed frames.
+func ResetCache() {
+	animCacheMap.Reset(make(map[string]*animCache))
+}
+
 // settingsHash creates a hash key for the settings to use for caching
 func settingsHash(opts Settings) string {
 	h := xxh3.New()

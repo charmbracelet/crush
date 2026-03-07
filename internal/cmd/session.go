@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
@@ -140,7 +141,9 @@ func runSessionList(cmd *cobra.Command, _ []string) error {
 	for _, s := range list {
 		hash := session.HashID(s.ID)[:7]
 		date := time.Unix(s.CreatedAt, 0).Format(time.RFC3339)
-		lipgloss.Println(hashStyle.Render(hash), dateStyle.Render(date), s.Title)
+		title := strings.ReplaceAll(s.Title, "\n", " ")
+		title = ansi.Truncate(title, 60, "…")
+		lipgloss.Println(hashStyle.Render(hash), dateStyle.Render(date), title)
 	}
 	return nil
 }

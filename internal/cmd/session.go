@@ -43,8 +43,9 @@ var (
 )
 
 var sessionListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List all sessions",
+	Use:     "list",
+	Aliases: []string{"ls"},
+	Short:   "List all sessions",
 	Long:  "List all sessions. Use --json for machine-readable output.",
 	RunE:  runSessionList,
 }

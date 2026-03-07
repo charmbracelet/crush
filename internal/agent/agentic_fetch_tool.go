@@ -182,6 +182,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				Sessions:             c.sessions,
 				Messages:             c.messages,
 				Tools:                fetchTools,
+				ModelSemaphore:       c.modelSemaphore,
 			})
 
 			return c.runSubAgent(ctx, subAgentParams{

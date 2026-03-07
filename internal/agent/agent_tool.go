@@ -37,6 +37,7 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 	if err != nil {
 		return nil, err
 	}
+
 	return fantasy.NewParallelAgentTool(
 		AgentToolName,
 		string(agentToolDescription),

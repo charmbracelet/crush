@@ -160,12 +160,22 @@ func runSessionList(cmd *cobra.Command, _ []string) error {
 	hashStyle := lipgloss.NewStyle().Foreground(charmtone.Malibu)
 	dateStyle := lipgloss.NewStyle().Foreground(charmtone.Damson)
 
+	width := sessionOutputWidth
+	if tw, _, err := term.GetSize(os.Stdout.Fd()); err == nil && tw > 0 {
+		width = tw
+	}
+	// 7 (hash) + 1 (space) + 25 (RFC3339 date) + 1 (space) = 34 chars prefix.
+	titleWidth := width - 34
+	if titleWidth < 10 {
+		titleWidth = 10
+	}
+
 	var writeErr error
 	for _, s := range list {
 		hash := session.HashID(s.ID)[:7]
 		date := time.Unix(s.CreatedAt, 0).Format(time.RFC3339)
 		title := strings.ReplaceAll(s.Title, "\n", " ")
-		title = ansi.Truncate(title, 60, "…")
+		title = ansi.Truncate(title, titleWidth, "…")
 		_, writeErr = fmt.Fprintln(w, hashStyle.Render(hash), dateStyle.Render(date), title)
 		if writeErr != nil {
 			break

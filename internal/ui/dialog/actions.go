@@ -79,6 +79,8 @@ type (
 		Arguments   []commands.Argument
 		Args        map[string]string // Actual argument values
 	}
+	// ActionReloadConfig is a message to reload configuration from disk.
+	ActionReloadConfig struct{}
 )
 
 // Messages for API key input dialog.

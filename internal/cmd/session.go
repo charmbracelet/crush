@@ -3,12 +3,14 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"charm.land/lipgloss/v2"
@@ -134,20 +136,27 @@ func runSessionList(cmd *cobra.Command, _ []string) error {
 		return enc.Encode(output)
 	}
 
-	w, cleanup := sessionWriter(len(list))
+	w, cleanup, usingPager := sessionWriter(len(list))
 	defer cleanup()
 
 	hashStyle := lipgloss.NewStyle().Foreground(charmtone.Malibu)
 	dateStyle := lipgloss.NewStyle().Foreground(charmtone.Damson)
 
+	var writeErr error
 	for _, s := range list {
 		hash := session.HashID(s.ID)[:7]
 		date := time.Unix(s.CreatedAt, 0).Format(time.RFC3339)
 		title := strings.ReplaceAll(s.Title, "\n", " ")
 		title = ansi.Truncate(title, 60, "…")
-		fmt.Fprintln(w, hashStyle.Render(hash), dateStyle.Render(date), title)
+		_, writeErr = fmt.Fprintln(w, hashStyle.Render(hash), dateStyle.Render(date), title)
+		if writeErr != nil {
+			break
+		}
 	}
-	return nil
+	if writeErr != nil && usingPager && isBrokenPipe(writeErr) {
+		return nil
+	}
+	return writeErr
 }
 
 type sessionJSON struct {
@@ -471,26 +480,44 @@ func outputSessionHuman(sess session.Session, msgs []*message.Message) error {
 	fmt.Fprintln(&buf)
 
 	contentHeight := strings.Count(buf.String(), "\n")
-	w, cleanup := sessionWriter(contentHeight)
+	w, cleanup, usingPager := sessionWriter(contentHeight)
 	defer cleanup()
 
 	_, err := io.WriteString(w, buf.String())
+	// Ignore broken pipe errors when using a pager. This happens when the user
+	// exits the pager early (e.g., pressing 'q' in less), which closes the pipe
+	// and causes subsequent writes to fail. These errors are expected user behavior.
+	if err != nil && usingPager && isBrokenPipe(err) {
+		return nil
+	}
 	return err
 }
 
-// sessionWriter returns a writer and cleanup function based on content height.
+func isBrokenPipe(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Check for syscall.EPIPE (broken pipe)
+	if errors.Is(err, syscall.EPIPE) {
+		return true
+	}
+	// Also check for "broken pipe" in the error message
+	return strings.Contains(err.Error(), "broken pipe")
+}
+
+// sessionWriter returns a writer, cleanup function, and a bool indicating if a pager is used.
 // When the content fits within the terminal (or stdout is not a TTY), it returns
 // a colorprofile.Writer wrapping stdout. When content exceeds terminal height,
 // it starts a pager process (respecting $PAGER, defaulting to "less -R").
-func sessionWriter(contentHeight int) (io.Writer, func()) {
+func sessionWriter(contentHeight int) (io.Writer, func(), bool) {
 	// Use NewWriter which automatically detects TTY and strips ANSI when redirected
 	if runtime.GOOS == "windows" || !term.IsTerminal(os.Stdout.Fd()) {
-		return colorprofile.NewWriter(os.Stdout, os.Environ()), func() {}
+		return colorprofile.NewWriter(os.Stdout, os.Environ()), func() {}, false
 	}
 
 	_, termHeight, err := term.GetSize(os.Stdout.Fd())
 	if err != nil || contentHeight <= termHeight {
-		return colorprofile.NewWriter(os.Stdout, os.Environ()), func() {}
+		return colorprofile.NewWriter(os.Stdout, os.Environ()), func() {}, false
 	}
 
 	profile := colorprofile.Detect(os.Stderr, os.Environ())
@@ -507,11 +534,11 @@ func sessionWriter(contentHeight int) (io.Writer, func()) {
 
 	pipe, err := cmd.StdinPipe()
 	if err != nil {
-		return colorprofile.NewWriter(os.Stdout, os.Environ()), func() {}
+		return colorprofile.NewWriter(os.Stdout, os.Environ()), func() {}, false
 	}
 
 	if err := cmd.Start(); err != nil {
-		return colorprofile.NewWriter(os.Stdout, os.Environ()), func() {}
+		return colorprofile.NewWriter(os.Stdout, os.Environ()), func() {}, false
 	}
 
 	return &colorprofile.Writer{
@@ -520,7 +547,7 @@ func sessionWriter(contentHeight int) (io.Writer, func()) {
 	}, func() {
 		pipe.Close()
 		_ = cmd.Wait()
-	}
+	}, true
 }
 
 type sessionShowMeta struct {

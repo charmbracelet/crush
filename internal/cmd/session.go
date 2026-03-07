@@ -135,6 +135,9 @@ func runSessionList(cmd *cobra.Command, _ []string) error {
 		return enc.Encode(output)
 	}
 
+	w, cleanup := sessionPager()
+	defer cleanup()
+
 	hashStyle := lipgloss.NewStyle().Foreground(charmtone.Malibu)
 	dateStyle := lipgloss.NewStyle().Foreground(charmtone.Damson)
 
@@ -143,7 +146,7 @@ func runSessionList(cmd *cobra.Command, _ []string) error {
 		date := time.Unix(s.CreatedAt, 0).Format(time.RFC3339)
 		title := strings.ReplaceAll(s.Title, "\n", " ")
 		title = ansi.Truncate(title, 60, "…")
-		lipgloss.Println(hashStyle.Render(hash), dateStyle.Render(date), title)
+		fmt.Fprintln(w, hashStyle.Render(hash), dateStyle.Render(date), title)
 	}
 	return nil
 }
@@ -438,8 +441,7 @@ func outputSessionHuman(sess session.Session, msgs []*message.Message) error {
 	}
 	contentWidth := min(width, sessionMaxContentWidth)
 
-	profile := colorprofile.Detect(os.Stderr, os.Environ())
-	w, cleanup := sessionPager(profile)
+	w, cleanup := sessionPager()
 	defer cleanup()
 
 	keyStyle := lipgloss.NewStyle().Foreground(charmtone.Damson)
@@ -472,10 +474,13 @@ func outputSessionHuman(sess session.Session, msgs []*message.Message) error {
 // sessionPager returns a writer and cleanup function. When stdout is a TTY,
 // it starts a pager process (respecting $PAGER, defaulting to "less -R")
 // and returns a colorprofile.Writer that preserves ANSI colors through
-// the pipe. When stdout is not a TTY, it returns os.Stdout directly.
-func sessionPager(profile colorprofile.Profile) (io.Writer, func()) {
+// the pipe. When stdout is not a TTY, it returns a colorprofile.Writer
+// that automatically strips ANSI codes.
+func sessionPager() (io.Writer, func()) {
+	profile := colorprofile.Detect(os.Stderr, os.Environ())
+
 	if runtime.GOOS == "windows" || !term.IsTerminal(os.Stdout.Fd()) {
-		return os.Stdout, func() {}
+		return colorprofile.NewWriter(os.Stdout, os.Environ()), func() {}
 	}
 
 	pager := os.Getenv("PAGER")
@@ -490,19 +495,17 @@ func sessionPager(profile colorprofile.Profile) (io.Writer, func()) {
 
 	pipe, err := cmd.StdinPipe()
 	if err != nil {
-		return os.Stdout, func() {}
+		return colorprofile.NewWriter(os.Stdout, os.Environ()), func() {}
 	}
 
 	if err := cmd.Start(); err != nil {
-		return os.Stdout, func() {}
+		return colorprofile.NewWriter(os.Stdout, os.Environ()), func() {}
 	}
 
-	w := &colorprofile.Writer{
+	return &colorprofile.Writer{
 		Forward: pipe,
 		Profile: profile,
-	}
-
-	return w, func() {
+	}, func() {
 		pipe.Close()
 		_ = cmd.Wait()
 	}

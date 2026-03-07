@@ -154,7 +154,7 @@ func runSessionList(cmd *cobra.Command, _ []string) error {
 		return enc.Encode(output)
 	}
 
-	w, cleanup, usingPager := sessionWriter(len(list))
+	w, cleanup, usingPager := sessionWriter(ctx, len(list))
 	defer cleanup()
 
 	hashStyle := lipgloss.NewStyle().Foreground(charmtone.Malibu)
@@ -269,7 +269,7 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 	if sessionShowJSON {
 		return outputSessionJSON(cmd.OutOrStdout(), sess, msgPtrs)
 	}
-	return outputSessionHuman(sess, msgPtrs)
+	return outputSessionHuman(ctx, sess, msgPtrs)
 }
 
 func runSessionDelete(cmd *cobra.Command, args []string) error {
@@ -364,7 +364,7 @@ func runSessionLast(cmd *cobra.Command, _ []string) error {
 	if sessionLastJSON {
 		return outputSessionJSON(cmd.OutOrStdout(), sess, msgPtrs)
 	}
-	return outputSessionHuman(sess, msgPtrs)
+	return outputSessionHuman(ctx, sess, msgPtrs)
 }
 
 const (
@@ -412,7 +412,7 @@ func outputSessionJSON(w io.Writer, sess session.Session, msgs []*message.Messag
 	return enc.Encode(output)
 }
 
-func outputSessionHuman(sess session.Session, msgs []*message.Message) error {
+func outputSessionHuman(ctx context.Context, sess session.Session, msgs []*message.Message) error {
 	sty := styles.DefaultStyles()
 	toolResults := chat.BuildToolResultMap(msgs)
 
@@ -451,7 +451,7 @@ func outputSessionHuman(sess session.Session, msgs []*message.Message) error {
 	fmt.Fprintln(&buf)
 
 	contentHeight := strings.Count(buf.String(), "\n")
-	w, cleanup, usingPager := sessionWriter(contentHeight)
+	w, cleanup, usingPager := sessionWriter(ctx, contentHeight)
 	defer cleanup()
 
 	_, err := io.WriteString(w, buf.String())
@@ -480,7 +480,7 @@ func isBrokenPipe(err error) bool {
 // When the content fits within the terminal (or stdout is not a TTY), it returns
 // a colorprofile.Writer wrapping stdout. When content exceeds terminal height,
 // it starts a pager process (respecting $PAGER, defaulting to "less -R").
-func sessionWriter(contentHeight int) (io.Writer, func(), bool) {
+func sessionWriter(ctx context.Context, contentHeight int) (io.Writer, func(), bool) {
 	// Use NewWriter which automatically detects TTY and strips ANSI when redirected
 	if runtime.GOOS == "windows" || !term.IsTerminal(os.Stdout.Fd()) {
 		return colorprofile.NewWriter(os.Stdout, os.Environ()), func() {}, false
@@ -500,7 +500,7 @@ func sessionWriter(contentHeight int) (io.Writer, func(), bool) {
 	}
 
 	parts := strings.Fields(pager)
-	cmd := exec.Command(parts[0], parts[1:]...) //nolint:gosec
+	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...) //nolint:gosec
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 

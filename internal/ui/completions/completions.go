@@ -27,6 +27,7 @@ const (
 type SelectionMsg[T any] struct {
 	Value    T
 	KeepOpen bool // If true, insert without closing.
+	Continue bool // If true, update query and continue completing (Tab behavior).
 }
 
 // ClosedMsg is sent when the completions are closed.
@@ -217,14 +218,17 @@ func (c *Completions) Update(msg tea.KeyPressMsg) (tea.Msg, bool) {
 
 	case key.Matches(msg, c.keyMap.UpInsert):
 		c.selectPrev()
-		return c.selectCurrent(true), true
+		return c.selectCurrent(true, false), true
 
 	case key.Matches(msg, c.keyMap.DownInsert):
 		c.selectNext()
-		return c.selectCurrent(true), true
+		return c.selectCurrent(true, false), true
 
 	case key.Matches(msg, c.keyMap.Select):
-		return c.selectCurrent(false), true
+		return c.selectCurrent(false, false), true
+
+	case key.Matches(msg, c.keyMap.Continue):
+		return c.selectCurrent(true, true), true
 
 	case key.Matches(msg, c.keyMap.Cancel):
 		c.Close()
@@ -259,7 +263,7 @@ func (c *Completions) selectNext() {
 }
 
 // selectCurrent returns a command with the currently selected item.
-func (c *Completions) selectCurrent(keepOpen bool) tea.Msg {
+func (c *Completions) selectCurrent(keepOpen, continueMode bool) tea.Msg {
 	items := c.list.FilteredItems()
 	if len(items) == 0 {
 		return nil
@@ -284,11 +288,13 @@ func (c *Completions) selectCurrent(keepOpen bool) tea.Msg {
 		return SelectionMsg[ResourceCompletionValue]{
 			Value:    item,
 			KeepOpen: keepOpen,
+			Continue: continueMode,
 		}
 	case FileCompletionValue:
 		return SelectionMsg[FileCompletionValue]{
 			Value:    item,
 			KeepOpen: keepOpen,
+			Continue: continueMode,
 		}
 	default:
 		return nil

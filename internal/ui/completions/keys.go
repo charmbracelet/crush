@@ -9,7 +9,8 @@ type KeyMap struct {
 	Down,
 	Up,
 	Select,
-	Cancel key.Binding
+	Cancel,
+	Continue key.Binding
 	DownInsert,
 	UpInsert key.Binding
 }
@@ -26,8 +27,12 @@ func DefaultKeyMap() KeyMap {
 			key.WithHelp("up", "move up"),
 		),
 		Select: key.NewBinding(
-			key.WithKeys("enter", "tab", "ctrl+y"),
+			key.WithKeys("enter", "ctrl+y"),
 			key.WithHelp("enter", "select"),
+		),
+		Continue: key.NewBinding(
+			key.WithKeys("tab"),
+			key.WithHelp("tab", "complete & continue"),
 		),
 		Cancel: key.NewBinding(
 			key.WithKeys("esc", "alt+esc"),
@@ -50,6 +55,7 @@ func (k KeyMap) KeyBindings() []key.Binding {
 		k.Down,
 		k.Up,
 		k.Select,
+		k.Continue,
 		k.Cancel,
 	}
 }

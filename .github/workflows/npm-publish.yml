@@ -1,0 +1,119 @@
+# Publish npm packages with optionalDependencies pattern
+# This workflow runs after the main release workflow completes
+# It creates platform-specific npm packages with embedded binaries
+
+name: NPM Publish (optionalDependencies)
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g., 0.43.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build-npm-packages:
+    name: Build npm packages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          mkdir -p dist
+          
+          # Download all archive files
+          gh release download "v${VERSION}" \
+            --pattern "crush_${VERSION}_*.tar.gz" \
+            --pattern "crush_${VERSION}_*.zip" \
+            --dir dist \
+            --skip-existing || true
+          
+          ls -la dist/
+
+      - name: Build npm packages
+        run: |
+          chmod +x scripts/npm-optional-deps/build-npm-packages.sh
+          ./scripts/npm-optional-deps/build-npm-packages.sh "${{ steps.version.outputs.version }}" ./dist
+
+      - name: Upload npm packages as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-packages
+          path: dist/npm/*.tgz
+          retention-days: 7
+
+  publish-npm:
+    name: Publish to npm
+    needs: build-npm-packages
+    runs-on: ubuntu-latest
+    environment: npm
+    steps:
+      - name: Download npm packages
+        uses: actions/download-artifact@v4
+        with:
+          name: npm-packages
+          path: packages
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: List packages
+        run: ls -la packages/
+
+      - name: Publish platform packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          cd packages
+          
+          # Publish platform packages first
+          for pkg in charmland-crush-linux-*.tgz charmland-crush-darwin-*.tgz charmland-crush-win32-*.tgz; do
+            if [ -f "$pkg" ]; then
+              echo "Publishing $pkg..."
+              npm publish "$pkg" --access public || echo "Failed to publish $pkg (may already exist)"
+            fi
+          done
+
+      - name: Publish main package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          cd packages
+          
+          # Find and publish main package (the one without platform suffix)
+          for pkg in charmland-crush-[0-9]*.tgz; do
+            if [ -f "$pkg" ]; then
+              echo "Publishing main package: $pkg"
+              npm publish "$pkg" --access public
+            fi
+          done

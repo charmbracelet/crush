@@ -37,6 +37,7 @@ var sessionCmd = &cobra.Command{
 var (
 	sessionListJSON   bool
 	sessionShowJSON   bool
+	sessionLastJSON   bool
 	sessionDeleteJSON bool
 	sessionRenameJSON bool
 )
@@ -83,7 +84,7 @@ var sessionRenameCmd = &cobra.Command{
 func init() {
 	sessionListCmd.Flags().BoolVar(&sessionListJSON, "json", false, "output in JSON format")
 	sessionShowCmd.Flags().BoolVar(&sessionShowJSON, "json", false, "output in JSON format")
-	sessionLastCmd.Flags().BoolVar(&sessionShowJSON, "json", false, "output in JSON format")
+	sessionLastCmd.Flags().BoolVar(&sessionLastJSON, "json", false, "output in JSON format")
 	sessionDeleteCmd.Flags().BoolVar(&sessionDeleteJSON, "json", false, "output in JSON format")
 	sessionRenameCmd.Flags().BoolVar(&sessionRenameJSON, "json", false, "output in JSON format")
 	sessionCmd.AddCommand(sessionListCmd)
@@ -391,7 +392,7 @@ func runSessionLast(cmd *cobra.Command, _ []string) error {
 	}
 
 	msgPtrs := messagePtrs(msgs)
-	if sessionShowJSON {
+	if sessionLastJSON {
 		return outputSessionJSON(cmd.OutOrStdout(), sess, msgPtrs)
 	}
 	return outputSessionHuman(sess, msgPtrs)

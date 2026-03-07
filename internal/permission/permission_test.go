@@ -80,21 +80,50 @@ func TestPermissionService_AllowedCommands(t *testing.T) {
 }
 
 func TestPermissionService_SkipMode(t *testing.T) {
-	service := NewPermissionService("/tmp", true, []string{})
+	t.Run("skip mode auto-approves non-dangerous commands", func(t *testing.T) {
+		service := NewPermissionService("/tmp", true, []string{})
 
-	result, err := service.Request(t.Context(), CreatePermissionRequest{
-		SessionID:   "test-session",
-		ToolName:    "bash",
-		Action:      "execute",
-		Description: "test command",
-		Path:        "/tmp",
+		result, err := service.Request(t.Context(), CreatePermissionRequest{
+			SessionID:   "test-session",
+			ToolName:    "bash",
+			Action:      "execute",
+			Description: "test command",
+			Path:        "/tmp",
+			Dangerous:   false,
+		})
+		require.NoError(t, err)
+		assert.True(t, result, "expected permission to be granted in skip mode")
 	})
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-	if !result {
-		t.Error("expected permission to be granted in skip mode")
-	}
+
+	t.Run("skip mode prompts for dangerous commands", func(t *testing.T) {
+		service := NewPermissionService("/tmp", true, []string{})
+
+		done := make(chan struct{})
+		go func() {
+			result, err := service.Request(t.Context(), CreatePermissionRequest{
+				SessionID:   "test-session",
+				ToolCallID:  "test-call",
+				ToolName:    "bash",
+				Action:      "execute",
+				Description: "dangerous command",
+				Path:        "/tmp",
+				Dangerous:   true,
+			})
+			require.NoError(t, err)
+			assert.True(t, result)
+			close(done)
+		}()
+
+		// Wait for permission request to be published
+		events := service.Subscribe(t.Context())
+		event := <-events
+		assert.Equal(t, "bash", event.Payload.ToolName)
+		assert.True(t, event.Payload.Dangerous)
+
+		// Grant the permission
+		service.Grant(event.Payload)
+		<-done
+	})
 }
 
 func TestPermissionService_SequentialProperties(t *testing.T) {

@@ -186,6 +186,12 @@ func blockFuncs() []shell.BlockFunc {
 	}
 }
 
+// isDangerousCommand checks if a command is considered dangerous and requires
+// explicit user approval even in YOLO mode.
+func isDangerousCommand(command string) bool {
+	return shell.IsCommandBlocked(command, blockFuncs())
+}
+
 func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelName string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		BashToolName,
@@ -215,6 +221,9 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for executing shell command")
 			}
 			if !isSafeReadOnly {
+				// Check if the command is dangerous
+				isDangerous := isDangerousCommand(params.Command)
+
 				p, err := permissions.Request(ctx,
 					permission.CreatePermissionRequest{
 						SessionID:   sessionID,
@@ -224,6 +233,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 						Action:      "execute",
 						Description: fmt.Sprintf("Execute command: %s", params.Command),
 						Params:      BashPermissionsParams(params),
+						Dangerous:   isDangerous,
 					},
 				)
 				if err != nil {
@@ -240,7 +250,8 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				bgManager := shell.GetBackgroundShellManager()
 				bgManager.Cleanup()
 				// Use background context so it continues after tool returns
-				bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), params.Command, params.Description)
+				// No block functions - permission check handles dangerous commands
+				bgShell, err := bgManager.Start(context.Background(), execWorkingDir, nil, params.Command, params.Description)
 				if err != nil {
 					return fantasy.ToolResponse{}, fmt.Errorf("error starting background shell: %w", err)
 				}
@@ -295,7 +306,8 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			// Start with detached context so it can survive if moved to background
 			bgManager := shell.GetBackgroundShellManager()
 			bgManager.Cleanup()
-			bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), params.Command, params.Description)
+			// No block functions - permission check handles dangerous commands
+			bgShell, err := bgManager.Start(context.Background(), execWorkingDir, nil, params.Command, params.Description)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error starting shell: %w", err)
 			}

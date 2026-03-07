@@ -117,9 +117,8 @@ func runSessionList(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("failed to list sessions: %w", err)
 	}
 
-	out := cmd.OutOrStdout()
-
 	if sessionListJSON {
+		out := cmd.OutOrStdout()
 		output := make([]sessionJSON, len(list))
 		for i, s := range list {
 			output[i] = sessionJSON{
@@ -135,7 +134,7 @@ func runSessionList(cmd *cobra.Command, _ []string) error {
 		return enc.Encode(output)
 	}
 
-	w, cleanup := sessionPager()
+	w, cleanup := sessionWriter(len(list))
 	defer cleanup()
 
 	hashStyle := lipgloss.NewStyle().Foreground(charmtone.Malibu)
@@ -441,7 +440,10 @@ func outputSessionHuman(sess session.Session, msgs []*message.Message) error {
 	}
 	contentWidth := min(width, sessionMaxContentWidth)
 
-	w, cleanup := sessionPager()
+	// Estimate content height: header (4 lines) + blank lines between messages + message content
+	contentHeight := 5 + len(msgs)*3
+
+	w, cleanup := sessionWriter(contentHeight)
 	defer cleanup()
 
 	keyStyle := lipgloss.NewStyle().Foreground(charmtone.Damson)
@@ -471,17 +473,22 @@ func outputSessionHuman(sess session.Session, msgs []*message.Message) error {
 	return nil
 }
 
-// sessionPager returns a writer and cleanup function. When stdout is a TTY,
-// it starts a pager process (respecting $PAGER, defaulting to "less -R")
-// and returns a colorprofile.Writer that preserves ANSI colors through
-// the pipe. When stdout is not a TTY, it returns a colorprofile.Writer
-// that automatically strips ANSI codes.
-func sessionPager() (io.Writer, func()) {
-	profile := colorprofile.Detect(os.Stderr, os.Environ())
-
+// sessionWriter returns a writer and cleanup function based on content height.
+// When the content fits within the terminal (or stdout is not a TTY), it returns
+// a colorprofile.Writer wrapping stdout. When content exceeds terminal height,
+// it starts a pager process (respecting $PAGER, defaulting to "less -R").
+func sessionWriter(contentHeight int) (io.Writer, func()) {
+	// Use NewWriter which automatically detects TTY and strips ANSI when redirected
 	if runtime.GOOS == "windows" || !term.IsTerminal(os.Stdout.Fd()) {
 		return colorprofile.NewWriter(os.Stdout, os.Environ()), func() {}
 	}
+
+	_, termHeight, err := term.GetSize(os.Stdout.Fd())
+	if err != nil || contentHeight <= termHeight {
+		return colorprofile.NewWriter(os.Stdout, os.Environ()), func() {}
+	}
+
+	profile := colorprofile.Detect(os.Stderr, os.Environ())
 
 	pager := os.Getenv("PAGER")
 	if pager == "" {

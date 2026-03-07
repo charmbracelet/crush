@@ -160,10 +160,16 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 					content = "<html>\n<body>\n" + body + "\n</body>\n</html>"
 				}
 			}
+			// maxFetchContentSize is the maximum size of content to return
+			// (200KB). This limit ensures content fits within model context
+			// windows. 200KB is about 50K tokens, which should leave more room
+			// for system prompts and conversation history.
+			const maxFetchContentSize = 200 * 1024
+
 			// truncate content if it exceeds max read size
-			if int64(len(content)) > MaxReadSize {
-				content = content[:MaxReadSize]
-				content += fmt.Sprintf("\n\n[Content truncated to %d bytes]", MaxReadSize)
+			if len(content) > maxFetchContentSize {
+				content = content[:maxFetchContentSize]
+				content += fmt.Sprintf("\n\n[Content truncated to %d bytes. The original page was larger: consider using agentic_fetch for large pages.]", maxFetchContentSize)
 			}
 
 			return fantasy.NewTextResponse(content), nil

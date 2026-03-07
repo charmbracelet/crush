@@ -2,7 +2,9 @@ package session
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -21,6 +23,12 @@ const (
 	TodoStatusInProgress TodoStatus = "in_progress"
 	TodoStatusCompleted  TodoStatus = "completed"
 )
+
+// HashID returns the SHA-256 hash of a session ID (UUID) as a hex string.
+func HashID(id string) string {
+	h := sha256.Sum256([]byte(id))
+	return hex.EncodeToString(h[:])
+}
 
 type Todo struct {
 	Content    string     `json:"content"`
@@ -61,6 +69,7 @@ type Service interface {
 	List(ctx context.Context) ([]Session, error)
 	Save(ctx context.Context, session Session) (Session, error)
 	UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error
+	Rename(ctx context.Context, id string, title string) error
 	Delete(ctx context.Context, id string) error
 
 	// Agent tool session management
@@ -195,6 +204,17 @@ func (s *service) UpdateTitleAndUsage(ctx context.Context, sessionID, title stri
 		PromptTokens:     promptTokens,
 		CompletionTokens: completionTokens,
 		Cost:             cost,
+	})
+}
+
+// Rename updates only the title of a session.
+func (s *service) Rename(ctx context.Context, id string, title string) error {
+	return s.q.UpdateSessionTitleAndUsage(ctx, db.UpdateSessionTitleAndUsageParams{
+		ID:               id,
+		Title:            title,
+		PromptTokens:     0,
+		CompletionTokens: 0,
+		Cost:             0,
 	})
 }
 

@@ -47,6 +47,7 @@ func init() {
 		schemaCmd,
 		loginCmd,
 		statsCmd,
+		sessionCmd,
 	)
 }
 

@@ -46,8 +46,8 @@ var sessionListCmd = &cobra.Command{
 	Use:     "list",
 	Aliases: []string{"ls"},
 	Short:   "List all sessions",
-	Long:  "List all sessions. Use --json for machine-readable output.",
-	RunE:  runSessionList,
+	Long:    "List all sessions. Use --json for machine-readable output.",
+	RunE:    runSessionList,
 }
 
 var sessionShowCmd = &cobra.Command{
@@ -61,7 +61,7 @@ var sessionShowCmd = &cobra.Command{
 var sessionLastCmd = &cobra.Command{
 	Use:   "last",
 	Short: "Show most recent session",
-	Long:  "Show the most recently modified session. Use --json for machine-readable output.",
+	Long:  "Show the last updated session. Use --json for machine-readable output.",
 	RunE:  runSessionLast,
 }
 
@@ -235,7 +235,7 @@ func resolveSessionID(ctx context.Context, svc session.Service, id string) (sess
 		fmt.Fprintf(&sb, "  %s... %q (created %s)\n", hash[:12], title, created)
 	}
 	sb.WriteString("\nUse more characters or the full hash")
-	return session.Session{}, fmt.Errorf("%s", sb.String())
+	return session.Session{}, errors.New(sb.String())
 }
 
 func runSessionShow(cmd *cobra.Command, args []string) error {
@@ -415,7 +415,7 @@ func outputSessionHuman(sess session.Session, msgs []*message.Message) error {
 	keyStyle := lipgloss.NewStyle().Foreground(charmtone.Damson)
 	valStyle := lipgloss.NewStyle().Foreground(charmtone.Malibu)
 
-	hash := session.HashID(sess.ID)
+	hash := session.HashID(sess.ID)[:12]
 	created := time.Unix(sess.CreatedAt, 0).Format("Mon Jan 2 15:04:05 2006 -0700")
 
 	// Render to buffer to determine actual height
@@ -614,6 +614,10 @@ func convertParts(parts []message.ContentPart) []sessionShowPart {
 				Type:   "finish",
 				Reason: string(p.Reason),
 				Time:   p.Time,
+			})
+		default:
+			result = append(result, sessionShowPart{
+				Type: "unknown",
 			})
 		}
 	}

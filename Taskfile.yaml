@@ -49,6 +49,8 @@ tasks:
     sources:
       - ./**/*.go
       - go.mod
+      - internal/agent/**/*.md
+      - internal/agent/**/*.md.tpl
     generates:
       - crush{{exeExt}}
 
@@ -120,6 +122,8 @@ tasks:
     sources:
       - ./**/*.go
       - go.mod
+      - internal/agent/**/*.md
+      - internal/agent/**/*.md.tpl
 
   profile:cpu:
     desc: 10s CPU profile

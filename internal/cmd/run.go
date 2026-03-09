@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"charm.land/log/v2"
+	crushapp "github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/spf13/cobra"
 )
@@ -33,12 +35,23 @@ crush run --quiet "Generate a README for this project"
 
 # Run in verbose mode
 crush run --verbose "Generate a README for this project"
-  `,
+
+# Run with JSON output (includes session_id for resuming)
+crush run --output-format json "Explain this code"
+
+# Continue an existing session
+crush run --session <session-id> "Continue from where we left off"
+
+# Run in headless mode (skip all permission prompts)
+crush run --dangerously-skip-permissions "Fix the bug in main.go"
+`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		quiet, _ := cmd.Flags().GetBool("quiet")
 		verbose, _ := cmd.Flags().GetBool("verbose")
 		largeModel, _ := cmd.Flags().GetString("model")
 		smallModel, _ := cmd.Flags().GetString("small-model")
+		sessionID, _ := cmd.Flags().GetString("session")
+		outputFormat, _ := cmd.Flags().GetString("output-format")
 
 		// Cancel on SIGINT or SIGTERM.
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
@@ -73,7 +86,35 @@ crush run --verbose "Generate a README for this project"
 		event.SetNonInteractive(true)
 		event.AppInitialized()
 
-		return app.RunNonInteractive(ctx, os.Stdout, prompt, largeModel, smallModel, quiet || verbose)
+		opts := crushapp.RunOptions{
+			Prompt:       prompt,
+			LargeModel:   largeModel,
+			SmallModel:   smallModel,
+			SessionID:    sessionID,
+			HideSpinner:  quiet || verbose,
+			OutputFormat: crushapp.OutputFormat(outputFormat),
+		}
+
+		result, err := app.RunNonInteractive(ctx, os.Stdout, opts)
+		if err != nil {
+			return err
+		}
+
+		// If JSON output format, print the result as JSON.
+		if opts.OutputFormat == crushapp.OutputFormatJSON {
+			output := struct {
+				SessionID string `json:"session_id"`
+				Result    string `json:"result"`
+			}{
+				SessionID: result.SessionID,
+				Result:    result.Content,
+			}
+			encoder := json.NewEncoder(os.Stdout)
+			encoder.SetEscapeHTML(false)
+			return encoder.Encode(output)
+		}
+
+		return nil
 	},
 	PostRun: func(cmd *cobra.Command, args []string) {
 		event.AppExited()
@@ -85,4 +126,6 @@ func init() {
 	runCmd.Flags().BoolP("verbose", "v", false, "Show logs")
 	runCmd.Flags().StringP("model", "m", "", "Model to use. Accepts 'model' or 'provider/model' to disambiguate models with the same name across providers")
 	runCmd.Flags().String("small-model", "", "Small model to use. If not provided, uses the default small model for the provider")
+	runCmd.Flags().StringP("session", "s", "", "Session ID to continue an existing conversation")
+	runCmd.Flags().StringP("output-format", "o", "text", "Output format: 'text' or 'json'. JSON includes session_id for resuming.")
 }

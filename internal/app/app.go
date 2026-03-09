@@ -49,6 +49,30 @@ type UpdateAvailableMsg struct {
 	IsDevelopment  bool
 }
 
+// OutputFormat controls how non-interactive output is formatted.
+type OutputFormat string
+
+const (
+	OutputFormatText OutputFormat = "text"
+	OutputFormatJSON OutputFormat = "json"
+)
+
+// RunOptions configures a non-interactive run.
+type RunOptions struct {
+	Prompt       string
+	LargeModel   string
+	SmallModel   string
+	SessionID    string
+	HideSpinner  bool
+	OutputFormat OutputFormat
+}
+
+// RunResult contains the result of a non-interactive run.
+type RunResult struct {
+	SessionID string
+	Content   string
+}
+
 type App struct {
 	Sessions    session.Service
 	Messages    message.Service
@@ -144,16 +168,17 @@ func (app *App) Config() *config.Config {
 }
 
 // RunNonInteractive runs the application in non-interactive mode with the
-// given prompt, printing to stdout.
-func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt, largeModel, smallModel string, hideSpinner bool) error {
+// given options, returning the session ID and content. If sessionID is provided,
+// it continues an existing session instead of creating a new one.
+func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, opts RunOptions) (RunResult, error) {
 	slog.Info("Running in non-interactive mode")
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	if largeModel != "" || smallModel != "" {
-		if err := app.overrideModelsForNonInteractive(ctx, largeModel, smallModel); err != nil {
-			return fmt.Errorf("failed to override models: %w", err)
+	if opts.LargeModel != "" || opts.SmallModel != "" {
+		if err := app.overrideModelsForNonInteractive(ctx, opts.LargeModel, opts.SmallModel); err != nil {
+			return RunResult{}, fmt.Errorf("failed to override models: %w", err)
 		}
 	}
 
@@ -172,7 +197,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	stdinTTY = term.IsTerminal(os.Stdin.Fd())
 	progress = app.config.Options.Progress == nil || *app.config.Options.Progress
 
-	if !hideSpinner && stderrTTY {
+	if !opts.HideSpinner && stderrTTY {
 		t := styles.DefaultStyles()
 
 		// Detect background color to set the appropriate color for the
@@ -197,7 +222,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 
 	// Helper function to stop spinner once.
 	stopSpinner := func() {
-		if !hideSpinner && spinner != nil {
+		if !opts.HideSpinner && spinner != nil {
 			spinner.Stop()
 			spinner = nil
 		}
@@ -205,7 +230,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 
 	// Wait for MCP initialization to complete before reading MCP tools.
 	if err := mcp.WaitForInit(ctx); err != nil {
-		return fmt.Errorf("failed to wait for MCP initialization: %w", err)
+		return RunResult{}, fmt.Errorf("failed to wait for MCP initialization: %w", err)
 	}
 
 	// force update of agent models before running so mcp tools are loaded
@@ -213,22 +238,35 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 
 	defer stopSpinner()
 
-	const maxPromptLengthForTitle = 100
-	const titlePrefix = "Non-interactive: "
-	var titleSuffix string
+	var sess session.Session
+	var err error
 
-	if len(prompt) > maxPromptLengthForTitle {
-		titleSuffix = prompt[:maxPromptLengthForTitle] + "..."
+	if opts.SessionID != "" {
+		// Continue an existing session.
+		sess, err = app.Sessions.Get(ctx, opts.SessionID)
+		if err != nil {
+			return RunResult{}, fmt.Errorf("failed to get session %s: %w", opts.SessionID, err)
+		}
+		slog.Info("Continuing existing session", "session_id", sess.ID)
 	} else {
-		titleSuffix = prompt
-	}
-	title := titlePrefix + titleSuffix
+		// Create a new session.
+		const maxPromptLengthForTitle = 100
+		const titlePrefix = "Non-interactive: "
+		var titleSuffix string
 
-	sess, err := app.Sessions.Create(ctx, title)
-	if err != nil {
-		return fmt.Errorf("failed to create session for non-interactive mode: %w", err)
+		if len(opts.Prompt) > maxPromptLengthForTitle {
+			titleSuffix = opts.Prompt[:maxPromptLengthForTitle] + "..."
+		} else {
+			titleSuffix = opts.Prompt
+		}
+		title := titlePrefix + titleSuffix
+
+		sess, err = app.Sessions.Create(ctx, title)
+		if err != nil {
+			return RunResult{}, fmt.Errorf("failed to create session for non-interactive mode: %w", err)
+		}
+		slog.Info("Created session for non-interactive run", "session_id", sess.ID)
 	}
-	slog.Info("Created session for non-interactive run", "session_id", sess.ID)
 
 	// Automatically approve all permission requests for this non-interactive
 	// session.
@@ -250,11 +288,14 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 		done <- response{
 			result: result,
 		}
-	}(ctx, sess.ID, prompt)
+	}(ctx, sess.ID, opts.Prompt)
 
 	messageEvents := app.Messages.Subscribe(ctx)
 	messageReadBytes := make(map[string]int)
 	var printed bool
+
+	// Track content for JSON output
+	var contentBuilder strings.Builder
 
 	defer func() {
 		if progress && stderrTTY {
@@ -263,7 +304,10 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 
 		// Always print a newline at the end. If output is a TTY this will
 		// prevent the prompt from overwriting the last line of output.
-		_, _ = fmt.Fprintln(output)
+		// Skip for JSON output format.
+		if opts.OutputFormat != OutputFormatJSON {
+			_, _ = fmt.Fprintln(output)
+		}
 	}()
 
 	for {
@@ -279,11 +323,11 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 			if result.err != nil {
 				if errors.Is(result.err, context.Canceled) || errors.Is(result.err, agent.ErrRequestCancelled) {
 					slog.Debug("Non-interactive: agent processing cancelled", "session_id", sess.ID)
-					return nil
+					return RunResult{SessionID: sess.ID, Content: contentBuilder.String()}, nil
 				}
-				return fmt.Errorf("agent processing failed: %w", result.err)
+				return RunResult{}, fmt.Errorf("agent processing failed: %w", result.err)
 			}
-			return nil
+			return RunResult{SessionID: sess.ID, Content: contentBuilder.String()}, nil
 
 		case event := <-messageEvents:
 			msg := event.Payload
@@ -295,7 +339,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 
 				if len(content) < readBytes {
 					slog.Error("Non-interactive: message content is shorter than read bytes", "message_length", len(content), "read_bytes", readBytes)
-					return fmt.Errorf("message content is shorter than read bytes: %d < %d", len(content), readBytes)
+					return RunResult{}, fmt.Errorf("message content is shorter than read bytes: %d < %d", len(content), readBytes)
 				}
 
 				part := content[readBytes:]
@@ -307,14 +351,19 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 				// Ignore initial whitespace-only messages.
 				if printed || strings.TrimSpace(part) != "" {
 					printed = true
-					fmt.Fprint(output, part)
+					// Always track content for JSON output
+					contentBuilder.WriteString(part)
+					// Only print to output for text format
+					if opts.OutputFormat != OutputFormatJSON {
+						fmt.Fprint(output, part)
+					}
 				}
 				messageReadBytes[msg.ID] = len(content)
 			}
 
 		case <-ctx.Done():
 			stopSpinner()
-			return ctx.Err()
+			return RunResult{}, ctx.Err()
 		}
 	}
 }

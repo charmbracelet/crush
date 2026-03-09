@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/util"
+	"github.com/charmbracelet/crush/plugin"
 )
 
 // ActionClose is a message to close the current dialog.
@@ -78,6 +79,12 @@ type (
 		ClientID    string
 		Arguments   []commands.Argument
 		Args        map[string]string // Actual argument values
+	}
+	// ActionRunPluginCommand is a message to run a plugin command.
+	ActionRunPluginCommand struct {
+		Command   plugin.PluginCommand
+		Handler   plugin.PluginCommandHandler
+		PluginApp *plugin.App
 	}
 )
 

@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -49,11 +50,13 @@ type Commands struct {
 		Close key.Binding
 	}
 
-	sessionID  string
-	hasSession bool
-	hasTodos   bool
-	hasQueue   bool
-	selected   CommandType
+	sessionID    string
+	hasSession   bool
+	hasTodos     bool
+	hasQueue     bool
+	mode         session.CollaborationMode
+	proposedPlan string
+	selected     CommandType
 
 	spinner spinner.Model
 	loading bool
@@ -71,7 +74,7 @@ type Commands struct {
 var _ Dialog = (*Commands)(nil)
 
 // NewCommands creates a new commands dialog.
-func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, hasQueue bool, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) (*Commands, error) {
+func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, hasQueue bool, mode session.CollaborationMode, proposedPlan string, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) (*Commands, error) {
 	c := &Commands{
 		com:            com,
 		selected:       SystemCommands,
@@ -79,6 +82,8 @@ func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, has
 		hasSession:     hasSession,
 		hasTodos:       hasTodos,
 		hasQueue:       hasQueue,
+		mode:           mode,
+		proposedPlan:   proposedPlan,
 		customCommands: customCommands,
 		mcpPrompts:     mcpPrompts,
 	}
@@ -395,6 +400,16 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	// Only show compact command if there's an active session
 	if c.hasSession {
 		commands = append(commands, NewCommandItem(c.com.Styles, "summarize", "Summarize Session", "", ActionSummarize{SessionID: c.sessionID}))
+		if c.mode == session.CollaborationModePlan {
+			commands = append(commands, NewCommandItem(c.com.Styles, "toggle_plan_mode", "Exit Plan Mode", "", ActionTogglePlanMode{SessionID: c.sessionID, NextMode: session.CollaborationModeDefault}))
+			if strings.TrimSpace(c.proposedPlan) != "" {
+				commands = append(commands, NewCommandItem(c.com.Styles, "execute_proposed_plan", "Execute Proposed Plan", "", ActionExecuteProposedPlan{SessionID: c.sessionID, Plan: c.proposedPlan}))
+			}
+		} else {
+			commands = append(commands, NewCommandItem(c.com.Styles, "toggle_plan_mode", "Enter Plan Mode", "", ActionTogglePlanMode{SessionID: c.sessionID, NextMode: session.CollaborationModePlan}))
+		}
+	} else {
+		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_plan_mode", "Enter Plan Mode", "", ActionTogglePlanMode{NextMode: session.CollaborationModePlan}))
 	}
 
 	// Add reasoning toggle for models that support it

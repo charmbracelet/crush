@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/planmode"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -142,7 +143,11 @@ func (a *AssistantMessageItem) renderMessageContent(width int) string {
 		if thinking != "" {
 			messageParts = append(messageParts, "")
 		}
-		messageParts = append(messageParts, a.renderMarkdown(content, width))
+		if plan, ok := planmode.ExtractProposedPlan(content); ok {
+			messageParts = append(messageParts, a.renderPlan(plan, width))
+		} else {
+			messageParts = append(messageParts, a.renderMarkdown(content, width))
+		}
 	}
 
 	// finally add any finish reason info
@@ -208,6 +213,12 @@ func (a *AssistantMessageItem) renderMarkdown(content string, width int) string 
 		return content
 	}
 	return strings.TrimSuffix(result, "\n")
+}
+
+func (a *AssistantMessageItem) renderPlan(plan string, width int) string {
+	header := common.Section(a.sty, "Proposed Plan", width)
+	body := a.renderMarkdown(plan, width)
+	return strings.Join([]string{header, "", body}, "\n")
 }
 
 func (a *AssistantMessageItem) renderSpinning() string {

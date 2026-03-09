@@ -665,11 +665,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 
 	a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, openrouterCost)
 
-	// Just in case, get just the last usage info.
-	usage := resp.Response.Usage
 	currentSession.SummaryMessageID = summaryMessage.ID
-	currentSession.CompletionTokens = usage.OutputTokens
-	currentSession.PromptTokens = 0
 	_, err = a.sessions.Save(genCtx, currentSession)
 	return err
 }
@@ -875,7 +871,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		cost = *openrouterCost
 	}
 
-	promptTokens := resp.TotalUsage.InputTokens + resp.TotalUsage.CacheCreationTokens
+	promptTokens := promptTokensForUsage(resp.TotalUsage)
 	completionTokens := resp.TotalUsage.OutputTokens
 
 	// Atomically update only title and usage fields to avoid overriding other
@@ -900,6 +896,14 @@ func (a *sessionAgent) openrouterCost(metadata fantasy.ProviderMetadata) *float6
 	return &opts.Usage.Cost
 }
 
+func promptTokensForUsage(usage fantasy.Usage) int64 {
+	return usage.InputTokens + usage.CacheCreationTokens + usage.CacheReadTokens
+}
+
+func totalTokensForUsage(usage fantasy.Usage) int64 {
+	return promptTokensForUsage(usage) + usage.OutputTokens
+}
+
 func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session, usage fantasy.Usage, overrideCost *float64) {
 	modelConfig := model.CatwalkCfg
 	cost := modelConfig.CostPer1MInCached/1e6*float64(usage.CacheCreationTokens) +
@@ -915,8 +919,8 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 		session.Cost += cost
 	}
 
-	session.CompletionTokens = usage.OutputTokens
-	session.PromptTokens = usage.InputTokens + usage.CacheReadTokens
+	session.CompletionTokens += usage.OutputTokens
+	session.PromptTokens += promptTokensForUsage(usage)
 }
 
 func (a *sessionAgent) Cancel(sessionID string) {

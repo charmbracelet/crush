@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"slices"
+	"strings"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
@@ -14,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // ModelType represents the type of model to select.
@@ -70,6 +72,8 @@ const (
 const ModelsID = "models"
 
 const defaultModelsDialogMaxWidth = 73
+
+const modelSummaryContentHeight = 2
 
 // Models represents a model selection dialog.
 type Models struct {
@@ -130,15 +134,15 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 	)
 	m.keyMap.UpDown = key.NewBinding(
 		key.WithKeys("up", "down"),
-		key.WithHelp("↑/↓", "choose"),
+		key.WithHelp("up/down", "choose"),
 	)
 	m.keyMap.Next = key.NewBinding(
 		key.WithKeys("down", "ctrl+n"),
-		key.WithHelp("↓", "next item"),
+		key.WithHelp("down", "next item"),
 	)
 	m.keyMap.Previous = key.NewBinding(
 		key.WithKeys("up", "ctrl+p"),
-		key.WithHelp("↑", "previous item"),
+		key.WithHelp("up", "previous item"),
 	)
 	m.keyMap.Close = CloseKey
 
@@ -230,7 +234,11 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 
 // Cursor returns the cursor for the dialog.
 func (m *Models) Cursor() *tea.Cursor {
-	return InputCursor(m.com.Styles, m.input.Cursor())
+	cur := InputCursor(m.com.Styles, m.input.Cursor())
+	if cur != nil && !m.isOnboarding {
+		cur.Y += modelSummaryContentHeight
+	}
+	return cur
 }
 
 // modelTypeRadioView returns the radio view for model type selection.
@@ -253,6 +261,77 @@ func (m *Models) modelTypeRadioView() string {
 		smallRadio, textStyle.Render(ModelTypeSmall.String()))
 }
 
+func (m *Models) currentModelSummaryView(width int) string {
+	lines := []string{
+		m.currentModelSummaryLine(ModelTypeLarge, width),
+		m.currentModelSummaryLine(ModelTypeSmall, width),
+	}
+	return m.com.Styles.Dialog.SecondaryText.Width(width).Render(strings.Join(lines, "\n"))
+}
+
+func (m *Models) currentModelSummaryLine(modelType ModelType, width int) string {
+	t := m.com.Styles
+	radioStyle := t.RadioOff
+	labelStyle := t.HalfMuted
+	if m.modelType == modelType {
+		radioStyle = t.RadioOn
+		labelStyle = t.Base
+	}
+
+	line := fmt.Sprintf(
+		"%s%s: %s",
+		radioStyle.Padding(0, 1).Render(),
+		labelStyle.Render(modelType.String()),
+		t.Subtle.Render(m.selectedModelSummary(modelType)),
+	)
+	return ansi.Truncate(line, max(0, width), "")
+}
+
+func (m *Models) selectedModelSummary(modelType ModelType) string {
+	selectedModel := m.com.Config().Models[modelType.Config()]
+	if selectedModel.Model == "" && selectedModel.Provider == "" {
+		return "Not configured"
+	}
+
+	modelName, providerName := m.lookupSelectedModelDisplay(selectedModel.Provider, selectedModel.Model)
+	if providerName == "" {
+		return modelName
+	}
+	return fmt.Sprintf("%s | %s", modelName, providerName)
+}
+
+func (m *Models) lookupSelectedModelDisplay(providerID, modelID string) (string, string) {
+	if providerID == "" || modelID == "" {
+		return "Not configured", ""
+	}
+
+	if providerConfig, ok := m.com.Config().Providers.Get(providerID); ok {
+		providerName := cmp.Or(providerConfig.Name, providerID)
+		for _, model := range providerConfig.Models {
+			if model.ID == modelID {
+				return cmp.Or(model.Name, model.ID), providerName
+			}
+		}
+	}
+
+	for _, provider := range m.providers {
+		if string(provider.ID) != providerID {
+			continue
+		}
+
+		providerName := cmp.Or(string(provider.Name), providerID)
+		for _, model := range provider.Models {
+			if model.ID == modelID {
+				return cmp.Or(model.Name, model.ID), providerName
+			}
+		}
+
+		return modelID, providerName
+	}
+
+	return modelID, providerID
+}
+
 // Draw implements [Dialog].
 func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := m.com.Styles
@@ -263,6 +342,9 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
 		t.Dialog.HelpView.GetVerticalFrameSize() +
 		t.Dialog.View.GetVerticalFrameSize()
+	if !m.isOnboarding {
+		heightOffset += modelSummaryContentHeight
+	}
 
 	m.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding
 	m.list.SetSize(innerWidth, height-heightOffset)
@@ -270,11 +352,15 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Switch Model"
-	rc.TitleInfo = m.modelTypeRadioView()
+	rc.TitleInfo = ""
 
 	if m.isOnboarding {
 		titleText := t.Dialog.PrimaryText.Render("To start, let's choose a provider and model.")
 		rc.AddPart(titleText)
+	}
+
+	if !m.isOnboarding {
+		rc.AddPart(m.currentModelSummaryView(innerWidth))
 	}
 
 	inputView := t.Dialog.InputPrompt.Render(m.input.View())
@@ -390,7 +476,7 @@ func (m *Models) setProviderItems() error {
 
 			group := NewModelGroup(t, name, true)
 			for _, model := range p.Models {
-				item := NewModelItem(t, provider, model, m.modelType, false)
+				item := NewModelItem(t, provider, model, m.modelType, false, model.ID == currentModel.Model && string(provider.ID) == currentModel.Provider)
 				group.AppendItems(item)
 				itemsMap[item.ID()] = item
 				if model.ID == currentModel.Model && string(provider.ID) == currentModel.Provider {
@@ -455,7 +541,7 @@ func (m *Models) setProviderItems() error {
 
 		group := NewModelGroup(t, name, providerConfigured)
 		for _, model := range displayProvider.Models {
-			item := NewModelItem(t, provider, model, m.modelType, false)
+			item := NewModelItem(t, provider, model, m.modelType, false, model.ID == currentModel.Model && string(provider.ID) == currentModel.Provider)
 			group.AppendItems(item)
 			itemsMap[item.ID()] = item
 			if model.ID == currentModel.Model && string(provider.ID) == currentModel.Provider {
@@ -478,7 +564,7 @@ func (m *Models) setProviderItems() error {
 			}
 
 			// Show provider for recent items
-			item = NewModelItem(t, item.prov, item.model, m.modelType, true)
+			item = NewModelItem(t, item.prov, item.model, m.modelType, true, recent.Model == currentModel.Model && recent.Provider == currentModel.Provider)
 			item.showProvider = true
 
 			validRecentItems = append(validRecentItems, recent)

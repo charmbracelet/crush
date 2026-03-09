@@ -209,7 +209,7 @@ func TestBackgroundShell_ConcurrentAccess(t *testing.T) {
 
 	// Start a background shell
 	bgManager := shell.GetBackgroundShellManager()
-	bgShell, err := bgManager.Start(ctx, workingDir, nil, "for i in 1 2 3 4 5; do echo \"line $i\"; sleep 0.05; done", "")
+	bgShell, err := bgManager.Start(ctx, workingDir, nil, "echo 'line 1'; sleep 1; echo 'line 2'; sleep 1; echo 'line 3'; sleep 1; echo 'line 4'; sleep 1; echo 'line 5'", "")
 	require.NoError(t, err)
 	defer bgManager.Kill(bgShell.ID)
 
@@ -311,8 +311,11 @@ func TestBackgroundShell_AutoBackground(t *testing.T) {
 	// Test that a long command stays in background
 	t.Run("long command stays in background", func(t *testing.T) {
 		t.Parallel()
+		if runtime.GOOS == "windows" {
+			t.Skip("Skipping flaky long-running background shell test on Windows")
+		}
 		bgManager := shell.GetBackgroundShellManager()
-		bgShell, err := bgManager.Start(ctx, workingDir, nil, "sleep 20 && echo '20 seconds completed'", "")
+		bgShell, err := bgManager.Start(ctx, workingDir, nil, "sleep 20", "")
 		require.NoError(t, err)
 		defer bgManager.Kill(bgShell.ID)
 

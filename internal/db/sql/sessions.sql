@@ -3,6 +3,7 @@ INSERT INTO sessions (
     id,
     parent_session_id,
     title,
+    collaboration_mode,
     message_count,
     prompt_tokens,
     completion_tokens,
@@ -11,6 +12,7 @@ INSERT INTO sessions (
     updated_at,
     created_at
 ) VALUES (
+    ?,
     ?,
     ?,
     ?,
@@ -38,11 +40,18 @@ ORDER BY updated_at DESC;
 UPDATE sessions
 SET
     title = ?,
+    collaboration_mode = ?,
     prompt_tokens = ?,
     completion_tokens = ?,
     summary_message_id = ?,
     cost = ?,
     todos = ?
+WHERE id = ?
+RETURNING *;
+
+-- name: UpdateSessionCollaborationMode :one
+UPDATE sessions
+SET collaboration_mode = ?
 WHERE id = ?
 RETURNING *;
 

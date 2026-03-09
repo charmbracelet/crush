@@ -71,9 +71,8 @@ func ModelInfo(t *styles.Styles, modelName, providerName, reasoningInfo string, 
 	)
 }
 
-// formatTokensAndCost formats token usage and cost with appropriate units
-// (K/M) and percentage of context window.
-func formatTokensAndCost(t *styles.Styles, tokens, contextWindow int64, cost float64) string {
+// FormatTokenCount formats token usage with appropriate units (K/M).
+func FormatTokenCount(tokens int64) string {
 	var formattedTokens string
 	switch {
 	case tokens >= 1_000_000:
@@ -91,17 +90,13 @@ func formatTokensAndCost(t *styles.Styles, tokens, contextWindow int64, cost flo
 		formattedTokens = strings.Replace(formattedTokens, ".0M", "M", 1)
 	}
 
-	percentage := (float64(tokens) / float64(contextWindow)) * 100
+	return formattedTokens
+}
 
+// formatTokensAndCost formats cumulative token usage and cost.
+func formatTokensAndCost(t *styles.Styles, tokens, _ int64, cost float64) string {
 	formattedCost := t.Muted.Render(fmt.Sprintf("$%.2f", cost))
-
-	formattedTokens = t.Subtle.Render(fmt.Sprintf("(%s)", formattedTokens))
-	formattedPercentage := t.Muted.Render(fmt.Sprintf("%d%%", int(percentage)))
-	formattedTokens = fmt.Sprintf("%s %s", formattedPercentage, formattedTokens)
-	if percentage > 80 {
-		formattedTokens = fmt.Sprintf("%s %s", styles.LSPWarningIcon, formattedTokens)
-	}
-
+	formattedTokens := t.Subtle.Render(fmt.Sprintf("Used %s tok", FormatTokenCount(tokens)))
 	return fmt.Sprintf("%s %s", formattedTokens, formattedCost)
 }
 

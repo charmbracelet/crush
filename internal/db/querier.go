@@ -43,6 +43,7 @@ type Querier interface {
 	RecordFileRead(ctx context.Context, arg RecordFileReadParams) error
 	UpdateMessage(ctx context.Context, arg UpdateMessageParams) error
 	UpdateSession(ctx context.Context, arg UpdateSessionParams) (Session, error)
+	UpdateSessionCollaborationMode(ctx context.Context, arg UpdateSessionCollaborationModeParams) (Session, error)
 	UpdateSessionTitleAndUsage(ctx context.Context, arg UpdateSessionTitleAndUsageParams) error
 }
 

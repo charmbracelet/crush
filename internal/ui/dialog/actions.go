@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/util"
+	"github.com/charmbracelet/crush/internal/userinput"
 )
 
 // ActionClose is a message to close the current dialog.
@@ -51,6 +52,18 @@ type (
 	ActionTogglePills       struct{}
 	ActionExternalEditor    struct{}
 	ActionToggleYoloMode    struct{}
+	ActionTogglePlanMode    struct {
+		SessionID string
+		NextMode  session.CollaborationMode
+	}
+	ActionExecuteProposedPlan struct {
+		SessionID string
+		Plan      string
+	}
+	ActionSubmitPlanFeedback struct {
+		SessionID string
+		Feedback  string
+	}
 	// ActionInitializeProject is a message to initialize a project.
 	ActionInitializeProject struct{}
 	ActionSummarize         struct {
@@ -78,6 +91,9 @@ type (
 		ClientID    string
 		Arguments   []commands.Argument
 		Args        map[string]string // Actual argument values
+	}
+	ActionResolveUserInput struct {
+		Response userinput.Response
 	}
 )
 

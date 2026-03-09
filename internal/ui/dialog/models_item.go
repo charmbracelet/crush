@@ -1,6 +1,9 @@
 package dialog
 
 import (
+	"cmp"
+	"strings"
+
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/config"
@@ -43,7 +46,7 @@ func (m *ModelGroup) Render(width int) string {
 	}
 
 	title := " " + m.Title + " "
-	title = ansi.Truncate(title, max(0, width-lipgloss.Width(configured)-1), "…")
+	title = ansi.Truncate(title, max(0, width-lipgloss.Width(configured)-1), "...")
 
 	return common.Section(m.t, title, width, configured)
 }
@@ -59,6 +62,7 @@ type ModelItem struct {
 	m            fuzzy.Match
 	focused      bool
 	showProvider bool
+	isCurrent    bool
 }
 
 // SelectedModel returns this model item as a [config.SelectedModel] instance.
@@ -79,7 +83,7 @@ func (m *ModelItem) SelectedModelType() config.SelectedModelType {
 var _ ListItem = &ModelItem{}
 
 // NewModelItem creates a new ModelItem.
-func NewModelItem(t *styles.Styles, prov catwalk.Provider, model catwalk.Model, typ ModelType, showProvider bool) *ModelItem {
+func NewModelItem(t *styles.Styles, prov catwalk.Provider, model catwalk.Model, typ ModelType, showProvider bool, isCurrent bool) *ModelItem {
 	return &ModelItem{
 		prov:         prov,
 		model:        model,
@@ -87,6 +91,7 @@ func NewModelItem(t *styles.Styles, prov catwalk.Provider, model catwalk.Model, 
 		t:            t,
 		cache:        make(map[int]string),
 		showProvider: showProvider,
+		isCurrent:    isCurrent,
 	}
 }
 
@@ -102,10 +107,15 @@ func (m *ModelItem) ID() string {
 
 // Render implements ListItem.
 func (m *ModelItem) Render(width int) string {
-	var providerInfo string
-	if m.showProvider {
-		providerInfo = string(m.prov.Name)
+	infoParts := make([]string, 0, 2)
+	if m.isCurrent {
+		infoParts = append(infoParts, "Current")
 	}
+	if m.showProvider {
+		infoParts = append(infoParts, cmp.Or(string(m.prov.Name), string(m.prov.ID)))
+	}
+	providerInfo := strings.Join(infoParts, " | ")
+
 	styles := ListItemStyles{
 		ItemBlurred:     m.t.Dialog.NormalItem,
 		ItemFocused:     m.t.Dialog.SelectedItem,

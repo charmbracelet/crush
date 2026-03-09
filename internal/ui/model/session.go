@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -58,6 +59,15 @@ type SessionFile struct {
 	LatestVersion history.File
 	Additions     int
 	Deletions     int
+}
+
+var modifiedFilesRootMarkers = []string{
+	".git",
+	"go.mod",
+	"package.json",
+	"Cargo.toml",
+	"pyproject.toml",
+	"AGENTS.md",
 }
 
 // loadSession loads the session along with its associated files and computes
@@ -207,13 +217,9 @@ func fileList(t *styles.Styles, cwd string, filesWithChanges []SessionFile, widt
 		}
 		extraContent := strings.Join(statusParts, " ")
 
-		// Format file path
-		filePath := f.FirstVersion.Path
-		if rel, err := filepath.Rel(cwd, filePath); err == nil {
-			filePath = rel
-		}
-		filePath = fsext.DirTrim(filePath, 2)
-		filePath = ansi.Truncate(filePath, width-(lipgloss.Width(extraContent)-2), "…")
+		// Format file path relative to the detected project root when possible.
+		filePath := formatModifiedFilePath(cwd, f.FirstVersion.Path)
+		filePath = compactModifiedFilePath(filePath, width-(lipgloss.Width(extraContent)-2))
 
 		line := t.Files.Path.Render(filePath)
 		if extraContent != "" {
@@ -230,6 +236,83 @@ func fileList(t *styles.Styles, cwd string, filesWithChanges []SessionFile, widt
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, renderedFiles...)
+}
+
+func formatModifiedFilePath(cwd, filePath string) string {
+	absPath := filePath
+	if !filepath.IsAbs(absPath) {
+		absPath = filepath.Join(cwd, filePath)
+	}
+	absPath = filepath.Clean(absPath)
+
+	if root, ok := detectModifiedFilesRoot(absPath); ok {
+		if rel, ok := relativeDisplayPath(root, absPath); ok {
+			return rel
+		}
+	}
+	if rel, ok := relativeDisplayPath(cwd, absPath); ok {
+		return rel
+	}
+	return fsext.PrettyPath(absPath)
+}
+
+func detectModifiedFilesRoot(filePath string) (string, bool) {
+	startDir := filepath.Dir(filePath)
+	for _, marker := range modifiedFilesRootMarkers {
+		if found, ok := fsext.LookupClosest(startDir, marker); ok {
+			if filepath.Base(found) == marker && marker != ".git" {
+				return filepath.Dir(found), true
+			}
+			if marker == ".git" {
+				info, err := os.Stat(found)
+				if err == nil && info.IsDir() {
+					return filepath.Dir(found), true
+				}
+			}
+		}
+	}
+	return "", false
+}
+
+func relativeDisplayPath(root, filePath string) (string, bool) {
+	if root == "" {
+		return "", false
+	}
+	rel, err := filepath.Rel(root, filePath)
+	if err != nil {
+		return "", false
+	}
+	rel = filepath.Clean(rel)
+	if rel == "." || rel == "" || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return rel, true
+}
+
+func compactModifiedFilePath(path string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if lipgloss.Width(path) <= width {
+		return path
+	}
+
+	cleanPath := filepath.Clean(path)
+	sep := string(filepath.Separator)
+	parts := strings.Split(cleanPath, sep)
+	if len(parts) >= 2 {
+		candidate := filepath.Join("…", parts[len(parts)-2], parts[len(parts)-1])
+		if lipgloss.Width(candidate) <= width {
+			return candidate
+		}
+	}
+	if len(parts) >= 1 {
+		candidate := filepath.Join("…", parts[len(parts)-1])
+		if lipgloss.Width(candidate) <= width {
+			return candidate
+		}
+	}
+	return ansi.Truncate(path, width, "…")
 }
 
 // startLSPs starts LSP servers for the given file paths.

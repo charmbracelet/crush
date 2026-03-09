@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"charm.land/x/vcr"
 	"github.com/charmbracelet/crush/internal/agent/tools"
@@ -650,4 +651,55 @@ func BenchmarkBuildSummaryPrompt(b *testing.B) {
 			}
 		})
 	}
+}
+
+func TestPromptTokensForUsage_OpenAIStyle(t *testing.T) {
+	t.Parallel()
+
+	usage := fantasy.Usage{
+		InputTokens:  120,
+		OutputTokens: 45,
+	}
+
+	require.Equal(t, int64(120), promptTokensForUsage(usage))
+	require.Equal(t, int64(165), totalTokensForUsage(usage))
+}
+
+func TestPromptTokensForUsage_AnthropicCacheStyle(t *testing.T) {
+	t.Parallel()
+
+	usage := fantasy.Usage{
+		InputTokens:         120,
+		CacheCreationTokens: 300,
+		CacheReadTokens:     900,
+		OutputTokens:        45,
+	}
+
+	require.Equal(t, int64(1320), promptTokensForUsage(usage))
+	require.Equal(t, int64(1365), totalTokensForUsage(usage))
+}
+
+func TestUpdateSessionUsage_AccumulatesTotals(t *testing.T) {
+	t.Parallel()
+
+	agent := &sessionAgent{}
+	model := Model{CatwalkCfg: catwalk.Model{}}
+	sess := session.Session{
+		PromptTokens:     1000,
+		CompletionTokens: 400,
+		Cost:             1.25,
+	}
+
+	usage := fantasy.Usage{
+		InputTokens:         120,
+		CacheCreationTokens: 300,
+		CacheReadTokens:     900,
+		OutputTokens:        45,
+	}
+
+	agent.updateSessionUsage(model, &sess, usage, nil)
+
+	require.Equal(t, int64(2320), sess.PromptTokens)
+	require.Equal(t, int64(445), sess.CompletionTokens)
+	require.GreaterOrEqual(t, sess.Cost, 1.25)
 }

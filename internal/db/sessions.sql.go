@@ -15,6 +15,7 @@ INSERT INTO sessions (
     id,
     parent_session_id,
     title,
+    collaboration_mode,
     message_count,
     prompt_tokens,
     completion_tokens,
@@ -30,20 +31,22 @@ INSERT INTO sessions (
     ?,
     ?,
     ?,
+    ?,
     null,
     strftime('%s', 'now'),
     strftime('%s', 'now')
-) RETURNING id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos
+) RETURNING id, parent_session_id, title, collaboration_mode, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos
 `
 
 type CreateSessionParams struct {
-	ID               string         `json:"id"`
-	ParentSessionID  sql.NullString `json:"parent_session_id"`
-	Title            string         `json:"title"`
-	MessageCount     int64          `json:"message_count"`
-	PromptTokens     int64          `json:"prompt_tokens"`
-	CompletionTokens int64          `json:"completion_tokens"`
-	Cost             float64        `json:"cost"`
+	ID                string         `json:"id"`
+	ParentSessionID   sql.NullString `json:"parent_session_id"`
+	Title             string         `json:"title"`
+	CollaborationMode string         `json:"collaboration_mode"`
+	MessageCount      int64          `json:"message_count"`
+	PromptTokens      int64          `json:"prompt_tokens"`
+	CompletionTokens  int64          `json:"completion_tokens"`
+	Cost              float64        `json:"cost"`
 }
 
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error) {
@@ -51,6 +54,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		arg.ID,
 		arg.ParentSessionID,
 		arg.Title,
+		arg.CollaborationMode,
 		arg.MessageCount,
 		arg.PromptTokens,
 		arg.CompletionTokens,
@@ -61,6 +65,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		&i.ID,
 		&i.ParentSessionID,
 		&i.Title,
+		&i.CollaborationMode,
 		&i.MessageCount,
 		&i.PromptTokens,
 		&i.CompletionTokens,
@@ -84,7 +89,7 @@ func (q *Queries) DeleteSession(ctx context.Context, id string) error {
 }
 
 const getSessionByID = `-- name: GetSessionByID :one
-SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos
+SELECT id, parent_session_id, title, collaboration_mode, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos
 FROM sessions
 WHERE id = ? LIMIT 1
 `
@@ -96,6 +101,7 @@ func (q *Queries) GetSessionByID(ctx context.Context, id string) (Session, error
 		&i.ID,
 		&i.ParentSessionID,
 		&i.Title,
+		&i.CollaborationMode,
 		&i.MessageCount,
 		&i.PromptTokens,
 		&i.CompletionTokens,
@@ -109,7 +115,7 @@ func (q *Queries) GetSessionByID(ctx context.Context, id string) (Session, error
 }
 
 const listSessions = `-- name: ListSessions :many
-SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos
+SELECT id, parent_session_id, title, collaboration_mode, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos
 FROM sessions
 WHERE parent_session_id is NULL
 ORDER BY updated_at DESC
@@ -128,6 +134,7 @@ func (q *Queries) ListSessions(ctx context.Context) ([]Session, error) {
 			&i.ID,
 			&i.ParentSessionID,
 			&i.Title,
+			&i.CollaborationMode,
 			&i.MessageCount,
 			&i.PromptTokens,
 			&i.CompletionTokens,
@@ -154,28 +161,31 @@ const updateSession = `-- name: UpdateSession :one
 UPDATE sessions
 SET
     title = ?,
+    collaboration_mode = ?,
     prompt_tokens = ?,
     completion_tokens = ?,
     summary_message_id = ?,
     cost = ?,
     todos = ?
 WHERE id = ?
-RETURNING id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos
+RETURNING id, parent_session_id, title, collaboration_mode, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos
 `
 
 type UpdateSessionParams struct {
-	Title            string         `json:"title"`
-	PromptTokens     int64          `json:"prompt_tokens"`
-	CompletionTokens int64          `json:"completion_tokens"`
-	SummaryMessageID sql.NullString `json:"summary_message_id"`
-	Cost             float64        `json:"cost"`
-	Todos            sql.NullString `json:"todos"`
-	ID               string         `json:"id"`
+	Title             string         `json:"title"`
+	CollaborationMode string         `json:"collaboration_mode"`
+	PromptTokens      int64          `json:"prompt_tokens"`
+	CompletionTokens  int64          `json:"completion_tokens"`
+	SummaryMessageID  sql.NullString `json:"summary_message_id"`
+	Cost              float64        `json:"cost"`
+	Todos             sql.NullString `json:"todos"`
+	ID                string         `json:"id"`
 }
 
 func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) (Session, error) {
 	row := q.queryRow(ctx, q.updateSessionStmt, updateSession,
 		arg.Title,
+		arg.CollaborationMode,
 		arg.PromptTokens,
 		arg.CompletionTokens,
 		arg.SummaryMessageID,
@@ -188,6 +198,42 @@ func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) (S
 		&i.ID,
 		&i.ParentSessionID,
 		&i.Title,
+		&i.CollaborationMode,
+		&i.MessageCount,
+		&i.PromptTokens,
+		&i.CompletionTokens,
+		&i.Cost,
+		&i.UpdatedAt,
+		&i.CreatedAt,
+		&i.SummaryMessageID,
+		&i.Todos,
+	)
+	return i, err
+}
+
+const updateSessionCollaborationMode = `-- name: UpdateSessionCollaborationMode :one
+UPDATE sessions
+SET collaboration_mode = ?
+WHERE id = ?
+RETURNING id, parent_session_id, title, collaboration_mode, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos
+`
+
+type UpdateSessionCollaborationModeParams struct {
+	CollaborationMode string `json:"collaboration_mode"`
+	ID                string `json:"id"`
+}
+
+func (q *Queries) UpdateSessionCollaborationMode(ctx context.Context, arg UpdateSessionCollaborationModeParams) (Session, error) {
+	row := q.queryRow(ctx, q.updateSessionCollaborationModeStmt, updateSessionCollaborationMode,
+		arg.CollaborationMode,
+		arg.ID,
+	)
+	var i Session
+	err := row.Scan(
+		&i.ID,
+		&i.ParentSessionID,
+		&i.Title,
+		&i.CollaborationMode,
 		&i.MessageCount,
 		&i.PromptTokens,
 		&i.CompletionTokens,

@@ -22,6 +22,22 @@ const (
 	TodoStatusCompleted  TodoStatus = "completed"
 )
 
+type CollaborationMode string
+
+const (
+	CollaborationModeDefault CollaborationMode = "default"
+	CollaborationModePlan    CollaborationMode = "plan"
+)
+
+func NormalizeCollaborationMode(mode string) CollaborationMode {
+	switch CollaborationMode(mode) {
+	case CollaborationModePlan:
+		return CollaborationModePlan
+	default:
+		return CollaborationModeDefault
+	}
+}
+
 type Todo struct {
 	Content    string     `json:"content"`
 	Status     TodoStatus `json:"status"`
@@ -39,17 +55,18 @@ func HasIncompleteTodos(todos []Todo) bool {
 }
 
 type Session struct {
-	ID               string
-	ParentSessionID  string
-	Title            string
-	MessageCount     int64
-	PromptTokens     int64
-	CompletionTokens int64
-	SummaryMessageID string
-	Cost             float64
-	Todos            []Todo
-	CreatedAt        int64
-	UpdatedAt        int64
+	ID                string
+	ParentSessionID   string
+	Title             string
+	CollaborationMode CollaborationMode
+	MessageCount      int64
+	PromptTokens      int64
+	CompletionTokens  int64
+	SummaryMessageID  string
+	Cost              float64
+	Todos             []Todo
+	CreatedAt         int64
+	UpdatedAt         int64
 }
 
 type Service interface {
@@ -60,6 +77,7 @@ type Service interface {
 	Get(ctx context.Context, id string) (Session, error)
 	List(ctx context.Context) ([]Session, error)
 	Save(ctx context.Context, session Session) (Session, error)
+	UpdateCollaborationMode(ctx context.Context, sessionID string, mode CollaborationMode) (Session, error)
 	UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error
 	Delete(ctx context.Context, id string) error
 
@@ -77,8 +95,9 @@ type service struct {
 
 func (s *service) Create(ctx context.Context, title string) (Session, error) {
 	dbSession, err := s.q.CreateSession(ctx, db.CreateSessionParams{
-		ID:    uuid.New().String(),
-		Title: title,
+		ID:                uuid.New().String(),
+		Title:             title,
+		CollaborationMode: string(CollaborationModeDefault),
 	})
 	if err != nil {
 		return Session{}, err
@@ -91,9 +110,10 @@ func (s *service) Create(ctx context.Context, title string) (Session, error) {
 
 func (s *service) CreateTaskSession(ctx context.Context, toolCallID, parentSessionID, title string) (Session, error) {
 	dbSession, err := s.q.CreateSession(ctx, db.CreateSessionParams{
-		ID:              toolCallID,
-		ParentSessionID: sql.NullString{String: parentSessionID, Valid: true},
-		Title:           title,
+		ID:                toolCallID,
+		ParentSessionID:   sql.NullString{String: parentSessionID, Valid: true},
+		Title:             title,
+		CollaborationMode: string(CollaborationModeDefault),
 	})
 	if err != nil {
 		return Session{}, err
@@ -105,9 +125,10 @@ func (s *service) CreateTaskSession(ctx context.Context, toolCallID, parentSessi
 
 func (s *service) CreateTitleSession(ctx context.Context, parentSessionID string) (Session, error) {
 	dbSession, err := s.q.CreateSession(ctx, db.CreateSessionParams{
-		ID:              "title-" + parentSessionID,
-		ParentSessionID: sql.NullString{String: parentSessionID, Valid: true},
-		Title:           "Generate a title",
+		ID:                "title-" + parentSessionID,
+		ParentSessionID:   sql.NullString{String: parentSessionID, Valid: true},
+		Title:             "Generate a title",
+		CollaborationMode: string(CollaborationModeDefault),
 	})
 	if err != nil {
 		return Session{}, err
@@ -164,10 +185,11 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 	}
 
 	dbSession, err := s.q.UpdateSession(ctx, db.UpdateSessionParams{
-		ID:               session.ID,
-		Title:            session.Title,
-		PromptTokens:     session.PromptTokens,
-		CompletionTokens: session.CompletionTokens,
+		ID:                session.ID,
+		Title:             session.Title,
+		CollaborationMode: string(NormalizeCollaborationMode(string(session.CollaborationMode))),
+		PromptTokens:      session.PromptTokens,
+		CompletionTokens:  session.CompletionTokens,
 		SummaryMessageID: sql.NullString{
 			String: session.SummaryMessageID,
 			Valid:  session.SummaryMessageID != "",
@@ -182,6 +204,19 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 		return Session{}, err
 	}
 	session = s.fromDBItem(dbSession)
+	s.Publish(pubsub.UpdatedEvent, session)
+	return session, nil
+}
+
+func (s *service) UpdateCollaborationMode(ctx context.Context, sessionID string, mode CollaborationMode) (Session, error) {
+	dbSession, err := s.q.UpdateSessionCollaborationMode(ctx, db.UpdateSessionCollaborationModeParams{
+		ID:                sessionID,
+		CollaborationMode: string(NormalizeCollaborationMode(string(mode))),
+	})
+	if err != nil {
+		return Session{}, err
+	}
+	session := s.fromDBItem(dbSession)
 	s.Publish(pubsub.UpdatedEvent, session)
 	return session, nil
 }
@@ -216,17 +251,18 @@ func (s service) fromDBItem(item db.Session) Session {
 		slog.Error("Failed to unmarshal todos", "session_id", item.ID, "error", err)
 	}
 	return Session{
-		ID:               item.ID,
-		ParentSessionID:  item.ParentSessionID.String,
-		Title:            item.Title,
-		MessageCount:     item.MessageCount,
-		PromptTokens:     item.PromptTokens,
-		CompletionTokens: item.CompletionTokens,
-		SummaryMessageID: item.SummaryMessageID.String,
-		Cost:             item.Cost,
-		Todos:            todos,
-		CreatedAt:        item.CreatedAt,
-		UpdatedAt:        item.UpdatedAt,
+		ID:                item.ID,
+		ParentSessionID:   item.ParentSessionID.String,
+		Title:             item.Title,
+		CollaborationMode: NormalizeCollaborationMode(item.CollaborationMode),
+		MessageCount:      item.MessageCount,
+		PromptTokens:      item.PromptTokens,
+		CompletionTokens:  item.CompletionTokens,
+		SummaryMessageID:  item.SummaryMessageID.String,
+		Cost:              item.Cost,
+		Todos:             todos,
+		CreatedAt:         item.CreatedAt,
+		UpdatedAt:         item.UpdatedAt,
 	}
 }
 

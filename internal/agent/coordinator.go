@@ -29,6 +29,7 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/userinput"
 	"golang.org/x/sync/errgroup"
 
 	"charm.land/fantasy/providers/anthropic"
@@ -64,6 +65,7 @@ type coordinator struct {
 	sessions    session.Service
 	messages    message.Service
 	permissions permission.Service
+	userInput   userinput.Service
 	history     history.Service
 	filetracker filetracker.Service
 	lspManager  *lsp.Manager
@@ -80,6 +82,7 @@ func NewCoordinator(
 	sessions session.Service,
 	messages message.Service,
 	permissions permission.Service,
+	userInput userinput.Service,
 	history history.Service,
 	filetracker filetracker.Service,
 	lspManager *lsp.Manager,
@@ -89,6 +92,7 @@ func NewCoordinator(
 		sessions:    sessions,
 		messages:    messages,
 		permissions: permissions,
+		userInput:   userInput,
 		history:     history,
 		filetracker: filetracker,
 		lspManager:  lspManager,
@@ -428,6 +432,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 	}
 
 	allTools = append(allTools,
+		tools.NewRequestUserInputTool(c.userInput),
 		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Options.Attribution, modelName),
 		tools.NewJobOutputTool(),
 		tools.NewJobKillTool(),
@@ -995,7 +1000,14 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		PresencePenalty:  model.ModelCfg.PresencePenalty,
 	})
 	if err != nil {
+		slog.Error("Sub-agent run failed", "error", err, "session", session.ID, "prompt", params.Prompt)
 		return fantasy.NewTextErrorResponse("error generating response"), nil
+	}
+
+	// Check if result has valid response content
+	if result.Response.Content == nil || result.Response.Content.Text() == "" {
+		slog.Warn("Sub-agent returned empty response", "session", session.ID, "prompt", params.Prompt)
+		return fantasy.NewTextErrorResponse("no content in response"), nil
 	}
 
 	// Update parent session cost

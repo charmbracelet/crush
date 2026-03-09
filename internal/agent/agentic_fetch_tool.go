@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -148,11 +149,14 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 
 			_, small, err := c.buildAgentModels(ctx, true)
 			if err != nil {
+				slog.Error("Failed to build agent models for agentic fetch", "error", err)
 				return fantasy.ToolResponse{}, fmt.Errorf("error building models: %s", err)
 			}
 
+			slog.Debug("Building agentic fetch prompt", "model", small.ModelCfg.Model, "provider", small.ModelCfg.Provider)
 			systemPrompt, err := promptTemplate.Build(ctx, small.Model.Provider(), small.Model.Model(), *c.cfg)
 			if err != nil {
+				slog.Error("Failed to build agentic fetch prompt", "error", err)
 				return fantasy.ToolResponse{}, fmt.Errorf("error building system prompt: %s", err)
 			}
 

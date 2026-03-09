@@ -36,6 +36,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/update"
+	"github.com/charmbracelet/crush/internal/userinput"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
@@ -53,6 +54,7 @@ type App struct {
 	Sessions    session.Service
 	Messages    message.Service
 	History     history.Service
+	UserInput   userinput.Service
 	Permissions permission.Service
 	FileTracker filetracker.Service
 
@@ -88,6 +90,7 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 		Sessions:    sessions,
 		Messages:    messages,
 		History:     files,
+		UserInput:   userinput.NewService(),
 		Permissions: permission.NewPermissionService(cfg.WorkingDir(), skipPermissionsRequests, allowedTools),
 		FileTracker: filetracker.NewService(q),
 		LSPManager:  lsp.NewManager(cfg),
@@ -422,6 +425,7 @@ func (app *App) setupEvents() {
 	app.eventsCtx = ctx
 	setupSubscriber(ctx, app.serviceEventsWG, "sessions", app.Sessions.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "messages", app.Messages.Subscribe, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "user-input", app.UserInput.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "permissions", app.Permissions.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "permissions-notifications", app.Permissions.SubscribeNotifications, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "history", app.History.Subscribe, app.events)
@@ -494,6 +498,7 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.Sessions,
 		app.Messages,
 		app.Permissions,
+		app.UserInput,
 		app.History,
 		app.FileTracker,
 		app.LSPManager,

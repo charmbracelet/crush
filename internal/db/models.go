@@ -50,3 +50,32 @@ type Session struct {
 	SummaryMessageID sql.NullString `json:"summary_message_id"`
 	Todos            sql.NullString `json:"todos"`
 }
+
+type DispatchMessage struct {
+	Id              string         `json:"id"`
+	FromAgent       string         `json:"from_agent"`
+	ToAgent         string         `json:"to_agent"`
+	SessionID       sql.NullString `json:"session_id"`
+	ParentMessageID sql.NullString `json:"parent_message_id"`
+	Task            string         `json:"task"`
+	Context         string         `json:"context"`
+	Status          string         `json:"status"`
+	Result          sql.NullString `json:"result"`
+	Error           sql.NullString `json:"error"`
+	Priority        int64          `json:"priority"`
+	CreatedAt       int64          `json:"created_at"`
+	UpdatedAt       int64          `json:"updated_at"`
+	CompletedAt     sql.NullInt64  `json:"completed_at"`
+}
+
+type Agent struct {
+	Name              string         `json:"name"`
+	Description       sql.NullString `json:"description"`
+	Capabilities      string         `json:"capabilities"`
+	SystemPrompt      sql.NullString `json:"system_prompt"`
+	CliCommand        sql.NullString `json:"cli_command"`
+	ModelRequirements string         `json:"model_requirements"`
+	Enabled           int64          `json:"enabled"`
+	CreatedAt         int64          `json:"created_at"`
+	UpdatedAt         int64          `json:"updated_at"`
+}

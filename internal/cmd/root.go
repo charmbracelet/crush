@@ -36,7 +36,8 @@ func init() {
 	rootCmd.PersistentFlags().StringP("data-dir", "D", "", "Custom crush data directory")
 	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Debug")
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
-	rootCmd.Flags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
+	rootCmd.PersistentFlags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
+	rootCmd.PersistentFlags().Bool("dangerously-skip-permissions", false, "Automatically accept all permissions (dangerous mode, same as --yolo)")
 
 	rootCmd.AddCommand(
 		runCmd,
@@ -184,6 +185,7 @@ func setupAppWithProgressBar(cmd *cobra.Command) (*app.App, error) {
 func setupApp(cmd *cobra.Command) (*app.App, error) {
 	debug, _ := cmd.Flags().GetBool("debug")
 	yolo, _ := cmd.Flags().GetBool("yolo")
+	dangerouslySkip, _ := cmd.Flags().GetBool("dangerously-skip-permissions")
 	dataDir, _ := cmd.Flags().GetString("data-dir")
 	ctx := cmd.Context()
 
@@ -200,7 +202,7 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 	if cfg.Permissions == nil {
 		cfg.Permissions = &config.Permissions{}
 	}
-	cfg.Permissions.SkipRequests = yolo
+	cfg.Permissions.SkipRequests = yolo || dangerouslySkip
 
 	if err := createDotCrushDir(cfg.Options.DataDirectory); err != nil {
 		return nil, err

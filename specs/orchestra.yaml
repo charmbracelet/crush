@@ -1,0 +1,403 @@
+id: orchestra
+name: Orchestra Multi-Agent Development System
+version: 0.1.0
+status: draft
+owner: crush-team
+created: 2026-02-21
+
+description: |
+  A spec-driven multi-agent development system where AI agents collaborate 
+  under human oversight to build software. Uses GitHub as the backbone for 
+  persistence, visibility, and collaboration.
+
+goals:
+  - Single spec document as source of truth
+  - Multiple specialized AI agents working in isolation
+  - Full visibility into all agent activity via TUI dashboard
+  - Automatic cascade when specs change
+  - GitHub-native (issues, PRs, milestones, comments)
+  - Human oversight at every phase
+
+non_goals:
+  - Fully autonomous development without human review
+  - Replacing existing project management tools (Linear, Jira)
+  - Supporting non-Git version control
+  - Real-time collaborative editing
+
+constraints:
+  technical:
+    - Must work with existing Crush CLI architecture
+    - Must use Git worktrees for agent isolation
+    - Must be compatible with GitHub API
+    - Must support multiple LLM providers
+  business:
+    - Dogfood the system by building it with itself
+    - Enable other developers to review before full implementation
+  resources:
+    - 1-2 core developers
+    - AI agents for implementation
+
+requirements:
+  functional:
+    - id: FR-001
+      description: Spec document serves as single source of truth
+      priority: P0
+      acceptance_criteria:
+        - Spec defined in YAML format
+        - All work traces back to spec requirements
+        - Spec changes trigger cascade to downstream artifacts
+
+    - id: FR-002
+      description: Managers coordinate work by role
+      priority: P0
+      acceptance_criteria:
+        - Spec Manager guards spec and triggers cascade
+        - Design Manager creates architecture and ADRs
+        - Construction Manager generates technical artifacts
+        - Phase Manager breaks work into phases
+        - Task Manager creates and assigns tasks
+
+    - id: FR-003
+      description: Agents execute work in isolation
+      priority: P0
+      acceptance_criteria:
+        - Implementer agents write code in git worktrees
+        - Verifier agents test and validate implementations
+        - Each agent has isolated context and state
+        - Agent progress is visible in real-time
+
+    - id: FR-004
+      description: All activity visible via TUI dashboard
+      priority: P0
+      acceptance_criteria:
+        - Manager status displayed (idle, active, error)
+        - Agent status displayed with progress bars
+        - Phase progress tracked with task counts
+        - Activity stream shows recent events
+        - Keyboard navigation between views
+
+    - id: FR-005
+      description: GitHub provides persistence and collaboration
+      priority: P0
+      acceptance_criteria:
+        - Specs stored as YAML files in repo
+        - Phases mapped to GitHub Milestones
+        - Tasks mapped to GitHub Issues
+        - Agent work creates Branches and PRs
+        - Comments mirror agent communication
+
+    - id: FR-006
+      description: Spec changes cascade downstream automatically
+      priority: P0
+      acceptance_criteria:
+        - Change detection on spec edit
+        - Impact analysis determines affected artifacts
+        - Blueprints regenerated when semantics change
+        - Construction artifacts regenerated on entity/endpoint change
+        - Affected tasks flagged for review
+
+    - id: FR-007
+      description: Managers can spawn other managers and agents
+      priority: P1
+      acceptance_criteria:
+        - Orchestrator spawns all managers
+        - Phase Manager spawns Task Manager
+        - Task Manager spawns Implementer and Verifier agents
+        - Parent tracks children status
+
+    - id: FR-008
+      description: Agents create proof artifacts before completion
+      priority: P1
+      acceptance_criteria:
+        - Implementer provides code changes and test results
+        - Verifier provides pass/fail with coverage report
+        - Proof artifacts stored in PR description checklist
+        - Proof required before task marked complete
+
+    - id: FR-009
+      description: CLI commands for orchestra operations
+      priority: P1
+      acceptance_criteria:
+        - crush orchestra init - Initialize orchestra in project
+        - crush orchestra status - Show current status
+        - crush orchestra dashboard - Launch TUI dashboard
+        - crush spec create|edit|show - Manage specs
+        - crush task start|watch|comment - Manage tasks
+
+  non_functional:
+    - id: NFR-001
+      category: reliability
+      description: Graceful degradation when GitHub unavailable
+      details: Cache state locally, sync when connection restored
+
+    - id: NFR-002
+      category: performance
+      description: Dashboard updates within 1 second of events
+      details: Event-based updates, not polling
+
+    - id: NFR-003
+      category: security
+      description: GitHub credentials stored securely
+      details: Use system keychain, never log tokens
+
+    - id: NFR-004
+      category: usability
+      description: Clear error messages with recovery suggestions
+      details: Link to docs, suggest commands to fix
+
+    - id: NFR-005
+      category: maintainability
+      description: Dogfooding validates the methodology
+      details: Build orchestra using orchestra spec-driven approach
+
+entities:
+  - name: Spec
+    description: Source of truth document defining what to build
+    fields:
+      - name: id
+        type: string
+        description: Unique identifier (kebab-case)
+      - name: name
+        type: string
+        description: Human-readable name
+      - name: version
+        type: string
+        description: Semantic version
+      - name: status
+        type: enum
+        values: [draft, active, paused, completed, archived]
+        description: Current status
+      - name: requirements
+        type: array
+        description: Functional and non-functional requirements
+      - name: entities
+        type: array
+        description: Domain entities
+      - name: api_endpoints
+        type: array
+        description: API endpoint definitions
+
+  - name: Manager
+    description: Long-running process with specific role
+    fields:
+      - name: id
+        type: string
+        description: Unique identifier
+      - name: role
+        type: enum
+        values: [spec, design, construction, phase, task]
+        description: Manager role
+      - name: state
+        type: enum
+        values: [idle, active, error, stopped]
+        description: Current state
+      - name: spawned_at
+        type: timestamp
+        description: When manager was started
+      - name: children
+        type: array
+        description: Child agents/managers
+
+  - name: Agent
+    description: Short-lived process executing a task
+    fields:
+      - name: id
+        type: string
+        description: Unique identifier
+      - name: role
+        type: enum
+        values: [implementer, verifier, reviewer]
+        description: Agent role
+      - name: task_id
+        type: string
+        description: Assigned task
+      - name: branch
+        type: string
+        description: Git branch name
+      - name: worktree
+        type: string
+        description: Path to git worktree
+      - name: progress
+        type: float
+        description: Completion percentage (0-100)
+      - name: state
+        type: enum
+        values: [pending, working, blocked, complete, failed]
+        description: Current state
+
+  - name: Phase
+    description: Group of related tasks with dependencies
+    fields:
+      - name: id
+        type: string
+        description: Unique identifier
+      - name: name
+        type: string
+        description: Phase name
+      - name: spec_id
+        type: string
+        description: Parent spec
+      - name: dependencies
+        type: array
+        description: Phase IDs that must complete first
+      - name: tasks
+        type: array
+        description: Task IDs in this phase
+      - name: status
+        type: enum
+        values: [pending, in_progress, blocked, completed]
+        description: Phase status
+
+  - name: Task
+    description: Granular work item
+    fields:
+      - name: id
+        type: string
+        description: Unique identifier (T-NNN format)
+      - name: title
+        type: string
+        description: Task title
+      - name: phase_id
+        type: string
+        description: Parent phase
+      - name: requirement_id
+        type: string
+        description: Linked requirement
+      - name: status
+        type: enum
+        values: [pending, ready, in_progress, review, blocked, completed, failed]
+        description: Task status
+      - name: assigned_agent
+        type: string
+        description: Agent ID assigned to task
+      - name: acceptance_criteria
+        type: array
+        description: Checklist items for completion
+      - name: proof_artifact
+        type: string
+        description: Path to proof file
+
+  - name: Message
+    description: Communication between managers and agents
+    fields:
+      - name: id
+        type: string
+        description: Unique identifier
+      - name: from
+        type: string
+        description: Sender ID
+      - name: to
+        type: string
+        description: Receiver ID or "broadcast"
+      - name: type
+        type: enum
+        values: [task.assigned, task.progress, task.complete, spec.propose, spec.cascade, review.request, clarify.request]
+        description: Message type
+      - name: payload
+        type: object
+        description: Typed payload
+      - name: github_url
+        type: string
+        description: Link to GitHub entity
+
+  - name: ActivityEvent
+    description: Recorded event for visibility
+    fields:
+      - name: id
+        type: string
+        description: Unique identifier
+      - name: timestamp
+        type: timestamp
+        description: When event occurred
+      - name: source
+        type: string
+        description: Manager or agent ID
+      - name: type
+        type: string
+        description: Event type
+      - name: message
+        type: string
+        description: Human-readable message
+      - name: github_url
+        type: string
+        description: Link to GitHub entity
+
+api_endpoints:
+  - path: /orchestra/init
+    method: POST
+    requirement: FR-009
+    description: Initialize orchestra in a project
+    request:
+      github_repo: string
+      spec_name: string
+    response:
+      orchestra_id: string
+      spec_path: string
+
+  - path: /orchestra/status
+    method: GET
+    requirement: FR-004
+    description: Get current orchestra status
+    response:
+      managers: Manager[]
+      agents: Agent[]
+      phases: Phase[]
+      activity: ActivityEvent[]
+
+  - path: /spec
+    method: POST
+    requirement: FR-001
+    description: Create a new spec
+    request:
+      name: string
+      description: string
+    response:
+      spec: Spec
+      path: string
+
+  - path: /spec/{id}/changes
+    method: POST
+    requirement: FR-006
+    description: Propose a spec change
+    request:
+      changes: object
+      reason: string
+    response:
+      impact_analysis: object
+      cascade_plan: object
+
+  - path: /task/{id}/start
+    method: POST
+    requirement: FR-003
+    description: Start work on a task
+    request:
+      agent_role: string
+    response:
+      agent: Agent
+      branch: string
+      worktree: string
+
+  - path: /task/{id}/complete
+    method: POST
+    requirement: FR-008
+    description: Mark task complete with proof
+    request:
+      proof_artifact: string
+      summary: string
+    response:
+      task: Task
+      pr_url: string
+
+dependencies:
+  internal:
+    - crush CLI core
+    - git worktree support
+    - TUI framework (bubbletea)
+  external:
+    - GitHub API
+    - LLM providers (OpenAI, Anthropic, etc.)
+
+metadata:
+  created_by: crush-team
+  approved: false
+  last_updated: 2026-02-21T00:00:00Z

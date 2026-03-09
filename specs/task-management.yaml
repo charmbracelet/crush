@@ -1,0 +1,233 @@
+# Spec: Task Management System
+id: task-management
+name: Task Management System
+version: 1.0.0
+status: active
+owner: dev-team
+created: 2026-02-21
+
+description: |
+  A task management system for tracking work items across projects,
+  supporting assignments, labels, due dates, and progress tracking.
+
+goals:
+  - Enable users to create and manage tasks across projects
+  - Support task assignment and collaboration
+  - Provide filtering and search capabilities
+  - Track task progress and completion
+
+non_goals:
+  - Time tracking (future phase)
+  - Gantt charts (future phase)
+  - Resource allocation (future phase)
+
+constraints:
+  technical:
+    - Must use PostgreSQL for data storage
+    - Must be compatible with existing Go backend
+    - API must follow REST conventions
+  business:
+    - Launch MVP within 2 sprints
+    - Must integrate with existing auth system
+  resources:
+    - Backend team: 2 developers
+    - AI agents: coder, reviewer, tester
+
+requirements:
+  functional:
+    - id: FR-001
+      description: User can create a task
+      priority: P0
+      acceptance_criteria:
+        - Task has title (required, max 200 chars)
+        - Task has description (optional, markdown supported)
+        - Task is assigned to a project
+        - Task created with default status "todo"
+
+    - id: FR-002
+      description: User can update a task
+      priority: P0
+      acceptance_criteria:
+        - Update title, description, status
+        - Assign to user
+        - Set due date
+        - Add labels
+
+    - id: FR-003
+      description: User can list and filter tasks
+      priority: P0
+      acceptance_criteria:
+        - Filter by project
+        - Filter by status
+        - Filter by assignee
+        - Filter by label
+        - Sort by created, updated, due date
+
+    - id: FR-004
+      description: User can delete a task
+      priority: P1
+      acceptance_criteria:
+        - Soft delete (can be restored)
+        - Permanent delete after 30 days
+
+  non_functional:
+    - id: NFR-001
+      category: performance
+      description: List endpoints must respond in <100ms
+      details: P99 latency target with 1000 concurrent users
+
+    - id: NFR-002
+      category: security
+      description: All endpoints require authentication
+      details: JWT token validation via existing auth system
+
+entities:
+  - name: Task
+    description: A work item in a project
+    fields:
+      - name: id
+        type: UUID
+        description: Unique identifier
+      - name: title
+        type: string
+        description: Task title
+      - name: description
+        type: string
+        description: Task description (markdown)
+      - name: status
+        type: enum
+        values: [todo, in_progress, done, cancelled]
+        description: Task status
+      - name: project_id
+        type: UUID
+        references: Project.id
+        description: Parent project
+      - name: assignee_id
+        type: UUID
+        references: User.id
+        description: Assigned user
+      - name: due_date
+        type: timestamp
+        description: Due date
+      - name: created_at
+        type: timestamp
+        description: Creation timestamp
+      - name: updated_at
+        type: timestamp
+        description: Last update timestamp
+
+  - name: Project
+    description: A collection of tasks
+    fields:
+      - name: id
+        type: UUID
+        description: Unique identifier
+      - name: name
+        type: string
+        description: Project name
+      - name: description
+        type: string
+        description: Project description
+      - name: created_at
+        type: timestamp
+        description: Creation timestamp
+
+  - name: Label
+    description: A tag for categorizing tasks
+    fields:
+      - name: id
+        type: UUID
+        description: Unique identifier
+      - name: name
+        type: string
+        description: Label name
+      - name: color
+        type: string
+        description: Hex color code
+      - name: project_id
+        type: UUID
+        references: Project.id
+        description: Parent project
+
+api_endpoints:
+  - path: /tasks
+    method: GET
+    requirement: FR-003
+    description: List tasks with filters
+    request:
+      project_id: UUID
+      status: string
+      assignee_id: UUID
+      label: string
+      sort: string
+    response:
+      tasks: Task[]
+      total: number
+    errors:
+      - code: INVALID_FILTER
+        message: Invalid filter parameter
+
+  - path: /tasks
+    method: POST
+    requirement: FR-001
+    description: Create a new task
+    request:
+      title: string
+      description: string
+      project_id: UUID
+    response:
+      task: Task
+    errors:
+      - code: VALIDATION_ERROR
+        message: Invalid request body
+      - code: PROJECT_NOT_FOUND
+        message: Project does not exist
+
+  - path: /tasks/{id}
+    method: GET
+    requirement: FR-003
+    description: Get a single task
+    response:
+      task: Task
+    errors:
+      - code: NOT_FOUND
+        message: Task not found
+
+  - path: /tasks/{id}
+    method: PATCH
+    requirement: FR-002
+    description: Update a task
+    request:
+      title: string
+      description: string
+      status: string
+      assignee_id: UUID
+      due_date: timestamp
+      labels: string[]
+    response:
+      task: Task
+    errors:
+      - code: NOT_FOUND
+        message: Task not found
+      - code: VALIDATION_ERROR
+        message: Invalid request body
+
+  - path: /tasks/{id}
+    method: DELETE
+    requirement: FR-004
+    description: Delete a task
+    response:
+      message: string
+    errors:
+      - code: NOT_FOUND
+        message: Task not found
+
+dependencies:
+  internal:
+    - Auth system (existing)
+    - Database connection pool (existing)
+  external: []
+
+metadata:
+  created_by: system
+  approved: true

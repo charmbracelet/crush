@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/dispatch"
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/log"
@@ -67,6 +68,7 @@ type coordinator struct {
 	history     history.Service
 	filetracker filetracker.Service
 	lspManager  *lsp.Manager
+	dispatch    dispatch.Service
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
@@ -83,6 +85,7 @@ func NewCoordinator(
 	history history.Service,
 	filetracker filetracker.Service,
 	lspManager *lsp.Manager,
+	dispatchService dispatch.Service,
 ) (Coordinator, error) {
 	c := &coordinator{
 		cfg:         cfg,
@@ -92,6 +95,7 @@ func NewCoordinator(
 		history:     history,
 		filetracker: filetracker,
 		lspManager:  lspManager,
+		dispatch:    dispatchService,
 		agents:      make(map[string]SessionAgent),
 	}
 
@@ -421,6 +425,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Options.Attribution, modelName),
 		tools.NewJobOutputTool(),
 		tools.NewJobKillTool(),
+		tools.NewCrushInstanceTool(),
 		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),
 		tools.NewEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 		tools.NewMultiEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
@@ -432,6 +437,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		tools.NewTodosTool(c.sessions),
 		tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, c.cfg.WorkingDir(), c.cfg.Options.SkillsPaths...),
 		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
+		tools.NewDispatchTool(c.dispatch),
 	)
 
 	// Add LSP tools if user has configured LSPs or auto_lsp is enabled (nil or true).

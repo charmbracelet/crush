@@ -62,6 +62,7 @@ type Session struct {
 	MessageCount      int64
 	PromptTokens      int64
 	CompletionTokens  int64
+	LastPromptTokens  int64
 	SummaryMessageID  string
 	Cost              float64
 	Todos             []Todo
@@ -190,6 +191,7 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 		CollaborationMode: string(NormalizeCollaborationMode(string(session.CollaborationMode))),
 		PromptTokens:      session.PromptTokens,
 		CompletionTokens:  session.CompletionTokens,
+		LastPromptTokens:  session.LastPromptTokens,
 		SummaryMessageID: sql.NullString{
 			String: session.SummaryMessageID,
 			Valid:  session.SummaryMessageID != "",
@@ -258,6 +260,7 @@ func (s service) fromDBItem(item db.Session) Session {
 		MessageCount:      item.MessageCount,
 		PromptTokens:      item.PromptTokens,
 		CompletionTokens:  item.CompletionTokens,
+		LastPromptTokens:  item.LastPromptTokens,
 		SummaryMessageID:  item.SummaryMessageID.String,
 		Cost:              item.Cost,
 		Todos:             todos,

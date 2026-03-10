@@ -54,6 +54,7 @@ type Coordinator interface {
 	IsBusy() bool
 	QueuedPrompts(sessionID string) int
 	QueuedPromptsList(sessionID string) []string
+	RemoveQueuedPrompt(sessionID string, index int) bool
 	ClearQueue(sessionID string)
 	Summarize(context.Context, string) error
 	Model() Model
@@ -859,6 +860,10 @@ func (c *coordinator) Cancel(sessionID string) {
 
 func (c *coordinator) CancelAll() {
 	c.currentAgent.CancelAll()
+}
+
+func (c *coordinator) RemoveQueuedPrompt(sessionID string, index int) bool {
+	return c.currentAgent.RemoveQueuedPrompt(sessionID, index)
 }
 
 func (c *coordinator) ClearQueue(sessionID string) {

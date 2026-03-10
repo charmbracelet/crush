@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/lsp"
@@ -124,8 +125,10 @@ func renderHeaderDetails(
 		parts = append(parts, t.LSP.ErrorDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPErrorIcon, errorCount)))
 	}
 
-	totalTokens := session.CompletionTokens + session.PromptTokens
-	formattedUsage := t.Header.Percentage.Render(fmt.Sprintf("%s tok", common.FormatTokenCount(totalTokens)))
+	agentCfg := com.Config().Agents[config.AgentCoder]
+	model := com.Config().GetModelByType(agentCfg.Model)
+	totalTokens := session.LastPromptTokens
+	formattedUsage := t.Header.Percentage.Render(common.FormatContextUsage(totalTokens, model.ContextWindow))
 	parts = append(parts, formattedUsage)
 
 	const keystroke = "ctrl+d"

@@ -35,7 +35,7 @@ INSERT INTO sessions (
     null,
     strftime('%s', 'now'),
     strftime('%s', 'now')
-) RETURNING id, parent_session_id, title, collaboration_mode, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos
+) RETURNING id, parent_session_id, title, collaboration_mode, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, last_prompt_tokens
 `
 
 type CreateSessionParams struct {
@@ -74,6 +74,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		&i.CreatedAt,
 		&i.SummaryMessageID,
 		&i.Todos,
+		&i.LastPromptTokens,
 	)
 	return i, err
 }
@@ -89,7 +90,7 @@ func (q *Queries) DeleteSession(ctx context.Context, id string) error {
 }
 
 const getSessionByID = `-- name: GetSessionByID :one
-SELECT id, parent_session_id, title, collaboration_mode, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos
+SELECT id, parent_session_id, title, collaboration_mode, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, last_prompt_tokens
 FROM sessions
 WHERE id = ? LIMIT 1
 `
@@ -110,12 +111,13 @@ func (q *Queries) GetSessionByID(ctx context.Context, id string) (Session, error
 		&i.CreatedAt,
 		&i.SummaryMessageID,
 		&i.Todos,
+		&i.LastPromptTokens,
 	)
 	return i, err
 }
 
 const listSessions = `-- name: ListSessions :many
-SELECT id, parent_session_id, title, collaboration_mode, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos
+SELECT id, parent_session_id, title, collaboration_mode, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, last_prompt_tokens
 FROM sessions
 WHERE parent_session_id is NULL
 ORDER BY updated_at DESC
@@ -143,6 +145,7 @@ func (q *Queries) ListSessions(ctx context.Context) ([]Session, error) {
 			&i.CreatedAt,
 			&i.SummaryMessageID,
 			&i.Todos,
+			&i.LastPromptTokens,
 		); err != nil {
 			return nil, err
 		}
@@ -164,11 +167,12 @@ SET
     collaboration_mode = ?,
     prompt_tokens = ?,
     completion_tokens = ?,
+    last_prompt_tokens = ?,
     summary_message_id = ?,
     cost = ?,
     todos = ?
 WHERE id = ?
-RETURNING id, parent_session_id, title, collaboration_mode, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos
+RETURNING id, parent_session_id, title, collaboration_mode, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, last_prompt_tokens
 `
 
 type UpdateSessionParams struct {
@@ -176,6 +180,7 @@ type UpdateSessionParams struct {
 	CollaborationMode string         `json:"collaboration_mode"`
 	PromptTokens      int64          `json:"prompt_tokens"`
 	CompletionTokens  int64          `json:"completion_tokens"`
+	LastPromptTokens  int64          `json:"last_prompt_tokens"`
 	SummaryMessageID  sql.NullString `json:"summary_message_id"`
 	Cost              float64        `json:"cost"`
 	Todos             sql.NullString `json:"todos"`
@@ -188,6 +193,7 @@ func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) (S
 		arg.CollaborationMode,
 		arg.PromptTokens,
 		arg.CompletionTokens,
+		arg.LastPromptTokens,
 		arg.SummaryMessageID,
 		arg.Cost,
 		arg.Todos,
@@ -207,6 +213,7 @@ func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) (S
 		&i.CreatedAt,
 		&i.SummaryMessageID,
 		&i.Todos,
+		&i.LastPromptTokens,
 	)
 	return i, err
 }
@@ -215,7 +222,7 @@ const updateSessionCollaborationMode = `-- name: UpdateSessionCollaborationMode 
 UPDATE sessions
 SET collaboration_mode = ?
 WHERE id = ?
-RETURNING id, parent_session_id, title, collaboration_mode, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos
+RETURNING id, parent_session_id, title, collaboration_mode, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, last_prompt_tokens
 `
 
 type UpdateSessionCollaborationModeParams struct {
@@ -242,6 +249,7 @@ func (q *Queries) UpdateSessionCollaborationMode(ctx context.Context, arg Update
 		&i.CreatedAt,
 		&i.SummaryMessageID,
 		&i.Todos,
+		&i.LastPromptTokens,
 	)
 	return i, err
 }

@@ -702,4 +702,36 @@ func TestUpdateSessionUsage_AccumulatesTotals(t *testing.T) {
 	require.Equal(t, int64(2320), sess.PromptTokens)
 	require.Equal(t, int64(445), sess.CompletionTokens)
 	require.GreaterOrEqual(t, sess.Cost, 1.25)
+	// LastPromptTokens should reflect only this step's input tokens (SET, not +=).
+	require.Equal(t, int64(1320), sess.LastPromptTokens)
+}
+
+func TestUpdateSessionUsage_LastPromptTokensIsSetNotAccumulated(t *testing.T) {
+	t.Parallel()
+
+	// Verify that LastPromptTokens always reflects the MOST RECENT step's
+	// input tokens, not a cumulative sum. This is used for the context
+	// window display and summarization threshold.
+	agent := &sessionAgent{}
+	model := Model{CatwalkCfg: catwalk.Model{}}
+	sess := session.Session{}
+
+	firstUsage := fantasy.Usage{
+		InputTokens:  15000,
+		OutputTokens: 200,
+	}
+	secondUsage := fantasy.Usage{
+		InputTokens:  15300,
+		OutputTokens: 180,
+	}
+
+	agent.updateSessionUsage(model, &sess, firstUsage, nil)
+	require.Equal(t, int64(15000), sess.LastPromptTokens)
+	require.Equal(t, int64(15000), sess.PromptTokens)
+
+	agent.updateSessionUsage(model, &sess, secondUsage, nil)
+	// PromptTokens accumulates across steps (used for billing).
+	require.Equal(t, int64(30300), sess.PromptTokens)
+	// LastPromptTokens reflects only the second step (used for display/StopWhen).
+	require.Equal(t, int64(15300), sess.LastPromptTokens)
 }

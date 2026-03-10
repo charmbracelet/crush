@@ -45,46 +45,46 @@ type ActionSelectModel struct {
 
 // Messages for commands
 type (
-	ActionNewSession        struct{}
-	ActionToggleHelp        struct{}
-	ActionToggleCompactMode struct{}
-	ActionToggleThinking    struct{}
-	ActionTogglePills       struct{}
-	ActionExternalEditor    struct{}
-	ActionToggleYoloMode    struct{}
-	ActionTogglePlanMode    struct {
+	ActionNewSession            struct{}
+	ActionToggleHelp            struct{}
+	ActionToggleCompactMode     struct{}
+	ActionToggleThinking        struct{}
+	ActionTogglePills           struct{}
+	ActionExternalEditor        struct{}
+	ActionToggleYoloMode        struct{}
+	ActionTogglePlanMode        struct {
 		SessionID string
 		NextMode  session.CollaborationMode
 	}
-	ActionExecuteProposedPlan struct {
+	ActionExecuteProposedPlan   struct {
 		SessionID string
 		Plan      string
 	}
-	ActionSubmitPlanFeedback struct {
+	ActionSubmitPlanFeedback    struct {
 		SessionID string
 		Feedback  string
 	}
 	// ActionInitializeProject is a message to initialize a project.
-	ActionInitializeProject struct{}
-	ActionSummarize         struct {
+	ActionInitializeProject     struct{}
+	ActionSummarize             struct {
 		SessionID string
 	}
 	// ActionSelectReasoningEffort is a message indicating a reasoning effort has been selected.
 	ActionSelectReasoningEffort struct {
 		Effort string
 	}
-	ActionPermissionResponse struct {
+	ActionPermissionResponse    struct {
 		Permission permission.PermissionRequest
 		Action     PermissionAction
 	}
 	// ActionRunCustomCommand is a message to run a custom command.
-	ActionRunCustomCommand struct {
+	ActionRunCustomCommand      struct {
 		Content   string
 		Arguments []commands.Argument
 		Args      map[string]string // Actual argument values
 	}
 	// ActionRunMCPPrompt is a message to run a custom command.
-	ActionRunMCPPrompt struct {
+	ActionRunMCPPrompt          struct {
 		Title       string
 		Description string
 		PromptID    string
@@ -92,7 +92,7 @@ type (
 		Arguments   []commands.Argument
 		Args        map[string]string // Actual argument values
 	}
-	ActionResolveUserInput struct {
+	ActionResolveUserInput      struct {
 		Response userinput.Response
 	}
 )

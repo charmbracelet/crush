@@ -93,10 +93,20 @@ func FormatTokenCount(tokens int64) string {
 	return formattedTokens
 }
 
-// formatTokensAndCost formats cumulative token usage and cost.
-func formatTokensAndCost(t *styles.Styles, tokens, _ int64, cost float64) string {
+// FormatContextUsage formats token usage as used/total context window.
+func FormatContextUsage(tokens, contextWindow int64) string {
+	if contextWindow <= 0 {
+		return strings.ToLower(FormatTokenCount(tokens))
+	}
+	used := strings.ToLower(FormatTokenCount(tokens))
+	total := strings.ToLower(FormatTokenCount(contextWindow))
+	return fmt.Sprintf("%s/%s", used, total)
+}
+
+// formatTokensAndCost formats cumulative context usage and cost.
+func formatTokensAndCost(t *styles.Styles, tokens, contextWindow int64, cost float64) string {
 	formattedCost := t.Muted.Render(fmt.Sprintf("$%.2f", cost))
-	formattedTokens := t.Subtle.Render(fmt.Sprintf("Used %s tok", FormatTokenCount(tokens)))
+	formattedTokens := t.Subtle.Render(FormatContextUsage(tokens, contextWindow))
 	return fmt.Sprintf("%s %s", formattedTokens, formattedCost)
 }
 

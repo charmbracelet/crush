@@ -15,6 +15,8 @@ type KeyMap struct {
 
 		// Attachments key maps
 		AttachmentDeleteMode key.Binding
+		RemoveLastAttachment key.Binding
+		ClearAttachments     key.Binding
 		Escape               key.Binding
 		DeleteAllAttachments key.Binding
 
@@ -32,6 +34,8 @@ type KeyMap struct {
 		TogglePills    key.Binding
 		PillLeft       key.Binding
 		PillRight      key.Binding
+		QueueDelete    key.Binding
+		QueueClear     key.Binding
 		Down           key.Binding
 		Up             key.Binding
 		UpDown         key.Binding
@@ -74,7 +78,7 @@ func DefaultKeyMap() KeyMap {
 		),
 		Help: key.NewBinding(
 			key.WithKeys("ctrl+g"),
-			key.WithHelp("ctrl+g", "more"),
+			key.WithHelp("ctrl+g", "shortcuts"),
 		),
 		Commands: key.NewBinding(
 			key.WithKeys("ctrl+p"),
@@ -122,8 +126,8 @@ func DefaultKeyMap() KeyMap {
 		key.WithHelp("ctrl+f", "add image"),
 	)
 	km.Editor.PasteImage = key.NewBinding(
-		key.WithKeys("ctrl+v"),
-		key.WithHelp("ctrl+v", "paste image from clipboard"),
+		key.WithKeys("ctrl+v", "alt+v"),
+		key.WithHelp("ctrl+v/alt+v", "paste image from clipboard"),
 	)
 	km.Editor.MentionFile = key.NewBinding(
 		key.WithKeys("@"),
@@ -135,7 +139,15 @@ func DefaultKeyMap() KeyMap {
 	)
 	km.Editor.AttachmentDeleteMode = key.NewBinding(
 		key.WithKeys("ctrl+r"),
-		key.WithHelp("ctrl+r+{i}", "delete attachment at index i"),
+		key.WithHelp("ctrl+r then 1-9", "delete attachment by number"),
+	)
+	km.Editor.RemoveLastAttachment = key.NewBinding(
+		key.WithKeys("backspace", "delete"),
+		key.WithHelp("del", "remove last attachment"),
+	)
+	km.Editor.ClearAttachments = key.NewBinding(
+		key.WithKeys("ctrl+backspace", "ctrl+delete"),
+		key.WithHelp("ctrl+del", "clear attachments"),
 	)
 	km.Editor.Escape = key.NewBinding(
 		key.WithKeys("esc", "alt+esc"),
@@ -143,7 +155,7 @@ func DefaultKeyMap() KeyMap {
 	)
 	km.Editor.DeleteAllAttachments = key.NewBinding(
 		key.WithKeys("r"),
-		key.WithHelp("ctrl+r+r", "delete all attachments"),
+		key.WithHelp("r after ctrl+r", "delete all attachments"),
 	)
 	km.Editor.HistoryPrev = key.NewBinding(
 		key.WithKeys("up"),
@@ -182,7 +194,15 @@ func DefaultKeyMap() KeyMap {
 	)
 	km.Chat.PillRight = key.NewBinding(
 		key.WithKeys("right"),
-		key.WithHelp("←/→", "switch section"),
+		key.WithHelp("→→", "switch section"),
+	)
+	km.Chat.QueueDelete = key.NewBinding(
+		key.WithKeys("x", "backspace", "delete"),
+		key.WithHelp("x", "remove queued"),
+	)
+	km.Chat.QueueClear = key.NewBinding(
+		key.WithKeys("ctrl+x", "ctrl+backspace", "ctrl+delete"),
+		key.WithHelp("ctrl+x", "clear queue"),
 	)
 
 	km.Chat.Down = key.NewBinding(

@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"image"
 	"log/slog"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -227,6 +230,8 @@ type UI struct {
 	pillsExpanded      bool
 	focusedPillSection pillSection
 	promptQueue        int
+	selectedQueueIndex int
+	pillsPreviousFocus uiFocusState
 	pillsView          string
 
 	// Todo spinner
@@ -234,7 +239,10 @@ type UI struct {
 	todoIsSpinning bool
 
 	// mouse highlighting related state
-	lastClickTime time.Time
+	lastClickTime              time.Time
+	lastClipboardPasteShortcut time.Time
+	lastClipboardAttachmentSig string
+	lastClipboardAttachmentAt  time.Time
 
 	// Prompt history for up/down navigation through previous messages.
 	promptHistory struct {
@@ -389,12 +397,8 @@ func (m *UI) loadMCPrompts() tea.Msg {
 // Update handles updates to the UI model.
 func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
-	if m.hasSession() && m.isAgentBusy() {
-		queueSize := m.com.App.AgentCoordinator.QueuedPrompts(m.session.ID)
-		if queueSize != m.promptQueue {
-			m.promptQueue = queueSize
-			m.updateLayoutAndSize()
-		}
+	if m.syncPromptQueue() {
+		m.updateLayoutAndSize()
 	}
 	// Update terminal capabilities
 	m.caps.Update(msg)
@@ -757,6 +761,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case message.Attachment:
+		if m.attachments.Update(msg) {
+			m.updateLayoutAndSize()
+		}
+		return m, tea.Batch(cmds...)
 	case util.InfoMsg:
 		m.status.SetInfoMsg(msg)
 		ttl := msg.TTL
@@ -1298,7 +1307,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleHelp:
-		m.status.ToggleHelp()
+		if shortcuts, err := dialog.NewKeyboardShortcuts(m.com); err == nil {
+			m.dialog.OpenDialog(shortcuts)
+		}
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionExternalEditor:
 		if m.isAgentBusy() {
@@ -1592,8 +1603,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	handleGlobalKeys := func(msg tea.KeyPressMsg) bool {
 		switch {
 		case key.Matches(msg, m.keyMap.Help):
-			m.status.ToggleHelp()
-			m.updateLayoutAndSize()
+			if shortcuts, err := dialog.NewKeyboardShortcuts(m.com); err == nil {
+				m.dialog.OpenDialog(shortcuts)
+			}
 			return true
 		case key.Matches(msg, m.keyMap.Commands):
 			if cmd := m.openCommandsDialog(); cmd != nil {
@@ -1660,9 +1672,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		return m.handleDialogMsg(msg)
 	}
 
-	// Handle cancel key when agent is busy.
+	// Handle cancel key when the current session has an active request or queue.
 	if key.Matches(msg, m.keyMap.Chat.Cancel) {
-		if m.isAgentBusy() {
+		if m.isAgentBusy() || m.hasQueuedPrompts() {
 			if cmd := m.cancelAgent(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
@@ -1711,7 +1723,27 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 
 			case key.Matches(msg, m.keyMap.Editor.PasteImage):
-				cmds = append(cmds, m.pasteImageFromClipboard)
+				m.lastClipboardPasteShortcut = time.Now()
+				cmds = append(cmds, func() tea.Msg {
+					clipboardMsg := m.pasteImageFromClipboard()
+					if _, skipped := clipboardMsg.(pasteSkippedMsg); skipped {
+						return nil
+					}
+					if clipboardMsg != nil {
+						return clipboardMsg
+					}
+					return util.NewInfoMsg("Clipboard does not contain an image or image file")
+				})
+
+			case m.attachments.HasAny() && m.textarea.Value() == "" && key.Matches(msg, m.keyMap.Editor.RemoveLastAttachment):
+				if m.attachments.DeleteLast() {
+					m.updateLayoutAndSize()
+				}
+
+			case m.attachments.HasAny() && m.textarea.Value() == "" && key.Matches(msg, m.keyMap.Editor.ClearAttachments):
+				if m.attachments.Clear() {
+					m.updateLayoutAndSize()
+				}
 
 			case key.Matches(msg, m.keyMap.Editor.SendMessage):
 				value := m.textarea.Value()
@@ -1866,6 +1898,18 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if cmd := m.newSession(); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
+			case m.queueSelectionActive() && key.Matches(msg, m.keyMap.Chat.QueueDelete):
+				if cmd := m.removeSelectedQueuedPrompt(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			case m.queueSelectionActive() && key.Matches(msg, m.keyMap.Chat.QueueClear):
+				if cmd := m.clearQueuedPrompts(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			case m.queueSelectionActive() && key.Matches(msg, m.keyMap.Chat.Up):
+				m.moveQueueSelection(-1)
+			case m.queueSelectionActive() && key.Matches(msg, m.keyMap.Chat.Down):
+				m.moveQueueSelection(1)
 			case key.Matches(msg, m.keyMap.Chat.Expand):
 				m.chat.ToggleExpandedSelectedItem()
 			case key.Matches(msg, m.keyMap.Chat.Up):
@@ -2189,8 +2233,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 	var binds [][]key.Binding
 	k := &m.keyMap
 	help := k.Help
-	help.SetHelp("ctrl+g", "less")
-	hasAttachments := len(m.attachments.List()) > 0
+	help.SetHelp("ctrl+g", "shortcuts")
 	hasSession := m.hasSession()
 	commands := k.Commands
 	if m.focus == uiFocusEditor && m.textarea.Value() == "" {
@@ -2246,15 +2289,15 @@ func (m *UI) FullHelp() [][]key.Binding {
 					k.Editor.OpenEditor,
 				},
 			)
-			if hasAttachments {
-				binds = append(binds,
-					[]key.Binding{
-						k.Editor.AttachmentDeleteMode,
-						k.Editor.DeleteAllAttachments,
-						k.Editor.Escape,
-					},
-				)
-			}
+			binds = append(binds,
+				[]key.Binding{
+					k.Editor.RemoveLastAttachment,
+					k.Editor.ClearAttachments,
+					k.Editor.AttachmentDeleteMode,
+					k.Editor.DeleteAllAttachments,
+					k.Editor.Escape,
+				},
+			)
 		case uiFocusMain:
 			binds = append(binds,
 				[]key.Binding{
@@ -2295,15 +2338,15 @@ func (m *UI) FullHelp() [][]key.Binding {
 					k.Editor.OpenEditor,
 				},
 			)
-			if hasAttachments {
-				binds = append(binds,
-					[]key.Binding{
-						k.Editor.AttachmentDeleteMode,
-						k.Editor.DeleteAllAttachments,
-						k.Editor.Escape,
-					},
-				)
-			}
+			binds = append(binds,
+				[]key.Binding{
+					k.Editor.RemoveLastAttachment,
+					k.Editor.ClearAttachments,
+					k.Editor.AttachmentDeleteMode,
+					k.Editor.DeleteAllAttachments,
+					k.Editor.Escape,
+				},
+			)
 			binds = append(binds,
 				[]key.Binding{
 					help,
@@ -2312,6 +2355,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 		}
 	}
 
+	// Always show help and quit in the last group
 	binds = append(binds,
 		[]key.Binding{
 			help,
@@ -2776,9 +2820,10 @@ func isWhitespace(b byte) bool {
 // isAgentBusy returns true if the agent coordinator exists and is currently
 // busy processing a request.
 func (m *UI) isAgentBusy() bool {
-	return m.com.App != nil &&
+	return m.hasSession() &&
+		m.com.App != nil &&
 		m.com.App.AgentCoordinator != nil &&
-		m.com.App.AgentCoordinator.IsBusy()
+		m.com.App.AgentCoordinator.IsSessionBusy(m.session.ID)
 }
 
 // hasSession returns true if there is an active session with a valid ID.
@@ -2948,6 +2993,72 @@ func cancelTimerCmd() tea.Cmd {
 // cancelAgent handles the cancel key press. The first press sets isCanceling to true
 // and starts a timer. The second press (before the timer expires) actually
 // cancels the agent.
+func (m *UI) hasQueuedPrompts() bool {
+	return m.hasSession() &&
+		m.com.App != nil &&
+		m.com.App.AgentCoordinator != nil &&
+		m.com.App.AgentCoordinator.QueuedPrompts(m.session.ID) > 0
+}
+
+func (m *UI) syncPromptQueue() bool {
+	if !m.hasSession() || m.com.App == nil || m.com.App.AgentCoordinator == nil {
+		return false
+	}
+
+	queueSize := m.com.App.AgentCoordinator.QueuedPrompts(m.session.ID)
+	changed := queueSize != m.promptQueue
+	m.promptQueue = queueSize
+	if queueSize <= 0 {
+		m.selectedQueueIndex = 0
+		return changed
+	}
+	if m.selectedQueueIndex >= queueSize {
+		m.selectedQueueIndex = queueSize - 1
+	}
+	if m.selectedQueueIndex < 0 {
+		m.selectedQueueIndex = 0
+	}
+	return changed
+}
+
+func (m *UI) queueSelectionActive() bool {
+	return m.state == uiChat &&
+		m.focus == uiFocusMain &&
+		m.pillsExpanded &&
+		m.focusedPillSection == pillSectionQueue &&
+		m.promptQueue > 0
+}
+
+func (m *UI) moveQueueSelection(delta int) {
+	if m.promptQueue <= 0 {
+		m.selectedQueueIndex = 0
+		m.renderPills()
+		return
+	}
+	m.selectedQueueIndex = min(max(m.selectedQueueIndex+delta, 0), m.promptQueue-1)
+	m.renderPills()
+}
+
+func (m *UI) removeSelectedQueuedPrompt() tea.Cmd {
+	if !m.hasSession() || m.com.App == nil || m.com.App.AgentCoordinator == nil || m.promptQueue == 0 {
+		return nil
+	}
+	m.com.App.AgentCoordinator.RemoveQueuedPrompt(m.session.ID, m.selectedQueueIndex)
+	m.syncPromptQueue()
+	m.renderPills()
+	return nil
+}
+
+func (m *UI) clearQueuedPrompts() tea.Cmd {
+	if !m.hasSession() || m.com.App == nil || m.com.App.AgentCoordinator == nil || m.promptQueue == 0 {
+		return nil
+	}
+	m.com.App.AgentCoordinator.ClearQueue(m.session.ID)
+	m.syncPromptQueue()
+	m.renderPills()
+	return nil
+}
+
 func (m *UI) cancelAgent() tea.Cmd {
 	if !m.hasSession() {
 		return nil
@@ -2970,8 +3081,7 @@ func (m *UI) cancelAgent() tea.Cmd {
 
 	// Check if there are queued prompts - if so, clear the queue.
 	if coordinator.QueuedPrompts(m.session.ID) > 0 {
-		coordinator.ClearQueue(m.session.ID)
-		return nil
+		return m.clearQueuedPrompts()
 	}
 
 	// First escape press - set canceling state and start timer.
@@ -3196,6 +3306,19 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 		return nil
 	}
 
+	if time.Since(m.lastClipboardPasteShortcut) <= 500*time.Millisecond {
+		return nil
+	}
+
+	if clipboardMsg := m.pasteImageFromClipboard(); clipboardMsg != nil {
+		if _, skipped := clipboardMsg.(pasteSkippedMsg); !skipped {
+			return func() tea.Msg {
+				return clipboardMsg
+			}
+		}
+		return nil
+	}
+
 	if strings.Count(msg.Content, "\n") > pasteLinesThreshold {
 		return func() tea.Msg {
 			content := []byte(msg.Content)
@@ -3285,36 +3408,79 @@ func (m *UI) handleFilePathPaste(path string) tea.Cmd {
 	}
 }
 
+func clipboardAttachmentSignature(att message.Attachment) string {
+	sum := sha256.Sum256(att.Content)
+	return att.MimeType + ":" + hex.EncodeToString(sum[:])
+}
+
+func (m *UI) shouldSkipClipboardAttachment(att message.Attachment) bool {
+	sig := clipboardAttachmentSignature(att)
+	if sig == m.lastClipboardAttachmentSig && time.Since(m.lastClipboardAttachmentAt) <= 200*time.Millisecond {
+		return true
+	}
+	m.lastClipboardAttachmentSig = sig
+	m.lastClipboardAttachmentAt = time.Now()
+	return false
+}
+
 // pasteImageFromClipboard reads image data from the system clipboard and
 // creates an attachment. If no image data is found, it falls back to
-// interpreting clipboard text as a file path.
+// file-drop clipboard entries and then clipboard text paths.
 func (m *UI) pasteImageFromClipboard() tea.Msg {
 	imageData, err := readClipboard(clipboardFormatImage)
-	if int64(len(imageData)) > common.MaxAttachmentSize {
-		return util.InfoMsg{
-			Type: util.InfoTypeError,
-			Msg:  "File too large, max 5MB",
+	if err == nil && len(imageData) > 0 {
+		if int64(len(imageData)) > common.MaxAttachmentSize {
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
+				Msg:  "File too large, max 5MB",
+			}
 		}
-	}
-	name := fmt.Sprintf("paste_%d.png", m.pasteIdx())
-	if err == nil {
-		return message.Attachment{
+		name := fmt.Sprintf("paste_%d.png", m.pasteIdx())
+		attachment := message.Attachment{
 			FilePath: name,
 			FileName: name,
 			MimeType: mimeOf(imageData),
 			Content:  imageData,
 		}
+		if m.shouldSkipClipboardAttachment(attachment) {
+			return pasteSkippedMsg{}
+		}
+		return attachment
+	}
+
+	if paths, pathsErr := readClipboardFileList(); pathsErr == nil {
+		if attachment, ok := m.attachmentFromClipboardPaths(paths); ok {
+			return attachment
+		}
 	}
 
 	textData, textErr := readClipboard(clipboardFormatText)
 	if textErr != nil || len(textData) == 0 {
-		return nil // Clipboard is empty or does not contain an image
+		return nil
 	}
+	if attachment, ok := m.attachmentFromClipboardPaths(clipboardPathCandidates(string(textData))); ok {
+		return attachment
+	}
+	return nil
+}
 
-	path := strings.TrimSpace(string(textData))
-	path = strings.ReplaceAll(path, "\\ ", " ")
+func (m *UI) attachmentFromClipboardPaths(paths []string) (message.Attachment, bool) {
+	for _, path := range paths {
+		attachment, err := attachmentFromClipboardPath(path)
+		if err == nil {
+			return attachment, true
+		}
+	}
+	return message.Attachment{}, false
+}
+
+func attachmentFromClipboardPath(rawPath string) (message.Attachment, error) {
+	path := normalizeClipboardPath(rawPath)
+	if path == "" {
+		return message.Attachment{}, fmt.Errorf("clipboard path is empty")
+	}
 	if _, statErr := os.Stat(path); statErr != nil {
-		return nil // Clipboard does not contain an image or valid file path
+		return message.Attachment{}, statErr
 	}
 
 	lowerPath := strings.ToLower(path)
@@ -3326,29 +3492,20 @@ func (m *UI) pasteImageFromClipboard() tea.Msg {
 		}
 	}
 	if !isAllowed {
-		return util.NewInfoMsg("File type is not a supported image format")
+		return message.Attachment{}, fmt.Errorf("clipboard path is not a supported image")
 	}
 
 	fileInfo, statErr := os.Stat(path)
 	if statErr != nil {
-		return util.InfoMsg{
-			Type: util.InfoTypeError,
-			Msg:  fmt.Sprintf("Unable to read file: %v", statErr),
-		}
+		return message.Attachment{}, statErr
 	}
 	if fileInfo.Size() > common.MaxAttachmentSize {
-		return util.InfoMsg{
-			Type: util.InfoTypeError,
-			Msg:  "File too large, max 5MB",
-		}
+		return message.Attachment{}, fmt.Errorf("file too large")
 	}
 
 	content, readErr := os.ReadFile(path)
 	if readErr != nil {
-		return util.InfoMsg{
-			Type: util.InfoTypeError,
-			Msg:  fmt.Sprintf("Unable to read file: %v", readErr),
-		}
+		return message.Attachment{}, readErr
 	}
 
 	return message.Attachment{
@@ -3356,10 +3513,48 @@ func (m *UI) pasteImageFromClipboard() tea.Msg {
 		FileName: filepath.Base(path),
 		MimeType: mimeOf(content),
 		Content:  content,
-	}
+	}, nil
 }
 
-var pasteRE = regexp.MustCompile(`paste_(\d+).txt`)
+func clipboardPathCandidates(text string) []string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	parts := strings.FieldsFunc(text, func(r rune) bool {
+		return r == '\n' || r == 0
+	})
+	paths := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			paths = append(paths, part)
+		}
+	}
+	return paths
+}
+
+func normalizeClipboardPath(path string) string {
+	path = strings.TrimSpace(path)
+	path = strings.Trim(path, "\"")
+	path = strings.ReplaceAll(path, "\\ ", " ")
+	if strings.HasPrefix(strings.ToLower(path), "file://") {
+		parsed, err := url.Parse(path)
+		if err == nil {
+			path = parsed.Path
+			if decoded, decodeErr := url.PathUnescape(path); decodeErr == nil {
+				path = decoded
+			}
+			if len(path) >= 3 && path[0] == '/' && path[2] == ':' {
+				path = path[1:]
+			}
+		}
+	}
+	return filepath.Clean(path)
+}
+
+// pasteSkippedMsg is returned by pasteImageFromClipboard when the same image
+// was pasted too recently and was silently skipped to prevent duplicates.
+type pasteSkippedMsg struct{}
+
+var pasteRE = regexp.MustCompile(`paste_(\d+)\.[^.]+`)
 
 func (m *UI) pasteIdx() int {
 	result := 0

@@ -38,6 +38,25 @@ type Attachments struct {
 
 func (m *Attachments) List() []message.Attachment { return m.list }
 func (m *Attachments) Reset()                     { m.list = nil }
+func (m *Attachments) HasAny() bool               { return len(m.list) > 0 }
+
+func (m *Attachments) DeleteLast() bool {
+	if len(m.list) == 0 {
+		return false
+	}
+	m.list = m.list[:len(m.list)-1]
+	m.deleting = false
+	return true
+}
+
+func (m *Attachments) Clear() bool {
+	if len(m.list) == 0 {
+		return false
+	}
+	m.list = nil
+	m.deleting = false
+	return true
+}
 
 func (m *Attachments) Update(msg tea.Msg) bool {
 	switch msg := msg.(type) {
@@ -55,14 +74,11 @@ func (m *Attachments) Update(msg tea.Msg) bool {
 			m.deleting = false
 			return true
 		case m.deleting && key.Matches(msg, m.keyMap.DeleteAll):
-			m.deleting = false
-			m.list = nil
-			return true
+			return m.Clear()
 		case m.deleting:
-			// Handle digit keys for individual attachment deletion.
 			r := msg.Code
-			if r >= '0' && r <= '9' {
-				num := int(r - '0')
+			if r >= '1' && r <= '9' {
+				num := int(r - '1')
 				if num < len(m.list) {
 					m.list = slices.Delete(m.list, num, num+1)
 				}
@@ -99,15 +115,14 @@ func (r *Renderer) Render(attachments []message.Attachment, deleting bool, width
 
 	for i, att := range attachments {
 		filename := filepath.Base(att.FileName)
-		// Truncate if needed.
 		if ansi.StringWidth(filename) > maxFilename {
-			filename = ansi.Truncate(filename, maxFilename, "…")
+			filename = ansi.Truncate(filename, maxFilename, "...")
 		}
 
 		if deleting {
 			chips = append(
 				chips,
-				r.deletingStyle.Render(fmt.Sprintf("%d", i)),
+				r.deletingStyle.Render(fmt.Sprintf("%d", i+1)),
 				r.normalStyle.Render(filename),
 			)
 		} else {
@@ -119,7 +134,7 @@ func (r *Renderer) Render(attachments []message.Attachment, deleting bool, width
 		}
 
 		if i == fits && len(attachments) > i {
-			chips = append(chips, lipgloss.NewStyle().Width(maxItemWidth).Render(fmt.Sprintf("%d more…", len(attachments)-fits)))
+			chips = append(chips, lipgloss.NewStyle().Width(maxItemWidth).Render(fmt.Sprintf("%d more...", len(attachments)-fits)))
 			break
 		}
 	}

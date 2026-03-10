@@ -56,7 +56,7 @@ func queuePill(queue int, focused, panelFocused bool, t *styles.Styles) string {
 	if queue <= 0 {
 		return ""
 	}
-	triangles := styles.ForegroundGrad(t, "▶▶▶▶▶▶▶▶▶", false, t.RedDark, t.Secondary)
+	triangles := styles.ForegroundGrad(t, ">>>>>", false, t.RedDark, t.Secondary)
 	if queue < len(triangles) {
 		triangles = triangles[:queue]
 	}
@@ -99,7 +99,7 @@ func todoPill(todos []session.Todo, spinnerView string, focused, panelFocused bo
 			taskText = currentTodo.ActiveForm
 		}
 		if len(taskText) > maxTaskDisplayLength {
-			taskText = taskText[:maxTaskDisplayLength-1] + "…"
+			taskText = taskText[:maxTaskDisplayLength-3] + "..."
 		}
 		task := t.Subtle.Render(taskText)
 		content = fmt.Sprintf("%s %s %s  %s", spinnerView, label, progress, task)
@@ -116,21 +116,38 @@ func todoList(sessionTodos []session.Todo, spinnerView string, t *styles.Styles,
 }
 
 // queueList renders the expanded queue items list.
-func queueList(queueItems []string, t *styles.Styles) string {
+func queueList(queueItems []string, selected int, t *styles.Styles) string {
 	if len(queueItems) == 0 {
 		return ""
 	}
 
 	var lines []string
-	for _, item := range queueItems {
+	for i, item := range queueItems {
 		text := item
 		if len(text) > maxQueueDisplayLength {
-			text = text[:maxQueueDisplayLength-1] + "…"
+			text = text[:maxQueueDisplayLength-3] + "..."
 		}
-		prefix := t.Pills.QueueItemPrefix.Render() + " "
-		lines = append(lines, prefix+t.Muted.Render(text))
+
+		line := fmt.Sprintf("%d. %s", i+1, text)
+		if i == selected {
+			content := t.Dialog.SelectedItem.Render("> " + line)
+			lines = append(lines, content)
+			continue
+		}
+		prefix := t.Pills.QueueItemPrefix.Render()
+		content := t.Muted.Render(line)
+		lines = append(lines, prefix+" "+content)
 	}
 
+	help := lipgloss.JoinHorizontal(
+		lipgloss.Left,
+		t.Pills.HelpKey.Render("up/down"), " ", t.Pills.HelpText.Render("select"),
+		"  ",
+		t.Pills.HelpKey.Render("del"), " ", t.Pills.HelpText.Render("remove"),
+		"  ",
+		t.Pills.HelpKey.Render("ctrl+x"), " ", t.Pills.HelpText.Render("clear all"),
+	)
+	lines = append(lines, "", help)
 	return strings.Join(lines, "\n")
 }
 
@@ -143,22 +160,42 @@ func (m *UI) togglePillsExpanded() tea.Cmd {
 	if !hasPills {
 		return nil
 	}
-	m.pillsExpanded = !m.pillsExpanded
-	if m.pillsExpanded {
+
+	opening := !m.pillsExpanded
+	m.pillsExpanded = opening
+	var cmd tea.Cmd
+	if opening {
+		m.pillsPreviousFocus = m.focus
 		if hasIncompleteTodos(m.session.Todos) {
 			m.focusedPillSection = pillSectionTodos
 		} else {
 			m.focusedPillSection = pillSectionQueue
+			m.selectedQueueIndex = 0
+		}
+		m.focus = uiFocusMain
+		m.textarea.Blur()
+		m.chat.Focus()
+		if m.chat.Len() > 0 {
+			m.chat.SetSelected(m.chat.Len() - 1)
+		}
+	} else {
+		if m.pillsPreviousFocus == uiFocusEditor {
+			m.focus = uiFocusEditor
+			m.chat.Blur()
+			cmd = m.textarea.Focus()
+		} else {
+			m.focus = uiFocusMain
+			m.textarea.Blur()
+			m.chat.Focus()
 		}
 	}
 	m.updateLayoutAndSize()
 
-	// Make sure to follow scroll if follow is enabled when toggling pills.
 	if m.chat.Follow() {
 		m.chat.ScrollToBottom()
 	}
 
-	return nil
+	return cmd
 }
 
 // switchPillSection changes focus between todo and queue sections.
@@ -176,6 +213,7 @@ func (m *UI) switchPillSection(dir int) tea.Cmd {
 	}
 	if dir > 0 && m.focusedPillSection == pillSectionTodos && hasQueue {
 		m.focusedPillSection = pillSectionQueue
+		m.selectedQueueIndex = 0
 		m.updateLayoutAndSize()
 		return nil
 	}
@@ -251,7 +289,7 @@ func (m *UI) renderPills() {
 		} else if queueFocused && hasQueue {
 			if m.com.App != nil && m.com.App.AgentCoordinator != nil {
 				queueItems := m.com.App.AgentCoordinator.QueuedPromptsList(m.session.ID)
-				expandedList = queueList(queueItems, t)
+				expandedList = queueList(queueItems, m.selectedQueueIndex, t)
 			}
 		}
 	}

@@ -1,4 +1,4 @@
-//go:build (linux || darwin || windows) && !arm && !386 && !ios && !android
+//go:build (linux || darwin) && !arm && !386 && !ios && !android
 
 package model
 
@@ -11,5 +11,9 @@ func readClipboard(f clipboardFormat) ([]byte, error) {
 	case clipboardFormatImage:
 		return nativeclipboard.Image.Read()
 	}
+	return nil, errClipboardUnknownFormat
+}
+
+func readClipboardFileList() ([]string, error) {
 	return nil, errClipboardUnknownFormat
 }

@@ -3,8 +3,10 @@ package model
 import (
 	"cmp"
 	"fmt"
+	"strings"
 
 	"charm.land/lipgloss/v2"
+	sessionpkg "github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/logo"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -51,7 +53,32 @@ func (m *UI) modelInfo(width int) string {
 			ModelContext: model.CatwalkCfg.ContextWindow,
 		}
 	}
-	return common.ModelInfo(m.com.Styles, model.CatwalkCfg.Name, providerName, reasoningInfo, modelContext, width)
+	info := common.ModelInfo(m.com.Styles, model.CatwalkCfg.Name, providerName, reasoningInfo, modelContext, width)
+	modeLine := m.modeInfo(width)
+	if modeLine == "" {
+		return info
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, info, modeLine)
+}
+
+func (m *UI) modeInfo(width int) string {
+	if m.session == nil || m.com.App == nil {
+		return ""
+	}
+
+	modes := make([]string, 0, 2)
+	if m.session.CollaborationMode == sessionpkg.CollaborationModePlan {
+		modes = append(modes, "PLAN")
+	}
+	if m.com.App.Permissions.SkipRequests() {
+		modes = append(modes, "YOLO")
+	}
+	if len(modes) == 0 {
+		return ""
+	}
+
+	text := fmt.Sprintf("Modes: %s", strings.Join(modes, " | "))
+	return m.com.Styles.Subtle.PaddingLeft(2).Width(width).Render(text)
 }
 
 // getDynamicHeightLimits will give us the num of items to show in each section based on the hight

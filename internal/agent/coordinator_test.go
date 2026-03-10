@@ -30,12 +30,13 @@ func (m *mockSessionAgent) SetSystemPrompt(systemPrompt string) {}
 func (m *mockSessionAgent) Cancel(sessionID string) {
 	m.cancelled = append(m.cancelled, sessionID)
 }
-func (m *mockSessionAgent) CancelAll()                                  {}
-func (m *mockSessionAgent) IsSessionBusy(sessionID string) bool         { return false }
-func (m *mockSessionAgent) IsBusy() bool                                { return false }
-func (m *mockSessionAgent) QueuedPrompts(sessionID string) int          { return 0 }
-func (m *mockSessionAgent) QueuedPromptsList(sessionID string) []string { return nil }
-func (m *mockSessionAgent) ClearQueue(sessionID string)                 {}
+func (m *mockSessionAgent) CancelAll()                                          {}
+func (m *mockSessionAgent) IsSessionBusy(sessionID string) bool                 { return false }
+func (m *mockSessionAgent) IsBusy() bool                                        { return false }
+func (m *mockSessionAgent) QueuedPrompts(sessionID string) int                  { return 0 }
+func (m *mockSessionAgent) QueuedPromptsList(sessionID string) []string         { return nil }
+func (m *mockSessionAgent) RemoveQueuedPrompt(sessionID string, index int) bool { return false }
+func (m *mockSessionAgent) ClearQueue(sessionID string)                         {}
 func (m *mockSessionAgent) Summarize(context.Context, string, fantasy.ProviderOptions) error {
 	return nil
 }
@@ -207,7 +208,7 @@ func TestRunSubAgent(t *testing.T) {
 			Prompt:         "test",
 			SessionTitle:   "Test",
 		})
-		// runSubAgent returns (errorResponse, nil) when agent.Run fails — not a Go error.
+		// runSubAgent returns (errorResponse, nil) when agent.Run fails 鈥?not a Go error.
 		require.NoError(t, err)
 		assert.True(t, resp.IsError)
 		assert.Equal(t, "error generating response", resp.Content)

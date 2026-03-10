@@ -43,6 +43,7 @@ SET
     collaboration_mode = ?,
     prompt_tokens = ?,
     completion_tokens = ?,
+    last_prompt_tokens = ?,
     summary_message_id = ?,
     cost = ?,
     todos = ?

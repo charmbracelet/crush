@@ -85,6 +85,7 @@ type SessionAgent interface {
 	IsBusy() bool
 	QueuedPrompts(sessionID string) int
 	QueuedPromptsList(sessionID string) []string
+	RemoveQueuedPrompt(sessionID string, index int) bool
 	ClearQueue(sessionID string)
 	Summarize(context.Context, string, fantasy.ProviderOptions) error
 	Model() Model
@@ -256,16 +257,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				prepared.Messages[i].ProviderOptions = nil
 			}
 
-			queuedCalls, _ := a.messageQueue.Get(call.SessionID)
-			a.messageQueue.Del(call.SessionID)
-			for _, queued := range queuedCalls {
-				userMessage, createErr := a.createUserMessage(callContext, queued)
-				if createErr != nil {
-					return callContext, prepared, createErr
-				}
-				prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
-			}
-
 			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel)
 
 			lastSystemRoleInx := 0
@@ -406,7 +397,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		StopWhen: []fantasy.StopCondition{
 			func(_ []fantasy.StepResult) bool {
 				cw := int64(largeModel.CatwalkCfg.ContextWindow)
-				tokens := currentSession.CompletionTokens + currentSession.PromptTokens
+				tokens := currentSession.LastPromptTokens
 				remaining := cw - tokens
 				var threshold int64
 				if cw > largeContextWindowThreshold {
@@ -921,6 +912,7 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 
 	session.CompletionTokens += usage.OutputTokens
 	session.PromptTokens += promptTokensForUsage(usage)
+	session.LastPromptTokens = promptTokensForUsage(usage)
 }
 
 func (a *sessionAgent) Cancel(sessionID string) {
@@ -943,6 +935,22 @@ func (a *sessionAgent) Cancel(sessionID string) {
 		slog.Debug("Clearing queued prompts", "session_id", sessionID)
 		a.messageQueue.Del(sessionID)
 	}
+}
+
+func (a *sessionAgent) RemoveQueuedPrompt(sessionID string, index int) bool {
+	queuedPrompts, ok := a.messageQueue.Get(sessionID)
+	if !ok || index < 0 || index >= len(queuedPrompts) {
+		return false
+	}
+
+	slog.Debug("Removing queued prompt", "session_id", sessionID, "index", index)
+	updatedQueue := append(queuedPrompts[:index:index], queuedPrompts[index+1:]...)
+	if len(updatedQueue) == 0 {
+		a.messageQueue.Del(sessionID)
+		return true
+	}
+	a.messageQueue.Set(sessionID, updatedQueue)
+	return true
 }
 
 func (a *sessionAgent) ClearQueue(sessionID string) {

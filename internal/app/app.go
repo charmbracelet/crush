@@ -60,7 +60,7 @@ type App struct {
 
 	LSPManager *lsp.Manager
 
-	config *config.Config
+	config *config.ConfigStore
 
 	serviceEventsWG *sync.WaitGroup
 	eventsCtx       context.Context
@@ -73,11 +73,12 @@ type App struct {
 }
 
 // New initializes a new application instance.
-func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
+func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, error) {
 	q := db.New(conn)
 	sessions := session.NewService(q, conn)
 	messages := message.NewService(q)
 	files := history.NewService(q, conn)
+	cfg := store.Config()
 	skipPermissionsRequests := cfg.Permissions != nil && cfg.Permissions.SkipRequests
 	var allowedTools []string
 	if cfg.Permissions != nil && cfg.Permissions.AllowedTools != nil {
@@ -88,13 +89,13 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 		Sessions:    sessions,
 		Messages:    messages,
 		History:     files,
-		Permissions: permission.NewPermissionService(cfg.WorkingDir(), skipPermissionsRequests, allowedTools),
+		Permissions: permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools),
 		FileTracker: filetracker.NewService(q),
-		LSPManager:  lsp.NewManager(cfg),
+		LSPManager:  lsp.NewManager(store),
 
 		globalCtx: ctx,
 
-		config: cfg,
+		config: store,
 
 		events:          make(chan tea.Msg, 100),
 		serviceEventsWG: &sync.WaitGroup{},
@@ -106,7 +107,7 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	// Check for updates in the background.
 	go app.checkForUpdates(ctx)
 
-	go mcp.Initialize(ctx, app.Permissions, cfg)
+	go mcp.Initialize(ctx, app.Permissions, store)
 
 	// cleanup database upon app shutdown
 	app.cleanupFuncs = append(
@@ -138,8 +139,13 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	return app, nil
 }
 
-// Config returns the application configuration.
+// Config returns the pure-data configuration.
 func (app *App) Config() *config.Config {
+	return app.config.Config()
+}
+
+// Store returns the config store.
+func (app *App) Store() *config.ConfigStore {
 	return app.config
 }
 
@@ -170,7 +176,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	}
 	stderrTTY = term.IsTerminal(os.Stderr.Fd())
 	stdinTTY = term.IsTerminal(os.Stdin.Fd())
-	progress = app.config.Options.Progress == nil || *app.config.Options.Progress
+	progress = app.config.Config().Options.Progress == nil || *app.config.Config().Options.Progress
 
 	if !hideSpinner && stderrTTY {
 		t := styles.DefaultStyles()
@@ -323,7 +329,7 @@ func (app *App) UpdateAgentModel(ctx context.Context) error {
 // If largeModel is provided but smallModel is not, the small model defaults to
 // the provider's default small model.
 func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel, smallModel string) error {
-	providers := app.config.Providers.Copy()
+	providers := app.config.Config().Providers.Copy()
 
 	largeMatches, smallMatches, err := findModels(providers, largeModel, smallModel)
 	if err != nil {
@@ -340,7 +346,7 @@ func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel,
 		}
 		largeProviderID = found.provider
 		slog.Info("Overriding large model for non-interactive run", "provider", found.provider, "model", found.modelID)
-		app.config.Models[config.SelectedModelTypeLarge] = config.SelectedModel{
+		app.config.Config().Models[config.SelectedModelTypeLarge] = config.SelectedModel{
 			Provider: found.provider,
 			Model:    found.modelID,
 		}
@@ -354,7 +360,7 @@ func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel,
 			return err
 		}
 		slog.Info("Overriding small model for non-interactive run", "provider", found.provider, "model", found.modelID)
-		app.config.Models[config.SelectedModelTypeSmall] = config.SelectedModel{
+		app.config.Config().Models[config.SelectedModelTypeSmall] = config.SelectedModel{
 			Provider: found.provider,
 			Model:    found.modelID,
 		}
@@ -362,7 +368,7 @@ func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel,
 	case largeModel != "":
 		// No small model specified, but large model was - use provider's default.
 		smallCfg := app.GetDefaultSmallModel(largeProviderID)
-		app.config.Models[config.SelectedModelTypeSmall] = smallCfg
+		app.config.Config().Models[config.SelectedModelTypeSmall] = smallCfg
 	}
 
 	return app.AgentCoordinator.UpdateModels(ctx)
@@ -371,7 +377,7 @@ func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel,
 // GetDefaultSmallModel returns the default small model for the given
 // provider. Falls back to the large model if no default is found.
 func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
-	cfg := app.config
+	cfg := app.config.Config()
 	largeModelCfg := cfg.Models[config.SelectedModelTypeLarge]
 
 	// Find the provider in the known providers list to get its default small model.
@@ -472,7 +478,7 @@ func setupSubscriber[T any](
 }
 
 func (app *App) InitCoderAgent(ctx context.Context) error {
-	coderAgentCfg := app.config.Agents[config.AgentCoder]
+	coderAgentCfg := app.config.Config().Agents[config.AgentCoder]
 	if coderAgentCfg.ID == "" {
 		return fmt.Errorf("coder agent configuration is missing")
 	}

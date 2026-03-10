@@ -240,6 +240,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	var currentAssistant *message.Message
 	var shouldSummarize bool
+	var estimatedPromptTokens int64
 	result, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
 		Files:            files,
@@ -293,6 +294,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatwalkCfg.SupportsImages)
 			callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatwalkCfg.Name)
 			currentAssistant = &assistantMsg
+
+			estimatedPromptTokens = estimatePromptTokens(prepared.Messages, agentTools)
 			return callContext, prepared, err
 		},
 		OnReasoningStart: func(id string, reasoning fantasy.ReasoningContent) error {
@@ -386,7 +389,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			if getSessionErr != nil {
 				return getSessionErr
 			}
-			a.updateSessionUsage(largeModel, &updatedSession, stepResult.Usage, a.openrouterCost(stepResult.ProviderMetadata))
+			a.updateSessionUsage(largeModel, &updatedSession, stepResult.Usage, a.openrouterCost(stepResult.ProviderMetadata), estimatedPromptTokens)
 			_, sessionErr := a.sessions.Save(ctx, updatedSession)
 			if sessionErr != nil {
 				return sessionErr
@@ -654,7 +657,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		}
 	}
 
-	a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, openrouterCost)
+	a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, openrouterCost, 0)
 
 	currentSession.SummaryMessageID = summaryMessage.ID
 	_, err = a.sessions.Save(genCtx, currentSession)
@@ -895,7 +898,32 @@ func totalTokensForUsage(usage fantasy.Usage) int64 {
 	return promptTokensForUsage(usage) + usage.OutputTokens
 }
 
-func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session, usage fantasy.Usage, overrideCost *float64) {
+// estimatePromptTokens estimates the prompt token count from message text
+// content and tool definitions. This serves as a fallback when providers
+// (e.g., some Anthropic-compatible proxies) don't report input tokens in
+// streaming mode. The estimate uses ~4 bytes per token for Latin text and
+// ~2 bytes per token for CJK, defaulting to a conservative 3 bytes/token.
+func estimatePromptTokens(messages []fantasy.Message, tools []fantasy.AgentTool) int64 {
+	var totalBytes int
+	for _, msg := range messages {
+		for _, part := range msg.Content {
+			if tp, ok := fantasy.AsMessagePart[fantasy.TextPart](part); ok {
+				totalBytes += len(tp.Text)
+			}
+		}
+	}
+	for _, tool := range tools {
+		info := tool.Info()
+		totalBytes += len(info.Name) + len(info.Description)
+		// Rough estimate for JSON schema parameters.
+		totalBytes += 200
+	}
+	// Use ~3 bytes per token as a conservative middle ground.
+	const bytesPerToken = 3
+	return int64(totalBytes / bytesPerToken)
+}
+
+func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session, usage fantasy.Usage, overrideCost *float64, estimatedPromptTokens int64) {
 	modelConfig := model.CatwalkCfg
 	cost := modelConfig.CostPer1MInCached/1e6*float64(usage.CacheCreationTokens) +
 		modelConfig.CostPer1MOutCached/1e6*float64(usage.CacheReadTokens) +
@@ -910,9 +938,17 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 		session.Cost += cost
 	}
 
+	promptTokens := promptTokensForUsage(usage)
+	// Some providers (e.g., Anthropic-compatible proxies) don't report input
+	// tokens in streaming mode. Fall back to the estimated count so that
+	// context window tracking still works.
+	if promptTokens == 0 && estimatedPromptTokens > 0 {
+		promptTokens = estimatedPromptTokens
+	}
+
 	session.CompletionTokens += usage.OutputTokens
-	session.PromptTokens += promptTokensForUsage(usage)
-	session.LastPromptTokens = promptTokensForUsage(usage)
+	session.PromptTokens += promptTokens
+	session.LastPromptTokens = promptTokens
 }
 
 func (a *sessionAgent) Cancel(sessionID string) {

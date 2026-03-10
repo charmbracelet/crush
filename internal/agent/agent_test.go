@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -697,7 +698,7 @@ func TestUpdateSessionUsage_AccumulatesTotals(t *testing.T) {
 		OutputTokens:        45,
 	}
 
-	agent.updateSessionUsage(model, &sess, usage, nil)
+	agent.updateSessionUsage(model, &sess, usage, nil, 0)
 
 	require.Equal(t, int64(2320), sess.PromptTokens)
 	require.Equal(t, int64(445), sess.CompletionTokens)
@@ -725,13 +726,104 @@ func TestUpdateSessionUsage_LastPromptTokensIsSetNotAccumulated(t *testing.T) {
 		OutputTokens: 180,
 	}
 
-	agent.updateSessionUsage(model, &sess, firstUsage, nil)
+	agent.updateSessionUsage(model, &sess, firstUsage, nil, 0)
 	require.Equal(t, int64(15000), sess.LastPromptTokens)
 	require.Equal(t, int64(15000), sess.PromptTokens)
 
-	agent.updateSessionUsage(model, &sess, secondUsage, nil)
+	agent.updateSessionUsage(model, &sess, secondUsage, nil, 0)
 	// PromptTokens accumulates across steps (used for billing).
 	require.Equal(t, int64(30300), sess.PromptTokens)
 	// LastPromptTokens reflects only the second step (used for display/StopWhen).
 	require.Equal(t, int64(15300), sess.LastPromptTokens)
 }
+
+func TestUpdateSessionUsage_FallbackToEstimatedTokens(t *testing.T) {
+	t.Parallel()
+
+	agent := &sessionAgent{}
+	model := Model{CatwalkCfg: catwalk.Model{}}
+	sess := session.Session{}
+
+	// Simulate a proxy that doesn't report input tokens in streaming mode.
+	usage := fantasy.Usage{
+		InputTokens:         0,
+		CacheCreationTokens: 0,
+		CacheReadTokens:     0,
+		OutputTokens:        95,
+	}
+
+	estimatedTokens := int64(4200)
+	agent.updateSessionUsage(model, &sess, usage, nil, estimatedTokens)
+
+	// When API reports 0 input tokens, the estimated value should be used.
+	require.Equal(t, estimatedTokens, sess.LastPromptTokens)
+	// PromptTokens should also use the estimate.
+	require.Equal(t, estimatedTokens, sess.PromptTokens)
+	require.Equal(t, int64(95), sess.CompletionTokens)
+}
+
+func TestUpdateSessionUsage_PreferAPIOverEstimate(t *testing.T) {
+	t.Parallel()
+
+	agent := &sessionAgent{}
+	model := Model{CatwalkCfg: catwalk.Model{}}
+	sess := session.Session{}
+
+	// Real Anthropic correctly reports input tokens.
+	usage := fantasy.Usage{
+		InputTokens:         68,
+		CacheCreationTokens: 4185,
+		CacheReadTokens:     0,
+		OutputTokens:        95,
+	}
+
+	estimatedTokens := int64(3500) // estimate is less accurate
+	agent.updateSessionUsage(model, &sess, usage, nil, estimatedTokens)
+
+	// API value (68+4185=4253) should be preferred over the estimate (3500).
+	require.Equal(t, int64(4253), sess.LastPromptTokens)
+	require.Equal(t, int64(4253), sess.PromptTokens)
+}
+
+func TestEstimatePromptTokens(t *testing.T) {
+	t.Parallel()
+
+	messages := []fantasy.Message{
+		fantasy.NewSystemMessage(strings.Repeat("x", 3000)), // 3000 bytes
+		fantasy.NewUserMessage("Hello world"),               // 11 bytes
+	}
+
+	// No tools.
+	estimate := estimatePromptTokens(messages, nil)
+	// (3000 + 11) / 3 = 1003
+	require.Equal(t, int64(1003), estimate)
+
+	// With a mock tool.
+	tool := &mockAgentTool{
+		name:        "read_file",
+		description: "Read a file from the filesystem",
+	}
+	estimateWithTools := estimatePromptTokens(messages, []fantasy.AgentTool{tool})
+	// (3000 + 11 + 9 + 31 + 200) / 3 = 1083
+	require.Equal(t, int64(1083), estimateWithTools)
+}
+
+// mockAgentTool implements fantasy.AgentTool for testing.
+type mockAgentTool struct {
+	name        string
+	description string
+}
+
+func (m *mockAgentTool) Info() fantasy.ToolInfo {
+	return fantasy.ToolInfo{
+		Name:        m.name,
+		Description: m.description,
+	}
+}
+
+func (m *mockAgentTool) Run(_ context.Context, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+	return fantasy.ToolResponse{}, nil
+}
+
+func (m *mockAgentTool) ProviderOptions() fantasy.ProviderOptions     { return nil }
+func (m *mockAgentTool) SetProviderOptions(_ fantasy.ProviderOptions) {}

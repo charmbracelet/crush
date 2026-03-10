@@ -288,10 +288,10 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		case !hasThink && model.ModelCfg.Think:
 			mergedOptions["thinking"] = map[string]any{"budget_tokens": 2000}
 		}
-		// Add betas from catwalk model config (e.g., for 1M context on Bedrock)
-		if len(model.CatwalkCfg.Betas) > 0 {
+		// Add 1M context window beta if enabled and supported
+		if model.ModelCfg.Context1M && model.CatwalkCfg.Supports1MContext {
 			if _, hasBetas := mergedOptions["betas"]; !hasBetas {
-				mergedOptions["betas"] = model.CatwalkCfg.Betas
+				mergedOptions["betas"] = []string{"context-1m-2025-08-07"}
 			}
 		}
 		parsed, err := anthropic.ParseOptions(mergedOptions)
@@ -554,6 +554,18 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 
 	largeModelID := largeModelCfg.Model
 	smallModelID := smallModelCfg.Model
+
+	// For Bedrock models with 1M context enabled, prepend cross-region prefix
+	if largeModelCfg.Context1M && largeCatwalkModel.Supports1MContext && largeModelCfg.Provider == bedrock.Name {
+		if !strings.Contains(largeModelID, ".anthropic.") {
+			largeModelID = "us." + largeModelID
+		}
+	}
+	if smallModelCfg.Context1M && smallCatwalkModel.Supports1MContext && smallModelCfg.Provider == bedrock.Name {
+		if !strings.Contains(smallModelID, ".anthropic.") {
+			smallModelID = "us." + smallModelID
+		}
+	}
 
 	if largeModelCfg.Provider == openrouter.Name && isExactoSupported(largeModelID) {
 		largeModelID += ":exacto"

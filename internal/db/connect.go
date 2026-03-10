@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"sync"
 
 	"github.com/pressly/goose/v3"
 )
+
+var gooseOnce sync.Once
 
 var pragmas = map[string]string{
 	"foreign_keys":  "ON",
@@ -37,11 +40,14 @@ func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	goose.SetBaseFS(FS)
-
-	if err := goose.SetDialect("sqlite3"); err != nil {
-		slog.Error("Failed to set dialect", "error", err)
-		return nil, fmt.Errorf("failed to set dialect: %w", err)
+	var dialectErr error
+	gooseOnce.Do(func() {
+		goose.SetBaseFS(FS)
+		dialectErr = goose.SetDialect("sqlite3")
+	})
+	if dialectErr != nil {
+		slog.Error("Failed to set dialect", "error", dialectErr)
+		return nil, fmt.Errorf("failed to set dialect: %w", dialectErr)
 	}
 
 	if err := goose.Up(db, "migrations"); err != nil {

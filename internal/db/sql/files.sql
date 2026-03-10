@@ -22,6 +22,18 @@ FROM files
 WHERE path = ?
 ORDER BY version DESC, created_at DESC;
 
+-- ListFilesByPathAndSession returns all file versions for a given path
+-- scoped to a single session. This is used by CreateVersion() to determine
+-- the next version number. The older ListFilesByPath query was not
+-- session-scoped, which caused version numbers to leak across sessions
+-- and trigger UNIQUE constraint violations when the new_session tool
+-- created a fresh session that re-edited the same files.
+-- name: ListFilesByPathAndSession :many
+SELECT *
+FROM files
+WHERE path = ? AND session_id = ?
+ORDER BY version DESC, created_at DESC;
+
 -- name: CreateFile :one
 INSERT INTO files (
     id,

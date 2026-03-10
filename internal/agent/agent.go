@@ -12,6 +12,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -898,28 +899,48 @@ func totalTokensForUsage(usage fantasy.Usage) int64 {
 	return promptTokensForUsage(usage) + usage.OutputTokens
 }
 
-// estimatePromptTokens estimates the prompt token count from message text
-// content and tool definitions. This serves as a fallback when providers
-// (e.g., some Anthropic-compatible proxies) don't report input tokens in
-// streaming mode. The estimate uses ~4 bytes per token for Latin text and
-// ~2 bytes per token for CJK, defaulting to a conservative 3 bytes/token.
+// estimatePromptTokens estimates the prompt token count from message content
+// and tool definitions. This serves as a fallback when providers (e.g., some
+// Anthropic-compatible proxies) don't report input tokens in streaming mode.
+//
+// All message part types are counted:
+//   - TextPart / ReasoningPart: plain text bytes
+//   - ToolCallPart: Input JSON string bytes
+//   - ToolResultPart: text output bytes
+//
+// Tool definitions include the JSON-encoded parameter schema. The estimate
+// uses ~4 bytes per token, which is accurate for English/ASCII code text.
 func estimatePromptTokens(messages []fantasy.Message, tools []fantasy.AgentTool) int64 {
 	var totalBytes int
 	for _, msg := range messages {
 		for _, part := range msg.Content {
-			if tp, ok := fantasy.AsMessagePart[fantasy.TextPart](part); ok {
-				totalBytes += len(tp.Text)
+			switch p := part.(type) {
+			case fantasy.TextPart:
+				totalBytes += len(p.Text)
+			case fantasy.ReasoningPart:
+				totalBytes += len(p.Text)
+			case fantasy.ToolCallPart:
+				totalBytes += len(p.Input)
+			case fantasy.ToolResultPart:
+				if txt, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentText](p.Output); ok {
+					totalBytes += len(txt.Text)
+				} else if errOut, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentError](p.Output); ok && errOut.Error != nil {
+					totalBytes += len(errOut.Error.Error())
+				}
 			}
 		}
 	}
 	for _, tool := range tools {
 		info := tool.Info()
 		totalBytes += len(info.Name) + len(info.Description)
-		// Rough estimate for JSON schema parameters.
-		totalBytes += 200
+		if schemaJSON, err := json.Marshal(info.Parameters); err == nil {
+			totalBytes += len(schemaJSON)
+		} else {
+			totalBytes += 300
+		}
 	}
-	// Use ~3 bytes per token as a conservative middle ground.
-	const bytesPerToken = 3
+	// Use ~4 bytes per token (accurate for English/ASCII source code).
+	const bytesPerToken = 4
 	return int64(totalBytes / bytesPerToken)
 }
 

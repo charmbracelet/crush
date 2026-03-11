@@ -52,29 +52,26 @@ func init() {
 
 var rootCmd = &cobra.Command{
 	Use:   "crush",
-	Short: "An AI assistant for software development",
-	Long:  "An AI assistant for software development and similar tasks with direct access to the terminal",
+	Short: "A terminal-first AI assistant for software development",
+	Long:  "A glamorous, terminal-first AI assistant for software development and adjacent tasks",
 	Example: `
 # Run in interactive mode
 crush
 
-# Run with debug logging
-crush -d
+# Run non-interactively
+crush run "Guess my 5 favorite Pokémon"
+
+# Run a non-interactively with pipes and redirection
+cat README.md | crush run "make this more glamorous" > GLAMOROUS_README.md
 
 # Run with debug logging in a specific directory
-crush -d -c /path/to/project
+crush --debug --cwd /path/to/project
+
+# Run in yolo mode (auto-accept all permissions; use with care)
+crush --yolo
 
 # Run with custom data directory
-crush -D /path/to/custom/.crush
-
-# Print version
-crush -v
-
-# Run a single non-interactive prompt
-crush run "Explain the use of context in Go"
-
-# Run in dangerous mode (auto-accept all permissions)
-crush -y
+crush --data-dir /path/to/custom/.crush
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		app, err := setupAppWithProgressBar(cmd)

@@ -55,19 +55,25 @@ func HasIncompleteTodos(todos []Todo) bool {
 }
 
 type Session struct {
-	ID                string
-	ParentSessionID   string
-	Title             string
-	CollaborationMode CollaborationMode
-	MessageCount      int64
-	PromptTokens      int64
-	CompletionTokens  int64
-	LastPromptTokens  int64
-	SummaryMessageID  string
-	Cost              float64
-	Todos             []Todo
-	CreatedAt         int64
-	UpdatedAt         int64
+	ID                   string
+	ParentSessionID      string
+	Title                string
+	CollaborationMode    CollaborationMode
+	MessageCount         int64
+	PromptTokens         int64
+	CompletionTokens     int64
+	LastPromptTokens     int64
+	LastCompletionTokens int64
+	SummaryMessageID     string
+	Cost                 float64
+	Todos                []Todo
+	CreatedAt            int64
+	UpdatedAt            int64
+}
+
+// LastContextTokens returns the most recent request's total context usage.
+func (s Session) LastContextTokens() int64 {
+	return s.LastPromptTokens + s.LastCompletionTokens
 }
 
 type Service interface {
@@ -186,12 +192,13 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 	}
 
 	dbSession, err := s.q.UpdateSession(ctx, db.UpdateSessionParams{
-		ID:                session.ID,
-		Title:             session.Title,
-		CollaborationMode: string(NormalizeCollaborationMode(string(session.CollaborationMode))),
-		PromptTokens:      session.PromptTokens,
-		CompletionTokens:  session.CompletionTokens,
-		LastPromptTokens:  session.LastPromptTokens,
+		ID:                   session.ID,
+		Title:                session.Title,
+		CollaborationMode:    string(NormalizeCollaborationMode(string(session.CollaborationMode))),
+		PromptTokens:         session.PromptTokens,
+		CompletionTokens:     session.CompletionTokens,
+		LastPromptTokens:     session.LastPromptTokens,
+		LastCompletionTokens: session.LastCompletionTokens,
 		SummaryMessageID: sql.NullString{
 			String: session.SummaryMessageID,
 			Valid:  session.SummaryMessageID != "",
@@ -253,19 +260,20 @@ func (s service) fromDBItem(item db.Session) Session {
 		slog.Error("Failed to unmarshal todos", "session_id", item.ID, "error", err)
 	}
 	return Session{
-		ID:                item.ID,
-		ParentSessionID:   item.ParentSessionID.String,
-		Title:             item.Title,
-		CollaborationMode: NormalizeCollaborationMode(item.CollaborationMode),
-		MessageCount:      item.MessageCount,
-		PromptTokens:      item.PromptTokens,
-		CompletionTokens:  item.CompletionTokens,
-		LastPromptTokens:  item.LastPromptTokens,
-		SummaryMessageID:  item.SummaryMessageID.String,
-		Cost:              item.Cost,
-		Todos:             todos,
-		CreatedAt:         item.CreatedAt,
-		UpdatedAt:         item.UpdatedAt,
+		ID:                   item.ID,
+		ParentSessionID:      item.ParentSessionID.String,
+		Title:                item.Title,
+		CollaborationMode:    NormalizeCollaborationMode(item.CollaborationMode),
+		MessageCount:         item.MessageCount,
+		PromptTokens:         item.PromptTokens,
+		CompletionTokens:     item.CompletionTokens,
+		LastPromptTokens:     item.LastPromptTokens,
+		LastCompletionTokens: item.LastCompletionTokens,
+		SummaryMessageID:     item.SummaryMessageID.String,
+		Cost:                 item.Cost,
+		Todos:                todos,
+		CreatedAt:            item.CreatedAt,
+		UpdatedAt:            item.UpdatedAt,
 	}
 }
 

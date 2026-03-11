@@ -44,6 +44,7 @@ SET
     prompt_tokens = ?,
     completion_tokens = ?,
     last_prompt_tokens = ?,
+    last_completion_tokens = ?,
     summary_message_id = ?,
     cost = ?,
     todos = ?

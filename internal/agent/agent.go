@@ -45,12 +45,8 @@ import (
 )
 
 const (
-	defaultSessionName = "Untitled Session"
-
-	// Constants for auto-summarization thresholds
-	largeContextWindowThreshold = 200_000
-	largeContextWindowBuffer    = 20_000
-	smallContextWindowRatio     = 0.2
+	defaultSessionName         = "Untitled Session"
+	autoSummarizeReserveTokens = 20_000
 )
 
 //go:embed templates/title.md
@@ -400,16 +396,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		},
 		StopWhen: []fantasy.StopCondition{
 			func(_ []fantasy.StepResult) bool {
-				cw := int64(largeModel.CatwalkCfg.ContextWindow)
-				tokens := currentSession.LastPromptTokens
-				remaining := cw - tokens
-				var threshold int64
-				if cw > largeContextWindowThreshold {
-					threshold = largeContextWindowBuffer
-				} else {
-					threshold = int64(float64(cw) * smallContextWindowRatio)
-				}
-				if (remaining <= threshold) && !a.disableAutoSummarize {
+				if shouldAutoSummarize(currentSession.LastContextTokens(), int64(largeModel.CatwalkCfg.ContextWindow), call.MaxOutputTokens) && !a.disableAutoSummarize {
 					shouldSummarize = true
 					return true
 				}
@@ -899,6 +886,24 @@ func totalTokensForUsage(usage fantasy.Usage) int64 {
 	return promptTokensForUsage(usage) + usage.OutputTokens
 }
 
+func autoSummarizeReservedTokens(maxOutputTokens int64) int64 {
+	if maxOutputTokens <= 0 {
+		return autoSummarizeReserveTokens
+	}
+	return min(autoSummarizeReserveTokens, maxOutputTokens)
+}
+
+func shouldAutoSummarize(contextUsed, contextWindow, maxOutputTokens int64) bool {
+	if contextWindow <= 0 {
+		return false
+	}
+	usable := contextWindow - autoSummarizeReservedTokens(maxOutputTokens)
+	if usable <= 0 {
+		return true
+	}
+	return contextUsed >= usable
+}
+
 // estimatePromptTokens estimates the prompt token count from message content
 // and tool definitions. This serves as a fallback when providers (e.g., some
 // Anthropic-compatible proxies) don't report input tokens in streaming mode.
@@ -970,6 +975,7 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 	session.CompletionTokens += usage.OutputTokens
 	session.PromptTokens += promptTokens
 	session.LastPromptTokens = promptTokens
+	session.LastCompletionTokens = usage.OutputTokens
 }
 
 func (a *sessionAgent) Cancel(sessionID string) {

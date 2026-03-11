@@ -680,6 +680,31 @@ func TestPromptTokensForUsage_AnthropicCacheStyle(t *testing.T) {
 	require.Equal(t, int64(1365), totalTokensForUsage(usage))
 }
 
+func TestShouldAutoSummarize(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name            string
+		contextUsed     int64
+		contextWindow   int64
+		maxOutputTokens int64
+		want            bool
+	}{
+		{name: "large window reserves 20k", contextUsed: 180_000, contextWindow: 200_000, maxOutputTokens: 50_000, want: true},
+		{name: "large window below threshold", contextUsed: 179_999, contextWindow: 200_000, maxOutputTokens: 50_000, want: false},
+		{name: "small window reserves max output", contextUsed: 24_000, contextWindow: 32_000, maxOutputTokens: 8_000, want: true},
+		{name: "small window below threshold", contextUsed: 23_999, contextWindow: 32_000, maxOutputTokens: 8_000, want: false},
+		{name: "invalid context window", contextUsed: 1, contextWindow: 0, maxOutputTokens: 8_000, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tt.want, shouldAutoSummarize(tt.contextUsed, tt.contextWindow, tt.maxOutputTokens))
+		})
+	}
+}
+
 func TestUpdateSessionUsage_AccumulatesTotals(t *testing.T) {
 	t.Parallel()
 

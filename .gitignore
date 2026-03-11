@@ -18,6 +18,12 @@
 go.work
 go.work.sum
 
+# Go module cache
+.gomodcache/
+
+# Go build cache
+.gocache/
+
 # IDE specific files
 .idea/
 .vscode/

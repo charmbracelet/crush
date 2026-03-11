@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"image/color"
+	"math"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -93,14 +94,15 @@ func FormatTokenCount(tokens int64) string {
 	return formattedTokens
 }
 
-// FormatContextUsage formats token usage as used/total context window.
+// FormatContextUsage formats token usage as used tokens plus context usage
+// percentage.
 func FormatContextUsage(tokens, contextWindow int64) string {
-	if contextWindow <= 0 {
-		return strings.ToLower(FormatTokenCount(tokens))
-	}
 	used := strings.ToLower(FormatTokenCount(tokens))
-	total := strings.ToLower(FormatTokenCount(contextWindow))
-	return fmt.Sprintf("%s/%s", used, total)
+	if contextWindow <= 0 {
+		return used
+	}
+	percentage := int(math.Round(float64(tokens) / float64(contextWindow) * 100))
+	return fmt.Sprintf("%s %d%%", used, percentage)
 }
 
 // formatTokensAndCost formats cumulative context usage and cost.

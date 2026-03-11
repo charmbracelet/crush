@@ -19,6 +19,7 @@ import (
 	"charm.land/fantasy"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/agent"
+	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
@@ -68,8 +69,9 @@ type App struct {
 	tuiWG           *sync.WaitGroup
 
 	// global context and cleanup functions
-	globalCtx    context.Context
-	cleanupFuncs []func(context.Context) error
+	globalCtx          context.Context
+	cleanupFuncs       []func(context.Context) error
+	agentNotifications *pubsub.Broker[notify.Notification]
 }
 
 // New initializes a new application instance.
@@ -97,9 +99,10 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 
 		config: store,
 
-		events:          make(chan tea.Msg, 100),
-		serviceEventsWG: &sync.WaitGroup{},
-		tuiWG:           &sync.WaitGroup{},
+		events:             make(chan tea.Msg, 100),
+		serviceEventsWG:    &sync.WaitGroup{},
+		tuiWG:              &sync.WaitGroup{},
+		agentNotifications: pubsub.NewBroker[notify.Notification](),
 	}
 
 	app.setupEvents()
@@ -113,7 +116,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 	app.cleanupFuncs = append(
 		app.cleanupFuncs,
 		func(context.Context) error { return conn.Close() },
-		mcp.Close,
+		func(ctx context.Context) error { return mcp.Close(ctx) },
 	)
 
 	// TODO: remove the concept of agent config, most likely.
@@ -147,6 +150,11 @@ func (app *App) Config() *config.Config {
 // Store returns the config store.
 func (app *App) Store() *config.ConfigStore {
 	return app.config
+}
+
+// AgentNotifications returns the broker for agent notification events.
+func (app *App) AgentNotifications() *pubsub.Broker[notify.Notification] {
+	return app.agentNotifications
 }
 
 // RunNonInteractive runs the application in non-interactive mode with the
@@ -420,6 +428,7 @@ func (app *App) setupEvents() {
 	setupSubscriber(ctx, app.serviceEventsWG, "permissions", app.Permissions.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "permissions-notifications", app.Permissions.SubscribeNotifications, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "history", app.History.Subscribe, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "agent-notifications", app.agentNotifications.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "mcp", mcp.SubscribeEvents, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "lsp", SubscribeLSPEvents, app.events)
 	cleanupFunc := func(context.Context) error {
@@ -492,6 +501,7 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.History,
 		app.FileTracker,
 		app.LSPManager,
+		app.agentNotifications,
 	)
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)

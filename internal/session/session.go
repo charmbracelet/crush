@@ -2,9 +2,7 @@ package session
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -14,6 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
+	"github.com/zeebo/xxh3"
 )
 
 type TodoStatus string
@@ -24,10 +23,11 @@ const (
 	TodoStatusCompleted  TodoStatus = "completed"
 )
 
-// HashID returns the SHA-256 hash of a session ID (UUID) as a hex string.
+// HashID returns the XXH3 hash of a session ID (UUID) as a hex string.
 func HashID(id string) string {
-	h := sha256.Sum256([]byte(id))
-	return hex.EncodeToString(h[:])
+	h := xxh3.New()
+	h.WriteString(id)
+	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
 type Todo struct {

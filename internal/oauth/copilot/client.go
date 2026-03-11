@@ -72,8 +72,17 @@ func (t *initiatorTransport) RoundTrip(req *http.Request) (*http.Response, error
 }
 
 func (t *initiatorTransport) roundTrip(req *http.Request) (*http.Response, error) {
+	var (
+		resp *http.Response
+		err  error
+	)
 	if t.debug {
-		return log.NewHTTPClient().Transport.RoundTrip(req)
+		resp, err = log.NewHTTPClient().Transport.RoundTrip(req)
+	} else {
+		resp, err = http.DefaultTransport.RoundTrip(req)
 	}
-	return http.DefaultTransport.RoundTrip(req)
+	if err != nil {
+		return resp, err
+	}
+	return wrapReasoningTransform(resp), nil
 }

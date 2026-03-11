@@ -153,7 +153,15 @@ func testSessionAgent(env fakeEnv, large, small fantasy.LanguageModel, systemPro
 			DefaultMaxTokens: 10000,
 		},
 	}
-	agent := NewSessionAgent(SessionAgentOptions{largeModel, smallModel, "", systemPrompt, false, false, true, env.sessions, env.messages, tools})
+	agent := NewSessionAgent(SessionAgentOptions{
+		LargeModel:   largeModel,
+		SmallModel:   smallModel,
+		SystemPrompt: systemPrompt,
+		IsYolo:       true,
+		Sessions:     env.sessions,
+		Messages:     env.messages,
+		Tools:        tools,
+	})
 	return agent
 }
 
@@ -182,12 +190,9 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 		GeneratedWith: true,
 	}
 
-	// Clear skills paths to ensure test reproducibility - user's skills
-	// would be included in prompt and break VCR cassette matching.
-	cfg.Options.SkillsPaths = []string{}
-
-	// Clear LSP config to ensure test reproducibility - user's LSP config
-	// would be included in prompt and break VCR cassette matching.
+	// Clear some fields to avoid issues with VCR cassette matching.
+	cfg.Options.SkillsPaths = nil
+	cfg.Options.ContextPaths = nil
 	cfg.LSP = nil
 
 	systemPrompt, err := prompt.Build(context.TODO(), large.Provider(), large.Model(), *cfg)

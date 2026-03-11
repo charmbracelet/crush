@@ -307,3 +307,28 @@ func TestBackgroundShellManager_KillAll_Timeout(t *testing.T) {
 	// Must return promptly after timeout, not hang for 60 seconds.
 	require.Less(t, elapsed, 2*time.Second)
 }
+
+func TestBackgroundShell_WaitContext_Completed(t *testing.T) {
+	t.Parallel()
+
+	done := make(chan struct{})
+	close(done)
+
+	bgShell := &BackgroundShell{done: done}
+
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	t.Cleanup(cancel)
+
+	require.True(t, bgShell.WaitContext(ctx))
+}
+
+func TestBackgroundShell_WaitContext_Canceled(t *testing.T) {
+	t.Parallel()
+
+	bgShell := &BackgroundShell{done: make(chan struct{})}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	require.False(t, bgShell.WaitContext(ctx))
+}

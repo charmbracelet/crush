@@ -57,3 +57,7 @@ func TokensUsed(props ...any) {
 		props...,
 	)
 }
+
+func StatsViewed() {
+	send("stats viewed")
+}

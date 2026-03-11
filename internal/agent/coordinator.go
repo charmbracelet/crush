@@ -18,6 +18,7 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
+	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
@@ -28,6 +29,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"golang.org/x/sync/errgroup"
 
@@ -41,6 +43,18 @@ import (
 	"charm.land/fantasy/providers/vercel"
 	openaisdk "github.com/openai/openai-go/v2/option"
 	"github.com/qjebbs/go-jsons"
+)
+
+// Coordinator errors.
+var (
+	errCoderAgentNotConfigured         = errors.New("coder agent not configured")
+	errModelProviderNotConfigured      = errors.New("model provider not configured")
+	errLargeModelNotSelected           = errors.New("large model not selected")
+	errSmallModelNotSelected           = errors.New("small model not selected")
+	errLargeModelProviderNotConfigured = errors.New("large model provider not configured")
+	errSmallModelProviderNotConfigured = errors.New("small model provider not configured")
+	errLargeModelNotFound              = errors.New("large model not found in provider config")
+	errSmallModelNotFound              = errors.New("small model not found in provider config")
 )
 
 type Coordinator interface {
@@ -67,6 +81,7 @@ type coordinator struct {
 	history     history.Service
 	filetracker filetracker.Service
 	lspManager  *lsp.Manager
+	notify      pubsub.Publisher[notify.Notification]
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
@@ -83,6 +98,7 @@ func NewCoordinator(
 	history history.Service,
 	filetracker filetracker.Service,
 	lspManager *lsp.Manager,
+	notify pubsub.Publisher[notify.Notification],
 ) (Coordinator, error) {
 	c := &coordinator{
 		cfg:         cfg,
@@ -92,12 +108,13 @@ func NewCoordinator(
 		history:     history,
 		filetracker: filetracker,
 		lspManager:  lspManager,
+		notify:      notify,
 		agents:      make(map[string]SessionAgent),
 	}
 
 	agentCfg, ok := cfg.Agents[config.AgentCoder]
 	if !ok {
-		return nil, errors.New("coder agent not configured")
+		return nil, errCoderAgentNotConfigured
 	}
 
 	// TODO: make this dynamic when we support multiple agents
@@ -145,7 +162,7 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 
 	providerCfg, ok := c.cfg.Providers.Get(model.ModelCfg.Provider)
 	if !ok {
-		return nil, errors.New("model provider not configured")
+		return nil, errModelProviderNotConfigured
 	}
 
 	mergedOptions, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(model, providerCfg)
@@ -278,12 +295,15 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			}
 		}
 	case anthropic.Name:
-		_, hasThink := mergedOptions["thinking"]
-		if !hasThink && model.ModelCfg.Think {
-			mergedOptions["thinking"] = map[string]any{
-				// TODO: kujtim see if we need to make this dynamic
-				"budget_tokens": 2000,
-			}
+		var (
+			_, hasEffort = mergedOptions["effort"]
+			_, hasThink  = mergedOptions["thinking"]
+		)
+		switch {
+		case !hasEffort && model.ModelCfg.ReasoningEffort != "":
+			mergedOptions["effort"] = model.ModelCfg.ReasoningEffort
+		case !hasThink && model.ModelCfg.Think:
+			mergedOptions["thinking"] = map[string]any{"budget_tokens": 2000}
 		}
 		parsed, err := anthropic.ParseOptions(mergedOptions)
 		if err == nil {
@@ -365,16 +385,17 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 
 	largeProviderCfg, _ := c.cfg.Providers.Get(large.ModelCfg.Provider)
 	result := NewSessionAgent(SessionAgentOptions{
-		large,
-		small,
-		largeProviderCfg.SystemPromptPrefix,
-		"",
-		isSubAgent,
-		c.cfg.Options.DisableAutoSummarize,
-		c.permissions.SkipRequests(),
-		c.sessions,
-		c.messages,
-		nil,
+		LargeModel:           large,
+		SmallModel:           small,
+		SystemPromptPrefix:   largeProviderCfg.SystemPromptPrefix,
+		SystemPrompt:         "",
+		IsSubAgent:           isSubAgent,
+		DisableAutoSummarize: c.cfg.Options.DisableAutoSummarize,
+		IsYolo:               c.permissions.SkipRequests(),
+		Sessions:             c.sessions,
+		Messages:             c.messages,
+		Tools:                nil,
+		Notify:               c.notify,
 	})
 
 	c.readyWg.Go(func() error {
@@ -494,16 +515,16 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Model, Model, error) {
 	largeModelCfg, ok := c.cfg.Models[config.SelectedModelTypeLarge]
 	if !ok {
-		return Model{}, Model{}, errors.New("large model not selected")
+		return Model{}, Model{}, errLargeModelNotSelected
 	}
 	smallModelCfg, ok := c.cfg.Models[config.SelectedModelTypeSmall]
 	if !ok {
-		return Model{}, Model{}, errors.New("small model not selected")
+		return Model{}, Model{}, errSmallModelNotSelected
 	}
 
 	largeProviderCfg, ok := c.cfg.Providers.Get(largeModelCfg.Provider)
 	if !ok {
-		return Model{}, Model{}, errors.New("large model provider not configured")
+		return Model{}, Model{}, errLargeModelProviderNotConfigured
 	}
 
 	largeProvider, err := c.buildProvider(largeProviderCfg, largeModelCfg, isSubAgent)
@@ -513,7 +534,7 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 
 	smallProviderCfg, ok := c.cfg.Providers.Get(smallModelCfg.Provider)
 	if !ok {
-		return Model{}, Model{}, errors.New("small model provider not configured")
+		return Model{}, Model{}, errSmallModelProviderNotConfigured
 	}
 
 	smallProvider, err := c.buildProvider(smallProviderCfg, smallModelCfg, true)
@@ -536,11 +557,11 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 	}
 
 	if largeCatwalkModel == nil {
-		return Model{}, Model{}, errors.New("large model not found in provider config")
+		return Model{}, Model{}, errLargeModelNotFound
 	}
 
 	if smallCatwalkModel == nil {
-		return Model{}, Model{}, errors.New("small model not found in provider config")
+		return Model{}, Model{}, errSmallModelNotFound
 	}
 
 	largeModelID := largeModelCfg.Model
@@ -582,7 +603,7 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 		// NOTE: Prevent the SDK from picking up the API key from env.
 		os.Setenv("ANTHROPIC_API_KEY", "")
 		headers["Authorization"] = apiKey
-	case providerID == string(catwalk.InferenceProviderMiniMax):
+	case providerID == string(catwalk.InferenceProviderMiniMax) || providerID == string(catwalk.InferenceProviderMiniMaxChina):
 		// NOTE: Prevent the SDK from picking up the API key from env.
 		os.Setenv("ANTHROPIC_API_KEY", "")
 		headers["Authorization"] = "Bearer " + apiKey
@@ -769,19 +790,8 @@ func (c *coordinator) isAnthropicThinking(model config.SelectedModel) bool {
 	if model.Think {
 		return true
 	}
-
-	if model.ProviderOptions == nil {
-		return false
-	}
-
 	opts, err := anthropic.ParseOptions(model.ProviderOptions)
-	if err != nil {
-		return false
-	}
-	if opts.Thinking != nil {
-		return true
-	}
-	return false
+	return err == nil && opts.Thinking != nil
 }
 
 func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model config.SelectedModel, isSubAgent bool) (fantasy.Provider, error) {
@@ -879,7 +889,7 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 
 	agentCfg, ok := c.cfg.Agents[config.AgentCoder]
 	if !ok {
-		return errors.New("coder agent not configured")
+		return errCoderAgentNotConfigured
 	}
 
 	tools, err := c.buildTools(ctx, agentCfg)
@@ -901,7 +911,7 @@ func (c *coordinator) QueuedPromptsList(sessionID string) []string {
 func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 	providerCfg, ok := c.cfg.Providers.Get(c.currentAgent.Model().ModelCfg.Provider)
 	if !ok {
-		return errors.New("model provider not configured")
+		return errModelProviderNotConfigured
 	}
 	return c.currentAgent.Summarize(ctx, sessionID, getProviderOptions(c.currentAgent.Model(), providerCfg))
 }
@@ -935,5 +945,92 @@ func (c *coordinator) refreshApiKeyTemplate(ctx context.Context, providerCfg con
 	if err := c.UpdateModels(ctx); err != nil {
 		return err
 	}
+	return nil
+}
+
+// subAgentParams holds the parameters for running a sub-agent.
+type subAgentParams struct {
+	Agent          SessionAgent
+	SessionID      string
+	AgentMessageID string
+	ToolCallID     string
+	Prompt         string
+	SessionTitle   string
+	// SessionSetup is an optional callback invoked after session creation
+	// but before agent execution, for custom session configuration.
+	SessionSetup func(sessionID string)
+}
+
+// runSubAgent runs a sub-agent and handles session management and cost accumulation.
+// It creates a sub-session, runs the agent with the given prompt, and propagates
+// the cost to the parent session.
+func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (fantasy.ToolResponse, error) {
+	// Create sub-session
+	agentToolSessionID := c.sessions.CreateAgentToolSessionID(params.AgentMessageID, params.ToolCallID)
+	session, err := c.sessions.CreateTaskSession(ctx, agentToolSessionID, params.SessionID, params.SessionTitle)
+	if err != nil {
+		return fantasy.ToolResponse{}, fmt.Errorf("create session: %w", err)
+	}
+
+	// Call session setup function if provided
+	if params.SessionSetup != nil {
+		params.SessionSetup(session.ID)
+	}
+
+	// Get model configuration
+	model := params.Agent.Model()
+	maxTokens := model.CatwalkCfg.DefaultMaxTokens
+	if model.ModelCfg.MaxTokens != 0 {
+		maxTokens = model.ModelCfg.MaxTokens
+	}
+
+	providerCfg, ok := c.cfg.Providers.Get(model.ModelCfg.Provider)
+	if !ok {
+		return fantasy.ToolResponse{}, errModelProviderNotConfigured
+	}
+
+	// Run the agent
+	result, err := params.Agent.Run(ctx, SessionAgentCall{
+		SessionID:        session.ID,
+		Prompt:           params.Prompt,
+		MaxOutputTokens:  maxTokens,
+		ProviderOptions:  getProviderOptions(model, providerCfg),
+		Temperature:      model.ModelCfg.Temperature,
+		TopP:             model.ModelCfg.TopP,
+		TopK:             model.ModelCfg.TopK,
+		FrequencyPenalty: model.ModelCfg.FrequencyPenalty,
+		PresencePenalty:  model.ModelCfg.PresencePenalty,
+		NonInteractive:   true,
+	})
+	if err != nil {
+		return fantasy.NewTextErrorResponse("error generating response"), nil
+	}
+
+	// Update parent session cost
+	if err := c.updateParentSessionCost(ctx, session.ID, params.SessionID); err != nil {
+		return fantasy.ToolResponse{}, err
+	}
+
+	return fantasy.NewTextResponse(result.Response.Content.Text()), nil
+}
+
+// updateParentSessionCost accumulates the cost from a child session to its parent session.
+func (c *coordinator) updateParentSessionCost(ctx context.Context, childSessionID, parentSessionID string) error {
+	childSession, err := c.sessions.Get(ctx, childSessionID)
+	if err != nil {
+		return fmt.Errorf("get child session: %w", err)
+	}
+
+	parentSession, err := c.sessions.Get(ctx, parentSessionID)
+	if err != nil {
+		return fmt.Errorf("get parent session: %w", err)
+	}
+
+	parentSession.Cost += childSession.Cost
+
+	if _, err := c.sessions.Save(ctx, parentSession); err != nil {
+		return fmt.Errorf("save parent session: %w", err)
+	}
+
 	return nil
 }

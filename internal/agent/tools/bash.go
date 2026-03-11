@@ -48,9 +48,9 @@ type BashResponseMetadata struct {
 const (
 	BashToolName = "bash"
 
-	AutoBackgroundThreshold = 1 * time.Minute // Commands taking longer automatically become background jobs
-	MaxOutputLength         = 30000
-	BashNoOutput            = "no output"
+	DefaultAutoBackgroundAfter = 60 // Commands taking longer automatically become background jobs
+	MaxOutputLength            = 30000
+	BashNoOutput               = "no output"
 )
 
 //go:embed bash.tpl
@@ -305,10 +305,9 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			// Wait for either completion, auto-background threshold, or context cancellation
 			ticker := time.NewTicker(100 * time.Millisecond)
 			defer ticker.Stop()
-			autoBackgroundThreshold := AutoBackgroundThreshold
-			if params.AutoBackgroundAfter > 0 {
-				autoBackgroundThreshold = time.Duration(params.AutoBackgroundAfter) * time.Second
-			}
+
+			autoBackgroundAfter := cmp.Or(params.AutoBackgroundAfter, DefaultAutoBackgroundAfter)
+			autoBackgroundThreshold := time.Duration(autoBackgroundAfter) * time.Second
 			timeout := time.After(autoBackgroundThreshold)
 
 			var stdout, stderr string

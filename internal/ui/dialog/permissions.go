@@ -446,11 +446,26 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 	title := common.DialogTitle(t, "Permission Required", contentWidth-t.Dialog.Title.GetHorizontalFrameSize(), t.Primary, t.Secondary)
 	title = t.Dialog.Title.Render(title)
 
+	lines := []string{title, ""}
+
+	// Add warning for dangerous commands.
+	if p.permission.Dangerous {
+		warningTag := t.Base.
+			Foreground(t.BgOverlay).
+			Background(t.Yellow).
+			Padding(0, 1).
+			Render("WARNING")
+		warningIcon := t.Base.Foreground(t.Warning).Render("⚠")
+		warningMsg := t.Base.Foreground(t.FgHalfMuted).Render(" Potentially dangerous command")
+		warningLine := lipgloss.JoinHorizontal(lipgloss.Left, warningIcon, " ", warningTag, warningMsg)
+		lines = append(lines, warningLine, "")
+	}
+
 	// Tool info.
 	toolLine := p.renderToolName(contentWidth)
 	pathLine := p.renderKeyValue("Path", fsext.PrettyPath(p.permission.Path), contentWidth)
 
-	lines := []string{title, "", toolLine, pathLine}
+	lines = append(lines, toolLine, pathLine)
 
 	// Add tool-specific header info.
 	switch p.permission.ToolName {

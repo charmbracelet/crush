@@ -1,9 +1,10 @@
-Executes bash commands with automatic background conversion for long-running tasks.
+Executes shell commands with automatic background conversion for long-running tasks.
 
 <cross_platform>
-Uses mvdan/sh interpreter (Bash-compatible on all platforms including Windows).
+Uses POSIX shell interpreter (mvdan/sh) on all platforms.
+On Windows: core utils (ls, cat, cp, mv, rm, mkdir, find, chmod, touch, xargs) are built-in.
+Additional Unix tools (grep, sed, awk, curl, etc.) available if Git for Windows or WSL is installed.
 Use forward slashes for paths: "ls C:/foo/bar" not "ls C:\foo\bar".
-Common shell builtins and core utils available on Windows.
 </cross_platform>
 
 <execution_steps>

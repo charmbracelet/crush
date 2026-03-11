@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -80,6 +81,12 @@ func NewShell(opts *Options) *Shell {
 	env := opts.Env
 	if env == nil {
 		env = os.Environ()
+	}
+
+	// Extend PATH with native shell tools (Git Bash, WSL) on Windows
+	// This allows the interpreter to find Unix tools like grep, sed, awk, etc.
+	if runtime.GOOS == "windows" {
+		env = ExtendEnvWithNativeTools(env)
 	}
 
 	logger := opts.Logger

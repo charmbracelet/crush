@@ -11,6 +11,8 @@ import (
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 // PrettyPath formats a file path with home directory shortening and applies
@@ -18,6 +20,14 @@ import (
 func PrettyPath(t *styles.Styles, path string, width int) string {
 	formatted := home.Short(path)
 	return t.Muted.Width(width).Render(formatted)
+}
+
+// FormatReasoningEffort formats a reasoning effort level for display.
+func FormatReasoningEffort(effort string) string {
+	if effort == "xhigh" {
+		return "X-High"
+	}
+	return cases.Title(language.English).String(effort)
 }
 
 // ModelContextInfo contains token usage and cost information for a model.

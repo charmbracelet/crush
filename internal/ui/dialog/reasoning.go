@@ -13,8 +13,6 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/sahilm/fuzzy"
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 )
 
 const (
@@ -241,13 +239,12 @@ func (r *Reasoning) setReasoningItems() error {
 		currentEffort = model.DefaultReasoningEffort
 	}
 
-	caser := cases.Title(language.English)
 	items := make([]list.FilterableItem, 0, len(model.ReasoningLevels))
 	selectedIndex := 0
 	for i, effort := range model.ReasoningLevels {
 		item := &ReasoningItem{
 			effort:    effort,
-			title:     caser.String(effort),
+			title:     common.FormatReasoningEffort(effort),
 			isCurrent: effort == currentEffort,
 			t:         r.com.Styles,
 		}

@@ -57,6 +57,12 @@ SET
 WHERE id = ?;
 
 
+-- name: RenameSession :exec
+UPDATE sessions
+SET
+    title = ?
+WHERE id = ?;
+
 -- name: DeleteSession :exec
 DELETE FROM sessions
 WHERE id = ?;

@@ -120,6 +120,11 @@ type ProviderConfig struct {
 	// Extra body
 	ExtraBody map[string]any `json:"extra_body,omitempty" jsonschema:"description=Additional fields to include in request bodies, only works with openai-compatible providers"`
 
+	// UseCopilotClient instructs openai-compat providers to use the GitHub
+	// Copilot OAuth HTTP client. This adds the X-Initiator header and applies
+	// response normalization for Copilot-specific reasoning fields.
+	UseCopilotClient bool `json:"use_copilot_client,omitempty" jsonschema:"description=Use the GitHub Copilot OAuth HTTP client for this provider (openai-compat only),default=false"`
+
 	ProviderOptions map[string]any `json:"provider_options,omitempty" jsonschema:"description=Additional provider-specific options for this provider"`
 
 	// Used to pass extra parameters to the provider.

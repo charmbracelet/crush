@@ -278,6 +278,8 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
 		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
 			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
+		} else if !hasReasoningEffort && model.CatwalkCfg.DefaultReasoningEffort != "" {
+			mergedOptions["reasoning_effort"] = model.CatwalkCfg.DefaultReasoningEffort
 		}
 		if openai.IsResponsesModel(model.CatwalkCfg.ID) {
 			if openai.IsResponsesReasoningModel(model.CatwalkCfg.ID) {
@@ -357,6 +359,8 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
 		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
 			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
+		} else if !hasReasoningEffort && model.CatwalkCfg.DefaultReasoningEffort != "" {
+			mergedOptions["reasoning_effort"] = model.CatwalkCfg.DefaultReasoningEffort
 		}
 		parsed, err := openaicompat.ParseOptions(mergedOptions)
 		if err == nil {
@@ -673,7 +677,7 @@ func (c *coordinator) buildVercelProvider(_, apiKey string, headers map[string]s
 	return vercel.New(opts...)
 }
 
-func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers map[string]string, extraBody map[string]any, providerID string, isSubAgent bool) (fantasy.Provider, error) {
+func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers map[string]string, extraBody map[string]any, providerID string, useCopilotClient bool, isSubAgent bool) (fantasy.Provider, error) {
 	opts := []openaicompat.Option{
 		openaicompat.WithBaseURL(baseURL),
 		openaicompat.WithAPIKey(apiKey),
@@ -681,8 +685,10 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 
 	// Set HTTP client based on provider and debug mode.
 	var httpClient *http.Client
-	if providerID == string(catwalk.InferenceProviderCopilot) {
-		opts = append(opts, openaicompat.WithUseResponsesAPI())
+	if providerID == string(catwalk.InferenceProviderCopilot) || useCopilotClient {
+		if providerID == string(catwalk.InferenceProviderCopilot) {
+			opts = append(opts, openaicompat.WithUseResponsesAPI())
+		}
 		httpClient = copilot.NewClient(isSubAgent, c.cfg.Options.Debug)
 	} else if c.cfg.Options.Debug {
 		httpClient = log.NewHTTPClient()
@@ -836,7 +842,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 			}
 			providerCfg.ExtraBody["tool_stream"] = true
 		}
-		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent)
+		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, providerCfg.UseCopilotClient, isSubAgent)
 	case hyper.Name:
 		return c.buildHyperProvider(baseURL, apiKey)
 	default:

@@ -71,6 +71,12 @@ func (s *Manager) Clients() *csync.Map[string, *Client] {
 	return s.clients
 }
 
+// SetConfig updates the config used by the manager (e.g. after config reload).
+// Note: Changes to the LSP server list in config only take effect after restart.
+func (s *Manager) SetConfig(cfg *config.Config) {
+	s.cfg = cfg
+}
+
 // SetCallback sets a callback that is invoked when a new LSP
 // client is successfully started. This allows the coordinator to add LSP tools.
 func (s *Manager) SetCallback(cb func(name string, client *Client)) {

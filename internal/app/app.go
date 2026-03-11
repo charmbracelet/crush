@@ -143,6 +143,28 @@ func (app *App) Config() *config.Config {
 	return app.config
 }
 
+// ReloadConfig reloads configuration from disk and re-initializes the coder agent.
+// Conversation history is preserved. Returns an error if config could not be loaded.
+func (app *App) ReloadConfig(ctx context.Context) error {
+	workingDir := app.config.WorkingDir()
+	dataDir := app.config.Options.DataDirectory
+	debug := app.config.Options.Debug
+
+	newCfg, err := config.Load(workingDir, dataDir, debug)
+	if err != nil {
+		return fmt.Errorf("reload config: %w", err)
+	}
+
+	app.config = newCfg
+	app.LSPManager.SetConfig(newCfg)
+
+	if !newCfg.IsConfigured() {
+		slog.Warn("No providers configured after config reload")
+		return nil
+	}
+	return app.InitCoderAgent(ctx)
+}
+
 // RunNonInteractive runs the application in non-interactive mode with the
 // given prompt, printing to stdout.
 func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt, largeModel, smallModel string, hideSpinner bool) error {

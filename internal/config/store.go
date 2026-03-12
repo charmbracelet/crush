@@ -147,6 +147,9 @@ func (s *ConfigStore) SetCompactMode(scope Scope, enabled bool) error {
 	if s.config.Options == nil {
 		s.config.Options = &Options{}
 	}
+	if s.config.Options.TUI == nil {
+		s.config.Options.TUI = &TUIOptions{}
+	}
 	s.config.Options.TUI.CompactMode = enabled
 	return s.SetConfigField(scope, "options.tui.compact_mode", enabled)
 }

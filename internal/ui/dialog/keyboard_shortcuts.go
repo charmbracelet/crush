@@ -26,11 +26,11 @@ type KeyboardShortcuts struct {
 		PageUp,
 		PageDown key.Binding
 	}
-	help       help.Model
-	windowWidth int
+	help         help.Model
+	windowWidth  int
 	windowHeight int
-	viewport   viewport.Model
-	content    string
+	viewport     viewport.Model
+	content      string
 }
 
 var _ Dialog = (*KeyboardShortcuts)(nil)
@@ -80,10 +80,10 @@ func NewKeyboardShortcuts(com *common.Common) (*KeyboardShortcuts, error) {
 	// Initialize viewport
 	vp := viewport.New()
 	vp.KeyMap = viewport.KeyMap{
-		Up:    k.keyMap.ScrollUp,
-		Down:  k.keyMap.ScrollDown,
-		Left:  key.NewBinding(key.WithDisabled()),
-		Right: key.NewBinding(key.WithDisabled()),
+		Up:           k.keyMap.ScrollUp,
+		Down:         k.keyMap.ScrollDown,
+		Left:         key.NewBinding(key.WithDisabled()),
+		Right:        key.NewBinding(key.WithDisabled()),
 		PageUp:       k.keyMap.PageUp,
 		PageDown:     k.keyMap.PageDown,
 		HalfPageUp:   key.NewBinding(key.WithDisabled()),
@@ -201,7 +201,7 @@ func (k *KeyboardShortcuts) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	if area.Dx() != k.windowWidth || area.Dy() != k.windowHeight {
 		k.windowWidth = area.Dx()
 		k.windowHeight = area.Dy()
-		
+
 		// Update viewport size
 		innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
 		contentHeight := height - t.Dialog.Title.GetVerticalFrameSize() -

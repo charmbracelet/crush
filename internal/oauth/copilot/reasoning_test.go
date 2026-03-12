@@ -89,6 +89,7 @@ func TestWrapReasoningTransform_SSEResponse(t *testing.T) {
 	resp := makeTestResponse("text/event-stream", input)
 
 	transformed := wrapReasoningTransform(resp)
+	defer transformed.Body.Close()
 	body, err := io.ReadAll(transformed.Body)
 	require.NoError(t, err)
 	require.Contains(t, string(body), `"reasoning_content":"step 1"`)
@@ -102,6 +103,7 @@ func TestWrapReasoningTransform_NonSSEResponse(t *testing.T) {
 	resp := makeTestResponse("application/json", input)
 
 	transformed := wrapReasoningTransform(resp)
+	defer transformed.Body.Close()
 	body, err := io.ReadAll(transformed.Body)
 	require.NoError(t, err)
 	// Non-SSE responses should not be transformed.

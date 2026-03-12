@@ -1,6 +1,7 @@
 package httpext
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"strings"
@@ -35,7 +36,7 @@ func TestWrapSSESanitizingHTTPClientSkipsLeadingBlankEvent(t *testing.T) {
 		}),
 	})
 
-	req, err := http.NewRequest(http.MethodGet, "https://example.com/stream", nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://example.com/stream", nil)
 	require.NoError(t, err)
 
 	gotResp, err := client.Do(req)
@@ -65,7 +66,7 @@ func TestWrapSSESanitizingHTTPClientLeavesNonSSEUntouched(t *testing.T) {
 		}),
 	})
 
-	req, err := http.NewRequest(http.MethodGet, "https://example.com/data", nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://example.com/data", nil)
 	require.NoError(t, err)
 
 	gotResp, err := client.Do(req)

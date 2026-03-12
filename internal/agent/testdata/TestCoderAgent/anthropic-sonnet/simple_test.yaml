@@ -15,7 +15,7 @@ interactions:
       Content-Type:
       - application/json
       User-Agent:
-      - Anthropic/Go 1.14.0
+      - Charm-Crush/devel (https://charm.land/crush)
     url: https://api.anthropic.com/v1/messages
     method: POST
   response:
@@ -23,40 +23,16 @@ interactions:
     proto_major: 2
     proto_minor: 0
     content_length: -1
-    body: |+
-      event: message_start
-      data: {"type":"message_start","message":{"model":"claude-3-5-haiku-20241022","id":"msg_01RhwrPwqgU78kv4XsoesFPF","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":131,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":1,"service_tier":"standard"}}}
-
-      event: content_block_start
-      data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""} }
-
-      event: ping
-      data: {"type": "ping"}
-
-      event: content_block_delta
-      data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Quick"}              }
-
-      event: content_block_delta
-      data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" Chat"}        }
-
-      event: content_block_delta
-      data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" Opener"}   }
-
-      event: content_block_stop
-      data: {"type":"content_block_stop","index":0 }
-
-      event: message_delta
-      data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":131,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":7}}
-
-      event: message_stop
-      data: {"type":"message_stop"  }
-
+    uncompressed: true
+    body: '{"type":"error","error":{"type":"not_found_error","message":"model: claude-3-5-haiku-20241022"},"request_id":"req_011CYyXcppNDLs1qvfBtpNfu"}'
     headers:
       Content-Type:
-      - text/event-stream; charset=utf-8
-    status: 200 OK
-    code: 200
-    duration: 705.524375ms
+      - application/json
+      content-type:
+      - application/json
+    status: 404 Not Found
+    code: 404
+    duration: 373.872792ms
 - id: 1
   request:
     proto: HTTP/1.1
@@ -71,7 +47,7 @@ interactions:
       Content-Type:
       - application/json
       User-Agent:
-      - Anthropic/Go 1.14.0
+      - Charm-Crush/devel (https://charm.land/crush)
     url: https://api.anthropic.com/v1/messages
     method: POST
   response:
@@ -79,58 +55,95 @@ interactions:
     proto_major: 2
     proto_minor: 0
     content_length: -1
+    uncompressed: true
     body: |+
       event: message_start
-      data: {"type":"message_start","message":{"model":"claude-sonnet-4-5-20250929","id":"msg_01Pcqx7Mq3aWnT6VUDVGAs71","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":2,"cache_creation_input_tokens":14012,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":14012,"ephemeral_1h_input_tokens":0},"output_tokens":1,"service_tier":"standard"}}         }
+      data: {"type":"message_start","message":{"model":"claude-sonnet-4-5-20250929","id":"msg_01KxbfB9Wy13GrJ3XzCbWAte","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":2,"cache_creation_input_tokens":14012,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":14012,"ephemeral_1h_input_tokens":0},"output_tokens":1,"service_tier":"standard","inference_geo":"not_available"}}           }
 
       event: content_block_start
-      data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}               }
+      data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
 
       event: ping
       data: {"type": "ping"}
 
       event: content_block_delta
-      data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}             }
+      data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}   }
 
       event: content_block_delta
-      data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"! I'm ready to help you with"}}
+      data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"! How"} }
 
       event: content_block_delta
-      data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" any"}            }
-
-      event: content_block_delta
-      data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" coding"}        }
-
-      event: content_block_delta
-      data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" tasks,"}     }
-
-      event: content_block_delta
-      data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" file"} }
-
-      event: content_block_delta
-      data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" operations, or questions"}     }
-
-      event: content_block_delta
-      data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" you have. What"}   }
-
-      event: content_block_delta
-      data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" would you like to work"}            }
-
-      event: content_block_delta
-      data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" on?"} }
+      data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" can I help you today?"}           }
 
       event: content_block_stop
-      data: {"type":"content_block_stop","index":0             }
+      data: {"type":"content_block_stop","index":0            }
 
       event: message_delta
-      data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":2,"cache_creation_input_tokens":14012,"cache_read_input_tokens":0,"output_tokens":32}          }
+      data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":2,"cache_creation_input_tokens":14012,"cache_read_input_tokens":0,"output_tokens":12}       }
 
       event: message_stop
-      data: {"type":"message_stop"         }
+      data: {"type":"message_stop"   }
 
     headers:
       Content-Type:
       - text/event-stream; charset=utf-8
     status: 200 OK
     code: 200
-    duration: 2.2130525s
+    duration: 1.342745458s
+- id: 2
+  request:
+    proto: HTTP/1.1
+    proto_major: 1
+    proto_minor: 1
+    content_length: 714
+    host: ""
+    body: '{"max_tokens":40,"messages":[{"content":[{"text":"Generate a concise title for the following content:\n\nHello\n \u003cthink\u003e\n\n\u003c/think\u003e","type":"text"}],"role":"user"}],"model":"claude-sonnet-4-5-20250929","system":[{"text":"you will generate a short title based on the first message a user begins a conversation with\n\n\u003crules\u003e\n- ensure it is not more than 50 characters long\n- the title should be a summary of the user''s message\n- it should be one line long\n- do not use quotes or colons\n- the entire text you return will be used as the title\n- never return anything that is more than one sentence (one line) long\n\u003c/rules\u003e\n\n /no_think","type":"text"}],"stream":true}'
+    headers:
+      Accept:
+      - application/json
+      Content-Type:
+      - application/json
+      User-Agent:
+      - Charm-Crush/devel (https://charm.land/crush)
+    url: https://api.anthropic.com/v1/messages
+    method: POST
+  response:
+    proto: HTTP/2.0
+    proto_major: 2
+    proto_minor: 0
+    content_length: -1
+    uncompressed: true
+    body: |+
+      event: message_start
+      data: {"type":"message_start","message":{"model":"claude-sonnet-4-5-20250929","id":"msg_01JQjg4fUDSXgCEK6L3V1tfC","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":131,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":1,"service_tier":"standard","inference_geo":"not_available"}} }
+
+      event: content_block_start
+      data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}              }
+
+      event: ping
+      data: {"type": "ping"}
+
+      event: content_block_delta
+      data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"General"}           }
+
+      event: content_block_delta
+      data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" Greeting or"} }
+
+      event: content_block_delta
+      data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" Hello"}  }
+
+      event: content_block_stop
+      data: {"type":"content_block_stop","index":0          }
+
+      event: message_delta
+      data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":131,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":8}             }
+
+      event: message_stop
+      data: {"type":"message_stop"               }
+
+    headers:
+      Content-Type:
+      - text/event-stream; charset=utf-8
+    status: 200 OK
+    code: 200
+    duration: 1.149213709s

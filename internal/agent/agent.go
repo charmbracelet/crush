@@ -32,6 +32,8 @@ import (
 	"charm.land/fantasy/providers/openrouter"
 	"charm.land/fantasy/providers/vercel"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/oauth/copilot"
+
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools"
@@ -66,9 +68,12 @@ var summaryPrompt []byte
 // Used to remove <think> tags from generated titles.
 var thinkTagRegex = regexp.MustCompile(`<think>.*?</think>`)
 
+const autoResumePromptPrefix = "The previous session was interrupted because it got too long, the initial user request was: `"
+
 type SessionAgentCall struct {
 	SessionID        string
 	Prompt           string
+	InitiatorType    string
 	ProviderOptions  fantasy.ProviderOptions
 	Attachments      []message.Attachment
 	MaxOutputTokens  int64
@@ -156,6 +161,12 @@ func NewSessionAgent(
 }
 
 func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
+	if call.InitiatorType != "" {
+		ctx = copilot.ContextWithInitiatorType(ctx, call.InitiatorType)
+	} else if a.isSubAgent {
+		ctx = copilot.ContextWithInitiatorType(ctx, copilot.InitiatorAgent)
+	}
+
 	if call.Prompt == "" && !message.ContainsTextAttachment(call.Attachments) {
 		return nil, ErrEmptyPrompt
 	}
@@ -221,7 +232,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	var wg sync.WaitGroup
 	// Generate title if first message.
 	if len(msgs) == 0 {
-		titleCtx := ctx // Copy to avoid race with ctx reassignment below.
+		titleCtx := copilot.ContextWithInitiatorType(ctx, copilot.InitiatorAgent)
 		wg.Go(func() {
 			a.generateTitle(titleCtx, call.SessionID, call.Prompt)
 		})
@@ -542,7 +553,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
-		if summarizeErr := a.Summarize(genCtx, call.SessionID, call.ProviderOptions); summarizeErr != nil {
+		if summarizeErr := a.Summarize(copilot.ContextWithInitiatorType(genCtx, copilot.InitiatorAgent), call.SessionID, call.ProviderOptions); summarizeErr != nil {
 			return nil, summarizeErr
 		}
 		// If the agent wasn't done...
@@ -551,7 +562,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			if !ok {
 				existing = []SessionAgentCall{}
 			}
-			call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
+			call.Prompt = fmt.Sprintf(autoResumePromptPrefix+"%s`", call.Prompt)
+			call.InitiatorType = copilot.InitiatorAgent
 			existing = append(existing, call)
 			a.messageQueue.Set(call.SessionID, existing)
 		}
@@ -596,6 +608,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	aiMsgs, _ := a.preparePrompt(msgs)
 
 	genCtx, cancel := context.WithCancel(ctx)
+	genCtx = copilot.ContextWithInitiatorType(genCtx, copilot.InitiatorAgent)
 	a.activeRequests.Set(sessionID, cancel)
 	defer a.activeRequests.Del(sessionID)
 	defer cancel()
@@ -814,7 +827,8 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	// Use the small model to generate the title.
 	model := smallModel
 	agent := newAgent(model.Model, titlePrompt, maxOutputTokens)
-	resp, err := agent.Stream(ctx, streamCall)
+	titleCtx := copilot.ContextWithInitiatorType(ctx, copilot.InitiatorAgent)
+	resp, err := agent.Stream(titleCtx, streamCall)
 	if err == nil {
 		// We successfully generated a title with the small model.
 		slog.Debug("Generated title with small model")
@@ -823,7 +837,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		slog.Error("Error generating title with small model; trying big model", "err", err)
 		model = largeModel
 		agent = newAgent(model.Model, titlePrompt, maxOutputTokens)
-		resp, err = agent.Stream(ctx, streamCall)
+		resp, err = agent.Stream(titleCtx, streamCall)
 		if err == nil {
 			slog.Debug("Generated title with large model")
 		} else {

@@ -20,7 +20,7 @@ var runCmd = &cobra.Command{
 The prompt can be provided as arguments or piped from stdin.`,
 	Example: `
 # Run a simple prompt
-crush run Explain the use of context in Go
+crush run "Guess my 5 favorite Pokémon"
 
 # Pipe input from stdin
 curl https://charm.land | crush run "Summarize this website"
@@ -28,10 +28,13 @@ curl https://charm.land | crush run "Summarize this website"
 # Read from a file
 crush run "What is this code doing?" <<< prrr.go
 
+# Redirect output to a file
+crush run "Generate a hot README for this project" > MY_HOT_README.md
+
 # Run in quiet mode (hide the spinner)
 crush run --quiet "Generate a README for this project"
 
-# Run in verbose mode
+# Run in verbose mode (show logs)
 crush run --verbose "Generate a README for this project"
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -74,9 +77,6 @@ crush run --verbose "Generate a README for this project"
 		event.AppInitialized()
 
 		return app.RunNonInteractive(ctx, os.Stdout, prompt, largeModel, smallModel, quiet || verbose)
-	},
-	PostRun: func(cmd *cobra.Command, args []string) {
-		event.AppExited()
 	},
 }
 

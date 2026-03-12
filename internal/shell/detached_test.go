@@ -1,18 +1,16 @@
 package shell
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewShell_DetachedSetsNonInteractiveEnv(t *testing.T) {
+func TestNewShell_PreservesProvidedEnv(t *testing.T) {
 	t.Parallel()
 
 	shell := NewShell(&Options{
 		WorkingDir: t.TempDir(),
-		Detached:   true,
 		Env: []string{
 			"PATH=/tmp/bin",
 			"TERM=xterm-256color",
@@ -20,43 +18,38 @@ func TestNewShell_DetachedSetsNonInteractiveEnv(t *testing.T) {
 	})
 
 	env := shell.GetEnv()
-	require.Contains(t, env, "CRUSH_BACKGROUND_JOB=1")
-	require.Contains(t, env, "TERM=dumb")
+	require.Contains(t, env, "PATH=/tmp/bin")
+	require.Contains(t, env, "TERM=xterm-256color")
 }
 
-func TestNewShell_DetachedReplacesTermOnce(t *testing.T) {
+func TestNewShell_SetEnvReplacesExistingEntry(t *testing.T) {
 	t.Parallel()
 
 	shell := NewShell(&Options{
 		WorkingDir: t.TempDir(),
-		Detached:   true,
 		Env: []string{
 			"PATH=/tmp/bin",
 			"TERM=screen",
 		},
 	})
 
-	termCount := 0
-	for _, entry := range shell.GetEnv() {
-		if strings.HasPrefix(entry, "TERM=") {
-			termCount++
-		}
-	}
-
-	require.Equal(t, 1, termCount)
+	shell.SetEnv("TERM", "dumb")
+	require.ElementsMatch(t, []string{"PATH=/tmp/bin", "TERM=dumb"}, shell.GetEnv())
 }
 
-func TestBackgroundShellManager_StartUsesDetachedShell(t *testing.T) {
+func TestBackgroundShellManager_StartUsesCurrentAPI(t *testing.T) {
 	t.Parallel()
 
+	workingDir := t.TempDir()
 	manager := newBackgroundShellManager()
 
-	bgShell, err := manager.Start(t.Context(), "session-123", t.TempDir(), nil, "echo hello", "")
+	bgShell, err := manager.Start(t.Context(), workingDir, nil, "echo hello", "")
 	require.NoError(t, err)
 
-	require.True(t, bgShell.Shell.detached)
-	require.Equal(t, "session-123", bgShell.SessionID)
-	require.Contains(t, bgShell.Shell.GetEnv(), "CRUSH_BACKGROUND_JOB=1")
+	require.Equal(t, workingDir, bgShell.WorkingDir)
+	require.Equal(t, workingDir, bgShell.Shell.GetWorkingDir())
+	require.Equal(t, "echo hello", bgShell.Command)
 
+	bgShell.Wait()
 	require.NoError(t, manager.Kill(bgShell.ID))
 }

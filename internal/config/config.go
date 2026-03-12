@@ -8,22 +8,16 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
-	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
-	"github.com/charmbracelet/crush/internal/oauth/hyper"
 	"github.com/invopop/jsonschema"
-	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 )
 
 const (
@@ -266,6 +260,7 @@ type Options struct {
 	InitializeAs              string       `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
 	AutoLSP                   *bool        `json:"auto_lsp,omitempty" jsonschema:"description=Automatically setup LSPs based on root markers,default=true"`
 	Progress                  *bool        `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
+	DisableNotifications      bool         `json:"disable_notifications,omitempty" jsonschema:"description=Disable desktop notifications,default=false"`
 }
 
 type MCPs map[string]MCPConfig
@@ -402,17 +397,6 @@ type Config struct {
 	Tools Tools `json:"tools,omitzero" jsonschema:"description=Tool configurations"`
 
 	Agents map[string]Agent `json:"-"`
-
-	// Internal
-	workingDir string `json:"-"`
-	// TODO: find a better way to do this this should probably not be part of the config
-	resolver       VariableResolver
-	dataConfigDir  string             `json:"-"`
-	knownProviders []catwalk.Provider `json:"-"`
-}
-
-func (c *Config) WorkingDir() string {
-	return c.workingDir
 }
 
 func (c *Config) EnabledProviders() []ProviderConfig {
@@ -476,234 +460,7 @@ func (c *Config) SmallModel() *catwalk.Model {
 	return c.GetModel(model.Provider, model.Model)
 }
 
-func (c *Config) SetCompactMode(enabled bool) error {
-	if c.Options == nil {
-		c.Options = &Options{}
-	}
-	c.Options.TUI.CompactMode = enabled
-	return c.SetConfigField("options.tui.compact_mode", enabled)
-}
-
-func (c *Config) Resolve(key string) (string, error) {
-	if c.resolver == nil {
-		return "", fmt.Errorf("no variable resolver configured")
-	}
-	return c.resolver.ResolveValue(key)
-}
-
-func (c *Config) UpdatePreferredModel(modelType SelectedModelType, model SelectedModel) error {
-	c.Models[modelType] = model
-	if err := c.SetConfigField(fmt.Sprintf("models.%s", modelType), model); err != nil {
-		return fmt.Errorf("failed to update preferred model: %w", err)
-	}
-	if err := c.recordRecentModel(modelType, model); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (c *Config) HasConfigField(key string) bool {
-	data, err := os.ReadFile(c.dataConfigDir)
-	if err != nil {
-		return false
-	}
-	return gjson.Get(string(data), key).Exists()
-}
-
-func (c *Config) SetConfigField(key string, value any) error {
-	data, err := os.ReadFile(c.dataConfigDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			data = []byte("{}")
-		} else {
-			return fmt.Errorf("failed to read config file: %w", err)
-		}
-	}
-
-	newValue, err := sjson.Set(string(data), key, value)
-	if err != nil {
-		return fmt.Errorf("failed to set config field %s: %w", key, err)
-	}
-	if err := os.MkdirAll(filepath.Dir(c.dataConfigDir), 0o755); err != nil {
-		return fmt.Errorf("failed to create config directory %q: %w", c.dataConfigDir, err)
-	}
-	if err := os.WriteFile(c.dataConfigDir, []byte(newValue), 0o600); err != nil {
-		return fmt.Errorf("failed to write config file: %w", err)
-	}
-	return nil
-}
-
-func (c *Config) RemoveConfigField(key string) error {
-	data, err := os.ReadFile(c.dataConfigDir)
-	if err != nil {
-		return fmt.Errorf("failed to read config file: %w", err)
-	}
-
-	newValue, err := sjson.Delete(string(data), key)
-	if err != nil {
-		return fmt.Errorf("failed to delete config field %s: %w", key, err)
-	}
-	if err := os.MkdirAll(filepath.Dir(c.dataConfigDir), 0o755); err != nil {
-		return fmt.Errorf("failed to create config directory %q: %w", c.dataConfigDir, err)
-	}
-	if err := os.WriteFile(c.dataConfigDir, []byte(newValue), 0o600); err != nil {
-		return fmt.Errorf("failed to write config file: %w", err)
-	}
-	return nil
-}
-
-// RefreshOAuthToken refreshes the OAuth token for the given provider.
-func (c *Config) RefreshOAuthToken(ctx context.Context, providerID string) error {
-	providerConfig, exists := c.Providers.Get(providerID)
-	if !exists {
-		return fmt.Errorf("provider %s not found", providerID)
-	}
-
-	if providerConfig.OAuthToken == nil {
-		return fmt.Errorf("provider %s does not have an OAuth token", providerID)
-	}
-
-	var newToken *oauth.Token
-	var refreshErr error
-	switch providerID {
-	case string(catwalk.InferenceProviderCopilot):
-		newToken, refreshErr = copilot.RefreshToken(ctx, providerConfig.OAuthToken.RefreshToken)
-	case hyperp.Name:
-		newToken, refreshErr = hyper.ExchangeToken(ctx, providerConfig.OAuthToken.RefreshToken)
-	default:
-		return fmt.Errorf("OAuth refresh not supported for provider %s", providerID)
-	}
-	if refreshErr != nil {
-		return fmt.Errorf("failed to refresh OAuth token for provider %s: %w", providerID, refreshErr)
-	}
-
-	slog.Info("Successfully refreshed OAuth token", "provider", providerID)
-	providerConfig.OAuthToken = newToken
-	providerConfig.APIKey = newToken.AccessToken
-
-	switch providerID {
-	case string(catwalk.InferenceProviderCopilot):
-		providerConfig.SetupGitHubCopilot()
-	}
-
-	c.Providers.Set(providerID, providerConfig)
-
-	if err := cmp.Or(
-		c.SetConfigField(fmt.Sprintf("providers.%s.api_key", providerID), newToken.AccessToken),
-		c.SetConfigField(fmt.Sprintf("providers.%s.oauth", providerID), newToken),
-	); err != nil {
-		return fmt.Errorf("failed to persist refreshed token: %w", err)
-	}
-
-	return nil
-}
-
-func (c *Config) SetProviderAPIKey(providerID string, apiKey any) error {
-	var providerConfig ProviderConfig
-	var exists bool
-	var setKeyOrToken func()
-
-	switch v := apiKey.(type) {
-	case string:
-		if err := c.SetConfigField(fmt.Sprintf("providers.%s.api_key", providerID), v); err != nil {
-			return fmt.Errorf("failed to save api key to config file: %w", err)
-		}
-		setKeyOrToken = func() { providerConfig.APIKey = v }
-	case *oauth.Token:
-		if err := cmp.Or(
-			c.SetConfigField(fmt.Sprintf("providers.%s.api_key", providerID), v.AccessToken),
-			c.SetConfigField(fmt.Sprintf("providers.%s.oauth", providerID), v),
-		); err != nil {
-			return err
-		}
-		setKeyOrToken = func() {
-			providerConfig.APIKey = v.AccessToken
-			providerConfig.OAuthToken = v
-			switch providerID {
-			case string(catwalk.InferenceProviderCopilot):
-				providerConfig.SetupGitHubCopilot()
-			}
-		}
-	}
-
-	providerConfig, exists = c.Providers.Get(providerID)
-	if exists {
-		setKeyOrToken()
-		c.Providers.Set(providerID, providerConfig)
-		return nil
-	}
-
-	var foundProvider *catwalk.Provider
-	for _, p := range c.knownProviders {
-		if string(p.ID) == providerID {
-			foundProvider = &p
-			break
-		}
-	}
-
-	if foundProvider != nil {
-		// Create new provider config based on known provider
-		providerConfig = ProviderConfig{
-			ID:           providerID,
-			Name:         foundProvider.Name,
-			BaseURL:      foundProvider.APIEndpoint,
-			Type:         foundProvider.Type,
-			Disable:      false,
-			ExtraHeaders: make(map[string]string),
-			ExtraParams:  make(map[string]string),
-			Models:       foundProvider.Models,
-		}
-		setKeyOrToken()
-	} else {
-		return fmt.Errorf("provider with ID %s not found in known providers", providerID)
-	}
-	// Store the updated provider config
-	c.Providers.Set(providerID, providerConfig)
-	return nil
-}
-
 const maxRecentModelsPerType = 5
-
-func (c *Config) recordRecentModel(modelType SelectedModelType, model SelectedModel) error {
-	if model.Provider == "" || model.Model == "" {
-		return nil
-	}
-
-	if c.RecentModels == nil {
-		c.RecentModels = make(map[SelectedModelType][]SelectedModel)
-	}
-
-	eq := func(a, b SelectedModel) bool {
-		return a.Provider == b.Provider && a.Model == b.Model
-	}
-
-	entry := SelectedModel{
-		Provider: model.Provider,
-		Model:    model.Model,
-	}
-
-	current := c.RecentModels[modelType]
-	withoutCurrent := slices.DeleteFunc(slices.Clone(current), func(existing SelectedModel) bool {
-		return eq(existing, entry)
-	})
-
-	updated := append([]SelectedModel{entry}, withoutCurrent...)
-	if len(updated) > maxRecentModelsPerType {
-		updated = updated[:maxRecentModelsPerType]
-	}
-
-	if slices.EqualFunc(current, updated, eq) {
-		return nil
-	}
-
-	c.RecentModels[modelType] = updated
-
-	if err := c.SetConfigField(fmt.Sprintf("recent_models.%s", modelType), updated); err != nil {
-		return fmt.Errorf("failed to persist recent models: %w", err)
-	}
-
-	return nil
-}
 
 func allToolNames() []string {
 	return []string{
@@ -783,10 +540,6 @@ func (c *Config) SetupAgents() {
 		},
 	}
 	c.Agents = agents
-}
-
-func (c *Config) Resolver() VariableResolver {
-	return c.resolver
 }
 
 func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {

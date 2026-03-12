@@ -101,19 +101,19 @@ func (t *billingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 }
 
 func (t *billingTransport) getInitiatorType(req *http.Request) string {
-	// Priority 1: Context value (highest priority, allows explicit control)
+	// Priority 1: Context value (highest priority, allows explicit control).
 	if v := req.Context().Value(InitiatorTypeKey); v != nil {
 		if s, ok := v.(string); ok && (s == InitiatorUser || s == InitiatorAgent) {
 			return s
 		}
 	}
 
-	// Priority 2: Explicit initiator type (deprecated, kept for backward compatibility)
+	// Priority 2: Explicit initiator type (deprecated, kept for backward compatibility).
 	if t.initiatorType != "" {
 		return t.initiatorType
 	}
 
-	// Priority 3: Inspect request body
+	// Priority 3: Inspect request body.
 	if req.Body != nil && req.Body != http.NoBody {
 		bodyBytes, err := readAndRestoreRequestBody(req)
 		if err != nil {
@@ -123,7 +123,7 @@ func (t *billingTransport) getInitiatorType(req *http.Request) string {
 		}
 	}
 
-	// Default to user (safe fallback)
+	// Default to user (safe fallback).
 	return InitiatorUser
 }
 

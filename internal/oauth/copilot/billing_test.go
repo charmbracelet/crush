@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestBillingTransport_ChatCompletionsInitiatorDetection(t *testing.T) {
@@ -59,7 +61,7 @@ func TestBillingTransport_ChatCompletionsInitiatorDetection(t *testing.T) {
 
 			initiator := detectInitiator(t, map[string]any{"messages": tt.messages})
 			if initiator != tt.expectedInit {
-				t.Fatalf("getInitiatorType() = %v, want %v", initiator, tt.expectedInit)
+				require.Equal(t, tt.expectedInit, initiator, "getInitiatorType() mismatch")
 			}
 		})
 	}
@@ -117,7 +119,7 @@ func TestBillingTransport_ResponsesAPIInitiatorDetection(t *testing.T) {
 
 			initiator := detectInitiator(t, map[string]any{"input": tt.input})
 			if initiator != tt.expectedInit {
-				t.Fatalf("getInitiatorType() = %v, want %v", initiator, tt.expectedInit)
+				require.Equal(t, tt.expectedInit, initiator, "getInitiatorType() mismatch")
 			}
 		})
 	}
@@ -130,9 +132,7 @@ func TestBillingTransport_EdgeCases(t *testing.T) {
 		t.Parallel()
 
 		initiator := detectInitiator(t, map[string]any{"messages": []any{}})
-		if initiator != InitiatorUser {
-			t.Fatalf("Empty messages should default to user, got %v", initiator)
-		}
+		require.Equal(t, InitiatorUser, initiator, "Empty messages should default to user")
 	})
 
 	t.Run("invalid JSON", func(t *testing.T) {
@@ -141,9 +141,7 @@ func TestBillingTransport_EdgeCases(t *testing.T) {
 		req, _ := http.NewRequestWithContext(context.Background(), "POST", "https://api.example.com/v1/chat/completions", strings.NewReader("invalid json"))
 		transport := &billingTransport{}
 		initiator := transport.getInitiatorType(req)
-		if initiator != InitiatorUser {
-			t.Fatalf("Invalid JSON should default to user, got %v", initiator)
-		}
+		require.Equal(t, InitiatorUser, initiator, "Invalid JSON should default to user")
 	})
 
 	t.Run("nil body", func(t *testing.T) {
@@ -152,9 +150,7 @@ func TestBillingTransport_EdgeCases(t *testing.T) {
 		req, _ := http.NewRequestWithContext(context.Background(), "POST", "https://api.example.com/v1/chat/completions", nil)
 		transport := &billingTransport{}
 		initiator := transport.getInitiatorType(req)
-		if initiator != InitiatorUser {
-			t.Fatalf("Nil body should default to user, got %v", initiator)
-		}
+		require.Equal(t, InitiatorUser, initiator, "Nil body should default to user")
 	})
 }
 
@@ -173,9 +169,7 @@ func TestBillingTransport_ContextInitiator(t *testing.T) {
 
 		transport := &billingTransport{}
 		initiator := transport.getInitiatorType(req)
-		if initiator != InitiatorUser {
-			t.Fatalf("Context initiator should override body detection, got %v, want %v", initiator, InitiatorUser)
-		}
+		require.Equal(t, InitiatorUser, initiator, "Context initiator should override body detection")
 	})
 
 	t.Run("context_with_agent_initiator", func(t *testing.T) {
@@ -190,9 +184,7 @@ func TestBillingTransport_ContextInitiator(t *testing.T) {
 
 		transport := &billingTransport{}
 		initiator := transport.getInitiatorType(req)
-		if initiator != InitiatorAgent {
-			t.Fatalf("Context initiator should override body detection, got %v, want %v", initiator, InitiatorAgent)
-		}
+		require.Equal(t, InitiatorAgent, initiator, "Context initiator should override body detection")
 	})
 
 	t.Run("resume_prompt_requires_explicit_agent_initiator", func(t *testing.T) {
@@ -207,9 +199,7 @@ func TestBillingTransport_ContextInitiator(t *testing.T) {
 
 		transport := &billingTransport{}
 		initiator := transport.getInitiatorType(req)
-		if initiator != InitiatorAgent {
-			t.Fatalf("Explicit agent initiator should control resume billing, got %v", initiator)
-		}
+		require.Equal(t, InitiatorAgent, initiator, "Explicit agent initiator should control resume billing")
 	})
 
 	t.Run("context_with_invalid_initiator_falls_back_to_body", func(t *testing.T) {
@@ -224,9 +214,7 @@ func TestBillingTransport_ContextInitiator(t *testing.T) {
 
 		transport := &billingTransport{}
 		initiator := transport.getInitiatorType(req)
-		if initiator != InitiatorAgent {
-			t.Fatalf("Invalid context initiator should fall back to body detection, got %v, want %v", initiator, InitiatorAgent)
-		}
+		require.Equal(t, InitiatorAgent, initiator, "Invalid context initiator should fall back to body detection")
 	})
 }
 
@@ -234,14 +222,10 @@ func detectInitiator(t *testing.T, payload map[string]any) string {
 	t.Helper()
 
 	bodyBytes, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatalf("Failed to marshal test data: %v", err)
-	}
+	require.NoError(t, err, "Failed to marshal test data")
 
 	req, err := http.NewRequestWithContext(context.Background(), "POST", "https://api.example.com/v1/chat/completions", bytes.NewReader(bodyBytes))
-	if err != nil {
-		t.Fatalf("Failed to create request: %v", err)
-	}
+	require.NoError(t, err, "Failed to create request")
 
 	transport := &billingTransport{
 		debug:    false,

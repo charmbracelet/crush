@@ -646,7 +646,7 @@ func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[st
 	// Set HTTP client based on provider and debug mode.
 	var httpClient *http.Client
 	if copilotService {
-		// Use billing client for Copilot service
+		// Use billing client for Copilot service.
 		httpClient = copilot.NewBillingClient(copilotService, c.cfg.Config().Options.Debug)
 	} else if c.cfg.Config().Options.Debug {
 		httpClient = log.NewHTTPClient()
@@ -714,7 +714,7 @@ func (c *coordinator) buildOpenaiCompatProvider(
 		}
 		httpClient = copilot.NewClient(isSubAgent, c.cfg.Config().Options.Debug)
 	} else if copilotService {
-		// Use billing client for Copilot-compatible providers
+		// Use billing client for Copilot-compatible providers.
 		httpClient = copilot.NewBillingClient(copilotService, c.cfg.Config().Options.Debug)
 	} else if c.cfg.Config().Options.Debug {
 		httpClient = log.NewHTTPClient()

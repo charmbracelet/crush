@@ -637,15 +637,24 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 	return anthropic.New(opts...)
 }
 
-func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[string]string) (fantasy.Provider, error) {
+func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[string]string, copilotService bool) (fantasy.Provider, error) {
 	opts := []openai.Option{
 		openai.WithAPIKey(apiKey),
 		openai.WithUseResponsesAPI(),
 	}
-	if c.cfg.Config().Options.Debug {
-		httpClient := log.NewHTTPClient()
+
+	// Set HTTP client based on provider and debug mode.
+	var httpClient *http.Client
+	if copilotService {
+		// Use billing client for Copilot service.
+		httpClient = copilot.NewBillingClient(copilotService, c.cfg.Config().Options.Debug)
+	} else if c.cfg.Config().Options.Debug {
+		httpClient = log.NewHTTPClient()
+	}
+	if httpClient != nil {
 		opts = append(opts, openai.WithHTTPClient(httpClient))
 	}
+
 	if len(headers) > 0 {
 		opts = append(opts, openai.WithHeaders(headers))
 	}
@@ -683,7 +692,15 @@ func (c *coordinator) buildVercelProvider(_, apiKey string, headers map[string]s
 	return vercel.New(opts...)
 }
 
-func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers map[string]string, extraBody map[string]any, providerID string, useCopilotClient bool, isSubAgent bool) (fantasy.Provider, error) {
+func (c *coordinator) buildOpenaiCompatProvider(
+	baseURL, apiKey string,
+	headers map[string]string,
+	extraBody map[string]any,
+	providerID string,
+	useCopilotClient bool,
+	isSubAgent bool,
+	copilotService bool,
+) (fantasy.Provider, error) {
 	opts := []openaicompat.Option{
 		openaicompat.WithBaseURL(baseURL),
 		openaicompat.WithAPIKey(apiKey),
@@ -696,6 +713,9 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 			opts = append(opts, openaicompat.WithUseResponsesAPI())
 		}
 		httpClient = copilot.NewClient(isSubAgent, c.cfg.Config().Options.Debug)
+	} else if copilotService {
+		// Use billing client for Copilot-compatible providers.
+		httpClient = copilot.NewBillingClient(copilotService, c.cfg.Config().Options.Debug)
 	} else if c.cfg.Config().Options.Debug {
 		httpClient = log.NewHTTPClient()
 	}
@@ -802,6 +822,7 @@ func (c *coordinator) isAnthropicThinking(model config.SelectedModel) bool {
 	if model.Think {
 		return true
 	}
+
 	opts, err := anthropic.ParseOptions(model.ProviderOptions)
 	return err == nil && opts.Thinking != nil
 }
@@ -826,7 +847,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 
 	switch providerCfg.Type {
 	case openai.Name:
-		return c.buildOpenaiProvider(baseURL, apiKey, headers)
+		return c.buildOpenaiProvider(baseURL, apiKey, headers, providerCfg.CopilotService)
 	case anthropic.Name:
 		return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID)
 	case openrouter.Name:
@@ -848,7 +869,16 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 			}
 			providerCfg.ExtraBody["tool_stream"] = true
 		}
-		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, providerCfg.UseCopilotClient, isSubAgent)
+		return c.buildOpenaiCompatProvider(
+			baseURL,
+			apiKey,
+			headers,
+			providerCfg.ExtraBody,
+			providerCfg.ID,
+			providerCfg.UseCopilotClient,
+			isSubAgent,
+			providerCfg.CopilotService,
+		)
 	case hyper.Name:
 		return c.buildHyperProvider(baseURL, apiKey)
 	default:
@@ -981,19 +1011,16 @@ type subAgentParams struct {
 // It creates a sub-session, runs the agent with the given prompt, and propagates
 // the cost to the parent session.
 func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (fantasy.ToolResponse, error) {
-	// Create sub-session
 	agentToolSessionID := c.sessions.CreateAgentToolSessionID(params.AgentMessageID, params.ToolCallID)
 	session, err := c.sessions.CreateTaskSession(ctx, agentToolSessionID, params.SessionID, params.SessionTitle)
 	if err != nil {
 		return fantasy.ToolResponse{}, fmt.Errorf("create session: %w", err)
 	}
 
-	// Call session setup function if provided
 	if params.SessionSetup != nil {
 		params.SessionSetup(session.ID)
 	}
 
-	// Get model configuration
 	model := params.Agent.Model()
 	maxTokens := model.CatwalkCfg.DefaultMaxTokens
 	if model.ModelCfg.MaxTokens != 0 {
@@ -1005,7 +1032,6 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		return fantasy.ToolResponse{}, errModelProviderNotConfigured
 	}
 
-	// Run the agent
 	result, err := params.Agent.Run(ctx, SessionAgentCall{
 		SessionID:        session.ID,
 		Prompt:           params.Prompt,
@@ -1023,13 +1049,11 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		return fantasy.NewTextErrorResponse("error generating response"), nil
 	}
 
-	// Check if result has valid response content
 	if result.Response.Content == nil || result.Response.Content.Text() == "" {
 		slog.Warn("Sub-agent returned empty response", "session", session.ID, "prompt", params.Prompt)
 		return fantasy.NewTextErrorResponse("no content in response"), nil
 	}
 
-	// Update parent session cost
 	if err := c.updateParentSessionCost(ctx, session.ID, params.SessionID); err != nil {
 		return fantasy.ToolResponse{}, err
 	}

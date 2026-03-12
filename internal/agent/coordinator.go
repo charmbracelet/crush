@@ -74,7 +74,7 @@ type Coordinator interface {
 }
 
 type coordinator struct {
-	cfg         *config.Config
+	cfg         *config.ConfigStore
 	sessions    session.Service
 	messages    message.Service
 	permissions permission.Service
@@ -91,7 +91,7 @@ type coordinator struct {
 
 func NewCoordinator(
 	ctx context.Context,
-	cfg *config.Config,
+	cfg *config.ConfigStore,
 	sessions session.Service,
 	messages message.Service,
 	permissions permission.Service,
@@ -112,7 +112,7 @@ func NewCoordinator(
 		agents:      make(map[string]SessionAgent),
 	}
 
-	agentCfg, ok := cfg.Agents[config.AgentCoder]
+	agentCfg, ok := cfg.Config().Agents[config.AgentCoder]
 	if !ok {
 		return nil, errCoderAgentNotConfigured
 	}
@@ -160,7 +160,7 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 		attachments = filteredAttachments
 	}
 
-	providerCfg, ok := c.cfg.Providers.Get(model.ModelCfg.Provider)
+	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
 	if !ok {
 		return nil, errModelProviderNotConfigured
 	}
@@ -383,14 +383,14 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		return nil, err
 	}
 
-	largeProviderCfg, _ := c.cfg.Providers.Get(large.ModelCfg.Provider)
+	largeProviderCfg, _ := c.cfg.Config().Providers.Get(large.ModelCfg.Provider)
 	result := NewSessionAgent(SessionAgentOptions{
 		LargeModel:           large,
 		SmallModel:           small,
 		SystemPromptPrefix:   largeProviderCfg.SystemPromptPrefix,
 		SystemPrompt:         "",
 		IsSubAgent:           isSubAgent,
-		DisableAutoSummarize: c.cfg.Options.DisableAutoSummarize,
+		DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
 		IsYolo:               c.permissions.SkipRequests(),
 		Sessions:             c.sessions,
 		Messages:             c.messages,
@@ -399,7 +399,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	})
 
 	c.readyWg.Go(func() error {
-		systemPrompt, err := prompt.Build(ctx, large.Model.Provider(), large.Model.Model(), *c.cfg)
+		systemPrompt, err := prompt.Build(ctx, large.Model.Provider(), large.Model.Model(), c.cfg)
 		if err != nil {
 			return err
 		}
@@ -439,14 +439,14 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 
 	// Get the model name for the agent
 	modelName := ""
-	if modelCfg, ok := c.cfg.Models[agent.Model]; ok {
-		if model := c.cfg.GetModel(modelCfg.Provider, modelCfg.Model); model != nil {
+	if modelCfg, ok := c.cfg.Config().Models[agent.Model]; ok {
+		if model := c.cfg.Config().GetModel(modelCfg.Provider, modelCfg.Model); model != nil {
 			modelName = model.Name
 		}
 	}
 
 	allTools = append(allTools,
-		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Options.Attribution, modelName),
+		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelName),
 		tools.NewJobOutputTool(),
 		tools.NewJobKillTool(),
 		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),
@@ -454,20 +454,20 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		tools.NewMultiEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 		tools.NewFetchTool(c.permissions, c.cfg.WorkingDir(), nil),
 		tools.NewGlobTool(c.cfg.WorkingDir()),
-		tools.NewGrepTool(c.cfg.WorkingDir(), c.cfg.Tools.Grep),
-		tools.NewLsTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Tools.Ls),
+		tools.NewGrepTool(c.cfg.WorkingDir(), c.cfg.Config().Tools.Grep),
+		tools.NewLsTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Tools.Ls),
 		tools.NewSourcegraphTool(nil),
 		tools.NewTodosTool(c.sessions),
-		tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, c.cfg.WorkingDir(), c.cfg.Options.SkillsPaths...),
+		tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, c.cfg.WorkingDir(), c.cfg.Config().Options.SkillsPaths...),
 		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 	)
 
 	// Add LSP tools if user has configured LSPs or auto_lsp is enabled (nil or true).
-	if len(c.cfg.LSP) > 0 || c.cfg.Options.AutoLSP == nil || *c.cfg.Options.AutoLSP {
+	if len(c.cfg.Config().LSP) > 0 || c.cfg.Config().Options.AutoLSP == nil || *c.cfg.Config().Options.AutoLSP {
 		allTools = append(allTools, tools.NewDiagnosticsTool(c.lspManager), tools.NewReferencesTool(c.lspManager), tools.NewLSPRestartTool(c.lspManager))
 	}
 
-	if len(c.cfg.MCP) > 0 {
+	if len(c.cfg.Config().MCP) > 0 {
 		allTools = append(
 			allTools,
 			tools.NewListMCPResourcesTool(c.cfg, c.permissions),
@@ -513,16 +513,16 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 
 // TODO: when we support multiple agents we need to change this so that we pass in the agent specific model config
 func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Model, Model, error) {
-	largeModelCfg, ok := c.cfg.Models[config.SelectedModelTypeLarge]
+	largeModelCfg, ok := c.cfg.Config().Models[config.SelectedModelTypeLarge]
 	if !ok {
 		return Model{}, Model{}, errLargeModelNotSelected
 	}
-	smallModelCfg, ok := c.cfg.Models[config.SelectedModelTypeSmall]
+	smallModelCfg, ok := c.cfg.Config().Models[config.SelectedModelTypeSmall]
 	if !ok {
 		return Model{}, Model{}, errSmallModelNotSelected
 	}
 
-	largeProviderCfg, ok := c.cfg.Providers.Get(largeModelCfg.Provider)
+	largeProviderCfg, ok := c.cfg.Config().Providers.Get(largeModelCfg.Provider)
 	if !ok {
 		return Model{}, Model{}, errLargeModelProviderNotConfigured
 	}
@@ -532,7 +532,7 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 		return Model{}, Model{}, err
 	}
 
-	smallProviderCfg, ok := c.cfg.Providers.Get(smallModelCfg.Provider)
+	smallProviderCfg, ok := c.cfg.Config().Providers.Get(smallModelCfg.Provider)
 	if !ok {
 		return Model{}, Model{}, errSmallModelProviderNotConfigured
 	}
@@ -620,7 +620,7 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 		opts = append(opts, anthropic.WithBaseURL(baseURL))
 	}
 
-	if c.cfg.Options.Debug {
+	if c.cfg.Config().Options.Debug {
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, anthropic.WithHTTPClient(httpClient))
 	}
@@ -632,7 +632,7 @@ func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[st
 		openai.WithAPIKey(apiKey),
 		openai.WithUseResponsesAPI(),
 	}
-	if c.cfg.Options.Debug {
+	if c.cfg.Config().Options.Debug {
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, openai.WithHTTPClient(httpClient))
 	}
@@ -649,7 +649,7 @@ func (c *coordinator) buildOpenrouterProvider(_, apiKey string, headers map[stri
 	opts := []openrouter.Option{
 		openrouter.WithAPIKey(apiKey),
 	}
-	if c.cfg.Options.Debug {
+	if c.cfg.Config().Options.Debug {
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, openrouter.WithHTTPClient(httpClient))
 	}
@@ -663,7 +663,7 @@ func (c *coordinator) buildVercelProvider(_, apiKey string, headers map[string]s
 	opts := []vercel.Option{
 		vercel.WithAPIKey(apiKey),
 	}
-	if c.cfg.Options.Debug {
+	if c.cfg.Config().Options.Debug {
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, vercel.WithHTTPClient(httpClient))
 	}
@@ -683,8 +683,8 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 	var httpClient *http.Client
 	if providerID == string(catwalk.InferenceProviderCopilot) {
 		opts = append(opts, openaicompat.WithUseResponsesAPI())
-		httpClient = copilot.NewClient(isSubAgent, c.cfg.Options.Debug)
-	} else if c.cfg.Options.Debug {
+		httpClient = copilot.NewClient(isSubAgent, c.cfg.Config().Options.Debug)
+	} else if c.cfg.Config().Options.Debug {
 		httpClient = log.NewHTTPClient()
 	}
 	if httpClient != nil {
@@ -708,7 +708,7 @@ func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[str
 		azure.WithAPIKey(apiKey),
 		azure.WithUseResponsesAPI(),
 	}
-	if c.cfg.Options.Debug {
+	if c.cfg.Config().Options.Debug {
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, azure.WithHTTPClient(httpClient))
 	}
@@ -727,7 +727,7 @@ func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[str
 
 func (c *coordinator) buildBedrockProvider(headers map[string]string) (fantasy.Provider, error) {
 	var opts []bedrock.Option
-	if c.cfg.Options.Debug {
+	if c.cfg.Config().Options.Debug {
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, bedrock.WithHTTPClient(httpClient))
 	}
@@ -746,7 +746,7 @@ func (c *coordinator) buildGoogleProvider(baseURL, apiKey string, headers map[st
 		google.WithBaseURL(baseURL),
 		google.WithGeminiAPIKey(apiKey),
 	}
-	if c.cfg.Options.Debug {
+	if c.cfg.Config().Options.Debug {
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, google.WithHTTPClient(httpClient))
 	}
@@ -758,7 +758,7 @@ func (c *coordinator) buildGoogleProvider(baseURL, apiKey string, headers map[st
 
 func (c *coordinator) buildGoogleVertexProvider(headers map[string]string, options map[string]string) (fantasy.Provider, error) {
 	opts := []google.Option{}
-	if c.cfg.Options.Debug {
+	if c.cfg.Config().Options.Debug {
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, google.WithHTTPClient(httpClient))
 	}
@@ -779,7 +779,7 @@ func (c *coordinator) buildHyperProvider(baseURL, apiKey string) (fantasy.Provid
 		hyper.WithBaseURL(baseURL),
 		hyper.WithAPIKey(apiKey),
 	}
-	if c.cfg.Options.Debug {
+	if c.cfg.Config().Options.Debug {
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, hyper.WithHTTPClient(httpClient))
 	}
@@ -887,7 +887,7 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 	}
 	c.currentAgent.SetModels(large, small)
 
-	agentCfg, ok := c.cfg.Agents[config.AgentCoder]
+	agentCfg, ok := c.cfg.Config().Agents[config.AgentCoder]
 	if !ok {
 		return errCoderAgentNotConfigured
 	}
@@ -909,7 +909,7 @@ func (c *coordinator) QueuedPromptsList(sessionID string) []string {
 }
 
 func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
-	providerCfg, ok := c.cfg.Providers.Get(c.currentAgent.Model().ModelCfg.Provider)
+	providerCfg, ok := c.cfg.Config().Providers.Get(c.currentAgent.Model().ModelCfg.Provider)
 	if !ok {
 		return errModelProviderNotConfigured
 	}
@@ -922,7 +922,7 @@ func (c *coordinator) isUnauthorized(err error) bool {
 }
 
 func (c *coordinator) refreshOAuth2Token(ctx context.Context, providerCfg config.ProviderConfig) error {
-	if err := c.cfg.RefreshOAuthToken(ctx, providerCfg.ID); err != nil {
+	if err := c.cfg.RefreshOAuthToken(ctx, config.ScopeGlobal, providerCfg.ID); err != nil {
 		slog.Error("Failed to refresh OAuth token after 401 error", "provider", providerCfg.ID, "error", err)
 		return err
 	}
@@ -940,7 +940,7 @@ func (c *coordinator) refreshApiKeyTemplate(ctx context.Context, providerCfg con
 	}
 
 	providerCfg.APIKey = newAPIKey
-	c.cfg.Providers.Set(providerCfg.ID, providerCfg)
+	c.cfg.Config().Providers.Set(providerCfg.ID, providerCfg)
 
 	if err := c.UpdateModels(ctx); err != nil {
 		return err
@@ -984,7 +984,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		maxTokens = model.ModelCfg.MaxTokens
 	}
 
-	providerCfg, ok := c.cfg.Providers.Get(model.ModelCfg.Provider)
+	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
 	if !ok {
 		return fantasy.ToolResponse{}, errModelProviderNotConfigured
 	}

@@ -317,7 +317,7 @@ func New(com *common.Common) *UI {
 	desiredFocus := uiFocusEditor
 	if !com.Config().IsConfigured() {
 		desiredState = uiOnboarding
-	} else if n, _ := config.ProjectNeedsInitialization(com.Config()); n {
+	} else if n, _ := config.ProjectNeedsInitialization(com.Store()); n {
 		desiredState = uiInitialize
 	}
 
@@ -579,7 +579,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case mcp.EventPromptsListChanged:
 			return m, handleMCPPromptsEvent(msg.Payload.Name)
 		case mcp.EventToolsListChanged:
-			return m, handleMCPToolsEvent(m.com.Config(), msg.Payload.Name)
+			return m, handleMCPToolsEvent(m.com.Store(), msg.Payload.Name)
 		case mcp.EventResourcesListChanged:
 			return m, handleMCPResourcesEvent(msg.Payload.Name)
 		}
@@ -1229,23 +1229,39 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, msg.Cmd)
 		}
 
-	// Session dialog messages
+	// Session dialog messages.
 	case dialog.ActionSelectSession:
 		m.dialog.CloseDialog(dialog.SessionsID)
 		cmds = append(cmds, m.loadSession(msg.Session.ID))
 
-	// Open dialog message
+	// Open dialog message.
 	case dialog.ActionOpenDialog:
 		m.dialog.CloseDialog(dialog.CommandsID)
 		if cmd := m.openDialog(msg.DialogID); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 
-	// Command dialog messages
+	// Command dialog messages.
 	case dialog.ActionToggleYoloMode:
 		yolo := !m.com.App.Permissions.SkipRequests()
 		m.com.App.Permissions.SetSkipRequests(yolo)
 		m.setEditorPrompt(yolo)
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionToggleNotifications:
+		cfg := m.com.Config()
+		if cfg != nil && cfg.Options != nil {
+			disabled := !cfg.Options.DisableNotifications
+			cfg.Options.DisableNotifications = disabled
+			if err := m.com.Store().SetConfigField(config.ScopeGlobal, "options.disable_notifications", disabled); err != nil {
+				cmds = append(cmds, util.ReportError(err))
+			} else {
+				status := "enabled"
+				if disabled {
+					status = "disabled"
+				}
+				cmds = append(cmds, util.CmdHandler(util.NewInfoMsg("Notifications "+status)))
+			}
+		}
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionNewSession:
 		if m.isAgentBusy() {
@@ -1301,7 +1317,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 			currentModel := cfg.Models[agentCfg.Model]
 			currentModel.Think = !currentModel.Think
-			if err := cfg.UpdatePreferredModel(agentCfg.Model, currentModel); err != nil {
+			if err := m.com.Store().UpdatePreferredModel(config.ScopeGlobal, agentCfg.Model, currentModel); err != nil {
 				return util.ReportError(err)()
 			}
 			m.com.App.UpdateAgentModel(context.TODO())
@@ -1342,7 +1358,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 		// Attempt to import GitHub Copilot tokens from VSCode if available.
 		if isCopilot && !isConfigured() && !msg.ReAuthenticate {
-			m.com.Config().ImportCopilot()
+			m.com.Store().ImportCopilot()
 		}
 
 		if !isConfigured() || msg.ReAuthenticate {
@@ -1353,12 +1369,12 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 
-		if err := cfg.UpdatePreferredModel(msg.ModelType, msg.Model); err != nil {
+		if err := m.com.Store().UpdatePreferredModel(config.ScopeGlobal, msg.ModelType, msg.Model); err != nil {
 			cmds = append(cmds, util.ReportError(err))
 		} else if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
 			// Ensure small model is set is unset.
 			smallModel := m.com.App.GetDefaultSmallModel(providerID)
-			if err := cfg.UpdatePreferredModel(config.SelectedModelTypeSmall, smallModel); err != nil {
+			if err := m.com.Store().UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeSmall, smallModel); err != nil {
 				cmds = append(cmds, util.ReportError(err))
 			}
 		}
@@ -1404,7 +1420,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 		currentModel := cfg.Models[agentCfg.Model]
 		currentModel.ReasoningEffort = msg.Effort
-		if err := cfg.UpdatePreferredModel(agentCfg.Model, currentModel); err != nil {
+		if err := m.com.Store().UpdatePreferredModel(config.ScopeGlobal, agentCfg.Model, currentModel); err != nil {
 			cmds = append(cmds, util.ReportError(err))
 			break
 		}
@@ -2016,7 +2032,7 @@ func (m *UI) View() tea.View {
 	}
 	v.MouseMode = tea.MouseModeCellMotion
 	v.ReportFocus = m.caps.ReportFocusEvents
-	v.WindowTitle = "crush " + home.Short(m.com.Config().WorkingDir())
+	v.WindowTitle = "crush " + home.Short(m.com.Store().WorkingDir())
 
 	canvas := uv.NewScreenBuffer(m.width, m.height)
 	v.Cursor = m.Draw(canvas, canvas.Bounds())
@@ -2255,7 +2271,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 func (m *UI) toggleCompactMode() tea.Cmd {
 	m.forceCompactMode = !m.forceCompactMode
 
-	err := m.com.Config().SetCompactMode(m.forceCompactMode)
+	err := m.com.Store().SetCompactMode(config.ScopeGlobal, m.forceCompactMode)
 	if err != nil {
 		return util.ReportError(err)
 	}
@@ -2637,7 +2653,7 @@ func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValu
 	return func() tea.Msg {
 		contents, err := mcp.ReadResource(
 			context.Background(),
-			m.com.Config(),
+			m.com.Store(),
 			item.MCPName,
 			item.URI,
 		)
@@ -3299,7 +3315,7 @@ func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
 
 	lspSection := m.lspInfo(sectionWidth, maxItemsPerSection, false)
 	mcpSection := m.mcpInfo(sectionWidth, maxItemsPerSection, false)
-	filesSection := m.filesInfo(m.com.Config().WorkingDir(), sectionWidth, maxItemsPerSection, false)
+	filesSection := m.filesInfo(m.com.Store().WorkingDir(), sectionWidth, maxItemsPerSection, false)
 	sections := lipgloss.JoinHorizontal(lipgloss.Top, filesSection, " ", lspSection, " ", mcpSection)
 	uv.NewStyledString(
 		s.CompactDetails.View.
@@ -3317,7 +3333,7 @@ func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
 
 func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string) tea.Cmd {
 	load := func() tea.Msg {
-		prompt, err := commands.GetMCPPrompt(m.com.Config(), clientID, promptID, arguments)
+		prompt, err := commands.GetMCPPrompt(m.com.Store(), clientID, promptID, arguments)
 		if err != nil {
 			// TODO: make this better
 			return util.ReportError(err)()
@@ -3358,7 +3374,7 @@ func handleMCPPromptsEvent(name string) tea.Cmd {
 	}
 }
 
-func handleMCPToolsEvent(cfg *config.Config, name string) tea.Cmd {
+func handleMCPToolsEvent(cfg *config.ConfigStore, name string) tea.Cmd {
 	return func() tea.Msg {
 		mcp.RefreshTools(
 			context.Background(),

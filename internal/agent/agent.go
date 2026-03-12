@@ -55,6 +55,8 @@ const (
 	smallContextWindowRatio     = 0.2
 )
 
+var userAgent = fmt.Sprintf("Charm-Crush/%s (https://charm.land/crush)", version.Version)
+
 //go:embed templates/title.md
 var titlePrompt []byte
 
@@ -201,7 +203,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		largeModel.Model,
 		fantasy.WithSystemPrompt(systemPrompt),
 		fantasy.WithTools(agentTools...),
-		fantasy.WithUserAgent("Charm Crush/"+version.Version),
+		fantasy.WithUserAgent(userAgent),
 	)
 
 	sessionLock := sync.Mutex{}
@@ -610,7 +612,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 
 	agent := fantasy.NewAgent(largeModel.Model,
 		fantasy.WithSystemPrompt(string(summaryPrompt)),
-		fantasy.WithUserAgent("Charm Crush/"+version.Version),
+		fantasy.WithUserAgent(userAgent),
 	)
 	summaryMessage, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
 		Role:             message.Assistant,
@@ -806,7 +808,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		return fantasy.NewAgent(m,
 			fantasy.WithSystemPrompt(string(p)+"\n /no_think"),
 			fantasy.WithMaxOutputTokens(tok),
-			fantasy.WithUserAgent("Charm Crush/"+version.Version),
+			fantasy.WithUserAgent(userAgent),
 		)
 	}
 
@@ -842,9 +844,9 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 			// Welp, the large model didn't work either. Use the default
 			// session name and return.
 			slog.Error("Error generating title with large model", "err", err)
-			saveErr := a.sessions.UpdateTitleAndUsage(ctx, sessionID, DefaultSessionName, 0, 0, 0)
+			saveErr := a.sessions.Rename(ctx, sessionID, DefaultSessionName)
 			if saveErr != nil {
-				slog.Error("Failed to save session title and usage", "error", saveErr)
+				slog.Error("Failed to save session title", "error", saveErr)
 			}
 			return
 		}
@@ -854,9 +856,9 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		// Actually, we didn't get a response so we can't. Use the default
 		// session name and return.
 		slog.Error("Response is nil; can't generate title")
-		saveErr := a.sessions.UpdateTitleAndUsage(ctx, sessionID, DefaultSessionName, 0, 0, 0)
+		saveErr := a.sessions.Rename(ctx, sessionID, DefaultSessionName)
 		if saveErr != nil {
-			slog.Error("Failed to save session title and usage", "error", saveErr)
+			slog.Error("Failed to save session title", "error", saveErr)
 		}
 		return
 	}

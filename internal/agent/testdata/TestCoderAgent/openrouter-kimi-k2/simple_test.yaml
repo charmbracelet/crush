@@ -24,13 +24,11 @@ interactions:
     proto_minor: 0
     content_length: -1
     body: |+
-      data: {"id":"gen-1768830280-4PCDv2pnxJ4GGNJaNBDx","provider":"Chutes","model":"qwen/qwen3-next-80b-a3b-instruct","object":"chat.completion.chunk","created":1768830280,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+      data: {"id":"gen-1773334508-8NckSs9Il6oS66YUbYZu","object":"chat.completion.chunk","created":1773334508,"model":"qwen/qwen3-next-80b-a3b-instruct-2509","provider":"Alibaba","choices":[{"index":0,"delta":{"content":"Hello","role":"assistant"},"finish_reason":null,"native_finish_reason":null}]}
 
-      data: {"id":"gen-1768830280-4PCDv2pnxJ4GGNJaNBDx","provider":"Chutes","model":"qwen/qwen3-next-80b-a3b-instruct","object":"chat.completion.chunk","created":1768830280,"choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+      data: {"id":"gen-1773334508-8NckSs9Il6oS66YUbYZu","object":"chat.completion.chunk","created":1773334508,"model":"qwen/qwen3-next-80b-a3b-instruct-2509","provider":"Alibaba","choices":[{"index":0,"delta":{"content":"","role":"assistant"},"finish_reason":"stop","native_finish_reason":"stop"}]}
 
-      data: {"id":"gen-1768830280-4PCDv2pnxJ4GGNJaNBDx","provider":"Chutes","model":"qwen/qwen3-next-80b-a3b-instruct","object":"chat.completion.chunk","created":1768830280,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":"stop","native_finish_reason":"stop","logprobs":null}]}
-
-      data: {"id":"gen-1768830280-4PCDv2pnxJ4GGNJaNBDx","provider":"Chutes","model":"qwen/qwen3-next-80b-a3b-instruct","object":"chat.completion.chunk","created":1768830280,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null,"native_finish_reason":null,"logprobs":null}],"usage":{"prompt_tokens":128,"completion_tokens":2,"total_tokens":130,"cost":0.0000144,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"audio_tokens":0,"video_tokens":0},"cost_details":{"upstream_inference_cost":null,"upstream_inference_prompt_cost":0.0000128,"upstream_inference_completions_cost":0.0000016},"completion_tokens_details":{"reasoning_tokens":0,"image_tokens":0}}}
+      data: {"id":"gen-1773334508-8NckSs9Il6oS66YUbYZu","object":"chat.completion.chunk","created":1773334508,"model":"qwen/qwen3-next-80b-a3b-instruct-2509","provider":"Alibaba","choices":[],"usage":{"prompt_tokens":132,"completion_tokens":1,"total_tokens":133,"cost":0.00001365,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"cache_write_tokens":0,"audio_tokens":0,"video_tokens":0},"cost_details":{"upstream_inference_cost":0.000021,"upstream_inference_prompt_cost":0.0000198,"upstream_inference_completions_cost":0.0000012},"completion_tokens_details":{"reasoning_tokens":0,"image_tokens":0,"audio_tokens":0}}}
 
       data: [DONE]
 
@@ -39,7 +37,7 @@ interactions:
       - text/event-stream
     status: 200 OK
     code: 200
-    duration: 1.783372292s
+    duration: 2.44035525s
 - id: 1
   request:
     proto: HTTP/1.1
@@ -63,13 +61,13 @@ interactions:
     proto_minor: 0
     content_length: -1
     body: |+
-      data: {"id":"gen-1768830280-yAMcRB3SQ5hL08vW1yrX","provider":"AtlasCloud","model":"moonshotai/kimi-k2-0905","object":"chat.completion.chunk","created":1768830280,"choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+      data: {"id":"gen-1773334508-ZqyuLPtakq5VFuSWlpBV","object":"chat.completion.chunk","created":1773334508,"model":"moonshotai/kimi-k2-0905","provider":"Moonshot AI","system_fingerprint":"fpv0_805d9276","choices":[{"index":0,"delta":{"content":"Hi","role":"assistant"},"finish_reason":null,"native_finish_reason":null}]}
 
-      data: {"id":"gen-1768830280-yAMcRB3SQ5hL08vW1yrX","provider":"AtlasCloud","model":"moonshotai/kimi-k2-0905","object":"chat.completion.chunk","created":1768830280,"choices":[{"index":0,"delta":{"role":"assistant","content":"!"},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+      data: {"id":"gen-1773334508-ZqyuLPtakq5VFuSWlpBV","object":"chat.completion.chunk","created":1773334508,"model":"moonshotai/kimi-k2-0905","provider":"Moonshot AI","system_fingerprint":"fpv0_805d9276","choices":[{"index":0,"delta":{"content":"!","role":"assistant"},"finish_reason":null,"native_finish_reason":null}]}
 
-      data: {"id":"gen-1768830280-yAMcRB3SQ5hL08vW1yrX","provider":"AtlasCloud","model":"moonshotai/kimi-k2-0905","object":"chat.completion.chunk","created":1768830280,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":"stop","native_finish_reason":"stop","logprobs":null}]}
+      data: {"id":"gen-1773334508-ZqyuLPtakq5VFuSWlpBV","object":"chat.completion.chunk","created":1773334508,"model":"moonshotai/kimi-k2-0905","provider":"Moonshot AI","system_fingerprint":"fpv0_805d9276","choices":[{"index":0,"delta":{"content":"","role":"assistant"},"finish_reason":"stop","native_finish_reason":"stop"}]}
 
-      data: {"id":"gen-1768830280-yAMcRB3SQ5hL08vW1yrX","provider":"AtlasCloud","model":"moonshotai/kimi-k2-0905","object":"chat.completion.chunk","created":1768830280,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null,"native_finish_reason":null,"logprobs":null}],"usage":{"prompt_tokens":11982,"completion_tokens":2,"total_tokens":11984,"cost":0.0071942,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"audio_tokens":0,"video_tokens":0},"cost_details":{"upstream_inference_cost":null,"upstream_inference_prompt_cost":0.0071892,"upstream_inference_completions_cost":0.000005},"completion_tokens_details":{"reasoning_tokens":0,"image_tokens":0}}}
+      data: {"id":"gen-1773334508-ZqyuLPtakq5VFuSWlpBV","object":"chat.completion.chunk","created":1773334508,"model":"moonshotai/kimi-k2-0905","provider":"Moonshot AI","system_fingerprint":"fpv0_805d9276","choices":[],"usage":{"prompt_tokens":11390,"completion_tokens":3,"total_tokens":11393,"cost":0.0068415,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"cache_write_tokens":0,"audio_tokens":0,"video_tokens":0},"cost_details":{"upstream_inference_cost":0.0068415,"upstream_inference_prompt_cost":0.006834,"upstream_inference_completions_cost":0.0000075},"completion_tokens_details":{"reasoning_tokens":0,"image_tokens":0,"audio_tokens":0}}}
 
       data: [DONE]
 
@@ -78,4 +76,4 @@ interactions:
       - text/event-stream
     status: 200 OK
     code: 200
-    duration: 2.531405542s
+    duration: 4.60327625s

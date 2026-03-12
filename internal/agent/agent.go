@@ -527,7 +527,12 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	// Send notification that agent has finished its turn (skip for
 	// nested/non-interactive sessions).
-	if !call.NonInteractive && a.notify != nil {
+	// NOTE: This is done after checking for summarization and queued messages
+	// to avoid sending a spurious "agent finished" notification when the agent
+	// is about to continue working.
+	queuedMessages, ok := a.messageQueue.Get(call.SessionID)
+	hasQueuedMessages := ok && len(queuedMessages) > 0
+	if !call.NonInteractive && a.notify != nil && !shouldSummarize && !hasQueuedMessages {
 		a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
 			SessionID:    call.SessionID,
 			SessionTitle: currentSession.Title,
@@ -556,7 +561,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	a.activeRequests.Del(call.SessionID)
 	cancel()
 
-	queuedMessages, ok := a.messageQueue.Get(call.SessionID)
+	queuedMessages, ok = a.messageQueue.Get(call.SessionID)
 	if !ok || len(queuedMessages) == 0 {
 		return result, err
 	}

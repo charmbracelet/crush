@@ -2946,7 +2946,10 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 		}
 		if newSession.ID != "" {
 			m.session = &newSession
-			_ = m.loadSession(newSession.ID) // Ignore returned cmd, session will be loaded elsewhere
+			// Load session to initialize LSP, file tracking, and prompt history
+			return tea.Batch(m.loadSession(newSession.ID), func() tea.Msg {
+				return sendMessageMsg{Content: content, Attachments: attachments}
+			})
 		}
 		m.setState(uiChat, m.focus)
 	}

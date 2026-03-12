@@ -131,14 +131,32 @@ require (
 `, crushModule)
 
 	// Add replace directive for local Crush.
+	var crushModPath string
 	if crushLocalPath != "" {
 		goModContent += fmt.Sprintf("\nreplace %s => %s\n", crushModule, crushLocalPath)
+		crushModPath = filepath.Join(crushLocalPath, "go.mod")
 	} else if flags.crushPath == "" {
 		cwd, err := os.Getwd()
 		if err != nil {
 			return fmt.Errorf("failed to get current directory: %w", err)
 		}
 		goModContent += fmt.Sprintf("\nreplace %s => %s\n", crushModule, cwd)
+		crushModPath = filepath.Join(cwd, "go.mod")
+	}
+
+	// Propagate replace directives from Crush's go.mod.
+	if crushModPath != "" {
+		crushModContent, err := os.ReadFile(crushModPath)
+		if err == nil {
+			for _, replace := range extractReplaceDirectives(string(crushModContent)) {
+				targetPath := replace.Path
+				if isLocalPath(targetPath) && !filepath.IsAbs(targetPath) {
+					targetPath = filepath.Join(filepath.Dir(crushModPath), targetPath)
+					targetPath, _ = filepath.Abs(targetPath)
+				}
+				goModContent += fmt.Sprintf("replace %s => %s\n", replace.Module, targetPath)
+			}
+		}
 	}
 
 	// Add replace directives for local plugins.
@@ -305,4 +323,8 @@ func extractReplaceDirectives(content string) []replaceDirective {
 		}
 	}
 	return directives
+}
+
+func isLocalPath(p string) bool {
+	return strings.HasPrefix(p, "./") || strings.HasPrefix(p, "../") || strings.HasPrefix(p, "/")
 }

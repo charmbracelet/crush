@@ -774,8 +774,11 @@ func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[str
 	return azure.New(opts...)
 }
 
-func (c *coordinator) buildBedrockProvider(headers map[string]string) (fantasy.Provider, error) {
+func (c *coordinator) buildBedrockProvider(baseURL string, headers map[string]string) (fantasy.Provider, error) {
 	var opts []bedrock.Option
+	if baseURL != "" {
+		opts = append(opts, bedrock.WithBaseURL(baseURL))
+	}
 	if c.cfg.Options.Debug {
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, bedrock.WithHTTPClient(httpClient))
@@ -873,7 +876,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 	case azure.Name:
 		return c.buildAzureProvider(baseURL, apiKey, headers, providerCfg.ExtraParams)
 	case bedrock.Name:
-		return c.buildBedrockProvider(headers)
+		return c.buildBedrockProvider(baseURL, headers)
 	case google.Name:
 		return c.buildGoogleProvider(baseURL, apiKey, headers)
 	case "google-vertex":

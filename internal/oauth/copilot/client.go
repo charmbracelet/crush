@@ -33,7 +33,7 @@ func (t *initiatorTransport) RoundTrip(req *http.Request) (*http.Response, error
 		return nil, fmt.Errorf("HTTP request is nil")
 	}
 
-	// Priority 1: Check context value (allows explicit control)
+	// Priority 1: Check context value (allows explicit control).
 	if initiator, ok := contextInitiator(req.Context()); ok {
 		req.Header.Set(xInitiatorHeader, initiator)
 		if t.debug {
@@ -42,7 +42,7 @@ func (t *initiatorTransport) RoundTrip(req *http.Request) (*http.Response, error
 		return t.roundTrip(req)
 	}
 
-	// Priority 2: Check isSubAgent flag (deprecated but kept for compatibility)
+	// Priority 2: Check isSubAgent flag (deprecated but kept for compatibility).
 	if t.isSubAgent {
 		req.Header.Set(xInitiatorHeader, agentInitiator)
 		if t.debug {

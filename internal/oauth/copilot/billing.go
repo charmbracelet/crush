@@ -118,7 +118,10 @@ func (t *billingTransport) getInitiatorType(req *http.Request) string {
 		bodyBytes, err := readAndRestoreRequestBody(req)
 		if err != nil {
 			slog.Debug("Failed to read request body for initiator detection", "error", err)
-		} else if initiator := detectInitiatorFromBody(bodyBytes); initiator != "" {
+			// Body may be partially consumed; default to user without body inspection.
+			return InitiatorUser
+		}
+		if initiator := detectInitiatorFromBody(bodyBytes); initiator != "" {
 			return initiator
 		}
 	}

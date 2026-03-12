@@ -50,7 +50,7 @@ import (
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/crush/plugin"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/charmbracelet/ultraviolet/layout"
+	layout "github.com/charmbracelet/crush/internal/ui/layoutcompat"
 	"github.com/charmbracelet/ultraviolet/screen"
 	"github.com/charmbracelet/x/editor"
 )

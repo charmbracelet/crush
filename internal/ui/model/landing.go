@@ -4,7 +4,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/ultraviolet/layout"
+	layout "github.com/charmbracelet/crush/internal/ui/layoutcompat"
 )
 
 // selectedLargeModel returns the currently selected large language model from

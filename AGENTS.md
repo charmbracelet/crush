@@ -166,6 +166,15 @@ func TestYourFunction(t *testing.T) {
 - Try to keep commits to one line, not including your attribution. Only use
   multi-line commits when additional context is truly necessary.
 
+## Creating Pull Requests
+
+- **Default target**: When asked to create a PR, always create it in the fork
+  repository (`meimingqi222/crush`), NOT the upstream repository
+  (`charmbracelet/crush`).
+- PRs should be from a feature branch to `main` within the fork.
+- Use `gh pr create --repo meimingqi222/crush` to ensure the PR is created in
+  the correct repository.
+
 ## Working on the TUI (UI)
 
 Anytime you need to work on the TUI, read `internal/ui/AGENTS.md` before

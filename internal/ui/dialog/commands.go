@@ -437,8 +437,11 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		}
 	}
 
-	// Add external editor command if $EDITOR is available
-	// TODO: Use [tea.EnvMsg] to get environment variable instead of os.Getenv
+	// Add external editor command if $EDITOR is available.
+	//
+	// TODO: Use [tea.EnvMsg] to get environment variable instead of os.Getenv;
+	// because os.Getenv does IO is breaks the TEA paradigm and is generally an
+	// antipattern.
 	if os.Getenv("EDITOR") != "" {
 		commands = append(commands, NewCommandItem(c.com.Styles, "open_external_editor", "Open External Editor", "ctrl+o", ActionExternalEditor{}))
 	}
@@ -455,6 +458,15 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		}
 		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_pills", label, "ctrl+t", ActionTogglePills{}))
 	}
+
+	// Add a command for toggling notifications.
+	cfg = c.com.Config()
+	notificationsDisabled := cfg != nil && cfg.Options != nil && cfg.Options.DisableNotifications
+	notificationLabel := "Disable Notifications"
+	if notificationsDisabled {
+		notificationLabel = "Enable Notifications"
+	}
+	commands = append(commands, NewCommandItem(c.com.Styles, "toggle_notifications", notificationLabel, "", ActionToggleNotifications{}))
 
 	commands = append(commands,
 		NewCommandItem(c.com.Styles, "toggle_yolo", "Toggle Yolo Mode", "", ActionToggleYoloMode{}),

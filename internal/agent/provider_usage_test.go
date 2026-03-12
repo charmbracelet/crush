@@ -206,6 +206,7 @@ func TestProviderUsage_AnthropicProxy_WithThinking(t *testing.T) {
 		t.Logf("FINDING: thinking mode does NOT suppress system-prompt tokens (total=%d). Different cause for 95.", totalPrompt)
 	}
 }
+
 func TestProviderUsage_AnthropicProxy_MultiTurn(t *testing.T) {
 	lm, _ := anthropicProxyProvider(t)
 

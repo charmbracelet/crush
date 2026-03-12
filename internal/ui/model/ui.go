@@ -2936,7 +2936,6 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 		return util.ReportError(fmt.Errorf("coder agent is not initialized"))
 	}
 
-	var cmds []tea.Cmd
 	if !m.hasSession() {
 		newSession, err := m.com.App.Sessions.Create(context.Background(), "New Session")
 		if err != nil {
@@ -2947,7 +2946,7 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 		}
 		if newSession.ID != "" {
 			m.session = &newSession
-			cmds = append(cmds, m.loadSession(newSession.ID))
+			_ = m.loadSession(newSession.ID) // Ignore returned cmd, session will be loaded elsewhere
 		}
 		m.setState(uiChat, m.focus)
 	}
@@ -2984,7 +2983,6 @@ func (m *UI) executeApprovedPlan(sessionID, plan string) tea.Cmd {
 }
 
 func (m *UI) runAgentMessage(content string, attachments ...message.Attachment) tea.Cmd {
-
 	ctx := context.Background()
 	cmds := []tea.Cmd{}
 	cmds = append(cmds, func() tea.Msg {

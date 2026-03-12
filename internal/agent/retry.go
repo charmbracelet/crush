@@ -23,17 +23,30 @@ func (m retryableStreamModel) Stream(ctx context.Context, call fantasy.Call) (fa
 		return nil, wrapRetryableNetworkErr(err)
 	}
 	return func(yield func(fantasy.StreamPart) bool) {
-		sawToolCall := false
+		sawToolUse := false
 		stream(func(part fantasy.StreamPart) bool {
-			if part.Type == fantasy.StreamPartTypeToolCall {
-				sawToolCall = true
+			if isToolStreamPart(part.Type) {
+				sawToolUse = true
 			}
-			if !sawToolCall && part.Type == fantasy.StreamPartTypeError && part.Error != nil {
+			if !sawToolUse && part.Type == fantasy.StreamPartTypeError && part.Error != nil {
 				part.Error = wrapRetryableNetworkErr(part.Error)
 			}
 			return yield(part)
 		})
 	}, nil
+}
+
+func isToolStreamPart(partType fantasy.StreamPartType) bool {
+	switch partType {
+	case fantasy.StreamPartTypeToolInputStart,
+		fantasy.StreamPartTypeToolInputDelta,
+		fantasy.StreamPartTypeToolInputEnd,
+		fantasy.StreamPartTypeToolCall,
+		fantasy.StreamPartTypeToolResult:
+		return true
+	default:
+		return false
+	}
 }
 
 // wrapRetryableNetworkErr wraps known retryable network errors into

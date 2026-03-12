@@ -268,6 +268,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	a.eventPromptSent(call.SessionID)
 
 	var currentAssistant *message.Message
+	var currentStepToolMessageIDs []string
 	var shouldSummarize bool
 	var estimatedPromptTokens int64
 	result, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
@@ -335,6 +336,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatwalkCfg.SupportsImages)
 			callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatwalkCfg.Name)
 			currentAssistant = &assistantMsg
+			currentStepToolMessageIDs = nil
 
 			estimatedPromptTokens = estimatePromptTokens(prepared.Messages, agentTools)
 			return callContext, prepared, err
@@ -393,8 +395,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			if currentAssistant == nil {
 				return
 			}
-			currentAssistant.Parts = []message.ContentPart{}
-			_ = a.messages.Update(ctx, *currentAssistant)
+			if err := a.resetRetriedStep(ctx, currentAssistant, currentStepToolMessageIDs); err != nil {
+				slog.Warn("Failed to reset step state before retry", "error", err, "session_id", currentAssistant.SessionID, "message_id", currentAssistant.ID)
+				return
+			}
+			currentStepToolMessageIDs = nil
 		},
 		OnToolCall: func(tc fantasy.ToolCallContent) error {
 			toolCall := message.ToolCall{
@@ -409,12 +414,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		},
 		OnToolResult: func(result fantasy.ToolResultContent) error {
 			toolResult := a.convertToToolResult(result)
-			_, createMsgErr := a.messages.Create(genCtx, currentAssistant.SessionID, message.CreateMessageParams{
+			toolMsg, createMsgErr := a.messages.Create(genCtx, currentAssistant.SessionID, message.CreateMessageParams{
 				Role: message.Tool,
 				Parts: []message.ContentPart{
 					toolResult,
 				},
 			})
+			if createMsgErr == nil {
+				currentStepToolMessageIDs = append(currentStepToolMessageIDs, toolMsg.ID)
+			}
 			return createMsgErr
 		},
 		OnStepFinish: func(stepResult fantasy.StepResult) error {
@@ -975,6 +983,16 @@ func shouldAutoSummarize(contextUsed, contextWindow, maxOutputTokens int64) bool
 		return true
 	}
 	return contextUsed >= usable
+}
+
+func (a *sessionAgent) resetRetriedStep(ctx context.Context, assistant *message.Message, toolMessageIDs []string) error {
+	for _, toolMessageID := range toolMessageIDs {
+		if err := a.messages.Delete(ctx, toolMessageID); err != nil {
+			return err
+		}
+	}
+	assistant.Parts = nil
+	return a.messages.Update(ctx, *assistant)
 }
 
 // estimatePromptTokens estimates the prompt token count from message content

@@ -100,3 +100,38 @@ func TestRetryableStreamModelDoesNotWrapUnexpectedEOFAfterToolCall(t *testing.T)
 	var providerErr *fantasy.ProviderError
 	require.False(t, errors.As(gotErr, &providerErr), "tool-call failures must not become retryable provider errors")
 }
+
+func TestRetryableStreamModelDoesNotWrapUnexpectedEOFAfterToolInputStart(t *testing.T) {
+	t.Parallel()
+
+	model := retryableStreamModel{stubLanguageModel{
+		stream: func(context.Context, fantasy.Call) (fantasy.StreamResponse, error) {
+			return func(yield func(fantasy.StreamPart) bool) {
+				yield(fantasy.StreamPart{
+					Type:         fantasy.StreamPartTypeToolInputStart,
+					ID:           "tool-1",
+					ToolCallName: "ls",
+				})
+				yield(fantasy.StreamPart{
+					Type:  fantasy.StreamPartTypeError,
+					Error: io.ErrUnexpectedEOF,
+				})
+			}, nil
+		},
+	}}
+
+	stream, err := model.Stream(t.Context(), fantasy.Call{})
+	require.NoError(t, err)
+
+	var gotErr error
+	stream(func(part fantasy.StreamPart) bool {
+		if part.Type == fantasy.StreamPartTypeError {
+			gotErr = part.Error
+		}
+		return true
+	})
+
+	require.ErrorIs(t, gotErr, io.ErrUnexpectedEOF)
+	var providerErr *fantasy.ProviderError
+	require.False(t, errors.As(gotErr, &providerErr), "tool-input failures must not become retryable provider errors")
+}

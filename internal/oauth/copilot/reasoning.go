@@ -38,8 +38,15 @@ type reasoningTransformReader struct {
 	buf     bytes.Buffer
 }
 
+// maxSSELineSize is the maximum size of a single SSE line we will buffer.
+// LLM tool-call results can be large JSON payloads, so we use 1 MiB to avoid
+// bufio.ErrTooLong on long lines.
+const maxSSELineSize = 1 << 20 // 1 MiB
+
 func newReasoningTransformReader(r io.ReadCloser) *reasoningTransformReader {
-	return &reasoningTransformReader{inner: r, scanner: bufio.NewScanner(r)}
+	s := bufio.NewScanner(r)
+	s.Buffer(make([]byte, 64*1024), maxSSELineSize)
+	return &reasoningTransformReader{inner: r, scanner: s}
 }
 
 func (r *reasoningTransformReader) Read(p []byte) (int, error) {

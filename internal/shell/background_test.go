@@ -116,6 +116,36 @@ func TestBackgroundShellManager_KillNonExistent(t *testing.T) {
 	}
 }
 
+func TestBackgroundShellManager_KillTimeoutKeepsShellTracked(t *testing.T) {
+	t.Parallel()
+
+	manager := newBackgroundShellManager()
+
+	done := make(chan struct{})
+	canceled := false
+	manager.shells.Set("stuck", &BackgroundShell{
+		ID:     "stuck",
+		done:   done,
+		cancel: func() { canceled = true },
+	})
+
+	originalTimeout := killTimeout
+	killTimeout = 10 * time.Millisecond
+	t.Cleanup(func() {
+		killTimeout = originalTimeout
+	})
+
+	err := manager.Kill("stuck")
+	require.Error(t, err)
+	require.True(t, canceled, "expected Kill to cancel the shell")
+
+	_, ok := manager.Get("stuck")
+	require.True(t, ok, "expected timed-out shell to remain tracked")
+
+	close(done)
+	require.NoError(t, manager.Kill("stuck"))
+}
+
 func TestBackgroundShell_IsDone(t *testing.T) {
 	t.Parallel()
 

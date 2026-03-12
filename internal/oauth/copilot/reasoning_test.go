@@ -1,6 +1,7 @@
 package copilot
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -108,4 +109,34 @@ func TestWrapReasoningTransform_NonSSEResponse(t *testing.T) {
 	require.NoError(t, err)
 	// Non-SSE responses should not be transformed.
 	require.Equal(t, input, string(body))
+}
+
+type errUnexpectedEOFReader struct {
+	data []byte
+	read bool
+}
+
+func (r *errUnexpectedEOFReader) Read(p []byte) (int, error) {
+	if r.read {
+		return 0, io.ErrUnexpectedEOF
+	}
+	r.read = true
+	n := copy(p, r.data)
+	return n, nil
+}
+
+func (r *errUnexpectedEOFReader) Close() error {
+	return nil
+}
+
+func TestReasoningTransformReader_PropagatesUnexpectedEOF(t *testing.T) {
+	t.Parallel()
+
+	r := newReasoningTransformReader(&errUnexpectedEOFReader{
+		data: []byte(`data: {"choices":[{"delta":{"reasoning_text":"partial"`),
+	})
+
+	_, err := io.ReadAll(r)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, io.ErrUnexpectedEOF))
 }

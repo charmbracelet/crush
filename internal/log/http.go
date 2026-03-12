@@ -62,6 +62,23 @@ func (h *HTTPRoundTripLogger) RoundTrip(req *http.Request) (*http.Response, erro
 		return resp, err
 	}
 
+	// For streaming responses (e.g. SSE), draining the body would consume
+	// the entire stream before the caller can read it, causing an unexpected
+	// EOF that breaks streaming consumers. Log headers only and pass through.
+	if isStreamingResponse(resp) {
+		if slog.Default().Enabled(req.Context(), slog.LevelDebug) {
+			slog.Debug(
+				"HTTP Response (streaming)",
+				"status_code", resp.StatusCode,
+				"status", resp.Status,
+				"headers", formatHeaders(resp.Header),
+				"content_length", resp.ContentLength,
+				"duration_ms", duration.Milliseconds(),
+			)
+		}
+		return resp, nil
+	}
+
 	save, resp.Body, err = drainBody(resp.Body)
 	if slog.Default().Enabled(req.Context(), slog.LevelDebug) {
 		slog.Debug(
@@ -111,6 +128,18 @@ func formatHeaders(headers http.Header) map[string][]string {
 		}
 	}
 	return filtered
+}
+
+// isStreamingResponse reports whether the response uses a streaming transfer
+// (e.g. Server-Sent Events or chunked encoding with unknown length) that must
+// not be fully buffered before being handed back to the caller.
+func isStreamingResponse(resp *http.Response) bool {
+	if resp == nil {
+		return false
+	}
+	ct := resp.Header.Get("Content-Type")
+	return strings.Contains(ct, "text/event-stream") ||
+		(resp.ContentLength < 0 && strings.Contains(ct, "application/octet-stream"))
 }
 
 func drainBody(b io.ReadCloser) (r1, r2 io.ReadCloser, err error) {

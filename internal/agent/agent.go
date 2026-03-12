@@ -167,6 +167,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		ctx = copilot.ContextWithInitiatorType(ctx, copilot.InitiatorAgent)
 	}
 
+	// isUserInitiatedRequest is true only for the very first step of a real user
+	// prompt. All tool-call continuations, auto-resume prompts, sub-agent
+	// requests, and any call with an explicit InitiatorAgent type are free
+	// (X-Initiator: agent).
+	isUserInitiatedRequest := call.InitiatorType == copilot.InitiatorUser ||
+		(call.InitiatorType == "" && !a.isSubAgent)
+	firstRequestStep := true
+
 	if call.Prompt == "" && !message.ContainsTextAttachment(call.Attachments) {
 		return nil, ErrEmptyPrompt
 	}
@@ -212,7 +220,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	}
 
 	agent := fantasy.NewAgent(
-		largeModel.Model,
+		retryableStreamModel{largeModel.Model},
 		fantasy.WithSystemPrompt(systemPrompt),
 		fantasy.WithTools(agentTools...),
 		fantasy.WithUserAgent("Charm Crush/"+version.Version),
@@ -274,6 +282,18 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		TopK:             call.TopK,
 		FrequencyPenalty: call.FrequencyPenalty,
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
+			// Explicitly tag every LLM request with the correct X-Initiator value
+			// so GitHub Copilot billing is correct regardless of how the fantasy
+			// framework propagates the outer context. Only the first step of a
+			// real user-initiated request is billable; tool-call loops,
+			// sub-agent steps, and continuations are always free.
+			if isUserInitiatedRequest && firstRequestStep {
+				callContext = copilot.ContextWithInitiatorType(callContext, copilot.InitiatorUser)
+			} else {
+				callContext = copilot.ContextWithInitiatorType(callContext, copilot.InitiatorAgent)
+			}
+			firstRequestStep = false
+
 			prepared.Messages = options.Messages
 			for i := range prepared.Messages {
 				prepared.Messages[i].ProviderOptions = nil
@@ -368,8 +388,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			currentAssistant.AddToolCall(toolCall)
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
-		OnRetry: func(err *fantasy.ProviderError, delay time.Duration) {
-			// TODO: implement
+		OnRetry: func(providerErr *fantasy.ProviderError, delay time.Duration) {
+			slog.Info("Retrying after network error", "error", providerErr.Error(), "delay", delay)
+			if currentAssistant == nil {
+				return
+			}
+			currentAssistant.Parts = []message.ContentPart{}
+			_ = a.messages.Update(ctx, *currentAssistant)
 		},
 		OnToolCall: func(tc fantasy.ToolCallContent) error {
 			toolCall := message.ToolCall{
@@ -634,6 +659,8 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		Messages:        aiMsgs,
 		ProviderOptions: opts,
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
+			// Summarization is always agent-initiated (never billable).
+			callContext = copilot.ContextWithInitiatorType(callContext, copilot.InitiatorAgent)
 			prepared.Messages = options.Messages
 			if systemPromptPrefix != "" {
 				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(systemPromptPrefix)}, prepared.Messages...)
@@ -814,6 +841,8 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	streamCall := fantasy.AgentStreamCall{
 		Prompt: fmt.Sprintf("Generate a concise title for the following content:\n\n%s\n <think>\n\n</think>", userPrompt),
 		PrepareStep: func(callCtx context.Context, opts fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
+			// Title generation is always agent-initiated (never billable).
+			callCtx = copilot.ContextWithInitiatorType(callCtx, copilot.InitiatorAgent)
 			prepared.Messages = opts.Messages
 			if systemPromptPrefix != "" {
 				prepared.Messages = append([]fantasy.Message{

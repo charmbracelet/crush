@@ -90,7 +90,11 @@ func (t *billingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		return nil, fmt.Errorf("HTTP request is nil")
 	}
 
-	initiator := t.getInitiatorType(req)
+	// Get initiator type (may read request body).
+	initiator, err := t.getInitiatorType(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine initiator type: %w", err)
+	}
 	req.Header.Set(xInitiatorHeader, initiator)
 
 	if t.debug {
@@ -100,34 +104,32 @@ func (t *billingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	return t.wrapped.RoundTrip(req)
 }
 
-func (t *billingTransport) getInitiatorType(req *http.Request) string {
+func (t *billingTransport) getInitiatorType(req *http.Request) (string, error) {
 	// Priority 1: Context value (highest priority, allows explicit control).
 	if v := req.Context().Value(InitiatorTypeKey); v != nil {
 		if s, ok := v.(string); ok && (s == InitiatorUser || s == InitiatorAgent) {
-			return s
+			return s, nil
 		}
 	}
 
 	// Priority 2: Explicit initiator type (deprecated, kept for backward compatibility).
 	if t.initiatorType != "" {
-		return t.initiatorType
+		return t.initiatorType, nil
 	}
 
 	// Priority 3: Inspect request body.
 	if req.Body != nil && req.Body != http.NoBody {
 		bodyBytes, err := readAndRestoreRequestBody(req)
 		if err != nil {
-			slog.Debug("Failed to read request body for initiator detection", "error", err)
-			// Body may be partially consumed; default to user without body inspection.
-			return InitiatorUser
+			return "", fmt.Errorf("failed to read request body for initiator detection: %w", err)
 		}
 		if initiator := detectInitiatorFromBody(bodyBytes); initiator != "" {
-			return initiator
+			return initiator, nil
 		}
 	}
 
 	// Default to user (safe fallback).
-	return InitiatorUser
+	return InitiatorUser, nil
 }
 
 func readAndRestoreRequestBody(req *http.Request) ([]byte, error) {

@@ -140,7 +140,8 @@ func TestBillingTransport_EdgeCases(t *testing.T) {
 
 		req, _ := http.NewRequestWithContext(context.Background(), "POST", "https://api.example.com/v1/chat/completions", strings.NewReader("invalid json"))
 		transport := &billingTransport{}
-		initiator := transport.getInitiatorType(req)
+		initiator, err := transport.getInitiatorType(req)
+		require.NoError(t, err)
 		require.Equal(t, InitiatorUser, initiator, "Invalid JSON should default to user")
 	})
 
@@ -149,7 +150,8 @@ func TestBillingTransport_EdgeCases(t *testing.T) {
 
 		req, _ := http.NewRequestWithContext(context.Background(), "POST", "https://api.example.com/v1/chat/completions", nil)
 		transport := &billingTransport{}
-		initiator := transport.getInitiatorType(req)
+		initiator, err := transport.getInitiatorType(req)
+		require.NoError(t, err)
 		require.Equal(t, InitiatorUser, initiator, "Nil body should default to user")
 	})
 }
@@ -168,7 +170,8 @@ func TestBillingTransport_ContextInitiator(t *testing.T) {
 		req = req.WithContext(ContextWithInitiatorType(req.Context(), InitiatorUser))
 
 		transport := &billingTransport{}
-		initiator := transport.getInitiatorType(req)
+		initiator, err := transport.getInitiatorType(req)
+		require.NoError(t, err)
 		require.Equal(t, InitiatorUser, initiator, "Context initiator should override body detection")
 	})
 
@@ -183,7 +186,8 @@ func TestBillingTransport_ContextInitiator(t *testing.T) {
 		req = req.WithContext(ContextWithInitiatorType(req.Context(), InitiatorAgent))
 
 		transport := &billingTransport{}
-		initiator := transport.getInitiatorType(req)
+		initiator, err := transport.getInitiatorType(req)
+		require.NoError(t, err)
 		require.Equal(t, InitiatorAgent, initiator, "Context initiator should override body detection")
 	})
 
@@ -198,7 +202,8 @@ func TestBillingTransport_ContextInitiator(t *testing.T) {
 		req = req.WithContext(ContextWithInitiatorType(req.Context(), InitiatorAgent))
 
 		transport := &billingTransport{}
-		initiator := transport.getInitiatorType(req)
+		initiator, err := transport.getInitiatorType(req)
+		require.NoError(t, err)
 		require.Equal(t, InitiatorAgent, initiator, "Explicit agent initiator should control resume billing")
 	})
 
@@ -213,7 +218,8 @@ func TestBillingTransport_ContextInitiator(t *testing.T) {
 		req = req.WithContext(context.WithValue(req.Context(), InitiatorTypeKey, "invalid_value"))
 
 		transport := &billingTransport{}
-		initiator := transport.getInitiatorType(req)
+		initiator, err := transport.getInitiatorType(req)
+		require.NoError(t, err)
 		require.Equal(t, InitiatorAgent, initiator, "Invalid context initiator should fall back to body detection")
 	})
 }
@@ -233,5 +239,8 @@ func detectInitiator(t *testing.T, payload map[string]any) string {
 		fallback: false,
 	}
 
-	return transport.getInitiatorType(req)
+	initiator, err := transport.getInitiatorType(req)
+	require.NoError(t, err, "getInitiatorType should not fail")
+
+	return initiator
 }

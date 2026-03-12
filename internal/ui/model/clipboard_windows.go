@@ -3,6 +3,7 @@
 package model
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
 	"os/exec"
@@ -100,7 +101,7 @@ Write-Output ([Convert]::ToBase64String($stream.ToArray()))
 }
 
 func runWindowsClipboardScript(script string) ([]byte, error) {
-	cmd := exec.Command("powershell.exe", "-NoProfile", "-STA", "-Command", script)
+	cmd := exec.CommandContext(context.Background(), "powershell.exe", "-NoProfile", "-STA", "-Command", script)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		trimmed := strings.TrimSpace(string(output))

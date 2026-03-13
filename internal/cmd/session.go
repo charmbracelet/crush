@@ -500,6 +500,9 @@ func sessionWriter(ctx context.Context, contentHeight int) (io.Writer, func(), b
 	}
 
 	parts := strings.Fields(pager)
+	if len(parts) == 0 {
+		return colorprofile.NewWriter(os.Stdout, os.Environ()), func() {}, false
+	}
 	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...) //nolint:gosec
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

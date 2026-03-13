@@ -49,6 +49,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.4.0
 	github.com/ncruces/go-sqlite3 v0.31.1
 	github.com/nxadm/tail v1.4.11
+	github.com/openai/openai-go/v2 v2.7.1
 	github.com/openai/openai-go/v3 v3.26.0
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
 	github.com/posthog/posthog-go v1.10.0

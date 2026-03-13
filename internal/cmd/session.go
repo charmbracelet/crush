@@ -206,12 +206,12 @@ type sessionMutationResult struct {
 // resolveSessionID resolves a session ID that can be a UUID, full hash, or hash prefix.
 // Returns an error if the prefix is ambiguous (matches multiple sessions).
 func resolveSessionID(ctx context.Context, svc session.Service, id string) (session.Session, error) {
-	// Try direct UUID lookup first
+	// Try direct UUID lookup first.
 	if s, err := svc.Get(ctx, id); err == nil {
 		return s, nil
 	}
 
-	// List all sessions and check for hash matches
+	// List all sessions and check for hash matches.
 	sessions, err := svc.List(ctx)
 	if err != nil {
 		return session.Session{}, err
@@ -233,7 +233,7 @@ func resolveSessionID(ctx context.Context, svc session.Service, id string) (sess
 		return matches[0], nil
 	}
 
-	// Ambiguous - show matches like Git does
+	// Ambiguous - show matches like Git does.
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "session ID '%s' is ambiguous. Matches:\n\n", id)
 	for _, m := range matches {
@@ -428,7 +428,7 @@ func outputSessionHuman(ctx context.Context, sess session.Session, msgs []*messa
 	hash := session.HashID(sess.ID)[:12]
 	created := time.Unix(sess.CreatedAt, 0).Format("Mon Jan 2 15:04:05 2006 -0700")
 
-	// Render to buffer to determine actual height
+	// Render to buffer to determine actual height.
 	var buf strings.Builder
 
 	fmt.Fprintln(&buf, keyStyle.Render("ID:    ")+valStyle.Render(hash))
@@ -468,11 +468,11 @@ func isBrokenPipe(err error) bool {
 	if err == nil {
 		return false
 	}
-	// Check for syscall.EPIPE (broken pipe)
+	// Check for syscall.EPIPE (broken pipe).
 	if errors.Is(err, syscall.EPIPE) {
 		return true
 	}
-	// Also check for "broken pipe" in the error message
+	// Also check for "broken pipe" in the error message.
 	return strings.Contains(err.Error(), "broken pipe")
 }
 
@@ -481,7 +481,7 @@ func isBrokenPipe(err error) bool {
 // a colorprofile.Writer wrapping stdout. When content exceeds terminal height,
 // it starts a pager process (respecting $PAGER, defaulting to "less -R").
 func sessionWriter(ctx context.Context, contentHeight int) (io.Writer, func(), bool) {
-	// Use NewWriter which automatically detects TTY and strips ANSI when redirected
+	// Use NewWriter which automatically detects TTY and strips ANSI when redirected.
 	if runtime.GOOS == "windows" || !term.IsTerminal(os.Stdout.Fd()) {
 		return colorprofile.NewWriter(os.Stdout, os.Environ()), func() {}, false
 	}

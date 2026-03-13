@@ -1347,15 +1347,17 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		if cfg != nil && cfg.Options != nil {
 			disabled := !cfg.Options.DisableNotifications
 			cfg.Options.DisableNotifications = disabled
-			if err := m.com.Store().SetConfigField(config.ScopeGlobal, "options.disable_notifications", disabled); err != nil {
-				cmds = append(cmds, util.ReportError(err))
-			} else {
+			// Persist the notification setting to config asynchronously.
+			cmds = append(cmds, func() tea.Msg {
+				if err := m.com.Store().SetConfigField(config.ScopeGlobal, "options.disable_notifications", disabled); err != nil {
+					slog.Error("Failed to persist notification setting", "error", err)
+				}
 				status := "enabled"
 				if disabled {
 					status = "disabled"
 				}
-				cmds = append(cmds, util.CmdHandler(util.NewInfoMsg("Notifications "+status)))
-			}
+				return util.NewInfoMsg("Notifications " + status)
+			})
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionNewSession:

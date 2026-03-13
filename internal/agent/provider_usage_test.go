@@ -10,6 +10,7 @@ package agent
 import (
 	"context"
 	"testing"
+	"time"
 
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
@@ -41,7 +42,9 @@ func anthropicProxyProvider(t *testing.T) (fantasy.LanguageModel, func()) {
 	)
 	require.NoError(t, err)
 
-	lm, err := provider.LanguageModel(context.Background(), "qwen3.5-plus")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	lm, err := provider.LanguageModel(ctx, "qwen3.5-plus")
 	require.NoError(t, err)
 	return lm, func() {}
 }
@@ -53,7 +56,9 @@ func TestProviderUsage_AnthropicProxy_SingleTurn(t *testing.T) {
 	lm, _ := anthropicProxyProvider(t)
 
 	maxTokens := int64(50)
-	resp, err := lm.Generate(context.Background(), fantasy.Call{
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	resp, err := lm.Generate(ctx, fantasy.Call{
 		Prompt: fantasy.Prompt{
 			fantasy.NewUserMessage("Reply with exactly: hello"),
 		},
@@ -85,7 +90,9 @@ func TestProviderUsage_AnthropicProxy_WithSystemPrompt(t *testing.T) {
 	maxTokens := int64(50)
 
 	// Case A: no system prompt (baseline).
-	respNoSys, err := lm.Generate(context.Background(), fantasy.Call{
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	respNoSys, err := lm.Generate(ctx, fantasy.Call{
 		Prompt:          fantasy.Prompt{fantasy.NewUserMessage("Reply: hello")},
 		MaxOutputTokens: &maxTokens,
 	})
@@ -93,7 +100,9 @@ func TestProviderUsage_AnthropicProxy_WithSystemPrompt(t *testing.T) {
 	tokensNoSys := respNoSys.Usage.InputTokens + respNoSys.Usage.CacheCreationTokens + respNoSys.Usage.CacheReadTokens
 
 	// Case B: system prompt WITHOUT cache_control (plain).
-	respWithSys, err := lm.Generate(context.Background(), fantasy.Call{
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel2()
+	respWithSys, err := lm.Generate(ctx2, fantasy.Call{
 		Prompt: fantasy.Prompt{
 			fantasy.NewSystemMessage(systemPromptText),
 			fantasy.NewUserMessage("Reply: hello"),
@@ -110,7 +119,9 @@ func TestProviderUsage_AnthropicProxy_WithSystemPrompt(t *testing.T) {
 			CacheControl: anthropic.CacheControl{Type: "ephemeral"},
 		},
 	}
-	respWithCache, err := lm.Generate(context.Background(), fantasy.Call{
+	ctx3, cancel3 := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel3()
+	respWithCache, err := lm.Generate(ctx3, fantasy.Call{
 		Prompt: fantasy.Prompt{
 			sysMsg,
 			fantasy.NewUserMessage("Reply: hello"),
@@ -169,7 +180,9 @@ func TestProviderUsage_AnthropicProxy_WithThinking(t *testing.T) {
 	sysMsg.ProviderOptions = cacheOptions
 
 	// With thinking enabled (what crush sends when think=true).
-	respThinking, err := lm.Generate(context.Background(), fantasy.Call{
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	respThinking, err := lm.Generate(ctx, fantasy.Call{
 		Prompt: fantasy.Prompt{
 			sysMsg,
 			fantasy.NewUserMessage("你是？"),
@@ -182,7 +195,9 @@ func TestProviderUsage_AnthropicProxy_WithThinking(t *testing.T) {
 	totalPrompt := u.InputTokens + u.CacheCreationTokens + u.CacheReadTokens
 
 	// Without thinking, same prompt.
-	respNoThink, err := lm.Generate(context.Background(), fantasy.Call{
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel2()
+	respNoThink, err := lm.Generate(ctx2, fantasy.Call{
 		Prompt: fantasy.Prompt{
 			sysMsg,
 			fantasy.NewUserMessage("你是？"),
@@ -213,7 +228,9 @@ func TestProviderUsage_AnthropicProxy_MultiTurn(t *testing.T) {
 	maxTokens := int64(50)
 
 	// Turn 1.
-	resp1, err := lm.Generate(context.Background(), fantasy.Call{
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	resp1, err := lm.Generate(ctx, fantasy.Call{
 		Prompt: fantasy.Prompt{
 			fantasy.NewUserMessage("What is 2+2? Reply with just the number."),
 		},
@@ -223,7 +240,9 @@ func TestProviderUsage_AnthropicProxy_MultiTurn(t *testing.T) {
 	u1 := resp1.Usage
 
 	// Turn 2: include previous exchange in context.
-	resp2, err := lm.Generate(context.Background(), fantasy.Call{
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel2()
+	resp2, err := lm.Generate(ctx2, fantasy.Call{
 		Prompt: fantasy.Prompt{
 			fantasy.NewUserMessage("What is 2+2? Reply with just the number."),
 			{
@@ -281,7 +300,9 @@ func TestProviderUsage_AnthropicProxy_StreamingStepUsage(t *testing.T) {
 	)
 
 	var stepUsages []fantasy.Usage
-	resp, err := agent.Stream(context.Background(), fantasy.AgentStreamCall{
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	resp, err := agent.Stream(ctx, fantasy.AgentStreamCall{
 		Prompt: "Reply with exactly: hello",
 		PrepareStep: func(ctx context.Context, opts fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = opts.Messages

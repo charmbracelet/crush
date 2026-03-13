@@ -45,6 +45,14 @@ func (m *mockSessionService) Get(_ context.Context, id string) (session.Session,
 	return session.Session{}, sql.ErrNoRows
 }
 
+func (m *mockSessionService) GetLast(_ context.Context) (session.Session, error) {
+	if len(m.sessions) > 0 {
+		return m.sessions[0], nil
+	}
+	return session.Session{}, sql.ErrNoRows
+}
+
+
 func (m *mockSessionService) List(context.Context) ([]session.Session, error) {
 	return m.sessions, nil
 }
@@ -54,6 +62,10 @@ func (m *mockSessionService) Save(_ context.Context, s session.Session) (session
 }
 
 func (m *mockSessionService) UpdateTitleAndUsage(context.Context, string, string, int64, int64, float64) error {
+	return nil
+}
+
+func (m *mockSessionService) Rename(context.Context, string, string) error {
 	return nil
 }
 

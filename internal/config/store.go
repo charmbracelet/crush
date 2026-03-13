@@ -163,6 +163,15 @@ func (s *ConfigStore) SetSkipRequests(scope Scope, enabled bool) error {
 	return s.SetConfigField(scope, "permissions.skip_requests", enabled)
 }
 
+// SetTransparentBackground sets the transparent background setting and persists it.
+func (s *ConfigStore) SetTransparentBackground(scope Scope, enabled bool) error {
+	if s.config.Options == nil {
+		s.config.Options = &Options{}
+	}
+	s.config.Options.TUI.Transparent = &enabled
+	return s.SetConfigField(scope, "options.tui.transparent", enabled)
+}
+
 // SetProviderAPIKey sets the API key for a provider and persists it.
 func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey any) error {
 	var providerConfig ProviderConfig

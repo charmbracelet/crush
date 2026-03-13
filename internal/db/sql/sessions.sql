@@ -52,9 +52,16 @@ SET
     title = ?,
     prompt_tokens = prompt_tokens + ?,
     completion_tokens = completion_tokens + ?,
-    cost = cost + ?
+    cost = cost + ?,
+    updated_at = strftime('%s', 'now')
 WHERE id = ?;
 
+
+-- name: RenameSession :exec
+UPDATE sessions
+SET
+    title = ?
+WHERE id = ?;
 
 -- name: DeleteSession :exec
 DELETE FROM sessions

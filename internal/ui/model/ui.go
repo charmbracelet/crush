@@ -1229,23 +1229,39 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, msg.Cmd)
 		}
 
-	// Session dialog messages
+	// Session dialog messages.
 	case dialog.ActionSelectSession:
 		m.dialog.CloseDialog(dialog.SessionsID)
 		cmds = append(cmds, m.loadSession(msg.Session.ID))
 
-	// Open dialog message
+	// Open dialog message.
 	case dialog.ActionOpenDialog:
 		m.dialog.CloseDialog(dialog.CommandsID)
 		if cmd := m.openDialog(msg.DialogID); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 
-	// Command dialog messages
+	// Command dialog messages.
 	case dialog.ActionToggleYoloMode:
 		yolo := !m.com.App.Permissions.SkipRequests()
 		m.com.App.Permissions.SetSkipRequests(yolo)
 		m.setEditorPrompt(yolo)
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionToggleNotifications:
+		cfg := m.com.Config()
+		if cfg != nil && cfg.Options != nil {
+			disabled := !cfg.Options.DisableNotifications
+			cfg.Options.DisableNotifications = disabled
+			if err := m.com.Store().SetConfigField(config.ScopeGlobal, "options.disable_notifications", disabled); err != nil {
+				cmds = append(cmds, util.ReportError(err))
+			} else {
+				status := "enabled"
+				if disabled {
+					status = "disabled"
+				}
+				cmds = append(cmds, util.CmdHandler(util.NewInfoMsg("Notifications "+status)))
+			}
+		}
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionNewSession:
 		if m.isAgentBusy() {

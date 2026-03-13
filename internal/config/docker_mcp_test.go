@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/stretchr/testify/require"
 )
@@ -54,10 +53,12 @@ func TestEnableDockerMCP(t *testing.T) {
 		configPath := filepath.Join(tmpDir, "crush.json")
 
 		cfg := &Config{
-			MCP:            make(map[string]MCPConfig),
-			dataConfigDir:  configPath,
+			MCP: make(map[string]MCPConfig),
+		}
+		store := &ConfigStore{
+			config:         cfg,
+			globalDataPath: configPath,
 			resolver:       NewShellVariableResolver(env.New()),
-			knownProviders: []catwalk.Provider{},
 		}
 
 		// Only run this test if docker mcp is available.
@@ -65,7 +66,7 @@ func TestEnableDockerMCP(t *testing.T) {
 			t.Skip("Docker MCP not available, skipping test")
 		}
 
-		err := cfg.EnableDockerMCP()
+		err := store.EnableDockerMCP()
 		require.NoError(t, err)
 
 		// Check in-memory config.
@@ -92,10 +93,12 @@ func TestEnableDockerMCP(t *testing.T) {
 		configPath := filepath.Join(tmpDir, "crush.json")
 
 		cfg := &Config{
-			MCP:            make(map[string]MCPConfig),
-			dataConfigDir:  configPath,
+			MCP: make(map[string]MCPConfig),
+		}
+		store := &ConfigStore{
+			config:         cfg,
+			globalDataPath: configPath,
 			resolver:       NewShellVariableResolver(env.New()),
-			knownProviders: []catwalk.Provider{},
 		}
 
 		// Skip if docker mcp is actually available.
@@ -103,7 +106,7 @@ func TestEnableDockerMCP(t *testing.T) {
 			t.Skip("Docker MCP is available, skipping unavailable test")
 		}
 
-		err := cfg.EnableDockerMCP()
+		err := store.EnableDockerMCP()
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "docker mcp is not available")
 	})
@@ -128,15 +131,17 @@ func TestDisableDockerMCP(t *testing.T) {
 					Disabled: false,
 				},
 			},
-			dataConfigDir:  configPath,
+		}
+		store := &ConfigStore{
+			config:         cfg,
+			globalDataPath: configPath,
 			resolver:       NewShellVariableResolver(env.New()),
-			knownProviders: []catwalk.Provider{},
 		}
 
 		// Verify it's enabled first.
 		require.True(t, cfg.IsDockerMCPEnabled())
 
-		err := cfg.DisableDockerMCP()
+		err := store.DisableDockerMCP()
 		require.NoError(t, err)
 
 		// Check in-memory config.
@@ -149,13 +154,15 @@ func TestDisableDockerMCP(t *testing.T) {
 		t.Parallel()
 
 		cfg := &Config{
-			MCP:            nil,
-			dataConfigDir:  t.TempDir() + "/crush.json",
+			MCP: nil,
+		}
+		store := &ConfigStore{
+			config:         cfg,
+			globalDataPath: filepath.Join(t.TempDir(), "crush.json"),
 			resolver:       NewShellVariableResolver(env.New()),
-			knownProviders: []catwalk.Provider{},
 		}
 
-		err := cfg.DisableDockerMCP()
+		err := store.DisableDockerMCP()
 		require.NoError(t, err)
 	})
 }

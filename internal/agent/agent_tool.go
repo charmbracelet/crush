@@ -24,7 +24,7 @@ const (
 )
 
 func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) {
-	agentCfg, ok := c.cfg.Agents[config.AgentTask]
+	agentCfg, ok := c.cfg.Config().Agents[config.AgentTask]
 	if !ok {
 		return nil, errors.New("task agent not configured")
 	}

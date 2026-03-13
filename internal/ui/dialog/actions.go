@@ -44,13 +44,14 @@ type ActionSelectModel struct {
 
 // Messages for commands
 type (
-	ActionNewSession        struct{}
-	ActionToggleHelp        struct{}
-	ActionToggleCompactMode struct{}
-	ActionToggleThinking    struct{}
-	ActionTogglePills       struct{}
-	ActionExternalEditor    struct{}
-	ActionToggleYoloMode    struct{}
+	ActionNewSession          struct{}
+	ActionToggleHelp          struct{}
+	ActionToggleCompactMode   struct{}
+	ActionToggleThinking      struct{}
+	ActionTogglePills         struct{}
+	ActionExternalEditor      struct{}
+	ActionToggleYoloMode      struct{}
+	ActionToggleNotifications struct{}
 	// ActionInitializeProject is a message to initialize a project.
 	ActionInitializeProject struct{}
 	ActionSummarize         struct {

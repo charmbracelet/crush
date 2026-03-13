@@ -163,11 +163,11 @@ func Close(ctx context.Context) error {
 }
 
 // Initialize initializes MCP clients based on the provided configuration.
-func Initialize(ctx context.Context, permissions permission.Service, cfg *config.Config) {
+func Initialize(ctx context.Context, permissions permission.Service, cfg *config.ConfigStore) {
 	slog.Info("Initializing MCP clients")
 	var wg sync.WaitGroup
 	// Initialize states for all configured MCPs
-	for name, m := range cfg.MCP {
+	for name, m := range cfg.Config().MCP {
 		if m.Disabled {
 			updateState(name, StateDisabled, nil, nil, Counts{})
 			slog.Debug("Skipping disabled MCP", "name", name)
@@ -215,8 +215,8 @@ func WaitForInit(ctx context.Context) error {
 }
 
 // InitializeSingle initializes a single MCP client by name.
-func InitializeSingle(ctx context.Context, name string, cfg *config.Config) error {
-	m, exists := cfg.MCP[name]
+func InitializeSingle(ctx context.Context, name string, cfg *config.ConfigStore) error {
+	m, exists := cfg.Config().MCP[name]
 	if !exists {
 		return fmt.Errorf("mcp '%s' not found in configuration", name)
 	}
@@ -231,7 +231,7 @@ func InitializeSingle(ctx context.Context, name string, cfg *config.Config) erro
 }
 
 // initClient initializes a single MCP client with the given configuration.
-func initClient(ctx context.Context, cfg *config.Config, name string, m config.MCPConfig, resolver config.VariableResolver) error {
+func initClient(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, resolver config.VariableResolver) error {
 	// Set initial starting state.
 	updateState(name, StateStarting, nil, nil, Counts{})
 
@@ -270,7 +270,7 @@ func initClient(ctx context.Context, cfg *config.Config, name string, m config.M
 }
 
 // DisableSingle disables and closes a single MCP client by name.
-func DisableSingle(cfg *config.Config, name string) error {
+func DisableSingle(cfg *config.ConfigStore, name string) error {
 	session, ok := sessions.Get(name)
 	if ok {
 		if err := session.Close(); err != nil &&
@@ -293,13 +293,13 @@ func DisableSingle(cfg *config.Config, name string) error {
 	return nil
 }
 
-func getOrRenewClient(ctx context.Context, cfg *config.Config, name string) (*ClientSession, error) {
+func getOrRenewClient(ctx context.Context, cfg *config.ConfigStore, name string) (*ClientSession, error) {
 	sess, ok := sessions.Get(name)
 	if !ok {
 		return nil, fmt.Errorf("mcp '%s' not available", name)
 	}
 
-	m := cfg.MCP[name]
+	m := cfg.Config().MCP[name]
 	state, _ := states.Get(name)
 
 	timeout := mcpTimeout(m)

@@ -31,7 +31,7 @@ func (c *Config) IsDockerMCPEnabled() bool {
 }
 
 // EnableDockerMCP adds Docker MCP configuration and persists it.
-func (c *Config) EnableDockerMCP() error {
+func (s *ConfigStore) EnableDockerMCP() error {
 	if !IsDockerMCPAvailable() {
 		return fmt.Errorf("docker mcp is not available, please ensure docker is installed and 'docker mcp version' succeeds")
 	}
@@ -44,13 +44,13 @@ func (c *Config) EnableDockerMCP() error {
 	}
 
 	// Add to in-memory config.
-	if c.MCP == nil {
-		c.MCP = make(map[string]MCPConfig)
+	if s.config.MCP == nil {
+		s.config.MCP = make(map[string]MCPConfig)
 	}
-	c.MCP[DockerMCPName] = mcpConfig
+	s.config.MCP[DockerMCPName] = mcpConfig
 
 	// Persist to config file.
-	if err := c.SetConfigField("mcp."+DockerMCPName, mcpConfig); err != nil {
+	if err := s.SetConfigField(ScopeGlobal, "mcp."+DockerMCPName, mcpConfig); err != nil {
 		return fmt.Errorf("failed to persist docker mcp configuration: %w", err)
 	}
 
@@ -58,16 +58,16 @@ func (c *Config) EnableDockerMCP() error {
 }
 
 // DisableDockerMCP removes Docker MCP configuration and persists the change.
-func (c *Config) DisableDockerMCP() error {
-	if c.MCP == nil {
+func (s *ConfigStore) DisableDockerMCP() error {
+	if s.config.MCP == nil {
 		return nil
 	}
 
 	// Remove from in-memory config.
-	delete(c.MCP, DockerMCPName)
+	delete(s.config.MCP, DockerMCPName)
 
 	// Persist to config file by setting to null.
-	if err := c.SetConfigField("mcp", c.MCP); err != nil {
+	if err := s.SetConfigField(ScopeGlobal, "mcp", s.config.MCP); err != nil {
 		return fmt.Errorf("failed to persist docker mcp removal: %w", err)
 	}
 

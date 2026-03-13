@@ -23,8 +23,13 @@ type retryableStreamModel struct {
 
 // Stream implements fantasy.LanguageModel.
 func (m retryableStreamModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
-	stream, err := m.LanguageModel.Stream(ctx, call)
+	// Create a derived context with cancel to ensure the underlying stream
+	// can be stopped when idle timeout fires or the outer function returns.
+	localCtx, localCancel := context.WithCancel(ctx)
+
+	stream, err := m.LanguageModel.Stream(localCtx, call)
 	if err != nil {
+		localCancel()
 		return nil, wrapRetryableNetworkErr(err)
 	}
 
@@ -33,11 +38,6 @@ func (m retryableStreamModel) Stream(ctx context.Context, call fantasy.Call) (fa
 		// idleTimer tracks time between stream parts to detect stalled connections.
 		idleTimer := time.NewTimer(streamIdleTimeout)
 		defer idleTimer.Stop()
-
-		// Create a derived context with cancel to ensure the goroutine can be
-		// stopped when the outer function returns (e.g., yield returns false,
-		// idle timeout, or context cancellation).
-		localCtx, localCancel := context.WithCancel(ctx)
 		defer localCancel()
 
 		// Create a channel to receive stream parts from the underlying stream.

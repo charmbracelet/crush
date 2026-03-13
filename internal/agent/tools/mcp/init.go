@@ -422,8 +422,9 @@ func createTransport(ctx context.Context, m config.MCPConfig, resolver config.Va
 			},
 		}
 		return &mcp.StreamableClientTransport{
-			Endpoint:   m.URL,
-			HTTPClient: client,
+			Endpoint:             m.URL,
+			HTTPClient:           client,
+			DisableStandaloneSSE: m.DisableStandaloneSSE,
 		}, nil
 	case config.MCPSSE:
 		if strings.TrimSpace(m.URL) == "" {

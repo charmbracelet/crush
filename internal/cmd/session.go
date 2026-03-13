@@ -625,9 +625,11 @@ func convertParts(parts []message.ContentPart) []sessionShowPart {
 			})
 		case message.Finish:
 			result = append(result, sessionShowPart{
-				Type:   "finish",
-				Reason: string(p.Reason),
-				Time:   p.Time,
+				Type:    "finish",
+				Reason:  string(p.Reason),
+				Time:    p.Time,
+				Text:    p.Message,
+				Content: p.Details,
 			})
 		default:
 			result = append(result, sessionShowPart{

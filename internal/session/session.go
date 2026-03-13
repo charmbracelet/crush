@@ -66,6 +66,7 @@ type Service interface {
 	CreateTitleSession(ctx context.Context, parentSessionID string) (Session, error)
 	CreateTaskSession(ctx context.Context, toolCallID, parentSessionID, title string) (Session, error)
 	Get(ctx context.Context, id string) (Session, error)
+	GetLast(ctx context.Context) (Session, error)
 	List(ctx context.Context) ([]Session, error)
 	Save(ctx context.Context, session Session) (Session, error)
 	UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error
@@ -160,6 +161,14 @@ func (s *service) Delete(ctx context.Context, id string) error {
 
 func (s *service) Get(ctx context.Context, id string) (Session, error) {
 	dbSession, err := s.q.GetSessionByID(ctx, id)
+	if err != nil {
+		return Session{}, err
+	}
+	return s.fromDBItem(dbSession), nil
+}
+
+func (s *service) GetLast(ctx context.Context) (Session, error) {
+	dbSession, err := s.q.GetLastSession(ctx)
 	if err != nil {
 		return Session{}, err
 	}

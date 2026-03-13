@@ -177,14 +177,11 @@ func (app *App) resolveSession(ctx context.Context, continueSessionID string, us
 		return sess, nil
 
 	case useLast:
-		sessions, err := app.Sessions.List(ctx)
+		sess, err := app.Sessions.GetLast(ctx)
 		if err != nil {
-			return session.Session{}, fmt.Errorf("failed to list sessions: %w", err)
-		}
-		if len(sessions) == 0 {
 			return session.Session{}, fmt.Errorf("no sessions found to continue")
 		}
-		return sessions[0], nil
+		return sess, nil
 
 	default:
 		return app.Sessions.Create(ctx, agent.DefaultSessionName)

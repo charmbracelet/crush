@@ -307,6 +307,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			defer ticker.Stop()
 
 			autoBackgroundAfter := cmp.Or(params.AutoBackgroundAfter, DefaultAutoBackgroundAfter)
+			autoBackgroundAfter = max(autoBackgroundAfter, 1)
 			autoBackgroundThreshold := time.Duration(autoBackgroundAfter) * time.Second
 			timeout := time.After(autoBackgroundThreshold)
 

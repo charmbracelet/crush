@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
+	"github.com/zeebo/xxh3"
 )
 
 type TodoStatus string
@@ -36,6 +37,13 @@ func NormalizeCollaborationMode(mode string) CollaborationMode {
 	default:
 		return CollaborationModeDefault
 	}
+}
+
+// HashID returns the XXH3 hash of a session ID (UUID) as a hex string.
+func HashID(id string) string {
+	h := xxh3.New()
+	h.WriteString(id)
+	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
 type Todo struct {
@@ -86,6 +94,7 @@ type Service interface {
 	Save(ctx context.Context, session Session) (Session, error)
 	UpdateCollaborationMode(ctx context.Context, sessionID string, mode CollaborationMode) (Session, error)
 	UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error
+	Rename(ctx context.Context, id string, title string) error
 	Delete(ctx context.Context, id string) error
 
 	// Agent tool session management
@@ -239,6 +248,15 @@ func (s *service) UpdateTitleAndUsage(ctx context.Context, sessionID, title stri
 		PromptTokens:     promptTokens,
 		CompletionTokens: completionTokens,
 		Cost:             cost,
+	})
+}
+
+// Rename updates only the title of a session without touching updated_at or
+// usage fields.
+func (s *service) Rename(ctx context.Context, id string, title string) error {
+	return s.q.RenameSession(ctx, db.RenameSessionParams{
+		ID:    id,
+		Title: title,
 	})
 }
 

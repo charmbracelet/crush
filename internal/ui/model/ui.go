@@ -3082,6 +3082,8 @@ func (m *UI) newSession() tea.Cmd {
 	m.pillsView = ""
 	m.historyReset()
 	agenttools.ResetCache()
+	anim.ResetCache()
+
 	return tea.Batch(
 		func() tea.Msg {
 			m.com.App.LSPManager.StopAll(context.Background())

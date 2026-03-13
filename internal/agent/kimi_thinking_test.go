@@ -317,13 +317,13 @@ func TestKimiThinking_RedactedDataFormats(t *testing.T) {
 	}{
 		{"empty_string", ""},
 		{"placeholder", "thinking_redacted"},
-		{"base64_a", "YQ=="},                // "a" in base64 (1 byte)
-		{"base64_ab", "YWI="},               // "ab" in base64 (2 bytes)
-		{"base64_abc", "YWJj"},              // "abc" in base64 (3 bytes)
-		{"base64_hello", "aGVsbG8="},        // "hello" in base64 (5 bytes)
-		{"base64_null1", "AA=="},            // single null byte
-		{"base64_null4", "AAAAAA=="},        // 4 null bytes
-		{"base64_null8", "AAAAAAAAAA=="},    // 8 null bytes
+		{"base64_a", "YQ=="},                 // "a" in base64 (1 byte)
+		{"base64_ab", "YWI="},                // "ab" in base64 (2 bytes)
+		{"base64_abc", "YWJj"},               // "abc" in base64 (3 bytes)
+		{"base64_hello", "aGVsbG8="},         // "hello" in base64 (5 bytes)
+		{"base64_null1", "AA=="},             // single null byte
+		{"base64_null4", "AAAAAA=="},         // 4 null bytes
+		{"base64_null8", "AAAAAAAAAA=="},     // 8 null bytes
 		{"base64_long", "AAAAAAAAAAAAAAAA="}, // padding bytes (12 bytes)
 	}
 

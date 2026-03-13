@@ -62,6 +62,14 @@ crush run --last "Follow up on your last response"
 		}
 		defer app.Shutdown()
 
+		if continueID != "" {
+			sess, err := resolveSessionID(ctx, app.Sessions, continueID)
+			if err != nil {
+				return err
+			}
+			continueID = sess.ID
+		}
+
 		if !app.Config().IsConfigured() {
 			return fmt.Errorf("no providers configured - please run 'crush' to set up a provider interactively")
 		}

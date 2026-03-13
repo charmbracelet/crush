@@ -1330,6 +1330,12 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionQuit:
 		cmds = append(cmds, tea.Quit)
+	case dialog.ActionEnableDockerMCP:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		cmds = append(cmds, m.enableDockerMCP)
+	case dialog.ActionDisableDockerMCP:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		cmds = append(cmds, m.disableDockerMCP)
 	case dialog.ActionInitializeProject:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
@@ -3402,6 +3408,36 @@ func (m *UI) copyChatHighlight() tea.Cmd {
 			return nil
 		},
 	)
+}
+
+func (m *UI) enableDockerMCP() tea.Msg {
+	store := m.com.Store()
+	if err := store.EnableDockerMCP(); err != nil {
+		return util.ReportError(err)()
+	}
+
+	// Initialize the Docker MCP client immediately.
+	ctx := context.Background()
+	if err := mcp.InitializeSingle(ctx, config.DockerMCPName, store); err != nil {
+		return util.ReportError(fmt.Errorf("docker MCP enabled but failed to start: %w", err))()
+	}
+
+	return util.NewInfoMsg("Docker MCP enabled and started successfully")
+}
+
+func (m *UI) disableDockerMCP() tea.Msg {
+	store := m.com.Store()
+	// Close the Docker MCP client.
+	if err := mcp.DisableSingle(store, config.DockerMCPName); err != nil {
+		return util.ReportError(fmt.Errorf("failed to disable docker MCP: %w", err))()
+	}
+
+	// Remove from config and persist.
+	if err := store.DisableDockerMCP(); err != nil {
+		return util.ReportError(err)()
+	}
+
+	return util.NewInfoMsg("Docker MCP disabled successfully")
 }
 
 // renderLogo renders the Crush logo with the given styles and dimensions.

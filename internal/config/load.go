@@ -844,13 +844,6 @@ func GlobalAgentsMD() string {
 	if xdgConfigHome := os.Getenv("XDG_CONFIG_HOME"); xdgConfigHome != "" {
 		return filepath.Join(xdgConfigHome, appName, "AGENTS.md")
 	}
-	if runtime.GOOS == "windows" {
-		localAppData := cmp.Or(
-			os.Getenv("LOCALAPPDATA"),
-			filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local"),
-		)
-		return filepath.Join(localAppData, appName, "AGENTS.md")
-	}
 	return filepath.Join(home.Dir(), ".config", appName, "AGENTS.md")
 }
 

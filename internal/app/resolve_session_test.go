@@ -52,7 +52,6 @@ func (m *mockSessionService) GetLast(_ context.Context) (session.Session, error)
 	return session.Session{}, sql.ErrNoRows
 }
 
-
 func (m *mockSessionService) List(context.Context) ([]session.Session, error) {
 	return m.sessions, nil
 }

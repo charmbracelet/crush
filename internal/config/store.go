@@ -154,6 +154,15 @@ func (s *ConfigStore) SetCompactMode(scope Scope, enabled bool) error {
 	return s.SetConfigField(scope, "options.tui.compact_mode", enabled)
 }
 
+// SetSkipRequests sets the skip requests (YOLO mode) setting and persists it.
+func (s *ConfigStore) SetSkipRequests(scope Scope, enabled bool) error {
+	if s.config.Permissions == nil {
+		s.config.Permissions = &Permissions{}
+	}
+	s.config.Permissions.SkipRequests = enabled
+	return s.SetConfigField(scope, "permissions.skip_requests", enabled)
+}
+
 // SetProviderAPIKey sets the API key for a provider and persists it.
 func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey any) error {
 	var providerConfig ProviderConfig

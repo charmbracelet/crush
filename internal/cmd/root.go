@@ -198,7 +198,11 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 	if cfg.Permissions == nil {
 		cfg.Permissions = &config.Permissions{}
 	}
-	cfg.Permissions.SkipRequests = yolo
+	// Use command-line --yolo flag if explicitly set, otherwise use config file value.
+	// This allows users to enable yolo mode permanently via config.
+	if cmd.Flags().Changed("yolo") {
+		cfg.Permissions.SkipRequests = yolo
+	}
 
 	if err := createDotCrushDir(cfg.Options.DataDirectory); err != nil {
 		return nil, err

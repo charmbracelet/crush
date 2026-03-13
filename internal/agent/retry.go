@@ -4,9 +4,14 @@ import (
 	"context"
 	"errors"
 	"io"
+	"time"
 
 	"charm.land/fantasy"
 )
+
+// streamIdleTimeout is the maximum time to wait between stream parts before
+// considering the connection stalled and triggering a retry.
+const streamIdleTimeout = 120 * time.Second
 
 // retryableStreamModel wraps a fantasy.LanguageModel and converts bare
 // retryable network errors (such as io.ErrUnexpectedEOF) inside stream parts
@@ -22,17 +27,86 @@ func (m retryableStreamModel) Stream(ctx context.Context, call fantasy.Call) (fa
 	if err != nil {
 		return nil, wrapRetryableNetworkErr(err)
 	}
+
 	return func(yield func(fantasy.StreamPart) bool) {
 		sawToolUse := false
-		stream(func(part fantasy.StreamPart) bool {
-			if isToolStreamPart(part.Type) {
-				sawToolUse = true
+		// idleTimer tracks time between stream parts to detect stalled connections.
+		idleTimer := time.NewTimer(streamIdleTimeout)
+		defer idleTimer.Stop()
+
+		// Create a channel to receive stream parts from the underlying stream.
+		// This allows us to use select with a timeout.
+		partCh := make(chan fantasy.StreamPart)
+		doneCh := make(chan struct{})
+
+		// Run the underlying stream in a goroutine.
+		go func() {
+			defer close(doneCh)
+			stream(func(part fantasy.StreamPart) bool {
+				// Check if context is cancelled.
+				select {
+				case <-ctx.Done():
+					return false
+				default:
+				}
+
+				// Send part to channel, respecting context cancellation.
+				select {
+				case partCh <- part:
+					return true
+				case <-ctx.Done():
+					return false
+				}
+			})
+		}()
+
+		for {
+			select {
+			case part := <-partCh:
+				// Reset idle timer on each part received.
+				if !idleTimer.Stop() {
+					select {
+					case <-idleTimer.C:
+					default:
+					}
+				}
+				idleTimer.Reset(streamIdleTimeout)
+
+				if isToolStreamPart(part.Type) {
+					sawToolUse = true
+				}
+				if !sawToolUse && part.Type == fantasy.StreamPartTypeError && part.Error != nil {
+					part.Error = wrapRetryableNetworkErr(part.Error)
+				}
+				if !yield(part) {
+					return
+				}
+
+			case <-idleTimer.C:
+				// Stream has been idle for too long - trigger a retryable error.
+				yield(fantasy.StreamPart{
+					Type: fantasy.StreamPartTypeError,
+					Error: &fantasy.ProviderError{
+						Title:   "network error",
+						Message: "stream idle timeout: no data received for 120s",
+						Cause:   errors.New("stream idle timeout"),
+					},
+				})
+				return
+
+			case <-ctx.Done():
+				// Context cancelled - propagate cancellation error.
+				yield(fantasy.StreamPart{
+					Type:  fantasy.StreamPartTypeError,
+					Error: ctx.Err(),
+				})
+				return
+
+			case <-doneCh:
+				// Stream completed normally.
+				return
 			}
-			if !sawToolUse && part.Type == fantasy.StreamPartTypeError && part.Error != nil {
-				part.Error = wrapRetryableNetworkErr(part.Error)
-			}
-			return yield(part)
-		})
+		}
 	}, nil
 }
 

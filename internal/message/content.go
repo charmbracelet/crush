@@ -499,9 +499,6 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 	case Assistant:
 		var parts []fantasy.MessagePart
 		text := strings.TrimSpace(m.Content().Text)
-		if text != "" {
-			parts = append(parts, fantasy.TextPart{Text: text})
-		}
 		reasoning := m.ReasoningContent()
 		if reasoning.Thinking != "" {
 			reasoningPart := fantasy.ReasoningPart{Text: reasoning.Thinking, ProviderOptions: fantasy.ProviderOptions{}}
@@ -519,7 +516,15 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 					ToolID:    reasoning.ToolID,
 				}
 			}
-			parts = append(parts, reasoningPart)
+			// Only include the reasoning part if we have valid provider metadata.
+			// Without metadata, the provider cannot verify the thinking block and will
+			// reject the request (e.g. Kimi rejects redacted_thinking entirely).
+			if len(reasoningPart.ProviderOptions) > 0 {
+				parts = append(parts, reasoningPart)
+			}
+		}
+		if text != "" {
+			parts = append(parts, fantasy.TextPart{Text: text})
 		}
 		for _, call := range m.ToolCalls() {
 			parts = append(parts, fantasy.ToolCallPart{

@@ -1285,6 +1285,10 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		yolo := !m.com.App.Permissions.SkipRequests()
 		m.com.App.Permissions.SetSkipRequests(yolo)
 		m.setEditorPrompt(yolo)
+		// Persist the YOLO mode setting to config.
+		if err := m.com.Store().SetSkipRequests(config.ScopeGlobal, yolo); err != nil {
+			slog.Error("Failed to persist yolo mode setting", "error", err)
+		}
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionTogglePlanMode:
 		if m.isAgentBusy() {

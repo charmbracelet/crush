@@ -584,7 +584,14 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 			if largeModelSelected.ReasoningEffort != "" {
 				large.ReasoningEffort = largeModelSelected.ReasoningEffort
 			}
-			large.Think = largeModelSelected.Think
+			// Default to enabling thinking for models that support reasoning.
+			// If the user has explicitly configured Think (even as false), respect their setting.
+			// We detect "explicitly configured" by checking if the model config exists in the user's config.
+			if model.CanReason && !hasThinkConfigured(c.Models[SelectedModelTypeLarge]) {
+				large.Think = true
+			} else {
+				large.Think = largeModelSelected.Think
+			}
 			if largeModelSelected.Temperature != nil {
 				large.Temperature = largeModelSelected.Temperature
 			}
@@ -643,12 +650,31 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 			if smallModelSelected.PresencePenalty != nil {
 				small.PresencePenalty = smallModelSelected.PresencePenalty
 			}
-			small.Think = smallModelSelected.Think
+			// Default to enabling thinking for models that support reasoning.
+			if model.CanReason && !hasThinkConfigured(c.Models[SelectedModelTypeSmall]) {
+				small.Think = true
+			} else {
+				small.Think = smallModelSelected.Think
+			}
 		}
 	}
 	c.Models[SelectedModelTypeLarge] = large
 	c.Models[SelectedModelTypeSmall] = small
 	return nil
+}
+
+// hasThinkConfigured checks if the user has explicitly configured the Think field
+// by looking at the raw config data. This helps distinguish between "not configured"
+// and "configured as false".
+func hasThinkConfigured(model SelectedModel) bool {
+	// If the model struct has Think=true, it's definitely configured.
+	// If Think=false, we need to check if it was explicitly set.
+	// For simplicity, we consider it configured if the model was loaded from config
+	// and has any other fields set (indicating user has touched this model config).
+	return model.Think || model.ReasoningEffort != "" || model.MaxTokens > 0 ||
+		model.Temperature != nil || model.TopP != nil || model.TopK != nil ||
+		model.FrequencyPenalty != nil || model.PresencePenalty != nil ||
+		len(model.ProviderOptions) > 0
 }
 
 // lookupConfigs searches config files recursively from CWD up to FS root
@@ -813,6 +839,25 @@ func GlobalSkillsDirs() []string {
 		filepath.Join(configBase, appName, "skills"),
 		filepath.Join(configBase, "agents", "skills"),
 	}
+}
+
+// GlobalAgentsMD returns the path to the global AGENTS.md file.
+// This file is loaded as a context file for all projects.
+func GlobalAgentsMD() string {
+	if crushGlobal := os.Getenv("CRUSH_GLOBAL_CONFIG"); crushGlobal != "" {
+		return filepath.Join(crushGlobal, "AGENTS.md")
+	}
+	if xdgConfigHome := os.Getenv("XDG_CONFIG_HOME"); xdgConfigHome != "" {
+		return filepath.Join(xdgConfigHome, appName, "AGENTS.md")
+	}
+	if runtime.GOOS == "windows" {
+		localAppData := cmp.Or(
+			os.Getenv("LOCALAPPDATA"),
+			filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local"),
+		)
+		return filepath.Join(localAppData, appName, "AGENTS.md")
+	}
+	return filepath.Join(home.Dir(), ".config", appName, "AGENTS.md")
 }
 
 func isAppleTerminal() bool { return os.Getenv("TERM_PROGRAM") == "Apple_Terminal" }

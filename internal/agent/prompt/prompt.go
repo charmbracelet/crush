@@ -27,16 +27,17 @@ type Prompt struct {
 }
 
 type PromptDat struct {
-	Provider      string
-	Model         string
-	Config        config.Config
-	WorkingDir    string
-	IsGitRepo     bool
-	Platform      string
-	Date          string
-	GitStatus     string
-	ContextFiles  []ContextFile
-	AvailSkillXML string
+	Provider           string
+	Model              string
+	Config             config.Config
+	WorkingDir         string
+	IsGitRepo          bool
+	Platform           string
+	Date               string
+	GitStatus          string
+	ContextFiles       []ContextFile
+	GlobalContextFiles []ContextFile
+	AvailSkillXML      string
 }
 
 type ContextFile struct {
@@ -152,17 +153,27 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 	workingDir := cmp.Or(p.workingDir, store.WorkingDir())
 	platform := cmp.Or(p.platform, runtime.GOOS)
 
-	files := map[string][]ContextFile{}
+	projectFiles := map[string][]ContextFile{}
 
 	cfg := store.Config()
+
 	for _, pth := range cfg.Options.ContextPaths {
 		expanded := expandPath(pth, store)
 		pathKey := strings.ToLower(expanded)
-		if _, ok := files[pathKey]; ok {
+
+		if _, ok := projectFiles[pathKey]; ok {
 			continue
 		}
 		content := processContextPath(expanded, store)
-		files[pathKey] = content
+		projectFiles[pathKey] = content
+	}
+
+	// Load global AGENTS.md directly to ensure it's always injected into system prompt.
+	var globalFiles []ContextFile
+	if globalAgentsPath := config.GlobalAgentsMD(); globalAgentsPath != "" {
+		if result := processFile(globalAgentsPath); result != nil {
+			globalFiles = append(globalFiles, *result)
+		}
 	}
 
 	// Discover and load skills metadata.
@@ -196,9 +207,10 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		}
 	}
 
-	for _, contextFiles := range files {
+	for _, contextFiles := range projectFiles {
 		data.ContextFiles = append(data.ContextFiles, contextFiles...)
 	}
+	data.GlobalContextFiles = globalFiles
 	return data, nil
 }
 

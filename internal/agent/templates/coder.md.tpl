@@ -382,8 +382,35 @@ If a skill mentions scripts, references, or assets, they are placed in the same 
 {{end}}
 
 {{if .ContextFiles}}
+{{if .GlobalContextFiles}}
+<memory>
+<!-- Global rules (lower priority) -->
+{{range .GlobalContextFiles}}
+<file path="{{.Path}}">
+{{.Content}}
+</file>
+{{end}}
+
+<!-- Project-specific rules (higher priority) -->
+{{range .ContextFiles}}
+<file path="{{.Path}}">
+{{.Content}}
+</file>
+{{end}}
+</memory>
+{{else}}
 <memory>
 {{range .ContextFiles}}
+<file path="{{.Path}}">
+{{.Content}}
+</file>
+{{end}}
+</memory>
+{{end}}
+{{else if .GlobalContextFiles}}
+<memory>
+<!-- Global rules -->
+{{range .GlobalContextFiles}}
 <file path="{{.Path}}">
 {{.Content}}
 </file>

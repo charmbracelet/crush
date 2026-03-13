@@ -34,6 +34,12 @@ func (m retryableStreamModel) Stream(ctx context.Context, call fantasy.Call) (fa
 		idleTimer := time.NewTimer(streamIdleTimeout)
 		defer idleTimer.Stop()
 
+		// Create a derived context with cancel to ensure the goroutine can be
+		// stopped when the outer function returns (e.g., yield returns false,
+		// idle timeout, or context cancellation).
+		localCtx, localCancel := context.WithCancel(ctx)
+		defer localCancel()
+
 		// Create a channel to receive stream parts from the underlying stream.
 		// This allows us to use select with a timeout.
 		partCh := make(chan fantasy.StreamPart)
@@ -45,7 +51,7 @@ func (m retryableStreamModel) Stream(ctx context.Context, call fantasy.Call) (fa
 			stream(func(part fantasy.StreamPart) bool {
 				// Check if context is cancelled.
 				select {
-				case <-ctx.Done():
+				case <-localCtx.Done():
 					return false
 				default:
 				}
@@ -54,7 +60,7 @@ func (m retryableStreamModel) Stream(ctx context.Context, call fantasy.Call) (fa
 				select {
 				case partCh <- part:
 					return true
-				case <-ctx.Done():
+				case <-localCtx.Done():
 					return false
 				}
 			})

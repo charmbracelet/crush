@@ -25,6 +25,7 @@ import (
 	"github.com/charmbracelet/crush/internal/log"
 	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
 	"github.com/qjebbs/go-jsons"
+	"github.com/tidwall/gjson"
 )
 
 const defaultCatwalkURL = "https://catwalk.charm.sh"
@@ -40,6 +41,17 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	}
 
 	cfg.setDefaults(workingDir, dataDir)
+
+	// Load SkipRequests (YOLO mode) from global data config only.
+	// This field is marked json:"-" to prevent loading from untrusted project configs.
+	if cfg.Permissions == nil {
+		cfg.Permissions = &Permissions{}
+	}
+	if data, err := os.ReadFile(GlobalConfigData()); err == nil && len(data) > 0 {
+		if gjson.GetBytes(data, "permissions.skip_requests").Bool() {
+			cfg.Permissions.SkipRequests = true
+		}
+	}
 
 	store := &ConfigStore{
 		config:         cfg,

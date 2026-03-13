@@ -102,10 +102,11 @@ type sessionServices struct {
 
 func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func(), error) {
 	dataDir, _ := cmd.Flags().GetString("data-dir")
+	cwd, _ := cmd.Flags().GetString("cwd")
 	ctx := cmd.Context()
 
 	if dataDir == "" {
-		cfg, err := config.Init("", "", false)
+		cfg, err := config.Init(cwd, "", false)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("failed to initialize config: %w", err)
 		}

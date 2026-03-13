@@ -129,10 +129,10 @@ func TestBackgroundShellManager_KillTimeoutKeepsShellTracked(t *testing.T) {
 		cancel: func() { canceled = true },
 	})
 
-	originalTimeout := killTimeout
-	killTimeout = 10 * time.Millisecond
+	originalTimeout := manager.killTimeout
+	manager.killTimeout = 10 * time.Millisecond
 	t.Cleanup(func() {
-		killTimeout = originalTimeout
+		manager.killTimeout = originalTimeout
 	})
 
 	err := manager.Kill("stuck")

@@ -61,7 +61,8 @@ type BackgroundShell struct {
 
 // BackgroundShellManager manages background shell instances.
 type BackgroundShellManager struct {
-	shells *csync.Map[string, *BackgroundShell]
+	shells      *csync.Map[string, *BackgroundShell]
+	killTimeout time.Duration
 }
 
 var (
@@ -73,7 +74,8 @@ var (
 // newBackgroundShellManager creates a new BackgroundShellManager instance.
 func newBackgroundShellManager() *BackgroundShellManager {
 	return &BackgroundShellManager{
-		shells: csync.NewMap[string, *BackgroundShell](),
+		shells:      csync.NewMap[string, *BackgroundShell](),
+		killTimeout: defaultKillTimeout,
 	}
 }
 
@@ -143,9 +145,9 @@ func (m *BackgroundShellManager) Remove(id string) error {
 	return nil
 }
 
-// killTimeout is the maximum time to wait for a background shell to exit
-// after cancellation before giving up.
-var killTimeout = 5 * time.Second
+// defaultKillTimeout is the default maximum time to wait for a background shell
+// to exit after cancellation before giving up.
+const defaultKillTimeout = 5 * time.Second
 
 // Kill terminates a background shell by ID.
 func (m *BackgroundShellManager) Kill(id string) error {
@@ -158,7 +160,7 @@ func (m *BackgroundShellManager) Kill(id string) error {
 	select {
 	case <-shell.done:
 		m.shells.Del(id)
-	case <-time.After(killTimeout):
+	case <-time.After(m.killTimeout):
 		return fmt.Errorf("timed out waiting for shell %s to terminate", id)
 	}
 	return nil

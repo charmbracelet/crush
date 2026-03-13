@@ -268,6 +268,7 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 		r := attachments.NewRenderer(
 			sty.Attachments.Normal,
 			sty.Attachments.Deleting,
+			sty.Attachments.CopySelecting,
 			sty.Attachments.Image,
 			sty.Attachments.Text,
 		)

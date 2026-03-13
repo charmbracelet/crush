@@ -78,20 +78,26 @@ func (m *Attachments) Render(width int) string {
 	return m.renderer.Render(m.list, m.deleting, width)
 }
 
-func NewRenderer(normalStyle, deletingStyle, imageStyle, textStyle lipgloss.Style) *Renderer {
+func NewRenderer(normalStyle, deletingStyle, copySelectingStyle, imageStyle, textStyle lipgloss.Style) *Renderer {
 	return &Renderer{
-		normalStyle:   normalStyle,
-		textStyle:     textStyle,
-		imageStyle:    imageStyle,
-		deletingStyle: deletingStyle,
+		normalStyle:        normalStyle,
+		textStyle:          textStyle,
+		imageStyle:         imageStyle,
+		deletingStyle:      deletingStyle,
+		copySelectingStyle: copySelectingStyle,
 	}
 }
 
 type Renderer struct {
-	normalStyle, textStyle, imageStyle, deletingStyle lipgloss.Style
+	normalStyle, textStyle, imageStyle, deletingStyle, copySelectingStyle lipgloss.Style
 }
 
 func (r *Renderer) Render(attachments []message.Attachment, deleting bool, width int) string {
+	return r.RenderWithMode(attachments, deleting, false, width)
+}
+
+// RenderWithMode renders attachments with a specific mode (normal, deleting, or copy selecting).
+func (r *Renderer) RenderWithMode(attachments []message.Attachment, deleting, copySelecting bool, width int) string {
 	var chips []string
 
 	maxItemWidth := lipgloss.Width(r.imageStyle.String() + r.normalStyle.Render(strings.Repeat("x", maxFilename)))
@@ -104,13 +110,20 @@ func (r *Renderer) Render(attachments []message.Attachment, deleting bool, width
 			filename = ansi.Truncate(filename, maxFilename, "…")
 		}
 
-		if deleting {
+		switch {
+		case deleting:
 			chips = append(
 				chips,
 				r.deletingStyle.Render(fmt.Sprintf("%d", i)),
 				r.normalStyle.Render(filename),
 			)
-		} else {
+		case copySelecting:
+			chips = append(
+				chips,
+				r.copySelectingStyle.Render(fmt.Sprintf("%d", i)),
+				r.normalStyle.Render(filename),
+			)
+		default:
 			chips = append(
 				chips,
 				r.icon(att).String(),

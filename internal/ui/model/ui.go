@@ -1717,11 +1717,15 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	}
 
 	if key.Matches(msg, m.keyMap.Quit) && !m.dialog.ContainsDialog(dialog.QuitID) {
-		// Always handle quit keys first
+		// In editor mode with text, clear the input instead of quitting.
+		if m.focus == uiFocusEditor && m.textarea.Value() != "" {
+			m.textarea.Reset()
+			return tea.Batch(cmds...)
+		}
+		// Otherwise, open quit dialog.
 		if cmd := m.openQuitDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-
 		return tea.Batch(cmds...)
 	}
 

@@ -151,7 +151,14 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	model := c.currentAgent.Model()
 	maxTokens := model.CatwalkCfg.DefaultMaxTokens
 	if model.ModelCfg.MaxTokens != 0 {
-		maxTokens = model.ModelCfg.MaxTokens
+		// If the configured max_tokens is significantly larger than the model's default,
+		// it may be a leftover value from a previously selected model.
+		// Use the model's default in this case to avoid API errors.
+		if model.ModelCfg.MaxTokens > model.CatwalkCfg.DefaultMaxTokens*2 {
+			slog.Warn("Configured max_tokens is much larger than model default, using model default", "configured", model.ModelCfg.MaxTokens, "default", model.CatwalkCfg.DefaultMaxTokens, "model", model.ModelCfg.Model)
+		} else {
+			maxTokens = model.ModelCfg.MaxTokens
+		}
 	}
 
 	if !model.CatwalkCfg.SupportsImages && attachments != nil {

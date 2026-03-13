@@ -192,4 +192,4 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 )
 
-replace charm.land/fantasy => github.com/aleksclark/fantasy v0.12.2-0.20260312135210-572244fe9cfa
+replace charm.land/fantasy => github.com/aleksclark/fantasy v0.12.2-0.20260313173731-b8ea67938150

@@ -116,6 +116,7 @@ type sessionAgent struct {
 	systemPromptPrefix *csync.Value[string]
 	systemPrompt       *csync.Value[string]
 	tools              *csync.Slice[fantasy.AgentTool]
+	agentFactory       func(model fantasy.LanguageModel, opts ...fantasy.AgentOption) fantasy.Agent
 
 	isSubAgent           bool
 	sessions             session.Service
@@ -133,6 +134,7 @@ type SessionAgentOptions struct {
 	SmallModel           Model
 	SystemPromptPrefix   string
 	SystemPrompt         string
+	AgentFactory         func(model fantasy.LanguageModel, opts ...fantasy.AgentOption) fantasy.Agent
 	IsSubAgent           bool
 	DisableAutoSummarize bool
 	IsYolo               bool
@@ -145,11 +147,16 @@ type SessionAgentOptions struct {
 func NewSessionAgent(
 	opts SessionAgentOptions,
 ) SessionAgent {
+	agentFactory := opts.AgentFactory
+	if agentFactory == nil {
+		agentFactory = fantasy.NewAgent
+	}
 	return &sessionAgent{
 		largeModel:           csync.NewValue(opts.LargeModel),
 		smallModel:           csync.NewValue(opts.SmallModel),
 		systemPromptPrefix:   csync.NewValue(opts.SystemPromptPrefix),
 		systemPrompt:         csync.NewValue(opts.SystemPrompt),
+		agentFactory:         agentFactory,
 		isSubAgent:           opts.IsSubAgent,
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
@@ -221,7 +228,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		agentTools[len(agentTools)-1].SetProviderOptions(a.getCacheControlOptions())
 	}
 
-	agent := fantasy.NewAgent(
+	agent := a.agentFactory(
 		retryableStreamModel{largeModel.Model},
 		fantasy.WithSystemPrompt(systemPrompt),
 		fantasy.WithTools(agentTools...),
@@ -269,203 +276,232 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	startTime := time.Now()
 	a.eventPromptSent(call.SessionID)
 
+	var shouldSummarize bool
 	var currentAssistant *message.Message
 	var currentStepToolMessageIDs []string
-	var shouldSummarize bool
 	var estimatedPromptTokens int64
-	result, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
-		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
-		Files:            files,
-		Messages:         history,
-		ProviderOptions:  call.ProviderOptions,
-		MaxOutputTokens:  &call.MaxOutputTokens,
-		TopP:             call.TopP,
-		Temperature:      call.Temperature,
-		PresencePenalty:  call.PresencePenalty,
-		TopK:             call.TopK,
-		FrequencyPenalty: call.FrequencyPenalty,
-		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
-			// Explicitly tag every LLM request with the correct X-Initiator value
-			// so GitHub Copilot billing is correct regardless of how the fantasy
-			// framework propagates the outer context. Only the first step of a
-			// real user-initiated request is billable; tool-call loops,
-			// sub-agent steps, and continuations are always free.
-			if isUserInitiatedRequest && firstRequestStep {
-				callContext = copilot.ContextWithInitiatorType(callContext, copilot.InitiatorUser)
-			} else {
-				callContext = copilot.ContextWithInitiatorType(callContext, copilot.InitiatorAgent)
-			}
-			firstRequestStep = false
+	var completedStepsThisRun int
+	runStream := func(providerOptions fantasy.ProviderOptions, billFirstStepAsUser bool) (*fantasy.AgentResult, error) {
+		currentAssistant = nil
+		currentStepToolMessageIDs = nil
+		estimatedPromptTokens = 0
+		shouldSummarize = false
+		completedStepsThisRun = 0
+		firstRequestStep = billFirstStepAsUser
 
-			prepared.Messages = options.Messages
-			for i := range prepared.Messages {
-				prepared.Messages[i].ProviderOptions = nil
-			}
-
-			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel)
-
-			lastSystemRoleInx := 0
-			systemMessageUpdated := false
-			for i, msg := range prepared.Messages {
-				// Only add cache control to the last message.
-				if msg.Role == fantasy.MessageRoleSystem {
-					lastSystemRoleInx = i
-				} else if !systemMessageUpdated {
-					prepared.Messages[lastSystemRoleInx].ProviderOptions = a.getCacheControlOptions()
-					systemMessageUpdated = true
+		return agent.Stream(genCtx, fantasy.AgentStreamCall{
+			Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
+			Files:            files,
+			Messages:         history,
+			ProviderOptions:  providerOptions,
+			MaxOutputTokens:  &call.MaxOutputTokens,
+			TopP:             call.TopP,
+			Temperature:      call.Temperature,
+			PresencePenalty:  call.PresencePenalty,
+			TopK:             call.TopK,
+			FrequencyPenalty: call.FrequencyPenalty,
+			PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
+				// Explicitly tag every LLM request with the correct X-Initiator value
+				// so GitHub Copilot billing is correct regardless of how the fantasy
+				// framework propagates the outer context. Only the first step of a
+				// real user-initiated request is billable; tool-call loops,
+				// sub-agent steps, and continuations are always free.
+				if isUserInitiatedRequest && firstRequestStep {
+					callContext = copilot.ContextWithInitiatorType(callContext, copilot.InitiatorUser)
+				} else {
+					callContext = copilot.ContextWithInitiatorType(callContext, copilot.InitiatorAgent)
 				}
-				// Than add cache control to the last 2 messages.
-				if i > len(prepared.Messages)-3 {
-					prepared.Messages[i].ProviderOptions = a.getCacheControlOptions()
+				firstRequestStep = false
+
+				prepared.Messages = options.Messages
+				for i := range prepared.Messages {
+					prepared.Messages[i].ProviderOptions = nil
 				}
-			}
 
-			if promptPrefix != "" {
-				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(promptPrefix)}, prepared.Messages...)
-			}
+				prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel)
 
-			var assistantMsg message.Message
-			assistantMsg, err = a.messages.Create(callContext, call.SessionID, message.CreateMessageParams{
-				Role:     message.Assistant,
-				Parts:    []message.ContentPart{},
-				Model:    largeModel.ModelCfg.Model,
-				Provider: largeModel.ModelCfg.Provider,
-			})
-			if err != nil {
+				lastSystemRoleInx := 0
+				systemMessageUpdated := false
+				for i, msg := range prepared.Messages {
+					// Only add cache control to the last message.
+					if msg.Role == fantasy.MessageRoleSystem {
+						lastSystemRoleInx = i
+					} else if !systemMessageUpdated {
+						prepared.Messages[lastSystemRoleInx].ProviderOptions = a.getCacheControlOptions()
+						systemMessageUpdated = true
+					}
+					// Than add cache control to the last 2 messages.
+					if i > len(prepared.Messages)-3 {
+						prepared.Messages[i].ProviderOptions = a.getCacheControlOptions()
+					}
+				}
+
+				if promptPrefix != "" {
+					prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(promptPrefix)}, prepared.Messages...)
+				}
+
+				var assistantMsg message.Message
+				assistantMsg, err = a.messages.Create(callContext, call.SessionID, message.CreateMessageParams{
+					Role:     message.Assistant,
+					Parts:    []message.ContentPart{},
+					Model:    largeModel.ModelCfg.Model,
+					Provider: largeModel.ModelCfg.Provider,
+				})
+				if err != nil {
+					return callContext, prepared, err
+				}
+				callContext = context.WithValue(callContext, tools.MessageIDContextKey, assistantMsg.ID)
+				callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatwalkCfg.SupportsImages)
+				callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatwalkCfg.Name)
+				currentAssistant = &assistantMsg
+				currentStepToolMessageIDs = nil
+
+				estimatedPromptTokens = estimatePromptTokens(prepared.Messages, agentTools)
 				return callContext, prepared, err
-			}
-			callContext = context.WithValue(callContext, tools.MessageIDContextKey, assistantMsg.ID)
-			callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatwalkCfg.SupportsImages)
-			callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatwalkCfg.Name)
-			currentAssistant = &assistantMsg
-			currentStepToolMessageIDs = nil
+			},
+			OnReasoningStart: func(id string, reasoning fantasy.ReasoningContent) error {
+				currentAssistant.AppendReasoningContent(reasoning.Text)
+				return a.messages.Update(genCtx, *currentAssistant)
+			},
+			OnReasoningDelta: func(id string, text string) error {
+				currentAssistant.AppendReasoningContent(text)
+				return a.messages.Update(genCtx, *currentAssistant)
+			},
+			OnReasoningEnd: func(id string, reasoning fantasy.ReasoningContent) error {
+				// handle anthropic signature
+				if anthropicData, ok := reasoning.ProviderMetadata[anthropic.Name]; ok {
+					if reasoning, ok := anthropicData.(*anthropic.ReasoningOptionMetadata); ok {
+						currentAssistant.AppendReasoningSignature(reasoning.Signature)
+					}
+				}
+				if googleData, ok := reasoning.ProviderMetadata[google.Name]; ok {
+					if reasoning, ok := googleData.(*google.ReasoningMetadata); ok {
+						currentAssistant.AppendThoughtSignature(reasoning.Signature, reasoning.ToolID)
+					}
+				}
+				if openaiData, ok := reasoning.ProviderMetadata[openai.Name]; ok {
+					if reasoning, ok := openaiData.(*openai.ResponsesReasoningMetadata); ok {
+						currentAssistant.SetReasoningResponsesData(reasoning)
+					}
+				}
+				currentAssistant.FinishThinking()
+				return a.messages.Update(genCtx, *currentAssistant)
+			},
+			OnTextDelta: func(id string, text string) error {
+				// Strip leading newline from initial text content. This is is
+				// particularly important in non-interactive mode where leading
+				// newlines are very visible.
+				if len(currentAssistant.Parts) == 0 {
+					text = strings.TrimPrefix(text, "\n")
+				}
 
-			estimatedPromptTokens = estimatePromptTokens(prepared.Messages, agentTools)
-			return callContext, prepared, err
-		},
-		OnReasoningStart: func(id string, reasoning fantasy.ReasoningContent) error {
-			currentAssistant.AppendReasoningContent(reasoning.Text)
-			return a.messages.Update(genCtx, *currentAssistant)
-		},
-		OnReasoningDelta: func(id string, text string) error {
-			currentAssistant.AppendReasoningContent(text)
-			return a.messages.Update(genCtx, *currentAssistant)
-		},
-		OnReasoningEnd: func(id string, reasoning fantasy.ReasoningContent) error {
-			// handle anthropic signature
-			if anthropicData, ok := reasoning.ProviderMetadata[anthropic.Name]; ok {
-				if reasoning, ok := anthropicData.(*anthropic.ReasoningOptionMetadata); ok {
-					currentAssistant.AppendReasoningSignature(reasoning.Signature)
+				currentAssistant.AppendContent(text)
+				return a.messages.Update(genCtx, *currentAssistant)
+			},
+			OnToolInputStart: func(id string, toolName string) error {
+				toolCall := message.ToolCall{
+					ID:               id,
+					Name:             toolName,
+					ProviderExecuted: false,
+					Finished:         false,
 				}
-			}
-			if googleData, ok := reasoning.ProviderMetadata[google.Name]; ok {
-				if reasoning, ok := googleData.(*google.ReasoningMetadata); ok {
-					currentAssistant.AppendThoughtSignature(reasoning.Signature, reasoning.ToolID)
+				currentAssistant.AddToolCall(toolCall)
+				return a.messages.Update(genCtx, *currentAssistant)
+			},
+			OnRetry: func(providerErr *fantasy.ProviderError, delay time.Duration) {
+				slog.Info("Retrying after network error", "error", providerErr.Error(), "delay", delay)
+				if currentAssistant == nil {
+					return
 				}
-			}
-			if openaiData, ok := reasoning.ProviderMetadata[openai.Name]; ok {
-				if reasoning, ok := openaiData.(*openai.ResponsesReasoningMetadata); ok {
-					currentAssistant.SetReasoningResponsesData(reasoning)
+				if err := a.resetRetriedStep(ctx, currentAssistant, currentStepToolMessageIDs); err != nil {
+					slog.Warn("Failed to reset step state before retry", "error", err, "session_id", currentAssistant.SessionID, "message_id", currentAssistant.ID)
+					return
 				}
-			}
-			currentAssistant.FinishThinking()
-			return a.messages.Update(genCtx, *currentAssistant)
-		},
-		OnTextDelta: func(id string, text string) error {
-			// Strip leading newline from initial text content. This is is
-			// particularly important in non-interactive mode where leading
-			// newlines are very visible.
-			if len(currentAssistant.Parts) == 0 {
-				text = strings.TrimPrefix(text, "\n")
-			}
+				currentStepToolMessageIDs = nil
+			},
+			OnToolCall: func(tc fantasy.ToolCallContent) error {
+				toolCall := message.ToolCall{
+					ID:               tc.ToolCallID,
+					Name:             tc.ToolName,
+					Input:            tc.Input,
+					ProviderExecuted: false,
+					Finished:         true,
+				}
+				currentAssistant.AddToolCall(toolCall)
+				return a.messages.Update(genCtx, *currentAssistant)
+			},
+			OnToolResult: func(result fantasy.ToolResultContent) error {
+				toolResult := a.convertToToolResult(result)
+				toolMsg, createMsgErr := a.messages.Create(genCtx, currentAssistant.SessionID, message.CreateMessageParams{
+					Role: message.Tool,
+					Parts: []message.ContentPart{
+						toolResult,
+					},
+				})
+				if createMsgErr == nil {
+					currentStepToolMessageIDs = append(currentStepToolMessageIDs, toolMsg.ID)
+				}
+				return createMsgErr
+			},
+			OnStepFinish: func(stepResult fantasy.StepResult) error {
+				finishReason := message.FinishReasonUnknown
+				switch stepResult.FinishReason {
+				case fantasy.FinishReasonLength:
+					finishReason = message.FinishReasonMaxTokens
+				case fantasy.FinishReasonStop:
+					finishReason = message.FinishReasonEndTurn
+				case fantasy.FinishReasonToolCalls:
+					finishReason = message.FinishReasonToolUse
+				}
+				currentAssistant.AddFinish(finishReason, "", "")
+				sessionLock.Lock()
+				defer sessionLock.Unlock()
 
-			currentAssistant.AppendContent(text)
-			return a.messages.Update(genCtx, *currentAssistant)
-		},
-		OnToolInputStart: func(id string, toolName string) error {
-			toolCall := message.ToolCall{
-				ID:               id,
-				Name:             toolName,
-				ProviderExecuted: false,
-				Finished:         false,
-			}
-			currentAssistant.AddToolCall(toolCall)
-			return a.messages.Update(genCtx, *currentAssistant)
-		},
-		OnRetry: func(providerErr *fantasy.ProviderError, delay time.Duration) {
-			slog.Info("Retrying after network error", "error", providerErr.Error(), "delay", delay)
-			if currentAssistant == nil {
-				return
-			}
-			if err := a.resetRetriedStep(ctx, currentAssistant, currentStepToolMessageIDs); err != nil {
-				slog.Warn("Failed to reset step state before retry", "error", err, "session_id", currentAssistant.SessionID, "message_id", currentAssistant.ID)
-				return
-			}
-			currentStepToolMessageIDs = nil
-		},
-		OnToolCall: func(tc fantasy.ToolCallContent) error {
-			toolCall := message.ToolCall{
-				ID:               tc.ToolCallID,
-				Name:             tc.ToolName,
-				Input:            tc.Input,
-				ProviderExecuted: false,
-				Finished:         true,
-			}
-			currentAssistant.AddToolCall(toolCall)
-			return a.messages.Update(genCtx, *currentAssistant)
-		},
-		OnToolResult: func(result fantasy.ToolResultContent) error {
-			toolResult := a.convertToToolResult(result)
-			toolMsg, createMsgErr := a.messages.Create(genCtx, currentAssistant.SessionID, message.CreateMessageParams{
-				Role: message.Tool,
-				Parts: []message.ContentPart{
-					toolResult,
+				updatedSession, getSessionErr := a.sessions.Get(ctx, call.SessionID)
+				if getSessionErr != nil {
+					return getSessionErr
+				}
+				a.updateSessionUsage(largeModel, &updatedSession, stepResult.Usage, a.openrouterCost(stepResult.ProviderMetadata), estimatedPromptTokens)
+				_, sessionErr := a.sessions.Save(ctx, updatedSession)
+				if sessionErr != nil {
+					return sessionErr
+				}
+				completedStepsThisRun++
+				currentSession = updatedSession
+				return a.messages.Update(genCtx, *currentAssistant)
+			},
+			StopWhen: []fantasy.StopCondition{
+				func(_ []fantasy.StepResult) bool {
+					if shouldAutoSummarize(currentSession.LastContextTokens(), int64(largeModel.CatwalkCfg.ContextWindow), call.MaxOutputTokens) && !a.disableAutoSummarize {
+						shouldSummarize = true
+						return true
+					}
+					return false
 				},
-			})
-			if createMsgErr == nil {
-				currentStepToolMessageIDs = append(currentStepToolMessageIDs, toolMsg.ID)
-			}
-			return createMsgErr
-		},
-		OnStepFinish: func(stepResult fantasy.StepResult) error {
-			finishReason := message.FinishReasonUnknown
-			switch stepResult.FinishReason {
-			case fantasy.FinishReasonLength:
-				finishReason = message.FinishReasonMaxTokens
-			case fantasy.FinishReasonStop:
-				finishReason = message.FinishReasonEndTurn
-			case fantasy.FinishReasonToolCalls:
-				finishReason = message.FinishReasonToolUse
-			}
-			currentAssistant.AddFinish(finishReason, "", "")
-			sessionLock.Lock()
-			defer sessionLock.Unlock()
+				func(steps []fantasy.StepResult) bool {
+					return hasRepeatedToolCalls(steps, loopDetectionWindowSize, loopDetectionMaxRepeats)
+				},
+			},
+		})
+	}
 
-			updatedSession, getSessionErr := a.sessions.Get(ctx, call.SessionID)
-			if getSessionErr != nil {
-				return getSessionErr
-			}
-			a.updateSessionUsage(largeModel, &updatedSession, stepResult.Usage, a.openrouterCost(stepResult.ProviderMetadata), estimatedPromptTokens)
-			_, sessionErr := a.sessions.Save(ctx, updatedSession)
-			if sessionErr != nil {
-				return sessionErr
-			}
-			currentSession = updatedSession
-			return a.messages.Update(genCtx, *currentAssistant)
-		},
-		StopWhen: []fantasy.StopCondition{
-			func(_ []fantasy.StepResult) bool {
-				if shouldAutoSummarize(currentSession.LastContextTokens(), int64(largeModel.CatwalkCfg.ContextWindow), call.MaxOutputTokens) && !a.disableAutoSummarize {
-					shouldSummarize = true
-					return true
-				}
-				return false
-			},
-			func(steps []fantasy.StepResult) bool {
-				return hasRepeatedToolCalls(steps, loopDetectionWindowSize, loopDetectionMaxRepeats)
-			},
-		},
-	})
+	providerOptions := call.ProviderOptions
+	result, err := runStream(providerOptions, true)
+	if completedStepsThisRun == 0 && shouldRetryWithoutAnthropicThinking(err, providerOptions) {
+		slog.Warn(
+			"Retrying request without Anthropic thinking after provider rejected unsigned reasoning content",
+			"session_id", call.SessionID,
+			"model", largeModel.ModelCfg.Model,
+			"provider", largeModel.ModelCfg.Provider,
+		)
+		if cleanupErr := a.cleanupFailedAttempt(ctx, currentAssistant, currentStepToolMessageIDs); cleanupErr != nil {
+			return nil, cleanupErr
+		}
+		currentAssistant = nil
+		currentStepToolMessageIDs = nil
+		providerOptions, _ = disableAnthropicThinking(providerOptions)
+		result, err = runStream(providerOptions, false)
+	}
 
 	a.eventPromptResponded(call.SessionID, time.Since(startTime).Truncate(time.Second))
 
@@ -801,6 +837,49 @@ If not, please feel free to ignore. Again do not mention this message to the use
 	}
 
 	return history, files
+}
+
+func disableAnthropicThinking(opts fantasy.ProviderOptions) (fantasy.ProviderOptions, bool) {
+	anthropicOpts, ok := opts[anthropic.Name].(*anthropic.ProviderOptions)
+	if !ok || anthropicOpts == nil || anthropicOpts.Thinking == nil {
+		return opts, false
+	}
+
+	cloned := make(fantasy.ProviderOptions, len(opts))
+	for k, v := range opts {
+		cloned[k] = v
+	}
+	sanitized := *anthropicOpts
+	sanitized.Thinking = nil
+	cloned[anthropic.Name] = &sanitized
+	return cloned, true
+}
+
+func shouldRetryWithoutAnthropicThinking(err error, opts fantasy.ProviderOptions) bool {
+	anthropicOpts, ok := opts[anthropic.Name].(*anthropic.ProviderOptions)
+	if !ok || anthropicOpts == nil || anthropicOpts.Thinking == nil {
+		return false
+	}
+	var providerErr *fantasy.ProviderError
+	if !errors.As(err, &providerErr) || providerErr == nil {
+		return false
+	}
+	if providerErr.StatusCode != 400 {
+		return false
+	}
+	return strings.Contains(providerErr.Message, "thinking is enabled but reasoning_content is missing")
+}
+
+func (a *sessionAgent) cleanupFailedAttempt(ctx context.Context, assistant *message.Message, toolMessageIDs []string) error {
+	for _, toolMessageID := range toolMessageIDs {
+		if err := a.messages.Delete(ctx, toolMessageID); err != nil {
+			return err
+		}
+	}
+	if assistant == nil {
+		return nil
+	}
+	return a.messages.Delete(ctx, assistant.ID)
 }
 
 func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.Session) ([]message.Message, error) {

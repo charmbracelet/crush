@@ -12,6 +12,7 @@ import (
 	"github.com/charlievieth/fastwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/home"
+	"github.com/go-git/go-git/v5/plumbing/format/config"
 	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
 )
 
@@ -80,18 +81,51 @@ var commonIgnorePatterns = sync.OnceValue(func() []gitignore.Pattern {
 	return parsePatterns(patterns, nil)
 })
 
-var homeIgnorePatterns = sync.OnceValue(func() []gitignore.Pattern {
-	homeDir := home.Dir()
-	var lines []string
-	for _, name := range []string{
-		filepath.Join(homeDir, ".gitignore"),
-		filepath.Join(homeDir, ".config", "git", "ignore"),
-		filepath.Join(homeDir, ".config", "crush", "ignore"),
-	} {
-		if bts, err := os.ReadFile(name); err == nil {
-			lines = append(lines, strings.Split(string(bts), "\n")...)
+// gitGlobalIgnorePatterns returns patterns from git's global excludes file
+// (core.excludesFile), following git's config/env fallback behavior.
+var gitGlobalIgnorePatterns = sync.OnceValue(func() []gitignore.Pattern {
+	globalConfigPath := strings.TrimSpace(os.Getenv("GIT_CONFIG_GLOBAL"))
+	if globalConfigPath == "" {
+		globalConfigPath = filepath.Join(home.Dir(), ".gitconfig")
+	}
+
+	excludesFilePath, found, err := readGitCoreExcludesFile(globalConfigPath)
+	if err != nil {
+		slog.Debug("Failed to read global git config", "path", globalConfigPath, "error", err)
+	}
+	if !found {
+		if xdgConfigHome := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); xdgConfigHome != "" {
+			excludesFilePath = filepath.Join(xdgConfigHome, "git", "ignore")
+		} else {
+			excludesFilePath = filepath.Join(home.Dir(), ".config", "git", "ignore")
 		}
 	}
+
+	excludesFilePath = home.Long(excludesFilePath)
+	bts, err := os.ReadFile(excludesFilePath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			slog.Debug("Failed to read git global excludes file", "path", excludesFilePath, "error", err)
+		}
+		return nil
+	}
+
+	return parsePatterns(strings.Split(string(bts), "\n"), nil)
+})
+
+// crushGlobalIgnorePatterns returns patterns from the user's
+// ~/.config/crush/ignore file.
+var crushGlobalIgnorePatterns = sync.OnceValue(func() []gitignore.Pattern {
+	homeDir := home.Dir()
+	name := filepath.Join(homeDir, ".config", "crush", "ignore")
+	bts, err := os.ReadFile(name)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			slog.Debug("Failed to read crush global ignore file", "path", name, "error", err)
+		}
+		return nil
+	}
+	lines := strings.Split(string(bts), "\n")
 	return parsePatterns(lines, nil)
 })
 
@@ -107,6 +141,28 @@ func parsePatterns(lines []string, domain []string) []gitignore.Pattern {
 		patterns = append(patterns, gitignore.ParsePattern(line, domain))
 	}
 	return patterns
+}
+
+func readGitCoreExcludesFile(globalConfigPath string) (string, bool, error) {
+	bts, err := os.ReadFile(globalConfigPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+
+	raw := config.New()
+	if err := config.NewDecoder(strings.NewReader(string(bts))).Decode(raw); err != nil {
+		return "", false, err
+	}
+
+	excludesFile := strings.TrimSpace(raw.Section("core").Options.Get("excludesfile"))
+	if excludesFile == "" {
+		return "", false, nil
+	}
+
+	return excludesFile, true, nil
 }
 
 type directoryLister struct {
@@ -169,8 +225,9 @@ func (dl *directoryLister) getCombinedMatcher(dir string) gitignore.Matcher {
 		// Add common patterns first (lowest priority).
 		allPatterns = append(allPatterns, commonIgnorePatterns()...)
 
-		// Add home ignore patterns.
-		allPatterns = append(allPatterns, homeIgnorePatterns()...)
+		// Add global ignore patterns (git core.excludesFile + crush global ignore).
+		allPatterns = append(allPatterns, gitGlobalIgnorePatterns()...)
+		allPatterns = append(allPatterns, crushGlobalIgnorePatterns()...)
 
 		// Collect patterns from root to this directory.
 		relDir, _ := filepath.Rel(dl.rootPath, dir)

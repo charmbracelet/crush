@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/chat"
@@ -126,6 +127,9 @@ func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func()
 }
 
 func runSessionList(cmd *cobra.Command, _ []string) error {
+	event.SetNonInteractive(true)
+	event.SessionListed(sessionListJSON)
+
 	ctx, svc, cleanup, err := sessionSetup(cmd)
 	if err != nil {
 		return err
@@ -249,6 +253,9 @@ func resolveSessionID(ctx context.Context, svc session.Service, id string) (sess
 }
 
 func runSessionShow(cmd *cobra.Command, args []string) error {
+	event.SetNonInteractive(true)
+	event.SessionShown(sessionShowJSON)
+
 	ctx, svc, cleanup, err := sessionSetup(cmd)
 	if err != nil {
 		return err
@@ -273,6 +280,9 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 }
 
 func runSessionDelete(cmd *cobra.Command, args []string) error {
+	event.SetNonInteractive(true)
+	event.SessionDeletedCommand(sessionDeleteJSON)
+
 	ctx, svc, cleanup, err := sessionSetup(cmd)
 	if err != nil {
 		return err
@@ -305,6 +315,9 @@ func runSessionDelete(cmd *cobra.Command, args []string) error {
 }
 
 func runSessionRename(cmd *cobra.Command, args []string) error {
+	event.SetNonInteractive(true)
+	event.SessionRenamed(sessionRenameJSON)
+
 	ctx, svc, cleanup, err := sessionSetup(cmd)
 	if err != nil {
 		return err
@@ -338,6 +351,9 @@ func runSessionRename(cmd *cobra.Command, args []string) error {
 }
 
 func runSessionLast(cmd *cobra.Command, _ []string) error {
+	event.SetNonInteractive(true)
+	event.SessionLastShown(sessionLastJSON)
+
 	ctx, svc, cleanup, err := sessionSetup(cmd)
 	if err != nil {
 		return err

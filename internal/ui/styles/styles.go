@@ -254,18 +254,18 @@ type Styles struct {
 	// Tool - styles for tool call rendering
 	Tool struct {
 		// Icon styles with tool status
-		IconPending   lipgloss.Style // Pending operation icon
-		IconSuccess   lipgloss.Style // Successful operation icon
-		IconError     lipgloss.Style // Error operation icon
-		IconCancelled lipgloss.Style // Cancelled operation icon
+		IconPending   lipgloss.Style
+		IconSuccess   lipgloss.Style
+		IconError     lipgloss.Style
+		IconCancelled lipgloss.Style
 
 		// Tool name styles
-		NameNormal lipgloss.Style // Normal tool name
-		NameNested lipgloss.Style // Nested tool name
+		NameNormal lipgloss.Style // Top-level tool name
+		NameNested lipgloss.Style // Nested child tool name (inside Agent/Agentic Fetch)
 
 		// Parameter list styles
-		ParamMain lipgloss.Style // Main parameter
-		ParamKey  lipgloss.Style // Parameter keys
+		ParamMain lipgloss.Style
+		ParamKey  lipgloss.Style
 
 		// Content rendering styles
 		ContentLine           lipgloss.Style // Individual content line with background and width
@@ -1119,7 +1119,7 @@ func DefaultStyles() Styles {
 	s.Tool.IconCancelled = s.Muted.SetString(ToolPending)
 
 	s.Tool.NameNormal = base.Foreground(blue)
-	s.Tool.NameNested = base.Foreground(fgHalfMuted)
+	s.Tool.NameNested = base.Foreground(blue)
 
 	s.Tool.ParamMain = s.Subtle
 	s.Tool.ParamKey = s.Subtle

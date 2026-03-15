@@ -36,7 +36,7 @@ type FetchToolRenderContext struct{}
 func (f *FetchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
-		return pendingTool(sty, "Fetch", opts.Anim)
+		return pendingTool(sty, "Fetch", opts.Anim, opts.Compact)
 	}
 
 	var params tools.FetchParams
@@ -111,7 +111,7 @@ type WebFetchToolRenderContext struct{}
 func (w *WebFetchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
-		return pendingTool(sty, "Fetch", opts.Anim)
+		return pendingTool(sty, "Fetch", opts.Anim, opts.Compact)
 	}
 
 	var params tools.WebFetchParams
@@ -165,7 +165,7 @@ type WebSearchToolRenderContext struct{}
 func (w *WebSearchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
-		return pendingTool(sty, "Search", opts.Anim)
+		return pendingTool(sty, "Search", opts.Anim, opts.Compact)
 	}
 
 	var params tools.WebSearchParams

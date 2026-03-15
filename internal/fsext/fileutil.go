@@ -1,6 +1,7 @@
 package fsext
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -86,15 +87,15 @@ func (w *FastGlobWalker) ShouldSkipDir(path string) bool {
 //
 // Does not respect gitignore.
 func Glob(pattern string, cwd string, limit int) ([]string, bool, error) {
-	return globWithDoubleStar(pattern, cwd, limit, false)
+	return globWithDoubleStar(context.Background(), pattern, cwd, limit, false)
 }
 
 // GlobGitignoreAware globs files respecting gitignore.
-func GlobGitignoreAware(pattern string, cwd string, limit int) ([]string, bool, error) {
-	return globWithDoubleStar(pattern, cwd, limit, true)
+func GlobGitignoreAware(ctx context.Context, pattern string, cwd string, limit int) ([]string, bool, error) {
+	return globWithDoubleStar(ctx, pattern, cwd, limit, true)
 }
 
-func globWithDoubleStar(pattern, searchPath string, limit int, gitignore bool) ([]string, bool, error) {
+func globWithDoubleStar(ctx context.Context, pattern, searchPath string, limit int, gitignore bool) ([]string, bool, error) {
 	// Normalize pattern to forward slashes on Windows so their config can use
 	// backslashes
 	pattern = filepath.ToSlash(pattern)
@@ -107,6 +108,13 @@ func globWithDoubleStar(pattern, searchPath string, limit int, gitignore bool) (
 		Sort:    fastwalk.SortFilesFirst,
 	}
 	err := fastwalk.Walk(&conf, searchPath, func(path string, d os.DirEntry, err error) error {
+		// Check context cancellation.
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		if err != nil {
 			return nil // Skip files we can't access
 		}

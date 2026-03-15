@@ -77,6 +77,9 @@ type SelectedModel struct {
 	// Used by anthropic models that can reason to indicate if the model should think.
 	Think bool `json:"think,omitempty" jsonschema:"description=Enable thinking mode for Anthropic models that support reasoning"`
 
+	// Enable 1M context window for models that support it.
+	Context1M bool `json:"context_1m,omitempty" jsonschema:"description=Enable 1M token context window for Anthropic models that support it"`
+
 	// Overrides the default model configuration.
 	MaxTokens        int64    `json:"max_tokens,omitempty" jsonschema:"description=Maximum number of tokens for model responses,maximum=200000,example=4096"`
 	Temperature      *float64 `json:"temperature,omitempty" jsonschema:"description=Sampling temperature,minimum=0,maximum=1,example=0.7"`

@@ -886,11 +886,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		}
 	}
 
-	modelConfig := model.CatwalkCfg
-	cost := modelConfig.CostPer1MInCached/1e6*float64(resp.TotalUsage.CacheCreationTokens) +
-		modelConfig.CostPer1MOutCached/1e6*float64(resp.TotalUsage.CacheReadTokens) +
-		modelConfig.CostPer1MIn/1e6*float64(resp.TotalUsage.InputTokens) +
-		modelConfig.CostPer1MOut/1e6*float64(resp.TotalUsage.OutputTokens)
+	cost := calculateCost(model, resp.TotalUsage)
 
 	// Use override cost if available (e.g., from OpenRouter).
 	if openrouterCost != nil {
@@ -922,12 +918,40 @@ func (a *sessionAgent) openrouterCost(metadata fantasy.ProviderMetadata) *float6
 	return &opts.Usage.Cost
 }
 
+// calculateCost computes the cost based on token usage. When the model has
+// context_1m enabled and total input tokens exceed 200K, long context premium
+// pricing is applied to the entire request.
+func calculateCost(model Model, usage fantasy.Usage) float64 {
+	mc := model.CatwalkCfg
+
+	costIn := mc.CostPer1MIn
+	costOut := mc.CostPer1MOut
+	costInCached := mc.CostPer1MInCached
+	costOutCached := mc.CostPer1MOutCached
+
+	// Apply long context pricing when 1M context is enabled and input exceeds 200K tokens.
+	totalInputTokens := usage.InputTokens + usage.CacheCreationTokens + usage.CacheReadTokens
+	if model.ModelCfg.Context1M && mc.Supports1MContext && totalInputTokens > 200_000 {
+		if mc.LongContextCostPer1MIn > 0 {
+			costIn = mc.LongContextCostPer1MIn
+		}
+		if mc.LongContextCostPer1MOut > 0 {
+			costOut = mc.LongContextCostPer1MOut
+		}
+		if mc.LongContextCostPer1MInCached > 0 {
+			costInCached = mc.LongContextCostPer1MInCached
+			costOutCached = mc.LongContextCostPer1MInCached
+		}
+	}
+
+	return costInCached/1e6*float64(usage.CacheCreationTokens) +
+		costOutCached/1e6*float64(usage.CacheReadTokens) +
+		costIn/1e6*float64(usage.InputTokens) +
+		costOut/1e6*float64(usage.OutputTokens)
+}
+
 func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session, usage fantasy.Usage, overrideCost *float64) {
-	modelConfig := model.CatwalkCfg
-	cost := modelConfig.CostPer1MInCached/1e6*float64(usage.CacheCreationTokens) +
-		modelConfig.CostPer1MOutCached/1e6*float64(usage.CacheReadTokens) +
-		modelConfig.CostPer1MIn/1e6*float64(usage.InputTokens) +
-		modelConfig.CostPer1MOut/1e6*float64(usage.OutputTokens)
+	cost := calculateCost(model, usage)
 
 	a.eventTokensUsed(session.ID, model, usage, cost)
 

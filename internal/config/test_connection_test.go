@@ -7,6 +7,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -16,8 +17,8 @@ func TestProviderConfigTestConnection_Vercel(t *testing.T) {
 	const apiKey = "vercel-test-key"
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/models", r.URL.Path)
-		require.Equal(t, "Bearer "+apiKey, r.Header.Get("Authorization"))
+		assert.Equal(t, "/models", r.URL.Path)
+		assert.Equal(t, "Bearer "+apiKey, r.Header.Get("Authorization"))
 		w.WriteHeader(http.StatusOK)
 	}))
 	t.Cleanup(server.Close)

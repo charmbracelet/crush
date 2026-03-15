@@ -556,7 +556,7 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	}
 
 	switch c.Type {
-	case catwalk.TypeOpenAI, catwalk.TypeOpenAICompat, catwalk.TypeOpenRouter:
+	case catwalk.TypeOpenAI, catwalk.TypeOpenAICompat, catwalk.TypeOpenRouter, catwalk.TypeVercel:
 		baseURL, _ := resolver.ResolveValue(c.BaseURL)
 		baseURL = cmp.Or(baseURL, "https://api.openai.com/v1")
 

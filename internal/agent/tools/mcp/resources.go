@@ -24,7 +24,7 @@ func Resources() iter.Seq2[string, []*Resource] {
 }
 
 // ListResources returns the current resources for an MCP server.
-func ListResources(ctx context.Context, cfg *config.Config, name string) ([]*Resource, error) {
+func ListResources(ctx context.Context, cfg *config.ConfigStore, name string) ([]*Resource, error) {
 	session, err := getOrRenewClient(ctx, cfg, name)
 	if err != nil {
 		return nil, err
@@ -43,7 +43,7 @@ func ListResources(ctx context.Context, cfg *config.Config, name string) ([]*Res
 }
 
 // ReadResource reads the contents of a resource from an MCP server.
-func ReadResource(ctx context.Context, cfg *config.Config, name, uri string) ([]*ResourceContents, error) {
+func ReadResource(ctx context.Context, cfg *config.ConfigStore, name, uri string) ([]*ResourceContents, error) {
 	session, err := getOrRenewClient(ctx, cfg, name)
 	if err != nil {
 		return nil, err

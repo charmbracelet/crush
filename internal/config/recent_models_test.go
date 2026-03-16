@@ -31,15 +31,23 @@ func readRecentModels(t *testing.T, path string) map[string]any {
 	return rm
 }
 
+// testStoreWithPath creates a ConfigStore backed by a Config for recent model tests.
+func testStoreWithPath(cfg *Config, dir string) *ConfigStore {
+	return &ConfigStore{
+		config:         cfg,
+		globalDataPath: filepath.Join(dir, "config.json"),
+	}
+}
+
 func TestRecordRecentModel_AddsAndPersists(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
 	cfg := &Config{}
 	cfg.setDefaults(dir, "")
-	cfg.dataConfigDir = filepath.Join(dir, "config.json")
+	store := testStoreWithPath(cfg, dir)
 
-	err := cfg.recordRecentModel(SelectedModelTypeLarge, SelectedModel{Provider: "openai", Model: "gpt-4o"})
+	err := store.recordRecentModel(ScopeGlobal, SelectedModelTypeLarge, SelectedModel{Provider: "openai", Model: "gpt-4o"})
 	require.NoError(t, err)
 
 	// in-memory state
@@ -48,7 +56,7 @@ func TestRecordRecentModel_AddsAndPersists(t *testing.T) {
 	require.Equal(t, "gpt-4o", cfg.RecentModels[SelectedModelTypeLarge][0].Model)
 
 	// persisted state
-	rm := readRecentModels(t, cfg.dataConfigDir)
+	rm := readRecentModels(t, store.globalDataPath)
 	large, ok := rm[string(SelectedModelTypeLarge)].([]any)
 	require.True(t, ok)
 	require.Len(t, large, 1)
@@ -64,13 +72,13 @@ func TestRecordRecentModel_DedupeAndMoveToFront(t *testing.T) {
 	dir := t.TempDir()
 	cfg := &Config{}
 	cfg.setDefaults(dir, "")
-	cfg.dataConfigDir = filepath.Join(dir, "config.json")
+	store := testStoreWithPath(cfg, dir)
 
 	// Add two entries
-	require.NoError(t, cfg.recordRecentModel(SelectedModelTypeLarge, SelectedModel{Provider: "openai", Model: "gpt-4o"}))
-	require.NoError(t, cfg.recordRecentModel(SelectedModelTypeLarge, SelectedModel{Provider: "anthropic", Model: "claude"}))
+	require.NoError(t, store.recordRecentModel(ScopeGlobal, SelectedModelTypeLarge, SelectedModel{Provider: "openai", Model: "gpt-4o"}))
+	require.NoError(t, store.recordRecentModel(ScopeGlobal, SelectedModelTypeLarge, SelectedModel{Provider: "anthropic", Model: "claude"}))
 	// Re-add first; should move to front and not duplicate
-	require.NoError(t, cfg.recordRecentModel(SelectedModelTypeLarge, SelectedModel{Provider: "openai", Model: "gpt-4o"}))
+	require.NoError(t, store.recordRecentModel(ScopeGlobal, SelectedModelTypeLarge, SelectedModel{Provider: "openai", Model: "gpt-4o"}))
 
 	got := cfg.RecentModels[SelectedModelTypeLarge]
 	require.Len(t, got, 2)
@@ -84,7 +92,7 @@ func TestRecordRecentModel_TrimsToMax(t *testing.T) {
 	dir := t.TempDir()
 	cfg := &Config{}
 	cfg.setDefaults(dir, "")
-	cfg.dataConfigDir = filepath.Join(dir, "config.json")
+	store := testStoreWithPath(cfg, dir)
 
 	// Insert 6 unique models; max is 5
 	entries := []SelectedModel{
@@ -96,7 +104,7 @@ func TestRecordRecentModel_TrimsToMax(t *testing.T) {
 		{Provider: "p6", Model: "m6"},
 	}
 	for _, e := range entries {
-		require.NoError(t, cfg.recordRecentModel(SelectedModelTypeLarge, e))
+		require.NoError(t, store.recordRecentModel(ScopeGlobal, SelectedModelTypeLarge, e))
 	}
 
 	// in-memory state
@@ -110,7 +118,7 @@ func TestRecordRecentModel_TrimsToMax(t *testing.T) {
 	require.Equal(t, SelectedModel{Provider: "p2", Model: "m2"}, got[4])
 
 	// persisted state: verify trimmed to 5 and newest-first order
-	rm := readRecentModels(t, cfg.dataConfigDir)
+	rm := readRecentModels(t, store.globalDataPath)
 	large, ok := rm[string(SelectedModelTypeLarge)].([]any)
 	require.True(t, ok)
 	require.Len(t, large, 5)
@@ -129,12 +137,12 @@ func TestRecordRecentModel_SkipsEmptyValues(t *testing.T) {
 	dir := t.TempDir()
 	cfg := &Config{}
 	cfg.setDefaults(dir, "")
-	cfg.dataConfigDir = filepath.Join(dir, "config.json")
+	store := testStoreWithPath(cfg, dir)
 
 	// Missing provider
-	require.NoError(t, cfg.recordRecentModel(SelectedModelTypeLarge, SelectedModel{Provider: "", Model: "m"}))
+	require.NoError(t, store.recordRecentModel(ScopeGlobal, SelectedModelTypeLarge, SelectedModel{Provider: "", Model: "m"}))
 	// Missing model
-	require.NoError(t, cfg.recordRecentModel(SelectedModelTypeLarge, SelectedModel{Provider: "p", Model: ""}))
+	require.NoError(t, store.recordRecentModel(ScopeGlobal, SelectedModelTypeLarge, SelectedModel{Provider: "p", Model: ""}))
 
 	_, ok := cfg.RecentModels[SelectedModelTypeLarge]
 	// Map may be initialized, but should have no entries
@@ -142,8 +150,8 @@ func TestRecordRecentModel_SkipsEmptyValues(t *testing.T) {
 		require.Len(t, cfg.RecentModels[SelectedModelTypeLarge], 0)
 	}
 	// No file should be written (stat via fs.FS)
-	baseDir := filepath.Dir(cfg.dataConfigDir)
-	fileName := filepath.Base(cfg.dataConfigDir)
+	baseDir := filepath.Dir(store.globalDataPath)
+	fileName := filepath.Base(store.globalDataPath)
 	_, err := fs.Stat(os.DirFS(baseDir), fileName)
 	require.True(t, os.IsNotExist(err))
 }
@@ -154,13 +162,13 @@ func TestRecordRecentModel_NoPersistOnNoop(t *testing.T) {
 	dir := t.TempDir()
 	cfg := &Config{}
 	cfg.setDefaults(dir, "")
-	cfg.dataConfigDir = filepath.Join(dir, "config.json")
+	store := testStoreWithPath(cfg, dir)
 
 	entry := SelectedModel{Provider: "openai", Model: "gpt-4o"}
-	require.NoError(t, cfg.recordRecentModel(SelectedModelTypeLarge, entry))
+	require.NoError(t, store.recordRecentModel(ScopeGlobal, SelectedModelTypeLarge, entry))
 
-	baseDir := filepath.Dir(cfg.dataConfigDir)
-	fileName := filepath.Base(cfg.dataConfigDir)
+	baseDir := filepath.Dir(store.globalDataPath)
+	fileName := filepath.Base(store.globalDataPath)
 	before, err := fs.ReadFile(os.DirFS(baseDir), fileName)
 	require.NoError(t, err)
 
@@ -170,7 +178,7 @@ func TestRecordRecentModel_NoPersistOnNoop(t *testing.T) {
 	beforeMod := stBefore.ModTime()
 
 	// Re-record same entry should be a no-op (no write)
-	require.NoError(t, cfg.recordRecentModel(SelectedModelTypeLarge, entry))
+	require.NoError(t, store.recordRecentModel(ScopeGlobal, SelectedModelTypeLarge, entry))
 
 	after, err := fs.ReadFile(os.DirFS(baseDir), fileName)
 	require.NoError(t, err)
@@ -188,17 +196,17 @@ func TestUpdatePreferredModel_UpdatesRecents(t *testing.T) {
 	dir := t.TempDir()
 	cfg := &Config{}
 	cfg.setDefaults(dir, "")
-	cfg.dataConfigDir = filepath.Join(dir, "config.json")
+	store := testStoreWithPath(cfg, dir)
 
 	sel := SelectedModel{Provider: "openai", Model: "gpt-4o"}
-	require.NoError(t, cfg.UpdatePreferredModel(SelectedModelTypeSmall, sel))
+	require.NoError(t, store.UpdatePreferredModel(ScopeGlobal, SelectedModelTypeSmall, sel))
 
 	// in-memory
 	require.Equal(t, sel, cfg.Models[SelectedModelTypeSmall])
 	require.Len(t, cfg.RecentModels[SelectedModelTypeSmall], 1)
 
 	// persisted (read via fs.FS)
-	rm := readRecentModels(t, cfg.dataConfigDir)
+	rm := readRecentModels(t, store.globalDataPath)
 	small, ok := rm[string(SelectedModelTypeSmall)].([]any)
 	require.True(t, ok)
 	require.Len(t, small, 1)
@@ -210,14 +218,14 @@ func TestRecordRecentModel_TypeIsolation(t *testing.T) {
 	dir := t.TempDir()
 	cfg := &Config{}
 	cfg.setDefaults(dir, "")
-	cfg.dataConfigDir = filepath.Join(dir, "config.json")
+	store := testStoreWithPath(cfg, dir)
 
 	// Add models to both large and small types
 	largeModel := SelectedModel{Provider: "openai", Model: "gpt-4o"}
 	smallModel := SelectedModel{Provider: "anthropic", Model: "claude"}
 
-	require.NoError(t, cfg.recordRecentModel(SelectedModelTypeLarge, largeModel))
-	require.NoError(t, cfg.recordRecentModel(SelectedModelTypeSmall, smallModel))
+	require.NoError(t, store.recordRecentModel(ScopeGlobal, SelectedModelTypeLarge, largeModel))
+	require.NoError(t, store.recordRecentModel(ScopeGlobal, SelectedModelTypeSmall, smallModel))
 
 	// in-memory: verify types maintain separate histories
 	require.Len(t, cfg.RecentModels[SelectedModelTypeLarge], 1)
@@ -227,14 +235,14 @@ func TestRecordRecentModel_TypeIsolation(t *testing.T) {
 
 	// Add another to large, verify small unchanged
 	anotherLarge := SelectedModel{Provider: "google", Model: "gemini"}
-	require.NoError(t, cfg.recordRecentModel(SelectedModelTypeLarge, anotherLarge))
+	require.NoError(t, store.recordRecentModel(ScopeGlobal, SelectedModelTypeLarge, anotherLarge))
 
 	require.Len(t, cfg.RecentModels[SelectedModelTypeLarge], 2)
 	require.Len(t, cfg.RecentModels[SelectedModelTypeSmall], 1)
 	require.Equal(t, smallModel, cfg.RecentModels[SelectedModelTypeSmall][0])
 
 	// persisted state: verify both types exist with correct lengths and contents
-	rm := readRecentModels(t, cfg.dataConfigDir)
+	rm := readRecentModels(t, store.globalDataPath)
 
 	large, ok := rm[string(SelectedModelTypeLarge)].([]any)
 	require.True(t, ok)

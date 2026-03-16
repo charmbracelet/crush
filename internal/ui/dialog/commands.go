@@ -427,9 +427,9 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_sidebar", "Toggle Sidebar", "", ActionToggleCompactMode{}))
 	}
 	if c.hasSession {
-		cfg := c.com.Config()
-		agentCfg := cfg.Agents[config.AgentCoder]
-		model := cfg.GetModelByType(agentCfg.Model)
+		cfgPrime := c.com.Config()
+		agentCfg := cfgPrime.Agents[config.AgentCoder]
+		model := cfgPrime.GetModelByType(agentCfg.Model)
 		if model != nil && model.SupportsImages {
 			commands = append(commands, NewCommandItem(c.com.Styles, "file_picker", "Open File Picker", "ctrl+f", ActionOpenDialog{
 				// TODO: Pass in the file picker dialog id
@@ -437,8 +437,11 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		}
 	}
 
-	// Add external editor command if $EDITOR is available
-	// TODO: Use [tea.EnvMsg] to get environment variable instead of os.Getenv
+	// Add external editor command if $EDITOR is available.
+	//
+	// TODO: Use [tea.EnvMsg] to get environment variable instead of os.Getenv;
+	// because os.Getenv does IO is breaks the TEA paradigm and is generally an
+	// antipattern.
 	if os.Getenv("EDITOR") != "" {
 		commands = append(commands, NewCommandItem(c.com.Styles, "open_external_editor", "Open External Editor", "ctrl+o", ActionExternalEditor{}))
 	}
@@ -456,10 +459,29 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_pills", label, "ctrl+t", ActionTogglePills{}))
 	}
 
+	// Add a command for toggling notifications.
+	cfg = c.com.Config()
+	notificationsDisabled := cfg != nil && cfg.Options != nil && cfg.Options.DisableNotifications
+	notificationLabel := "Disable Notifications"
+	if notificationsDisabled {
+		notificationLabel = "Enable Notifications"
+	}
+	commands = append(commands, NewCommandItem(c.com.Styles, "toggle_notifications", notificationLabel, "", ActionToggleNotifications{}))
+
 	commands = append(commands,
 		NewCommandItem(c.com.Styles, "toggle_yolo", "Toggle Yolo Mode", "", ActionToggleYoloMode{}),
 		NewCommandItem(c.com.Styles, "toggle_help", "Toggle Help", "ctrl+g", ActionToggleHelp{}),
 		NewCommandItem(c.com.Styles, "init", "Initialize Project", "", ActionInitializeProject{}),
+	)
+
+	// Add transparent background toggle.
+	transparentLabel := "Disable Background Color"
+	if cfg != nil && cfg.Options != nil && cfg.Options.TUI.Transparent != nil && *cfg.Options.TUI.Transparent {
+		transparentLabel = "Enable Background Color"
+	}
+	commands = append(commands, NewCommandItem(c.com.Styles, "toggle_transparent", transparentLabel, "", ActionToggleTransparentBackground{}))
+
+	commands = append(commands,
 		NewCommandItem(c.com.Styles, "quit", "Quit", "ctrl+c", tea.QuitMsg{}),
 	)
 

@@ -17,7 +17,9 @@ const (
 	endpoint = "https://data.charm.land"
 	key      = "phc_4zt4VgDWLqbYnJYEwLRxFoaTL2noNrQij0C6E8k3I0V"
 
-	nonInteractiveEventName = "NonInteractive"
+	nonInteractiveAttrName      = "NonInteractive"
+	continueSessionByIDAttrName = "ContinueSessionByID"
+	continueLastSessionAttrName = "ContinueLastSession"
 )
 
 var (
@@ -30,11 +32,19 @@ var (
 			Set("SHELL", filepath.Base(os.Getenv("SHELL"))).
 			Set("Version", version.Version).
 			Set("GoVersion", runtime.Version()).
-			Set(nonInteractiveEventName, false)
+			Set(nonInteractiveAttrName, false)
 )
 
 func SetNonInteractive(nonInteractive bool) {
-	baseProps = baseProps.Set(nonInteractiveEventName, nonInteractive)
+	baseProps = baseProps.Set(nonInteractiveAttrName, nonInteractive)
+}
+
+func SetContinueBySessionID(continueBySessionID bool) {
+	baseProps = baseProps.Set(continueSessionByIDAttrName, continueBySessionID)
+}
+
+func SetContinueLastSession(continueLastSession bool) {
+	baseProps = baseProps.Set(continueLastSessionAttrName, continueLastSession)
 }
 
 func Init() {

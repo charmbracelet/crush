@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/fang/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/crush/internal/app"
@@ -23,7 +24,6 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	ui "github.com/charmbracelet/crush/internal/ui/model"
 	"github.com/charmbracelet/crush/internal/version"
-	"github.com/charmbracelet/fang"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
@@ -47,6 +47,7 @@ func init() {
 		schemaCmd,
 		loginCmd,
 		statsCmd,
+		sessionCmd,
 	)
 }
 
@@ -189,11 +190,12 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 		return nil, err
 	}
 
-	cfg, err := config.Init(cwd, dataDir, debug)
+	store, err := config.Init(cwd, dataDir, debug)
 	if err != nil {
 		return nil, err
 	}
 
+	cfg := store.Config()
 	if cfg.Permissions == nil {
 		cfg.Permissions = &config.Permissions{}
 	}
@@ -215,7 +217,7 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 		return nil, err
 	}
 
-	appInstance, err := app.New(ctx, conn, cfg)
+	appInstance, err := app.New(ctx, conn, store)
 	if err != nil {
 		slog.Error("Failed to create app instance", "error", err)
 		return nil, err

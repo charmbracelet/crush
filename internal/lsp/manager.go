@@ -26,18 +26,18 @@ var unavailable = csync.NewMap[string, struct{}]()
 // Manager handles lazy initialization of LSP clients based on file types.
 type Manager struct {
 	clients  *csync.Map[string, *Client]
-	cfg      *config.Config
+	cfg      *config.ConfigStore
 	manager  *powernapconfig.Manager
 	callback func(name string, client *Client)
 }
 
 // NewManager creates a new LSP manager service.
-func NewManager(cfg *config.Config) *Manager {
+func NewManager(cfg *config.ConfigStore) *Manager {
 	manager := powernapconfig.NewManager()
 	manager.LoadDefaults()
 
 	// Merge user-configured LSPs into the manager.
-	for name, clientConfig := range cfg.LSP {
+	for name, clientConfig := range cfg.Config().LSP {
 		if clientConfig.Disabled {
 			slog.Debug("LSP disabled by user config", "name", name)
 			manager.RemoveServer(name)
@@ -194,7 +194,7 @@ func (s *Manager) startServer(ctx context.Context, name, filepath string, server
 		cfg,
 		s.cfg.Resolver(),
 		s.cfg.WorkingDir(),
-		s.cfg.Options.DebugLSP,
+		s.cfg.Config().Options.DebugLSP,
 	)
 	if err != nil {
 		slog.Error("Failed to create LSP client", "name", name, "error", err)
@@ -244,7 +244,7 @@ func (s *Manager) startServer(ctx context.Context, name, filepath string, server
 }
 
 func (s *Manager) isUserConfigured(name string) bool {
-	cfg, ok := s.cfg.LSP[name]
+	cfg, ok := s.cfg.Config().LSP[name]
 	return ok && !cfg.Disabled
 }
 
@@ -258,7 +258,7 @@ func (s *Manager) buildConfig(name string, server *powernapconfig.ServerConfig) 
 		InitOptions: server.InitOptions,
 		Options:     server.Settings,
 	}
-	if userCfg, ok := s.cfg.LSP[name]; ok {
+	if userCfg, ok := s.cfg.Config().LSP[name]; ok {
 		cfg.Timeout = userCfg.Timeout
 	}
 	return cfg

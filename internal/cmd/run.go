@@ -36,12 +36,23 @@ crush run --quiet "Generate a README for this project"
 
 # Run in verbose mode (show logs)
 crush run --verbose "Generate a README for this project"
+
+# Continue a previous session
+crush run --session {session-id} "Follow up on your last response"
+
+# Continue the most recent session
+crush run --continue "Follow up on your last response"
+
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		quiet, _ := cmd.Flags().GetBool("quiet")
-		verbose, _ := cmd.Flags().GetBool("verbose")
-		largeModel, _ := cmd.Flags().GetString("model")
-		smallModel, _ := cmd.Flags().GetString("small-model")
+		var (
+			quiet, _      = cmd.Flags().GetBool("quiet")
+			verbose, _    = cmd.Flags().GetBool("verbose")
+			largeModel, _ = cmd.Flags().GetString("model")
+			smallModel, _ = cmd.Flags().GetString("small-model")
+			sessionID, _  = cmd.Flags().GetString("session")
+			useLast, _    = cmd.Flags().GetBool("continue")
+		)
 
 		// Cancel on SIGINT or SIGTERM.
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
@@ -52,6 +63,14 @@ crush run --verbose "Generate a README for this project"
 			return err
 		}
 		defer app.Shutdown()
+
+		if sessionID != "" {
+			sess, err := resolveSessionID(ctx, app.Sessions, sessionID)
+			if err != nil {
+				return err
+			}
+			sessionID = sess.ID
+		}
 
 		if !app.Config().IsConfigured() {
 			return fmt.Errorf("no providers configured - please run 'crush' to set up a provider interactively")
@@ -76,7 +95,14 @@ crush run --verbose "Generate a README for this project"
 		event.SetNonInteractive(true)
 		event.AppInitialized()
 
-		return app.RunNonInteractive(ctx, os.Stdout, prompt, largeModel, smallModel, quiet || verbose)
+		switch {
+		case sessionID != "":
+			event.SetContinueBySessionID(true)
+		case useLast:
+			event.SetContinueLastSession(true)
+		}
+
+		return app.RunNonInteractive(ctx, os.Stdout, prompt, largeModel, smallModel, quiet || verbose, sessionID, useLast)
 	},
 }
 
@@ -85,4 +111,7 @@ func init() {
 	runCmd.Flags().BoolP("verbose", "v", false, "Show logs")
 	runCmd.Flags().StringP("model", "m", "", "Model to use. Accepts 'model' or 'provider/model' to disambiguate models with the same name across providers")
 	runCmd.Flags().String("small-model", "", "Small model to use. If not provided, uses the default small model for the provider")
+	runCmd.Flags().StringP("session", "s", "", "Continue a previous session by ID")
+	runCmd.Flags().BoolP("continue", "C", false, "Continue the most recent session")
+	runCmd.MarkFlagsMutuallyExclusive("session", "continue")
 }

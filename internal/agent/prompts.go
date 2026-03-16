@@ -33,7 +33,7 @@ func taskPrompt(opts ...prompt.Option) (*prompt.Prompt, error) {
 	return systemPrompt, nil
 }
 
-func InitializePrompt(cfg config.Config) (string, error) {
+func InitializePrompt(cfg *config.ConfigStore) (string, error) {
 	systemPrompt, err := prompt.NewPrompt("initialize", string(initializePromptTmpl))
 	if err != nil {
 		return "", err

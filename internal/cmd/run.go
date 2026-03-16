@@ -38,10 +38,10 @@ crush run --quiet "Generate a README for this project"
 crush run --verbose "Generate a README for this project"
 
 # Continue a previous session
-crush run --continue <session-id> "Follow up on your last response"
+crush run --session {session-id} "Follow up on your last response"
 
 # Continue the most recent session
-crush run --last "Follow up on your last response"
+crush run --continue "Follow up on your last response"
 
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -49,8 +49,8 @@ crush run --last "Follow up on your last response"
 		verbose, _ := cmd.Flags().GetBool("verbose")
 		largeModel, _ := cmd.Flags().GetString("model")
 		smallModel, _ := cmd.Flags().GetString("small-model")
-		continueID, _ := cmd.Flags().GetString("continue")
-		useLast, _ := cmd.Flags().GetBool("last")
+		sessionID, _ := cmd.Flags().GetString("session")
+		useLast, _ := cmd.Flags().GetBool("continue")
 
 		// Cancel on SIGINT or SIGTERM.
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
@@ -62,12 +62,12 @@ crush run --last "Follow up on your last response"
 		}
 		defer app.Shutdown()
 
-		if continueID != "" {
-			sess, err := resolveSessionID(ctx, app.Sessions, continueID)
+		if sessionID != "" {
+			sess, err := resolveSessionID(ctx, app.Sessions, sessionID)
 			if err != nil {
 				return err
 			}
-			continueID = sess.ID
+			sessionID = sess.ID
 		}
 
 		if !app.Config().IsConfigured() {
@@ -93,7 +93,7 @@ crush run --last "Follow up on your last response"
 		event.SetNonInteractive(true)
 		event.AppInitialized()
 
-		return app.RunNonInteractive(ctx, os.Stdout, prompt, largeModel, smallModel, quiet || verbose, continueID, useLast)
+		return app.RunNonInteractive(ctx, os.Stdout, prompt, largeModel, smallModel, quiet || verbose, sessionID, useLast)
 	},
 }
 
@@ -102,7 +102,7 @@ func init() {
 	runCmd.Flags().BoolP("verbose", "v", false, "Show logs")
 	runCmd.Flags().StringP("model", "m", "", "Model to use. Accepts 'model' or 'provider/model' to disambiguate models with the same name across providers")
 	runCmd.Flags().String("small-model", "", "Small model to use. If not provided, uses the default small model for the provider")
-	runCmd.Flags().StringP("continue", "C", "", "Continue a previous session by ID")
-	runCmd.Flags().BoolP("last", "l", false, "Continue the most recent session")
-	runCmd.MarkFlagsMutuallyExclusive("continue", "last")
+	runCmd.Flags().StringP("session", "s", "", "Continue a previous session by ID")
+	runCmd.Flags().BoolP("continue", "C", false, "Continue the most recent session")
+	runCmd.MarkFlagsMutuallyExclusive("session", "continue")
 }

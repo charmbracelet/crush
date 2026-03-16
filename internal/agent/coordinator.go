@@ -22,6 +22,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/log"
@@ -85,6 +86,7 @@ type coordinator struct {
 	filetracker filetracker.Service
 	lspManager  *lsp.Manager
 	notify      pubsub.Publisher[notify.Notification]
+	hookManager *hooks.Manager
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
@@ -104,6 +106,12 @@ func NewCoordinator(
 	lspManager *lsp.Manager,
 	notify pubsub.Publisher[notify.Notification],
 ) (Coordinator, error) {
+	hookMgr, err := hooks.NewManager(cfg.Config().Hooks)
+	if err != nil {
+		slog.Warn("Failed to initialize hook manager, hooks will be disabled", "error", err)
+		hookMgr = nil
+	}
+
 	c := &coordinator{
 		cfg:         cfg,
 		sessions:    sessions,
@@ -114,6 +122,7 @@ func NewCoordinator(
 		filetracker: filetracker,
 		lspManager:  lspManager,
 		notify:      notify,
+		hookManager: hookMgr,
 		agents:      make(map[string]SessionAgent),
 	}
 
@@ -464,7 +473,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 
 	allTools = append(allTools,
 		tools.NewRequestUserInputTool(c.userInput),
-		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelName),
+		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelName, c.hookManager),
 		tools.NewJobOutputTool(),
 		tools.NewJobKillTool(),
 		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),

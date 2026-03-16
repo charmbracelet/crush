@@ -49,8 +49,9 @@ func NewLSPRestartTool(lspManager *lsp.Manager) fantasy.AgentTool {
 			var mu sync.Mutex
 			var wg sync.WaitGroup
 			for name, client := range clientsToRestart {
+				name, client := name, client // capture loop variables
 				wg.Go(func() {
-					if err := client.Restart(); err != nil {
+					if err := client.Restart(ctx); err != nil {
 						slog.Error("Failed to restart LSP client", "name", name, "error", err)
 						mu.Lock()
 						failed = append(failed, name)
@@ -63,7 +64,16 @@ func NewLSPRestartTool(lspManager *lsp.Manager) fantasy.AgentTool {
 				})
 			}
 
-			wg.Wait()
+			done := make(chan struct{})
+			go func() {
+				wg.Wait()
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-ctx.Done():
+				return fantasy.ToolResponse{}, ctx.Err()
+			}
 
 			var output string
 			if len(restarted) > 0 {

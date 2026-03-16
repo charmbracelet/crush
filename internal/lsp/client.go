@@ -207,18 +207,25 @@ func (c *Client) registerHandlers() {
 	})
 }
 
-// Restart closes the current LSP client and creates a new one with the same configuration.
-func (c *Client) Restart() error {
+// Restart closes the current LSP client and creates a new one with the same
+// configuration. The provided context controls the overall restart operation;
+// individual phases (close and initialize) are additionally capped with their
+// own shorter timeouts so a hung LSP process cannot block indefinitely.
+func (c *Client) Restart(ctx context.Context) error {
 	var openFiles []string
 	for uri := range c.openFiles.Seq2() {
 		openFiles = append(openFiles, string(uri))
 	}
 
-	closeCtx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
+	closeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	if err := c.Close(closeCtx); err != nil {
 		slog.Warn("Error closing client during restart", "name", c.name, "error", err)
+	}
+
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 
 	c.SetServerState(StateStopped)
@@ -230,7 +237,7 @@ func (c *Client) Restart() error {
 		return err
 	}
 
-	initCtx, cancel := context.WithTimeout(c.ctx, 30*time.Second)
+	initCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	c.SetServerState(StateStarting)

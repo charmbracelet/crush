@@ -16,6 +16,7 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/invopop/jsonschema"
@@ -403,6 +404,8 @@ type Config struct {
 	Permissions *Permissions `json:"permissions,omitempty" jsonschema:"description=Permission settings for tool usage"`
 
 	Tools Tools `json:"tools,omitzero" jsonschema:"description=Tool configurations"`
+
+	Hooks []hooks.HookConfig `json:"hooks,omitempty" jsonschema:"description=Tool execution hooks (PreToolUse)"`
 
 	Agents map[string]Agent `json:"-"`
 }

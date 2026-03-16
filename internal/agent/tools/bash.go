@@ -15,6 +15,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/shell"
 )
@@ -188,7 +189,7 @@ func blockFuncs() []shell.BlockFunc {
 	}
 }
 
-func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelName string) fantasy.AgentTool {
+func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelName string, hookMgr *hooks.Manager) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		BashToolName,
 		string(bashDescription(attribution, modelName)),
@@ -199,6 +200,32 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 
 			// Determine working directory
 			execWorkingDir := cmp.Or(params.WorkingDir, workingDir)
+
+			// Run PreToolUse hooks before permission checks and execution.
+			if hookMgr != nil {
+				sessionID := GetSessionFromContext(ctx)
+				hookResult, hookErr := hookMgr.RunPreToolUse(ctx, BashToolName, map[string]any{
+					"command":     params.Command,
+					"working_dir": execWorkingDir,
+				}, sessionID)
+				if hookErr == nil && hookResult != nil {
+					switch hookResult.Decision {
+					case hooks.DecisionDeny:
+						reason := hookResult.Reason
+						if reason == "" {
+							reason = "command blocked by hook"
+						}
+						return fantasy.NewTextErrorResponse(reason), nil
+					case hooks.DecisionModify:
+						if cmd, ok := hookResult.ModifiedInput["command"].(string); ok && cmd != "" {
+							params.Command = cmd
+						}
+						if wd, ok := hookResult.ModifiedInput["working_dir"].(string); ok && wd != "" {
+							execWorkingDir = wd
+						}
+					}
+				}
+			}
 
 			isSafeReadOnly := false
 			cmdLower := strings.ToLower(params.Command)

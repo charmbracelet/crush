@@ -3,20 +3,26 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
+
+	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/session"
 )
 
 // PromptSubmitterAdapter adapts coordinator prompt submission to plugin.PromptSubmitter.
 type PromptSubmitterAdapter struct {
 	coordinator Coordinator
+	sessions    session.Service
+	permissions permission.Service
 
 	mu        sync.RWMutex
 	sessionID string
 }
 
 // NewPromptSubmitterAdapter creates a new adapter for prompt submission.
-func NewPromptSubmitterAdapter() *PromptSubmitterAdapter {
-	return &PromptSubmitterAdapter{}
+func NewPromptSubmitterAdapter(sessions session.Service, permissions permission.Service) *PromptSubmitterAdapter {
+	return &PromptSubmitterAdapter{sessions: sessions, permissions: permissions}
 }
 
 // SetCoordinator sets the coordinator reference.
@@ -38,19 +44,27 @@ func (a *PromptSubmitterAdapter) SetSessionID(sessionID string) {
 func (a *PromptSubmitterAdapter) SubmitPrompt(ctx context.Context, prompt string) error {
 	a.mu.RLock()
 	coordinator := a.coordinator
-	sessionID := a.sessionID
 	a.mu.RUnlock()
 
 	if coordinator == nil {
 		return errors.New("coordinator not initialized")
 	}
-	if sessionID == "" {
-		return errors.New("no active session")
+
+	// Always create a fresh session so each ACP run gets isolated conversation
+	// history. This prevents tool results from one run leaking into the next.
+	if a.sessions == nil {
+		return errors.New("no session service available")
+	}
+	sess, err := a.sessions.Create(ctx, "ACP Session")
+	if err != nil {
+		return fmt.Errorf("failed to create session: %w", err)
 	}
 
-	// Run the prompt through the coordinator.
-	// The coordinator handles queuing if the agent is busy.
-	_, err := coordinator.Run(ctx, sessionID, prompt)
+	if a.permissions != nil {
+		a.permissions.AutoApproveSession(sess.ID)
+	}
+
+	_, err = coordinator.Run(ctx, sess.ID, prompt)
 	return err
 }
 

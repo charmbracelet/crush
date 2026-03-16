@@ -1022,7 +1022,7 @@ func (c *coordinator) initPluginHooks(ctx context.Context) error {
 
 	// Create prompt submitter adapter for hooks.
 	// The coordinator reference will be set after NewCoordinator returns.
-	c.promptSubmitterAdapter = NewPromptSubmitterAdapter()
+	c.promptSubmitterAdapter = NewPromptSubmitterAdapter(c.sessions, c.permissions)
 
 	// Create sub-agent runner adapter for plugins.
 	// The coordinator reference will be set after NewCoordinator returns.

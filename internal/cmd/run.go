@@ -45,12 +45,14 @@ crush run --continue "Follow up on your last response"
 
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		quiet, _ := cmd.Flags().GetBool("quiet")
-		verbose, _ := cmd.Flags().GetBool("verbose")
-		largeModel, _ := cmd.Flags().GetString("model")
-		smallModel, _ := cmd.Flags().GetString("small-model")
-		sessionID, _ := cmd.Flags().GetString("session")
-		useLast, _ := cmd.Flags().GetBool("continue")
+		var (
+			quiet, _      = cmd.Flags().GetBool("quiet")
+			verbose, _    = cmd.Flags().GetBool("verbose")
+			largeModel, _ = cmd.Flags().GetString("model")
+			smallModel, _ = cmd.Flags().GetString("small-model")
+			sessionID, _  = cmd.Flags().GetString("session")
+			useLast, _    = cmd.Flags().GetBool("continue")
+		)
 
 		// Cancel on SIGINT or SIGTERM.
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)

@@ -69,6 +69,8 @@
   - "/openrouter/i"
 "provider: qwen":
   - "/qwen/i"
+"provider: vercel":
+  - "/vercel/i"
 "provider: xai grok":
   - "/(xai|x\\.ai|grok)/i"
 "security":

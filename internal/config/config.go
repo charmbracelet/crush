@@ -593,6 +593,12 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 			return nil
 		}
 		return errors.New("not a valid bedrock api key")
+	case catwalk.TypeVercel:
+		// NOTE: Vercel does not validate API keys on the `/models` endpoint.
+		if strings.HasPrefix(apiKey, "vck_") { // Vercel API keys
+			return nil
+		}
+		return errors.New("not a valid vercel api key")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

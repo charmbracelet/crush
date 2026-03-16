@@ -17,8 +17,9 @@ const (
 	endpoint = "https://data.charm.land"
 	key      = "phc_4zt4VgDWLqbYnJYEwLRxFoaTL2noNrQij0C6E8k3I0V"
 
-	nonInteractiveAttrName        = "NonInteractive"
-	nonInteractiveSessionAttrName = "NonInteractiveSession"
+	nonInteractiveAttrName      = "NonInteractive"
+	continueSessionByIDAttrName = "ContinueSessionByID"
+	continueLastSessionAttrName = "ContinueLastSession"
 )
 
 var (
@@ -38,8 +39,12 @@ func SetNonInteractive(nonInteractive bool) {
 	baseProps = baseProps.Set(nonInteractiveAttrName, nonInteractive)
 }
 
-func SetNonInteractiveSession(session string) {
-	baseProps = baseProps.Set(nonInteractiveSessionAttrName, session)
+func SetContinueBySessionID(continueBySessionID bool) {
+	baseProps = baseProps.Set(continueSessionByIDAttrName, continueBySessionID)
+}
+
+func SetContinueLastSession(continueLastSession bool) {
+	baseProps = baseProps.Set(continueLastSessionAttrName, continueLastSession)
 }
 
 func Init() {

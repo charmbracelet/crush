@@ -19,14 +19,17 @@ var reasoningFieldMapping = map[string]string{
 }
 
 // wrapReasoningTransform wraps an HTTP response to normalize non-standard
-// reasoning field names in SSE streams to the standard "reasoning_content"
-// that the openai-compat provider expects.
+// reasoning field names to the standard "reasoning_content" that the
+// openai-compat provider expects.
 func wrapReasoningTransform(resp *http.Response) *http.Response {
 	contentType := resp.Header.Get("Content-Type")
-	if !strings.Contains(contentType, "text/event-stream") {
+	if strings.Contains(contentType, "text/event-stream") {
+		resp.Body = newReasoningTransformReader(resp.Body)
 		return resp
 	}
-	resp.Body = newReasoningTransformReader(resp.Body)
+	if strings.Contains(contentType, "application/json") {
+		resp.Body = newJSONReasoningTransformReader(resp.Body)
+	}
 	return resp
 }
 
@@ -49,6 +52,19 @@ func newReasoningTransformReader(r io.ReadCloser) *reasoningTransformReader {
 	return &reasoningTransformReader{inner: r, scanner: s}
 }
 
+type jsonReasoningTransformReader struct {
+	buf *bytes.Reader
+}
+
+func newJSONReasoningTransformReader(r io.ReadCloser) *jsonReasoningTransformReader {
+	bodyBytes, err := io.ReadAll(r)
+	_ = r.Close()
+	if err != nil {
+		return &jsonReasoningTransformReader{buf: bytes.NewReader(bodyBytes)}
+	}
+	return &jsonReasoningTransformReader{buf: bytes.NewReader(transformReasoningJSON(bodyBytes))}
+}
+
 func (r *reasoningTransformReader) Read(p []byte) (int, error) {
 	for r.buf.Len() == 0 {
 		if !r.scanner.Scan() {
@@ -69,6 +85,14 @@ func (r *reasoningTransformReader) Close() error {
 	return r.inner.Close()
 }
 
+func (r *jsonReasoningTransformReader) Read(p []byte) (int, error) {
+	return r.buf.Read(p)
+}
+
+func (r *jsonReasoningTransformReader) Close() error {
+	return nil
+}
+
 // transformReasoningLine replaces non-standard reasoning field names with the
 // standard "reasoning_content" field in an SSE data line.
 func transformReasoningLine(line string) string {
@@ -81,4 +105,14 @@ func transformReasoningLine(line string) string {
 		}
 	}
 	return line
+}
+
+func transformReasoningJSON(body []byte) []byte {
+	transformed := string(body)
+	for from, to := range reasoningFieldMapping {
+		if strings.Contains(transformed, from) {
+			transformed = strings.ReplaceAll(transformed, from, to)
+		}
+	}
+	return []byte(transformed)
 }

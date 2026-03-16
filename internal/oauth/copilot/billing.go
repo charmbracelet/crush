@@ -143,9 +143,11 @@ func readAndRestoreRequestBody(req *http.Request) ([]byte, error) {
 }
 
 type requestItem struct {
-	kind    string
-	role    string
-	content string
+	kind          string
+	role          string
+	content       string
+	hasToolUse    bool
+	hasToolResult bool
 }
 
 func detectInitiatorFromBody(bodyBytes []byte) string {
@@ -175,10 +177,6 @@ func parseRequestItems(bodyBytes []byte) ([]requestItem, bool) {
 		return nil, false
 	}
 
-	if rawMessages, ok := payload["messages"].([]any); ok {
-		return parseChatMessages(rawMessages)
-	}
-
 	if rawInput, ok := payload["input"]; ok {
 		switch input := rawInput.(type) {
 		case string:
@@ -186,6 +184,13 @@ func parseRequestItems(bodyBytes []byte) ([]requestItem, bool) {
 		case []any:
 			return parseResponsesInput(input)
 		}
+	}
+
+	if rawMessages, ok := payload["messages"].([]any); ok {
+		if isAnthropicMessagesPayload(payload) {
+			return parseAnthropicMessages(rawMessages)
+		}
+		return parseChatMessages(rawMessages)
 	}
 
 	return nil, false
@@ -205,9 +210,35 @@ func parseChatMessages(rawMessages []any) ([]requestItem, bool) {
 
 		role, _ := msg["role"].(string)
 		items = append(items, requestItem{
-			kind:    "message",
-			role:    role,
-			content: extractTextContent(msg["content"]),
+			kind:       "message",
+			role:       role,
+			content:    extractTextContent(msg["content"]),
+			hasToolUse: hasOpenAIToolUse(msg),
+		})
+	}
+
+	return items, true
+}
+
+func parseAnthropicMessages(rawMessages []any) ([]requestItem, bool) {
+	if len(rawMessages) == 0 {
+		return nil, false
+	}
+
+	items := make([]requestItem, 0, len(rawMessages))
+	for _, rawMsg := range rawMessages {
+		msg, ok := rawMsg.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+
+		role, _ := msg["role"].(string)
+		items = append(items, requestItem{
+			kind:          "message",
+			role:          role,
+			content:       extractTextContent(msg["content"]),
+			hasToolUse:    hasAnthropicBlockType(msg["content"], "tool_use"),
+			hasToolResult: hasAnthropicBlockType(msg["content"], "tool_result"),
 		})
 	}
 
@@ -233,9 +264,10 @@ func parseResponsesInput(rawInput []any) ([]requestItem, bool) {
 		}
 
 		items = append(items, requestItem{
-			kind:    kind,
-			role:    role,
-			content: extractTextContent(item["content"]),
+			kind:       kind,
+			role:       role,
+			content:    extractTextContent(item["content"]),
+			hasToolUse: kind == "function_call",
 		})
 	}
 
@@ -251,14 +283,59 @@ func lastMeaningfulItem(items []requestItem) (requestItem, bool) {
 			}
 		}
 
-		if item.kind == "" && item.role == "" {
+		if item.kind == "" && item.role == "" && !item.hasToolUse && !item.hasToolResult {
 			continue
+		}
+
+		if item.role == "user" && item.hasToolResult {
+			return requestItem{kind: "tool_result", role: InitiatorAgent}, true
+		}
+
+		if item.kind == "message" && item.role == "user" && i > 0 {
+			prev := items[i-1]
+			if prev.role == "assistant" && prev.hasToolUse {
+				return requestItem{kind: "tool_result", role: InitiatorAgent}, true
+			}
 		}
 
 		return item, true
 	}
 
 	return requestItem{}, false
+}
+
+func isAnthropicMessagesPayload(payload map[string]any) bool {
+	if _, ok := payload["anthropic_version"]; ok {
+		return true
+	}
+	if _, ok := payload["anthropic-beta"]; ok {
+		return true
+	}
+	model, _ := payload["model"].(string)
+	model = strings.ToLower(model)
+	return strings.Contains(model, "claude") || strings.Contains(model, "anthropic")
+}
+
+func hasOpenAIToolUse(msg map[string]any) bool {
+	toolCalls, ok := msg["tool_calls"].([]any)
+	return ok && len(toolCalls) > 0
+}
+
+func hasAnthropicBlockType(content any, blockType string) bool {
+	blocks, ok := content.([]any)
+	if !ok {
+		return false
+	}
+	for _, rawBlock := range blocks {
+		block, ok := rawBlock.(map[string]any)
+		if !ok {
+			continue
+		}
+		if block["type"] == blockType {
+			return true
+		}
+	}
+	return false
 }
 
 func extractTextContent(content any) string {

@@ -83,6 +83,15 @@ func TestReasoningTransformReader(t *testing.T) {
 	require.Contains(t, output, `"content":"hello"`)
 }
 
+func TestTransformReasoningJSON(t *testing.T) {
+	t.Parallel()
+
+	input := []byte(`{"choices":[{"message":{"reasoning_text":"step 1"}}]}`)
+	output := string(transformReasoningJSON(input))
+	require.Contains(t, output, `"reasoning_content":"step 1"`)
+	require.NotContains(t, output, `"reasoning_text"`)
+}
+
 func TestWrapReasoningTransform_SSEResponse(t *testing.T) {
 	t.Parallel()
 
@@ -107,8 +116,8 @@ func TestWrapReasoningTransform_NonSSEResponse(t *testing.T) {
 	defer transformed.Body.Close()
 	body, err := io.ReadAll(transformed.Body)
 	require.NoError(t, err)
-	// Non-SSE responses should not be transformed.
-	require.Equal(t, input, string(body))
+	require.Contains(t, string(body), `"reasoning_content":"step 1"`)
+	require.NotContains(t, string(body), `"reasoning_text"`)
 }
 
 type errUnexpectedEOFReader struct {

@@ -72,6 +72,7 @@ func (m *ModelItem) SelectedModel() config.SelectedModel {
 		Provider:        string(m.prov.ID),
 		ReasoningEffort: m.model.DefaultReasoningEffort,
 		MaxTokens:       m.model.DefaultMaxTokens,
+		Think:           m.model.CanReason && len(m.model.ReasoningLevels) == 0,
 	}
 }
 

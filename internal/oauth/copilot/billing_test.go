@@ -118,9 +118,94 @@ func TestBillingTransport_ResponsesAPIInitiatorDetection(t *testing.T) {
 			t.Parallel()
 
 			initiator := detectInitiator(t, map[string]any{"input": tt.input})
-			if initiator != tt.expectedInit {
-				require.Equal(t, tt.expectedInit, initiator, "getInitiatorType() mismatch")
-			}
+			require.Equal(t, tt.expectedInit, initiator)
+		})
+	}
+}
+
+func TestBillingTransport_AnthropicMessagesInitiatorDetection(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		payload      map[string]any
+		expectedInit string
+	}{
+		{
+			name: "direct user request is billable",
+			payload: map[string]any{
+				"anthropic_version": "2023-06-01",
+				"messages": []map[string]any{
+					{"role": "user", "content": "Write a function."},
+				},
+			},
+			expectedInit: InitiatorUser,
+		},
+		{
+			name: "user tool_result continuation is free",
+			payload: map[string]any{
+				"anthropic_version": "2023-06-01",
+				"messages": []map[string]any{
+					{"role": "assistant", "content": []map[string]any{{"type": "tool_use", "id": "toolu_1", "name": "ls", "input": map[string]any{"path": "."}}}},
+					{"role": "user", "content": []map[string]any{{"type": "tool_result", "tool_use_id": "toolu_1", "content": "files"}}},
+				},
+			},
+			expectedInit: InitiatorAgent,
+		},
+		{
+			name: "mixed user text with tool_result continuation is free",
+			payload: map[string]any{
+				"anthropic_version": "2023-06-01",
+				"messages": []map[string]any{
+					{"role": "assistant", "content": []map[string]any{{"type": "tool_use", "id": "toolu_1", "name": "ls", "input": map[string]any{"path": "."}}}},
+					{"role": "user", "content": []map[string]any{{"type": "tool_result", "tool_use_id": "toolu_1", "content": "files"}, {"type": "text", "text": "Continue"}}},
+				},
+			},
+			expectedInit: InitiatorAgent,
+		},
+		{
+			name: "assistant tool_use tail is free",
+			payload: map[string]any{
+				"anthropic_version": "2023-06-01",
+				"messages": []map[string]any{
+					{"role": "user", "content": "Inspect repo"},
+					{"role": "assistant", "content": []map[string]any{{"type": "tool_use", "id": "toolu_1", "name": "ls", "input": map[string]any{"path": "."}}}},
+				},
+			},
+			expectedInit: InitiatorAgent,
+		},
+		{
+			name: "openai chat tool continuation is still free",
+			payload: map[string]any{
+				"model": "gpt-4.1",
+				"messages": []map[string]any{
+					{"role": "user", "content": "Inspect the repository."},
+					{"role": "assistant", "content": "Let me inspect it.", "tool_calls": []any{map[string]any{"id": "call_1"}}},
+					{"role": "tool", "content": "Repository contents..."},
+				},
+			},
+			expectedInit: InitiatorAgent,
+		},
+		{
+			name: "follow-up user prompt after assistant history is billable",
+			payload: map[string]any{
+				"anthropic_version": "2023-06-01",
+				"messages": []map[string]any{
+					{"role": "user", "content": "Inspect repo"},
+					{"role": "assistant", "content": []map[string]any{{"type": "text", "text": "Done"}}},
+					{"role": "user", "content": []map[string]any{{"type": "text", "text": "Now summarize"}}},
+				},
+			},
+			expectedInit: InitiatorUser,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			initiator := detectInitiator(t, tt.payload)
+			require.Equal(t, tt.expectedInit, initiator)
 		})
 	}
 }

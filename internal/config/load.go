@@ -521,6 +521,7 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 			Model:           defaultLargeModel.ID,
 			MaxTokens:       defaultLargeModel.DefaultMaxTokens,
 			ReasoningEffort: defaultLargeModel.DefaultReasoningEffort,
+			Think:           defaultLargeModel.CanReason && len(defaultLargeModel.ReasoningLevels) == 0,
 		}
 
 		defaultSmallModel := c.GetModel(string(p.ID), p.DefaultSmallModelID)
@@ -533,6 +534,7 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 			Model:           defaultSmallModel.ID,
 			MaxTokens:       defaultSmallModel.DefaultMaxTokens,
 			ReasoningEffort: defaultSmallModel.DefaultReasoningEffort,
+			Think:           defaultSmallModel.CanReason && len(defaultSmallModel.ReasoningLevels) == 0,
 		}
 		return largeModel, smallModel, err
 	}
@@ -600,8 +602,6 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 			if largeModelSelected.ReasoningEffort != "" {
 				large.ReasoningEffort = largeModelSelected.ReasoningEffort
 			}
-			// Use the user's Think setting if they have configured this model.
-			// This preserves the user's preference across restarts.
 			large.Think = largeModelSelected.Think
 			if largeModelSelected.Temperature != nil {
 				large.Temperature = largeModelSelected.Temperature
@@ -661,8 +661,6 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 			if smallModelSelected.PresencePenalty != nil {
 				small.PresencePenalty = smallModelSelected.PresencePenalty
 			}
-			// Use the user's Think setting if they have configured this model.
-			// This preserves the user's preference across restarts.
 			small.Think = smallModelSelected.Think
 		}
 	}

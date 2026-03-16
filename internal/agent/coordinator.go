@@ -613,7 +613,7 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 		}, nil
 }
 
-func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID string) (fantasy.Provider, error) {
+func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID string, useCopilotClient, isSubAgent bool) (fantasy.Provider, error) {
 	var opts []anthropic.Option
 
 	switch {
@@ -638,14 +638,21 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 		opts = append(opts, anthropic.WithBaseURL(baseURL))
 	}
 
-	if c.cfg.Config().Options.Debug {
-		httpClient := log.NewHTTPClient()
+	// Set HTTP client based on provider and debug mode.
+	var httpClient *http.Client
+	if useCopilotClient {
+		httpClient = copilot.NewClient(isSubAgent, c.cfg.Config().Options.Debug)
+	} else if c.cfg.Config().Options.Debug {
+		httpClient = log.NewHTTPClient()
+	}
+	if httpClient != nil {
 		opts = append(opts, anthropic.WithHTTPClient(httpClient))
 	}
+
 	return anthropic.New(opts...)
 }
 
-func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[string]string, copilotService bool) (fantasy.Provider, error) {
+func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[string]string, copilotService, useCopilotClient, isSubAgent bool) (fantasy.Provider, error) {
 	opts := []openai.Option{
 		openai.WithAPIKey(apiKey),
 		openai.WithUseResponsesAPI(),
@@ -653,7 +660,9 @@ func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[st
 
 	// Set HTTP client based on provider and debug mode.
 	var httpClient *http.Client
-	if copilotService {
+	if useCopilotClient {
+		httpClient = copilot.NewClient(isSubAgent, c.cfg.Config().Options.Debug)
+	} else if copilotService {
 		// Use billing client for Copilot service.
 		httpClient = copilot.NewBillingClient(copilotService, c.cfg.Config().Options.Debug)
 	} else if c.cfg.Config().Options.Debug {
@@ -855,9 +864,9 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 
 	switch providerCfg.Type {
 	case openai.Name:
-		return c.buildOpenaiProvider(baseURL, apiKey, headers, providerCfg.CopilotService)
+		return c.buildOpenaiProvider(baseURL, apiKey, headers, providerCfg.CopilotService, providerCfg.UseCopilotClient, isSubAgent)
 	case anthropic.Name:
-		return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID)
+		return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID, providerCfg.UseCopilotClient, isSubAgent)
 	case openrouter.Name:
 		return c.buildOpenrouterProvider(baseURL, apiKey, headers)
 	case vercel.Name:

@@ -95,6 +95,15 @@ crush run --continue "Follow up on your last response"
 		event.SetNonInteractive(true)
 		event.AppInitialized()
 
+		switch {
+		case sessionID != "":
+			event.SetNonInteractiveSession("ContinueSessionByID")
+		case useLast:
+			event.SetNonInteractiveSession("ContinueLastSession")
+		default:
+			event.SetNonInteractiveSession("NewSession")
+		}
+
 		return app.RunNonInteractive(ctx, os.Stdout, prompt, largeModel, smallModel, quiet || verbose, sessionID, useLast)
 	},
 }

@@ -464,7 +464,7 @@ func createTransport(ctx context.Context, cfg *config.ConfigStore, name string, 
 		})
 		if m.SupportsInteractiveAuth() {
 			transport = &oauthRoundTripper{
-				base:       transport,
+				base:       http.DefaultTransport,
 				headers:    headers,
 				authorizer: newMCPOAuthAuthorizer(name, cfg, headers),
 			}

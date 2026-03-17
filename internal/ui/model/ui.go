@@ -3306,7 +3306,7 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 	return nil
 }
 
-// openReasoningDialog opens the reasoning effort dialog.
+// openMCPDialog opens the MCP management dialog.
 func (m *UI) openMCPDialog() tea.Cmd {
 	if m.dialog.ContainsDialog(dialog.MCPID) {
 		m.dialog.BringToFront(dialog.MCPID)
@@ -3876,9 +3876,8 @@ func (m *UI) toggleMCP(name string, enable bool) tea.Cmd {
 			return util.ReportError(errors.New("MCP server not found: " + name))()
 		}
 
-		// Update the disabled field
-		fieldKey := fmt.Sprintf("mcp.%s.disabled", mcpKey)
-		if err := m.com.Store().SetConfigField(config.ScopeWorkspace, fieldKey, !enable); err != nil {
+		// Update the disabled field in memory and persist to disk
+		if err := m.com.Store().SetMCPDisabled(config.ScopeWorkspace, mcpKey, !enable); err != nil {
 			return util.ReportError(err)()
 		}
 

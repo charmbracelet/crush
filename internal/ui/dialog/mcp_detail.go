@@ -87,9 +87,7 @@ func (d *MCPDetail) HandleMsg(msg tea.Msg) Action {
 			return ActionClose{}
 		case key.Matches(msg, d.keyMap.Reconnect):
 			if d.config.Disabled {
-				return ActionCmd{Cmd: func() tea.Msg {
-					return util.ReportWarn("Cannot reconnect a disabled MCP server.")
-				}}
+				return ActionCmd{Cmd: util.ReportWarn("Cannot reconnect a disabled MCP server.")}
 			}
 			return ActionReconnectMCP{Name: d.name}
 		case key.Matches(msg, d.keyMap.Toggle):

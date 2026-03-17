@@ -163,6 +163,17 @@ func (s *ConfigStore) SetSkipRequests(scope Scope, enabled bool) error {
 	return s.SetConfigField(scope, "permissions.skip_requests", enabled)
 }
 
+// SetMCPDisabled sets the disabled state for an MCP server and persists it.
+func (s *ConfigStore) SetMCPDisabled(scope Scope, name string, disabled bool) error {
+	mcpConfig, ok := s.config.MCP[name]
+	if !ok {
+		return fmt.Errorf("mcp %s not found", name)
+	}
+	mcpConfig.Disabled = disabled
+	s.config.MCP[name] = mcpConfig
+	return s.SetConfigField(scope, fmt.Sprintf("mcp.%s.disabled", name), disabled)
+}
+
 // SetTransparentBackground sets the transparent background setting and persists it.
 func (s *ConfigStore) SetTransparentBackground(scope Scope, enabled bool) error {
 	if s.config.Options == nil {

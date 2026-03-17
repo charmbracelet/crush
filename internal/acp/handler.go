@@ -200,6 +200,10 @@ func (h *Handler) handleSessionPrompt(ctx context.Context, req *Request) (any, *
 	// Wrap context with cancellation so session/cancel can stop the run.
 	runCtx, cancel := context.WithCancel(ctx)
 	h.mu.Lock()
+	// Cancel any previous prompt for this session before overwriting.
+	if oldCancel, ok := h.cancels[params.SessionID]; ok {
+		oldCancel()
+	}
 	h.cancels[params.SessionID] = cancel
 	h.mu.Unlock()
 	defer func() {

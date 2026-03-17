@@ -45,6 +45,7 @@ type App struct {
 	sessionInfoProvider SessionInfoProvider
 	promptSubmitter     PromptSubmitter
 	subAgentRunner      SubAgentRunner
+	searchProvider      SearchProvider
 	logger              *slog.Logger
 	cleanupFuncs        []func() error
 }
@@ -131,6 +132,13 @@ func WithPromptSubmitter(ps PromptSubmitter) AppOption {
 func WithSubAgentRunner(sar SubAgentRunner) AppOption {
 	return func(a *App) {
 		a.subAgentRunner = sar
+	}
+}
+
+// WithSearchProvider sets the search provider for web searches.
+func WithSearchProvider(sp SearchProvider) AppOption {
+	return func(a *App) {
+		a.searchProvider = sp
 	}
 }
 
@@ -238,6 +246,12 @@ func (a *App) PromptSubmitter() PromptSubmitter {
 // Returns nil if no sub-agent runner is configured.
 func (a *App) SubAgentRunner() SubAgentRunner {
 	return a.subAgentRunner
+}
+
+// SearchProvider returns the registered search provider.
+// Returns nil if no search provider is configured (DuckDuckGo will be used).
+func (a *App) SearchProvider() SearchProvider {
+	return a.searchProvider
 }
 
 // Logger returns a structured logger.

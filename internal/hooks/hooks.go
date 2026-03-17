@@ -43,13 +43,13 @@ type HTTPConfig struct {
 }
 
 type HookConfig struct {
-	Name    string       `json:"name"`
-	Enabled *bool        `json:"enabled,omitempty"`
-	Events  []Event      `json:"events"`
-	Type    HandlerType  `json:"type"`
-	TimeoutMs int        `json:"timeout_ms,omitempty"`
-	Command *CommandConfig `json:"command,omitempty"`
-	HTTP    *HTTPConfig    `json:"http,omitempty"`
+	Name      string         `json:"name"`
+	Enabled   *bool          `json:"enabled,omitempty"`
+	Events    []Event        `json:"events"`
+	Type      HandlerType    `json:"type"`
+	TimeoutMs int            `json:"timeout_ms,omitempty"`
+	Command   *CommandConfig `json:"command,omitempty"`
+	HTTP      *HTTPConfig    `json:"http,omitempty"`
 }
 
 func (h *HookConfig) IsEnabled() bool {
@@ -124,8 +124,11 @@ func (m *Manager) RunPreToolUse(ctx context.Context, toolName string, toolInput 
 func (m *Manager) run(ctx context.Context, event Event, input HookInput) (*HookOutput, error) {
 	hooks := m.hooks[event]
 	if len(hooks) == 0 {
+		slog.Debug("No hooks registered for event", "event", event)
 		return &HookOutput{Decision: DecisionAllow}, nil
 	}
+
+	slog.Debug("Running hooks for event", "event", event, "count", len(hooks))
 
 	currentInput := make(map[string]any, len(input.ToolInput))
 	maps.Copy(currentInput, input.ToolInput)

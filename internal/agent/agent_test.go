@@ -805,9 +805,33 @@ func TestUpdateSessionUsage_PreferAPIOverEstimate(t *testing.T) {
 	estimatedTokens := int64(3500) // estimate is less accurate
 	agent.updateSessionUsage(model, &sess, usage, nil, estimatedTokens)
 
-	// API value (68+4185=4253) should be preferred over the estimate (3500).
+	// API value (68+4185=4253) should be preferred over the estimate (3500)
+	// because it is more than half the estimate.
 	require.Equal(t, int64(4253), sess.LastPromptTokens)
 	require.Equal(t, int64(4253), sess.PromptTokens)
+}
+
+func TestUpdateSessionUsage_FallbackWhenAPIUnderReports(t *testing.T) {
+	t.Parallel()
+
+	agent := &sessionAgent{}
+	model := Model{CatwalkCfg: catwalk.Model{}}
+	sess := session.Session{}
+
+	// Simulate a proxy that under-reports input tokens (e.g., only user
+	// message tokens, omitting system prompt and tool definitions).
+	usage := fantasy.Usage{
+		InputTokens:  95,
+		OutputTokens: 200,
+	}
+
+	estimatedTokens := int64(18500) // includes system prompt + tools
+	agent.updateSessionUsage(model, &sess, usage, nil, estimatedTokens)
+
+	// API reports 95 which is < estimatedTokens/2 (9250), so the
+	// estimate should be used instead.
+	require.Equal(t, estimatedTokens, sess.LastPromptTokens)
+	require.Equal(t, estimatedTokens, sess.PromptTokens)
 }
 
 func TestEstimatePromptTokens(t *testing.T) {

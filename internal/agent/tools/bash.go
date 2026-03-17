@@ -201,9 +201,10 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			// Determine working directory
 			execWorkingDir := cmp.Or(params.WorkingDir, workingDir)
 
+			sessionID := GetSessionFromContext(ctx)
+
 			// Run PreToolUse hooks before permission checks and execution.
 			if hookMgr != nil {
-				sessionID := GetSessionFromContext(ctx)
 				hookResult, hookErr := hookMgr.RunPreToolUse(ctx, BashToolName, map[string]any{
 					"command":     params.Command,
 					"working_dir": execWorkingDir,
@@ -239,7 +240,6 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				}
 			}
 
-			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {
 				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for executing shell command")
 			}

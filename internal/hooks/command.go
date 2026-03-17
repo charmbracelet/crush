@@ -47,7 +47,7 @@ func (h *commandHandler) executePassthrough(ctx context.Context, input HookInput
 
 	err := cmd.Run()
 	if err != nil {
-		return &HookOutput{Decision: DecisionAllow}, nil
+		return nil, fmt.Errorf("command execution failed: %w (stderr: %s)", err, stderr.String())
 	}
 
 	result := strings.TrimRight(stdout.String(), "\r\n")
@@ -80,7 +80,7 @@ func (h *commandHandler) executeJSON(ctx context.Context, input HookInput) (*Hoo
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return &HookOutput{Decision: DecisionAllow}, nil
+		return nil, fmt.Errorf("command execution failed: %w (stderr: %s)", err, stderr.String())
 	}
 
 	out := stdout.Bytes()
@@ -90,7 +90,7 @@ func (h *commandHandler) executeJSON(ctx context.Context, input HookInput) (*Hoo
 
 	var output HookOutput
 	if err := json.Unmarshal(out, &output); err != nil {
-		return &HookOutput{Decision: DecisionAllow}, nil
+		return nil, fmt.Errorf("failed to parse hook output: %w (output: %s)", err, string(out))
 	}
 
 	if output.Decision == "" {

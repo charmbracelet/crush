@@ -42,7 +42,7 @@ func (h *httpHandler) Execute(ctx context.Context, input HookInput) (*HookOutput
 
 	req, err := http.NewRequestWithContext(ctx, method, httpCfg.URL, bytes.NewReader(payload))
 	if err != nil {
-		return &HookOutput{Decision: DecisionAllow}, nil
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
@@ -52,13 +52,17 @@ func (h *httpHandler) Execute(ctx context.Context, input HookInput) (*HookOutput
 
 	resp, err := h.getClient().Do(req)
 	if err != nil {
-		return &HookOutput{Decision: DecisionAllow}, nil
+		return nil, fmt.Errorf("HTTP request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("hook returned non-2xx status: %d", resp.StatusCode)
+	}
+
 	var output HookOutput
 	if err := json.NewDecoder(resp.Body).Decode(&output); err != nil {
-		return &HookOutput{Decision: DecisionAllow}, nil
+		return nil, fmt.Errorf("failed to decode hook response: %w", err)
 	}
 
 	if output.Decision == "" {

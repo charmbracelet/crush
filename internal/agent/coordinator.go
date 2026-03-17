@@ -110,6 +110,8 @@ func NewCoordinator(
 	if err != nil {
 		slog.Warn("Failed to initialize hook manager, hooks will be disabled", "error", err)
 		hookMgr = nil
+	} else {
+		slog.Debug("Hook manager initialized", "hooks_count", len(cfg.Config().Hooks))
 	}
 
 	c := &coordinator{

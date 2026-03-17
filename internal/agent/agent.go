@@ -690,8 +690,8 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	)
 	summaryMessage, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
 		Role:             message.Assistant,
-		Model:            largeModel.Model.Model(),
-		Provider:         largeModel.Model.Provider(),
+		Model:            largeModel.ModelCfg.Model,
+		Provider:         largeModel.ModelCfg.Provider,
 		IsSummaryMessage: true,
 	})
 	if err != nil {
@@ -1137,10 +1137,12 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 	}
 
 	promptTokens := promptTokensForUsage(usage)
-	// Some providers (e.g., Anthropic-compatible proxies) don't report input
-	// tokens in streaming mode. Fall back to the estimated count so that
-	// context window tracking still works.
-	if promptTokens == 0 && estimatedPromptTokens > 0 {
+	// Some providers (e.g., Anthropic-compatible proxies) under-report input
+	// tokens in streaming mode, especially with thinking enabled — they may
+	// report only user-message tokens while omitting system prompt and tool
+	// definitions. Fall back to the estimated count when the provider value
+	// is zero or suspiciously low compared to the estimate.
+	if estimatedPromptTokens > 0 && promptTokens < estimatedPromptTokens/2 {
 		promptTokens = estimatedPromptTokens
 	}
 

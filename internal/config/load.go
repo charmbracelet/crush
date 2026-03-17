@@ -414,6 +414,12 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 		}
 	}
 
+	// Add project-local skills directory if not already present.
+	projectSkillsDir := filepath.Join(c.Options.DataDirectory, "skills")
+	if !slices.Contains(c.Options.SkillsPaths, projectSkillsDir) {
+		c.Options.SkillsPaths = append(c.Options.SkillsPaths, projectSkillsDir)
+	}
+
 	if str, ok := os.LookupEnv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE"); ok {
 		c.Options.DisableProviderAutoUpdate, _ = strconv.ParseBool(str)
 	}

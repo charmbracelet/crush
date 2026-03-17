@@ -252,7 +252,7 @@ func (a *mcpOAuthAuthorizer) authenticate(ctx context.Context, resourceURL strin
 	if err != nil {
 		return nil, err
 	}
-	callback, err := startAuthCallbackServer(m.OAuth)
+	callback, err := startAuthCallbackServer(ctx, m.OAuth)
 	if err != nil {
 		return nil, err
 	}
@@ -379,7 +379,7 @@ func (a *mcpOAuthAuthorizer) discoverProtectedResourceMetadata(ctx context.Conte
 }
 
 func (a *mcpOAuthAuthorizer) discoverAuthServerMetadata(ctx context.Context, prm *protectedResourceMetadata) (*authServerMetadata, error) {
-	authServerURL := prm.Resource
+	var authServerURL string
 	if len(prm.AuthorizationServers) > 0 {
 		authServerURL = prm.AuthorizationServers[0]
 	} else {
@@ -507,7 +507,7 @@ func (a *mcpOAuthAuthorizer) refreshTokenLocked(ctx context.Context, m config.MC
 	return internalToken, nil
 }
 
-func startAuthCallbackServer(oauthCfg *config.MCPOAuthConfig) (*authCallbackServer, error) {
+func startAuthCallbackServer(ctx context.Context, oauthCfg *config.MCPOAuthConfig) (*authCallbackServer, error) {
 	redirectURL := ""
 	if oauthCfg != nil {
 		redirectURL = oauthCfg.RedirectURL
@@ -530,7 +530,8 @@ func startAuthCallbackServer(oauthCfg *config.MCPOAuthConfig) (*authCallbackServ
 			callbackPath = parsed.Path
 		}
 	}
-	listener, err := net.Listen("tcp", listenAddress)
+	lc := net.ListenConfig{}
+	listener, err := lc.Listen(ctx, "tcp", listenAddress)
 	if err != nil {
 		return nil, err
 	}

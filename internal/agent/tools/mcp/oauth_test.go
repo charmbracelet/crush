@@ -72,6 +72,9 @@ func TestOAuthRoundTripperMapsUnauthorizedToAuthRequired(t *testing.T) {
 	require.NoError(t, err)
 
 	resp, err := rt.RoundTrip(req)
+	if resp != nil {
+		resp.Body.Close()
+	}
 	require.Nil(t, resp)
 	require.Error(t, err)
 	var authErr *AuthRequiredError

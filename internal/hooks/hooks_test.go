@@ -31,7 +31,7 @@ func helperBinary(t *testing.T, name, src string) string {
 		binName += ".exe"
 	}
 	binPath := filepath.Join(dir, binName)
-	out, err := exec.Command("go", "build", "-o", binPath, srcFile).CombinedOutput()
+	out, err := exec.CommandContext(t.Context(), "go", "build", "-o", binPath, srcFile).CombinedOutput()
 	require.NoError(t, err, "build helper binary: %s", out)
 	return binPath
 }

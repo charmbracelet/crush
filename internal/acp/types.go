@@ -13,9 +13,9 @@ const ProtocolVersion = 1
 // ContentBlock is a union type for prompt content.
 type ContentBlock struct {
 	Type string `json:"type"`
-	// text
+	// Text content.
 	Text string `json:"text,omitempty"`
-	// image / audio
+	// Image or audio content.
 	Data     string `json:"data,omitempty"`
 	MIMEType string `json:"mimeType,omitempty"`
 	URI      string `json:"uri,omitempty"`
@@ -177,19 +177,19 @@ const (
 // wire format; we use a single Title field and populate it for both.
 type SessionUpdate struct {
 	SessionUpdate SessionUpdateType `json:"sessionUpdate"`
-	// agent_message_chunk / agent_thought_chunk / user_message_chunk
+	// Message chunk content.
 	Content string `json:"content,omitempty"`
-	// tool_call / tool_call_update / session_info_update
+	// Tool call or session info title.
 	Title string `json:"title,omitempty"`
-	// tool_call / tool_call_update
+	// Tool call identifier.
 	ToolCallID string         `json:"toolCallId,omitempty"`
 	Kind       string         `json:"kind,omitempty"`
 	Status     ToolCallStatus `json:"status,omitempty"`
 	RawInput   any            `json:"rawInput,omitempty"`
 	RawOutput  any            `json:"rawOutput,omitempty"`
-	// plan
+	// Plan entries.
 	Entries []PlanEntry `json:"entries,omitempty"`
-	// session_info_update
+	// Session info update timestamp.
 	UpdatedAt int64 `json:"updatedAt,omitempty"`
 }
 

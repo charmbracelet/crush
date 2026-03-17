@@ -81,7 +81,7 @@ func handlePermissionRequest(ctx context.Context, req permission.PermissionReque
 	case allowOnceID:
 		perms.Grant(req)
 	default:
-		// reject_once, reject_always, cancelled, or unknown
+		// Reject_once, reject_always, cancelled, or unknown option.
 		perms.Deny(req)
 	}
 }

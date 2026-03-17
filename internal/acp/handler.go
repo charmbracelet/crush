@@ -191,7 +191,11 @@ func (h *Handler) handleSessionPrompt(ctx context.Context, req *Request) (any, *
 	}
 
 	// Subscribe to messages before running to capture streaming updates.
-	msgSub := h.app.GetMessages().Subscribe(ctx)
+	// Use a dedicated child context so the subscription is cleaned up when
+	// this function returns, preventing a slow memory leak.
+	subCtx, subCancel := context.WithCancel(ctx)
+	defer subCancel()
+	msgSub := h.app.GetMessages().Subscribe(subCtx)
 
 	// Wrap context with cancellation so session/cancel can stop the run.
 	runCtx, cancel := context.WithCancel(ctx)

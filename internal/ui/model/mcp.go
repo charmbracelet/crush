@@ -70,6 +70,12 @@ func mcpList(t *styles.Styles, mcps []mcp.ClientInfo, width, maxItems int) strin
 		case mcp.StateConnected:
 			icon = t.ResourceOnlineIcon.String()
 			extraContent = mcpCounts(t, m.Counts)
+		case mcp.StateNeedsAuth:
+			icon = t.ResourceErrorIcon.String()
+			description = t.ResourceStatus.Render("authentication required")
+			if m.Error != nil {
+				description = t.ResourceStatus.Render(fmt.Sprintf("authentication required: %s", m.Error.Error()))
+			}
 		case mcp.StateError:
 			icon = t.ResourceErrorIcon.String()
 			description = t.ResourceStatus.Render("error")

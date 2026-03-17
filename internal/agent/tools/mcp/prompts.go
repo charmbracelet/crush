@@ -30,6 +30,9 @@ func GetPromptMessages(ctx context.Context, cfg *config.ConfigStore, clientName,
 		Arguments: args,
 	})
 	if err != nil {
+		if prev, ok := states.Get(clientName); ok {
+			updateState(clientName, stateForError(err), err, nil, prev.Counts)
+		}
 		return nil, err
 	}
 
@@ -56,7 +59,7 @@ func RefreshPrompts(ctx context.Context, name string) {
 
 	prompts, err := getPrompts(ctx, session)
 	if err != nil {
-		updateState(name, StateError, err, nil, Counts{})
+		updateState(name, stateForError(err), err, nil, Counts{})
 		return
 	}
 

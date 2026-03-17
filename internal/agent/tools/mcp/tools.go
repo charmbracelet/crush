@@ -47,6 +47,9 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 		Arguments: args,
 	})
 	if err != nil {
+		if prev, ok := states.Get(name); ok {
+			updateState(name, stateForError(err), err, nil, prev.Counts)
+		}
 		return ToolResult{}, err
 	}
 
@@ -117,7 +120,7 @@ func RefreshTools(ctx context.Context, cfg *config.ConfigStore, name string) {
 
 	tools, err := getTools(ctx, session)
 	if err != nil {
-		updateState(name, StateError, err, nil, Counts{})
+		updateState(name, stateForError(err), err, nil, Counts{})
 		return
 	}
 

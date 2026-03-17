@@ -314,6 +314,18 @@ using `$(echo $VAR)` syntax.
         "Authorization": "Bearer $GH_PAT"
       }
     },
+    "notion": {
+      "type": "http",
+      "url": "https://mcp.notion.com/mcp",
+      "timeout": 120,
+      "oauth": {
+        "enabled": true,
+        "client_name": "Crush",
+        "redirect_url": "http://127.0.0.1:8913/callback",
+        "scopes": ["read:content"],
+        "resource": "https://mcp.notion.com/mcp"
+      }
+    },
     "streaming-service": {
       "type": "sse",
       "url": "https://example.com/mcp/sse",
@@ -326,6 +338,26 @@ using `$(echo $VAR)` syntax.
   }
 }
 ```
+
+For HTTP MCP servers that require OAuth, set `mcp.<name>.oauth.enabled` to
+`true`. Crush can discover the authorization server, open a browser for the
+interactive login flow, persist the resulting token, and reconnect the MCP
+server after authentication completes.
+
+The `oauth` block supports:
+
+- `enabled`: turn on OAuth handling for HTTP MCP servers.
+- `client_name`: optional client name used during dynamic registration.
+- `redirect_url`: optional loopback callback URL override.
+- `client_id` / `client_secret`: optional pre-registered OAuth client
+  credentials.
+- `resource`: optional protected resource identifier.
+- `scopes`: optional OAuth scopes to request.
+
+If an MCP server needs authentication before it can initialize, Crush will show
+it as `authentication required`. You can then open `Commands` -> `MCP Servers`
+to inspect server status, review tools/prompts/resources, and trigger
+authenticate or reconnect actions from the MCP management dialog.
 
 ### Ignoring Files
 

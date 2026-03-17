@@ -514,6 +514,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case mcpStateChangedMsg:
 		m.mcpStates = msg.states
+		dia := m.dialog.Dialog(dialog.MCPID)
+		if mcpDialog, ok := dia.(*dialog.MCP); ok {
+			mcpDialog.SetStates(msg.states)
+		}
 	case mcpPromptsLoadedMsg:
 		m.mcpPrompts = msg.Prompts
 		dia := m.dialog.Dialog(dialog.CommandsID)
@@ -1448,6 +1452,21 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			return util.NewInfoMsg("Transparent background " + status)
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionAuthenticateMCP:
+		cmds = append(cmds, m.authenticateMCP(msg.Name))
+	case dialog.ActionReconnectMCP:
+		cmds = append(cmds, m.reconnectMCP(msg.Name))
+	case dialog.ActionOpenMCPDetail:
+		mcpCfg, ok := m.com.Config().MCP[msg.Name]
+		if !ok {
+			cmds = append(cmds, util.ReportWarn("MCP server not found: "+msg.Name))
+			break
+		}
+		state := m.mcpStates[msg.Name]
+		detailDialog := dialog.NewMCPDetail(m.com, msg.Name, state, mcpCfg)
+		m.dialog.OpenDialog(detailDialog)
+	case dialog.ActionToggleMCP:
+		cmds = append(cmds, m.toggleMCP(msg.Name, msg.Enable))
 	case dialog.ActionQuit:
 		cmds = append(cmds, tea.Quit)
 	case dialog.ActionInitializeProject:
@@ -3208,6 +3227,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openCommandsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.MCPID:
+		if cmd := m.openMCPDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.ReasoningID:
 		if cmd := m.openReasoningDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -3280,6 +3303,22 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 
 	m.dialog.OpenDialog(commands)
 
+	return nil
+}
+
+// openMCPDialog opens the MCP management dialog.
+func (m *UI) openMCPDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.MCPID) {
+		m.dialog.BringToFront(dialog.MCPID)
+		return nil
+	}
+
+	mcpDialog, err := dialog.NewMCP(m.com, m.mcpStates)
+	if err != nil {
+		return util.ReportError(err)
+	}
+
+	m.dialog.OpenDialog(mcpDialog)
 	return nil
 }
 
@@ -3799,6 +3838,57 @@ func handleMCPResourcesEvent(name string) tea.Cmd {
 	return func() tea.Msg {
 		mcp.RefreshResources(context.Background(), name)
 		return nil
+	}
+}
+
+func (m *UI) authenticateMCP(name string) tea.Cmd {
+	return func() tea.Msg {
+		if err := mcp.Authenticate(context.Background(), m.com.Store(), name); err != nil {
+			return util.ReportError(err)()
+		}
+		if err := mcp.Reconnect(context.Background(), m.com.Store(), name); err != nil {
+			return util.ReportError(err)()
+		}
+		return util.NewInfoMsg("MCP " + name + " authenticated")
+	}
+}
+
+func (m *UI) reconnectMCP(name string) tea.Cmd {
+	return func() tea.Msg {
+		if err := mcp.Reconnect(context.Background(), m.com.Store(), name); err != nil {
+			return util.ReportError(err)()
+		}
+		return util.NewInfoMsg("MCP " + name + " reconnected")
+	}
+}
+
+func (m *UI) toggleMCP(name string, enable bool) tea.Cmd {
+	return func() tea.Msg {
+		// Find the MCP config key
+		var mcpKey string
+		for k := range m.com.Config().MCP {
+			if k == name {
+				mcpKey = k
+				break
+			}
+		}
+		if mcpKey == "" {
+			return util.ReportError(errors.New("MCP server not found: " + name))()
+		}
+
+		// Update the disabled field in memory and persist to disk
+		if err := m.com.Store().SetMCPDisabled(config.ScopeWorkspace, mcpKey, !enable); err != nil {
+			return util.ReportError(err)()
+		}
+
+		// Reconnect if enabling
+		if enable {
+			if err := mcp.Reconnect(context.Background(), m.com.Store(), name); err != nil {
+				return util.ReportError(err)()
+			}
+			return util.NewInfoMsg("MCP " + name + " enabled and reconnected")
+		}
+		return util.NewInfoMsg("MCP " + name + " disabled")
 	}
 }
 

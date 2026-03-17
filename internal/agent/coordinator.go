@@ -1028,8 +1028,8 @@ func (c *coordinator) initPluginHooks(ctx context.Context) error {
 	// The coordinator reference will be set after NewCoordinator returns.
 	c.subAgentRunnerAdapter = NewSubAgentRunnerAdapter()
 
-	// Create shared plugin app for both tools and hooks.
-	c.pluginApp = plugin.NewApp(
+	// Build plugin app options.
+	appOpts := []plugin.AppOption{
 		plugin.WithWorkingDir(c.cfg.WorkingDir()),
 		plugin.WithPermissions(c.permissions),
 		plugin.WithPluginConfig(pluginConfig),
@@ -1038,7 +1038,29 @@ func (c *coordinator) initPluginHooks(ctx context.Context) error {
 		plugin.WithSessionInfoProvider(c.sessionInfoAdapter),
 		plugin.WithPromptSubmitter(c.promptSubmitterAdapter),
 		plugin.WithSubAgentRunner(c.subAgentRunnerAdapter),
-	)
+	}
+
+	// Initialize search provider if one is registered.
+	if name, reg := plugin.GetSearchProviderRegistration(); reg != nil {
+		if !slices.Contains(disabledPlugins, name) {
+			// Create a temporary app to load config for the search provider factory.
+			tmpApp := plugin.NewApp(
+				plugin.WithWorkingDir(c.cfg.WorkingDir()),
+				plugin.WithPluginConfig(pluginConfig),
+				plugin.WithDisabledPlugins(disabledPlugins),
+			)
+			sp, err := reg.Factory(ctx, tmpApp)
+			if err != nil {
+				slog.Error("failed to create search provider", "name", name, "error", err)
+			} else if sp != nil {
+				appOpts = append(appOpts, plugin.WithSearchProvider(sp))
+				slog.Debug("initialized search provider plugin", "name", name)
+			}
+		}
+	}
+
+	// Create shared plugin app for both tools and hooks.
+	c.pluginApp = plugin.NewApp(appOpts...)
 
 	// Initialize registered hooks.
 	for _, name := range plugin.RegisteredHooks() {

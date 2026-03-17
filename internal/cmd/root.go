@@ -298,12 +298,13 @@ func createDotCrushDir(dir string) error {
 	return nil
 }
 
-// listRegisteredPlugins prints all registered plugin tools and hooks.
+// listRegisteredPlugins prints all registered plugin tools, hooks, and search providers.
 func listRegisteredPlugins() error {
 	tools := plugin.RegisteredTools()
 	hooks := plugin.RegisteredHooks()
+	searchName, searchReg := plugin.GetSearchProviderRegistration()
 
-	if len(tools) == 0 && len(hooks) == 0 {
+	if len(tools) == 0 && len(hooks) == 0 && searchReg == nil {
 		fmt.Println("No plugins registered")
 		return nil
 	}
@@ -320,6 +321,11 @@ func listRegisteredPlugins() error {
 		for _, name := range hooks {
 			fmt.Printf("  - %s\n", name)
 		}
+	}
+
+	if searchReg != nil {
+		fmt.Println("Registered search providers:")
+		fmt.Printf("  - %s\n", searchName)
 	}
 
 	return nil

@@ -18,7 +18,7 @@ import (
 )
 
 func TestCommandsDefaultCommandsIncludeMCPServers(t *testing.T) {
-	com := testCommon(t, `{"options":{"disable_default_providers":true,"disable_provider_auto_update":true},"tools":{}}`)
+	com := testCommon(t, `{"options":{"disable_provider_auto_update":true},"tools":{}}`)
 	d, err := NewCommands(com, "", false, false, false, session.CollaborationModeDefault, "", nil, nil)
 	require.NoError(t, err)
 

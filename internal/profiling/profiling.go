@@ -20,11 +20,11 @@ var (
 
 // Config holds profiling configuration.
 type Config struct {
-	CPUProfile  string // Path to CPU profile file
-	MemProfile  string // Path to memory profile file
-	TraceFile   string // Path to trace file
-	BlockRate   int    // Block profiling rate (0 to disable)
-	MutexFrac   int    // Mutex profiling fraction (0 to disable)
+	CPUProfile string // Path to CPU profile file
+	MemProfile string // Path to memory profile file
+	TraceFile  string // Path to trace file
+	BlockRate  int    // Block profiling rate (0 to disable)
+	MutexFrac  int    // Mutex profiling fraction (0 to disable)
 }
 
 // Start begins profiling based on the provided configuration.

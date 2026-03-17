@@ -67,6 +67,7 @@ const (
 	StateDisabled State = iota
 	StateStarting
 	StateConnected
+	StateNeedsAuth
 	StateError
 )
 
@@ -78,6 +79,8 @@ func (s State) String() string {
 		return "starting"
 	case StateConnected:
 		return "connected"
+	case StateNeedsAuth:
+		return "needs_auth"
 	case StateError:
 		return "error"
 	default:
@@ -196,46 +199,9 @@ func Initialize(ctx context.Context, permissions permission.Service, cfg *config
 				}
 			}()
 
-			// createSession handles its own timeout internally.
-			session, err := createSession(ctx, name, m, cfg.Resolver())
-			if err != nil {
+			if err := Reconnect(ctx, cfg, name); err != nil {
 				return
 			}
-
-			tools, err := getTools(ctx, session)
-			if err != nil {
-				slog.Error("Error listing tools", "error", err)
-				updateState(name, StateError, err, nil, Counts{})
-				session.Close()
-				return
-			}
-
-			prompts, err := getPrompts(ctx, session)
-			if err != nil {
-				slog.Error("Error listing prompts", "error", err)
-				updateState(name, StateError, err, nil, Counts{})
-				session.Close()
-				return
-			}
-
-			resources, err := getResources(ctx, session)
-			if err != nil {
-				slog.Error("Error listing resources", "error", err)
-				updateState(name, StateError, err, nil, Counts{})
-				session.Close()
-				return
-			}
-
-			toolCount := updateTools(cfg, name, tools)
-			updatePrompts(name, prompts)
-			resourceCount := updateResources(name, resources)
-			sessions.Set(name, session)
-
-			updateState(name, StateConnected, nil, session, Counts{
-				Tools:     toolCount,
-				Prompts:   len(prompts),
-				Resources: resourceCount,
-			})
 		}(name, m)
 	}
 	wg.Wait()
@@ -256,7 +222,14 @@ func WaitForInit(ctx context.Context) error {
 func getOrRenewClient(ctx context.Context, cfg *config.ConfigStore, name string) (*ClientSession, error) {
 	sess, ok := sessions.Get(name)
 	if !ok {
-		return nil, fmt.Errorf("mcp '%s' not available", name)
+		if err := Reconnect(ctx, cfg, name); err != nil {
+			return nil, err
+		}
+		sess, ok = sessions.Get(name)
+		if !ok {
+			return nil, fmt.Errorf("mcp '%s' not available", name)
+		}
+		return sess, nil
 	}
 
 	m := cfg.Config().MCP[name]
@@ -269,15 +242,15 @@ func getOrRenewClient(ctx context.Context, cfg *config.ConfigStore, name string)
 	if err == nil {
 		return sess, nil
 	}
-	updateState(name, StateError, maybeTimeoutErr(err, timeout), nil, state.Counts)
+	updateState(name, stateForError(maybeTimeoutErr(err, timeout)), maybeTimeoutErr(err, timeout), nil, state.Counts)
 
-	sess, err = createSession(ctx, name, m, cfg.Resolver())
-	if err != nil {
+	if err := Reconnect(ctx, cfg, name); err != nil {
 		return nil, err
 	}
-
-	updateState(name, StateConnected, nil, sess, state.Counts)
-	sessions.Set(name, sess)
+	sess, ok = sessions.Get(name)
+	if !ok {
+		return nil, fmt.Errorf("mcp '%s' not available", name)
+	}
 	return sess, nil
 }
 
@@ -293,8 +266,13 @@ func updateState(name string, state State, err error, client *ClientSession, cou
 	switch state {
 	case StateConnected:
 		info.ConnectedAt = time.Now()
-	case StateError:
+	case StateDisabled, StateNeedsAuth, StateError:
+		info.Client = nil
+		info.Counts = Counts{}
 		sessions.Del(name)
+		allTools.Del(name)
+		allPrompts.Del(name)
+		allResources.Del(name)
 	}
 	states.Set(name, info)
 
@@ -308,14 +286,14 @@ func updateState(name string, state State, err error, client *ClientSession, cou
 	})
 }
 
-func createSession(ctx context.Context, name string, m config.MCPConfig, resolver config.VariableResolver) (*ClientSession, error) {
+func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, resolver config.VariableResolver) (*ClientSession, error) {
 	timeout := mcpTimeout(m)
 	mcpCtx, cancel := context.WithCancel(ctx)
 	cancelTimer := time.AfterFunc(timeout, cancel)
 
-	transport, err := createTransport(mcpCtx, m, resolver)
+	transport, err := createTransport(mcpCtx, cfg, name, m, resolver)
 	if err != nil {
-		updateState(name, StateError, err, nil, Counts{})
+		updateState(name, stateForError(err), err, nil, Counts{})
 		slog.Error("Error creating MCP client", "error", err, "name", name)
 		cancel()
 		cancelTimer.Stop()
@@ -357,7 +335,8 @@ func createSession(ctx context.Context, name string, m config.MCPConfig, resolve
 	session, err := client.Connect(mcpCtx, transport, nil)
 	if err != nil {
 		err = maybeStdioErr(err, transport)
-		updateState(name, StateError, maybeTimeoutErr(err, timeout), nil, Counts{})
+		err = maybeTimeoutErr(err, timeout)
+		updateState(name, stateForError(err), err, nil, Counts{})
 		slog.Error("MCP client failed to initialize", "error", err, "name", name)
 		cancel()
 		cancelTimer.Stop()
@@ -397,7 +376,70 @@ func maybeTimeoutErr(err error, timeout time.Duration) error {
 	return err
 }
 
-func createTransport(ctx context.Context, m config.MCPConfig, resolver config.VariableResolver) (mcp.Transport, error) {
+func stateForError(err error) State {
+	if _, ok := NeedsAuth(err); ok {
+		return StateNeedsAuth
+	}
+	return StateError
+}
+
+func Reconnect(ctx context.Context, cfg *config.ConfigStore, name string) error {
+	m, ok := cfg.Config().MCP[name]
+	if !ok {
+		return fmt.Errorf("mcp %s not found", name)
+	}
+	if m.Disabled {
+		updateState(name, StateDisabled, nil, nil, Counts{})
+		return nil
+	}
+	if existing, ok := sessions.Get(name); ok {
+		_ = existing.Close()
+	}
+	updateState(name, StateStarting, nil, nil, Counts{})
+	resolver := cfg.Resolver()
+	session, err := createSession(ctx, cfg, name, m, resolver)
+	if err != nil {
+		return err
+	}
+
+	tools, err := getTools(ctx, session)
+	if err != nil {
+		slog.Error("Error listing tools", "error", err, "name", name)
+		updateState(name, stateForError(err), err, nil, Counts{})
+		_ = session.Close()
+		return err
+	}
+
+	prompts, err := getPrompts(ctx, session)
+	if err != nil {
+		slog.Error("Error listing prompts", "error", err, "name", name)
+		updateState(name, stateForError(err), err, nil, Counts{})
+		_ = session.Close()
+		return err
+	}
+
+	resources, err := getResources(ctx, session)
+	if err != nil {
+		slog.Error("Error listing resources", "error", err, "name", name)
+		updateState(name, stateForError(err), err, nil, Counts{})
+		_ = session.Close()
+		return err
+	}
+
+	toolCount := updateTools(cfg, name, tools)
+	updatePrompts(name, prompts)
+	resourceCount := updateResources(name, resources)
+	sessions.Set(name, session)
+
+	updateState(name, StateConnected, nil, session, Counts{
+		Tools:     toolCount,
+		Prompts:   len(prompts),
+		Resources: resourceCount,
+	})
+	return nil
+}
+
+func createTransport(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, resolver config.VariableResolver) (mcp.Transport, error) {
 	switch m.Type {
 	case config.MCPStdio:
 		command, err := resolver.ResolveValue(m.Command)
@@ -416,11 +458,18 @@ func createTransport(ctx context.Context, m config.MCPConfig, resolver config.Va
 		if strings.TrimSpace(m.URL) == "" {
 			return nil, fmt.Errorf("mcp http config requires a non-empty 'url' field")
 		}
-		client := &http.Client{
-			Transport: &headerRoundTripper{
-				headers: m.ResolvedHeaders(),
-			},
+		headers := m.ResolvedHeaders()
+		transport := http.RoundTripper(&headerRoundTripper{
+			headers: headers,
+		})
+		if m.SupportsInteractiveAuth() {
+			transport = &oauthRoundTripper{
+				base:       transport,
+				headers:    headers,
+				authorizer: newMCPOAuthAuthorizer(name, cfg, headers),
+			}
 		}
+		client := &http.Client{Transport: transport}
 		return &mcp.StreamableClientTransport{
 			Endpoint:   m.URL,
 			HTTPClient: client,

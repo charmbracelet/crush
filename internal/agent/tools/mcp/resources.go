@@ -32,6 +32,9 @@ func ListResources(ctx context.Context, cfg *config.ConfigStore, name string) ([
 
 	resources, err := getResources(ctx, session)
 	if err != nil {
+		if prev, ok := states.Get(name); ok {
+			updateState(name, stateForError(err), err, nil, prev.Counts)
+		}
 		return nil, err
 	}
 
@@ -50,6 +53,9 @@ func ReadResource(ctx context.Context, cfg *config.ConfigStore, name, uri string
 	}
 	result, err := session.ReadResource(ctx, &mcp.ReadResourceParams{URI: uri})
 	if err != nil {
+		if prev, ok := states.Get(name); ok {
+			updateState(name, stateForError(err), err, nil, prev.Counts)
+		}
 		return nil, err
 	}
 	return result.Contents, nil
@@ -66,7 +72,7 @@ func RefreshResources(ctx context.Context, name string) {
 
 	resources, err := getResources(ctx, session)
 	if err != nil {
-		updateState(name, StateError, err, nil, Counts{})
+		updateState(name, stateForError(err), err, nil, Counts{})
 		return
 	}
 

@@ -97,6 +97,19 @@ type (
 	ActionResolveUserInput struct {
 		Response userinput.Response
 	}
+	ActionAuthenticateMCP struct {
+		Name string
+	}
+	ActionReconnectMCP struct {
+		Name string
+	}
+	ActionOpenMCPDetail struct {
+		Name string
+	}
+	ActionToggleMCP struct {
+		Name   string
+		Enable bool
+	}
 )
 
 // Messages for API key input dialog.

@@ -29,6 +29,30 @@
       "additionalProperties": false,
       "type": "object"
     },
+    "CommandConfig": {
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "passthrough": {
+          "type": "boolean"
+        },
+        "passthrough_field": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "command"
+      ]
+    },
     "Completions": {
       "properties": {
         "max_depth": {
@@ -89,12 +113,75 @@
         "tools": {
           "$ref": "#/$defs/Tools",
           "description": "Tool configurations"
+        },
+        "hooks": {
+          "items": {
+            "$ref": "#/$defs/HookConfig"
+          },
+          "type": "array",
+          "description": "Tool execution hooks (PreToolUse)"
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
         "tools"
+      ]
+    },
+    "HTTPConfig": {
+      "properties": {
+        "url": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "url"
+      ]
+    },
+    "HookConfig": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "events": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "type": {
+          "type": "string"
+        },
+        "timeout_ms": {
+          "type": "integer"
+        },
+        "command": {
+          "$ref": "#/$defs/CommandConfig"
+        },
+        "http": {
+          "$ref": "#/$defs/HTTPConfig"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name",
+        "events",
+        "type"
       ]
     },
     "LSPConfig": {
@@ -245,6 +332,10 @@
             120
           ]
         },
+        "oauth": {
+          "$ref": "#/$defs/MCPOAuthConfig",
+          "description": "OAuth configuration for HTTP MCP servers"
+        },
         "headers": {
           "additionalProperties": {
             "type": "string"
@@ -258,6 +349,104 @@
       "required": [
         "type"
       ]
+    },
+    "MCPOAuthAuthServer": {
+      "properties": {
+        "issuer": {
+          "type": "string",
+          "format": "uri",
+          "description": "OAuth authorization server issuer URL"
+        },
+        "authorization_endpoint": {
+          "type": "string",
+          "format": "uri",
+          "description": "OAuth authorization endpoint for the MCP server"
+        },
+        "token_endpoint": {
+          "type": "string",
+          "format": "uri",
+          "description": "OAuth token endpoint for the MCP server"
+        },
+        "registration_endpoint": {
+          "type": "string",
+          "format": "uri",
+          "description": "OAuth dynamic client registration endpoint for the MCP server"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "MCPOAuthConfig": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable OAuth authentication for HTTP MCP servers",
+          "default": false
+        },
+        "client_name": {
+          "type": "string",
+          "description": "Client name used during MCP OAuth registration",
+          "examples": [
+            "Crush"
+          ]
+        },
+        "redirect_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Loopback redirect URL override for MCP OAuth callbacks",
+          "examples": [
+            "http://127.0.0.1:8913/callback"
+          ]
+        },
+        "client_id": {
+          "type": "string",
+          "description": "Pre-registered OAuth client ID for the MCP server"
+        },
+        "client_secret": {
+          "type": "string",
+          "description": "Pre-registered OAuth client secret for the MCP server"
+        },
+        "token": {
+          "$ref": "#/$defs/Token",
+          "description": "Persisted OAuth token for the MCP server"
+        },
+        "registration": {
+          "$ref": "#/$defs/MCPOAuthRegistration",
+          "description": "Persisted OAuth client registration for the MCP server"
+        },
+        "auth_server": {
+          "$ref": "#/$defs/MCPOAuthAuthServer",
+          "description": "Discovered OAuth authorization server metadata for the MCP server"
+        },
+        "resource": {
+          "type": "string",
+          "format": "uri",
+          "description": "Protected resource identifier for the MCP server"
+        },
+        "scopes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "OAuth scopes granted for the MCP server"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "MCPOAuthRegistration": {
+      "properties": {
+        "client_id": {
+          "type": "string",
+          "description": "Registered OAuth client ID for the MCP server"
+        },
+        "client_secret": {
+          "type": "string",
+          "description": "Registered OAuth client secret for the MCP server"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
     },
     "MCPs": {
       "additionalProperties": {
@@ -546,9 +735,19 @@
           "type": "object",
           "description": "Additional fields to include in request bodies"
         },
+        "use_copilot_client": {
+          "type": "boolean",
+          "description": "Use the GitHub Copilot OAuth HTTP client for this provider (openai-compat",
+          "default": false
+        },
         "provider_options": {
           "type": "object",
           "description": "Additional provider-specific options for this provider"
+        },
+        "copilot_service": {
+          "type": "boolean",
+          "description": "Enable GitHub Copilot billing rules with X-Initiator header. When true",
+          "default": false
         },
         "models": {
           "items": {

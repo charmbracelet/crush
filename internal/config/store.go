@@ -235,6 +235,78 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 	return nil
 }
 
+func (s *ConfigStore) SetMCPOAuthConfig(scope Scope, mcpName string, oauthCfg *MCPOAuthConfig) error {
+	mcpConfig, ok := s.config.MCP[mcpName]
+	if !ok {
+		return fmt.Errorf("mcp %s not found", mcpName)
+	}
+
+	if oauthCfg == nil {
+		mcpConfig.OAuth = nil
+		s.config.MCP[mcpName] = mcpConfig
+		if !s.HasConfigField(scope, fmt.Sprintf("mcp.%s.oauth", mcpName)) {
+			return nil
+		}
+		return s.RemoveConfigField(scope, fmt.Sprintf("mcp.%s.oauth", mcpName))
+	}
+
+	mcpConfig.OAuth = cloneMCPOAuthConfig(oauthCfg)
+	s.config.MCP[mcpName] = mcpConfig
+	if err := s.SetConfigField(scope, fmt.Sprintf("mcp.%s.oauth", mcpName), mcpConfig.OAuth); err != nil {
+		return fmt.Errorf("failed to save mcp oauth config: %w", err)
+	}
+	return nil
+}
+
+func (s *ConfigStore) SetMCPOAuthToken(scope Scope, mcpName string, token *oauth.Token) error {
+	oauthCfg, err := s.cloneCurrentMCPOAuthConfig(mcpName)
+	if err != nil {
+		return err
+	}
+	if token == nil && oauthCfg == nil {
+		return nil
+	}
+	if oauthCfg == nil {
+		oauthCfg = &MCPOAuthConfig{}
+	}
+	oauthCfg.Token = token
+	return s.SetMCPOAuthConfig(scope, mcpName, oauthCfg)
+}
+
+func (s *ConfigStore) cloneCurrentMCPOAuthConfig(mcpName string) (*MCPOAuthConfig, error) {
+	mcpConfig, ok := s.config.MCP[mcpName]
+	if !ok {
+		return nil, fmt.Errorf("mcp %s not found", mcpName)
+	}
+	if mcpConfig.OAuth == nil {
+		return nil, nil
+	}
+	return cloneMCPOAuthConfig(mcpConfig.OAuth), nil
+}
+
+func cloneMCPOAuthConfig(in *MCPOAuthConfig) *MCPOAuthConfig {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	if in.Token != nil {
+		token := *in.Token
+		out.Token = &token
+	}
+	if in.Registration != nil {
+		registration := *in.Registration
+		out.Registration = &registration
+	}
+	if in.AuthServer != nil {
+		authServer := *in.AuthServer
+		out.AuthServer = &authServer
+	}
+	if in.Scopes != nil {
+		out.Scopes = slices.Clone(in.Scopes)
+	}
+	return &out
+}
+
 // RefreshOAuthToken refreshes the OAuth token for the given provider.
 func (s *ConfigStore) RefreshOAuthToken(ctx context.Context, scope Scope, providerID string) error {
 	providerConfig, exists := s.config.Providers.Get(providerID)

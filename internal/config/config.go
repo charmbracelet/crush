@@ -179,6 +179,31 @@ const (
 	MCPHttp  MCPType = "http"
 )
 
+type MCPOAuthRegistration struct {
+	ClientID     string `json:"client_id,omitempty" jsonschema:"description=Registered OAuth client ID for the MCP server"`
+	ClientSecret string `json:"client_secret,omitempty" jsonschema:"description=Registered OAuth client secret for the MCP server"`
+}
+
+type MCPOAuthAuthServer struct {
+	Issuer                string `json:"issuer,omitempty" jsonschema:"description=OAuth authorization server issuer URL,format=uri"`
+	AuthorizationEndpoint string `json:"authorization_endpoint,omitempty" jsonschema:"description=OAuth authorization endpoint for the MCP server,format=uri"`
+	TokenEndpoint         string `json:"token_endpoint,omitempty" jsonschema:"description=OAuth token endpoint for the MCP server,format=uri"`
+	RegistrationEndpoint  string `json:"registration_endpoint,omitempty" jsonschema:"description=OAuth dynamic client registration endpoint for the MCP server,format=uri"`
+}
+
+type MCPOAuthConfig struct {
+	Enabled      bool                  `json:"enabled,omitempty" jsonschema:"description=Enable OAuth authentication for HTTP MCP servers,default=false"`
+	ClientName   string                `json:"client_name,omitempty" jsonschema:"description=Client name used during MCP OAuth registration,example=Crush"`
+	RedirectURL  string                `json:"redirect_url,omitempty" jsonschema:"description=Loopback redirect URL override for MCP OAuth callbacks,format=uri,example=http://127.0.0.1:8913/callback"`
+	ClientID     string                `json:"client_id,omitempty" jsonschema:"description=Pre-registered OAuth client ID for the MCP server"`
+	ClientSecret string                `json:"client_secret,omitempty" jsonschema:"description=Pre-registered OAuth client secret for the MCP server"`
+	Token        *oauth.Token          `json:"token,omitempty" jsonschema:"description=Persisted OAuth token for the MCP server"`
+	Registration *MCPOAuthRegistration `json:"registration,omitempty" jsonschema:"description=Persisted OAuth client registration for the MCP server"`
+	AuthServer   *MCPOAuthAuthServer   `json:"auth_server,omitempty" jsonschema:"description=Discovered OAuth authorization server metadata for the MCP server"`
+	Resource     string                `json:"resource,omitempty" jsonschema:"description=Protected resource identifier for the MCP server,format=uri"`
+	Scopes       []string              `json:"scopes,omitempty" jsonschema:"description=OAuth scopes granted for the MCP server"`
+}
+
 type MCPConfig struct {
 	Command       string            `json:"command,omitempty" jsonschema:"description=Command to execute for stdio MCP servers,example=npx"`
 	Env           map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set for the MCP server"`
@@ -188,6 +213,7 @@ type MCPConfig struct {
 	Disabled      bool              `json:"disabled,omitempty" jsonschema:"description=Whether this MCP server is disabled,default=false"`
 	DisabledTools []string          `json:"disabled_tools,omitempty" jsonschema:"description=List of tools from this MCP server to disable,example=get-library-doc"`
 	Timeout       int               `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for MCP server connections,default=15,example=30,example=60,example=120"`
+	OAuth         *MCPOAuthConfig   `json:"oauth,omitempty" jsonschema:"description=OAuth configuration for HTTP MCP servers"`
 
 	// TODO: maybe make it possible to get the value from the env
 	Headers map[string]string `json:"headers,omitempty" jsonschema:"description=HTTP headers for HTTP/SSE MCP servers"`
@@ -323,16 +349,26 @@ func (m MCPConfig) ResolvedEnv() []string {
 }
 
 func (m MCPConfig) ResolvedHeaders() map[string]string {
+	resolved := make(map[string]string, len(m.Headers))
 	resolver := NewShellVariableResolver(env.New())
 	for e, v := range m.Headers {
-		var err error
-		m.Headers[e], err = resolver.ResolveValue(v)
+		rv, err := resolver.ResolveValue(v)
 		if err != nil {
 			slog.Error("Error resolving header variable", "error", err, "variable", e, "value", v)
+			resolved[e] = v
 			continue
 		}
+		resolved[e] = rv
 	}
-	return m.Headers
+	return resolved
+}
+
+func (m MCPConfig) OAuthEnabled() bool {
+	return m.Type == MCPHttp && m.OAuth != nil && (m.OAuth.Enabled || m.OAuth.Token != nil || m.OAuth.ClientID != "" || m.OAuth.Registration != nil)
+}
+
+func (m MCPConfig) SupportsInteractiveAuth() bool {
+	return m.Type == MCPHttp
 }
 
 type Agent struct {

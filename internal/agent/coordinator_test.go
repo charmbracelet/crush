@@ -38,6 +38,9 @@ func (m *mockSessionAgent) QueuedPrompts(sessionID string) int                  
 func (m *mockSessionAgent) QueuedPromptsList(sessionID string) []string         { return nil }
 func (m *mockSessionAgent) RemoveQueuedPrompt(sessionID string, index int) bool { return false }
 func (m *mockSessionAgent) ClearQueue(sessionID string)                         {}
+func (m *mockSessionAgent) PauseQueue(sessionID string)                         {}
+func (m *mockSessionAgent) ResumeQueue(sessionID string)                        {}
+func (m *mockSessionAgent) IsQueuePaused(sessionID string) bool                 { return false }
 func (m *mockSessionAgent) Summarize(context.Context, string, fantasy.ProviderOptions) error {
 	return nil
 }
@@ -387,29 +390,7 @@ func TestUpdateParentSessionCost(t *testing.T) {
 }
 
 func TestMergeCallOptions_AnthropicThinkingCompatibility(t *testing.T) {
-	t.Run("copilot anthropic uses budget thinking without effort", func(t *testing.T) {
-		model := Model{
-			CatwalkCfg: catwalk.Model{
-				ID:                     "gpt-5.3-codex",
-				CanReason:              true,
-				DefaultReasoningEffort: "high",
-			},
-		}
-		cfg := config.ProviderConfig{
-			Type:             anthropic.Name,
-			UseCopilotClient: true,
-		}
-
-		options, _, _, _, _, _ := mergeCallOptions(model, cfg)
-		anthropicOpts, ok := options[anthropic.Name].(*anthropic.ProviderOptions)
-		require.True(t, ok)
-		require.NotNil(t, anthropicOpts)
-		require.Nil(t, anthropicOpts.Effort)
-		require.NotNil(t, anthropicOpts.Thinking)
-		require.Equal(t, int64(28672), anthropicOpts.Thinking.BudgetTokens)
-	})
-
-	t.Run("native anthropic keeps effort and thinking budget", func(t *testing.T) {
+	t.Run("claude 4.6 uses effort without budget thinking", func(t *testing.T) {
 		model := Model{
 			CatwalkCfg: catwalk.Model{
 				ID:                     "claude-sonnet-4.6",
@@ -426,6 +407,49 @@ func TestMergeCallOptions_AnthropicThinkingCompatibility(t *testing.T) {
 		require.True(t, ok)
 		require.NotNil(t, anthropicOpts)
 		require.Equal(t, anthropic.Effort("high"), *anthropicOpts.Effort)
+		// Claude 4.6 with effort uses adaptive thinking (SDK handles this)
+		require.Nil(t, anthropicOpts.Thinking)
+	})
+
+	t.Run("claude opus 4.6 with think flag uses medium effort", func(t *testing.T) {
+		model := Model{
+			CatwalkCfg: catwalk.Model{
+				ID:        "claude-opus-4-6",
+				CanReason: true,
+			},
+			ModelCfg: config.SelectedModel{
+				Think: true,
+			},
+		}
+		cfg := config.ProviderConfig{
+			Type: anthropic.Name,
+		}
+
+		options, _, _, _, _, _ := mergeCallOptions(model, cfg)
+		anthropicOpts, ok := options[anthropic.Name].(*anthropic.ProviderOptions)
+		require.True(t, ok)
+		require.NotNil(t, anthropicOpts)
+		require.Equal(t, anthropic.Effort("medium"), *anthropicOpts.Effort)
+		require.Nil(t, anthropicOpts.Thinking)
+	})
+
+	t.Run("older claude uses budget thinking without effort", func(t *testing.T) {
+		model := Model{
+			CatwalkCfg: catwalk.Model{
+				ID:                     "claude-sonnet-4",
+				CanReason:              true,
+				DefaultReasoningEffort: "high",
+			},
+		}
+		cfg := config.ProviderConfig{
+			Type: anthropic.Name,
+		}
+
+		options, _, _, _, _, _ := mergeCallOptions(model, cfg)
+		anthropicOpts, ok := options[anthropic.Name].(*anthropic.ProviderOptions)
+		require.True(t, ok)
+		require.NotNil(t, anthropicOpts)
+		require.Nil(t, anthropicOpts.Effort)
 		require.NotNil(t, anthropicOpts.Thinking)
 		require.Equal(t, int64(28672), anthropicOpts.Thinking.BudgetTokens)
 	})

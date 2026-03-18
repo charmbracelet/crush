@@ -174,6 +174,7 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 		prompt.WithTimeFunc(fixedTime),
 		prompt.WithPlatform("linux"),
 		prompt.WithWorkingDir(filepath.ToSlash(env.workingDir)),
+		prompt.WithDisableGlobalContextFile(true),
 	)
 	if err != nil {
 		return nil, err

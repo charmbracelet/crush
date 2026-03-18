@@ -102,6 +102,9 @@ type SessionAgent interface {
 	ClearQueue(sessionID string)
 	Summarize(context.Context, string, fantasy.ProviderOptions) error
 	Model() Model
+	PauseQueue(sessionID string)
+	ResumeQueue(sessionID string)
+	IsQueuePaused(sessionID string) bool
 }
 
 type Model struct {
@@ -127,6 +130,7 @@ type sessionAgent struct {
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, context.CancelFunc]
+	pausedQueues   *csync.Map[string, bool]
 }
 
 type SessionAgentOptions struct {
@@ -166,6 +170,7 @@ func NewSessionAgent(
 		notify:               opts.Notify,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, context.CancelFunc](),
+		pausedQueues:         csync.NewMap[string, bool](),
 	}
 }
 
@@ -277,6 +282,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	a.eventPromptSent(call.SessionID)
 
 	var shouldSummarize bool
+	var contextWindowExceeded bool
 	var currentAssistant *message.Message
 	var currentStepToolMessageIDs []string
 	var estimatedPromptTokens int64
@@ -486,7 +492,33 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	}
 
 	providerOptions := call.ProviderOptions
-	result, err := runStream(providerOptions, true)
+	var result *fantasy.AgentResult
+	var retryAttempt int
+	for {
+		result, err = runStream(providerOptions, retryAttempt == 0)
+
+		// Check for retriable errors (429, 503, network issues).
+		if err != nil && isRetriableError(err) && retryAttempt < maxRetriableAttempts && completedStepsThisRun == 0 {
+			retryAttempt++
+			delay := retryDelay(retryAttempt)
+			slog.Warn("Retrying after transient error",
+				"error", err,
+				"attempt", retryAttempt,
+				"delay", delay,
+				"session_id", call.SessionID,
+				"model", largeModel.ModelCfg.Model,
+				"provider", largeModel.ModelCfg.Provider,
+			)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delay):
+			}
+			continue
+		}
+		break
+	}
+
 	if completedStepsThisRun == 0 && shouldRetryWithoutAnthropicThinking(err, providerOptions) {
 		slog.Warn(
 			"Retrying request without Anthropic thinking after provider rejected unsigned reasoning content",
@@ -501,6 +533,38 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		currentStepToolMessageIDs = nil
 		providerOptions, _ = disableAnthropicThinking(providerOptions)
 		result, err = runStream(providerOptions, false)
+	}
+
+	// Context-window-exceeded recovery: if the LLM rejected the request
+	// before completing any step (completedStepsThisRun == 0) because the
+	// history was too long, we truncate the oversized tool result that caused
+	// the overflow, then force an auto-summarize + auto-resume instead of
+	// surfacing a fatal error that leaves the session unusable.
+	if completedStepsThisRun == 0 && isContextWindowExceededError(err) && !a.disableAutoSummarize {
+		slog.Warn("Context window exceeded before any step completed; forcing summarization to recover",
+			"session_id", call.SessionID,
+			"model", largeModel.ModelCfg.Model,
+			"provider", largeModel.ModelCfg.Provider,
+		)
+		if truncErr := a.truncateOversizedToolResults(ctx, call.SessionID); truncErr != nil {
+			slog.Warn("Failed to truncate oversized tool results", "error", truncErr)
+		}
+		// Update the empty failed-assistant message with a human-readable
+		// notice instead of deleting it, so the user can see what happened.
+		if currentAssistant != nil {
+			currentAssistant.AddFinish(
+				message.FinishReasonError,
+				"Context limit reached",
+				"The conversation history reached this model's context window limit. Auto-summarizing the session to continue the task…",
+			)
+			if updateErr := a.messages.Update(ctx, *currentAssistant); updateErr != nil {
+				slog.Warn("Failed to update failed assistant message after context-window error", "error", updateErr)
+			}
+		}
+		contextWindowExceeded = true
+		shouldSummarize = true
+		err = nil
+		result = &fantasy.AgentResult{}
 	}
 
 	a.eventPromptResponded(call.SessionID, time.Since(startTime).Truncate(time.Second))
@@ -627,13 +691,21 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		if summarizeErr := a.Summarize(copilot.ContextWithInitiatorType(genCtx, copilot.InitiatorAgent), call.SessionID, call.ProviderOptions); summarizeErr != nil {
 			return nil, summarizeErr
 		}
-		// If the agent wasn't done...
-		if len(currentAssistant.ToolCalls()) > 0 {
+		// Queue an auto-resume when:
+		//   (a) the agent had pending tool calls mid-run (normal summarize path), or
+		//   (b) the LLM call itself was rejected due to context overflow before
+		//       returning any output (contextWindowExceeded path).
+		hasPendingToolCalls := currentAssistant != nil && len(currentAssistant.ToolCalls()) > 0
+		if hasPendingToolCalls || contextWindowExceeded {
 			existing, ok := a.messageQueue.Get(call.SessionID)
 			if !ok {
 				existing = []SessionAgentCall{}
 			}
-			call.Prompt = fmt.Sprintf(autoResumePromptPrefix+"%s`", call.Prompt)
+			resumePrefix := autoResumePromptPrefix
+			if contextWindowExceeded {
+				resumePrefix = contextWindowResumePromptPrefix
+			}
+			call.Prompt = fmt.Sprintf(resumePrefix+"%s`", call.Prompt)
 			call.InitiatorType = copilot.InitiatorAgent
 			existing = append(existing, call)
 			a.messageQueue.Set(call.SessionID, existing)
@@ -646,6 +718,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	queuedMessages, ok = a.messageQueue.Get(call.SessionID)
 	if !ok || len(queuedMessages) == 0 {
+		return result, err
+	}
+	// Don't auto-process the next queued message while the queue is paused.
+	if a.IsQueuePaused(call.SessionID) {
 		return result, err
 	}
 	// There are queued messages restart the loop.
@@ -1172,6 +1248,7 @@ func (a *sessionAgent) Cancel(sessionID string) {
 		slog.Debug("Clearing queued prompts", "session_id", sessionID)
 		a.messageQueue.Del(sessionID)
 	}
+	a.pausedQueues.Del(sessionID)
 }
 
 func (a *sessionAgent) RemoveQueuedPrompt(sessionID string, index int) bool {
@@ -1184,6 +1261,7 @@ func (a *sessionAgent) RemoveQueuedPrompt(sessionID string, index int) bool {
 	updatedQueue := append(queuedPrompts[:index:index], queuedPrompts[index+1:]...)
 	if len(updatedQueue) == 0 {
 		a.messageQueue.Del(sessionID)
+		a.pausedQueues.Del(sessionID)
 		return true
 	}
 	a.messageQueue.Set(sessionID, updatedQueue)
@@ -1195,6 +1273,45 @@ func (a *sessionAgent) ClearQueue(sessionID string) {
 		slog.Debug("Clearing queued prompts", "session_id", sessionID)
 		a.messageQueue.Del(sessionID)
 	}
+	// Auto-unpause when the queue is cleared.
+	a.pausedQueues.Del(sessionID)
+}
+
+// PauseQueue pauses automatic processing of queued prompts for the session.
+// The current request (if any) continues, but the next queued prompt won't
+// be automatically started. Use this to stop the queue without clearing it.
+func (a *sessionAgent) PauseQueue(sessionID string) {
+	a.pausedQueues.Set(sessionID, true)
+	slog.Debug("Queue paused", "session_id", sessionID)
+}
+
+// ResumeQueue resumes automatic processing of queued prompts for the session.
+// If there are queued prompts and no active request, it starts the next one.
+func (a *sessionAgent) ResumeQueue(sessionID string) {
+	a.pausedQueues.Del(sessionID)
+	slog.Debug("Queue resumed", "session_id", sessionID)
+
+	if a.IsSessionBusy(sessionID) {
+		return
+	}
+	queuedMessages, ok := a.messageQueue.Get(sessionID)
+	if !ok || len(queuedMessages) == 0 {
+		return
+	}
+
+	firstQueuedMessage := queuedMessages[0]
+	a.messageQueue.Set(sessionID, queuedMessages[1:])
+	go func(call SessionAgentCall) {
+		if _, err := a.Run(context.Background(), call); err != nil {
+			slog.Warn("Failed to resume queued prompt", "session_id", sessionID, "error", err)
+		}
+	}(firstQueuedMessage)
+}
+
+// IsQueuePaused reports whether the queue is paused for the session.
+func (a *sessionAgent) IsQueuePaused(sessionID string) bool {
+	paused, _ := a.pausedQueues.Get(sessionID)
+	return paused
 }
 
 func (a *sessionAgent) CancelAll() {

@@ -235,6 +235,7 @@ type UI struct {
 	pillsExpanded      bool
 	focusedPillSection pillSection
 	promptQueue        int
+	queuePaused        bool
 	selectedQueueIndex int
 	pillsPreviousFocus uiFocusState
 	pillsView          string
@@ -1399,7 +1400,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 		cmds = append(cmds, func() tea.Msg {
-			err := m.com.App.AgentCoordinator.Summarize(context.Background(), msg.SessionID)
+			err := m.com.App.AgentCoordinator.Summarize(context.Background(), msg.SessionID, nil)
 			if err != nil {
 				return util.ReportError(err)()
 			}
@@ -1423,6 +1424,16 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionTogglePills:
 		if cmd := m.togglePillsExpanded(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionPauseQueue:
+		if cmd := m.pauseQueue(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionResumeQueue:
+		if cmd := m.resumeQueue(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)
@@ -2322,8 +2333,8 @@ func (m *UI) ShortHelp() []key.Binding {
 			cancelBinding := k.Chat.Cancel
 			if m.isCanceling {
 				cancelBinding.SetHelp("esc", "press again to cancel")
-			} else if m.com.App.AgentCoordinator.QueuedPrompts(m.session.ID) > 0 {
-				cancelBinding.SetHelp("esc", "clear queue")
+			} else if m.com.App.AgentCoordinator.QueuedPrompts(m.session.ID) > 0 && !m.queuePaused {
+				cancelBinding.SetHelp("esc", "pause queue")
 			}
 			binds = append(binds, cancelBinding)
 		}
@@ -2400,8 +2411,8 @@ func (m *UI) FullHelp() [][]key.Binding {
 			cancelBinding := k.Chat.Cancel
 			if m.isCanceling {
 				cancelBinding.SetHelp("esc", "press again to cancel")
-			} else if m.com.App.AgentCoordinator.QueuedPrompts(m.session.ID) > 0 {
-				cancelBinding.SetHelp("esc", "clear queue")
+			} else if m.com.App.AgentCoordinator.QueuedPrompts(m.session.ID) > 0 && !m.queuePaused {
+				cancelBinding.SetHelp("esc", "pause queue")
 			}
 			binds = append(binds, []key.Binding{cancelBinding})
 		}
@@ -3155,8 +3166,10 @@ func (m *UI) syncPromptQueue() bool {
 	}
 
 	queueSize := m.com.App.AgentCoordinator.QueuedPrompts(m.session.ID)
-	changed := queueSize != m.promptQueue
+	queuePaused := m.com.App.AgentCoordinator.IsQueuePaused(m.session.ID)
+	changed := queueSize != m.promptQueue || queuePaused != m.queuePaused
 	m.promptQueue = queueSize
+	m.queuePaused = queuePaused
 	if queueSize <= 0 {
 		m.selectedQueueIndex = 0
 		return changed
@@ -3203,7 +3216,31 @@ func (m *UI) clearQueuedPrompts() tea.Cmd {
 		return nil
 	}
 	m.com.App.AgentCoordinator.ClearQueue(m.session.ID)
+	m.queuePaused = false
 	m.syncPromptQueue()
+	m.renderPills()
+	return nil
+}
+
+// pauseQueue pauses automatic processing of queued prompts.
+// The current request continues, but subsequent queued items won't start.
+func (m *UI) pauseQueue() tea.Cmd {
+	if !m.hasSession() || m.com.App == nil || m.com.App.AgentCoordinator == nil {
+		return nil
+	}
+	m.com.App.AgentCoordinator.PauseQueue(m.session.ID)
+	m.queuePaused = true
+	m.renderPills()
+	return nil
+}
+
+// resumeQueue resumes automatic processing of queued prompts.
+func (m *UI) resumeQueue() tea.Cmd {
+	if !m.hasSession() || m.com.App == nil || m.com.App.AgentCoordinator == nil {
+		return nil
+	}
+	m.com.App.AgentCoordinator.ResumeQueue(m.session.ID)
+	m.queuePaused = false
 	m.renderPills()
 	return nil
 }
@@ -3228,9 +3265,10 @@ func (m *UI) cancelAgent() tea.Cmd {
 		return nil
 	}
 
-	// Check if there are queued prompts - if so, clear the queue.
-	if coordinator.QueuedPrompts(m.session.ID) > 0 {
-		return m.clearQueuedPrompts()
+	// If there's a queue that's not yet paused, pause it first.
+	// Once paused (or if already paused), ESC proceeds to the normal cancel flow.
+	if coordinator.QueuedPrompts(m.session.ID) > 0 && !m.queuePaused {
+		return m.pauseQueue()
 	}
 
 	// First escape press - set canceling state and start timer.
@@ -3322,8 +3360,9 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 	}
 	hasTodos := hasSession && hasIncompleteTodos(m.session.Todos)
 	hasQueue := m.promptQueue > 0
+	queuePaused := m.queuePaused
 
-	commands, err := dialog.NewCommands(m.com, sessionID, hasSession, hasTodos, hasQueue, mode, m.latestProposedPlan, m.customCommands, m.mcpPrompts)
+	commands, err := dialog.NewCommands(m.com, sessionID, hasSession, hasTodos, hasQueue, queuePaused, mode, m.latestProposedPlan, m.customCommands, m.mcpPrompts)
 	if err != nil {
 		return util.ReportError(err)
 	}

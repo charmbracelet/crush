@@ -52,7 +52,7 @@ func hasInProgressTodo(todos []session.Todo) bool {
 }
 
 // queuePill renders the queue count pill with gradient triangles.
-func queuePill(queue int, focused, panelFocused bool, t *styles.Styles) string {
+func queuePill(queue int, paused, focused, panelFocused bool, t *styles.Styles) string {
 	if queue <= 0 {
 		return ""
 	}
@@ -61,7 +61,11 @@ func queuePill(queue int, focused, panelFocused bool, t *styles.Styles) string {
 		triangles = triangles[:queue]
 	}
 
-	text := t.Base.Render(fmt.Sprintf("%d Queued", queue))
+	label := "Queued"
+	if paused {
+		label = "Paused"
+	}
+	text := t.Base.Render(fmt.Sprintf("%d %s", queue, label))
 	content := fmt.Sprintf("%s %s", strings.Join(triangles, ""), text)
 	return pillStyle(focused, panelFocused, t).Render(content)
 }
@@ -279,7 +283,7 @@ func (m *UI) renderPills() {
 		pills = append(pills, todoPill(m.session.Todos, inProgressIcon, todosFocused, m.pillsExpanded, t))
 	}
 	if hasQueue {
-		pills = append(pills, queuePill(m.promptQueue, queueFocused, m.pillsExpanded, t))
+		pills = append(pills, queuePill(m.promptQueue, m.queuePaused, queueFocused, m.pillsExpanded, t))
 	}
 
 	var expandedList string

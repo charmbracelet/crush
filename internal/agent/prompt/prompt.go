@@ -19,11 +19,12 @@ import (
 
 // Prompt represents a template-based prompt generator.
 type Prompt struct {
-	name       string
-	template   string
-	now        func() time.Time
-	platform   string
-	workingDir string
+	name              string
+	template          string
+	now               func() time.Time
+	platform          string
+	workingDir        string
+	disableGlobalFile bool
 }
 
 type PromptDat struct {
@@ -62,6 +63,12 @@ func WithPlatform(platform string) Option {
 func WithWorkingDir(workingDir string) Option {
 	return func(p *Prompt) {
 		p.workingDir = workingDir
+	}
+}
+
+func WithDisableGlobalContextFile(disable bool) Option {
+	return func(p *Prompt) {
+		p.disableGlobalFile = disable
 	}
 }
 
@@ -170,9 +177,11 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 
 	// Load global AGENTS.md directly to ensure it's always injected into system prompt.
 	var globalFiles []ContextFile
-	if globalAgentsPath := config.GlobalAgentsMD(); globalAgentsPath != "" {
-		if result := processFile(globalAgentsPath); result != nil {
-			globalFiles = append(globalFiles, *result)
+	if !p.disableGlobalFile {
+		if globalAgentsPath := config.GlobalAgentsMD(); globalAgentsPath != "" {
+			if result := processFile(globalAgentsPath); result != nil {
+				globalFiles = append(globalFiles, *result)
+			}
 		}
 	}
 

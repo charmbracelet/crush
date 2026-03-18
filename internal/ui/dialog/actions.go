@@ -50,6 +50,8 @@ type (
 	ActionToggleCompactMode           struct{}
 	ActionToggleThinking              struct{}
 	ActionTogglePills                 struct{}
+	ActionPauseQueue                  struct{}
+	ActionResumeQueue                 struct{}
 	ActionExternalEditor              struct{}
 	ActionToggleYoloMode              struct{}
 	ActionToggleNotifications         struct{}

@@ -71,7 +71,10 @@ type Coordinator interface {
 	QueuedPromptsList(sessionID string) []string
 	RemoveQueuedPrompt(sessionID string, index int) bool
 	ClearQueue(sessionID string)
-	Summarize(context.Context, string) error
+	PauseQueue(sessionID string)
+	ResumeQueue(sessionID string)
+	IsQueuePaused(sessionID string) bool
+	Summarize(context.Context, string, fantasy.ProviderOptions) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
 }
@@ -324,27 +327,38 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		_, hasEffort := mergedOptions["effort"]
 		_, hasThinking := mergedOptions["thinking"]
 
-		// Map default_reasoning_effort to Anthropic thinking parameters.
-		// Native Anthropic can use "effort" directly, but Copilot-compatible
-		// Anthropic proxies need an explicit thinking budget. The fantasy
-		// Anthropic provider prefers "effort" over "thinking" and serializes it as
-		// adaptive thinking, so we must avoid auto-setting "effort" when routing
-		// through the Copilot Anthropic client.
+		// Map reasoning effort to Anthropic parameters.
+		//
+		// Claude 4.6+ (claude-sonnet-4.6, claude-opus-4.6) supports the "effort"
+		// parameter which enables adaptive thinking. The fantasy SDK converts
+		// effort → thinking: {type: "adaptive"} automatically.
+		//
+		// Older Claude models use the legacy thinking: {type: "enabled", budget_tokens}.
 		if !hasEffort && !hasThinking && model.CatwalkCfg.CanReason {
+			isClaude46 := isClaude46Model(model.CatwalkCfg.ID)
 			switch {
 			case reasoningEffort != "":
-				budgetTokens := effortToBudgetTokens(reasoningEffort, model.CatwalkCfg.ID)
-				if !providerCfg.UseCopilotClient {
+				if isClaude46 {
+					// Claude 4.6+: use effort parameter (adaptive thinking)
 					mergedOptions["effort"] = reasoningEffort
-				}
-				mergedOptions["thinking"] = map[string]any{
-					"type":          "enabled",
-					"budget_tokens": budgetTokens,
+				} else {
+					// Older Claude: use budget_tokens
+					budgetTokens := effortToBudgetTokens(reasoningEffort, model.CatwalkCfg.ID)
+					mergedOptions["thinking"] = map[string]any{
+						"type":          "enabled",
+						"budget_tokens": budgetTokens,
+					}
 				}
 			case model.ModelCfg.Think:
-				mergedOptions["thinking"] = map[string]any{
-					"type":          "enabled",
-					"budget_tokens": effortToBudgetTokens("medium", model.CatwalkCfg.ID),
+				if isClaude46 {
+					// Claude 4.6+ with think:true: use medium effort
+					mergedOptions["effort"] = "medium"
+				} else {
+					// Older Claude: use budget_tokens
+					mergedOptions["thinking"] = map[string]any{
+						"type":          "enabled",
+						"budget_tokens": effortToBudgetTokens("medium", model.CatwalkCfg.ID),
+					}
 				}
 			}
 		}
@@ -429,6 +443,17 @@ func effortToBudgetTokens(effort, modelID string) int {
 	}
 
 	return budget
+}
+
+// isClaude46Model reports whether the model ID is a Claude 4.6+ model that
+// supports the "effort" parameter for adaptive thinking.
+// Claude 4.6+ models: claude-sonnet-4.6, claude-opus-4.6 (and their hyphenated variants).
+func isClaude46Model(modelID string) bool {
+	id := strings.ToLower(modelID)
+	return strings.Contains(id, "claude-sonnet-4.6") ||
+		strings.Contains(id, "claude-sonnet-4-6") ||
+		strings.Contains(id, "claude-opus-4.6") ||
+		strings.Contains(id, "claude-opus-4-6")
 }
 
 func mergeCallOptions(model Model, cfg config.ProviderConfig) (fantasy.ProviderOptions, *float64, *float64, *int64, *float64, *float64) {
@@ -986,6 +1011,18 @@ func (c *coordinator) ClearQueue(sessionID string) {
 	c.currentAgent.ClearQueue(sessionID)
 }
 
+func (c *coordinator) PauseQueue(sessionID string) {
+	c.currentAgent.PauseQueue(sessionID)
+}
+
+func (c *coordinator) ResumeQueue(sessionID string) {
+	c.currentAgent.ResumeQueue(sessionID)
+}
+
+func (c *coordinator) IsQueuePaused(sessionID string) bool {
+	return c.currentAgent.IsQueuePaused(sessionID)
+}
+
 func (c *coordinator) IsBusy() bool {
 	return c.currentAgent.IsBusy()
 }
@@ -1027,12 +1064,15 @@ func (c *coordinator) QueuedPromptsList(sessionID string) []string {
 	return c.currentAgent.QueuedPromptsList(sessionID)
 }
 
-func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
-	providerCfg, ok := c.cfg.Config().Providers.Get(c.currentAgent.Model().ModelCfg.Provider)
-	if !ok {
-		return errModelProviderNotConfigured
+func (c *coordinator) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions) error {
+	if opts == nil {
+		providerCfg, ok := c.cfg.Config().Providers.Get(c.currentAgent.Model().ModelCfg.Provider)
+		if !ok {
+			return errModelProviderNotConfigured
+		}
+		opts = getProviderOptions(c.currentAgent.Model(), providerCfg)
 	}
-	return c.currentAgent.Summarize(ctx, sessionID, getProviderOptions(c.currentAgent.Model(), providerCfg))
+	return c.currentAgent.Summarize(ctx, sessionID, opts)
 }
 
 func (c *coordinator) isUnauthorized(err error) bool {

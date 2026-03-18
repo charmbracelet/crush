@@ -54,6 +54,7 @@ type Commands struct {
 	hasSession   bool
 	hasTodos     bool
 	hasQueue     bool
+	queuePaused  bool
 	mode         session.CollaborationMode
 	proposedPlan string
 	selected     CommandType
@@ -74,7 +75,7 @@ type Commands struct {
 var _ Dialog = (*Commands)(nil)
 
 // NewCommands creates a new commands dialog.
-func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, hasQueue bool, mode session.CollaborationMode, proposedPlan string, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) (*Commands, error) {
+func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, hasQueue, queuePaused bool, mode session.CollaborationMode, proposedPlan string, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) (*Commands, error) {
 	c := &Commands{
 		com:            com,
 		selected:       SystemCommands,
@@ -82,6 +83,7 @@ func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, has
 		hasSession:     hasSession,
 		hasTodos:       hasTodos,
 		hasQueue:       hasQueue,
+		queuePaused:    queuePaused,
 		mode:           mode,
 		proposedPlan:   proposedPlan,
 		customCommands: customCommands,
@@ -474,6 +476,19 @@ func (c *Commands) defaultCommands() []*CommandItem {
 			label = "Toggle To-Dos"
 		}
 		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_pills", label, "ctrl+t", ActionTogglePills{}))
+	}
+
+	// Add queue pause/resume command when there's an active queue.
+	if c.hasQueue {
+		if c.queuePaused {
+			commands = append(commands,
+				NewCommandItem(c.com.Styles, "resume_queue", "Resume Queue", "", ActionResumeQueue{}),
+			)
+		} else {
+			commands = append(commands,
+				NewCommandItem(c.com.Styles, "pause_queue", "Pause Queue", "", ActionPauseQueue{}),
+			)
+		}
 	}
 
 	// Add a command for toggling notifications.

@@ -41,7 +41,7 @@ import (
 	"charm.land/fantasy/providers/openaicompat"
 	"charm.land/fantasy/providers/openrouter"
 	"charm.land/fantasy/providers/vercel"
-	openaisdk "github.com/openai/openai-go/v2/option"
+	openaisdk "github.com/openai/openai-go/v3/option"
 	"github.com/qjebbs/go-jsons"
 )
 
@@ -726,7 +726,7 @@ func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[str
 	return azure.New(opts...)
 }
 
-func (c *coordinator) buildBedrockProvider(headers map[string]string) (fantasy.Provider, error) {
+func (c *coordinator) buildBedrockProvider(apiKey string, headers map[string]string) (fantasy.Provider, error) {
 	var opts []bedrock.Option
 	if c.cfg.Config().Options.Debug {
 		httpClient := log.NewHTTPClient()
@@ -735,9 +735,13 @@ func (c *coordinator) buildBedrockProvider(headers map[string]string) (fantasy.P
 	if len(headers) > 0 {
 		opts = append(opts, bedrock.WithHeaders(headers))
 	}
-	bearerToken := os.Getenv("AWS_BEARER_TOKEN_BEDROCK")
-	if bearerToken != "" {
-		opts = append(opts, bedrock.WithAPIKey(bearerToken))
+	switch {
+	case apiKey != "":
+		opts = append(opts, bedrock.WithAPIKey(apiKey))
+	case os.Getenv("AWS_BEARER_TOKEN_BEDROCK") != "":
+		opts = append(opts, bedrock.WithAPIKey(os.Getenv("AWS_BEARER_TOKEN_BEDROCK")))
+	default:
+		// Skip, let the SDK do authentication.
 	}
 	return bedrock.New(opts...)
 }
@@ -825,7 +829,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 	case azure.Name:
 		return c.buildAzureProvider(baseURL, apiKey, headers, providerCfg.ExtraParams)
 	case bedrock.Name:
-		return c.buildBedrockProvider(headers)
+		return c.buildBedrockProvider(apiKey, headers)
 	case google.Name:
 		return c.buildGoogleProvider(baseURL, apiKey, headers)
 	case "google-vertex":

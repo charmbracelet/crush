@@ -184,3 +184,8 @@ tasks:
       - go get charm.land/fantasy
       - go get charm.land/catwalk
       - go mod tidy
+
+  sqlc:
+    desc: Generate code using SQLC
+    cmds:
+      - sqlc generate

@@ -3,6 +3,7 @@ package config
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -584,6 +585,20 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 		baseURL, _ := resolver.ResolveValue(c.BaseURL)
 		baseURL = cmp.Or(baseURL, "https://generativelanguage.googleapis.com")
 		testURL = baseURL + "/v1beta/models?key=" + url.QueryEscape(apiKey)
+	case catwalk.TypeBedrock:
+		// NOTE: Bedrock has a `/foundation-models` endpoint that we could in
+		// theory use, but apparently the authorization is region-specific,
+		// so it's not so trivial.
+		if strings.HasPrefix(apiKey, "ABSK") { // Bedrock API keys
+			return nil
+		}
+		return errors.New("not a valid bedrock api key")
+	case catwalk.TypeVercel:
+		// NOTE: Vercel does not validate API keys on the `/models` endpoint.
+		if strings.HasPrefix(apiKey, "vck_") { // Vercel API keys
+			return nil
+		}
+		return errors.New("not a valid vercel api key")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

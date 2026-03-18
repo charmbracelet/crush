@@ -1,7 +1,6 @@
 package model
 
 import (
-	"cmp"
 	"fmt"
 	"strings"
 
@@ -29,13 +28,15 @@ func (m *UI) modelInfo(width int) string {
 			// Only check reasoning if model can reason
 			if model.CatwalkCfg.CanReason {
 				if len(model.CatwalkCfg.ReasoningLevels) == 0 {
-					if model.ModelCfg.Think {
-						reasoningInfo = "Thinking On"
+					// Older Anthropic models use thinking mode
+					if model.CatwalkCfg.DefaultReasoningEffort != "" {
+						reasoningInfo = fmt.Sprintf("Thinking %s", common.FormatReasoningEffort(model.CatwalkCfg.DefaultReasoningEffort))
 					} else {
 						reasoningInfo = "Thinking Off"
 					}
 				} else {
-					reasoningEffort := cmp.Or(model.ModelCfg.ReasoningEffort, model.CatwalkCfg.DefaultReasoningEffort)
+					// Newer models with reasoning levels
+					reasoningEffort := model.CatwalkCfg.DefaultReasoningEffort
 					reasoningInfo = fmt.Sprintf("Reasoning %s", common.FormatReasoningEffort(reasoningEffort))
 				}
 			}

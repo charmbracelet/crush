@@ -72,12 +72,6 @@ type SelectedModel struct {
 	// Required.
 	Provider string `json:"provider" jsonschema:"required,description=The model provider ID that matches a key in the providers config,example=openai"`
 
-	// Only used by models that use the openai provider and need this set.
-	ReasoningEffort string `json:"reasoning_effort,omitempty" jsonschema:"description=Reasoning effort level for OpenAI models that support it,enum=low,enum=medium,enum=high"`
-
-	// Used by anthropic models that can reason to indicate if the model should think.
-	Think bool `json:"think,omitempty" jsonschema:"description=Enable thinking mode for Anthropic models that support reasoning"`
-
 	// Overrides the default model configuration.
 	MaxTokens        int64    `json:"max_tokens,omitempty" jsonschema:"description=Maximum number of tokens for model responses,maximum=200000,example=4096"`
 	Temperature      *float64 `json:"temperature,omitempty" jsonschema:"description=Sampling temperature,minimum=0,maximum=1,example=0.7"`
@@ -86,8 +80,17 @@ type SelectedModel struct {
 	FrequencyPenalty *float64 `json:"frequency_penalty,omitempty" jsonschema:"description=Frequency penalty to reduce repetition"`
 	PresencePenalty  *float64 `json:"presence_penalty,omitempty" jsonschema:"description=Presence penalty to increase topic diversity"`
 
-	// Override provider specific options.
-	ProviderOptions map[string]any `json:"provider_options,omitempty" jsonschema:"description=Additional provider-specific options for the model"`
+	// Deprecated: Use model's default_reasoning_effort in provider config instead.
+	// This field is kept for backward compatibility but is no longer used.
+	ReasoningEffort string `json:"reasoning_effort,omitempty" jsonschema:"description=Deprecated: Use model's default_reasoning_effort in provider config instead,enum=low,enum=medium,enum=high"`
+
+	// Deprecated: Use model's default_reasoning_effort in provider config instead.
+	// This field is kept for backward compatibility but is no longer used.
+	Think bool `json:"think,omitempty" jsonschema:"description=Deprecated: Use model's default_reasoning_effort in provider config instead"`
+
+	// Deprecated: Use model's options.provider_options in provider config instead.
+	// This field is kept for backward compatibility but is no longer used.
+	ProviderOptions map[string]any `json:"provider_options,omitempty" jsonschema:"description=Deprecated: Use model's options.provider_options in provider config instead"`
 }
 
 type ProviderConfig struct {

@@ -28,6 +28,12 @@ func (m *mockPermissionService) GrantPersistent(req permission.PermissionRequest
 
 func (m *mockPermissionService) AutoApproveSession(sessionID string) {}
 
+func (m *mockPermissionService) SetSessionAutoApprove(sessionID string, enabled bool) {}
+
+func (m *mockPermissionService) IsSessionAutoApprove(sessionID string) bool {
+	return false
+}
+
 func (m *mockPermissionService) SetSkipRequests(skip bool) {}
 
 func (m *mockPermissionService) SkipRequests() bool {

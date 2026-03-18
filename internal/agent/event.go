@@ -39,13 +39,14 @@ func (a *sessionAgent) eventTokensUsed(sessionID string, model Model, usage fant
 
 func (a *sessionAgent) eventCommon(sessionID string, model Model) []any {
 	m := model.ModelCfg
+	catwalk := model.CatwalkCfg
 
 	return []any{
 		"session id", sessionID,
 		"provider", m.Provider,
 		"model", m.Model,
-		"reasoning effort", m.ReasoningEffort,
-		"thinking mode", m.Think,
+		"reasoning effort", catwalk.DefaultReasoningEffort,
+		"can reason", catwalk.CanReason,
 		"yolo mode", a.isYolo,
 	}
 }

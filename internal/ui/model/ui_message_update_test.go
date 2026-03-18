@@ -1,0 +1,47 @@
+package model
+
+import (
+	"testing"
+
+	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/ui/chat"
+	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/stretchr/testify/require"
+)
+
+func TestUpdateSessionMessageReinsertsAssistantAfterToolOnly(t *testing.T) {
+	t.Parallel()
+
+	theme := styles.DefaultStyles()
+	com := &common.Common{Styles: &theme}
+	ui := &UI{
+		com:  com,
+		chat: NewChat(com),
+	}
+
+	assistantMsg := message.Message{
+		ID:   "assistant-1",
+		Role: message.Assistant,
+	}
+	ui.chat.AppendMessages(chat.NewAssistantMessageItem(ui.com.Styles, &assistantMsg))
+	require.NotNil(t, ui.chat.MessageItem(assistantMsg.ID))
+
+	// First update: assistant message becomes tool-only; UI removes the assistant item.
+	assistantMsg.Parts = append(assistantMsg.Parts, message.ToolCall{
+		ID:       "tool-1",
+		Name:     "bash",
+		Finished: true,
+	})
+	_ = ui.updateSessionMessage(assistantMsg)
+	require.Nil(t, ui.chat.MessageItem(assistantMsg.ID))
+	require.NotNil(t, ui.chat.MessageItem("tool-1"))
+
+	// Second update: same assistant message gets text content; UI should re-insert it.
+	assistantMsg.Parts = append(assistantMsg.Parts, message.TextContent{Text: "Hello"})
+	_ = ui.updateSessionMessage(assistantMsg)
+
+	require.NotNil(t, ui.chat.MessageItem(assistantMsg.ID))
+	require.NotNil(t, ui.chat.MessageItem("tool-1"))
+	require.Less(t, ui.chat.idInxMap[assistantMsg.ID], ui.chat.idInxMap["tool-1"])
+}

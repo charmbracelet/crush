@@ -68,11 +68,9 @@ type ModelItem struct {
 // SelectedModel returns this model item as a [config.SelectedModel] instance.
 func (m *ModelItem) SelectedModel() config.SelectedModel {
 	return config.SelectedModel{
-		Model:           m.model.ID,
-		Provider:        string(m.prov.ID),
-		ReasoningEffort: m.model.DefaultReasoningEffort,
-		MaxTokens:       m.model.DefaultMaxTokens,
-		Think:           m.model.CanReason && len(m.model.ReasoningLevels) == 0,
+		Model:     m.model.ID,
+		Provider:  string(m.prov.ID),
+		MaxTokens: m.model.DefaultMaxTokens,
 	}
 }
 

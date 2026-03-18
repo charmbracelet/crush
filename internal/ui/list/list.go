@@ -1,6 +1,7 @@
 package list
 
 import (
+	"slices"
 	"strings"
 )
 
@@ -344,6 +345,34 @@ func (l *List) PrependItems(items ...Item) {
 
 	// Update selection index if valid
 	if l.selectedIdx != -1 {
+		l.selectedIdx += len(items)
+	}
+}
+
+// InsertItems inserts items at the given index.
+//
+// If the insertion index is before the current viewport offset or selection,
+// those indices are adjusted to keep the same content visible/selected.
+func (l *List) InsertItems(idx int, items ...Item) {
+	if len(items) == 0 {
+		return
+	}
+	if idx < 0 {
+		idx = 0
+	}
+	if idx > len(l.items) {
+		idx = len(l.items)
+	}
+
+	l.items = slices.Insert(l.items, idx, items...)
+
+	// Keep view position relative to the content that was visible.
+	if l.offsetIdx >= idx {
+		l.offsetIdx += len(items)
+	}
+
+	// Update selection index if valid.
+	if l.selectedIdx != -1 && l.selectedIdx >= idx {
 		l.selectedIdx += len(items)
 	}
 }

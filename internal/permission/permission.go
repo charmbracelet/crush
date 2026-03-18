@@ -49,6 +49,8 @@ type Service interface {
 	Deny(permission PermissionRequest)
 	Request(ctx context.Context, opts CreatePermissionRequest) (bool, error)
 	AutoApproveSession(sessionID string)
+	SetSessionAutoApprove(sessionID string, enabled bool)
+	IsSessionAutoApprove(sessionID string) bool
 	SetSkipRequests(skip bool)
 	SkipRequests() bool
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
@@ -216,9 +218,24 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 }
 
 func (s *permissionService) AutoApproveSession(sessionID string) {
+	s.SetSessionAutoApprove(sessionID, true)
+}
+
+func (s *permissionService) SetSessionAutoApprove(sessionID string, enabled bool) {
 	s.autoApproveSessionsMu.Lock()
-	s.autoApproveSessions[sessionID] = true
+	if enabled {
+		s.autoApproveSessions[sessionID] = true
+	} else {
+		delete(s.autoApproveSessions, sessionID)
+	}
 	s.autoApproveSessionsMu.Unlock()
+}
+
+func (s *permissionService) IsSessionAutoApprove(sessionID string) bool {
+	s.autoApproveSessionsMu.RLock()
+	enabled := s.autoApproveSessions[sessionID]
+	s.autoApproveSessionsMu.RUnlock()
+	return enabled
 }
 
 func (s *permissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification] {

@@ -7,6 +7,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
+	"charm.land/fantasy/providers/anthropic"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -382,5 +383,50 @@ func TestUpdateParentSessionCost(t *testing.T) {
 		updated, err := env.sessions.Get(t.Context(), parent.ID)
 		require.NoError(t, err)
 		assert.InDelta(t, 0.0, updated.Cost, 1e-9)
+	})
+}
+
+func TestMergeCallOptions_AnthropicThinkingCompatibility(t *testing.T) {
+	t.Run("copilot anthropic uses budget thinking without effort", func(t *testing.T) {
+		model := Model{
+			CatwalkCfg: catwalk.Model{
+				ID:                     "gpt-5.3-codex",
+				CanReason:              true,
+				DefaultReasoningEffort: "high",
+			},
+		}
+		cfg := config.ProviderConfig{
+			Type:             anthropic.Name,
+			UseCopilotClient: true,
+		}
+
+		options, _, _, _, _, _ := mergeCallOptions(model, cfg)
+		anthropicOpts, ok := options[anthropic.Name].(*anthropic.ProviderOptions)
+		require.True(t, ok)
+		require.NotNil(t, anthropicOpts)
+		require.Nil(t, anthropicOpts.Effort)
+		require.NotNil(t, anthropicOpts.Thinking)
+		require.Equal(t, int64(28672), anthropicOpts.Thinking.BudgetTokens)
+	})
+
+	t.Run("native anthropic keeps effort and thinking budget", func(t *testing.T) {
+		model := Model{
+			CatwalkCfg: catwalk.Model{
+				ID:                     "claude-sonnet-4.6",
+				CanReason:              true,
+				DefaultReasoningEffort: "high",
+			},
+		}
+		cfg := config.ProviderConfig{
+			Type: anthropic.Name,
+		}
+
+		options, _, _, _, _, _ := mergeCallOptions(model, cfg)
+		anthropicOpts, ok := options[anthropic.Name].(*anthropic.ProviderOptions)
+		require.True(t, ok)
+		require.NotNil(t, anthropicOpts)
+		require.Equal(t, anthropic.Effort("high"), *anthropicOpts.Effort)
+		require.NotNil(t, anthropicOpts.Thinking)
+		require.Equal(t, int64(28672), anthropicOpts.Thinking.BudgetTokens)
 	})
 }

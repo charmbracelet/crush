@@ -17,13 +17,20 @@ import (
 	"github.com/charmbracelet/crush/internal/version"
 )
 
+// cancelEntry wraps a cancel function for safe concurrent prompt handling.
+// It allows the deferred cleanup to verify it's still the active entry
+// before deleting from the map.
+type cancelEntry struct {
+	cancel context.CancelFunc
+}
+
 // Handler dispatches incoming ACP requests to the correct methods.
 type Handler struct {
 	app    App
 	server *Server // set after server is constructed (circular reference resolved via setter)
 
 	mu      sync.RWMutex
-	cancels map[string]context.CancelFunc
+	cancels map[string]*cancelEntry
 }
 
 // App is the subset of app.App the ACP handler needs.
@@ -37,7 +44,7 @@ type App interface {
 func NewHandler(app App) *Handler {
 	return &Handler{
 		app:     app,
-		cancels: make(map[string]context.CancelFunc),
+		cancels: make(map[string]*cancelEntry),
 	}
 }
 
@@ -199,17 +206,23 @@ func (h *Handler) handleSessionPrompt(ctx context.Context, req *Request) (any, *
 
 	// Wrap context with cancellation so session/cancel can stop the run.
 	runCtx, cancel := context.WithCancel(ctx)
+	entry := &cancelEntry{cancel: cancel}
 	h.mu.Lock()
 	// Cancel any previous prompt for this session before overwriting.
-	if oldCancel, ok := h.cancels[params.SessionID]; ok {
-		oldCancel()
+	if oldEntry, ok := h.cancels[params.SessionID]; ok {
+		oldEntry.cancel()
 	}
-	h.cancels[params.SessionID] = cancel
+	h.cancels[params.SessionID] = entry
 	h.mu.Unlock()
 	defer func() {
 		cancel()
 		h.mu.Lock()
-		delete(h.cancels, params.SessionID)
+		// Only delete if this entry is still the active one.
+		// This prevents a finishing prompt from removing another prompt's
+		// cancel entry when multiple prompts run concurrently for the same session.
+		if h.cancels[params.SessionID] == entry {
+			delete(h.cancels, params.SessionID)
+		}
 		h.mu.Unlock()
 	}()
 
@@ -340,11 +353,11 @@ func (h *Handler) handleSessionCancel(_ context.Context, req *Request) (any, *RP
 	}
 
 	h.mu.RLock()
-	cancel, ok := h.cancels[params.SessionID]
+	entry, ok := h.cancels[params.SessionID]
 	h.mu.RUnlock()
 
 	if ok {
-		cancel()
+		entry.cancel()
 		slog.Info("ACP: cancelled session", "session_id", params.SessionID)
 	}
 	return struct{}{}, nil

@@ -242,13 +242,19 @@ func (s *service) UpdateCollaborationMode(ctx context.Context, sessionID string,
 // UpdateTitleAndUsage updates only the title and usage fields atomically.
 // This is safer than fetching, modifying, and saving the entire session.
 func (s *service) UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error {
-	return s.q.UpdateSessionTitleAndUsage(ctx, db.UpdateSessionTitleAndUsageParams{
+	dbSession, err := s.q.UpdateSessionTitleAndUsage(ctx, db.UpdateSessionTitleAndUsageParams{
 		ID:               sessionID,
 		Title:            title,
 		PromptTokens:     promptTokens,
 		CompletionTokens: completionTokens,
 		Cost:             cost,
 	})
+	if err != nil {
+		return err
+	}
+	session := s.fromDBItem(dbSession)
+	s.Publish(pubsub.UpdatedEvent, session)
+	return nil
 }
 
 // Rename updates only the title of a session without touching updated_at or

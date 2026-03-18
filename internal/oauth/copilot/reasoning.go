@@ -74,8 +74,7 @@ func (r *reasoningTransformReader) Read(p []byte) (int, error) {
 			return 0, io.EOF
 		}
 		line := r.scanner.Text()
-		transformed := transformReasoningLine(line)
-		r.buf.WriteString(transformed)
+		r.buf.WriteString(transformReasoningLine(line))
 		r.buf.WriteByte('\n')
 	}
 	return r.buf.Read(p)

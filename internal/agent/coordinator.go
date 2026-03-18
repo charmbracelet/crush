@@ -243,10 +243,10 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 	providerCfgOpts := []byte("{}")
 	catwalkOpts := []byte("{}")
 
-	if model.ModelCfg.ProviderOptions != nil {
-		data, err := json.Marshal(model.ModelCfg.ProviderOptions)
+	if model.CatwalkCfg.Options.ProviderOptions != nil {
+		data, err := json.Marshal(model.CatwalkCfg.Options.ProviderOptions)
 		if err == nil {
-			cfgOpts = data
+			catwalkOpts = data
 		}
 	}
 
@@ -254,13 +254,6 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		data, err := json.Marshal(providerCfg.ProviderOptions)
 		if err == nil {
 			providerCfgOpts = data
-		}
-	}
-
-	if model.CatwalkCfg.Options.ProviderOptions != nil {
-		data, err := json.Marshal(model.CatwalkCfg.Options.ProviderOptions)
-		if err == nil {
-			catwalkOpts = data
 		}
 	}
 
@@ -297,18 +290,25 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		}
 	}
 
+	// Get reasoning effort from model selection override, falling back to model default.
+	reasoningEffort := cmp.Or(model.ModelCfg.ReasoningEffort, model.CatwalkCfg.DefaultReasoningEffort)
+
 	switch providerType {
 	case openai.Name, azure.Name:
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
-		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
-			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
-		} else if !hasReasoningEffort && model.CatwalkCfg.DefaultReasoningEffort != "" {
-			mergedOptions["reasoning_effort"] = model.CatwalkCfg.DefaultReasoningEffort
+		if !hasReasoningEffort && reasoningEffort != "" {
+			mergedOptions["reasoning_effort"] = reasoningEffort
 		}
 		if openai.IsResponsesModel(model.CatwalkCfg.ID) {
 			if openai.IsResponsesReasoningModel(model.CatwalkCfg.ID) {
-				mergedOptions["reasoning_summary"] = "auto"
-				mergedOptions["include"] = []openai.IncludeType{openai.IncludeReasoningEncryptedContent}
+				_, hasSummary := mergedOptions["reasoning_summary"]
+				if !hasSummary {
+					mergedOptions["reasoning_summary"] = "auto"
+				}
+				_, hasInclude := mergedOptions["include"]
+				if !hasInclude {
+					mergedOptions["include"] = []openai.IncludeType{openai.IncludeReasoningEncryptedContent}
+				}
 			}
 			parsed, err := openai.ParseResponsesOptions(mergedOptions)
 			if err == nil {
@@ -321,15 +321,32 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			}
 		}
 	case anthropic.Name:
-		var (
-			_, hasEffort = mergedOptions["effort"]
-			_, hasThink  = mergedOptions["thinking"]
-		)
-		switch {
-		case !hasEffort && model.ModelCfg.ReasoningEffort != "":
-			mergedOptions["effort"] = model.ModelCfg.ReasoningEffort
-		case !hasThink && model.ModelCfg.Think:
-			mergedOptions["thinking"] = map[string]any{"budget_tokens": 2000}
+		_, hasEffort := mergedOptions["effort"]
+		_, hasThinking := mergedOptions["thinking"]
+
+		// Map default_reasoning_effort to Anthropic thinking parameters.
+		// Native Anthropic can use "effort" directly, but Copilot-compatible
+		// Anthropic proxies need an explicit thinking budget. The fantasy
+		// Anthropic provider prefers "effort" over "thinking" and serializes it as
+		// adaptive thinking, so we must avoid auto-setting "effort" when routing
+		// through the Copilot Anthropic client.
+		if !hasEffort && !hasThinking && model.CatwalkCfg.CanReason {
+			switch {
+			case reasoningEffort != "":
+				budgetTokens := effortToBudgetTokens(reasoningEffort, model.CatwalkCfg.ID)
+				if !providerCfg.UseCopilotClient {
+					mergedOptions["effort"] = reasoningEffort
+				}
+				mergedOptions["thinking"] = map[string]any{
+					"type":          "enabled",
+					"budget_tokens": budgetTokens,
+				}
+			case model.ModelCfg.Think:
+				mergedOptions["thinking"] = map[string]any{
+					"type":          "enabled",
+					"budget_tokens": effortToBudgetTokens("medium", model.CatwalkCfg.ID),
+				}
+			}
 		}
 		parsed, err := anthropic.ParseOptions(mergedOptions)
 		if err == nil {
@@ -338,10 +355,10 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 
 	case openrouter.Name:
 		_, hasReasoning := mergedOptions["reasoning"]
-		if !hasReasoning && model.ModelCfg.ReasoningEffort != "" {
+		if !hasReasoning && reasoningEffort != "" {
 			mergedOptions["reasoning"] = map[string]any{
 				"enabled": true,
-				"effort":  model.ModelCfg.ReasoningEffort,
+				"effort":  reasoningEffort,
 			}
 		}
 		parsed, err := openrouter.ParseOptions(mergedOptions)
@@ -350,10 +367,10 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		}
 	case vercel.Name:
 		_, hasReasoning := mergedOptions["reasoning"]
-		if !hasReasoning && model.ModelCfg.ReasoningEffort != "" {
+		if !hasReasoning && reasoningEffort != "" {
 			mergedOptions["reasoning"] = map[string]any{
 				"enabled": true,
-				"effort":  model.ModelCfg.ReasoningEffort,
+				"effort":  reasoningEffort,
 			}
 		}
 		parsed, err := vercel.ParseOptions(mergedOptions)
@@ -361,16 +378,16 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			options[vercel.Name] = parsed
 		}
 	case google.Name:
-		_, hasReasoning := mergedOptions["thinking_config"]
-		if !hasReasoning {
-			if strings.HasPrefix(model.CatwalkCfg.ID, "gemini-2") {
+		_, hasThinkingConfig := mergedOptions["thinking_config"]
+		if !hasThinkingConfig && model.CatwalkCfg.CanReason {
+			if reasoningEffort != "" {
 				mergedOptions["thinking_config"] = map[string]any{
-					"thinking_budget":  2000,
+					"thinking_level":   reasoningEffort,
 					"include_thoughts": true,
 				}
-			} else {
+			} else if strings.HasPrefix(model.CatwalkCfg.ID, "gemini-2") {
 				mergedOptions["thinking_config"] = map[string]any{
-					"thinking_level":   model.ModelCfg.ReasoningEffort,
+					"thinking_budget":  2000,
 					"include_thoughts": true,
 				}
 			}
@@ -381,10 +398,8 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		}
 	case openaicompat.Name:
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
-		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
-			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
-		} else if !hasReasoningEffort && model.CatwalkCfg.DefaultReasoningEffort != "" {
-			mergedOptions["reasoning_effort"] = model.CatwalkCfg.DefaultReasoningEffort
+		if !hasReasoningEffort && reasoningEffort != "" {
+			mergedOptions["reasoning_effort"] = reasoningEffort
 		}
 		parsed, err := openaicompat.ParseOptions(mergedOptions)
 		if err == nil {
@@ -393,6 +408,27 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 	}
 
 	return options
+}
+
+// effortToBudgetTokens maps reasoning effort levels to budget_tokens for Anthropic models.
+// These values are chosen to be correctly reverse-mapped by Copilot API's translation logic:
+// Copilot API: budget >= 32768 → xhigh, >= 24576 → high, >= 8192 → medium, >= 1024 → low
+// We want: "high" → high, "medium" → medium, "low" → low
+func effortToBudgetTokens(effort, modelID string) int {
+	// Budget tokens chosen to produce the correct reasoning_effort when translated by Copilot API
+	budgetMap := map[string]int{
+		"low":    2048,  // Will map to "low" in Copilot (1024 <= budget < 8192)
+		"medium": 12288, // Will map to "medium" in Copilot (8192 <= budget < 24576)
+		"high":   28672, // Will map to "high" in Copilot (24576 <= budget < 32768)
+		"max":    49152, // Will map to "xhigh" in Copilot (>= 32768)
+	}
+
+	budget, ok := budgetMap[effort]
+	if !ok {
+		budget = 12288 // default to medium
+	}
+
+	return budget
 }
 
 func mergeCallOptions(model Model, cfg config.ProviderConfig) (fantasy.ProviderOptions, *float64, *float64, *int64, *float64, *float64) {
@@ -556,32 +592,24 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 		return Model{}, Model{}, errLargeModelProviderNotConfigured
 	}
 
-	largeProvider, err := c.buildProvider(largeProviderCfg, largeModelCfg, isSubAgent)
-	if err != nil {
-		return Model{}, Model{}, err
-	}
-
 	smallProviderCfg, ok := c.cfg.Config().Providers.Get(smallModelCfg.Provider)
 	if !ok {
 		return Model{}, Model{}, errSmallModelProviderNotConfigured
 	}
 
-	smallProvider, err := c.buildProvider(smallProviderCfg, smallModelCfg, true)
-	if err != nil {
-		return Model{}, Model{}, err
-	}
-
 	var largeCatwalkModel *catwalk.Model
 	var smallCatwalkModel *catwalk.Model
 
-	for _, m := range largeProviderCfg.Models {
-		if m.ID == largeModelCfg.Model {
-			largeCatwalkModel = &m
+	for i := range largeProviderCfg.Models {
+		if largeProviderCfg.Models[i].ID == largeModelCfg.Model {
+			largeCatwalkModel = &largeProviderCfg.Models[i]
+			break
 		}
 	}
-	for _, m := range smallProviderCfg.Models {
-		if m.ID == smallModelCfg.Model {
-			smallCatwalkModel = &m
+	for i := range smallProviderCfg.Models {
+		if smallProviderCfg.Models[i].ID == smallModelCfg.Model {
+			smallCatwalkModel = &smallProviderCfg.Models[i]
+			break
 		}
 	}
 
@@ -591,6 +619,16 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 
 	if smallCatwalkModel == nil {
 		return Model{}, Model{}, errSmallModelNotFound
+	}
+
+	largeProvider, err := c.buildProvider(largeProviderCfg, *largeCatwalkModel, largeModelCfg, isSubAgent)
+	if err != nil {
+		return Model{}, Model{}, err
+	}
+
+	smallProvider, err := c.buildProvider(smallProviderCfg, *smallCatwalkModel, smallModelCfg, true)
+	if err != nil {
+		return Model{}, Model{}, err
 	}
 
 	largeModelID := largeModelCfg.Model
@@ -850,23 +888,26 @@ func (c *coordinator) buildHyperProvider(baseURL, apiKey string) (fantasy.Provid
 	return hyper.New(opts...)
 }
 
-func (c *coordinator) isAnthropicThinking(model config.SelectedModel) bool {
-	if model.Think {
+// isAnthropicThinking checks if the model should use Anthropic extended thinking.
+// This is true when the selected model enables think/reasoning effort,
+// or when provider options include a thinking configuration.
+func (c *coordinator) isAnthropicThinking(model catwalk.Model, selectedModel config.SelectedModel) bool {
+	if model.CanReason && (selectedModel.Think || selectedModel.ReasoningEffort != "" || model.DefaultReasoningEffort != "") {
 		return true
 	}
 
-	opts, err := anthropic.ParseOptions(model.ProviderOptions)
+	opts, err := anthropic.ParseOptions(model.Options.ProviderOptions)
 	return err == nil && opts.Thinking != nil
 }
 
-func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model config.SelectedModel, isSubAgent bool) (fantasy.Provider, error) {
+func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model catwalk.Model, selectedModel config.SelectedModel, isSubAgent bool) (fantasy.Provider, error) {
 	headers := maps.Clone(providerCfg.ExtraHeaders)
 	if headers == nil {
 		headers = make(map[string]string)
 	}
 
 	// handle special headers for anthropic
-	if providerCfg.Type == anthropic.Name && c.isAnthropicThinking(model) {
+	if providerCfg.Type == anthropic.Name && c.isAnthropicThinking(model, selectedModel) {
 		if v, ok := headers["anthropic-beta"]; ok {
 			headers["anthropic-beta"] = v + ",interleaved-thinking-2025-05-14"
 		} else {

@@ -144,6 +144,39 @@ func (m *Chat) AppendMessages(msgs ...chat.MessageItem) {
 	m.list.AppendItems(items...)
 }
 
+func (m *Chat) rebuildIDIndexMap() {
+	m.idInxMap = make(map[string]int)
+	for i := 0; i < m.list.Len(); i++ {
+		item, ok := m.list.ItemAt(i).(chat.MessageItem)
+		if !ok || item == nil {
+			continue
+		}
+		m.idInxMap[item.ID()] = i
+		// Register nested tool IDs for tools that contain nested tools.
+		if container, ok := item.(chat.NestedToolContainer); ok {
+			for _, nested := range container.NestedTools() {
+				m.idInxMap[nested.ID()] = i
+			}
+		}
+	}
+}
+
+// InsertMessagesBefore inserts message items before the item with the given ID.
+// Returns false if the reference ID is not found.
+func (m *Chat) InsertMessagesBefore(beforeID string, msgs ...chat.MessageItem) bool {
+	idx, ok := m.idInxMap[beforeID]
+	if !ok {
+		return false
+	}
+	items := make([]list.Item, len(msgs))
+	for i, msg := range msgs {
+		items[i] = msg
+	}
+	m.list.InsertItems(idx, items...)
+	m.rebuildIDIndexMap()
+	return true
+}
+
 // UpdateNestedToolIDs updates the ID map for nested tools within a container.
 // Call this after modifying nested tools to ensure animations work correctly.
 func (m *Chat) UpdateNestedToolIDs(containerID string) {

@@ -21,6 +21,11 @@ type ContentBlock struct {
 	URI      string `json:"uri,omitempty"`
 }
 
+// TextBlock returns a text ContentBlock.
+func TextBlock(text string) *ContentBlock {
+	return &ContentBlock{Type: "text", Text: text}
+}
+
 // StopReason is the reason a prompt turn stopped.
 type StopReason string
 
@@ -61,11 +66,18 @@ type InitializeParams struct {
 	ClientInfo         ClientInfo         `json:"clientInfo"`
 }
 
+// SessionCapabilities describes session-level features the agent supports.
+type SessionCapabilities struct {
+	// List indicates the agent supports session/list.
+	List *struct{} `json:"list,omitempty"`
+}
+
 // AgentCapabilities describes what this agent supports.
 type AgentCapabilities struct {
-	LoadSession        bool                `json:"loadSession,omitempty"`
-	PromptCapabilities *PromptCapabilities `json:"promptCapabilities,omitempty"`
-	MCP                *MCPCapabilities    `json:"mcp,omitempty"`
+	LoadSession         bool                 `json:"loadSession,omitempty"`
+	PromptCapabilities  *PromptCapabilities  `json:"promptCapabilities,omitempty"`
+	MCP                 *MCPCapabilities     `json:"mcp,omitempty"`
+	SessionCapabilities *SessionCapabilities `json:"sessionCapabilities,omitempty"`
 }
 
 // PromptCapabilities lists content types the agent accepts.
@@ -117,12 +129,91 @@ type SessionNewParams struct {
 
 // SessionNewResult is the response after creating a new session.
 type SessionNewResult struct {
-	SessionID string `json:"sessionId"`
+	SessionID     string           `json:"sessionId"`
+	ConfigOptions []ConfigOption   `json:"configOptions,omitempty"`
+	Modes         *SessionModeState `json:"modes,omitempty"`
 }
 
 // SessionLoadParams is the request to load an existing session.
 type SessionLoadParams struct {
+	SessionID  string            `json:"sessionId"`
+	CWD        string            `json:"cwd,omitempty"`
+	MCPServers []MCPServerConfig `json:"mcpServers,omitempty"`
+}
+
+// SessionLoadResult is the response after loading a session.
+// Note: sessionId is NOT included per the ACP spec (unlike session/new).
+type SessionLoadResult struct {
+	ConfigOptions []ConfigOption   `json:"configOptions,omitempty"`
+	Modes         *SessionModeState `json:"modes,omitempty"`
+}
+
+// SessionListParams is the request to list sessions.
+type SessionListParams struct {
+	CWD    string `json:"cwd,omitempty"`
+	Cursor string `json:"cursor,omitempty"`
+}
+
+// SessionListEntry is a single entry in a session list.
+type SessionListEntry struct {
 	SessionID string `json:"sessionId"`
+	CWD       string `json:"cwd"`
+	Title     string `json:"title,omitempty"`
+	UpdatedAt string `json:"updatedAt,omitempty"` // ISO 8601
+}
+
+// SessionListResult is the response to a session/list request.
+type SessionListResult struct {
+	Sessions   []SessionListEntry `json:"sessions"`
+	NextCursor string             `json:"nextCursor,omitempty"`
+}
+
+// SessionMode describes a legacy ACP mode entry.
+type SessionMode struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+// SessionModeState describes legacy ACP mode state.
+type SessionModeState struct {
+	CurrentModeID  string        `json:"currentModeId"`
+	AvailableModes []SessionMode `json:"availableModes"`
+}
+
+// ConfigOption represents a session configuration option.
+type ConfigOption struct {
+	ID           string                `json:"id"`
+	Name         string                `json:"name"`
+	Category     string                `json:"category,omitempty"`
+	Type         string                `json:"type"` // "select"
+	CurrentValue string                `json:"currentValue,omitempty"`
+	Options      []ConfigOptionVariant `json:"options,omitempty"`
+}
+
+// ConfigOptionVariant is a selectable option within a ConfigOption.
+type ConfigOptionVariant struct {
+	Value       string `json:"value"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+// SetConfigOptionParams is the request to set a config option.
+type SetConfigOptionParams struct {
+	SessionID string `json:"sessionId"`
+	ConfigID  string `json:"configId"`
+	Value     string `json:"value"`
+}
+
+// SetConfigOptionResult is the response after setting a config option.
+type SetConfigOptionResult struct {
+	ConfigOptions []ConfigOption `json:"configOptions"`
+}
+
+// SetModeParams is the legacy request to set session mode.
+type SetModeParams struct {
+	SessionID string `json:"sessionId"`
+	ModeID    string `json:"modeId"`
 }
 
 // ---- Prompt ----
@@ -151,34 +242,39 @@ type SessionCancelParams struct {
 type SessionUpdateType string
 
 const (
-	SessionUpdateUserMessageChunk  SessionUpdateType = "user_message_chunk"
-	SessionUpdateAgentMessageChunk SessionUpdateType = "agent_message_chunk"
-	SessionUpdateAgentThoughtChunk SessionUpdateType = "agent_thought_chunk"
-	SessionUpdateToolCall          SessionUpdateType = "tool_call"
-	SessionUpdateToolCallUpdate    SessionUpdateType = "tool_call_update"
-	SessionUpdatePlan              SessionUpdateType = "plan"
-	SessionUpdateSessionInfoUpdate SessionUpdateType = "session_info_update"
+	SessionUpdateUserMessageChunk   SessionUpdateType = "user_message_chunk"
+	SessionUpdateAgentMessageChunk  SessionUpdateType = "agent_message_chunk"
+	SessionUpdateAgentThoughtChunk  SessionUpdateType = "agent_thought_chunk"
+	SessionUpdateToolCall           SessionUpdateType = "tool_call"
+	SessionUpdateToolCallUpdate     SessionUpdateType = "tool_call_update"
+	SessionUpdatePlan               SessionUpdateType = "plan"
+	SessionUpdateSessionInfoUpdate  SessionUpdateType = "session_info_update"
+	SessionUpdateConfigOptionUpdate SessionUpdateType = "config_option_update"
+	SessionUpdateCurrentModeUpdate  SessionUpdateType = "current_mode_update"
 )
 
 // ToolCallStatus describes the execution state of a tool call.
 type ToolCallStatus string
 
 const (
-	ToolCallStatusRunning   ToolCallStatus = "running"
-	ToolCallStatusCompleted ToolCallStatus = "completed"
-	ToolCallStatusError     ToolCallStatus = "error"
+	// ToolCallStatusPending means the tool call has not started yet.
+	ToolCallStatusPending    ToolCallStatus = "pending"
+	// ToolCallStatusInProgress means the tool call is currently running.
+	ToolCallStatusInProgress ToolCallStatus = "in_progress"
+	// ToolCallStatusCompleted means the tool call finished successfully.
+	ToolCallStatusCompleted  ToolCallStatus = "completed"
+	// ToolCallStatusFailed means the tool call failed with an error.
+	ToolCallStatusFailed     ToolCallStatus = "failed"
 )
 
 // SessionUpdate is the payload of a session/update notification.
 // The SessionUpdate field identifies the variant; remaining fields are
 // populated based on that variant.
-//
-// Both tool_call and session_info_update variants use a "title" field in the
-// wire format; we use a single Title field and populate it for both.
 type SessionUpdate struct {
 	SessionUpdate SessionUpdateType `json:"sessionUpdate"`
-	// Message chunk content.
-	Content string `json:"content,omitempty"`
+	// Content for message/thought chunks (agent_message_chunk, user_message_chunk,
+	// agent_thought_chunk). Must be a ContentBlock per ACP spec.
+	Content *ContentBlock `json:"content,omitempty"`
 	// Tool call or session info title.
 	Title string `json:"title,omitempty"`
 	// Tool call identifier.
@@ -189,8 +285,12 @@ type SessionUpdate struct {
 	RawOutput  any            `json:"rawOutput,omitempty"`
 	// Plan entries.
 	Entries []PlanEntry `json:"entries,omitempty"`
-	// Session info update timestamp.
-	UpdatedAt int64 `json:"updatedAt,omitempty"`
+	// Session info update fields (ISO 8601 timestamp).
+	UpdatedAt string `json:"updatedAt,omitempty"`
+	// Config option update fields.
+	ConfigOptions []ConfigOption `json:"configOptions,omitempty"`
+	// Legacy current mode update fields.
+	CurrentModeID string `json:"currentModeId,omitempty"`
 }
 
 // PlanEntry is a single entry in an agent execution plan.
@@ -242,10 +342,15 @@ type RequestPermissionParams struct {
 	Options   []PermissionOption `json:"options"`
 }
 
-// RequestPermissionResult is the client's response to a permission request.
-type RequestPermissionResult struct {
+// RequestPermissionOutcome is the selection state returned by the client.
+type RequestPermissionOutcome struct {
 	Outcome  string `json:"outcome"` // "selected" | "cancelled"
 	OptionID string `json:"optionId,omitempty"`
+}
+
+// RequestPermissionResult is the client's response to a permission request.
+type RequestPermissionResult struct {
+	Outcome RequestPermissionOutcome `json:"outcome"`
 }
 
 // ---- JSON-RPC 2.0 wire types ----
@@ -274,9 +379,11 @@ type RPCError struct {
 
 // Standard JSON-RPC error codes.
 const (
-	CodeParseError     = -32700
-	CodeInvalidRequest = -32600
-	CodeMethodNotFound = -32601
-	CodeInvalidParams  = -32602
-	CodeInternalError  = -32603
+	CodeParseError      = -32700
+	CodeInvalidRequest  = -32600
+	CodeMethodNotFound  = -32601
+	CodeInvalidParams   = -32602
+	CodeInternalError   = -32603
+	CodeAuthRequired    = -32000
+	CodeResourceNotFound = -32002
 )

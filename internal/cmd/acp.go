@@ -53,6 +53,8 @@ crush acp --cwd /path/to/project
 			appInstance.Sessions,
 			appInstance.Messages,
 			appInstance.AgentCoordinator,
+			appInstance.Permissions,
+			appInstance.Store(),
 		)
 
 		handler := acp.NewHandler(adapter)

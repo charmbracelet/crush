@@ -1081,15 +1081,35 @@ func (m *UI) handleClickFocus(msg tea.MouseClickMsg) (cmd tea.Cmd) {
 func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 	var cmds []tea.Cmd
 	existingItem := m.chat.MessageItem(msg.ID)
+	shouldRenderAssistant := chat.ShouldRenderAssistantMessage(&msg)
 
 	if existingItem != nil {
 		if assistantItem, ok := existingItem.(*chat.AssistantMessageItem); ok {
 			assistantItem.SetMessage(&msg)
 		}
+	} else if shouldRenderAssistant {
+		assistantItem := chat.NewAssistantMessageItem(m.com.Styles, &msg)
+		inserted := false
+		if toolCalls := msg.ToolCalls(); len(toolCalls) > 0 {
+			inserted = m.chat.InsertMessagesBefore(toolCalls[0].ID, assistantItem)
+		}
+		if !inserted {
+			m.chat.AppendMessages(assistantItem)
+		}
+		if animatable, ok := assistantItem.(chat.Animatable); ok {
+			if cmd := animatable.StartAnimation(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
+		if m.chat.Follow() {
+			if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
+		existingItem = assistantItem
 	}
 	m.updateLatestProposedPlan(msg)
 
-	shouldRenderAssistant := chat.ShouldRenderAssistantMessage(&msg)
 	// if the message of the assistant does not have any  response just tool calls we need to remove it
 	if !shouldRenderAssistant && len(msg.ToolCalls()) > 0 && existingItem != nil {
 		m.chat.RemoveMessage(msg.ID)
@@ -1408,6 +1428,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleThinking:
 		cmds = append(cmds, func() tea.Msg {
+			if m.isAgentBusy() {
+				return util.ReportWarn("Agent is busy, please wait...")()
+			}
 			cfg := m.com.Config()
 			if cfg == nil {
 				return util.ReportError(errors.New("configuration not found"))()
@@ -1423,7 +1446,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			if err := m.com.Store().UpdatePreferredModel(config.ScopeGlobal, agentCfg.Model, currentModel); err != nil {
 				return util.ReportError(err)()
 			}
-			m.com.App.UpdateAgentModel(context.TODO())
+			if err := m.com.App.UpdateAgentModel(context.TODO()); err != nil {
+				return util.ReportError(err)()
+			}
 			status := "disabled"
 			if currentModel.Think {
 				status = "enabled"
@@ -1565,7 +1590,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 
 		cmds = append(cmds, func() tea.Msg {
-			m.com.App.UpdateAgentModel(context.TODO())
+			if err := m.com.App.UpdateAgentModel(context.TODO()); err != nil {
+				return util.ReportError(err)
+			}
 			return util.NewInfoMsg("Reasoning effort set to " + msg.Effort)
 		})
 		m.dialog.CloseDialog(dialog.ReasoningID)

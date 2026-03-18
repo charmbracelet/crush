@@ -46,7 +46,7 @@ func handlePermissionRequest(ctx context.Context, req permission.PermissionReque
 		ToolCallID: req.ToolCallID,
 		Title:      fmt.Sprintf("%s: %s", req.ToolName, req.Action),
 		Kind:       "tool",
-		Status:     ToolCallStatusRunning,
+		Status:     ToolCallStatusInProgress,
 		RawInput:   req.Params,
 	}
 
@@ -75,13 +75,20 @@ func handlePermissionRequest(ctx context.Context, req permission.PermissionReque
 		return
 	}
 
-	switch result.OptionID {
-	case allowAlwaysID:
-		perms.GrantPersistent(req)
-	case allowOnceID:
-		perms.Grant(req)
+	switch result.Outcome.Outcome {
+	case "selected":
+		switch result.Outcome.OptionID {
+		case allowAlwaysID:
+			perms.GrantPersistent(req)
+		case allowOnceID:
+			perms.Grant(req)
+		default:
+			// Reject selection or unknown option.
+			perms.Deny(req)
+		}
+	case "cancelled":
+		perms.Deny(req)
 	default:
-		// Reject_once, reject_always, cancelled, or unknown option.
 		perms.Deny(req)
 	}
 }

@@ -2,11 +2,14 @@ package tools
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
+	"log/slog"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/imageutil"
 	"github.com/charmbracelet/crush/internal/permission"
 )
 
@@ -122,11 +125,36 @@ func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolRe
 			return fantasy.NewTextErrorResponse(fmt.Sprintf("This model (%s) does not support image data.", modelName)), nil
 		}
 
+		// MCP SDK returns Data as already base64-encoded.
+		// For images, we need to decode -> compress -> re-encode.
+		imageData := result.Data
+		mimeType := result.MediaType
+		if result.Type == "image" && len(result.Data) > 0 {
+			// Decode base64 to raw bytes.
+			decoded, decodeErr := base64.StdEncoding.DecodeString(string(result.Data))
+			if decodeErr != nil {
+				slog.Warn("Failed to decode base64 MCP image", "error", decodeErr, "tool", m.tool.Name)
+				// Fall through with original data.
+			} else {
+				// Compress the decoded image.
+				compressConfig := imageutil.DefaultCompressionConfig()
+				compressResult, compressErr := imageutil.CompressImage(decoded, mimeType, compressConfig)
+				if compressErr != nil {
+					slog.Warn("Failed to compress MCP image", "error", compressErr, "tool", m.tool.Name)
+					// Fall through with original data.
+				} else if compressResult.WasCompressed {
+					// Re-encode to base64.
+					imageData = []byte(base64.StdEncoding.EncodeToString(compressResult.Data))
+					mimeType = compressResult.MimeType
+				}
+			}
+		}
+
 		var response fantasy.ToolResponse
 		if result.Type == "image" {
-			response = fantasy.NewImageResponse(result.Data, result.MediaType)
+			response = fantasy.NewImageResponse(imageData, mimeType)
 		} else {
-			response = fantasy.NewMediaResponse(result.Data, result.MediaType)
+			response = fantasy.NewMediaResponse(imageData, mimeType)
 		}
 		response.Content = result.Content
 		return response, nil

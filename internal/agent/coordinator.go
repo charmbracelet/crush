@@ -604,8 +604,15 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 	}
 
 	// Add custom plugin tools - they bypass AllowedTools filter since they are user-defined
+	// But only add them if they don't already exist in filteredTools (to avoid duplicates).
+	existingToolNames := make(map[string]bool)
+	for _, tool := range filteredTools {
+		existingToolNames[tool.Info().Name] = true
+	}
 	for _, customTool := range plugin.GetCustomTools() {
-		filteredTools = append(filteredTools, plugin.NewCustomToolAgentTool(customTool, c.cfg.WorkingDir()))
+		if !existingToolNames[customTool.Name] {
+			filteredTools = append(filteredTools, plugin.NewCustomToolAgentTool(customTool, c.cfg.WorkingDir()))
+		}
 	}
 
 	for _, tool := range tools.GetMCPTools(c.permissions, c.cfg, c.cfg.WorkingDir()) {

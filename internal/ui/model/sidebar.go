@@ -1,6 +1,7 @@
 package model
 
 import (
+	"cmp"
 	"fmt"
 	"strings"
 
@@ -27,17 +28,21 @@ func (m *UI) modelInfo(width int) string {
 
 			// Only check reasoning if model can reason
 			if model.CatwalkCfg.CanReason {
+				effectiveEffort := cmp.Or(model.ModelCfg.ReasoningEffort, model.CatwalkCfg.DefaultReasoningEffort)
 				if len(model.CatwalkCfg.ReasoningLevels) == 0 {
-					// Older Anthropic models use thinking mode
-					if model.CatwalkCfg.DefaultReasoningEffort != "" {
-						reasoningInfo = fmt.Sprintf("Thinking %s", common.FormatReasoningEffort(model.CatwalkCfg.DefaultReasoningEffort))
+					// Anthropic-style thinking models (binary on/off)
+					if model.ModelCfg.Think || effectiveEffort != "" {
+						if effectiveEffort != "" {
+							reasoningInfo = fmt.Sprintf("Thinking %s", common.FormatReasoningEffort(effectiveEffort))
+						} else {
+							reasoningInfo = "Thinking On"
+						}
 					} else {
 						reasoningInfo = "Thinking Off"
 					}
 				} else {
-					// Newer models with reasoning levels
-					reasoningEffort := model.CatwalkCfg.DefaultReasoningEffort
-					reasoningInfo = fmt.Sprintf("Reasoning %s", common.FormatReasoningEffort(reasoningEffort))
+					// Models with explicit reasoning levels
+					reasoningInfo = fmt.Sprintf("Reasoning %s", common.FormatReasoningEffort(effectiveEffort))
 				}
 			}
 		}

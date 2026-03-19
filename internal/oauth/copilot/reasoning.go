@@ -14,8 +14,35 @@ import (
 //
 // The Copilot API proxy returns "reasoning_text" for the thinking text
 // instead of the standard OpenAI "reasoning_content" field.
+// Some models use "reasoning" instead of "reasoning_content".
 var reasoningFieldMapping = map[string]string{
 	`"reasoning_text":`: `"reasoning_content":`,
+	`"reasoning":`:      `"reasoning_content":`,
+}
+
+// reasoningNormalizingTransport is an http.RoundTripper that normalizes
+// non-standard reasoning field names in every response.
+type reasoningNormalizingTransport struct {
+	inner http.RoundTripper
+}
+
+// NewReasoningNormalizingTransport wraps inner with a transport that rewrites
+// non-standard reasoning field names (e.g. "reasoning", "reasoning_text") to
+// the canonical "reasoning_content" field expected by the openai-compat
+// provider. If inner is nil, http.DefaultTransport is used.
+func NewReasoningNormalizingTransport(inner http.RoundTripper) http.RoundTripper {
+	if inner == nil {
+		inner = http.DefaultTransport
+	}
+	return &reasoningNormalizingTransport{inner: inner}
+}
+
+func (t *reasoningNormalizingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.inner.RoundTrip(req)
+	if err != nil {
+		return resp, err
+	}
+	return wrapReasoningTransform(resp), nil
 }
 
 // wrapReasoningTransform wraps an HTTP response to normalize non-standard

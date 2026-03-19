@@ -849,12 +849,26 @@ func (c *coordinator) buildOpenaiCompatProvider(
 		if providerID == string(catwalk.InferenceProviderCopilot) {
 			opts = append(opts, openaicompat.WithUseResponsesAPI())
 		}
+		// Copilot client already applies reasoning field normalization internally.
 		httpClient = copilot.NewClient(isSubAgent, c.cfg.Config().Options.Debug)
 	} else if copilotService {
-		// Use billing client for Copilot-compatible providers.
-		httpClient = copilot.NewBillingClient(copilotService, c.cfg.Config().Options.Debug)
-	} else if c.cfg.Config().Options.Debug {
-		httpClient = log.NewHTTPClient()
+		// Use billing client for Copilot-compatible providers, wrapped with
+		// reasoning field normalization.
+		billingClient := copilot.NewBillingClient(copilotService, c.cfg.Config().Options.Debug)
+		httpClient = &http.Client{
+			Transport: copilot.NewReasoningNormalizingTransport(billingClient.Transport),
+		}
+	} else {
+		// For all other openai-compat providers, apply reasoning field
+		// normalization so that models returning "reasoning" or
+		// "reasoning_text" are transparently mapped to "reasoning_content".
+		var inner http.RoundTripper
+		if c.cfg.Config().Options.Debug {
+			inner = log.NewHTTPClient().Transport
+		}
+		httpClient = &http.Client{
+			Transport: copilot.NewReasoningNormalizingTransport(inner),
+		}
 	}
 	if httpClient != nil {
 		opts = append(opts, openaicompat.WithHTTPClient(httpClient))

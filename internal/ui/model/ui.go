@@ -3592,7 +3592,7 @@ func (m *UI) executeTerminalCommand(command string) tea.Cmd {
 			err:      execErr,
 		}
 	}
-	
+
 	cmds = append(cmds, execCmd)
 	return tea.Sequence(cmds...)
 }

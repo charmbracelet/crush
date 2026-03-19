@@ -35,8 +35,8 @@ func NewAppAdapter(
 	}
 }
 
-func (a *AppAdapter) GetSessions() session.Service         { return a.sessions }
-func (a *AppAdapter) GetMessages() message.Service         { return a.messages }
-func (a *AppAdapter) GetCoordinator() agent.Coordinator    { return a.coordinator }
-func (a *AppAdapter) GetPermissions() permission.Service   { return a.permissions }
-func (a *AppAdapter) GetConfig() *config.ConfigStore       { return a.cfg }
+func (a *AppAdapter) GetSessions() session.Service       { return a.sessions }
+func (a *AppAdapter) GetMessages() message.Service       { return a.messages }
+func (a *AppAdapter) GetCoordinator() agent.Coordinator  { return a.coordinator }
+func (a *AppAdapter) GetPermissions() permission.Service { return a.permissions }
+func (a *AppAdapter) GetConfig() *config.ConfigStore     { return a.cfg }

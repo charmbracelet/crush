@@ -47,6 +47,32 @@ type noopLogger struct{}
 
 func (noopLogger) InfoPersist(msg string, keysAndValues ...any) {}
 
+// RuntimeEnvInput contains dynamic environment hook inputs.
+type RuntimeEnvInput struct {
+	CWD string
+}
+
+// RuntimeEnvHook can inject environment variables at command execution time.
+type RuntimeEnvHook func(ctx context.Context, input RuntimeEnvInput) map[string]string
+
+var (
+	runtimeEnvHook   RuntimeEnvHook
+	runtimeEnvHookMu sync.RWMutex
+)
+
+// SetRuntimeEnvHook sets the global runtime environment hook.
+func SetRuntimeEnvHook(hook RuntimeEnvHook) {
+	runtimeEnvHookMu.Lock()
+	defer runtimeEnvHookMu.Unlock()
+	runtimeEnvHook = hook
+}
+
+func getRuntimeEnvHook() RuntimeEnvHook {
+	runtimeEnvHookMu.RLock()
+	defer runtimeEnvHookMu.RUnlock()
+	return runtimeEnvHook
+}
+
 // BlockFunc is a function that determines if a command should be blocked
 type BlockFunc func(args []string) bool
 
@@ -244,18 +270,73 @@ func (s *Shell) blockHandler() func(next interp.ExecHandlerFunc) interp.ExecHand
 }
 
 // newInterp creates a new interpreter with the current shell state
-func (s *Shell) newInterp(stdout, stderr io.Writer) (*interp.Runner, error) {
-	return interp.New(
+func (s *Shell) newInterp(ctx context.Context, stdout, stderr io.Writer) (*interp.Runner, map[string]runtimeEnvOverride, error) {
+	env := slices.Clone(s.env)
+	overrides := make(map[string]runtimeEnvOverride)
+	if hook := getRuntimeEnvHook(); hook != nil {
+		for key, value := range hook(ctx, RuntimeEnvInput{CWD: s.cwd}) {
+			previousValue, hadOriginal := envValue(env, key)
+			overrides[key] = runtimeEnvOverride{
+				InjectedValue: value,
+				HadOriginal:   hadOriginal,
+				OriginalValue: previousValue,
+			}
+			setEnvValue(&env, key, value)
+		}
+	}
+
+	runner, err := interp.New(
 		interp.StdIO(nil, stdout, stderr),
 		interp.Interactive(false),
-		interp.Env(expand.ListEnviron(s.env...)),
+		interp.Env(expand.ListEnviron(env...)),
 		interp.Dir(s.cwd),
 		interp.ExecHandlers(s.execHandlers()...),
 	)
+	if err != nil {
+		return nil, nil, err
+	}
+	return runner, overrides, nil
+}
+
+func envValue(env []string, key string) (string, bool) {
+	keyPrefix := key + "="
+	for _, item := range env {
+		if strings.HasPrefix(item, keyPrefix) {
+			return strings.TrimPrefix(item, keyPrefix), true
+		}
+	}
+	return "", false
+}
+
+func setEnvValue(env *[]string, key, value string) {
+	keyPrefix := key + "="
+	for i, item := range *env {
+		if strings.HasPrefix(item, keyPrefix) {
+			(*env)[i] = keyPrefix + value
+			return
+		}
+	}
+	*env = append(*env, keyPrefix+value)
+}
+
+func removeEnvValue(env *[]string, key string) {
+	keyPrefix := key + "="
+	for i, item := range *env {
+		if strings.HasPrefix(item, keyPrefix) {
+			*env = append((*env)[:i], (*env)[i+1:]...)
+			return
+		}
+	}
+}
+
+type runtimeEnvOverride struct {
+	InjectedValue string
+	HadOriginal   bool
+	OriginalValue string
 }
 
 // updateShellFromRunner updates the shell from the interpreter after execution.
-func (s *Shell) updateShellFromRunner(runner *interp.Runner) {
+func (s *Shell) updateShellFromRunner(runner *interp.Runner, overrides map[string]runtimeEnvOverride) {
 	s.cwd = runner.Dir
 	s.env = s.env[:0]
 	for name, vr := range runner.Vars {
@@ -263,17 +344,29 @@ func (s *Shell) updateShellFromRunner(runner *interp.Runner) {
 			s.env = append(s.env, name+"="+vr.Str)
 		}
 	}
+	for key, override := range overrides {
+		currentValue, exists := envValue(s.env, key)
+		if !exists || currentValue != override.InjectedValue {
+			continue
+		}
+		if override.HadOriginal {
+			setEnvValue(&s.env, key, override.OriginalValue)
+			continue
+		}
+		removeEnvValue(&s.env, key)
+	}
 }
 
 // execCommon is the shared implementation for executing commands
 func (s *Shell) execCommon(ctx context.Context, command string, stdout, stderr io.Writer) (err error) {
 	var runner *interp.Runner
+	overrides := make(map[string]runtimeEnvOverride)
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("command execution panic: %v", r)
 		}
 		if runner != nil {
-			s.updateShellFromRunner(runner)
+			s.updateShellFromRunner(runner, overrides)
 		}
 		s.logger.InfoPersist("command finished", "command", command, "err", err)
 	}()
@@ -283,7 +376,7 @@ func (s *Shell) execCommon(ctx context.Context, command string, stdout, stderr i
 		return fmt.Errorf("could not parse command: %w", err)
 	}
 
-	runner, err = s.newInterp(stdout, stderr)
+	runner, overrides, err = s.newInterp(ctx, stdout, stderr)
 	if err != nil {
 		return fmt.Errorf("could not run command: %w", err)
 	}

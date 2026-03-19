@@ -1,0 +1,8 @@
+{
+  "name": "crush-morph-compact-plugin",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@morphllm/morphsdk": "latest"
+  }
+}

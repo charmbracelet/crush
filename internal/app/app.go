@@ -31,6 +31,7 @@ import (
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/plugin"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
@@ -106,6 +107,15 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 		serviceEventsWG:    &sync.WaitGroup{},
 		tuiWG:              &sync.WaitGroup{},
 		agentNotifications: pubsub.NewBroker[notify.Notification](),
+	}
+
+	if err := plugin.Init(ctx, plugin.PluginInput{
+		Config:     store,
+		Sessions:   sessions,
+		Messages:   messages,
+		WorkingDir: store.WorkingDir(),
+	}); err != nil {
+		return nil, fmt.Errorf("failed to initialize plugins: %w", err)
 	}
 
 	app.setupEvents()
@@ -427,7 +437,7 @@ func (app *App) setupEvents() {
 	ctx, cancel := context.WithCancel(app.globalCtx)
 	app.eventsCtx = ctx
 	setupSubscriber(ctx, app.serviceEventsWG, "sessions", app.Sessions.Subscribe, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "messages", app.Messages.Subscribe, app.events)
+	setupMessageSubscriber(ctx, app.serviceEventsWG, app.Messages.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "user-input", app.UserInput.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "permissions", app.Permissions.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "permissions-notifications", app.Permissions.SubscribeNotifications, app.events)
@@ -484,6 +494,55 @@ func setupSubscriber[T any](
 				}
 			case <-ctx.Done():
 				slog.Debug("Subscription cancelled", "name", name)
+				return
+			}
+		}
+	})
+}
+
+func setupMessageSubscriber(
+	ctx context.Context,
+	wg *sync.WaitGroup,
+	subscriber func(context.Context) <-chan pubsub.Event[message.Message],
+	outputCh chan<- tea.Msg,
+) {
+	wg.Go(func() {
+		subCh := subscriber(ctx)
+		sendTimer := time.NewTimer(0)
+		<-sendTimer.C
+		defer sendTimer.Stop()
+
+		for {
+			select {
+			case event, ok := <-subCh:
+				if !ok {
+					slog.Debug("Subscription channel closed", "name", "messages")
+					return
+				}
+				if event.Type == pubsub.CreatedEvent {
+					if err := plugin.TriggerMessageCreated(ctx, event.Payload); err != nil {
+						slog.Error("Plugin message created hook failed", "error", err, "message_id", event.Payload.ID)
+					}
+				}
+				var msg tea.Msg = event
+				if !sendTimer.Stop() {
+					select {
+					case <-sendTimer.C:
+					default:
+					}
+				}
+				sendTimer.Reset(subscriberSendTimeout)
+
+				select {
+				case outputCh <- msg:
+				case <-sendTimer.C:
+					slog.Debug("Message dropped due to slow consumer", "name", "messages")
+				case <-ctx.Done():
+					slog.Debug("Subscription cancelled", "name", "messages")
+					return
+				}
+			case <-ctx.Done():
+				slog.Debug("Subscription cancelled", "name", "messages")
 				return
 			}
 		}

@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
@@ -703,6 +704,103 @@ func TestShouldAutoSummarize(t *testing.T) {
 			require.Equal(t, tt.want, shouldAutoSummarize(tt.contextUsed, tt.contextWindow, tt.maxOutputTokens))
 		})
 	}
+}
+
+func TestRefreshCallConfigIfNeeded_UsesContextRuntimeConfig(t *testing.T) {
+	t.Parallel()
+
+	call := SessionAgentCall{MaxOutputTokens: 1}
+	runtimeConfig := sessionAgentRuntimeConfig{MaxOutputTokens: 2048}
+	agent := &sessionAgent{
+		refreshCallConfig: func(context.Context) (sessionAgentRuntimeConfig, error) {
+			return sessionAgentRuntimeConfig{MaxOutputTokens: 4096}, nil
+		},
+	}
+
+	ctx := context.WithValue(context.Background(), sessionAgentRuntimeConfigContextKey{}, runtimeConfig)
+	err := agent.refreshCallConfigIfNeeded(ctx, &call)
+	require.NoError(t, err)
+	require.Equal(t, int64(2048), call.MaxOutputTokens)
+}
+
+func TestRefreshCallConfigIfNeeded_IgnoresNilPointerContextAndRefreshes(t *testing.T) {
+	t.Parallel()
+
+	call := SessionAgentCall{MaxOutputTokens: 1}
+	agent := &sessionAgent{
+		refreshCallConfig: func(context.Context) (sessionAgentRuntimeConfig, error) {
+			return sessionAgentRuntimeConfig{MaxOutputTokens: 4096}, nil
+		},
+	}
+
+	ctx := context.WithValue(context.Background(), sessionAgentRuntimeConfigContextKey{}, (*sessionAgentRuntimeConfig)(nil))
+	err := agent.refreshCallConfigIfNeeded(ctx, &call)
+	require.NoError(t, err)
+	require.Equal(t, int64(4096), call.MaxOutputTokens)
+}
+
+func float64Ptr(v float64) *float64 {
+	return &v
+}
+
+func int64Ptr(v int64) *int64 {
+	return &v
+}
+
+func ptrAddress[T any](p *T) uintptr {
+	if p == nil {
+		return 0
+	}
+	return uintptr(unsafe.Pointer(p))
+}
+
+func TestApplyRuntimeConfig_OnlyOverridesExplicitPointerFields(t *testing.T) {
+	t.Parallel()
+
+	temperature := 0.7
+	topP := 0.9
+	topK := int64(50)
+	frequencyPenalty := 0.2
+	presencePenalty := 0.3
+
+	call := SessionAgentCall{
+		MaxOutputTokens:  256,
+		Temperature:      float64Ptr(0.1),
+		TopP:             float64Ptr(0.2),
+		TopK:             int64Ptr(3),
+		FrequencyPenalty: float64Ptr(-0.1),
+		PresencePenalty:  float64Ptr(-0.2),
+	}
+
+	applyRuntimeConfig(&call, sessionAgentRuntimeConfig{
+		MaxOutputTokens:  1024,
+		Temperature:      &temperature,
+		TopP:             &topP,
+		TopK:             &topK,
+		FrequencyPenalty: &frequencyPenalty,
+		PresencePenalty:  &presencePenalty,
+	})
+
+	require.Equal(t, int64(1024), call.MaxOutputTokens)
+	require.Equal(t, ptrAddress(&temperature), ptrAddress(call.Temperature))
+	require.Equal(t, ptrAddress(&topP), ptrAddress(call.TopP))
+	require.Equal(t, ptrAddress(&topK), ptrAddress(call.TopK))
+	require.Equal(t, ptrAddress(&frequencyPenalty), ptrAddress(call.FrequencyPenalty))
+	require.Equal(t, ptrAddress(&presencePenalty), ptrAddress(call.PresencePenalty))
+
+	existingTemp := call.Temperature
+	existingTopP := call.TopP
+	existingTopK := call.TopK
+	existingFreq := call.FrequencyPenalty
+	existingPresence := call.PresencePenalty
+
+	applyRuntimeConfig(&call, sessionAgentRuntimeConfig{})
+	require.Equal(t, int64(1024), call.MaxOutputTokens)
+	require.Equal(t, ptrAddress(existingTemp), ptrAddress(call.Temperature))
+	require.Equal(t, ptrAddress(existingTopP), ptrAddress(call.TopP))
+	require.Equal(t, ptrAddress(existingTopK), ptrAddress(call.TopK))
+	require.Equal(t, ptrAddress(existingFreq), ptrAddress(call.FrequencyPenalty))
+	require.Equal(t, ptrAddress(existingPresence), ptrAddress(call.PresencePenalty))
 }
 
 func TestUpdateSessionUsage_AccumulatesTotals(t *testing.T) {

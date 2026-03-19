@@ -129,8 +129,8 @@ type SessionNewParams struct {
 
 // SessionNewResult is the response after creating a new session.
 type SessionNewResult struct {
-	SessionID     string           `json:"sessionId"`
-	ConfigOptions []ConfigOption   `json:"configOptions,omitempty"`
+	SessionID     string            `json:"sessionId"`
+	ConfigOptions []ConfigOption    `json:"configOptions,omitempty"`
 	Modes         *SessionModeState `json:"modes,omitempty"`
 }
 
@@ -144,7 +144,7 @@ type SessionLoadParams struct {
 // SessionLoadResult is the response after loading a session.
 // Note: sessionId is NOT included per the ACP spec (unlike session/new).
 type SessionLoadResult struct {
-	ConfigOptions []ConfigOption   `json:"configOptions,omitempty"`
+	ConfigOptions []ConfigOption    `json:"configOptions,omitempty"`
 	Modes         *SessionModeState `json:"modes,omitempty"`
 }
 
@@ -258,13 +258,13 @@ type ToolCallStatus string
 
 const (
 	// ToolCallStatusPending means the tool call has not started yet.
-	ToolCallStatusPending    ToolCallStatus = "pending"
+	ToolCallStatusPending ToolCallStatus = "pending"
 	// ToolCallStatusInProgress means the tool call is currently running.
 	ToolCallStatusInProgress ToolCallStatus = "in_progress"
 	// ToolCallStatusCompleted means the tool call finished successfully.
-	ToolCallStatusCompleted  ToolCallStatus = "completed"
+	ToolCallStatusCompleted ToolCallStatus = "completed"
 	// ToolCallStatusFailed means the tool call failed with an error.
-	ToolCallStatusFailed     ToolCallStatus = "failed"
+	ToolCallStatusFailed ToolCallStatus = "failed"
 )
 
 // SessionUpdate is the payload of a session/update notification.
@@ -379,11 +379,11 @@ type RPCError struct {
 
 // Standard JSON-RPC error codes.
 const (
-	CodeParseError      = -32700
-	CodeInvalidRequest  = -32600
-	CodeMethodNotFound  = -32601
-	CodeInvalidParams   = -32602
-	CodeInternalError   = -32603
-	CodeAuthRequired    = -32000
+	CodeParseError       = -32700
+	CodeInvalidRequest   = -32600
+	CodeMethodNotFound   = -32601
+	CodeInvalidParams    = -32602
+	CodeInternalError    = -32603
+	CodeAuthRequired     = -32000
 	CodeResourceNotFound = -32002
 )

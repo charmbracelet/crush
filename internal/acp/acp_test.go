@@ -44,12 +44,15 @@ func (f *fakeSessionService) Create(_ context.Context, title string) (session.Se
 	f.sessions[s.ID] = s
 	return s, nil
 }
+
 func (f *fakeSessionService) CreateTitleSession(_ context.Context, parentID string) (session.Session, error) {
 	return session.Session{ID: "title-" + parentID}, nil
 }
+
 func (f *fakeSessionService) CreateTaskSession(_ context.Context, toolCallID, parentID, title string) (session.Session, error) {
 	return session.Session{ID: toolCallID}, nil
 }
+
 func (f *fakeSessionService) Get(_ context.Context, id string) (session.Session, error) {
 	s, ok := f.sessions[id]
 	if !ok {
@@ -57,6 +60,7 @@ func (f *fakeSessionService) Get(_ context.Context, id string) (session.Session,
 	}
 	return s, nil
 }
+
 func (f *fakeSessionService) List(_ context.Context) ([]session.Session, error) {
 	list := make([]session.Session, 0, len(f.sessions))
 	for _, s := range f.sessions {
@@ -64,12 +68,15 @@ func (f *fakeSessionService) List(_ context.Context) ([]session.Session, error) 
 	}
 	return list, nil
 }
+
 func (f *fakeSessionService) Save(_ context.Context, s session.Session) (session.Session, error) {
 	return s, nil
 }
+
 func (f *fakeSessionService) UpdateCollaborationMode(_ context.Context, id string, mode session.CollaborationMode) (session.Session, error) {
 	return session.Session{ID: id}, nil
 }
+
 func (f *fakeSessionService) UpdateTitleAndUsage(_ context.Context, id, title string, p, c int64, cost float64) error {
 	return nil
 }
@@ -78,6 +85,7 @@ func (f *fakeSessionService) Delete(_ context.Context, id string) error        {
 func (f *fakeSessionService) CreateAgentToolSessionID(msgID, tcID string) string {
 	return msgID + ":" + tcID
 }
+
 func (f *fakeSessionService) ParseAgentToolSessionID(id string) (string, string, bool) {
 	parts := strings.SplitN(id, ":", 2)
 	if len(parts) == 2 {
@@ -106,12 +114,15 @@ func (f *fakeMessageService) Update(_ context.Context, _ message.Message) error 
 func (f *fakeMessageService) Get(_ context.Context, _ string) (message.Message, error) {
 	return message.Message{}, nil
 }
+
 func (f *fakeMessageService) List(_ context.Context, sessionID string) ([]message.Message, error) {
 	return f.lists[sessionID], nil
 }
+
 func (f *fakeMessageService) ListUserMessages(_ context.Context, _ string) ([]message.Message, error) {
 	return nil, nil
 }
+
 func (f *fakeMessageService) ListAllUserMessages(_ context.Context) ([]message.Message, error) {
 	return nil, nil
 }
@@ -126,17 +137,22 @@ type fakeCoordinator struct {
 func (f *fakeCoordinator) Run(_ context.Context, sessionID, prompt string, _ ...message.Attachment) (*fantasy.AgentResult, error) {
 	return f.runResult, f.runErr
 }
-func (f *fakeCoordinator) Cancel(_ string)                             {}
-func (f *fakeCoordinator) CancelAll()                                  {}
-func (f *fakeCoordinator) IsSessionBusy(_ string) bool                 { return false }
-func (f *fakeCoordinator) IsBusy() bool                                { return false }
-func (f *fakeCoordinator) QueuedPrompts(_ string) int                  { return 0 }
-func (f *fakeCoordinator) QueuedPromptsList(_ string) []string         { return nil }
-func (f *fakeCoordinator) RemoveQueuedPrompt(_ string, _ int) bool     { return false }
-func (f *fakeCoordinator) ClearQueue(_ string)                         {}
-func (f *fakeCoordinator) Summarize(_ context.Context, _ string) error { return nil }
-func (f *fakeCoordinator) Model() agent.Model                          { return agent.Model{} }
-func (f *fakeCoordinator) UpdateModels(_ context.Context) error        { return nil }
+func (f *fakeCoordinator) Cancel(_ string)                         {}
+func (f *fakeCoordinator) CancelAll()                              {}
+func (f *fakeCoordinator) IsSessionBusy(_ string) bool             { return false }
+func (f *fakeCoordinator) IsBusy() bool                            { return false }
+func (f *fakeCoordinator) QueuedPrompts(_ string) int              { return 0 }
+func (f *fakeCoordinator) QueuedPromptsList(_ string) []string     { return nil }
+func (f *fakeCoordinator) RemoveQueuedPrompt(_ string, _ int) bool { return false }
+func (f *fakeCoordinator) ClearQueue(_ string)                     {}
+func (f *fakeCoordinator) PauseQueue(_ string)                     {}
+func (f *fakeCoordinator) ResumeQueue(_ string)                    {}
+func (f *fakeCoordinator) IsQueuePaused(_ string) bool             { return false }
+func (f *fakeCoordinator) Summarize(_ context.Context, _ string, _ fantasy.ProviderOptions) error {
+	return nil
+}
+func (f *fakeCoordinator) Model() agent.Model                   { return agent.Model{} }
+func (f *fakeCoordinator) UpdateModels(_ context.Context) error { return nil }
 
 type fakeApp struct {
 	sessions    *fakeSessionService
@@ -144,11 +160,11 @@ type fakeApp struct {
 	coordinator *fakeCoordinator
 }
 
-func (a *fakeApp) GetSessions() session.Service         { return a.sessions }
-func (a *fakeApp) GetMessages() message.Service         { return a.messages }
-func (a *fakeApp) GetCoordinator() agent.Coordinator    { return a.coordinator }
-func (a *fakeApp) GetConfig() *config.ConfigStore       { return nil }
-func (a *fakeApp) GetPermissions() permission.Service   { return nil }
+func (a *fakeApp) GetSessions() session.Service       { return a.sessions }
+func (a *fakeApp) GetMessages() message.Service       { return a.messages }
+func (a *fakeApp) GetCoordinator() agent.Coordinator  { return a.coordinator }
+func (a *fakeApp) GetConfig() *config.ConfigStore     { return nil }
+func (a *fakeApp) GetPermissions() permission.Service { return nil }
 
 func TestSessionListIncludesCWD(t *testing.T) {
 	t.Parallel()

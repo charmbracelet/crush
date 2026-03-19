@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // Benchmark to measure CPU efficiency
@@ -117,4 +119,36 @@ func TestCrossPlatformExecution(t *testing.T) {
 	if !strings.Contains(strings.ToLower(stdout), "hello") {
 		t.Errorf("Echo output should contain 'hello', got: %q", stdout)
 	}
+}
+
+func TestRuntimeEnvHookInjectsAndOverridesVars(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping test on Windows")
+	}
+
+	SetRuntimeEnvHook(nil)
+	t.Cleanup(func() {
+		SetRuntimeEnvHook(nil)
+	})
+
+	SetRuntimeEnvHook(func(ctx context.Context, input RuntimeEnvInput) map[string]string {
+		return map[string]string{
+			"HOOK_VAR":     "hook-value",
+			"SHARED_VALUE": "hook-override",
+		}
+	})
+
+	shell := NewShell(&Options{
+		WorkingDir: t.TempDir(),
+		Env: []string{
+			"SHARED_VALUE=base",
+		},
+	})
+
+	stdout, _, err := shell.Exec(t.Context(), "echo $HOOK_VAR,$SHARED_VALUE")
+	require.NoError(t, err)
+	require.Equal(t, "hook-value,hook-override\n", stdout)
+
+	storedEnv := shell.GetEnv()
+	require.Equal(t, []string{"SHARED_VALUE=base"}, storedEnv)
 }

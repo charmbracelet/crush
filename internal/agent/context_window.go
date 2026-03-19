@@ -43,6 +43,8 @@ func isContextWindowExceededError(err error) bool {
 		strings.Contains(msg, "context length") ||
 		strings.Contains(msg, "maximum context") ||
 		strings.Contains(msg, "input exceeds") ||
+		strings.Contains(msg, "input length should be") ||
+		strings.Contains(msg, "range of input length should be") ||
 		strings.Contains(msg, "too many tokens") ||
 		strings.Contains(msg, "prompt is too long")
 }

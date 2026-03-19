@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/plugin"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
 )
@@ -183,6 +184,34 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		Description: opts.Description,
 		Action:      opts.Action,
 		Params:      opts.Params,
+	}
+
+	hookDecision := plugin.TriggerPermissionAsk(plugin.PermissionAskInput{
+		Permission: plugin.PermissionRequest{
+			ID:          permission.ID,
+			SessionID:   permission.SessionID,
+			ToolCallID:  permission.ToolCallID,
+			ToolName:    permission.ToolName,
+			Description: permission.Description,
+			Action:      permission.Action,
+			Params:      permission.Params,
+			Path:        permission.Path,
+		},
+	})
+	if hookDecision.Action == plugin.PermissionAllow {
+		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+			ToolCallID: opts.ToolCallID,
+			Granted:    true,
+		})
+		return true, nil
+	}
+	if hookDecision.Action == plugin.PermissionDeny {
+		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+			ToolCallID: opts.ToolCallID,
+			Granted:    false,
+			Denied:     true,
+		})
+		return false, nil
 	}
 
 	s.sessionPermissionsMu.RLock()

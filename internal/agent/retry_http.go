@@ -14,10 +14,11 @@ const (
 	maxRetriableAttempts = 5
 
 	// retryBaseDelay is the base delay for exponential backoff.
-	retryBaseDelay = 2 * time.Second
+	// Retry schedule: 3s, 6s, 12s, 24s, 48s.
+	retryBaseDelay = 3 * time.Second
 
 	// retryMaxDelay is the maximum delay between retries.
-	retryMaxDelay = 60 * time.Second
+	retryMaxDelay = 48 * time.Second
 )
 
 // isRetriableError reports whether the error is a transient error that
@@ -31,36 +32,51 @@ func isRetriableError(err error) bool {
 	}
 
 	var providerErr *fantasy.ProviderError
-	if !errors.As(err, &providerErr) {
-		// Non-provider errors (e.g., network timeouts) are retriable.
-		return isTransientNetworkError(err)
+	if errors.As(err, &providerErr) {
+		// 429: Rate limit exceeded - always retriable.
+		if providerErr.StatusCode == 429 {
+			return true
+		}
+
+		// 503: Service unavailable - retriable.
+		if providerErr.StatusCode == 503 {
+			return true
+		}
+
+		// 502/504: Gateway errors - often transient.
+		if providerErr.StatusCode == 502 || providerErr.StatusCode == 504 {
+			return true
+		}
+
+		// Check message for rate-limit indicators even with other status codes.
+		msg := strings.ToLower(providerErr.Message)
+		if strings.Contains(msg, "rate limit") ||
+			strings.Contains(msg, "too many requests") ||
+			strings.Contains(msg, "overloaded") ||
+			strings.Contains(msg, "temporarily unavailable") {
+			return true
+		}
 	}
 
-	// 429: Rate limit exceeded - always retriable.
-	if providerErr.StatusCode == 429 {
+	// Fallback: check the full error string for HTTP status codes that
+	// indicate transient failures. This catches errors that are not
+	// wrapped as *fantasy.ProviderError (e.g. *fantasy.Error or raw
+	// HTTP client errors).
+	// Use more specific patterns to avoid false positives.
+	errStr := strings.ToLower(err.Error())
+	if strings.Contains(errStr, "status 503") || strings.Contains(errStr, "http 503") ||
+		strings.Contains(errStr, "service unavailable") ||
+		strings.Contains(errStr, "status 502") || strings.Contains(errStr, "http 502") ||
+		strings.Contains(errStr, "bad gateway") ||
+		strings.Contains(errStr, "status 504") || strings.Contains(errStr, "http 504") ||
+		strings.Contains(errStr, "gateway timeout") ||
+		strings.Contains(errStr, "status 429") || strings.Contains(errStr, "http 429") ||
+		strings.Contains(errStr, "too many requests") ||
+		strings.Contains(errStr, "rate limit") || strings.Contains(errStr, "overloaded") {
 		return true
 	}
 
-	// 503: Service unavailable - retriable.
-	if providerErr.StatusCode == 503 {
-		return true
-	}
-
-	// 502/504: Gateway errors - often transient.
-	if providerErr.StatusCode == 502 || providerErr.StatusCode == 504 {
-		return true
-	}
-
-	// Check message for rate-limit indicators even with other status codes.
-	msg := strings.ToLower(providerErr.Message)
-	if strings.Contains(msg, "rate limit") ||
-		strings.Contains(msg, "too many requests") ||
-		strings.Contains(msg, "overloaded") ||
-		strings.Contains(msg, "temporarily unavailable") {
-		return true
-	}
-
-	return false
+	return isTransientNetworkError(err)
 }
 
 // isTransientNetworkError reports whether a non-ProviderError is a transient
@@ -81,11 +97,11 @@ func isTransientNetworkError(err error) bool {
 }
 
 // retryDelay calculates the delay for the given attempt number using
-// exponential backoff.
+// exponential backoff: base * 2^(attempt-1).
+// With base=3s: 3s, 6s, 12s, 24s, 48s.
 func retryDelay(attempt int) time.Duration {
-	// Exponential backoff: base * 2^attempt
 	delay := retryBaseDelay
-	for i := 0; i < attempt; i++ {
+	for i := 1; i < attempt; i++ {
 		delay *= 2
 		if delay > retryMaxDelay {
 			delay = retryMaxDelay

@@ -1,12 +1,27 @@
 package permission
 
 import (
+	"context"
 	"sync"
 	"testing"
 
+	"github.com/charmbracelet/crush/internal/plugin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type permissionTestPlugin struct {
+	name  string
+	hooks plugin.Hooks
+}
+
+func (p *permissionTestPlugin) Name() string {
+	return p.name
+}
+
+func (p *permissionTestPlugin) Init(ctx context.Context, input plugin.PluginInput) (plugin.Hooks, error) {
+	return p.hooks, nil
+}
 
 func TestPermissionService_AllowedCommands(t *testing.T) {
 	tests := []struct {
@@ -80,6 +95,9 @@ func TestPermissionService_AllowedCommands(t *testing.T) {
 }
 
 func TestPermissionService_SkipMode(t *testing.T) {
+	plugin.Reset()
+	t.Cleanup(plugin.Reset)
+
 	service := NewPermissionService("/tmp", true, []string{})
 
 	result, err := service.Request(t.Context(), CreatePermissionRequest{
@@ -95,6 +113,60 @@ func TestPermissionService_SkipMode(t *testing.T) {
 	if !result {
 		t.Error("expected permission to be granted in skip mode")
 	}
+}
+
+func TestPermissionService_PluginDecisionAllow(t *testing.T) {
+	plugin.Reset()
+	t.Cleanup(plugin.Reset)
+
+	plugin.Register(&permissionTestPlugin{
+		name: "allow",
+		hooks: plugin.Hooks{
+			PermissionAsk: func(input plugin.PermissionAskInput) plugin.PermissionAskOutput {
+				return plugin.PermissionAskOutput{Action: plugin.PermissionAllow}
+			},
+		},
+	})
+	require.NoError(t, plugin.Init(t.Context(), plugin.PluginInput{}))
+
+	service := NewPermissionService("/tmp", false, []string{})
+	result, err := service.Request(t.Context(), CreatePermissionRequest{
+		SessionID:   "session-allow",
+		ToolCallID:  "tool-call-1",
+		ToolName:    "bash",
+		Action:      "execute",
+		Description: "test command",
+		Path:        "/tmp",
+	})
+	require.NoError(t, err)
+	require.True(t, result)
+}
+
+func TestPermissionService_PluginDecisionDeny(t *testing.T) {
+	plugin.Reset()
+	t.Cleanup(plugin.Reset)
+
+	plugin.Register(&permissionTestPlugin{
+		name: "deny",
+		hooks: plugin.Hooks{
+			PermissionAsk: func(input plugin.PermissionAskInput) plugin.PermissionAskOutput {
+				return plugin.PermissionAskOutput{Action: plugin.PermissionDeny}
+			},
+		},
+	})
+	require.NoError(t, plugin.Init(t.Context(), plugin.PluginInput{}))
+
+	service := NewPermissionService("/tmp", false, []string{})
+	result, err := service.Request(t.Context(), CreatePermissionRequest{
+		SessionID:   "session-deny",
+		ToolCallID:  "tool-call-2",
+		ToolName:    "bash",
+		Action:      "execute",
+		Description: "test command",
+		Path:        "/tmp",
+	})
+	require.NoError(t, err)
+	require.False(t, result)
 }
 
 func TestPermissionService_SequentialProperties(t *testing.T) {

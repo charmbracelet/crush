@@ -30,6 +30,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/plugin"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/userinput"
@@ -158,22 +159,15 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	}
 
 	// refresh models before each run
-	if err := c.UpdateModels(ctx); err != nil {
+	runtimeConfig, err := c.updateCurrentAgentRuntime(ctx)
+	if err != nil {
 		return nil, fmt.Errorf("failed to update models: %w", err)
 	}
 
 	model := c.currentAgent.Model()
-	maxTokens := model.CatwalkCfg.DefaultMaxTokens
-	if model.ModelCfg.MaxTokens != 0 {
-		// If the configured max_tokens is significantly larger than the model's default,
-		// it may be a leftover value from a previously selected model.
-		// Use the model's default in this case to avoid API errors.
-		// Only apply this check when the model has a valid default (non-zero).
-		if model.CatwalkCfg.DefaultMaxTokens > 0 && model.ModelCfg.MaxTokens > model.CatwalkCfg.DefaultMaxTokens*2 {
-			slog.Warn("Configured max_tokens is much larger than model default, using model default", "configured", model.ModelCfg.MaxTokens, "default", model.CatwalkCfg.DefaultMaxTokens, "model", model.ModelCfg.Model)
-		} else {
-			maxTokens = model.ModelCfg.MaxTokens
-		}
+	maxTokens := runtimeConfig.MaxOutputTokens
+	if maxTokens == 0 {
+		maxTokens = model.CatwalkCfg.DefaultMaxTokens
 	}
 
 	if !model.CatwalkCfg.SupportsImages && attachments != nil {
@@ -187,12 +181,12 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 		attachments = filteredAttachments
 	}
 
+	ctx = context.WithValue(ctx, sessionAgentRuntimeConfigContextKey{}, runtimeConfig)
+
 	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
 	if !ok {
 		return nil, errModelProviderNotConfigured
 	}
-
-	mergedOptions, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(model, providerCfg)
 
 	if providerCfg.OAuthToken != nil && providerCfg.OAuthToken.IsExpired() {
 		slog.Debug("Token needs to be refreshed", "provider", providerCfg.ID)
@@ -207,12 +201,12 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 			Prompt:           prompt,
 			Attachments:      attachments,
 			MaxOutputTokens:  maxTokens,
-			ProviderOptions:  mergedOptions,
-			Temperature:      temp,
-			TopP:             topP,
-			TopK:             topK,
-			FrequencyPenalty: freqPenalty,
-			PresencePenalty:  presPenalty,
+			ProviderOptions:  runtimeConfig.ProviderOptions,
+			Temperature:      runtimeConfig.Temperature,
+			TopP:             runtimeConfig.TopP,
+			TopK:             runtimeConfig.TopK,
+			FrequencyPenalty: runtimeConfig.FrequencyPenalty,
+			PresencePenalty:  runtimeConfig.PresencePenalty,
 		})
 	}
 	result, originalErr := run()
@@ -424,10 +418,6 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 	return options
 }
 
-// effortToBudgetTokens maps reasoning effort levels to budget_tokens for Anthropic models.
-// These values are chosen to be correctly reverse-mapped by Copilot API's translation logic:
-// Copilot API: budget >= 32768 → xhigh, >= 24576 → high, >= 8192 → medium, >= 1024 → low
-// We want: "high" → high, "medium" → medium, "low" → low
 func effortToBudgetTokens(effort, modelID string) int {
 	// Budget tokens chosen to produce the correct reasoning_effort when translated by Copilot API
 	budgetMap := map[string]int{
@@ -445,9 +435,6 @@ func effortToBudgetTokens(effort, modelID string) int {
 	return budget
 }
 
-// isClaude46Model reports whether the model ID is a Claude 4.6+ model that
-// supports the "effort" parameter for adaptive thinking.
-// Claude 4.6+ models: claude-sonnet-4.6, claude-opus-4.6 (and their hyphenated variants).
 func isClaude46Model(modelID string) bool {
 	id := strings.ToLower(modelID)
 	return strings.Contains(id, "claude-sonnet-4.6") ||
@@ -466,6 +453,17 @@ func mergeCallOptions(model Model, cfg config.ProviderConfig) (fantasy.ProviderO
 	return modelOptions, temp, topP, topK, freqPenalty, presPenalty
 }
 
+func effectiveMaxOutputTokens(model Model) (int64, bool) {
+	maxTokens := model.CatwalkCfg.DefaultMaxTokens
+	if model.ModelCfg.MaxTokens == 0 {
+		return maxTokens, false
+	}
+	if model.CatwalkCfg.DefaultMaxTokens > 0 && model.ModelCfg.MaxTokens > model.CatwalkCfg.DefaultMaxTokens*2 {
+		return model.CatwalkCfg.DefaultMaxTokens, true
+	}
+	return model.ModelCfg.MaxTokens, false
+}
+
 func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool) (SessionAgent, error) {
 	large, small, err := c.buildAgentModels(ctx, isSubAgent)
 	if err != nil {
@@ -473,11 +471,15 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	}
 
 	largeProviderCfg, _ := c.cfg.Config().Providers.Get(large.ModelCfg.Provider)
-	result := NewSessionAgent(SessionAgentOptions{
-		LargeModel:           large,
-		SmallModel:           small,
-		SystemPromptPrefix:   largeProviderCfg.SystemPromptPrefix,
-		SystemPrompt:         "",
+	var result SessionAgent
+	result = NewSessionAgent(SessionAgentOptions{
+		LargeModel:         large,
+		SmallModel:         small,
+		SystemPromptPrefix: largeProviderCfg.SystemPromptPrefix,
+		SystemPrompt:       "",
+		RefreshCallConfig: func(callCtx context.Context) (sessionAgentRuntimeConfig, error) {
+			return c.refreshSessionAgentRuntimeConfig(callCtx, result, prompt, agent, isSubAgent)
+		},
 		IsSubAgent:           isSubAgent,
 		DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
 		IsYolo:               c.permissions.SkipRequests(),
@@ -488,24 +490,53 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	})
 
 	c.readyWg.Go(func() error {
-		systemPrompt, err := prompt.Build(ctx, large.Model.Provider(), large.Model.Model(), c.cfg)
-		if err != nil {
-			return err
-		}
-		result.SetSystemPrompt(systemPrompt)
-		return nil
-	})
-
-	c.readyWg.Go(func() error {
-		tools, err := c.buildTools(ctx, agent)
-		if err != nil {
-			return err
-		}
-		result.SetTools(tools)
-		return nil
+		_, err := c.refreshSessionAgentRuntimeConfig(ctx, result, prompt, agent, isSubAgent)
+		return err
 	})
 
 	return result, nil
+}
+
+func (c *coordinator) refreshSessionAgentRuntimeConfig(ctx context.Context, currentAgent SessionAgent, promptBuilder *prompt.Prompt, agentCfg config.Agent, isSubAgent bool) (sessionAgentRuntimeConfig, error) {
+	large, small, err := c.buildAgentModels(ctx, isSubAgent)
+	if err != nil {
+		return sessionAgentRuntimeConfig{}, err
+	}
+	currentAgent.SetModels(large, small)
+
+	providerCfg, ok := c.cfg.Config().Providers.Get(large.ModelCfg.Provider)
+	if !ok {
+		return sessionAgentRuntimeConfig{}, errModelProviderNotConfigured
+	}
+	currentAgent.SetSystemPromptPrefix(providerCfg.SystemPromptPrefix)
+
+	systemPrompt, err := promptBuilder.Build(ctx, large.Model.Provider(), large.Model.Model(), c.cfg)
+	if err != nil {
+		return sessionAgentRuntimeConfig{}, err
+	}
+	currentAgent.SetSystemPrompt(systemPrompt)
+
+	tools, err := c.buildTools(ctx, agentCfg)
+	if err != nil {
+		return sessionAgentRuntimeConfig{}, err
+	}
+	currentAgent.SetTools(tools)
+
+	maxTokens, clamped := effectiveMaxOutputTokens(large)
+	if clamped {
+		slog.Warn("Configured max_tokens is much larger than model default, using model default", "configured", large.ModelCfg.MaxTokens, "default", large.CatwalkCfg.DefaultMaxTokens, "model", large.ModelCfg.Model)
+	}
+
+	mergedOptions, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(large, providerCfg)
+	return sessionAgentRuntimeConfig{
+		ProviderOptions:  mergedOptions,
+		MaxOutputTokens:  maxTokens,
+		Temperature:      temp,
+		TopP:             topP,
+		TopK:             topK,
+		FrequencyPenalty: freqPenalty,
+		PresencePenalty:  presPenalty,
+	}, nil
 }
 
 func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fantasy.AgentTool, error) {
@@ -572,6 +603,11 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		}
 	}
 
+	// Add custom plugin tools - they bypass AllowedTools filter since they are user-defined
+	for _, customTool := range plugin.GetCustomTools() {
+		filteredTools = append(filteredTools, plugin.NewCustomToolAgentTool(customTool, c.cfg.WorkingDir()))
+	}
+
 	for _, tool := range tools.GetMCPTools(c.permissions, c.cfg, c.cfg.WorkingDir()) {
 		if agent.AllowedMCP == nil {
 			// No MCP restrictions
@@ -595,13 +631,16 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 			slog.Debug("MCP not allowed", "tool", tool.Name(), "agent", agent.Name)
 		}
 	}
+	for i, tool := range filteredTools {
+		filteredTools[i] = plugin.WrapAgentTool(tool)
+	}
+
 	slices.SortFunc(filteredTools, func(a, b fantasy.AgentTool) int {
 		return strings.Compare(a.Info().Name, b.Info().Name)
 	})
 	return filteredTools, nil
 }
 
-// TODO: when we support multiple agents we need to change this so that we pass in the agent specific model config
 func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Model, Model, error) {
 	largeModelCfg, ok := c.cfg.Config().Models[config.SelectedModelTypeLarge]
 	if !ok {
@@ -913,10 +952,7 @@ func (c *coordinator) buildHyperProvider(baseURL, apiKey string) (fantasy.Provid
 	return hyper.New(opts...)
 }
 
-// isAnthropicThinking checks if the model should use Anthropic extended thinking.
-// This is true when the selected model enables think/reasoning effort,
-// or when provider options include a thinking configuration.
-func (c *coordinator) isAnthropicThinking(model catwalk.Model, selectedModel config.SelectedModel) bool {
+func isAnthropicThinking(model catwalk.Model, selectedModel config.SelectedModel) bool {
 	if model.CanReason && (selectedModel.Think || selectedModel.ReasoningEffort != "" || model.DefaultReasoningEffort != "") {
 		return true
 	}
@@ -932,7 +968,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model cat
 	}
 
 	// handle special headers for anthropic
-	if providerCfg.Type == anthropic.Name && c.isAnthropicThinking(model, selectedModel) {
+	if providerCfg.Type == anthropic.Name && isAnthropicThinking(model, selectedModel) {
 		if v, ok := headers["anthropic-beta"]; ok {
 			headers["anthropic-beta"] = v + ",interleaved-thinking-2025-05-14"
 		} else {
@@ -1036,24 +1072,22 @@ func (c *coordinator) Model() Model {
 }
 
 func (c *coordinator) UpdateModels(ctx context.Context) error {
-	// build the models again so we make sure we get the latest config
-	large, small, err := c.buildAgentModels(ctx, false)
-	if err != nil {
-		return err
-	}
-	c.currentAgent.SetModels(large, small)
+	_, err := c.updateCurrentAgentRuntime(ctx)
+	return err
+}
 
+func (c *coordinator) updateCurrentAgentRuntime(ctx context.Context) (sessionAgentRuntimeConfig, error) {
 	agentCfg, ok := c.cfg.Config().Agents[config.AgentCoder]
 	if !ok {
-		return errCoderAgentNotConfigured
+		return sessionAgentRuntimeConfig{}, errCoderAgentNotConfigured
 	}
 
-	tools, err := c.buildTools(ctx, agentCfg)
+	promptBuilder, err := coderPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
 	if err != nil {
-		return err
+		return sessionAgentRuntimeConfig{}, err
 	}
-	c.currentAgent.SetTools(tools)
-	return nil
+
+	return c.refreshSessionAgentRuntimeConfig(ctx, c.currentAgent, promptBuilder, agentCfg, false)
 }
 
 func (c *coordinator) QueuedPrompts(sessionID string) int {

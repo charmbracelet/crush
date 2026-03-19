@@ -2,13 +2,22 @@ package app
 
 import (
 	"context"
+	"database/sql"
+	"os"
+	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/plugin"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/session"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 )
@@ -135,6 +144,81 @@ type subscriberFixture struct {
 	wg       sync.WaitGroup
 	outputCh chan tea.Msg
 	cancel   context.CancelFunc
+}
+
+type messageCreatedPlugin struct {
+	called atomic.Int32
+}
+
+func (p *messageCreatedPlugin) Name() string {
+	return "message-created-plugin"
+}
+
+func (p *messageCreatedPlugin) Init(ctx context.Context, input plugin.PluginInput) (plugin.Hooks, error) {
+	return plugin.Hooks{
+		MessageCreated: func(ctx context.Context, msg message.Message) error {
+			p.called.Add(1)
+			return nil
+		},
+	}, nil
+}
+
+func TestSetupMessageSubscriber_TriggersMessageCreatedHook(t *testing.T) {
+	plugin.Reset()
+	defer plugin.Reset()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	testPlugin := &messageCreatedPlugin{}
+	plugin.Register(testPlugin)
+
+	conn, store := setupMessageSubscriberDependencies(t)
+	defer func() {
+		require.NoError(t, conn.Close())
+	}()
+
+	sessions := session.NewService(db.New(conn), conn)
+	messages := message.NewService(db.New(conn))
+
+	require.NoError(t, plugin.Init(ctx, plugin.PluginInput{
+		Config:     store,
+		Sessions:   sessions,
+		Messages:   messages,
+		WorkingDir: store.WorkingDir(),
+	}))
+
+	var wg sync.WaitGroup
+	outputCh := make(chan tea.Msg, 8)
+	setupMessageSubscriber(ctx, &wg, messages.Subscribe, outputCh)
+
+	testSession, err := sessions.Create(ctx, "message hook")
+	require.NoError(t, err)
+	_, err = messages.Create(ctx, testSession.ID, message.CreateMessageParams{
+		Role:  message.User,
+		Parts: []message.ContentPart{message.TextContent{Text: "hello"}},
+	})
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		return testPlugin.called.Load() == 1
+	}, time.Second, 10*time.Millisecond)
+
+	cancel()
+	wg.Wait()
+}
+
+func setupMessageSubscriberDependencies(t *testing.T) (*sql.DB, *config.ConfigStore) {
+	t.Helper()
+	workingDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(workingDir, "crush.json"), []byte(`{"options":{"disable_provider_auto_update":true}}`), 0o644))
+
+	store, err := config.Init(workingDir, t.TempDir(), false)
+	require.NoError(t, err)
+
+	conn, err := db.Connect(t.Context(), t.TempDir())
+	require.NoError(t, err)
+	return conn, store
 }
 
 func newSubscriberFixture(t *testing.T, bufSize int) *subscriberFixture {

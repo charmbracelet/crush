@@ -413,12 +413,30 @@ func (t ToolLs) Limits() (depth, items int) {
 }
 
 type ToolGrep struct {
-	Timeout *time.Duration `json:"timeout,omitempty" jsonschema:"description=Timeout for the grep tool call,default=5s,example=10s"`
+	Timeout *time.Duration `json:"timeout,omitempty"`
 }
 
 // GetTimeout returns the user-defined timeout or the default.
 func (t ToolGrep) GetTimeout() time.Duration {
 	return ptrValOr(t.Timeout, 5*time.Second)
+}
+
+type PluginConfig struct {
+	Name      string            `json:"name" jsonschema:"required,description=Unique plugin name,example=morph_compact"`
+	Type      string            `json:"type,omitempty" jsonschema:"description=Plugin transport type,enum=command,default=command"`
+	Command   string            `json:"command" jsonschema:"required,description=Command used to invoke the external plugin,example=node"`
+	Args      []string          `json:"args,omitempty" jsonschema:"description=Arguments passed to the plugin command"`
+	Env       map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables passed to the plugin command"`
+	Hooks     []string          `json:"hooks,omitempty" jsonschema:"description=Enabled plugin hooks,example=[\"chat_messages_transform\",\"session_compacting\"]"`
+	TimeoutMs int               `json:"timeout_ms,omitempty" jsonschema:"description=Timeout in milliseconds for each plugin invocation,example=60000"`
+	CWD       string            `json:"cwd,omitempty" jsonschema:"description=Working directory for the plugin command"`
+}
+
+func (p PluginConfig) Timeout() time.Duration {
+	if p.TimeoutMs <= 0 {
+		return 60 * time.Second
+	}
+	return time.Duration(p.TimeoutMs) * time.Millisecond
 }
 
 // Config holds the configuration for crush.
@@ -445,6 +463,8 @@ type Config struct {
 	Tools Tools `json:"tools,omitzero" jsonschema:"description=Tool configurations"`
 
 	Hooks []hooks.HookConfig `json:"hooks,omitempty" jsonschema:"description=Tool execution hooks (PreToolUse)"`
+
+	Plugins []PluginConfig `json:"plugins,omitempty" jsonschema:"description=External command plugins for chat or tool lifecycle customization"`
 
 	Agents map[string]Agent `json:"-"`
 }

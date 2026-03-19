@@ -71,6 +71,25 @@ func (s *Server) Serve(ctx context.Context) error {
 
 // dispatch determines the message kind and handles it.
 func (s *Server) dispatch(ctx context.Context, raw json.RawMessage) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("ACP: panic in dispatch", "panic", r)
+			// Best-effort: try to parse the request ID so we can send an
+			// error response back to the client instead of silently
+			// dropping the request.
+			var peek struct {
+				ID *int64 `json:"id"`
+			}
+			if json.Unmarshal(raw, &peek) == nil && peek.ID != nil {
+				s.writeResponse(&Response{
+					JSONRPC: "2.0",
+					ID:      peek.ID,
+					Error:   &RPCError{Code: CodeInternalError, Message: fmt.Sprintf("internal panic: %v", r)},
+				})
+			}
+		}
+	}()
+
 	// Peek at the message to determine type.
 	var peek struct {
 		ID     *int64          `json:"id"`

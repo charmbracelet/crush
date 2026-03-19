@@ -1,0 +1,24 @@
+{
+  "plugins": [
+    {
+      "name": "morph_compact",
+      "type": "command",
+      "command": "node",
+      "args": [
+        "./examples/plugins/morph-compact/index.mjs"
+      ],
+      "hooks": [
+        "chat_messages_transform",
+        "session_compacting"
+      ],
+      "timeout_ms": 60000,
+      "env": {
+        "MORPH_API_KEY": "$MORPH_API_KEY",
+        "MORPH_COMPACT_CONTEXT_THRESHOLD": "0.7",
+        "MORPH_COMPACT_PRESERVE_RECENT": "1",
+        "MORPH_COMPACT_RATIO": "0.3",
+        "MORPH_MODEL_CONTEXT_TOKENS": "200000"
+      }
+    }
+  ]
+}

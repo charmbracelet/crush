@@ -46,7 +46,12 @@ func NewJobOutputTool() fantasy.AgentTool {
 			}
 
 			if params.Wait {
-				bgShell.WaitContext(ctx)
+				if !bgShell.WaitContext(ctx) {
+					// Context was cancelled while waiting; propagate the
+					// cancellation so the agent's error handler creates
+					// the required tool-result message.
+					return fantasy.ToolResponse{}, ctx.Err()
+				}
 			}
 
 			stdout, stderr, done, err := bgShell.GetOutput()

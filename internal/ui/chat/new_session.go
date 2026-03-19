@@ -29,7 +29,7 @@ type NewSessionToolRenderContext struct{}
 func (r *NewSessionToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
-		return pendingTool(sty, "New Session", opts.Anim)
+		return pendingTool(sty, "New Session", opts.Anim, false)
 	}
 
 	header := toolHeader(sty, opts.Status, "New Session", cappedWidth, opts.Compact)

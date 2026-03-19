@@ -1,7 +1,6 @@
 package config
 
 import (
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -13,14 +12,14 @@ func TestSetCompactionMethod(t *testing.T) {
 	dir := t.TempDir()
 	cfg := &Config{}
 	cfg.setDefaults(dir, "")
-	cfg.dataConfigDir = filepath.Join(dir, "config.json")
+	store := testStoreWithPath(cfg, dir)
 
-	err := cfg.SetCompactionMethod(CompactionLLM)
+	err := store.SetCompactionMethod(ScopeGlobal, CompactionLLM)
 	require.NoError(t, err)
 
 	require.Equal(t, CompactionLLM, cfg.Options.CompactionMethod)
 
-	out := readConfigJSON(t, cfg.dataConfigDir)
+	out := readConfigJSON(t, store.globalDataPath)
 	opts, ok := out["options"].(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, string(CompactionLLM), opts["compaction_method"])
@@ -50,9 +49,9 @@ func TestSetCompactionMethod_NilOptions(t *testing.T) {
 	dir := t.TempDir()
 	cfg := &Config{}
 	cfg.Options = nil
-	cfg.dataConfigDir = filepath.Join(dir, "config.json")
+	store := testStoreWithPath(cfg, dir)
 
-	err := cfg.SetCompactionMethod(CompactionAuto)
+	err := store.SetCompactionMethod(ScopeGlobal, CompactionAuto)
 	require.NoError(t, err)
 
 	require.NotNil(t, cfg.Options)

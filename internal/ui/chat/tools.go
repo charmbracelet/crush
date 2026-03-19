@@ -426,9 +426,13 @@ func (t *baseToolMessageItem) HandleKeyEvent(key tea.KeyMsg) (bool, tea.Cmd) {
 }
 
 // pendingTool renders a tool that is still in progress with an animation.
-func pendingTool(sty *styles.Styles, name string, anim *anim.Anim) string {
+func pendingTool(sty *styles.Styles, name string, anim *anim.Anim, nested bool) string {
 	icon := sty.Tool.IconPending.Render()
-	toolName := sty.Tool.NameNormal.Render(name)
+	nameStyle := sty.Tool.NameNormal
+	if nested {
+		nameStyle = sty.Tool.NameNested
+	}
+	toolName := nameStyle.Render(name)
 
 	var animView string
 	if anim != nil {
@@ -1339,7 +1343,7 @@ func (t *baseToolMessageItem) formatWebFetchResultForCopy() string {
 	}
 
 	var result strings.Builder
-	result.WriteString(fmt.Sprintf("URL: %s\n\n", params.URL))
+	fmt.Fprintf(&result, "URL: %s\n\n", params.URL)
 	result.WriteString("```markdown\n")
 	result.WriteString(t.result.Content)
 	result.WriteString("\n```")
@@ -1356,7 +1360,7 @@ func (t *baseToolMessageItem) formatAgentResultForCopy() string {
 	var result strings.Builder
 
 	if t.result.Content != "" {
-		result.WriteString(fmt.Sprintf("```markdown\n%s\n```", t.result.Content))
+		fmt.Fprintf(&result, "```markdown\n%s\n```", t.result.Content)
 	}
 
 	return result.String()

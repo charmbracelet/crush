@@ -26,9 +26,14 @@ type Common struct {
 	Styles *styles.Styles
 }
 
-// Config returns the configuration associated with this [Common] instance.
+// Config returns the pure-data configuration associated with this [Common] instance.
 func (c *Common) Config() *config.Config {
 	return c.App.Config()
+}
+
+// Store returns the config store associated with this [Common] instance.
+func (c *Common) Store() *config.ConfigStore {
+	return c.App.Store()
 }
 
 // DefaultCommon returns the default common UI configurations.

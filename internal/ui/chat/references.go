@@ -33,7 +33,7 @@ type ReferencesToolRenderContext struct{}
 func (r *ReferencesToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
-		return pendingTool(sty, "Find References", opts.Anim)
+		return pendingTool(sty, "Find References", opts.Anim, opts.Compact)
 	}
 
 	var params tools.ReferencesParams

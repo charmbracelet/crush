@@ -143,8 +143,7 @@ func renderHeaderDetails(
 	metadata = dot + metadata
 
 	const dirTrimLimit = 4
-	cfg := com.Config()
-	cwd := fsext.DirTrim(fsext.PrettyPath(cfg.WorkingDir()), dirTrimLimit)
+	cwd := fsext.DirTrim(fsext.PrettyPath(com.Store().WorkingDir()), dirTrimLimit)
 	cwd = t.Header.WorkingDir.Render(cwd)
 
 	result := cwd + metadata

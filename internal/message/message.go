@@ -224,6 +224,11 @@ type partWrapper struct {
 	Data ContentPart `json:"data"`
 }
 
+// MarshalParts serializes message parts to JSON with type discriminators.
+func MarshalParts(parts []ContentPart) ([]byte, error) {
+	return marshalParts(parts)
+}
+
 func marshalParts(parts []ContentPart) ([]byte, error) {
 	wrappedParts := make([]partWrapper, len(parts))
 

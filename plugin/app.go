@@ -46,6 +46,7 @@ type App struct {
 	promptSubmitter     PromptSubmitter
 	subAgentRunner      SubAgentRunner
 	searchProvider      SearchProvider
+	sessionStore        SessionStore
 	logger              *slog.Logger
 	cleanupFuncs        []func() error
 }
@@ -139,6 +140,13 @@ func WithSubAgentRunner(sar SubAgentRunner) AppOption {
 func WithSearchProvider(sp SearchProvider) AppOption {
 	return func(a *App) {
 		a.searchProvider = sp
+	}
+}
+
+// WithSessionStore sets the session store for session persistence.
+func WithSessionStore(ss SessionStore) AppOption {
+	return func(a *App) {
+		a.sessionStore = ss
 	}
 }
 
@@ -252,6 +260,12 @@ func (a *App) SubAgentRunner() SubAgentRunner {
 // Returns nil if no search provider is configured (DuckDuckGo will be used).
 func (a *App) SearchProvider() SearchProvider {
 	return a.searchProvider
+}
+
+// SessionStore returns the session store for session persistence.
+// Returns nil if no session store is configured.
+func (a *App) SessionStore() SessionStore {
+	return a.sessionStore
 }
 
 // Logger returns a structured logger.

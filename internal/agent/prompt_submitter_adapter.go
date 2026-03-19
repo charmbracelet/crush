@@ -40,7 +40,7 @@ func (a *PromptSubmitterAdapter) SetSessionID(sessionID string) {
 	a.sessionID = sessionID
 }
 
-// SubmitPrompt sends a prompt to the agent.
+// SubmitPrompt sends a prompt to the agent in a new session.
 func (a *PromptSubmitterAdapter) SubmitPrompt(ctx context.Context, prompt string) error {
 	a.mu.RLock()
 	coordinator := a.coordinator
@@ -50,8 +50,6 @@ func (a *PromptSubmitterAdapter) SubmitPrompt(ctx context.Context, prompt string
 		return errors.New("coordinator not initialized")
 	}
 
-	// Always create a fresh session so each ACP run gets isolated conversation
-	// history. This prevents tool results from one run leaking into the next.
 	if a.sessions == nil {
 		return errors.New("no session service available")
 	}
@@ -65,6 +63,39 @@ func (a *PromptSubmitterAdapter) SubmitPrompt(ctx context.Context, prompt string
 	}
 
 	_, err = coordinator.Run(ctx, sess.ID, prompt)
+	return err
+}
+
+// SubmitPromptToSession sends a prompt to a specific existing session.
+// If the session exists, the prompt is appended preserving conversation history.
+// If it doesn't exist, a new session is created with that title.
+func (a *PromptSubmitterAdapter) SubmitPromptToSession(ctx context.Context, sessionID, prompt string) error {
+	a.mu.RLock()
+	coordinator := a.coordinator
+	a.mu.RUnlock()
+
+	if coordinator == nil {
+		return errors.New("coordinator not initialized")
+	}
+
+	if a.sessions == nil {
+		return errors.New("no session service available")
+	}
+
+	// Check if session exists; if not, create one.
+	_, err := a.sessions.Get(ctx, sessionID)
+	if err != nil {
+		_, err = a.sessions.Create(ctx, "ACP Session")
+		if err != nil {
+			return fmt.Errorf("failed to create session: %w", err)
+		}
+	}
+
+	if a.permissions != nil {
+		a.permissions.AutoApproveSession(sessionID)
+	}
+
+	_, err = coordinator.Run(ctx, sessionID, prompt)
 	return err
 }
 

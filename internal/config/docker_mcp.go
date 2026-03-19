@@ -35,6 +35,8 @@ func IsDockerMCPAvailable() bool {
 	return err == nil
 }
 
+// DockerMCPAvailabilityCached returns the cached Docker MCP availability and
+// whether the cached value is still fresh.
 func DockerMCPAvailabilityCached() (available bool, known bool) {
 	dockerMCPAvailabilityCache.mu.Lock()
 	defer dockerMCPAvailabilityCache.mu.Unlock()
@@ -48,6 +50,7 @@ func DockerMCPAvailabilityCached() (available bool, known bool) {
 	return dockerMCPAvailabilityCache.available, true
 }
 
+// RefreshDockerMCPAvailability refreshes and caches Docker MCP availability.
 func RefreshDockerMCPAvailability() bool {
 	available := IsDockerMCPAvailable()
 	dockerMCPAvailabilityCache.mu.Lock()
@@ -67,6 +70,7 @@ func (c *Config) IsDockerMCPEnabled() bool {
 	return exists
 }
 
+// DockerMCPConfig returns the default Docker MCP stdio configuration.
 func DockerMCPConfig() MCPConfig {
 	return MCPConfig{
 		Type:     MCPStdio,
@@ -76,6 +80,8 @@ func DockerMCPConfig() MCPConfig {
 	}
 }
 
+// PrepareDockerMCPConfig validates Docker MCP availability and stages the
+// Docker MCP configuration in memory.
 func (s *ConfigStore) PrepareDockerMCPConfig() (MCPConfig, error) {
 	if !IsDockerMCPAvailable() {
 		return MCPConfig{}, fmt.Errorf("docker mcp is not available, please ensure docker is installed and 'docker mcp version' succeeds")
@@ -89,6 +95,8 @@ func (s *ConfigStore) PrepareDockerMCPConfig() (MCPConfig, error) {
 	return mcpConfig, nil
 }
 
+// PersistDockerMCPConfig persists a previously prepared Docker MCP
+// configuration to the global config file.
 func (s *ConfigStore) PersistDockerMCPConfig(mcpConfig MCPConfig) error {
 	if err := s.SetConfigField(ScopeGlobal, "mcp."+DockerMCPName, mcpConfig); err != nil {
 		return fmt.Errorf("failed to persist docker mcp configuration: %w", err)

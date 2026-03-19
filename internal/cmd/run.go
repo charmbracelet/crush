@@ -14,8 +14,9 @@ import (
 )
 
 var runCmd = &cobra.Command{
-	Use:   "run [prompt...]",
-	Short: "Run a single non-interactive prompt",
+	Aliases: []string{"r"},
+	Use:     "run [prompt...]",
+	Short:   "Run a single non-interactive prompt",
 	Long: `Run a single prompt in non-interactive mode and exit.
 The prompt can be provided as arguments or piped from stdin.`,
 	Example: `

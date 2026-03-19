@@ -39,6 +39,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
@@ -156,6 +157,16 @@ type (
 	// fetched from the API.
 	creditsUpdatedMsg struct {
 		credits int
+	}
+
+	// terminalOutputMsg is sent when a local terminal command finishes executing.
+	terminalOutputMsg struct {
+		command  string
+		stdout   string
+		stderr   string
+		exitCode int
+		duration time.Duration
+		err      error
 	}
 )
 
@@ -543,6 +554,23 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.historyReset()
 		cmds = append(cmds, m.loadPromptHistory())
 		m.updateLayoutAndSize()
+
+	case terminalOutputMsg:
+		id := fmt.Sprintf("term-cmd-%d", time.Now().UnixNano())
+		item := chat.NewTerminalOutputItem(
+			id,
+			m.com.Styles,
+			msg.command,
+			msg.stdout,
+			msg.stderr,
+			msg.exitCode,
+			msg.duration,
+			msg.err != nil || msg.exitCode != 0,
+		)
+		m.chat.AppendMessages(item)
+		if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 
 	case sessionFilesUpdatesMsg:
 		m.sessionFiles = msg.sessionFiles
@@ -1894,6 +1922,14 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 				m.randomizePlaceholders()
 				m.historyReset()
+
+				// If it starts with ! and > 1 len, it's a terminal command
+				if strings.HasPrefix(value, "!") && len(value) > 1 {
+					cmdStr := strings.TrimSpace(value[1:])
+					if cmdStr != "" {
+						return tea.Batch(m.executeTerminalCommand(cmdStr), m.loadPromptHistory())
+					}
+				}
 
 				return tea.Batch(m.sendMessage(value, attachments...), m.loadPromptHistory())
 			case key.Matches(msg, m.keyMap.Chat.NewSession):
@@ -3810,4 +3846,96 @@ func renderLogo(t *styles.Styles, compact, hyper bool, width int) string {
 		Width:        width,
 		Hyper:        hyper,
 	})
+}
+
+// interactiveCommands is a list of commands that require terminal interaction
+// and should not be executed in terminal mode to avoid hanging.
+var interactiveCommands = []string{
+	// TUI/interactive programs
+	"vim", "nvim", "vi", "nano", "emacs", "less", "more", "top", "htop",
+	"tmux", "screen", "ssh", "ftp", "sftp", "telnet",
+	// Programs that may start interactive TUIs
+	"python", "python3", "node", "irb", "ghci", "lua",
+	// This application itself
+	"crush",
+}
+
+// isInteractiveCommand checks if the command might start an interactive program.
+func isInteractiveCommand(command string) bool {
+	// Extract the first word (command name)
+	parts := strings.Fields(command)
+	if len(parts) == 0 {
+		return false
+	}
+	cmd := strings.ToLower(parts[0])
+
+	// Check against known interactive commands
+	for _, ic := range interactiveCommands {
+		if cmd == ic {
+			return true
+		}
+	}
+
+	// Special case: "go run" without specific flags that make it non-interactive
+	if cmd == "go" && len(parts) > 1 && parts[1] == "run" {
+		return true
+	}
+
+	return false
+}
+
+// executeTerminalCommand executes a shell command directly without AI involvement.
+func (m *UI) executeTerminalCommand(command string) tea.Cmd {
+	// Check for interactive commands that would hang
+	if isInteractiveCommand(command) {
+		return util.ReportWarn("This command may require terminal interaction and cannot be run in terminal mode: " + strings.Fields(command)[0])
+	}
+
+	var cmds []tea.Cmd
+	if !m.hasSession() {
+		newSession, err := m.com.App.Sessions.Create(context.Background(), "Terminal Session")
+		if err != nil {
+			return util.ReportError(err)
+		}
+		if m.forceCompactMode {
+			m.isCompact = true
+		}
+		if newSession.ID != "" {
+			m.session = &newSession
+			cmds = append(cmds, m.loadSession(newSession.ID))
+		}
+		m.setState(uiChat, m.focus)
+	}
+
+	execCmd := func() tea.Msg {
+		startTime := time.Now()
+
+		workingDir := m.com.Store().WorkingDir()
+		if workingDir == "" {
+			workingDir = "."
+		}
+
+		sh := shell.NewShell(&shell.Options{
+			WorkingDir: workingDir,
+		})
+
+		stdout, stderr, execErr := sh.Exec(context.Background(), command)
+
+		exitCode := 0
+		if execErr != nil {
+			exitCode = shell.ExitCode(execErr)
+		}
+
+		return terminalOutputMsg{
+			command:  command,
+			stdout:   stdout,
+			stderr:   stderr,
+			exitCode: exitCode,
+			duration: time.Since(startTime),
+			err:      execErr,
+		}
+	}
+	
+	cmds = append(cmds, execCmd)
+	return tea.Sequence(cmds...)
 }

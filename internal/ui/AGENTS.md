@@ -191,6 +191,7 @@ through all components that need access to app state or styles.
 - Always account for padding/borders in width calculations.
 - Use `tea.Batch()` when returning multiple commands.
 - Pass `*common.Common` to components that need styles or app access.
+- When writing tea.Cmd's prefer creating methods in the model instead of writing inline functions.
 - The `list.List` only renders visible items (lazy). No render cache exists
   at the list level — items should cache internally if rendering is
   expensive.

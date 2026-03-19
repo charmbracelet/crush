@@ -139,6 +139,11 @@ type UI struct {
 	// keeps track of read files while we don't have a session id
 	sessionFileReads []string
 
+	// initialSessionID is set when loading a specific session on startup.
+	initialSessionID string
+	// continueLastSession is set to continue the most recent session on startup.
+	continueLastSession bool
+
 	lastUserMessageTime int64
 
 	// The width and height of the terminal in cells.
@@ -242,7 +247,7 @@ type UI struct {
 }
 
 // New creates a new instance of the [UI] model.
-func New(com *common.Common) *UI {
+func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	// Editor components
 	ta := textarea.New()
 	ta.SetStyles(com.Styles.TextArea)
@@ -298,6 +303,8 @@ func New(com *common.Common) *UI {
 		mcpStates:           make(map[string]mcp.ClientInfo),
 		notifyBackend:       notification.NoopBackend{},
 		notifyWindowFocused: true,
+		initialSessionID:    initialSessionID,
+		continueLastSession: continueLast,
 	}
 
 	status := NewStatus(com, ui)
@@ -346,7 +353,32 @@ func (m *UI) Init() tea.Cmd {
 	cmds = append(cmds, m.loadCustomCommands())
 	// load prompt history async
 	cmds = append(cmds, m.loadPromptHistory())
+	// load initial session if specified
+	if cmd := m.loadInitialSession(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
 	return tea.Batch(cmds...)
+}
+
+// loadInitialSession loads the initial session if one was specified on startup.
+func (m *UI) loadInitialSession() tea.Cmd {
+	switch {
+	case m.state != uiLanding:
+		// Only load if we're in landing state (i.e., fully configured)
+		return nil
+	case m.initialSessionID != "":
+		return m.loadSession(m.initialSessionID)
+	case m.continueLastSession:
+		return func() tea.Msg {
+			sess, err := m.com.App.Sessions.GetLast(context.Background())
+			if err != nil {
+				return nil
+			}
+			return m.loadSession(sess.ID)()
+		}
+	default:
+		return nil
+	}
 }
 
 // sendNotification returns a command that sends a notification if allowed by policy.
@@ -1360,6 +1392,12 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionQuit:
 		cmds = append(cmds, tea.Quit)
+	case dialog.ActionEnableDockerMCP:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		cmds = append(cmds, m.enableDockerMCP)
+	case dialog.ActionDisableDockerMCP:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		cmds = append(cmds, m.disableDockerMCP)
 	case dialog.ActionInitializeProject:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
@@ -3472,6 +3510,36 @@ func (m *UI) copyChatHighlight() tea.Cmd {
 			return nil
 		},
 	)
+}
+
+func (m *UI) enableDockerMCP() tea.Msg {
+	store := m.com.Store()
+	if err := store.EnableDockerMCP(); err != nil {
+		return util.ReportError(err)()
+	}
+
+	// Initialize the Docker MCP client immediately.
+	ctx := context.Background()
+	if err := mcp.InitializeSingle(ctx, config.DockerMCPName, store); err != nil {
+		return util.ReportError(fmt.Errorf("docker MCP enabled but failed to start: %w", err))()
+	}
+
+	return util.NewInfoMsg("Docker MCP enabled and started successfully")
+}
+
+func (m *UI) disableDockerMCP() tea.Msg {
+	store := m.com.Store()
+	// Close the Docker MCP client.
+	if err := mcp.DisableSingle(store, config.DockerMCPName); err != nil {
+		return util.ReportError(fmt.Errorf("failed to disable docker MCP: %w", err))()
+	}
+
+	// Remove from config and persist.
+	if err := store.DisableDockerMCP(); err != nil {
+		return util.ReportError(err)()
+	}
+
+	return util.NewInfoMsg("Docker MCP disabled successfully")
 }
 
 // renderLogo renders the Crush logo with the given styles and dimensions.

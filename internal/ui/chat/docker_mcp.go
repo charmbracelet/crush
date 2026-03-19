@@ -3,6 +3,7 @@ package chat
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -102,8 +103,13 @@ func (d *DockerMCPToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 
 	var toolParams []string
 	toolParams = append(toolParams, mainParam)
-	for k, v := range extraArgs {
-		toolParams = append(toolParams, k, v)
+	keys := make([]string, 0, len(extraArgs))
+	for k := range extraArgs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		toolParams = append(toolParams, k, extraArgs[k])
 	}
 
 	if opts.IsPending() {

@@ -61,6 +61,8 @@ type App struct {
 	LSPManager *lsp.Manager
 
 	config *config.Config
+	dbConn *sql.DB
+	dbQ    *db.Queries
 
 	serviceEventsWG *sync.WaitGroup
 	eventsCtx       context.Context
@@ -93,6 +95,8 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 		LSPManager:  lsp.NewManager(cfg),
 
 		globalCtx: ctx,
+		dbConn:    conn,
+		dbQ:       q,
 
 		config: cfg,
 
@@ -486,6 +490,8 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.History,
 		app.FileTracker,
 		app.LSPManager,
+		app.dbConn,
+		app.dbQ,
 	)
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)

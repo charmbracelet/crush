@@ -103,6 +103,11 @@ type PromptSubmitter interface {
 	// The sessionID is automatically determined from the current session.
 	SubmitPrompt(ctx context.Context, prompt string) error
 
+	// SubmitPromptToSession sends a prompt to a specific session.
+	// If the session exists, the prompt is appended to it, preserving
+	// conversation history. If it doesn't exist, a new session is created.
+	SubmitPromptToSession(ctx context.Context, sessionID, prompt string) error
+
 	// CurrentSessionID returns the ID of the currently active session.
 	// Returns empty string if no session is active.
 	CurrentSessionID() string

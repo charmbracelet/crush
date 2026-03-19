@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +22,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/log"
@@ -81,6 +83,8 @@ type coordinator struct {
 	history     history.Service
 	filetracker filetracker.Service
 	lspManager  *lsp.Manager
+	dbConn      *sql.DB
+	dbQueries   *db.Queries
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
@@ -103,6 +107,8 @@ func NewCoordinator(
 	history history.Service,
 	filetracker filetracker.Service,
 	lspManager *lsp.Manager,
+	dbConn *sql.DB,
+	dbQueries *db.Queries,
 ) (Coordinator, error) {
 	c := &coordinator{
 		cfg:         cfg,
@@ -112,6 +118,8 @@ func NewCoordinator(
 		history:     history,
 		filetracker: filetracker,
 		lspManager:  lspManager,
+		dbConn:      dbConn,
+		dbQueries:   dbQueries,
 		agents:      make(map[string]SessionAgent),
 	}
 
@@ -1028,6 +1036,9 @@ func (c *coordinator) initPluginHooks(ctx context.Context) error {
 	// The coordinator reference will be set after NewCoordinator returns.
 	c.subAgentRunnerAdapter = NewSubAgentRunnerAdapter()
 
+	// Create session store adapter for plugins.
+	sessionStoreAdapter := NewSessionStoreAdapter(c.sessions, c.messages, c.dbQueries, c.dbConn)
+
 	// Build plugin app options.
 	appOpts := []plugin.AppOption{
 		plugin.WithWorkingDir(c.cfg.WorkingDir()),
@@ -1038,6 +1049,7 @@ func (c *coordinator) initPluginHooks(ctx context.Context) error {
 		plugin.WithSessionInfoProvider(c.sessionInfoAdapter),
 		plugin.WithPromptSubmitter(c.promptSubmitterAdapter),
 		plugin.WithSubAgentRunner(c.subAgentRunnerAdapter),
+		plugin.WithSessionStore(sessionStoreAdapter),
 	}
 
 	// Initialize search provider if one is registered.

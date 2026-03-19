@@ -50,6 +50,11 @@ func TestEnsureBase64(t *testing.T) {
 			input:    []byte("U0dWc2JHOGdWMjl5YkdRaA==\n"),
 			wantData: []byte("U0dWc2JHOGdWMjl5YkdRaA=="),
 		},
+		{
+			name:     "raw ascii bytes that look like unpadded base64",
+			input:    []byte("abc"),
+			wantData: []byte("YWJj"),
+		},
 	}
 
 	for _, tt := range tests {

@@ -139,6 +139,11 @@ type UI struct {
 	// keeps track of read files while we don't have a session id
 	sessionFileReads []string
 
+	// initialSessionID is set when loading a specific session on startup.
+	initialSessionID string
+	// continueLastSession is set to continue the most recent session on startup.
+	continueLastSession bool
+
 	lastUserMessageTime int64
 
 	// The width and height of the terminal in cells.
@@ -242,7 +247,7 @@ type UI struct {
 }
 
 // New creates a new instance of the [UI] model.
-func New(com *common.Common) *UI {
+func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	// Editor components
 	ta := textarea.New()
 	ta.SetStyles(com.Styles.TextArea)
@@ -298,6 +303,8 @@ func New(com *common.Common) *UI {
 		mcpStates:           make(map[string]mcp.ClientInfo),
 		notifyBackend:       notification.NoopBackend{},
 		notifyWindowFocused: true,
+		initialSessionID:    initialSessionID,
+		continueLastSession: continueLast,
 	}
 
 	status := NewStatus(com, ui)
@@ -346,7 +353,32 @@ func (m *UI) Init() tea.Cmd {
 	cmds = append(cmds, m.loadCustomCommands())
 	// load prompt history async
 	cmds = append(cmds, m.loadPromptHistory())
+	// load initial session if specified
+	if cmd := m.loadInitialSession(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
 	return tea.Batch(cmds...)
+}
+
+// loadInitialSession loads the initial session if one was specified on startup.
+func (m *UI) loadInitialSession() tea.Cmd {
+	switch {
+	case m.state != uiLanding:
+		// Only load if we're in landing state (i.e., fully configured)
+		return nil
+	case m.initialSessionID != "":
+		return m.loadSession(m.initialSessionID)
+	case m.continueLastSession:
+		return func() tea.Msg {
+			sess, err := m.com.App.Sessions.GetLast(context.Background())
+			if err != nil {
+				return nil
+			}
+			return m.loadSession(sess.ID)()
+		}
+	default:
+		return nil
+	}
 }
 
 // sendNotification returns a command that sends a notification if allowed by policy.

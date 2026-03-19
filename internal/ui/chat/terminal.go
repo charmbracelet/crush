@@ -70,14 +70,14 @@ func (m *TerminalOutputItem) RawRender(width int) string {
 
 	// Header with command
 	cmdIcon := lipgloss.NewStyle().
-		Foreground(m.sty.BgSubtle).
-		Background(m.sty.Yellow).
+		Foreground(lipgloss.Color("#000000")).
+		Background(m.sty.Tool.NoteTag.GetBackground()).
 		Padding(0, 1).
 		Bold(true).
 		Render("$")
 
 	cmdText := lipgloss.NewStyle().
-		Foreground(m.sty.FgBase).
+		Foreground(m.sty.Tool.NameNormal.GetForeground()).
 		Bold(true).
 		Render(" " + m.command)
 
@@ -93,7 +93,7 @@ func (m *TerminalOutputItem) RawRender(width int) string {
 	}
 
 	if output == "" {
-		output = lipgloss.NewStyle().Foreground(m.sty.FgMuted).Render("(no output)")
+		output = lipgloss.NewStyle().Foreground(m.sty.Tool.JobPID.GetForeground()).Render("(no output)")
 	} else {
 		// Truncate long output
 		lines := strings.Split(output, "\n")
@@ -110,7 +110,7 @@ func (m *TerminalOutputItem) RawRender(width int) string {
 	}
 
 	outputStyle := lipgloss.NewStyle().
-		Foreground(m.sty.FgMuted).
+		Foreground(m.sty.Tool.JobPID.GetForeground()).
 		Width(textWidth)
 
 	var outputParts []string
@@ -120,13 +120,13 @@ func (m *TerminalOutputItem) RawRender(width int) string {
 	var footerParts []string
 
 	// Duration
-	durationText := lipgloss.NewStyle().Foreground(m.sty.FgMuted).Render(m.duration.Round(time.Millisecond).String())
+	durationText := lipgloss.NewStyle().Foreground(m.sty.Tool.JobPID.GetForeground()).Render(m.duration.Round(time.Millisecond).String())
 	footerParts = append(footerParts, durationText)
 
 	// Exit code
 	if m.exitCode != 0 {
 		exitStyle := lipgloss.NewStyle().
-			Foreground(m.sty.Red).
+			Foreground(m.sty.Tool.JobIconError.GetForeground()).
 			Bold(true)
 		footerParts = append(footerParts, exitStyle.Render(fmt.Sprintf("exit %d", m.exitCode)))
 	}
@@ -140,12 +140,12 @@ func (m *TerminalOutputItem) RawRender(width int) string {
 	joined := lipgloss.JoinVertical(lipgloss.Left, outputParts...)
 
 	// Container style
-	borderColor := m.sty.Green
+	borderColor := m.sty.Tool.JobIconSuccess.GetForeground()
 	if m.hasError {
-		borderColor = m.sty.Red
+		borderColor = m.sty.Tool.JobIconError.GetForeground()
 	}
 	if m.focused {
-		borderColor = m.sty.Primary
+		borderColor = m.sty.Tool.NameNormal.GetForeground()
 	}
 
 	containerStyle := lipgloss.NewStyle().

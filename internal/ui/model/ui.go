@@ -224,6 +224,9 @@ type UI struct {
 	readyPlaceholder   string
 	workingPlaceholder string
 
+	// Shell mode tracks if the current input starts with !
+	isShellMode bool
+
 	// Completions state
 	completions              *completions.Completions
 	completionsOpen          bool
@@ -943,14 +946,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case uiFocusMain:
 	case uiFocusEditor:
 		// Textarea placeholder logic
-		if m.isAgentBusy() {
-			m.textarea.Placeholder = m.workingPlaceholder
-		} else {
-			m.textarea.Placeholder = m.readyPlaceholder
-		}
-		if m.com.Workspace.PermissionSkipRequests() {
-			m.textarea.Placeholder = "Yolo mode!"
-		}
+		m.updatePlaceholder()
 	}
 
 	// at this point this can only handle [message.Attachment] message, and we
@@ -1923,10 +1919,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				m.randomizePlaceholders()
 				m.historyReset()
 
-				// If it starts with ! and > 1 len, it's a terminal command
-				if strings.HasPrefix(value, "!") && len(value) > 1 {
-					cmdStr := strings.TrimSpace(value[1:])
+				// If in shell mode, execute as terminal command
+				if m.isShellMode {
+					cmdStr := strings.TrimSpace(value)
 					if cmdStr != "" {
+						// Stay in shell mode until user explicitly exits with !
 						return tea.Batch(m.executeTerminalCommand(cmdStr), m.loadPromptHistory())
 					}
 				}
@@ -1990,6 +1987,14 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				curValue := m.textarea.Value()
 				curIdx := len(curValue)
 
+				// Toggle shell mode on ! (only when input is empty).
+				if msg.String() == "!" && curIdx == 0 {
+					m.isShellMode = !m.isShellMode
+					m.setEditorPrompt(m.com.Workspace.PermissionSkipRequests())
+					m.updatePlaceholder()
+					break
+				}
+
 				// Trigger completions on @.
 				if msg.String() == "@" && !m.completionsOpen {
 					// Only show if beginning of prompt or after whitespace.
@@ -2011,6 +2016,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 				prevHeight := m.textarea.Height()
 				cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
+
+				// Shell mode is now controlled by explicit toggle, not content
+				// (we don't need updateShellMode here anymore)
 
 				// Any text modification becomes the current draft.
 				m.updateHistoryDraft(curValue)
@@ -2263,8 +2271,14 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 		if m.textarea.Focused() {
 			cur := m.textarea.Cursor()
-			cur.X++                            // Adjust for app margins
-			cur.Y += m.layout.editor.Min.Y + 1 // Offset for attachments row
+			cur.X++ // Adjust for app margins
+
+			// Calculate Y offset
+			yOffset := m.layout.editor.Min.Y
+			if len(m.attachments.List()) > 0 {
+				yOffset++ // Offset for attachments row
+			}
+			cur.Y += yOffset
 			return cur
 		}
 	}
@@ -2879,10 +2893,14 @@ func (m *UI) openEditor(value string) tea.Cmd {
 }
 
 // setEditorPrompt configures the textarea prompt function based on whether
-// yolo mode is enabled.
+// yolo mode or shell mode is enabled.
 func (m *UI) setEditorPrompt(yolo bool) {
 	if yolo {
 		m.textarea.SetPromptFunc(4, m.yoloPromptFunc)
+		return
+	}
+	if m.isShellMode {
+		m.textarea.SetPromptFunc(4, m.shellPromptFunc)
 		return
 	}
 	m.textarea.SetPromptFunc(4, m.normalPromptFunc)
@@ -2919,6 +2937,42 @@ func (m *UI) yoloPromptFunc(info textarea.PromptInfo) string {
 		return t.Editor.PromptYoloDotsFocused.Render()
 	}
 	return t.Editor.PromptYoloDotsBlurred.Render()
+}
+
+// shellPromptFunc returns the shell mode editor prompt style with $ icon
+// and colored dots.
+func (m *UI) shellPromptFunc(info textarea.PromptInfo) string {
+	t := m.com.Styles
+	if info.LineNumber == 0 {
+		if info.Focused {
+			return t.Editor.PromptShellIconFocused.Render()
+		} else {
+			return t.Editor.PromptShellIconBlurred.Render()
+		}
+	}
+	if info.Focused {
+		return t.Editor.PromptShellDotsFocused.Render()
+	}
+	return t.Editor.PromptShellDotsBlurred.Render()
+}
+
+// updatePlaceholder updates the textarea placeholder based on current mode.
+func (m *UI) updatePlaceholder() {
+	if m.isShellMode {
+		m.textarea.Placeholder = "Shell mode - Direct command execution"
+		return
+	}
+
+	if m.com.Workspace.PermissionSkipRequests() {
+		m.textarea.Placeholder = "Yolo mode!"
+		return
+	}
+
+	if m.isAgentBusy() {
+		m.textarea.Placeholder = m.workingPlaceholder
+	} else {
+		m.textarea.Placeholder = m.readyPlaceholder
+	}
 }
 
 // closeCompletions closes the completions popup and resets state.
@@ -3111,15 +3165,20 @@ func (m *UI) randomizePlaceholders() {
 
 // renderEditorView renders the editor view with attachments if any.
 func (m *UI) renderEditorView(width int) string {
-	var attachmentsView string
+	var parts []string
+
+	// Attachments
 	if len(m.attachments.List()) > 0 {
-		attachmentsView = m.attachments.Render(width)
+		parts = append(parts, m.attachments.Render(width))
 	}
-	return strings.Join([]string{
-		attachmentsView,
-		m.textarea.View(),
-		"", // margin at bottom of editor
-	}, "\n")
+
+	// Textarea
+	parts = append(parts, m.textarea.View())
+
+	// Bottom margin
+	parts = append(parts, "")
+
+	return strings.Join(parts, "\n")
 }
 
 // cacheSidebarLogo renders and caches the sidebar logo at the specified width.
@@ -3892,8 +3951,9 @@ func (m *UI) executeTerminalCommand(command string) tea.Cmd {
 	}
 
 	var cmds []tea.Cmd
+	// Create a new session if one doesn't exist
 	if !m.hasSession() {
-		newSession, err := m.com.App.Sessions.Create(context.Background(), "Terminal Session")
+		newSession, err := m.com.Workspace.CreateSession(context.Background(), "New Session")
 		if err != nil {
 			return util.ReportError(err)
 		}
@@ -3910,7 +3970,7 @@ func (m *UI) executeTerminalCommand(command string) tea.Cmd {
 	execCmd := func() tea.Msg {
 		startTime := time.Now()
 
-		workingDir := m.com.Store().WorkingDir()
+		workingDir := m.com.Workspace.WorkingDir()
 		if workingDir == "" {
 			workingDir = "."
 		}
@@ -3935,7 +3995,7 @@ func (m *UI) executeTerminalCommand(command string) tea.Cmd {
 			err:      execErr,
 		}
 	}
-	
+
 	cmds = append(cmds, execCmd)
 	return tea.Sequence(cmds...)
 }

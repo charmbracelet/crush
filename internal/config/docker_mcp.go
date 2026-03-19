@@ -66,7 +66,7 @@ func (s *ConfigStore) DisableDockerMCP() error {
 	// Remove from in-memory config.
 	delete(s.config.MCP, DockerMCPName)
 
-	// Persist to config file by setting to null.
+	// Persist the updated MCP map to the config file.
 	if err := s.SetConfigField(ScopeGlobal, "mcp", s.config.MCP); err != nil {
 		return fmt.Errorf("failed to persist docker mcp removal: %w", err)
 	}

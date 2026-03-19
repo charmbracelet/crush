@@ -71,7 +71,7 @@ type Commands struct {
 	customCommands []commands.CustomCommand
 	mcpPrompts     []commands.MCPPrompt
 
-	dockerMCPAvailable   *bool
+	dockerMCPAvailable     *bool
 	dockerMCPCheckInFlight bool
 }
 

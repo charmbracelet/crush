@@ -5,9 +5,9 @@ go 1.26.1
 require (
 	charm.land/bubbles/v2 v2.0.0
 	charm.land/bubbletea/v2 v2.0.2
-	charm.land/catwalk v0.30.7
+	charm.land/catwalk v0.30.8
 	charm.land/fang/v2 v2.0.1
-	charm.land/fantasy v0.15.0
+	charm.land/fantasy v0.15.1
 	charm.land/glamour/v2 v2.0.0
 	charm.land/lipgloss/v2 v2.0.2
 	charm.land/log/v2 v2.0.0
@@ -22,6 +22,7 @@ require (
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/charlievieth/fastwalk v1.0.14
 	github.com/charmbracelet/colorprofile v0.4.3
+	github.com/charmbracelet/openai-go v0.0.0-20260319145158-d0740cc34266
 	github.com/charmbracelet/ultraviolet v0.0.0-20260205113103-524a6607adb8
 	github.com/charmbracelet/x/ansi v0.11.6
 	github.com/charmbracelet/x/editor v0.2.0
@@ -49,7 +50,6 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.4.1
 	github.com/ncruces/go-sqlite3 v0.32.0
 	github.com/nxadm/tail v1.4.11
-	github.com/openai/openai-go/v3 v3.28.0
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
 	github.com/posthog/posthog-go v1.11.1
 	github.com/pressly/goose/v3 v3.27.0

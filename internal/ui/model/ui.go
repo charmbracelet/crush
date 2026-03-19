@@ -3017,7 +3017,7 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 
 	m.dialog.OpenDialog(commands)
 
-	return nil
+	return commands.InitialCmd()
 }
 
 // openReasoningDialog opens the reasoning effort dialog.
@@ -3473,16 +3473,17 @@ func (m *UI) enableDockerMCP() tea.Msg {
 
 	ctx := context.Background()
 	if err := mcp.InitializeSingle(ctx, config.DockerMCPName, store); err != nil {
-		// Roll back in-memory state when startup fails.
+		// Roll back runtime and in-memory state when startup fails.
+		disableErr := mcp.DisableSingle(store, config.DockerMCPName)
 		delete(store.Config().MCP, config.DockerMCPName)
-		return util.ReportError(fmt.Errorf("docker MCP enabled but failed to start: %w", err))()
+		return util.ReportError(fmt.Errorf("failed to start docker MCP: %w", errors.Join(err, disableErr)))()
 	}
 
 	if err := store.PersistDockerMCPConfig(mcpConfig); err != nil {
 		// Roll back runtime and in-memory state if persistence fails.
-		_ = mcp.DisableSingle(store, config.DockerMCPName)
+		disableErr := mcp.DisableSingle(store, config.DockerMCPName)
 		delete(store.Config().MCP, config.DockerMCPName)
-		return util.ReportError(fmt.Errorf("docker MCP started but failed to persist configuration: %w", err))()
+		return util.ReportError(fmt.Errorf("docker MCP started but failed to persist configuration: %w", errors.Join(err, disableErr)))()
 	}
 
 	return util.NewInfoMsg("Docker MCP enabled and started successfully")

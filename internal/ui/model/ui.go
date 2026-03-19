@@ -3465,14 +3465,24 @@ func (m *UI) copyChatHighlight() tea.Cmd {
 
 func (m *UI) enableDockerMCP() tea.Msg {
 	store := m.com.Store()
-	if err := store.EnableDockerMCP(); err != nil {
+	// Stage Docker MCP in memory first so startup and persistence can be atomic.
+	mcpConfig, err := store.PrepareDockerMCPConfig()
+	if err != nil {
 		return util.ReportError(err)()
 	}
 
-	// Initialize the Docker MCP client immediately.
 	ctx := context.Background()
 	if err := mcp.InitializeSingle(ctx, config.DockerMCPName, store); err != nil {
+		// Roll back in-memory state when startup fails.
+		delete(store.Config().MCP, config.DockerMCPName)
 		return util.ReportError(fmt.Errorf("docker MCP enabled but failed to start: %w", err))()
+	}
+
+	if err := store.PersistDockerMCPConfig(mcpConfig); err != nil {
+		// Roll back runtime and in-memory state if persistence fails.
+		_ = mcp.DisableSingle(store, config.DockerMCPName)
+		delete(store.Config().MCP, config.DockerMCPName)
+		return util.ReportError(fmt.Errorf("docker MCP started but failed to persist configuration: %w", err))()
 	}
 
 	return util.NewInfoMsg("Docker MCP enabled and started successfully")

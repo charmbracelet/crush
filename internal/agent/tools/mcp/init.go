@@ -257,13 +257,23 @@ func initClient(ctx context.Context, cfg *config.ConfigStore, name string, m con
 		return err
 	}
 
+	resources, err := getResources(ctx, session)
+	if err != nil {
+		slog.Error("Error listing resources", "error", err)
+		updateState(name, StateError, err, nil, Counts{})
+		session.Close()
+		return err
+	}
+
 	toolCount := updateTools(cfg, name, tools)
 	updatePrompts(name, prompts)
+	resourceCount := updateResources(name, resources)
 	sessions.Set(name, session)
 
 	updateState(name, StateConnected, nil, session, Counts{
-		Tools:   toolCount,
-		Prompts: len(prompts),
+		Tools:     toolCount,
+		Prompts:   len(prompts),
+		Resources: resourceCount,
 	})
 
 	return nil

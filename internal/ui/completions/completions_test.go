@@ -8,6 +8,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestRankPrefersStrongBasenameMatch verifies that when no path hint is present,
+// files with exact basename matches rank higher than partial path matches.
+// Query "user" should prefer "user.go" over "internal/user_service.go".
 func TestRankPrefersStrongBasenameMatch(t *testing.T) {
 	t.Parallel()
 
@@ -26,6 +29,8 @@ func TestRankPrefersStrongBasenameMatch(t *testing.T) {
 	require.Equal(t, "user.go", ranked[0].Text())
 }
 
+// TestRankReturnsOriginalOrderForEmptyQuery verifies that empty queries
+// return all items in their original order without reordering.
 func TestRankReturnsOriginalOrderForEmptyQuery(t *testing.T) {
 	t.Parallel()
 
@@ -44,6 +49,9 @@ func TestRankReturnsOriginalOrderForEmptyQuery(t *testing.T) {
 	require.Equal(t, "a/user.go", ranked[1].Text())
 }
 
+// TestRankPrefersPathMatchesWhenPathHintPresent verifies that when query
+// contains a path separator (/), path-level matches are prioritized.
+// Query "internal/u" should rank "internal/user.go" highest.
 func TestRankPrefersPathMatchesWhenPathHintPresent(t *testing.T) {
 	t.Parallel()
 
@@ -62,6 +70,9 @@ func TestRankPrefersPathMatchesWhenPathHintPresent(t *testing.T) {
 	require.Equal(t, "internal/user.go", ranked[0].Text())
 }
 
+// TestRankDotHintPrefersSuffixPathMatch verifies that file extension queries
+// (e.g., ".go") trigger path hint behavior and prioritize extension matches.
+// Query ".go" should rank "user.go" higher than "go-guide.md".
 func TestRankDotHintPrefersSuffixPathMatch(t *testing.T) {
 	t.Parallel()
 
@@ -79,6 +90,9 @@ func TestRankDotHintPrefersSuffixPathMatch(t *testing.T) {
 	require.Equal(t, "src/user.go", ranked[0].Text())
 }
 
+// TestRemapMatchToPath verifies that basename match indices are correctly
+// remapped to full path indices. For "user" matched in "user.go" at [0,1,2],
+// when full path is "internal/user.go", indices become [9,10,11].
 func TestRemapMatchToPath(t *testing.T) {
 	t.Parallel()
 
@@ -89,6 +103,11 @@ func TestRemapMatchToPath(t *testing.T) {
 	require.Equal(t, []int{9, 10, 11}, match.MatchedIndexes)
 }
 
+// TestHasPathHint verifies the heuristics for detecting path-like queries.
+// - "internal/u" → true (contains /)
+// - "main.go" → true (file extension)
+// - "v0.1" → false (no letter in suffix)
+// - "main" → false (no path hint)
 func TestHasPathHint(t *testing.T) {
 	t.Parallel()
 

@@ -835,10 +835,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.handleClipboardPathsMsg(msg); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-	case clipboardTextMsg:
-		if cmd := m.handleClipboardTextMsg(msg); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
 	case clipboardFallbackMsg:
 		if cmd := m.handleClipboardFallback(msg); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -3698,17 +3694,9 @@ func (m *UI) pasteImageFromClipboard(originalMsg tea.PasteMsg) tea.Cmd {
 			return clipboardPathsMsg{paths: paths}
 		}
 
-		// Try to read text from clipboard (might contain file paths).
-		textData, textErr := readClipboard(clipboardFormatText)
-		if textErr == nil && len(textData) > 0 {
-			// Check if the text looks like file paths.
-			candidates := clipboardPathCandidates(string(textData))
-			if len(candidates) > 0 {
-				return clipboardTextMsg{text: string(textData), err: nil}
-			}
-		}
-
 		// No clipboard image/file content found; fall back to text paste handling.
+		// The fallback handler properly validates file paths and falls through
+		// to textarea text paste when content is not valid file paths.
 		return clipboardFallbackMsg{pasteMsg: originalMsg}
 	}
 }
@@ -3765,14 +3753,6 @@ func (m *UI) handleClipboardPathsMsg(msg clipboardPathsMsg) tea.Cmd {
 		return nil
 	}
 	return m.attachmentFromClipboardPaths(msg.paths)
-}
-
-// handleClipboardTextMsg processes clipboard text returned by the command.
-func (m *UI) handleClipboardTextMsg(msg clipboardTextMsg) tea.Cmd {
-	if msg.err != nil || msg.text == "" {
-		return nil
-	}
-	return m.attachmentFromClipboardPaths(clipboardPathCandidates(msg.text))
 }
 
 func (m *UI) attachmentFromClipboardPaths(paths []string) tea.Cmd {
@@ -3892,12 +3872,6 @@ type clipboardImageMsg struct {
 // clipboardPathsMsg is returned by the clipboard file list read command.
 type clipboardPathsMsg struct {
 	paths []string
-}
-
-// clipboardTextMsg is returned by the clipboard text read command.
-type clipboardTextMsg struct {
-	text string
-	err  error
 }
 
 // clipboardFallbackMsg is returned when clipboard has no image/file content,

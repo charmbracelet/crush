@@ -255,7 +255,9 @@ func NewToolMessageItem(
 	case tools.LSPRestartToolName:
 		item = NewLSPRestartToolMessageItem(sty, toolCall, result, canceled)
 	default:
-		if strings.HasPrefix(toolCall.Name, "mcp_") {
+		if IsDockerMCPTool(toolCall.Name) {
+			item = NewDockerMCPToolMessageItem(sty, toolCall, result, canceled)
+		} else if strings.HasPrefix(toolCall.Name, "mcp_") {
 			item = NewMCPToolMessageItem(sty, toolCall, result, canceled)
 		} else {
 			item = NewGenericToolMessageItem(sty, toolCall, result, canceled)
@@ -424,9 +426,13 @@ func (t *baseToolMessageItem) HandleKeyEvent(key tea.KeyMsg) (bool, tea.Cmd) {
 }
 
 // pendingTool renders a tool that is still in progress with an animation.
-func pendingTool(sty *styles.Styles, name string, anim *anim.Anim) string {
+func pendingTool(sty *styles.Styles, name string, anim *anim.Anim, nested bool) string {
 	icon := sty.Tool.IconPending.Render()
-	toolName := sty.Tool.NameNormal.Render(name)
+	nameStyle := sty.Tool.NameNormal
+	if nested {
+		nameStyle = sty.Tool.NameNested
+	}
+	toolName := nameStyle.Render(name)
 
 	var animView string
 	if anim != nil {

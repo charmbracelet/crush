@@ -18,19 +18,20 @@ type ProjectInitFlag struct {
 	Initialized bool `json:"initialized"`
 }
 
-func Init(workingDir, dataDir string, debug bool) (*Config, error) {
-	cfg, err := Load(workingDir, dataDir, debug)
+func Init(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
+	store, err := Load(workingDir, dataDir, debug)
 	if err != nil {
 		return nil, err
 	}
-	return cfg, nil
+	return store, nil
 }
 
-func ProjectNeedsInitialization(cfg *Config) (bool, error) {
-	if cfg == nil {
+func ProjectNeedsInitialization(store *ConfigStore) (bool, error) {
+	if store == nil {
 		return false, fmt.Errorf("config not loaded")
 	}
 
+	cfg := store.Config()
 	flagFilePath := filepath.Join(cfg.Options.DataDirectory, InitFlagFilename)
 
 	_, err := os.Stat(flagFilePath)
@@ -42,7 +43,7 @@ func ProjectNeedsInitialization(cfg *Config) (bool, error) {
 		return false, fmt.Errorf("failed to check init flag file: %w", err)
 	}
 
-	someContextFileExists, err := contextPathsExist(cfg.WorkingDir())
+	someContextFileExists, err := contextPathsExist(store.WorkingDir())
 	if err != nil {
 		return false, fmt.Errorf("failed to check for context files: %w", err)
 	}
@@ -51,7 +52,7 @@ func ProjectNeedsInitialization(cfg *Config) (bool, error) {
 	}
 
 	// If the working directory has no non-ignored files, skip initialization step
-	empty, err := dirHasNoVisibleFiles(cfg.WorkingDir())
+	empty, err := dirHasNoVisibleFiles(store.WorkingDir())
 	if err != nil {
 		return false, fmt.Errorf("failed to check if directory is empty: %w", err)
 	}
@@ -90,7 +91,7 @@ func contextPathsExist(dir string) (bool, error) {
 	return false, nil
 }
 
-// dirHasNoVisibleFiles returns true if the directory has no files/dirs after applying ignore rules
+// dirHasNoVisibleFiles returns true if the directory has no files/dirs after applying ignore rules.
 func dirHasNoVisibleFiles(dir string) (bool, error) {
 	files, _, err := fsext.ListDirectory(dir, nil, 1, 1)
 	if err != nil {
@@ -99,11 +100,11 @@ func dirHasNoVisibleFiles(dir string) (bool, error) {
 	return len(files) == 0, nil
 }
 
-func MarkProjectInitialized(cfg *Config) error {
-	if cfg == nil {
+func MarkProjectInitialized(store *ConfigStore) error {
+	if store == nil {
 		return fmt.Errorf("config not loaded")
 	}
-	flagFilePath := filepath.Join(cfg.Options.DataDirectory, InitFlagFilename)
+	flagFilePath := filepath.Join(store.Config().Options.DataDirectory, InitFlagFilename)
 
 	file, err := os.Create(flagFilePath)
 	if err != nil {
@@ -114,13 +115,13 @@ func MarkProjectInitialized(cfg *Config) error {
 	return nil
 }
 
-func HasInitialDataConfig(cfg *Config) bool {
-	if cfg == nil {
+func HasInitialDataConfig(store *ConfigStore) bool {
+	if store == nil {
 		return false
 	}
 	cfgPath := GlobalConfigData()
 	if _, err := os.Stat(cfgPath); err != nil {
 		return false
 	}
-	return cfg.IsConfigured()
+	return store.Config().IsConfigured()
 }

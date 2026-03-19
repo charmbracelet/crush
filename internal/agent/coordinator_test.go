@@ -44,7 +44,7 @@ func (m *mockSessionAgent) Summarize(context.Context, string, fantasy.ProviderOp
 func newTestCoordinator(t *testing.T, env fakeEnv, providerID string, providerCfg config.ProviderConfig) *coordinator {
 	cfg, err := config.Init(env.workingDir, "", false)
 	require.NoError(t, err)
-	cfg.Providers.Set(providerID, providerCfg)
+	cfg.Config().Providers.Set(providerID, providerCfg)
 	return &coordinator{
 		cfg:      cfg,
 		sessions: env.sessions,

@@ -37,7 +37,7 @@ type GlobToolRenderContext struct{}
 func (g *GlobToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
-		return pendingTool(sty, "Glob", opts.Anim)
+		return pendingTool(sty, "Glob", opts.Anim, opts.Compact)
 	}
 
 	var params tools.GlobParams
@@ -96,7 +96,7 @@ type GrepToolRenderContext struct{}
 func (g *GrepToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
-		return pendingTool(sty, "Grep", opts.Anim)
+		return pendingTool(sty, "Grep", opts.Anim, opts.Compact)
 	}
 
 	var params tools.GrepParams
@@ -161,7 +161,7 @@ type LSToolRenderContext struct{}
 func (l *LSToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
-		return pendingTool(sty, "List", opts.Anim)
+		return pendingTool(sty, "List", opts.Anim, opts.Compact)
 	}
 
 	var params tools.LSParams
@@ -221,7 +221,7 @@ type SourcegraphToolRenderContext struct{}
 func (s *SourcegraphToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
-		return pendingTool(sty, "Sourcegraph", opts.Anim)
+		return pendingTool(sty, "Sourcegraph", opts.Anim, opts.Compact)
 	}
 
 	var params tools.SourcegraphParams

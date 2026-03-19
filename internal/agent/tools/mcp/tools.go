@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"iter"
@@ -32,7 +33,7 @@ func Tools() iter.Seq2[string, []*Tool] {
 }
 
 // RunTool runs an MCP tool with the given input parameters.
-func RunTool(ctx context.Context, cfg *config.Config, name, toolName string, input string) (ToolResult, error) {
+func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string, input string) (ToolResult, error) {
 	var args map[string]any
 	if err := json.Unmarshal([]byte(input), &args); err != nil {
 		return ToolResult{}, fmt.Errorf("error parsing parameters: %s", err)
@@ -81,12 +82,13 @@ func RunTool(ctx context.Context, cfg *config.Config, name, toolName string, inp
 
 	textContent := strings.Join(textParts, "\n")
 
-	// MCP SDK returns Data as already base64-encoded, so we use it directly.
+	// We need to make sure the data is base64
+	// when using something like docker + playwright the data was not returned correctly.
 	if imageData != nil {
 		return ToolResult{
 			Type:      "image",
 			Content:   textContent,
-			Data:      imageData,
+			Data:      ensureBase64(imageData),
 			MediaType: imageMimeType,
 		}, nil
 	}
@@ -95,7 +97,7 @@ func RunTool(ctx context.Context, cfg *config.Config, name, toolName string, inp
 		return ToolResult{
 			Type:      "media",
 			Content:   textContent,
-			Data:      audioData,
+			Data:      ensureBase64(audioData),
 			MediaType: audioMimeType,
 		}, nil
 	}
@@ -108,7 +110,7 @@ func RunTool(ctx context.Context, cfg *config.Config, name, toolName string, inp
 
 // RefreshTools gets the updated list of tools from the MCP and updates the
 // global state.
-func RefreshTools(ctx context.Context, cfg *config.Config, name string) {
+func RefreshTools(ctx context.Context, cfg *config.ConfigStore, name string) {
 	session, ok := sessions.Get(name)
 	if !ok {
 		slog.Warn("Refresh tools: no session", "name", name)
@@ -139,7 +141,7 @@ func getTools(ctx context.Context, session *ClientSession) ([]*Tool, error) {
 	return result.Tools, nil
 }
 
-func updateTools(cfg *config.Config, name string, tools []*Tool) int {
+func updateTools(cfg *config.ConfigStore, name string, tools []*Tool) int {
 	tools = filterDisabledTools(cfg, name, tools)
 	if len(tools) == 0 {
 		allTools.Del(name)
@@ -150,8 +152,8 @@ func updateTools(cfg *config.Config, name string, tools []*Tool) int {
 }
 
 // filterDisabledTools removes tools that are disabled via config.
-func filterDisabledTools(cfg *config.Config, mcpName string, tools []*Tool) []*Tool {
-	mcpCfg, ok := cfg.MCP[mcpName]
+func filterDisabledTools(cfg *config.ConfigStore, mcpName string, tools []*Tool) []*Tool {
+	mcpCfg, ok := cfg.Config().MCP[mcpName]
 	if !ok || len(mcpCfg.DisabledTools) == 0 {
 		return tools
 	}
@@ -163,4 +165,34 @@ func filterDisabledTools(cfg *config.Config, mcpName string, tools []*Tool) []*T
 		}
 	}
 	return filtered
+}
+
+// ensureBase64 checks if data is valid base64 and returns it as-is if so,
+// otherwise encodes the raw binary data to base64.
+func ensureBase64(data []byte) []byte {
+	// Check if the data is already valid base64 by attempting to decode it.
+	// Valid base64 should only contain ASCII characters (A-Z, a-z, 0-9, +, /, =).
+	if isValidBase64(data) {
+		return data
+	}
+	// Data is raw binary, encode it to base64.
+	encoded := make([]byte, base64.StdEncoding.EncodedLen(len(data)))
+	base64.StdEncoding.Encode(encoded, data)
+	return encoded
+}
+
+// isValidBase64 checks if the data appears to be valid base64-encoded content.
+func isValidBase64(data []byte) bool {
+	if len(data) == 0 {
+		return true
+	}
+	// Base64 strings should only contain ASCII characters.
+	for _, b := range data {
+		if b > 127 {
+			return false
+		}
+	}
+	// Try to decode to verify it's valid base64.
+	_, err := base64.StdEncoding.DecodeString(string(data))
+	return err == nil
 }

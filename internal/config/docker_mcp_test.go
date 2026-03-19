@@ -1,6 +1,8 @@
 package config
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -8,6 +10,17 @@ import (
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/stretchr/testify/require"
 )
+
+var errDockerUnavailable = errors.New("docker unavailable")
+
+func setDockerMCPVersionRunner(t *testing.T, runner func(context.Context) error) {
+	t.Helper()
+	orig := dockerMCPVersionRunner
+	dockerMCPVersionRunner = runner
+	t.Cleanup(func() {
+		dockerMCPVersionRunner = orig
+	})
+}
 
 func TestIsDockerMCPEnabled(t *testing.T) {
 	t.Parallel()
@@ -43,10 +56,8 @@ func TestIsDockerMCPEnabled(t *testing.T) {
 }
 
 func TestEnableDockerMCP(t *testing.T) {
-	t.Parallel()
-
 	t.Run("adds docker mcp to config", func(t *testing.T) {
-		t.Parallel()
+		setDockerMCPVersionRunner(t, func(context.Context) error { return nil })
 
 		// Create a temporary directory for config.
 		tmpDir := t.TempDir()
@@ -59,11 +70,6 @@ func TestEnableDockerMCP(t *testing.T) {
 			config:         cfg,
 			globalDataPath: configPath,
 			resolver:       NewShellVariableResolver(env.New()),
-		}
-
-		// Only run this test if docker mcp is available.
-		if !IsDockerMCPAvailable() {
-			t.Skip("Docker MCP not available, skipping test")
 		}
 
 		err := store.EnableDockerMCP()
@@ -86,7 +92,7 @@ func TestEnableDockerMCP(t *testing.T) {
 	})
 
 	t.Run("fails when docker mcp not available", func(t *testing.T) {
-		t.Parallel()
+		setDockerMCPVersionRunner(t, func(context.Context) error { return errDockerUnavailable })
 
 		// Create a temporary directory for config.
 		tmpDir := t.TempDir()
@@ -99,11 +105,6 @@ func TestEnableDockerMCP(t *testing.T) {
 			config:         cfg,
 			globalDataPath: configPath,
 			resolver:       NewShellVariableResolver(env.New()),
-		}
-
-		// Skip if docker mcp is actually available.
-		if IsDockerMCPAvailable() {
-			t.Skip("Docker MCP is available, skipping unavailable test")
 		}
 
 		err := store.EnableDockerMCP()
@@ -165,4 +166,28 @@ func TestDisableDockerMCP(t *testing.T) {
 		err := store.DisableDockerMCP()
 		require.NoError(t, err)
 	})
+}
+
+func TestEnableDockerMCPWithRealDockerWhenAvailable(t *testing.T) {
+	t.Parallel()
+
+	if !IsDockerMCPAvailable() {
+		t.Skip("docker mcp not available on this machine")
+	}
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "crush.json")
+
+	cfg := &Config{
+		MCP: make(map[string]MCPConfig),
+	}
+	store := &ConfigStore{
+		config:         cfg,
+		globalDataPath: configPath,
+		resolver:       NewShellVariableResolver(env.New()),
+	}
+
+	err := store.EnableDockerMCP()
+	require.NoError(t, err)
+	require.True(t, cfg.IsDockerMCPEnabled())
 }

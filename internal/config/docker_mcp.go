@@ -7,6 +7,11 @@ import (
 	"time"
 )
 
+var dockerMCPVersionRunner = func(ctx context.Context) error {
+	cmd := exec.CommandContext(ctx, "docker", "mcp", "version")
+	return cmd.Run()
+}
+
 // DockerMCPName is the name of the Docker MCP configuration.
 const DockerMCPName = "docker"
 
@@ -16,8 +21,7 @@ func IsDockerMCPAvailable() bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "docker", "mcp", "version")
-	err := cmd.Run()
+	err := dockerMCPVersionRunner(ctx)
 	return err == nil
 }
 

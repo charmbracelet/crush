@@ -328,6 +328,10 @@ type Styles struct {
 		ResourceName            lipgloss.Style
 		ResourceSize            lipgloss.Style
 		MediaType               lipgloss.Style
+
+		// Docker MCP tools
+		DockerMCPActionAdd lipgloss.Style // Docker MCP add action (green)
+		DockerMCPActionDel lipgloss.Style // Docker MCP remove action (red)
 	}
 
 	// Dialog styles
@@ -1181,6 +1185,10 @@ func DefaultStyles() Styles {
 	s.Tool.ResourceName = base
 	s.Tool.MediaType = base
 	s.Tool.ResourceSize = base.Foreground(fgMuted)
+
+	// Docker MCP styles
+	s.Tool.DockerMCPActionAdd = base.Foreground(greenLight)
+	s.Tool.DockerMCPActionDel = base.Foreground(red)
 
 	// Buttons
 	s.ButtonFocus = lipgloss.NewStyle().Foreground(white).Background(secondary)

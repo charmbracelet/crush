@@ -101,7 +101,7 @@ func (a *SubAgentRunnerAdapter) RunSubAgent(ctx context.Context, opts plugin.Sub
 		maxTokens = model.ModelCfg.MaxTokens
 	}
 
-	providerCfg, ok := c.cfg.Providers.Get(model.ModelCfg.Provider)
+	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
 	if !ok {
 		return "", errors.New("model provider not configured")
 	}
@@ -144,7 +144,7 @@ func (a *SubAgentRunnerAdapter) RunSubAgent(ctx context.Context, opts plugin.Sub
 // getAllToolNames returns all available tool names.
 func (c *coordinator) getAllToolNames(ctx context.Context) []string {
 	// Get task agent config for tool list (it has the most tools).
-	agentCfg, ok := c.cfg.Agents[config.AgentCoder]
+	agentCfg, ok := c.cfg.Config().Agents[config.AgentCoder]
 	if !ok {
 		return nil
 	}
@@ -158,18 +158,19 @@ func (c *coordinator) buildSubAgentWithPrompt(ctx context.Context, systemPrompt 
 		return nil, err
 	}
 
-	largeProviderCfg, _ := c.cfg.Providers.Get(large.ModelCfg.Provider)
+	largeProviderCfg, _ := c.cfg.Config().Providers.Get(large.ModelCfg.Provider)
 	result := NewSessionAgent(SessionAgentOptions{
-		large,
-		small,
-		largeProviderCfg.SystemPromptPrefix,
-		"",
-		true, // isSubAgent
-		c.cfg.Options.DisableAutoSummarize,
-		c.permissions.SkipRequests(),
-		c.sessions,
-		c.messages,
-		nil,
+		LargeModel:           large,
+		SmallModel:           small,
+		SystemPromptPrefix:   largeProviderCfg.SystemPromptPrefix,
+		SystemPrompt:         "",
+		IsSubAgent:           true, // isSubAgent
+		DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
+		IsYolo:               c.permissions.SkipRequests(),
+		Sessions:             c.sessions,
+		Messages:             c.messages,
+		Tools:                nil,
+		Notify:               c.notify,
 	})
 
 	// Build tools for the sub-agent.
@@ -189,7 +190,7 @@ func (c *coordinator) buildSubAgentWithPrompt(ctx context.Context, systemPrompt 
 			if err != nil {
 				return err
 			}
-			p, err := taskP.Build(ctx, large.Model.Provider(), large.Model.Model(), *c.cfg)
+			p, err := taskP.Build(ctx, large.Model.Provider(), large.Model.Model(), c.cfg)
 			if err != nil {
 				return err
 			}
@@ -210,15 +211,15 @@ func (c *coordinator) buildSubAgentTools(ctx context.Context, agent config.Agent
 
 	// Get the model name for the agent.
 	modelName := ""
-	if modelCfg, ok := c.cfg.Models[agent.Model]; ok {
-		if model := c.cfg.GetModel(modelCfg.Provider, modelCfg.Model); model != nil {
+	if modelCfg, ok := c.cfg.Config().Models[agent.Model]; ok {
+		if model := c.cfg.Config().GetModel(modelCfg.Provider, modelCfg.Model); model != nil {
 			modelName = model.Name
 		}
 	}
 
 	// Add core tools.
 	allTools = append(allTools,
-		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Options.Attribution, modelName),
+		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelName),
 		tools.NewJobOutputTool(),
 		tools.NewJobKillTool(),
 		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),
@@ -226,16 +227,16 @@ func (c *coordinator) buildSubAgentTools(ctx context.Context, agent config.Agent
 		tools.NewMultiEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 		tools.NewFetchTool(c.permissions, c.cfg.WorkingDir(), nil),
 		tools.NewGlobTool(c.cfg.WorkingDir()),
-		tools.NewGrepTool(c.cfg.WorkingDir(), c.cfg.Tools.Grep),
-		tools.NewLsTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Tools.Ls),
+		tools.NewGrepTool(c.cfg.WorkingDir(), c.cfg.Config().Tools.Grep),
+		tools.NewLsTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Tools.Ls),
 		tools.NewSourcegraphTool(nil),
 		tools.NewTodosTool(c.sessions),
-		tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, c.cfg.WorkingDir(), c.cfg.Options.SkillsPaths...),
+		tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, c.cfg.WorkingDir(), c.cfg.Config().Options.SkillsPaths...),
 		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 	)
 
 	// Add LSP tools if user has configured LSPs or auto_lsp is enabled (nil or true).
-	if len(c.cfg.LSP) > 0 || c.cfg.Options.AutoLSP == nil || *c.cfg.Options.AutoLSP {
+	if len(c.cfg.Config().LSP) > 0 || c.cfg.Config().Options.AutoLSP == nil || *c.cfg.Config().Options.AutoLSP {
 		allTools = append(allTools, tools.NewDiagnosticsTool(c.lspManager), tools.NewReferencesTool(c.lspManager), tools.NewLSPRestartTool(c.lspManager))
 	}
 

@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/fang/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/crush/internal/app"
@@ -24,7 +25,6 @@ import (
 	ui "github.com/charmbracelet/crush/internal/ui/model"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/crush/plugin"
-	"github.com/charmbracelet/fang"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
@@ -39,6 +39,9 @@ func init() {
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
 	rootCmd.Flags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
 	rootCmd.Flags().Bool("list-plugins", false, "List registered plugins and exit")
+	rootCmd.Flags().StringP("session", "s", "", "Continue a previous session by ID")
+	rootCmd.Flags().BoolP("continue", "C", false, "Continue the most recent session")
+	rootCmd.MarkFlagsMutuallyExclusive("session", "continue")
 
 	rootCmd.AddCommand(
 		runCmd,
@@ -49,6 +52,7 @@ func init() {
 		schemaCmd,
 		loginCmd,
 		statsCmd,
+		sessionCmd,
 	)
 }
 
@@ -74,6 +78,12 @@ crush --yolo
 
 # Run with custom data directory
 crush --data-dir /path/to/custom/.crush
+
+# Continue a previous session
+crush --session {session-id}
+
+# Continue the most recent session
+crush --continue
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Handle --list-plugins flag.
@@ -81,11 +91,23 @@ crush --data-dir /path/to/custom/.crush
 			return listRegisteredPlugins()
 		}
 
+		sessionID, _ := cmd.Flags().GetString("session")
+		continueLast, _ := cmd.Flags().GetBool("continue")
+
 		app, err := setupAppWithProgressBar(cmd)
 		if err != nil {
 			return err
 		}
 		defer app.Shutdown()
+
+		// Resolve session ID if provided
+		if sessionID != "" {
+			sess, err := resolveSessionID(cmd.Context(), app.Sessions, sessionID)
+			if err != nil {
+				return err
+			}
+			sessionID = sess.ID
+		}
 
 		event.AppInitialized()
 
@@ -93,7 +115,7 @@ crush --data-dir /path/to/custom/.crush
 		var env uv.Environ = os.Environ()
 
 		com := common.DefaultCommon(app)
-		model := ui.New(com)
+		model := ui.New(com, sessionID, continueLast)
 
 		program := tea.NewProgram(
 			model,
@@ -196,11 +218,12 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 		return nil, err
 	}
 
-	cfg, err := config.Init(cwd, dataDir, debug)
+	store, err := config.Init(cwd, dataDir, debug)
 	if err != nil {
 		return nil, err
 	}
 
+	cfg := store.Config()
 	if cfg.Permissions == nil {
 		cfg.Permissions = &config.Permissions{}
 	}
@@ -222,7 +245,7 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 		return nil, err
 	}
 
-	appInstance, err := app.New(ctx, conn, cfg)
+	appInstance, err := app.New(ctx, conn, store)
 	if err != nil {
 		slog.Error("Failed to create app instance", "error", err)
 		return nil, err

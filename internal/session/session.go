@@ -79,8 +79,15 @@ type Session struct {
 	UpdatedAt            int64
 }
 
-// LastContextTokens returns the most recent request's total context usage.
-func (s Session) LastContextTokens() int64 {
+func (s Session) LastInputTokens() int64 {
+	return s.LastPromptTokens
+}
+
+func (s Session) LastOutputTokens() int64 {
+	return s.LastCompletionTokens
+}
+
+func (s Session) LastExchangeTokens() int64 {
 	return s.LastPromptTokens + s.LastCompletionTokens
 }
 

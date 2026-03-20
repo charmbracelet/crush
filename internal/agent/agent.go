@@ -581,7 +581,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 					projectedPromptTokens, estimateErr := a.estimateNextStepPromptTokens(genCtx, call.SessionID, agentTools, systemPrompt, promptPrefix, largeModel, providerCtx)
 					if estimateErr != nil {
 						slog.Warn("Failed to estimate next-step prompt tokens", "error", estimateErr, "session_id", call.SessionID)
-						projectedPromptTokens = currentSession.LastContextTokens()
+						projectedPromptTokens = currentSession.LastInputTokens()
 					}
 					if shouldAutoSummarize(projectedPromptTokens, int64(largeModel.CatwalkCfg.ContextWindow), call.MaxOutputTokens) && !a.disableAutoSummarize {
 						shouldSummarize = true

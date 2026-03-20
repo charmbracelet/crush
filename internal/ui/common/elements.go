@@ -32,7 +32,8 @@ func FormatReasoningEffort(effort string) string {
 
 // ModelContextInfo contains token usage and cost information for a model.
 type ModelContextInfo struct {
-	ContextUsed  int64
+	InputTokens  int64
+	OutputTokens int64
 	ModelContext int64
 	Cost         float64
 }
@@ -73,7 +74,7 @@ func ModelInfo(t *styles.Styles, modelName, providerName, reasoningInfo string, 
 	}
 
 	if context != nil {
-		formattedInfo := formatTokensAndCost(t, context.ContextUsed, context.ModelContext, context.Cost)
+		formattedInfo := formatTokensAndCost(t, context.InputTokens, context.OutputTokens, context.ModelContext, context.Cost)
 		parts = append(parts, lipgloss.NewStyle().PaddingLeft(2).Render(formattedInfo))
 	}
 
@@ -107,19 +108,30 @@ func FormatTokenCount(tokens int64) string {
 // FormatContextUsage formats token usage as used tokens plus context usage
 // percentage.
 func FormatContextUsage(tokens, contextWindow int64) string {
-	used := strings.ToLower(FormatTokenCount(tokens))
+	if tokens < 0 {
+		tokens = 0
+	}
+	displayedTokens := tokens
+	if contextWindow > 0 {
+		displayedTokens = min(displayedTokens, contextWindow)
+	}
+	used := strings.ToLower(FormatTokenCount(displayedTokens))
 	if contextWindow <= 0 {
 		return used
 	}
-	percentage := int(math.Round(float64(tokens) / float64(contextWindow) * 100))
+	percentage := int(math.Round(float64(displayedTokens) / float64(contextWindow) * 100))
 	return fmt.Sprintf("%s %d%%", used, percentage)
 }
 
 // formatTokensAndCost formats cumulative context usage and cost.
-func formatTokensAndCost(t *styles.Styles, tokens, contextWindow int64, cost float64) string {
+func formatTokensAndCost(t *styles.Styles, inputTokens, outputTokens, contextWindow int64, cost float64) string {
+	if outputTokens < 0 {
+		outputTokens = 0
+	}
 	formattedCost := t.Muted.Render(fmt.Sprintf("$%.2f", cost))
-	formattedTokens := t.Subtle.Render(FormatContextUsage(tokens, contextWindow))
-	return fmt.Sprintf("%s %s", formattedTokens, formattedCost)
+	formattedInput := t.Subtle.Render(fmt.Sprintf("%s in", FormatContextUsage(inputTokens, contextWindow)))
+	formattedOutput := t.Muted.Render(fmt.Sprintf("%s out", strings.ToLower(FormatTokenCount(outputTokens))))
+	return fmt.Sprintf("%s %s %s", formattedInput, formattedOutput, formattedCost)
 }
 
 // StatusOpts defines options for rendering a status line with icon, title,

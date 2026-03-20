@@ -14,3 +14,16 @@ func TestNormalizeCollaborationMode(t *testing.T) {
 	require.Equal(t, CollaborationModeDefault, NormalizeCollaborationMode(string(CollaborationModeDefault)))
 	require.Equal(t, CollaborationModePlan, NormalizeCollaborationMode(string(CollaborationModePlan)))
 }
+
+func TestSessionLastTokenHelpers(t *testing.T) {
+	t.Parallel()
+
+	s := Session{
+		LastPromptTokens:     1234,
+		LastCompletionTokens: 56,
+	}
+
+	require.Equal(t, int64(1234), s.LastInputTokens())
+	require.Equal(t, int64(56), s.LastOutputTokens())
+	require.Equal(t, int64(1290), s.LastExchangeTokens())
+}

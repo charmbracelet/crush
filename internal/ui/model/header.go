@@ -127,7 +127,7 @@ func renderHeaderDetails(
 
 	agentCfg := com.Config().Agents[config.AgentCoder]
 	model := com.Config().GetModelByType(agentCfg.Model)
-	totalTokens := session.LastContextTokens()
+	totalTokens := session.LastInputTokens()
 	formattedUsage := t.Header.Percentage.Render(common.FormatContextUsage(totalTokens, model.ContextWindow))
 	parts = append(parts, formattedUsage)
 

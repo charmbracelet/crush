@@ -14,6 +14,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/plugin"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -211,12 +212,16 @@ func TestSetupMessageSubscriber_TriggersMessageCreatedHook(t *testing.T) {
 func setupMessageSubscriberDependencies(t *testing.T) (*sql.DB, *config.ConfigStore) {
 	t.Helper()
 	workingDir := t.TempDir()
+	dataDir := t.TempDir()
+	t.Cleanup(func() {
+		require.NoError(t, log.ResetForTesting())
+	})
 	require.NoError(t, os.WriteFile(filepath.Join(workingDir, "crush.json"), []byte(`{"options":{"disable_provider_auto_update":true}}`), 0o644))
 
-	store, err := config.Init(workingDir, t.TempDir(), false)
+	store, err := config.Init(workingDir, dataDir, false)
 	require.NoError(t, err)
 
-	conn, err := db.Connect(t.Context(), t.TempDir())
+	conn, err := db.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
 	return conn, store
 }

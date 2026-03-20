@@ -54,10 +54,12 @@ const (
 	DefaultSessionName = "Untitled Session"
 
 	// Constants for auto-summarization thresholds
-	autoSummarizeReserveTokens  = 20_000
-	largeContextWindowThreshold = 200_000
-	largeContextWindowBuffer    = 20_000
-	smallContextWindowRatio     = 0.2
+	autoSummarizeReserveTokens        = 20_000
+	autoSummarizeToolReserveMax       = 8_000
+	autoSummarizeToolReserveMin       = 2_000
+	autoSummarizeSafetyReserveMin     = 2_000
+	autoSummarizeSoftLimitNumerator   = 9
+	autoSummarizeSoftLimitDenominator = 10
 )
 
 var userAgent = fmt.Sprintf("Charm-Crush/%s (https://charm.land/crush)", version.Version)
@@ -121,6 +123,7 @@ type sessionAgent struct {
 	smallModel         *csync.Value[Model]
 	systemPromptPrefix *csync.Value[string]
 	systemPrompt       *csync.Value[string]
+	workingDir         string
 	tools              *csync.Slice[fantasy.AgentTool]
 	agentFactory       func(model fantasy.LanguageModel, opts ...fantasy.AgentOption) fantasy.Agent
 
@@ -142,6 +145,7 @@ type SessionAgentOptions struct {
 	SmallModel           Model
 	SystemPromptPrefix   string
 	SystemPrompt         string
+	WorkingDir           string
 	AgentFactory         func(model fantasy.LanguageModel, opts ...fantasy.AgentOption) fantasy.Agent
 	RefreshCallConfig    func(context.Context) (sessionAgentRuntimeConfig, error)
 	IsSubAgent           bool
@@ -177,6 +181,7 @@ func NewSessionAgent(
 		smallModel:           csync.NewValue(opts.SmallModel),
 		systemPromptPrefix:   csync.NewValue(opts.SystemPromptPrefix),
 		systemPrompt:         csync.NewValue(opts.SystemPrompt),
+		workingDir:           opts.WorkingDir,
 		agentFactory:         agentFactory,
 		refreshCallConfig:    opts.RefreshCallConfig,
 		isSubAgent:           opts.IsSubAgent,
@@ -529,6 +534,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			},
 			OnToolResult: func(result fantasy.ToolResultContent) error {
 				toolResult := a.convertToToolResult(result)
+				if truncatedResult, truncated := a.truncateToolResult(currentAssistant.SessionID, toolResult); truncated {
+					toolResult = truncatedResult
+				}
 				toolMsg, createMsgErr := a.messages.Create(genCtx, currentAssistant.SessionID, message.CreateMessageParams{
 					Role: message.Tool,
 					Parts: []message.ContentPart{
@@ -1371,11 +1379,27 @@ func autoSummarizeReservedTokens(maxOutputTokens int64) int64 {
 	return min(autoSummarizeReserveTokens, maxOutputTokens)
 }
 
+func autoSummarizeToolReserveTokens(contextWindow int64) int64 {
+	if contextWindow <= 0 {
+		return 0
+	}
+	return min(autoSummarizeToolReserveMax, max(autoSummarizeToolReserveMin, contextWindow/10))
+}
+
+func autoSummarizeSafetyReserveTokens(contextWindow int64) int64 {
+	if contextWindow <= 0 {
+		return 0
+	}
+	return max(autoSummarizeSafetyReserveMin, contextWindow/50)
+}
+
 func shouldAutoSummarize(contextUsed, contextWindow, maxOutputTokens int64) bool {
 	if contextWindow <= 0 {
 		return false
 	}
-	usable := contextWindow - autoSummarizeReservedTokens(maxOutputTokens)
+	hardLimit := contextWindow - autoSummarizeReservedTokens(maxOutputTokens) - autoSummarizeToolReserveTokens(contextWindow) - autoSummarizeSafetyReserveTokens(contextWindow)
+	softLimit := contextWindow * autoSummarizeSoftLimitNumerator / autoSummarizeSoftLimitDenominator
+	usable := min(hardLimit, softLimit)
 	if usable <= 0 {
 		return true
 	}

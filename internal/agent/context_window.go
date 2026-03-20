@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"charm.land/fantasy"
@@ -17,6 +20,7 @@ const (
 	// in-place so that the subsequent summarization call does not also hit
 	// the limit.
 	contextWindowToolResultMaxChars = 20_000
+	contextWindowTruncationDir      = ".crush/truncation"
 
 	// contextWindowResumePromptPrefix is prepended to the original user
 	// prompt when re-queuing the task after a forced summarization.  It
@@ -49,6 +53,93 @@ func isContextWindowExceededError(err error) bool {
 		strings.Contains(msg, "prompt is too long")
 }
 
+func (a *sessionAgent) truncateToolResult(sessionID string, tr message.ToolResult) (message.ToolResult, bool) {
+	if tr.IsError || tr.Data != "" || tr.MIMEType != "" {
+		return tr, false
+	}
+	contentRunes := []rune(tr.Content)
+	if len(contentRunes) <= contextWindowToolResultMaxChars {
+		return tr, false
+	}
+
+	fullOutputPath := ""
+	if a != nil {
+		persistedPath, err := a.persistToolResultContent(sessionID, tr)
+		if err != nil {
+			slog.Warn("Failed to persist oversized tool result", "error", err, "session_id", sessionID, "tool_name", tr.Name)
+		} else {
+			fullOutputPath = persistedPath
+		}
+	}
+
+	keep := contextWindowToolResultMaxChars
+	for range 3 {
+		notice := truncatedToolResultNotice(len(contentRunes)-keep, fullOutputPath)
+		keep = contextWindowToolResultMaxChars - len([]rune(notice))
+		if keep < 0 {
+			keep = 0
+		}
+		if keep > len(contentRunes) {
+			keep = len(contentRunes)
+		}
+	}
+
+	tr.Content = string(contentRunes[:keep]) + truncatedToolResultNotice(len(contentRunes)-keep, fullOutputPath)
+	return tr, true
+}
+
+func truncatedToolResultNotice(omitted int, fullOutputPath string) string {
+	if fullOutputPath != "" {
+		return fmt.Sprintf("\n\n[%d characters omitted — output exceeded the context window limit. This excerpt is incomplete; do not assume it contains the full result. The full output was saved to `%s`. Use the view tool to inspect that file with offset/limit.]", omitted, filepath.ToSlash(fullOutputPath))
+	}
+	return fmt.Sprintf("\n\n[%d characters omitted — output exceeded the context window limit. This excerpt is incomplete; do not assume it contains the full result. If you need more detail, rerun the tool with a narrower scope or use a precise read with offsets/limits when available.]", omitted)
+}
+
+func (a *sessionAgent) persistToolResultContent(sessionID string, tr message.ToolResult) (string, error) {
+	if a == nil || a.workingDir == "" || tr.Content == "" {
+		return "", nil
+	}
+	truncationDir := filepath.Join(a.workingDir, contextWindowTruncationDir)
+	if err := os.MkdirAll(truncationDir, 0o755); err != nil {
+		return "", err
+	}
+	pattern := fmt.Sprintf("%s-%s-*.txt", sanitizeTruncationPathPart(sessionID), sanitizeTruncationPathPart(tr.Name))
+	file, err := os.CreateTemp(truncationDir, pattern)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	if _, err = file.WriteString(tr.Content); err != nil {
+		return "", err
+	}
+	path := file.Name()
+	if relPath, err := filepath.Rel(a.workingDir, path); err == nil {
+		return relPath, nil
+	}
+	return path, nil
+}
+
+func sanitizeTruncationPathPart(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "tool"
+	}
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z':
+			return r
+		case r >= 'A' && r <= 'Z':
+			return r
+		case r >= '0' && r <= '9':
+			return r
+		case r == '-', r == '_':
+			return r
+		default:
+			return '_'
+		}
+	}, trimmed)
+}
+
 // truncateOversizedToolResults scans all tool messages in the session and
 // truncates any ToolResult whose Content field exceeds
 // contextWindowToolResultMaxChars.  This is called before summarization when
@@ -69,21 +160,14 @@ func (a *sessionAgent) truncateOversizedToolResults(ctx context.Context, session
 		modified := false
 		for i, part := range msg.Parts {
 			tr, ok := part.(message.ToolResult)
-			if !ok || tr.IsError {
+			if !ok {
 				continue
 			}
-			contentRunes := []rune(tr.Content)
-			if len(contentRunes) <= contextWindowToolResultMaxChars {
+			truncated, ok := a.truncateToolResult(sessionID, tr)
+			if !ok {
 				continue
 			}
-			omitted := len(contentRunes) - contextWindowToolResultMaxChars
-			tr.Content = fmt.Sprintf(
-				"%s\n\n[%d characters omitted — output exceeded the context window limit. "+
-					"Use a more targeted query (e.g. add WHERE/LIMIT clauses, avoid large columns) to retrieve less data.]",
-				string(contentRunes[:contextWindowToolResultMaxChars]),
-				omitted,
-			)
-			msg.Parts[i] = tr
+			msg.Parts[i] = truncated
 			modified = true
 		}
 		if modified {

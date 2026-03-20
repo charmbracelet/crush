@@ -39,21 +39,21 @@ func DefaultCompressionConfig() CompressionConfig {
 
 // CompressResult contains the compressed image data and metadata.
 type CompressResult struct {
-	Data     []byte
-	MimeType string
-	WasCompressed bool
-	OriginalSize int64
+	Data           []byte
+	MimeType       string
+	WasCompressed  bool
+	OriginalSize   int64
 	CompressedSize int64
 }
 
 // DetectMimeType detects the MIME type from image data.
 func DetectMimeType(data []byte) string {
-	if len(data) < 12 {
+	if len(data) < 3 {
 		return ""
 	}
 
 	// Check for PNG.
-	if data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47 {
+	if len(data) >= 4 && data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47 {
 		return "image/png"
 	}
 
@@ -68,7 +68,7 @@ func DetectMimeType(data []byte) string {
 	}
 
 	// Check for WebP.
-	if data[0] == 0x52 && data[1] == 0x49 && data[2] == 0x46 && data[3] == 0x46 &&
+	if len(data) >= 12 && data[0] == 0x52 && data[1] == 0x49 && data[2] == 0x46 && data[3] == 0x46 &&
 		data[8] == 0x57 && data[9] == 0x45 && data[10] == 0x42 && data[11] == 0x50 {
 		return "image/webp"
 	}
@@ -91,10 +91,10 @@ func CompressImage(data []byte, mimeType string, config CompressionConfig) (*Com
 	// If under threshold, return original.
 	if !ShouldCompress(data, config) {
 		return &CompressResult{
-			Data:          data,
-			MimeType:      mimeType,
-			WasCompressed: false,
-			OriginalSize:  originalSize,
+			Data:           data,
+			MimeType:       mimeType,
+			WasCompressed:  false,
+			OriginalSize:   originalSize,
 			CompressedSize: originalSize,
 		}, nil
 	}
@@ -118,10 +118,10 @@ func CompressImage(data []byte, mimeType string, config CompressionConfig) (*Com
 	if err != nil {
 		slog.Warn("Failed to decode image for compression, returning original", "error", err, "mime_type", mimeType)
 		return &CompressResult{
-			Data:          data,
-			MimeType:      mimeType,
-			WasCompressed: false,
-			OriginalSize:  originalSize,
+			Data:           data,
+			MimeType:       mimeType,
+			WasCompressed:  false,
+			OriginalSize:   originalSize,
 			CompressedSize: originalSize,
 		}, nil
 	}
@@ -147,10 +147,10 @@ func CompressImage(data []byte, mimeType string, config CompressionConfig) (*Com
 		if err := png.Encode(&output, img); err != nil {
 			slog.Warn("Failed to encode PNG, returning original", "error", err)
 			return &CompressResult{
-				Data:          data,
-				MimeType:      mimeType,
-				WasCompressed: false,
-				OriginalSize:  originalSize,
+				Data:           data,
+				MimeType:       mimeType,
+				WasCompressed:  false,
+				OriginalSize:   originalSize,
 				CompressedSize: originalSize,
 			}, nil
 		}
@@ -160,10 +160,10 @@ func CompressImage(data []byte, mimeType string, config CompressionConfig) (*Com
 		if err := jpeg.Encode(&output, img, &jpeg.Options{Quality: config.JPEGQuality}); err != nil {
 			slog.Warn("Failed to encode JPEG, returning original", "error", err)
 			return &CompressResult{
-				Data:          data,
-				MimeType:      mimeType,
-				WasCompressed: false,
-				OriginalSize:  originalSize,
+				Data:           data,
+				MimeType:       mimeType,
+				WasCompressed:  false,
+				OriginalSize:   originalSize,
 				CompressedSize: originalSize,
 			}, nil
 		}
@@ -179,10 +179,10 @@ func CompressImage(data []byte, mimeType string, config CompressionConfig) (*Com
 			"compressed_size", compressedSize,
 		)
 		return &CompressResult{
-			Data:          data,
-			MimeType:      mimeType,
-			WasCompressed: false,
-			OriginalSize:  originalSize,
+			Data:           data,
+			MimeType:       mimeType,
+			WasCompressed:  false,
+			OriginalSize:   originalSize,
 			CompressedSize: originalSize,
 		}, nil
 	}
@@ -195,10 +195,10 @@ func CompressImage(data []byte, mimeType string, config CompressionConfig) (*Com
 	)
 
 	return &CompressResult{
-		Data:          compressedData,
-		MimeType:      outputMimeType,
-		WasCompressed: true,
-		OriginalSize:  originalSize,
+		Data:           compressedData,
+		MimeType:       outputMimeType,
+		WasCompressed:  true,
+		OriginalSize:   originalSize,
 		CompressedSize: compressedSize,
 	}, nil
 }

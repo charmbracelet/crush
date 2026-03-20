@@ -477,6 +477,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		SmallModel:         small,
 		SystemPromptPrefix: largeProviderCfg.SystemPromptPrefix,
 		SystemPrompt:       "",
+		WorkingDir:         c.cfg.WorkingDir(),
 		RefreshCallConfig: func(callCtx context.Context) (sessionAgentRuntimeConfig, error) {
 			return c.refreshSessionAgentRuntimeConfig(callCtx, result, prompt, agent, isSubAgent)
 		},

@@ -691,10 +691,12 @@ func TestShouldAutoSummarize(t *testing.T) {
 		maxOutputTokens int64
 		want            bool
 	}{
-		{name: "large window reserves 20k", contextUsed: 180_000, contextWindow: 200_000, maxOutputTokens: 50_000, want: true},
-		{name: "large window below threshold", contextUsed: 179_999, contextWindow: 200_000, maxOutputTokens: 50_000, want: false},
-		{name: "small window reserves max output", contextUsed: 24_000, contextWindow: 32_000, maxOutputTokens: 8_000, want: true},
-		{name: "small window below threshold", contextUsed: 23_999, contextWindow: 32_000, maxOutputTokens: 8_000, want: false},
+		{name: "large window uses hard reserve threshold", contextUsed: 168_000, contextWindow: 200_000, maxOutputTokens: 50_000, want: true},
+		{name: "large window below hard reserve threshold", contextUsed: 167_999, contextWindow: 200_000, maxOutputTokens: 50_000, want: false},
+		{name: "small window reserves output tool and safety budget", contextUsed: 18_800, contextWindow: 32_000, maxOutputTokens: 8_000, want: true},
+		{name: "small window below mixed threshold", contextUsed: 18_799, contextWindow: 32_000, maxOutputTokens: 8_000, want: false},
+		{name: "soft limit caps very large windows at ninety percent", contextUsed: 450_000, contextWindow: 500_000, maxOutputTokens: 1_000, want: true},
+		{name: "soft limit still leaves headroom below ninety percent", contextUsed: 449_999, contextWindow: 500_000, maxOutputTokens: 1_000, want: false},
 		{name: "invalid context window", contextUsed: 1, contextWindow: 0, maxOutputTokens: 8_000, want: false},
 	}
 

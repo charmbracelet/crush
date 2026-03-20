@@ -16,6 +16,8 @@ import (
 var (
 	initOnce    sync.Once
 	initialized atomic.Bool
+	rotatorMu   sync.Mutex
+	rotator     *lumberjack.Logger
 )
 
 func Setup(logFile string, debug bool) {
@@ -38,6 +40,9 @@ func Setup(logFile string, debug bool) {
 			AddSource: true,
 		})
 
+		rotatorMu.Lock()
+		rotator = logRotator
+		rotatorMu.Unlock()
 		slog.SetDefault(slog.New(logger))
 		initialized.Store(true)
 	})
@@ -45,6 +50,21 @@ func Setup(logFile string, debug bool) {
 
 func Initialized() bool {
 	return initialized.Load()
+}
+
+func ResetForTesting() error {
+	rotatorMu.Lock()
+	currentRotator := rotator
+	rotator = nil
+	initOnce = sync.Once{}
+	initialized.Store(false)
+	rotatorMu.Unlock()
+
+	slog.SetDefault(slog.New(slog.DiscardHandler))
+	if currentRotator != nil {
+		return currentRotator.Close()
+	}
+	return nil
 }
 
 func RecoverPanic(name string, cleanup func()) {

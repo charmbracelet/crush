@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -102,7 +104,7 @@ func TestTruncateOversizedToolResults(t *testing.T) {
 	t.Parallel()
 
 	env := testEnv(t)
-	agent := &sessionAgent{messages: env.messages}
+	agent := &sessionAgent{messages: env.messages, workingDir: env.workingDir}
 
 	sess, err := env.sessions.Create(t.Context(), "Truncate Test")
 	require.NoError(t, err)
@@ -135,17 +137,28 @@ func TestTruncateOversizedToolResults(t *testing.T) {
 	truncated := results[0].Content
 	// Content must be shorter than original.
 	assert.Less(t, len(truncated), len(bigContent))
-	// The kept prefix must be exactly contextWindowToolResultMaxChars chars.
-	assert.Equal(t, strings.Repeat("x", contextWindowToolResultMaxChars), truncated[:contextWindowToolResultMaxChars])
+	assert.LessOrEqual(t, len([]rune(truncated)), contextWindowToolResultMaxChars)
+	assert.True(t, strings.HasPrefix(truncated, strings.Repeat("x", 1000)))
 	// Must include truncation notice.
 	assert.Contains(t, truncated, "characters omitted")
+	assert.Contains(t, truncated, "This excerpt is incomplete")
+	assert.Contains(t, truncated, ".crush/truncation/")
+	assert.Contains(t, truncated, "Use the view tool")
+	assert.NotContains(t, truncated, "use grep")
+
+	artifactMatches, globErr := filepath.Glob(filepath.Join(env.workingDir, ".crush", "truncation", "*.txt"))
+	require.NoError(t, globErr)
+	require.Len(t, artifactMatches, 1)
+	artifactContent, readErr := os.ReadFile(artifactMatches[0])
+	require.NoError(t, readErr)
+	assert.Equal(t, bigContent, string(artifactContent))
 }
 
 func TestTruncateOversizedToolResults_UnicodeSafe(t *testing.T) {
 	t.Parallel()
 
 	env := testEnv(t)
-	agent := &sessionAgent{messages: env.messages}
+	agent := &sessionAgent{messages: env.messages, workingDir: env.workingDir}
 
 	sess, err := env.sessions.Create(t.Context(), "Truncate Unicode")
 	require.NoError(t, err)
@@ -175,15 +188,17 @@ func TestTruncateOversizedToolResults_UnicodeSafe(t *testing.T) {
 	truncated := results[0].Content
 
 	assert.True(t, utf8.ValidString(truncated), "truncated content must remain valid UTF-8")
-	assert.Contains(t, truncated, "10 characters omitted")
-	assert.True(t, strings.HasPrefix(truncated, strings.Repeat("你", contextWindowToolResultMaxChars)))
+	assert.Contains(t, truncated, ".crush/truncation/")
+	assert.Contains(t, truncated, "This excerpt is incomplete")
+	assert.LessOrEqual(t, len([]rune(truncated)), contextWindowToolResultMaxChars)
+	assert.True(t, strings.HasPrefix(truncated, strings.Repeat("你", 1000)))
 }
 
 func TestTruncateOversizedToolResults_SmallContentUntouched(t *testing.T) {
 	t.Parallel()
 
 	env := testEnv(t)
-	agent := &sessionAgent{messages: env.messages}
+	agent := &sessionAgent{messages: env.messages, workingDir: env.workingDir}
 
 	sess, err := env.sessions.Create(t.Context(), "Truncate Small")
 	require.NoError(t, err)
@@ -215,7 +230,7 @@ func TestTruncateOversizedToolResults_ErrorResultUntouched(t *testing.T) {
 	t.Parallel()
 
 	env := testEnv(t)
-	agent := &sessionAgent{messages: env.messages}
+	agent := &sessionAgent{messages: env.messages, workingDir: env.workingDir}
 
 	sess, err := env.sessions.Create(t.Context(), "Truncate Error")
 	require.NoError(t, err)
@@ -243,4 +258,8 @@ func TestTruncateOversizedToolResults_ErrorResultUntouched(t *testing.T) {
 	results := msgs[0].ToolResults()
 	require.Len(t, results, 1)
 	assert.Equal(t, bigError, results[0].Content, "error results should not be truncated")
+
+	artifactMatches, globErr := filepath.Glob(filepath.Join(env.workingDir, ".crush", "truncation", "*.txt"))
+	require.NoError(t, globErr)
+	assert.Empty(t, artifactMatches)
 }

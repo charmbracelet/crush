@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/stretchr/testify/require"
 )
@@ -18,6 +19,9 @@ func TestConfiguredCommandPlugin(t *testing.T) {
 	defer Reset()
 
 	workingDir := t.TempDir()
+	t.Cleanup(func() {
+		require.NoError(t, log.ResetForTesting())
+	})
 	configDir := filepath.Join(workingDir, ".crush")
 	require.NoError(t, os.MkdirAll(configDir, 0o755))
 

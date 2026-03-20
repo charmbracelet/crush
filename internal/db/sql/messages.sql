@@ -53,3 +53,9 @@ SELECT *
 FROM messages
 WHERE role = 'user'
 ORDER BY created_at DESC;
+
+-- name: DeleteMessagesAfter :exec
+DELETE FROM messages AS target
+WHERE target.session_id = ? AND target.created_at >= (
+    SELECT m.created_at FROM messages AS m WHERE m.id = ?
+);

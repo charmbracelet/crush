@@ -157,6 +157,11 @@ type (
 	creditsUpdatedMsg struct {
 		credits int
 	}
+
+	// reloadSessionMessagesMsg is sent to reload messages for the current session.
+	reloadSessionMessagesMsg struct {
+		messages []message.Message
+	}
 )
 
 // UI represents the main user interface model.
@@ -551,6 +556,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			paths = append(paths, f.LatestVersion.Path)
 		}
 		cmds = append(cmds, m.startLSPs(paths))
+
+	case reloadSessionMessagesMsg:
+		if cmd := m.setSessionMessages(msg.messages); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 
 	case sendMessageMsg:
 		cmds = append(cmds, m.sendMessage(msg.Content, msg.Attachments...))
@@ -983,6 +993,22 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	return tea.Sequence(cmds...)
 }
 
+// reloadSessionMessages reloads the messages for the current session.
+func (m *UI) reloadSessionMessages() tea.Cmd {
+	return func() tea.Msg {
+		if !m.hasSession() {
+			return nil
+		}
+
+		msgs, err := m.com.Workspace.ListMessages(context.Background(), m.session.ID)
+		if err != nil {
+			return util.ReportError(err)
+		}
+
+		return reloadSessionMessagesMsg{messages: msgs}
+	}
+}
+
 // loadNestedToolCalls recursively loads nested tool calls for agent/agentic_fetch tools.
 func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
 	for _, item := range items {
@@ -1371,6 +1397,13 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		if cmd := m.newSession(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionUndo:
+		if m.isAgentBusy() {
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before undoing..."))
+			break
+		}
+		cmds = append(cmds, m.handleUndoCommand())
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSummarize:
 		if m.isAgentBusy() {
@@ -3120,6 +3153,43 @@ func (m *UI) refreshStyles() {
 	m.todoSpinner.Style = t.Pills.TodoSpinner
 	m.status.help.Styles = t.Help
 	m.chat.InvalidateRenderCaches()
+}
+
+// handleUndoCommand deletes the last user message and all messages after it.
+func (m *UI) handleUndoCommand() tea.Cmd {
+	return func() tea.Msg {
+		if !m.hasSession() {
+			return util.ReportWarn("No active session to undo")
+		}
+
+		ctx := context.Background()
+
+		// Get user messages ordered by created_at DESC
+		userMessages, err := m.com.Workspace.ListUserMessages(ctx, m.session.ID)
+		if err != nil {
+			return util.ReportError(fmt.Errorf("Failed to list messages: %w", err))
+		}
+
+		if len(userMessages) == 0 {
+			return util.ReportWarn("No messages to undo")
+		}
+
+		// Get the last user message (first in DESC order)
+		lastUserMessage := userMessages[0]
+
+		// Delete the last user message and all messages after it
+		err = m.com.Workspace.DeleteMessagesAfter(ctx, m.session.ID, lastUserMessage.ID)
+		if err != nil {
+			return util.ReportError(fmt.Errorf("Failed to undo: %w", err))
+		}
+
+		// Reload session messages to reflect the changes in UI
+		msgs, err := m.com.Workspace.ListMessages(ctx, m.session.ID)
+		if err != nil {
+			return util.ReportError(fmt.Errorf("Failed to reload messages: %w", err))
+		}
+		return reloadSessionMessagesMsg{messages: msgs}
+	}
 }
 
 // sendMessage sends a message with the given content and attachments.

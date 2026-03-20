@@ -157,6 +157,10 @@ func (w *ClientWorkspace) ListAllUserMessages(ctx context.Context) ([]message.Me
 	return protoToMessages(msgs), nil
 }
 
+func (w *ClientWorkspace) DeleteMessagesAfter(ctx context.Context, sessionID, messageID string) error {
+	return w.client.DeleteMessagesAfter(ctx, w.workspaceID(), sessionID, messageID)
+}
+
 // -- Agent --
 
 func (w *ClientWorkspace) AgentRun(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) error {

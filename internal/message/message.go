@@ -30,6 +30,7 @@ type Service interface {
 	ListAllUserMessages(ctx context.Context) ([]Message, error)
 	Delete(ctx context.Context, id string) error
 	DeleteSessionMessages(ctx context.Context, sessionID string) error
+	DeleteMessagesAfter(ctx context.Context, sessionID, messageID string) error
 }
 
 type service struct {
@@ -109,6 +110,13 @@ func (s *service) DeleteSessionMessages(ctx context.Context, sessionID string) e
 		}
 	}
 	return nil
+}
+
+func (s *service) DeleteMessagesAfter(ctx context.Context, sessionID, messageID string) error {
+	return s.q.DeleteMessagesAfter(ctx, db.DeleteMessagesAfterParams{
+		SessionID: sessionID,
+		ID:        messageID,
+	})
 }
 
 func (s *service) Update(ctx context.Context, message Message) error {

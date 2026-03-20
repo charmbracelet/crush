@@ -73,6 +73,23 @@ func (q *Queries) DeleteMessage(ctx context.Context, id string) error {
 	return err
 }
 
+const deleteMessagesAfter = `-- name: DeleteMessagesAfter :exec
+DELETE FROM messages AS target
+WHERE target.session_id = ? AND target.created_at >= (
+    SELECT m.created_at FROM messages AS m WHERE m.id = ?
+)
+`
+
+type DeleteMessagesAfterParams struct {
+	SessionID string `json:"session_id"`
+	ID        string `json:"id"`
+}
+
+func (q *Queries) DeleteMessagesAfter(ctx context.Context, arg DeleteMessagesAfterParams) error {
+	_, err := q.exec(ctx, q.deleteMessagesAfterStmt, deleteMessagesAfter, arg.SessionID, arg.ID)
+	return err
+}
+
 const deleteSessionMessages = `-- name: DeleteSessionMessages :exec
 DELETE FROM messages
 WHERE session_id = ?

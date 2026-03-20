@@ -65,6 +65,8 @@ type Service interface {
 	// message known to the service. Intended for shutdown and
 	// session-switch paths.
 	FlushAll(ctx context.Context) error
+
+	DeleteMessagesAfter(ctx context.Context, sessionID, messageID string) error
 }
 
 // pendingState holds the in-memory coalescing buffer for a single
@@ -209,6 +211,15 @@ func (s *service) DeleteSessionMessages(ctx context.Context, sessionID string) e
 		}
 	}
 	return nil
+}
+
+// DeleteMessagesAfter deletes all messages in the session at or after the
+// given message ID.
+func (s *service) DeleteMessagesAfter(ctx context.Context, sessionID, messageID string) error {
+	return s.q.DeleteMessagesAfter(ctx, db.DeleteMessagesAfterParams{
+		SessionID: sessionID,
+		ID:        messageID,
+	})
 }
 
 // Update accepts a new state for a message and either flushes

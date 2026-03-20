@@ -96,6 +96,8 @@ type (
 	ActionEnableDockerMCP struct{}
 	// ActionDisableDockerMCP is a message to disable Docker MCP.
 	ActionDisableDockerMCP struct{}
+	// ActionUndo is a message to undo the last user message and all subsequent messages.
+	ActionUndo struct{}
 )
 
 // Messages for API key input dialog.

@@ -696,6 +696,19 @@ func (c *Client) ListAllUserMessages(ctx context.Context, id string) ([]proto.Me
 	return msgs, nil
 }
 
+// DeleteMessagesAfter deletes messages in a session from the given message ID onward.
+func (c *Client) DeleteMessagesAfter(ctx context.Context, id string, sessionID string, messageID string) error {
+	rsp, err := c.delete(ctx, fmt.Sprintf("/workspaces/%s/sessions/%s/messages/%s", id, sessionID, messageID), nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to delete messages after: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to delete messages after: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
 // CancelAgentSession cancels an ongoing agent operation for a session.
 func (c *Client) CancelAgentSession(ctx context.Context, id string, sessionID string) error {
 	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent/sessions/%s/cancel", id, sessionID), nil, nil, nil)

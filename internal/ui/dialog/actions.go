@@ -45,19 +45,21 @@ type ActionSelectModel struct {
 
 // Messages for commands
 type (
-	ActionNewSession        struct{}
-	ActionToggleHelp        struct{}
-	ActionToggleCompactMode struct{}
-	ActionToggleThinking    struct{}
-	ActionTogglePills       struct{}
-	ActionExternalEditor    struct{}
-	ActionToggleYoloMode    struct{}
-	// ActionInitializeProject is a message to initialize a project.
-	ActionInitializeProject struct{}
-	ActionSummarize         struct {
+	ActionNewSession                  struct{}
+	ActionToggleHelp                  struct{}
+	ActionToggleCompactMode           struct{}
+	ActionToggleThinking              struct{}
+	ActionTogglePills                 struct{}
+	ActionExternalEditor              struct{}
+	ActionToggleYoloMode              struct{}
+	ActionToggleNotifications         struct{}
+	ActionToggleTransparentBackground struct{}
+	ActionInitializeProject           struct{}
+	ActionSummarize                   struct {
 		SessionID string
 	}
-	// ActionSelectReasoningEffort is a message indicating a reasoning effort has been selected.
+	// ActionSelectReasoningEffort is a message indicating a reasoning effort
+	// has been selected.
 	ActionSelectReasoningEffort struct {
 		Effort string
 	}
@@ -86,6 +88,10 @@ type (
 		Handler   plugin.PluginCommandHandler
 		PluginApp *plugin.App
 	}
+	// ActionEnableDockerMCP is a message to enable Docker MCP.
+	ActionEnableDockerMCP struct{}
+	// ActionDisableDockerMCP is a message to disable Docker MCP.
+	ActionDisableDockerMCP struct{}
 )
 
 // Messages for API key input dialog.

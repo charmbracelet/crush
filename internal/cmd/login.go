@@ -52,16 +52,16 @@ crush login copilot
 		}
 		switch provider {
 		case "hyper":
-			return loginHyper(app.Config())
+			return loginHyper(app.Store())
 		case "copilot", "github", "github-copilot":
-			return loginCopilot(app.Config())
+			return loginCopilot(app.Store())
 		default:
 			return fmt.Errorf("unknown platform: %s", args[0])
 		}
 	},
 }
 
-func loginHyper(cfg *config.Config) error {
+func loginHyper(cfg *config.ConfigStore) error {
 	if !hyperp.Enabled() {
 		return fmt.Errorf("hyper not enabled")
 	}
@@ -112,8 +112,8 @@ func loginHyper(cfg *config.Config) error {
 	}
 
 	if err := cmp.Or(
-		cfg.SetConfigField("providers.hyper.api_key", token.AccessToken),
-		cfg.SetConfigField("providers.hyper.oauth", token),
+		cfg.SetConfigField(config.ScopeGlobal, "providers.hyper.api_key", token.AccessToken),
+		cfg.SetConfigField(config.ScopeGlobal, "providers.hyper.oauth", token),
 	); err != nil {
 		return err
 	}
@@ -123,10 +123,10 @@ func loginHyper(cfg *config.Config) error {
 	return nil
 }
 
-func loginCopilot(cfg *config.Config) error {
+func loginCopilot(cfg *config.ConfigStore) error {
 	ctx := getLoginContext()
 
-	if cfg.HasConfigField("providers.copilot.oauth") {
+	if cfg.HasConfigField(config.ScopeGlobal, "providers.copilot.oauth") {
 		fmt.Println("You are already logged in to GitHub Copilot.")
 		return nil
 	}
@@ -177,8 +177,8 @@ func loginCopilot(cfg *config.Config) error {
 	}
 
 	if err := cmp.Or(
-		cfg.SetConfigField("providers.copilot.api_key", token.AccessToken),
-		cfg.SetConfigField("providers.copilot.oauth", token),
+		cfg.SetConfigField(config.ScopeGlobal, "providers.copilot.api_key", token.AccessToken),
+		cfg.SetConfigField(config.ScopeGlobal, "providers.copilot.oauth", token),
 	); err != nil {
 		return err
 	}

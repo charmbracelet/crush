@@ -45,6 +45,7 @@ func init() {
 
 	rootCmd.AddCommand(
 		runCmd,
+		serveCmd,
 		dirsCmd,
 		projectsCmd,
 		updateProvidersCmd,

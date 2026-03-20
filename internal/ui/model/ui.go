@@ -3481,9 +3481,7 @@ func (m *UI) enableDockerMCP() tea.Msg {
 func (m *UI) disableDockerMCP() tea.Msg {
 	store := m.com.Store()
 	// Close the Docker MCP client.
-	if err := mcp.DisableSingle(store, config.DockerMCPName); err != nil {
-		return util.ReportError(fmt.Errorf("failed to disable docker MCP: %w", err))()
-	}
+	mcp.DisableSingle(store, config.DockerMCPName)
 
 	// Remove from config and persist.
 	if err := store.DisableDockerMCP(); err != nil {

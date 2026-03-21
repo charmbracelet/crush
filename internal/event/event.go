@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/posthog/posthog-go"
@@ -15,6 +16,10 @@ import (
 const (
 	endpoint = "https://data.charm.land"
 	key      = "phc_4zt4VgDWLqbYnJYEwLRxFoaTL2noNrQij0C6E8k3I0V"
+
+	nonInteractiveAttrName      = "NonInteractive"
+	continueSessionByIDAttrName = "ContinueSessionByID"
+	continueLastSessionAttrName = "ContinueLastSession"
 )
 
 var (
@@ -27,17 +32,26 @@ var (
 			Set("SHELL", filepath.Base(os.Getenv("SHELL"))).
 			Set("Version", version.Version).
 			Set("GoVersion", runtime.Version()).
-			Set("Interactive", false)
+			Set(nonInteractiveAttrName, false)
 )
 
-func SetInteractive(interactive bool) {
-	baseProps = baseProps.Set("interactive", interactive)
+func SetNonInteractive(nonInteractive bool) {
+	baseProps = baseProps.Set(nonInteractiveAttrName, nonInteractive)
+}
+
+func SetContinueBySessionID(continueBySessionID bool) {
+	baseProps = baseProps.Set(continueSessionByIDAttrName, continueBySessionID)
+}
+
+func SetContinueLastSession(continueLastSession bool) {
+	baseProps = baseProps.Set(continueLastSessionAttrName, continueLastSession)
 }
 
 func Init() {
 	c, err := posthog.NewWithConfig(key, posthog.Config{
-		Endpoint: endpoint,
-		Logger:   logger{},
+		Endpoint:        endpoint,
+		Logger:          logger{},
+		ShutdownTimeout: 500 * time.Millisecond,
 	})
 	if err != nil {
 		slog.Error("Failed to initialize PostHog client", "error", err)
@@ -79,23 +93,20 @@ func send(event string, props ...any) {
 }
 
 // Error logs an error event to PostHog with the error type and message.
-func Error(err any, props ...any) {
-	if client == nil {
+func Error(errToLog any, props ...any) {
+	if client == nil || distinctId == "" || errToLog == nil {
 		return
 	}
-	// The PostHog Go client does not yet support sending exceptions.
-	// We're mimicking the behavior by sending the minimal info required
-	// for PostHog to recognize this as an exception event.
-	props = append(
-		[]any{
-			"$exception_list",
-			[]map[string]string{
-				{"type": reflect.TypeOf(err).String(), "value": fmt.Sprintf("%v", err)},
-			},
-		},
-		props...,
-	)
-	send("$exception", props...)
+	posthogErr := client.Enqueue(posthog.NewDefaultException(
+		time.Now(),
+		distinctId,
+		reflect.TypeOf(errToLog).String(),
+		fmt.Sprintf("%v", errToLog),
+	))
+	if posthogErr != nil {
+		slog.Error("Failed to enqueue PostHog error", "err", errToLog, "props", props, "posthogErr", posthogErr)
+		return
+	}
 }
 
 func Flush() {

@@ -25,10 +25,14 @@ type File struct {
 	UpdatedAt int64
 }
 
+// Service manages file versions and history for sessions.
 type Service interface {
 	pubsub.Subscriber[File]
 	Create(ctx context.Context, sessionID, path, content string) (File, error)
+
+	// CreateVersion creates a new version of a file.
 	CreateVersion(ctx context.Context, sessionID, path, content string) (File, error)
+
 	Get(ctx context.Context, id string) (File, error)
 	GetByPathAndSession(ctx context.Context, path, sessionID string) (File, error)
 	ListBySession(ctx context.Context, sessionID string) ([]File, error)
@@ -55,6 +59,9 @@ func (s *service) Create(ctx context.Context, sessionID, path, content string) (
 	return s.createWithVersion(ctx, sessionID, path, content, InitialVersion)
 }
 
+// CreateVersion creates a new version of a file with auto-incremented version
+// number. If no previous versions exist for the path, it creates the initial
+// version. The provided content is stored as the new version.
 func (s *service) CreateVersion(ctx context.Context, sessionID, path, content string) (File, error) {
 	// Get the latest version for this path
 	files, err := s.q.ListFilesByPath(ctx, path)

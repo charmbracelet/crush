@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
+	"github.com/zeebo/xxh3"
 )
 
 type TodoStatus string
@@ -22,10 +23,27 @@ const (
 	TodoStatusCompleted  TodoStatus = "completed"
 )
 
+// HashID returns the XXH3 hash of a session ID (UUID) as a hex string.
+func HashID(id string) string {
+	h := xxh3.New()
+	h.WriteString(id)
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
 type Todo struct {
 	Content    string     `json:"content"`
 	Status     TodoStatus `json:"status"`
 	ActiveForm string     `json:"active_form"`
+}
+
+// HasIncompleteTodos returns true if there are any non-completed todos.
+func HasIncompleteTodos(todos []Todo) bool {
+	for _, todo := range todos {
+		if todo.Status != TodoStatusCompleted {
+			return true
+		}
+	}
+	return false
 }
 
 type Session struct {
@@ -48,9 +66,11 @@ type Service interface {
 	CreateTitleSession(ctx context.Context, parentSessionID string) (Session, error)
 	CreateTaskSession(ctx context.Context, toolCallID, parentSessionID, title string) (Session, error)
 	Get(ctx context.Context, id string) (Session, error)
+	GetLast(ctx context.Context) (Session, error)
 	List(ctx context.Context) ([]Session, error)
 	Save(ctx context.Context, session Session) (Session, error)
 	UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error
+	Rename(ctx context.Context, id string, title string) error
 	Delete(ctx context.Context, id string) error
 
 	// Agent tool session management
@@ -61,7 +81,8 @@ type Service interface {
 
 type service struct {
 	*pubsub.Broker[Session]
-	q db.Querier
+	db *sql.DB
+	q  *db.Queries
 }
 
 func (s *service) Create(ctx context.Context, title string) (Session, error) {
@@ -107,14 +128,32 @@ func (s *service) CreateTitleSession(ctx context.Context, parentSessionID string
 }
 
 func (s *service) Delete(ctx context.Context, id string) error {
-	session, err := s.Get(ctx, id)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	qtx := s.q.WithTx(tx)
+
+	dbSession, err := qtx.GetSessionByID(ctx, id)
 	if err != nil {
 		return err
 	}
-	err = s.q.DeleteSession(ctx, session.ID)
-	if err != nil {
-		return err
+	if err = qtx.DeleteSessionMessages(ctx, dbSession.ID); err != nil {
+		return fmt.Errorf("deleting session messages: %w", err)
 	}
+	if err = qtx.DeleteSessionFiles(ctx, dbSession.ID); err != nil {
+		return fmt.Errorf("deleting session files: %w", err)
+	}
+	if err = qtx.DeleteSession(ctx, dbSession.ID); err != nil {
+		return fmt.Errorf("deleting session: %w", err)
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("committing transaction: %w", err)
+	}
+
+	session := s.fromDBItem(dbSession)
 	s.Publish(pubsub.DeletedEvent, session)
 	event.SessionDeleted()
 	return nil
@@ -122,6 +161,14 @@ func (s *service) Delete(ctx context.Context, id string) error {
 
 func (s *service) Get(ctx context.Context, id string) (Session, error) {
 	dbSession, err := s.q.GetSessionByID(ctx, id)
+	if err != nil {
+		return Session{}, err
+	}
+	return s.fromDBItem(dbSession), nil
+}
+
+func (s *service) GetLast(ctx context.Context) (Session, error) {
+	dbSession, err := s.q.GetLastSession(ctx)
 	if err != nil {
 		return Session{}, err
 	}
@@ -169,6 +216,15 @@ func (s *service) UpdateTitleAndUsage(ctx context.Context, sessionID, title stri
 	})
 }
 
+// Rename updates only the title of a session without touching updated_at or
+// usage fields.
+func (s *service) Rename(ctx context.Context, id string, title string) error {
+	return s.q.RenameSession(ctx, db.RenameSessionParams{
+		ID:    id,
+		Title: title,
+	})
+}
+
 func (s *service) List(ctx context.Context) ([]Session, error) {
 	dbSessions, err := s.q.ListSessions(ctx)
 	if err != nil {
@@ -184,7 +240,7 @@ func (s *service) List(ctx context.Context) ([]Session, error) {
 func (s service) fromDBItem(item db.Session) Session {
 	todos, err := unmarshalTodos(item.Todos.String)
 	if err != nil {
-		slog.Error("failed to unmarshal todos", "session_id", item.ID, "error", err)
+		slog.Error("Failed to unmarshal todos", "session_id", item.ID, "error", err)
 	}
 	return Session{
 		ID:               item.ID,
@@ -223,11 +279,12 @@ func unmarshalTodos(data string) ([]Todo, error) {
 	return todos, nil
 }
 
-func NewService(q db.Querier) Service {
+func NewService(q *db.Queries, conn *sql.DB) Service {
 	broker := pubsub.NewBroker[Session]()
 	return &service{
-		broker,
-		q,
+		Broker: broker,
+		db:     conn,
+		q:      q,
 	}
 }
 

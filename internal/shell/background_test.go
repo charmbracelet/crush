@@ -6,15 +6,17 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestBackgroundShellManager_Start(t *testing.T) {
 	t.Skip("Skipping this until I figure out why its flaky")
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	workingDir := t.TempDir()
-	manager := GetBackgroundShellManager()
+	manager := newBackgroundShellManager()
 
 	bgShell, err := manager.Start(ctx, workingDir, nil, "echo 'hello world'", "")
 	if err != nil {
@@ -49,9 +51,9 @@ func TestBackgroundShellManager_Start(t *testing.T) {
 func TestBackgroundShellManager_Get(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	workingDir := t.TempDir()
-	manager := GetBackgroundShellManager()
+	manager := newBackgroundShellManager()
 
 	bgShell, err := manager.Start(ctx, workingDir, nil, "echo 'test'", "")
 	if err != nil {
@@ -75,9 +77,9 @@ func TestBackgroundShellManager_Get(t *testing.T) {
 func TestBackgroundShellManager_Kill(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	workingDir := t.TempDir()
-	manager := GetBackgroundShellManager()
+	manager := newBackgroundShellManager()
 
 	// Start a long-running command
 	bgShell, err := manager.Start(ctx, workingDir, nil, "sleep 10", "")
@@ -106,7 +108,7 @@ func TestBackgroundShellManager_Kill(t *testing.T) {
 func TestBackgroundShellManager_KillNonExistent(t *testing.T) {
 	t.Parallel()
 
-	manager := GetBackgroundShellManager()
+	manager := newBackgroundShellManager()
 
 	err := manager.Kill("non-existent-id")
 	if err == nil {
@@ -117,9 +119,9 @@ func TestBackgroundShellManager_KillNonExistent(t *testing.T) {
 func TestBackgroundShell_IsDone(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	workingDir := t.TempDir()
-	manager := GetBackgroundShellManager()
+	manager := newBackgroundShellManager()
 
 	bgShell, err := manager.Start(ctx, workingDir, nil, "echo 'quick'", "")
 	if err != nil {
@@ -140,9 +142,9 @@ func TestBackgroundShell_IsDone(t *testing.T) {
 func TestBackgroundShell_WithBlockFuncs(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	workingDir := t.TempDir()
-	manager := GetBackgroundShellManager()
+	manager := newBackgroundShellManager()
 
 	blockFuncs := []BlockFunc{
 		CommandsBlocker([]string{"curl", "wget"}),
@@ -178,9 +180,9 @@ func TestBackgroundShellManager_List(t *testing.T) {
 
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	workingDir := t.TempDir()
-	manager := GetBackgroundShellManager()
+	manager := newBackgroundShellManager()
 
 	// Start two shells
 	bgShell1, err := manager.Start(ctx, workingDir, nil, "sleep 1", "")
@@ -222,9 +224,9 @@ func TestBackgroundShellManager_List(t *testing.T) {
 func TestBackgroundShellManager_KillAll(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	workingDir := t.TempDir()
-	manager := GetBackgroundShellManager()
+	manager := newBackgroundShellManager()
 
 	// Start multiple long-running shells
 	shell1, err := manager.Start(ctx, workingDir, nil, "sleep 10", "")
@@ -248,7 +250,7 @@ func TestBackgroundShellManager_KillAll(t *testing.T) {
 	}
 
 	// Kill all shells
-	manager.KillAll()
+	manager.KillAll(t.Context())
 
 	// Verify all shells are done
 	if !shell1.IsDone() {
@@ -279,4 +281,54 @@ func TestBackgroundShellManager_KillAll(t *testing.T) {
 			t.Errorf("shell %s should not be in list after KillAll", id)
 		}
 	}
+}
+
+func TestBackgroundShellManager_KillAll_Timeout(t *testing.T) {
+	t.Parallel()
+
+	// XXX: can't use synctest here - causes --race to trip.
+
+	workingDir := t.TempDir()
+	manager := newBackgroundShellManager()
+
+	// Start a shell that traps signals and ignores cancellation.
+	_, err := manager.Start(t.Context(), workingDir, nil, "trap '' TERM INT; sleep 60", "")
+	require.NoError(t, err)
+
+	// Short timeout to test the timeout path.
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	t.Cleanup(cancel)
+
+	start := time.Now()
+	manager.KillAll(ctx)
+
+	elapsed := time.Since(start)
+
+	// Must return promptly after timeout, not hang for 60 seconds.
+	require.Less(t, elapsed, 2*time.Second)
+}
+
+func TestBackgroundShell_WaitContext_Completed(t *testing.T) {
+	t.Parallel()
+
+	done := make(chan struct{})
+	close(done)
+
+	bgShell := &BackgroundShell{done: done}
+
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	t.Cleanup(cancel)
+
+	require.True(t, bgShell.WaitContext(ctx))
+}
+
+func TestBackgroundShell_WaitContext_Canceled(t *testing.T) {
+	t.Parallel()
+
+	bgShell := &BackgroundShell{done: make(chan struct{})}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	require.False(t, bgShell.WaitContext(ctx))
 }

@@ -3,28 +3,22 @@ package config
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/catwalk/pkg/catwalk"
-	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
+	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/oauth"
-	"github.com/charmbracelet/crush/internal/oauth/claude"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
-	"github.com/charmbracelet/crush/internal/oauth/hyper"
 	"github.com/invopop/jsonschema"
-	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 )
 
 const (
@@ -53,6 +47,11 @@ var defaultContextPaths = []string{
 }
 
 type SelectedModelType string
+
+// String returns the string representation of the [SelectedModelType].
+func (s SelectedModelType) String() string {
+	return string(s)
+}
 
 const (
 	SelectedModelTypeLarge SelectedModelType = "large"
@@ -155,21 +154,6 @@ func (pc *ProviderConfig) ToProvider() catwalk.Provider {
 	return provider
 }
 
-func (pc *ProviderConfig) SetupClaudeCode() {
-	pc.SystemPromptPrefix = "You are Claude Code, Anthropic's official CLI for Claude."
-	pc.ExtraHeaders["anthropic-version"] = "2023-06-01"
-
-	value := pc.ExtraHeaders["anthropic-beta"]
-	const want = "oauth-2025-04-20"
-	if !strings.Contains(value, want) {
-		if value != "" {
-			value += ","
-		}
-		value += want
-	}
-	pc.ExtraHeaders["anthropic-beta"] = value
-}
-
 func (pc *ProviderConfig) SetupGitHubCopilot() {
 	maps.Copy(pc.ExtraHeaders, copilot.Headers())
 }
@@ -198,13 +182,14 @@ type MCPConfig struct {
 
 type LSPConfig struct {
 	Disabled    bool              `json:"disabled,omitempty" jsonschema:"description=Whether this LSP server is disabled,default=false"`
-	Command     string            `json:"command,omitempty" jsonschema:"required,description=Command to execute for the LSP server,example=gopls"`
+	Command     string            `json:"command,omitempty" jsonschema:"description=Command to execute for the LSP server,example=gopls"`
 	Args        []string          `json:"args,omitempty" jsonschema:"description=Arguments to pass to the LSP server command"`
 	Env         map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set to the LSP server command"`
 	FileTypes   []string          `json:"filetypes,omitempty" jsonschema:"description=File types this LSP server handles,example=go,example=mod,example=rs,example=c,example=js,example=ts"`
 	RootMarkers []string          `json:"root_markers,omitempty" jsonschema:"description=Files or directories that indicate the project root,example=go.mod,example=package.json,example=Cargo.toml"`
 	InitOptions map[string]any    `json:"init_options,omitempty" jsonschema:"description=Initialization options passed to the LSP server during initialize request"`
 	Options     map[string]any    `json:"options,omitempty" jsonschema:"description=LSP server-specific settings passed during initialization"`
+	Timeout     int               `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for LSP server initialization,default=30,example=60,example=120"`
 }
 
 type TUIOptions struct {
@@ -214,6 +199,7 @@ type TUIOptions struct {
 	//
 
 	Completions Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
+	Transparent *bool       `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
 }
 
 // Completions defines options for the completions UI.
@@ -264,9 +250,13 @@ type Options struct {
 	DataDirectory             string       `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data (relative to working directory),default=.crush,example=.crush"` // Relative to the cwd
 	DisabledTools             []string     `json:"disabled_tools,omitempty" jsonschema:"description=List of built-in tools to disable and hide from the agent,example=bash,example=sourcegraph"`
 	DisableProviderAutoUpdate bool         `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`
+	DisableDefaultProviders   bool         `json:"disable_default_providers,omitempty" jsonschema:"description=Ignore all default/embedded providers. When enabled, providers must be fully specified in the config file with base_url, models, and api_key - no merging with defaults occurs,default=false"`
 	Attribution               *Attribution `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
 	DisableMetrics            bool         `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
 	InitializeAs              string       `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
+	AutoLSP                   *bool        `json:"auto_lsp,omitempty" jsonschema:"description=Automatically setup LSPs based on root markers,default=true"`
+	Progress                  *bool        `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
+	DisableNotifications      bool         `json:"disable_notifications,omitempty" jsonschema:"description=Disable desktop notifications,default=false"`
 }
 
 type MCPs map[string]MCPConfig
@@ -325,7 +315,7 @@ func (m MCPConfig) ResolvedHeaders() map[string]string {
 		var err error
 		m.Headers[e], err = resolver.ResolveValue(v)
 		if err != nil {
-			slog.Error("error resolving header variable", "error", err, "variable", e, "value", v)
+			slog.Error("Error resolving header variable", "error", err, "variable", e, "value", v)
 			continue
 		}
 	}
@@ -356,7 +346,8 @@ type Agent struct {
 }
 
 type Tools struct {
-	Ls ToolLs `json:"ls,omitzero"`
+	Ls   ToolLs   `json:"ls,omitzero"`
+	Grep ToolGrep `json:"grep,omitzero"`
 }
 
 type ToolLs struct {
@@ -364,8 +355,18 @@ type ToolLs struct {
 	MaxItems *int `json:"max_items,omitempty" jsonschema:"description=Maximum number of items to return for the ls tool,default=1000,example=100"`
 }
 
+// Limits returns the user-defined max-depth and max-items, or their defaults.
 func (t ToolLs) Limits() (depth, items int) {
 	return ptrValOr(t.MaxDepth, 0), ptrValOr(t.MaxItems, 0)
+}
+
+type ToolGrep struct {
+	Timeout *time.Duration `json:"timeout,omitempty" jsonschema:"description=Timeout for the grep tool call,default=5s,example=10s"`
+}
+
+// GetTimeout returns the user-defined timeout or the default.
+func (t ToolGrep) GetTimeout() time.Duration {
+	return ptrValOr(t.Timeout, 5*time.Second)
 }
 
 // Config holds the configuration for crush.
@@ -374,8 +375,9 @@ type Config struct {
 
 	// We currently only support large/small as values here.
 	Models map[SelectedModelType]SelectedModel `json:"models,omitempty" jsonschema:"description=Model configurations for different model types,example={\"large\":{\"model\":\"gpt-4o\",\"provider\":\"openai\"}}"`
+
 	// Recently used models stored in the data directory config.
-	RecentModels map[SelectedModelType][]SelectedModel `json:"recent_models,omitempty" jsonschema:"description=Recently used models sorted by most recent first"`
+	RecentModels map[SelectedModelType][]SelectedModel `json:"recent_models,omitempty" jsonschema:"-"`
 
 	// The providers that are configured
 	Providers *csync.Map[string, ProviderConfig] `json:"providers,omitempty" jsonschema:"description=AI provider configurations"`
@@ -391,17 +393,6 @@ type Config struct {
 	Tools Tools `json:"tools,omitzero" jsonschema:"description=Tool configurations"`
 
 	Agents map[string]Agent `json:"-"`
-
-	// Internal
-	workingDir string `json:"-"`
-	// TODO: find a better way to do this this should probably not be part of the config
-	resolver       VariableResolver
-	dataConfigDir  string             `json:"-"`
-	knownProviders []catwalk.Provider `json:"-"`
-}
-
-func (c *Config) WorkingDir() string {
-	return c.workingDir
 }
 
 func (c *Config) EnabledProviders() []ProviderConfig {
@@ -465,221 +456,7 @@ func (c *Config) SmallModel() *catwalk.Model {
 	return c.GetModel(model.Provider, model.Model)
 }
 
-func (c *Config) SetCompactMode(enabled bool) error {
-	if c.Options == nil {
-		c.Options = &Options{}
-	}
-	c.Options.TUI.CompactMode = enabled
-	return c.SetConfigField("options.tui.compact_mode", enabled)
-}
-
-func (c *Config) Resolve(key string) (string, error) {
-	if c.resolver == nil {
-		return "", fmt.Errorf("no variable resolver configured")
-	}
-	return c.resolver.ResolveValue(key)
-}
-
-func (c *Config) UpdatePreferredModel(modelType SelectedModelType, model SelectedModel) error {
-	c.Models[modelType] = model
-	if err := c.SetConfigField(fmt.Sprintf("models.%s", modelType), model); err != nil {
-		return fmt.Errorf("failed to update preferred model: %w", err)
-	}
-	if err := c.recordRecentModel(modelType, model); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (c *Config) HasConfigField(key string) bool {
-	data, err := os.ReadFile(c.dataConfigDir)
-	if err != nil {
-		return false
-	}
-	return gjson.Get(string(data), key).Exists()
-}
-
-func (c *Config) SetConfigField(key string, value any) error {
-	data, err := os.ReadFile(c.dataConfigDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			data = []byte("{}")
-		} else {
-			return fmt.Errorf("failed to read config file: %w", err)
-		}
-	}
-
-	newValue, err := sjson.Set(string(data), key, value)
-	if err != nil {
-		return fmt.Errorf("failed to set config field %s: %w", key, err)
-	}
-	if err := os.MkdirAll(filepath.Dir(c.dataConfigDir), 0o755); err != nil {
-		return fmt.Errorf("failed to create config directory %q: %w", c.dataConfigDir, err)
-	}
-	if err := os.WriteFile(c.dataConfigDir, []byte(newValue), 0o600); err != nil {
-		return fmt.Errorf("failed to write config file: %w", err)
-	}
-	return nil
-}
-
-// RefreshOAuthToken refreshes the OAuth token for the given provider.
-func (c *Config) RefreshOAuthToken(ctx context.Context, providerID string) error {
-	providerConfig, exists := c.Providers.Get(providerID)
-	if !exists {
-		return fmt.Errorf("provider %s not found", providerID)
-	}
-
-	if providerConfig.OAuthToken == nil {
-		return fmt.Errorf("provider %s does not have an OAuth token", providerID)
-	}
-
-	var newToken *oauth.Token
-	var refreshErr error
-	switch providerID {
-	case string(catwalk.InferenceProviderAnthropic):
-		newToken, refreshErr = claude.RefreshToken(ctx, providerConfig.OAuthToken.RefreshToken)
-	case string(catwalk.InferenceProviderCopilot):
-		newToken, refreshErr = copilot.RefreshToken(ctx, providerConfig.OAuthToken.RefreshToken)
-	case hyperp.Name:
-		newToken, refreshErr = hyper.ExchangeToken(ctx, providerConfig.OAuthToken.RefreshToken)
-	default:
-		return fmt.Errorf("OAuth refresh not supported for provider %s", providerID)
-	}
-	if refreshErr != nil {
-		return fmt.Errorf("failed to refresh OAuth token for provider %s: %w", providerID, refreshErr)
-	}
-
-	slog.Info("Successfully refreshed OAuth token", "provider", providerID)
-	providerConfig.OAuthToken = newToken
-	providerConfig.APIKey = newToken.AccessToken
-
-	switch providerID {
-	case string(catwalk.InferenceProviderAnthropic):
-		providerConfig.SetupClaudeCode()
-	case string(catwalk.InferenceProviderCopilot):
-		providerConfig.SetupGitHubCopilot()
-	}
-
-	c.Providers.Set(providerID, providerConfig)
-
-	if err := cmp.Or(
-		c.SetConfigField(fmt.Sprintf("providers.%s.api_key", providerID), newToken.AccessToken),
-		c.SetConfigField(fmt.Sprintf("providers.%s.oauth", providerID), newToken),
-	); err != nil {
-		return fmt.Errorf("failed to persist refreshed token: %w", err)
-	}
-
-	return nil
-}
-
-func (c *Config) SetProviderAPIKey(providerID string, apiKey any) error {
-	var providerConfig ProviderConfig
-	var exists bool
-	var setKeyOrToken func()
-
-	switch v := apiKey.(type) {
-	case string:
-		if err := c.SetConfigField(fmt.Sprintf("providers.%s.api_key", providerID), v); err != nil {
-			return fmt.Errorf("failed to save api key to config file: %w", err)
-		}
-		setKeyOrToken = func() { providerConfig.APIKey = v }
-	case *oauth.Token:
-		if err := cmp.Or(
-			c.SetConfigField(fmt.Sprintf("providers.%s.api_key", providerID), v.AccessToken),
-			c.SetConfigField(fmt.Sprintf("providers.%s.oauth", providerID), v),
-		); err != nil {
-			return err
-		}
-		setKeyOrToken = func() {
-			providerConfig.APIKey = v.AccessToken
-			providerConfig.OAuthToken = v
-			switch providerID {
-			case string(catwalk.InferenceProviderAnthropic):
-				providerConfig.SetupClaudeCode()
-			case string(catwalk.InferenceProviderCopilot):
-				providerConfig.SetupGitHubCopilot()
-			}
-		}
-	}
-
-	providerConfig, exists = c.Providers.Get(providerID)
-	if exists {
-		setKeyOrToken()
-		c.Providers.Set(providerID, providerConfig)
-		return nil
-	}
-
-	var foundProvider *catwalk.Provider
-	for _, p := range c.knownProviders {
-		if string(p.ID) == providerID {
-			foundProvider = &p
-			break
-		}
-	}
-
-	if foundProvider != nil {
-		// Create new provider config based on known provider
-		providerConfig = ProviderConfig{
-			ID:           providerID,
-			Name:         foundProvider.Name,
-			BaseURL:      foundProvider.APIEndpoint,
-			Type:         foundProvider.Type,
-			Disable:      false,
-			ExtraHeaders: make(map[string]string),
-			ExtraParams:  make(map[string]string),
-			Models:       foundProvider.Models,
-		}
-		setKeyOrToken()
-	} else {
-		return fmt.Errorf("provider with ID %s not found in known providers", providerID)
-	}
-	// Store the updated provider config
-	c.Providers.Set(providerID, providerConfig)
-	return nil
-}
-
 const maxRecentModelsPerType = 5
-
-func (c *Config) recordRecentModel(modelType SelectedModelType, model SelectedModel) error {
-	if model.Provider == "" || model.Model == "" {
-		return nil
-	}
-
-	if c.RecentModels == nil {
-		c.RecentModels = make(map[SelectedModelType][]SelectedModel)
-	}
-
-	eq := func(a, b SelectedModel) bool {
-		return a.Provider == b.Provider && a.Model == b.Model
-	}
-
-	entry := SelectedModel{
-		Provider: model.Provider,
-		Model:    model.Model,
-	}
-
-	current := c.RecentModels[modelType]
-	withoutCurrent := slices.DeleteFunc(slices.Clone(current), func(existing SelectedModel) bool {
-		return eq(existing, entry)
-	})
-
-	updated := append([]SelectedModel{entry}, withoutCurrent...)
-	if len(updated) > maxRecentModelsPerType {
-		updated = updated[:maxRecentModelsPerType]
-	}
-
-	if slices.EqualFunc(current, updated, eq) {
-		return nil
-	}
-
-	c.RecentModels[modelType] = updated
-
-	if err := c.SetConfigField(fmt.Sprintf("recent_models.%s", modelType), updated); err != nil {
-		return fmt.Errorf("failed to persist recent models: %w", err)
-	}
-
-	return nil
-}
 
 func allToolNames() []string {
 	return []string{
@@ -692,6 +469,7 @@ func allToolNames() []string {
 		"multiedit",
 		"lsp_diagnostics",
 		"lsp_references",
+		"lsp_restart",
 		"fetch",
 		"agentic_fetch",
 		"glob",
@@ -701,6 +479,8 @@ func allToolNames() []string {
 		"todos",
 		"view",
 		"write",
+		"list_mcp_resources",
+		"read_mcp_resource",
 	}
 }
 
@@ -719,7 +499,7 @@ func resolveReadOnlyTools(tools []string) []string {
 }
 
 func filterSlice(data []string, mask []string, include bool) []string {
-	filtered := []string{}
+	var filtered []string
 	for _, s := range data {
 		// if include is true, we include items that ARE in the mask
 		// if include is false, we include items that are NOT in the mask
@@ -744,7 +524,7 @@ func (c *Config) SetupAgents() {
 		},
 
 		AgentTask: {
-			ID:           AgentCoder,
+			ID:           AgentTask,
 			Name:         "Task",
 			Description:  "An agent that helps with searching for context and finding implementation details.",
 			Model:        SelectedModelTypeLarge,
@@ -757,47 +537,73 @@ func (c *Config) SetupAgents() {
 	c.Agents = agents
 }
 
-func (c *Config) Resolver() VariableResolver {
-	return c.resolver
-}
-
 func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
-	testURL := ""
-	headers := make(map[string]string)
-	apiKey, _ := resolver.ResolveValue(c.APIKey)
+	var (
+		providerID = catwalk.InferenceProvider(c.ID)
+		testURL    = ""
+		headers    = make(map[string]string)
+		apiKey, _  = resolver.ResolveValue(c.APIKey)
+	)
+
+	switch providerID {
+	case catwalk.InferenceProviderMiniMax, catwalk.InferenceProviderMiniMaxChina:
+		// NOTE: MiniMax has no good endpoint we can use to validate the API key.
+		// Let's at least check the pattern.
+		if !strings.HasPrefix(apiKey, "sk-") {
+			return fmt.Errorf("invalid API key format for provider %s", c.ID)
+		}
+		return nil
+	}
+
 	switch c.Type {
 	case catwalk.TypeOpenAI, catwalk.TypeOpenAICompat, catwalk.TypeOpenRouter:
 		baseURL, _ := resolver.ResolveValue(c.BaseURL)
-		if baseURL == "" {
-			baseURL = "https://api.openai.com/v1"
-		}
-		if c.ID == string(catwalk.InferenceProviderOpenRouter) {
+		baseURL = cmp.Or(baseURL, "https://api.openai.com/v1")
+
+		switch providerID {
+		case catwalk.InferenceProviderOpenRouter:
 			testURL = baseURL + "/credits"
-		} else {
+		default:
 			testURL = baseURL + "/models"
 		}
+
 		headers["Authorization"] = "Bearer " + apiKey
 	case catwalk.TypeAnthropic:
 		baseURL, _ := resolver.ResolveValue(c.BaseURL)
-		if baseURL == "" {
-			baseURL = "https://api.anthropic.com/v1"
-		}
-		testURL = baseURL + "/models"
-		// TODO: replace with const when catwalk is released
-		if c.ID == "kimi-coding" {
+		baseURL = cmp.Or(baseURL, "https://api.anthropic.com/v1")
+
+		switch providerID {
+		case catwalk.InferenceKimiCoding:
 			testURL = baseURL + "/v1/models"
+		default:
+			testURL = baseURL + "/models"
 		}
+
 		headers["x-api-key"] = apiKey
 		headers["anthropic-version"] = "2023-06-01"
 	case catwalk.TypeGoogle:
 		baseURL, _ := resolver.ResolveValue(c.BaseURL)
-		if baseURL == "" {
-			baseURL = "https://generativelanguage.googleapis.com"
-		}
+		baseURL = cmp.Or(baseURL, "https://generativelanguage.googleapis.com")
 		testURL = baseURL + "/v1beta/models?key=" + url.QueryEscape(apiKey)
+	case catwalk.TypeBedrock:
+		// NOTE: Bedrock has a `/foundation-models` endpoint that we could in
+		// theory use, but apparently the authorization is region-specific,
+		// so it's not so trivial.
+		if strings.HasPrefix(apiKey, "ABSK") { // Bedrock API keys
+			return nil
+		}
+		return errors.New("not a valid bedrock api key")
+	case catwalk.TypeVercel:
+		// NOTE: Vercel does not validate API keys on the `/models` endpoint.
+		if strings.HasPrefix(apiKey, "vck_") { // Vercel API keys
+			return nil
+		}
+		return errors.New("not a valid vercel api key")
 	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
 	client := &http.Client{}
 	req, err := http.NewRequestWithContext(ctx, "GET", testURL, nil)
 	if err != nil {
@@ -809,21 +615,23 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	for k, v := range c.ExtraHeaders {
 		req.Header.Set(k, v)
 	}
-	b, err := client.Do(req)
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to create request for provider %s: %w", c.ID, err)
 	}
-	if c.ID == string(catwalk.InferenceProviderZAI) {
-		if b.StatusCode == http.StatusUnauthorized {
-			// for z.ai just check if the http response is not 401
-			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, b.Status)
+	defer resp.Body.Close()
+
+	switch providerID {
+	case catwalk.InferenceProviderZAI:
+		if resp.StatusCode == http.StatusUnauthorized {
+			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, resp.Status)
 		}
-	} else {
-		if b.StatusCode != http.StatusOK {
-			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, b.Status)
+	default:
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, resp.Status)
 		}
 	}
-	_ = b.Body.Close()
 	return nil
 }
 
@@ -833,7 +641,7 @@ func resolveEnvs(envs map[string]string) []string {
 		var err error
 		envs[e], err = resolver.ResolveValue(v)
 		if err != nil {
-			slog.Error("error resolving environment variable", "error", err, "variable", e, "value", v)
+			slog.Error("Error resolving environment variable", "error", err, "variable", e, "value", v)
 			continue
 		}
 	}

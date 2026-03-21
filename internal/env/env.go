@@ -2,7 +2,6 @@ package env
 
 import (
 	"os"
-	"testing"
 )
 
 type Env interface {
@@ -18,17 +17,10 @@ func (o *osEnv) Get(key string) string {
 }
 
 func (o *osEnv) Env() []string {
-	env := os.Environ()
-	if len(env) == 0 {
-		return nil
-	}
-	return env
+	return os.Environ()
 }
 
 func New() Env {
-	if testing.Testing() {
-		return NewFromMap(nil)
-	}
 	return &osEnv{}
 }
 
@@ -46,9 +38,6 @@ func (m *mapEnv) Get(key string) string {
 
 // Env implements Env.
 func (m *mapEnv) Env() []string {
-	if len(m.m) == 0 {
-		return nil
-	}
 	env := make([]string, 0, len(m.m))
 	for k, v := range m.m {
 		env = append(env, k+"="+v)

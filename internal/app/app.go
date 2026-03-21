@@ -15,13 +15,16 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/agent"
+	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/event"
+	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/format"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/log"
@@ -31,8 +34,8 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
-	"github.com/charmbracelet/crush/internal/tui/components/anim"
-	"github.com/charmbracelet/crush/internal/tui/styles"
+	"github.com/charmbracelet/crush/internal/ui/anim"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/update"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/x/ansi"
@@ -40,17 +43,25 @@ import (
 	"github.com/charmbracelet/x/term"
 )
 
+// UpdateAvailableMsg is sent when a new version is available.
+type UpdateAvailableMsg struct {
+	CurrentVersion string
+	LatestVersion  string
+	IsDevelopment  bool
+}
+
 type App struct {
 	Sessions    session.Service
 	Messages    message.Service
 	History     history.Service
 	Permissions permission.Service
+	FileTracker filetracker.Service
 
 	AgentCoordinator agent.Coordinator
 
-	LSPClients *csync.Map[string, *lsp.Client]
+	LSPManager *lsp.Manager
 
-	config *config.Config
+	config *config.ConfigStore
 
 	serviceEventsWG *sync.WaitGroup
 	eventsCtx       context.Context
@@ -58,16 +69,18 @@ type App struct {
 	tuiWG           *sync.WaitGroup
 
 	// global context and cleanup functions
-	globalCtx    context.Context
-	cleanupFuncs []func() error
+	globalCtx          context.Context
+	cleanupFuncs       []func(context.Context) error
+	agentNotifications *pubsub.Broker[notify.Notification]
 }
 
 // New initializes a new application instance.
-func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
+func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, error) {
 	q := db.New(conn)
-	sessions := session.NewService(q)
+	sessions := session.NewService(q, conn)
 	messages := message.NewService(q)
 	files := history.NewService(q, conn)
+	cfg := store.Config()
 	skipPermissionsRequests := cfg.Permissions != nil && cfg.Permissions.SkipRequests
 	var allowedTools []string
 	if cfg.Permissions != nil && cfg.Permissions.AllowedTools != nil {
@@ -78,33 +91,33 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 		Sessions:    sessions,
 		Messages:    messages,
 		History:     files,
-		Permissions: permission.NewPermissionService(cfg.WorkingDir(), skipPermissionsRequests, allowedTools),
-		LSPClients:  csync.NewMap[string, *lsp.Client](),
+		Permissions: permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools),
+		FileTracker: filetracker.NewService(q),
+		LSPManager:  lsp.NewManager(store),
 
 		globalCtx: ctx,
 
-		config: cfg,
+		config: store,
 
-		events:          make(chan tea.Msg, 100),
-		serviceEventsWG: &sync.WaitGroup{},
-		tuiWG:           &sync.WaitGroup{},
+		events:             make(chan tea.Msg, 100),
+		serviceEventsWG:    &sync.WaitGroup{},
+		tuiWG:              &sync.WaitGroup{},
+		agentNotifications: pubsub.NewBroker[notify.Notification](),
 	}
 
 	app.setupEvents()
 
-	// Initialize LSP clients in the background.
-	app.initLSPClients(ctx)
-
 	// Check for updates in the background.
 	go app.checkForUpdates(ctx)
 
-	go func() {
-		slog.Info("Initializing MCP clients")
-		mcp.Initialize(ctx, app.Permissions, cfg)
-	}()
+	go mcp.Initialize(ctx, app.Permissions, store)
 
 	// cleanup database upon app shutdown
-	app.cleanupFuncs = append(app.cleanupFuncs, conn.Close, mcp.Close)
+	app.cleanupFuncs = append(
+		app.cleanupFuncs,
+		func(context.Context) error { return conn.Close() },
+		func(ctx context.Context) error { return mcp.Close(ctx) },
+	)
 
 	// TODO: remove the concept of agent config, most likely.
 	if !cfg.IsConfigured() {
@@ -114,27 +127,87 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 	if err := app.InitCoderAgent(ctx); err != nil {
 		return nil, fmt.Errorf("failed to initialize coder agent: %w", err)
 	}
+
+	// Set up callback for LSP state updates.
+	app.LSPManager.SetCallback(func(name string, client *lsp.Client) {
+		if client == nil {
+			updateLSPState(name, lsp.StateUnstarted, nil, nil, 0)
+			return
+		}
+		client.SetDiagnosticsCallback(updateLSPDiagnostics)
+		updateLSPState(name, client.GetServerState(), nil, client, 0)
+	})
+	go app.LSPManager.TrackConfigured()
+
 	return app, nil
 }
 
-// Config returns the application configuration.
+// Config returns the pure-data configuration.
 func (app *App) Config() *config.Config {
+	return app.config.Config()
+}
+
+// Store returns the config store.
+func (app *App) Store() *config.ConfigStore {
 	return app.config
+}
+
+// AgentNotifications returns the broker for agent notification events.
+func (app *App) AgentNotifications() *pubsub.Broker[notify.Notification] {
+	return app.agentNotifications
+}
+
+// resolveSession resolves which session to use for a non-interactive run
+// If continueSessionID is set, it looks up that session by ID
+// If useLast is set, it returns the most recently updated top-level session
+// Otherwise, it creates a new session
+func (app *App) resolveSession(ctx context.Context, continueSessionID string, useLast bool) (session.Session, error) {
+	switch {
+	case continueSessionID != "":
+		if app.Sessions.IsAgentToolSession(continueSessionID) {
+			return session.Session{}, fmt.Errorf("cannot continue an agent tool session: %s", continueSessionID)
+		}
+		sess, err := app.Sessions.Get(ctx, continueSessionID)
+		if err != nil {
+			return session.Session{}, fmt.Errorf("session not found: %s", continueSessionID)
+		}
+		if sess.ParentSessionID != "" {
+			return session.Session{}, fmt.Errorf("cannot continue a child session: %s", continueSessionID)
+		}
+		return sess, nil
+
+	case useLast:
+		sess, err := app.Sessions.GetLast(ctx)
+		if err != nil {
+			return session.Session{}, fmt.Errorf("no sessions found to continue")
+		}
+		return sess, nil
+
+	default:
+		return app.Sessions.Create(ctx, agent.DefaultSessionName)
+	}
 }
 
 // RunNonInteractive runs the application in non-interactive mode with the
 // given prompt, printing to stdout.
-func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt string, quiet bool) error {
+func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt, largeModel, smallModel string, hideSpinner bool, continueSessionID string, useLast bool) error {
 	slog.Info("Running in non-interactive mode")
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	if largeModel != "" || smallModel != "" {
+		if err := app.overrideModelsForNonInteractive(ctx, largeModel, smallModel); err != nil {
+			return fmt.Errorf("failed to override models: %w", err)
+		}
+	}
 
 	var (
 		spinner   *format.Spinner
 		stdoutTTY bool
 		stderrTTY bool
 		stdinTTY  bool
+		progress  bool
 	)
 
 	if f, ok := output.(*os.File); ok {
@@ -142,9 +215,10 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 	}
 	stderrTTY = term.IsTerminal(os.Stderr.Fd())
 	stdinTTY = term.IsTerminal(os.Stdin.Fd())
+	progress = app.config.Config().Options.Progress == nil || *app.config.Config().Options.Progress
 
-	if !quiet && stderrTTY {
-		t := styles.CurrentTheme()
+	if !hideSpinner && stderrTTY {
+		t := styles.DefaultStyles()
 
 		// Detect background color to set the appropriate color for the
 		// spinner's 'Generating...' text. Without this, that text would be
@@ -168,29 +242,32 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 
 	// Helper function to stop spinner once.
 	stopSpinner := func() {
-		if !quiet && spinner != nil {
+		if !hideSpinner && spinner != nil {
 			spinner.Stop()
 			spinner = nil
 		}
 	}
+
+	// Wait for MCP initialization to complete before reading MCP tools.
+	if err := mcp.WaitForInit(ctx); err != nil {
+		return fmt.Errorf("failed to wait for MCP initialization: %w", err)
+	}
+
+	// force update of agent models before running so mcp tools are loaded
+	app.AgentCoordinator.UpdateModels(ctx)
+
 	defer stopSpinner()
 
-	const maxPromptLengthForTitle = 100
-	const titlePrefix = "Non-interactive: "
-	var titleSuffix string
-
-	if len(prompt) > maxPromptLengthForTitle {
-		titleSuffix = prompt[:maxPromptLengthForTitle] + "..."
-	} else {
-		titleSuffix = prompt
-	}
-	title := titlePrefix + titleSuffix
-
-	sess, err := app.Sessions.Create(ctx, title)
+	sess, err := app.resolveSession(ctx, continueSessionID, useLast)
 	if err != nil {
 		return fmt.Errorf("failed to create session for non-interactive mode: %w", err)
 	}
-	slog.Info("Created session for non-interactive run", "session_id", sess.ID)
+
+	if continueSessionID != "" || useLast {
+		slog.Info("Continuing session for non-interactive run", "session_id", sess.ID)
+	} else {
+		slog.Info("Created session for non-interactive run", "session_id", sess.ID)
+	}
 
 	// Automatically approve all permission requests for this non-interactive
 	// session.
@@ -208,6 +285,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 			done <- response{
 				err: fmt.Errorf("failed to start agent processing stream: %w", err),
 			}
+			return
 		}
 		done <- response{
 			result: result,
@@ -216,9 +294,10 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 
 	messageEvents := app.Messages.Subscribe(ctx)
 	messageReadBytes := make(map[string]int)
+	var printed bool
 
 	defer func() {
-		if stderrTTY {
+		if progress && stderrTTY {
 			_, _ = fmt.Fprintf(os.Stderr, ansi.ResetProgressBar)
 		}
 
@@ -228,7 +307,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 	}()
 
 	for {
-		if stderrTTY {
+		if progress && stderrTTY {
 			// HACK: Reinitialize the terminal progress bar on every iteration
 			// so it doesn't get hidden by the terminal due to inactivity.
 			_, _ = fmt.Fprintf(os.Stderr, ansi.SetIndeterminateProgressBar)
@@ -239,7 +318,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 			stopSpinner()
 			if result.err != nil {
 				if errors.Is(result.err, context.Canceled) || errors.Is(result.err, agent.ErrRequestCancelled) {
-					slog.Info("Non-interactive: agent processing cancelled", "session_id", sess.ID)
+					slog.Debug("Non-interactive: agent processing cancelled", "session_id", sess.ID)
 					return nil
 				}
 				return fmt.Errorf("agent processing failed: %w", result.err)
@@ -265,7 +344,11 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt 
 				if readBytes == 0 {
 					part = strings.TrimLeft(part, " \t")
 				}
-				fmt.Fprint(output, part)
+				// Ignore initial whitespace-only messages.
+				if printed || strings.TrimSpace(part) != "" {
+					printed = true
+					fmt.Fprint(output, part)
+				}
 				messageReadBytes[msg.ID] = len(content)
 			}
 
@@ -283,6 +366,96 @@ func (app *App) UpdateAgentModel(ctx context.Context) error {
 	return app.AgentCoordinator.UpdateModels(ctx)
 }
 
+// overrideModelsForNonInteractive parses the model strings and temporarily
+// overrides the model configurations, then rebuilds the agent.
+// Format: "model-name" (searches all providers) or "provider/model-name".
+// Model matching is case-insensitive.
+// If largeModel is provided but smallModel is not, the small model defaults to
+// the provider's default small model.
+func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel, smallModel string) error {
+	providers := app.config.Config().Providers.Copy()
+
+	largeMatches, smallMatches, err := findModels(providers, largeModel, smallModel)
+	if err != nil {
+		return err
+	}
+
+	var largeProviderID string
+
+	// Override large model.
+	if largeModel != "" {
+		found, err := validateMatches(largeMatches, largeModel, "large")
+		if err != nil {
+			return err
+		}
+		largeProviderID = found.provider
+		slog.Info("Overriding large model for non-interactive run", "provider", found.provider, "model", found.modelID)
+		app.config.Config().Models[config.SelectedModelTypeLarge] = config.SelectedModel{
+			Provider: found.provider,
+			Model:    found.modelID,
+		}
+	}
+
+	// Override small model.
+	switch {
+	case smallModel != "":
+		found, err := validateMatches(smallMatches, smallModel, "small")
+		if err != nil {
+			return err
+		}
+		slog.Info("Overriding small model for non-interactive run", "provider", found.provider, "model", found.modelID)
+		app.config.Config().Models[config.SelectedModelTypeSmall] = config.SelectedModel{
+			Provider: found.provider,
+			Model:    found.modelID,
+		}
+
+	case largeModel != "":
+		// No small model specified, but large model was - use provider's default.
+		smallCfg := app.GetDefaultSmallModel(largeProviderID)
+		app.config.Config().Models[config.SelectedModelTypeSmall] = smallCfg
+	}
+
+	return app.AgentCoordinator.UpdateModels(ctx)
+}
+
+// GetDefaultSmallModel returns the default small model for the given
+// provider. Falls back to the large model if no default is found.
+func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
+	cfg := app.config.Config()
+	largeModelCfg := cfg.Models[config.SelectedModelTypeLarge]
+
+	// Find the provider in the known providers list to get its default small model.
+	knownProviders, _ := config.Providers(cfg)
+	var knownProvider *catwalk.Provider
+	for _, p := range knownProviders {
+		if string(p.ID) == providerID {
+			knownProvider = &p
+			break
+		}
+	}
+
+	// For unknown/local providers, use the large model as small.
+	if knownProvider == nil {
+		slog.Warn("Using large model as small model for unknown provider", "provider", providerID, "model", largeModelCfg.Model)
+		return largeModelCfg
+	}
+
+	defaultSmallModelID := knownProvider.DefaultSmallModelID
+	model := cfg.GetModel(providerID, defaultSmallModelID)
+	if model == nil {
+		slog.Warn("Default small model not found, using large model", "provider", providerID, "model", largeModelCfg.Model)
+		return largeModelCfg
+	}
+
+	slog.Info("Using provider default small model", "provider", providerID, "model", defaultSmallModelID)
+	return config.SelectedModel{
+		Provider:        providerID,
+		Model:           defaultSmallModelID,
+		MaxTokens:       model.DefaultMaxTokens,
+		ReasoningEffort: model.DefaultReasoningEffort,
+	}
+}
+
 func (app *App) setupEvents() {
 	ctx, cancel := context.WithCancel(app.globalCtx)
 	app.eventsCtx = ctx
@@ -291,15 +464,18 @@ func (app *App) setupEvents() {
 	setupSubscriber(ctx, app.serviceEventsWG, "permissions", app.Permissions.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "permissions-notifications", app.Permissions.SubscribeNotifications, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "history", app.History.Subscribe, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "agent-notifications", app.agentNotifications.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "mcp", mcp.SubscribeEvents, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "lsp", SubscribeLSPEvents, app.events)
-	cleanupFunc := func() error {
+	cleanupFunc := func(context.Context) error {
 		cancel()
 		app.serviceEventsWG.Wait()
 		return nil
 	}
 	app.cleanupFuncs = append(app.cleanupFuncs, cleanupFunc)
 }
+
+const subscriberSendTimeout = 2 * time.Second
 
 func setupSubscriber[T any](
 	ctx context.Context,
@@ -310,24 +486,36 @@ func setupSubscriber[T any](
 ) {
 	wg.Go(func() {
 		subCh := subscriber(ctx)
+		sendTimer := time.NewTimer(0)
+		<-sendTimer.C
+		defer sendTimer.Stop()
+
 		for {
 			select {
 			case event, ok := <-subCh:
 				if !ok {
-					slog.Debug("subscription channel closed", "name", name)
+					slog.Debug("Subscription channel closed", "name", name)
 					return
 				}
 				var msg tea.Msg = event
+				if !sendTimer.Stop() {
+					select {
+					case <-sendTimer.C:
+					default:
+					}
+				}
+				sendTimer.Reset(subscriberSendTimeout)
+
 				select {
 				case outputCh <- msg:
-				case <-time.After(2 * time.Second):
-					slog.Warn("message dropped due to slow consumer", "name", name)
+				case <-sendTimer.C:
+					slog.Debug("Message dropped due to slow consumer", "name", name)
 				case <-ctx.Done():
-					slog.Debug("subscription cancelled", "name", name)
+					slog.Debug("Subscription cancelled", "name", name)
 					return
 				}
 			case <-ctx.Done():
-				slog.Debug("subscription cancelled", "name", name)
+				slog.Debug("Subscription cancelled", "name", name)
 				return
 			}
 		}
@@ -335,7 +523,7 @@ func setupSubscriber[T any](
 }
 
 func (app *App) InitCoderAgent(ctx context.Context) error {
-	coderAgentCfg := app.config.Agents[config.AgentCoder]
+	coderAgentCfg := app.config.Config().Agents[config.AgentCoder]
 	if coderAgentCfg.ID == "" {
 		return fmt.Errorf("coder agent configuration is missing")
 	}
@@ -347,7 +535,9 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.Messages,
 		app.Permissions,
 		app.History,
-		app.LSPClients,
+		app.FileTracker,
+		app.LSPManager,
+		app.agentNotifications,
 	)
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)
@@ -365,7 +555,7 @@ func (app *App) Subscribe(program *tea.Program) {
 
 	app.tuiWG.Add(1)
 	tuiCtx, tuiCancel := context.WithCancel(app.globalCtx)
-	app.cleanupFuncs = append(app.cleanupFuncs, func() error {
+	app.cleanupFuncs = append(app.cleanupFuncs, func(context.Context) error {
 		slog.Debug("Cancelling TUI message handler")
 		tuiCancel()
 		app.tuiWG.Wait()
@@ -391,35 +581,41 @@ func (app *App) Subscribe(program *tea.Program) {
 // Shutdown performs a graceful shutdown of the application.
 func (app *App) Shutdown() {
 	start := time.Now()
-	defer func() { slog.Info("Shutdown took " + time.Since(start).String()) }()
-	var wg sync.WaitGroup
+	defer func() { slog.Debug("Shutdown took " + time.Since(start).String()) }()
+
+	// First, cancel all agents and wait for them to finish. This must complete
+	// before closing the DB so agents can finish writing their state.
 	if app.AgentCoordinator != nil {
-		wg.Go(func() {
-			app.AgentCoordinator.CancelAll()
-		})
+		app.AgentCoordinator.CancelAll()
 	}
+
+	// Now run remaining cleanup tasks in parallel.
+	var wg sync.WaitGroup
+
+	// Shared shutdown context for all timeout-bounded cleanup.
+	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(app.globalCtx), 5*time.Second)
+	defer cancel()
+
+	// Send exit event
+	wg.Go(func() {
+		event.AppExited()
+	})
 
 	// Kill all background shells.
 	wg.Go(func() {
-		shell.GetBackgroundShellManager().KillAll()
+		shell.GetBackgroundShellManager().KillAll(shutdownCtx)
 	})
 
 	// Shutdown all LSP clients.
-	for name, client := range app.LSPClients.Seq2() {
-		wg.Go(func() {
-			shutdownCtx, cancel := context.WithTimeout(app.globalCtx, 5*time.Second)
-			defer cancel()
-			if err := client.Close(shutdownCtx); err != nil {
-				slog.Error("Failed to shutdown LSP client", "name", name, "error", err)
-			}
-		})
-	}
+	wg.Go(func() {
+		app.LSPManager.KillAll(shutdownCtx)
+	})
 
 	// Call all cleanup functions.
 	for _, cleanup := range app.cleanupFuncs {
 		if cleanup != nil {
 			wg.Go(func() {
-				if err := cleanup(); err != nil {
+				if err := cleanup(shutdownCtx); err != nil {
 					slog.Error("Failed to cleanup app properly on shutdown", "error", err)
 				}
 			})
@@ -437,7 +633,7 @@ func (app *App) checkForUpdates(ctx context.Context) {
 	if err != nil || !info.Available() {
 		return
 	}
-	app.events <- pubsub.UpdateAvailableMsg{
+	app.events <- UpdateAvailableMsg{
 		CurrentVersion: info.Current,
 		LatestVersion:  info.Latest,
 		IsDevelopment:  info.IsDevelopment(),

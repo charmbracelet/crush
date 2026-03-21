@@ -57,3 +57,27 @@ func TokensUsed(props ...any) {
 		props...,
 	)
 }
+
+func StatsViewed() {
+	send("stats viewed")
+}
+
+func SessionListed(json bool) {
+	send("session listed", "json", json)
+}
+
+func SessionShown(json bool) {
+	send("session shown", "json", json)
+}
+
+func SessionLastShown(json bool) {
+	send("session last shown", "json", json)
+}
+
+func SessionDeletedCommand(json bool) {
+	send("session deleted", "json", json)
+}
+
+func SessionRenamed(json bool) {
+	send("session renamed", "json", json)
+}

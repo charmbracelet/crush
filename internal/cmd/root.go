@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/fang/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/crush/internal/app"
@@ -20,10 +21,9 @@ import (
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/projects"
-	"github.com/charmbracelet/crush/internal/stringext"
-	"github.com/charmbracelet/crush/internal/tui"
+	"github.com/charmbracelet/crush/internal/ui/common"
+	ui "github.com/charmbracelet/crush/internal/ui/model"
 	"github.com/charmbracelet/crush/internal/version"
-	"github.com/charmbracelet/fang"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
@@ -37,6 +37,9 @@ func init() {
 	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Debug")
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
 	rootCmd.Flags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
+	rootCmd.Flags().StringP("session", "s", "", "Continue a previous session by ID")
+	rootCmd.Flags().BoolP("continue", "C", false, "Continue the most recent session")
+	rootCmd.MarkFlagsMutuallyExclusive("session", "continue")
 
 	rootCmd.AddCommand(
 		runCmd,
@@ -45,56 +48,75 @@ func init() {
 		updateProvidersCmd,
 		logsCmd,
 		schemaCmd,
-		loginCmd,
+			loginCmd,
 		acpCmd,
+		statsCmd,
+		sessionCmd,
 	)
 }
 
 var rootCmd = &cobra.Command{
 	Use:   "crush",
-	Short: "An AI assistant for software development",
-	Long:  "An AI assistant for software development and similar tasks with direct access to the terminal",
+	Short: "A terminal-first AI assistant for software development",
+	Long:  "A glamorous, terminal-first AI assistant for software development and adjacent tasks",
 	Example: `
 # Run in interactive mode
 crush
 
-# Run with debug logging
-crush -d
+# Run non-interactively
+crush run "Guess my 5 favorite Pokémon"
+
+# Run a non-interactively with pipes and redirection
+cat README.md | crush run "make this more glamorous" > GLAMOROUS_README.md
 
 # Run with debug logging in a specific directory
-crush -d -c /path/to/project
+crush --debug --cwd /path/to/project
+
+# Run in yolo mode (auto-accept all permissions; use with care)
+crush --yolo
 
 # Run with custom data directory
-crush -D /path/to/custom/.crush
+crush --data-dir /path/to/custom/.crush
 
-# Print version
-crush -v
+# Continue a previous session
+crush --session {session-id}
 
-# Run a single non-interactive prompt
-crush run "Explain the use of context in Go"
-
-# Run in dangerous mode (auto-accept all permissions)
-crush -y
+# Continue the most recent session
+crush --continue
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		sessionID, _ := cmd.Flags().GetString("session")
+		continueLast, _ := cmd.Flags().GetBool("continue")
+
 		app, err := setupAppWithProgressBar(cmd)
 		if err != nil {
 			return err
 		}
 		defer app.Shutdown()
 
+		// Resolve session ID if provided
+		if sessionID != "" {
+			sess, err := resolveSessionID(cmd.Context(), app.Sessions, sessionID)
+			if err != nil {
+				return err
+			}
+			sessionID = sess.ID
+		}
+
 		event.AppInitialized()
 
 		// Set up the TUI.
 		var env uv.Environ = os.Environ()
-		ui := tui.New(app)
-		ui.QueryVersion = shouldQueryTerminalVersion(env)
+
+		com := common.DefaultCommon(app)
+		model := ui.New(com, sessionID, continueLast)
 
 		program := tea.NewProgram(
-			ui,
+			model,
 			tea.WithEnvironment(env),
 			tea.WithContext(cmd.Context()),
-			tea.WithFilter(tui.MouseEventFilter)) // Filter mouse events based on focus state
+			tea.WithFilter(ui.MouseEventFilter), // Filter mouse events based on focus state
+		)
 		go app.Subscribe(program)
 
 		if _, err := program.Run(); err != nil {
@@ -103,9 +125,6 @@ crush -y
 			return errors.New("Crush crashed. If metrics are enabled, we were notified about it. If you'd like to report it, please copy the stacktrace above and open an issue at https://github.com/charmbracelet/crush/issues/new?template=bug.yml") //nolint:staticcheck
 		}
 		return nil
-	},
-	PostRun: func(cmd *cobra.Command, args []string) {
-		event.AppExited()
 	},
 }
 
@@ -165,12 +184,19 @@ func supportsProgressBar() bool {
 }
 
 func setupAppWithProgressBar(cmd *cobra.Command) (*app.App, error) {
-	if supportsProgressBar() {
+	app, err := setupApp(cmd)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check if progress bar is enabled in config (defaults to true if nil)
+	progressEnabled := app.Config().Options.Progress == nil || *app.Config().Options.Progress
+	if progressEnabled && supportsProgressBar() {
 		_, _ = fmt.Fprintf(os.Stderr, ansi.SetIndeterminateProgressBar)
 		defer func() { _, _ = fmt.Fprintf(os.Stderr, ansi.ResetProgressBar) }()
 	}
 
-	return setupApp(cmd)
+	return app, nil
 }
 
 // setupApp handles the common setup logic for both interactive and non-interactive modes.
@@ -186,11 +212,12 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 		return nil, err
 	}
 
-	cfg, err := config.Init(cwd, dataDir, debug)
+	store, err := config.Init(cwd, dataDir, debug)
 	if err != nil {
 		return nil, err
 	}
 
+	cfg := store.Config()
 	if cfg.Permissions == nil {
 		cfg.Permissions = &config.Permissions{}
 	}
@@ -212,27 +239,27 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 		return nil, err
 	}
 
-	appInstance, err := app.New(ctx, conn, cfg)
+	appInstance, err := app.New(ctx, conn, store)
 	if err != nil {
 		slog.Error("Failed to create app instance", "error", err)
 		return nil, err
 	}
 
-	if shouldEnableMetrics() {
+	if shouldEnableMetrics(cfg) {
 		event.Init()
 	}
 
 	return appInstance, nil
 }
 
-func shouldEnableMetrics() bool {
+func shouldEnableMetrics(cfg *config.Config) bool {
 	if v, _ := strconv.ParseBool(os.Getenv("CRUSH_DISABLE_METRICS")); v {
 		return false
 	}
 	if v, _ := strconv.ParseBool(os.Getenv("DO_NOT_TRACK")); v {
 		return false
 	}
-	if config.Get().Options.DisableMetrics {
+	if cfg.Options.DisableMetrics {
 		return false
 	}
 	return true
@@ -286,14 +313,4 @@ func createDotCrushDir(dir string) error {
 	}
 
 	return nil
-}
-
-func shouldQueryTerminalVersion(env uv.Environ) bool {
-	termType := env.Getenv("TERM")
-	termProg, okTermProg := env.LookupEnv("TERM_PROGRAM")
-	_, okSSHTTY := env.LookupEnv("SSH_TTY")
-	return (!okTermProg && !okSSHTTY) ||
-		(!strings.Contains(termProg, "Apple") && !okSSHTTY) ||
-		// Terminals that do support XTVERSION.
-		stringext.ContainsAny(termType, "alacritty", "ghostty", "kitty", "rio", "wezterm")
 }

@@ -6,14 +6,12 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
 	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/oauth"
-	"github.com/charmbracelet/crush/internal/oauth/claude"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/oauth/hyper"
 	"github.com/pkg/browser"
@@ -26,21 +24,16 @@ var loginCmd = &cobra.Command{
 	Short:   "Login Crush to a platform",
 	Long: `Login Crush to a specified platform.
 The platform should be provided as an argument.
-Available platforms are: hyper, claude, copilot.`,
+Available platforms are: hyper, copilot.`,
 	Example: `
 # Authenticate with Charm Hyper
 crush login
-
-# Authenticate with Claude Code Max
-crush login claude
 
 # Authenticate with GitHub Copilot
 crush login copilot
   `,
 	ValidArgs: []cobra.Completion{
 		"hyper",
-		"claude",
-		"anthropic",
 		"copilot",
 		"github",
 		"github-copilot",
@@ -59,19 +52,16 @@ crush login copilot
 		}
 		switch provider {
 		case "hyper":
-			return loginHyper()
-		case "anthropic", "claude":
-			return loginClaude()
+			return loginHyper(app.Store())
 		case "copilot", "github", "github-copilot":
-			return loginCopilot()
+			return loginCopilot(app.Store())
 		default:
 			return fmt.Errorf("unknown platform: %s", args[0])
 		}
 	},
 }
 
-func loginHyper() error {
-	cfg := config.Get()
+func loginHyper(cfg *config.ConfigStore) error {
 	if !hyperp.Enabled() {
 		return fmt.Errorf("hyper not enabled")
 	}
@@ -122,8 +112,8 @@ func loginHyper() error {
 	}
 
 	if err := cmp.Or(
-		cfg.SetConfigField("providers.hyper.api_key", token.AccessToken),
-		cfg.SetConfigField("providers.hyper.oauth", token),
+		cfg.SetConfigField(config.ScopeGlobal, "providers.hyper.api_key", token.AccessToken),
+		cfg.SetConfigField(config.ScopeGlobal, "providers.hyper.oauth", token),
 	); err != nil {
 		return err
 	}
@@ -133,65 +123,10 @@ func loginHyper() error {
 	return nil
 }
 
-func loginClaude() error {
+func loginCopilot(cfg *config.ConfigStore) error {
 	ctx := getLoginContext()
 
-	cfg := config.Get()
-	if cfg.HasConfigField("providers.anthropic.oauth") {
-		fmt.Println("You are already logged in to Claude.")
-		return nil
-	}
-
-	verifier, challenge, err := claude.GetChallenge()
-	if err != nil {
-		return err
-	}
-	url, err := claude.AuthorizeURL(verifier, challenge)
-	if err != nil {
-		return err
-	}
-	fmt.Println("Open the following URL and follow the instructions to authenticate with Claude Code Max:")
-	fmt.Println()
-	fmt.Println(lipgloss.NewStyle().Hyperlink(url, "id=claude").Render(url))
-	fmt.Println()
-	fmt.Println("Press enter to continue...")
-	if _, err := fmt.Scanln(); err != nil {
-		return err
-	}
-
-	fmt.Println("Now paste and code from Anthropic and press enter...")
-	fmt.Println()
-	fmt.Print("> ")
-	var code string
-	for code == "" {
-		_, _ = fmt.Scanln(&code)
-		code = strings.TrimSpace(code)
-	}
-
-	fmt.Println()
-	fmt.Println("Exchanging authorization code...")
-	token, err := claude.ExchangeToken(ctx, code, verifier)
-	if err != nil {
-		return err
-	}
-
-	if err := cmp.Or(
-		cfg.SetConfigField("providers.anthropic.api_key", token.AccessToken),
-		cfg.SetConfigField("providers.anthropic.oauth", token),
-	); err != nil {
-		return err
-	}
-
-	fmt.Println()
-	fmt.Println("You're now authenticated with Claude Code Max!")
-	return nil
-}
-
-func loginCopilot() error {
-	ctx := getLoginContext()
-
-	cfg := config.Get()
-	if cfg.HasConfigField("providers.copilot.oauth") {
+	if cfg.HasConfigField(config.ScopeGlobal, "providers.copilot.oauth") {
 		fmt.Println("You are already logged in to GitHub Copilot.")
 		return nil
 	}
@@ -231,7 +166,7 @@ func loginCopilot() error {
 			fmt.Println()
 			fmt.Println(lipgloss.NewStyle().Hyperlink(copilot.SignupURL, "id=copilot-signup").Render(copilot.SignupURL))
 			fmt.Println()
-			fmt.Println("You may be able to request free access if elegible. For more information, see:")
+			fmt.Println("You may be able to request free access if eligible. For more information, see:")
 			fmt.Println()
 			fmt.Println(lipgloss.NewStyle().Hyperlink(copilot.FreeURL, "id=copilot-free").Render(copilot.FreeURL))
 		}
@@ -242,8 +177,8 @@ func loginCopilot() error {
 	}
 
 	if err := cmp.Or(
-		cfg.SetConfigField("providers.copilot.api_key", token.AccessToken),
-		cfg.SetConfigField("providers.copilot.oauth", token),
+		cfg.SetConfigField(config.ScopeGlobal, "providers.copilot.api_key", token.AccessToken),
+		cfg.SetConfigField(config.ScopeGlobal, "providers.copilot.oauth", token),
 	); err != nil {
 		return err
 	}

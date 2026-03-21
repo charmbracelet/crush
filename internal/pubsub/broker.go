@@ -20,13 +20,11 @@ func NewBroker[T any]() *Broker[T] {
 }
 
 func NewBrokerWithOptions[T any](channelBufferSize, maxEvents int) *Broker[T] {
-	b := &Broker[T]{
+	return &Broker[T]{
 		subs:      make(map[chan Event[T]]struct{}),
 		done:      make(chan struct{}),
-		subCount:  0,
 		maxEvents: maxEvents,
 	}
-	return b
 }
 
 func (b *Broker[T]) Shutdown() {

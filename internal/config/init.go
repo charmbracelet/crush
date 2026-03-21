@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync/atomic"
 
 	"github.com/charmbracelet/crush/internal/fsext"
 )
@@ -19,29 +18,20 @@ type ProjectInitFlag struct {
 	Initialized bool `json:"initialized"`
 }
 
-// TODO: we need to remove the global config instance keeping it now just until everything is migrated
-var instance atomic.Pointer[Config]
-
-func Init(workingDir, dataDir string, debug bool) (*Config, error) {
-	cfg, err := Load(workingDir, dataDir, debug)
+func Init(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
+	store, err := Load(workingDir, dataDir, debug)
 	if err != nil {
 		return nil, err
 	}
-	instance.Store(cfg)
-	return instance.Load(), nil
+	return store, nil
 }
 
-func Get() *Config {
-	cfg := instance.Load()
-	return cfg
-}
-
-func ProjectNeedsInitialization() (bool, error) {
-	cfg := Get()
-	if cfg == nil {
+func ProjectNeedsInitialization(store *ConfigStore) (bool, error) {
+	if store == nil {
 		return false, fmt.Errorf("config not loaded")
 	}
 
+	cfg := store.Config()
 	flagFilePath := filepath.Join(cfg.Options.DataDirectory, InitFlagFilename)
 
 	_, err := os.Stat(flagFilePath)
@@ -53,7 +43,7 @@ func ProjectNeedsInitialization() (bool, error) {
 		return false, fmt.Errorf("failed to check init flag file: %w", err)
 	}
 
-	someContextFileExists, err := contextPathsExist(cfg.WorkingDir())
+	someContextFileExists, err := contextPathsExist(store.WorkingDir())
 	if err != nil {
 		return false, fmt.Errorf("failed to check for context files: %w", err)
 	}
@@ -62,7 +52,7 @@ func ProjectNeedsInitialization() (bool, error) {
 	}
 
 	// If the working directory has no non-ignored files, skip initialization step
-	empty, err := dirHasNoVisibleFiles(cfg.WorkingDir())
+	empty, err := dirHasNoVisibleFiles(store.WorkingDir())
 	if err != nil {
 		return false, fmt.Errorf("failed to check if directory is empty: %w", err)
 	}
@@ -101,7 +91,7 @@ func contextPathsExist(dir string) (bool, error) {
 	return false, nil
 }
 
-// dirHasNoVisibleFiles returns true if the directory has no files/dirs after applying ignore rules
+// dirHasNoVisibleFiles returns true if the directory has no files/dirs after applying ignore rules.
 func dirHasNoVisibleFiles(dir string) (bool, error) {
 	files, _, err := fsext.ListDirectory(dir, nil, 1, 1)
 	if err != nil {
@@ -110,12 +100,11 @@ func dirHasNoVisibleFiles(dir string) (bool, error) {
 	return len(files) == 0, nil
 }
 
-func MarkProjectInitialized() error {
-	cfg := Get()
-	if cfg == nil {
+func MarkProjectInitialized(store *ConfigStore) error {
+	if store == nil {
 		return fmt.Errorf("config not loaded")
 	}
-	flagFilePath := filepath.Join(cfg.Options.DataDirectory, InitFlagFilename)
+	flagFilePath := filepath.Join(store.Config().Options.DataDirectory, InitFlagFilename)
 
 	file, err := os.Create(flagFilePath)
 	if err != nil {
@@ -126,10 +115,13 @@ func MarkProjectInitialized() error {
 	return nil
 }
 
-func HasInitialDataConfig() bool {
+func HasInitialDataConfig(store *ConfigStore) bool {
+	if store == nil {
+		return false
+	}
 	cfgPath := GlobalConfigData()
 	if _, err := os.Stat(cfgPath); err != nil {
 		return false
 	}
-	return Get().IsConfigured()
+	return store.Config().IsConfigured()
 }

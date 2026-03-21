@@ -3,6 +3,10 @@
 
 "area: ci":
   - "/^ci: /i"
+"area: crush run":
+  - "/crush run/i"
+  - "/headless/i"
+  - "/non-interactive/i"
 "area: diff":
   - "/diff/i"
 "area: docs":
@@ -51,8 +55,12 @@
   - "/gemini/i"
 "provider: google vertex":
   - "/vertex/i"
+"provider: hyper":
+  - "/hyper/i"
 "provider: kimi":
   - "/kimi/i"
+"provider: minimax":
+  - "/minimax/i"
 "provider: ollama":
   - "/llama/i"
 "provider: openai chatgpt":
@@ -61,6 +69,8 @@
   - "/openrouter/i"
 "provider: qwen":
   - "/qwen/i"
+"provider: vercel":
+  - "/vercel/i"
 "provider: xai grok":
   - "/(xai|x\\.ai|grok)/i"
 "security":

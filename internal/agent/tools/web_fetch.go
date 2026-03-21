@@ -18,13 +18,14 @@ var webFetchToolDescription []byte
 // NewWebFetchTool creates a simple web fetch tool for sub-agents (no permissions needed).
 func NewWebFetchTool(workingDir string, client *http.Client) fantasy.AgentTool {
 	if client == nil {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.MaxIdleConns = 100
+		transport.MaxIdleConnsPerHost = 10
+		transport.IdleConnTimeout = 90 * time.Second
+
 		client = &http.Client{
-			Timeout: 30 * time.Second,
-			Transport: &http.Transport{
-				MaxIdleConns:        100,
-				MaxIdleConnsPerHost: 10,
-				IdleConnTimeout:     90 * time.Second,
-			},
+			Timeout:   30 * time.Second,
+			Transport: transport,
 		}
 	}
 
@@ -59,11 +60,11 @@ func NewWebFetchTool(workingDir string, client *http.Client) fantasy.AgentTool {
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to close temporary file: %s", err)), nil
 				}
 
-				result.WriteString(fmt.Sprintf("Fetched content from %s (large page)\n\n", params.URL))
-				result.WriteString(fmt.Sprintf("Content saved to: %s\n\n", tempFilePath))
+				fmt.Fprintf(&result, "Fetched content from %s (large page)\n\n", params.URL)
+				fmt.Fprintf(&result, "Content saved to: %s\n\n", tempFilePath)
 				result.WriteString("Use the view and grep tools to analyze this file.")
 			} else {
-				result.WriteString(fmt.Sprintf("Fetched content from %s:\n\n", params.URL))
+				fmt.Fprintf(&result, "Fetched content from %s:\n\n", params.URL)
 				result.WriteString(content)
 			}
 

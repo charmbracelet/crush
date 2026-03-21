@@ -21,9 +21,9 @@ func TestCrushIgnore(t *testing.T) {
 	require.NoError(t, os.WriteFile(".crushignore", []byte("*.log\n"), 0o644))
 
 	dl := NewDirectoryLister(tempDir)
-	require.True(t, dl.shouldIgnore("test2.log", nil), ".log files should be ignored")
-	require.False(t, dl.shouldIgnore("test1.txt", nil), ".txt files should not be ignored")
-	require.True(t, dl.shouldIgnore("test3.tmp", nil), ".tmp files should be ignored by common patterns")
+	require.True(t, dl.shouldIgnore("test2.log", nil, false), ".log files should be ignored")
+	require.False(t, dl.shouldIgnore("test1.txt", nil, false), ".txt files should not be ignored")
+	require.True(t, dl.shouldIgnore("test3.tmp", nil, false), ".tmp files should be ignored by common patterns")
 }
 
 func TestShouldExcludeFile(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,6 +19,30 @@ const (
 	CompletedJobRetentionMinutes = 8 * 60
 )
 
+// syncBuffer is a thread-safe wrapper around bytes.Buffer.
+type syncBuffer struct {
+	buf bytes.Buffer
+	mu  sync.RWMutex
+}
+
+func (sb *syncBuffer) Write(p []byte) (n int, err error) {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	return sb.buf.Write(p)
+}
+
+func (sb *syncBuffer) WriteString(s string) (n int, err error) {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	return sb.buf.WriteString(s)
+}
+
+func (sb *syncBuffer) String() string {
+	sb.mu.RLock()
+	defer sb.mu.RUnlock()
+	return sb.buf.String()
+}
+
 // BackgroundShell represents a shell running in the background.
 type BackgroundShell struct {
 	ID          string
@@ -27,8 +52,8 @@ type BackgroundShell struct {
 	WorkingDir  string
 	ctx         context.Context
 	cancel      context.CancelFunc
-	stdout      *bytes.Buffer
-	stderr      *bytes.Buffer
+	stdout      *syncBuffer
+	stderr      *syncBuffer
 	done        chan struct{}
 	exitErr     error
 	completedAt int64 // Unix timestamp when job completed (0 if still running)
@@ -45,12 +70,17 @@ var (
 	idCounter             atomic.Uint64
 )
 
+// newBackgroundShellManager creates a new BackgroundShellManager instance.
+func newBackgroundShellManager() *BackgroundShellManager {
+	return &BackgroundShellManager{
+		shells: csync.NewMap[string, *BackgroundShell](),
+	}
+}
+
 // GetBackgroundShellManager returns the singleton background shell manager.
 func GetBackgroundShellManager() *BackgroundShellManager {
 	backgroundManagerOnce.Do(func() {
-		backgroundManager = &BackgroundShellManager{
-			shells: csync.NewMap[string, *BackgroundShell](),
-		}
+		backgroundManager = newBackgroundShellManager()
 	})
 	return backgroundManager
 }
@@ -79,8 +109,8 @@ func (m *BackgroundShellManager) Start(ctx context.Context, workingDir string, b
 		Shell:       shell,
 		ctx:         shellCtx,
 		cancel:      cancel,
-		stdout:      &bytes.Buffer{},
-		stderr:      &bytes.Buffer{},
+		stdout:      &syncBuffer{},
+		stderr:      &syncBuffer{},
 		done:        make(chan struct{}),
 	}
 
@@ -161,18 +191,23 @@ func (m *BackgroundShellManager) Cleanup() int {
 	return len(toRemove)
 }
 
-// KillAll terminates all background shells.
-func (m *BackgroundShellManager) KillAll() {
-	shells := make([]*BackgroundShell, 0, m.shells.Len())
-	for shell := range m.shells.Seq() {
-		shells = append(shells, shell)
-	}
+// KillAll terminates all background shells. The provided context bounds how
+// long the function waits for each shell to exit.
+func (m *BackgroundShellManager) KillAll(ctx context.Context) {
+	shells := slices.Collect(m.shells.Seq())
 	m.shells.Reset(map[string]*BackgroundShell{})
 
+	var wg sync.WaitGroup
 	for _, shell := range shells {
-		shell.cancel()
-		<-shell.done
+		wg.Go(func() {
+			shell.cancel()
+			select {
+			case <-shell.done:
+			case <-ctx.Done():
+			}
+		})
 	}
+	wg.Wait()
 }
 
 // GetOutput returns the current output of a background shell.
@@ -198,4 +233,13 @@ func (bs *BackgroundShell) IsDone() bool {
 // Wait blocks until the background shell completes.
 func (bs *BackgroundShell) Wait() {
 	<-bs.done
+}
+
+func (bs *BackgroundShell) WaitContext(ctx context.Context) bool {
+	select {
+	case <-bs.done:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }

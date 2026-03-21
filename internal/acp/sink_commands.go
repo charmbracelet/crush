@@ -3,12 +3,12 @@ package acp
 import (
 	"log/slog"
 
-	"github.com/charmbracelet/catwalk/pkg/catwalk"
+	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/crush/internal/uicmd"
 	"github.com/coder/acp-go-sdk"
 )
 
@@ -26,25 +26,26 @@ func (s *Sink) HandleMCPEvent(event pubsub.Event[mcp.Event]) {
 // PublishCommands aggregates commands from all sources and sends an
 // AvailableCommandsUpdate to the ACP client.
 func (s *Sink) PublishCommands() {
-	var commands []acp.AvailableCommand
+	var availableCommands []acp.AvailableCommand
 
 	// System/built-in commands.
-	commands = append(commands, s.builtinCommands()...)
+	availableCommands = append(availableCommands, s.builtinCommands()...)
 
-	// User and project commands (already prefixed by uicmd).
-	if userCmds, err := uicmd.LoadCustomCommandsFromConfig(config.Get()); err == nil {
-		commands = append(commands, translateCommands(userCmds, "")...)
+	// User and project commands (already prefixed by commands).
+	if userCmds, err := commands.LoadCustomCommands(s.configStore.Config()); err == nil {
+		availableCommands = append(availableCommands, translateCommands(userCmds, "")...)
 	}
 
 	// MCP prompts.
-	mcpCmds := uicmd.LoadMCPPrompts()
-	commands = append(commands, translateCommands(mcpCmds, mcpCommandPrefix)...)
+	if mcpCmds, err := commands.LoadMCPPrompts(); err == nil {
+		availableCommands = append(availableCommands, translateCommands(mcpCmds, mcpCommandPrefix)...)
+	}
 
 	if err := s.conn.SessionUpdate(s.ctx, acp.SessionNotification{
 		SessionId: acp.SessionId(s.sessionID),
 		Update: acp.SessionUpdate{
 			AvailableCommandsUpdate: &acp.SessionAvailableCommandsUpdate{
-				AvailableCommands: commands,
+				AvailableCommands: availableCommands,
 			},
 		},
 	}); err != nil {
@@ -67,7 +68,10 @@ func (s *Sink) builtinCommands() []acp.AvailableCommand {
 	}
 
 	// Add reasoning commands based on current model capabilities.
-	cfg := config.Get()
+	if s.configStore == nil {
+		return commands
+	}
+	cfg := s.configStore.Config()
 	if cfg == nil {
 		return commands
 	}
@@ -107,21 +111,27 @@ func (s *Sink) builtinCommands() []acp.AvailableCommand {
 	return commands
 }
 
-// translateCommands converts uicmd.Command slice to acp.AvailableCommand
-// slice, optionally adding a prefix.
-func translateCommands(cmds []uicmd.Command, prefix string) []acp.AvailableCommand {
+// translateCommands converts command slices to acp.AvailableCommand slice,
+// optionally adding a prefix.
+func translateCommands[T interface {
+	GetID() string
+	GetDescription() string
+	GetTitle() string
+}](cmds []T, prefix string) []acp.AvailableCommand {
 	result := make([]acp.AvailableCommand, 0, len(cmds))
 	for _, cmd := range cmds {
+		id := cmd.GetID()
+		title := cmd.GetTitle()
 		acpCmd := acp.AvailableCommand{
-			Name:        prefix + cmd.ID,
-			Description: cmd.Description,
+			Name:        prefix + id,
+			Description: cmd.GetDescription(),
 		}
 
 		// If the command has a title different from ID, use it as a hint.
-		if cmd.Title != "" && cmd.Title != cmd.ID {
+		if title != "" && title != id {
 			acpCmd.Input = &acp.AvailableCommandInput{
 				UnstructuredCommandInput: &acp.AvailableCommandUnstructuredCommandInput{
-					Hint: cmd.Title,
+					Hint: title,
 				},
 			}
 		}

@@ -21,7 +21,7 @@ streaming updates about agent activity.`,
 		}
 		defer app.Shutdown()
 
-		if shouldEnableMetrics() {
+		if shouldEnableMetrics(app.Config()) {
 			event.Init()
 		}
 

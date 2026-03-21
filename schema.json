@@ -63,16 +63,6 @@
           "type": "object",
           "description": "Model configurations for different model types"
         },
-        "recent_models": {
-          "additionalProperties": {
-            "items": {
-              "$ref": "#/$defs/SelectedModel"
-            },
-            "type": "array"
-          },
-          "type": "object",
-          "description": "Recently used models sorted by most recent first"
-        },
         "providers": {
           "additionalProperties": {
             "$ref": "#/$defs/ProviderConfig"
@@ -169,13 +159,19 @@
         "options": {
           "type": "object",
           "description": "LSP server-specific settings passed during initialization"
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Timeout in seconds for LSP server initialization",
+          "default": 30,
+          "examples": [
+            60,
+            120
+          ]
         }
       },
       "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "command"
-      ]
+      "type": "object"
     },
     "LSPs": {
       "additionalProperties": {
@@ -421,6 +417,11 @@
           "description": "Disable providers auto-update",
           "default": false
         },
+        "disable_default_providers": {
+          "type": "boolean",
+          "description": "Ignore all default/embedded providers. When enabled",
+          "default": false
+        },
         "attribution": {
           "$ref": "#/$defs/Attribution",
           "description": "Attribution settings for generated content"
@@ -440,6 +441,21 @@
             "CLAUDE.md",
             "docs/LLMs.md"
           ]
+        },
+        "auto_lsp": {
+          "type": "boolean",
+          "description": "Automatically setup LSPs based on root markers",
+          "default": true
+        },
+        "progress": {
+          "type": "boolean",
+          "description": "Show indeterminate progress updates during long operations",
+          "default": true
+        },
+        "disable_notifications": {
+          "type": "boolean",
+          "description": "Disable desktop notifications",
+          "default": false
         }
       },
       "additionalProperties": false,
@@ -642,6 +658,11 @@
         "completions": {
           "$ref": "#/$defs/Completions",
           "description": "Completions UI options"
+        },
+        "transparent": {
+          "type": "boolean",
+          "description": "Enable transparent background for the TUI interface",
+          "default": false
         }
       },
       "additionalProperties": false,
@@ -674,6 +695,16 @@
         "expires_at"
       ]
     },
+    "ToolGrep": {
+      "properties": {
+        "timeout": {
+          "type": "integer",
+          "description": "Timeout for the grep tool call"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "ToolLs": {
       "properties": {
         "max_depth": {
@@ -700,12 +731,16 @@
       "properties": {
         "ls": {
           "$ref": "#/$defs/ToolLs"
+        },
+        "grep": {
+          "$ref": "#/$defs/ToolGrep"
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
-        "ls"
+        "ls",
+        "grep"
       ]
     }
   }

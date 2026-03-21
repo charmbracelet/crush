@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -14,10 +15,11 @@ import (
 // Sink receives events from Crush's pubsub system and translates them to ACP
 // session updates.
 type Sink struct {
-	ctx       context.Context
-	cancel    context.CancelFunc
-	conn      *acp.AgentSideConnection
-	sessionID string
+	ctx         context.Context
+	cancel      context.CancelFunc
+	conn        *acp.AgentSideConnection
+	sessionID   string
+	configStore *config.ConfigStore
 
 	// Track text deltas per message to avoid re-sending content.
 	textOffsets      map[string]int
@@ -25,13 +27,14 @@ type Sink struct {
 }
 
 // NewSink creates a new event sink for the given session.
-func NewSink(ctx context.Context, conn *acp.AgentSideConnection, sessionID string) *Sink {
+func NewSink(ctx context.Context, conn *acp.AgentSideConnection, sessionID string, configStore *config.ConfigStore) *Sink {
 	sinkCtx, cancel := context.WithCancel(ctx)
 	return &Sink{
 		ctx:              sinkCtx,
 		cancel:           cancel,
 		conn:             conn,
 		sessionID:        sessionID,
+		configStore:      configStore,
 		textOffsets:      make(map[string]int),
 		reasoningOffsets: make(map[string]int),
 	}

@@ -1,0 +1,107 @@
+package model
+
+import (
+	"fmt"
+	"strings"
+
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/styles"
+)
+
+// mcpInfo renders the MCP status section showing active MCP clients and their
+// tool/prompt counts.
+func (m *UI) mcpInfo(width, maxItems int, isSection bool) string {
+	var mcps []mcp.ClientInfo
+	t := m.com.Styles
+
+	for _, mcp := range m.com.Config().MCP.Sorted() {
+		if state, ok := m.mcpStates[mcp.Name]; ok {
+			mcps = append(mcps, state)
+		}
+	}
+
+	title := t.ResourceGroupTitle.Render("MCPs")
+	if isSection {
+		title = common.Section(t, title, width)
+	}
+	list := t.ResourceAdditionalText.Render("None")
+	if len(mcps) > 0 {
+		list = mcpList(t, mcps, width, maxItems)
+	}
+
+	return lipgloss.NewStyle().Width(width).Render(fmt.Sprintf("%s\n\n%s", title, list))
+}
+
+// mcpCounts formats tool, prompt, and resource counts for display.
+func mcpCounts(t *styles.Styles, counts mcp.Counts) string {
+	var parts []string
+	if counts.Tools > 0 {
+		parts = append(parts, t.Subtle.Render(fmt.Sprintf("%d tools", counts.Tools)))
+	}
+	if counts.Prompts > 0 {
+		parts = append(parts, t.Subtle.Render(fmt.Sprintf("%d prompts", counts.Prompts)))
+	}
+	if counts.Resources > 0 {
+		parts = append(parts, t.Subtle.Render(fmt.Sprintf("%d resources", counts.Resources)))
+	}
+	return strings.Join(parts, " ")
+}
+
+// mcpList renders a list of MCP clients with their status and counts,
+// truncating to maxItems if needed.
+func mcpList(t *styles.Styles, mcps []mcp.ClientInfo, width, maxItems int) string {
+	if maxItems <= 0 {
+		return ""
+	}
+	var renderedMcps []string
+
+	for _, m := range mcps {
+		var icon string
+		title := m.Name
+		// Show "Docker MCP" instead of the config name for Docker MCP.
+		if m.Name == config.DockerMCPName {
+			title = "Docker MCP"
+		}
+		title = t.ResourceName.Render(title)
+		var description string
+		var extraContent string
+
+		switch m.State {
+		case mcp.StateStarting:
+			icon = t.ResourceBusyIcon.String()
+			description = t.ResourceStatus.Render("starting...")
+		case mcp.StateConnected:
+			icon = t.ResourceOnlineIcon.String()
+			extraContent = mcpCounts(t, m.Counts)
+		case mcp.StateError:
+			icon = t.ResourceErrorIcon.String()
+			description = t.ResourceStatus.Render("error")
+			if m.Error != nil {
+				description = t.ResourceStatus.Render(fmt.Sprintf("error: %s", m.Error.Error()))
+			}
+		case mcp.StateDisabled:
+			icon = t.ResourceOfflineIcon.Foreground(t.Muted.GetBackground()).String()
+			description = t.ResourceStatus.Render("disabled")
+		default:
+			icon = t.ResourceOfflineIcon.String()
+		}
+
+		renderedMcps = append(renderedMcps, common.Status(t, common.StatusOpts{
+			Icon:         icon,
+			Title:        title,
+			Description:  description,
+			ExtraContent: extraContent,
+		}, width))
+	}
+
+	if len(renderedMcps) > maxItems {
+		visibleItems := renderedMcps[:maxItems-1]
+		remaining := len(renderedMcps) - maxItems
+		visibleItems = append(visibleItems, t.ResourceAdditionalText.Render(fmt.Sprintf("…and %d more", remaining)))
+		return lipgloss.JoinVertical(lipgloss.Left, visibleItems...)
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, renderedMcps...)
+}

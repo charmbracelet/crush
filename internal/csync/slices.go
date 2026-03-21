@@ -2,7 +2,6 @@ package csync
 
 import (
 	"iter"
-	"slices"
 	"sync"
 )
 
@@ -63,24 +62,6 @@ func (s *Slice[T]) Append(items ...T) {
 	s.inner = append(s.inner, items...)
 }
 
-// Prepend adds an element to the beginning of the slice.
-func (s *Slice[T]) Prepend(item T) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.inner = append([]T{item}, s.inner...)
-}
-
-// Delete removes the element at the specified index.
-func (s *Slice[T]) Delete(index int) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if index < 0 || index >= len(s.inner) {
-		return false
-	}
-	s.inner = slices.Delete(s.inner, index, index+1)
-	return true
-}
-
 // Get returns the element at the specified index.
 func (s *Slice[T]) Get(index int) (T, bool) {
 	s.mu.RLock()
@@ -90,17 +71,6 @@ func (s *Slice[T]) Get(index int) (T, bool) {
 		return zero, false
 	}
 	return s.inner[index], true
-}
-
-// Set updates the element at the specified index.
-func (s *Slice[T]) Set(index int, item T) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if index < 0 || index >= len(s.inner) {
-		return false
-	}
-	s.inner[index] = item
-	return true
 }
 
 // Len returns the number of elements in the slice.
@@ -131,10 +101,7 @@ func (s *Slice[T]) Seq() iter.Seq[T] {
 
 // Seq2 returns an iterator that yields index-value pairs from the slice.
 func (s *Slice[T]) Seq2() iter.Seq2[int, T] {
-	s.mu.RLock()
-	items := make([]T, len(s.inner))
-	copy(items, s.inner)
-	s.mu.RUnlock()
+	items := s.Copy()
 	return func(yield func(int, T) bool) {
 		for i, v := range items {
 			if !yield(i, v) {
@@ -142,4 +109,13 @@ func (s *Slice[T]) Seq2() iter.Seq2[int, T] {
 			}
 		}
 	}
+}
+
+// Copy returns a copy of the inner slice.
+func (s *Slice[T]) Copy() []T {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := make([]T, len(s.inner))
+	copy(items, s.inner)
+	return items
 }

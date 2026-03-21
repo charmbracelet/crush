@@ -12,16 +12,19 @@ import (
 	"github.com/charmbracelet/crush/internal/log"
 )
 
+var assistantRolePattern = regexp.MustCompile(`"role"\s*:\s*"assistant"`)
+
 // NewClient creates a new HTTP client with a custom transport that adds the
 // X-Initiator header based on message history in the request body.
-func NewClient(debug bool) *http.Client {
+func NewClient(isSubAgent, debug bool) *http.Client {
 	return &http.Client{
-		Transport: &initiatorTransport{debug: debug},
+		Transport: &initiatorTransport{debug: debug, isSubAgent: isSubAgent},
 	}
 }
 
 type initiatorTransport struct {
-	debug bool
+	debug      bool
+	isSubAgent bool
 }
 
 func (t *initiatorTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -57,8 +60,7 @@ func (t *initiatorTransport) RoundTrip(req *http.Request) (*http.Response, error
 	// Check for assistant messages using regex to handle whitespace
 	// variations in the JSON while avoiding full unmarshalling overhead.
 	initiator := userInitiator
-	assistantRolePattern := regexp.MustCompile(`"role"\s*:\s*"assistant"`)
-	if assistantRolePattern.Match(bodyBytes) {
+	if assistantRolePattern.Match(bodyBytes) || t.isSubAgent {
 		slog.Debug("Setting X-Initiator header to agent (found assistant messages in history)")
 		initiator = agentInitiator
 	} else {

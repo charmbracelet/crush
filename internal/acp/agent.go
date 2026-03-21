@@ -7,8 +7,8 @@ import (
 	"log/slog"
 	"strings"
 
+	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
-	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
@@ -83,7 +83,7 @@ func (a *Agent) NewSession(ctx context.Context, params acp.NewSessionRequest) (a
 	// Create and start the event sink to stream updates to this session.
 	// Use a background context since the sink needs to outlive the NewSession
 	// request.
-	sink := NewSink(context.Background(), a.conn, sess.ID)
+	sink := NewSink(context.Background(), a.conn, sess.ID, a.app.Store())
 	sink.Start(a.app.Messages, a.app.Permissions, a.app.Sessions)
 	a.sinks.Set(sess.ID, sink)
 
@@ -105,7 +105,7 @@ func (a *Agent) LoadSession(ctx context.Context, params acp.LoadSessionRequest) 
 	}
 
 	// Create and start the event sink for future updates.
-	sink := NewSink(context.Background(), a.conn, session.ID)
+	sink := NewSink(context.Background(), a.conn, session.ID, a.app.Store())
 	sink.Start(a.app.Messages, a.app.Permissions, a.app.Sessions)
 	a.sinks.Set(session.ID, sink)
 
@@ -145,7 +145,7 @@ func (a *Agent) SetSessionModel(ctx context.Context, params acp.SetSessionModelR
 	providerID, modelID := parts[0], parts[1]
 
 	// Validate that the model exists.
-	cfg := config.Get()
+	cfg := a.app.Config()
 	if cfg.GetModel(providerID, modelID) == nil {
 		return acp.SetSessionModelResponse{}, fmt.Errorf("model %q not found for provider %q", modelID, providerID)
 	}
@@ -160,7 +160,7 @@ func (a *Agent) SetSessionModel(ctx context.Context, params acp.SetSessionModelR
 		Provider: providerID,
 		Model:    modelID,
 	}
-	if err := cfg.UpdatePreferredModel(config.SelectedModelTypeLarge, selectedModel); err != nil {
+	if err := a.app.Store().UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeLarge, selectedModel); err != nil {
 		return acp.SetSessionModelResponse{}, fmt.Errorf("failed to update preferred model: %w", err)
 	}
 
@@ -289,7 +289,7 @@ func (a *Agent) cmdToggleYolo() string {
 
 // cmdToggleThinking toggles thinking mode for Anthropic/Hyper reasoning models.
 func (a *Agent) cmdToggleThinking(ctx context.Context) (string, error) {
-	cfg := config.Get()
+	cfg := a.app.Config()
 	agentCfg := cfg.Agents[config.AgentCoder]
 
 	// Validate that the current model supports thinking toggle.
@@ -311,7 +311,7 @@ func (a *Agent) cmdToggleThinking(ctx context.Context) (string, error) {
 	currentModel := cfg.Models[agentCfg.Model]
 	currentModel.Think = !currentModel.Think
 
-	if err := cfg.UpdatePreferredModel(agentCfg.Model, currentModel); err != nil {
+	if err := a.app.Store().UpdatePreferredModel(config.ScopeGlobal, agentCfg.Model, currentModel); err != nil {
 		return "", fmt.Errorf("failed to update model config: %w", err)
 	}
 
@@ -336,7 +336,7 @@ func (a *Agent) cmdSummarize(ctx context.Context, sessionID string) (string, err
 
 // cmdSetReasoningEffort sets the reasoning effort level for OpenAI-style models.
 func (a *Agent) cmdSetReasoningEffort(ctx context.Context, args []string) (string, error) {
-	cfg := config.Get()
+	cfg := a.app.Config()
 	agentCfg := cfg.Agents[config.AgentCoder]
 	model := cfg.GetModelByType(agentCfg.Model)
 
@@ -373,7 +373,7 @@ func (a *Agent) cmdSetReasoningEffort(ctx context.Context, args []string) (strin
 	currentModel := cfg.Models[agentCfg.Model]
 	currentModel.ReasoningEffort = effort
 
-	if err := cfg.UpdatePreferredModel(agentCfg.Model, currentModel); err != nil {
+	if err := a.app.Store().UpdatePreferredModel(config.ScopeGlobal, agentCfg.Model, currentModel); err != nil {
 		return "", fmt.Errorf("failed to update model config: %w", err)
 	}
 
@@ -466,7 +466,7 @@ func (a *Agent) translateHistoryPart(role message.MessageRole, part message.Cont
 // buildSessionModelState constructs the model state for session responses,
 // listing all available models and the currently selected one.
 func (a *Agent) buildSessionModelState() *acp.SessionModelState {
-	cfg := config.Get()
+	cfg := a.app.Config()
 	if cfg == nil {
 		return nil
 	}

@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"maps"
 	"os"
@@ -17,7 +16,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/catwalk/pkg/catwalk"
+	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
@@ -25,27 +24,14 @@ import (
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/log"
 	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
+	"github.com/qjebbs/go-jsons"
 )
 
 const defaultCatwalkURL = "https://catwalk.charm.sh"
 
-// LoadReader config via io.Reader.
-func LoadReader(fd io.Reader) (*Config, error) {
-	data, err := io.ReadAll(fd)
-	if err != nil {
-		return nil, err
-	}
-
-	var config Config
-	err = json.Unmarshal(data, &config)
-	if err != nil {
-		return nil, err
-	}
-	return &config, err
-}
-
-// Load loads the configuration from the default paths.
-func Load(workingDir, dataDir string, debug bool) (*Config, error) {
+// Load loads the configuration from the default paths and returns a
+// ConfigStore that owns both the pure-data Config and all runtime state.
+func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	configPaths := lookupConfigs(workingDir)
 
 	cfg, err := loadFromConfigPaths(configPaths)
@@ -53,9 +39,14 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 		return nil, fmt.Errorf("failed to load config from paths %v: %w", configPaths, err)
 	}
 
-	cfg.dataConfigDir = GlobalConfigData()
-
 	cfg.setDefaults(workingDir, dataDir)
+
+	store := &ConfigStore{
+		config:         cfg,
+		workingDir:     workingDir,
+		globalDataPath: GlobalConfigData(),
+		workspacePath:  filepath.Join(cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName)),
+	}
 
 	if debug {
 		cfg.Options.Debug = true
@@ -67,6 +58,18 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 		cfg.Options.Debug,
 	)
 
+	// Load workspace config last so it has highest priority.
+	if wsData, err := os.ReadFile(store.workspacePath); err == nil && len(wsData) > 0 {
+		merged, mergeErr := loadFromBytes(append([][]byte{mustMarshalConfig(cfg)}, wsData))
+		if mergeErr == nil {
+			// Preserve defaults that setDefaults already applied.
+			dataDir := cfg.Options.DataDirectory
+			*cfg = *merged
+			cfg.setDefaults(workingDir, dataDir)
+			store.config = cfg
+		}
+	}
+
 	if !isInsideWorktree() {
 		const depth = 2
 		const items = 100
@@ -77,35 +80,50 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 		assignIfNil(&cfg.Options.TUI.Completions.MaxItems, items)
 	}
 
+	if isAppleTerminal() {
+		slog.Warn("Detected Apple Terminal, enabling transparent mode")
+		assignIfNil(&cfg.Options.TUI.Transparent, true)
+	}
+
 	// Load known providers, this loads the config from catwalk
 	providers, err := Providers(cfg)
 	if err != nil {
 		return nil, err
 	}
-	cfg.knownProviders = providers
+	store.knownProviders = providers
 
 	env := env.New()
 	// Configure providers
 	valueResolver := NewShellVariableResolver(env)
-	cfg.resolver = valueResolver
-	if err := cfg.configureProviders(env, valueResolver, cfg.knownProviders); err != nil {
+	store.resolver = valueResolver
+	if err := cfg.configureProviders(store, env, valueResolver, store.knownProviders); err != nil {
 		return nil, fmt.Errorf("failed to configure providers: %w", err)
 	}
 
 	if !cfg.IsConfigured() {
 		slog.Warn("No providers configured")
-		return cfg, nil
+		return store, nil
 	}
 
-	if err := cfg.configureSelectedModels(cfg.knownProviders); err != nil {
+	if err := configureSelectedModels(store, store.knownProviders); err != nil {
 		return nil, fmt.Errorf("failed to configure selected models: %w", err)
 	}
-	cfg.SetupAgents()
-	return cfg, nil
+	store.SetupAgents()
+	return store, nil
+}
+
+// mustMarshalConfig marshals the config to JSON bytes, returning empty JSON on
+// error.
+func mustMarshalConfig(cfg *Config) []byte {
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return []byte("{}")
+	}
+	return data
 }
 
 func PushPopCrushEnv() func() {
-	found := []string{}
+	var found []string
 	for _, ev := range os.Environ() {
 		if strings.HasPrefix(ev, "CRUSH_") {
 			pair := strings.SplitN(ev, "=", 2)
@@ -132,10 +150,18 @@ func PushPopCrushEnv() func() {
 	return restore
 }
 
-func (c *Config) configureProviders(env env.Env, resolver VariableResolver, knownProviders []catwalk.Provider) error {
+func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver VariableResolver, knownProviders []catwalk.Provider) error {
 	knownProviderNames := make(map[string]bool)
 	restore := PushPopCrushEnv()
 	defer restore()
+
+	// When disable_default_providers is enabled, skip all default/embedded
+	// providers entirely. Users must fully specify any providers they want.
+	// We skip to the custom provider validation loop which handles all
+	// user-configured providers uniformly.
+	if c.Options.DisableDefaultProviders {
+		knownProviders = nil
+	}
 
 	for _, p := range knownProviders {
 		knownProviderNames[string(p.ID)] = true
@@ -184,6 +210,14 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 		if len(config.ExtraHeaders) > 0 {
 			maps.Copy(headers, config.ExtraHeaders)
 		}
+		for k, v := range headers {
+			resolved, err := resolver.ResolveValue(v)
+			if err != nil {
+				slog.Error("Could not resolve provider header", "err", err.Error())
+				continue
+			}
+			headers[k] = resolved
+		}
 		prepared := ProviderConfig{
 			ID:                 string(p.ID),
 			Name:               p.Name,
@@ -202,25 +236,30 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 
 		switch {
 		case p.ID == catwalk.InferenceProviderAnthropic && config.OAuthToken != nil:
-			prepared.SetupClaudeCode()
-		case p.ID == catwalk.InferenceProviderCopilot:
-			if config.OAuthToken != nil {
-				prepared.SetupGitHubCopilot()
-			}
+			// Claude Code subscription is not supported anymore. Remove to show onboarding.
+			store.RemoveConfigField(ScopeGlobal, "providers.anthropic")
+			c.Providers.Del(string(p.ID))
+			continue
+		case p.ID == catwalk.InferenceProviderCopilot && config.OAuthToken != nil:
+			prepared.SetupGitHubCopilot()
 		}
 
 		switch p.ID {
 		// Handle specific providers that require additional configuration
 		case catwalk.InferenceProviderVertexAI:
-			if !hasVertexCredentials(env) {
+			var (
+				project  = env.Get("VERTEXAI_PROJECT")
+				location = env.Get("VERTEXAI_LOCATION")
+			)
+			if project == "" || location == "" {
 				if configExists {
 					slog.Warn("Skipping Vertex AI provider due to missing credentials")
 					c.Providers.Del(string(p.ID))
 				}
 				continue
 			}
-			prepared.ExtraParams["project"] = env.Get("VERTEXAI_PROJECT")
-			prepared.ExtraParams["location"] = env.Get("VERTEXAI_LOCATION")
+			prepared.ExtraParams["project"] = project
+			prepared.ExtraParams["location"] = location
 		case catwalk.InferenceProviderAzure:
 			endpoint, err := resolver.ResolveValue(p.APIEndpoint)
 			if err != nil || endpoint == "" {
@@ -271,13 +310,9 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 
 		// Make sure the provider ID is set
 		providerConfig.ID = id
-		if providerConfig.Name == "" {
-			providerConfig.Name = id // Use ID as name if not set
-		}
+		providerConfig.Name = cmp.Or(providerConfig.Name, id) // Use ID as name if not set
 		// default to OpenAI if not set
-		if providerConfig.Type == "" {
-			providerConfig.Type = catwalk.TypeOpenAICompat
-		}
+		providerConfig.Type = cmp.Or(providerConfig.Type, catwalk.TypeOpenAICompat)
 		if !slices.Contains(catwalk.KnownProviderTypes(), providerConfig.Type) && providerConfig.Type != hyper.Name {
 			slog.Warn("Skipping custom provider due to unsupported provider type", "provider", id)
 			c.Providers.Del(id)
@@ -313,24 +348,31 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 			continue
 		}
 
+		for k, v := range providerConfig.ExtraHeaders {
+			resolved, err := resolver.ResolveValue(v)
+			if err != nil {
+				slog.Error("Could not resolve provider header", "err", err.Error())
+				continue
+			}
+			providerConfig.ExtraHeaders[k] = resolved
+		}
+
 		c.Providers.Set(id, providerConfig)
 	}
+
+	if c.Providers.Len() == 0 && c.Options.DisableDefaultProviders {
+		return fmt.Errorf("default providers are disabled and there are no custom providers are configured")
+	}
+
 	return nil
 }
 
 func (c *Config) setDefaults(workingDir, dataDir string) {
-	c.workingDir = workingDir
 	if c.Options == nil {
 		c.Options = &Options{}
 	}
 	if c.Options.TUI == nil {
 		c.Options.TUI = &TUIOptions{}
-	}
-	if c.Options.ContextPaths == nil {
-		c.Options.ContextPaths = []string{}
-	}
-	if c.Options.SkillsPaths == nil {
-		c.Options.SkillsPaths = []string{}
 	}
 	if dataDir != "" {
 		c.Options.DataDirectory = dataDir
@@ -365,14 +407,19 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	slices.Sort(c.Options.ContextPaths)
 	c.Options.ContextPaths = slices.Compact(c.Options.ContextPaths)
 
-	// Add the default skills directory if not already present.
-	defaultSkillsDir := GlobalSkillsDir()
-	if !slices.Contains(c.Options.SkillsPaths, defaultSkillsDir) {
-		c.Options.SkillsPaths = append([]string{defaultSkillsDir}, c.Options.SkillsPaths...)
+	// Add the default skills directories if not already present.
+	for _, dir := range GlobalSkillsDirs() {
+		if !slices.Contains(c.Options.SkillsPaths, dir) {
+			c.Options.SkillsPaths = append(c.Options.SkillsPaths, dir)
+		}
 	}
 
 	if str, ok := os.LookupEnv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE"); ok {
 		c.Options.DisableProviderAutoUpdate, _ = strconv.ParseBool(str)
+	}
+
+	if str, ok := os.LookupEnv("CRUSH_DISABLE_DEFAULT_PROVIDERS"); ok {
+		c.Options.DisableDefaultProviders, _ = strconv.ParseBool(str)
 	}
 
 	if c.Options.Attribution == nil {
@@ -392,9 +439,7 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 			c.Options.Attribution.TrailerStyle = TrailerStyleAssistedBy
 		}
 	}
-	if c.Options.InitializeAs == "" {
-		c.Options.InitializeAs = defaultInitializeAs
-	}
+	c.Options.InitializeAs = cmp.Or(c.Options.InitializeAs, defaultInitializeAs)
 }
 
 // applyLSPDefaults applies default values from powernap to LSP configurations
@@ -425,9 +470,7 @@ func (c *Config) applyLSPDefaults() {
 		if len(cfg.RootMarkers) == 0 {
 			cfg.RootMarkers = base.RootMarkers
 		}
-		if cfg.Command == "" {
-			cfg.Command = base.Command
-		}
+		cfg.Command = cmp.Or(cfg.Command, base.Command)
 		if len(cfg.Args) == 0 {
 			cfg.Args = base.Args
 		}
@@ -508,7 +551,8 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 	return largeModel, smallModel, err
 }
 
-func (c *Config) configureSelectedModels(knownProviders []catwalk.Provider) error {
+func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provider) error {
+	c := store.config
 	defaultLarge, defaultSmall, err := c.defaultModelSelection(knownProviders)
 	if err != nil {
 		return fmt.Errorf("failed to select default models: %w", err)
@@ -527,7 +571,7 @@ func (c *Config) configureSelectedModels(knownProviders []catwalk.Provider) erro
 		if model == nil {
 			large = defaultLarge
 			// override the model type to large
-			err := c.UpdatePreferredModel(SelectedModelTypeLarge, large)
+			err := store.UpdatePreferredModel(ScopeGlobal, SelectedModelTypeLarge, large)
 			if err != nil {
 				return fmt.Errorf("failed to update preferred large model: %w", err)
 			}
@@ -571,7 +615,7 @@ func (c *Config) configureSelectedModels(knownProviders []catwalk.Provider) erro
 		if model == nil {
 			small = defaultSmall
 			// override the model type to small
-			err := c.UpdatePreferredModel(SelectedModelTypeSmall, small)
+			err := store.UpdatePreferredModel(ScopeGlobal, SelectedModelTypeSmall, small)
 			if err != nil {
 				return fmt.Errorf("failed to update preferred small model: %w", err)
 			}
@@ -630,41 +674,39 @@ func lookupConfigs(cwd string) []string {
 }
 
 func loadFromConfigPaths(configPaths []string) (*Config, error) {
-	var configs []io.Reader
+	var configs [][]byte
 
 	for _, path := range configPaths {
-		fd, err := os.Open(path)
+		data, err := os.ReadFile(path)
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
 			}
 			return nil, fmt.Errorf("failed to open config file %s: %w", path, err)
 		}
-		defer fd.Close()
-
-		configs = append(configs, fd)
+		if len(data) == 0 {
+			continue
+		}
+		configs = append(configs, data)
 	}
 
-	return loadFromReaders(configs)
+	return loadFromBytes(configs)
 }
 
-func loadFromReaders(readers []io.Reader) (*Config, error) {
-	if len(readers) == 0 {
+func loadFromBytes(configs [][]byte) (*Config, error) {
+	if len(configs) == 0 {
 		return &Config{}, nil
 	}
 
-	merged, err := Merge(readers)
+	data, err := jsons.Merge(configs)
 	if err != nil {
-		return nil, fmt.Errorf("failed to merge configuration readers: %w", err)
+		return nil, err
 	}
-
-	return LoadReader(merged)
-}
-
-func hasVertexCredentials(env env.Env) bool {
-	hasProject := env.Get("VERTEXAI_PROJECT") != ""
-	hasLocation := env.Get("VERTEXAI_LOCATION") != ""
-	return hasProject && hasLocation
+	var config Config
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, err
+	}
+	return &config, nil
 }
 
 func hasAWSCredentials(env env.Env) bool {
@@ -746,24 +788,31 @@ func isInsideWorktree() bool {
 	return err == nil && strings.TrimSpace(string(bts)) == "true"
 }
 
-// GlobalSkillsDir returns the default directory for Agent Skills.
-// Skills in this directory are auto-discovered and their files can be read
+// GlobalSkillsDirs returns the default directories for Agent Skills.
+// Skills in these directories are auto-discovered and their files can be read
 // without permission prompts.
-func GlobalSkillsDir() string {
+func GlobalSkillsDirs() []string {
 	if crushSkills := os.Getenv("CRUSH_SKILLS_DIR"); crushSkills != "" {
-		return crushSkills
-	}
-	if xdgConfigHome := os.Getenv("XDG_CONFIG_HOME"); xdgConfigHome != "" {
-		return filepath.Join(xdgConfigHome, appName, "skills")
+		return []string{crushSkills}
 	}
 
-	if runtime.GOOS == "windows" {
-		localAppData := cmp.Or(
+	// Determine the base config directory.
+	var configBase string
+	if xdgConfigHome := os.Getenv("XDG_CONFIG_HOME"); xdgConfigHome != "" {
+		configBase = xdgConfigHome
+	} else if runtime.GOOS == "windows" {
+		configBase = cmp.Or(
 			os.Getenv("LOCALAPPDATA"),
 			filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local"),
 		)
-		return filepath.Join(localAppData, appName, "skills")
+	} else {
+		configBase = filepath.Join(home.Dir(), ".config")
 	}
 
-	return filepath.Join(home.Dir(), ".config", appName, "skills")
+	return []string{
+		filepath.Join(configBase, appName, "skills"),
+		filepath.Join(configBase, "agents", "skills"),
+	}
 }
+
+func isAppleTerminal() bool { return os.Getenv("TERM_PROGRAM") == "Apple_Terminal" }

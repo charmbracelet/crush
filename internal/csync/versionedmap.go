@@ -40,6 +40,11 @@ func (m *VersionedMap[K, V]) Seq2() iter.Seq2[K, V] {
 	return m.m.Seq2()
 }
 
+// Copy returns a copy of the inner map.
+func (m *VersionedMap[K, V]) Copy() map[K]V {
+	return m.m.Copy()
+}
+
 // Len returns the number of items in the map.
 func (m *VersionedMap[K, V]) Len() int {
 	return m.m.Len()

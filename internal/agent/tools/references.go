@@ -15,7 +15,6 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
-	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
@@ -26,7 +25,7 @@ type ReferencesParams struct {
 }
 
 type referencesTool struct {
-	lspClients *csync.Map[string, *lsp.Client]
+	lspManager *lsp.Manager
 }
 
 const ReferencesToolName = "lsp_references"
@@ -34,7 +33,7 @@ const ReferencesToolName = "lsp_references"
 //go:embed references.md
 var referencesDescription []byte
 
-func NewReferencesTool(lspClients *csync.Map[string, *lsp.Client]) fantasy.AgentTool {
+func NewReferencesTool(lspManager *lsp.Manager) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		ReferencesToolName,
 		string(referencesDescription),
@@ -43,7 +42,7 @@ func NewReferencesTool(lspClients *csync.Map[string, *lsp.Client]) fantasy.Agent
 				return fantasy.NewTextErrorResponse("symbol is required"), nil
 			}
 
-			if lspClients.Len() == 0 {
+			if lspManager.Clients().Len() == 0 {
 				return fantasy.NewTextErrorResponse("no LSP clients available"), nil
 			}
 
@@ -61,7 +60,7 @@ func NewReferencesTool(lspClients *csync.Map[string, *lsp.Client]) fantasy.Agent
 			var allLocations []protocol.Location
 			var allErrs error
 			for _, match := range matches {
-				locations, err := find(ctx, lspClients, params.Symbol, match)
+				locations, err := find(ctx, lspManager, params.Symbol, match)
 				if err != nil {
 					if strings.Contains(err.Error(), "no identifier found") {
 						// grep probably matched a comment, string value, or something else that's irrelevant
@@ -72,7 +71,11 @@ func NewReferencesTool(lspClients *csync.Map[string, *lsp.Client]) fantasy.Agent
 					continue
 				}
 				allLocations = append(allLocations, locations...)
-				// XXX: should we break here or look for all results?
+				// Once we have results, we're done - LSP returns all references
+				// for the symbol, not just from this file.
+				if len(locations) > 0 {
+					break
+				}
 			}
 
 			if len(allLocations) > 0 {
@@ -91,14 +94,14 @@ func (r *referencesTool) Name() string {
 	return ReferencesToolName
 }
 
-func find(ctx context.Context, lspClients *csync.Map[string, *lsp.Client], symbol string, match grepMatch) ([]protocol.Location, error) {
+func find(ctx context.Context, lspManager *lsp.Manager, symbol string, match grepMatch) ([]protocol.Location, error) {
 	absPath, err := filepath.Abs(match.path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get absolute path: %s", err)
 	}
 
 	var client *lsp.Client
-	for c := range lspClients.Seq() {
+	for c := range lspManager.Clients().Seq() {
 		if c.HandlesFile(absPath) {
 			client = c
 			break
@@ -173,15 +176,15 @@ func formatReferences(locations []protocol.Location) string {
 	sort.Strings(files)
 
 	var output strings.Builder
-	output.WriteString(fmt.Sprintf("Found %d reference(s) in %d file(s):\n\n", len(locations), len(files)))
+	fmt.Fprintf(&output, "Found %d reference(s) in %d file(s):\n\n", len(locations), len(files))
 
 	for _, file := range files {
 		refs := fileRefs[file]
-		output.WriteString(fmt.Sprintf("%s (%d reference(s)):\n", file, len(refs)))
+		fmt.Fprintf(&output, "%s (%d reference(s)):\n", file, len(refs))
 		for _, ref := range refs {
 			line := ref.Range.Start.Line + 1
 			char := ref.Range.Start.Character + 1
-			output.WriteString(fmt.Sprintf("  Line %d, Column %d\n", line, char))
+			fmt.Fprintf(&output, "  Line %d, Column %d\n", line, char)
 		}
 		output.WriteString("\n")
 	}

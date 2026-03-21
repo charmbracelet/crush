@@ -19,6 +19,8 @@ import (
 // BrowserUserAgent is a realistic browser User-Agent for better compatibility.
 const BrowserUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
+var multipleNewlinesRe = regexp.MustCompile(`\n{3,}`)
+
 // FetchURLAndConvert fetches a URL and converts HTML content to markdown.
 func FetchURLAndConvert(ctx context.Context, client *http.Client, url string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
@@ -128,8 +130,7 @@ func removeNoisyElements(htmlContent string) string {
 // cleanupMarkdown removes excessive whitespace and blank lines from markdown.
 func cleanupMarkdown(content string) string {
 	// Collapse multiple blank lines into at most two.
-	multipleNewlines := regexp.MustCompile(`\n{3,}`)
-	content = multipleNewlines.ReplaceAllString(content, "\n\n")
+	content = multipleNewlinesRe.ReplaceAllString(content, "\n\n")
 
 	// Remove trailing whitespace from each line.
 	lines := strings.Split(content, "\n")

@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/filepathext"
+	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
 
@@ -35,13 +35,6 @@ type WritePermissionsParams struct {
 	NewContent string `json:"new_content,omitempty"`
 }
 
-type writeTool struct {
-	lspClients  *csync.Map[string, *lsp.Client]
-	permissions permission.Service
-	files       history.Service
-	workingDir  string
-}
-
 type WriteResponseMetadata struct {
 	FilePath   string `json:"file_path"`
 	OldContent string `json:"old_content,omitempty"`
@@ -53,7 +46,13 @@ type WriteResponseMetadata struct {
 
 const WriteToolName = "write"
 
-func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permission.Service, files history.Service, workingDir string) fantasy.AgentTool {
+func NewWriteTool(
+	lspManager *lsp.Manager,
+	permissions permission.Service,
+	files history.Service,
+	filetracker filetracker.Service,
+	workingDir string,
+) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		WriteToolName,
 		string(writeDescription),
@@ -66,6 +65,11 @@ func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permis
 				return fantasy.NewTextErrorResponse("content is required"), nil
 			}
 
+			sessionID := GetSessionFromContext(ctx)
+			if sessionID == "" {
+				return fantasy.ToolResponse{}, fmt.Errorf("session_id is required")
+			}
+
 			filePath := filepathext.SmartJoin(workingDir, params.FilePath)
 
 			fileInfo, err := os.Stat(filePath)
@@ -74,8 +78,8 @@ func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permis
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("Path is a directory, not a file: %s", filePath)), nil
 				}
 
-				modTime := fileInfo.ModTime()
-				lastRead := getLastReadTime(filePath)
+				modTime := fileInfo.ModTime().Truncate(time.Second)
+				lastRead := filetracker.LastReadTime(ctx, sessionID, filePath)
 				if modTime.After(lastRead) {
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("File %s has been modified since it was last read.\nLast modification: %s\nLast read: %s\n\nPlease read the file again before modifying it.",
 						filePath, modTime.Format(time.RFC3339), lastRead.Format(time.RFC3339))), nil
@@ -102,18 +106,13 @@ func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permis
 				}
 			}
 
-			sessionID := GetSessionFromContext(ctx)
-			if sessionID == "" {
-				return fantasy.ToolResponse{}, fmt.Errorf("session_id is required")
-			}
-
 			diff, additions, removals := diff.GenerateDiff(
 				oldContent,
 				params.Content,
 				strings.TrimPrefix(filePath, workingDir),
 			)
 
-			p := permissions.Request(
+			p, err := permissions.Request(ctx,
 				permission.CreatePermissionRequest{
 					SessionID:   sessionID,
 					Path:        fsext.PathOrPrefix(filePath, workingDir),
@@ -128,6 +127,9 @@ func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permis
 					},
 				},
 			)
+			if err != nil {
+				return fantasy.ToolResponse{}, err
+			}
 			if !p {
 				return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 			}
@@ -147,7 +149,7 @@ func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permis
 				}
 			}
 			if file.Content != oldContent {
-				// User Manually changed the content store an intermediate version
+				// User manually changed the content; store an intermediate version
 				_, err = files.CreateVersion(ctx, sessionID, filePath, oldContent)
 				if err != nil {
 					slog.Error("Error creating file history version", "error", err)
@@ -159,14 +161,13 @@ func NewWriteTool(lspClients *csync.Map[string, *lsp.Client], permissions permis
 				slog.Error("Error creating file history version", "error", err)
 			}
 
-			recordFileWrite(filePath)
-			recordFileRead(filePath)
+			filetracker.RecordRead(ctx, sessionID, filePath)
 
-			notifyLSPs(ctx, lspClients, params.FilePath)
+			notifyLSPs(ctx, lspManager, params.FilePath)
 
 			result := fmt.Sprintf("File successfully written: %s", filePath)
 			result = fmt.Sprintf("<result>\n%s\n</result>", result)
-			result += getDiagnostics(filePath, lspClients)
+			result += getDiagnostics(filePath, lspManager)
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(result),
 				WriteResponseMetadata{
 					FilePath:   filePath,

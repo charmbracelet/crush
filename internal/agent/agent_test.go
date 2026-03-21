@@ -14,6 +14,7 @@ import (
 	"charm.land/fantasy"
 	"charm.land/x/vcr"
 	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/stretchr/testify/assert"
@@ -663,8 +664,8 @@ func TestPromptTokensForUsage_OpenAIStyle(t *testing.T) {
 		OutputTokens: 45,
 	}
 
-	require.Equal(t, int64(120), promptTokensForUsage(usage))
-	require.Equal(t, int64(165), totalTokensForUsage(usage))
+	require.Equal(t, int64(120), promptTokensForUsage(usage, "openai"))
+	require.Equal(t, int64(165), totalTokensForUsage(usage, "openai"))
 }
 
 func TestPromptTokensForUsage_AnthropicCacheStyle(t *testing.T) {
@@ -677,8 +678,15 @@ func TestPromptTokensForUsage_AnthropicCacheStyle(t *testing.T) {
 		OutputTokens:        45,
 	}
 
-	require.Equal(t, int64(1320), promptTokensForUsage(usage))
-	require.Equal(t, int64(1365), totalTokensForUsage(usage))
+	// Anthropic-style: InputTokens does NOT include cached tokens
+	require.Equal(t, int64(1320), promptTokensForUsage(usage, "anthropic"))
+	require.Equal(t, int64(1365), totalTokensForUsage(usage, "anthropic"))
+	require.Equal(t, int64(1365), totalTokensForUsage(usage, "@ai-sdk/anthropic"))
+	require.Equal(t, int64(1365), totalTokensForUsage(usage, "@ai-sdk/google-vertex/anthropic"))
+
+	// OpenAI-style: InputTokens ALREADY includes cached tokens
+	// So we don't add CacheReadTokens again (would be double-counting)
+	require.Equal(t, int64(420), promptTokensForUsage(usage, "openai")) // 120 + 300 (CacheCreation) + 0 (Reasoning)
 }
 
 func TestShouldAutoSummarize(t *testing.T) {
@@ -809,7 +817,7 @@ func TestUpdateSessionUsage_AccumulatesTotals(t *testing.T) {
 	t.Parallel()
 
 	agent := &sessionAgent{}
-	model := Model{CatwalkCfg: catwalk.Model{}}
+	model := Model{CatwalkCfg: catwalk.Model{}, ModelCfg: config.SelectedModel{Provider: "anthropic"}}
 	sess := session.Session{
 		PromptTokens:     1000,
 		CompletionTokens: 400,
@@ -825,11 +833,38 @@ func TestUpdateSessionUsage_AccumulatesTotals(t *testing.T) {
 
 	agent.updateSessionUsage(model, &sess, usage, nil, 0)
 
-	require.Equal(t, int64(2320), sess.PromptTokens)
+	// For Anthropic: promptTokens = InputTokens + CacheCreationTokens + CacheReadTokens
+	require.Equal(t, int64(2320), sess.PromptTokens) // 1000 + (120 + 300 + 900)
 	require.Equal(t, int64(445), sess.CompletionTokens)
 	require.GreaterOrEqual(t, sess.Cost, 1.25)
 	// LastPromptTokens should reflect only this step's input tokens (SET, not +=).
+	require.Equal(t, int64(1320), sess.LastPromptTokens) // 120 + 300 + 900
+}
+
+func TestUpdateSessionUsage_AccumulatesTotals_AnthropicSDKProviderName(t *testing.T) {
+	t.Parallel()
+
+	agent := &sessionAgent{}
+	model := Model{
+		CatwalkCfg: catwalk.Model{},
+		ModelCfg:   config.SelectedModel{Provider: "openai"},
+		Model:      anthropicProviderLanguageModel{},
+	}
+	sess := session.Session{}
+
+	usage := fantasy.Usage{
+		InputTokens:         120,
+		CacheCreationTokens: 300,
+		CacheReadTokens:     900,
+		OutputTokens:        45,
+	}
+
+	agent.updateSessionUsage(model, &sess, usage, nil, 0)
+
+	// Model.Provider() = "@ai-sdk/anthropic" should be treated as Anthropic-style usage.
+	require.Equal(t, int64(1320), sess.PromptTokens)
 	require.Equal(t, int64(1320), sess.LastPromptTokens)
+	require.Equal(t, int64(45), sess.CompletionTokens)
 }
 
 func TestUpdateSessionUsage_LastPromptTokensIsSetNotAccumulated(t *testing.T) {
@@ -839,7 +874,7 @@ func TestUpdateSessionUsage_LastPromptTokensIsSetNotAccumulated(t *testing.T) {
 	// input tokens, not a cumulative sum. This is used for the context
 	// window display and summarization threshold.
 	agent := &sessionAgent{}
-	model := Model{CatwalkCfg: catwalk.Model{}}
+	model := Model{CatwalkCfg: catwalk.Model{}, ModelCfg: config.SelectedModel{Provider: "anthropic"}}
 	sess := session.Session{}
 
 	firstUsage := fantasy.Usage{
@@ -866,7 +901,7 @@ func TestUpdateSessionUsage_FallbackToEstimatedTokens(t *testing.T) {
 	t.Parallel()
 
 	agent := &sessionAgent{}
-	model := Model{CatwalkCfg: catwalk.Model{}}
+	model := Model{CatwalkCfg: catwalk.Model{}, ModelCfg: config.SelectedModel{Provider: "anthropic"}}
 	sess := session.Session{}
 
 	// Simulate a proxy that doesn't report input tokens in streaming mode.
@@ -891,7 +926,7 @@ func TestUpdateSessionUsage_PreferAPIOverEstimate(t *testing.T) {
 	t.Parallel()
 
 	agent := &sessionAgent{}
-	model := Model{CatwalkCfg: catwalk.Model{}}
+	model := Model{CatwalkCfg: catwalk.Model{}, ModelCfg: config.SelectedModel{Provider: "anthropic"}}
 	sess := session.Session{}
 
 	// Real Anthropic correctly reports input tokens.
@@ -906,7 +941,7 @@ func TestUpdateSessionUsage_PreferAPIOverEstimate(t *testing.T) {
 	agent.updateSessionUsage(model, &sess, usage, nil, estimatedTokens)
 
 	// API value (68+4185=4253) should be preferred over the estimate (3500)
-	// because it is more than half the estimate.
+	// because the API value exceeds the estimate.
 	require.Equal(t, int64(4253), sess.LastPromptTokens)
 	require.Equal(t, int64(4253), sess.PromptTokens)
 }
@@ -915,7 +950,7 @@ func TestUpdateSessionUsage_FallbackWhenAPIUnderReports(t *testing.T) {
 	t.Parallel()
 
 	agent := &sessionAgent{}
-	model := Model{CatwalkCfg: catwalk.Model{}}
+	model := Model{CatwalkCfg: catwalk.Model{}, ModelCfg: config.SelectedModel{Provider: "anthropic"}}
 	sess := session.Session{}
 
 	// Simulate a proxy that under-reports input tokens (e.g., only user
@@ -928,8 +963,31 @@ func TestUpdateSessionUsage_FallbackWhenAPIUnderReports(t *testing.T) {
 	estimatedTokens := int64(18500) // includes system prompt + tools
 	agent.updateSessionUsage(model, &sess, usage, nil, estimatedTokens)
 
-	// API reports 95 which is < estimatedTokens/2 (9250), so the
+	// API reports 95 which is < estimatedTokens (18500), so the
 	// estimate should be used instead.
+	require.Equal(t, estimatedTokens, sess.LastPromptTokens)
+	require.Equal(t, estimatedTokens, sess.PromptTokens)
+}
+
+func TestUpdateSessionUsage_FallbackWhenAPIReportsStaleValue(t *testing.T) {
+	t.Parallel()
+
+	agent := &sessionAgent{}
+	model := Model{CatwalkCfg: catwalk.Model{}, ModelCfg: config.SelectedModel{Provider: "anthropic"}}
+	sess := session.Session{}
+
+	// Simulate a proxy that returns a constant (stale) input token count
+	// that does not grow across tool-call steps.
+	usage := fantasy.Usage{
+		InputTokens:  5000,
+		OutputTokens: 200,
+	}
+
+	estimatedTokens := int64(8000) // estimate grew with messages
+	agent.updateSessionUsage(model, &sess, usage, nil, estimatedTokens)
+
+	// API reports 5000 which is less than the estimate (8000). The
+	// estimate should be used to keep the context display growing.
 	require.Equal(t, estimatedTokens, sess.LastPromptTokens)
 	require.Equal(t, estimatedTokens, sess.PromptTokens)
 }
@@ -997,3 +1055,15 @@ func (m *mockAgentTool) Run(_ context.Context, _ fantasy.ToolCall) (fantasy.Tool
 
 func (m *mockAgentTool) ProviderOptions() fantasy.ProviderOptions     { return nil }
 func (m *mockAgentTool) SetProviderOptions(_ fantasy.ProviderOptions) {}
+
+type anthropicProviderLanguageModel struct {
+	stubLanguageModel
+}
+
+func (anthropicProviderLanguageModel) Provider() string {
+	return "@ai-sdk/anthropic"
+}
+
+func (anthropicProviderLanguageModel) Model() string {
+	return "test-model"
+}

@@ -19,6 +19,10 @@ func (p *permissionTestPlugin) Name() string {
 	return p.name
 }
 
+func (p *permissionTestPlugin) Close(ctx context.Context) error {
+	return nil
+}
+
 func (p *permissionTestPlugin) Init(ctx context.Context, input plugin.PluginInput) (plugin.Hooks, error) {
 	return p.hooks, nil
 }

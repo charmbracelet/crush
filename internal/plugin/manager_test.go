@@ -29,6 +29,8 @@ func (p *testPlugin) Init(ctx context.Context, input PluginInput) (Hooks, error)
 	return p.hooks, p.initErr
 }
 
+func (p *testPlugin) Close(_ context.Context) error { return nil }
+
 func TestPluginRegister(t *testing.T) {
 	Reset()
 	defer Reset()

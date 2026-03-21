@@ -424,6 +424,7 @@ func (t ToolGrep) GetTimeout() time.Duration {
 type PluginConfig struct {
 	Name      string            `json:"name" jsonschema:"required,description=Unique plugin name,example=morph_compact"`
 	Type      string            `json:"type,omitempty" jsonschema:"description=Plugin transport type,enum=command,default=command"`
+	Mode      string            `json:"mode,omitempty" jsonschema:"description=Plugin execution mode,enum=transient,persistent,default=transient,description=transient spawns a new process per call; persistent reuses a long-running process over stdio"`
 	Command   string            `json:"command" jsonschema:"required,description=Command used to invoke the external plugin,example=node"`
 	Args      []string          `json:"args,omitempty" jsonschema:"description=Arguments passed to the plugin command"`
 	Env       map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables passed to the plugin command"`

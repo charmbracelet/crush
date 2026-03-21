@@ -154,6 +154,33 @@ func TestBoundedBuffer(t *testing.T) {
 	})
 }
 
+func TestResolveCommandPluginOutputMaxBytes(t *testing.T) {
+	t.Run("default_when_unset", func(t *testing.T) {
+		t.Setenv("CRUSH_PLUGIN_OUTPUT_MAX_BYTES", "")
+		require.Equal(t, commandPluginDefaultOutputMaxBytes, resolveCommandPluginOutputMaxBytes())
+	})
+
+	t.Run("default_when_invalid", func(t *testing.T) {
+		t.Setenv("CRUSH_PLUGIN_OUTPUT_MAX_BYTES", "invalid")
+		require.Equal(t, commandPluginDefaultOutputMaxBytes, resolveCommandPluginOutputMaxBytes())
+	})
+
+	t.Run("default_when_non_positive", func(t *testing.T) {
+		t.Setenv("CRUSH_PLUGIN_OUTPUT_MAX_BYTES", "0")
+		require.Equal(t, commandPluginDefaultOutputMaxBytes, resolveCommandPluginOutputMaxBytes())
+	})
+
+	t.Run("uses_env_value", func(t *testing.T) {
+		t.Setenv("CRUSH_PLUGIN_OUTPUT_MAX_BYTES", "2097152")
+		require.Equal(t, 2<<20, resolveCommandPluginOutputMaxBytes())
+	})
+
+	t.Run("clamps_to_maximum", func(t *testing.T) {
+		t.Setenv("CRUSH_PLUGIN_OUTPUT_MAX_BYTES", "999999999")
+		require.Equal(t, commandPluginMaxOutputMaxBytes, resolveCommandPluginOutputMaxBytes())
+	})
+}
+
 func mustJSON(v any) []byte {
 	data, err := json.Marshal(v)
 	if err != nil {

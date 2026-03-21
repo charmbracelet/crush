@@ -59,8 +59,9 @@ func cloneMessages(msgs []message.Message) []message.Message {
 
 func agentModelInfo(model Model) plugin.ModelInfo {
 	return plugin.ModelInfo{
-		ProviderID: model.ModelCfg.Provider,
-		ModelID:    model.ModelCfg.Model,
+		ProviderID:    model.ModelCfg.Provider,
+		ModelID:       model.ModelCfg.Model,
+		ContextWindow: int64(model.CatwalkCfg.ContextWindow),
 	}
 }
 

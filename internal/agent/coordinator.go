@@ -337,7 +337,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 					mergedOptions["effort"] = reasoningEffort
 				} else {
 					// Older Claude: use budget_tokens
-					budgetTokens := effortToBudgetTokens(reasoningEffort, model.CatwalkCfg.ID)
+					budgetTokens := effortToBudgetTokens(reasoningEffort)
 					mergedOptions["thinking"] = map[string]any{
 						"type":          "enabled",
 						"budget_tokens": budgetTokens,
@@ -351,7 +351,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 					// Older Claude: use budget_tokens
 					mergedOptions["thinking"] = map[string]any{
 						"type":          "enabled",
-						"budget_tokens": effortToBudgetTokens("medium", model.CatwalkCfg.ID),
+						"budget_tokens": effortToBudgetTokens("medium"),
 					}
 				}
 			}
@@ -418,7 +418,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 	return options
 }
 
-func effortToBudgetTokens(effort, modelID string) int {
+func effortToBudgetTokens(effort string) int {
 	// Budget tokens chosen to produce the correct reasoning_effort when translated by Copilot API
 	budgetMap := map[string]int{
 		"low":    2048,  // Will map to "low" in Copilot (1024 <= budget < 8192)

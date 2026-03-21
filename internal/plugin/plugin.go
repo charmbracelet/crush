@@ -236,8 +236,9 @@ type ShellEnvInput struct {
 
 // ModelInfo contains model identification information.
 type ModelInfo struct {
-	ProviderID string
-	ModelID    string
+	ProviderID    string
+	ModelID       string
+	ContextWindow int64 `json:"context_window,omitempty"`
 }
 
 // ProviderContext contains provider context information.
@@ -256,4 +257,8 @@ type Plugin interface {
 	// Returning an empty Hooks struct is valid if the plugin only wants to
 	// perform initialization logic.
 	Init(ctx context.Context, input PluginInput) (Hooks, error)
+
+	// Close shuts down the plugin, releasing any resources (e.g. persistent processes).
+	// Plugins that don't hold resources can return nil.
+	Close(ctx context.Context) error
 }

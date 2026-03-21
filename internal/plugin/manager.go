@@ -34,17 +34,58 @@ func Init(ctx context.Context, input PluginInput) error {
 	mu.Lock()
 	initializedHooks = nil
 	customTools = make(map[string]ToolDefinition)
-	registeredPlugins := append([]Plugin(nil), plugins...)
+
+	// Snapshot plugins that were manually registered (via Register) before we clear.
+	// These need to be re-initialized after Close since they don't have config to recreate them.
+	manuallyRegistered := append([]Plugin(nil), plugins...)
+
+	// Close all existing plugins before clearing to prevent process leaks.
+	for _, p := range plugins {
+		if err := p.Close(ctx); err != nil {
+			slog.Debug("Failed to close plugin during init", "name", p.Name(), "error", err)
+		}
+	}
+	plugins = nil
 	mu.Unlock()
 
 	configuredPlugins, err := newConfiguredPlugins(input)
 	if err != nil {
 		return err
 	}
-	registeredPlugins = append(registeredPlugins, configuredPlugins...)
+	// Register configured plugins so they appear in ListPlugins() and are
+	// properly closed by Close()/Reset(). This is safe because Reset() clears
+	// the plugins slice before tests that call Init() multiple times.
+	for _, p := range configuredPlugins {
+		Register(p)
+	}
 	toolSources := make(map[string]string)
 
-	for _, p := range registeredPlugins {
+	// Initialize manually registered plugins first (they were closed above and need re-init).
+	for _, p := range manuallyRegistered {
+		slog.Info("Initializing plugin", "name", p.Name())
+		h, err := p.Init(ctx, input)
+		if err != nil {
+			slog.Error("Failed to initialize plugin", "name", p.Name(), "error", err)
+			continue
+		}
+
+		mu.Lock()
+		initializedHooks = append(initializedHooks, h)
+		for name, tool := range h.Tools {
+			source := "plugin:" + p.Name()
+			if existingSource, exists := toolSources[name]; exists {
+				slog.Warn("Custom tool registration collision", "tool", name, "existing_source", existingSource, "overriding_source", source)
+			}
+			customTools[name] = tool
+			toolSources[name] = source
+		}
+		mu.Unlock()
+
+		slog.Info("Plugin initialized", "name", p.Name(), "tools", len(h.Tools))
+	}
+
+	// Then initialize newly configured plugins (fresh instances, not previously closed).
+	for _, p := range configuredPlugins {
 		slog.Info("Initializing plugin", "name", p.Name())
 		h, err := p.Init(ctx, input)
 		if err != nil {
@@ -393,14 +434,19 @@ func GetCustomTools() map[string]ToolDefinition {
 	return result
 }
 
-// ListPlugins returns the names of all registered plugins.
+// ListPlugins returns the names of all registered and configured plugins.
 func ListPlugins() []string {
 	mu.RLock()
 	defer mu.RUnlock()
 
-	names := make([]string, len(plugins))
-	for i, p := range plugins {
-		names[i] = p.Name()
+	seen := make(map[string]struct{})
+	for _, p := range plugins {
+		seen[p.Name()] = struct{}{}
+	}
+
+	names := make([]string, 0, len(seen))
+	for name := range seen {
+		names = append(names, name)
 	}
 	return names
 }
@@ -410,7 +456,28 @@ func ListPlugins() []string {
 func Reset() {
 	mu.Lock()
 	defer mu.Unlock()
+
+	// Close all plugins before clearing to release resources (e.g. persistent processes).
+	for _, p := range plugins {
+		if err := p.Close(context.Background()); err != nil {
+			slog.Debug("Failed to close plugin during reset", "name", p.Name(), "error", err)
+		}
+	}
+
 	plugins = nil
 	initializedHooks = nil
 	customTools = make(map[string]ToolDefinition)
+}
+
+// Close shuts down all registered plugins that hold resources (e.g. persistent processes).
+func Close(ctx context.Context) {
+	mu.RLock()
+	registeredPlugins := append([]Plugin(nil), plugins...)
+	mu.RUnlock()
+
+	for _, p := range registeredPlugins {
+		if err := p.Close(ctx); err != nil {
+			slog.Error("Failed to close plugin", "name", p.Name(), "error", err)
+		}
+	}
 }

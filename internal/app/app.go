@@ -639,6 +639,11 @@ func (app *App) Shutdown() {
 		app.LSPManager.KillAll(shutdownCtx)
 	})
 
+	// Shutdown all persistent plugins.
+	wg.Go(func() {
+		plugin.Close(shutdownCtx)
+	})
+
 	// Call all cleanup functions.
 	for _, cleanup := range app.cleanupFuncs {
 		if cleanup != nil {

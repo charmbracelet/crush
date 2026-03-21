@@ -91,6 +91,14 @@ func (s Session) LastExchangeTokens() int64 {
 	return s.LastPromptTokens + s.LastCompletionTokens
 }
 
+// LastTotalTokens returns the total token count for the last exchange,
+// including prompt tokens, completion tokens, and cached tokens.
+// This matches opencode's token counting approach for consistent UI display
+// and context window threshold calculations.
+func (s Session) LastTotalTokens() int64 {
+	return s.LastPromptTokens + s.LastCompletionTokens
+}
+
 type Service interface {
 	pubsub.Subscriber[Session]
 	Create(ctx context.Context, title string) (Session, error)

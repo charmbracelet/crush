@@ -138,6 +138,9 @@ type (
 	sessionFilesUpdatesMsg struct {
 		sessionFiles []SessionFile
 	}
+	sessionUsageRefreshedMsg struct {
+		session *session.Session
+	}
 )
 
 // UI represents the main user interface model.
@@ -493,6 +496,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmds = append(cmds, m.startLSPs(paths))
 
+	case sessionUsageRefreshedMsg:
+		if msg.session != nil && m.session != nil && msg.session.ID == m.session.ID {
+			m.session = msg.session
+		}
+
 	case sendMessageMsg:
 		cmds = append(cmds, m.sendMessage(msg.Content, msg.Attachments...))
 
@@ -577,6 +585,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.updateSessionMessage(msg.Payload))
 		case pubsub.DeletedEvent:
 			m.chat.RemoveMessage(msg.Payload.ID)
+		}
+		if m.shouldRefreshSessionUsage(msg.Type, msg.Payload) {
+			cmds = append(cmds, m.refreshCurrentSessionUsage())
 		}
 		// start the spinner if there is a new message
 		if hasInProgressTodo(m.session.Todos) && m.isAgentBusy() && !m.todoIsSpinning {
@@ -904,8 +915,15 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	m.latestProposedPlan = ""
 
 	// Add messages to chat with linked tool results
+	// Filter out incomplete summary messages that have no content (these are
+	// leftover loading states from interrupted summarization and should not
+	// be displayed when restoring a session).
 	items := make([]chat.MessageItem, 0, len(msgs)*2)
 	for _, msg := range msgPtrs {
+		// Skip incomplete summary messages with no content (interrupted loading states)
+		if msg.IsSummaryMessage && !msg.IsFinished() && strings.TrimSpace(msg.Content().Text) == "" {
+			continue
+		}
 		switch msg.Role {
 		case message.User:
 			m.lastUserMessageTime = msg.CreatedAt
@@ -926,11 +944,15 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	m.loadNestedToolCalls(items)
 
 	// If the user switches between sessions while the agent is working we want
-	// to make sure the animations are shown.
-	for _, item := range items {
-		if animatable, ok := item.(chat.Animatable); ok {
-			if cmd := animatable.StartAnimation(); cmd != nil {
-				cmds = append(cmds, cmd)
+	// to make sure the animations are shown. Only start animations if the
+	// agent is actually busy; otherwise we are restoring a historical session
+	// and nothing should be spinning.
+	if m.isAgentBusy() {
+		for _, item := range items {
+			if animatable, ok := item.(chat.Animatable); ok {
+				if cmd := animatable.StartAnimation(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			}
 		}
 	}
@@ -1146,6 +1168,7 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 		}
 	}
 
+	isCanceled := msg.FinishReason() == message.FinishReasonCanceled
 	var items []chat.MessageItem
 	for _, tc := range msg.ToolCalls() {
 		existingToolItem := m.chat.MessageItem(tc.ID)
@@ -1156,9 +1179,12 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 			if (tc.Finished && !existingToolCall.Finished) || tc.Input != existingToolCall.Input {
 				toolItem.SetToolCall(tc)
 			}
+			if isCanceled && toolItem.Status() != chat.ToolStatusCanceled {
+				toolItem.SetStatus(chat.ToolStatusCanceled)
+			}
 		}
 		if existingToolItem == nil {
-			items = append(items, chat.NewToolMessageItem(m.com.Styles, msg.ID, tc, nil, false))
+			items = append(items, chat.NewToolMessageItem(m.com.Styles, msg.ID, tc, nil, isCanceled))
 		}
 	}
 
@@ -3000,6 +3026,28 @@ func (m *UI) hasSession() bool {
 	return m.session != nil && m.session.ID != ""
 }
 
+func (m *UI) shouldRefreshSessionUsage(eventType pubsub.EventType, msg message.Message) bool {
+	if eventType != pubsub.UpdatedEvent || msg.Role != message.Assistant {
+		return false
+	}
+	finish := msg.FinishPart()
+	return finish != nil && finish.Time > 0
+}
+
+func (m *UI) refreshCurrentSessionUsage() tea.Cmd {
+	if !m.hasSession() {
+		return nil
+	}
+	sessionID := m.session.ID
+	return func() tea.Msg {
+		refreshed, err := m.com.App.Sessions.Get(context.Background(), sessionID)
+		if err != nil {
+			return util.ReportError(err)()
+		}
+		return sessionUsageRefreshedMsg{session: &refreshed}
+	}
+}
+
 // mimeOf detects the MIME type of the given content.
 func mimeOf(content []byte) string {
 	mimeBufferSize := min(512, len(content))
@@ -3104,18 +3152,18 @@ func (m *UI) executeApprovedPlan(sessionID, plan string) tea.Cmd {
 
 func (m *UI) runAgentMessage(content string, attachments ...message.Attachment) tea.Cmd {
 	ctx := context.Background()
-	cmds := []tea.Cmd{}
-	cmds = append(cmds, func() tea.Msg {
+
+	preRunCmd := func() tea.Msg {
 		for _, path := range m.sessionFileReads {
 			m.com.App.FileTracker.RecordRead(ctx, m.session.ID, path)
 			m.com.App.LSPManager.Start(ctx, path)
 		}
 		return nil
-	})
+	}
 
 	// Capture session ID to avoid race with main goroutine updating m.session.
 	sessionID := m.session.ID
-	cmds = append(cmds, func() tea.Msg {
+	runCmd := func() tea.Msg {
 		_, err := m.com.App.AgentCoordinator.Run(context.Background(), sessionID, content, attachments...)
 		if err != nil {
 			isCancelErr := errors.Is(err, context.Canceled)
@@ -3129,8 +3177,17 @@ func (m *UI) runAgentMessage(content string, attachments ...message.Attachment) 
 			}
 		}
 		return nil
-	})
-	return tea.Batch(cmds...)
+	}
+
+	refreshUsageCmd := func() tea.Msg {
+		refreshed, err := m.com.App.Sessions.Get(context.Background(), sessionID)
+		if err != nil {
+			return util.ReportError(err)()
+		}
+		return sessionUsageRefreshedMsg{session: &refreshed}
+	}
+
+	return tea.Sequence(preRunCmd, runCmd, refreshUsageCmd)
 }
 
 func isPlanApprovalMessage(content string) bool {
@@ -3540,6 +3597,14 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 
 	if time.Since(m.lastClipboardPasteShortcut) <= 500*time.Millisecond {
 		return nil
+	}
+
+	// If the terminal already provided text content, handle it directly.
+	// This avoids slow PowerShell calls on Windows when pasting plain text.
+	// When clipboard contains an image, terminals typically send empty Content,
+	// so we only check for image/file when Content is empty.
+	if msg.Content != "" {
+		return m.handleClipboardFallback(clipboardFallbackMsg{pasteMsg: msg})
 	}
 
 	// Try to paste image/file from clipboard first.

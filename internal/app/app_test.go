@@ -155,6 +155,10 @@ func (p *messageCreatedPlugin) Name() string {
 	return "message-created-plugin"
 }
 
+func (p *messageCreatedPlugin) Close(ctx context.Context) error {
+	return nil
+}
+
 func (p *messageCreatedPlugin) Init(ctx context.Context, input plugin.PluginInput) (plugin.Hooks, error) {
 	return plugin.Hooks{
 		MessageCreated: func(ctx context.Context, msg message.Message) error {

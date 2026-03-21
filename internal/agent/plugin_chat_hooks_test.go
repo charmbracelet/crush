@@ -24,6 +24,8 @@ func (p *chatHookTestPlugin) Init(context.Context, plugin.PluginInput) (plugin.H
 	return p.hooks, nil
 }
 
+func (p *chatHookTestPlugin) Close(context.Context) error { return nil }
+
 type chatHookTestAgent struct {
 	t            *testing.T
 	responseText string

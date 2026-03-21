@@ -1,26 +1,8 @@
 package agent
 
 import (
-	"slices"
-
-	"charm.land/fantasy"
-	agenttools "github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/session"
 )
-
-var planModeAllowedTools = []string{
-	agenttools.DiagnosticsToolName,
-	agenttools.FetchToolName,
-	agenttools.GlobToolName,
-	agenttools.GrepToolName,
-	agenttools.LSToolName,
-	agenttools.ListMCPResourcesToolName,
-	agenttools.ReadMCPResourceToolName,
-	agenttools.ReferencesToolName,
-	agenttools.RequestUserInputToolName,
-	agenttools.SourcegraphToolName,
-	agenttools.ViewToolName,
-}
 
 const planModeSystemPrompt = `<collaboration_mode>
 You are in Plan Mode.
@@ -46,20 +28,6 @@ Output rules:
 - The proposed plan should be concise but execution-ready.
 - Include the key files or subsystems to change, the main steps, important reuse points, and the validation approach.
 </collaboration_mode>`
-
-func filterToolsForMode(agentTools []fantasy.AgentTool, mode session.CollaborationMode) []fantasy.AgentTool {
-	if mode != session.CollaborationModePlan {
-		return agentTools
-	}
-
-	filtered := make([]fantasy.AgentTool, 0, len(agentTools))
-	for _, tool := range agentTools {
-		if slices.Contains(planModeAllowedTools, tool.Info().Name) {
-			filtered = append(filtered, tool)
-		}
-	}
-	return filtered
-}
 
 func collaborationModePrompt(mode session.CollaborationMode) string {
 	if mode == session.CollaborationModePlan {

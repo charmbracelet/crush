@@ -707,6 +707,29 @@ crush logs --tail 500
 crush logs --follow
 ```
 
+## Plugins
+
+Extend Crush with plugins that add new capabilities. Plugins are installed to `.crush/plugins/` in your project.
+
+```bash
+# Install morph-compact plugin (compresses conversation history)
+crush plugin install morph-compact
+
+# List installed plugins
+crush plugin list
+
+# Uninstall plugin
+crush plugin uninstall morph-compact
+```
+
+**Tip**: Crush uses **pnpm** by default for dependency installation to save disk space. Install pnpm for the best experience:
+
+```bash
+npm install -g pnpm
+```
+
+For more details, see [Plugin Installation Guide](docs/plugin-installation.md).
+
 Want more logging? Run `crush` with the `--debug` flag, or enable it in the
 config:
 

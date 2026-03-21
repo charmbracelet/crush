@@ -286,24 +286,26 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	if err != nil {
 		return nil, err
 	}
-	if !a.disableAutoSummarize && len(msgs) > 0 && shouldAutoSummarize(
-		a.estimateSessionPromptTokens(preflightState.History, call.Prompt, call.Attachments, agentTools, preflightState.SystemPrompt, preflightState.PromptPrefix),
-		int64(largeModel.CatwalkCfg.ContextWindow),
-		call.MaxOutputTokens,
-	) {
-		if truncErr := a.truncateOversizedToolResults(ctx, call.SessionID); truncErr != nil {
-			slog.Warn("Failed to truncate oversized tool results before preflight summarization", "error", truncErr, "session_id", call.SessionID)
-		}
-		if summarizeErr := a.Summarize(withSessionCompactingPurpose(copilot.ContextWithInitiatorType(ctx, copilot.InitiatorAgent), plugin.ChatTransformPurposeSummarize), call.SessionID, call.ProviderOptions); summarizeErr != nil {
-			return nil, summarizeErr
-		}
-		currentSession, err = a.sessions.Get(ctx, call.SessionID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to reload session after summarization: %w", err)
-		}
-		msgs, err = a.getSessionMessages(ctx, currentSession)
-		if err != nil {
-			return nil, fmt.Errorf("failed to reload session messages after summarization: %w", err)
+	if !a.disableAutoSummarize && len(msgs) > 0 {
+		// Estimate input tokens only. The shouldAutoSummarize function handles
+		// output token reservation internally, so we don't need to add maxOutputTokens here.
+		// This prevents double-counting the output reservation for large context models.
+		estimatedInput := a.estimateSessionPromptTokens(preflightState.History, call.Prompt, call.Attachments, agentTools, preflightState.SystemPrompt, preflightState.PromptPrefix)
+		if shouldAutoSummarize(estimatedInput, int64(largeModel.CatwalkCfg.ContextWindow), call.MaxOutputTokens) {
+			if truncErr := a.truncateOversizedToolResults(ctx, call.SessionID); truncErr != nil {
+				slog.Warn("Failed to truncate oversized tool results before preflight summarization", "error", truncErr, "session_id", call.SessionID)
+			}
+			if summarizeErr := a.Summarize(withSessionCompactingPurpose(copilot.ContextWithInitiatorType(ctx, copilot.InitiatorAgent), plugin.ChatTransformPurposeSummarize), call.SessionID, call.ProviderOptions); summarizeErr != nil {
+				return nil, summarizeErr
+			}
+			currentSession, err = a.sessions.Get(ctx, call.SessionID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to reload session after summarization: %w", err)
+			}
+			msgs, err = a.getSessionMessages(ctx, currentSession)
+			if err != nil {
+				return nil, fmt.Errorf("failed to reload session messages after summarization: %w", err)
+			}
 		}
 	}
 
@@ -581,8 +583,20 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 					projectedPromptTokens, estimateErr := a.estimateNextStepPromptTokens(genCtx, call.SessionID, agentTools, systemPrompt, promptPrefix, largeModel, providerCtx)
 					if estimateErr != nil {
 						slog.Warn("Failed to estimate next-step prompt tokens", "error", estimateErr, "session_id", call.SessionID)
-						projectedPromptTokens = currentSession.LastInputTokens()
+						// Fallback: use the higher of LastInputTokens or the current step's estimatedPromptTokens.
+						// estimatedPromptTokens is set during PrepareStep and reflects the actual messages
+						// that will be sent to the LLM, making it more accurate than LastInputTokens.
+						fallbackTokens := currentSession.LastInputTokens()
+						if estimatedPromptTokens > fallbackTokens {
+							fallbackTokens = estimatedPromptTokens
+							slog.Info("Using current step's estimatedPromptTokens as fallback", "estimatedPromptTokens", estimatedPromptTokens, "lastInputTokens", currentSession.LastInputTokens(), "session_id", call.SessionID)
+						} else {
+							slog.Info("Using LastInputTokens as fallback", "lastInputTokens", fallbackTokens, "session_id", call.SessionID)
+						}
+						projectedPromptTokens = fallbackTokens
 					}
+					// Pass input-only estimate to shouldAutoSummarize. The function
+					// handles output token reservation internally to avoid double-counting.
 					if shouldAutoSummarize(projectedPromptTokens, int64(largeModel.CatwalkCfg.ContextWindow), call.MaxOutputTokens) && !a.disableAutoSummarize {
 						shouldSummarize = true
 						return true
@@ -902,6 +916,122 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	return a.Run(ctx, firstQueuedMessage)
 }
 
+// isContextLengthError checks if the error is due to context length exceeding the model's limit.
+func isContextLengthError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	// Check for common context length error patterns from various providers.
+	// These patterns are specifically chosen to avoid matching rate limits or other errors.
+	contextLengthIndicators := []string{
+		"context window",
+		"context length",
+		"maximum context length",
+		"range of input length",
+		"context_too_long",
+		"context window exceeded",
+		"input length exceeds",
+		"prompt is too long",
+		"token limit exceeded",
+	}
+	lowerErr := strings.ToLower(errStr)
+	for _, indicator := range contextLengthIndicators {
+		if strings.Contains(lowerErr, indicator) {
+			return true
+		}
+	}
+	return false
+}
+
+// truncateMessagesToFit truncates messages to fit within the specified token limit.
+// It keeps the most recent messages and removes older ones until the estimated
+// token count is below the limit.
+// Note: System messages are excluded from the result. The caller is responsible
+// for adding appropriate system messages (e.g., via PrepareStep).
+func truncateMessagesToFit(msgs []fantasy.Message, maxTokens int64) []fantasy.Message {
+	if len(msgs) == 0 {
+		return msgs
+	}
+
+	// Always keep at least the last 2 messages (user request + assistant response).
+	minMessagesToKeep := 2
+	if len(msgs) <= minMessagesToKeep {
+		return msgs
+	}
+
+	// Calculate tokens for all messages.
+	type msgInfo struct {
+		index  int
+		tokens int64
+	}
+
+	msgInfos := make([]msgInfo, len(msgs))
+	var totalTokens int64
+	for i, msg := range msgs {
+		tokens := estimateSingleMessageTokens(msg)
+		msgInfos[i] = msgInfo{index: i, tokens: tokens}
+		totalTokens += tokens
+	}
+
+	// If already under limit, return as-is.
+	if totalTokens <= maxTokens {
+		return msgs
+	}
+
+	// Skip system messages at the beginning (they will be re-added by the caller's PrepareStep).
+	startIdx := 0
+	for startIdx < len(msgs) && msgs[startIdx].Role == fantasy.MessageRoleSystem {
+		startIdx++
+	}
+
+	// Subtract tokens for messages we already skipped (system messages).
+	for i := 0; i < startIdx; i++ {
+		totalTokens -= msgInfos[i].tokens
+	}
+
+	// Store original token count before removal.
+	originalTokens := totalTokens
+
+	// Remove from the oldest non-system message first.
+	for totalTokens > maxTokens && startIdx < len(msgs)-minMessagesToKeep {
+		totalTokens -= msgInfos[startIdx].tokens
+		startIdx++
+	}
+
+	slog.Info("Truncated messages for summarization",
+		"original_count", len(msgs),
+		"new_count", len(msgs)-startIdx,
+		"removed_count", startIdx,
+		"original_tokens", originalTokens,
+		"new_tokens", totalTokens)
+
+	return msgs[startIdx:]
+}
+
+// estimateSingleMessageTokens estimates tokens for a single fantasy.Message.
+func estimateSingleMessageTokens(msg fantasy.Message) int64 {
+	var totalBytes int
+	for _, part := range msg.Content {
+		switch p := part.(type) {
+		case fantasy.TextPart:
+			totalBytes += len(p.Text)
+		case fantasy.ReasoningPart:
+			totalBytes += len(p.Text)
+		case fantasy.ToolCallPart:
+			totalBytes += len(p.Input)
+		case fantasy.ToolResultPart:
+			if txt, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentText](p.Output); ok {
+				totalBytes += len(txt.Text)
+			} else if errOut, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentError](p.Output); ok && errOut.Error != nil {
+				totalBytes += len(errOut.Error.Error())
+			}
+		}
+	}
+	const bytesPerToken = 4
+	return int64(totalBytes / bytesPerToken)
+}
+
 func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions) error {
 	if a.IsSessionBusy(sessionID) {
 		return ErrSessionBusy
@@ -987,6 +1117,26 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 
 	summaryPromptText := buildSessionCompactingPrompt(currentSession.Todos, compacting.Context, compacting.Prompt)
 
+	// Check if aiMsgs exceeds context window limit and truncate if necessary.
+	// This prevents 400 Bad Request when the context is too large for the model.
+	contextWindow := int64(largeModel.CatwalkCfg.ContextWindow)
+	if contextWindow > 0 {
+		estimatedTokens := estimatePromptTokens(aiMsgs, nil)
+		// Leave room for system prompt, summary prompt, and output tokens.
+		maxAllowedTokens := contextWindow - 4000 // Reserve 4k for safety.
+		if maxAllowedTokens < 0 {
+			maxAllowedTokens = contextWindow * 3 / 4 // Fallback: use 75% of context window.
+		}
+		if estimatedTokens > maxAllowedTokens {
+			slog.Warn("Messages exceed context window, truncating before summarization",
+				"estimated_tokens", estimatedTokens,
+				"max_allowed", maxAllowedTokens,
+				"context_window", contextWindow,
+				"session_id", sessionID)
+			aiMsgs = truncateMessagesToFit(aiMsgs, maxAllowedTokens)
+		}
+	}
+
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:          summaryPromptText,
 		Messages:        aiMsgs,
@@ -1021,9 +1171,16 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	})
 	if err != nil {
 		isCancelErr := errors.Is(err, context.Canceled)
-		if isCancelErr {
-			// User cancelled summarize we need to remove the summary message.
+		isContextLengthErr := isContextLengthError(err)
+		if isCancelErr || isContextLengthErr {
+			// User cancelled or context too long - remove the summary message.
 			deleteErr := a.messages.Delete(ctx, summaryMessage.ID)
+			if isContextLengthErr {
+				if deleteErr != nil {
+					slog.Warn("Failed to delete summary message after context length error", "error", deleteErr, "session_id", sessionID, "message_id", summaryMessage.ID)
+				}
+				return fmt.Errorf("context too long for summarization: %w", err)
+			}
 			return deleteErr
 		}
 		return err
@@ -1047,7 +1204,10 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		}
 	}
 
-	a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, openrouterCost, 0)
+	// Compute an estimate so the fallback in updateSessionUsage can correct
+	// for proxies that under-report input tokens during summarization.
+	summarizeEstimatedPromptTokens := estimatePromptTokens(aiMsgs, nil)
+	a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, openrouterCost, summarizeEstimatedPromptTokens)
 
 	currentSession.SummaryMessageID = summaryMessage.ID
 	_, err = a.sessions.Save(genCtx, currentSession)
@@ -1339,7 +1499,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		cost = *openrouterCost
 	}
 
-	promptTokens := promptTokensForUsage(resp.TotalUsage)
+	promptTokens := promptTokensForUsage(resp.TotalUsage, usageProvider(model))
 	completionTokens := resp.TotalUsage.OutputTokens
 
 	// Atomically update only title and usage fields to avoid overriding other
@@ -1364,12 +1524,43 @@ func (a *sessionAgent) openrouterCost(metadata fantasy.ProviderMetadata) *float6
 	return &opts.Usage.Cost
 }
 
-func promptTokensForUsage(usage fantasy.Usage) int64 {
-	return usage.InputTokens + usage.CacheCreationTokens + usage.CacheReadTokens
+func usageProvider(model Model) string {
+	if model.Model != nil {
+		if provider := model.Model.Provider(); provider != "" {
+			return provider
+		}
+	}
+	return model.ModelCfg.Provider
 }
 
-func totalTokensForUsage(usage fantasy.Usage) int64 {
-	return promptTokensForUsage(usage) + usage.OutputTokens
+func isAnthropicStyleUsageProvider(providerID string) bool {
+	providerID = strings.ToLower(strings.TrimSpace(providerID))
+	if providerID == "" {
+		return false
+	}
+	switch providerID {
+	case "anthropic", "anthropic-proxy", "bedrock":
+		return true
+	default:
+		return strings.Contains(providerID, "anthropic") || strings.Contains(providerID, "bedrock")
+	}
+}
+
+func promptTokensForUsage(usage fantasy.Usage, providerID string) int64 {
+	// Anthropic and Bedrock report InputTokens WITHOUT cached tokens.
+	// OpenAI and other providers report InputTokens INCLUDING cached tokens.
+	// See: https://github.com/vercel/ai/issues/8794
+	if isAnthropicStyleUsageProvider(providerID) {
+		return usage.InputTokens + usage.CacheCreationTokens + usage.CacheReadTokens
+	}
+	// For OpenAI, Google, etc., InputTokens already includes cached tokens.
+	// Only add CacheCreationTokens (rare).
+	// Note: ReasoningTokens are output tokens (part of completion_tokens), not input tokens.
+	return usage.InputTokens + usage.CacheCreationTokens
+}
+
+func totalTokensForUsage(usage fantasy.Usage, providerID string) int64 {
+	return promptTokensForUsage(usage, providerID) + usage.OutputTokens
 }
 
 func autoSummarizeReservedTokens(maxOutputTokens int64) int64 {
@@ -1395,12 +1586,30 @@ func autoSummarizeSafetyReserveTokens(contextWindow int64) int64 {
 
 func shouldAutoSummarize(contextUsed, contextWindow, maxOutputTokens int64) bool {
 	if contextWindow <= 0 {
+		slog.Warn("ShouldAutoSummarize: contextWindow <= 0, returning false", "contextWindow", contextWindow)
 		return false
 	}
-	hardLimit := contextWindow - autoSummarizeReservedTokens(maxOutputTokens) - autoSummarizeToolReserveTokens(contextWindow) - autoSummarizeSafetyReserveTokens(contextWindow)
+	reserved := autoSummarizeReservedTokens(maxOutputTokens)
+	toolReserve := autoSummarizeToolReserveTokens(contextWindow)
+	safetyReserve := autoSummarizeSafetyReserveTokens(contextWindow)
+	hardLimit := contextWindow - reserved - toolReserve - safetyReserve
 	softLimit := contextWindow * autoSummarizeSoftLimitNumerator / autoSummarizeSoftLimitDenominator
 	usable := min(hardLimit, softLimit)
+
+	slog.Info("ShouldAutoSummarize calculation",
+		"contextUsed", contextUsed,
+		"contextWindow", contextWindow,
+		"maxOutputTokens", maxOutputTokens,
+		"reserved", reserved,
+		"toolReserve", toolReserve,
+		"safetyReserve", safetyReserve,
+		"hardLimit", hardLimit,
+		"softLimit", softLimit,
+		"usable", usable,
+		"shouldSummarize", contextUsed >= usable)
+
 	if usable <= 0 {
+		slog.Warn("ShouldAutoSummarize: usable <= 0, forcing summarize", "usable", usable)
 		return true
 	}
 	return contextUsed >= usable
@@ -1561,13 +1770,16 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 		session.Cost += cost
 	}
 
-	promptTokens := promptTokensForUsage(usage)
-	// Some providers (e.g., Anthropic-compatible proxies) under-report input
-	// tokens in streaming mode, especially with thinking enabled — they may
-	// report only user-message tokens while omitting system prompt and tool
-	// definitions. Fall back to the estimated count when the provider value
-	// is zero or suspiciously low compared to the estimate.
-	if estimatedPromptTokens > 0 && promptTokens < estimatedPromptTokens/2 {
+	promptTokens := promptTokensForUsage(usage, usageProvider(model))
+	// Some providers (e.g., Anthropic-compatible proxies) under-report or
+	// return stale input token counts in streaming mode — they may report
+	// only user-message tokens, omit system prompt and tool definitions, or
+	// return a constant value that does not grow across tool-call steps.
+	// Use the higher of the API-reported value and the byte-based estimate
+	// so the context-window display keeps pace with the actual conversation
+	// size. The estimate is rough (total bytes / 4) but directionally
+	// correct and guaranteed to grow as messages accumulate.
+	if estimatedPromptTokens > 0 && promptTokens < estimatedPromptTokens {
 		promptTokens = estimatedPromptTokens
 	}
 

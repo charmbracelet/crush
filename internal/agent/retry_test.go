@@ -72,11 +72,13 @@ func TestRetryableStreamModelDoesNotWrapUnexpectedEOFAfterToolCall(t *testing.T)
 	model := retryableStreamModel{stubLanguageModel{
 		stream: func(context.Context, fantasy.Call) (fantasy.StreamResponse, error) {
 			return func(yield func(fantasy.StreamPart) bool) {
-				yield(fantasy.StreamPart{
+				if !yield(fantasy.StreamPart{
 					Type:         fantasy.StreamPartTypeToolCall,
 					ID:           "tool-1",
 					ToolCallName: "bash",
-				})
+				}) {
+					return
+				}
 				yield(fantasy.StreamPart{
 					Type:  fantasy.StreamPartTypeError,
 					Error: io.ErrUnexpectedEOF,
@@ -107,11 +109,13 @@ func TestRetryableStreamModelDoesNotWrapUnexpectedEOFAfterToolInputStart(t *test
 	model := retryableStreamModel{stubLanguageModel{
 		stream: func(context.Context, fantasy.Call) (fantasy.StreamResponse, error) {
 			return func(yield func(fantasy.StreamPart) bool) {
-				yield(fantasy.StreamPart{
+				if !yield(fantasy.StreamPart{
 					Type:         fantasy.StreamPartTypeToolInputStart,
 					ID:           "tool-1",
 					ToolCallName: "ls",
-				})
+				}) {
+					return
+				}
 				yield(fantasy.StreamPart{
 					Type:  fantasy.StreamPartTypeError,
 					Error: io.ErrUnexpectedEOF,

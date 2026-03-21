@@ -3,6 +3,8 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@morphllm/morphsdk": "latest"
+    "@morphllm/morphsdk": "latest",
+    "ai": ">=5.0.0",
+    "zod": "^3.23.0"
   }
 }

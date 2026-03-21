@@ -92,7 +92,7 @@ func (s *failOnceMessageService) List(ctx context.Context, sessionID string) ([]
 	return s.Service.List(ctx, sessionID)
 }
 
-func newAutoSummarizeTestSessionAgent(t *testing.T, env fakeEnv, fakeAgent fantasy.Agent, messages message.Service, contextWindow int64) SessionAgent {
+func newAutoSummarizeTestSessionAgent(_ *testing.T, env fakeEnv, fakeAgent fantasy.Agent, messages message.Service, contextWindow int64) SessionAgent {
 	model := Model{
 		CatwalkCfg: catwalk.Model{
 			ContextWindow:    contextWindow,

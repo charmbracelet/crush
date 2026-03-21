@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -44,4 +45,32 @@ func TestUpdateSessionMessageReinsertsAssistantAfterToolOnly(t *testing.T) {
 	require.NotNil(t, ui.chat.MessageItem(assistantMsg.ID))
 	require.NotNil(t, ui.chat.MessageItem("tool-1"))
 	require.Less(t, ui.chat.idInxMap[assistantMsg.ID], ui.chat.idInxMap["tool-1"])
+}
+
+func TestShouldRefreshSessionUsage(t *testing.T) {
+	t.Parallel()
+
+	ui := &UI{}
+	msg := message.Message{
+		ID:   "assistant-1",
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "done"},
+			message.Finish{Reason: message.FinishReasonEndTurn, Time: 100},
+		},
+	}
+
+	require.True(t, ui.shouldRefreshSessionUsage(pubsub.UpdatedEvent, msg))
+	require.True(t, ui.shouldRefreshSessionUsage(pubsub.UpdatedEvent, msg))
+
+	changed := msg
+	changed.Parts = []message.ContentPart{
+		message.TextContent{Text: "done!"},
+		message.Finish{Reason: message.FinishReasonEndTurn, Time: 100},
+	}
+	require.True(t, ui.shouldRefreshSessionUsage(pubsub.UpdatedEvent, changed))
+	require.False(t, ui.shouldRefreshSessionUsage(pubsub.CreatedEvent, changed))
+
+	unfinished := message.Message{ID: "assistant-2", Role: message.Assistant}
+	require.False(t, ui.shouldRefreshSessionUsage(pubsub.UpdatedEvent, unfinished))
 }

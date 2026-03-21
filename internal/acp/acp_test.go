@@ -170,7 +170,8 @@ func TestSessionListIncludesCWD(t *testing.T) {
 	t.Parallel()
 
 	var outBuf bytes.Buffer
-	reqLine := buildRequest(t, 1, "session/list", acp.SessionListParams{CWD: "/tmp/project"})
+	cwd := "/tmp/project"
+	reqLine := buildRequest(t, 1, "session/list", acp.SessionListParams{CWD: cwd})
 
 	app := &fakeApp{
 		sessions:    newFakeSessionService(),
@@ -198,7 +199,11 @@ func TestSessionListIncludesCWD(t *testing.T) {
 	require.Len(t, result.Sessions, 1)
 	require.Equal(t, "sess-1", result.Sessions[0].SessionID)
 	require.Equal(t, "test", result.Sessions[0].Title)
-	require.Equal(t, filepath.Clean(filepath.FromSlash("H:/tmp/project")), filepath.Clean(result.Sessions[0].CWD))
+
+	// Expected CWD is the absolute path of the input cwd.
+	expectedCWD, err := filepath.Abs(filepath.FromSlash(cwd))
+	require.NoError(t, err)
+	require.Equal(t, expectedCWD, result.Sessions[0].CWD)
 }
 
 // ---- Helpers ----

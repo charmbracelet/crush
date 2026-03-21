@@ -49,7 +49,10 @@ func (s *Server) Run(agent *Agent) error {
 	return nil
 }
 
-// Shutdown performs graceful shutdown.
+// Shutdown performs graceful shutdown, stopping all active sinks.
 func (s *Server) Shutdown() {
+	if s.agent != nil {
+		s.agent.Shutdown()
+	}
 	s.cancel()
 }

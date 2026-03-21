@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"strings"
+	"sync"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
@@ -15,14 +17,19 @@ import (
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/version"
 	"github.com/coder/acp-go-sdk"
 )
 
 // Agent implements the acp.Agent interface to handle ACP protocol methods.
 type Agent struct {
-	app   *app.App
-	conn  *acp.AgentSideConnection
-	sinks *csync.Map[string, *Sink]
+	app           *app.App
+	conn          *acp.AgentSideConnection
+	sinks         *csync.Map[string, *Sink]
+	sessionModes  *csync.Map[string, acp.SessionModeId]
+	authMethods   map[acp.AuthMethodId]acp.AuthMethod
+	authMu        sync.RWMutex
+	authenticated bool
 }
 
 // Compile-time interface checks.
@@ -32,11 +39,38 @@ var (
 	_ acp.AgentExperimental = (*Agent)(nil)
 )
 
+const (
+	authMethodLocal acp.AuthMethodId  = "local"
+	modeAsk         acp.SessionModeId = "ask"
+	modeCode        acp.SessionModeId = "code"
+)
+
+var availableSessionModes = []acp.SessionMode{
+	{
+		Id:          modeAsk,
+		Name:        "Ask",
+		Description: acp.Ptr("Request permission before making changes"),
+	},
+	{
+		Id:          modeCode,
+		Name:        "Code",
+		Description: acp.Ptr("Write and modify code with full tool access"),
+	},
+}
+
 // NewAgent creates a new ACP agent backed by a Crush app instance.
 func NewAgent(app *app.App) *Agent {
 	return &Agent{
-		app:   app,
-		sinks: csync.NewMap[string, *Sink](),
+		app:          app,
+		sinks:        csync.NewMap[string, *Sink](),
+		sessionModes: csync.NewMap[string, acp.SessionModeId](),
+		authMethods: map[acp.AuthMethodId]acp.AuthMethod{
+			authMethodLocal: {
+				Id:          authMethodLocal,
+				Name:        "Local",
+				Description: acp.Ptr("Authenticate the local ACP client session"),
+			},
+		},
 	}
 }
 
@@ -48,6 +82,16 @@ func (a *Agent) SetAgentConnection(conn *acp.AgentSideConnection) {
 // Initialize handles the ACP initialize request.
 func (a *Agent) Initialize(ctx context.Context, params acp.InitializeRequest) (acp.InitializeResponse, error) {
 	slog.Debug("ACP Initialize", "protocol_version", params.ProtocolVersion)
+
+	a.authMu.Lock()
+	a.authenticated = false
+	a.authMu.Unlock()
+
+	authMethods := make([]acp.AuthMethod, 0, len(a.authMethods))
+	for _, method := range a.authMethods {
+		authMethods = append(authMethods, method)
+	}
+
 	return acp.InitializeResponse{
 		ProtocolVersion: acp.ProtocolVersionNumber,
 		AgentCapabilities: acp.AgentCapabilities{
@@ -62,12 +106,31 @@ func (a *Agent) Initialize(ctx context.Context, params acp.InitializeRequest) (a
 				Image:           false,
 			},
 		},
+		AgentInfo: &acp.Implementation{
+			Name:    "crush",
+			Title:   acp.Ptr("Crush"),
+			Version: version.Version,
+		},
+		AuthMethods: authMethods,
 	}, nil
 }
 
-// Authenticate handles authentication requests (stub for local stdio).
+// Authenticate handles authentication requests.
 func (a *Agent) Authenticate(ctx context.Context, params acp.AuthenticateRequest) (acp.AuthenticateResponse, error) {
-	slog.Debug("ACP Authenticate")
+	slog.Debug("ACP Authenticate", "method_id", params.MethodId)
+
+	if params.MethodId == "" {
+		return acp.AuthenticateResponse{}, acp.NewInvalidParams("methodId is required")
+	}
+
+	if _, ok := a.authMethods[params.MethodId]; !ok {
+		return acp.AuthenticateResponse{}, acp.NewInvalidParams(fmt.Sprintf("unsupported auth method %q", params.MethodId))
+	}
+
+	a.authMu.Lock()
+	a.authenticated = true
+	a.authMu.Unlock()
+
 	return acp.AuthenticateResponse{}, nil
 }
 
@@ -75,9 +138,23 @@ func (a *Agent) Authenticate(ctx context.Context, params acp.AuthenticateRequest
 func (a *Agent) NewSession(ctx context.Context, params acp.NewSessionRequest) (acp.NewSessionResponse, error) {
 	slog.Info("ACP NewSession", "cwd", params.Cwd)
 
+	if err := a.requireAuthenticated(); err != nil {
+		return acp.NewSessionResponse{}, err
+	}
+	if !filepath.IsAbs(params.Cwd) {
+		return acp.NewSessionResponse{}, acp.NewInvalidParams("cwd must be an absolute path")
+	}
+
 	sess, err := a.app.Sessions.Create(ctx, "ACP Session")
 	if err != nil {
 		return acp.NewSessionResponse{}, err
+	}
+
+	a.sessionModes.Set(sess.ID, modeAsk)
+
+	// Stop any previous sink for this session before creating a new one.
+	if prev, ok := a.sinks.Take(sess.ID); ok {
+		prev.Stop()
 	}
 
 	// Create and start the event sink to stream updates to this session.
@@ -90,6 +167,7 @@ func (a *Agent) NewSession(ctx context.Context, params acp.NewSessionRequest) (a
 	return acp.NewSessionResponse{
 		SessionId: acp.SessionId(sess.ID),
 		Models:    a.buildSessionModelState(),
+		Modes:     a.buildSessionModeState(sess.ID),
 	}, nil
 }
 
@@ -98,10 +176,26 @@ func (a *Agent) LoadSession(ctx context.Context, params acp.LoadSessionRequest) 
 	sessionID := string(params.SessionId)
 	slog.Info("ACP LoadSession", "session_id", sessionID)
 
+	if err := a.requireAuthenticated(); err != nil {
+		return acp.LoadSessionResponse{}, err
+	}
+	if !filepath.IsAbs(params.Cwd) {
+		return acp.LoadSessionResponse{}, acp.NewInvalidParams("cwd must be an absolute path")
+	}
+
 	// Verify the session exists.
 	session, err := a.app.Sessions.Get(ctx, sessionID)
 	if err != nil {
 		return acp.LoadSessionResponse{}, err
+	}
+
+	if _, ok := a.sessionModes.Get(session.ID); !ok {
+		a.sessionModes.Set(session.ID, modeAsk)
+	}
+
+	// Stop any previous sink for this session before creating a new one.
+	if prev, ok := a.sinks.Take(session.ID); ok {
+		prev.Stop()
 	}
 
 	// Create and start the event sink for future updates.
@@ -123,12 +217,43 @@ func (a *Agent) LoadSession(ctx context.Context, params acp.LoadSessionRequest) 
 
 	return acp.LoadSessionResponse{
 		Models: a.buildSessionModelState(),
+		Modes:  a.buildSessionModeState(sessionID),
 	}, nil
 }
 
-// SetSessionMode handles mode switching (stub - Crush doesn't have modes yet).
+// SetSessionMode handles mode switching for ACP sessions.
 func (a *Agent) SetSessionMode(ctx context.Context, params acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
-	slog.Debug("ACP SetSessionMode", "mode_id", params.ModeId)
+	slog.Debug("ACP SetSessionMode", "session_id", params.SessionId, "mode_id", params.ModeId)
+
+	if err := a.requireAuthenticated(); err != nil {
+		return acp.SetSessionModeResponse{}, err
+	}
+
+	sessionID := string(params.SessionId)
+	if !a.sessionExists(ctx, sessionID) {
+		return acp.SetSessionModeResponse{}, acp.NewInvalidParams(fmt.Sprintf("unknown session %q", sessionID))
+	}
+	if !isSupportedMode(params.ModeId) {
+		return acp.SetSessionModeResponse{}, acp.NewInvalidParams(fmt.Sprintf("unsupported mode %q", params.ModeId))
+	}
+
+	a.sessionModes.Set(sessionID, params.ModeId)
+
+	if a.conn != nil {
+		update := acp.SessionUpdate{
+			CurrentModeUpdate: &acp.SessionCurrentModeUpdate{
+				CurrentModeId: params.ModeId,
+				SessionUpdate: "current_mode_update",
+			},
+		}
+		if err := a.conn.SessionUpdate(ctx, acp.SessionNotification{
+			SessionId: params.SessionId,
+			Update:    update,
+		}); err != nil {
+			return acp.SetSessionModeResponse{}, fmt.Errorf("failed to send current mode update: %w", err)
+		}
+	}
+
 	return acp.SetSessionModeResponse{}, nil
 }
 
@@ -137,17 +262,26 @@ func (a *Agent) SetSessionMode(ctx context.Context, params acp.SetSessionModeReq
 func (a *Agent) SetSessionModel(ctx context.Context, params acp.SetSessionModelRequest) (acp.SetSessionModelResponse, error) {
 	slog.Info("ACP SetSessionModel", "session_id", params.SessionId, "model_id", params.ModelId)
 
+	if err := a.requireAuthenticated(); err != nil {
+		return acp.SetSessionModelResponse{}, err
+	}
+
+	sessionID := string(params.SessionId)
+	if !a.sessionExists(ctx, sessionID) {
+		return acp.SetSessionModelResponse{}, acp.NewInvalidParams(fmt.Sprintf("unknown session %q", sessionID))
+	}
+
 	// Parse model ID (format: "provider:model").
 	parts := strings.SplitN(string(params.ModelId), ":", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return acp.SetSessionModelResponse{}, fmt.Errorf("invalid model ID format %q: expected provider:model", params.ModelId)
+		return acp.SetSessionModelResponse{}, acp.NewInvalidParams(fmt.Sprintf("invalid model ID format %q: expected provider:model", params.ModelId))
 	}
 	providerID, modelID := parts[0], parts[1]
 
 	// Validate that the model exists.
 	cfg := a.app.Config()
 	if cfg.GetModel(providerID, modelID) == nil {
-		return acp.SetSessionModelResponse{}, fmt.Errorf("model %q not found for provider %q", modelID, providerID)
+		return acp.SetSessionModelResponse{}, acp.NewInvalidParams(fmt.Sprintf("model %q not found for provider %q", modelID, providerID))
 	}
 
 	// Check if the agent is busy.
@@ -176,6 +310,15 @@ func (a *Agent) SetSessionModel(ctx context.Context, params acp.SetSessionModelR
 // Prompt handles a prompt request by running the agent.
 func (a *Agent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.PromptResponse, error) {
 	slog.Info("ACP Prompt", "session_id", params.SessionId)
+
+	if err := a.requireAuthenticated(); err != nil {
+		return acp.PromptResponse{}, err
+	}
+
+	sessionID := string(params.SessionId)
+	if !a.sessionExists(ctx, sessionID) {
+		return acp.PromptResponse{}, acp.NewInvalidParams(fmt.Sprintf("unknown session %q", sessionID))
+	}
 
 	// Extract text from content blocks.
 	var prompt string
@@ -222,6 +365,9 @@ func (a *Agent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.Promp
 // Cancel handles cancellation of an in-flight prompt.
 func (a *Agent) Cancel(ctx context.Context, params acp.CancelNotification) error {
 	slog.Info("ACP Cancel", "session_id", params.SessionId)
+	if err := a.requireAuthenticated(); err != nil {
+		return err
+	}
 	a.app.AgentCoordinator.Cancel(string(params.SessionId))
 	return nil
 }
@@ -500,5 +646,47 @@ func (a *Agent) buildSessionModelState() *acp.SessionModelState {
 	return &acp.SessionModelState{
 		AvailableModels: availableModels,
 		CurrentModelId:  currentModelID,
+	}
+}
+
+func (a *Agent) buildSessionModeState(sessionID string) *acp.SessionModeState {
+	mode, ok := a.sessionModes.Get(sessionID)
+	if !ok {
+		mode = modeAsk
+	}
+
+	return &acp.SessionModeState{
+		CurrentModeId:  mode,
+		AvailableModes: append([]acp.SessionMode(nil), availableSessionModes...),
+	}
+}
+
+func isSupportedMode(modeID acp.SessionModeId) bool {
+	for _, mode := range availableSessionModes {
+		if mode.Id == modeID {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *Agent) sessionExists(ctx context.Context, sessionID string) bool {
+	_, err := a.app.Sessions.Get(ctx, sessionID)
+	return err == nil
+}
+
+func (a *Agent) requireAuthenticated() error {
+	a.authMu.RLock()
+	defer a.authMu.RUnlock()
+	if a.authenticated {
+		return nil
+	}
+	return acp.NewAuthRequired("authenticate before creating or loading sessions")
+}
+
+// Shutdown stops all active sinks.
+func (a *Agent) Shutdown() {
+	for sink := range a.sinks.Seq() {
+		sink.Stop()
 	}
 }

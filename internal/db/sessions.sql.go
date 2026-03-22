@@ -90,6 +90,36 @@ func (q *Queries) DeleteSession(ctx context.Context, id string) error {
 	return err
 }
 
+const getLastSession = `-- name: GetLastSession :one
+SELECT id, parent_session_id, title, collaboration_mode, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, last_prompt_tokens, last_completion_tokens
+FROM sessions
+WHERE parent_session_id IS NULL
+ORDER BY updated_at DESC
+LIMIT 1
+`
+
+func (q *Queries) GetLastSession(ctx context.Context) (Session, error) {
+	row := q.queryRow(ctx, q.getLastSessionStmt, getLastSession)
+	var i Session
+	err := row.Scan(
+		&i.ID,
+		&i.ParentSessionID,
+		&i.Title,
+		&i.CollaborationMode,
+		&i.MessageCount,
+		&i.PromptTokens,
+		&i.CompletionTokens,
+		&i.Cost,
+		&i.UpdatedAt,
+		&i.CreatedAt,
+		&i.SummaryMessageID,
+		&i.Todos,
+		&i.LastPromptTokens,
+		&i.LastCompletionTokens,
+	)
+	return i, err
+}
+
 const getSessionByID = `-- name: GetSessionByID :one
 SELECT id, parent_session_id, title, collaboration_mode, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, last_prompt_tokens, last_completion_tokens
 FROM sessions

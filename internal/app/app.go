@@ -170,9 +170,43 @@ func (app *App) AgentNotifications() *pubsub.Broker[notify.Notification] {
 	return app.agentNotifications
 }
 
+// resolveSession resolves which session to use for a non-interactive run.
+// If continueSessionID is set, it looks up that session by ID.
+// If useLast is set, it returns the most recently updated top-level session.
+// Otherwise, it creates a new session.
+func (app *App) resolveSession(ctx context.Context, continueSessionID string, useLast bool) (session.Session, error) {
+	switch {
+	case continueSessionID != "":
+		if app.Sessions.IsAgentToolSession(continueSessionID) {
+			return session.Session{}, fmt.Errorf("cannot continue an agent tool session: %s", continueSessionID)
+		}
+		sess, err := app.Sessions.Get(ctx, continueSessionID)
+		if err != nil {
+			return session.Session{}, fmt.Errorf("session not found: %s", continueSessionID)
+		}
+		if sess.ParentSessionID != "" {
+			return session.Session{}, fmt.Errorf("cannot continue a child session: %s", continueSessionID)
+		}
+		return sess, nil
+
+	case useLast:
+		sess, err := app.Sessions.GetLast(ctx)
+		if err != nil {
+			return session.Session{}, fmt.Errorf("no sessions found to continue")
+		}
+		if sess.ParentSessionID != "" {
+			return session.Session{}, fmt.Errorf("cannot continue a child session: %s", sess.ID)
+		}
+		return sess, nil
+
+	default:
+		return app.Sessions.Create(ctx, agent.DefaultSessionName)
+	}
+}
+
 // RunNonInteractive runs the application in non-interactive mode with the
 // given prompt, printing to stdout.
-func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt, largeModel, smallModel string, hideSpinner bool) error {
+func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt, largeModel, smallModel string, hideSpinner bool, continueSessionID string, useLast bool) error {
 	slog.Info("Running in non-interactive mode")
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -240,11 +274,16 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 
 	defer stopSpinner()
 
-	sess, err := app.Sessions.Create(ctx, agent.DefaultSessionName)
+	sess, err := app.resolveSession(ctx, continueSessionID, useLast)
 	if err != nil {
-		return fmt.Errorf("failed to create session for non-interactive mode: %w", err)
+		return fmt.Errorf("failed to resolve session: %w", err)
 	}
-	slog.Info("Created session for non-interactive run", "session_id", sess.ID)
+
+	if continueSessionID != "" || useLast {
+		slog.Info("Continuing session for non-interactive run", "session_id", sess.ID)
+	} else {
+		slog.Info("Created session for non-interactive run", "session_id", sess.ID)
+	}
 
 	// Automatically approve all permission requests for this non-interactive
 	// session.

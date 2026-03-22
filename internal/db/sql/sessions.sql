@@ -30,6 +30,13 @@ SELECT *
 FROM sessions
 WHERE id = ? LIMIT 1;
 
+-- name: GetLastSession :one
+SELECT *
+FROM sessions
+WHERE parent_session_id IS NULL
+ORDER BY updated_at DESC
+LIMIT 1;
+
 -- name: ListSessions :many
 SELECT *
 FROM sessions

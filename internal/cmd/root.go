@@ -37,6 +37,9 @@ func init() {
 	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Debug")
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
 	rootCmd.Flags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
+	rootCmd.Flags().StringP("session", "s", "", "Continue a previous session by ID")
+	rootCmd.Flags().BoolP("continue", "C", false, "Continue the most recent session")
+	rootCmd.MarkFlagsMutuallyExclusive("session", "continue")
 
 	rootCmd.AddCommand(
 		runCmd,
@@ -73,13 +76,37 @@ crush --yolo
 
 # Run with custom data directory
 crush --data-dir /path/to/custom/.crush
+
+# Continue a previous session
+crush --session {session-id}
+
+# Continue the most recent session
+crush --continue
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		sessionID, _ := cmd.Flags().GetString("session")
+		continueLast, _ := cmd.Flags().GetBool("continue")
+
 		app, err := setupAppWithProgressBar(cmd)
 		if err != nil {
 			return err
 		}
 		defer app.Shutdown()
+
+		// Resolve session ID if provided.
+		if sessionID != "" {
+			sess, err := resolveSessionID(cmd.Context(), app.Sessions, sessionID)
+			if err != nil {
+				return err
+			}
+			if app.Sessions.IsAgentToolSession(sess.ID) {
+				return fmt.Errorf("cannot continue an agent tool session: %s", sess.ID)
+			}
+			if sess.ParentSessionID != "" {
+				return fmt.Errorf("cannot continue a child session: %s", sess.ID)
+			}
+			sessionID = sess.ID
+		}
 
 		event.AppInitialized()
 
@@ -87,7 +114,7 @@ crush --data-dir /path/to/custom/.crush
 		var env uv.Environ = os.Environ()
 
 		com := common.DefaultCommon(app)
-		model := ui.New(com)
+		model := ui.New(com, sessionID, continueLast)
 
 		program := tea.NewProgram(
 			model,

@@ -52,6 +52,12 @@ type ToolMessageItem interface {
 	Status() ToolStatus
 }
 
+// LoadingStateControllable lets the UI suppress stale loading indicators when
+// restoring interrupted sessions that are no longer active.
+type LoadingStateControllable interface {
+	SetLoadingStateVisible(visible bool)
+}
+
 // Compactable is an interface for tool items that can render in a compacted mode.
 // When compact mode is enabled, tools render as a compact single-line header.
 type Compactable interface {
@@ -101,7 +107,7 @@ type ToolRenderOpts struct {
 // IsPending returns true if the tool call is still pending (not finished and
 // not canceled).
 func (o *ToolRenderOpts) IsPending() bool {
-	return !o.ToolCall.Finished && !o.IsCanceled()
+	return o.IsSpinning && !o.IsCanceled()
 }
 
 // IsCanceled returns true if the tool status is canceled.
@@ -148,6 +154,10 @@ type baseToolMessageItem struct {
 	hasCappedWidth bool
 	// isCompact indicates this tool should render in compact mode.
 	isCompact bool
+	// showLoadingState controls whether unfinished tools should render loading
+	// UI. Historical interrupted items should render their static content
+	// without looking live.
+	showLoadingState bool
 	// spinningFunc allows tools to override the default spinning logic.
 	// If nil, uses the default: !toolCall.Finished && !canceled.
 	spinningFunc SpinningFunc
@@ -185,6 +195,7 @@ func newBaseToolMessageItem(
 		result:                   result,
 		status:                   status,
 		hasCappedWidth:           hasCappedWidth,
+		showLoadingState:         true,
 	}
 	t.anim = anim.New(anim.Settings{
 		ID:          toolCall.ID,
@@ -268,6 +279,16 @@ func NewToolMessageItem(
 // SetCompact implements the Compactable interface.
 func (t *baseToolMessageItem) SetCompact(compact bool) {
 	t.isCompact = compact
+	t.clearCache()
+}
+
+// SetLoadingStateVisible controls whether loading UI should be rendered for
+// unfinished tools restored from history.
+func (t *baseToolMessageItem) SetLoadingStateVisible(visible bool) {
+	if t.showLoadingState == visible {
+		return
+	}
+	t.showLoadingState = visible
 	t.clearCache()
 }
 
@@ -387,6 +408,9 @@ func (t *baseToolMessageItem) computeStatus() ToolStatus {
 
 // isSpinning returns true if the tool should show animation.
 func (t *baseToolMessageItem) isSpinning() bool {
+	if !t.showLoadingState {
+		return false
+	}
 	if t.spinningFunc != nil {
 		return t.spinningFunc(SpinningState{
 			ToolCall: t.toolCall,
@@ -448,6 +472,9 @@ func toolEarlyStateContent(sty *styles.Styles, opts *ToolRenderOpts, width int) 
 	case ToolStatusAwaitingPermission:
 		msg = sty.Tool.StateWaiting.Render("Requesting permission...")
 	case ToolStatusRunning:
+		if !opts.IsSpinning {
+			return "", false
+		}
 		msg = sty.Tool.StateWaiting.Render("Waiting for tool response...")
 	default:
 		return "", false

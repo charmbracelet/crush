@@ -36,6 +36,17 @@ func TestConfig_LoadFromBytes(t *testing.T) {
 	require.Equal(t, "https://api.openai.com/v2", pc.BaseURL)
 }
 
+func TestConfig_LoadFromBytesIncludesConfiguredAgents(t *testing.T) {
+	loadedConfig, err := loadFromBytes([][]byte{
+		[]byte(`{"agents":{"reviewer":{"mode":"subagent","allowed_tools":["view"]}}}`),
+	})
+
+	require.NoError(t, err)
+	require.Contains(t, loadedConfig.Agents, "reviewer")
+	require.Equal(t, AgentModeSubagent, loadedConfig.Agents["reviewer"].Mode)
+	require.Equal(t, []string{"view"}, loadedConfig.Agents["reviewer"].AllowedTools)
+}
+
 // testStore wraps a Config in a minimal ConfigStore for testing.
 func testStore(cfg *Config) *ConfigStore {
 	return &ConfigStore{config: cfg}
@@ -468,11 +479,17 @@ func TestConfig_setupAgentsWithNoDisabledTools(t *testing.T) {
 	cfg.SetupAgents()
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
-	assert.Equal(t, allToolNames(), coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "bash", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "glob", "grep", "ls", "request_user_input", "sourcegraph", "view", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
 
-	taskAgent, ok := cfg.Agents[AgentTask]
+	generalAgent, ok := cfg.Agents[AgentGeneral]
 	require.True(t, ok)
-	assert.Equal(t, []string{"glob", "grep", "ls", "sourcegraph", "view"}, taskAgent.AllowedTools)
+	assert.Equal(t, []string{"bash", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "glob", "grep", "ls", "sourcegraph", "view", "write", "list_mcp_resources", "read_mcp_resource"}, generalAgent.AllowedTools)
+	assert.Equal(t, AgentModeSubagent, generalAgent.Mode)
+
+	exploreAgent, ok := cfg.Agents[AgentExplore]
+	require.True(t, ok)
+	assert.Equal(t, []string{"glob", "grep", "ls", "sourcegraph", "view"}, exploreAgent.AllowedTools)
+	assert.Equal(t, AgentModeSubagent, exploreAgent.Mode)
 }
 
 func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
@@ -490,11 +507,11 @@ func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
 
-	assert.Equal(t, []string{"agent", "bash", "job_output", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "glob", "ls", "request_user_input", "sourcegraph", "todos", "view", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "bash", "job_output", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "glob", "ls", "request_user_input", "sourcegraph", "view", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
 
-	taskAgent, ok := cfg.Agents[AgentTask]
+	generalAgent, ok := cfg.Agents[AgentGeneral]
 	require.True(t, ok)
-	assert.Equal(t, []string{"glob", "ls", "sourcegraph", "view"}, taskAgent.AllowedTools)
+	assert.Equal(t, []string{"bash", "job_output", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "glob", "ls", "sourcegraph", "view", "write", "list_mcp_resources", "read_mcp_resource"}, generalAgent.AllowedTools)
 }
 
 func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
@@ -513,11 +530,79 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 	cfg.SetupAgents()
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
-	assert.Equal(t, []string{"agent", "bash", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "request_user_input", "todos", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "bash", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "request_user_input", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
 
-	taskAgent, ok := cfg.Agents[AgentTask]
+	generalAgent, ok := cfg.Agents[AgentGeneral]
 	require.True(t, ok)
-	assert.Len(t, taskAgent.AllowedTools, 0)
+	assert.Equal(t, []string{"bash", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "write", "list_mcp_resources", "read_mcp_resource"}, generalAgent.AllowedTools)
+}
+
+func TestConfig_setupAgentsMergesConfiguredAgentsAndTaskAlias(t *testing.T) {
+	cfg := &Config{
+		Options: &Options{
+			DisabledTools: []string{},
+		},
+		Agents: map[string]Agent{
+			AgentTask: {
+				Description: "Custom explore description.",
+			},
+			"reviewer": {
+				Mode:        AgentModeSubagent,
+				Description: "Reviews changes before handoff.",
+			},
+		},
+	}
+
+	cfg.SetupAgents()
+
+	exploreAgent, ok := cfg.Agents[AgentExplore]
+	require.True(t, ok)
+	assert.Equal(t, "Custom explore description.", exploreAgent.Description)
+
+	_, ok = cfg.Agents[AgentTask]
+	require.False(t, ok)
+
+	reviewerAgent, ok := cfg.Agents["reviewer"]
+	require.True(t, ok)
+	assert.Equal(t, "reviewer", reviewerAgent.ID)
+	assert.Equal(t, SelectedModelTypeLarge, reviewerAgent.Model)
+	assert.Equal(t, AgentModeSubagent, reviewerAgent.Mode)
+	assert.Equal(t, resolveSubAgentTools(resolvePrimaryTools(allToolNames())), reviewerAgent.AllowedTools)
+	assert.Equal(t, cfg.Options.ContextPaths, reviewerAgent.ContextPaths)
+}
+
+func TestConfig_setupAgentsDoesNotEscalateBuiltinAgentTools(t *testing.T) {
+	cfg := &Config{
+		Options: &Options{
+			DisabledTools: []string{},
+		},
+		Agents: map[string]Agent{
+			// Override only description of explore agent - should NOT escalate tools
+			AgentExplore: {
+				Description: "My custom explore",
+			},
+			// Override only description of general agent - should NOT escalate tools
+			AgentGeneral: {
+				Description: "My custom general",
+			},
+		},
+	}
+
+	cfg.SetupAgents()
+
+	// Explore agent should keep read-only tools, not get primary tools
+	exploreAgent, ok := cfg.Agents[AgentExplore]
+	require.True(t, ok)
+	assert.Equal(t, "My custom explore", exploreAgent.Description)
+	exploreTools := resolveReadOnlyTools(allToolNames())
+	assert.Equal(t, exploreTools, exploreAgent.AllowedTools, "explore agent should keep read-only tools, not get escalated to primary tools")
+
+	// General agent should keep general tools, not get primary tools
+	generalAgent, ok := cfg.Agents[AgentGeneral]
+	require.True(t, ok)
+	assert.Equal(t, "My custom general", generalAgent.Description)
+	generalTools := resolveSubAgentTools(resolvePrimaryTools(allToolNames()))
+	assert.Equal(t, generalTools, generalAgent.AllowedTools, "general agent should keep subagent tools, not get escalated to primary tools")
 }
 
 func TestConfig_configureProvidersWithDisabledProvider(t *testing.T) {

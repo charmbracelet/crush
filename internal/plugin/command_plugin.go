@@ -541,15 +541,15 @@ type pendingRequest struct {
 }
 
 type persistentPluginManager struct {
-	cfg      resolvedCommandPluginConfig
-	cmd      *exec.Cmd
-	stdin    io.WriteCloser
-	stderr   *boundedBuffer
-	pending  map[int]*pendingRequest
-	nextID   int
-	mu       sync.Mutex
-	writeMu  sync.Mutex
-	wg       sync.WaitGroup
+	cfg     resolvedCommandPluginConfig
+	cmd     *exec.Cmd
+	stdin   io.WriteCloser
+	stderr  *boundedBuffer
+	pending map[int]*pendingRequest
+	nextID  int
+	mu      sync.Mutex
+	writeMu sync.Mutex
+	wg      sync.WaitGroup
 }
 
 type persistentPlugin struct {
@@ -814,7 +814,18 @@ func (mgr *persistentPluginManager) invoke(ctx context.Context, event string, in
 	}
 }
 
-func (mgr *persistentPluginManager) shutdown(_ context.Context) error {
+func (mgr *persistentPluginManager) shutdown(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	waitCtx := ctx
+	cancel := func() {}
+	if _, ok := waitCtx.Deadline(); !ok {
+		waitCtx, cancel = context.WithTimeout(waitCtx, 5*time.Second)
+	}
+	defer cancel()
+
 	// Close stdin to signal EOF — the plugin process should exit gracefully.
 	if err := mgr.stdin.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
 		slog.Warn("Persistent plugin close stdin failed", "name", mgr.cfg.name, "error", err)
@@ -828,10 +839,10 @@ func (mgr *persistentPluginManager) shutdown(_ context.Context) error {
 			return fmt.Errorf("plugin %q exited with error: %w", mgr.cfg.name, err)
 		}
 		return nil
-	case <-time.After(5 * time.Second):
+	case <-waitCtx.Done():
 		_ = mgr.cmd.Process.Kill()
 		mgr.wg.Wait()
-		return fmt.Errorf("plugin %q did not exit after stdin close, killed", mgr.cfg.name)
+		return fmt.Errorf("plugin %q did not exit after stdin close: %w", mgr.cfg.name, waitCtx.Err())
 	}
 }
 

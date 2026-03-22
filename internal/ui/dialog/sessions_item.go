@@ -76,6 +76,10 @@ func (s *SessionItem) Cursor() *tea.Cursor {
 // Render returns the string representation of the session item.
 func (s *SessionItem) Render(width int) string {
 	info := humanize.Time(time.Unix(s.UpdatedAt, 0))
+	title := s.Title
+	if s.ParentSessionID != "" {
+		title = "↳ " + title
+	}
 	styles := ListItemStyles{
 		ItemBlurred:     s.t.Dialog.NormalItem,
 		ItemFocused:     s.t.Dialog.SelectedItem,
@@ -98,7 +102,7 @@ func (s *SessionItem) Render(width int) string {
 		}
 	}
 
-	return renderItem(styles, s.Title, info, s.focused, width, s.cache, &s.m)
+	return renderItem(styles, title, info, s.focused, width, s.cache, &s.m)
 }
 
 type ListItemStyles struct {

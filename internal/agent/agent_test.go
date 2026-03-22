@@ -656,6 +656,19 @@ func BenchmarkBuildSummaryPrompt(b *testing.B) {
 	}
 }
 
+func TestBuildSummaryPromptIncludesTrackedTasksWithoutTodoInstructions(t *testing.T) {
+	t.Parallel()
+
+	prompt := buildSummaryPrompt([]session.Todo{{
+		Status:  session.TodoStatusInProgress,
+		Content: "Investigate delegation bias",
+	}})
+
+	require.Contains(t, prompt, "## Tracked Tasks")
+	require.Contains(t, prompt, "[in_progress] Investigate delegation bias")
+	require.NotContains(t, prompt, "use the `todos` tool")
+}
+
 func TestPromptTokensForUsage_OpenAIStyle(t *testing.T) {
 	t.Parallel()
 

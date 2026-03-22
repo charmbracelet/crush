@@ -138,7 +138,7 @@ func NewCoordinator(
 	}
 
 	// TODO: make this dynamic when we support multiple agents
-	prompt, err := coderPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	prompt, err := promptForAgent(agentCfg, false, prompt.WithWorkingDir(c.cfg.WorkingDir()))
 	if err != nil {
 		return nil, err
 	}
@@ -542,7 +542,7 @@ func (c *coordinator) refreshSessionAgentRuntimeConfig(ctx context.Context, curr
 
 func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fantasy.AgentTool, error) {
 	var allTools []fantasy.AgentTool
-	if slices.Contains(agent.AllowedTools, AgentToolName) {
+	if config.NormalizeAgentMode(agent.Mode) != config.AgentModeSubagent && slices.Contains(agent.AllowedTools, AgentToolName) {
 		agentTool, err := c.agentTool(ctx)
 		if err != nil {
 			return nil, err
@@ -1104,7 +1104,7 @@ func (c *coordinator) updateCurrentAgentRuntime(ctx context.Context) (sessionAge
 		return sessionAgentRuntimeConfig{}, errCoderAgentNotConfigured
 	}
 
-	promptBuilder, err := coderPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	promptBuilder, err := promptForAgent(agentCfg, false, prompt.WithWorkingDir(c.cfg.WorkingDir()))
 	if err != nil {
 		return sessionAgentRuntimeConfig{}, err
 	}
@@ -1200,6 +1200,12 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	if !ok {
 		return fantasy.ToolResponse{}, errModelProviderNotConfigured
 	}
+
+	// Clear any inherited runtime config from the parent agent before running
+	// the subagent. Each subagent must refresh its own models, tools, and
+	// system prompt; otherwise concurrent child runs can observe the parent's
+	// runtime config and skip their own initialization.
+	ctx = context.WithValue(ctx, sessionAgentRuntimeConfigContextKey{}, (*sessionAgentRuntimeConfig)(nil))
 
 	result, err := params.Agent.Run(ctx, SessionAgentCall{
 		SessionID:        session.ID,

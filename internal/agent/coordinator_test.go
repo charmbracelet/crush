@@ -246,6 +246,38 @@ func TestRunSubAgent(t *testing.T) {
 		assert.NotEmpty(t, setupCalledWith, "SessionSetup should have been called")
 	})
 
+	t.Run("clears inherited parent runtime config before subagent run", func(t *testing.T) {
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, providerID, providerCfg)
+
+		parentSession, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+
+		parentRuntimeConfig := sessionAgentRuntimeConfig{
+			MaxOutputTokens: 1234,
+		}
+
+		agent := newMockAgent(providerID, 4096, func(ctx context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+			got, ok := ctx.Value(sessionAgentRuntimeConfigContextKey{}).(*sessionAgentRuntimeConfig)
+			require.True(t, ok, "subagent context should carry an explicit runtime config override marker")
+			require.Nil(t, got, "subagent must not inherit the parent agent runtime config")
+			return agentResultWithText("ok"), nil
+		})
+
+		_, err = coord.runSubAgent(
+			context.WithValue(t.Context(), sessionAgentRuntimeConfigContextKey{}, parentRuntimeConfig),
+			subAgentParams{
+				Agent:          agent,
+				SessionID:      parentSession.ID,
+				AgentMessageID: "msg-1",
+				ToolCallID:     "call-1",
+				Prompt:         "test",
+				SessionTitle:   "Test",
+			},
+		)
+		require.NoError(t, err)
+	})
+
 	t.Run("cost propagation to parent session", func(t *testing.T) {
 		env := testEnv(t)
 		coord := newTestCoordinator(t, env, providerID, providerCfg)

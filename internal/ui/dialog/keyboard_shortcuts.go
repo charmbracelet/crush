@@ -154,11 +154,15 @@ func (k *KeyboardShortcuts) getShortcutCategories() []ShortcutCategory {
 			},
 		},
 		{
-			Name: "聊天导航",
+			Name: "聊天与 Subagent 导航",
 			Shortcuts: []Shortcut{
 				{"ctrl+n", "新建会话"},
 				{"ctrl+t / ctrl+space", "切换任务面板"},
 				{"ctrl+d", "切换详情"},
+				{"ctrl+→", "进入当前选中的 subagent"},
+				{"ctrl+←", "退出到父会话 / 主会话"},
+				{"ctrl+↑", "进入上一个 subagent"},
+				{"ctrl+↓", "进入下一个 subagent"},
 				{"↑/↓", "向上/向下滚动"},
 				{"shift+↑/↓", "逐项滚动"},
 				{"←/→", "切换面板区域"},

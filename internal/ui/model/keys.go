@@ -51,6 +51,10 @@ type KeyMap struct {
 		Copy           key.Binding
 		ClearHighlight key.Binding
 		Expand         key.Binding
+		SessionParent  key.Binding
+		SessionChild   key.Binding
+		SessionNext    key.Binding
+		SessionPrev    key.Binding
 	}
 
 	Initialize struct {
@@ -264,6 +268,22 @@ func DefaultKeyMap() KeyMap {
 	km.Chat.Expand = key.NewBinding(
 		key.WithKeys("space"),
 		key.WithHelp("space", "expand/collapse"),
+	)
+	km.Chat.SessionParent = key.NewBinding(
+		key.WithKeys("ctrl+left"),
+		key.WithHelp("ctrl+←", "exit subagent"),
+	)
+	km.Chat.SessionChild = key.NewBinding(
+		key.WithKeys("ctrl+right"),
+		key.WithHelp("ctrl+→", "open subagent"),
+	)
+	km.Chat.SessionNext = key.NewBinding(
+		key.WithKeys("ctrl+down"),
+		key.WithHelp("ctrl+↓", "next subagent"),
+	)
+	km.Chat.SessionPrev = key.NewBinding(
+		key.WithKeys("ctrl+up"),
+		key.WithHelp("ctrl+↑", "prev subagent"),
 	)
 	km.Initialize.Yes = key.NewBinding(
 		key.WithKeys("y", "Y"),

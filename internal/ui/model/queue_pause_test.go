@@ -4,33 +4,39 @@ import (
 	"context"
 	"testing"
 
+	"charm.land/bubbles/v2/textarea"
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/stretchr/testify/require"
 )
 
 type mockQueueCoordinator struct {
-	queue  int
-	paused bool
+	queue          int
+	paused         bool
+	busy           bool
+	cancelSessions []string
 }
 
 func (m *mockQueueCoordinator) Run(context.Context, string, string, ...message.Attachment) (*fantasy.AgentResult, error) {
 	return nil, nil
 }
-func (m *mockQueueCoordinator) Cancel(string)                       {}
+func (m *mockQueueCoordinator) Cancel(sessionID string) {
+	m.cancelSessions = append(m.cancelSessions, sessionID)
+}
 func (m *mockQueueCoordinator) CancelAll()                          {}
-func (m *mockQueueCoordinator) IsSessionBusy(string) bool           { return false }
+func (m *mockQueueCoordinator) IsSessionBusy(string) bool           { return m.busy }
 func (m *mockQueueCoordinator) IsBusy() bool                        { return false }
 func (m *mockQueueCoordinator) QueuedPrompts(string) int            { return m.queue }
 func (m *mockQueueCoordinator) QueuedPromptsList(string) []string   { return nil }
 func (m *mockQueueCoordinator) RemoveQueuedPrompt(string, int) bool { return false }
 func (m *mockQueueCoordinator) ClearQueue(string)                   {}
-func (m *mockQueueCoordinator) PauseQueue(string)                   {}
-func (m *mockQueueCoordinator) ResumeQueue(string)                  {}
+func (m *mockQueueCoordinator) PauseQueue(string)                   { m.paused = true }
+func (m *mockQueueCoordinator) ResumeQueue(string)                  { m.paused = false }
 func (m *mockQueueCoordinator) IsQueuePaused(string) bool           { return m.paused }
 func (m *mockQueueCoordinator) Summarize(context.Context, string, fantasy.ProviderOptions) error {
 	return nil
@@ -70,4 +76,54 @@ func TestSyncPromptQueueDetectsPauseToggleWithoutQueueSizeChange(t *testing.T) {
 	changed = ui.syncPromptQueue()
 	require.True(t, changed)
 	require.True(t, ui.queuePaused)
+}
+
+func TestCancelAgentRequiresSecondEscapeToCancel(t *testing.T) {
+	t.Parallel()
+
+	coord := &mockQueueCoordinator{busy: true}
+	ui := &UI{
+		session: &session.Session{ID: "s1"},
+		com:     &common.Common{App: &app.App{AgentCoordinator: coord}},
+	}
+
+	cmd := ui.cancelAgent()
+	require.NotNil(t, cmd)
+	require.True(t, ui.isCanceling)
+	require.Empty(t, coord.cancelSessions)
+
+	cmd = ui.cancelAgent()
+	require.Nil(t, cmd)
+	require.False(t, ui.isCanceling)
+	require.Equal(t, []string{"s1"}, coord.cancelSessions)
+}
+
+func TestLoadSessionMsgResetsCancelState(t *testing.T) {
+	t.Parallel()
+
+	coord := &mockQueueCoordinator{}
+	theme := styles.DefaultStyles()
+	com := &common.Common{
+		App:    &app.App{AgentCoordinator: coord},
+		Styles: &theme,
+	}
+	ui := &UI{
+		com:      com,
+		chat:     NewChat(com),
+		status:   NewStatus(com, nil),
+		textarea: textarea.New(),
+		session: &session.Session{
+			ID: "old-session",
+		},
+		isCanceling:    true,
+		todoIsSpinning: true,
+	}
+
+	_, cmd := ui.Update(loadSessionMsg{
+		session: &session.Session{ID: "new-session"},
+	})
+	_ = cmd
+	require.False(t, ui.isCanceling)
+	require.False(t, ui.todoIsSpinning)
+	require.Equal(t, "new-session", ui.session.ID)
 }

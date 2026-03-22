@@ -118,7 +118,7 @@ func NewTodosTool(sessions session.Service) fantasy.AgentTool {
 			response += fmt.Sprintf("Status: %d pending, %d in progress, %d completed\n",
 				pendingCount, inProgressCount, completedCount)
 
-			response += "Todos have been modified successfully. Ensure that you continue to use the todo list to track your progress. Please proceed with the current tasks if applicable."
+			response += "Tracked tasks have been modified successfully."
 
 			metadata := TodosResponseMetadata{
 				IsNew:         isNew,

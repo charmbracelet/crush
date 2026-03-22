@@ -71,6 +71,7 @@ func (m *UI) modeInfo(width int) string {
 	}
 
 	modes := make([]string, 0, 2)
+	modes = append(modes, "SESSION "+strings.ToUpper(m.sessionRoleLabel(m.session)))
 	if m.session.CollaborationMode == sessionpkg.CollaborationModePlan {
 		modes = append(modes, "PLAN")
 	}

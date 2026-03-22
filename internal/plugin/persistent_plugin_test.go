@@ -3,9 +3,11 @@ package plugin
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/log"
@@ -122,4 +124,40 @@ rl.on('line', (line) => {
 
 	// Close the persistent plugin.
 	Close(context.Background())
+}
+
+func TestPersistentPluginShutdownRespectsContext(t *testing.T) {
+	cfg := resolvedCommandPluginConfig{
+		name:    "persistent-hanging-test",
+		command: os.Args[0],
+		args:    []string{"-test.run=TestPersistentPluginShutdownHelperProcess"},
+		env:     []string{"GO_WANT_PERSISTENT_PLUGIN_SHUTDOWN_HELPER=1"},
+		cwd:     t.TempDir(),
+		mode:    commandPluginModePersistent,
+	}
+
+	mgr, err := newPersistentPluginManager(context.Background(), cfg)
+	require.NoError(t, err)
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	err = mgr.shutdown(shutdownCtx)
+	elapsed := time.Since(start)
+
+	require.Error(t, err)
+	require.ErrorContains(t, err, context.DeadlineExceeded.Error())
+	require.Less(t, elapsed, time.Second)
+}
+
+func TestPersistentPluginShutdownHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_PERSISTENT_PLUGIN_SHUTDOWN_HELPER") != "1" {
+		return
+	}
+
+	_, _ = io.Copy(io.Discard, os.Stdin)
+	for {
+		time.Sleep(time.Second)
+	}
 }

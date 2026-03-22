@@ -1,15 +1,12 @@
-Creates and manages a structured task list for tracking progress on complex, multi-step coding tasks.
+Creates and manages a structured task list for tracking progress when explicit,
+manual task tracking is useful.
 
 <when_to_use>
-Use this tool proactively in these scenarios:
+Use this tool when task tracking is specifically useful:
 
-- Complex multi-step tasks requiring 3+ distinct steps or actions
-- Non-trivial tasks requiring careful planning or multiple operations
 - User explicitly requests todo list management
-- User provides multiple tasks (numbered or comma-separated list)
-- After receiving new instructions to capture requirements
-- When starting work on a task (mark as in_progress BEFORE beginning)
-- After completing a task (mark completed and add new follow-up tasks)
+- You need a persistent checklist for a long-running task in the current session
+- You are already using the tool and need to update statuses accurately
 </when_to_use>
 
 <when_not_to_use>
@@ -17,8 +14,9 @@ Skip this tool when:
 
 - Single, straightforward task
 - Trivial task with no organizational benefit
-- Task completable in less than 3 trivial steps
 - Purely conversational or informational request
+- Independent tasks should be delegated to subagents instead of tracked here
+- You can continue work directly without maintaining a manual checklist
 </when_not_to_use>
 
 <task_states>
@@ -35,7 +33,6 @@ Skip this tool when:
 - Update task status in real-time as you work
 - Mark tasks complete IMMEDIATELY after finishing (don't batch completions)
 - Exactly ONE task must be in_progress at any time (not less, not more)
-- Complete current tasks before starting new ones
 - Remove tasks that are no longer relevant from the list entirely
 </task_management>
 
@@ -84,7 +81,7 @@ If blocked:
 </output_behavior>
 
 <tips>
-- When in doubt, use this tool - being proactive demonstrates attentiveness
-- One task in_progress at a time keeps work focused
+- Use this tool only when the checklist itself adds value
+- For parallel or independent work, prefer subagents over todo tracking
 - Update immediately after state changes for accurate tracking
 </tips>

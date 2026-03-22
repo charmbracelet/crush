@@ -238,7 +238,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	agentTools := a.tools.Copy()
 	largeModel := a.largeModel.Get()
 	systemPrompt := a.systemPrompt.Get()
-	promptPrefix := a.systemPromptPrefix.Get()
 	var instructions strings.Builder
 
 	for _, server := range mcp.GetStates() {
@@ -271,6 +270,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session messages: %w", err)
 	}
+	promptPrefix := buildDelegationPromptPrefix(a.systemPromptPrefix.Get(), agentTools, a.isSubAgent)
 	preflightState, err := a.buildChatRequestState(ctx, chatRequestStateInput{
 		SessionID:    call.SessionID,
 		Agent:        "session",
@@ -1250,15 +1250,6 @@ func (a *sessionAgent) createUserMessage(ctx context.Context, call SessionAgentC
 
 func (a *sessionAgent) preparePrompt(msgs []message.Message, attachments ...message.Attachment) ([]fantasy.Message, []fantasy.FilePart) {
 	var history []fantasy.Message
-	if !a.isSubAgent {
-		history = append(history, fantasy.NewUserMessage(
-			fmt.Sprintf("<system_reminder>%s</system_reminder>",
-				`This is a reminder that your todo list is currently empty. DO NOT mention this to the user explicitly because they are already aware.
-If you are working on tasks that would benefit from a todo list please use the "todos" tool to create one.
-If not, please feel free to ignore. Again do not mention this message to the user.`,
-			),
-		))
-	}
 	// Build a set of tool-call IDs that already have a tool-result so we can
 	// detect orphaned tool_use blocks below.
 	toolResultIDs := make(map[string]bool)
@@ -2078,12 +2069,11 @@ func buildSummaryPrompt(todos []session.Todo) string {
 	var sb strings.Builder
 	sb.WriteString("Provide a detailed summary of our conversation above.")
 	if len(todos) > 0 {
-		sb.WriteString("\n\n## Current Todo List\n\n")
+		sb.WriteString("\n\n## Tracked Tasks\n\n")
 		for _, t := range todos {
 			fmt.Fprintf(&sb, "- [%s] %s\n", t.Status, t.Content)
 		}
-		sb.WriteString("\nInclude these tasks and their statuses in your summary. ")
-		sb.WriteString("Instruct the resuming assistant to use the `todos` tool to continue tracking progress on these tasks.")
+		sb.WriteString("\nInclude these tasks and their statuses in your summary.")
 	}
 	return sb.String()
 }

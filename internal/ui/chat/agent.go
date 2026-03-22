@@ -3,11 +3,13 @@ package chat
 import (
 	"encoding/json"
 	"strings"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/tree"
 	"github.com/charmbracelet/crush/internal/agent"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -100,41 +102,52 @@ type AgentToolRenderContext struct {
 // RenderTool implements the [ToolRenderer] interface.
 func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if !opts.ToolCall.Finished && !opts.IsCanceled() && len(r.agent.nestedTools) == 0 {
+	if opts.IsPending() && len(r.agent.nestedTools) == 0 {
 		return pendingTool(sty, "Agent", opts.Anim)
 	}
 
 	var params agent.AgentParams
 	_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
 
-	prompt := params.Prompt
-	prompt = strings.ReplaceAll(prompt, "\n", " ")
+	prompt := strings.ReplaceAll(params.Prompt, "\n", " ")
+	description := strings.TrimSpace(params.Description)
+	if description == "" {
+		description = prompt
+	}
+	description = strings.ReplaceAll(description, "\n", " ")
+	subagentType := titleCase(config.CanonicalSubagentID(params.SubagentType))
 
 	header := toolHeader(sty, opts.Status, "Agent", cappedWidth, opts.Compact)
 	if opts.Compact {
 		return header
 	}
 
-	// Build the task tag and prompt.
-	taskTag := sty.Tool.AgentTaskTag.Render("Task")
+	// Build the subagent tag and description.
+	taskTag := sty.Tool.AgentTaskTag.Render(subagentType)
 	taskTagWidth := lipgloss.Width(taskTag)
 
-	// Calculate remaining width for prompt.
+	// Calculate remaining width for the title.
 	remainingWidth := min(cappedWidth-taskTagWidth-3, maxTextWidth-taskTagWidth-3) // -3 for spacing
 
-	promptText := sty.Tool.AgentPrompt.Width(remainingWidth).Render(prompt)
-
-	header = lipgloss.JoinVertical(
-		lipgloss.Left,
+	descriptionText := sty.Tool.AgentPrompt.Width(remainingWidth).Render(description)
+	headerParts := []string{
 		header,
 		"",
 		lipgloss.JoinHorizontal(
 			lipgloss.Left,
 			taskTag,
 			" ",
-			promptText,
+			descriptionText,
 		),
-	)
+	}
+	if prompt != "" && prompt != description {
+		promptTag := sty.Tool.AgenticFetchPromptTag.Render("Prompt")
+		promptWidth := min(cappedWidth-lipgloss.Width(promptTag)-3, maxTextWidth-lipgloss.Width(promptTag)-3)
+		promptText := sty.Tool.AgentPrompt.Width(promptWidth).Render(prompt)
+		headerParts = append(headerParts, lipgloss.JoinHorizontal(lipgloss.Left, promptTag, " ", promptText))
+	}
+
+	header = lipgloss.JoinVertical(lipgloss.Left, headerParts...)
 
 	// Build tree with nested tool calls.
 	childTools := tree.Root(header)
@@ -149,7 +162,7 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	parts = append(parts, childTools.Enumerator(roundedEnumerator(2, taskTagWidth-5)).String())
 
 	// Show animation if still running.
-	if !opts.HasResult() && !opts.IsCanceled() {
+	if opts.IsSpinning && !opts.HasResult() && !opts.IsCanceled() {
 		parts = append(parts, "", opts.Anim.Render())
 	}
 
@@ -162,6 +175,15 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	}
 
 	return result
+}
+
+func titleCase(value string) string {
+	if value == "" {
+		return ""
+	}
+	runes := []rune(value)
+	runes[0] = unicode.ToUpper(runes[0])
+	return string(runes)
 }
 
 // -----------------------------------------------------------------------------
@@ -231,7 +253,7 @@ type agenticFetchParams struct {
 // RenderTool implements the [ToolRenderer] interface.
 func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if !opts.ToolCall.Finished && !opts.IsCanceled() && len(r.fetch.nestedTools) == 0 {
+	if opts.IsPending() && len(r.fetch.nestedTools) == 0 {
 		return pendingTool(sty, "Agentic Fetch", opts.Anim)
 	}
 
@@ -286,7 +308,7 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 	parts = append(parts, childTools.Enumerator(roundedEnumerator(2, promptTagWidth-5)).String())
 
 	// Show animation if still running.
-	if !opts.HasResult() && !opts.IsCanceled() {
+	if opts.IsSpinning && !opts.HasResult() && !opts.IsCanceled() {
 		parts = append(parts, "", opts.Anim.Render())
 	}
 

@@ -4,6 +4,10 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"fmt"
+	"slices"
+	"strings"
+	"unicode"
 
 	"charm.land/fantasy"
 
@@ -17,7 +21,9 @@ import (
 var agentToolDescription []byte
 
 type AgentParams struct {
-	Prompt string `json:"prompt" description:"The task for the agent to perform"`
+	Description  string `json:"description,omitempty" description:"A short title for the delegated task"`
+	Prompt       string `json:"prompt" description:"The task for the agent to perform"`
+	SubagentType string `json:"subagent_type,omitempty" description:"The subagent type to use: general, explore, or a configured subagent name"`
 }
 
 const (
@@ -25,25 +31,27 @@ const (
 )
 
 func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) {
-	agentCfg, ok := c.cfg.Config().Agents[config.AgentTask]
-	if !ok {
-		return nil, errors.New("task agent not configured")
-	}
-	prompt, err := taskPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
-	if err != nil {
-		return nil, err
-	}
-
-	agent, err := c.buildAgent(ctx, prompt, agentCfg, true)
-	if err != nil {
-		return nil, err
-	}
 	return fantasy.NewParallelAgentTool(
 		AgentToolName,
-		string(agentToolDescription),
+		c.buildAgentToolDescription(),
 		func(ctx context.Context, params AgentParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Prompt == "" {
 				return fantasy.NewTextErrorResponse("prompt is required"), nil
+			}
+
+			agentCfg, err := c.subagentConfig(params.SubagentType)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
+			}
+
+			promptBuilder, err := promptForAgent(agentCfg, true, prompt.WithWorkingDir(c.cfg.WorkingDir()))
+			if err != nil {
+				return fantasy.ToolResponse{}, err
+			}
+
+			subAgent, err := c.buildAgent(ctx, promptBuilder, agentCfg, true)
+			if err != nil {
+				return fantasy.ToolResponse{}, err
 			}
 
 			sessionID := tools.GetSessionFromContext(ctx)
@@ -56,13 +64,85 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 				return fantasy.ToolResponse{}, errors.New("agent message id missing from context")
 			}
 
+			subagentType := config.CanonicalSubagentID(agentCfg.ID)
+			description := strings.TrimSpace(params.Description)
+			if description == "" {
+				description = defaultSubagentDescription(subagentType, params.Prompt)
+			}
+
 			return c.runSubAgent(ctx, subAgentParams{
-				Agent:          agent,
+				Agent:          subAgent,
 				SessionID:      sessionID,
 				AgentMessageID: agentMessageID,
 				ToolCallID:     call.ID,
 				Prompt:         params.Prompt,
-				SessionTitle:   "New Agent Session",
+				SessionTitle:   formatSubagentSessionTitle(description, subagentType),
 			})
 		}), nil
+}
+
+func (c *coordinator) buildAgentToolDescription() string {
+	subagents := make([]config.Agent, 0)
+	seen := make(map[string]struct{})
+	for _, agentCfg := range c.cfg.Config().Agents {
+		if config.NormalizeAgentMode(agentCfg.Mode) == config.AgentModePrimary {
+			continue
+		}
+		canonicalID := config.CanonicalSubagentID(agentCfg.ID)
+		if _, ok := seen[canonicalID]; ok {
+			continue
+		}
+		seen[canonicalID] = struct{}{}
+		subagents = append(subagents, agentCfg)
+	}
+	slices.SortFunc(subagents, func(a, b config.Agent) int {
+		return strings.Compare(a.ID, b.ID)
+	})
+
+	entries := make([]string, 0, len(subagents))
+	for _, agentCfg := range subagents {
+		entries = append(entries, fmt.Sprintf("- %s: %s", config.CanonicalSubagentID(agentCfg.ID), agentCfg.Description))
+	}
+
+	return strings.ReplaceAll(string(agentToolDescription), "{agents}", strings.Join(entries, "\n"))
+}
+
+func (c *coordinator) subagentConfig(requestedType string) (config.Agent, error) {
+	subagentType := config.CanonicalSubagentID(strings.TrimSpace(requestedType))
+	agentCfg, ok := c.cfg.Config().Agents[subagentType]
+	if !ok {
+		return config.Agent{}, fmt.Errorf("unknown subagent type: %s", subagentType)
+	}
+	if config.NormalizeAgentMode(agentCfg.Mode) == config.AgentModePrimary {
+		return config.Agent{}, fmt.Errorf("agent %s is not available as a subagent", agentCfg.ID)
+	}
+	return agentCfg, nil
+}
+
+func defaultSubagentDescription(subagentType, prompt string) string {
+	title := strings.TrimSpace(prompt)
+	if title == "" {
+		return titleCase(subagentType) + " task"
+	}
+	words := strings.Fields(title)
+	if len(words) > 6 {
+		words = words[:6]
+	}
+	return strings.Join(words, " ")
+}
+
+func formatSubagentSessionTitle(description, subagentType string) string {
+	if description == "" {
+		description = titleCase(subagentType) + " task"
+	}
+	return fmt.Sprintf("%s (@%s subagent)", description, subagentType)
+}
+
+func titleCase(value string) string {
+	if value == "" {
+		return ""
+	}
+	runes := []rune(value)
+	runes[0] = unicode.ToUpper(runes[0])
+	return string(runes)
 }

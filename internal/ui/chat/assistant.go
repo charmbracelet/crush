@@ -32,6 +32,7 @@ type AssistantMessageItem struct {
 	message           *message.Message
 	sty               *styles.Styles
 	anim              *anim.Anim
+	showLoadingState  bool
 	thinkingExpanded  bool
 	thinkingBoxHeight int // Tracks the rendered thinking box height for click detection.
 }
@@ -44,6 +45,7 @@ func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) Messa
 		focusableMessageItem:     &focusableMessageItem{},
 		message:                  message,
 		sty:                      sty,
+		showLoadingState:         true,
 	}
 
 	a.anim = anim.New(anim.Settings{
@@ -125,6 +127,16 @@ func (a *AssistantMessageItem) Render(width int) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// SetLoadingStateVisible controls whether loading UI should be rendered for
+// unfinished assistant messages restored from history.
+func (a *AssistantMessageItem) SetLoadingStateVisible(visible bool) {
+	if a.showLoadingState == visible {
+		return
+	}
+	a.showLoadingState = visible
+	a.clearCache()
 }
 
 // renderMessageContent renders the message content including thinking, main content, and finish reason.
@@ -242,6 +254,9 @@ func (a *AssistantMessageItem) renderError(width int) string {
 
 // isSpinning returns true if the assistant message is still generating.
 func (a *AssistantMessageItem) isSpinning() bool {
+	if !a.showLoadingState {
+		return false
+	}
 	isThinking := a.message.IsThinking()
 	isFinished := a.message.IsFinished()
 	hasContent := strings.TrimSpace(a.message.Content().Text) != ""

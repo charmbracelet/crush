@@ -226,13 +226,14 @@ async function handleCliArgs() {
 // Parent process liveness check
 const crushPid = Number.parseInt(process.env.CRUSH_PID || "", 10);
 if (Number.isFinite(crushPid) && crushPid > 0) {
-  setInterval(() => {
+  const livenessTimer = setInterval(() => {
     try {
       process.kill(crushPid, 0);
     } catch {
       process.exit(0);
     }
   }, 5000);
+  livenessTimer.unref?.();
 }
 
 async function main() {

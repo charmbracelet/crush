@@ -2,19 +2,27 @@ package model
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/agent"
+	agenttools "github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/util"
@@ -24,9 +32,12 @@ import (
 // loadSessionMsg is a message indicating that a session and its files have
 // been loaded.
 type loadSessionMsg struct {
-	session   *session.Session
-	files     []SessionFile
-	readFiles []string
+	session           *session.Session
+	messages          []message.Message
+	files             []SessionFile
+	readFiles         []string
+	selectedMessageID string
+	childSessionInfo  map[string]childSessionInfo
 }
 
 // lspFilePaths returns deduplicated file paths from both modified and read
@@ -75,6 +86,10 @@ var modifiedFilesRootMarkers = []string{
 // It returns a tea.Cmd that, when executed, fetches the session data and
 // returns a sessionFilesLoadedMsg containing the processed session files.
 func (m *UI) loadSession(sessionID string) tea.Cmd {
+	return m.loadSessionWithSelection(sessionID, "")
+}
+
+func (m *UI) loadSessionWithSelection(sessionID string, selectedMessageID string) tea.Cmd {
 	return func() tea.Msg {
 		session, err := m.com.App.Sessions.Get(context.Background(), sessionID)
 		if err != nil {
@@ -91,10 +106,25 @@ func (m *UI) loadSession(sessionID string) tea.Cmd {
 			slog.Error("Failed to load read files for session", "error", err)
 		}
 
+		msgs, err := m.com.App.Messages.List(context.Background(), sessionID)
+		if err != nil {
+			return util.ReportError(err)
+		}
+
+		childInfo := make(map[string]childSessionInfo)
+		if session.ParentSessionID != "" {
+			if info, ok := fetchChildSessionMetadata(m.com.App, session.ID); ok {
+				childInfo[session.ID] = info
+			}
+		}
+
 		return loadSessionMsg{
-			session:   &session,
-			files:     sessionFiles,
-			readFiles: readFiles,
+			session:           &session,
+			messages:          msgs,
+			files:             sessionFiles,
+			readFiles:         readFiles,
+			selectedMessageID: selectedMessageID,
+			childSessionInfo:  childInfo,
 		}
 	}
 }
@@ -313,6 +343,181 @@ func compactModifiedFilePath(path string, width int) string {
 		}
 	}
 	return ansi.Truncate(path, width, "…")
+}
+
+func (m *UI) childSessions(parentID string) ([]session.Session, error) {
+	msgs, err := m.com.App.Messages.List(context.Background(), parentID)
+	if err != nil {
+		return nil, err
+	}
+
+	children := make([]session.Session, 0)
+	for _, msg := range msgs {
+		for _, tc := range msg.ToolCalls() {
+			if !isChildSessionToolCall(tc.Name) {
+				continue
+			}
+			childID := m.com.App.Sessions.CreateAgentToolSessionID(msg.ID, tc.ID)
+			child, err := m.com.App.Sessions.Get(context.Background(), childID)
+			if err != nil {
+				continue
+			}
+			if child.ParentSessionID == parentID {
+				children = append(children, child)
+			}
+		}
+	}
+
+	return children, nil
+}
+
+func (m *UI) sessionRoleLabel(sess *session.Session) string {
+	if sess == nil || sess.ParentSessionID == "" {
+		return "Main"
+	}
+
+	if m.childSessionInfoCache != nil {
+		if info, ok := m.childSessionInfoCache[sess.ID]; ok {
+			return info.RoleLabel
+		}
+	}
+
+	return "Subagent"
+}
+
+func titleCase(value string) string {
+	if value == "" {
+		return ""
+	}
+	runes := []rune(value)
+	runes[0] = unicode.ToUpper(runes[0])
+	return string(runes)
+}
+
+type childSessionInfo struct {
+	RoleLabel string
+}
+
+func fetchChildSessionMetadata(app *app.App, sessionID string) (childSessionInfo, bool) {
+	messageID, toolCallID, ok := app.Sessions.ParseAgentToolSessionID(sessionID)
+	if !ok {
+		return childSessionInfo{}, false
+	}
+
+	msg, err := app.Messages.Get(context.Background(), messageID)
+	if err != nil {
+		return childSessionInfo{}, false
+	}
+
+	for _, tc := range msg.ToolCalls() {
+		if tc.ID != toolCallID {
+			continue
+		}
+		switch tc.Name {
+		case agent.AgentToolName:
+			var params agent.AgentParams
+			if err := json.Unmarshal([]byte(tc.Input), &params); err != nil {
+				return childSessionInfo{}, false
+			}
+			return childSessionInfo{
+				RoleLabel: titleCase(config.CanonicalSubagentID(params.SubagentType)),
+			}, true
+		case agenttools.AgenticFetchToolName:
+			return childSessionInfo{RoleLabel: "Fetch"}, true
+		}
+	}
+
+	return childSessionInfo{}, false
+}
+
+func isChildSessionToolCall(toolName string) bool {
+	switch toolName {
+	case agent.AgentToolName, agenttools.AgenticFetchToolName:
+		return true
+	default:
+		return false
+	}
+}
+
+type openChildSessionMsg struct {
+	sessionID string
+}
+
+func (m *UI) openSelectedChildSession() tea.Cmd {
+	if m.session == nil {
+		return nil
+	}
+
+	selected := m.chat.SelectedMessageItem()
+	if selected == nil {
+		return nil
+	}
+
+	toolItem, ok := selected.(chat.ToolMessageItem)
+	if !ok || !isChildSessionToolCall(toolItem.ToolCall().Name) {
+		return nil
+	}
+
+	childID := m.com.App.Sessions.CreateAgentToolSessionID(toolItem.MessageID(), toolItem.ToolCall().ID)
+	parentSessionID := m.session.ID
+
+	return func() tea.Msg {
+		child, err := m.com.App.Sessions.Get(context.Background(), childID)
+		if err != nil || child.ParentSessionID != parentSessionID {
+			return nil
+		}
+		return openChildSessionMsg{sessionID: child.ID}
+	}
+}
+
+func (m *UI) openParentSession() tea.Cmd {
+	if m.session == nil || m.session.ParentSessionID == "" {
+		return nil
+	}
+
+	_, toolCallID, ok := m.com.App.Sessions.ParseAgentToolSessionID(m.session.ID)
+	if ok {
+		return m.loadSessionWithSelection(m.session.ParentSessionID, toolCallID)
+	}
+
+	return m.loadSession(m.session.ParentSessionID)
+}
+
+func (m *UI) cycleSiblingChildSession(step int) tea.Cmd {
+	if m.session == nil || m.session.ParentSessionID == "" {
+		return nil
+	}
+
+	parentID := m.session.ParentSessionID
+	currentID := m.session.ID
+
+	return func() tea.Msg {
+		children, err := m.childSessions(parentID)
+		if err != nil {
+			return util.ReportError(err)
+		}
+		if len(children) < 2 {
+			return nil
+		}
+
+		currentIndex := -1
+		for i, child := range children {
+			if child.ID == currentID {
+				currentIndex = i
+				break
+			}
+		}
+		if currentIndex == -1 {
+			return nil
+		}
+
+		nextIndex := currentIndex + step
+		if nextIndex < 0 || nextIndex >= len(children) {
+			return nil
+		}
+
+		return openChildSessionMsg{sessionID: children[nextIndex].ID}
+	}
 }
 
 // startLSPs starts LSP servers for the given file paths.

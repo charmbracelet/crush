@@ -149,6 +149,10 @@ type UI struct {
 	session      *session.Session
 	sessionFiles []SessionFile
 
+	// childSessionInfoCache caches child session metadata to avoid
+	// DB I/O in the render path.
+	childSessionInfoCache map[string]childSessionInfo
+
 	// keeps track of read files while we don't have a session id
 	sessionFileReads []string
 
@@ -464,16 +468,20 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.isCompact = true
 		}
 		m.setState(uiChat, m.focus)
+		m.isCanceling = false
+		m.todoIsSpinning = false
 		m.session = msg.session
 		m.sessionFiles = msg.files
+		m.childSessionInfoCache = msg.childSessionInfo
+		m.syncPromptQueue()
 		cmds = append(cmds, m.startLSPs(msg.lspFilePaths()))
-		msgs, err := m.com.App.Messages.List(context.Background(), m.session.ID)
-		if err != nil {
-			cmds = append(cmds, util.ReportError(err))
-			break
-		}
-		if cmd := m.setSessionMessages(msgs); cmd != nil {
+		if cmd := m.setSessionMessages(msg.messages); cmd != nil {
 			cmds = append(cmds, cmd)
+		}
+		if msg.selectedMessageID != "" && m.chat.SelectMessage(msg.selectedMessageID) {
+			if cmd := m.chat.ScrollToSelectedAndAnimate(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 		}
 		if hasInProgressTodo(m.session.Todos) {
 			// only start spinner if there is an in-progress todo
@@ -487,6 +495,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.historyReset()
 		cmds = append(cmds, m.loadPromptHistory())
 		m.updateLayoutAndSize()
+
+	case openChildSessionMsg:
+		cmds = append(cmds, m.loadSession(msg.sessionID))
 
 	case sessionFilesUpdatesMsg:
 		m.sessionFiles = msg.sessionFiles
@@ -943,6 +954,13 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	// Load nested tool calls for agent/agentic_fetch tools.
 	m.loadNestedToolCalls(items)
 
+	// Restored sessions can contain incomplete assistant/tool messages left
+	// behind by interruption. Keep their content, but suppress loading UI when
+	// the coordinator is no longer actively working that session.
+	if !m.isAgentBusy() {
+		m.setLoadingStateVisible(items, false)
+	}
+
 	// If the user switches between sessions while the agent is working we want
 	// to make sure the animations are shown. Only start animations if the
 	// agent is actually busy; otherwise we are restoring a historical session
@@ -963,6 +981,26 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	}
 	m.chat.SelectLast()
 	return tea.Sequence(cmds...)
+}
+
+func (m *UI) setLoadingStateVisible(items []chat.MessageItem, visible bool) {
+	for _, item := range items {
+		if controllable, ok := item.(chat.LoadingStateControllable); ok {
+			controllable.SetLoadingStateVisible(visible)
+		}
+
+		nested, ok := item.(chat.NestedToolContainer)
+		if !ok {
+			continue
+		}
+
+		nestedTools := nested.NestedTools()
+		nestedItems := make([]chat.MessageItem, 0, len(nestedTools))
+		for _, tool := range nestedTools {
+			nestedItems = append(nestedItems, tool)
+		}
+		m.setLoadingStateVisible(nestedItems, visible)
+	}
 }
 
 // loadNestedToolCalls recursively loads nested tool calls for agent/agentic_fetch tools.
@@ -1844,6 +1882,34 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 				return true
 			}
+		case key.Matches(msg, m.keyMap.Chat.SessionParent):
+			if m.state == uiChat && m.hasSession() {
+				if cmd := m.openParentSession(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				return true
+			}
+		case key.Matches(msg, m.keyMap.Chat.SessionChild):
+			if m.state == uiChat && m.hasSession() {
+				if cmd := m.openSelectedChildSession(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				return true
+			}
+		case key.Matches(msg, m.keyMap.Chat.SessionNext):
+			if m.state == uiChat && m.hasSession() {
+				if cmd := m.cycleSiblingChildSession(1); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				return true
+			}
+		case key.Matches(msg, m.keyMap.Chat.SessionPrev):
+			if m.state == uiChat && m.hasSession() {
+				if cmd := m.cycleSiblingChildSession(-1); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				return true
+			}
 		case key.Matches(msg, m.keyMap.Suspend):
 			if m.isAgentBusy() {
 				cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
@@ -2399,6 +2465,8 @@ func (m *UI) ShortHelp() []key.Binding {
 				k.Chat.PageUp,
 				k.Chat.PageDown,
 				k.Chat.Copy,
+				k.Chat.SessionParent,
+				k.Chat.SessionChild,
 			)
 			if m.pillsExpanded && hasIncompleteTodos(m.session.Todos) && m.promptQueue > 0 {
 				binds = append(binds, k.Chat.PillLeft)
@@ -2510,6 +2578,12 @@ func (m *UI) FullHelp() [][]key.Binding {
 				[]key.Binding{
 					k.Chat.Copy,
 					k.Chat.ClearHighlight,
+					k.Chat.SessionParent,
+					k.Chat.SessionChild,
+				},
+				[]key.Binding{
+					k.Chat.SessionPrev,
+					k.Chat.SessionNext,
 				},
 			)
 			if m.pillsExpanded && hasIncompleteTodos(m.session.Todos) && m.promptQueue > 0 {

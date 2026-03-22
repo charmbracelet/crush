@@ -512,6 +512,26 @@ func (m *Chat) MessageItem(id string) chat.MessageItem {
 	return item
 }
 
+// SelectMessage selects the list item associated with the given message/tool ID.
+// Returns false if the ID is unknown.
+func (m *Chat) SelectMessage(id string) bool {
+	idx, ok := m.idInxMap[id]
+	if !ok {
+		return false
+	}
+	m.SetSelected(idx)
+	return true
+}
+
+// SelectedMessageItem returns the currently selected message item.
+func (m *Chat) SelectedMessageItem() chat.MessageItem {
+	item, ok := m.list.SelectedItem().(chat.MessageItem)
+	if !ok {
+		return nil
+	}
+	return item
+}
+
 // ToggleExpandedSelectedItem expands the selected message item if it is expandable.
 func (m *Chat) ToggleExpandedSelectedItem() {
 	if expandable, ok := m.list.SelectedItem().(chat.Expandable); ok {

@@ -396,8 +396,11 @@ func (m *UI) loadInitialSession() tea.Cmd {
 	case m.continueLastSession:
 		return func() tea.Msg {
 			sess, err := m.com.App.Sessions.GetLast(context.Background())
-			if err != nil || sess.ParentSessionID != "" {
-				return nil
+			if err != nil {
+				return util.NewWarnMsg("No sessions found to continue")
+			}
+			if sess.ParentSessionID != "" {
+				return util.NewWarnMsg("Cannot continue a child session")
 			}
 			return m.loadSession(sess.ID)()
 		}

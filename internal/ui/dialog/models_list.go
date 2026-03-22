@@ -217,7 +217,7 @@ func (f *ModelsList) VisibleItems() []list.Item {
 
 		matches := fuzzy.Find(query, names)
 
-		// Sort by original index to preserve order within the group
+		// Sort by original index to preserve order within the group.
 		sort.SliceStable(matches, func(i, j int) bool {
 			return matches[i].Index < matches[j].Index
 		})

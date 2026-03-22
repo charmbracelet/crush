@@ -93,7 +93,7 @@ crush --continue
 		}
 		defer app.Shutdown()
 
-		// Resolve session ID if provided
+		// Resolve session ID if provided.
 		if sessionID != "" {
 			sess, err := resolveSessionID(cmd.Context(), app.Sessions, sessionID)
 			if err != nil {

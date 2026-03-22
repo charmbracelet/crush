@@ -276,7 +276,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 
 	sess, err := app.resolveSession(ctx, continueSessionID, useLast)
 	if err != nil {
-		return fmt.Errorf("failed to create session for non-interactive mode: %w", err)
+		return fmt.Errorf("failed to resolve session: %w", err)
 	}
 
 	if continueSessionID != "" || useLast {

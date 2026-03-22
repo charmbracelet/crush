@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"sync"
@@ -125,9 +126,18 @@ func (s *ConfigStore) DisableDockerMCP() error {
 	// Remove from in-memory config.
 	delete(s.config.MCP, DockerMCPName)
 
-	// Persist the updated MCP map to the config file.
-	if err := s.SetConfigField(ScopeGlobal, "mcp", s.config.MCP); err != nil {
-		return fmt.Errorf("failed to persist docker mcp removal: %w", err)
+	var persistErrs []error
+	for _, scope := range []Scope{ScopeGlobal, ScopeWorkspace} {
+		key := "mcp." + DockerMCPName
+		if !s.HasConfigField(scope, key) {
+			continue
+		}
+		if err := s.RemoveConfigField(scope, key); err != nil {
+			persistErrs = append(persistErrs, err)
+		}
+	}
+	if len(persistErrs) > 0 {
+		return fmt.Errorf("failed to persist docker mcp removal: %w", errors.Join(persistErrs...))
 	}
 
 	return nil

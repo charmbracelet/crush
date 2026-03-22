@@ -139,16 +139,23 @@ func TestDisableDockerMCP(t *testing.T) {
 			resolver:       NewShellVariableResolver(env.New()),
 		}
 
+		err := os.WriteFile(configPath, []byte(`{"mcp":{"docker":{"type":"stdio","command":"docker","args":["mcp","gateway","run"]}}}`), 0o600)
+		require.NoError(t, err)
+
 		// Verify it's enabled first.
 		require.True(t, cfg.IsDockerMCPEnabled())
 
-		err := store.DisableDockerMCP()
+		err = store.DisableDockerMCP()
 		require.NoError(t, err)
 
 		// Check in-memory config.
 		require.False(t, cfg.IsDockerMCPEnabled())
 		_, exists := cfg.MCP[DockerMCPName]
 		require.False(t, exists)
+
+		data, err := os.ReadFile(configPath)
+		require.NoError(t, err)
+		require.NotContains(t, string(data), `"docker"`)
 	})
 
 	t.Run("does nothing when MCP is nil", func(t *testing.T) {
@@ -165,6 +172,56 @@ func TestDisableDockerMCP(t *testing.T) {
 
 		err := store.DisableDockerMCP()
 		require.NoError(t, err)
+	})
+
+	t.Run("does not copy workspace mcp entries into global config", func(t *testing.T) {
+		t.Parallel()
+
+		tmpDir := t.TempDir()
+		globalPath := filepath.Join(tmpDir, "global.json")
+		workspacePath := filepath.Join(tmpDir, "workspace.json")
+
+		cfg := &Config{
+			MCP: map[string]MCPConfig{
+				DockerMCPName: {
+					Type:    MCPStdio,
+					Command: "docker",
+					Args:    []string{"mcp", "gateway", "run"},
+				},
+				"globalonly": {
+					Type:    MCPStdio,
+					Command: "global-server",
+				},
+				"workspaceonly": {
+					Type:    MCPStdio,
+					Command: "workspace-server",
+				},
+			},
+		}
+		store := &ConfigStore{
+			config:         cfg,
+			globalDataPath: globalPath,
+			workspacePath:  workspacePath,
+			resolver:       NewShellVariableResolver(env.New()),
+		}
+
+		err := os.WriteFile(globalPath, []byte(`{"mcp":{"docker":{"type":"stdio","command":"docker","args":["mcp","gateway","run"]},"globalonly":{"type":"stdio","command":"global-server"}}}`), 0o600)
+		require.NoError(t, err)
+		err = os.WriteFile(workspacePath, []byte(`{"mcp":{"workspaceonly":{"type":"stdio","command":"workspace-server"}}}`), 0o600)
+		require.NoError(t, err)
+
+		err = store.DisableDockerMCP()
+		require.NoError(t, err)
+
+		globalData, err := os.ReadFile(globalPath)
+		require.NoError(t, err)
+		require.NotContains(t, string(globalData), `"docker"`)
+		require.Contains(t, string(globalData), `"globalonly"`)
+		require.NotContains(t, string(globalData), `"workspaceonly"`)
+
+		workspaceData, err := os.ReadFile(workspacePath)
+		require.NoError(t, err)
+		require.Contains(t, string(workspaceData), `"workspaceonly"`)
 	})
 }
 

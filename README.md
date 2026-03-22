@@ -193,6 +193,7 @@ That said, you can also set environment variables for preferred providers.
 | `OPENROUTER_API_KEY`        | OpenRouter                                         |
 | `IONET_API_KEY`             | io.net                                             |
 | `GROQ_API_KEY`              | Groq                                               |
+| `NOVITA_API_KEY`            | Novita AI                                          |
 | `VERTEXAI_PROJECT`          | Google Cloud VertexAI (Gemini)                     |
 | `VERTEXAI_LOCATION`         | Google Cloud VertexAI (Gemini)                     |
 | `AWS_ACCESS_KEY_ID`         | Amazon Bedrock (Claude)                            |
@@ -559,6 +560,56 @@ Custom Anthropic-compatible providers follow this format:
           "default_max_tokens": 50000,
           "can_reason": true,
           "supports_attachments": true
+        }
+      ]
+    }
+  }
+}
+```
+
+#### Novita AI
+
+[Novita AI](https://novita.ai) is a built-in provider. Set `NOVITA_API_KEY` in
+your environment to enable it.
+
+Alternatively, you can configure it manually:
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "providers": {
+    "novita": {
+      "name": "Novita AI",
+      "type": "openai-compat",
+      "base_url": "https://api.novita.ai/openai",
+      "api_key": "$NOVITA_API_KEY",
+      "models": [
+        {
+          "id": "moonshotai/kimi-k2.5",
+          "name": "Kimi K2.5",
+          "cost_per_1m_in": 0.6,
+          "cost_per_1m_out": 3,
+          "cost_per_1m_in_cached": 0.1,
+          "context_window": 262144,
+          "default_max_tokens": 32768
+        },
+        {
+          "id": "zai-org/glm-5",
+          "name": "GLM-5",
+          "cost_per_1m_in": 1,
+          "cost_per_1m_out": 3.2,
+          "cost_per_1m_in_cached": 0.2,
+          "context_window": 202800,
+          "default_max_tokens": 32768
+        },
+        {
+          "id": "minimax/minimax-m2.5",
+          "name": "MiniMax M2.5",
+          "cost_per_1m_in": 0.3,
+          "cost_per_1m_out": 1.2,
+          "cost_per_1m_in_cached": 0.03,
+          "context_window": 204800,
+          "default_max_tokens": 32768
         }
       ]
     }

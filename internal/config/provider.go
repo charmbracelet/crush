@@ -18,6 +18,7 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/catwalk/pkg/embedded"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
+	"github.com/charmbracelet/crush/internal/agent/novita"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/x/etag"
@@ -181,6 +182,14 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 				return
 			}
 			providers.Append(item)
+		})
+
+		wg.Go(func() {
+			if customProvidersOnly || !novita.Enabled() {
+				return
+			}
+			slog.Info("Using embedded Novita provider")
+			providers.Append(novita.Embedded())
 		})
 
 		wg.Wait()

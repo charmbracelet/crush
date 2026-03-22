@@ -50,6 +50,24 @@ func TestEnsureBase64(t *testing.T) {
 			input:    []byte("U0dWc2JHOGdWMjl5YkdRaA==\n"),
 			wantData: []byte("U0dWc2JHOGdWMjl5YkdRaA=="),
 		},
+		{
+			// RawStdEncoding fallback requires len >= 8 and len % 4 == 0
+			name:     "base64 without padding (8 chars, valid alignment)",
+			input:    []byte("SGVsbG8h"), // "Hello!" in base64 without padding
+			wantData: []byte("SGVsbG8h"),
+		},
+		{
+			// "ABCD" is valid StdEncoding base64 (4 chars = 3 bytes decoded)
+			name:     "4-char valid base64 (StdEncoding)",
+			input:    []byte("ABCD"),
+			wantData: []byte("ABCD"), // Already valid base64, returned as-is after normalization
+		},
+		{
+			// 6 chars but not aligned to 4, RawStdEncoding fallback won't trigger
+			name:     "6-char ASCII treated as raw (not 4-aligned for raw fallback)",
+			input:    []byte("ABCDEF"), // 6 chars, not multiple of 4 for raw fallback
+			wantData: []byte(base64.StdEncoding.EncodeToString([]byte("ABCDEF"))),
+		},
 	}
 
 	for _, tt := range tests {

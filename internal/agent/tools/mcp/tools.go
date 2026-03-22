@@ -210,10 +210,12 @@ func decodeBase64(data []byte) ([]byte, bool) {
 		return decoded, true
 	}
 
-	// For RawStdEncoding (no padding), apply a minimum length check to reduce
-	// false positives. Short strings like "ab" would decode successfully but
-	// are more likely to be raw text than base64.
-	if len(s) >= 4 {
+	// For RawStdEncoding (no padding), apply stricter heuristics to reduce
+	// false positives. We require:
+	// 1. Minimum length of 8 characters (more likely to be real base64)
+	// 2. Length must be a multiple of 4 when padding is added (base64 alignment)
+	// This reduces the chance of misinterpreting random ASCII text as base64.
+	if len(s) >= 8 && len(s)%4 == 0 {
 		decoded, err = base64.RawStdEncoding.DecodeString(s)
 		if err == nil {
 			return decoded, true

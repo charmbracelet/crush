@@ -160,6 +160,7 @@ func (f *fakeCoordinator) Summarize(_ context.Context, _ string, _ fantasy.Provi
 }
 func (f *fakeCoordinator) Model() agent.Model                   { return agent.Model{} }
 func (f *fakeCoordinator) UpdateModels(_ context.Context) error { return nil }
+func (f *fakeCoordinator) RefreshTools(_ context.Context) error { return nil }
 
 type fakeApp struct {
 	sessions    *fakeSessionService

@@ -78,6 +78,7 @@ type Coordinator interface {
 	Summarize(context.Context, string, fantasy.ProviderOptions) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
+	RefreshTools(ctx context.Context) error
 }
 
 type coordinator struct {
@@ -1110,6 +1111,21 @@ func (c *coordinator) updateCurrentAgentRuntime(ctx context.Context) (sessionAge
 	}
 
 	return c.refreshSessionAgentRuntimeConfig(ctx, c.currentAgent, promptBuilder, agentCfg, false)
+}
+
+func (c *coordinator) RefreshTools(ctx context.Context) error {
+	agentCfg, ok := c.cfg.Config().Agents[config.AgentCoder]
+	if !ok {
+		return errors.New("coder agent not configured")
+	}
+
+	tools, err := c.buildTools(ctx, agentCfg)
+	if err != nil {
+		return err
+	}
+	c.currentAgent.SetTools(tools)
+	slog.Debug("Refreshed agent tools", "count", len(tools))
+	return nil
 }
 
 func (c *coordinator) QueuedPrompts(sessionID string) int {

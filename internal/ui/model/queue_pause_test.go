@@ -43,6 +43,7 @@ func (m *mockQueueCoordinator) Summarize(context.Context, string, fantasy.Provid
 }
 func (m *mockQueueCoordinator) Model() agent.Model                 { return agent.Model{} }
 func (m *mockQueueCoordinator) UpdateModels(context.Context) error { return nil }
+func (m *mockQueueCoordinator) RefreshTools(context.Context) error { return nil }
 
 func TestSyncPromptQueueTracksPausedState(t *testing.T) {
 	t.Parallel()

@@ -1621,6 +1621,12 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		cmds = append(cmds, m.toggleMCP(msg.Name, msg.Enable))
 	case dialog.ActionQuit:
 		cmds = append(cmds, tea.Quit)
+	case dialog.ActionEnableDockerMCP:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		cmds = append(cmds, m.enableDockerMCP)
+	case dialog.ActionDisableDockerMCP:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		cmds = append(cmds, m.disableDockerMCP)
 	case dialog.ActionInitializeProject:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
@@ -3545,7 +3551,7 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 
 	m.dialog.OpenDialog(commands)
 
-	return nil
+	return commands.InitialCmd()
 }
 
 // openMCPDialog opens the MCP management dialog.
@@ -4243,6 +4249,57 @@ func (m *UI) copyChatHighlight() tea.Cmd {
 			return nil
 		},
 	)
+}
+
+func (m *UI) enableDockerMCP() tea.Msg {
+	store := m.com.Store()
+	// Stage Docker MCP in memory first so startup and persistence can be atomic.
+	mcpConfig, err := store.PrepareDockerMCPConfig()
+	if err != nil {
+		return util.ReportError(err)()
+	}
+
+	ctx := context.Background()
+	if err := mcp.InitializeSingle(ctx, config.DockerMCPName, store); err != nil {
+		// Roll back runtime and in-memory state when startup fails.
+		disableErr := mcp.DisableSingle(store, config.DockerMCPName)
+		delete(store.Config().MCP, config.DockerMCPName)
+		return util.ReportError(fmt.Errorf("failed to start docker MCP: %w", errors.Join(err, disableErr)))()
+	}
+
+	if err := store.PersistDockerMCPConfig(mcpConfig); err != nil {
+		// Roll back runtime and in-memory state if persistence fails.
+		disableErr := mcp.DisableSingle(store, config.DockerMCPName)
+		delete(store.Config().MCP, config.DockerMCPName)
+		return util.ReportError(fmt.Errorf("docker MCP started but failed to persist configuration: %w", errors.Join(err, disableErr)))()
+	}
+
+	// Refresh agent tools to include the new Docker MCP tools.
+	if err := m.com.App.AgentCoordinator.RefreshTools(ctx); err != nil {
+		slog.Warn("Failed to refresh agent tools after enabling Docker MCP", "error", err)
+	}
+
+	return util.NewInfoMsg("Docker MCP enabled and started successfully")
+}
+
+func (m *UI) disableDockerMCP() tea.Msg {
+	store := m.com.Store()
+	// Close the Docker MCP client.
+	if err := mcp.DisableSingle(store, config.DockerMCPName); err != nil {
+		return util.ReportError(fmt.Errorf("failed to disable docker MCP: %w", err))()
+	}
+
+	// Remove from config and persist.
+	if err := store.DisableDockerMCP(); err != nil {
+		return util.ReportError(err)()
+	}
+
+	// Refresh agent tools to remove the Docker MCP tools.
+	if err := m.com.App.AgentCoordinator.RefreshTools(context.Background()); err != nil {
+		slog.Warn("Failed to refresh agent tools after disabling Docker MCP", "error", err)
+	}
+
+	return util.NewInfoMsg("Docker MCP disabled successfully")
 }
 
 // renderLogo renders the Crush logo with the given styles and dimensions.

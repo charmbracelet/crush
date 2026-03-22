@@ -416,9 +416,25 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				}
 				firstRequestStep = false
 
+				// Use latest tools (updated by SetTools when MCP tools change).
+				prepared.Tools = a.tools.Copy()
+				// Add Anthropic caching to the last tool.
+				if len(prepared.Tools) > 0 {
+					prepared.Tools[len(prepared.Tools)-1].SetProviderOptions(a.getCacheControlOptions())
+				}
+
 				prepared.Messages = options.Messages
 				for i := range prepared.Messages {
 					prepared.Messages[i].ProviderOptions = nil
+				}
+
+				queuedCalls, _ := a.messageQueue.Take(call.SessionID)
+				for _, queued := range queuedCalls {
+					userMessage, createErr := a.createUserMessage(callContext, queued)
+					if createErr != nil {
+						return callContext, prepared, createErr
+					}
+					prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
 				}
 
 				prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel)
@@ -460,7 +476,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				currentStepToolMessageIDs = nil
 				allRunMessageIDs = append(allRunMessageIDs, assistantMsg.ID)
 
-				estimatedPromptTokens = estimatePromptTokens(prepared.Messages, agentTools)
+				estimatedPromptTokens = estimatePromptTokens(prepared.Messages, prepared.Tools)
 				return callContext, prepared, err
 			},
 			OnReasoningStart: func(id string, reasoning fantasy.ReasoningContent) error {

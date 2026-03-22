@@ -86,6 +86,8 @@ type coordinator struct {
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
 
+	secops *SecOpsComponents
+
 	readyWg errgroup.Group
 }
 
@@ -100,6 +102,12 @@ func NewCoordinator(
 	lspManager *lsp.Manager,
 	notify pubsub.Publisher[notify.Notification],
 ) (Coordinator, error) {
+	// Initialize SecOps components
+	secopsComponents, err := InitSecOps(cfg.WorkingDir())
+	if err != nil {
+		slog.Warn("SecOps initialization failed, continuing without SecOps tools", "error", err)
+	}
+
 	c := &coordinator{
 		cfg:         cfg,
 		sessions:    sessions,
@@ -110,6 +118,7 @@ func NewCoordinator(
 		lspManager:  lspManager,
 		notify:      notify,
 		agents:      make(map[string]SessionAgent),
+		secops:      secopsComponents,
 	}
 
 	agentCfg, ok := cfg.Config().Agents[config.AgentCoder]
@@ -473,6 +482,11 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 			tools.NewListMCPResourcesTool(c.cfg, c.permissions),
 			tools.NewReadMCPResourceTool(c.cfg, c.permissions),
 		)
+	}
+
+	// Add SecOps tools if components are available
+	if c.secops != nil {
+		allTools = append(allTools, BuildSecOpsTools(c.permissions, c.secops, c.cfg.WorkingDir())...)
 	}
 
 	var filteredTools []fantasy.AgentTool

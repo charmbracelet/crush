@@ -70,6 +70,12 @@ crush run --continue "Follow up on your last response"
 			if err != nil {
 				return err
 			}
+			if app.Sessions.IsAgentToolSession(sess.ID) {
+				return fmt.Errorf("cannot continue an agent tool session: %s", sess.ID)
+			}
+			if sess.ParentSessionID != "" {
+				return fmt.Errorf("cannot continue a child session: %s", sess.ID)
+			}
 			sessionID = sess.ID
 		}
 

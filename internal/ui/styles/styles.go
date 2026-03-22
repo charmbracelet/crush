@@ -1119,7 +1119,7 @@ func DefaultStyles() Styles {
 	s.Tool.IconCancelled = s.Muted.SetString(ToolPending)
 
 	s.Tool.NameNormal = base.Foreground(blue)
-	s.Tool.NameNested = base.Foreground(fgHalfMuted)
+	s.Tool.NameNested = base.Foreground(blue)
 
 	s.Tool.ParamMain = s.Subtle
 	s.Tool.ParamKey = s.Subtle

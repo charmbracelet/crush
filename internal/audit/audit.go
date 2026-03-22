@@ -195,10 +195,14 @@ func (l *Logger) Log(ctx context.Context, event Event) error {
 	}
 	l.events = append(l.events, event)
 
-	// Export to external systems (non-blocking)
+	// Export to external systems (non-blocking).
+	// Use context.Background so exports are not cancelled when the caller's
+	// context expires — audit events must always reach SIEM.
 	for _, exp := range l.exporters {
 		go func(e Exporter) {
-			if err := e.Export(ctx, []Event{event}); err != nil {
+			exportCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := e.Export(exportCtx, []Event{event}); err != nil {
 				slog.Error("audit export failed", "exporter", e.Name(), "error", err)
 			}
 		}(exp)

@@ -130,18 +130,27 @@ func NewNetworkDiagnosticsTool(
 }
 
 func buildNetworkDiagCommand(action, target string, count int) string {
+	// Validate target against shell injection
+	if target != "" {
+		if msg := security.ValidateNoShellMeta(target); msg != "" {
+			return fmt.Sprintf("echo 'Error: invalid target: %s'", msg)
+		}
+	}
+
+	qt := security.ShellQuote(target)
+
 	switch strings.ToLower(action) {
 	case "ping":
 		if target == "" {
 			return "echo 'target is required for ping'"
 		}
-		return fmt.Sprintf("ping -c %d -W 5 %s 2>&1", count, target)
+		return fmt.Sprintf("ping -c %d -W 5 %s 2>&1", count, qt)
 
 	case "traceroute":
 		if target == "" {
 			return "echo 'target is required for traceroute'"
 		}
-		return fmt.Sprintf("traceroute -m 20 -w 3 %s 2>&1 || tracepath %s 2>&1", target, target)
+		return fmt.Sprintf("traceroute -m 20 -w 3 %s 2>&1 || tracepath %s 2>&1", qt, qt)
 
 	case "dns-lookup":
 		if target == "" {
@@ -156,7 +165,7 @@ echo "--- dig ---"
 dig %s +short 2>&1 || echo "dig not available"
 echo ""
 echo "--- host ---"
-host %s 2>&1 || echo "host not available"`, target, target, target, target)
+host %s 2>&1 || echo "host not available"`, qt, qt, qt, qt)
 
 	case "port-check":
 		if target == "" {
@@ -164,9 +173,9 @@ host %s 2>&1 || echo "host not available"`, target, target, target, target)
 		}
 		parts := strings.SplitN(target, ":", 2)
 		if len(parts) != 2 {
-			return fmt.Sprintf("echo 'Invalid target format: %s. Use host:port'", target)
+			return fmt.Sprintf("echo 'Invalid target format. Use host:port'")
 		}
-		host, port := parts[0], parts[1]
+		host, port := security.ShellQuote(parts[0]), security.ShellQuote(parts[1])
 		return fmt.Sprintf(`echo "===== Port Check: %s:%s ====="
 echo ""
 echo "--- TCP Connect ---"

@@ -1,6 +1,7 @@
 package security
 
 import (
+	"fmt"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -187,6 +188,24 @@ func (ra *RiskAssessor) AssessCommand(cmd string) RiskAssessment {
 		})
 	}
 
+	// 8. Check for reverse shell patterns
+	if containsReverseShell(cmdLower) {
+		assessment.Factors = append(assessment.Factors, RiskFactor{
+			Name:     "reverse_shell",
+			Weight:   50,
+			Evidence: "Reverse shell pattern detected",
+		})
+	}
+
+	// 9. Check for environment/secret dumping
+	if containsEnvDump(cmdLower) {
+		assessment.Factors = append(assessment.Factors, RiskFactor{
+			Name:     "env_dump",
+			Weight:   35,
+			Evidence: "Environment variable extraction detected",
+		})
+	}
+
 	// Calculate total score (capped at 100)
 	for _, factor := range assessment.Factors {
 		assessment.Score += factor.Weight
@@ -301,9 +320,12 @@ func (ra *RiskAssessor) AssessToolCall(toolName, action, target string) RiskAsse
 func compilePatterns(patterns []string) []*regexp.Regexp {
 	compiled := make([]*regexp.Regexp, 0, len(patterns))
 	for _, p := range patterns {
-		if re, err := regexp.Compile(p); err == nil {
-			compiled = append(compiled, re)
+		re, err := regexp.Compile(p)
+		if err != nil {
+			// Security patterns must compile. Log loudly so operators notice.
+			panic(fmt.Sprintf("secops: invalid risk assessment pattern %q: %v", p, err))
 		}
+		compiled = append(compiled, re)
 	}
 	return compiled
 }
@@ -316,6 +338,47 @@ func pathMatch(cmd, pattern string) bool {
 	// Try glob match on each whitespace-separated token
 	for _, token := range strings.Fields(cmd) {
 		if matched, _ := filepath.Match(pattern, token); matched {
+			return true
+		}
+	}
+	return false
+}
+
+// containsReverseShell checks for common reverse shell patterns.
+func containsReverseShell(cmd string) bool {
+	patterns := []string{
+		`bash\s+-[a-z]*i.*>/dev/tcp/`,            // bash -i reverse shell
+		`/dev/tcp/\d`,                             // /dev/tcp connections
+		`nc\s+.*-[a-z]*e\s+/bin/(ba)?sh`,         // nc -e /bin/sh
+		`ncat\s+.*-[a-z]*e\s+/bin/(ba)?sh`,       // ncat -e
+		`python.*socket.*connect`,                 // python reverse shell
+		`perl.*socket.*INET`,                      // perl reverse shell
+		`ruby.*TCPSocket`,                         // ruby reverse shell
+		`php.*fsockopen`,                          // php reverse shell
+		`mkfifo.*nc`,                              // named pipe reverse shell
+		`socat.*exec`,                             // socat reverse shell
+		`telnet.*\|\s*/bin/(ba)?sh`,               // telnet pipe shell
+	}
+	for _, p := range patterns {
+		if matched, _ := regexp.MatchString(p, cmd); matched {
+			return true
+		}
+	}
+	return false
+}
+
+// containsEnvDump checks for attempts to dump environment variables or secrets.
+func containsEnvDump(cmd string) bool {
+	patterns := []string{
+		`\benv\b.*\|`,         // env piped somewhere
+		`\bprintenv\b`,        // printenv
+		`\bset\b\s*\|`,        // set piped
+		`cat.*/proc/.*/environ`, // process environment
+		`strings.*/proc/.*/environ`,
+		`xargs.*-0.*environ`,
+	}
+	for _, p := range patterns {
+		if matched, _ := regexp.MatchString(p, cmd); matched {
 			return true
 		}
 	}

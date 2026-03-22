@@ -143,15 +143,22 @@ func NewSecurityScanTool(
 }
 
 func buildScanCommand(scanType, target, severity, format string) string {
+	// Validate target against injection
+	if msg := security.ValidateNoShellMeta(target); msg != "" {
+		return fmt.Sprintf("echo 'Error: invalid target: %s'", msg)
+	}
+
+	qt := security.ShellQuote(target)
+
 	switch strings.ToLower(scanType) {
 	case "trivy":
 		cmd := fmt.Sprintf("trivy --severity %s", strings.ToUpper(severity))
 		if strings.Contains(target, ":") && !strings.HasPrefix(target, "/") {
-			cmd += " image " + target
+			cmd += " image " + qt
 		} else if target == "localhost" {
 			cmd += " rootfs /"
 		} else {
-			cmd += " fs " + target
+			cmd += " fs " + qt
 		}
 		if format == "json" {
 			cmd += " --format json"
@@ -161,7 +168,7 @@ func buildScanCommand(scanType, target, severity, format string) string {
 		return cmd
 
 	case "grype":
-		cmd := "grype " + target
+		cmd := "grype " + qt
 		cmd += " --only-fixed --fail-on " + strings.ToLower(severity)
 		if format == "json" {
 			cmd += " -o json"
@@ -172,7 +179,7 @@ func buildScanCommand(scanType, target, severity, format string) string {
 		if target == "localhost" || target == "/" {
 			return "lynis audit system --quick --no-colors 2>&1"
 		}
-		return fmt.Sprintf("lynis audit system --quick --no-colors --rootdir %s 2>&1", target)
+		return fmt.Sprintf("lynis audit system --quick --no-colors --rootdir %s 2>&1", qt)
 
 	case "chkrootkit":
 		return "chkrootkit -q 2>&1"
@@ -189,7 +196,7 @@ func buildScanCommand(scanType, target, severity, format string) string {
 		}
 		var cmds []string
 		for _, p := range patterns {
-			cmds = append(cmds, fmt.Sprintf(p, target))
+			cmds = append(cmds, fmt.Sprintf(p, qt))
 		}
 		return `echo "=== Secret Scan Results ==="; echo ""; echo "--- Hardcoded Secrets ---"; ` +
 			cmds[0] + `; echo ""; echo "--- Private Keys ---"; ` +

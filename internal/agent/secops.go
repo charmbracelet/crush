@@ -27,6 +27,7 @@ const (
 	SecOpsMonitoringQuery     = tools.MonitoringQueryToolName
 	SecOpsNetworkDiagnostics  = tools.NetworkDiagnosticsToolName
 	SecOpsCertificateAudit    = tools.CertificateAuditToolName
+	SecOpsAuditViewer         = tools.AuditViewerToolName
 )
 
 // AllSecOpsToolNames returns the names of all SecOps tools for use in
@@ -39,6 +40,7 @@ func AllSecOpsToolNames() []string {
 		SecOpsMonitoringQuery,
 		SecOpsNetworkDiagnostics,
 		SecOpsCertificateAudit,
+		SecOpsAuditViewer,
 	}
 }
 
@@ -125,5 +127,6 @@ func BuildSecOpsTools(
 			secops.AuditLogger,
 			workingDir,
 		),
+		tools.NewAuditViewerTool(secops.AuditLogger),
 	}
 }

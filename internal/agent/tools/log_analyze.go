@@ -149,10 +149,21 @@ func NewLogAnalyzeTool(
 func buildLogAnalyzeCommand(params LogAnalyzeParams, timeRange string, maxLines int) string {
 	source := params.Source
 
+	// Validate inputs against shell injection
+	if msg := security.ValidateNoShellMeta(source); msg != "" {
+		return fmt.Sprintf("echo 'Error: invalid source: %s'", msg)
+	}
+	if params.Pattern != "" {
+		if msg := security.ValidateNoShellMeta(params.Pattern); msg != "" {
+			return fmt.Sprintf("echo 'Error: invalid pattern: %s'", msg)
+		}
+	}
+
 	// If source looks like a journalctl unit, use journalctl
 	if strings.HasPrefix(source, "journalctl") || strings.HasPrefix(source, "systemd:") {
 		unit := strings.TrimPrefix(source, "systemd:")
-		cmd := fmt.Sprintf("journalctl --no-pager --since '%s ago' -u %s", timeRange, unit)
+		cmd := fmt.Sprintf("journalctl --no-pager --since %s -u %s",
+			security.ShellQuote(timeRange+" ago"), security.ShellQuote(unit))
 		if params.Severity != "" {
 			priorities := map[string]string{
 				"ERROR": "3", "WARN": "4", "INFO": "6", "DEBUG": "7",
@@ -162,7 +173,7 @@ func buildLogAnalyzeCommand(params LogAnalyzeParams, timeRange string, maxLines 
 			}
 		}
 		if params.Pattern != "" {
-			cmd += fmt.Sprintf(" --grep='%s'", params.Pattern)
+			cmd += fmt.Sprintf(" --grep=%s", security.ShellQuote(params.Pattern))
 		}
 		cmd += fmt.Sprintf(" | tail -n %d", maxLines)
 		return cmd
@@ -171,17 +182,16 @@ func buildLogAnalyzeCommand(params LogAnalyzeParams, timeRange string, maxLines 
 	// File-based log analysis
 	var parts []string
 
-	// Time-based filtering using awk for common log formats
-	parts = append(parts, fmt.Sprintf("cat '%s' 2>/dev/null", source))
+	parts = append(parts, fmt.Sprintf("cat %s 2>/dev/null", security.ShellQuote(source)))
 
 	// Apply severity filter
 	if params.Severity != "" {
-		parts = append(parts, fmt.Sprintf("grep -i '%s'", params.Severity))
+		parts = append(parts, fmt.Sprintf("grep -i %s", security.ShellQuote(params.Severity)))
 	}
 
 	// Apply pattern filter
 	if params.Pattern != "" {
-		parts = append(parts, fmt.Sprintf("grep -E '%s'", params.Pattern))
+		parts = append(parts, fmt.Sprintf("grep -E %s", security.ShellQuote(params.Pattern)))
 	}
 
 	// Limit output

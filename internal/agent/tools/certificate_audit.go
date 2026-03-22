@@ -133,6 +133,11 @@ func NewCertificateAuditTool(
 }
 
 func buildCertificateCommand(action, target string, warnDays int) string {
+	// Validate target against shell injection
+	if msg := security.ValidateNoShellMeta(target); msg != "" {
+		return fmt.Sprintf("echo 'Error: invalid target: %s'", msg)
+	}
+
 	switch strings.ToLower(action) {
 	case "check-expiry":
 		return fmt.Sprintf(`echo "===== Certificate Expiry Check ====="

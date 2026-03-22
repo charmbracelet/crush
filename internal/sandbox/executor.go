@@ -6,7 +6,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -158,14 +160,50 @@ func (e *Executor) buildCommand(ctx context.Context, command string, cfg *Config
 }
 
 // validateCommand checks the command against deny-path rules.
+// It normalises each token and resolves symlinks to prevent path-traversal bypasses.
 func (e *Executor) validateCommand(command string, cfg *Config) error {
+	// Build a list of normalised deny paths.
+	normalDeny := make([]string, 0, len(cfg.DenyPaths))
+	for _, dp := range cfg.DenyPaths {
+		normalDeny = append(normalDeny, normalizePath(dp))
+	}
+
+	// Inspect every whitespace-separated token in the command.
+	for _, token := range strings.Fields(command) {
+		// Only consider tokens that look like absolute paths.
+		if !strings.HasPrefix(token, "/") {
+			continue
+		}
+		// Strip shell quoting characters that might obscure the real path.
+		clean := strings.Trim(token, `"'`)
+		// Normalise: collapse .., ., double slashes.
+		clean = normalizePath(clean)
+		// Attempt symlink resolution (best-effort; file may not exist yet).
+		if resolved, err := filepath.EvalSymlinks(clean); err == nil {
+			clean = normalizePath(resolved)
+		}
+		for _, denied := range normalDeny {
+			if clean == denied || strings.HasPrefix(clean, denied+string(os.PathSeparator)) {
+				return fmt.Errorf("[sandbox] access denied: path %q is under restricted path %q",
+					token, denied)
+			}
+		}
+	}
+
+	// Also do a quick substring check for non-path tokens (e.g. "cat /etc/shadow" as one blob).
 	cmdLower := strings.ToLower(command)
-	for _, denied := range cfg.DenyPaths {
-		if strings.Contains(cmdLower, strings.ToLower(denied)) {
-			return fmt.Errorf("[sandbox] access denied: command references restricted path %q", denied)
+	for _, dp := range cfg.DenyPaths {
+		if strings.Contains(cmdLower, strings.ToLower(dp)) {
+			return fmt.Errorf("[sandbox] access denied: command references restricted path %q", dp)
 		}
 	}
 	return nil
+}
+
+// normalizePath applies filepath.Clean and lowercases the result on case-
+// insensitive systems. On Linux paths are case-sensitive so we keep case.
+func normalizePath(p string) string {
+	return filepath.Clean(p)
 }
 
 func limitOutput(s string, max int) string {

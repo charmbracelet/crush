@@ -489,6 +489,7 @@ func allToolNames() []string {
 		"monitoring_query",
 		"network_diagnostics",
 		"certificate_audit",
+		"audit_viewer",
 	}
 }
 
@@ -511,6 +512,7 @@ func resolveSecOpsTools(tools []string) []string {
 		// SecOps-specific tools
 		"log_analyze", "compliance_check", "security_scan",
 		"monitoring_query", "network_diagnostics", "certificate_audit",
+		"audit_viewer",
 		// Read-only tools for context
 		"glob", "grep", "ls", "view", "todos",
 		// Bash for flexible operations (sandboxed by SecOps layer)

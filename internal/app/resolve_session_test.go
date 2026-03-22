@@ -168,6 +168,19 @@ func TestResolveSession_Last(t *testing.T) {
 	require.Empty(t, mock.created)
 }
 
+func TestResolveSession_Last_ChildSession(t *testing.T) {
+	mock := &mockSessionService{
+		sessions: []session.Session{
+			{ID: "child-id", ParentSessionID: "parent-id", Title: "Child session"},
+		},
+	}
+	app := newTestApp(mock)
+
+	_, err := app.resolveSession(t.Context(), "", true)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cannot continue a child session")
+}
+
 func TestResolveSession_Last_NoSessions(t *testing.T) {
 	mock := &mockSessionService{}
 	app := newTestApp(mock)

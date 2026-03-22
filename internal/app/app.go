@@ -194,6 +194,9 @@ func (app *App) resolveSession(ctx context.Context, continueSessionID string, us
 		if err != nil {
 			return session.Session{}, fmt.Errorf("no sessions found to continue")
 		}
+		if sess.ParentSessionID != "" {
+			return session.Session{}, fmt.Errorf("cannot continue a child session: %s", sess.ID)
+		}
 		return sess, nil
 
 	default:

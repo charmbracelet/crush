@@ -396,7 +396,7 @@ func (m *UI) loadInitialSession() tea.Cmd {
 	case m.continueLastSession:
 		return func() tea.Msg {
 			sess, err := m.com.App.Sessions.GetLast(context.Background())
-			if err != nil {
+			if err != nil || sess.ParentSessionID != "" {
 				return nil
 			}
 			return m.loadSession(sess.ID)()

@@ -60,6 +60,10 @@ func (m *mockSessionService) Save(_ context.Context, s session.Session) (session
 	return s, nil
 }
 
+func (m *mockSessionService) UpdateCollaborationMode(_ context.Context, sessionID string, mode session.CollaborationMode) (session.Session, error) {
+	return session.Session{ID: sessionID, CollaborationMode: mode}, nil
+}
+
 func (m *mockSessionService) UpdateTitleAndUsage(context.Context, string, string, int64, int64, float64) error {
 	return nil
 }

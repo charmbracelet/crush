@@ -65,7 +65,7 @@ func (f *fakeSessionService) GetLast(_ context.Context) (session.Session, error)
 	for _, s := range f.sessions {
 		return s, nil
 	}
-	return session.Session{}, nil
+	return session.Session{}, fmt.Errorf("no sessions found")
 }
 
 func (f *fakeSessionService) List(_ context.Context) ([]session.Session, error) {

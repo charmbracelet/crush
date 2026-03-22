@@ -209,9 +209,15 @@ func decodeBase64(data []byte) ([]byte, bool) {
 	if err == nil {
 		return decoded, true
 	}
-	decoded, err = base64.RawStdEncoding.DecodeString(s)
-	if err == nil {
-		return decoded, true
+
+	// For RawStdEncoding (no padding), apply a minimum length check to reduce
+	// false positives. Short strings like "ab" would decode successfully but
+	// are more likely to be raw text than base64.
+	if len(s) >= 4 {
+		decoded, err = base64.RawStdEncoding.DecodeString(s)
+		if err == nil {
+			return decoded, true
+		}
 	}
 	return nil, false
 }

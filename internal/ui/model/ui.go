@@ -1828,11 +1828,13 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 func (m *UI) prepareModelSwitchCmd(action dialog.ActionSelectModel, sessionID string, isOnboarding bool) tea.Cmd {
 	return func() tea.Msg {
-		if err := m.com.App.AgentCoordinator.PrepareModelSwitch(context.Background(), sessionID, action.ModelType, action.Model); err != nil {
-			return modelSwitchPreparedMsg{
-				action:       action,
-				isOnboarding: isOnboarding,
-				err:          err,
+		if m.com.App.AgentCoordinator != nil {
+			if err := m.com.App.AgentCoordinator.PrepareModelSwitch(context.Background(), sessionID, action.ModelType, action.Model); err != nil {
+				return modelSwitchPreparedMsg{
+					action:       action,
+					isOnboarding: isOnboarding,
+					err:          err,
+				}
 			}
 		}
 		return modelSwitchPreparedMsg{

@@ -117,6 +117,19 @@ Add a relative path to keep project-specific skills alongside your code:
 }
 ```
 
+### Disable Skills
+
+```json
+{
+  "options": {
+    "disabled_skills": ["crush-config"]
+  }
+}
+```
+
+`disabled_skills` disables skills by name, including both builtin skills and
+skills discovered from disk paths.
+
 ### Debug Options
 
 ```json

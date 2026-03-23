@@ -29,6 +29,10 @@ import (
 
 const defaultCatwalkURL = "https://catwalk.charm.sh"
 
+// ProjectSkillDir is the directory name for project-level skills.
+// This directory is auto-discovered in the working directory.
+const ProjectSkillDir = ".agents/skills"
+
 // Load loads the configuration from the default paths and returns a
 // ConfigStore that owns both the pure-data Config and all runtime state.
 func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
@@ -407,7 +411,16 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	slices.Sort(c.Options.ContextPaths)
 	c.Options.ContextPaths = slices.Compact(c.Options.ContextPaths)
 
-	// Add the default skills directories if not already present.
+	// Add project-level skills directory if it exists in the working directory.
+	// Project skills have higher priority than global ones.
+	projectSkillsPath := filepath.Join(workingDir, ProjectSkillDir)
+	if info, err := os.Stat(projectSkillsPath); err == nil && info.IsDir() {
+		if !slices.Contains(c.Options.SkillsPaths, projectSkillsPath) {
+			c.Options.SkillsPaths = append(c.Options.SkillsPaths, projectSkillsPath)
+		}
+	}
+
+	// Add the default global skills directories if not already present.
 	for _, dir := range GlobalSkillsDirs() {
 		if !slices.Contains(c.Options.SkillsPaths, dir) {
 			c.Options.SkillsPaths = append(c.Options.SkillsPaths, dir)

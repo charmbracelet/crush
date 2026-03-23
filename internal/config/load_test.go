@@ -60,6 +60,54 @@ func TestConfig_setDefaults(t *testing.T) {
 	}
 }
 
+func TestConfig_setDefaultsWithProjectSkillsDir(t *testing.T) {
+	// Create a temp directory with .agents/skills subdirectory
+	tempDir := t.TempDir()
+	projectSkillsDir := filepath.Join(tempDir, ProjectSkillDir)
+	err := os.MkdirAll(projectSkillsDir, 0o755)
+	require.NoError(t, err)
+
+	cfg := &Config{}
+	cfg.setDefaults(tempDir, "")
+
+	require.NotNil(t, cfg.Options.SkillsPaths)
+	require.Contains(t, cfg.Options.SkillsPaths, projectSkillsDir)
+
+	// Project skills should have higher priority (come before global)
+	projectIdx := 0
+	for i, p := range cfg.Options.SkillsPaths {
+		if p == projectSkillsDir {
+			projectIdx = i
+			break
+		}
+	}
+	globalDirs := GlobalSkillsDirs()
+	for _, globalDir := range globalDirs {
+		globalIdx := 0
+		for i, p := range cfg.Options.SkillsPaths {
+			if p == globalDir {
+				globalIdx = i
+				break
+			}
+		}
+		require.Less(t, projectIdx, globalIdx,
+			"project skills should have higher priority than global skills")
+	}
+}
+
+func TestConfig_setDefaultsWithoutProjectSkillsDir(t *testing.T) {
+	// Create a temp directory without .agents/skills subdirectory
+	tempDir := t.TempDir()
+
+	cfg := &Config{}
+	cfg.setDefaults(tempDir, "")
+
+	// SkillsPaths should only contain global dirs, not project skills
+	require.NotNil(t, cfg.Options.SkillsPaths)
+	projectSkillsPath := filepath.Join(tempDir, ProjectSkillDir)
+	require.NotContains(t, cfg.Options.SkillsPaths, projectSkillsPath)
+}
+
 func TestConfig_configureProviders(t *testing.T) {
 	knownProviders := []catwalk.Provider{
 		{

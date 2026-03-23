@@ -40,6 +40,16 @@ func TestEnsureBase64(t *testing.T) {
 			input:    []byte("YQ=="), // "a" in base64
 			wantData: []byte("YQ=="),
 		},
+		{
+			name:     "base64 without padding",
+			input:    []byte("YQ"),
+			wantData: []byte("YQ=="),
+		},
+		{
+			name:     "base64 with whitespace",
+			input:    []byte("U0dWc2JHOGdWMjl5YkdRaA==\n"),
+			wantData: []byte("U0dWc2JHOGdWMjl5YkdRaA=="),
+		},
 	}
 
 	for _, tt := range tests {
@@ -51,6 +61,9 @@ func TestEnsureBase64(t *testing.T) {
 			// Verify the result is valid base64 that can be decoded.
 			if len(result) > 0 {
 				_, err := base64.StdEncoding.DecodeString(string(result))
+				if err != nil {
+					_, err = base64.RawStdEncoding.DecodeString(string(result))
+				}
 				require.NoError(t, err, "result should be valid base64")
 			}
 		})
@@ -83,6 +96,16 @@ func TestIsValidBase64(t *testing.T) {
 		{
 			name:  "empty",
 			input: []byte{},
+			want:  true,
+		},
+		{
+			name:  "valid raw base64 without padding",
+			input: []byte("YQ"),
+			want:  true,
+		},
+		{
+			name:  "valid base64 with whitespace",
+			input: normalizeBase64Input([]byte("U0dWc2JHOGdWMjl5YkdRaA==\n")),
 			want:  true,
 		},
 		{

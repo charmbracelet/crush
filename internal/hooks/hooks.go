@@ -74,9 +74,11 @@ type HookInput struct {
 }
 
 type HookOutput struct {
-	Decision      Decision       `json:"decision"`
-	ModifiedInput map[string]any `json:"modified_input,omitempty"`
-	Reason        string         `json:"reason,omitempty"`
+	Decision        Decision       `json:"decision"`
+	ModifiedInput   map[string]any `json:"modified_input,omitempty"`
+	Reason          string         `json:"reason,omitempty"`
+	FallbackOnError bool           `json:"fallback_on_error,omitempty"`
+	FallbackInput   map[string]any `json:"fallback_input,omitempty"`
 }
 
 type Handler interface {
@@ -136,6 +138,8 @@ func (m *Manager) run(ctx context.Context, event Event, input HookInput) (*HookO
 	current.ToolInput = currentInput
 
 	anyModified := false
+	var fallbackInput map[string]any
+	fallbackProtectedKeys := make(map[string]struct{})
 	for _, rh := range hooks {
 		timeoutCtx, cancel := context.WithTimeout(ctx, rh.config.Timeout())
 		output, err := rh.handler.Execute(timeoutCtx, current)
@@ -155,13 +159,33 @@ func (m *Manager) run(ctx context.Context, event Event, input HookInput) (*HookO
 		case DecisionModify:
 			anyModified = true
 			maps.Copy(current.ToolInput, output.ModifiedInput)
+			if fallbackInput != nil {
+				for key, value := range output.ModifiedInput {
+					if _, protected := fallbackProtectedKeys[key]; protected {
+						continue
+					}
+					fallbackInput[key] = value
+				}
+			}
+			if output.FallbackOnError {
+				if fallbackInput == nil {
+					fallbackInput = make(map[string]any, len(current.ToolInput))
+					maps.Copy(fallbackInput, current.ToolInput)
+				}
+				for key, value := range output.FallbackInput {
+					fallbackInput[key] = value
+					fallbackProtectedKeys[key] = struct{}{}
+				}
+			}
 		}
 	}
 
 	if anyModified {
 		return &HookOutput{
-			Decision:      DecisionModify,
-			ModifiedInput: current.ToolInput,
+			Decision:        DecisionModify,
+			ModifiedInput:   current.ToolInput,
+			FallbackOnError: fallbackInput != nil,
+			FallbackInput:   fallbackInput,
 		}, nil
 	}
 	return &HookOutput{Decision: DecisionAllow}, nil

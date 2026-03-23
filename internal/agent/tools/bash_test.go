@@ -3,10 +3,15 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/shell"
@@ -85,10 +90,59 @@ func TestBashTool_CustomAutoBackgroundThreshold(t *testing.T) {
 	require.NoError(t, bgManager.Kill(meta.ShellID))
 }
 
+func TestBashTool_HookPassthroughFallsBackToOriginalCommand(t *testing.T) {
+	workingDir := t.TempDir()
+	rewriteHook := helperBinary(t, "rewrite-hook", `package main
+import (
+	"fmt"
+	"os"
+)
+func main() {
+	if len(os.Args) < 2 {
+		os.Exit(1)
+	}
+	fmt.Print("false")
+}`)
+
+	enabled := true
+	hookMgr, err := hooks.NewManager([]hooks.HookConfig{
+		{
+			Name:    "rewrite",
+			Enabled: &enabled,
+			Events:  []hooks.Event{hooks.EventPreToolUse},
+			Type:    hooks.HandlerTypeCommand,
+			Command: &hooks.CommandConfig{
+				Command:     rewriteHook,
+				Passthrough: true,
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	tool := newBashToolForTestWithHooks(workingDir, hookMgr)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description: "hook fallback",
+		Command:     "echo done",
+	})
+
+	require.False(t, resp.IsError)
+
+	var meta BashResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	require.Contains(t, meta.Output, "done")
+	require.NotContains(t, meta.Output, "Exit code 1")
+}
+
 func newBashToolForTest(workingDir string) fantasy.AgentTool {
+	return newBashToolForTestWithHooks(workingDir, nil)
+}
+
+func newBashToolForTestWithHooks(workingDir string, hookMgr *hooks.Manager) fantasy.AgentTool {
 	permissions := &mockBashPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
 	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
-	return NewBashTool(permissions, workingDir, attribution, "test-model", nil)
+	return NewBashTool(permissions, workingDir, attribution, "test-model", hookMgr)
 }
 
 func runBashTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, params BashParams) fantasy.ToolResponse {
@@ -106,4 +160,24 @@ func runBashTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, para
 	resp, err := tool.Run(ctx, call)
 	require.NoError(t, err)
 	return resp
+}
+
+func helperBinary(t *testing.T, name, src string) string {
+	t.Helper()
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not found, skipping")
+	}
+
+	dir := t.TempDir()
+	srcFile := filepath.Join(dir, "main.go")
+	require.NoError(t, os.WriteFile(srcFile, []byte(src), 0o644))
+
+	binName := name
+	if runtime.GOOS == "windows" {
+		binName += ".exe"
+	}
+	binPath := filepath.Join(dir, binName)
+	out, err := exec.CommandContext(t.Context(), "go", "build", "-o", binPath, srcFile).CombinedOutput()
+	require.NoError(t, err, "build helper binary: %s", out)
+	return binPath
 }

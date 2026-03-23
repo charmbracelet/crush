@@ -60,6 +60,10 @@ func (h *commandHandler) executePassthrough(ctx context.Context, input HookInput
 		ModifiedInput: map[string]any{
 			field: result,
 		},
+		FallbackOnError: true,
+		FallbackInput: map[string]any{
+			field: fieldValue,
+		},
 	}, nil
 }
 

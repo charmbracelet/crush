@@ -68,13 +68,26 @@ func (s *Skill) Validate() error {
 	return errors.Join(errs...)
 }
 
-// Parse parses a SKILL.md file.
+// Parse parses a SKILL.md file from disk.
 func Parse(path string) (*Skill, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 
+	skill, err := ParseContent(content)
+	if err != nil {
+		return nil, err
+	}
+
+	skill.Path = filepath.Dir(path)
+	skill.SkillFilePath = path
+
+	return skill, nil
+}
+
+// ParseContent parses a SKILL.md from raw bytes.
+func ParseContent(content []byte) (*Skill, error) {
 	frontmatter, body, err := splitFrontmatter(string(content))
 	if err != nil {
 		return nil, err
@@ -86,8 +99,6 @@ func Parse(path string) (*Skill, error) {
 	}
 
 	skill.Instructions = strings.TrimSpace(body)
-	skill.Path = filepath.Dir(path)
-	skill.SkillFilePath = path
 
 	return &skill, nil
 }
@@ -180,4 +191,42 @@ func ToPromptXML(skills []*Skill) string {
 func escape(s string) string {
 	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\"", "&quot;", "'", "&apos;")
 	return r.Replace(s)
+}
+
+// Deduplicate removes duplicate skills by name. When duplicates exist, the
+// last occurrence wins. This means user skills (appended after builtins)
+// override builtin skills with the same name.
+func Deduplicate(all []*Skill) []*Skill {
+	seen := make(map[string]int, len(all))
+	for i, s := range all {
+		seen[s.Name] = i
+	}
+
+	result := make([]*Skill, 0, len(seen))
+	for i, s := range all {
+		if seen[s.Name] == i {
+			result = append(result, s)
+		}
+	}
+	return result
+}
+
+// Filter removes skills whose names appear in the disabled list.
+func Filter(all []*Skill, disabled []string) []*Skill {
+	if len(disabled) == 0 {
+		return all
+	}
+
+	disabledSet := make(map[string]bool, len(disabled))
+	for _, name := range disabled {
+		disabledSet[name] = true
+	}
+
+	result := make([]*Skill, 0, len(all))
+	for _, s := range all {
+		if !disabledSet[s.Name] {
+			result = append(result, s)
+		}
+	}
+	return result
 }

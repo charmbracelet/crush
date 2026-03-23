@@ -135,7 +135,14 @@ func (h *Handler) handleSessionNew(ctx context.Context, req *Request) (any, *RPC
 	if err != nil {
 		return nil, &RPCError{Code: CodeInternalError, Message: fmt.Sprintf("failed to create session: %v", err)}
 	}
-	h.setSessionCWD(sess.ID, normalizeSessionCWD(params.CWD))
+
+	cwd := normalizeSessionCWD(params.CWD)
+	h.setSessionCWD(sess.ID, cwd)
+
+	// Update the config store's working directory so tools use the correct CWD.
+	if cfg := h.app.GetConfig(); cfg != nil {
+		cfg.SetWorkingDir(cwd)
+	}
 
 	// Use the internal session ID as the ACP session ID for simplicity.
 	slog.Info("ACP: created session", "session_id", sess.ID)
@@ -160,7 +167,14 @@ func (h *Handler) handleSessionLoad(ctx context.Context, req *Request) (any, *RP
 
 	// Replay history as session/update notifications before responding so
 	// clients can deterministically rebuild transcript state during load.
-	h.setSessionCWD(sess.ID, normalizeSessionCWD(params.CWD))
+	cwd := normalizeSessionCWD(params.CWD)
+	h.setSessionCWD(sess.ID, cwd)
+
+	// Update the config store's working directory so tools use the correct CWD.
+	if cfg := h.app.GetConfig(); cfg != nil {
+		cfg.SetWorkingDir(cwd)
+	}
+
 	h.replayHistory(ctx, sess.ID)
 
 	slog.Info("ACP: loaded session", "session_id", sess.ID)
@@ -185,6 +199,21 @@ func (h *Handler) replayHistory(ctx context.Context, sessionID string) {
 				h.sendUpdate(sessionID, SessionUpdate{
 					SessionUpdate: SessionUpdateUserMessageChunk,
 					Content:       TextBlock(content),
+				})
+			}
+		case message.Tool:
+			for _, tr := range msg.ToolResults() {
+				status := ToolCallStatusCompleted
+				if tr.IsError {
+					status = ToolCallStatusFailed
+				}
+				h.sendUpdate(sessionID, SessionUpdate{
+					SessionUpdate: SessionUpdateToolCallUpdate,
+					ToolCallID:    tr.ToolCallID,
+					Title:         tr.Name,
+					Kind:          "tool",
+					Status:        status,
+					RawOutput:     tr,
 				})
 			}
 		case message.Assistant:
@@ -376,6 +405,25 @@ func (h *Handler) handleMessageEvent(sessionID string, msg message.Message, read
 						RawInput:      tc.Input,
 					})
 				}
+			}
+		}
+	case message.Tool:
+		for _, tr := range msg.ToolResults() {
+			key := msg.ID + ":tr:" + tr.ToolCallID
+			if _, seen := readBytes[key]; !seen {
+				readBytes[key] = 1
+				status := ToolCallStatusCompleted
+				if tr.IsError {
+					status = ToolCallStatusFailed
+				}
+				h.sendUpdate(sessionID, SessionUpdate{
+					SessionUpdate: SessionUpdateToolCallUpdate,
+					ToolCallID:    tr.ToolCallID,
+					Title:         tr.Name,
+					Kind:          "tool",
+					Status:        status,
+					RawOutput:     tr,
+				})
 			}
 		}
 	}

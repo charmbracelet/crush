@@ -40,6 +40,11 @@ func (s *ConfigStore) WorkingDir() string {
 	return s.workingDir
 }
 
+// SetWorkingDir updates the current working directory.
+func (s *ConfigStore) SetWorkingDir(dir string) {
+	s.workingDir = dir
+}
+
 // Resolver returns the variable resolver.
 func (s *ConfigStore) Resolver() VariableResolver {
 	return s.resolver

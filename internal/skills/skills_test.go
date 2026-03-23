@@ -247,3 +247,123 @@ func TestToPromptXMLEmpty(t *testing.T) {
 	require.Empty(t, ToPromptXML(nil))
 	require.Empty(t, ToPromptXML([]*Skill{}))
 }
+
+func TestParseContent(t *testing.T) {
+	t.Parallel()
+
+	content := []byte(`---
+name: my-skill
+description: A test skill.
+---
+
+# My Skill
+
+Instructions here.
+`)
+	skill, err := ParseContent(content)
+	require.NoError(t, err)
+	require.Equal(t, "my-skill", skill.Name)
+	require.Equal(t, "A test skill.", skill.Description)
+	require.Equal(t, "# My Skill\n\nInstructions here.", skill.Instructions)
+	require.Empty(t, skill.Path)
+	require.Empty(t, skill.SkillFilePath)
+}
+
+func TestParseContent_NoFrontmatter(t *testing.T) {
+	t.Parallel()
+
+	_, err := ParseContent([]byte("# Just Markdown"))
+	require.Error(t, err)
+}
+
+func TestDiscoverBuiltin(t *testing.T) {
+	t.Parallel()
+
+	discovered := DiscoverBuiltin()
+	require.NotEmpty(t, discovered)
+
+	var found bool
+	for _, s := range discovered {
+		if s.Name == "crush-config" {
+			found = true
+			require.True(t, strings.HasPrefix(s.SkillFilePath, BuiltinPrefix))
+			require.True(t, strings.HasPrefix(s.Path, BuiltinPrefix))
+			require.Equal(t, "crush://crush-config/SKILL.md", s.SkillFilePath)
+			require.Equal(t, "crush://crush-config", s.Path)
+			require.NotEmpty(t, s.Description)
+			require.NotEmpty(t, s.Instructions)
+		}
+	}
+	require.True(t, found, "crush-config builtin skill not found")
+}
+
+func TestDeduplicate(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		input    []*Skill
+		wantLen  int
+		wantName string
+		wantPath string
+	}{
+		{
+			name:    "no duplicates",
+			input:   []*Skill{{Name: "a", Path: "/a"}, {Name: "b", Path: "/b"}},
+			wantLen: 2,
+		},
+		{
+			name:     "user overrides builtin",
+			input:    []*Skill{{Name: "crush-config", Path: "crush://crush-config"}, {Name: "crush-config", Path: "/user/crush-config"}},
+			wantLen:  1,
+			wantName: "crush-config",
+			wantPath: "/user/crush-config",
+		},
+		{
+			name:    "empty",
+			input:   nil,
+			wantLen: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := Deduplicate(tt.input)
+			require.Len(t, result, tt.wantLen)
+			if tt.wantName != "" {
+				require.Equal(t, tt.wantName, result[0].Name)
+				require.Equal(t, tt.wantPath, result[0].Path)
+			}
+		})
+	}
+}
+
+func TestFilter(t *testing.T) {
+	t.Parallel()
+
+	all := []*Skill{
+		{Name: "a"},
+		{Name: "b"},
+		{Name: "c"},
+	}
+
+	tests := []struct {
+		name     string
+		disabled []string
+		wantLen  int
+	}{
+		{"no filter", nil, 3},
+		{"filter one", []string{"b"}, 2},
+		{"filter all", []string{"a", "b", "c"}, 0},
+		{"filter nonexistent", []string{"d"}, 3},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := Filter(all, tt.disabled)
+			require.Len(t, result, tt.wantLen)
+		})
+	}
+}

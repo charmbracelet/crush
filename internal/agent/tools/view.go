@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -71,6 +72,11 @@ func NewViewTool(
 		func(ctx context.Context, params ViewParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.FilePath == "" {
 				return fantasy.NewTextErrorResponse("file_path is required"), nil
+			}
+
+			// Handle builtin skill files (crush:// prefix).
+			if strings.HasPrefix(params.FilePath, skills.BuiltinPrefix) {
+				return readBuiltinFile(params)
 			}
 
 			// Handle relative paths
@@ -372,4 +378,57 @@ func isInSkillsPath(filePath string, skillsPaths []string) bool {
 	}
 
 	return false
+}
+
+// readBuiltinFile reads a file from the embedded builtin skills filesystem.
+func readBuiltinFile(params ViewParams) (fantasy.ToolResponse, error) {
+	embeddedPath := "builtin/" + strings.TrimPrefix(params.FilePath, skills.BuiltinPrefix)
+	builtinFS := skills.BuiltinFS()
+
+	data, err := fs.ReadFile(builtinFS, embeddedPath)
+	if err != nil {
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("Builtin file not found: %s", params.FilePath)), nil
+	}
+
+	content := string(data)
+	if !utf8.ValidString(content) {
+		return fantasy.NewTextErrorResponse("File content is not valid UTF-8"), nil
+	}
+
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 1000000 // Effectively no limit for skill files.
+	}
+
+	lines := strings.Split(content, "\n")
+	offset := min(params.Offset, len(lines))
+	lines = lines[offset:]
+
+	hasMore := len(lines) > limit
+	if hasMore {
+		lines = lines[:limit]
+	}
+
+	output := "<file>\n"
+	output += addLineNumbers(strings.Join(lines, "\n"), offset+1)
+	if hasMore {
+		output += fmt.Sprintf("\n\n(File has more lines. Use 'offset' parameter to read beyond line %d)",
+			offset+len(lines))
+	}
+	output += "\n</file>\n"
+
+	meta := ViewResponseMetadata{
+		FilePath: params.FilePath,
+		Content:  strings.Join(lines, "\n"),
+	}
+	if skill, err := skills.ParseContent(data); err == nil {
+		meta.ResourceType = ViewResourceSkill
+		meta.ResourceName = skill.Name
+		meta.ResourceDescription = skill.Description
+	}
+
+	return fantasy.WithResponseMetadata(
+		fantasy.NewTextResponse(output),
+		meta,
+	), nil
 }

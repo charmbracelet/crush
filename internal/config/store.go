@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync"
 
 	"charm.land/catwalk/pkg/catwalk"
 	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
@@ -24,6 +25,7 @@ import (
 type ConfigStore struct {
 	config         *Config
 	workingDir     string
+	workingDirMu   sync.RWMutex // protects workingDir
 	resolver       VariableResolver
 	globalDataPath string // ~/.local/share/crush/crush.json
 	workspacePath  string // .crush/crush.json
@@ -37,12 +39,16 @@ func (s *ConfigStore) Config() *Config {
 
 // WorkingDir returns the current working directory.
 func (s *ConfigStore) WorkingDir() string {
+	s.workingDirMu.RLock()
+	defer s.workingDirMu.RUnlock()
 	return s.workingDir
 }
 
 // SetWorkingDir updates the current working directory.
 func (s *ConfigStore) SetWorkingDir(dir string) {
+	s.workingDirMu.Lock()
 	s.workingDir = dir
+	s.workingDirMu.Unlock()
 }
 
 // Resolver returns the variable resolver.

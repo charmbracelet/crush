@@ -141,6 +141,11 @@ type (
 	sessionUsageRefreshedMsg struct {
 		session *session.Session
 	}
+	modelSwitchPreparedMsg struct {
+		action       dialog.ActionSelectModel
+		isOnboarding bool
+		err          error
+	}
 	modelSwitchCompletedMsg struct {
 		modelType    config.SelectedModelType
 		modelName    string
@@ -902,6 +907,30 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.handleClipboardFallback(msg); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case modelSwitchPreparedMsg:
+		if msg.err != nil {
+			m.dialog.StopLoading()
+			cmds = append(cmds, util.ReportError(msg.err))
+			break
+		}
+
+		m.com.Store().ApplyPreferredModel(msg.action.ModelType, msg.action.Model)
+
+		var defaultSmallModel *config.SelectedModel
+		cfg := m.com.Config()
+		if cfg != nil {
+			if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
+				smallModel := m.com.App.GetDefaultSmallModel(msg.action.Model.Provider)
+				m.com.Store().ApplyPreferredModel(config.SelectedModelTypeSmall, smallModel)
+				defaultSmallModel = &smallModel
+			}
+		}
+
+		if msg.isOnboarding {
+			m.com.Config().SetupAgents()
+		}
+
+		cmds = append(cmds, m.completeModelSwitchCmd(msg.action, defaultSmallModel, msg.isOnboarding))
 	case modelSwitchCompletedMsg:
 		m.dialog.StopLoading()
 		if msg.err != nil {
@@ -1696,7 +1725,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		if cmd := m.dialog.StartLoading(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-		cmds = append(cmds, m.switchModelCmd(msg, sessionID, isOnboarding))
+		cmds = append(cmds, m.prepareModelSwitchCmd(msg, sessionID, isOnboarding))
 	case dialog.ActionSelectReasoningEffort:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
@@ -1797,13 +1826,29 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-func (m *UI) switchModelCmd(action dialog.ActionSelectModel, sessionID string, isOnboarding bool) tea.Cmd {
+func (m *UI) prepareModelSwitchCmd(action dialog.ActionSelectModel, sessionID string, isOnboarding bool) tea.Cmd {
+	return func() tea.Msg {
+		if err := m.com.App.AgentCoordinator.PrepareModelSwitch(context.Background(), sessionID, action.ModelType, action.Model); err != nil {
+			return modelSwitchPreparedMsg{
+				action:       action,
+				isOnboarding: isOnboarding,
+				err:          err,
+			}
+		}
+		return modelSwitchPreparedMsg{
+			action:       action,
+			isOnboarding: isOnboarding,
+		}
+	}
+}
+
+func (m *UI) completeModelSwitchCmd(action dialog.ActionSelectModel, defaultSmallModel *config.SelectedModel, isOnboarding bool) tea.Cmd {
 	modelType := action.ModelType
 	modelName := action.Model.Model
 	selectedModel := action.Model
 
 	return func() tea.Msg {
-		if err := m.com.App.AgentCoordinator.PrepareModelSwitch(context.Background(), sessionID, modelType, selectedModel); err != nil {
+		if err := m.com.Store().PersistPreferredModel(config.ScopeGlobal, modelType, selectedModel); err != nil {
 			return modelSwitchCompletedMsg{
 				modelType:    modelType,
 				modelName:    modelName,
@@ -1812,32 +1857,18 @@ func (m *UI) switchModelCmd(action dialog.ActionSelectModel, sessionID string, i
 			}
 		}
 
-		if err := m.com.Store().UpdatePreferredModel(config.ScopeGlobal, modelType, selectedModel); err != nil {
-			return modelSwitchCompletedMsg{
-				modelType:    modelType,
-				modelName:    modelName,
-				isOnboarding: isOnboarding,
-				err:          err,
-			}
-		}
-
-		cfg := m.com.Config()
-		if cfg != nil {
-			if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
-				smallModel := m.com.App.GetDefaultSmallModel(selectedModel.Provider)
-				if err := m.com.Store().UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeSmall, smallModel); err != nil {
-					return modelSwitchCompletedMsg{
-						modelType:    modelType,
-						modelName:    modelName,
-						isOnboarding: isOnboarding,
-						err:          err,
-					}
+		if defaultSmallModel != nil {
+			if err := m.com.Store().PersistPreferredModel(config.ScopeGlobal, config.SelectedModelTypeSmall, *defaultSmallModel); err != nil {
+				return modelSwitchCompletedMsg{
+					modelType:    modelType,
+					modelName:    modelName,
+					isOnboarding: isOnboarding,
+					err:          err,
 				}
 			}
 		}
 
 		if isOnboarding {
-			m.com.Config().SetupAgents()
 			if err := m.com.App.InitCoderAgent(context.Background()); err != nil {
 				return modelSwitchCompletedMsg{
 					modelType:    modelType,

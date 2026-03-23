@@ -132,12 +132,36 @@ func (s *ConfigStore) RemoveConfigField(scope Scope, key string) error {
 // UpdatePreferredModel updates the preferred model for the given type and
 // persists it to the config file at the given scope.
 func (s *ConfigStore) UpdatePreferredModel(scope Scope, modelType SelectedModelType, model SelectedModel) error {
+	s.ApplyPreferredModel(modelType, model)
+	return s.PersistPreferredModel(scope, modelType, model)
+}
+
+// ApplyPreferredModel updates the in-memory preferred model and recent models.
+func (s *ConfigStore) ApplyPreferredModel(modelType SelectedModelType, model SelectedModel) {
 	s.config.Models[modelType] = model
+
+	recent, changed, ok := updatedRecentModels(s.config.RecentModels[modelType], model)
+	if !ok || !changed {
+		return
+	}
+	if s.config.RecentModels == nil {
+		s.config.RecentModels = make(map[SelectedModelType][]SelectedModel)
+	}
+	s.config.RecentModels[modelType] = recent
+}
+
+// PersistPreferredModel persists the preferred model and current recent list
+// without mutating in-memory config.
+func (s *ConfigStore) PersistPreferredModel(scope Scope, modelType SelectedModelType, model SelectedModel) error {
 	if err := s.SetConfigField(scope, fmt.Sprintf("models.%s", modelType), model); err != nil {
 		return fmt.Errorf("failed to update preferred model: %w", err)
 	}
-	if err := s.recordRecentModel(scope, modelType, model); err != nil {
-		return err
+	recent := s.config.RecentModels[modelType]
+	if recent == nil {
+		return nil
+	}
+	if err := s.SetConfigField(scope, fmt.Sprintf("recent_models.%s", modelType), recent); err != nil {
+		return fmt.Errorf("failed to persist recent models: %w", err)
 	}
 	return nil
 }
@@ -366,12 +390,26 @@ func (s *ConfigStore) RefreshOAuthToken(ctx context.Context, scope Scope, provid
 
 // recordRecentModel records a model in the recent models list.
 func (s *ConfigStore) recordRecentModel(scope Scope, modelType SelectedModelType, model SelectedModel) error {
-	if model.Provider == "" || model.Model == "" {
+	updated, changed, ok := updatedRecentModels(s.config.RecentModels[modelType], model)
+	if !ok || !changed {
 		return nil
 	}
 
 	if s.config.RecentModels == nil {
 		s.config.RecentModels = make(map[SelectedModelType][]SelectedModel)
+	}
+	s.config.RecentModels[modelType] = updated
+
+	if err := s.SetConfigField(scope, fmt.Sprintf("recent_models.%s", modelType), updated); err != nil {
+		return fmt.Errorf("failed to persist recent models: %w", err)
+	}
+
+	return nil
+}
+
+func updatedRecentModels(current []SelectedModel, model SelectedModel) ([]SelectedModel, bool, bool) {
+	if model.Provider == "" || model.Model == "" {
+		return nil, false, false
 	}
 
 	eq := func(a, b SelectedModel) bool {
@@ -383,7 +421,6 @@ func (s *ConfigStore) recordRecentModel(scope Scope, modelType SelectedModelType
 		Model:    model.Model,
 	}
 
-	current := s.config.RecentModels[modelType]
 	withoutCurrent := slices.DeleteFunc(slices.Clone(current), func(existing SelectedModel) bool {
 		return eq(existing, entry)
 	})
@@ -394,16 +431,9 @@ func (s *ConfigStore) recordRecentModel(scope Scope, modelType SelectedModelType
 	}
 
 	if slices.EqualFunc(current, updated, eq) {
-		return nil
+		return current, false, true
 	}
-
-	s.config.RecentModels[modelType] = updated
-
-	if err := s.SetConfigField(scope, fmt.Sprintf("recent_models.%s", modelType), updated); err != nil {
-		return fmt.Errorf("failed to persist recent models: %w", err)
-	}
-
-	return nil
+	return updated, true, true
 }
 
 // ImportCopilot attempts to import a GitHub Copilot token from disk.

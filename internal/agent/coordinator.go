@@ -299,7 +299,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 	case openai.Name, azure.Name:
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
 		if !hasReasoningEffort && model.CatwalkCfg.CanReason {
-			// Default: enable reasoning for models that support it
+			// Default: enable reasoning for models that support it.
 			if reasoningEffort != "" {
 				mergedOptions["reasoning_effort"] = reasoningEffort
 			} else {
@@ -368,7 +368,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 					}
 				}
 			default:
-				// Default: model supports reasoning, enable thinking with high effort
+				// Default: model supports reasoning, enable thinking with high effort.
 				if isClaude46 {
 					mergedOptions["effort"] = "high"
 				} else {
@@ -387,7 +387,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 	case openrouter.Name:
 		_, hasReasoning := mergedOptions["reasoning"]
 		if !hasReasoning && model.CatwalkCfg.CanReason {
-			// Default: enable reasoning for models that support it
+			// Default: enable reasoning for models that support it.
 			if reasoningEffort != "" {
 				mergedOptions["reasoning"] = map[string]any{
 					"enabled": true,
@@ -407,7 +407,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 	case vercel.Name:
 		_, hasReasoning := mergedOptions["reasoning"]
 		if !hasReasoning && model.CatwalkCfg.CanReason {
-			// Default: enable reasoning for models that support it
+			// Default: enable reasoning for models that support it.
 			if reasoningEffort != "" {
 				mergedOptions["reasoning"] = map[string]any{
 					"enabled": true,
@@ -427,7 +427,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 	case google.Name:
 		_, hasThinkingConfig := mergedOptions["thinking_config"]
 		if !hasThinkingConfig && model.CatwalkCfg.CanReason {
-			// Default: enable thinking for models that support it
+			// Default: enable thinking for models that support it.
 			if reasoningEffort != "" {
 				mergedOptions["thinking_config"] = map[string]any{
 					"thinking_level":   reasoningEffort,
@@ -447,7 +447,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 	case openaicompat.Name:
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
 		if !hasReasoningEffort && model.CatwalkCfg.CanReason {
-			// Default: enable reasoning for models that support it
+			// Default: enable reasoning for models that support it.
 			if reasoningEffort != "" {
 				mergedOptions["reasoning_effort"] = reasoningEffort
 			} else {

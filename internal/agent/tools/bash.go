@@ -246,6 +246,24 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				}
 			}
 
+			// Check if fallback command needs permission (it may be the original unsafe command)
+			fallbackNeedsPermission := false
+			if fallbackCommand != "" {
+				fallbackLower := strings.ToLower(fallbackCommand)
+				fallbackIsSafe := false
+				for _, safe := range safeCommands {
+					if strings.HasPrefix(fallbackLower, safe) {
+						if len(fallbackLower) == len(safe) || fallbackLower[len(safe)] == ' ' || fallbackLower[len(safe)] == '-' {
+							fallbackIsSafe = true
+							break
+						}
+					}
+				}
+				if !fallbackIsSafe {
+					fallbackNeedsPermission = true
+				}
+			}
+
 			if sessionID == "" {
 				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for executing shell command")
 			}
@@ -292,6 +310,26 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 						bgManager.Remove(bgShell.ID)
 
 						if shouldRetryOriginalCommand(execErr, commandToRun, fallbackCommand, attemptedFallback) {
+							// Check permission for fallback command if needed
+							if fallbackNeedsPermission && !attemptedFallback {
+								p, err := permissions.Request(ctx,
+									permission.CreatePermissionRequest{
+										SessionID:   sessionID,
+										Path:        execWorkingDir,
+										ToolCallID:  call.ID,
+										ToolName:    BashToolName,
+										Action:      "execute",
+										Description: fmt.Sprintf("Execute command: %s", fallbackCommand),
+										Params:      BashPermissionsParams(BashParams{Command: fallbackCommand}),
+									},
+								)
+								if err != nil {
+									return fantasy.ToolResponse{}, err
+								}
+								if !p {
+									return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
+								}
+							}
 							commandToRun = fallbackCommand
 							attemptedFallback = true
 							continue
@@ -387,6 +425,26 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 					bgManager.Remove(bgShell.ID)
 
 					if shouldRetryOriginalCommand(execErr, commandToRun, fallbackCommand, attemptedFallback) {
+						// Check permission for fallback command if needed
+						if fallbackNeedsPermission && !attemptedFallback {
+							p, err := permissions.Request(ctx,
+								permission.CreatePermissionRequest{
+									SessionID:   sessionID,
+									Path:        execWorkingDir,
+									ToolCallID:  call.ID,
+									ToolName:    BashToolName,
+									Action:      "execute",
+									Description: fmt.Sprintf("Execute command: %s", fallbackCommand),
+									Params:      BashPermissionsParams(BashParams{Command: fallbackCommand}),
+								},
+							)
+							if err != nil {
+								return fantasy.ToolResponse{}, err
+							}
+							if !p {
+								return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
+							}
+						}
 						commandToRun = fallbackCommand
 						attemptedFallback = true
 						continue

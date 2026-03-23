@@ -914,7 +914,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 
-		// Check if the dialog is still open - if closed, the user cancelled
+		// Check if the dialog is still open - if closed, the user cancelled.
 		if !m.dialog.ContainsDialog(dialog.ModelsID) {
 			break
 		}

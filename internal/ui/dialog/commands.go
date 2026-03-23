@@ -75,7 +75,7 @@ type Commands struct {
 	customCommands []commands.CustomCommand
 	mcpPrompts     []commands.MCPPrompt
 
-	dockerMCPAvailable   *bool
+	dockerMCPAvailable     *bool
 	dockerMCPCheckInFlight bool
 }
 
@@ -457,9 +457,12 @@ func (c *Commands) defaultCommands() []*CommandItem {
 
 			// Anthropic models: thinking toggle
 			if model.CanReason && len(model.ReasoningLevels) == 0 {
-				status := "Enable"
-				if selectedModel.Think {
-					status = "Disable"
+				// Thinking is on by default (Think==nil). Only off when explicitly
+				// set to false.
+				thinkingEnabled := selectedModel.Think == nil || *selectedModel.Think
+				status := "Disable"
+				if !thinkingEnabled {
+					status = "Enable"
 				}
 				commands = append(commands, NewCommandItem(c.com.Styles, "toggle_thinking", status+" Thinking Mode", "", ActionToggleThinking{}))
 			}

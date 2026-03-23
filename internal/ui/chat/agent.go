@@ -15,6 +15,10 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/styles"
 )
 
+// maxAgentPromptDisplayLines is the maximum number of lines to show for a
+// subagent prompt or description in the main session view before truncating.
+const maxAgentPromptDisplayLines = 3
+
 // -----------------------------------------------------------------------------
 // Agent Tool
 // -----------------------------------------------------------------------------
@@ -129,7 +133,7 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	// Calculate remaining width for the title.
 	remainingWidth := min(cappedWidth-taskTagWidth-3, maxTextWidth-taskTagWidth-3) // -3 for spacing
 
-	descriptionText := sty.Tool.AgentPrompt.Width(remainingWidth).Render(description)
+	descriptionText := sty.Tool.AgentPrompt.Width(remainingWidth).Render(truncateAgentPrompt(description, remainingWidth))
 	headerParts := []string{
 		header,
 		"",
@@ -143,7 +147,7 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	if prompt != "" && prompt != description {
 		promptTag := sty.Tool.AgenticFetchPromptTag.Render("Prompt")
 		promptWidth := min(cappedWidth-lipgloss.Width(promptTag)-3, maxTextWidth-lipgloss.Width(promptTag)-3)
-		promptText := sty.Tool.AgentPrompt.Width(promptWidth).Render(prompt)
+		promptText := sty.Tool.AgentPrompt.Width(promptWidth).Render(truncateAgentPrompt(prompt, promptWidth))
 		headerParts = append(headerParts, lipgloss.JoinHorizontal(lipgloss.Left, promptTag, " ", promptText))
 	}
 
@@ -175,6 +179,21 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	}
 
 	return result
+}
+
+// truncateAgentPrompt truncates a single-line string to fit within
+// maxAgentPromptDisplayLines lines at the given column width. If the string is
+// truncated, "…" is appended to the last visible character.
+func truncateAgentPrompt(text string, lineWidth int) string {
+	if lineWidth <= 0 {
+		return text
+	}
+	maxRunes := lineWidth * maxAgentPromptDisplayLines
+	runes := []rune(text)
+	if len(runes) <= maxRunes {
+		return text
+	}
+	return string(runes[:maxRunes-1]) + "…"
 }
 
 func titleCase(value string) string {

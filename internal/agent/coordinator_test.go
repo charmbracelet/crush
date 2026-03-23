@@ -8,6 +8,8 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
+	"charm.land/fantasy/providers/openai"
+	"charm.land/fantasy/providers/openaicompat"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -541,13 +543,14 @@ func TestMergeCallOptions_AnthropicThinkingCompatibility(t *testing.T) {
 	})
 
 	t.Run("claude opus 4.6 with think flag uses high effort", func(t *testing.T) {
+		think := true
 		model := Model{
 			CatwalkCfg: catwalk.Model{
 				ID:        "claude-opus-4-6",
 				CanReason: true,
 			},
 			ModelCfg: config.SelectedModel{
-				Think: true,
+				Think: &think,
 			},
 		}
 		cfg := config.ProviderConfig{
@@ -603,6 +606,62 @@ func TestMergeCallOptions_AnthropicThinkingCompatibility(t *testing.T) {
 		require.Equal(t, int64(28672), anthropicOpts.Thinking.BudgetTokens)
 	})
 
+	t.Run("thinking is disabled when Think is explicitly false", func(t *testing.T) {
+		think := false
+		model := Model{
+			CatwalkCfg: catwalk.Model{
+				ID:        "claude-sonnet-4",
+				CanReason: true,
+			},
+			ModelCfg: config.SelectedModel{
+				Think: &think,
+			},
+		}
+		cfg := config.ProviderConfig{
+			Type: anthropic.Name,
+		}
+
+		options, _, _, _, _, _ := mergeCallOptions(model, cfg)
+		anthropicOpts, ok := options[anthropic.Name].(*anthropic.ProviderOptions)
+		require.True(t, ok)
+		require.NotNil(t, anthropicOpts)
+		require.Nil(t, anthropicOpts.Effort)
+		require.Nil(t, anthropicOpts.Thinking)
+	})
+
+	t.Run("thinking is disabled for claude 4.6 when Think is explicitly false", func(t *testing.T) {
+		think := false
+		model := Model{
+			CatwalkCfg: catwalk.Model{
+				ID:        "claude-sonnet-4.6",
+				CanReason: true,
+			},
+			ModelCfg: config.SelectedModel{
+				Think: &think,
+			},
+		}
+		cfg := config.ProviderConfig{
+			Type: anthropic.Name,
+		}
+
+		options, _, _, _, _, _ := mergeCallOptions(model, cfg)
+		anthropicOpts, ok := options[anthropic.Name].(*anthropic.ProviderOptions)
+		require.True(t, ok)
+		require.NotNil(t, anthropicOpts)
+		require.Nil(t, anthropicOpts.Effort)
+		require.Nil(t, anthropicOpts.Thinking)
+	})
+
+	t.Run("isAnthropicThinking returns true for any CanReason model", func(t *testing.T) {
+		for _, id := range []string{"claude-sonnet-4", "claude-sonnet-4.6", "kimi-k2.5"} {
+			require.True(t, isAnthropicThinking(catwalk.Model{ID: id, CanReason: true}), id)
+		}
+	})
+
+	t.Run("isAnthropicThinking returns false when CanReason is false", func(t *testing.T) {
+		require.False(t, isAnthropicThinking(catwalk.Model{ID: "claude-sonnet-4", CanReason: false}))
+	})
+
 	t.Run("claude 4.6 canReason enables effort by default", func(t *testing.T) {
 		model := Model{
 			CatwalkCfg: catwalk.Model{
@@ -620,5 +679,126 @@ func TestMergeCallOptions_AnthropicThinkingCompatibility(t *testing.T) {
 		require.NotNil(t, anthropicOpts)
 		require.Equal(t, anthropic.Effort("high"), *anthropicOpts.Effort)
 		require.Nil(t, anthropicOpts.Thinking)
+	})
+}
+
+func TestMergeCallOptions_ThinkDisabledAllProviders(t *testing.T) {
+	t.Parallel()
+
+	think := false
+
+	t.Run("openai: no reasoning_effort when Think is false", func(t *testing.T) {
+		t.Parallel()
+		// Use a non-responses model ID so mergeCallOptions returns *ProviderOptions.
+		model := Model{
+			CatwalkCfg: catwalk.Model{
+				ID:        "custom-reasoning-model",
+				CanReason: true,
+			},
+			ModelCfg: config.SelectedModel{Think: &think},
+		}
+		options, _, _, _, _, _ := mergeCallOptions(model, config.ProviderConfig{Type: openai.Name})
+		opts, ok := options[openai.Name].(*openai.ProviderOptions)
+		require.True(t, ok)
+		require.Nil(t, opts.ReasoningEffort)
+	})
+
+	t.Run("openai: reasoning_effort set by default when Think is nil", func(t *testing.T) {
+		t.Parallel()
+		// Use a non-responses model ID so mergeCallOptions returns *ProviderOptions.
+		model := Model{
+			CatwalkCfg: catwalk.Model{
+				ID:        "custom-reasoning-model",
+				CanReason: true,
+			},
+		}
+		options, _, _, _, _, _ := mergeCallOptions(model, config.ProviderConfig{Type: openai.Name})
+		opts, ok := options[openai.Name].(*openai.ProviderOptions)
+		require.True(t, ok)
+		require.NotNil(t, opts.ReasoningEffort)
+		require.Equal(t, openai.ReasoningEffortHigh, *opts.ReasoningEffort)
+	})
+
+	t.Run("openai-compat: no reasoning_effort when Think is false", func(t *testing.T) {
+		t.Parallel()
+		model := Model{
+			CatwalkCfg: catwalk.Model{
+				ID:        "some-reasoning-model",
+				CanReason: true,
+			},
+			ModelCfg: config.SelectedModel{Think: &think},
+		}
+		options, _, _, _, _, _ := mergeCallOptions(model, config.ProviderConfig{Type: openaicompat.Name})
+		opts, ok := options[openaicompat.Name].(*openaicompat.ProviderOptions)
+		require.True(t, ok)
+		require.Nil(t, opts.ReasoningEffort)
+	})
+}
+
+func TestMergeCallOptions_ThinkDisabledClearsProviderOptions(t *testing.T) {
+	t.Parallel()
+
+	think := false
+
+	t.Run("anthropic: Think=false clears effort set in provider config", func(t *testing.T) {
+		t.Parallel()
+		model := Model{
+			CatwalkCfg: catwalk.Model{
+				ID:        "claude-sonnet-4",
+				CanReason: true,
+			},
+			ModelCfg: config.SelectedModel{Think: &think},
+		}
+		// Provider config has effort pre-set.
+		cfg := config.ProviderConfig{
+			Type:            anthropic.Name,
+			ProviderOptions: map[string]any{"effort": "high"},
+		}
+
+		options, _, _, _, _, _ := mergeCallOptions(model, cfg)
+		anthropicOpts, ok := options[anthropic.Name].(*anthropic.ProviderOptions)
+		require.True(t, ok)
+		require.Nil(t, anthropicOpts.Effort)
+		require.Nil(t, anthropicOpts.Thinking)
+	})
+
+	t.Run("openai: Think=false clears reasoning_effort set in provider config", func(t *testing.T) {
+		t.Parallel()
+		model := Model{
+			CatwalkCfg: catwalk.Model{
+				ID:        "custom-reasoning-model",
+				CanReason: true,
+			},
+			ModelCfg: config.SelectedModel{Think: &think},
+		}
+		cfg := config.ProviderConfig{
+			Type:            openai.Name,
+			ProviderOptions: map[string]any{"reasoning_effort": "high"},
+		}
+
+		options, _, _, _, _, _ := mergeCallOptions(model, cfg)
+		opts, ok := options[openai.Name].(*openai.ProviderOptions)
+		require.True(t, ok)
+		require.Nil(t, opts.ReasoningEffort)
+	})
+
+	t.Run("openai-compat: Think=false clears reasoning_effort set in provider config", func(t *testing.T) {
+		t.Parallel()
+		model := Model{
+			CatwalkCfg: catwalk.Model{
+				ID:        "custom-reasoning-model",
+				CanReason: true,
+			},
+			ModelCfg: config.SelectedModel{Think: &think},
+		}
+		cfg := config.ProviderConfig{
+			Type:            openaicompat.Name,
+			ProviderOptions: map[string]any{"reasoning_effort": "high"},
+		}
+
+		options, _, _, _, _, _ := mergeCallOptions(model, cfg)
+		opts, ok := options[openaicompat.Name].(*openaicompat.ProviderOptions)
+		require.True(t, ok)
+		require.Nil(t, opts.ReasoningEffort)
 	})
 }

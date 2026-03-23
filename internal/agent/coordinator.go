@@ -297,17 +297,27 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 
 	switch providerType {
 	case openai.Name, azure.Name:
-		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
-		if !hasReasoningEffort && model.CatwalkCfg.CanReason {
-			// Default: enable reasoning for models that support it.
-			if reasoningEffort != "" {
-				mergedOptions["reasoning_effort"] = reasoningEffort
-			} else {
-				mergedOptions["reasoning_effort"] = "high"
+		thinkingDisabled := model.ModelCfg.Think != nil && !*model.ModelCfg.Think
+		if thinkingDisabled {
+			// Explicitly disabled: clear any reasoning params from provider config too.
+			delete(mergedOptions, "reasoning_effort")
+		} else {
+			_, hasReasoningEffort := mergedOptions["reasoning_effort"]
+			if !hasReasoningEffort && model.CatwalkCfg.CanReason {
+				// Default: enable reasoning for models that support it.
+				if reasoningEffort != "" {
+					mergedOptions["reasoning_effort"] = reasoningEffort
+				} else {
+					mergedOptions["reasoning_effort"] = "high"
+				}
 			}
 		}
 		if openai.IsResponsesModel(model.CatwalkCfg.ID) {
-			if openai.IsResponsesReasoningModel(model.CatwalkCfg.ID) {
+			if thinkingDisabled {
+				// Clear Responses API reasoning params from provider config.
+				delete(mergedOptions, "reasoning_summary")
+				delete(mergedOptions, "include")
+			} else if openai.IsResponsesReasoningModel(model.CatwalkCfg.ID) {
 				_, hasSummary := mergedOptions["reasoning_summary"]
 				if !hasSummary {
 					mergedOptions["reasoning_summary"] = "auto"
@@ -328,9 +338,6 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			}
 		}
 	case anthropic.Name:
-		_, hasEffort := mergedOptions["effort"]
-		_, hasThinking := mergedOptions["thinking"]
-
 		// Map reasoning effort to Anthropic parameters.
 		//
 		// Claude 4.6+ (claude-sonnet-4.6, claude-opus-4.6) supports the "effort"
@@ -340,41 +347,39 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		// Older Claude models use the legacy thinking: {type: "enabled", budget_tokens}.
 		//
 		// Default behavior: if the model supports reasoning (CanReason), enable thinking
-		// by default. Users can override by setting effort/thinking in provider config.
-		if !hasEffort && !hasThinking && model.CatwalkCfg.CanReason {
-			isClaude46 := isClaude46Model(model.CatwalkCfg.ID)
-			switch {
-			case reasoningEffort != "":
-				if isClaude46 {
-					// Claude 4.6+: use effort parameter (adaptive thinking)
-					mergedOptions["effort"] = reasoningEffort
-				} else {
-					// Older Claude: use budget_tokens
-					budgetTokens := effortToBudgetTokens(reasoningEffort)
-					mergedOptions["thinking"] = map[string]any{
-						"type":          "enabled",
-						"budget_tokens": budgetTokens,
+		// by default. Users can override via Think=false to disable.
+		thinkingDisabled := model.ModelCfg.Think != nil && !*model.ModelCfg.Think
+		if thinkingDisabled {
+			// Explicitly disabled: clear any thinking params from provider config too.
+			delete(mergedOptions, "effort")
+			delete(mergedOptions, "thinking")
+		} else {
+			_, hasEffort := mergedOptions["effort"]
+			_, hasThinking := mergedOptions["thinking"]
+			if !hasEffort && !hasThinking && model.CatwalkCfg.CanReason {
+				isClaude46 := isClaude46Model(model.CatwalkCfg.ID)
+				switch {
+				case reasoningEffort != "":
+					if isClaude46 {
+						// Claude 4.6+: use effort parameter (adaptive thinking)
+						mergedOptions["effort"] = reasoningEffort
+					} else {
+						// Older Claude: use budget_tokens
+						budgetTokens := effortToBudgetTokens(reasoningEffort)
+						mergedOptions["thinking"] = map[string]any{
+							"type":          "enabled",
+							"budget_tokens": budgetTokens,
+						}
 					}
-				}
-			case model.ModelCfg.Think:
-				if isClaude46 {
-					// Claude 4.6+ with think:true: use high effort
-					mergedOptions["effort"] = "high"
-				} else {
-					// Older Claude: use budget_tokens
-					mergedOptions["thinking"] = map[string]any{
-						"type":          "enabled",
-						"budget_tokens": effortToBudgetTokens("high"),
-					}
-				}
-			default:
-				// Default: model supports reasoning, enable thinking with high effort.
-				if isClaude46 {
-					mergedOptions["effort"] = "high"
-				} else {
-					mergedOptions["thinking"] = map[string]any{
-						"type":          "enabled",
-						"budget_tokens": effortToBudgetTokens("high"),
+				default:
+					// Default: model supports reasoning, enable thinking with high effort.
+					if isClaude46 {
+						mergedOptions["effort"] = "high"
+					} else {
+						mergedOptions["thinking"] = map[string]any{
+							"type":          "enabled",
+							"budget_tokens": effortToBudgetTokens("high"),
+						}
 					}
 				}
 			}
@@ -385,18 +390,23 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		}
 
 	case openrouter.Name:
-		_, hasReasoning := mergedOptions["reasoning"]
-		if !hasReasoning && model.CatwalkCfg.CanReason {
-			// Default: enable reasoning for models that support it.
-			if reasoningEffort != "" {
-				mergedOptions["reasoning"] = map[string]any{
-					"enabled": true,
-					"effort":  reasoningEffort,
-				}
-			} else {
-				mergedOptions["reasoning"] = map[string]any{
-					"enabled": true,
-					"effort":  "high",
+		thinkingDisabled := model.ModelCfg.Think != nil && !*model.ModelCfg.Think
+		if thinkingDisabled {
+			delete(mergedOptions, "reasoning")
+		} else {
+			_, hasReasoning := mergedOptions["reasoning"]
+			if !hasReasoning && model.CatwalkCfg.CanReason {
+				// Default: enable reasoning for models that support it.
+				if reasoningEffort != "" {
+					mergedOptions["reasoning"] = map[string]any{
+						"enabled": true,
+						"effort":  reasoningEffort,
+					}
+				} else {
+					mergedOptions["reasoning"] = map[string]any{
+						"enabled": true,
+						"effort":  "high",
+					}
 				}
 			}
 		}
@@ -405,18 +415,23 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			options[openrouter.Name] = parsed
 		}
 	case vercel.Name:
-		_, hasReasoning := mergedOptions["reasoning"]
-		if !hasReasoning && model.CatwalkCfg.CanReason {
-			// Default: enable reasoning for models that support it.
-			if reasoningEffort != "" {
-				mergedOptions["reasoning"] = map[string]any{
-					"enabled": true,
-					"effort":  reasoningEffort,
-				}
-			} else {
-				mergedOptions["reasoning"] = map[string]any{
-					"enabled": true,
-					"effort":  "high",
+		thinkingDisabled := model.ModelCfg.Think != nil && !*model.ModelCfg.Think
+		if thinkingDisabled {
+			delete(mergedOptions, "reasoning")
+		} else {
+			_, hasReasoning := mergedOptions["reasoning"]
+			if !hasReasoning && model.CatwalkCfg.CanReason {
+				// Default: enable reasoning for models that support it.
+				if reasoningEffort != "" {
+					mergedOptions["reasoning"] = map[string]any{
+						"enabled": true,
+						"effort":  reasoningEffort,
+					}
+				} else {
+					mergedOptions["reasoning"] = map[string]any{
+						"enabled": true,
+						"effort":  "high",
+					}
 				}
 			}
 		}
@@ -425,18 +440,23 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			options[vercel.Name] = parsed
 		}
 	case google.Name:
-		_, hasThinkingConfig := mergedOptions["thinking_config"]
-		if !hasThinkingConfig && model.CatwalkCfg.CanReason {
-			// Default: enable thinking for models that support it.
-			if reasoningEffort != "" {
-				mergedOptions["thinking_config"] = map[string]any{
-					"thinking_level":   reasoningEffort,
-					"include_thoughts": true,
-				}
-			} else {
-				mergedOptions["thinking_config"] = map[string]any{
-					"thinking_level":   "high",
-					"include_thoughts": true,
+		thinkingDisabled := model.ModelCfg.Think != nil && !*model.ModelCfg.Think
+		if thinkingDisabled {
+			delete(mergedOptions, "thinking_config")
+		} else {
+			_, hasThinkingConfig := mergedOptions["thinking_config"]
+			if !hasThinkingConfig && model.CatwalkCfg.CanReason {
+				// Default: enable thinking for models that support it.
+				if reasoningEffort != "" {
+					mergedOptions["thinking_config"] = map[string]any{
+						"thinking_level":   reasoningEffort,
+						"include_thoughts": true,
+					}
+				} else {
+					mergedOptions["thinking_config"] = map[string]any{
+						"thinking_level":   "high",
+						"include_thoughts": true,
+					}
 				}
 			}
 		}
@@ -445,13 +465,18 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			options[google.Name] = parsed
 		}
 	case openaicompat.Name:
-		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
-		if !hasReasoningEffort && model.CatwalkCfg.CanReason {
-			// Default: enable reasoning for models that support it.
-			if reasoningEffort != "" {
-				mergedOptions["reasoning_effort"] = reasoningEffort
-			} else {
-				mergedOptions["reasoning_effort"] = "high"
+		thinkingDisabled := model.ModelCfg.Think != nil && !*model.ModelCfg.Think
+		if thinkingDisabled {
+			delete(mergedOptions, "reasoning_effort")
+		} else {
+			_, hasReasoningEffort := mergedOptions["reasoning_effort"]
+			if !hasReasoningEffort && model.CatwalkCfg.CanReason {
+				// Default: enable reasoning for models that support it.
+				if reasoningEffort != "" {
+					mergedOptions["reasoning_effort"] = reasoningEffort
+				} else {
+					mergedOptions["reasoning_effort"] = "high"
+				}
 			}
 		}
 		parsed, err := openaicompat.ParseOptions(mergedOptions)
@@ -515,12 +540,20 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		return nil, err
 	}
 
-	largeProviderCfg, _ := c.cfg.Config().Providers.Get(large.ModelCfg.Provider)
+	// Select inference model based on agent configuration.
+	inferenceModel := large
+	inferenceProviderCfg, _ := c.cfg.Config().Providers.Get(large.ModelCfg.Provider)
+	if agent.Model == config.SelectedModelTypeSmall {
+		inferenceModel = small
+		if cfg, ok := c.cfg.Config().Providers.Get(small.ModelCfg.Provider); ok {
+			inferenceProviderCfg = cfg
+		}
+	}
 	var result SessionAgent
 	result = NewSessionAgent(SessionAgentOptions{
-		LargeModel:         large,
+		LargeModel:         inferenceModel,
 		SmallModel:         small,
-		SystemPromptPrefix: largeProviderCfg.SystemPromptPrefix,
+		SystemPromptPrefix: inferenceProviderCfg.SystemPromptPrefix,
 		SystemPrompt:       "",
 		WorkingDir:         c.cfg.WorkingDir(),
 		RefreshCallConfig: func(callCtx context.Context) (sessionAgentRuntimeConfig, error) {
@@ -548,15 +581,21 @@ func (c *coordinator) refreshSessionAgentRuntimeConfig(ctx context.Context, curr
 	if err != nil {
 		return sessionAgentRuntimeConfig{}, err
 	}
-	currentAgent.SetModels(large, small)
 
-	providerCfg, ok := c.cfg.Config().Providers.Get(large.ModelCfg.Provider)
+	// Select inference model based on agent configuration.
+	inferenceModel := large
+	if agentCfg.Model == config.SelectedModelTypeSmall {
+		inferenceModel = small
+	}
+	currentAgent.SetModels(inferenceModel, small)
+
+	providerCfg, ok := c.cfg.Config().Providers.Get(inferenceModel.ModelCfg.Provider)
 	if !ok {
 		return sessionAgentRuntimeConfig{}, errModelProviderNotConfigured
 	}
 	currentAgent.SetSystemPromptPrefix(providerCfg.SystemPromptPrefix)
 
-	systemPrompt, err := promptBuilder.Build(ctx, large.Model.Provider(), large.Model.Model(), c.cfg)
+	systemPrompt, err := promptBuilder.Build(ctx, inferenceModel.Model.Provider(), inferenceModel.Model.Model(), c.cfg)
 	if err != nil {
 		return sessionAgentRuntimeConfig{}, err
 	}
@@ -568,12 +607,12 @@ func (c *coordinator) refreshSessionAgentRuntimeConfig(ctx context.Context, curr
 	}
 	currentAgent.SetTools(tools)
 
-	maxTokens, clamped := effectiveMaxOutputTokens(large)
+	maxTokens, clamped := effectiveMaxOutputTokens(inferenceModel)
 	if clamped {
-		slog.Warn("Configured max_tokens is much larger than model default, using model default", "configured", large.ModelCfg.MaxTokens, "default", large.CatwalkCfg.DefaultMaxTokens, "model", large.ModelCfg.Model)
+		slog.Warn("Configured max_tokens is much larger than model default, using model default", "configured", inferenceModel.ModelCfg.MaxTokens, "default", inferenceModel.CatwalkCfg.DefaultMaxTokens, "model", inferenceModel.ModelCfg.Model)
 	}
 
-	mergedOptions, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(large, providerCfg)
+	mergedOptions, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(inferenceModel, providerCfg)
 	return sessionAgentRuntimeConfig{
 		ProviderOptions:  mergedOptions,
 		MaxOutputTokens:  maxTokens,
@@ -738,12 +777,14 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 		return Model{}, Model{}, errSmallModelNotFound
 	}
 
-	largeProvider, err := c.buildProvider(largeProviderCfg, *largeCatwalkModel, largeModelCfg, isSubAgent)
+	largeThinkingDisabled := largeModelCfg.Think != nil && !*largeModelCfg.Think
+	largeProvider, err := c.buildProvider(largeProviderCfg, *largeCatwalkModel, isSubAgent, largeThinkingDisabled)
 	if err != nil {
 		return Model{}, Model{}, err
 	}
 
-	smallProvider, err := c.buildProvider(smallProviderCfg, *smallCatwalkModel, smallModelCfg, true)
+	smallThinkingDisabled := smallModelCfg.Think != nil && !*smallModelCfg.Think
+	smallProvider, err := c.buildProvider(smallProviderCfg, *smallCatwalkModel, true, smallThinkingDisabled)
 	if err != nil {
 		return Model{}, Model{}, err
 	}
@@ -1019,8 +1060,11 @@ func (c *coordinator) buildHyperProvider(baseURL, apiKey string) (fantasy.Provid
 	return hyper.New(opts...)
 }
 
-func isAnthropicThinking(model catwalk.Model, selectedModel config.SelectedModel) bool {
-	if model.CanReason && (selectedModel.Think || selectedModel.ReasoningEffort != "" || model.DefaultReasoningEffort != "") {
+func isAnthropicThinking(model catwalk.Model) bool {
+	// When model.CanReason is true, thinking is enabled by default unless the
+	// user explicitly disables it (Think=false). Callers that need to respect the
+	// explicit-disable case must also check thinkingDisabled separately.
+	if model.CanReason {
 		return true
 	}
 
@@ -1028,14 +1072,14 @@ func isAnthropicThinking(model catwalk.Model, selectedModel config.SelectedModel
 	return err == nil && opts.Thinking != nil
 }
 
-func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model catwalk.Model, selectedModel config.SelectedModel, isSubAgent bool) (fantasy.Provider, error) {
+func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model catwalk.Model, isSubAgent bool, thinkingDisabled bool) (fantasy.Provider, error) {
 	headers := maps.Clone(providerCfg.ExtraHeaders)
 	if headers == nil {
 		headers = make(map[string]string)
 	}
 
 	// handle special headers for anthropic
-	if providerCfg.Type == anthropic.Name && isAnthropicThinking(model, selectedModel) {
+	if providerCfg.Type == anthropic.Name && isAnthropicThinking(model) && !thinkingDisabled {
 		if v, ok := headers["anthropic-beta"]; ok {
 			headers["anthropic-beta"] = v + ",interleaved-thinking-2025-05-14"
 		} else {

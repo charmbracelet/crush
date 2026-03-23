@@ -113,9 +113,10 @@ type SelectedModel struct {
 	// This field is kept for backward compatibility but is no longer used.
 	ReasoningEffort string `json:"reasoning_effort,omitempty" jsonschema:"description=Deprecated: Use model's default_reasoning_effort in provider config instead,enum=low,enum=medium,enum=high"`
 
-	// Deprecated: Use model's default_reasoning_effort in provider config instead.
-	// This field is kept for backward compatibility but is no longer used.
-	Think bool `json:"think,omitempty" jsonschema:"description=Deprecated: Use model's default_reasoning_effort in provider config instead"`
+	// Think controls whether to enable thinking/reasoning mode for models that
+	// support it. When nil (the default), thinking is enabled for all CanReason
+	// models. Set to false to explicitly disable thinking across all providers.
+	Think *bool `json:"think,omitempty" jsonschema:"description=Enable thinking/reasoning mode for models that support it (applies to all providers)"`
 
 	// Deprecated: Use model's options.provider_options in provider config instead.
 	// This field is kept for backward compatibility but is no longer used.

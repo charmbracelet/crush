@@ -1627,7 +1627,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			}
 
 			currentModel := cfg.Models[agentCfg.Model]
-			currentModel.Think = !currentModel.Think
+			thinkingCurrentlyEnabled := currentModel.Think == nil || *currentModel.Think
+			newThinkValue := !thinkingCurrentlyEnabled
+			currentModel.Think = &newThinkValue
 			if err := m.com.Store().UpdatePreferredModel(config.ScopeGlobal, agentCfg.Model, currentModel); err != nil {
 				return util.ReportError(err)()
 			}
@@ -1635,7 +1637,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 				return util.ReportError(err)()
 			}
 			status := "disabled"
-			if currentModel.Think {
+			if newThinkValue {
 				status = "enabled"
 			}
 			return util.NewInfoMsg("Thinking mode " + status)

@@ -26,23 +26,28 @@ func (m *UI) modelInfo(width int) string {
 		if ok {
 			providerName = providerConfig.Name
 
-			// Only check reasoning if model can reason
+			// Only check reasoning if model can reason.
 			if model.CatwalkCfg.CanReason {
 				effectiveEffort := cmp.Or(model.ModelCfg.ReasoningEffort, model.CatwalkCfg.DefaultReasoningEffort)
 				if len(model.CatwalkCfg.ReasoningLevels) == 0 {
-					// Anthropic-style thinking models (binary on/off)
-					if model.ModelCfg.Think || effectiveEffort != "" {
-						if effectiveEffort != "" {
-							reasoningInfo = fmt.Sprintf("Thinking %s", common.FormatReasoningEffort(effectiveEffort))
-						} else {
-							reasoningInfo = "Thinking On"
-						}
-					} else {
+					// Anthropic-style thinking models. Think==nil or true means on
+					// (default), Think==&false means explicitly disabled.
+					thinkingDisabled := model.ModelCfg.Think != nil && !*model.ModelCfg.Think
+					if thinkingDisabled {
 						reasoningInfo = "Thinking Off"
+					} else {
+						displayEffort := cmp.Or(effectiveEffort, "high")
+						reasoningInfo = fmt.Sprintf("Thinking On (%s)", common.FormatReasoningEffort(displayEffort))
 					}
 				} else {
-					// Models with explicit reasoning levels
-					reasoningInfo = fmt.Sprintf("Reasoning %s", common.FormatReasoningEffort(effectiveEffort))
+					// Models with explicit reasoning levels (e.g. OpenAI).
+					thinkingDisabled := model.ModelCfg.Think != nil && !*model.ModelCfg.Think
+					if thinkingDisabled {
+						reasoningInfo = "Reasoning Off"
+					} else {
+						displayEffort := cmp.Or(effectiveEffort, "high")
+						reasoningInfo = fmt.Sprintf("Reasoning %s", common.FormatReasoningEffort(displayEffort))
+					}
 				}
 			}
 		}

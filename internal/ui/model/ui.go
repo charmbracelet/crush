@@ -908,9 +908,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case modelSwitchPreparedMsg:
+		m.dialog.StopLoading()
 		if msg.err != nil {
-			m.dialog.StopLoading()
 			cmds = append(cmds, util.ReportError(msg.err))
+			break
+		}
+
+		// Check if the dialog is still open - if closed, the user cancelled
+		if !m.dialog.ContainsDialog(dialog.ModelsID) {
 			break
 		}
 

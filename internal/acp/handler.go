@@ -712,7 +712,7 @@ func (h *Handler) handleSetConfigOption(ctx context.Context, req *Request) (any,
 	}
 
 	if err := h.app.GetCoordinator().PrepareModelSwitch(ctx, params.SessionID, modelType, selectedModel); err != nil {
-		return nil, &RPCError{Code: CodeInvalidParams, Message: err.Error()}
+		return nil, &RPCError{Code: CodeInternalError, Message: err.Error()}
 	}
 
 	if params.ConfigID == "model_large" {

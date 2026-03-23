@@ -908,25 +908,27 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case modelSwitchPreparedMsg:
-		m.dialog.StopLoading()
 		if msg.err != nil {
+			m.dialog.StopLoading()
 			cmds = append(cmds, util.ReportError(msg.err))
 			break
 		}
 
 		// Check if the dialog is still open - if closed, the user cancelled.
 		if !m.dialog.ContainsDialog(dialog.ModelsID) {
+			m.dialog.StopLoading()
 			break
 		}
 
-		m.com.Store().ApplyPreferredModel(msg.action.ModelType, msg.action.Model)
+		// Keep loading state active during complete phase to prevent concurrent switches.
+		// Note: We don't call ApplyPreferredModel here anymore - completeModelSwitchCmd
+		// will call UpdatePreferredModel which handles both memory and persistence atomically.
 
 		var defaultSmallModel *config.SelectedModel
 		cfg := m.com.Config()
 		if cfg != nil {
 			if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
 				smallModel := m.com.App.GetDefaultSmallModel(msg.action.Model.Provider)
-				m.com.Store().ApplyPreferredModel(config.SelectedModelTypeSmall, smallModel)
 				defaultSmallModel = &smallModel
 			}
 		}
@@ -1855,7 +1857,7 @@ func (m *UI) completeModelSwitchCmd(action dialog.ActionSelectModel, defaultSmal
 	selectedModel := action.Model
 
 	return func() tea.Msg {
-		if err := m.com.Store().PersistPreferredModel(config.ScopeGlobal, modelType, selectedModel); err != nil {
+		if err := m.com.Store().UpdatePreferredModel(config.ScopeGlobal, modelType, selectedModel); err != nil {
 			return modelSwitchCompletedMsg{
 				modelType:    modelType,
 				modelName:    modelName,
@@ -1865,7 +1867,7 @@ func (m *UI) completeModelSwitchCmd(action dialog.ActionSelectModel, defaultSmal
 		}
 
 		if defaultSmallModel != nil {
-			if err := m.com.Store().PersistPreferredModel(config.ScopeGlobal, config.SelectedModelTypeSmall, *defaultSmallModel); err != nil {
+			if err := m.com.Store().UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeSmall, *defaultSmallModel); err != nil {
 				return modelSwitchCompletedMsg{
 					modelType:    modelType,
 					modelName:    modelName,

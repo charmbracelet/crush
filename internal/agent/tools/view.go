@@ -74,7 +74,7 @@ func NewViewTool(
 				return fantasy.NewTextErrorResponse("file_path is required"), nil
 			}
 
-			// Handle builtin skill files (crush:// prefix).
+			// Handle builtin skill files (crush: prefix).
 			if strings.HasPrefix(params.FilePath, skills.BuiltinPrefix) {
 				return readBuiltinFile(params)
 			}

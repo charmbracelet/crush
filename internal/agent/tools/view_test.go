@@ -94,7 +94,7 @@ func TestReadBuiltinFile(t *testing.T) {
 		t.Parallel()
 
 		resp, err := readBuiltinFile(ViewParams{
-			FilePath: "crush://crush-config/SKILL.md",
+			FilePath: "/crush/skills/crush-config/SKILL.md",
 		})
 		require.NoError(t, err)
 		require.NotEmpty(t, resp.Content)
@@ -105,7 +105,7 @@ func TestReadBuiltinFile(t *testing.T) {
 		t.Parallel()
 
 		resp, err := readBuiltinFile(ViewParams{
-			FilePath: "crush://nonexistent/SKILL.md",
+			FilePath: "/crush/skills/nonexistent/SKILL.md",
 		})
 		require.NoError(t, err)
 		require.True(t, resp.IsError)
@@ -115,7 +115,7 @@ func TestReadBuiltinFile(t *testing.T) {
 		t.Parallel()
 
 		resp, err := readBuiltinFile(ViewParams{
-			FilePath: "crush://crush-config/SKILL.md",
+			FilePath: "/crush/skills/crush-config/SKILL.md",
 		})
 		require.NoError(t, err)
 
@@ -130,7 +130,7 @@ func TestReadBuiltinFile(t *testing.T) {
 		t.Parallel()
 
 		resp, err := readBuiltinFile(ViewParams{
-			FilePath: "crush://crush-config/SKILL.md",
+			FilePath: "/crush/skills/crush-config/SKILL.md",
 			Offset:   5,
 		})
 		require.NoError(t, err)

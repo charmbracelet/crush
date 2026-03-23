@@ -377,9 +377,10 @@ Diagnostics (lint/typecheck) included in tool output.
 
 <skills_usage>
 When a user task matches a skill's description, read the skill's SKILL.md file to get full instructions.
-Skills are activated by reading their location path. Follow the skill's instructions to complete the task.
+Skills are activated by reading their **exact** location path as shown above using the View tool. Always pass the location value directly to the View tool's file_path parameter — never guess, modify, or construct skill paths yourself.
+Do not use MCP tools (including read_mcp_resource) to load skills.
+Follow the skill's instructions to complete the task.
 If a skill mentions scripts, references, or assets, they are placed in the same folder as the skill itself (e.g., scripts/, references/, assets/ subdirectories within the skill's folder).
-Skills with a crush:// location are builtin and are read the same way via the View tool.
 </skills_usage>
 {{end}}
 

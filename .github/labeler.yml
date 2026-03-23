@@ -45,6 +45,8 @@
   - "/(panic|crash|segfault)/i"
 "provider: anthropic claude":
   - "/(anthropic|claude)/i"
+"provider: avian":
+  - "/avian/i"
 "provider: aws bedrock":
   - "/(aws|bedrock)/i"
 "provider: azure":

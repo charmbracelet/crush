@@ -41,7 +41,7 @@ import (
 	"charm.land/fantasy/providers/openaicompat"
 	"charm.land/fantasy/providers/openrouter"
 	"charm.land/fantasy/providers/vercel"
-	openaisdk "github.com/openai/openai-go/v3/option"
+	openaisdk "github.com/charmbracelet/openai-go/option"
 	"github.com/qjebbs/go-jsons"
 )
 
@@ -71,7 +71,6 @@ type Coordinator interface {
 	Summarize(context.Context, string) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
-	RefreshTools(ctx context.Context) error
 }
 
 type coordinator struct {
@@ -927,21 +926,6 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 	disableAutoSummarize, disableContextStatus := compactionFlags(c.cfg.Config().Options.CompactionMethod, c.cfg.Config().Options.DisableAutoSummarize)
 	c.currentAgent.SetCompactionFlags(disableAutoSummarize, disableContextStatus)
 
-	return nil
-}
-
-func (c *coordinator) RefreshTools(ctx context.Context) error {
-	agentCfg, ok := c.cfg.Config().Agents[config.AgentCoder]
-	if !ok {
-		return errors.New("coder agent not configured")
-	}
-
-	tools, err := c.buildTools(ctx, agentCfg)
-	if err != nil {
-		return err
-	}
-	c.currentAgent.SetTools(tools)
-	slog.Debug("refreshed agent tools", "count", len(tools))
 	return nil
 }
 

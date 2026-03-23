@@ -141,6 +141,12 @@ type (
 	sessionUsageRefreshedMsg struct {
 		session *session.Session
 	}
+	modelSwitchCompletedMsg struct {
+		modelType    config.SelectedModelType
+		modelName    string
+		isOnboarding bool
+		err          error
+	}
 )
 
 // UI represents the main user interface model.
@@ -896,6 +902,22 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.handleClipboardFallback(msg); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case modelSwitchCompletedMsg:
+		m.dialog.StopLoading()
+		if msg.err != nil {
+			cmds = append(cmds, util.ReportError(msg.err))
+			break
+		}
+
+		m.dialog.CloseDialog(dialog.APIKeyInputID)
+		m.dialog.CloseDialog(dialog.OAuthID)
+		m.dialog.CloseDialog(dialog.ModelsID)
+
+		if msg.isOnboarding {
+			m.setState(uiLanding, uiFocusEditor)
+		}
+
+		cmds = append(cmds, util.ReportInfo(fmt.Sprintf("%s model changed to %s", msg.modelType, msg.modelName)))
 	case util.InfoMsg:
 		m.status.SetInfoMsg(msg)
 		ttl := msg.TTL
@@ -1666,37 +1688,15 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 
-		if err := m.com.Store().UpdatePreferredModel(config.ScopeGlobal, msg.ModelType, msg.Model); err != nil {
-			cmds = append(cmds, util.ReportError(err))
-		} else if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
-			// Ensure small model is set is unset.
-			smallModel := m.com.App.GetDefaultSmallModel(providerID)
-			if err := m.com.Store().UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeSmall, smallModel); err != nil {
-				cmds = append(cmds, util.ReportError(err))
-			}
+		sessionID := ""
+		if m.session != nil {
+			sessionID = m.session.ID
 		}
 
-		cmds = append(cmds, func() tea.Msg {
-			if err := m.com.App.UpdateAgentModel(context.TODO()); err != nil {
-				return util.ReportError(err)
-			}
-
-			modelMsg := fmt.Sprintf("%s model changed to %s", msg.ModelType, msg.Model.Model)
-
-			return util.NewInfoMsg(modelMsg)
-		})
-
-		m.dialog.CloseDialog(dialog.APIKeyInputID)
-		m.dialog.CloseDialog(dialog.OAuthID)
-		m.dialog.CloseDialog(dialog.ModelsID)
-
-		if isOnboarding {
-			m.setState(uiLanding, uiFocusEditor)
-			m.com.Config().SetupAgents()
-			if err := m.com.App.InitCoderAgent(context.TODO()); err != nil {
-				cmds = append(cmds, util.ReportError(err))
-			}
+		if cmd := m.dialog.StartLoading(); cmd != nil {
+			cmds = append(cmds, cmd)
 		}
+		cmds = append(cmds, m.switchModelCmd(msg, sessionID, isOnboarding))
 	case dialog.ActionSelectReasoningEffort:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
@@ -1795,6 +1795,74 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	}
 
 	return tea.Batch(cmds...)
+}
+
+func (m *UI) switchModelCmd(action dialog.ActionSelectModel, sessionID string, isOnboarding bool) tea.Cmd {
+	modelType := action.ModelType
+	modelName := action.Model.Model
+	selectedModel := action.Model
+
+	return func() tea.Msg {
+		if err := m.com.App.AgentCoordinator.PrepareModelSwitch(context.Background(), sessionID, modelType, selectedModel); err != nil {
+			return modelSwitchCompletedMsg{
+				modelType:    modelType,
+				modelName:    modelName,
+				isOnboarding: isOnboarding,
+				err:          err,
+			}
+		}
+
+		if err := m.com.Store().UpdatePreferredModel(config.ScopeGlobal, modelType, selectedModel); err != nil {
+			return modelSwitchCompletedMsg{
+				modelType:    modelType,
+				modelName:    modelName,
+				isOnboarding: isOnboarding,
+				err:          err,
+			}
+		}
+
+		cfg := m.com.Config()
+		if cfg != nil {
+			if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
+				smallModel := m.com.App.GetDefaultSmallModel(selectedModel.Provider)
+				if err := m.com.Store().UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeSmall, smallModel); err != nil {
+					return modelSwitchCompletedMsg{
+						modelType:    modelType,
+						modelName:    modelName,
+						isOnboarding: isOnboarding,
+						err:          err,
+					}
+				}
+			}
+		}
+
+		if isOnboarding {
+			m.com.Config().SetupAgents()
+			if err := m.com.App.InitCoderAgent(context.Background()); err != nil {
+				return modelSwitchCompletedMsg{
+					modelType:    modelType,
+					modelName:    modelName,
+					isOnboarding: isOnboarding,
+					err:          err,
+				}
+			}
+		} else {
+			if err := m.com.App.UpdateAgentModel(context.Background()); err != nil {
+				return modelSwitchCompletedMsg{
+					modelType:    modelType,
+					modelName:    modelName,
+					isOnboarding: isOnboarding,
+					err:          err,
+				}
+			}
+		}
+
+		return modelSwitchCompletedMsg{
+			modelType:    modelType,
+			modelName:    modelName,
+			isOnboarding: isOnboarding,
+		}
+	}
 }
 
 // substituteArgs replaces $ARG_NAME placeholders in content with actual values.

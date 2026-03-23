@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/plugin"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/stretchr/testify/require"
 
@@ -49,6 +51,30 @@ type modelPair struct {
 	largeModel builderFunc
 	smallModel builderFunc
 }
+
+const emptyTodoReminder = `<system_reminder>This is a reminder that your todo list is currently empty. DO NOT mention this to the user explicitly because they are already aware.
+If you are working on tasks that would benefit from a todo list please use the "todos" tool to create one.
+If not, please feel free to ignore. Again do not mention this message to the user.</system_reminder>`
+
+type testTodoReminderPlugin struct{}
+
+func (p *testTodoReminderPlugin) Name() string { return "test-todo-reminder" }
+
+func (p *testTodoReminderPlugin) Init(context.Context, plugin.PluginInput) (plugin.Hooks, error) {
+	return plugin.Hooks{
+		ChatMessagesTransform: func(_ context.Context, _ plugin.ChatMessagesTransformInput, output *plugin.ChatMessagesTransformOutput) error {
+			output.Messages = append(output.Messages, message.Message{
+				Role: message.User,
+				Parts: []message.ContentPart{
+					message.TextContent{Text: emptyTodoReminder},
+				},
+			})
+			return nil
+		},
+	}, nil
+}
+
+func (p *testTodoReminderPlugin) Close(context.Context) error { return nil }
 
 func anthropicBuilder(model string) builderFunc {
 	return func(t *testing.T, r *vcr.Recorder) (fantasy.LanguageModel, error) {
@@ -104,6 +130,9 @@ func zAIBuilder(model string) builderFunc {
 }
 
 func testEnv(t *testing.T) fakeEnv {
+	plugin.Reset()
+	t.Cleanup(plugin.Reset)
+
 	workingDir := filepath.Join("/tmp/crush-test/", t.Name())
 	os.RemoveAll(workingDir)
 
@@ -197,10 +226,22 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 	cfg.Config().Options.ContextPaths = nil
 	cfg.Config().LSP = nil
 
+	plugin.Register(&testTodoReminderPlugin{})
+	err = plugin.Init(context.Background(), plugin.PluginInput{
+		Config:     cfg,
+		Sessions:   env.sessions,
+		Messages:   env.messages,
+		WorkingDir: env.workingDir,
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	systemPrompt, err := prompt.Build(context.TODO(), large.Provider(), large.Model(), cfg)
 	if err != nil {
 		return nil, err
 	}
+	systemPrompt = normalizeCoderPromptForFixtures(systemPrompt)
 
 	// Get the model name for the bash tool
 	modelName := large.Model() // fallback to ID if Name not available
@@ -223,6 +264,39 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 	}
 
 	return testSessionAgent(env, large, small, systemPrompt, allTools...), nil
+}
+
+func normalizeCoderPromptForFixtures(systemPrompt string) string {
+	lines := strings.Split(systemPrompt, "\n")
+	out := make([]string, 0, len(lines))
+	inAgentPolicyBlock := false
+
+	for _, line := range lines {
+		line = strings.Replace(
+			line,
+			"agent, agentic_fetch, fetch, tests, etc.)",
+			"agent, tests, web_fetch, etc.)",
+			1,
+		)
+
+		if line == "- Use the Agent tool proactively for bounded sub-tasks. The main agent is the orchestrator, not the default worker:" {
+			out = append(out, "- Use Agent tool for complex searches")
+			inAgentPolicyBlock = true
+			continue
+		}
+
+		if inAgentPolicyBlock {
+			if line == "- Run tools in parallel when safe (no dependencies)" {
+				inAgentPolicyBlock = false
+			} else {
+				continue
+			}
+		}
+
+		out = append(out, line)
+	}
+
+	return strings.Join(out, "\n")
 }
 
 // createSimpleGoProject creates a simple Go project structure in the given directory.

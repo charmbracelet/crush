@@ -58,7 +58,10 @@ var (
 	errSmallModelProviderNotConfigured = errors.New("small model provider not configured")
 	errLargeModelNotFound              = errors.New("large model not found in provider config")
 	errSmallModelNotFound              = errors.New("small model not found in provider config")
+	errTargetModelNotFound             = errors.New("target model not found in provider config")
 )
+
+const maxModelSwitchSummaries = 2
 
 type Coordinator interface {
 	// INFO: (kujtim) this is not used yet we will use this when we have multiple agents
@@ -77,6 +80,7 @@ type Coordinator interface {
 	IsQueuePaused(sessionID string) bool
 	Summarize(context.Context, string, fantasy.ProviderOptions) error
 	Model() Model
+	PrepareModelSwitch(ctx context.Context, sessionID string, modelType config.SelectedModelType, selectedModel config.SelectedModel) error
 	UpdateModels(ctx context.Context) error
 	RefreshTools(ctx context.Context) error
 }
@@ -294,8 +298,13 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 	switch providerType {
 	case openai.Name, azure.Name:
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
-		if !hasReasoningEffort && reasoningEffort != "" {
-			mergedOptions["reasoning_effort"] = reasoningEffort
+		if !hasReasoningEffort && model.CatwalkCfg.CanReason {
+			// Default: enable reasoning for models that support it
+			if reasoningEffort != "" {
+				mergedOptions["reasoning_effort"] = reasoningEffort
+			} else {
+				mergedOptions["reasoning_effort"] = "high"
+			}
 		}
 		if openai.IsResponsesModel(model.CatwalkCfg.ID) {
 			if openai.IsResponsesReasoningModel(model.CatwalkCfg.ID) {
@@ -329,6 +338,9 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		// effort → thinking: {type: "adaptive"} automatically.
 		//
 		// Older Claude models use the legacy thinking: {type: "enabled", budget_tokens}.
+		//
+		// Default behavior: if the model supports reasoning (CanReason), enable thinking
+		// by default. Users can override by setting effort/thinking in provider config.
 		if !hasEffort && !hasThinking && model.CatwalkCfg.CanReason {
 			isClaude46 := isClaude46Model(model.CatwalkCfg.ID)
 			switch {
@@ -346,13 +358,23 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 				}
 			case model.ModelCfg.Think:
 				if isClaude46 {
-					// Claude 4.6+ with think:true: use medium effort
-					mergedOptions["effort"] = "medium"
+					// Claude 4.6+ with think:true: use high effort
+					mergedOptions["effort"] = "high"
 				} else {
 					// Older Claude: use budget_tokens
 					mergedOptions["thinking"] = map[string]any{
 						"type":          "enabled",
-						"budget_tokens": effortToBudgetTokens("medium"),
+						"budget_tokens": effortToBudgetTokens("high"),
+					}
+				}
+			default:
+				// Default: model supports reasoning, enable thinking with high effort
+				if isClaude46 {
+					mergedOptions["effort"] = "high"
+				} else {
+					mergedOptions["thinking"] = map[string]any{
+						"type":          "enabled",
+						"budget_tokens": effortToBudgetTokens("high"),
 					}
 				}
 			}
@@ -364,10 +386,18 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 
 	case openrouter.Name:
 		_, hasReasoning := mergedOptions["reasoning"]
-		if !hasReasoning && reasoningEffort != "" {
-			mergedOptions["reasoning"] = map[string]any{
-				"enabled": true,
-				"effort":  reasoningEffort,
+		if !hasReasoning && model.CatwalkCfg.CanReason {
+			// Default: enable reasoning for models that support it
+			if reasoningEffort != "" {
+				mergedOptions["reasoning"] = map[string]any{
+					"enabled": true,
+					"effort":  reasoningEffort,
+				}
+			} else {
+				mergedOptions["reasoning"] = map[string]any{
+					"enabled": true,
+					"effort":  "high",
+				}
 			}
 		}
 		parsed, err := openrouter.ParseOptions(mergedOptions)
@@ -376,10 +406,18 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		}
 	case vercel.Name:
 		_, hasReasoning := mergedOptions["reasoning"]
-		if !hasReasoning && reasoningEffort != "" {
-			mergedOptions["reasoning"] = map[string]any{
-				"enabled": true,
-				"effort":  reasoningEffort,
+		if !hasReasoning && model.CatwalkCfg.CanReason {
+			// Default: enable reasoning for models that support it
+			if reasoningEffort != "" {
+				mergedOptions["reasoning"] = map[string]any{
+					"enabled": true,
+					"effort":  reasoningEffort,
+				}
+			} else {
+				mergedOptions["reasoning"] = map[string]any{
+					"enabled": true,
+					"effort":  "high",
+				}
 			}
 		}
 		parsed, err := vercel.ParseOptions(mergedOptions)
@@ -389,14 +427,15 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 	case google.Name:
 		_, hasThinkingConfig := mergedOptions["thinking_config"]
 		if !hasThinkingConfig && model.CatwalkCfg.CanReason {
+			// Default: enable thinking for models that support it
 			if reasoningEffort != "" {
 				mergedOptions["thinking_config"] = map[string]any{
 					"thinking_level":   reasoningEffort,
 					"include_thoughts": true,
 				}
-			} else if strings.HasPrefix(model.CatwalkCfg.ID, "gemini-2") {
+			} else {
 				mergedOptions["thinking_config"] = map[string]any{
-					"thinking_budget":  2000,
+					"thinking_level":   "high",
 					"include_thoughts": true,
 				}
 			}
@@ -407,8 +446,13 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		}
 	case openaicompat.Name:
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
-		if !hasReasoningEffort && reasoningEffort != "" {
-			mergedOptions["reasoning_effort"] = reasoningEffort
+		if !hasReasoningEffort && model.CatwalkCfg.CanReason {
+			// Default: enable reasoning for models that support it
+			if reasoningEffort != "" {
+				mergedOptions["reasoning_effort"] = reasoningEffort
+			} else {
+				mergedOptions["reasoning_effort"] = "high"
+			}
 		}
 		parsed, err := openaicompat.ParseOptions(mergedOptions)
 		if err == nil {
@@ -1145,6 +1189,76 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string, opts fant
 		opts = getProviderOptions(c.currentAgent.Model(), providerCfg)
 	}
 	return c.currentAgent.Summarize(ctx, sessionID, opts)
+}
+
+func (c *coordinator) PrepareModelSwitch(ctx context.Context, sessionID string, modelType config.SelectedModelType, selectedModel config.SelectedModel) error {
+	if sessionID == "" || c.currentAgent == nil {
+		return nil
+	}
+
+	agentCfg, ok := c.cfg.Config().Agents[config.AgentCoder]
+	if !ok || agentCfg.Model != modelType {
+		return nil
+	}
+
+	targetCatwalkModel, err := c.lookupCatwalkModel(selectedModel)
+	if err != nil {
+		return err
+	}
+
+	targetContextWindow := int64(targetCatwalkModel.ContextWindow)
+	if targetContextWindow <= 0 {
+		return nil
+	}
+
+	currentContextWindow := int64(c.currentAgent.Model().CatwalkCfg.ContextWindow)
+	if currentContextWindow > 0 && targetContextWindow >= currentContextWindow {
+		return nil
+	}
+
+	targetModel := Model{
+		CatwalkCfg: targetCatwalkModel,
+		ModelCfg:   selectedModel,
+	}
+	targetMaxOutputTokens, _ := effectiveMaxOutputTokens(targetModel)
+
+	lastEstimate := int64(-1)
+	for attempt := 0; attempt <= maxModelSwitchSummaries; attempt++ {
+		estimatedInput, err := c.currentAgent.EstimateSessionPromptTokensForModel(ctx, sessionID, targetModel)
+		if err != nil {
+			return fmt.Errorf("failed to estimate session size for target model: %w", err)
+		}
+		if !shouldAutoSummarize(estimatedInput, targetContextWindow, targetMaxOutputTokens) {
+			return nil
+		}
+		if attempt == maxModelSwitchSummaries {
+			return fmt.Errorf("session is too large to switch to model %q safely; summarize with the current model first or start a new session", selectedModel.Model)
+		}
+		if lastEstimate >= 0 && estimatedInput >= lastEstimate {
+			return fmt.Errorf("session is still too large to switch to model %q after summarization", selectedModel.Model)
+		}
+		lastEstimate = estimatedInput
+		if err := c.Summarize(ctx, sessionID, nil); err != nil {
+			return fmt.Errorf("failed to summarize session before model switch: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func (c *coordinator) lookupCatwalkModel(selectedModel config.SelectedModel) (catwalk.Model, error) {
+	providerCfg, ok := c.cfg.Config().Providers.Get(selectedModel.Provider)
+	if !ok {
+		return catwalk.Model{}, errModelProviderNotConfigured
+	}
+
+	for _, candidate := range providerCfg.Models {
+		if candidate.ID == selectedModel.Model {
+			return candidate, nil
+		}
+	}
+
+	return catwalk.Model{}, errTargetModelNotFound
 }
 
 func (c *coordinator) isUnauthorized(err error) bool {

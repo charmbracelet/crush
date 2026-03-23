@@ -702,12 +702,24 @@ func (h *Handler) handleSetConfigOption(ctx context.Context, req *Request) (any,
 		return nil, &RPCError{Code: CodeInvalidParams, Message: "invalid model value format, expected 'provider:model'"}
 	}
 	providerID, modelID := parts[0], parts[1]
+	selectedModel := config.SelectedModel{Provider: providerID, Model: modelID}
+
+	var modelType config.SelectedModelType
+	if params.ConfigID == "model_large" {
+		modelType = config.SelectedModelTypeLarge
+	} else {
+		modelType = config.SelectedModelTypeSmall
+	}
+
+	if err := h.app.GetCoordinator().PrepareModelSwitch(ctx, params.SessionID, modelType, selectedModel); err != nil {
+		return nil, &RPCError{Code: CodeInvalidParams, Message: err.Error()}
+	}
 
 	if params.ConfigID == "model_large" {
 		largeCurrent := cfg.Config().Models[config.SelectedModelTypeLarge]
 		newLarge := config.SelectedModel{
-			Provider:         providerID,
-			Model:            modelID,
+			Provider:         selectedModel.Provider,
+			Model:            selectedModel.Model,
 			MaxTokens:        largeCurrent.MaxTokens,
 			Temperature:      largeCurrent.Temperature,
 			TopP:             largeCurrent.TopP,
@@ -721,8 +733,8 @@ func (h *Handler) handleSetConfigOption(ctx context.Context, req *Request) (any,
 	} else {
 		smallCurrent := cfg.Config().Models[config.SelectedModelTypeSmall]
 		newSmall := config.SelectedModel{
-			Provider:         providerID,
-			Model:            modelID,
+			Provider:         selectedModel.Provider,
+			Model:            selectedModel.Model,
 			MaxTokens:        smallCurrent.MaxTokens,
 			Temperature:      smallCurrent.Temperature,
 			TopP:             smallCurrent.TopP,

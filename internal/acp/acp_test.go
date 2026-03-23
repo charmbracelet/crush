@@ -158,7 +158,10 @@ func (f *fakeCoordinator) IsQueuePaused(_ string) bool             { return fals
 func (f *fakeCoordinator) Summarize(_ context.Context, _ string, _ fantasy.ProviderOptions) error {
 	return nil
 }
-func (f *fakeCoordinator) Model() agent.Model                   { return agent.Model{} }
+func (f *fakeCoordinator) Model() agent.Model { return agent.Model{} }
+func (f *fakeCoordinator) PrepareModelSwitch(_ context.Context, _ string, _ config.SelectedModelType, _ config.SelectedModel) error {
+	return nil
+}
 func (f *fakeCoordinator) UpdateModels(_ context.Context) error { return nil }
 func (f *fakeCoordinator) RefreshTools(_ context.Context) error { return nil }
 

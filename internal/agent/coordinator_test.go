@@ -15,13 +15,23 @@ import (
 
 // mockSessionAgent is a minimal mock for the SessionAgent interface.
 type mockSessionAgent struct {
-	model     Model
-	runFunc   func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error)
-	cancelled []string
+	model        Model
+	runFunc      func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error)
+	estimateFunc func(ctx context.Context, sessionID string, model Model) (int64, error)
+	summarizeErr error
+	summarized   []string
+	cancelled    []string
 }
 
 func (m *mockSessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
 	return m.runFunc(ctx, call)
+}
+
+func (m *mockSessionAgent) EstimateSessionPromptTokensForModel(ctx context.Context, sessionID string, model Model) (int64, error) {
+	if m.estimateFunc == nil {
+		return 0, nil
+	}
+	return m.estimateFunc(ctx, sessionID, model)
 }
 
 func (m *mockSessionAgent) Model() Model                                    { return m.model }
@@ -43,6 +53,10 @@ func (m *mockSessionAgent) PauseQueue(sessionID string)                         
 func (m *mockSessionAgent) ResumeQueue(sessionID string)                        {}
 func (m *mockSessionAgent) IsQueuePaused(sessionID string) bool                 { return false }
 func (m *mockSessionAgent) Summarize(context.Context, string, fantasy.ProviderOptions) error {
+	if m.summarizeErr != nil {
+		return m.summarizeErr
+	}
+	m.summarized = append(m.summarized, "summarized")
 	return nil
 }
 
@@ -315,6 +329,88 @@ func TestRunSubAgent(t *testing.T) {
 	})
 }
 
+func TestPrepareModelSwitch(t *testing.T) {
+	const providerID = "test-provider"
+	providerCfg := config.ProviderConfig{
+		ID: providerID,
+		Models: []catwalk.Model{
+			{ID: "big", ContextWindow: 1_000_000, DefaultMaxTokens: 32_000},
+			{ID: "small", ContextWindow: 200_000, DefaultMaxTokens: 8_000},
+		},
+	}
+
+	t.Run("summarizes before switching to smaller active model", func(t *testing.T) {
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, providerID, providerCfg)
+		coord.cfg.Config().Agents[config.AgentCoder] = config.Agent{Name: config.AgentCoder, Model: config.SelectedModelTypeLarge}
+
+		sess, err := env.sessions.Create(t.Context(), "switch")
+		require.NoError(t, err)
+
+		estimates := []int64{250_000, 50_000}
+		agent := newMockAgent(providerID, 32_000, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+			return agentResultWithText("ok"), nil
+		})
+		agent.model.CatwalkCfg.ContextWindow = 1_000_000
+		agent.estimateFunc = func(_ context.Context, sessionID string, model Model) (int64, error) {
+			require.Equal(t, sess.ID, sessionID)
+			require.Equal(t, "small", model.ModelCfg.Model)
+			v := estimates[0]
+			estimates = estimates[1:]
+			return v, nil
+		}
+		coord.currentAgent = agent
+
+		err = coord.PrepareModelSwitch(t.Context(), sess.ID, config.SelectedModelTypeLarge, config.SelectedModel{Provider: providerID, Model: "small"})
+		require.NoError(t, err)
+		require.Len(t, agent.summarized, 1)
+	})
+
+	t.Run("fails when summarization cannot shrink session enough", func(t *testing.T) {
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, providerID, providerCfg)
+		coord.cfg.Config().Agents[config.AgentCoder] = config.Agent{Name: config.AgentCoder, Model: config.SelectedModelTypeLarge}
+
+		sess, err := env.sessions.Create(t.Context(), "switch")
+		require.NoError(t, err)
+
+		agent := newMockAgent(providerID, 32_000, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+			return agentResultWithText("ok"), nil
+		})
+		agent.model.CatwalkCfg.ContextWindow = 1_000_000
+		agent.estimateFunc = func(_ context.Context, _ string, _ Model) (int64, error) {
+			return 250_000, nil
+		}
+		coord.currentAgent = agent
+
+		err = coord.PrepareModelSwitch(t.Context(), sess.ID, config.SelectedModelTypeLarge, config.SelectedModel{Provider: providerID, Model: "small"})
+		require.ErrorContains(t, err, "still too large")
+		require.Len(t, agent.summarized, 1)
+	})
+
+	t.Run("ignores inactive model slot switches", func(t *testing.T) {
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, providerID, providerCfg)
+		coord.cfg.Config().Agents[config.AgentCoder] = config.Agent{Name: config.AgentCoder, Model: config.SelectedModelTypeLarge}
+
+		sess, err := env.sessions.Create(t.Context(), "switch")
+		require.NoError(t, err)
+
+		agent := newMockAgent(providerID, 32_000, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+			return agentResultWithText("ok"), nil
+		})
+		agent.estimateFunc = func(_ context.Context, _ string, _ Model) (int64, error) {
+			t.Fatal("estimate should not be called for inactive model slot")
+			return 0, nil
+		}
+		coord.currentAgent = agent
+
+		err = coord.PrepareModelSwitch(t.Context(), sess.ID, config.SelectedModelTypeSmall, config.SelectedModel{Provider: providerID, Model: "small"})
+		require.NoError(t, err)
+		require.Empty(t, agent.summarized)
+	})
+}
+
 func TestUpdateParentSessionCost(t *testing.T) {
 	t.Run("accumulates cost correctly", func(t *testing.T) {
 		env := testEnv(t)
@@ -444,7 +540,7 @@ func TestMergeCallOptions_AnthropicThinkingCompatibility(t *testing.T) {
 		require.Nil(t, anthropicOpts.Thinking)
 	})
 
-	t.Run("claude opus 4.6 with think flag uses medium effort", func(t *testing.T) {
+	t.Run("claude opus 4.6 with think flag uses high effort", func(t *testing.T) {
 		model := Model{
 			CatwalkCfg: catwalk.Model{
 				ID:        "claude-opus-4-6",
@@ -462,7 +558,7 @@ func TestMergeCallOptions_AnthropicThinkingCompatibility(t *testing.T) {
 		anthropicOpts, ok := options[anthropic.Name].(*anthropic.ProviderOptions)
 		require.True(t, ok)
 		require.NotNil(t, anthropicOpts)
-		require.Equal(t, anthropic.Effort("medium"), *anthropicOpts.Effort)
+		require.Equal(t, anthropic.Effort("high"), *anthropicOpts.Effort)
 		require.Nil(t, anthropicOpts.Thinking)
 	})
 
@@ -485,5 +581,44 @@ func TestMergeCallOptions_AnthropicThinkingCompatibility(t *testing.T) {
 		require.Nil(t, anthropicOpts.Effort)
 		require.NotNil(t, anthropicOpts.Thinking)
 		require.Equal(t, int64(28672), anthropicOpts.Thinking.BudgetTokens)
+	})
+
+	t.Run("canReason model enables thinking by default", func(t *testing.T) {
+		model := Model{
+			CatwalkCfg: catwalk.Model{
+				ID:        "claude-sonnet-4",
+				CanReason: true,
+			},
+		}
+		cfg := config.ProviderConfig{
+			Type: anthropic.Name,
+		}
+
+		options, _, _, _, _, _ := mergeCallOptions(model, cfg)
+		anthropicOpts, ok := options[anthropic.Name].(*anthropic.ProviderOptions)
+		require.True(t, ok)
+		require.NotNil(t, anthropicOpts)
+		require.Nil(t, anthropicOpts.Effort)
+		require.NotNil(t, anthropicOpts.Thinking)
+		require.Equal(t, int64(28672), anthropicOpts.Thinking.BudgetTokens)
+	})
+
+	t.Run("claude 4.6 canReason enables effort by default", func(t *testing.T) {
+		model := Model{
+			CatwalkCfg: catwalk.Model{
+				ID:        "claude-sonnet-4.6",
+				CanReason: true,
+			},
+		}
+		cfg := config.ProviderConfig{
+			Type: anthropic.Name,
+		}
+
+		options, _, _, _, _, _ := mergeCallOptions(model, cfg)
+		anthropicOpts, ok := options[anthropic.Name].(*anthropic.ProviderOptions)
+		require.True(t, ok)
+		require.NotNil(t, anthropicOpts)
+		require.Equal(t, anthropic.Effort("high"), *anthropicOpts.Effort)
+		require.Nil(t, anthropicOpts.Thinking)
 	})
 }

@@ -8,6 +8,7 @@ import (
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
@@ -95,9 +96,13 @@ type Models struct {
 	list  *ModelsList
 	input textinput.Model
 	help  help.Model
+
+	spinner spinner.Model
+	loading bool
 }
 
 var _ Dialog = (*Models)(nil)
+var _ LoadingDialog = (*Models)(nil)
 
 // NewModels creates a new Models dialog.
 func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
@@ -119,6 +124,11 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 	m.input.Placeholder = onboardingModelInputPlaceholder
 	m.input.SetStyles(com.Styles.TextInput)
 	m.input.Focus()
+
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	s.Style = com.Styles.Dialog.Spinner
+	m.spinner = s
 
 	m.keyMap.Tab = key.NewBinding(
 		key.WithKeys("tab", "shift+tab"),
@@ -167,7 +177,19 @@ func (m *Models) ID() string {
 // HandleMsg implements Dialog.
 func (m *Models) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
+	case spinner.TickMsg:
+		if m.loading {
+			var cmd tea.Cmd
+			m.spinner, cmd = m.spinner.Update(msg)
+			return ActionCmd{Cmd: cmd}
+		}
 	case tea.KeyPressMsg:
+		if m.loading {
+			if key.Matches(msg, m.keyMap.Close) {
+				return ActionClose{}
+			}
+			return nil
+		}
 		switch {
 		case key.Matches(msg, m.keyMap.Close):
 			return ActionClose{}
@@ -234,6 +256,9 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 
 // Cursor returns the cursor for the dialog.
 func (m *Models) Cursor() *tea.Cursor {
+	if m.loading {
+		return nil
+	}
 	cur := InputCursor(m.com.Styles, m.input.Cursor())
 	if cur != nil && !m.isOnboarding {
 		cur.Y += modelSummaryContentHeight
@@ -370,6 +395,9 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc.AddPart(listView)
 
 	rc.Help = m.help.View(m)
+	if m.loading {
+		rc.Help = m.spinner.View() + " Preparing model switch..."
+	}
 
 	cur := m.Cursor()
 
@@ -415,6 +443,20 @@ func (m *Models) ShortHelp() []key.Binding {
 // FullHelp returns the full help view.
 func (m *Models) FullHelp() [][]key.Binding {
 	return [][]key.Binding{m.ShortHelp()}
+}
+
+// StartLoading implements [LoadingDialog].
+func (m *Models) StartLoading() tea.Cmd {
+	if m.loading {
+		return nil
+	}
+	m.loading = true
+	return m.spinner.Tick
+}
+
+// StopLoading implements [LoadingDialog].
+func (m *Models) StopLoading() {
+	m.loading = false
 }
 
 func (m *Models) isSelectedConfigured() bool {

@@ -8,6 +8,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
@@ -41,7 +42,10 @@ func (m *mockQueueCoordinator) IsQueuePaused(string) bool           { return m.p
 func (m *mockQueueCoordinator) Summarize(context.Context, string, fantasy.ProviderOptions) error {
 	return nil
 }
-func (m *mockQueueCoordinator) Model() agent.Model                 { return agent.Model{} }
+func (m *mockQueueCoordinator) Model() agent.Model { return agent.Model{} }
+func (m *mockQueueCoordinator) PrepareModelSwitch(context.Context, string, config.SelectedModelType, config.SelectedModel) error {
+	return nil
+}
 func (m *mockQueueCoordinator) UpdateModels(context.Context) error { return nil }
 func (m *mockQueueCoordinator) RefreshTools(context.Context) error { return nil }
 

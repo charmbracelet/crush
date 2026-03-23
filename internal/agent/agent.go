@@ -93,6 +93,7 @@ type SessionAgentCall struct {
 
 type SessionAgent interface {
 	Run(context.Context, SessionAgentCall) (*fantasy.AgentResult, error)
+	EstimateSessionPromptTokensForModel(context.Context, string, Model) (int64, error)
 	SetModels(large Model, small Model)
 	SetTools(tools []fantasy.AgentTool)
 	SetSystemPrompt(systemPrompt string)
@@ -1661,6 +1662,18 @@ func (a *sessionAgent) estimateNextStepPromptTokens(ctx context.Context, session
 		return 0, err
 	}
 	return a.estimateSessionPromptTokens(state.History, "", nil, tools, state.SystemPrompt, state.PromptPrefix), nil
+}
+
+func (a *sessionAgent) EstimateSessionPromptTokensForModel(ctx context.Context, sessionID string, model Model) (int64, error) {
+	return a.estimateNextStepPromptTokens(
+		ctx,
+		sessionID,
+		a.tools.Copy(),
+		a.systemPrompt.Get(),
+		a.systemPromptPrefix.Get(),
+		model,
+		defaultProviderContext(),
+	)
 }
 
 func applyRuntimeConfig(call *SessionAgentCall, runtimeConfig sessionAgentRuntimeConfig) {

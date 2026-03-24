@@ -28,6 +28,7 @@ type ConfigStore struct {
 	globalDataPath string // ~/.local/share/crush/crush.json
 	workspacePath  string // .crush/crush.json
 	knownProviders []catwalk.Provider
+	keyring        *KeyringStore
 }
 
 // Config returns the pure-data config struct (read-only after load).
@@ -56,6 +57,11 @@ func (s *ConfigStore) Resolve(key string) (string, error) {
 // KnownProviders returns the list of known providers.
 func (s *ConfigStore) KnownProviders() []catwalk.Provider {
 	return s.knownProviders
+}
+
+// Keyring returns the keyring store for secure credential storage.
+func (s *ConfigStore) Keyring() *KeyringStore {
+	return s.keyring
 }
 
 // SetupAgents configures the coder and task agents on the config.
@@ -161,6 +167,9 @@ func (s *ConfigStore) SetTransparentBackground(scope Scope, enabled bool) error 
 }
 
 // SetProviderAPIKey sets the API key for a provider and persists it.
+// When the OS keychain is available, credentials are stored there and a
+// placeholder marker is written to the JSON config file. Otherwise the
+// credentials are written to JSON as before.
 func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey any) error {
 	var providerConfig ProviderConfig
 	var exists bool
@@ -168,15 +177,12 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 
 	switch v := apiKey.(type) {
 	case string:
-		if err := s.SetConfigField(scope, fmt.Sprintf("providers.%s.api_key", providerID), v); err != nil {
-			return fmt.Errorf("failed to save api key to config file: %w", err)
+		if err := s.persistAPIKey(scope, providerID, v); err != nil {
+			return fmt.Errorf("failed to save api key: %w", err)
 		}
 		setKeyOrToken = func() { providerConfig.APIKey = v }
 	case *oauth.Token:
-		if err := cmp.Or(
-			s.SetConfigField(scope, fmt.Sprintf("providers.%s.api_key", providerID), v.AccessToken),
-			s.SetConfigField(scope, fmt.Sprintf("providers.%s.oauth", providerID), v),
-		); err != nil {
+		if err := s.persistOAuthCredentials(scope, providerID, v); err != nil {
 			return err
 		}
 		setKeyOrToken = func() {
@@ -259,10 +265,7 @@ func (s *ConfigStore) RefreshOAuthToken(ctx context.Context, scope Scope, provid
 
 	s.config.Providers.Set(providerID, providerConfig)
 
-	if err := cmp.Or(
-		s.SetConfigField(scope, fmt.Sprintf("providers.%s.api_key", providerID), newToken.AccessToken),
-		s.SetConfigField(scope, fmt.Sprintf("providers.%s.oauth", providerID), newToken),
-	); err != nil {
+	if err := s.persistOAuthCredentials(scope, providerID, newToken); err != nil {
 		return fmt.Errorf("failed to persist refreshed token: %w", err)
 	}
 
@@ -330,16 +333,64 @@ func (s *ConfigStore) ImportCopilot() (*oauth.Token, bool) {
 	}
 
 	if err := s.SetProviderAPIKey(ScopeGlobal, string(catwalk.InferenceProviderCopilot), token); err != nil {
+		slog.Error("Unable to save GitHub Copilot token", "error", err)
 		return token, false
-	}
-
-	if err := cmp.Or(
-		s.SetConfigField(ScopeGlobal, "providers.copilot.api_key", token.AccessToken),
-		s.SetConfigField(ScopeGlobal, "providers.copilot.oauth", token),
-	); err != nil {
-		slog.Error("Unable to save GitHub Copilot token to disk", "error", err)
 	}
 
 	slog.Info("GitHub Copilot successfully imported")
 	return token, true
+}
+
+// persistAPIKey stores an API key using the OS keychain when available,
+// falling back to the JSON config file. When stored in the keychain, a
+// marker value is written to JSON so the config system knows a key exists.
+func (s *ConfigStore) persistAPIKey(scope Scope, providerID, apiKey string) error {
+	field := fmt.Sprintf("providers.%s.api_key", providerID)
+
+	// Use keyring for literal secrets (not env-var references).
+	if s.keyring.Available() && isLiteralSecret(apiKey) {
+		if err := s.keyring.SetAPIKey(providerID, apiKey); err != nil {
+			slog.Warn("Failed to store API key in OS keychain, falling back to config file",
+				"provider", providerID, "error", err)
+			return s.SetConfigField(scope, field, apiKey)
+		}
+		// Write marker to JSON so HasConfigField still works.
+		return s.SetConfigField(scope, field, KeyringMarker)
+	}
+
+	return s.SetConfigField(scope, field, apiKey)
+}
+
+// persistOAuthCredentials stores both the access token and the full OAuth
+// token using the OS keychain when available, falling back to JSON.
+func (s *ConfigStore) persistOAuthCredentials(scope Scope, providerID string, token *oauth.Token) error {
+	apiKeyField := fmt.Sprintf("providers.%s.api_key", providerID)
+	oauthField := fmt.Sprintf("providers.%s.oauth", providerID)
+
+	if s.keyring.Available() {
+		keyringOK := true
+
+		if err := s.keyring.SetAPIKey(providerID, token.AccessToken); err != nil {
+			slog.Warn("Failed to store API key in OS keychain", "provider", providerID, "error", err)
+			keyringOK = false
+		}
+		if err := s.keyring.SetOAuthToken(providerID, token); err != nil {
+			slog.Warn("Failed to store OAuth token in OS keychain", "provider", providerID, "error", err)
+			keyringOK = false
+		}
+
+		if keyringOK {
+			// Write markers to JSON.
+			return cmp.Or(
+				s.SetConfigField(scope, apiKeyField, KeyringMarker),
+				s.SetConfigField(scope, oauthField, KeyringMarker),
+			)
+		}
+		// Fall through to plaintext storage.
+	}
+
+	return cmp.Or(
+		s.SetConfigField(scope, apiKeyField, token.AccessToken),
+		s.SetConfigField(scope, oauthField, token),
+	)
 }

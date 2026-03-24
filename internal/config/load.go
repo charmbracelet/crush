@@ -46,6 +46,7 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		workingDir:     workingDir,
 		globalDataPath: GlobalConfigData(),
 		workspacePath:  filepath.Join(cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName)),
+		keyring:        NewKeyringStore(),
 	}
 
 	if debug {
@@ -168,6 +169,29 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 		config, configExists := c.Providers.Get(string(p.ID))
 		// if the user configured a known provider we need to allow it to override a couple of parameters
 		if configExists {
+			// Resolve credentials from keyring when the marker is present.
+			if IsKeyringMarker(config.APIKey) {
+				if store.keyring.Available() {
+					if realKey, err := store.keyring.GetAPIKey(string(p.ID)); err == nil {
+						config.APIKey = realKey
+					} else {
+						slog.Warn("Failed to read API key from OS keychain", "provider", p.ID, "error", err)
+						config.APIKey = "" // Clear marker so provider is properly skipped
+					}
+					if token, err := store.keyring.GetOAuthToken(string(p.ID)); err == nil {
+						config.OAuthToken = token
+					}
+				} else {
+					slog.Warn("Config has keyring marker but OS keychain is unavailable", "provider", p.ID)
+					config.APIKey = "" // Clear marker — can't resolve without keychain
+				}
+			}
+
+			// Migrate plaintext literal keys to keyring on first load.
+			if isLiteralSecret(config.APIKey) && store.keyring.Available() {
+				migrateProviderToKeyring(store, string(p.ID), &config)
+			}
+
 			if config.BaseURL != "" {
 				p.APIEndpoint = config.BaseURL
 			}
@@ -306,6 +330,29 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 	for id, providerConfig := range c.Providers.Seq2() {
 		if knownProviderNames[id] {
 			continue
+		}
+
+		// Resolve credentials from keyring when the marker is present.
+		if IsKeyringMarker(providerConfig.APIKey) {
+			if store.keyring.Available() {
+				if realKey, err := store.keyring.GetAPIKey(id); err == nil {
+					providerConfig.APIKey = realKey
+				} else {
+					slog.Warn("Failed to read API key from OS keychain", "provider", id, "error", err)
+					providerConfig.APIKey = "" // Clear marker so provider is properly skipped
+				}
+				if token, err := store.keyring.GetOAuthToken(id); err == nil {
+					providerConfig.OAuthToken = token
+				}
+			} else {
+				slog.Warn("Config has keyring marker but OS keychain is unavailable", "provider", id)
+				providerConfig.APIKey = "" // Clear marker — can't resolve without keychain
+			}
+		}
+
+		// Migrate plaintext literal keys to keyring on first load.
+		if isLiteralSecret(providerConfig.APIKey) && store.keyring.Available() {
+			migrateProviderToKeyring(store, id, &providerConfig)
 		}
 
 		// Make sure the provider ID is set
@@ -816,3 +863,37 @@ func GlobalSkillsDirs() []string {
 }
 
 func isAppleTerminal() bool { return os.Getenv("TERM_PROGRAM") == "Apple_Terminal" }
+
+// migrateProviderToKeyring moves a plaintext API key (and optional OAuth token)
+// from the JSON config file into the OS keychain, replacing the values in the
+// file with markers. The in-memory config retains the real values.
+func migrateProviderToKeyring(store *ConfigStore, providerID string, pc *ProviderConfig) {
+	if !store.keyring.Available() {
+		return
+	}
+
+	if err := store.keyring.SetAPIKey(providerID, pc.APIKey); err != nil {
+		slog.Warn("Migration: failed to store API key in keychain", "provider", providerID, "error", err)
+		return
+	}
+
+	// Replace plaintext in JSON with marker.
+	if err := store.SetConfigField(ScopeGlobal, fmt.Sprintf("providers.%s.api_key", providerID), KeyringMarker); err != nil {
+		slog.Warn("Migration: failed to write keyring marker", "provider", providerID, "error", err)
+		return
+	}
+
+	// Migrate OAuth token too if present.
+	if pc.OAuthToken != nil {
+		if err := store.keyring.SetOAuthToken(providerID, pc.OAuthToken); err != nil {
+			slog.Warn("Migration: failed to store OAuth token in keychain", "provider", providerID, "error", err)
+			return
+		}
+		if err := store.SetConfigField(ScopeGlobal, fmt.Sprintf("providers.%s.oauth", providerID), KeyringMarker); err != nil {
+			slog.Warn("Migration: failed to write OAuth keyring marker", "provider", providerID, "error", err)
+			return
+		}
+	}
+
+	slog.Info("Migrated credentials from config file to OS keychain", "provider", providerID)
+}

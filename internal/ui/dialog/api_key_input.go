@@ -169,11 +169,17 @@ func (m *APIKeyInput) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	m.input.Prompt = m.spinner.View()
 
+	var storageHint string
+	if store := m.com.Store(); store != nil && store.Keyring() != nil && store.Keyring().Available() {
+		storageHint = "This will be stored securely in your OS keychain."
+	} else {
+		storageHint = "This will be written in your global configuration:\n" + config.GlobalConfigData()
+	}
+
 	content := strings.Join([]string{
 		m.headerView(),
 		inputStyle.Render(m.inputView()),
-		textStyle.Render("This will be written in your global configuration:"),
-		textStyle.Render(config.GlobalConfigData()),
+		textStyle.Render(storageHint),
 		"",
 		helpStyle.Render(m.help.View(m)),
 	}, "\n")

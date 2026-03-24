@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"time"
 
@@ -11,7 +12,7 @@ import (
 
 // streamIdleTimeout is the maximum time to wait between stream parts before
 // considering the connection stalled and triggering a retry.
-const streamIdleTimeout = 120 * time.Second
+var streamIdleTimeout = 45 * time.Second
 
 // retryableStreamModel wraps a fantasy.LanguageModel and converts bare
 // retryable network errors (such as io.ErrUnexpectedEOF) inside stream parts
@@ -94,7 +95,7 @@ func (m retryableStreamModel) Stream(ctx context.Context, call fantasy.Call) (fa
 					Type: fantasy.StreamPartTypeError,
 					Error: &fantasy.ProviderError{
 						Title:   "network error",
-						Message: "stream idle timeout: no data received for 120s",
+						Message: streamIdleTimeoutMessage(),
 						Cause:   errors.New("stream idle timeout"),
 					},
 				})
@@ -127,6 +128,13 @@ func isToolStreamPart(partType fantasy.StreamPartType) bool {
 	default:
 		return false
 	}
+}
+
+func streamIdleTimeoutMessage() string {
+	return fmt.Sprintf(
+		"stream idle timeout: no data received for %ds",
+		int(streamIdleTimeout/time.Second),
+	)
 }
 
 // wrapRetryableNetworkErr wraps known retryable network errors into

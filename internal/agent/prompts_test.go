@@ -9,39 +9,39 @@ import (
 
 func TestIsReadOnlyAgent(t *testing.T) {
 	tests := []struct {
-		name        string
+		name         string
 		allowedTools []string
-		expected    bool
+		expected     bool
 	}{
 		{
-			name:        "nil allowed tools returns false",
+			name:         "nil allowed tools returns false",
 			allowedTools: nil,
-			expected:    false,
+			expected:     false,
 		},
 		{
-			name:        "empty allowed tools returns false",
+			name:         "empty allowed tools returns false",
 			allowedTools: []string{},
-			expected:    false,
+			expected:     false,
 		},
 		{
-			name:        "read-only tools returns true",
+			name:         "read-only tools returns true",
 			allowedTools: []string{"glob", "grep", "ls", "view"},
-			expected:    true,
+			expected:     true,
 		},
 		{
-			name:        "read-only tools with sourcegraph returns true",
+			name:         "read-only tools with sourcegraph returns true",
 			allowedTools: []string{"sourcegraph", "view", "grep"},
-			expected:    true,
+			expected:     true,
 		},
 		{
-			name:        "mixed tools returns false",
+			name:         "mixed tools returns false",
 			allowedTools: []string{"glob", "bash", "view"},
-			expected:    false,
+			expected:     false,
 		},
 		{
-			name:        "write tools returns false",
+			name:         "write tools returns false",
 			allowedTools: []string{"edit", "write"},
-			expected:    false,
+			expected:     false,
 		},
 	}
 

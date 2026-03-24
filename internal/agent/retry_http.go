@@ -2,6 +2,7 @@ package agent
 
 import (
 	"errors"
+	"math/rand/v2"
 	"strings"
 	"time"
 
@@ -103,8 +104,10 @@ func isTransientNetworkError(err error) bool {
 }
 
 // retryDelay calculates the delay for the given attempt number using
-// exponential backoff: base * 2^(attempt-1).
-// With base=3s: 3s, 6s, 12s, 24s, 48s.
+// exponential backoff with jitter: base * 2^(attempt-1) ± 25%.
+// The jitter prevents thundering-herd collisions when multiple
+// concurrent subagents all retry against the same rate-limited API.
+// With base=3s: ~3s, ~6s, ~12s, ~24s, ~48s (each ±25%).
 func retryDelay(attempt int) time.Duration {
 	delay := retryBaseDelay
 	for i := 1; i < attempt; i++ {
@@ -114,5 +117,13 @@ func retryDelay(attempt int) time.Duration {
 			break
 		}
 	}
-	return delay
+	return addJitter(delay)
+}
+
+// addJitter adds ±25% random jitter to a duration so that concurrent
+// retries from parallel subagents do not all fire at the same instant.
+func addJitter(d time.Duration) time.Duration {
+	// jitter range: [0.75*d, 1.25*d]
+	jitter := float64(d) * (0.75 + rand.Float64()*0.5) //nolint:gosec
+	return time.Duration(jitter)
 }

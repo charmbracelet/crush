@@ -139,3 +139,30 @@ func TestRetryableStreamModelDoesNotWrapUnexpectedEOFAfterToolInputStart(t *test
 	var providerErr *fantasy.ProviderError
 	require.False(t, errors.As(gotErr, &providerErr), "tool-input failures must not become retryable provider errors")
 }
+
+func TestWithRetryFailureDetails(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns details unchanged when no retries happened", func(t *testing.T) {
+		t.Parallel()
+		require.Equal(t, "stream idle timeout: no data received for 45s", withRetryFailureDetails("stream idle timeout: no data received for 45s", 0))
+	})
+
+	t.Run("prefixes details when retries were exhausted", func(t *testing.T) {
+		t.Parallel()
+		require.Equal(
+			t,
+			"Retried 2 times, but the request still failed. stream idle timeout: no data received for 45s",
+			withRetryFailureDetails("stream idle timeout: no data received for 45s", 2),
+		)
+	})
+
+	t.Run("handles singular retry wording", func(t *testing.T) {
+		t.Parallel()
+		require.Equal(
+			t,
+			"Retried 1 time, but the request still failed.",
+			withRetryFailureDetails("", 1),
+		)
+	})
+}

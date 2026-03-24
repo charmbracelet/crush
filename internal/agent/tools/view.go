@@ -2,6 +2,7 @@ package tools
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	_ "embed"
 	"encoding/base64"
@@ -75,11 +76,14 @@ func NewViewTool(
 				return fantasy.NewTextErrorResponse("file_path is required"), nil
 			}
 
+			// Use session-specific working directory from context if available.
+			effectiveWorkingDir := cmp.Or(GetWorkingDirFromContext(ctx), workingDir)
+
 			// Handle relative paths
-			filePath := filepathext.SmartJoin(workingDir, params.FilePath)
+			filePath := filepathext.SmartJoin(effectiveWorkingDir, params.FilePath)
 
 			// Check if file is outside working directory and request permission if needed
-			absWorkingDir, err := filepath.Abs(workingDir)
+			absWorkingDir, err := filepath.Abs(effectiveWorkingDir)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error resolving working directory: %w", err)
 			}

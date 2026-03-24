@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"cmp"
 	"context"
 	_ "embed"
 	"fmt"
@@ -74,12 +75,15 @@ func NewEditTool(
 				return fantasy.NewTextErrorResponse("file_path is required"), nil
 			}
 
-			params.FilePath = filepathext.SmartJoin(workingDir, params.FilePath)
+			// Use session-specific working directory from context if available.
+			effectiveWorkingDir := cmp.Or(GetWorkingDirFromContext(ctx), workingDir)
+
+			params.FilePath = filepathext.SmartJoin(effectiveWorkingDir, params.FilePath)
 
 			var response fantasy.ToolResponse
 			var err error
 
-			editCtx := editContext{ctx, permissions, files, filetracker, workingDir}
+			editCtx := editContext{ctx, permissions, files, filetracker, effectiveWorkingDir}
 
 			if params.OldString == "" {
 				response, err = createNewFile(editCtx, params.FilePath, params.NewString, call)

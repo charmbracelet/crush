@@ -62,8 +62,11 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 				return fantasy.NewTextErrorResponse("URL must start with http:// or https://"), nil
 			}
 
-			filePath := filepathext.SmartJoin(workingDir, params.FilePath)
-			relPath, _ := filepath.Rel(workingDir, filePath)
+			// Use session-specific working directory from context if available.
+			effectiveWorkingDir := cmp.Or(GetWorkingDirFromContext(ctx), workingDir)
+
+			filePath := filepathext.SmartJoin(effectiveWorkingDir, params.FilePath)
+			relPath, _ := filepath.Rel(effectiveWorkingDir, filePath)
 			relPath = filepath.ToSlash(cmp.Or(relPath, filePath))
 
 			sessionID := GetSessionFromContext(ctx)

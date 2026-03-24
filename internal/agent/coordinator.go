@@ -163,6 +163,21 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 		return nil, err
 	}
 
+	// Get session to retrieve session-specific working directory.
+	sess, err := c.sessions.Get(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get session: %w", err)
+	}
+
+	// Set session-specific working directory in context.
+	// Tools will use this instead of the global working dir to avoid
+	// race conditions when multiple sessions run concurrently.
+	sessionWorkingDir := sess.WorkspaceCWD
+	if sessionWorkingDir == "" {
+		sessionWorkingDir = c.cfg.WorkingDir()
+	}
+	ctx = context.WithValue(ctx, tools.WorkingDirContextKey, sessionWorkingDir)
+
 	// refresh models before each run
 	runtimeConfig, err := c.updateCurrentAgentRuntime(ctx)
 	if err != nil {
@@ -1404,7 +1419,10 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	})
 	if err != nil {
 		slog.Error("Sub-agent run failed", "error", err, "session", session.ID, "prompt", params.Prompt)
-		return fantasy.NewTextErrorResponse("error generating response"), nil
+		if costErr := c.updateParentSessionCost(ctx, session.ID, params.SessionID); costErr != nil {
+			return fantasy.ToolResponse{}, costErr
+		}
+		return fantasy.NewTextErrorResponse(c.subAgentErrorText(ctx, session.ID, err)), nil
 	}
 
 	if err := c.updateParentSessionCost(ctx, session.ID, params.SessionID); err != nil {
@@ -1418,6 +1436,34 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	}
 
 	return fantasy.NewTextResponse(content), nil
+}
+
+func (c *coordinator) subAgentErrorText(ctx context.Context, sessionID string, runErr error) string {
+	if c.messages != nil {
+		msgs, err := c.messages.List(ctx, sessionID)
+		if err == nil {
+			for i := len(msgs) - 1; i >= 0; i-- {
+				msg := msgs[i]
+				if msg.Role != message.Assistant || msg.IsSummaryMessage {
+					continue
+				}
+				if finish := msg.FinishPart(); finish != nil && finish.Reason == message.FinishReasonError {
+					switch {
+					case strings.TrimSpace(finish.Details) != "":
+						return strings.TrimSpace(finish.Details)
+					case strings.TrimSpace(finish.Message) != "":
+						return strings.TrimSpace(finish.Message)
+					}
+				}
+			}
+		} else {
+			slog.Warn("Failed to load sub-agent messages for error fallback", "error", err, "session", sessionID)
+		}
+	}
+	if runErr == nil {
+		return "error generating response"
+	}
+	return strings.TrimSpace(runErr.Error())
 }
 
 // updateParentSessionCost accumulates the cost from a child session to its parent session.

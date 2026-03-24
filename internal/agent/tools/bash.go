@@ -213,8 +213,9 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				return fantasy.NewTextErrorResponse("missing command"), nil
 			}
 
-			// Determine working directory
-			execWorkingDir := cmp.Or(params.WorkingDir, workingDir)
+			// Determine working directory: prefer session-specific from context,
+			// then explicit param, then global fallback.
+			execWorkingDir := cmp.Or(GetWorkingDirFromContext(ctx), params.WorkingDir, workingDir)
 			fallbackCommand := ""
 
 			sessionID := GetSessionFromContext(ctx)

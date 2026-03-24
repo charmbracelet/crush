@@ -2,6 +2,7 @@ package chat
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"unicode"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // maxAgentPromptDisplayLines is the maximum number of lines to show for a
@@ -30,16 +32,27 @@ type NestedToolContainer interface {
 	AddNestedTool(tool ToolMessageItem)
 }
 
+// ChildSessionStatusSetter updates the transient child-session status shown on
+// parent agent tool items while the delegated work is still running.
+type ChildSessionStatusSetter interface {
+	SetChildSessionStatus(text string, isError bool)
+	ClearChildSessionStatus()
+}
+
 // AgentToolMessageItem is a message item that represents an agent tool call.
 type AgentToolMessageItem struct {
 	*baseToolMessageItem
 
 	nestedTools []ToolMessageItem
+
+	childStatusText    string
+	childStatusIsError bool
 }
 
 var (
-	_ ToolMessageItem     = (*AgentToolMessageItem)(nil)
-	_ NestedToolContainer = (*AgentToolMessageItem)(nil)
+	_ ToolMessageItem          = (*AgentToolMessageItem)(nil)
+	_ NestedToolContainer      = (*AgentToolMessageItem)(nil)
+	_ ChildSessionStatusSetter = (*AgentToolMessageItem)(nil)
 )
 
 // NewAgentToolMessageItem creates a new [AgentToolMessageItem].
@@ -98,6 +111,26 @@ func (a *AgentToolMessageItem) AddNestedTool(tool ToolMessageItem) {
 	a.clearCache()
 }
 
+// SetChildSessionStatus stores transient child-session status text.
+func (a *AgentToolMessageItem) SetChildSessionStatus(text string, isError bool) {
+	if a.childStatusText == text && a.childStatusIsError == isError {
+		return
+	}
+	a.childStatusText = text
+	a.childStatusIsError = isError
+	a.clearCache()
+}
+
+// ClearChildSessionStatus removes transient child-session status text.
+func (a *AgentToolMessageItem) ClearChildSessionStatus() {
+	if a.childStatusText == "" && !a.childStatusIsError {
+		return
+	}
+	a.childStatusText = ""
+	a.childStatusIsError = false
+	a.clearCache()
+}
+
 // AgentToolRenderContext renders agent tool messages.
 type AgentToolRenderContext struct {
 	agent *AgentToolMessageItem
@@ -106,7 +139,7 @@ type AgentToolRenderContext struct {
 // RenderTool implements the [ToolRenderer] interface.
 func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if opts.IsPending() && len(r.agent.nestedTools) == 0 {
+	if opts.IsPending() && len(r.agent.nestedTools) == 0 && r.agent.childStatusText == "" {
 		return pendingTool(sty, "Agent", opts.Anim, opts.Compact)
 	}
 
@@ -165,6 +198,12 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	var parts []string
 	parts = append(parts, childTools.Enumerator(roundedEnumerator(2, taskTagWidth-5)).String())
 
+	if !opts.HasResult() {
+		if status := renderChildSessionStatus(sty, remainingWidth, r.agent.childStatusText, r.agent.childStatusIsError); status != "" {
+			parts = append(parts, "", status)
+		}
+	}
+
 	// Show animation if still running.
 	if opts.IsSpinning && !opts.HasResult() && !opts.IsCanceled() {
 		parts = append(parts, "", opts.Anim.Render())
@@ -214,11 +253,15 @@ type AgenticFetchToolMessageItem struct {
 	*baseToolMessageItem
 
 	nestedTools []ToolMessageItem
+
+	childStatusText    string
+	childStatusIsError bool
 }
 
 var (
-	_ ToolMessageItem     = (*AgenticFetchToolMessageItem)(nil)
-	_ NestedToolContainer = (*AgenticFetchToolMessageItem)(nil)
+	_ ToolMessageItem          = (*AgenticFetchToolMessageItem)(nil)
+	_ NestedToolContainer      = (*AgenticFetchToolMessageItem)(nil)
+	_ ChildSessionStatusSetter = (*AgenticFetchToolMessageItem)(nil)
 )
 
 // NewAgenticFetchToolMessageItem creates a new [AgenticFetchToolMessageItem].
@@ -258,6 +301,26 @@ func (a *AgenticFetchToolMessageItem) AddNestedTool(tool ToolMessageItem) {
 	a.clearCache()
 }
 
+// SetChildSessionStatus stores transient child-session status text.
+func (a *AgenticFetchToolMessageItem) SetChildSessionStatus(text string, isError bool) {
+	if a.childStatusText == text && a.childStatusIsError == isError {
+		return
+	}
+	a.childStatusText = text
+	a.childStatusIsError = isError
+	a.clearCache()
+}
+
+// ClearChildSessionStatus removes transient child-session status text.
+func (a *AgenticFetchToolMessageItem) ClearChildSessionStatus() {
+	if a.childStatusText == "" && !a.childStatusIsError {
+		return
+	}
+	a.childStatusText = ""
+	a.childStatusIsError = false
+	a.clearCache()
+}
+
 // AgenticFetchToolRenderContext renders agentic fetch tool messages.
 type AgenticFetchToolRenderContext struct {
 	fetch *AgenticFetchToolMessageItem
@@ -272,7 +335,7 @@ type agenticFetchParams struct {
 // RenderTool implements the [ToolRenderer] interface.
 func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if opts.IsPending() && len(r.fetch.nestedTools) == 0 {
+	if opts.IsPending() && len(r.fetch.nestedTools) == 0 && r.fetch.childStatusText == "" {
 		return pendingTool(sty, "Agentic Fetch", opts.Anim, opts.Compact)
 	}
 
@@ -326,6 +389,12 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 	var parts []string
 	parts = append(parts, childTools.Enumerator(roundedEnumerator(2, promptTagWidth-5)).String())
 
+	if !opts.HasResult() {
+		if status := renderChildSessionStatus(sty, remainingWidth, r.fetch.childStatusText, r.fetch.childStatusIsError); status != "" {
+			parts = append(parts, "", status)
+		}
+	}
+
 	// Show animation if still running.
 	if opts.IsSpinning && !opts.HasResult() && !opts.IsCanceled() {
 		parts = append(parts, "", opts.Anim.Render())
@@ -340,4 +409,37 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 	}
 
 	return result
+}
+
+func renderChildSessionStatus(sty *styles.Styles, width int, text string, isError bool) string {
+	text = strings.TrimSpace(strings.ReplaceAll(text, "\n", " "))
+	if text == "" || width <= 0 {
+		return ""
+	}
+
+	statusTag := sty.Tool.AgenticFetchPromptTag.Render("Status")
+	availableWidth := max(0, width-lipgloss.Width(statusTag)-3)
+	if availableWidth == 0 {
+		return statusTag
+	}
+
+	if isError {
+		errTag := sty.Tool.ErrorTag.Render("ERROR")
+		errText := sty.Tool.ErrorMessage.Render(
+			ansi.Truncate(text, max(0, availableWidth-lipgloss.Width(errTag)-1), "…"),
+		)
+		return lipgloss.JoinHorizontal(
+			lipgloss.Left,
+			statusTag,
+			" ",
+			fmt.Sprintf("%s %s", errTag, errText),
+		)
+	}
+
+	return lipgloss.JoinHorizontal(
+		lipgloss.Left,
+		statusTag,
+		" ",
+		sty.Tool.StateWaiting.Render(ansi.Truncate(text, availableWidth, "…")),
+	)
 }

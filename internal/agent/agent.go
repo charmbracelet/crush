@@ -22,6 +22,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
@@ -76,10 +77,14 @@ var thinkTagRegex = regexp.MustCompile(`<think>.*?</think>`)
 const autoResumePromptPrefix = "The previous session was interrupted because it got too long, the initial user request was: `"
 
 type SessionAgentCall struct {
-	SessionID        string
-	Prompt           string
-	Purpose          plugin.ChatTransformPurpose
-	InitiatorType    string
+	SessionID     string
+	Prompt        string
+	Purpose       plugin.ChatTransformPurpose
+	InitiatorType string
+	// JoinActiveRun allows this queued call to be injected into the active
+	// run's next provider step instead of waiting for the current run to
+	// finish.
+	JoinActiveRun    bool
 	ProviderOptions  fantasy.ProviderOptions
 	Attachments      []message.Attachment
 	MaxOutputTokens  int64
@@ -136,6 +141,7 @@ type sessionAgent struct {
 	isYolo               bool
 	notify               pubsub.Publisher[notify.Notification]
 
+	queueMu        sync.Mutex
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, context.CancelFunc]
 	pausedQueues   *csync.Map[string, bool]
@@ -222,12 +228,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	// Queue the message if busy
 	if a.IsSessionBusy(call.SessionID) {
-		existing, ok := a.messageQueue.Get(call.SessionID)
-		if !ok {
-			existing = []SessionAgentCall{}
-		}
-		existing = append(existing, call)
-		a.messageQueue.Set(call.SessionID, existing)
+		a.enqueueQueuedCall(call.SessionID, call)
 		return nil, nil
 	}
 
@@ -292,6 +293,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		// output token reservation internally, so we don't need to add maxOutputTokens here.
 		// This prevents double-counting the output reservation for large context models.
 		estimatedInput := a.estimateSessionPromptTokens(preflightState.History, call.Prompt, call.Attachments, agentTools, preflightState.SystemPrompt, preflightState.PromptPrefix)
+		estimatedInput = max(estimatedInput, currentSession.LastInputTokens())
 		if shouldAutoSummarize(estimatedInput, int64(largeModel.CatwalkCfg.ContextWindow), call.MaxOutputTokens) {
 			if truncErr := a.truncateOversizedToolResults(ctx, call.SessionID); truncErr != nil {
 				slog.Warn("Failed to truncate oversized tool results before preflight summarization", "error", truncErr, "session_id", call.SessionID)
@@ -366,6 +368,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	var shouldSummarize bool
 	var contextWindowExceeded bool
+	var forceResumeAfterSummarize bool
 	var currentAssistant *message.Message
 	var currentStepToolMessageIDs []string
 	var allRunMessageIDs []string
@@ -429,7 +432,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 					prepared.Messages[i].ProviderOptions = nil
 				}
 
-				queuedCalls, _ := a.messageQueue.Take(call.SessionID)
+				queuedCalls := a.takeJoinActiveRunCalls(call.SessionID)
 				for _, queued := range queuedCalls {
 					userMessage, createErr := a.createUserMessage(callContext, queued)
 					if createErr != nil {
@@ -612,6 +615,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 						}
 						projectedPromptTokens = fallbackTokens
 					}
+					projectedPromptTokens = max(projectedPromptTokens, currentSession.LastInputTokens())
 					// Pass input-only estimate to shouldAutoSummarize. The function
 					// handles output token reservation internally to avoid double-counting.
 					if shouldAutoSummarize(projectedPromptTokens, int64(largeModel.CatwalkCfg.ContextWindow), call.MaxOutputTokens) && !a.disableAutoSummarize {
@@ -653,12 +657,82 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	for {
 		result, err = runStream(providerOptions, retryAttempt == 0)
 
+		if err != nil && isRetriableError(err) && !a.disableAutoSummarize {
+			observedPromptTokens := max(currentSession.LastInputTokens(), estimatedPromptTokens)
+			if shouldAutoSummarize(observedPromptTokens, int64(largeModel.CatwalkCfg.ContextWindow), call.MaxOutputTokens) {
+				slog.Warn("Near context limit during transient failure; forcing summarization to recover",
+					"error", err,
+					"session_id", call.SessionID,
+					"model", largeModel.ModelCfg.Model,
+					"provider", largeModel.ModelCfg.Provider,
+					"observed_prompt_tokens", observedPromptTokens,
+				)
+				if truncErr := a.truncateOversizedToolResults(ctx, call.SessionID); truncErr != nil {
+					slog.Warn("Failed to truncate oversized tool results before retry summarization", "error", truncErr, "session_id", call.SessionID)
+				}
+				if currentAssistant != nil {
+					currentAssistant.FinishThinking()
+					currentAssistant.AddFinish(
+						message.FinishReasonError,
+						"Context limit reached",
+						"The conversation history is near this model's context window limit and the request is repeatedly failing. Auto-summarizing the session to continue the task…",
+					)
+					if updateErr := a.messages.Update(ctx, *currentAssistant); updateErr != nil {
+						slog.Warn("Failed to update assistant message before retry summarization", "error", updateErr, "session_id", call.SessionID)
+					}
+				}
+				forceResumeAfterSummarize = true
+				shouldSummarize = true
+				err = nil
+				result = &fantasy.AgentResult{}
+				break
+			}
+		}
+
 		// Check for retriable errors (429, 503, network issues).
-		// Only retry if no steps have been completed yet to avoid duplicate tool side effects.
-		if err != nil && isRetriableError(err) && completedStepsThisRun == 0 && retryAttempt < maxRetriableAttempts {
-			// Clean up all messages created during the failed attempt so
-			// the retry starts from a clean slate.
-			if len(allRunMessageIDs) > 0 {
+		if err != nil && isRetriableError(err) && retryAttempt < maxRetriableAttempts {
+			if completedStepsThisRun > 0 {
+				// Steps already completed — only clean up the current
+				// incomplete step to avoid re-executing tool side
+				// effects. Completed steps' messages stay in the DB.
+				if cleanupErr := a.cleanupFailedAttempt(ctx, currentAssistant, currentStepToolMessageIDs); cleanupErr != nil {
+					slog.Warn("Failed to clean up incomplete step during retry",
+						"error", cleanupErr, "session_id", call.SessionID)
+					break
+				}
+				// Re-fetch history from DB so the retry includes the
+				// completed steps' messages.
+				retryMsgs, getMsgsErr := a.getSessionMessages(ctx, currentSession)
+				if getMsgsErr != nil {
+					slog.Warn("Failed to re-fetch messages for retry",
+						"error", getMsgsErr, "session_id", call.SessionID)
+					break
+				}
+				retryState, buildErr := a.buildChatRequestState(genCtx, chatRequestStateInput{
+					SessionID:    call.SessionID,
+					Agent:        "session",
+					Model:        largeModel,
+					Provider:     providerCtx,
+					Purpose:      requestPurpose,
+					Messages:     retryMsgs,
+					Message:      userMessage,
+					Attachments:  call.Attachments,
+					SystemPrompt: systemPrompt,
+					PromptPrefix: promptPrefix,
+				})
+				if buildErr != nil {
+					slog.Warn("Failed to rebuild request state for retry",
+						"error", buildErr, "session_id", call.SessionID)
+					break
+				}
+				requestState = retryState
+				// Reset retry budget — completed steps prove the
+				// previous attempt made progress, so this is a new
+				// transient failure that deserves full retries.
+				retryAttempt = 0
+			} else {
+				// No steps completed — clean up all messages so the
+				// retry starts from a clean slate.
 				for _, id := range allRunMessageIDs {
 					if delErr := a.messages.Delete(ctx, id); delErr != nil {
 						slog.Warn("Failed to delete message during retry cleanup",
@@ -850,15 +924,30 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				currentAssistant.AddFinish(
 					message.FinishReasonError,
 					"Copilot model not enabled",
-					fmt.Sprintf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", largeModel.CatwalkCfg.Name, link),
+					withRetryFailureDetails(
+						fmt.Sprintf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", largeModel.CatwalkCfg.Name, link),
+						retryAttempt,
+					),
 				)
 			} else {
-				currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), providerErr.Message)
+				currentAssistant.AddFinish(
+					message.FinishReasonError,
+					cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle),
+					withRetryFailureDetails(providerErr.Message, retryAttempt),
+				)
 			}
 		} else if errors.As(err, &fantasyErr) {
-			currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(fantasyErr.Title), defaultTitle), fantasyErr.Message)
+			currentAssistant.AddFinish(
+				message.FinishReasonError,
+				cmp.Or(stringext.Capitalize(fantasyErr.Title), defaultTitle),
+				withRetryFailureDetails(fantasyErr.Message, retryAttempt),
+			)
 		} else {
-			currentAssistant.AddFinish(message.FinishReasonError, defaultTitle, err.Error())
+			currentAssistant.AddFinish(
+				message.FinishReasonError,
+				defaultTitle,
+				withRetryFailureDetails(err.Error(), retryAttempt),
+			)
 		}
 		// Use the detached cleanup context to ensure the assistant message
 		// (with its finish reason) is always persisted.
@@ -887,7 +976,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
 		summarizePurpose := plugin.ChatTransformPurposeSummarize
-		if contextWindowExceeded {
+		if contextWindowExceeded || forceResumeAfterSummarize {
 			summarizePurpose = plugin.ChatTransformPurposeRecover
 		}
 		if summarizeErr := a.Summarize(withSessionCompactingPurpose(copilot.ContextWithInitiatorType(genCtx, copilot.InitiatorAgent), summarizePurpose), call.SessionID, call.ProviderOptions); summarizeErr != nil {
@@ -898,22 +987,17 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		//   (b) the LLM call itself was rejected due to context overflow before
 		//       returning any output (contextWindowExceeded path).
 		hasPendingToolCalls := currentAssistant != nil && len(currentAssistant.ToolCalls()) > 0
-		if hasPendingToolCalls || contextWindowExceeded {
-			existing, ok := a.messageQueue.Get(call.SessionID)
-			if !ok {
-				existing = []SessionAgentCall{}
-			}
+		if hasPendingToolCalls || contextWindowExceeded || forceResumeAfterSummarize {
 			resumePrefix := autoResumePromptPrefix
 			if contextWindowExceeded {
 				resumePrefix = contextWindowResumePromptPrefix
 			}
 			call.Prompt = fmt.Sprintf(resumePrefix+"%s`", call.Prompt)
-			if contextWindowExceeded {
+			if contextWindowExceeded || forceResumeAfterSummarize {
 				call.Purpose = plugin.ChatTransformPurposeRecover
 			}
 			call.InitiatorType = copilot.InitiatorAgent
-			existing = append(existing, call)
-			a.messageQueue.Set(call.SessionID, existing)
+			a.enqueueQueuedCall(call.SessionID, call)
 		}
 	}
 
@@ -921,8 +1005,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	a.activeRequests.Del(call.SessionID)
 	cancel()
 
-	queuedMessages, ok = a.messageQueue.Get(call.SessionID)
-	if !ok || len(queuedMessages) == 0 {
+	if a.QueuedPrompts(call.SessionID) == 0 {
 		return result, err
 	}
 	// Don't auto-process the next queued message while the queue is paused.
@@ -930,8 +1013,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		return result, err
 	}
 	// There are queued messages restart the loop.
-	firstQueuedMessage := queuedMessages[0]
-	a.messageQueue.Set(call.SessionID, queuedMessages[1:])
+	firstQueuedMessage, ok := a.popNextQueuedCall(call.SessionID)
+	if !ok {
+		return result, err
+	}
 	ctx = context.WithValue(ctx, sessionAgentRuntimeConfigContextKey{}, (*sessionAgentRuntimeConfig)(nil))
 	return a.Run(ctx, firstQueuedMessage)
 }
@@ -1057,25 +1142,24 @@ func truncateMessagesToFit(msgs []fantasy.Message, maxTokens int64) []fantasy.Me
 
 // estimateSingleMessageTokens estimates tokens for a single fantasy.Message.
 func estimateSingleMessageTokens(msg fantasy.Message) int64 {
-	var totalBytes int
+	var totalTokens int64
 	for _, part := range msg.Content {
 		switch p := part.(type) {
 		case fantasy.TextPart:
-			totalBytes += len(p.Text)
+			totalTokens += estimateTextTokens(p.Text, false)
 		case fantasy.ReasoningPart:
-			totalBytes += len(p.Text)
+			totalTokens += estimateTextTokens(p.Text, false)
 		case fantasy.ToolCallPart:
-			totalBytes += len(p.Input)
+			totalTokens += estimateTextTokens(p.Input, false)
 		case fantasy.ToolResultPart:
 			if txt, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentText](p.Output); ok {
-				totalBytes += len(txt.Text)
+				totalTokens += estimateTextTokens(txt.Text, false)
 			} else if errOut, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentError](p.Output); ok && errOut.Error != nil {
-				totalBytes += len(errOut.Error.Error())
+				totalTokens += estimateTextTokens(errOut.Error.Error(), false)
 			}
 		}
 	}
-	const bytesPerToken = 4
-	return int64(totalBytes / bytesPerToken)
+	return totalTokens
 }
 
 func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions) error {
@@ -1656,7 +1740,27 @@ func estimateStringTokens(s string) int64 {
 	if s == "" {
 		return 0
 	}
-	return int64((len(s) + 3) / 4)
+	return estimateTextTokens(s, true)
+}
+
+func estimateTextTokens(s string, roundUpASCII bool) int64 {
+	if s == "" {
+		return 0
+	}
+	var asciiBytes int
+	var nonASCIIRunes int
+	for _, r := range s {
+		if r < utf8.RuneSelf {
+			asciiBytes++
+			continue
+		}
+		nonASCIIRunes++
+	}
+	asciiTokens := asciiBytes / 4
+	if roundUpASCII && asciiBytes%4 != 0 {
+		asciiTokens++
+	}
+	return int64(asciiTokens + nonASCIIRunes)
 }
 
 func (a *sessionAgent) estimateSessionPromptTokens(history []fantasy.Message, prompt string, attachments []message.Attachment, tools []fantasy.AgentTool, systemPrompt string, promptPrefix string) int64 {
@@ -1759,6 +1863,26 @@ func (a *sessionAgent) resetRetriedStep(ctx context.Context, assistant *message.
 	return a.messages.Update(ctx, *assistant)
 }
 
+func withRetryFailureDetails(details string, retryAttempt int) string {
+	details = strings.TrimSpace(details)
+	if retryAttempt <= 0 {
+		return details
+	}
+
+	summary := fmt.Sprintf("Retried %d %s, but the request still failed.", retryAttempt, cmp.Or(pluralizeRetryAttempt(retryAttempt), "times"))
+	if details == "" {
+		return summary
+	}
+	return summary + " " + details
+}
+
+func pluralizeRetryAttempt(retryAttempt int) string {
+	if retryAttempt == 1 {
+		return "time"
+	}
+	return "times"
+}
+
 // estimatePromptTokens estimates the prompt token count from message content
 // and tool definitions. This serves as a fallback when providers (e.g., some
 // Anthropic-compatible proxies) don't report input tokens in streaming mode.
@@ -1768,40 +1892,41 @@ func (a *sessionAgent) resetRetriedStep(ctx context.Context, assistant *message.
 //   - ToolCallPart: Input JSON string bytes
 //   - ToolResultPart: text output bytes
 //
-// Tool definitions include the JSON-encoded parameter schema. The estimate
-// uses ~4 bytes per token, which is accurate for English/ASCII code text.
+// Tool definitions include the JSON-encoded parameter schema. ASCII-heavy
+// content is estimated at roughly 4 bytes per token, while non-ASCII runes
+// count as at least one token each so CJK-heavy prompts are not badly
+// under-estimated.
 func estimatePromptTokens(messages []fantasy.Message, tools []fantasy.AgentTool) int64 {
-	var totalBytes int
+	var totalTokens int64
 	for _, msg := range messages {
 		for _, part := range msg.Content {
 			switch p := part.(type) {
 			case fantasy.TextPart:
-				totalBytes += len(p.Text)
+				totalTokens += estimateTextTokens(p.Text, false)
 			case fantasy.ReasoningPart:
-				totalBytes += len(p.Text)
+				totalTokens += estimateTextTokens(p.Text, false)
 			case fantasy.ToolCallPart:
-				totalBytes += len(p.Input)
+				totalTokens += estimateTextTokens(p.Input, false)
 			case fantasy.ToolResultPart:
 				if txt, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentText](p.Output); ok {
-					totalBytes += len(txt.Text)
+					totalTokens += estimateTextTokens(txt.Text, false)
 				} else if errOut, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentError](p.Output); ok && errOut.Error != nil {
-					totalBytes += len(errOut.Error.Error())
+					totalTokens += estimateTextTokens(errOut.Error.Error(), false)
 				}
 			}
 		}
 	}
 	for _, tool := range tools {
 		info := tool.Info()
-		totalBytes += len(info.Name) + len(info.Description)
+		totalTokens += estimateTextTokens(info.Name, false)
+		totalTokens += estimateTextTokens(info.Description, false)
 		if schemaJSON, err := json.Marshal(info.Parameters); err == nil {
-			totalBytes += len(schemaJSON)
+			totalTokens += estimateTextTokens(string(schemaJSON), false)
 		} else {
-			totalBytes += 300
+			totalTokens += 75
 		}
 	}
-	// Use ~4 bytes per token (accurate for English/ASCII source code).
-	const bytesPerToken = 4
-	return int64(totalBytes / bytesPerToken)
+	return totalTokens
 }
 
 func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session, usage fantasy.Usage, overrideCost *float64, estimatedPromptTokens int64) {
@@ -1856,32 +1981,27 @@ func (a *sessionAgent) Cancel(sessionID string) {
 
 	if a.QueuedPrompts(sessionID) > 0 {
 		slog.Debug("Clearing queued prompts", "session_id", sessionID)
-		a.messageQueue.Del(sessionID)
+		a.clearQueuedCalls(sessionID)
 	}
 	a.pausedQueues.Del(sessionID)
 }
 
 func (a *sessionAgent) RemoveQueuedPrompt(sessionID string, index int) bool {
-	queuedPrompts, ok := a.messageQueue.Get(sessionID)
-	if !ok || index < 0 || index >= len(queuedPrompts) {
+	if !a.removeQueuedCall(sessionID, index) {
 		return false
 	}
 
 	slog.Debug("Removing queued prompt", "session_id", sessionID, "index", index)
-	updatedQueue := append(queuedPrompts[:index:index], queuedPrompts[index+1:]...)
-	if len(updatedQueue) == 0 {
-		a.messageQueue.Del(sessionID)
+	if a.QueuedPrompts(sessionID) == 0 {
 		a.pausedQueues.Del(sessionID)
-		return true
 	}
-	a.messageQueue.Set(sessionID, updatedQueue)
 	return true
 }
 
 func (a *sessionAgent) ClearQueue(sessionID string) {
 	if a.QueuedPrompts(sessionID) > 0 {
 		slog.Debug("Clearing queued prompts", "session_id", sessionID)
-		a.messageQueue.Del(sessionID)
+		a.clearQueuedCalls(sessionID)
 	}
 	// Auto-unpause when the queue is cleared.
 	a.pausedQueues.Del(sessionID)
@@ -1904,13 +2024,10 @@ func (a *sessionAgent) ResumeQueue(sessionID string) {
 	if a.IsSessionBusy(sessionID) {
 		return
 	}
-	queuedMessages, ok := a.messageQueue.Get(sessionID)
-	if !ok || len(queuedMessages) == 0 {
+	firstQueuedMessage, ok := a.popNextQueuedCall(sessionID)
+	if !ok {
 		return
 	}
-
-	firstQueuedMessage := queuedMessages[0]
-	a.messageQueue.Set(sessionID, queuedMessages[1:])
 	go func(call SessionAgentCall) {
 		if _, err := a.Run(context.Background(), call); err != nil {
 			slog.Warn("Failed to resume queued prompt", "session_id", sessionID, "error", err)
@@ -1960,23 +2077,101 @@ func (a *sessionAgent) IsSessionBusy(sessionID string) bool {
 }
 
 func (a *sessionAgent) QueuedPrompts(sessionID string) int {
-	l, ok := a.messageQueue.Get(sessionID)
-	if !ok {
-		return 0
-	}
-	return len(l)
+	return len(a.queuedCallsSnapshot(sessionID))
 }
 
 func (a *sessionAgent) QueuedPromptsList(sessionID string) []string {
-	l, ok := a.messageQueue.Get(sessionID)
-	if !ok {
-		return nil
-	}
+	l := a.queuedCallsSnapshot(sessionID)
 	prompts := make([]string, len(l))
 	for i, call := range l {
 		prompts[i] = call.Prompt
 	}
 	return prompts
+}
+
+func (a *sessionAgent) enqueueQueuedCall(sessionID string, call SessionAgentCall) {
+	a.queueMu.Lock()
+	defer a.queueMu.Unlock()
+
+	queuedCalls, _ := a.messageQueue.Get(sessionID)
+	queuedCalls = append(append([]SessionAgentCall(nil), queuedCalls...), call)
+	a.setQueuedCallsLocked(sessionID, queuedCalls)
+}
+
+func (a *sessionAgent) takeJoinActiveRunCalls(sessionID string) []SessionAgentCall {
+	a.queueMu.Lock()
+	defer a.queueMu.Unlock()
+
+	queuedCalls, ok := a.messageQueue.Get(sessionID)
+	if !ok || len(queuedCalls) == 0 {
+		return nil
+	}
+
+	joinActiveRunCalls := make([]SessionAgentCall, 0, len(queuedCalls))
+	remainingCalls := make([]SessionAgentCall, 0, len(queuedCalls))
+	for _, queuedCall := range queuedCalls {
+		if queuedCall.JoinActiveRun {
+			joinActiveRunCalls = append(joinActiveRunCalls, queuedCall)
+			continue
+		}
+		remainingCalls = append(remainingCalls, queuedCall)
+	}
+	a.setQueuedCallsLocked(sessionID, remainingCalls)
+	return joinActiveRunCalls
+}
+
+func (a *sessionAgent) popNextQueuedCall(sessionID string) (SessionAgentCall, bool) {
+	a.queueMu.Lock()
+	defer a.queueMu.Unlock()
+
+	queuedCalls, ok := a.messageQueue.Get(sessionID)
+	if !ok || len(queuedCalls) == 0 {
+		return SessionAgentCall{}, false
+	}
+
+	nextCall := queuedCalls[0]
+	a.setQueuedCallsLocked(sessionID, queuedCalls[1:])
+	return nextCall, true
+}
+
+func (a *sessionAgent) removeQueuedCall(sessionID string, index int) bool {
+	a.queueMu.Lock()
+	defer a.queueMu.Unlock()
+
+	queuedCalls, ok := a.messageQueue.Get(sessionID)
+	if !ok || index < 0 || index >= len(queuedCalls) {
+		return false
+	}
+
+	updatedQueue := append(queuedCalls[:index:index], queuedCalls[index+1:]...)
+	a.setQueuedCallsLocked(sessionID, updatedQueue)
+	return true
+}
+
+func (a *sessionAgent) clearQueuedCalls(sessionID string) {
+	a.queueMu.Lock()
+	defer a.queueMu.Unlock()
+
+	a.messageQueue.Del(sessionID)
+}
+
+func (a *sessionAgent) queuedCallsSnapshot(sessionID string) []SessionAgentCall {
+	a.queueMu.Lock()
+	defer a.queueMu.Unlock()
+
+	queuedCalls, ok := a.messageQueue.Get(sessionID)
+	if !ok || len(queuedCalls) == 0 {
+		return nil
+	}
+	return append([]SessionAgentCall(nil), queuedCalls...)
+}
+
+func (a *sessionAgent) setQueuedCallsLocked(sessionID string, queuedCalls []SessionAgentCall) {
+	if len(queuedCalls) == 0 {
+		a.messageQueue.Del(sessionID)
+		return
+	}
+	a.messageQueue.Set(sessionID, append([]SessionAgentCall(nil), queuedCalls...))
 }
 
 func (a *sessionAgent) SetModels(large Model, small Model) {

@@ -641,6 +641,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case pubsub.UpdatedEvent:
 			cmds = append(cmds, m.updateSessionMessage(msg.Payload))
 		case pubsub.DeletedEvent:
+			if msg.Payload.Role == message.Assistant {
+				m.removeToolItemsForMessage(msg.Payload.ID, nil)
+				m.chat.RemoveMessage(chat.AssistantInfoID(msg.Payload.ID))
+			}
 			m.chat.RemoveMessage(msg.Payload.ID)
 		}
 		if m.shouldRefreshSessionUsage(msg.Type, msg.Payload) {
@@ -1253,6 +1257,10 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 	var cmds []tea.Cmd
 	existingItem := m.chat.MessageItem(msg.ID)
 	shouldRenderAssistant := chat.ShouldRenderAssistantMessage(&msg)
+	toolCallIDs := make(map[string]struct{}, len(msg.ToolCalls()))
+	for _, tc := range msg.ToolCalls() {
+		toolCallIDs[tc.ID] = struct{}{}
+	}
 
 	if existingItem != nil {
 		if assistantItem, ok := existingItem.(*chat.AssistantMessageItem); ok {
@@ -1288,6 +1296,8 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 			m.chat.RemoveMessage(chat.AssistantInfoID(msg.ID))
 		}
 	}
+
+	m.removeToolItemsForMessage(msg.ID, toolCallIDs)
 
 	if shouldRenderAssistant && msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
 		if infoItem := m.chat.MessageItem(chat.AssistantInfoID(msg.ID)); infoItem == nil {
@@ -1338,14 +1348,44 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 	return tea.Sequence(cmds...)
 }
 
+func (m *UI) removeToolItemsForMessage(messageID string, keepToolCallIDs map[string]struct{}) {
+	var toolItemIDs []string
+	for i := 0; i < m.chat.Len(); i++ {
+		item, ok := m.chat.list.ItemAt(i).(chat.ToolMessageItem)
+		if !ok || item.MessageID() != messageID {
+			continue
+		}
+		if _, keep := keepToolCallIDs[item.ToolCall().ID]; keep {
+			continue
+		}
+		toolItemIDs = append(toolItemIDs, item.ToolCall().ID)
+	}
+	for _, toolItemID := range toolItemIDs {
+		m.chat.RemoveMessage(toolItemID)
+	}
+}
+
+func syncNestedToolsForMessage(
+	nestedTools []chat.ToolMessageItem,
+	messageID string,
+	keepToolCallIDs map[string]struct{},
+) []chat.ToolMessageItem {
+	filtered := make([]chat.ToolMessageItem, 0, len(nestedTools))
+	for _, nestedTool := range nestedTools {
+		if nestedTool.MessageID() != messageID {
+			filtered = append(filtered, nestedTool)
+			continue
+		}
+		if _, keep := keepToolCallIDs[nestedTool.ToolCall().ID]; keep {
+			filtered = append(filtered, nestedTool)
+		}
+	}
+	return filtered
+}
+
 // handleChildSessionMessage handles messages from child sessions (agent tools).
 func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.Cmd {
 	var cmds []tea.Cmd
-
-	// Only process messages with tool calls or results.
-	if len(event.Payload.ToolCalls()) == 0 && len(event.Payload.ToolResults()) == 0 {
-		return nil
-	}
 
 	// Check if this is an agent tool session and parse it.
 	childSessionID := event.Payload.SessionID
@@ -1377,8 +1417,41 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 		return nil
 	}
 
+	if statusItem, ok := agentItem.(chat.ChildSessionStatusSetter); ok && event.Payload.Role == message.Assistant {
+		if statusText, isError, ok := childSessionStatus(event.Payload); ok {
+			if event.Type == pubsub.DeletedEvent {
+				statusItem.ClearChildSessionStatus()
+			} else {
+				statusItem.SetChildSessionStatus(statusText, isError)
+			}
+		} else {
+			statusItem.ClearChildSessionStatus()
+		}
+	}
+
 	// Get existing nested tools.
 	nestedTools := agentItem.NestedTools()
+
+	if event.Payload.Role == message.Assistant {
+		toolCallIDs := make(map[string]struct{}, len(event.Payload.ToolCalls()))
+		for _, tc := range event.Payload.ToolCalls() {
+			toolCallIDs[tc.ID] = struct{}{}
+		}
+		nestedTools = syncNestedToolsForMessage(nestedTools, event.Payload.ID, toolCallIDs)
+	}
+
+	// Only process tool call and result updates below this point.
+	if len(event.Payload.ToolCalls()) == 0 && len(event.Payload.ToolResults()) == 0 {
+		agentItem.SetNestedTools(nestedTools)
+		m.chat.rebuildIDIndexMap()
+		return nil
+	}
+
+	if event.Type == pubsub.DeletedEvent {
+		agentItem.SetNestedTools(nestedTools)
+		m.chat.rebuildIDIndexMap()
+		return nil
+	}
 
 	// Update or create nested tool calls.
 	for _, tc := range event.Payload.ToolCalls() {
@@ -1418,8 +1491,8 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 	// Update the agent item with the new nested tools.
 	agentItem.SetNestedTools(nestedTools)
 
-	// Update the chat so it updates the index map for animations to work as expected
-	m.chat.UpdateNestedToolIDs(toolCallID)
+	// Rebuild the ID map so removed nested tools stop resolving to the parent.
+	m.chat.rebuildIDIndexMap()
 
 	if m.chat.Follow() {
 		if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
@@ -1833,6 +1906,25 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	}
 
 	return tea.Batch(cmds...)
+}
+
+func childSessionStatus(msg message.Message) (text string, isError bool, ok bool) {
+	const retryPrefix = "Service temporarily unavailable. Retrying in "
+
+	if content := strings.TrimSpace(msg.Content().Text); strings.HasPrefix(content, retryPrefix) {
+		return content, false, true
+	}
+
+	if finish := msg.FinishPart(); finish != nil && finish.Reason == message.FinishReasonError {
+		switch {
+		case strings.TrimSpace(finish.Details) != "":
+			return strings.TrimSpace(finish.Details), true, true
+		case strings.TrimSpace(finish.Message) != "":
+			return strings.TrimSpace(finish.Message), true, true
+		}
+	}
+
+	return "", false, false
 }
 
 func (m *UI) prepareModelSwitchCmd(action dialog.ActionSelectModel, sessionID string, isOnboarding bool) tea.Cmd {

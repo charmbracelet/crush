@@ -234,7 +234,39 @@ func TestRunSubAgent(t *testing.T) {
 		// runSubAgent returns (errorResponse, nil) when agent.Run fails 鈥?not a Go error.
 		require.NoError(t, err)
 		assert.True(t, resp.IsError)
-		assert.Equal(t, "error generating response", resp.Content)
+		assert.Equal(t, "agent exploded", resp.Content)
+	})
+
+	t.Run("agent run error prefers persisted child assistant error details", func(t *testing.T) {
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, providerID, providerCfg)
+
+		parentSession, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+
+		agent := newMockAgent(providerID, 4096, func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
+			assistant, createErr := env.messages.Create(ctx, call.SessionID, message.CreateMessageParams{
+				Role: message.Assistant,
+			})
+			require.NoError(t, createErr)
+
+			assistant.AddFinish(message.FinishReasonError, "Network error", "stream idle timeout: no data received for 45s")
+			require.NoError(t, env.messages.Update(ctx, assistant))
+
+			return nil, errors.New("agent exploded")
+		})
+
+		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          agent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "test",
+			SessionTitle:   "Test",
+		})
+		require.NoError(t, err)
+		assert.True(t, resp.IsError)
+		assert.Equal(t, "stream idle timeout: no data received for 45s", resp.Content)
 	})
 
 	t.Run("falls back to persisted child session assistant content", func(t *testing.T) {

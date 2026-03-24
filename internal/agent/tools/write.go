@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"cmp"
 	"context"
 	_ "embed"
 	"fmt"
@@ -67,7 +68,10 @@ func NewWriteTool(
 				return fantasy.ToolResponse{}, fmt.Errorf("session_id is required")
 			}
 
-			filePath := filepathext.SmartJoin(workingDir, params.FilePath)
+			// Use session-specific working directory from context if available.
+			effectiveWorkingDir := cmp.Or(GetWorkingDirFromContext(ctx), workingDir)
+
+			filePath := filepathext.SmartJoin(effectiveWorkingDir, params.FilePath)
 
 			fileInfo, err := os.Stat(filePath)
 			if err == nil {
@@ -106,13 +110,13 @@ func NewWriteTool(
 			diff, additions, removals := diff.GenerateDiff(
 				oldContent,
 				params.Content,
-				strings.TrimPrefix(filePath, workingDir),
+				strings.TrimPrefix(filePath, effectiveWorkingDir),
 			)
 
 			p, err := permissions.Request(ctx,
 				permission.CreatePermissionRequest{
 					SessionID:   sessionID,
-					Path:        fsext.PathOrPrefix(filePath, workingDir),
+					Path:        fsext.PathOrPrefix(filePath, effectiveWorkingDir),
 					ToolCallID:  call.ID,
 					ToolName:    WriteToolName,
 					Action:      "write",

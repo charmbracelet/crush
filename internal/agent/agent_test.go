@@ -1017,14 +1017,14 @@ func TestEstimatePromptTokens(t *testing.T) {
 	estimate := estimatePromptTokens(messages, nil)
 	require.Equal(t, int64(752), estimate)
 
-	// With a mock tool: name(9) + desc(31) + schema("null"=4) = 44 bytes.
-	// Total: (3000 + 11 + 44) / 4 = 763.
+	// With a mock tool: name(9) + desc(31) + schema("null"=4) = 10 estimated
+	// tokens, so total is 752 + 10 = 762.
 	tool := &mockAgentTool{
 		name:        "read_file",
 		description: "Read a file from the filesystem",
 	}
 	estimateWithTools := estimatePromptTokens(messages, []fantasy.AgentTool{tool})
-	require.Equal(t, int64(763), estimateWithTools)
+	require.Equal(t, int64(762), estimateWithTools)
 
 	// ToolCallPart input is counted.
 	msgs2 := []fantasy.Message{
@@ -1047,6 +1047,11 @@ func TestEstimatePromptTokens(t *testing.T) {
 	}
 	// 400 / 4 = 100.
 	require.Equal(t, int64(100), estimatePromptTokens(msgs3, nil))
+
+	msgs4 := []fantasy.Message{
+		fantasy.NewUserMessage("你好世界"),
+	}
+	require.Equal(t, int64(4), estimatePromptTokens(msgs4, nil))
 }
 
 // mockAgentTool implements fantasy.AgentTool for testing.

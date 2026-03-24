@@ -49,6 +49,70 @@ func TestUpdateSessionMessageReinsertsAssistantAfterToolOnly(t *testing.T) {
 	require.Less(t, ui.chat.idInxMap[assistantMsg.ID], ui.chat.idInxMap["tool-1"])
 }
 
+func TestUpdateSessionMessageRemovesStaleToolItemsAfterRetryReset(t *testing.T) {
+	t.Parallel()
+
+	theme := styles.DefaultStyles()
+	com := &common.Common{Styles: &theme}
+	ui := &UI{
+		com:  com,
+		chat: NewChat(com),
+	}
+
+	assistantMsg := message.Message{
+		ID:   "assistant-1",
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.ToolCall{
+				ID:       "tool-1",
+				Name:     "write",
+				Input:    `{"file_path":"retry.txt","content":"before"}`,
+				Finished: true,
+			},
+		},
+	}
+	_ = ui.updateSessionMessage(assistantMsg)
+	require.NotNil(t, ui.chat.MessageItem("tool-1"))
+
+	assistantMsg.Parts = nil
+	_ = ui.updateSessionMessage(assistantMsg)
+
+	require.Nil(t, ui.chat.MessageItem("tool-1"))
+}
+
+func TestDeletedAssistantMessageRemovesAssociatedToolItems(t *testing.T) {
+	t.Parallel()
+
+	theme := styles.DefaultStyles()
+	com := &common.Common{Styles: &theme}
+	ui := &UI{
+		com:     com,
+		chat:    NewChat(com),
+		session: &session.Session{ID: "session-1"},
+	}
+
+	toolCall := message.ToolCall{
+		ID:       "tool-1",
+		Name:     "write",
+		Input:    `{"file_path":"retry.txt","content":"before"}`,
+		Finished: true,
+	}
+	ui.chat.SetMessages(chat.NewToolMessageItem(ui.com.Styles, "assistant-1", toolCall, nil, false))
+	require.NotNil(t, ui.chat.MessageItem("tool-1"))
+
+	_, _ = ui.Update(pubsub.Event[message.Message]{
+		Type: pubsub.DeletedEvent,
+		Payload: message.Message{
+			ID:        "assistant-1",
+			SessionID: "session-1",
+			Role:      message.Assistant,
+			Parts:     []message.ContentPart{toolCall},
+		},
+	})
+
+	require.Nil(t, ui.chat.MessageItem("tool-1"))
+}
+
 func TestShouldRefreshSessionUsage(t *testing.T) {
 	t.Parallel()
 
@@ -122,4 +186,137 @@ func TestSetSessionMessagesSuppressesStaleLoadingStateForRestoredSession(t *test
 	toolRendered := ansi.Strip(toolItem.Render(80))
 	require.Contains(t, toolRendered, "Bash")
 	require.NotContains(t, toolRendered, "Waiting for tool response...")
+}
+
+func TestHandleChildSessionMessageShowsAndClearsRetryStatus(t *testing.T) {
+	t.Parallel()
+
+	ui, parent, generalChild, _, _, _ := testSessionUI(t)
+	ui.session = parent
+
+	msgs, err := ui.com.App.Messages.List(t.Context(), parent.ID)
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+
+	toolCalls := msgs[0].ToolCalls()
+	require.NotEmpty(t, toolCalls)
+	ui.chat.SetMessages(chat.NewToolMessageItem(ui.com.Styles, msgs[0].ID, toolCalls[0], nil, false))
+
+	_ = ui.handleChildSessionMessage(pubsub.Event[message.Message]{
+		Type: pubsub.CreatedEvent,
+		Payload: message.Message{
+			ID:        "child-retry-1",
+			SessionID: generalChild.ID,
+			Role:      message.Assistant,
+			Parts: []message.ContentPart{
+				message.TextContent{Text: "Service temporarily unavailable. Retrying in 3 seconds... (attempt 1/5)"},
+			},
+		},
+	})
+
+	rendered := ansi.Strip(ui.chat.MessageItem(toolCalls[0].ID).Render(100))
+	require.Contains(t, rendered, "Retrying in 3 seconds")
+
+	_ = ui.handleChildSessionMessage(pubsub.Event[message.Message]{
+		Type: pubsub.CreatedEvent,
+		Payload: message.Message{
+			ID:        "child-assistant-2",
+			SessionID: generalChild.ID,
+			Role:      message.Assistant,
+			Parts: []message.ContentPart{
+				message.TextContent{Text: "Final child answer"},
+			},
+		},
+	})
+
+	rendered = ansi.Strip(ui.chat.MessageItem(toolCalls[0].ID).Render(100))
+	require.NotContains(t, rendered, "Retrying in 3 seconds")
+}
+
+func TestHandleChildSessionMessageClearsRetryStatusOnDelete(t *testing.T) {
+	t.Parallel()
+
+	ui, parent, generalChild, _, _, _ := testSessionUI(t)
+	ui.session = parent
+
+	msgs, err := ui.com.App.Messages.List(t.Context(), parent.ID)
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+
+	toolCalls := msgs[0].ToolCalls()
+	require.NotEmpty(t, toolCalls)
+	ui.chat.SetMessages(chat.NewToolMessageItem(ui.com.Styles, msgs[0].ID, toolCalls[0], nil, false))
+
+	retryMsg := message.Message{
+		ID:        "child-retry-1",
+		SessionID: generalChild.ID,
+		Role:      message.Assistant,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "Service temporarily unavailable. Retrying in 3 seconds... (attempt 1/5)"},
+		},
+	}
+
+	_ = ui.handleChildSessionMessage(pubsub.Event[message.Message]{
+		Type:    pubsub.CreatedEvent,
+		Payload: retryMsg,
+	})
+
+	rendered := ansi.Strip(ui.chat.MessageItem(toolCalls[0].ID).Render(100))
+	require.Contains(t, rendered, "Retrying in 3 seconds")
+
+	_ = ui.handleChildSessionMessage(pubsub.Event[message.Message]{
+		Type:    pubsub.DeletedEvent,
+		Payload: retryMsg,
+	})
+
+	rendered = ansi.Strip(ui.chat.MessageItem(toolCalls[0].ID).Render(100))
+	require.NotContains(t, rendered, "Retrying in 3 seconds")
+}
+
+func TestHandleChildSessionMessageRemovesStaleNestedToolsAfterRetryReset(t *testing.T) {
+	t.Parallel()
+
+	ui, parent, generalChild, _, _, _ := testSessionUI(t)
+	ui.session = parent
+
+	msgs, err := ui.com.App.Messages.List(t.Context(), parent.ID)
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+
+	toolCalls := msgs[0].ToolCalls()
+	require.NotEmpty(t, toolCalls)
+	ui.chat.SetMessages(chat.NewToolMessageItem(ui.com.Styles, msgs[0].ID, toolCalls[0], nil, false))
+
+	childAssistant := message.Message{
+		ID:        "child-assistant-1",
+		SessionID: generalChild.ID,
+		Role:      message.Assistant,
+		Parts: []message.ContentPart{
+			message.ToolCall{
+				ID:       "child-write-1",
+				Name:     "write",
+				Input:    `{"file_path":"retry.txt","content":"before"}`,
+				Finished: false,
+			},
+		},
+	}
+
+	_ = ui.handleChildSessionMessage(pubsub.Event[message.Message]{
+		Type:    pubsub.CreatedEvent,
+		Payload: childAssistant,
+	})
+
+	parentTool, ok := ui.chat.MessageItem(toolCalls[0].ID).(chat.NestedToolContainer)
+	require.True(t, ok)
+	require.Len(t, parentTool.NestedTools(), 1)
+
+	childAssistant.Parts = nil
+	_ = ui.handleChildSessionMessage(pubsub.Event[message.Message]{
+		Type:    pubsub.UpdatedEvent,
+		Payload: childAssistant,
+	})
+
+	parentTool, ok = ui.chat.MessageItem(toolCalls[0].ID).(chat.NestedToolContainer)
+	require.True(t, ok)
+	require.Empty(t, parentTool.NestedTools())
 }

@@ -141,12 +141,6 @@ func (h *Handler) handleSessionNew(ctx context.Context, req *Request) (any, *RPC
 	if err != nil {
 		return nil, &RPCError{Code: CodeInternalError, Message: fmt.Sprintf("failed to persist session cwd: %v", err)}
 	}
-	cwd := h.sessionCWDForSession(sess, params.CWD)
-
-	// Update the config store's working directory so tools use the correct CWD.
-	if cfg := h.app.GetConfig(); cfg != nil {
-		cfg.SetWorkingDir(cwd)
-	}
 
 	// Use the internal session ID as the ACP session ID for simplicity.
 	slog.Info("ACP: created session", "session_id", sess.ID)
@@ -176,12 +170,6 @@ func (h *Handler) handleSessionLoad(ctx context.Context, req *Request) (any, *RP
 	if err != nil {
 		return nil, &RPCError{Code: CodeInternalError, Message: fmt.Sprintf("failed to persist session cwd: %v", err)}
 	}
-	cwd := h.sessionCWDForSession(sess, params.CWD)
-
-	// Update the config store's working directory so tools use the correct CWD.
-	if cfg := h.app.GetConfig(); cfg != nil {
-		cfg.SetWorkingDir(cwd)
-	}
 
 	h.replayHistory(ctx, sess.ID)
 
@@ -204,7 +192,7 @@ func (h *Handler) replayHistory(ctx context.Context, sessionID string) {
 		case message.User:
 			content := msg.Content().Text
 			if content != "" {
-				h.sendUpdateSyncWithContext(ctx, sessionID, SessionUpdate{
+				h.sendUpdateWithContext(ctx, sessionID, SessionUpdate{
 					SessionUpdate: SessionUpdateUserMessageChunk,
 					Content:       TextBlock(content),
 				})
@@ -215,7 +203,7 @@ func (h *Handler) replayHistory(ctx context.Context, sessionID string) {
 				if tr.IsError {
 					status = ToolCallStatusFailed
 				}
-				h.sendUpdateSyncWithContext(ctx, sessionID, SessionUpdate{
+				h.sendUpdateWithContext(ctx, sessionID, SessionUpdate{
 					SessionUpdate: SessionUpdateToolCallUpdate,
 					ToolCallID:    tr.ToolCallID,
 					Title:         tr.Name,
@@ -227,13 +215,13 @@ func (h *Handler) replayHistory(ctx context.Context, sessionID string) {
 		case message.Assistant:
 			content := msg.Content().Text
 			if content != "" {
-				h.sendUpdateSyncWithContext(ctx, sessionID, SessionUpdate{
+				h.sendUpdateWithContext(ctx, sessionID, SessionUpdate{
 					SessionUpdate: SessionUpdateAgentMessageChunk,
 					Content:       TextBlock(content),
 				})
 			}
 			for _, tc := range msg.ToolCalls() {
-				h.sendUpdateSyncWithContext(ctx, sessionID, SessionUpdate{
+				h.sendUpdateWithContext(ctx, sessionID, SessionUpdate{
 					SessionUpdate: SessionUpdateToolCall,
 					ToolCallID:    tc.ID,
 					Title:         tc.Name,
@@ -245,6 +233,7 @@ func (h *Handler) replayHistory(ctx context.Context, sessionID string) {
 		}
 	}
 }
+
 // handleSessionPrompt runs a prompt turn and streams updates back.
 func (h *Handler) handleSessionPrompt(ctx context.Context, req *Request) (any, *RPCError) {
 	var params PromptParams

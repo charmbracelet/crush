@@ -5,10 +5,11 @@ import (
 )
 
 type (
-	sessionIDContextKey string
-	messageIDContextKey string
-	supportsImagesKey   string
-	modelNameKey        string
+	sessionIDContextKey  string
+	messageIDContextKey  string
+	supportsImagesKey    string
+	modelNameKey         string
+	workingDirContextKey string
 )
 
 const (
@@ -20,6 +21,8 @@ const (
 	SupportsImagesContextKey supportsImagesKey = "supports_images"
 	// ModelNameContextKey is the key for the model name in the context.
 	ModelNameContextKey modelNameKey = "model_name"
+	// WorkingDirContextKey is the key for the session-specific working directory.
+	WorkingDirContextKey workingDirContextKey = "working_dir"
 )
 
 // getContextValue is a generic helper that retrieves a typed value from context.
@@ -53,4 +56,10 @@ func GetSupportsImagesFromContext(ctx context.Context) bool {
 // GetModelNameFromContext retrieves the model name from the context.
 func GetModelNameFromContext(ctx context.Context) string {
 	return getContextValue(ctx, ModelNameContextKey, "")
+}
+
+// GetWorkingDirFromContext retrieves the session-specific working directory from context.
+// Returns empty string if not set, in which case tools should fall back to the global working dir.
+func GetWorkingDirFromContext(ctx context.Context) string {
+	return getContextValue(ctx, WorkingDirContextKey, "")
 }

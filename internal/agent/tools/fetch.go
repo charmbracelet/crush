@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"cmp"
 	"context"
 	_ "embed"
 	"fmt"
@@ -56,10 +57,13 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for creating a new file")
 			}
 
+			// Use session-specific working directory from context if available.
+			effectiveWorkingDir := cmp.Or(GetWorkingDirFromContext(ctx), workingDir)
+
 			p, err := permissions.Request(ctx,
 				permission.CreatePermissionRequest{
 					SessionID:   sessionID,
-					Path:        workingDir,
+					Path:        effectiveWorkingDir,
 					ToolCallID:  call.ID,
 					ToolName:    FetchToolName,
 					Action:      "fetch",

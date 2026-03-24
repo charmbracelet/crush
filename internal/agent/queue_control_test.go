@@ -23,6 +23,40 @@ func (queueTestAgent) Stream(context.Context, fantasy.AgentStreamCall) (*fantasy
 	return &fantasy.AgentResult{}, nil
 }
 
+type queuePrepareTestAgent struct {
+	t                 *testing.T
+	afterFirstPrepare func()
+}
+
+func (queuePrepareTestAgent) Generate(context.Context, fantasy.AgentCall) (*fantasy.AgentResult, error) {
+	return &fantasy.AgentResult{}, nil
+}
+
+func (a *queuePrepareTestAgent) Stream(ctx context.Context, call fantasy.AgentStreamCall) (*fantasy.AgentResult, error) {
+	preparedCtx, prepared, err := call.PrepareStep(ctx, fantasy.PrepareStepFunctionOptions{Messages: call.Messages})
+	require.NoError(a.t, err)
+
+	if a.afterFirstPrepare != nil {
+		a.afterFirstPrepare()
+		a.afterFirstPrepare = nil
+	}
+
+	_, _, err = call.PrepareStep(preparedCtx, fantasy.PrepareStepFunctionOptions{Messages: prepared.Messages})
+	require.NoError(a.t, err)
+
+	if call.OnTextDelta != nil {
+		require.NoError(a.t, call.OnTextDelta("reply", "ok"))
+	}
+	if call.OnStepFinish != nil {
+		require.NoError(a.t, call.OnStepFinish(fantasy.StepResult{
+			Response: fantasy.Response{
+				FinishReason: fantasy.FinishReasonStop,
+			},
+		}))
+	}
+	return &fantasy.AgentResult{}, nil
+}
+
 func newQueueControlTestAgent(env fakeEnv) *sessionAgent {
 	return &sessionAgent{
 		largeModel:         csync.NewValue(Model{CatwalkCfg: catwalk.Model{}, ModelCfg: config.SelectedModel{}}),
@@ -39,6 +73,28 @@ func newQueueControlTestAgent(env fakeEnv) *sessionAgent {
 		activeRequests: csync.NewMap[string, context.CancelFunc](),
 		pausedQueues:   csync.NewMap[string, bool](),
 	}
+}
+
+func newQueuePrepareTestSessionAgent(env fakeEnv, fakeAgent fantasy.Agent) *sessionAgent {
+	model := Model{
+		CatwalkCfg: catwalk.Model{
+			ContextWindow:    10000,
+			DefaultMaxTokens: 1000,
+		},
+	}
+
+	return NewSessionAgent(SessionAgentOptions{
+		LargeModel:   model,
+		SmallModel:   model,
+		SystemPrompt: "",
+		WorkingDir:   env.workingDir,
+		IsYolo:       true,
+		Sessions:     env.sessions,
+		Messages:     env.messages,
+		AgentFactory: func(fantasy.LanguageModel, ...fantasy.AgentOption) fantasy.Agent {
+			return fakeAgent
+		},
+	}).(*sessionAgent)
 }
 
 func TestResumeQueueStartsNextPromptWhenIdle(t *testing.T) {
@@ -146,4 +202,102 @@ func TestRemoveQueuedPromptClearsPauseWhenQueueEmpties(t *testing.T) {
 	require.True(t, removed)
 	require.Equal(t, 0, a.QueuedPrompts(sess.ID))
 	require.False(t, a.IsQueuePaused(sess.ID))
+}
+
+func TestQueuedPromptWaitsForCurrentRunByDefault(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	var sessionAgent *sessionAgent
+	testAgent := &queuePrepareTestAgent{t: t}
+	sessionAgent = newQueuePrepareTestSessionAgent(env, testAgent)
+
+	sess, err := env.sessions.Create(t.Context(), "queue waits")
+	require.NoError(t, err)
+	_, err = env.messages.Create(t.Context(), sess.ID, message.CreateMessageParams{
+		Role: message.User,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "seed"},
+		},
+	})
+	require.NoError(t, err)
+
+	sessionAgent.PauseQueue(sess.ID)
+	testAgent.afterFirstPrepare = func() {
+		_, runErr := sessionAgent.Run(context.Background(), SessionAgentCall{
+			SessionID:       sess.ID,
+			Prompt:          "queued later",
+			MaxOutputTokens: 1000,
+		})
+		require.NoError(t, runErr)
+	}
+
+	result, err := sessionAgent.Run(t.Context(), SessionAgentCall{
+		SessionID:       sess.ID,
+		Prompt:          "run now",
+		MaxOutputTokens: 1000,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	require.Equal(t, 1, sessionAgent.QueuedPrompts(sess.ID))
+
+	msgs, err := env.messages.List(t.Context(), sess.ID)
+	require.NoError(t, err)
+	for _, msg := range msgs {
+		if msg.Role == message.User && msg.Content().Text == "queued later" {
+			t.Fatalf("queued prompt was merged into the active run")
+		}
+	}
+}
+
+func TestJoinActiveRunQueuedPromptMergesIntoCurrentRun(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	var sessionAgent *sessionAgent
+	testAgent := &queuePrepareTestAgent{t: t}
+	sessionAgent = newQueuePrepareTestSessionAgent(env, testAgent)
+
+	sess, err := env.sessions.Create(t.Context(), "queue joins run")
+	require.NoError(t, err)
+	_, err = env.messages.Create(t.Context(), sess.ID, message.CreateMessageParams{
+		Role: message.User,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "seed"},
+		},
+	})
+	require.NoError(t, err)
+
+	sessionAgent.PauseQueue(sess.ID)
+	testAgent.afterFirstPrepare = func() {
+		_, runErr := sessionAgent.Run(context.Background(), SessionAgentCall{
+			SessionID:       sess.ID,
+			Prompt:          "join now",
+			JoinActiveRun:   true,
+			MaxOutputTokens: 1000,
+		})
+		require.NoError(t, runErr)
+	}
+
+	result, err := sessionAgent.Run(t.Context(), SessionAgentCall{
+		SessionID:       sess.ID,
+		Prompt:          "run now",
+		MaxOutputTokens: 1000,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	require.Equal(t, 0, sessionAgent.QueuedPrompts(sess.ID))
+
+	msgs, err := env.messages.List(t.Context(), sess.ID)
+	require.NoError(t, err)
+	foundJoinedPrompt := false
+	for _, msg := range msgs {
+		if msg.Role == message.User && msg.Content().Text == "join now" {
+			foundJoinedPrompt = true
+			break
+		}
+	}
+	require.True(t, foundJoinedPrompt)
 }

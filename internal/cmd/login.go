@@ -1,12 +1,12 @@
 package cmd
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"os"
 	"os/signal"
 
+	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
 	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
@@ -111,10 +111,7 @@ func loginHyper(cfg *config.ConfigStore) error {
 		return fmt.Errorf("access token is not active")
 	}
 
-	if err := cmp.Or(
-		cfg.SetConfigField(config.ScopeGlobal, "providers.hyper.api_key", token.AccessToken),
-		cfg.SetConfigField(config.ScopeGlobal, "providers.hyper.oauth", token),
-	); err != nil {
+	if err := cfg.SetProviderAPIKey(config.ScopeGlobal, "hyper", token); err != nil {
 		return err
 	}
 
@@ -126,7 +123,8 @@ func loginHyper(cfg *config.ConfigStore) error {
 func loginCopilot(cfg *config.ConfigStore) error {
 	ctx := getLoginContext()
 
-	if cfg.HasConfigField(config.ScopeGlobal, "providers.copilot.oauth") {
+	if cfg.HasConfigField(config.ScopeGlobal, "providers.copilot.oauth") ||
+		cfg.HasConfigField(config.ScopeGlobal, "providers.copilot.api_key") {
 		fmt.Println("You are already logged in to GitHub Copilot.")
 		return nil
 	}
@@ -176,10 +174,7 @@ func loginCopilot(cfg *config.ConfigStore) error {
 		token = t
 	}
 
-	if err := cmp.Or(
-		cfg.SetConfigField(config.ScopeGlobal, "providers.copilot.api_key", token.AccessToken),
-		cfg.SetConfigField(config.ScopeGlobal, "providers.copilot.oauth", token),
-	); err != nil {
+	if err := cfg.SetProviderAPIKey(config.ScopeGlobal, string(catwalk.InferenceProviderCopilot), token); err != nil {
 		return err
 	}
 

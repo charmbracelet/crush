@@ -62,6 +62,8 @@ type App struct {
 	LSPManager *lsp.Manager
 
 	config *config.ConfigStore
+	dbConn *sql.DB
+	dbQ    *db.Queries
 
 	serviceEventsWG *sync.WaitGroup
 	eventsCtx       context.Context
@@ -96,6 +98,8 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 		LSPManager:  lsp.NewManager(store),
 
 		globalCtx: ctx,
+		dbConn:    conn,
+		dbQ:       q,
 
 		config: store,
 
@@ -359,6 +363,32 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	}
 }
 
+// OverrideModels parses model strings and temporarily overrides the model
+// configurations for non-interactive/headless use.
+func (app *App) OverrideModels(ctx context.Context, largeModel, smallModel string) error {
+	return app.overrideModelsForNonInteractive(ctx, largeModel, smallModel)
+}
+
+// RunServe starts the application in headless server mode. Plugin hooks
+// (such as the ACP server) are already running after app initialization.
+// This method waits for MCP init, updates models, then blocks until the
+// context is cancelled. All permission requests are auto-approved.
+func (app *App) RunServe(ctx context.Context) error {
+	slog.Info("Running in serve mode (headless)")
+
+	if err := mcp.WaitForInit(ctx); err != nil {
+		return fmt.Errorf("failed to wait for MCP initialization: %w", err)
+	}
+
+	app.AgentCoordinator.UpdateModels(ctx)
+
+	app.Permissions.SetSkipRequests(true)
+
+	slog.Info("Serve mode ready, waiting for requests")
+	<-ctx.Done()
+	return nil
+}
+
 func (app *App) UpdateAgentModel(ctx context.Context) error {
 	if app.AgentCoordinator == nil {
 		return fmt.Errorf("agent configuration is missing")
@@ -537,6 +567,8 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.History,
 		app.FileTracker,
 		app.LSPManager,
+		app.dbConn,
+		app.dbQ,
 		app.agentNotifications,
 	)
 	if err != nil {

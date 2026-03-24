@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,6 +23,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/log"
@@ -31,6 +33,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/plugin"
 	"golang.org/x/sync/errgroup"
 
 	"charm.land/fantasy/providers/anthropic"
@@ -71,6 +74,7 @@ type Coordinator interface {
 	Summarize(context.Context, string) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
+	PluginApp() *plugin.App
 }
 
 type coordinator struct {
@@ -81,10 +85,18 @@ type coordinator struct {
 	history     history.Service
 	filetracker filetracker.Service
 	lspManager  *lsp.Manager
+	dbConn      *sql.DB
+	dbQueries   *db.Queries
 	notify      pubsub.Publisher[notify.Notification]
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
+
+	pluginApp              *plugin.App
+	hooks                  []plugin.Hook
+	sessionInfoAdapter     *SessionInfoAdapter
+	promptSubmitterAdapter *PromptSubmitterAdapter
+	subAgentRunnerAdapter  *SubAgentRunnerAdapter
 
 	readyWg errgroup.Group
 }
@@ -98,6 +110,8 @@ func NewCoordinator(
 	history history.Service,
 	filetracker filetracker.Service,
 	lspManager *lsp.Manager,
+	dbConn *sql.DB,
+	dbQueries *db.Queries,
 	notify pubsub.Publisher[notify.Notification],
 ) (Coordinator, error) {
 	c := &coordinator{
@@ -108,8 +122,15 @@ func NewCoordinator(
 		history:     history,
 		filetracker: filetracker,
 		lspManager:  lspManager,
+		dbConn:      dbConn,
+		dbQueries:   dbQueries,
 		notify:      notify,
 		agents:      make(map[string]SessionAgent),
+	}
+
+	// Initialize plugin hooks.
+	if err := c.initPluginHooks(ctx); err != nil {
+		return nil, fmt.Errorf("failed to initialize plugin hooks: %w", err)
 	}
 
 	agentCfg, ok := cfg.Config().Agents[config.AgentCoder]
@@ -129,6 +150,19 @@ func NewCoordinator(
 	}
 	c.currentAgent = agent
 	c.agents[config.AgentCoder] = agent
+
+	// Set the coordinator reference on the prompt submitter adapter.
+	// This must be done after the coordinator is fully initialized.
+	if c.promptSubmitterAdapter != nil {
+		c.promptSubmitterAdapter.SetCoordinator(c)
+	}
+
+	// Set the coordinator reference on the sub-agent runner adapter.
+	// This must be done after the coordinator is fully initialized.
+	if c.subAgentRunnerAdapter != nil {
+		c.subAgentRunnerAdapter.SetCoordinator(c)
+	}
+
 	return c, nil
 }
 
@@ -166,6 +200,17 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	}
 
 	mergedOptions, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(model, providerCfg)
+
+	// Update session info adapter for plugins.
+	if c.sessionInfoAdapter != nil {
+		c.sessionInfoAdapter.SetSessionID(sessionID)
+		c.sessionInfoAdapter.SetModel(model.CatwalkCfg.ID, model.ModelCfg.Provider)
+	}
+
+	// Update prompt submitter adapter with current session.
+	if c.promptSubmitterAdapter != nil {
+		c.promptSubmitterAdapter.SetSessionID(sessionID)
+	}
 
 	if providerCfg.OAuthToken != nil && providerCfg.OAuthToken.IsExpired() {
 		slog.Debug("Token needs to be refreshed", "provider", providerCfg.ID)
@@ -473,6 +518,24 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 			tools.NewListMCPResourcesTool(c.cfg, c.permissions),
 			tools.NewReadMCPResourceTool(c.cfg, c.permissions),
 		)
+	}
+
+	// Add plugin tools.
+	for _, name := range plugin.RegisteredTools() {
+		if c.pluginApp.IsPluginDisabled(name) {
+			slog.Debug("skipping disabled plugin", "name", name)
+			continue
+		}
+		factory, ok := plugin.GetToolFactory(name)
+		if !ok {
+			continue
+		}
+		tool, err := factory(ctx, c.pluginApp)
+		if err != nil {
+			slog.Error("failed to create plugin tool", "name", name, "error", err)
+			continue
+		}
+		allTools = append(allTools, tool)
 	}
 
 	var filteredTools []fantasy.AgentTool
@@ -949,6 +1012,107 @@ func (c *coordinator) refreshApiKeyTemplate(ctx context.Context, providerCfg con
 	if err := c.UpdateModels(ctx); err != nil {
 		return err
 	}
+	return nil
+}
+
+// PluginApp returns the plugin app for accessing plugin services.
+func (c *coordinator) PluginApp() *plugin.App {
+	return c.pluginApp
+}
+
+// initPluginHooks initializes plugin hooks and starts them in background goroutines.
+func (c *coordinator) initPluginHooks(ctx context.Context) error {
+	var disabledPlugins []string
+	var pluginConfig map[string]map[string]any
+	if c.cfg.Config().Options != nil {
+		disabledPlugins = c.cfg.Config().Options.DisabledPlugins
+		pluginConfig = c.cfg.Config().Options.Plugins
+	}
+
+	// Create message subscriber adapter for hooks.
+	messageAdapter := NewMessageSubscriberAdapter(c.messages)
+
+	// Create session info adapter for hooks.
+	c.sessionInfoAdapter = NewSessionInfoAdapter(c.sessions)
+
+	// Create prompt submitter adapter for hooks.
+	// The coordinator reference will be set after NewCoordinator returns.
+	c.promptSubmitterAdapter = NewPromptSubmitterAdapter(c.sessions, c.permissions)
+
+	// Create sub-agent runner adapter for plugins.
+	// The coordinator reference will be set after NewCoordinator returns.
+	c.subAgentRunnerAdapter = NewSubAgentRunnerAdapter()
+
+	// Create session store adapter for plugins.
+	sessionStoreAdapter := NewSessionStoreAdapter(c.sessions, c.messages, c.dbQueries, c.dbConn)
+
+	// Build plugin app options.
+	appOpts := []plugin.AppOption{
+		plugin.WithWorkingDir(c.cfg.WorkingDir()),
+		plugin.WithPermissions(c.permissions),
+		plugin.WithPluginConfig(pluginConfig),
+		plugin.WithDisabledPlugins(disabledPlugins),
+		plugin.WithMessageSubscriber(messageAdapter),
+		plugin.WithSessionInfoProvider(c.sessionInfoAdapter),
+		plugin.WithPromptSubmitter(c.promptSubmitterAdapter),
+		plugin.WithSubAgentRunner(c.subAgentRunnerAdapter),
+		plugin.WithSessionStore(sessionStoreAdapter),
+	}
+
+	// Initialize search provider if one is registered.
+	if name, reg := plugin.GetSearchProviderRegistration(); reg != nil {
+		if !slices.Contains(disabledPlugins, name) {
+			// Create a temporary app to load config for the search provider factory.
+			tmpApp := plugin.NewApp(
+				plugin.WithWorkingDir(c.cfg.WorkingDir()),
+				plugin.WithPluginConfig(pluginConfig),
+				plugin.WithDisabledPlugins(disabledPlugins),
+			)
+			sp, err := reg.Factory(ctx, tmpApp)
+			if err != nil {
+				slog.Error("failed to create search provider", "name", name, "error", err)
+			} else if sp != nil {
+				appOpts = append(appOpts, plugin.WithSearchProvider(sp))
+				slog.Debug("initialized search provider plugin", "name", name)
+			}
+		}
+	}
+
+	// Create shared plugin app for both tools and hooks.
+	c.pluginApp = plugin.NewApp(appOpts...)
+
+	// Initialize registered hooks.
+	for _, name := range plugin.RegisteredHooks() {
+		if c.pluginApp.IsPluginDisabled(name) {
+			slog.Debug("skipping disabled hook", "name", name)
+			continue
+		}
+		factory, ok := plugin.GetHookFactory(name)
+		if !ok {
+			continue
+		}
+		hook, err := factory(ctx, c.pluginApp)
+		if err != nil {
+			slog.Error("failed to create plugin hook", "name", name, "error", err)
+			continue
+		}
+		if hook == nil {
+			// Hook returned nil without error - it's disabled/not configured
+			slog.Debug("plugin hook disabled (no configuration)", "name", name)
+			continue
+		}
+		c.hooks = append(c.hooks, hook)
+
+		// Start hook in background.
+		go func(h plugin.Hook) {
+			if err := h.Start(ctx); err != nil {
+				slog.Error("hook error", "name", h.Name(), "error", err)
+			}
+		}(hook)
+
+		slog.Debug("started plugin hook", "name", name)
+	}
+
 	return nil
 }
 

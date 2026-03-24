@@ -24,6 +24,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	ui "github.com/charmbracelet/crush/internal/ui/model"
 	"github.com/charmbracelet/crush/internal/version"
+	"github.com/charmbracelet/crush/plugin"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
@@ -37,12 +38,14 @@ func init() {
 	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Debug")
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
 	rootCmd.Flags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
+	rootCmd.Flags().Bool("list-plugins", false, "List registered plugins and exit")
 	rootCmd.Flags().StringP("session", "s", "", "Continue a previous session by ID")
 	rootCmd.Flags().BoolP("continue", "C", false, "Continue the most recent session")
 	rootCmd.MarkFlagsMutuallyExclusive("session", "continue")
 
 	rootCmd.AddCommand(
 		runCmd,
+		serveCmd,
 		dirsCmd,
 		projectsCmd,
 		updateProvidersCmd,
@@ -84,6 +87,11 @@ crush --session {session-id}
 crush --continue
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Handle --list-plugins flag.
+		if listPlugins, _ := cmd.Flags().GetBool("list-plugins"); listPlugins {
+			return listRegisteredPlugins()
+		}
+
 		sessionID, _ := cmd.Flags().GetString("session")
 		continueLast, _ := cmd.Flags().GetBool("continue")
 
@@ -309,6 +317,39 @@ func createDotCrushDir(dir string) error {
 		if err := os.WriteFile(gitIgnorePath, []byte("*\n"), 0o644); err != nil {
 			return fmt.Errorf("failed to create .gitignore file: %q %w", gitIgnorePath, err)
 		}
+	}
+
+	return nil
+}
+
+// listRegisteredPlugins prints all registered plugin tools, hooks, and search providers.
+func listRegisteredPlugins() error {
+	tools := plugin.RegisteredTools()
+	hooks := plugin.RegisteredHooks()
+	searchName, searchReg := plugin.GetSearchProviderRegistration()
+
+	if len(tools) == 0 && len(hooks) == 0 && searchReg == nil {
+		fmt.Println("No plugins registered")
+		return nil
+	}
+
+	if len(tools) > 0 {
+		fmt.Println("Registered plugin tools:")
+		for _, name := range tools {
+			fmt.Printf("  - %s\n", name)
+		}
+	}
+
+	if len(hooks) > 0 {
+		fmt.Println("Registered plugin hooks:")
+		for _, name := range hooks {
+			fmt.Printf("  - %s\n", name)
+		}
+	}
+
+	if searchReg != nil {
+		fmt.Println("Registered search providers:")
+		fmt.Printf("  - %s\n", searchName)
 	}
 
 	return nil

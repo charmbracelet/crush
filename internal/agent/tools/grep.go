@@ -118,6 +118,13 @@ func NewGrepTool(workingDir string, config config.ToolGrep) fantasy.AgentTool {
 
 			searchPath := cmp.Or(params.Path, workingDir)
 
+			// Clamp search path to working directory to prevent
+			// searching the entire filesystem.
+			searchPath, err := clampToWorkingDir(workingDir, searchPath)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
+			}
+
 			searchCtx, cancel := context.WithTimeout(ctx, config.GetTimeout())
 			defer cancel()
 

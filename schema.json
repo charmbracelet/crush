@@ -92,10 +92,7 @@
         }
       },
       "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "tools"
-      ]
+      "type": "object"
     },
     "LSPConfig": {
       "properties": {
@@ -666,10 +663,7 @@
         }
       },
       "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "completions"
-      ]
+      "type": "object"
     },
     "Token": {
       "properties": {
@@ -695,10 +689,28 @@
         "expires_at"
       ]
     },
+    "ToolBash": {
+      "properties": {
+        "allowed_commands": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "curl",
+              "ssh",
+              "scp"
+            ]
+          },
+          "type": "array",
+          "description": "List of default blocked bash commands to explicitly allow; commands outside the default blocked-command list are ignored"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "ToolGrep": {
       "properties": {
         "timeout": {
-          "type": "integer",
+          "type": "string",
           "description": "Timeout for the grep tool call"
         }
       },
@@ -734,14 +746,13 @@
         },
         "grep": {
           "$ref": "#/$defs/ToolGrep"
+        },
+        "bash": {
+          "$ref": "#/$defs/ToolBash"
         }
       },
       "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "ls",
-        "grep"
-      ]
+      "type": "object"
     }
   }
 }

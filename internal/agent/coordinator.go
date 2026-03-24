@@ -440,13 +440,14 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 	// Get the model name for the agent
 	modelName := ""
 	if modelCfg, ok := c.cfg.Config().Models[agent.Model]; ok {
-		if model := c.cfg.Config().GetModel(modelCfg.Provider, modelCfg.Model); model != nil {
+		modelName = modelCfg.Model
+		if model := c.cfg.Config().GetModel(modelCfg.Provider, modelCfg.Model); model != nil && model.Name != "" {
 			modelName = model.Name
 		}
 	}
 
 	allTools = append(allTools,
-		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelName),
+		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelName, c.cfg.Config().Tools.Bash),
 		tools.NewJobOutputTool(),
 		tools.NewJobKillTool(),
 		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),

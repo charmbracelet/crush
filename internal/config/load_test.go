@@ -36,6 +36,43 @@ func TestConfig_LoadFromBytes(t *testing.T) {
 	require.Equal(t, "https://api.openai.com/v2", pc.BaseURL)
 }
 
+func TestConfig_LoadFromBytes_WithBashAllowedCommands(t *testing.T) {
+	data := []byte(`{"tools": {"bash": {"allowed_commands": ["curl", "ssh"]}}}`)
+
+	loadedConfig, err := loadFromBytes([][]byte{data})
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"curl", "ssh"}, loadedConfig.Tools.Bash.AllowedCommands)
+}
+
+func TestConfig_LoadFromBytes_WithBashAllowedCommands_MergeOrder(t *testing.T) {
+	base := []byte(`{"tools": {"bash": {"allowed_commands": ["curl"]}}}`)
+	override := []byte(`{"tools": {"bash": {"allowed_commands": ["ssh", " curl ", "alias", "go"]}}}`)
+
+	loadedConfig, err := loadFromBytes([][]byte{base, override})
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"curl", "ssh", " curl ", "alias", "go"}, loadedConfig.Tools.Bash.AllowedCommands)
+}
+
+func TestConfig_LoadFromBytes_WithoutTools(t *testing.T) {
+	loadedConfig, err := loadFromBytes([][]byte{[]byte(`{"options": {"debug": true}}`)})
+
+	require.NoError(t, err)
+	require.NotNil(t, loadedConfig)
+	require.Empty(t, loadedConfig.Tools.Bash.AllowedCommands)
+}
+
+func TestConfig_LoadFromBytes_WithBashAllowedCommandsOnlyInOverride(t *testing.T) {
+	base := []byte(`{"options": {"debug": true}}`)
+	override := []byte(`{"tools": {"bash": {"allowed_commands": ["curl"]}}}`)
+
+	loadedConfig, err := loadFromBytes([][]byte{base, override})
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"curl"}, loadedConfig.Tools.Bash.AllowedCommands)
+}
+
 // testStore wraps a Config in a minimal ConfigStore for testing.
 func testStore(cfg *Config) *ConfigStore {
 	return &ConfigStore{config: cfg}

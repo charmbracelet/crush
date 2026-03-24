@@ -796,23 +796,31 @@ func GlobalSkillsDirs() []string {
 		return []string{crushSkills}
 	}
 
-	// Determine the base config directory.
-	var configBase string
-	if xdgConfigHome := os.Getenv("XDG_CONFIG_HOME"); xdgConfigHome != "" {
-		configBase = xdgConfigHome
-	} else if runtime.GOOS == "windows" {
-		configBase = cmp.Or(
+	configHome := cmp.Or(
+		os.Getenv("XDG_CONFIG_HOME"),
+		filepath.Join(home.Dir(), ".config"),
+	)
+
+	paths := []string{
+		filepath.Join(configHome, appName, "skills"),
+		filepath.Join(configHome, "agents", "skills"),
+	}
+
+	// On Windows, also load from app data on top of `$HOME/.config/crush`.
+	// This is here mostly for backwards compatibility.
+	if runtime.GOOS == "windows" {
+		appData := cmp.Or(
 			os.Getenv("LOCALAPPDATA"),
 			filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local"),
 		)
-	} else {
-		configBase = filepath.Join(home.Dir(), ".config")
+		paths = append(
+			paths,
+			filepath.Join(appData, appName, "skills"),
+			filepath.Join(appData, "agents", "skills"),
+		)
 	}
 
-	return []string{
-		filepath.Join(configBase, appName, "skills"),
-		filepath.Join(configBase, "agents", "skills"),
-	}
+	return paths
 }
 
 func isAppleTerminal() bool { return os.Getenv("TERM_PROGRAM") == "Apple_Terminal" }

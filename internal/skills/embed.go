@@ -47,6 +47,7 @@ func DiscoverBuiltin() []*Skill {
 		// so the path is relative to the embedded root
 		// (e.g., "/crush/skills/crush-config/SKILL.md").
 		relPath, _ := filepath.Rel("builtin", path)
+		relPath = filepath.ToSlash(relPath)
 		skill.SkillFilePath = BuiltinPrefix + relPath
 		skill.Path = BuiltinPrefix + filepath.Dir(relPath)
 

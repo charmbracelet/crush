@@ -202,6 +202,11 @@ type TUIOptions struct {
 	Transparent *bool       `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
 }
 
+// JSONSchemaExtend marks TUI option fields as optional in the schema.
+func (TUIOptions) JSONSchemaExtend(schema *jsonschema.Schema) {
+	schema.Required = nil
+}
+
 // Completions defines options for the completions UI.
 type Completions struct {
 	MaxDepth *int `json:"max_depth,omitempty" jsonschema:"description=Maximum depth for the ls tool,default=0,example=10"`
@@ -351,6 +356,11 @@ type Tools struct {
 	Bash ToolBash `json:"bash,omitzero"`
 }
 
+// JSONSchemaExtend marks tool configuration fields as optional in the schema.
+func (Tools) JSONSchemaExtend(schema *jsonschema.Schema) {
+	schema.Required = nil
+}
+
 type ToolLs struct {
 	MaxDepth *int `json:"max_depth,omitempty" jsonschema:"description=Maximum depth for the ls tool,default=0,example=10"`
 	MaxItems *int `json:"max_items,omitempty" jsonschema:"description=Maximum number of items to return for the ls tool,default=1000,example=100"`
@@ -363,6 +373,15 @@ func (t ToolLs) Limits() (depth, items int) {
 
 type ToolGrep struct {
 	Timeout *time.Duration `json:"timeout,omitempty" jsonschema:"description=Timeout for the grep tool call,default=5s,example=10s"`
+}
+
+// JSONSchemaExtend marks grep timeout as a duration string in the schema.
+func (ToolGrep) JSONSchemaExtend(schema *jsonschema.Schema) {
+	if schema.Properties != nil {
+		if prop, ok := schema.Properties.Get("timeout"); ok {
+			prop.Type = "string"
+		}
+	}
 }
 
 // GetTimeout returns the user-defined timeout or the default.
@@ -398,6 +417,13 @@ type Config struct {
 	Tools Tools `json:"tools,omitzero" jsonschema:"description=Tool configurations"`
 
 	Agents map[string]Agent `json:"-"`
+}
+
+// JSONSchemaExtend marks top-level config fields as optional in the schema.
+func (Config) JSONSchemaExtend(schema *jsonschema.Schema) {
+	if schema.Properties != nil {
+		schema.Required = nil
+	}
 }
 
 func (c *Config) EnabledProviders() []ProviderConfig {

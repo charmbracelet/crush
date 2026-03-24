@@ -15,9 +15,11 @@ import (
 
 type mockBashPermissionService struct {
 	*pubsub.Broker[permission.PermissionRequest]
+	requestCount int
 }
 
 func (m *mockBashPermissionService) Request(ctx context.Context, req permission.CreatePermissionRequest) (bool, error) {
+	m.requestCount++
 	return true, nil
 }
 
@@ -145,6 +147,58 @@ func TestBashTool_BlockedCommandReturnsErrorOutput(t *testing.T) {
 	require.Contains(t, resp.Content, "command is not allowed for security reasons")
 }
 
+func TestBashTool_SafeReadOnlyDetection(t *testing.T) {
+	workingDir := t.TempDir()
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	t.Run("safe command skips permission request", func(t *testing.T) {
+		permissions := &mockBashPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
+		tool := newBashToolForTestWithPermissions(workingDir, config.ToolBash{}, permissions)
+
+		resp := runBashTool(t, tool, ctx, BashParams{Description: "git status", Command: "git status --short"})
+		require.False(t, resp.IsError)
+		require.Zero(t, permissions.requestCount)
+	})
+
+	t.Run("mutating git subcommands require permission request", func(t *testing.T) {
+		for _, command := range []string{"git remote add origin https://example.com/repo", "git branch -D main", "git tag -d v1.0.0", "git ls-remote origin", "git diff --output=out.txt"} {
+			permissions := &mockBashPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
+			tool := newBashToolForTestWithPermissions(workingDir, config.ToolBash{}, permissions)
+
+			resp := runBashTool(t, tool, ctx, BashParams{Description: "unsafe git", Command: command})
+			require.False(t, resp.IsError)
+			require.Equal(t, 1, permissions.requestCount, command)
+		}
+	})
+
+	t.Run("wrapper command requires permission request", func(t *testing.T) {
+		permissions := &mockBashPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
+		tool := newBashToolForTestWithPermissions(workingDir, config.ToolBash{}, permissions)
+
+		resp := runBashTool(t, tool, ctx, BashParams{Description: "env wrapper", Command: "env git status --short"})
+		require.False(t, resp.IsError)
+		require.Equal(t, 1, permissions.requestCount)
+	})
+
+	t.Run("shell chaining requires permission request", func(t *testing.T) {
+		permissions := &mockBashPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
+		tool := newBashToolForTestWithPermissions(workingDir, config.ToolBash{}, permissions)
+
+		resp := runBashTool(t, tool, ctx, BashParams{Description: "chained command", Command: "git status --short && echo done"})
+		require.False(t, resp.IsError)
+		require.Equal(t, 1, permissions.requestCount)
+	})
+
+	t.Run("redirection requires permission request", func(t *testing.T) {
+		permissions := &mockBashPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
+		tool := newBashToolForTestWithPermissions(workingDir, config.ToolBash{}, permissions)
+
+		resp := runBashTool(t, tool, ctx, BashParams{Description: "redirected echo", Command: "echo hi > out.txt"})
+		require.False(t, resp.IsError)
+		require.Equal(t, 1, permissions.requestCount)
+	})
+}
+
 func TestBashTool_DefaultAutoBackgroundThreshold(t *testing.T) {
 	workingDir := t.TempDir()
 	tool := newBashToolForTest(workingDir, config.ToolBash{})
@@ -170,7 +224,7 @@ func TestBashTool_CustomAutoBackgroundThreshold(t *testing.T) {
 
 	resp := runBashTool(t, tool, ctx, BashParams{
 		Description:         "custom threshold",
-		Command:             "sleep 1.5 && echo done",
+		Command:             "yes crush",
 		AutoBackgroundAfter: 1,
 	})
 
@@ -187,6 +241,10 @@ func TestBashTool_CustomAutoBackgroundThreshold(t *testing.T) {
 
 func newBashToolForTest(workingDir string, toolCfg config.ToolBash) fantasy.AgentTool {
 	permissions := &mockBashPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
+	return newBashToolForTestWithPermissions(workingDir, toolCfg, permissions)
+}
+
+func newBashToolForTestWithPermissions(workingDir string, toolCfg config.ToolBash, permissions *mockBashPermissionService) fantasy.AgentTool {
 	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
 	return NewBashTool(permissions, workingDir, attribution, "test-model", toolCfg)
 }

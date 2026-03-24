@@ -92,10 +92,7 @@
         }
       },
       "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "tools"
-      ]
+      "type": "object"
     },
     "LSPConfig": {
       "properties": {
@@ -666,10 +663,7 @@
         }
       },
       "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "completions"
-      ]
+      "type": "object"
     },
     "Token": {
       "properties": {
@@ -716,7 +710,7 @@
     "ToolGrep": {
       "properties": {
         "timeout": {
-          "type": "integer",
+          "type": "string",
           "description": "Timeout for the grep tool call"
         }
       },
@@ -758,12 +752,7 @@
         }
       },
       "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "ls",
-        "grep",
-        "bash"
-      ]
+      "type": "object"
     }
   }
 }

@@ -225,7 +225,7 @@ Crush’s default model listing is managed in [Catwalk](https://github.com/charm
 ## Configuration
 
 > [!TIP]
-> Crush ships with a builtin `crush-config` skill for configuring itself. In
+> Crush ships with a builtin `configuring-crush` skill for configuring itself. In
 > many cases you can simply ask Crush to configure itself.
 
 Crush runs great with no configuration. That said, if you do need or want to
@@ -394,7 +394,7 @@ from the agent, including builtin skills and skills discovered from disk.
 {
   "$schema": "https://charm.land/crush.json",
   "options": {
-    "disabled_skills": ["crush-config"]
+    "disabled_skills": ["configuring-crush"]
   }
 }
 ```

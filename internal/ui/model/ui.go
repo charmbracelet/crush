@@ -110,6 +110,9 @@ type (
 	mcpPromptsLoadedMsg struct {
 		Prompts []commands.MCPPrompt
 	}
+	userSkillsLoadedMsg struct {
+		Skills []dialog.SkillEntry
+	}
 	// mcpStateChangedMsg is sent when there is a change in MCP client states.
 	mcpStateChangedMsg struct {
 		states map[string]mcp.ClientInfo
@@ -217,6 +220,7 @@ type UI struct {
 	// custom commands & mcp commands
 	customCommands []commands.CustomCommand
 	mcpPrompts     []commands.MCPPrompt
+	userSkills     []dialog.SkillEntry
 
 	// forceCompactMode tracks whether compact mode is forced by user toggle
 	forceCompactMode bool
@@ -354,6 +358,7 @@ func (m *UI) Init() tea.Cmd {
 	}
 	// load the user commands async
 	cmds = append(cmds, m.loadCustomCommands())
+	cmds = append(cmds, m.loadUserSkills())
 	// load prompt history async
 	cmds = append(cmds, m.loadPromptHistory())
 	// load initial session if specified
@@ -430,6 +435,12 @@ func (m *UI) loadCustomCommands() tea.Cmd {
 			slog.Error("Failed to load custom commands", "error", err)
 		}
 		return userCommandsLoadedMsg{Commands: customCommands}
+	}
+}
+
+func (m *UI) loadUserSkills() tea.Cmd {
+	return func() tea.Msg {
+		return userSkillsLoadedMsg{Skills: dialog.LoadUserSkillEntries(m.com.Store())}
 	}
 }
 
@@ -542,6 +553,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if ok {
 			commands.SetMCPPrompts(m.mcpPrompts)
 		}
+
+	case userSkillsLoadedMsg:
+		m.userSkills = msg.Skills
 
 	case promptHistoryLoadedMsg:
 		m.promptHistory.messages = msg.messages
@@ -1512,6 +1526,15 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			},
 			func() tea.Msg {
 				fimage.ResetCache()
+				return nil
+			},
+		))
+
+	case dialog.ActionAttachSkill:
+		cmds = append(cmds, tea.Sequence(
+			msg.Cmd(),
+			func() tea.Msg {
+				m.dialog.CloseDialog(dialog.SkillsID)
 				return nil
 			},
 		))
@@ -2945,6 +2968,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openCommandsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.SkillsID:
+		if cmd := m.openSkillsDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.ReasoningID:
 		if cmd := m.openReasoningDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -3016,6 +3043,18 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 	m.dialog.OpenDialog(commands)
 
 	return commands.InitialCmd()
+}
+
+// openSkillsDialog opens the skills dialog.
+func (m *UI) openSkillsDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.SkillsID) {
+		m.dialog.BringToFront(dialog.SkillsID)
+		return nil
+	}
+
+	skillsDialog := dialog.NewSkills(m.com, dialog.LoadSystemSkillEntries(), m.userSkills)
+	m.dialog.OpenDialog(skillsDialog)
+	return nil
 }
 
 // openReasoningDialog opens the reasoning effort dialog.

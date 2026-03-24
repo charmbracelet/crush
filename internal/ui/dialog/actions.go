@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
@@ -14,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/util"
 )
@@ -81,6 +83,10 @@ type (
 		Arguments   []commands.Argument
 		Args        map[string]string // Actual argument values
 	}
+	ActionAttachSkill struct {
+		Path string
+		Name string
+	}
 	// ActionEnableDockerMCP is a message to enable Docker MCP.
 	ActionEnableDockerMCP struct{}
 	// ActionDisableDockerMCP is a message to disable Docker MCP.
@@ -129,10 +135,7 @@ type ActionFilePickerSelected struct {
 	Path string
 }
 
-// Cmd returns a command that reads the file at path and sends a
-// [message.Attachement] to the program.
-func (a ActionFilePickerSelected) Cmd() tea.Cmd {
-	path := a.Path
+func attachmentFromPath(path, fileName string) tea.Cmd {
 	if path == "" {
 		return nil
 	}
@@ -161,7 +164,9 @@ func (a ActionFilePickerSelected) Cmd() tea.Cmd {
 
 		mimeBufferSize := min(512, len(content))
 		mimeType := http.DetectContentType(content[:mimeBufferSize])
-		fileName := filepath.Base(path)
+		if fileName == "" {
+			fileName = filepath.Base(path)
+		}
 
 		return message.Attachment{
 			FilePath: path,
@@ -170,4 +175,34 @@ func (a ActionFilePickerSelected) Cmd() tea.Cmd {
 			Content:  content,
 		}
 	}
+}
+
+// Cmd returns a command that reads the file at path and sends a
+// [message.Attachement] to the program.
+func (a ActionFilePickerSelected) Cmd() tea.Cmd {
+	return attachmentFromPath(a.Path, "")
+}
+
+func (a ActionAttachSkill) Cmd() tea.Cmd {
+	// Builtin skills are embedded in the binary and cannot be read from
+	// disk. Resolve them from the embedded FS instead.
+	if strings.HasPrefix(a.Path, skills.BuiltinPrefix) {
+		return func() tea.Msg {
+			embeddedPath := "builtin/" + strings.TrimPrefix(a.Path, skills.BuiltinPrefix)
+			content, err := skills.BuiltinFS().ReadFile(embeddedPath)
+			if err != nil {
+				return util.InfoMsg{
+					Type: util.InfoTypeError,
+					Msg:  fmt.Sprintf("unable to read builtin skill: %v", err),
+				}
+			}
+			return message.Attachment{
+				FilePath: a.Path,
+				FileName: a.Name,
+				MimeType: "text/markdown",
+				Content:  content,
+			}
+		}
+	}
+	return attachmentFromPath(a.Path, a.Name)
 }

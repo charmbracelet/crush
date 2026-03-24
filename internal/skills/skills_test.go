@@ -284,17 +284,17 @@ func TestDiscoverBuiltin(t *testing.T) {
 
 	var found bool
 	for _, s := range discovered {
-		if s.Name == "crush-config" {
+		if s.Name == "configuring-crush" {
 			found = true
 			require.True(t, strings.HasPrefix(s.SkillFilePath, BuiltinPrefix))
 			require.True(t, strings.HasPrefix(s.Path, BuiltinPrefix))
-			require.Equal(t, "/crush/skills/crush-config/SKILL.md", s.SkillFilePath)
-			require.Equal(t, "/crush/skills/crush-config", s.Path)
+			require.Equal(t, "/crush/skills/configuring-crush/SKILL.md", s.SkillFilePath)
+			require.Equal(t, "/crush/skills/configuring-crush", s.Path)
 			require.NotEmpty(t, s.Description)
 			require.NotEmpty(t, s.Instructions)
 		}
 	}
-	require.True(t, found, "crush-config builtin skill not found")
+	require.True(t, found, "configuring-crush builtin skill not found")
 }
 
 func TestDeduplicate(t *testing.T) {

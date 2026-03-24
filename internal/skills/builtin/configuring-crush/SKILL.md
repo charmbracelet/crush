@@ -1,9 +1,7 @@
 ---
-name: crush-config
+name: configuring-crush
 description: Configure Crush settings including providers, LSPs, MCPs, skills, permissions, and behavior options. Use when the user needs help with crush.json configuration, setting up providers, configuring LSPs, adding MCP servers, or changing Crush behavior.
 ---
-
-# Crush Configuration
 
 Crush uses JSON configuration files with the following priority (highest to lowest):
 
@@ -15,8 +13,8 @@ Crush uses JSON configuration files with the following priority (highest to lowe
 
 ```json
 {
-  "$schema": "https://charm.land/crush.json",
-  "options": {}
+	"$schema": "https://charm.land/crush.json",
+	"options": {}
 }
 ```
 
@@ -30,9 +28,9 @@ Add a relative path to keep project-specific skills alongside your code:
 
 ```json
 {
-  "options": {
-    "skills_paths": ["./skills"]
-  }
+	"options": {
+		"skills_paths": ["./skills"]
+	}
 }
 ```
 
@@ -40,18 +38,18 @@ Add a relative path to keep project-specific skills alongside your code:
 
 ```json
 {
-  "lsp": {
-    "go": {
-      "command": "gopls",
-      "env": {
-        "GOTOOLCHAIN": "go1.24.5"
-      }
-    },
-    "typescript": {
-      "command": "typescript-language-server",
-      "args": ["--stdio"]
-    }
-  }
+	"lsp": {
+		"go": {
+			"command": "gopls",
+			"env": {
+				"GOTOOLCHAIN": "go1.24.5"
+			}
+		},
+		"typescript": {
+			"command": "typescript-language-server",
+			"args": ["--stdio"]
+		}
+	}
 }
 ```
 
@@ -59,20 +57,20 @@ Add a relative path to keep project-specific skills alongside your code:
 
 ```json
 {
-  "mcp": {
-    "filesystem": {
-      "type": "stdio",
-      "command": "node",
-      "args": ["/path/to/mcp-server.js"]
-    },
-    "github": {
-      "type": "http",
-      "url": "https://api.githubcopilot.com/mcp/",
-      "headers": {
-        "Authorization": "Bearer $GH_PAT"
-      }
-    }
-  }
+	"mcp": {
+		"filesystem": {
+			"type": "stdio",
+			"command": "node",
+			"args": ["/path/to/mcp-server.js"]
+		},
+		"github": {
+			"type": "http",
+			"url": "https://api.githubcopilot.com/mcp/",
+			"headers": {
+				"Authorization": "Bearer $GH_PAT"
+			}
+		}
+	}
 }
 ```
 
@@ -80,20 +78,20 @@ Add a relative path to keep project-specific skills alongside your code:
 
 ```json
 {
-  "providers": {
-    "deepseek": {
-      "type": "openai-compat",
-      "base_url": "https://api.deepseek.com/v1",
-      "api_key": "$DEEPSEEK_API_KEY",
-      "models": [
-        {
-          "id": "deepseek-chat",
-          "name": "Deepseek V3",
-          "context_window": 64000
-        }
-      ]
-    }
-  }
+	"providers": {
+		"deepseek": {
+			"type": "openai-compat",
+			"base_url": "https://api.deepseek.com/v1",
+			"api_key": "$DEEPSEEK_API_KEY",
+			"models": [
+				{
+					"id": "deepseek-chat",
+					"name": "Deepseek V3",
+					"context_window": 64000
+				}
+			]
+		}
+	}
 }
 ```
 
@@ -101,9 +99,9 @@ Add a relative path to keep project-specific skills alongside your code:
 
 ```json
 {
-  "permissions": {
-    "allowed_tools": ["view", "ls", "grep", "edit"]
-  }
+	"permissions": {
+		"allowed_tools": ["view", "ls", "grep", "edit"]
+	}
 }
 ```
 
@@ -111,9 +109,9 @@ Add a relative path to keep project-specific skills alongside your code:
 
 ```json
 {
-  "options": {
-    "disabled_tools": ["bash", "sourcegraph"]
-  }
+	"options": {
+		"disabled_tools": ["bash", "sourcegraph"]
+	}
 }
 ```
 
@@ -121,9 +119,9 @@ Add a relative path to keep project-specific skills alongside your code:
 
 ```json
 {
-  "options": {
-    "disabled_skills": ["crush-config"]
-  }
+	"options": {
+		"disabled_skills": ["configuring-crush"]
+	}
 }
 ```
 
@@ -134,10 +132,10 @@ skills discovered from disk paths.
 
 ```json
 {
-  "options": {
-    "debug": true,
-    "debug_lsp": true
-  }
+	"options": {
+		"debug": true,
+		"debug_lsp": true
+	}
 }
 ```
 
@@ -145,12 +143,12 @@ skills discovered from disk paths.
 
 ```json
 {
-  "options": {
-    "attribution": {
-      "trailer_style": "assisted-by",
-      "generated_with": true
-    }
-  }
+	"options": {
+		"attribution": {
+			"trailer_style": "assisted-by",
+			"generated_with": true
+		}
+	}
 }
 ```
 
@@ -165,3 +163,15 @@ skills discovered from disk paths.
 - `openai` - For OpenAI or OpenAI-compatible APIs that route through OpenAI
 - `openai-compat` - For non-OpenAI providers with OpenAI-compatible APIs
 - `anthropic` - For Anthropic-compatible APIs
+
+## Viewing docs for the running version
+
+```bash
+crush -v | head -1
+```
+
+This prints something like `crush version VERSION`. Use the version and agentic fetch to get info for the current version when needed.
+
+```
+https://raw.githubusercontent.com/charmbracelet/crush/refs/tags/VERSION/README.md
+```

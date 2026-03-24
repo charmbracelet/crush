@@ -60,6 +60,15 @@ func TestResolveBannedCommands(t *testing.T) {
 		require.Contains(t, blocked, "wget")
 		require.Equal(t, []string{"curl", "ssh"}, allowed)
 	})
+
+	t.Run("normalizes values and ignores non-overridable commands", func(t *testing.T) {
+		t.Parallel()
+
+		blocked, allowed := bashCommandLists(config.ToolBash{AllowedCommands: []string{" CURL ", "curl", "Alias", "go"}})
+		require.NotContains(t, blocked, "curl")
+		require.Contains(t, blocked, "alias")
+		require.Equal(t, []string{"curl"}, allowed)
+	})
 }
 
 func TestBlockFuncs_RespectAllowedCommands(t *testing.T) {
@@ -76,7 +85,7 @@ func TestBlockFuncs_RespectAllowedCommands(t *testing.T) {
 		t.Fatal("expected curl to be blocked by default")
 	})
 
-	t.Run("allowing a command lifts command and argument blockers", func(t *testing.T) {
+	t.Run("allowing a blocked package manager lifts its install blocker", func(t *testing.T) {
 		t.Parallel()
 
 		for _, blockFunc := range blockFuncs(config.ToolBash{AllowedCommands: []string{"apt"}}) {
@@ -84,21 +93,30 @@ func TestBlockFuncs_RespectAllowedCommands(t *testing.T) {
 		}
 	})
 
-	t.Run("go test exec remains blocked unless go is allowed", func(t *testing.T) {
+	t.Run("non blocked commands stay protected", func(t *testing.T) {
 		t.Parallel()
 
 		blocked := false
-		for _, blockFunc := range blockFuncs(config.ToolBash{}) {
+		for _, blockFunc := range blockFuncs(config.ToolBash{AllowedCommands: []string{"go"}}) {
 			if blockFunc([]string{"go", "test", "-exec=bash"}) {
 				blocked = true
 				break
 			}
 		}
 		require.True(t, blocked)
+	})
 
-		for _, blockFunc := range blockFuncs(config.ToolBash{AllowedCommands: []string{"go"}}) {
-			require.False(t, blockFunc([]string{"go", "test", "-exec=bash"}))
+	t.Run("alias remains blocked even if configured", func(t *testing.T) {
+		t.Parallel()
+
+		blocked := false
+		for _, blockFunc := range blockFuncs(config.ToolBash{AllowedCommands: []string{"alias"}}) {
+			if blockFunc([]string{"alias", "curl=echo nope"}) {
+				blocked = true
+				break
+			}
 		}
+		require.True(t, blocked)
 	})
 }
 
@@ -106,11 +124,25 @@ func TestBashDescription_WarnsWhenDangerousCommandsAllowed(t *testing.T) {
 	t.Parallel()
 
 	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
-	description := bashDescription(attribution, "test-model", config.ToolBash{AllowedCommands: []string{"curl", "ssh"}})
+	description := bashDescription(attribution, "test-model", config.ToolBash{AllowedCommands: []string{"curl", "ssh", "go", "alias"}})
 
 	require.Contains(t, description, "Allowed dangerous commands (curl, ssh)")
-	require.Contains(t, description, "Blocked commands")
-	require.NotContains(t, description, "curl, ssh, wget")
+	require.Contains(t, description, "default blocked-command list")
+	require.NotContains(t, description, "Allowed dangerous commands (curl, ssh, go")
+}
+
+func TestBashTool_BlockedCommandReturnsErrorOutput(t *testing.T) {
+	workingDir := t.TempDir()
+	tool := newBashToolForTest(workingDir, config.ToolBash{})
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description: "blocked command",
+		Command:     "curl https://example.com",
+	})
+
+	require.False(t, resp.IsError)
+	require.Contains(t, resp.Content, "command is not allowed for security reasons")
 }
 
 func TestBashTool_DefaultAutoBackgroundThreshold(t *testing.T) {

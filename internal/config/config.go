@@ -371,7 +371,7 @@ func (t ToolGrep) GetTimeout() time.Duration {
 }
 
 type ToolBash struct {
-	AllowedCommands []string `json:"allowed_commands,omitempty" jsonschema:"description=List of otherwise-blocked bash commands to explicitly allow,example=curl,example=ssh,example=scp"`
+	AllowedCommands []string `json:"allowed_commands,omitempty" jsonschema:"description=List of default blocked bash commands to explicitly allow; commands outside the default blocked-command list are ignored,example=curl,example=ssh,example=scp"`
 }
 
 // Config holds the configuration for crush.

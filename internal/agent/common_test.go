@@ -202,7 +202,7 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 
 	// Get the model name for the bash tool
 	modelName := large.Model() // fallback to ID if Name not available
-	if model := cfg.Config().GetModel(large.Provider(), large.Model()); model != nil {
+	if model := cfg.Config().GetModel(large.Provider(), large.Model()); model != nil && model.Name != "" {
 		modelName = model.Name
 	}
 

@@ -45,6 +45,16 @@ func TestConfig_LoadFromBytes_WithBashAllowedCommands(t *testing.T) {
 	require.Equal(t, []string{"curl", "ssh"}, loadedConfig.Tools.Bash.AllowedCommands)
 }
 
+func TestConfig_LoadFromBytes_WithBashAllowedCommands_MergeOrder(t *testing.T) {
+	base := []byte(`{"tools": {"bash": {"allowed_commands": ["curl"]}}}`)
+	override := []byte(`{"tools": {"bash": {"allowed_commands": ["ssh", " curl ", "alias", "go"]}}}`)
+
+	loadedConfig, err := loadFromBytes([][]byte{base, override})
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"curl", "ssh", " curl ", "alias", "go"}, loadedConfig.Tools.Bash.AllowedCommands)
+}
+
 // testStore wraps a Config in a minimal ConfigStore for testing.
 func testStore(cfg *Config) *ConfigStore {
 	return &ConfigStore{config: cfg}

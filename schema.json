@@ -707,7 +707,7 @@
             ]
           },
           "type": "array",
-          "description": "List of otherwise-blocked bash commands to explicitly allow"
+          "description": "List of default blocked bash commands to explicitly allow; commands outside the default blocked-command list are ignored"
         }
       },
       "additionalProperties": false,

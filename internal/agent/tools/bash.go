@@ -142,6 +142,10 @@ var defaultBannedCommands = []string{
 	"ufw",
 }
 
+var nonOverridableBannedCommands = map[string]struct{}{
+	"alias": {},
+}
+
 func bashDescription(attribution *config.Attribution, modelName string, toolCfg config.ToolBash) string {
 	blockedCommands, allowedCommands := bashCommandLists(toolCfg)
 	var out bytes.Buffer
@@ -169,6 +173,10 @@ func bashCommandLists(toolCfg config.ToolBash) (blocked []string, allowed []stri
 	}
 
 	for _, command := range defaultBannedCommands {
+		if _, nonOverridable := nonOverridableBannedCommands[command]; nonOverridable {
+			blocked = append(blocked, command)
+			continue
+		}
 		if _, ok := allowedSet[command]; ok {
 			allowed = append(allowed, command)
 			continue
@@ -179,59 +187,57 @@ func bashCommandLists(toolCfg config.ToolBash) (blocked []string, allowed []stri
 	return blocked, allowed
 }
 
-func isAllowedCommand(toolCfg config.ToolBash, command string) bool {
-	command = strings.TrimSpace(strings.ToLower(command))
-	if command == "" {
-		return false
-	}
-
-	for _, allowed := range toolCfg.AllowedCommands {
-		if strings.TrimSpace(strings.ToLower(allowed)) == command {
-			return true
-		}
-	}
-
-	return false
-}
-
-func appendArgumentBlocker(blockers []shell.BlockFunc, toolCfg config.ToolBash, command string, args []string, flags []string) []shell.BlockFunc {
-	if isAllowedCommand(toolCfg, command) {
-		return blockers
-	}
-	return append(blockers, shell.ArgumentsBlocker(command, args, flags))
-}
-
 func blockFuncs(toolCfg config.ToolBash) []shell.BlockFunc {
-	blockedCommands, _ := bashCommandLists(toolCfg)
+	blockedCommands, allowedCommands := bashCommandLists(toolCfg)
 	blockers := []shell.BlockFunc{
 		shell.CommandsBlocker(blockedCommands),
 	}
+	allowedBlockedCommands := make(map[string]struct{}, len(allowedCommands))
+	for _, command := range allowedCommands {
+		allowedBlockedCommands[command] = struct{}{}
+	}
 
 	// System package managers.
-	blockers = appendArgumentBlocker(blockers, toolCfg, "apk", []string{"add"}, nil)
-	blockers = appendArgumentBlocker(blockers, toolCfg, "apt", []string{"install"}, nil)
-	blockers = appendArgumentBlocker(blockers, toolCfg, "apt-get", []string{"install"}, nil)
-	blockers = appendArgumentBlocker(blockers, toolCfg, "dnf", []string{"install"}, nil)
-	blockers = appendArgumentBlocker(blockers, toolCfg, "pacman", nil, []string{"-S"})
-	blockers = appendArgumentBlocker(blockers, toolCfg, "pkg", []string{"install"}, nil)
-	blockers = appendArgumentBlocker(blockers, toolCfg, "yum", []string{"install"}, nil)
-	blockers = appendArgumentBlocker(blockers, toolCfg, "zypper", []string{"install"}, nil)
+	if _, ok := allowedBlockedCommands["apk"]; !ok {
+		blockers = append(blockers, shell.ArgumentsBlocker("apk", []string{"add"}, nil))
+	}
+	if _, ok := allowedBlockedCommands["apt"]; !ok {
+		blockers = append(blockers, shell.ArgumentsBlocker("apt", []string{"install"}, nil))
+	}
+	if _, ok := allowedBlockedCommands["apt-get"]; !ok {
+		blockers = append(blockers, shell.ArgumentsBlocker("apt-get", []string{"install"}, nil))
+	}
+	if _, ok := allowedBlockedCommands["dnf"]; !ok {
+		blockers = append(blockers, shell.ArgumentsBlocker("dnf", []string{"install"}, nil))
+	}
+	if _, ok := allowedBlockedCommands["pacman"]; !ok {
+		blockers = append(blockers, shell.ArgumentsBlocker("pacman", nil, []string{"-S"}))
+	}
+	if _, ok := allowedBlockedCommands["pkg"]; !ok {
+		blockers = append(blockers, shell.ArgumentsBlocker("pkg", []string{"install"}, nil))
+	}
+	if _, ok := allowedBlockedCommands["yum"]; !ok {
+		blockers = append(blockers, shell.ArgumentsBlocker("yum", []string{"install"}, nil))
+	}
+	if _, ok := allowedBlockedCommands["zypper"]; !ok {
+		blockers = append(blockers, shell.ArgumentsBlocker("zypper", []string{"install"}, nil))
+	}
 
 	// Language-specific package managers.
-	blockers = appendArgumentBlocker(blockers, toolCfg, "brew", []string{"install"}, nil)
-	blockers = appendArgumentBlocker(blockers, toolCfg, "cargo", []string{"install"}, nil)
-	blockers = appendArgumentBlocker(blockers, toolCfg, "gem", []string{"install"}, nil)
-	blockers = appendArgumentBlocker(blockers, toolCfg, "go", []string{"install"}, nil)
-	blockers = appendArgumentBlocker(blockers, toolCfg, "npm", []string{"install"}, []string{"--global"})
-	blockers = appendArgumentBlocker(blockers, toolCfg, "npm", []string{"install"}, []string{"-g"})
-	blockers = appendArgumentBlocker(blockers, toolCfg, "pip", []string{"install"}, []string{"--user"})
-	blockers = appendArgumentBlocker(blockers, toolCfg, "pip3", []string{"install"}, []string{"--user"})
-	blockers = appendArgumentBlocker(blockers, toolCfg, "pnpm", []string{"add"}, []string{"--global"})
-	blockers = appendArgumentBlocker(blockers, toolCfg, "pnpm", []string{"add"}, []string{"-g"})
-	blockers = appendArgumentBlocker(blockers, toolCfg, "yarn", []string{"global", "add"}, nil)
+	blockers = append(blockers, shell.ArgumentsBlocker("brew", []string{"install"}, nil))
+	blockers = append(blockers, shell.ArgumentsBlocker("cargo", []string{"install"}, nil))
+	blockers = append(blockers, shell.ArgumentsBlocker("gem", []string{"install"}, nil))
+	blockers = append(blockers, shell.ArgumentsBlocker("go", []string{"install"}, nil))
+	blockers = append(blockers, shell.ArgumentsBlocker("npm", []string{"install"}, []string{"--global"}))
+	blockers = append(blockers, shell.ArgumentsBlocker("npm", []string{"install"}, []string{"-g"}))
+	blockers = append(blockers, shell.ArgumentsBlocker("pip", []string{"install"}, []string{"--user"}))
+	blockers = append(blockers, shell.ArgumentsBlocker("pip3", []string{"install"}, []string{"--user"}))
+	blockers = append(blockers, shell.ArgumentsBlocker("pnpm", []string{"add"}, []string{"--global"}))
+	blockers = append(blockers, shell.ArgumentsBlocker("pnpm", []string{"add"}, []string{"-g"}))
+	blockers = append(blockers, shell.ArgumentsBlocker("yarn", []string{"global", "add"}, nil))
 
 	// `go test -exec` can run arbitrary commands.
-	blockers = appendArgumentBlocker(blockers, toolCfg, "go", []string{"test"}, []string{"-exec"})
+	blockers = append(blockers, shell.ArgumentsBlocker("go", []string{"test"}, []string{"-exec"}))
 
 	return blockers
 }

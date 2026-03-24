@@ -157,8 +157,10 @@ func validateRestrictedGitArgs(args []string) error {
 		}
 
 		flag, _, _ := strings.Cut(arg, "=")
-		if _, blocked := restrictedGitBlockedFlags[flag]; blocked {
-			return fmt.Errorf("restricted git bash does not allow git option %q", flag)
+		for blockedFlag := range restrictedGitBlockedFlags {
+			if strings.HasPrefix(blockedFlag, flag) {
+				return fmt.Errorf("restricted git bash does not allow git option %q", flag)
+			}
 		}
 	}
 

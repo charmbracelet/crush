@@ -342,9 +342,28 @@ func retryAfter(resp *http.Response) string {
 // parseRetryAfter extracts the Retry-After header value as a duration.
 // Returns zero if the header is absent or unparseable.
 func parseRetryAfter(resp *http.Response) time.Duration {
-	after, err := strconv.Atoi(resp.Header.Get("Retry-After"))
+	if resp == nil {
+		return 0
+	}
+
+	retryAfter := strings.TrimSpace(resp.Header.Get("Retry-After"))
+	if retryAfter == "" {
+		return 0
+	}
+
+	after, err := strconv.Atoi(retryAfter)
 	if err == nil && after > 0 {
 		return time.Duration(after) * time.Second
 	}
-	return 0
+
+	retryAt, err := http.ParseTime(retryAfter)
+	if err != nil {
+		return 0
+	}
+
+	delay := time.Until(retryAt)
+	if delay <= 0 {
+		return 0
+	}
+	return delay
 }

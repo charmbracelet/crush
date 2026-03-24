@@ -21,6 +21,10 @@ import (
 // subagent prompt or description in the main session view before truncating.
 const maxAgentPromptDisplayLines = 3
 
+// maxCollapsedAgentNestedTools is the number of nested tool calls rendered in
+// collapsed mode before the user expands the agent block.
+const maxCollapsedAgentNestedTools = 10
+
 // -----------------------------------------------------------------------------
 // Agent Tool
 // -----------------------------------------------------------------------------
@@ -43,7 +47,8 @@ type ChildSessionStatusSetter interface {
 type AgentToolMessageItem struct {
 	*baseToolMessageItem
 
-	nestedTools []ToolMessageItem
+	nestedTools    []ToolMessageItem
+	nestedExpanded bool
 
 	childStatusText    string
 	childStatusIsError bool
@@ -109,6 +114,14 @@ func (a *AgentToolMessageItem) AddNestedTool(tool ToolMessageItem) {
 	}
 	a.nestedTools = append(a.nestedTools, tool)
 	a.clearCache()
+}
+
+// ToggleExpanded toggles the nested tool list expansion state.
+func (a *AgentToolMessageItem) ToggleExpanded() bool {
+	a.nestedExpanded = !a.nestedExpanded
+	a.expandedContent = a.nestedExpanded
+	a.clearCache()
+	return a.nestedExpanded
 }
 
 // SetChildSessionStatus stores transient child-session status text.
@@ -186,10 +199,13 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 
 	header = lipgloss.JoinVertical(lipgloss.Left, headerParts...)
 
+	visibleNestedTools, hiddenNestedTools := agentNestedToolWindow(r.agent.nestedTools, r.agent.nestedExpanded)
+	header = renderAgentHeaderWithToggle(sty, header, remainingWidth, r.agent.nestedExpanded, len(r.agent.nestedTools), hiddenNestedTools)
+
 	// Build tree with nested tool calls.
 	childTools := tree.Root(header)
 
-	for _, nestedTool := range r.agent.nestedTools {
+	for _, nestedTool := range visibleNestedTools {
 		childView := nestedTool.Render(remainingWidth)
 		childTools.Child(childView)
 	}
@@ -252,7 +268,8 @@ func titleCase(value string) string {
 type AgenticFetchToolMessageItem struct {
 	*baseToolMessageItem
 
-	nestedTools []ToolMessageItem
+	nestedTools    []ToolMessageItem
+	nestedExpanded bool
 
 	childStatusText    string
 	childStatusIsError bool
@@ -299,6 +316,14 @@ func (a *AgenticFetchToolMessageItem) AddNestedTool(tool ToolMessageItem) {
 	}
 	a.nestedTools = append(a.nestedTools, tool)
 	a.clearCache()
+}
+
+// ToggleExpanded toggles the nested tool list expansion state.
+func (a *AgenticFetchToolMessageItem) ToggleExpanded() bool {
+	a.nestedExpanded = !a.nestedExpanded
+	a.expandedContent = a.nestedExpanded
+	a.clearCache()
+	return a.nestedExpanded
 }
 
 // SetChildSessionStatus stores transient child-session status text.
@@ -377,10 +402,13 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 		),
 	)
 
+	visibleNestedTools, hiddenNestedTools := agentNestedToolWindow(r.fetch.nestedTools, r.fetch.nestedExpanded)
+	header = renderAgentHeaderWithToggle(sty, header, remainingWidth, r.fetch.nestedExpanded, len(r.fetch.nestedTools), hiddenNestedTools)
+
 	// Build tree with nested tool calls.
 	childTools := tree.Root(header)
 
-	for _, nestedTool := range r.fetch.nestedTools {
+	for _, nestedTool := range visibleNestedTools {
 		childView := nestedTool.Render(remainingWidth)
 		childTools.Child(childView)
 	}
@@ -442,4 +470,48 @@ func renderChildSessionStatus(sty *styles.Styles, width int, text string, isErro
 		" ",
 		sty.Tool.StateWaiting.Render(ansi.Truncate(text, availableWidth, "…")),
 	)
+}
+
+func agentNestedToolWindow(nestedTools []ToolMessageItem, expanded bool) ([]ToolMessageItem, int) {
+	if expanded || len(nestedTools) <= maxCollapsedAgentNestedTools {
+		return nestedTools, 0
+	}
+
+	visible := maxCollapsedAgentNestedTools
+	return nestedTools[:visible], len(nestedTools) - visible
+}
+
+func renderAgentHeaderWithToggle(sty *styles.Styles, header string, width int, expanded bool, totalNested, hiddenNested int) string {
+	if totalNested <= maxCollapsedAgentNestedTools {
+		return header
+	}
+
+	var toggleLabel string
+	if expanded {
+		toggleLabel = "▾ Collapse"
+	} else {
+		toggleLabel = fmt.Sprintf("▸ Expand (%d more)", hiddenNested)
+	}
+
+	toggleTag := sty.Tool.AgenticFetchPromptTag.Render(toggleLabel)
+	lines := strings.Split(header, "\n")
+	if len(lines) == 0 {
+		return header
+	}
+
+	firstLineWidth := ansi.StringWidth(lines[0])
+	if width <= 0 {
+		lines[0] = lipgloss.JoinHorizontal(lipgloss.Left, lines[0], " ", toggleTag)
+		return strings.Join(lines, "\n")
+	}
+
+	availableWidth := max(0, width-firstLineWidth-1)
+	if availableWidth == 0 {
+		toggleTag = ansi.Truncate(toggleTag, width, "…")
+		return lipgloss.JoinVertical(lipgloss.Left, header, toggleTag)
+	}
+
+	toggleTag = ansi.Truncate(toggleTag, availableWidth, "…")
+	lines[0] = lipgloss.JoinHorizontal(lipgloss.Left, lines[0], " ", toggleTag)
+	return strings.Join(lines, "\n")
 }

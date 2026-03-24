@@ -51,7 +51,6 @@ require (
 	github.com/ncruces/go-sqlite3 v0.32.0
 	github.com/nxadm/tail v1.4.11
 	github.com/openai/openai-go/v2 v2.7.1
-	github.com/openai/openai-go/v3 v3.28.0
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
 	github.com/posthog/posthog-go v1.11.1
 	github.com/pressly/goose/v3 v3.27.0

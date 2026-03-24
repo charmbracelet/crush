@@ -1054,6 +1054,24 @@ func TestEstimatePromptTokens(t *testing.T) {
 	require.Equal(t, int64(4), estimatePromptTokens(msgs4, nil))
 }
 
+func TestEstimatePromptTokens_AggregatesShortASCIIFragments(t *testing.T) {
+	t.Parallel()
+
+	shortFragments := make([]fantasy.MessagePart, 8)
+	for i := range shortFragments {
+		shortFragments[i] = fantasy.TextPart{Text: "abc"}
+	}
+
+	messages := []fantasy.Message{
+		{
+			Role:    fantasy.MessageRoleUser,
+			Content: shortFragments,
+		},
+	}
+
+	require.Equal(t, int64(6), estimatePromptTokens(messages, nil))
+}
+
 // mockAgentTool implements fantasy.AgentTool for testing.
 type mockAgentTool struct {
 	name        string

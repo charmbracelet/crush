@@ -224,6 +224,11 @@ func TestRestrictedGitBashTool_BlocksUnsafeCommands(t *testing.T) {
 		"git restore .",
 		"bash -lc \"git diff\"",
 		"git diff > out.txt",
+		"git diff --output=out.txt",
+		"git diff --output out.txt",
+		"git diff --out=out.txt",
+		"git diff --outp out.txt",
+		"git diff --outpu=evil.txt",
 	}
 
 	for _, command := range cases {

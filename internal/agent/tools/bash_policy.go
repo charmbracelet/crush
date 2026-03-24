@@ -35,6 +35,10 @@ var restrictedGitSubcommands = map[string]struct{}{
 	"status":     {},
 }
 
+var restrictedGitBlockedFlags = map[string]struct{}{
+	"--output": {},
+}
+
 func restrictedGitBashDescription() string {
 	return `Executes a restricted shell for local git inspection only.
 
@@ -142,6 +146,22 @@ func validateRestrictedGitArgs(args []string) error {
 	}
 	if _, ok := restrictedGitSubcommands[subcommand]; !ok {
 		return fmt.Errorf("restricted git bash does not allow git %s", subcommand)
+	}
+
+	for _, arg := range args[i+1:] {
+		if arg == "--" {
+			break
+		}
+		if arg == "" || arg == "-" || !strings.HasPrefix(arg, "-") {
+			continue
+		}
+
+		flag, _, _ := strings.Cut(arg, "=")
+		for blockedFlag := range restrictedGitBlockedFlags {
+			if strings.HasPrefix(blockedFlag, flag) {
+				return fmt.Errorf("restricted git bash does not allow git option %q", flag)
+			}
+		}
 	}
 
 	return nil

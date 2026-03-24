@@ -1142,24 +1142,7 @@ func truncateMessagesToFit(msgs []fantasy.Message, maxTokens int64) []fantasy.Me
 
 // estimateSingleMessageTokens estimates tokens for a single fantasy.Message.
 func estimateSingleMessageTokens(msg fantasy.Message) int64 {
-	var totalTokens int64
-	for _, part := range msg.Content {
-		switch p := part.(type) {
-		case fantasy.TextPart:
-			totalTokens += estimateTextTokens(p.Text, false)
-		case fantasy.ReasoningPart:
-			totalTokens += estimateTextTokens(p.Text, false)
-		case fantasy.ToolCallPart:
-			totalTokens += estimateTextTokens(p.Input, false)
-		case fantasy.ToolResultPart:
-			if txt, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentText](p.Output); ok {
-				totalTokens += estimateTextTokens(txt.Text, false)
-			} else if errOut, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentError](p.Output); ok && errOut.Error != nil {
-				totalTokens += estimateTextTokens(errOut.Error.Error(), false)
-			}
-		}
-	}
-	return totalTokens
+	return estimateMessageContentTokens(msg.Content)
 }
 
 func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions) error {
@@ -1186,14 +1169,10 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	if err != nil {
 		return fmt.Errorf("failed to get session: %w", err)
 	}
-	msgs, err := a.getSessionMessages(ctx, currentSession)
-	if err != nil {
-		return err
-	}
 	if truncErr := a.truncateOversizedToolResults(ctx, sessionID); truncErr != nil {
 		slog.Warn("Failed to truncate oversized tool results before summarization", "error", truncErr, "session_id", sessionID)
 	}
-	msgs, err = a.getSessionMessages(ctx, currentSession)
+	msgs, err := a.getSessionMessages(ctx, currentSession)
 	if err != nil {
 		return err
 	}
@@ -1747,8 +1726,11 @@ func estimateTextTokens(s string, roundUpASCII bool) int64 {
 	if s == "" {
 		return 0
 	}
-	var asciiBytes int
-	var nonASCIIRunes int
+	asciiBytes, nonASCIIRunes := estimateTextTokenUnits(s)
+	return estimateTextTokensFromUnits(asciiBytes, nonASCIIRunes, roundUpASCII)
+}
+
+func estimateTextTokenUnits(s string) (asciiBytes int64, nonASCIIRunes int64) {
 	for _, r := range s {
 		if r < utf8.RuneSelf {
 			asciiBytes++
@@ -1756,11 +1738,45 @@ func estimateTextTokens(s string, roundUpASCII bool) int64 {
 		}
 		nonASCIIRunes++
 	}
+	return asciiBytes, nonASCIIRunes
+}
+
+func estimateTextTokensFromUnits(asciiBytes, nonASCIIRunes int64, roundUpASCII bool) int64 {
 	asciiTokens := asciiBytes / 4
 	if roundUpASCII && asciiBytes%4 != 0 {
 		asciiTokens++
 	}
-	return int64(asciiTokens + nonASCIIRunes)
+	return asciiTokens + nonASCIIRunes
+}
+
+func estimateMessageContentTokens(parts []fantasy.MessagePart) int64 {
+	var asciiBytes int64
+	var nonASCIIRunes int64
+
+	accumulate := func(s string) {
+		partASCII, partNonASCII := estimateTextTokenUnits(s)
+		asciiBytes += partASCII
+		nonASCIIRunes += partNonASCII
+	}
+
+	for _, part := range parts {
+		switch p := part.(type) {
+		case fantasy.TextPart:
+			accumulate(p.Text)
+		case fantasy.ReasoningPart:
+			accumulate(p.Text)
+		case fantasy.ToolCallPart:
+			accumulate(p.Input)
+		case fantasy.ToolResultPart:
+			if txt, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentText](p.Output); ok {
+				accumulate(txt.Text)
+			} else if errOut, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentError](p.Output); ok && errOut.Error != nil {
+				accumulate(errOut.Error.Error())
+			}
+		}
+	}
+
+	return estimateTextTokensFromUnits(asciiBytes, nonASCIIRunes, false)
 }
 
 func (a *sessionAgent) estimateSessionPromptTokens(history []fantasy.Message, prompt string, attachments []message.Attachment, tools []fantasy.AgentTool, systemPrompt string, promptPrefix string) int64 {
@@ -1899,22 +1915,7 @@ func pluralizeRetryAttempt(retryAttempt int) string {
 func estimatePromptTokens(messages []fantasy.Message, tools []fantasy.AgentTool) int64 {
 	var totalTokens int64
 	for _, msg := range messages {
-		for _, part := range msg.Content {
-			switch p := part.(type) {
-			case fantasy.TextPart:
-				totalTokens += estimateTextTokens(p.Text, false)
-			case fantasy.ReasoningPart:
-				totalTokens += estimateTextTokens(p.Text, false)
-			case fantasy.ToolCallPart:
-				totalTokens += estimateTextTokens(p.Input, false)
-			case fantasy.ToolResultPart:
-				if txt, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentText](p.Output); ok {
-					totalTokens += estimateTextTokens(txt.Text, false)
-				} else if errOut, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentError](p.Output); ok && errOut.Error != nil {
-					totalTokens += estimateTextTokens(errOut.Error.Error(), false)
-				}
-			}
-		}
+		totalTokens += estimateMessageContentTokens(msg.Content)
 	}
 	for _, tool := range tools {
 		info := tool.Info()

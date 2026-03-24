@@ -39,9 +39,83 @@ func (m *mockBashPermissionService) SubscribeNotifications(ctx context.Context) 
 	return make(<-chan pubsub.Event[permission.PermissionNotification])
 }
 
+func TestResolveBannedCommands(t *testing.T) {
+	t.Parallel()
+
+	t.Run("defaults remain blocked", func(t *testing.T) {
+		t.Parallel()
+
+		blocked, allowed := bashCommandLists(config.ToolBash{})
+		require.Contains(t, blocked, "curl")
+		require.Contains(t, blocked, "ssh")
+		require.Empty(t, allowed)
+	})
+
+	t.Run("explicitly allowed commands are removed", func(t *testing.T) {
+		t.Parallel()
+
+		blocked, allowed := bashCommandLists(config.ToolBash{AllowedCommands: []string{"curl", "ssh", "unknown"}})
+		require.NotContains(t, blocked, "curl")
+		require.NotContains(t, blocked, "ssh")
+		require.Contains(t, blocked, "wget")
+		require.Equal(t, []string{"curl", "ssh"}, allowed)
+	})
+}
+
+func TestBlockFuncs_RespectAllowedCommands(t *testing.T) {
+	t.Parallel()
+
+	t.Run("default blockers reject blocked commands", func(t *testing.T) {
+		t.Parallel()
+
+		for _, blockFunc := range blockFuncs(config.ToolBash{}) {
+			if blockFunc([]string{"curl", "https://example.com"}) {
+				return
+			}
+		}
+		t.Fatal("expected curl to be blocked by default")
+	})
+
+	t.Run("allowing a command lifts command and argument blockers", func(t *testing.T) {
+		t.Parallel()
+
+		for _, blockFunc := range blockFuncs(config.ToolBash{AllowedCommands: []string{"apt"}}) {
+			require.False(t, blockFunc([]string{"apt", "install", "ripgrep"}))
+		}
+	})
+
+	t.Run("go test exec remains blocked unless go is allowed", func(t *testing.T) {
+		t.Parallel()
+
+		blocked := false
+		for _, blockFunc := range blockFuncs(config.ToolBash{}) {
+			if blockFunc([]string{"go", "test", "-exec=bash"}) {
+				blocked = true
+				break
+			}
+		}
+		require.True(t, blocked)
+
+		for _, blockFunc := range blockFuncs(config.ToolBash{AllowedCommands: []string{"go"}}) {
+			require.False(t, blockFunc([]string{"go", "test", "-exec=bash"}))
+		}
+	})
+}
+
+func TestBashDescription_WarnsWhenDangerousCommandsAllowed(t *testing.T) {
+	t.Parallel()
+
+	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
+	description := bashDescription(attribution, "test-model", config.ToolBash{AllowedCommands: []string{"curl", "ssh"}})
+
+	require.Contains(t, description, "Allowed dangerous commands (curl, ssh)")
+	require.Contains(t, description, "Blocked commands")
+	require.NotContains(t, description, "curl, ssh, wget")
+}
+
 func TestBashTool_DefaultAutoBackgroundThreshold(t *testing.T) {
 	workingDir := t.TempDir()
-	tool := newBashToolForTest(workingDir)
+	tool := newBashToolForTest(workingDir, config.ToolBash{})
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
 
 	resp := runBashTool(t, tool, ctx, BashParams{
@@ -59,7 +133,7 @@ func TestBashTool_DefaultAutoBackgroundThreshold(t *testing.T) {
 
 func TestBashTool_CustomAutoBackgroundThreshold(t *testing.T) {
 	workingDir := t.TempDir()
-	tool := newBashToolForTest(workingDir)
+	tool := newBashToolForTest(workingDir, config.ToolBash{})
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
 
 	resp := runBashTool(t, tool, ctx, BashParams{
@@ -79,10 +153,10 @@ func TestBashTool_CustomAutoBackgroundThreshold(t *testing.T) {
 	require.NoError(t, bgManager.Kill(meta.ShellID))
 }
 
-func newBashToolForTest(workingDir string) fantasy.AgentTool {
+func newBashToolForTest(workingDir string, toolCfg config.ToolBash) fantasy.AgentTool {
 	permissions := &mockBashPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
 	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
-	return NewBashTool(permissions, workingDir, attribution, "test-model")
+	return NewBashTool(permissions, workingDir, attribution, "test-model", toolCfg)
 }
 
 func runBashTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, params BashParams) fantasy.ToolResponse {

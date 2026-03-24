@@ -348,6 +348,7 @@ type Agent struct {
 type Tools struct {
 	Ls   ToolLs   `json:"ls,omitzero"`
 	Grep ToolGrep `json:"grep,omitzero"`
+	Bash ToolBash `json:"bash,omitzero"`
 }
 
 type ToolLs struct {
@@ -367,6 +368,10 @@ type ToolGrep struct {
 // GetTimeout returns the user-defined timeout or the default.
 func (t ToolGrep) GetTimeout() time.Duration {
 	return ptrValOr(t.Timeout, 5*time.Second)
+}
+
+type ToolBash struct {
+	AllowedCommands []string `json:"allowed_commands,omitempty" jsonschema:"description=List of otherwise-blocked bash commands to explicitly allow,example=curl,example=ssh,example=scp"`
 }
 
 // Config holds the configuration for crush.

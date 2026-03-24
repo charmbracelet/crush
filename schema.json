@@ -695,6 +695,24 @@
         "expires_at"
       ]
     },
+    "ToolBash": {
+      "properties": {
+        "allowed_commands": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "curl",
+              "ssh",
+              "scp"
+            ]
+          },
+          "type": "array",
+          "description": "List of otherwise-blocked bash commands to explicitly allow"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "ToolGrep": {
       "properties": {
         "timeout": {
@@ -734,13 +752,17 @@
         },
         "grep": {
           "$ref": "#/$defs/ToolGrep"
+        },
+        "bash": {
+          "$ref": "#/$defs/ToolBash"
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
         "ls",
-        "grep"
+        "grep",
+        "bash"
       ]
     }
   }

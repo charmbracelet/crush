@@ -36,6 +36,15 @@ func TestConfig_LoadFromBytes(t *testing.T) {
 	require.Equal(t, "https://api.openai.com/v2", pc.BaseURL)
 }
 
+func TestConfig_LoadFromBytes_WithBashAllowedCommands(t *testing.T) {
+	data := []byte(`{"tools": {"bash": {"allowed_commands": ["curl", "ssh"]}}}`)
+
+	loadedConfig, err := loadFromBytes([][]byte{data})
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"curl", "ssh"}, loadedConfig.Tools.Bash.AllowedCommands)
+}
+
 // testStore wraps a Config in a minimal ConfigStore for testing.
 func testStore(cfg *Config) *ConfigStore {
 	return &ConfigStore{config: cfg}

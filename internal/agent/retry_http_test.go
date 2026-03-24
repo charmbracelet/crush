@@ -2,10 +2,12 @@ package agent
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/stretchr/testify/require"
 )
 
@@ -105,12 +107,12 @@ func TestRetryDelay(t *testing.T) {
 		require.LessOrEqual(t, got, hi, "delay %v above upper bound %v", got, hi)
 	}
 
-	assertInRange(t, retryBaseDelay, retryDelay(1))   // ~3s
-	assertInRange(t, retryBaseDelay*2, retryDelay(2)) // ~6s
-	assertInRange(t, retryBaseDelay*4, retryDelay(3)) // ~12s
-	assertInRange(t, retryBaseDelay*8, retryDelay(4)) // ~24s
-	assertInRange(t, retryMaxDelay, retryDelay(5))    // ~48s
-	assertInRange(t, retryMaxDelay, retryDelay(10))   // clamped at ~48s
+	assertInRange(t, retryBaseDelay, retryDelay(1, 0))   // ~3s
+	assertInRange(t, retryBaseDelay*2, retryDelay(2, 0)) // ~6s
+	assertInRange(t, retryBaseDelay*4, retryDelay(3, 0)) // ~12s
+	assertInRange(t, retryBaseDelay*8, retryDelay(4, 0)) // ~24s
+	assertInRange(t, retryMaxDelay, retryDelay(5, 0))    // ~48s
+	assertInRange(t, retryMaxDelay, retryDelay(10, 0))   // clamped at ~48s
 }
 
 func TestAddJitter(t *testing.T) {
@@ -133,8 +135,85 @@ func TestRetryDelayProducesSpread(t *testing.T) {
 	// not all values are identical — i.e. jitter is actually applied.
 	seen := make(map[time.Duration]struct{})
 	for range 50 {
-		seen[retryDelay(1)] = struct{}{}
+		seen[retryDelay(1, 0)] = struct{}{}
 	}
 	require.Greater(t, len(seen), 1,
 		"retryDelay should produce varied values due to jitter")
+}
+
+func TestRetryDelayRespectsRetryAfter(t *testing.T) {
+	t.Parallel()
+
+	t.Run("retry-after larger than backoff wins", func(t *testing.T) {
+		t.Parallel()
+		serverDelay := 60 * time.Second
+		got := retryDelay(1, serverDelay)
+		require.Equal(t, serverDelay, got,
+			"when Retry-After exceeds exponential backoff, the server value should be used")
+	})
+
+	t.Run("backoff larger than retry-after wins", func(t *testing.T) {
+		t.Parallel()
+		serverDelay := 1 * time.Second
+		got := retryDelay(5, serverDelay)
+		lo := time.Duration(float64(retryMaxDelay) * 0.75)
+		require.GreaterOrEqual(t, got, lo,
+			"when backoff exceeds Retry-After, exponential backoff should be used")
+	})
+
+	t.Run("zero retry-after falls back to backoff", func(t *testing.T) {
+		t.Parallel()
+		got := retryDelay(2, 0)
+		lo := time.Duration(float64(retryBaseDelay*2) * 0.75)
+		hi := time.Duration(float64(retryBaseDelay*2) * 1.25)
+		require.GreaterOrEqual(t, got, lo)
+		require.LessOrEqual(t, got, hi)
+	})
+}
+
+func TestRetryAfterFromError(t *testing.T) {
+	t.Parallel()
+
+	t.Run("unwraps RetryAfterError", func(t *testing.T) {
+		t.Parallel()
+		inner := &fantasy.ProviderError{StatusCode: 429, Message: "rate limited"}
+		err := &hyper.RetryAfterError{Err: inner, After: 30 * time.Second}
+		require.Equal(t, 30*time.Second, retryAfterFromError(err))
+	})
+
+	t.Run("unwraps nested RetryAfterError", func(t *testing.T) {
+		t.Parallel()
+		inner := &fantasy.ProviderError{StatusCode: 429, Message: "rate limited"}
+		raErr := &hyper.RetryAfterError{Err: inner, After: 15 * time.Second}
+		wrapped := fmt.Errorf("stream failed: %w", raErr)
+		require.Equal(t, 15*time.Second, retryAfterFromError(wrapped))
+	})
+
+	t.Run("returns zero for plain error", func(t *testing.T) {
+		t.Parallel()
+		require.Equal(t, time.Duration(0), retryAfterFromError(errors.New("something")))
+	})
+
+	t.Run("returns zero for nil", func(t *testing.T) {
+		t.Parallel()
+		require.Equal(t, time.Duration(0), retryAfterFromError(nil))
+	})
+
+	t.Run("returns zero for ProviderError without RetryAfter", func(t *testing.T) {
+		t.Parallel()
+		err := &fantasy.ProviderError{StatusCode: 429, Message: "rate limited"}
+		require.Equal(t, time.Duration(0), retryAfterFromError(err))
+	})
+}
+
+func TestRetryAfterErrorUnwrapsToProviderError(t *testing.T) {
+	t.Parallel()
+
+	inner := &fantasy.ProviderError{StatusCode: 429, Message: "rate limited"}
+	err := &hyper.RetryAfterError{Err: inner, After: 10 * time.Second}
+
+	var providerErr *fantasy.ProviderError
+	require.True(t, errors.As(err, &providerErr), "RetryAfterError must unwrap to ProviderError")
+	require.Equal(t, 429, providerErr.StatusCode)
+	require.True(t, isRetriableError(err), "RetryAfterError wrapping 429 must be retriable")
 }

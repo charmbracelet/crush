@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/httpext"
 )
 
 // streamIdleTimeout is the maximum time to wait between stream parts before
@@ -27,6 +28,12 @@ func (m retryableStreamModel) Stream(ctx context.Context, call fantasy.Call) (fa
 	// Create a derived context with cancel to ensure the underlying stream
 	// can be stopped when idle timeout fires or the outer function returns.
 	localCtx, localCancel := context.WithCancel(ctx)
+
+	// Attach a stream-activity channel so that HTTP response-body reads
+	// (including SSE keep-alive pings silently consumed by the SDK) reset
+	// the idle timer. Without this, ping events never produce StreamParts
+	// and the timer fires even though the network connection is alive.
+	localCtx, activityCh := httpext.WithStreamActivity(localCtx)
 
 	stream, err := m.LanguageModel.Stream(localCtx, call)
 	if err != nil {
@@ -71,13 +78,7 @@ func (m retryableStreamModel) Stream(ctx context.Context, call fantasy.Call) (fa
 			select {
 			case part := <-partCh:
 				// Reset idle timer on each part received.
-				if !idleTimer.Stop() {
-					select {
-					case <-idleTimer.C:
-					default:
-					}
-				}
-				idleTimer.Reset(streamIdleTimeout)
+				resetTimer(idleTimer, streamIdleTimeout)
 
 				if isToolStreamPart(part.Type) {
 					sawToolUse = true
@@ -88,6 +89,12 @@ func (m retryableStreamModel) Stream(ctx context.Context, call fantasy.Call) (fa
 				if !yield(part) {
 					return
 				}
+
+			case <-activityCh:
+				// HTTP response body received data (e.g. SSE ping events
+				// that the SDK consumes without yielding StreamParts).
+				// Reset the idle timer to prevent false timeouts.
+				resetTimer(idleTimer, streamIdleTimeout)
 
 			case <-idleTimer.C:
 				// Stream has been idle for too long - trigger a retryable error.
@@ -115,6 +122,17 @@ func (m retryableStreamModel) Stream(ctx context.Context, call fantasy.Call) (fa
 			}
 		}
 	}, nil
+}
+
+// resetTimer safely resets a timer, draining any pending fire.
+func resetTimer(t *time.Timer, d time.Duration) {
+	if !t.Stop() {
+		select {
+		case <-t.C:
+		default:
+		}
+	}
+	t.Reset(d)
 }
 
 func isToolStreamPart(partType fantasy.StreamPartType) bool {

@@ -741,7 +741,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				}
 			}
 			retryAttempt++
-			delay := retryDelay(retryAttempt)
+			delay := retryDelay(retryAttempt, retryAfterFromError(err))
 			slog.Warn("Retrying after transient error",
 				"error", err,
 				"attempt", retryAttempt,
@@ -1231,7 +1231,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	defer a.activeRequests.Del(sessionID)
 	defer cancel()
 
-	agent := a.agentFactory(largeModel.Model,
+	agent := a.agentFactory(retryableStreamModel{largeModel.Model},
 		fantasy.WithSystemPrompt(string(summaryPrompt)),
 		fantasy.WithUserAgent(userAgent),
 	)

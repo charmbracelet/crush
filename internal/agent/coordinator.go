@@ -25,6 +25,7 @@ import (
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/hooks"
+	"github.com/charmbracelet/crush/internal/httpext"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
@@ -876,9 +877,7 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 	} else if c.cfg.Config().Options.Debug {
 		httpClient = log.NewHTTPClient()
 	}
-	if httpClient != nil {
-		opts = append(opts, anthropic.WithHTTPClient(httpClient))
-	}
+	opts = append(opts, anthropic.WithHTTPClient(httpext.WrapActivityTrackingHTTPClient(httpClient)))
 
 	return anthropic.New(opts...)
 }
@@ -899,9 +898,7 @@ func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[st
 	} else if c.cfg.Config().Options.Debug {
 		httpClient = log.NewHTTPClient()
 	}
-	if httpClient != nil {
-		opts = append(opts, openai.WithHTTPClient(httpClient))
-	}
+	opts = append(opts, openai.WithHTTPClient(httpext.WrapActivityTrackingHTTPClient(httpClient)))
 
 	if len(headers) > 0 {
 		opts = append(opts, openai.WithHeaders(headers))
@@ -916,10 +913,11 @@ func (c *coordinator) buildOpenrouterProvider(_, apiKey string, headers map[stri
 	opts := []openrouter.Option{
 		openrouter.WithAPIKey(apiKey),
 	}
+	var httpClient *http.Client
 	if c.cfg.Config().Options.Debug {
-		httpClient := log.NewHTTPClient()
-		opts = append(opts, openrouter.WithHTTPClient(httpClient))
+		httpClient = log.NewHTTPClient()
 	}
+	opts = append(opts, openrouter.WithHTTPClient(httpext.WrapActivityTrackingHTTPClient(httpClient)))
 	if len(headers) > 0 {
 		opts = append(opts, openrouter.WithHeaders(headers))
 	}
@@ -930,10 +928,11 @@ func (c *coordinator) buildVercelProvider(_, apiKey string, headers map[string]s
 	opts := []vercel.Option{
 		vercel.WithAPIKey(apiKey),
 	}
+	var httpClient *http.Client
 	if c.cfg.Config().Options.Debug {
-		httpClient := log.NewHTTPClient()
-		opts = append(opts, vercel.WithHTTPClient(httpClient))
+		httpClient = log.NewHTTPClient()
 	}
+	opts = append(opts, vercel.WithHTTPClient(httpext.WrapActivityTrackingHTTPClient(httpClient)))
 	if len(headers) > 0 {
 		opts = append(opts, vercel.WithHeaders(headers))
 	}
@@ -981,9 +980,7 @@ func (c *coordinator) buildOpenaiCompatProvider(
 			Transport: copilot.NewReasoningNormalizingTransport(inner),
 		}
 	}
-	if httpClient != nil {
-		opts = append(opts, openaicompat.WithHTTPClient(httpClient))
-	}
+	opts = append(opts, openaicompat.WithHTTPClient(httpext.WrapActivityTrackingHTTPClient(httpClient)))
 
 	if len(headers) > 0 {
 		opts = append(opts, openaicompat.WithHeaders(headers))
@@ -1002,10 +999,11 @@ func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[str
 		azure.WithAPIKey(apiKey),
 		azure.WithUseResponsesAPI(),
 	}
+	var httpClient *http.Client
 	if c.cfg.Config().Options.Debug {
-		httpClient := log.NewHTTPClient()
-		opts = append(opts, azure.WithHTTPClient(httpClient))
+		httpClient = log.NewHTTPClient()
 	}
+	opts = append(opts, azure.WithHTTPClient(httpext.WrapActivityTrackingHTTPClient(httpClient)))
 	if options == nil {
 		options = make(map[string]string)
 	}
@@ -1021,10 +1019,11 @@ func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[str
 
 func (c *coordinator) buildBedrockProvider(apiKey string, headers map[string]string) (fantasy.Provider, error) {
 	var opts []bedrock.Option
+	var httpClient *http.Client
 	if c.cfg.Config().Options.Debug {
-		httpClient := log.NewHTTPClient()
-		opts = append(opts, bedrock.WithHTTPClient(httpClient))
+		httpClient = log.NewHTTPClient()
 	}
+	opts = append(opts, bedrock.WithHTTPClient(httpext.WrapActivityTrackingHTTPClient(httpClient)))
 	if len(headers) > 0 {
 		opts = append(opts, bedrock.WithHeaders(headers))
 	}
@@ -1044,10 +1043,11 @@ func (c *coordinator) buildGoogleProvider(baseURL, apiKey string, headers map[st
 		google.WithBaseURL(baseURL),
 		google.WithGeminiAPIKey(apiKey),
 	}
+	var httpClient *http.Client
 	if c.cfg.Config().Options.Debug {
-		httpClient := log.NewHTTPClient()
-		opts = append(opts, google.WithHTTPClient(httpClient))
+		httpClient = log.NewHTTPClient()
 	}
+	opts = append(opts, google.WithHTTPClient(httpext.WrapActivityTrackingHTTPClient(httpClient)))
 	if len(headers) > 0 {
 		opts = append(opts, google.WithHeaders(headers))
 	}
@@ -1056,10 +1056,11 @@ func (c *coordinator) buildGoogleProvider(baseURL, apiKey string, headers map[st
 
 func (c *coordinator) buildGoogleVertexProvider(headers map[string]string, options map[string]string) (fantasy.Provider, error) {
 	opts := []google.Option{}
+	var httpClient *http.Client
 	if c.cfg.Config().Options.Debug {
-		httpClient := log.NewHTTPClient()
-		opts = append(opts, google.WithHTTPClient(httpClient))
+		httpClient = log.NewHTTPClient()
 	}
+	opts = append(opts, google.WithHTTPClient(httpext.WrapActivityTrackingHTTPClient(httpClient)))
 	if len(headers) > 0 {
 		opts = append(opts, google.WithHeaders(headers))
 	}
@@ -1077,10 +1078,11 @@ func (c *coordinator) buildHyperProvider(baseURL, apiKey string) (fantasy.Provid
 		hyper.WithBaseURL(baseURL),
 		hyper.WithAPIKey(apiKey),
 	}
+	var httpClient *http.Client
 	if c.cfg.Config().Options.Debug {
-		httpClient := log.NewHTTPClient()
-		opts = append(opts, hyper.WithHTTPClient(httpClient))
+		httpClient = log.NewHTTPClient()
 	}
+	opts = append(opts, hyper.WithHTTPClient(httpext.WrapActivityTrackingHTTPClient(httpClient)))
 	return hyper.New(opts...)
 }
 

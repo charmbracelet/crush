@@ -7,7 +7,18 @@ import (
 	"time"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/agent/hyper"
 )
+
+// retryAfterFromError extracts the Retry-After duration from an error chain.
+// Returns zero if the error does not carry retry-after information.
+func retryAfterFromError(err error) time.Duration {
+	var ra *hyper.RetryAfterError
+	if errors.As(err, &ra) {
+		return ra.After
+	}
+	return 0
+}
 
 const (
 	// maxRetriableAttempts is the maximum number of retry attempts for
@@ -99,7 +110,8 @@ func isTransientNetworkError(err error) bool {
 		strings.Contains(errStr, "connection reset") ||
 		strings.Contains(errStr, "connection refused") ||
 		strings.Contains(errStr, "temporary failure") ||
-		strings.Contains(errStr, "eof") ||
+		strings.Contains(errStr, "unexpected eof") ||
+		strings.HasSuffix(errStr, "eof") ||
 		strings.Contains(errStr, "broken pipe")
 }
 
@@ -108,7 +120,10 @@ func isTransientNetworkError(err error) bool {
 // The jitter prevents thundering-herd collisions when multiple
 // concurrent subagents all retry against the same rate-limited API.
 // With base=3s: ~3s, ~6s, ~12s, ~24s, ~48s (each ±25%).
-func retryDelay(attempt int) time.Duration {
+//
+// If serverRetryAfter is positive (from a Retry-After header), the
+// returned delay is max(exponentialBackoff, serverRetryAfter).
+func retryDelay(attempt int, serverRetryAfter time.Duration) time.Duration {
 	delay := retryBaseDelay
 	for i := 1; i < attempt; i++ {
 		delay *= 2
@@ -117,7 +132,11 @@ func retryDelay(attempt int) time.Duration {
 			break
 		}
 	}
-	return addJitter(delay)
+	backoff := addJitter(delay)
+	if serverRetryAfter > backoff {
+		return serverRetryAfter
+	}
+	return backoff
 }
 
 // addJitter adds ±25% random jitter to a duration so that concurrent

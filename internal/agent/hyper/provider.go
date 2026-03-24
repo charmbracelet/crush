@@ -321,18 +321,30 @@ func ioReadAllLimit(r io.Reader, n int64) ([]byte, error) {
 }
 
 func toProviderError(resp *http.Response, message string) error {
-	return &fantasy.ProviderError{
+	pErr := &fantasy.ProviderError{
 		Title:      fantasy.ErrorTitleForStatusCode(resp.StatusCode),
 		Message:    message,
 		StatusCode: resp.StatusCode,
 	}
+	if d := parseRetryAfter(resp); d > 0 {
+		return &RetryAfterError{Err: pErr, After: d}
+	}
+	return pErr
 }
 
 func retryAfter(resp *http.Response) string {
-	after, err := strconv.Atoi(resp.Header.Get("Retry-After"))
-	if err == nil && after > 0 {
-		d := time.Duration(after) * time.Second
+	if d := parseRetryAfter(resp); d > 0 {
 		return "Try again in " + d.String()
 	}
 	return "Try again later"
+}
+
+// parseRetryAfter extracts the Retry-After header value as a duration.
+// Returns zero if the header is absent or unparseable.
+func parseRetryAfter(resp *http.Response) time.Duration {
+	after, err := strconv.Atoi(resp.Header.Get("Retry-After"))
+	if err == nil && after > 0 {
+		return time.Duration(after) * time.Second
+	}
+	return 0
 }

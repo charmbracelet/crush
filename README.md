@@ -286,8 +286,10 @@ like you would. LSPs can be added manually like so:
 
 Crush also supports Model Context Protocol (MCP) servers through three
 transport types: `stdio` for command-line servers, `http` for HTTP endpoints,
-and `sse` for Server-Sent Events. Environment variable expansion is supported
-using `$(echo $VAR)` syntax.
+and `sse` for Server-Sent Events.
+Environment variable expansion is supported using `$(echo $VAR)` syntax.
+For file-based secrets (e.g. sops, systemd credentials, Docker secrets),
+use `env_files` to map variable names to filepaths — Crush reads the file contents at startup
 
 ```json
 {
@@ -312,6 +314,15 @@ using `$(echo $VAR)` syntax.
       "disabled_tools": ["create_issue", "create_pull_request"],
       "headers": {
         "Authorization": "Bearer $GH_PAT"
+      }
+    },
+    "codeberg": {
+      "type": "stdio",
+      "command": "/path/to/forgejo-mcp",
+      "args": ["transport", "stdio", "--url", "https://codeberg.org"],
+      "timeout": 120,
+      "env_files": {
+        "FORGEJO_ACCESS_TOKEN": "/run/secrets/codeberg_token"
       }
     },
     "streaming-service": {

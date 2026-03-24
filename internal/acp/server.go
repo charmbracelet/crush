@@ -274,6 +274,27 @@ func (s *Server) Notify(_ context.Context, method string, params any) {
 	}
 }
 
+// NotifySync sends a notification and blocks until it is written.
+func (s *Server) NotifySync(ctx context.Context, method string, params any) error {
+	b, err := json.Marshal(params)
+	if err != nil {
+		return fmt.Errorf("acp: marshal notification params: %w", err)
+	}
+	msg := Request{
+		JSONRPC: "2.0",
+		Method:  method,
+		Params:  b,
+	}
+	raw, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("acp: marshal notification: %w", err)
+	}
+	if err := s.writeLineSync(ctx, raw); err != nil {
+		return fmt.Errorf("acp: write notification: %w", err)
+	}
+	return nil
+}
+
 // Call sends a request to the client and waits for its response.
 // Returns the raw result JSON or an error.
 func (s *Server) Call(ctx context.Context, method string, params any) (json.RawMessage, error) {

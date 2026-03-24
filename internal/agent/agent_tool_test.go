@@ -72,6 +72,8 @@ func TestBuildAgentToolDescriptionEmphasizesParallelDelegation(t *testing.T) {
 	assert.Contains(t, description, "If 2 or more substantial independent tasks can proceed in parallel")
 	assert.Contains(t, description, "launch multiple Agent tool calls in the same assistant message")
 	assert.Contains(t, description, "Prefer early delegation for bounded work")
+	assert.Contains(t, description, "restricted `bash` tool")
+	assert.Contains(t, description, "git diff")
 	assert.Contains(t, description, "Do not claim that you are delegating")
 	assert.Contains(t, description, "make the tool call first rather than narrating a future intention to delegate")
 	assert.Contains(t, description, "Do not use the main thread for broad implementation work just because you already know which files are involved")
@@ -125,5 +127,5 @@ func TestBuildToolsForSubagentsUseExpectedCapabilities(t *testing.T) {
 	for _, tool := range exploreTools {
 		exploreNames = append(exploreNames, tool.Info().Name)
 	}
-	assert.Equal(t, []string{"glob", "grep", "ls", "sourcegraph", "view"}, exploreNames)
+	assert.Equal(t, []string{"bash", "glob", "grep", "ls", "sourcegraph", "view"}, exploreNames)
 }

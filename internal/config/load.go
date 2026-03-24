@@ -3,6 +3,8 @@ package config
 import (
 	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -53,9 +55,10 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		}
 	}
 
+	workspaceDir := workspaceIdentityDir(workingDir)
 	store := &ConfigStore{
 		config:         cfg,
-		workingDir:     workingDir,
+		workingDir:     workspaceDir,
 		globalDataPath: GlobalConfigData(),
 		workspacePath:  filepath.Join(cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName)),
 	}
@@ -395,6 +398,10 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	} else if c.Options.DataDirectory == "" {
 		if path, ok := fsext.LookupClosest(workingDir, defaultDataDirectory); ok {
 			c.Options.DataDirectory = path
+		} else if shouldUseGlobalWorkspaceDataDir(workingDir) {
+			workspaceIdentity := workspaceIdentityDir(workingDir)
+			c.Options.DataDirectory = globalWorkspaceDataDir(workspaceIdentity)
+			slog.Warn("Using global workspace data directory", "working_dir", workingDir, "workspace_identity", workspaceIdentity, "data_dir", c.Options.DataDirectory)
 		} else {
 			c.Options.DataDirectory = filepath.Join(workingDir, defaultDataDirectory)
 		}
@@ -783,6 +790,116 @@ func assignIfNil[T any](ptr **T, val T) {
 	if *ptr == nil {
 		*ptr = &val
 	}
+}
+
+func shouldUseGlobalWorkspaceDataDir(workingDir string) bool {
+	return shouldUseGlobalWorkspaceDataDirForOS(runtime.GOOS, workingDir, os.Getenv("WINDIR"))
+}
+func shouldUseGlobalWorkspaceDataDirForOS(goos, workingDir, windowsDir string) bool {
+	clean := filepath.Clean(strings.TrimSpace(workingDir))
+	if clean == "" || clean == "." {
+		return true
+	}
+
+	if goos == "windows" {
+		system32 := filepath.Join(cmp.Or(strings.TrimSpace(windowsDir), `C:\Windows`), "System32")
+		return isPathWithin(clean, system32)
+	}
+
+	return clean == string(filepath.Separator)
+}
+
+func isPathWithin(path, parent string) bool {
+	path = filepath.Clean(path)
+	parent = filepath.Clean(parent)
+	if runtime.GOOS == "windows" {
+		path = strings.ToLower(path)
+		parent = strings.ToLower(parent)
+	}
+	if path == parent {
+		return true
+	}
+	parentWithSep := parent + string(filepath.Separator)
+	return strings.HasPrefix(path, parentWithSep)
+}
+
+func globalWorkspaceDataDir(workingDir string) string {
+	root := filepath.Dir(GlobalConfigData())
+	return filepath.Join(root, "workspaces", workspaceDataDirName(workingDir))
+}
+
+func workspaceIdentityDir(workingDir string) string {
+	for _, key := range []string{
+		"CRUSH_WORKSPACE_CWD",
+		"ZED_WORKSPACE_ROOT",
+		"ZED_WORKTREE_ROOT",
+		"ZED_CWD",
+		"VSCODE_CWD",
+		"PROJECT_ROOT",
+		"WORKSPACE_ROOT",
+		"INIT_CWD",
+		"PWD",
+	} {
+		value := normalizeWorkspaceIdentityDir(os.Getenv(key))
+		if value == "" {
+			continue
+		}
+		if shouldUseGlobalWorkspaceDataDir(value) {
+			continue
+		}
+		return value
+	}
+	return normalizeWorkspaceIdentityDir(workingDir)
+}
+
+func normalizeWorkspaceIdentityDir(dir string) string {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return ""
+	}
+	if abs, err := filepath.Abs(dir); err == nil {
+		return filepath.Clean(abs)
+	}
+	return filepath.Clean(dir)
+}
+
+func workspaceDataDirName(workingDir string) string {
+	normalized := filepath.Clean(strings.TrimSpace(workingDir))
+	if normalized == "" || normalized == "." {
+		normalized = "workspace"
+	}
+	if abs, err := filepath.Abs(normalized); err == nil {
+		normalized = filepath.Clean(abs)
+	}
+	sum := sha256.Sum256([]byte(filepath.ToSlash(normalized)))
+	hash := hex.EncodeToString(sum[:6])
+	base := sanitizeWorkspaceSegment(filepath.Base(normalized))
+	if base == "" || base == "." || base == string(filepath.Separator) {
+		base = "workspace"
+	}
+	return fmt.Sprintf("%s-%s", base, hash)
+}
+
+func sanitizeWorkspaceSegment(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	sanitized := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z':
+			return r
+		case r >= 'A' && r <= 'Z':
+			return r
+		case r >= '0' && r <= '9':
+			return r
+		case r == '-', r == '_':
+			return r
+		default:
+			return '_'
+		}
+	}, value)
+	return strings.Trim(sanitized, "_")
 }
 
 func isInsideWorktree() bool {

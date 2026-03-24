@@ -22,9 +22,7 @@ import (
 // the anthropic-proxy entry in crush.json, skipping the test if unavailable.
 func anthropicProxyProvider(t *testing.T) (fantasy.LanguageModel, func()) {
 	t.Helper()
-	if testing.Short() {
-		t.Skip("skipping real API test in short mode")
-	}
+	requireRealProviderTests(t)
 	cfg, err := config.Init(t.TempDir(), "", false)
 	require.NoError(t, err)
 

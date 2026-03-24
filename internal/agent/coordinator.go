@@ -650,9 +650,18 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		}
 	}
 
+	bashOpts := tools.BashToolOptions{}
+	if agent.ID == config.AgentExplore {
+		bashOpts = tools.BashToolOptions{
+			RestrictedToGitReadOnly: true,
+			DisableBackground:       true,
+			DescriptionOverride:     tools.RestrictedGitBashDescription(),
+		}
+	}
+
 	allTools = append(allTools,
 		tools.NewRequestUserInputTool(c.userInput),
-		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelName, c.hookManager),
+		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelName, c.hookManager, bashOpts),
 		tools.NewJobOutputTool(),
 		tools.NewJobKillTool(),
 		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),
@@ -1398,16 +1407,17 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		return fantasy.NewTextErrorResponse("error generating response"), nil
 	}
 
-	if result.Response.Content == nil || result.Response.Content.Text() == "" {
-		slog.Warn("Sub-agent returned empty response", "session", session.ID, "prompt", params.Prompt)
-		return fantasy.NewTextErrorResponse("no content in response"), nil
-	}
-
 	if err := c.updateParentSessionCost(ctx, session.ID, params.SessionID); err != nil {
 		return fantasy.ToolResponse{}, err
 	}
 
-	return fantasy.NewTextResponse(result.Response.Content.Text()), nil
+	content := c.subAgentResponseText(ctx, session.ID, result)
+	if content == "" {
+		slog.Warn("Sub-agent returned empty response", "session", session.ID, "prompt", params.Prompt)
+		return fantasy.NewTextErrorResponse("no content in response"), nil
+	}
+
+	return fantasy.NewTextResponse(content), nil
 }
 
 // updateParentSessionCost accumulates the cost from a child session to its parent session.
@@ -1429,4 +1439,32 @@ func (c *coordinator) updateParentSessionCost(ctx context.Context, childSessionI
 	}
 
 	return nil
+}
+
+func (c *coordinator) subAgentResponseText(ctx context.Context, sessionID string, result *fantasy.AgentResult) string {
+	if result != nil && result.Response.Content != nil {
+		if text := strings.TrimSpace(result.Response.Content.Text()); text != "" {
+			return text
+		}
+	}
+
+	if c.messages == nil {
+		return ""
+	}
+
+	msgs, err := c.messages.List(ctx, sessionID)
+	if err != nil {
+		slog.Warn("Failed to load sub-agent messages for response fallback", "error", err, "session", sessionID)
+		return ""
+	}
+
+	for i := len(msgs) - 1; i >= 0; i-- {
+		msg := msgs[i]
+		if msg.Role != message.Assistant || msg.IsSummaryMessage {
+			continue
+		}
+		return strings.TrimSpace(msg.Content().Text)
+	}
+
+	return ""
 }

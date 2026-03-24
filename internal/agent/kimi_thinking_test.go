@@ -21,9 +21,7 @@ import (
 // provider configured in crush.json, skipping if not available.
 func kimiProvider(t *testing.T) fantasy.LanguageModel {
 	t.Helper()
-	if testing.Short() {
-		t.Skip("skipping real API test in short mode")
-	}
+	requireRealProviderTests(t)
 	cfg, err := config.Init(t.TempDir(), "", false)
 	require.NoError(t, err)
 

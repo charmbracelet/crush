@@ -140,9 +140,13 @@ func newBashToolForTest(workingDir string) fantasy.AgentTool {
 }
 
 func newBashToolForTestWithHooks(workingDir string, hookMgr *hooks.Manager) fantasy.AgentTool {
+	return newBashToolForTestWithHooksAndOptions(workingDir, hookMgr)
+}
+
+func newBashToolForTestWithHooksAndOptions(workingDir string, hookMgr *hooks.Manager, opts ...BashToolOptions) fantasy.AgentTool {
 	permissions := &mockBashPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
 	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
-	return NewBashTool(permissions, workingDir, attribution, "test-model", hookMgr)
+	return NewBashTool(permissions, workingDir, attribution, "test-model", hookMgr, opts...)
 }
 
 func runBashTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, params BashParams) fantasy.ToolResponse {
@@ -180,4 +184,100 @@ func helperBinary(t *testing.T, name, src string) string {
 	out, err := exec.CommandContext(t.Context(), "go", "build", "-o", binPath, srcFile).CombinedOutput()
 	require.NoError(t, err, "build helper binary: %s", out)
 	return binPath
+}
+
+func TestRestrictedGitBashTool_AllowsReadOnlyGitCommands(t *testing.T) {
+	repoDir := initGitRepoForTest(t)
+	tool := newBashToolForTestWithHooksAndOptions(repoDir, nil, BashToolOptions{
+		RestrictedToGitReadOnly: true,
+		DisableBackground:       true,
+		DescriptionOverride:     RestrictedGitBashDescription(),
+	})
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description: "inspect git status",
+		Command:     "git status --short",
+	})
+	require.False(t, resp.IsError)
+	require.Contains(t, resp.Content, "tracked.txt")
+
+	resp = runBashTool(t, tool, ctx, BashParams{
+		Description: "inspect git diff",
+		Command:     "git diff -- tracked.txt",
+	})
+	require.False(t, resp.IsError)
+	require.Contains(t, resp.Content, "+after")
+}
+
+func TestRestrictedGitBashTool_BlocksUnsafeCommands(t *testing.T) {
+	repoDir := initGitRepoForTest(t)
+	tool := newBashToolForTestWithHooksAndOptions(repoDir, nil, BashToolOptions{
+		RestrictedToGitReadOnly: true,
+		DisableBackground:       true,
+		DescriptionOverride:     RestrictedGitBashDescription(),
+	})
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	cases := []string{
+		"git checkout main",
+		"git restore .",
+		"bash -lc \"git diff\"",
+		"git diff > out.txt",
+	}
+
+	for _, command := range cases {
+		resp := runBashTool(t, tool, ctx, BashParams{
+			Description: "unsafe",
+			Command:     command,
+		})
+		require.True(t, resp.IsError, command)
+	}
+}
+
+func TestRestrictedGitBashTool_DisablesBackgroundExecution(t *testing.T) {
+	repoDir := initGitRepoForTest(t)
+	tool := newBashToolForTestWithHooksAndOptions(repoDir, nil, BashToolOptions{
+		RestrictedToGitReadOnly: true,
+		DisableBackground:       true,
+		DescriptionOverride:     RestrictedGitBashDescription(),
+	})
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description:     "background",
+		Command:         "git status --short",
+		RunInBackground: true,
+	})
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "background execution is disabled")
+}
+
+func initGitRepoForTest(t *testing.T) string {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found, skipping")
+	}
+
+	repoDir := t.TempDir()
+	runGit(t, repoDir, "init")
+	runGit(t, repoDir, "config", "user.name", "Test User")
+	runGit(t, repoDir, "config", "user.email", "test@example.com")
+
+	tracked := filepath.Join(repoDir, "tracked.txt")
+	require.NoError(t, os.WriteFile(tracked, []byte("before\n"), 0o644))
+	runGit(t, repoDir, "add", "tracked.txt")
+	runGit(t, repoDir, "commit", "-m", "init")
+
+	require.NoError(t, os.WriteFile(tracked, []byte("before\nafter\n"), 0o644))
+	return repoDir
+}
+
+func runGit(t *testing.T, repoDir string, args ...string) {
+	t.Helper()
+
+	cmd := exec.CommandContext(t.Context(), "git", args...)
+	cmd.Dir = repoDir
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "git %v: %s", args, out)
 }

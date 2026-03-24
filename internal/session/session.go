@@ -66,6 +66,7 @@ type Session struct {
 	ID                   string
 	ParentSessionID      string
 	Title                string
+	WorkspaceCWD         string
 	CollaborationMode    CollaborationMode
 	MessageCount         int64
 	PromptTokens         int64
@@ -129,6 +130,7 @@ func (s *service) Create(ctx context.Context, title string) (Session, error) {
 	dbSession, err := s.q.CreateSession(ctx, db.CreateSessionParams{
 		ID:                uuid.New().String(),
 		Title:             title,
+		WorkspaceCwd:      sql.NullString{},
 		CollaborationMode: string(CollaborationModeDefault),
 	})
 	if err != nil {
@@ -145,6 +147,7 @@ func (s *service) CreateTaskSession(ctx context.Context, toolCallID, parentSessi
 		ID:                toolCallID,
 		ParentSessionID:   sql.NullString{String: parentSessionID, Valid: true},
 		Title:             title,
+		WorkspaceCwd:      sql.NullString{},
 		CollaborationMode: string(CollaborationModeDefault),
 	})
 	if err != nil {
@@ -160,6 +163,7 @@ func (s *service) CreateTitleSession(ctx context.Context, parentSessionID string
 		ID:                "title-" + parentSessionID,
 		ParentSessionID:   sql.NullString{String: parentSessionID, Valid: true},
 		Title:             "Generate a title",
+		WorkspaceCwd:      sql.NullString{},
 		CollaborationMode: string(CollaborationModeDefault),
 	})
 	if err != nil {
@@ -227,6 +231,7 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 	dbSession, err := s.q.UpdateSession(ctx, db.UpdateSessionParams{
 		ID:                   session.ID,
 		Title:                session.Title,
+		WorkspaceCwd:         sql.NullString{String: session.WorkspaceCWD, Valid: session.WorkspaceCWD != ""},
 		CollaborationMode:    string(NormalizeCollaborationMode(string(session.CollaborationMode))),
 		PromptTokens:         session.PromptTokens,
 		CompletionTokens:     session.CompletionTokens,
@@ -311,6 +316,7 @@ func (s service) fromDBItem(item db.Session) Session {
 		ID:                   item.ID,
 		ParentSessionID:      item.ParentSessionID.String,
 		Title:                item.Title,
+		WorkspaceCWD:         item.WorkspaceCwd.String,
 		CollaborationMode:    NormalizeCollaborationMode(item.CollaborationMode),
 		MessageCount:         item.MessageCount,
 		PromptTokens:         item.PromptTokens,

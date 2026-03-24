@@ -3,6 +3,7 @@ INSERT INTO sessions (
     id,
     parent_session_id,
     title,
+    workspace_cwd,
     collaboration_mode,
     message_count,
     prompt_tokens,
@@ -12,6 +13,7 @@ INSERT INTO sessions (
     updated_at,
     created_at
 ) VALUES (
+    ?,
     ?,
     ?,
     ?,
@@ -47,6 +49,7 @@ ORDER BY updated_at DESC;
 UPDATE sessions
 SET
     title = ?,
+    workspace_cwd = ?,
     collaboration_mode = ?,
     prompt_tokens = ?,
     completion_tokens = ?,

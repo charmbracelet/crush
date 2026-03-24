@@ -5,6 +5,7 @@ Available subagent types:
 
 When to use the Agent tool:
 - Open-ended codebase exploration, pattern hunting, and implementation lookup should usually use the `explore` subagent.
+- The `explore` subagent is read-only and has a restricted `bash` tool for direct local read-only git inspection only. It is suitable for `git diff`, `git status`, `git log`, `git show`, `git blame`, `git rev-parse`, `git merge-base`, and `git ls-files`, but not for mutating git commands, wrapper shells, or general shell work.
 - Independent implementation tasks, test reproduction, or file-local refactors that can proceed without blocking your immediate next step should usually use the `general` subagent.
 - If 2 or more substantial independent tasks can proceed in parallel, you should usually delegate them instead of doing them serially in the main thread.
 - When there are multiple substantial independent tasks, launch multiple Agent tool calls in the same assistant message so they can run in parallel.

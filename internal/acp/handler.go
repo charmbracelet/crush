@@ -136,8 +136,12 @@ func (h *Handler) handleSessionNew(ctx context.Context, req *Request) (any, *RPC
 		return nil, &RPCError{Code: CodeInternalError, Message: fmt.Sprintf("failed to create session: %v", err)}
 	}
 
-	cwd := normalizeSessionCWD(params.CWD)
-	h.setSessionCWD(sess.ID, cwd)
+	requestedCWD := normalizeOptionalSessionCWD(params.CWD)
+	sess, err = h.persistSessionCWD(ctx, sess, requestedCWD)
+	if err != nil {
+		return nil, &RPCError{Code: CodeInternalError, Message: fmt.Sprintf("failed to persist session cwd: %v", err)}
+	}
+	cwd := h.sessionCWDForSession(sess, params.CWD)
 
 	// Update the config store's working directory so tools use the correct CWD.
 	if cfg := h.app.GetConfig(); cfg != nil {
@@ -167,8 +171,12 @@ func (h *Handler) handleSessionLoad(ctx context.Context, req *Request) (any, *RP
 
 	// Replay history as session/update notifications before responding so
 	// clients can deterministically rebuild transcript state during load.
-	cwd := normalizeSessionCWD(params.CWD)
-	h.setSessionCWD(sess.ID, cwd)
+	requestedCWD := normalizeOptionalSessionCWD(params.CWD)
+	sess, err = h.persistSessionCWD(ctx, sess, requestedCWD)
+	if err != nil {
+		return nil, &RPCError{Code: CodeInternalError, Message: fmt.Sprintf("failed to persist session cwd: %v", err)}
+	}
+	cwd := h.sessionCWDForSession(sess, params.CWD)
 
 	// Update the config store's working directory so tools use the correct CWD.
 	if cfg := h.app.GetConfig(); cfg != nil {
@@ -196,7 +204,7 @@ func (h *Handler) replayHistory(ctx context.Context, sessionID string) {
 		case message.User:
 			content := msg.Content().Text
 			if content != "" {
-				h.sendUpdate(sessionID, SessionUpdate{
+				h.sendUpdateSyncWithContext(ctx, sessionID, SessionUpdate{
 					SessionUpdate: SessionUpdateUserMessageChunk,
 					Content:       TextBlock(content),
 				})
@@ -207,7 +215,7 @@ func (h *Handler) replayHistory(ctx context.Context, sessionID string) {
 				if tr.IsError {
 					status = ToolCallStatusFailed
 				}
-				h.sendUpdate(sessionID, SessionUpdate{
+				h.sendUpdateSyncWithContext(ctx, sessionID, SessionUpdate{
 					SessionUpdate: SessionUpdateToolCallUpdate,
 					ToolCallID:    tr.ToolCallID,
 					Title:         tr.Name,
@@ -219,13 +227,13 @@ func (h *Handler) replayHistory(ctx context.Context, sessionID string) {
 		case message.Assistant:
 			content := msg.Content().Text
 			if content != "" {
-				h.sendUpdate(sessionID, SessionUpdate{
+				h.sendUpdateSyncWithContext(ctx, sessionID, SessionUpdate{
 					SessionUpdate: SessionUpdateAgentMessageChunk,
 					Content:       TextBlock(content),
 				})
 			}
 			for _, tc := range msg.ToolCalls() {
-				h.sendUpdate(sessionID, SessionUpdate{
+				h.sendUpdateSyncWithContext(ctx, sessionID, SessionUpdate{
 					SessionUpdate: SessionUpdateToolCall,
 					ToolCallID:    tc.ID,
 					Title:         tc.Name,
@@ -237,7 +245,6 @@ func (h *Handler) replayHistory(ctx context.Context, sessionID string) {
 		}
 	}
 }
-
 // handleSessionPrompt runs a prompt turn and streams updates back.
 func (h *Handler) handleSessionPrompt(ctx context.Context, req *Request) (any, *RPCError) {
 	var params PromptParams
@@ -459,13 +466,29 @@ func (h *Handler) handleSessionCancel(_ context.Context, req *Request) (any, *RP
 
 // sendUpdate dispatches a session/update notification to the connected client.
 func (h *Handler) sendUpdate(sessionID string, update SessionUpdate) {
+	h.sendUpdateWithContext(context.Background(), sessionID, update)
+}
+
+func (h *Handler) sendUpdateWithContext(ctx context.Context, sessionID string, update SessionUpdate) {
 	if h.server == nil {
 		return
 	}
-	h.server.Notify(context.Background(), "session/update", SessionUpdateNotification{
+	h.server.Notify(ctx, "session/update", SessionUpdateNotification{
 		SessionID: sessionID,
 		Update:    update,
 	})
+}
+
+func (h *Handler) sendUpdateSyncWithContext(ctx context.Context, sessionID string, update SessionUpdate) {
+	if h.server == nil {
+		return
+	}
+	if err := h.server.NotifySync(ctx, "session/update", SessionUpdateNotification{
+		SessionID: sessionID,
+		Update:    update,
+	}); err != nil {
+		slog.Warn("ACP: failed to write session update", "session_id", sessionID, "err", err)
+	}
 }
 
 // extractText joins all text-type ContentBlocks into a single string.
@@ -516,6 +539,13 @@ func (h *Handler) setSessionCWD(sessionID, cwd string) {
 	h.mu.Unlock()
 }
 
+func normalizeOptionalSessionCWD(cwd string) string {
+	if strings.TrimSpace(cwd) == "" {
+		return ""
+	}
+	return normalizeSessionCWD(cwd)
+}
+
 func normalizeSessionCWD(cwd string) string {
 	if cwd == "" {
 		cwd = "."
@@ -527,10 +557,26 @@ func normalizeSessionCWD(cwd string) string {
 	return abs
 }
 
-func (h *Handler) sessionCWDForSession(sessionID, fallbackCWD string) string {
+func (h *Handler) persistSessionCWD(ctx context.Context, sess session.Session, cwd string) (session.Session, error) {
+	if cwd != "" && cwd != sess.WorkspaceCWD {
+		sess.WorkspaceCWD = cwd
+		saved, err := h.app.GetSessions().Save(ctx, sess)
+		if err != nil {
+			return session.Session{}, err
+		}
+		sess = saved
+	}
+	h.setSessionCWD(sess.ID, normalizeOptionalSessionCWD(sess.WorkspaceCWD))
+	return sess, nil
+}
+
+func (h *Handler) sessionCWDForSession(sess session.Session, fallbackCWD string) string {
 	h.mu.RLock()
-	cwd := h.sessionCWD[sessionID]
+	cwd := h.sessionCWD[sess.ID]
 	h.mu.RUnlock()
+	if stored := normalizeOptionalSessionCWD(sess.WorkspaceCWD); stored != "" {
+		return stored
+	}
 	if cwd != "" {
 		return cwd
 	}
@@ -678,7 +724,7 @@ func (h *Handler) handleSessionList(ctx context.Context, req *Request) (any, *RP
 		}
 		entry := SessionListEntry{
 			SessionID: s.ID,
-			CWD:       h.sessionCWDForSession(s.ID, params.CWD),
+			CWD:       h.sessionCWDForSession(s, params.CWD),
 			Title:     s.Title,
 		}
 		if s.UpdatedAt != 0 {

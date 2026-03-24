@@ -11,6 +11,7 @@ import (
 	"charm.land/fantasy/providers/openai"
 	"charm.land/fantasy/providers/openaicompat"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -70,6 +71,7 @@ func newTestCoordinator(t *testing.T, env fakeEnv, providerID string, providerCf
 	return &coordinator{
 		cfg:      cfg,
 		sessions: env.sessions,
+		messages: env.messages,
 	}
 }
 
@@ -233,6 +235,103 @@ func TestRunSubAgent(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, resp.IsError)
 		assert.Equal(t, "error generating response", resp.Content)
+	})
+
+	t.Run("falls back to persisted child session assistant content", func(t *testing.T) {
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, providerID, providerCfg)
+
+		parentSession, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+
+		agent := newMockAgent(providerID, 4096, func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
+			_, err := env.messages.Create(ctx, call.SessionID, message.CreateMessageParams{
+				Role: message.Assistant,
+				Parts: []message.ContentPart{
+					message.TextContent{Text: "persisted final answer"},
+					message.Finish{Reason: message.FinishReasonEndTurn},
+				},
+			})
+			require.NoError(t, err)
+			return &fantasy.AgentResult{}, nil
+		})
+
+		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          agent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "test",
+			SessionTitle:   "Test",
+		})
+		require.NoError(t, err)
+		assert.False(t, resp.IsError)
+		assert.Equal(t, "persisted final answer", resp.Content)
+	})
+
+	t.Run("returns empty-response error when neither result nor child session has content", func(t *testing.T) {
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, providerID, providerCfg)
+
+		parentSession, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+
+		agent := newMockAgent(providerID, 4096, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+			return &fantasy.AgentResult{}, nil
+		})
+
+		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          agent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "test",
+			SessionTitle:   "Test",
+		})
+		require.NoError(t, err)
+		assert.True(t, resp.IsError)
+		assert.Equal(t, "no content in response", resp.Content)
+	})
+
+	t.Run("does not fall back to earlier assistant text when latest assistant is empty", func(t *testing.T) {
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, providerID, providerCfg)
+
+		parentSession, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+
+		agent := newMockAgent(providerID, 4096, func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
+			_, err := env.messages.Create(ctx, call.SessionID, message.CreateMessageParams{
+				Role: message.Assistant,
+				Parts: []message.ContentPart{
+					message.TextContent{Text: "earlier text"},
+					message.Finish{Reason: message.FinishReasonToolUse},
+				},
+			})
+			require.NoError(t, err)
+
+			_, err = env.messages.Create(ctx, call.SessionID, message.CreateMessageParams{
+				Role: message.Assistant,
+				Parts: []message.ContentPart{
+					message.Finish{Reason: message.FinishReasonEndTurn},
+				},
+			})
+			require.NoError(t, err)
+
+			return &fantasy.AgentResult{}, nil
+		})
+
+		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          agent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "test",
+			SessionTitle:   "Test",
+		})
+		require.NoError(t, err)
+		assert.True(t, resp.IsError)
+		assert.Equal(t, "no content in response", resp.Content)
 	})
 
 	t.Run("session setup callback is invoked", func(t *testing.T) {

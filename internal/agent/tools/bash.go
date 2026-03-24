@@ -189,10 +189,25 @@ func blockFuncs() []shell.BlockFunc {
 	}
 }
 
-func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelName string, hookMgr *hooks.Manager) fantasy.AgentTool {
+func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelName string, hookMgr *hooks.Manager, opts ...BashToolOptions) fantasy.AgentTool {
+	var toolOpts BashToolOptions
+	if len(opts) > 0 {
+		toolOpts = opts[0]
+	}
+
+	description := bashDescription(attribution, modelName)
+	if toolOpts.DescriptionOverride != "" {
+		description = toolOpts.DescriptionOverride
+	}
+
+	execBlockFuncs := blockFuncs()
+	if toolOpts.RestrictedToGitReadOnly {
+		execBlockFuncs = append(execBlockFuncs, restrictedGitBlockFunc())
+	}
+
 	return fantasy.NewAgentTool(
 		BashToolName,
-		string(bashDescription(attribution, modelName)),
+		string(description),
 		func(ctx context.Context, params BashParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Command == "" {
 				return fantasy.NewTextErrorResponse("missing command"), nil
@@ -234,14 +249,32 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				}
 			}
 
-			isSafeReadOnly := false
-			cmdLower := strings.ToLower(params.Command)
+			if toolOpts.RestrictedToGitReadOnly {
+				if err := validateRestrictedGitCommand(params.Command); err != nil {
+					return fantasy.NewTextErrorResponse(err.Error()), nil
+				}
+				if fallbackCommand != "" {
+					if err := validateRestrictedGitCommand(fallbackCommand); err != nil {
+						return fantasy.NewTextErrorResponse(err.Error()), nil
+					}
+				}
+			}
 
-			for _, safe := range safeCommands {
-				if strings.HasPrefix(cmdLower, safe) {
-					if len(cmdLower) == len(safe) || cmdLower[len(safe)] == ' ' || cmdLower[len(safe)] == '-' {
-						isSafeReadOnly = true
-						break
+			if toolOpts.DisableBackground && params.RunInBackground {
+				return fantasy.NewTextErrorResponse("background execution is disabled for this bash tool"), nil
+			}
+
+			isSafeReadOnly := false
+			if toolOpts.RestrictedToGitReadOnly {
+				isSafeReadOnly = true
+			} else {
+				cmdLower := strings.ToLower(params.Command)
+				for _, safe := range safeCommands {
+					if strings.HasPrefix(cmdLower, safe) {
+						if len(cmdLower) == len(safe) || cmdLower[len(safe)] == ' ' || cmdLower[len(safe)] == '-' {
+							isSafeReadOnly = true
+							break
+						}
 					}
 				}
 			}
@@ -249,18 +282,22 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			// Check if fallback command needs permission (it may be the original unsafe command)
 			fallbackNeedsPermission := false
 			if fallbackCommand != "" {
-				fallbackLower := strings.ToLower(fallbackCommand)
-				fallbackIsSafe := false
-				for _, safe := range safeCommands {
-					if strings.HasPrefix(fallbackLower, safe) {
-						if len(fallbackLower) == len(safe) || fallbackLower[len(safe)] == ' ' || fallbackLower[len(safe)] == '-' {
-							fallbackIsSafe = true
-							break
+				if toolOpts.RestrictedToGitReadOnly {
+					fallbackNeedsPermission = false
+				} else {
+					fallbackLower := strings.ToLower(fallbackCommand)
+					fallbackIsSafe := false
+					for _, safe := range safeCommands {
+						if strings.HasPrefix(fallbackLower, safe) {
+							if len(fallbackLower) == len(safe) || fallbackLower[len(safe)] == ' ' || fallbackLower[len(safe)] == '-' {
+								fallbackIsSafe = true
+								break
+							}
 						}
 					}
-				}
-				if !fallbackIsSafe {
-					fallbackNeedsPermission = true
+					if !fallbackIsSafe {
+						fallbackNeedsPermission = true
+					}
 				}
 			}
 
@@ -296,7 +333,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				attemptedFallback := false
 				for {
 					// Use background context so it continues after tool returns
-					bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), commandToRun, params.Description)
+					bgShell, err := bgManager.Start(context.Background(), execWorkingDir, execBlockFuncs, commandToRun, params.Description)
 					if err != nil {
 						return fantasy.ToolResponse{}, fmt.Errorf("error starting background shell: %w", err)
 					}
@@ -381,7 +418,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			commandToRun := params.Command
 			attemptedFallback := false
 			for {
-				bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), commandToRun, params.Description)
+				bgShell, err := bgManager.Start(context.Background(), execWorkingDir, execBlockFuncs, commandToRun, params.Description)
 				if err != nil {
 					return fantasy.ToolResponse{}, fmt.Errorf("error starting shell: %w", err)
 				}
@@ -390,7 +427,10 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				ticker := time.NewTicker(100 * time.Millisecond)
 				autoBackgroundAfter := cmp.Or(params.AutoBackgroundAfter, DefaultAutoBackgroundAfter)
 				autoBackgroundAfter = max(autoBackgroundAfter, 1)
-				autoBackgroundThreshold := time.Duration(autoBackgroundAfter) * time.Second
+				autoBackgroundThreshold := 24 * time.Hour
+				if !toolOpts.DisableBackground {
+					autoBackgroundThreshold = time.Duration(autoBackgroundAfter) * time.Second
+				}
 				timeout := time.After(autoBackgroundThreshold)
 
 				var stdout, stderr string

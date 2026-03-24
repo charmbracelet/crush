@@ -625,6 +625,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				},
 			},
 		})
+		if err == nil {
+			hydrateAgentResultFromAssistantMessage(result, currentAssistant)
+		}
 		if hookErr := plugin.TriggerChatAfterResponse(genCtx, plugin.ChatAfterResponseInput{
 			SessionID: call.SessionID,
 			Agent:     "session",
@@ -931,6 +934,32 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	a.messageQueue.Set(call.SessionID, queuedMessages[1:])
 	ctx = context.WithValue(ctx, sessionAgentRuntimeConfigContextKey{}, (*sessionAgentRuntimeConfig)(nil))
 	return a.Run(ctx, firstQueuedMessage)
+}
+
+func hydrateAgentResultFromAssistantMessage(result *fantasy.AgentResult, assistant *message.Message) {
+	if result == nil || assistant == nil {
+		return
+	}
+
+	text := assistant.Content().Text
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+
+	if result.Response.Content.Text() != "" {
+		return
+	}
+
+	textPart := fantasy.TextContent{Text: text}
+	result.Response.Content = append(fantasy.ResponseContent{textPart}, result.Response.Content...)
+
+	if len(result.Steps) == 0 {
+		return
+	}
+	last := &result.Steps[len(result.Steps)-1]
+	if last.Content.Text() == "" {
+		last.Content = append(fantasy.ResponseContent{textPart}, last.Content...)
+	}
 }
 
 // isContextLengthError checks if the error is due to context length exceeding the model's limit.

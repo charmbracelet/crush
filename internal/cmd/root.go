@@ -237,7 +237,8 @@ func setupApp(cmd *cobra.Command) (*app.App, error) {
 	}
 
 	// Register this project in the centralized projects list.
-	if err := projects.Register(cwd, cfg.Options.DataDirectory); err != nil {
+	projectDir := store.WorkingDir()
+	if err := projects.Register(projectDir, cfg.Options.DataDirectory); err != nil {
 		slog.Warn("Failed to register project", "error", err)
 		// Non-fatal: continue even if registration fails
 	}
@@ -300,7 +301,11 @@ func ResolveCwd(cmd *cobra.Command) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("failed to change directory: %v", err)
 		}
-		return cwd, nil
+		resolved, err := os.Getwd()
+		if err != nil {
+			return "", fmt.Errorf("failed to get current working directory: %v", err)
+		}
+		return resolved, nil
 	}
 	cwd, err := os.Getwd()
 	if err != nil {

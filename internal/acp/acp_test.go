@@ -2,7 +2,6 @@ package acp_test
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -77,6 +76,7 @@ func (f *fakeSessionService) List(_ context.Context) ([]session.Session, error) 
 }
 
 func (f *fakeSessionService) Save(_ context.Context, s session.Session) (session.Session, error) {
+	f.sessions[s.ID] = s
 	return s, nil
 }
 
@@ -180,7 +180,6 @@ func (a *fakeApp) GetPermissions() permission.Service { return nil }
 func TestSessionListIncludesCWD(t *testing.T) {
 	t.Parallel()
 
-	var outBuf bytes.Buffer
 	cwd := "/tmp/project"
 	reqLine := buildRequest(t, 1, "session/list", acp.SessionListParams{CWD: cwd})
 
@@ -191,18 +190,7 @@ func TestSessionListIncludesCWD(t *testing.T) {
 	}
 	app.sessions.sessions["sess-1"] = session.Session{ID: "sess-1", Title: "test"}
 
-	handler := acp.NewHandler(app)
-	server := acp.NewServerWithIO(handler, strings.NewReader(reqLine), &outBuf)
-	handler.SetServer(server)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	go func() { _ = server.Serve(ctx) }()
-	time.Sleep(100 * time.Millisecond)
-
-	scanner := bufio.NewScanner(&outBuf)
-	resp := readResponse(t, scanner)
+	resp := runSingleRequest(t, app, reqLine)
 	require.Nil(t, resp.Error)
 
 	var result acp.SessionListResult
@@ -215,6 +203,29 @@ func TestSessionListIncludesCWD(t *testing.T) {
 	expectedCWD, err := filepath.Abs(filepath.FromSlash(cwd))
 	require.NoError(t, err)
 	require.Equal(t, expectedCWD, result.Sessions[0].CWD)
+}
+
+func TestSessionListPrefersPersistedCWD(t *testing.T) {
+	t.Parallel()
+
+	reqLine := buildRequest(t, 1, "session/list", acp.SessionListParams{CWD: "/fallback"})
+
+	app := &fakeApp{
+		sessions:    newFakeSessionService(),
+		messages:    newFakeMessageService(),
+		coordinator: &fakeCoordinator{runResult: &fantasy.AgentResult{}},
+	}
+	savedCWD, err := filepath.Abs(filepath.FromSlash("/persisted/workspace"))
+	require.NoError(t, err)
+	app.sessions.sessions["sess-1"] = session.Session{ID: "sess-1", Title: "test", WorkspaceCWD: savedCWD}
+
+	resp := runSingleRequest(t, app, reqLine)
+	require.Nil(t, resp.Error)
+
+	var result acp.SessionListResult
+	require.NoError(t, json.Unmarshal(resp.Result, &result))
+	require.Len(t, result.Sessions, 1)
+	require.Equal(t, savedCWD, result.Sessions[0].CWD)
 }
 
 // ---- Helpers ----
@@ -242,12 +253,34 @@ func readResponse(t *testing.T, scanner *bufio.Scanner) acp.Response {
 	return resp
 }
 
+func runSingleRequest(t *testing.T, app *fakeApp, reqLine string) acp.Response {
+	t.Helper()
+
+	inReader, inWriter := io.Pipe()
+	outReader, outWriter := io.Pipe()
+
+	handler := acp.NewHandler(app)
+	server := acp.NewServerWithIO(handler, inReader, outWriter)
+	handler.SetServer(server)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	go func() { _ = server.Serve(ctx) }()
+
+	_, err := fmt.Fprint(inWriter, reqLine)
+	require.NoError(t, err)
+	require.NoError(t, inWriter.Close())
+
+	scanner := bufio.NewScanner(outReader)
+	return readResponse(t, scanner)
+}
+
 // ---- Tests ----
 
 func TestInitialize(t *testing.T) {
 	t.Parallel()
 
-	var outBuf bytes.Buffer
 	reqLine := buildRequest(t, 1, "initialize", acp.InitializeParams{
 		ProtocolVersion: 1,
 		ClientInfo:      acp.ClientInfo{Name: "test-client", Version: "1.0"},
@@ -259,18 +292,7 @@ func TestInitialize(t *testing.T) {
 		coordinator: &fakeCoordinator{runResult: &fantasy.AgentResult{}},
 	}
 
-	handler := acp.NewHandler(app)
-	server := acp.NewServerWithIO(handler, strings.NewReader(reqLine), &outBuf)
-	handler.SetServer(server)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	go func() { _ = server.Serve(ctx) }()
-	time.Sleep(100 * time.Millisecond) // let it process
-
-	scanner := bufio.NewScanner(&outBuf)
-	resp := readResponse(t, scanner)
+	resp := runSingleRequest(t, app, reqLine)
 
 	require.Nil(t, resp.Error, "unexpected error: %v", resp.Error)
 	require.NotNil(t, resp.Result)
@@ -285,7 +307,6 @@ func TestInitialize(t *testing.T) {
 func TestSessionNew(t *testing.T) {
 	t.Parallel()
 
-	var outBuf bytes.Buffer
 	reqLine := buildRequest(t, 1, "session/new", acp.SessionNewParams{CWD: "/tmp"})
 
 	app := &fakeApp{
@@ -294,18 +315,7 @@ func TestSessionNew(t *testing.T) {
 		coordinator: &fakeCoordinator{runResult: &fantasy.AgentResult{}},
 	}
 
-	handler := acp.NewHandler(app)
-	server := acp.NewServerWithIO(handler, strings.NewReader(reqLine), &outBuf)
-	handler.SetServer(server)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	go func() { _ = server.Serve(ctx) }()
-	time.Sleep(100 * time.Millisecond)
-
-	scanner := bufio.NewScanner(&outBuf)
-	resp := readResponse(t, scanner)
+	resp := runSingleRequest(t, app, reqLine)
 
 	require.Nil(t, resp.Error)
 	var result acp.SessionNewResult
@@ -431,10 +441,35 @@ func TestSessionLoadReplaysHistoryBeforeResponse(t *testing.T) {
 	require.Nil(t, resp.Error)
 }
 
+func TestSessionLoadPersistsCWD(t *testing.T) {
+	t.Parallel()
+
+	sessionID := "test-load-save-cwd"
+	reqLine := buildRequest(t, 1, "session/load", acp.SessionLoadParams{
+		SessionID: sessionID,
+		CWD:       "/tmp/acp-workspace",
+	})
+
+	app := &fakeApp{
+		sessions:    newFakeSessionService(),
+		messages:    newFakeMessageService(),
+		coordinator: &fakeCoordinator{runResult: &fantasy.AgentResult{}},
+	}
+	app.sessions.sessions[sessionID] = session.Session{ID: sessionID, Title: "loaded-session"}
+
+	resp := runSingleRequest(t, app, reqLine)
+	require.Nil(t, resp.Error)
+
+	saved, ok := app.sessions.sessions[sessionID]
+	require.True(t, ok)
+	expectedCWD, err := filepath.Abs(filepath.FromSlash("/tmp/acp-workspace"))
+	require.NoError(t, err)
+	require.Equal(t, expectedCWD, saved.WorkspaceCWD)
+}
+
 func TestUnknownMethod(t *testing.T) {
 	t.Parallel()
 
-	var outBuf bytes.Buffer
 	reqLine := buildRequest(t, 1, "unknown/method", nil)
 
 	app := &fakeApp{
@@ -443,18 +478,7 @@ func TestUnknownMethod(t *testing.T) {
 		coordinator: &fakeCoordinator{runResult: &fantasy.AgentResult{}},
 	}
 
-	handler := acp.NewHandler(app)
-	server := acp.NewServerWithIO(handler, strings.NewReader(reqLine), &outBuf)
-	handler.SetServer(server)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	go func() { _ = server.Serve(ctx) }()
-	time.Sleep(100 * time.Millisecond)
-
-	scanner := bufio.NewScanner(&outBuf)
-	resp := readResponse(t, scanner)
+	resp := runSingleRequest(t, app, reqLine)
 
 	require.NotNil(t, resp.Error)
 	require.Equal(t, acp.CodeMethodNotFound, resp.Error.Code)
@@ -463,7 +487,6 @@ func TestUnknownMethod(t *testing.T) {
 func TestSetConfigOptionMethodIsRouted(t *testing.T) {
 	t.Parallel()
 
-	var outBuf bytes.Buffer
 	reqLine := buildRequest(t, 1, "session/set_config_option", acp.SetConfigOptionParams{
 		SessionID: "sess-1",
 		ConfigID:  "model_large",
@@ -476,18 +499,7 @@ func TestSetConfigOptionMethodIsRouted(t *testing.T) {
 		coordinator: &fakeCoordinator{runResult: &fantasy.AgentResult{}},
 	}
 
-	handler := acp.NewHandler(app)
-	server := acp.NewServerWithIO(handler, strings.NewReader(reqLine), &outBuf)
-	handler.SetServer(server)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	go func() { _ = server.Serve(ctx) }()
-	time.Sleep(100 * time.Millisecond)
-
-	scanner := bufio.NewScanner(&outBuf)
-	resp := readResponse(t, scanner)
+	resp := runSingleRequest(t, app, reqLine)
 
 	require.NotNil(t, resp.Error)
 	// Should be handled by set_config_option and fail params, not method not found.

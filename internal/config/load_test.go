@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -69,6 +70,119 @@ func TestConfig_setDefaults(t *testing.T) {
 	for _, path := range defaultContextPaths {
 		require.Contains(t, cfg.Options.ContextPaths, path)
 	}
+}
+
+func TestShouldUseGlobalWorkspaceDataDirForOS(t *testing.T) {
+	t.Run("windows system32 paths use global data dir", func(t *testing.T) {
+		require.True(t, shouldUseGlobalWorkspaceDataDirForOS("windows", `C:\Windows\System32`, `C:\Windows`))
+		require.True(t, shouldUseGlobalWorkspaceDataDirForOS("windows", `C:\Windows\System32\drivers\etc`, `C:\Windows`))
+		require.False(t, shouldUseGlobalWorkspaceDataDirForOS("windows", `C:\Users\dev\project`, `C:\Windows`))
+	})
+
+	t.Run("unix root path uses global data dir", func(t *testing.T) {
+		require.True(t, shouldUseGlobalWorkspaceDataDirForOS("linux", "/", ""))
+		require.False(t, shouldUseGlobalWorkspaceDataDirForOS("linux", "/home/dev/project", ""))
+	})
+}
+
+func TestWorkspaceDataDirNameStable(t *testing.T) {
+	nameA := workspaceDataDirName("/tmp/project-a")
+	nameB := workspaceDataDirName("/tmp/project-a")
+	nameC := workspaceDataDirName("/tmp/project-b")
+
+	require.Equal(t, nameA, nameB)
+	require.NotEqual(t, nameA, nameC)
+	require.NotEmpty(t, nameA)
+}
+
+func TestConfig_setDefaultsUsesGlobalWorkspaceDataDirForUnsafeWorkingDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("CRUSH_GLOBAL_DATA", filepath.Join(tmpDir, "global-data"))
+
+	unsafeWorkingDir := string(filepath.Separator)
+	if runtime.GOOS == "windows" {
+		windowsDir := os.Getenv("WINDIR")
+		if windowsDir == "" {
+			windowsDir = `C:\Windows`
+		}
+		unsafeWorkingDir = filepath.Join(windowsDir, "System32")
+	}
+
+	cfg := &Config{}
+	cfg.setDefaults(unsafeWorkingDir, "")
+
+	expectedRoot := filepath.Join(tmpDir, "global-data", "workspaces")
+	require.True(t, isPathWithin(cfg.Options.DataDirectory, expectedRoot))
+}
+
+func TestWorkspaceIdentityDirPrefersWorkspaceEnv(t *testing.T) {
+	t.Setenv("CRUSH_WORKSPACE_CWD", "")
+	t.Setenv("ZED_WORKSPACE_ROOT", "")
+	t.Setenv("ZED_WORKTREE_ROOT", "")
+	t.Setenv("ZED_CWD", "")
+	t.Setenv("VSCODE_CWD", "")
+	t.Setenv("PROJECT_ROOT", "")
+	t.Setenv("WORKSPACE_ROOT", "")
+	t.Setenv("INIT_CWD", "")
+	t.Setenv("PWD", "")
+
+	envWorkspace := "/tmp/project-from-env"
+	fallback := "/tmp/fallback"
+	if runtime.GOOS == "windows" {
+		envWorkspace = `C:\tmp\project-from-env`
+		fallback = `C:\tmp\fallback`
+	}
+
+	t.Setenv("PROJECT_ROOT", envWorkspace)
+	require.Equal(t, normalizeWorkspaceIdentityDir(envWorkspace), workspaceIdentityDir(fallback))
+}
+
+func TestWorkspaceIdentityDirSkipsUnsafeEnvValue(t *testing.T) {
+	t.Setenv("CRUSH_WORKSPACE_CWD", "")
+	t.Setenv("ZED_WORKSPACE_ROOT", "")
+	t.Setenv("ZED_WORKTREE_ROOT", "")
+	t.Setenv("ZED_CWD", "")
+	t.Setenv("VSCODE_CWD", "")
+	t.Setenv("PROJECT_ROOT", "")
+	t.Setenv("WORKSPACE_ROOT", "")
+	t.Setenv("INIT_CWD", "")
+	t.Setenv("PWD", "")
+
+	fallback := "/tmp/fallback"
+	unsafe := string(filepath.Separator)
+	if runtime.GOOS == "windows" {
+		windowsDir := os.Getenv("WINDIR")
+		if windowsDir == "" {
+			windowsDir = `C:\Windows`
+		}
+		unsafe = filepath.Join(windowsDir, "System32")
+		fallback = `C:\tmp\fallback`
+	}
+
+	t.Setenv("PROJECT_ROOT", unsafe)
+	require.Equal(t, normalizeWorkspaceIdentityDir(fallback), workspaceIdentityDir(fallback))
+}
+
+func TestWorkspaceIdentityDirFallsBackToPwd(t *testing.T) {
+	t.Setenv("CRUSH_WORKSPACE_CWD", "")
+	t.Setenv("ZED_WORKSPACE_ROOT", "")
+	t.Setenv("ZED_WORKTREE_ROOT", "")
+	t.Setenv("ZED_CWD", "")
+	t.Setenv("VSCODE_CWD", "")
+	t.Setenv("PROJECT_ROOT", "")
+	t.Setenv("WORKSPACE_ROOT", "")
+	t.Setenv("INIT_CWD", "")
+	t.Setenv("PWD", "")
+
+	pwd := "/tmp/pwd-workspace"
+	fallback := "/tmp/fallback"
+	if runtime.GOOS == "windows" {
+		pwd = `C:\tmp\pwd-workspace`
+		fallback = `C:\tmp\fallback`
+	}
+
+	t.Setenv("PWD", pwd)
+	require.Equal(t, normalizeWorkspaceIdentityDir(pwd), workspaceIdentityDir(fallback))
 }
 
 func TestConfig_configureProviders(t *testing.T) {
@@ -488,7 +602,7 @@ func TestConfig_setupAgentsWithNoDisabledTools(t *testing.T) {
 
 	exploreAgent, ok := cfg.Agents[AgentExplore]
 	require.True(t, ok)
-	assert.Equal(t, []string{"glob", "grep", "ls", "sourcegraph", "view"}, exploreAgent.AllowedTools)
+	assert.Equal(t, []string{"bash", "glob", "grep", "ls", "sourcegraph", "view"}, exploreAgent.AllowedTools)
 	assert.Equal(t, AgentModeSubagent, exploreAgent.Mode)
 }
 
@@ -518,6 +632,7 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 	cfg := &Config{
 		Options: &Options{
 			DisabledTools: []string{
+				"bash",
 				"glob",
 				"grep",
 				"ls",
@@ -530,11 +645,11 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 	cfg.SetupAgents()
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
-	assert.Equal(t, []string{"agent", "bash", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "request_user_input", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "request_user_input", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
 
 	generalAgent, ok := cfg.Agents[AgentGeneral]
 	require.True(t, ok)
-	assert.Equal(t, []string{"bash", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "write", "list_mcp_resources", "read_mcp_resource"}, generalAgent.AllowedTools)
+	assert.Equal(t, []string{"job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "write", "list_mcp_resources", "read_mcp_resource"}, generalAgent.AllowedTools)
 }
 
 func TestConfig_setupAgentsMergesConfiguredAgentsAndTaskAlias(t *testing.T) {

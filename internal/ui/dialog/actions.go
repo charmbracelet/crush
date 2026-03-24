@@ -62,6 +62,10 @@ type (
 	ActionSelectReasoningEffort struct {
 		Effort string
 	}
+	// ActionSelectCompactionMethod is a message indicating a compaction method has been selected.
+	ActionSelectCompactionMethod struct {
+		Method string
+	}
 	ActionPermissionResponse struct {
 		Permission permission.PermissionRequest
 		Action     PermissionAction

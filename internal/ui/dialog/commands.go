@@ -458,6 +458,11 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	if c.windowWidth >= sidebarCompactModeBreakpoint && c.hasSession {
 		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_sidebar", "Toggle Sidebar", "", ActionToggleCompactMode{}))
 	}
+
+	commands = append(commands, NewCommandItem(c.com.Styles, "select_compaction", "Select Compaction Method", "", ActionOpenDialog{
+		DialogID: CompactionID,
+	}))
+
 	if c.hasSession {
 		cfgPrime := c.com.Config()
 		agentCfg := cfgPrime.Agents[config.AgentCoder]

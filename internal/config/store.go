@@ -151,6 +151,15 @@ func (s *ConfigStore) SetCompactMode(scope Scope, enabled bool) error {
 	return s.SetConfigField(scope, "options.tui.compact_mode", enabled)
 }
 
+// SetCompactionMethod sets the compaction method and persists it.
+func (s *ConfigStore) SetCompactionMethod(scope Scope, method CompactionMethod) error {
+	if s.config.Options == nil {
+		s.config.Options = &Options{}
+	}
+	s.config.Options.CompactionMethod = method
+	return s.SetConfigField(scope, "options.compaction_method", method)
+}
+
 // SetTransparentBackground sets the transparent background setting and persists it.
 func (s *ConfigStore) SetTransparentBackground(scope Scope, enabled bool) error {
 	if s.config.Options == nil {

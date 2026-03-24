@@ -154,13 +154,14 @@ func testSessionAgent(env fakeEnv, large, small fantasy.LanguageModel, systemPro
 		},
 	}
 	agent := NewSessionAgent(SessionAgentOptions{
-		LargeModel:   largeModel,
-		SmallModel:   smallModel,
-		SystemPrompt: systemPrompt,
-		IsYolo:       true,
-		Sessions:     env.sessions,
-		Messages:     env.messages,
-		Tools:        tools,
+		LargeModel:           largeModel,
+		SmallModel:           smallModel,
+		SystemPrompt:         systemPrompt,
+		DisableContextStatus: true,
+		IsYolo:               true,
+		Sessions:             env.sessions,
+		Messages:             env.messages,
+		Tools:                tools,
 	})
 	return agent
 }

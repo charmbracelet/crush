@@ -1169,14 +1169,10 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	if err != nil {
 		return fmt.Errorf("failed to get session: %w", err)
 	}
-	msgs, err := a.getSessionMessages(ctx, currentSession)
-	if err != nil {
-		return err
-	}
 	if truncErr := a.truncateOversizedToolResults(ctx, sessionID); truncErr != nil {
 		slog.Warn("Failed to truncate oversized tool results before summarization", "error", truncErr, "session_id", sessionID)
 	}
-	msgs, err = a.getSessionMessages(ctx, currentSession)
+	msgs, err := a.getSessionMessages(ctx, currentSession)
 	if err != nil {
 		return err
 	}

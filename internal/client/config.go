@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/charmbracelet/crush/internal/proto"
 )
 
 // SetConfigField sets a config key/value pair on the server.
@@ -183,6 +184,23 @@ func (c *Client) GetInitializePrompt(ctx context.Context, id string) (string, er
 		return "", fmt.Errorf("failed to decode init prompt response: %w", err)
 	}
 	return result.Prompt, nil
+}
+
+// ListSkills retrieves the visible skills for a workspace.
+func (c *Client) ListSkills(ctx context.Context, id string) ([]proto.SkillInfo, error) {
+	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/skills", id), nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list skills: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to list skills: status code %d", rsp.StatusCode)
+	}
+	var skills []proto.SkillInfo
+	if err := json.NewDecoder(rsp.Body).Decode(&skills); err != nil {
+		return nil, fmt.Errorf("failed to decode skills: %w", err)
+	}
+	return skills, nil
 }
 
 // MCPResourceContents holds the contents of an MCP resource.

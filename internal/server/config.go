@@ -259,6 +259,26 @@ func (c *controllerV1) handleGetWorkspaceProjectInitPrompt(w http.ResponseWriter
 	jsonEncode(w, proto.ProjectInitPromptResponse{Prompt: prompt})
 }
 
+// handleGetWorkspaceSkills returns the effective visible skills for a workspace.
+//
+//	@Summary		List visible skills
+//	@Tags			skills
+//	@Produce		json
+//	@Param			id	path		string			true	"Workspace ID"
+//	@Success		200	{array}		proto.SkillInfo
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/skills [get]
+func (c *controllerV1) handleGetWorkspaceSkills(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	skills, err := c.backend.ListSkills(id)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, skills)
+}
+
 // handlePostWorkspaceMCPEnableDocker enables the Docker MCP server.
 //
 //	@Summary		Enable Docker MCP

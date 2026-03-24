@@ -10,6 +10,8 @@ import (
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/charmbracelet/crush/internal/proto"
+	"github.com/charmbracelet/crush/internal/skills"
 )
 
 // MCPResourceContents holds the contents of an MCP resource returned
@@ -114,6 +116,26 @@ func (b *Backend) InitializePrompt(workspaceID string) (string, error) {
 		return "", err
 	}
 	return agent.InitializePrompt(ws.Cfg)
+}
+
+// ListSkills returns the effective visible skills for a workspace.
+func (b *Backend) ListSkills(workspaceID string) ([]proto.SkillInfo, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	entries := skills.Catalog(ws.Cfg)
+	result := make([]proto.SkillInfo, len(entries))
+	for i, entry := range entries {
+		result[i] = proto.SkillInfo{
+			ID:          entry.ID,
+			Name:        entry.Name,
+			Description: entry.Description,
+			Label:       entry.Label,
+			Source:      string(entry.Source),
+		}
+	}
+	return result, nil
 }
 
 // EnableDockerMCP validates Docker MCP availability, stages the

@@ -28,6 +28,15 @@ type Error struct {
 	Message string `json:"message"`
 }
 
+// SkillInfo describes a visible skill exposed to a frontend.
+type SkillInfo struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Label       string `json:"label"`
+	Source      string `json:"source"`
+}
+
 // AgentInfo represents information about the agent.
 type AgentInfo struct {
 	IsBusy   bool                 `json:"is_busy"`

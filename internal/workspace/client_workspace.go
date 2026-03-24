@@ -22,6 +22,7 @@ import (
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
@@ -470,6 +471,24 @@ func (w *ClientWorkspace) MarkProjectInitialized() error {
 
 func (w *ClientWorkspace) InitializePrompt() (string, error) {
 	return w.client.GetInitializePrompt(context.Background(), w.workspaceID())
+}
+
+func (w *ClientWorkspace) ListSkills(ctx context.Context) ([]skills.CatalogEntry, error) {
+	entries, err := w.client.ListSkills(ctx, w.workspaceID())
+	if err != nil {
+		return nil, err
+	}
+	result := make([]skills.CatalogEntry, len(entries))
+	for i, entry := range entries {
+		result[i] = skills.CatalogEntry{
+			ID:          entry.ID,
+			Name:        entry.Name,
+			Description: entry.Description,
+			Label:       entry.Label,
+			Source:      skills.SourceType(entry.Source),
+		}
+	}
+	return result, nil
 }
 
 // -- MCP operations --

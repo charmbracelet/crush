@@ -37,6 +37,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/chat"
@@ -119,6 +120,11 @@ type (
 	// mcpPromptsLoadedMsg is sent when mcp prompts are loaded.
 	mcpPromptsLoadedMsg struct {
 		Prompts []commands.MCPPrompt
+	}
+	skillsLoadedMsg struct {
+		LoadID int
+		Skills []skills.CatalogEntry
+		Err    error
 	}
 	// mcpStateChangedMsg is sent when there is a change in MCP client states.
 	mcpStateChangedMsg struct {
@@ -227,6 +233,7 @@ type UI struct {
 	// custom commands & mcp commands
 	customCommands []commands.CustomCommand
 	mcpPrompts     []commands.MCPPrompt
+	skillsLoadID   int
 
 	// forceCompactMode tracks whether compact mode is forced by user toggle
 	forceCompactMode bool
@@ -446,6 +453,13 @@ func (m *UI) loadCustomCommands() tea.Cmd {
 	}
 }
 
+func (m *UI) loadSkills(loadID int) tea.Cmd {
+	return func() tea.Msg {
+		skills, err := m.com.Workspace.ListSkills(context.Background())
+		return skillsLoadedMsg{LoadID: loadID, Skills: skills, Err: err}
+	}
+}
+
 // loadMCPrompts loads the MCP prompts asynchronously.
 func (m *UI) loadMCPrompts() tea.Msg {
 	prompts, err := commands.LoadMCPPrompts()
@@ -554,6 +568,21 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		commands, ok := dia.(*dialog.Commands)
 		if ok {
 			commands.SetMCPPrompts(m.mcpPrompts)
+		}
+
+	case skillsLoadedMsg:
+		if msg.LoadID != m.skillsLoadID {
+			break
+		}
+		if loader, ok := m.dialog.Dialog(dialog.SkillsID).(dialog.LoadingDialog); ok {
+			loader.StopLoading()
+		}
+		if msg.Err != nil {
+			cmds = append(cmds, util.ReportError(msg.Err))
+			break
+		}
+		if skillsDialog, ok := m.dialog.Dialog(dialog.SkillsID).(*dialog.Skills); ok {
+			skillsDialog.SetSkills(msg.Skills)
 		}
 
 	case promptHistoryLoadedMsg:
@@ -1528,6 +1557,10 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 				return nil
 			},
 		))
+
+	case dialog.ActionAttachSkill:
+		m.dialog.CloseDialog(dialog.SkillsID)
+		cmds = append(cmds, m.attachSkill(msg.ID, msg.Name))
 
 	case dialog.ActionRunCustomCommand:
 		if len(msg.Arguments) > 0 && msg.Args == nil {
@@ -2921,6 +2954,21 @@ func (m *UI) cacheSidebarLogo(width int) {
 	m.sidebarLogo = renderLogo(m.com.Styles, true, width)
 }
 
+func (m *UI) attachSkill(skillID, name string) tea.Cmd {
+	return func() tea.Msg {
+		content, err := skills.ReadContent(m.com.Workspace, skillID)
+		if err != nil {
+			return util.NewErrorMsg(err)
+		}
+		return message.Attachment{
+			FilePath: skillID,
+			FileName: name,
+			MimeType: "text/markdown",
+			Content:  content,
+		}
+	}
+}
+
 // sendMessage sends a message with the given content and attachments.
 func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.Cmd {
 	if !m.com.Workspace.AgentIsReady() {
@@ -3030,6 +3078,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openCommandsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.SkillsID:
+		if cmd := m.openSkillsDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.ReasoningID:
 		if cmd := m.openReasoningDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -3105,6 +3157,30 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 	m.dialog.OpenDialog(commands)
 
 	return commands.InitialCmd()
+}
+
+// openSkillsDialog opens the skills dialog.
+func (m *UI) openSkillsDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.SkillsID) {
+		m.dialog.BringToFront(dialog.SkillsID)
+	} else {
+		skillsDialog := dialog.NewSkills(m.com, nil)
+		m.dialog.OpenDialog(skillsDialog)
+	}
+	if skillsDialog, ok := m.dialog.Dialog(dialog.SkillsID).(*dialog.Skills); ok {
+		skillsDialog.SetSkills(nil)
+	}
+	m.skillsLoadID++
+	loadID := m.skillsLoadID
+
+	var cmds []tea.Cmd
+	if loader, ok := m.dialog.Dialog(dialog.SkillsID).(dialog.LoadingDialog); ok {
+		if cmd := loader.StartLoading(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+	cmds = append(cmds, m.loadSkills(loadID))
+	return tea.Batch(cmds...)
 }
 
 // openReasoningDialog opens the reasoning effort dialog.

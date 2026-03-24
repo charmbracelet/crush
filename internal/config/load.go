@@ -414,6 +414,9 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 		}
 	}
 
+	// Project specific skills dirs.
+	c.Options.SkillsPaths = append(c.Options.SkillsPaths, ProjectSkillsDir(workingDir)...)
+
 	if str, ok := os.LookupEnv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE"); ok {
 		c.Options.DisableProviderAutoUpdate, _ = strconv.ParseBool(str)
 	}
@@ -821,6 +824,17 @@ func GlobalSkillsDirs() []string {
 	}
 
 	return paths
+}
+
+// ProjectSkillsDir returns the default project directories for which Crush
+// will look for skills.
+func ProjectSkillsDir(workingDir string) []string {
+	return []string{
+		filepath.Join(workingDir, ".agents/skills"),
+		filepath.Join(workingDir, ".crush/skills"),
+		filepath.Join(workingDir, ".claude/skills"),
+		filepath.Join(workingDir, ".cursor/skills"),
+	}
 }
 
 func isAppleTerminal() bool { return os.Getenv("TERM_PROGRAM") == "Apple_Terminal" }

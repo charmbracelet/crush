@@ -289,7 +289,7 @@ transport types: `stdio` for command-line servers, `http` for HTTP endpoints,
 and `sse` for Server-Sent Events.
 Environment variable expansion is supported using `$(echo $VAR)` syntax.
 For file-based secrets (e.g. sops, systemd credentials, Docker secrets),
-use `env_files` to map variable names to filepaths — Crush reads the file contents at startup
+use `env_files` to map variable names to filepaths — Crush reads the file contents at startup.
 
 ```json
 {

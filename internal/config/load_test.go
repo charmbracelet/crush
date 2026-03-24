@@ -1462,3 +1462,102 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		require.Equal(t, int64(100), large.MaxTokens)
 	})
 }
+
+func TestLoadConfig_MCPEnvFiles(t *testing.T) {
+	t.Parallel()
+
+	data := []byte(`{
+		"mcp": {
+			"codeberg": {
+				"type": "stdio",
+				"command": "/path/to/forgejo-mcp",
+				"args": ["transport", "stdio", "--url", "https://codeberg.org"],
+				"env_files": {
+					"FORGEJO_ACCESS_TOKEN": "/run/secrets/codeberg_token"
+				}
+			}
+		}
+	}`)
+
+	cfg, err := loadFromBytes([][]byte{data})
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+
+	// env_files should be parsed into MCPConfig.EnvFiles
+	mcp, ok := cfg.MCP["codeberg"]
+	require.True(t, ok)
+
+	require.Equal(t, MCPStdio, mcp.Type)
+	require.Equal(t, "/path/to/forgejo-mcp", mcp.Command)
+	// file path should be stored as-is, without resolution
+	require.Equal(t, map[string]string{
+		"FORGEJO_ACCESS_TOKEN": "/run/secrets/codeberg_token",
+	}, mcp.EnvFiles)
+}
+
+func TestMCPConfig_ResolvedEnv_WithEnvFiles(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	secretPath := filepath.Join(dir, "token")
+	require.NoError(t, os.WriteFile(secretPath, []byte("my-secret-token\n"), 0o600))
+
+	m := MCPConfig{
+		EnvFiles: map[string]string{
+			"FORGEJO_ACCESS_TOKEN": secretPath,
+		},
+	}
+
+	// trailing newline should be stripped, consistent with $(cat file) behavior
+	require.Contains(t, m.ResolvedEnv(), "FORGEJO_ACCESS_TOKEN=my-secret-token")
+}
+
+func TestMCPConfig_ResolvedEnv_MissingEnvFile(t *testing.T) {
+	t.Parallel()
+
+	m := MCPConfig{
+		EnvFiles: map[string]string{
+			"FORGEJO_ACCESS_TOKEN": "/nonexistent/path/token",
+		},
+	}
+
+	// missing file should not crash, just be skipped
+	require.Empty(t, m.ResolvedEnv())
+}
+
+func TestMCPConfig_ResolvedEnv_EnvAndEnvFilesMerged(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	secretPath := filepath.Join(dir, "token")
+	require.NoError(t, os.WriteFile(secretPath, []byte("file-token"), 0o600))
+
+	m := MCPConfig{
+		Env:      map[string]string{"NODE_ENV": "production"},
+		EnvFiles: map[string]string{"FORGEJO_ACCESS_TOKEN": secretPath},
+	}
+
+	envs := m.ResolvedEnv()
+	// both sources should be present in the result
+	require.Contains(t, envs, "NODE_ENV=production")
+	require.Contains(t, envs, "FORGEJO_ACCESS_TOKEN=file-token")
+}
+
+func TestMCPConfig_ResolvedEnv_DuplicateKeyEnvWins(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	secretPath := filepath.Join(dir, "token")
+	require.NoError(t, os.WriteFile(secretPath, []byte("file-value"), 0o600))
+
+	m := MCPConfig{
+		Env:      map[string]string{"MY_VAR": "env-value"},
+		EnvFiles: map[string]string{"MY_VAR": secretPath},
+	}
+
+	envs := m.ResolvedEnv()
+	// both entries are present; last-wins behavior means env_files takes precedence
+	require.Contains(t, envs, "MY_VAR=env-value")
+	require.Contains(t, envs, "MY_VAR=file-value")
+}
+

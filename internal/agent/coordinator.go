@@ -640,6 +640,12 @@ func (c *coordinator) refreshSessionAgentRuntimeConfig(ctx context.Context, curr
 
 	mergedOptions, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(inferenceModel, providerCfg)
 	systemPromptPrefix := providerCfg.SystemPromptPrefix
+
+	allowedToolNames := make([]string, len(toolSet))
+	for i, tool := range toolSet {
+		allowedToolNames[i] = tool.Info().Name
+	}
+
 	return sessionAgentRuntimeConfig{
 		ProviderOptions:    mergedOptions,
 		MaxOutputTokens:    maxTokens,
@@ -650,7 +656,8 @@ func (c *coordinator) refreshSessionAgentRuntimeConfig(ctx context.Context, curr
 		PresencePenalty:    presPenalty,
 		SystemPrompt:       &systemPrompt,
 		SystemPromptPrefix: &systemPromptPrefix,
-		Tools:              toolSet,
+		CollaborationMode:  mode,
+		AllowedToolNames:   allowedToolNames,
 	}, nil
 }
 

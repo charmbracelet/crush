@@ -18,7 +18,6 @@ import (
 	"log/slog"
 	"os"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -166,16 +165,17 @@ type SessionAgentOptions struct {
 }
 
 type sessionAgentRuntimeConfig struct {
-	ProviderOptions    fantasy.ProviderOptions
-	MaxOutputTokens    int64
-	Temperature        *float64
-	TopP               *float64
-	TopK               *int64
-	FrequencyPenalty   *float64
-	PresencePenalty    *float64
-	SystemPrompt       *string
-	SystemPromptPrefix *string
-	Tools              []fantasy.AgentTool
+	ProviderOptions     fantasy.ProviderOptions
+	MaxOutputTokens     int64
+	Temperature         *float64
+	TopP                *float64
+	TopK                *int64
+	FrequencyPenalty    *float64
+	PresencePenalty     *float64
+	SystemPrompt        *string
+	SystemPromptPrefix  *string
+	CollaborationMode   session.CollaborationMode
+	AllowedToolNames    []string
 }
 
 type sessionAgentRuntimeConfigContextKey struct{}
@@ -253,8 +253,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		if runtimeConfig.SystemPromptPrefix != nil {
 			promptPrefix = *runtimeConfig.SystemPromptPrefix
 		}
-		if runtimeConfig.Tools != nil {
-			agentTools = slices.Clone(runtimeConfig.Tools)
+		if len(runtimeConfig.AllowedToolNames) > 0 {
+			agentTools = filterToolsByNames(agentTools, runtimeConfig.AllowedToolNames)
 		}
 	}
 	var instructions strings.Builder
@@ -438,8 +438,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				firstRequestStep = false
 
 				prepared.Tools = a.tools.Copy()
-				if runtimeConfig != nil && runtimeConfig.Tools != nil {
-					prepared.Tools = slices.Clone(runtimeConfig.Tools)
+				if runtimeConfig != nil && len(runtimeConfig.AllowedToolNames) > 0 {
+					prepared.Tools = filterToolsByNames(prepared.Tools, runtimeConfig.AllowedToolNames)
 				}
 				// Add Anthropic caching to the last tool.
 				if len(prepared.Tools) > 0 {

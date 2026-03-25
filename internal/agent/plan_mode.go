@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 
+	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/session"
 )
@@ -88,6 +89,23 @@ func filterToolsForCollaborationMode(toolNames []string, mode session.Collaborat
 	}
 	if !slices.Contains(filtered, tools.PlanExitToolName) {
 		filtered = append(filtered, tools.PlanExitToolName)
+	}
+	return filtered
+}
+
+func filterToolsByNames(toolsList []fantasy.AgentTool, allowedNames []string) []fantasy.AgentTool {
+	if len(allowedNames) == 0 {
+		return toolsList
+	}
+	allowedSet := make(map[string]bool, len(allowedNames))
+	for _, name := range allowedNames {
+		allowedSet[name] = true
+	}
+	filtered := make([]fantasy.AgentTool, 0, len(toolsList))
+	for _, tool := range toolsList {
+		if allowedSet[tool.Info().Name] {
+			filtered = append(filtered, tool)
+		}
 	}
 	return filtered
 }

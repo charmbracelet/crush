@@ -44,6 +44,40 @@ func TestCreateHandoffSessionStoresMetadata(t *testing.T) {
 	require.Equal(t, handoff, loaded)
 }
 
+func TestCreateUsesAutoModeByDefault(t *testing.T) {
+	t.Parallel()
+
+	conn, err := db.Connect(context.Background(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = conn.Close()
+	})
+
+	q := db.New(conn)
+	svc := NewService(q, conn)
+
+	created, err := svc.Create(context.Background(), "Auto by default")
+	require.NoError(t, err)
+	require.Equal(t, CollaborationModeAuto, created.CollaborationMode)
+}
+
+func TestCreateCanUseExplicitDefaultMode(t *testing.T) {
+	t.Parallel()
+
+	conn, err := db.Connect(context.Background(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = conn.Close()
+	})
+
+	q := db.New(conn)
+	svc := NewService(q, conn, CollaborationModeDefault)
+
+	created, err := svc.Create(context.Background(), "Manual mode")
+	require.NoError(t, err)
+	require.Equal(t, CollaborationModeDefault, created.CollaborationMode)
+}
+
 func TestSavePersistsHandoffDraftUpdates(t *testing.T) {
 	t.Parallel()
 

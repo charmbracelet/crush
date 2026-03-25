@@ -12,9 +12,9 @@ func TestNormalizeCollaborationMode(t *testing.T) {
 	require.Equal(t, CollaborationModeDefault, NormalizeCollaborationMode(""))
 	require.Equal(t, CollaborationModeDefault, NormalizeCollaborationMode("unknown"))
 	require.Equal(t, CollaborationModeDefault, NormalizeCollaborationMode(string(CollaborationModeDefault)))
+	require.Equal(t, CollaborationModeAuto, NormalizeCollaborationMode(string(CollaborationModeAuto)))
 	require.Equal(t, CollaborationModePlan, NormalizeCollaborationMode(string(CollaborationModePlan)))
 }
-
 func TestNormalizeKind(t *testing.T) {
 	t.Parallel()
 

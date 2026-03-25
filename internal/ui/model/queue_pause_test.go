@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -44,6 +45,9 @@ func (m *mockQueueCoordinator) Summarize(context.Context, string, fantasy.Provid
 }
 func (m *mockQueueCoordinator) GenerateHandoff(context.Context, string, string) (agent.HandoffDraft, error) {
 	return agent.HandoffDraft{}, nil
+}
+func (m *mockQueueCoordinator) ClassifyPermission(context.Context, permission.PermissionRequest) (permission.AutoClassification, error) {
+	return permission.AutoClassification{}, nil
 }
 func (m *mockQueueCoordinator) Model() agent.Model { return agent.Model{} }
 func (m *mockQueueCoordinator) PrepareModelSwitch(context.Context, string, config.SelectedModelType, config.SelectedModel) error {

@@ -11,13 +11,19 @@ import (
 func TestCollaborationModePrompt(t *testing.T) {
 	t.Parallel()
 
+	autoPrompt := collaborationModePrompt(session.CollaborationModeAuto)
+	require.Contains(t, autoPrompt, "Auto Mode")
+	require.Contains(t, autoPrompt, "Minimize interruptions")
+
 	prompt := collaborationModePrompt(session.CollaborationModePlan)
 	require.Contains(t, prompt, "Plan Mode")
 	require.Contains(t, prompt, "request_user_input")
 	require.Contains(t, prompt, "plan_exit")
 	require.Contains(t, prompt, "<proposed_plan>")
 	require.Contains(t, prompt, "Do not write files")
-	require.Empty(t, collaborationModePrompt(session.CollaborationModeDefault))
+
+	defaultPrompt := collaborationModePrompt(session.CollaborationModeDefault)
+	require.Contains(t, defaultPrompt, "Auto Mode is not active")
 }
 
 func TestBuildSystemPromptForCollaborationMode(t *testing.T) {
@@ -25,7 +31,13 @@ func TestBuildSystemPromptForCollaborationMode(t *testing.T) {
 
 	base := "Base system prompt."
 
-	require.Equal(t, base, buildSystemPromptForCollaborationMode(base, session.CollaborationModeDefault))
+	defaultPrompt := buildSystemPromptForCollaborationMode(base, session.CollaborationModeDefault)
+	require.Contains(t, defaultPrompt, base)
+	require.Contains(t, defaultPrompt, "Auto Mode is not active")
+
+	autoPrompt := buildSystemPromptForCollaborationMode(base, session.CollaborationModeAuto)
+	require.Contains(t, autoPrompt, base)
+	require.Contains(t, autoPrompt, "You are in Auto Mode.")
 
 	planPrompt := buildSystemPromptForCollaborationMode(base, session.CollaborationModePlan)
 	require.Contains(t, planPrompt, base)

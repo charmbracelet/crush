@@ -79,8 +79,17 @@ func (m *UI) modeInfo(width int) string {
 	modes = append(modes, "SESSION "+strings.ToUpper(m.sessionRoleLabel(m.session)))
 	if m.session.CollaborationMode == sessionpkg.CollaborationModePlan {
 		modes = append(modes, "PLAN")
+	} else {
+		switch m.currentExecutionMode() {
+		case executionModeAuto:
+			modes = append(modes, "AUTO")
+		case executionModeYolo:
+			modes = append(modes, "YOLO")
+		default:
+			modes = append(modes, "ASK")
+		}
 	}
-	if m.com.App.Permissions.SkipRequests() {
+	if m.session.CollaborationMode == sessionpkg.CollaborationModePlan && m.com.App.Permissions.SkipRequests() {
 		modes = append(modes, "YOLO")
 	}
 	if len(modes) == 0 {

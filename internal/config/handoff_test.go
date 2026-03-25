@@ -45,6 +45,7 @@ func TestConfigureSelectedModels_DefaultsHandoffToLarge(t *testing.T) {
 	require.NoError(t, configureSelectedModels(testStore(cfg), knownProviders))
 
 	require.Equal(t, cfg.Models[SelectedModelTypeLarge], cfg.Models[SelectedModelTypeHandoff])
+	require.Equal(t, cfg.Models[SelectedModelTypeHandoff], cfg.Models[SelectedModelTypeAutoClassifier])
 }
 
 func TestConfigureSelectedModels_UsesExplicitHandoff(t *testing.T) {
@@ -93,4 +94,56 @@ func TestConfigureSelectedModels_UsesExplicitHandoff(t *testing.T) {
 
 	require.Equal(t, "gpt-4.1", cfg.Models[SelectedModelTypeHandoff].Model)
 	require.Equal(t, "openai", cfg.Models[SelectedModelTypeHandoff].Provider)
+}
+
+func TestConfigureSelectedModels_UsesExplicitAutoClassifier(t *testing.T) {
+	t.Parallel()
+
+	knownProviders := []catwalk.Provider{
+		{
+			ID:                  "openai",
+			Name:                "OpenAI",
+			APIEndpoint:         "https://api.openai.com/v1",
+			DefaultLargeModelID: "gpt-5",
+			DefaultSmallModelID: "gpt-5-mini",
+			Models: []catwalk.Model{
+				{ID: "gpt-5", DefaultMaxTokens: 32000},
+				{ID: "gpt-5-mini", DefaultMaxTokens: 16000},
+				{ID: "gpt-4.1-mini", DefaultMaxTokens: 8000},
+			},
+		},
+	}
+
+	temperature := 0.0
+	cfg := &Config{
+		Providers: csync.NewMap[string, ProviderConfig](),
+		Models: map[SelectedModelType]SelectedModel{
+			SelectedModelTypeAutoClassifier: {
+				Provider:    "openai",
+				Model:       "gpt-4.1-mini",
+				Temperature: &temperature,
+			},
+		},
+	}
+	cfg.setDefaults(t.TempDir(), "")
+	cfg.Providers.Set("openai", ProviderConfig{
+		ID:     "openai",
+		Name:   "OpenAI",
+		APIKey: "test-key",
+		Models: []catwalk.Model{
+			{ID: "gpt-5", DefaultMaxTokens: 32000},
+			{ID: "gpt-5-mini", DefaultMaxTokens: 16000},
+			{ID: "gpt-4.1-mini", DefaultMaxTokens: 8000},
+		},
+	})
+
+	envMap := env.NewFromMap(map[string]string{})
+	resolver := NewEnvironmentVariableResolver(envMap)
+	require.NoError(t, cfg.configureProviders(testStore(cfg), envMap, resolver, knownProviders))
+	require.NoError(t, configureSelectedModels(testStore(cfg), knownProviders))
+
+	require.Equal(t, "gpt-4.1-mini", cfg.Models[SelectedModelTypeAutoClassifier].Model)
+	require.Equal(t, "openai", cfg.Models[SelectedModelTypeAutoClassifier].Provider)
+	require.NotNil(t, cfg.Models[SelectedModelTypeAutoClassifier].Temperature)
+	require.Equal(t, temperature, *cfg.Models[SelectedModelTypeAutoClassifier].Temperature)
 }

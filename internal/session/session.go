@@ -27,15 +27,29 @@ type CollaborationMode string
 
 const (
 	CollaborationModeDefault CollaborationMode = "default"
+	CollaborationModeAuto    CollaborationMode = "auto"
 	CollaborationModePlan    CollaborationMode = "plan"
 )
 
 func NormalizeCollaborationMode(mode string) CollaborationMode {
 	switch CollaborationMode(mode) {
+	case CollaborationModeAuto:
+		return CollaborationModeAuto
 	case CollaborationModePlan:
 		return CollaborationModePlan
 	default:
 		return CollaborationModeDefault
+	}
+}
+
+func NormalizeInteractiveCollaborationMode(mode string) CollaborationMode {
+	switch CollaborationMode(mode) {
+	case CollaborationModeDefault:
+		return CollaborationModeDefault
+	case CollaborationModeAuto:
+		return CollaborationModeAuto
+	default:
+		return CollaborationModeAuto
 	}
 }
 
@@ -144,8 +158,9 @@ type Service interface {
 
 type service struct {
 	*pubsub.Broker[Session]
-	db *sql.DB
-	q  *db.Queries
+	db                       *sql.DB
+	q                        *db.Queries
+	defaultCollaborationMode CollaborationMode
 }
 
 func (s *service) Create(ctx context.Context, title string) (Session, error) {
@@ -153,7 +168,7 @@ func (s *service) Create(ctx context.Context, title string) (Session, error) {
 		ID:                   uuid.New().String(),
 		Title:                title,
 		WorkspaceCwd:         sql.NullString{},
-		CollaborationMode:    string(CollaborationModeDefault),
+		CollaborationMode:    string(s.defaultCollaborationMode),
 		Kind:                 string(KindNormal),
 		HandoffGoal:          "",
 		HandoffDraftPrompt:   "",
@@ -174,7 +189,7 @@ func (s *service) CreateTaskSession(ctx context.Context, toolCallID, parentSessi
 		ParentSessionID:      sql.NullString{String: parentSessionID, Valid: true},
 		Title:                title,
 		WorkspaceCwd:         sql.NullString{},
-		CollaborationMode:    string(CollaborationModeDefault),
+		CollaborationMode:    string(s.defaultCollaborationMode),
 		Kind:                 string(KindNormal),
 		HandoffGoal:          "",
 		HandoffDraftPrompt:   "",
@@ -194,7 +209,7 @@ func (s *service) CreateTitleSession(ctx context.Context, parentSessionID string
 		ParentSessionID:      sql.NullString{String: parentSessionID, Valid: true},
 		Title:                "Generate a title",
 		WorkspaceCwd:         sql.NullString{},
-		CollaborationMode:    string(CollaborationModeDefault),
+		CollaborationMode:    string(s.defaultCollaborationMode),
 		Kind:                 string(KindNormal),
 		HandoffGoal:          "",
 		HandoffDraftPrompt:   "",
@@ -218,7 +233,7 @@ func (s *service) CreateHandoffSession(ctx context.Context, sourceSessionID, tit
 		ID:                uuid.New().String(),
 		Title:             title,
 		WorkspaceCwd:      sql.NullString{},
-		CollaborationMode: string(CollaborationModeDefault),
+		CollaborationMode: string(s.defaultCollaborationMode),
 		Kind:              string(KindHandoff),
 		HandoffSourceSessionID: sql.NullString{
 			String: sourceSessionID,
@@ -459,12 +474,17 @@ func unmarshalStringSlice(data string) ([]string, error) {
 	return values, nil
 }
 
-func NewService(q *db.Queries, conn *sql.DB) Service {
+func NewService(q *db.Queries, conn *sql.DB, defaultModes ...CollaborationMode) Service {
 	broker := pubsub.NewBroker[Session]()
+	defaultMode := CollaborationModeAuto
+	if len(defaultModes) > 0 {
+		defaultMode = NormalizeInteractiveCollaborationMode(string(defaultModes[0]))
+	}
 	return &service{
-		Broker: broker,
-		db:     conn,
-		q:      q,
+		Broker:                   broker,
+		db:                       conn,
+		q:                        q,
+		defaultCollaborationMode: defaultMode,
 	}
 }
 

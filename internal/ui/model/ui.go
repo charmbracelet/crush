@@ -123,6 +123,10 @@ type (
 		Content     string
 		Attachments []message.Attachment
 	}
+	executionModeChangedMsg struct {
+		SessionID string
+		Status    string
+	}
 	planModeChangedMsg struct {
 		SessionID string
 		Status    string
@@ -288,6 +292,14 @@ type UI struct {
 	}
 }
 
+type executionMode string
+
+const (
+	executionModeAsk  executionMode = "ask"
+	executionModeAuto executionMode = "auto"
+	executionModeYolo executionMode = "yolo"
+)
+
 // New creates a new instance of the [UI] model.
 func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	// Editor components
@@ -353,7 +365,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 
 	ui.setEditorPrompt(false)
 	ui.randomizePlaceholders()
-	ui.textarea.Placeholder = ui.readyPlaceholder
+	ui.refreshEditorPlaceholder()
 	ui.status = status
 
 	// Initialize compact mode from config
@@ -573,6 +585,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case sendMessageMsg:
 		cmds = append(cmds, m.sendMessage(msg.Content, msg.Attachments...))
+
+	case executionModeChangedMsg:
+		cmds = append(cmds, util.ReportInfo(msg.Status))
+		if msg.SessionID != "" && (m.session == nil || m.session.ID != msg.SessionID) {
+			cmds = append(cmds, m.loadSession(msg.SessionID))
+		}
 
 	case planModeChangedMsg:
 		cmds = append(cmds, util.ReportInfo(msg.Status))
@@ -1023,17 +1041,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.focus {
 	case uiFocusMain:
 	case uiFocusEditor:
-		// Textarea placeholder logic
-		if m.isAgentBusy() {
-			m.textarea.Placeholder = m.workingPlaceholder
-		} else if m.session != nil && m.session.CollaborationMode == session.CollaborationModePlan {
-			m.textarea.Placeholder = "Plan Mode: explore, clarify, and propose a plan"
-		} else {
-			m.textarea.Placeholder = m.readyPlaceholder
-		}
-		if m.com.App.Permissions.SkipRequests() {
-			m.textarea.Placeholder = "Yolo mode!"
-		}
+		m.refreshEditorPlaceholder()
 	}
 
 	// at this point this can only handle [message.Attachment] message, and we
@@ -1628,6 +1636,56 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			return planModeChangedMsg{SessionID: sessionID, Status: status}
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionToggleAutoMode:
+		if m.isAgentBusy() {
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before changing Auto Mode..."))
+			break
+		}
+		if msg.SessionID == "" {
+			targetMode := executionModeAsk
+			if msg.NextMode == session.CollaborationModeAuto {
+				targetMode = executionModeAuto
+			}
+			if cmd := m.setExecutionMode(targetMode); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			m.dialog.CloseDialog(dialog.CommandsID)
+			break
+		}
+		if cfg := m.com.Config(); cfg != nil && cfg.Options != nil {
+			cfg.Options.PreferredCollaborationMode = string(msg.NextMode)
+		}
+		if m.session != nil && (msg.SessionID == "" || m.session.ID == msg.SessionID) {
+			m.session.CollaborationMode = msg.NextMode
+		}
+		m.refreshEditorPlaceholder()
+		cmds = append(cmds, func() tea.Msg {
+			ctx := context.Background()
+			sessionID := msg.SessionID
+			if sessionID == "" {
+				if msg.NextMode != session.CollaborationModeAuto {
+					return util.ReportError(errors.New("cannot exit Auto Mode without an active session"))()
+				}
+				newSession, err := m.com.App.Sessions.Create(ctx, "New Session")
+				if err != nil {
+					return util.ReportError(err)()
+				}
+				sessionID = newSession.ID
+			}
+			_, err := m.com.App.Sessions.UpdateCollaborationMode(ctx, sessionID, msg.NextMode)
+			if err != nil {
+				return util.ReportError(err)()
+			}
+			if err := m.com.Store().SetPreferredCollaborationMode(config.ScopeGlobal, string(msg.NextMode)); err != nil {
+				return util.ReportError(err)()
+			}
+			status := "Auto Mode disabled"
+			if msg.NextMode == session.CollaborationModeAuto {
+				status = "Auto Mode enabled"
+			}
+			return planModeChangedMsg{SessionID: sessionID, Status: status}
+		})
+		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionExecuteProposedPlan:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before executing the plan..."))
@@ -2153,6 +2211,127 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 	return cmd
 }
 
+func (m *UI) preferredExecutionMode() executionMode {
+	if m.com == nil || m.com.App == nil {
+		return executionModeAuto
+	}
+	cfg := m.com.Config()
+	if cfg == nil || cfg.Options == nil {
+		return executionModeAuto
+	}
+	if session.NormalizeInteractiveCollaborationMode(cfg.Options.PreferredCollaborationMode) == session.CollaborationModeDefault {
+		return executionModeAsk
+	}
+	return executionModeAuto
+}
+
+func (m *UI) currentExecutionMode() executionMode {
+	if m.com != nil && m.com.App != nil && m.com.App.Permissions.SkipRequests() {
+		return executionModeYolo
+	}
+	if m.session != nil && m.session.CollaborationMode == session.CollaborationModeAuto {
+		return executionModeAuto
+	}
+	if m.session != nil {
+		return executionModeAsk
+	}
+	return m.preferredExecutionMode()
+}
+
+func nextExecutionMode(mode executionMode) executionMode {
+	switch mode {
+	case executionModeAsk:
+		return executionModeAuto
+	case executionModeAuto:
+		return executionModeYolo
+	default:
+		return executionModeAsk
+	}
+}
+
+func (m *UI) refreshEditorPlaceholder() {
+	if m.isAgentBusy() {
+		m.textarea.Placeholder = m.workingPlaceholder
+		return
+	}
+	if m.session != nil && m.session.CollaborationMode == session.CollaborationModePlan {
+		m.textarea.Placeholder = "Plan Mode: explore, clarify, and propose a plan"
+		return
+	}
+	switch m.currentExecutionMode() {
+	case executionModeAuto:
+		m.textarea.Placeholder = "Auto Mode: work autonomously with guarded approvals"
+	case executionModeYolo:
+		m.textarea.Placeholder = "Yolo mode!"
+	default:
+		m.textarea.Placeholder = m.readyPlaceholder
+	}
+}
+
+func (m *UI) cycleExecutionMode() tea.Cmd {
+	if m.isAgentBusy() {
+		return util.ReportWarn("Agent is busy, please wait before changing execution mode...")
+	}
+	if m.session != nil && m.session.CollaborationMode == session.CollaborationModePlan {
+		return util.ReportWarn("Exit Plan Mode before cycling Ask/Auto/Yolo.")
+	}
+	return m.setExecutionMode(nextExecutionMode(m.currentExecutionMode()))
+}
+
+func (m *UI) setExecutionMode(mode executionMode) tea.Cmd {
+	if m.com == nil || m.com.App == nil {
+		return nil
+	}
+
+	status := "Ask mode enabled"
+	preferredMode := session.CollaborationModeDefault
+	enableYolo := false
+
+	switch mode {
+	case executionModeAuto:
+		status = "Auto Mode enabled"
+		preferredMode = session.CollaborationModeAuto
+	case executionModeYolo:
+		status = "Yolo mode enabled"
+		enableYolo = true
+	}
+
+	m.com.App.Permissions.SetSkipRequests(enableYolo)
+	m.setEditorPrompt(enableYolo)
+
+	if !enableYolo {
+		if cfg := m.com.Config(); cfg != nil && cfg.Options != nil {
+			cfg.Options.PreferredCollaborationMode = string(preferredMode)
+		}
+		if m.session != nil {
+			m.session.CollaborationMode = preferredMode
+		}
+	}
+	m.refreshEditorPlaceholder()
+
+	return func() tea.Msg {
+		if err := m.com.Store().SetSkipRequests(config.ScopeGlobal, enableYolo); err != nil {
+			return util.ReportError(err)()
+		}
+		if enableYolo {
+			return executionModeChangedMsg{Status: status}
+		}
+		if err := m.com.Store().SetPreferredCollaborationMode(config.ScopeGlobal, string(preferredMode)); err != nil {
+			return util.ReportError(err)()
+		}
+		sessionID := ""
+		if m.session != nil {
+			sessionID = m.session.ID
+		}
+		if sessionID != "" {
+			if _, err := m.com.App.Sessions.UpdateCollaborationMode(context.Background(), sessionID, preferredMode); err != nil {
+				return util.ReportError(err)()
+			}
+		}
+		return executionModeChangedMsg{SessionID: sessionID, Status: status}
+	}
+}
+
 func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	var cmds []tea.Cmd
 
@@ -2376,6 +2555,10 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					break
 				}
 				cmds = append(cmds, m.openEditor(m.textarea.Value()))
+			case key.Matches(msg, m.keyMap.Editor.CycleExecutionMode):
+				if cmd := m.cycleExecutionMode(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			case key.Matches(msg, m.keyMap.Editor.Newline):
 				m.textarea.InsertRune('\n')
 				m.closeCompletions()
@@ -2777,6 +2960,7 @@ func (m *UI) ShortHelp() []key.Binding {
 		switch m.focus {
 		case uiFocusEditor:
 			binds = append(binds,
+				k.Editor.CycleExecutionMode,
 				k.Editor.Newline,
 			)
 		case uiFocusMain:
@@ -2800,6 +2984,7 @@ func (m *UI) ShortHelp() []key.Binding {
 		binds = append(binds,
 			commands,
 			k.Models,
+			k.Editor.CycleExecutionMode,
 			k.Editor.Newline,
 		)
 	}
@@ -2866,6 +3051,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 		case uiFocusEditor:
 			binds = append(binds,
 				[]key.Binding{
+					k.Editor.CycleExecutionMode,
 					k.Editor.Newline,
 					k.Editor.AddImage,
 					k.Editor.PasteImage,
@@ -2921,6 +3107,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 					k.Sessions,
 				},
 				[]key.Binding{
+					k.Editor.CycleExecutionMode,
 					k.Editor.Newline,
 					k.Editor.AddImage,
 					k.Editor.PasteImage,
@@ -3818,7 +4005,7 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 	}
 
 	var sessionID string
-	mode := session.CollaborationModeDefault
+	mode := session.NormalizeInteractiveCollaborationMode(m.com.Config().Options.PreferredCollaborationMode)
 	hasSession := m.session != nil
 	if hasSession {
 		sessionID = m.session.ID

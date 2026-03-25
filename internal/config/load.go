@@ -463,6 +463,9 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 		}
 	}
 	c.Options.InitializeAs = cmp.Or(c.Options.InitializeAs, defaultInitializeAs)
+	if c.Options.PreferredCollaborationMode == "" {
+		c.Options.PreferredCollaborationMode = "auto"
+	}
 }
 
 // applyLSPDefaults applies default values from powernap to LSP configurations
@@ -580,6 +583,7 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 	}
 	large, small := defaultLarge, defaultSmall
 	handoff := defaultLarge
+	autoClassifier := handoff
 
 	largeModelSelected, largeModelConfigured := c.Models[SelectedModelTypeLarge]
 	if largeModelConfigured {
@@ -708,10 +712,71 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 	} else {
 		handoff = large
 	}
+	autoClassifierModelSelected, autoClassifierModelConfigured := c.Models[SelectedModelTypeAutoClassifier]
+	if autoClassifierModelConfigured {
+		autoClassifier = handoff
+		if autoClassifierModelSelected.Model != "" {
+			autoClassifier.Model = autoClassifierModelSelected.Model
+		}
+		if autoClassifierModelSelected.Provider != "" {
+			autoClassifier.Provider = autoClassifierModelSelected.Provider
+		}
+
+		model := c.GetModel(autoClassifier.Provider, autoClassifier.Model)
+		if model == nil {
+			autoClassifier = handoff
+			err := store.UpdatePreferredModel(ScopeGlobal, SelectedModelTypeAutoClassifier, autoClassifier)
+			if err != nil {
+				return fmt.Errorf("failed to update preferred auto classifier model: %w", err)
+			}
+		} else {
+			if autoClassifierModelSelected.MaxTokens > 0 {
+				autoClassifier.MaxTokens = autoClassifierModelSelected.MaxTokens
+			} else {
+				autoClassifier.MaxTokens = model.DefaultMaxTokens
+			}
+			if autoClassifierModelSelected.Temperature != nil {
+				autoClassifier.Temperature = autoClassifierModelSelected.Temperature
+			}
+			if autoClassifierModelSelected.TopP != nil {
+				autoClassifier.TopP = autoClassifierModelSelected.TopP
+			}
+			if autoClassifierModelSelected.TopK != nil {
+				autoClassifier.TopK = autoClassifierModelSelected.TopK
+			}
+			if autoClassifierModelSelected.FrequencyPenalty != nil {
+				autoClassifier.FrequencyPenalty = autoClassifierModelSelected.FrequencyPenalty
+			}
+			if autoClassifierModelSelected.PresencePenalty != nil {
+				autoClassifier.PresencePenalty = autoClassifierModelSelected.PresencePenalty
+			}
+			if autoClassifierModelSelected.Think != nil {
+				autoClassifier.Think = autoClassifierModelSelected.Think
+			}
+			if autoClassifierModelSelected.ReasoningEffort != "" {
+				autoClassifier.ReasoningEffort = autoClassifierModelSelected.ReasoningEffort
+			}
+		}
+	} else {
+		autoClassifier = handoff
+	}
 	c.Models[SelectedModelTypeLarge] = large
 	c.Models[SelectedModelTypeSmall] = small
 	c.Models[SelectedModelTypeHandoff] = handoff
+	c.Models[SelectedModelTypeAutoClassifier] = autoClassifier
 	return nil
+}
+
+func resolveAutoClassifierFallback(c *Config, handoffConfigured bool, handoff, small, large SelectedModel) SelectedModel {
+	if handoffConfigured {
+		if model := c.GetModel(handoff.Provider, handoff.Model); model != nil {
+			return handoff
+		}
+	}
+	if model := c.GetModel(small.Provider, small.Model); model != nil {
+		return small
+	}
+	return large
 }
 
 // lookupConfigs searches config files recursively from CWD up to FS root

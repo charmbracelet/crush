@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/autopermission"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
@@ -80,22 +81,33 @@ type App struct {
 // New initializes a new application instance.
 func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, error) {
 	q := db.New(conn)
-	sessions := session.NewService(q, conn)
+	cfg := store.Config()
+	sessions := session.NewService(q, conn, session.CollaborationMode(cfg.Options.PreferredCollaborationMode))
 	messages := message.NewService(q)
 	files := history.NewService(q, conn)
-	cfg := store.Config()
 	skipPermissionsRequests := cfg.Permissions != nil && cfg.Permissions.SkipRequests
 	var allowedTools []string
 	if cfg.Permissions != nil && cfg.Permissions.AllowedTools != nil {
 		allowedTools = cfg.Permissions.AllowedTools
 	}
+	basePermissions := permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools)
 
-	app := &App{
-		Sessions:    sessions,
-		Messages:    messages,
-		History:     files,
-		UserInput:   userinput.NewService(),
-		Permissions: permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools),
+	var app *App
+	app = &App{
+		Sessions:  sessions,
+		Messages:  messages,
+		History:   files,
+		UserInput: userinput.NewService(),
+		Permissions: autopermission.New(basePermissions, sessions, func() permission.Classifier {
+			if app == nil || app.AgentCoordinator == nil {
+				return nil
+			}
+			classifier, ok := app.AgentCoordinator.(permission.Classifier)
+			if !ok {
+				return nil
+			}
+			return classifier
+		}),
 		FileTracker: filetracker.NewService(q),
 		LSPManager:  lsp.NewManager(store),
 

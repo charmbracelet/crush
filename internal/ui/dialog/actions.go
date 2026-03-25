@@ -57,7 +57,11 @@ type (
 	ActionToggleYoloMode              struct{}
 	ActionToggleNotifications         struct{}
 	ActionToggleTransparentBackground struct{}
-	ActionTogglePlanMode              struct {
+	ActionToggleAutoMode              struct {
+		SessionID string
+		NextMode  session.CollaborationMode
+	}
+	ActionTogglePlanMode struct {
 		SessionID string
 		NextMode  session.CollaborationMode
 	}

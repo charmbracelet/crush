@@ -81,6 +81,7 @@ type Coordinator interface {
 	IsQueuePaused(sessionID string) bool
 	Summarize(context.Context, string, fantasy.ProviderOptions) error
 	GenerateHandoff(ctx context.Context, sourceSessionID, goal string) (HandoffDraft, error)
+	ClassifyPermission(ctx context.Context, req permission.PermissionRequest) (permission.AutoClassification, error)
 	Model() Model
 	PrepareModelSwitch(ctx context.Context, sessionID string, modelType config.SelectedModelType, selectedModel config.SelectedModel) error
 	UpdateModels(ctx context.Context) error

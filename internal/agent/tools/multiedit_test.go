@@ -20,6 +20,14 @@ func (m *mockPermissionService) Request(ctx context.Context, req permission.Crea
 	return true, nil
 }
 
+func (m *mockPermissionService) EvaluateRequest(context.Context, permission.CreatePermissionRequest) (permission.EvaluationResult, error) {
+	return permission.EvaluationResult{Decision: permission.EvaluationDecisionAllow}, nil
+}
+
+func (m *mockPermissionService) Prompt(context.Context, permission.PermissionRequest) (bool, error) {
+	return true, nil
+}
+
 func (m *mockPermissionService) Grant(req permission.PermissionRequest) {}
 
 func (m *mockPermissionService) Deny(req permission.PermissionRequest) {}

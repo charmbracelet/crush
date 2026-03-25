@@ -39,6 +39,23 @@ func testStoreWithPath(cfg *Config, dir string) *ConfigStore {
 	}
 }
 
+func TestSetPreferredCollaborationMode_Persists(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfg := &Config{}
+	cfg.setDefaults(dir, "")
+	store := testStoreWithPath(cfg, dir)
+
+	require.NoError(t, store.SetPreferredCollaborationMode(ScopeGlobal, "default"))
+	require.Equal(t, "default", cfg.Options.PreferredCollaborationMode)
+
+	out := readConfigJSON(t, store.globalDataPath)
+	options, ok := out["options"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "default", options["preferred_collaboration_mode"])
+}
+
 func TestRecordRecentModel_AddsAndPersists(t *testing.T) {
 	t.Parallel()
 

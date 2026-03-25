@@ -175,6 +175,9 @@ func (f *fakeCoordinator) Summarize(_ context.Context, _ string, _ fantasy.Provi
 func (f *fakeCoordinator) GenerateHandoff(_ context.Context, _ string, _ string) (agent.HandoffDraft, error) {
 	return agent.HandoffDraft{}, nil
 }
+func (f *fakeCoordinator) ClassifyPermission(_ context.Context, _ permission.PermissionRequest) (permission.AutoClassification, error) {
+	return permission.AutoClassification{}, nil
+}
 func (f *fakeCoordinator) Model() agent.Model { return agent.Model{} }
 func (f *fakeCoordinator) PrepareModelSwitch(_ context.Context, _ string, _ config.SelectedModelType, _ config.SelectedModel) error {
 	return nil

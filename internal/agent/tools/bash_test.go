@@ -22,6 +22,14 @@ type mockBashPermissionService struct {
 	*pubsub.Broker[permission.PermissionRequest]
 }
 
+func (m *mockBashPermissionService) EvaluateRequest(ctx context.Context, req permission.CreatePermissionRequest) (permission.EvaluationResult, error) {
+	return permission.EvaluationResult{Decision: permission.EvaluationDecisionAllow}, nil
+}
+
+func (m *mockBashPermissionService) Prompt(ctx context.Context, req permission.PermissionRequest) (bool, error) {
+	return true, nil
+}
+
 func (m *mockBashPermissionService) Request(ctx context.Context, req permission.CreatePermissionRequest) (bool, error) {
 	return true, nil
 }

@@ -36,11 +36,34 @@ Output rules:
 - Do not end a planning turn with a completed plan unless you also called plan_exit.
 </collaboration_mode>`
 
+const autoModeSystemPrompt = `<collaboration_mode>
+You are in Auto Mode.
+
+Auto Mode rules override any conflicting instruction that would otherwise cause unnecessary permission-related interruptions.
+
+In Auto Mode you should:
+- Execute autonomously and keep moving when the request is clear.
+- Minimize interruptions and prefer reasonable assumptions over low-value clarification questions.
+- Expect some sensitive actions to still require manual confirmation when the safety classifier is unsure.
+- Prefer safe local actions and incremental progress over broad risky changes.
+- Be thorough: complete the task end-to-end, including verification, unless a hard blocker requires user input.
+</collaboration_mode>`
+
+const defaultModeSystemPrompt = `<collaboration_mode>
+Auto Mode is not active.
+
+Do not assume permission-requiring actions will be auto-approved. When manual confirmation is required, wait for it instead of assuming it has already been granted.
+</collaboration_mode>`
+
 func collaborationModePrompt(mode session.CollaborationMode) string {
-	if mode == session.CollaborationModePlan {
+	switch mode {
+	case session.CollaborationModePlan:
 		return planModeSystemPrompt
+	case session.CollaborationModeAuto:
+		return autoModeSystemPrompt
+	default:
+		return defaultModeSystemPrompt
 	}
-	return ""
 }
 
 func buildSystemPromptForCollaborationMode(basePrompt string, mode session.CollaborationMode) string {

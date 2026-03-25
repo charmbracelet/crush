@@ -43,11 +43,44 @@ type PermissionRequest struct {
 	Path        string `json:"path"`
 }
 
+type EvaluationDecision string
+
+const (
+	EvaluationDecisionAllow EvaluationDecision = "allow"
+	EvaluationDecisionAsk   EvaluationDecision = "ask"
+	EvaluationDecisionDeny  EvaluationDecision = "deny"
+)
+
+type EvaluationResult struct {
+	Decision   EvaluationDecision `json:"decision"`
+	Permission PermissionRequest  `json:"permission"`
+}
+
+type AutoApprovalConfidence string
+
+const (
+	AutoApprovalConfidenceLow    AutoApprovalConfidence = "low"
+	AutoApprovalConfidenceMedium AutoApprovalConfidence = "medium"
+	AutoApprovalConfidenceHigh   AutoApprovalConfidence = "high"
+)
+
+type AutoClassification struct {
+	AllowAuto  bool                   `json:"allow_auto"`
+	Reason     string                 `json:"reason"`
+	Confidence AutoApprovalConfidence `json:"confidence"`
+}
+
+type Classifier interface {
+	ClassifyPermission(ctx context.Context, req PermissionRequest) (AutoClassification, error)
+}
+
 type Service interface {
 	pubsub.Subscriber[PermissionRequest]
 	GrantPersistent(permission PermissionRequest)
 	Grant(permission PermissionRequest)
 	Deny(permission PermissionRequest)
+	EvaluateRequest(ctx context.Context, opts CreatePermissionRequest) (EvaluationResult, error)
+	Prompt(ctx context.Context, permission PermissionRequest) (bool, error)
 	Request(ctx context.Context, opts CreatePermissionRequest) (bool, error)
 	AutoApproveSession(sessionID string)
 	SetSessionAutoApprove(sessionID string, enabled bool)
@@ -133,57 +166,41 @@ func (s *permissionService) Deny(permission PermissionRequest) {
 }
 
 func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRequest) (bool, error) {
-	if s.skip {
-		return true, nil
+	eval, err := s.EvaluateRequest(ctx, opts)
+	if err != nil {
+		return false, err
 	}
 
-	// Check if the tool/action combination is in the allowlist
+	switch eval.Decision {
+	case EvaluationDecisionAllow:
+		return true, nil
+	case EvaluationDecisionDeny:
+		return false, nil
+	default:
+		return s.Prompt(ctx, eval.Permission)
+	}
+}
+
+func (s *permissionService) EvaluateRequest(_ context.Context, opts CreatePermissionRequest) (EvaluationResult, error) {
+	permission, err := s.buildPermissionRequest(opts)
+	if err != nil {
+		return EvaluationResult{}, err
+	}
+
+	if s.skip {
+		return EvaluationResult{Decision: EvaluationDecisionAllow, Permission: permission}, nil
+	}
+
 	commandKey := opts.ToolName + ":" + opts.Action
 	if slices.Contains(s.allowedTools, commandKey) || slices.Contains(s.allowedTools, opts.ToolName) {
-		return true, nil
+		return EvaluationResult{Decision: EvaluationDecisionAllow, Permission: permission}, nil
 	}
-
-	// tell the UI that a permission was requested
-	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
-		ToolCallID: opts.ToolCallID,
-	})
-	s.requestMu.Lock()
-	defer s.requestMu.Unlock()
 
 	s.autoApproveSessionsMu.RLock()
 	autoApprove := s.autoApproveSessions[opts.SessionID]
 	s.autoApproveSessionsMu.RUnlock()
-
 	if autoApprove {
-		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
-			ToolCallID: opts.ToolCallID,
-			Granted:    true,
-		})
-		return true, nil
-	}
-
-	fileInfo, err := os.Stat(opts.Path)
-	dir := opts.Path
-	if err == nil {
-		if fileInfo.IsDir() {
-			dir = opts.Path
-		} else {
-			dir = filepath.Dir(opts.Path)
-		}
-	}
-
-	if dir == "." {
-		dir = s.workingDir
-	}
-	permission := PermissionRequest{
-		ID:          uuid.New().String(),
-		Path:        dir,
-		SessionID:   opts.SessionID,
-		ToolCallID:  opts.ToolCallID,
-		ToolName:    opts.ToolName,
-		Description: opts.Description,
-		Action:      opts.Action,
-		Params:      opts.Params,
+		return EvaluationResult{Decision: EvaluationDecisionAllow, Permission: permission}, nil
 	}
 
 	hookDecision := plugin.TriggerPermissionAsk(plugin.PermissionAskInput{
@@ -199,33 +216,29 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		},
 	})
 	if hookDecision.Action == plugin.PermissionAllow {
-		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
-			ToolCallID: opts.ToolCallID,
-			Granted:    true,
-		})
-		return true, nil
+		return EvaluationResult{Decision: EvaluationDecisionAllow, Permission: permission}, nil
 	}
 	if hookDecision.Action == plugin.PermissionDeny {
-		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
-			ToolCallID: opts.ToolCallID,
-			Granted:    false,
-			Denied:     true,
-		})
-		return false, nil
+		return EvaluationResult{Decision: EvaluationDecisionDeny, Permission: permission}, nil
 	}
 
 	s.sessionPermissionsMu.RLock()
+	defer s.sessionPermissionsMu.RUnlock()
 	for _, p := range s.sessionPermissions {
 		if p.ToolName == permission.ToolName && p.Action == permission.Action && p.SessionID == permission.SessionID && p.Path == permission.Path {
-			s.sessionPermissionsMu.RUnlock()
-			s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
-				ToolCallID: opts.ToolCallID,
-				Granted:    true,
-			})
-			return true, nil
+			return EvaluationResult{Decision: EvaluationDecisionAllow, Permission: permission}, nil
 		}
 	}
-	s.sessionPermissionsMu.RUnlock()
+
+	return EvaluationResult{Decision: EvaluationDecisionAsk, Permission: permission}, nil
+}
+
+func (s *permissionService) Prompt(ctx context.Context, permission PermissionRequest) (bool, error) {
+	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+		ToolCallID: permission.ToolCallID,
+	})
+	s.requestMu.Lock()
+	defer s.requestMu.Unlock()
 
 	s.activeRequestMu.Lock()
 	s.activeRequest = &permission
@@ -235,7 +248,6 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	s.pendingRequests.Set(permission.ID, respCh)
 	defer s.pendingRequests.Del(permission.ID)
 
-	// Publish the request
 	s.Publish(pubsub.CreatedEvent, permission)
 
 	select {
@@ -244,6 +256,33 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	case granted := <-respCh:
 		return granted, nil
 	}
+}
+
+func (s *permissionService) buildPermissionRequest(opts CreatePermissionRequest) (PermissionRequest, error) {
+	fileInfo, err := os.Stat(opts.Path)
+	dir := opts.Path
+	if err == nil {
+		if fileInfo.IsDir() {
+			dir = opts.Path
+		} else {
+			dir = filepath.Dir(opts.Path)
+		}
+	}
+
+	if dir == "." {
+		dir = s.workingDir
+	}
+
+	return PermissionRequest{
+		ID:          uuid.New().String(),
+		Path:        dir,
+		SessionID:   opts.SessionID,
+		ToolCallID:  opts.ToolCallID,
+		ToolName:    opts.ToolName,
+		Description: opts.Description,
+		Action:      opts.Action,
+		Params:      opts.Params,
+	}, nil
 }
 
 func (s *permissionService) AutoApproveSession(sessionID string) {

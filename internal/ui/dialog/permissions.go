@@ -483,7 +483,28 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 			lines = append(lines, p.renderKeyValue("Directory", fsext.PrettyPath(params.Path), contentWidth))
 		}
 	}
+	if review := p.renderAutoReview(contentWidth); review != "" {
+		lines = append(lines, "", review)
+	}
 
+	return lipgloss.JoinVertical(lipgloss.Left, lines...)
+}
+
+func (p *Permissions) renderAutoReview(contentWidth int) string {
+	review := p.permission.AutoReview
+	if review == nil {
+		return ""
+	}
+
+	lines := []string{
+		p.renderKeyValue("Auto", prettyName(string(review.Trigger)), contentWidth),
+	}
+	if reason := strings.TrimSpace(review.Reason); reason != "" {
+		lines = append(lines, p.renderKeyValue("Reason", reason, contentWidth))
+	}
+	if review.Confidence != "" {
+		lines = append(lines, p.renderKeyValue("Confidence", prettyName(string(review.Confidence)), contentWidth))
+	}
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 

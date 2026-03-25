@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/charmbracelet/crush/internal/csync"
@@ -14,7 +15,67 @@ import (
 	"github.com/google/uuid"
 )
 
-var ErrorPermissionDenied = errors.New("user denied permission")
+type PermissionErrorKind string
+
+const (
+	PermissionErrorKindUserDenied   PermissionErrorKind = "user_denied"
+	PermissionErrorKindPolicyDenied PermissionErrorKind = "policy_denied"
+)
+
+type PermissionError struct {
+	Kind    PermissionErrorKind
+	Message string
+	Details string
+}
+
+func (e *PermissionError) Error() string {
+	if e == nil {
+		return "permission error"
+	}
+	if strings.TrimSpace(e.Message) != "" {
+		return e.Message
+	}
+	if e.Kind == PermissionErrorKindPolicyDenied {
+		return "permission blocked by safety policy"
+	}
+	return "user denied permission"
+}
+
+func (e *PermissionError) Is(target error) bool {
+	t, ok := target.(*PermissionError)
+	if !ok {
+		return false
+	}
+	return e.Kind == t.Kind
+}
+
+var (
+	ErrorPermissionDenied  = &PermissionError{Kind: PermissionErrorKindUserDenied, Message: "user denied permission"}
+	ErrorPermissionBlocked = &PermissionError{Kind: PermissionErrorKindPolicyDenied, Message: "permission blocked by safety policy"}
+)
+
+func NewPermissionBlockedError(message, details string) error {
+	if strings.TrimSpace(message) == "" {
+		message = ErrorPermissionBlocked.Error()
+	}
+	return &PermissionError{
+		Kind:    PermissionErrorKindPolicyDenied,
+		Message: strings.TrimSpace(message),
+		Details: strings.TrimSpace(details),
+	}
+}
+
+func AsPermissionError(err error) (*PermissionError, bool) {
+	var permissionErr *PermissionError
+	if errors.As(err, &permissionErr) {
+		return permissionErr, true
+	}
+	return nil, false
+}
+
+func IsPermissionError(err error) bool {
+	return errors.Is(err, ErrorPermissionDenied) || errors.Is(err, ErrorPermissionBlocked)
+}
 
 type CreatePermissionRequest struct {
 	SessionID   string `json:"session_id"`
@@ -33,14 +94,15 @@ type PermissionNotification struct {
 }
 
 type PermissionRequest struct {
-	ID          string `json:"id"`
-	SessionID   string `json:"session_id"`
-	ToolCallID  string `json:"tool_call_id"`
-	ToolName    string `json:"tool_name"`
-	Description string `json:"description"`
-	Action      string `json:"action"`
-	Params      any    `json:"params"`
-	Path        string `json:"path"`
+	ID          string      `json:"id"`
+	SessionID   string      `json:"session_id"`
+	ToolCallID  string      `json:"tool_call_id"`
+	ToolName    string      `json:"tool_name"`
+	Description string      `json:"description"`
+	Action      string      `json:"action"`
+	Params      any         `json:"params"`
+	Path        string      `json:"path"`
+	AutoReview  *AutoReview `json:"auto_review,omitempty"`
 }
 
 type EvaluationDecision string
@@ -68,6 +130,22 @@ type AutoClassification struct {
 	AllowAuto  bool                   `json:"allow_auto"`
 	Reason     string                 `json:"reason"`
 	Confidence AutoApprovalConfidence `json:"confidence"`
+}
+
+type AutoReviewTrigger string
+
+const (
+	AutoReviewTriggerClassifierBlock       AutoReviewTrigger = "classifier_block"
+	AutoReviewTriggerAlwaysManual          AutoReviewTrigger = "always_manual"
+	AutoReviewTriggerClassifierUnavailable AutoReviewTrigger = "classifier_unavailable"
+	AutoReviewTriggerClassifierFailed      AutoReviewTrigger = "classifier_failed"
+	AutoReviewTriggerClassifierSuspended   AutoReviewTrigger = "classifier_suspended"
+)
+
+type AutoReview struct {
+	Trigger    AutoReviewTrigger      `json:"trigger,omitempty"`
+	Reason     string                 `json:"reason,omitempty"`
+	Confidence AutoApprovalConfidence `json:"confidence,omitempty"`
 }
 
 type Classifier interface {
@@ -175,7 +253,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	case EvaluationDecisionAllow:
 		return true, nil
 	case EvaluationDecisionDeny:
-		return false, nil
+		return false, ErrorPermissionBlocked
 	default:
 		return s.Prompt(ctx, eval.Permission)
 	}

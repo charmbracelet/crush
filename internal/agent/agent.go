@@ -116,6 +116,7 @@ type SessionAgent interface {
 	PauseQueue(sessionID string)
 	ResumeQueue(sessionID string)
 	IsQueuePaused(sessionID string) bool
+	PrioritizeQueuedPrompt(sessionID string, index int) bool
 }
 
 type Model struct {
@@ -165,17 +166,17 @@ type SessionAgentOptions struct {
 }
 
 type sessionAgentRuntimeConfig struct {
-	ProviderOptions     fantasy.ProviderOptions
-	MaxOutputTokens     int64
-	Temperature         *float64
-	TopP                *float64
-	TopK                *int64
-	FrequencyPenalty    *float64
-	PresencePenalty     *float64
-	SystemPrompt        *string
-	SystemPromptPrefix  *string
-	CollaborationMode   session.CollaborationMode
-	AllowedToolNames    []string
+	ProviderOptions    fantasy.ProviderOptions
+	MaxOutputTokens    int64
+	Temperature        *float64
+	TopP               *float64
+	TopK               *int64
+	FrequencyPenalty   *float64
+	PresencePenalty    *float64
+	SystemPrompt       *string
+	SystemPromptPrefix *string
+	CollaborationMode  session.CollaborationMode
+	AllowedToolNames   []string
 }
 
 type sessionAgentRuntimeConfigContextKey struct{}
@@ -857,7 +858,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	if err != nil {
 		isCancelErr := errors.Is(err, context.Canceled)
-		isPermissionErr := errors.Is(err, permission.ErrorPermissionDenied)
+		isPermissionErr := permission.IsPermissionError(err)
+		permissionErr, hasPermissionErr := permission.AsPermissionError(err)
 		if currentAssistant == nil {
 			return result, err
 		}
@@ -906,7 +908,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			if isCancelErr {
 				content = "Tool execution canceled by user"
 			} else if isPermissionErr {
-				content = "User denied permission"
+				if hasPermissionErr && permissionErr.Kind == permission.PermissionErrorKindPolicyDenied {
+					content = cmp.Or(permissionErr.Message, "Permission blocked by safety policy")
+				} else {
+					content = "User denied permission"
+				}
 			}
 			toolResult := message.ToolResult{
 				ToolCallID: tc.ID,
@@ -931,7 +937,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		if isCancelErr {
 			currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
 		} else if isPermissionErr {
-			currentAssistant.AddFinish(message.FinishReasonPermissionDenied, "User denied permission", "")
+			if hasPermissionErr && permissionErr.Kind == permission.PermissionErrorKindPolicyDenied {
+				currentAssistant.AddFinish(
+					message.FinishReasonPermissionDenied,
+					"Permission blocked",
+					permissionErr.Details,
+				)
+			} else {
+				currentAssistant.AddFinish(message.FinishReasonPermissionDenied, "User denied permission", "")
+			}
 		} else if errors.Is(err, hyper.ErrNoCredits) {
 			url := hyper.BaseURL()
 			link := linkStyle.Hyperlink(url, "id=hyper").Render(url)
@@ -2027,6 +2041,14 @@ func (a *sessionAgent) ClearQueue(sessionID string) {
 	a.pausedQueues.Del(sessionID)
 }
 
+func (a *sessionAgent) PrioritizeQueuedPrompt(sessionID string, index int) bool {
+	if !a.prioritizeQueuedCall(sessionID, index) {
+		return false
+	}
+	slog.Debug("Prioritizing queued prompt", "session_id", sessionID, "index", index)
+	return true
+}
+
 // PauseQueue pauses automatic processing of queued prompts for the session.
 // The current request (if any) continues, but the next queued prompt won't
 // be automatically started. Use this to stop the queue without clearing it.
@@ -2165,6 +2187,26 @@ func (a *sessionAgent) removeQueuedCall(sessionID string, index int) bool {
 
 	updatedQueue := append(queuedCalls[:index:index], queuedCalls[index+1:]...)
 	a.setQueuedCallsLocked(sessionID, updatedQueue)
+	return true
+}
+
+func (a *sessionAgent) prioritizeQueuedCall(sessionID string, index int) bool {
+	a.queueMu.Lock()
+	defer a.queueMu.Unlock()
+
+	queuedCalls, ok := a.messageQueue.Get(sessionID)
+	if !ok || index < 0 || index >= len(queuedCalls) {
+		return false
+	}
+
+	call := queuedCalls[index]
+	call.JoinActiveRun = true
+
+	newQueue := make([]SessionAgentCall, 0, len(queuedCalls))
+	newQueue = append(newQueue, call)
+	newQueue = append(newQueue, queuedCalls[:index]...)
+	newQueue = append(newQueue, queuedCalls[index+1:]...)
+	a.setQueuedCallsLocked(sessionID, newQueue)
 	return true
 }
 

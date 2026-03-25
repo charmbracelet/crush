@@ -79,6 +79,7 @@ type Coordinator interface {
 	PauseQueue(sessionID string)
 	ResumeQueue(sessionID string)
 	IsQueuePaused(sessionID string) bool
+	PrioritizeQueuedPrompt(sessionID string, index int) bool
 	Summarize(context.Context, string, fantasy.ProviderOptions) error
 	GenerateHandoff(ctx context.Context, sourceSessionID, goal string) (HandoffDraft, error)
 	ClassifyPermission(ctx context.Context, req permission.PermissionRequest) (permission.AutoClassification, error)
@@ -1255,6 +1256,10 @@ func (c *coordinator) ResumeQueue(sessionID string) {
 
 func (c *coordinator) IsQueuePaused(sessionID string) bool {
 	return c.currentAgent.IsQueuePaused(sessionID)
+}
+
+func (c *coordinator) PrioritizeQueuedPrompt(sessionID string, index int) bool {
+	return c.currentAgent.PrioritizeQueuedPrompt(sessionID, index)
 }
 
 func (c *coordinator) IsBusy() bool {

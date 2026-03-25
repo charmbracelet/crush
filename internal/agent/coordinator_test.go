@@ -55,6 +55,9 @@ func (m *mockSessionAgent) ClearQueue(sessionID string)                         
 func (m *mockSessionAgent) PauseQueue(sessionID string)                         {}
 func (m *mockSessionAgent) ResumeQueue(sessionID string)                        {}
 func (m *mockSessionAgent) IsQueuePaused(sessionID string) bool                 { return false }
+func (m *mockSessionAgent) PrioritizeQueuedPrompt(sessionID string, index int) bool {
+	return false
+}
 func (m *mockSessionAgent) Summarize(context.Context, string, fantasy.ProviderOptions) error {
 	if m.summarizeErr != nil {
 		return m.summarizeErr

@@ -169,7 +169,8 @@ func TestPermissionService_PluginDecisionDeny(t *testing.T) {
 		Description: "test command",
 		Path:        "/tmp",
 	})
-	require.NoError(t, err)
+	require.Error(t, err)
+	require.True(t, IsPermissionError(err))
 	require.False(t, result)
 }
 

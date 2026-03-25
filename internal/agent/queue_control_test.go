@@ -301,3 +301,66 @@ func TestJoinActiveRunQueuedPromptMergesIntoCurrentRun(t *testing.T) {
 	}
 	require.True(t, foundJoinedPrompt)
 }
+
+func TestPrioritizeQueuedPromptMovesToJoinActiveRun(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	a := newQueueControlTestAgent(env)
+
+	sess, err := env.sessions.Create(t.Context(), "prioritize test")
+	require.NoError(t, err)
+
+	_, err = env.messages.Create(t.Context(), sess.ID, message.CreateMessageParams{
+		Role: message.User,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "seed"},
+		},
+	})
+	require.NoError(t, err)
+
+	a.messageQueue.Set(sess.ID, []SessionAgentCall{
+		{SessionID: sess.ID, Prompt: "first"},
+		{SessionID: sess.ID, Prompt: "second"},
+		{SessionID: sess.ID, Prompt: "third"},
+	})
+
+	require.Equal(t, 3, a.QueuedPrompts(sess.ID))
+
+	result := a.PrioritizeQueuedPrompt(sess.ID, 1)
+	require.True(t, result)
+	require.Equal(t, 3, a.QueuedPrompts(sess.ID))
+
+	list := a.QueuedPromptsList(sess.ID)
+	require.Equal(t, []string{"second", "first", "third"}, list)
+
+	queueSnapshot, _ := a.messageQueue.Get(sess.ID)
+	require.True(t, queueSnapshot[0].JoinActiveRun)
+	require.False(t, queueSnapshot[1].JoinActiveRun)
+	require.False(t, queueSnapshot[2].JoinActiveRun)
+}
+
+func TestPrioritizeQueuedPromptInvalidIndexReturnsFalse(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	a := newQueueControlTestAgent(env)
+
+	sess, err := env.sessions.Create(t.Context(), "prioritize invalid")
+	require.NoError(t, err)
+
+	_, err = env.messages.Create(t.Context(), sess.ID, message.CreateMessageParams{
+		Role: message.User,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "seed"},
+		},
+	})
+	require.NoError(t, err)
+
+	a.messageQueue.Set(sess.ID, []SessionAgentCall{
+		{SessionID: sess.ID, Prompt: "first"},
+	})
+
+	require.False(t, a.PrioritizeQueuedPrompt(sess.ID, -1))
+	require.False(t, a.PrioritizeQueuedPrompt(sess.ID, 5))
+}

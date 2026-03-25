@@ -16,6 +16,7 @@ type mockPermissionService struct {
 	*pubsub.Broker[permission.PermissionRequest]
 
 	evalResult  permission.EvaluationResult
+	lastPrompt  permission.PermissionRequest
 	promptGrant bool
 	promptCalls int
 }
@@ -26,7 +27,8 @@ func (m *mockPermissionService) Deny(permission.PermissionRequest)            {}
 func (m *mockPermissionService) EvaluateRequest(context.Context, permission.CreatePermissionRequest) (permission.EvaluationResult, error) {
 	return m.evalResult, nil
 }
-func (m *mockPermissionService) Prompt(context.Context, permission.PermissionRequest) (bool, error) {
+func (m *mockPermissionService) Prompt(_ context.Context, req permission.PermissionRequest) (bool, error) {
+	m.lastPrompt = req
 	m.promptCalls++
 	return m.promptGrant, nil
 }
@@ -106,7 +108,7 @@ func TestAutoPermission_DefaultModeFallsBackToPrompt(t *testing.T) {
 		evalResult:  permission.EvaluationResult{Decision: permission.EvaluationDecisionAsk, Permission: permission.PermissionRequest{SessionID: "s1", ToolName: "edit", Action: "write"}},
 		promptGrant: true,
 	}
-	svc := New(base, &mockSessionService{mode: session.CollaborationModeDefault}, nil, "")
+	svc := New(base, &mockSessionService{mode: session.CollaborationModeDefault}, nil, "", false)
 
 	granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{})
 	require.NoError(t, err)
@@ -123,7 +125,7 @@ func TestAutoPermission_AutoModeReadOnlyRequestSkipsClassifier(t *testing.T) {
 		promptGrant: true,
 	}
 	classifier := &mockClassifier{}
-	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, "")
+	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, "", false)
 
 	granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{})
 	require.NoError(t, err)
@@ -141,7 +143,7 @@ func TestAutoPermission_AutoModeClassifierAllowSkipsPrompt(t *testing.T) {
 		promptGrant: true,
 	}
 	classifier := &mockClassifier{result: permission.AutoClassification{AllowAuto: true}}
-	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, "")
+	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, "", false)
 
 	granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{})
 	require.NoError(t, err)
@@ -159,13 +161,16 @@ func TestAutoPermission_AutoModeClassifierBlockFallsBackToPrompt(t *testing.T) {
 		promptGrant: true,
 	}
 	classifier := &mockClassifier{result: permission.AutoClassification{AllowAuto: false}}
-	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, "")
+	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, "", false)
 
 	granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{})
 	require.NoError(t, err)
 	require.True(t, granted)
 	require.Equal(t, 1, base.promptCalls)
 	require.Equal(t, 1, classifier.calls)
+	require.NotNil(t, base.lastPrompt.AutoReview)
+	require.Equal(t, permission.AutoReviewTriggerClassifierBlock, base.lastPrompt.AutoReview.Trigger)
+	require.Equal(t, "The classifier could not confirm this action is safe to auto-approve.", base.lastPrompt.AutoReview.Reason)
 }
 
 func TestAutoPermission_AutoModeClassifierErrorFallsBackToPrompt(t *testing.T) {
@@ -177,13 +182,16 @@ func TestAutoPermission_AutoModeClassifierErrorFallsBackToPrompt(t *testing.T) {
 		promptGrant: true,
 	}
 	classifier := &mockClassifier{err: context.DeadlineExceeded}
-	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, "")
+	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, "", false)
 
 	granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{})
 	require.NoError(t, err)
 	require.True(t, granted)
 	require.Equal(t, 1, base.promptCalls)
 	require.Equal(t, 1, classifier.calls)
+	require.NotNil(t, base.lastPrompt.AutoReview)
+	require.Equal(t, permission.AutoReviewTriggerClassifierFailed, base.lastPrompt.AutoReview.Trigger)
+	require.Contains(t, base.lastPrompt.AutoReview.Reason, "context deadline exceeded")
 }
 
 func TestAutoPermission_SuspendsClassifierAfterRepeatedBlocks(t *testing.T) {
@@ -195,14 +203,18 @@ func TestAutoPermission_SuspendsClassifierAfterRepeatedBlocks(t *testing.T) {
 		promptGrant: true,
 	}
 	classifier := &mockClassifier{result: permission.AutoClassification{AllowAuto: false}}
-	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, "")
+	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, "", false)
 
+	// First 3 classifier blocks should fall back to prompting the user.
 	for range defaultMaxConsecutiveClassifierBlocks {
 		granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{})
 		require.NoError(t, err)
 		require.True(t, granted)
 	}
+	require.Equal(t, defaultMaxConsecutiveClassifierBlocks, classifier.calls)
+	require.Equal(t, defaultMaxConsecutiveClassifierBlocks, base.promptCalls)
 
+	// After reaching threshold, should prompt user without calling the classifier.
 	granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{})
 	require.NoError(t, err)
 	require.True(t, granted)
@@ -229,7 +241,7 @@ func TestAutoPermission_AutoModeReadOnlyBashSkipsClassifier(t *testing.T) {
 		promptGrant: true,
 	}
 	classifier := &mockClassifier{}
-	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, "")
+	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, "", false)
 
 	granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{})
 	require.NoError(t, err)
@@ -261,7 +273,7 @@ func TestAutoPermission_AutoModeWorkspaceWriteSkipsClassifier(t *testing.T) {
 		promptGrant: true,
 	}
 	classifier := &mockClassifier{}
-	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, workingDir)
+	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, workingDir, false)
 
 	granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{})
 	require.NoError(t, err)
@@ -293,11 +305,34 @@ func TestAutoPermission_AutoModeSensitiveWorkspaceWriteFallsBackToPrompt(t *test
 		promptGrant: true,
 	}
 	classifier := &mockClassifier{}
-	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, workingDir)
+	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, workingDir, false)
 
 	granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{})
 	require.NoError(t, err)
 	require.True(t, granted)
 	require.Equal(t, 1, base.promptCalls)
 	require.Zero(t, classifier.calls)
+	require.NotNil(t, base.lastPrompt.AutoReview)
+	require.Equal(t, permission.AutoReviewTriggerAlwaysManual, base.lastPrompt.AutoReview.Trigger)
+}
+
+func TestAutoPermission_FailClosedOnClassifierErrorBlocksRequest(t *testing.T) {
+	t.Parallel()
+
+	base := &mockPermissionService{
+		Broker:     pubsub.NewBroker[permission.PermissionRequest](),
+		evalResult: permission.EvaluationResult{Decision: permission.EvaluationDecisionAsk, Permission: permission.PermissionRequest{SessionID: "s1", ToolName: "edit", Action: "write"}},
+	}
+	classifier := &mockClassifier{err: context.DeadlineExceeded}
+	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, "", true)
+
+	granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{})
+	require.False(t, granted)
+	require.Error(t, err)
+	require.True(t, permission.IsPermissionError(err))
+	require.Equal(t, 1, classifier.calls)
+	require.Zero(t, base.promptCalls)
+	permissionErr, ok := permission.AsPermissionError(err)
+	require.True(t, ok)
+	require.Contains(t, permissionErr.Details, "context deadline exceeded")
 }

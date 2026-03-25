@@ -2,6 +2,8 @@ package autopermission
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -26,12 +28,13 @@ type sessionClassifierState struct {
 }
 
 type service struct {
-	base          permission.Service
-	sessions      session.Service
-	classifierFn  func() permission.Classifier
-	workingDir    string
-	classifierMu  sync.Mutex
-	sessionStates map[string]sessionClassifierState
+	base                        permission.Service
+	sessions                    session.Service
+	classifierFn                func() permission.Classifier
+	workingDir                  string
+	failClosedOnClassifierError bool
+	classifierMu                sync.Mutex
+	sessionStates               map[string]sessionClassifierState
 }
 
 func New(
@@ -39,13 +42,15 @@ func New(
 	sessions session.Service,
 	classifierFn func() permission.Classifier,
 	workingDir string,
+	failClosedOnClassifierError bool,
 ) permission.Service {
 	return &service{
-		base:          base,
-		sessions:      sessions,
-		classifierFn:  classifierFn,
-		workingDir:    workingDir,
-		sessionStates: map[string]sessionClassifierState{},
+		base:                        base,
+		sessions:                    sessions,
+		classifierFn:                classifierFn,
+		workingDir:                  workingDir,
+		failClosedOnClassifierError: failClosedOnClassifierError,
+		sessionStates:               map[string]sessionClassifierState{},
 	}
 }
 
@@ -83,7 +88,7 @@ func (s *service) Request(ctx context.Context, opts permission.CreatePermissionR
 	case permission.EvaluationDecisionAllow:
 		return true, nil
 	case permission.EvaluationDecisionDeny:
-		return false, nil
+		return false, permission.ErrorPermissionBlocked
 	}
 
 	mode, err := s.sessionMode(ctx, eval.Permission.SessionID)
@@ -92,10 +97,17 @@ func (s *service) Request(ctx context.Context, opts permission.CreatePermissionR
 	}
 
 	if s.shouldSuspendAutoApproval(eval.Permission.SessionID, mode) {
-		return s.base.Prompt(ctx, eval.Permission)
+		return s.base.Prompt(ctx, withAutoReview(eval.Permission, permission.AutoReview{
+			Trigger: permission.AutoReviewTriggerClassifierSuspended,
+			Reason:  "Auto approval is paused after repeated classifier blocks.",
+		}))
 	}
+
 	if isAlwaysManual(eval.Permission, s.workingDir) {
-		return s.base.Prompt(ctx, eval.Permission)
+		return s.base.Prompt(ctx, withAutoReview(eval.Permission, permission.AutoReview{
+			Trigger: permission.AutoReviewTriggerAlwaysManual,
+			Reason:  "This action always requires manual confirmation in Auto Mode.",
+		}))
 	}
 
 	if isAutoAllowedFastPath(eval.Permission, s.workingDir) {
@@ -105,12 +117,12 @@ func (s *service) Request(ctx context.Context, opts permission.CreatePermissionR
 
 	classifier := s.classifier()
 	if classifier == nil {
-		return s.base.Prompt(ctx, eval.Permission)
+		return s.handleClassifierUnavailable(ctx, eval.Permission, "Auto Mode permission classification is unavailable.")
 	}
 
 	classification, err := classifier.ClassifyPermission(ctx, eval.Permission)
 	if err != nil {
-		return s.base.Prompt(ctx, eval.Permission)
+		return s.handleClassifierFailure(ctx, eval.Permission, err)
 	}
 	if classification.AllowAuto {
 		s.resetClassifierBlocks(eval.Permission.SessionID)
@@ -118,7 +130,11 @@ func (s *service) Request(ctx context.Context, opts permission.CreatePermissionR
 	}
 
 	s.recordClassifierBlock(eval.Permission.SessionID)
-	return s.base.Prompt(ctx, eval.Permission)
+	return s.base.Prompt(ctx, withAutoReview(eval.Permission, permission.AutoReview{
+		Trigger:    permission.AutoReviewTriggerClassifierBlock,
+		Reason:     firstNonEmpty(classification.Reason, "The classifier could not confirm this action is safe to auto-approve."),
+		Confidence: classification.Confidence,
+	}))
 }
 
 func (s *service) AutoApproveSession(sessionID string) {
@@ -150,6 +166,50 @@ func (s *service) classifier() permission.Classifier {
 		return nil
 	}
 	return s.classifierFn()
+}
+
+func (s *service) handleClassifierUnavailable(ctx context.Context, req permission.PermissionRequest, message string) (bool, error) {
+	if s.failClosedOnClassifierError {
+		return false, permission.NewPermissionBlockedError(message, "Set permissions.fail_closed_on_classifier_error=false to fall back to manual confirmation.")
+	}
+	return s.base.Prompt(ctx, withAutoReview(req, permission.AutoReview{
+		Trigger: permission.AutoReviewTriggerClassifierUnavailable,
+		Reason:  message,
+	}))
+}
+
+func (s *service) handleClassifierFailure(ctx context.Context, req permission.PermissionRequest, err error) (bool, error) {
+	reason := fmt.Sprintf("Auto Mode permission classification failed: %v", err)
+	slog.Warn("Auto Mode permission classification failed",
+		"session_id", req.SessionID,
+		"tool", req.ToolName,
+		"action", req.Action,
+		"err", err,
+	)
+	if s.failClosedOnClassifierError {
+		return false, permission.NewPermissionBlockedError(
+			"Auto Mode permission classification failed.",
+			reason,
+		)
+	}
+	return s.base.Prompt(ctx, withAutoReview(req, permission.AutoReview{
+		Trigger: permission.AutoReviewTriggerClassifierFailed,
+		Reason:  reason,
+	}))
+}
+
+func withAutoReview(req permission.PermissionRequest, review permission.AutoReview) permission.PermissionRequest {
+	req.AutoReview = &review
+	return req
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func (s *service) sessionMode(ctx context.Context, sessionID string) (session.CollaborationMode, error) {

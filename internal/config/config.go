@@ -285,8 +285,9 @@ func (c Completions) Limits() (depth, items int) {
 }
 
 type Permissions struct {
-	AllowedTools []string `json:"allowed_tools,omitempty" jsonschema:"description=List of tools that don't require permission prompts,example=bash,example=view"` // Tools that don't require permission prompts
-	SkipRequests bool     `json:"-"`                                                                                                                              // Automatically accept all permissions (YOLO mode)
+	AllowedTools                []string `json:"allowed_tools,omitempty" jsonschema:"description=List of tools that don't require permission prompts,example=bash,example=view"` // Tools that don't require permission prompts
+	SkipRequests                bool     `json:"-"`                                                                                                                              // Automatically accept all permissions (YOLO mode)
+	FailClosedOnClassifierError bool     `json:"fail_closed_on_classifier_error,omitempty" jsonschema:"description=Block permission-requiring actions when Auto Mode permission classification is unavailable instead of falling back to manual confirmation,default=false"`
 }
 
 type TrailerStyle string

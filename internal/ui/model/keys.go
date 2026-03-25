@@ -27,35 +27,36 @@ type KeyMap struct {
 	}
 
 	Chat struct {
-		NewSession     key.Binding
-		AddAttachment  key.Binding
-		Cancel         key.Binding
-		Tab            key.Binding
-		Details        key.Binding
-		TogglePills    key.Binding
-		PillLeft       key.Binding
-		PillRight      key.Binding
-		QueueDelete    key.Binding
-		QueueClear     key.Binding
-		Down           key.Binding
-		Up             key.Binding
-		UpDown         key.Binding
-		DownOneItem    key.Binding
-		UpOneItem      key.Binding
-		UpDownOneItem  key.Binding
-		PageDown       key.Binding
-		PageUp         key.Binding
-		HalfPageDown   key.Binding
-		HalfPageUp     key.Binding
-		Home           key.Binding
-		End            key.Binding
-		Copy           key.Binding
-		ClearHighlight key.Binding
-		Expand         key.Binding
-		SessionParent  key.Binding
-		SessionChild   key.Binding
-		SessionNext    key.Binding
-		SessionPrev    key.Binding
+		NewSession      key.Binding
+		AddAttachment   key.Binding
+		Cancel          key.Binding
+		Tab             key.Binding
+		Details         key.Binding
+		TogglePills     key.Binding
+		PillLeft        key.Binding
+		PillRight       key.Binding
+		QueueDelete     key.Binding
+		QueueClear      key.Binding
+		QueuePrioritize key.Binding
+		Down            key.Binding
+		Up              key.Binding
+		UpDown          key.Binding
+		DownOneItem     key.Binding
+		UpOneItem       key.Binding
+		UpDownOneItem   key.Binding
+		PageDown        key.Binding
+		PageUp          key.Binding
+		HalfPageDown    key.Binding
+		HalfPageUp      key.Binding
+		Home            key.Binding
+		End             key.Binding
+		Copy            key.Binding
+		ClearHighlight  key.Binding
+		Expand          key.Binding
+		SessionParent   key.Binding
+		SessionChild    key.Binding
+		SessionNext     key.Binding
+		SessionPrev     key.Binding
 	}
 
 	Initialize struct {
@@ -212,6 +213,10 @@ func DefaultKeyMap() KeyMap {
 	km.Chat.QueueClear = key.NewBinding(
 		key.WithKeys("ctrl+x", "ctrl+backspace", "ctrl+delete"),
 		key.WithHelp("ctrl+x", "clear queue"),
+	)
+	km.Chat.QueuePrioritize = key.NewBinding(
+		key.WithKeys("enter"),
+		key.WithHelp("enter", "prioritize"),
 	)
 
 	km.Chat.Down = key.NewBinding(

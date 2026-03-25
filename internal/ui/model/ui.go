@@ -2671,6 +2671,10 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if cmd := m.clearQueuedPrompts(); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
+			case m.queueSelectionActive() && key.Matches(msg, m.keyMap.Chat.QueuePrioritize):
+				if cmd := m.prioritizeSelectedQueuedPrompt(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			case m.queueSelectionActive() && key.Matches(msg, m.keyMap.Chat.Up):
 				m.moveQueueSelection(-1)
 			case m.queueSelectionActive() && key.Matches(msg, m.keyMap.Chat.Down):
@@ -3750,7 +3754,7 @@ func (m *UI) runAgentMessage(content string, attachments ...message.Attachment) 
 		_, err := m.com.App.AgentCoordinator.Run(context.Background(), sessionID, content, attachments...)
 		if err != nil {
 			isCancelErr := errors.Is(err, context.Canceled)
-			isPermissionErr := errors.Is(err, permission.ErrorPermissionDenied)
+			isPermissionErr := permission.IsPermissionError(err)
 			if isCancelErr || isPermissionErr {
 				return nil
 			}
@@ -3867,6 +3871,16 @@ func (m *UI) clearQueuedPrompts() tea.Cmd {
 	}
 	m.com.App.AgentCoordinator.ClearQueue(m.session.ID)
 	m.queuePaused = false
+	m.syncPromptQueue()
+	m.renderPills()
+	return nil
+}
+
+func (m *UI) prioritizeSelectedQueuedPrompt() tea.Cmd {
+	if !m.hasSession() || m.com.App == nil || m.com.App.AgentCoordinator == nil || m.promptQueue == 0 {
+		return nil
+	}
+	m.com.App.AgentCoordinator.PrioritizeQueuedPrompt(m.session.ID, m.selectedQueueIndex)
 	m.syncPromptQueue()
 	m.renderPills()
 	return nil

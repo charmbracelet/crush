@@ -273,7 +273,7 @@ func isSafeReadOnlyGitCommand(args []string) bool {
 	case "status", "diff", "log", "show", "rev-parse", "ls-files", "grep", "symbolic-ref":
 		return true
 	case "branch":
-		return true
+		return len(args) == 1
 	case "remote":
 		return len(args) > 1 && args[1] == "-v"
 	default:

@@ -94,7 +94,7 @@ func (s *service) Request(ctx context.Context, opts permission.CreatePermissionR
 	if s.shouldSuspendAutoApproval(eval.Permission.SessionID, mode) {
 		return s.base.Prompt(ctx, eval.Permission)
 	}
-	if isAlwaysManual(eval.Permission) {
+	if isAlwaysManual(eval.Permission, s.workingDir) {
 		return s.base.Prompt(ctx, eval.Permission)
 	}
 
@@ -253,8 +253,10 @@ func isSafeReadOnlyBashRequest(req permission.PermissionRequest) bool {
 	}
 
 	switch fields[0] {
-	case "pwd", "ls", "dir", "tree", "cat", "type", "head", "tail", "wc", "find", "rg", "grep", "which", "where", "stat":
+	case "pwd", "ls", "dir", "tree", "cat", "type", "head", "tail", "wc", "rg", "grep", "which", "where", "stat":
 		return true
+	case "find":
+		return isSafeFindCommand(fields)
 	case "get-location", "get-childitem", "get-content", "select-string", "get-item", "get-command":
 		return true
 	case "git":
@@ -279,6 +281,18 @@ func isSafeReadOnlyGitCommand(args []string) bool {
 	default:
 		return false
 	}
+}
+
+func isSafeFindCommand(args []string) bool {
+	for _, arg := range args[1:] {
+		if arg == "-delete" || arg == "-exec" || arg == "-execdir" || arg == "-ok" || arg == "-okdir" {
+			return false
+		}
+		if strings.HasPrefix(arg, "-exec") || strings.HasPrefix(arg, "-ok") {
+			return false
+		}
+	}
+	return true
 }
 
 func isSafeWorkspaceWrite(req permission.PermissionRequest, workingDir string) bool {
@@ -357,7 +371,7 @@ func isSensitiveWorkspacePath(path, workingDir string) bool {
 	}
 }
 
-func isAlwaysManual(req permission.PermissionRequest) bool {
+func isAlwaysManual(req permission.PermissionRequest, workingDir string) bool {
 	switch req.ToolName {
 	case tools.DownloadToolName, tools.FetchToolName, tools.AgenticFetchToolName:
 		return true
@@ -365,7 +379,7 @@ func isAlwaysManual(req permission.PermissionRequest) bool {
 		return isHighRiskBashRequest(req)
 	case tools.EditToolName, tools.WriteToolName, tools.MultiEditToolName:
 		filePath, ok := permissionRequestFilePath(req)
-		return ok && isSensitiveWorkspacePath(filePath, req.Path)
+		return ok && isSensitiveWorkspacePath(filePath, workingDir)
 	default:
 		return strings.HasPrefix(req.ToolName, "mcp_") && req.Action == "execute"
 	}

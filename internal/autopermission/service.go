@@ -288,7 +288,10 @@ func isSafeFindCommand(args []string) bool {
 		if arg == "-delete" || arg == "-exec" || arg == "-execdir" || arg == "-ok" || arg == "-okdir" {
 			return false
 		}
-		if strings.HasPrefix(arg, "-exec") || strings.HasPrefix(arg, "-ok") {
+		if arg == "-fprint" || arg == "-fprintf" || arg == "-fls" {
+			return false
+		}
+		if strings.HasPrefix(arg, "-exec") || strings.HasPrefix(arg, "-ok") || strings.HasPrefix(arg, "-fprint") || strings.HasPrefix(arg, "-fls") {
 			return false
 		}
 	}

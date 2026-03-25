@@ -1285,7 +1285,10 @@ func (c *coordinator) updateCurrentAgentRuntime(ctx context.Context) (sessionAge
 		return sessionAgentRuntimeConfig{}, errCoderAgentNotConfigured
 	}
 
-	promptBuilder, err := promptForAgent(agentCfg, false, prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	// Use session-specific working directory from context if available,
+	// otherwise fall back to global working directory.
+	workingDir := cmp.Or(tools.GetWorkingDirFromContext(ctx), c.cfg.WorkingDir())
+	promptBuilder, err := promptForAgent(agentCfg, false, prompt.WithWorkingDir(workingDir))
 	if err != nil {
 		return sessionAgentRuntimeConfig{}, err
 	}

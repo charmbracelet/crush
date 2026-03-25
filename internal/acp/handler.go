@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -160,7 +161,10 @@ func (h *Handler) handleSessionLoad(ctx context.Context, req *Request) (any, *RP
 
 	sess, err := h.app.GetSessions().Get(ctx, params.SessionID)
 	if err != nil {
-		return nil, &RPCError{Code: CodeInternalError, Message: fmt.Sprintf("session not found: %v", err)}
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &RPCError{Code: CodeResourceNotFound, Message: fmt.Sprintf("session not found: %s", params.SessionID)}
+		}
+		return nil, &RPCError{Code: CodeInternalError, Message: fmt.Sprintf("failed to get session: %v", err)}
 	}
 
 	// Replay history as session/update notifications before responding so

@@ -3,6 +3,7 @@ package acp_test
 import (
 	"bufio"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -69,7 +70,7 @@ func (f *fakeSessionService) CreateHandoffSession(_ context.Context, sourceSessi
 func (f *fakeSessionService) Get(_ context.Context, id string) (session.Session, error) {
 	s, ok := f.sessions[id]
 	if !ok {
-		return session.Session{ID: id, Title: "loaded"}, nil
+		return session.Session{}, sql.ErrNoRows
 	}
 	return s, nil
 }
@@ -486,6 +487,27 @@ func TestSessionLoadPersistsCWD(t *testing.T) {
 	expectedCWD, err := filepath.Abs(filepath.FromSlash("/tmp/acp-workspace"))
 	require.NoError(t, err)
 	require.Equal(t, expectedCWD, saved.WorkspaceCWD)
+}
+
+func TestSessionLoadNotFound(t *testing.T) {
+	t.Parallel()
+
+	reqLine := buildRequest(t, 1, "session/load", acp.SessionLoadParams{
+		SessionID: "nonexistent-session",
+	})
+
+	app := &fakeApp{
+		sessions:    newFakeSessionService(),
+		messages:    newFakeMessageService(),
+		coordinator: &fakeCoordinator{runResult: &fantasy.AgentResult{}},
+	}
+
+	resp := runSingleRequest(t, app, reqLine)
+
+	require.NotNil(t, resp.Error)
+	require.Equal(t, acp.CodeResourceNotFound, resp.Error.Code)
+	require.Contains(t, resp.Error.Message, "session not found")
+	require.Contains(t, resp.Error.Message, "nonexistent-session")
 }
 
 func TestUnknownMethod(t *testing.T) {

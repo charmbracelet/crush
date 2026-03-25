@@ -80,6 +80,7 @@ type Coordinator interface {
 	ResumeQueue(sessionID string)
 	IsQueuePaused(sessionID string) bool
 	Summarize(context.Context, string, fantasy.ProviderOptions) error
+	GenerateHandoff(ctx context.Context, sourceSessionID, goal string) (HandoffDraft, error)
 	Model() Model
 	PrepareModelSwitch(ctx context.Context, sessionID string, modelType config.SelectedModelType, selectedModel config.SelectedModel) error
 	UpdateModels(ctx context.Context) error
@@ -178,6 +179,7 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 		sessionWorkingDir = c.cfg.WorkingDir()
 	}
 	ctx = context.WithValue(ctx, tools.WorkingDirContextKey, sessionWorkingDir)
+	ctx = context.WithValue(ctx, tools.SessionIDContextKey, sessionID)
 
 	// refresh models before each run
 	runtimeConfig, err := c.updateCurrentAgentRuntime(ctx)
@@ -609,19 +611,27 @@ func (c *coordinator) refreshSessionAgentRuntimeConfig(ctx context.Context, curr
 	if !ok {
 		return sessionAgentRuntimeConfig{}, errModelProviderNotConfigured
 	}
-	currentAgent.SetSystemPromptPrefix(providerCfg.SystemPromptPrefix)
 
 	systemPrompt, err := promptBuilder.Build(ctx, inferenceModel.Model.Provider(), inferenceModel.Model.Model(), c.cfg)
 	if err != nil {
 		return sessionAgentRuntimeConfig{}, err
 	}
-	currentAgent.SetSystemPrompt(systemPrompt)
-
-	tools, err := c.buildTools(ctx, agentCfg)
+	mode, err := c.collaborationModeForContext(ctx)
 	if err != nil {
 		return sessionAgentRuntimeConfig{}, err
 	}
-	currentAgent.SetTools(tools)
+	systemPrompt = buildSystemPromptForCollaborationMode(systemPrompt, mode)
+
+	toolSet, err := c.buildTools(ctx, agentCfg, mode)
+	if err != nil {
+		return sessionAgentRuntimeConfig{}, err
+	}
+
+	if tools.GetSessionFromContext(ctx) == "" {
+		currentAgent.SetSystemPromptPrefix(providerCfg.SystemPromptPrefix)
+		currentAgent.SetSystemPrompt(systemPrompt)
+		currentAgent.SetTools(toolSet)
+	}
 
 	maxTokens, clamped := effectiveMaxOutputTokens(inferenceModel)
 	if clamped {
@@ -629,18 +639,35 @@ func (c *coordinator) refreshSessionAgentRuntimeConfig(ctx context.Context, curr
 	}
 
 	mergedOptions, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(inferenceModel, providerCfg)
+	systemPromptPrefix := providerCfg.SystemPromptPrefix
 	return sessionAgentRuntimeConfig{
-		ProviderOptions:  mergedOptions,
-		MaxOutputTokens:  maxTokens,
-		Temperature:      temp,
-		TopP:             topP,
-		TopK:             topK,
-		FrequencyPenalty: freqPenalty,
-		PresencePenalty:  presPenalty,
+		ProviderOptions:    mergedOptions,
+		MaxOutputTokens:    maxTokens,
+		Temperature:        temp,
+		TopP:               topP,
+		TopK:               topK,
+		FrequencyPenalty:   freqPenalty,
+		PresencePenalty:    presPenalty,
+		SystemPrompt:       &systemPrompt,
+		SystemPromptPrefix: &systemPromptPrefix,
+		Tools:              toolSet,
 	}, nil
 }
 
-func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fantasy.AgentTool, error) {
+func (c *coordinator) collaborationModeForContext(ctx context.Context) (session.CollaborationMode, error) {
+	sessionID := tools.GetSessionFromContext(ctx)
+	if sessionID == "" {
+		return session.CollaborationModeDefault, nil
+	}
+
+	sess, err := c.sessions.Get(ctx, sessionID)
+	if err != nil {
+		return session.CollaborationModeDefault, fmt.Errorf("failed to get session collaboration mode: %w", err)
+	}
+	return sess.CollaborationMode, nil
+}
+
+func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, mode session.CollaborationMode) ([]fantasy.AgentTool, error) {
 	var allTools []fantasy.AgentTool
 	if config.NormalizeAgentMode(agent.Mode) != config.AgentModeSubagent && slices.Contains(agent.AllowedTools, AgentToolName) {
 		agentTool, err := c.agentTool(ctx)
@@ -667,7 +694,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 	}
 
 	bashOpts := tools.BashToolOptions{}
-	if agent.ID == config.AgentExplore {
+	if agent.ID == config.AgentExplore || mode == session.CollaborationModePlan {
 		bashOpts = tools.BashToolOptions{
 			RestrictedToGitReadOnly: true,
 			DisableBackground:       true,
@@ -677,6 +704,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 
 	allTools = append(allTools,
 		tools.NewRequestUserInputTool(c.userInput),
+		tools.NewPlanExitTool(c.sessions),
 		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelName, c.hookManager, bashOpts),
 		tools.NewJobOutputTool(),
 		tools.NewJobKillTool(),
@@ -707,10 +735,15 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 	}
 
 	var filteredTools []fantasy.AgentTool
+	allowedToolNames := filterToolsForCollaborationMode(agent.AllowedTools, mode)
 	for _, tool := range allTools {
-		if slices.Contains(agent.AllowedTools, tool.Info().Name) {
+		if slices.Contains(allowedToolNames, tool.Info().Name) {
 			filteredTools = append(filteredTools, tool)
 		}
+	}
+
+	if mode == session.CollaborationModePlan {
+		return filteredTools, nil
 	}
 
 	// Add custom plugin tools - they bypass AllowedTools filter since they are user-defined
@@ -1233,7 +1266,7 @@ func (c *coordinator) RefreshTools(ctx context.Context) error {
 		return errors.New("coder agent not configured")
 	}
 
-	tools, err := c.buildTools(ctx, agentCfg)
+	tools, err := c.buildTools(ctx, agentCfg, session.CollaborationModeDefault)
 	if err != nil {
 		return err
 	}

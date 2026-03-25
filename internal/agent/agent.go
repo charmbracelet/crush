@@ -18,6 +18,7 @@ import (
 	"log/slog"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -165,13 +166,16 @@ type SessionAgentOptions struct {
 }
 
 type sessionAgentRuntimeConfig struct {
-	ProviderOptions  fantasy.ProviderOptions
-	MaxOutputTokens  int64
-	Temperature      *float64
-	TopP             *float64
-	TopK             *int64
-	FrequencyPenalty *float64
-	PresencePenalty  *float64
+	ProviderOptions    fantasy.ProviderOptions
+	MaxOutputTokens    int64
+	Temperature        *float64
+	TopP               *float64
+	TopK               *int64
+	FrequencyPenalty   *float64
+	PresencePenalty    *float64
+	SystemPrompt       *string
+	SystemPromptPrefix *string
+	Tools              []fantasy.AgentTool
 }
 
 type sessionAgentRuntimeConfigContextKey struct{}
@@ -232,7 +236,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		return nil, nil
 	}
 
-	if err := a.refreshCallConfigIfNeeded(ctx, &call); err != nil {
+	runtimeConfig, err := a.refreshCallConfigIfNeeded(ctx, &call)
+	if err != nil {
 		return nil, err
 	}
 
@@ -240,6 +245,18 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	agentTools := a.tools.Copy()
 	largeModel := a.largeModel.Get()
 	systemPrompt := a.systemPrompt.Get()
+	promptPrefix := a.systemPromptPrefix.Get()
+	if runtimeConfig != nil {
+		if runtimeConfig.SystemPrompt != nil {
+			systemPrompt = *runtimeConfig.SystemPrompt
+		}
+		if runtimeConfig.SystemPromptPrefix != nil {
+			promptPrefix = *runtimeConfig.SystemPromptPrefix
+		}
+		if runtimeConfig.Tools != nil {
+			agentTools = slices.Clone(runtimeConfig.Tools)
+		}
+	}
 	var instructions strings.Builder
 
 	for _, server := range mcp.GetStates() {
@@ -272,7 +289,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session messages: %w", err)
 	}
-	promptPrefix := buildDelegationPromptPrefix(a.systemPromptPrefix.Get(), agentTools, a.isSubAgent)
+	promptPrefix = buildDelegationPromptPrefix(promptPrefix, agentTools, a.isSubAgent)
 	preflightState, err := a.buildChatRequestState(ctx, chatRequestStateInput{
 		SessionID:    call.SessionID,
 		Agent:        "session",
@@ -420,8 +437,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				}
 				firstRequestStep = false
 
-				// Use latest tools (updated by SetTools when MCP tools change).
 				prepared.Tools = a.tools.Copy()
+				if runtimeConfig != nil && runtimeConfig.Tools != nil {
+					prepared.Tools = slices.Clone(runtimeConfig.Tools)
+				}
 				// Add Anthropic caching to the last tool.
 				if len(prepared.Tools) > 0 {
 					prepared.Tools[len(prepared.Tools)-1].SetProviderOptions(a.getCacheControlOptions())
@@ -1849,24 +1868,24 @@ func applyRuntimeConfig(call *SessionAgentCall, runtimeConfig sessionAgentRuntim
 	}
 }
 
-func (a *sessionAgent) refreshCallConfigIfNeeded(ctx context.Context, call *SessionAgentCall) error {
+func (a *sessionAgent) refreshCallConfigIfNeeded(ctx context.Context, call *SessionAgentCall) (*sessionAgentRuntimeConfig, error) {
 	if runtimeConfig, ok := ctx.Value(sessionAgentRuntimeConfigContextKey{}).(*sessionAgentRuntimeConfig); ok && runtimeConfig != nil {
 		applyRuntimeConfig(call, *runtimeConfig)
-		return nil
+		return runtimeConfig, nil
 	}
 	if runtimeConfig, ok := ctx.Value(sessionAgentRuntimeConfigContextKey{}).(sessionAgentRuntimeConfig); ok {
 		applyRuntimeConfig(call, runtimeConfig)
-		return nil
+		return &runtimeConfig, nil
 	}
 	if a.refreshCallConfig == nil {
-		return nil
+		return nil, nil
 	}
 	runtimeConfig, err := a.refreshCallConfig(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	applyRuntimeConfig(call, runtimeConfig)
-	return nil
+	return &runtimeConfig, nil
 }
 
 func (a *sessionAgent) resetRetriedStep(ctx context.Context, assistant *message.Message, toolMessageIDs []string) error {

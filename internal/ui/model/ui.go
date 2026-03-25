@@ -150,7 +150,13 @@ type (
 		modelType    config.SelectedModelType
 		modelName    string
 		isOnboarding bool
+		closeDialog  bool
 		err          error
+	}
+	handoffGeneratedMsg struct {
+		sessionID string
+		title     string
+		err       error
 	}
 )
 
@@ -523,6 +529,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.startLSPs(msg.lspFilePaths()))
 		if cmd := m.setSessionMessages(msg.messages); cmd != nil {
 			cmds = append(cmds, cmd)
+		}
+		if m.session != nil && m.session.Kind == session.KindHandoff && m.session.MessageCount == 0 && strings.TrimSpace(m.session.HandoffDraftPrompt) != "" {
+			m.textarea.SetValue(m.session.HandoffDraftPrompt)
+			m.textarea.MoveToEnd()
+			if m.attachments != nil {
+				m.attachments.Clear()
+			}
 		}
 		if msg.selectedMessageID != "" && m.chat.SelectMessage(msg.selectedMessageID) {
 			if cmd := m.chat.ScrollToSelectedAndAnimate(); cmd != nil {
@@ -949,15 +962,36 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 
+		if dia := m.dialog.Dialog(dialog.ModelsID); dia != nil {
+			if models, ok := dia.(*dialog.Models); ok {
+				if err := models.HandleModelApplied(msg.modelType); err != nil {
+					cmds = append(cmds, util.ReportError(err))
+				}
+			}
+		}
+
 		m.dialog.CloseDialog(dialog.APIKeyInputID)
 		m.dialog.CloseDialog(dialog.OAuthID)
-		m.dialog.CloseDialog(dialog.ModelsID)
+		if msg.closeDialog || msg.isOnboarding {
+			m.dialog.CloseDialog(dialog.ModelsID)
+		}
 
 		if msg.isOnboarding {
 			m.setState(uiLanding, uiFocusEditor)
 		}
 
 		cmds = append(cmds, util.ReportInfo(fmt.Sprintf("%s model changed to %s", msg.modelType, msg.modelName)))
+	case handoffGeneratedMsg:
+		m.dialog.StopLoading()
+		if msg.err != nil {
+			cmds = append(cmds, util.ReportError(msg.err))
+			break
+		}
+		m.dialog.CloseDialog(dialog.HandoffID)
+		cmds = append(cmds, util.ReportInfo("Created handoff "+msg.title))
+		if msg.sessionID != "" {
+			cmds = append(cmds, m.loadSession(msg.sessionID))
+		}
 	case util.InfoMsg:
 		m.status.SetInfoMsg(msg)
 		ttl := msg.TTL
@@ -1654,6 +1688,32 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			return nil
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionGenerateHandoff:
+		if m.isAgentBusy() {
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before creating a handoff..."))
+			break
+		}
+		if m.com.App.AgentCoordinator == nil {
+			cmds = append(cmds, util.ReportWarn("Agent is not configured."))
+			break
+		}
+		if cmd := m.dialog.StartLoading(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		cmds = append(cmds, func() tea.Msg {
+			draft, err := m.com.App.AgentCoordinator.GenerateHandoff(context.Background(), msg.SessionID, msg.Goal)
+			if err != nil {
+				return handoffGeneratedMsg{err: err}
+			}
+			handoffSession, err := m.com.App.Sessions.CreateHandoffSession(context.Background(), msg.SessionID, draft.Title, msg.Goal, draft.Prompt, draft.RelevantFiles)
+			if err != nil {
+				return handoffGeneratedMsg{err: err}
+			}
+			return handoffGeneratedMsg{
+				sessionID: handoffSession.ID,
+				title:     handoffSession.Title,
+			}
+		})
 	case dialog.ActionToggleHelp:
 		if shortcuts, err := dialog.NewKeyboardShortcuts(m.com); err == nil {
 			m.dialog.OpenDialog(shortcuts)
@@ -1949,6 +2009,7 @@ func (m *UI) completeModelSwitchCmd(action dialog.ActionSelectModel, defaultSmal
 	modelType := action.ModelType
 	modelName := action.Model.Model
 	selectedModel := action.Model
+	closeDialog := action.CloseDialog
 
 	return func() tea.Msg {
 		if err := m.com.Store().UpdatePreferredModel(config.ScopeGlobal, modelType, selectedModel); err != nil {
@@ -1956,6 +2017,7 @@ func (m *UI) completeModelSwitchCmd(action dialog.ActionSelectModel, defaultSmal
 				modelType:    modelType,
 				modelName:    modelName,
 				isOnboarding: isOnboarding,
+				closeDialog:  closeDialog,
 				err:          err,
 			}
 		}
@@ -1966,6 +2028,7 @@ func (m *UI) completeModelSwitchCmd(action dialog.ActionSelectModel, defaultSmal
 					modelType:    modelType,
 					modelName:    modelName,
 					isOnboarding: isOnboarding,
+					closeDialog:  closeDialog,
 					err:          err,
 				}
 			}
@@ -1977,6 +2040,7 @@ func (m *UI) completeModelSwitchCmd(action dialog.ActionSelectModel, defaultSmal
 					modelType:    modelType,
 					modelName:    modelName,
 					isOnboarding: isOnboarding,
+					closeDialog:  closeDialog,
 					err:          err,
 				}
 			}
@@ -1986,6 +2050,7 @@ func (m *UI) completeModelSwitchCmd(action dialog.ActionSelectModel, defaultSmal
 					modelType:    modelType,
 					modelName:    modelName,
 					isOnboarding: isOnboarding,
+					closeDialog:  closeDialog,
 					err:          err,
 				}
 			}
@@ -1995,6 +2060,7 @@ func (m *UI) completeModelSwitchCmd(action dialog.ActionSelectModel, defaultSmal
 			modelType:    modelType,
 			modelName:    modelName,
 			isOnboarding: isOnboarding,
+			closeDialog:  closeDialog,
 		}
 	}
 }
@@ -2030,6 +2096,9 @@ func (m *UI) maybeOpenProposedPlanDialog(msg message.Message) tea.Cmd {
 	if !ok || strings.TrimSpace(plan) == "" {
 		return nil
 	}
+	if !hasToolCall(msg, agenttools.PlanExitToolName) {
+		return nil
+	}
 	if m.lastPromptedPlanMsg == msg.ID {
 		return nil
 	}
@@ -2039,6 +2108,15 @@ func (m *UI) maybeOpenProposedPlanDialog(msg message.Message) tea.Cmd {
 	}
 	m.dialog.OpenDialog(dialog.NewProposedPlan(m.com, msg.SessionID, plan))
 	return nil
+}
+
+func hasToolCall(msg message.Message, toolName string) bool {
+	for _, tc := range msg.ToolCalls() {
+		if tc.Name == toolName {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *UI) openRequestUserInputDialog(request userinput.Request) tea.Cmd {
@@ -3676,6 +3754,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openCommandsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.HandoffID:
+		if cmd := m.openHandoffDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.MCPID:
 		if cmd := m.openMCPDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -3754,6 +3836,20 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 	m.dialog.OpenDialog(commands)
 
 	return commands.InitialCmd()
+}
+
+func (m *UI) openHandoffDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.HandoffID) {
+		m.dialog.BringToFront(dialog.HandoffID)
+		return nil
+	}
+	if m.session == nil {
+		return util.ReportWarn("Open a session before creating a handoff.")
+	}
+
+	handoffDialog := dialog.NewHandoff(m.com, m.session.ID)
+	m.dialog.OpenDialog(handoffDialog)
+	return nil
 }
 
 // openMCPDialog opens the MCP management dialog.

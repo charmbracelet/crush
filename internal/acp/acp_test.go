@@ -52,6 +52,20 @@ func (f *fakeSessionService) CreateTaskSession(_ context.Context, toolCallID, pa
 	return session.Session{ID: toolCallID}, nil
 }
 
+func (f *fakeSessionService) CreateHandoffSession(_ context.Context, sourceSessionID, title, goal, draftPrompt string, files []string) (session.Session, error) {
+	s := session.Session{
+		ID:                     "handoff-" + title,
+		Kind:                   session.KindHandoff,
+		Title:                  title,
+		HandoffSourceSessionID: sourceSessionID,
+		HandoffGoal:            goal,
+		HandoffDraftPrompt:     draftPrompt,
+		HandoffRelevantFiles:   files,
+	}
+	f.sessions[s.ID] = s
+	return s, nil
+}
+
 func (f *fakeSessionService) Get(_ context.Context, id string) (session.Session, error) {
 	s, ok := f.sessions[id]
 	if !ok {
@@ -157,6 +171,9 @@ func (f *fakeCoordinator) ResumeQueue(_ string)                    {}
 func (f *fakeCoordinator) IsQueuePaused(_ string) bool             { return false }
 func (f *fakeCoordinator) Summarize(_ context.Context, _ string, _ fantasy.ProviderOptions) error {
 	return nil
+}
+func (f *fakeCoordinator) GenerateHandoff(_ context.Context, _ string, _ string) (agent.HandoffDraft, error) {
+	return agent.HandoffDraft{}, nil
 }
 func (f *fakeCoordinator) Model() agent.Model { return agent.Model{} }
 func (f *fakeCoordinator) PrepareModelSwitch(_ context.Context, _ string, _ config.SelectedModelType, _ config.SelectedModel) error {

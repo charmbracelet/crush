@@ -435,6 +435,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	// Only show compact command if there's an active session
 	if c.hasSession {
 		commands = append(commands, NewCommandItem(c.com.Styles, "summarize", "Summarize Session", "", ActionSummarize{SessionID: c.sessionID}))
+		commands = append(commands, NewCommandItem(c.com.Styles, "handoff", "Handoff", "", ActionOpenDialog{HandoffID}))
 		if c.mode == session.CollaborationModePlan {
 			commands = append(commands, NewCommandItem(c.com.Styles, "toggle_plan_mode", "Exit Plan Mode", "", ActionTogglePlanMode{SessionID: c.sessionID, NextMode: session.CollaborationModeDefault}))
 			if strings.TrimSpace(c.proposedPlan) != "" {

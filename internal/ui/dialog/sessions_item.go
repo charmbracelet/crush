@@ -30,12 +30,13 @@ type ListItem interface {
 // SessionItem wraps a [session.Session] to implement the [ListItem] interface.
 type SessionItem struct {
 	session.Session
-	t                *styles.Styles
-	sessionsMode     sessionsMode
-	m                fuzzy.Match
-	cache            map[int]string
-	updateTitleInput textinput.Model
-	focused          bool
+	t                  *styles.Styles
+	sessionsMode       sessionsMode
+	sourceSessionTitle string
+	m                  fuzzy.Match
+	cache              map[int]string
+	updateTitleInput   textinput.Model
+	focused            bool
 }
 
 var _ ListItem = &SessionItem{}
@@ -75,11 +76,6 @@ func (s *SessionItem) Cursor() *tea.Cursor {
 
 // Render returns the string representation of the session item.
 func (s *SessionItem) Render(width int) string {
-	info := humanize.Time(time.Unix(s.UpdatedAt, 0))
-	title := s.Title
-	if s.ParentSessionID != "" {
-		title = "↳ " + title
-	}
 	styles := ListItemStyles{
 		ItemBlurred:     s.t.Dialog.NormalItem,
 		ItemFocused:     s.t.Dialog.SelectedItem,
@@ -100,9 +96,45 @@ func (s *SessionItem) Render(width int) string {
 			s.updateTitleInput.Placeholder = ansi.Truncate(s.Title, width, "…")
 			return styles.ItemFocused.Render(s.updateTitleInput.View())
 		}
+		return renderItem(styles, s.Title, "", s.focused, width, s.cache, &s.m)
 	}
 
-	return renderItem(styles, title, info, s.focused, width, s.cache, &s.m)
+	title := strings.TrimSpace(s.Title)
+	if title == "" {
+		title = "Untitled Session"
+	}
+	metadata := humanize.Time(time.Unix(s.UpdatedAt, 0))
+	if s.Kind == session.KindHandoff {
+		sourceTitle := s.sourceSessionTitle
+		if strings.TrimSpace(sourceTitle) == "" && s.HandoffSourceSessionID != "" {
+			sourceTitle = "Source " + session.HashID(s.HandoffSourceSessionID)[:7]
+		}
+		state := "Sent"
+		if s.MessageCount == 0 {
+			state = "Draft"
+		}
+		parts := []string{"Handoff", state}
+		if sourceTitle != "" {
+			parts = append(parts, "From "+sourceTitle)
+		}
+		if count := len(s.HandoffRelevantFiles); count > 0 {
+			parts = append(parts, fmt.Sprintf("%d files", count))
+		}
+		parts = append(parts, metadata)
+		metadata = strings.Join(parts, " | ")
+	}
+
+	lineStyle := styles.ItemBlurred
+	metaStyle := styles.InfoTextBlurred
+	if s.focused {
+		lineStyle = styles.ItemFocused
+		metaStyle = styles.InfoTextFocused
+	}
+
+	titleLine := ansi.Truncate(title, max(0, width), "…")
+	metaLine := ansi.Truncate(metadata, max(0, width), "…")
+	content := lipgloss.JoinVertical(lipgloss.Left, titleLine, metaStyle.Render(metaLine))
+	return lineStyle.Render(content)
 }
 
 type ListItemStyles struct {
@@ -188,10 +220,15 @@ func (s *SessionItem) SetFocused(focused bool) {
 
 // sessionItems takes a slice of [session.Session]s and convert them to a slice
 // of [ListItem]s.
-func sessionItems(t *styles.Styles, mode sessionsMode, sessions ...session.Session) []list.FilterableItem {
+func sessionItems(t *styles.Styles, mode sessionsMode, sourceTitles map[string]string, sessions ...session.Session) []list.FilterableItem {
 	items := make([]list.FilterableItem, len(sessions))
 	for i, s := range sessions {
-		item := &SessionItem{Session: s, t: t, sessionsMode: mode}
+		item := &SessionItem{
+			Session:            s,
+			t:                  t,
+			sessionsMode:       mode,
+			sourceSessionTitle: sourceTitles[s.HandoffSourceSessionID],
+		}
 		if mode == sessionsModeUpdating {
 			item.updateTitleInput = textinput.New()
 			item.updateTitleInput.SetVirtualCursor(false)

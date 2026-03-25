@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/lsp"
+	"github.com/charmbracelet/crush/internal/session"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -108,7 +109,7 @@ func TestBuildToolsForSubagentsUseExpectedCapabilities(t *testing.T) {
 		lspManager:  lsp.NewManager(cfg),
 	}
 
-	generalTools, err := coord.buildTools(t.Context(), cfg.Config().Agents[config.AgentGeneral])
+	generalTools, err := coord.buildTools(t.Context(), cfg.Config().Agents[config.AgentGeneral], session.CollaborationModeDefault)
 	require.NoError(t, err)
 
 	generalNames := make([]string, 0, len(generalTools))
@@ -120,7 +121,7 @@ func TestBuildToolsForSubagentsUseExpectedCapabilities(t *testing.T) {
 	assert.NotContains(t, generalNames, AgentToolName)
 	assert.NotContains(t, generalNames, "request_user_input")
 
-	exploreTools, err := coord.buildTools(t.Context(), cfg.Config().Agents[config.AgentExplore])
+	exploreTools, err := coord.buildTools(t.Context(), cfg.Config().Agents[config.AgentExplore], session.CollaborationModeDefault)
 	require.NoError(t, err)
 
 	exploreNames := make([]string, 0, len(exploreTools))
@@ -128,4 +129,50 @@ func TestBuildToolsForSubagentsUseExpectedCapabilities(t *testing.T) {
 		exploreNames = append(exploreNames, tool.Info().Name)
 	}
 	assert.Equal(t, []string{"bash", "glob", "grep", "ls", "sourcegraph", "view"}, exploreNames)
+}
+
+func TestBuildToolsForPlanModeUsesReadOnlyCapabilities(t *testing.T) {
+	env := testEnv(t)
+	cfg, err := config.Init(env.workingDir, "", false)
+	require.NoError(t, err)
+
+	coord := &coordinator{
+		cfg:         cfg,
+		sessions:    env.sessions,
+		messages:    env.messages,
+		permissions: env.permissions,
+		userInput:   nil,
+		history:     env.history,
+		filetracker: *env.filetracker,
+		lspManager:  lsp.NewManager(cfg),
+	}
+
+	planTools, err := coord.buildTools(t.Context(), cfg.Config().Agents[config.AgentCoder], session.CollaborationModePlan)
+	require.NoError(t, err)
+
+	planNames := make([]string, 0, len(planTools))
+	for _, tool := range planTools {
+		planNames = append(planNames, tool.Info().Name)
+	}
+
+	assert.Equal(t, []string{
+		"request_user_input",
+		"plan_exit",
+		"bash",
+		"fetch",
+		"glob",
+		"grep",
+		"ls",
+		"sourcegraph",
+		"view",
+		"lsp_diagnostics",
+		"lsp_references",
+		"list_mcp_resources",
+		"read_mcp_resource",
+	}, planNames)
+	assert.NotContains(t, planNames, AgentToolName)
+	assert.NotContains(t, planNames, "edit")
+	assert.NotContains(t, planNames, "multiedit")
+	assert.NotContains(t, planNames, "write")
+	assert.NotContains(t, planNames, "todos")
 }

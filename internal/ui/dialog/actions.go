@@ -41,6 +41,7 @@ type ActionSelectModel struct {
 	Model          config.SelectedModel
 	ModelType      config.SelectedModelType
 	ReAuthenticate bool
+	CloseDialog    bool
 }
 
 // Messages for commands
@@ -71,6 +72,10 @@ type (
 	ActionInitializeProject struct{}
 	ActionSummarize         struct {
 		SessionID string
+	}
+	ActionGenerateHandoff struct {
+		SessionID string
+		Goal      string
 	}
 	// ActionSelectReasoningEffort is a message indicating a reasoning effort
 	// has been selected.

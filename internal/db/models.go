@@ -38,19 +38,24 @@ type ReadFile struct {
 }
 
 type Session struct {
-	ID                   string         `json:"id"`
-	ParentSessionID      sql.NullString `json:"parent_session_id"`
-	Title                string         `json:"title"`
-	WorkspaceCwd         sql.NullString `json:"workspace_cwd"`
-	CollaborationMode    string         `json:"collaboration_mode"`
-	MessageCount         int64          `json:"message_count"`
-	PromptTokens         int64          `json:"prompt_tokens"`
-	CompletionTokens     int64          `json:"completion_tokens"`
-	Cost                 float64        `json:"cost"`
-	UpdatedAt            int64          `json:"updated_at"`
-	CreatedAt            int64          `json:"created_at"`
-	SummaryMessageID     sql.NullString `json:"summary_message_id"`
-	Todos                sql.NullString `json:"todos"`
-	LastPromptTokens     int64          `json:"last_prompt_tokens"`
-	LastCompletionTokens int64          `json:"last_completion_tokens"`
+	ID                     string         `json:"id"`
+	ParentSessionID        sql.NullString `json:"parent_session_id"`
+	Kind                   string         `json:"kind"`
+	Title                  string         `json:"title"`
+	WorkspaceCwd           sql.NullString `json:"workspace_cwd"`
+	CollaborationMode      string         `json:"collaboration_mode"`
+	HandoffSourceSessionID sql.NullString `json:"handoff_source_session_id"`
+	HandoffGoal            string         `json:"handoff_goal"`
+	HandoffDraftPrompt     string         `json:"handoff_draft_prompt"`
+	HandoffRelevantFiles   string         `json:"handoff_relevant_files"`
+	MessageCount           int64          `json:"message_count"`
+	PromptTokens           int64          `json:"prompt_tokens"`
+	CompletionTokens       int64          `json:"completion_tokens"`
+	Cost                   float64        `json:"cost"`
+	UpdatedAt              int64          `json:"updated_at"`
+	CreatedAt              int64          `json:"created_at"`
+	SummaryMessageID       sql.NullString `json:"summary_message_id"`
+	Todos                  sql.NullString `json:"todos"`
+	LastPromptTokens       int64          `json:"last_prompt_tokens"`
+	LastCompletionTokens   int64          `json:"last_completion_tokens"`
 }

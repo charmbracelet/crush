@@ -36,6 +36,20 @@ func (m *mockSessionService) CreateTaskSession(context.Context, string, string, 
 	return session.Session{}, nil
 }
 
+func (m *mockSessionService) CreateHandoffSession(_ context.Context, sourceSessionID, title, goal, draftPrompt string, files []string) (session.Session, error) {
+	s := session.Session{
+		ID:                     "handoff-session-id",
+		Kind:                   session.KindHandoff,
+		Title:                  title,
+		HandoffSourceSessionID: sourceSessionID,
+		HandoffGoal:            goal,
+		HandoffDraftPrompt:     draftPrompt,
+		HandoffRelevantFiles:   files,
+	}
+	m.created = append(m.created, s)
+	return s, nil
+}
+
 func (m *mockSessionService) Get(_ context.Context, id string) (session.Session, error) {
 	for _, s := range m.sessions {
 		if s.ID == id {

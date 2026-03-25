@@ -25,15 +25,18 @@ type ModelType int
 const (
 	ModelTypeLarge ModelType = iota
 	ModelTypeSmall
+	ModelTypeHandoff
 )
 
 // String returns the string representation of the [ModelType].
 func (mt ModelType) String() string {
 	switch mt {
 	case ModelTypeLarge:
-		return "Large Task"
+		return "Large"
 	case ModelTypeSmall:
-		return "Small Task"
+		return "Small"
+	case ModelTypeHandoff:
+		return "Handoff"
 	default:
 		return "Unknown"
 	}
@@ -46,6 +49,8 @@ func (mt ModelType) Config() config.SelectedModelType {
 		return config.SelectedModelTypeLarge
 	case ModelTypeSmall:
 		return config.SelectedModelTypeSmall
+	case ModelTypeHandoff:
+		return config.SelectedModelTypeHandoff
 	default:
 		return ""
 	}
@@ -58,6 +63,8 @@ func (mt ModelType) Placeholder() string {
 		return largeModelInputPlaceholder
 	case ModelTypeSmall:
 		return smallModelInputPlaceholder
+	case ModelTypeHandoff:
+		return handoffModelInputPlaceholder
 	default:
 		return ""
 	}
@@ -67,6 +74,7 @@ const (
 	onboardingModelInputPlaceholder = "Find your fave"
 	largeModelInputPlaceholder      = "Choose a model for large, complex tasks"
 	smallModelInputPlaceholder      = "Choose a model for small, simple tasks"
+	handoffModelInputPlaceholder    = "Choose a model for handoff draft generation"
 )
 
 // ModelsID is the identifier for the model selection dialog.
@@ -74,7 +82,7 @@ const ModelsID = "models"
 
 const defaultModelsDialogMaxWidth = 73
 
-const modelSummaryContentHeight = 2
+const modelSummaryContentHeight = 3
 
 // Models represents a model selection dialog.
 type Models struct {
@@ -85,13 +93,14 @@ type Models struct {
 	providers []catwalk.Provider
 
 	keyMap struct {
-		Tab      key.Binding
-		UpDown   key.Binding
-		Select   key.Binding
-		Edit     key.Binding
-		Next     key.Binding
-		Previous key.Binding
-		Close    key.Binding
+		Tab           key.Binding
+		UpDown        key.Binding
+		Apply         key.Binding
+		ApplyAndClose key.Binding
+		Edit          key.Binding
+		Next          key.Binding
+		Previous      key.Binding
+		Close         key.Binding
 	}
 	list  *ModelsList
 	input textinput.Model
@@ -129,14 +138,19 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 	s.Spinner = spinner.Dot
 	s.Style = com.Styles.Dialog.Spinner
 	m.spinner = s
+	m.modelType = m.firstSelectableModelType()
 
 	m.keyMap.Tab = key.NewBinding(
 		key.WithKeys("tab", "shift+tab"),
 		key.WithHelp("tab", "toggle type"),
 	)
-	m.keyMap.Select = key.NewBinding(
-		key.WithKeys("enter", "ctrl+y"),
-		key.WithHelp("enter", "confirm"),
+	m.keyMap.Apply = key.NewBinding(
+		key.WithKeys("enter"),
+		key.WithHelp("enter", "apply"),
+	)
+	m.keyMap.ApplyAndClose = key.NewBinding(
+		key.WithKeys("ctrl+y"),
+		key.WithHelp("ctrl+y", "done"),
 	)
 	m.keyMap.Edit = key.NewBinding(
 		key.WithKeys("ctrl+e"),
@@ -209,7 +223,7 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 				m.list.SelectNext()
 			}
 			m.list.ScrollToSelected()
-		case key.Matches(msg, m.keyMap.Select, m.keyMap.Edit):
+		case key.Matches(msg, m.keyMap.Apply, m.keyMap.ApplyAndClose, m.keyMap.Edit):
 			selectedItem := m.list.SelectedItem()
 			if selectedItem == nil {
 				break
@@ -221,22 +235,20 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 			}
 
 			isEdit := key.Matches(msg, m.keyMap.Edit)
+			closeDialog := key.Matches(msg, m.keyMap.ApplyAndClose)
 
 			return ActionSelectModel{
 				Provider:       modelItem.prov,
 				Model:          modelItem.SelectedModel(),
 				ModelType:      modelItem.SelectedModelType(),
 				ReAuthenticate: isEdit,
+				CloseDialog:    closeDialog,
 			}
 		case key.Matches(msg, m.keyMap.Tab):
 			if m.isOnboarding {
 				break
 			}
-			if m.modelType == ModelTypeLarge {
-				m.modelType = ModelTypeSmall
-			} else {
-				m.modelType = ModelTypeLarge
-			}
+			m.modelType = m.nextModelType(m.modelType)
 			if err := m.setProviderItems(); err != nil {
 				return util.ReportError(err)
 			}
@@ -272,24 +284,30 @@ func (m *Models) modelTypeRadioView() string {
 	textStyle := t.HalfMuted
 	largeRadioStyle := t.RadioOff
 	smallRadioStyle := t.RadioOff
+	handoffRadioStyle := t.RadioOff
 	if m.modelType == ModelTypeLarge {
 		largeRadioStyle = t.RadioOn
-	} else {
+	} else if m.modelType == ModelTypeSmall {
 		smallRadioStyle = t.RadioOn
+	} else {
+		handoffRadioStyle = t.RadioOn
 	}
 
 	largeRadio := largeRadioStyle.Padding(0, 1).Render()
 	smallRadio := smallRadioStyle.Padding(0, 1).Render()
+	handoffRadio := handoffRadioStyle.Padding(0, 1).Render()
 
-	return fmt.Sprintf("%s%s  %s%s",
+	return fmt.Sprintf("%s%s  %s%s  %s%s",
 		largeRadio, textStyle.Render(ModelTypeLarge.String()),
-		smallRadio, textStyle.Render(ModelTypeSmall.String()))
+		smallRadio, textStyle.Render(ModelTypeSmall.String()),
+		handoffRadio, textStyle.Render(ModelTypeHandoff.String()))
 }
 
 func (m *Models) currentModelSummaryView(width int) string {
 	lines := []string{
 		m.currentModelSummaryLine(ModelTypeLarge, width),
 		m.currentModelSummaryLine(ModelTypeSmall, width),
+		m.currentModelSummaryLine(ModelTypeHandoff, width),
 	}
 	return m.com.Styles.Dialog.SecondaryText.Width(width).Render(strings.Join(lines, "\n"))
 }
@@ -425,13 +443,15 @@ func (m *Models) ShortHelp() []key.Binding {
 	if m.isOnboarding {
 		return []key.Binding{
 			m.keyMap.UpDown,
-			m.keyMap.Select,
+			m.keyMap.Apply,
+			m.keyMap.ApplyAndClose,
 		}
 	}
 	h := []key.Binding{
 		m.keyMap.UpDown,
 		m.keyMap.Tab,
-		m.keyMap.Select,
+		m.keyMap.Apply,
+		m.keyMap.ApplyAndClose,
 	}
 	if m.isSelectedConfigured() {
 		h = append(h, m.keyMap.Edit)
@@ -639,6 +659,45 @@ func (m *Models) setProviderItems() error {
 	}
 
 	return nil
+}
+
+func (m *Models) firstSelectableModelType() ModelType {
+	for _, modelType := range []ModelType{ModelTypeLarge, ModelTypeSmall, ModelTypeHandoff} {
+		selected := m.com.Config().Models[modelType.Config()]
+		if selected.Provider == "" || selected.Model == "" {
+			return modelType
+		}
+	}
+	return ModelTypeLarge
+}
+
+func (m *Models) nextModelType(current ModelType) ModelType {
+	switch current {
+	case ModelTypeLarge:
+		return ModelTypeSmall
+	case ModelTypeSmall:
+		return ModelTypeHandoff
+	default:
+		return ModelTypeLarge
+	}
+}
+
+func (m *Models) HandleModelApplied(modelType config.SelectedModelType) error {
+	if m.modelType.Config() == modelType {
+		for i := 0; i < 3; i++ {
+			next := m.nextModelType(m.modelType)
+			selected := m.com.Config().Models[next.Config()]
+			if selected.Provider == "" || selected.Model == "" {
+				m.modelType = next
+				break
+			}
+			if next == m.modelType {
+				break
+			}
+			m.modelType = next
+		}
+	}
+	return m.setProviderItems()
 }
 
 func modelKey(providerID, modelID string) string {

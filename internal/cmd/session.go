@@ -143,11 +143,15 @@ func runSessionList(cmd *cobra.Command, _ []string) error {
 		output := make([]sessionJSON, len(list))
 		for i, s := range list {
 			output[i] = sessionJSON{
-				ID:       session.HashID(s.ID),
-				UUID:     s.ID,
-				Title:    s.Title,
-				Created:  time.Unix(s.CreatedAt, 0).Format(time.RFC3339),
-				Modified: time.Unix(s.UpdatedAt, 0).Format(time.RFC3339),
+				ID:                     session.HashID(s.ID),
+				UUID:                   s.ID,
+				Kind:                   string(s.Kind),
+				Title:                  s.Title,
+				Created:                time.Unix(s.CreatedAt, 0).Format(time.RFC3339),
+				Modified:               time.Unix(s.UpdatedAt, 0).Format(time.RFC3339),
+				HandoffSourceSessionID: s.HandoffSourceSessionID,
+				HandoffGoal:            s.HandoffGoal,
+				HandoffRelevantFiles:   s.HandoffRelevantFiles,
 			}
 		}
 		enc := json.NewEncoder(out)
@@ -176,6 +180,9 @@ func runSessionList(cmd *cobra.Command, _ []string) error {
 		hash := session.HashID(s.ID)[:7]
 		date := time.Unix(s.CreatedAt, 0).Format(time.RFC3339)
 		title := strings.ReplaceAll(s.Title, "\n", " ")
+		if s.Kind == session.KindHandoff {
+			title = "[handoff] " + title
+		}
 		title = ansi.Truncate(title, titleWidth, "…")
 		_, writeErr = fmt.Fprintln(w, hashStyle.Render(hash), dateStyle.Render(date), title)
 		if writeErr != nil {
@@ -189,11 +196,15 @@ func runSessionList(cmd *cobra.Command, _ []string) error {
 }
 
 type sessionJSON struct {
-	ID       string `json:"id"`
-	UUID     string `json:"uuid"`
-	Title    string `json:"title"`
-	Created  string `json:"created"`
-	Modified string `json:"modified"`
+	ID                     string   `json:"id"`
+	UUID                   string   `json:"uuid"`
+	Kind                   string   `json:"kind"`
+	Title                  string   `json:"title"`
+	Created                string   `json:"created"`
+	Modified               string   `json:"modified"`
+	HandoffSourceSessionID string   `json:"handoff_source_session_id,omitempty"`
+	HandoffGoal            string   `json:"handoff_goal,omitempty"`
+	HandoffRelevantFiles   []string `json:"handoff_relevant_files,omitempty"`
 }
 
 type sessionMutationResult struct {
@@ -384,15 +395,20 @@ func messagePtrs(msgs []message.Message) []*message.Message {
 func outputSessionJSON(w io.Writer, sess session.Session, msgs []*message.Message) error {
 	output := sessionShowOutput{
 		Meta: sessionShowMeta{
-			ID:               session.HashID(sess.ID),
-			UUID:             sess.ID,
-			Title:            sess.Title,
-			Created:          time.Unix(sess.CreatedAt, 0).Format(time.RFC3339),
-			Modified:         time.Unix(sess.UpdatedAt, 0).Format(time.RFC3339),
-			Cost:             sess.Cost,
-			PromptTokens:     sess.PromptTokens,
-			CompletionTokens: sess.CompletionTokens,
-			TotalTokens:      sess.PromptTokens + sess.CompletionTokens,
+			ID:                     session.HashID(sess.ID),
+			UUID:                   sess.ID,
+			Kind:                   string(sess.Kind),
+			Title:                  sess.Title,
+			Created:                time.Unix(sess.CreatedAt, 0).Format(time.RFC3339),
+			Modified:               time.Unix(sess.UpdatedAt, 0).Format(time.RFC3339),
+			Cost:                   sess.Cost,
+			PromptTokens:           sess.PromptTokens,
+			CompletionTokens:       sess.CompletionTokens,
+			TotalTokens:            sess.PromptTokens + sess.CompletionTokens,
+			HandoffSourceSessionID: sess.HandoffSourceSessionID,
+			HandoffGoal:            sess.HandoffGoal,
+			HandoffDraftPrompt:     sess.HandoffDraftPrompt,
+			HandoffRelevantFiles:   sess.HandoffRelevantFiles,
 		},
 		Messages: make([]sessionShowMessage, len(msgs)),
 	}
@@ -434,8 +450,23 @@ func outputSessionHuman(ctx context.Context, sess session.Session, msgs []*messa
 
 	fmt.Fprintln(&buf, keyStyle.Render("ID:    ")+valStyle.Render(hash))
 	fmt.Fprintln(&buf, keyStyle.Render("UUID:  ")+valStyle.Render(sess.ID))
+	fmt.Fprintln(&buf, keyStyle.Render("Kind:  ")+valStyle.Render(string(sess.Kind)))
 	fmt.Fprintln(&buf, keyStyle.Render("Title: ")+valStyle.Render(sess.Title))
 	fmt.Fprintln(&buf, keyStyle.Render("Date:  ")+valStyle.Render(created))
+	if sess.Kind == session.KindHandoff {
+		if sess.HandoffSourceSessionID != "" {
+			fmt.Fprintln(&buf, keyStyle.Render("From:  ")+valStyle.Render(sess.HandoffSourceSessionID))
+		}
+		if sess.HandoffGoal != "" {
+			fmt.Fprintln(&buf, keyStyle.Render("Goal:  ")+valStyle.Render(sess.HandoffGoal))
+		}
+		if sess.HandoffDraftPrompt != "" {
+			fmt.Fprintln(&buf, keyStyle.Render("Draft: ")+valStyle.Render(sess.HandoffDraftPrompt))
+		}
+		if len(sess.HandoffRelevantFiles) > 0 {
+			fmt.Fprintln(&buf, keyStyle.Render("Files: ")+valStyle.Render(strings.Join(sess.HandoffRelevantFiles, ", ")))
+		}
+	}
 	fmt.Fprintln(&buf)
 
 	first := true
@@ -527,15 +558,20 @@ func sessionWriter(ctx context.Context, contentHeight int) (io.Writer, func(), b
 }
 
 type sessionShowMeta struct {
-	ID               string  `json:"id"`
-	UUID             string  `json:"uuid"`
-	Title            string  `json:"title"`
-	Created          string  `json:"created"`
-	Modified         string  `json:"modified"`
-	Cost             float64 `json:"cost"`
-	PromptTokens     int64   `json:"prompt_tokens"`
-	CompletionTokens int64   `json:"completion_tokens"`
-	TotalTokens      int64   `json:"total_tokens"`
+	ID                     string   `json:"id"`
+	UUID                   string   `json:"uuid"`
+	Kind                   string   `json:"kind"`
+	Title                  string   `json:"title"`
+	Created                string   `json:"created"`
+	Modified               string   `json:"modified"`
+	Cost                   float64  `json:"cost"`
+	PromptTokens           int64    `json:"prompt_tokens"`
+	CompletionTokens       int64    `json:"completion_tokens"`
+	TotalTokens            int64    `json:"total_tokens"`
+	HandoffSourceSessionID string   `json:"handoff_source_session_id,omitempty"`
+	HandoffGoal            string   `json:"handoff_goal,omitempty"`
+	HandoffDraftPrompt     string   `json:"handoff_draft_prompt,omitempty"`
+	HandoffRelevantFiles   []string `json:"handoff_relevant_files,omitempty"`
 }
 
 type sessionShowMessage struct {

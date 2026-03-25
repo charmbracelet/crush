@@ -56,8 +56,9 @@ func (s SelectedModelType) String() string {
 }
 
 const (
-	SelectedModelTypeLarge SelectedModelType = "large"
-	SelectedModelTypeSmall SelectedModelType = "small"
+	SelectedModelTypeLarge   SelectedModelType = "large"
+	SelectedModelTypeSmall   SelectedModelType = "small"
+	SelectedModelTypeHandoff SelectedModelType = "handoff"
 )
 
 const (
@@ -475,7 +476,7 @@ func (p PluginConfig) Timeout() time.Duration {
 type Config struct {
 	Schema string `json:"$schema,omitempty"`
 
-	// We currently only support large/small as values here.
+	// Model slots available to the application.
 	Models map[SelectedModelType]SelectedModel `json:"models,omitempty" jsonschema:"description=Model configurations for different model types,example={\"large\":{\"model\":\"gpt-4o\",\"provider\":\"openai\"}}"`
 
 	// Recently used models stored in the data directory config.
@@ -556,6 +557,14 @@ func (c *Config) LargeModel() *catwalk.Model {
 
 func (c *Config) SmallModel() *catwalk.Model {
 	model, ok := c.Models[SelectedModelTypeSmall]
+	if !ok {
+		return nil
+	}
+	return c.GetModel(model.Provider, model.Model)
+}
+
+func (c *Config) HandoffModel() *catwalk.Model {
+	model, ok := c.Models[SelectedModelTypeHandoff]
 	if !ok {
 		return nil
 	}

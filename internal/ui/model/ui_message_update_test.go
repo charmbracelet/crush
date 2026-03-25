@@ -3,11 +3,14 @@ package model
 import (
 	"testing"
 
+	agenttools "github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/planmode"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/dialog"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
@@ -271,6 +274,38 @@ func TestHandleChildSessionMessageClearsRetryStatusOnDelete(t *testing.T) {
 
 	rendered = ansi.Strip(ui.chat.MessageItem(toolCalls[0].ID).Render(100))
 	require.NotContains(t, rendered, "Retrying in 3 seconds")
+}
+
+func TestMaybeOpenProposedPlanDialogRequiresPlanExit(t *testing.T) {
+	t.Parallel()
+
+	theme := styles.DefaultStyles()
+	com := &common.Common{Styles: &theme}
+	ui := &UI{
+		com:     com,
+		dialog:  dialog.NewOverlay(),
+		session: &session.Session{ID: "session-1", CollaborationMode: session.CollaborationModePlan},
+	}
+
+	msg := message.Message{
+		ID:        "assistant-1",
+		SessionID: "session-1",
+		Role:      message.Assistant,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: planmode.WrapProposedPlan("- Step 1")},
+			message.Finish{Reason: message.FinishReasonEndTurn, Time: 1},
+		},
+	}
+
+	require.Nil(t, ui.maybeOpenProposedPlanDialog(msg))
+	require.False(t, ui.dialog.ContainsDialog(dialog.ProposedPlanID))
+
+	msg.Parts = append(msg.Parts,
+		message.ToolCall{ID: "tool-1", Name: agenttools.PlanExitToolName, Finished: true},
+	)
+
+	require.Nil(t, ui.maybeOpenProposedPlanDialog(msg))
+	require.True(t, ui.dialog.ContainsDialog(dialog.ProposedPlanID))
 }
 
 func TestHandleChildSessionMessageRemovesStaleNestedToolsAfterRetryReset(t *testing.T) {

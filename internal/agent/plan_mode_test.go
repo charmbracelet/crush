@@ -3,6 +3,7 @@ package agent
 import (
 	"testing"
 
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/stretchr/testify/require"
 )
@@ -13,7 +14,61 @@ func TestCollaborationModePrompt(t *testing.T) {
 	prompt := collaborationModePrompt(session.CollaborationModePlan)
 	require.Contains(t, prompt, "Plan Mode")
 	require.Contains(t, prompt, "request_user_input")
+	require.Contains(t, prompt, "plan_exit")
 	require.Contains(t, prompt, "<proposed_plan>")
 	require.Contains(t, prompt, "Do not write files")
 	require.Empty(t, collaborationModePrompt(session.CollaborationModeDefault))
+}
+
+func TestBuildSystemPromptForCollaborationMode(t *testing.T) {
+	t.Parallel()
+
+	base := "Base system prompt."
+
+	require.Equal(t, base, buildSystemPromptForCollaborationMode(base, session.CollaborationModeDefault))
+
+	planPrompt := buildSystemPromptForCollaborationMode(base, session.CollaborationModePlan)
+	require.Contains(t, planPrompt, base)
+	require.Contains(t, planPrompt, "You are in Plan Mode.")
+}
+
+func TestFilterToolsForCollaborationMode(t *testing.T) {
+	t.Parallel()
+
+	baseTools := []string{
+		AgentToolName,
+		"bash",
+		"grep",
+		"ls",
+		"view",
+		tools.GlobToolName,
+		tools.FetchToolName,
+		tools.EditToolName,
+		tools.MultiEditToolName,
+		tools.WriteToolName,
+		tools.RequestUserInputToolName,
+		tools.PlanExitToolName,
+		tools.DiagnosticsToolName,
+		tools.ReferencesToolName,
+		tools.ListMCPResourcesToolName,
+		tools.ReadMCPResourceToolName,
+		tools.SourcegraphToolName,
+	}
+
+	require.Equal(t, baseTools, filterToolsForCollaborationMode(baseTools, session.CollaborationModeDefault))
+	require.Equal(t, []string{
+		"bash",
+		"grep",
+		"ls",
+		"view",
+		tools.GlobToolName,
+		tools.FetchToolName,
+		tools.RequestUserInputToolName,
+		tools.PlanExitToolName,
+		tools.DiagnosticsToolName,
+		tools.ReferencesToolName,
+		tools.ListMCPResourcesToolName,
+		tools.ReadMCPResourceToolName,
+		tools.SourcegraphToolName,
+	}, filterToolsForCollaborationMode(baseTools, session.CollaborationModePlan))
 }

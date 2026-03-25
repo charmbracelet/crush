@@ -42,6 +42,9 @@ func (m *mockQueueCoordinator) IsQueuePaused(string) bool           { return m.p
 func (m *mockQueueCoordinator) Summarize(context.Context, string, fantasy.ProviderOptions) error {
 	return nil
 }
+func (m *mockQueueCoordinator) GenerateHandoff(context.Context, string, string) (agent.HandoffDraft, error) {
+	return agent.HandoffDraft{}, nil
+}
 func (m *mockQueueCoordinator) Model() agent.Model { return agent.Model{} }
 func (m *mockQueueCoordinator) PrepareModelSwitch(context.Context, string, config.SelectedModelType, config.SelectedModel) error {
 	return nil
@@ -131,4 +134,32 @@ func TestLoadSessionMsgResetsCancelState(t *testing.T) {
 	require.False(t, ui.isCanceling)
 	require.False(t, ui.todoIsSpinning)
 	require.Equal(t, "new-session", ui.session.ID)
+}
+
+func TestLoadSessionMsgPrefillsHandoffDraft(t *testing.T) {
+	t.Parallel()
+
+	coord := &mockQueueCoordinator{}
+	theme := styles.DefaultStyles()
+	com := &common.Common{
+		App:    &app.App{AgentCoordinator: coord},
+		Styles: &theme,
+	}
+	ui := &UI{
+		com:      com,
+		chat:     NewChat(com),
+		status:   NewStatus(com, nil),
+		textarea: textarea.New(),
+	}
+
+	_, cmd := ui.Update(loadSessionMsg{
+		session: &session.Session{
+			ID:                 "handoff-session",
+			Kind:               session.KindHandoff,
+			HandoffDraftPrompt: "Continue the handoff draft.",
+		},
+	})
+	_ = cmd
+
+	require.Equal(t, "Continue the handoff draft.", ui.textarea.Value())
 }

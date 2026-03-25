@@ -1,6 +1,10 @@
 package agent
 
 import (
+	"slices"
+	"strings"
+
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/session"
 )
 
@@ -24,9 +28,11 @@ Clarification rules:
 
 Output rules:
 - If the user asks you to implement while Plan Mode is active, do not implement; continue planning instead.
-- Your final answer must be exactly one <proposed_plan>...</proposed_plan> block and nothing else.
+- When the plan is implementation-ready, call the plan_exit tool.
+- Your final textual answer must be exactly one <proposed_plan>...</proposed_plan> block and nothing else.
 - The proposed plan should be concise but execution-ready.
 - Include the key files or subsystems to change, the main steps, important reuse points, and the validation approach.
+- Do not end a planning turn with a completed plan unless you also called plan_exit.
 </collaboration_mode>`
 
 func collaborationModePrompt(mode session.CollaborationMode) string {
@@ -34,4 +40,54 @@ func collaborationModePrompt(mode session.CollaborationMode) string {
 		return planModeSystemPrompt
 	}
 	return ""
+}
+
+func buildSystemPromptForCollaborationMode(basePrompt string, mode session.CollaborationMode) string {
+	sections := []string{basePrompt}
+	if prompt := collaborationModePrompt(mode); prompt != "" {
+		sections = append(sections, prompt)
+	}
+
+	filtered := make([]string, 0, len(sections))
+	for _, section := range sections {
+		section = strings.TrimSpace(section)
+		if section == "" {
+			continue
+		}
+		filtered = append(filtered, section)
+	}
+	return strings.Join(filtered, "\n\n")
+}
+
+func filterToolsForCollaborationMode(toolNames []string, mode session.CollaborationMode) []string {
+	if mode != session.CollaborationModePlan {
+		return slices.Clone(toolNames)
+	}
+
+	allowed := map[string]struct{}{
+		tools.BashToolName:             {},
+		tools.FetchToolName:            {},
+		tools.GlobToolName:             {},
+		tools.GrepToolName:             {},
+		tools.LSToolName:               {},
+		tools.ViewToolName:             {},
+		tools.DiagnosticsToolName:      {},
+		tools.ReferencesToolName:       {},
+		tools.ListMCPResourcesToolName: {},
+		tools.ReadMCPResourceToolName:  {},
+		tools.RequestUserInputToolName: {},
+		tools.PlanExitToolName:         {},
+		tools.SourcegraphToolName:      {},
+	}
+
+	filtered := make([]string, 0, len(toolNames))
+	for _, toolName := range toolNames {
+		if _, ok := allowed[toolName]; ok {
+			filtered = append(filtered, toolName)
+		}
+	}
+	if !slices.Contains(filtered, tools.PlanExitToolName) {
+		filtered = append(filtered, tools.PlanExitToolName)
+	}
+	return filtered
 }

@@ -579,6 +579,7 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 		return fmt.Errorf("failed to select default models: %w", err)
 	}
 	large, small := defaultLarge, defaultSmall
+	handoff := defaultLarge
 
 	largeModelSelected, largeModelConfigured := c.Models[SelectedModelTypeLarge]
 	if largeModelConfigured {
@@ -659,8 +660,57 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 			}
 		}
 	}
+	handoffModelSelected, handoffModelConfigured := c.Models[SelectedModelTypeHandoff]
+	if handoffModelConfigured {
+		handoff = large
+		if handoffModelSelected.Model != "" {
+			handoff.Model = handoffModelSelected.Model
+		}
+		if handoffModelSelected.Provider != "" {
+			handoff.Provider = handoffModelSelected.Provider
+		}
+
+		model := c.GetModel(handoff.Provider, handoff.Model)
+		if model == nil {
+			handoff = large
+			err := store.UpdatePreferredModel(ScopeGlobal, SelectedModelTypeHandoff, handoff)
+			if err != nil {
+				return fmt.Errorf("failed to update preferred handoff model: %w", err)
+			}
+		} else {
+			if handoffModelSelected.MaxTokens > 0 {
+				handoff.MaxTokens = handoffModelSelected.MaxTokens
+			} else {
+				handoff.MaxTokens = model.DefaultMaxTokens
+			}
+			if handoffModelSelected.Temperature != nil {
+				handoff.Temperature = handoffModelSelected.Temperature
+			}
+			if handoffModelSelected.TopP != nil {
+				handoff.TopP = handoffModelSelected.TopP
+			}
+			if handoffModelSelected.TopK != nil {
+				handoff.TopK = handoffModelSelected.TopK
+			}
+			if handoffModelSelected.FrequencyPenalty != nil {
+				handoff.FrequencyPenalty = handoffModelSelected.FrequencyPenalty
+			}
+			if handoffModelSelected.PresencePenalty != nil {
+				handoff.PresencePenalty = handoffModelSelected.PresencePenalty
+			}
+			if handoffModelSelected.Think != nil {
+				handoff.Think = handoffModelSelected.Think
+			}
+			if handoffModelSelected.ReasoningEffort != "" {
+				handoff.ReasoningEffort = handoffModelSelected.ReasoningEffort
+			}
+		}
+	} else {
+		handoff = large
+	}
 	c.Models[SelectedModelTypeLarge] = large
 	c.Models[SelectedModelTypeSmall] = small
+	c.Models[SelectedModelTypeHandoff] = handoff
 	return nil
 }
 

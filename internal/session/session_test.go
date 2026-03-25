@@ -15,6 +15,15 @@ func TestNormalizeCollaborationMode(t *testing.T) {
 	require.Equal(t, CollaborationModePlan, NormalizeCollaborationMode(string(CollaborationModePlan)))
 }
 
+func TestNormalizeKind(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, KindNormal, NormalizeKind(""))
+	require.Equal(t, KindNormal, NormalizeKind("unknown"))
+	require.Equal(t, KindNormal, NormalizeKind(string(KindNormal)))
+	require.Equal(t, KindHandoff, NormalizeKind(string(KindHandoff)))
+}
+
 func TestSessionLastTokenHelpers(t *testing.T) {
 	t.Parallel()
 

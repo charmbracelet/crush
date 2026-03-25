@@ -39,6 +39,22 @@ func NormalizeCollaborationMode(mode string) CollaborationMode {
 	}
 }
 
+type Kind string
+
+const (
+	KindNormal  Kind = "normal"
+	KindHandoff Kind = "handoff"
+)
+
+func NormalizeKind(kind string) Kind {
+	switch Kind(kind) {
+	case KindHandoff:
+		return KindHandoff
+	default:
+		return KindNormal
+	}
+}
+
 // HashID returns the XXH3 hash of a session ID (UUID) as a hex string.
 func HashID(id string) string {
 	h := xxh3.New()
@@ -63,21 +79,26 @@ func HasIncompleteTodos(todos []Todo) bool {
 }
 
 type Session struct {
-	ID                   string
-	ParentSessionID      string
-	Title                string
-	WorkspaceCWD         string
-	CollaborationMode    CollaborationMode
-	MessageCount         int64
-	PromptTokens         int64
-	CompletionTokens     int64
-	LastPromptTokens     int64
-	LastCompletionTokens int64
-	SummaryMessageID     string
-	Cost                 float64
-	Todos                []Todo
-	CreatedAt            int64
-	UpdatedAt            int64
+	ID                     string
+	ParentSessionID        string
+	Kind                   Kind
+	Title                  string
+	WorkspaceCWD           string
+	CollaborationMode      CollaborationMode
+	HandoffSourceSessionID string
+	HandoffGoal            string
+	HandoffDraftPrompt     string
+	HandoffRelevantFiles   []string
+	MessageCount           int64
+	PromptTokens           int64
+	CompletionTokens       int64
+	LastPromptTokens       int64
+	LastCompletionTokens   int64
+	SummaryMessageID       string
+	Cost                   float64
+	Todos                  []Todo
+	CreatedAt              int64
+	UpdatedAt              int64
 }
 
 func (s Session) LastInputTokens() int64 {
@@ -105,6 +126,7 @@ type Service interface {
 	Create(ctx context.Context, title string) (Session, error)
 	CreateTitleSession(ctx context.Context, parentSessionID string) (Session, error)
 	CreateTaskSession(ctx context.Context, toolCallID, parentSessionID, title string) (Session, error)
+	CreateHandoffSession(ctx context.Context, sourceSessionID, title, goal, draftPrompt string, files []string) (Session, error)
 	Get(ctx context.Context, id string) (Session, error)
 	GetLast(ctx context.Context) (Session, error)
 	List(ctx context.Context) ([]Session, error)
@@ -128,10 +150,14 @@ type service struct {
 
 func (s *service) Create(ctx context.Context, title string) (Session, error) {
 	dbSession, err := s.q.CreateSession(ctx, db.CreateSessionParams{
-		ID:                uuid.New().String(),
-		Title:             title,
-		WorkspaceCwd:      sql.NullString{},
-		CollaborationMode: string(CollaborationModeDefault),
+		ID:                   uuid.New().String(),
+		Title:                title,
+		WorkspaceCwd:         sql.NullString{},
+		CollaborationMode:    string(CollaborationModeDefault),
+		Kind:                 string(KindNormal),
+		HandoffGoal:          "",
+		HandoffDraftPrompt:   "",
+		HandoffRelevantFiles: "[]",
 	})
 	if err != nil {
 		return Session{}, err
@@ -144,11 +170,15 @@ func (s *service) Create(ctx context.Context, title string) (Session, error) {
 
 func (s *service) CreateTaskSession(ctx context.Context, toolCallID, parentSessionID, title string) (Session, error) {
 	dbSession, err := s.q.CreateSession(ctx, db.CreateSessionParams{
-		ID:                toolCallID,
-		ParentSessionID:   sql.NullString{String: parentSessionID, Valid: true},
-		Title:             title,
-		WorkspaceCwd:      sql.NullString{},
-		CollaborationMode: string(CollaborationModeDefault),
+		ID:                   toolCallID,
+		ParentSessionID:      sql.NullString{String: parentSessionID, Valid: true},
+		Title:                title,
+		WorkspaceCwd:         sql.NullString{},
+		CollaborationMode:    string(CollaborationModeDefault),
+		Kind:                 string(KindNormal),
+		HandoffGoal:          "",
+		HandoffDraftPrompt:   "",
+		HandoffRelevantFiles: "[]",
 	})
 	if err != nil {
 		return Session{}, err
@@ -160,17 +190,50 @@ func (s *service) CreateTaskSession(ctx context.Context, toolCallID, parentSessi
 
 func (s *service) CreateTitleSession(ctx context.Context, parentSessionID string) (Session, error) {
 	dbSession, err := s.q.CreateSession(ctx, db.CreateSessionParams{
-		ID:                "title-" + parentSessionID,
-		ParentSessionID:   sql.NullString{String: parentSessionID, Valid: true},
-		Title:             "Generate a title",
-		WorkspaceCwd:      sql.NullString{},
-		CollaborationMode: string(CollaborationModeDefault),
+		ID:                   "title-" + parentSessionID,
+		ParentSessionID:      sql.NullString{String: parentSessionID, Valid: true},
+		Title:                "Generate a title",
+		WorkspaceCwd:         sql.NullString{},
+		CollaborationMode:    string(CollaborationModeDefault),
+		Kind:                 string(KindNormal),
+		HandoffGoal:          "",
+		HandoffDraftPrompt:   "",
+		HandoffRelevantFiles: "[]",
 	})
 	if err != nil {
 		return Session{}, err
 	}
 	session := s.fromDBItem(dbSession)
 	s.Publish(pubsub.CreatedEvent, session)
+	return session, nil
+}
+
+func (s *service) CreateHandoffSession(ctx context.Context, sourceSessionID, title, goal, draftPrompt string, files []string) (Session, error) {
+	relevantFilesJSON, err := marshalStringSlice(files)
+	if err != nil {
+		return Session{}, err
+	}
+
+	dbSession, err := s.q.CreateSession(ctx, db.CreateSessionParams{
+		ID:                uuid.New().String(),
+		Title:             title,
+		WorkspaceCwd:      sql.NullString{},
+		CollaborationMode: string(CollaborationModeDefault),
+		Kind:              string(KindHandoff),
+		HandoffSourceSessionID: sql.NullString{
+			String: sourceSessionID,
+			Valid:  sourceSessionID != "",
+		},
+		HandoffGoal:          goal,
+		HandoffDraftPrompt:   draftPrompt,
+		HandoffRelevantFiles: relevantFilesJSON,
+	})
+	if err != nil {
+		return Session{}, err
+	}
+	session := s.fromDBItem(dbSession)
+	s.Publish(pubsub.CreatedEvent, session)
+	event.SessionCreated()
 	return session, nil
 }
 
@@ -227,12 +290,24 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 	if err != nil {
 		return Session{}, err
 	}
+	relevantFilesJSON, err := marshalStringSlice(session.HandoffRelevantFiles)
+	if err != nil {
+		return Session{}, err
+	}
 
 	dbSession, err := s.q.UpdateSession(ctx, db.UpdateSessionParams{
-		ID:                   session.ID,
-		Title:                session.Title,
-		WorkspaceCwd:         sql.NullString{String: session.WorkspaceCWD, Valid: session.WorkspaceCWD != ""},
-		CollaborationMode:    string(NormalizeCollaborationMode(string(session.CollaborationMode))),
+		ID:                session.ID,
+		Title:             session.Title,
+		WorkspaceCwd:      sql.NullString{String: session.WorkspaceCWD, Valid: session.WorkspaceCWD != ""},
+		CollaborationMode: string(NormalizeCollaborationMode(string(session.CollaborationMode))),
+		Kind:              string(NormalizeKind(string(session.Kind))),
+		HandoffSourceSessionID: sql.NullString{
+			String: session.HandoffSourceSessionID,
+			Valid:  session.HandoffSourceSessionID != "",
+		},
+		HandoffGoal:          session.HandoffGoal,
+		HandoffDraftPrompt:   session.HandoffDraftPrompt,
+		HandoffRelevantFiles: relevantFilesJSON,
 		PromptTokens:         session.PromptTokens,
 		CompletionTokens:     session.CompletionTokens,
 		LastPromptTokens:     session.LastPromptTokens,
@@ -312,22 +387,31 @@ func (s service) fromDBItem(item db.Session) Session {
 	if err != nil {
 		slog.Error("Failed to unmarshal todos", "session_id", item.ID, "error", err)
 	}
+	relevantFiles, err := unmarshalStringSlice(item.HandoffRelevantFiles)
+	if err != nil {
+		slog.Error("Failed to unmarshal handoff relevant files", "session_id", item.ID, "error", err)
+	}
 	return Session{
-		ID:                   item.ID,
-		ParentSessionID:      item.ParentSessionID.String,
-		Title:                item.Title,
-		WorkspaceCWD:         item.WorkspaceCwd.String,
-		CollaborationMode:    NormalizeCollaborationMode(item.CollaborationMode),
-		MessageCount:         item.MessageCount,
-		PromptTokens:         item.PromptTokens,
-		CompletionTokens:     item.CompletionTokens,
-		LastPromptTokens:     item.LastPromptTokens,
-		LastCompletionTokens: item.LastCompletionTokens,
-		SummaryMessageID:     item.SummaryMessageID.String,
-		Cost:                 item.Cost,
-		Todos:                todos,
-		CreatedAt:            item.CreatedAt,
-		UpdatedAt:            item.UpdatedAt,
+		ID:                     item.ID,
+		ParentSessionID:        item.ParentSessionID.String,
+		Kind:                   NormalizeKind(item.Kind),
+		Title:                  item.Title,
+		WorkspaceCWD:           item.WorkspaceCwd.String,
+		CollaborationMode:      NormalizeCollaborationMode(item.CollaborationMode),
+		HandoffSourceSessionID: item.HandoffSourceSessionID.String,
+		HandoffGoal:            item.HandoffGoal,
+		HandoffDraftPrompt:     item.HandoffDraftPrompt,
+		HandoffRelevantFiles:   relevantFiles,
+		MessageCount:           item.MessageCount,
+		PromptTokens:           item.PromptTokens,
+		CompletionTokens:       item.CompletionTokens,
+		LastPromptTokens:       item.LastPromptTokens,
+		LastCompletionTokens:   item.LastCompletionTokens,
+		SummaryMessageID:       item.SummaryMessageID.String,
+		Cost:                   item.Cost,
+		Todos:                  todos,
+		CreatedAt:              item.CreatedAt,
+		UpdatedAt:              item.UpdatedAt,
 	}
 }
 
@@ -351,6 +435,28 @@ func unmarshalTodos(data string) ([]Todo, error) {
 		return []Todo{}, err
 	}
 	return todos, nil
+}
+
+func marshalStringSlice(values []string) (string, error) {
+	if len(values) == 0 {
+		return "[]", nil
+	}
+	data, err := json.Marshal(values)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func unmarshalStringSlice(data string) ([]string, error) {
+	if data == "" {
+		return []string{}, nil
+	}
+	var values []string
+	if err := json.Unmarshal([]byte(data), &values); err != nil {
+		return []string{}, err
+	}
+	return values, nil
 }
 
 func NewService(q *db.Queries, conn *sql.DB) Service {

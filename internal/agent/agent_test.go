@@ -741,8 +741,9 @@ func TestRefreshCallConfigIfNeeded_UsesContextRuntimeConfig(t *testing.T) {
 	}
 
 	ctx := context.WithValue(context.Background(), sessionAgentRuntimeConfigContextKey{}, runtimeConfig)
-	err := agent.refreshCallConfigIfNeeded(ctx, &call)
+	runtimeConfigPtr, err := agent.refreshCallConfigIfNeeded(ctx, &call)
 	require.NoError(t, err)
+	require.NotNil(t, runtimeConfigPtr)
 	require.Equal(t, int64(2048), call.MaxOutputTokens)
 }
 
@@ -757,8 +758,9 @@ func TestRefreshCallConfigIfNeeded_IgnoresNilPointerContextAndRefreshes(t *testi
 	}
 
 	ctx := context.WithValue(context.Background(), sessionAgentRuntimeConfigContextKey{}, (*sessionAgentRuntimeConfig)(nil))
-	err := agent.refreshCallConfigIfNeeded(ctx, &call)
+	runtimeConfigPtr, err := agent.refreshCallConfigIfNeeded(ctx, &call)
 	require.NoError(t, err)
+	require.NotNil(t, runtimeConfigPtr)
 	require.Equal(t, int64(4096), call.MaxOutputTokens)
 }
 

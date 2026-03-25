@@ -749,6 +749,26 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, mode s
 		}
 	}
 
+	// plan_exit should always be available for plan mode sessions
+	// even if not in agent.AllowedTools
+	if mode == session.CollaborationModePlan {
+		hasPlanExit := false
+		for _, tool := range filteredTools {
+			if tool.Info().Name == tools.PlanExitToolName {
+				hasPlanExit = true
+				break
+			}
+		}
+		if !hasPlanExit {
+			for _, tool := range allTools {
+				if tool.Info().Name == tools.PlanExitToolName {
+					filteredTools = append(filteredTools, tool)
+					break
+				}
+			}
+		}
+	}
+
 	if mode == session.CollaborationModePlan {
 		return filteredTools, nil
 	}

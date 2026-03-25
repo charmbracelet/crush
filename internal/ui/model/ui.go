@@ -2309,6 +2309,11 @@ func (m *UI) setExecutionMode(mode executionMode) tea.Cmd {
 	}
 	m.refreshEditorPlaceholder()
 
+	sessionID := ""
+	if m.session != nil {
+		sessionID = m.session.ID
+	}
+
 	return func() tea.Msg {
 		if err := m.com.Store().SetSkipRequests(config.ScopeGlobal, enableYolo); err != nil {
 			return util.ReportError(err)()
@@ -2318,10 +2323,6 @@ func (m *UI) setExecutionMode(mode executionMode) tea.Cmd {
 		}
 		if err := m.com.Store().SetPreferredCollaborationMode(config.ScopeGlobal, string(preferredMode)); err != nil {
 			return util.ReportError(err)()
-		}
-		sessionID := ""
-		if m.session != nil {
-			sessionID = m.session.ID
 		}
 		if sessionID != "" {
 			if _, err := m.com.App.Sessions.UpdateCollaborationMode(context.Background(), sessionID, preferredMode); err != nil {

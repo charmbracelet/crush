@@ -72,8 +72,11 @@ const (
 	compactModeHeightBreakpoint = 30
 )
 
-// If pasted text has more than 2 newlines, treat it as a file attachment.
+// If pasted text has more than 10 newlines, treat it as a file attachment.
 const pasteLinesThreshold = 10
+
+// If pasted text has more than 1000 columns, treat it as a file attachment.
+const pasteColsThreshold = 1000
 
 // Session details panel max height.
 const sessionDetailsMaxHeight = 20
@@ -3968,6 +3971,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openReasoningDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.FilePickerID:
+		if cmd := m.openFilesDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.QuitID:
 		if cmd := m.openQuitDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -4227,6 +4234,22 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 	return m.pasteImageFromClipboard(msg)
 }
 
+func hasPasteExceededThreshold(msg tea.PasteMsg) bool {
+	var (
+		lineCount = 0
+		colCount  = 0
+	)
+	for line := range strings.SplitSeq(msg.Content, "\n") {
+		lineCount++
+		colCount = max(colCount, len(line))
+
+		if lineCount > pasteLinesThreshold || colCount > pasteColsThreshold {
+			return true
+		}
+	}
+	return false
+}
+
 // handleClipboardFallback handles the case when clipboard has no image/file content.
 // It processes the original paste event as a text paste.
 // If pasteMsg is empty (keyboard shortcut case), there's nothing to do.
@@ -4235,7 +4258,7 @@ func (m *UI) handleClipboardFallback(msg clipboardFallbackMsg) tea.Cmd {
 	if msg.pasteMsg.Content == "" {
 		return nil
 	}
-	if strings.Count(msg.pasteMsg.Content, "\n") > pasteLinesThreshold {
+	if hasPasteExceededThreshold(msg.pasteMsg) {
 		pasteIdx := m.pasteIdx()
 		return func() tea.Msg {
 			content := []byte(msg.pasteMsg.Content)

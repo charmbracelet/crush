@@ -80,6 +80,10 @@ func (h *HTTPRoundTripLogger) RoundTrip(req *http.Request) (*http.Response, erro
 	}
 
 	save, resp.Body, err = drainBody(resp.Body)
+	if err != nil {
+		slog.Error("Failed to drain response body", "error", err)
+		return resp, err
+	}
 	if slog.Default().Enabled(req.Context(), slog.LevelDebug) {
 		slog.Debug(
 			"HTTP Response",
@@ -89,10 +93,9 @@ func (h *HTTPRoundTripLogger) RoundTrip(req *http.Request) (*http.Response, erro
 			"body", bodyToString(save),
 			"content_length", resp.ContentLength,
 			"duration_ms", duration.Milliseconds(),
-			"error", err,
 		)
 	}
-	return resp, err
+	return resp, nil
 }
 
 func bodyToString(body io.ReadCloser) string {

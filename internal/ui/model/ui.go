@@ -2949,6 +2949,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openReasoningDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.FilePickerID:
+		if cmd := m.openFilesDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.QuitID:
 		if cmd := m.openQuitDialog(); cmd != nil {
 			cmds = append(cmds, cmd)

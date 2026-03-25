@@ -107,7 +107,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 				return nil
 			}
 			return classifier
-		}),
+		}, store.WorkingDir()),
 		FileTracker: filetracker.NewService(q),
 		LSPManager:  lsp.NewManager(store),
 

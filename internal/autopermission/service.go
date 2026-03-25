@@ -2,10 +2,12 @@ package autopermission
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"sync"
 
 	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
@@ -27,6 +29,7 @@ type service struct {
 	base          permission.Service
 	sessions      session.Service
 	classifierFn  func() permission.Classifier
+	workingDir    string
 	classifierMu  sync.Mutex
 	sessionStates map[string]sessionClassifierState
 }
@@ -35,11 +38,13 @@ func New(
 	base permission.Service,
 	sessions session.Service,
 	classifierFn func() permission.Classifier,
+	workingDir string,
 ) permission.Service {
 	return &service{
 		base:          base,
 		sessions:      sessions,
 		classifierFn:  classifierFn,
+		workingDir:    workingDir,
 		sessionStates: map[string]sessionClassifierState{},
 	}
 }
@@ -93,7 +98,7 @@ func (s *service) Request(ctx context.Context, opts permission.CreatePermissionR
 		return s.base.Prompt(ctx, eval.Permission)
 	}
 
-	if isAutoAllowedReadOnly(eval.Permission) {
+	if isAutoAllowedFastPath(eval.Permission, s.workingDir) {
 		s.resetClassifierBlocks(eval.Permission.SessionID)
 		return true, nil
 	}
@@ -182,6 +187,9 @@ func (s *service) resetClassifierBlocks(sessionID string) {
 	state := s.sessionStates[sessionID]
 	state.lastMode = session.CollaborationModeAuto
 	state.consecutiveBlocks = 0
+	if state.totalBlocks < defaultMaxTotalClassifierBlocks {
+		state.suspendAutoApproval = false
+	}
 	s.sessionStates[sessionID] = state
 }
 
@@ -199,6 +207,12 @@ func (s *service) recordClassifierBlock(sessionID string) {
 	s.sessionStates[sessionID] = state
 }
 
+func isAutoAllowedFastPath(req permission.PermissionRequest, workingDir string) bool {
+	return isAutoAllowedReadOnly(req) ||
+		isSafeReadOnlyBashRequest(req) ||
+		isSafeWorkspaceWrite(req, workingDir)
+}
+
 func isAutoAllowedReadOnly(req permission.PermissionRequest) bool {
 	switch req.ToolName {
 	case tools.ViewToolName, tools.ReadMCPResourceToolName:
@@ -210,12 +224,148 @@ func isAutoAllowedReadOnly(req permission.PermissionRequest) bool {
 	}
 }
 
+func isSafeReadOnlyBashRequest(req permission.PermissionRequest) bool {
+	if req.ToolName != tools.BashToolName || req.Action != "execute" {
+		return false
+	}
+
+	params, ok := req.Params.(tools.BashPermissionsParams)
+	if !ok || params.RunInBackground {
+		return false
+	}
+
+	command := strings.TrimSpace(params.Command)
+	if command == "" {
+		return false
+	}
+	if strings.ContainsAny(command, "\r\n;<>") ||
+		strings.Contains(command, "&&") ||
+		strings.Contains(command, "||") ||
+		strings.Contains(command, "|") ||
+		strings.Contains(command, "$(") ||
+		strings.Contains(command, "`") {
+		return false
+	}
+
+	fields := strings.Fields(strings.ToLower(command))
+	if len(fields) == 0 {
+		return false
+	}
+
+	switch fields[0] {
+	case "pwd", "ls", "dir", "tree", "cat", "type", "head", "tail", "wc", "find", "rg", "grep", "which", "where", "stat":
+		return true
+	case "get-location", "get-childitem", "get-content", "select-string", "get-item", "get-command":
+		return true
+	case "git":
+		return isSafeReadOnlyGitCommand(fields[1:])
+	default:
+		return false
+	}
+}
+
+func isSafeReadOnlyGitCommand(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+
+	switch args[0] {
+	case "status", "diff", "log", "show", "rev-parse", "ls-files", "grep", "symbolic-ref":
+		return true
+	case "branch":
+		return true
+	case "remote":
+		return len(args) > 1 && args[1] == "-v"
+	default:
+		return false
+	}
+}
+
+func isSafeWorkspaceWrite(req permission.PermissionRequest, workingDir string) bool {
+	if workingDir == "" {
+		return false
+	}
+
+	switch req.ToolName {
+	case tools.EditToolName, tools.WriteToolName, tools.MultiEditToolName:
+	default:
+		return false
+	}
+
+	if !fsext.HasPrefix(req.Path, workingDir) {
+		return false
+	}
+
+	filePath, ok := permissionRequestFilePath(req)
+	if !ok || filePath == "" || !fsext.HasPrefix(filePath, workingDir) {
+		return false
+	}
+
+	return !isSensitiveWorkspacePath(filePath, workingDir)
+}
+
+func permissionRequestFilePath(req permission.PermissionRequest) (string, bool) {
+	switch params := req.Params.(type) {
+	case tools.EditPermissionsParams:
+		return params.FilePath, true
+	case tools.WritePermissionsParams:
+		return params.FilePath, true
+	case tools.MultiEditPermissionsParams:
+		return params.FilePath, true
+	default:
+		return "", false
+	}
+}
+
+func isSensitiveWorkspacePath(path, workingDir string) bool {
+	rel, err := filepath.Rel(workingDir, path)
+	if err != nil {
+		return true
+	}
+	rel = filepath.ToSlash(filepath.Clean(rel))
+	if rel == "." || strings.HasPrefix(rel, "../") {
+		return true
+	}
+
+	lowerRel := strings.ToLower(rel)
+	lowerBase := strings.ToLower(filepath.Base(path))
+
+	switch {
+	case lowerRel == ".cursorrules":
+		return true
+	case lowerRel == ".github/copilot-instructions.md":
+		return true
+	case strings.HasPrefix(lowerRel, ".cursor/rules/"):
+		return true
+	case strings.HasPrefix(lowerRel, ".git/"):
+		return true
+	case strings.HasPrefix(lowerRel, ".crush/"):
+		return true
+	case strings.HasPrefix(lowerBase, ".env"):
+		return true
+	}
+
+	switch lowerBase {
+	case "agents.md", "agents.local.md",
+		"claude.md", "claude.local.md",
+		"gemini.md", "gemini.local.md",
+		"crush.md", "crush.local.md",
+		"crush.json", ".crush.json":
+		return true
+	default:
+		return false
+	}
+}
+
 func isAlwaysManual(req permission.PermissionRequest) bool {
 	switch req.ToolName {
 	case tools.DownloadToolName, tools.FetchToolName, tools.AgenticFetchToolName:
 		return true
 	case tools.BashToolName:
 		return isHighRiskBashRequest(req)
+	case tools.EditToolName, tools.WriteToolName, tools.MultiEditToolName:
+		filePath, ok := permissionRequestFilePath(req)
+		return ok && isSensitiveWorkspacePath(filePath, req.Path)
 	default:
 		return strings.HasPrefix(req.ToolName, "mcp_") && req.Action == "execute"
 	}

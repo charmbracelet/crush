@@ -2,8 +2,10 @@ package autopermission
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
@@ -104,7 +106,7 @@ func TestAutoPermission_DefaultModeFallsBackToPrompt(t *testing.T) {
 		evalResult:  permission.EvaluationResult{Decision: permission.EvaluationDecisionAsk, Permission: permission.PermissionRequest{SessionID: "s1", ToolName: "edit", Action: "write"}},
 		promptGrant: true,
 	}
-	svc := New(base, &mockSessionService{mode: session.CollaborationModeDefault}, nil)
+	svc := New(base, &mockSessionService{mode: session.CollaborationModeDefault}, nil, "")
 
 	granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{})
 	require.NoError(t, err)
@@ -121,7 +123,7 @@ func TestAutoPermission_AutoModeReadOnlyRequestSkipsClassifier(t *testing.T) {
 		promptGrant: true,
 	}
 	classifier := &mockClassifier{}
-	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier })
+	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, "")
 
 	granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{})
 	require.NoError(t, err)
@@ -139,7 +141,7 @@ func TestAutoPermission_AutoModeClassifierAllowSkipsPrompt(t *testing.T) {
 		promptGrant: true,
 	}
 	classifier := &mockClassifier{result: permission.AutoClassification{AllowAuto: true}}
-	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier })
+	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, "")
 
 	granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{})
 	require.NoError(t, err)
@@ -157,7 +159,7 @@ func TestAutoPermission_AutoModeClassifierBlockFallsBackToPrompt(t *testing.T) {
 		promptGrant: true,
 	}
 	classifier := &mockClassifier{result: permission.AutoClassification{AllowAuto: false}}
-	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier })
+	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, "")
 
 	granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{})
 	require.NoError(t, err)
@@ -175,7 +177,7 @@ func TestAutoPermission_AutoModeClassifierErrorFallsBackToPrompt(t *testing.T) {
 		promptGrant: true,
 	}
 	classifier := &mockClassifier{err: context.DeadlineExceeded}
-	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier })
+	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, "")
 
 	granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{})
 	require.NoError(t, err)
@@ -193,7 +195,7 @@ func TestAutoPermission_SuspendsClassifierAfterRepeatedBlocks(t *testing.T) {
 		promptGrant: true,
 	}
 	classifier := &mockClassifier{result: permission.AutoClassification{AllowAuto: false}}
-	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier })
+	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, "")
 
 	for range defaultMaxConsecutiveClassifierBlocks {
 		granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{})
@@ -206,4 +208,96 @@ func TestAutoPermission_SuspendsClassifierAfterRepeatedBlocks(t *testing.T) {
 	require.True(t, granted)
 	require.Equal(t, defaultMaxConsecutiveClassifierBlocks, classifier.calls)
 	require.Equal(t, defaultMaxConsecutiveClassifierBlocks+1, base.promptCalls)
+}
+
+func TestAutoPermission_AutoModeReadOnlyBashSkipsClassifier(t *testing.T) {
+	t.Parallel()
+
+	base := &mockPermissionService{
+		Broker: pubsub.NewBroker[permission.PermissionRequest](),
+		evalResult: permission.EvaluationResult{
+			Decision: permission.EvaluationDecisionAsk,
+			Permission: permission.PermissionRequest{
+				SessionID: "s1",
+				ToolName:  tools.BashToolName,
+				Action:    "execute",
+				Params: tools.BashPermissionsParams{
+					Command: "git status --short",
+				},
+			},
+		},
+		promptGrant: true,
+	}
+	classifier := &mockClassifier{}
+	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, "")
+
+	granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{})
+	require.NoError(t, err)
+	require.True(t, granted)
+	require.Zero(t, base.promptCalls)
+	require.Zero(t, classifier.calls)
+}
+
+func TestAutoPermission_AutoModeWorkspaceWriteSkipsClassifier(t *testing.T) {
+	t.Parallel()
+
+	workingDir := filepath.Join(t.TempDir(), "workspace")
+	filePath := filepath.Join(workingDir, "internal", "ui", "model.go")
+
+	base := &mockPermissionService{
+		Broker: pubsub.NewBroker[permission.PermissionRequest](),
+		evalResult: permission.EvaluationResult{
+			Decision: permission.EvaluationDecisionAsk,
+			Permission: permission.PermissionRequest{
+				SessionID: "s1",
+				ToolName:  tools.WriteToolName,
+				Action:    "write",
+				Path:      workingDir,
+				Params: tools.WritePermissionsParams{
+					FilePath: filePath,
+				},
+			},
+		},
+		promptGrant: true,
+	}
+	classifier := &mockClassifier{}
+	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, workingDir)
+
+	granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{})
+	require.NoError(t, err)
+	require.True(t, granted)
+	require.Zero(t, base.promptCalls)
+	require.Zero(t, classifier.calls)
+}
+
+func TestAutoPermission_AutoModeSensitiveWorkspaceWriteFallsBackToPrompt(t *testing.T) {
+	t.Parallel()
+
+	workingDir := filepath.Join(t.TempDir(), "workspace")
+	filePath := filepath.Join(workingDir, "AGENTS.md")
+
+	base := &mockPermissionService{
+		Broker: pubsub.NewBroker[permission.PermissionRequest](),
+		evalResult: permission.EvaluationResult{
+			Decision: permission.EvaluationDecisionAsk,
+			Permission: permission.PermissionRequest{
+				SessionID: "s1",
+				ToolName:  tools.WriteToolName,
+				Action:    "write",
+				Path:      workingDir,
+				Params: tools.WritePermissionsParams{
+					FilePath: filePath,
+				},
+			},
+		},
+		promptGrant: true,
+	}
+	classifier := &mockClassifier{}
+	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, workingDir)
+
+	granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{})
+	require.NoError(t, err)
+	require.True(t, granted)
+	require.Equal(t, 1, base.promptCalls)
+	require.Zero(t, classifier.calls)
 }

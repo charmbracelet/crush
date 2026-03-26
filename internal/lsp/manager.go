@@ -26,18 +26,18 @@ var unavailable = csync.NewMap[string, struct{}]()
 // Manager handles lazy initialization of LSP clients based on file types.
 type Manager struct {
 	clients  *csync.Map[string, *Client]
-	cfg      *config.Config
+	cfg      *config.ConfigStore
 	manager  *powernapconfig.Manager
 	callback func(name string, client *Client)
 }
 
 // NewManager creates a new LSP manager service.
-func NewManager(cfg *config.Config) *Manager {
+func NewManager(cfg *config.ConfigStore) *Manager {
 	manager := powernapconfig.NewManager()
 	manager.LoadDefaults()
 
 	// Merge user-configured LSPs into the manager.
-	for name, clientConfig := range cfg.LSP {
+	for name, clientConfig := range cfg.Config().LSP {
 		if clientConfig.Disabled {
 			slog.Debug("LSP disabled by user config", "name", name)
 			manager.RemoveServer(name)
@@ -194,7 +194,7 @@ func (s *Manager) startServer(ctx context.Context, name, filepath string, server
 		cfg,
 		s.cfg.Resolver(),
 		s.cfg.WorkingDir(),
-		s.cfg.Options.DebugLSP,
+		s.cfg.Config().Options.DebugLSP,
 	)
 	if err != nil {
 		slog.Error("Failed to create LSP client", "name", name, "error", err)
@@ -205,7 +205,7 @@ func (s *Manager) startServer(ctx context.Context, name, filepath string, server
 	if existing, ok := s.clients.Get(name); ok {
 		switch existing.GetServerState() {
 		case StateReady, StateStarting, StateDisabled:
-			client.Close(ctx)
+			_ = client.Close(ctx)
 			s.callback(name, existing)
 			return
 		}
@@ -228,7 +228,7 @@ func (s *Manager) startServer(ctx context.Context, name, filepath string, server
 
 	if _, err := client.Initialize(initCtx, s.cfg.WorkingDir()); err != nil {
 		slog.Error("LSP client initialization failed", "name", name, "error", err)
-		client.Close(ctx)
+		_ = client.Close(ctx)
 		s.clients.Del(name)
 		return
 	}
@@ -244,7 +244,7 @@ func (s *Manager) startServer(ctx context.Context, name, filepath string, server
 }
 
 func (s *Manager) isUserConfigured(name string) bool {
-	cfg, ok := s.cfg.LSP[name]
+	cfg, ok := s.cfg.Config().LSP[name]
 	return ok && !cfg.Disabled
 }
 
@@ -258,7 +258,7 @@ func (s *Manager) buildConfig(name string, server *powernapconfig.ServerConfig) 
 		InitOptions: server.InitOptions,
 		Options:     server.Settings,
 	}
-	if userCfg, ok := s.cfg.LSP[name]; ok {
+	if userCfg, ok := s.cfg.Config().LSP[name]; ok {
 		cfg.Timeout = userCfg.Timeout
 	}
 	return cfg
@@ -303,8 +303,10 @@ func hasRootMarkers(dir string, markers []string) bool {
 		return true
 	}
 	for _, pattern := range markers {
-		// Use fsext.GlobWithDoubleStar to find matches
-		matches, _, err := fsext.Glob(pattern, dir, 1)
+		// Use filepath.Glob for a non-recursive check in the root
+		// directory. This avoids walking the entire tree (which is
+		// catastrophic in large monorepos with node_modules, etc.).
+		matches, err := filepath.Glob(filepath.Join(dir, pattern))
 		if err == nil && len(matches) > 0 {
 			return true
 		}

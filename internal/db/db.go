@@ -11,10 +11,10 @@ import (
 )
 
 type DBTX interface {
-	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
 	PrepareContext(context.Context, string) (*sql.Stmt, error)
-	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
-	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
 func New(db DBTX) *Queries {
@@ -62,6 +62,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.getHourDayHeatmapStmt, err = db.PrepareContext(ctx, getHourDayHeatmap); err != nil {
 		return nil, fmt.Errorf("error preparing query GetHourDayHeatmap: %w", err)
+	}
+	if q.getLastSessionStmt, err = db.PrepareContext(ctx, getLastSession); err != nil {
+		return nil, fmt.Errorf("error preparing query GetLastSession: %w", err)
 	}
 	if q.getMessageStmt, err = db.PrepareContext(ctx, getMessage); err != nil {
 		return nil, fmt.Errorf("error preparing query GetMessage: %w", err)
@@ -119,6 +122,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.recordFileReadStmt, err = db.PrepareContext(ctx, recordFileRead); err != nil {
 		return nil, fmt.Errorf("error preparing query RecordFileRead: %w", err)
+	}
+	if q.renameSessionStmt, err = db.PrepareContext(ctx, renameSession); err != nil {
+		return nil, fmt.Errorf("error preparing query RenameSession: %w", err)
 	}
 	if q.updateMessageStmt, err = db.PrepareContext(ctx, updateMessage); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateMessage: %w", err)
@@ -197,6 +203,11 @@ func (q *Queries) Close() error {
 	if q.getHourDayHeatmapStmt != nil {
 		if cerr := q.getHourDayHeatmapStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getHourDayHeatmapStmt: %w", cerr)
+		}
+	}
+	if q.getLastSessionStmt != nil {
+		if cerr := q.getLastSessionStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getLastSessionStmt: %w", cerr)
 		}
 	}
 	if q.getMessageStmt != nil {
@@ -294,6 +305,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing recordFileReadStmt: %w", cerr)
 		}
 	}
+	if q.renameSessionStmt != nil {
+		if cerr := q.renameSessionStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing renameSessionStmt: %w", cerr)
+		}
+	}
 	if q.updateMessageStmt != nil {
 		if cerr := q.updateMessageStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing updateMessageStmt: %w", cerr)
@@ -361,6 +377,7 @@ type Queries struct {
 	getFileByPathAndSessionStmt    *sql.Stmt
 	getFileReadStmt                *sql.Stmt
 	getHourDayHeatmapStmt          *sql.Stmt
+	getLastSessionStmt             *sql.Stmt
 	getMessageStmt                 *sql.Stmt
 	getRecentActivityStmt          *sql.Stmt
 	getSessionByIDStmt             *sql.Stmt
@@ -380,6 +397,7 @@ type Queries struct {
 	listSessionsStmt               *sql.Stmt
 	listUserMessagesBySessionStmt  *sql.Stmt
 	recordFileReadStmt             *sql.Stmt
+	renameSessionStmt              *sql.Stmt
 	updateMessageStmt              *sql.Stmt
 	updateSessionStmt              *sql.Stmt
 	updateSessionTitleAndUsageStmt *sql.Stmt
@@ -402,6 +420,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getFileByPathAndSessionStmt:    q.getFileByPathAndSessionStmt,
 		getFileReadStmt:                q.getFileReadStmt,
 		getHourDayHeatmapStmt:          q.getHourDayHeatmapStmt,
+		getLastSessionStmt:             q.getLastSessionStmt,
 		getMessageStmt:                 q.getMessageStmt,
 		getRecentActivityStmt:          q.getRecentActivityStmt,
 		getSessionByIDStmt:             q.getSessionByIDStmt,
@@ -421,6 +440,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listSessionsStmt:               q.listSessionsStmt,
 		listUserMessagesBySessionStmt:  q.listUserMessagesBySessionStmt,
 		recordFileReadStmt:             q.recordFileReadStmt,
+		renameSessionStmt:              q.renameSessionStmt,
 		updateMessageStmt:              q.updateMessageStmt,
 		updateSessionStmt:              q.updateSessionStmt,
 		updateSessionTitleAndUsageStmt: q.updateSessionTitleAndUsageStmt,

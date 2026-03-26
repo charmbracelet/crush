@@ -101,7 +101,7 @@ type AgentToolRenderContext struct {
 func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if !opts.ToolCall.Finished && !opts.IsCanceled() && len(r.agent.nestedTools) == 0 {
-		return pendingTool(sty, "Agent", opts.Anim)
+		return pendingTool(sty, "Agent", opts.Anim, opts.Compact)
 	}
 
 	var params agent.AgentParams
@@ -232,7 +232,7 @@ type agenticFetchParams struct {
 func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if !opts.ToolCall.Finished && !opts.IsCanceled() && len(r.fetch.nestedTools) == 0 {
-		return pendingTool(sty, "Agentic Fetch", opts.Anim)
+		return pendingTool(sty, "Agentic Fetch", opts.Anim, opts.Compact)
 	}
 
 	var params agenticFetchParams

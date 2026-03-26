@@ -34,7 +34,7 @@ type Message struct {
 type ReadFile struct {
 	SessionID string `json:"session_id"`
 	Path      string `json:"path"`
-	ReadAt    int64  `json:"read_at"` // Unix timestamp when file was last read
+	ReadAt    int64  `json:"read_at"`
 }
 
 type Session struct {

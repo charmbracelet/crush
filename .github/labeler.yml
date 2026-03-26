@@ -45,6 +45,8 @@
   - "/(panic|crash|segfault)/i"
 "provider: anthropic claude":
   - "/(anthropic|claude)/i"
+"provider: avian":
+  - "/avian/i"
 "provider: aws bedrock":
   - "/(aws|bedrock)/i"
 "provider: azure":
@@ -55,6 +57,8 @@
   - "/gemini/i"
 "provider: google vertex":
   - "/vertex/i"
+"provider: hyper":
+  - "/hyper/i"
 "provider: kimi":
   - "/kimi/i"
 "provider: minimax":
@@ -67,6 +71,8 @@
   - "/openrouter/i"
 "provider: qwen":
   - "/qwen/i"
+"provider: vercel":
+  - "/vercel/i"
 "provider: xai grok":
   - "/(xai|x\\.ai|grok)/i"
 "security":

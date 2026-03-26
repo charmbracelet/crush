@@ -37,6 +37,10 @@ const (
 )
 
 // Commands represents a dialog that shows available commands.
+type dockerMCPAvailabilityCheckedMsg struct {
+	available bool
+}
+
 type Commands struct {
 	com    *common.Common
 	keyMap struct {
@@ -66,6 +70,9 @@ type Commands struct {
 
 	customCommands []commands.CustomCommand
 	mcpPrompts     []commands.MCPPrompt
+
+	dockerMCPAvailable     *bool
+	dockerMCPCheckInFlight bool
 }
 
 var _ Dialog = (*Commands)(nil)
@@ -126,6 +133,10 @@ func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, has
 	closeKey.SetHelp("esc", "cancel")
 	c.keyMap.Close = closeKey
 
+	if available, known := config.DockerMCPAvailabilityCached(); known {
+		c.dockerMCPAvailable = &available
+	}
+
 	// Set initial commands
 	c.setCommandItems(c.selected)
 
@@ -145,6 +156,13 @@ func (c *Commands) ID() string {
 // HandleMsg implements [Dialog].
 func (c *Commands) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
+	case dockerMCPAvailabilityCheckedMsg:
+		c.dockerMCPAvailable = &msg.available
+		c.dockerMCPCheckInFlight = false
+		if c.selected == SystemCommands {
+			c.setCommandItems(c.selected)
+		}
+		return nil
 	case spinner.TickMsg:
 		if c.loading {
 			var cmd tea.Cmd
@@ -205,6 +223,20 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 		}
 	}
 	return nil
+}
+
+func checkDockerMCPAvailabilityCmd() tea.Cmd {
+	return func() tea.Msg {
+		return dockerMCPAvailabilityCheckedMsg{available: config.RefreshDockerMCPAvailability()}
+	}
+}
+
+func (c *Commands) InitialCmd() tea.Cmd {
+	if c.dockerMCPAvailable != nil || c.dockerMCPCheckInFlight {
+		return nil
+	}
+	c.dockerMCPCheckInFlight = true
+	return checkDockerMCPAvailabilityCmd()
 }
 
 // Cursor returns the cursor position relative to the dialog.
@@ -427,20 +459,33 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_sidebar", "Toggle Sidebar", "", ActionToggleCompactMode{}))
 	}
 	if c.hasSession {
-		cfg := c.com.Config()
-		agentCfg := cfg.Agents[config.AgentCoder]
-		model := cfg.GetModelByType(agentCfg.Model)
+		cfgPrime := c.com.Config()
+		agentCfg := cfgPrime.Agents[config.AgentCoder]
+		model := cfgPrime.GetModelByType(agentCfg.Model)
 		if model != nil && model.SupportsImages {
 			commands = append(commands, NewCommandItem(c.com.Styles, "file_picker", "Open File Picker", "ctrl+f", ActionOpenDialog{
-				// TODO: Pass in the file picker dialog id
+				DialogID: FilePickerID,
 			}))
 		}
 	}
 
-	// Add external editor command if $EDITOR is available
-	// TODO: Use [tea.EnvMsg] to get environment variable instead of os.Getenv
+	// Add external editor command if $EDITOR is available.
+	//
+	// TODO: Use [tea.EnvMsg] to get environment variable instead of os.Getenv;
+	// because os.Getenv does IO is breaks the TEA paradigm and is generally an
+	// antipattern.
 	if os.Getenv("EDITOR") != "" {
 		commands = append(commands, NewCommandItem(c.com.Styles, "open_external_editor", "Open External Editor", "ctrl+o", ActionExternalEditor{}))
+	}
+
+	// Add Docker MCP command if available and not already enabled.
+	if !cfg.IsDockerMCPEnabled() && c.dockerMCPAvailable != nil && *c.dockerMCPAvailable {
+		commands = append(commands, NewCommandItem(c.com.Styles, "enable_docker_mcp", "Enable Docker MCP Catalog", "", ActionEnableDockerMCP{}))
+	}
+
+	// Add disable Docker MCP command if it's currently enabled
+	if cfg.IsDockerMCPEnabled() {
+		commands = append(commands, NewCommandItem(c.com.Styles, "disable_docker_mcp", "Disable Docker MCP Catalog", "", ActionDisableDockerMCP{}))
 	}
 
 	if c.hasTodos || c.hasQueue {
@@ -456,10 +501,29 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_pills", label, "ctrl+t", ActionTogglePills{}))
 	}
 
+	// Add a command for toggling notifications.
+	cfg = c.com.Config()
+	notificationsDisabled := cfg != nil && cfg.Options != nil && cfg.Options.DisableNotifications
+	notificationLabel := "Disable Notifications"
+	if notificationsDisabled {
+		notificationLabel = "Enable Notifications"
+	}
+	commands = append(commands, NewCommandItem(c.com.Styles, "toggle_notifications", notificationLabel, "", ActionToggleNotifications{}))
+
 	commands = append(commands,
 		NewCommandItem(c.com.Styles, "toggle_yolo", "Toggle Yolo Mode", "", ActionToggleYoloMode{}),
 		NewCommandItem(c.com.Styles, "toggle_help", "Toggle Help", "ctrl+g", ActionToggleHelp{}),
 		NewCommandItem(c.com.Styles, "init", "Initialize Project", "", ActionInitializeProject{}),
+	)
+
+	// Add transparent background toggle.
+	transparentLabel := "Disable Background Color"
+	if cfg != nil && cfg.Options != nil && cfg.Options.TUI.Transparent != nil && *cfg.Options.TUI.Transparent {
+		transparentLabel = "Enable Background Color"
+	}
+	commands = append(commands, NewCommandItem(c.com.Styles, "toggle_transparent", transparentLabel, "", ActionToggleTransparentBackground{}))
+
+	commands = append(commands,
 		NewCommandItem(c.com.Styles, "quit", "Quit", "ctrl+c", tea.QuitMsg{}),
 	)
 

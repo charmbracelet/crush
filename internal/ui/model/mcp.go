@@ -6,6 +6,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 )
@@ -59,7 +60,12 @@ func mcpList(t *styles.Styles, mcps []mcp.ClientInfo, width, maxItems int) strin
 
 	for _, m := range mcps {
 		var icon string
-		title := t.ResourceName.Render(m.Name)
+		title := m.Name
+		// Show "Docker MCP" instead of the config name for Docker MCP.
+		if m.Name == config.DockerMCPName {
+			title = "Docker MCP"
+		}
+		title = t.ResourceName.Render(title)
 		var description string
 		var extraContent string
 

@@ -588,10 +588,15 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		Notify:               c.notify,
 	})
 
-	c.readyWg.Go(func() error {
-		_, err := c.refreshSessionAgentRuntimeConfig(ctx, result, prompt, agent, isSubAgent)
-		return err
-	})
+	// Only use async initialization for the primary agent (not subagents).
+	// Subagents will have their runtime config refreshed synchronously
+	// in the Run function via refreshCallConfigIfNeeded.
+	if !isSubAgent {
+		c.readyWg.Go(func() error {
+			_, err := c.refreshSessionAgentRuntimeConfig(ctx, result, prompt, agent, isSubAgent)
+			return err
+		})
+	}
 
 	return result, nil
 }

@@ -8,13 +8,11 @@ import (
 	"fmt"
 	"html/template"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/shell"
@@ -598,8 +596,5 @@ func countLines(s string) int {
 }
 
 func normalizeWorkingDir(path string) string {
-	if runtime.GOOS == "windows" {
-		path = strings.ReplaceAll(path, fsext.WindowsWorkingDirDrive(), "")
-	}
 	return filepath.ToSlash(path)
 }

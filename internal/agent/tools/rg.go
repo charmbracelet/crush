@@ -4,8 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"os/exec"
-	"path/filepath"
-	"strings"
 	"sync"
 
 	"github.com/charmbracelet/crush/internal/log"
@@ -29,9 +27,6 @@ func getRgCmd(ctx context.Context, globPattern string) *exec.Cmd {
 	}
 	args := []string{"--files", "-L", "--null"}
 	if globPattern != "" {
-		if !filepath.IsAbs(globPattern) && !strings.HasPrefix(globPattern, "/") {
-			globPattern = "/" + globPattern
-		}
 		args = append(args, "--glob", globPattern)
 	}
 	return exec.CommandContext(ctx, name, args...)

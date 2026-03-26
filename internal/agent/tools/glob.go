@@ -42,11 +42,12 @@ func NewGlobTool(workingDir string) fantasy.AgentTool {
 
 			// Use session-specific working directory from context if available.
 			effectiveWorkingDir := cmp.Or(GetWorkingDirFromContext(ctx), workingDir)
-			searchPath := cmp.Or(params.Path, effectiveWorkingDir)
+			searchPath := filepath.FromSlash(cmp.Or(params.Path, effectiveWorkingDir))
 
 			files, truncated, err := globFiles(ctx, params.Pattern, searchPath, 100)
 			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error finding files: %w", err)
+				slog.Warn("Glob search failed", "error", err, "pattern", params.Pattern, "path", searchPath)
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("error finding files: %s", err)), nil
 			}
 
 			var output string

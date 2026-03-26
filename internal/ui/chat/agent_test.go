@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/toolruntime"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
@@ -140,4 +141,30 @@ func newNestedBashTool(t *testing.T, sty *styles.Styles, cmd string) ToolMessage
 		Input:    string(input),
 		Finished: true,
 	}, nil, false)
+}
+
+func TestBashToolMessageItemRuntimeSnapshotRendersSanitizedText(t *testing.T) {
+	t.Parallel()
+
+	input, err := json.Marshal(tools.BashParams{Command: "echo test", Description: "runtime"})
+	require.NoError(t, err)
+
+	theme := styles.DefaultStyles()
+	item := NewBashToolMessageItem(&theme, message.ToolCall{
+		ID:    "tool-runtime",
+		Name:  tools.BashToolName,
+		Input: string(input),
+	}, nil, false)
+	item.SetRuntimeState(&toolruntime.State{
+		ToolCallID:   "tool-runtime",
+		ToolName:     tools.BashToolName,
+		Status:       toolruntime.StatusRunning,
+		SnapshotText: "3\nwarn",
+	})
+
+	rendered := ansi.Strip(item.Render(100))
+	require.Contains(t, rendered, "3")
+	require.Contains(t, rendered, "warn")
+	require.NotContains(t, rendered, "Waiting for tool response...")
+	require.NotContains(t, rendered, "\x1b")
 }

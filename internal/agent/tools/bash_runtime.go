@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -71,7 +72,68 @@ func publishShellRuntime(ctx context.Context, bgShell *shell.BackgroundShell, st
 	})
 }
 
+var ansiControlSequenceRE = regexp.MustCompile(`(?:\x1b\][^\x07\x1b]*(?:\x07|\x1b\\))|(?:\x1b\[[0-?]*[ -/]*[@-~])|(?:\x1b[@-_])`)
+
+func sanitizeTerminalText(content string) string {
+	if content == "" {
+		return ""
+	}
+
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	content = ansiControlSequenceRE.ReplaceAllString(content, "")
+
+	var sanitized strings.Builder
+	line := make([]rune, 0, len(content))
+	lineNeedsReset := false
+	flushLine := func() {
+		sanitized.WriteString(string(line))
+		line = line[:0]
+		lineNeedsReset = false
+	}
+	resetLineIfNeeded := func() {
+		if lineNeedsReset {
+			line = line[:0]
+			lineNeedsReset = false
+		}
+	}
+	writeRune := func(r rune) {
+		resetLineIfNeeded()
+		line = append(line, r)
+	}
+	writeString := func(value string) {
+		for _, r := range value {
+			writeRune(r)
+		}
+	}
+
+	for _, r := range content {
+		switch {
+		case r == '\r':
+			lineNeedsReset = true
+		case r == '\n':
+			flushLine()
+			sanitized.WriteByte('\n')
+		case r == '\b':
+			resetLineIfNeeded()
+			if len(line) > 0 {
+				line = line[:len(line)-1]
+			}
+		case r == '\t':
+			writeString("    ")
+		case r < 0x20 || r == 0x7f:
+			continue
+		default:
+			writeRune(r)
+		}
+	}
+	flushLine()
+
+	return strings.TrimSpace(sanitized.String())
+}
+
 func combinedOutputSnapshot(stdout, stderr string) string {
+	stdout = sanitizeTerminalText(stdout)
+	stderr = sanitizeTerminalText(stderr)
 	stdout = strings.TrimSuffix(stdout, "\n")
 	stderr = strings.TrimSuffix(stderr, "\n")
 	switch {
@@ -83,7 +145,6 @@ func combinedOutputSnapshot(stdout, stderr string) string {
 		return stderr
 	}
 }
-
 func finalShellOutput(stdout, stderr string, execErr error) string {
 	return truncateOutput(formatOutput(stdout, stderr, execErr))
 }
@@ -113,4 +174,3 @@ func formatJobOutput(stdout, stderr string, execErr error, done bool) string {
 	}
 	return truncateOutput(combinedOutputSnapshot(stdout, stderr))
 }
-

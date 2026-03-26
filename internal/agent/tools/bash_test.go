@@ -347,3 +347,52 @@ func runGit(t *testing.T, repoDir string, args ...string) {
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "git %v: %s", args, out)
 }
+
+func TestSanitizeTerminalText_StripsAnsiAndControlSequences(t *testing.T) {
+	t.Parallel()
+
+	input := "line 1\x1b[31m red\x1b[0m\n\x1b]9;test\aline 2\x00"
+	require.Equal(t, "line 1 red\nline 2", sanitizeTerminalText(input))
+}
+
+func TestSanitizeTerminalText_UsesLatestCarriageReturnLine(t *testing.T) {
+	t.Parallel()
+
+	input := "progress 10%\rprogress 50%\rprogress 100%\nnext line"
+	require.Equal(t, "progress 100%\nnext line", sanitizeTerminalText(input))
+}
+
+func TestSanitizeTerminalText_KeepsCarriageReturnFrameUntilReplacement(t *testing.T) {
+	t.Parallel()
+
+	input := "progress 10%\r"
+	require.Equal(t, "progress 10%", sanitizeTerminalText(input))
+}
+
+func TestSanitizeTerminalText_AppliesBackspaceEdits(t *testing.T) {
+	t.Parallel()
+
+	input := "step 10%\b\b\b20%"
+	require.Equal(t, "step 20%", sanitizeTerminalText(input))
+}
+
+func TestCombinedOutputSnapshot_SanitizesTerminalControlCharacters(t *testing.T) {
+	t.Parallel()
+
+	stdout := "1\r2\r3\n"
+	stderr := "\x1b[35mwarn\x1b[0m\n"
+	require.Equal(t, "3\nwarn", combinedOutputSnapshot(stdout, stderr))
+}
+
+func TestCombinedOutputSnapshot_RetainsRunningCarriageReturnFrame(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "progress 10%", combinedOutputSnapshot("progress 10%\r", ""))
+}
+
+func TestSanitizeTerminalText_ReplacesLineAfterCarriageReturn(t *testing.T) {
+	t.Parallel()
+
+	input := "10%\r20%"
+	require.Equal(t, "20%", sanitizeTerminalText(input))
+}

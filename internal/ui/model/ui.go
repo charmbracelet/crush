@@ -75,6 +75,16 @@ const pasteColsThreshold = 1000
 // Session details panel max height.
 const sessionDetailsMaxHeight = 20
 
+// TextareaMaxHeight is the maximum height of the prompt textarea.
+const TextareaMaxHeight = 15
+
+// editorHeightMargin is the vertical margin added to the textarea height to
+// account for the attachments row (top) and bottom margin.
+const editorHeightMargin = 2
+
+// TextareaMinHeight is the minimum height of the prompt textarea.
+const TextareaMinHeight = 3
+
 // uiFocusState represents the current focus state of the UI.
 type uiFocusState uint8
 
@@ -258,8 +268,8 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	ta.CharLimit = -1
 	ta.SetVirtualCursor(false)
 	ta.DynamicHeight = true
-	ta.MinHeight = 3
-	ta.MaxHeight = 15
+	ta.MinHeight = TextareaMinHeight
+	ta.MaxHeight = TextareaMaxHeight
 	ta.Focus()
 
 	ch := NewChat(com)
@@ -2410,7 +2420,7 @@ func (m *UI) updateSize() {
 	m.status.SetWidth(m.layout.status.Dx())
 
 	m.chat.SetSize(m.layout.main.Dx(), m.layout.main.Dy())
-	m.textarea.MaxHeight = 15
+	m.textarea.MaxHeight = TextareaMaxHeight
 	m.textarea.SetWidth(m.layout.editor.Dx())
 	m.renderPills()
 
@@ -2431,8 +2441,8 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 
 	// The help height
 	helpHeight := 1
-	// The editor height: textarea height + 2 (top margin/attachments + bottom margin).
-	editorHeight := m.textarea.Height() + 2
+	// The editor height: textarea height + margin for attachments and bottom spacing.
+	editorHeight := m.textarea.Height() + editorHeightMargin
 	// The sidebar width
 	sidebarWidth := 30
 	// The header height

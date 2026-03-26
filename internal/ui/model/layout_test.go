@@ -35,8 +35,8 @@ func newTestUI() *UI {
 	ta.CharLimit = -1
 	ta.SetVirtualCursor(false)
 	ta.DynamicHeight = true
-	ta.MinHeight = 3
-	ta.MaxHeight = 15
+	ta.MinHeight = TextareaMinHeight
+	ta.MaxHeight = TextareaMaxHeight
 	ta.Focus()
 
 	u := &UI{

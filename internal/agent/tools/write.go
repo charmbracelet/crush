@@ -99,7 +99,7 @@ func NewWriteTool(
 			if fileInfo != nil && !fileInfo.IsDir() {
 				oldBytes, readErr := os.ReadFile(filePath)
 				if readErr == nil {
-					oldContent = string(oldBytes)
+					oldContent, _ = fsext.ToUnixLineEndings(string(oldBytes))
 				}
 			}
 

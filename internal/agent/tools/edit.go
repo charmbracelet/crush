@@ -274,6 +274,7 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 		return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
+	normalizedNewContent := newContent
 	if isCrlf {
 		newContent, _ = fsext.ToWindowsLineEndings(newContent)
 	}
@@ -300,7 +301,7 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 		}
 	}
 	// Store the new version
-	_, err = edit.files.CreateVersion(edit.ctx, sessionID, filePath, newContent)
+	_, err = edit.files.CreateVersion(edit.ctx, sessionID, filePath, normalizedNewContent)
 	if err != nil {
 		slog.Error("Error creating file history version", "error", err)
 	}
@@ -311,7 +312,7 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 		fantasy.NewTextResponse("Content deleted from file: "+filePath),
 		EditResponseMetadata{
 			OldContent: oldContent,
-			NewContent: newContent,
+			NewContent: normalizedNewContent,
 			Additions:  additions,
 			Removals:   removals,
 		},
@@ -405,6 +406,7 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 		return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
+	normalizedNewContent := newContent
 	if isCrlf {
 		newContent, _ = fsext.ToWindowsLineEndings(newContent)
 	}
@@ -431,7 +433,7 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 		}
 	}
 	// Store the new version
-	_, err = edit.files.CreateVersion(edit.ctx, sessionID, filePath, newContent)
+	_, err = edit.files.CreateVersion(edit.ctx, sessionID, filePath, normalizedNewContent)
 	if err != nil {
 		slog.Error("Error creating file history version", "error", err)
 	}
@@ -442,7 +444,7 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 		fantasy.NewTextResponse("Content replaced in file: "+filePath),
 		EditResponseMetadata{
 			OldContent: oldContent,
-			NewContent: newContent,
+			NewContent: normalizedNewContent,
 			Additions:  additions,
 			Removals:   removals,
 		}), nil

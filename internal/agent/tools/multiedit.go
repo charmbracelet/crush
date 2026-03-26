@@ -340,6 +340,7 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 		return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
+	normalizedNewContent := currentContent
 	if isCrlf {
 		currentContent, _ = fsext.ToWindowsLineEndings(currentContent)
 	}
@@ -367,7 +368,7 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 	}
 
 	// Store the new version
-	_, err = edit.files.CreateVersion(edit.ctx, sessionID, params.FilePath, currentContent)
+	_, err = edit.files.CreateVersion(edit.ctx, sessionID, params.FilePath, normalizedNewContent)
 	if err != nil {
 		slog.Error("Error creating file history version", "error", err)
 	}
@@ -385,7 +386,7 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 		fantasy.NewTextResponse(message),
 		MultiEditResponseMetadata{
 			OldContent:   oldContent,
-			NewContent:   currentContent,
+			NewContent:   normalizedNewContent,
 			Additions:    additions,
 			Removals:     removals,
 			EditsApplied: editsApplied,

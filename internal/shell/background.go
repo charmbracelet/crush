@@ -60,6 +60,7 @@ type BackgroundShell struct {
 	done        chan struct{}
 	exitErr     error
 	completedAt int64 // Unix timestamp when job completed (0 if still running)
+	killed      atomic.Bool
 }
 
 // BackgroundShellManager manages background shell instances.
@@ -264,4 +265,15 @@ func (bs *BackgroundShell) WaitContext(ctx context.Context) bool {
 	case <-ctx.Done():
 		return false
 	}
+}
+
+// KillByUser marks the shell as explicitly killed by user and cancels it.
+func (bs *BackgroundShell) KillByUser() {
+	bs.killed.Store(true)
+	bs.cancel()
+}
+
+// WasKilled returns true if the shell was explicitly killed by user.
+func (bs *BackgroundShell) WasKilled() bool {
+	return bs.killed.Load()
 }

@@ -480,6 +480,9 @@ func watchBackgroundShellRuntime(ctx context.Context, bgShell *shell.BackgroundS
 			publishShellRuntime(ctx, bgShell, toolruntime.StatusBackgroundRunning, snapshot)
 		}
 		if done {
+			if bgShell.WasKilled() {
+				return
+			}
 			finalSnapshot := finalShellOutput(stdout, stderr, execErr)
 			status := toolruntime.StatusCompleted
 			switch {

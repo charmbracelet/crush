@@ -35,6 +35,7 @@ type Skill struct {
 	Instructions  string            `yaml:"-" json:"instructions"`
 	Path          string            `yaml:"-" json:"path"`
 	SkillFilePath string            `yaml:"-" json:"skill_file_path"`
+	Builtin       bool              `yaml:"-" json:"builtin"`
 }
 
 // Validate checks if the skill meets spec requirements.
@@ -182,6 +183,9 @@ func ToPromptXML(skills []*Skill) string {
 		fmt.Fprintf(&sb, "    <name>%s</name>\n", escape(s.Name))
 		fmt.Fprintf(&sb, "    <description>%s</description>\n", escape(s.Description))
 		fmt.Fprintf(&sb, "    <location>%s</location>\n", escape(s.SkillFilePath))
+		if s.Builtin {
+			sb.WriteString("    <type>builtin</type>\n")
+		}
 		sb.WriteString("  </skill>\n")
 	}
 	sb.WriteString("</available_skills>")

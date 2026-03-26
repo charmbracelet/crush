@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/toolruntime"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -40,10 +41,6 @@ type BashToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
-	if opts.IsPending() {
-		return pendingTool(sty, "Bash", opts.Anim, opts.Compact)
-	}
-
 	var params tools.BashParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
 		params.Command = "failed to parse command"
@@ -53,6 +50,34 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	var meta tools.BashResponseMetadata
 	if opts.HasResult() {
 		_ = json.Unmarshal([]byte(opts.Result.Metadata), &meta)
+	}
+
+	if runtime := opts.RuntimeState; runtime != nil {
+		switch runtime.Status {
+		case toolruntime.StatusBackgroundRunning:
+			description := cmp.Or(meta.Description, params.Command)
+			return renderJobTool(sty, opts, cappedWidth, "Start", runtimeShellID(runtime, meta.ShellID), description, runtime.SnapshotText)
+		case toolruntime.StatusRunning:
+			cmd := strings.ReplaceAll(params.Command, "\n", " ")
+			cmd = strings.ReplaceAll(cmd, "\t", "    ")
+			header := toolHeader(sty, opts.Status, "Bash", cappedWidth, opts.Compact, cmd)
+			if opts.Compact {
+				return header
+			}
+			if runtime.SnapshotText == "" {
+				if opts.IsPending() {
+					return pendingTool(sty, "Bash", opts.Anim, opts.Compact)
+				}
+				return joinToolParts(header, sty.Tool.StateWaiting.Render("Waiting for tool response..."))
+			}
+			bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
+			body := sty.Tool.Body.Render(toolOutputPlainContent(sty, runtime.SnapshotText, bodyWidth, opts.ExpandedContent))
+			return joinToolParts(header, body)
+		}
+	}
+
+	if opts.IsPending() {
+		return pendingTool(sty, "Bash", opts.Anim, opts.Compact)
 	}
 
 	if meta.Background {
@@ -144,6 +169,53 @@ func (j *JobOutputToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 		content = opts.Result.Content
 	}
 	return renderJobTool(sty, opts, cappedWidth, "Output", params.ShellID, description, content)
+}
+
+// -----------------------------------------------------------------------------
+// Job Wait Tool
+// -----------------------------------------------------------------------------
+
+type JobWaitToolMessageItem struct {
+	*baseToolMessageItem
+}
+
+var _ ToolMessageItem = (*JobWaitToolMessageItem)(nil)
+
+func NewJobWaitToolMessageItem(
+	sty *styles.Styles,
+	toolCall message.ToolCall,
+	result *message.ToolResult,
+	canceled bool,
+) ToolMessageItem {
+	return newBaseToolMessageItem(sty, toolCall, result, &JobWaitToolRenderContext{}, canceled)
+}
+
+type JobWaitToolRenderContext struct{}
+
+func (j *JobWaitToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
+	cappedWidth := cappedMessageWidth(width)
+	if opts.IsPending() {
+		return pendingTool(sty, "Job", opts.Anim, opts.Compact)
+	}
+
+	var params tools.JobWaitParams
+	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
+		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
+	}
+
+	var description string
+	if opts.HasResult() && opts.Result.Metadata != "" {
+		var meta tools.JobWaitResponseMetadata
+		if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil {
+			description = cmp.Or(meta.Description, meta.Command)
+		}
+	}
+
+	content := ""
+	if opts.HasResult() {
+		content = opts.Result.Content
+	}
+	return renderJobTool(sty, opts, cappedWidth, "Wait", params.ShellID, description, content)
 }
 
 // -----------------------------------------------------------------------------
@@ -245,4 +317,14 @@ func jobHeader(sty *styles.Styles, status ToolStatus, action, shellID, descripti
 // joinToolParts joins header and body with a blank line separator.
 func joinToolParts(header, body string) string {
 	return strings.Join([]string{header, "", body}, "\n")
+}
+
+func runtimeShellID(state *toolruntime.State, fallback string) string {
+	if state == nil || state.ClientMetadata == nil {
+		return fallback
+	}
+	if shellID, ok := state.ClientMetadata["shell_id"].(string); ok && shellID != "" {
+		return shellID
+	}
+	return fallback
 }

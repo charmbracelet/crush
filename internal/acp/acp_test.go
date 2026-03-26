@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/toolruntime"
 	"github.com/stretchr/testify/require"
 )
 
@@ -183,14 +184,15 @@ func (f *fakeCoordinator) Model() agent.Model { return agent.Model{} }
 func (f *fakeCoordinator) PrepareModelSwitch(_ context.Context, _ string, _ config.SelectedModelType, _ config.SelectedModel) error {
 	return nil
 }
-func (f *fakeCoordinator) UpdateModels(_ context.Context) error { return nil }
-func (f *fakeCoordinator) RefreshTools(_ context.Context) error { return nil }
+func (f *fakeCoordinator) UpdateModels(_ context.Context) error        { return nil }
+func (f *fakeCoordinator) RefreshTools(_ context.Context) error        { return nil }
 func (f *fakeCoordinator) PrioritizeQueuedPrompt(_ string, _ int) bool { return false }
 
 type fakeApp struct {
 	sessions    *fakeSessionService
 	messages    *fakeMessageService
 	coordinator *fakeCoordinator
+	runtime     toolruntime.Service
 }
 
 func (a *fakeApp) GetSessions() session.Service       { return a.sessions }
@@ -198,6 +200,12 @@ func (a *fakeApp) GetMessages() message.Service       { return a.messages }
 func (a *fakeApp) GetCoordinator() agent.Coordinator  { return a.coordinator }
 func (a *fakeApp) GetConfig() *config.ConfigStore     { return nil }
 func (a *fakeApp) GetPermissions() permission.Service { return nil }
+func (a *fakeApp) GetToolRuntime() toolruntime.Service {
+	if a.runtime == nil {
+		a.runtime = toolruntime.NewService()
+	}
+	return a.runtime
+}
 
 func TestSessionListIncludesCWD(t *testing.T) {
 	t.Parallel()

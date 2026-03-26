@@ -34,6 +34,7 @@ import (
 	"github.com/charmbracelet/crush/internal/plugin"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/toolruntime"
 	"github.com/charmbracelet/crush/internal/userinput"
 	"golang.org/x/sync/errgroup"
 
@@ -99,6 +100,7 @@ type coordinator struct {
 	filetracker filetracker.Service
 	lspManager  *lsp.Manager
 	notify      pubsub.Publisher[notify.Notification]
+	toolRuntime toolruntime.Service
 	hookManager *hooks.Manager
 
 	currentAgent SessionAgent
@@ -118,6 +120,7 @@ func NewCoordinator(
 	filetracker filetracker.Service,
 	lspManager *lsp.Manager,
 	notify pubsub.Publisher[notify.Notification],
+	toolRuntime toolruntime.Service,
 ) (Coordinator, error) {
 	hookMgr, err := hooks.NewManager(cfg.Config().Hooks)
 	if err != nil {
@@ -137,6 +140,7 @@ func NewCoordinator(
 		filetracker: filetracker,
 		lspManager:  lspManager,
 		notify:      notify,
+		toolRuntime: toolRuntime,
 		hookManager: hookMgr,
 		agents:      make(map[string]SessionAgent),
 	}
@@ -182,6 +186,7 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	}
 	ctx = context.WithValue(ctx, tools.WorkingDirContextKey, sessionWorkingDir)
 	ctx = context.WithValue(ctx, tools.SessionIDContextKey, sessionID)
+	ctx = toolruntime.WithService(ctx, c.toolRuntime)
 
 	// refresh models before each run
 	runtimeConfig, err := c.updateCurrentAgentRuntime(ctx)
@@ -721,6 +726,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, mode s
 		tools.NewPlanExitTool(c.sessions),
 		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelName, c.hookManager, bashOpts),
 		tools.NewJobOutputTool(),
+		tools.NewJobWaitTool(),
 		tools.NewJobKillTool(),
 		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),
 		tools.NewEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),

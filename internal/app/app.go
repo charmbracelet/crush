@@ -36,6 +36,7 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
+	"github.com/charmbracelet/crush/internal/toolruntime"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/update"
@@ -60,6 +61,7 @@ type App struct {
 	UserInput   userinput.Service
 	Permissions permission.Service
 	FileTracker filetracker.Service
+	ToolRuntime toolruntime.Service
 
 	AgentCoordinator agent.Coordinator
 
@@ -109,6 +111,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 			return classifier
 		}, store.WorkingDir(), cfg.Permissions != nil && cfg.Permissions.FailClosedOnClassifierError),
 		FileTracker: filetracker.NewService(q),
+		ToolRuntime: toolruntime.NewService(),
 		LSPManager:  lsp.NewManager(store),
 
 		globalCtx: ctx,
@@ -180,6 +183,30 @@ func (app *App) Store() *config.ConfigStore {
 // AgentNotifications returns the broker for agent notification events.
 func (app *App) AgentNotifications() *pubsub.Broker[notify.Notification] {
 	return app.agentNotifications
+}
+
+func (app *App) GetSessions() session.Service {
+	return app.Sessions
+}
+
+func (app *App) GetMessages() message.Service {
+	return app.Messages
+}
+
+func (app *App) GetCoordinator() agent.Coordinator {
+	return app.AgentCoordinator
+}
+
+func (app *App) GetConfig() *config.ConfigStore {
+	return app.config
+}
+
+func (app *App) GetPermissions() permission.Service {
+	return app.Permissions
+}
+
+func (app *App) GetToolRuntime() toolruntime.Service {
+	return app.ToolRuntime
 }
 
 // resolveSession resolves which session to use for a non-interactive run.
@@ -494,6 +521,7 @@ func (app *App) setupEvents() {
 	setupSubscriber(ctx, app.serviceEventsWG, "permissions-notifications", app.Permissions.SubscribeNotifications, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "history", app.History.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "agent-notifications", app.agentNotifications.Subscribe, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "tool-runtime", app.ToolRuntime.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "mcp", mcp.SubscribeEvents, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "lsp", SubscribeLSPEvents, app.events)
 	cleanupFunc := func(context.Context) error {
@@ -617,6 +645,7 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.FileTracker,
 		app.LSPManager,
 		app.agentNotifications,
+		app.ToolRuntime,
 	)
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)

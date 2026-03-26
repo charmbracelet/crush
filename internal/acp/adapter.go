@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/toolruntime"
 )
 
 // AppAdapter wraps app.App (or a compatible struct) to satisfy the acp.App
@@ -15,6 +16,7 @@ type AppAdapter struct {
 	messages    message.Service
 	coordinator agent.Coordinator
 	permissions permission.Service
+	runtime     toolruntime.Service
 	cfg         *config.ConfigStore
 }
 
@@ -24,6 +26,7 @@ func NewAppAdapter(
 	messages message.Service,
 	coordinator agent.Coordinator,
 	permissions permission.Service,
+	runtime toolruntime.Service,
 	cfg *config.ConfigStore,
 ) *AppAdapter {
 	return &AppAdapter{
@@ -31,12 +34,14 @@ func NewAppAdapter(
 		messages:    messages,
 		coordinator: coordinator,
 		permissions: permissions,
+		runtime:     runtime,
 		cfg:         cfg,
 	}
 }
 
-func (a *AppAdapter) GetSessions() session.Service       { return a.sessions }
-func (a *AppAdapter) GetMessages() message.Service       { return a.messages }
-func (a *AppAdapter) GetCoordinator() agent.Coordinator  { return a.coordinator }
-func (a *AppAdapter) GetPermissions() permission.Service { return a.permissions }
-func (a *AppAdapter) GetConfig() *config.ConfigStore     { return a.cfg }
+func (a *AppAdapter) GetSessions() session.Service        { return a.sessions }
+func (a *AppAdapter) GetMessages() message.Service        { return a.messages }
+func (a *AppAdapter) GetCoordinator() agent.Coordinator   { return a.coordinator }
+func (a *AppAdapter) GetPermissions() permission.Service  { return a.permissions }
+func (a *AppAdapter) GetToolRuntime() toolruntime.Service { return a.runtime }
+func (a *AppAdapter) GetConfig() *config.ConfigStore      { return a.cfg }

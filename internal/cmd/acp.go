@@ -54,6 +54,7 @@ crush acp --cwd /path/to/project
 			appInstance.Messages,
 			appInstance.AgentCoordinator,
 			appInstance.Permissions,
+			appInstance.ToolRuntime,
 			appInstance.Store(),
 		)
 

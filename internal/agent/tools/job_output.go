@@ -4,7 +4,6 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"strings"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/shell"
@@ -27,7 +26,9 @@ type JobOutputResponseMetadata struct {
 	Command          string `json:"command"`
 	Description      string `json:"description"`
 	Done             bool   `json:"done"`
+	ExitCode         int    `json:"exit_code,omitempty"`
 	WorkingDirectory string `json:"working_directory"`
+	DeprecationNotes []string `json:"deprecation_notes,omitempty"`
 }
 
 func NewJobOutputTool() fantasy.AgentTool {
@@ -54,42 +55,16 @@ func NewJobOutputTool() fantasy.AgentTool {
 				}
 			}
 
-			stdout, stderr, done, err := bgShell.GetOutput()
-
-			var outputParts []string
-			if stdout != "" {
-				outputParts = append(outputParts, stdout)
-			}
-			if stderr != "" {
-				outputParts = append(outputParts, stderr)
-			}
-
-			status := "running"
-			if done {
-				status = "completed"
-				if err != nil {
-					exitCode := shell.ExitCode(err)
-					if exitCode != 0 {
-						outputParts = append(outputParts, fmt.Sprintf("Exit code %d", exitCode))
-					}
-				}
-			}
-
-			output := strings.Join(outputParts, "\n")
-
+			result, meta := formatJobToolResponse(bgShell, params.ShellID, params.Wait)
 			metadata := JobOutputResponseMetadata{
-				ShellID:          params.ShellID,
-				Command:          bgShell.Command,
-				Description:      bgShell.Description,
-				Done:             done,
-				WorkingDirectory: bgShell.WorkingDir,
+				ShellID:          meta.ShellID,
+				Command:          meta.Command,
+				Description:      meta.Description,
+				Done:             meta.Done,
+				ExitCode:         meta.ExitCode,
+				WorkingDirectory: meta.WorkingDirectory,
+				DeprecationNotes: meta.DeprecationNotes,
 			}
-
-			if output == "" {
-				output = BashNoOutput
-			}
-
-			result := fmt.Sprintf("Status: %s\n\n%s", status, output)
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(result), metadata), nil
 		})
 }

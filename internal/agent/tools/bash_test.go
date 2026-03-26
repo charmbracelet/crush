@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/shell"
+	"github.com/charmbracelet/crush/internal/toolruntime"
 	"github.com/stretchr/testify/require"
 )
 
@@ -90,12 +91,64 @@ func TestBashTool_CustomAutoBackgroundThreshold(t *testing.T) {
 	require.False(t, resp.IsError)
 	var meta BashResponseMetadata
 	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	require.False(t, meta.Background)
+	require.Empty(t, meta.ShellID)
+	require.True(t, meta.TimedOut)
+	require.Equal(t, 1, meta.TimeoutSeconds)
+	require.NotEmpty(t, meta.DeprecationNotes)
+	require.Contains(t, resp.Content, "Command timed out after 1 seconds")
+}
+
+func TestBashTool_ExplicitBackgroundReturnsShellID(t *testing.T) {
+	workingDir := t.TempDir()
+	tool := newBashToolForTest(workingDir)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description:     "explicit background",
+		Command:         "sleep 1.5 && echo done",
+		RunInBackground: true,
+	})
+
+	require.False(t, resp.IsError)
+	var meta BashResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
 	require.True(t, meta.Background)
 	require.NotEmpty(t, meta.ShellID)
-	require.Contains(t, resp.Content, "moved to background")
+	require.Contains(t, resp.Content, "Background shell started with ID")
 
 	bgManager := shell.GetBackgroundShellManager()
 	require.NoError(t, bgManager.Kill(meta.ShellID))
+}
+
+func TestEffectiveBashTimeout_ExplicitZeroDisablesTimeout(t *testing.T) {
+	timeoutSeconds := 0
+	timeout, notes := effectiveBashTimeout(BashParams{
+		TimeoutSeconds:      &timeoutSeconds,
+		AutoBackgroundAfter: 1,
+	})
+
+	require.Zero(t, timeout)
+	require.NotEmpty(t, notes)
+}
+
+func TestPublishShellRuntime_UsesDetachedToolRuntimeContext(t *testing.T) {
+	runtimeService := toolruntime.NewService()
+	ctx := toolruntime.WithService(context.Background(), runtimeService)
+	bgShell := &shell.BackgroundShell{
+		ID:         "job-1",
+		SessionID:  "session-1",
+		ToolCallID: "call-1",
+		ToolName:   BashToolName,
+	}
+
+	publishShellRuntime(detachedToolRuntimeContext(ctx), bgShell, toolruntime.StatusBackgroundRunning, "partial output")
+
+	state, ok := runtimeService.Get("session-1", "call-1")
+	require.True(t, ok)
+	require.Equal(t, toolruntime.StatusBackgroundRunning, state.Status)
+	require.Equal(t, "partial output", state.SnapshotText)
+	require.Equal(t, "job-1", state.ClientMetadata["shell_id"])
 }
 
 func TestBashTool_HookPassthroughFallsBackToOriginalCommand(t *testing.T) {

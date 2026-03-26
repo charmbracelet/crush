@@ -7,6 +7,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/shell"
+	"github.com/charmbracelet/crush/internal/toolruntime"
 )
 
 const (
@@ -51,6 +52,21 @@ func NewJobKillTool() fantasy.AgentTool {
 			err := bgManager.Kill(params.ShellID)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
+			}
+
+			if bgShell.SessionID != "" && bgShell.ToolCallID != "" {
+				stdout, stderr, _, execErr := bgShell.GetOutput()
+				toolruntime.Report(ctx, toolruntime.State{
+					SessionID:    bgShell.SessionID,
+					ToolCallID:   bgShell.ToolCallID,
+					ToolName:     bgShell.ToolName,
+					Status:       toolruntime.StatusCanceled,
+					SnapshotText: finalShellOutput(stdout, stderr, execErr),
+					ClientMetadata: map[string]any{
+						"shell_id":   bgShell.ID,
+						"background": true,
+					},
+				})
 			}
 
 			result := fmt.Sprintf("Background shell %s terminated successfully", params.ShellID)

@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -19,6 +20,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/toolruntime"
 	"github.com/charmbracelet/crush/internal/version"
 )
 
@@ -47,6 +49,7 @@ type App interface {
 	GetCoordinator() agent.Coordinator
 	GetConfig() *config.ConfigStore
 	GetPermissions() permission.Service
+	GetToolRuntime() toolruntime.Service
 }
 
 // NewHandler constructs a Handler backed by the given App.
@@ -262,6 +265,7 @@ func (h *Handler) handleSessionPrompt(ctx context.Context, req *Request) (any, *
 	defer subCancel()
 	msgSub := h.app.GetMessages().Subscribe(subCtx)
 	sessionSub := h.app.GetSessions().Subscribe(subCtx)
+	runtimeSub := h.app.GetToolRuntime().Subscribe(subCtx)
 
 	// Wrap context with cancellation so session/cancel can stop the run.
 	runCtx, cancel := context.WithCancel(ctx)
@@ -287,6 +291,7 @@ func (h *Handler) handleSessionPrompt(ctx context.Context, req *Request) (any, *
 
 	// Track the last-known text length per message for streaming.
 	readBytes := make(map[string]int)
+	runtimeSnapshotHashes := make(map[string][32]byte)
 
 	// Run the agent in a goroutine and stream message events.
 	type runResult struct {
@@ -338,6 +343,12 @@ loop:
 				continue
 			}
 			h.handleSessionEvent(params.SessionID, event)
+
+		case event := <-runtimeSub:
+			if event.Payload.SessionID != params.SessionID {
+				continue
+			}
+			h.handleToolRuntimeEvent(params.SessionID, event, runtimeSnapshotHashes)
 
 		case <-ctx.Done():
 			stopReason = StopReasonCancelled
@@ -427,6 +438,40 @@ func (h *Handler) handleMessageEvent(sessionID string, msg message.Message, read
 			}
 		}
 	}
+}
+
+func (h *Handler) handleToolRuntimeEvent(sessionID string, event pubsub.Event[toolruntime.State], snapshotHashes map[string][32]byte) {
+	if event.Type == pubsub.DeletedEvent {
+		return
+	}
+
+	state := event.Payload
+	if state.ToolName != "bash" || state.Status != toolruntime.StatusRunning {
+		return
+	}
+	if background, _ := state.ClientMetadata["background"].(bool); background {
+		return
+	}
+
+	snapshot := strings.TrimSpace(state.SnapshotText)
+	if snapshot == "" {
+		return
+	}
+
+	hash := sha256.Sum256([]byte(snapshot))
+	if prev, ok := snapshotHashes[state.ToolCallID]; ok && prev == hash {
+		return
+	}
+	snapshotHashes[state.ToolCallID] = hash
+
+	h.sendUpdate(sessionID, SessionUpdate{
+		SessionUpdate: SessionUpdateToolCallUpdate,
+		ToolCallID:    state.ToolCallID,
+		Title:         state.ToolName,
+		Kind:          "tool",
+		Status:        ToolCallStatusInProgress,
+		Content:       TextBlock(snapshot),
+	})
 }
 
 // handleSessionEvent converts a session update into session/update notifications.

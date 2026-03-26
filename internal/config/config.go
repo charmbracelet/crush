@@ -587,6 +587,7 @@ func allToolNames() []string {
 		"agent",
 		"bash",
 		"job_output",
+		"job_wait",
 		"job_kill",
 		"download",
 		"edit",

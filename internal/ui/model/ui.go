@@ -43,6 +43,7 @@ import (
 	"github.com/charmbracelet/crush/internal/planmode"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/toolruntime"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/chat"
@@ -695,6 +696,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// there is a number of things that could change the pills here so we want to re-render
 		m.renderPills()
+	case pubsub.Event[toolruntime.State]:
+		if cmd := m.handleToolRuntimeEvent(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case pubsub.Event[history.File]:
 		cmds = append(cmds, m.handleFileEvent(msg.Payload))
 	case pubsub.Event[app.LSPEvent]:
@@ -1118,6 +1123,14 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	}
 
 	m.chat.SetMessages(items...)
+	if m.session != nil && m.com != nil && m.com.App != nil && m.com.App.GetToolRuntime() != nil {
+		for _, state := range m.com.App.GetToolRuntime().ListBySession(m.session.ID) {
+			item := m.chat.MessageItem(state.ToolCallID)
+			if toolItem, ok := item.(chat.ToolMessageItem); ok {
+				toolItem.SetRuntimeState(&state)
+			}
+		}
+	}
 	if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
@@ -4835,4 +4848,32 @@ func renderLogo(t *styles.Styles, compact bool, width int) string {
 		VersionColor: t.LogoVersionColor,
 		Width:        width,
 	})
+}
+
+func (m *UI) handleToolRuntimeEvent(event pubsub.Event[toolruntime.State]) tea.Cmd {
+	if m.session == nil {
+		return nil
+	}
+	state := event.Payload
+	if state.SessionID != m.session.ID {
+		return nil
+	}
+
+	item := m.chat.MessageItem(state.ToolCallID)
+	toolItem, ok := item.(chat.ToolMessageItem)
+	if !ok {
+		return nil
+	}
+
+	switch event.Type {
+	case pubsub.DeletedEvent:
+		toolItem.SetRuntimeState(nil)
+	default:
+		toolItem.SetRuntimeState(&state)
+	}
+
+	if m.chat.Follow() {
+		return m.chat.ScrollToBottomAndAnimate()
+	}
+	return nil
 }

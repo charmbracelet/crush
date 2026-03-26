@@ -46,6 +46,9 @@ func (sb *syncBuffer) String() string {
 // BackgroundShell represents a shell running in the background.
 type BackgroundShell struct {
 	ID          string
+	SessionID   string
+	ToolCallID  string
+	ToolName    string
 	Command     string
 	Description string
 	Shell       *Shell
@@ -89,6 +92,11 @@ func GetBackgroundShellManager() *BackgroundShellManager {
 
 // Start creates and starts a new background shell with the given command.
 func (m *BackgroundShellManager) Start(ctx context.Context, workingDir string, blockFuncs []BlockFunc, command string, description string) (*BackgroundShell, error) {
+	return m.StartWithMetadata(ctx, workingDir, blockFuncs, command, description, "", "", "")
+}
+
+// StartWithMetadata creates and starts a new background shell with the given command.
+func (m *BackgroundShellManager) StartWithMetadata(ctx context.Context, workingDir string, blockFuncs []BlockFunc, command string, description string, sessionID string, toolCallID string, toolName string) (*BackgroundShell, error) {
 	// Check job limit
 	if m.shells.Len() >= MaxBackgroundJobs {
 		return nil, fmt.Errorf("maximum number of background jobs (%d) reached. Please terminate or wait for some jobs to complete", MaxBackgroundJobs)
@@ -105,6 +113,9 @@ func (m *BackgroundShellManager) Start(ctx context.Context, workingDir string, b
 
 	bgShell := &BackgroundShell{
 		ID:          id,
+		SessionID:   sessionID,
+		ToolCallID:  toolCallID,
+		ToolName:    toolName,
 		Command:     command,
 		Description: description,
 		WorkingDir:  workingDir,

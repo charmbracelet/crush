@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/stringext"
+	"github.com/charmbracelet/crush/internal/toolruntime"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -50,6 +51,8 @@ type ToolMessageItem interface {
 	SetMessageID(id string)
 	SetStatus(status ToolStatus)
 	Status() ToolStatus
+	SetRuntimeState(state *toolruntime.State)
+	RuntimeState() *toolruntime.State
 }
 
 // LoadingStateControllable lets the UI suppress stale loading indicators when
@@ -97,6 +100,7 @@ func (d *DefaultToolRenderContext) RenderTool(sty *styles.Styles, width int, opt
 type ToolRenderOpts struct {
 	ToolCall        message.ToolCall
 	Result          *message.ToolResult
+	RuntimeState    *toolruntime.State
 	Anim            *anim.Anim
 	ExpandedContent bool
 	Compact         bool
@@ -147,6 +151,7 @@ type baseToolMessageItem struct {
 	toolRenderer ToolRenderer
 	toolCall     message.ToolCall
 	result       *message.ToolResult
+	runtimeState *toolruntime.State
 	messageID    string
 	status       ToolStatus
 	// we use this so we can efficiently cache
@@ -227,6 +232,8 @@ func NewToolMessageItem(
 		item = NewBashToolMessageItem(sty, toolCall, result, canceled)
 	case tools.JobOutputToolName:
 		item = NewJobOutputToolMessageItem(sty, toolCall, result, canceled)
+	case tools.JobWaitToolName:
+		item = NewJobWaitToolMessageItem(sty, toolCall, result, canceled)
 	case tools.JobKillToolName:
 		item = NewJobKillToolMessageItem(sty, toolCall, result, canceled)
 	case tools.ViewToolName:
@@ -328,6 +335,7 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 		content = t.toolRenderer.RenderTool(t.sty, toolItemWidth, &ToolRenderOpts{
 			ToolCall:        t.toolCall,
 			Result:          t.result,
+			RuntimeState:    t.runtimeState,
 			Anim:            t.anim,
 			ExpandedContent: t.expandedContent,
 			Compact:         t.isCompact,
@@ -395,6 +403,21 @@ func (t *baseToolMessageItem) SetStatus(status ToolStatus) {
 // Status returns the current tool status.
 func (t *baseToolMessageItem) Status() ToolStatus {
 	return t.status
+}
+
+func (t *baseToolMessageItem) SetRuntimeState(state *toolruntime.State) {
+	if state == nil {
+		t.runtimeState = nil
+		t.clearCache()
+		return
+	}
+	copyState := *state
+	t.runtimeState = &copyState
+	t.clearCache()
+}
+
+func (t *baseToolMessageItem) RuntimeState() *toolruntime.State {
+	return t.runtimeState
 }
 
 // computeStatus computes the effective status considering the result.
@@ -1402,6 +1425,8 @@ func prettifyToolName(name string) string {
 		return "Bash"
 	case tools.JobOutputToolName:
 		return "Job: Output"
+	case tools.JobWaitToolName:
+		return "Job: Wait"
 	case tools.JobKillToolName:
 		return "Job: Kill"
 	case tools.DownloadToolName:

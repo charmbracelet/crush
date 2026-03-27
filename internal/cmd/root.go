@@ -210,7 +210,10 @@ func renderSessionResumeHint(sessionID string) string {
 	return fmt.Sprintf(
 		"%s\n%s\n\n",
 		headerStyle.Render("CONTINUE"),
-		textStyle.Render(fmt.Sprintf("Resume this session later with:\ncrush --session %s", shortID)),
+		textStyle.Render(fmt.Sprintf(
+			"Resume this session later with:\ncrush --session %s\n\nOr alternatively for the last session:\ncrush --continue (or -C)",
+			shortID,
+		)),
 	)
 }
 

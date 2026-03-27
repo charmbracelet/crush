@@ -153,7 +153,7 @@ func bashDescription(attribution *config.Attribution, modelName string, bannedCo
 		Attribution:     *attribution,
 		ModelName:       modelName,
 	}); err != nil {
-		// this should never happen.
+		// This should never happen.
 		panic("failed to execute bash description template: " + err.Error())
 	}
 	return out.String()

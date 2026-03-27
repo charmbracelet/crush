@@ -107,18 +107,18 @@ func TestBashTool_CustomBannedCommands(t *testing.T) {
 	permissions := &mockBashPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
 	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
 
-	// Create a tool with custom banned commands
+	// Create a tool with custom banned commands.
 	tool := NewBashTool(permissions, workingDir, attribution, "test-model", []string{"ls", "whoami"})
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
 
-	// Running "ls" should fail
+	// Running "ls" should fail.
 	resp := runBashTool(t, tool, ctx, BashParams{
 		Command: "ls",
 	})
 	require.False(t, resp.IsError)
 	require.Contains(t, resp.Content, "not allowed")
 
-	// Running "echo" should succeed (it's not in our custom list)
+	// Running "echo" should succeed (it's not in our custom list).
 	resp = runBashTool(t, tool, ctx, BashParams{
 		Command: "echo hello",
 	})

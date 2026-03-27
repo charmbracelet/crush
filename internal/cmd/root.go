@@ -22,6 +22,7 @@ import (
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/projects"
+	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	ui "github.com/charmbracelet/crush/internal/ui/model"
 	"github.com/charmbracelet/crush/internal/version"
@@ -194,6 +195,7 @@ func renderSessionResumeHint(sessionID string) string {
 	if sessionID == "" {
 		return ""
 	}
+	shortID := session.HashID(sessionID)[:7]
 
 	headerStyle := lipgloss.NewStyle().
 		Foreground(charmtone.Butter).
@@ -208,7 +210,7 @@ func renderSessionResumeHint(sessionID string) string {
 	return fmt.Sprintf(
 		"%s\n%s\n\n",
 		headerStyle.Render("CONTINUE"),
-		textStyle.Render(fmt.Sprintf("Resume this session later with:\ncrush --session %s", sessionID)),
+		textStyle.Render(fmt.Sprintf("Resume this session later with:\ncrush --session %s", shortID)),
 	)
 }
 

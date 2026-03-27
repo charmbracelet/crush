@@ -784,6 +784,19 @@ Or by setting the following in your config:
 Crush also respects the `DO_NOT_TRACK` convention which can be enabled via
 `export DO_NOT_TRACK=1`.
 
+## Q&A
+
+### Why is clipboard copy and paste not working?
+
+Installing an extra tool might be needed on Unix-like environments.
+
+| Environment         | Tool                     |
+| ------------------- | ------------------------ |
+| Windows             | Native support           |
+| macOS               | Native support           |
+| Linux/BSD + Wayland | `wl-copy` and `wl-paste` |
+| Linux/BSD + X11     | `xclip` or `xsel`        |
+
 ## Contributing
 
 See the [contributing guide](https://github.com/charmbracelet/crush?tab=contributing-ov-file#contributing).

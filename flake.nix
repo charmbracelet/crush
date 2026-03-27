@@ -21,7 +21,7 @@
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
             # Go toolchain
-            go_1_25
+            go_1_26
 
             # Development tools
             gopls # Go language server
@@ -33,12 +33,13 @@
             # Additional tools
             git # Version control
             gh # GitHub CLI
+            svu # Semantic version utility
+            sqlc # SQL code generator
           ];
 
           shellHook = ''
             # Set Go environment variables
             export CGO_ENABLED=0
-            export GOEXPERIMENT=greenteagc
           '';
         };
       }

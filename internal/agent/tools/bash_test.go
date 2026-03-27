@@ -82,7 +82,7 @@ func TestBashTool_CustomAutoBackgroundThreshold(t *testing.T) {
 func newBashToolForTest(workingDir string) fantasy.AgentTool {
 	permissions := &mockBashPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
 	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
-	return NewBashTool(permissions, workingDir, attribution, "test-model")
+	return NewBashTool(permissions, workingDir, attribution, "test-model", nil)
 }
 
 func runBashTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, params BashParams) fantasy.ToolResponse {
@@ -100,4 +100,28 @@ func runBashTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, para
 	resp, err := tool.Run(ctx, call)
 	require.NoError(t, err)
 	return resp
+}
+
+func TestBashTool_CustomBannedCommands(t *testing.T) {
+	workingDir := t.TempDir()
+	permissions := &mockBashPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
+	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
+
+	// Create a tool with custom banned commands
+	tool := NewBashTool(permissions, workingDir, attribution, "test-model", []string{"ls", "whoami"})
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	// Running "ls" should fail
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Command: "ls",
+	})
+	require.False(t, resp.IsError)
+	require.Contains(t, resp.Content, "not allowed")
+
+	// Running "echo" should succeed (it's not in our custom list)
+	resp = runBashTool(t, tool, ctx, BashParams{
+		Command: "echo hello",
+	})
+	require.False(t, resp.IsError)
+	require.Contains(t, resp.Content, "hello")
 }

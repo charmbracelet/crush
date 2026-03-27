@@ -84,7 +84,12 @@ type App struct {
 func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, error) {
 	q := db.New(conn)
 	cfg := store.Config()
-	sessions := session.NewService(q, conn, session.CollaborationMode(cfg.Options.PreferredCollaborationMode))
+	sessions := session.NewService(q, conn, session.CollaborationModeDefault)
+	preferredPermissionMode := session.NormalizePermissionMode(cfg.Options.PreferredPermissionMode)
+	if skip := cfg.Permissions != nil && cfg.Permissions.SkipRequests; skip {
+		preferredPermissionMode = session.PermissionModeYolo
+	}
+	sessions.SetDefaultPermissionMode(preferredPermissionMode)
 	messages := message.NewService(q)
 	files := history.NewService(q, conn)
 	skipPermissionsRequests := cfg.Permissions != nil && cfg.Permissions.SkipRequests
@@ -92,7 +97,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 	if cfg.Permissions != nil && cfg.Permissions.AllowedTools != nil {
 		allowedTools = cfg.Permissions.AllowedTools
 	}
-	basePermissions := permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools)
+	basePermissions := permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, nil)
 
 	var app *App
 	app = &App{
@@ -109,7 +114,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 				return nil
 			}
 			return classifier
-		}, store.WorkingDir(), cfg.Permissions != nil && cfg.Permissions.FailClosedOnClassifierError),
+		}, store.WorkingDir(), cfg.Permissions != nil && cfg.Permissions.FailClosedOnClassifierError, allowedTools),
 		FileTracker: filetracker.NewService(q),
 		ToolRuntime: toolruntime.NewService(),
 		LSPManager:  lsp.NewManager(store),

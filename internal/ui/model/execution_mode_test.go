@@ -17,13 +17,13 @@ import (
 func TestCurrentExecutionModeDefaultsToAuto(t *testing.T) {
 	ui := testExecutionModeUI(t, `{"options":{"disable_provider_auto_update":true},"tools":{}}`)
 	require.Equal(t, executionModeAuto, ui.currentExecutionMode())
-	require.Equal(t, "auto", ui.com.Config().Options.PreferredCollaborationMode)
+	require.Equal(t, "auto", ui.com.Config().Options.PreferredPermissionMode)
 }
 
 func TestCycleExecutionModeCyclesAskAutoYolo(t *testing.T) {
 	ui := testExecutionModeUI(t, `{"options":{"disable_provider_auto_update":true},"tools":{}}`)
 
-	require.NoError(t, ui.com.Store().SetPreferredCollaborationMode(config.ScopeGlobal, "default"))
+	require.NoError(t, ui.com.Store().SetPreferredPermissionMode(config.ScopeGlobal, "default"))
 	require.Equal(t, executionModeAsk, ui.currentExecutionMode())
 
 	cmd := ui.cycleExecutionMode()
@@ -32,15 +32,15 @@ func TestCycleExecutionModeCyclesAskAutoYolo(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, executionModeAuto, ui.currentExecutionMode())
 	require.False(t, ui.com.App.Permissions.SkipRequests())
-	require.Equal(t, "auto", ui.com.Config().Options.PreferredCollaborationMode)
+	require.Equal(t, "auto", ui.com.Config().Options.PreferredPermissionMode)
 
 	cmd = ui.cycleExecutionMode()
 	require.NotNil(t, cmd)
 	_, ok = cmd().(executionModeChangedMsg)
 	require.True(t, ok)
 	require.Equal(t, executionModeYolo, ui.currentExecutionMode())
-	require.True(t, ui.com.App.Permissions.SkipRequests())
-	require.Equal(t, "auto", ui.com.Config().Options.PreferredCollaborationMode)
+	require.False(t, ui.com.App.Permissions.SkipRequests())
+	require.Equal(t, "yolo", ui.com.Config().Options.PreferredPermissionMode)
 
 	cmd = ui.cycleExecutionMode()
 	require.NotNil(t, cmd)
@@ -48,7 +48,7 @@ func TestCycleExecutionModeCyclesAskAutoYolo(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, executionModeAsk, ui.currentExecutionMode())
 	require.False(t, ui.com.App.Permissions.SkipRequests())
-	require.Equal(t, "default", ui.com.Config().Options.PreferredCollaborationMode)
+	require.Equal(t, "default", ui.com.Config().Options.PreferredPermissionMode)
 }
 
 func testExecutionModeUI(t *testing.T, configContent string) *UI {
@@ -76,9 +76,11 @@ func testExecutionModeUI(t *testing.T, configContent string) *UI {
 		_ = conn.Close()
 	})
 
-	application, err := app.New(context.Background(), conn, store)
+	appCtx, cancel := context.WithCancel(context.Background())
+	application, err := app.New(appCtx, conn, store)
 	require.NoError(t, err)
 	t.Cleanup(func() {
+		cancel()
 		application.Shutdown()
 		require.NoError(t, log.ResetForTesting())
 	})

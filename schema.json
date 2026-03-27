@@ -3,6 +3,67 @@
   "$id": "https://github.com/charmbracelet/crush/internal/config/config",
   "$ref": "#/$defs/Config",
   "$defs": {
+    "Agent": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "primary",
+            "subagent",
+            "all"
+          ],
+          "description": "Where this agent can run",
+          "default": "all"
+        },
+        "disabled": {
+          "type": "boolean"
+        },
+        "model": {
+          "type": "string",
+          "enum": [
+            "large",
+            "small"
+          ],
+          "description": "The model type to use for this agent",
+          "default": "large"
+        },
+        "allowed_tools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "allowed_mcp": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "object"
+        },
+        "context_paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "model"
+      ]
+    },
     "Attribution": {
       "properties": {
         "trailer_style": {
@@ -24,6 +85,33 @@
           "type": "boolean",
           "description": "Add Generated with Crush line to commit messages and issues and PRs",
           "default": true
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "AutoMode": {
+      "properties": {
+        "environment": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Additional environment facts injected into Auto Mode classifier prompts"
+        },
+        "block_rules": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Additional block rules for Auto Mode guards"
+        },
+        "allow_exceptions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Additional allow-list exceptions for Auto Mode guards"
         }
       },
       "additionalProperties": false,
@@ -88,10 +176,7 @@
           "description": "Model configurations for different model types"
         },
         "providers": {
-          "additionalProperties": {
-            "$ref": "#/$defs/ProviderConfig"
-          },
-          "type": "object",
+          "$ref": "#/$defs/Map[string,github.com/charmbracelet/crush/internal/config.ProviderConfig]",
           "description": "AI provider configurations"
         },
         "mcp": {
@@ -120,6 +205,20 @@
           },
           "type": "array",
           "description": "Tool execution hooks (PreToolUse)"
+        },
+        "plugins": {
+          "items": {
+            "$ref": "#/$defs/PluginConfig"
+          },
+          "type": "array",
+          "description": "External command plugins for chat or tool lifecycle customization"
+        },
+        "agents": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Agent"
+          },
+          "type": "object",
+          "description": "Named agent configurations"
         }
       },
       "additionalProperties": false,
@@ -454,88 +553,8 @@
       },
       "type": "object"
     },
-    "Model": {
-      "properties": {
-        "id": {
-          "type": "string"
-        },
-        "name": {
-          "type": "string"
-        },
-        "cost_per_1m_in": {
-          "type": "number"
-        },
-        "cost_per_1m_out": {
-          "type": "number"
-        },
-        "cost_per_1m_in_cached": {
-          "type": "number"
-        },
-        "cost_per_1m_out_cached": {
-          "type": "number"
-        },
-        "context_window": {
-          "type": "integer"
-        },
-        "default_max_tokens": {
-          "type": "integer"
-        },
-        "can_reason": {
-          "type": "boolean"
-        },
-        "reasoning_levels": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "default_reasoning_effort": {
-          "type": "string"
-        },
-        "supports_attachments": {
-          "type": "boolean"
-        },
-        "options": {
-          "$ref": "#/$defs/ModelOptions"
-        }
-      },
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "id",
-        "name",
-        "cost_per_1m_in",
-        "cost_per_1m_out",
-        "cost_per_1m_in_cached",
-        "cost_per_1m_out_cached",
-        "context_window",
-        "default_max_tokens",
-        "can_reason",
-        "supports_attachments",
-        "options"
-      ]
-    },
-    "ModelOptions": {
-      "properties": {
-        "temperature": {
-          "type": "number"
-        },
-        "top_p": {
-          "type": "number"
-        },
-        "top_k": {
-          "type": "integer"
-        },
-        "frequency_penalty": {
-          "type": "number"
-        },
-        "presence_penalty": {
-          "type": "number"
-        },
-        "provider_options": {
-          "type": "object"
-        }
-      },
+    "Map[string,github.com/charmbracelet/crush/internal/config.ProviderConfig]": {
+      "properties": {},
       "additionalProperties": false,
       "type": "object"
     },
@@ -567,6 +586,16 @@
           "$ref": "#/$defs/TUIOptions",
           "description": "Terminal user interface options"
         },
+        "preferred_permission_mode": {
+          "type": "string",
+          "enum": [
+            "default",
+            "auto",
+            "yolo"
+          ],
+          "description": "Default interactive permission mode for new sessions",
+          "default": "auto"
+        },
         "debug": {
           "type": "boolean",
           "description": "Enable debug logging",
@@ -584,7 +613,7 @@
         },
         "data_directory": {
           "type": "string",
-          "description": "Directory for storing application data (relative to working directory)",
+          "description": "Directory for storing project-scoped application data (defaults to .crush in the working directory; falls back to a safe global workspace path when startup cwd is unsafe)",
           "default": ".crush",
           "examples": [
             ".crush"
@@ -662,103 +691,94 @@
           },
           "type": "array",
           "description": "List of tools that don't require permission prompts"
+        },
+        "fail_closed_on_classifier_error": {
+          "type": "boolean",
+          "description": "Block permission-requiring actions when Auto Mode permission classification is unavailable instead of falling back to manual confirmation",
+          "default": false
+        },
+        "auto_mode": {
+          "$ref": "#/$defs/AutoMode",
+          "description": "Auto Mode policy customization"
         }
       },
       "additionalProperties": false,
       "type": "object"
     },
-    "ProviderConfig": {
+    "PluginConfig": {
       "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique identifier for the provider",
-          "examples": [
-            "openai"
-          ]
-        },
         "name": {
           "type": "string",
-          "description": "Human-readable name for the provider",
+          "description": "Unique plugin name",
           "examples": [
-            "OpenAI"
-          ]
-        },
-        "base_url": {
-          "type": "string",
-          "format": "uri",
-          "description": "Base URL for the provider's API",
-          "examples": [
-            "https://api.openai.com/v1"
+            "morph_compact"
           ]
         },
         "type": {
           "type": "string",
           "enum": [
-            "openai",
-            "openai-compat",
-            "anthropic",
-            "gemini",
-            "azure",
-            "vertexai"
+            "command"
           ],
-          "description": "Provider type that determines the API format",
-          "default": "openai"
+          "description": "Plugin transport type",
+          "default": "command"
         },
-        "api_key": {
+        "mode": {
           "type": "string",
-          "description": "API key for authentication with the provider",
+          "enum": [
+            "transient"
+          ],
+          "description": "transient spawns a new process per call; persistent reuses a long-running process over stdio",
+          "default": "transient"
+        },
+        "command": {
+          "type": "string",
+          "description": "Command used to invoke the external plugin",
           "examples": [
-            "$OPENAI_API_KEY"
+            "node"
           ]
         },
-        "oauth": {
-          "$ref": "#/$defs/Token",
-          "description": "OAuth2 token for authentication with the provider"
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Arguments passed to the plugin command"
         },
-        "disable": {
-          "type": "boolean",
-          "description": "Whether this provider is disabled",
-          "default": false
-        },
-        "system_prompt_prefix": {
-          "type": "string",
-          "description": "Custom prefix to add to system prompts for this provider"
-        },
-        "extra_headers": {
+        "env": {
           "additionalProperties": {
             "type": "string"
           },
           "type": "object",
-          "description": "Additional HTTP headers to send with requests"
+          "description": "Environment variables passed to the plugin command"
         },
-        "extra_body": {
-          "type": "object",
-          "description": "Additional fields to include in request bodies"
-        },
-        "use_copilot_client": {
-          "type": "boolean",
-          "description": "Use the GitHub Copilot OAuth HTTP client for this provider (openai-compat",
-          "default": false
-        },
-        "provider_options": {
-          "type": "object",
-          "description": "Additional provider-specific options for this provider"
-        },
-        "copilot_service": {
-          "type": "boolean",
-          "description": "Enable GitHub Copilot billing rules with X-Initiator header. When true",
-          "default": false
-        },
-        "models": {
+        "hooks": {
           "items": {
-            "$ref": "#/$defs/Model"
+            "type": "string",
+            "examples": [
+              "[\"chat_messages_transform\""
+            ]
           },
           "type": "array",
-          "description": "List of models available from this provider"
+          "description": "Enabled plugin hooks"
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "description": "Timeout in milliseconds for each plugin invocation",
+          "examples": [
+            60000
+          ]
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Working directory for the plugin command"
         }
       },
       "additionalProperties": false,
-      "type": "object"
+      "type": "object",
+      "required": [
+        "name",
+        "command"
+      ]
     },
     "SelectedModel": {
       "properties": {
@@ -775,19 +795,6 @@
           "examples": [
             "openai"
           ]
-        },
-        "reasoning_effort": {
-          "type": "string",
-          "enum": [
-            "low",
-            "medium",
-            "high"
-          ],
-          "description": "Reasoning effort level for OpenAI models that support it"
-        },
-        "think": {
-          "type": "boolean",
-          "description": "Enable thinking mode for Anthropic models that support reasoning"
         },
         "max_tokens": {
           "type": "integer",
@@ -827,9 +834,22 @@
           "type": "number",
           "description": "Presence penalty to increase topic diversity"
         },
+        "reasoning_effort": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "description": "Deprecated: Use model's default_reasoning_effort in provider config instead"
+        },
+        "think": {
+          "type": "boolean",
+          "description": "Enable thinking/reasoning mode for models that support it (applies to all providers)"
+        },
         "provider_options": {
           "type": "object",
-          "description": "Additional provider-specific options for the model"
+          "description": "Deprecated: Use model's options.provider_options in provider config instead"
         }
       },
       "additionalProperties": false,
@@ -897,8 +917,7 @@
     "ToolGrep": {
       "properties": {
         "timeout": {
-          "type": "integer",
-          "description": "Timeout for the grep tool call"
+          "type": "integer"
         }
       },
       "additionalProperties": false,

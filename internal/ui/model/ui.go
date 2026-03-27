@@ -1611,18 +1611,6 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 
 	// Command dialog messages.
-	case dialog.ActionToggleYoloMode:
-		yolo := !m.com.App.Permissions.SkipRequests()
-		m.com.App.Permissions.SetSkipRequests(yolo)
-		m.setEditorPrompt(yolo)
-		// Persist the YOLO mode setting to config asynchronously.
-		cmds = append(cmds, func() tea.Msg {
-			if err := m.com.Store().SetSkipRequests(config.ScopeGlobal, yolo); err != nil {
-				slog.Error("Failed to persist yolo mode setting", "error", err)
-			}
-			return nil
-		})
-		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionTogglePlanMode:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before changing Plan Mode..."))
@@ -1654,53 +1642,19 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleAutoMode:
 		if m.isAgentBusy() {
-			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before changing Auto Mode..."))
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before changing execution mode..."))
 			break
 		}
-		if msg.SessionID == "" {
-			targetMode := executionModeAsk
-			if msg.NextMode == session.CollaborationModeAuto {
-				targetMode = executionModeAuto
-			}
-			if cmd := m.setExecutionMode(targetMode); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-			m.dialog.CloseDialog(dialog.CommandsID)
-			break
+		targetMode := executionModeAsk
+		switch msg.NextMode {
+		case session.PermissionModeAuto:
+			targetMode = executionModeAuto
+		case session.PermissionModeYolo:
+			targetMode = executionModeYolo
 		}
-		if cfg := m.com.Config(); cfg != nil && cfg.Options != nil {
-			cfg.Options.PreferredCollaborationMode = string(msg.NextMode)
+		if cmd := m.setExecutionMode(targetMode); cmd != nil {
+			cmds = append(cmds, cmd)
 		}
-		if m.session != nil && (msg.SessionID == "" || m.session.ID == msg.SessionID) {
-			m.session.CollaborationMode = msg.NextMode
-		}
-		m.refreshEditorPlaceholder()
-		cmds = append(cmds, func() tea.Msg {
-			ctx := context.Background()
-			sessionID := msg.SessionID
-			if sessionID == "" {
-				if msg.NextMode != session.CollaborationModeAuto {
-					return util.ReportError(errors.New("cannot exit Auto Mode without an active session"))()
-				}
-				newSession, err := m.com.App.Sessions.Create(ctx, "New Session")
-				if err != nil {
-					return util.ReportError(err)()
-				}
-				sessionID = newSession.ID
-			}
-			_, err := m.com.App.Sessions.UpdateCollaborationMode(ctx, sessionID, msg.NextMode)
-			if err != nil {
-				return util.ReportError(err)()
-			}
-			if err := m.com.Store().SetPreferredCollaborationMode(config.ScopeGlobal, string(msg.NextMode)); err != nil {
-				return util.ReportError(err)()
-			}
-			status := "Auto Mode disabled"
-			if msg.NextMode == session.CollaborationModeAuto {
-				status = "Auto Mode enabled"
-			}
-			return planModeChangedMsg{SessionID: sessionID, Status: status}
-		})
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionExecuteProposedPlan:
 		if m.isAgentBusy() {
@@ -1980,7 +1934,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		case dialog.PermissionAllow:
 			m.com.App.Permissions.Grant(msg.Permission)
 		case dialog.PermissionAllowForSession:
-			m.com.App.Permissions.GrantPersistent(msg.Permission)
+			if msg.Permission.AutoReview != nil {
+				m.com.App.Permissions.Grant(msg.Permission)
+			} else {
+				m.com.App.Permissions.GrantPersistent(msg.Permission)
+			}
 		case dialog.PermissionDeny:
 			m.com.App.Permissions.Deny(msg.Permission)
 		}
@@ -2235,8 +2193,11 @@ func (m *UI) preferredExecutionMode() executionMode {
 	if cfg == nil || cfg.Options == nil {
 		return executionModeAuto
 	}
-	if session.NormalizeInteractiveCollaborationMode(cfg.Options.PreferredCollaborationMode) == session.CollaborationModeDefault {
+	switch session.NormalizePermissionMode(cfg.Options.PreferredPermissionMode) {
+	case session.PermissionModeDefault:
 		return executionModeAsk
+	case session.PermissionModeYolo:
+		return executionModeYolo
 	}
 	return executionModeAuto
 }
@@ -2245,11 +2206,15 @@ func (m *UI) currentExecutionMode() executionMode {
 	if m.com != nil && m.com.App != nil && m.com.App.Permissions.SkipRequests() {
 		return executionModeYolo
 	}
-	if m.session != nil && m.session.CollaborationMode == session.CollaborationModeAuto {
-		return executionModeAuto
-	}
 	if m.session != nil {
-		return executionModeAsk
+		switch m.session.PermissionMode {
+		case session.PermissionModeAuto:
+			return executionModeAuto
+		case session.PermissionModeYolo:
+			return executionModeYolo
+		default:
+			return executionModeAsk
+		}
 	}
 	return m.preferredExecutionMode()
 }
@@ -2300,28 +2265,27 @@ func (m *UI) setExecutionMode(mode executionMode) tea.Cmd {
 	}
 
 	status := "Ask mode enabled"
-	preferredMode := session.CollaborationModeDefault
-	enableYolo := false
+	preferredMode := session.PermissionModeDefault
 
 	switch mode {
 	case executionModeAuto:
 		status = "Auto Mode enabled"
-		preferredMode = session.CollaborationModeAuto
+		preferredMode = session.PermissionModeAuto
 	case executionModeYolo:
 		status = "Yolo mode enabled"
-		enableYolo = true
+		preferredMode = session.PermissionModeYolo
 	}
 
-	m.com.App.Permissions.SetSkipRequests(enableYolo)
-	m.setEditorPrompt(enableYolo)
+	if preferredMode != session.PermissionModeYolo {
+		m.com.App.Permissions.SetSkipRequests(false)
+	}
+	m.setEditorPrompt(preferredMode == session.PermissionModeYolo)
 
-	if !enableYolo {
-		if cfg := m.com.Config(); cfg != nil && cfg.Options != nil {
-			cfg.Options.PreferredCollaborationMode = string(preferredMode)
-		}
-		if m.session != nil {
-			m.session.CollaborationMode = preferredMode
-		}
+	if cfg := m.com.Config(); cfg != nil && cfg.Options != nil {
+		cfg.Options.PreferredPermissionMode = string(preferredMode)
+	}
+	if m.session != nil {
+		m.session.PermissionMode = preferredMode
 	}
 	m.refreshEditorPlaceholder()
 
@@ -2331,17 +2295,20 @@ func (m *UI) setExecutionMode(mode executionMode) tea.Cmd {
 	}
 
 	return func() tea.Msg {
-		if err := m.com.Store().SetSkipRequests(config.ScopeGlobal, enableYolo); err != nil {
+		if preferredMode != session.PermissionModeYolo {
+			if err := m.com.Store().SetSkipRequests(config.ScopeGlobal, false); err != nil {
+				return util.ReportError(err)()
+			}
+		}
+		if err := m.com.Store().SetPreferredPermissionMode(config.ScopeGlobal, string(preferredMode)); err != nil {
 			return util.ReportError(err)()
 		}
-		if enableYolo {
-			return executionModeChangedMsg{Status: status}
-		}
-		if err := m.com.Store().SetPreferredCollaborationMode(config.ScopeGlobal, string(preferredMode)); err != nil {
-			return util.ReportError(err)()
-		}
+		m.com.App.Sessions.SetDefaultPermissionMode(preferredMode)
 		if sessionID != "" {
-			if _, err := m.com.App.Sessions.UpdateCollaborationMode(context.Background(), sessionID, preferredMode); err != nil {
+			if preferredMode == session.PermissionModeAuto {
+				m.com.App.Permissions.ClearPersistentPermissions(sessionID)
+			}
+			if _, err := m.com.App.Sessions.UpdatePermissionMode(context.Background(), sessionID, preferredMode); err != nil {
 				return util.ReportError(err)()
 			}
 		}
@@ -4040,7 +4007,7 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 	}
 
 	var sessionID string
-	mode := session.NormalizeInteractiveCollaborationMode(m.com.Config().Options.PreferredCollaborationMode)
+	mode := session.CollaborationModeDefault
 	hasSession := m.session != nil
 	if hasSession {
 		sessionID = m.session.ID
@@ -4050,7 +4017,11 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 	hasQueue := m.promptQueue > 0
 	queuePaused := m.queuePaused
 
-	commands, err := dialog.NewCommands(m.com, sessionID, hasSession, hasTodos, hasQueue, queuePaused, mode, m.latestProposedPlan, m.customCommands, m.mcpPrompts)
+	permissionMode := session.PermissionModeDefault
+	if m.session != nil {
+		permissionMode = m.session.PermissionMode
+	}
+	commands, err := dialog.NewCommands(m.com, sessionID, hasSession, hasTodos, hasQueue, queuePaused, mode, permissionMode, m.latestProposedPlan, m.customCommands, m.mcpPrompts)
 	if err != nil {
 		return util.ReportError(err)
 	}

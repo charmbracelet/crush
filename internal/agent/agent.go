@@ -138,6 +138,7 @@ type sessionAgent struct {
 	isSubAgent           bool
 	sessions             session.Service
 	messages             message.Service
+	reviewToolResult     func(context.Context, string, message.ToolResult, session.PermissionMode) (message.ToolResult, error)
 	disableAutoSummarize bool
 	isYolo               bool
 	notify               pubsub.Publisher[notify.Notification]
@@ -161,6 +162,7 @@ type SessionAgentOptions struct {
 	IsYolo               bool
 	Sessions             session.Service
 	Messages             message.Service
+	ReviewToolResult     func(context.Context, string, message.ToolResult, session.PermissionMode) (message.ToolResult, error)
 	Tools                []fantasy.AgentTool
 	Notify               pubsub.Publisher[notify.Notification]
 }
@@ -176,6 +178,7 @@ type sessionAgentRuntimeConfig struct {
 	SystemPrompt       *string
 	SystemPromptPrefix *string
 	CollaborationMode  session.CollaborationMode
+	PermissionMode     session.PermissionMode
 	AllowedToolNames   []string
 }
 
@@ -199,6 +202,7 @@ func NewSessionAgent(
 		isSubAgent:           opts.IsSubAgent,
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
+		reviewToolResult:     opts.ReviewToolResult,
 		disableAutoSummarize: opts.DisableAutoSummarize,
 		tools:                csync.NewSliceFrom(opts.Tools),
 		isYolo:               opts.IsYolo,
@@ -576,6 +580,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			},
 			OnToolResult: func(result fantasy.ToolResultContent) error {
 				toolResult := a.convertToToolResult(result)
+				if runtimeConfig != nil {
+					toolResult = a.applyToolResultReview(genCtx, currentAssistant.SessionID, toolResult, runtimeConfig.PermissionMode)
+				}
 				if truncatedResult, truncated := a.truncateToolResult(currentAssistant.SessionID, toolResult); truncated {
 					toolResult = truncatedResult
 				}
@@ -1171,6 +1178,18 @@ func truncateMessagesToFit(msgs []fantasy.Message, maxTokens int64) []fantasy.Me
 		"new_tokens", totalTokens)
 
 	return msgs[startIdx:]
+}
+
+func (a *sessionAgent) applyToolResultReview(ctx context.Context, sessionID string, toolResult message.ToolResult, permissionMode session.PermissionMode) message.ToolResult {
+	if a.reviewToolResult == nil {
+		return toolResult
+	}
+
+	reviewed, err := a.reviewToolResult(ctx, sessionID, toolResult, permissionMode)
+	if err != nil {
+		slog.Warn("Failed to review tool result for Auto Mode", "error", err, "tool_name", toolResult.Name, "session_id", sessionID)
+	}
+	return reviewed
 }
 
 // estimateSingleMessageTokens estimates tokens for a single fantasy.Message.

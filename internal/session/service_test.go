@@ -44,7 +44,7 @@ func TestCreateHandoffSessionStoresMetadata(t *testing.T) {
 	require.Equal(t, handoff, loaded)
 }
 
-func TestCreateUsesAutoModeByDefault(t *testing.T) {
+func TestCreateUsesDefaultCollaborationModeAndAutoPermissionModeByDefault(t *testing.T) {
 	t.Parallel()
 
 	conn, err := db.Connect(context.Background(), t.TempDir())
@@ -58,7 +58,8 @@ func TestCreateUsesAutoModeByDefault(t *testing.T) {
 
 	created, err := svc.Create(context.Background(), "Auto by default")
 	require.NoError(t, err)
-	require.Equal(t, CollaborationModeAuto, created.CollaborationMode)
+	require.Equal(t, CollaborationModeDefault, created.CollaborationMode)
+	require.Equal(t, PermissionModeAuto, created.PermissionMode)
 }
 
 func TestCreateCanUseExplicitDefaultMode(t *testing.T) {
@@ -76,6 +77,66 @@ func TestCreateCanUseExplicitDefaultMode(t *testing.T) {
 	created, err := svc.Create(context.Background(), "Manual mode")
 	require.NoError(t, err)
 	require.Equal(t, CollaborationModeDefault, created.CollaborationMode)
+	require.Equal(t, PermissionModeAuto, created.PermissionMode)
+}
+
+func TestSetDefaultPermissionModeAffectsNewSessions(t *testing.T) {
+	t.Parallel()
+
+	conn, err := db.Connect(context.Background(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = conn.Close()
+	})
+
+	q := db.New(conn)
+	svc := NewService(q, conn)
+
+	svc.SetDefaultPermissionMode(PermissionModeYolo)
+
+	created, err := svc.Create(context.Background(), "Yolo default")
+	require.NoError(t, err)
+	require.Equal(t, PermissionModeYolo, created.PermissionMode)
+
+	// Invalid mode inputs are normalized to default.
+	svc.SetDefaultPermissionMode(PermissionMode("not-a-real-mode"))
+
+	created, err = svc.Create(context.Background(), "Normalized default")
+	require.NoError(t, err)
+	require.Equal(t, PermissionModeDefault, created.PermissionMode)
+}
+
+func TestUpdatePermissionModePersistsAndNormalizes(t *testing.T) {
+	t.Parallel()
+
+	conn, err := db.Connect(context.Background(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = conn.Close()
+	})
+
+	q := db.New(conn)
+	svc := NewService(q, conn)
+
+	created, err := svc.Create(context.Background(), "Permission mode updates")
+	require.NoError(t, err)
+	require.Equal(t, PermissionModeAuto, created.PermissionMode)
+
+	updated, err := svc.UpdatePermissionMode(context.Background(), created.ID, PermissionModeYolo)
+	require.NoError(t, err)
+	require.Equal(t, PermissionModeYolo, updated.PermissionMode)
+
+	loaded, err := svc.Get(context.Background(), created.ID)
+	require.NoError(t, err)
+	require.Equal(t, PermissionModeYolo, loaded.PermissionMode)
+
+	updated, err = svc.UpdatePermissionMode(context.Background(), created.ID, PermissionMode("invalid"))
+	require.NoError(t, err)
+	require.Equal(t, PermissionModeDefault, updated.PermissionMode)
+
+	loaded, err = svc.Get(context.Background(), created.ID)
+	require.NoError(t, err)
+	require.Equal(t, PermissionModeDefault, loaded.PermissionMode)
 }
 
 func TestSavePersistsHandoffDraftUpdates(t *testing.T) {

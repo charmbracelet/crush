@@ -54,12 +54,11 @@ type (
 	ActionPauseQueue                  struct{}
 	ActionResumeQueue                 struct{}
 	ActionExternalEditor              struct{}
-	ActionToggleYoloMode              struct{}
 	ActionToggleNotifications         struct{}
 	ActionToggleTransparentBackground struct{}
 	ActionToggleAutoMode              struct {
 		SessionID string
-		NextMode  session.CollaborationMode
+		NextMode  session.PermissionMode
 	}
 	ActionTogglePlanMode struct {
 		SessionID string

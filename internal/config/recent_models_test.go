@@ -39,7 +39,7 @@ func testStoreWithPath(cfg *Config, dir string) *ConfigStore {
 	}
 }
 
-func TestSetPreferredCollaborationMode_Persists(t *testing.T) {
+func TestSetPreferredPermissionMode_Persists(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -47,13 +47,32 @@ func TestSetPreferredCollaborationMode_Persists(t *testing.T) {
 	cfg.setDefaults(dir, "")
 	store := testStoreWithPath(cfg, dir)
 
-	require.NoError(t, store.SetPreferredCollaborationMode(ScopeGlobal, "default"))
-	require.Equal(t, "default", cfg.Options.PreferredCollaborationMode)
+	require.NoError(t, store.SetPreferredPermissionMode(ScopeGlobal, "default"))
+	require.Equal(t, "default", cfg.Options.PreferredPermissionMode)
 
 	out := readConfigJSON(t, store.globalDataPath)
 	options, ok := out["options"].(map[string]any)
 	require.True(t, ok)
-	require.Equal(t, "default", options["preferred_collaboration_mode"])
+	require.Equal(t, "default", options["preferred_permission_mode"])
+}
+
+func TestSetPreferredCollaborationMode_PersistsToPreferredPermissionModeOnly(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfg := &Config{}
+	cfg.setDefaults(dir, "")
+	store := testStoreWithPath(cfg, dir)
+
+	require.NoError(t, store.SetPreferredCollaborationMode(ScopeGlobal, "yolo"))
+	require.Equal(t, "yolo", cfg.Options.PreferredPermissionMode)
+
+	out := readConfigJSON(t, store.globalDataPath)
+	options, ok := out["options"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "yolo", options["preferred_permission_mode"])
+	_, exists := options["preferred_collaboration_mode"]
+	require.False(t, exists)
 }
 
 func TestRecordRecentModel_AddsAndPersists(t *testing.T) {

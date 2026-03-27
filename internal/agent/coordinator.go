@@ -589,8 +589,11 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		IsYolo:               c.permissions.SkipRequests(),
 		Sessions:             c.sessions,
 		Messages:             c.messages,
-		Tools:                nil,
-		Notify:               c.notify,
+		ReviewToolResult: func(callCtx context.Context, sessionID string, toolResult message.ToolResult, permissionMode session.PermissionMode) (message.ToolResult, error) {
+			return c.reviewToolResultForPromptInjection(callCtx, sessionID, toolResult, permissionMode)
+		},
+		Tools:  nil,
+		Notify: c.notify,
 	})
 
 	// Only use async initialization for the primary agent (not subagents).
@@ -632,7 +635,11 @@ func (c *coordinator) refreshSessionAgentRuntimeConfig(ctx context.Context, curr
 	if err != nil {
 		return sessionAgentRuntimeConfig{}, err
 	}
-	systemPrompt = buildSystemPromptForCollaborationMode(systemPrompt, mode)
+	permissionMode, err := c.permissionModeForContext(ctx)
+	if err != nil {
+		return sessionAgentRuntimeConfig{}, err
+	}
+	systemPrompt = buildSystemPromptForModes(systemPrompt, mode, permissionMode)
 
 	toolSet, err := c.buildTools(ctx, agentCfg, mode)
 	if err != nil {
@@ -669,6 +676,7 @@ func (c *coordinator) refreshSessionAgentRuntimeConfig(ctx context.Context, curr
 		SystemPrompt:       &systemPrompt,
 		SystemPromptPrefix: &systemPromptPrefix,
 		CollaborationMode:  mode,
+		PermissionMode:     permissionMode,
 		AllowedToolNames:   allowedToolNames,
 	}, nil
 }
@@ -684,6 +692,19 @@ func (c *coordinator) collaborationModeForContext(ctx context.Context) (session.
 		return session.CollaborationModeDefault, fmt.Errorf("failed to get session collaboration mode: %w", err)
 	}
 	return sess.CollaborationMode, nil
+}
+
+func (c *coordinator) permissionModeForContext(ctx context.Context) (session.PermissionMode, error) {
+	sessionID := tools.GetSessionFromContext(ctx)
+	if sessionID == "" {
+		return session.PermissionModeDefault, nil
+	}
+
+	sess, err := c.sessions.Get(ctx, sessionID)
+	if err != nil {
+		return session.PermissionModeDefault, fmt.Errorf("failed to get session permission mode: %w", err)
+	}
+	return sess.PermissionMode, nil
 }
 
 func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, mode session.CollaborationMode) ([]fantasy.AgentTool, error) {
@@ -1460,14 +1481,32 @@ type subAgentParams struct {
 // It creates a sub-session, runs the agent with the given prompt, and propagates
 // the cost to the parent session.
 func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (fantasy.ToolResponse, error) {
+	parentSession, err := c.sessions.Get(ctx, params.SessionID)
+	if err != nil {
+		return fantasy.ToolResponse{}, fmt.Errorf("get parent session: %w", err)
+	}
+	if parentSession.PermissionMode == session.PermissionModeAuto {
+		review, reviewErr := c.reviewHandoffText(ctx, parentSession, params.SessionTitle, params.Prompt)
+		if reviewErr != nil {
+			return fantasy.NewTextErrorResponse("Auto Mode blocked subagent delegation because the handoff review failed."), nil
+		}
+		if !review.AllowAuto {
+			reason := strings.TrimSpace(review.Reason)
+			if reason == "" {
+				reason = "Auto Mode blocked subagent delegation."
+			}
+			return fantasy.NewTextErrorResponse(reason), nil
+		}
+	}
+
 	agentToolSessionID := c.sessions.CreateAgentToolSessionID(params.AgentMessageID, params.ToolCallID)
-	session, err := c.sessions.CreateTaskSession(ctx, agentToolSessionID, params.SessionID, params.SessionTitle)
+	subSession, err := c.sessions.CreateTaskSession(ctx, agentToolSessionID, params.SessionID, params.SessionTitle)
 	if err != nil {
 		return fantasy.ToolResponse{}, fmt.Errorf("create session: %w", err)
 	}
 
 	if params.SessionSetup != nil {
-		params.SessionSetup(session.ID)
+		params.SessionSetup(subSession.ID)
 	}
 
 	model := params.Agent.Model()
@@ -1488,7 +1527,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	ctx = context.WithValue(ctx, sessionAgentRuntimeConfigContextKey{}, (*sessionAgentRuntimeConfig)(nil))
 
 	result, err := params.Agent.Run(ctx, SessionAgentCall{
-		SessionID:        session.ID,
+		SessionID:        subSession.ID,
 		Prompt:           params.Prompt,
 		MaxOutputTokens:  maxTokens,
 		ProviderOptions:  getProviderOptions(model, providerCfg),
@@ -1500,21 +1539,34 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		NonInteractive:   true,
 	})
 	if err != nil {
-		slog.Error("Sub-agent run failed", "error", err, "session", session.ID, "prompt", params.Prompt)
-		if costErr := c.updateParentSessionCost(ctx, session.ID, params.SessionID); costErr != nil {
+		slog.Error("Sub-agent run failed", "error", err, "session", subSession.ID, "prompt", params.Prompt)
+		if costErr := c.updateParentSessionCost(ctx, subSession.ID, params.SessionID); costErr != nil {
 			return fantasy.ToolResponse{}, costErr
 		}
-		return fantasy.NewTextErrorResponse(c.subAgentErrorText(ctx, session.ID, err)), nil
+		return fantasy.NewTextErrorResponse(c.subAgentErrorText(ctx, subSession.ID, err)), nil
 	}
 
-	if err := c.updateParentSessionCost(ctx, session.ID, params.SessionID); err != nil {
+	if err := c.updateParentSessionCost(ctx, subSession.ID, params.SessionID); err != nil {
 		return fantasy.ToolResponse{}, err
 	}
 
-	content := c.subAgentResponseText(ctx, session.ID, result)
+	content := c.subAgentResponseText(ctx, subSession.ID, result)
 	if content == "" {
-		slog.Warn("Sub-agent returned empty response", "session", session.ID, "prompt", params.Prompt)
+		slog.Warn("Sub-agent returned empty response", "session", subSession.ID, "prompt", params.Prompt)
 		return fantasy.NewTextErrorResponse("no content in response"), nil
+	}
+	if parentSession.PermissionMode == session.PermissionModeAuto {
+		review, reviewErr := c.reviewHandoffText(ctx, parentSession, params.SessionTitle, content)
+		if reviewErr != nil {
+			return fantasy.NewTextErrorResponse("Auto Mode blocked subagent handoff because the handoff review failed."), nil
+		}
+		if !review.AllowAuto {
+			reason := strings.TrimSpace(review.Reason)
+			if reason == "" {
+				reason = "Auto Mode blocked subagent handoff."
+			}
+			return fantasy.NewTextErrorResponse(reason), nil
+		}
 	}
 
 	return fantasy.NewTextResponse(content), nil

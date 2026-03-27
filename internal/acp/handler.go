@@ -38,7 +38,6 @@ type Handler struct {
 
 	mu         sync.RWMutex
 	cancels    map[string]*cancelEntry
-	modes      map[string]string
 	sessionCWD map[string]string
 }
 
@@ -57,7 +56,6 @@ func NewHandler(app App) *Handler {
 	return &Handler{
 		app:        app,
 		cancels:    make(map[string]*cancelEntry),
-		modes:      make(map[string]string),
 		sessionCWD: make(map[string]string),
 	}
 }
@@ -555,20 +553,15 @@ func isContextError(err error) bool {
 	return false
 }
 
-func (h *Handler) setModeForSession(sessionID, mode string) {
-	h.mu.Lock()
-	h.modes[sessionID] = mode
-	h.mu.Unlock()
-}
-
 func (h *Handler) currentModeForSession(sessionID string) string {
-	h.mu.RLock()
-	mode := h.modes[sessionID]
-	h.mu.RUnlock()
-	if mode == "" {
+	if strings.TrimSpace(sessionID) == "" {
 		return "default"
 	}
-	return mode
+	sess, err := h.app.GetSessions().Get(context.Background(), sessionID)
+	if err != nil {
+		return "default"
+	}
+	return string(sess.PermissionMode)
 }
 
 func (h *Handler) setSessionCWD(sessionID, cwd string) {
@@ -631,6 +624,11 @@ func (h *Handler) buildModes(sessionID string) *SessionModeState {
 				Description: "Ask for permission when required",
 			},
 			{
+				ID:          "auto",
+				Name:        "Auto",
+				Description: "Guarded autonomy with manual fallback",
+			},
+			{
 				ID:          "yolo",
 				Name:        "YOLO",
 				Description: "Auto-approve tool permissions in this session",
@@ -644,11 +642,15 @@ func (h *Handler) handleSetMode(_ context.Context, req *Request) (any, *RPCError
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return nil, &RPCError{Code: CodeInvalidParams, Message: err.Error()}
 	}
-	if params.ModeID != "default" && params.ModeID != "yolo" {
+	if params.ModeID != "default" && params.ModeID != "auto" && params.ModeID != "yolo" {
 		return nil, &RPCError{Code: CodeInvalidParams, Message: fmt.Sprintf("invalid modeId: %s", params.ModeID)}
 	}
-	h.setModeForSession(params.SessionID, params.ModeID)
-	h.app.GetPermissions().SetSessionAutoApprove(params.SessionID, params.ModeID == "yolo")
+	if params.ModeID == "auto" {
+		h.app.GetPermissions().ClearPersistentPermissions(params.SessionID)
+	}
+	if _, err := h.app.GetSessions().UpdatePermissionMode(context.Background(), params.SessionID, session.NormalizePermissionMode(params.ModeID)); err != nil {
+		return nil, &RPCError{Code: CodeInternalError, Message: err.Error()}
+	}
 	h.sendUpdate(params.SessionID, SessionUpdate{
 		SessionUpdate: SessionUpdateCurrentModeUpdate,
 		CurrentModeID: params.ModeID,
@@ -734,6 +736,7 @@ func (h *Handler) buildConfigOptions(sessionID string) []ConfigOption {
 			CurrentValue: h.currentModeForSession(sessionID),
 			Options: []ConfigOptionVariant{
 				{Value: "default", Name: "Default", Description: "Ask for permission when required"},
+				{Value: "auto", Name: "Auto", Description: "Guarded autonomy with manual fallback"},
 				{Value: "yolo", Name: "YOLO", Description: "Auto-approve tool permissions in this session"},
 			},
 		},
@@ -791,12 +794,15 @@ func (h *Handler) handleSetConfigOption(ctx context.Context, req *Request) (any,
 	}
 
 	if params.ConfigID == "mode" {
-		if params.Value != "default" && params.Value != "yolo" {
+		if params.Value != "default" && params.Value != "auto" && params.Value != "yolo" {
 			return nil, &RPCError{Code: CodeInvalidParams, Message: fmt.Sprintf("invalid mode option value: %s", params.Value)}
 		}
-		h.setModeForSession(params.SessionID, params.Value)
-		enableYolo := params.Value == "yolo"
-		h.app.GetPermissions().SetSessionAutoApprove(params.SessionID, enableYolo)
+		if params.Value == "auto" {
+			h.app.GetPermissions().ClearPersistentPermissions(params.SessionID)
+		}
+		if _, err := h.app.GetSessions().UpdatePermissionMode(ctx, params.SessionID, session.NormalizePermissionMode(params.Value)); err != nil {
+			return nil, &RPCError{Code: CodeInternalError, Message: err.Error()}
+		}
 
 		updated := h.buildConfigOptions(params.SessionID)
 		h.sendUpdate(params.SessionID, SessionUpdate{

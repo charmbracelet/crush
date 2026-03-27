@@ -17,6 +17,7 @@ INSERT INTO sessions (
     title,
     workspace_cwd,
     collaboration_mode,
+    permission_mode,
     kind,
     handoff_source_session_id,
     handoff_goal,
@@ -44,10 +45,11 @@ INSERT INTO sessions (
     ?,
     ?,
     ?,
+    ?,
     null,
     strftime('%s', 'now'),
     strftime('%s', 'now')
-) RETURNING id, parent_session_id, kind, title, workspace_cwd, collaboration_mode, handoff_source_session_id, handoff_goal, handoff_draft_prompt, handoff_relevant_files, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, last_prompt_tokens, last_completion_tokens
+) RETURNING id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, collaboration_mode, last_prompt_tokens, last_completion_tokens, workspace_cwd, kind, handoff_source_session_id, handoff_goal, handoff_draft_prompt, handoff_relevant_files, permission_mode
 `
 
 type CreateSessionParams struct {
@@ -56,6 +58,7 @@ type CreateSessionParams struct {
 	Title                  string         `json:"title"`
 	WorkspaceCwd           sql.NullString `json:"workspace_cwd"`
 	CollaborationMode      string         `json:"collaboration_mode"`
+	PermissionMode         string         `json:"permission_mode"`
 	Kind                   string         `json:"kind"`
 	HandoffSourceSessionID sql.NullString `json:"handoff_source_session_id"`
 	HandoffGoal            string         `json:"handoff_goal"`
@@ -74,6 +77,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		arg.Title,
 		arg.WorkspaceCwd,
 		arg.CollaborationMode,
+		arg.PermissionMode,
 		arg.Kind,
 		arg.HandoffSourceSessionID,
 		arg.HandoffGoal,
@@ -88,14 +92,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 	err := row.Scan(
 		&i.ID,
 		&i.ParentSessionID,
-		&i.Kind,
 		&i.Title,
-		&i.WorkspaceCwd,
-		&i.CollaborationMode,
-		&i.HandoffSourceSessionID,
-		&i.HandoffGoal,
-		&i.HandoffDraftPrompt,
-		&i.HandoffRelevantFiles,
 		&i.MessageCount,
 		&i.PromptTokens,
 		&i.CompletionTokens,
@@ -104,8 +101,16 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		&i.CreatedAt,
 		&i.SummaryMessageID,
 		&i.Todos,
+		&i.CollaborationMode,
 		&i.LastPromptTokens,
 		&i.LastCompletionTokens,
+		&i.WorkspaceCwd,
+		&i.Kind,
+		&i.HandoffSourceSessionID,
+		&i.HandoffGoal,
+		&i.HandoffDraftPrompt,
+		&i.HandoffRelevantFiles,
+		&i.PermissionMode,
 	)
 	return i, err
 }
@@ -121,7 +126,7 @@ func (q *Queries) DeleteSession(ctx context.Context, id string) error {
 }
 
 const getLastSession = `-- name: GetLastSession :one
-SELECT id, parent_session_id, kind, title, workspace_cwd, collaboration_mode, handoff_source_session_id, handoff_goal, handoff_draft_prompt, handoff_relevant_files, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, last_prompt_tokens, last_completion_tokens
+SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, collaboration_mode, last_prompt_tokens, last_completion_tokens, workspace_cwd, kind, handoff_source_session_id, handoff_goal, handoff_draft_prompt, handoff_relevant_files, permission_mode
 FROM sessions
 WHERE parent_session_id IS NULL
 ORDER BY updated_at DESC
@@ -134,14 +139,7 @@ func (q *Queries) GetLastSession(ctx context.Context) (Session, error) {
 	err := row.Scan(
 		&i.ID,
 		&i.ParentSessionID,
-		&i.Kind,
 		&i.Title,
-		&i.WorkspaceCwd,
-		&i.CollaborationMode,
-		&i.HandoffSourceSessionID,
-		&i.HandoffGoal,
-		&i.HandoffDraftPrompt,
-		&i.HandoffRelevantFiles,
 		&i.MessageCount,
 		&i.PromptTokens,
 		&i.CompletionTokens,
@@ -150,14 +148,22 @@ func (q *Queries) GetLastSession(ctx context.Context) (Session, error) {
 		&i.CreatedAt,
 		&i.SummaryMessageID,
 		&i.Todos,
+		&i.CollaborationMode,
 		&i.LastPromptTokens,
 		&i.LastCompletionTokens,
+		&i.WorkspaceCwd,
+		&i.Kind,
+		&i.HandoffSourceSessionID,
+		&i.HandoffGoal,
+		&i.HandoffDraftPrompt,
+		&i.HandoffRelevantFiles,
+		&i.PermissionMode,
 	)
 	return i, err
 }
 
 const getSessionByID = `-- name: GetSessionByID :one
-SELECT id, parent_session_id, kind, title, workspace_cwd, collaboration_mode, handoff_source_session_id, handoff_goal, handoff_draft_prompt, handoff_relevant_files, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, last_prompt_tokens, last_completion_tokens
+SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, collaboration_mode, last_prompt_tokens, last_completion_tokens, workspace_cwd, kind, handoff_source_session_id, handoff_goal, handoff_draft_prompt, handoff_relevant_files, permission_mode
 FROM sessions
 WHERE id = ? LIMIT 1
 `
@@ -168,14 +174,7 @@ func (q *Queries) GetSessionByID(ctx context.Context, id string) (Session, error
 	err := row.Scan(
 		&i.ID,
 		&i.ParentSessionID,
-		&i.Kind,
 		&i.Title,
-		&i.WorkspaceCwd,
-		&i.CollaborationMode,
-		&i.HandoffSourceSessionID,
-		&i.HandoffGoal,
-		&i.HandoffDraftPrompt,
-		&i.HandoffRelevantFiles,
 		&i.MessageCount,
 		&i.PromptTokens,
 		&i.CompletionTokens,
@@ -184,14 +183,22 @@ func (q *Queries) GetSessionByID(ctx context.Context, id string) (Session, error
 		&i.CreatedAt,
 		&i.SummaryMessageID,
 		&i.Todos,
+		&i.CollaborationMode,
 		&i.LastPromptTokens,
 		&i.LastCompletionTokens,
+		&i.WorkspaceCwd,
+		&i.Kind,
+		&i.HandoffSourceSessionID,
+		&i.HandoffGoal,
+		&i.HandoffDraftPrompt,
+		&i.HandoffRelevantFiles,
+		&i.PermissionMode,
 	)
 	return i, err
 }
 
 const listSessions = `-- name: ListSessions :many
-SELECT id, parent_session_id, kind, title, workspace_cwd, collaboration_mode, handoff_source_session_id, handoff_goal, handoff_draft_prompt, handoff_relevant_files, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, last_prompt_tokens, last_completion_tokens
+SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, collaboration_mode, last_prompt_tokens, last_completion_tokens, workspace_cwd, kind, handoff_source_session_id, handoff_goal, handoff_draft_prompt, handoff_relevant_files, permission_mode
 FROM sessions
 WHERE parent_session_id is NULL
 ORDER BY updated_at DESC
@@ -209,14 +216,7 @@ func (q *Queries) ListSessions(ctx context.Context) ([]Session, error) {
 		if err := rows.Scan(
 			&i.ID,
 			&i.ParentSessionID,
-			&i.Kind,
 			&i.Title,
-			&i.WorkspaceCwd,
-			&i.CollaborationMode,
-			&i.HandoffSourceSessionID,
-			&i.HandoffGoal,
-			&i.HandoffDraftPrompt,
-			&i.HandoffRelevantFiles,
 			&i.MessageCount,
 			&i.PromptTokens,
 			&i.CompletionTokens,
@@ -225,8 +225,16 @@ func (q *Queries) ListSessions(ctx context.Context) ([]Session, error) {
 			&i.CreatedAt,
 			&i.SummaryMessageID,
 			&i.Todos,
+			&i.CollaborationMode,
 			&i.LastPromptTokens,
 			&i.LastCompletionTokens,
+			&i.WorkspaceCwd,
+			&i.Kind,
+			&i.HandoffSourceSessionID,
+			&i.HandoffGoal,
+			&i.HandoffDraftPrompt,
+			&i.HandoffRelevantFiles,
+			&i.PermissionMode,
 		); err != nil {
 			return nil, err
 		}
@@ -264,6 +272,7 @@ SET
     title = ?,
     workspace_cwd = ?,
     collaboration_mode = ?,
+    permission_mode = ?,
     kind = ?,
     handoff_source_session_id = ?,
     handoff_goal = ?,
@@ -277,13 +286,14 @@ SET
     cost = ?,
     todos = ?
 WHERE id = ?
-RETURNING id, parent_session_id, kind, title, workspace_cwd, collaboration_mode, handoff_source_session_id, handoff_goal, handoff_draft_prompt, handoff_relevant_files, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, last_prompt_tokens, last_completion_tokens
+RETURNING id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, collaboration_mode, last_prompt_tokens, last_completion_tokens, workspace_cwd, kind, handoff_source_session_id, handoff_goal, handoff_draft_prompt, handoff_relevant_files, permission_mode
 `
 
 type UpdateSessionParams struct {
 	Title                  string         `json:"title"`
 	WorkspaceCwd           sql.NullString `json:"workspace_cwd"`
 	CollaborationMode      string         `json:"collaboration_mode"`
+	PermissionMode         string         `json:"permission_mode"`
 	Kind                   string         `json:"kind"`
 	HandoffSourceSessionID sql.NullString `json:"handoff_source_session_id"`
 	HandoffGoal            string         `json:"handoff_goal"`
@@ -304,6 +314,7 @@ func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) (S
 		arg.Title,
 		arg.WorkspaceCwd,
 		arg.CollaborationMode,
+		arg.PermissionMode,
 		arg.Kind,
 		arg.HandoffSourceSessionID,
 		arg.HandoffGoal,
@@ -322,14 +333,7 @@ func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) (S
 	err := row.Scan(
 		&i.ID,
 		&i.ParentSessionID,
-		&i.Kind,
 		&i.Title,
-		&i.WorkspaceCwd,
-		&i.CollaborationMode,
-		&i.HandoffSourceSessionID,
-		&i.HandoffGoal,
-		&i.HandoffDraftPrompt,
-		&i.HandoffRelevantFiles,
 		&i.MessageCount,
 		&i.PromptTokens,
 		&i.CompletionTokens,
@@ -338,8 +342,16 @@ func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) (S
 		&i.CreatedAt,
 		&i.SummaryMessageID,
 		&i.Todos,
+		&i.CollaborationMode,
 		&i.LastPromptTokens,
 		&i.LastCompletionTokens,
+		&i.WorkspaceCwd,
+		&i.Kind,
+		&i.HandoffSourceSessionID,
+		&i.HandoffGoal,
+		&i.HandoffDraftPrompt,
+		&i.HandoffRelevantFiles,
+		&i.PermissionMode,
 	)
 	return i, err
 }
@@ -348,7 +360,7 @@ const updateSessionCollaborationMode = `-- name: UpdateSessionCollaborationMode 
 UPDATE sessions
 SET collaboration_mode = ?
 WHERE id = ?
-RETURNING id, parent_session_id, kind, title, workspace_cwd, collaboration_mode, handoff_source_session_id, handoff_goal, handoff_draft_prompt, handoff_relevant_files, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, last_prompt_tokens, last_completion_tokens
+RETURNING id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, collaboration_mode, last_prompt_tokens, last_completion_tokens, workspace_cwd, kind, handoff_source_session_id, handoff_goal, handoff_draft_prompt, handoff_relevant_files, permission_mode
 `
 
 type UpdateSessionCollaborationModeParams struct {
@@ -357,22 +369,12 @@ type UpdateSessionCollaborationModeParams struct {
 }
 
 func (q *Queries) UpdateSessionCollaborationMode(ctx context.Context, arg UpdateSessionCollaborationModeParams) (Session, error) {
-	row := q.queryRow(ctx, q.updateSessionCollaborationModeStmt, updateSessionCollaborationMode,
-		arg.CollaborationMode,
-		arg.ID,
-	)
+	row := q.queryRow(ctx, q.updateSessionCollaborationModeStmt, updateSessionCollaborationMode, arg.CollaborationMode, arg.ID)
 	var i Session
 	err := row.Scan(
 		&i.ID,
 		&i.ParentSessionID,
-		&i.Kind,
 		&i.Title,
-		&i.WorkspaceCwd,
-		&i.CollaborationMode,
-		&i.HandoffSourceSessionID,
-		&i.HandoffGoal,
-		&i.HandoffDraftPrompt,
-		&i.HandoffRelevantFiles,
 		&i.MessageCount,
 		&i.PromptTokens,
 		&i.CompletionTokens,
@@ -381,8 +383,57 @@ func (q *Queries) UpdateSessionCollaborationMode(ctx context.Context, arg Update
 		&i.CreatedAt,
 		&i.SummaryMessageID,
 		&i.Todos,
+		&i.CollaborationMode,
 		&i.LastPromptTokens,
 		&i.LastCompletionTokens,
+		&i.WorkspaceCwd,
+		&i.Kind,
+		&i.HandoffSourceSessionID,
+		&i.HandoffGoal,
+		&i.HandoffDraftPrompt,
+		&i.HandoffRelevantFiles,
+		&i.PermissionMode,
+	)
+	return i, err
+}
+
+const updateSessionPermissionMode = `-- name: UpdateSessionPermissionMode :one
+UPDATE sessions
+SET permission_mode = ?
+WHERE id = ?
+RETURNING id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, collaboration_mode, last_prompt_tokens, last_completion_tokens, workspace_cwd, kind, handoff_source_session_id, handoff_goal, handoff_draft_prompt, handoff_relevant_files, permission_mode
+`
+
+type UpdateSessionPermissionModeParams struct {
+	PermissionMode string `json:"permission_mode"`
+	ID             string `json:"id"`
+}
+
+func (q *Queries) UpdateSessionPermissionMode(ctx context.Context, arg UpdateSessionPermissionModeParams) (Session, error) {
+	row := q.queryRow(ctx, q.updateSessionPermissionModeStmt, updateSessionPermissionMode, arg.PermissionMode, arg.ID)
+	var i Session
+	err := row.Scan(
+		&i.ID,
+		&i.ParentSessionID,
+		&i.Title,
+		&i.MessageCount,
+		&i.PromptTokens,
+		&i.CompletionTokens,
+		&i.Cost,
+		&i.UpdatedAt,
+		&i.CreatedAt,
+		&i.SummaryMessageID,
+		&i.Todos,
+		&i.CollaborationMode,
+		&i.LastPromptTokens,
+		&i.LastCompletionTokens,
+		&i.WorkspaceCwd,
+		&i.Kind,
+		&i.HandoffSourceSessionID,
+		&i.HandoffGoal,
+		&i.HandoffDraftPrompt,
+		&i.HandoffRelevantFiles,
+		&i.PermissionMode,
 	)
 	return i, err
 }
@@ -396,7 +447,7 @@ SET
     cost = cost + ?,
     updated_at = strftime('%s', 'now')
 WHERE id = ?
-RETURNING id, parent_session_id, kind, title, workspace_cwd, collaboration_mode, handoff_source_session_id, handoff_goal, handoff_draft_prompt, handoff_relevant_files, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, last_prompt_tokens, last_completion_tokens
+RETURNING id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, collaboration_mode, last_prompt_tokens, last_completion_tokens, workspace_cwd, kind, handoff_source_session_id, handoff_goal, handoff_draft_prompt, handoff_relevant_files, permission_mode
 `
 
 type UpdateSessionTitleAndUsageParams struct {
@@ -419,14 +470,7 @@ func (q *Queries) UpdateSessionTitleAndUsage(ctx context.Context, arg UpdateSess
 	err := row.Scan(
 		&i.ID,
 		&i.ParentSessionID,
-		&i.Kind,
 		&i.Title,
-		&i.WorkspaceCwd,
-		&i.CollaborationMode,
-		&i.HandoffSourceSessionID,
-		&i.HandoffGoal,
-		&i.HandoffDraftPrompt,
-		&i.HandoffRelevantFiles,
 		&i.MessageCount,
 		&i.PromptTokens,
 		&i.CompletionTokens,
@@ -435,8 +479,16 @@ func (q *Queries) UpdateSessionTitleAndUsage(ctx context.Context, arg UpdateSess
 		&i.CreatedAt,
 		&i.SummaryMessageID,
 		&i.Todos,
+		&i.CollaborationMode,
 		&i.LastPromptTokens,
 		&i.LastCompletionTokens,
+		&i.WorkspaceCwd,
+		&i.Kind,
+		&i.HandoffSourceSessionID,
+		&i.HandoffGoal,
+		&i.HandoffDraftPrompt,
+		&i.HandoffRelevantFiles,
+		&i.PermissionMode,
 	)
 	return i, err
 }

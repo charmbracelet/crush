@@ -27,14 +27,11 @@ type CollaborationMode string
 
 const (
 	CollaborationModeDefault CollaborationMode = "default"
-	CollaborationModeAuto    CollaborationMode = "auto"
 	CollaborationModePlan    CollaborationMode = "plan"
 )
 
 func NormalizeCollaborationMode(mode string) CollaborationMode {
 	switch CollaborationMode(mode) {
-	case CollaborationModeAuto:
-		return CollaborationModeAuto
 	case CollaborationModePlan:
 		return CollaborationModePlan
 	default:
@@ -42,14 +39,22 @@ func NormalizeCollaborationMode(mode string) CollaborationMode {
 	}
 }
 
-func NormalizeInteractiveCollaborationMode(mode string) CollaborationMode {
-	switch CollaborationMode(mode) {
-	case CollaborationModeDefault:
-		return CollaborationModeDefault
-	case CollaborationModeAuto:
-		return CollaborationModeAuto
+type PermissionMode string
+
+const (
+	PermissionModeDefault PermissionMode = "default"
+	PermissionModeAuto    PermissionMode = "auto"
+	PermissionModeYolo    PermissionMode = "yolo"
+)
+
+func NormalizePermissionMode(mode string) PermissionMode {
+	switch PermissionMode(mode) {
+	case PermissionModeAuto:
+		return PermissionModeAuto
+	case PermissionModeYolo:
+		return PermissionModeYolo
 	default:
-		return CollaborationModeAuto
+		return PermissionModeDefault
 	}
 }
 
@@ -99,6 +104,7 @@ type Session struct {
 	Title                  string
 	WorkspaceCWD           string
 	CollaborationMode      CollaborationMode
+	PermissionMode         PermissionMode
 	HandoffSourceSessionID string
 	HandoffGoal            string
 	HandoffDraftPrompt     string
@@ -146,6 +152,8 @@ type Service interface {
 	List(ctx context.Context) ([]Session, error)
 	Save(ctx context.Context, session Session) (Session, error)
 	UpdateCollaborationMode(ctx context.Context, sessionID string, mode CollaborationMode) (Session, error)
+	UpdatePermissionMode(ctx context.Context, sessionID string, mode PermissionMode) (Session, error)
+	SetDefaultPermissionMode(mode PermissionMode)
 	UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error
 	Rename(ctx context.Context, id string, title string) error
 	Delete(ctx context.Context, id string) error
@@ -161,6 +169,7 @@ type service struct {
 	db                       *sql.DB
 	q                        *db.Queries
 	defaultCollaborationMode CollaborationMode
+	defaultPermissionMode    PermissionMode
 }
 
 func (s *service) Create(ctx context.Context, title string) (Session, error) {
@@ -169,6 +178,7 @@ func (s *service) Create(ctx context.Context, title string) (Session, error) {
 		Title:                title,
 		WorkspaceCwd:         sql.NullString{},
 		CollaborationMode:    string(s.defaultCollaborationMode),
+		PermissionMode:       string(s.defaultPermissionMode),
 		Kind:                 string(KindNormal),
 		HandoffGoal:          "",
 		HandoffDraftPrompt:   "",
@@ -190,6 +200,7 @@ func (s *service) CreateTaskSession(ctx context.Context, toolCallID, parentSessi
 		Title:                title,
 		WorkspaceCwd:         sql.NullString{},
 		CollaborationMode:    string(s.defaultCollaborationMode),
+		PermissionMode:       string(s.defaultPermissionMode),
 		Kind:                 string(KindNormal),
 		HandoffGoal:          "",
 		HandoffDraftPrompt:   "",
@@ -210,6 +221,7 @@ func (s *service) CreateTitleSession(ctx context.Context, parentSessionID string
 		Title:                "Generate a title",
 		WorkspaceCwd:         sql.NullString{},
 		CollaborationMode:    string(s.defaultCollaborationMode),
+		PermissionMode:       string(s.defaultPermissionMode),
 		Kind:                 string(KindNormal),
 		HandoffGoal:          "",
 		HandoffDraftPrompt:   "",
@@ -234,6 +246,7 @@ func (s *service) CreateHandoffSession(ctx context.Context, sourceSessionID, tit
 		Title:             title,
 		WorkspaceCwd:      sql.NullString{},
 		CollaborationMode: string(s.defaultCollaborationMode),
+		PermissionMode:    string(s.defaultPermissionMode),
 		Kind:              string(KindHandoff),
 		HandoffSourceSessionID: sql.NullString{
 			String: sourceSessionID,
@@ -315,6 +328,7 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 		Title:             session.Title,
 		WorkspaceCwd:      sql.NullString{String: session.WorkspaceCWD, Valid: session.WorkspaceCWD != ""},
 		CollaborationMode: string(NormalizeCollaborationMode(string(session.CollaborationMode))),
+		PermissionMode:    string(NormalizePermissionMode(string(session.PermissionMode))),
 		Kind:              string(NormalizeKind(string(session.Kind))),
 		HandoffSourceSessionID: sql.NullString{
 			String: session.HandoffSourceSessionID,
@@ -356,6 +370,23 @@ func (s *service) UpdateCollaborationMode(ctx context.Context, sessionID string,
 	session := s.fromDBItem(dbSession)
 	s.Publish(pubsub.UpdatedEvent, session)
 	return session, nil
+}
+
+func (s *service) UpdatePermissionMode(ctx context.Context, sessionID string, mode PermissionMode) (Session, error) {
+	dbSession, err := s.q.UpdateSessionPermissionMode(ctx, db.UpdateSessionPermissionModeParams{
+		ID:             sessionID,
+		PermissionMode: string(NormalizePermissionMode(string(mode))),
+	})
+	if err != nil {
+		return Session{}, err
+	}
+	current := s.fromDBItem(dbSession)
+	s.Publish(pubsub.UpdatedEvent, current)
+	return current, nil
+}
+
+func (s *service) SetDefaultPermissionMode(mode PermissionMode) {
+	s.defaultPermissionMode = NormalizePermissionMode(string(mode))
 }
 
 // UpdateTitleAndUsage updates only the title and usage fields atomically.
@@ -413,6 +444,7 @@ func (s service) fromDBItem(item db.Session) Session {
 		Title:                  item.Title,
 		WorkspaceCWD:           item.WorkspaceCwd.String,
 		CollaborationMode:      NormalizeCollaborationMode(item.CollaborationMode),
+		PermissionMode:         NormalizePermissionMode(item.PermissionMode),
 		HandoffSourceSessionID: item.HandoffSourceSessionID.String,
 		HandoffGoal:            item.HandoffGoal,
 		HandoffDraftPrompt:     item.HandoffDraftPrompt,
@@ -476,15 +508,16 @@ func unmarshalStringSlice(data string) ([]string, error) {
 
 func NewService(q *db.Queries, conn *sql.DB, defaultModes ...CollaborationMode) Service {
 	broker := pubsub.NewBroker[Session]()
-	defaultMode := CollaborationModeAuto
+	defaultMode := CollaborationModeDefault
 	if len(defaultModes) > 0 {
-		defaultMode = NormalizeInteractiveCollaborationMode(string(defaultModes[0]))
+		defaultMode = NormalizeCollaborationMode(string(defaultModes[0]))
 	}
 	return &service{
 		Broker:                   broker,
 		db:                       conn,
 		q:                        q,
 		defaultCollaborationMode: defaultMode,
+		defaultPermissionMode:    PermissionModeAuto,
 	}
 }
 

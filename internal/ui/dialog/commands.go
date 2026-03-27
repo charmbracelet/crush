@@ -54,14 +54,15 @@ type Commands struct {
 		Close key.Binding
 	}
 
-	sessionID    string
-	hasSession   bool
-	hasTodos     bool
-	hasQueue     bool
-	queuePaused  bool
-	mode         session.CollaborationMode
-	proposedPlan string
-	selected     CommandType
+	sessionID      string
+	hasSession     bool
+	hasTodos       bool
+	hasQueue       bool
+	queuePaused    bool
+	mode           session.CollaborationMode
+	permissionMode session.PermissionMode
+	proposedPlan   string
+	selected       CommandType
 
 	spinner spinner.Model
 	loading bool
@@ -82,7 +83,7 @@ type Commands struct {
 var _ Dialog = (*Commands)(nil)
 
 // NewCommands creates a new commands dialog.
-func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, hasQueue, queuePaused bool, mode session.CollaborationMode, proposedPlan string, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) (*Commands, error) {
+func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, hasQueue, queuePaused bool, mode session.CollaborationMode, permissionMode session.PermissionMode, proposedPlan string, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) (*Commands, error) {
 	c := &Commands{
 		com:            com,
 		selected:       SystemCommands,
@@ -92,6 +93,7 @@ func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, has
 		hasQueue:       hasQueue,
 		queuePaused:    queuePaused,
 		mode:           mode,
+		permissionMode: permissionMode,
 		proposedPlan:   proposedPlan,
 		customCommands: customCommands,
 		mcpPrompts:     mcpPrompts,
@@ -446,6 +448,18 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		}
 	} else {
 		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_plan_mode", "Enter Plan Mode", "", ActionTogglePlanMode{NextMode: session.CollaborationModePlan}))
+	}
+
+	if c.mode != session.CollaborationModePlan {
+		if c.permissionMode != session.PermissionModeDefault {
+			commands = append(commands, NewCommandItem(c.com.Styles, "set_mode_default", "Enable Ask Mode", "", ActionToggleAutoMode{SessionID: c.sessionID, NextMode: session.PermissionModeDefault}))
+		}
+		if c.permissionMode != session.PermissionModeAuto {
+			commands = append(commands, NewCommandItem(c.com.Styles, "set_mode_auto", "Enable Auto Mode", "", ActionToggleAutoMode{SessionID: c.sessionID, NextMode: session.PermissionModeAuto}))
+		}
+		if c.permissionMode != session.PermissionModeYolo {
+			commands = append(commands, NewCommandItem(c.com.Styles, "set_mode_yolo", "Enable YOLO Mode", "", ActionToggleAutoMode{SessionID: c.sessionID, NextMode: session.PermissionModeYolo}))
+		}
 	}
 
 	// Add reasoning toggle for models that support it

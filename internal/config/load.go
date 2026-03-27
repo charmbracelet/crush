@@ -466,8 +466,8 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 		}
 	}
 	c.Options.InitializeAs = cmp.Or(c.Options.InitializeAs, defaultInitializeAs)
-	if c.Options.PreferredCollaborationMode == "" {
-		c.Options.PreferredCollaborationMode = "auto"
+	if c.Options.PreferredPermissionMode == "" {
+		c.Options.PreferredPermissionMode = cmp.Or(c.Options.PreferredCollaborationMode, "auto")
 	}
 }
 
@@ -586,7 +586,6 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 	}
 	large, small := defaultLarge, defaultSmall
 	handoff := defaultLarge
-	autoClassifier := handoff
 
 	largeModelSelected, largeModelConfigured := c.Models[SelectedModelTypeLarge]
 	if largeModelConfigured {
@@ -715,62 +714,89 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 	} else {
 		handoff = large
 	}
-	autoClassifierModelSelected, autoClassifierModelConfigured := c.Models[SelectedModelTypeAutoClassifier]
-	if autoClassifierModelConfigured {
-		autoClassifier = handoff
-		if autoClassifierModelSelected.Model != "" {
-			autoClassifier.Model = autoClassifierModelSelected.Model
-		}
-		if autoClassifierModelSelected.Provider != "" {
-			autoClassifier.Provider = autoClassifierModelSelected.Provider
-		}
-
-		model := c.GetModel(autoClassifier.Provider, autoClassifier.Model)
-		if model == nil {
-			autoClassifier = handoff
-			err := store.UpdatePreferredModel(ScopeGlobal, SelectedModelTypeAutoClassifier, autoClassifier)
-			if err != nil {
-				return fmt.Errorf("failed to update preferred auto classifier model: %w", err)
-			}
-		} else {
-			if autoClassifierModelSelected.MaxTokens > 0 {
-				autoClassifier.MaxTokens = autoClassifierModelSelected.MaxTokens
-			} else {
-				autoClassifier.MaxTokens = model.DefaultMaxTokens
-			}
-			if autoClassifierModelSelected.Temperature != nil {
-				autoClassifier.Temperature = autoClassifierModelSelected.Temperature
-			}
-			if autoClassifierModelSelected.TopP != nil {
-				autoClassifier.TopP = autoClassifierModelSelected.TopP
-			}
-			if autoClassifierModelSelected.TopK != nil {
-				autoClassifier.TopK = autoClassifierModelSelected.TopK
-			}
-			if autoClassifierModelSelected.FrequencyPenalty != nil {
-				autoClassifier.FrequencyPenalty = autoClassifierModelSelected.FrequencyPenalty
-			}
-			if autoClassifierModelSelected.PresencePenalty != nil {
-				autoClassifier.PresencePenalty = autoClassifierModelSelected.PresencePenalty
-			}
-			if autoClassifierModelSelected.Think != nil {
-				autoClassifier.Think = autoClassifierModelSelected.Think
-			}
-			if autoClassifierModelSelected.ReasoningEffort != "" {
-				autoClassifier.ReasoningEffort = autoClassifierModelSelected.ReasoningEffort
-			}
-		}
-	} else {
-		autoClassifier = handoff
-	}
+	migrateLegacyAutoClassifierSelection(c.Models)
+	autoClassifierFast := resolveConfiguredModel(store, c, SelectedModelTypeAutoClassifierFast, resolveAutoClassifierFastFallback(c, handoffModelConfigured, handoff, small, large))
+	autoClassifierReasoning := resolveConfiguredModel(store, c, SelectedModelTypeAutoClassifierReasoning, resolveAutoClassifierReasoningFallback(c, handoffModelConfigured, handoff, small, large))
 	c.Models[SelectedModelTypeLarge] = large
 	c.Models[SelectedModelTypeSmall] = small
 	c.Models[SelectedModelTypeHandoff] = handoff
-	c.Models[SelectedModelTypeAutoClassifier] = autoClassifier
+	c.Models[SelectedModelTypeAutoClassifierFast] = autoClassifierFast
+	c.Models[SelectedModelTypeAutoClassifierReasoning] = autoClassifierReasoning
 	return nil
 }
 
-func resolveAutoClassifierFallback(c *Config, handoffConfigured bool, handoff, small, large SelectedModel) SelectedModel {
+func migrateLegacyAutoClassifierSelection(models map[SelectedModelType]SelectedModel) {
+	if models == nil {
+		return
+	}
+
+	legacy, ok := models[SelectedModelTypeAutoClassifier]
+	if !ok {
+		return
+	}
+
+	if _, exists := models[SelectedModelTypeAutoClassifierFast]; !exists {
+		models[SelectedModelTypeAutoClassifierFast] = legacy
+	}
+	if _, exists := models[SelectedModelTypeAutoClassifierReasoning]; !exists {
+		models[SelectedModelTypeAutoClassifierReasoning] = legacy
+	}
+
+	delete(models, SelectedModelTypeAutoClassifier)
+}
+
+func resolveConfiguredModel(store *ConfigStore, c *Config, modelType SelectedModelType, fallback SelectedModel) SelectedModel {
+	selected, configured := c.Models[modelType]
+	if !configured {
+		return fallback
+	}
+
+	resolved := fallback
+	if selected.Model != "" {
+		resolved.Model = selected.Model
+	}
+	if selected.Provider != "" {
+		resolved.Provider = selected.Provider
+	}
+
+	model := c.GetModel(resolved.Provider, resolved.Model)
+	if model == nil {
+		if err := store.UpdatePreferredModel(ScopeGlobal, modelType, fallback); err != nil {
+			slog.Warn("Failed to update preferred model fallback", "model_type", modelType, "error", err)
+		}
+		return fallback
+	}
+
+	if selected.MaxTokens > 0 {
+		resolved.MaxTokens = selected.MaxTokens
+	} else {
+		resolved.MaxTokens = model.DefaultMaxTokens
+	}
+	if selected.Temperature != nil {
+		resolved.Temperature = selected.Temperature
+	}
+	if selected.TopP != nil {
+		resolved.TopP = selected.TopP
+	}
+	if selected.TopK != nil {
+		resolved.TopK = selected.TopK
+	}
+	if selected.FrequencyPenalty != nil {
+		resolved.FrequencyPenalty = selected.FrequencyPenalty
+	}
+	if selected.PresencePenalty != nil {
+		resolved.PresencePenalty = selected.PresencePenalty
+	}
+	if selected.Think != nil {
+		resolved.Think = selected.Think
+	}
+	if selected.ReasoningEffort != "" {
+		resolved.ReasoningEffort = selected.ReasoningEffort
+	}
+	return resolved
+}
+
+func resolveAutoClassifierFastFallback(c *Config, handoffConfigured bool, handoff, small, large SelectedModel) SelectedModel {
 	if handoffConfigured {
 		if model := c.GetModel(handoff.Provider, handoff.Model); model != nil {
 			return handoff
@@ -778,6 +804,15 @@ func resolveAutoClassifierFallback(c *Config, handoffConfigured bool, handoff, s
 	}
 	if model := c.GetModel(small.Provider, small.Model); model != nil {
 		return small
+	}
+	return large
+}
+
+func resolveAutoClassifierReasoningFallback(c *Config, handoffConfigured bool, handoff, small, large SelectedModel) SelectedModel {
+	if handoffConfigured {
+		if model := c.GetModel(handoff.Provider, handoff.Model); model != nil {
+			return handoff
+		}
 	}
 	return large
 }

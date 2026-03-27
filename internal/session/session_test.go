@@ -12,9 +12,20 @@ func TestNormalizeCollaborationMode(t *testing.T) {
 	require.Equal(t, CollaborationModeDefault, NormalizeCollaborationMode(""))
 	require.Equal(t, CollaborationModeDefault, NormalizeCollaborationMode("unknown"))
 	require.Equal(t, CollaborationModeDefault, NormalizeCollaborationMode(string(CollaborationModeDefault)))
-	require.Equal(t, CollaborationModeAuto, NormalizeCollaborationMode(string(CollaborationModeAuto)))
+	require.Equal(t, CollaborationModeDefault, NormalizeCollaborationMode("auto"))
 	require.Equal(t, CollaborationModePlan, NormalizeCollaborationMode(string(CollaborationModePlan)))
 }
+
+func TestNormalizePermissionMode(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, PermissionModeDefault, NormalizePermissionMode(""))
+	require.Equal(t, PermissionModeDefault, NormalizePermissionMode("unknown"))
+	require.Equal(t, PermissionModeDefault, NormalizePermissionMode(string(PermissionModeDefault)))
+	require.Equal(t, PermissionModeAuto, NormalizePermissionMode(string(PermissionModeAuto)))
+	require.Equal(t, PermissionModeYolo, NormalizePermissionMode(string(PermissionModeYolo)))
+}
+
 func TestNormalizeKind(t *testing.T) {
 	t.Parallel()
 

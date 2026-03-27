@@ -45,7 +45,8 @@ func TestConfigureSelectedModels_DefaultsHandoffToLarge(t *testing.T) {
 	require.NoError(t, configureSelectedModels(testStore(cfg), knownProviders))
 
 	require.Equal(t, cfg.Models[SelectedModelTypeLarge], cfg.Models[SelectedModelTypeHandoff])
-	require.Equal(t, cfg.Models[SelectedModelTypeHandoff], cfg.Models[SelectedModelTypeAutoClassifier])
+	require.Equal(t, cfg.Models[SelectedModelTypeHandoff], cfg.Models[SelectedModelTypeAutoClassifierReasoning])
+	require.Equal(t, cfg.Models[SelectedModelTypeSmall], cfg.Models[SelectedModelTypeAutoClassifierFast])
 }
 
 func TestConfigureSelectedModels_UsesExplicitHandoff(t *testing.T) {
@@ -118,7 +119,7 @@ func TestConfigureSelectedModels_UsesExplicitAutoClassifier(t *testing.T) {
 	cfg := &Config{
 		Providers: csync.NewMap[string, ProviderConfig](),
 		Models: map[SelectedModelType]SelectedModel{
-			SelectedModelTypeAutoClassifier: {
+			SelectedModelTypeAutoClassifierFast: {
 				Provider:    "openai",
 				Model:       "gpt-4.1-mini",
 				Temperature: &temperature,
@@ -142,8 +143,8 @@ func TestConfigureSelectedModels_UsesExplicitAutoClassifier(t *testing.T) {
 	require.NoError(t, cfg.configureProviders(testStore(cfg), envMap, resolver, knownProviders))
 	require.NoError(t, configureSelectedModels(testStore(cfg), knownProviders))
 
-	require.Equal(t, "gpt-4.1-mini", cfg.Models[SelectedModelTypeAutoClassifier].Model)
-	require.Equal(t, "openai", cfg.Models[SelectedModelTypeAutoClassifier].Provider)
-	require.NotNil(t, cfg.Models[SelectedModelTypeAutoClassifier].Temperature)
-	require.Equal(t, temperature, *cfg.Models[SelectedModelTypeAutoClassifier].Temperature)
+	require.Equal(t, "gpt-4.1-mini", cfg.Models[SelectedModelTypeAutoClassifierFast].Model)
+	require.Equal(t, "openai", cfg.Models[SelectedModelTypeAutoClassifierFast].Provider)
+	require.NotNil(t, cfg.Models[SelectedModelTypeAutoClassifierFast].Temperature)
+	require.Equal(t, temperature, *cfg.Models[SelectedModelTypeAutoClassifierFast].Temperature)
 }

@@ -135,6 +135,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.updateSessionCollaborationModeStmt, err = db.PrepareContext(ctx, updateSessionCollaborationMode); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateSessionCollaborationMode: %w", err)
 	}
+	if q.updateSessionPermissionModeStmt, err = db.PrepareContext(ctx, updateSessionPermissionMode); err != nil {
+		return nil, fmt.Errorf("error preparing query UpdateSessionPermissionMode: %w", err)
+	}
 	if q.updateSessionTitleAndUsageStmt, err = db.PrepareContext(ctx, updateSessionTitleAndUsage); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateSessionTitleAndUsage: %w", err)
 	}
@@ -328,6 +331,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing updateSessionCollaborationModeStmt: %w", cerr)
 		}
 	}
+	if q.updateSessionPermissionModeStmt != nil {
+		if cerr := q.updateSessionPermissionModeStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing updateSessionPermissionModeStmt: %w", cerr)
+		}
+	}
 	if q.updateSessionTitleAndUsageStmt != nil {
 		if cerr := q.updateSessionTitleAndUsageStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing updateSessionTitleAndUsageStmt: %w", cerr)
@@ -409,6 +417,7 @@ type Queries struct {
 	updateMessageStmt                  *sql.Stmt
 	updateSessionStmt                  *sql.Stmt
 	updateSessionCollaborationModeStmt *sql.Stmt
+	updateSessionPermissionModeStmt    *sql.Stmt
 	updateSessionTitleAndUsageStmt     *sql.Stmt
 }
 
@@ -453,6 +462,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		updateMessageStmt:                  q.updateMessageStmt,
 		updateSessionStmt:                  q.updateSessionStmt,
 		updateSessionCollaborationModeStmt: q.updateSessionCollaborationModeStmt,
+		updateSessionPermissionModeStmt:    q.updateSessionPermissionModeStmt,
 		updateSessionTitleAndUsageStmt:     q.updateSessionTitleAndUsageStmt,
 	}
 }

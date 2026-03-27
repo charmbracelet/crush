@@ -89,9 +89,6 @@ func (m *UI) modeInfo(width int) string {
 			modes = append(modes, "ASK")
 		}
 	}
-	if m.session.CollaborationMode == sessionpkg.CollaborationModePlan && m.com.App.Permissions.SkipRequests() {
-		modes = append(modes, "YOLO")
-	}
 	if len(modes) == 0 {
 		return ""
 	}

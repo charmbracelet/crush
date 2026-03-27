@@ -78,6 +78,12 @@ func (m *mockSessionService) UpdateCollaborationMode(_ context.Context, sessionI
 	return session.Session{ID: sessionID, CollaborationMode: mode}, nil
 }
 
+func (m *mockSessionService) UpdatePermissionMode(_ context.Context, sessionID string, mode session.PermissionMode) (session.Session, error) {
+	return session.Session{ID: sessionID, PermissionMode: mode}, nil
+}
+
+func (m *mockSessionService) SetDefaultPermissionMode(session.PermissionMode) {}
+
 func (m *mockSessionService) UpdateTitleAndUsage(context.Context, string, string, int64, int64, float64) error {
 	return nil
 }

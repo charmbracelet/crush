@@ -19,11 +19,31 @@ type mockPermissionService struct {
 	lastPrompt  permission.PermissionRequest
 	promptGrant bool
 	promptCalls int
+	persistent  []permission.PermissionRequest
 }
 
-func (m *mockPermissionService) GrantPersistent(permission.PermissionRequest) {}
-func (m *mockPermissionService) Grant(permission.PermissionRequest)           {}
-func (m *mockPermissionService) Deny(permission.PermissionRequest)            {}
+func (m *mockPermissionService) GrantPersistent(req permission.PermissionRequest) {
+	m.persistent = append(m.persistent, req)
+}
+func (m *mockPermissionService) Grant(permission.PermissionRequest) {}
+func (m *mockPermissionService) Deny(permission.PermissionRequest)  {}
+func (m *mockPermissionService) HasPersistentPermission(req permission.PermissionRequest) bool {
+	for _, granted := range m.persistent {
+		if granted.ToolName == req.ToolName && granted.Action == req.Action && granted.SessionID == req.SessionID && granted.Path == req.Path {
+			return true
+		}
+	}
+	return false
+}
+func (m *mockPermissionService) ClearPersistentPermissions(sessionID string) {
+	filtered := m.persistent[:0]
+	for _, granted := range m.persistent {
+		if granted.SessionID != sessionID {
+			filtered = append(filtered, granted)
+		}
+	}
+	m.persistent = filtered
+}
 func (m *mockPermissionService) EvaluateRequest(context.Context, permission.CreatePermissionRequest) (permission.EvaluationResult, error) {
 	return m.evalResult, nil
 }
@@ -45,7 +65,7 @@ func (m *mockPermissionService) SubscribeNotifications(context.Context) <-chan p
 }
 
 type mockSessionService struct {
-	mode session.CollaborationMode
+	mode session.PermissionMode
 }
 
 func (m *mockSessionService) Subscribe(context.Context) <-chan pubsub.Event[session.Session] {
@@ -64,7 +84,7 @@ func (m *mockSessionService) CreateHandoffSession(context.Context, string, strin
 	return session.Session{}, nil
 }
 func (m *mockSessionService) Get(context.Context, string) (session.Session, error) {
-	return session.Session{CollaborationMode: m.mode}, nil
+	return session.Session{CollaborationMode: session.CollaborationModeDefault, PermissionMode: m.mode}, nil
 }
 func (m *mockSessionService) GetLast(context.Context) (session.Session, error) {
 	return session.Session{}, nil
@@ -76,6 +96,10 @@ func (m *mockSessionService) Save(context.Context, session.Session) (session.Ses
 func (m *mockSessionService) UpdateCollaborationMode(context.Context, string, session.CollaborationMode) (session.Session, error) {
 	return session.Session{}, nil
 }
+func (m *mockSessionService) UpdatePermissionMode(context.Context, string, session.PermissionMode) (session.Session, error) {
+	return session.Session{}, nil
+}
+func (m *mockSessionService) SetDefaultPermissionMode(session.PermissionMode) {}
 func (m *mockSessionService) UpdateTitleAndUsage(context.Context, string, string, int64, int64, float64) error {
 	return nil
 }
@@ -108,7 +132,7 @@ func TestAutoPermission_DefaultModeFallsBackToPrompt(t *testing.T) {
 		evalResult:  permission.EvaluationResult{Decision: permission.EvaluationDecisionAsk, Permission: permission.PermissionRequest{SessionID: "s1", ToolName: "edit", Action: "write"}},
 		promptGrant: true,
 	}
-	svc := New(base, &mockSessionService{mode: session.CollaborationModeDefault}, nil, "", false)
+	svc := New(base, &mockSessionService{mode: session.PermissionModeDefault}, nil, "", false, nil)
 
 	granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{})
 	require.NoError(t, err)
@@ -125,7 +149,7 @@ func TestAutoPermission_AutoModeReadOnlyRequestSkipsClassifier(t *testing.T) {
 		promptGrant: true,
 	}
 	classifier := &mockClassifier{}
-	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, "", false)
+	svc := New(base, &mockSessionService{mode: session.PermissionModeAuto}, func() permission.Classifier { return classifier }, "", false, nil)
 
 	granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{})
 	require.NoError(t, err)
@@ -143,13 +167,34 @@ func TestAutoPermission_AutoModeClassifierAllowSkipsPrompt(t *testing.T) {
 		promptGrant: true,
 	}
 	classifier := &mockClassifier{result: permission.AutoClassification{AllowAuto: true}}
-	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, "", false)
+	svc := New(base, &mockSessionService{mode: session.PermissionModeAuto}, func() permission.Classifier { return classifier }, "", false, nil)
 
 	granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{})
 	require.NoError(t, err)
 	require.True(t, granted)
 	require.Zero(t, base.promptCalls)
 	require.Equal(t, 1, classifier.calls)
+}
+
+func TestAutoPermission_AutoModeExplicitAllowListSkipsClassifierAndPrompt(t *testing.T) {
+	t.Parallel()
+
+	base := &mockPermissionService{
+		Broker:     pubsub.NewBroker[permission.PermissionRequest](),
+		evalResult: permission.EvaluationResult{Decision: permission.EvaluationDecisionAsk, Permission: permission.PermissionRequest{SessionID: "s1", ToolName: "edit", Action: "write"}},
+	}
+	classifier := &mockClassifier{result: permission.AutoClassification{AllowAuto: false}}
+	svc := New(base, &mockSessionService{mode: session.PermissionModeAuto}, func() permission.Classifier { return classifier }, "", false, []string{"edit"})
+
+	granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{
+		SessionID: "s1",
+		ToolName:  "edit",
+		Action:    "write",
+	})
+	require.NoError(t, err)
+	require.True(t, granted)
+	require.Zero(t, base.promptCalls)
+	require.Zero(t, classifier.calls)
 }
 
 func TestAutoPermission_AutoModeClassifierBlockFallsBackToPrompt(t *testing.T) {
@@ -161,7 +206,7 @@ func TestAutoPermission_AutoModeClassifierBlockFallsBackToPrompt(t *testing.T) {
 		promptGrant: true,
 	}
 	classifier := &mockClassifier{result: permission.AutoClassification{AllowAuto: false}}
-	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, "", false)
+	svc := New(base, &mockSessionService{mode: session.PermissionModeAuto}, func() permission.Classifier { return classifier }, "", false, nil)
 
 	granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{})
 	require.NoError(t, err)
@@ -182,7 +227,7 @@ func TestAutoPermission_AutoModeClassifierErrorFallsBackToPrompt(t *testing.T) {
 		promptGrant: true,
 	}
 	classifier := &mockClassifier{err: context.DeadlineExceeded}
-	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, "", false)
+	svc := New(base, &mockSessionService{mode: session.PermissionModeAuto}, func() permission.Classifier { return classifier }, "", false, nil)
 
 	granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{})
 	require.NoError(t, err)
@@ -203,7 +248,7 @@ func TestAutoPermission_SuspendsClassifierAfterRepeatedBlocks(t *testing.T) {
 		promptGrant: true,
 	}
 	classifier := &mockClassifier{result: permission.AutoClassification{AllowAuto: false}}
-	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, "", false)
+	svc := New(base, &mockSessionService{mode: session.PermissionModeAuto}, func() permission.Classifier { return classifier }, "", false, nil)
 
 	// First 3 classifier blocks should fall back to prompting the user.
 	for range defaultMaxConsecutiveClassifierBlocks {
@@ -241,7 +286,7 @@ func TestAutoPermission_AutoModeReadOnlyBashSkipsClassifier(t *testing.T) {
 		promptGrant: true,
 	}
 	classifier := &mockClassifier{}
-	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, "", false)
+	svc := New(base, &mockSessionService{mode: session.PermissionModeAuto}, func() permission.Classifier { return classifier }, "", false, nil)
 
 	granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{})
 	require.NoError(t, err)
@@ -273,7 +318,7 @@ func TestAutoPermission_AutoModeWorkspaceWriteSkipsClassifier(t *testing.T) {
 		promptGrant: true,
 	}
 	classifier := &mockClassifier{}
-	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, workingDir, false)
+	svc := New(base, &mockSessionService{mode: session.PermissionModeAuto}, func() permission.Classifier { return classifier }, workingDir, false, nil)
 
 	granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{})
 	require.NoError(t, err)
@@ -305,7 +350,7 @@ func TestAutoPermission_AutoModeSensitiveWorkspaceWriteFallsBackToPrompt(t *test
 		promptGrant: true,
 	}
 	classifier := &mockClassifier{}
-	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, workingDir, false)
+	svc := New(base, &mockSessionService{mode: session.PermissionModeAuto}, func() permission.Classifier { return classifier }, workingDir, false, nil)
 
 	granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{})
 	require.NoError(t, err)
@@ -324,7 +369,7 @@ func TestAutoPermission_FailClosedOnClassifierErrorBlocksRequest(t *testing.T) {
 		evalResult: permission.EvaluationResult{Decision: permission.EvaluationDecisionAsk, Permission: permission.PermissionRequest{SessionID: "s1", ToolName: "edit", Action: "write"}},
 	}
 	classifier := &mockClassifier{err: context.DeadlineExceeded}
-	svc := New(base, &mockSessionService{mode: session.CollaborationModeAuto}, func() permission.Classifier { return classifier }, "", true)
+	svc := New(base, &mockSessionService{mode: session.PermissionModeAuto}, func() permission.Classifier { return classifier }, "", true, nil)
 
 	granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{})
 	require.False(t, granted)

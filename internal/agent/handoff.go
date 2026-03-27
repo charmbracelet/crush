@@ -94,7 +94,20 @@ func (c *coordinator) GenerateHandoff(ctx context.Context, sourceSessionID, goal
 		return HandoffDraft{}, fmt.Errorf("handoff generation returned no response")
 	}
 
-	return parseHandoffDraft(resp.Response.Content.Text(), candidateFiles)
+	draft, err := parseHandoffDraft(resp.Response.Content.Text(), candidateFiles)
+	if err != nil {
+		return HandoffDraft{}, err
+	}
+	if currentSession.PermissionMode == session.PermissionModeAuto {
+		review, reviewErr := c.reviewHandoffText(ctx, currentSession, draft.Title, draft.Prompt)
+		if reviewErr != nil {
+			return HandoffDraft{}, fmt.Errorf("failed to review handoff draft: %w", reviewErr)
+		}
+		if !review.AllowAuto {
+			return HandoffDraft{}, fmt.Errorf("handoff draft blocked by Auto Mode review: %s", strings.TrimSpace(review.Reason))
+		}
+	}
+	return draft, nil
 }
 
 func (c *coordinator) selectedModel(ctx context.Context, modelType config.SelectedModelType, isSubAgent bool) (Model, config.ProviderConfig, error) {
@@ -301,7 +314,7 @@ func buildHandoffPrompt(currentSession session.Session, goal string, candidateFi
 					sb.WriteString("false")
 				}
 				sb.WriteString("\">\n")
-				sb.WriteString(p.Content)
+				sb.WriteString(p.ModelSafeContent())
 				sb.WriteString("\n</tool_result>\n")
 			case message.Finish:
 				if p.Reason == "" {

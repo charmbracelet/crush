@@ -41,6 +41,12 @@ func (m *mockBashPermissionService) Deny(req permission.PermissionRequest) {}
 
 func (m *mockBashPermissionService) GrantPersistent(req permission.PermissionRequest) {}
 
+func (m *mockBashPermissionService) HasPersistentPermission(permission.PermissionRequest) bool {
+	return false
+}
+
+func (m *mockBashPermissionService) ClearPersistentPermissions(string) {}
+
 func (m *mockBashPermissionService) AutoApproveSession(sessionID string) {}
 
 func (m *mockBashPermissionService) SetSessionAutoApprove(sessionID string, enabled bool) {}

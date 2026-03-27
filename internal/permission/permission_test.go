@@ -1,31 +1,11 @@
 package permission
 
 import (
-	"context"
 	"sync"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/plugin"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
-
-type permissionTestPlugin struct {
-	name  string
-	hooks plugin.Hooks
-}
-
-func (p *permissionTestPlugin) Name() string {
-	return p.name
-}
-
-func (p *permissionTestPlugin) Close(ctx context.Context) error {
-	return nil
-}
-
-func (p *permissionTestPlugin) Init(ctx context.Context, input plugin.PluginInput) (plugin.Hooks, error) {
-	return p.hooks, nil
-}
 
 func TestPermissionService_AllowedCommands(t *testing.T) {
 	tests := []struct {
@@ -99,9 +79,6 @@ func TestPermissionService_AllowedCommands(t *testing.T) {
 }
 
 func TestPermissionService_SkipMode(t *testing.T) {
-	plugin.Reset()
-	t.Cleanup(plugin.Reset)
-
 	service := NewPermissionService("/tmp", true, []string{})
 
 	result, err := service.Request(t.Context(), CreatePermissionRequest{
@@ -119,106 +96,28 @@ func TestPermissionService_SkipMode(t *testing.T) {
 	}
 }
 
-func TestPermissionService_PluginDecisionAllow(t *testing.T) {
-	plugin.Reset()
-	t.Cleanup(plugin.Reset)
-
-	plugin.Register(&permissionTestPlugin{
-		name: "allow",
-		hooks: plugin.Hooks{
-			PermissionAsk: func(input plugin.PermissionAskInput) plugin.PermissionAskOutput {
-				return plugin.PermissionAskOutput{Action: plugin.PermissionAllow}
-			},
-		},
-	})
-	require.NoError(t, plugin.Init(t.Context(), plugin.PluginInput{}))
-
-	service := NewPermissionService("/tmp", false, []string{})
-	result, err := service.Request(t.Context(), CreatePermissionRequest{
-		SessionID:   "session-allow",
-		ToolCallID:  "tool-call-1",
-		ToolName:    "bash",
-		Action:      "execute",
-		Description: "test command",
-		Path:        "/tmp",
-	})
-	require.NoError(t, err)
-	require.True(t, result)
-}
-
-func TestPermissionService_PluginDecisionDeny(t *testing.T) {
-	plugin.Reset()
-	t.Cleanup(plugin.Reset)
-
-	plugin.Register(&permissionTestPlugin{
-		name: "deny",
-		hooks: plugin.Hooks{
-			PermissionAsk: func(input plugin.PermissionAskInput) plugin.PermissionAskOutput {
-				return plugin.PermissionAskOutput{Action: plugin.PermissionDeny}
-			},
-		},
-	})
-	require.NoError(t, plugin.Init(t.Context(), plugin.PluginInput{}))
-
-	service := NewPermissionService("/tmp", false, []string{})
-	result, err := service.Request(t.Context(), CreatePermissionRequest{
-		SessionID:   "session-deny",
-		ToolCallID:  "tool-call-2",
-		ToolName:    "bash",
-		Action:      "execute",
-		Description: "test command",
-		Path:        "/tmp",
-	})
-	require.Error(t, err)
-	require.True(t, IsPermissionError(err))
-	require.False(t, result)
-}
-
 func TestPermissionService_SequentialProperties(t *testing.T) {
-	t.Run("Sequential permission requests with persistent grants", func(t *testing.T) {
+	t.Run("Persistent grants are stored and can be cleared", func(t *testing.T) {
 		service := NewPermissionService("/tmp", false, []string{})
 
-		req1 := CreatePermissionRequest{
-			SessionID:   "session1",
-			ToolName:    "file_tool",
-			Description: "Read file",
-			Action:      "read",
-			Params:      map[string]string{"file": "test.txt"},
-			Path:        "/tmp/test.txt",
+		granted := PermissionRequest{
+			SessionID: "session1",
+			ToolName:  "file_tool",
+			Action:    "read",
+			Path:      "/tmp/test.txt",
+		}
+		requested := PermissionRequest{
+			SessionID: "session1",
+			ToolName:  "file_tool",
+			Action:    "read",
+			Path:      "/tmp/test.txt",
 		}
 
-		var result1 bool
-		var wg sync.WaitGroup
-		wg.Add(1)
+		service.GrantPersistent(granted)
+		assert.True(t, service.HasPersistentPermission(requested))
 
-		events := service.Subscribe(t.Context())
-
-		go func() {
-			defer wg.Done()
-			result1, _ = service.Request(t.Context(), req1)
-		}()
-
-		var permissionReq PermissionRequest
-		event := <-events
-
-		permissionReq = event.Payload
-		service.GrantPersistent(permissionReq)
-
-		wg.Wait()
-		assert.True(t, result1, "First request should be granted")
-
-		// Second identical request should be automatically approved due to persistent permission
-		req2 := CreatePermissionRequest{
-			SessionID:   "session1",
-			ToolName:    "file_tool",
-			Description: "Read file again",
-			Action:      "read",
-			Params:      map[string]string{"file": "test.txt"},
-			Path:        "/tmp/test.txt",
-		}
-		result2, err := service.Request(t.Context(), req2)
-		require.NoError(t, err)
-		assert.True(t, result2, "Second request should be auto-approved")
+		service.ClearPersistentPermissions("session1")
+		assert.False(t, service.HasPersistentPermission(requested))
 	})
 	t.Run("Sequential requests with temporary grants", func(t *testing.T) {
 		service := NewPermissionService("/tmp", false, []string{})
@@ -321,10 +220,11 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 		}
 
 		assert.Equal(t, 2, grantedCount, "Should have 2 granted and 1 denied")
-		secondReq := requests[1]
-		secondReq.Description = "Repeat of second request"
-		result, err := service.Request(t.Context(), secondReq)
-		require.NoError(t, err)
-		assert.True(t, result, "Repeated request should be auto-approved due to persistent permission")
+		assert.True(t, service.HasPersistentPermission(PermissionRequest{
+			SessionID: "concurrent2",
+			ToolName:  "tool2",
+			Action:    "action2",
+			Path:      "/tmp/file2.txt",
+		}))
 	})
 }

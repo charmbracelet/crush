@@ -36,7 +36,7 @@ Output rules:
 - Do not end a planning turn with a completed plan unless you also called plan_exit.
 </collaboration_mode>`
 
-const autoModeSystemPrompt = `<collaboration_mode>
+const autoModeSystemPrompt = `<permission_mode>
 You are in Auto Mode.
 
 Auto Mode rules override any conflicting instruction that would otherwise cause unnecessary permission-related interruptions.
@@ -47,28 +47,48 @@ In Auto Mode you should:
 - Expect some sensitive actions to still require manual confirmation when the safety classifier is unsure.
 - Prefer safe local actions and incremental progress over broad risky changes.
 - Be thorough: complete the task end-to-end, including verification, unless a hard blocker requires user input.
-</collaboration_mode>`
+</permission_mode>`
 
-const defaultModeSystemPrompt = `<collaboration_mode>
+const yoloModeSystemPrompt = `<permission_mode>
+You are in YOLO Mode.
+
+YOLO Mode auto-approves permission checks.
+
+Proceed without waiting for permission prompts, but still avoid pointless risk and stay aligned with the user's request.
+</permission_mode>`
+
+const defaultModeSystemPrompt = `<permission_mode>
 Auto Mode is not active.
 
 Do not assume permission-requiring actions will be auto-approved. When manual confirmation is required, wait for it instead of assuming it has already been granted.
-</collaboration_mode>`
+</permission_mode>`
 
 func collaborationModePrompt(mode session.CollaborationMode) string {
 	switch mode {
 	case session.CollaborationModePlan:
 		return planModeSystemPrompt
-	case session.CollaborationModeAuto:
+	default:
+		return ""
+	}
+}
+
+func permissionModePrompt(mode session.PermissionMode) string {
+	switch mode {
+	case session.PermissionModeAuto:
 		return autoModeSystemPrompt
+	case session.PermissionModeYolo:
+		return yoloModeSystemPrompt
 	default:
 		return defaultModeSystemPrompt
 	}
 }
 
-func buildSystemPromptForCollaborationMode(basePrompt string, mode session.CollaborationMode) string {
+func buildSystemPromptForModes(basePrompt string, mode session.CollaborationMode, permissionMode session.PermissionMode) string {
 	sections := []string{basePrompt}
 	if prompt := collaborationModePrompt(mode); prompt != "" {
+		sections = append(sections, prompt)
+	}
+	if prompt := permissionModePrompt(permissionMode); prompt != "" {
 		sections = append(sections, prompt)
 	}
 

@@ -56,10 +56,12 @@ func (s SelectedModelType) String() string {
 }
 
 const (
-	SelectedModelTypeLarge          SelectedModelType = "large"
-	SelectedModelTypeSmall          SelectedModelType = "small"
-	SelectedModelTypeHandoff        SelectedModelType = "handoff"
-	SelectedModelTypeAutoClassifier SelectedModelType = "auto_classifier"
+	SelectedModelTypeAutoClassifier          SelectedModelType = "auto_classifier"
+	SelectedModelTypeLarge                   SelectedModelType = "large"
+	SelectedModelTypeSmall                   SelectedModelType = "small"
+	SelectedModelTypeHandoff                 SelectedModelType = "handoff"
+	SelectedModelTypeAutoClassifierFast      SelectedModelType = "auto_classifier_fast"
+	SelectedModelTypeAutoClassifierReasoning SelectedModelType = "auto_classifier_reasoning"
 )
 const (
 	AgentCoder   string = "coder"
@@ -285,9 +287,16 @@ func (c Completions) Limits() (depth, items int) {
 }
 
 type Permissions struct {
-	AllowedTools                []string `json:"allowed_tools,omitempty" jsonschema:"description=List of tools that don't require permission prompts,example=bash,example=view"` // Tools that don't require permission prompts
-	SkipRequests                bool     `json:"-"`                                                                                                                              // Automatically accept all permissions (YOLO mode)
-	FailClosedOnClassifierError bool     `json:"fail_closed_on_classifier_error,omitempty" jsonschema:"description=Block permission-requiring actions when Auto Mode permission classification is unavailable instead of falling back to manual confirmation,default=false"`
+	AllowedTools                []string  `json:"allowed_tools,omitempty" jsonschema:"description=List of tools that don't require permission prompts,example=bash,example=view"` // Tools that don't require permission prompts
+	SkipRequests                bool      `json:"-"`                                                                                                                              // Automatically accept all permissions (YOLO mode)
+	FailClosedOnClassifierError bool      `json:"fail_closed_on_classifier_error,omitempty" jsonschema:"description=Block permission-requiring actions when Auto Mode permission classification is unavailable instead of falling back to manual confirmation,default=false"`
+	AutoMode                    *AutoMode `json:"auto_mode,omitempty" jsonschema:"description=Auto Mode policy customization"`
+}
+
+type AutoMode struct {
+	Environment     []string `json:"environment,omitempty" jsonschema:"description=Additional environment facts injected into Auto Mode classifier prompts"`
+	BlockRules      []string `json:"block_rules,omitempty" jsonschema:"description=Additional block rules for Auto Mode guards"`
+	AllowExceptions []string `json:"allow_exceptions,omitempty" jsonschema:"description=Additional allow-list exceptions for Auto Mode guards"`
 }
 
 type TrailerStyle string
@@ -317,7 +326,8 @@ type Options struct {
 	ContextPaths               []string     `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=CRUSH.md"`
 	SkillsPaths                []string     `json:"skills_paths,omitempty" jsonschema:"description=Paths to directories containing Agent Skills (folders with SKILL.md files),example=~/.config/crush/skills,example=./skills"`
 	TUI                        *TUIOptions  `json:"tui,omitempty" jsonschema:"description=Terminal user interface options"`
-	PreferredCollaborationMode string       `json:"preferred_collaboration_mode,omitempty" jsonschema:"description=Default interactive collaboration mode for new sessions,enum=default,enum=auto,default=auto"`
+	PreferredPermissionMode    string       `json:"preferred_permission_mode,omitempty" jsonschema:"description=Default interactive permission mode for new sessions,enum=default,enum=auto,enum=yolo,default=auto"`
+	PreferredCollaborationMode string       `json:"preferred_collaboration_mode,omitempty" jsonschema:"-"`
 	Debug                      bool         `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
 	DebugLSP                   bool         `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
 	DisableAutoSummarize       bool         `json:"disable_auto_summarize,omitempty" jsonschema:"description=Disable automatic conversation summarization,default=false"`
@@ -572,8 +582,16 @@ func (c *Config) HandoffModel() *catwalk.Model {
 	return c.GetModel(model.Provider, model.Model)
 }
 
-func (c *Config) AutoClassifierModel() *catwalk.Model {
-	model, ok := c.Models[SelectedModelTypeAutoClassifier]
+func (c *Config) AutoClassifierFastModel() *catwalk.Model {
+	model, ok := c.Models[SelectedModelTypeAutoClassifierFast]
+	if !ok {
+		return nil
+	}
+	return c.GetModel(model.Provider, model.Model)
+}
+
+func (c *Config) AutoClassifierReasoningModel() *catwalk.Model {
+	model, ok := c.Models[SelectedModelTypeAutoClassifierReasoning]
 	if !ok {
 		return nil
 	}

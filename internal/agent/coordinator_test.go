@@ -12,6 +12,7 @@ import (
 	"charm.land/fantasy/providers/openaicompat"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/session"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -71,6 +72,7 @@ func newTestCoordinator(t *testing.T, env fakeEnv, providerID string, providerCf
 	cfg, err := config.Init(env.workingDir, "", false)
 	require.NoError(t, err)
 	cfg.Config().Providers.Set(providerID, providerCfg)
+	env.sessions.SetDefaultPermissionMode(session.PermissionModeDefault)
 	return &coordinator{
 		cfg:      cfg,
 		sessions: env.sessions,
@@ -132,6 +134,33 @@ func TestRunSubAgent(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "done", resp.Content)
 		assert.False(t, resp.IsError)
+	})
+
+	t.Run("auto mode blocks delegation when handoff review cannot run", func(t *testing.T) {
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, providerID, providerCfg)
+
+		parentSession, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+		_, err = env.sessions.UpdatePermissionMode(t.Context(), parentSession.ID, session.PermissionModeAuto)
+		require.NoError(t, err)
+
+		agent := newMockAgent(providerID, 4096, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+			t.Fatalf("subagent should not run when auto delegation review blocks")
+			return nil, nil
+		})
+
+		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          agent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "do something",
+			SessionTitle:   "Test Session",
+		})
+		require.NoError(t, err)
+		assert.True(t, resp.IsError)
+		assert.Equal(t, "Auto Mode blocked subagent delegation because the handoff review failed.", resp.Content)
 	})
 
 	t.Run("ModelCfg.MaxTokens overrides default", func(t *testing.T) {

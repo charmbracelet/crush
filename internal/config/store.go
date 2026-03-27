@@ -198,14 +198,20 @@ func (s *ConfigStore) SetSkipRequests(scope Scope, enabled bool) error {
 	return s.SetConfigField(scope, "permissions.skip_requests", enabled)
 }
 
-// SetPreferredCollaborationMode sets the preferred interactive collaboration
-// mode and persists it.
-func (s *ConfigStore) SetPreferredCollaborationMode(scope Scope, mode string) error {
+// SetPreferredPermissionMode sets the preferred interactive permission mode
+// and persists it.
+func (s *ConfigStore) SetPreferredPermissionMode(scope Scope, mode string) error {
 	if s.config.Options == nil {
 		s.config.Options = &Options{}
 	}
-	s.config.Options.PreferredCollaborationMode = mode
-	return s.SetConfigField(scope, "options.preferred_collaboration_mode", mode)
+	s.config.Options.PreferredPermissionMode = mode
+	return s.SetConfigField(scope, "options.preferred_permission_mode", mode)
+}
+
+// SetPreferredCollaborationMode keeps backward compatibility by mapping the
+// deprecated setting to preferred_permission_mode.
+func (s *ConfigStore) SetPreferredCollaborationMode(scope Scope, mode string) error {
+	return s.SetPreferredPermissionMode(scope, mode)
 }
 
 // SetMCPDisabled sets the disabled state for an MCP server and persists it.

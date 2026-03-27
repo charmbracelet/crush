@@ -46,6 +46,7 @@ type Querier interface {
 	UpdateMessage(ctx context.Context, arg UpdateMessageParams) error
 	UpdateSession(ctx context.Context, arg UpdateSessionParams) (Session, error)
 	UpdateSessionCollaborationMode(ctx context.Context, arg UpdateSessionCollaborationModeParams) (Session, error)
+	UpdateSessionPermissionMode(ctx context.Context, arg UpdateSessionPermissionModeParams) (Session, error)
 	UpdateSessionTitleAndUsage(ctx context.Context, arg UpdateSessionTitleAndUsageParams) (Session, error)
 }
 

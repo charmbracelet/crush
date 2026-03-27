@@ -48,6 +48,28 @@ func TestConfig_LoadFromBytesIncludesConfiguredAgents(t *testing.T) {
 	require.Equal(t, []string{"view"}, loadedConfig.Agents["reviewer"].AllowedTools)
 }
 
+func TestConfig_LoadFromBytesPreferredPermissionModeFallback(t *testing.T) {
+	t.Run("deprecated preferred_collaboration_mode is used as fallback", func(t *testing.T) {
+		cfg, err := loadFromBytes([][]byte{
+			[]byte(`{"options":{"preferred_collaboration_mode":"yolo"}}`),
+		})
+		require.NoError(t, err)
+		cfg.setDefaults("/tmp", "")
+		require.NotNil(t, cfg.Options)
+		require.Equal(t, "yolo", cfg.Options.PreferredPermissionMode)
+	})
+
+	t.Run("preferred_permission_mode takes precedence over deprecated key", func(t *testing.T) {
+		cfg, err := loadFromBytes([][]byte{
+			[]byte(`{"options":{"preferred_collaboration_mode":"default","preferred_permission_mode":"auto"}}`),
+		})
+		require.NoError(t, err)
+		cfg.setDefaults("/tmp", "")
+		require.NotNil(t, cfg.Options)
+		require.Equal(t, "auto", cfg.Options.PreferredPermissionMode)
+	})
+}
+
 // testStore wraps a Config in a minimal ConfigStore for testing.
 func testStore(cfg *Config) *ConfigStore {
 	return &ConfigStore{config: cfg}
@@ -67,7 +89,7 @@ func TestConfig_setDefaults(t *testing.T) {
 	require.NotNil(t, cfg.MCP)
 	require.Equal(t, filepath.Join("/tmp", ".crush"), cfg.Options.DataDirectory)
 	require.Equal(t, "AGENTS.md", cfg.Options.InitializeAs)
-	require.Equal(t, "auto", cfg.Options.PreferredCollaborationMode)
+	require.Equal(t, "auto", cfg.Options.PreferredPermissionMode)
 	for _, path := range defaultContextPaths {
 		require.Contains(t, cfg.Options.ContextPaths, path)
 	}
@@ -1661,5 +1683,58 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		require.Equal(t, "large-model", large.Model)
 		require.Equal(t, "openai", large.Provider)
 		require.Equal(t, int64(100), large.MaxTokens)
+	})
+
+	t.Run("should migrate legacy auto classifier model to both new slots", func(t *testing.T) {
+		knownProviders := []catwalk.Provider{
+			{
+				ID:                  "openai",
+				APIKey:              "abc",
+				DefaultLargeModelID: "large-model",
+				DefaultSmallModelID: "small-model",
+				Models: []catwalk.Model{
+					{
+						ID:               "large-model",
+						DefaultMaxTokens: 1000,
+					},
+					{
+						ID:               "small-model",
+						DefaultMaxTokens: 500,
+					},
+					{
+						ID:               "legacy-classifier",
+						DefaultMaxTokens: 750,
+					},
+				},
+			},
+		}
+
+		cfg := &Config{
+			Models: map[SelectedModelType]SelectedModel{
+				SelectedModelTypeAutoClassifier: {
+					Provider: "openai",
+					Model:    "legacy-classifier",
+				},
+			},
+		}
+		cfg.setDefaults("/tmp", "")
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
+		require.NoError(t, err)
+
+		err = configureSelectedModels(testStore(cfg), knownProviders)
+		require.NoError(t, err)
+
+		fast := cfg.Models[SelectedModelTypeAutoClassifierFast]
+		reasoning := cfg.Models[SelectedModelTypeAutoClassifierReasoning]
+		require.Equal(t, "openai", fast.Provider)
+		require.Equal(t, "legacy-classifier", fast.Model)
+		require.Equal(t, int64(750), fast.MaxTokens)
+		require.Equal(t, "openai", reasoning.Provider)
+		require.Equal(t, "legacy-classifier", reasoning.Model)
+		require.Equal(t, int64(750), reasoning.MaxTokens)
+		_, exists := cfg.Models[SelectedModelTypeAutoClassifier]
+		require.False(t, exists)
 	})
 }

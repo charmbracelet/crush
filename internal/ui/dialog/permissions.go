@@ -233,16 +233,17 @@ func (p *Permissions) HandleMsg(msg tea.Msg) Action {
 			// Escape denies the permission request.
 			return p.respond(PermissionDeny)
 		case key.Matches(msg, p.keyMap.Right), key.Matches(msg, p.keyMap.Tab):
-			p.selectedOption = (p.selectedOption + 1) % 3
+			p.selectedOption = (p.selectedOption + 1) % p.optionCount()
 		case key.Matches(msg, p.keyMap.Left):
-			// Add 2 instead of subtracting 1 to avoid negative modulo.
-			p.selectedOption = (p.selectedOption + 2) % 3
+			p.selectedOption = (p.selectedOption + p.optionCount() - 1) % p.optionCount()
 		case key.Matches(msg, p.keyMap.Select):
 			return p.selectCurrentOption()
 		case key.Matches(msg, p.keyMap.Allow):
 			return p.respond(PermissionAllow)
 		case key.Matches(msg, p.keyMap.AllowSession):
-			return p.respond(PermissionAllowForSession)
+			if p.canAllowSession() {
+				return p.respond(PermissionAllowForSession)
+			}
 		case key.Matches(msg, p.keyMap.Deny):
 			return p.respond(PermissionDeny)
 		case key.Matches(msg, p.keyMap.ToggleDiffMode):
@@ -301,10 +302,24 @@ func (p *Permissions) selectCurrentOption() tea.Msg {
 	case 0:
 		return p.respond(PermissionAllow)
 	case 1:
+		if !p.canAllowSession() {
+			return p.respond(PermissionDeny)
+		}
 		return p.respond(PermissionAllowForSession)
 	default:
 		return p.respond(PermissionDeny)
 	}
+}
+
+func (p *Permissions) canAllowSession() bool {
+	return p.permission.AutoReview == nil
+}
+
+func (p *Permissions) optionCount() int {
+	if p.canAllowSession() {
+		return 3
+	}
+	return 2
 }
 
 func (p *Permissions) respond(action PermissionAction) tea.Msg {
@@ -751,11 +766,15 @@ func (p *Permissions) renderContentPanel(content string, width int) string {
 }
 
 func (p *Permissions) renderButtons(contentWidth int) string {
-	buttons := []common.ButtonOpts{
-		{Text: "Allow", UnderlineIndex: 0, Selected: p.selectedOption == 0},
-		{Text: "Allow for Session", UnderlineIndex: 10, Selected: p.selectedOption == 1},
-		{Text: "Deny", UnderlineIndex: 0, Selected: p.selectedOption == 2},
+	buttons := []common.ButtonOpts{{Text: "Allow", UnderlineIndex: 0, Selected: p.selectedOption == 0}}
+	if p.canAllowSession() {
+		buttons = append(buttons, common.ButtonOpts{Text: "Allow for Session", UnderlineIndex: 10, Selected: p.selectedOption == 1})
 	}
+	denyIndex := 1
+	if p.canAllowSession() {
+		denyIndex = 2
+	}
+	buttons = append(buttons, common.ButtonOpts{Text: "Deny", UnderlineIndex: 0, Selected: p.selectedOption == denyIndex})
 
 	content := common.ButtonGroup(p.com.Styles, buttons, "  ")
 

@@ -5,6 +5,7 @@ INSERT INTO sessions (
     title,
     workspace_cwd,
     collaboration_mode,
+    permission_mode,
     kind,
     handoff_source_session_id,
     handoff_goal,
@@ -18,6 +19,7 @@ INSERT INTO sessions (
     updated_at,
     created_at
 ) VALUES (
+    ?,
     ?,
     ?,
     ?,
@@ -61,6 +63,7 @@ SET
     title = ?,
     workspace_cwd = ?,
     collaboration_mode = ?,
+    permission_mode = ?,
     kind = ?,
     handoff_source_session_id = ?,
     handoff_goal = ?,
@@ -79,6 +82,12 @@ RETURNING *;
 -- name: UpdateSessionCollaborationMode :one
 UPDATE sessions
 SET collaboration_mode = ?
+WHERE id = ?
+RETURNING *;
+
+-- name: UpdateSessionPermissionMode :one
+UPDATE sessions
+SET permission_mode = ?
 WHERE id = ?
 RETURNING *;
 

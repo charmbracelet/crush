@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/plugin"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 )
@@ -21,7 +23,7 @@ const (
 )
 
 type sessionClassifierState struct {
-	lastMode            session.CollaborationMode
+	lastMode            session.PermissionMode
 	consecutiveBlocks   int
 	totalBlocks         int
 	suspendAutoApproval bool
@@ -33,6 +35,7 @@ type service struct {
 	classifierFn                func() permission.Classifier
 	workingDir                  string
 	failClosedOnClassifierError bool
+	allowedTools                []string
 	classifierMu                sync.Mutex
 	sessionStates               map[string]sessionClassifierState
 }
@@ -43,6 +46,7 @@ func New(
 	classifierFn func() permission.Classifier,
 	workingDir string,
 	failClosedOnClassifierError bool,
+	allowedTools []string,
 ) permission.Service {
 	return &service{
 		base:                        base,
@@ -50,6 +54,7 @@ func New(
 		classifierFn:                classifierFn,
 		workingDir:                  workingDir,
 		failClosedOnClassifierError: failClosedOnClassifierError,
+		allowedTools:                slices.Clone(allowedTools),
 		sessionStates:               map[string]sessionClassifierState{},
 	}
 }
@@ -59,6 +64,11 @@ func (s *service) Subscribe(ctx context.Context) <-chan pubsub.Event[permission.
 }
 
 func (s *service) GrantPersistent(p permission.PermissionRequest) {
+	mode, err := s.sessionPermissionMode(context.Background(), p.SessionID)
+	if err == nil && mode != session.PermissionModeDefault {
+		s.base.Grant(p)
+		return
+	}
 	s.base.GrantPersistent(p)
 }
 
@@ -68,6 +78,14 @@ func (s *service) Grant(p permission.PermissionRequest) {
 
 func (s *service) Deny(p permission.PermissionRequest) {
 	s.base.Deny(p)
+}
+
+func (s *service) HasPersistentPermission(p permission.PermissionRequest) bool {
+	return s.base.HasPersistentPermission(p)
+}
+
+func (s *service) ClearPersistentPermissions(sessionID string) {
+	s.base.ClearPersistentPermissions(sessionID)
 }
 
 func (s *service) EvaluateRequest(ctx context.Context, opts permission.CreatePermissionRequest) (permission.EvaluationResult, error) {
@@ -91,8 +109,34 @@ func (s *service) Request(ctx context.Context, opts permission.CreatePermissionR
 		return false, permission.ErrorPermissionBlocked
 	}
 
-	mode, err := s.sessionMode(ctx, eval.Permission.SessionID)
-	if err != nil || mode != session.CollaborationModeAuto {
+	mode, err := s.sessionPermissionMode(ctx, eval.Permission.SessionID)
+	if err != nil {
+		return s.base.Prompt(ctx, eval.Permission)
+	}
+
+	if mode == session.PermissionModeYolo {
+		return true, nil
+	}
+
+	if s.isExplicitlyAllowed(opts, eval.Permission) {
+		return true, nil
+	}
+
+	switch classifyPluginDecision(eval.Permission) {
+	case permission.EvaluationDecisionAllow:
+		return true, nil
+	case permission.EvaluationDecisionDeny:
+		return false, permission.ErrorPermissionBlocked
+	}
+
+	if mode == session.PermissionModeDefault {
+		if s.base.HasPersistentPermission(eval.Permission) {
+			return true, nil
+		}
+		return s.base.Prompt(ctx, eval.Permission)
+	}
+
+	if mode != session.PermissionModeAuto {
 		return s.base.Prompt(ctx, eval.Permission)
 	}
 
@@ -212,27 +256,27 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func (s *service) sessionMode(ctx context.Context, sessionID string) (session.CollaborationMode, error) {
+func (s *service) sessionPermissionMode(ctx context.Context, sessionID string) (session.PermissionMode, error) {
 	if sessionID == "" {
-		return session.CollaborationModeDefault, nil
+		return session.PermissionModeDefault, nil
 	}
 	sess, err := s.sessions.Get(ctx, sessionID)
 	if err != nil {
-		return session.CollaborationModeDefault, err
+		return session.PermissionModeDefault, err
 	}
-	return sess.CollaborationMode, nil
+	return sess.PermissionMode, nil
 }
 
-func (s *service) shouldSuspendAutoApproval(sessionID string, mode session.CollaborationMode) bool {
+func (s *service) shouldSuspendAutoApproval(sessionID string, mode session.PermissionMode) bool {
 	s.classifierMu.Lock()
 	defer s.classifierMu.Unlock()
 
 	state := s.sessionStates[sessionID]
-	if mode != session.CollaborationModeAuto {
+	if mode != session.PermissionModeAuto {
 		delete(s.sessionStates, sessionID)
 		return false
 	}
-	if state.lastMode != session.CollaborationModeAuto {
+	if state.lastMode != session.PermissionModeAuto {
 		state = sessionClassifierState{lastMode: mode}
 		s.sessionStates[sessionID] = state
 		return false
@@ -245,7 +289,7 @@ func (s *service) resetClassifierBlocks(sessionID string) {
 	defer s.classifierMu.Unlock()
 
 	state := s.sessionStates[sessionID]
-	state.lastMode = session.CollaborationModeAuto
+	state.lastMode = session.PermissionModeAuto
 	state.consecutiveBlocks = 0
 	if state.totalBlocks < defaultMaxTotalClassifierBlocks {
 		state.suspendAutoApproval = false
@@ -258,13 +302,18 @@ func (s *service) recordClassifierBlock(sessionID string) {
 	defer s.classifierMu.Unlock()
 
 	state := s.sessionStates[sessionID]
-	state.lastMode = session.CollaborationModeAuto
+	state.lastMode = session.PermissionModeAuto
 	state.consecutiveBlocks++
 	state.totalBlocks++
 	if state.consecutiveBlocks >= defaultMaxConsecutiveClassifierBlocks || state.totalBlocks >= defaultMaxTotalClassifierBlocks {
 		state.suspendAutoApproval = true
 	}
 	s.sessionStates[sessionID] = state
+}
+
+func (s *service) isExplicitlyAllowed(opts permission.CreatePermissionRequest, req permission.PermissionRequest) bool {
+	commandKey := opts.ToolName + ":" + opts.Action
+	return slices.Contains(s.allowedTools, commandKey) || slices.Contains(s.allowedTools, req.ToolName)
 }
 
 func isAutoAllowedFastPath(req permission.PermissionRequest, workingDir string) bool {
@@ -445,6 +494,29 @@ func isAlwaysManual(req permission.PermissionRequest, workingDir string) bool {
 		return ok && isSensitiveWorkspacePath(filePath, workingDir)
 	default:
 		return strings.HasPrefix(req.ToolName, "mcp_") && req.Action == "execute"
+	}
+}
+
+func classifyPluginDecision(req permission.PermissionRequest) permission.EvaluationDecision {
+	hookDecision := plugin.TriggerPermissionAsk(plugin.PermissionAskInput{
+		Permission: plugin.PermissionRequest{
+			ID:          req.ID,
+			SessionID:   req.SessionID,
+			ToolCallID:  req.ToolCallID,
+			ToolName:    req.ToolName,
+			Description: req.Description,
+			Action:      req.Action,
+			Params:      req.Params,
+			Path:        req.Path,
+		},
+	})
+	switch hookDecision.Action {
+	case plugin.PermissionAllow:
+		return permission.EvaluationDecisionAllow
+	case plugin.PermissionDeny:
+		return permission.EvaluationDecisionDeny
+	default:
+		return permission.EvaluationDecisionAsk
 	}
 }
 

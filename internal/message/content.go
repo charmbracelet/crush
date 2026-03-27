@@ -544,7 +544,7 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 			var content fantasy.ToolResultOutputContent
 			if result.IsError {
 				content = fantasy.ToolResultOutputContentError{
-					Error: errors.New(result.Content),
+					Error: errors.New(result.ModelSafeContent()),
 				}
 			} else if result.Data != "" {
 				content = fantasy.ToolResultOutputContentMedia{
@@ -553,7 +553,7 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 				}
 			} else {
 				content = fantasy.ToolResultOutputContentText{
-					Text: result.Content,
+					Text: result.ModelSafeContent(),
 				}
 			}
 			parts = append(parts, fantasy.ToolResultPart{

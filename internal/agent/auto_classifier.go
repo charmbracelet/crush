@@ -16,8 +16,11 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 )
 
-//go:embed templates/auto_classifier.md
-var autoClassifierPrompt []byte
+//go:embed templates/auto_classifier_fast.md
+var autoClassifierFastPrompt []byte
+
+//go:embed templates/auto_classifier_reasoning.md
+var autoClassifierReasoningPrompt []byte
 
 var autoClassifierCodeFenceRegex = regexp.MustCompile("(?s)^```(?:json)?\\s*(.*?)\\s*```$")
 
@@ -28,7 +31,7 @@ type autoClassifierResponse struct {
 }
 
 func (c *coordinator) ClassifyPermission(ctx context.Context, req permission.PermissionRequest) (permission.AutoClassification, error) {
-	model, providerCfg, err := c.autoClassifierModel(ctx)
+	model, providerCfg, err := c.selectedModel(ctx, config.SelectedModelTypeAutoClassifierFast, false)
 	if err != nil {
 		return permission.AutoClassification{}, err
 	}
@@ -42,38 +45,50 @@ func (c *coordinator) ClassifyPermission(ctx context.Context, req permission.Per
 		return permission.AutoClassification{}, fmt.Errorf("failed to load messages for auto classification: %w", err)
 	}
 
-	maxOutputTokens := int64(512)
-	if model.ModelCfg.MaxTokens > 0 && model.ModelCfg.MaxTokens < maxOutputTokens {
-		maxOutputTokens = model.ModelCfg.MaxTokens
+	prompt := buildAutoClassifierPrompt(c.cfg.Config(), c.cfg.WorkingDir(), sess, req, msgs)
+	quickResult, err := c.runAutoGuardModel(ctx, model, providerCfg, string(autoClassifierFastPrompt), prompt, 8, 0.0)
+	if err != nil {
+		return permission.AutoClassification{}, err
 	}
-	if model.CatwalkCfg.DefaultMaxTokens > 0 && model.CatwalkCfg.DefaultMaxTokens < maxOutputTokens {
-		maxOutputTokens = model.CatwalkCfg.DefaultMaxTokens
-	}
-	if maxOutputTokens <= 0 {
-		maxOutputTokens = 512
-	}
-
-	providerOptions, temperature, topP, topK, freqPenalty, presPenalty := mergeCallOptions(model, providerCfg)
-	if temperature == nil {
-		defaultTemperature := 0.0
-		temperature = &defaultTemperature
+	if parseQuickClassifierDecision(quickResult) {
+		return permission.AutoClassification{
+			AllowAuto:  true,
+			Reason:     "Quick classifier allowed this request.",
+			Confidence: permission.AutoApprovalConfidenceMedium,
+		}, nil
 	}
 
+	reasoningModel, reasoningProviderCfg, err := c.selectedModel(ctx, config.SelectedModelTypeAutoClassifierReasoning, false)
+	if err != nil {
+		return permission.AutoClassification{}, err
+	}
+	reasoningResult, err := c.runAutoGuardModel(ctx, reasoningModel, reasoningProviderCfg, string(autoClassifierReasoningPrompt), prompt, 512, 0.0)
+	if err != nil {
+		return permission.AutoClassification{}, err
+	}
+	return parseAutoClassification(reasoningResult)
+}
+
+func (c *coordinator) runAutoGuardModel(
+	ctx context.Context,
+	model Model,
+	providerCfg config.ProviderConfig,
+	systemPrompt string,
+	prompt string,
+	maxOutputTokens int64,
+	temperature float64,
+) (string, error) {
 	agent := fantasy.NewAgent(
 		model.Model,
-		fantasy.WithSystemPrompt(string(autoClassifierPrompt)),
+		fantasy.WithSystemPrompt(systemPrompt),
 		fantasy.WithMaxOutputTokens(maxOutputTokens),
 		fantasy.WithUserAgent(userAgent),
 	)
 
 	resp, err := agent.Stream(copilot.ContextWithInitiatorType(ctx, copilot.InitiatorAgent), fantasy.AgentStreamCall{
-		Prompt:           buildAutoClassifierPrompt(c.cfg.WorkingDir(), sess.CollaborationMode, req, msgs),
-		ProviderOptions:  providerOptions,
-		Temperature:      temperature,
-		TopP:             topP,
-		TopK:             topK,
-		FrequencyPenalty: freqPenalty,
-		PresencePenalty:  presPenalty,
+		Prompt:          prompt,
+		ProviderOptions: getProviderOptions(model, providerCfg),
+		Temperature:     &temperature,
 		PrepareStep: func(callCtx context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			callCtx = copilot.ContextWithInitiatorType(callCtx, copilot.InitiatorAgent)
 			prepared.Messages = options.Messages
@@ -86,62 +101,22 @@ func (c *coordinator) ClassifyPermission(ctx context.Context, req permission.Per
 		},
 	})
 	if err != nil {
-		return permission.AutoClassification{}, fmt.Errorf("failed to classify permission request: %w", err)
+		return "", fmt.Errorf("failed to classify permission request: %w", err)
 	}
 	if resp == nil {
-		return permission.AutoClassification{}, fmt.Errorf("auto classification returned no response")
+		return "", fmt.Errorf("auto classification returned no response")
 	}
-
-	return parseAutoClassification(resp.Response.Content.Text())
+	return strings.TrimSpace(resp.Response.Content.Text()), nil
 }
 
-func (c *coordinator) autoClassifierModel(ctx context.Context) (Model, config.ProviderConfig, error) {
-	selectedModel, ok := c.cfg.Config().Models[config.SelectedModelTypeAutoClassifier]
-	if !ok {
-		return Model{}, config.ProviderConfig{}, fmt.Errorf("model type %q not configured", config.SelectedModelTypeAutoClassifier)
-	}
-
-	providerCfg, ok := c.cfg.Config().Providers.Get(selectedModel.Provider)
-	if !ok {
-		return Model{}, config.ProviderConfig{}, errModelProviderNotConfigured
-	}
-
-	catwalkModel, err := c.lookupCatwalkModel(selectedModel)
-	if err != nil {
-		return Model{}, config.ProviderConfig{}, err
-	}
-
-	thinkingDisabled := true
-	provider, err := c.buildProvider(providerCfg, catwalkModel, false, thinkingDisabled)
-	if err != nil {
-		return Model{}, config.ProviderConfig{}, err
-	}
-
-	modelID := selectedModel.Model
-	if selectedModel.Provider == "openrouter" && isExactoSupported(modelID) {
-		modelID += ":exacto"
-	}
-
-	languageModel, err := provider.LanguageModel(ctx, modelID)
-	if err != nil {
-		return Model{}, config.ProviderConfig{}, err
-	}
-
-	selectedModel.Think = boolPtr(false)
-
-	return Model{
-		Model:      languageModel,
-		CatwalkCfg: catwalkModel,
-		ModelCfg:   selectedModel,
-	}, providerCfg, nil
-}
-
-func buildAutoClassifierPrompt(workingDir string, mode session.CollaborationMode, req permission.PermissionRequest, msgs []message.Message) string {
+func buildAutoClassifierPrompt(cfg *config.Config, workingDir string, sess session.Session, req permission.PermissionRequest, msgs []message.Message) string {
 	var sb strings.Builder
 	sb.WriteString("Working directory:\n")
 	sb.WriteString(strings.TrimSpace(workingDir))
 	sb.WriteString("\n\nCollaboration mode:\n")
-	sb.WriteString(string(mode))
+	sb.WriteString(string(sess.CollaborationMode))
+	sb.WriteString("\n\nPermission mode:\n")
+	sb.WriteString(string(sess.PermissionMode))
 	sb.WriteString("\n\nPending permission request:\n")
 	sb.WriteString("- tool: ")
 	sb.WriteString(req.ToolName)
@@ -158,7 +133,34 @@ func buildAutoClassifierPrompt(workingDir string, mode session.CollaborationMode
 		sb.WriteString(fmt.Sprintf("%v", req.Params))
 	}
 
-	sb.WriteString("\n\nRecent transcript:\n")
+	if cfg != nil && cfg.Permissions != nil && cfg.Permissions.AutoMode != nil {
+		if len(cfg.Permissions.AutoMode.Environment) > 0 {
+			sb.WriteString("\n\nEnvironment:\n")
+			for _, item := range cfg.Permissions.AutoMode.Environment {
+				sb.WriteString("- ")
+				sb.WriteString(strings.TrimSpace(item))
+				sb.WriteByte('\n')
+			}
+		}
+		if len(cfg.Permissions.AutoMode.BlockRules) > 0 {
+			sb.WriteString("\nBlock rules:\n")
+			for _, item := range cfg.Permissions.AutoMode.BlockRules {
+				sb.WriteString("- ")
+				sb.WriteString(strings.TrimSpace(item))
+				sb.WriteByte('\n')
+			}
+		}
+		if len(cfg.Permissions.AutoMode.AllowExceptions) > 0 {
+			sb.WriteString("\nAllow exceptions:\n")
+			for _, item := range cfg.Permissions.AutoMode.AllowExceptions {
+				sb.WriteString("- ")
+				sb.WriteString(strings.TrimSpace(item))
+				sb.WriteByte('\n')
+			}
+		}
+	}
+
+	sb.WriteString("\nRecent transcript:\n")
 	for _, msg := range compactAutoClassifierMessages(msgs) {
 		appendAutoClassifierMessage(&sb, msg)
 	}
@@ -167,7 +169,7 @@ func buildAutoClassifierPrompt(workingDir string, mode session.CollaborationMode
 }
 
 func compactAutoClassifierMessages(msgs []message.Message) []message.Message {
-	const limit = 12
+	const limit = 16
 
 	filtered := make([]message.Message, 0, min(limit, len(msgs)))
 	for i := len(msgs) - 1; i >= 0 && len(filtered) < limit; i-- {
@@ -200,16 +202,6 @@ func appendAutoClassifierMessage(sb *strings.Builder, msg message.Message) {
 			sb.WriteString(truncateAutoClassifierText(call.Input, 300))
 			sb.WriteByte('\n')
 		}
-		for _, result := range msg.ToolResults() {
-			sb.WriteString("- tool_result ")
-			sb.WriteString(result.Name)
-			if result.IsError {
-				sb.WriteString(" (error)")
-			}
-			sb.WriteString(": ")
-			sb.WriteString(truncateAutoClassifierText(result.Content, 300))
-			sb.WriteByte('\n')
-		}
 	}
 }
 
@@ -220,6 +212,11 @@ func truncateAutoClassifierText(value string, limit int) string {
 		return value
 	}
 	return strings.TrimSpace(string(runes[:limit])) + "..."
+}
+
+func parseQuickClassifierDecision(raw string) bool {
+	raw = strings.TrimSpace(strings.ToUpper(raw))
+	return raw == "ALLOW"
 }
 
 func parseAutoClassification(raw string) (permission.AutoClassification, error) {

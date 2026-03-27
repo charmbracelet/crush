@@ -10,7 +10,6 @@ import (
 	"sync"
 
 	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/plugin"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
 )
@@ -157,6 +156,8 @@ type Service interface {
 	GrantPersistent(permission PermissionRequest)
 	Grant(permission PermissionRequest)
 	Deny(permission PermissionRequest)
+	HasPersistentPermission(permission PermissionRequest) bool
+	ClearPersistentPermissions(sessionID string)
 	EvaluateRequest(ctx context.Context, opts CreatePermissionRequest) (EvaluationResult, error)
 	Prompt(ctx context.Context, permission PermissionRequest) (bool, error)
 	Request(ctx context.Context, opts CreatePermissionRequest) (bool, error)
@@ -206,6 +207,31 @@ func (s *permissionService) GrantPersistent(permission PermissionRequest) {
 		s.activeRequest = nil
 	}
 	s.activeRequestMu.Unlock()
+}
+
+func (s *permissionService) HasPersistentPermission(permission PermissionRequest) bool {
+	s.sessionPermissionsMu.RLock()
+	defer s.sessionPermissionsMu.RUnlock()
+
+	for _, p := range s.sessionPermissions {
+		if matchesPersistentPermission(p, permission) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *permissionService) ClearPersistentPermissions(sessionID string) {
+	s.sessionPermissionsMu.Lock()
+	defer s.sessionPermissionsMu.Unlock()
+
+	filtered := s.sessionPermissions[:0]
+	for _, p := range s.sessionPermissions {
+		if p.SessionID != sessionID {
+			filtered = append(filtered, p)
+		}
+	}
+	s.sessionPermissions = filtered
 }
 
 func (s *permissionService) Grant(permission PermissionRequest) {
@@ -279,33 +305,6 @@ func (s *permissionService) EvaluateRequest(_ context.Context, opts CreatePermis
 	s.autoApproveSessionsMu.RUnlock()
 	if autoApprove {
 		return EvaluationResult{Decision: EvaluationDecisionAllow, Permission: permission}, nil
-	}
-
-	hookDecision := plugin.TriggerPermissionAsk(plugin.PermissionAskInput{
-		Permission: plugin.PermissionRequest{
-			ID:          permission.ID,
-			SessionID:   permission.SessionID,
-			ToolCallID:  permission.ToolCallID,
-			ToolName:    permission.ToolName,
-			Description: permission.Description,
-			Action:      permission.Action,
-			Params:      permission.Params,
-			Path:        permission.Path,
-		},
-	})
-	if hookDecision.Action == plugin.PermissionAllow {
-		return EvaluationResult{Decision: EvaluationDecisionAllow, Permission: permission}, nil
-	}
-	if hookDecision.Action == plugin.PermissionDeny {
-		return EvaluationResult{Decision: EvaluationDecisionDeny, Permission: permission}, nil
-	}
-
-	s.sessionPermissionsMu.RLock()
-	defer s.sessionPermissionsMu.RUnlock()
-	for _, p := range s.sessionPermissions {
-		if p.ToolName == permission.ToolName && p.Action == permission.Action && p.SessionID == permission.SessionID && p.Path == permission.Path {
-			return EvaluationResult{Decision: EvaluationDecisionAllow, Permission: permission}, nil
-		}
 	}
 
 	return EvaluationResult{Decision: EvaluationDecisionAsk, Permission: permission}, nil
@@ -394,6 +393,13 @@ func (s *permissionService) SetSkipRequests(skip bool) {
 
 func (s *permissionService) SkipRequests() bool {
 	return s.skip
+}
+
+func matchesPersistentPermission(granted PermissionRequest, requested PermissionRequest) bool {
+	return granted.ToolName == requested.ToolName &&
+		granted.Action == requested.Action &&
+		granted.SessionID == requested.SessionID &&
+		granted.Path == requested.Path
 }
 
 func NewPermissionService(workingDir string, skip bool, allowedTools []string) Service {

@@ -55,10 +55,14 @@ func handlePermissionRequest(ctx context.Context, req permission.PermissionReque
 		ToolCall:  toolCall,
 		Options: []PermissionOption{
 			{OptionID: allowOnceID, Name: "Allow once", Kind: PermissionOptionAllowOnce},
-			{OptionID: allowAlwaysID, Name: "Allow always", Kind: PermissionOptionAllowAlways},
 			{OptionID: rejectOnceID, Name: "Reject", Kind: PermissionOptionRejectOnce},
 			{OptionID: rejectAlwaysID, Name: "Reject always", Kind: PermissionOptionRejectAlways},
 		},
+	}
+	if req.AutoReview == nil {
+		params.Options = append(params.Options[:1], append([]PermissionOption{
+			{OptionID: allowAlwaysID, Name: "Allow always", Kind: PermissionOptionAllowAlways},
+		}, params.Options[1:]...)...)
 	}
 
 	raw, err := server.Call(ctx, "session/request_permission", params)
@@ -79,7 +83,11 @@ func handlePermissionRequest(ctx context.Context, req permission.PermissionReque
 	case "selected":
 		switch result.Outcome.OptionID {
 		case allowAlwaysID:
-			perms.GrantPersistent(req)
+			if req.AutoReview != nil {
+				perms.Grant(req)
+			} else {
+				perms.GrantPersistent(req)
+			}
 		case allowOnceID:
 			perms.Grant(req)
 		default:

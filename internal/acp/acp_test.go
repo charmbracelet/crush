@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/acp"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -99,6 +101,16 @@ func (f *fakeSessionService) Save(_ context.Context, s session.Session) (session
 func (f *fakeSessionService) UpdateCollaborationMode(_ context.Context, id string, mode session.CollaborationMode) (session.Session, error) {
 	return session.Session{ID: id}, nil
 }
+
+func (f *fakeSessionService) UpdatePermissionMode(_ context.Context, id string, mode session.PermissionMode) (session.Session, error) {
+	s := f.sessions[id]
+	s.ID = id
+	s.PermissionMode = mode
+	f.sessions[id] = s
+	return s, nil
+}
+
+func (f *fakeSessionService) SetDefaultPermissionMode(session.PermissionMode) {}
 
 func (f *fakeSessionService) UpdateTitleAndUsage(_ context.Context, id, title string, p, c int64, cost float64) error {
 	return nil
@@ -192,14 +204,21 @@ type fakeApp struct {
 	sessions    *fakeSessionService
 	messages    *fakeMessageService
 	coordinator *fakeCoordinator
+	permissions permission.Service
+	cfg         *config.ConfigStore
 	runtime     toolruntime.Service
 }
 
-func (a *fakeApp) GetSessions() session.Service       { return a.sessions }
-func (a *fakeApp) GetMessages() message.Service       { return a.messages }
-func (a *fakeApp) GetCoordinator() agent.Coordinator  { return a.coordinator }
-func (a *fakeApp) GetConfig() *config.ConfigStore     { return nil }
-func (a *fakeApp) GetPermissions() permission.Service { return nil }
+func (a *fakeApp) GetSessions() session.Service      { return a.sessions }
+func (a *fakeApp) GetMessages() message.Service      { return a.messages }
+func (a *fakeApp) GetCoordinator() agent.Coordinator { return a.coordinator }
+func (a *fakeApp) GetConfig() *config.ConfigStore    { return a.cfg }
+func (a *fakeApp) GetPermissions() permission.Service {
+	if a.permissions == nil {
+		a.permissions = permission.NewPermissionService(".", false, nil)
+	}
+	return a.permissions
+}
 func (a *fakeApp) GetToolRuntime() toolruntime.Service {
 	if a.runtime == nil {
 		a.runtime = toolruntime.NewService()
@@ -277,10 +296,15 @@ func buildRequest(t *testing.T, id int64, method string, params any) string {
 
 func readResponse(t *testing.T, scanner *bufio.Scanner) acp.Response {
 	t.Helper()
-	require.True(t, scanner.Scan(), "expected a response line")
-	var resp acp.Response
-	require.NoError(t, json.Unmarshal(scanner.Bytes(), &resp))
-	return resp
+	for scanner.Scan() {
+		var resp acp.Response
+		require.NoError(t, json.Unmarshal(scanner.Bytes(), &resp))
+		if resp.ID != nil {
+			return resp
+		}
+	}
+	require.FailNow(t, "expected a response line")
+	return acp.Response{}
 }
 
 func runSingleRequest(t *testing.T, app *fakeApp, reqLine string) acp.Response {
@@ -555,4 +579,78 @@ func TestSetConfigOptionMethodIsRouted(t *testing.T) {
 	require.NotNil(t, resp.Error)
 	// Should be handled by set_config_option and fail params, not method not found.
 	require.NotEqual(t, acp.CodeMethodNotFound, resp.Error.Code)
+}
+
+func TestSessionSetModePersistsPermissionMode(t *testing.T) {
+	t.Parallel()
+
+	sessionID := "sess-mode"
+	reqLine := buildRequest(t, 1, "session/set_mode", acp.SetModeParams{
+		SessionID: sessionID,
+		ModeID:    "yolo",
+	})
+
+	app := &fakeApp{
+		sessions:    newFakeSessionService(),
+		messages:    newFakeMessageService(),
+		coordinator: &fakeCoordinator{runResult: &fantasy.AgentResult{}},
+	}
+	app.sessions.sessions[sessionID] = session.Session{
+		ID:             sessionID,
+		Title:          "mode-test",
+		PermissionMode: session.PermissionModeDefault,
+	}
+
+	resp := runSingleRequest(t, app, reqLine)
+	require.Nil(t, resp.Error)
+
+	saved := app.sessions.sessions[sessionID]
+	require.Equal(t, session.PermissionModeYolo, saved.PermissionMode)
+}
+
+func TestSessionSetConfigOptionModePersistsPermissionMode(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	workingDir := filepath.Join(baseDir, "workspace")
+	require.NoError(t, os.MkdirAll(workingDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(workingDir, "crush.json"),
+		[]byte(`{"options":{"disable_provider_auto_update":true},"tools":{}}`),
+		0o644,
+	))
+
+	store, err := config.Init(workingDir, filepath.Join(baseDir, "state"), false)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, log.ResetForTesting())
+	})
+
+	sessionID := "sess-config-mode"
+	reqLine := buildRequest(t, 1, "session/set_config_option", acp.SetConfigOptionParams{
+		SessionID: sessionID,
+		ConfigID:  "mode",
+		Value:     "auto",
+	})
+
+	app := &fakeApp{
+		sessions:    newFakeSessionService(),
+		messages:    newFakeMessageService(),
+		coordinator: &fakeCoordinator{runResult: &fantasy.AgentResult{}},
+		cfg:         store,
+	}
+	app.sessions.sessions[sessionID] = session.Session{
+		ID:             sessionID,
+		Title:          "config-mode-test",
+		PermissionMode: session.PermissionModeDefault,
+	}
+
+	resp := runSingleRequest(t, app, reqLine)
+	require.Nil(t, resp.Error)
+
+	saved := app.sessions.sessions[sessionID]
+	require.Equal(t, session.PermissionModeAuto, saved.PermissionMode)
+
+	var result acp.SetConfigOptionResult
+	require.NoError(t, json.Unmarshal(resp.Result, &result))
 }

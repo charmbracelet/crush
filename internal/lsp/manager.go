@@ -160,9 +160,9 @@ func (s *Manager) startServer(ctx context.Context, name, filepath string, server
 	}
 
 	userConfigured := s.isUserConfigured(name)
-	autoLSP := s.cfg.Config().Options.AutoLSP
 
-	if autoLSP != nil && *autoLSP == false {
+	autoLSP := s.cfg.Config().Options.AutoLSP
+	if autoLSP != nil && !*autoLSP {
 		slog.Debug("Auto-start LSP disabled", "name", name)
 		return
 	}

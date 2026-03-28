@@ -129,6 +129,21 @@ func TestNewShellInjectsAgentEnvironment(t *testing.T) {
 	require.Equal(t, "1,crush,crush\n", stdout)
 }
 
+func TestWindowsGitBashStyleCDPath(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Skipping Windows-specific path normalization test")
+	}
+
+	workingDir := t.TempDir()
+	gitBashPath := toGitBashStylePath(t, workingDir)
+	shell := NewShell(&Options{WorkingDir: workingDir})
+
+	stdout, stderr, err := shell.Exec(t.Context(), "cd "+gitBashPath+" && pwd")
+	require.NoError(t, err, stderr)
+	require.Equal(t, filepath.Clean(workingDir), filepath.Clean(strings.TrimSpace(stdout)))
+	require.Equal(t, filepath.Clean(workingDir), filepath.Clean(shell.GetWorkingDir()))
+}
+
 func TestRuntimeEnvHookInjectsAndOverridesVars(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Skipping test on Windows")
@@ -159,4 +174,14 @@ func TestRuntimeEnvHookInjectsAndOverridesVars(t *testing.T) {
 
 	storedEnv := shell.GetEnv()
 	require.Equal(t, []string{"SHARED_VALUE=base"}, storedEnv)
+}
+
+func toGitBashStylePath(t *testing.T, path string) string {
+	t.Helper()
+
+	volume := filepath.VolumeName(path)
+	require.NotEmpty(t, volume)
+
+	trimmed := strings.TrimPrefix(filepath.ToSlash(path), filepath.ToSlash(volume))
+	return "/" + strings.ToLower(strings.TrimSuffix(volume, ":")) + trimmed
 }

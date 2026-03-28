@@ -16,10 +16,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/charmbracelet/x/exp/slice"
 	"mvdan.cc/sh/moreinterp/coreutils"
@@ -382,6 +384,7 @@ func (s *Shell) execCommon(ctx context.Context, command string, stdout, stderr i
 	if err != nil {
 		return fmt.Errorf("could not parse command: %w", err)
 	}
+	normalizeWindowsGitBashCDPaths(line, s.cwd)
 
 	runner, overrides, err = s.newInterp(ctx, stdout, stderr)
 	if err != nil {
@@ -402,6 +405,167 @@ func (s *Shell) exec(ctx context.Context, command string) (string, string, error
 // execStream executes commands using POSIX shell emulation with streaming output
 func (s *Shell) execStream(ctx context.Context, command string, stdout, stderr io.Writer) error {
 	return s.execCommon(ctx, command, stdout, stderr)
+}
+
+func normalizeWindowsGitBashCDPaths(node syntax.Node, cwd string) {
+	if runtime.GOOS != "windows" {
+		return
+	}
+
+	volume := filepath.VolumeName(cwd)
+	if volume == "" {
+		return
+	}
+
+	syntax.Walk(node, func(node syntax.Node) bool {
+		call, ok := node.(*syntax.CallExpr)
+		if !ok {
+			return true
+		}
+		if !isLiteralCommand(call, "cd") {
+			return true
+		}
+
+		normalizeWindowsGitBashCDCall(call, volume)
+		return true
+	})
+}
+
+func isLiteralCommand(call *syntax.CallExpr, name string) bool {
+	if call == nil || len(call.Args) == 0 {
+		return false
+	}
+	command, ok := literalWord(call.Args[0])
+	return ok && command == name
+}
+
+func normalizeWindowsGitBashCDCall(call *syntax.CallExpr, volume string) {
+	pathArg := firstCDPathArg(call.Args[1:])
+	if pathArg == nil {
+		return
+	}
+
+	rawPath, ok := literalWord(pathArg)
+	if !ok {
+		return
+	}
+
+	normalizedPath, ok := rewriteWindowsGitBashCDPath(rawPath, volume)
+	if !ok {
+		return
+	}
+
+	setLiteralWord(pathArg, filepath.ToSlash(normalizedPath))
+}
+
+func firstCDPathArg(args []*syntax.Word) *syntax.Word {
+	for i, arg := range args {
+		value, ok := literalWord(arg)
+		if !ok {
+			return nil
+		}
+		if value == "--" {
+			if i+1 >= len(args) {
+				return nil
+			}
+			return args[i+1]
+		}
+		if strings.HasPrefix(value, "-") && value != "-" {
+			continue
+		}
+		return arg
+	}
+	return nil
+}
+
+func rewriteWindowsGitBashCDPath(rawPath, volume string) (string, bool) {
+	if !isGitBashWindowsAbsolutePath(rawPath) {
+		return "", false
+	}
+
+	currentDriveRootPath := volume + filepath.FromSlash(rawPath)
+	if pathExists(currentDriveRootPath) {
+		return "", false
+	}
+
+	drivePath := gitBashWindowsPathToDrivePath(rawPath)
+	if !pathExists(drivePath) {
+		return "", false
+	}
+
+	return drivePath, true
+}
+
+func isGitBashWindowsAbsolutePath(path string) bool {
+	if len(path) < 2 || path[0] != '/' {
+		return false
+	}
+	drive := rune(path[1])
+	if !unicode.IsLetter(drive) {
+		return false
+	}
+	return len(path) == 2 || path[2] == '/' || path[2] == '\\'
+}
+
+func gitBashWindowsPathToDrivePath(path string) string {
+	drive := strings.ToUpper(path[1:2]) + ":"
+	if len(path) == 2 {
+		return drive + string(filepath.Separator)
+	}
+	return drive + filepath.FromSlash(path[2:])
+}
+
+func pathExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func literalWord(word *syntax.Word) (string, bool) {
+	if word == nil {
+		return "", false
+	}
+	return literalWordParts(word.Parts)
+}
+
+func literalWordParts(parts []syntax.WordPart) (string, bool) {
+	var b strings.Builder
+	for _, part := range parts {
+		switch x := part.(type) {
+		case *syntax.Lit:
+			b.WriteString(x.Value)
+		case *syntax.SglQuoted:
+			b.WriteString(x.Value)
+		case *syntax.DblQuoted:
+			value, ok := literalWordParts(x.Parts)
+			if !ok {
+				return "", false
+			}
+			b.WriteString(value)
+		default:
+			return "", false
+		}
+	}
+	return b.String(), true
+}
+
+func setLiteralWord(word *syntax.Word, value string) {
+	if word == nil {
+		return
+	}
+	if len(word.Parts) == 1 {
+		switch x := word.Parts[0].(type) {
+		case *syntax.Lit:
+			x.Value = value
+			return
+		case *syntax.SglQuoted:
+			x.Value = value
+			return
+		case *syntax.DblQuoted:
+			x.Parts = []syntax.WordPart{&syntax.Lit{Value: value}}
+			return
+		}
+	}
+	word.Parts = []syntax.WordPart{&syntax.Lit{Value: value}}
 }
 
 func (s *Shell) execHandlers() []func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {

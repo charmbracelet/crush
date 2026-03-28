@@ -6,8 +6,10 @@ import (
 	"testing"
 
 	"charm.land/bubbles/v2/textarea"
+	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/dialog"
 )
 
 // testMessageItem is a minimal chat item used to populate the chat list
@@ -28,6 +30,7 @@ var _ chat.MessageItem = testMessageItem{}
 // in isolation.
 func newTestUI() *UI {
 	com := common.DefaultCommon(nil)
+	keyMap := DefaultKeyMap()
 
 	ta := textarea.New()
 	ta.SetStyles(com.Styles.TextArea)
@@ -40,14 +43,29 @@ func newTestUI() *UI {
 	ta.Focus()
 
 	u := &UI{
+		keyMap:   keyMap,
 		com:      com,
+		dialog:   dialog.NewOverlay(),
 		status:   NewStatus(com, nil),
 		chat:     NewChat(com),
 		textarea: ta,
-		state:    uiChat,
-		focus:    uiFocusEditor,
-		width:    140,
-		height:   45,
+		attachments: attachments.New(
+			attachments.NewRenderer(
+				com.Styles.Attachments.Normal,
+				com.Styles.Attachments.Deleting,
+				com.Styles.Attachments.Image,
+				com.Styles.Attachments.Text,
+			),
+			attachments.Keymap{
+				DeleteMode: keyMap.Editor.AttachmentDeleteMode,
+				DeleteAll:  keyMap.Editor.DeleteAllAttachments,
+				Escape:     keyMap.Editor.Escape,
+			},
+		),
+		state:  uiChat,
+		focus:  uiFocusEditor,
+		width:  140,
+		height: 45,
 	}
 
 	return u

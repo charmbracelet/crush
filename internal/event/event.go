@@ -127,7 +127,11 @@ func pairsToProps(props ...any) posthog.Properties {
 	}
 
 	for i := 0; i < len(props); i += 2 {
-		key := props[i].(string)
+		key, ok := props[i].(string)
+		if !ok {
+			slog.Error("Event property key must be a string", "key", props[i], "index", i)
+			continue
+		}
 		value := props[i+1]
 		p = p.Set(key, value)
 	}

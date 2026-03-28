@@ -121,6 +121,14 @@ func TestCrossPlatformExecution(t *testing.T) {
 	}
 }
 
+func TestNewShellInjectsAgentEnvironment(t *testing.T) {
+	shell := NewShell(&Options{WorkingDir: t.TempDir(), Env: []string{}})
+
+	stdout, stderr, err := shell.Exec(t.Context(), "echo $CRUSH,$AGENT,$AI_AGENT")
+	require.NoError(t, err, stderr)
+	require.Equal(t, "1,crush,crush\n", stdout)
+}
+
 func TestRuntimeEnvHookInjectsAndOverridesVars(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Skipping test on Windows")

@@ -296,16 +296,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	}
 	promptPrefix = buildDelegationPromptPrefix(promptPrefix, agentTools, a.isSubAgent)
 	preflightState, err := a.buildChatRequestState(ctx, chatRequestStateInput{
-		SessionID:    call.SessionID,
-		Agent:        "session",
-		Model:        largeModel,
-		Provider:     providerCtx,
-		Purpose:      plugin.ChatTransformPurposePreflightEstimate,
-		Messages:     msgs,
-		Message:      transientUserMessage(call.SessionID, call.Prompt, call.Attachments),
-		Attachments:  call.Attachments,
-		SystemPrompt: systemPrompt,
-		PromptPrefix: promptPrefix,
+		SessionID:      call.SessionID,
+		Agent:          "session",
+		Model:          largeModel,
+		Provider:       providerCtx,
+		Purpose:        plugin.ChatTransformPurposePreflightEstimate,
+		Messages:       msgs,
+		Message:        transientUserMessage(call.SessionID, call.Prompt, call.Attachments),
+		Attachments:    call.Attachments,
+		SystemPrompt:   systemPrompt,
+		PromptPrefix:   promptPrefix,
 		PermissionMode: currentSession.PermissionMode,
 	})
 	if err != nil {
@@ -361,16 +361,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	defer a.activeRequests.Del(call.SessionID)
 
 	requestState, err := a.buildChatRequestState(genCtx, chatRequestStateInput{
-		SessionID:    call.SessionID,
-		Agent:        "session",
-		Model:        largeModel,
-		Provider:     providerCtx,
-		Purpose:      requestPurpose,
-		Messages:     msgs,
-		Message:      userMessage,
-		Attachments:  call.Attachments,
-		SystemPrompt: systemPrompt,
-		PromptPrefix: promptPrefix,
+		SessionID:      call.SessionID,
+		Agent:          "session",
+		Model:          largeModel,
+		Provider:       providerCtx,
+		Purpose:        requestPurpose,
+		Messages:       msgs,
+		Message:        userMessage,
+		Attachments:    call.Attachments,
+		SystemPrompt:   systemPrompt,
+		PromptPrefix:   promptPrefix,
 		PermissionMode: currentSession.PermissionMode,
 	})
 	if err != nil {
@@ -556,7 +556,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 					Finished:         false,
 				}
 				currentAssistant.AddToolCall(toolCall)
-				return a.messages.Update(genCtx, *currentAssistant)
+				return a.messages.Update(ctx, *currentAssistant)
 			},
 			OnRetry: func(providerErr *fantasy.ProviderError, delay time.Duration) {
 				slog.Info("Retrying after network error", "error", providerErr.Error(), "delay", delay)
@@ -578,7 +578,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 					Finished:         true,
 				}
 				currentAssistant.AddToolCall(toolCall)
-				return a.messages.Update(genCtx, *currentAssistant)
+				return a.messages.Update(ctx, *currentAssistant)
 			},
 			OnToolResult: func(result fantasy.ToolResultContent) error {
 				toolResult := a.convertToToolResult(result)
@@ -588,7 +588,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				if truncatedResult, truncated := a.truncateToolResult(currentAssistant.SessionID, toolResult); truncated {
 					toolResult = truncatedResult
 				}
-				toolMsg, createMsgErr := a.messages.Create(genCtx, currentAssistant.SessionID, message.CreateMessageParams{
+				toolMsg, createMsgErr := a.messages.Create(ctx, currentAssistant.SessionID, message.CreateMessageParams{
 					Role: message.Tool,
 					Parts: []message.ContentPart{
 						toolResult,
@@ -738,16 +738,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 					break
 				}
 				retryState, buildErr := a.buildChatRequestState(genCtx, chatRequestStateInput{
-					SessionID:    call.SessionID,
-					Agent:        "session",
-					Model:        largeModel,
-					Provider:     providerCtx,
-					Purpose:      requestPurpose,
-					Messages:     retryMsgs,
-					Message:      userMessage,
-					Attachments:  call.Attachments,
-					SystemPrompt: systemPrompt,
-					PromptPrefix: promptPrefix,
+					SessionID:      call.SessionID,
+					Agent:          "session",
+					Model:          largeModel,
+					Provider:       providerCtx,
+					Purpose:        requestPurpose,
+					Messages:       retryMsgs,
+					Message:        userMessage,
+					Attachments:    call.Attachments,
+					SystemPrompt:   systemPrompt,
+					PromptPrefix:   promptPrefix,
 					PermissionMode: currentSession.PermissionMode,
 				})
 				if buildErr != nil {
@@ -916,7 +916,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			}
 			content := "There was an error while executing the tool"
 			if isCancelErr {
-				content = "Tool execution canceled by user"
+				content = "Error: user cancelled assistant tool calling"
 			} else if isPermissionErr {
 				if hasPermissionErr && permissionErr.Kind == permission.PermissionErrorKindPolicyDenied {
 					content = cmp.Or(permissionErr.Message, "Permission blocked by safety policy")
@@ -1852,15 +1852,15 @@ func (a *sessionAgent) estimateNextStepPromptTokens(ctx context.Context, session
 		return 0, err
 	}
 	state, err := a.buildChatRequestState(ctx, chatRequestStateInput{
-		SessionID:    sessionID,
-		Agent:        "session",
-		Model:        model,
-		Provider:     provider,
-		Purpose:      plugin.ChatTransformPurposeNextStepEstimate,
-		Messages:     msgs,
-		Message:      message.Message{SessionID: sessionID, Role: message.User},
-		SystemPrompt: systemPrompt,
-		PromptPrefix: promptPrefix,
+		SessionID:      sessionID,
+		Agent:          "session",
+		Model:          model,
+		Provider:       provider,
+		Purpose:        plugin.ChatTransformPurposeNextStepEstimate,
+		Messages:       msgs,
+		Message:        message.Message{SessionID: sessionID, Role: message.User},
+		SystemPrompt:   systemPrompt,
+		PromptPrefix:   promptPrefix,
 		PermissionMode: currentSession.PermissionMode,
 	})
 	if err != nil {

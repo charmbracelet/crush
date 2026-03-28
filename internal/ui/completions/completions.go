@@ -2,9 +2,11 @@ package completions
 
 import (
 	"cmp"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
+	"unicode"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -14,6 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/ordered"
+	"github.com/sahilm/fuzzy"
 )
 
 const (
@@ -21,6 +24,27 @@ const (
 	maxHeight = 10
 	minWidth  = 10
 	maxWidth  = 100
+
+	fullMatchWeight = 1_000
+	baseMatchWeight = 300
+
+	pathPrefixBonus       = 5_000
+	pathContainsBonus     = 2_000
+	pathContainsHintBonus = 2_500
+	basePrefixBonus       = 1_500
+	baseContainsBonus     = 500
+	basePrefixHintBonus   = 300
+	baseContainsHintBonus = 120
+
+	depthPenaltyDefault  = 20
+	depthPenaltyPathHint = 5
+)
+
+const (
+	tierExactName = iota
+	tierPrefixName
+	tierPathSegment
+	tierFallback
 )
 
 // SelectionMsg is sent when a completion is selected.
@@ -58,6 +82,12 @@ type Completions struct {
 	normalStyle  lipgloss.Style
 	focusedStyle lipgloss.Style
 	matchStyle   lipgloss.Style
+
+	// Items and ranking state
+	items    []*CompletionItem
+	filtered []*CompletionItem
+	paths    []string
+	bases    []string
 }
 
 // New creates a new completions component.
@@ -142,8 +172,19 @@ func (c *Completions) SetItems(files []FileCompletionValue, resources []Resource
 
 	c.open = true
 	c.query = ""
-	c.list.SetItems(items...)
-	c.list.SetFilter("")
+	c.items = make([]*CompletionItem, len(items))
+	for i, item := range items {
+		c.items[i] = item.(*CompletionItem)
+	}
+	c.paths = make([]string, len(c.items))
+	c.bases = make([]string, len(c.items))
+	for i, item := range c.items {
+		path := item.Filter()
+		c.paths[i] = path
+		c.bases[i] = pathBase(path)
+	}
+	c.filtered = c.rank(queryContext{query: c.query})
+	c.setVisibleItems(c.filtered)
 	c.list.Focus()
 
 	c.width = maxWidth
@@ -171,13 +212,13 @@ func (c *Completions) Filter(query string) {
 	}
 
 	c.query = query
-	c.list.SetFilter(query)
-
+	c.filtered = c.rank(queryContext{query: query})
+	c.setVisibleItems(c.filtered)
 	c.updateSize()
 }
 
 func (c *Completions) updateSize() {
-	items := c.list.FilteredItems()
+	items := c.filtered
 	start, end := c.list.VisibleItemIndices()
 	width := 0
 	for i := start; i <= end; i++ {
@@ -197,7 +238,7 @@ func (c *Completions) updateSize() {
 
 // HasItems returns whether there are visible items.
 func (c *Completions) HasItems() bool {
-	return len(c.list.FilteredItems()) > 0
+	return len(c.filtered) > 0
 }
 
 // Update handles key events for the completions.
@@ -236,7 +277,7 @@ func (c *Completions) Update(msg tea.KeyPressMsg) (tea.Msg, bool) {
 
 // selectPrev selects the previous item with circular navigation.
 func (c *Completions) selectPrev() {
-	items := c.list.FilteredItems()
+	items := c.filtered
 	if len(items) == 0 {
 		return
 	}
@@ -248,7 +289,7 @@ func (c *Completions) selectPrev() {
 
 // selectNext selects the next item with circular navigation.
 func (c *Completions) selectNext() {
-	items := c.list.FilteredItems()
+	items := c.filtered
 	if len(items) == 0 {
 		return
 	}
@@ -260,7 +301,7 @@ func (c *Completions) selectNext() {
 
 // selectCurrent returns a command with the currently selected item.
 func (c *Completions) selectCurrent(keepOpen bool) tea.Msg {
-	items := c.list.FilteredItems()
+	items := c.filtered
 	if len(items) == 0 {
 		return nil
 	}
@@ -270,10 +311,7 @@ func (c *Completions) selectCurrent(keepOpen bool) tea.Msg {
 		return nil
 	}
 
-	item, ok := items[selected].(*CompletionItem)
-	if !ok {
-		return nil
-	}
+	item := items[selected]
 
 	if !keepOpen {
 		c.open = false
@@ -301,12 +339,239 @@ func (c *Completions) Render() string {
 		return ""
 	}
 
-	items := c.list.FilteredItems()
+	items := c.filtered
 	if len(items) == 0 {
 		return ""
 	}
 
 	return c.list.Render()
+}
+
+func (c *Completions) setVisibleItems(items []*CompletionItem) {
+	filterables := make([]list.FilterableItem, 0, len(items))
+	for _, item := range items {
+		filterables = append(filterables, item)
+	}
+	c.list.SetItems(filterables...)
+}
+
+type queryContext struct {
+	query string
+}
+
+type rankedItem struct {
+	item  *CompletionItem
+	score int
+}
+
+func (c *Completions) rank(ctx queryContext) []*CompletionItem {
+	query := strings.TrimSpace(ctx.query)
+	if query == "" {
+		for _, item := range c.items {
+			item.SetMatch(fuzzy.Match{})
+		}
+		return c.items
+	}
+
+	fullMatches := matchIndex(query, c.paths)
+	baseMatches := matchIndex(query, c.bases)
+	allIndexes := make(map[int]struct{}, len(fullMatches)+len(baseMatches))
+	for idx := range fullMatches {
+		allIndexes[idx] = struct{}{}
+	}
+	for idx := range baseMatches {
+		allIndexes[idx] = struct{}{}
+	}
+
+	queryLower := strings.ToLower(query)
+	pathHint := hasPathHint(query)
+	ranked := make([]rankedItem, 0, len(allIndexes))
+	for idx := range allIndexes {
+		path := c.paths[idx]
+		pathLower := strings.ToLower(path)
+		baseLower := strings.ToLower(c.bases[idx])
+
+		fullMatch, hasFullMatch := fullMatches[idx]
+		baseMatch, hasBaseMatch := baseMatches[idx]
+
+		pathPrefix := strings.HasPrefix(pathLower, queryLower)
+		pathContains := strings.Contains(pathLower, queryLower)
+		basePrefix := strings.HasPrefix(baseLower, queryLower)
+		baseContains := strings.Contains(baseLower, queryLower)
+
+		score := 0
+		if hasFullMatch {
+			score += fullMatch.Score * fullMatchWeight
+		}
+		if hasBaseMatch {
+			score += baseMatch.Score * baseMatchWeight
+		}
+		if pathPrefix {
+			score += pathPrefixBonus
+		}
+		if pathContains {
+			score += pathContainsBonus
+		}
+		if pathHint {
+			if pathContains {
+				score += pathContainsHintBonus
+			}
+			if basePrefix {
+				score += basePrefixHintBonus
+			}
+			if baseContains {
+				score += baseContainsHintBonus
+			}
+		} else {
+			if basePrefix {
+				score += basePrefixBonus
+			}
+			if baseContains {
+				score += baseContainsBonus
+			}
+		}
+
+		depthPenalty := depthPenaltyDefault
+		if pathHint {
+			depthPenalty = depthPenaltyPathHint
+		}
+		score -= strings.Count(path, "/") * depthPenalty
+		score -= ansi.StringWidth(path)
+
+		if hasFullMatch && (!hasBaseMatch || fullMatch.Score*fullMatchWeight >= baseMatch.Score*baseMatchWeight) {
+			c.items[idx].SetMatch(fullMatch)
+		} else if hasBaseMatch {
+			c.items[idx].SetMatch(remapMatchToPath(baseMatch, path))
+		} else {
+			c.items[idx].SetMatch(fuzzy.Match{})
+		}
+
+		ranked = append(ranked, rankedItem{
+			item:  c.items[idx],
+			score: score,
+		})
+	}
+
+	slices.SortStableFunc(ranked, func(a, b rankedItem) int {
+		if a.score != b.score {
+			return b.score - a.score
+		}
+		return strings.Compare(a.item.Text(), b.item.Text())
+	})
+
+	result := make([]*CompletionItem, 0, len(ranked))
+	for _, item := range ranked {
+		result = append(result, item.item)
+	}
+	return result
+}
+
+func matchIndex(query string, values []string) map[int]fuzzy.Match {
+	source := stringSource(values)
+	matches := fuzzy.FindFrom(query, source)
+	result := make(map[int]fuzzy.Match, len(matches))
+	for _, match := range matches {
+		result[match.Index] = match
+	}
+	return result
+}
+
+type stringSource []string
+
+func (s stringSource) Len() int {
+	return len(s)
+}
+
+func (s stringSource) String(i int) string {
+	return s[i]
+}
+
+func pathBase(value string) string {
+	trimmed := strings.TrimRight(value, `/\`)
+	if trimmed == "" {
+		return value
+	}
+	idx := strings.LastIndexAny(trimmed, `/\`)
+	if idx < 0 {
+		return trimmed
+	}
+	return trimmed[idx+1:]
+}
+
+func remapMatchToPath(match fuzzy.Match, fullPath string) fuzzy.Match {
+	base := pathBase(fullPath)
+	if base == "" {
+		return match
+	}
+	offset := len(fullPath) - len(base)
+	remapped := make([]int, 0, len(match.MatchedIndexes))
+	for _, idx := range match.MatchedIndexes {
+		remapped = append(remapped, offset+idx)
+	}
+	match.MatchedIndexes = remapped
+	return match
+}
+
+func hasPathHint(query string) bool {
+	if strings.Contains(query, "/") || strings.Contains(query, "\\") {
+		return true
+	}
+
+	lastDot := strings.LastIndex(query, ".")
+	if lastDot < 0 || lastDot == len(query)-1 {
+		return false
+	}
+
+	suffix := query[lastDot+1:]
+	if len(suffix) > 12 {
+		return false
+	}
+
+	hasLetter := false
+	for _, r := range suffix {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' && r != '-' {
+			return false
+		}
+		if unicode.IsLetter(r) {
+			hasLetter = true
+		}
+	}
+
+	return hasLetter
+}
+
+func namePriorityTier(path, query string) int {
+	queryLower := strings.ToLower(strings.TrimSpace(query))
+	if queryLower == "" {
+		return tierFallback
+	}
+
+	normalized := strings.ToLower(strings.ReplaceAll(path, `\`, `/`))
+	base := strings.ToLower(pathBase(normalized))
+	stem := strings.TrimSuffix(base, filepath.Ext(base))
+
+	if base == queryLower || stem == queryLower {
+		return tierExactName
+	}
+	if strings.HasPrefix(base, queryLower) {
+		return tierPrefixName
+	}
+	if hasPathSegment(normalized, queryLower) {
+		return tierPathSegment
+	}
+	return tierFallback
+}
+
+func hasPathSegment(pathLower, queryLower string) bool {
+	if queryLower == "" {
+		return false
+	}
+	for _, part := range strings.Split(pathLower, "/") {
+		if part == queryLower {
+			return true
+		}
+	}
+	return false
 }
 
 func loadFiles(depth, limit int) []FileCompletionValue {

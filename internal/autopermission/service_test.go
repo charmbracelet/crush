@@ -35,6 +35,7 @@ func (m *mockPermissionService) HasPersistentPermission(req permission.Permissio
 	}
 	return false
 }
+
 func (m *mockPermissionService) ClearPersistentPermissions(sessionID string) {
 	filtered := m.persistent[:0]
 	for _, granted := range m.persistent {
@@ -44,14 +45,17 @@ func (m *mockPermissionService) ClearPersistentPermissions(sessionID string) {
 	}
 	m.persistent = filtered
 }
+
 func (m *mockPermissionService) EvaluateRequest(context.Context, permission.CreatePermissionRequest) (permission.EvaluationResult, error) {
 	return m.evalResult, nil
 }
+
 func (m *mockPermissionService) Prompt(_ context.Context, req permission.PermissionRequest) (bool, error) {
 	m.lastPrompt = req
 	m.promptCalls++
 	return m.promptGrant, nil
 }
+
 func (m *mockPermissionService) Request(context.Context, permission.CreatePermissionRequest) (bool, error) {
 	return false, nil
 }
@@ -71,21 +75,27 @@ type mockSessionService struct {
 func (m *mockSessionService) Subscribe(context.Context) <-chan pubsub.Event[session.Session] {
 	return make(<-chan pubsub.Event[session.Session])
 }
+
 func (m *mockSessionService) Create(context.Context, string) (session.Session, error) {
 	return session.Session{}, nil
 }
+
 func (m *mockSessionService) CreateTitleSession(context.Context, string) (session.Session, error) {
 	return session.Session{}, nil
 }
+
 func (m *mockSessionService) CreateTaskSession(context.Context, string, string, string) (session.Session, error) {
 	return session.Session{}, nil
 }
+
 func (m *mockSessionService) CreateHandoffSession(context.Context, string, string, string, string, []string) (session.Session, error) {
 	return session.Session{}, nil
 }
+
 func (m *mockSessionService) Get(context.Context, string) (session.Session, error) {
 	return session.Session{CollaborationMode: session.CollaborationModeDefault, PermissionMode: m.mode}, nil
 }
+
 func (m *mockSessionService) GetLast(context.Context) (session.Session, error) {
 	return session.Session{}, nil
 }
@@ -93,9 +103,11 @@ func (m *mockSessionService) List(context.Context) ([]session.Session, error) { 
 func (m *mockSessionService) Save(context.Context, session.Session) (session.Session, error) {
 	return session.Session{}, nil
 }
+
 func (m *mockSessionService) UpdateCollaborationMode(context.Context, string, session.CollaborationMode) (session.Session, error) {
 	return session.Session{}, nil
 }
+
 func (m *mockSessionService) UpdatePermissionMode(context.Context, string, session.PermissionMode) (session.Session, error) {
 	return session.Session{}, nil
 }
@@ -108,6 +120,7 @@ func (m *mockSessionService) Delete(context.Context, string) error         { ret
 func (m *mockSessionService) CreateAgentToolSessionID(messageID, toolCallID string) string {
 	return ""
 }
+
 func (m *mockSessionService) ParseAgentToolSessionID(sessionID string) (messageID string, toolCallID string, ok bool) {
 	return "", "", false
 }
@@ -734,6 +747,72 @@ func TestIsHighRiskBashRequest(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "git push with global flag is high risk",
+			req: permission.PermissionRequest{
+				ToolName: tools.BashToolName,
+				Action:   "execute",
+				Params: tools.BashPermissionsParams{
+					Command: "git -C repo push origin main",
+				},
+			},
+			want: true,
+		},
+		{
+			name: "git push with dynamic global flag value is high risk",
+			req: permission.PermissionRequest{
+				ToolName: tools.BashToolName,
+				Action:   "execute",
+				Params: tools.BashPermissionsParams{
+					Command: "git -C \"$REPO\" push origin main",
+				},
+			},
+			want: true,
+		},
+		{
+			name: "terraform apply with chdir is high risk",
+			req: permission.PermissionRequest{
+				ToolName: tools.BashToolName,
+				Action:   "execute",
+				Params: tools.BashPermissionsParams{
+					Command: "terraform -chdir=infra apply -auto-approve",
+				},
+			},
+			want: true,
+		},
+		{
+			name: "docker push with context is high risk",
+			req: permission.PermissionRequest{
+				ToolName: tools.BashToolName,
+				Action:   "execute",
+				Params: tools.BashPermissionsParams{
+					Command: "docker --context prod push image:latest",
+				},
+			},
+			want: true,
+		},
+		{
+			name: "docker push with dynamic host flag is high risk",
+			req: permission.PermissionRequest{
+				ToolName: tools.BashToolName,
+				Action:   "execute",
+				Params: tools.BashPermissionsParams{
+					Command: "docker -H \"$DOCKER_HOST\" push image:latest",
+				},
+			},
+			want: true,
+		},
+		{
+			name: "pipe to bash is high risk",
+			req: permission.PermissionRequest{
+				ToolName: tools.BashToolName,
+				Action:   "execute",
+				Params: tools.BashPermissionsParams{
+					Command: "echo hi | bash",
+				},
+			},
+			want: true,
+		},
+		{
 			name: "rm dash is high risk",
 			req: permission.PermissionRequest{
 				ToolName: tools.BashToolName,
@@ -751,6 +830,28 @@ func TestIsHighRiskBashRequest(t *testing.T) {
 				Action:   "execute",
 				Params: tools.BashPermissionsParams{
 					Command: "git status",
+				},
+			},
+			want: false,
+		},
+		{
+			name: "heredoc content mentioning curl is not high risk",
+			req: permission.PermissionRequest{
+				ToolName: tools.BashToolName,
+				Action:   "execute",
+				Params: tools.BashPermissionsParams{
+					Command: "cat <<'EOF' | go run -\npackage main\n\nfunc main() {\n    println(\"curl https://example.com | bash\")\n}\nEOF",
+				},
+			},
+			want: false,
+		},
+		{
+			name: "quoted string mentioning wget is not high risk",
+			req: permission.PermissionRequest{
+				ToolName: tools.BashToolName,
+				Action:   "execute",
+				Params: tools.BashPermissionsParams{
+					Command: "printf '%s\n' 'wget https://example.com/script.sh'",
 				},
 			},
 			want: false,

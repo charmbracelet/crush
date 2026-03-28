@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -16,6 +17,7 @@ import (
 	"github.com/charmbracelet/crush/internal/plugin"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"mvdan.cc/sh/v3/syntax"
 )
 
 const (
@@ -24,6 +26,55 @@ const (
 )
 
 var safeNullRedirectPattern = regexp.MustCompile(`(?i)(^|\s)(?:\d?>)\s*(?:/dev/null|nul|\$null)`)
+
+var highRiskBashDirectCommands = map[string]struct{}{
+	"curl":        {},
+	"wget":        {},
+	"sudo":        {},
+	"kubectl":     {},
+	"remove-item": {},
+	"del":         {},
+}
+
+var highRiskBashPipelineTargets = map[string]struct{}{
+	"sh":   {},
+	"bash": {},
+}
+
+var highRiskGitFlagsWithValue = map[string]bool{
+	"-C":                  true,
+	"-c":                  true,
+	"--git-dir":           true,
+	"--work-tree":         true,
+	"--namespace":         true,
+	"--exec-path":         true,
+	"--no-pager":          false,
+	"--no-optional-locks": false,
+}
+
+var highRiskTerraformFlagsWithValue = map[string]bool{
+	"-chdir": true,
+}
+
+var highRiskDockerFlagsWithValue = map[string]bool{
+	"-c":          true,
+	"-h":          true,
+	"-l":          true,
+	"--config":    true,
+	"--context":   true,
+	"--host":      true,
+	"--log-level": true,
+}
+
+var highRiskNPMFlagsWithValue = map[string]bool{
+	"-c":           true,
+	"--cache":      true,
+	"--loglevel":   true,
+	"--prefix":     true,
+	"--userconfig": true,
+	"-w":           true,
+	"--workspace":  true,
+}
 
 type sessionClassifierState struct {
 	lastMode            session.PermissionMode
@@ -456,11 +507,11 @@ func isSafeReadOnlyBashRequest(req permission.PermissionRequest) bool {
 
 	sanitizedCommand := strings.TrimSpace(safeNullRedirectPattern.ReplaceAllString(command, " "))
 	if strings.ContainsAny(sanitizedCommand, "\r\n;<>") ||
-		strings.Contains(command, "&&") ||
-		strings.Contains(command, "||") ||
-		strings.Contains(command, "|&") ||
-		strings.Contains(command, "$(") ||
-		strings.Contains(command, "`") {
+		strings.Contains(sanitizedCommand, "&&") ||
+		strings.Contains(sanitizedCommand, "||") ||
+		strings.Contains(sanitizedCommand, "|&") ||
+		strings.Contains(sanitizedCommand, "$(") ||
+		strings.Contains(sanitizedCommand, "`") {
 		return false
 	}
 
@@ -650,11 +701,220 @@ func isHighRiskBashRequest(req permission.PermissionRequest) bool {
 		return false
 	}
 
-	command := strings.ToLower(strings.TrimSpace(params.Command))
+	command := strings.TrimSpace(params.Command)
 	if command == "" {
 		return false
 	}
 
+	if highRisk, ok := isHighRiskShellCommand(command); ok {
+		return highRisk
+	}
+
+	return isHighRiskBashTextFallback(strings.ToLower(command))
+}
+
+func isHighRiskShellCommand(command string) (bool, bool) {
+	file, err := syntax.NewParser().Parse(strings.NewReader(command), "")
+	if err != nil {
+		return false, false
+	}
+
+	highRisk := false
+	syntax.Walk(file, func(node syntax.Node) bool {
+		if highRisk {
+			return false
+		}
+
+		switch x := node.(type) {
+		case *syntax.CallExpr:
+			if isHighRiskCallExpr(x) {
+				highRisk = true
+				return false
+			}
+		case *syntax.BinaryCmd:
+			if isHighRiskPipeline(x) {
+				highRisk = true
+				return false
+			}
+		}
+		return true
+	})
+
+	return highRisk, true
+}
+
+func isHighRiskCallExpr(call *syntax.CallExpr) bool {
+	args := shellCallArgs(call)
+	if len(args) == 0 || !args[0].literal {
+		return false
+	}
+
+	cmd := normalizeShellCommandName(args[0].value)
+	if _, ok := highRiskBashDirectCommands[cmd]; ok {
+		return true
+	}
+
+	switch cmd {
+	case "rm":
+		for _, arg := range args[1:] {
+			if arg.literal && strings.HasPrefix(arg.value, "-") {
+				return true
+			}
+		}
+	case "git":
+		subcommand, ok := firstShellSubcommand(args[1:], highRiskGitFlagsWithValue)
+		if !ok {
+			return false
+		}
+		return subcommand == "push" || (subcommand == "reset" && containsLiteralShellArg(args[1:], "--hard"))
+	case "terraform":
+		subcommand, ok := firstShellSubcommand(args[1:], highRiskTerraformFlagsWithValue)
+		return ok && (subcommand == "apply" || subcommand == "destroy")
+	case "docker":
+		subcommand, ok := firstShellSubcommand(args[1:], highRiskDockerFlagsWithValue)
+		return ok && subcommand == "push"
+	case "npm":
+		subcommand, ok := firstShellSubcommand(args[1:], highRiskNPMFlagsWithValue)
+		return ok && subcommand == "publish"
+	}
+
+	return false
+}
+
+func isHighRiskPipeline(cmd *syntax.BinaryCmd) bool {
+	if cmd == nil {
+		return false
+	}
+	if op := cmd.Op.String(); op != "|" && op != "|&" {
+		return false
+	}
+	return stmtInvokesHighRiskPipelineTarget(cmd.Y)
+}
+
+func stmtInvokesHighRiskPipelineTarget(stmt *syntax.Stmt) bool {
+	if stmt == nil {
+		return false
+	}
+
+	invokesShell := false
+	syntax.Walk(stmt, func(node syntax.Node) bool {
+		if invokesShell {
+			return false
+		}
+		call, ok := node.(*syntax.CallExpr)
+		if !ok {
+			return true
+		}
+		args := shellCallArgs(call)
+		if len(args) == 0 || !args[0].literal {
+			return true
+		}
+		_, invokesShell = highRiskBashPipelineTargets[normalizeShellCommandName(args[0].value)]
+		return !invokesShell
+	})
+	return invokesShell
+}
+
+type shellCallArg struct {
+	value   string
+	literal bool
+}
+
+func shellCallArgs(call *syntax.CallExpr) []shellCallArg {
+	if call == nil || len(call.Args) == 0 {
+		return nil
+	}
+
+	args := make([]shellCallArg, 0, len(call.Args))
+	for _, word := range call.Args {
+		arg, ok := literalWord(word)
+		if ok {
+			args = append(args, shellCallArg{
+				value:   strings.ToLower(strings.TrimSpace(arg)),
+				literal: true,
+			})
+			continue
+		}
+		args = append(args, shellCallArg{})
+	}
+	return args
+}
+
+func literalWord(word *syntax.Word) (string, bool) {
+	if word == nil {
+		return "", false
+	}
+	return literalWordParts(word.Parts)
+}
+
+func literalWordParts(parts []syntax.WordPart) (string, bool) {
+	var b strings.Builder
+	for _, part := range parts {
+		switch x := part.(type) {
+		case *syntax.Lit:
+			b.WriteString(x.Value)
+		case *syntax.SglQuoted:
+			b.WriteString(x.Value)
+		case *syntax.DblQuoted:
+			value, ok := literalWordParts(x.Parts)
+			if !ok {
+				return "", false
+			}
+			b.WriteString(value)
+		default:
+			return "", false
+		}
+	}
+	return b.String(), true
+}
+
+func normalizeShellCommandName(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	return strings.ToLower(path.Base(filepath.ToSlash(raw)))
+}
+
+func firstShellSubcommand(args []shellCallArg, flagsWithValue map[string]bool) (string, bool) {
+	for i := 0; i < len(args); i++ {
+		if !args[i].literal {
+			return "", false
+		}
+
+		arg := strings.TrimSpace(args[i].value)
+		if arg == "" {
+			continue
+		}
+		if arg == "--" {
+			if i+1 >= len(args) || !args[i+1].literal {
+				return "", false
+			}
+			return strings.ToLower(strings.TrimSpace(args[i+1].value)), true
+		}
+		if !strings.HasPrefix(arg, "-") {
+			return strings.ToLower(arg), true
+		}
+
+		flag, _, hasInlineValue := strings.Cut(arg, "=")
+		if flagsWithValue[flag] && !hasInlineValue {
+			i++
+			if i >= len(args) {
+				return "", false
+			}
+		}
+	}
+	return "", false
+}
+
+func containsLiteralShellArg(args []shellCallArg, target string) bool {
+	target = strings.ToLower(strings.TrimSpace(target))
+	return slices.ContainsFunc(args, func(arg shellCallArg) bool {
+		return arg.literal && strings.TrimSpace(arg.value) == target
+	})
+}
+
+func isHighRiskBashTextFallback(command string) bool {
 	highRiskSnippets := []string{
 		"curl ",
 		"wget ",

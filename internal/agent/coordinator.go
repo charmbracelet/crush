@@ -1171,9 +1171,12 @@ func (c *coordinator) buildGoogleVertexProvider(headers map[string]string, optio
 	return google.New(opts...)
 }
 
-func (c *coordinator) buildHyperProvider(apiKey string) (fantasy.Provider, error) {
+func (c *coordinator) buildHyperProvider(baseURL, apiKey string) (fantasy.Provider, error) {
 	opts := []hyper.Option{
 		hyper.WithAPIKey(apiKey),
+	}
+	if baseURL != "" {
+		opts = append(opts, hyper.WithBaseURL(baseURL))
 	}
 	var httpClient *http.Client
 	if c.cfg.Config().Options.Debug {
@@ -1248,7 +1251,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model cat
 			providerCfg.CopilotService,
 		)
 	case hyper.Name:
-		return c.buildHyperProvider(apiKey)
+		return c.buildHyperProvider(baseURL, apiKey)
 	default:
 		return nil, fmt.Errorf("provider type not supported: %q", providerCfg.Type)
 	}

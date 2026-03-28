@@ -3,13 +3,16 @@ package agent
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
+	"unsafe"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/openai"
 	"charm.land/fantasy/providers/openaicompat"
+	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
@@ -968,4 +971,41 @@ func TestMergeCallOptions_ThinkDisabledClearsProviderOptions(t *testing.T) {
 		require.True(t, ok)
 		require.Nil(t, opts.ReasoningEffort)
 	})
+}
+
+func TestBuildProvider_PreservesHyperBaseURL(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	coord := newTestCoordinator(t, env, hyper.Name, config.ProviderConfig{
+		ID:      hyper.Name,
+		Type:    hyper.Name,
+		BaseURL: "https://hyper.example.test/api/v1/fantasy",
+		APIKey:  "test-key",
+	})
+
+	provider, err := coord.buildProvider(config.ProviderConfig{
+		ID:      hyper.Name,
+		Type:    hyper.Name,
+		BaseURL: "https://hyper.example.test/api/v1/fantasy",
+		APIKey:  "test-key",
+	}, catwalk.Model{}, false, false)
+	require.NoError(t, err)
+	require.Equal(t, "https://hyper.example.test/api/v1/fantasy", hyperProviderBaseURL(t, provider))
+}
+
+func hyperProviderBaseURL(t *testing.T, provider fantasy.Provider) string {
+	t.Helper()
+
+	value := reflect.ValueOf(provider)
+	require.Equal(t, reflect.Pointer, value.Kind())
+
+	optionsField := value.Elem().FieldByName("options")
+	require.True(t, optionsField.IsValid())
+
+	optionsValue := reflect.NewAt(optionsField.Type(), unsafe.Pointer(optionsField.UnsafeAddr())).Elem()
+	baseURLField := optionsValue.FieldByName("baseURL")
+	require.True(t, baseURLField.IsValid())
+
+	return reflect.NewAt(baseURLField.Type(), unsafe.Pointer(baseURLField.UnsafeAddr())).Elem().String()
 }

@@ -60,6 +60,23 @@ func TestFilterPrefersPathSegmentExact(t *testing.T) {
 	require.Equal(t, "internal/ui/chat/mcp.go", first.Text())
 }
 
+func TestRenderPreservesMatchIndexes(t *testing.T) {
+	t.Parallel()
+
+	c := newTestCompletions()
+	c.SetItems([]FileCompletionValue{
+		{Path: "internal/ui/chat/user.go"},
+	}, nil)
+
+	c.Filter("user")
+
+	require.Len(t, c.filtered, 1)
+	require.NotEmpty(t, c.filtered[0].match.MatchedIndexes)
+
+	_ = c.Render()
+	require.NotEmpty(t, c.filtered[0].match.MatchedIndexes)
+}
+
 func TestNamePriorityTier(t *testing.T) {
 	t.Parallel()
 

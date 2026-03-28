@@ -344,7 +344,7 @@ func (c *Completions) Render() string {
 		return ""
 	}
 
-	return c.list.Render()
+	return c.list.List.Render()
 }
 
 func (c *Completions) setVisibleItems(items []*CompletionItem) {

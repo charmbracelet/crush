@@ -402,8 +402,12 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	// Apply defaults to LSP configurations
 	c.applyLSPDefaults()
 
-	// Add the default context paths if they are not already present
+	c.Options.InitializeAs = cmp.Or(c.Options.InitializeAs, defaultInitializeAs)
+
+	// Add the default context paths and the initialization target if they are
+	// not already present.
 	c.Options.ContextPaths = append(defaultContextPaths, c.Options.ContextPaths...)
+	c.Options.ContextPaths = append(c.Options.ContextPaths, c.Options.InitializeAs)
 	slices.Sort(c.Options.ContextPaths)
 	c.Options.ContextPaths = slices.Compact(c.Options.ContextPaths)
 
@@ -442,7 +446,6 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 			c.Options.Attribution.TrailerStyle = TrailerStyleAssistedBy
 		}
 	}
-	c.Options.InitializeAs = cmp.Or(c.Options.InitializeAs, defaultInitializeAs)
 }
 
 // applyLSPDefaults applies default values from powernap to LSP configurations

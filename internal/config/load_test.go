@@ -60,6 +60,21 @@ func TestConfig_setDefaults(t *testing.T) {
 	}
 }
 
+func TestConfig_setDefaultsIncludesCustomInitializeAsInContextPaths(t *testing.T) {
+	t.Parallel()
+
+	cfg := &Config{
+		Options: &Options{
+			InitializeAs: "docs/LLMs.md",
+		},
+	}
+
+	cfg.setDefaults("/tmp", "")
+
+	require.Equal(t, "docs/LLMs.md", cfg.Options.InitializeAs)
+	require.Contains(t, cfg.Options.ContextPaths, "docs/LLMs.md")
+}
+
 func TestConfig_configureProviders(t *testing.T) {
 	knownProviders := []catwalk.Provider{
 		{

@@ -428,6 +428,16 @@ func (t *baseToolMessageItem) computeStatus() ToolStatus {
 		}
 		return ToolStatusSuccess
 	}
+	if t.runtimeState != nil {
+		switch t.runtimeState.Status {
+		case toolruntime.StatusCompleted:
+			return ToolStatusSuccess
+		case toolruntime.StatusFailed:
+			return ToolStatusError
+		case toolruntime.StatusCanceled:
+			return ToolStatusCanceled
+		}
+	}
 	return t.status
 }
 

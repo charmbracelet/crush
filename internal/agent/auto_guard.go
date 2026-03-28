@@ -106,9 +106,24 @@ func isTrustedLocalReadOnlyToolResult(toolResult message.ToolResult) bool {
 		tools.DiagnosticsToolName,
 		tools.ReferencesToolName:
 		return true
+	case tools.BashToolName:
+		return isTrustedLocalReadOnlyBashToolResult(toolResult)
 	default:
 		return false
 	}
+}
+
+func isTrustedLocalReadOnlyBashToolResult(toolResult message.ToolResult) bool {
+	if toolResult.IsError || strings.TrimSpace(toolResult.Metadata) == "" {
+		return false
+	}
+
+	var meta tools.BashResponseMetadata
+	if err := json.Unmarshal([]byte(toolResult.Metadata), &meta); err != nil {
+		return false
+	}
+
+	return meta.SafeReadOnly
 }
 
 func suspiciousToolOutputSnippet(content string) (string, bool) {

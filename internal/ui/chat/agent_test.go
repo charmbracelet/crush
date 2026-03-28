@@ -168,3 +168,33 @@ func TestBashToolMessageItemRuntimeSnapshotRendersSanitizedText(t *testing.T) {
 	require.NotContains(t, rendered, "Waiting for tool response...")
 	require.NotContains(t, rendered, "\x1b")
 }
+
+func TestBashToolMessageItemFinalRuntimeSnapshotRendersBeforeToolResultArrives(t *testing.T) {
+	t.Parallel()
+
+	input, err := json.Marshal(tools.BashParams{Command: "git show --stat HEAD", Description: "runtime final"})
+	require.NoError(t, err)
+
+	theme := styles.DefaultStyles()
+	item := NewBashToolMessageItem(&theme, message.ToolCall{
+		ID:       "tool-runtime-final",
+		Name:     tools.BashToolName,
+		Input:    string(input),
+		Finished: true,
+	}, nil, false)
+	item.SetRuntimeState(&toolruntime.State{
+		ToolCallID:   "tool-runtime-final",
+		ToolName:     tools.BashToolName,
+		Status:       toolruntime.StatusCompleted,
+		SnapshotText: "commit abc123\n file.go | 2 +-",
+	})
+
+	rendered := ansi.Strip(item.Render(100))
+	require.Contains(t, rendered, "commit abc123")
+	require.Contains(t, rendered, "file.go | 2 +-")
+	require.NotContains(t, rendered, "Waiting for tool response...")
+	require.NotContains(t, rendered, "no output")
+	if bashItem, ok := item.(*BashToolMessageItem); ok {
+		require.Equal(t, ToolStatusSuccess, bashItem.computeStatus())
+	}
+}

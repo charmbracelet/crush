@@ -52,23 +52,34 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		_ = json.Unmarshal([]byte(opts.Result.Metadata), &meta)
 	}
 
-	if runtime := opts.RuntimeState; runtime != nil {
+	if runtime := opts.RuntimeState; runtime != nil && !opts.HasResult() {
+		cmd := strings.ReplaceAll(params.Command, "\n", " ")
+		cmd = strings.ReplaceAll(cmd, "\t", "    ")
+		header := toolHeader(sty, opts.Status, "Bash", cappedWidth, opts.Compact, cmd)
+		if opts.Compact {
+			return header
+		}
+
 		switch runtime.Status {
 		case toolruntime.StatusBackgroundRunning:
 			description := cmp.Or(meta.Description, params.Command)
 			return renderJobTool(sty, opts, cappedWidth, "Start", runtimeShellID(runtime, meta.ShellID), description, runtime.SnapshotText)
 		case toolruntime.StatusRunning:
-			cmd := strings.ReplaceAll(params.Command, "\n", " ")
-			cmd = strings.ReplaceAll(cmd, "\t", "    ")
-			header := toolHeader(sty, opts.Status, "Bash", cappedWidth, opts.Compact, cmd)
-			if opts.Compact {
-				return header
-			}
 			if runtime.SnapshotText == "" {
 				if opts.IsPending() {
 					return pendingTool(sty, "Bash", opts.Anim, opts.Compact)
 				}
 				return joinToolParts(header, sty.Tool.StateWaiting.Render("Waiting for tool response..."))
+			}
+			bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
+			body := sty.Tool.Body.Render(toolOutputPlainContent(sty, runtime.SnapshotText, bodyWidth, opts.ExpandedContent))
+			return joinToolParts(header, body)
+		case toolruntime.StatusCompleted, toolruntime.StatusFailed, toolruntime.StatusCanceled:
+			if runtime.SnapshotText == "" {
+				if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
+					return joinToolParts(header, earlyState)
+				}
+				return header
 			}
 			bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
 			body := sty.Tool.Body.Render(toolOutputPlainContent(sty, runtime.SnapshotText, bodyWidth, opts.ExpandedContent))

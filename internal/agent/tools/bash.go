@@ -43,6 +43,7 @@ type BashResponseMetadata struct {
 	Output           string   `json:"output"`
 	Description      string   `json:"description"`
 	WorkingDirectory string   `json:"working_directory"`
+	SafeReadOnly     bool     `json:"safe_read_only,omitempty"`
 	Background       bool     `json:"background,omitempty"`
 	ShellID          string   `json:"shell_id,omitempty"`
 	TimedOut         bool     `json:"timed_out,omitempty"`
@@ -306,7 +307,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			}
 
 			if params.RunInBackground {
-				return runBackgroundBash(ctx, call, params, execWorkingDir, execBlockFuncs, timeoutSeconds, deprecationNotes)
+				return runBackgroundBash(ctx, call, params, execWorkingDir, execBlockFuncs, timeoutSeconds, deprecationNotes, isSafeReadOnly)
 			}
 
 			startTime := time.Now()
@@ -336,6 +337,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 					Output:           output,
 					Description:      params.Description,
 					WorkingDirectory: execWorkingDir,
+					SafeReadOnly:     isSafeReadOnly,
 					TimeoutSeconds:   timeoutSeconds,
 					TimedOut:         timedOut,
 				}
@@ -385,7 +387,7 @@ func requestBashPermission(ctx context.Context, permissions permission.Service, 
 	return nil
 }
 
-func runBackgroundBash(ctx context.Context, call fantasy.ToolCall, params BashParams, execWorkingDir string, execBlockFuncs []shell.BlockFunc, timeoutSeconds int, deprecationNotes []string) (fantasy.ToolResponse, error) {
+func runBackgroundBash(ctx context.Context, call fantasy.ToolCall, params BashParams, execWorkingDir string, execBlockFuncs []shell.BlockFunc, timeoutSeconds int, deprecationNotes []string, safeReadOnly bool) (fantasy.ToolResponse, error) {
 	startTime := time.Now()
 	bgManager := shell.GetBackgroundShellManager()
 	bgManager.Cleanup()
@@ -405,6 +407,7 @@ func runBackgroundBash(ctx context.Context, call fantasy.ToolCall, params BashPa
 		EndTime:          time.Now().UnixMilli(),
 		Description:      params.Description,
 		WorkingDirectory: bgShell.WorkingDir,
+		SafeReadOnly:     safeReadOnly,
 		Background:       true,
 		ShellID:          bgShell.ID,
 		TimeoutSeconds:   timeoutSeconds,

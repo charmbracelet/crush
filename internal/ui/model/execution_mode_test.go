@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/log"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/stretchr/testify/require"
 )
@@ -49,6 +50,36 @@ func TestCycleExecutionModeCyclesAskAutoYolo(t *testing.T) {
 	require.Equal(t, executionModeAsk, ui.currentExecutionMode())
 	require.False(t, ui.com.App.Permissions.SkipRequests())
 	require.Equal(t, "default", ui.com.Config().Options.PreferredPermissionMode)
+}
+
+func TestSetExecutionModeAutoExitCreatesReminder(t *testing.T) {
+	ui := testExecutionModeUI(t, `{"options":{"disable_provider_auto_update":true},"tools":{}}`)
+
+	sess, err := ui.com.App.Sessions.Create(context.Background(), "auto-exit-reminder")
+	require.NoError(t, err)
+	ui.session = &sess
+
+	cmd := ui.setExecutionMode(executionModeAuto)
+	require.NotNil(t, cmd)
+	_, ok := cmd().(executionModeChangedMsg)
+	require.True(t, ok)
+
+	cmd = ui.setExecutionMode(executionModeAsk)
+	require.NotNil(t, cmd)
+	_, ok = cmd().(executionModeChangedMsg)
+	require.True(t, ok)
+
+	msgs, err := ui.com.App.Messages.List(context.Background(), sess.ID)
+	require.NoError(t, err)
+
+	exitCount := 0
+	for _, msg := range msgs {
+		promptType, isAutoPrompt := message.ParseAutoModePrompt(msg)
+		if isAutoPrompt && promptType == message.AutoModePromptTypeExit {
+			exitCount++
+		}
+	}
+	require.Equal(t, 1, exitCount)
 }
 
 func testExecutionModeUI(t *testing.T, configContent string) *UI {

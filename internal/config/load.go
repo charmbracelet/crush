@@ -715,13 +715,11 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 		handoff = large
 	}
 	migrateLegacyAutoClassifierSelection(c.Models)
-	autoClassifierFast := resolveConfiguredModel(store, c, SelectedModelTypeAutoClassifierFast, resolveAutoClassifierFastFallback(c, handoffModelConfigured, handoff, small, large))
-	autoClassifierReasoning := resolveConfiguredModel(store, c, SelectedModelTypeAutoClassifierReasoning, resolveAutoClassifierReasoningFallback(c, handoffModelConfigured, handoff, small, large))
+	autoClassifier := resolveConfiguredModel(store, c, SelectedModelTypeAutoClassifier, resolveAutoClassifierFallback(c, handoffModelConfigured, handoff, small, large))
 	c.Models[SelectedModelTypeLarge] = large
 	c.Models[SelectedModelTypeSmall] = small
 	c.Models[SelectedModelTypeHandoff] = handoff
-	c.Models[SelectedModelTypeAutoClassifierFast] = autoClassifierFast
-	c.Models[SelectedModelTypeAutoClassifierReasoning] = autoClassifierReasoning
+	c.Models[SelectedModelTypeAutoClassifier] = autoClassifier
 	return nil
 }
 
@@ -730,19 +728,17 @@ func migrateLegacyAutoClassifierSelection(models map[SelectedModelType]SelectedM
 		return
 	}
 
-	legacy, ok := models[SelectedModelTypeAutoClassifier]
-	if !ok {
-		return
+	if _, exists := models[SelectedModelTypeAutoClassifier]; !exists {
+		switch {
+		case models[SelectedModelTypeAutoClassifierReasoning].Model != "":
+			models[SelectedModelTypeAutoClassifier] = models[SelectedModelTypeAutoClassifierReasoning]
+		case models[SelectedModelTypeAutoClassifierFast].Model != "":
+			models[SelectedModelTypeAutoClassifier] = models[SelectedModelTypeAutoClassifierFast]
+		}
 	}
 
-	if _, exists := models[SelectedModelTypeAutoClassifierFast]; !exists {
-		models[SelectedModelTypeAutoClassifierFast] = legacy
-	}
-	if _, exists := models[SelectedModelTypeAutoClassifierReasoning]; !exists {
-		models[SelectedModelTypeAutoClassifierReasoning] = legacy
-	}
-
-	delete(models, SelectedModelTypeAutoClassifier)
+	delete(models, SelectedModelTypeAutoClassifierFast)
+	delete(models, SelectedModelTypeAutoClassifierReasoning)
 }
 
 func resolveConfiguredModel(store *ConfigStore, c *Config, modelType SelectedModelType, fallback SelectedModel) SelectedModel {
@@ -796,7 +792,10 @@ func resolveConfiguredModel(store *ConfigStore, c *Config, modelType SelectedMod
 	return resolved
 }
 
-func resolveAutoClassifierFastFallback(c *Config, handoffConfigured bool, handoff, small, large SelectedModel) SelectedModel {
+func resolveAutoClassifierFallback(c *Config, handoffConfigured bool, handoff, small, large SelectedModel) SelectedModel {
+	if model := c.GetModel(small.Provider, small.Model); model != nil && model.CanReason {
+		return small
+	}
 	if handoffConfigured {
 		if model := c.GetModel(handoff.Provider, handoff.Model); model != nil {
 			return handoff
@@ -804,15 +803,6 @@ func resolveAutoClassifierFastFallback(c *Config, handoffConfigured bool, handof
 	}
 	if model := c.GetModel(small.Provider, small.Model); model != nil {
 		return small
-	}
-	return large
-}
-
-func resolveAutoClassifierReasoningFallback(c *Config, handoffConfigured bool, handoff, small, large SelectedModel) SelectedModel {
-	if handoffConfigured {
-		if model := c.GetModel(handoff.Provider, handoff.Model); model != nil {
-			return handoff
-		}
 	}
 	return large
 }

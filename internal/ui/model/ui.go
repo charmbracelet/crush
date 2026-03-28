@@ -2281,6 +2281,13 @@ func (m *UI) setExecutionMode(mode executionMode) tea.Cmd {
 	}
 	m.setEditorPrompt(preferredMode == session.PermissionModeYolo)
 
+	previousMode := session.PermissionModeDefault
+	sessionID := ""
+	if m.session != nil {
+		sessionID = m.session.ID
+		previousMode = m.session.PermissionMode
+	}
+
 	if cfg := m.com.Config(); cfg != nil && cfg.Options != nil {
 		cfg.Options.PreferredPermissionMode = string(preferredMode)
 	}
@@ -2288,11 +2295,6 @@ func (m *UI) setExecutionMode(mode executionMode) tea.Cmd {
 		m.session.PermissionMode = preferredMode
 	}
 	m.refreshEditorPlaceholder()
-
-	sessionID := ""
-	if m.session != nil {
-		sessionID = m.session.ID
-	}
 
 	return func() tea.Msg {
 		if preferredMode != session.PermissionModeYolo {
@@ -2310,6 +2312,11 @@ func (m *UI) setExecutionMode(mode executionMode) tea.Cmd {
 			}
 			if _, err := m.com.App.Sessions.UpdatePermissionMode(context.Background(), sessionID, preferredMode); err != nil {
 				return util.ReportError(err)()
+			}
+			if previousMode == session.PermissionModeAuto && preferredMode != session.PermissionModeAuto {
+				if _, err := m.com.App.Messages.Create(context.Background(), sessionID, message.NewAutoModePromptMessage(message.AutoModePromptTypeExit)); err != nil {
+					return util.ReportError(err)()
+				}
 			}
 		}
 		return executionModeChangedMsg{SessionID: sessionID, Status: status}

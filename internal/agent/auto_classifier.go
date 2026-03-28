@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/config"
@@ -23,6 +24,8 @@ var autoClassifierFastPrompt []byte
 var autoClassifierReasoningPrompt []byte
 
 var autoClassifierCodeFenceRegex = regexp.MustCompile("(?s)^```(?:json)?\\s*(.*?)\\s*```$")
+var autoClassifierQuickAllowBlockRegex = regexp.MustCompile(`(?is)^\s*<block>\s*no\s*</block>\s*$`)
+var autoClassifierQuickDenyBlockRegex = regexp.MustCompile(`(?is)^\s*<block>\s*yes\s*</block>\s*$`)
 
 type autoClassifierResponse struct {
 	AllowAuto  bool                              `json:"allow_auto"`
@@ -31,7 +34,7 @@ type autoClassifierResponse struct {
 }
 
 func (c *coordinator) ClassifyPermission(ctx context.Context, req permission.PermissionRequest) (permission.AutoClassification, error) {
-	model, providerCfg, err := c.selectedModel(ctx, config.SelectedModelTypeAutoClassifierFast, false)
+	model, providerCfg, err := c.selectedAutoClassifierModel(ctx, false)
 	if err != nil {
 		return permission.AutoClassification{}, err
 	}
@@ -58,7 +61,7 @@ func (c *coordinator) ClassifyPermission(ctx context.Context, req permission.Per
 		}, nil
 	}
 
-	reasoningModel, reasoningProviderCfg, err := c.selectedModel(ctx, config.SelectedModelTypeAutoClassifierReasoning, false)
+	reasoningModel, reasoningProviderCfg, err := c.selectedAutoClassifierModel(ctx, true)
 	if err != nil {
 		return permission.AutoClassification{}, err
 	}
@@ -67,6 +70,12 @@ func (c *coordinator) ClassifyPermission(ctx context.Context, req permission.Per
 		return permission.AutoClassification{}, err
 	}
 	return parseAutoClassification(reasoningResult)
+}
+
+func (c *coordinator) selectedAutoClassifierModel(ctx context.Context, enableReasoning bool) (Model, config.ProviderConfig, error) {
+	return c.selectedModelWithOverride(ctx, config.SelectedModelTypeAutoClassifier, false, func(selected *config.SelectedModel) {
+		selected.Think = boolPtr(enableReasoning)
+	})
 }
 
 func (c *coordinator) runAutoGuardModel(
@@ -215,8 +224,56 @@ func truncateAutoClassifierText(value string, limit int) string {
 }
 
 func parseQuickClassifierDecision(raw string) bool {
-	raw = strings.TrimSpace(strings.ToUpper(raw))
-	return raw == "ALLOW"
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return false
+	}
+
+	if matches := autoClassifierCodeFenceRegex.FindStringSubmatch(raw); len(matches) == 2 {
+		raw = strings.TrimSpace(matches[1])
+	}
+	if raw == "" {
+		return false
+	}
+
+	if autoClassifierQuickAllowBlockRegex.MatchString(raw) {
+		return true
+	}
+	if autoClassifierQuickDenyBlockRegex.MatchString(raw) {
+		return false
+	}
+
+	if object := extractFirstJSONObject(raw); object != "" {
+		var payload struct {
+			AllowAuto *bool  `json:"allow_auto"`
+			Decision  string `json:"decision"`
+			Block     *bool  `json:"block"`
+		}
+		if err := json.Unmarshal([]byte(object), &payload); err == nil {
+			if payload.AllowAuto != nil {
+				return *payload.AllowAuto
+			}
+			if payload.Block != nil {
+				return !*payload.Block
+			}
+			switch strings.ToLower(strings.TrimSpace(payload.Decision)) {
+			case "allow", "approve", "approved", "yes":
+				return true
+			case "block", "deny", "denied", "no":
+				return false
+			}
+		}
+	}
+
+	normalized := strings.ToLower(strings.Join(strings.Fields(raw), " "))
+	switch normalized {
+	case "allow", "decision: allow", "decision=allow", "allow.", "allow!":
+		return true
+	case "block", "decision: block", "decision=block", "block.", "block!":
+		return false
+	default:
+		return false
+	}
 }
 
 func parseAutoClassification(raw string) (permission.AutoClassification, error) {
@@ -224,9 +281,15 @@ func parseAutoClassification(raw string) (permission.AutoClassification, error) 
 	if matches := autoClassifierCodeFenceRegex.FindStringSubmatch(raw); len(matches) == 2 {
 		raw = strings.TrimSpace(matches[1])
 	}
+	if object := extractFirstJSONObject(raw); object != "" {
+		raw = object
+	}
 
 	var payload autoClassifierResponse
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		if fallback, ok := parseAutoClassificationTextFallback(raw); ok {
+			return fallback, nil
+		}
 		return permission.AutoClassification{}, fmt.Errorf("failed to parse auto classifier response: %w", err)
 	}
 	if payload.Confidence == "" {
@@ -239,6 +302,137 @@ func parseAutoClassification(raw string) (permission.AutoClassification, error) 
 	}, nil
 }
 
+func extractFirstJSONObject(raw string) string {
+	start := strings.IndexByte(raw, '{')
+	if start == -1 {
+		return ""
+	}
+
+	depth := 0
+	inString := false
+	escaped := false
+	for i := start; i < len(raw); i++ {
+		ch := raw[i]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			if ch == '"' {
+				inString = false
+			}
+			continue
+		}
+
+		switch ch {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return strings.TrimSpace(raw[start : i+1])
+			}
+		}
+	}
+	return ""
+}
+
+func parseAutoClassificationTextFallback(raw string) (permission.AutoClassification, bool) {
+	text := strings.TrimSpace(raw)
+	if text == "" {
+		return permission.AutoClassification{}, false
+	}
+
+	normalized := strings.ToLower(strings.Join(strings.Fields(text), " "))
+	for _, hint := range autoClassificationBlockHints {
+		if strings.Contains(normalized, hint) {
+			return permission.AutoClassification{
+				AllowAuto:  false,
+				Reason:     truncateFallbackReason(text),
+				Confidence: permission.AutoApprovalConfidenceLow,
+			}, true
+		}
+	}
+
+	for _, prefix := range autoClassificationAllowPrefixes {
+		if strings.HasPrefix(normalized, prefix) {
+			return permission.AutoClassification{
+				AllowAuto:  true,
+				Reason:     truncateFallbackReason(text),
+				Confidence: permission.AutoApprovalConfidenceLow,
+			}, true
+		}
+	}
+	return permission.AutoClassification{}, false
+}
+
+func truncateFallbackReason(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	runes := []rune(text)
+	if len(runes) <= 160 {
+		return text
+	}
+	cut := 160
+	for cut > 0 && !unicode.IsSpace(runes[cut-1]) {
+		cut--
+	}
+	if cut == 0 {
+		cut = 160
+	}
+	return strings.TrimSpace(string(runes[:cut])) + "..."
+}
+
 func boolPtr(value bool) *bool {
 	return &value
+}
+
+var autoClassificationBlockHints = []string{
+	"block",
+	"deny",
+	"denied",
+	"cannot allow",
+	"can't allow",
+	"could not allow",
+	"couldn't allow",
+	"would not allow",
+	"wouldn't allow",
+	"should not allow",
+	"shouldn't allow",
+	"must not allow",
+	"mustn't allow",
+	"cannot approve",
+	"can't approve",
+	"could not approve",
+	"couldn't approve",
+	"would not approve",
+	"wouldn't approve",
+	"should not approve",
+	"shouldn't approve",
+	"must not approve",
+	"mustn't approve",
+	"do not allow",
+	"don't allow",
+	"do not approve",
+	"don't approve",
+	"not safe",
+	"unsafe",
+}
+
+var autoClassificationAllowPrefixes = []string{
+	"allow",
+	"approve",
+	"approved",
+	"decision: allow",
+	"decision: approve",
+	"safe to proceed",
+	"safe to allow",
 }

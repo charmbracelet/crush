@@ -59,6 +59,78 @@ func RestrictedGitBashDescription() string {
 	return restrictedGitBashDescription()
 }
 
+func validateNoWrapperShellCommand(command string) error {
+	file, err := syntax.NewParser().Parse(strings.NewReader(command), "")
+	if err != nil {
+		return nil
+	}
+
+	var wrapperErr error
+	syntax.Walk(file, func(node syntax.Node) bool {
+		if wrapperErr != nil {
+			return false
+		}
+
+		call, ok := node.(*syntax.CallExpr)
+		if !ok {
+			return true
+		}
+
+		args := make([]string, 0, len(call.Args))
+		for _, word := range call.Args {
+			arg, ok := literalWord(word)
+			if !ok {
+				return true
+			}
+			args = append(args, arg)
+		}
+
+		wrapperErr = validateWrapperShellArgs(args)
+		return wrapperErr == nil
+	})
+
+	return wrapperErr
+}
+
+func validateWrapperShellArgs(args []string) error {
+	if len(args) < 2 {
+		return nil
+	}
+
+	command := strings.ToLower(args[0])
+	switch command {
+	case "bash", "sh", "zsh", "dash":
+		if hasLeadingShellFlag(args[1:], []string{"-c", "-lc"}, "-") {
+			return fmt.Errorf("bash tool does not allow wrapper shells like %s -c; run the command directly", args[0])
+		}
+	case "cmd", "cmd.exe":
+		if hasLeadingShellFlag(args[1:], []string{"/c"}, "/") {
+			return fmt.Errorf("bash tool does not allow wrapper shells like %s /c; run the command directly", args[0])
+		}
+	case "powershell", "powershell.exe", "pwsh", "pwsh.exe":
+		if hasLeadingShellFlag(args[1:], []string{"-c", "-command"}, "-") {
+			return fmt.Errorf("bash tool does not allow wrapper shells like %s -Command; run the command directly", args[0])
+		}
+	}
+
+	return nil
+}
+
+func hasLeadingShellFlag(args []string, blocked []string, prefix string) bool {
+	for _, arg := range args {
+		lower := strings.ToLower(arg)
+		for _, candidate := range blocked {
+			if lower == candidate {
+				return true
+			}
+		}
+		if !strings.HasPrefix(arg, prefix) {
+			return false
+		}
+	}
+	return false
+}
+
 func restrictedGitBlockFunc() shell.BlockFunc {
 	return func(args []string) bool {
 		return validateRestrictedGitArgs(args) != nil

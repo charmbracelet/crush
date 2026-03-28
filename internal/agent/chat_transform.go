@@ -32,6 +32,7 @@ type chatRequestStateInput struct {
 	Attachments  []message.Attachment
 	SystemPrompt string
 	PromptPrefix string
+	PermissionMode session.PermissionMode
 }
 
 func withSessionCompactingPurpose(ctx context.Context, purpose plugin.ChatTransformPurpose) context.Context {
@@ -134,6 +135,9 @@ func (a *sessionAgent) buildChatRequestState(ctx context.Context, input chatRequ
 	systemPrompt, promptPrefix, err := a.transformSystemPrompt(ctx, input)
 	if err != nil {
 		return chatRequestState{}, err
+	}
+	if autoModePrompt, ok := pendingAutoModePromptText(transformedMessages, input.PermissionMode); ok {
+		systemPrompt = joinSystemSections([]string{systemPrompt, autoModePrompt})
 	}
 	history, files := a.preparePrompt(transformedMessages, input.Attachments...)
 	return chatRequestState{

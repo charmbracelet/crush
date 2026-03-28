@@ -139,6 +139,10 @@ func TestRunSubAgent(t *testing.T) {
 	t.Run("auto mode blocks delegation when handoff review cannot run", func(t *testing.T) {
 		env := testEnv(t)
 		coord := newTestCoordinator(t, env, providerID, providerCfg)
+		coord.cfg.Config().Models[config.SelectedModelTypeAutoClassifier] = config.SelectedModel{
+			Provider: "missing-provider",
+			Model:    "missing-model",
+		}
 
 		parentSession, err := env.sessions.Create(t.Context(), "Parent")
 		require.NoError(t, err)

@@ -41,6 +41,9 @@ ehthumbs.db
 Thumbs.db
 *.log
 
+# Windows shell interpreter artifact (reserved device name)
+nul
+
 # Binary output directory
 /bin/
 /dist/

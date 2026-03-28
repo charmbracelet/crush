@@ -111,9 +111,21 @@ func (c *coordinator) GenerateHandoff(ctx context.Context, sourceSessionID, goal
 }
 
 func (c *coordinator) selectedModel(ctx context.Context, modelType config.SelectedModelType, isSubAgent bool) (Model, config.ProviderConfig, error) {
+	return c.selectedModelWithOverride(ctx, modelType, isSubAgent, nil)
+}
+
+func (c *coordinator) selectedModelWithOverride(
+	ctx context.Context,
+	modelType config.SelectedModelType,
+	isSubAgent bool,
+	override func(*config.SelectedModel),
+) (Model, config.ProviderConfig, error) {
 	selectedModel, ok := c.cfg.Config().Models[modelType]
 	if !ok {
 		return Model{}, config.ProviderConfig{}, fmt.Errorf("model type %q not configured", modelType)
+	}
+	if override != nil {
+		override(&selectedModel)
 	}
 
 	providerCfg, ok := c.cfg.Config().Providers.Get(selectedModel.Provider)

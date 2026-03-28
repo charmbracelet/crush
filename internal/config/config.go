@@ -56,11 +56,14 @@ func (s SelectedModelType) String() string {
 }
 
 const (
-	SelectedModelTypeAutoClassifier          SelectedModelType = "auto_classifier"
-	SelectedModelTypeLarge                   SelectedModelType = "large"
-	SelectedModelTypeSmall                   SelectedModelType = "small"
-	SelectedModelTypeHandoff                 SelectedModelType = "handoff"
-	SelectedModelTypeAutoClassifierFast      SelectedModelType = "auto_classifier_fast"
+	SelectedModelTypeAutoClassifier SelectedModelType = "auto_classifier"
+	SelectedModelTypeLarge          SelectedModelType = "large"
+	SelectedModelTypeSmall          SelectedModelType = "small"
+	SelectedModelTypeHandoff        SelectedModelType = "handoff"
+
+	// Deprecated: kept only for backward-compatible config loading.
+	SelectedModelTypeAutoClassifierFast SelectedModelType = "auto_classifier_fast"
+	// Deprecated: kept only for backward-compatible config loading.
 	SelectedModelTypeAutoClassifierReasoning SelectedModelType = "auto_classifier_reasoning"
 )
 const (
@@ -582,16 +585,8 @@ func (c *Config) HandoffModel() *catwalk.Model {
 	return c.GetModel(model.Provider, model.Model)
 }
 
-func (c *Config) AutoClassifierFastModel() *catwalk.Model {
-	model, ok := c.Models[SelectedModelTypeAutoClassifierFast]
-	if !ok {
-		return nil
-	}
-	return c.GetModel(model.Provider, model.Model)
-}
-
-func (c *Config) AutoClassifierReasoningModel() *catwalk.Model {
-	model, ok := c.Models[SelectedModelTypeAutoClassifierReasoning]
+func (c *Config) AutoClassifierModel() *catwalk.Model {
+	model, ok := c.Models[SelectedModelTypeAutoClassifier]
 	if !ok {
 		return nil
 	}

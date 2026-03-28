@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 
@@ -292,11 +291,6 @@ func (s *permissionService) EvaluateRequest(_ context.Context, opts CreatePermis
 	}
 
 	if s.skip {
-		return EvaluationResult{Decision: EvaluationDecisionAllow, Permission: permission}, nil
-	}
-
-	commandKey := opts.ToolName + ":" + opts.Action
-	if slices.Contains(s.allowedTools, commandKey) || slices.Contains(s.allowedTools, opts.ToolName) {
 		return EvaluationResult{Decision: EvaluationDecisionAllow, Permission: permission}, nil
 	}
 

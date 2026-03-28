@@ -132,7 +132,13 @@ func (f *fakeSessionService) IsAgentToolSession(id string) bool { return strings
 
 type fakeMessageService struct {
 	*pubsub.Broker[message.Message]
-	lists map[string][]message.Message
+	lists   map[string][]message.Message
+	created []createdMessageCall
+}
+
+type createdMessageCall struct {
+	sessionID string
+	params    message.CreateMessageParams
 }
 
 func newFakeMessageService() *fakeMessageService {
@@ -142,8 +148,19 @@ func newFakeMessageService() *fakeMessageService {
 	}
 }
 
-func (f *fakeMessageService) Create(_ context.Context, _ string, _ message.CreateMessageParams) (message.Message, error) {
-	return message.Message{}, nil
+func (f *fakeMessageService) Create(_ context.Context, sessionID string, params message.CreateMessageParams) (message.Message, error) {
+	msg := message.Message{
+		ID:        fmt.Sprintf("msg-%d", len(f.created)+1),
+		Role:      params.Role,
+		SessionID: sessionID,
+		Parts:     append([]message.ContentPart(nil), params.Parts...),
+	}
+	f.created = append(f.created, createdMessageCall{
+		sessionID: sessionID,
+		params:    params,
+	})
+	f.lists[sessionID] = append(f.lists[sessionID], msg)
+	return msg, nil
 }
 func (f *fakeMessageService) Update(_ context.Context, _ message.Message) error { return nil }
 func (f *fakeMessageService) Get(_ context.Context, _ string) (message.Message, error) {
@@ -608,6 +625,42 @@ func TestSessionSetModePersistsPermissionMode(t *testing.T) {
 	require.Equal(t, session.PermissionModeYolo, saved.PermissionMode)
 }
 
+func TestSessionSetModeAutoExitCreatesReminder(t *testing.T) {
+	t.Parallel()
+
+	sessionID := "sess-mode-auto-exit"
+	reqLine := buildRequest(t, 1, "session/set_mode", acp.SetModeParams{
+		SessionID: sessionID,
+		ModeID:    "default",
+	})
+
+	app := &fakeApp{
+		sessions:    newFakeSessionService(),
+		messages:    newFakeMessageService(),
+		coordinator: &fakeCoordinator{runResult: &fantasy.AgentResult{}},
+	}
+	app.sessions.sessions[sessionID] = session.Session{
+		ID:             sessionID,
+		Title:          "mode-test",
+		PermissionMode: session.PermissionModeAuto,
+	}
+
+	resp := runSingleRequest(t, app, reqLine)
+	require.Nil(t, resp.Error)
+
+	require.Len(t, app.messages.created, 1)
+	created := app.messages.created[0]
+	require.Equal(t, sessionID, created.sessionID)
+	msg := message.Message{
+		Role:      created.params.Role,
+		SessionID: created.sessionID,
+		Parts:     created.params.Parts,
+	}
+	promptType, ok := message.ParseAutoModePrompt(msg)
+	require.True(t, ok)
+	require.Equal(t, message.AutoModePromptTypeExit, promptType)
+}
+
 func TestSessionSetConfigOptionModePersistsPermissionMode(t *testing.T) {
 	t.Parallel()
 
@@ -653,4 +706,57 @@ func TestSessionSetConfigOptionModePersistsPermissionMode(t *testing.T) {
 
 	var result acp.SetConfigOptionResult
 	require.NoError(t, json.Unmarshal(resp.Result, &result))
+}
+
+func TestSessionSetConfigOptionModeAutoExitCreatesReminder(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	workingDir := filepath.Join(baseDir, "workspace")
+	require.NoError(t, os.MkdirAll(workingDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(workingDir, "crush.json"),
+		[]byte(`{"options":{"disable_provider_auto_update":true},"tools":{}}`),
+		0o644,
+	))
+
+	store, err := config.Init(workingDir, filepath.Join(baseDir, "state"), false)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, log.ResetForTesting())
+	})
+
+	sessionID := "sess-config-mode-auto-exit"
+	reqLine := buildRequest(t, 1, "session/set_config_option", acp.SetConfigOptionParams{
+		SessionID: sessionID,
+		ConfigID:  "mode",
+		Value:     "default",
+	})
+
+	app := &fakeApp{
+		sessions:    newFakeSessionService(),
+		messages:    newFakeMessageService(),
+		coordinator: &fakeCoordinator{runResult: &fantasy.AgentResult{}},
+		cfg:         store,
+	}
+	app.sessions.sessions[sessionID] = session.Session{
+		ID:             sessionID,
+		Title:          "config-mode-test",
+		PermissionMode: session.PermissionModeAuto,
+	}
+
+	resp := runSingleRequest(t, app, reqLine)
+	require.Nil(t, resp.Error)
+
+	require.Len(t, app.messages.created, 1)
+	created := app.messages.created[0]
+	require.Equal(t, sessionID, created.sessionID)
+	msg := message.Message{
+		Role:      created.params.Role,
+		SessionID: created.sessionID,
+		Parts:     created.params.Parts,
+	}
+	promptType, ok := message.ParseAutoModePrompt(msg)
+	require.True(t, ok)
+	require.Equal(t, message.AutoModePromptTypeExit, promptType)
 }

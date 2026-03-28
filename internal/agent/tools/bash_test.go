@@ -325,6 +325,31 @@ func TestRestrictedGitBashTool_DisablesBackgroundExecution(t *testing.T) {
 	require.Contains(t, resp.Content, "background execution is disabled")
 }
 
+func TestBashTool_BlocksWrapperShellCommands(t *testing.T) {
+	t.Parallel()
+
+	workingDir := t.TempDir()
+	tool := newBashToolForTest(workingDir)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	commands := []string{
+		`bash -lc "echo done"`,
+		`sh -c "echo done"`,
+		`cmd /c dir`,
+		`powershell -Command "Get-ChildItem"`,
+		`pwsh -c "Get-ChildItem"`,
+	}
+
+	for _, command := range commands {
+		resp := runBashTool(t, tool, ctx, BashParams{
+			Description: "wrapper shell",
+			Command:     command,
+		})
+		require.True(t, resp.IsError, command)
+		require.Contains(t, resp.Content, "does not allow wrapper shells", command)
+	}
+}
+
 func initGitRepoForTest(t *testing.T) string {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {

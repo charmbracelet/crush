@@ -26,8 +26,7 @@ const (
 	ModelTypeLarge ModelType = iota
 	ModelTypeSmall
 	ModelTypeHandoff
-	ModelTypeAutoClassifierFast
-	ModelTypeAutoClassifierReasoning
+	ModelTypeAutoClassifier
 )
 
 // String returns the string representation of the [ModelType].
@@ -39,10 +38,8 @@ func (mt ModelType) String() string {
 		return "Small"
 	case ModelTypeHandoff:
 		return "Handoff"
-	case ModelTypeAutoClassifierFast:
-		return "Auto Classifier Fast"
-	case ModelTypeAutoClassifierReasoning:
-		return "Auto Classifier Reasoning"
+	case ModelTypeAutoClassifier:
+		return "Auto Classifier"
 	default:
 		return "Unknown"
 	}
@@ -57,10 +54,8 @@ func (mt ModelType) Config() config.SelectedModelType {
 		return config.SelectedModelTypeSmall
 	case ModelTypeHandoff:
 		return config.SelectedModelTypeHandoff
-	case ModelTypeAutoClassifierFast:
-		return config.SelectedModelTypeAutoClassifierFast
-	case ModelTypeAutoClassifierReasoning:
-		return config.SelectedModelTypeAutoClassifierReasoning
+	case ModelTypeAutoClassifier:
+		return config.SelectedModelTypeAutoClassifier
 	default:
 		return ""
 	}
@@ -75,9 +70,7 @@ func (mt ModelType) Placeholder() string {
 		return smallModelInputPlaceholder
 	case ModelTypeHandoff:
 		return handoffModelInputPlaceholder
-	case ModelTypeAutoClassifierFast:
-		return autoClassifierFastModelInputPlaceholder
-	case ModelTypeAutoClassifierReasoning:
+	case ModelTypeAutoClassifier:
 		return autoClassifierModelInputPlaceholder
 	default:
 		return ""
@@ -85,12 +78,11 @@ func (mt ModelType) Placeholder() string {
 }
 
 const (
-	onboardingModelInputPlaceholder         = "Find your fave"
-	largeModelInputPlaceholder              = "Choose a model for large, complex tasks"
-	smallModelInputPlaceholder              = "Choose a model for small, simple tasks"
-	handoffModelInputPlaceholder            = "Choose a model for handoff draft generation"
-	autoClassifierFastModelInputPlaceholder = "Choose a model for fast Auto Mode permission screening"
-	autoClassifierModelInputPlaceholder     = "Choose a model for reasoning Auto Mode permission review"
+	onboardingModelInputPlaceholder     = "Find your fave"
+	largeModelInputPlaceholder          = "Choose a model for large, complex tasks"
+	smallModelInputPlaceholder          = "Choose a model for small, simple tasks"
+	handoffModelInputPlaceholder        = "Choose a model for handoff draft generation"
+	autoClassifierModelInputPlaceholder = "Choose a model for Auto Mode permission review"
 )
 
 // ModelsID is the identifier for the model selection dialog.
@@ -301,32 +293,27 @@ func (m *Models) modelTypeRadioView() string {
 	largeRadioStyle := t.RadioOff
 	smallRadioStyle := t.RadioOff
 	handoffRadioStyle := t.RadioOff
-	autoClassifierFastRadioStyle := t.RadioOff
-	autoClassifierReasoningRadioStyle := t.RadioOff
+	autoClassifierRadioStyle := t.RadioOff
 	if m.modelType == ModelTypeLarge {
 		largeRadioStyle = t.RadioOn
 	} else if m.modelType == ModelTypeSmall {
 		smallRadioStyle = t.RadioOn
 	} else if m.modelType == ModelTypeHandoff {
 		handoffRadioStyle = t.RadioOn
-	} else if m.modelType == ModelTypeAutoClassifierFast {
-		autoClassifierFastRadioStyle = t.RadioOn
 	} else {
-		autoClassifierReasoningRadioStyle = t.RadioOn
+		autoClassifierRadioStyle = t.RadioOn
 	}
 
 	largeRadio := largeRadioStyle.Padding(0, 1).Render()
 	smallRadio := smallRadioStyle.Padding(0, 1).Render()
 	handoffRadio := handoffRadioStyle.Padding(0, 1).Render()
-	autoClassifierFastRadio := autoClassifierFastRadioStyle.Padding(0, 1).Render()
-	autoClassifierReasoningRadio := autoClassifierReasoningRadioStyle.Padding(0, 1).Render()
+	autoClassifierRadio := autoClassifierRadioStyle.Padding(0, 1).Render()
 
-	return fmt.Sprintf("%s%s  %s%s  %s%s  %s%s  %s%s",
+	return fmt.Sprintf("%s%s  %s%s  %s%s  %s%s",
 		largeRadio, textStyle.Render(ModelTypeLarge.String()),
 		smallRadio, textStyle.Render(ModelTypeSmall.String()),
 		handoffRadio, textStyle.Render(ModelTypeHandoff.String()),
-		autoClassifierFastRadio, textStyle.Render(ModelTypeAutoClassifierFast.String()),
-		autoClassifierReasoningRadio, textStyle.Render(ModelTypeAutoClassifierReasoning.String()))
+		autoClassifierRadio, textStyle.Render(ModelTypeAutoClassifier.String()))
 }
 
 func (m *Models) currentModelSummaryView(width int) string {
@@ -334,8 +321,7 @@ func (m *Models) currentModelSummaryView(width int) string {
 		m.currentModelSummaryLine(ModelTypeLarge, width),
 		m.currentModelSummaryLine(ModelTypeSmall, width),
 		m.currentModelSummaryLine(ModelTypeHandoff, width),
-		m.currentModelSummaryLine(ModelTypeAutoClassifierFast, width),
-		m.currentModelSummaryLine(ModelTypeAutoClassifierReasoning, width),
+		m.currentModelSummaryLine(ModelTypeAutoClassifier, width),
 	}
 	return m.com.Styles.Dialog.SecondaryText.Width(width).Render(strings.Join(lines, "\n"))
 }
@@ -690,7 +676,7 @@ func (m *Models) setProviderItems() error {
 }
 
 func (m *Models) firstSelectableModelType() ModelType {
-	for _, modelType := range []ModelType{ModelTypeLarge, ModelTypeSmall, ModelTypeHandoff, ModelTypeAutoClassifierFast, ModelTypeAutoClassifierReasoning} {
+	for _, modelType := range []ModelType{ModelTypeLarge, ModelTypeSmall, ModelTypeHandoff, ModelTypeAutoClassifier} {
 		selected := m.com.Config().Models[modelType.Config()]
 		if selected.Provider == "" || selected.Model == "" {
 			return modelType
@@ -706,9 +692,7 @@ func (m *Models) nextModelType(current ModelType) ModelType {
 	case ModelTypeSmall:
 		return ModelTypeHandoff
 	case ModelTypeHandoff:
-		return ModelTypeAutoClassifierFast
-	case ModelTypeAutoClassifierFast:
-		return ModelTypeAutoClassifierReasoning
+		return ModelTypeAutoClassifier
 	default:
 		return ModelTypeLarge
 	}

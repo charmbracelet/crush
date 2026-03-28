@@ -1685,7 +1685,7 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		require.Equal(t, int64(100), large.MaxTokens)
 	})
 
-	t.Run("should migrate legacy auto classifier model to both new slots", func(t *testing.T) {
+	t.Run("should keep explicit auto classifier model in single slot", func(t *testing.T) {
 		knownProviders := []catwalk.Provider{
 			{
 				ID:                  "openai",
@@ -1726,15 +1726,68 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		err = configureSelectedModels(testStore(cfg), knownProviders)
 		require.NoError(t, err)
 
-		fast := cfg.Models[SelectedModelTypeAutoClassifierFast]
-		reasoning := cfg.Models[SelectedModelTypeAutoClassifierReasoning]
-		require.Equal(t, "openai", fast.Provider)
-		require.Equal(t, "legacy-classifier", fast.Model)
-		require.Equal(t, int64(750), fast.MaxTokens)
-		require.Equal(t, "openai", reasoning.Provider)
-		require.Equal(t, "legacy-classifier", reasoning.Model)
-		require.Equal(t, int64(750), reasoning.MaxTokens)
-		_, exists := cfg.Models[SelectedModelTypeAutoClassifier]
-		require.False(t, exists)
+		classifier := cfg.Models[SelectedModelTypeAutoClassifier]
+		require.Equal(t, "openai", classifier.Provider)
+		require.Equal(t, "legacy-classifier", classifier.Model)
+		require.Equal(t, int64(750), classifier.MaxTokens)
+	})
+
+	t.Run("should migrate legacy fast/reasoning keys into auto classifier slot", func(t *testing.T) {
+		knownProviders := []catwalk.Provider{
+			{
+				ID:                  "openai",
+				APIKey:              "abc",
+				DefaultLargeModelID: "large-model",
+				DefaultSmallModelID: "small-model",
+				Models: []catwalk.Model{
+					{
+						ID:               "large-model",
+						DefaultMaxTokens: 1000,
+					},
+					{
+						ID:               "small-model",
+						DefaultMaxTokens: 500,
+					},
+					{
+						ID:               "legacy-fast",
+						DefaultMaxTokens: 300,
+					},
+					{
+						ID:               "legacy-reasoning",
+						DefaultMaxTokens: 900,
+					},
+				},
+			},
+		}
+
+		cfg := &Config{
+			Models: map[SelectedModelType]SelectedModel{
+				SelectedModelTypeAutoClassifierFast: {
+					Provider: "openai",
+					Model:    "legacy-fast",
+				},
+				SelectedModelTypeAutoClassifierReasoning: {
+					Provider: "openai",
+					Model:    "legacy-reasoning",
+				},
+			},
+		}
+		cfg.setDefaults("/tmp", "")
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
+		require.NoError(t, err)
+
+		err = configureSelectedModels(testStore(cfg), knownProviders)
+		require.NoError(t, err)
+
+		classifier := cfg.Models[SelectedModelTypeAutoClassifier]
+		require.Equal(t, "openai", classifier.Provider)
+		require.Equal(t, "legacy-reasoning", classifier.Model)
+		require.Equal(t, int64(900), classifier.MaxTokens)
+		_, fastExists := cfg.Models[SelectedModelTypeAutoClassifierFast]
+		require.False(t, fastExists)
+		_, reasoningExists := cfg.Models[SelectedModelTypeAutoClassifierReasoning]
+		require.False(t, reasoningExists)
 	})
 }

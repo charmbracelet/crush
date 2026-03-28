@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -21,6 +22,8 @@ const (
 	defaultMaxConsecutiveClassifierBlocks = 3
 	defaultMaxTotalClassifierBlocks       = 20
 )
+
+var safeNullRedirectPattern = regexp.MustCompile(`(?i)(^|\s)(?:\d?>)\s*(?:/dev/null|nul|\$null)`)
 
 type sessionClassifierState struct {
 	lastMode            session.PermissionMode
@@ -118,7 +121,12 @@ func (s *service) Request(ctx context.Context, opts permission.CreatePermissionR
 		return true, nil
 	}
 
-	if s.isExplicitlyAllowed(opts, eval.Permission) {
+	if mode == session.PermissionModeDefault && s.isExplicitlyAllowed(opts, eval.Permission) {
+		slog.Debug("Auto Mode permission explicitly allowed",
+			"session_id", eval.Permission.SessionID,
+			"tool", eval.Permission.ToolName,
+			"action", eval.Permission.Action,
+		)
 		return true, nil
 	}
 
@@ -141,6 +149,11 @@ func (s *service) Request(ctx context.Context, opts permission.CreatePermissionR
 	}
 
 	if s.shouldSuspendAutoApproval(eval.Permission.SessionID, mode) {
+		slog.Debug("Auto Mode permission auto-approval suspended",
+			"session_id", eval.Permission.SessionID,
+			"tool", eval.Permission.ToolName,
+			"action", eval.Permission.Action,
+		)
 		return s.base.Prompt(ctx, withAutoReview(eval.Permission, permission.AutoReview{
 			Trigger: permission.AutoReviewTriggerClassifierSuspended,
 			Reason:  "Auto approval is paused after repeated classifier blocks.",
@@ -148,13 +161,43 @@ func (s *service) Request(ctx context.Context, opts permission.CreatePermissionR
 	}
 
 	if isAlwaysManual(eval.Permission, s.workingDir) {
+		slog.Debug("Auto Mode permission requires manual confirmation",
+			"session_id", eval.Permission.SessionID,
+			"tool", eval.Permission.ToolName,
+			"action", eval.Permission.Action,
+		)
 		return s.base.Prompt(ctx, withAutoReview(eval.Permission, permission.AutoReview{
 			Trigger: permission.AutoReviewTriggerAlwaysManual,
 			Reason:  "This action always requires manual confirmation in Auto Mode.",
 		}))
 	}
 
-	if isAutoAllowedFastPath(eval.Permission, s.workingDir) {
+	if isAcceptEditsEquivalentRequest(eval.Permission, s.workingDir) {
+		slog.Debug("Auto Mode permission allowed via accept-edits equivalent request",
+			"session_id", eval.Permission.SessionID,
+			"tool", eval.Permission.ToolName,
+			"action", eval.Permission.Action,
+		)
+		s.resetClassifierBlocks(eval.Permission.SessionID)
+		return true, nil
+	}
+
+	if isAutoModeAllowlistedRequest(eval.Permission) {
+		slog.Debug("Auto Mode permission allowed via allowlist",
+			"session_id", eval.Permission.SessionID,
+			"tool", eval.Permission.ToolName,
+			"action", eval.Permission.Action,
+		)
+		s.resetClassifierBlocks(eval.Permission.SessionID)
+		return true, nil
+	}
+
+	if isSafeReadOnlyBashRequest(eval.Permission) {
+		slog.Debug("Auto Mode permission allowed via safe read-only bash",
+			"session_id", eval.Permission.SessionID,
+			"tool", eval.Permission.ToolName,
+			"action", eval.Permission.Action,
+		)
 		s.resetClassifierBlocks(eval.Permission.SessionID)
 		return true, nil
 	}
@@ -169,9 +212,24 @@ func (s *service) Request(ctx context.Context, opts permission.CreatePermissionR
 		return s.handleClassifierFailure(ctx, eval.Permission, err)
 	}
 	if classification.AllowAuto {
+		slog.Debug("Auto Mode permission allowed by classifier",
+			"session_id", eval.Permission.SessionID,
+			"tool", eval.Permission.ToolName,
+			"action", eval.Permission.Action,
+			"reason", strings.TrimSpace(classification.Reason),
+			"confidence", classification.Confidence,
+		)
 		s.resetClassifierBlocks(eval.Permission.SessionID)
 		return true, nil
 	}
+
+	slog.Debug("Auto Mode permission blocked by classifier",
+		"session_id", eval.Permission.SessionID,
+		"tool", eval.Permission.ToolName,
+		"action", eval.Permission.Action,
+		"reason", strings.TrimSpace(classification.Reason),
+		"confidence", classification.Confidence,
+	)
 
 	s.recordClassifierBlock(eval.Permission.SessionID)
 	return s.base.Prompt(ctx, withAutoReview(eval.Permission, permission.AutoReview{
@@ -213,6 +271,12 @@ func (s *service) classifier() permission.Classifier {
 }
 
 func (s *service) handleClassifierUnavailable(ctx context.Context, req permission.PermissionRequest, message string) (bool, error) {
+	slog.Debug("Auto Mode classifier unavailable",
+		"session_id", req.SessionID,
+		"tool", req.ToolName,
+		"action", req.Action,
+		"fail_closed", s.failClosedOnClassifierError,
+	)
 	if s.failClosedOnClassifierError {
 		return false, permission.NewPermissionBlockedError(message, "Set permissions.fail_closed_on_classifier_error=false to fall back to manual confirmation.")
 	}
@@ -231,11 +295,21 @@ func (s *service) handleClassifierFailure(ctx context.Context, req permission.Pe
 		"err", err,
 	)
 	if s.failClosedOnClassifierError {
+		slog.Debug("Auto Mode classifier failure blocks request (fail closed)",
+			"session_id", req.SessionID,
+			"tool", req.ToolName,
+			"action", req.Action,
+		)
 		return false, permission.NewPermissionBlockedError(
 			"Auto Mode permission classification failed.",
 			reason,
 		)
 	}
+	slog.Debug("Auto Mode classifier failure falls back to manual review",
+		"session_id", req.SessionID,
+		"tool", req.ToolName,
+		"action", req.Action,
+	)
 	return s.base.Prompt(ctx, withAutoReview(req, permission.AutoReview{
 		Trigger: permission.AutoReviewTriggerClassifierFailed,
 		Reason:  reason,
@@ -273,12 +347,21 @@ func (s *service) shouldSuspendAutoApproval(sessionID string, mode session.Permi
 
 	state := s.sessionStates[sessionID]
 	if mode != session.PermissionModeAuto {
+		if _, ok := s.sessionStates[sessionID]; ok {
+			slog.Debug("Auto Mode classifier state cleared for non-auto mode",
+				"session_id", sessionID,
+				"mode", mode,
+			)
+		}
 		delete(s.sessionStates, sessionID)
 		return false
 	}
 	if state.lastMode != session.PermissionModeAuto {
 		state = sessionClassifierState{lastMode: mode}
 		s.sessionStates[sessionID] = state
+		slog.Debug("Auto Mode classifier state initialized",
+			"session_id", sessionID,
+		)
 		return false
 	}
 	return state.suspendAutoApproval
@@ -289,12 +372,23 @@ func (s *service) resetClassifierBlocks(sessionID string) {
 	defer s.classifierMu.Unlock()
 
 	state := s.sessionStates[sessionID]
+	prevConsecutive := state.consecutiveBlocks
+	prevSuspended := state.suspendAutoApproval
 	state.lastMode = session.PermissionModeAuto
 	state.consecutiveBlocks = 0
 	if state.totalBlocks < defaultMaxTotalClassifierBlocks {
 		state.suspendAutoApproval = false
 	}
 	s.sessionStates[sessionID] = state
+	if prevConsecutive > 0 || prevSuspended {
+		slog.Debug("Auto Mode classifier block counters reset",
+			"session_id", sessionID,
+			"previous_consecutive_blocks", prevConsecutive,
+			"total_blocks", state.totalBlocks,
+			"previous_suspended", prevSuspended,
+			"suspended", state.suspendAutoApproval,
+		)
+	}
 }
 
 func (s *service) recordClassifierBlock(sessionID string) {
@@ -302,6 +396,7 @@ func (s *service) recordClassifierBlock(sessionID string) {
 	defer s.classifierMu.Unlock()
 
 	state := s.sessionStates[sessionID]
+	prevSuspended := state.suspendAutoApproval
 	state.lastMode = session.PermissionModeAuto
 	state.consecutiveBlocks++
 	state.totalBlocks++
@@ -309,6 +404,19 @@ func (s *service) recordClassifierBlock(sessionID string) {
 		state.suspendAutoApproval = true
 	}
 	s.sessionStates[sessionID] = state
+	slog.Debug("Auto Mode classifier block recorded",
+		"session_id", sessionID,
+		"consecutive_blocks", state.consecutiveBlocks,
+		"total_blocks", state.totalBlocks,
+		"suspended", state.suspendAutoApproval,
+	)
+	if !prevSuspended && state.suspendAutoApproval {
+		slog.Debug("Auto Mode auto-approval suspended due to classifier blocks",
+			"session_id", sessionID,
+			"consecutive_blocks", state.consecutiveBlocks,
+			"total_blocks", state.totalBlocks,
+		)
+	}
 }
 
 func (s *service) isExplicitlyAllowed(opts permission.CreatePermissionRequest, req permission.PermissionRequest) bool {
@@ -316,13 +424,7 @@ func (s *service) isExplicitlyAllowed(opts permission.CreatePermissionRequest, r
 	return slices.Contains(s.allowedTools, commandKey) || slices.Contains(s.allowedTools, req.ToolName)
 }
 
-func isAutoAllowedFastPath(req permission.PermissionRequest, workingDir string) bool {
-	return isAutoAllowedReadOnly(req) ||
-		isSafeReadOnlyBashRequest(req) ||
-		isSafeWorkspaceWrite(req, workingDir)
-}
-
-func isAutoAllowedReadOnly(req permission.PermissionRequest) bool {
+func isAutoModeAllowlistedRequest(req permission.PermissionRequest) bool {
 	switch req.ToolName {
 	case tools.ViewToolName, tools.ReadMCPResourceToolName:
 		return req.Action == "read"
@@ -331,6 +433,10 @@ func isAutoAllowedReadOnly(req permission.PermissionRequest) bool {
 	default:
 		return false
 	}
+}
+
+func isAcceptEditsEquivalentRequest(req permission.PermissionRequest, workingDir string) bool {
+	return isSafeWorkspaceWrite(req, workingDir)
 }
 
 func isSafeReadOnlyBashRequest(req permission.PermissionRequest) bool {
@@ -347,26 +453,38 @@ func isSafeReadOnlyBashRequest(req permission.PermissionRequest) bool {
 	if command == "" {
 		return false
 	}
-	if strings.ContainsAny(command, "\r\n;<>") ||
+
+	sanitizedCommand := strings.TrimSpace(safeNullRedirectPattern.ReplaceAllString(command, " "))
+	if strings.ContainsAny(sanitizedCommand, "\r\n;<>") ||
 		strings.Contains(command, "&&") ||
 		strings.Contains(command, "||") ||
-		strings.Contains(command, "|") ||
+		strings.Contains(command, "|&") ||
 		strings.Contains(command, "$(") ||
 		strings.Contains(command, "`") {
 		return false
 	}
 
-	fields := strings.Fields(strings.ToLower(command))
-	if len(fields) == 0 {
-		return false
+	segments := strings.Split(sanitizedCommand, "|")
+	for _, segment := range segments {
+		fields := strings.Fields(strings.ToLower(strings.TrimSpace(segment)))
+		if len(fields) == 0 || !isSafeReadOnlyBashSegment(fields) {
+			return false
+		}
 	}
+	return true
+}
 
+func isSafeReadOnlyBashSegment(fields []string) bool {
 	switch fields[0] {
 	case "pwd", "ls", "dir", "tree", "cat", "type", "head", "tail", "wc", "rg", "grep", "which", "where", "stat":
+		return true
+	case "cut", "sort", "uniq":
 		return true
 	case "find":
 		return isSafeFindCommand(fields)
 	case "get-location", "get-childitem", "get-content", "select-string", "get-item", "get-command":
+		return true
+	case "select-object", "sort-object", "measure-object", "format-table", "out-string":
 		return true
 	case "git":
 		return isSafeReadOnlyGitCommand(fields[1:])
@@ -383,10 +501,16 @@ func isSafeReadOnlyGitCommand(args []string) bool {
 	switch args[0] {
 	case "status", "diff", "log", "show", "rev-parse", "ls-files", "grep", "symbolic-ref":
 		return true
+	case "stash":
+		return len(args) > 1 && args[1] == "list"
+	case "tag":
+		return len(args) == 1 || slices.Contains(args[1:], "--list")
+	case "config":
+		return len(args) > 1 && args[1] == "--get"
 	case "branch":
-		return len(args) == 1
+		return len(args) == 1 || slices.Contains(args[1:], "--show-current")
 	case "remote":
-		return len(args) > 1 && args[1] == "-v"
+		return len(args) > 1 && (args[1] == "-v" || (args[1] == "get-url" && len(args) <= 3))
 	default:
 		return false
 	}

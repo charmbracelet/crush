@@ -306,6 +306,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		Attachments:  call.Attachments,
 		SystemPrompt: systemPrompt,
 		PromptPrefix: promptPrefix,
+		PermissionMode: currentSession.PermissionMode,
 	})
 	if err != nil {
 		return nil, err
@@ -370,6 +371,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		Attachments:  call.Attachments,
 		SystemPrompt: systemPrompt,
 		PromptPrefix: promptPrefix,
+		PermissionMode: currentSession.PermissionMode,
 	})
 	if err != nil {
 		return nil, err
@@ -746,6 +748,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 					Attachments:  call.Attachments,
 					SystemPrompt: systemPrompt,
 					PromptPrefix: promptPrefix,
+					PermissionMode: currentSession.PermissionMode,
 				})
 				if buildErr != nil {
 					slog.Warn("Failed to rebuild request state for retry",
@@ -1537,7 +1540,7 @@ func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.S
 			msgs[0].Role = message.User
 		}
 	}
-	return msgs, nil
+	return filterAutoModePromptMessages(msgs, session.PermissionMode), nil
 }
 
 // generateTitle generates a session titled based on the initial prompt.
@@ -1858,6 +1861,7 @@ func (a *sessionAgent) estimateNextStepPromptTokens(ctx context.Context, session
 		Message:      message.Message{SessionID: sessionID, Role: message.User},
 		SystemPrompt: systemPrompt,
 		PromptPrefix: promptPrefix,
+		PermissionMode: currentSession.PermissionMode,
 	})
 	if err != nil {
 		return 0, err

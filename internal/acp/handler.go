@@ -648,8 +648,17 @@ func (h *Handler) handleSetMode(_ context.Context, req *Request) (any, *RPCError
 	if params.ModeID == "auto" {
 		h.app.GetPermissions().ClearPersistentPermissions(params.SessionID)
 	}
+	previousMode := session.PermissionModeDefault
+	if sess, err := h.app.GetSessions().Get(context.Background(), params.SessionID); err == nil {
+		previousMode = sess.PermissionMode
+	}
 	if _, err := h.app.GetSessions().UpdatePermissionMode(context.Background(), params.SessionID, session.NormalizePermissionMode(params.ModeID)); err != nil {
 		return nil, &RPCError{Code: CodeInternalError, Message: err.Error()}
+	}
+	if previousMode == session.PermissionModeAuto && session.NormalizePermissionMode(params.ModeID) != session.PermissionModeAuto {
+		if _, err := h.app.GetMessages().Create(context.Background(), params.SessionID, message.NewAutoModePromptMessage(message.AutoModePromptTypeExit)); err != nil {
+			return nil, &RPCError{Code: CodeInternalError, Message: err.Error()}
+		}
 	}
 	h.sendUpdate(params.SessionID, SessionUpdate{
 		SessionUpdate: SessionUpdateCurrentModeUpdate,
@@ -800,8 +809,17 @@ func (h *Handler) handleSetConfigOption(ctx context.Context, req *Request) (any,
 		if params.Value == "auto" {
 			h.app.GetPermissions().ClearPersistentPermissions(params.SessionID)
 		}
+		previousMode := session.PermissionModeDefault
+		if sess, err := h.app.GetSessions().Get(ctx, params.SessionID); err == nil {
+			previousMode = sess.PermissionMode
+		}
 		if _, err := h.app.GetSessions().UpdatePermissionMode(ctx, params.SessionID, session.NormalizePermissionMode(params.Value)); err != nil {
 			return nil, &RPCError{Code: CodeInternalError, Message: err.Error()}
+		}
+		if previousMode == session.PermissionModeAuto && session.NormalizePermissionMode(params.Value) != session.PermissionModeAuto {
+			if _, err := h.app.GetMessages().Create(ctx, params.SessionID, message.NewAutoModePromptMessage(message.AutoModePromptTypeExit)); err != nil {
+				return nil, &RPCError{Code: CodeInternalError, Message: err.Error()}
+			}
 		}
 
 		updated := h.buildConfigOptions(params.SessionID)

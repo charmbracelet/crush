@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -32,8 +33,11 @@ func (c *coordinator) reviewToolResultForPromptInjection(ctx context.Context, se
 	if toolResult.Data != "" || strings.TrimSpace(toolResult.Content) == "" {
 		return toolResult, nil
 	}
+	if reviewed, handled := applyLocalAutoToolOutputReview(toolResult); handled {
+		return reviewed, nil
+	}
 
-	model, providerCfg, err := c.selectedModel(ctx, config.SelectedModelTypeAutoClassifierReasoning, false)
+	model, providerCfg, err := c.selectedAutoClassifierModel(ctx, true)
 	if err != nil {
 		return toolResult.WithAutoReview(message.ToolResultAutoReview{
 			Suspicious:     true,
@@ -73,6 +77,72 @@ func (c *coordinator) reviewToolResultForPromptInjection(ctx context.Context, se
 		Reason:     strings.TrimSpace(review.Reason),
 		Confidence: string(review.Confidence),
 	}), nil
+}
+
+func applyLocalAutoToolOutputReview(toolResult message.ToolResult) (message.ToolResult, bool) {
+	if snippet, ok := suspiciousToolOutputSnippet(toolResult.Content); ok {
+		if isTrustedLocalReadOnlyToolResult(toolResult) {
+			return toolResult.WithAutoReview(message.ToolResultAutoReview{
+				Suspicious: true,
+				Sanitized:  true,
+				Reason:     "Tool output matched local prompt-injection heuristics (" + snippet + ").",
+				Confidence: string(permission.AutoApprovalConfidenceLow),
+			}), true
+		}
+		return toolResult, false
+	}
+	if isTrustedLocalReadOnlyToolResult(toolResult) {
+		return toolResult, true
+	}
+	return toolResult, false
+}
+
+func isTrustedLocalReadOnlyToolResult(toolResult message.ToolResult) bool {
+	switch toolResult.Name {
+	case tools.ViewToolName,
+		tools.LSToolName,
+		tools.GlobToolName,
+		tools.GrepToolName,
+		tools.DiagnosticsToolName,
+		tools.ReferencesToolName:
+		return true
+	default:
+		return false
+	}
+}
+
+func suspiciousToolOutputSnippet(content string) (string, bool) {
+	lower := strings.ToLower(strings.TrimSpace(content))
+	if lower == "" {
+		return "", false
+	}
+
+	suspiciousSnippets := []string{
+		"ignore previous",
+		"ignore all previous",
+		"ignore all instructions",
+		"system prompt",
+		"developer message",
+		"assistant message",
+		"user message",
+		"tool instructions",
+		"execute this",
+		"run this command",
+		"sudo ",
+		"curl ",
+		"wget ",
+		"base64",
+		"<system",
+		"</system",
+		"assistant:",
+		"user:",
+	}
+	for _, snippet := range suspiciousSnippets {
+		if strings.Contains(lower, snippet) {
+			return snippet, true
+		}
+	}
+	return "", false
 }
 
 func buildToolOutputGuardPrompt(cfg *config.Config, toolResult message.ToolResult) string {
@@ -116,7 +186,7 @@ func parseToolOutputGuard(raw string) (toolOutputGuardResponse, error) {
 }
 
 func (c *coordinator) reviewHandoffText(ctx context.Context, sess session.Session, title, content string) (permission.AutoClassification, error) {
-	model, providerCfg, err := c.selectedModel(ctx, config.SelectedModelTypeAutoClassifierReasoning, false)
+	model, providerCfg, err := c.selectedAutoClassifierModel(ctx, true)
 	if err != nil {
 		return permission.AutoClassification{}, err
 	}

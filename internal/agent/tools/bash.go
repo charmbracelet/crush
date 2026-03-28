@@ -251,6 +251,14 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 					}
 				}
 			}
+			if err := validateNoWrapperShellCommand(params.Command); err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
+			}
+			if fallbackCommand != "" {
+				if err := validateNoWrapperShellCommand(fallbackCommand); err != nil {
+					return fantasy.NewTextErrorResponse(err.Error()), nil
+				}
+			}
 
 			if toolOpts.DisableBackground && params.RunInBackground {
 				return fantasy.NewTextErrorResponse("background execution is disabled for this bash tool"), nil

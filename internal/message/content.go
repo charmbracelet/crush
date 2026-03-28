@@ -463,6 +463,15 @@ func PromptWithTextAttachments(prompt string, attachments []Attachment) string {
 func (m *Message) ToAIMessage() []fantasy.Message {
 	var messages []fantasy.Message
 	switch m.Role {
+	case System:
+		if _, ok := ParseAutoModePrompt(*m); ok {
+			return nil
+		}
+		text := strings.TrimSpace(m.Content().Text)
+		if text == "" {
+			return nil
+		}
+		messages = append(messages, fantasy.NewSystemMessage(text))
 	case User:
 		var parts []fantasy.MessagePart
 		text := strings.TrimSpace(m.Content().Text)

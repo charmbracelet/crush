@@ -188,6 +188,10 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	ctx = context.WithValue(ctx, tools.SessionIDContextKey, sessionID)
 	ctx = toolruntime.WithService(ctx, c.toolRuntime)
 
+	if err := c.maybeAppendAutoModeReminder(ctx, sessionID, sess.PermissionMode); err != nil {
+		return nil, fmt.Errorf("failed to append auto mode reminder: %w", err)
+	}
+
 	// refresh models before each run
 	runtimeConfig, err := c.updateCurrentAgentRuntime(ctx)
 	if err != nil {

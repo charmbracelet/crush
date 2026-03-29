@@ -1934,11 +1934,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		case dialog.PermissionAllow:
 			m.com.App.Permissions.Grant(msg.Permission)
 		case dialog.PermissionAllowForSession:
-			if msg.Permission.AutoReview != nil {
-				m.com.App.Permissions.Grant(msg.Permission)
-			} else {
-				m.com.App.Permissions.GrantPersistent(msg.Permission)
-			}
+			m.com.App.Permissions.GrantPersistent(msg.Permission)
 		case dialog.PermissionDeny:
 			m.com.App.Permissions.Deny(msg.Permission)
 		}

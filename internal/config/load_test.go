@@ -279,6 +279,47 @@ func TestConfig_configureProvidersWithOverride(t *testing.T) {
 	require.Equal(t, "https://api.openai.com/v2", pc.BaseURL)
 	require.Len(t, pc.Models, 2)
 	require.Equal(t, "Updated", pc.Models[0].Name)
+	require.False(t, pc.ResponsesWebSocket)
+}
+
+func TestConfig_configureProvidersWithOverrideKeepsResponsesWebSocket(t *testing.T) {
+	knownProviders := []catwalk.Provider{
+		{
+			ID:          "openai",
+			APIKey:      "$OPENAI_API_KEY",
+			APIEndpoint: "https://api.openai.com/v1",
+			Models: []catwalk.Model{{
+				ID: "test-model",
+			}},
+		},
+	}
+
+	cfg := &Config{
+		Providers: csync.NewMap[string, ProviderConfig](),
+	}
+	cfg.Providers.Set("openai", ProviderConfig{
+		APIKey:             "xyz",
+		BaseURL:            "https://api.openai.com/v2",
+		ResponsesWebSocket: true,
+		Models: []catwalk.Model{
+			{
+				ID:   "test-model",
+				Name: "Updated",
+			},
+		},
+	})
+	cfg.setDefaults("/tmp", "")
+
+	env := env.NewFromMap(map[string]string{
+		"OPENAI_API_KEY": "test-key",
+	})
+	resolver := NewEnvironmentVariableResolver(env)
+	err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
+	require.NoError(t, err)
+
+	pc, ok := cfg.Providers.Get("openai")
+	require.True(t, ok)
+	require.True(t, pc.ResponsesWebSocket)
 }
 
 func TestConfig_configureProvidersWithNewProvider(t *testing.T) {

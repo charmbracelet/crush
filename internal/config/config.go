@@ -163,6 +163,10 @@ type ProviderConfig struct {
 
 	ProviderOptions map[string]any `json:"provider_options,omitempty" jsonschema:"description=Additional provider-specific options for this provider"`
 
+	// ResponsesWebSocket enables OpenAI Responses streaming over WebSocket.
+	// When false, streaming uses HTTP SSE for compatibility.
+	ResponsesWebSocket bool `json:"responses_websocket,omitempty" jsonschema:"description=Use WebSocket transport for OpenAI Responses streaming when supported,default=false"`
+
 	// CopilotService indicates if this provider follows GitHub Copilot billing rules.
 	// When true, X-Initiator header is set based on request type:
 	// - "user" for direct user prompts (billable)

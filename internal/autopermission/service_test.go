@@ -153,6 +153,31 @@ func TestAutoPermission_DefaultModeFallsBackToPrompt(t *testing.T) {
 	require.Equal(t, 1, base.promptCalls)
 }
 
+func TestAutoPermission_AutoModePersistentPermissionSkipsPromptAndClassifier(t *testing.T) {
+	t.Parallel()
+
+	persistentReq := permission.PermissionRequest{
+		SessionID: "s1",
+		ToolName:  "mcp_acemcp_search_context",
+		Action:    "execute",
+		Path:      "/workspace",
+	}
+	base := &mockPermissionService{
+		Broker:      pubsub.NewBroker[permission.PermissionRequest](),
+		evalResult:  permission.EvaluationResult{Decision: permission.EvaluationDecisionAsk, Permission: persistentReq},
+		promptGrant: true,
+		persistent:  []permission.PermissionRequest{persistentReq},
+	}
+	classifier := &mockClassifier{}
+	svc := New(base, &mockSessionService{mode: session.PermissionModeAuto}, func() permission.Classifier { return classifier }, "", false, nil)
+
+	granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{})
+	require.NoError(t, err)
+	require.True(t, granted)
+	require.Zero(t, base.promptCalls)
+	require.Zero(t, classifier.calls)
+}
+
 func TestAutoPermission_AutoModeReadOnlyRequestSkipsClassifier(t *testing.T) {
 	t.Parallel()
 
@@ -947,9 +972,9 @@ func TestIsAlwaysManual(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "mcp execute always manual",
+			name: "mcp execute not always manual",
 			req:  permission.PermissionRequest{ToolName: "mcp_custom", Action: "execute"},
-			want: true,
+			want: false,
 		},
 	}
 

@@ -987,7 +987,7 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 	return anthropic.New(opts...)
 }
 
-func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[string]string, copilotService, useCopilotClient, isSubAgent bool) (fantasy.Provider, error) {
+func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[string]string, copilotService, useCopilotClient, isSubAgent, responsesWebSocket bool) (fantasy.Provider, error) {
 	opts := []openai.Option{
 		openai.WithAPIKey(apiKey),
 		openai.WithUseResponsesAPI(),
@@ -1003,7 +1003,7 @@ func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[st
 	} else if c.cfg.Config().Options.Debug {
 		httpClient = log.NewHTTPClient()
 	}
-	opts = append(opts, openai.WithHTTPClient(httpext.WrapActivityTrackingHTTPClient(httpClient)))
+	opts = append(opts, openai.WithHTTPClient(wrapOpenAIStreamingHTTPClient(httpClient, responsesWebSocket)))
 
 	if len(headers) > 0 {
 		opts = append(opts, openai.WithHeaders(headers))
@@ -1012,6 +1012,13 @@ func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[st
 		opts = append(opts, openai.WithBaseURL(baseURL))
 	}
 	return openai.New(opts...)
+}
+
+func wrapOpenAIStreamingHTTPClient(httpClient *http.Client, responsesWebSocket bool) *http.Client {
+	if responsesWebSocket {
+		httpClient = httpext.WrapOpenAIResponsesWebSocketHTTPClient(httpClient)
+	}
+	return httpext.WrapActivityTrackingHTTPClient(httpClient)
 }
 
 func (c *coordinator) buildOpenrouterProvider(_, apiKey string, headers map[string]string) (fantasy.Provider, error) {
@@ -1052,6 +1059,7 @@ func (c *coordinator) buildOpenaiCompatProvider(
 	useCopilotClient bool,
 	isSubAgent bool,
 	copilotService bool,
+	responsesWebSocket bool,
 ) (fantasy.Provider, error) {
 	opts := []openaicompat.Option{
 		openaicompat.WithBaseURL(baseURL),
@@ -1085,7 +1093,7 @@ func (c *coordinator) buildOpenaiCompatProvider(
 			Transport: copilot.NewReasoningNormalizingTransport(inner),
 		}
 	}
-	opts = append(opts, openaicompat.WithHTTPClient(httpext.WrapActivityTrackingHTTPClient(httpClient)))
+	opts = append(opts, openaicompat.WithHTTPClient(wrapOpenAIStreamingHTTPClient(httpClient, responsesWebSocket)))
 
 	if len(headers) > 0 {
 		opts = append(opts, openaicompat.WithHeaders(headers))
@@ -1225,7 +1233,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model cat
 
 	switch providerCfg.Type {
 	case openai.Name:
-		return c.buildOpenaiProvider(baseURL, apiKey, headers, providerCfg.CopilotService, providerCfg.UseCopilotClient, isSubAgent)
+		return c.buildOpenaiProvider(baseURL, apiKey, headers, providerCfg.CopilotService, providerCfg.UseCopilotClient, isSubAgent, providerCfg.ResponsesWebSocket)
 	case anthropic.Name:
 		return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID, providerCfg.UseCopilotClient, isSubAgent)
 	case openrouter.Name:
@@ -1256,6 +1264,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model cat
 			providerCfg.UseCopilotClient,
 			isSubAgent,
 			providerCfg.CopilotService,
+			providerCfg.ResponsesWebSocket,
 		)
 	case hyper.Name:
 		return c.buildHyperProvider(baseURL, apiKey)

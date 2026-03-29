@@ -312,7 +312,7 @@ func (p *Permissions) selectCurrentOption() tea.Msg {
 }
 
 func (p *Permissions) canAllowSession() bool {
-	return p.permission.AutoReview == nil
+	return true
 }
 
 func (p *Permissions) optionCount() int {

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"net/http"
 	"reflect"
 	"testing"
 	"unsafe"
@@ -970,6 +971,42 @@ func TestMergeCallOptions_ThinkDisabledClearsProviderOptions(t *testing.T) {
 		opts, ok := options[openaicompat.Name].(*openaicompat.ProviderOptions)
 		require.True(t, ok)
 		require.Nil(t, opts.ReasoningEffort)
+	})
+}
+
+func TestWrapOpenAIStreamingHTTPClient(t *testing.T) {
+	t.Parallel()
+
+	t.Run("uses websocket wrapper when enabled", func(t *testing.T) {
+		t.Parallel()
+
+		wrapped := wrapOpenAIStreamingHTTPClient(nil, true)
+		require.NotNil(t, wrapped)
+
+		transportType := reflect.TypeOf(wrapped.Transport).String()
+		require.Equal(t, "*httpext.activityTrackingTransport", transportType)
+
+		activityValue := reflect.ValueOf(wrapped.Transport).Elem()
+		baseField := activityValue.FieldByName("base")
+		require.True(t, baseField.IsValid())
+		base := reflect.NewAt(baseField.Type(), unsafe.Pointer(baseField.UnsafeAddr())).Elem().Interface().(http.RoundTripper)
+		require.Equal(t, "httpext.openAIResponsesWebSocketTransport", reflect.TypeOf(base).String())
+	})
+
+	t.Run("uses activity wrapper only when disabled", func(t *testing.T) {
+		t.Parallel()
+
+		wrapped := wrapOpenAIStreamingHTTPClient(nil, false)
+		require.NotNil(t, wrapped)
+
+		transportType := reflect.TypeOf(wrapped.Transport).String()
+		require.Equal(t, "*httpext.activityTrackingTransport", transportType)
+
+		activityValue := reflect.ValueOf(wrapped.Transport).Elem()
+		baseField := activityValue.FieldByName("base")
+		require.True(t, baseField.IsValid())
+		base := reflect.NewAt(baseField.Type(), unsafe.Pointer(baseField.UnsafeAddr())).Elem().Interface().(http.RoundTripper)
+		require.Same(t, http.DefaultTransport, base)
 	})
 }
 

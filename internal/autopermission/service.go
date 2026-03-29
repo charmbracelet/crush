@@ -118,11 +118,6 @@ func (s *service) Subscribe(ctx context.Context) <-chan pubsub.Event[permission.
 }
 
 func (s *service) GrantPersistent(p permission.PermissionRequest) {
-	mode, err := s.sessionPermissionMode(context.Background(), p.SessionID)
-	if err == nil && mode != session.PermissionModeDefault {
-		s.base.Grant(p)
-		return
-	}
 	s.base.GrantPersistent(p)
 }
 
@@ -172,6 +167,18 @@ func (s *service) Request(ctx context.Context, opts permission.CreatePermissionR
 		return true, nil
 	}
 
+	if s.base.HasPersistentPermission(eval.Permission) {
+		slog.Debug("Permission allowed via session grant",
+			"session_id", eval.Permission.SessionID,
+			"tool", eval.Permission.ToolName,
+			"action", eval.Permission.Action,
+		)
+		if mode == session.PermissionModeAuto {
+			s.resetClassifierBlocks(eval.Permission.SessionID)
+		}
+		return true, nil
+	}
+
 	if mode == session.PermissionModeDefault && s.isExplicitlyAllowed(opts, eval.Permission) {
 		slog.Debug("Auto Mode permission explicitly allowed",
 			"session_id", eval.Permission.SessionID,
@@ -189,9 +196,6 @@ func (s *service) Request(ctx context.Context, opts permission.CreatePermissionR
 	}
 
 	if mode == session.PermissionModeDefault {
-		if s.base.HasPersistentPermission(eval.Permission) {
-			return true, nil
-		}
 		return s.base.Prompt(ctx, eval.Permission)
 	}
 
@@ -668,7 +672,7 @@ func isAlwaysManual(req permission.PermissionRequest, workingDir string) bool {
 		filePath, ok := permissionRequestFilePath(req)
 		return ok && isSensitiveWorkspacePath(filePath, workingDir)
 	default:
-		return strings.HasPrefix(req.ToolName, "mcp_") && req.Action == "execute"
+		return false
 	}
 }
 

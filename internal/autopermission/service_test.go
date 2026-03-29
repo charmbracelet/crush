@@ -214,7 +214,7 @@ func TestAutoPermission_AutoModeClassifierAllowSkipsPrompt(t *testing.T) {
 	require.Equal(t, 1, classifier.calls)
 }
 
-func TestAutoPermission_AutoModeExplicitAllowListSkipsClassifierAndPrompt(t *testing.T) {
+func TestAutoPermission_DefaultModeExplicitAllowListSkipsClassifierAndPrompt(t *testing.T) {
 	t.Parallel()
 
 	base := &mockPermissionService{
@@ -228,6 +228,27 @@ func TestAutoPermission_AutoModeExplicitAllowListSkipsClassifierAndPrompt(t *tes
 		SessionID: "s1",
 		ToolName:  "edit",
 		Action:    "write",
+	})
+	require.NoError(t, err)
+	require.True(t, granted)
+	require.Zero(t, base.promptCalls)
+	require.Zero(t, classifier.calls)
+}
+
+func TestAutoPermission_AutoModeExplicitAllowListSkipsClassifierAndPrompt(t *testing.T) {
+	t.Parallel()
+
+	base := &mockPermissionService{
+		Broker:     pubsub.NewBroker[permission.PermissionRequest](),
+		evalResult: permission.EvaluationResult{Decision: permission.EvaluationDecisionAsk, Permission: permission.PermissionRequest{SessionID: "s1", ToolName: "mcp_custom", Action: "execute"}},
+	}
+	classifier := &mockClassifier{result: permission.AutoClassification{AllowAuto: false}}
+	svc := New(base, &mockSessionService{mode: session.PermissionModeAuto}, func() permission.Classifier { return classifier }, "", false, []string{"mcp_custom"})
+
+	granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{
+		SessionID: "s1",
+		ToolName:  "mcp_custom",
+		Action:    "execute",
 	})
 	require.NoError(t, err)
 	require.True(t, granted)

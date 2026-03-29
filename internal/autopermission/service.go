@@ -179,13 +179,24 @@ func (s *service) Request(ctx context.Context, opts permission.CreatePermissionR
 		return true, nil
 	}
 
-	if mode == session.PermissionModeDefault && s.isExplicitlyAllowed(opts, eval.Permission) {
-		slog.Debug("Auto Mode permission explicitly allowed",
-			"session_id", eval.Permission.SessionID,
-			"tool", eval.Permission.ToolName,
-			"action", eval.Permission.Action,
-		)
-		return true, nil
+	if s.isExplicitlyAllowed(opts, eval.Permission) {
+		if mode == session.PermissionModeAuto && isAlwaysManual(eval.Permission, s.workingDir) {
+			slog.Debug("Auto Mode explicit allowlist still requires manual confirmation",
+				"session_id", eval.Permission.SessionID,
+				"tool", eval.Permission.ToolName,
+				"action", eval.Permission.Action,
+			)
+		} else {
+			slog.Debug("Permission explicitly allowed",
+				"session_id", eval.Permission.SessionID,
+				"tool", eval.Permission.ToolName,
+				"action", eval.Permission.Action,
+			)
+			if mode == session.PermissionModeAuto {
+				s.resetClassifierBlocks(eval.Permission.SessionID)
+			}
+			return true, nil
+		}
 	}
 
 	switch classifyPluginDecision(eval.Permission) {

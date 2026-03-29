@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 	"unsafe"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -1105,3 +1107,368 @@ func (anthropicProviderLanguageModel) Provider() string {
 func (anthropicProviderLanguageModel) Model() string {
 	return "test-model"
 }
+
+func TestTitleUserPromptFromCall(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns plain prompt", func(t *testing.T) {
+		t.Parallel()
+		require.Equal(t, "hello world", titleUserPromptFromCall("hello world"))
+	})
+
+	t.Run("extracts auto resume original prompt", func(t *testing.T) {
+		t.Parallel()
+		wrapped := autoResumePromptPrefix + "please fix bug`"
+		require.Equal(t, "please fix bug", titleUserPromptFromCall(wrapped))
+	})
+
+	t.Run("extracts context window resume original prompt", func(t *testing.T) {
+		t.Parallel()
+		wrapped := contextWindowResumePromptPrefix + "analyze logs quickly`"
+		require.Equal(t, "analyze logs quickly", titleUserPromptFromCall(wrapped))
+	})
+
+	t.Run("returns empty for blank prompt", func(t *testing.T) {
+		t.Parallel()
+		require.Empty(t, titleUserPromptFromCall("   \n\t  "))
+	})
+}
+
+func TestShouldGenerateSessionTitle(t *testing.T) {
+	t.Parallel()
+
+	require.True(t, shouldGenerateSessionTitle(""))
+	require.True(t, shouldGenerateSessionTitle("New Session"))
+	require.True(t, shouldGenerateSessionTitle("new session"))
+	require.True(t, shouldGenerateSessionTitle(DefaultSessionName))
+	require.False(t, shouldGenerateSessionTitle("Bugfix summary"))
+}
+
+func TestTitlePromptFromCallOrHistory(t *testing.T) {
+	t.Parallel()
+
+	t.Run("prefers current call prompt", func(t *testing.T) {
+		t.Parallel()
+		history := []message.Message{{Role: message.User, Parts: []message.ContentPart{message.TextContent{Text: "older prompt"}}}}
+		require.Equal(t, "latest prompt", titlePromptFromCallOrHistory("latest prompt", history))
+	})
+
+	t.Run("falls back to latest user history when call prompt empty", func(t *testing.T) {
+		t.Parallel()
+		history := []message.Message{
+			{Role: message.Assistant, Parts: []message.ContentPart{message.TextContent{Text: "assistant"}}},
+			{Role: message.User, Parts: []message.ContentPart{message.TextContent{Text: "first prompt"}}},
+			{Role: message.User, Parts: []message.ContentPart{message.TextContent{Text: "latest user prompt"}}},
+		}
+		require.Equal(t, "latest user prompt", titlePromptFromCallOrHistory("", history))
+	})
+
+	t.Run("returns empty when no usable prompt", func(t *testing.T) {
+		t.Parallel()
+		history := []message.Message{{Role: message.Assistant, Parts: []message.ContentPart{message.TextContent{Text: "assistant"}}}}
+		require.Empty(t, titlePromptFromCallOrHistory("   ", history))
+	})
+}
+
+func TestGenerateTitleResetsStreamedTitleOnModelFallback(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	testSession, err := env.sessions.Create(t.Context(), "New Session")
+	require.NoError(t, err)
+
+	streamCalls := 0
+	titleModel := stubLanguageModel{
+		stream: func(context.Context, fantasy.Call) (fantasy.StreamResponse, error) {
+			streamCalls++
+			if streamCalls == 1 {
+				return func(yield func(fantasy.StreamPart) bool) {
+					if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextStart, ID: "title"}) {
+						return
+					}
+					if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, ID: "title", Delta: "partial-"}) {
+						return
+					}
+					yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeError, Error: fmt.Errorf("small model failed")})
+				}, nil
+			}
+			return func(yield func(fantasy.StreamPart) bool) {
+				if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextStart, ID: "title"}) {
+					return
+				}
+				if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, ID: "title", Delta: "clean-title"}) {
+					return
+				}
+				yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop})
+			}, nil
+		},
+	}
+
+	model := Model{
+		Model: titleModel,
+		CatwalkCfg: catwalk.Model{
+			ContextWindow:    200000,
+			DefaultMaxTokens: 1000,
+		},
+		ModelCfg: config.SelectedModel{
+			Model:    "claude-sonnet-4",
+			Provider: "anthropic",
+		},
+	}
+
+	a := NewSessionAgent(SessionAgentOptions{
+		LargeModel:   model,
+		SmallModel:   model,
+		SystemPrompt: "",
+		WorkingDir:   env.workingDir,
+		IsYolo:       true,
+		Sessions:     env.sessions,
+		Messages:     env.messages,
+	})
+
+	a.(*sessionAgent).generateTitle(t.Context(), testSession.ID, "user prompt", nil)
+
+	after, err := env.sessions.Get(t.Context(), testSession.ID)
+	require.NoError(t, err)
+	require.Equal(t, "clean-title", after.Title)
+	require.Equal(t, 2, streamCalls)
+}
+
+func TestGenerateTitleDoesNotOverwriteSessionUsage(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	testSession, err := env.sessions.Create(t.Context(), "New Session")
+	require.NoError(t, err)
+
+	orig := testSession
+	orig.PromptTokens = 321
+	orig.CompletionTokens = 654
+	orig.Cost = 12.34
+	orig.LastPromptTokens = 11
+	orig.LastCompletionTokens = 22
+	_, err = env.sessions.Save(t.Context(), orig)
+	require.NoError(t, err)
+
+	titleModel := stubLanguageModel{
+		stream: func(context.Context, fantasy.Call) (fantasy.StreamResponse, error) {
+			return func(yield func(fantasy.StreamPart) bool) {
+				if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextStart, ID: "title"}) {
+					return
+				}
+				if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, ID: "title", Delta: "kept-usage-title"}) {
+					return
+				}
+				yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop})
+			}, nil
+		},
+	}
+
+	model := Model{
+		Model: titleModel,
+		CatwalkCfg: catwalk.Model{
+			ContextWindow:    200000,
+			DefaultMaxTokens: 1000,
+		},
+		ModelCfg: config.SelectedModel{
+			Model:    "claude-sonnet-4",
+			Provider: "anthropic",
+		},
+	}
+
+	a := NewSessionAgent(SessionAgentOptions{
+		LargeModel:   model,
+		SmallModel:   model,
+		SystemPrompt: "",
+		WorkingDir:   env.workingDir,
+		IsYolo:       true,
+		Sessions:     env.sessions,
+		Messages:     env.messages,
+	})
+
+	a.(*sessionAgent).generateTitle(t.Context(), testSession.ID, "user prompt", nil)
+
+	after, err := env.sessions.Get(t.Context(), testSession.ID)
+	require.NoError(t, err)
+	require.Equal(t, "kept-usage-title", after.Title)
+	require.Equal(t, orig.PromptTokens, after.PromptTokens)
+	require.Equal(t, orig.CompletionTokens, after.CompletionTokens)
+	require.InDelta(t, orig.Cost, after.Cost, 1e-9)
+	require.Equal(t, orig.LastPromptTokens, after.LastPromptTokens)
+	require.Equal(t, orig.LastCompletionTokens, after.LastCompletionTokens)
+}
+
+func TestGenerateTitleRespectsSessionLockDuringUsageUpdate(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	testSession, err := env.sessions.Create(t.Context(), "New Session")
+	require.NoError(t, err)
+
+	titleModel := stubLanguageModel{
+		stream: func(context.Context, fantasy.Call) (fantasy.StreamResponse, error) {
+			return func(yield func(fantasy.StreamPart) bool) {
+				if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextStart, ID: "title"}) {
+					return
+				}
+				if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, ID: "title", Delta: "locked-title"}) {
+					return
+				}
+				yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop})
+			}, nil
+		},
+	}
+
+	model := Model{
+		Model: titleModel,
+		CatwalkCfg: catwalk.Model{
+			ContextWindow:    200000,
+			DefaultMaxTokens: 1000,
+		},
+		ModelCfg: config.SelectedModel{
+			Model:    "claude-sonnet-4",
+			Provider: "anthropic",
+		},
+	}
+
+	a := NewSessionAgent(SessionAgentOptions{
+		LargeModel:   model,
+		SmallModel:   model,
+		SystemPrompt: "",
+		WorkingDir:   env.workingDir,
+		IsYolo:       true,
+		Sessions:     env.sessions,
+		Messages:     env.messages,
+	})
+
+	lock := &sync.Mutex{}
+	lock.Lock()
+	done := make(chan struct{})
+	go func() {
+		a.(*sessionAgent).generateTitle(t.Context(), testSession.ID, "user prompt", lock)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("generateTitle should wait for session lock")
+	default:
+	}
+
+	lock.Unlock()
+	<-done
+
+	after, err := env.sessions.Get(t.Context(), testSession.ID)
+	require.NoError(t, err)
+	require.Equal(t, "locked-title", after.Title)
+}
+
+func TestRunWaitsForTitleGenerationBeforeDequeuing(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	testSession, err := env.sessions.Create(t.Context(), "New Session")
+	require.NoError(t, err)
+
+	titleStarted := make(chan struct{})
+	releaseTitle := make(chan struct{})
+	var titleStartedOnce sync.Once
+	titleModel := stubLanguageModel{
+		stream: func(context.Context, fantasy.Call) (fantasy.StreamResponse, error) {
+			return func(yield func(fantasy.StreamPart) bool) {
+				titleStartedOnce.Do(func() { close(titleStarted) })
+				<-releaseTitle
+				if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextStart, ID: "title"}) {
+					return
+				}
+				if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, ID: "title", Delta: "queued-safe-title"}) {
+					return
+				}
+				yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop})
+			}, nil
+		},
+	}
+
+	model := Model{
+		Model: titleModel,
+		CatwalkCfg: catwalk.Model{
+			ContextWindow:    200000,
+			DefaultMaxTokens: 1000,
+		},
+		ModelCfg: config.SelectedModel{
+			Model:    "claude-sonnet-4",
+			Provider: "anthropic",
+		},
+	}
+
+	var sessAgent *sessionAgent
+	testAgent := &queuePrepareTestAgent{t: t}
+	sessAgent = NewSessionAgent(SessionAgentOptions{
+		LargeModel:   model,
+		SmallModel:   model,
+		SystemPrompt: "",
+		WorkingDir:   env.workingDir,
+		IsYolo:       true,
+		Sessions:     env.sessions,
+		Messages:     env.messages,
+		AgentFactory: func(fantasy.LanguageModel, ...fantasy.AgentOption) fantasy.Agent {
+			return testAgent
+		},
+	}).(*sessionAgent)
+
+	hasUserPrompt := func(prompt string) bool {
+		msgs, listErr := env.messages.List(t.Context(), testSession.ID)
+		require.NoError(t, listErr)
+		for _, msg := range msgs {
+			if msg.Role == message.User && msg.Content().Text == prompt {
+				return true
+			}
+		}
+		return false
+	}
+
+	testAgent.afterFirstPrepare = func() {
+		_, runErr := sessAgent.Run(context.Background(), SessionAgentCall{
+			SessionID:       testSession.ID,
+			Prompt:          "queued later",
+			MaxOutputTokens: 1000,
+		})
+		require.NoError(t, runErr)
+	}
+
+	runDone := make(chan error, 1)
+	go func() {
+		_, runErr := sessAgent.Run(t.Context(), SessionAgentCall{
+			SessionID:       testSession.ID,
+			Prompt:          "run now",
+			MaxOutputTokens: 1000,
+		})
+		runDone <- runErr
+	}()
+
+	select {
+	case <-titleStarted:
+	case <-time.After(time.Second):
+		t.Fatal("title generation did not start")
+	}
+
+	require.Eventually(t, func() bool {
+		return sessAgent.QueuedPrompts(testSession.ID) == 1
+	}, time.Second, 10*time.Millisecond)
+
+	select {
+	case err := <-runDone:
+		require.NoError(t, err)
+		t.Fatal("run finished before title generation was released")
+	default:
+	}
+
+	require.False(t, hasUserPrompt("queued later"))
+	close(releaseTitle)
+
+	require.NoError(t, <-runDone)
+	require.Eventually(t, func() bool {
+		return hasUserPrompt("queued later")
+	}, time.Second, 10*time.Millisecond)
+}
+

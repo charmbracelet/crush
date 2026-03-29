@@ -6,6 +6,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -60,6 +61,8 @@ const (
 	DefaultReadLimit = 2000
 	MaxLineLength    = 2000
 )
+
+var errViewOffsetBeyondEOF = errors.New("offset is beyond end of file")
 
 func NewViewTool(
 	lspManager *lsp.Manager,
@@ -207,6 +210,9 @@ func NewViewTool(
 			// Read the file content.
 			content, hasMore, err := readTextFile(filePath, params.Offset, params.Limit)
 			if err != nil {
+				if errors.Is(err, errViewOffsetBeyondEOF) {
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("Offset %d is beyond end of file", params.Offset)), nil
+				}
 				return fantasy.ToolResponse{}, fmt.Errorf("error reading file: %w", err)
 			}
 			if !utf8.ValidString(content) {
@@ -278,13 +284,16 @@ func readTextFile(filePath string, offset, limit int) (string, bool, error) {
 	defer file.Close()
 
 	scanner := NewLineScanner(file)
+	skipped := 0
 	if offset > 0 {
-		skipped := 0
 		for skipped < offset && scanner.Scan() {
 			skipped++
 		}
 		if err = scanner.Err(); err != nil {
 			return "", false, err
+		}
+		if skipped < offset {
+			return "", false, errViewOffsetBeyondEOF
 		}
 	}
 

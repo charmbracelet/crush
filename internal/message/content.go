@@ -112,6 +112,8 @@ type ToolResult struct {
 	MIMEType   string `json:"mime_type"`
 	Metadata   string `json:"metadata"`
 	IsError    bool   `json:"is_error"`
+
+	AutoReviewMeta ToolResultAutoReview `json:"-"`
 }
 
 func (ToolResult) isPart() {}

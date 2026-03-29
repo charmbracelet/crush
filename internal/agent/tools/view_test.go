@@ -57,6 +57,13 @@ func TestReadTextFileBoundaryCases(t *testing.T) {
 			wantContent: "",
 			wantHasMore: false,
 		},
+		{
+			name:        "offset at eof",
+			offset:      5,
+			limit:       3,
+			wantContent: "",
+			wantHasMore: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -64,6 +71,12 @@ func TestReadTextFileBoundaryCases(t *testing.T) {
 			t.Parallel()
 
 			gotContent, gotHasMore, err := readTextFile(filePath, tt.offset, tt.limit)
+			if tt.offset > len(allLines) {
+				require.ErrorIs(t, err, errViewOffsetBeyondEOF)
+				require.Equal(t, "", gotContent)
+				require.False(t, gotHasMore)
+				return
+			}
 			require.NoError(t, err)
 			require.Equal(t, tt.wantContent, gotContent)
 			require.Equal(t, tt.wantHasMore, gotHasMore)

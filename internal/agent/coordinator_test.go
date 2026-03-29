@@ -340,7 +340,7 @@ func TestRunSubAgent(t *testing.T) {
 		assert.Equal(t, "persisted final answer", resp.Content)
 	})
 
-	t.Run("returns empty-response error when neither result nor child session has content", func(t *testing.T) {
+	t.Run("returns guidance text when neither result nor child session has content", func(t *testing.T) {
 		env := testEnv(t)
 		coord := newTestCoordinator(t, env, providerID, providerCfg)
 
@@ -360,8 +360,8 @@ func TestRunSubAgent(t *testing.T) {
 			SessionTitle:   "Test",
 		})
 		require.NoError(t, err)
-		assert.True(t, resp.IsError)
-		assert.Equal(t, "no content in response", resp.Content)
+		assert.False(t, resp.IsError)
+		assert.Contains(t, resp.Content, "Subagent completed with no textual response")
 	})
 
 	t.Run("does not fall back to earlier assistant text when latest assistant is empty", func(t *testing.T) {
@@ -401,8 +401,8 @@ func TestRunSubAgent(t *testing.T) {
 			SessionTitle:   "Test",
 		})
 		require.NoError(t, err)
-		assert.True(t, resp.IsError)
-		assert.Equal(t, "no content in response", resp.Content)
+		assert.False(t, resp.IsError)
+		assert.Contains(t, resp.Content, "Subagent completed with no textual response")
 	})
 
 	t.Run("session setup callback is invoked", func(t *testing.T) {

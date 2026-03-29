@@ -84,6 +84,68 @@ func TestShouldRetryWithoutAnthropicThinking_RejectsOtherErrors(t *testing.T) {
 	}, fantasy.ProviderOptions{}))
 }
 
+func TestShouldRetryWithoutAnthropicThinking_FuzzyProviderMessage(t *testing.T) {
+	t.Parallel()
+
+	opts := fantasy.ProviderOptions{
+		anthropic.Name: &anthropic.ProviderOptions{
+			Thinking: &anthropic.ThinkingProviderOption{BudgetTokens: 2000},
+		},
+	}
+
+	tests := []struct {
+		name    string
+		msg     string
+		want    bool
+		status  int
+		options fantasy.ProviderOptions
+	}{
+		{
+			name:   "matches fuzzy tool_use wording",
+			msg:    "THINKING failed because reasoning content is required for assistant tool_use payload",
+			want:   true,
+			status: 400,
+		},
+		{
+			name:   "matches fuzzy tool call wording",
+			msg:    "thinking block rejected: reasoning_content missing in assistant tool call",
+			want:   true,
+			status: 400,
+		},
+		{
+			name:   "rejects missing tool context",
+			msg:    "thinking enabled but reasoning_content is required",
+			want:   false,
+			status: 400,
+		},
+		{
+			name:   "rejects wrong status",
+			msg:    "thinking block rejected: reasoning_content missing in assistant tool call",
+			want:   false,
+			status: 422,
+		},
+		{
+			name:    "rejects when anthropic thinking disabled",
+			msg:     "thinking block rejected: reasoning_content missing in assistant tool call",
+			want:    false,
+			status:  400,
+			options: fantasy.ProviderOptions{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			currentOpts := tt.options
+			if currentOpts == nil {
+				currentOpts = opts
+			}
+			err := &fantasy.ProviderError{StatusCode: tt.status, Message: tt.msg}
+			require.Equal(t, tt.want, shouldRetryWithoutAnthropicThinking(err, currentOpts))
+		})
+	}
+}
+
 type assertiveError string
 
 func (e assertiveError) Error() string { return string(e) }

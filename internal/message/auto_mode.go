@@ -31,6 +31,23 @@ func ParseToolResultAutoReview(metadata string) (ToolResultAutoReview, bool) {
 	if strings.TrimSpace(metadata) == "" {
 		return review, false
 	}
+
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(metadata), &payload); err != nil {
+		return ToolResultAutoReview{}, false
+	}
+
+	hasReviewField := false
+	for _, key := range []string{"suspicious", "reason", "confidence", "sanitized", "detector_failed"} {
+		if _, ok := payload[key]; ok {
+			hasReviewField = true
+			break
+		}
+	}
+	if !hasReviewField {
+		return ToolResultAutoReview{}, false
+	}
+
 	if err := json.Unmarshal([]byte(metadata), &review); err != nil {
 		return ToolResultAutoReview{}, false
 	}
@@ -38,15 +55,49 @@ func ParseToolResultAutoReview(metadata string) (ToolResultAutoReview, bool) {
 }
 
 func (t ToolResult) AutoReview() (ToolResultAutoReview, bool) {
+	if t.AutoReviewMeta != (ToolResultAutoReview{}) {
+		return t.AutoReviewMeta, true
+	}
 	return ParseToolResultAutoReview(t.Metadata)
 }
 
 func (t ToolResult) WithAutoReview(review ToolResultAutoReview) ToolResult {
-	data, err := json.Marshal(review)
+	t.AutoReviewMeta = review
+	reviewData, err := json.Marshal(review)
 	if err != nil {
 		return t
 	}
-	t.Metadata = string(data)
+	if strings.TrimSpace(t.Metadata) == "" {
+		t.Metadata = string(reviewData)
+		return t
+	}
+
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(t.Metadata), &payload); err != nil {
+		t.Metadata = string(reviewData)
+		return t
+	}
+	if payload == nil {
+		payload = map[string]json.RawMessage{}
+	}
+
+	for _, key := range []string{"suspicious", "reason", "confidence", "sanitized", "detector_failed"} {
+		delete(payload, key)
+	}
+
+	var reviewPayload map[string]json.RawMessage
+	if err := json.Unmarshal(reviewData, &reviewPayload); err != nil {
+		return t
+	}
+	for key, value := range reviewPayload {
+		payload[key] = value
+	}
+
+	merged, err := json.Marshal(payload)
+	if err != nil {
+		return t
+	}
+	t.Metadata = string(merged)
 	return t
 }
 

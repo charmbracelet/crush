@@ -80,18 +80,13 @@ func (c *coordinator) reviewToolResultForPromptInjection(ctx context.Context, se
 }
 
 func applyLocalAutoToolOutputReview(toolResult message.ToolResult) (message.ToolResult, bool) {
-	if snippet, ok := suspiciousToolOutputSnippet(toolResult.Content); ok {
-		if isTrustedLocalReadOnlyToolResult(toolResult) {
-			return toolResult.WithAutoReview(message.ToolResultAutoReview{
-				Suspicious: true,
-				Sanitized:  true,
-				Reason:     "Tool output matched local prompt-injection heuristics (" + snippet + ").",
-				Confidence: string(permission.AutoApprovalConfidenceLow),
-			}), true
-		}
+	trustedReadOnly := isTrustedLocalReadOnlyToolResult(toolResult)
+	if _, suspicious := suspiciousToolOutputSnippet(toolResult.Content); suspicious {
+		// For suspicious local output, defer to the classifier model instead of
+		// hard-sanitizing by keyword to reduce false positives.
 		return toolResult, false
 	}
-	if isTrustedLocalReadOnlyToolResult(toolResult) {
+	if trustedReadOnly {
 		return toolResult, true
 	}
 	return toolResult, false
@@ -133,24 +128,21 @@ func suspiciousToolOutputSnippet(content string) (string, bool) {
 	}
 
 	suspiciousSnippets := []string{
-		"ignore previous",
-		"ignore all previous",
+		"ignore previous instructions",
+		"ignore all previous instructions",
 		"ignore all instructions",
-		"system prompt",
-		"developer message",
-		"assistant message",
-		"user message",
-		"tool instructions",
-		"execute this",
+		"disregard previous instructions",
+		"follow these instructions instead",
 		"run this command",
-		"sudo ",
-		"curl ",
-		"wget ",
-		"base64",
-		"<system",
-		"</system",
-		"assistant:",
-		"user:",
+		"execute this command",
+		"execute this script",
+		"show me your system prompt",
+		"reveal your system prompt",
+		"print your system prompt",
+		"<system>",
+		"</system>",
+		"assistant: ignore",
+		"user: ignore",
 	}
 	for _, snippet := range suspiciousSnippets {
 		if strings.Contains(lower, snippet) {

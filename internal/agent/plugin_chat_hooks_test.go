@@ -33,6 +33,7 @@ type chatHookTestAgent struct {
 	callCount    int
 	lastCall     fantasy.AgentStreamCall
 	prepared     []fantasy.Message
+	onStreamCall func(fantasy.AgentStreamCall)
 }
 
 func (a *chatHookTestAgent) Generate(context.Context, fantasy.AgentCall) (*fantasy.AgentResult, error) {
@@ -47,6 +48,10 @@ func (a *chatHookTestAgent) Stream(ctx context.Context, call fantasy.AgentStream
 		_, prepared, err := call.PrepareStep(ctx, fantasy.PrepareStepFunctionOptions{Messages: call.Messages})
 		require.NoError(a.t, err)
 		a.prepared = prepared.Messages
+	}
+
+	if a.onStreamCall != nil {
+		a.onStreamCall(call)
 	}
 
 	if a.streamErr != nil {
@@ -261,6 +266,179 @@ func TestSessionAgentRunReturnsCombinedErrorWhenStreamAndChatAfterHookFail(t *te
 	require.ErrorIs(t, err, hookErr)
 	require.Nil(t, result)
 	require.Equal(t, 1, fakeAgent.callCount)
+}
+
+func TestSessionAgentRunSkipsTitleGenerationForNonInteractiveCalls(t *testing.T) {
+	plugin.Reset()
+	t.Cleanup(plugin.Reset)
+
+	env := testEnv(t)
+	titleSession, err := env.sessions.Create(t.Context(), "New Session")
+	require.NoError(t, err)
+
+	interactiveSession, err := env.sessions.Create(t.Context(), "New Session")
+	require.NoError(t, err)
+
+	var titlePrompt string
+	titleModel := stubLanguageModel{
+		stream: func(_ context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
+			return func(yield func(fantasy.StreamPart) bool) {
+				titlePrompt = ""
+				for _, msg := range call.Prompt {
+					if msg.Role != fantasy.MessageRoleUser {
+						continue
+					}
+					for _, part := range msg.Content {
+						if textPart, ok := part.(fantasy.TextPart); ok {
+							titlePrompt = textPart.Text
+							break
+						}
+					}
+					if titlePrompt != "" {
+						break
+					}
+				}
+				if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextStart, ID: "title"}) {
+					return
+				}
+				if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, ID: "title", Delta: "captured title"}) {
+					return
+				}
+				yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop})
+			}, nil
+		},
+	}
+	model := Model{
+		Model: titleModel,
+		CatwalkCfg: catwalk.Model{
+			ContextWindow:    200000,
+			DefaultMaxTokens: 1000,
+		},
+		ModelCfg: config.SelectedModel{
+			Model:    "claude-sonnet-4",
+			Provider: "anthropic",
+		},
+	}
+
+	fakeAgent := &chatHookTestAgent{t: t, responseText: "ok"}
+	sessionAgent := NewSessionAgent(SessionAgentOptions{
+		LargeModel:   model,
+		SmallModel:   model,
+		SystemPrompt: "",
+		WorkingDir:   env.workingDir,
+		IsYolo:       true,
+		Sessions:     env.sessions,
+		Messages:     env.messages,
+		AgentFactory: func(model fantasy.LanguageModel, opts ...fantasy.AgentOption) fantasy.Agent {
+			return fakeAgent
+		},
+	})
+
+	_, err = sessionAgent.Run(t.Context(), SessionAgentCall{
+		Prompt:          autoResumePromptPrefix + "summarized prompt`",
+		SessionID:       titleSession.ID,
+		MaxOutputTokens: 1000,
+		NonInteractive:  true,
+	})
+	require.NoError(t, err)
+	require.Empty(t, titlePrompt)
+
+	_, err = sessionAgent.Run(t.Context(), SessionAgentCall{
+		Prompt:          autoResumePromptPrefix + "interactive prompt`",
+		SessionID:       interactiveSession.ID,
+		MaxOutputTokens: 1000,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "interactive prompt", titlePrompt)
+}
+
+func TestSessionAgentRunRegeneratesMissingTitleOnLaterInteractiveTurn(t *testing.T) {
+	plugin.Reset()
+	t.Cleanup(plugin.Reset)
+
+	env := testEnv(t)
+	testSession, err := env.sessions.Create(t.Context(), "New Session")
+	require.NoError(t, err)
+
+	var titlePrompt string
+	titleModel := stubLanguageModel{
+		stream: func(_ context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
+			return func(yield func(fantasy.StreamPart) bool) {
+				titlePrompt = ""
+				for _, msg := range call.Prompt {
+					if msg.Role != fantasy.MessageRoleUser {
+						continue
+					}
+					for _, part := range msg.Content {
+						if textPart, ok := part.(fantasy.TextPart); ok {
+							titlePrompt = textPart.Text
+							break
+						}
+					}
+					if titlePrompt != "" {
+						break
+					}
+				}
+				if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextStart, ID: "title"}) {
+					return
+				}
+				if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, ID: "title", Delta: "captured title"}) {
+					return
+				}
+				yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop})
+			}, nil
+		},
+	}
+	model := Model{
+		Model: titleModel,
+		CatwalkCfg: catwalk.Model{
+			ContextWindow:    200000,
+			DefaultMaxTokens: 1000,
+		},
+		ModelCfg: config.SelectedModel{
+			Model:    "claude-sonnet-4",
+			Provider: "anthropic",
+		},
+	}
+
+	fakeAgent := &chatHookTestAgent{t: t, responseText: "ok"}
+	sessionAgent := NewSessionAgent(SessionAgentOptions{
+		LargeModel:   model,
+		SmallModel:   model,
+		SystemPrompt: "",
+		WorkingDir:   env.workingDir,
+		IsYolo:       true,
+		Sessions:     env.sessions,
+		Messages:     env.messages,
+		AgentFactory: func(model fantasy.LanguageModel, opts ...fantasy.AgentOption) fantasy.Agent {
+			return fakeAgent
+		},
+	})
+
+	_, err = sessionAgent.Run(t.Context(), SessionAgentCall{
+		Prompt:          autoResumePromptPrefix + "summarized prompt`",
+		SessionID:       testSession.ID,
+		MaxOutputTokens: 1000,
+		NonInteractive:  true,
+	})
+	require.NoError(t, err)
+	require.Empty(t, titlePrompt)
+
+	afterNonInteractive, err := env.sessions.Get(t.Context(), testSession.ID)
+	require.NoError(t, err)
+	require.Equal(t, "New Session", afterNonInteractive.Title)
+
+	_, err = sessionAgent.Run(t.Context(), SessionAgentCall{
+		Prompt:          "follow-up prompt",
+		SessionID:       testSession.ID,
+		MaxOutputTokens: 1000,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "follow-up prompt", titlePrompt)
+
+	afterInteractive, err := env.sessions.Get(t.Context(), testSession.ID)
+	require.NoError(t, err)
+	require.Equal(t, "captured title", afterInteractive.Title)
 }
 
 func TestSessionAgentRunAppliesChatTransforms(t *testing.T) {

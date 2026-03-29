@@ -650,7 +650,7 @@ func (c *coordinator) refreshSessionAgentRuntimeConfig(ctx context.Context, curr
 		return sessionAgentRuntimeConfig{}, err
 	}
 
-	if tools.GetSessionFromContext(ctx) == "" {
+	if shouldPersistRuntimeOnAgent(ctx, isSubAgent) {
 		currentAgent.SetSystemPromptPrefix(providerCfg.SystemPromptPrefix)
 		currentAgent.SetSystemPrompt(systemPrompt)
 		currentAgent.SetTools(toolSet)
@@ -683,6 +683,13 @@ func (c *coordinator) refreshSessionAgentRuntimeConfig(ctx context.Context, curr
 		PermissionMode:     permissionMode,
 		AllowedToolNames:   allowedToolNames,
 	}, nil
+}
+
+func shouldPersistRuntimeOnAgent(ctx context.Context, isSubAgent bool) bool {
+	if isSubAgent {
+		return true
+	}
+	return tools.GetSessionFromContext(ctx) == ""
 }
 
 func (c *coordinator) collaborationModeForContext(ctx context.Context) (session.CollaborationMode, error) {
@@ -1559,7 +1566,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	content := c.subAgentResponseText(ctx, subSession.ID, result)
 	if content == "" {
 		slog.Warn("Sub-agent returned empty response", "session", subSession.ID, "prompt", params.Prompt)
-		return fantasy.NewTextErrorResponse("no content in response"), nil
+		content = subAgentNoContentText(subSession.ID)
 	}
 	if parentSession.PermissionMode == session.PermissionModeAuto {
 		review, reviewErr := c.reviewHandoffText(ctx, parentSession, params.SessionTitle, content)
@@ -1653,4 +1660,12 @@ func (c *coordinator) subAgentResponseText(ctx context.Context, sessionID string
 	}
 
 	return ""
+}
+
+func subAgentNoContentText(sessionID string) string {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return "Subagent completed with no textual response. Open the child session from this Agent tool call to inspect tool outputs and details."
+	}
+	return fmt.Sprintf("Subagent completed with no textual response. Open child session %s from this Agent tool call to inspect tool outputs and details.", sessionID)
 }

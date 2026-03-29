@@ -81,6 +81,14 @@ func (v *ViewToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil && meta.Content != "" {
 		content = meta.Content
 	}
+	if review, ok := opts.Result.AutoReview(); ok && review.Sanitized {
+		if opts.Result.ModelSafeContent() == "" {
+			return header
+		}
+		bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
+		body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.ModelSafeContent(), bodyWidth, opts.ExpandedContent))
+		return joinToolParts(header, body)
+	}
 
 	// Handle skill content.
 	if meta.ResourceType == tools.ViewResourceSkill {

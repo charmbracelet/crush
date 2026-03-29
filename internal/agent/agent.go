@@ -336,12 +336,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	}
 
 	var wg sync.WaitGroup
-	// Generate title if first message.
-	if len(msgs) == 0 {
-		titleCtx := copilot.ContextWithInitiatorType(ctx, copilot.InitiatorAgent)
-		wg.Go(func() {
-			a.generateTitle(titleCtx, call.SessionID, call.Prompt)
-		})
+	if !call.NonInteractive && shouldGenerateSessionTitle(currentSession.Title) {
+		titlePrompt := titlePromptFromCallOrHistory(call.Prompt, msgs)
+		if titlePrompt != "" {
+			titleCtx := copilot.ContextWithInitiatorType(ctx, copilot.InitiatorAgent)
+			wg.Go(func() {
+				a.generateTitle(titleCtx, call.SessionID, titlePrompt, &sessionLock)
+			})
+		}
 	}
 	defer wg.Wait()
 
@@ -816,18 +818,42 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		break
 	}
 
-	if completedStepsThisRun == 0 && shouldRetryWithoutAnthropicThinking(err, providerOptions) {
+	if shouldRetryWithoutAnthropicThinking(err, providerOptions) {
 		slog.Warn(
 			"Retrying request without Anthropic thinking after provider rejected unsigned reasoning content",
 			"session_id", call.SessionID,
 			"model", largeModel.ModelCfg.Model,
 			"provider", largeModel.ModelCfg.Provider,
+			"completed_steps", completedStepsThisRun,
 		)
 		if cleanupErr := a.cleanupFailedAttempt(ctx, currentAssistant, currentStepToolMessageIDs); cleanupErr != nil {
 			return nil, cleanupErr
 		}
 		currentAssistant = nil
 		currentStepToolMessageIDs = nil
+		if completedStepsThisRun > 0 {
+			retryMsgs, getMsgsErr := a.getSessionMessages(ctx, currentSession)
+			if getMsgsErr != nil {
+				return nil, getMsgsErr
+			}
+			retryState, buildErr := a.buildChatRequestState(genCtx, chatRequestStateInput{
+				SessionID:      call.SessionID,
+				Agent:          "session",
+				Model:          largeModel,
+				Provider:       providerCtx,
+				Purpose:        requestPurpose,
+				Messages:       retryMsgs,
+				Message:        userMessage,
+				Attachments:    call.Attachments,
+				SystemPrompt:   systemPrompt,
+				PromptPrefix:   promptPrefix,
+				PermissionMode: currentSession.PermissionMode,
+			})
+			if buildErr != nil {
+				return nil, buildErr
+			}
+			requestState = retryState
+		}
 		providerOptions, _ = disableAnthropicThinking(providerOptions)
 		result, err = runStream(providerOptions, false)
 	}
@@ -1047,6 +1073,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	// Release active request before processing queued messages.
 	a.activeRequests.Del(call.SessionID)
 	cancel()
+	wg.Wait()
 
 	if a.QueuedPrompts(call.SessionID) == 0 {
 		return result, err
@@ -1506,7 +1533,18 @@ func shouldRetryWithoutAnthropicThinking(err error, opts fantasy.ProviderOptions
 	if providerErr.StatusCode != 400 {
 		return false
 	}
-	return strings.Contains(providerErr.Message, "thinking is enabled but reasoning_content is missing")
+	msg := strings.ToLower(strings.TrimSpace(providerErr.Message))
+	if msg == "" {
+		return false
+	}
+	if strings.Contains(msg, "thinking is enabled but reasoning_content is missing") {
+		return true
+	}
+	hasThinking := strings.Contains(msg, "thinking")
+	hasReasoning := strings.Contains(msg, "reasoning_content") || strings.Contains(msg, "reasoning content")
+	hasMissing := strings.Contains(msg, "missing") || strings.Contains(msg, "required")
+	isToolContext := strings.Contains(msg, "tool call") || strings.Contains(msg, "tool_use") || strings.Contains(msg, "tool use")
+	return hasThinking && hasReasoning && hasMissing && isToolContext
 }
 
 func (a *sessionAgent) cleanupFailedAttempt(ctx context.Context, assistant *message.Message, toolMessageIDs []string) error {
@@ -1543,8 +1581,54 @@ func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.S
 	return filterAutoModePromptMessages(msgs, session.PermissionMode), nil
 }
 
+func shouldGenerateSessionTitle(title string) bool {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return true
+	}
+	if strings.EqualFold(title, "New Session") {
+		return true
+	}
+	return strings.EqualFold(title, DefaultSessionName)
+}
+
+func titlePromptFromCallOrHistory(prompt string, history []message.Message) string {
+	if titlePrompt := titleUserPromptFromCall(prompt); titlePrompt != "" {
+		return titlePrompt
+	}
+	for i := len(history) - 1; i >= 0; i-- {
+		msg := history[i]
+		if msg.Role != message.User {
+			continue
+		}
+		if titlePrompt := titleUserPromptFromCall(msg.Content().Text); titlePrompt != "" {
+			return titlePrompt
+		}
+	}
+	return ""
+}
+
 // generateTitle generates a session titled based on the initial prompt.
-func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, userPrompt string) {
+func titleUserPromptFromCall(prompt string) string {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return ""
+	}
+	for _, prefix := range []string{autoResumePromptPrefix, contextWindowResumePromptPrefix} {
+		if !strings.HasPrefix(prompt, prefix) {
+			continue
+		}
+		trimmed := strings.TrimPrefix(prompt, prefix)
+		if end := strings.LastIndex(trimmed, "`"); end >= 0 {
+			trimmed = trimmed[:end]
+		}
+		return strings.TrimSpace(trimmed)
+	}
+	return prompt
+}
+
+func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, userPrompt string, sessionLock *sync.Mutex) {
+	userPrompt = titleUserPromptFromCall(userPrompt)
 	if userPrompt == "" {
 		return
 	}
@@ -1553,21 +1637,19 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	largeModel := a.largeModel.Get()
 	systemPromptPrefix := a.systemPromptPrefix.Get()
 
-	var maxOutputTokens int64 = 40
-	if smallModel.CatwalkCfg.CanReason {
-		maxOutputTokens = smallModel.CatwalkCfg.DefaultMaxTokens
-	}
+	const maxOutputTokens int64 = 40
 
 	newAgent := func(m fantasy.LanguageModel, p []byte, tok int64) fantasy.Agent {
 		return fantasy.NewAgent(m,
-			fantasy.WithSystemPrompt(string(p)+"\n /no_think"),
+			fantasy.WithSystemPrompt(string(p)+"\n/no_think"),
 			fantasy.WithMaxOutputTokens(tok),
 			fantasy.WithUserAgent(userAgent),
 		)
 	}
 
+	var streamedTitle strings.Builder
 	streamCall := fantasy.AgentStreamCall{
-		Prompt: fmt.Sprintf("Generate a concise title for the following content:\n\n%s\n <think>\n\n</think>", userPrompt),
+		Prompt: userPrompt,
 		PrepareStep: func(callCtx context.Context, opts fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			// Title generation is always agent-initiated (never billable).
 			callCtx = copilot.ContextWithInitiatorType(callCtx, copilot.InitiatorAgent)
@@ -1578,6 +1660,10 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 				}, prepared.Messages...)
 			}
 			return callCtx, prepared, nil
+		},
+		OnTextDelta: func(_ string, text string) error {
+			streamedTitle.WriteString(text)
+			return nil
 		},
 	}
 
@@ -1594,6 +1680,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		slog.Error("Error generating title with small model; trying big model", "err", err)
 		model = largeModel
 		agent = newAgent(model.Model, titlePrompt, maxOutputTokens)
+		streamedTitle.Reset()
 		resp, err = agent.Stream(titleCtx, streamCall)
 		if err == nil {
 			slog.Debug("Generated title with large model")
@@ -1601,6 +1688,10 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 			// Welp, the large model didn't work either. Use the default
 			// session name and return.
 			slog.Error("Error generating title with large model", "err", err)
+			if sessionLock != nil {
+				sessionLock.Lock()
+				defer sessionLock.Unlock()
+			}
 			saveErr := a.sessions.Rename(ctx, sessionID, DefaultSessionName)
 			if saveErr != nil {
 				slog.Error("Failed to save session title", "error", saveErr)
@@ -1613,6 +1704,10 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		// Actually, we didn't get a response so we can't. Use the default
 		// session name and return.
 		slog.Error("Response is nil; can't generate title")
+		if sessionLock != nil {
+			sessionLock.Lock()
+			defer sessionLock.Unlock()
+		}
 		saveErr := a.sessions.Rename(ctx, sessionID, DefaultSessionName)
 		if saveErr != nil {
 			slog.Error("Failed to save session title", "error", saveErr)
@@ -1621,8 +1716,11 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	}
 
 	// Clean up title.
-	var title string
-	title = strings.ReplaceAll(resp.Response.Content.Text(), "\n", " ")
+	title := streamedTitle.String()
+	if strings.TrimSpace(title) == "" {
+		title = resp.Response.Content.Text()
+	}
+	title = strings.ReplaceAll(title, "\n", " ")
 
 	// Remove thinking tags if present.
 	title = thinkTagRegex.ReplaceAllString(title, "")
@@ -1659,6 +1757,10 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 
 	// Atomically update only title and usage fields to avoid overriding other
 	// concurrent session updates.
+	if sessionLock != nil {
+		sessionLock.Lock()
+		defer sessionLock.Unlock()
+	}
 	saveErr := a.sessions.UpdateTitleAndUsage(ctx, sessionID, title, promptTokens, completionTokens, cost)
 	if saveErr != nil {
 		slog.Error("Failed to save session title and usage", "error", saveErr)

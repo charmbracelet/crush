@@ -93,7 +93,7 @@ func TestRunRetriesWithoutAnthropicThinkingOnUnsignedReasoningError(t *testing.T
 	require.Equal(t, 1, assistantCount, "failed first attempt assistant should be deleted before retry")
 }
 
-func TestRunDoesNotRetryWithoutAnthropicThinkingAfterCompletedStep(t *testing.T) {
+func TestRunRetriesWithoutAnthropicThinkingAfterCompletedStep(t *testing.T) {
 	t.Parallel()
 
 	env := testEnv(t)
@@ -148,7 +148,13 @@ func TestRunDoesNotRetryWithoutAnthropicThinkingAfterCompletedStep(t *testing.T)
 		},
 	})
 	require.Error(t, err)
-	require.Len(t, agentWithCompletedStepFailure.calls, 1, "fallback must not retry after a step already completed")
+	require.Len(t, agentWithCompletedStepFailure.calls, 2, "fallback should retry once after a completed step")
+	firstAnthropic, ok := agentWithCompletedStepFailure.calls[0][anthropic.Name].(*anthropic.ProviderOptions)
+	require.True(t, ok)
+	require.NotNil(t, firstAnthropic.Thinking)
+	secondAnthropic, ok := agentWithCompletedStepFailure.calls[1][anthropic.Name].(*anthropic.ProviderOptions)
+	require.True(t, ok)
+	require.Nil(t, secondAnthropic.Thinking)
 }
 
 type scriptedRetryAgent struct {

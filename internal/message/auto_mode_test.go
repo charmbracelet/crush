@@ -77,3 +77,102 @@ func TestToAIMessage_AutoModePromptMarkerSkipped(t *testing.T) {
 	aiMsgs := msg.ToAIMessage()
 	require.Len(t, aiMsgs, 0)
 }
+
+func TestToolResultAutoReviewRoundTripUsesStructuredField(t *testing.T) {
+	t.Parallel()
+
+	review := ToolResultAutoReview{
+		Suspicious: true,
+		Reason:     "local heuristic matched",
+		Confidence: "low",
+		Sanitized:  true,
+	}
+
+	result := ToolResult{
+		Name: "view",
+	}.WithAutoReview(review)
+
+	parsed, ok := result.AutoReview()
+	require.True(t, ok)
+	require.Equal(t, review, parsed)
+	require.NotEmpty(t, result.Metadata)
+}
+
+func TestParseToolResultAutoReviewIgnoresNonReviewMetadata(t *testing.T) {
+	t.Parallel()
+
+	review, ok := ParseToolResultAutoReview(`{"old_content":"a","new_content":"b","additions":1}`)
+	require.False(t, ok)
+	require.Equal(t, ToolResultAutoReview{}, review)
+}
+
+func TestWithAutoReviewPreservesExistingMetadata(t *testing.T) {
+	t.Parallel()
+
+	result := ToolResult{
+		Metadata: `{"old_content":"a","new_content":"b"}`,
+	}.WithAutoReview(ToolResultAutoReview{Sanitized: true, Reason: "x"})
+
+	require.Contains(t, result.Metadata, `"old_content":"a"`)
+	require.Contains(t, result.Metadata, `"new_content":"b"`)
+	require.Contains(t, result.Metadata, `"sanitized":true`)
+	require.Contains(t, result.Metadata, `"reason":"x"`)
+
+	parsed, ok := result.AutoReview()
+	require.True(t, ok)
+	require.True(t, parsed.Sanitized)
+	require.Equal(t, "x", parsed.Reason)
+}
+
+func TestWithAutoReview_NullMetadataNoPanic(t *testing.T) {
+	t.Parallel()
+
+	result := ToolResult{Metadata: `null`}.WithAutoReview(ToolResultAutoReview{
+		Suspicious: true,
+		Reason:     "x",
+		Sanitized:  true,
+	})
+
+	require.NotEmpty(t, result.Metadata)
+	require.Contains(t, result.Metadata, `"suspicious":true`)
+	require.Contains(t, result.Metadata, `"reason":"x"`)
+	require.Contains(t, result.Metadata, `"sanitized":true`)
+}
+
+func TestWithAutoReview_ClearsStaleReviewFields(t *testing.T) {
+	t.Parallel()
+
+	result := ToolResult{Metadata: `{"old_content":"a","sanitized":true,"reason":"old","confidence":"high"}`}.WithAutoReview(ToolResultAutoReview{
+		Suspicious: true,
+	})
+
+	require.Contains(t, result.Metadata, `"old_content":"a"`)
+	require.Contains(t, result.Metadata, `"suspicious":true`)
+	require.NotContains(t, result.Metadata, `"sanitized":true`)
+	require.NotContains(t, result.Metadata, `"reason":"old"`)
+	require.NotContains(t, result.Metadata, `"confidence":"high"`)
+
+	parsed, ok := result.AutoReview()
+	require.True(t, ok)
+	require.True(t, parsed.Suspicious)
+	require.False(t, parsed.Sanitized)
+	require.Empty(t, parsed.Reason)
+	require.Empty(t, parsed.Confidence)
+}
+
+func TestWithAutoReview_InvalidMetadataFallsBackToReviewPayload(t *testing.T) {
+	t.Parallel()
+
+	result := ToolResult{Metadata: `not-json`}.WithAutoReview(ToolResultAutoReview{
+		Sanitized: true,
+		Reason:    "x",
+	})
+
+	require.Contains(t, result.Metadata, `"sanitized":true`)
+	require.Contains(t, result.Metadata, `"reason":"x"`)
+
+	parsed, ok := result.AutoReview()
+	require.True(t, ok)
+	require.True(t, parsed.Sanitized)
+	require.Equal(t, "x", parsed.Reason)
+}

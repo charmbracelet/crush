@@ -49,6 +49,9 @@ tasks:
     sources:
       - ./**/*.go
       - go.mod
+      - internal/agent/**/*.md
+      - internal/agent/**/*.md.tpl
+      - internal/agent/hyper/provider.json
     generates:
       - crush{{exeExt}}
 
@@ -120,6 +123,9 @@ tasks:
     sources:
       - ./**/*.go
       - go.mod
+      - internal/agent/**/*.md
+      - internal/agent/**/*.md.tpl
+      - internal/agent/hyper/provider.json
 
   profile:cpu:
     desc: 10s CPU profile

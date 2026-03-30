@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"io"
@@ -306,11 +307,20 @@ func createDotCrushDir(dir string) error {
 	}
 
 	gitIgnorePath := filepath.Join(dir, ".gitignore")
-	if _, err := os.Stat(gitIgnorePath); os.IsNotExist(err) {
-		if err := os.WriteFile(gitIgnorePath, []byte("*\n"), 0o644); err != nil {
+	content, err := os.ReadFile(gitIgnorePath)
+
+	// create or update if old version
+	if os.IsNotExist(err) || string(content) == oldGitIgnore {
+		if err := os.WriteFile(gitIgnorePath, []byte(defaultGitIgnore), 0o644); err != nil {
 			return fmt.Errorf("failed to create .gitignore file: %q %w", gitIgnorePath, err)
 		}
 	}
 
 	return nil
 }
+
+//go:embed gitignore/old
+var oldGitIgnore string
+
+//go:embed gitignore/default
+var defaultGitIgnore string

@@ -38,6 +38,24 @@ func InputCursor(t *styles.Styles, cur *tea.Cursor) *tea.Cursor {
 	return cur
 }
 
+// AdjustOnboardingInputCursor removes the dialog view frame offset from an
+// input cursor. Onboarding dialogs render without Dialog.View frame, while
+// InputCursor includes that frame offset for regular dialogs.
+func AdjustOnboardingInputCursor(t *styles.Styles, cur *tea.Cursor) *tea.Cursor {
+	if cur == nil {
+		return nil
+	}
+
+	dialogStyle := t.Dialog.View
+	cur.X -= dialogStyle.GetBorderLeftSize() +
+		dialogStyle.GetPaddingLeft() +
+		dialogStyle.GetMarginLeft()
+	cur.Y -= dialogStyle.GetBorderTopSize() +
+		dialogStyle.GetPaddingTop() +
+		dialogStyle.GetMarginTop()
+	return cur
+}
+
 // RenderContext is a dialog rendering context that can be used to render
 // common dialog layouts.
 type RenderContext struct {

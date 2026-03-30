@@ -26,6 +26,7 @@ func TestBuildExecutionPrompt(t *testing.T) {
 
 	prompt := BuildExecutionPrompt("- Ship it")
 	require.Contains(t, prompt, "Execute the approved plan below")
-	require.Contains(t, prompt, "<proposed_plan>")
+	require.Contains(t, prompt, "Approved plan:")
 	require.Contains(t, prompt, "- Ship it")
+	require.NotContains(t, prompt, "<proposed_plan>")
 }

@@ -33,6 +33,9 @@ func WrapProposedPlan(plan string) string {
 }
 
 func BuildExecutionPrompt(plan string) string {
-	wrapped := WrapProposedPlan(plan)
-	return strings.TrimSpace("Execute the approved plan below. You are no longer in Plan Mode, so you should implement it now.\n\n" + wrapped)
+	plan = strings.TrimSpace(plan)
+	if plan == "" {
+		return "Execute the approved plan below. You are no longer in Plan Mode, so you should implement it now."
+	}
+	return strings.TrimSpace("Execute the approved plan below. You are no longer in Plan Mode, so you should implement it now.\n\nApproved plan:\n" + plan)
 }

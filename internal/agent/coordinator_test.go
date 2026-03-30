@@ -171,6 +171,7 @@ func TestRunSubAgent(t *testing.T) {
 		assert.Equal(t, "Auto Mode blocked subagent delegation because the handoff review failed.", resp.Content)
 	})
 
+
 	t.Run("ModelCfg.MaxTokens overrides default", func(t *testing.T) {
 		env := testEnv(t)
 		coord := newTestCoordinator(t, env, providerID, providerCfg)

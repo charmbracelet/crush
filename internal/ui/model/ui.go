@@ -2106,6 +2106,12 @@ func (m *UI) updateLatestProposedPlan(msg message.Message) {
 	if msg.Role != message.Assistant {
 		return
 	}
+	if m.session == nil || m.session.CollaborationMode != session.CollaborationModePlan {
+		return
+	}
+	if !hasToolCall(msg, agenttools.PlanExitToolName) {
+		return
+	}
 	plan, ok := planmode.ExtractProposedPlan(msg.Content().Text)
 	if !ok {
 		return

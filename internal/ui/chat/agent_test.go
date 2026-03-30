@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"testing"
 
+	agenttools "github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent"
-	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/planmode"
 	"github.com/charmbracelet/crush/internal/toolruntime"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
@@ -110,7 +111,7 @@ func TestAgenticFetchToolMessageItemCollapsesNestedToolsByDefault(t *testing.T) 
 	theme := styles.DefaultStyles()
 	item := NewAgenticFetchToolMessageItem(&theme, message.ToolCall{
 		ID:       "agentic-fetch-tool",
-		Name:     tools.AgenticFetchToolName,
+		Name:     agenttools.AgenticFetchToolName,
 		Input:    string(params),
 		Finished: true,
 	}, nil, false)
@@ -132,12 +133,12 @@ func TestAgenticFetchToolMessageItemCollapsesNestedToolsByDefault(t *testing.T) 
 func newNestedBashTool(t *testing.T, sty *styles.Styles, cmd string) ToolMessageItem {
 	t.Helper()
 
-	input, err := json.Marshal(tools.BashParams{Command: cmd, Description: "nested"})
+	input, err := json.Marshal(agenttools.BashParams{Command: cmd, Description: "nested"})
 	require.NoError(t, err)
 
 	return NewBashToolMessageItem(sty, message.ToolCall{
 		ID:       "nested-" + cmd,
-		Name:     tools.BashToolName,
+		Name:     agenttools.BashToolName,
 		Input:    string(input),
 		Finished: true,
 	}, nil, false)
@@ -146,18 +147,18 @@ func newNestedBashTool(t *testing.T, sty *styles.Styles, cmd string) ToolMessage
 func TestBashToolMessageItemRuntimeSnapshotRendersSanitizedText(t *testing.T) {
 	t.Parallel()
 
-	input, err := json.Marshal(tools.BashParams{Command: "echo test", Description: "runtime"})
+	input, err := json.Marshal(agenttools.BashParams{Command: "echo test", Description: "runtime"})
 	require.NoError(t, err)
 
 	theme := styles.DefaultStyles()
 	item := NewBashToolMessageItem(&theme, message.ToolCall{
 		ID:    "tool-runtime",
-		Name:  tools.BashToolName,
+		Name:  agenttools.BashToolName,
 		Input: string(input),
 	}, nil, false)
 	item.SetRuntimeState(&toolruntime.State{
 		ToolCallID:   "tool-runtime",
-		ToolName:     tools.BashToolName,
+		ToolName:     agenttools.BashToolName,
 		Status:       toolruntime.StatusRunning,
 		SnapshotText: "3\nwarn",
 	})
@@ -172,19 +173,19 @@ func TestBashToolMessageItemRuntimeSnapshotRendersSanitizedText(t *testing.T) {
 func TestBashToolMessageItemFinalRuntimeSnapshotRendersBeforeToolResultArrives(t *testing.T) {
 	t.Parallel()
 
-	input, err := json.Marshal(tools.BashParams{Command: "git show --stat HEAD", Description: "runtime final"})
+	input, err := json.Marshal(agenttools.BashParams{Command: "git show --stat HEAD", Description: "runtime final"})
 	require.NoError(t, err)
 
 	theme := styles.DefaultStyles()
 	item := NewBashToolMessageItem(&theme, message.ToolCall{
 		ID:       "tool-runtime-final",
-		Name:     tools.BashToolName,
+		Name:     agenttools.BashToolName,
 		Input:    string(input),
 		Finished: true,
 	}, nil, false)
 	item.SetRuntimeState(&toolruntime.State{
 		ToolCallID:   "tool-runtime-final",
-		ToolName:     tools.BashToolName,
+		ToolName:     agenttools.BashToolName,
 		Status:       toolruntime.StatusCompleted,
 		SnapshotText: "commit abc123\n file.go | 2 +-",
 	})
@@ -197,4 +198,37 @@ func TestBashToolMessageItemFinalRuntimeSnapshotRendersBeforeToolResultArrives(t
 	if bashItem, ok := item.(*BashToolMessageItem); ok {
 		require.Equal(t, ToolStatusSuccess, bashItem.computeStatus())
 	}
+}
+
+func TestAssistantMessageOnlyRendersProposedPlanWithPlanExitToolCall(t *testing.T) {
+	t.Parallel()
+
+	theme := styles.DefaultStyles()
+	content := planmode.WrapProposedPlan("- Step 1")
+
+	withoutPlanExit := message.Message{
+		ID:   "assistant-without-plan-exit",
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: content},
+		},
+	}
+	item := NewAssistantMessageItem(&theme, &withoutPlanExit)
+	rendered := ansi.Strip(item.Render(120))
+	require.NotContains(t, rendered, "Proposed Plan")
+	require.Contains(t, rendered, "<proposed_plan>")
+
+	withPlanExit := message.Message{
+		ID:   "assistant-with-plan-exit",
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: content},
+			message.ToolCall{ID: "tool-1", Name: agenttools.PlanExitToolName, Finished: true},
+		},
+	}
+	item = NewAssistantMessageItem(&theme, &withPlanExit)
+	rendered = ansi.Strip(item.Render(120))
+	require.Contains(t, rendered, "Proposed Plan")
+	require.NotContains(t, rendered, "<proposed_plan>")
+	require.Contains(t, rendered, "Step 1")
 }

@@ -61,20 +61,9 @@ When user asks to create git commit:
    - Use clear language, accurate reflection ("add"=new feature, "update"=enhancement, "fix"=bug fix)
    - Avoid generic messages, review draft
 
-4. Create commit{{ if or (eq .Attribution.TrailerStyle "assisted-by") (eq .Attribution.TrailerStyle "co-authored-by")}} with attribution{{ end }} using HEREDOC:
+4. Create commit using HEREDOC:
    git commit -m "$(cat <<'EOF'
    Commit message here.
-
-{{ if .Attribution.GeneratedWith }}
-   💘 Generated with Crush
-{{ end}}
-{{if eq .Attribution.TrailerStyle "assisted-by" }}
-
-   Assisted-by: {{ .ModelName }} via Crush <crush@charm.land>
-{{ else if eq .Attribution.TrailerStyle "co-authored-by" }}
-
-   Co-Authored-By: Crush <crush@charm.land>
-{{ end }}
 
    EOF
    )"
@@ -123,10 +112,6 @@ Use gh command for ALL GitHub tasks. When user asks to create PR:
    ## Test plan
 
    [Checklist of TODOs...]
-
-{{ if .Attribution.GeneratedWith}}
-   💘 Generated with Crush
-{{ end }}
 
    EOF
    )"

@@ -1512,7 +1512,8 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		if reviewErr != nil {
 			return fantasy.NewTextErrorResponse("Auto Mode blocked subagent delegation because the handoff review failed."), nil
 		}
-		if !review.AllowAuto {
+		recentUserRequest := c.latestUserRequestForHandoff(ctx, params.SessionID)
+		if !review.AllowAuto && !shouldAllowSubagentRunDespiteReview(review, params.Prompt, recentUserRequest) {
 			reason := strings.TrimSpace(review.Reason)
 			if reason == "" {
 				reason = "Auto Mode blocked subagent delegation."

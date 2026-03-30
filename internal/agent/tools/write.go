@@ -94,11 +94,6 @@ func NewWriteTool(
 				return fantasy.ToolResponse{}, fmt.Errorf("error checking file: %w", err)
 			}
 
-			dir := filepath.Dir(filePath)
-			if err = os.MkdirAll(dir, 0o755); err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error creating directory: %w", err)
-			}
-
 			oldContent := ""
 			if fileInfo != nil && !fileInfo.IsDir() {
 				oldBytes, readErr := os.ReadFile(filePath)
@@ -113,7 +108,7 @@ func NewWriteTool(
 				strings.TrimPrefix(filePath, effectiveWorkingDir),
 			)
 
-			p, err := permissions.Request(ctx,
+			permissionResponse, err := RequestPermission(ctx, permissions,
 				permission.CreatePermissionRequest{
 					SessionID:   sessionID,
 					Path:        fsext.PathOrPrefix(filePath, effectiveWorkingDir),
@@ -131,8 +126,13 @@ func NewWriteTool(
 			if err != nil {
 				return fantasy.ToolResponse{}, err
 			}
-			if !p {
-				return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
+			if permissionResponse != nil {
+				return *permissionResponse, nil
+			}
+
+			dir := filepath.Dir(filePath)
+			if err = os.MkdirAll(dir, 0o755); err != nil {
+				return fantasy.ToolResponse{}, fmt.Errorf("error creating directory: %w", err)
 			}
 
 			err = os.WriteFile(filePath, []byte(params.Content), 0o644)

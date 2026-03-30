@@ -858,16 +858,17 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		result, err = runStream(providerOptions, false)
 	}
 
-	// Context-window-exceeded recovery: if the LLM rejected the request
-	// before completing any step (completedStepsThisRun == 0) because the
-	// history was too long, we truncate the oversized tool result that caused
-	// the overflow, then force an auto-summarize + auto-resume instead of
-	// surfacing a fatal error that leaves the session unusable.
-	if completedStepsThisRun == 0 && isContextWindowExceededError(err) && !a.disableAutoSummarize {
-		slog.Warn("Context window exceeded before any step completed; forcing summarization to recover",
+	// Context-window recovery: if the LLM rejects the request due to context
+	// length, force an auto-summarize + auto-resume instead of surfacing a
+	// fatal error that leaves the session unusable.
+	alreadyRecoveringFromContextWindow := strings.HasPrefix(call.Prompt, contextWindowResumePromptPrefix)
+	contextWindowErr := isContextWindowExceededError(err) || (completedStepsThisRun == 0 && isContextLengthError(err))
+	if contextWindowErr && !a.disableAutoSummarize && !alreadyRecoveringFromContextWindow {
+		slog.Warn("Context window exceeded; forcing summarization to recover",
 			"session_id", call.SessionID,
 			"model", largeModel.ModelCfg.Model,
 			"provider", largeModel.ModelCfg.Provider,
+			"completed_steps", completedStepsThisRun,
 		)
 		if truncErr := a.truncateOversizedToolResults(ctx, call.SessionID); truncErr != nil {
 			slog.Warn("Failed to truncate oversized tool results", "error", truncErr)
@@ -888,6 +889,12 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		shouldSummarize = true
 		err = nil
 		result = &fantasy.AgentResult{}
+	} else if contextWindowErr && alreadyRecoveringFromContextWindow {
+		slog.Warn("Context window exceeded again after recover attempt; returning provider error",
+			"session_id", call.SessionID,
+			"model", largeModel.ModelCfg.Model,
+			"provider", largeModel.ModelCfg.Provider,
+		)
 	}
 
 	a.eventPromptResponded(call.SessionID, time.Since(startTime).Truncate(time.Second))

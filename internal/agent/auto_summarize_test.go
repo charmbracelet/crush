@@ -323,3 +323,63 @@ func TestRunTransientRetryNearContextLimitSummarizesInsteadOfRetrying(t *testing
 	require.NotEmpty(t, savedSession.SummaryMessageID)
 	require.Equal(t, int64(100), savedSession.LastInputTokens())
 }
+
+func TestRunStreamingContextWindowErrorStringForcesSummarizeRecovery(t *testing.T) {
+	t.Parallel()
+	plugin.Reset()
+	t.Cleanup(plugin.Reset)
+
+	env := testEnv(t)
+	testSession, err := env.sessions.Create(t.Context(), "streaming context-window recover")
+	require.NoError(t, err)
+
+	fakeAgent := &autoSummarizeTestAgent{
+		t: t,
+		runErrs: []error{
+			errors.New("received error while streaming: {\"message\":\"{\\\"error\\\":{\\\"message\\\":\\\"Your input exceeds the context window of this model. Please adjust your input and try again.\\\",\\\"code\\\":\\\"invalid_request_body\\\"}}\"}"),
+			nil,
+		},
+	}
+	sessionAgent := newAutoSummarizeTestSessionAgent(t, env, fakeAgent, env.messages, 200_000)
+
+	result, err := sessionAgent.Run(t.Context(), SessionAgentCall{
+		Prompt:          "hello",
+		SessionID:       testSession.ID,
+		MaxOutputTokens: 50_000,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 2, fakeAgent.runCalls)
+	require.Equal(t, 1, fakeAgent.summaryCalls)
+
+	savedSession, err := env.sessions.Get(t.Context(), testSession.ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, savedSession.SummaryMessageID)
+}
+
+func TestRunStreamingContextWindowRecoveryOnlyOnce(t *testing.T) {
+	t.Parallel()
+	plugin.Reset()
+	t.Cleanup(plugin.Reset)
+
+	env := testEnv(t)
+	testSession, err := env.sessions.Create(t.Context(), "streaming context-window no loop")
+	require.NoError(t, err)
+
+	streamErr := errors.New("received error while streaming: {\"message\":\"{\\\"error\\\":{\\\"message\\\":\\\"Your input exceeds the context window of this model. Please adjust your input and try again.\\\",\\\"code\\\":\\\"invalid_request_body\\\"}}\"}")
+	fakeAgent := &autoSummarizeTestAgent{
+		t: t,
+		runErrs: []error{streamErr, streamErr},
+	}
+	sessionAgent := newAutoSummarizeTestSessionAgent(t, env, fakeAgent, env.messages, 200_000)
+
+	_, err = sessionAgent.Run(t.Context(), SessionAgentCall{
+		Prompt:          "hello",
+		SessionID:       testSession.ID,
+		MaxOutputTokens: 50_000,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "context window")
+	require.Equal(t, 2, fakeAgent.runCalls)
+	require.Equal(t, 1, fakeAgent.summaryCalls)
+}

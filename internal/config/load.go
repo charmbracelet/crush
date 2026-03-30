@@ -419,6 +419,9 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 		}
 	}
 
+	// Project specific skills dirs.
+	c.Options.SkillsPaths = append(c.Options.SkillsPaths, ProjectSkillsDir(workingDir)...)
+
 	if str, ok := os.LookupEnv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE"); ok {
 		c.Options.DisableProviderAutoUpdate, _ = strconv.ParseBool(str)
 	}
@@ -805,22 +808,41 @@ func GlobalSkillsDirs() []string {
 		return []string{crushSkills}
 	}
 
-	// Determine the base config directory.
-	var configBase string
-	if xdgConfigHome := os.Getenv("XDG_CONFIG_HOME"); xdgConfigHome != "" {
-		configBase = xdgConfigHome
-	} else if runtime.GOOS == "windows" {
-		configBase = cmp.Or(
+	configHome := cmp.Or(
+		os.Getenv("XDG_CONFIG_HOME"),
+		filepath.Join(home.Dir(), ".config"),
+	)
+
+	paths := []string{
+		filepath.Join(configHome, appName, "skills"),
+		filepath.Join(configHome, "agents", "skills"),
+	}
+
+	// On Windows, also load from app data on top of `$HOME/.config/crush`.
+	// This is here mostly for backwards compatibility.
+	if runtime.GOOS == "windows" {
+		appData := cmp.Or(
 			os.Getenv("LOCALAPPDATA"),
 			filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local"),
 		)
-	} else {
-		configBase = filepath.Join(home.Dir(), ".config")
+		paths = append(
+			paths,
+			filepath.Join(appData, appName, "skills"),
+			filepath.Join(appData, "agents", "skills"),
+		)
 	}
 
+	return paths
+}
+
+// ProjectSkillsDir returns the default project directories for which Crush
+// will look for skills.
+func ProjectSkillsDir(workingDir string) []string {
 	return []string{
-		filepath.Join(configBase, appName, "skills"),
-		filepath.Join(configBase, "agents", "skills"),
+		filepath.Join(workingDir, ".agents/skills"),
+		filepath.Join(workingDir, ".crush/skills"),
+		filepath.Join(workingDir, ".claude/skills"),
+		filepath.Join(workingDir, ".cursor/skills"),
 	}
 }
 

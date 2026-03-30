@@ -38,7 +38,7 @@ func TestUdiff(t *testing.T) {
 
 	t.Run("ToUnifiedDiff", func(t *testing.T) {
 		toUnifiedDiff := func(t *testing.T, before, after string, contextLines int) udiff.UnifiedDiff {
-			edits := udiff.Strings(before, after)
+			edits := udiff.Lines(before, after)
 			unifiedDiff, err := udiff.ToUnifiedDiff("main.go", "main.go", before, edits, contextLines)
 			if err != nil {
 				t.Fatalf("ToUnifiedDiff failed: %v", err)

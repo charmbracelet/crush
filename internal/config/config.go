@@ -125,16 +125,16 @@ type ProviderConfig struct {
 }
 
 // ToProvider converts the [ProviderConfig] to a [catwalk.Provider].
-func (pc *ProviderConfig) ToProvider() catwalk.Provider {
+func (c *ProviderConfig) ToProvider() catwalk.Provider {
 	// Convert config provider to provider.Provider format
 	provider := catwalk.Provider{
-		Name:   pc.Name,
-		ID:     catwalk.InferenceProvider(pc.ID),
-		Models: make([]catwalk.Model, len(pc.Models)),
+		Name:   c.Name,
+		ID:     catwalk.InferenceProvider(c.ID),
+		Models: make([]catwalk.Model, len(c.Models)),
 	}
 
 	// Convert models
-	for i, model := range pc.Models {
+	for i, model := range c.Models {
 		provider.Models[i] = catwalk.Model{
 			ID:                     model.ID,
 			Name:                   model.Name,
@@ -154,8 +154,8 @@ func (pc *ProviderConfig) ToProvider() catwalk.Provider {
 	return provider
 }
 
-func (pc *ProviderConfig) SetupGitHubCopilot() {
-	maps.Copy(pc.ExtraHeaders, copilot.Headers())
+func (c *ProviderConfig) SetupGitHubCopilot() {
+	maps.Copy(c.ExtraHeaders, copilot.Headers())
 }
 
 type MCPType string

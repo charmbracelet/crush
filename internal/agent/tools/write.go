@@ -140,16 +140,15 @@ func NewWriteTool(
 				return fantasy.ToolResponse{}, fmt.Errorf("error writing file: %w", err)
 			}
 
-			// Check if file exists in history
-			file, err := files.GetByPathAndSession(ctx, filePath, sessionID)
+			// Check if file exists in history.
+			historyFile, err := files.GetByPathAndSession(ctx, filePath, sessionID)
 			if err != nil {
 				_, err = files.Create(ctx, sessionID, filePath, oldContent)
 				if err != nil {
 					// Log error but don't fail the operation
 					return fantasy.ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
 				}
-			}
-			if file.Content != oldContent {
+			} else if historyFile.Content != oldContent {
 				// User manually changed the content; store an intermediate version
 				_, err = files.CreateVersion(ctx, sessionID, filePath, oldContent)
 				if err != nil {

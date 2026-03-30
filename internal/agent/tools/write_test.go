@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -40,12 +41,12 @@ func (m *mockWritePermissionService) GrantPersistent(permission.PermissionReques
 func (m *mockWritePermissionService) HasPersistentPermission(permission.PermissionRequest) bool {
 	return false
 }
-func (m *mockWritePermissionService) ClearPersistentPermissions(string)   {}
-func (m *mockWritePermissionService) AutoApproveSession(string)           {}
-func (m *mockWritePermissionService) SetSessionAutoApprove(string, bool)  {}
-func (m *mockWritePermissionService) IsSessionAutoApprove(string) bool    { return false }
-func (m *mockWritePermissionService) SetSkipRequests(bool)                {}
-func (m *mockWritePermissionService) SkipRequests() bool                  { return false }
+func (m *mockWritePermissionService) ClearPersistentPermissions(string)  {}
+func (m *mockWritePermissionService) AutoApproveSession(string)          {}
+func (m *mockWritePermissionService) SetSessionAutoApprove(string, bool) {}
+func (m *mockWritePermissionService) IsSessionAutoApprove(string) bool   { return false }
+func (m *mockWritePermissionService) SetSkipRequests(bool)               {}
+func (m *mockWritePermissionService) SkipRequests() bool                 { return false }
 func (m *mockWritePermissionService) SubscribeNotifications(context.Context) <-chan pubsub.Event[permission.PermissionNotification] {
 	return make(<-chan pubsub.Event[permission.PermissionNotification])
 }
@@ -58,8 +59,10 @@ func (m *mockFileTracker) LastReadTime(context.Context, string, string) time.Tim
 }
 func (m *mockFileTracker) ListReadFiles(context.Context, string) ([]string, error) { return nil, nil }
 
-var _ filetracker.Service = (*mockFileTracker)(nil)
-var _ history.Service = (*mockHistoryService)(nil)
+var (
+	_ filetracker.Service = (*mockFileTracker)(nil)
+	_ history.Service     = (*mockHistoryService)(nil)
+)
 
 func runWriteTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, params WriteParams) (fantasy.ToolResponse, error) {
 	t.Helper()
@@ -74,8 +77,11 @@ func runWriteTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, par
 	})
 }
 
-func newWriteToolForTest(permissions permission.Service, workingDir string) fantasy.AgentTool {
-	return NewWriteTool(nil, permissions, &mockHistoryService{Broker: pubsub.NewBroker[history.File]()}, &mockFileTracker{}, workingDir)
+func newWriteToolForTest(permissions permission.Service, historySvc history.Service, workingDir string) fantasy.AgentTool {
+	if historySvc == nil {
+		historySvc = &mockHistoryService{Broker: pubsub.NewBroker[history.File]()}
+	}
+	return NewWriteTool(nil, permissions, historySvc, &mockFileTracker{}, workingDir)
 }
 
 func TestWriteTool_ReturnsToolErrorForAutoModePolicyBlock(t *testing.T) {
@@ -89,7 +95,7 @@ func TestWriteTool_ReturnsToolErrorForAutoModePolicyBlock(t *testing.T) {
 			"Reason: Write touches a file outside the approved scope.\nConfidence: medium",
 		),
 	}
-	tool := newWriteToolForTest(permissions, workingDir)
+	tool := newWriteToolForTest(permissions, nil, workingDir)
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
 
 	resp, err := runWriteTool(t, tool, ctx, WriteParams{
@@ -113,7 +119,7 @@ func TestWriteTool_ReturnsFatalErrorForUserDeniedPermission(t *testing.T) {
 		Broker:  pubsub.NewBroker[permission.PermissionRequest](),
 		granted: false,
 	}
-	tool := newWriteToolForTest(permissions, workingDir)
+	tool := newWriteToolForTest(permissions, nil, workingDir)
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
 
 	_, err := runWriteTool(t, tool, ctx, WriteParams{
@@ -135,7 +141,7 @@ func TestWriteTool_WritesFileWhenPermissionGranted(t *testing.T) {
 		Broker:  pubsub.NewBroker[permission.PermissionRequest](),
 		granted: true,
 	}
-	tool := newWriteToolForTest(permissions, workingDir)
+	tool := newWriteToolForTest(permissions, nil, workingDir)
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
 
 	resp, err := runWriteTool(t, tool, ctx, WriteParams{
@@ -146,6 +152,40 @@ func TestWriteTool_WritesFileWhenPermissionGranted(t *testing.T) {
 	require.False(t, resp.IsError)
 
 	data, readErr := os.ReadFile(filepath.Join(workingDir, "allowed.txt"))
+	require.NoError(t, readErr)
+	require.Equal(t, "hello", string(data))
+}
+
+type missingHistoryService struct {
+	*mockHistoryService
+}
+
+func (m *missingHistoryService) GetByPathAndSession(context.Context, string, string) (history.File, error) {
+	return history.File{}, errors.New("not found")
+}
+
+func TestWriteTool_WritesFileWhenHistoryDoesNotExist(t *testing.T) {
+	t.Parallel()
+
+	workingDir := t.TempDir()
+	permissions := &mockWritePermissionService{
+		Broker:  pubsub.NewBroker[permission.PermissionRequest](),
+		granted: true,
+	}
+	historySvc := &missingHistoryService{
+		mockHistoryService: &mockHistoryService{Broker: pubsub.NewBroker[history.File]()},
+	}
+	tool := newWriteToolForTest(permissions, historySvc, workingDir)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	resp, err := runWriteTool(t, tool, ctx, WriteParams{
+		FilePath: "first-write.txt",
+		Content:  "hello",
+	})
+	require.NoError(t, err)
+	require.False(t, resp.IsError)
+
+	data, readErr := os.ReadFile(filepath.Join(workingDir, "first-write.txt"))
 	require.NoError(t, readErr)
 	require.Equal(t, "hello", string(data))
 }

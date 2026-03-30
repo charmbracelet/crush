@@ -368,7 +368,7 @@ func TestRunStreamingContextWindowRecoveryOnlyOnce(t *testing.T) {
 
 	streamErr := errors.New("received error while streaming: {\"message\":\"{\\\"error\\\":{\\\"message\\\":\\\"Your input exceeds the context window of this model. Please adjust your input and try again.\\\",\\\"code\\\":\\\"invalid_request_body\\\"}}\"}")
 	fakeAgent := &autoSummarizeTestAgent{
-		t: t,
+		t:       t,
 		runErrs: []error{streamErr, streamErr},
 	}
 	sessionAgent := newAutoSummarizeTestSessionAgent(t, env, fakeAgent, env.messages, 200_000)
@@ -382,4 +382,34 @@ func TestRunStreamingContextWindowRecoveryOnlyOnce(t *testing.T) {
 	require.Contains(t, err.Error(), "context window")
 	require.Equal(t, 2, fakeAgent.runCalls)
 	require.Equal(t, 1, fakeAgent.summaryCalls)
+}
+
+func TestRunContextWindowErrorAfterCompletedStepDoesNotAutoResume(t *testing.T) {
+	t.Parallel()
+	plugin.Reset()
+	t.Cleanup(plugin.Reset)
+
+	env := testEnv(t)
+	testSession, err := env.sessions.Create(t.Context(), "context-window after step")
+	require.NoError(t, err)
+
+	contextWindowErr := &fantasy.ProviderError{
+		StatusCode: 400,
+		Message:    "Your input exceeds the context window of this model.",
+	}
+	fakeAgent := &autoSummarizeTestAgent{
+		t:            t,
+		runErr:       contextWindowErr,
+		errAfterStep: true,
+	}
+	sessionAgent := newAutoSummarizeTestSessionAgent(t, env, fakeAgent, env.messages, 200_000)
+
+	_, err = sessionAgent.Run(t.Context(), SessionAgentCall{
+		Prompt:          "hello",
+		SessionID:       testSession.ID,
+		MaxOutputTokens: 50_000,
+	})
+	require.ErrorIs(t, err, contextWindowErr)
+	require.Equal(t, 1, fakeAgent.runCalls)
+	require.Equal(t, 0, fakeAgent.summaryCalls)
 }

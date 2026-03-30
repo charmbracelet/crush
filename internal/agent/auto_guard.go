@@ -5,9 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
-	"unicode"
 
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
@@ -29,49 +27,10 @@ type toolOutputGuardResponse struct {
 }
 
 const (
-	maxAutoHandoffTitleRunes      = 300
+	maxAutoHandoffTitleRunes       = 300
 	maxAutoHandoffUserRequestRunes = 1200
-	maxAutoHandoffContentRunes    = 12000
+	maxAutoHandoffContentRunes     = 12000
 )
-
-var autoHandoffScopeOnlyHints = []string{
-	"scope",
-	"topic",
-	"unclear",
-	"not clear",
-	"scope expansion",
-	"findings dump",
-	"tool output",
-	"范围",
-	"主题",
-	"不明确",
-	"不清楚",
-	"无关",
-	"不相关",
-}
-
-var autoHandoffRiskHints = []string{
-	"danger",
-	"dangerous",
-	"unsafe",
-	"escalat",
-	"credential",
-	"secret",
-	"token",
-	"jailbreak",
-	"prompt injection",
-	"malicious",
-	"exploit",
-	"提权",
-	"权限",
-	"凭据",
-	"密钥",
-	"注入",
-	"越权",
-	"危险",
-}
-
-var taskPathPattern = regexp.MustCompile(`(?i)\b[a-z]:/[\w\-. /]+|/[\w\-. /]+`)
 
 func (c *coordinator) reviewToolResultForPromptInjection(ctx context.Context, sessionID string, toolResult message.ToolResult, permissionMode session.PermissionMode) (message.ToolResult, error) {
 	if permissionMode != session.PermissionModeAuto {
@@ -291,16 +250,7 @@ func (c *coordinator) reviewHandoffText(ctx context.Context, sess session.Sessio
 	if err != nil {
 		return permission.AutoClassification{}, err
 	}
-	classification, err := parseAutoClassification(raw)
-	if err != nil {
-		return permission.AutoClassification{}, err
-	}
-	if shouldAutoAllowTaskRelevantHandoff(classification, title, content) {
-		classification.AllowAuto = true
-		classification.Reason = "Auto Mode accepted a low-confidence scope mismatch after local safety checks."
-		classification.Confidence = permission.AutoApprovalConfidenceLow
-	}
-	return classification, nil
+	return parseAutoClassification(raw)
 }
 
 func (c *coordinator) latestUserRequestForHandoff(ctx context.Context, sessionID string) string {
@@ -322,153 +272,6 @@ func (c *coordinator) latestUserRequestForHandoff(ctx context.Context, sessionID
 		}
 	}
 	return ""
-}
-
-func shouldAutoAllowTaskRelevantHandoff(review permission.AutoClassification, title, content string) bool {
-	if review.AllowAuto || review.Confidence != permission.AutoApprovalConfidenceLow {
-		return false
-	}
-	reason := strings.TrimSpace(review.Reason)
-	if reason == "" {
-		return false
-	}
-	if containsNormalizedHint(reason, autoHandoffRiskHints) {
-		return false
-	}
-	if !containsNormalizedHint(reason, autoHandoffScopeOnlyHints) {
-		return false
-	}
-	if strings.TrimSpace(content) == "" {
-		return false
-	}
-	if _, suspicious := suspiciousToolOutputSnippet(content); suspicious {
-		return false
-	}
-	return hasMeaningfulText(title) || hasMeaningfulText(content)
-}
-
-func shouldAllowSubagentRunDespiteReview(review permission.AutoClassification, delegatedPrompt, latestUserRequest string) bool {
-	if review.AllowAuto || review.Confidence != permission.AutoApprovalConfidenceLow {
-		return false
-	}
-	reason := strings.TrimSpace(review.Reason)
-	if reason == "" {
-		return false
-	}
-	if containsNormalizedHint(reason, autoHandoffRiskHints) {
-		return false
-	}
-	if strings.TrimSpace(delegatedPrompt) == "" || strings.TrimSpace(latestUserRequest) == "" {
-		return false
-	}
-	if _, suspicious := suspiciousToolOutputSnippet(delegatedPrompt); suspicious {
-		return false
-	}
-	return likelySameTask(delegatedPrompt, latestUserRequest)
-}
-
-func likelySameTask(candidate, userRequest string) bool {
-	candidateTokens := taskTokenSet(candidate)
-	requestTokens := taskTokenSet(userRequest)
-	if len(candidateTokens) == 0 || len(requestTokens) == 0 {
-		return false
-	}
-
-	common := 0
-	for token := range candidateTokens {
-		if _, ok := requestTokens[token]; ok {
-			common++
-		}
-	}
-	if common >= 3 {
-		return true
-	}
-
-	shorter := len(candidateTokens)
-	if len(requestTokens) < shorter {
-		shorter = len(requestTokens)
-	}
-	if shorter == 0 {
-		return false
-	}
-	return float64(common)/float64(shorter) >= 0.35
-}
-
-func taskTokenSet(value string) map[string]struct{} {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if value == "" {
-		return nil
-	}
-	value = taskPathPattern.ReplaceAllString(value, " ")
-
-	var normalized strings.Builder
-	for _, r := range value {
-		switch {
-		case unicode.Is(unicode.Han, r):
-			normalized.WriteByte(' ')
-			normalized.WriteRune(r)
-			normalized.WriteByte(' ')
-		case unicode.IsLetter(r) || unicode.IsDigit(r):
-			normalized.WriteRune(r)
-		default:
-			normalized.WriteByte(' ')
-		}
-	}
-
-	set := make(map[string]struct{})
-	for _, token := range strings.Fields(normalized.String()) {
-		if shouldSkipTaskToken(token) {
-			continue
-		}
-		set[token] = struct{}{}
-	}
-	return set
-}
-
-func shouldSkipTaskToken(token string) bool {
-	token = strings.TrimSpace(token)
-	if token == "" {
-		return true
-	}
-	runes := []rune(token)
-	if len(runes) == 1 {
-		return !unicode.Is(unicode.Han, runes[0])
-	}
-	if len(runes) < 3 {
-		for _, r := range runes {
-			if unicode.Is(unicode.Han, r) {
-				return false
-			}
-		}
-		return true
-	}
-	return false
-}
-
-func containsNormalizedHint(value string, hints []string) bool {
-	normalized := strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(value)), " "))
-	if normalized == "" {
-		return false
-	}
-	for _, hint := range hints {
-		hint = strings.TrimSpace(strings.ToLower(hint))
-		if hint == "" {
-			continue
-		}
-		if strings.Contains(normalized, hint) {
-			return true
-		}
-	}
-	return false
-}
-
-func hasMeaningfulText(value string) bool {
-	for _, r := range value {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			return true
-		}
-	}
-	return false
 }
 
 func truncateForAutoGuard(value string, maxRunes int) string {

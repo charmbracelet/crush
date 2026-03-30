@@ -858,11 +858,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		result, err = runStream(providerOptions, false)
 	}
 
-	// Context-window recovery: if the LLM rejects the request due to context
-	// length, force an auto-summarize + auto-resume instead of surfacing a
-	// fatal error that leaves the session unusable.
+	// Context-window recovery: only retry automatically when the request was
+	// rejected before any step completed. If tools already ran in this turn,
+	// auto-resume can repeat side effects, so return the provider error.
 	alreadyRecoveringFromContextWindow := strings.HasPrefix(call.Prompt, contextWindowResumePromptPrefix)
-	contextWindowErr := isContextWindowExceededError(err) || (completedStepsThisRun == 0 && isContextLengthError(err))
+	contextWindowErr := completedStepsThisRun == 0 && (isContextWindowExceededError(err) || isContextLengthError(err))
 	if contextWindowErr && !a.disableAutoSummarize && !alreadyRecoveringFromContextWindow {
 		slog.Warn("Context window exceeded; forcing summarization to recover",
 			"session_id", call.SessionID,

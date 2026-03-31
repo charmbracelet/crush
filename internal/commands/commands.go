@@ -130,8 +130,8 @@ func loadAll(sources []commandSource) ([]CustomCommand, error) {
 }
 
 func loadFromSource(source commandSource) ([]CustomCommand, error) {
-	if err := ensureDir(source.path); err != nil {
-		return nil, err
+	if _, err := os.Stat(source.path); os.IsNotExist(err) {
+		return nil, nil
 	}
 
 	var commands []CustomCommand
@@ -214,13 +214,6 @@ func getXDGCommandsDir() string {
 		return filepath.Join(xdgHome, "crush", "commands")
 	}
 	return ""
-}
-
-func ensureDir(path string) error {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return os.MkdirAll(path, 0o755)
-	}
-	return nil
 }
 
 func isMarkdownFile(name string) bool {

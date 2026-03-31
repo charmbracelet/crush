@@ -74,6 +74,19 @@ func TestIsRetriableError(t *testing.T) {
 		}))
 	})
 
+	t.Run("accounts exhausted provider message is retriable", func(t *testing.T) {
+		t.Parallel()
+		require.True(t, isRetriableError(&fantasy.ProviderError{
+			Title:   "provider error",
+			Message: "All accounts exhausted",
+		}))
+	})
+
+	t.Run("accounts exhausted plain error is retriable", func(t *testing.T) {
+		t.Parallel()
+		require.True(t, isRetriableError(errors.New("received error while streaming: {\"message\":\"All accounts exhausted\",\"type\":\"rate_limit_error\"}")))
+	})
+
 	t.Run("400 bad request is not retriable", func(t *testing.T) {
 		t.Parallel()
 		require.False(t, isRetriableError(&fantasy.ProviderError{

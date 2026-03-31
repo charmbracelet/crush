@@ -725,7 +725,7 @@ func DisableSingle(cfg *config.ConfigStore, name string) error {
 	// re-enable (even with an unchanged config) is seen as new and restarts.
 	teardown(name)
 	updateState(name, StateDisabled, nil, nil, Counts{})
-	slog.Info("Disabled mcp client", "name", name)
+	slog.Info("Disabled MCP client", "name", name)
 	return nil
 }
 

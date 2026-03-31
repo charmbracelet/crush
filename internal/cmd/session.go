@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -640,6 +641,13 @@ func extractSkillsFromMessages(msgs []*message.Message) []sessionShowSkill {
 			}
 		}
 	}
+
+	sort.Slice(skills, func(i, j int) bool {
+		if skills[i].LoadedAt == skills[j].LoadedAt {
+			return skills[i].Name < skills[j].Name
+		}
+		return skills[i].LoadedAt < skills[j].LoadedAt
+	})
 
 	return skills
 }

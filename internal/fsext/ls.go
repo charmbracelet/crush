@@ -1,6 +1,7 @@
 package fsext
 
 import (
+	"cmp"
 	"errors"
 	"log/slog"
 	"os"
@@ -12,7 +13,7 @@ import (
 	"github.com/charlievieth/fastwalk"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/home"
-	"github.com/go-git/go-git/v5/plumbing/format/config"
+	gitconfig "github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
 )
 
@@ -82,21 +83,19 @@ var commonIgnorePatterns = sync.OnceValue(func() []gitignore.Pattern {
 })
 
 // gitGlobalIgnorePatterns returns patterns from git's global excludes file
-// (core.excludesFile), following git's config/env fallback behavior.
+// (core.excludesFile), following git's config resolution order.
 var gitGlobalIgnorePatterns = sync.OnceValue(func() []gitignore.Pattern {
-	globalConfigPath := strings.TrimSpace(os.Getenv("GIT_CONFIG_GLOBAL"))
-	if globalConfigPath == "" {
-		globalConfigPath = filepath.Join(home.Dir(), ".gitconfig")
+	cfg, err := gitconfig.LoadConfig(gitconfig.GlobalScope)
+	if err != nil {
+		slog.Debug("Failed to load global git config", "error", err)
+		return nil
 	}
 
-	excludesFilePath, found, err := readGitCoreExcludesFile(globalConfigPath)
-	if err != nil {
-		slog.Debug("Failed to read global git config", "path", globalConfigPath, "error", err)
-	}
-	if !found {
-		excludesFilePath = cmp.Or(
-			os.Getenv("XDG_CONFIG_HOME"),
-			filepath.Join(home.Dir(), ".config", "git", "ignore"),
+	excludesFilePath := cfg.Raw.Section("core").Options.Get("excludesfile")
+	if excludesFilePath == "" {
+		excludesFilePath = filepath.Join(
+			cmp.Or(os.Getenv("XDG_CONFIG_HOME"), filepath.Join(home.Dir(), ".config")),
+			"git", "ignore",
 		)
 	}
 
@@ -140,28 +139,6 @@ func parsePatterns(lines []string, domain []string) []gitignore.Pattern {
 		patterns = append(patterns, gitignore.ParsePattern(line, domain))
 	}
 	return patterns
-}
-
-func readGitCoreExcludesFile(globalConfigPath string) (string, bool, error) {
-	bts, err := os.ReadFile(globalConfigPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", false, nil
-		}
-		return "", false, err
-	}
-
-	raw := config.New()
-	if err := config.NewDecoder(strings.NewReader(string(bts))).Decode(raw); err != nil {
-		return "", false, err
-	}
-
-	excludesFile := raw.Section("core").Options.Get("excludesfile")
-	if excludesFile == "" {
-		return "", false, nil
-	}
-
-	return excludesFile, true, nil
 }
 
 type directoryLister struct {

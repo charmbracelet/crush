@@ -155,7 +155,11 @@ func NewSessionAgent(
 }
 
 func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
-	if call.Prompt == "" && !message.ContainsTextAttachment(call.Attachments) {
+	slog.Info("agent.Run", "prompt", call.Prompt, "attachments", len(call.Attachments))
+	for i, att := range call.Attachments {
+		slog.Info("attachment", "index", i, "file", att.FileName, "mime", att.MimeType, "size", len(att.Content))
+	}
+	if call.Prompt == "" && len(call.Attachments) == 0 {
 		return nil, ErrEmptyPrompt
 	}
 	if call.SessionID == "" {

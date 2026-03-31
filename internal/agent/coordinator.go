@@ -134,6 +134,11 @@ func NewCoordinator(
 
 // Run implements Coordinator.
 func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
+	// If prompt is empty but there are attachments, use a default prompt
+	if prompt == "" && len(attachments) > 0 {
+		prompt = "请分析我发送的图片/附件" // Please analyze the image/attachment I sent
+	}
+
 	if err := c.readyWg.Wait(); err != nil {
 		return nil, err
 	}
@@ -149,7 +154,9 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 		maxTokens = model.ModelCfg.MaxTokens
 	}
 
-	if !model.CatwalkCfg.SupportsImages && attachments != nil {
+	slog.Info("coordinator.Run", "SupportsImages", model.CatwalkCfg.SupportsImages, "provider", model.ModelCfg.Provider, "attachments", len(attachments))
+	// Skip image filtering for minimax-china provider since it uses MCP to handle images
+	if !model.CatwalkCfg.SupportsImages && model.ModelCfg.Provider != "minimax-china" && attachments != nil {
 		// filter out image attachments
 		filteredAttachments := make([]message.Attachment, 0, len(attachments))
 		for _, att := range attachments {
@@ -158,6 +165,7 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 			}
 		}
 		attachments = filteredAttachments
+		slog.Info("Filtered image attachments", "remaining", len(attachments))
 	}
 
 	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
@@ -429,13 +437,14 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		allTools = append(allTools, agentTool)
 	}
 
-	if slices.Contains(agent.AllowedTools, tools.AgenticFetchToolName) {
-		agenticFetchTool, err := c.agenticFetchTool(ctx, nil)
-		if err != nil {
-			return nil, err
-		}
-		allTools = append(allTools, agenticFetchTool)
-	}
+	// DISABLED: agentic_fetch tool removed due to network issues
+	// if slices.Contains(agent.AllowedTools, tools.AgenticFetchToolName) {
+	//	agenticFetchTool, err := c.agenticFetchTool(ctx, nil)
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	//	allTools = append(allTools, agenticFetchTool)
+	// }
 
 	// Get the model name for the agent
 	modelName := ""

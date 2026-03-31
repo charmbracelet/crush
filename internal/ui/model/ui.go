@@ -1753,8 +1753,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 
 				attachments := m.attachments.List()
+				slog.Info("SendMessage", "value", value, "attachments", len(attachments))
 				m.attachments.Reset()
-				if len(value) == 0 && !message.ContainsTextAttachment(attachments) {
+				if len(value) == 0 && len(attachments) == 0 {
 					return nil
 				}
 
@@ -3224,6 +3225,29 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 
 	if m.focus != uiFocusEditor {
 		return nil
+	}
+
+	// Check if clipboard contains image data directly (before processing text content)
+	// On Windows, PasteMsg.Content may be empty or contain special characters when
+	// an image is copied. We need to check the clipboard directly for image data.
+	imageData, imageErr := readClipboard(clipboardFormatImage)
+	slog.Info("pasteImageFromClipboard check", "error", imageErr, "dataSize", len(imageData))
+	if imageErr == nil && len(imageData) > 0 {
+		// Clipboard contains image data - use it instead of text paste
+		if int64(len(imageData)) > common.MaxAttachmentSize {
+			return func() tea.Msg {
+				return util.InfoMsg{Type: util.InfoTypeError, Msg: "Image too large (>5MB)"}
+			}
+		}
+		name := fmt.Sprintf("paste_%d.png", m.pasteIdx())
+		return func() tea.Msg {
+			return message.Attachment{
+				FilePath: name,
+				FileName: name,
+				MimeType: mimeOf(imageData),
+				Content:  imageData,
+			}
+		}
 	}
 
 	if hasPasteExceededThreshold(msg) {

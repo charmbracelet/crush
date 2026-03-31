@@ -93,9 +93,7 @@ func CopyToClipboard(text, successMessage string) tea.Cmd {
 // before showing the success message.
 // This is useful when you need to perform additional actions like clearing UI state.
 func CopyToClipboardWithCallback(text, successMessage string, callback tea.Cmd) tea.Cmd {
-	var (
-		copied bool
-	)
+	var copied bool
 
 	return tea.Sequence(
 		tea.SetClipboard(text),

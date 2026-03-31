@@ -499,6 +499,12 @@ func (s *Styles) DialogHelpStyles() help.Styles {
 
 // DefaultStyles returns the default styles for the UI.
 func DefaultStyles() Styles {
+	return DefaultStylesForBackground(true)
+}
+
+// DefaultStylesForBackground returns the default styles tuned for the terminal
+// background brightness.
+func DefaultStylesForBackground(hasDarkBackground bool) Styles {
 	var (
 		primary   = charmtone.Charple
 		secondary = charmtone.Dolly
@@ -548,6 +554,20 @@ func DefaultStyles() Styles {
 		// redLight = charmtone.Salmon
 		// cherry   = charmtone.Cherry
 	)
+
+	if !hasDarkBackground {
+		bgBase = charmtone.Salt
+		bgBaseLighter = charmtone.Ash
+		bgSubtle = charmtone.Ash
+		bgOverlay = charmtone.Anchovy
+
+		fgBase = charmtone.Pepper
+		fgMuted = charmtone.Charcoal
+		fgHalfMuted = charmtone.Oyster
+		fgSubtle = charmtone.Iron
+
+		border = charmtone.Anchovy
+	}
 
 	normalBorder := lipgloss.NormalBorder()
 

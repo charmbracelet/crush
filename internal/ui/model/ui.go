@@ -373,7 +373,17 @@ func (m *UI) Init() tea.Cmd {
 	if cmd := m.loadInitialSession(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
+	cmds = append(cmds, tea.RequestBackgroundColor)
 	return tea.Batch(cmds...)
+}
+
+func (m *UI) applyBackgroundTheme(hasDarkBackground bool) {
+	sty := styles.DefaultStylesForBackground(hasDarkBackground)
+	*m.com.Styles = sty
+	m.textarea.SetStyles(m.com.Styles.TextArea)
+	m.status.help.Styles = m.com.Styles.Help
+	m.header = newHeader(m.com)
+	m.sidebarLogo = ""
 }
 
 // loadInitialSession loads the initial session if one was specified on startup.
@@ -478,6 +488,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sendProgressBar = slices.Contains(msg, "WT_SESSION")
 		}
 		cmds = append(cmds, common.QueryCmd(uv.Environ(msg)))
+	case tea.BackgroundColorMsg:
+		m.applyBackgroundTheme(msg.IsDark())
+		m.updateLayoutAndSize()
 	case tea.ModeReportMsg:
 		if m.caps.ReportFocusEvents {
 			m.notifyBackend = notification.NewNativeBackend(notification.Icon)

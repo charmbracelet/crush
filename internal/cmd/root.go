@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
+	"github.com/charmbracelet/crush/internal/profiling"
 	"github.com/charmbracelet/crush/internal/projects"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	ui "github.com/charmbracelet/crush/internal/ui/model"
@@ -42,6 +43,13 @@ func init() {
 	rootCmd.Flags().BoolP("continue", "C", false, "Continue the most recent session")
 	rootCmd.MarkFlagsMutuallyExclusive("session", "continue")
 
+	// Profiling flags
+	rootCmd.PersistentFlags().String("cpuprofile", "", "write cpu profile to `file`")
+	rootCmd.PersistentFlags().String("memprofile", "", "write memory profile to `file`")
+	rootCmd.PersistentFlags().String("trace", "", "write execution trace to `file`")
+	rootCmd.PersistentFlags().Int("blockprofile-rate", 0, "block profile rate (0 to disable)")
+	rootCmd.PersistentFlags().Int("mutexprofile-frac", 0, "mutex profile fraction (0 to disable)")
+
 	rootCmd.AddCommand(
 		runCmd,
 		dirsCmd,
@@ -54,6 +62,8 @@ func init() {
 		sessionCmd,
 	)
 }
+
+var profilingCleanup func()
 
 var rootCmd = &cobra.Command{
 	Use:   "crush",
@@ -84,6 +94,29 @@ crush --session {session-id}
 # Continue the most recent session
 crush --continue
   `,
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		cpuprofile, _ := cmd.Flags().GetString("cpuprofile")
+		memprofile, _ := cmd.Flags().GetString("memprofile")
+		tracefile, _ := cmd.Flags().GetString("trace")
+		blockrate, _ := cmd.Flags().GetInt("blockprofile-rate")
+		mutexfrac, _ := cmd.Flags().GetInt("mutexprofile-frac")
+
+		if cpuprofile != "" || memprofile != "" || tracefile != "" || blockrate > 0 || mutexfrac > 0 {
+			cfg := &profiling.Config{
+				CPUProfile: cpuprofile,
+				MemProfile: memprofile,
+				TraceFile:  tracefile,
+				BlockRate:  blockrate,
+				MutexFrac:  mutexfrac,
+			}
+			cleanup, err := profiling.Start(cfg)
+			if err != nil {
+				return fmt.Errorf("failed to start profiling: %w", err)
+			}
+			profilingCleanup = cleanup
+		}
+		return nil
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		sessionID, _ := cmd.Flags().GetString("session")
 		continueLast, _ := cmd.Flags().GetBool("continue")
@@ -147,13 +180,6 @@ const defaultVersionTemplate = `{{with .DisplayName}}{{printf "%s " .}}{{end}}{{
 `
 
 func Execute() {
-	// NOTE: very hacky: we create a colorprofile writer with STDOUT, then make
-	// it forward to a bytes.Buffer, write the colored heartbit to it, and then
-	// finally prepend it in the version template.
-	// Unfortunately cobra doesn't give us a way to set a function to handle
-	// printing the version, and PreRunE runs after the version is already
-	// handled, so that doesn't work either.
-	// This is the only way I could find that works relatively well.
 	if term.IsTerminal(os.Stdout.Fd()) {
 		var b bytes.Buffer
 		w := colorprofile.NewWriter(os.Stdout, os.Environ())
@@ -161,6 +187,7 @@ func Execute() {
 		_, _ = w.WriteString(heartbit.String())
 		rootCmd.SetVersionTemplate(b.String() + "\n" + defaultVersionTemplate)
 	}
+
 	if err := fang.Execute(
 		context.Background(),
 		rootCmd,
@@ -168,6 +195,10 @@ func Execute() {
 		fang.WithNotifySignal(os.Interrupt),
 	); err != nil {
 		os.Exit(1)
+	}
+
+	if profilingCleanup != nil {
+		profilingCleanup()
 	}
 }
 

@@ -460,10 +460,10 @@ func outputSessionHuman(ctx context.Context, sess session.Session, msgs []*messa
 	if len(skills) > 0 {
 		skillNames := make([]string, len(skills))
 		for i, s := range skills {
-			timestamp := time.Unix(sess.CreatedAt, 0).Format("15:04:05")
+			timestamp := time.Unix(sess.CreatedAt, 0).Format("15:04:05 -0700")
 			if s.LoadedAt != "" {
 				if t, err := time.Parse(time.RFC3339, s.LoadedAt); err == nil {
-					timestamp = t.Format("15:04:05")
+					timestamp = t.Format("15:04:05 -0700")
 				}
 			}
 			skillNames[i] = fmt.Sprintf("%s (%s)", s.Name, timestamp)

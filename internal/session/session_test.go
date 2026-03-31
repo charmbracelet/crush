@@ -47,3 +47,16 @@ func TestSessionLastTokenHelpers(t *testing.T) {
 	require.Equal(t, int64(56), s.LastOutputTokens())
 	require.Equal(t, int64(1290), s.LastExchangeTokens())
 }
+
+func TestModeStateFromSession(t *testing.T) {
+	t.Parallel()
+
+	state := ModeStateFromSession(Session{
+		CollaborationMode: CollaborationMode("invalid"),
+		PermissionMode:    PermissionModeYolo,
+	})
+
+	require.Equal(t, CollaborationModeDefault, state.CollaborationMode)
+	require.Equal(t, PermissionModeYolo, state.PermissionMode)
+	require.Equal(t, "yolo", state.CurrentModeID())
+}

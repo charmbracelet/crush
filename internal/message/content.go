@@ -113,7 +113,8 @@ type ToolResult struct {
 	Metadata   string `json:"metadata"`
 	IsError    bool   `json:"is_error"`
 
-	AutoReviewMeta ToolResultAutoReview `json:"-"`
+	AutoReviewMeta    ToolResultAutoReview    `json:"-"`
+	SubtaskResultMeta ToolResultSubtaskResult `json:"-"`
 }
 
 func (ToolResult) isPart() {}

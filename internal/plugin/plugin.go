@@ -146,6 +146,7 @@ const (
 	ChatTransformPurposeSummarize ChatTransformPurpose = "summarize"
 	// ChatTransformPurposeRecover is the purpose for a recover.
 	ChatTransformPurposeRecover ChatTransformPurpose = "recover"
+	ChatTransformPurposeProactiveCompact ChatTransformPurpose = "proactive_compact"
 )
 
 // ChatMessagesTransformInput is the input for ChatMessagesTransform hook.

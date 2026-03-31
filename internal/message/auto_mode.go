@@ -26,6 +26,22 @@ type ToolResultAutoReview struct {
 	DetectorFailed bool   `json:"detector_failed,omitempty"`
 }
 
+type ToolResultSubtaskStatus string
+
+const (
+	ToolResultSubtaskStatusCompleted ToolResultSubtaskStatus = "completed"
+	ToolResultSubtaskStatusFailed    ToolResultSubtaskStatus = "failed"
+	ToolResultSubtaskStatusCanceled  ToolResultSubtaskStatus = "canceled"
+)
+
+type ToolResultSubtaskResult struct {
+	ChildSessionID   string                  `json:"child_session_id,omitempty"`
+	ParentToolCallID string                  `json:"parent_tool_call_id,omitempty"`
+	Status           ToolResultSubtaskStatus `json:"status,omitempty"`
+}
+
+const toolResultSubtaskResultMetadataKey = "subtask_result"
+
 func ParseToolResultAutoReview(metadata string) (ToolResultAutoReview, bool) {
 	var review ToolResultAutoReview
 	if strings.TrimSpace(metadata) == "" {
@@ -92,6 +108,63 @@ func (t ToolResult) WithAutoReview(review ToolResultAutoReview) ToolResult {
 	for key, value := range reviewPayload {
 		payload[key] = value
 	}
+
+	merged, err := json.Marshal(payload)
+	if err != nil {
+		return t
+	}
+	t.Metadata = string(merged)
+	return t
+}
+
+func ParseToolResultSubtaskResult(metadata string) (ToolResultSubtaskResult, bool) {
+	var subtask ToolResultSubtaskResult
+	if strings.TrimSpace(metadata) == "" {
+		return subtask, false
+	}
+
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(metadata), &payload); err != nil {
+		return ToolResultSubtaskResult{}, false
+	}
+
+	raw, ok := payload[toolResultSubtaskResultMetadataKey]
+	if !ok || len(raw) == 0 || string(raw) == "null" {
+		return ToolResultSubtaskResult{}, false
+	}
+	if err := json.Unmarshal(raw, &subtask); err != nil {
+		return ToolResultSubtaskResult{}, false
+	}
+	if subtask == (ToolResultSubtaskResult{}) {
+		return ToolResultSubtaskResult{}, false
+	}
+	return subtask, true
+}
+
+func (t ToolResult) SubtaskResult() (ToolResultSubtaskResult, bool) {
+	if t.SubtaskResultMeta != (ToolResultSubtaskResult{}) {
+		return t.SubtaskResultMeta, true
+	}
+	return ParseToolResultSubtaskResult(t.Metadata)
+}
+
+func (t ToolResult) WithSubtaskResult(subtask ToolResultSubtaskResult) ToolResult {
+	t.SubtaskResultMeta = subtask
+	subtaskData, err := json.Marshal(subtask)
+	if err != nil {
+		return t
+	}
+
+	var payload map[string]json.RawMessage
+	if strings.TrimSpace(t.Metadata) != "" {
+		if err := json.Unmarshal([]byte(t.Metadata), &payload); err != nil {
+			payload = nil
+		}
+	}
+	if payload == nil {
+		payload = map[string]json.RawMessage{}
+	}
+	payload[toolResultSubtaskResultMetadataKey] = subtaskData
 
 	merged, err := json.Marshal(payload)
 	if err != nil {

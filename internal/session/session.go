@@ -170,6 +170,7 @@ type service struct {
 	q                        *db.Queries
 	defaultCollaborationMode CollaborationMode
 	defaultPermissionMode    PermissionMode
+	onDeleteSession          func(sessionID string)
 }
 
 func (s *service) Create(ctx context.Context, title string) (Session, error) {
@@ -194,13 +195,18 @@ func (s *service) Create(ctx context.Context, title string) (Session, error) {
 }
 
 func (s *service) CreateTaskSession(ctx context.Context, toolCallID, parentSessionID, title string) (Session, error) {
+	parentSession, err := s.Get(ctx, parentSessionID)
+	if err != nil {
+		return Session{}, err
+	}
+
 	dbSession, err := s.q.CreateSession(ctx, db.CreateSessionParams{
 		ID:                   toolCallID,
 		ParentSessionID:      sql.NullString{String: parentSessionID, Valid: true},
 		Title:                title,
 		WorkspaceCwd:         sql.NullString{},
-		CollaborationMode:    string(s.defaultCollaborationMode),
-		PermissionMode:       string(s.defaultPermissionMode),
+		CollaborationMode:    string(parentSession.CollaborationMode),
+		PermissionMode:       string(parentSession.PermissionMode),
 		Kind:                 string(KindNormal),
 		HandoffGoal:          "",
 		HandoffDraftPrompt:   "",
@@ -292,6 +298,9 @@ func (s *service) Delete(ctx context.Context, id string) error {
 	}
 
 	session := s.fromDBItem(dbSession)
+	if s.onDeleteSession != nil {
+		s.onDeleteSession(session.ID)
+	}
 	s.Publish(pubsub.DeletedEvent, session)
 	event.SessionDeleted()
 	return nil
@@ -360,29 +369,47 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 }
 
 func (s *service) UpdateCollaborationMode(ctx context.Context, sessionID string, mode CollaborationMode) (Session, error) {
+	current, err := s.Get(ctx, sessionID)
+	if err != nil {
+		return Session{}, err
+	}
+	transition := NewCollaborationModeTransition(current, mode)
+	if !transition.Changed() {
+		return current, nil
+	}
+
 	dbSession, err := s.q.UpdateSessionCollaborationMode(ctx, db.UpdateSessionCollaborationModeParams{
 		ID:                sessionID,
-		CollaborationMode: string(NormalizeCollaborationMode(string(mode))),
+		CollaborationMode: string(transition.Current.CollaborationMode),
 	})
 	if err != nil {
 		return Session{}, err
 	}
-	session := s.fromDBItem(dbSession)
-	s.Publish(pubsub.UpdatedEvent, session)
-	return session, nil
+	updated := s.fromDBItem(dbSession)
+	s.Publish(pubsub.UpdatedEvent, updated)
+	return updated, nil
 }
 
 func (s *service) UpdatePermissionMode(ctx context.Context, sessionID string, mode PermissionMode) (Session, error) {
+	current, err := s.Get(ctx, sessionID)
+	if err != nil {
+		return Session{}, err
+	}
+	transition := NewPermissionModeTransition(current, mode)
+	if !transition.Changed() {
+		return current, nil
+	}
+
 	dbSession, err := s.q.UpdateSessionPermissionMode(ctx, db.UpdateSessionPermissionModeParams{
 		ID:             sessionID,
-		PermissionMode: string(NormalizePermissionMode(string(mode))),
+		PermissionMode: string(transition.Current.PermissionMode),
 	})
 	if err != nil {
 		return Session{}, err
 	}
-	current := s.fromDBItem(dbSession)
-	s.Publish(pubsub.UpdatedEvent, current)
-	return current, nil
+	updated := s.fromDBItem(dbSession)
+	s.Publish(pubsub.UpdatedEvent, updated)
+	return updated, nil
 }
 
 func (s *service) SetDefaultPermissionMode(mode PermissionMode) {
@@ -507,6 +534,10 @@ func unmarshalStringSlice(data string) ([]string, error) {
 }
 
 func NewService(q *db.Queries, conn *sql.DB, defaultModes ...CollaborationMode) Service {
+	return NewServiceWithDeleteCallback(q, conn, nil, defaultModes...)
+}
+
+func NewServiceWithDeleteCallback(q *db.Queries, conn *sql.DB, onDeleteSession func(sessionID string), defaultModes ...CollaborationMode) Service {
 	broker := pubsub.NewBroker[Session]()
 	defaultMode := CollaborationModeDefault
 	if len(defaultModes) > 0 {
@@ -518,6 +549,7 @@ func NewService(q *db.Queries, conn *sql.DB, defaultModes ...CollaborationMode) 
 		q:                        q,
 		defaultCollaborationMode: defaultMode,
 		defaultPermissionMode:    PermissionModeAuto,
+		onDeleteSession:          onDeleteSession,
 	}
 }
 

@@ -19,6 +19,8 @@ import (
 	"github.com/charmbracelet/crush/internal/plugin"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/timeline"
+	"github.com/charmbracelet/crush/internal/toolruntime"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 )
@@ -247,4 +249,36 @@ func newSubscriberFixture(t *testing.T, bufSize int) *subscriberFixture {
 	}, f.outputCh)
 
 	return f
+}
+
+func TestSetupTimelineFromToolRuntimePublishesTimelineEvents(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	app := &App{
+		ToolRuntime:     toolruntime.NewService(),
+		Timeline:        timeline.NewService(),
+		serviceEventsWG: &sync.WaitGroup{},
+	}
+	app.setupTimelineFromToolRuntime(ctx)
+
+	sub := app.Timeline.Subscribe(ctx)
+	app.ToolRuntime.Publish(toolruntime.State{SessionID: "sess-1", ToolCallID: "tool-1", ToolName: "bash", Status: toolruntime.StatusRunning, SnapshotText: "first"})
+	app.ToolRuntime.Publish(toolruntime.State{SessionID: "sess-1", ToolCallID: "tool-1", ToolName: "bash", Status: toolruntime.StatusCompleted, SnapshotText: "done"})
+
+	seen := make([]timeline.EventType, 0, 3)
+	for len(seen) < 3 {
+		select {
+		case event := <-sub:
+			seen = append(seen, event.Payload.Type)
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for timeline events: %v", seen)
+		}
+	}
+
+	require.Equal(t, []timeline.EventType{timeline.EventToolStarted, timeline.EventToolProgress, timeline.EventToolFinished}, seen)
+	cancel()
+	app.serviceEventsWG.Wait()
 }

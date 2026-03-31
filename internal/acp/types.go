@@ -251,6 +251,7 @@ const (
 	SessionUpdateSessionInfoUpdate  SessionUpdateType = "session_info_update"
 	SessionUpdateConfigOptionUpdate SessionUpdateType = "config_option_update"
 	SessionUpdateCurrentModeUpdate  SessionUpdateType = "current_mode_update"
+	SessionUpdateTimelineEvent      SessionUpdateType = "timeline_event"
 )
 
 // ToolCallStatus describes the execution state of a tool call.
@@ -265,7 +266,13 @@ const (
 	ToolCallStatusCompleted ToolCallStatus = "completed"
 	// ToolCallStatusFailed means the tool call failed with an error.
 	ToolCallStatusFailed ToolCallStatus = "failed"
+	// ToolCallStatusCanceled means the tool call was canceled before completion.
+	ToolCallStatusCanceled ToolCallStatus = "canceled"
 )
+
+type SubtaskResult struct {
+	Status string `json:"status,omitempty"`
+}
 
 // SessionUpdate is the payload of a session/update notification.
 // The SessionUpdate field identifies the variant; remaining fields are
@@ -283,6 +290,10 @@ type SessionUpdate struct {
 	Status     ToolCallStatus `json:"status,omitempty"`
 	RawInput   any            `json:"rawInput,omitempty"`
 	RawOutput  any            `json:"rawOutput,omitempty"`
+	// Structured subtask result metadata projected from tool-result metadata.
+	ChildSessionID   string         `json:"childSessionId,omitempty"`
+	ParentToolCallID string         `json:"parentToolCallId,omitempty"`
+	SubtaskResult    *SubtaskResult `json:"subtaskResult,omitempty"`
 	// Plan entries.
 	Entries []PlanEntry `json:"entries,omitempty"`
 	// Session info update fields (ISO 8601 timestamp).
@@ -291,6 +302,8 @@ type SessionUpdate struct {
 	ConfigOptions []ConfigOption `json:"configOptions,omitempty"`
 	// Legacy current mode update fields.
 	CurrentModeID string `json:"currentModeId,omitempty"`
+	// Timeline event payload.
+	TimelineEvent *TimelineEvent `json:"timelineEvent,omitempty"`
 }
 
 // PlanEntry is a single entry in an agent execution plan.
@@ -305,6 +318,20 @@ type PlanEntry struct {
 type SessionUpdateNotification struct {
 	SessionID string        `json:"sessionId"`
 	Update    SessionUpdate `json:"update"`
+}
+
+type TimelineEvent struct {
+	Type              string         `json:"type"`
+	Timestamp         int64          `json:"timestamp,omitempty"`
+	Title             string         `json:"title,omitempty"`
+	ToolCallID        string         `json:"toolCallId,omitempty"`
+	ToolName          string         `json:"toolName,omitempty"`
+	Status            string         `json:"status,omitempty"`
+	Content           string         `json:"content,omitempty"`
+	ChildSessionID    string         `json:"childSessionId,omitempty"`
+	CollaborationMode string         `json:"collaborationMode,omitempty"`
+	PermissionMode    string         `json:"permissionMode,omitempty"`
+	Metadata          map[string]any `json:"metadata,omitempty"`
 }
 
 // ---- session/request_permission ----

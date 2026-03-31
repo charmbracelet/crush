@@ -14,6 +14,35 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type compactingPurposePlugin struct {
+	purposes []plugin.ChatTransformPurpose
+}
+
+func (p *compactingPurposePlugin) Name() string { return "compacting-purpose-plugin" }
+
+func (p *compactingPurposePlugin) Init(context.Context, plugin.PluginInput) (plugin.Hooks, error) {
+	return plugin.Hooks{
+		SessionCompacting: func(_ context.Context, input plugin.SessionCompactingInput, _ *plugin.SessionCompactingOutput) error {
+			p.purposes = append(p.purposes, input.Purpose)
+			return nil
+		},
+	}, nil
+}
+
+func (p *compactingPurposePlugin) Close(context.Context) error { return nil }
+
+func initCompactingPurposePlugin(t *testing.T, env fakeEnv) *compactingPurposePlugin {
+	tracker := &compactingPurposePlugin{}
+	plugin.Register(tracker)
+	err := plugin.Init(context.Background(), plugin.PluginInput{
+		Sessions:   env.sessions,
+		Messages:   env.messages,
+		WorkingDir: env.workingDir,
+	})
+	require.NoError(t, err)
+	return tracker
+}
+
 type autoSummarizeTestAgent struct {
 	t            *testing.T
 	runCalls     int
@@ -140,6 +169,7 @@ func TestRunPreflightAutoSummarizesBeforeRequest(t *testing.T) {
 	t.Cleanup(plugin.Reset)
 
 	env := testEnv(t)
+	purposeTracker := initCompactingPurposePlugin(t, env)
 	testSession, err := env.sessions.Create(t.Context(), "preflight summarize")
 	require.NoError(t, err)
 
@@ -161,6 +191,7 @@ func TestRunPreflightAutoSummarizesBeforeRequest(t *testing.T) {
 	require.NotNil(t, result)
 	require.Equal(t, 1, fakeAgent.summaryCalls)
 	require.Equal(t, 1, fakeAgent.runCalls)
+	require.Equal(t, []plugin.ChatTransformPurpose{plugin.ChatTransformPurposeProactiveCompact}, purposeTracker.purposes)
 
 	savedSession, err := env.sessions.Get(t.Context(), testSession.ID)
 	require.NoError(t, err)
@@ -168,7 +199,6 @@ func TestRunPreflightAutoSummarizesBeforeRequest(t *testing.T) {
 }
 
 func TestRunPreflightAutoSummarizesWhenLastInputTokensAlreadyNearThreshold(t *testing.T) {
-	t.Parallel()
 	plugin.Reset()
 	t.Cleanup(plugin.Reset)
 
@@ -277,11 +307,11 @@ func TestRunStepAutoSummarizeFallbackIgnoresOutputTokens(t *testing.T) {
 }
 
 func TestRunTransientRetryNearContextLimitSummarizesInsteadOfRetrying(t *testing.T) {
-	t.Parallel()
 	plugin.Reset()
 	t.Cleanup(plugin.Reset)
 
 	env := testEnv(t)
+	purposeTracker := initCompactingPurposePlugin(t, env)
 	testSession, err := env.sessions.Create(t.Context(), "retry summarize")
 	require.NoError(t, err)
 	createSeedHistoryMessage(t, env, testSession.ID)
@@ -317,6 +347,7 @@ func TestRunTransientRetryNearContextLimitSummarizesInsteadOfRetrying(t *testing
 	require.NotNil(t, result)
 	require.Equal(t, 2, fakeAgent.runCalls)
 	require.Equal(t, 1, fakeAgent.summaryCalls)
+	require.Equal(t, []plugin.ChatTransformPurpose{plugin.ChatTransformPurposeRecover}, purposeTracker.purposes)
 
 	savedSession, err := env.sessions.Get(t.Context(), testSession.ID)
 	require.NoError(t, err)
@@ -325,11 +356,11 @@ func TestRunTransientRetryNearContextLimitSummarizesInsteadOfRetrying(t *testing
 }
 
 func TestRunStreamingContextWindowErrorStringForcesSummarizeRecovery(t *testing.T) {
-	t.Parallel()
 	plugin.Reset()
 	t.Cleanup(plugin.Reset)
 
 	env := testEnv(t)
+	purposeTracker := initCompactingPurposePlugin(t, env)
 	testSession, err := env.sessions.Create(t.Context(), "streaming context-window recover")
 	require.NoError(t, err)
 
@@ -351,6 +382,7 @@ func TestRunStreamingContextWindowErrorStringForcesSummarizeRecovery(t *testing.
 	require.NotNil(t, result)
 	require.Equal(t, 2, fakeAgent.runCalls)
 	require.Equal(t, 1, fakeAgent.summaryCalls)
+	require.Equal(t, []plugin.ChatTransformPurpose{plugin.ChatTransformPurposeRecover}, purposeTracker.purposes)
 
 	savedSession, err := env.sessions.Get(t.Context(), testSession.ID)
 	require.NoError(t, err)
@@ -358,7 +390,6 @@ func TestRunStreamingContextWindowErrorStringForcesSummarizeRecovery(t *testing.
 }
 
 func TestRunStreamingContextWindowRecoveryOnlyOnce(t *testing.T) {
-	t.Parallel()
 	plugin.Reset()
 	t.Cleanup(plugin.Reset)
 
@@ -384,8 +415,47 @@ func TestRunStreamingContextWindowRecoveryOnlyOnce(t *testing.T) {
 	require.Equal(t, 1, fakeAgent.summaryCalls)
 }
 
+func TestRunNormalSummarizeUsesSummarizePurpose(t *testing.T) {
+	plugin.Reset()
+	t.Cleanup(plugin.Reset)
+
+	env := testEnv(t)
+	purposeTracker := initCompactingPurposePlugin(t, env)
+	testSession, err := env.sessions.Create(t.Context(), "normal summarize")
+	require.NoError(t, err)
+	createSeedHistoryMessage(t, env, testSession.ID)
+
+	fakeAgent := &autoSummarizeTestAgent{
+		t: t,
+		afterStep: func() {
+			_, createErr := env.messages.Create(t.Context(), testSession.ID, message.CreateMessageParams{
+				Role: message.Tool,
+				Parts: []message.ContentPart{
+					message.ToolResult{ToolCallID: "tc-1", Name: "view", Content: strings.Repeat("x", 30000)},
+				},
+			})
+			require.NoError(t, createErr)
+		},
+	}
+	sessionAgent := newAutoSummarizeTestSessionAgent(t, env, fakeAgent, env.messages, 10000)
+
+	result, err := sessionAgent.Run(t.Context(), SessionAgentCall{
+		Prompt:          "hello",
+		SessionID:       testSession.ID,
+		MaxOutputTokens: 1000,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 1, fakeAgent.runCalls)
+	require.Equal(t, 1, fakeAgent.summaryCalls)
+	require.Equal(t, []plugin.ChatTransformPurpose{plugin.ChatTransformPurposeSummarize}, purposeTracker.purposes)
+
+	savedSession, err := env.sessions.Get(t.Context(), testSession.ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, savedSession.SummaryMessageID)
+}
+
 func TestRunContextWindowErrorAfterCompletedStepDoesNotAutoResume(t *testing.T) {
-	t.Parallel()
 	plugin.Reset()
 	t.Cleanup(plugin.Reset)
 

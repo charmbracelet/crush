@@ -22,6 +22,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/timeline"
 	"github.com/charmbracelet/crush/internal/toolruntime"
 	"github.com/stretchr/testify/require"
 )
@@ -99,7 +100,11 @@ func (f *fakeSessionService) Save(_ context.Context, s session.Session) (session
 }
 
 func (f *fakeSessionService) UpdateCollaborationMode(_ context.Context, id string, mode session.CollaborationMode) (session.Session, error) {
-	return session.Session{ID: id}, nil
+	s := f.sessions[id]
+	s.ID = id
+	s.CollaborationMode = mode
+	f.sessions[id] = s
+	return s, nil
 }
 
 func (f *fakeSessionService) UpdatePermissionMode(_ context.Context, id string, mode session.PermissionMode) (session.Session, error) {
@@ -182,11 +187,50 @@ func (f *fakeMessageService) Delete(_ context.Context, _ string) error          
 func (f *fakeMessageService) DeleteSessionMessages(_ context.Context, _ string) error { return nil }
 
 type fakeCoordinator struct {
-	runResult *fantasy.AgentResult
-	runErr    error
+	runResult   *fantasy.AgentResult
+	runErr      error
+	sessionSvc  *fakeSessionService
+	messageSvc  *fakeMessageService
+	runtimeSvc  toolruntime.Service
+	timelineSvc timeline.Service
+	sessions    map[string]session.Session
 }
 
 func (f *fakeCoordinator) Run(_ context.Context, sessionID, prompt string, _ ...message.Attachment) (*fantasy.AgentResult, error) {
+	if strings.Contains(prompt, "spawn-agent-subsession") {
+		subSessionID := "sub-session-1"
+		if subSession, ok := f.sessions[subSessionID]; ok {
+			f.sessionSvc.Publish(pubsub.CreatedEvent, subSession)
+		}
+		f.messageSvc.Publish(pubsub.CreatedEvent, message.Message{
+			ID:        "sub-tool-result-1",
+			SessionID: subSessionID,
+			Role:      message.Tool,
+			Parts: []message.ContentPart{
+				message.ToolResult{
+					ToolCallID: "tool-agent-1",
+					Name:       "agent",
+					Content:    "sub-session tool result",
+				}.WithSubtaskResult(message.ToolResultSubtaskResult{
+					ChildSessionID:   subSessionID,
+					ParentToolCallID: "tool-agent-1",
+					Status:           message.ToolResultSubtaskStatusCompleted,
+				}),
+			},
+		})
+	}
+	if strings.Contains(prompt, "publish-runtime-complete") {
+		f.runtimeSvc.Publish(toolruntime.State{SessionID: sessionID, ToolCallID: "tool-fetch-1", ToolName: "fetch", Status: toolruntime.StatusCompleted})
+	}
+	if strings.Contains(prompt, "publish-timeline-events") && f.timelineSvc != nil {
+		f.timelineSvc.Publish(timeline.ModeChangedEvent(sessionID, session.ModeTransition{
+			Previous: session.ModeState{CollaborationMode: session.CollaborationModeDefault, PermissionMode: session.PermissionModeAuto},
+			Current:  session.ModeState{CollaborationMode: session.CollaborationModePlan, PermissionMode: session.PermissionModeYolo},
+		}))
+		f.timelineSvc.Publish(timeline.ChildSessionStartedEvent(sessionID, "child-1", "Child Session"))
+		f.timelineSvc.Publish(timeline.ChildSessionFinishedEvent(sessionID, "child-1", "Child Session", "completed", "done"))
+		f.timelineSvc.Publish(timeline.Event{SessionID: sessionID, Type: timeline.EventToolFinished, ToolCallID: "tool-1", ToolName: "bash", Title: "bash", Status: "completed"})
+	}
 	return f.runResult, f.runErr
 }
 func (f *fakeCoordinator) Cancel(_ string)                         {}
@@ -203,9 +247,11 @@ func (f *fakeCoordinator) IsQueuePaused(_ string) bool             { return fals
 func (f *fakeCoordinator) Summarize(_ context.Context, _ string, _ fantasy.ProviderOptions) error {
 	return nil
 }
+
 func (f *fakeCoordinator) GenerateHandoff(_ context.Context, _ string, _ string) (agent.HandoffDraft, error) {
 	return agent.HandoffDraft{}, nil
 }
+
 func (f *fakeCoordinator) ClassifyPermission(_ context.Context, _ permission.PermissionRequest) (permission.AutoClassification, error) {
 	return permission.AutoClassification{}, nil
 }
@@ -224,6 +270,7 @@ type fakeApp struct {
 	permissions permission.Service
 	cfg         *config.ConfigStore
 	runtime     toolruntime.Service
+	timeline    timeline.Service
 }
 
 func (a *fakeApp) GetSessions() session.Service      { return a.sessions }
@@ -236,11 +283,41 @@ func (a *fakeApp) GetPermissions() permission.Service {
 	}
 	return a.permissions
 }
+
 func (a *fakeApp) GetToolRuntime() toolruntime.Service {
 	if a.runtime == nil {
 		a.runtime = toolruntime.NewService()
 	}
 	return a.runtime
+}
+
+func (a *fakeApp) GetTimeline() timeline.Service {
+	if a.timeline == nil {
+		a.timeline = timeline.NewService()
+	}
+	return a.timeline
+}
+
+func newFakeApp() *fakeApp {
+	app := &fakeApp{
+		sessions: newFakeSessionService(),
+		messages: newFakeMessageService(),
+	}
+	app.coordinator = &fakeCoordinator{
+		runResult:   &fantasy.AgentResult{},
+		sessionSvc:  app.sessions,
+		messageSvc:  app.messages,
+		runtimeSvc:  app.GetToolRuntime(),
+		timelineSvc: app.GetTimeline(),
+		sessions:    app.sessions.sessions,
+	}
+	return app
+}
+
+func newFakeAppWithConfig(cfg *config.ConfigStore) *fakeApp {
+	app := newFakeApp()
+	app.cfg = cfg
+	return app
 }
 
 func TestSessionListIncludesCWD(t *testing.T) {
@@ -249,11 +326,7 @@ func TestSessionListIncludesCWD(t *testing.T) {
 	cwd := "/tmp/project"
 	reqLine := buildRequest(t, 1, "session/list", acp.SessionListParams{CWD: cwd})
 
-	app := &fakeApp{
-		sessions:    newFakeSessionService(),
-		messages:    newFakeMessageService(),
-		coordinator: &fakeCoordinator{runResult: &fantasy.AgentResult{}},
-	}
+	app := newFakeApp()
 	app.sessions.sessions["sess-1"] = session.Session{ID: "sess-1", Title: "test"}
 
 	resp := runSingleRequest(t, app, reqLine)
@@ -276,11 +349,7 @@ func TestSessionListPrefersPersistedCWD(t *testing.T) {
 
 	reqLine := buildRequest(t, 1, "session/list", acp.SessionListParams{CWD: "/fallback"})
 
-	app := &fakeApp{
-		sessions:    newFakeSessionService(),
-		messages:    newFakeMessageService(),
-		coordinator: &fakeCoordinator{runResult: &fantasy.AgentResult{}},
-	}
+	app := newFakeApp()
 	savedCWD, err := filepath.Abs(filepath.FromSlash("/persisted/workspace"))
 	require.NoError(t, err)
 	app.sessions.sessions["sess-1"] = session.Session{ID: "sess-1", Title: "test", WorkspaceCWD: savedCWD}
@@ -357,11 +426,7 @@ func TestInitialize(t *testing.T) {
 		ClientInfo:      acp.ClientInfo{Name: "test-client", Version: "1.0"},
 	})
 
-	app := &fakeApp{
-		sessions:    newFakeSessionService(),
-		messages:    newFakeMessageService(),
-		coordinator: &fakeCoordinator{runResult: &fantasy.AgentResult{}},
-	}
+	app := newFakeApp()
 
 	resp := runSingleRequest(t, app, reqLine)
 
@@ -380,11 +445,7 @@ func TestSessionNew(t *testing.T) {
 
 	reqLine := buildRequest(t, 1, "session/new", acp.SessionNewParams{CWD: "/tmp"})
 
-	app := &fakeApp{
-		sessions:    newFakeSessionService(),
-		messages:    newFakeMessageService(),
-		coordinator: &fakeCoordinator{runResult: &fantasy.AgentResult{}},
-	}
+	app := newFakeApp()
 
 	resp := runSingleRequest(t, app, reqLine)
 
@@ -404,11 +465,7 @@ func TestSessionPrompt(t *testing.T) {
 
 	sessionID := "test-sess-123"
 
-	app := &fakeApp{
-		sessions:    newFakeSessionService(),
-		messages:    newFakeMessageService(),
-		coordinator: &fakeCoordinator{runResult: &fantasy.AgentResult{}},
-	}
+	app := newFakeApp()
 	app.sessions.sessions[sessionID] = session.Session{ID: sessionID, Title: "test"}
 
 	handler := acp.NewHandler(app)
@@ -451,11 +508,7 @@ func TestSessionLoadReplaysHistoryBeforeResponse(t *testing.T) {
 
 	sessionID := "test-load-sess"
 
-	app := &fakeApp{
-		sessions:    newFakeSessionService(),
-		messages:    newFakeMessageService(),
-		coordinator: &fakeCoordinator{runResult: &fantasy.AgentResult{}},
-	}
+	app := newFakeApp()
 	app.sessions.sessions[sessionID] = session.Session{ID: sessionID, Title: "loaded-session"}
 	app.messages.lists[sessionID] = []message.Message{
 		{
@@ -521,11 +574,7 @@ func TestSessionLoadPersistsCWD(t *testing.T) {
 		CWD:       "/tmp/acp-workspace",
 	})
 
-	app := &fakeApp{
-		sessions:    newFakeSessionService(),
-		messages:    newFakeMessageService(),
-		coordinator: &fakeCoordinator{runResult: &fantasy.AgentResult{}},
-	}
+	app := newFakeApp()
 	app.sessions.sessions[sessionID] = session.Session{ID: sessionID, Title: "loaded-session"}
 
 	resp := runSingleRequest(t, app, reqLine)
@@ -545,11 +594,7 @@ func TestSessionLoadNotFound(t *testing.T) {
 		SessionID: "nonexistent-session",
 	})
 
-	app := &fakeApp{
-		sessions:    newFakeSessionService(),
-		messages:    newFakeMessageService(),
-		coordinator: &fakeCoordinator{runResult: &fantasy.AgentResult{}},
-	}
+	app := newFakeApp()
 
 	resp := runSingleRequest(t, app, reqLine)
 
@@ -564,11 +609,7 @@ func TestUnknownMethod(t *testing.T) {
 
 	reqLine := buildRequest(t, 1, "unknown/method", nil)
 
-	app := &fakeApp{
-		sessions:    newFakeSessionService(),
-		messages:    newFakeMessageService(),
-		coordinator: &fakeCoordinator{runResult: &fantasy.AgentResult{}},
-	}
+	app := newFakeApp()
 
 	resp := runSingleRequest(t, app, reqLine)
 
@@ -585,11 +626,7 @@ func TestSetConfigOptionMethodIsRouted(t *testing.T) {
 		Value:     "bad-format",
 	})
 
-	app := &fakeApp{
-		sessions:    newFakeSessionService(),
-		messages:    newFakeMessageService(),
-		coordinator: &fakeCoordinator{runResult: &fantasy.AgentResult{}},
-	}
+	app := newFakeApp()
 
 	resp := runSingleRequest(t, app, reqLine)
 
@@ -607,11 +644,7 @@ func TestSessionSetModePersistsPermissionMode(t *testing.T) {
 		ModeID:    "yolo",
 	})
 
-	app := &fakeApp{
-		sessions:    newFakeSessionService(),
-		messages:    newFakeMessageService(),
-		coordinator: &fakeCoordinator{runResult: &fantasy.AgentResult{}},
-	}
+	app := newFakeApp()
 	app.sessions.sessions[sessionID] = session.Session{
 		ID:             sessionID,
 		Title:          "mode-test",
@@ -634,11 +667,7 @@ func TestSessionSetModeAutoExitCreatesReminder(t *testing.T) {
 		ModeID:    "default",
 	})
 
-	app := &fakeApp{
-		sessions:    newFakeSessionService(),
-		messages:    newFakeMessageService(),
-		coordinator: &fakeCoordinator{runResult: &fantasy.AgentResult{}},
-	}
+	app := newFakeApp()
 	app.sessions.sessions[sessionID] = session.Session{
 		ID:             sessionID,
 		Title:          "mode-test",
@@ -686,12 +715,7 @@ func TestSessionSetConfigOptionModePersistsPermissionMode(t *testing.T) {
 		Value:     "auto",
 	})
 
-	app := &fakeApp{
-		sessions:    newFakeSessionService(),
-		messages:    newFakeMessageService(),
-		coordinator: &fakeCoordinator{runResult: &fantasy.AgentResult{}},
-		cfg:         store,
-	}
+	app := newFakeAppWithConfig(store)
 	app.sessions.sessions[sessionID] = session.Session{
 		ID:             sessionID,
 		Title:          "config-mode-test",
@@ -733,12 +757,7 @@ func TestSessionSetConfigOptionModeAutoExitCreatesReminder(t *testing.T) {
 		Value:     "default",
 	})
 
-	app := &fakeApp{
-		sessions:    newFakeSessionService(),
-		messages:    newFakeMessageService(),
-		coordinator: &fakeCoordinator{runResult: &fantasy.AgentResult{}},
-		cfg:         store,
-	}
+	app := newFakeAppWithConfig(store)
 	app.sessions.sessions[sessionID] = session.Session{
 		ID:             sessionID,
 		Title:          "config-mode-test",
@@ -759,4 +778,189 @@ func TestSessionSetConfigOptionModeAutoExitCreatesReminder(t *testing.T) {
 	promptType, ok := message.ParseAutoModePrompt(msg)
 	require.True(t, ok)
 	require.Equal(t, message.AutoModePromptTypeExit, promptType)
+}
+
+func TestSessionPrompt_ForwardsChildSessionToolUpdates(t *testing.T) {
+	t.Parallel()
+
+	inReader, inWriter := io.Pipe()
+	outReader, outWriter := io.Pipe()
+
+	sessionID := "parent-session"
+	subSessionID := "sub-session-1"
+
+	app := newFakeApp()
+	app.sessions.sessions[sessionID] = session.Session{ID: sessionID, Title: "parent"}
+	app.sessions.sessions[subSessionID] = session.Session{ID: subSessionID, ParentSessionID: sessionID, Title: "child"}
+
+	handler := acp.NewHandler(app)
+	server := acp.NewServerWithIO(handler, inReader, outWriter)
+	handler.SetServer(server)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	defer inWriter.Close()
+
+	go func() { _ = server.Serve(ctx) }()
+
+	outScanner := bufio.NewScanner(outReader)
+
+	_, err := fmt.Fprint(inWriter, buildRequest(t, 1, "session/prompt", acp.PromptParams{
+		SessionID: sessionID,
+		Prompt:    []acp.ContentBlock{{Type: "text", Text: "spawn-agent-subsession"}},
+	}))
+	require.NoError(t, err)
+
+	seenSubToolUpdate := false
+	for outScanner.Scan() {
+		line := outScanner.Bytes()
+		var envelope struct {
+			ID     *int64                        `json:"id"`
+			Method string                        `json:"method"`
+			Params acp.SessionUpdateNotification `json:"params"`
+		}
+		require.NoError(t, json.Unmarshal(line, &envelope))
+		if envelope.ID != nil {
+			require.EqualValues(t, 1, *envelope.ID)
+			break
+		}
+		if envelope.Method != "session/update" {
+			continue
+		}
+		if envelope.Params.Update.SessionUpdate == acp.SessionUpdateToolCallUpdate && envelope.Params.Update.ToolCallID == "tool-agent-1" {
+			seenSubToolUpdate = true
+			require.Equal(t, sessionID, envelope.Params.SessionID)
+			require.Equal(t, "agent", envelope.Params.Update.Title)
+			require.Equal(t, subSessionID, envelope.Params.Update.ChildSessionID)
+			require.Equal(t, "tool-agent-1", envelope.Params.Update.ParentToolCallID)
+			require.NotNil(t, envelope.Params.Update.SubtaskResult)
+			require.Equal(t, "completed", envelope.Params.Update.SubtaskResult.Status)
+		}
+	}
+	require.True(t, seenSubToolUpdate)
+}
+
+func TestSessionPrompt_ForwardsNonBashRuntimeCompletion(t *testing.T) {
+	t.Parallel()
+
+	inReader, inWriter := io.Pipe()
+	outReader, outWriter := io.Pipe()
+
+	sessionID := "runtime-session"
+
+	app := newFakeApp()
+	app.sessions.sessions[sessionID] = session.Session{ID: sessionID, Title: "runtime"}
+
+	handler := acp.NewHandler(app)
+	server := acp.NewServerWithIO(handler, inReader, outWriter)
+	handler.SetServer(server)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	defer inWriter.Close()
+
+	go func() { _ = server.Serve(ctx) }()
+
+	outScanner := bufio.NewScanner(outReader)
+
+	_, err := fmt.Fprint(inWriter, buildRequest(t, 1, "session/prompt", acp.PromptParams{
+		SessionID: sessionID,
+		Prompt:    []acp.ContentBlock{{Type: "text", Text: "publish-runtime-complete"}},
+	}))
+	require.NoError(t, err)
+
+	seenRuntimeUpdate := false
+	for outScanner.Scan() {
+		line := outScanner.Bytes()
+		var envelope struct {
+			ID     *int64                        `json:"id"`
+			Method string                        `json:"method"`
+			Params acp.SessionUpdateNotification `json:"params"`
+		}
+		require.NoError(t, json.Unmarshal(line, &envelope))
+		if envelope.ID != nil {
+			require.EqualValues(t, 1, *envelope.ID)
+			break
+		}
+		if envelope.Method != "session/update" {
+			continue
+		}
+		update := envelope.Params.Update
+		if update.SessionUpdate == acp.SessionUpdateToolCallUpdate && update.ToolCallID == "tool-fetch-1" {
+			seenRuntimeUpdate = true
+			require.Equal(t, acp.ToolCallStatusCompleted, update.Status)
+			require.Equal(t, "fetch", update.Title)
+		}
+	}
+	require.True(t, seenRuntimeUpdate)
+}
+
+func TestSessionPrompt_ForwardsTimelineEvents(t *testing.T) {
+	t.Parallel()
+
+	inReader, inWriter := io.Pipe()
+	outReader, outWriter := io.Pipe()
+
+	sessionID := "timeline-session"
+
+	app := newFakeApp()
+	app.sessions.sessions[sessionID] = session.Session{ID: sessionID, Title: "timeline", PermissionMode: session.PermissionModeAuto}
+
+	handler := acp.NewHandler(app)
+	server := acp.NewServerWithIO(handler, inReader, outWriter)
+	handler.SetServer(server)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	defer inWriter.Close()
+
+	go func() { _ = server.Serve(ctx) }()
+
+	outScanner := bufio.NewScanner(outReader)
+	_, err := fmt.Fprint(inWriter, buildRequest(t, 1, "session/prompt", acp.PromptParams{
+		SessionID: sessionID,
+		Prompt:    []acp.ContentBlock{{Type: "text", Text: "publish-timeline-events"}},
+	}))
+	require.NoError(t, err)
+
+	seenMode := false
+	seenChildEvent := false
+	seenTimeline := false
+	for outScanner.Scan() {
+		line := outScanner.Bytes()
+		var envelope struct {
+			ID     *int64                        `json:"id"`
+			Method string                        `json:"method"`
+			Params acp.SessionUpdateNotification `json:"params"`
+		}
+		require.NoError(t, json.Unmarshal(line, &envelope))
+		if envelope.ID != nil {
+			require.EqualValues(t, 1, *envelope.ID)
+			break
+		}
+		if envelope.Method != "session/update" {
+			continue
+		}
+		update := envelope.Params.Update
+		if update.SessionUpdate != acp.SessionUpdateTimelineEvent || update.TimelineEvent == nil {
+			continue
+		}
+		seenTimeline = true
+		switch update.TimelineEvent.Type {
+		case "mode_changed":
+			seenMode = true
+			require.Equal(t, "plan", update.TimelineEvent.CollaborationMode)
+			require.Equal(t, "yolo", update.TimelineEvent.PermissionMode)
+		case "child_session_started":
+			seenChildEvent = true
+			require.Equal(t, "child-1", update.TimelineEvent.ChildSessionID)
+		case "child_session_finished":
+			seenChildEvent = true
+			require.Equal(t, "child-1", update.TimelineEvent.ChildSessionID)
+			require.Equal(t, "completed", update.TimelineEvent.Status)
+		}
+	}
+	require.True(t, seenTimeline)
+	require.True(t, seenMode)
+	require.True(t, seenChildEvent)
 }

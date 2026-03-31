@@ -600,9 +600,11 @@ type sessionShowPart struct {
 	Input      string `json:"input,omitempty"`
 
 	// Tool result
-	Content  string `json:"content,omitempty"`
-	IsError  bool   `json:"is_error,omitempty"`
-	MIMEType string `json:"mime_type,omitempty"`
+	Content       string                    `json:"content,omitempty"`
+	IsError       bool                      `json:"is_error,omitempty"`
+	MIMEType      string                    `json:"mime_type,omitempty"`
+	Metadata      string                    `json:"metadata,omitempty"`
+	SubtaskResult *sessionShowSubtaskResult `json:"subtask_result,omitempty"`
 
 	// Binary
 	Size int64 `json:"size,omitempty"`
@@ -614,6 +616,12 @@ type sessionShowPart struct {
 	// Finish
 	Reason string `json:"reason,omitempty"`
 	Time   int64  `json:"time,omitempty"`
+}
+
+type sessionShowSubtaskResult struct {
+	ChildSessionID   string `json:"child_session_id,omitempty"`
+	ParentToolCallID string `json:"parent_tool_call_id,omitempty"`
+	Status           string `json:"status,omitempty"`
 }
 
 func convertParts(parts []message.ContentPart) []sessionShowPart {
@@ -640,14 +648,23 @@ func convertParts(parts []message.ContentPart) []sessionShowPart {
 				Input:      p.Input,
 			})
 		case message.ToolResult:
-			result = append(result, sessionShowPart{
+			part := sessionShowPart{
 				Type:       "tool_result",
 				ToolCallID: p.ToolCallID,
 				Name:       p.Name,
 				Content:    p.Content,
 				IsError:    p.IsError,
 				MIMEType:   p.MIMEType,
-			})
+				Metadata:   p.Metadata,
+			}
+			if subtask, ok := p.SubtaskResult(); ok {
+				part.SubtaskResult = &sessionShowSubtaskResult{
+					ChildSessionID:   subtask.ChildSessionID,
+					ParentToolCallID: subtask.ParentToolCallID,
+					Status:           string(subtask.Status),
+				}
+			}
+			result = append(result, part)
 		case message.BinaryContent:
 			result = append(result, sessionShowPart{
 				Type:     "binary",

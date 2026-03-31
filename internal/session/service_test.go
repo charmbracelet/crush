@@ -139,6 +139,30 @@ func TestUpdatePermissionModePersistsAndNormalizes(t *testing.T) {
 	require.Equal(t, PermissionModeDefault, loaded.PermissionMode)
 }
 
+func TestUpdateModesNoopWhenStateUnchanged(t *testing.T) {
+	t.Parallel()
+
+	conn, err := db.Connect(context.Background(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = conn.Close()
+	})
+
+	q := db.New(conn)
+	svc := NewService(q, conn)
+
+	created, err := svc.Create(context.Background(), "Noop mode updates")
+	require.NoError(t, err)
+
+	updated, err := svc.UpdatePermissionMode(context.Background(), created.ID, PermissionModeAuto)
+	require.NoError(t, err)
+	require.Equal(t, created.PermissionMode, updated.PermissionMode)
+
+	updated, err = svc.UpdateCollaborationMode(context.Background(), created.ID, CollaborationModeDefault)
+	require.NoError(t, err)
+	require.Equal(t, created.CollaborationMode, updated.CollaborationMode)
+}
+
 func TestSavePersistsHandoffDraftUpdates(t *testing.T) {
 	t.Parallel()
 
@@ -201,4 +225,73 @@ func TestListReturnsTopLevelHandoffSessions(t *testing.T) {
 		}
 	}
 	require.True(t, handoffFound)
+}
+
+func TestCreateTaskSessionInheritsParentModes(t *testing.T) {
+	t.Parallel()
+
+	conn, err := db.Connect(context.Background(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = conn.Close()
+	})
+
+	q := db.New(conn)
+	svc := NewService(q, conn)
+
+	parent, err := svc.Create(context.Background(), "Parent")
+	require.NoError(t, err)
+	_, err = svc.UpdateCollaborationMode(context.Background(), parent.ID, CollaborationModePlan)
+	require.NoError(t, err)
+	_, err = svc.UpdatePermissionMode(context.Background(), parent.ID, PermissionModeYolo)
+	require.NoError(t, err)
+
+	child, err := svc.CreateTaskSession(context.Background(), "tool-1", parent.ID, "Child")
+	require.NoError(t, err)
+	require.Equal(t, parent.ID, child.ParentSessionID)
+	require.Equal(t, CollaborationModePlan, child.CollaborationMode)
+	require.Equal(t, PermissionModeYolo, child.PermissionMode)
+}
+
+func TestDeleteTriggersDeleteCallbackAfterSuccessfulDelete(t *testing.T) {
+	t.Parallel()
+
+	conn, err := db.Connect(context.Background(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = conn.Close()
+	})
+
+	q := db.New(conn)
+	deletedSessionIDs := make([]string, 0, 1)
+	svc := NewServiceWithDeleteCallback(q, conn, func(sessionID string) {
+		deletedSessionIDs = append(deletedSessionIDs, sessionID)
+	})
+
+	created, err := svc.Create(context.Background(), "Delete callback")
+	require.NoError(t, err)
+
+	err = svc.Delete(context.Background(), created.ID)
+	require.NoError(t, err)
+	require.Equal(t, []string{created.ID}, deletedSessionIDs)
+}
+
+func TestDeleteDoesNotTriggerDeleteCallbackWhenDeleteFails(t *testing.T) {
+	t.Parallel()
+
+	conn, err := db.Connect(context.Background(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = conn.Close()
+	})
+
+	q := db.New(conn)
+	called := false
+	svc := NewServiceWithDeleteCallback(q, conn, func(string) {
+		called = true
+	})
+
+	err = svc.Delete(context.Background(), "missing-session")
+	require.Error(t, err)
+	require.False(t, called)
 }

@@ -36,6 +36,7 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
+	"github.com/charmbracelet/crush/internal/timeline"
 	"github.com/charmbracelet/crush/internal/toolruntime"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -62,6 +63,7 @@ type App struct {
 	Permissions permission.Service
 	FileTracker filetracker.Service
 	ToolRuntime toolruntime.Service
+	Timeline    timeline.Service
 
 	AgentCoordinator agent.Coordinator
 
@@ -84,7 +86,9 @@ type App struct {
 func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, error) {
 	q := db.New(conn)
 	cfg := store.Config()
-	sessions := session.NewService(q, conn, session.CollaborationModeDefault)
+	runtimeService := toolruntime.NewService()
+	timelineService := timeline.NewService()
+	sessions := session.NewServiceWithDeleteCallback(q, conn, runtimeService.DeleteSession, session.CollaborationModeDefault)
 	preferredPermissionMode := session.NormalizePermissionMode(cfg.Options.PreferredPermissionMode)
 	if skip := cfg.Permissions != nil && cfg.Permissions.SkipRequests; skip {
 		preferredPermissionMode = session.PermissionModeYolo
@@ -116,7 +120,8 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 			return classifier
 		}, store.WorkingDir(), cfg.Permissions != nil && cfg.Permissions.FailClosedOnClassifierError, allowedTools),
 		FileTracker: filetracker.NewService(q),
-		ToolRuntime: toolruntime.NewService(),
+		ToolRuntime: runtimeService,
+		Timeline:    timelineService,
 		LSPManager:  lsp.NewManager(store),
 
 		globalCtx: ctx,
@@ -148,7 +153,9 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 	// cleanup database upon app shutdown
 	app.cleanupFuncs = append(
 		app.cleanupFuncs,
-		func(context.Context) error { return conn.Close() },
+		func(context.Context) error {
+			return conn.Close()
+		},
 		func(ctx context.Context) error { return mcp.Close(ctx) },
 	)
 
@@ -212,6 +219,10 @@ func (app *App) GetPermissions() permission.Service {
 
 func (app *App) GetToolRuntime() toolruntime.Service {
 	return app.ToolRuntime
+}
+
+func (app *App) GetTimeline() timeline.Service {
+	return app.Timeline
 }
 
 // resolveSession resolves which session to use for a non-interactive run.
@@ -519,6 +530,7 @@ func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
 func (app *App) setupEvents() {
 	ctx, cancel := context.WithCancel(app.globalCtx)
 	app.eventsCtx = ctx
+	app.setupTimeline(ctx)
 	setupSubscriber(ctx, app.serviceEventsWG, "sessions", app.Sessions.Subscribe, app.events)
 	setupMessageSubscriber(ctx, app.serviceEventsWG, app.Messages.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "user-input", app.UserInput.Subscribe, app.events)
@@ -527,10 +539,14 @@ func (app *App) setupEvents() {
 	setupSubscriber(ctx, app.serviceEventsWG, "history", app.History.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "agent-notifications", app.agentNotifications.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "tool-runtime", app.ToolRuntime.Subscribe, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "timeline", app.Timeline.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "mcp", mcp.SubscribeEvents, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "lsp", SubscribeLSPEvents, app.events)
 	cleanupFunc := func(context.Context) error {
 		cancel()
+		if app.Timeline != nil {
+			app.Timeline.Shutdown()
+		}
 		app.serviceEventsWG.Wait()
 		return nil
 	}
@@ -651,6 +667,7 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.LSPManager,
 		app.agentNotifications,
 		app.ToolRuntime,
+		app.Timeline,
 	)
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)

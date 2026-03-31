@@ -43,11 +43,17 @@ crush acp --cwd /path/to/project
 			return nil
 		}
 
-		// Wait for MCP servers to initialise before accepting prompts.
-		if err := mcp.WaitForInit(ctx); err != nil {
-			slog.Warn("ACP: MCP initialization failed", "err", err)
-		}
-		appInstance.AgentCoordinator.UpdateModels(ctx)
+		// Do not block ACP handshake on MCP startup; editors may time out.
+		// Refresh models once MCP initialization finishes so MCP tools are picked up.
+		go func() {
+			if err := mcp.WaitForInit(ctx); err != nil {
+				slog.Warn("ACP: MCP initialization failed", "err", err)
+				return
+			}
+			if err := appInstance.AgentCoordinator.UpdateModels(ctx); err != nil {
+				slog.Warn("ACP: failed to refresh models after MCP initialization", "err", err)
+			}
+		}()
 
 		adapter := acp.NewAppAdapter(
 			appInstance.Sessions,
@@ -55,6 +61,7 @@ crush acp --cwd /path/to/project
 			appInstance.AgentCoordinator,
 			appInstance.Permissions,
 			appInstance.ToolRuntime,
+			appInstance.Timeline,
 			appInstance.Store(),
 		)
 

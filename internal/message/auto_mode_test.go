@@ -176,3 +176,26 @@ func TestWithAutoReview_InvalidMetadataFallsBackToReviewPayload(t *testing.T) {
 	require.True(t, parsed.Sanitized)
 	require.Equal(t, "x", parsed.Reason)
 }
+
+func TestToolResultSubtaskResultRoundTripUsesStructuredMetadata(t *testing.T) {
+	t.Parallel()
+
+	result := ToolResult{
+		Metadata: `{"existing":"value"}`,
+	}.WithSubtaskResult(ToolResultSubtaskResult{
+		ChildSessionID:   "child-1",
+		ParentToolCallID: "call-1",
+		Status:           ToolResultSubtaskStatusCompleted,
+	})
+
+	require.Contains(t, result.Metadata, `"existing":"value"`)
+	require.Contains(t, result.Metadata, `"subtask_result":`)
+
+	parsed, ok := result.SubtaskResult()
+	require.True(t, ok)
+	require.Equal(t, ToolResultSubtaskResult{
+		ChildSessionID:   "child-1",
+		ParentToolCallID: "call-1",
+		Status:           ToolResultSubtaskStatusCompleted,
+	}, parsed)
+}

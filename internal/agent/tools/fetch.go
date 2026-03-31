@@ -63,7 +63,7 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 			// Use session-specific working directory from context if available.
 			effectiveWorkingDir := cmp.Or(GetWorkingDirFromContext(ctx), workingDir)
 
-			p, err := permissions.Request(ctx,
+			permissionResponse, err := RequestPermission(ctx, permissions,
 				permission.CreatePermissionRequest{
 					SessionID:   sessionID,
 					Path:        effectiveWorkingDir,
@@ -77,8 +77,8 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 			if err != nil {
 				return fantasy.ToolResponse{}, err
 			}
-			if !p {
-				return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
+			if permissionResponse != nil {
+				return *permissionResponse, nil
 			}
 
 			// maxFetchTimeoutSeconds is the maximum allowed timeout for fetch requests (2 minutes)

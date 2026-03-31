@@ -99,32 +99,34 @@ func (m *UI) modeInfo(width int) string {
 
 // getDynamicHeightLimits will give us the num of items to show in each section based on the hight
 // some items are more important than others.
-func getDynamicHeightLimits(availableHeight int) (maxFiles, maxLSPs, maxMCPs int) {
+func getDynamicHeightLimits(availableHeight int) (maxFiles, maxLSPs, maxMCPs, maxTimeline int) {
 	const (
 		minItemsPerSection      = 2
 		defaultMaxFilesShown    = 10
 		defaultMaxLSPsShown     = 8
 		defaultMaxMCPsShown     = 8
-		minAvailableHeightLimit = 10
+		defaultMaxTimelineShown = 6
+		minAvailableHeightLimit = 12
 	)
 
-	// If we have very little space, use minimum values
+	// If we have very little space, use minimum values.
 	if availableHeight < minAvailableHeightLimit {
-		return minItemsPerSection, minItemsPerSection, minItemsPerSection
+		return minItemsPerSection, minItemsPerSection, minItemsPerSection, minItemsPerSection
 	}
 
-	// Distribute available height among the three sections
-	// Give priority to files, then LSPs, then MCPs
-	totalSections := 3
+	// Distribute available height among the four sections.
+	// Give priority to files, then LSPs, MCPs, and timeline.
+	totalSections := 4
 	heightPerSection := availableHeight / totalSections
 
-	// Calculate limits for each section, ensuring minimums
+	// Calculate limits for each section, ensuring minimums.
 	maxFiles = max(minItemsPerSection, min(defaultMaxFilesShown, heightPerSection))
 	maxLSPs = max(minItemsPerSection, min(defaultMaxLSPsShown, heightPerSection))
 	maxMCPs = max(minItemsPerSection, min(defaultMaxMCPsShown, heightPerSection))
+	maxTimeline = max(minItemsPerSection, min(defaultMaxTimelineShown, heightPerSection))
 
-	// If we have extra space, give it to files first
-	remainingHeight := availableHeight - (maxFiles + maxLSPs + maxMCPs)
+	// If we have extra space, give it to files first.
+	remainingHeight := availableHeight - (maxFiles + maxLSPs + maxMCPs + maxTimeline)
 	if remainingHeight > 0 {
 		extraForFiles := min(remainingHeight, defaultMaxFilesShown-maxFiles)
 		maxFiles += extraForFiles
@@ -136,12 +138,18 @@ func getDynamicHeightLimits(availableHeight int) (maxFiles, maxLSPs, maxMCPs int
 			remainingHeight -= extraForLSPs
 
 			if remainingHeight > 0 {
-				maxMCPs += min(remainingHeight, defaultMaxMCPsShown-maxMCPs)
+				extraForMCPs := min(remainingHeight, defaultMaxMCPsShown-maxMCPs)
+				maxMCPs += extraForMCPs
+				remainingHeight -= extraForMCPs
+
+				if remainingHeight > 0 {
+					maxTimeline += min(remainingHeight, defaultMaxTimelineShown-maxTimeline)
+				}
 			}
 		}
 	}
 
-	return maxFiles, maxLSPs, maxMCPs
+	return maxFiles, maxLSPs, maxMCPs, maxTimeline
 }
 
 // sidebar renders the chat sidebar containing session title, working
@@ -179,12 +187,13 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	)
 
 	_, remainingHeightArea := layout.SplitVertical(m.layout.sidebar, layout.Fixed(lipgloss.Height(sidebarHeader)))
-	remainingHeight := remainingHeightArea.Dy() - 10
-	maxFiles, maxLSPs, maxMCPs := getDynamicHeightLimits(remainingHeight)
+	remainingHeight := remainingHeightArea.Dy() - 12
+	maxFiles, maxLSPs, maxMCPs, maxTimeline := getDynamicHeightLimits(remainingHeight)
 
 	lspSection := m.lspInfo(width, maxLSPs, true)
 	mcpSection := m.mcpInfo(width, maxMCPs, true)
 	filesSection := m.filesInfo(m.com.Store().WorkingDir(), width, maxFiles, true)
+	timelineSection := m.timelineInfo(width, maxTimeline, true)
 
 	uv.NewStyledString(
 		lipgloss.NewStyle().
@@ -199,6 +208,8 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 					lspSection,
 					"",
 					mcpSection,
+					"",
+					timelineSection,
 				),
 			),
 	).Draw(scr, area)

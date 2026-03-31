@@ -9,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/timeline"
 	"github.com/stretchr/testify/require"
 )
 
@@ -114,7 +115,7 @@ func (m *mockSessionService) IsAgentToolSession(sessionID string) bool {
 }
 
 func newTestApp(sessions session.Service) *App {
-	return &App{Sessions: sessions}
+	return &App{Sessions: sessions, Timeline: timeline.NewService()}
 }
 
 func TestResolveSession_NewSession(t *testing.T) {

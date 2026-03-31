@@ -43,6 +43,7 @@ import (
 	"github.com/charmbracelet/crush/internal/planmode"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/timeline"
 	"github.com/charmbracelet/crush/internal/toolruntime"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
@@ -177,6 +178,7 @@ type UI struct {
 	// childSessionInfoCache caches child session metadata to avoid
 	// DB I/O in the render path.
 	childSessionInfoCache map[string]childSessionInfo
+	timelineEvents        []timeline.Event
 
 	// keeps track of read files while we don't have a session id
 	sessionFileReads []string
@@ -541,6 +543,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.session = msg.session
 		m.sessionFiles = msg.files
 		m.childSessionInfoCache = msg.childSessionInfo
+		m.timelineEvents = nil
+		if m.com != nil && m.com.App != nil && m.com.App.GetTimeline() != nil && m.session != nil {
+			m.timelineEvents = m.com.App.GetTimeline().ListBySession(m.session.ID)
+		}
 		m.syncPromptQueue()
 		cmds = append(cmds, m.startLSPs(msg.lspFilePaths()))
 		if cmd := m.setSessionMessages(msg.messages); cmd != nil {
@@ -698,6 +704,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.renderPills()
 	case pubsub.Event[toolruntime.State]:
 		if cmd := m.handleToolRuntimeEvent(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case pubsub.Event[timeline.Event]:
+		if cmd := m.handleTimelineEvent(msg); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case pubsub.Event[history.File]:
@@ -2283,18 +2293,18 @@ func (m *UI) setExecutionMode(mode executionMode) tea.Cmd {
 	}
 	m.setEditorPrompt(preferredMode == session.PermissionModeYolo)
 
-	previousMode := session.PermissionModeDefault
+	var transition session.ModeTransition
 	sessionID := ""
 	if m.session != nil {
 		sessionID = m.session.ID
-		previousMode = m.session.PermissionMode
+		transition = session.NewPermissionModeTransition(*m.session, preferredMode)
 	}
 
 	if cfg := m.com.Config(); cfg != nil && cfg.Options != nil {
 		cfg.Options.PreferredPermissionMode = string(preferredMode)
 	}
 	if m.session != nil {
-		m.session.PermissionMode = preferredMode
+		m.session.PermissionMode = transition.Current.PermissionMode
 	}
 	m.refreshEditorPlaceholder()
 
@@ -2312,10 +2322,10 @@ func (m *UI) setExecutionMode(mode executionMode) tea.Cmd {
 			if preferredMode == session.PermissionModeAuto {
 				m.com.App.Permissions.ClearPersistentPermissions(sessionID)
 			}
-			if _, err := m.com.App.Sessions.UpdatePermissionMode(context.Background(), sessionID, preferredMode); err != nil {
+			if _, err := m.com.App.Sessions.UpdatePermissionMode(context.Background(), sessionID, transition.Current.PermissionMode); err != nil {
 				return util.ReportError(err)()
 			}
-			if previousMode == session.PermissionModeAuto && preferredMode != session.PermissionModeAuto {
+			if transition.ExitedAutoMode() {
 				if _, err := m.com.App.Messages.Create(context.Background(), sessionID, message.NewAutoModePromptMessage(message.AutoModePromptTypeExit)); err != nil {
 					return util.ReportError(err)()
 				}
@@ -4623,13 +4633,15 @@ func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
 	remainingHeight := height - lipgloss.Height(detailsHeader) - lipgloss.Height(version)
 
 	const maxSectionWidth = 50
-	sectionWidth := min(maxSectionWidth, width/3-2) // account for 2 spaces
+	sectionWidth := min(maxSectionWidth, width/2-1) // account for 1 space
 	maxItemsPerSection := remainingHeight - 3       // Account for section title and spacing
 
+	filesSection := m.filesInfo(m.com.Store().WorkingDir(), sectionWidth, maxItemsPerSection, false)
 	lspSection := m.lspInfo(sectionWidth, maxItemsPerSection, false)
 	mcpSection := m.mcpInfo(sectionWidth, maxItemsPerSection, false)
-	filesSection := m.filesInfo(m.com.Store().WorkingDir(), sectionWidth, maxItemsPerSection, false)
-	sections := lipgloss.JoinHorizontal(lipgloss.Top, filesSection, " ", lspSection, " ", mcpSection)
+	timelineSection := m.timelineInfo(sectionWidth, maxItemsPerSection, false)
+	upperSections := lipgloss.JoinHorizontal(lipgloss.Top, filesSection, " ", lspSection)
+	lowerSections := lipgloss.JoinHorizontal(lipgloss.Top, mcpSection, " ", timelineSection)
 	uv.NewStyledString(
 		s.CompactDetails.View.
 			Width(area.Dx()).
@@ -4637,7 +4649,9 @@ func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
 				lipgloss.JoinVertical(
 					lipgloss.Left,
 					detailsHeader,
-					sections,
+					upperSections,
+					"",
+					lowerSections,
 					version,
 				),
 			),

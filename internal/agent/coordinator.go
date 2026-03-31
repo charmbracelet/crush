@@ -34,6 +34,7 @@ import (
 	"github.com/charmbracelet/crush/internal/plugin"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/timeline"
 	"github.com/charmbracelet/crush/internal/toolruntime"
 	"github.com/charmbracelet/crush/internal/userinput"
 	"golang.org/x/sync/errgroup"
@@ -101,6 +102,7 @@ type coordinator struct {
 	lspManager  *lsp.Manager
 	notify      pubsub.Publisher[notify.Notification]
 	toolRuntime toolruntime.Service
+	timeline    timeline.Service
 	hookManager *hooks.Manager
 
 	currentAgent SessionAgent
@@ -121,6 +123,7 @@ func NewCoordinator(
 	lspManager *lsp.Manager,
 	notify pubsub.Publisher[notify.Notification],
 	toolRuntime toolruntime.Service,
+	timeline timeline.Service,
 ) (Coordinator, error) {
 	hookMgr, err := hooks.NewManager(cfg.Config().Hooks)
 	if err != nil {
@@ -141,6 +144,7 @@ func NewCoordinator(
 		lspManager:  lspManager,
 		notify:      notify,
 		toolRuntime: toolRuntime,
+		timeline:    timeline,
 		hookManager: hookMgr,
 		agents:      make(map[string]SessionAgent),
 	}
@@ -1510,14 +1514,24 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	if parentSession.PermissionMode == session.PermissionModeAuto {
 		review, reviewErr := c.reviewHandoffText(ctx, parentSession, params.SessionTitle, params.Prompt)
 		if reviewErr != nil {
-			return fantasy.NewTextErrorResponse("Auto Mode blocked subagent delegation because the handoff review failed."), nil
+			return withSubtaskToolResponseMetadata(
+				fantasy.NewTextErrorResponse("Auto Mode blocked subagent delegation because the handoff review failed."),
+				params.ToolCallID,
+				"",
+				message.ToolResultSubtaskStatusFailed,
+			), nil
 		}
 		if !review.AllowAuto {
 			reason := strings.TrimSpace(review.Reason)
 			if reason == "" {
 				reason = "Auto Mode blocked subagent delegation."
 			}
-			return fantasy.NewTextErrorResponse(reason), nil
+			return withSubtaskToolResponseMetadata(
+				fantasy.NewTextErrorResponse(reason),
+				params.ToolCallID,
+				"",
+				message.ToolResultSubtaskStatusFailed,
+			), nil
 		}
 	}
 
@@ -1562,10 +1576,19 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	})
 	if err != nil {
 		slog.Error("Sub-agent run failed", "error", err, "session", subSession.ID, "prompt", params.Prompt)
+		content := c.subAgentErrorText(ctx, subSession.ID, err)
+		if c.timeline != nil {
+			c.timeline.Publish(timeline.ChildSessionFinishedEvent(params.SessionID, subSession.ID, params.SessionTitle, "failed", content))
+		}
 		if costErr := c.updateParentSessionCost(ctx, subSession.ID, params.SessionID); costErr != nil {
 			return fantasy.ToolResponse{}, costErr
 		}
-		return fantasy.NewTextErrorResponse(c.subAgentErrorText(ctx, subSession.ID, err)), nil
+		return withSubtaskToolResponseMetadata(
+			fantasy.NewTextErrorResponse(content),
+			params.ToolCallID,
+			subSession.ID,
+			message.ToolResultSubtaskStatusFailed,
+		), nil
 	}
 
 	if err := c.updateParentSessionCost(ctx, subSession.ID, params.SessionID); err != nil {
@@ -1580,18 +1603,45 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	if parentSession.PermissionMode == session.PermissionModeAuto {
 		review, reviewErr := c.reviewHandoffText(ctx, parentSession, params.SessionTitle, content)
 		if reviewErr != nil {
-			return fantasy.NewTextErrorResponse("Auto Mode blocked subagent handoff because the handoff review failed."), nil
+			return withSubtaskToolResponseMetadata(
+				fantasy.NewTextErrorResponse("Auto Mode blocked subagent handoff because the handoff review failed."),
+				params.ToolCallID,
+				subSession.ID,
+				message.ToolResultSubtaskStatusFailed,
+			), nil
 		}
 		if !review.AllowAuto {
 			reason := strings.TrimSpace(review.Reason)
 			if reason == "" {
 				reason = "Auto Mode blocked subagent handoff."
 			}
-			return fantasy.NewTextErrorResponse(reason), nil
+			return withSubtaskToolResponseMetadata(
+				fantasy.NewTextErrorResponse(reason),
+				params.ToolCallID,
+				subSession.ID,
+				message.ToolResultSubtaskStatusFailed,
+			), nil
 		}
 	}
+	if c.timeline != nil {
+		c.timeline.Publish(timeline.ChildSessionFinishedEvent(params.SessionID, subSession.ID, params.SessionTitle, "completed", content))
+	}
 
-	return fantasy.NewTextResponse(content), nil
+	return withSubtaskToolResponseMetadata(
+		fantasy.NewTextResponse(content),
+		params.ToolCallID,
+		subSession.ID,
+		message.ToolResultSubtaskStatusCompleted,
+	), nil
+}
+
+func withSubtaskToolResponseMetadata(response fantasy.ToolResponse, parentToolCallID, childSessionID string, status message.ToolResultSubtaskStatus) fantasy.ToolResponse {
+	response.Metadata = message.ToolResult{Metadata: response.Metadata}.WithSubtaskResult(message.ToolResultSubtaskResult{
+		ChildSessionID:   childSessionID,
+		ParentToolCallID: parentToolCallID,
+		Status:           status,
+	}).Metadata
+	return response
 }
 
 func (c *coordinator) subAgentErrorText(ctx context.Context, sessionID string, runErr error) string {

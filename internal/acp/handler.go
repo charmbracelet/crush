@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/timeline"
 	"github.com/charmbracelet/crush/internal/toolruntime"
 	"github.com/charmbracelet/crush/internal/version"
 )
@@ -49,6 +50,7 @@ type App interface {
 	GetConfig() *config.ConfigStore
 	GetPermissions() permission.Service
 	GetToolRuntime() toolruntime.Service
+	GetTimeline() timeline.Service
 }
 
 // NewHandler constructs a Handler backed by the given App.
@@ -204,18 +206,7 @@ func (h *Handler) replayHistory(ctx context.Context, sessionID string) {
 			}
 		case message.Tool:
 			for _, tr := range msg.ToolResults() {
-				status := ToolCallStatusCompleted
-				if tr.IsError {
-					status = ToolCallStatusFailed
-				}
-				h.sendUpdateWithContext(ctx, sessionID, SessionUpdate{
-					SessionUpdate: SessionUpdateToolCallUpdate,
-					ToolCallID:    tr.ToolCallID,
-					Title:         tr.Name,
-					Kind:          "tool",
-					Status:        status,
-					RawOutput:     tr,
-				})
+				h.sendUpdateWithContext(ctx, sessionID, h.sessionUpdateFromToolResult(tr))
 			}
 		case message.Assistant:
 			content := msg.Content().Text
@@ -264,6 +255,7 @@ func (h *Handler) handleSessionPrompt(ctx context.Context, req *Request) (any, *
 	msgSub := h.app.GetMessages().Subscribe(subCtx)
 	sessionSub := h.app.GetSessions().Subscribe(subCtx)
 	runtimeSub := h.app.GetToolRuntime().Subscribe(subCtx)
+	timelineSub := h.app.GetTimeline().Subscribe(subCtx)
 
 	// Wrap context with cancellation so session/cancel can stop the run.
 	runCtx, cancel := context.WithCancel(ctx)
@@ -290,6 +282,7 @@ func (h *Handler) handleSessionPrompt(ctx context.Context, req *Request) (any, *
 	// Track the last-known text length per message for streaming.
 	readBytes := make(map[string]int)
 	runtimeSnapshotHashes := make(map[string][32]byte)
+	trackedSessionIDs := map[string]struct{}{params.SessionID: {}}
 
 	// Run the agent in a goroutine and stream message events.
 	type runResult struct {
@@ -316,37 +309,82 @@ loop:
 					return nil, &RPCError{Code: CodeInternalError, Message: r.err.Error()}
 				}
 			}
-			// Drain any remaining message events before returning so that
+			// Drain any remaining subscription events before returning so that
 			// trailing stream chunks are not lost.
 			for {
+				drained := false
 				select {
 				case event := <-msgSub:
-					if event.Payload.SessionID == params.SessionID {
+					drained = true
+					if h.shouldForwardSessionEvent(subCtx, params.SessionID, event.Payload.SessionID, trackedSessionIDs) {
 						h.handleMessageEvent(params.SessionID, event.Payload, readBytes)
 					}
 				default:
+				}
+
+				select {
+				case event := <-sessionSub:
+					drained = true
+					if event.Payload.ID == params.SessionID {
+						h.handleSessionEvent(params.SessionID, event)
+						continue
+					}
+					if event.Payload.ParentSessionID == params.SessionID {
+						trackedSessionIDs[event.Payload.ID] = struct{}{}
+					}
+				default:
+				}
+
+				select {
+				case event := <-runtimeSub:
+					drained = true
+					if h.shouldForwardSessionEvent(subCtx, params.SessionID, event.Payload.SessionID, trackedSessionIDs) {
+						h.handleToolRuntimeEvent(params.SessionID, event, runtimeSnapshotHashes)
+					}
+				default:
+				}
+
+				select {
+				case event := <-timelineSub:
+					drained = true
+					if h.shouldForwardSessionEvent(subCtx, params.SessionID, event.Payload.SessionID, trackedSessionIDs) {
+						h.handleTimelineEvent(params.SessionID, event)
+					}
+				default:
+				}
+
+				if !drained {
 					break loop
 				}
 			}
 
 		case event := <-msgSub:
 			msg := event.Payload
-			if msg.SessionID != params.SessionID {
+			if !h.shouldForwardSessionEvent(subCtx, params.SessionID, msg.SessionID, trackedSessionIDs) {
 				continue
 			}
 			h.handleMessageEvent(params.SessionID, msg, readBytes)
 
 		case event := <-sessionSub:
-			if event.Payload.ID != params.SessionID {
+			if event.Payload.ID == params.SessionID {
+				h.handleSessionEvent(params.SessionID, event)
 				continue
 			}
-			h.handleSessionEvent(params.SessionID, event)
+			if event.Payload.ParentSessionID == params.SessionID {
+				trackedSessionIDs[event.Payload.ID] = struct{}{}
+			}
 
 		case event := <-runtimeSub:
-			if event.Payload.SessionID != params.SessionID {
+			if !h.shouldForwardSessionEvent(subCtx, params.SessionID, event.Payload.SessionID, trackedSessionIDs) {
 				continue
 			}
 			h.handleToolRuntimeEvent(params.SessionID, event, runtimeSnapshotHashes)
+
+		case event := <-timelineSub:
+			if !h.shouldForwardSessionEvent(subCtx, params.SessionID, event.Payload.SessionID, trackedSessionIDs) {
+				continue
+			}
+			h.handleTimelineEvent(params.SessionID, event)
 
 		case <-ctx.Done():
 			stopReason = StopReasonCancelled
@@ -421,18 +459,7 @@ func (h *Handler) handleMessageEvent(sessionID string, msg message.Message, read
 			key := msg.ID + ":tr:" + tr.ToolCallID
 			if _, seen := readBytes[key]; !seen {
 				readBytes[key] = 1
-				status := ToolCallStatusCompleted
-				if tr.IsError {
-					status = ToolCallStatusFailed
-				}
-				h.sendUpdate(sessionID, SessionUpdate{
-					SessionUpdate: SessionUpdateToolCallUpdate,
-					ToolCallID:    tr.ToolCallID,
-					Title:         tr.Name,
-					Kind:          "tool",
-					Status:        status,
-					RawOutput:     tr,
-				})
+				h.sendUpdate(sessionID, h.sessionUpdateFromToolResult(tr))
 			}
 		}
 	}
@@ -444,31 +471,51 @@ func (h *Handler) handleToolRuntimeEvent(sessionID string, event pubsub.Event[to
 	}
 
 	state := event.Payload
-	if state.ToolName != "bash" || state.Status != toolruntime.StatusRunning {
-		return
-	}
 	if background, _ := state.ClientMetadata["background"].(bool); background {
 		return
 	}
 
-	snapshot := strings.TrimSpace(state.SnapshotText)
-	if snapshot == "" {
+	if state.Status == toolruntime.StatusRunning {
+		snapshot := strings.TrimSpace(state.SnapshotText)
+		if snapshot == "" {
+			return
+		}
+
+		hash := sha256.Sum256([]byte(snapshot))
+		if prev, ok := snapshotHashes[state.ToolCallID]; ok && prev == hash {
+			return
+		}
+		snapshotHashes[state.ToolCallID] = hash
+
+		h.sendUpdate(sessionID, SessionUpdate{
+			SessionUpdate: SessionUpdateToolCallUpdate,
+			ToolCallID:    state.ToolCallID,
+			Title:         state.ToolName,
+			Kind:          "tool",
+			Status:        ToolCallStatusInProgress,
+			Content:       TextBlock(snapshot),
+		})
 		return
 	}
 
-	hash := sha256.Sum256([]byte(snapshot))
-	if prev, ok := snapshotHashes[state.ToolCallID]; ok && prev == hash {
+	if state.Status != toolruntime.StatusCompleted && state.Status != toolruntime.StatusFailed && state.Status != toolruntime.StatusCanceled {
 		return
 	}
-	snapshotHashes[state.ToolCallID] = hash
+	delete(snapshotHashes, state.ToolCallID)
+
+	status := ToolCallStatusCompleted
+	if state.Status == toolruntime.StatusFailed {
+		status = ToolCallStatusFailed
+	} else if state.Status == toolruntime.StatusCanceled {
+		status = ToolCallStatusCanceled
+	}
 
 	h.sendUpdate(sessionID, SessionUpdate{
 		SessionUpdate: SessionUpdateToolCallUpdate,
 		ToolCallID:    state.ToolCallID,
 		Title:         state.ToolName,
 		Kind:          "tool",
-		Status:        ToolCallStatusInProgress,
-		Content:       TextBlock(snapshot),
+		Status:        status,
 	})
 }
 
@@ -480,6 +527,46 @@ func (h *Handler) handleSessionEvent(sessionID string, event pubsub.Event[sessio
 		Title:         sess.Title,
 		UpdatedAt:     time.Unix(sess.UpdatedAt, 0).UTC().Format(time.RFC3339),
 	})
+}
+
+func (h *Handler) handleTimelineEvent(sessionID string, event pubsub.Event[timeline.Event]) {
+	if event.Type == pubsub.DeletedEvent {
+		return
+	}
+	h.sendUpdate(sessionID, SessionUpdate{
+		SessionUpdate: SessionUpdateTimelineEvent,
+		TimelineEvent: timelineEventPayload(event.Payload),
+	})
+}
+
+func (h *Handler) sessionUpdateFromToolResult(tr message.ToolResult) SessionUpdate {
+	status := ToolCallStatusCompleted
+	subtaskResult, hasSubtaskResult := tr.SubtaskResult()
+	if hasSubtaskResult {
+		switch subtaskResult.Status {
+		case message.ToolResultSubtaskStatusFailed:
+			status = ToolCallStatusFailed
+		case message.ToolResultSubtaskStatusCanceled:
+			status = ToolCallStatusCanceled
+		}
+	} else if tr.IsError {
+		status = ToolCallStatusFailed
+	}
+
+	update := SessionUpdate{
+		SessionUpdate: SessionUpdateToolCallUpdate,
+		ToolCallID:    tr.ToolCallID,
+		Title:         tr.Name,
+		Kind:          "tool",
+		Status:        status,
+		RawOutput:     tr,
+	}
+	if hasSubtaskResult {
+		update.ChildSessionID = subtaskResult.ChildSessionID
+		update.ParentToolCallID = subtaskResult.ParentToolCallID
+		update.SubtaskResult = &SubtaskResult{Status: string(subtaskResult.Status)}
+	}
+	return update
 }
 
 // handleSessionCancel cancels a running prompt turn.
@@ -527,6 +614,28 @@ func (h *Handler) sendUpdateSyncWithContext(ctx context.Context, sessionID strin
 	}
 }
 
+func (h *Handler) shouldForwardSessionEvent(ctx context.Context, parentSessionID string, candidateSessionID string, trackedSessionIDs map[string]struct{}) bool {
+	if candidateSessionID == parentSessionID {
+		trackedSessionIDs[candidateSessionID] = struct{}{}
+		return true
+	}
+	if _, ok := trackedSessionIDs[candidateSessionID]; ok {
+		return true
+	}
+	if candidateSessionID == "" {
+		return false
+	}
+	candidate, err := h.app.GetSessions().Get(ctx, candidateSessionID)
+	if err != nil {
+		return false
+	}
+	if candidate.ParentSessionID != parentSessionID {
+		return false
+	}
+	trackedSessionIDs[candidateSessionID] = struct{}{}
+	return true
+}
+
 // extractText joins all text-type ContentBlocks into a single string.
 func extractText(blocks []ContentBlock) string {
 	var sb strings.Builder
@@ -561,7 +670,7 @@ func (h *Handler) currentModeForSession(sessionID string) string {
 	if err != nil {
 		return "default"
 	}
-	return string(sess.PermissionMode)
+	return session.ModeStateFromSession(sess).CurrentModeID()
 }
 
 func (h *Handler) setSessionCWD(sessionID, cwd string) {
@@ -648,21 +757,22 @@ func (h *Handler) handleSetMode(_ context.Context, req *Request) (any, *RPCError
 	if params.ModeID == "auto" {
 		h.app.GetPermissions().ClearPersistentPermissions(params.SessionID)
 	}
-	previousMode := session.PermissionModeDefault
-	if sess, err := h.app.GetSessions().Get(context.Background(), params.SessionID); err == nil {
-		previousMode = sess.PermissionMode
-	}
-	if _, err := h.app.GetSessions().UpdatePermissionMode(context.Background(), params.SessionID, session.NormalizePermissionMode(params.ModeID)); err != nil {
+	current, err := h.app.GetSessions().Get(context.Background(), params.SessionID)
+	if err != nil {
 		return nil, &RPCError{Code: CodeInternalError, Message: err.Error()}
 	}
-	if previousMode == session.PermissionModeAuto && session.NormalizePermissionMode(params.ModeID) != session.PermissionModeAuto {
+	transition := session.NewPermissionModeTransition(current, session.NormalizePermissionMode(params.ModeID))
+	if _, err := h.app.GetSessions().UpdatePermissionMode(context.Background(), params.SessionID, transition.Current.PermissionMode); err != nil {
+		return nil, &RPCError{Code: CodeInternalError, Message: err.Error()}
+	}
+	if transition.ExitedAutoMode() {
 		if _, err := h.app.GetMessages().Create(context.Background(), params.SessionID, message.NewAutoModePromptMessage(message.AutoModePromptTypeExit)); err != nil {
 			return nil, &RPCError{Code: CodeInternalError, Message: err.Error()}
 		}
 	}
 	h.sendUpdate(params.SessionID, SessionUpdate{
 		SessionUpdate: SessionUpdateCurrentModeUpdate,
-		CurrentModeID: params.ModeID,
+		CurrentModeID: transition.Current.CurrentModeID(),
 	})
 	h.sendUpdate(params.SessionID, SessionUpdate{
 		SessionUpdate: SessionUpdateConfigOptionUpdate,
@@ -809,14 +919,15 @@ func (h *Handler) handleSetConfigOption(ctx context.Context, req *Request) (any,
 		if params.Value == "auto" {
 			h.app.GetPermissions().ClearPersistentPermissions(params.SessionID)
 		}
-		previousMode := session.PermissionModeDefault
-		if sess, err := h.app.GetSessions().Get(ctx, params.SessionID); err == nil {
-			previousMode = sess.PermissionMode
-		}
-		if _, err := h.app.GetSessions().UpdatePermissionMode(ctx, params.SessionID, session.NormalizePermissionMode(params.Value)); err != nil {
+		current, err := h.app.GetSessions().Get(ctx, params.SessionID)
+		if err != nil {
 			return nil, &RPCError{Code: CodeInternalError, Message: err.Error()}
 		}
-		if previousMode == session.PermissionModeAuto && session.NormalizePermissionMode(params.Value) != session.PermissionModeAuto {
+		transition := session.NewPermissionModeTransition(current, session.NormalizePermissionMode(params.Value))
+		if _, err := h.app.GetSessions().UpdatePermissionMode(ctx, params.SessionID, transition.Current.PermissionMode); err != nil {
+			return nil, &RPCError{Code: CodeInternalError, Message: err.Error()}
+		}
+		if transition.ExitedAutoMode() {
 			if _, err := h.app.GetMessages().Create(ctx, params.SessionID, message.NewAutoModePromptMessage(message.AutoModePromptTypeExit)); err != nil {
 				return nil, &RPCError{Code: CodeInternalError, Message: err.Error()}
 			}
@@ -829,7 +940,7 @@ func (h *Handler) handleSetConfigOption(ctx context.Context, req *Request) (any,
 		})
 		h.sendUpdate(params.SessionID, SessionUpdate{
 			SessionUpdate: SessionUpdateCurrentModeUpdate,
-			CurrentModeID: params.Value,
+			CurrentModeID: transition.Current.CurrentModeID(),
 		})
 		return SetConfigOptionResult{ConfigOptions: updated}, nil
 	}

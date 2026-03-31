@@ -107,7 +107,7 @@ func NewViewTool(
 
 			// Request permission for files outside working directory, unless it's a skill file.
 			if isOutsideWorkDir && !isSkillFile {
-				granted, permReqErr := permissions.Request(ctx,
+				permissionResponse, permReqErr := RequestPermission(ctx, permissions,
 					permission.CreatePermissionRequest{
 						SessionID:   sessionID,
 						Path:        absFilePath,
@@ -121,8 +121,8 @@ func NewViewTool(
 				if permReqErr != nil {
 					return fantasy.ToolResponse{}, permReqErr
 				}
-				if !granted {
-					return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
+				if permissionResponse != nil {
+					return *permissionResponse, nil
 				}
 			}
 

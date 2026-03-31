@@ -118,8 +118,9 @@ func TestParseAutoClassification_DoesNotTreatMidSentenceAllowAsApproval(t *testi
 
 	classification, err := parseAutoClassification("Given the risk tradeoff, I cannot determine whether to allow this request.")
 	require.NoError(t, err)
-	require.True(t, classification.AllowAuto)
+	require.False(t, classification.AllowAuto)
 	require.Equal(t, permission.AutoApprovalConfidenceLow, classification.Confidence)
+	require.Contains(t, classification.Reason, "defaulting to block as a secure degradation")
 }
 
 func TestParseQuickClassifierDecision(t *testing.T) {
@@ -195,14 +196,15 @@ func TestParseAutoClassificationTextFallback_SkipsLongReasoningText(t *testing.T
 	require.False(t, classification.AllowAuto)
 }
 
-func TestParseAutoClassification_DefaultsToAllowOnUnparseableResponse(t *testing.T) {
+func TestParseAutoClassification_DefaultsToBlockOnUnparseableResponse(t *testing.T) {
 	t.Parallel()
 
 	classification, err := parseAutoClassification("The model returned some gibberish that is neither JSON nor a clear decision.")
 	require.NoError(t, err)
-	require.True(t, classification.AllowAuto)
+	require.False(t, classification.AllowAuto)
 	require.Equal(t, permission.AutoApprovalConfidenceLow, classification.Confidence)
 	require.Contains(t, classification.Reason, "could not be parsed")
+	require.Contains(t, classification.Reason, "defaulting to block as a secure degradation")
 }
 
 func TestParseAutoClassificationTextFallback(t *testing.T) {

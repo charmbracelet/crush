@@ -63,6 +63,7 @@ func (m *mockSessionAgent) IsQueuePaused(sessionID string) bool                 
 func (m *mockSessionAgent) PrioritizeQueuedPrompt(sessionID string, index int) bool {
 	return false
 }
+
 func (m *mockSessionAgent) Summarize(context.Context, string, fantasy.ProviderOptions) error {
 	if m.summarizeErr != nil {
 		return m.summarizeErr
@@ -138,6 +139,13 @@ func TestRunSubAgent(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "done", resp.Content)
 		assert.False(t, resp.IsError)
+		parsed, ok := message.ParseToolResultSubtaskResult(resp.Metadata)
+		require.True(t, ok)
+		assert.Equal(t, message.ToolResultSubtaskResult{
+			ChildSessionID:   "msg-1$$call-1",
+			ParentToolCallID: "call-1",
+			Status:           message.ToolResultSubtaskStatusCompleted,
+		}, parsed)
 	})
 
 	t.Run("auto mode blocks delegation when handoff review cannot run", func(t *testing.T) {
@@ -170,7 +178,6 @@ func TestRunSubAgent(t *testing.T) {
 		assert.True(t, resp.IsError)
 		assert.Equal(t, "Auto Mode blocked subagent delegation because the handoff review failed.", resp.Content)
 	})
-
 
 	t.Run("ModelCfg.MaxTokens overrides default", func(t *testing.T) {
 		env := testEnv(t)
@@ -276,6 +283,13 @@ func TestRunSubAgent(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, resp.IsError)
 		assert.Equal(t, "agent exploded", resp.Content)
+		parsed, ok := message.ParseToolResultSubtaskResult(resp.Metadata)
+		require.True(t, ok)
+		assert.Equal(t, message.ToolResultSubtaskResult{
+			ChildSessionID:   "msg-1$$call-1",
+			ParentToolCallID: "call-1",
+			Status:           message.ToolResultSubtaskStatusFailed,
+		}, parsed)
 	})
 
 	t.Run("agent run error prefers persisted child assistant error details", func(t *testing.T) {

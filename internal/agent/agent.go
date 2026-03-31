@@ -76,6 +76,33 @@ var thinkTagRegex = regexp.MustCompile(`<think>.*?</think>`)
 
 const autoResumePromptPrefix = "The previous session was interrupted because it got too long, the initial user request was: `"
 
+type sessionCompactionTrigger string
+
+const (
+	sessionCompactionTriggerNone       sessionCompactionTrigger = ""
+	sessionCompactionTriggerNormal     sessionCompactionTrigger = "normal_summarize"
+	sessionCompactionTriggerRecover    sessionCompactionTrigger = "recover_summarize"
+	sessionCompactionTriggerProactive  sessionCompactionTrigger = "proactive_compact"
+)
+
+func (t sessionCompactionTrigger) Purpose() plugin.ChatTransformPurpose {
+	switch t {
+	case sessionCompactionTriggerRecover:
+		return plugin.ChatTransformPurposeRecover
+	case sessionCompactionTriggerProactive:
+		return plugin.ChatTransformPurposeProactiveCompact
+	default:
+		return plugin.ChatTransformPurposeSummarize
+	}
+}
+
+func proactiveCompactionTrigger(contextUsed, contextWindow, maxOutputTokens int64) sessionCompactionTrigger {
+	if shouldAutoSummarize(contextUsed, contextWindow, maxOutputTokens) {
+		return sessionCompactionTriggerProactive
+	}
+	return sessionCompactionTriggerNone
+}
+
 type SessionAgentCall struct {
 	SessionID     string
 	Prompt        string
@@ -317,11 +344,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		// This prevents double-counting the output reservation for large context models.
 		estimatedInput := a.estimateSessionPromptTokens(preflightState.History, call.Prompt, call.Attachments, agentTools, preflightState.SystemPrompt, preflightState.PromptPrefix)
 		estimatedInput = max(estimatedInput, currentSession.LastInputTokens())
-		if shouldAutoSummarize(estimatedInput, int64(largeModel.CatwalkCfg.ContextWindow), call.MaxOutputTokens) {
+		if trigger := proactiveCompactionTrigger(estimatedInput, int64(largeModel.CatwalkCfg.ContextWindow), call.MaxOutputTokens); trigger != sessionCompactionTriggerNone {
 			if truncErr := a.truncateOversizedToolResults(ctx, call.SessionID); truncErr != nil {
 				slog.Warn("Failed to truncate oversized tool results before preflight summarization", "error", truncErr, "session_id", call.SessionID)
 			}
-			if summarizeErr := a.Summarize(withSessionCompactingPurpose(copilot.ContextWithInitiatorType(ctx, copilot.InitiatorAgent), plugin.ChatTransformPurposeSummarize), call.SessionID, call.ProviderOptions); summarizeErr != nil {
+			if summarizeErr := a.Summarize(withSessionCompactingPurpose(copilot.ContextWithInitiatorType(ctx, copilot.InitiatorAgent), trigger.Purpose()), call.SessionID, call.ProviderOptions); summarizeErr != nil {
 				return nil, summarizeErr
 			}
 			currentSession, err = a.sessions.Get(ctx, call.SessionID)
@@ -393,8 +420,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	a.eventPromptSent(call.SessionID)
 
 	var shouldSummarize bool
+	var compactionTrigger sessionCompactionTrigger
 	var contextWindowExceeded bool
-	var forceResumeAfterSummarize bool
 	var currentAssistant *message.Message
 	var currentStepToolMessageIDs []string
 	var allRunMessageIDs []string
@@ -712,7 +739,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 						slog.Warn("Failed to update assistant message before retry summarization", "error", updateErr, "session_id", call.SessionID)
 					}
 				}
-				forceResumeAfterSummarize = true
+				compactionTrigger = sessionCompactionTriggerRecover
 				shouldSummarize = true
 				err = nil
 				result = &fantasy.AgentResult{}
@@ -886,6 +913,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			}
 		}
 		contextWindowExceeded = true
+		compactionTrigger = sessionCompactionTriggerRecover
 		shouldSummarize = true
 		err = nil
 		result = &fantasy.AgentResult{}
@@ -962,6 +990,12 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				Name:       tc.Name,
 				Content:    content,
 				IsError:    true,
+			}
+			if subtaskStatus, ok := syntheticSubtaskStatusForTool(tc.Name, isCancelErr, isPermissionErr); ok {
+				toolResult = toolResult.WithSubtaskResult(message.ToolResultSubtaskResult{
+					ParentToolCallID: tc.ID,
+					Status:           subtaskStatus,
+				})
 			}
 			_, createErr = a.messages.Create(cleanupCtx, currentAssistant.SessionID, message.CreateMessageParams{
 				Role: message.Tool,
@@ -1051,25 +1085,20 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
-		summarizePurpose := plugin.ChatTransformPurposeSummarize
-		if contextWindowExceeded || forceResumeAfterSummarize {
-			summarizePurpose = plugin.ChatTransformPurposeRecover
+		if compactionTrigger == sessionCompactionTriggerNone {
+			compactionTrigger = sessionCompactionTriggerNormal
 		}
-		if summarizeErr := a.Summarize(withSessionCompactingPurpose(copilot.ContextWithInitiatorType(genCtx, copilot.InitiatorAgent), summarizePurpose), call.SessionID, call.ProviderOptions); summarizeErr != nil {
+		if summarizeErr := a.Summarize(withSessionCompactingPurpose(copilot.ContextWithInitiatorType(genCtx, copilot.InitiatorAgent), compactionTrigger.Purpose()), call.SessionID, call.ProviderOptions); summarizeErr != nil {
 			return nil, summarizeErr
 		}
-		// Queue an auto-resume when:
-		//   (a) the agent had pending tool calls mid-run (normal summarize path), or
-		//   (b) the LLM call itself was rejected due to context overflow before
-		//       returning any output (contextWindowExceeded path).
 		hasPendingToolCalls := currentAssistant != nil && len(currentAssistant.ToolCalls()) > 0
-		if hasPendingToolCalls || contextWindowExceeded || forceResumeAfterSummarize {
+		if hasPendingToolCalls || compactionTrigger == sessionCompactionTriggerRecover {
 			resumePrefix := autoResumePromptPrefix
 			if contextWindowExceeded {
 				resumePrefix = contextWindowResumePromptPrefix
 			}
 			call.Prompt = fmt.Sprintf(resumePrefix+"%s`", call.Prompt)
-			if contextWindowExceeded || forceResumeAfterSummarize {
+			if compactionTrigger == sessionCompactionTriggerRecover {
 				call.Purpose = plugin.ChatTransformPurposeRecover
 			}
 			call.InitiatorType = copilot.InitiatorAgent
@@ -1096,6 +1125,18 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	}
 	ctx = context.WithValue(ctx, sessionAgentRuntimeConfigContextKey{}, (*sessionAgentRuntimeConfig)(nil))
 	return a.Run(ctx, firstQueuedMessage)
+}
+
+func syntheticSubtaskStatusForTool(toolName string, isCancelErr, isPermissionErr bool) (message.ToolResultSubtaskStatus, bool) {
+	switch toolName {
+	case AgentToolName, tools.AgenticFetchToolName:
+		if isCancelErr || isPermissionErr {
+			return message.ToolResultSubtaskStatusCanceled, true
+		}
+		return message.ToolResultSubtaskStatusFailed, true
+	default:
+		return "", false
+	}
 }
 
 func hydrateAgentResultFromAssistantMessage(result *fantasy.AgentResult, assistant *message.Message) {
@@ -1480,12 +1521,14 @@ func (a *sessionAgent) preparePrompt(msgs []message.Message, attachments ...mess
 				if !toolResultIDs[tc.ID] {
 					slog.Warn("Injecting synthetic tool_result for orphaned tool_use",
 						"tool_call_id", tc.ID, "tool_name", tc.Name)
-					missingParts = append(missingParts, fantasy.ToolResultPart{
+					missingOutput := fantasy.ToolResultOutputContentError{
+						Error: fmt.Errorf("tool execution was interrupted"),
+					}
+					missingPart := fantasy.ToolResultPart{
 						ToolCallID: tc.ID,
-						Output: fantasy.ToolResultOutputContentError{
-							Error: fmt.Errorf("tool execution was interrupted"),
-						},
-					})
+						Output:     missingOutput,
+					}
+					missingParts = append(missingParts, missingPart)
 				}
 			}
 			if len(missingParts) > 0 {

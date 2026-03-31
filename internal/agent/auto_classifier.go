@@ -291,8 +291,8 @@ func parseAutoClassification(raw string) (permission.AutoClassification, error) 
 			return fallback, nil
 		}
 		return permission.AutoClassification{
-			AllowAuto:  true,
-			Reason:     "Auto classifier response could not be parsed; defaulting to allow.",
+			AllowAuto:  false,
+			Reason:     "Auto classifier response could not be parsed; defaulting to block as a secure degradation (fail-closed).",
 			Confidence: permission.AutoApprovalConfidenceLow,
 		}, nil
 	}

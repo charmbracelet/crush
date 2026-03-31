@@ -94,11 +94,10 @@ var gitGlobalIgnorePatterns = sync.OnceValue(func() []gitignore.Pattern {
 		slog.Debug("Failed to read global git config", "path", globalConfigPath, "error", err)
 	}
 	if !found {
-		if xdgConfigHome := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); xdgConfigHome != "" {
-			excludesFilePath = filepath.Join(xdgConfigHome, "git", "ignore")
-		} else {
-			excludesFilePath = filepath.Join(home.Dir(), ".config", "git", "ignore")
-		}
+		excludesFilePath = cmp.Or(
+			os.Getenv("XDG_CONFIG_HOME"),
+			filepath.Join(home.Dir(), ".config", "git", "ignore"),
+		)
 	}
 
 	excludesFilePath = home.Long(excludesFilePath)
@@ -157,7 +156,7 @@ func readGitCoreExcludesFile(globalConfigPath string) (string, bool, error) {
 		return "", false, err
 	}
 
-	excludesFile := strings.TrimSpace(raw.Section("core").Options.Get("excludesfile"))
+	excludesFile := raw.Section("core").Options.Get("excludesfile")
 	if excludesFile == "" {
 		return "", false, nil
 	}

@@ -38,10 +38,10 @@ func InputCursor(t *styles.Styles, cur *tea.Cursor) *tea.Cursor {
 	return cur
 }
 
-// AdjustOnboardingInputCursor removes the dialog view frame offset from an
+// adjustOnboardingInputCursor removes the dialog view frame offset from an
 // input cursor. Onboarding dialogs render without Dialog.View frame, while
 // InputCursor includes that frame offset for regular dialogs.
-func AdjustOnboardingInputCursor(t *styles.Styles, cur *tea.Cursor) *tea.Cursor {
+func adjustOnboardingInputCursor(t *styles.Styles, cur *tea.Cursor) *tea.Cursor {
 	if cur == nil {
 		return nil
 	}

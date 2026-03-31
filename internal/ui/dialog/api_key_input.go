@@ -182,7 +182,7 @@ func (m *APIKeyInput) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	if m.isOnboarding {
 		view := content
-		cur = AdjustOnboardingInputCursor(t, cur)
+		cur = adjustOnboardingInputCursor(t, cur)
 		DrawOnboardingCursor(scr, area, view, cur)
 	} else {
 		view := dialogStyle.Render(content)

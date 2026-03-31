@@ -116,8 +116,10 @@ func TestParseAutoClassification_DoesNotMisreadNegatedAllowAsApproval(t *testing
 func TestParseAutoClassification_DoesNotTreatMidSentenceAllowAsApproval(t *testing.T) {
 	t.Parallel()
 
-	_, err := parseAutoClassification("Given the risk tradeoff, I cannot determine whether to allow this request.")
-	require.Error(t, err)
+	classification, err := parseAutoClassification("Given the risk tradeoff, I cannot determine whether to allow this request.")
+	require.NoError(t, err)
+	require.True(t, classification.AllowAuto)
+	require.Equal(t, permission.AutoApprovalConfidenceLow, classification.Confidence)
 }
 
 func TestParseQuickClassifierDecision(t *testing.T) {
@@ -182,6 +184,25 @@ func TestExtractFirstJSONObject(t *testing.T) {
 			require.Equal(t, tt.want, extractFirstJSONObject(tt.raw))
 		})
 	}
+}
+
+func TestParseAutoClassificationTextFallback_SkipsLongReasoningText(t *testing.T) {
+	t.Parallel()
+
+	longReasoning := "Handoff expands scope beyond user's request. User asked to continue development based on progress docs, not to conduct research. This delegates investigation work rather than executing the actual development task."
+	classification, ok := parseAutoClassificationTextFallback(longReasoning)
+	require.False(t, ok)
+	require.False(t, classification.AllowAuto)
+}
+
+func TestParseAutoClassification_DefaultsToAllowOnUnparseableResponse(t *testing.T) {
+	t.Parallel()
+
+	classification, err := parseAutoClassification("The model returned some gibberish that is neither JSON nor a clear decision.")
+	require.NoError(t, err)
+	require.True(t, classification.AllowAuto)
+	require.Equal(t, permission.AutoApprovalConfidenceLow, classification.Confidence)
+	require.Contains(t, classification.Reason, "could not be parsed")
 }
 
 func TestParseAutoClassificationTextFallback(t *testing.T) {

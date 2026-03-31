@@ -57,6 +57,7 @@ type KeyMap struct {
 		SessionChild    key.Binding
 		SessionNext     key.Binding
 		SessionPrev     key.Binding
+		SessionNav      key.Binding
 	}
 
 	Initialize struct {
@@ -280,20 +281,24 @@ func DefaultKeyMap() KeyMap {
 		key.WithHelp("space", "expand/collapse"),
 	)
 	km.Chat.SessionParent = key.NewBinding(
-		key.WithKeys("ctrl+left"),
-		key.WithHelp("ctrl+←", "exit subagent"),
+		key.WithKeys("alt+left", "alt+b"),
+		key.WithHelp("alt+←", "exit subagent"),
 	)
 	km.Chat.SessionChild = key.NewBinding(
-		key.WithKeys("ctrl+right"),
-		key.WithHelp("ctrl+→", "open subagent"),
+		key.WithKeys("alt+right", "alt+f"),
+		key.WithHelp("alt+→", "open subagent"),
 	)
 	km.Chat.SessionNext = key.NewBinding(
-		key.WithKeys("ctrl+down"),
-		key.WithHelp("ctrl+↓", "next subagent"),
+		key.WithKeys("alt+down", "alt+n"),
+		key.WithHelp("alt+↓", "next subagent"),
 	)
 	km.Chat.SessionPrev = key.NewBinding(
-		key.WithKeys("ctrl+up"),
-		key.WithHelp("ctrl+↑", "prev subagent"),
+		key.WithKeys("alt+up", "alt+p"),
+		key.WithHelp("alt+↑", "prev subagent"),
+	)
+	km.Chat.SessionNav = key.NewBinding(
+		key.WithKeys("alt+left", "alt+right", "alt+b", "alt+f"),
+		key.WithHelp("alt+←/→", "subagent"),
 	)
 	km.Initialize.Yes = key.NewBinding(
 		key.WithKeys("y", "Y"),

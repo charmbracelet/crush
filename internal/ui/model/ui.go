@@ -2376,28 +2376,28 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				return true
 			}
 		case key.Matches(msg, m.keyMap.Chat.SessionParent):
-			if m.state == uiChat && m.hasSession() {
+			if m.state == uiChat && m.hasSession() && m.focus != uiFocusEditor {
 				if cmd := m.openParentSession(); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
 				return true
 			}
 		case key.Matches(msg, m.keyMap.Chat.SessionChild):
-			if m.state == uiChat && m.hasSession() {
+			if m.state == uiChat && m.hasSession() && m.focus != uiFocusEditor {
 				if cmd := m.openSelectedChildSession(); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
 				return true
 			}
 		case key.Matches(msg, m.keyMap.Chat.SessionNext):
-			if m.state == uiChat && m.hasSession() {
+			if m.state == uiChat && m.hasSession() && m.focus != uiFocusEditor {
 				if cmd := m.cycleSiblingChildSession(1); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
 				return true
 			}
 		case key.Matches(msg, m.keyMap.Chat.SessionPrev):
-			if m.state == uiChat && m.hasSession() {
+			if m.state == uiChat && m.hasSession() && m.focus != uiFocusEditor {
 				if cmd := m.cycleSiblingChildSession(-1); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
@@ -2967,8 +2967,7 @@ func (m *UI) ShortHelp() []key.Binding {
 				k.Chat.PageUp,
 				k.Chat.PageDown,
 				k.Chat.Copy,
-				k.Chat.SessionParent,
-				k.Chat.SessionChild,
+				k.Chat.SessionNav,
 			)
 			if m.pillsExpanded && hasIncompleteTodos(m.session.Todos) && m.promptQueue > 0 {
 				binds = append(binds, k.Chat.PillLeft)
@@ -3082,8 +3081,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 				[]key.Binding{
 					k.Chat.Copy,
 					k.Chat.ClearHighlight,
-					k.Chat.SessionParent,
-					k.Chat.SessionChild,
+					k.Chat.SessionNav,
 				},
 				[]key.Binding{
 					k.Chat.SessionPrev,

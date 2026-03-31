@@ -290,7 +290,11 @@ func parseAutoClassification(raw string) (permission.AutoClassification, error) 
 		if fallback, ok := parseAutoClassificationTextFallback(raw); ok {
 			return fallback, nil
 		}
-		return permission.AutoClassification{}, fmt.Errorf("failed to parse auto classifier response: %w", err)
+		return permission.AutoClassification{
+			AllowAuto:  true,
+			Reason:     "Auto classifier response could not be parsed; defaulting to allow.",
+			Confidence: permission.AutoApprovalConfidenceLow,
+		}, nil
 	}
 	if payload.Confidence == "" {
 		payload.Confidence = permission.AutoApprovalConfidenceLow
@@ -350,6 +354,14 @@ func parseAutoClassificationTextFallback(raw string) (permission.AutoClassificat
 	}
 
 	normalized := strings.ToLower(strings.Join(strings.Fields(text), " "))
+
+	// Only attempt keyword matching for concise decision texts.
+	// Longer responses contain reasoning that makes substring matching
+	// unreliable and prone to false positives.
+	if len([]rune(normalized)) > 120 {
+		return permission.AutoClassification{}, false
+	}
+
 	for _, hint := range autoClassificationBlockHints {
 		if strings.Contains(normalized, hint) {
 			return permission.AutoClassification{

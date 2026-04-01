@@ -127,8 +127,11 @@ func shouldQueryCapabilities(env uv.Environ) bool {
 	if okTermProg && strings.Contains(termProg, osVendorTypeApple) {
 		return false
 	}
-	return (!okTermProg && !okSSHTTY) ||
-		(!strings.Contains(termProg, osVendorTypeApple) && !okSSHTTY) ||
-		// Terminals that do support XTVERSION.
-		xstrings.ContainsAnyOf(termType, kittyTerminals...)
+	if okSSHTTY {
+		return false
+	}
+	if xstrings.ContainsAnyOf(termType, kittyTerminals...) {
+		return true
+	}
+	return okTermProg
 }

@@ -75,8 +75,26 @@ func (s *catwalkSync) Get(ctx context.Context) ([]catwalk.Provider, error) {
 			return
 		}
 
-		s.result = result
-		throwErr = s.cache.Store(result)
+		// Merge embedded providers with online providers
+		// This ensures local providers (like alibaba-coding-plan) are always available
+		embeddedProviders := embedded.GetAll()
+		merged := make([]catwalk.Provider, len(result))
+		copy(merged, result)
+		
+		// Add embedded providers that aren't in the online list
+		onlineIDs := make(map[catwalk.InferenceProvider]bool)
+		for _, p := range result {
+			onlineIDs[p.ID] = true
+		}
+		for _, p := range embeddedProviders {
+			if !onlineIDs[p.ID] {
+				merged = append(merged, p)
+				slog.Info("Added embedded provider", "provider", p.ID)
+			}
+		}
+
+		s.result = merged
+		throwErr = s.cache.Store(merged)
 	})
 	return s.result, throwErr
 }

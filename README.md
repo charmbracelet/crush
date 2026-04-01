@@ -554,7 +554,7 @@ And here's an example configuration for Alibaba Coding Plan, which uses an OpenA
   "providers": {
     "alibaba-coding-plan": {
       "type": "alibaba-coding-plan",
-      "base_url": "https://coding-intl.dashscope.aliyuncs.com/v1",
+      "base_url": "https://coding.dashscope.aliyuncs.com/v1",
       "api_key": "$ALIBABA_CODING_PLAN_API_KEY",
       "models": [
         {
@@ -582,6 +582,8 @@ And here's an example configuration for Alibaba Coding Plan, which uses an OpenA
   }
 }
 ```
+
+**Important:** Alibaba Coding Plan API keys must start with `sk-sp-` (subscription plan), not just `sk-`. Get your plan-specific API key from the [Coding Plan page](https://modelstudio.console.alibabacloud.com/ap-southeast-1/?tab=globalset#/efm/coding_plan).
 
 #### Anthropic-Compatible APIs
 

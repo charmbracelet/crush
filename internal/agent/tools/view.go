@@ -163,8 +163,11 @@ func NewViewTool(
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("Path is a directory, not a file: %s", filePath)), nil
 			}
 
+			isSupportedImage, mimeType := getImageMimeType(filePath)
+
 			// Based on the specifications we should not limit the skills read.
-			if !isSkillFile && fileInfo.Size() > MaxViewSize {
+			// For images, we allow reading first so compression can be applied.
+			if !isSkillFile && !isSupportedImage && fileInfo.Size() > MaxViewSize {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("File is too large (%d bytes). Maximum size is %d bytes",
 					fileInfo.Size(), MaxViewSize)), nil
 			}
@@ -178,7 +181,6 @@ func NewViewTool(
 				}
 			}
 
-			isSupportedImage, mimeType := getImageMimeType(filePath)
 			if isSupportedImage {
 				if !GetSupportsImagesFromContext(ctx) {
 					modelName := GetModelNameFromContext(ctx)

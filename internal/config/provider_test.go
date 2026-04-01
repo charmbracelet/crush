@@ -382,3 +382,42 @@ func TestProviderConfig_TestConnection_Alibaba(t *testing.T) {
 		})
 	}
 }
+
+func TestAlibabaCodingPlanProviderInList(t *testing.T) {
+	cfg := &Config{
+		Options: &Options{
+			DisableProviderAutoUpdate: true,
+		},
+	}
+	
+	providers, err := Providers(cfg)
+	if err != nil {
+		t.Fatalf("Error loading providers: %v", err)
+	}
+	
+	t.Logf("Total providers: %d", len(providers))
+	
+	found := false
+	for _, p := range providers {
+		if p.ID == "alibaba-coding-plan" {
+			found = true
+			t.Logf("✓ Found Alibaba Coding Plan!")
+			t.Logf("  Name: %s", p.Name)
+			t.Logf("  Type: %s", p.Type)
+			t.Logf("  Models: %d", len(p.Models))
+			for _, m := range p.Models {
+				t.Logf("    - %s", m.Name)
+			}
+			break
+		}
+	}
+	
+	if !found {
+		t.Log("✗ Alibaba Coding Plan NOT found")
+		t.Log("Available providers:")
+		for _, p := range providers {
+			t.Logf("  - %s (%s)", p.ID, p.Name)
+		}
+		t.Fatal("Alibaba Coding Plan provider not found")
+	}
+}

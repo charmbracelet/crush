@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"testing"
 
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 )
 
@@ -139,4 +140,42 @@ func TestIsValidBase64(t *testing.T) {
 			require.Equal(t, tt.want, isValidBase64(tt.input))
 		})
 	}
+}
+
+func TestResultFromMCPContent(t *testing.T) {
+	t.Parallel()
+
+	t.Run("text only", func(t *testing.T) {
+		t.Parallel()
+
+		result := resultFromMCPContent([]sdkmcp.Content{
+			&sdkmcp.TextContent{Text: "first"},
+			&sdkmcp.TextContent{Text: "second"},
+		})
+
+		require.Equal(t, "text", result.Type)
+		require.Equal(t, "first\nsecond", result.Content)
+		require.Empty(t, result.Data)
+		require.Empty(t, result.MediaType)
+		require.Empty(t, result.AdditionalMedia)
+	})
+
+	t.Run("multiple image/audio payloads", func(t *testing.T) {
+		t.Parallel()
+
+		result := resultFromMCPContent([]sdkmcp.Content{
+			&sdkmcp.TextContent{Text: "captured"},
+			&sdkmcp.ImageContent{MIMEType: "image/png", Data: []byte("AQID")},
+			&sdkmcp.ImageContent{MIMEType: "image/jpeg", Data: []byte{0xFF, 0xD8, 0xFF}},
+			&sdkmcp.AudioContent{MIMEType: "audio/wav", Data: []byte("BAUG")},
+		})
+
+		require.Equal(t, "image", result.Type)
+		require.Equal(t, "captured", result.Content)
+		require.Equal(t, "image/png", result.MediaType)
+		require.Equal(t, []byte("AQID"), result.Data)
+		require.Len(t, result.AdditionalMedia, 2)
+		require.Equal(t, ToolMedia{Type: "image", MediaType: "image/jpeg", Data: []byte(base64.StdEncoding.EncodeToString([]byte{0xFF, 0xD8, 0xFF}))}, result.AdditionalMedia[0])
+		require.Equal(t, ToolMedia{Type: "media", MediaType: "audio/wav", Data: []byte("BAUG")}, result.AdditionalMedia[1])
+	})
 }

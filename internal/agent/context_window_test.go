@@ -263,3 +263,4 @@ func TestTruncateOversizedToolResults_ErrorResultUntouched(t *testing.T) {
 	require.NoError(t, globErr)
 	assert.Empty(t, artifactMatches)
 }
+

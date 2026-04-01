@@ -17,12 +17,20 @@ import (
 
 type Tool = mcp.Tool
 
-// ToolResult represents the result of running an MCP tool.
-type ToolResult struct {
+// ToolMedia represents a single media payload returned by an MCP tool.
+type ToolMedia struct {
 	Type      string
-	Content   string
 	Data      []byte
 	MediaType string
+}
+
+// ToolResult represents the result of running an MCP tool.
+type ToolResult struct {
+	Type            string
+	Content         string
+	Data            []byte
+	MediaType       string
+	AdditionalMedia []ToolMedia
 }
 
 var allTools = csync.NewMap[string, []*Tool]()
@@ -58,56 +66,49 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 		return ToolResult{Type: "text", Content: ""}, nil
 	}
 
-	var textParts []string
-	var imageData []byte
-	var imageMimeType string
-	var audioData []byte
-	var audioMimeType string
+	return resultFromMCPContent(result.Content), nil
+}
 
-	for _, v := range result.Content {
-		switch content := v.(type) {
+func resultFromMCPContent(content []mcp.Content) ToolResult {
+	var textParts []string
+	mediaParts := make([]ToolMedia, 0, len(content))
+
+	for _, v := range content {
+		switch item := v.(type) {
 		case *mcp.TextContent:
-			textParts = append(textParts, content.Text)
+			textParts = append(textParts, item.Text)
 		case *mcp.ImageContent:
-			if imageData == nil {
-				imageData = content.Data
-				imageMimeType = content.MIMEType
-			}
+			mediaParts = append(mediaParts, ToolMedia{
+				Type:      "image",
+				Data:      ensureBase64(item.Data),
+				MediaType: item.MIMEType,
+			})
 		case *mcp.AudioContent:
-			if audioData == nil {
-				audioData = content.Data
-				audioMimeType = content.MIMEType
-			}
+			mediaParts = append(mediaParts, ToolMedia{
+				Type:      "media",
+				Data:      ensureBase64(item.Data),
+				MediaType: item.MIMEType,
+			})
 		default:
 			textParts = append(textParts, fmt.Sprintf("%v", v))
 		}
 	}
 
 	textContent := strings.Join(textParts, "\n")
-
-	// Normalize both raw bytes and already-encoded payloads into standard base64.
-	if imageData != nil {
-		return ToolResult{
-			Type:      "image",
-			Content:   textContent,
-			Data:      ensureBase64(imageData),
-			MediaType: imageMimeType,
-		}, nil
+	if len(mediaParts) == 0 {
+		return ToolResult{Type: "text", Content: textContent}
 	}
 
-	if audioData != nil {
-		return ToolResult{
-			Type:      "media",
-			Content:   textContent,
-			Data:      ensureBase64(audioData),
-			MediaType: audioMimeType,
-		}, nil
+	result := ToolResult{
+		Type:      mediaParts[0].Type,
+		Content:   textContent,
+		Data:      mediaParts[0].Data,
+		MediaType: mediaParts[0].MediaType,
 	}
-
-	return ToolResult{
-		Type:    "text",
-		Content: textContent,
-	}, nil
+	if len(mediaParts) > 1 {
+		result.AdditionalMedia = append(result.AdditionalMedia, mediaParts[1:]...)
+	}
+	return result
 }
 
 // RefreshTools gets the updated list of tools from the MCP and updates the

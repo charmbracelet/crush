@@ -546,13 +546,19 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	)
 
 	// Special validation for custom providers before main switch
-	if c.ID == "alibaba-coding-plan" && !strings.HasPrefix(apiKey, "sk-") {
-		return fmt.Errorf("invalid API key format for provider %s", c.ID)
-	}
+	// (Note: alibaba-coding-plan validation moved to providerID switch above)
 
 	switch providerID {
 	case catwalk.InferenceProviderMiniMax, catwalk.InferenceProviderMiniMaxChina:
 		// NOTE: MiniMax has no good endpoint we can use to validate the API key.
+		// Let's at least check the pattern.
+		if !strings.HasPrefix(apiKey, "sk-") {
+			return fmt.Errorf("invalid API key format for provider %s", c.ID)
+		}
+		return nil
+
+	case "alibaba-coding-plan":
+		// NOTE: Alibaba Coding Plan has no good endpoint we can use to validate the API key.
 		// Let's at least check the pattern.
 		if !strings.HasPrefix(apiKey, "sk-") {
 			return fmt.Errorf("invalid API key format for provider %s", c.ID)

@@ -421,3 +421,26 @@ func TestAlibabaCodingPlanProviderInList(t *testing.T) {
 		t.Fatal("Alibaba Coding Plan provider not found")
 	}
 }
+
+func TestAlibabaCodingPlanRealKeyValidation(t *testing.T) {
+	// Test with a real API key format
+	testKey := "sk-1eec30204cfc491d8e922f8e4c71f64b"
+	
+	cfg := &ProviderConfig{
+		ID:      "alibaba-coding-plan",
+		Name:    "Alibaba Coding Plan",
+		Type:    catwalk.TypeOpenAICompat,
+		APIKey:  testKey,
+		BaseURL: "https://coding-intl.dashscope.aliyuncs.com/v1",
+	}
+	
+	resolver := NewEnvironmentVariableResolver(nil)
+	
+	err := cfg.TestConnection(resolver)
+	t.Logf("TestConnection result: %v", err)
+	
+	// The format validation should pass
+	if err != nil && strings.Contains(err.Error(), "invalid API key format") {
+		t.Errorf("API key format validation failed: %v", err)
+	}
+}

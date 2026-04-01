@@ -444,3 +444,33 @@ func TestAlibabaCodingPlanRealKeyValidation(t *testing.T) {
 		t.Errorf("API key format validation failed: %v", err)
 	}
 }
+
+func TestAlibabaCodingPlanInProvidersList(t *testing.T) {
+	// Simulate what the TUI does
+	cfg := &Config{
+		Options: &Options{
+			DisableProviderAutoUpdate: true,
+		},
+	}
+	
+	providers, err := Providers(cfg)
+	if err != nil {
+		t.Fatalf("Error loading providers: %v", err)
+	}
+	
+	t.Logf("Total providers loaded: %d", len(providers))
+	
+	// Check if alibaba-coding-plan is in the list
+	found := false
+	for _, p := range providers {
+		t.Logf("  - %s (%s)", p.ID, p.Name)
+		if p.ID == "alibaba-coding-plan" {
+			found = true
+			t.Logf("    ✓ Found alibaba-coding-plan with %d models", len(p.Models))
+		}
+	}
+	
+	if !found {
+		t.Fatal("alibaba-coding-plan not found in providers list!")
+	}
+}

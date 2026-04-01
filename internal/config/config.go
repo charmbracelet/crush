@@ -558,11 +558,10 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 		return nil
 
 	case "alibaba-coding-plan":
-		// NOTE: Alibaba Coding Plan has no good endpoint we can use to validate the API key.
+		// NOTE: Alibaba has no good endpoint we can use to validate the API key.
 		// Let's at least check the pattern.
-		// Coding Plan keys start with "sk-sp-" (subscription plan)
-		if !strings.HasPrefix(apiKey, "sk-sp-") {
-			return fmt.Errorf("invalid API key format for provider %s (should start with sk-sp-)", c.ID)
+		if !strings.HasPrefix(apiKey, "sk-") {
+			return fmt.Errorf("invalid API key format for provider %s", c.ID)
 		}
 		return nil
 	}

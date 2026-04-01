@@ -230,6 +230,60 @@ func (q *Queries) ListUserMessagesBySession(ctx context.Context, sessionID strin
 	return items, nil
 }
 
+const searchMessages = `-- name: SearchMessages :many
+SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message
+FROM messages
+WHERE (?1 = '' OR session_id = ?1)
+  AND EXISTS (
+    SELECT 1
+    FROM json_each(messages.parts)
+    WHERE json_extract(json_each.value, '$.type') = 'text'
+      AND lower(COALESCE(json_extract(json_each.value, '$.data.text'), '')) LIKE lower('%' || ?2 || '%')
+  )
+ORDER BY created_at DESC
+LIMIT ?3
+`
+
+type SearchMessagesParams struct {
+	SessionID interface{}    `json:"session_id"`
+	Query     sql.NullString `json:"query"`
+	Limit     int64          `json:"limit"`
+}
+
+func (q *Queries) SearchMessages(ctx context.Context, arg SearchMessagesParams) ([]Message, error) {
+	rows, err := q.query(ctx, q.searchMessagesStmt, searchMessages, arg.SessionID, arg.Query, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Message{}
+	for rows.Next() {
+		var i Message
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.Role,
+			&i.Parts,
+			&i.Model,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.FinishedAt,
+			&i.Provider,
+			&i.IsSummaryMessage,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateMessage = `-- name: UpdateMessage :exec
 UPDATE messages
 SET

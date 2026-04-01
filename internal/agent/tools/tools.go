@@ -2,15 +2,22 @@ package tools
 
 import (
 	"context"
+
+	"github.com/charmbracelet/crush/internal/session"
 )
 
 type (
-	sessionIDContextKey  string
-	messageIDContextKey  string
-	supportsImagesKey    string
-	modelNameKey         string
-	workingDirContextKey string
+	sessionIDContextKey      string
+	messageIDContextKey      string
+	supportsImagesKey        string
+	modelNameKey             string
+	workingDirContextKey     string
+	sessionServiceContextKey string
 )
+
+type sessionLookupService interface {
+	Get(context.Context, string) (session.Session, error)
+}
 
 const (
 	// SessionIDContextKey is the key for the session ID in the context.
@@ -22,7 +29,8 @@ const (
 	// ModelNameContextKey is the key for the model name in the context.
 	ModelNameContextKey modelNameKey = "model_name"
 	// WorkingDirContextKey is the key for the session-specific working directory.
-	WorkingDirContextKey workingDirContextKey = "working_dir"
+	WorkingDirContextKey     workingDirContextKey     = "working_dir"
+	SessionServiceContextKey sessionServiceContextKey = "session_service"
 )
 
 // getContextValue is a generic helper that retrieves a typed value from context.
@@ -62,4 +70,8 @@ func GetModelNameFromContext(ctx context.Context) string {
 // Returns empty string if not set, in which case tools should fall back to the global working dir.
 func GetWorkingDirFromContext(ctx context.Context) string {
 	return getContextValue(ctx, WorkingDirContextKey, "")
+}
+
+func GetSessionServiceFromContext(ctx context.Context) sessionLookupService {
+	return getContextValue(ctx, SessionServiceContextKey, sessionLookupService(nil))
 }

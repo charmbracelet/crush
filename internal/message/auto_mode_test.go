@@ -199,3 +199,46 @@ func TestToolResultSubtaskResultRoundTripUsesStructuredMetadata(t *testing.T) {
 		Status:           ToolResultSubtaskStatusCompleted,
 	}, parsed)
 }
+
+func TestToolResultReducerRoundTripUsesStructuredMetadata(t *testing.T) {
+	t.Parallel()
+
+	reducer := ToolResultReducer{
+		Summary:     "Done",
+		Artifacts:   []string{"a.txt"},
+		Risks:       []string{"timeout"},
+		NextActions: []string{"monitor"},
+		Confidence:  "medium",
+	}
+
+	result := ToolResult{Metadata: `{"existing":"value"}`}.WithReducer(reducer)
+
+	require.Contains(t, result.Metadata, `"existing":"value"`)
+	require.Contains(t, result.Metadata, `"reducer":`)
+
+	parsed, ok := result.Reducer()
+	require.True(t, ok)
+	require.Equal(t, reducer, parsed)
+}
+
+func TestToolResultReducerPreservesSubtaskMetadata(t *testing.T) {
+	t.Parallel()
+
+	result := ToolResult{Metadata: `{"existing":"value"}`}.WithSubtaskResult(ToolResultSubtaskResult{
+		ChildSessionID:   "child-1",
+		ParentToolCallID: "call-1",
+		Status:           ToolResultSubtaskStatusCompleted,
+	}).WithReducer(ToolResultReducer{Summary: "Done"})
+
+	require.Contains(t, result.Metadata, `"existing":"value"`)
+	require.Contains(t, result.Metadata, `"subtask_result":`)
+	require.Contains(t, result.Metadata, `"reducer":`)
+
+	subtask, ok := result.SubtaskResult()
+	require.True(t, ok)
+	require.Equal(t, "child-1", subtask.ChildSessionID)
+
+	reducer, ok := result.Reducer()
+	require.True(t, ok)
+	require.Equal(t, "Done", reducer.Summary)
+}

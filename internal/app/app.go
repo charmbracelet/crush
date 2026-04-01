@@ -30,6 +30,7 @@ import (
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
+	"github.com/charmbracelet/crush/internal/memory"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/plugin"
@@ -56,14 +57,15 @@ type UpdateAvailableMsg struct {
 }
 
 type App struct {
-	Sessions    session.Service
-	Messages    message.Service
-	History     history.Service
-	UserInput   userinput.Service
-	Permissions permission.Service
-	FileTracker filetracker.Service
-	ToolRuntime toolruntime.Service
-	Timeline    timeline.Service
+	Sessions       session.Service
+	Messages       message.Service
+	History        history.Service
+	LongTermMemory memory.Service
+	UserInput      userinput.Service
+	Permissions    permission.Service
+	FileTracker    filetracker.Service
+	ToolRuntime    toolruntime.Service
+	Timeline       timeline.Service
 
 	AgentCoordinator agent.Coordinator
 
@@ -96,6 +98,10 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 	sessions.SetDefaultPermissionMode(preferredPermissionMode)
 	messages := message.NewService(q)
 	files := history.NewService(q, conn)
+	longTermMemory, err := memory.NewService(cfg.Options.DataDirectory)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize long-term memory service: %w", err)
+	}
 	skipPermissionsRequests := cfg.Permissions != nil && cfg.Permissions.SkipRequests
 	var allowedTools []string
 	if cfg.Permissions != nil && cfg.Permissions.AllowedTools != nil {
@@ -105,10 +111,11 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 
 	var app *App
 	app = &App{
-		Sessions:  sessions,
-		Messages:  messages,
-		History:   files,
-		UserInput: userinput.NewService(),
+		Sessions:       sessions,
+		Messages:       messages,
+		History:        files,
+		LongTermMemory: longTermMemory,
+		UserInput:      userinput.NewService(),
 		Permissions: autopermission.New(basePermissions, sessions, func() permission.Classifier {
 			if app == nil || app.AgentCoordinator == nil {
 				return nil
@@ -663,6 +670,7 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.Permissions,
 		app.UserInput,
 		app.History,
+		app.LongTermMemory,
 		app.FileTracker,
 		app.LSPManager,
 		app.agentNotifications,

@@ -1,10 +1,12 @@
 package permission
 
 import (
+	"encoding/json"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPermissionService_AllowedCommands(t *testing.T) {
@@ -227,4 +229,60 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 			Path:      "/tmp/file2.txt",
 		}))
 	})
+}
+
+func TestCreatePermissionRequestJSONRoundTrip_AuthoritySessionID(t *testing.T) {
+	t.Parallel()
+
+	input := CreatePermissionRequest{
+		SessionID:          "child-session",
+		AuthoritySessionID: "parent-session",
+		ToolCallID:         "tool-1",
+		ToolName:           "write",
+		Description:        "write file",
+		Action:             "write",
+		Params:             map[string]any{"file_path": "a.txt"},
+		Path:               ".",
+	}
+
+	data, err := json.Marshal(input)
+	require.NoError(t, err)
+	require.Contains(t, string(data), "authority_session_id")
+
+	var output CreatePermissionRequest
+	require.NoError(t, json.Unmarshal(data, &output))
+	require.Equal(t, input.AuthoritySessionID, output.AuthoritySessionID)
+}
+
+func TestPermissionRequestJSONRoundTrip_AuthoritySessionID(t *testing.T) {
+	t.Parallel()
+
+	input := PermissionRequest{
+		ID:                 "perm-1",
+		SessionID:          "child-session",
+		AuthoritySessionID: "parent-session",
+		ToolCallID:         "tool-1",
+		ToolName:           "write",
+		Description:        "write file",
+		Action:             "write",
+		Params:             map[string]any{"file_path": "a.txt"},
+		Path:               ".",
+	}
+
+	data, err := json.Marshal(input)
+	require.NoError(t, err)
+	require.Contains(t, string(data), "authority_session_id")
+
+	var output PermissionRequest
+	require.NoError(t, json.Unmarshal(data, &output))
+	require.Equal(t, input.AuthoritySessionID, output.AuthoritySessionID)
+}
+
+func TestPermissionService_BuildPermissionRequestDefaultsAuthoritySessionID(t *testing.T) {
+	t.Parallel()
+
+	svc := NewPermissionService(".", true, nil).(*permissionService)
+	built, err := svc.buildPermissionRequest(CreatePermissionRequest{SessionID: "child-session", Path: "."})
+	require.NoError(t, err)
+	require.Equal(t, "child-session", built.AuthoritySessionID)
 }

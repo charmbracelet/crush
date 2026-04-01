@@ -40,7 +40,26 @@ type ToolResultSubtaskResult struct {
 	Status           ToolResultSubtaskStatus `json:"status,omitempty"`
 }
 
-const toolResultSubtaskResultMetadataKey = "subtask_result"
+type ToolResultReducer struct {
+	Summary     string   `json:"summary,omitempty"`
+	Artifacts   []string `json:"artifacts,omitempty"`
+	Risks       []string `json:"risks,omitempty"`
+	NextActions []string `json:"next_actions,omitempty"`
+	Confidence  string   `json:"confidence,omitempty"`
+}
+
+func (r ToolResultReducer) isEmpty() bool {
+	return strings.TrimSpace(r.Summary) == "" &&
+		len(r.Artifacts) == 0 &&
+		len(r.Risks) == 0 &&
+		len(r.NextActions) == 0 &&
+		strings.TrimSpace(r.Confidence) == ""
+}
+
+const (
+	toolResultSubtaskResultMetadataKey = "subtask_result"
+	toolResultReducerMetadataKey       = "reducer"
+)
 
 func ParseToolResultAutoReview(metadata string) (ToolResultAutoReview, bool) {
 	var review ToolResultAutoReview
@@ -165,6 +184,63 @@ func (t ToolResult) WithSubtaskResult(subtask ToolResultSubtaskResult) ToolResul
 		payload = map[string]json.RawMessage{}
 	}
 	payload[toolResultSubtaskResultMetadataKey] = subtaskData
+
+	merged, err := json.Marshal(payload)
+	if err != nil {
+		return t
+	}
+	t.Metadata = string(merged)
+	return t
+}
+
+func ParseToolResultReducer(metadata string) (ToolResultReducer, bool) {
+	var reducer ToolResultReducer
+	if strings.TrimSpace(metadata) == "" {
+		return reducer, false
+	}
+
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(metadata), &payload); err != nil {
+		return ToolResultReducer{}, false
+	}
+
+	raw, ok := payload[toolResultReducerMetadataKey]
+	if !ok || len(raw) == 0 || string(raw) == "null" {
+		return ToolResultReducer{}, false
+	}
+	if err := json.Unmarshal(raw, &reducer); err != nil {
+		return ToolResultReducer{}, false
+	}
+	if reducer.isEmpty() {
+		return ToolResultReducer{}, false
+	}
+	return reducer, true
+}
+
+func (t ToolResult) Reducer() (ToolResultReducer, bool) {
+	if !t.ReducerMeta.isEmpty() {
+		return t.ReducerMeta, true
+	}
+	return ParseToolResultReducer(t.Metadata)
+}
+
+func (t ToolResult) WithReducer(reducer ToolResultReducer) ToolResult {
+	t.ReducerMeta = reducer
+	reducerData, err := json.Marshal(reducer)
+	if err != nil {
+		return t
+	}
+
+	var payload map[string]json.RawMessage
+	if strings.TrimSpace(t.Metadata) != "" {
+		if err := json.Unmarshal([]byte(t.Metadata), &payload); err != nil {
+			payload = nil
+		}
+	}
+	if payload == nil {
+		payload = map[string]json.RawMessage{}
+	}
+	payload[toolResultReducerMetadataKey] = reducerData
 
 	merged, err := json.Marshal(payload)
 	if err != nil {

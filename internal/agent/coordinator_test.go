@@ -480,6 +480,38 @@ func TestRunSubAgent(t *testing.T) {
 		require.NoError(t, err)
 	})
 
+	t.Run("uses injected subagent scheduler", func(t *testing.T) {
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, providerID, providerCfg)
+
+		parentSession, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+
+		agent := newMockAgent(providerID, 4096, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+			t.Fatalf("direct subagent path should not execute when scheduler is injected")
+			return nil, nil
+		})
+
+		var gotParams subAgentParams
+		coord.subAgentScheduler = func(_ context.Context, params subAgentParams) (fantasy.ToolResponse, error) {
+			gotParams = params
+			return fantasy.NewTextResponse("scheduled"), nil
+		}
+
+		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:          agent,
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+			Prompt:         "scheduled prompt",
+			SessionTitle:   "Scheduled Session",
+		})
+		require.NoError(t, err)
+		assert.Equal(t, "scheduled", resp.Content)
+		assert.Equal(t, "scheduled prompt", gotParams.Prompt)
+		assert.Equal(t, "Scheduled Session", gotParams.SessionTitle)
+	})
+
 	t.Run("cost propagation to parent session", func(t *testing.T) {
 		env := testEnv(t)
 		coord := newTestCoordinator(t, env, providerID, providerCfg)

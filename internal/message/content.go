@@ -115,6 +115,7 @@ type ToolResult struct {
 
 	AutoReviewMeta    ToolResultAutoReview    `json:"-"`
 	SubtaskResultMeta ToolResultSubtaskResult `json:"-"`
+	ReducerMeta       ToolResultReducer       `json:"-"`
 }
 
 func (ToolResult) isPart() {}

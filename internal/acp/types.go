@@ -274,6 +274,14 @@ type SubtaskResult struct {
 	Status string `json:"status,omitempty"`
 }
 
+type Reducer struct {
+	Summary     string   `json:"summary,omitempty"`
+	Artifacts   []string `json:"artifacts,omitempty"`
+	Risks       []string `json:"risks,omitempty"`
+	NextActions []string `json:"nextActions,omitempty"`
+	Confidence  string   `json:"confidence,omitempty"`
+}
+
 // SessionUpdate is the payload of a session/update notification.
 // The SessionUpdate field identifies the variant; remaining fields are
 // populated based on that variant.
@@ -294,6 +302,7 @@ type SessionUpdate struct {
 	ChildSessionID   string         `json:"childSessionId,omitempty"`
 	ParentToolCallID string         `json:"parentToolCallId,omitempty"`
 	SubtaskResult    *SubtaskResult `json:"subtaskResult,omitempty"`
+	Reducer          *Reducer       `json:"reducer,omitempty"`
 	// Plan entries.
 	Entries []PlanEntry `json:"entries,omitempty"`
 	// Session info update fields (ISO 8601 timestamp).
@@ -364,9 +373,10 @@ type ACPToolCall struct {
 
 // RequestPermissionParams is sent by the agent to ask the client for approval.
 type RequestPermissionParams struct {
-	SessionID string             `json:"sessionId"`
-	ToolCall  ACPToolCall        `json:"toolCall"`
-	Options   []PermissionOption `json:"options"`
+	SessionID          string             `json:"sessionId"`
+	AuthoritySessionID string             `json:"authoritySessionId,omitempty"`
+	ToolCall           ACPToolCall        `json:"toolCall"`
+	Options            []PermissionOption `json:"options"`
 }
 
 // RequestPermissionOutcome is the selection state returned by the client.

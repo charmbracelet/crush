@@ -183,12 +183,13 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 		description = fmt.Sprintf("Create file %s with %d edits", params.FilePath, editsApplied)
 	}
 	p, err := edit.permissions.Request(edit.ctx, permission.CreatePermissionRequest{
-		SessionID:   sessionID,
-		Path:        fsext.PathOrPrefix(params.FilePath, edit.workingDir),
-		ToolCallID:  call.ID,
-		ToolName:    MultiEditToolName,
-		Action:      "write",
-		Description: description,
+		SessionID:          sessionID,
+		AuthoritySessionID: ResolveAuthoritySessionID(edit.ctx, sessionID),
+		Path:               fsext.PathOrPrefix(params.FilePath, edit.workingDir),
+		ToolCallID:         call.ID,
+		ToolName:           MultiEditToolName,
+		Action:             "write",
+		Description:        description,
 		Params: MultiEditPermissionsParams{
 			FilePath:   params.FilePath,
 			OldContent: "",
@@ -325,12 +326,13 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 		description = fmt.Sprintf("Apply %d edits to file %s", editsApplied, params.FilePath)
 	}
 	p, err := edit.permissions.Request(edit.ctx, permission.CreatePermissionRequest{
-		SessionID:   sessionID,
-		Path:        fsext.PathOrPrefix(params.FilePath, edit.workingDir),
-		ToolCallID:  call.ID,
-		ToolName:    MultiEditToolName,
-		Action:      "write",
-		Description: description,
+		SessionID:          sessionID,
+		AuthoritySessionID: ResolveAuthoritySessionID(edit.ctx, sessionID),
+		Path:               fsext.PathOrPrefix(params.FilePath, edit.workingDir),
+		ToolCallID:         call.ID,
+		ToolName:           MultiEditToolName,
+		Action:             "write",
+		Description:        description,
 		Params: MultiEditPermissionsParams{
 			FilePath:   params.FilePath,
 			OldContent: oldContent,

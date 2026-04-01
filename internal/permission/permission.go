@@ -76,13 +76,14 @@ func IsPermissionError(err error) bool {
 }
 
 type CreatePermissionRequest struct {
-	SessionID   string `json:"session_id"`
-	ToolCallID  string `json:"tool_call_id"`
-	ToolName    string `json:"tool_name"`
-	Description string `json:"description"`
-	Action      string `json:"action"`
-	Params      any    `json:"params"`
-	Path        string `json:"path"`
+	SessionID          string `json:"session_id"`
+	AuthoritySessionID string `json:"authority_session_id,omitempty"`
+	ToolCallID         string `json:"tool_call_id"`
+	ToolName           string `json:"tool_name"`
+	Description        string `json:"description"`
+	Action             string `json:"action"`
+	Params             any    `json:"params"`
+	Path               string `json:"path"`
 }
 
 type PermissionNotification struct {
@@ -92,15 +93,16 @@ type PermissionNotification struct {
 }
 
 type PermissionRequest struct {
-	ID          string      `json:"id"`
-	SessionID   string      `json:"session_id"`
-	ToolCallID  string      `json:"tool_call_id"`
-	ToolName    string      `json:"tool_name"`
-	Description string      `json:"description"`
-	Action      string      `json:"action"`
-	Params      any         `json:"params"`
-	Path        string      `json:"path"`
-	AutoReview  *AutoReview `json:"auto_review,omitempty"`
+	ID                 string      `json:"id"`
+	SessionID          string      `json:"session_id"`
+	AuthoritySessionID string      `json:"authority_session_id,omitempty"`
+	ToolCallID         string      `json:"tool_call_id"`
+	ToolName           string      `json:"tool_name"`
+	Description        string      `json:"description"`
+	Action             string      `json:"action"`
+	Params             any         `json:"params"`
+	Path               string      `json:"path"`
+	AutoReview         *AutoReview `json:"auto_review,omitempty"`
 }
 
 type EvaluationDecision string
@@ -344,15 +346,21 @@ func (s *permissionService) buildPermissionRequest(opts CreatePermissionRequest)
 		dir = s.workingDir
 	}
 
+	authoritySessionID := opts.AuthoritySessionID
+	if authoritySessionID == "" {
+		authoritySessionID = opts.SessionID
+	}
+
 	return PermissionRequest{
-		ID:          uuid.New().String(),
-		Path:        dir,
-		SessionID:   opts.SessionID,
-		ToolCallID:  opts.ToolCallID,
-		ToolName:    opts.ToolName,
-		Description: opts.Description,
-		Action:      opts.Action,
-		Params:      opts.Params,
+		ID:                 uuid.New().String(),
+		Path:               dir,
+		SessionID:          opts.SessionID,
+		AuthoritySessionID: authoritySessionID,
+		ToolCallID:         opts.ToolCallID,
+		ToolName:           opts.ToolName,
+		Description:        opts.Description,
+		Action:             opts.Action,
+		Params:             opts.Params,
 	}, nil
 }
 

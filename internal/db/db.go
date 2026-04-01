@@ -126,6 +126,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.renameSessionStmt, err = db.PrepareContext(ctx, renameSession); err != nil {
 		return nil, fmt.Errorf("error preparing query RenameSession: %w", err)
 	}
+	if q.searchMessagesStmt, err = db.PrepareContext(ctx, searchMessages); err != nil {
+		return nil, fmt.Errorf("error preparing query SearchMessages: %w", err)
+	}
 	if q.updateMessageStmt, err = db.PrepareContext(ctx, updateMessage); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateMessage: %w", err)
 	}
@@ -316,6 +319,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing renameSessionStmt: %w", cerr)
 		}
 	}
+	if q.searchMessagesStmt != nil {
+		if cerr := q.searchMessagesStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing searchMessagesStmt: %w", cerr)
+		}
+	}
 	if q.updateMessageStmt != nil {
 		if cerr := q.updateMessageStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing updateMessageStmt: %w", cerr)
@@ -414,6 +422,7 @@ type Queries struct {
 	listUserMessagesBySessionStmt      *sql.Stmt
 	recordFileReadStmt                 *sql.Stmt
 	renameSessionStmt                  *sql.Stmt
+	searchMessagesStmt                 *sql.Stmt
 	updateMessageStmt                  *sql.Stmt
 	updateSessionStmt                  *sql.Stmt
 	updateSessionCollaborationModeStmt *sql.Stmt
@@ -459,6 +468,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listUserMessagesBySessionStmt:      q.listUserMessagesBySessionStmt,
 		recordFileReadStmt:                 q.recordFileReadStmt,
 		renameSessionStmt:                  q.renameSessionStmt,
+		searchMessagesStmt:                 q.searchMessagesStmt,
 		updateMessageStmt:                  q.updateMessageStmt,
 		updateSessionStmt:                  q.updateSessionStmt,
 		updateSessionCollaborationModeStmt: q.updateSessionCollaborationModeStmt,

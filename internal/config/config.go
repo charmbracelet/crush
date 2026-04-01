@@ -619,6 +619,8 @@ func allToolNames() []string {
 		"ls",
 		"request_user_input",
 		"sourcegraph",
+		"history_search",
+		"long_term_memory",
 		"todos",
 		"view",
 		"write",

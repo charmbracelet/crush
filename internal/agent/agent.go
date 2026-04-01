@@ -79,10 +79,10 @@ const autoResumePromptPrefix = "The previous session was interrupted because it 
 type sessionCompactionTrigger string
 
 const (
-	sessionCompactionTriggerNone       sessionCompactionTrigger = ""
-	sessionCompactionTriggerNormal     sessionCompactionTrigger = "normal_summarize"
-	sessionCompactionTriggerRecover    sessionCompactionTrigger = "recover_summarize"
-	sessionCompactionTriggerProactive  sessionCompactionTrigger = "proactive_compact"
+	sessionCompactionTriggerNone      sessionCompactionTrigger = ""
+	sessionCompactionTriggerNormal    sessionCompactionTrigger = "normal_summarize"
+	sessionCompactionTriggerRecover   sessionCompactionTrigger = "recover_summarize"
+	sessionCompactionTriggerProactive sessionCompactionTrigger = "proactive_compact"
 )
 
 func (t sessionCompactionTrigger) Purpose() plugin.ChatTransformPurpose {
@@ -382,6 +382,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	// Add the session to the context.
 	ctx = context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
+	ctx = context.WithValue(ctx, tools.SessionServiceContextKey, a.sessions)
 
 	genCtx, cancel := context.WithCancel(ctx)
 	a.activeRequests.Set(call.SessionID, cancel)
@@ -531,6 +532,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				callContext = context.WithValue(callContext, tools.MessageIDContextKey, assistantMsg.ID)
 				callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatwalkCfg.SupportsImages)
 				callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatwalkCfg.Name)
+				callContext = context.WithValue(callContext, tools.SessionServiceContextKey, a.sessions)
 				currentAssistant = &assistantMsg
 				currentStepToolMessageIDs = nil
 				allRunMessageIDs = append(allRunMessageIDs, assistantMsg.ID)

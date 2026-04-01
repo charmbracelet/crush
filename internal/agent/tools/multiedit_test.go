@@ -86,6 +86,10 @@ func (m *mockHistoryService) ListLatestSessionFiles(ctx context.Context, session
 	return nil, nil
 }
 
+func (m *mockHistoryService) SearchMessages(ctx context.Context, params history.SearchParams) ([]history.MessageSearchResult, error) {
+	return nil, nil
+}
+
 func (m *mockHistoryService) Delete(ctx context.Context, id string) error {
 	return nil
 }

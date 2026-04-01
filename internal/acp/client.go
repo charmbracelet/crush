@@ -51,8 +51,9 @@ func handlePermissionRequest(ctx context.Context, req permission.PermissionReque
 	}
 
 	params := RequestPermissionParams{
-		SessionID: req.SessionID,
-		ToolCall:  toolCall,
+		SessionID:          req.SessionID,
+		AuthoritySessionID: req.AuthoritySessionID,
+		ToolCall:           toolCall,
 		Options: []PermissionOption{
 			{OptionID: allowOnceID, Name: "Allow once", Kind: PermissionOptionAllowOnce},
 			{OptionID: rejectOnceID, Name: "Reject", Kind: PermissionOptionRejectOnce},

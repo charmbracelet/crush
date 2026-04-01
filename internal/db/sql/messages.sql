@@ -53,3 +53,16 @@ SELECT *
 FROM messages
 WHERE role = 'user'
 ORDER BY created_at DESC;
+
+-- name: SearchMessages :many
+SELECT *
+FROM messages
+WHERE (sqlc.arg(session_id) = '' OR session_id = sqlc.arg(session_id))
+  AND EXISTS (
+    SELECT 1
+    FROM json_each(messages.parts)
+    WHERE json_extract(json_each.value, '$.type') = 'text'
+      AND lower(COALESCE(json_extract(json_each.value, '$.data.text'), '')) LIKE lower('%' || sqlc.arg(query) || '%')
+  )
+ORDER BY created_at DESC
+LIMIT sqlc.arg(limit);

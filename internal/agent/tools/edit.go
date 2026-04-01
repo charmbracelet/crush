@@ -139,12 +139,13 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 	)
 	p, err := edit.permissions.Request(edit.ctx,
 		permission.CreatePermissionRequest{
-			SessionID:   sessionID,
-			Path:        fsext.PathOrPrefix(filePath, edit.workingDir),
-			ToolCallID:  call.ID,
-			ToolName:    EditToolName,
-			Action:      "write",
-			Description: fmt.Sprintf("Create file %s", filePath),
+			SessionID:          sessionID,
+			AuthoritySessionID: ResolveAuthoritySessionID(edit.ctx, sessionID),
+			Path:               fsext.PathOrPrefix(filePath, edit.workingDir),
+			ToolCallID:         call.ID,
+			ToolName:           EditToolName,
+			Action:             "write",
+			Description:        fmt.Sprintf("Create file %s", filePath),
 			Params: EditPermissionsParams{
 				FilePath:   filePath,
 				OldContent: "",
@@ -258,12 +259,13 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 
 	p, err := edit.permissions.Request(edit.ctx,
 		permission.CreatePermissionRequest{
-			SessionID:   sessionID,
-			Path:        fsext.PathOrPrefix(filePath, edit.workingDir),
-			ToolCallID:  call.ID,
-			ToolName:    EditToolName,
-			Action:      "write",
-			Description: fmt.Sprintf("Delete content from file %s", filePath),
+			SessionID:          sessionID,
+			AuthoritySessionID: ResolveAuthoritySessionID(edit.ctx, sessionID),
+			Path:               fsext.PathOrPrefix(filePath, edit.workingDir),
+			ToolCallID:         call.ID,
+			ToolName:           EditToolName,
+			Action:             "write",
+			Description:        fmt.Sprintf("Delete content from file %s", filePath),
 			Params: EditPermissionsParams{
 				FilePath:   filePath,
 				OldContent: oldContent,
@@ -389,12 +391,13 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 
 	p, err := edit.permissions.Request(edit.ctx,
 		permission.CreatePermissionRequest{
-			SessionID:   sessionID,
-			Path:        fsext.PathOrPrefix(filePath, edit.workingDir),
-			ToolCallID:  call.ID,
-			ToolName:    EditToolName,
-			Action:      "write",
-			Description: fmt.Sprintf("Replace content in file %s", filePath),
+			SessionID:          sessionID,
+			AuthoritySessionID: ResolveAuthoritySessionID(edit.ctx, sessionID),
+			Path:               fsext.PathOrPrefix(filePath, edit.workingDir),
+			ToolCallID:         call.ID,
+			ToolName:           EditToolName,
+			Action:             "write",
+			Description:        fmt.Sprintf("Replace content in file %s", filePath),
 			Params: EditPermissionsParams{
 				FilePath:   filePath,
 				OldContent: oldContent,

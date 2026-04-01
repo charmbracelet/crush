@@ -222,6 +222,26 @@ func (f *fakeCoordinator) Run(_ context.Context, sessionID, prompt string, _ ...
 	if strings.Contains(prompt, "publish-runtime-complete") {
 		f.runtimeSvc.Publish(toolruntime.State{SessionID: sessionID, ToolCallID: "tool-fetch-1", ToolName: "fetch", Status: toolruntime.StatusCompleted})
 	}
+	if strings.Contains(prompt, "publish-reducer-update") {
+		f.messageSvc.Publish(pubsub.CreatedEvent, message.Message{
+			ID:        "reducer-tool-result-1",
+			SessionID: sessionID,
+			Role:      message.Tool,
+			Parts: []message.ContentPart{
+				message.ToolResult{
+					ToolCallID: "tool-reducer-1",
+					Name:       "agent",
+					Content:    "done",
+				}.WithReducer(message.ToolResultReducer{
+					Summary:     "Execution finished",
+					Artifacts:   []string{"dist/app"},
+					Risks:       []string{"network flakiness"},
+					NextActions: []string{"monitor"},
+					Confidence:  "high",
+				}),
+			},
+		})
+	}
 	if strings.Contains(prompt, "publish-timeline-events") && f.timelineSvc != nil {
 		f.timelineSvc.Publish(timeline.ModeChangedEvent(sessionID, session.ModeTransition{
 			Previous: session.ModeState{CollaborationMode: session.CollaborationModeDefault, PermissionMode: session.PermissionModeAuto},
@@ -271,6 +291,37 @@ type fakeApp struct {
 	cfg         *config.ConfigStore
 	runtime     toolruntime.Service
 	timeline    timeline.Service
+}
+
+type recordingPermissionService struct {
+	permission.Service
+	requests              *pubsub.Broker[permission.PermissionRequest]
+	lastGrantedPersistent permission.PermissionRequest
+	lastGranted           permission.PermissionRequest
+	lastDenied            permission.PermissionRequest
+}
+
+func (r *recordingPermissionService) Subscribe(ctx context.Context) <-chan pubsub.Event[permission.PermissionRequest] {
+	return r.requests.Subscribe(ctx)
+}
+
+func (r *recordingPermissionService) PublishRequest(req permission.PermissionRequest) {
+	r.requests.Publish(pubsub.CreatedEvent, req)
+}
+
+func (r *recordingPermissionService) GrantPersistent(req permission.PermissionRequest) {
+	r.lastGrantedPersistent = req
+	r.Service.GrantPersistent(req)
+}
+
+func (r *recordingPermissionService) Grant(req permission.PermissionRequest) {
+	r.lastGranted = req
+	r.Service.Grant(req)
+}
+
+func (r *recordingPermissionService) Deny(req permission.PermissionRequest) {
+	r.lastDenied = req
+	r.Service.Deny(req)
 }
 
 func (a *fakeApp) GetSessions() session.Service      { return a.sessions }
@@ -840,6 +891,65 @@ func TestSessionPrompt_ForwardsChildSessionToolUpdates(t *testing.T) {
 	require.True(t, seenSubToolUpdate)
 }
 
+func TestSessionPrompt_ForwardsReducerFromToolResult(t *testing.T) {
+	t.Parallel()
+
+	inReader, inWriter := io.Pipe()
+	outReader, outWriter := io.Pipe()
+
+	sessionID := "reducer-session"
+
+	app := newFakeApp()
+	app.sessions.sessions[sessionID] = session.Session{ID: sessionID, Title: "reducer"}
+
+	handler := acp.NewHandler(app)
+	server := acp.NewServerWithIO(handler, inReader, outWriter)
+	handler.SetServer(server)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	defer inWriter.Close()
+
+	go func() { _ = server.Serve(ctx) }()
+
+	outScanner := bufio.NewScanner(outReader)
+
+	_, err := fmt.Fprint(inWriter, buildRequest(t, 1, "session/prompt", acp.PromptParams{
+		SessionID: sessionID,
+		Prompt:    []acp.ContentBlock{{Type: "text", Text: "publish-reducer-update"}},
+	}))
+	require.NoError(t, err)
+
+	seenReducerUpdate := false
+	for outScanner.Scan() {
+		line := outScanner.Bytes()
+		var envelope struct {
+			ID     *int64                        `json:"id"`
+			Method string                        `json:"method"`
+			Params acp.SessionUpdateNotification `json:"params"`
+		}
+		require.NoError(t, json.Unmarshal(line, &envelope))
+		if envelope.ID != nil {
+			require.EqualValues(t, 1, *envelope.ID)
+			break
+		}
+		if envelope.Method != "session/update" {
+			continue
+		}
+		update := envelope.Params.Update
+		if update.SessionUpdate == acp.SessionUpdateToolCallUpdate && update.ToolCallID == "tool-reducer-1" {
+			seenReducerUpdate = true
+			require.NotNil(t, update.Reducer)
+			require.Equal(t, "Execution finished", update.Reducer.Summary)
+			require.Equal(t, []string{"dist/app"}, update.Reducer.Artifacts)
+			require.Equal(t, []string{"network flakiness"}, update.Reducer.Risks)
+			require.Equal(t, []string{"monitor"}, update.Reducer.NextActions)
+			require.Equal(t, "high", update.Reducer.Confidence)
+		}
+	}
+	require.True(t, seenReducerUpdate)
+}
+
 func TestSessionPrompt_ForwardsNonBashRuntimeCompletion(t *testing.T) {
 	t.Parallel()
 
@@ -926,6 +1036,7 @@ func TestSessionPrompt_ForwardsTimelineEvents(t *testing.T) {
 	seenMode := false
 	seenChildEvent := false
 	seenTimeline := false
+	seenResponse := false
 	for outScanner.Scan() {
 		line := outScanner.Bytes()
 		var envelope struct {
@@ -936,7 +1047,11 @@ func TestSessionPrompt_ForwardsTimelineEvents(t *testing.T) {
 		require.NoError(t, json.Unmarshal(line, &envelope))
 		if envelope.ID != nil {
 			require.EqualValues(t, 1, *envelope.ID)
-			break
+			seenResponse = true
+			if seenTimeline && seenMode && seenChildEvent {
+				break
+			}
+			continue
 		}
 		if envelope.Method != "session/update" {
 			continue
@@ -959,8 +1074,88 @@ func TestSessionPrompt_ForwardsTimelineEvents(t *testing.T) {
 			require.Equal(t, "child-1", update.TimelineEvent.ChildSessionID)
 			require.Equal(t, "completed", update.TimelineEvent.Status)
 		}
+		if seenResponse && seenTimeline && seenMode && seenChildEvent {
+			break
+		}
 	}
+	require.True(t, seenResponse)
 	require.True(t, seenTimeline)
 	require.True(t, seenMode)
 	require.True(t, seenChildEvent)
+}
+
+func TestPermissionBridgeForwardsAuthoritySessionID(t *testing.T) {
+	t.Parallel()
+
+	inReader, inWriter := io.Pipe()
+	outReader, outWriter := io.Pipe()
+
+	handler := acp.NewHandler(newFakeApp())
+	server := acp.NewServerWithIO(handler, inReader, outWriter)
+	handler.SetServer(server)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	defer inWriter.Close()
+
+	go func() { _ = server.Serve(ctx) }()
+
+	base := permission.NewPermissionService(".", false, nil)
+	perms := &recordingPermissionService{Service: base, requests: pubsub.NewBroker[permission.PermissionRequest]()}
+	go acp.RunPermissionBridge(ctx, perms, server)
+	require.Eventually(t, func() bool {
+		return perms.requests.GetSubscriberCount() > 0
+	}, time.Second, 10*time.Millisecond)
+
+	req := permission.PermissionRequest{
+		ID:                 "perm-1",
+		SessionID:          "child-session",
+		AuthoritySessionID: "parent-session",
+		ToolCallID:         "tool-1",
+		ToolName:           "write",
+		Action:             "write",
+		Params:             map[string]any{"file_path": "a.txt"},
+		Path:               ".",
+	}
+
+	perms.PublishRequest(req)
+
+	scanner := bufio.NewScanner(outReader)
+	require.True(t, scanner.Scan(), "expected request_permission call")
+	line := scanner.Bytes()
+
+	var outbound struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      *int64          `json:"id"`
+		Method  string          `json:"method"`
+		Params  json.RawMessage `json:"params"`
+	}
+	require.NoError(t, json.Unmarshal(line, &outbound))
+	require.Equal(t, "session/request_permission", outbound.Method)
+	require.NotNil(t, outbound.ID)
+
+	var params acp.RequestPermissionParams
+	require.NoError(t, json.Unmarshal(outbound.Params, &params))
+	require.Equal(t, "child-session", params.SessionID)
+	require.Equal(t, "parent-session", params.AuthoritySessionID)
+
+	response, err := json.Marshal(acp.Response{
+		JSONRPC: "2.0",
+		ID:      outbound.ID,
+		Result:  mustJSONRaw(t, acp.RequestPermissionResult{Outcome: acp.RequestPermissionOutcome{Outcome: "selected", OptionID: params.Options[0].OptionID}}),
+	})
+	require.NoError(t, err)
+	_, err = fmt.Fprintln(inWriter, string(response))
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		return perms.lastGranted.ToolCallID == "tool-1"
+	}, time.Second, 10*time.Millisecond)
+}
+
+func mustJSONRaw(t *testing.T, v any) json.RawMessage {
+	t.Helper()
+	b, err := json.Marshal(v)
+	require.NoError(t, err)
+	return b
 }

@@ -20,6 +20,12 @@ func TestConvertPartsIncludesToolResultMetadataAndSubtaskResult(t *testing.T) {
 			ChildSessionID:   "child-1",
 			ParentToolCallID: "call-1",
 			Status:           message.ToolResultSubtaskStatusCompleted,
+		}).WithReducer(message.ToolResultReducer{
+			Summary:     "Execution finished",
+			Artifacts:   []string{"dist/app"},
+			Risks:       []string{"network flakiness"},
+			NextActions: []string{"monitor"},
+			Confidence:  "high",
 		}),
 	})
 
@@ -31,4 +37,10 @@ func TestConvertPartsIncludesToolResultMetadataAndSubtaskResult(t *testing.T) {
 	require.Equal(t, "child-1", parts[0].SubtaskResult.ChildSessionID)
 	require.Equal(t, "call-1", parts[0].SubtaskResult.ParentToolCallID)
 	require.Equal(t, "completed", parts[0].SubtaskResult.Status)
+	require.NotNil(t, parts[0].Reducer)
+	require.Equal(t, "Execution finished", parts[0].Reducer.Summary)
+	require.Equal(t, []string{"dist/app"}, parts[0].Reducer.Artifacts)
+	require.Equal(t, []string{"network flakiness"}, parts[0].Reducer.Risks)
+	require.Equal(t, []string{"monitor"}, parts[0].Reducer.NextActions)
+	require.Equal(t, "high", parts[0].Reducer.Confidence)
 }

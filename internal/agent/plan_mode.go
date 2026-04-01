@@ -63,6 +63,55 @@ Auto Mode is not active.
 Do not assume permission-requiring actions will be auto-approved. When manual confirmation is required, wait for it instead of assuming it has already been granted.
 </permission_mode>`
 
+type toolRiskLevel string
+
+const (
+	toolRiskRead       toolRiskLevel = "read"
+	toolRiskWrite      toolRiskLevel = "write"
+	toolRiskExecute    toolRiskLevel = "execute"
+	toolRiskNetwork    toolRiskLevel = "network"
+	toolRiskDelegation toolRiskLevel = "delegation"
+)
+
+var toolRiskLevels = map[string]toolRiskLevel{
+	AgentToolName:                  toolRiskDelegation,
+	tools.AgenticFetchToolName:     toolRiskNetwork,
+	tools.BashToolName:             toolRiskExecute,
+	tools.JobOutputToolName:        toolRiskExecute,
+	tools.JobWaitToolName:          toolRiskExecute,
+	tools.JobKillToolName:          toolRiskExecute,
+	tools.DownloadToolName:         toolRiskNetwork,
+	tools.EditToolName:             toolRiskWrite,
+	tools.MultiEditToolName:        toolRiskWrite,
+	tools.FetchToolName:            toolRiskNetwork,
+	tools.GlobToolName:             toolRiskRead,
+	tools.GrepToolName:             toolRiskRead,
+	tools.LSToolName:               toolRiskRead,
+	tools.SourcegraphToolName:      toolRiskNetwork,
+	tools.HistorySearchToolName:    toolRiskRead,
+	tools.LongTermMemoryToolName:   toolRiskWrite,
+	tools.TodosToolName:            toolRiskWrite,
+	tools.ViewToolName:             toolRiskRead,
+	tools.WriteToolName:            toolRiskWrite,
+	tools.ListMCPResourcesToolName: toolRiskNetwork,
+	tools.ReadMCPResourceToolName:  toolRiskNetwork,
+	tools.DiagnosticsToolName:      toolRiskRead,
+	tools.ReferencesToolName:       toolRiskRead,
+	tools.LSPRestartToolName:       toolRiskExecute,
+	tools.RequestUserInputToolName: toolRiskRead,
+	tools.PlanExitToolName:         toolRiskRead,
+}
+
+var planModeReadToolNames = map[string]struct{}{
+	tools.GlobToolName:          {},
+	tools.GrepToolName:          {},
+	tools.LSToolName:            {},
+	tools.ViewToolName:          {},
+	tools.HistorySearchToolName: {},
+	tools.DiagnosticsToolName:   {},
+	tools.ReferencesToolName:    {},
+}
+
 func collaborationModePrompt(mode session.CollaborationMode) string {
 	switch mode {
 	case session.CollaborationModePlan:
@@ -103,37 +152,74 @@ func buildSystemPromptForModes(basePrompt string, mode session.CollaborationMode
 	return strings.Join(filtered, "\n\n")
 }
 
-func filterToolsForCollaborationMode(toolNames []string, mode session.CollaborationMode) []string {
-	if mode != session.CollaborationModePlan {
-		return slices.Clone(toolNames)
+func riskLevelForTool(toolName string) toolRiskLevel {
+	if level, ok := toolRiskLevels[toolName]; ok {
+		return level
 	}
+	return toolRiskExecute
+}
 
-	allowed := map[string]struct{}{
-		tools.BashToolName:             {},
-		tools.FetchToolName:            {},
-		tools.GlobToolName:             {},
-		tools.GrepToolName:             {},
-		tools.LSToolName:               {},
-		tools.ViewToolName:             {},
-		tools.DiagnosticsToolName:      {},
-		tools.ReferencesToolName:       {},
-		tools.ListMCPResourcesToolName: {},
-		tools.ReadMCPResourceToolName:  {},
-		tools.RequestUserInputToolName: {},
-		tools.PlanExitToolName:         {},
-		tools.SourcegraphToolName:      {},
+func isPlanModeToolAllowed(toolName string) bool {
+	if toolName == tools.RequestUserInputToolName || toolName == tools.PlanExitToolName {
+		return true
 	}
+	if riskLevelForTool(toolName) != toolRiskRead {
+		return false
+	}
+	_, ok := planModeReadToolNames[toolName]
+	return ok
+}
 
+func deduplicateToolNames(toolNames []string) []string {
 	filtered := make([]string, 0, len(toolNames))
+	seen := make(map[string]struct{}, len(toolNames))
 	for _, toolName := range toolNames {
-		if _, ok := allowed[toolName]; ok {
-			filtered = append(filtered, toolName)
+		if _, ok := seen[toolName]; ok {
+			continue
 		}
-	}
-	if !slices.Contains(filtered, tools.PlanExitToolName) {
-		filtered = append(filtered, tools.PlanExitToolName)
+		seen[toolName] = struct{}{}
+		filtered = append(filtered, toolName)
 	}
 	return filtered
+}
+
+func removeDisabledToolNames(toolNames []string, disabledToolNames []string) []string {
+	if len(disabledToolNames) == 0 {
+		return toolNames
+	}
+	filtered := make([]string, 0, len(toolNames))
+	for _, toolName := range toolNames {
+		if slices.Contains(disabledToolNames, toolName) {
+			continue
+		}
+		filtered = append(filtered, toolName)
+	}
+	return filtered
+}
+
+func filterToolsForRiskPolicy(toolNames []string, mode session.CollaborationMode, disabledToolNames []string) []string {
+	filtered := deduplicateToolNames(toolNames)
+	if mode != session.CollaborationModePlan {
+		return removeDisabledToolNames(filtered, disabledToolNames)
+	}
+
+	planModeTools := make([]string, 0, len(filtered)+2)
+	for _, toolName := range filtered {
+		if isPlanModeToolAllowed(toolName) {
+			planModeTools = append(planModeTools, toolName)
+		}
+	}
+	if !slices.Contains(planModeTools, tools.RequestUserInputToolName) {
+		planModeTools = append(planModeTools, tools.RequestUserInputToolName)
+	}
+	if !slices.Contains(planModeTools, tools.PlanExitToolName) {
+		planModeTools = append(planModeTools, tools.PlanExitToolName)
+	}
+	return planModeTools
+}
+
+func filterToolsForCollaborationMode(toolNames []string, mode session.CollaborationMode) []string {
+	return filterToolsForRiskPolicy(toolNames, mode, nil)
 }
 
 func filterToolsByNames(toolsList []fantasy.AgentTool, allowedNames []string) []fantasy.AgentTool {

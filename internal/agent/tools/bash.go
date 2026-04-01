@@ -362,12 +362,13 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 func requestBashPermission(ctx context.Context, permissions permission.Service, sessionID, toolCallID, workingDir string, params BashParams) error {
 	p, err := permissions.Request(ctx,
 		permission.CreatePermissionRequest{
-			SessionID:   sessionID,
-			Path:        workingDir,
-			ToolCallID:  toolCallID,
-			ToolName:    BashToolName,
-			Action:      "execute",
-			Description: fmt.Sprintf("Execute command: %s", params.Command),
+			SessionID:          sessionID,
+			AuthoritySessionID: ResolveAuthoritySessionID(ctx, sessionID),
+			Path:               workingDir,
+			ToolCallID:         toolCallID,
+			ToolName:           BashToolName,
+			Action:             "execute",
+			Description:        fmt.Sprintf("Execute command: %s", params.Command),
 			Params: BashPermissionsParams{
 				Description:         params.Description,
 				Command:             params.Command,

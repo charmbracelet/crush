@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/session"
 	"github.com/stretchr/testify/require"
 )
 
@@ -14,9 +15,11 @@ type mockToolPermissionService struct {
 	*pubsub.Broker[permission.PermissionRequest]
 	granted bool
 	err     error
+	lastReq permission.CreatePermissionRequest
 }
 
-func (m *mockToolPermissionService) Request(context.Context, permission.CreatePermissionRequest) (bool, error) {
+func (m *mockToolPermissionService) Request(_ context.Context, req permission.CreatePermissionRequest) (bool, error) {
+	m.lastReq = req
 	return m.granted, m.err
 }
 
@@ -89,4 +92,49 @@ func TestRequestPermission_PropagatesNonPermissionError(t *testing.T) {
 	resp, err := RequestPermission(context.Background(), permissions, permission.CreatePermissionRequest{})
 	require.Nil(t, resp)
 	require.ErrorIs(t, err, expectedErr)
+}
+
+func TestResolveAuthoritySessionID_UsesParentSession(t *testing.T) {
+	t.Parallel()
+
+	svc := &mockPermissionSessionLookup{session: session.Session{ID: "child", ParentSessionID: "parent"}}
+	ctx := context.WithValue(context.Background(), SessionServiceContextKey, svc)
+
+	authoritySessionID := ResolveAuthoritySessionID(ctx, "child")
+	require.Equal(t, "parent", authoritySessionID)
+}
+
+func TestResolveAuthoritySessionID_FallsBackToCurrentSession(t *testing.T) {
+	t.Parallel()
+
+	authoritySessionID := ResolveAuthoritySessionID(context.Background(), "child")
+	require.Equal(t, "child", authoritySessionID)
+}
+
+func TestRequestPermission_SetsAuthoritySessionID(t *testing.T) {
+	t.Parallel()
+
+	permissions := &mockToolPermissionService{
+		Broker:  pubsub.NewBroker[permission.PermissionRequest](),
+		granted: true,
+	}
+	svc := &mockPermissionSessionLookup{session: session.Session{ID: "child", ParentSessionID: "parent"}}
+	ctx := context.WithValue(context.Background(), SessionServiceContextKey, svc)
+
+	resp, err := RequestPermission(ctx, permissions, permission.CreatePermissionRequest{SessionID: "child"})
+	require.NoError(t, err)
+	require.Nil(t, resp)
+	require.Equal(t, "parent", permissions.lastReq.AuthoritySessionID)
+}
+
+type mockPermissionSessionLookup struct {
+	session session.Session
+	err     error
+}
+
+func (m *mockPermissionSessionLookup) Get(context.Context, string) (session.Session, error) {
+	if m.err != nil {
+		return session.Session{}, m.err
+	}
+	return m.session, nil
 }

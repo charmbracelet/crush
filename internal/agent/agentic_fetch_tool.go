@@ -83,13 +83,14 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 
 			p, err := c.permissions.Request(ctx,
 				permission.CreatePermissionRequest{
-					SessionID:   validationResult.SessionID,
-					Path:        c.cfg.WorkingDir(),
-					ToolCallID:  call.ID,
-					ToolName:    tools.AgenticFetchToolName,
-					Action:      "fetch",
-					Description: description,
-					Params:      tools.AgenticFetchPermissionsParams(params),
+					SessionID:          validationResult.SessionID,
+					AuthoritySessionID: tools.ResolveAuthoritySessionID(ctx, validationResult.SessionID),
+					Path:               c.cfg.WorkingDir(),
+					ToolCallID:         call.ID,
+					ToolName:           tools.AgenticFetchToolName,
+					Action:             "fetch",
+					Description:        description,
+					Params:             tools.AgenticFetchPermissionsParams(params),
 				},
 			)
 			if err != nil {

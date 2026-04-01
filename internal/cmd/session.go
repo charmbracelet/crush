@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/chat"
@@ -35,11 +36,13 @@ var sessionCmd = &cobra.Command{
 }
 
 var (
-	sessionListJSON   bool
-	sessionShowJSON   bool
-	sessionLastJSON   bool
-	sessionDeleteJSON bool
-	sessionRenameJSON bool
+	sessionListJSON      bool
+	sessionShowJSON      bool
+	sessionLastJSON      bool
+	sessionDeleteJSON    bool
+	sessionRenameJSON    bool
+	sessionSearchSession string
+	sessionSearchLimit   int
 )
 
 var sessionListCmd = &cobra.Command{
@@ -82,22 +85,34 @@ var sessionRenameCmd = &cobra.Command{
 	RunE:  runSessionRename,
 }
 
+var sessionSearchCmd = &cobra.Command{
+	Use:   "search <query>",
+	Short: "Search messages across session history",
+	Long:  "Search message text content in one session or globally.",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runSessionSearch,
+}
+
 func init() {
 	sessionListCmd.Flags().BoolVar(&sessionListJSON, "json", false, "output in JSON format")
 	sessionShowCmd.Flags().BoolVar(&sessionShowJSON, "json", false, "output in JSON format")
 	sessionLastCmd.Flags().BoolVar(&sessionLastJSON, "json", false, "output in JSON format")
 	sessionDeleteCmd.Flags().BoolVar(&sessionDeleteJSON, "json", false, "output in JSON format")
 	sessionRenameCmd.Flags().BoolVar(&sessionRenameJSON, "json", false, "output in JSON format")
+	sessionSearchCmd.Flags().StringVar(&sessionSearchSession, "session", "", "session ID, hash, or hash prefix")
+	sessionSearchCmd.Flags().IntVar(&sessionSearchLimit, "limit", 20, "maximum number of results")
 	sessionCmd.AddCommand(sessionListCmd)
 	sessionCmd.AddCommand(sessionShowCmd)
 	sessionCmd.AddCommand(sessionLastCmd)
 	sessionCmd.AddCommand(sessionDeleteCmd)
 	sessionCmd.AddCommand(sessionRenameCmd)
+	sessionCmd.AddCommand(sessionSearchCmd)
 }
 
 type sessionServices struct {
 	sessions session.Service
 	messages message.Service
+	history  history.Service
 }
 
 func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func(), error) {
@@ -122,6 +137,7 @@ func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func()
 	svc := &sessionServices{
 		sessions: session.NewService(queries, conn),
 		messages: message.NewService(queries),
+		history:  history.NewService(queries, conn),
 	}
 	return ctx, svc, func() { conn.Close() }, nil
 }
@@ -379,6 +395,64 @@ func runSessionLast(cmd *cobra.Command, _ []string) error {
 	return outputSessionHuman(ctx, sess, msgPtrs)
 }
 
+func runSessionSearch(cmd *cobra.Command, args []string) error {
+	ctx, svc, cleanup, err := sessionSetup(cmd)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	query := strings.TrimSpace(args[0])
+	if query == "" {
+		return fmt.Errorf("query cannot be empty")
+	}
+
+	sessionID := ""
+	if sessionSearchSession != "" {
+		sess, err := resolveSessionID(ctx, svc.sessions, sessionSearchSession)
+		if err != nil {
+			return err
+		}
+		sessionID = sess.ID
+	}
+
+	results, err := svc.history.SearchMessages(ctx, history.SearchParams{
+		Query:     query,
+		SessionID: sessionID,
+		Limit:     sessionSearchLimit,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to search messages: %w", err)
+	}
+
+	out := cmd.OutOrStdout()
+	if len(results) == 0 {
+		_, err := fmt.Fprintln(out, "No matching messages found.")
+		return err
+	}
+
+	_, err = fmt.Fprintf(out, "Found %d matching messages:\n\n", len(results))
+	if err != nil {
+		return err
+	}
+	for i, result := range results {
+		line := strings.ReplaceAll(result.Text, "\n", " ")
+		line = strings.TrimSpace(line)
+		if len([]rune(line)) > 120 {
+			line = string([]rune(line)[:120]) + "…"
+		}
+		timestamp := time.Unix(result.CreatedAt, 0).Format(time.RFC3339)
+		hash := session.HashID(result.SessionID)
+		if len(hash) > 12 {
+			hash = hash[:12]
+		}
+		if _, err := fmt.Fprintf(out, "%d. [%s] session=%s role=%s\n   %s\n", i+1, timestamp, hash, result.Role, line); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 const (
 	sessionOutputWidth     = 80
 	sessionMaxContentWidth = 120
@@ -605,6 +679,7 @@ type sessionShowPart struct {
 	MIMEType      string                    `json:"mime_type,omitempty"`
 	Metadata      string                    `json:"metadata,omitempty"`
 	SubtaskResult *sessionShowSubtaskResult `json:"subtask_result,omitempty"`
+	Reducer       *sessionShowReducer       `json:"reducer,omitempty"`
 
 	// Binary
 	Size int64 `json:"size,omitempty"`
@@ -622,6 +697,14 @@ type sessionShowSubtaskResult struct {
 	ChildSessionID   string `json:"child_session_id,omitempty"`
 	ParentToolCallID string `json:"parent_tool_call_id,omitempty"`
 	Status           string `json:"status,omitempty"`
+}
+
+type sessionShowReducer struct {
+	Summary     string   `json:"summary,omitempty"`
+	Artifacts   []string `json:"artifacts,omitempty"`
+	Risks       []string `json:"risks,omitempty"`
+	NextActions []string `json:"next_actions,omitempty"`
+	Confidence  string   `json:"confidence,omitempty"`
 }
 
 func convertParts(parts []message.ContentPart) []sessionShowPart {
@@ -662,6 +745,15 @@ func convertParts(parts []message.ContentPart) []sessionShowPart {
 					ChildSessionID:   subtask.ChildSessionID,
 					ParentToolCallID: subtask.ParentToolCallID,
 					Status:           string(subtask.Status),
+				}
+			}
+			if reducer, ok := p.Reducer(); ok {
+				part.Reducer = &sessionShowReducer{
+					Summary:     reducer.Summary,
+					Artifacts:   reducer.Artifacts,
+					Risks:       reducer.Risks,
+					NextActions: reducer.NextActions,
+					Confidence:  reducer.Confidence,
 				}
 			}
 			result = append(result, part)

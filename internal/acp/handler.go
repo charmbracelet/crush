@@ -566,6 +566,15 @@ func (h *Handler) sessionUpdateFromToolResult(tr message.ToolResult) SessionUpda
 		update.ParentToolCallID = subtaskResult.ParentToolCallID
 		update.SubtaskResult = &SubtaskResult{Status: string(subtaskResult.Status)}
 	}
+	if reducer, ok := tr.Reducer(); ok {
+		update.Reducer = &Reducer{
+			Summary:     reducer.Summary,
+			Artifacts:   reducer.Artifacts,
+			Risks:       reducer.Risks,
+			NextActions: reducer.NextActions,
+			Confidence:  reducer.Confidence,
+		}
+	}
 	return update
 }
 

@@ -807,6 +807,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			},
 			OnToolResult: func(result fantasy.ToolResultContent) error {
 				toolResult := a.convertToToolResult(result)
+				toolResult, additionalMedia := a.extractAdditionalMCPMedia(toolResult)
 				if runtimeConfig != nil {
 					toolResult = a.applyToolResultReview(genCtx, currentAssistant.SessionID, toolResult, runtimeConfig.PermissionMode)
 				}
@@ -820,11 +821,34 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 						toolResult,
 					},
 				})
-				if createMsgErr == nil {
-					currentStepToolMessageIDs = append(currentStepToolMessageIDs, toolMsg.ID)
-					allRunMessageIDs = append(allRunMessageIDs, toolMsg.ID)
+				if createMsgErr != nil {
+					return createMsgErr
 				}
-				return createMsgErr
+				currentStepToolMessageIDs = append(currentStepToolMessageIDs, toolMsg.ID)
+				allRunMessageIDs = append(allRunMessageIDs, toolMsg.ID)
+
+				if len(additionalMedia) > 0 {
+					parts := make([]message.ContentPart, 0, len(additionalMedia))
+					for idx, mediaPart := range additionalMedia {
+						parts = append(parts, message.ToolResult{
+							ToolCallID: fmt.Sprintf("%s%s#%d", syntheticMCPAdditionalMediaToolCallIDPrefix, toolResult.ToolCallID, idx+1),
+							Name:       toolResult.Name,
+							Content:    fmt.Sprintf("Additional media content from %s", toolResult.Name),
+							Data:       base64.StdEncoding.EncodeToString(mediaPart.Data),
+							MIMEType:   mediaPart.MIMEType,
+						})
+					}
+					additionalMsg, additionalErr := a.messages.Create(ctx, currentAssistant.SessionID, message.CreateMessageParams{
+						Role:  message.Tool,
+						Parts: parts,
+					})
+					if additionalErr != nil {
+						return additionalErr
+					}
+					currentStepToolMessageIDs = append(currentStepToolMessageIDs, additionalMsg.ID)
+					allRunMessageIDs = append(allRunMessageIDs, additionalMsg.ID)
+				}
+				return nil
 			},
 			OnStepFinish: func(stepResult fantasy.StepResult) error {
 				finishReason := message.FinishReasonUnknown
@@ -2767,6 +2791,74 @@ func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) mes
 	}
 
 	return baseResult
+}
+
+const (
+	mcpAdditionalMediaMetadataKey               = "mcp_additional_media"
+	syntheticMCPAdditionalMediaToolCallIDPrefix = "mcp_additional_media:"
+)
+
+type additionalMediaItem struct {
+	Type      string `json:"type"`
+	Data      string `json:"data"`
+	MediaType string `json:"media_type"`
+}
+
+func (a *sessionAgent) extractAdditionalMCPMedia(toolResult message.ToolResult) (message.ToolResult, []message.BinaryContent) {
+	if toolResult.Metadata == "" {
+		return toolResult, nil
+	}
+
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(toolResult.Metadata), &payload); err != nil {
+		return toolResult, nil
+	}
+
+	rawAdditional, ok := payload[mcpAdditionalMediaMetadataKey]
+	if !ok {
+		return toolResult, nil
+	}
+
+	var additional []additionalMediaItem
+	if err := json.Unmarshal(rawAdditional, &additional); err != nil {
+		slog.Warn("Failed to decode MCP additional media metadata", "error", err, "tool_name", toolResult.Name, "tool_call_id", toolResult.ToolCallID)
+		return toolResult, nil
+	}
+
+	delete(payload, mcpAdditionalMediaMetadataKey)
+	if len(payload) == 0 {
+		toolResult.Metadata = ""
+	} else if cleaned, err := json.Marshal(payload); err != nil {
+		slog.Warn("Failed to re-encode tool metadata after removing additional media", "error", err, "tool_name", toolResult.Name, "tool_call_id", toolResult.ToolCallID)
+	} else {
+		toolResult.Metadata = string(cleaned)
+	}
+
+	media := make([]message.BinaryContent, 0, len(additional))
+	for index, item := range additional {
+		if strings.TrimSpace(item.Data) == "" {
+			continue
+		}
+		decoded, err := base64.StdEncoding.DecodeString(item.Data)
+		if err != nil {
+			slog.Warn("Failed to decode additional MCP media payload", "error", err, "tool_name", toolResult.Name, "tool_call_id", toolResult.ToolCallID)
+			continue
+		}
+		mediaType := strings.TrimSpace(item.MediaType)
+		if mediaType == "" {
+			mediaType = "application/octet-stream"
+		}
+		media = append(media, message.BinaryContent{
+			Path:     fmt.Sprintf("tool-result-%s-extra-%d", toolResult.ToolCallID, index+1),
+			MIMEType: mediaType,
+			Data:     decoded,
+		})
+	}
+
+	if len(media) == 0 {
+		return toolResult, nil
+	}
+	return toolResult, media
 }
 
 // workaroundProviderMediaLimitations converts media content in tool results to

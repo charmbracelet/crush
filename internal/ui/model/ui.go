@@ -4186,7 +4186,7 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 	switch n.Type {
 	case notify.TypeAgentFinished:
 		return m.sendNotification(notification.Notification{
-			Title:   "Crush is waiting...",
+			Title:   "Crush finished turn",
 			Message: fmt.Sprintf("Agent's turn completed in \"%s\"", n.SessionTitle),
 		})
 	default:

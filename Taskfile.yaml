@@ -77,7 +77,7 @@ tasks:
     cmds:
       - task: build
       - rm -rf tmp/onboarding
-      - ./crush{exeExt} {{.CLI_ARGS}}
+      - ./crush{{exeExt}} {{.CLI_ARGS}}
 
   test:
     desc: Run tests

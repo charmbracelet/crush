@@ -49,7 +49,7 @@ func init() {
 		updateProvidersCmd,
 		logsCmd,
 		schemaCmd,
-			loginCmd,
+		loginCmd,
 		acpCmd,
 		statsCmd,
 		sessionCmd,

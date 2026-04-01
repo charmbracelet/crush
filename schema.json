@@ -510,7 +510,8 @@
             "anthropic",
             "gemini",
             "azure",
-            "vertexai"
+            "vertexai",
+            "alibaba"
           ],
           "description": "Provider type that determines the API format",
           "default": "openai"

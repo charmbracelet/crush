@@ -193,6 +193,7 @@ That said, you can also set environment variables for preferred providers.
 | `OPENROUTER_API_KEY`        | OpenRouter                                         |
 | `IONET_API_KEY`             | io.net                                             |
 | `GROQ_API_KEY`              | Groq                                               |
+| `ALIBABA_API_KEY`           | Alibaba                                            |
 | `VERTEXAI_PROJECT`          | Google Cloud VertexAI (Gemini)                     |
 | `VERTEXAI_LOCATION`         | Google Cloud VertexAI (Gemini)                     |
 | `AWS_ACCESS_KEY_ID`         | Amazon Bedrock (Claude)                            |
@@ -213,6 +214,7 @@ Crush:
 - [GLM Coding Plan](https://z.ai/subscribe)
 - [Kimi Code](https://www.kimi.com/membership/pricing)
 - [MiniMax Coding Plan](https://platform.minimax.io/subscribe/coding-plan)
+- [Alibaba Coding Plan](https://www.aliyun.com/product/dashscope)
 
 ### By the Way
 
@@ -537,6 +539,33 @@ API. Don't forget to set `DEEPSEEK_API_KEY` in your environment.
           "cost_per_1m_out_cached": 1.1,
           "context_window": 64000,
           "default_max_tokens": 5000
+        }
+      ]
+    }
+  }
+}
+```
+
+And here's an example configuration for Alibaba DashScope API, which also uses an OpenAI-compatible API. Don't forget to set `ALIBABA_API_KEY` in your environment.
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "providers": {
+    "alibaba": {
+      "type": "alibaba",
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "api_key": "$ALIBABA_API_KEY",
+      "models": [
+        {
+          "id": "qwen-max",
+          "name": "Qwen Max",
+          "cost_per_1m_in": 0.0,
+          "cost_per_1m_out": 0.0,
+          "context_window": 32000,
+          "default_max_tokens": 4096,
+          "can_reason": false,
+          "supports_attachments": true
         }
       ]
     }

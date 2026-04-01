@@ -11,6 +11,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// fakeVariableResolver implements VariableResolver for testing
+type fakeVariableResolver struct {
+	values map[string]string
+}
+
+func (f *fakeVariableResolver) ResolveValue(value string) (string, error) {
+	if resolved, ok := f.values[value]; ok {
+		return resolved, nil
+	}
+	return value, nil
+}
+
 func resetProviderState() {
 	providerOnce = sync.Once{}
 	providerList = nil
@@ -302,6 +314,61 @@ func TestCachePathFor(t *testing.T) {
 			} else {
 				require.Contains(t, result, "crush")
 				require.Contains(t, result, "providers.json")
+			}
+		})
+	}
+}
+
+func TestProviderConfig_TestConnection_Alibaba(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		apiKey      string
+		expectError bool
+	}{
+		{
+			name:        "valid alibaba api key",
+			apiKey:      "sk-sp-valid123456",
+			expectError: false,
+		},
+		{
+			name:        "invalid alibaba api key",
+			apiKey:      "invalid-key",
+			expectError: true,
+		},
+		{
+			name:        "short alibaba api key",
+			apiKey:      "sk-",
+			expectError: true,
+		},
+		{
+			name:        "alibaba key without prefix",
+			apiKey:      "not-sk-sp-key",
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &ProviderConfig{
+				ID:     string(catwalk.InferenceProviderAlibaba),
+				APIKey: "$TEST_ALIBABA_API_KEY",
+			}
+			
+			// Create a resolver that returns the test API key
+			resolver := &fakeVariableResolver{
+				values: map[string]string{
+					"$TEST_ALIBABA_API_KEY": tt.apiKey,
+				},
+			}
+
+			err := cfg.TestConnection(resolver)
+			if tt.expectError {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), "invalid API key format for provider")
+			} else {
+				require.NoError(t, err)
 			}
 		})
 	}

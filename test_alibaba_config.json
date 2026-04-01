@@ -1,0 +1,30 @@
+{
+  "$schema": "https://charm.land/crush.json",
+  "providers": {
+    "alibaba": {
+      "id": "alibaba",
+      "name": "Alibaba Cloud",
+      "type": "alibaba",
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "api_key": "$TEST_ALIBABA_API_KEY",
+      "models": [
+        {
+          "id": "qwen-max",
+          "name": "Qwen Max",
+          "cost_per_1m_in": 0.0,
+          "cost_per_1m_out": 0.0,
+          "context_window": 32000,
+          "default_max_tokens": 4096,
+          "can_reason": false,
+          "supports_attachments": true
+        }
+      ]
+    }
+  },
+  "models": {
+    "large": {
+      "model": "qwen-max",
+      "provider": "alibaba"
+    }
+  }
+}

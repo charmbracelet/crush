@@ -474,3 +474,40 @@ func TestAlibabaCodingPlanInProvidersList(t *testing.T) {
 		t.Fatal("alibaba-coding-plan not found in providers list!")
 	}
 }
+
+func TestAlibabaModelsAreValid(t *testing.T) {
+	cfg := &Config{
+		Options: &Options{
+			DisableProviderAutoUpdate: true,
+		},
+	}
+	
+	providers, err := Providers(cfg)
+	if err != nil {
+		t.Fatalf("Error loading providers: %v", err)
+	}
+	
+	for _, p := range providers {
+		if p.ID == "alibaba-coding-plan" {
+			t.Logf("Found alibaba-coding-plan with %d models", len(p.Models))
+			for i, m := range p.Models {
+				t.Logf("  Model %d: %s (ID: %s, MaxTokens: %d, Context: %d)", 
+					i, m.Name, m.ID, m.DefaultMaxTokens, m.ContextWindow)
+				
+				// Validate required fields
+				if m.ID == "" {
+					t.Errorf("Model %d has empty ID", i)
+				}
+				if m.Name == "" {
+					t.Errorf("Model %d has empty Name", i)
+				}
+				if m.DefaultMaxTokens <= 0 {
+					t.Errorf("Model %d has invalid DefaultMaxTokens: %d", i, m.DefaultMaxTokens)
+				}
+				if m.ContextWindow <= 0 {
+					t.Errorf("Model %d has invalid ContextWindow: %d", i, m.ContextWindow)
+				}
+			}
+		}
+	}
+}

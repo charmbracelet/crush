@@ -193,7 +193,7 @@ That said, you can also set environment variables for preferred providers.
 | `OPENROUTER_API_KEY`        | OpenRouter                                         |
 | `IONET_API_KEY`             | io.net                                             |
 | `GROQ_API_KEY`              | Groq                                               |
-| `ALIBABA_API_KEY`           | Alibaba                                            |
+| `ALIBABA_CODING_PLAN_API_KEY` | Alibaba Coding Plan                                |
 | `VERTEXAI_PROJECT`          | Google Cloud VertexAI (Gemini)                     |
 | `VERTEXAI_LOCATION`         | Google Cloud VertexAI (Gemini)                     |
 | `AWS_ACCESS_KEY_ID`         | Amazon Bedrock (Claude)                            |
@@ -546,26 +546,36 @@ API. Don't forget to set `DEEPSEEK_API_KEY` in your environment.
 }
 ```
 
-And here's an example configuration for Alibaba DashScope API, which also uses an OpenAI-compatible API. Don't forget to set `ALIBABA_API_KEY` in your environment.
+And here's an example configuration for Alibaba Coding Plan, which uses an OpenAI-compatible API. Don't forget to set `ALIBABA_CODING_PLAN_API_KEY` in your environment.
 
 ```json
 {
   "$schema": "https://charm.land/crush.json",
   "providers": {
-    "alibaba": {
-      "type": "alibaba",
-      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-      "api_key": "$ALIBABA_API_KEY",
+    "alibaba-coding-plan": {
+      "type": "alibaba-coding-plan",
+      "base_url": "https://coding-intl.dashscope.aliyuncs.com/v1",
+      "api_key": "$ALIBABA_CODING_PLAN_API_KEY",
       "models": [
         {
-          "id": "qwen-max",
-          "name": "Qwen Max",
+          "id": "qwen3.5-plus",
+          "name": "Qwen3.5 Plus",
           "cost_per_1m_in": 0.0,
           "cost_per_1m_out": 0.0,
-          "context_window": 32000,
-          "default_max_tokens": 4096,
+          "context_window": 1000000,
+          "default_max_tokens": 65536,
+          "can_reason": true,
+          "supports_attachments": false
+        },
+        {
+          "id": "qwen3-coder-next",
+          "name": "Qwen3 Coder Next",
+          "cost_per_1m_in": 0.0,
+          "cost_per_1m_out": 0.0,
+          "context_window": 262144,
+          "default_max_tokens": 65536,
           "can_reason": false,
-          "supports_attachments": true
+          "supports_attachments": false
         }
       ]
     }

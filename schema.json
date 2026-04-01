@@ -511,7 +511,7 @@
             "gemini",
             "azure",
             "vertexai",
-            "alibaba"
+            "alibaba-coding-plan"
           ],
           "description": "Provider type that determines the API format",
           "default": "openai"

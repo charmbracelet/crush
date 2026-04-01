@@ -546,7 +546,7 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	)
 
 	// Special validation for custom providers before main switch
-	if c.ID == "alibaba" && !strings.HasPrefix(apiKey, "sk-sp-") {
+	if c.ID == "alibaba-coding-plan" && !strings.HasPrefix(apiKey, "sk-") {
 		return fmt.Errorf("invalid API key format for provider %s", c.ID)
 	}
 

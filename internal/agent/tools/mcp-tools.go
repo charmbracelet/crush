@@ -108,30 +108,28 @@ func (m *Tool) Info() fantasy.ToolInfo {
 	}
 }
 
+// normalizeMCPMediaPayload decodes the base64 MCP image payload, optionally
+// compresses it, and returns the raw (unencoded) image bytes along with the
+// (possibly updated) MIME type. Callers that need a base64 string must encode
+// the returned bytes themselves.
 func normalizeMCPMediaPayload(mediaType string, data []byte, mimeType string, toolName string) ([]byte, string) {
-	normalizedData := data
-	normalizedMimeType := mimeType
 	if mediaType != "image" || len(data) == 0 {
-		return normalizedData, normalizedMimeType
+		return data, mimeType
 	}
 
 	decoded, decodeErr := base64.StdEncoding.DecodeString(string(data))
 	if decodeErr != nil {
 		slog.Warn("Failed to decode base64 MCP image", "error", decodeErr, "tool", toolName)
-		return normalizedData, normalizedMimeType
+		return data, mimeType
 	}
 
 	compressConfig := imageutil.DefaultCompressionConfig()
 	compressResult, compressErr := imageutil.CompressImage(decoded, mimeType, compressConfig)
 	if compressErr != nil {
 		slog.Warn("Failed to compress MCP image", "error", compressErr, "tool", toolName)
-		return normalizedData, normalizedMimeType
+		return decoded, mimeType
 	}
-	if compressResult.WasCompressed {
-		normalizedData = []byte(base64.StdEncoding.EncodeToString(compressResult.Data))
-		normalizedMimeType = compressResult.MimeType
-	}
-	return normalizedData, normalizedMimeType
+	return compressResult.Data, compressResult.MimeType
 }
 
 func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -174,23 +172,23 @@ func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolRe
 			return fantasy.NewTextErrorResponse(fmt.Sprintf("This model (%s) does not support image data.", modelName)), nil
 		}
 
-		imageData, mimeType := normalizeMCPMediaPayload(result.Type, result.Data, result.MediaType, m.tool.Name)
+		rawImageData, mimeType := normalizeMCPMediaPayload(result.Type, result.Data, result.MediaType, m.tool.Name)
 
 		var response fantasy.ToolResponse
 		if result.Type == "image" {
-			response = fantasy.NewImageResponse(imageData, mimeType)
+			response = fantasy.NewImageResponse(rawImageData, mimeType)
 		} else {
-			response = fantasy.NewMediaResponse(imageData, mimeType)
+			response = fantasy.NewMediaResponse(rawImageData, mimeType)
 		}
 		response.Content = result.Content
 
 		if len(result.AdditionalMedia) > 0 {
 			additional := make([]mcpAdditionalMediaMetadataItem, 0, len(result.AdditionalMedia))
 			for _, media := range result.AdditionalMedia {
-				mediaData, mediaType := normalizeMCPMediaPayload(media.Type, media.Data, media.MediaType, m.tool.Name)
+				rawMediaData, mediaType := normalizeMCPMediaPayload(media.Type, media.Data, media.MediaType, m.tool.Name)
 				additional = append(additional, mcpAdditionalMediaMetadataItem{
 					Type:      media.Type,
-					Data:      string(mediaData),
+					Data:      base64.StdEncoding.EncodeToString(rawMediaData),
 					MediaType: mediaType,
 				})
 			}

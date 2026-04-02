@@ -828,18 +828,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				allRunMessageIDs = append(allRunMessageIDs, toolMsg.ID)
 
 				if len(additionalMedia) > 0 {
-					parts := make([]message.ContentPart, 0, len(additionalMedia))
-					for idx, mediaPart := range additionalMedia {
-						parts = append(parts, message.ToolResult{
-							ToolCallID: fmt.Sprintf("%s%s#%d", syntheticMCPAdditionalMediaToolCallIDPrefix, toolResult.ToolCallID, idx+1),
-							Name:       toolResult.Name,
-							Content:    fmt.Sprintf("Additional media content from %s", toolResult.Name),
-							Data:       base64.StdEncoding.EncodeToString(mediaPart.Data),
-							MIMEType:   mediaPart.MIMEType,
-						})
+					parts := make([]message.ContentPart, 0, len(additionalMedia)+1)
+					parts = append(parts, message.TextContent{Text: "Additional media content from the tool result:"})
+					for _, mediaPart := range additionalMedia {
+						parts = append(parts, mediaPart)
 					}
 					additionalMsg, additionalErr := a.messages.Create(ctx, currentAssistant.SessionID, message.CreateMessageParams{
-						Role:  message.Tool,
+						Role:  message.User,
 						Parts: parts,
 					})
 					if additionalErr != nil {
@@ -2794,8 +2789,7 @@ func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) mes
 }
 
 const (
-	mcpAdditionalMediaMetadataKey               = "mcp_additional_media"
-	syntheticMCPAdditionalMediaToolCallIDPrefix = "mcp_additional_media:"
+	mcpAdditionalMediaMetadataKey = "mcp_additional_media"
 )
 
 type additionalMediaItem struct {

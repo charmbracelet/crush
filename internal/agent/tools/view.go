@@ -5,7 +5,6 @@ import (
 	"cmp"
 	"context"
 	_ "embed"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -205,8 +204,7 @@ func NewViewTool(
 					}
 				}
 
-				encoded := base64.StdEncoding.EncodeToString(result.Data)
-				return fantasy.NewImageResponse([]byte(encoded), result.MimeType), nil
+				return fantasy.NewImageResponse(result.Data, result.MimeType), nil
 			}
 
 			// Read the file content.

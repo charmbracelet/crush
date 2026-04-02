@@ -158,6 +158,17 @@ func (c *ProviderConfig) SetupGitHubCopilot() {
 	maps.Copy(c.ExtraHeaders, copilot.Headers())
 }
 
+func (c *ProviderConfig) SetupOpenAICodex(accountID string) {
+	if c.ExtraHeaders == nil {
+		c.ExtraHeaders = make(map[string]string)
+	}
+	c.ExtraHeaders["originator"] = "crush"
+	c.ExtraHeaders["OpenAI-Beta"] = "responses=experimental"
+	if accountID != "" {
+		c.ExtraHeaders["chatgpt-account-id"] = accountID
+	}
+}
+
 type MCPType string
 
 const (

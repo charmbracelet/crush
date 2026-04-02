@@ -1,3 +1,13 @@
+// Package main is the entry point for the Crush CLI.
+//
+//	@title			Crush API
+//	@version		1.0
+//	@description	Crush is a terminal-based AI coding assistant. This API is served over a Unix socket (or Windows named pipe) and provides programmatic access to workspaces, sessions, agents, LSP, MCP, and more.
+//	@contact.name	Charm
+//	@contact.url	https://charm.sh
+//	@license.name	MIT
+//	@license.url	https://github.com/charmbracelet/crush/blob/main/LICENSE
+//	@BasePath		/v1
 package main
 
 import (

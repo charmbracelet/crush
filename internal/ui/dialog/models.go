@@ -292,13 +292,8 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		rc.TitleInfo = ""
 		rc.IsOnboarding = true
 		view := rc.Render()
+		cur = adjustOnboardingInputCursor(t, cur)
 		DrawOnboardingCursor(scr, area, view, cur)
-
-		// FIXME(@andreynering): Figure it out how to properly fix this
-		if cur != nil {
-			cur.Y -= 1
-			cur.X -= 1
-		}
 	} else {
 		view := rc.Render()
 		DrawCenterCursor(scr, area, view, cur)
@@ -490,7 +485,7 @@ func (m *Models) setProviderItems() error {
 
 		if len(validRecentItems) != len(recentItems) {
 			// FIXME: Does this need to be here? Is it mutating the config during a read?
-			if err := m.com.Store().SetConfigField(config.ScopeGlobal, fmt.Sprintf("recent_models.%s", selectedType), validRecentItems); err != nil {
+			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, fmt.Sprintf("recent_models.%s", selectedType), validRecentItems); err != nil {
 				return fmt.Errorf("failed to update recent models: %w", err)
 			}
 		}

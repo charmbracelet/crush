@@ -64,10 +64,7 @@
           "description": "Model configurations for different model types"
         },
         "providers": {
-          "additionalProperties": {
-            "$ref": "#/$defs/ProviderConfig"
-          },
-          "type": "object",
+          "$ref": "#/$defs/Map[string,github.com/charmbracelet/crush/internal/config.ProviderConfig]",
           "description": "AI provider configurations"
         },
         "mcp": {
@@ -265,88 +262,8 @@
       },
       "type": "object"
     },
-    "Model": {
-      "properties": {
-        "id": {
-          "type": "string"
-        },
-        "name": {
-          "type": "string"
-        },
-        "cost_per_1m_in": {
-          "type": "number"
-        },
-        "cost_per_1m_out": {
-          "type": "number"
-        },
-        "cost_per_1m_in_cached": {
-          "type": "number"
-        },
-        "cost_per_1m_out_cached": {
-          "type": "number"
-        },
-        "context_window": {
-          "type": "integer"
-        },
-        "default_max_tokens": {
-          "type": "integer"
-        },
-        "can_reason": {
-          "type": "boolean"
-        },
-        "reasoning_levels": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "default_reasoning_effort": {
-          "type": "string"
-        },
-        "supports_attachments": {
-          "type": "boolean"
-        },
-        "options": {
-          "$ref": "#/$defs/ModelOptions"
-        }
-      },
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "id",
-        "name",
-        "cost_per_1m_in",
-        "cost_per_1m_out",
-        "cost_per_1m_in_cached",
-        "cost_per_1m_out_cached",
-        "context_window",
-        "default_max_tokens",
-        "can_reason",
-        "supports_attachments",
-        "options"
-      ]
-    },
-    "ModelOptions": {
-      "properties": {
-        "temperature": {
-          "type": "number"
-        },
-        "top_p": {
-          "type": "number"
-        },
-        "top_k": {
-          "type": "integer"
-        },
-        "frequency_penalty": {
-          "type": "number"
-        },
-        "presence_penalty": {
-          "type": "number"
-        },
-        "provider_options": {
-          "type": "object"
-        }
-      },
+    "Map[string,github.com/charmbracelet/crush/internal/config.ProviderConfig]": {
+      "properties": {},
       "additionalProperties": false,
       "type": "object"
     },
@@ -456,6 +373,16 @@
           "type": "boolean",
           "description": "Disable desktop notifications",
           "default": false
+        },
+        "disabled_skills": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "crush-config"
+            ]
+          },
+          "type": "array",
+          "description": "List of skill names to disable and hide from the agent"
         }
       },
       "additionalProperties": false,
@@ -473,89 +400,6 @@
           },
           "type": "array",
           "description": "List of tools that don't require permission prompts"
-        }
-      },
-      "additionalProperties": false,
-      "type": "object"
-    },
-    "ProviderConfig": {
-      "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique identifier for the provider",
-          "examples": [
-            "openai"
-          ]
-        },
-        "name": {
-          "type": "string",
-          "description": "Human-readable name for the provider",
-          "examples": [
-            "OpenAI"
-          ]
-        },
-        "base_url": {
-          "type": "string",
-          "format": "uri",
-          "description": "Base URL for the provider's API",
-          "examples": [
-            "https://api.openai.com/v1"
-          ]
-        },
-        "type": {
-          "type": "string",
-          "enum": [
-            "openai",
-            "openai-compat",
-            "anthropic",
-            "gemini",
-            "azure",
-            "vertexai"
-          ],
-          "description": "Provider type that determines the API format",
-          "default": "openai"
-        },
-        "api_key": {
-          "type": "string",
-          "description": "API key for authentication with the provider",
-          "examples": [
-            "$OPENAI_API_KEY"
-          ]
-        },
-        "oauth": {
-          "$ref": "#/$defs/Token",
-          "description": "OAuth2 token for authentication with the provider"
-        },
-        "disable": {
-          "type": "boolean",
-          "description": "Whether this provider is disabled",
-          "default": false
-        },
-        "system_prompt_prefix": {
-          "type": "string",
-          "description": "Custom prefix to add to system prompts for this provider"
-        },
-        "extra_headers": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "type": "object",
-          "description": "Additional HTTP headers to send with requests"
-        },
-        "extra_body": {
-          "type": "object",
-          "description": "Additional fields to include in request bodies"
-        },
-        "provider_options": {
-          "type": "object",
-          "description": "Additional provider-specific options for this provider"
-        },
-        "models": {
-          "items": {
-            "$ref": "#/$defs/Model"
-          },
-          "type": "array",
-          "description": "List of models available from this provider"
         }
       },
       "additionalProperties": false,
@@ -669,30 +513,6 @@
       "type": "object",
       "required": [
         "completions"
-      ]
-    },
-    "Token": {
-      "properties": {
-        "access_token": {
-          "type": "string"
-        },
-        "refresh_token": {
-          "type": "string"
-        },
-        "expires_in": {
-          "type": "integer"
-        },
-        "expires_at": {
-          "type": "integer"
-        }
-      },
-      "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "access_token",
-        "refresh_token",
-        "expires_in",
-        "expires_at"
       ]
     },
     "ToolGrep": {

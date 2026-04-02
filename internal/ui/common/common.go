@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/util"
+	"github.com/charmbracelet/crush/internal/workspace"
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
@@ -23,26 +24,21 @@ var AllowedImageTypes = []string{".jpg", ".jpeg", ".png"}
 
 // Common defines common UI options and configurations.
 type Common struct {
-	App    *app.App
-	Styles *styles.Styles
+	Workspace workspace.Workspace
+	Styles    *styles.Styles
 }
 
 // Config returns the pure-data configuration associated with this [Common] instance.
 func (c *Common) Config() *config.Config {
-	return c.App.Config()
-}
-
-// Store returns the config store associated with this [Common] instance.
-func (c *Common) Store() *config.ConfigStore {
-	return c.App.Store()
+	return c.Workspace.Config()
 }
 
 // DefaultCommon returns the default common UI configurations.
-func DefaultCommon(app *app.App) *Common {
+func DefaultCommon(ws workspace.Workspace) *Common {
 	s := styles.DefaultStyles()
 	return &Common{
-		App:    app,
-		Styles: &s,
+		Workspace: ws,
+		Styles:    &s,
 	}
 }
 

@@ -80,7 +80,7 @@ func TestHasRepeatedToolCalls(t *testing.T) {
 	t.Run("exact repeat at threshold not detected", func(t *testing.T) {
 		// maxRepeats=5 means > 5 is needed, so exactly 5 should return false
 		steps := make([]fantasy.StepResult, 10)
-		for i := 0; i < 5; i++ {
+		for i := range 5 {
 			steps[i] = makeToolStep("read", `{"file":"a.go"}`, "content")
 		}
 		for i := 5; i < 10; i++ {
@@ -95,7 +95,7 @@ func TestHasRepeatedToolCalls(t *testing.T) {
 	t.Run("loop detected", func(t *testing.T) {
 		// 6 identical steps in a window of 10 with maxRepeats=5 → detected
 		steps := make([]fantasy.StepResult, 10)
-		for i := 0; i < 6; i++ {
+		for i := range 6 {
 			steps[i] = makeToolStep("read", `{"file":"a.go"}`, "content")
 		}
 		for i := 6; i < 10; i++ {
@@ -110,7 +110,7 @@ func TestHasRepeatedToolCalls(t *testing.T) {
 	t.Run("steps without tool calls are skipped", func(t *testing.T) {
 		// Mix of tool steps and empty steps — empty ones should not affect counts
 		steps := make([]fantasy.StepResult, 10)
-		for i := 0; i < 4; i++ {
+		for i := range 4 {
 			steps[i] = makeToolStep("read", `{"file":"a.go"}`, "content")
 		}
 		for i := 4; i < 8; i++ {

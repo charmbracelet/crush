@@ -2,12 +2,12 @@ package config
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
+	"github.com/bytedance/sonic"
 	"github.com/stretchr/testify/require"
 )
 
@@ -84,7 +84,7 @@ func TestHyperSync_GetNotModifiedUsesCached(t *testing.T) {
 		Name: "Cached Hyper",
 		ID:   "hyper",
 	}
-	data, err := json.Marshal(cachedProvider)
+	data, err := sonic.Marshal(cachedProvider)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(path, data, 0o644))
 

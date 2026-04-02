@@ -2,11 +2,11 @@ package chat
 
 import (
 	"cmp"
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/bytedance/sonic"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -45,14 +45,14 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	}
 
 	var params tools.BashParams
-	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
+	if err := sonic.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
 		params.Command = "failed to parse command"
 	}
 
 	// Check if this is a background job.
 	var meta tools.BashResponseMetadata
 	if opts.HasResult() {
-		_ = json.Unmarshal([]byte(opts.Result.Metadata), &meta)
+		_ = sonic.Unmarshal([]byte(opts.Result.Metadata), &meta)
 	}
 
 	if meta.Background {
@@ -127,14 +127,14 @@ func (j *JobOutputToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 	}
 
 	var params tools.JobOutputParams
-	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
+	if err := sonic.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
 		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
 	}
 
 	var description string
 	if opts.HasResult() && opts.Result.Metadata != "" {
 		var meta tools.JobOutputResponseMetadata
-		if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil {
+		if err := sonic.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil {
 			description = cmp.Or(meta.Description, meta.Command)
 		}
 	}
@@ -178,14 +178,14 @@ func (j *JobKillToolRenderContext) RenderTool(sty *styles.Styles, width int, opt
 	}
 
 	var params tools.JobKillParams
-	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
+	if err := sonic.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
 		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
 	}
 
 	var description string
 	if opts.HasResult() && opts.Result.Metadata != "" {
 		var meta tools.JobKillResponseMetadata
-		if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil {
+		if err := sonic.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil {
 			description = cmp.Or(meta.Description, meta.Command)
 		}
 	}

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"cmp"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +17,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
+	"github.com/bytedance/sonic"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/prompt"
@@ -235,21 +235,21 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 	catwalkOpts := []byte("{}")
 
 	if model.ModelCfg.ProviderOptions != nil {
-		data, err := json.Marshal(model.ModelCfg.ProviderOptions)
+		data, err := sonic.Marshal(model.ModelCfg.ProviderOptions)
 		if err == nil {
 			cfgOpts = data
 		}
 	}
 
 	if providerCfg.ProviderOptions != nil {
-		data, err := json.Marshal(providerCfg.ProviderOptions)
+		data, err := sonic.Marshal(providerCfg.ProviderOptions)
 		if err == nil {
 			providerCfgOpts = data
 		}
 	}
 
 	if model.CatwalkCfg.Options.ProviderOptions != nil {
-		data, err := json.Marshal(model.CatwalkCfg.Options.ProviderOptions)
+		data, err := sonic.Marshal(model.CatwalkCfg.Options.ProviderOptions)
 		if err == nil {
 			catwalkOpts = data
 		}
@@ -269,7 +269,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 
 	mergedOptions := make(map[string]any)
 
-	err = json.Unmarshal([]byte(got), &mergedOptions)
+	err = sonic.Unmarshal([]byte(got), &mergedOptions)
 	if err != nil {
 		slog.Error("Could not create config for call", "err", err)
 		return options

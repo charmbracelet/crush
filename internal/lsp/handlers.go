@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 
+	"github.com/bytedance/sonic"
 	"github.com/charmbracelet/crush/internal/lsp/util"
 	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
@@ -18,7 +19,7 @@ func HandleWorkspaceConfiguration(_ context.Context, _ string, params json.RawMe
 // HandleRegisterCapability handles capability registration requests
 func HandleRegisterCapability(_ context.Context, _ string, params json.RawMessage) (any, error) {
 	var registerParams protocol.RegistrationParams
-	if err := json.Unmarshal(params, &registerParams); err != nil {
+	if err := sonic.Unmarshal(params, &registerParams); err != nil {
 		slog.Error("Error unmarshaling registration params", "error", err)
 		return nil, err
 	}
@@ -27,13 +28,13 @@ func HandleRegisterCapability(_ context.Context, _ string, params json.RawMessag
 		switch reg.Method {
 		case "workspace/didChangeWatchedFiles":
 			// Parse the registration options
-			optionsJSON, err := json.Marshal(reg.RegisterOptions)
+			optionsJSON, err := sonic.Marshal(reg.RegisterOptions)
 			if err != nil {
 				slog.Error("Error marshaling registration options", "error", err)
 				continue
 			}
 			var options protocol.DidChangeWatchedFilesRegistrationOptions
-			if err := json.Unmarshal(optionsJSON, &options); err != nil {
+			if err := sonic.Unmarshal(optionsJSON, &options); err != nil {
 				slog.Error("Error unmarshaling registration options", "error", err)
 				continue
 			}
@@ -48,7 +49,7 @@ func HandleRegisterCapability(_ context.Context, _ string, params json.RawMessag
 func HandleApplyEdit(encoding powernap.OffsetEncoding) func(_ context.Context, _ string, params json.RawMessage) (any, error) {
 	return func(_ context.Context, _ string, params json.RawMessage) (any, error) {
 		var edit protocol.ApplyWorkspaceEditParams
-		if err := json.Unmarshal(params, &edit); err != nil {
+		if err := sonic.Unmarshal(params, &edit); err != nil {
 			return nil, err
 		}
 
@@ -83,7 +84,7 @@ func notifyFileWatchRegistration(id string, watchers []protocol.FileSystemWatche
 // HandleServerMessage handles server messages
 func HandleServerMessage(_ context.Context, method string, params json.RawMessage) {
 	var msg protocol.ShowMessageParams
-	if err := json.Unmarshal(params, &msg); err != nil {
+	if err := sonic.Unmarshal(params, &msg); err != nil {
 		slog.Debug("Error unmarshal server message", "error", err)
 		return
 	}
@@ -103,7 +104,7 @@ func HandleServerMessage(_ context.Context, method string, params json.RawMessag
 // HandleDiagnostics handles diagnostic notifications from the LSP server
 func HandleDiagnostics(client *Client, params json.RawMessage) {
 	var diagParams protocol.PublishDiagnosticsParams
-	if err := json.Unmarshal(params, &diagParams); err != nil {
+	if err := sonic.Unmarshal(params, &diagParams); err != nil {
 		slog.Error("Error unmarshaling diagnostics params", "error", err)
 		return
 	}

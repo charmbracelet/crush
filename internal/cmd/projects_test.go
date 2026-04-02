@@ -2,9 +2,9 @@ package cmd
 
 import (
 	"bytes"
-	"encoding/json"
 	"testing"
 
+	"github.com/bytedance/sonic"
 	"github.com/charmbracelet/crush/internal/projects"
 	"github.com/stretchr/testify/require"
 )
@@ -47,7 +47,7 @@ func TestProjectsJSON(t *testing.T) {
 	var result struct {
 		Projects []projects.Project `json:"projects"`
 	}
-	err = json.Unmarshal(b.Bytes(), &result)
+	err = sonic.Unmarshal(b.Bytes(), &result)
 	require.NoError(t, err)
 
 	require.Len(t, result.Projects, 1)

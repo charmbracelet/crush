@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"html/template"
 	"os"
@@ -14,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bytedance/sonic"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
@@ -341,7 +341,7 @@ func nullFloat64ToInt64(n sql.NullFloat64) int64 {
 }
 
 func generateHTML(stats *Stats, projName, username, path string) error {
-	statsJSON, err := json.Marshal(stats)
+	statsJSON, err := sonic.Marshal(stats)
 	if err != nil {
 		return err
 	}

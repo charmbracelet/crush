@@ -1,8 +1,7 @@
 package chat
 
 import (
-	"encoding/json"
-
+	"github.com/bytedance/sonic"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -40,7 +39,7 @@ func (f *FetchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	}
 
 	var params tools.FetchParams
-	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
+	if err := sonic.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
 		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
 	}
 
@@ -115,7 +114,7 @@ func (w *WebFetchToolRenderContext) RenderTool(sty *styles.Styles, width int, op
 	}
 
 	var params tools.WebFetchParams
-	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
+	if err := sonic.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
 		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
 	}
 
@@ -169,7 +168,7 @@ func (w *WebSearchToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 	}
 
 	var params tools.WebSearchParams
-	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
+	if err := sonic.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
 		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
 	}
 

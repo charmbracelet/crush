@@ -3,11 +3,11 @@ package session
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
 
+	"github.com/bytedance/sonic"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -261,7 +261,7 @@ func marshalTodos(todos []Todo) (string, error) {
 	if len(todos) == 0 {
 		return "", nil
 	}
-	data, err := json.Marshal(todos)
+	data, err := sonic.Marshal(todos)
 	if err != nil {
 		return "", err
 	}
@@ -273,7 +273,7 @@ func unmarshalTodos(data string) ([]Todo, error) {
 		return []Todo{}, nil
 	}
 	var todos []Todo
-	if err := json.Unmarshal([]byte(data), &todos); err != nil {
+	if err := sonic.Unmarshal([]byte(data), &todos); err != nil {
 		return []Todo{}, err
 	}
 	return todos, nil

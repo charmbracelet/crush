@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"charm.land/log/v2"
+	"github.com/bytedance/sonic"
 	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/x/term"
@@ -166,7 +166,7 @@ func showLogs(logsFile string, tailLines int) error {
 
 func printLogLine(lineText string) {
 	var data map[string]any
-	if err := json.Unmarshal([]byte(lineText), &data); err != nil {
+	if err := sonic.Unmarshal([]byte(lineText), &data); err != nil {
 		return
 	}
 	msg := data["msg"]

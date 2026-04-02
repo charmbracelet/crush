@@ -1,12 +1,12 @@
 package chat
 
 import (
-	"encoding/json"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/tree"
+	"github.com/bytedance/sonic"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/anim"
@@ -105,7 +105,7 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	}
 
 	var params agent.AgentParams
-	_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
+	_ = sonic.Unmarshal([]byte(opts.ToolCall.Input), &params)
 
 	prompt := params.Prompt
 	prompt = strings.ReplaceAll(prompt, "\n", " ")
@@ -236,7 +236,7 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 	}
 
 	var params agenticFetchParams
-	_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
+	_ = sonic.Unmarshal([]byte(opts.ToolCall.Input), &params)
 
 	prompt := params.Prompt
 	prompt = strings.ReplaceAll(prompt, "\n", " ")

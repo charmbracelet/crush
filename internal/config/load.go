@@ -3,7 +3,6 @@ package config
 import (
 	"cmp"
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -17,6 +16,7 @@ import (
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
+	"github.com/bytedance/sonic"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
@@ -120,7 +120,7 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 // mustMarshalConfig marshals the config to JSON bytes, returning empty JSON on
 // error.
 func mustMarshalConfig(cfg *Config) []byte {
-	data, err := json.Marshal(cfg)
+	data, err := sonic.Marshal(cfg)
 	if err != nil {
 		return []byte("{}")
 	}
@@ -733,7 +733,7 @@ func loadFromBytes(configs [][]byte) (*Config, error) {
 		return nil, err
 	}
 	var config Config
-	if err := json.Unmarshal(data, &config); err != nil {
+	if err := sonic.Unmarshal(data, &config); err != nil {
 		return nil, err
 	}
 	return &config, nil

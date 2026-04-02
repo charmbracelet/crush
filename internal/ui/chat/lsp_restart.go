@@ -1,8 +1,7 @@
 package chat
 
 import (
-	"encoding/json"
-
+	"github.com/bytedance/sonic"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -36,7 +35,7 @@ func (r *LSPRestartToolRenderContext) RenderTool(sty *styles.Styles, width int, 
 	}
 
 	var params tools.LSPRestartParams
-	_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
+	_ = sonic.Unmarshal([]byte(opts.ToolCall.Input), &params)
 
 	var toolParams []string
 	if params.Name != "" {

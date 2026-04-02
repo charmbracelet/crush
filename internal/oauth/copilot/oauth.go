@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bytedance/sonic"
 	"github.com/charmbracelet/crush/internal/oauth"
 )
 
@@ -180,7 +181,7 @@ func getCopilotToken(ctx context.Context, githubToken string) (*oauth.Token, err
 		Token     string `json:"token"`
 		ExpiresAt int64  `json:"expires_at"`
 	}
-	if err := json.Unmarshal(body, &result); err != nil {
+	if err := sonic.Unmarshal(body, &result); err != nil {
 		return nil, err
 	}
 

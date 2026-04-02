@@ -1,10 +1,11 @@
 package copilot
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
+
+	"github.com/bytedance/sonic"
 )
 
 func RefreshTokenFromDisk() (string, bool) {
@@ -17,7 +18,7 @@ func RefreshTokenFromDisk() (string, bool) {
 		OAuthToken  string `json:"oauth_token"`
 		GitHubAppID string `json:"githubAppId"`
 	}
-	if err := json.Unmarshal(data, &content); err != nil {
+	if err := sonic.Unmarshal(data, &content); err != nil {
 		return "", false
 	}
 	if app, ok := content["github.com:Iv1.b507a08c87ecfe98"]; ok {

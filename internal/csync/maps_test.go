@@ -2,6 +2,7 @@ package csync
 
 import (
 	"encoding/json"
+	"fmt"
 	"maps"
 	"sync"
 	"sync/atomic"
@@ -9,6 +10,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/bytedance/sonic"
 	"github.com/stretchr/testify/require"
 )
 
@@ -345,11 +347,11 @@ func TestMap_MarshalJSON(t *testing.T) {
 	m.Set("key1", 1)
 	m.Set("key2", 2)
 
-	data, err := json.Marshal(m)
+	data, err := sonic.Marshal(m)
 	require.NoError(t, err)
 
 	result := &Map[string, int]{}
-	err = json.Unmarshal(data, result)
+	err = sonic.Unmarshal(data, result)
 	require.NoError(t, err)
 	require.Equal(t, 2, result.Len())
 	v1, _ := result.Get("key1")
@@ -363,7 +365,7 @@ func TestMap_MarshalJSON_EmptyMap(t *testing.T) {
 
 	m := NewMap[string, int]()
 
-	data, err := json.Marshal(m)
+	data, err := sonic.Marshal(m)
 	require.NoError(t, err)
 	require.Equal(t, "{}", string(data))
 }
@@ -374,7 +376,7 @@ func TestMap_UnmarshalJSON(t *testing.T) {
 	jsonData := `{"key1": 1, "key2": 2}`
 
 	m := NewMap[string, int]()
-	err := json.Unmarshal([]byte(jsonData), m)
+	err := sonic.Unmarshal([]byte(jsonData), m)
 	require.NoError(t, err)
 
 	require.Equal(t, 2, m.Len())
@@ -393,7 +395,7 @@ func TestMap_UnmarshalJSON_EmptyJSON(t *testing.T) {
 	jsonData := `{}`
 
 	m := NewMap[string, int]()
-	err := json.Unmarshal([]byte(jsonData), m)
+	err := sonic.Unmarshal([]byte(jsonData), m)
 	require.NoError(t, err)
 	require.Equal(t, 0, m.Len())
 }
@@ -404,7 +406,7 @@ func TestMap_UnmarshalJSON_InvalidJSON(t *testing.T) {
 	jsonData := `{"key1": 1, "key2":}`
 
 	m := NewMap[string, int]()
-	err := json.Unmarshal([]byte(jsonData), m)
+	err := sonic.Unmarshal([]byte(jsonData), m)
 	require.Error(t, err)
 }
 
@@ -415,7 +417,7 @@ func TestMap_UnmarshalJSON_OverwritesExistingData(t *testing.T) {
 	m.Set("existing", 999)
 
 	jsonData := `{"key1": 1, "key2": 2}`
-	err := json.Unmarshal([]byte(jsonData), m)
+	err := sonic.Unmarshal([]byte(jsonData), m)
 	require.NoError(t, err)
 
 	require.Equal(t, 2, m.Len())
@@ -435,11 +437,11 @@ func TestMap_JSONRoundTrip(t *testing.T) {
 	original.Set("key2", 2)
 	original.Set("key3", 3)
 
-	data, err := json.Marshal(original)
+	data, err := sonic.Marshal(original)
 	require.NoError(t, err)
 
 	restored := NewMap[string, int]()
-	err = json.Unmarshal(data, restored)
+	err = sonic.Unmarshal(data, restored)
 	require.NoError(t, err)
 
 	require.Equal(t, original.Len(), restored.Len())

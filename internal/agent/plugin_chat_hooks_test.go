@@ -87,6 +87,7 @@ func createAgentWithHooksForTest(env fakeEnv, fakeAgent fantasy.Agent) SessionAg
 		SmallModel:   model,
 		SystemPrompt: "",
 		WorkingDir:   env.workingDir,
+		AutoRecall:   buildAutoRecall(env.history, env.memory),
 		IsYolo:       true,
 		Sessions:     env.sessions,
 		Messages:     env.messages,
@@ -450,10 +451,12 @@ func TestSessionAgentRunAppliesChatTransforms(t *testing.T) {
 	require.NoError(t, err)
 	createSeedHistoryMessage(t, env, testSession.ID)
 
+	var purposes []plugin.ChatTransformPurpose
 	plugin.Register(&chatHookTestPlugin{
 		name: "chat-transforms-plugin",
 		hooks: plugin.Hooks{
 			ChatMessagesTransform: func(ctx context.Context, input plugin.ChatMessagesTransformInput, output *plugin.ChatMessagesTransformOutput) error {
+				purposes = append(purposes, input.Purpose)
 				output.Messages = append(output.Messages, message.Message{
 					Role:  message.User,
 					Parts: []message.ContentPart{message.TextContent{Text: "plugin compacted history"}},
@@ -489,6 +492,7 @@ func TestSessionAgentRunAppliesChatTransforms(t *testing.T) {
 		}
 	}
 	require.True(t, foundTransformedMessage)
+	require.Contains(t, purposes, plugin.ChatTransformPurposeMicroCompact)
 	require.NotEmpty(t, fakeAgent.prepared)
 	first := fakeAgent.prepared[0]
 	require.Equal(t, fantasy.MessageRoleSystem, first.Role)

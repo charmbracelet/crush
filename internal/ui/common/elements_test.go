@@ -18,7 +18,7 @@ func TestFormatContextUsage(t *testing.T) {
 		want          string
 	}{
 		{name: "formats usage without context window", tokens: 1500, contextWindow: 0, want: "1.5k"},
-		{name: "clamps usage to context window", tokens: 120, contextWindow: 100, want: "100 100%"},
+		{name: "allows usage above context window", tokens: 120, contextWindow: 100, want: "120 120%"},
 		{name: "clamps negative usage to zero", tokens: -1, contextWindow: 100, want: "0 0%"},
 		{name: "keeps usage below context window", tokens: 55, contextWindow: 100, want: "55 55%"},
 	}
@@ -37,7 +37,7 @@ func TestFormatTokensAndCost(t *testing.T) {
 	theme := styles.DefaultStyles()
 	rendered := ansi.Strip(formatTokensAndCost(&theme, 120, 25, 100, 1.23))
 
-	require.Contains(t, rendered, "100 100% in")
+	require.Contains(t, rendered, "120 120% in")
 	require.Contains(t, rendered, "25 out")
 	require.Contains(t, rendered, "$1.23")
 }

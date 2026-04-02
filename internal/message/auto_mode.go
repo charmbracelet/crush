@@ -29,23 +29,27 @@ type ToolResultAutoReview struct {
 type ToolResultSubtaskStatus string
 
 const (
-	ToolResultSubtaskStatusCompleted ToolResultSubtaskStatus = "completed"
-	ToolResultSubtaskStatusFailed    ToolResultSubtaskStatus = "failed"
-	ToolResultSubtaskStatusCanceled  ToolResultSubtaskStatus = "canceled"
+	ToolResultSubtaskStatusPending    ToolResultSubtaskStatus = "pending"
+	ToolResultSubtaskStatusInProgress ToolResultSubtaskStatus = "in_progress"
+	ToolResultSubtaskStatusCompleted  ToolResultSubtaskStatus = "completed"
+	ToolResultSubtaskStatusFailed     ToolResultSubtaskStatus = "failed"
+	ToolResultSubtaskStatusCanceled   ToolResultSubtaskStatus = "canceled"
 )
 
 type ToolResultSubtaskResult struct {
 	ChildSessionID   string                  `json:"child_session_id,omitempty"`
 	ParentToolCallID string                  `json:"parent_tool_call_id,omitempty"`
+	ParentMessageID  string                  `json:"parent_message_id,omitempty"`
 	Status           ToolResultSubtaskStatus `json:"status,omitempty"`
 }
-
 type ToolResultReducer struct {
 	Summary     string   `json:"summary,omitempty"`
 	Artifacts   []string `json:"artifacts,omitempty"`
 	Risks       []string `json:"risks,omitempty"`
 	NextActions []string `json:"next_actions,omitempty"`
 	Confidence  string   `json:"confidence,omitempty"`
+	MailboxID   string   `json:"mailbox_id,omitempty"`
+	Messages    []string `json:"messages,omitempty"`
 }
 
 func (r ToolResultReducer) isEmpty() bool {
@@ -53,7 +57,9 @@ func (r ToolResultReducer) isEmpty() bool {
 		len(r.Artifacts) == 0 &&
 		len(r.Risks) == 0 &&
 		len(r.NextActions) == 0 &&
-		strings.TrimSpace(r.Confidence) == ""
+		strings.TrimSpace(r.Confidence) == "" &&
+		strings.TrimSpace(r.MailboxID) == "" &&
+		len(r.Messages) == 0
 }
 
 const (

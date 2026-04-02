@@ -54,8 +54,9 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 				return fantasy.ToolResponse{}, errors.New("agent message id missing from context")
 			}
 
+			// Unified path: construct task graph and delegate to runTaskGraph
+			var tasks []taskGraphTask
 			if len(params.Tasks) > 0 {
-				tasks := make([]taskGraphTask, 0, len(params.Tasks))
 				for _, task := range params.Tasks {
 					if strings.TrimSpace(task.ID) == "" {
 						return fantasy.NewTextErrorResponse("task id is required"), nil
@@ -71,36 +72,30 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 						DependsOn:    task.DependsOn,
 					})
 				}
-				return c.runTaskGraph(ctx, taskGraphParams{
-					SessionID:      sessionID,
-					AgentMessageID: agentMessageID,
-					ToolCallID:     call.ID,
-					Tasks:          tasks,
-				})
+			} else {
+				// Single-task case: convert to single-node task graph
+				if params.Prompt == "" {
+					return fantasy.NewTextErrorResponse("prompt is required"), nil
+				}
+				description := strings.TrimSpace(params.Description)
+				if description == "" {
+					// Use subagent type to determine default description
+					subagentType := config.CanonicalSubagentID(strings.TrimSpace(params.SubagentType))
+					description = defaultSubagentDescription(subagentType, params.Prompt)
+				}
+				tasks = []taskGraphTask{{
+					ID:           "task",
+					Description:  description,
+					Prompt:       params.Prompt,
+					SubagentType: params.SubagentType,
+				}}
 			}
 
-			if params.Prompt == "" {
-				return fantasy.NewTextErrorResponse("prompt is required"), nil
-			}
-
-			subAgent, agentCfg, err := c.buildSubAgentForType(ctx, params.SubagentType)
-			if err != nil {
-				return fantasy.NewTextErrorResponse(err.Error()), nil
-			}
-
-			subagentType := config.CanonicalSubagentID(agentCfg.ID)
-			description := strings.TrimSpace(params.Description)
-			if description == "" {
-				description = defaultSubagentDescription(subagentType, params.Prompt)
-			}
-
-			return c.runSubAgent(ctx, subAgentParams{
-				Agent:          subAgent,
+			return c.runTaskGraph(ctx, taskGraphParams{
 				SessionID:      sessionID,
 				AgentMessageID: agentMessageID,
 				ToolCallID:     call.ID,
-				Prompt:         params.Prompt,
-				SessionTitle:   formatSubagentSessionTitle(description, subagentType),
+				Tasks:          tasks,
 			})
 		}), nil
 }

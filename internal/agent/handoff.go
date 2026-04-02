@@ -61,7 +61,7 @@ func (c *coordinator) GenerateHandoff(ctx context.Context, sourceSessionID, goal
 		return HandoffDraft{}, err
 	}
 
-	maxOutputTokens := int64(4000)
+	maxOutputTokens := int64(1500)
 	if model.CatwalkCfg.DefaultMaxTokens > 0 && model.CatwalkCfg.DefaultMaxTokens < maxOutputTokens {
 		maxOutputTokens = model.CatwalkCfg.DefaultMaxTokens
 	}
@@ -304,12 +304,7 @@ func buildHandoffPrompt(currentSession session.Session, goal string, candidateFi
 				sb.WriteString(p.Text)
 				sb.WriteByte('\n')
 			case message.ReasoningContent:
-				if strings.TrimSpace(p.Thinking) == "" {
-					continue
-				}
-				sb.WriteString("<thinking>\n")
-				sb.WriteString(p.Thinking)
-				sb.WriteString("\n</thinking>\n")
+				continue
 			case message.ToolCall:
 				sb.WriteString("<tool_call name=\"")
 				sb.WriteString(p.Name)
@@ -346,6 +341,15 @@ func parseHandoffDraft(raw string, candidateFiles []string) (HandoffDraft, error
 	raw = strings.TrimSpace(raw)
 	if matches := handoffCodeFenceRegex.FindStringSubmatch(raw); len(matches) == 2 {
 		raw = strings.TrimSpace(matches[1])
+	}
+	if object := extractFirstJSONObject(raw); object != "" {
+		raw = object
+	} else if !strings.HasPrefix(raw, "{") {
+		preview := raw
+		if len(preview) > 200 {
+			preview = preview[:200] + "…"
+		}
+		return HandoffDraft{}, fmt.Errorf("handoff generation returned unexpected response (possible API error): %.200s", preview)
 	}
 
 	var payload handoffResponse

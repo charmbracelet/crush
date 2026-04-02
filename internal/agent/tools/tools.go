@@ -7,12 +7,16 @@ import (
 )
 
 type (
-	sessionIDContextKey      string
-	messageIDContextKey      string
-	supportsImagesKey        string
-	modelNameKey             string
-	workingDirContextKey     string
-	sessionServiceContextKey string
+	sessionIDContextKey       string
+	messageIDContextKey       string
+	supportsImagesKey         string
+	modelNameKey              string
+	workingDirContextKey      string
+	sessionServiceContextKey  string
+	toolCallIDContextKey      string
+	agentMemoryContextKey     string
+	agentIsolationContextKey  string
+	agentBackgroundContextKey string
 )
 
 type sessionLookupService interface {
@@ -29,8 +33,12 @@ const (
 	// ModelNameContextKey is the key for the model name in the context.
 	ModelNameContextKey modelNameKey = "model_name"
 	// WorkingDirContextKey is the key for the session-specific working directory.
-	WorkingDirContextKey     workingDirContextKey     = "working_dir"
-	SessionServiceContextKey sessionServiceContextKey = "session_service"
+	WorkingDirContextKey      workingDirContextKey      = "working_dir"
+	SessionServiceContextKey  sessionServiceContextKey  = "session_service"
+	ToolCallIDContextKey      toolCallIDContextKey      = "tool_call_id"
+	AgentMemoryContextKey     agentMemoryContextKey     = "agent_memory"
+	AgentIsolationContextKey  agentIsolationContextKey  = "agent_isolation"
+	AgentBackgroundContextKey agentBackgroundContextKey = "agent_background"
 )
 
 // getContextValue is a generic helper that retrieves a typed value from context.
@@ -74,4 +82,20 @@ func GetWorkingDirFromContext(ctx context.Context) string {
 
 func GetSessionServiceFromContext(ctx context.Context) sessionLookupService {
 	return getContextValue(ctx, SessionServiceContextKey, sessionLookupService(nil))
+}
+
+func GetToolCallIDFromContext(ctx context.Context) string {
+	return getContextValue(ctx, ToolCallIDContextKey, "")
+}
+
+func GetAgentMemoryFromContext(ctx context.Context) string {
+	return getContextValue(ctx, AgentMemoryContextKey, "")
+}
+
+func GetAgentIsolationFromContext(ctx context.Context) string {
+	return getContextValue(ctx, AgentIsolationContextKey, "")
+}
+
+func GetAgentBackgroundFromContext(ctx context.Context) bool {
+	return getContextValue(ctx, AgentBackgroundContextKey, false)
 }

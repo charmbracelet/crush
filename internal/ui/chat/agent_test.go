@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	agenttools "github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent"
+	agenttools "github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/planmode"
 	"github.com/charmbracelet/crush/internal/toolruntime"
@@ -42,6 +42,40 @@ func TestAgentToolMessageItemRendersSubagentTypeAndDescription(t *testing.T) {
 	require.Contains(t, rendered, "Update the parser package and run targeted tests")
 }
 
+func TestAgentToolMessageItemRendersTaskListForTaskGraph(t *testing.T) {
+	t.Parallel()
+
+	params, err := json.Marshal(agent.AgentParams{
+		Tasks: []agent.AgentTaskParams{
+			{ID: "t1", Description: "Search references", Prompt: "Find usages", SubagentType: "explore"},
+			{ID: "t2", Description: "Apply patch", Prompt: "Implement fix", SubagentType: "general"},
+			{ID: "t3", Description: "Run tests", Prompt: "Run targeted tests", SubagentType: "general"},
+			{ID: "t4", Description: "Summarize", Prompt: "Write summary", SubagentType: "general"},
+		},
+	})
+	require.NoError(t, err)
+
+	theme := styles.DefaultStyles()
+	item := NewAgentToolMessageItem(&theme, message.ToolCall{
+		ID:       "tool-taskgraph",
+		Name:     agent.AgentToolName,
+		Input:    string(params),
+		Finished: true,
+	}, &message.ToolResult{
+		ToolCallID: "tool-taskgraph",
+		Content:    "done",
+	}, false)
+
+	rendered := ansi.Strip(item.Render(120))
+	require.Contains(t, rendered, "Tasks")
+	require.Contains(t, rendered, "Tasks")
+	require.Contains(t, rendered, "done 0 · running 4 · pending 0")
+	require.Contains(t, rendered, "[Explore] Search references")
+	require.Contains(t, rendered, "[General] Apply patch")
+	require.Contains(t, rendered, "[General] Run tests")
+	require.Contains(t, rendered, "[General] Summarize")
+}
+
 func TestAgentToolMessageItemRendersChildSessionStatus(t *testing.T) {
 	t.Parallel()
 
@@ -63,6 +97,35 @@ func TestAgentToolMessageItemRendersChildSessionStatus(t *testing.T) {
 	rendered := ansi.Strip(item.Render(120))
 	require.Contains(t, rendered, "Status")
 	require.Contains(t, rendered, "Retrying in 3 seconds")
+}
+
+func TestAgentToolMessageItemRendersTaskDependenciesAndStatuses(t *testing.T) {
+	t.Parallel()
+
+	params, err := json.Marshal(agent.AgentParams{
+		Tasks: []agent.AgentTaskParams{
+			{ID: "t1", Description: "Index code", Prompt: "Build map", SubagentType: "explore"},
+			{ID: "t2", Description: "Apply fix", Prompt: "Patch", SubagentType: "general", DependsOn: []string{"t1"}},
+		},
+	})
+	require.NoError(t, err)
+
+	resultContent := "All good\n- t1: completed\n- t2: failed\n\nTask outputs:\n- t1 ..."
+	theme := styles.DefaultStyles()
+	item := NewAgentToolMessageItem(&theme, message.ToolCall{
+		ID:       "tool-graph",
+		Name:     agent.AgentToolName,
+		Input:    string(params),
+		Finished: true,
+	}, &message.ToolResult{
+		ToolCallID: "tool-graph",
+		Content:    resultContent,
+	}, false)
+
+	rendered := ansi.Strip(item.Render(140))
+	require.Contains(t, rendered, "done 1 · running 0 · pending 0 · failed 1")
+	require.Contains(t, rendered, "[Explore] Index code")
+	require.Contains(t, rendered, "[General] Apply fix (after: t1)")
 }
 
 func TestAgentToolMessageItemCollapsesNestedToolsByDefault(t *testing.T) {

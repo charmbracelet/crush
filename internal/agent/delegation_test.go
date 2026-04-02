@@ -43,16 +43,17 @@ func TestPromptForAgentUsesWorkerPromptForWritableSubagents(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "coder", promptBuilder.Name())
 
-	promptBuilder, err = promptForAgent(config.Agent{ID: config.AgentGeneral}, true)
+	promptBuilder, err = promptForAgent(config.Agent{ID: config.AgentGeneral, Role: "executor"}, true)
 	require.NoError(t, err)
 	assert.Equal(t, "general", promptBuilder.Name())
 
-	promptBuilder, err = promptForAgent(config.Agent{ID: config.AgentExplore}, true)
+	promptBuilder, err = promptForAgent(config.Agent{ID: config.AgentExplore, Role: "reviewer"}, true)
 	require.NoError(t, err)
 	assert.Equal(t, "explore", promptBuilder.Name())
 
 	promptBuilder, err = promptForAgent(config.Agent{
 		ID:           "reviewer",
+		Role:         "planner",
 		Mode:         config.AgentModeSubagent,
 		AllowedTools: []string{"bash", "view"},
 	}, true)

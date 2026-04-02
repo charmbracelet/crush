@@ -69,7 +69,7 @@ func TestLongTermMemoryToolStoreAndGet(t *testing.T) {
 	tool := newLongTermMemoryToolForTest(t, permissions)
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "session-1")
 
-	storeResp, err := runLongTermMemoryTool(t, tool, ctx, LongTermMemoryParams{Action: "store", Key: "goal", Value: "ship mvp"})
+	storeResp, err := runLongTermMemoryTool(t, tool, ctx, LongTermMemoryParams{Action: "store", Key: "goal", Value: "ship mvp", Scope: "project", Category: "product", Type: "goal", Tags: []string{"roadmap", "launch"}})
 	require.NoError(t, err)
 	require.False(t, storeResp.IsError)
 	require.Contains(t, storeResp.Content, "Stored long-term memory key \"goal\".")
@@ -79,6 +79,9 @@ func TestLongTermMemoryToolStoreAndGet(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, getResp.IsError)
 	require.Contains(t, getResp.Content, "key=goal")
+	require.Contains(t, getResp.Content, "category=product")
+	require.Contains(t, getResp.Content, "type=goal")
+	require.Contains(t, getResp.Content, "tags=launch, roadmap")
 	require.Contains(t, getResp.Content, "value=ship mvp")
 }
 
@@ -89,15 +92,17 @@ func TestLongTermMemoryToolDeleteAndList(t *testing.T) {
 	tool := newLongTermMemoryToolForTest(t, permissions)
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "session-1")
 
-	_, err := runLongTermMemoryTool(t, tool, ctx, LongTermMemoryParams{Action: "store", Key: "a", Value: "first"})
+	_, err := runLongTermMemoryTool(t, tool, ctx, LongTermMemoryParams{Action: "store", Key: "a", Value: "first", Scope: "project", Category: "notes", Tags: []string{"alpha"}})
 	require.NoError(t, err)
-	_, err = runLongTermMemoryTool(t, tool, ctx, LongTermMemoryParams{Action: "store", Key: "b", Value: "second"})
+	_, err = runLongTermMemoryTool(t, tool, ctx, LongTermMemoryParams{Action: "store", Key: "b", Value: "second", Scope: "session", Type: "plan", Tags: []string{"beta"}})
 	require.NoError(t, err)
 
-	listResp, err := runLongTermMemoryTool(t, tool, ctx, LongTermMemoryParams{Action: "list", Limit: 10})
+	listResp, err := runLongTermMemoryTool(t, tool, ctx, LongTermMemoryParams{Action: "list", Scope: "project", Limit: 10})
 	require.NoError(t, err)
 	require.False(t, listResp.IsError)
-	require.Contains(t, listResp.Content, "Found 2 long-term memory entries")
+	require.Contains(t, listResp.Content, "Found 1 long-term memory entries")
+	require.Contains(t, listResp.Content, "key=a")
+	require.Contains(t, listResp.Content, "category=notes")
 
 	deleteResp, err := runLongTermMemoryTool(t, tool, ctx, LongTermMemoryParams{Action: "delete", Key: "a"})
 	require.NoError(t, err)
@@ -113,13 +118,16 @@ func TestLongTermMemoryToolSearchAndErrors(t *testing.T) {
 	tool := newLongTermMemoryToolForTest(t, permissions)
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "session-1")
 
-	_, err := runLongTermMemoryTool(t, tool, ctx, LongTermMemoryParams{Action: "store", Key: "design", Value: "search index"})
+	_, err := runLongTermMemoryTool(t, tool, ctx, LongTermMemoryParams{Action: "store", Key: "design", Value: "search index", Scope: "project", Category: "architecture", Type: "decision", Tags: []string{"search", "index"}})
 	require.NoError(t, err)
 
-	searchResp, err := runLongTermMemoryTool(t, tool, ctx, LongTermMemoryParams{Action: "search", Query: "index"})
+	searchResp, err := runLongTermMemoryTool(t, tool, ctx, LongTermMemoryParams{Action: "search", Query: "index", Scope: "project", Type: "decision", Tags: []string{"search"}})
 	require.NoError(t, err)
 	require.False(t, searchResp.IsError)
 	require.Contains(t, searchResp.Content, "key=design")
+	require.Contains(t, searchResp.Content, "category=architecture")
+	require.Contains(t, searchResp.Content, "type=decision")
+	require.Contains(t, searchResp.Content, "tags=index, search")
 
 	invalidResp, err := runLongTermMemoryTool(t, tool, ctx, LongTermMemoryParams{Action: "invalid"})
 	require.NoError(t, err)

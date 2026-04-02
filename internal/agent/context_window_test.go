@@ -194,6 +194,45 @@ func TestTruncateOversizedToolResults_UnicodeSafe(t *testing.T) {
 	assert.True(t, strings.HasPrefix(truncated, strings.Repeat("你", 1000)))
 }
 
+func TestEnforceStepToolResultBudget_TruncatesOversizedStepAggregate(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	agent := &sessionAgent{messages: env.messages, workingDir: env.workingDir}
+	used := 35_000
+	original := strings.Repeat("x", 10_000)
+	result := message.ToolResult{Name: "glob", Content: original}
+
+	truncated := agent.enforceStepToolResultBudget("sess", result, &used)
+
+	assert.True(t, utf8.ValidString(truncated.Content))
+	assert.Contains(t, truncated.Content, "This excerpt is incomplete")
+	assert.Contains(t, truncated.Content, ".crush/truncation/")
+	assert.LessOrEqual(t, len([]rune(truncated.Content)), 5_000)
+	assert.Equal(t, contextWindowStepToolResultCharsLimit, used)
+
+	artifactMatches, globErr := filepath.Glob(filepath.Join(env.workingDir, ".crush", "truncation", "*.txt"))
+	require.NoError(t, globErr)
+	require.Len(t, artifactMatches, 1)
+	artifactContent, readErr := os.ReadFile(artifactMatches[0])
+	require.NoError(t, readErr)
+	assert.Equal(t, original, string(artifactContent))
+}
+
+func TestEnforceStepToolResultBudget_OmitsWhenBudgetExhausted(t *testing.T) {
+	t.Parallel()
+
+	agent := &sessionAgent{}
+	used := contextWindowStepToolResultCharsLimit
+	result := message.ToolResult{Name: "glob", Content: strings.Repeat("x", 200)}
+
+	truncated := agent.enforceStepToolResultBudget("sess", result, &used)
+
+	assert.Contains(t, truncated.Content, "Step tool-result budget exhausted")
+	assert.Contains(t, truncated.Content, "200 characters omitted")
+	assert.Equal(t, contextWindowStepToolResultCharsLimit, used)
+}
+
 func TestTruncateOversizedToolResults_SmallContentUntouched(t *testing.T) {
 	t.Parallel()
 

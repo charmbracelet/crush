@@ -16,10 +16,11 @@ import (
 )
 
 type localToolDefinition struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Parameters  any    `json:"parameters"`
-	Execute     string `json:"execute"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Parameters  any            `json:"parameters"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+	Execute     string         `json:"execute"`
 }
 
 func DiscoverLocalTools(workingDir string) (map[string]ToolDefinition, error) {
@@ -85,6 +86,7 @@ func loadLocalToolDefinition(path string, workingDir string) (ToolDefinition, er
 		Name:        parsed.Name,
 		Description: parsed.Description,
 		Parameters:  parameters,
+		Metadata:    parsed.Metadata,
 		Execute:     localToolExecutor(parsed.Execute, workingDir),
 	}, nil
 }

@@ -16,13 +16,17 @@ func TestMemoryServiceStoreGetDelete(t *testing.T) {
 	service, err := NewService(t.TempDir())
 	require.NoError(t, err)
 
-	err = service.Store(context.Background(), "project/goal", "Ship MVP")
+	err = service.Store(context.Background(), StoreParams{Key: "project/goal", Value: "Ship MVP", Scope: "project", Category: "product", Type: "goal", Tags: []string{"roadmap", "launch"}})
 	require.NoError(t, err)
 
 	entry, err := service.Get(context.Background(), "project/goal")
 	require.NoError(t, err)
 	require.Equal(t, "project/goal", entry.Key)
 	require.Equal(t, "Ship MVP", entry.Value)
+	require.Equal(t, "project", entry.Scope)
+	require.Equal(t, "product", entry.Category)
+	require.Equal(t, "goal", entry.Type)
+	require.Equal(t, []string{"launch", "roadmap"}, entry.Tags)
 	require.NotZero(t, entry.UpdatedAt)
 
 	err = service.Delete(context.Background(), "project/goal")
@@ -38,21 +42,57 @@ func TestMemoryServiceSearchAndList(t *testing.T) {
 	service, err := NewService(t.TempDir())
 	require.NoError(t, err)
 
-	require.NoError(t, service.Store(context.Background(), "alpha", "first memory"))
-	require.NoError(t, service.Store(context.Background(), "beta", "second memory"))
-	require.NoError(t, service.Store(context.Background(), "project", "beta plan"))
+	require.NoError(t, service.Store(context.Background(), StoreParams{Key: "alpha", Value: "first memory", Scope: "project", Category: "notes", Type: "fact", Tags: []string{"alpha"}}))
+	require.NoError(t, service.Store(context.Background(), StoreParams{Key: "beta", Value: "second memory", Scope: "project", Category: "preferences", Type: "workflow", Tags: []string{"golang", "tests"}}))
+	require.NoError(t, service.Store(context.Background(), StoreParams{Key: "session-note", Value: "beta plan", Scope: "session", Category: "notes", Type: "plan", Tags: []string{"beta", "tests"}}))
 
-	searchResults, err := service.Search(context.Background(), "beta", 10)
+	searchResults, err := service.Search(context.Background(), SearchParams{Query: "beta", Limit: 10})
 	require.NoError(t, err)
 	require.Len(t, searchResults, 2)
-	require.Equal(t, "project", searchResults[0].Key)
+	require.Equal(t, "session-note", searchResults[0].Key)
 	require.Equal(t, "beta", searchResults[1].Key)
 
-	listResults, err := service.List(context.Background(), 2)
+	metadataSearch, err := service.Search(context.Background(), SearchParams{Query: "workflow", Type: "workflow", Tags: []string{"golang"}, Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, metadataSearch, 1)
+	require.Equal(t, "beta", metadataSearch[0].Key)
+
+	projectOnly, err := service.Search(context.Background(), SearchParams{Query: "beta", Scope: "project", Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, projectOnly, 1)
+	require.Equal(t, "beta", projectOnly[0].Key)
+
+	listResults, err := service.List(context.Background(), ListParams{Scope: "project", Limit: 2})
 	require.NoError(t, err)
 	require.Len(t, listResults, 2)
-	require.Equal(t, "project", listResults[0].Key)
-	require.Equal(t, "beta", listResults[1].Key)
+	require.Equal(t, "beta", listResults[0].Key)
+	require.Equal(t, "alpha", listResults[1].Key)
+
+	tagFiltered, err := service.List(context.Background(), ListParams{Category: "notes", Tags: []string{"beta"}, Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, tagFiltered, 1)
+	require.Equal(t, "session-note", tagFiltered[0].Key)
+}
+
+func TestMemoryServiceReadsLegacyStoreFormat(t *testing.T) {
+	t.Parallel()
+
+	dataDir := t.TempDir()
+	memoryDir := filepath.Join(dataDir, "memory")
+	require.NoError(t, os.MkdirAll(memoryDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(memoryDir, "entries.json"), []byte(`{"entries":{"legacy":{"key":"legacy","value":"old value","scope":"project","updated_at":123}}}`), 0o644))
+
+	service, err := NewService(dataDir)
+	require.NoError(t, err)
+
+	entry, err := service.Get(context.Background(), "legacy")
+	require.NoError(t, err)
+	require.Equal(t, "legacy", entry.Key)
+	require.Equal(t, "old value", entry.Value)
+	require.Equal(t, "project", entry.Scope)
+	require.Empty(t, entry.Category)
+	require.Empty(t, entry.Type)
+	require.Nil(t, entry.Tags)
 }
 
 func TestMemoryServiceWritesAuditLog(t *testing.T) {
@@ -62,7 +102,7 @@ func TestMemoryServiceWritesAuditLog(t *testing.T) {
 	service, err := NewService(dataDir)
 	require.NoError(t, err)
 
-	require.NoError(t, service.Store(context.Background(), "k1", "v1"))
+	require.NoError(t, service.Store(context.Background(), StoreParams{Key: "k1", Value: "v1", Scope: "project"}))
 	require.NoError(t, service.Delete(context.Background(), "k1"))
 
 	auditFile := filepath.Join(dataDir, "memory", "audit.log")
@@ -79,13 +119,13 @@ func TestMemoryServiceValidation(t *testing.T) {
 	service, err := NewService(t.TempDir())
 	require.NoError(t, err)
 
-	err = service.Store(context.Background(), " ", "value")
+	err = service.Store(context.Background(), StoreParams{Key: " ", Value: "value"})
 	require.ErrorContains(t, err, "key is required")
 
-	err = service.Store(context.Background(), "key", " ")
+	err = service.Store(context.Background(), StoreParams{Key: "key", Value: " "})
 	require.ErrorContains(t, err, "value is required")
 
-	_, err = service.Search(context.Background(), " ", 10)
+	_, err = service.Search(context.Background(), SearchParams{Query: " ", Limit: 10})
 	require.ErrorContains(t, err, "query is required")
 
 	err = service.Delete(context.Background(), "missing")
@@ -101,6 +141,6 @@ func TestMemoryServiceContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err = service.Store(ctx, "key", "value")
+	err = service.Store(ctx, StoreParams{Key: "key", Value: "value"})
 	require.True(t, errors.Is(err, context.Canceled))
 }

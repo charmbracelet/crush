@@ -19,12 +19,14 @@ import (
 
 // Prompt represents a template-based prompt generator.
 type Prompt struct {
-	name              string
-	template          string
-	now               func() time.Time
-	platform          string
-	workingDir        string
-	disableGlobalFile bool
+	name                  string
+	template              string
+	now                   func() time.Time
+	platform              string
+	workingDir            string
+	disableGlobalFile     bool
+	omitProjectContext    bool
+	contextPathsOverride  []string
 }
 
 type PromptDat struct {
@@ -69,6 +71,22 @@ func WithWorkingDir(workingDir string) Option {
 func WithDisableGlobalContextFile(disable bool) Option {
 	return func(p *Prompt) {
 		p.disableGlobalFile = disable
+	}
+}
+
+func WithOmitProjectContextFiles(omit bool) Option {
+	return func(p *Prompt) {
+		p.omitProjectContext = omit
+	}
+}
+
+func WithContextPathsOverride(paths []string) Option {
+	return func(p *Prompt) {
+		if paths == nil {
+			p.contextPathsOverride = nil
+			return
+		}
+		p.contextPathsOverride = append([]string(nil), paths...)
 	}
 }
 
@@ -164,15 +182,21 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 
 	cfg := store.Config()
 
-	for _, pth := range cfg.Options.ContextPaths {
-		expanded := expandPath(pth, store)
-		pathKey := strings.ToLower(expanded)
+	contextPaths := cfg.Options.ContextPaths
+	if p.contextPathsOverride != nil {
+		contextPaths = p.contextPathsOverride
+	}
+	if !p.omitProjectContext {
+		for _, pth := range contextPaths {
+			expanded := expandPath(pth, store)
+			pathKey := strings.ToLower(expanded)
 
-		if _, ok := projectFiles[pathKey]; ok {
-			continue
+			if _, ok := projectFiles[pathKey]; ok {
+				continue
+			}
+			content := processContextPath(expanded, store)
+			projectFiles[pathKey] = content
 		}
-		content := processContextPath(expanded, store)
-		projectFiles[pathKey] = content
 	}
 
 	// Load global AGENTS.md directly to ensure it's always injected into system prompt.

@@ -555,6 +555,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.session != nil && m.session.Kind == session.KindHandoff && m.session.MessageCount == 0 && strings.TrimSpace(m.session.HandoffDraftPrompt) != "" {
 			m.textarea.SetValue(m.session.HandoffDraftPrompt)
 			m.textarea.MoveToEnd()
+			var cmd tea.Cmd
+			m.textarea, cmd = m.textarea.Update(nil)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 			if m.attachments != nil {
 				m.attachments.Clear()
 			}
@@ -1464,22 +1469,29 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 
 	// Find the parent agent tool item.
 	var agentItem chat.NestedToolContainer
-	for i := 0; i < m.chat.Len(); i++ {
-		item := m.chat.MessageItem(toolCallID)
-		if item == nil {
-			continue
-		}
-		if agent, ok := item.(chat.NestedToolContainer); ok {
-			if toolMessageItem, ok := item.(chat.ToolMessageItem); ok {
-				if toolMessageItem.ToolCall().ID == toolCallID {
-					// Verify this agent belongs to the correct parent message.
-					// We can't directly check parentMessageID on the item, so we trust the session parsing.
-					agentItem = agent
-					break
+	resolveParentToolCallID := func(candidate string) string {
+		for candidate != "" {
+			if item := m.chat.MessageItem(candidate); item != nil {
+				if nested, ok := item.(chat.NestedToolContainer); ok {
+					if toolMessageItem, ok := item.(chat.ToolMessageItem); ok && toolMessageItem.ToolCall().ID == candidate {
+						agentItem = nested
+						return candidate
+					}
 				}
 			}
+			next, _, found := strings.Cut(candidate, "::")
+			if !found || next == candidate {
+				break
+			}
+			candidate = next
 		}
+		return ""
 	}
+	resolvedToolCallID := resolveParentToolCallID(toolCallID)
+	if resolvedToolCallID == "" {
+		return nil
+	}
+	toolCallID = resolvedToolCallID
 
 	if agentItem == nil {
 		return nil

@@ -94,6 +94,20 @@ func TestFilterToolsForRiskPolicy(t *testing.T) {
 		tools.RequestUserInputToolName,
 		tools.PlanExitToolName,
 	}, filterToolsForRiskPolicy([]string{AgentToolName, tools.AgenticFetchToolName, tools.ViewToolName}, session.CollaborationModePlan, nil))
+
+	require.Equal(t, []string{
+		tools.LSPDefinitionToolName,
+		tools.LSPHoverToolName,
+		tools.LSPDocumentSymbolsToolName,
+		tools.LSPWorkspaceSymbolsToolName,
+		tools.RequestUserInputToolName,
+		tools.PlanExitToolName,
+	}, filterToolsForRiskPolicy([]string{
+		tools.LSPDefinitionToolName,
+		tools.LSPHoverToolName,
+		tools.LSPDocumentSymbolsToolName,
+		tools.LSPWorkspaceSymbolsToolName,
+	}, session.CollaborationModePlan, nil))
 }
 
 func TestFilterToolsForCollaborationMode(t *testing.T) {
@@ -117,6 +131,10 @@ func TestFilterToolsForCollaborationMode(t *testing.T) {
 		tools.PlanExitToolName,
 		tools.DiagnosticsToolName,
 		tools.ReferencesToolName,
+		tools.LSPDefinitionToolName,
+		tools.LSPHoverToolName,
+		tools.LSPDocumentSymbolsToolName,
+		tools.LSPWorkspaceSymbolsToolName,
 		tools.ListMCPResourcesToolName,
 		tools.ReadMCPResourceToolName,
 		tools.SourcegraphToolName,
@@ -140,6 +158,10 @@ func TestFilterToolsForCollaborationMode(t *testing.T) {
 		tools.PlanExitToolName,
 		tools.DiagnosticsToolName,
 		tools.ReferencesToolName,
+		tools.LSPDefinitionToolName,
+		tools.LSPHoverToolName,
+		tools.LSPDocumentSymbolsToolName,
+		tools.LSPWorkspaceSymbolsToolName,
 		tools.ListMCPResourcesToolName,
 		tools.ReadMCPResourceToolName,
 		tools.SourcegraphToolName,
@@ -155,5 +177,9 @@ func TestFilterToolsForCollaborationMode(t *testing.T) {
 		tools.PlanExitToolName,
 		tools.DiagnosticsToolName,
 		tools.ReferencesToolName,
+		tools.LSPDefinitionToolName,
+		tools.LSPHoverToolName,
+		tools.LSPDocumentSymbolsToolName,
+		tools.LSPWorkspaceSymbolsToolName,
 	}, filterToolsForCollaborationMode(baseTools, session.CollaborationModePlan))
 }

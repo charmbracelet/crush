@@ -12,8 +12,18 @@ Required JSON shape:
 Rules:
 - The handoff goal is the top priority.
 - `title` must be one line and concise.
-- `prompt` must be directly usable as the first unsent draft in the new session.
-- `prompt` should briefly capture the goal, current state, known decisions, remaining work, and the most relevant files.
+- `prompt` must be written as instructions for the next session, not as a retrospective summary.
+- Prefer the current terminal state over chronological history.
+- Extract concrete facts from the transcript: implemented work, decisions, constraints, blockers, remaining work, and validation steps.
+- Include unresolved questions only if they affect the next steps.
+- Use a short structured format, for example:
+  Goal: ...
+  Current state: ...
+  Decisions / constraints: ...
+  Remaining work: ...
+  Validation: ...
+  Relevant files: ...
+- Keep `prompt` compact and scannable. Aim for ~10 bullets and no more than ~1500 characters.
 - `relevant_files` must only contain file paths from the provided tracked-files list.
 - Prefer a small set of high-signal files over listing everything.
 - If no tracked files are relevant, return an empty array.

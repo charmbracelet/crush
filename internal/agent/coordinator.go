@@ -15,10 +15,13 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
+	"github.com/charmbracelet/crush/internal/agent/mailbox"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/reducer"
@@ -109,9 +112,13 @@ type coordinator struct {
 	toolRuntime    toolruntime.Service
 	timeline       timeline.Service
 	hookManager    *hooks.Manager
+	mailbox        mailbox.Service
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
+
+	deferredMu                 sync.Mutex
+	activatedDeferredBySession map[string]map[string]struct{}
 
 	subAgentScheduler  subAgentScheduler
 	subAgentFactory    subAgentFactory
@@ -143,20 +150,22 @@ func NewCoordinator(
 	}
 
 	c := &coordinator{
-		cfg:            cfg,
-		sessions:       sessions,
-		messages:       messages,
-		permissions:    permissions,
-		userInput:      userInput,
-		history:        history,
-		longTermMemory: longTermMemory,
-		filetracker:    filetracker,
-		lspManager:     lspManager,
-		notify:         notify,
-		toolRuntime:    toolRuntime,
-		timeline:       timeline,
-		hookManager:    hookMgr,
-		agents:         make(map[string]SessionAgent),
+		cfg:                        cfg,
+		sessions:                   sessions,
+		messages:                   messages,
+		permissions:                permissions,
+		userInput:                  userInput,
+		history:                    history,
+		longTermMemory:             longTermMemory,
+		filetracker:                filetracker,
+		lspManager:                 lspManager,
+		notify:                     notify,
+		toolRuntime:                toolRuntime,
+		timeline:                   timeline,
+		hookManager:                hookMgr,
+		mailbox:                    mailbox.NewService(),
+		agents:                     make(map[string]SessionAgent),
+		activatedDeferredBySession: make(map[string]map[string]struct{}),
 	}
 	agentCfg, ok := cfg.Config().Agents[config.AgentCoder]
 	if !ok {
@@ -183,6 +192,7 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	if err := c.readyWg.Wait(); err != nil {
 		return nil, err
 	}
+	defer c.clearDeferredToolActivationsForSession(sessionID)
 
 	// Get session to retrieve session-specific working directory.
 	sess, err := c.sessions.Get(ctx, sessionID)
@@ -201,6 +211,10 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	ctx = context.WithValue(ctx, tools.SessionIDContextKey, sessionID)
 	ctx = context.WithValue(ctx, tools.SessionServiceContextKey, c.sessions)
 	ctx = toolruntime.WithService(ctx, c.toolRuntime)
+	ctx = toolruntime.WithSessionID(ctx, sessionID)
+	if agentCfg, ok := c.cfg.Config().Agents[config.AgentCoder]; ok {
+		ctx = withAgentPolicyContext(ctx, agentCfg)
+	}
 
 	if err := c.maybeAppendAutoModeReminder(ctx, sessionID, sess.PermissionMode); err != nil {
 		return nil, fmt.Errorf("failed to append auto mode reminder: %w", err)
@@ -599,6 +613,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		SystemPromptPrefix: inferenceProviderCfg.SystemPromptPrefix,
 		SystemPrompt:       "",
 		WorkingDir:         c.cfg.WorkingDir(),
+		AutoRecall:         buildAutoRecall(c.history, c.longTermMemory),
 		RefreshCallConfig: func(callCtx context.Context) (sessionAgentRuntimeConfig, error) {
 			return c.refreshSessionAgentRuntimeConfig(callCtx, result, prompt, agent, isSubAgent)
 		},
@@ -696,6 +711,7 @@ func (c *coordinator) refreshSessionAgentRuntimeConfig(ctx context.Context, curr
 		CollaborationMode:  mode,
 		PermissionMode:     permissionMode,
 		AllowedToolNames:   allowedToolNames,
+		Tools:              append([]fantasy.AgentTool(nil), toolSet...),
 	}, nil
 }
 
@@ -733,122 +749,66 @@ func (c *coordinator) permissionModeForContext(ctx context.Context) (session.Per
 }
 
 func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, mode session.CollaborationMode) ([]fantasy.AgentTool, error) {
-	var allTools []fantasy.AgentTool
-	if config.NormalizeAgentMode(agent.Mode) != config.AgentModeSubagent && slices.Contains(agent.AllowedTools, AgentToolName) {
-		agentTool, err := c.agentTool(ctx)
-		if err != nil {
-			return nil, err
-		}
-		allTools = append(allTools, agentTool)
+	registry := newToolRegistry()
+	registeredTools, err := c.registerAgentTools(ctx, agent, mode, registry)
+	if err != nil {
+		return nil, err
 	}
 
-	if slices.Contains(agent.AllowedTools, tools.AgenticFetchToolName) {
-		agenticFetchTool, err := c.agenticFetchTool(ctx, nil)
-		if err != nil {
-			return nil, err
-		}
-		allTools = append(allTools, agenticFetchTool)
-	}
-
-	// Get the model name for the agent
-	modelName := ""
-	if modelCfg, ok := c.cfg.Config().Models[agent.Model]; ok {
-		if model := c.cfg.Config().GetModel(modelCfg.Provider, modelCfg.Model); model != nil {
-			modelName = model.Name
-		}
-	}
-
-	bashOpts := tools.BashToolOptions{}
-	if agent.ID == config.AgentExplore || mode == session.CollaborationModePlan {
-		bashOpts = tools.BashToolOptions{
-			RestrictedToGitReadOnly: true,
-			DisableBackground:       true,
-			DescriptionOverride:     tools.RestrictedGitBashDescription(),
-		}
-	}
-
-	allTools = append(allTools,
-		tools.NewRequestUserInputTool(c.userInput),
-		tools.NewPlanExitTool(c.sessions),
-		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelName, c.hookManager, bashOpts),
-		tools.NewJobOutputTool(),
-		tools.NewJobWaitTool(),
-		tools.NewJobKillTool(),
-		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),
-		tools.NewEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
-		tools.NewMultiEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
-		tools.NewFetchTool(c.permissions, c.cfg.WorkingDir(), nil),
-		tools.NewGlobTool(c.cfg.WorkingDir()),
-		tools.NewGrepTool(c.cfg.WorkingDir(), c.cfg.Config().Tools.Grep),
-		tools.NewLsTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Tools.Ls),
-		tools.NewSourcegraphTool(nil),
-		tools.NewHistorySearchTool(c.history),
-		tools.NewLongTermMemoryTool(c.longTermMemory, c.permissions, c.cfg.WorkingDir()),
-		tools.NewTodosTool(c.sessions),
-		tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, c.cfg.WorkingDir(), c.cfg.Config().Options.SkillsPaths...),
-		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
-	)
-
-	// Add LSP tools if user has configured LSPs or auto_lsp is enabled (nil or true).
-	if len(c.cfg.Config().LSP) > 0 || c.cfg.Config().Options.AutoLSP == nil || *c.cfg.Config().Options.AutoLSP {
-		allTools = append(allTools, tools.NewDiagnosticsTool(c.lspManager), tools.NewReferencesTool(c.lspManager), tools.NewLSPRestartTool(c.lspManager))
-	}
-
-	if len(c.cfg.Config().MCP) > 0 {
-		allTools = append(
-			allTools,
-			tools.NewListMCPResourcesTool(c.cfg, c.permissions),
-			tools.NewReadMCPResourceTool(c.cfg, c.permissions),
-		)
-	}
-
-	var filteredTools []fantasy.AgentTool
 	allowedToolNames := filterToolsForRiskPolicy(agent.AllowedTools, mode, c.cfg.Config().Options.DisabledTools)
-	for _, tool := range allTools {
-		if slices.Contains(allowedToolNames, tool.Info().Name) {
-			filteredTools = append(filteredTools, tool)
+	allowedSet := make(map[string]struct{}, len(allowedToolNames))
+	for _, name := range allowedToolNames {
+		allowedSet[name] = struct{}{}
+	}
+
+	activatedDeferred := c.activatedDeferredTools(ctx)
+	filteredTools := make([]fantasy.AgentTool, 0, len(registeredTools))
+	exposedByName := make(map[string]bool, len(registeredTools))
+	disabledSet := make(map[string]struct{}, len(c.cfg.Config().Options.DisabledTools))
+	for _, disabled := range c.cfg.Config().Options.DisabledTools {
+		disabledSet[disabled] = struct{}{}
+	}
+	for _, registered := range registeredTools {
+		name := registered.tool.Info().Name
+		_, allowed := allowedSet[name]
+		if !allowed {
+			if mode == session.CollaborationModePlan || !registered.metadata.IsDeferred() {
+				continue
+			}
+			if _, activated := activatedDeferred[name]; !activated {
+				continue
+			}
+			if _, disabled := disabledSet[name]; disabled {
+				continue
+			}
 		}
+		if mode != session.CollaborationModePlan && registered.metadata.IsDeferred() {
+			if _, activated := activatedDeferred[name]; !activated {
+				continue
+			}
+		}
+		filteredTools = append(filteredTools, registered.tool)
+		exposedByName[name] = true
+	}
+
+	for _, entry := range registry.entries {
+		entry.Exposed = exposedByName[entry.Name]
+		registry.entries[entry.Name] = entry
 	}
 
 	if mode == session.CollaborationModePlan {
+		filteredTools = removeNonPlanSafeCustomTools(filteredTools, registry)
+		slices.SortFunc(filteredTools, func(a, b fantasy.AgentTool) int {
+			return strings.Compare(a.Info().Name, b.Info().Name)
+		})
 		return filteredTools, nil
 	}
 
-	// Add custom plugin tools - they bypass AllowedTools filter since they are user-defined
-	// But only add them if they don't already exist in filteredTools (to avoid duplicates).
-	existingToolNames := make(map[string]bool)
-	for _, tool := range filteredTools {
-		existingToolNames[tool.Info().Name] = true
-	}
-	for _, customTool := range plugin.GetCustomTools() {
-		if !existingToolNames[customTool.Name] {
-			filteredTools = append(filteredTools, plugin.NewCustomToolAgentTool(customTool, c.cfg.WorkingDir()))
-		}
+	for _, entry := range registry.entries {
+		entry.Exposed = exposedByName[entry.Name]
+		registry.entries[entry.Name] = entry
 	}
 
-	for _, tool := range tools.GetMCPTools(c.permissions, c.cfg, c.cfg.WorkingDir()) {
-		if agent.AllowedMCP == nil {
-			// No MCP restrictions
-			filteredTools = append(filteredTools, tool)
-			continue
-		}
-		if len(agent.AllowedMCP) == 0 {
-			// No MCPs allowed
-			slog.Debug("No MCPs allowed", "tool", tool.Name(), "agent", agent.Name)
-			break
-		}
-
-		for mcp, tools := range agent.AllowedMCP {
-			if mcp != tool.MCP() {
-				continue
-			}
-			if len(tools) == 0 || slices.Contains(tools, tool.MCPToolName()) {
-				filteredTools = append(filteredTools, tool)
-				break
-			}
-			slog.Debug("MCP not allowed", "tool", tool.Name(), "agent", agent.Name)
-		}
-	}
 	for i, tool := range filteredTools {
 		filteredTools[i] = plugin.WrapAgentTool(tool)
 	}
@@ -857,6 +817,24 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, mode s
 		return strings.Compare(a.Info().Name, b.Info().Name)
 	})
 	return filteredTools, nil
+}
+
+func removeNonPlanSafeCustomTools(toolsList []fantasy.AgentTool, registry *toolRegistry) []fantasy.AgentTool {
+	if len(toolsList) == 0 || registry == nil {
+		return toolsList
+	}
+	filtered := make([]fantasy.AgentTool, 0, len(toolsList))
+	for _, tool := range toolsList {
+		entry, ok := registry.Resolve(tool.Info().Name)
+		if !ok || !strings.HasPrefix(entry.Source, "plugin") {
+			filtered = append(filtered, tool)
+			continue
+		}
+		if entry.Metadata.ReadOnly {
+			filtered = append(filtered, tool)
+		}
+	}
+	return filtered
 }
 
 func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Model, Model, error) {
@@ -899,8 +877,16 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 		return Model{}, Model{}, errLargeModelNotFound
 	}
 
+	if largeModelCfg.ContextWindow > 0 {
+		largeCatwalkModel.ContextWindow = largeModelCfg.ContextWindow
+	}
+
 	if smallCatwalkModel == nil {
 		return Model{}, Model{}, errSmallModelNotFound
+	}
+
+	if smallModelCfg.ContextWindow > 0 {
+		smallCatwalkModel.ContextWindow = smallModelCfg.ContextWindow
 	}
 
 	largeThinkingDisabled := largeModelCfg.Think != nil && !*largeModelCfg.Think
@@ -1361,6 +1347,67 @@ func (c *coordinator) RefreshTools(ctx context.Context) error {
 	return nil
 }
 
+func (c *coordinator) activateDeferredTools(ctx context.Context, toolNames []string) []string {
+	sessionID := tools.GetSessionFromContext(ctx)
+	if sessionID == "" || len(toolNames) == 0 {
+		return nil
+	}
+
+	c.deferredMu.Lock()
+	defer c.deferredMu.Unlock()
+
+	set, ok := c.activatedDeferredBySession[sessionID]
+	if !ok {
+		set = make(map[string]struct{})
+		c.activatedDeferredBySession[sessionID] = set
+	}
+
+	activated := make([]string, 0, len(toolNames))
+	for _, name := range toolNames {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			continue
+		}
+		if _, exists := set[trimmed]; exists {
+			activated = append(activated, trimmed)
+			continue
+		}
+		set[trimmed] = struct{}{}
+		activated = append(activated, trimmed)
+	}
+	return activated
+}
+
+func (c *coordinator) activatedDeferredTools(ctx context.Context) map[string]struct{} {
+	sessionID := tools.GetSessionFromContext(ctx)
+	if sessionID == "" {
+		return nil
+	}
+
+	c.deferredMu.Lock()
+	defer c.deferredMu.Unlock()
+
+	set, ok := c.activatedDeferredBySession[sessionID]
+	if !ok || len(set) == 0 {
+		return nil
+	}
+	clone := make(map[string]struct{}, len(set))
+	for name := range set {
+		clone[name] = struct{}{}
+	}
+	return clone
+}
+
+func (c *coordinator) clearDeferredToolActivationsForSession(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+
+	c.deferredMu.Lock()
+	delete(c.activatedDeferredBySession, sessionID)
+	c.deferredMu.Unlock()
+}
+
 func (c *coordinator) QueuedPrompts(sessionID string) int {
 	return c.currentAgent.QueuedPrompts(sessionID)
 }
@@ -1484,15 +1531,21 @@ func (c *coordinator) refreshApiKeyTemplate(ctx context.Context, providerCfg con
 
 // subAgentParams holds the parameters for running a sub-agent.
 type subAgentParams struct {
-	Agent          SessionAgent
-	SessionID      string
-	AgentMessageID string
-	ToolCallID     string
-	Prompt         string
-	SessionTitle   string
+	Agent             SessionAgent
+	SessionID         string
+	AgentMessageID    string
+	ParentMessageID   string
+	ToolCallID        string
+	Prompt            string
+	SessionTitle      string
+	DelegationMailbox string
+	AgentMemory       string
+	AgentIsolation    string
+	AgentBackground   *bool
 	// SessionSetup is an optional callback invoked after session creation
 	// but before agent execution, for custom session configuration.
 	SessionSetup func(sessionID string)
+	OnProgress   func(toolUses int, lastTool string)
 }
 
 type taskGraphTask struct {
@@ -1542,6 +1595,8 @@ func (c *coordinator) runTaskGraphDirect(ctx context.Context, params taskGraphPa
 		return fantasy.NewTextErrorResponse("tasks is required"), nil
 	}
 
+	ctx = taskGraphContextWithBudget(ctx, params.Tasks, c.cfg.Config().Agents)
+	ctx = toolruntime.WithToolCallID(ctx, params.ToolCallID)
 	graph := taskgraph.TaskGraph{Nodes: make([]taskgraph.TaskNode, 0, len(params.Tasks))}
 	tasksByID := make(map[string]taskGraphTask, len(params.Tasks))
 	for _, task := range params.Tasks {
@@ -1554,8 +1609,17 @@ func (c *coordinator) runTaskGraphDirect(ctx context.Context, params taskGraphPa
 		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
 
+	mailboxBridge, err := newTaskGraphMailboxBridge(c.mailbox, c.sessions, params.SessionID, params.ToolCallID, params.Tasks)
+	if err != nil {
+		return fantasy.NewTextErrorResponse(err.Error()), nil
+	}
+	defer mailboxBridge.Close()
+
 	results := make(map[string]taskGraphNodeResult, len(params.Tasks))
+	semaphores := make(map[string]chan struct{})
 	var mu sync.Mutex
+	var semMu sync.Mutex
+	var firstFailure atomic.Bool
 
 	for _, layer := range layers {
 		var wg sync.WaitGroup
@@ -1566,6 +1630,7 @@ func (c *coordinator) runTaskGraphDirect(ctx context.Context, params taskGraphPa
 			go func() {
 				defer wg.Done()
 
+				mailboxBridge.MarkPending(task.ID)
 				mu.Lock()
 				var blockedBy string
 				for _, dependencyID := range task.DependsOn {
@@ -1577,25 +1642,54 @@ func (c *coordinator) runTaskGraphDirect(ctx context.Context, params taskGraphPa
 				}
 				mu.Unlock()
 
-				if blockedBy != "" {
+				if taskGraphFailFastEnabled(task, c.cfg.Config().Agents) && firstFailure.Load() {
+					result := taskGraphNodeResult{
+						Task:    task,
+						Status:  message.ToolResultSubtaskStatusCanceled,
+						Content: "Skipped because fail-fast stopped new task execution after an earlier failure.",
+					}
+					mailboxBridge.MarkResult(task.ID, result.Status, result.Content)
 					mu.Lock()
-					results[task.ID] = taskGraphNodeResult{
+					results[task.ID] = result
+					mu.Unlock()
+					return
+				}
+				if budgetErr := taskGraphRuntimeBudgetError(ctx); budgetErr != nil {
+					result := taskGraphNodeResult{
+						Task:    task,
+						Status:  message.ToolResultSubtaskStatusCanceled,
+						Content: strings.TrimSpace(budgetErr.Error()),
+					}
+					mailboxBridge.MarkResult(task.ID, result.Status, result.Content)
+					mu.Lock()
+					results[task.ID] = result
+					mu.Unlock()
+					return
+				}
+
+				if blockedBy != "" {
+					result := taskGraphNodeResult{
 						Task:    task,
 						Status:  message.ToolResultSubtaskStatusCanceled,
 						Content: fmt.Sprintf("Skipped due to dependency %q failure.", blockedBy),
 					}
+					mailboxBridge.MarkResult(task.ID, result.Status, result.Content)
+					mu.Lock()
+					results[task.ID] = result
 					mu.Unlock()
 					return
 				}
 
 				subAgent, agentCfg, buildErr := c.buildSubAgentForType(ctx, task.SubagentType)
 				if buildErr != nil {
-					mu.Lock()
-					results[task.ID] = taskGraphNodeResult{
+					result := taskGraphNodeResult{
 						Task:    task,
 						Status:  message.ToolResultSubtaskStatusFailed,
 						Content: strings.TrimSpace(buildErr.Error()),
 					}
+					mailboxBridge.MarkResult(task.ID, result.Status, result.Content)
+					mu.Lock()
+					results[task.ID] = result
 					mu.Unlock()
 					return
 				}
@@ -1606,44 +1700,96 @@ func (c *coordinator) runTaskGraphDirect(ctx context.Context, params taskGraphPa
 					description = defaultSubagentDescription(subagentType, task.Prompt)
 				}
 
-				taskToolCallID := fmt.Sprintf("%s::%s", params.ToolCallID, task.ID)
-				response, runErr := c.runSubAgent(ctx, subAgentParams{
-					Agent:          subAgent,
-					SessionID:      params.SessionID,
-					AgentMessageID: params.AgentMessageID,
-					ToolCallID:     taskToolCallID,
-					Prompt:         task.Prompt,
-					SessionTitle:   formatSubagentSessionTitle(description, subagentType),
-				})
-				if runErr != nil {
-					mu.Lock()
-					results[task.ID] = taskGraphNodeResult{
-						Task:    task,
-						Status:  message.ToolResultSubtaskStatusFailed,
-						Content: strings.TrimSpace(runErr.Error()),
+				mailboxBridge.MarkInProgress(task.ID)
+				semaphore := taskGraphSemaphoreForAgent(agentCfg, semaphores, &semMu)
+				if semaphore != nil {
+					select {
+					case semaphore <- struct{}{}:
+						defer func() {
+							<-semaphore
+						}()
+					case <-ctx.Done():
+						result := taskGraphNodeResult{
+							Task:    task,
+							Status:  message.ToolResultSubtaskStatusCanceled,
+							Content: strings.TrimSpace(taskGraphRuntimeBudgetCause(ctx).Error()),
+						}
+						mailboxBridge.MarkResult(task.ID, result.Status, result.Content)
+						mu.Lock()
+						results[task.ID] = result
+						mu.Unlock()
+						return
 					}
-					mu.Unlock()
-					return
 				}
 
-				status := message.ToolResultSubtaskStatusCompleted
-				childSessionID := ""
-				if subtask, ok := message.ParseToolResultSubtaskResult(response.Metadata); ok {
-					status = subtask.Status
-					childSessionID = subtask.ChildSessionID
-				} else if response.IsError {
-					status = message.ToolResultSubtaskStatusFailed
-				}
-				if status == "" {
-					status = message.ToolResultSubtaskStatusCompleted
+				taskToolCallID := fmt.Sprintf("%s::%s", params.ToolCallID, task.ID)
+				attempts := 1
+				if agentCfg.TaskGovernance != nil {
+					attempts += agentCfg.TaskGovernance.RetryBudgetLimit()
 				}
 
+				result := taskGraphNodeResult{Task: task}
+				basePrompt := strings.TrimSpace(task.Prompt)
+				for attempt := range attempts {
+					attemptPrompt := basePrompt
+					effects, consumeErr := mailboxBridge.Consume(task.ID)
+					if consumeErr == nil {
+						if len(effects.Messages) > 0 {
+							attemptPrompt = taskGraphPromptWithMailboxMessages(basePrompt, effects.Messages)
+						}
+						if effects.Stop {
+							result = taskGraphNodeResult{Task: task, Status: message.ToolResultSubtaskStatusCanceled, Content: effects.Reason}
+							break
+						}
+					}
+					attemptCtx := taskGraphAttemptContext(ctx, agentCfg, task.ID)
+					cancel := func() {}
+					if agentCfg.TaskGovernance != nil {
+						if timeout := agentCfg.TaskGovernance.Timeout(); timeout > 0 {
+							attemptCtx, cancel = context.WithTimeout(attemptCtx, timeout)
+						}
+					}
+
+					response, runErr := c.runSubAgent(attemptCtx, subAgentParams{
+						Agent:             subAgent,
+						SessionID:         params.SessionID,
+						AgentMessageID:    params.AgentMessageID,
+						ParentMessageID:   params.AgentMessageID,
+						ToolCallID:        taskGraphAttemptToolCallID(taskToolCallID, attempt),
+						Prompt:            attemptPrompt,
+						SessionTitle:      formatSubagentSessionTitle(description, subagentType),
+						DelegationMailbox: params.ToolCallID,
+						AgentMemory:       agentCfg.Memory,
+						AgentIsolation:    agentCfg.Isolation,
+						AgentBackground:   agentCfg.Background,
+					})
+					cancel()
+					if runErr != nil {
+						_ = toolruntime.ReportFailure(attemptCtx, "subagent_run", runErr)
+						result = taskGraphNodeResult{
+							Task:    task,
+							Status:  message.ToolResultSubtaskStatusFailed,
+							Content: strings.TrimSpace(runErr.Error()),
+						}
+					} else {
+						result = taskGraphNodeResultFromResponse(task, response)
+						if result.Status == message.ToolResultSubtaskStatusFailed {
+							_ = toolruntime.ReportFailure(attemptCtx, "subagent_result", errors.New(result.Content))
+						}
+					}
+
+					if result.Status == message.ToolResultSubtaskStatusCompleted ||
+						result.Status == message.ToolResultSubtaskStatusCanceled ||
+						attempt == attempts-1 {
+						break
+					}
+				}
+
+				mailboxBridge.MarkResult(task.ID, result.Status, result.Content)
 				mu.Lock()
-				results[task.ID] = taskGraphNodeResult{
-					Task:           task,
-					Status:         status,
-					ChildSessionID: childSessionID,
-					Content:        strings.TrimSpace(response.Content),
+				results[task.ID] = result
+				if result.Status == message.ToolResultSubtaskStatusFailed && taskGraphFailFastEnabled(task, c.cfg.Config().Agents) {
+					firstFailure.Store(true)
 				}
 				mu.Unlock()
 			}()
@@ -1684,9 +1830,14 @@ func (c *coordinator) runTaskGraphDirect(ctx context.Context, params taskGraphPa
 	}
 
 	reducerResult := reducer.Reduce(reducerInput)
+	reducerResult.MailboxID = strings.TrimSpace(params.ToolCallID)
+	reducerResult.Messages = taskGraphReducerMessages(orderedResults)
 	content := reducerResult.Summary
 	if len(lines) > 0 {
 		content += "\n" + strings.Join(lines, "\n")
+	}
+	if details := taskGraphOutputDetailsForModel(orderedResults); details != "" {
+		content += "\n\nTask outputs:\n" + details
 	}
 
 	response := fantasy.NewTextResponse(content)
@@ -1697,10 +1848,135 @@ func (c *coordinator) runTaskGraphDirect(ctx context.Context, params taskGraphPa
 
 	if len(orderedResults) == 1 {
 		only := orderedResults[0]
-		response = withSubtaskToolResponseMetadata(response, params.ToolCallID, only.ChildSessionID, only.Status)
+		response = withSubtaskToolResponseMetadata(response, params.ToolCallID, only.ChildSessionID, params.AgentMessageID, only.Status)
 	}
 
 	return response, nil
+}
+
+func taskGraphSemaphoreForAgent(agentCfg config.Agent, semaphores map[string]chan struct{}, semMu *sync.Mutex) chan struct{} {
+	if agentCfg.TaskGovernance == nil {
+		return nil
+	}
+	limit := agentCfg.TaskGovernance.MaxConcurrentLimit()
+	if limit == 0 {
+		return nil
+	}
+
+	agentID := config.CanonicalSubagentID(agentCfg.ID)
+	semMu.Lock()
+	defer semMu.Unlock()
+	if semaphore, ok := semaphores[agentID]; ok {
+		return semaphore
+	}
+	semaphore := make(chan struct{}, limit)
+	semaphores[agentID] = semaphore
+	return semaphore
+}
+
+func taskGraphContextWithBudget(ctx context.Context, tasks []taskGraphTask, agents map[string]config.Agent) context.Context {
+	var graphTimeout time.Duration
+	var runtimeBudget time.Duration
+	var failureBudget int
+	var failureDomain string
+	for _, task := range tasks {
+		agentCfg, ok := agents[config.CanonicalSubagentID(strings.TrimSpace(task.SubagentType))]
+		if !ok || agentCfg.TaskGovernance == nil {
+			continue
+		}
+		if timeout := agentCfg.TaskGovernance.GraphTimeout(); timeout > 0 && (graphTimeout == 0 || timeout < graphTimeout) {
+			graphTimeout = timeout
+		}
+		if budget := agentCfg.TaskGovernance.RuntimeBudget(); budget > 0 && (runtimeBudget == 0 || budget < runtimeBudget) {
+			runtimeBudget = budget
+		}
+		if budget := agentCfg.TaskGovernance.FailureBudgetLimit(); budget > 0 && (failureBudget == 0 || budget < failureBudget) {
+			failureBudget = budget
+		}
+		if failureDomain == "" {
+			failureDomain = agentCfg.TaskGovernance.FailureDomainName()
+		}
+	}
+	ctx = toolruntime.WithGovernance(ctx, toolruntime.Governance{
+		RuntimeBudget: runtimeBudget,
+		FailureBudget: failureBudget,
+		FailureDomain: cmp.Or(strings.TrimSpace(failureDomain), "task_graph"),
+	})
+	if graphTimeout == 0 {
+		return ctx
+	}
+	budgetCtx, _ := context.WithTimeout(ctx, graphTimeout)
+	return budgetCtx
+}
+
+func taskGraphFailFastEnabled(task taskGraphTask, agents map[string]config.Agent) bool {
+	agentCfg, ok := agents[config.CanonicalSubagentID(strings.TrimSpace(task.SubagentType))]
+	if !ok || agentCfg.TaskGovernance == nil {
+		return false
+	}
+	return agentCfg.TaskGovernance.FailFastEnabled()
+}
+
+func taskGraphAttemptContext(ctx context.Context, agentCfg config.Agent, taskID string) context.Context {
+	attemptCtx := ctx
+	governance := toolruntime.Governance{FailureDomain: taskGraphFailureDomain(agentCfg, taskID)}
+	if agentCfg.TaskGovernance != nil {
+		governance.RuntimeBudget = agentCfg.TaskGovernance.RuntimeBudget()
+		if governance.RuntimeBudget == 0 {
+			governance.RuntimeBudget = 0
+		}
+		if governance.FailureDomain == "" {
+			governance.FailureDomain = cmp.Or(agentCfg.TaskGovernance.FailureDomainName(), taskID)
+		}
+	}
+	attemptCtx = toolruntime.WithGovernance(attemptCtx, governance)
+	return attemptCtx
+}
+
+func taskGraphFailureDomain(agentCfg config.Agent, taskID string) string {
+	if agentCfg.TaskGovernance == nil {
+		return strings.TrimSpace(taskID)
+	}
+	return cmp.Or(agentCfg.TaskGovernance.FailureDomainName(), strings.TrimSpace(taskID))
+}
+
+func taskGraphRuntimeBudgetError(ctx context.Context) error {
+	if err := context.Cause(ctx); err != nil && toolruntime.FailureDomainFromContext(ctx) != "" {
+		return err
+	}
+	return nil
+}
+
+func taskGraphRuntimeBudgetCause(ctx context.Context) error {
+	if err := context.Cause(ctx); err != nil {
+		return err
+	}
+	return ctx.Err()
+}
+
+func taskGraphAttemptToolCallID(toolCallID string, attempt int) string {
+	if attempt == 0 {
+		return toolCallID
+	}
+	return fmt.Sprintf("%s::retry-%d", toolCallID, attempt)
+}
+
+func taskGraphNodeResultFromResponse(task taskGraphTask, response fantasy.ToolResponse) taskGraphNodeResult {
+	result := taskGraphNodeResult{
+		Task:    task,
+		Status:  message.ToolResultSubtaskStatusCompleted,
+		Content: strings.TrimSpace(response.Content),
+	}
+	if subtask, ok := message.ParseToolResultSubtaskResult(response.Metadata); ok {
+		result.Status = subtask.Status
+		result.ChildSessionID = subtask.ChildSessionID
+	} else if response.IsError {
+		result.Status = message.ToolResultSubtaskStatusFailed
+	}
+	if result.Status == "" {
+		result.Status = message.ToolResultSubtaskStatusCompleted
+	}
+	return result
 }
 
 func (c *coordinator) runSubAgentDirect(ctx context.Context, params subAgentParams) (fantasy.ToolResponse, error) {
@@ -1715,6 +1991,7 @@ func (c *coordinator) runSubAgentDirect(ctx context.Context, params subAgentPara
 				fantasy.NewTextErrorResponse("Auto Mode blocked subagent delegation because the handoff review failed."),
 				params.ToolCallID,
 				"",
+				params.ParentMessageID,
 				message.ToolResultSubtaskStatusFailed,
 			), nil
 		}
@@ -1727,6 +2004,7 @@ func (c *coordinator) runSubAgentDirect(ctx context.Context, params subAgentPara
 				fantasy.NewTextErrorResponse(reason),
 				params.ToolCallID,
 				"",
+				params.ParentMessageID,
 				message.ToolResultSubtaskStatusFailed,
 			), nil
 		}
@@ -1737,6 +2015,7 @@ func (c *coordinator) runSubAgentDirect(ctx context.Context, params subAgentPara
 	if err != nil {
 		return fantasy.ToolResponse{}, fmt.Errorf("create session: %w", err)
 	}
+	defer c.clearDeferredToolActivationsForSession(subSession.ID)
 
 	if params.SessionSetup != nil {
 		params.SessionSetup(subSession.ID)
@@ -1758,6 +2037,18 @@ func (c *coordinator) runSubAgentDirect(ctx context.Context, params subAgentPara
 	// system prompt; otherwise concurrent child runs can observe the parent's
 	// runtime config and skip their own initialization.
 	ctx = context.WithValue(ctx, sessionAgentRuntimeConfigContextKey{}, (*sessionAgentRuntimeConfig)(nil))
+	ctx = context.WithValue(ctx, tools.SessionIDContextKey, subSession.ID)
+	ctx = context.WithValue(ctx, tools.ToolCallIDContextKey, params.ToolCallID)
+	ctx = toolruntime.WithSessionID(ctx, subSession.ID)
+	ctx = toolruntime.WithToolCallID(ctx, params.ToolCallID)
+	ctx = withAgentPolicyContext(ctx, config.Agent{
+		Memory:     params.AgentMemory,
+		Isolation:  params.AgentIsolation,
+		Background: params.AgentBackground,
+	})
+	if params.DelegationMailbox != "" {
+		ctx = toolruntime.WithDelegationMailbox(ctx, params.DelegationMailbox)
+	}
 
 	result, err := params.Agent.Run(ctx, SessionAgentCall{
 		SessionID:        subSession.ID,
@@ -1770,8 +2061,10 @@ func (c *coordinator) runSubAgentDirect(ctx context.Context, params subAgentPara
 		FrequencyPenalty: model.ModelCfg.FrequencyPenalty,
 		PresencePenalty:  model.ModelCfg.PresencePenalty,
 		NonInteractive:   true,
+		OnProgress:       params.OnProgress,
 	})
 	if err != nil {
+		_ = toolruntime.ReportFailure(ctx, "subagent_run", err)
 		slog.Error("Sub-agent run failed", "error", err, "session", subSession.ID, "prompt", params.Prompt)
 		content := c.subAgentErrorText(ctx, subSession.ID, err)
 		if c.timeline != nil {
@@ -1780,11 +2073,16 @@ func (c *coordinator) runSubAgentDirect(ctx context.Context, params subAgentPara
 		if costErr := c.updateParentSessionCost(ctx, subSession.ID, params.SessionID); costErr != nil {
 			return fantasy.ToolResponse{}, costErr
 		}
+		status := message.ToolResultSubtaskStatusFailed
+		if ctx.Err() != nil {
+			status = message.ToolResultSubtaskStatusCanceled
+		}
 		return withSubtaskToolResponseMetadata(
 			fantasy.NewTextErrorResponse(content),
 			params.ToolCallID,
 			subSession.ID,
-			message.ToolResultSubtaskStatusFailed,
+			params.ParentMessageID,
+			status,
 		), nil
 	}
 
@@ -1804,6 +2102,7 @@ func (c *coordinator) runSubAgentDirect(ctx context.Context, params subAgentPara
 				fantasy.NewTextErrorResponse("Auto Mode blocked subagent handoff because the handoff review failed."),
 				params.ToolCallID,
 				subSession.ID,
+				params.ParentMessageID,
 				message.ToolResultSubtaskStatusFailed,
 			), nil
 		}
@@ -1816,6 +2115,7 @@ func (c *coordinator) runSubAgentDirect(ctx context.Context, params subAgentPara
 				fantasy.NewTextErrorResponse(reason),
 				params.ToolCallID,
 				subSession.ID,
+				params.ParentMessageID,
 				message.ToolResultSubtaskStatusFailed,
 			), nil
 		}
@@ -1828,17 +2128,99 @@ func (c *coordinator) runSubAgentDirect(ctx context.Context, params subAgentPara
 		fantasy.NewTextResponse(content),
 		params.ToolCallID,
 		subSession.ID,
+		params.ParentMessageID,
 		message.ToolResultSubtaskStatusCompleted,
 	), nil
 }
 
-func withSubtaskToolResponseMetadata(response fantasy.ToolResponse, parentToolCallID, childSessionID string, status message.ToolResultSubtaskStatus) fantasy.ToolResponse {
+func withAgentPolicyContext(ctx context.Context, agentCfg config.Agent) context.Context {
+	ctx = context.WithValue(ctx, tools.AgentMemoryContextKey, strings.TrimSpace(agentCfg.Memory))
+	ctx = context.WithValue(ctx, tools.AgentIsolationContextKey, strings.TrimSpace(agentCfg.Isolation))
+	if agentCfg.Background != nil {
+		ctx = context.WithValue(ctx, tools.AgentBackgroundContextKey, *agentCfg.Background)
+	}
+	return ctx
+}
+
+func withSubtaskToolResponseMetadata(response fantasy.ToolResponse, parentToolCallID, childSessionID, parentMessageID string, status message.ToolResultSubtaskStatus) fantasy.ToolResponse {
 	response.Metadata = message.ToolResult{Metadata: response.Metadata}.WithSubtaskResult(message.ToolResultSubtaskResult{
 		ChildSessionID:   childSessionID,
 		ParentToolCallID: parentToolCallID,
+		ParentMessageID:  parentMessageID,
 		Status:           status,
 	}).Metadata
 	return response
+}
+
+func taskGraphReducerMessages(results []taskGraphNodeResult) []string {
+	messages := make([]string, 0, len(results))
+	for _, result := range results {
+		label := strings.TrimSpace(result.Task.Description)
+		if label == "" {
+			label = result.Task.ID
+		}
+		content := taskGraphCompactText(result.Content)
+		if content == "" {
+			messages = append(messages, fmt.Sprintf("%s (%s)", label, result.Status))
+			continue
+		}
+		content, truncated := taskGraphEllipsize(content, taskGraphReducerMessageCharsLimit)
+		entry := fmt.Sprintf("%s (%s): %s", label, result.Status, content)
+		if truncated {
+			entry += " [truncated]"
+		}
+		messages = append(messages, entry)
+	}
+	return messages
+}
+
+func taskGraphOutputDetailsForModel(results []taskGraphNodeResult) string {
+	lines := make([]string, 0, len(results))
+	remaining := taskGraphOutputAggregateCharsLimit
+	truncatedTail := false
+	for _, result := range results {
+		content := taskGraphCompactText(result.Content)
+		if content == "" {
+			continue
+		}
+
+		label := strings.TrimSpace(result.Task.Description)
+		if label == "" {
+			label = result.Task.ID
+		}
+
+		content, truncated := taskGraphEllipsize(content, taskGraphOutputPerTaskCharsLimit)
+		line := fmt.Sprintf("- %s (%s): %s", label, result.Status, content)
+		if truncated {
+			line += " [truncated]"
+		}
+
+		lineRunes := len([]rune(line))
+		if remaining <= 0 {
+			truncatedTail = true
+			break
+		}
+		if lineRunes > remaining {
+			clipped, _ := taskGraphEllipsize(line, remaining)
+			if clipped != "" {
+				lines = append(lines, clipped)
+			}
+			truncatedTail = true
+			remaining = 0
+			break
+		}
+
+		lines = append(lines, line)
+		remaining -= lineRunes
+	}
+
+	if len(lines) == 0 {
+		return ""
+	}
+	if truncatedTail {
+		lines = append(lines, "- … additional task output omitted to stay within context budget")
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 func (c *coordinator) subAgentErrorText(ctx context.Context, sessionID string, runErr error) string {
@@ -1893,7 +2275,7 @@ func (c *coordinator) updateParentSessionCost(ctx context.Context, childSessionI
 func (c *coordinator) subAgentResponseText(ctx context.Context, sessionID string, result *fantasy.AgentResult) string {
 	if result != nil && result.Response.Content != nil {
 		if text := strings.TrimSpace(result.Response.Content.Text()); text != "" {
-			return text
+			return taskGraphModelSafeSubAgentText(text, sessionID)
 		}
 	}
 
@@ -1912,7 +2294,7 @@ func (c *coordinator) subAgentResponseText(ctx context.Context, sessionID string
 		if msg.Role != message.Assistant || msg.IsSummaryMessage {
 			continue
 		}
-		return strings.TrimSpace(msg.Content().Text)
+		return taskGraphModelSafeSubAgentText(msg.Content().Text, sessionID)
 	}
 
 	return ""

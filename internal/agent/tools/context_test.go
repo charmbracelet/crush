@@ -231,3 +231,20 @@ func TestGetModelNameFromContext(t *testing.T) {
 		})
 	}
 }
+
+func TestAgentPolicyContextAccessors(t *testing.T) {
+	ctx := context.Background()
+	ctx = context.WithValue(ctx, AgentMemoryContextKey, "isolated")
+	ctx = context.WithValue(ctx, AgentIsolationContextKey, "session")
+	ctx = context.WithValue(ctx, AgentBackgroundContextKey, true)
+
+	if got := GetAgentMemoryFromContext(ctx); got != "isolated" {
+		t.Errorf("GetAgentMemoryFromContext() = %v, want %v", got, "isolated")
+	}
+	if got := GetAgentIsolationFromContext(ctx); got != "session" {
+		t.Errorf("GetAgentIsolationFromContext() = %v, want %v", got, "session")
+	}
+	if got := GetAgentBackgroundFromContext(ctx); !got {
+		t.Errorf("GetAgentBackgroundFromContext() = %v, want true", got)
+	}
+}

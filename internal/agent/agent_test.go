@@ -15,7 +15,7 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"charm.land/x/vcr"
-	"github.com/charmbracelet/crush/internal/agent/tools"
+	agenttools "github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
@@ -99,7 +99,7 @@ func TestCoderAgent(t *testing.T) {
 				for _, msg := range msgs {
 					if msg.Role == message.Assistant {
 						for _, tc := range msg.ToolCalls() {
-							if tc.Name == tools.ViewToolName {
+							if tc.Name == agenttools.ViewToolName {
 								tcID = tc.ID
 							}
 						}
@@ -141,10 +141,10 @@ func TestCoderAgent(t *testing.T) {
 				for _, msg := range msgs {
 					if msg.Role == message.Assistant {
 						for _, tc := range msg.ToolCalls() {
-							if tc.Name == tools.ViewToolName {
+							if tc.Name == agenttools.ViewToolName {
 								readTCID = tc.ID
 							}
-							if tc.Name == tools.EditToolName || tc.Name == tools.WriteToolName {
+							if tc.Name == agenttools.EditToolName || tc.Name == agenttools.WriteToolName {
 								writeTCID = tc.ID
 							}
 						}
@@ -192,7 +192,7 @@ func TestCoderAgent(t *testing.T) {
 				for _, msg := range msgs {
 					if msg.Role == message.Assistant {
 						for _, tc := range msg.ToolCalls() {
-							if tc.Name == tools.BashToolName {
+							if tc.Name == agenttools.BashToolName {
 								bashTCID = tc.ID
 							}
 						}
@@ -236,7 +236,7 @@ func TestCoderAgent(t *testing.T) {
 				for _, msg := range msgs {
 					if msg.Role == message.Assistant {
 						for _, tc := range msg.ToolCalls() {
-							if tc.Name == tools.DownloadToolName {
+							if tc.Name == agenttools.DownloadToolName {
 								downloadTCID = tc.ID
 							}
 						}
@@ -279,7 +279,7 @@ func TestCoderAgent(t *testing.T) {
 				for _, msg := range msgs {
 					if msg.Role == message.Assistant {
 						for _, tc := range msg.ToolCalls() {
-							if tc.Name == tools.FetchToolName {
+							if tc.Name == agenttools.FetchToolName {
 								fetchTCID = tc.ID
 							}
 						}
@@ -318,7 +318,7 @@ func TestCoderAgent(t *testing.T) {
 				for _, msg := range msgs {
 					if msg.Role == message.Assistant {
 						for _, tc := range msg.ToolCalls() {
-							if tc.Name == tools.GlobToolName {
+							if tc.Name == agenttools.GlobToolName {
 								globTCID = tc.ID
 							}
 						}
@@ -358,7 +358,7 @@ func TestCoderAgent(t *testing.T) {
 				for _, msg := range msgs {
 					if msg.Role == message.Assistant {
 						for _, tc := range msg.ToolCalls() {
-							if tc.Name == tools.GrepToolName {
+							if tc.Name == agenttools.GrepToolName {
 								grepTCID = tc.ID
 							}
 						}
@@ -398,7 +398,7 @@ func TestCoderAgent(t *testing.T) {
 				for _, msg := range msgs {
 					if msg.Role == message.Assistant {
 						for _, tc := range msg.ToolCalls() {
-							if tc.Name == tools.LSToolName {
+							if tc.Name == agenttools.LSToolName {
 								lsTCID = tc.ID
 							}
 						}
@@ -439,7 +439,7 @@ func TestCoderAgent(t *testing.T) {
 				for _, msg := range msgs {
 					if msg.Role == message.Assistant {
 						for _, tc := range msg.ToolCalls() {
-							if tc.Name == tools.MultiEditToolName {
+							if tc.Name == agenttools.MultiEditToolName {
 								multiEditTCID = tc.ID
 							}
 						}
@@ -483,7 +483,7 @@ func TestCoderAgent(t *testing.T) {
 				for _, msg := range msgs {
 					if msg.Role == message.Assistant {
 						for _, tc := range msg.ToolCalls() {
-							if tc.Name == tools.SourcegraphToolName {
+							if tc.Name == agenttools.SourcegraphToolName {
 								sourcegraphTCID = tc.ID
 							}
 						}
@@ -522,7 +522,7 @@ func TestCoderAgent(t *testing.T) {
 				for _, msg := range msgs {
 					if msg.Role == message.Assistant {
 						for _, tc := range msg.ToolCalls() {
-							if tc.Name == tools.WriteToolName {
+							if tc.Name == agenttools.WriteToolName {
 								writeTCID = tc.ID
 							}
 						}
@@ -584,11 +584,11 @@ func TestCoderAgent(t *testing.T) {
 				var globTCID, lsTCID string
 
 				for _, tc := range toolCalls {
-					if tc.Name == tools.GlobToolName {
+					if tc.Name == agenttools.GlobToolName {
 						foundGlob = true
 						globTCID = tc.ID
 					}
-					if tc.Name == tools.LSToolName {
+					if tc.Name == agenttools.LSToolName {
 						foundLS = true
 						lsTCID = tc.ID
 					}
@@ -1017,7 +1017,7 @@ func TestEstimatePromptTokens(t *testing.T) {
 		fantasy.NewUserMessage("Hello world"),               // 11 bytes
 	}
 
-	// No tools. (3000 + 11) / 4 = 752.
+	// No agenttools. (3000 + 11) / 4 = 752.
 	estimate := estimatePromptTokens(messages, nil)
 	require.Equal(t, int64(752), estimate)
 
@@ -1052,6 +1052,36 @@ func TestEstimatePromptTokens(t *testing.T) {
 	// 400 / 4 = 100.
 	require.Equal(t, int64(100), estimatePromptTokens(msgs3, nil))
 
+	// ToolResultPart media payloads are counted by byte size and metadata text.
+	msgsMedia := []fantasy.Message{
+		{
+			Role: fantasy.MessageRoleTool,
+			Content: []fantasy.MessagePart{fantasy.ToolResultPart{
+				Output: fantasy.ToolResultOutputContentMedia{
+					Data:      strings.Repeat("a", 64),
+					MediaType: "image/png",
+					Text:      "preview",
+				},
+			}},
+		},
+	}
+	// data(64) + media type(9) + text(7) => 20 tokens.
+	require.Equal(t, int64(20), estimatePromptTokens(msgsMedia, nil))
+
+	// FilePart attachments are counted by byte size and metadata text.
+	msgsFile := []fantasy.Message{
+		{
+			Role: fantasy.MessageRoleUser,
+			Content: []fantasy.MessagePart{fantasy.FilePart{
+				Filename:  "img.png",
+				MediaType: "image/png",
+				Data:      []byte("12345678"),
+			}},
+		},
+	}
+	// data(8) + filename(7) + media type(9) => 6 tokens.
+	require.Equal(t, int64(6), estimatePromptTokens(msgsFile, nil))
+
 	msgs4 := []fantasy.Message{
 		fantasy.NewUserMessage("你好世界"),
 	}
@@ -1080,12 +1110,14 @@ func TestEstimatePromptTokens_AggregatesShortASCIIFragments(t *testing.T) {
 type mockAgentTool struct {
 	name        string
 	description string
+	parallel    bool
 }
 
 func (m *mockAgentTool) Info() fantasy.ToolInfo {
 	return fantasy.ToolInfo{
 		Name:        m.name,
 		Description: m.description,
+		Parallel:    m.parallel,
 	}
 }
 
@@ -1095,6 +1127,7 @@ func (m *mockAgentTool) Run(_ context.Context, _ fantasy.ToolCall) (fantasy.Tool
 
 func (m *mockAgentTool) ProviderOptions() fantasy.ProviderOptions     { return nil }
 func (m *mockAgentTool) SetProviderOptions(_ fantasy.ProviderOptions) {}
+func (m *mockAgentTool) SetParallel(parallel bool)                    { m.parallel = parallel }
 
 type anthropicProviderLanguageModel struct {
 	stubLanguageModel
@@ -1106,6 +1139,24 @@ func (anthropicProviderLanguageModel) Provider() string {
 
 func (anthropicProviderLanguageModel) Model() string {
 	return "test-model"
+}
+
+func TestEnableNativeToolParallelism(t *testing.T) {
+	t.Parallel()
+
+	t.Run("enables parallel for read-only concurrency-safe tools", func(t *testing.T) {
+		t.Parallel()
+		tool := &mockAgentTool{name: "glob", description: "find files"}
+		enableNativeToolParallelism(tool, agenttools.ToolMetadata{ReadOnly: true, ConcurrencySafe: true})
+		require.True(t, tool.Info().Parallel)
+	})
+
+	t.Run("keeps write tools sequential", func(t *testing.T) {
+		t.Parallel()
+		tool := &mockAgentTool{name: "edit", description: "modify files"}
+		enableNativeToolParallelism(tool, agenttools.ToolMetadata{ReadOnly: false, ConcurrencySafe: true})
+		require.False(t, tool.Info().Parallel)
+	})
 }
 
 func TestTitleUserPromptFromCall(t *testing.T) {
@@ -1471,4 +1522,3 @@ func TestRunWaitsForTitleGenerationBeforeDequeuing(t *testing.T) {
 		return hasUserPrompt("queued later")
 	}, time.Second, 10*time.Millisecond)
 }
-

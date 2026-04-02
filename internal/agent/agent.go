@@ -61,6 +61,9 @@ const (
 	autoSummarizeSafetyReserveMin     = 2_000
 	autoSummarizeSoftLimitNumerator   = 9
 	autoSummarizeSoftLimitDenominator = 10
+
+	joinActiveRunMaxInjectedCalls  = 2
+	joinActiveRunPromptCharsBudget = 1_600
 )
 
 var userAgent = fmt.Sprintf("Charm-Crush/%s (https://charm.land/crush)", version.Version)
@@ -103,6 +106,108 @@ func proactiveCompactionTrigger(contextUsed, contextWindow, maxOutputTokens int6
 	return sessionCompactionTriggerNone
 }
 
+func shouldCollapseMessages(purpose plugin.ChatTransformPurpose) bool {
+	switch purpose {
+	case plugin.ChatTransformPurposeSummarize,
+		plugin.ChatTransformPurposeRecover,
+		plugin.ChatTransformPurposeProactiveCompact:
+		return true
+	default:
+		return false
+	}
+}
+
+func shouldReactiveCompactMessages(purpose plugin.ChatTransformPurpose) bool {
+	switch purpose {
+	case plugin.ChatTransformPurposeRecover,
+		plugin.ChatTransformPurposeProactiveCompact:
+		return true
+	default:
+		return false
+	}
+}
+
+func shouldAutoCompactMessages(purpose plugin.ChatTransformPurpose, msgs []message.Message) bool {
+	if len(msgs) < 3 {
+		return false
+	}
+	switch purpose {
+	case plugin.ChatTransformPurposeSummarize,
+		plugin.ChatTransformPurposeRecover,
+		plugin.ChatTransformPurposeProactiveCompact:
+		return true
+	default:
+		return false
+	}
+}
+
+func (a *sessionAgent) microCompactSessionMessages(ctx context.Context, sessionID string, model Model, providerCtx plugin.ProviderContext, msgs []message.Message) ([]message.Message, error) {
+	return a.transformSessionMessages(ctx, chatRequestStateInput{
+		SessionID: sessionID,
+		Agent:     "session",
+		Model:     model,
+		Provider:  providerCtx,
+		Purpose:   plugin.ChatTransformPurposeMicroCompact,
+		Messages:  msgs,
+		Message:   message.Message{SessionID: sessionID, Role: message.User},
+	})
+}
+
+func (a *sessionAgent) collapseSessionMessages(ctx context.Context, sessionID string, model Model, providerCtx plugin.ProviderContext, msgs []message.Message) ([]message.Message, error) {
+	return a.transformSessionMessages(ctx, chatRequestStateInput{
+		SessionID: sessionID,
+		Agent:     "session",
+		Model:     model,
+		Provider:  providerCtx,
+		Purpose:   plugin.ChatTransformPurposeCollapse,
+		Messages:  msgs,
+		Message:   message.Message{SessionID: sessionID, Role: message.User},
+	})
+}
+
+func (a *sessionAgent) reactiveCompactSessionMessages(ctx context.Context, sessionID string, model Model, providerCtx plugin.ProviderContext, msgs []message.Message) ([]message.Message, error) {
+	return a.transformSessionMessages(ctx, chatRequestStateInput{
+		SessionID: sessionID,
+		Agent:     "session",
+		Model:     model,
+		Provider:  providerCtx,
+		Purpose:   plugin.ChatTransformPurposeReactiveCompact,
+		Messages:  msgs,
+		Message:   message.Message{SessionID: sessionID, Role: message.User},
+	})
+}
+
+func (a *sessionAgent) autoCompactSessionMessages(ctx context.Context, sessionID string, model Model, providerCtx plugin.ProviderContext, msgs []message.Message) ([]message.Message, error) {
+	return a.transformSessionMessages(ctx, chatRequestStateInput{
+		SessionID: sessionID,
+		Agent:     "session",
+		Model:     model,
+		Provider:  providerCtx,
+		Purpose:   plugin.ChatTransformPurposeAutoCompact,
+		Messages:  msgs,
+		Message:   message.Message{SessionID: sessionID, Role: message.User},
+	})
+}
+
+func (a *sessionAgent) postCompactSessionMessages(ctx context.Context, sessionID string, model Model, providerCtx plugin.ProviderContext, msgs []message.Message) ([]message.Message, error) {
+	return a.transformSessionMessages(ctx, chatRequestStateInput{
+		SessionID: sessionID,
+		Agent:     "session",
+		Model:     model,
+		Provider:  providerCtx,
+		Purpose:   plugin.ChatTransformPurposePostCompact,
+		Messages:  msgs,
+		Message:   message.Message{SessionID: sessionID, Role: message.User},
+	})
+}
+
+func (a *sessionAgent) autoRecallBlock(ctx context.Context, sessionID, prompt string) string {
+	if a.autoRecall == nil {
+		return ""
+	}
+	return strings.TrimSpace(a.autoRecall(ctx, sessionID, prompt))
+}
+
 type SessionAgentCall struct {
 	SessionID     string
 	Prompt        string
@@ -121,6 +226,9 @@ type SessionAgentCall struct {
 	FrequencyPenalty *float64
 	PresencePenalty  *float64
 	NonInteractive   bool
+	// OnProgress is called after each completed LLM step with accumulated
+	// tool call count and the name of the last tool invoked.
+	OnProgress func(toolUses int, lastTool string)
 }
 
 type SessionAgent interface {
@@ -160,6 +268,7 @@ type sessionAgent struct {
 	workingDir         string
 	tools              *csync.Slice[fantasy.AgentTool]
 	agentFactory       func(model fantasy.LanguageModel, opts ...fantasy.AgentOption) fantasy.Agent
+	autoRecall         func(context.Context, string, string) string
 
 	refreshCallConfig    func(context.Context) (sessionAgentRuntimeConfig, error)
 	isSubAgent           bool
@@ -183,6 +292,7 @@ type SessionAgentOptions struct {
 	SystemPrompt         string
 	WorkingDir           string
 	AgentFactory         func(model fantasy.LanguageModel, opts ...fantasy.AgentOption) fantasy.Agent
+	AutoRecall           func(context.Context, string, string) string
 	RefreshCallConfig    func(context.Context) (sessionAgentRuntimeConfig, error)
 	IsSubAgent           bool
 	DisableAutoSummarize bool
@@ -207,6 +317,7 @@ type sessionAgentRuntimeConfig struct {
 	CollaborationMode  session.CollaborationMode
 	PermissionMode     session.PermissionMode
 	AllowedToolNames   []string
+	Tools              []fantasy.AgentTool
 }
 
 type sessionAgentRuntimeConfigContextKey struct{}
@@ -225,6 +336,7 @@ func NewSessionAgent(
 		systemPrompt:         csync.NewValue(opts.SystemPrompt),
 		workingDir:           opts.WorkingDir,
 		agentFactory:         agentFactory,
+		autoRecall:           opts.AutoRecall,
 		refreshCallConfig:    opts.RefreshCallConfig,
 		isSubAgent:           opts.IsSubAgent,
 		sessions:             opts.Sessions,
@@ -285,6 +397,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		if runtimeConfig.SystemPromptPrefix != nil {
 			promptPrefix = *runtimeConfig.SystemPromptPrefix
 		}
+		if len(runtimeConfig.Tools) > 0 {
+			agentTools = append([]fantasy.AgentTool(nil), runtimeConfig.Tools...)
+		}
 		if len(runtimeConfig.AllowedToolNames) > 0 {
 			agentTools = filterToolsByNames(agentTools, runtimeConfig.AllowedToolNames)
 		}
@@ -305,12 +420,19 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		systemPrompt += "\n\n<mcp-instructions>\n" + s + "\n</mcp-instructions>"
 	}
 
+	if !a.isSubAgent {
+		if recall := a.autoRecallBlock(ctx, call.SessionID, call.Prompt); recall != "" {
+			systemPrompt += "\n\n<auto_recall>\n" + recall + "\n</auto_recall>"
+		}
+	}
+
 	providerCtx := defaultProviderContext()
 	requestPurpose := call.Purpose
 	if requestPurpose == "" {
 		requestPurpose = plugin.ChatTransformPurposeRequest
 	}
 
+	var preflightSummarized bool
 	sessionLock := sync.Mutex{}
 	currentSession, err := a.sessions.Get(ctx, call.SessionID)
 	if err != nil {
@@ -322,6 +444,23 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		return nil, fmt.Errorf("failed to get session messages: %w", err)
 	}
 	promptPrefix = buildDelegationPromptPrefix(promptPrefix, agentTools, a.isSubAgent)
+	if len(msgs) > 0 {
+		microCompacted, compactErr := a.microCompactSessionMessages(ctx, call.SessionID, largeModel, providerCtx, msgs)
+		if compactErr != nil {
+			return nil, compactErr
+		}
+		if len(microCompacted) > 0 {
+			msgs = microCompacted
+		}
+		collapsed, collapseErr := a.collapseSessionMessages(ctx, call.SessionID, largeModel, providerCtx, msgs)
+		if collapseErr != nil {
+			return nil, collapseErr
+		}
+		if len(collapsed) > 0 {
+			msgs = collapsed
+		}
+	}
+
 	preflightState, err := a.buildChatRequestState(ctx, chatRequestStateInput{
 		SessionID:      call.SessionID,
 		Agent:          "session",
@@ -351,6 +490,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			if summarizeErr := a.Summarize(withSessionCompactingPurpose(copilot.ContextWithInitiatorType(ctx, copilot.InitiatorAgent), trigger.Purpose()), call.SessionID, call.ProviderOptions); summarizeErr != nil {
 				return nil, summarizeErr
 			}
+			preflightSummarized = true
 			currentSession, err = a.sessions.Get(ctx, call.SessionID)
 			if err != nil {
 				return nil, fmt.Errorf("failed to reload session after summarization: %w", err)
@@ -425,16 +565,22 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	var contextWindowExceeded bool
 	var currentAssistant *message.Message
 	var currentStepToolMessageIDs []string
+	var currentStepToolResultChars int
 	var allRunMessageIDs []string
 	var estimatedPromptTokens int64
 	var completedStepsThisRun int
+	var runToolUses int
+	var runLastTool string
 	runStream := func(providerOptions fantasy.ProviderOptions, billFirstStepAsUser bool) (*fantasy.AgentResult, error) {
 		currentAssistant = nil
 		currentStepToolMessageIDs = nil
+		currentStepToolResultChars = 0
 		allRunMessageIDs = nil
 		estimatedPromptTokens = 0
 		shouldSummarize = false
 		completedStepsThisRun = 0
+		runToolUses = 0
+		runLastTool = ""
 		firstRequestStep = billFirstStepAsUser
 
 		if err := plugin.TriggerChatBeforeRequest(genCtx, plugin.ChatBeforeRequestInput{
@@ -474,9 +620,22 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				}
 				firstRequestStep = false
 
+				stepRuntimeConfig := runtimeConfig
+				if a.refreshCallConfig != nil {
+					refreshed, refreshErr := a.refreshCallConfig(callContext)
+					if refreshErr != nil {
+						slog.Warn("Failed to refresh runtime config for step", "error", refreshErr, "session_id", call.SessionID)
+					} else {
+						stepRuntimeConfig = &refreshed
+					}
+				}
+
 				prepared.Tools = a.tools.Copy()
-				if runtimeConfig != nil && len(runtimeConfig.AllowedToolNames) > 0 {
-					prepared.Tools = filterToolsByNames(prepared.Tools, runtimeConfig.AllowedToolNames)
+				if stepRuntimeConfig != nil && len(stepRuntimeConfig.Tools) > 0 {
+					prepared.Tools = append([]fantasy.AgentTool(nil), stepRuntimeConfig.Tools...)
+				}
+				if stepRuntimeConfig != nil && len(stepRuntimeConfig.AllowedToolNames) > 0 {
+					prepared.Tools = filterToolsByNames(prepared.Tools, stepRuntimeConfig.AllowedToolNames)
 				}
 				// Add Anthropic caching to the last tool.
 				if len(prepared.Tools) > 0 {
@@ -489,12 +648,35 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				}
 
 				queuedCalls := a.takeJoinActiveRunCalls(call.SessionID)
-				for _, queued := range queuedCalls {
+				remainingJoinBudget := joinActiveRunPromptCharsBudget
+				injectedCalls := 0
+				for i := len(queuedCalls) - 1; i >= 0; i-- {
+					queued := queuedCalls[i]
+					if injectedCalls >= joinActiveRunMaxInjectedCalls || remainingJoinBudget <= 0 {
+						a.enqueueQueuedCall(call.SessionID, queued)
+						continue
+					}
+					prompt := strings.TrimSpace(queued.Prompt)
+					if prompt == "" {
+						a.enqueueQueuedCall(call.SessionID, queued)
+						continue
+					}
+					promptRunes := []rune(prompt)
+					if len(promptRunes) > remainingJoinBudget {
+						if remainingJoinBudget <= 1 {
+							a.enqueueQueuedCall(call.SessionID, queued)
+							continue
+						}
+						prompt = string(promptRunes[:remainingJoinBudget-1]) + "…"
+					}
+					queued.Prompt = prompt
 					userMessage, createErr := a.createUserMessage(callContext, queued)
 					if createErr != nil {
 						return callContext, prepared, createErr
 					}
 					prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
+					remainingJoinBudget -= len([]rune(prompt))
+					injectedCalls++
 				}
 
 				prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel)
@@ -535,6 +717,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				callContext = context.WithValue(callContext, tools.SessionServiceContextKey, a.sessions)
 				currentAssistant = &assistantMsg
 				currentStepToolMessageIDs = nil
+				currentStepToolResultChars = 0
 				allRunMessageIDs = append(allRunMessageIDs, assistantMsg.ID)
 
 				estimatedPromptTokens = estimatePromptTokens(prepared.Messages, prepared.Tools)
@@ -599,6 +782,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 					return
 				}
 				currentStepToolMessageIDs = nil
+				currentStepToolResultChars = 0
 			},
 			OnToolCall: func(tc fantasy.ToolCallContent) error {
 				toolCall := message.ToolCall{
@@ -609,6 +793,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 					Finished:         true,
 				}
 				currentAssistant.AddToolCall(toolCall)
+				runToolUses++
+				runLastTool = tc.ToolName
 				return a.messages.Update(ctx, *currentAssistant)
 			},
 			OnToolResult: func(result fantasy.ToolResultContent) error {
@@ -616,6 +802,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				if runtimeConfig != nil {
 					toolResult = a.applyToolResultReview(genCtx, currentAssistant.SessionID, toolResult, runtimeConfig.PermissionMode)
 				}
+				toolResult = a.enforceStepToolResultBudget(currentAssistant.SessionID, toolResult, &currentStepToolResultChars)
 				if truncatedResult, truncated := a.truncateToolResult(currentAssistant.SessionID, toolResult); truncated {
 					toolResult = truncatedResult
 				}
@@ -656,7 +843,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				}
 				completedStepsThisRun++
 				currentSession = updatedSession
-				return a.messages.Update(genCtx, *currentAssistant)
+				updateErr := a.messages.Update(genCtx, *currentAssistant)
+				if call.OnProgress != nil {
+					call.OnProgress(runToolUses, runLastTool)
+				}
+				return updateErr
 			},
 			StopWhen: []fantasy.StopCondition{
 				func(_ []fantasy.StepResult) bool {
@@ -675,7 +866,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 						}
 						projectedPromptTokens = fallbackTokens
 					}
-					projectedPromptTokens = max(projectedPromptTokens, currentSession.LastInputTokens())
+					if !preflightSummarized {
+						projectedPromptTokens = max(projectedPromptTokens, currentSession.LastInputTokens())
+					}
 					// Pass input-only estimate to shouldAutoSummarize. The function
 					// handles output token reservation internally to avoid double-counting.
 					if shouldAutoSummarize(projectedPromptTokens, int64(largeModel.CatwalkCfg.ContextWindow), call.MaxOutputTokens) && !a.disableAutoSummarize {
@@ -902,15 +1095,66 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		if truncErr := a.truncateOversizedToolResults(ctx, call.SessionID); truncErr != nil {
 			slog.Warn("Failed to truncate oversized tool results", "error", truncErr)
 		}
-		// Update the empty failed-assistant message with a human-readable
-		// notice instead of deleting it, so the user can see what happened.
 		if currentAssistant != nil {
+			currentAssistant.FinishThinking()
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cleanupCancel()
+			msgs, listErr := a.messages.List(cleanupCtx, currentAssistant.SessionID)
+			if listErr != nil {
+				return nil, listErr
+			}
+			for _, tc := range currentAssistant.ToolCalls() {
+				if !tc.Finished {
+					tc.Finished = true
+					tc.Input = "{}"
+					currentAssistant.AddToolCall(tc)
+				}
+				found := false
+				for _, msg := range msgs {
+					if msg.Role != message.Tool {
+						continue
+					}
+					for _, tr := range msg.ToolResults() {
+						if tr.ToolCallID == tc.ID {
+							found = true
+							break
+						}
+					}
+					if found {
+						break
+					}
+				}
+				if found {
+					continue
+				}
+				toolResult := message.ToolResult{
+					ToolCallID: tc.ID,
+					Name:       tc.Name,
+					Content:    "There was an error while executing the tool",
+					IsError:    true,
+				}
+				if subtaskStatus, ok := syntheticSubtaskStatusForTool(tc.Name, false, false); ok {
+					toolResult = toolResult.WithSubtaskResult(message.ToolResultSubtaskResult{
+						ParentToolCallID: tc.ID,
+						Status:           subtaskStatus,
+					})
+				}
+				if _, createErr := a.messages.Create(cleanupCtx, currentAssistant.SessionID, message.CreateMessageParams{
+					Role: message.Tool,
+					Parts: []message.ContentPart{
+						toolResult,
+					},
+				}); createErr != nil {
+					return nil, createErr
+				}
+			}
+			// Update the failed assistant message with a human-readable notice.
 			currentAssistant.AddFinish(
 				message.FinishReasonError,
 				"Context limit reached",
 				"The conversation history reached this model's context window limit. Auto-summarizing the session to continue the task…",
 			)
-			if updateErr := a.messages.Update(ctx, *currentAssistant); updateErr != nil {
+			if updateErr := a.messages.Update(cleanupCtx, *currentAssistant); updateErr != nil {
 				slog.Warn("Failed to update failed assistant message after context-window error", "error", updateErr)
 			}
 		}
@@ -1311,6 +1555,48 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	if len(msgs) == 0 {
 		// Nothing to summarize.
 		return nil
+	}
+
+	microCompacted, err := a.microCompactSessionMessages(ctx, sessionID, largeModel, providerCtx, msgs)
+	if err != nil {
+		return err
+	}
+	if len(microCompacted) > 0 {
+		msgs = microCompacted
+	}
+	if shouldCollapseMessages(compactingPurpose) {
+		collapsed, collapseErr := a.collapseSessionMessages(ctx, sessionID, largeModel, providerCtx, msgs)
+		if collapseErr != nil {
+			return collapseErr
+		}
+		if len(collapsed) > 0 {
+			msgs = collapsed
+		}
+	}
+	if shouldReactiveCompactMessages(compactingPurpose) {
+		reactiveCompacted, reactiveErr := a.reactiveCompactSessionMessages(ctx, sessionID, largeModel, providerCtx, msgs)
+		if reactiveErr != nil {
+			return reactiveErr
+		}
+		if len(reactiveCompacted) > 0 {
+			msgs = reactiveCompacted
+		}
+	}
+	if shouldAutoCompactMessages(compactingPurpose, msgs) {
+		autoCompacted, autoCompactErr := a.autoCompactSessionMessages(ctx, sessionID, largeModel, providerCtx, msgs)
+		if autoCompactErr != nil {
+			return autoCompactErr
+		}
+		if len(autoCompacted) > 0 {
+			msgs = autoCompacted
+		}
+		postCompacted, postCompactErr := a.postCompactSessionMessages(ctx, sessionID, largeModel, providerCtx, msgs)
+		if postCompactErr != nil {
+			return postCompactErr
+		}
+		if len(postCompacted) > 0 {
+			msgs = postCompacted
+		}
 	}
 
 	transformedMsgs, err := a.transformSessionMessages(ctx, chatRequestStateInput{
@@ -1976,11 +2262,19 @@ func estimateMessageContentTokens(parts []fantasy.MessagePart) int64 {
 			accumulate(p.Text)
 		case fantasy.ToolCallPart:
 			accumulate(p.Input)
+		case fantasy.FilePart:
+			asciiBytes += int64(len(p.Data))
+			accumulate(p.Filename)
+			accumulate(p.MediaType)
 		case fantasy.ToolResultPart:
 			if txt, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentText](p.Output); ok {
 				accumulate(txt.Text)
 			} else if errOut, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentError](p.Output); ok && errOut.Error != nil {
 				accumulate(errOut.Error.Error())
+			} else if mediaOut, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentMedia](p.Output); ok {
+				asciiBytes += int64(len(mediaOut.Data))
+				accumulate(mediaOut.MediaType)
+				accumulate(mediaOut.Text)
 			}
 		}
 	}

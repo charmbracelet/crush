@@ -124,6 +124,11 @@ func TestBuildToolsForSubagentsUseExpectedCapabilities(t *testing.T) {
 	assert.Contains(t, generalNames, "edit")
 	assert.Contains(t, generalNames, tools.HistorySearchToolName)
 	assert.Contains(t, generalNames, tools.LongTermMemoryToolName)
+	assert.Contains(t, generalNames, tools.SendMessageToolName)
+	assert.Contains(t, generalNames, tools.TaskStopToolName)
+	assert.Contains(t, generalNames, tools.LSPCodeActionToolName)
+	assert.Contains(t, generalNames, tools.LSPRenameToolName)
+	assert.Contains(t, generalNames, tools.LSPFormatToolName)
 	assert.NotContains(t, generalNames, AgentToolName)
 	assert.NotContains(t, generalNames, "request_user_input")
 
@@ -134,7 +139,7 @@ func TestBuildToolsForSubagentsUseExpectedCapabilities(t *testing.T) {
 	for _, tool := range exploreTools {
 		exploreNames = append(exploreNames, tool.Info().Name)
 	}
-	assert.Equal(t, []string{"bash", "glob", "grep", "ls", "sourcegraph", "view"}, exploreNames)
+	assert.Equal(t, []string{"bash", "glob", "grep", "ls", "tool_search", "view"}, exploreNames)
 }
 
 func TestBuildToolsForPlanModeUsesReadOnlyCapabilities(t *testing.T) {
@@ -162,21 +167,29 @@ func TestBuildToolsForPlanModeUsesReadOnlyCapabilities(t *testing.T) {
 	}
 
 	assert.Equal(t, []string{
-		"request_user_input",
-		"plan_exit",
 		"glob",
 		"grep",
-		"ls",
 		"history_search",
-		"view",
+		"ls",
+		"lsp_declaration",
+		"lsp_definition",
 		"lsp_diagnostics",
+		"lsp_document_symbols",
+		"lsp_hover",
+		"lsp_implementation",
 		"lsp_references",
+		"lsp_type_definition",
+		"lsp_workspace_symbols",
+		"plan_exit",
+		"request_user_input",
+		"view",
 	}, planNames)
 	assert.NotContains(t, planNames, AgentToolName)
 	assert.NotContains(t, planNames, "agentic_fetch")
 	assert.NotContains(t, planNames, "bash")
 	assert.NotContains(t, planNames, "fetch")
 	assert.NotContains(t, planNames, "sourcegraph")
+	assert.NotContains(t, planNames, "tool_search")
 	assert.NotContains(t, planNames, "list_mcp_resources")
 	assert.NotContains(t, planNames, "read_mcp_resource")
 	assert.NotContains(t, planNames, "edit")
@@ -268,10 +281,12 @@ func TestAgentToolKeepsSinglePromptPathCompatible(t *testing.T) {
 	}
 
 	called := false
-	coord.subAgentScheduler = func(_ context.Context, params subAgentParams) (fantasy.ToolResponse, error) {
+	coord.taskGraphScheduler = func(_ context.Context, params taskGraphParams) (fantasy.ToolResponse, error) {
 		called = true
 		require.Equal(t, "call-1", params.ToolCallID)
-		require.Equal(t, "fix issue", params.Prompt)
+		require.Len(t, params.Tasks, 1)
+		require.Equal(t, "task", params.Tasks[0].ID)
+		require.Equal(t, "fix issue", params.Tasks[0].Prompt)
 		return fantasy.NewTextResponse("single"), nil
 	}
 

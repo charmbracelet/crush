@@ -28,6 +28,7 @@ type State struct {
 	ClientMetadata map[string]any `json:"client_metadata,omitempty"`
 	StartedAt      int64          `json:"started_at"`
 	UpdatedAt      int64          `json:"updated_at"`
+	DurationMs     int64          `json:"duration_ms,omitempty"`
 }
 
 type Service interface {
@@ -72,6 +73,19 @@ func (s *service) Publish(state State) {
 		}
 		if state.ClientMetadata == nil {
 			state.ClientMetadata = prev.ClientMetadata
+		}
+	}
+	if state.StartedAt > 0 {
+		duration := state.UpdatedAt - state.StartedAt
+		if duration < 0 {
+			duration = 0
+		}
+		state.DurationMs = duration
+		if state.ClientMetadata == nil {
+			state.ClientMetadata = map[string]any{}
+		}
+		if _, ok := state.ClientMetadata["duration_ms"]; !ok {
+			state.ClientMetadata["duration_ms"] = state.DurationMs
 		}
 	}
 	s.states[state.SessionID][state.ToolCallID] = state
@@ -136,8 +150,41 @@ func (s *service) DeleteSession(sessionID string) {
 
 type serviceContextKey struct{}
 
+type sessionIDContextKey struct{}
+
+type toolCallIDContextKey struct{}
+
 func WithService(ctx context.Context, service Service) context.Context {
 	return context.WithValue(ctx, serviceContextKey{}, service)
+}
+
+func WithSessionID(ctx context.Context, sessionID string) context.Context {
+	return context.WithValue(ctx, sessionIDContextKey{}, sessionID)
+}
+
+func WithToolCallID(ctx context.Context, toolCallID string) context.Context {
+	return context.WithValue(ctx, toolCallIDContextKey{}, toolCallID)
+}
+
+func SessionIDFromContext(ctx context.Context) string {
+	sessionID, _ := ctx.Value(sessionIDContextKey{}).(string)
+	return sessionID
+}
+
+func ToolCallIDFromContext(ctx context.Context) string {
+	toolCallID, _ := ctx.Value(toolCallIDContextKey{}).(string)
+	return toolCallID
+}
+
+type delegationMailboxContextKey struct{}
+
+func WithDelegationMailbox(ctx context.Context, mailboxID string) context.Context {
+	return context.WithValue(ctx, delegationMailboxContextKey{}, mailboxID)
+}
+
+func DelegationMailboxFromContext(ctx context.Context) string {
+	mailboxID, _ := ctx.Value(delegationMailboxContextKey{}).(string)
+	return mailboxID
 }
 
 func ServiceFromContext(ctx context.Context) Service {

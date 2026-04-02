@@ -271,7 +271,8 @@ const (
 )
 
 type SubtaskResult struct {
-	Status string `json:"status,omitempty"`
+	Status          string `json:"status,omitempty"`
+	ParentMessageID string `json:"parentMessageId,omitempty"`
 }
 
 type Reducer struct {
@@ -280,6 +281,8 @@ type Reducer struct {
 	Risks       []string `json:"risks,omitempty"`
 	NextActions []string `json:"nextActions,omitempty"`
 	Confidence  string   `json:"confidence,omitempty"`
+	MailboxID   string   `json:"mailboxId,omitempty"`
+	Messages    []string `json:"messages,omitempty"`
 }
 
 // SessionUpdate is the payload of a session/update notification.
@@ -298,6 +301,8 @@ type SessionUpdate struct {
 	Status     ToolCallStatus `json:"status,omitempty"`
 	RawInput   any            `json:"rawInput,omitempty"`
 	RawOutput  any            `json:"rawOutput,omitempty"`
+	ClientMetadata map[string]any `json:"clientMetadata,omitempty"`
+	DurationMs int64 `json:"durationMs,omitempty"`
 	// Structured subtask result metadata projected from tool-result metadata.
 	ChildSessionID   string         `json:"childSessionId,omitempty"`
 	ParentToolCallID string         `json:"parentToolCallId,omitempty"`

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
@@ -21,7 +22,24 @@ const (
 	TodoStatusPending    TodoStatus = "pending"
 	TodoStatusInProgress TodoStatus = "in_progress"
 	TodoStatusCompleted  TodoStatus = "completed"
+	TodoStatusFailed     TodoStatus = "failed"
+	TodoStatusCanceled   TodoStatus = "canceled"
 )
+
+func NormalizeTodoStatus(status string) TodoStatus {
+	switch TodoStatus(status) {
+	case TodoStatusInProgress:
+		return TodoStatusInProgress
+	case TodoStatusCompleted:
+		return TodoStatusCompleted
+	case TodoStatusFailed:
+		return TodoStatusFailed
+	case TodoStatusCanceled:
+		return TodoStatusCanceled
+	default:
+		return TodoStatusPending
+	}
+}
 
 type CollaborationMode string
 
@@ -82,9 +100,15 @@ func HashID(id string) string {
 }
 
 type Todo struct {
-	Content    string     `json:"content"`
-	Status     TodoStatus `json:"status"`
-	ActiveForm string     `json:"active_form"`
+	ID          string     `json:"id,omitempty"`
+	Content     string     `json:"content"`
+	Status      TodoStatus `json:"status"`
+	ActiveForm  string     `json:"active_form,omitempty"`
+	Progress    int        `json:"progress,omitempty"`
+	CreatedAt   int64      `json:"created_at,omitempty"`
+	UpdatedAt   int64      `json:"updated_at,omitempty"`
+	StartedAt   int64      `json:"started_at,omitempty"`
+	CompletedAt int64      `json:"completed_at,omitempty"`
 }
 
 // HasIncompleteTodos returns true if there are any non-completed todos.
@@ -95,6 +119,110 @@ func HasIncompleteTodos(todos []Todo) bool {
 		}
 	}
 	return false
+}
+
+func normalizeTodoProgress(status TodoStatus, progress int) int {
+	if progress < 0 {
+		progress = 0
+	}
+	if progress > 100 {
+		progress = 100
+	}
+	switch status {
+	case TodoStatusCompleted:
+		return 100
+	case TodoStatusFailed, TodoStatusCanceled:
+		if progress == 0 {
+			return 100
+		}
+		return progress
+	default:
+		return progress
+	}
+}
+
+func legacyTodoID(todo Todo, index int) string {
+	source := fmt.Sprintf("%d|%s|%s|%s|%d|%d|%d|%d", index, strings.TrimSpace(todo.Content), todo.Status, strings.TrimSpace(todo.ActiveForm), todo.Progress, todo.CreatedAt, todo.StartedAt, todo.CompletedAt)
+	return fmt.Sprintf("todo-%x", xxh3.HashString(source))
+}
+
+func normalizeTodosForStorage(todos []Todo) []Todo {
+	if len(todos) == 0 {
+		return nil
+	}
+	return normalizeTodos(todos, true)
+}
+
+func normalizeTodosForLoad(todos []Todo) []Todo {
+	if len(todos) == 0 {
+		return []Todo{}
+	}
+	return normalizeTodos(todos, false)
+}
+
+func normalizeTodos(todos []Todo, populateTimestamps bool) []Todo {
+	normalized := make([]Todo, len(todos))
+	seenIDs := make(map[string]struct{}, len(todos))
+	now := time.Now().Unix()
+
+	for i, todo := range todos {
+		current := Todo{
+			ID:          strings.TrimSpace(todo.ID),
+			Content:     strings.TrimSpace(todo.Content),
+			Status:      NormalizeTodoStatus(string(todo.Status)),
+			ActiveForm:  strings.TrimSpace(todo.ActiveForm),
+			Progress:    normalizeTodoProgress(NormalizeTodoStatus(string(todo.Status)), todo.Progress),
+			CreatedAt:   todo.CreatedAt,
+			UpdatedAt:   todo.UpdatedAt,
+			StartedAt:   todo.StartedAt,
+			CompletedAt: todo.CompletedAt,
+		}
+
+		if current.ID == "" {
+			if populateTimestamps {
+				current.ID = uuid.New().String()
+			} else {
+				current.ID = legacyTodoID(current, i)
+			}
+		} else if _, exists := seenIDs[current.ID]; exists {
+			current.ID = uuid.New().String()
+		}
+		seenIDs[current.ID] = struct{}{}
+
+		if populateTimestamps {
+			if current.CreatedAt == 0 {
+				current.CreatedAt = now
+			}
+			current.UpdatedAt = now
+			switch current.Status {
+			case TodoStatusInProgress:
+				if current.StartedAt == 0 {
+					current.StartedAt = now
+				}
+				current.CompletedAt = 0
+			case TodoStatusCompleted:
+				if current.StartedAt == 0 {
+					current.StartedAt = now
+				}
+				if current.CompletedAt == 0 {
+					current.CompletedAt = now
+				}
+			case TodoStatusFailed, TodoStatusCanceled:
+				if current.StartedAt == 0 {
+					current.StartedAt = now
+				}
+				if current.CompletedAt == 0 {
+					current.CompletedAt = now
+				}
+			default:
+				current.CompletedAt = 0
+			}
+		}
+
+		normalized[i] = current
+	}
+
+	return normalized
 }
 
 type Session struct {
@@ -493,7 +621,7 @@ func marshalTodos(todos []Todo) (string, error) {
 	if len(todos) == 0 {
 		return "", nil
 	}
-	data, err := json.Marshal(todos)
+	data, err := json.Marshal(normalizeTodosForStorage(todos))
 	if err != nil {
 		return "", err
 	}
@@ -508,7 +636,7 @@ func unmarshalTodos(data string) ([]Todo, error) {
 	if err := json.Unmarshal([]byte(data), &todos); err != nil {
 		return []Todo{}, err
 	}
-	return todos, nil
+	return normalizeTodosForLoad(todos), nil
 }
 
 func marshalStringSlice(values []string) (string, error) {

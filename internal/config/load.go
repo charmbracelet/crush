@@ -610,6 +610,9 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 			} else {
 				large.MaxTokens = model.DefaultMaxTokens
 			}
+			if largeModelSelected.ContextWindow > 0 {
+				large.ContextWindow = largeModelSelected.ContextWindow
+			}
 			if largeModelSelected.Temperature != nil {
 				large.Temperature = largeModelSelected.Temperature
 			}
@@ -650,6 +653,9 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 			} else {
 				small.MaxTokens = model.DefaultMaxTokens
 			}
+			if smallModelSelected.ContextWindow > 0 {
+				small.ContextWindow = smallModelSelected.ContextWindow
+			}
 			if smallModelSelected.Temperature != nil {
 				small.Temperature = smallModelSelected.Temperature
 			}
@@ -689,6 +695,9 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 				handoff.MaxTokens = handoffModelSelected.MaxTokens
 			} else {
 				handoff.MaxTokens = model.DefaultMaxTokens
+			}
+			if handoffModelSelected.ContextWindow > 0 {
+				handoff.ContextWindow = handoffModelSelected.ContextWindow
 			}
 			if handoffModelSelected.Temperature != nil {
 				handoff.Temperature = handoffModelSelected.Temperature
@@ -768,6 +777,9 @@ func resolveConfiguredModel(store *ConfigStore, c *Config, modelType SelectedMod
 		resolved.MaxTokens = selected.MaxTokens
 	} else {
 		resolved.MaxTokens = model.DefaultMaxTokens
+	}
+	if selected.ContextWindow > 0 {
+		resolved.ContextWindow = selected.ContextWindow
 	}
 	if selected.Temperature != nil {
 		resolved.Temperature = selected.Temperature

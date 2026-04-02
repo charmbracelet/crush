@@ -111,15 +111,11 @@ func FormatContextUsage(tokens, contextWindow int64) string {
 	if tokens < 0 {
 		tokens = 0
 	}
-	displayedTokens := tokens
-	if contextWindow > 0 {
-		displayedTokens = min(displayedTokens, contextWindow)
-	}
-	used := strings.ToLower(FormatTokenCount(displayedTokens))
+	used := strings.ToLower(FormatTokenCount(tokens))
 	if contextWindow <= 0 {
 		return used
 	}
-	percentage := int(math.Round(float64(displayedTokens) / float64(contextWindow) * 100))
+	percentage := int(math.Round(float64(tokens) / float64(contextWindow) * 100))
 	return fmt.Sprintf("%s %d%%", used, percentage)
 }
 
@@ -127,6 +123,9 @@ func FormatContextUsage(tokens, contextWindow int64) string {
 func formatTokensAndCost(t *styles.Styles, inputTokens, outputTokens, contextWindow int64, cost float64) string {
 	if outputTokens < 0 {
 		outputTokens = 0
+	}
+	if inputTokens < 0 {
+		inputTokens = 0
 	}
 	formattedCost := t.Muted.Render(fmt.Sprintf("$%.2f", cost))
 	formattedInput := t.Subtle.Render(fmt.Sprintf("%s in", FormatContextUsage(inputTokens, contextWindow)))

@@ -69,6 +69,7 @@ type ToolDefinition struct {
 	Name        string
 	Description string
 	Parameters  any // JSON Schema
+	Metadata    map[string]any
 	Execute     func(ctx context.Context, args map[string]any, execCtx ToolContext) (string, error)
 }
 
@@ -142,6 +143,11 @@ const (
 	ChatTransformPurposePreflightEstimate ChatTransformPurpose = "preflight_estimate"
 	// ChatTransformPurposeNextStepEstimate is the purpose for a next step estimate.
 	ChatTransformPurposeNextStepEstimate ChatTransformPurpose = "next_step_estimate"
+	ChatTransformPurposeMicroCompact     ChatTransformPurpose = "micro_compact"
+	ChatTransformPurposeCollapse         ChatTransformPurpose = "collapse"
+	ChatTransformPurposeReactiveCompact  ChatTransformPurpose = "reactive_compact"
+	ChatTransformPurposeAutoCompact      ChatTransformPurpose = "auto_compact"
+	ChatTransformPurposePostCompact      ChatTransformPurpose = "post_compact"
 	// ChatTransformPurposeSummarize is the purpose for a summarize.
 	ChatTransformPurposeSummarize ChatTransformPurpose = "summarize"
 	// ChatTransformPurposeRecover is the purpose for a recover.

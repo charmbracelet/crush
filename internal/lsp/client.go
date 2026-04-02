@@ -8,14 +8,17 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/crush/internal/lsp/util"
 	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/charmbracelet/x/powernap/pkg/transport"
@@ -28,6 +31,18 @@ type DiagnosticCounts struct {
 	Information int
 	Hint        int
 }
+
+const (
+	MethodTextDocumentDefinition     = "textDocument/definition"
+	MethodTextDocumentDeclaration    = "textDocument/declaration"
+	MethodTextDocumentImplementation = "textDocument/implementation"
+	MethodTextDocumentTypeDefinition = "textDocument/typeDefinition"
+	MethodTextDocumentDocumentSymbol = "textDocument/documentSymbol"
+	MethodTextDocumentCodeAction     = "textDocument/codeAction"
+	MethodTextDocumentRename         = "textDocument/rename"
+	MethodTextDocumentFormatting     = "textDocument/formatting"
+	MethodWorkspaceSymbol            = "workspace/symbol"
+)
 
 type Client struct {
 	client *powernap.Client
@@ -114,6 +129,17 @@ func (c *Client) Initialize(ctx context.Context, workspaceDir string) (*protocol
 			}
 			return nil
 		}(),
+		HoverProvider:              caps.HoverProvider,
+		DefinitionProvider:         caps.DefinitionProvider,
+		DeclarationProvider:        caps.DeclarationProvider,
+		TypeDefinitionProvider:     caps.TypeDefinitionProvider,
+		ImplementationProvider:     caps.ImplementationProvider,
+		ReferencesProvider:         caps.ReferencesProvider,
+		DocumentSymbolProvider:     caps.DocumentSymbolProvider,
+		CodeActionProvider:         caps.CodeActionProvider,
+		DocumentFormattingProvider: caps.DocumentFormattingProvider,
+		RenameProvider:             caps.RenameProvider,
+		WorkspaceSymbolProvider:    caps.WorkspaceSymbolProvider,
 	}
 
 	result := &protocol.InitializeResult{
@@ -566,5 +592,363 @@ func (c *Client) FindReferences(ctx context.Context, filepath string, line, char
 
 	// NOTE: line and character should be 0-based.
 	// See: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#position
-	return c.client.FindReferences(ctx, filepath, line-1, character-1, includeDeclaration)
+	return c.client.FindReferences(
+		ctx,
+		filepath,
+		line-1,
+		character-1,
+		includeDeclaration,
+	)
+}
+
+func (c *Client) Hover(ctx context.Context, filepath string, line, character int) (*protocol.Hover, error) {
+	if err := c.OpenFileOnDemand(ctx, filepath); err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	uri := string(protocol.URIFromPath(filepath))
+	return c.client.RequestHover(ctx, uri, protocol.Position{
+		Line:      uint32(line - 1),
+		Character: uint32(character - 1),
+	})
+}
+
+func (c *Client) FindDefinition(ctx context.Context, filepath string, line, character int) ([]protocol.Location, error) {
+	if err := c.OpenFileOnDemand(ctx, filepath); err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	params := protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.URIFromPath(filepath)},
+			Position: protocol.Position{
+				Line:      uint32(line - 1),
+				Character: uint32(character - 1),
+			},
+		},
+	}
+
+	if caps := c.client.GetCapabilities(); caps.DefinitionProvider == nil {
+		return nil, fmt.Errorf("definition requests are not supported by this LSP server")
+	}
+
+	var result protocol.Or_Definition
+	if err := c.call(ctx, MethodTextDocumentDefinition, params, &result); err != nil {
+		return nil, fmt.Errorf("definition request failed: %w", err)
+	}
+	return locationResults(result.Value), nil
+}
+
+func (c *Client) FindDeclaration(ctx context.Context, filepath string, line, character int) ([]protocol.Location, error) {
+	if err := c.OpenFileOnDemand(ctx, filepath); err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	params := protocol.DeclarationParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.URIFromPath(filepath)},
+			Position: protocol.Position{
+				Line:      uint32(line - 1),
+				Character: uint32(character - 1),
+			},
+		},
+	}
+
+	if caps := c.client.GetCapabilities(); caps.DeclarationProvider == nil {
+		return nil, fmt.Errorf("declaration requests are not supported by this LSP server")
+	}
+
+	var result protocol.Or_Declaration
+	if err := c.call(ctx, MethodTextDocumentDeclaration, params, &result); err != nil {
+		return nil, fmt.Errorf("declaration request failed: %w", err)
+	}
+	return locationResults(result.Value), nil
+}
+
+func (c *Client) FindImplementation(ctx context.Context, filepath string, line, character int) ([]protocol.Location, error) {
+	if err := c.OpenFileOnDemand(ctx, filepath); err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	params := protocol.ImplementationParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.URIFromPath(filepath)},
+			Position: protocol.Position{
+				Line:      uint32(line - 1),
+				Character: uint32(character - 1),
+			},
+		},
+	}
+
+	if caps := c.client.GetCapabilities(); caps.ImplementationProvider == nil {
+		return nil, fmt.Errorf("implementation requests are not supported by this LSP server")
+	}
+
+	var result protocol.Or_Result_textDocument_implementation
+	if err := c.call(ctx, MethodTextDocumentImplementation, params, &result); err != nil {
+		return nil, fmt.Errorf("implementation request failed: %w", err)
+	}
+	return locationResults(result.Value), nil
+}
+
+func (c *Client) FindTypeDefinition(ctx context.Context, filepath string, line, character int) ([]protocol.Location, error) {
+	if err := c.OpenFileOnDemand(ctx, filepath); err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	params := protocol.TypeDefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.URIFromPath(filepath)},
+			Position: protocol.Position{
+				Line:      uint32(line - 1),
+				Character: uint32(character - 1),
+			},
+		},
+	}
+
+	if caps := c.client.GetCapabilities(); caps.TypeDefinitionProvider == nil {
+		return nil, fmt.Errorf("type definition requests are not supported by this LSP server")
+	}
+
+	var result protocol.Or_Result_textDocument_typeDefinition
+	if err := c.call(ctx, MethodTextDocumentTypeDefinition, params, &result); err != nil {
+		return nil, fmt.Errorf("type definition request failed: %w", err)
+	}
+	return locationResults(result.Value), nil
+}
+
+func (c *Client) DocumentSymbols(ctx context.Context, filepath string) ([]protocol.DocumentSymbolResult, error) {
+	if err := c.OpenFileOnDemand(ctx, filepath); err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	params := protocol.DocumentSymbolParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.URIFromPath(filepath)},
+	}
+
+	if caps := c.client.GetCapabilities(); caps.DocumentSymbolProvider == nil {
+		return nil, fmt.Errorf("document symbol requests are not supported by this LSP server")
+	}
+
+	var result protocol.Or_Result_textDocument_documentSymbol
+	if err := c.call(ctx, MethodTextDocumentDocumentSymbol, params, &result); err != nil {
+		return nil, fmt.Errorf("document symbol request failed: %w", err)
+	}
+	return result.Results()
+}
+
+func (c *Client) WorkspaceSymbols(ctx context.Context, query string) ([]protocol.WorkspaceSymbolResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	if caps := c.client.GetCapabilities(); caps.WorkspaceSymbolProvider == nil {
+		return nil, fmt.Errorf("workspace symbol requests are not supported by this LSP server")
+	}
+
+	var result protocol.Or_Result_workspace_symbol
+	if err := c.call(ctx, MethodWorkspaceSymbol, protocol.WorkspaceSymbolParams{Query: query}, &result); err != nil {
+		return nil, fmt.Errorf("workspace symbol request failed: %w", err)
+	}
+	return result.Results()
+}
+
+func (c *Client) CodeActions(ctx context.Context, filepath string, line, character int, only []protocol.CodeActionKind) ([]protocol.CodeAction, error) {
+	if err := c.OpenFileOnDemand(ctx, filepath); err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	if !capabilityEnabled(c.client.GetCapabilities().CodeActionProvider) {
+		return nil, fmt.Errorf("code action requests are not supported by this LSP server")
+	}
+
+	position := protocol.Position{Line: uint32(line - 1), Character: uint32(character - 1)}
+	params := protocol.CodeActionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.URIFromPath(filepath)},
+		Range:        protocol.Range{Start: position, End: position},
+		Context: protocol.CodeActionContext{
+			Diagnostics: []protocol.Diagnostic{},
+			Only:        only,
+		},
+	}
+
+	var result []protocol.Or_Result_textDocument_codeAction_Item0_Elem
+	if err := c.call(ctx, MethodTextDocumentCodeAction, params, &result); err != nil {
+		return nil, fmt.Errorf("code action request failed: %w", err)
+	}
+	return codeActionResults(result), nil
+}
+
+func (c *Client) Rename(ctx context.Context, filepath string, line, character int, newName string) (*protocol.WorkspaceEdit, error) {
+	if err := c.OpenFileOnDemand(ctx, filepath); err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	if !capabilityEnabled(c.client.GetCapabilities().RenameProvider) {
+		return nil, fmt.Errorf("rename requests are not supported by this LSP server")
+	}
+
+	params := protocol.RenameParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.URIFromPath(filepath)},
+		Position: protocol.Position{
+			Line:      uint32(line - 1),
+			Character: uint32(character - 1),
+		},
+		NewName: newName,
+	}
+
+	var result *protocol.WorkspaceEdit
+	if err := c.call(ctx, MethodTextDocumentRename, params, &result); err != nil {
+		return nil, fmt.Errorf("rename request failed: %w", err)
+	}
+	return result, nil
+}
+
+func (c *Client) FormatDocument(ctx context.Context, filepath string, options protocol.FormattingOptions) ([]protocol.TextEdit, error) {
+	if err := c.OpenFileOnDemand(ctx, filepath); err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	if !capabilityEnabled(c.client.GetCapabilities().DocumentFormattingProvider) {
+		return nil, fmt.Errorf("document formatting requests are not supported by this LSP server")
+	}
+
+	params := protocol.DocumentFormattingParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.URIFromPath(filepath)},
+		Options:      options,
+	}
+
+	var result []protocol.TextEdit
+	if err := c.call(ctx, MethodTextDocumentFormatting, params, &result); err != nil {
+		return nil, fmt.Errorf("document formatting request failed: %w", err)
+	}
+	return result, nil
+}
+
+func (c *Client) ApplyWorkspaceEdit(edit protocol.WorkspaceEdit) error {
+	if c == nil || c.client == nil {
+		return fmt.Errorf("LSP client is unavailable")
+	}
+	return util.ApplyWorkspaceEdit(edit, c.client.GetOffsetEncoding())
+}
+
+func (c *Client) call(ctx context.Context, method string, params any, result any) error {
+	conn := c.connection()
+	if conn == nil {
+		return fmt.Errorf("LSP connection is unavailable")
+	}
+	return conn.Call(ctx, method, params, result)
+}
+
+func (c *Client) connection() *transport.Connection {
+	if c == nil || c.client == nil {
+		return nil
+	}
+	value := reflect.ValueOf(c.client).Elem().FieldByName("conn")
+	if !value.IsValid() || value.IsNil() {
+		return nil
+	}
+	return reflect.NewAt(value.Type(), unsafe.Pointer(value.UnsafeAddr())).Elem().Interface().(*transport.Connection)
+}
+
+func locationResults(value any) []protocol.Location {
+	switch v := value.(type) {
+	case nil:
+		return nil
+	case protocol.Location:
+		return []protocol.Location{v}
+	case []protocol.Location:
+		return append([]protocol.Location(nil), v...)
+	case protocol.Or_Definition:
+		return locationResults(v.Value)
+	case protocol.Or_Declaration:
+		return locationResults(v.Value)
+	case protocol.Or_Result_textDocument_implementation:
+		return locationResults(v.Value)
+	case protocol.Or_Result_textDocument_typeDefinition:
+		return locationResults(v.Value)
+	default:
+		return nil
+	}
+}
+
+func capabilityEnabled(capability any) bool {
+	switch value := capability.(type) {
+	case nil:
+		return false
+	case bool:
+		return value
+	case protocol.Or_ServerCapabilities_codeActionProvider:
+		return capabilityEnabled(value.Value)
+	case *protocol.Or_ServerCapabilities_codeActionProvider:
+		if value == nil {
+			return false
+		}
+		return capabilityEnabled(value.Value)
+	case protocol.Or_ServerCapabilities_documentFormattingProvider:
+		return capabilityEnabled(value.Value)
+	case *protocol.Or_ServerCapabilities_documentFormattingProvider:
+		if value == nil {
+			return false
+		}
+		return capabilityEnabled(value.Value)
+	case protocol.Or_ServerCapabilities_renameProvider:
+		return capabilityEnabled(value.Value)
+	case *protocol.Or_ServerCapabilities_renameProvider:
+		if value == nil {
+			return false
+		}
+		return capabilityEnabled(value.Value)
+	default:
+		return true
+	}
+}
+
+func codeActionResults(results []protocol.Or_Result_textDocument_codeAction_Item0_Elem) []protocol.CodeAction {
+	actions := make([]protocol.CodeAction, 0, len(results))
+	for _, result := range results {
+		switch value := result.Value.(type) {
+		case protocol.CodeAction:
+			actions = append(actions, value)
+		case *protocol.CodeAction:
+			if value != nil {
+				actions = append(actions, *value)
+			}
+		case protocol.Command:
+			command := value
+			actions = append(actions, protocol.CodeAction{Title: command.Title, Command: &command})
+		case *protocol.Command:
+			if value != nil {
+				command := *value
+				actions = append(actions, protocol.CodeAction{Title: command.Title, Command: &command})
+			}
+		}
+	}
+	return actions
 }

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
@@ -46,6 +47,24 @@ func TestConfig_LoadFromBytesIncludesConfiguredAgents(t *testing.T) {
 	require.Contains(t, loadedConfig.Agents, "reviewer")
 	require.Equal(t, AgentModeSubagent, loadedConfig.Agents["reviewer"].Mode)
 	require.Equal(t, []string{"view"}, loadedConfig.Agents["reviewer"].AllowedTools)
+}
+
+func TestConfig_LoadFromBytesIncludesTaskGovernance(t *testing.T) {
+	loadedConfig, err := loadFromBytes([][]byte{
+		[]byte(`{"agents":{"reviewer":{"mode":"subagent","task_governance":{"max_concurrent":2,"timeout_seconds":30,"retry_budget":1,"graph_timeout_seconds":90,"fail_fast":true,"runtime_budget_seconds":120,"failure_budget":3,"failure_domain":"delegation"}}}}`),
+	})
+
+	require.NoError(t, err)
+	governance := loadedConfig.Agents["reviewer"].TaskGovernance
+	require.NotNil(t, governance)
+	require.Equal(t, 2, governance.MaxConcurrentLimit())
+	require.Equal(t, 30*time.Second, governance.Timeout())
+	require.Equal(t, 1, governance.RetryBudgetLimit())
+	require.Equal(t, 90*time.Second, governance.GraphTimeout())
+	require.True(t, governance.FailFastEnabled())
+	require.Equal(t, 120*time.Second, governance.RuntimeBudget())
+	require.Equal(t, 3, governance.FailureBudgetLimit())
+	require.Equal(t, "delegation", governance.FailureDomainName())
 }
 
 func TestConfig_LoadFromBytesPreferredPermissionModeFallback(t *testing.T) {
@@ -657,17 +676,23 @@ func TestConfig_setupAgentsWithNoDisabledTools(t *testing.T) {
 	cfg.SetupAgents()
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
-	assert.Equal(t, []string{"agent", "bash", "job_output", "job_wait", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "glob", "grep", "ls", "request_user_input", "sourcegraph", "history_search", "long_term_memory", "view", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "bash", "job_output", "job_wait", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_declaration", "lsp_definition", "lsp_implementation", "lsp_type_definition", "lsp_hover", "lsp_document_symbols", "lsp_workspace_symbols", "lsp_code_action", "lsp_rename", "lsp_format", "lsp_restart", "fetch", "agentic_fetch", "glob", "grep", "ls", "request_user_input", "history_search", "long_term_memory", "tool_search", "send_message", "task_stop", "subtask_result", "view", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, "orchestrator", coderAgent.Role)
+	assert.Empty(t, coderAgent.AdditionalPrompt)
 
 	generalAgent, ok := cfg.Agents[AgentGeneral]
 	require.True(t, ok)
-	assert.Equal(t, []string{"bash", "job_output", "job_wait", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "glob", "grep", "ls", "sourcegraph", "history_search", "long_term_memory", "view", "write", "list_mcp_resources", "read_mcp_resource"}, generalAgent.AllowedTools)
+	assert.Equal(t, []string{"bash", "job_output", "job_wait", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_declaration", "lsp_definition", "lsp_implementation", "lsp_type_definition", "lsp_hover", "lsp_document_symbols", "lsp_workspace_symbols", "lsp_code_action", "lsp_rename", "lsp_format", "lsp_restart", "fetch", "agentic_fetch", "glob", "grep", "ls", "history_search", "long_term_memory", "tool_search", "send_message", "task_stop", "subtask_result", "view", "write", "list_mcp_resources", "read_mcp_resource"}, generalAgent.AllowedTools)
 	assert.Equal(t, AgentModeSubagent, generalAgent.Mode)
+	assert.Equal(t, "executor", generalAgent.Role)
+	assert.Contains(t, generalAgent.AdditionalPrompt, "Act as the executor")
 
 	exploreAgent, ok := cfg.Agents[AgentExplore]
 	require.True(t, ok)
-	assert.Equal(t, []string{"bash", "glob", "grep", "ls", "sourcegraph", "view"}, exploreAgent.AllowedTools)
+	assert.Equal(t, []string{"bash", "glob", "grep", "ls", "tool_search", "view"}, exploreAgent.AllowedTools)
 	assert.Equal(t, AgentModeSubagent, exploreAgent.Mode)
+	assert.Equal(t, "reviewer", exploreAgent.Role)
+	assert.Contains(t, exploreAgent.AdditionalPrompt, "Act as the reviewer")
 }
 
 func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
@@ -685,11 +710,11 @@ func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
 
-	assert.Equal(t, []string{"agent", "bash", "job_output", "job_wait", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "glob", "ls", "request_user_input", "sourcegraph", "history_search", "long_term_memory", "view", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "bash", "job_output", "job_wait", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_declaration", "lsp_definition", "lsp_implementation", "lsp_type_definition", "lsp_hover", "lsp_document_symbols", "lsp_workspace_symbols", "lsp_code_action", "lsp_rename", "lsp_format", "lsp_restart", "fetch", "agentic_fetch", "glob", "ls", "request_user_input", "history_search", "long_term_memory", "tool_search", "send_message", "task_stop", "subtask_result", "view", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
 
 	generalAgent, ok := cfg.Agents[AgentGeneral]
 	require.True(t, ok)
-	assert.Equal(t, []string{"bash", "job_output", "job_wait", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "glob", "ls", "sourcegraph", "history_search", "long_term_memory", "view", "write", "list_mcp_resources", "read_mcp_resource"}, generalAgent.AllowedTools)
+	assert.Equal(t, []string{"bash", "job_output", "job_wait", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_declaration", "lsp_definition", "lsp_implementation", "lsp_type_definition", "lsp_hover", "lsp_document_symbols", "lsp_workspace_symbols", "lsp_code_action", "lsp_rename", "lsp_format", "lsp_restart", "fetch", "agentic_fetch", "glob", "ls", "history_search", "long_term_memory", "tool_search", "send_message", "task_stop", "subtask_result", "view", "write", "list_mcp_resources", "read_mcp_resource"}, generalAgent.AllowedTools)
 }
 
 func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
@@ -709,14 +734,19 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 	cfg.SetupAgents()
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
-	assert.Equal(t, []string{"agent", "job_output", "job_wait", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "request_user_input", "history_search", "long_term_memory", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "job_output", "job_wait", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_declaration", "lsp_definition", "lsp_implementation", "lsp_type_definition", "lsp_hover", "lsp_document_symbols", "lsp_workspace_symbols", "lsp_code_action", "lsp_rename", "lsp_format", "lsp_restart", "fetch", "agentic_fetch", "request_user_input", "history_search", "long_term_memory", "tool_search", "send_message", "task_stop", "subtask_result", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
 
 	generalAgent, ok := cfg.Agents[AgentGeneral]
 	require.True(t, ok)
-	assert.Equal(t, []string{"job_output", "job_wait", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "history_search", "long_term_memory", "write", "list_mcp_resources", "read_mcp_resource"}, generalAgent.AllowedTools)
+	assert.Equal(t, []string{"job_output", "job_wait", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_declaration", "lsp_definition", "lsp_implementation", "lsp_type_definition", "lsp_hover", "lsp_document_symbols", "lsp_workspace_symbols", "lsp_code_action", "lsp_rename", "lsp_format", "lsp_restart", "fetch", "agentic_fetch", "history_search", "long_term_memory", "tool_search", "send_message", "task_stop", "subtask_result", "write", "list_mcp_resources", "read_mcp_resource"}, generalAgent.AllowedTools)
 }
 
 func TestConfig_setupAgentsMergesConfiguredAgentsAndTaskAlias(t *testing.T) {
+	maxConcurrent := 2
+	timeoutSeconds := 45
+	retryBudget := 1
+	graphTimeoutSeconds := 120
+	failFast := true
 	cfg := &Config{
 		Options: &Options{
 			DisabledTools: []string{},
@@ -725,9 +755,20 @@ func TestConfig_setupAgentsMergesConfiguredAgentsAndTaskAlias(t *testing.T) {
 			AgentTask: {
 				Description: "Custom explore description.",
 			},
+			AgentGeneral: {
+				TaskGovernance: &TaskGovernance{
+					MaxConcurrent:       &maxConcurrent,
+					TimeoutSeconds:      &timeoutSeconds,
+					RetryBudget:         &retryBudget,
+					GraphTimeoutSeconds: &graphTimeoutSeconds,
+					FailFast:            &failFast,
+				},
+			},
 			"reviewer": {
-				Mode:        AgentModeSubagent,
-				Description: "Reviews changes before handoff.",
+				Mode:             AgentModeSubagent,
+				Description:      "Reviews changes before handoff.",
+				Role:             "planner",
+				AdditionalPrompt: "Produce a fix plan before coding.",
 			},
 		},
 	}
@@ -741,11 +782,22 @@ func TestConfig_setupAgentsMergesConfiguredAgentsAndTaskAlias(t *testing.T) {
 	_, ok = cfg.Agents[AgentTask]
 	require.False(t, ok)
 
+	generalAgent, ok := cfg.Agents[AgentGeneral]
+	require.True(t, ok)
+	require.NotNil(t, generalAgent.TaskGovernance)
+	assert.Equal(t, maxConcurrent, generalAgent.TaskGovernance.MaxConcurrentLimit())
+	assert.Equal(t, time.Duration(timeoutSeconds)*time.Second, generalAgent.TaskGovernance.Timeout())
+	assert.Equal(t, retryBudget, generalAgent.TaskGovernance.RetryBudgetLimit())
+	assert.Equal(t, time.Duration(graphTimeoutSeconds)*time.Second, generalAgent.TaskGovernance.GraphTimeout())
+	assert.True(t, generalAgent.TaskGovernance.FailFastEnabled())
+
 	reviewerAgent, ok := cfg.Agents["reviewer"]
 	require.True(t, ok)
 	assert.Equal(t, "reviewer", reviewerAgent.ID)
 	assert.Equal(t, SelectedModelTypeLarge, reviewerAgent.Model)
 	assert.Equal(t, AgentModeSubagent, reviewerAgent.Mode)
+	assert.Equal(t, "planner", reviewerAgent.Role)
+	assert.Equal(t, "Produce a fix plan before coding.", reviewerAgent.AdditionalPrompt)
 	assert.Equal(t, resolveSubAgentTools(resolvePrimaryTools(allToolNames())), reviewerAgent.AllowedTools)
 	assert.Equal(t, cfg.Options.ContextPaths, reviewerAgent.ContextPaths)
 }
@@ -1724,6 +1776,50 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		require.Equal(t, "large-model", large.Model)
 		require.Equal(t, "openai", large.Provider)
 		require.Equal(t, int64(100), large.MaxTokens)
+	})
+
+	t.Run("should override context window only", func(t *testing.T) {
+		knownProviders := []catwalk.Provider{
+			{
+				ID:                  "openai",
+				APIKey:              "abc",
+				DefaultLargeModelID: "large-model",
+				DefaultSmallModelID: "small-model",
+				Models: []catwalk.Model{
+					{
+						ID:               "large-model",
+						ContextWindow:    200000,
+						DefaultMaxTokens: 1000,
+					},
+					{
+						ID:               "small-model",
+						ContextWindow:    128000,
+						DefaultMaxTokens: 500,
+					},
+				},
+			},
+		}
+
+		cfg := &Config{
+			Models: map[SelectedModelType]SelectedModel{
+				"large": {
+					ContextWindow: 400000,
+				},
+			},
+		}
+		cfg.setDefaults("/tmp", "")
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
+		require.NoError(t, err)
+
+		err = configureSelectedModels(testStore(cfg), knownProviders)
+		require.NoError(t, err)
+		large := cfg.Models[SelectedModelTypeLarge]
+		require.Equal(t, "large-model", large.Model)
+		require.Equal(t, "openai", large.Provider)
+		require.Equal(t, int64(1000), large.MaxTokens)
+		require.Equal(t, int64(400000), large.ContextWindow)
 	})
 
 	t.Run("should keep explicit auto classifier model in single slot", func(t *testing.T) {

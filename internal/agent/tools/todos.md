@@ -1,6 +1,15 @@
 Creates and manages a structured task list for tracking progress when explicit,
 manual task tracking is useful.
 
+<usage>
+- Default behavior stays backward compatible: pass `todos` with no `action` to replace the full task list.
+- Set `action` to `replace`, `create`, `update`, `delete`, `get`, or `list` for structured task CRUD.
+- `create` appends new tasks.
+- `update` modifies exactly one existing task by ID.
+- `delete` and `get` require `id`.
+- Tasks support stable IDs plus `progress`, `created_at`, `updated_at`, `started_at`, and `completed_at` fields.
+</usage>
+
 <when_to_use>
 Use this tool when task tracking is specifically useful:
 
@@ -34,6 +43,8 @@ Skip this tool when:
 - Mark tasks complete IMMEDIATELY after finishing (don't batch completions)
 - Exactly ONE task must be in_progress at any time (not less, not more)
 - Remove tasks that are no longer relevant from the list entirely
+- Prefer `update` with task IDs when changing a single existing task
+- Use `progress` to reflect partial completion before a task reaches `completed`
 </task_management>
 
 <completion_requirements>
@@ -61,9 +72,11 @@ If blocked:
 ✅ Good task:
 ```json
 {
+  "id": "task-auth",
   "content": "Implement user authentication with JWT tokens",
   "status": "in_progress",
-  "active_form": "Implementing user authentication with JWT tokens"
+  "active_form": "Implementing user authentication with JWT tokens",
+  "progress": 40
 }
 ```
 
@@ -84,4 +97,6 @@ If blocked:
 - Use this tool only when the checklist itself adds value
 - For parallel or independent work, prefer subagents over todo tracking
 - Update immediately after state changes for accurate tracking
+- Use `list` or `get` to inspect current task IDs before single-task updates or deletes
+- Structured task metadata (`todos`, `current`, `affected_id`, progress counters) is returned in response metadata for programmatic consumers
 </tips>

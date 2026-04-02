@@ -356,6 +356,50 @@ func TestHandleChildSessionMessageRemovesStaleNestedToolsAfterRetryReset(t *test
 	require.Empty(t, parentTool.NestedTools())
 }
 
+func TestHandleChildSessionMessageMapsTaskGraphRetrySessionsToParentAgentTool(t *testing.T) {
+	t.Parallel()
+
+	ui, parent, generalChild, _, _, _ := testSessionUI(t)
+	ui.session = parent
+
+	msgs, err := ui.com.App.Messages.List(t.Context(), parent.ID)
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+
+	toolCalls := msgs[0].ToolCalls()
+	require.NotEmpty(t, toolCalls)
+	ui.chat.SetMessages(chat.NewToolMessageItem(ui.com.Styles, msgs[0].ID, toolCalls[0], nil, false))
+
+	retryChildSessionID := ui.com.App.Sessions.CreateAgentToolSessionID(msgs[0].ID, "call-general::task-a::retry-1")
+	retryChild, err := ui.com.App.Sessions.CreateTaskSession(t.Context(), retryChildSessionID, parent.ID, "Retry child")
+	require.NoError(t, err)
+	require.Equal(t, generalChild.ParentSessionID, retryChild.ParentSessionID)
+
+	retryEvent := message.Message{
+		ID:        "retry-assistant-1",
+		SessionID: retryChild.ID,
+		Role:      message.Assistant,
+		Parts: []message.ContentPart{
+			message.ToolCall{
+				ID:       "retry-nested-1",
+				Name:     "view",
+				Input:    `{"file_path":"README.md"}`,
+				Finished: false,
+			},
+		},
+	}
+
+	_ = ui.handleChildSessionMessage(pubsub.Event[message.Message]{
+		Type:    pubsub.CreatedEvent,
+		Payload: retryEvent,
+	})
+
+	parentTool, ok := ui.chat.MessageItem(toolCalls[0].ID).(chat.NestedToolContainer)
+	require.True(t, ok)
+	require.Len(t, parentTool.NestedTools(), 1)
+	require.Equal(t, "retry-nested-1", parentTool.NestedTools()[0].ToolCall().ID)
+}
+
 func TestUpdateLatestProposedPlanRequiresPlanModeAndPlanExit(t *testing.T) {
 	t.Parallel()
 

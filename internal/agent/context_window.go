@@ -19,8 +19,9 @@ const (
 	// context-window-exceeded error.  Results larger than this are truncated
 	// in-place so that the subsequent summarization call does not also hit
 	// the limit.
-	contextWindowToolResultMaxChars = 20_000
-	contextWindowTruncationDir      = ".crush/truncation"
+	contextWindowToolResultMaxChars       = 20_000
+	contextWindowStepToolResultCharsLimit = 40_000
+	contextWindowTruncationDir            = ".crush/truncation"
 
 	// contextWindowResumePromptPrefix is prepended to the original user
 	// prompt when re-queuing the task after a forced summarization.  It
@@ -138,6 +139,45 @@ func sanitizeTruncationPathPart(value string) string {
 			return '_'
 		}
 	}, trimmed)
+}
+
+func (a *sessionAgent) enforceStepToolResultBudget(sessionID string, tr message.ToolResult, used *int) message.ToolResult {
+	if tr.IsError || tr.Data != "" || tr.MIMEType != "" || used == nil {
+		return tr
+	}
+	remaining := contextWindowStepToolResultCharsLimit - *used
+	if remaining <= 0 {
+		tr.Content = fmt.Sprintf("[Step tool-result budget exhausted. This result was omitted to keep the conversation within the context window. Re-run the tool with a narrower scope if you still need it. %d characters omitted.]", len([]rune(tr.Content)))
+		return tr
+	}
+	contentRunes := []rune(tr.Content)
+	if len(contentRunes) <= remaining {
+		*used += len(contentRunes)
+		return tr
+	}
+	fullOutputPath := ""
+	if a != nil {
+		persistedPath, err := a.persistToolResultContent(sessionID, tr)
+		if err != nil {
+			slog.Warn("Failed to persist step-budget tool result", "error", err, "session_id", sessionID, "tool_name", tr.Name)
+		} else {
+			fullOutputPath = persistedPath
+		}
+	}
+	keep := remaining
+	for range 3 {
+		notice := truncatedToolResultNotice(len(contentRunes)-keep, fullOutputPath)
+		keep = remaining - len([]rune(notice))
+		if keep < 0 {
+			keep = 0
+		}
+		if keep > len(contentRunes) {
+			keep = len(contentRunes)
+		}
+	}
+	tr.Content = string(contentRunes[:keep]) + truncatedToolResultNotice(len(contentRunes)-keep, fullOutputPath)
+	*used = contextWindowStepToolResultCharsLimit
+	return tr
 }
 
 // truncateOversizedToolResults scans all tool messages in the session and

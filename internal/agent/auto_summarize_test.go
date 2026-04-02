@@ -15,13 +15,18 @@ import (
 )
 
 type compactingPurposePlugin struct {
-	purposes []plugin.ChatTransformPurpose
+	purposes        []plugin.ChatTransformPurpose
+	messagePurposes []plugin.ChatTransformPurpose
 }
 
 func (p *compactingPurposePlugin) Name() string { return "compacting-purpose-plugin" }
 
 func (p *compactingPurposePlugin) Init(context.Context, plugin.PluginInput) (plugin.Hooks, error) {
 	return plugin.Hooks{
+		ChatMessagesTransform: func(_ context.Context, input plugin.ChatMessagesTransformInput, _ *plugin.ChatMessagesTransformOutput) error {
+			p.messagePurposes = append(p.messagePurposes, input.Purpose)
+			return nil
+		},
 		SessionCompacting: func(_ context.Context, input plugin.SessionCompactingInput, _ *plugin.SessionCompactingOutput) error {
 			p.purposes = append(p.purposes, input.Purpose)
 			return nil
@@ -44,15 +49,18 @@ func initCompactingPurposePlugin(t *testing.T, env fakeEnv) *compactingPurposePl
 }
 
 type autoSummarizeTestAgent struct {
-	t            *testing.T
-	runCalls     int
-	summaryCalls int
-	stepUsage    fantasy.Usage
-	stepUsages   []fantasy.Usage
-	afterStep    func()
-	runErr       error
-	runErrs      []error
-	errAfterStep bool
+	t                       *testing.T
+	runCalls                int
+	summaryCalls            int
+	stepUsage               fantasy.Usage
+	stepUsages              []fantasy.Usage
+	afterStep               func()
+	runErr                  error
+	runErrs                 []error
+	errAfterStep            bool
+	startToolBeforeRunError bool
+	toolCallID              string
+	toolName                string
 }
 
 func (a *autoSummarizeTestAgent) Generate(context.Context, fantasy.AgentCall) (*fantasy.AgentResult, error) {
@@ -82,6 +90,17 @@ func (a *autoSummarizeTestAgent) Stream(ctx context.Context, call fantasy.AgentS
 		a.runErrs = a.runErrs[1:]
 	}
 	if runErr != nil && !a.errAfterStep {
+		if a.startToolBeforeRunError && call.OnToolInputStart != nil {
+			toolCallID := a.toolCallID
+			if toolCallID == "" {
+				toolCallID = "tool-call-before-error"
+			}
+			toolName := a.toolName
+			if toolName == "" {
+				toolName = "view"
+			}
+			require.NoError(a.t, call.OnToolInputStart(toolCallID, toolName))
+		}
 		return nil, runErr
 	}
 	if call.OnTextDelta != nil {
@@ -155,6 +174,7 @@ func newAutoSummarizeTestSessionAgent(_ *testing.T, env fakeEnv, fakeAgent fanta
 		SmallModel:   model,
 		SystemPrompt: "",
 		WorkingDir:   env.workingDir,
+		AutoRecall:   buildAutoRecall(env.history, env.memory),
 		IsYolo:       true,
 		Sessions:     env.sessions,
 		Messages:     messages,
@@ -191,6 +211,9 @@ func TestRunPreflightAutoSummarizesBeforeRequest(t *testing.T) {
 	require.NotNil(t, result)
 	require.Equal(t, 1, fakeAgent.summaryCalls)
 	require.Equal(t, 1, fakeAgent.runCalls)
+	require.Contains(t, purposeTracker.messagePurposes, plugin.ChatTransformPurposeMicroCompact)
+	require.Contains(t, purposeTracker.messagePurposes, plugin.ChatTransformPurposeCollapse)
+	require.Contains(t, purposeTracker.messagePurposes, plugin.ChatTransformPurposeReactiveCompact)
 	require.Equal(t, []plugin.ChatTransformPurpose{plugin.ChatTransformPurposeProactiveCompact}, purposeTracker.purposes)
 
 	savedSession, err := env.sessions.Get(t.Context(), testSession.ID)
@@ -347,6 +370,9 @@ func TestRunTransientRetryNearContextLimitSummarizesInsteadOfRetrying(t *testing
 	require.NotNil(t, result)
 	require.Equal(t, 2, fakeAgent.runCalls)
 	require.Equal(t, 1, fakeAgent.summaryCalls)
+	require.Contains(t, purposeTracker.messagePurposes, plugin.ChatTransformPurposeMicroCompact)
+	require.Contains(t, purposeTracker.messagePurposes, plugin.ChatTransformPurposeCollapse)
+	require.Contains(t, purposeTracker.messagePurposes, plugin.ChatTransformPurposeReactiveCompact)
 	require.Equal(t, []plugin.ChatTransformPurpose{plugin.ChatTransformPurposeRecover}, purposeTracker.purposes)
 
 	savedSession, err := env.sessions.Get(t.Context(), testSession.ID)
@@ -364,8 +390,11 @@ func TestRunStreamingContextWindowErrorStringForcesSummarizeRecovery(t *testing.
 	testSession, err := env.sessions.Create(t.Context(), "streaming context-window recover")
 	require.NoError(t, err)
 
+	const toolCallID = "tool-call-before-overflow"
 	fakeAgent := &autoSummarizeTestAgent{
-		t: t,
+		t:                       t,
+		startToolBeforeRunError: true,
+		toolCallID:              toolCallID,
 		runErrs: []error{
 			errors.New("received error while streaming: {\"message\":\"{\\\"error\\\":{\\\"message\\\":\\\"Your input exceeds the context window of this model. Please adjust your input and try again.\\\",\\\"code\\\":\\\"invalid_request_body\\\"}}\"}"),
 			nil,
@@ -382,11 +411,39 @@ func TestRunStreamingContextWindowErrorStringForcesSummarizeRecovery(t *testing.
 	require.NotNil(t, result)
 	require.Equal(t, 2, fakeAgent.runCalls)
 	require.Equal(t, 1, fakeAgent.summaryCalls)
+	require.Contains(t, purposeTracker.messagePurposes, plugin.ChatTransformPurposeMicroCompact)
+	require.Contains(t, purposeTracker.messagePurposes, plugin.ChatTransformPurposeCollapse)
+	require.Contains(t, purposeTracker.messagePurposes, plugin.ChatTransformPurposeReactiveCompact)
 	require.Equal(t, []plugin.ChatTransformPurpose{plugin.ChatTransformPurposeRecover}, purposeTracker.purposes)
 
 	savedSession, err := env.sessions.Get(t.Context(), testSession.ID)
 	require.NoError(t, err)
 	require.NotEmpty(t, savedSession.SummaryMessageID)
+
+	msgs, err := env.messages.List(t.Context(), testSession.ID)
+	require.NoError(t, err)
+	var foundToolCall bool
+	for _, msg := range msgs {
+		for _, tc := range msg.ToolCalls() {
+			if tc.ID == toolCallID {
+				foundToolCall = true
+				require.True(t, tc.Finished)
+			}
+		}
+	}
+	require.True(t, foundToolCall)
+
+	var foundSyntheticToolResult bool
+	for _, msg := range msgs {
+		for _, tr := range msg.ToolResults() {
+			if tr.ToolCallID == toolCallID {
+				foundSyntheticToolResult = true
+				require.True(t, tr.IsError)
+				require.Contains(t, tr.Content, "error while executing the tool")
+			}
+		}
+	}
+	require.True(t, foundSyntheticToolResult)
 }
 
 func TestRunStreamingContextWindowRecoveryOnlyOnce(t *testing.T) {
@@ -448,6 +505,10 @@ func TestRunNormalSummarizeUsesSummarizePurpose(t *testing.T) {
 	require.NotNil(t, result)
 	require.Equal(t, 1, fakeAgent.runCalls)
 	require.Equal(t, 1, fakeAgent.summaryCalls)
+	require.Contains(t, purposeTracker.messagePurposes, plugin.ChatTransformPurposeMicroCompact)
+	require.Contains(t, purposeTracker.messagePurposes, plugin.ChatTransformPurposeCollapse)
+	require.Contains(t, purposeTracker.messagePurposes, plugin.ChatTransformPurposeAutoCompact)
+	require.Contains(t, purposeTracker.messagePurposes, plugin.ChatTransformPurposePostCompact)
 	require.Equal(t, []plugin.ChatTransformPurpose{plugin.ChatTransformPurposeSummarize}, purposeTracker.purposes)
 
 	savedSession, err := env.sessions.Get(t.Context(), testSession.ID)
@@ -482,4 +543,31 @@ func TestRunContextWindowErrorAfterCompletedStepDoesNotAutoResume(t *testing.T) 
 	require.ErrorIs(t, err, contextWindowErr)
 	require.Equal(t, 1, fakeAgent.runCalls)
 	require.Equal(t, 0, fakeAgent.summaryCalls)
+}
+
+func TestSummarizeSkipsAutoCompactForTinyHistory(t *testing.T) {
+	plugin.Reset()
+	t.Cleanup(plugin.Reset)
+
+	env := testEnv(t)
+	purposeTracker := initCompactingPurposePlugin(t, env)
+	testSession, err := env.sessions.Create(t.Context(), "tiny summarize")
+	require.NoError(t, err)
+
+	_, err = env.messages.Create(t.Context(), testSession.ID, message.CreateMessageParams{
+		Role:  message.User,
+		Parts: []message.ContentPart{message.TextContent{Text: "only one"}},
+	})
+	require.NoError(t, err)
+
+	fakeAgent := &autoSummarizeTestAgent{t: t}
+	sessionAgent := newAutoSummarizeTestSessionAgent(t, env, fakeAgent, env.messages, 10000)
+
+	err = sessionAgent.Summarize(t.Context(), testSession.ID, nil)
+	require.NoError(t, err)
+	require.Equal(t, 1, fakeAgent.summaryCalls)
+	require.Contains(t, purposeTracker.messagePurposes, plugin.ChatTransformPurposeMicroCompact)
+	require.Contains(t, purposeTracker.messagePurposes, plugin.ChatTransformPurposeCollapse)
+	require.NotContains(t, purposeTracker.messagePurposes, plugin.ChatTransformPurposeAutoCompact)
+	require.NotContains(t, purposeTracker.messagePurposes, plugin.ChatTransformPurposePostCompact)
 }

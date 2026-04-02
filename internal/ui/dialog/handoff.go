@@ -8,6 +8,7 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	uv "github.com/charmbracelet/ultraviolet"
 )
@@ -27,8 +28,10 @@ type Handoff struct {
 	}
 }
 
-var _ Dialog = (*Handoff)(nil)
-var _ LoadingDialog = (*Handoff)(nil)
+var (
+	_ Dialog        = (*Handoff)(nil)
+	_ LoadingDialog = (*Handoff)(nil)
+)
 
 func NewHandoff(com *common.Common, sessionID string) *Handoff {
 	input := textinput.New()
@@ -105,7 +108,13 @@ func (h *Handoff) Cursor() *tea.Cursor {
 	if h.loading {
 		return nil
 	}
-	return InputCursor(h.com.Styles, h.input.Cursor())
+	cur := InputCursor(h.com.Styles, h.input.Cursor())
+	if cur == nil {
+		return nil
+	}
+	intro := "Describe the goal for the next top-level session. Crush will draft the prompt and carry over the most relevant files."
+	cur.Y += titleContentHeight + lipgloss.Height(intro)
+	return cur
 }
 
 func (h *Handoff) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {

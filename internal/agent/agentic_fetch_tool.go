@@ -192,12 +192,16 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 			})
 
 			return c.runSubAgent(ctx, subAgentParams{
-				Agent:          agent,
-				SessionID:      validationResult.SessionID,
-				AgentMessageID: validationResult.AgentMessageID,
-				ToolCallID:     call.ID,
-				Prompt:         fullPrompt,
-				SessionTitle:   "Fetch Analysis",
+				Agent:             agent,
+				SessionID:         validationResult.SessionID,
+				AgentMessageID:    validationResult.AgentMessageID,
+				ParentMessageID:   validationResult.AgentMessageID,
+				ToolCallID:        call.ID,
+				Prompt:            fullPrompt,
+				SessionTitle:      "Fetch Analysis",
+				DelegationMailbox: call.ID,
+				AgentMemory:       "ephemeral",
+				AgentIsolation:    "process",
 				SessionSetup: func(sessionID string) {
 					c.permissions.AutoApproveSession(sessionID)
 				},

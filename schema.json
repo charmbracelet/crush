@@ -51,6 +51,10 @@
           },
           "type": "object"
         },
+        "task_governance": {
+          "$ref": "#/$defs/TaskGovernance",
+          "description": "Task graph execution policy for this agent"
+        },
         "context_paths": {
           "items": {
             "type": "string"
@@ -889,6 +893,33 @@
       "required": [
         "completions"
       ]
+    },
+    "TaskGovernance": {
+      "properties": {
+        "max_concurrent": {
+          "type": "integer",
+          "description": "Maximum number of task graph tasks of this agent type to run concurrently",
+          "examples": [
+            2
+          ]
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "description": "Maximum number of seconds each task graph task may run before timing out",
+          "examples": [
+            300
+          ]
+        },
+        "retry_budget": {
+          "type": "integer",
+          "description": "Number of retry attempts allowed after a task graph task fails",
+          "examples": [
+            2
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
     },
     "Token": {
       "properties": {

@@ -74,6 +74,15 @@ func TestIsRetriableError(t *testing.T) {
 		}))
 	})
 
+	t.Run("accounts exhausted message is retriable", func(t *testing.T) {
+		t.Parallel()
+		// Mid-stream SSE error from copilot-api when all accounts are rate limited
+		require.True(t, isRetriableError(&fantasy.ProviderError{
+			StatusCode: 0, // No HTTP status code for mid-stream errors
+			Message:    `{"message":"All accounts exhausted","type":"error"}`,
+		}))
+	})
+
 	t.Run("400 bad request is not retriable", func(t *testing.T) {
 		t.Parallel()
 		require.False(t, isRetriableError(&fantasy.ProviderError{

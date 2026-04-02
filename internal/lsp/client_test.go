@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/stretchr/testify/require"
 )
 
@@ -69,4 +70,32 @@ func TestNilClient(t *testing.T) {
 	require.Nil(t, c.OpenFileOnDemand(context.Background(), "/some/file.go"))
 	require.Nil(t, c.NotifyChange(context.Background(), "/some/file.go"))
 	c.WaitForDiagnostics(context.Background(), time.Second)
+}
+
+func TestCapabilityEnabled(t *testing.T) {
+	t.Parallel()
+
+	require.False(t, capabilityEnabled(nil))
+	require.False(t, capabilityEnabled(false))
+	require.True(t, capabilityEnabled(true))
+	require.True(t, capabilityEnabled(protocol.Or_ServerCapabilities_codeActionProvider{Value: true}))
+	require.False(t, capabilityEnabled(protocol.Or_ServerCapabilities_codeActionProvider{Value: false}))
+	require.True(t, capabilityEnabled(protocol.Or_ServerCapabilities_documentFormattingProvider{Value: protocol.DocumentFormattingOptions{}}))
+	require.True(t, capabilityEnabled(protocol.Or_ServerCapabilities_renameProvider{Value: protocol.RenameOptions{}}))
+}
+
+func TestCodeActionResults(t *testing.T) {
+	t.Parallel()
+
+	command := protocol.Command{Title: "Run fix", Command: "fix.command"}
+	actions := codeActionResults([]protocol.Or_Result_textDocument_codeAction_Item0_Elem{
+		{Value: protocol.CodeAction{Title: "Use fmt.Errorf"}},
+		{Value: command},
+	})
+
+	require.Len(t, actions, 2)
+	require.Equal(t, "Use fmt.Errorf", actions[0].Title)
+	require.Equal(t, "Run fix", actions[1].Title)
+	require.NotNil(t, actions[1].Command)
+	require.Equal(t, "fix.command", actions[1].Command.Command)
 }

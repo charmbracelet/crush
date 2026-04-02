@@ -3,6 +3,7 @@ package chat
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"unicode"
 
@@ -24,6 +25,7 @@ const maxAgentPromptDisplayLines = 3
 // maxCollapsedAgentNestedTools is the number of nested tool calls rendered in
 // collapsed mode before the user expands the agent block.
 const maxCollapsedAgentNestedTools = 10
+const maxAgentTaskDisplayItems = 8
 
 // -----------------------------------------------------------------------------
 // Agent Tool
@@ -149,6 +151,14 @@ type AgentToolRenderContext struct {
 	agent *AgentToolMessageItem
 }
 
+type agentTaskRenderEntry struct {
+	id           string
+	description  string
+	prompt       string
+	subagentType string
+	dependsOn    []string
+}
+
 // RenderTool implements the [ToolRenderer] interface.
 func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
@@ -158,14 +168,23 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 
 	var params agent.AgentParams
 	_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
+	tasks := collectAgentTaskEntries(params)
 
-	prompt := strings.ReplaceAll(params.Prompt, "\n", " ")
-	description := strings.TrimSpace(params.Description)
+	firstTask := agentTaskRenderEntry{}
+	if len(tasks) > 0 {
+		firstTask = tasks[0]
+	}
+	description := strings.TrimSpace(firstTask.description)
+	prompt := strings.TrimSpace(firstTask.prompt)
 	if description == "" {
 		description = prompt
 	}
 	description = strings.ReplaceAll(description, "\n", " ")
-	subagentType := titleCase(config.CanonicalSubagentID(params.SubagentType))
+	prompt = strings.ReplaceAll(prompt, "\n", " ")
+	subagentType := titleCase(firstTask.subagentType)
+	if subagentType == "" {
+		subagentType = titleCase(config.CanonicalSubagentID(params.SubagentType))
+	}
 
 	header := toolHeader(sty, opts.Status, "Agent", cappedWidth, opts.Compact)
 	if opts.Compact {
@@ -198,6 +217,7 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	}
 
 	header = lipgloss.JoinVertical(lipgloss.Left, headerParts...)
+	header = renderAgentTaskList(sty, header, tasks, remainingWidth, opts)
 
 	visibleNestedTools, hiddenNestedTools := agentNestedToolWindow(r.agent.nestedTools, r.agent.nestedExpanded)
 	header = renderAgentHeaderWithToggle(sty, header, remainingWidth, r.agent.nestedExpanded, len(r.agent.nestedTools), hiddenNestedTools)
@@ -437,6 +457,178 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 	}
 
 	return result
+}
+
+func collectAgentTaskEntries(params agent.AgentParams) []agentTaskRenderEntry {
+	tasks := make([]agentTaskRenderEntry, 0, max(1, len(params.Tasks)))
+	if len(params.Tasks) == 0 {
+		tasks = append(tasks, agentTaskRenderEntry{
+			id:           "",
+			description:  strings.TrimSpace(params.Description),
+			prompt:       strings.TrimSpace(params.Prompt),
+			subagentType: config.CanonicalSubagentID(params.SubagentType),
+		})
+		return tasks
+	}
+
+	for _, task := range params.Tasks {
+		tasks = append(tasks, agentTaskRenderEntry{
+			id:           strings.TrimSpace(task.ID),
+			description:  strings.TrimSpace(task.Description),
+			prompt:       strings.TrimSpace(task.Prompt),
+			subagentType: config.CanonicalSubagentID(task.SubagentType),
+			dependsOn:    append([]string(nil), task.DependsOn...),
+		})
+	}
+	return tasks
+}
+
+func renderAgentTaskList(sty *styles.Styles, header string, tasks []agentTaskRenderEntry, width int, opts *ToolRenderOpts) string {
+	if len(tasks) <= 1 || width <= 0 {
+		return header
+	}
+
+	taskTag := sty.Tool.AgenticFetchPromptTag.Render("Tasks")
+	availableWidth := max(0, width-lipgloss.Width(taskTag)-3)
+	if availableWidth == 0 {
+		return lipgloss.JoinVertical(lipgloss.Left, header, taskTag)
+	}
+
+	statusesByID := parseTaskStatusesFromAgentResult(opts)
+	completed, failed, canceled, inProgress, pending := summarizeTaskStatusCounts(tasks, statusesByID)
+	summaryText := fmt.Sprintf("done %d · running %d · pending %d", completed, inProgress, pending)
+	if failed > 0 {
+		summaryText += fmt.Sprintf(" · failed %d", failed)
+	}
+	if canceled > 0 {
+		summaryText += fmt.Sprintf(" · canceled %d", canceled)
+	}
+	summaryLine := lipgloss.JoinHorizontal(
+		lipgloss.Left,
+		taskTag,
+		" ",
+		sty.Tool.AgentPrompt.Width(availableWidth).Render(summaryText),
+	)
+
+	visibleCount := len(tasks)
+	if visibleCount > maxAgentTaskDisplayItems {
+		visibleCount = maxAgentTaskDisplayItems
+	}
+
+	lines := make([]string, 0, visibleCount+1)
+	for i := range visibleCount {
+		entry := tasks[i]
+		label := strings.TrimSpace(entry.description)
+		if label == "" {
+			label = strings.TrimSpace(entry.prompt)
+		}
+		if label == "" {
+			label = fmt.Sprintf("Task %d", i+1)
+		}
+		subagentLabel := titleCase(entry.subagentType)
+		if subagentLabel != "" {
+			label = fmt.Sprintf("[%s] %s", subagentLabel, label)
+		}
+		if deps := formatTaskDependencies(entry.dependsOn); deps != "" {
+			label += " " + deps
+		}
+
+		status := taskStatusIcon(sty, statusesByID[entry.id], opts, entry.id)
+		lineText := strings.ReplaceAll(label, "\n", " ")
+		lines = append(lines, fmt.Sprintf("%s %s", status, lineText))
+	}
+	if len(tasks) > visibleCount {
+		lines = append(lines, fmt.Sprintf("… +%d more", len(tasks)-visibleCount))
+	}
+
+	taskText := sty.Tool.AgentPrompt.Width(availableWidth).Render(strings.Join(lines, "\n"))
+	return lipgloss.JoinVertical(lipgloss.Left, header, summaryLine, taskText)
+}
+
+var taskStatusLinePattern = regexp.MustCompile(`(?m)^-\s+([^:]+):\s*(completed|failed|canceled)\s*$`)
+
+func parseTaskStatusesFromAgentResult(opts *ToolRenderOpts) map[string]message.ToolResultSubtaskStatus {
+	statuses := make(map[string]message.ToolResultSubtaskStatus)
+	if opts == nil || opts.Result == nil {
+		return statuses
+	}
+	content := opts.Result.Content
+	if strings.TrimSpace(content) == "" {
+		return statuses
+	}
+	matches := taskStatusLinePattern.FindAllStringSubmatch(content, -1)
+	for _, match := range matches {
+		if len(match) < 3 {
+			continue
+		}
+		taskID := strings.TrimSpace(match[1])
+		if taskID == "" {
+			continue
+		}
+		switch strings.TrimSpace(match[2]) {
+		case string(message.ToolResultSubtaskStatusCompleted):
+			statuses[taskID] = message.ToolResultSubtaskStatusCompleted
+		case string(message.ToolResultSubtaskStatusFailed):
+			statuses[taskID] = message.ToolResultSubtaskStatusFailed
+		case string(message.ToolResultSubtaskStatusCanceled):
+			statuses[taskID] = message.ToolResultSubtaskStatusCanceled
+		}
+	}
+	return statuses
+}
+
+func summarizeTaskStatusCounts(tasks []agentTaskRenderEntry, statuses map[string]message.ToolResultSubtaskStatus) (completed, failed, canceled, inProgress, pending int) {
+	for _, task := range tasks {
+		status := statuses[task.id]
+		switch status {
+		case message.ToolResultSubtaskStatusCompleted:
+			completed++
+		case message.ToolResultSubtaskStatusFailed:
+			failed++
+		case message.ToolResultSubtaskStatusCanceled:
+			canceled++
+		default:
+			if len(task.dependsOn) == 0 {
+				inProgress++
+			} else {
+				pending++
+			}
+		}
+	}
+	return completed, failed, canceled, inProgress, pending
+}
+
+func taskStatusIcon(sty *styles.Styles, status message.ToolResultSubtaskStatus, opts *ToolRenderOpts, taskID string) string {
+	switch status {
+	case message.ToolResultSubtaskStatusCompleted:
+		return sty.Tool.IconSuccess.String()
+	case message.ToolResultSubtaskStatusFailed:
+		return sty.Tool.IconError.String()
+	case message.ToolResultSubtaskStatusCanceled:
+		return sty.Tool.IconCancelled.String()
+	default:
+		if opts != nil && !opts.HasResult() && taskID != "" {
+			return sty.Tool.IconPending.String()
+		}
+		return sty.Tool.IconPending.String()
+	}
+}
+
+func formatTaskDependencies(dependsOn []string) string {
+	if len(dependsOn) == 0 {
+		return ""
+	}
+	cleaned := make([]string, 0, len(dependsOn))
+	for _, dep := range dependsOn {
+		dep = strings.TrimSpace(dep)
+		if dep != "" {
+			cleaned = append(cleaned, dep)
+		}
+	}
+	if len(cleaned) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("(after: %s)", strings.Join(cleaned, ", "))
 }
 
 func renderChildSessionStatus(sty *styles.Styles, width int, text string, isError bool) string {

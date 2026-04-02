@@ -295,3 +295,46 @@ func TestDeleteDoesNotTriggerDeleteCallbackWhenDeleteFails(t *testing.T) {
 	require.Error(t, err)
 	require.False(t, called)
 }
+
+func TestSavePersistsStructuredTodos(t *testing.T) {
+	t.Parallel()
+
+	conn, err := db.Connect(context.Background(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = conn.Close()
+	})
+
+	q := db.New(conn)
+	svc := NewService(q, conn)
+
+	created, err := svc.Create(context.Background(), "Structured todos")
+	require.NoError(t, err)
+
+	created.Todos = []Todo{{
+		ID:          "task-1",
+		Content:     "Track progress",
+		Status:      TodoStatusInProgress,
+		ActiveForm:  "Tracking progress",
+		Progress:    60,
+		CreatedAt:   11,
+		UpdatedAt:   12,
+		StartedAt:   13,
+		CompletedAt: 0,
+	}}
+
+	saved, err := svc.Save(context.Background(), created)
+	require.NoError(t, err)
+	require.Len(t, saved.Todos, 1)
+	require.Equal(t, "task-1", saved.Todos[0].ID)
+	require.Equal(t, 60, saved.Todos[0].Progress)
+	require.NotZero(t, saved.Todos[0].UpdatedAt)
+	require.NotZero(t, saved.Todos[0].StartedAt)
+
+	loaded, err := svc.Get(context.Background(), created.ID)
+	require.NoError(t, err)
+	require.Len(t, loaded.Todos, 1)
+	require.Equal(t, "task-1", loaded.Todos[0].ID)
+	require.Equal(t, 60, loaded.Todos[0].Progress)
+	require.Equal(t, TodoStatusInProgress, loaded.Todos[0].Status)
+}

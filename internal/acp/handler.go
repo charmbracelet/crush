@@ -488,12 +488,14 @@ func (h *Handler) handleToolRuntimeEvent(sessionID string, event pubsub.Event[to
 		snapshotHashes[state.ToolCallID] = hash
 
 		h.sendUpdate(sessionID, SessionUpdate{
-			SessionUpdate: SessionUpdateToolCallUpdate,
-			ToolCallID:    state.ToolCallID,
-			Title:         state.ToolName,
-			Kind:          "tool",
-			Status:        ToolCallStatusInProgress,
-			Content:       TextBlock(snapshot),
+			SessionUpdate:  SessionUpdateToolCallUpdate,
+			ToolCallID:     state.ToolCallID,
+			Title:          state.ToolName,
+			Kind:           "tool",
+			Status:         ToolCallStatusInProgress,
+			Content:        TextBlock(snapshot),
+			ClientMetadata: state.ClientMetadata,
+			DurationMs:     state.DurationMs,
 		})
 		return
 	}
@@ -511,11 +513,13 @@ func (h *Handler) handleToolRuntimeEvent(sessionID string, event pubsub.Event[to
 	}
 
 	h.sendUpdate(sessionID, SessionUpdate{
-		SessionUpdate: SessionUpdateToolCallUpdate,
-		ToolCallID:    state.ToolCallID,
-		Title:         state.ToolName,
-		Kind:          "tool",
-		Status:        status,
+		SessionUpdate:  SessionUpdateToolCallUpdate,
+		ToolCallID:     state.ToolCallID,
+		Title:          state.ToolName,
+		Kind:           "tool",
+		Status:         status,
+		ClientMetadata: state.ClientMetadata,
+		DurationMs:     state.DurationMs,
 	})
 }
 
@@ -564,7 +568,7 @@ func (h *Handler) sessionUpdateFromToolResult(tr message.ToolResult) SessionUpda
 	if hasSubtaskResult {
 		update.ChildSessionID = subtaskResult.ChildSessionID
 		update.ParentToolCallID = subtaskResult.ParentToolCallID
-		update.SubtaskResult = &SubtaskResult{Status: string(subtaskResult.Status)}
+		update.SubtaskResult = &SubtaskResult{Status: string(subtaskResult.Status), ParentMessageID: subtaskResult.ParentMessageID}
 	}
 	if reducer, ok := tr.Reducer(); ok {
 		update.Reducer = &Reducer{
@@ -573,6 +577,8 @@ func (h *Handler) sessionUpdateFromToolResult(tr message.ToolResult) SessionUpda
 			Risks:       reducer.Risks,
 			NextActions: reducer.NextActions,
 			Confidence:  reducer.Confidence,
+			MailboxID:   reducer.MailboxID,
+			Messages:    reducer.Messages,
 		}
 	}
 	return update

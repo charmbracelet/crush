@@ -14,6 +14,7 @@ import (
 	"charm.land/fantasy/providers/openai"
 	"charm.land/fantasy/providers/openaicompat"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
+	agenttools "github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
@@ -129,12 +130,13 @@ func TestRunSubAgent(t *testing.T) {
 		})
 
 		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
-			Agent:          agent,
-			SessionID:      parentSession.ID,
-			AgentMessageID: "msg-1",
-			ToolCallID:     "call-1",
-			Prompt:         "do something",
-			SessionTitle:   "Test Session",
+			Agent:           agent,
+			SessionID:       parentSession.ID,
+			AgentMessageID:  "msg-1",
+			ParentMessageID: "msg-1",
+			ToolCallID:      "call-1",
+			Prompt:          "do something",
+			SessionTitle:    "Test Session",
 		})
 		require.NoError(t, err)
 		assert.Equal(t, "done", resp.Content)
@@ -144,6 +146,7 @@ func TestRunSubAgent(t *testing.T) {
 		assert.Equal(t, message.ToolResultSubtaskResult{
 			ChildSessionID:   "msg-1$$call-1",
 			ParentToolCallID: "call-1",
+			ParentMessageID:  "msg-1",
 			Status:           message.ToolResultSubtaskStatusCompleted,
 		}, parsed)
 	})
@@ -167,12 +170,13 @@ func TestRunSubAgent(t *testing.T) {
 		})
 
 		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
-			Agent:          agent,
-			SessionID:      parentSession.ID,
-			AgentMessageID: "msg-1",
-			ToolCallID:     "call-1",
-			Prompt:         "do something",
-			SessionTitle:   "Test Session",
+			Agent:           agent,
+			SessionID:       parentSession.ID,
+			AgentMessageID:  "msg-1",
+			ParentMessageID: "msg-1",
+			ToolCallID:      "call-1",
+			Prompt:          "do something",
+			SessionTitle:    "Test Session",
 		})
 		require.NoError(t, err)
 		assert.True(t, resp.IsError)
@@ -203,12 +207,13 @@ func TestRunSubAgent(t *testing.T) {
 		}
 
 		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
-			Agent:          agent,
-			SessionID:      parentSession.ID,
-			AgentMessageID: "msg-1",
-			ToolCallID:     "call-1",
-			Prompt:         "test",
-			SessionTitle:   "Test",
+			Agent:           agent,
+			SessionID:       parentSession.ID,
+			AgentMessageID:  "msg-1",
+			ParentMessageID: "msg-1",
+			ToolCallID:      "call-1",
+			Prompt:          "test",
+			SessionTitle:    "Test",
 		})
 		require.NoError(t, err)
 		assert.Equal(t, "ok", resp.Content)
@@ -228,12 +233,13 @@ func TestRunSubAgent(t *testing.T) {
 		cancel()
 
 		_, err = coord.runSubAgent(ctx, subAgentParams{
-			Agent:          agent,
-			SessionID:      parentSession.ID,
-			AgentMessageID: "msg-1",
-			ToolCallID:     "call-1",
-			Prompt:         "test",
-			SessionTitle:   "Test",
+			Agent:           agent,
+			SessionID:       parentSession.ID,
+			AgentMessageID:  "msg-1",
+			ParentMessageID: "msg-1",
+			ToolCallID:      "call-1",
+			Prompt:          "test",
+			SessionTitle:    "Test",
 		})
 		require.Error(t, err)
 	})
@@ -249,12 +255,13 @@ func TestRunSubAgent(t *testing.T) {
 		agent := newMockAgent("unknown-provider", 4096, nil)
 
 		_, err = coord.runSubAgent(t.Context(), subAgentParams{
-			Agent:          agent,
-			SessionID:      parentSession.ID,
-			AgentMessageID: "msg-1",
-			ToolCallID:     "call-1",
-			Prompt:         "test",
-			SessionTitle:   "Test",
+			Agent:           agent,
+			SessionID:       parentSession.ID,
+			AgentMessageID:  "msg-1",
+			ParentMessageID: "msg-1",
+			ToolCallID:      "call-1",
+			Prompt:          "test",
+			SessionTitle:    "Test",
 		})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "model provider not configured")
@@ -272,12 +279,13 @@ func TestRunSubAgent(t *testing.T) {
 		})
 
 		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
-			Agent:          agent,
-			SessionID:      parentSession.ID,
-			AgentMessageID: "msg-1",
-			ToolCallID:     "call-1",
-			Prompt:         "test",
-			SessionTitle:   "Test",
+			Agent:           agent,
+			SessionID:       parentSession.ID,
+			AgentMessageID:  "msg-1",
+			ParentMessageID: "msg-1",
+			ToolCallID:      "call-1",
+			Prompt:          "test",
+			SessionTitle:    "Test",
 		})
 		// runSubAgent returns (errorResponse, nil) when agent.Run fails 鈥?not a Go error.
 		require.NoError(t, err)
@@ -288,6 +296,7 @@ func TestRunSubAgent(t *testing.T) {
 		assert.Equal(t, message.ToolResultSubtaskResult{
 			ChildSessionID:   "msg-1$$call-1",
 			ParentToolCallID: "call-1",
+			ParentMessageID:  "msg-1",
 			Status:           message.ToolResultSubtaskStatusFailed,
 		}, parsed)
 	})
@@ -312,12 +321,13 @@ func TestRunSubAgent(t *testing.T) {
 		})
 
 		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
-			Agent:          agent,
-			SessionID:      parentSession.ID,
-			AgentMessageID: "msg-1",
-			ToolCallID:     "call-1",
-			Prompt:         "test",
-			SessionTitle:   "Test",
+			Agent:           agent,
+			SessionID:       parentSession.ID,
+			AgentMessageID:  "msg-1",
+			ParentMessageID: "msg-1",
+			ToolCallID:      "call-1",
+			Prompt:          "test",
+			SessionTitle:    "Test",
 		})
 		require.NoError(t, err)
 		assert.True(t, resp.IsError)
@@ -344,12 +354,13 @@ func TestRunSubAgent(t *testing.T) {
 		})
 
 		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
-			Agent:          agent,
-			SessionID:      parentSession.ID,
-			AgentMessageID: "msg-1",
-			ToolCallID:     "call-1",
-			Prompt:         "test",
-			SessionTitle:   "Test",
+			Agent:           agent,
+			SessionID:       parentSession.ID,
+			AgentMessageID:  "msg-1",
+			ParentMessageID: "msg-1",
+			ToolCallID:      "call-1",
+			Prompt:          "test",
+			SessionTitle:    "Test",
 		})
 		require.NoError(t, err)
 		assert.False(t, resp.IsError)
@@ -368,12 +379,13 @@ func TestRunSubAgent(t *testing.T) {
 		})
 
 		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
-			Agent:          agent,
-			SessionID:      parentSession.ID,
-			AgentMessageID: "msg-1",
-			ToolCallID:     "call-1",
-			Prompt:         "test",
-			SessionTitle:   "Test",
+			Agent:           agent,
+			SessionID:       parentSession.ID,
+			AgentMessageID:  "msg-1",
+			ParentMessageID: "msg-1",
+			ToolCallID:      "call-1",
+			Prompt:          "test",
+			SessionTitle:    "Test",
 		})
 		require.NoError(t, err)
 		assert.False(t, resp.IsError)
@@ -409,12 +421,13 @@ func TestRunSubAgent(t *testing.T) {
 		})
 
 		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
-			Agent:          agent,
-			SessionID:      parentSession.ID,
-			AgentMessageID: "msg-1",
-			ToolCallID:     "call-1",
-			Prompt:         "test",
-			SessionTitle:   "Test",
+			Agent:           agent,
+			SessionID:       parentSession.ID,
+			AgentMessageID:  "msg-1",
+			ParentMessageID: "msg-1",
+			ToolCallID:      "call-1",
+			Prompt:          "test",
+			SessionTitle:    "Test",
 		})
 		require.NoError(t, err)
 		assert.False(t, resp.IsError)
@@ -434,18 +447,49 @@ func TestRunSubAgent(t *testing.T) {
 		})
 
 		_, err = coord.runSubAgent(t.Context(), subAgentParams{
-			Agent:          agent,
-			SessionID:      parentSession.ID,
-			AgentMessageID: "msg-1",
-			ToolCallID:     "call-1",
-			Prompt:         "test",
-			SessionTitle:   "Test",
+			Agent:           agent,
+			SessionID:       parentSession.ID,
+			AgentMessageID:  "msg-1",
+			ParentMessageID: "msg-1",
+			ToolCallID:      "call-1",
+			Prompt:          "test",
+			SessionTitle:    "Test",
 			SessionSetup: func(sessionID string) {
 				setupCalledWith = sessionID
 			},
 		})
 		require.NoError(t, err)
 		assert.NotEmpty(t, setupCalledWith, "SessionSetup should have been called")
+	})
+
+	t.Run("propagates subagent lifecycle policy in context", func(t *testing.T) {
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, providerID, providerCfg)
+
+		parentSession, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+
+		background := true
+		agent := newMockAgent(providerID, 4096, func(ctx context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+			require.Equal(t, "isolated", agenttools.GetAgentMemoryFromContext(ctx))
+			require.Equal(t, "session", agenttools.GetAgentIsolationFromContext(ctx))
+			require.True(t, agenttools.GetAgentBackgroundFromContext(ctx))
+			return agentResultWithText("ok"), nil
+		})
+
+		_, err = coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:           agent,
+			SessionID:       parentSession.ID,
+			AgentMessageID:  "msg-1",
+			ParentMessageID: "msg-1",
+			ToolCallID:      "call-1",
+			Prompt:          "test",
+			SessionTitle:    "Test",
+			AgentMemory:     "isolated",
+			AgentIsolation:  "session",
+			AgentBackground: &background,
+		})
+		require.NoError(t, err)
 	})
 
 	t.Run("clears inherited parent runtime config before subagent run", func(t *testing.T) {
@@ -499,12 +543,13 @@ func TestRunSubAgent(t *testing.T) {
 		}
 
 		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
-			Agent:          agent,
-			SessionID:      parentSession.ID,
-			AgentMessageID: "msg-1",
-			ToolCallID:     "call-1",
-			Prompt:         "scheduled prompt",
-			SessionTitle:   "Scheduled Session",
+			Agent:           agent,
+			SessionID:       parentSession.ID,
+			AgentMessageID:  "msg-1",
+			ParentMessageID: "msg-1",
+			ToolCallID:      "call-1",
+			Prompt:          "scheduled prompt",
+			SessionTitle:    "Scheduled Session",
 		})
 		require.NoError(t, err)
 		assert.Equal(t, "scheduled", resp.Content)
@@ -534,12 +579,13 @@ func TestRunSubAgent(t *testing.T) {
 		})
 
 		_, err = coord.runSubAgent(t.Context(), subAgentParams{
-			Agent:          agent,
-			SessionID:      parentSession.ID,
-			AgentMessageID: "msg-1",
-			ToolCallID:     "call-1",
-			Prompt:         "test",
-			SessionTitle:   "Test",
+			Agent:           agent,
+			SessionID:       parentSession.ID,
+			AgentMessageID:  "msg-1",
+			ParentMessageID: "msg-1",
+			ToolCallID:      "call-1",
+			Prompt:          "test",
+			SessionTitle:    "Test",
 		})
 		require.NoError(t, err)
 
@@ -554,8 +600,8 @@ func TestPrepareModelSwitch(t *testing.T) {
 	providerCfg := config.ProviderConfig{
 		ID: providerID,
 		Models: []catwalk.Model{
-			{ID: "big", ContextWindow: 1_000_000, DefaultMaxTokens: 32_000},
-			{ID: "small", ContextWindow: 200_000, DefaultMaxTokens: 8_000},
+			{ID: "big", Name: "Big", ContextWindow: 1_000_000, DefaultMaxTokens: 32_000},
+			{ID: "small", Name: "Small", ContextWindow: 200_000, DefaultMaxTokens: 8_000},
 		},
 	}
 
@@ -629,6 +675,41 @@ func TestPrepareModelSwitch(t *testing.T) {
 		require.NoError(t, err)
 		require.Empty(t, agent.summarized)
 	})
+}
+
+func TestBuildAgentModels_ContextWindowOverride(t *testing.T) {
+	env := testEnv(t)
+	cfg, err := config.Init(env.workingDir, "", false)
+	require.NoError(t, err)
+
+	providerID := "openai"
+	providerCfg := config.ProviderConfig{
+		ID:   providerID,
+		Type: catwalk.TypeOpenAICompat,
+		Models: []catwalk.Model{
+			{ID: "big", Name: "Big", ContextWindow: 200_000, DefaultMaxTokens: 32_000},
+			{ID: "small", Name: "Small", ContextWindow: 128_000, DefaultMaxTokens: 8_000},
+		},
+	}
+	cfg.Config().Providers.Set(providerID, providerCfg)
+	cfg.Config().Models[config.SelectedModelTypeLarge] = config.SelectedModel{
+		Provider:      providerID,
+		Model:         "big",
+		MaxTokens:     32_000,
+		ContextWindow: 400_000,
+	}
+	cfg.Config().Models[config.SelectedModelTypeSmall] = config.SelectedModel{
+		Provider:  providerID,
+		Model:     "small",
+		MaxTokens: 8_000,
+		// No override for small model.
+	}
+
+	coord := &coordinator{cfg: cfg}
+	large, small, err := coord.buildAgentModels(t.Context(), false)
+	require.NoError(t, err)
+	require.Equal(t, int64(400_000), large.CatwalkCfg.ContextWindow)
+	require.Equal(t, int64(128_000), small.CatwalkCfg.ContextWindow)
 }
 
 func TestUpdateParentSessionCost(t *testing.T) {

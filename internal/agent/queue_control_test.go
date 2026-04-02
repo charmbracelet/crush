@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -294,12 +295,61 @@ func TestJoinActiveRunQueuedPromptMergesIntoCurrentRun(t *testing.T) {
 	require.NoError(t, err)
 	foundJoinedPrompt := false
 	for _, msg := range msgs {
-		if msg.Role == message.User && msg.Content().Text == "join now" {
+		if msg.Role == message.User && strings.HasPrefix(msg.Content().Text, "join now") {
 			foundJoinedPrompt = true
 			break
 		}
 	}
 	require.True(t, foundJoinedPrompt)
+}
+
+func TestJoinActiveRunQueuedPromptRespectsInjectionBudgets(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	sessionAgent := newQueueControlTestAgent(env)
+
+	sess, err := env.sessions.Create(t.Context(), "join active budgets")
+	require.NoError(t, err)
+
+	sessionAgent.messageQueue.Set(sess.ID, []SessionAgentCall{
+		{SessionID: sess.ID, Prompt: strings.Repeat("A", joinActiveRunPromptCharsBudget+200), JoinActiveRun: true},
+		{SessionID: sess.ID, Prompt: "second", JoinActiveRun: true},
+		{SessionID: sess.ID, Prompt: "third", JoinActiveRun: true},
+	})
+
+	calls := sessionAgent.takeJoinActiveRunCalls(sess.ID)
+	require.Len(t, calls, 3)
+
+	remaining := joinActiveRunPromptCharsBudget
+	injected := 0
+	for i := len(calls) - 1; i >= 0; i-- {
+		call := calls[i]
+		if injected >= joinActiveRunMaxInjectedCalls || remaining <= 0 {
+			sessionAgent.enqueueQueuedCall(sess.ID, call)
+			continue
+		}
+		prompt := strings.TrimSpace(call.Prompt)
+		if prompt == "" {
+			sessionAgent.enqueueQueuedCall(sess.ID, call)
+			continue
+		}
+		runes := []rune(prompt)
+		if len(runes) > remaining {
+			if remaining <= 1 {
+				sessionAgent.enqueueQueuedCall(sess.ID, call)
+				continue
+			}
+			prompt = string(runes[:remaining-1]) + "…"
+		}
+		remaining -= len([]rune(prompt))
+		injected++
+	}
+
+	require.Equal(t, joinActiveRunMaxInjectedCalls, injected)
+	queue := sessionAgent.queuedCallsSnapshot(sess.ID)
+	require.Len(t, queue, 1)
+	require.Equal(t, strings.Repeat("A", joinActiveRunPromptCharsBudget+200), queue[0].Prompt)
 }
 
 func TestPrioritizeQueuedPromptMovesToJoinActiveRun(t *testing.T) {

@@ -126,10 +126,16 @@ func renderHeaderDetails(
 	}
 
 	agentCfg := com.Config().Agents[config.AgentCoder]
-	model := com.Config().GetModelByType(agentCfg.Model)
+	activeModel := com.App.AgentCoordinator.Model()
+	contextWindow := activeModel.CatwalkCfg.ContextWindow
+	if contextWindow <= 0 {
+		if model := com.Config().GetModelByType(agentCfg.Model); model != nil {
+			contextWindow = model.ContextWindow
+		}
+	}
 	// Use LastInputTokens for context usage display (matches sidebar and shouldAutoSummarize).
 	totalTokens := session.LastInputTokens()
-	formattedUsage := t.Header.Percentage.Render(common.FormatContextUsage(totalTokens, model.ContextWindow))
+	formattedUsage := t.Header.Percentage.Render(common.FormatContextUsage(totalTokens, contextWindow))
 	parts = append(parts, formattedUsage)
 
 	const keystroke = "ctrl+d"

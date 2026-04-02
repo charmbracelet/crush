@@ -109,6 +109,7 @@ type SelectedModel struct {
 
 	// Overrides the default model configuration.
 	MaxTokens        int64    `json:"max_tokens,omitempty" jsonschema:"description=Maximum number of tokens for model responses,maximum=200000,example=4096"`
+	ContextWindow    int64    `json:"context_window,omitempty" jsonschema:"description=Context window override for this model,example=400000"`
 	Temperature      *float64 `json:"temperature,omitempty" jsonschema:"description=Sampling temperature,minimum=0,maximum=1,example=0.7"`
 	TopP             *float64 `json:"top_p,omitempty" jsonschema:"description=Top-p (nucleus) sampling parameter,minimum=0,maximum=1,example=0.9"`
 	TopK             *int64   `json:"top_k,omitempty" jsonschema:"description=Top-k sampling parameter"`
@@ -423,11 +424,85 @@ func (m MCPConfig) SupportsInteractiveAuth() bool {
 	return m.Type == MCPHttp
 }
 
+type TaskGovernance struct {
+	MaxConcurrent        *int   `json:"max_concurrent,omitempty" jsonschema:"description=Maximum number of task graph tasks of this agent type to run concurrently,example=2"`
+	TimeoutSeconds       *int   `json:"timeout_seconds,omitempty" jsonschema:"description=Maximum number of seconds each task graph task may run before timing out,example=300"`
+	RetryBudget          *int   `json:"retry_budget,omitempty" jsonschema:"description=Number of retry attempts allowed after a task graph task fails,example=2"`
+	GraphTimeoutSeconds  *int   `json:"graph_timeout_seconds,omitempty" jsonschema:"description=Maximum number of seconds the entire task graph may run before remaining tasks are canceled,example=900"`
+	FailFast             *bool  `json:"fail_fast,omitempty" jsonschema:"description=Stop launching new task graph work after the first task failure,default=false"`
+	RuntimeBudgetSeconds *int   `json:"runtime_budget_seconds,omitempty" jsonschema:"description=Maximum number of seconds a shared runtime budget may remain active across delegated work,example=600"`
+	FailureBudget        *int   `json:"failure_budget,omitempty" jsonschema:"description=Maximum number of failures allowed within the configured failure domain before remaining delegated work is canceled,example=2"`
+	FailureDomain        string `json:"failure_domain,omitempty" jsonschema:"description=Logical failure domain name shared by related delegated work,example=task_graph"`
+}
+
+func (t *TaskGovernance) MaxConcurrentLimit() int {
+	if t == nil || t.MaxConcurrent == nil || *t.MaxConcurrent <= 0 {
+		return 0
+	}
+	return *t.MaxConcurrent
+}
+
+func (t *TaskGovernance) Timeout() time.Duration {
+	if t == nil || t.TimeoutSeconds == nil || *t.TimeoutSeconds <= 0 {
+		return 0
+	}
+	return time.Duration(*t.TimeoutSeconds) * time.Second
+}
+
+func (t *TaskGovernance) RetryBudgetLimit() int {
+	if t == nil || t.RetryBudget == nil || *t.RetryBudget <= 0 {
+		return 0
+	}
+	return *t.RetryBudget
+}
+
+func (t *TaskGovernance) GraphTimeout() time.Duration {
+	if t == nil || t.GraphTimeoutSeconds == nil || *t.GraphTimeoutSeconds <= 0 {
+		return 0
+	}
+	return time.Duration(*t.GraphTimeoutSeconds) * time.Second
+}
+
+func (t *TaskGovernance) FailFastEnabled() bool {
+	if t == nil || t.FailFast == nil {
+		return false
+	}
+	return *t.FailFast
+}
+
+func (t *TaskGovernance) RuntimeBudget() time.Duration {
+	if t == nil || t.RuntimeBudgetSeconds == nil || *t.RuntimeBudgetSeconds <= 0 {
+		return 0
+	}
+	return time.Duration(*t.RuntimeBudgetSeconds) * time.Second
+}
+
+func (t *TaskGovernance) FailureBudgetLimit() int {
+	if t == nil || t.FailureBudget == nil || *t.FailureBudget <= 0 {
+		return 0
+	}
+	return *t.FailureBudget
+}
+
+func (t *TaskGovernance) FailureDomainName() string {
+	if t == nil {
+		return ""
+	}
+	return strings.TrimSpace(t.FailureDomain)
+}
+
 type Agent struct {
-	ID          string    `json:"id,omitempty"`
-	Name        string    `json:"name,omitempty"`
-	Description string    `json:"description,omitempty"`
-	Mode        AgentMode `json:"mode,omitempty" jsonschema:"description=Where this agent can run,enum=primary,enum=subagent,enum=all,default=all"`
+	ID               string    `json:"id,omitempty"`
+	Name             string    `json:"name,omitempty"`
+	Description      string    `json:"description,omitempty"`
+	Role             string    `json:"role,omitempty" jsonschema:"description=Optional role hint used to specialize this agent,example=orchestrator,example=planner,example=reviewer,example=executor"`
+	AdditionalPrompt string    `json:"additional_prompt,omitempty" jsonschema:"description=Additional prompt instructions appended to this agent's system prompt"`
+	InitialPrompt    string    `json:"initial_prompt,omitempty" jsonschema:"description=Additional initial instructions injected into this agent's system prompt before it runs"`
+	Mode             AgentMode `json:"mode,omitempty" jsonschema:"description=Where this agent can run,enum=primary,enum=subagent,enum=all,default=all"`
+	Background       *bool     `json:"background,omitempty" jsonschema:"description=Whether this agent is expected to run as a background-style worker hint"`
+	Memory           string    `json:"memory,omitempty" jsonschema:"description=Memory scope hint for this agent,example=inherit,example=isolated,example=ephemeral"`
+	Isolation        string    `json:"isolation,omitempty" jsonschema:"description=Isolation hint for this agent,example=workspace,example=session,example=process"`
+	OmitContextFiles bool      `json:"omit_context_files,omitempty" jsonschema:"description=Skip project and global context file injection for this agent,default=false"`
 	// This is the id of the system prompt used by the agent
 	Disabled bool `json:"disabled,omitempty"`
 
@@ -442,6 +517,8 @@ type Agent struct {
 	//  the string array is the list of tools from the AllowedMCP the agent has available
 	//  if the string array is nil, all tools from the AllowedMCP are available
 	AllowedMCP map[string][]string `json:"allowed_mcp,omitempty"`
+
+	TaskGovernance *TaskGovernance `json:"task_governance,omitempty" jsonschema:"description=Task graph execution policy for this agent"`
 
 	// Overrides the context paths for this agent
 	ContextPaths []string `json:"context_paths,omitempty"`
@@ -611,6 +688,16 @@ func allToolNames() []string {
 		"multiedit",
 		"lsp_diagnostics",
 		"lsp_references",
+		"lsp_declaration",
+		"lsp_definition",
+		"lsp_implementation",
+		"lsp_type_definition",
+		"lsp_hover",
+		"lsp_document_symbols",
+		"lsp_workspace_symbols",
+		"lsp_code_action",
+		"lsp_rename",
+		"lsp_format",
 		"lsp_restart",
 		"fetch",
 		"agentic_fetch",
@@ -618,10 +705,13 @@ func allToolNames() []string {
 		"grep",
 		"ls",
 		"request_user_input",
-		"sourcegraph",
 		"history_search",
 		"long_term_memory",
+		"tool_search",
 		"todos",
+		"send_message",
+		"task_stop",
+		"subtask_result",
 		"view",
 		"write",
 		"list_mcp_resources",
@@ -638,7 +728,7 @@ func resolveAllowedTools(allTools []string, disabledTools []string) []string {
 }
 
 func resolveReadOnlyTools(tools []string) []string {
-	readOnlyTools := []string{"bash", "glob", "grep", "ls", "sourcegraph", "view"}
+	readOnlyTools := []string{"bash", "glob", "grep", "ls", "tool_search", "view"}
 	// filter to only include tools that are in allowedtools (include mode)
 	return filterSlice(tools, readOnlyTools, true)
 }
@@ -670,29 +760,40 @@ func builtinAgents(primaryTools, generalTools, exploreTools, contextPaths []stri
 		AgentCoder: {
 			ID:           AgentCoder,
 			Name:         "Coder",
-			Description:  "An agent that helps with executing coding tasks.",
+			Description:  "The primary orchestrator agent for coding tasks.",
+			Role:         "orchestrator",
+			Memory:       "inherit",
+			Isolation:    "workspace",
 			Mode:         AgentModePrimary,
 			Model:        SelectedModelTypeLarge,
 			ContextPaths: contextPaths,
 			AllowedTools: primaryTools,
 		},
 		AgentGeneral: {
-			ID:           AgentGeneral,
-			Name:         "General",
-			Description:  "A subagent that helps with executing independent implementation tasks.",
-			Mode:         AgentModeSubagent,
-			Model:        SelectedModelTypeLarge,
-			ContextPaths: contextPaths,
-			AllowedTools: generalTools,
+			ID:               AgentGeneral,
+			Name:             "General",
+			Description:      "A subagent that executes independent implementation tasks.",
+			Role:             "executor",
+			AdditionalPrompt: "Act as the executor: implement the delegated task directly, run the most relevant verification you can, and return a concise execution handoff.",
+			Memory:           "inherit",
+			Isolation:        "session",
+			Mode:             AgentModeSubagent,
+			Model:            SelectedModelTypeLarge,
+			ContextPaths:     contextPaths,
+			AllowedTools:     generalTools,
 		},
 		AgentExplore: {
-			ID:           AgentExplore,
-			Name:         "Explore",
-			Description:  "A read-only subagent for searching code and inspecting local git state with a restricted bash tool limited to safe read-only git commands.",
-			Mode:         AgentModeSubagent,
-			Model:        SelectedModelTypeLarge,
-			ContextPaths: contextPaths,
-			AllowedTools: exploreTools,
+			ID:               AgentExplore,
+			Name:             "Explore",
+			Description:      "A read-only subagent that reviews code, diffs, and local git state with a restricted bash tool limited to safe read-only git commands.",
+			Role:             "reviewer",
+			AdditionalPrompt: "Act as the reviewer: inspect code or outputs, validate assumptions, summarize findings clearly, and do not edit files unless the delegated task explicitly asks for a fix.",
+			Memory:           "inherit",
+			Isolation:        "session",
+			Mode:             AgentModeSubagent,
+			Model:            SelectedModelTypeLarge,
+			ContextPaths:     contextPaths,
+			AllowedTools:     exploreTools,
 			// NO MCPs or LSPs by default
 			AllowedMCP: map[string][]string{},
 		},
@@ -708,8 +809,29 @@ func mergeAgentConfig(base, override Agent) Agent {
 	if override.Description != "" {
 		merged.Description = override.Description
 	}
+	if override.Role != "" {
+		merged.Role = override.Role
+	}
+	if override.AdditionalPrompt != "" {
+		merged.AdditionalPrompt = override.AdditionalPrompt
+	}
+	if override.InitialPrompt != "" {
+		merged.InitialPrompt = override.InitialPrompt
+	}
 	if override.Mode != "" {
 		merged.Mode = override.Mode
+	}
+	if override.Background != nil {
+		merged.Background = override.Background
+	}
+	if override.Memory != "" {
+		merged.Memory = override.Memory
+	}
+	if override.Isolation != "" {
+		merged.Isolation = override.Isolation
+	}
+	if override.OmitContextFiles {
+		merged.OmitContextFiles = true
 	}
 	if override.Disabled {
 		merged.Disabled = true
@@ -723,6 +845,9 @@ func mergeAgentConfig(base, override Agent) Agent {
 	if override.AllowedMCP != nil {
 		merged.AllowedMCP = override.AllowedMCP
 	}
+	if override.TaskGovernance != nil {
+		merged.TaskGovernance = override.TaskGovernance
+	}
 	if override.ContextPaths != nil {
 		merged.ContextPaths = override.ContextPaths
 	}
@@ -734,12 +859,49 @@ func agentConfigsEqual(a, b Agent) bool {
 	return a.ID == b.ID &&
 		a.Name == b.Name &&
 		a.Description == b.Description &&
+		a.Role == b.Role &&
+		a.AdditionalPrompt == b.AdditionalPrompt &&
+		a.InitialPrompt == b.InitialPrompt &&
 		a.Mode == b.Mode &&
+		ptrValOr(a.Background, false) == ptrValOr(b.Background, false) &&
+		a.Memory == b.Memory &&
+		a.Isolation == b.Isolation &&
+		a.OmitContextFiles == b.OmitContextFiles &&
 		a.Disabled == b.Disabled &&
 		a.Model == b.Model &&
 		slices.Equal(a.AllowedTools, b.AllowedTools) &&
+		taskGovernanceEqual(a.TaskGovernance, b.TaskGovernance) &&
 		slices.Equal(a.ContextPaths, b.ContextPaths) &&
 		maps.EqualFunc(a.AllowedMCP, b.AllowedMCP, slices.Equal)
+}
+
+func taskGovernanceEqual(a, b *TaskGovernance) bool {
+	return effectiveTaskGovernanceInt(a, func(t *TaskGovernance) *int { return t.MaxConcurrent }) == effectiveTaskGovernanceInt(b, func(t *TaskGovernance) *int { return t.MaxConcurrent }) &&
+		effectiveTaskGovernanceInt(a, func(t *TaskGovernance) *int { return t.TimeoutSeconds }) == effectiveTaskGovernanceInt(b, func(t *TaskGovernance) *int { return t.TimeoutSeconds }) &&
+		effectiveTaskGovernanceInt(a, func(t *TaskGovernance) *int { return t.RetryBudget }) == effectiveTaskGovernanceInt(b, func(t *TaskGovernance) *int { return t.RetryBudget }) &&
+		effectiveTaskGovernanceInt(a, func(t *TaskGovernance) *int { return t.GraphTimeoutSeconds }) == effectiveTaskGovernanceInt(b, func(t *TaskGovernance) *int { return t.GraphTimeoutSeconds }) &&
+		effectiveTaskGovernanceBool(a, func(t *TaskGovernance) *bool { return t.FailFast }) == effectiveTaskGovernanceBool(b, func(t *TaskGovernance) *bool { return t.FailFast }) &&
+		effectiveTaskGovernanceInt(a, func(t *TaskGovernance) *int { return t.RuntimeBudgetSeconds }) == effectiveTaskGovernanceInt(b, func(t *TaskGovernance) *int { return t.RuntimeBudgetSeconds }) &&
+		effectiveTaskGovernanceInt(a, func(t *TaskGovernance) *int { return t.FailureBudget }) == effectiveTaskGovernanceInt(b, func(t *TaskGovernance) *int { return t.FailureBudget }) &&
+		a.FailureDomainName() == b.FailureDomainName()
+}
+
+func effectiveTaskGovernanceInt(t *TaskGovernance, field func(*TaskGovernance) *int) int {
+	if t == nil {
+		return 0
+	}
+	value := field(t)
+	if value == nil || *value <= 0 {
+		return 0
+	}
+	return *value
+}
+
+func effectiveTaskGovernanceBool(t *TaskGovernance, field func(*TaskGovernance) *bool) bool {
+	if t == nil {
+		return false
+	}
+	return ptrValOr(field(t), false)
 }
 
 func defaultAllowedToolsForAgent(agent Agent, primaryTools, generalTools []string) []string {

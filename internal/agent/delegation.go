@@ -18,6 +18,14 @@ Execution strategy:
 - Do not spawn subagents for tiny file-local edits when direct tool calls are cheaper in tokens and nearly as fast.
 - After delegating, continue on the critical path locally instead of waiting idly unless you are genuinely blocked on a delegated result.
 - For broad implementation requests, do the minimum shared setup, then split substantial independent workstreams across subagents instead of letting the main thread implement everything itself.
+
+When NOT to use the Agent tool:
+- If the next step depends immediately on the result, do the work directly instead of delegating and waiting.
+- Do not delegate tiny, tightly-coupled edits that are faster to do in the current thread.
+- Do not delegate lightweight isolated single-file operations when direct tool calls are likely cheaper in tokens and just as fast.
+- NEVER delegate a task that is fundamentally a single tool call: reading a file (view), searching for text (grep), listing files (glob/ls), or running a short command (bash). Call those tools directly — spawning a subagent just to run view/grep/glob/ls wastes an entire LLM turn and a session for no gain.
+- NEVER describe a subagent prompt in terms of specific file paths and line numbers (e.g. "read coordinator.go lines 1530-1800") — if you already know exactly which file and lines to read, just call view yourself.
+- Do not use the main thread for broad implementation work just because you already know which files are involved. If those file changes are still separable, delegate them.
 </delegation_policy>`
 
 func buildDelegationPromptPrefix(basePrefix string, agentTools []fantasy.AgentTool, isSubAgent bool) string {

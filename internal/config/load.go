@@ -23,6 +23,7 @@ import (
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/log"
+	"github.com/charmbracelet/crush/internal/oauth/openai_codex"
 	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
 	"github.com/qjebbs/go-jsons"
 )
@@ -230,6 +231,7 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 			SystemPromptPrefix: config.SystemPromptPrefix,
 			ExtraHeaders:       headers,
 			ExtraBody:          config.ExtraBody,
+			ProviderOptions:    config.ProviderOptions,
 			ExtraParams:        make(map[string]string),
 			Models:             p.Models,
 		}
@@ -246,6 +248,20 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 
 		switch p.ID {
 		// Handle specific providers that require additional configuration
+		case catwalk.InferenceProvider(openai_codex.ProviderID):
+			accountID := ""
+			if configExists && config.OAuthToken != nil && config.OAuthToken.AccessToken != "" {
+				if parsed, err := openai_codex.ExtractAccountID(config.OAuthToken.AccessToken); err == nil {
+					accountID = parsed
+				}
+			}
+			prepared.SetupOpenAICodex(accountID)
+			if prepared.ProviderOptions == nil {
+				prepared.ProviderOptions = make(map[string]any)
+			}
+			if _, ok := prepared.ProviderOptions["instructions"]; !ok {
+				prepared.ProviderOptions["instructions"] = "You are Crush, a terminal-first coding assistant."
+			}
 		case catwalk.InferenceProviderVertexAI:
 			var (
 				project  = env.Get("VERTEXAI_PROJECT")

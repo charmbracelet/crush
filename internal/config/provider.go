@@ -186,6 +186,9 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 		wg.Wait()
 
 		providerList = slices.Collect(providers.Seq())
+		if !customProvidersOnly {
+			providerList = ensureOpenAICodexProvider(providerList)
+		}
 		providerErr = errors.Join(errs...)
 	})
 	return providerList, providerErr

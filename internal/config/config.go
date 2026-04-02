@@ -257,6 +257,7 @@ type Options struct {
 	AutoLSP                   *bool        `json:"auto_lsp,omitempty" jsonschema:"description=Automatically setup LSPs based on root markers,default=true"`
 	Progress                  *bool        `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
 	DisableNotifications      bool         `json:"disable_notifications,omitempty" jsonschema:"description=Disable desktop notifications,default=false"`
+	BannedCommands            []string     `json:"banned_commands,omitempty" jsonschema:"description=List of shell commands that are forbidden from being executed by the agent,example=rm,example=sudo,example=ssh"`
 }
 
 type MCPs map[string]MCPConfig

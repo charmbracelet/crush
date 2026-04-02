@@ -124,6 +124,9 @@ type coordinator struct {
 	subAgentFactory    subAgentFactory
 	taskGraphScheduler taskGraphScheduler
 	readyWg            errgroup.Group
+
+	// backgroundAgents tracks asynchronously running background agents.
+	backgroundAgents *backgroundAgentRegistry
 }
 
 func NewCoordinator(
@@ -166,6 +169,7 @@ func NewCoordinator(
 		mailbox:                    mailbox.NewService(),
 		agents:                     make(map[string]SessionAgent),
 		activatedDeferredBySession: make(map[string]map[string]struct{}),
+		backgroundAgents:           newBackgroundAgentRegistry(),
 	}
 	agentCfg, ok := cfg.Config().Agents[config.AgentCoder]
 	if !ok {
@@ -212,6 +216,7 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	ctx = context.WithValue(ctx, tools.SessionServiceContextKey, c.sessions)
 	ctx = toolruntime.WithService(ctx, c.toolRuntime)
 	ctx = toolruntime.WithSessionID(ctx, sessionID)
+	ctx = toolruntime.WithBackgroundAgentLookup(ctx, c.backgroundAgentLookup())
 	if agentCfg, ok := c.cfg.Config().Agents[config.AgentCoder]; ok {
 		ctx = withAgentPolicyContext(ctx, agentCfg)
 	}
@@ -1549,18 +1554,20 @@ type subAgentParams struct {
 }
 
 type taskGraphTask struct {
-	ID           string
-	Description  string
-	Prompt       string
-	SubagentType string
-	DependsOn    []string
+	ID              string
+	Description     string
+	Prompt          string
+	SubagentType    string
+	DependsOn       []string
+	RunInBackground bool
 }
 
 type taskGraphParams struct {
-	SessionID      string
-	AgentMessageID string
-	ToolCallID     string
-	Tasks          []taskGraphTask
+	SessionID       string
+	AgentMessageID  string
+	ToolCallID      string
+	Tasks           []taskGraphTask
+	RunInBackground bool
 }
 
 type taskGraphNodeResult struct {
@@ -1583,6 +1590,11 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 }
 
 func (c *coordinator) runTaskGraph(ctx context.Context, params taskGraphParams) (fantasy.ToolResponse, error) {
+	// Handle background execution mode.
+	if params.RunInBackground {
+		return c.runBackgroundTask(ctx, params)
+	}
+
 	scheduler := c.taskGraphScheduler
 	if scheduler == nil {
 		scheduler = c.runTaskGraphDirect
@@ -1701,6 +1713,23 @@ func (c *coordinator) runTaskGraphDirect(ctx context.Context, params taskGraphPa
 				}
 
 				mailboxBridge.MarkInProgress(task.ID)
+
+				// Handle task-level background execution.
+				if task.RunInBackground {
+					agentID := c.runBackgroundTaskNode(ctx, params, task, subAgent, agentCfg, description, subagentType)
+					result := taskGraphNodeResult{
+						Task:           task,
+						Status:         message.ToolResultSubtaskStatusRunning,
+						Content:        fmt.Sprintf("Background agent launched with ID: %s. Use subtask_result tool to check status.", agentID),
+						ChildSessionID: agentID,
+					}
+					mailboxBridge.MarkResult(task.ID, result.Status, result.Content)
+					mu.Lock()
+					results[task.ID] = result
+					mu.Unlock()
+					return
+				}
+
 				semaphore := taskGraphSemaphoreForAgent(agentCfg, semaphores, &semMu)
 				if semaphore != nil {
 					select {
@@ -2050,9 +2079,14 @@ func (c *coordinator) runSubAgentDirect(ctx context.Context, params subAgentPara
 		ctx = toolruntime.WithDelegationMailbox(ctx, params.DelegationMailbox)
 	}
 
+	// Prepend a brief summary of the coordinator's recent reasoning so the
+	// subagent has concrete context from the Research phase and does not need
+	// to rediscover details the coordinator already gathered.
+	enrichedPrompt := c.buildSubagentContextPrefix(ctx, params.SessionID) + params.Prompt
+
 	result, err := params.Agent.Run(ctx, SessionAgentCall{
 		SessionID:        subSession.ID,
-		Prompt:           params.Prompt,
+		Prompt:           enrichedPrompt,
 		MaxOutputTokens:  maxTokens,
 		ProviderOptions:  getProviderOptions(model, providerCfg),
 		Temperature:      model.ModelCfg.Temperature,
@@ -2272,6 +2306,64 @@ func (c *coordinator) updateParentSessionCost(ctx context.Context, childSessionI
 	return nil
 }
 
+const (
+	// subagentContextInjectMaxMessages caps how many of the coordinator's recent
+	// text messages are prepended to a subagent's prompt as parent context.
+	subagentContextInjectMaxMessages = 3
+	// subagentContextInjectMaxCharsPerMsg caps each injected snippet so that the
+	// combined overhead stays well under a typical context window.
+	subagentContextInjectMaxCharsPerMsg = 500
+)
+
+// buildSubagentContextPrefix collects the coordinator's most recent text
+// reasoning from the parent session and formats it as a <parent_context> block.
+// This gives subagents concrete information the coordinator gathered during the
+// Research phase without requiring them to rediscover it from scratch.
+// Returns "" when there is nothing meaningful to inject.
+func (c *coordinator) buildSubagentContextPrefix(ctx context.Context, parentSessionID string) string {
+	if c.messages == nil {
+		return ""
+	}
+	msgs, err := c.messages.List(ctx, parentSessionID)
+	if err != nil || len(msgs) == 0 {
+		return ""
+	}
+
+	var snippets []string
+	for i := len(msgs) - 1; i >= 0 && len(snippets) < subagentContextInjectMaxMessages; i-- {
+		msg := msgs[i]
+		if msg.Role != message.Assistant || msg.IsSummaryMessage {
+			continue
+		}
+		text := strings.TrimSpace(msg.Content().Text)
+		// Strip extended-thinking blocks — they contain internal reasoning that
+		// is not useful to share with a subagent.
+		text = thinkTagRegex.ReplaceAllString(text, "")
+		text = strings.TrimSpace(text)
+		if text == "" {
+			continue
+		}
+		runes := []rune(text)
+		if len(runes) > subagentContextInjectMaxCharsPerMsg {
+			text = string(runes[:subagentContextInjectMaxCharsPerMsg]) + "…"
+		}
+		snippets = append([]string{text}, snippets...) // maintain chronological order
+	}
+
+	if len(snippets) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("<parent_context>\n")
+	sb.WriteString("Context gathered by the orchestrating agent before this task was delegated:\n\n")
+	for i, s := range snippets {
+		fmt.Fprintf(&sb, "%d. %s\n\n", i+1, s)
+	}
+	sb.WriteString("</parent_context>\n\n")
+	return sb.String()
+}
+
 func (c *coordinator) subAgentResponseText(ctx context.Context, sessionID string, result *fantasy.AgentResult) string {
 	if result != nil && result.Response.Content != nil {
 		if text := strings.TrimSpace(result.Response.Content.Text()); text != "" {
@@ -2306,4 +2398,78 @@ func subAgentNoContentText(sessionID string) string {
 		return "Subagent completed with no textual response. Open the child session from this Agent tool call to inspect tool outputs and details."
 	}
 	return fmt.Sprintf("Subagent completed with no textual response. Open child session %s from this Agent tool call to inspect tool outputs and details.", sessionID)
+}
+
+// backgroundAgentLookup returns a lookup function for background agent status.
+func (c *coordinator) backgroundAgentLookup() toolruntime.BackgroundAgentLookup {
+	return func(agentID string) (status, content, childSessionID string, found bool) {
+		entry, ok := c.backgroundAgents.Get(agentID)
+		if !ok {
+			return "", "", "", false
+		}
+		return string(entry.Status), entry.Content, entry.ChildSessionID, true
+	}
+}
+
+// runBackgroundTaskNode launches a single task as a background agent.
+// It returns the agent ID immediately while the task executes asynchronously.
+func (c *coordinator) runBackgroundTaskNode(
+	ctx context.Context,
+	params taskGraphParams,
+	task taskGraphTask,
+	subAgent SessionAgent,
+	agentCfg config.Agent,
+	description string,
+	subagentType string,
+) string {
+	agentID := c.backgroundAgents.Register(description)
+	taskToolCallID := fmt.Sprintf("%s::%s", params.ToolCallID, task.ID)
+
+	// Launch the task in a background goroutine.
+	go func() {
+		bgCtx := context.Background()
+		attemptCtx := taskGraphAttemptContext(bgCtx, agentCfg, task.ID)
+		cancel := func() {}
+		if agentCfg.TaskGovernance != nil {
+			if timeout := agentCfg.TaskGovernance.Timeout(); timeout > 0 {
+				attemptCtx, cancel = context.WithTimeout(attemptCtx, timeout)
+			}
+		}
+
+		response, runErr := c.runSubAgent(attemptCtx, subAgentParams{
+			Agent:             subAgent,
+			SessionID:         params.SessionID,
+			AgentMessageID:    params.AgentMessageID,
+			ParentMessageID:   params.AgentMessageID,
+			ToolCallID:        taskToolCallID,
+			Prompt:            strings.TrimSpace(task.Prompt),
+			SessionTitle:      formatSubagentSessionTitle(description, subagentType),
+			DelegationMailbox: params.ToolCallID,
+			AgentMemory:       agentCfg.Memory,
+			AgentIsolation:    agentCfg.Isolation,
+			AgentBackground:   agentCfg.Background,
+		})
+		cancel()
+
+		if runErr != nil {
+			slog.Error("Background agent task failed", "agent_id", agentID, "task_id", task.ID, "error", runErr)
+			c.backgroundAgents.Fail(agentID, runErr.Error())
+			return
+		}
+
+		content := response.Content
+		if content == "" {
+			content = "Background agent completed with no output."
+		}
+		c.backgroundAgents.Complete(agentID, content)
+
+		// Extract child session ID from metadata if present.
+		if response.Metadata != "" {
+			if sub, ok := message.ParseToolResultSubtaskResult(response.Metadata); ok && sub.ChildSessionID != "" {
+				c.backgroundAgents.SetChildSession(agentID, sub.ChildSessionID)
+			}
+		}
+	}()
+
+	return agentID
 }

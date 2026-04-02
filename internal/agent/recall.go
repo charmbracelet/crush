@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -15,8 +16,17 @@ const (
 	autoRecallMemoryLimit      = 3
 	autoRecallHistoryLimit     = 3
 	autoRecallSectionCharLimit = 600
+	autoRecallQueryMaxWords    = 12
 )
 
+// recallFilePattern matches file references like foo.go, bar/baz.ts, etc.
+var recallFilePattern = regexp.MustCompile(`\b[\w/.-]+\.(?:go|ts|tsx|js|jsx|py|rs|rb|java|kt|swift|md|json|yaml|yml|toml|sql|sh|bash)\b`)
+
+// recallIdentPattern matches CamelCase identifiers (likely function/type names).
+var recallIdentPattern = regexp.MustCompile(`\b[A-Z][A-Za-z0-9]{3,}\b`)
+
+// buildAutoRecall returns a closure that, given a session and prompt, retrieves
+// relevant long-term memories and session history to inject into the system prompt.
 func buildAutoRecall(historySvc history.Service, memorySvc memory.Service) func(context.Context, string, string) string {
 	if historySvc == nil && memorySvc == nil {
 		return nil
@@ -27,12 +37,13 @@ func buildAutoRecall(historySvc history.Service, memorySvc memory.Service) func(
 }
 
 func buildAutoRecallBlock(ctx context.Context, historySvc history.Service, memorySvc memory.Service, sessionID, prompt string) string {
-	query := strings.TrimSpace(prompt)
+	query := extractRecallQuery(prompt)
 	if query == "" {
 		return ""
 	}
 
 	sections := make([]string, 0, 2)
+
 	if memorySvc != nil {
 		scope, includeMemory := autoRecallMemoryScope(ctx)
 		if includeMemory {
@@ -46,16 +57,61 @@ func buildAutoRecallBlock(ctx context.Context, historySvc history.Service, memor
 			}
 		}
 	}
+
 	if historySvc != nil {
-		results, err := historySvc.SearchMessages(ctx, history.SearchParams{Query: query, SessionID: sessionID, Limit: autoRecallHistoryLimit})
+		results, err := historySvc.SearchMessages(ctx, history.SearchParams{
+			Query:     query,
+			SessionID: sessionID,
+			Limit:     autoRecallHistoryLimit,
+		})
 		if err == nil && len(results) > 0 {
 			sections = append(sections, formatAutoRecallHistory(results))
 		}
 	}
+
 	if len(sections) == 0 {
 		return ""
 	}
 	return strings.Join(sections, "\n\n")
+}
+
+// extractRecallQuery distills a prompt into a short, focused search query.
+// It extracts file references and CamelCase identifiers first (most precise),
+// then falls back to the first autoRecallQueryMaxWords words of the prompt.
+func extractRecallQuery(prompt string) string {
+	trimmed := strings.TrimSpace(prompt)
+	if trimmed == "" {
+		return ""
+	}
+
+	var tokens []string
+	seen := make(map[string]bool)
+
+	addToken := func(s string) {
+		s = strings.TrimSpace(s)
+		if s == "" || seen[s] {
+			return
+		}
+		seen[s] = true
+		tokens = append(tokens, s)
+	}
+
+	for _, f := range recallFilePattern.FindAllString(trimmed, -1) {
+		addToken(f)
+	}
+	for _, id := range recallIdentPattern.FindAllString(trimmed, -1) {
+		addToken(id)
+	}
+
+	if len(tokens) >= 3 {
+		return strings.Join(tokens, " ")
+	}
+
+	words := strings.Fields(trimmed)
+	if len(words) > autoRecallQueryMaxWords {
+		words = words[:autoRecallQueryMaxWords]
+	}
+	return strings.Join(words, " ")
 }
 
 func formatAutoRecallMemory(entries []memory.Entry) string {
@@ -111,6 +167,8 @@ func formatAutoRecallHistory(results []history.MessageSearchResult) string {
 	return strings.Join(lines, "\n")
 }
 
+// autoRecallMemoryScope determines the scope for memory retrieval based on the
+// context's memory and isolation policies.
 func autoRecallMemoryScope(ctx context.Context) (string, bool) {
 	memoryPolicy := strings.ToLower(strings.TrimSpace(tools.GetAgentMemoryFromContext(ctx)))
 	isolationPolicy := strings.ToLower(strings.TrimSpace(tools.GetAgentIsolationFromContext(ctx)))

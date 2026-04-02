@@ -187,6 +187,20 @@ func DelegationMailboxFromContext(ctx context.Context) string {
 	return mailboxID
 }
 
+// BackgroundAgentLookup is a function type for looking up background agent status.
+type BackgroundAgentLookup func(agentID string) (status, content, childSessionID string, found bool)
+
+type backgroundAgentLookupKey struct{}
+
+func WithBackgroundAgentLookup(ctx context.Context, lookup BackgroundAgentLookup) context.Context {
+	return context.WithValue(ctx, backgroundAgentLookupKey{}, lookup)
+}
+
+func BackgroundAgentLookupFromContext(ctx context.Context) BackgroundAgentLookup {
+	lookup, _ := ctx.Value(backgroundAgentLookupKey{}).(BackgroundAgentLookup)
+	return lookup
+}
+
 func ServiceFromContext(ctx context.Context) Service {
 	service, _ := ctx.Value(serviceContextKey{}).(Service)
 	return service

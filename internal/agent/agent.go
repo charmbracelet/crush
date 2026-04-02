@@ -142,7 +142,7 @@ func shouldAutoCompactMessages(purpose plugin.ChatTransformPurpose, msgs []messa
 }
 
 func (a *sessionAgent) microCompactSessionMessages(ctx context.Context, sessionID string, model Model, providerCtx plugin.ProviderContext, msgs []message.Message) ([]message.Message, error) {
-	return a.transformSessionMessages(ctx, chatRequestStateInput{
+	result, err := a.transformSessionMessages(ctx, chatRequestStateInput{
 		SessionID: sessionID,
 		Agent:     "session",
 		Model:     model,
@@ -151,6 +151,10 @@ func (a *sessionAgent) microCompactSessionMessages(ctx context.Context, sessionI
 		Messages:  msgs,
 		Message:   message.Message{SessionID: sessionID, Role: message.User},
 	})
+	if err != nil {
+		return nil, err
+	}
+	return builtinMicroCompactMessages(result), nil
 }
 
 func (a *sessionAgent) collapseSessionMessages(ctx context.Context, sessionID string, model Model, providerCtx plugin.ProviderContext, msgs []message.Message) ([]message.Message, error) {
@@ -178,7 +182,7 @@ func (a *sessionAgent) reactiveCompactSessionMessages(ctx context.Context, sessi
 }
 
 func (a *sessionAgent) autoCompactSessionMessages(ctx context.Context, sessionID string, model Model, providerCtx plugin.ProviderContext, msgs []message.Message) ([]message.Message, error) {
-	return a.transformSessionMessages(ctx, chatRequestStateInput{
+	result, err := a.transformSessionMessages(ctx, chatRequestStateInput{
 		SessionID: sessionID,
 		Agent:     "session",
 		Model:     model,
@@ -187,6 +191,10 @@ func (a *sessionAgent) autoCompactSessionMessages(ctx context.Context, sessionID
 		Messages:  msgs,
 		Message:   message.Message{SessionID: sessionID, Role: message.User},
 	})
+	if err != nil {
+		return nil, err
+	}
+	return builtinAutoCompactMessages(result), nil
 }
 
 func (a *sessionAgent) postCompactSessionMessages(ctx context.Context, sessionID string, model Model, providerCtx plugin.ProviderContext, msgs []message.Message) ([]message.Message, error) {

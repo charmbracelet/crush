@@ -31,6 +31,7 @@ type ToolResultSubtaskStatus string
 const (
 	ToolResultSubtaskStatusPending    ToolResultSubtaskStatus = "pending"
 	ToolResultSubtaskStatusInProgress ToolResultSubtaskStatus = "in_progress"
+	ToolResultSubtaskStatusRunning    ToolResultSubtaskStatus = "running"    // Background agent still executing
 	ToolResultSubtaskStatusCompleted  ToolResultSubtaskStatus = "completed"
 	ToolResultSubtaskStatusFailed     ToolResultSubtaskStatus = "failed"
 	ToolResultSubtaskStatusCanceled   ToolResultSubtaskStatus = "canceled"

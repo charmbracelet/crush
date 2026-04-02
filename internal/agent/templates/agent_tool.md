@@ -18,6 +18,7 @@ When NOT to use the Agent tool:
 - Do not delegate lightweight isolated single-file operations when direct tool calls are likely cheaper in tokens and just as fast.
 - If several independent lightweight file operations can proceed in parallel, prefer multiple direct tool calls in one response instead of subagents.
 - Do not use the main thread for broad implementation work just because you already know which files are involved. If those file changes are still separable, delegate them.
+- **NEVER spawn a subagent whose sole job is to read files and return their contents.** If you already know the file paths, call `view`/`grep`/`glob` directly in the main thread — in parallel if needed. Spawning a subagent just to call `view` wastes a full LLM turn and a session context for zero benefit.
 
 Usage notes:
 1. Each subagent call is stateless and returns a single final report.
@@ -27,3 +28,4 @@ Usage notes:
 5. The subagent's outputs should generally be trusted unless they conflict with stronger evidence in the current thread.
 6. Do not treat this tool as a last resort. Prefer early delegation for bounded work that can unblock or parallelize the main task.
 7. If you choose delegation, make the tool call first rather than narrating a future intention to delegate.
+8. Use the `tasks` array to express a dependency graph: tasks with no `depends_on` run in parallel; tasks with dependencies run after their prerequisites complete.

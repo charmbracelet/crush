@@ -28,12 +28,14 @@ func TestBuildDelegationPromptPrefixAddsCostAwareDelegationPolicyForPrimaryAgent
 	prefix := buildDelegationPromptPrefix("provider-prefix", []fantasy.AgentTool{testAgentTool()}, false)
 
 	assert.Contains(t, prefix, "provider-prefix")
-	assert.Contains(t, prefix, "Operate as an orchestrator first")
-	assert.Contains(t, prefix, "prefer batching direct tool calls in parallel instead of spawning subagents")
-	assert.Contains(t, prefix, "Do delegate review or change-inspection tasks")
+	assert.Contains(t, prefix, "coordinator agent")
 	assert.Contains(t, prefix, "explore subagent")
-	assert.Contains(t, prefix, "Do not spawn subagents for tiny file-local edits")
-	assert.Contains(t, prefix, "For broad implementation requests, do the minimum shared setup")
+	assert.Contains(t, prefix, "Phase 1")
+	assert.Contains(t, prefix, "Phase 2")
+	assert.Contains(t, prefix, "Phase 3")
+	assert.Contains(t, prefix, "Phase 4")
+	assert.Contains(t, prefix, "Cost comparison")
+	assert.Contains(t, prefix, "view/grep/glob")
 }
 
 func TestPromptForAgentUsesWorkerPromptForWritableSubagents(t *testing.T) {

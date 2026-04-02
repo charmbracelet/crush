@@ -21,18 +21,20 @@ import (
 var agentToolDescription []byte
 
 type AgentTaskParams struct {
-	ID           string   `json:"id" description:"The unique task identifier used for dependency references"`
-	Description  string   `json:"description,omitempty" description:"A short title for the delegated task"`
-	Prompt       string   `json:"prompt" description:"The task for the agent to perform"`
-	SubagentType string   `json:"subagent_type,omitempty" description:"The subagent type to use: general, explore, or a configured subagent name"`
-	DependsOn    []string `json:"depends_on,omitempty" description:"Task IDs that must complete successfully before this task runs"`
+	ID              string   `json:"id" description:"The unique task identifier used for dependency references"`
+	Description     string   `json:"description,omitempty" description:"A short title for the delegated task"`
+	Prompt          string   `json:"prompt" description:"The task for the agent to perform"`
+	SubagentType    string   `json:"subagent_type,omitempty" description:"The subagent type to use: general, explore, or a configured subagent name"`
+	DependsOn       []string `json:"depends_on,omitempty" description:"Task IDs that must complete successfully before this task runs"`
+	RunInBackground bool     `json:"run_in_background,omitempty" description:"Run this task in the background and return immediately with a task ID"`
 }
 
 type AgentParams struct {
-	Description  string            `json:"description,omitempty" description:"A short title for the delegated task"`
-	Prompt       string            `json:"prompt,omitempty" description:"The task for the agent to perform"`
-	SubagentType string            `json:"subagent_type,omitempty" description:"The subagent type to use: general, explore, or a configured subagent name"`
-	Tasks        []AgentTaskParams `json:"tasks,omitempty" description:"Optional task graph with dependency-aware delegation"`
+	Description     string            `json:"description,omitempty" description:"A short title for the delegated task"`
+	Prompt          string            `json:"prompt,omitempty" description:"The task for the agent to perform"`
+	SubagentType    string            `json:"subagent_type,omitempty" description:"The subagent type to use: general, explore, or a configured subagent name"`
+	Tasks           []AgentTaskParams `json:"tasks,omitempty" description:"Optional task graph with dependency-aware delegation"`
+	RunInBackground bool              `json:"run_in_background,omitempty" description:"Run the agent in the background and return immediately with an agent ID"`
 }
 
 const (
@@ -65,11 +67,12 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 						return fantasy.NewTextErrorResponse(fmt.Sprintf("task %q prompt is required", task.ID)), nil
 					}
 					tasks = append(tasks, taskGraphTask{
-						ID:           strings.TrimSpace(task.ID),
-						Description:  task.Description,
-						Prompt:       task.Prompt,
-						SubagentType: task.SubagentType,
-						DependsOn:    task.DependsOn,
+						ID:              strings.TrimSpace(task.ID),
+						Description:     task.Description,
+						Prompt:          task.Prompt,
+						SubagentType:    task.SubagentType,
+						DependsOn:       task.DependsOn,
+						RunInBackground: task.RunInBackground,
 					})
 				}
 			} else {
@@ -84,18 +87,20 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 					description = defaultSubagentDescription(subagentType, params.Prompt)
 				}
 				tasks = []taskGraphTask{{
-					ID:           "task",
-					Description:  description,
-					Prompt:       params.Prompt,
-					SubagentType: params.SubagentType,
+					ID:              "task",
+					Description:     description,
+					Prompt:          params.Prompt,
+					SubagentType:    params.SubagentType,
+					RunInBackground: params.RunInBackground,
 				}}
 			}
 
 			return c.runTaskGraph(ctx, taskGraphParams{
-				SessionID:      sessionID,
-				AgentMessageID: agentMessageID,
-				ToolCallID:     call.ID,
-				Tasks:          tasks,
+				SessionID:       sessionID,
+				AgentMessageID:  agentMessageID,
+				ToolCallID:      call.ID,
+				Tasks:           tasks,
+				RunInBackground: params.RunInBackground,
 			})
 		}), nil
 }

@@ -4,6 +4,10 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/openaicodex"
+	"github.com/stretchr/testify/require"
 )
 
 func makeTestAttachments(n int, contentSize int) []Attachment {
@@ -42,4 +46,48 @@ func BenchmarkPromptWithTextAttachments(b *testing.B) {
 			}
 		})
 	}
+}
+
+func TestToAIMessageAssistantProviderPolicySkipsReasoningText(t *testing.T) {
+	msg := Message{
+		Role:     Assistant,
+		Provider: openaicodex.ProviderID,
+		Parts: []ContentPart{
+			ReasoningContent{Thinking: "internal reasoning that should not be replayed"},
+			TextContent{Text: "final answer"},
+		},
+	}
+
+	out := msg.ToAIMessage()
+	require.Len(t, out, 1)
+	require.Equal(t, fantasy.MessageRoleAssistant, out[0].Role)
+	require.Len(t, out[0].Content, 1)
+
+	textPart, ok := out[0].Content[0].(fantasy.TextPart)
+	require.True(t, ok)
+	require.Equal(t, "final answer", textPart.Text)
+}
+
+func TestToAIMessageAssistantNonCodexKeepsReasoningText(t *testing.T) {
+	msg := Message{
+		Role:     Assistant,
+		Provider: "openai",
+		Parts: []ContentPart{
+			ReasoningContent{Thinking: "reasoning should be preserved"},
+			TextContent{Text: "final answer"},
+		},
+	}
+
+	out := msg.ToAIMessage()
+	require.Len(t, out, 1)
+	require.Equal(t, fantasy.MessageRoleAssistant, out[0].Role)
+	require.Len(t, out[0].Content, 2)
+
+	textPart, ok := out[0].Content[0].(fantasy.TextPart)
+	require.True(t, ok)
+	require.Equal(t, "final answer", textPart.Text)
+
+	reasoningPart, ok := out[0].Content[1].(fantasy.ReasoningPart)
+	require.True(t, ok)
+	require.Equal(t, "reasoning should be preserved", reasoningPart.Text)
 }

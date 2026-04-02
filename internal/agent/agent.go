@@ -21,6 +21,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
@@ -38,6 +39,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/openaicodex"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
@@ -53,6 +55,8 @@ const (
 	largeContextWindowThreshold = 200_000
 	largeContextWindowBuffer    = 20_000
 	smallContextWindowRatio     = 0.2
+	titleMaxOutputTokens        = int64(40)
+	summaryMaxOutputTokens      = int64(1200)
 )
 
 var userAgent = fmt.Sprintf("Charm-Crush/%s (https://charm.land/crush)", version.Version)
@@ -249,12 +253,21 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	var currentAssistant *message.Message
 	var shouldSummarize bool
+	isCodex := largeModel.ModelCfg.Provider == openaicodex.ProviderID
+	estimatedOutputRuneBudget := int(call.MaxOutputTokens * 4)
+	outputRunes := 0
+	codexLimitReached := false
 	result, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
-		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
-		Files:            files,
-		Messages:         history,
-		ProviderOptions:  call.ProviderOptions,
-		MaxOutputTokens:  &call.MaxOutputTokens,
+		Prompt:          message.PromptWithTextAttachments(call.Prompt, call.Attachments),
+		Files:           files,
+		Messages:        history,
+		ProviderOptions: call.ProviderOptions,
+		MaxOutputTokens: func() *int64 {
+			if isCodex {
+				return nil
+			}
+			return &call.MaxOutputTokens
+		}(),
 		TopP:             call.TopP,
 		Temperature:      call.Temperature,
 		PresencePenalty:  call.PresencePenalty,
@@ -322,6 +335,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		OnReasoningDelta: func(id string, text string) error {
+			if isCodex && estimatedOutputRuneBudget > 0 {
+				outputRunes += utf8.RuneCountInString(text)
+				if outputRunes >= estimatedOutputRuneBudget {
+					codexLimitReached = true
+					cancel()
+					return nil
+				}
+			}
 			currentAssistant.AppendReasoningContent(text)
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
@@ -346,6 +367,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		OnTextDelta: func(id string, text string) error {
+			if isCodex && estimatedOutputRuneBudget > 0 {
+				outputRunes += utf8.RuneCountInString(text)
+				if outputRunes >= estimatedOutputRuneBudget {
+					codexLimitReached = true
+					cancel()
+					return nil
+				}
+			}
 			// Strip leading newline from initial text content. This is is
 			// particularly important in non-interactive mode where leading
 			// newlines are very visible.
@@ -449,6 +478,17 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	if err != nil {
 		isCancelErr := errors.Is(err, context.Canceled)
+		if isCancelErr && codexLimitReached {
+			if currentAssistant == nil {
+				return result, nil
+			}
+			currentAssistant.FinishThinking()
+			currentAssistant.AddFinish(message.FinishReasonMaxTokens, "", "")
+			if updateErr := a.messages.Update(ctx, *currentAssistant); updateErr != nil {
+				return nil, updateErr
+			}
+			return result, nil
+		}
 		isPermissionErr := errors.Is(err, permission.ErrorPermissionDenied)
 		if currentAssistant == nil {
 			return result, err
@@ -639,6 +679,16 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		Prompt:          summaryPromptText,
 		Messages:        aiMsgs,
 		ProviderOptions: opts,
+		MaxOutputTokens: func() *int64 {
+			if largeModel.ModelCfg.Provider == openaicodex.ProviderID {
+				return nil
+			}
+			tok := summaryMaxOutputTokens
+			if largeModel.CatwalkCfg.DefaultMaxTokens > 0 && largeModel.CatwalkCfg.DefaultMaxTokens < tok {
+				tok = largeModel.CatwalkCfg.DefaultMaxTokens
+			}
+			return &tok
+		}(),
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = options.Messages
 			if systemPromptPrefix != "" {
@@ -808,17 +858,17 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	largeModel := a.largeModel.Get()
 	systemPromptPrefix := a.systemPromptPrefix.Get()
 
-	var maxOutputTokens int64 = 40
-	if smallModel.CatwalkCfg.CanReason {
-		maxOutputTokens = smallModel.CatwalkCfg.DefaultMaxTokens
-	}
+	maxOutputTokens := titleMaxOutputTokens
 
-	newAgent := func(m fantasy.LanguageModel, p []byte, tok int64) fantasy.Agent {
-		return fantasy.NewAgent(m,
-			fantasy.WithSystemPrompt(string(p)+"\n /no_think"),
-			fantasy.WithMaxOutputTokens(tok),
+	newAgent := func(m Model, p []byte, tok int64) fantasy.Agent {
+		options := []fantasy.AgentOption{
+			fantasy.WithSystemPrompt(string(p) + "\n /no_think"),
 			fantasy.WithUserAgent(userAgent),
-		)
+		}
+		if m.ModelCfg.Provider != openaicodex.ProviderID {
+			options = append(options, fantasy.WithMaxOutputTokens(tok))
+		}
+		return fantasy.NewAgent(m.Model, options...)
 	}
 
 	streamCall := fantasy.AgentStreamCall{
@@ -836,7 +886,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 
 	// Use the small model to generate the title.
 	model := smallModel
-	agent := newAgent(model.Model, titlePrompt, maxOutputTokens)
+	agent := newAgent(model, titlePrompt, maxOutputTokens)
 	resp, err := agent.Stream(ctx, streamCall)
 	if err == nil {
 		// We successfully generated a title with the small model.
@@ -845,7 +895,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		// It didn't work. Let's try with the big model.
 		slog.Error("Error generating title with small model; trying big model", "err", err)
 		model = largeModel
-		agent = newAgent(model.Model, titlePrompt, maxOutputTokens)
+		agent = newAgent(model, titlePrompt, maxOutputTokens)
 		resp, err = agent.Stream(ctx, streamCall)
 		if err == nil {
 			slog.Debug("Generated title with large model")

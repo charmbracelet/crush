@@ -28,6 +28,7 @@ import (
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
+	"github.com/charmbracelet/crush/internal/openaicodex"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
@@ -279,10 +280,19 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
 			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
 		}
+		if providerCfg.ID == openaicodex.ProviderID {
+			if _, hasVerbosity := mergedOptions["text_verbosity"]; !hasVerbosity {
+				mergedOptions["text_verbosity"] = "low"
+			}
+		}
 		if openai.IsResponsesModel(model.CatwalkCfg.ID) {
 			if openai.IsResponsesReasoningModel(model.CatwalkCfg.ID) {
-				mergedOptions["reasoning_summary"] = "auto"
-				mergedOptions["include"] = []openai.IncludeType{openai.IncludeReasoningEncryptedContent}
+				// For subscription-backed codex models we avoid forcing reasoning
+				// summary payloads unless the user explicitly enabled thinking.
+				if providerCfg.ID != openaicodex.ProviderID || model.ModelCfg.Think {
+					mergedOptions["reasoning_summary"] = "auto"
+					mergedOptions["include"] = []openai.IncludeType{openai.IncludeReasoningEncryptedContent}
+				}
 			}
 			parsed, err := openai.ParseResponsesOptions(mergedOptions)
 			if err == nil {

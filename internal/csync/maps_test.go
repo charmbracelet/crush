@@ -2,7 +2,6 @@ package csync
 
 import (
 	"encoding/json"
-	"fmt"
 	"maps"
 	"sync"
 	"sync/atomic"

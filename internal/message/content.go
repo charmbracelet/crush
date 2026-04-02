@@ -13,6 +13,7 @@ import (
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/google"
 	"charm.land/fantasy/providers/openai"
+	"github.com/charmbracelet/crush/internal/openaicodex"
 )
 
 type MessageRole string
@@ -503,8 +504,12 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 			parts = append(parts, fantasy.TextPart{Text: text})
 		}
 		reasoning := m.ReasoningContent()
-		if reasoning.Thinking != "" {
-			reasoningPart := fantasy.ReasoningPart{Text: reasoning.Thinking, ProviderOptions: fantasy.ProviderOptions{}}
+		reasoningText := ""
+		if shouldReplayReasoningText(m.Provider, reasoning) {
+			reasoningText = reasoning.Thinking
+		}
+		if reasoningText != "" || reasoning.Signature != "" || reasoning.ResponsesData != nil || reasoning.ThoughtSignature != "" {
+			reasoningPart := fantasy.ReasoningPart{Text: reasoningText, ProviderOptions: fantasy.ProviderOptions{}}
 			if reasoning.Signature != "" {
 				reasoningPart.ProviderOptions[anthropic.Name] = &anthropic.ReasoningOptionMetadata{
 					Signature: reasoning.Signature,
@@ -562,4 +567,18 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 		})
 	}
 	return messages
+}
+
+var providersWithoutReasoningReplay = map[string]struct{}{
+	openaicodex.ProviderID: {},
+}
+
+func shouldReplayReasoningText(provider string, reasoning ReasoningContent) bool {
+	if reasoning.Thinking == "" {
+		return false
+	}
+	if _, disabled := providersWithoutReasoningReplay[provider]; disabled {
+		return false
+	}
+	return true
 }

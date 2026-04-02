@@ -179,3 +179,11 @@ func TestYourFunction(t *testing.T) {
 
 Anytime you need to work on the TUI, read `internal/ui/AGENTS.md` before
 starting work.
+
+## Code Review Checklist
+
+When reviewing code changes, check for pitfalls documented in `docs/pitfalls/`:
+
+- Scan the changed files for patterns matching known issues
+- Verify API contracts match expected data formats (raw vs encoded)
+- Cross-reference with symptoms described in each pitfall document

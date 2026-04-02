@@ -34,6 +34,7 @@ type ModelContextInfo struct {
 	ContextUsed  int64
 	ModelContext int64
 	Cost         float64
+	UsageLines   []string
 }
 
 // ModelInfo renders model information including name, provider, reasoning
@@ -72,8 +73,14 @@ func ModelInfo(t *styles.Styles, modelName, providerName, reasoningInfo string, 
 	}
 
 	if context != nil {
-		formattedInfo := formatTokensAndCost(t, context.ContextUsed, context.ModelContext, context.Cost)
-		parts = append(parts, lipgloss.NewStyle().PaddingLeft(2).Render(formattedInfo))
+		if len(context.UsageLines) > 0 {
+			for _, line := range context.UsageLines {
+				parts = append(parts, t.Subtle.PaddingLeft(2).Render(line))
+			}
+		} else {
+			formattedInfo := formatTokensAndCost(t, context.ContextUsed, context.ModelContext, context.Cost)
+			parts = append(parts, lipgloss.NewStyle().PaddingLeft(2).Render(formattedInfo))
+		}
 	}
 
 	return lipgloss.NewStyle().Width(width).Render(

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/subscription"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/logo"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -46,6 +47,9 @@ func (m *UI) modelInfo(width int) string {
 			ContextUsed:  m.session.CompletionTokens + m.session.PromptTokens,
 			Cost:         m.session.Cost,
 			ModelContext: model.CatwalkCfg.ContextWindow,
+		}
+		if subscription.HasFetcher(model.ModelCfg.Provider) {
+			modelContext.UsageLines = m.subscriptionUsageLines(model.ModelCfg.Provider)
 		}
 	}
 	return common.ModelInfo(m.com.Styles, model.CatwalkCfg.Name, providerName, reasoningInfo, modelContext, width)

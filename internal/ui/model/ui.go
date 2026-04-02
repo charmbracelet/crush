@@ -35,9 +35,12 @@ import (
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/oauth/openai_codex"
+	"github.com/charmbracelet/crush/internal/openaicodex"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/subscription"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/chat"
@@ -84,6 +87,7 @@ const editorHeightMargin = 2
 
 // TextareaMinHeight is the minimum height of the prompt textarea.
 const TextareaMinHeight = 3
+const localStatusCommand = "/status"
 
 // uiFocusState represents the current focus state of the UI.
 type uiFocusState uint8
@@ -141,6 +145,17 @@ type (
 	sessionFilesUpdatesMsg struct {
 		sessionFiles []SessionFile
 	}
+
+	// subscriptionUsageLoadedMsg is sent when subscription usage has been fetched.
+	subscriptionUsageLoadedMsg struct {
+		providerID string
+		report     *subscription.UsageReport
+		err        error
+		fetchedAt  time.Time
+	}
+
+	// subscriptionUsageTickMsg triggers periodic subscription usage refresh.
+	subscriptionUsageTickMsg struct{}
 )
 
 // UI represents the main user interface model.
@@ -257,6 +272,13 @@ type UI struct {
 		index    int
 		draft    string
 	}
+
+	// Sidebar subscription usage state.
+	subscriptionUsage           *subscription.UsageReport
+	subscriptionUsageProviderID string
+	subscriptionUsageLoading    bool
+	subscriptionUsageError      string
+	subscriptionUsageFetchedAt  time.Time
 }
 
 // New creates a new instance of the [UI] model.
@@ -373,6 +395,7 @@ func (m *UI) Init() tea.Cmd {
 	if cmd := m.loadInitialSession(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
+	cmds = append(cmds, m.subscriptionUsageTick())
 	return tea.Batch(cmds...)
 }
 
@@ -517,6 +540,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Reload prompt history for the new session.
 		m.historyReset()
 		cmds = append(cmds, m.loadPromptHistory())
+		if cmd := m.refreshSubscriptionUsage(true); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		m.updateLayoutAndSize()
 
 	case sessionFilesUpdatesMsg:
@@ -560,6 +586,24 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.promptHistory.messages = msg.messages
 		m.promptHistory.index = -1
 		m.promptHistory.draft = ""
+
+	case subscriptionUsageTickMsg:
+		if cmd := m.refreshSubscriptionUsage(false); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		cmds = append(cmds, m.subscriptionUsageTick())
+
+	case subscriptionUsageLoadedMsg:
+		m.subscriptionUsageLoading = false
+		m.subscriptionUsageProviderID = msg.providerID
+		m.subscriptionUsageFetchedAt = msg.fetchedAt
+		if msg.err != nil {
+			m.subscriptionUsage = nil
+			m.subscriptionUsageError = msg.err.Error()
+		} else {
+			m.subscriptionUsage = msg.report
+			m.subscriptionUsageError = ""
+		}
 
 	case closeDialogMsg:
 		m.dialog.CloseFrontDialog()
@@ -1460,6 +1504,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 			return util.NewInfoMsg(modelMsg)
 		})
+		if cmd := m.refreshSubscriptionUsage(true); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 
 		m.dialog.CloseDialog(dialog.APIKeyInputID)
 		m.dialog.CloseDialog(dialog.OAuthID)
@@ -1589,6 +1636,8 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 		dlg, cmd = dialog.NewOAuthHyper(m.com, isOnboarding, provider, model, modelType)
 	case catwalk.InferenceProviderCopilot:
 		dlg, cmd = dialog.NewOAuthCopilot(m.com, isOnboarding, provider, model, modelType)
+	case "openai-codex":
+		dlg, cmd = dialog.NewOAuthOpenAICodex(m.com, isOnboarding, provider, model, modelType)
 	default:
 		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
 	}
@@ -1760,6 +1809,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 				attachments := m.attachments.List()
 				m.attachments.Reset()
+				if value == localStatusCommand {
+					m.randomizePlaceholders()
+					m.historyReset()
+					return tea.Batch(m.showLocalStatus(), m.loadPromptHistory())
+				}
 				if len(value) == 0 && !message.ContainsTextAttachment(attachments) {
 					return nil
 				}
@@ -2969,6 +3023,42 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 		return nil
 	})
 	return tea.Batch(cmds...)
+}
+
+func (m *UI) showLocalStatus() tea.Cmd {
+	return func() tea.Msg {
+		cfg := m.com.Config()
+		if cfg == nil {
+			return util.NewWarnMsg("Status unavailable: configuration not found")
+		}
+
+		provider, ok := cfg.Providers.Get(openaicodex.ProviderID)
+		if !ok || provider.Disable {
+			return util.NewWarnMsg("Status unavailable: openai-codex is not configured")
+		}
+
+		accessToken, err := m.com.Store().Resolve(provider.APIKey)
+		if err != nil {
+			return util.NewWarnMsg("Status unavailable: failed to resolve API key")
+		}
+		accountID := strings.TrimSpace(provider.ExtraHeaders["chatgpt-account-id"])
+		if accountID == "" {
+			accountID, err = openai_codex.ExtractAccountID(accessToken)
+			if err != nil {
+				return util.NewWarnMsg("Status unavailable: failed to resolve account id")
+			}
+		}
+
+		report, err := openaicodex.FetchUsage(context.Background(), openaicodex.UsageRequest{
+			BaseURL:     provider.BaseURL,
+			AccessToken: accessToken,
+			AccountID:   accountID,
+		})
+		if err != nil {
+			return util.NewWarnMsg("Status unavailable: " + err.Error())
+		}
+		return util.NewInfoMsg(openaicodex.FormatStatusSummary(report, time.Now()))
+	}
 }
 
 const cancelTimerDuration = 2 * time.Second

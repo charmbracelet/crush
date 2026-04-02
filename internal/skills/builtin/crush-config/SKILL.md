@@ -9,7 +9,7 @@ Crush uses JSON configuration files with the following priority (highest to lowe
 
 1. `.crush.json` (project-local, hidden)
 2. `crush.json` (project-local)
-3. `$HOME/.config/crush/crush.json` (global)
+3. `$XDG_CONFIG_HOME/crush/crush.json` or `$HOME/.config/crush/crush.json` (global)
 
 ## Basic Structure
 
@@ -35,6 +35,14 @@ Add a relative path to keep project-specific skills alongside your code:
   }
 }
 ```
+
+> [!IMPORTANT]
+>  Keep in mind that the following paths are loaded by default, so they DO NOT NEED to be added to `skill_paths`:
+>
+>  * `.agents/skills`
+>  * `.crush/skills`
+>  * `.claude/skills`
+>  * `.cursor/skills`
 
 ### LSP Configuration
 

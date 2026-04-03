@@ -27,6 +27,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/reducer"
 	"github.com/charmbracelet/crush/internal/agent/taskgraph"
 	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/checkpoint"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/history"
@@ -112,6 +113,7 @@ type coordinator struct {
 	toolRuntime    toolruntime.Service
 	timeline       timeline.Service
 	hookManager    *hooks.Manager
+	checkpoint     checkpoint.Service
 	mailbox        mailbox.Service
 
 	currentAgent SessionAgent
@@ -139,6 +141,7 @@ func NewCoordinator(
 	history history.Service,
 	longTermMemory memory.Service,
 	filetracker filetracker.Service,
+	checkpointSvc checkpoint.Service,
 	lspManager *lsp.Manager,
 	notify pubsub.Publisher[notify.Notification],
 	toolRuntime toolruntime.Service,
@@ -161,6 +164,7 @@ func NewCoordinator(
 		history:                    history,
 		longTermMemory:             longTermMemory,
 		filetracker:                filetracker,
+		checkpoint:                 checkpointSvc,
 		lspManager:                 lspManager,
 		notify:                     notify,
 		toolRuntime:                toolRuntime,
@@ -632,6 +636,9 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		},
 		Tools:  nil,
 		Notify: c.notify,
+		HookManager: c.hookManager,
+		Filetracker: c.filetracker,
+		Checkpoint:  c.checkpoint,
 	})
 
 	// Only use async initialization for the primary agent (not subagents).
@@ -1779,6 +1786,10 @@ func (c *coordinator) runTaskGraphDirect(ctx context.Context, params taskGraphPa
 						}
 					}
 
+					if c.hookManager != nil {
+						c.hookManager.RunSubagentStart(attemptCtx, taskGraphAttemptToolCallID(taskToolCallID, attempt), subagentType, params.SessionID)
+					}
+
 					response, runErr := c.runSubAgent(attemptCtx, subAgentParams{
 						Agent:             subAgent,
 						SessionID:         params.SessionID,
@@ -1793,6 +1804,9 @@ func (c *coordinator) runTaskGraphDirect(ctx context.Context, params taskGraphPa
 						AgentBackground:   agentCfg.Background,
 					})
 					cancel()
+					if c.hookManager != nil {
+						c.hookManager.RunSubagentStop(ctx, taskGraphAttemptToolCallID(taskToolCallID, attempt), subagentType, params.SessionID)
+					}
 					if runErr != nil {
 						_ = toolruntime.ReportFailure(attemptCtx, "subagent_run", runErr)
 						result = taskGraphNodeResult{
@@ -2436,6 +2450,10 @@ func (c *coordinator) runBackgroundTaskNode(
 			}
 		}
 
+		if c.hookManager != nil {
+			c.hookManager.RunSubagentStart(attemptCtx, agentID, subagentType, params.SessionID)
+		}
+
 		response, runErr := c.runSubAgent(attemptCtx, subAgentParams{
 			Agent:             subAgent,
 			SessionID:         params.SessionID,
@@ -2450,6 +2468,10 @@ func (c *coordinator) runBackgroundTaskNode(
 			AgentBackground:   agentCfg.Background,
 		})
 		cancel()
+
+		if c.hookManager != nil {
+			c.hookManager.RunSubagentStop(bgCtx, agentID, subagentType, params.SessionID)
+		}
 
 		if runErr != nil {
 			slog.Error("Background agent task failed", "agent_id", agentID, "task_id", task.ID, "error", runErr)

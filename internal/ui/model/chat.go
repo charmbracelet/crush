@@ -266,6 +266,11 @@ func (m *Chat) RestartPausedVisibleAnimations() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// ClickCount returns the current consecutive click count for the last mouse click.
+func (m *Chat) ClickCount() int {
+	return m.clickCount
+}
+
 // Focus sets the focus state of the chat component.
 func (m *Chat) Focus() {
 	m.list.Focus()
@@ -497,6 +502,27 @@ func (m *Chat) RemoveMessage(id string) {
 
 	// Clean up any paused animations for this message
 	delete(m.pausedAnimations, id)
+}
+
+// RemoveTaskNodesForRemovedToolCalls removes any TaskNodeItems whose parent tool call ID
+// is in the removedToolCallIDs set.
+func (m *Chat) RemoveTaskNodesForRemovedToolCalls(removedToolCallIDs map[string]struct{}) {
+	if len(removedToolCallIDs) == 0 {
+		return
+	}
+	var toRemove []string
+	for id, idx := range m.idInxMap {
+		item, ok := m.list.ItemAt(idx).(*chat.TaskNodeItem)
+		if !ok {
+			continue
+		}
+		if _, remove := removedToolCallIDs[item.ParentToolCallID()]; remove {
+			toRemove = append(toRemove, id)
+		}
+	}
+	for _, id := range toRemove {
+		m.RemoveMessage(id)
+	}
 }
 
 // MessageItem returns the message item with the given ID, or nil if not found.

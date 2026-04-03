@@ -109,6 +109,12 @@ SET
     title = ?
 WHERE id = ?;
 
+-- name: ListSessionsByParentID :many
+SELECT *
+FROM sessions
+WHERE parent_session_id = ?
+ORDER BY created_at DESC;
+
 -- name: DeleteSession :exec
 DELETE FROM sessions
 WHERE id = ?;

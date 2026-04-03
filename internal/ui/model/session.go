@@ -90,6 +90,7 @@ func (m *UI) loadSession(sessionID string) tea.Cmd {
 }
 
 func (m *UI) loadSessionWithSelection(sessionID string, selectedMessageID string) tea.Cmd {
+	m.pendingSessionLoad = sessionID
 	return func() tea.Msg {
 		session, err := m.com.App.Sessions.Get(context.Background(), sessionID)
 		if err != nil {
@@ -351,6 +352,10 @@ func (m *UI) childSessions(parentID string) ([]session.Session, error) {
 		return nil, err
 	}
 
+	allSessions, _ := m.com.App.Sessions.ListChildren(context.Background(), parentID)
+	parentChildren := allSessions
+
+	seen := make(map[string]struct{})
 	children := make([]session.Session, 0)
 	for _, msg := range msgs {
 		for _, tc := range msg.ToolCalls() {
@@ -359,11 +364,21 @@ func (m *UI) childSessions(parentID string) ([]session.Session, error) {
 			}
 			childID := m.com.App.Sessions.CreateAgentToolSessionID(msg.ID, tc.ID)
 			child, err := m.com.App.Sessions.Get(context.Background(), childID)
-			if err != nil {
+			if err == nil && child.ParentSessionID == parentID {
+				if _, exists := seen[child.ID]; !exists {
+					seen[child.ID] = struct{}{}
+					children = append(children, child)
+				}
 				continue
 			}
-			if child.ParentSessionID == parentID {
-				children = append(children, child)
+			prefix := childID + "::"
+			for _, s := range parentChildren {
+				if strings.HasPrefix(s.ID, prefix) {
+					if _, exists := seen[s.ID]; !exists {
+						seen[s.ID] = struct{}{}
+						children = append(children, s)
+					}
+				}
 			}
 		}
 	}
@@ -453,6 +468,28 @@ func (m *UI) openSelectedChildSession() tea.Cmd {
 		return nil
 	}
 
+	if taskNode, ok := selected.(*chat.TaskNodeItem); ok {
+		childID := taskNode.ChildSessionID()
+		parentSessionID := m.session.ID
+		return func() tea.Msg {
+			s, err := m.com.App.Sessions.Get(context.Background(), childID)
+			if err == nil && s.ParentSessionID == parentSessionID {
+				return openChildSessionMsg{sessionID: s.ID}
+			}
+			prefix := childID + "::"
+			children, err := m.com.App.Sessions.ListChildren(context.Background(), parentSessionID)
+			if err != nil {
+				return nil
+			}
+			for _, s := range children {
+				if strings.HasPrefix(s.ID, prefix) {
+					return openChildSessionMsg{sessionID: s.ID}
+				}
+			}
+			return nil
+		}
+	}
+
 	toolItem, ok := selected.(chat.ToolMessageItem)
 	if !ok || !isChildSessionToolCall(toolItem.ToolCall().Name) {
 		return nil
@@ -463,10 +500,20 @@ func (m *UI) openSelectedChildSession() tea.Cmd {
 
 	return func() tea.Msg {
 		child, err := m.com.App.Sessions.Get(context.Background(), childID)
-		if err != nil || child.ParentSessionID != parentSessionID {
+		if err == nil && child.ParentSessionID == parentSessionID {
+			return openChildSessionMsg{sessionID: child.ID}
+		}
+		prefix := childID + "::"
+		children, err := m.com.App.Sessions.ListChildren(context.Background(), parentSessionID)
+		if err != nil {
 			return nil
 		}
-		return openChildSessionMsg{sessionID: child.ID}
+		for _, s := range children {
+			if strings.HasPrefix(s.ID, prefix) {
+				return openChildSessionMsg{sessionID: s.ID}
+			}
+		}
+		return nil
 	}
 }
 
@@ -477,7 +524,11 @@ func (m *UI) openParentSession() tea.Cmd {
 
 	_, toolCallID, ok := m.com.App.Sessions.ParseAgentToolSessionID(m.session.ID)
 	if ok {
-		return m.loadSessionWithSelection(m.session.ParentSessionID, toolCallID)
+		outerToolCallID := toolCallID
+		if idx := strings.Index(toolCallID, "::"); idx != -1 {
+			outerToolCallID = toolCallID[:idx]
+		}
+		return m.loadSessionWithSelection(m.session.ParentSessionID, outerToolCallID)
 	}
 
 	return m.loadSession(m.session.ParentSessionID)

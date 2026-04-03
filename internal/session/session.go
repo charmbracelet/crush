@@ -278,6 +278,7 @@ type Service interface {
 	Get(ctx context.Context, id string) (Session, error)
 	GetLast(ctx context.Context) (Session, error)
 	List(ctx context.Context) ([]Session, error)
+	ListChildren(ctx context.Context, parentID string) ([]Session, error)
 	Save(ctx context.Context, session Session) (Session, error)
 	UpdateCollaborationMode(ctx context.Context, sessionID string, mode CollaborationMode) (Session, error)
 	UpdatePermissionMode(ctx context.Context, sessionID string, mode PermissionMode) (Session, error)
@@ -573,6 +574,18 @@ func (s *service) Rename(ctx context.Context, id string, title string) error {
 
 func (s *service) List(ctx context.Context) ([]Session, error) {
 	dbSessions, err := s.q.ListSessions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sessions := make([]Session, len(dbSessions))
+	for i, dbSession := range dbSessions {
+		sessions[i] = s.fromDBItem(dbSession)
+	}
+	return sessions, nil
+}
+
+func (s *service) ListChildren(ctx context.Context, parentID string) ([]Session, error) {
+	dbSessions, err := s.q.ListSessionsByParentID(ctx, sql.NullString{String: parentID, Valid: parentID != ""})
 	if err != nil {
 		return nil, err
 	}

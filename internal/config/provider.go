@@ -183,6 +183,15 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 			providers.Append(item)
 		})
 
+		wg.Go(func() {
+			path := cachePathFor("models-dev")
+			modelsDevSyncer.Init(path, autoupdate)
+
+			if _, err := modelsDevSyncer.Get(ctx); err != nil {
+				slog.Warn("Failed to fetch models.dev metadata", "error", err)
+			}
+		})
+
 		wg.Wait()
 
 		providerList = slices.Collect(providers.Seq())

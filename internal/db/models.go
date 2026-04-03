@@ -8,6 +8,18 @@ import (
 	"database/sql"
 )
 
+type Checkpoint struct {
+	ID        string `json:"id"`
+	SessionID string `json:"session_id"`
+	MessageID string `json:"message_id"`
+	CreatedAt int64  `json:"created_at"`
+}
+
+type CheckpointFile struct {
+	CheckpointID string `json:"checkpoint_id"`
+	FileID       string `json:"file_id"`
+}
+
 type File struct {
 	ID        string `json:"id"`
 	SessionID string `json:"session_id"`

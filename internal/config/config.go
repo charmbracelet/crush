@@ -620,6 +620,13 @@ func (c *Config) GetModel(provider, model string) *catwalk.Model {
 			}
 		}
 	}
+	// Fallback: look up model in models.dev data and create a catwalk.Model.
+	if devData := GetModelsDevData(); len(devData) > 0 {
+		if devModel, found := devData.LookupModel(model); found {
+			m := devModel.ToCatwalkModel()
+			return &m
+		}
+	}
 	return nil
 }
 

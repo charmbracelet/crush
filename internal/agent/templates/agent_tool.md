@@ -8,7 +8,7 @@ When to use the Agent tool:
 - The `explore` subagent is read-only and has a restricted `bash` tool for direct local read-only git inspection only. It is suitable for `git diff`, `git status`, `git log`, `git show`, `git blame`, `git rev-parse`, `git merge-base`, and `git ls-files`, but not for mutating git commands, wrapper shells, or general shell work.
 - Independent implementation tasks, test reproduction, or file-local refactors that can proceed without blocking your immediate next step should usually use the `general` subagent.
 - If 2 or more substantial independent tasks can proceed in parallel, you should usually delegate them instead of doing them serially in the main thread.
-- When there are multiple substantial independent tasks, launch multiple Agent tool calls in the same assistant message so they can run in parallel.
+- **When there are multiple substantial independent tasks, use a single Agent call with the `tasks` array** so they run in parallel with unified tracking, shared budget control, and a single consolidated result.
 - If an `explore` subagent can gather context while you or another subagent handles implementation, start that delegated work immediately instead of waiting to do the search yourself first.
 - Do not claim that you are delegating, spinning up subagents, or parallelizing work unless this response actually includes the corresponding `agent` tool calls.
 
@@ -28,4 +28,4 @@ Usage notes:
 5. The subagent's outputs should generally be trusted unless they conflict with stronger evidence in the current thread.
 6. Do not treat this tool as a last resort. Prefer early delegation for bounded work that can unblock or parallelize the main task.
 7. If you choose delegation, make the tool call first rather than narrating a future intention to delegate.
-8. Use the `tasks` array to express a dependency graph: tasks with no `depends_on` run in parallel; tasks with dependencies run after their prerequisites complete.
+8. **Use the `tasks` array for 2+ tasks.** Tasks with no `depends_on` run in parallel; tasks with dependencies run after their prerequisites complete. The `tasks` array provides budget control, concurrency limiting, retry support, and a unified result — always prefer it over launching multiple separate Agent calls.

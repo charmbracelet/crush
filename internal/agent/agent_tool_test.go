@@ -75,7 +75,7 @@ func TestBuildAgentToolDescriptionEmphasizesParallelDelegation(t *testing.T) {
 	description := coord.buildAgentToolDescription()
 
 	assert.Contains(t, description, "If 2 or more substantial independent tasks can proceed in parallel")
-	assert.Contains(t, description, "launch multiple Agent tool calls in the same assistant message")
+	assert.Contains(t, description, "use a single Agent call with the `tasks` array")
 	assert.Contains(t, description, "Prefer early delegation for bounded work")
 	assert.Contains(t, description, "restricted `bash` tool")
 	assert.Contains(t, description, "git diff")
@@ -89,7 +89,7 @@ func TestCoderPromptTemplateRequiresOrchestrationFirstDelegation(t *testing.T) {
 	promptText := string(coderPromptTmpl)
 
 	assert.Contains(t, promptText, "The main agent is the orchestrator, not the default worker")
-	assert.Contains(t, promptText, "you MUST prefer launching multiple Agent tool calls in the same assistant message")
+	assert.Contains(t, promptText, "you MUST prefer a single Agent call with the `tasks` array")
 	assert.Contains(t, promptText, "After delegating independent work, continue on the critical path locally")
 	assert.Contains(t, promptText, "prefer batching direct tool calls in parallel instead of paying subagent overhead")
 	assert.Contains(t, promptText, "Use subagents when each independent workstream is substantial enough")

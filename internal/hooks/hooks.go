@@ -11,7 +11,19 @@ import (
 type Event string
 
 const (
-	EventPreToolUse Event = "PreToolUse"
+	EventPreToolUse         Event = "PreToolUse"
+	EventPostToolUse        Event = "PostToolUse"
+	EventPostToolUseFailure Event = "PostToolUseFailure"
+	EventSubagentStart      Event = "SubagentStart"
+	EventSubagentStop       Event = "SubagentStop"
+	EventSessionStart       Event = "SessionStart"
+	EventSessionEnd         Event = "SessionEnd"
+	EventStop               Event = "Stop"
+	EventPreCompact         Event = "PreCompact"
+	EventPostCompact        Event = "PostCompact"
+	EventNotification       Event = "Notification"
+	EventUserPromptSubmit   Event = "UserPromptSubmit"
+	EventPermissionRequest  Event = "PermissionRequest"
 )
 
 type Decision string
@@ -27,6 +39,7 @@ type HandlerType string
 const (
 	HandlerTypeCommand HandlerType = "command"
 	HandlerTypeHTTP    HandlerType = "http"
+	HandlerTypePrompt  HandlerType = "prompt"
 )
 
 type CommandConfig struct {
@@ -42,6 +55,11 @@ type HTTPConfig struct {
 	Headers map[string]string `json:"headers,omitempty"`
 }
 
+type PromptConfig struct {
+	Prompt string `json:"prompt"`
+	Model  string `json:"model,omitempty"`
+}
+
 type HookConfig struct {
 	Name      string         `json:"name"`
 	Enabled   *bool          `json:"enabled,omitempty"`
@@ -50,6 +68,7 @@ type HookConfig struct {
 	TimeoutMs int            `json:"timeout_ms,omitempty"`
 	Command   *CommandConfig `json:"command,omitempty"`
 	HTTP      *HTTPConfig    `json:"http,omitempty"`
+	Prompt    *PromptConfig  `json:"prompt,omitempty"`
 }
 
 func (h *HookConfig) IsEnabled() bool {
@@ -70,7 +89,10 @@ type HookInput struct {
 	HookEventName string         `json:"hook_event_name"`
 	ToolName      string         `json:"tool_name"`
 	ToolInput     map[string]any `json:"tool_input"`
+	ToolResult    string         `json:"tool_result,omitempty"`
 	SessionID     string         `json:"session_id,omitempty"`
+	AgentID       string         `json:"agent_id,omitempty"`
+	AgentType     string         `json:"agent_type,omitempty"`
 }
 
 type HookOutput struct {
@@ -90,19 +112,35 @@ type registeredHook struct {
 	handler Handler
 }
 
-type Manager struct {
-	hooks map[Event][]*registeredHook
+type PromptHandler interface {
+	RunPrompt(ctx context.Context, prompt string, hookInput HookInput) (*HookOutput, error)
 }
 
-func NewManager(configs []HookConfig) (*Manager, error) {
+type ManagerOption func(*Manager)
+
+func WithPromptHandler(ph PromptHandler) ManagerOption {
+	return func(m *Manager) {
+		m.promptHandler = ph
+	}
+}
+
+type Manager struct {
+	hooks         map[Event][]*registeredHook
+	promptHandler PromptHandler
+}
+
+func NewManager(configs []HookConfig, opts ...ManagerOption) (*Manager, error) {
 	m := &Manager{
 		hooks: make(map[Event][]*registeredHook),
+	}
+	for _, opt := range opts {
+		opt(m)
 	}
 	for _, cfg := range configs {
 		if !cfg.IsEnabled() {
 			continue
 		}
-		handler, err := newHandler(cfg)
+		handler, err := m.newHandler(cfg)
 		if err != nil {
 			return nil, fmt.Errorf("hook %q: %w", cfg.Name, err)
 		}
@@ -191,7 +229,122 @@ func (m *Manager) run(ctx context.Context, event Event, input HookInput) (*HookO
 	return &HookOutput{Decision: DecisionAllow}, nil
 }
 
-func newHandler(cfg HookConfig) (Handler, error) {
+func (m *Manager) RunPostToolUse(ctx context.Context, toolName string, toolInput map[string]any, toolResult string, sessionID string) {
+	m.runNotify(ctx, EventPostToolUse, HookInput{
+		HookEventName: string(EventPostToolUse),
+		ToolName:      toolName,
+		ToolInput:     toolInput,
+		ToolResult:    toolResult,
+		SessionID:     sessionID,
+	})
+}
+
+func (m *Manager) RunPostToolUseFailure(ctx context.Context, toolName string, toolInput map[string]any, errMsg string, sessionID string) {
+	m.runNotify(ctx, EventPostToolUseFailure, HookInput{
+		HookEventName: string(EventPostToolUseFailure),
+		ToolName:      toolName,
+		ToolInput:     toolInput,
+		ToolResult:    errMsg,
+		SessionID:     sessionID,
+	})
+}
+
+func (m *Manager) RunSubagentStart(ctx context.Context, agentID, agentType, sessionID string) {
+	m.runNotify(ctx, EventSubagentStart, HookInput{
+		HookEventName: string(EventSubagentStart),
+		AgentID:       agentID,
+		AgentType:     agentType,
+		SessionID:     sessionID,
+	})
+}
+
+func (m *Manager) RunSubagentStop(ctx context.Context, agentID, agentType, sessionID string) {
+	m.runNotify(ctx, EventSubagentStop, HookInput{
+		HookEventName: string(EventSubagentStop),
+		AgentID:       agentID,
+		AgentType:     agentType,
+		SessionID:     sessionID,
+	})
+}
+
+func (m *Manager) RunSessionStart(ctx context.Context, sessionID string) {
+	m.runNotify(ctx, EventSessionStart, HookInput{
+		HookEventName: string(EventSessionStart),
+		SessionID:     sessionID,
+	})
+}
+
+func (m *Manager) RunSessionEnd(ctx context.Context, sessionID string) {
+	m.runNotify(ctx, EventSessionEnd, HookInput{
+		HookEventName: string(EventSessionEnd),
+		SessionID:     sessionID,
+	})
+}
+
+func (m *Manager) RunPreCompact(ctx context.Context, sessionID string) {
+	m.runNotify(ctx, EventPreCompact, HookInput{
+		HookEventName: string(EventPreCompact),
+		SessionID:     sessionID,
+	})
+}
+
+func (m *Manager) RunPostCompact(ctx context.Context, sessionID string) {
+	m.runNotify(ctx, EventPostCompact, HookInput{
+		HookEventName: string(EventPostCompact),
+		SessionID:     sessionID,
+	})
+}
+
+func (m *Manager) RunStop(ctx context.Context, sessionID string) {
+	m.runNotify(ctx, EventStop, HookInput{
+		HookEventName: string(EventStop),
+		SessionID:     sessionID,
+	})
+}
+
+func (m *Manager) RunNotification(ctx context.Context, sessionID, notificationType, notificationMessage string) {
+	m.runNotify(ctx, EventNotification, HookInput{
+		HookEventName: string(EventNotification),
+		SessionID:     sessionID,
+		ToolName:      notificationType,
+		ToolResult:    notificationMessage,
+	})
+}
+
+func (m *Manager) RunUserPromptSubmit(ctx context.Context, sessionID, prompt string) {
+	m.runNotify(ctx, EventUserPromptSubmit, HookInput{
+		HookEventName: string(EventUserPromptSubmit),
+		SessionID:     sessionID,
+		ToolResult:    prompt,
+	})
+}
+
+func (m *Manager) RunPermissionRequest(ctx context.Context, sessionID, toolName string, toolInput map[string]any) {
+	m.runNotify(ctx, EventPermissionRequest, HookInput{
+		HookEventName: string(EventPermissionRequest),
+		SessionID:     sessionID,
+		ToolName:      toolName,
+		ToolInput:     toolInput,
+	})
+}
+
+func (m *Manager) runNotify(ctx context.Context, event Event, input HookInput) {
+	hooks := m.hooks[event]
+	if len(hooks) == 0 {
+		return
+	}
+	slog.Debug("Running notify hooks for event", "event", event, "count", len(hooks))
+	for _, rh := range hooks {
+		timeoutCtx, cancel := context.WithTimeout(ctx, rh.config.Timeout())
+		_, err := rh.handler.Execute(timeoutCtx, input)
+		cancel()
+		if err != nil {
+			slog.Warn("Notify hook execution failed", "hook", rh.config.Name, "event", event, "error", err)
+		}
+	}
+}
+
+func (m *Manager) newHandler(cfg HookConfig) (Handler, error) {
 	switch cfg.Type {
 	case HandlerTypeCommand:
 		if cfg.Command == nil {
@@ -203,6 +356,8 @@ func newHandler(cfg HookConfig) (Handler, error) {
 			return nil, fmt.Errorf("http config is required for http handler type")
 		}
 		return newHTTPHandler(cfg), nil
+	case HandlerTypePrompt:
+		return newPromptHandler(cfg, m.promptHandler)
 	default:
 		return nil, fmt.Errorf("unknown handler type: %q", cfg.Type)
 	}

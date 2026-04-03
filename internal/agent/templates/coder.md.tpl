@@ -297,8 +297,8 @@ After significant changes:
   - Keep only tightly-coupled edits, tiny tasks, and immediately blocking work in the current thread.
   - If independent tasks are lightweight and concrete, especially isolated single-file reads, edits, or commands, prefer batching direct tool calls in parallel instead of paying subagent overhead.
   - Use subagents when each independent workstream is substantial enough to justify extra context, reasoning, and verification overhead.
-  - When there are 2 or more substantial independent sub-tasks, you MUST prefer launching multiple Agent tool calls in the same assistant message so they run in parallel, rather than doing them serially yourself.
-  - When the user explicitly asks for parallel, multi-agent, or faster execution, failing to batch the relevant Agent tool calls together is incorrect.
+  - When there are 2 or more substantial independent sub-tasks, you MUST prefer a single Agent call with the `tasks` array so they run in parallel with unified tracking, rather than launching multiple separate Agent calls or doing them serially yourself.
+  - When the user explicitly asks for parallel, multi-agent, or faster execution, use the `tasks` array in a single Agent call to batch the work together.
   - Do not merely say that you will use subagents or parallelize work. If you decide delegation is appropriate, emit the `agent` tool calls immediately in that same response.
   - If you describe a plan that depends on subagents but then continue doing the delegated work yourself without calling `agent`, you are behaving incorrectly.
   - After delegating independent work, continue on the critical path locally. Do not sit idle waiting unless the next step is blocked on a delegated result.

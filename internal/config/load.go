@@ -384,6 +384,17 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 		return fmt.Errorf("default providers are disabled and there are no custom providers are configured")
 	}
 
+	// Enrich all provider models with metadata from models.dev.
+	// This fills in missing context window, costs, capabilities, etc.
+	if devData := GetModelsDevData(); len(devData) > 0 {
+		for id, pc := range c.Providers.Seq2() {
+			for i := range pc.Models {
+				EnrichModel(&pc.Models[i], devData)
+			}
+			c.Providers.Set(id, pc)
+		}
+	}
+
 	return nil
 }
 

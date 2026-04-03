@@ -54,6 +54,10 @@ type AgentToolMessageItem struct {
 
 	childStatusText    string
 	childStatusIsError bool
+
+	// hasTaskNodes is true when TaskNodeItems have been injected below
+	// this item, so the inline task list only renders the summary line.
+	hasTaskNodes bool
 }
 
 var (
@@ -133,6 +137,15 @@ func (a *AgentToolMessageItem) SetChildSessionStatus(text string, isError bool) 
 	}
 	a.childStatusText = text
 	a.childStatusIsError = isError
+	a.clearCache()
+}
+
+// SetHasTaskNodes marks this item as having TaskNodeItem children in the list.
+func (a *AgentToolMessageItem) SetHasTaskNodes(v bool) {
+	if a.hasTaskNodes == v {
+		return
+	}
+	a.hasTaskNodes = v
 	a.clearCache()
 }
 
@@ -217,7 +230,7 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	}
 
 	header = lipgloss.JoinVertical(lipgloss.Left, headerParts...)
-	header = renderAgentTaskList(sty, header, tasks, remainingWidth, opts)
+	header = renderAgentTaskList(sty, header, tasks, remainingWidth, opts, r.agent.hasTaskNodes)
 
 	visibleNestedTools, hiddenNestedTools := agentNestedToolWindow(r.agent.nestedTools, r.agent.nestedExpanded)
 	header = renderAgentHeaderWithToggle(sty, header, remainingWidth, r.agent.nestedExpanded, len(r.agent.nestedTools), hiddenNestedTools)
@@ -483,7 +496,7 @@ func collectAgentTaskEntries(params agent.AgentParams) []agentTaskRenderEntry {
 	return tasks
 }
 
-func renderAgentTaskList(sty *styles.Styles, header string, tasks []agentTaskRenderEntry, width int, opts *ToolRenderOpts) string {
+func renderAgentTaskList(sty *styles.Styles, header string, tasks []agentTaskRenderEntry, width int, opts *ToolRenderOpts, summaryOnly bool) string {
 	if len(tasks) <= 1 || width <= 0 {
 		return header
 	}
@@ -509,6 +522,12 @@ func renderAgentTaskList(sty *styles.Styles, header string, tasks []agentTaskRen
 		" ",
 		sty.Tool.AgentPrompt.Width(availableWidth).Render(summaryText),
 	)
+
+	// When TaskNodeItems are present below this item, only show the summary
+	// to avoid duplicating the per-task lines.
+	if summaryOnly {
+		return lipgloss.JoinVertical(lipgloss.Left, header, summaryLine)
+	}
 
 	visibleCount := len(tasks)
 	if visibleCount > maxAgentTaskDisplayItems {
@@ -552,7 +571,17 @@ func parseTaskStatusesFromAgentResult(opts *ToolRenderOpts) map[string]message.T
 	if opts == nil || opts.Result == nil {
 		return statuses
 	}
-	content := opts.Result.Content
+	return ParseTaskStatusesFromAgentResult(opts.Result)
+}
+
+// ParseTaskStatusesFromAgentResult extracts per-task completion statuses from
+// an agent tool result's content (lines like "- task_id: completed").
+func ParseTaskStatusesFromAgentResult(result *message.ToolResult) map[string]message.ToolResultSubtaskStatus {
+	statuses := make(map[string]message.ToolResultSubtaskStatus)
+	if result == nil {
+		return statuses
+	}
+	content := result.Content
 	if strings.TrimSpace(content) == "" {
 		return statuses
 	}
@@ -706,4 +735,154 @@ func renderAgentHeaderWithToggle(sty *styles.Styles, header string, width int, e
 	toggleTag = ansi.Truncate(toggleTag, availableWidth, "…")
 	lines[0] = lipgloss.JoinHorizontal(lipgloss.Left, lines[0], " ", toggleTag)
 	return strings.Join(lines, "\n")
+}
+
+func TaskNodeItemID(parentToolCallID, taskID string) string {
+	return fmt.Sprintf("%s::task-node::%s", parentToolCallID, taskID)
+}
+
+type TaskNodeItem struct {
+	*cachedMessageItem
+	id               string
+	parentToolCallID string
+	childSessionID   string
+	taskID           string
+	description      string
+	prompt           string
+	subagentType     string
+	sty              *styles.Styles
+	focused          bool
+
+	childStatusText    string
+	childStatusIsError bool
+	completionStatus   message.ToolResultSubtaskStatus
+}
+
+var _ ChildSessionStatusSetter = (*TaskNodeItem)(nil)
+
+func NewTaskNodeItem(sty *styles.Styles, parentToolCallID, taskID, description, prompt, subagentType, childSessionID string) *TaskNodeItem {
+	return &TaskNodeItem{
+		cachedMessageItem: &cachedMessageItem{},
+		id:                TaskNodeItemID(parentToolCallID, taskID),
+		parentToolCallID:  parentToolCallID,
+		childSessionID:    childSessionID,
+		taskID:            taskID,
+		description:       description,
+		prompt:            prompt,
+		subagentType:      subagentType,
+		sty:               sty,
+	}
+}
+
+func (t *TaskNodeItem) ID() string { return t.id }
+
+func (t *TaskNodeItem) ParentToolCallID() string { return t.parentToolCallID }
+
+func (t *TaskNodeItem) ChildSessionID() string { return t.childSessionID }
+
+// SetChildSessionStatus stores transient child-session status text for live display.
+func (t *TaskNodeItem) SetChildSessionStatus(text string, isError bool) {
+	if t.childStatusText == text && t.childStatusIsError == isError {
+		return
+	}
+	t.childStatusText = text
+	t.childStatusIsError = isError
+	t.clearCache()
+}
+
+// ClearChildSessionStatus removes transient child-session status text.
+func (t *TaskNodeItem) ClearChildSessionStatus() {
+	if t.childStatusText == "" && !t.childStatusIsError {
+		return
+	}
+	t.childStatusText = ""
+	t.childStatusIsError = false
+	t.clearCache()
+}
+
+// SetCompletionStatus stores the final completion status for this task node.
+func (t *TaskNodeItem) SetCompletionStatus(status message.ToolResultSubtaskStatus) {
+	if t.completionStatus == status {
+		return
+	}
+	t.completionStatus = status
+	t.clearCache()
+}
+
+// CompletionStatus returns the final completion status for this task node.
+func (t *TaskNodeItem) CompletionStatus() message.ToolResultSubtaskStatus {
+	return t.completionStatus
+}
+
+func (t *TaskNodeItem) SetFocused(focused bool) {
+	if t.focused == focused {
+		return
+	}
+	t.focused = focused
+	t.clearCache()
+}
+
+func (t *TaskNodeItem) RawRender(width int) string {
+	innerWidth := max(0, width-MessageLeftPaddingTotal)
+	content, _, ok := t.getCachedRender(innerWidth)
+	if !ok {
+		content = t.renderContent(innerWidth)
+		t.setCachedRender(content, innerWidth, lipgloss.Height(content))
+	}
+	return content
+}
+
+func (t *TaskNodeItem) Render(width int) string {
+	var prefix string
+	if t.focused {
+		prefix = t.sty.Chat.Message.ToolCallFocused.Render()
+	} else {
+		prefix = t.sty.Chat.Message.ToolCallBlurred.Render()
+	}
+	raw := t.RawRender(width)
+	lines := strings.Split(raw, "\n")
+	for i, ln := range lines {
+		lines[i] = prefix + ln
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (t *TaskNodeItem) renderContent(width int) string {
+	label := strings.ReplaceAll(strings.TrimSpace(t.description), "\n", " ")
+	if label == "" {
+		label = strings.ReplaceAll(strings.TrimSpace(t.prompt), "\n", " ")
+	}
+	if label == "" {
+		label = t.taskID
+	}
+
+	var statusIcon string
+	switch {
+	case t.childStatusIsError:
+		statusIcon = t.sty.Tool.IconError.String()
+	case t.completionStatus == message.ToolResultSubtaskStatusCompleted:
+		statusIcon = t.sty.Tool.IconSuccess.String()
+	case t.completionStatus == message.ToolResultSubtaskStatusFailed:
+		statusIcon = t.sty.Tool.IconError.String()
+	case t.completionStatus == message.ToolResultSubtaskStatusCanceled:
+		statusIcon = t.sty.Tool.IconCancelled.String()
+	case t.childStatusText != "":
+		statusIcon = t.sty.Tool.IconPending.String()
+	default:
+		statusIcon = t.sty.Tool.IconPending.String()
+	}
+
+	arrow := " ↳ "
+	subagentLabel := titleCase(t.subagentType)
+	tag := ""
+	if subagentLabel != "" {
+		tag = t.sty.Tool.AgentTaskTag.Render(subagentLabel) + " "
+	}
+	// statusIcon(1) + arrow(3) + tag
+	indentWidth := 1 + ansi.StringWidth(arrow) + lipgloss.Width(tag)
+	availWidth := max(0, width-indentWidth)
+	labelText := t.sty.Tool.AgentPrompt.Width(availWidth).Render(
+		ansi.Truncate(label, availWidth, "…"),
+	)
+	return lipgloss.JoinHorizontal(lipgloss.Left, statusIcon, arrow, tag, labelText)
 }

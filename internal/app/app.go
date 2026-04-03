@@ -22,6 +22,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/autopermission"
+	"github.com/charmbracelet/crush/internal/checkpoint"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
@@ -64,6 +65,7 @@ type App struct {
 	UserInput      userinput.Service
 	Permissions    permission.Service
 	FileTracker    filetracker.Service
+	Checkpoint     checkpoint.Service
 	ToolRuntime    toolruntime.Service
 	Timeline       timeline.Service
 
@@ -98,6 +100,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 	sessions.SetDefaultPermissionMode(preferredPermissionMode)
 	messages := message.NewService(q)
 	files := history.NewService(q, conn)
+	checkpointSvc := checkpoint.NewService(q, conn, files, store.WorkingDir())
 	longTermMemory, err := memory.NewService(cfg.Options.DataDirectory)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize long-term memory service: %w", err)
@@ -127,6 +130,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 			return classifier
 		}, store.WorkingDir(), cfg.Permissions != nil && cfg.Permissions.FailClosedOnClassifierError, allowedTools),
 		FileTracker: filetracker.NewService(q),
+		Checkpoint: checkpointSvc,
 		ToolRuntime: runtimeService,
 		Timeline:    timelineService,
 		LSPManager:  lsp.NewManager(store),
@@ -672,6 +676,7 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.History,
 		app.LongTermMemory,
 		app.FileTracker,
+		app.Checkpoint,
 		app.LSPManager,
 		app.agentNotifications,
 		app.ToolRuntime,

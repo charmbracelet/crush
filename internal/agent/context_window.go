@@ -23,6 +23,12 @@ const (
 	contextWindowStepToolResultCharsLimit = 40_000
 	contextWindowTruncationDir            = ".crush/truncation"
 
+	// contextWindowMessageToolResultCharsLimit is the aggregate character budget
+	// for all tool results within a single API-level message. When multiple tool
+	// steps run in parallel, the per-step budget alone cannot prevent the total
+	// from exceeding the context window. This limit caps the combined size.
+	contextWindowMessageToolResultCharsLimit = 200_000
+
 	// contextWindowResumePromptPrefix is prepended to the original user
 	// prompt when re-queuing the task after a forced summarization.  It
 	// tells the LLM why the session was interrupted and asks it to reduce
@@ -180,6 +186,73 @@ func (a *sessionAgent) enforceStepToolResultBudget(sessionID string, tr message.
 	return tr
 }
 
+// enforceMessageToolResultBudget applies an aggregate character budget across
+// all tool results in the pending message. It should be called after individual
+// tool results have been collected for the current turn but before they are sent
+// to the LLM. Results are processed in order; once the budget is exhausted,
+// remaining results are replaced with a notice.
+//
+// The function works on a slice of tool results and returns a new slice with
+// oversized results replaced by truncated versions. It prioritizes keeping
+// earlier (typically more important) results intact.
+func (a *sessionAgent) enforceMessageToolResultBudget(sessionID string, results []message.ToolResult) []message.ToolResult {
+	totalUsed := 0
+	out := make([]message.ToolResult, len(results))
+	copy(out, results)
+
+	for i, tr := range out {
+		if tr.IsError || tr.Data != "" || tr.MIMEType != "" {
+			continue
+		}
+
+		contentRunes := []rune(tr.Content)
+		remaining := contextWindowMessageToolResultCharsLimit - totalUsed
+
+		if remaining <= 0 {
+			out[i].Content = fmt.Sprintf(
+				"[Message tool-result budget exhausted (%d/%d chars used). "+
+					"This result was omitted to keep the conversation within the context window. "+
+					"Re-run the tool with a narrower scope if you still need it. %d characters omitted.]",
+				totalUsed, contextWindowMessageToolResultCharsLimit, len(contentRunes))
+			continue
+		}
+
+		if len(contentRunes) <= remaining {
+			totalUsed += len(contentRunes)
+			continue
+		}
+
+		// Need to truncate this result to fit within the message budget.
+		fullOutputPath := ""
+		if a != nil {
+			persistedPath, err := a.persistToolResultContent(sessionID, tr)
+			if err != nil {
+				slog.Warn("Failed to persist message-budget tool result",
+					"error", err, "session_id", sessionID, "tool_name", tr.Name)
+			} else {
+				fullOutputPath = persistedPath
+			}
+		}
+
+		keep := remaining
+		for range 3 {
+			notice := truncatedToolResultNotice(len(contentRunes)-keep, fullOutputPath)
+			keep = remaining - len([]rune(notice))
+			if keep < 0 {
+				keep = 0
+			}
+			if keep > len(contentRunes) {
+				keep = len(contentRunes)
+			}
+		}
+
+		out[i].Content = string(contentRunes[:keep]) + truncatedToolResultNotice(len(contentRunes)-keep, fullOutputPath)
+		totalUsed = contextWindowMessageToolResultCharsLimit
+	}
+
+	return out
+}
+
 // truncateOversizedToolResults scans all tool messages in the session and
 // truncates any ToolResult whose Content field exceeds
 // contextWindowToolResultMaxChars.  This is called before summarization when
@@ -213,6 +286,74 @@ func (a *sessionAgent) truncateOversizedToolResults(ctx context.Context, session
 		if modified {
 			if updateErr := a.messages.Update(ctx, msg); updateErr != nil {
 				return updateErr
+			}
+		}
+	}
+
+	// Also enforce aggregate message-level budget across tool result groups.
+	if err := a.enforceMessageToolResultBudgets(ctx, sessionID); err != nil {
+		return fmt.Errorf("enforcing message tool result budget: %w", err)
+	}
+	return nil
+}
+
+// enforceMessageToolResultBudgets scans all tool messages in the session and
+// applies the aggregate message-level budget to groups of tool results that
+// belong to the same API-level message (consecutive tool messages).
+func (a *sessionAgent) enforceMessageToolResultBudgets(ctx context.Context, sessionID string) error {
+	msgs, err := a.messages.List(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+
+	// Process consecutive groups of tool messages (these form a single API message).
+	i := 0
+	for i < len(msgs) {
+		if msgs[i].Role != message.Tool {
+			i++
+			continue
+		}
+
+		// Collect consecutive tool messages into a group.
+		groupStart := i
+		var allResults []message.ToolResult
+		var resultLocations []struct{ msgIdx, partIdx int }
+
+		for i < len(msgs) && msgs[i].Role == message.Tool {
+			for j, part := range msgs[i].Parts {
+				if tr, ok := part.(message.ToolResult); ok && !tr.IsError && tr.Data == "" && tr.MIMEType == "" {
+					allResults = append(allResults, tr)
+					resultLocations = append(resultLocations, struct{ msgIdx, partIdx int }{i, j})
+				}
+			}
+			i++
+		}
+
+		// Check if this group exceeds the message budget.
+		totalChars := 0
+		for _, tr := range allResults {
+			totalChars += len([]rune(tr.Content))
+		}
+		if totalChars <= contextWindowMessageToolResultCharsLimit {
+			continue
+		}
+
+		// Apply budget enforcement.
+		budgeted := a.enforceMessageToolResultBudget(sessionID, allResults)
+		modified := false
+		for k, loc := range resultLocations {
+			if budgeted[k].Content != allResults[k].Content {
+				msgs[loc.msgIdx].Parts[loc.partIdx] = budgeted[k]
+				modified = true
+			}
+		}
+
+		// Persist modified messages.
+		if modified {
+			for idx := groupStart; idx < i; idx++ {
+				if updateErr := a.messages.Update(ctx, msgs[idx]); updateErr != nil {
+					return updateErr
+				}
 			}
 		}
 	}

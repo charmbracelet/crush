@@ -281,12 +281,12 @@ func DefaultKeyMap() KeyMap {
 		key.WithHelp("space", "expand/collapse"),
 	)
 	km.Chat.SessionParent = key.NewBinding(
-		key.WithKeys("ctrl+left", "alt+left", "ctrl+b", "alt+b"),
-		key.WithHelp("ctrl+←", "exit subagent"),
+		key.WithKeys("ctrl+left", "alt+left", "ctrl+b", "alt+b", "[", "h"),
+		key.WithHelp("[/h", "exit subagent"),
 	)
 	km.Chat.SessionChild = key.NewBinding(
-		key.WithKeys("ctrl+right", "alt+right", "ctrl+f", "alt+f"),
-		key.WithHelp("ctrl+→", "open subagent"),
+		key.WithKeys("ctrl+right", "alt+right", "ctrl+f", "alt+f", "]", "l"),
+		key.WithHelp("]/l", "open subagent"),
 	)
 	km.Chat.SessionNext = key.NewBinding(
 		key.WithKeys("ctrl+down", "alt+down", "ctrl+n", "alt+n"),
@@ -297,8 +297,8 @@ func DefaultKeyMap() KeyMap {
 		key.WithHelp("ctrl+↑", "prev subagent"),
 	)
 	km.Chat.SessionNav = key.NewBinding(
-		key.WithKeys("ctrl+left", "ctrl+right", "alt+left", "alt+right", "ctrl+b", "ctrl+f", "alt+b", "alt+f"),
-		key.WithHelp("ctrl+←/→", "subagent"),
+		key.WithKeys("ctrl+left", "ctrl+right", "alt+left", "alt+right", "ctrl+b", "ctrl+f", "alt+b", "alt+f", "[", "]", "h", "l"),
+		key.WithHelp("[/]/h/l", "subagent"),
 	)
 	km.Initialize.Yes = key.NewBinding(
 		key.WithKeys("y", "Y"),

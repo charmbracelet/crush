@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
@@ -28,6 +29,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	agenttools "github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
@@ -63,6 +65,16 @@ import (
 	"github.com/charmbracelet/ultraviolet/screen"
 	"github.com/charmbracelet/x/editor"
 )
+
+type agentToolParams struct {
+	Tasks []struct {
+		ID           string   `json:"id"`
+		Description  string   `json:"description,omitempty"`
+		Prompt       string   `json:"prompt,omitempty"`
+		SubagentType string   `json:"subagent_type,omitempty"`
+		DependsOn    []string `json:"depends_on,omitempty"`
+	} `json:"tasks,omitempty"`
+}
 
 // MouseScrollThreshold defines how many lines to scroll the chat when a mouse
 // wheel event occurs.
@@ -279,6 +291,11 @@ type UI struct {
 	selectedQueueIndex int
 	pillsPreviousFocus uiFocusState
 	pillsView          string
+
+	// pendingSessionLoad is set when an async session load is in flight.
+	// Events with this session ID are ignored until loadSessionMsg arrives,
+	// avoiding the race where m.session.ID hasn't switched yet.
+	pendingSessionLoad string
 
 	// Todo spinner
 	todoSpinner    spinner.Model
@@ -534,6 +551,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case loadSessionMsg:
+		m.pendingSessionLoad = ""
 		if m.forceCompactMode {
 			m.isCompact = true
 		}
@@ -675,6 +693,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		if msg.Payload.SessionID != m.session.ID {
+			// If we're async-loading this session, skip — loadSessionMsg will
+			// bring the UI up to date once the load finishes.
+			if m.pendingSessionLoad != "" && msg.Payload.SessionID == m.pendingSessionLoad {
+				break
+			}
 			// This might be a child session message from an agent tool.
 			if cmd := m.handleChildSessionMessage(msg); cmd != nil {
 				cmds = append(cmds, cmd)
@@ -797,6 +820,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !image.Pt(msg.X, msg.Y).In(m.layout.sidebar) {
 				if handled, cmd := m.chat.HandleMouseDown(x, y); handled {
 					m.lastClickTime = time.Now()
+					if m.chat.ClickCount() == 2 {
+						if navCmd := m.openSelectedChildSession(); navCmd != nil {
+							cmds = append(cmds, navCmd)
+						}
+					}
 					if cmd != nil {
 						cmds = append(cmds, cmd)
 					}
@@ -1116,6 +1144,12 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	// Load nested tool calls for agent/agentic_fetch tools.
 	m.loadNestedToolCalls(items)
 
+	// Restore TaskNodeItems for agent tool calls with task graphs.
+	// During live streaming these are created by ensureTaskNodes in
+	// appendSessionMessage, but when restoring a session we must recreate
+	// them from the stored message data.
+	items = m.restoreTaskNodes(items, toolResultMap)
+
 	// Restored sessions can contain incomplete assistant/tool messages left
 	// behind by interruption. Keep their content, but suppress loading UI when
 	// the coordinator is no longer actively working that session.
@@ -1231,6 +1265,83 @@ func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
 	}
 }
 
+// restoreTaskNodes recreates TaskNodeItems for agent tool calls that contain a
+// task graph. During live streaming these are created by ensureTaskNodes in
+// appendSessionMessage, but when restoring a session (e.g. returning from a
+// child session) we must recreate them from the stored message data.
+// It also propagates completion status from the agent tool result to each node.
+func (m *UI) restoreTaskNodes(items []chat.MessageItem, toolResultMap map[string]message.ToolResult) []chat.MessageItem {
+	var result []chat.MessageItem
+	for _, item := range items {
+		result = append(result, item)
+
+		toolItem, ok := item.(chat.ToolMessageItem)
+		if !ok || toolItem.ToolCall().Name != agent.AgentToolName {
+			continue
+		}
+
+		var params agentToolParams
+		if err := json.Unmarshal([]byte(toolItem.ToolCall().Input), &params); err != nil || len(params.Tasks) <= 1 {
+			continue
+		}
+
+		// Mark the parent agent item so the inline task list renders summary only.
+		if agentItem, ok := item.(*chat.AgentToolMessageItem); ok {
+			agentItem.SetHasTaskNodes(true)
+		}
+
+		// Parse task completion statuses from the agent tool result.
+		var statuses map[string]message.ToolResultSubtaskStatus
+		if tr, exists := toolResultMap[toolItem.ToolCall().ID]; exists {
+			statuses = chat.ParseTaskStatusesFromAgentResult(&tr)
+		}
+		if statuses == nil {
+			statuses = make(map[string]message.ToolResultSubtaskStatus)
+		}
+
+		tc := toolItem.ToolCall()
+		messageID := toolItem.MessageID()
+		for _, task := range params.Tasks {
+			taskID := strings.TrimSpace(task.ID)
+			if taskID == "" {
+				continue
+			}
+			childSessionID := m.com.App.Sessions.CreateAgentToolSessionID(
+				messageID,
+				fmt.Sprintf("%s::%s", tc.ID, taskID),
+			)
+			node := chat.NewTaskNodeItem(
+				m.com.Styles,
+				tc.ID,
+				taskID,
+				strings.TrimSpace(task.Description),
+				strings.TrimSpace(task.Prompt),
+				task.SubagentType,
+				childSessionID,
+			)
+			if status, ok := statuses[taskID]; ok {
+				node.SetCompletionStatus(status)
+			}
+			result = append(result, node)
+		}
+	}
+	return result
+}
+
+// propagateTaskStatusesToNodes updates TaskNodeItems with completion statuses
+// parsed from an agent tool result (lines like "- task_id: completed").
+func (m *UI) propagateTaskStatusesToNodes(toolCallID string, result *message.ToolResult) {
+	statuses := chat.ParseTaskStatusesFromAgentResult(result)
+	for taskID, status := range statuses {
+		nodeID := chat.TaskNodeItemID(toolCallID, taskID)
+		if nodeItem := m.chat.MessageItem(nodeID); nodeItem != nil {
+			if taskNode, ok := nodeItem.(*chat.TaskNodeItem); ok {
+				taskNode.SetCompletionStatus(status)
+			}
+		}
+	}
+}
+
 // appendSessionMessage appends a new message to the current session in the chat
 // if the message is a tool result it will update the corresponding tool call message
 func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
@@ -1294,6 +1405,10 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 			}
 			if toolMsgItem, ok := toolItem.(chat.ToolMessageItem); ok {
 				toolMsgItem.SetResult(&tr)
+				// Propagate task statuses to TaskNodeItems when the agent result arrives.
+				if toolMsgItem.ToolCall().Name == agent.AgentToolName {
+					m.propagateTaskStatusesToNodes(tr.ToolCallID, &tr)
+				}
 				if m.chat.Follow() {
 					if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
 						cmds = append(cmds, cmd)
@@ -1398,7 +1513,14 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 			}
 		}
 		if existingToolItem == nil {
-			items = append(items, chat.NewToolMessageItem(m.com.Styles, msg.ID, tc, nil, isCanceled))
+			newItem := chat.NewToolMessageItem(m.com.Styles, msg.ID, tc, nil, isCanceled)
+			items = append(items, newItem)
+		}
+		// Create TaskNodeItems for agent tool calls with a tasks array.
+		// This runs for both new and existing tool items because during
+		// streaming the tasks JSON may arrive after the initial tool call.
+		if tc.Name == agent.AgentToolName {
+			items = append(items, m.ensureTaskNodes(msg.ID, tc, existingToolItem)...)
 		}
 	}
 
@@ -1421,6 +1543,55 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 	return tea.Sequence(cmds...)
 }
 
+// ensureTaskNodes creates TaskNodeItems for an agent tool call with tasks.
+// It also marks the parent AgentToolMessageItem so it only shows the summary.
+func (m *UI) ensureTaskNodes(messageID string, tc message.ToolCall, existing chat.MessageItem) []chat.MessageItem {
+	var params agentToolParams
+	if err := json.Unmarshal([]byte(tc.Input), &params); err != nil || len(params.Tasks) <= 1 {
+		return nil
+	}
+
+	// Resolve the agent tool item — either from the existing item or from
+	// the chat list (if ensureTaskNodes is called for a newly created item
+	// that hasn't been appended yet, existing is nil, but the item was just
+	// appended in the same batch so check the chat too).
+	agentItem, _ := existing.(*chat.AgentToolMessageItem)
+	if agentItem == nil {
+		if item := m.chat.MessageItem(tc.ID); item != nil {
+			agentItem, _ = item.(*chat.AgentToolMessageItem)
+		}
+	}
+	if agentItem != nil {
+		agentItem.SetHasTaskNodes(true)
+	}
+
+	var items []chat.MessageItem
+	for _, task := range params.Tasks {
+		taskID := strings.TrimSpace(task.ID)
+		if taskID == "" {
+			continue
+		}
+		nodeID := chat.TaskNodeItemID(tc.ID, taskID)
+		if m.chat.MessageItem(nodeID) != nil {
+			continue
+		}
+		childSessionID := m.com.App.Sessions.CreateAgentToolSessionID(
+			messageID,
+			fmt.Sprintf("%s::%s", tc.ID, taskID),
+		)
+		items = append(items, chat.NewTaskNodeItem(
+			m.com.Styles,
+			tc.ID,
+			taskID,
+			strings.TrimSpace(task.Description),
+			strings.TrimSpace(task.Prompt),
+			task.SubagentType,
+			childSessionID,
+		))
+	}
+	return items
+}
+
 func (m *UI) removeToolItemsForMessage(messageID string, keepToolCallIDs map[string]struct{}) {
 	var toolItemIDs []string
 	for i := 0; i < m.chat.Len(); i++ {
@@ -1433,9 +1604,12 @@ func (m *UI) removeToolItemsForMessage(messageID string, keepToolCallIDs map[str
 		}
 		toolItemIDs = append(toolItemIDs, item.ToolCall().ID)
 	}
+	removedToolCallIDs := make(map[string]struct{}, len(toolItemIDs))
 	for _, toolItemID := range toolItemIDs {
+		removedToolCallIDs[toolItemID] = struct{}{}
 		m.chat.RemoveMessage(toolItemID)
 	}
+	m.chat.RemoveTaskNodesForRemovedToolCalls(removedToolCallIDs)
 }
 
 func syncNestedToolsForMessage(
@@ -1465,6 +1639,39 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 	_, toolCallID, ok := m.com.App.Sessions.ParseAgentToolSessionID(childSessionID)
 	if !ok {
 		return nil
+	}
+
+	// If this is a task-graph task session (toolCallID = "tc.ID::taskID"),
+	// update the corresponding TaskNodeItem status directly.
+	if event.Payload.Role == message.Assistant {
+		if tcPart, taskPart, found := strings.Cut(toolCallID, "::"); found && taskPart != "" {
+			baseTaskID, _, _ := strings.Cut(taskPart, "::")
+			nodeID := chat.TaskNodeItemID(tcPart, baseTaskID)
+			if nodeItem := m.chat.MessageItem(nodeID); nodeItem != nil {
+				if taskNode, ok := nodeItem.(*chat.TaskNodeItem); ok {
+					if statusText, isError, ok := childSessionStatus(event.Payload); ok {
+						if event.Type == pubsub.DeletedEvent {
+							taskNode.ClearChildSessionStatus()
+						} else {
+							taskNode.SetChildSessionStatus(statusText, isError)
+						}
+					} else {
+						taskNode.ClearChildSessionStatus()
+					}
+					// Detect task completion from child session finish reason.
+					if finish := event.Payload.FinishPart(); finish != nil {
+						switch finish.Reason {
+						case message.FinishReasonEndTurn:
+							taskNode.SetCompletionStatus(message.ToolResultSubtaskStatusCompleted)
+						case message.FinishReasonError:
+							taskNode.SetCompletionStatus(message.ToolResultSubtaskStatusFailed)
+						case message.FinishReasonCanceled:
+							taskNode.SetCompletionStatus(message.ToolResultSubtaskStatusCanceled)
+						}
+					}
+				}
+			}
+		}
 	}
 
 	// Find the parent agent tool item.

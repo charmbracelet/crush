@@ -249,6 +249,58 @@ func (q *Queries) ListSessions(ctx context.Context) ([]Session, error) {
 	return items, nil
 }
 
+const listSessionsByParentID = `-- name: ListSessionsByParentID :many
+SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, collaboration_mode, last_prompt_tokens, last_completion_tokens, workspace_cwd, kind, handoff_source_session_id, handoff_goal, handoff_draft_prompt, handoff_relevant_files, permission_mode
+FROM sessions
+WHERE parent_session_id = ?
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListSessionsByParentID(ctx context.Context, parentSessionID sql.NullString) ([]Session, error) {
+	rows, err := q.query(ctx, q.listSessionsByParentIDStmt, listSessionsByParentID, parentSessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Session{}
+	for rows.Next() {
+		var i Session
+		if err := rows.Scan(
+			&i.ID,
+			&i.ParentSessionID,
+			&i.Title,
+			&i.MessageCount,
+			&i.PromptTokens,
+			&i.CompletionTokens,
+			&i.Cost,
+			&i.UpdatedAt,
+			&i.CreatedAt,
+			&i.SummaryMessageID,
+			&i.Todos,
+			&i.CollaborationMode,
+			&i.LastPromptTokens,
+			&i.LastCompletionTokens,
+			&i.WorkspaceCwd,
+			&i.Kind,
+			&i.HandoffSourceSessionID,
+			&i.HandoffGoal,
+			&i.HandoffDraftPrompt,
+			&i.HandoffRelevantFiles,
+			&i.PermissionMode,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const renameSession = `-- name: RenameSession :exec
 UPDATE sessions
 SET

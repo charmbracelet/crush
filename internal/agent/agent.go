@@ -38,8 +38,11 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/checkpoint"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/filetracker"
+	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -286,6 +289,9 @@ type sessionAgent struct {
 	disableAutoSummarize bool
 	isYolo               bool
 	notify               pubsub.Publisher[notify.Notification]
+	hookManager          *hooks.Manager
+	filetracker          filetracker.Service
+	checkpoint           checkpoint.Service
 
 	queueMu        sync.Mutex
 	messageQueue   *csync.Map[string, []SessionAgentCall]
@@ -310,6 +316,9 @@ type SessionAgentOptions struct {
 	ReviewToolResult     func(context.Context, string, message.ToolResult, session.PermissionMode) (message.ToolResult, error)
 	Tools                []fantasy.AgentTool
 	Notify               pubsub.Publisher[notify.Notification]
+	HookManager          *hooks.Manager
+	Filetracker          filetracker.Service
+	Checkpoint           checkpoint.Service
 }
 
 type sessionAgentRuntimeConfig struct {
@@ -354,6 +363,9 @@ func NewSessionAgent(
 		tools:                csync.NewSliceFrom(opts.Tools),
 		isYolo:               opts.IsYolo,
 		notify:               opts.Notify,
+		hookManager:          opts.HookManager,
+		filetracker:          opts.Filetracker,
+		checkpoint:           opts.Checkpoint,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, context.CancelFunc](),
 		pausedQueues:         csync.NewMap[string, bool](),
@@ -386,6 +398,21 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	if a.IsSessionBusy(call.SessionID) {
 		a.enqueueQueuedCall(call.SessionID, call)
 		return nil, nil
+	}
+
+	if a.hookManager != nil {
+		a.hookManager.RunSessionStart(ctx, call.SessionID)
+		defer a.hookManager.RunSessionEnd(ctx, call.SessionID)
+	}
+
+	if a.hookManager != nil && call.Prompt != "" {
+		a.hookManager.RunUserPromptSubmit(ctx, call.SessionID, call.Prompt)
+	}
+
+	if a.checkpoint != nil && !a.isSubAgent {
+		if _, cpErr := a.checkpoint.CreateCheckpoint(ctx, call.SessionID, ""); cpErr != nil {
+			slog.Warn("Failed to create checkpoint", "error", cpErr, "session_id", call.SessionID)
+		}
 	}
 
 	runtimeConfig, err := a.refreshCallConfigIfNeeded(ctx, &call)
@@ -1346,6 +1373,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	// NOTE: This is done after checking for summarization and queued messages
 	// to avoid sending a spurious "agent finished" notification when the agent
 	// is about to continue working.
+	if a.hookManager != nil && !shouldSummarize {
+		a.hookManager.RunStop(ctx, call.SessionID)
+	}
+
 	queuedMessages, ok := a.messageQueue.Get(call.SessionID)
 	hasQueuedMessages := ok && len(queuedMessages) > 0
 	if !call.NonInteractive && a.notify != nil && !shouldSummarize && !hasQueuedMessages {
@@ -1584,6 +1615,10 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return nil
 	}
 
+	if a.hookManager != nil {
+		a.hookManager.RunPreCompact(ctx, sessionID)
+	}
+
 	microCompacted, err := a.microCompactSessionMessages(ctx, sessionID, largeModel, providerCtx, msgs)
 	if err != nil {
 		return err
@@ -1647,6 +1682,11 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	}, plugin.SessionCompactingOutput{})
 	if err != nil {
 		return err
+	}
+
+	if a.filetracker != nil {
+		fileContext := a.buildRecentFileContext(ctx, sessionID, int64(largeModel.CatwalkCfg.ContextWindow))
+		compacting.Context = append(compacting.Context, fileContext...)
 	}
 
 	genCtx, cancel := context.WithCancel(ctx)
@@ -1765,6 +1805,9 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 
 	currentSession.SummaryMessageID = summaryMessage.ID
 	_, err = a.sessions.Save(genCtx, currentSession)
+	if err == nil && a.hookManager != nil {
+		a.hookManager.RunPostCompact(ctx, sessionID)
+	}
 	return err
 }
 

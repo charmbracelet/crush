@@ -354,6 +354,12 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 						responseText = buildBashResponseText(metadata.Output, execWorkingDir)
 					}
 				}
+				if hookMgr != nil {
+					hookMgr.RunPostToolUse(ctx, BashToolName, map[string]any{
+						"command":     commandToRun,
+						"working_dir": execWorkingDir,
+					}, metadata.Output, sessionID)
+				}
 				return fantasy.WithResponseMetadata(fantasy.NewTextResponse(responseText), metadata), nil
 			}
 		})

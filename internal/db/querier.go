@@ -6,23 +6,32 @@ package db
 
 import (
 	"context"
+	"database/sql"
 )
 
 type Querier interface {
+	AddCheckpointFile(ctx context.Context, arg AddCheckpointFileParams) error
+	CountCheckpointFiles(ctx context.Context, checkpointID string) (int64, error)
+	CreateCheckpoint(ctx context.Context, arg CreateCheckpointParams) (Checkpoint, error)
 	CreateFile(ctx context.Context, arg CreateFileParams) (File, error)
 	CreateMessage(ctx context.Context, arg CreateMessageParams) (Message, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
+	DeleteCheckpoint(ctx context.Context, id string) error
 	DeleteFile(ctx context.Context, id string) error
 	DeleteMessage(ctx context.Context, id string) error
 	DeleteSession(ctx context.Context, id string) error
+	DeleteSessionCheckpoints(ctx context.Context, sessionID string) error
 	DeleteSessionFiles(ctx context.Context, sessionID string) error
 	DeleteSessionMessages(ctx context.Context, sessionID string) error
 	GetAverageResponseTime(ctx context.Context) (int64, error)
+	GetCheckpoint(ctx context.Context, id string) (Checkpoint, error)
+	GetCheckpointByMessageID(ctx context.Context, messageID string) (Checkpoint, error)
 	GetFile(ctx context.Context, id string) (File, error)
 	GetFileByPathAndSession(ctx context.Context, arg GetFileByPathAndSessionParams) (File, error)
 	GetFileRead(ctx context.Context, arg GetFileReadParams) (ReadFile, error)
 	GetHourDayHeatmap(ctx context.Context) ([]GetHourDayHeatmapRow, error)
 	GetLastSession(ctx context.Context) (Session, error)
+	GetLatestSessionCheckpoint(ctx context.Context, sessionID string) (Checkpoint, error)
 	GetMessage(ctx context.Context, id string) (Message, error)
 	GetRecentActivity(ctx context.Context) ([]GetRecentActivityRow, error)
 	GetSessionByID(ctx context.Context, id string) (Session, error)
@@ -33,13 +42,16 @@ type Querier interface {
 	GetUsageByHour(ctx context.Context) ([]GetUsageByHourRow, error)
 	GetUsageByModel(ctx context.Context) ([]GetUsageByModelRow, error)
 	ListAllUserMessages(ctx context.Context) ([]Message, error)
+	ListCheckpointFiles(ctx context.Context, checkpointID string) ([]File, error)
 	ListFilesByPath(ctx context.Context, path string) ([]File, error)
 	ListFilesBySession(ctx context.Context, sessionID string) ([]File, error)
 	ListLatestSessionFiles(ctx context.Context, sessionID string) ([]File, error)
 	ListMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
 	ListNewFiles(ctx context.Context) ([]File, error)
+	ListSessionCheckpoints(ctx context.Context, sessionID string) ([]Checkpoint, error)
 	ListSessionReadFiles(ctx context.Context, sessionID string) ([]ReadFile, error)
 	ListSessions(ctx context.Context) ([]Session, error)
+	ListSessionsByParentID(ctx context.Context, parentSessionID sql.NullString) ([]Session, error)
 	ListUserMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
 	RecordFileRead(ctx context.Context, arg RecordFileReadParams) error
 	RenameSession(ctx context.Context, arg RenameSessionParams) error

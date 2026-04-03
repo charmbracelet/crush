@@ -14,3 +14,40 @@ Platform: {{.Platform}}
 Today's date: {{.Date}}
 </env>
 
+{{if .ContextFiles}}
+{{if .GlobalContextFiles}}
+<memory>
+<!-- Global rules (lower priority) -->
+{{range .GlobalContextFiles}}
+<file path="{{.Path}}">
+{{.Content}}
+</file>
+{{end}}
+
+<!-- Project-specific rules (higher priority) -->
+{{range .ContextFiles}}
+<file path="{{.Path}}">
+{{.Content}}
+</file>
+{{end}}
+</memory>
+{{else}}
+<memory>
+{{range .ContextFiles}}
+<file path="{{.Path}}">
+{{.Content}}
+</file>
+{{end}}
+</memory>
+{{end}}
+{{else if .GlobalContextFiles}}
+<memory>
+<!-- Global rules -->
+{{range .GlobalContextFiles}}
+<file path="{{.Path}}">
+{{.Content}}
+</file>
+{{end}}
+</memory>
+{{end}}
+

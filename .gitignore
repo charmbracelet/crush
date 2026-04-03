@@ -62,4 +62,4 @@ completions/crush.*sh
 .prettierignore
 .task
 .factory
-.workbuddy
+.workbuddyignoredocs/

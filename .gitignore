@@ -20,7 +20,6 @@ go.work.sum
 
 # IDE specific files
 .idea/
-.vscode/
 *.swp
 *.swo
 
@@ -39,8 +38,6 @@ Thumbs.db
 /dist/
 
 # Local environment variables
-.env
-.env.local
 
 **/.crush/**
 
@@ -51,3 +48,5 @@ manpages/
 completions/crush.*sh
 .prettierignore
 .task
+config.bat
+node_modules

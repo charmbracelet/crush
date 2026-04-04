@@ -33,7 +33,7 @@ Users lose anonymous metrics/error reporting; no core coding or session behavior
 Must preserve startup, shutdown, session creation/deletion, and logging without the analytics hooks.
 
 ## Things that must be preserved while removing it
-Keep crash/error logging, session state, and user-facing auth/model features untouched.
+Keep crash/error logging, session state, user-facing auth/model features, and any valuable local-only diagnostics or metrics for power users untouched.
 
 ## Suggested removal order
 First or early; low-risk dependency cleanup before harder removals.
@@ -42,7 +42,8 @@ First or early; low-risk dependency cleanup before harder removals.
 - No PostHog or machineid dependency remains.
 - No telemetry init/send/flush hooks remain.
 - Disable-metrics config/docs removed or rewritten if obsolete.
+- Local-only diagnostics/metrics that are still useful to users remain available.
 - No behavior regressions outside metrics removal.
 
 ## Open questions / uncertainties
-- Whether any local-only diagnostic counters should stay even after remote telemetry is removed.
+- Distinguish clearly between remote telemetry that must go and local-only diagnostics that still provide user value.

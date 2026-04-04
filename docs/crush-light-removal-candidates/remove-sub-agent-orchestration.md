@@ -26,7 +26,7 @@ Users lose the ability to delegate work to nested agents or task sessions from i
 - Config: agent allowed_tools defaults and any task-agent config assumptions
 - Docs/tests: agent templates, agent testdata/fixtures, README or help copy mentioning sub-agents
 - API/server: any agent/session payload fields or session-title conventions used only for sub-agent runs
-- UI: nested session displays, agent task status text, prompt queue affordances
+- UI: remove user-facing references to nested sessions, agent task status text, and sub-agent affordances; internal queue assumptions matter less as long as they are not surfaced
 - Persistence/data model: task-session IDs and parent_session_id behavior must be preserved only where still needed by kept features
 
 ## Dependencies on kept features
@@ -46,4 +46,4 @@ Before removing parallel execution if parallel wrappers exist only to support ne
 
 ## Open questions / uncertainties
 - Whether title/task session helpers still serve any kept summarization/title-generation path after agent-tool removal.
-- Whether prompt queue UI assumes nested sessions exist.
+- Internal prompt-queue assumptions are lower priority than removing user-facing nested-session references from the UI.

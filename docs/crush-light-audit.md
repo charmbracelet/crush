@@ -3,7 +3,7 @@
 ## Audit scope
 - Repository root: `/home/runner/work/crush-light/crush-light`
 - Coverage basis: tracked repository content excluding `.git/` and `.github/agents/`
-- Reviewed paths: **982** total (**123** directories, **859** files)
+- Reviewed paths: **984** total (**123** directories, **861** files)
 - Audit artifacts:
   - `docs/crush-light-reviewed-paths.tsv`
   - `docs/crush-light-fantasy-usage.md`
@@ -35,15 +35,15 @@
 | Remove out-of-working-dir permission gate | `medium` | Planned branch: `draft/remove-out-of-working-dir-permission-gate` (body prepared in repo; remote PR creation blocked by single-branch PR tooling) | `docs/crush-light-removal-candidates/remove-out-of-working-dir-permission-gate.md` |
 | Remove todo support while keeping sessions | `medium` | Planned branch: `draft/remove-todo-support` (body prepared in repo; remote PR creation blocked by single-branch PR tooling) | `docs/crush-light-removal-candidates/remove-todo-support.md` |
 | Remove NixOS and Home Manager module support | `low` | Planned branch: `draft/remove-nix-home-manager-support` (body prepared in repo; remote PR creation blocked by single-branch PR tooling) | `docs/crush-light-removal-candidates/remove-nix-home-manager-support.md` |
+| Remove Sourcegraph tool | `low` | Planned branch: `draft/remove-sourcegraph-tool` (body prepared in repo; remote PR creation blocked by single-branch PR tooling) | `docs/crush-light-removal-candidates/remove-sourcegraph-tool.md` |
+| Remove Hyper provider support | `medium` | Planned branch: `draft/remove-hyper-provider-support` (body prepared in repo; remote PR creation blocked by single-branch PR tooling) | `docs/crush-light-removal-candidates/remove-hyper-provider-support.md` |
 | Track charm.land/fantasy usage | `high` | Planned branch: `draft/track-fantasy-usage` (references prepared in repo; dedicated remote PR still pending because only the current task branch can be opened from this environment) | `docs/crush-light-removal-candidates/track-fantasy-usage.md` |
 
 ## Additional removal candidates identified during review
 These are plausible light-variant follow-ons but are not in the mandatory removal set above.
 
-- `sourcegraph` tool surface if it is not folded into the remote-research-tools PR.
 - Desktop notifications (`internal/ui/notification/**`, `options.disable_notifications`) if further UX simplification is desired.
 - Update-checking and stats/dashboard surfaces (`internal/update/**`, `internal/cmd/stats*`) if the fork wants a smaller non-core command/UI set.
-- Hyper-specific provider support (`internal/agent/hyper/**`, `internal/oauth/hyper/**`) if the fork decides to trim provider-specific integrations beyond the protected OAuth/BYOK baseline.
 
 ## Explicit removal-target mapping
 - **MCP support** → `docs/crush-light-removal-candidates/remove-mcp-support.md`
@@ -74,8 +74,5 @@ These are plausible light-variant follow-ons but are not in the mandatory remova
 - Non-code repository assets (README, schema, workflows, scripts, release config, fixtures, and generated Swagger/schema artifacts) are included in the coverage file.
 
 ## Open questions
-- Should `sourcegraph` be removed together with the remote-research tools, or kept as the lone external search integration?
-- After LSP removal, which `view`/`edit` affordances need explicit non-LSP fallbacks documented or tested?
-- Is any remaining permission behavior still expected to enforce a working-directory boundary after the explicit gate is removed?
-- Should Hyper-specific provider integration stay in scope for a later light-variant cut, given the requirement to keep OAuth/BYOK support generically?
+- View may deserve a quick sanity-check after LSP removal, but edit/file operations do not need special non-LSP fallback planning.
 - If PR-comment access remains unavailable, what repository-approved workaround should be used for future fantasy usage annotations beyond the PR description and audit docs?

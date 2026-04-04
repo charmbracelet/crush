@@ -151,12 +151,14 @@ docs/crush-light-audit.md	file	reviewed	Audit or planning documentation added fo
 docs/crush-light-draft-prs/remove-mcp-support.md	file	reviewed	Audit or planning documentation added for crush-light removal tracking.	mcp		yes	no	no	yes
 docs/crush-light-fantasy-usage.md	file	reviewed	Audit or planning documentation added for crush-light removal tracking.			yes	no	no	yes
 docs/crush-light-removal-candidates/remove-lsp-support.md	file	reviewed	Audit or planning documentation added for crush-light removal tracking.	lsp		yes	no	no	yes
+docs/crush-light-removal-candidates/remove-hyper-provider-support.md	file	reviewed	Audit or planning documentation added for crush-light removal tracking.			no	no	no	yes
 docs/crush-light-removal-candidates/remove-mcp-support.md	file	reviewed	Audit or planning documentation added for crush-light removal tracking.	mcp		yes	no	no	yes
 docs/crush-light-removal-candidates/remove-nix-home-manager-support.md	file	reviewed	Audit or planning documentation added for crush-light removal tracking. Nix/NixOS/Home Manager support or documentation surface.	nix-home-manager		no	no	no	yes
 docs/crush-light-removal-candidates/remove-out-of-working-dir-permission-gate.md	file	reviewed	Audit or planning documentation added for crush-light removal tracking.			yes	no	no	yes
 docs/crush-light-removal-candidates/remove-parallel-tool-execution.md	file	reviewed	Audit or planning documentation added for crush-light removal tracking. Parallel tool execution touch point or fixture.	parallel-tools		yes	no	no	yes
 docs/crush-light-removal-candidates/remove-posthog-analytics.md	file	reviewed	Audit or planning documentation added for crush-light removal tracking.			no	no	no	yes
 docs/crush-light-removal-candidates/remove-remote-research-tools.md	file	reviewed	Audit or planning documentation added for crush-light removal tracking.			yes	no	no	yes
+docs/crush-light-removal-candidates/remove-sourcegraph-tool.md	file	reviewed	Audit or planning documentation added for crush-light removal tracking.			no	no	no	yes
 docs/crush-light-removal-candidates/remove-sub-agent-orchestration.md	file	reviewed	Audit or planning documentation added for crush-light removal tracking.			yes	no	no	yes
 docs/crush-light-removal-candidates/remove-todo-support.md	file	reviewed	Audit or planning documentation added for crush-light removal tracking.			yes	no	no	yes
 docs/crush-light-removal-candidates/track-fantasy-usage.md	file	reviewed	Audit or planning documentation added for crush-light removal tracking.			yes	no	no	yes

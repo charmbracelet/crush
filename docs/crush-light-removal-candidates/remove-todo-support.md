@@ -10,7 +10,7 @@ Remove the `todos` tool and all todo persistence/serialization/UI/docs while pre
 Todo items and lists are explicitly required to be removed even though sessions must remain.
 
 ## Why the chosen risk level applies
-The tool itself is simple, but todos are now embedded in session types, DB migrations, server payloads, and tests. The future PR must clean those links without disturbing sessions.
+The tool itself is simple, but todos are now embedded in session types, the active schema/data model, server payloads, and tests. The future PR must clean those links without disturbing sessions, and it does not need to preserve the existing migration history verbatim in this fresh-start fork.
 
 ## User-visible behavior affected
 Users lose todo-list tracking in sessions; normal session creation, switching, summarization, and history remain.
@@ -18,11 +18,12 @@ Users lose todo-list tracking in sessions; normal session creation, switching, s
 ## Code entrypoints
 - `internal/agent/tools/todos.go`
 - `internal/session/session.go`
-- `internal/db/migrations/20250812000000_add_todos_to_sessions.sql`
+- `internal/db/models.go`
+- `internal/db/sql/*.sql`
 - `internal/server/server.go`
 
 ## Known touch points
-- Files/packages: todos tool, session service/types, db queries/models/migrations, workspace/backend/server session payloads, UI rendering that surfaces todos
+- Files/packages: todos tool, session service/types, active DB schema/queries/models, workspace/backend/server session payloads, UI rendering that surfaces todos
 - Config: disabled-tools docs/help may mention `todos`
 - Docs/tests: README/help copy, session/agent tests, fixtures using todo metadata
 - API/server: session read/write payloads and docs exposing todos
@@ -41,8 +42,9 @@ Can happen early; useful before slimming session payloads and before fantasy rep
 ## Acceptance criteria for the future implementation PR
 - No `todos` tool remains.
 - Session types, DB queries, API payloads, and UI no longer include todos.
+- The fork's effective initial schema/data model no longer includes todo state.
 - Sessions continue to work normally without todo state.
 - Tests updated to confirm session preservation without todos.
 
 ## Open questions / uncertainties
-- Whether any session summaries or title-generation prompts rely on todo metadata today.
+- If prompt text still mentions todo metadata anywhere, it can be updated directly as part of the removal without blocking the schema/tool cleanup.

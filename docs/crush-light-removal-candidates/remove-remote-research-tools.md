@@ -20,7 +20,6 @@ Users lose built-in remote search/fetch/download helpers and any agent flow that
 - `internal/agent/tools/download.go`
 - `internal/agent/tools/web_fetch.go`
 - `internal/agent/tools/web_search.go`
-- `internal/agent/tools/sourcegraph.go`
 
 ## Known touch points
 - Files/packages: the tool implementations above, fetch helper/types files, coordinator tool registration, templates/agentic_fetch*
@@ -34,7 +33,7 @@ Users lose built-in remote search/fetch/download helpers and any agent flow that
 Must preserve local `fetch`, `view`, `grep`, `glob`, and normal shell/file tools unless explicitly removed elsewhere.
 
 ## Things that must be preserved while removing it
-Keep local repository inspection tools and primary agent execution intact.
+Keep local repository inspection tools, the `sourcegraph` tool, and primary agent execution intact.
 
 ## Suggested removal order
 After or alongside sub-agent removal; before fantasy replacement.
@@ -43,7 +42,8 @@ After or alongside sub-agent removal; before fantasy replacement.
 - No `agentic_fetch`, `web_fetch`, `web_search`, or `download` tools remain.
 - Associated tool docs/tests/fixtures are removed or updated.
 - No UI or README copy advertises remote research/download helpers.
+- `sourcegraph` remains untouched for its own follow-up removal PR.
 - Core local tools remain functional.
 
 ## Open questions / uncertainties
-- Whether `sourcegraph` should be removed in the same PR or follow separately if maintainers want to keep one remote code-search tool.
+- None currently.

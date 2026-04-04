@@ -33,7 +33,7 @@ Agents stop advertising or using parallel tool calls; affected tools either beco
 Must preserve core tool availability, single-agent execution, and model switching.
 
 ## Things that must be preserved while removing it
-Keep tools functional sequentially where the feature is retained, and avoid entangling this work with fantasy replacement more than necessary.
+Keep tools functional sequentially where the feature is retained, and avoid entangling this work with fantasy replacement more than necessary. The retained providers/tools are expected to keep working once execution becomes sequential-only.
 
 ## Suggested removal order
 After removals that delete whole parallel-only tools (MCP/sub-agent/remote research) so fewer call sites remain; before fantasy replacement if it simplifies the swap.
@@ -45,4 +45,4 @@ After removals that delete whole parallel-only tools (MCP/sub-agent/remote resea
 - Retained tools still work sequentially.
 
 ## Open questions / uncertainties
-- Whether any retained provider/tool APIs depend on parallel metadata or batching behavior from fantasy.
+- None currently.

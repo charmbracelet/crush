@@ -1,0 +1,966 @@
+path	type	review_status	brief_notes	removal_candidate_tags	required_kept_tags	fantasy_usage	server_api_surface	configuration	tests_docs_build_release
+.	directory	reviewed	Repository root and aggregate audit scope.			no	no	no	yes
+.github	directory	reviewed	GitHub automation, labels, and release workflow surface.			no	no	no	yes
+.github/workflows	directory	reviewed	GitHub automation, labels, and release workflow surface. CI, release, schema, and security workflow definitions.			no	no	no	yes
+internal	directory	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/agent	directory	reviewed	Agent runtime, prompt templates, tools, and regression fixtures.			no	no	no	no
+internal/agent/hyper	directory	reviewed	Agent runtime, prompt templates, tools, and regression fixtures.			no	no	no	no
+internal/agent/notify	directory	reviewed	Agent runtime, prompt templates, tools, and regression fixtures.			no	no	no	no
+internal/agent/prompt	directory	reviewed	Agent runtime, prompt templates, tools, and regression fixtures.			no	no	no	no
+internal/agent/templates	directory	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tool or prompt documentation artifact.			no	no	no	yes
+internal/agent/testdata	directory	reviewed	Agent runtime, prompt templates, tools, and regression fixtures.			no	no	no	no
+internal/agent/testdata/TestCoderAgent	directory	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/anthropic-sonnet	directory	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/openai-gpt-5	directory	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/openrouter-kimi-k2	directory	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/zai-glm4.6	directory	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/tools	directory	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface.			no	no	no	no
+internal/agent/tools/mcp	directory	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. MCP integration surface targeted for removal.	mcp		no	no	no	no
+internal/agent/tools/testdata	directory	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface.			no	no	no	no
+internal/ansiext	directory	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/app	directory	reviewed	Application wiring for services, config, agent coordination, and lifecycle.		server-api	no	no	no	no
+internal/backend	directory	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/client	directory	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/cmd	directory	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/cmd/gitignore	directory	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/cmd/stats	directory	reviewed	User-facing stats/dashboard tooling; additional light-variant removal candidate.			no	no	no	yes
+internal/commands	directory	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/config	directory	reviewed	Configuration schema and load/merge logic for kept and removable features.	mcp;lsp;nix-home-manager;sub-agents;parallel-tools	oauth-and-byok;model-picker	no	no	yes	no
+internal/csync	directory	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/db	directory	reviewed	SQLite schema, migrations, or queries with session/todo persistence touch points.	todos	sessions-and-history	no	no	no	no
+internal/db/migrations	directory	reviewed	SQLite schema, migrations, or queries with session/todo persistence touch points.	todos	sessions-and-history	no	no	no	no
+internal/db/sql	directory	reviewed	SQLite schema, migrations, or queries with session/todo persistence touch points.	todos	sessions-and-history	no	no	no	no
+internal/diff	directory	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/env	directory	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/event	directory	reviewed	Telemetry and analytics implementation using PostHog.	posthog-analytics		no	no	no	no
+internal/filepathext	directory	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/filetracker	directory	reviewed	Per-session file read tracking that must remain.		sessions-and-history	no	no	no	no
+internal/format	directory	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/fsext	directory	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/history	directory	reviewed	Session history and file snapshot support that must remain.		sessions-and-history	no	no	no	no
+internal/home	directory	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/log	directory	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/lsp	directory	reviewed	LSP integration or LSP-facing tool surface targeted for removal.	lsp		no	no	no	no
+internal/lsp/util	directory	reviewed	LSP integration or LSP-facing tool surface targeted for removal.	lsp		no	no	no	no
+internal/message	directory	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/oauth	directory	reviewed	OAuth/provider-auth surface that must remain.		oauth-and-byok	no	no	no	no
+internal/oauth/copilot	directory	reviewed	OAuth/provider-auth surface that must remain.		oauth-and-byok	no	no	no	no
+internal/oauth/hyper	directory	reviewed	OAuth/provider-auth surface that must remain.		oauth-and-byok	no	no	no	no
+internal/permission	directory	reviewed	Permission request flow and working-directory gate logic.	permission-gate		no	no	no	no
+internal/projects	directory	reviewed	Workspace/project service surface supporting kept session and API behavior.		server-api	no	no	no	no
+internal/proto	directory	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/pubsub	directory	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/server	directory	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/session	directory	reviewed	Session persistence and state that must remain while todo support is removed.	todos	sessions-and-history	no	no	no	no
+internal/shell	directory	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/skills	directory	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/skills/builtin	directory	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/skills/builtin/crush-config	directory	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/stringext	directory	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/swagger	directory	reviewed	Generated Swagger/OpenAPI artifacts that must remain except for removed-feature endpoints.		server-api;swagger-docs	no	yes	no	no
+internal/ui	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/anim	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/attachments	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/chat	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/common	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/completions	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/dialog	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/diffview	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/diffview/testdata	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/diffview/testdata/TestDiffView	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Split	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Split/CustomContextLines	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Split/Default	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Split/LargeWidth	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Split/MultipleHunks	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Split/Narrow	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Split/NoLineNumbers	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Split/NoSyntaxHighlight	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Split/SmallWidth	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Unified	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Unified/CustomContextLines	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Unified/Default	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Unified/LargeWidth	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Unified/MultipleHunks	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Unified/Narrow	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Unified/NoLineNumbers	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Unified/NoSyntaxHighlight	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Unified/SmallWidth	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Split	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Unified	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewLineBreakIssue	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewTabs	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Split	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Unified	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Split	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Unified	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Split	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Unified	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestUdiff	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestUdiff/ToUnifiedDiff	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestUdiff/ToUnifiedDiff/DefaultContextLines	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestUdiff/ToUnifiedDiff/DefaultContextLinesPlusOne	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestUdiff/ToUnifiedDiff/DefaultContextLinesPlusTwo	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/image	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/list	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/logo	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/model	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/notification	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/styles	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/util	directory	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/update	directory	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/version	directory	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/workspace	directory	reviewed	Workspace/project service surface supporting kept session and API behavior.		server-api	no	no	no	no
+scripts	directory	reviewed	Build, lint, packaging, or repository tooling artifact.			no	no	no	yes
+.gitattributes	file	reviewed	Build, lint, packaging, or repository tooling artifact.			no	no	no	yes
+.github/CODEOWNERS	file	reviewed	GitHub automation, labels, and release workflow surface.			no	no	no	yes
+.github/cla-signatures.json	file	reviewed	GitHub automation, labels, and release workflow surface.			no	no	no	yes
+.github/dependabot.yml	file	reviewed	GitHub automation, labels, and release workflow surface.			no	no	no	yes
+.github/entitlements.plist	file	reviewed	GitHub automation, labels, and release workflow surface.			no	no	no	yes
+.github/labeler.yml	file	reviewed	GitHub automation, labels, and release workflow surface.			no	no	no	yes
+.github/workflows/build.yml	file	reviewed	GitHub automation, labels, and release workflow surface. CI, release, schema, and security workflow definitions.			no	no	no	yes
+.github/workflows/cla.yml	file	reviewed	GitHub automation, labels, and release workflow surface. CI, release, schema, and security workflow definitions.			no	no	no	yes
+.github/workflows/labeler.yml	file	reviewed	GitHub automation, labels, and release workflow surface. CI, release, schema, and security workflow definitions.			no	no	no	yes
+.github/workflows/lint-sync.yml	file	reviewed	GitHub automation, labels, and release workflow surface. CI, release, schema, and security workflow definitions.			no	no	no	yes
+.github/workflows/lint.yml	file	reviewed	GitHub automation, labels, and release workflow surface. CI, release, schema, and security workflow definitions.			no	no	no	yes
+.github/workflows/nightly.yml	file	reviewed	GitHub automation, labels, and release workflow surface. CI, release, schema, and security workflow definitions.			no	no	no	yes
+.github/workflows/release.yml	file	reviewed	GitHub automation, labels, and release workflow surface. CI, release, schema, and security workflow definitions.			no	no	no	yes
+.github/workflows/schema-update.yml	file	reviewed	GitHub automation, labels, and release workflow surface. CI, release, schema, and security workflow definitions.			no	no	no	yes
+.github/workflows/security.yml	file	reviewed	GitHub automation, labels, and release workflow surface. CI, release, schema, and security workflow definitions.			no	no	no	yes
+.github/workflows/snapshot.yml	file	reviewed	GitHub automation, labels, and release workflow surface. CI, release, schema, and security workflow definitions.			no	no	no	yes
+.gitignore	file	reviewed	Build, lint, packaging, or repository tooling artifact.			no	no	no	yes
+.golangci.yml	file	reviewed	Build, lint, packaging, or repository tooling artifact.			no	no	no	yes
+.goreleaser.yml	file	reviewed	Build, lint, packaging, or repository tooling artifact.			no	no	no	yes
+AGENTS.md	file	reviewed	Top-level documentation or repository policy file.			yes	no	no	yes
+CLA.md	file	reviewed	Top-level documentation or repository policy file.			no	no	no	yes
+LICENSE.md	file	reviewed	Top-level documentation or repository policy file.			no	no	no	yes
+README.md	file	reviewed	Top-level documentation or repository policy file.			no	no	no	yes
+Taskfile.yaml	file	reviewed	Build, lint, packaging, or repository tooling artifact.			yes	no	no	yes
+crush.json	file	reviewed	Configuration example or generated schema surface.			no	no	yes	yes
+go.mod	file	reviewed	Top-level dependency or entrypoint surface.			yes	no	no	yes
+go.sum	file	reviewed	Top-level dependency or entrypoint surface.			yes	no	no	yes
+internal/agent/.env.sample	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures.			no	no	no	no
+internal/agent/agent.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures.			yes	no	no	no
+internal/agent/agent_test.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			yes	no	no	yes
+internal/agent/agent_tool.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Sub-agent or remote research tooling surface targeted for removal. Parallel tool execution touch point or fixture.	sub-agents;parallel-tools		yes	no	no	no
+internal/agent/agentic_fetch_tool.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Sub-agent or remote research tooling surface targeted for removal. Parallel tool execution touch point or fixture.	sub-agents;parallel-tools		yes	no	no	no
+internal/agent/common_test.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			yes	no	no	yes
+internal/agent/coordinator.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures.			yes	no	no	no
+internal/agent/coordinator_test.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			yes	no	no	yes
+internal/agent/errors.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures.			no	no	no	no
+internal/agent/event.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures.			yes	no	no	no
+internal/agent/hyper/provider.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures.			yes	no	no	no
+internal/agent/hyper/provider.json	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures.			yes	no	no	no
+internal/agent/loop_detection.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures.			yes	no	no	no
+internal/agent/loop_detection_test.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			yes	no	no	yes
+internal/agent/notify/notify.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures.			no	no	no	no
+internal/agent/prompt/prompt.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures.			no	no	no	no
+internal/agent/prompts.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures.			no	no	no	no
+internal/agent/templates/agent_tool.md	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Sub-agent or remote research tooling surface targeted for removal. Tool or prompt documentation artifact.	sub-agents		no	no	no	yes
+internal/agent/templates/agentic_fetch.md	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Sub-agent or remote research tooling surface targeted for removal. Tool or prompt documentation artifact.	sub-agents		no	no	no	yes
+internal/agent/templates/agentic_fetch_prompt.md.tpl	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Sub-agent or remote research tooling surface targeted for removal. Tool or prompt documentation artifact.	sub-agents		no	no	no	yes
+internal/agent/templates/coder.md.tpl	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tool or prompt documentation artifact.			no	no	no	yes
+internal/agent/templates/initialize.md.tpl	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tool or prompt documentation artifact.			no	no	no	yes
+internal/agent/templates/summary.md	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tool or prompt documentation artifact.			no	no	no	yes
+internal/agent/templates/task.md.tpl	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tool or prompt documentation artifact.			no	no	no	yes
+internal/agent/templates/title.md	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tool or prompt documentation artifact.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/anthropic-sonnet/bash_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/anthropic-sonnet/download_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/anthropic-sonnet/fetch_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/anthropic-sonnet/glob_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/anthropic-sonnet/grep_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/anthropic-sonnet/ls_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/anthropic-sonnet/multiedit_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/anthropic-sonnet/parallel_tool_calls.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior. Parallel tool execution touch point or fixture.	parallel-tools		no	no	no	yes
+internal/agent/testdata/TestCoderAgent/anthropic-sonnet/read_a_file.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/anthropic-sonnet/simple_test.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/anthropic-sonnet/sourcegraph_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/anthropic-sonnet/update_a_file.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/anthropic-sonnet/write_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/openai-gpt-5/bash_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/openai-gpt-5/download_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/openai-gpt-5/fetch_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/openai-gpt-5/glob_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/openai-gpt-5/grep_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/openai-gpt-5/ls_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/openai-gpt-5/multiedit_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/openai-gpt-5/parallel_tool_calls.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior. Parallel tool execution touch point or fixture.	parallel-tools		no	no	no	yes
+internal/agent/testdata/TestCoderAgent/openai-gpt-5/read_a_file.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/openai-gpt-5/simple_test.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/openai-gpt-5/sourcegraph_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/openai-gpt-5/update_a_file.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/openai-gpt-5/write_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/openrouter-kimi-k2/bash_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/openrouter-kimi-k2/download_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/openrouter-kimi-k2/fetch_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/openrouter-kimi-k2/glob_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/openrouter-kimi-k2/grep_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/openrouter-kimi-k2/ls_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/openrouter-kimi-k2/multiedit_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/openrouter-kimi-k2/parallel_tool_calls.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior. Parallel tool execution touch point or fixture.	parallel-tools		no	no	no	yes
+internal/agent/testdata/TestCoderAgent/openrouter-kimi-k2/read_a_file.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/openrouter-kimi-k2/simple_test.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/openrouter-kimi-k2/sourcegraph_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/openrouter-kimi-k2/update_a_file.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/openrouter-kimi-k2/write_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/zai-glm4.6/bash_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/zai-glm4.6/download_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/zai-glm4.6/fetch_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/zai-glm4.6/glob_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/zai-glm4.6/grep_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/zai-glm4.6/ls_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/zai-glm4.6/multiedit_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/zai-glm4.6/parallel_tool_calls.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior. Parallel tool execution touch point or fixture.	parallel-tools		no	no	no	yes
+internal/agent/testdata/TestCoderAgent/zai-glm4.6/read_a_file.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/zai-glm4.6/simple_test.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/zai-glm4.6/sourcegraph_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/zai-glm4.6/update_a_file.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/testdata/TestCoderAgent/zai-glm4.6/write_tool.yaml	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior.			no	no	no	yes
+internal/agent/tools/bash.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface.			yes	no	no	no
+internal/agent/tools/bash.tpl	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface.			no	no	no	no
+internal/agent/tools/bash_test.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior. Built-in agent tool implementation or description surface.			yes	no	no	yes
+internal/agent/tools/context_test.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior. Built-in agent tool implementation or description surface.			no	no	no	yes
+internal/agent/tools/diagnostics.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. LSP integration or LSP-facing tool surface targeted for removal.	lsp		yes	no	no	no
+internal/agent/tools/diagnostics.md	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. Tool or prompt documentation artifact.			no	no	no	yes
+internal/agent/tools/download.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. Standalone download tool slated for removal in light variant. Parallel tool execution touch point or fixture.	remote-research-tools;parallel-tools		yes	no	no	no
+internal/agent/tools/download.md	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. Standalone download tool slated for removal in light variant. Tool or prompt documentation artifact.	remote-research-tools		no	no	no	yes
+internal/agent/tools/edit.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface.			yes	no	no	no
+internal/agent/tools/edit.md	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. Tool or prompt documentation artifact.			no	no	no	yes
+internal/agent/tools/fetch.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. Parallel tool execution touch point or fixture.	parallel-tools		yes	no	no	no
+internal/agent/tools/fetch.md	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. Tool or prompt documentation artifact.			no	no	no	yes
+internal/agent/tools/fetch_helpers.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface.			no	no	no	no
+internal/agent/tools/fetch_types.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface.			no	no	no	no
+internal/agent/tools/glob.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface.			yes	no	no	no
+internal/agent/tools/glob.md	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. Tool or prompt documentation artifact.			no	no	no	yes
+internal/agent/tools/grep.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface.			yes	no	no	no
+internal/agent/tools/grep.md	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. Tool or prompt documentation artifact.			no	no	no	yes
+internal/agent/tools/grep_test.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior. Built-in agent tool implementation or description surface.			no	no	no	yes
+internal/agent/tools/job_kill.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface.			yes	no	no	no
+internal/agent/tools/job_kill.md	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. Tool or prompt documentation artifact.			no	no	no	yes
+internal/agent/tools/job_output.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface.			yes	no	no	no
+internal/agent/tools/job_output.md	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. Tool or prompt documentation artifact.			no	no	no	yes
+internal/agent/tools/job_test.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior. Built-in agent tool implementation or description surface.			no	no	no	yes
+internal/agent/tools/list_mcp_resources.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. MCP integration surface targeted for removal. Parallel tool execution touch point or fixture.	mcp;parallel-tools		yes	no	no	no
+internal/agent/tools/list_mcp_resources.md	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. MCP integration surface targeted for removal. Tool or prompt documentation artifact.	mcp		no	no	no	yes
+internal/agent/tools/ls.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface.			yes	no	no	no
+internal/agent/tools/ls.md	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. Tool or prompt documentation artifact.			no	no	no	yes
+internal/agent/tools/lsp_restart.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. LSP integration or LSP-facing tool surface targeted for removal.	lsp		yes	no	no	no
+internal/agent/tools/lsp_restart.md	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. LSP integration or LSP-facing tool surface targeted for removal. Tool or prompt documentation artifact.	lsp		no	no	no	yes
+internal/agent/tools/mcp-tools.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. MCP integration surface targeted for removal.	mcp		yes	no	no	no
+internal/agent/tools/mcp/init.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. MCP integration surface targeted for removal.	mcp		no	no	no	no
+internal/agent/tools/mcp/init_test.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior. Built-in agent tool implementation or description surface. MCP integration surface targeted for removal.	mcp		no	no	no	yes
+internal/agent/tools/mcp/prompts.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. MCP integration surface targeted for removal.	mcp		no	no	no	no
+internal/agent/tools/mcp/resources.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. MCP integration surface targeted for removal.	mcp		no	no	no	no
+internal/agent/tools/mcp/tools.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. MCP integration surface targeted for removal.	mcp		no	no	no	no
+internal/agent/tools/mcp/tools_test.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior. Built-in agent tool implementation or description surface. MCP integration surface targeted for removal.	mcp		no	no	no	yes
+internal/agent/tools/multiedit.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface.			yes	no	no	no
+internal/agent/tools/multiedit.md	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. Tool or prompt documentation artifact.			no	no	no	yes
+internal/agent/tools/multiedit_test.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior. Built-in agent tool implementation or description surface.			no	no	no	yes
+internal/agent/tools/read_mcp_resource.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. MCP integration surface targeted for removal. Parallel tool execution touch point or fixture.	mcp;parallel-tools		yes	no	no	no
+internal/agent/tools/read_mcp_resource.md	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. MCP integration surface targeted for removal. Tool or prompt documentation artifact.	mcp		no	no	no	yes
+internal/agent/tools/references.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. LSP integration or LSP-facing tool surface targeted for removal.	lsp		yes	no	no	no
+internal/agent/tools/references.md	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. Tool or prompt documentation artifact.			no	no	no	yes
+internal/agent/tools/rg.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface.			no	no	no	no
+internal/agent/tools/safe.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface.			no	no	no	no
+internal/agent/tools/search.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface.			no	no	no	no
+internal/agent/tools/sourcegraph.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. Optional remote code-search tool candidate for light variant removal. Parallel tool execution touch point or fixture.	remote-research-tools;parallel-tools		yes	no	no	no
+internal/agent/tools/sourcegraph.md	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. Optional remote code-search tool candidate for light variant removal. Tool or prompt documentation artifact.	remote-research-tools		no	no	no	yes
+internal/agent/tools/testdata/grep.txt	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior. Built-in agent tool implementation or description surface.			no	no	no	yes
+internal/agent/tools/todos.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface.	todos		yes	no	no	no
+internal/agent/tools/todos.md	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. Tool or prompt documentation artifact.	todos		no	no	no	yes
+internal/agent/tools/tools.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface.			no	no	no	no
+internal/agent/tools/view.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface.			yes	no	no	no
+internal/agent/tools/view.md	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. Tool or prompt documentation artifact.			no	no	no	yes
+internal/agent/tools/view_test.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Tests or fixture data for agent behavior. Built-in agent tool implementation or description surface.			no	no	no	yes
+internal/agent/tools/web_fetch.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. Sub-agent or remote research tooling surface targeted for removal. Parallel tool execution touch point or fixture.	sub-agents;parallel-tools		yes	no	no	no
+internal/agent/tools/web_fetch.md	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. Tool or prompt documentation artifact.			no	no	no	yes
+internal/agent/tools/web_search.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. Sub-agent or remote research tooling surface targeted for removal. Parallel tool execution touch point or fixture.	sub-agents;parallel-tools		yes	no	no	no
+internal/agent/tools/web_search.md	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. Tool or prompt documentation artifact.			no	no	no	yes
+internal/agent/tools/write.go	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface.			yes	no	no	no
+internal/agent/tools/write.md	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures. Built-in agent tool implementation or description surface. Tool or prompt documentation artifact.			no	no	no	yes
+internal/ansiext/ansi.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/app/app.go	file	reviewed	Application wiring for services, config, agent coordination, and lifecycle.		server-api	yes	no	no	no
+internal/app/app_test.go	file	reviewed	Application wiring for services, config, agent coordination, and lifecycle.		server-api	no	no	no	yes
+internal/app/lsp_events.go	file	reviewed	Application wiring for services, config, agent coordination, and lifecycle. LSP integration or LSP-facing tool surface targeted for removal.	lsp	server-api	no	no	no	no
+internal/app/provider.go	file	reviewed	Application wiring for services, config, agent coordination, and lifecycle.		server-api	no	no	no	no
+internal/app/provider_test.go	file	reviewed	Application wiring for services, config, agent coordination, and lifecycle.		server-api	no	no	no	yes
+internal/app/resolve_session_test.go	file	reviewed	Application wiring for services, config, agent coordination, and lifecycle.		server-api	no	no	no	yes
+internal/backend/agent.go	file	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/backend/backend.go	file	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/backend/config.go	file	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/backend/events.go	file	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/backend/filetracker.go	file	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/backend/permission.go	file	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/backend/session.go	file	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/backend/util.go	file	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/client/client.go	file	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/client/config.go	file	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/client/dial_other.go	file	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/client/dial_windows.go	file	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/client/proto.go	file	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/cmd/dirs.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/cmd/dirs_test.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	yes
+internal/cmd/gitignore/default	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/cmd/gitignore/old	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/cmd/login.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/cmd/logs.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/cmd/models.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/cmd/projects.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/cmd/projects_test.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	yes
+internal/cmd/root.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/cmd/root_other.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/cmd/root_windows.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/cmd/run.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/cmd/schema.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/cmd/server.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/cmd/server_other.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/cmd/server_windows.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/cmd/session.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/cmd/stats.go	file	reviewed	User-facing stats/dashboard tooling; additional light-variant removal candidate.			no	no	no	yes
+internal/cmd/stats/AGENTS.md	file	reviewed	User-facing stats/dashboard tooling; additional light-variant removal candidate.			no	no	no	yes
+internal/cmd/stats/footer.svg	file	reviewed	User-facing stats/dashboard tooling; additional light-variant removal candidate.			no	no	no	yes
+internal/cmd/stats/header.svg	file	reviewed	User-facing stats/dashboard tooling; additional light-variant removal candidate.			no	no	no	yes
+internal/cmd/stats/heartbit.svg	file	reviewed	User-facing stats/dashboard tooling; additional light-variant removal candidate.			no	no	no	yes
+internal/cmd/stats/index.css	file	reviewed	User-facing stats/dashboard tooling; additional light-variant removal candidate.			no	no	no	yes
+internal/cmd/stats/index.html	file	reviewed	User-facing stats/dashboard tooling; additional light-variant removal candidate.			no	no	no	yes
+internal/cmd/stats/index.js	file	reviewed	User-facing stats/dashboard tooling; additional light-variant removal candidate.			no	no	no	yes
+internal/cmd/update_providers.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/commands/commands.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/commands/commands_test.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	yes
+internal/config/agent_id_test.go	file	reviewed	Configuration schema and load/merge logic for kept and removable features.	mcp;lsp;nix-home-manager;sub-agents;parallel-tools	oauth-and-byok;model-picker	no	no	yes	yes
+internal/config/attribution_migration_test.go	file	reviewed	Configuration schema and load/merge logic for kept and removable features.	mcp;lsp;nix-home-manager;sub-agents;parallel-tools	oauth-and-byok;model-picker	no	no	yes	yes
+internal/config/catwalk.go	file	reviewed	Configuration schema and load/merge logic for kept and removable features.	mcp;lsp;nix-home-manager;sub-agents;parallel-tools	oauth-and-byok;model-picker	no	no	yes	no
+internal/config/catwalk_test.go	file	reviewed	Configuration schema and load/merge logic for kept and removable features.	mcp;lsp;nix-home-manager;sub-agents;parallel-tools	oauth-and-byok;model-picker	no	no	yes	yes
+internal/config/config.go	file	reviewed	Configuration schema and load/merge logic for kept and removable features.	mcp;lsp;nix-home-manager;sub-agents;parallel-tools	oauth-and-byok;model-picker	no	no	yes	no
+internal/config/copilot.go	file	reviewed	Configuration schema and load/merge logic for kept and removable features.	mcp;lsp;nix-home-manager;sub-agents;parallel-tools	oauth-and-byok;model-picker	no	no	yes	no
+internal/config/docker_mcp.go	file	reviewed	Configuration schema and load/merge logic for kept and removable features.	mcp;lsp;nix-home-manager;sub-agents;parallel-tools	oauth-and-byok;model-picker	no	no	yes	no
+internal/config/docker_mcp_test.go	file	reviewed	Configuration schema and load/merge logic for kept and removable features.	mcp;lsp;nix-home-manager;sub-agents;parallel-tools	oauth-and-byok;model-picker	no	no	yes	yes
+internal/config/hyper.go	file	reviewed	Configuration schema and load/merge logic for kept and removable features.	mcp;lsp;nix-home-manager;sub-agents;parallel-tools	oauth-and-byok;model-picker	no	no	yes	no
+internal/config/hyper_test.go	file	reviewed	Configuration schema and load/merge logic for kept and removable features.	mcp;lsp;nix-home-manager;sub-agents;parallel-tools	oauth-and-byok;model-picker	no	no	yes	yes
+internal/config/init.go	file	reviewed	Configuration schema and load/merge logic for kept and removable features.	mcp;lsp;nix-home-manager;sub-agents;parallel-tools	oauth-and-byok;model-picker	no	no	yes	no
+internal/config/load.go	file	reviewed	Configuration schema and load/merge logic for kept and removable features.	mcp;lsp;nix-home-manager;sub-agents;parallel-tools	oauth-and-byok;model-picker	no	no	yes	no
+internal/config/load_bench_test.go	file	reviewed	Configuration schema and load/merge logic for kept and removable features.	mcp;lsp;nix-home-manager;sub-agents;parallel-tools	oauth-and-byok;model-picker	no	no	yes	yes
+internal/config/load_test.go	file	reviewed	Configuration schema and load/merge logic for kept and removable features.	mcp;lsp;nix-home-manager;sub-agents;parallel-tools	oauth-and-byok;model-picker	no	no	yes	yes
+internal/config/lsp_defaults_test.go	file	reviewed	LSP integration or LSP-facing tool surface targeted for removal. Configuration schema and load/merge logic for kept and removable features.	lsp;mcp;nix-home-manager;sub-agents;parallel-tools	oauth-and-byok;model-picker	no	no	yes	yes
+internal/config/provider.go	file	reviewed	Configuration schema and load/merge logic for kept and removable features.	mcp;lsp;nix-home-manager;sub-agents;parallel-tools	oauth-and-byok;model-picker	no	no	yes	no
+internal/config/provider_empty_test.go	file	reviewed	Configuration schema and load/merge logic for kept and removable features.	mcp;lsp;nix-home-manager;sub-agents;parallel-tools	oauth-and-byok;model-picker	no	no	yes	yes
+internal/config/provider_test.go	file	reviewed	Configuration schema and load/merge logic for kept and removable features.	mcp;lsp;nix-home-manager;sub-agents;parallel-tools	oauth-and-byok;model-picker	no	no	yes	yes
+internal/config/recent_models_test.go	file	reviewed	Configuration schema and load/merge logic for kept and removable features.	mcp;lsp;nix-home-manager;sub-agents;parallel-tools	oauth-and-byok;model-picker	no	no	yes	yes
+internal/config/resolve.go	file	reviewed	Configuration schema and load/merge logic for kept and removable features.	mcp;lsp;nix-home-manager;sub-agents;parallel-tools	oauth-and-byok;model-picker	no	no	yes	no
+internal/config/resolve_test.go	file	reviewed	Configuration schema and load/merge logic for kept and removable features.	mcp;lsp;nix-home-manager;sub-agents;parallel-tools	oauth-and-byok;model-picker	no	no	yes	yes
+internal/config/scope.go	file	reviewed	Configuration schema and load/merge logic for kept and removable features.	mcp;lsp;nix-home-manager;sub-agents;parallel-tools	oauth-and-byok;model-picker	no	no	yes	no
+internal/config/store.go	file	reviewed	Configuration schema and load/merge logic for kept and removable features.	mcp;lsp;nix-home-manager;sub-agents;parallel-tools	oauth-and-byok;model-picker	no	no	yes	no
+internal/config/store_test.go	file	reviewed	Configuration schema and load/merge logic for kept and removable features.	mcp;lsp;nix-home-manager;sub-agents;parallel-tools	oauth-and-byok;model-picker	no	no	yes	yes
+internal/csync/doc.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/csync/maps.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/csync/maps_test.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	yes
+internal/csync/slices.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/csync/slices_test.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	yes
+internal/csync/value.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/csync/value_test.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	yes
+internal/csync/versionedmap.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/csync/versionedmap_test.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	yes
+internal/db/connect.go	file	reviewed	SQLite schema, migrations, or queries with session/todo persistence touch points.	todos	sessions-and-history	no	no	no	no
+internal/db/connect_modernc.go	file	reviewed	SQLite schema, migrations, or queries with session/todo persistence touch points.	todos	sessions-and-history	no	no	no	no
+internal/db/connect_ncruces.go	file	reviewed	SQLite schema, migrations, or queries with session/todo persistence touch points.	todos	sessions-and-history	no	no	no	no
+internal/db/db.go	file	reviewed	SQLite schema, migrations, or queries with session/todo persistence touch points.	todos	sessions-and-history	no	no	no	no
+internal/db/embed.go	file	reviewed	SQLite schema, migrations, or queries with session/todo persistence touch points.	todos	sessions-and-history	no	no	no	no
+internal/db/files.sql.go	file	reviewed	SQLite schema, migrations, or queries with session/todo persistence touch points.	todos	sessions-and-history	no	no	no	no
+internal/db/messages.sql.go	file	reviewed	SQLite schema, migrations, or queries with session/todo persistence touch points.	todos	sessions-and-history	no	no	no	no
+internal/db/migrations/20250424200609_initial.sql	file	reviewed	SQLite schema, migrations, or queries with session/todo persistence touch points.	todos	sessions-and-history	no	no	no	no
+internal/db/migrations/20250515105448_add_summary_message_id.sql	file	reviewed	SQLite schema, migrations, or queries with session/todo persistence touch points.	todos	sessions-and-history	no	no	no	no
+internal/db/migrations/20250624000000_add_created_at_indexes.sql	file	reviewed	SQLite schema, migrations, or queries with session/todo persistence touch points.	todos	sessions-and-history	no	no	no	no
+internal/db/migrations/20250627000000_add_provider_to_messages.sql	file	reviewed	SQLite schema, migrations, or queries with session/todo persistence touch points.	todos	sessions-and-history	no	no	no	no
+internal/db/migrations/20250810000000_add_is_summary_message.sql	file	reviewed	SQLite schema, migrations, or queries with session/todo persistence touch points.	todos	sessions-and-history	no	no	no	no
+internal/db/migrations/20250812000000_add_todos_to_sessions.sql	file	reviewed	SQLite schema, migrations, or queries with session/todo persistence touch points.	todos	sessions-and-history	no	no	no	no
+internal/db/migrations/20260127000000_add_read_files_table.sql	file	reviewed	SQLite schema, migrations, or queries with session/todo persistence touch points.	todos	sessions-and-history	no	no	no	no
+internal/db/models.go	file	reviewed	SQLite schema, migrations, or queries with session/todo persistence touch points.	todos	sessions-and-history	no	no	no	no
+internal/db/querier.go	file	reviewed	SQLite schema, migrations, or queries with session/todo persistence touch points.	todos	sessions-and-history	no	no	no	no
+internal/db/read_files.sql.go	file	reviewed	SQLite schema, migrations, or queries with session/todo persistence touch points.	todos	sessions-and-history	no	no	no	no
+internal/db/sessions.sql.go	file	reviewed	SQLite schema, migrations, or queries with session/todo persistence touch points.	todos	sessions-and-history	no	no	no	no
+internal/db/sql/files.sql	file	reviewed	SQLite schema, migrations, or queries with session/todo persistence touch points.	todos	sessions-and-history	no	no	no	no
+internal/db/sql/messages.sql	file	reviewed	SQLite schema, migrations, or queries with session/todo persistence touch points.	todos	sessions-and-history	no	no	no	no
+internal/db/sql/read_files.sql	file	reviewed	SQLite schema, migrations, or queries with session/todo persistence touch points.	todos	sessions-and-history	no	no	no	no
+internal/db/sql/sessions.sql	file	reviewed	SQLite schema, migrations, or queries with session/todo persistence touch points.	todos	sessions-and-history	no	no	no	no
+internal/db/sql/stats.sql	file	reviewed	SQLite schema, migrations, or queries with session/todo persistence touch points.	todos	sessions-and-history	no	no	no	no
+internal/db/stats.sql.go	file	reviewed	SQLite schema, migrations, or queries with session/todo persistence touch points.	todos	sessions-and-history	no	no	no	no
+internal/diff/diff.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/env/env.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/env/env_test.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	yes
+internal/event/all.go	file	reviewed	Telemetry and analytics implementation using PostHog.	posthog-analytics		no	no	no	no
+internal/event/event.go	file	reviewed	Telemetry and analytics implementation using PostHog.	posthog-analytics		no	no	no	no
+internal/event/event_test.go	file	reviewed	Telemetry and analytics implementation using PostHog.	posthog-analytics		no	no	no	yes
+internal/event/identifier.go	file	reviewed	Telemetry and analytics implementation using PostHog.	posthog-analytics		no	no	no	no
+internal/event/logger.go	file	reviewed	Telemetry and analytics implementation using PostHog.	posthog-analytics		no	no	no	no
+internal/filepathext/filepath.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/filetracker/service.go	file	reviewed	Per-session file read tracking that must remain.		sessions-and-history	no	no	no	no
+internal/filetracker/service_test.go	file	reviewed	Per-session file read tracking that must remain.		sessions-and-history	no	no	no	yes
+internal/format/spinner.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/fsext/drive_other.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/fsext/drive_windows.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/fsext/expand.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/fsext/fileutil.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/fsext/fileutil_test.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	yes
+internal/fsext/ignore_test.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	yes
+internal/fsext/lookup.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/fsext/lookup_test.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	yes
+internal/fsext/ls.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/fsext/ls_test.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	yes
+internal/fsext/owner_others.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/fsext/owner_windows.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/fsext/paste.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/fsext/paste_test.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	yes
+internal/history/file.go	file	reviewed	Session history and file snapshot support that must remain.		sessions-and-history	no	no	no	no
+internal/home/home.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/home/home_test.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	yes
+internal/log/http.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/log/http_test.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	yes
+internal/log/log.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/lsp/client.go	file	reviewed	LSP integration or LSP-facing tool surface targeted for removal.	lsp		no	no	no	no
+internal/lsp/client_test.go	file	reviewed	LSP integration or LSP-facing tool surface targeted for removal.	lsp		no	no	no	yes
+internal/lsp/handlers.go	file	reviewed	LSP integration or LSP-facing tool surface targeted for removal.	lsp		no	no	no	no
+internal/lsp/manager.go	file	reviewed	LSP integration or LSP-facing tool surface targeted for removal.	lsp		no	no	no	no
+internal/lsp/util/edit.go	file	reviewed	LSP integration or LSP-facing tool surface targeted for removal.	lsp		no	no	no	no
+internal/lsp/util/edit_test.go	file	reviewed	LSP integration or LSP-facing tool surface targeted for removal.	lsp		no	no	no	yes
+internal/message/attachment.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/message/content.go	file	reviewed	General repository surface reviewed for audit coverage.			yes	no	no	no
+internal/message/content_test.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	yes
+internal/message/message.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/oauth/copilot/client.go	file	reviewed	OAuth/provider-auth surface that must remain.		oauth-and-byok	no	no	no	no
+internal/oauth/copilot/disk.go	file	reviewed	OAuth/provider-auth surface that must remain.		oauth-and-byok	no	no	no	no
+internal/oauth/copilot/http.go	file	reviewed	OAuth/provider-auth surface that must remain.		oauth-and-byok	no	no	no	no
+internal/oauth/copilot/oauth.go	file	reviewed	OAuth/provider-auth surface that must remain.		oauth-and-byok	no	no	no	no
+internal/oauth/copilot/urls.go	file	reviewed	OAuth/provider-auth surface that must remain.		oauth-and-byok	no	no	no	no
+internal/oauth/hyper/device.go	file	reviewed	OAuth/provider-auth surface that must remain.		oauth-and-byok	no	no	no	no
+internal/oauth/token.go	file	reviewed	OAuth/provider-auth surface that must remain.		oauth-and-byok	no	no	no	no
+internal/permission/permission.go	file	reviewed	Permission request flow and working-directory gate logic.	permission-gate		no	no	no	no
+internal/permission/permission_test.go	file	reviewed	Permission request flow and working-directory gate logic.	permission-gate		no	no	no	yes
+internal/projects/projects.go	file	reviewed	Workspace/project service surface supporting kept session and API behavior.		server-api	no	no	no	no
+internal/projects/projects_test.go	file	reviewed	Workspace/project service surface supporting kept session and API behavior.		server-api	no	no	no	yes
+internal/proto/agent.go	file	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/proto/history.go	file	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/proto/mcp.go	file	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.	mcp	server-api	no	yes	no	no
+internal/proto/message.go	file	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/proto/permission.go	file	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/proto/proto.go	file	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/proto/requests.go	file	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/proto/server.go	file	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/proto/session.go	file	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/proto/tools.go	file	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/proto/version.go	file	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/pubsub/broker.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/pubsub/events.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/server/config.go	file	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/server/events.go	file	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/server/logging.go	file	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/server/net_other.go	file	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/server/net_windows.go	file	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/server/proto.go	file	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/server/server.go	file	reviewed	HTTP or client/server surface that must remain while feature-specific endpoints shrink later.		server-api	no	yes	no	no
+internal/session/session.go	file	reviewed	Session persistence and state that must remain while todo support is removed.	todos	sessions-and-history	no	no	no	no
+internal/shell/background.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/shell/background_test.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	yes
+internal/shell/command_block_test.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	yes
+internal/shell/comparison_test.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	yes
+internal/shell/coreutils.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/shell/doc.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/shell/shell.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/shell/shell_test.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	yes
+internal/skills/builtin/crush-config/SKILL.md	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/skills/embed.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/skills/skills.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/skills/skills_test.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	yes
+internal/stringext/string.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/swagger/docs.go	file	reviewed	Generated Swagger/OpenAPI artifacts that must remain except for removed-feature endpoints.		server-api;swagger-docs	no	yes	no	no
+internal/swagger/swagger.json	file	reviewed	Generated Swagger/OpenAPI artifacts that must remain except for removed-feature endpoints.		server-api;swagger-docs	no	yes	no	no
+internal/swagger/swagger.yaml	file	reviewed	Generated Swagger/OpenAPI artifacts that must remain except for removed-feature endpoints.		server-api;swagger-docs	no	yes	no	no
+internal/ui/AGENTS.md	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/anim/anim.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/attachments/attachments.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/chat/agent.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/chat/assistant.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/chat/bash.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/chat/diagnostics.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/chat/docker_mcp.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/chat/fetch.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/chat/file.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/chat/generic.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/chat/lsp_restart.go	file	reviewed	LSP integration or LSP-facing tool surface targeted for removal. TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	lsp;mcp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/chat/mcp.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/chat/messages.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/chat/references.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/chat/search.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/chat/todos.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/chat/tools.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/chat/user.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/common/button.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/common/capabilities.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/common/common.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/common/diff.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/common/elements.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/common/highlight.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/common/interface.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/common/markdown.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/common/scrollbar.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/completions/completions.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/completions/completions_test.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/completions/item.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/completions/keys.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/dialog/actions.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/dialog/api_key_input.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/dialog/arguments.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/dialog/commands.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/dialog/commands_item.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/dialog/common.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/dialog/dialog.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/dialog/filepicker.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/dialog/models.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/dialog/models_item.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/dialog/models_list.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/dialog/oauth.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/dialog/oauth_copilot.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/dialog/oauth_hyper.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/dialog/permissions.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/dialog/quit.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/dialog/reasoning.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/dialog/sessions.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/dialog/sessions_item.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/diffview/Taskfile.yaml	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/diffview/chroma.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/diffview/diffview.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/diffview/diffview_test.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/split.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/diffview/style.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/diffview/testdata/TestDefault.after	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDefault.before	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Split/CustomContextLines/DarkMode.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Split/CustomContextLines/LightMode.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Split/Default/DarkMode.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Split/Default/LightMode.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Split/LargeWidth/DarkMode.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Split/LargeWidth/LightMode.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Split/MultipleHunks/DarkMode.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Split/MultipleHunks/LightMode.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Split/Narrow/DarkMode.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Split/Narrow/LightMode.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Split/NoLineNumbers/DarkMode.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Split/NoLineNumbers/LightMode.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Split/NoSyntaxHighlight/DarkMode.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Split/NoSyntaxHighlight/LightMode.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Split/SmallWidth/DarkMode.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Split/SmallWidth/LightMode.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Unified/CustomContextLines/DarkMode.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Unified/CustomContextLines/LightMode.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Unified/Default/DarkMode.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Unified/Default/LightMode.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Unified/LargeWidth/DarkMode.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Unified/LargeWidth/LightMode.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Unified/MultipleHunks/DarkMode.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Unified/MultipleHunks/LightMode.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Unified/Narrow/DarkMode.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Unified/Narrow/LightMode.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Unified/NoLineNumbers/DarkMode.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Unified/NoLineNumbers/LightMode.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Unified/NoSyntaxHighlight/DarkMode.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Unified/NoSyntaxHighlight/LightMode.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Unified/SmallWidth/DarkMode.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffView/Unified/SmallWidth/LightMode.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Split/HeightOf001.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Split/HeightOf002.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Split/HeightOf003.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Split/HeightOf004.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Split/HeightOf005.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Split/HeightOf006.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Split/HeightOf007.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Split/HeightOf008.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Split/HeightOf009.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Split/HeightOf010.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Split/HeightOf011.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Split/HeightOf012.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Split/HeightOf013.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Split/HeightOf014.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Split/HeightOf015.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Split/HeightOf016.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Split/HeightOf017.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Split/HeightOf018.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Split/HeightOf019.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Split/HeightOf020.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Unified/HeightOf001.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Unified/HeightOf002.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Unified/HeightOf003.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Unified/HeightOf004.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Unified/HeightOf005.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Unified/HeightOf006.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Unified/HeightOf007.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Unified/HeightOf008.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Unified/HeightOf009.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Unified/HeightOf010.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Unified/HeightOf011.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Unified/HeightOf012.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Unified/HeightOf013.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Unified/HeightOf014.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Unified/HeightOf015.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Unified/HeightOf016.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Unified/HeightOf017.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Unified/HeightOf018.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Unified/HeightOf019.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewHeight/Unified/HeightOf020.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewLineBreakIssue/Split.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewLineBreakIssue/Unified.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewTabs/Split.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewTabs/Unified.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf001.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf002.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf003.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf004.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf005.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf006.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf007.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf008.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf009.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf010.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf011.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf012.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf013.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf014.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf015.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf016.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf017.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf018.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf019.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf020.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf021.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf022.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf023.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf024.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf025.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf026.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf027.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf028.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf029.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf030.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf031.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf032.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf033.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf034.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf035.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf036.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf037.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf038.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf039.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf040.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf041.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf042.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf043.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf044.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf045.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf046.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf047.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf048.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf049.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf050.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf051.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf052.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf053.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf054.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf055.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf056.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf057.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf058.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf059.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf060.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf061.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf062.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf063.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf064.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf065.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf066.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf067.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf068.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf069.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf070.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf071.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf072.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf073.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf074.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf075.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf076.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf077.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf078.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf079.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf080.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf081.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf082.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf083.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf084.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf085.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf086.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf087.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf088.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf089.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf090.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf091.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf092.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf093.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf094.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf095.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf096.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf097.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf098.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf099.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf100.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf101.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf102.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf103.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf104.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf105.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf106.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf107.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf108.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf109.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Split/WidthOf110.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf001.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf002.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf003.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf004.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf005.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf006.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf007.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf008.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf009.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf010.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf011.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf012.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf013.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf014.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf015.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf016.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf017.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf018.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf019.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf020.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf021.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf022.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf023.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf024.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf025.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf026.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf027.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf028.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf029.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf030.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf031.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf032.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf033.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf034.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf035.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf036.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf037.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf038.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf039.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf040.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf041.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf042.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf043.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf044.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf045.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf046.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf047.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf048.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf049.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf050.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf051.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf052.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf053.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf054.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf055.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf056.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf057.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf058.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf059.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewWidth/Unified/WidthOf060.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Split/XOffsetOf00.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Split/XOffsetOf01.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Split/XOffsetOf02.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Split/XOffsetOf03.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Split/XOffsetOf04.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Split/XOffsetOf05.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Split/XOffsetOf06.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Split/XOffsetOf07.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Split/XOffsetOf08.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Split/XOffsetOf09.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Split/XOffsetOf10.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Split/XOffsetOf11.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Split/XOffsetOf12.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Split/XOffsetOf13.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Split/XOffsetOf14.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Split/XOffsetOf15.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Split/XOffsetOf16.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Split/XOffsetOf17.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Split/XOffsetOf18.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Split/XOffsetOf19.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Split/XOffsetOf20.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Unified/XOffsetOf00.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Unified/XOffsetOf01.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Unified/XOffsetOf02.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Unified/XOffsetOf03.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Unified/XOffsetOf04.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Unified/XOffsetOf05.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Unified/XOffsetOf06.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Unified/XOffsetOf07.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Unified/XOffsetOf08.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Unified/XOffsetOf09.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Unified/XOffsetOf10.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Unified/XOffsetOf11.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Unified/XOffsetOf12.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Unified/XOffsetOf13.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Unified/XOffsetOf14.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Unified/XOffsetOf15.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Unified/XOffsetOf16.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Unified/XOffsetOf17.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Unified/XOffsetOf18.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Unified/XOffsetOf19.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewXOffset/Unified/XOffsetOf20.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Split/YOffsetOf00.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Split/YOffsetOf01.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Split/YOffsetOf02.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Split/YOffsetOf03.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Split/YOffsetOf04.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Split/YOffsetOf05.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Split/YOffsetOf06.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Split/YOffsetOf07.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Split/YOffsetOf08.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Split/YOffsetOf09.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Split/YOffsetOf10.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Split/YOffsetOf11.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Split/YOffsetOf12.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Split/YOffsetOf13.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Split/YOffsetOf14.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Split/YOffsetOf15.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Split/YOffsetOf16.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Unified/YOffsetOf00.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Unified/YOffsetOf01.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Unified/YOffsetOf02.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Unified/YOffsetOf03.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Unified/YOffsetOf04.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Unified/YOffsetOf05.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Unified/YOffsetOf06.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Unified/YOffsetOf07.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Unified/YOffsetOf08.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Unified/YOffsetOf09.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Unified/YOffsetOf10.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Unified/YOffsetOf11.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Unified/YOffsetOf12.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Unified/YOffsetOf13.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Unified/YOffsetOf14.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Unified/YOffsetOf15.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffset/Unified/YOffsetOf16.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Split/YOffsetOf00.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Split/YOffsetOf01.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Split/YOffsetOf02.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Split/YOffsetOf03.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Split/YOffsetOf04.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Split/YOffsetOf05.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Split/YOffsetOf06.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Split/YOffsetOf07.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Split/YOffsetOf08.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Split/YOffsetOf09.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Split/YOffsetOf10.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Split/YOffsetOf11.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Split/YOffsetOf12.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Split/YOffsetOf13.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Split/YOffsetOf14.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Split/YOffsetOf15.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Split/YOffsetOf16.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Unified/YOffsetOf00.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Unified/YOffsetOf01.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Unified/YOffsetOf02.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Unified/YOffsetOf03.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Unified/YOffsetOf04.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Unified/YOffsetOf05.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Unified/YOffsetOf06.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Unified/YOffsetOf07.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Unified/YOffsetOf08.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Unified/YOffsetOf09.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Unified/YOffsetOf10.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Unified/YOffsetOf11.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Unified/YOffsetOf12.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Unified/YOffsetOf13.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Unified/YOffsetOf14.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Unified/YOffsetOf15.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestDiffViewYOffsetInfinite/Unified/YOffsetOf16.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestLineBreakIssue.after	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestLineBreakIssue.before	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestMultipleHunks.after	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestMultipleHunks.before	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestNarrow.after	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestNarrow.before	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestTabs.after	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestTabs.before	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestUdiff/ToUnifiedDiff/DefaultContextLines/Content.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestUdiff/ToUnifiedDiff/DefaultContextLines/JSON.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestUdiff/ToUnifiedDiff/DefaultContextLinesPlusOne/Content.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestUdiff/ToUnifiedDiff/DefaultContextLinesPlusOne/JSON.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestUdiff/ToUnifiedDiff/DefaultContextLinesPlusTwo/Content.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestUdiff/ToUnifiedDiff/DefaultContextLinesPlusTwo/JSON.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/testdata/TestUdiff/Unified.golden	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/udiff_test.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/diffview/util.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/diffview/util_test.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/image/image.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/image/image_test.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/list/filterable.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/list/focus.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/list/highlight.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/list/item.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/list/list.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/logo/logo.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/logo/rand.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/model/chat.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/model/clipboard.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/model/clipboard_not_supported.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/model/clipboard_supported.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/model/filter.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/model/header.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/model/history.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/model/keys.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/model/landing.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/model/layout_test.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	yes
+internal/ui/model/lsp.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/model/mcp.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/model/onboarding.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/model/pills.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/model/session.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/model/sidebar.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/model/status.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/model/ui.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	no
+internal/ui/model/ui_test.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures. UI affordances likely to change when removable features are stripped out.	mcp;lsp;sub-agents;todos;nix-home-manager		no	no	no	yes
+internal/ui/notification/crush-icon-solo.png	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/notification/crush-icon.png	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/notification/icon_darwin.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/notification/icon_other.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/notification/native.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/notification/noop.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/notification/notification.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/notification/notification_test.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances. UI tests or golden fixtures.			no	no	no	yes
+internal/ui/styles/grad.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/styles/styles.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/ui/util/util.go	file	reviewed	TUI surface for chat, settings, prompts, or feature affordances.			no	no	no	no
+internal/update/update.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/update/update_test.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	yes
+internal/version/version.go	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
+internal/workspace/app_workspace.go	file	reviewed	Workspace/project service surface supporting kept session and API behavior.		server-api	no	no	no	no
+internal/workspace/client_workspace.go	file	reviewed	Workspace/project service surface supporting kept session and API behavior.		server-api	no	no	no	no
+internal/workspace/workspace.go	file	reviewed	Workspace/project service surface supporting kept session and API behavior.		server-api	no	no	no	no
+main.go	file	reviewed	Top-level dependency or entrypoint surface.			no	no	no	yes
+schema.json	file	reviewed	Configuration example or generated schema surface.			no	no	yes	yes
+scripts/check_log_capitalization.sh	file	reviewed	Build, lint, packaging, or repository tooling artifact.			no	no	no	yes
+scripts/run-labeler.sh	file	reviewed	Build, lint, packaging, or repository tooling artifact.			no	no	no	yes
+sqlc.yaml	file	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no

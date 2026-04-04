@@ -120,3 +120,37 @@ func TestViewToolRenderContextRendersSanitizedResultWithWindowsPath(t *testing.T
 	require.Contains(t, out, `C:\Users\dev\project\test.go`)
 	require.NotContains(t, out, "|package main")
 }
+
+func TestHashlineEditToolRenderContextRendersDiffFromMetadata(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.DefaultStyles()
+	renderer := &HashlineEditToolRenderContext{}
+
+	metaJSON, err := json.Marshal(tools.HashlineEditResponseMetadata{
+		OldContent: "line1\n",
+		NewContent: "line1\nline2\n",
+		Additions:  1,
+		Removals:   0,
+	})
+	require.NoError(t, err)
+
+	result := message.ToolResult{
+		Name:     tools.HashlineEditToolName,
+		Content:  "Applied hashline edit to file: /tmp/test.go",
+		Metadata: string(metaJSON),
+	}
+
+	out := renderer.RenderTool(&sty, 120, &ToolRenderOpts{
+		ToolCall: message.ToolCall{
+			Name:  tools.HashlineEditToolName,
+			Input: `{"file_path":"/tmp/test.go"}`,
+		},
+		Result:     &result,
+		Status:     ToolStatusSuccess,
+		IsSpinning: false,
+	})
+
+	require.NotContains(t, out, "Applied hashline edit to file")
+	require.Contains(t, out, "line2")
+}

@@ -120,6 +120,11 @@ type SelectedModel struct {
 	// This field is kept for backward compatibility but is no longer used.
 	ReasoningEffort string `json:"reasoning_effort,omitempty" jsonschema:"description=Deprecated: Use model's default_reasoning_effort in provider config instead,enum=low,enum=medium,enum=high"`
 
+	// MaxPromptTokens optionally overrides the model prompt/input token budget.
+	// This is primarily useful for OpenAI-compatible Responses endpoints where
+	// max_prompt_tokens can be lower than the advertised context window.
+	MaxPromptTokens int64 `json:"max_prompt_tokens,omitempty" jsonschema:"description=Maximum prompt/input token budget override for this model,example=262144"`
+
 	// Think controls whether to enable thinking/reasoning mode for models that
 	// support it. When nil (the default), thinking is enabled for all CanReason
 	// models. Set to false to explicitly disable thinking across all providers.
@@ -692,6 +697,7 @@ func allToolNames() []string {
 		"job_kill",
 		"download",
 		"edit",
+		"hashline_edit",
 		"multiedit",
 		"lsp_diagnostics",
 		"lsp_references",

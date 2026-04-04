@@ -31,12 +31,14 @@ type ViewParams struct {
 	FilePath string `json:"file_path" description:"The path to the file to read"`
 	Offset   int    `json:"offset,omitempty" description:"The line number to start reading from (0-based)"`
 	Limit    int    `json:"limit,omitempty" description:"The number of lines to read (defaults to 2000)"`
+	Hashline bool   `json:"hashline,omitempty" description:"If true, include hashline anchors in the output for line-addressable editing"`
 }
 
 type ViewPermissionsParams struct {
 	FilePath string `json:"file_path"`
 	Offset   int    `json:"offset"`
 	Limit    int    `json:"limit"`
+	Hashline bool   `json:"hashline,omitempty"`
 }
 
 type ViewResourceType string
@@ -49,6 +51,7 @@ const (
 type ViewResponseMetadata struct {
 	FilePath            string           `json:"file_path"`
 	Content             string           `json:"content"`
+	Hashline            bool             `json:"hashline,omitempty"`
 	ResourceType        ViewResourceType `json:"resource_type,omitempty"`
 	ResourceName        string           `json:"resource_name,omitempty"`
 	ResourceDescription string           `json:"resource_description,omitempty"`
@@ -222,7 +225,11 @@ func NewViewTool(
 			openInLSPs(ctx, lspManager, filePath)
 			waitForLSPDiagnostics(ctx, lspManager, filePath, 300*time.Millisecond)
 			output := "<file>\n"
-			output += addLineNumbers(content, params.Offset+1)
+			if params.Hashline {
+				output += addHashlineLineNumbers(content, params.Offset+1)
+			} else {
+				output += addLineNumbers(content, params.Offset+1)
+			}
 
 			if hasMore {
 				output += fmt.Sprintf("\n\n(File has more lines. Use 'offset' parameter to read beyond line %d)",
@@ -235,6 +242,7 @@ func NewViewTool(
 			meta := ViewResponseMetadata{
 				FilePath: filePath,
 				Content:  content,
+				Hashline: params.Hashline,
 			}
 			if isSkillFile {
 				if skill, err := skills.Parse(filePath); err == nil {
@@ -271,6 +279,22 @@ func addLineNumbers(content string, startLine int) string {
 			paddedNum := fmt.Sprintf("%6s", numStr)
 			result = append(result, fmt.Sprintf("%s|%s", paddedNum, line))
 		}
+	}
+
+	return strings.Join(result, "\n")
+}
+
+func addHashlineLineNumbers(content string, startLine int) string {
+	if content == "" {
+		return ""
+	}
+
+	lines := strings.Split(content, "\n")
+	result := make([]string, 0, len(lines))
+	for i, line := range lines {
+		line = strings.TrimSuffix(line, "\r")
+		lineNum := i + startLine
+		result = append(result, fmt.Sprintf("%6s#%s|%s", fmt.Sprintf("%d", lineNum), computeHashlineID(lineNum, line), line))
 	}
 
 	return strings.Join(result, "\n")

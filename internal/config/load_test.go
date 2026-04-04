@@ -676,13 +676,13 @@ func TestConfig_setupAgentsWithNoDisabledTools(t *testing.T) {
 	cfg.SetupAgents()
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
-	assert.Equal(t, []string{"agent", "bash", "job_output", "job_wait", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_declaration", "lsp_definition", "lsp_implementation", "lsp_type_definition", "lsp_hover", "lsp_document_symbols", "lsp_workspace_symbols", "lsp_code_action", "lsp_rename", "lsp_format", "lsp_restart", "fetch", "agentic_fetch", "glob", "grep", "ls", "request_user_input", "history_search", "long_term_memory", "tool_search", "send_message", "task_stop", "subtask_result", "view", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "bash", "job_output", "job_wait", "job_kill", "download", "edit", "hashline_edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_declaration", "lsp_definition", "lsp_implementation", "lsp_type_definition", "lsp_hover", "lsp_document_symbols", "lsp_workspace_symbols", "lsp_code_action", "lsp_rename", "lsp_format", "lsp_restart", "fetch", "agentic_fetch", "glob", "grep", "ls", "request_user_input", "history_search", "long_term_memory", "tool_search", "send_message", "task_stop", "subtask_result", "view", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
 	assert.Equal(t, "orchestrator", coderAgent.Role)
 	assert.Empty(t, coderAgent.AdditionalPrompt)
 
 	generalAgent, ok := cfg.Agents[AgentGeneral]
 	require.True(t, ok)
-	assert.Equal(t, []string{"bash", "job_output", "job_wait", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_declaration", "lsp_definition", "lsp_implementation", "lsp_type_definition", "lsp_hover", "lsp_document_symbols", "lsp_workspace_symbols", "lsp_code_action", "lsp_rename", "lsp_format", "lsp_restart", "fetch", "agentic_fetch", "glob", "grep", "ls", "history_search", "long_term_memory", "tool_search", "send_message", "task_stop", "subtask_result", "view", "write", "list_mcp_resources", "read_mcp_resource"}, generalAgent.AllowedTools)
+	assert.Equal(t, []string{"bash", "job_output", "job_wait", "job_kill", "download", "edit", "hashline_edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_declaration", "lsp_definition", "lsp_implementation", "lsp_type_definition", "lsp_hover", "lsp_document_symbols", "lsp_workspace_symbols", "lsp_code_action", "lsp_rename", "lsp_format", "lsp_restart", "fetch", "agentic_fetch", "glob", "grep", "ls", "history_search", "long_term_memory", "tool_search", "send_message", "task_stop", "subtask_result", "view", "write", "list_mcp_resources", "read_mcp_resource"}, generalAgent.AllowedTools)
 	assert.Equal(t, AgentModeSubagent, generalAgent.Mode)
 	assert.Equal(t, "executor", generalAgent.Role)
 	assert.Contains(t, generalAgent.AdditionalPrompt, "Act as the executor")
@@ -710,11 +710,11 @@ func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
 
-	assert.Equal(t, []string{"agent", "bash", "job_output", "job_wait", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_declaration", "lsp_definition", "lsp_implementation", "lsp_type_definition", "lsp_hover", "lsp_document_symbols", "lsp_workspace_symbols", "lsp_code_action", "lsp_rename", "lsp_format", "lsp_restart", "fetch", "agentic_fetch", "glob", "ls", "request_user_input", "history_search", "long_term_memory", "tool_search", "send_message", "task_stop", "subtask_result", "view", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "bash", "job_output", "job_wait", "job_kill", "hashline_edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_declaration", "lsp_definition", "lsp_implementation", "lsp_type_definition", "lsp_hover", "lsp_document_symbols", "lsp_workspace_symbols", "lsp_code_action", "lsp_rename", "lsp_format", "lsp_restart", "fetch", "agentic_fetch", "glob", "ls", "request_user_input", "history_search", "long_term_memory", "tool_search", "send_message", "task_stop", "subtask_result", "view", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
 
 	generalAgent, ok := cfg.Agents[AgentGeneral]
 	require.True(t, ok)
-	assert.Equal(t, []string{"bash", "job_output", "job_wait", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_declaration", "lsp_definition", "lsp_implementation", "lsp_type_definition", "lsp_hover", "lsp_document_symbols", "lsp_workspace_symbols", "lsp_code_action", "lsp_rename", "lsp_format", "lsp_restart", "fetch", "agentic_fetch", "glob", "ls", "history_search", "long_term_memory", "tool_search", "send_message", "task_stop", "subtask_result", "view", "write", "list_mcp_resources", "read_mcp_resource"}, generalAgent.AllowedTools)
+	assert.Equal(t, []string{"bash", "job_output", "job_wait", "job_kill", "hashline_edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_declaration", "lsp_definition", "lsp_implementation", "lsp_type_definition", "lsp_hover", "lsp_document_symbols", "lsp_workspace_symbols", "lsp_code_action", "lsp_rename", "lsp_format", "lsp_restart", "fetch", "agentic_fetch", "glob", "ls", "history_search", "long_term_memory", "tool_search", "send_message", "task_stop", "subtask_result", "view", "write", "list_mcp_resources", "read_mcp_resource"}, generalAgent.AllowedTools)
 }
 
 func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
@@ -734,11 +734,11 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 	cfg.SetupAgents()
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
-	assert.Equal(t, []string{"agent", "job_output", "job_wait", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_declaration", "lsp_definition", "lsp_implementation", "lsp_type_definition", "lsp_hover", "lsp_document_symbols", "lsp_workspace_symbols", "lsp_code_action", "lsp_rename", "lsp_format", "lsp_restart", "fetch", "agentic_fetch", "request_user_input", "history_search", "long_term_memory", "tool_search", "send_message", "task_stop", "subtask_result", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "job_output", "job_wait", "job_kill", "download", "edit", "hashline_edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_declaration", "lsp_definition", "lsp_implementation", "lsp_type_definition", "lsp_hover", "lsp_document_symbols", "lsp_workspace_symbols", "lsp_code_action", "lsp_rename", "lsp_format", "lsp_restart", "fetch", "agentic_fetch", "request_user_input", "history_search", "long_term_memory", "tool_search", "send_message", "task_stop", "subtask_result", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
 
 	generalAgent, ok := cfg.Agents[AgentGeneral]
 	require.True(t, ok)
-	assert.Equal(t, []string{"job_output", "job_wait", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_declaration", "lsp_definition", "lsp_implementation", "lsp_type_definition", "lsp_hover", "lsp_document_symbols", "lsp_workspace_symbols", "lsp_code_action", "lsp_rename", "lsp_format", "lsp_restart", "fetch", "agentic_fetch", "history_search", "long_term_memory", "tool_search", "send_message", "task_stop", "subtask_result", "write", "list_mcp_resources", "read_mcp_resource"}, generalAgent.AllowedTools)
+	assert.Equal(t, []string{"job_output", "job_wait", "job_kill", "download", "edit", "hashline_edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_declaration", "lsp_definition", "lsp_implementation", "lsp_type_definition", "lsp_hover", "lsp_document_symbols", "lsp_workspace_symbols", "lsp_code_action", "lsp_rename", "lsp_format", "lsp_restart", "fetch", "agentic_fetch", "history_search", "long_term_memory", "tool_search", "send_message", "task_stop", "subtask_result", "write", "list_mcp_resources", "read_mcp_resource"}, generalAgent.AllowedTools)
 }
 
 func TestConfig_setupAgentsMergesConfiguredAgentsAndTaskAlias(t *testing.T) {

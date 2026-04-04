@@ -51,6 +51,7 @@ func TestRiskLevelForTool(t *testing.T) {
 	require.Equal(t, toolRiskNetwork, riskLevelForTool(tools.AgenticFetchToolName))
 	require.Equal(t, toolRiskRead, riskLevelForTool(tools.ViewToolName))
 	require.Equal(t, toolRiskWrite, riskLevelForTool(tools.WriteToolName))
+	require.Equal(t, toolRiskWrite, riskLevelForTool(tools.HashlineEditToolName))
 	require.Equal(t, toolRiskWrite, riskLevelForTool(tools.LongTermMemoryToolName))
 	require.Equal(t, toolRiskExecute, riskLevelForTool(tools.BashToolName))
 	require.Equal(t, toolRiskExecute, riskLevelForTool("unknown_tool"))

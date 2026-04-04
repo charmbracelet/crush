@@ -100,6 +100,9 @@ func (m *mockSessionService) GetLast(context.Context) (session.Session, error) {
 	return session.Session{}, nil
 }
 func (m *mockSessionService) List(context.Context) ([]session.Session, error) { return nil, nil }
+func (m *mockSessionService) ListChildren(context.Context, string) ([]session.Session, error) {
+	return nil, nil
+}
 func (m *mockSessionService) Save(context.Context, session.Session) (session.Session, error) {
 	return session.Session{}, nil
 }
@@ -675,6 +678,18 @@ func TestIsSafeWorkspaceWrite(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "safe hashline edit in workspace",
+			req: permission.PermissionRequest{
+				ToolName: tools.HashlineEditToolName,
+				Action:   "write",
+				Path:     workingDir,
+				Params: tools.HashlineEditPermissionsParams{
+					FilePath: insideFile,
+				},
+			},
+			want: true,
+		},
+		{
 			name: "sensitive path blocked",
 			req: permission.PermissionRequest{
 				ToolName: tools.WriteToolName,
@@ -987,6 +1002,28 @@ func TestIsAlwaysManual(t *testing.T) {
 				ToolName: tools.WriteToolName,
 				Action:   "write",
 				Params: tools.WritePermissionsParams{
+					FilePath: safePath,
+				},
+			},
+			want: false,
+		},
+		{
+			name: "sensitive hashline edit manual",
+			req: permission.PermissionRequest{
+				ToolName: tools.HashlineEditToolName,
+				Action:   "write",
+				Params: tools.HashlineEditPermissionsParams{
+					FilePath: sensitivePath,
+				},
+			},
+			want: true,
+		},
+		{
+			name: "safe hashline edit not always manual",
+			req: permission.PermissionRequest{
+				ToolName: tools.HashlineEditToolName,
+				Action:   "write",
+				Params: tools.HashlineEditPermissionsParams{
 					FilePath: safePath,
 				},
 			},

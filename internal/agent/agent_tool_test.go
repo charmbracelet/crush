@@ -122,6 +122,7 @@ func TestBuildToolsForSubagentsUseExpectedCapabilities(t *testing.T) {
 	}
 	assert.Contains(t, generalNames, "bash")
 	assert.Contains(t, generalNames, "edit")
+	assert.Contains(t, generalNames, tools.HashlineEditToolName)
 	assert.Contains(t, generalNames, tools.HistorySearchToolName)
 	assert.Contains(t, generalNames, tools.LongTermMemoryToolName)
 	assert.Contains(t, generalNames, tools.SendMessageToolName)
@@ -193,6 +194,7 @@ func TestBuildToolsForPlanModeUsesReadOnlyCapabilities(t *testing.T) {
 	assert.NotContains(t, planNames, "list_mcp_resources")
 	assert.NotContains(t, planNames, "read_mcp_resource")
 	assert.NotContains(t, planNames, "edit")
+	assert.NotContains(t, planNames, tools.HashlineEditToolName)
 	assert.NotContains(t, planNames, tools.LongTermMemoryToolName)
 	assert.NotContains(t, planNames, "multiedit")
 	assert.NotContains(t, planNames, "write")

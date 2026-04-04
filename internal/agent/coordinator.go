@@ -892,6 +892,12 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 	if largeModelCfg.ContextWindow > 0 {
 		largeCatwalkModel.ContextWindow = largeModelCfg.ContextWindow
 	}
+	if largeModelCfg.MaxPromptTokens > 0 {
+		if largeCatwalkModel.Options.ProviderOptions == nil {
+			largeCatwalkModel.Options.ProviderOptions = map[string]any{}
+		}
+		largeCatwalkModel.Options.ProviderOptions["max_prompt_tokens"] = largeModelCfg.MaxPromptTokens
+	}
 
 	if smallCatwalkModel == nil {
 		return Model{}, Model{}, errSmallModelNotFound
@@ -899,6 +905,12 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 
 	if smallModelCfg.ContextWindow > 0 {
 		smallCatwalkModel.ContextWindow = smallModelCfg.ContextWindow
+	}
+	if smallModelCfg.MaxPromptTokens > 0 {
+		if smallCatwalkModel.Options.ProviderOptions == nil {
+			smallCatwalkModel.Options.ProviderOptions = map[string]any{}
+		}
+		smallCatwalkModel.Options.ProviderOptions["max_prompt_tokens"] = smallModelCfg.MaxPromptTokens
 	}
 
 	largeThinkingDisabled := largeModelCfg.Think != nil && !*largeModelCfg.Think

@@ -518,7 +518,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		// This prevents double-counting the output reservation for large context models.
 		estimatedInput := a.estimateSessionPromptTokens(preflightState.History, call.Prompt, call.Attachments, agentTools, preflightState.SystemPrompt, preflightState.PromptPrefix)
 		estimatedInput = max(estimatedInput, currentSession.LastInputTokens())
-		if trigger := proactiveCompactionTrigger(estimatedInput, int64(largeModel.CatwalkCfg.ContextWindow), call.MaxOutputTokens); trigger != sessionCompactionTriggerNone {
+		if trigger := proactiveCompactionTrigger(estimatedInput, effectiveContextWindow(largeModel), call.MaxOutputTokens); trigger != sessionCompactionTriggerNone {
 			if truncErr := a.truncateOversizedToolResults(ctx, call.SessionID); truncErr != nil {
 				slog.Warn("Failed to truncate oversized tool results before preflight summarization", "error", truncErr, "session_id", call.SessionID)
 			}
@@ -598,6 +598,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	var shouldSummarize bool
 	var compactionTrigger sessionCompactionTrigger
 	var contextWindowExceeded bool
+	var contextWindowAutoResumeAllowed = true
 	var currentAssistant *message.Message
 	var currentStepToolMessageIDs []string
 	var currentStepToolResultChars int
@@ -925,7 +926,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 					}
 					// Pass input-only estimate to shouldAutoSummarize. The function
 					// handles output token reservation internally to avoid double-counting.
-					if shouldAutoSummarize(projectedPromptTokens, int64(largeModel.CatwalkCfg.ContextWindow), call.MaxOutputTokens) && !a.disableAutoSummarize {
+					if shouldAutoSummarize(projectedPromptTokens, effectiveContextWindow(largeModel), call.MaxOutputTokens) && !a.disableAutoSummarize {
 						shouldSummarize = true
 						return true
 					}
@@ -966,7 +967,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 		if err != nil && isRetriableError(err) && !a.disableAutoSummarize {
 			observedPromptTokens := max(currentSession.LastInputTokens(), estimatedPromptTokens)
-			if shouldAutoSummarize(observedPromptTokens, int64(largeModel.CatwalkCfg.ContextWindow), call.MaxOutputTokens) {
+			if shouldAutoSummarize(observedPromptTokens, effectiveContextWindow(largeModel), call.MaxOutputTokens) {
 				slog.Warn("Near context limit during transient failure; forcing summarization to recover",
 					"error", err,
 					"session_id", call.SessionID,
@@ -1134,17 +1135,36 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		result, err = runStream(providerOptions, false)
 	}
 
-	// Context-window recovery: only retry automatically when the request was
-	// rejected before any step completed. If tools already ran in this turn,
-	// auto-resume can repeat side effects, so return the provider error.
 	alreadyRecoveringFromContextWindow := strings.HasPrefix(call.Prompt, contextWindowResumePromptPrefix)
-	contextWindowErr := completedStepsThisRun == 0 && (isContextWindowExceededError(err) || isContextLengthError(err))
+	contextWindowErr := isContextWindowExceededError(err) || isContextLengthError(err)
+	if contextWindowErr {
+		estimatedInput := max(currentSession.LastInputTokens(), estimatedPromptTokens)
+		if estimatedInput > currentSession.LastPromptTokens {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cleanupCancel()
+			updatedSession, getSessionErr := a.sessions.Get(cleanupCtx, call.SessionID)
+			if getSessionErr != nil {
+				slog.Warn("Failed to load session for context-window token update", "error", getSessionErr, "session_id", call.SessionID)
+			} else if estimatedInput > updatedSession.LastPromptTokens {
+				updatedSession.LastPromptTokens = estimatedInput
+				sessionLock.Lock()
+				if _, saveSessionErr := a.sessions.Save(cleanupCtx, updatedSession); saveSessionErr != nil {
+					slog.Warn("Failed to persist context-window token estimate", "error", saveSessionErr, "session_id", call.SessionID)
+				} else {
+					currentSession = updatedSession
+				}
+				sessionLock.Unlock()
+			}
+		}
+	}
 	if contextWindowErr && !a.disableAutoSummarize && !alreadyRecoveringFromContextWindow {
+		contextWindowAutoResumeAllowed = completedStepsThisRun == 0
 		slog.Warn("Context window exceeded; forcing summarization to recover",
 			"session_id", call.SessionID,
 			"model", largeModel.ModelCfg.Model,
 			"provider", largeModel.ModelCfg.Provider,
 			"completed_steps", completedStepsThisRun,
+			"auto_resume_allowed", contextWindowAutoResumeAllowed,
 		)
 		if truncErr := a.truncateOversizedToolResults(ctx, call.SessionID); truncErr != nil {
 			slog.Warn("Failed to truncate oversized tool results", "error", truncErr)
@@ -1202,17 +1222,20 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 					return nil, createErr
 				}
 			}
-			// Update the failed assistant message with a human-readable notice.
+			finishDescription := "The conversation history reached this model's context window limit. Auto-summarizing the session to continue the task…"
+			if !contextWindowAutoResumeAllowed {
+				finishDescription = "The conversation history reached this model's context window limit after tools already ran. Auto-summarizing the session now; re-run your last request to continue safely without replaying completed tool calls."
+			}
 			currentAssistant.AddFinish(
 				message.FinishReasonError,
 				"Context limit reached",
-				"The conversation history reached this model's context window limit. Auto-summarizing the session to continue the task…",
+				finishDescription,
 			)
 			if updateErr := a.messages.Update(cleanupCtx, *currentAssistant); updateErr != nil {
 				slog.Warn("Failed to update failed assistant message after context-window error", "error", updateErr)
 			}
 		}
-		contextWindowExceeded = true
+		contextWindowExceeded = contextWindowAutoResumeAllowed
 		compactionTrigger = sessionCompactionTriggerRecover
 		shouldSummarize = true
 		err = nil
@@ -1396,7 +1419,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return nil, summarizeErr
 		}
 		hasPendingToolCalls := currentAssistant != nil && len(currentAssistant.ToolCalls()) > 0
-		if hasPendingToolCalls || compactionTrigger == sessionCompactionTriggerRecover {
+		shouldAutoResume := hasPendingToolCalls
+		if compactionTrigger == sessionCompactionTriggerRecover {
+			shouldAutoResume = contextWindowAutoResumeAllowed
+		}
+		if shouldAutoResume {
 			resumePrefix := autoResumePromptPrefix
 			if contextWindowExceeded {
 				resumePrefix = contextWindowResumePromptPrefix
@@ -2196,6 +2223,53 @@ func usageProvider(model Model) string {
 		}
 	}
 	return model.ModelCfg.Provider
+}
+
+func effectiveContextWindow(model Model) int64 {
+	window := int64(model.CatwalkCfg.ContextWindow)
+	options := model.CatwalkCfg.Options.ProviderOptions
+	if options == nil {
+		return window
+	}
+	value, ok := options["max_prompt_tokens"]
+	if !ok {
+		return window
+	}
+	maxPromptTokens, ok := int64ProviderOptionValue(value)
+	if !ok || maxPromptTokens <= 0 {
+		return window
+	}
+	if window <= 0 {
+		return maxPromptTokens
+	}
+	return min(window, maxPromptTokens)
+}
+
+func int64ProviderOptionValue(value any) (int64, bool) {
+	switch v := value.(type) {
+	case int:
+		return int64(v), true
+	case int64:
+		return v, true
+	case int32:
+		return int64(v), true
+	case float64:
+		return int64(v), true
+	case float32:
+		return int64(v), true
+	case json.Number:
+		parsed, err := v.Int64()
+		if err == nil {
+			return parsed, true
+		}
+		f, ferr := v.Float64()
+		if ferr != nil {
+			return 0, false
+		}
+		return int64(f), true
+	default:
+		return 0, false
+	}
 }
 
 func isAnthropicStyleUsageProvider(providerID string) bool {

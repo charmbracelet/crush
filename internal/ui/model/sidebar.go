@@ -2,10 +2,12 @@ package model
 
 import (
 	"cmp"
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/agent"
 	sessionpkg "github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/logo"
@@ -59,7 +61,7 @@ func (m *UI) modelInfo(width int) string {
 			InputTokens:  m.session.LastInputTokens(),
 			OutputTokens: m.session.LastOutputTokens(),
 			Cost:         m.session.Cost,
-			ModelContext: model.CatwalkCfg.ContextWindow,
+			ModelContext: effectiveContextWindow(*model),
 		}
 	}
 	info := common.ModelInfo(m.com.Styles, model.CatwalkCfg.Name, providerName, reasoningInfo, modelContext, width)
@@ -68,6 +70,53 @@ func (m *UI) modelInfo(width int) string {
 		return info
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, info, modeLine)
+}
+
+func effectiveContextWindow(model agent.Model) int64 {
+	window := model.CatwalkCfg.ContextWindow
+	options := model.CatwalkCfg.Options.ProviderOptions
+	if options == nil {
+		return window
+	}
+	value, ok := options["max_prompt_tokens"]
+	if !ok {
+		return window
+	}
+	maxPromptTokens, ok := contextWindowInt64(value)
+	if !ok || maxPromptTokens <= 0 {
+		return window
+	}
+	if window <= 0 {
+		return maxPromptTokens
+	}
+	return min(window, maxPromptTokens)
+}
+
+func contextWindowInt64(value any) (int64, bool) {
+	switch v := value.(type) {
+	case int:
+		return int64(v), true
+	case int64:
+		return v, true
+	case int32:
+		return int64(v), true
+	case float64:
+		return int64(v), true
+	case float32:
+		return int64(v), true
+	case json.Number:
+		parsed, err := v.Int64()
+		if err == nil {
+			return parsed, true
+		}
+		f, ferr := v.Float64()
+		if ferr != nil {
+			return 0, false
+		}
+		return int64(f), true
+	default:
+		return 0, false
+	}
 }
 
 func (m *UI) modeInfo(width int) string {

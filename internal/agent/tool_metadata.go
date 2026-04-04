@@ -22,7 +22,7 @@ func builtinToolMetadata(name string) tools.ToolMetadata {
 		return tools.ToolMetadata{RiskHint: "execute", SearchHint: "inspect or control background shell jobs", SearchTags: []string{"shell", "background"}}
 	case tools.DownloadToolName:
 		return tools.ToolMetadata{ConcurrencySafe: true, RiskHint: "network", SearchHint: "download URL to local file", SearchTags: []string{"network", "file"}}
-	case tools.EditToolName, tools.MultiEditToolName, tools.WriteToolName:
+	case tools.EditToolName, tools.HashlineEditToolName, tools.MultiEditToolName, tools.WriteToolName:
 		return tools.ToolMetadata{RiskHint: "write", SearchHint: "modify local files", SearchTags: []string{"file", "edit"}, Direct: true}
 	case tools.FetchToolName:
 		return tools.ToolMetadata{ReadOnly: true, ConcurrencySafe: true, RiskHint: "network", SearchHint: "fetch raw URL content", SearchTags: []string{"network", "http", "read"}, Direct: true}

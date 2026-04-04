@@ -603,7 +603,7 @@ func isSafeWorkspaceWrite(req permission.PermissionRequest, workingDir string) b
 	}
 
 	switch req.ToolName {
-	case tools.EditToolName, tools.WriteToolName, tools.MultiEditToolName:
+	case tools.EditToolName, tools.WriteToolName, tools.MultiEditToolName, tools.HashlineEditToolName:
 	default:
 		return false
 	}
@@ -627,6 +627,8 @@ func permissionRequestFilePath(req permission.PermissionRequest) (string, bool) 
 	case tools.WritePermissionsParams:
 		return params.FilePath, true
 	case tools.MultiEditPermissionsParams:
+		return params.FilePath, true
+	case tools.HashlineEditPermissionsParams:
 		return params.FilePath, true
 	default:
 		return "", false
@@ -679,7 +681,7 @@ func isAlwaysManual(req permission.PermissionRequest, workingDir string) bool {
 		return true
 	case tools.BashToolName:
 		return isHighRiskBashRequest(req)
-	case tools.EditToolName, tools.WriteToolName, tools.MultiEditToolName:
+	case tools.EditToolName, tools.WriteToolName, tools.MultiEditToolName, tools.HashlineEditToolName:
 		filePath, ok := permissionRequestFilePath(req)
 		return ok && isSensitiveWorkspacePath(filePath, workingDir)
 	default:

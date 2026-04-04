@@ -82,6 +82,7 @@ var toolRiskLevels = map[string]toolRiskLevel{
 	tools.JobKillToolName:             toolRiskExecute,
 	tools.DownloadToolName:            toolRiskNetwork,
 	tools.EditToolName:                toolRiskWrite,
+	tools.HashlineEditToolName:        toolRiskWrite,
 	tools.MultiEditToolName:           toolRiskWrite,
 	tools.FetchToolName:               toolRiskNetwork,
 	tools.GlobToolName:                toolRiskRead,

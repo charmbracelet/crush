@@ -127,7 +127,7 @@ func renderHeaderDetails(
 
 	agentCfg := com.Config().Agents[config.AgentCoder]
 	activeModel := com.App.AgentCoordinator.Model()
-	contextWindow := activeModel.CatwalkCfg.ContextWindow
+	contextWindow := effectiveContextWindow(activeModel)
 	if contextWindow <= 0 {
 		if model := com.Config().GetModelByType(agentCfg.Model); model != nil {
 			contextWindow = model.ContextWindow

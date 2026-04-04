@@ -63,3 +63,4 @@ completions/crush.*sh
 .task
 .factory
 .workbuddyignoredocs/
+ignore_docs

@@ -516,7 +516,7 @@ func TestRunNormalSummarizeUsesSummarizePurpose(t *testing.T) {
 	require.NotEmpty(t, savedSession.SummaryMessageID)
 }
 
-func TestRunContextWindowErrorAfterCompletedStepDoesNotAutoResume(t *testing.T) {
+func TestRunContextWindowErrorAfterCompletedStepSummarizesWithoutAutoResume(t *testing.T) {
 	plugin.Reset()
 	t.Cleanup(plugin.Reset)
 
@@ -540,9 +540,9 @@ func TestRunContextWindowErrorAfterCompletedStepDoesNotAutoResume(t *testing.T) 
 		SessionID:       testSession.ID,
 		MaxOutputTokens: 50_000,
 	})
-	require.ErrorIs(t, err, contextWindowErr)
+	require.NoError(t, err)
 	require.Equal(t, 1, fakeAgent.runCalls)
-	require.Equal(t, 0, fakeAgent.summaryCalls)
+	require.Equal(t, 1, fakeAgent.summaryCalls)
 }
 
 func TestSummarizeSkipsAutoCompactForTinyHistory(t *testing.T) {

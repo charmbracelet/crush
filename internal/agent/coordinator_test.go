@@ -693,10 +693,11 @@ func TestBuildAgentModels_ContextWindowOverride(t *testing.T) {
 	}
 	cfg.Config().Providers.Set(providerID, providerCfg)
 	cfg.Config().Models[config.SelectedModelTypeLarge] = config.SelectedModel{
-		Provider:      providerID,
-		Model:         "big",
-		MaxTokens:     32_000,
-		ContextWindow: 400_000,
+		Provider:        providerID,
+		Model:           "big",
+		MaxTokens:       32_000,
+		ContextWindow:   400_000,
+		MaxPromptTokens: 262_144,
 	}
 	cfg.Config().Models[config.SelectedModelTypeSmall] = config.SelectedModel{
 		Provider:  providerID,
@@ -710,6 +711,7 @@ func TestBuildAgentModels_ContextWindowOverride(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(400_000), large.CatwalkCfg.ContextWindow)
 	require.Equal(t, int64(128_000), small.CatwalkCfg.ContextWindow)
+	require.Equal(t, int64(262_144), large.CatwalkCfg.Options.ProviderOptions["max_prompt_tokens"])
 }
 
 func TestUpdateParentSessionCost(t *testing.T) {

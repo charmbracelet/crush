@@ -292,6 +292,69 @@ func (m *MultiEditToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 }
 
 // -----------------------------------------------------------------------------
+// Hashline Edit Tool
+// -----------------------------------------------------------------------------
+
+// HashlineEditToolMessageItem is a message item that represents a hashline-edit tool call.
+type HashlineEditToolMessageItem struct {
+	*baseToolMessageItem
+}
+
+var _ ToolMessageItem = (*HashlineEditToolMessageItem)(nil)
+
+// NewHashlineEditToolMessageItem creates a new [HashlineEditToolMessageItem].
+func NewHashlineEditToolMessageItem(
+	sty *styles.Styles,
+	toolCall message.ToolCall,
+	result *message.ToolResult,
+	canceled bool,
+) ToolMessageItem {
+	return newBaseToolMessageItem(sty, toolCall, result, &HashlineEditToolRenderContext{}, canceled)
+}
+
+// HashlineEditToolRenderContext renders hashline-edit tool messages.
+type HashlineEditToolRenderContext struct{}
+
+// RenderTool implements the [ToolRenderer] interface.
+func (h *HashlineEditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
+	// Hashline edit tool uses full width for diffs.
+	if opts.IsPending() {
+		return pendingTool(sty, "Hashline Edit", opts.Anim, opts.Compact)
+	}
+
+	var params tools.HashlineEditParams
+	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
+		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
+	}
+
+	file := fsext.PrettyPath(params.FilePath)
+	header := toolHeader(sty, opts.Status, "Hashline Edit", width, opts.Compact, file)
+	if opts.Compact {
+		return header
+	}
+
+	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
+		return joinToolParts(header, earlyState)
+	}
+
+	if !opts.HasResult() {
+		return header
+	}
+
+	// Get diff content from metadata.
+	var meta tools.HashlineEditResponseMetadata
+	if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err != nil {
+		bodyWidth := width - toolBodyLeftPaddingTotal
+		body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
+		return joinToolParts(header, body)
+	}
+
+	// Render diff.
+	body := toolOutputDiffContent(sty, file, meta.OldContent, meta.NewContent, width, opts.ExpandedContent)
+	return joinToolParts(header, body)
+}
+
+// -----------------------------------------------------------------------------
 // Download Tool
 // -----------------------------------------------------------------------------
 

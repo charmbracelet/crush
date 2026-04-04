@@ -75,6 +75,9 @@ func (c *coordinator) registerAgentTools(ctx context.Context, agent config.Agent
 		}
 	}
 
+	editTool := agenttools.NewEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir())
+	hashlineEditTool := agenttools.NewHashlineEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir())
+
 	builtin := []fantasy.AgentTool{
 		agenttools.NewRequestUserInputTool(c.userInput),
 		agenttools.NewPlanExitTool(c.sessions),
@@ -83,7 +86,8 @@ func (c *coordinator) registerAgentTools(ctx context.Context, agent config.Agent
 		agenttools.NewJobWaitTool(),
 		agenttools.NewJobKillTool(),
 		agenttools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),
-		agenttools.NewEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
+		editTool,
+		hashlineEditTool,
 		agenttools.NewMultiEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 		agenttools.NewFetchTool(c.permissions, c.cfg.WorkingDir(), nil),
 		agenttools.NewGlobTool(c.cfg.WorkingDir()),

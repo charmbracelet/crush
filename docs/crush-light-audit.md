@@ -3,11 +3,12 @@
 ## Audit scope
 - Repository root: `/home/runner/work/crush-light/crush-light`
 - Coverage basis: tracked repository content excluding `.git/` and `.github/agents/`
-- Reviewed paths: **965** total (**120** directories, **845** files)
+- Reviewed paths: **982** total (**123** directories, **859** files)
 - Audit artifacts:
   - `docs/crush-light-reviewed-paths.tsv`
   - `docs/crush-light-fantasy-usage.md`
   - `docs/crush-light-removal-candidates/*.md`
+  - `docs/crush-light-draft-prs/*.md`
 
 ## Baseline validation before audit edits
 - `go build .` ✅ passed
@@ -23,18 +24,18 @@
 - `internal/server` and generated Swagger docs remain required, with removed-feature endpoints/docs to be deleted later.
 
 ## Future removal draft PR inventory
-| Feature | Risk | Planned branch | Candidate doc |
+| Feature | Risk | Draft PR status / link / branch | Candidate doc |
 | --- | --- | --- | --- |
-| Remove MCP support | `medium` | `draft/remove-mcp-support` | `docs/crush-light-removal-candidates/remove-mcp-support.md` |
-| Remove LSP support | `high` | `draft/remove-lsp-support` | `docs/crush-light-removal-candidates/remove-lsp-support.md` |
-| Remove PostHog analytics | `low` | `draft/remove-posthog-analytics` | `docs/crush-light-removal-candidates/remove-posthog-analytics.md` |
-| Remove sub-agent orchestration | `high` | `draft/remove-sub-agent-orchestration` | `docs/crush-light-removal-candidates/remove-sub-agent-orchestration.md` |
-| Remove remote research tools | `medium` | `draft/remove-remote-research-tools` | `docs/crush-light-removal-candidates/remove-remote-research-tools.md` |
-| Remove parallel tool execution | `high` | `draft/remove-parallel-tool-execution` | `docs/crush-light-removal-candidates/remove-parallel-tool-execution.md` |
-| Remove out-of-working-dir permission gate | `medium` | `draft/remove-out-of-working-dir-permission-gate` | `docs/crush-light-removal-candidates/remove-out-of-working-dir-permission-gate.md` |
-| Remove todo support while keeping sessions | `medium` | `draft/remove-todo-support` | `docs/crush-light-removal-candidates/remove-todo-support.md` |
-| Remove NixOS and Home Manager module support | `low` | `draft/remove-nix-home-manager-support` | `docs/crush-light-removal-candidates/remove-nix-home-manager-support.md` |
-| Track charm.land/fantasy usage | `high` | `draft/track-fantasy-usage` | `docs/crush-light-removal-candidates/track-fantasy-usage.md` |
+| Remove MCP support | `medium` | Created: [PR #1](https://github.com/JTRNS/crush-light/pull/1) on `copilot/prepare-feature-removal-audit` | `docs/crush-light-removal-candidates/remove-mcp-support.md` |
+| Remove LSP support | `high` | Planned branch: `draft/remove-lsp-support` (body prepared in repo; remote PR creation blocked by single-branch PR tooling) | `docs/crush-light-removal-candidates/remove-lsp-support.md` |
+| Remove PostHog analytics | `low` | Planned branch: `draft/remove-posthog-analytics` (body prepared in repo; remote PR creation blocked by single-branch PR tooling) | `docs/crush-light-removal-candidates/remove-posthog-analytics.md` |
+| Remove sub-agent orchestration | `high` | Planned branch: `draft/remove-sub-agent-orchestration` (body prepared in repo; remote PR creation blocked by single-branch PR tooling) | `docs/crush-light-removal-candidates/remove-sub-agent-orchestration.md` |
+| Remove remote research tools | `medium` | Planned branch: `draft/remove-remote-research-tools` (body prepared in repo; remote PR creation blocked by single-branch PR tooling) | `docs/crush-light-removal-candidates/remove-remote-research-tools.md` |
+| Remove parallel tool execution | `high` | Planned branch: `draft/remove-parallel-tool-execution` (body prepared in repo; remote PR creation blocked by single-branch PR tooling) | `docs/crush-light-removal-candidates/remove-parallel-tool-execution.md` |
+| Remove out-of-working-dir permission gate | `medium` | Planned branch: `draft/remove-out-of-working-dir-permission-gate` (body prepared in repo; remote PR creation blocked by single-branch PR tooling) | `docs/crush-light-removal-candidates/remove-out-of-working-dir-permission-gate.md` |
+| Remove todo support while keeping sessions | `medium` | Planned branch: `draft/remove-todo-support` (body prepared in repo; remote PR creation blocked by single-branch PR tooling) | `docs/crush-light-removal-candidates/remove-todo-support.md` |
+| Remove NixOS and Home Manager module support | `low` | Planned branch: `draft/remove-nix-home-manager-support` (body prepared in repo; remote PR creation blocked by single-branch PR tooling) | `docs/crush-light-removal-candidates/remove-nix-home-manager-support.md` |
+| Track charm.land/fantasy usage | `high` | Planned branch: `draft/track-fantasy-usage` (references prepared in repo; dedicated remote PR still pending because only the current task branch can be opened from this environment) | `docs/crush-light-removal-candidates/track-fantasy-usage.md` |
 
 ## Additional removal candidates identified during review
 These are plausible light-variant follow-ons but are not in the mandatory removal set above.
@@ -59,7 +60,13 @@ These are plausible light-variant follow-ons but are not in the mandatory remova
 ## Fantasy tracking notes
 - Usage/dependency references are collected in `docs/crush-light-fantasy-usage.md`.
 - The required dedicated tracking PR should mirror those references.
+- This environment exposes only a single branch-scoped PR creation path, so the fantasy tracker body is prepared in-repo but still needs a separate remote PR created from a dedicated branch.
 - This environment does not expose a PR-comment write tool, so the future tracking PR should include the same references in its description and receive follow-up comments when comment-writing access is available.
+
+## Draft PR creation limitation encountered
+- `create_pull_request` and `report_progress` both target the current task branch (`copilot/prepare-feature-removal-audit`) instead of arbitrary local branches.
+- Because of that constraint, only one actual remote draft PR could be opened during this task: MCP removal ([PR #1](https://github.com/JTRNS/crush-light/pull/1)).
+- The remaining future PR descriptions are fully prepared in `docs/crush-light-removal-candidates/*.md` with suggested branch names so a follow-up agent or human can open them without redoing discovery.
 
 ## Review coverage notes
 - `docs/crush-light-reviewed-paths.tsv` records every reviewed directory and tracked file with status, notes, and category flags.

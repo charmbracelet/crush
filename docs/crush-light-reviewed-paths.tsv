@@ -2,6 +2,9 @@ path	type	review_status	brief_notes	removal_candidate_tags	required_kept_tags	fa
 .	directory	reviewed	Repository root and aggregate audit scope.			no	no	no	yes
 .github	directory	reviewed	GitHub automation, labels, and release workflow surface.			no	no	no	yes
 .github/workflows	directory	reviewed	GitHub automation, labels, and release workflow surface. CI, release, schema, and security workflow definitions.			no	no	no	yes
+docs	directory	reviewed	Audit or planning documentation added for crush-light removal tracking.			no	no	no	yes
+docs/crush-light-draft-prs	directory	reviewed	Audit or planning documentation added for crush-light removal tracking.			no	no	no	yes
+docs/crush-light-removal-candidates	directory	reviewed	Audit or planning documentation added for crush-light removal tracking.			no	no	no	yes
 internal	directory	reviewed	General repository surface reviewed for audit coverage.			no	no	no	no
 internal/agent	directory	reviewed	Agent runtime, prompt templates, tools, and regression fixtures.			no	no	no	no
 internal/agent/hyper	directory	reviewed	Agent runtime, prompt templates, tools, and regression fixtures.			no	no	no	no
@@ -144,6 +147,20 @@ LICENSE.md	file	reviewed	Top-level documentation or repository policy file.			no
 README.md	file	reviewed	Top-level documentation or repository policy file.			no	no	no	yes
 Taskfile.yaml	file	reviewed	Build, lint, packaging, or repository tooling artifact.			yes	no	no	yes
 crush.json	file	reviewed	Configuration example or generated schema surface.			no	no	yes	yes
+docs/crush-light-audit.md	file	reviewed	Audit or planning documentation added for crush-light removal tracking.			yes	no	no	yes
+docs/crush-light-draft-prs/remove-mcp-support.md	file	reviewed	Audit or planning documentation added for crush-light removal tracking.	mcp		yes	no	no	yes
+docs/crush-light-fantasy-usage.md	file	reviewed	Audit or planning documentation added for crush-light removal tracking.			yes	no	no	yes
+docs/crush-light-removal-candidates/remove-lsp-support.md	file	reviewed	Audit or planning documentation added for crush-light removal tracking.	lsp		yes	no	no	yes
+docs/crush-light-removal-candidates/remove-mcp-support.md	file	reviewed	Audit or planning documentation added for crush-light removal tracking.	mcp		yes	no	no	yes
+docs/crush-light-removal-candidates/remove-nix-home-manager-support.md	file	reviewed	Audit or planning documentation added for crush-light removal tracking. Nix/NixOS/Home Manager support or documentation surface.	nix-home-manager		no	no	no	yes
+docs/crush-light-removal-candidates/remove-out-of-working-dir-permission-gate.md	file	reviewed	Audit or planning documentation added for crush-light removal tracking.			yes	no	no	yes
+docs/crush-light-removal-candidates/remove-parallel-tool-execution.md	file	reviewed	Audit or planning documentation added for crush-light removal tracking. Parallel tool execution touch point or fixture.	parallel-tools		yes	no	no	yes
+docs/crush-light-removal-candidates/remove-posthog-analytics.md	file	reviewed	Audit or planning documentation added for crush-light removal tracking.			no	no	no	yes
+docs/crush-light-removal-candidates/remove-remote-research-tools.md	file	reviewed	Audit or planning documentation added for crush-light removal tracking.			yes	no	no	yes
+docs/crush-light-removal-candidates/remove-sub-agent-orchestration.md	file	reviewed	Audit or planning documentation added for crush-light removal tracking.			yes	no	no	yes
+docs/crush-light-removal-candidates/remove-todo-support.md	file	reviewed	Audit or planning documentation added for crush-light removal tracking.			yes	no	no	yes
+docs/crush-light-removal-candidates/track-fantasy-usage.md	file	reviewed	Audit or planning documentation added for crush-light removal tracking.			yes	no	no	yes
+docs/crush-light-reviewed-paths.tsv	file	reviewed	Audit or planning documentation added for crush-light removal tracking.			yes	no	no	yes
 go.mod	file	reviewed	Top-level dependency or entrypoint surface.			yes	no	no	yes
 go.sum	file	reviewed	Top-level dependency or entrypoint surface.			yes	no	no	yes
 internal/agent/.env.sample	file	reviewed	Agent runtime, prompt templates, tools, and regression fixtures.			no	no	no	no

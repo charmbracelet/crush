@@ -118,8 +118,10 @@ type Models struct {
 	loading bool
 }
 
-var _ Dialog = (*Models)(nil)
-var _ LoadingDialog = (*Models)(nil)
+var (
+	_ Dialog        = (*Models)(nil)
+	_ LoadingDialog = (*Models)(nil)
+)
 
 // NewModels creates a new Models dialog.
 func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {

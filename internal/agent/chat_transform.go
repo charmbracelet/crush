@@ -22,16 +22,16 @@ type chatRequestState struct {
 }
 
 type chatRequestStateInput struct {
-	SessionID    string
-	Agent        string
-	Model        Model
-	Provider     plugin.ProviderContext
-	Purpose      plugin.ChatTransformPurpose
-	Messages     []message.Message
-	Message      message.Message
-	Attachments  []message.Attachment
-	SystemPrompt string
-	PromptPrefix string
+	SessionID      string
+	Agent          string
+	Model          Model
+	Provider       plugin.ProviderContext
+	Purpose        plugin.ChatTransformPurpose
+	Messages       []message.Message
+	Message        message.Message
+	Attachments    []message.Attachment
+	SystemPrompt   string
+	PromptPrefix   string
 	PermissionMode session.PermissionMode
 }
 

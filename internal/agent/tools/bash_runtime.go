@@ -145,6 +145,7 @@ func combinedOutputSnapshot(stdout, stderr string) string {
 		return stderr
 	}
 }
+
 func finalShellOutput(stdout, stderr string, execErr error) string {
 	return truncateOutput(formatOutput(stdout, stderr, execErr))
 }

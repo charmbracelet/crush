@@ -14,8 +14,10 @@ type Governance struct {
 	FailureDomain string
 }
 
-type runtimeBudgetContextKey struct{}
-type failureDomainContextKey struct{}
+type (
+	runtimeBudgetContextKey struct{}
+	failureDomainContextKey struct{}
+)
 
 type runtimeBudgetController struct {
 	cancel        context.CancelCauseFunc

@@ -22,12 +22,12 @@ type JobOutputParams struct {
 }
 
 type JobOutputResponseMetadata struct {
-	ShellID          string `json:"shell_id"`
-	Command          string `json:"command"`
-	Description      string `json:"description"`
-	Done             bool   `json:"done"`
-	ExitCode         int    `json:"exit_code,omitempty"`
-	WorkingDirectory string `json:"working_directory"`
+	ShellID          string   `json:"shell_id"`
+	Command          string   `json:"command"`
+	Description      string   `json:"description"`
+	Done             bool     `json:"done"`
+	ExitCode         int      `json:"exit_code,omitempty"`
+	WorkingDirectory string   `json:"working_directory"`
 	DeprecationNotes []string `json:"deprecation_notes,omitempty"`
 }
 

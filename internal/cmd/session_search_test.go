@@ -69,7 +69,6 @@ func TestRunSessionSearch(t *testing.T) {
 	err = runSessionSearch(cmd, []string{"missing"})
 	require.NoError(t, err)
 	require.Contains(t, out.String(), "No matching messages found.")
-
 }
 
 func TestRunSessionSearchRequiresQuery(t *testing.T) {

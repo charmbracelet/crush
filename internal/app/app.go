@@ -130,7 +130,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 			return classifier
 		}, store.WorkingDir(), cfg.Permissions != nil && cfg.Permissions.FailClosedOnClassifierError, allowedTools),
 		FileTracker: filetracker.NewService(q),
-		Checkpoint: checkpointSvc,
+		Checkpoint:  checkpointSvc,
 		ToolRuntime: runtimeService,
 		Timeline:    timelineService,
 		LSPManager:  lsp.NewManager(store),

@@ -151,7 +151,7 @@ const (
 	// ChatTransformPurposeSummarize is the purpose for a summarize.
 	ChatTransformPurposeSummarize ChatTransformPurpose = "summarize"
 	// ChatTransformPurposeRecover is the purpose for a recover.
-	ChatTransformPurposeRecover ChatTransformPurpose = "recover"
+	ChatTransformPurposeRecover          ChatTransformPurpose = "recover"
 	ChatTransformPurposeProactiveCompact ChatTransformPurpose = "proactive_compact"
 )
 

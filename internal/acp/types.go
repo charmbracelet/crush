@@ -296,13 +296,13 @@ type SessionUpdate struct {
 	// Tool call or session info title.
 	Title string `json:"title,omitempty"`
 	// Tool call identifier.
-	ToolCallID string         `json:"toolCallId,omitempty"`
-	Kind       string         `json:"kind,omitempty"`
-	Status     ToolCallStatus `json:"status,omitempty"`
-	RawInput   any            `json:"rawInput,omitempty"`
-	RawOutput  any            `json:"rawOutput,omitempty"`
+	ToolCallID     string         `json:"toolCallId,omitempty"`
+	Kind           string         `json:"kind,omitempty"`
+	Status         ToolCallStatus `json:"status,omitempty"`
+	RawInput       any            `json:"rawInput,omitempty"`
+	RawOutput      any            `json:"rawOutput,omitempty"`
 	ClientMetadata map[string]any `json:"clientMetadata,omitempty"`
-	DurationMs int64 `json:"durationMs,omitempty"`
+	DurationMs     int64          `json:"durationMs,omitempty"`
 	// Structured subtask result metadata projected from tool-result metadata.
 	ChildSessionID   string         `json:"childSessionId,omitempty"`
 	ParentToolCallID string         `json:"parentToolCallId,omitempty"`

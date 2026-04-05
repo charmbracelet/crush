@@ -69,6 +69,7 @@ const (
 	// Deprecated: kept only for backward-compatible config loading.
 	SelectedModelTypeAutoClassifierReasoning SelectedModelType = "auto_classifier_reasoning"
 )
+
 const (
 	AgentCoder   string = "coder"
 	AgentTask    string = "task"

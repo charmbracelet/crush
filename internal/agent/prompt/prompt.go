@@ -19,14 +19,14 @@ import (
 
 // Prompt represents a template-based prompt generator.
 type Prompt struct {
-	name                  string
-	template              string
-	now                   func() time.Time
-	platform              string
-	workingDir            string
-	disableGlobalFile     bool
-	omitProjectContext    bool
-	contextPathsOverride  []string
+	name                 string
+	template             string
+	now                  func() time.Time
+	platform             string
+	workingDir           string
+	disableGlobalFile    bool
+	omitProjectContext   bool
+	contextPathsOverride []string
 }
 
 type PromptDat struct {

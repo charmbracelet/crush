@@ -23,9 +23,11 @@ var autoClassifierFastPrompt []byte
 //go:embed templates/auto_classifier_reasoning.md
 var autoClassifierReasoningPrompt []byte
 
-var autoClassifierCodeFenceRegex = regexp.MustCompile("(?s)^```(?:json)?\\s*(.*?)\\s*```$")
-var autoClassifierQuickAllowBlockRegex = regexp.MustCompile(`(?is)^\s*<block>\s*no\s*</block>\s*$`)
-var autoClassifierQuickDenyBlockRegex = regexp.MustCompile(`(?is)^\s*<block>\s*yes\s*</block>\s*$`)
+var (
+	autoClassifierCodeFenceRegex       = regexp.MustCompile("(?s)^```(?:json)?\\s*(.*?)\\s*```$")
+	autoClassifierQuickAllowBlockRegex = regexp.MustCompile(`(?is)^\s*<block>\s*no\s*</block>\s*$`)
+	autoClassifierQuickDenyBlockRegex  = regexp.MustCompile(`(?is)^\s*<block>\s*yes\s*</block>\s*$`)
+)
 
 type autoClassifierResponse struct {
 	AllowAuto  bool                              `json:"allow_auto"`

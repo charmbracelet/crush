@@ -27,6 +27,7 @@ type mockQueueCoordinator struct {
 func (m *mockQueueCoordinator) Run(context.Context, string, string, ...message.Attachment) (*fantasy.AgentResult, error) {
 	return nil, nil
 }
+
 func (m *mockQueueCoordinator) Cancel(sessionID string) {
 	m.cancelSessions = append(m.cancelSessions, sessionID)
 }
@@ -43,9 +44,11 @@ func (m *mockQueueCoordinator) IsQueuePaused(string) bool           { return m.p
 func (m *mockQueueCoordinator) Summarize(context.Context, string, fantasy.ProviderOptions) error {
 	return nil
 }
+
 func (m *mockQueueCoordinator) GenerateHandoff(context.Context, string, string) (agent.HandoffDraft, error) {
 	return agent.HandoffDraft{}, nil
 }
+
 func (m *mockQueueCoordinator) ClassifyPermission(context.Context, permission.PermissionRequest) (permission.AutoClassification, error) {
 	return permission.AutoClassification{}, nil
 }
@@ -53,6 +56,7 @@ func (m *mockQueueCoordinator) Model() agent.Model { return agent.Model{} }
 func (m *mockQueueCoordinator) EscalationBridge() *permission.EscalationBridge {
 	return nil
 }
+
 func (m *mockQueueCoordinator) PrepareModelSwitch(context.Context, string, config.SelectedModelType, config.SelectedModel) error {
 	return nil
 }

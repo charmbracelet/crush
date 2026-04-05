@@ -24,8 +24,10 @@ const maxAgentPromptDisplayLines = 3
 
 // maxCollapsedAgentNestedTools is the number of nested tool calls rendered in
 // collapsed mode before the user expands the agent block.
-const maxCollapsedAgentNestedTools = 10
-const maxAgentTaskDisplayItems = 8
+const (
+	maxCollapsedAgentNestedTools = 10
+	maxAgentTaskDisplayItems     = 8
+)
 
 // -----------------------------------------------------------------------------
 // Agent Tool

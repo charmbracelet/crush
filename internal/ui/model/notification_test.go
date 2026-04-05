@@ -57,4 +57,3 @@ func TestUpdatePermissionRequestNotificationKeepsWaitingTitle(t *testing.T) {
 	require.Equal(t, "Crush is waiting...", backend.notifications[0].Title)
 	require.Contains(t, backend.notifications[0].Message, "Permission required")
 }
-

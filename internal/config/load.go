@@ -735,7 +735,6 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 			if backgroundModelSelected.Think != nil {
 				background.Think = backgroundModelSelected.Think
 			}
-
 		}
 	}
 	migrateLegacyAutoClassifierSelection(c.Models)

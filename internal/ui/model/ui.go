@@ -2143,11 +2143,6 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 
 		currentModel := cfg.Models[agentCfg.Model]
-		// Keep legacy field untouched; apply reasoning via provider options.
-		if currentModel.ProviderOptions == nil {
-			currentModel.ProviderOptions = map[string]any{}
-		}
-		currentModel.ProviderOptions["reasoning_effort"] = msg.Effort
 		if err := m.com.Store().UpdatePreferredModel(config.ScopeGlobal, agentCfg.Model, currentModel); err != nil {
 			cmds = append(cmds, util.ReportError(err))
 			break

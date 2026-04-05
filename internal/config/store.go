@@ -32,8 +32,9 @@ type ConfigStore struct {
 	config         *Config
 	workingDir     string
 	resolver       VariableResolver
-	globalDataPath string // ~/.local/share/crush/crush.json
-	workspacePath  string // .crush/crush.json
+	globalDataPath string   // ~/.local/share/crush/crush.json
+	workspacePath  string   // .crush/crush.json
+	loadedPaths    []string // config files that were successfully loaded
 	knownProviders []catwalk.Provider
 	overrides      RuntimeOverrides
 }
@@ -74,6 +75,11 @@ func (s *ConfigStore) SetupAgents() {
 // Overrides returns the runtime overrides for this store.
 func (s *ConfigStore) Overrides() *RuntimeOverrides {
 	return &s.overrides
+}
+
+// LoadedPaths returns the config file paths that were successfully loaded.
+func (s *ConfigStore) LoadedPaths() []string {
+	return slices.Clone(s.loadedPaths)
 }
 
 // configPath returns the file path for the given scope.
@@ -335,6 +341,14 @@ func (s *ConfigStore) recordRecentModel(scope Scope, modelType SelectedModelType
 	}
 
 	return nil
+}
+
+// NewTestStore creates a ConfigStore for testing purposes.
+func NewTestStore(cfg *Config, loadedPaths ...string) *ConfigStore {
+	return &ConfigStore{
+		config:      cfg,
+		loadedPaths: loadedPaths,
+	}
 }
 
 // ImportCopilot attempts to import a GitHub Copilot token from disk.

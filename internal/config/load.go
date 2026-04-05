@@ -33,7 +33,7 @@ const defaultCatwalkURL = "https://catwalk.charm.sh"
 func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	configPaths := lookupConfigs(workingDir)
 
-	cfg, err := loadFromConfigPaths(configPaths)
+	cfg, loadedPaths, err := loadFromConfigPaths(configPaths)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config from paths %v: %w", configPaths, err)
 	}
@@ -45,6 +45,7 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		workingDir:     workingDir,
 		globalDataPath: GlobalConfigData(),
 		workspacePath:  filepath.Join(cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName)),
+		loadedPaths:    loadedPaths,
 	}
 
 	if debug {
@@ -60,6 +61,7 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 			*cfg = *merged
 			cfg.setDefaults(workingDir, dataDir)
 			store.config = cfg
+			store.loadedPaths = append(store.loadedPaths, store.workspacePath)
 		}
 	}
 
@@ -669,8 +671,9 @@ func lookupConfigs(cwd string) []string {
 	return append(configPaths, foundConfigs...)
 }
 
-func loadFromConfigPaths(configPaths []string) (*Config, error) {
+func loadFromConfigPaths(configPaths []string) (*Config, []string, error) {
 	var configs [][]byte
+	var loaded []string
 
 	for _, path := range configPaths {
 		data, err := os.ReadFile(path)
@@ -678,15 +681,20 @@ func loadFromConfigPaths(configPaths []string) (*Config, error) {
 			if os.IsNotExist(err) {
 				continue
 			}
-			return nil, fmt.Errorf("failed to open config file %s: %w", path, err)
+			return nil, nil, fmt.Errorf("failed to open config file %s: %w", path, err)
 		}
 		if len(data) == 0 {
 			continue
 		}
 		configs = append(configs, data)
+		loaded = append(loaded, path)
 	}
 
-	return loadFromBytes(configs)
+	cfg, err := loadFromBytes(configs)
+	if err != nil {
+		return nil, nil, err
+	}
+	return cfg, loaded, nil
 }
 
 func loadFromBytes(configs [][]byte) (*Config, error) {

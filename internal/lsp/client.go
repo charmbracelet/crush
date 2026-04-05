@@ -286,6 +286,11 @@ func (c *Client) GetName() string {
 	return c.name
 }
 
+// FileTypes returns the file types this LSP client handles
+func (c *Client) FileTypes() []string {
+	return c.fileTypes
+}
+
 // SetDiagnosticsCallback sets the callback function for diagnostic changes
 func (c *Client) SetDiagnosticsCallback(callback func(name string, count int)) {
 	c.onDiagnosticsChanged = callback

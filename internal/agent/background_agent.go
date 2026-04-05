@@ -134,8 +134,8 @@ func (r *backgroundAgentRegistry) Cancel(agentID, reason string) {
 // Get retrieves a background agent entry by ID.
 func (r *backgroundAgentRegistry) Get(agentID string) (*backgroundAgentEntry, bool) {
 	r.mu.RLock()
+	defer r.mu.RUnlock()
 	entry, ok := r.agents[agentID]
-	r.mu.RUnlock()
 	if !ok {
 		return nil, false
 	}

@@ -56,7 +56,7 @@ func (c *coordinator) GenerateHandoff(ctx context.Context, sourceSessionID, goal
 		return HandoffDraft{}, err
 	}
 
-	model, providerCfg, err := c.selectedModel(ctx, config.SelectedModelTypeHandoff, false)
+	model, providerCfg, err := c.selectedModel(ctx, config.SelectedModelTypeBackground, false)
 	if err != nil {
 		return HandoffDraft{}, err
 	}

@@ -25,7 +25,7 @@ type ModelType int
 const (
 	ModelTypeLarge ModelType = iota
 	ModelTypeSmall
-	ModelTypeHandoff
+	ModelTypeBackground
 	ModelTypeAutoClassifier
 )
 
@@ -36,8 +36,8 @@ func (mt ModelType) String() string {
 		return "Large"
 	case ModelTypeSmall:
 		return "Small"
-	case ModelTypeHandoff:
-		return "Handoff"
+	case ModelTypeBackground:
+		return "Background"
 	case ModelTypeAutoClassifier:
 		return "Auto Classifier"
 	default:
@@ -52,8 +52,8 @@ func (mt ModelType) Config() config.SelectedModelType {
 		return config.SelectedModelTypeLarge
 	case ModelTypeSmall:
 		return config.SelectedModelTypeSmall
-	case ModelTypeHandoff:
-		return config.SelectedModelTypeHandoff
+	case ModelTypeBackground:
+		return config.SelectedModelTypeBackground
 	case ModelTypeAutoClassifier:
 		return config.SelectedModelTypeAutoClassifier
 	default:
@@ -68,8 +68,8 @@ func (mt ModelType) Placeholder() string {
 		return largeModelInputPlaceholder
 	case ModelTypeSmall:
 		return smallModelInputPlaceholder
-	case ModelTypeHandoff:
-		return handoffModelInputPlaceholder
+	case ModelTypeBackground:
+		return backgroundModelInputPlaceholder
 	case ModelTypeAutoClassifier:
 		return autoClassifierModelInputPlaceholder
 	default:
@@ -81,7 +81,7 @@ const (
 	onboardingModelInputPlaceholder     = "Find your fave"
 	largeModelInputPlaceholder          = "Choose a model for large, complex tasks"
 	smallModelInputPlaceholder          = "Choose a model for small, simple tasks"
-	handoffModelInputPlaceholder        = "Choose a model for handoff draft generation"
+	backgroundModelInputPlaceholder     = "Choose a model for background tasks (memory extraction, handoff generation)"
 	autoClassifierModelInputPlaceholder = "Choose a model for Auto Mode permission review"
 )
 
@@ -298,7 +298,7 @@ func (m *Models) modelTypeRadioView() string {
 		largeRadioStyle = t.RadioOn
 	} else if m.modelType == ModelTypeSmall {
 		smallRadioStyle = t.RadioOn
-	} else if m.modelType == ModelTypeHandoff {
+	} else if m.modelType == ModelTypeBackground {
 		handoffRadioStyle = t.RadioOn
 	} else {
 		autoClassifierRadioStyle = t.RadioOn
@@ -312,7 +312,7 @@ func (m *Models) modelTypeRadioView() string {
 	return fmt.Sprintf("%s%s  %s%s  %s%s  %s%s",
 		largeRadio, textStyle.Render(ModelTypeLarge.String()),
 		smallRadio, textStyle.Render(ModelTypeSmall.String()),
-		handoffRadio, textStyle.Render(ModelTypeHandoff.String()),
+		handoffRadio, textStyle.Render(ModelTypeBackground.String()),
 		autoClassifierRadio, textStyle.Render(ModelTypeAutoClassifier.String()))
 }
 
@@ -320,7 +320,7 @@ func (m *Models) currentModelSummaryView(width int) string {
 	lines := []string{
 		m.currentModelSummaryLine(ModelTypeLarge, width),
 		m.currentModelSummaryLine(ModelTypeSmall, width),
-		m.currentModelSummaryLine(ModelTypeHandoff, width),
+		m.currentModelSummaryLine(ModelTypeBackground, width),
 		m.currentModelSummaryLine(ModelTypeAutoClassifier, width),
 	}
 	return m.com.Styles.Dialog.SecondaryText.Width(width).Render(strings.Join(lines, "\n"))
@@ -676,7 +676,7 @@ func (m *Models) setProviderItems() error {
 }
 
 func (m *Models) firstSelectableModelType() ModelType {
-	for _, modelType := range []ModelType{ModelTypeLarge, ModelTypeSmall, ModelTypeHandoff, ModelTypeAutoClassifier} {
+	for _, modelType := range []ModelType{ModelTypeLarge, ModelTypeSmall, ModelTypeBackground, ModelTypeAutoClassifier} {
 		selected := m.com.Config().Models[modelType.Config()]
 		if selected.Provider == "" || selected.Model == "" {
 			return modelType
@@ -690,8 +690,8 @@ func (m *Models) nextModelType(current ModelType) ModelType {
 	case ModelTypeLarge:
 		return ModelTypeSmall
 	case ModelTypeSmall:
-		return ModelTypeHandoff
-	case ModelTypeHandoff:
+		return ModelTypeBackground
+	case ModelTypeBackground:
 		return ModelTypeAutoClassifier
 	default:
 		return ModelTypeLarge

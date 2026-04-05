@@ -2,7 +2,6 @@ package memory
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -11,23 +10,27 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 const (
-	defaultLimit = 20
-	maxLimit     = 100
+	defaultLimit   = 20
+	maxLimit       = 100
+	maxMemoryFiles = 200
+	indexFilename  = "MEMORY.md"
 )
 
 var ErrNotFound = errors.New("memory key not found")
 
 type Entry struct {
-	Key       string   `json:"key"`
-	Value     string   `json:"value"`
-	Scope     string   `json:"scope,omitempty"`
-	Category  string   `json:"category,omitempty"`
-	Type      string   `json:"type,omitempty"`
-	Tags      []string `json:"tags,omitempty"`
-	UpdatedAt int64    `json:"updated_at"`
+	Key       string   `json:"key" yaml:"key"`
+	Value     string   `json:"value" yaml:"value"`
+	Scope     string   `json:"scope,omitempty" yaml:"scope,omitempty"`
+	Category  string   `json:"category,omitempty" yaml:"category,omitempty"`
+	Type      string   `json:"type,omitempty" yaml:"type,omitempty"`
+	Tags      []string `json:"tags,omitempty" yaml:"tags,omitempty"`
+	UpdatedAt int64    `json:"updated_at" yaml:"updated_at"`
 }
 
 type StoreParams struct {
@@ -62,29 +65,24 @@ type Service interface {
 	Delete(context.Context, string) error
 	Search(context.Context, SearchParams) ([]Entry, error)
 	List(context.Context, ListParams) ([]Entry, error)
+	ReadIndex() (string, error)
+	ListMemoryFiles() ([]MemoryFileInfo, error)
+	ReadMemoryFileBody(string) (string, error)
 }
 
 type service struct {
-	storePath string
-	auditPath string
+	memoryDir string
+	indexPath string
 	mu        sync.Mutex
 }
 
-type persistedData struct {
-	Entries map[string]Entry `json:"entries"`
-}
-
-type auditRecord struct {
-	Action    string `json:"action"`
-	Key       string `json:"key"`
-	Timestamp int64  `json:"timestamp"`
-}
-
-type entryFilters struct {
-	Scope    string
-	Category string
-	Type     string
-	Tags     []string
+type memoryFrontmatter struct {
+	Key         string   `yaml:"key"`
+	Description string   `yaml:"description"`
+	Scope       string   `yaml:"scope,omitempty"`
+	Category    string   `yaml:"category,omitempty"`
+	Type        string   `yaml:"type,omitempty"`
+	Tags        []string `yaml:"tags,omitempty"`
 }
 
 func NewService(dataDir string) (Service, error) {
@@ -99,10 +97,10 @@ func NewService(dataDir string) (Service, error) {
 	}
 
 	s := &service{
-		storePath: filepath.Join(memoryDir, "entries.json"),
-		auditPath: filepath.Join(memoryDir, "audit.log"),
+		memoryDir: memoryDir,
+		indexPath: filepath.Join(memoryDir, indexFilename),
 	}
-	if err := s.ensureStoreFile(); err != nil {
+	if err := s.ensureIndexFile(); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -124,24 +122,25 @@ func (s *service) Store(ctx context.Context, params StoreParams) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	data, err := s.readDataLocked()
-	if err != nil {
-		return err
+	fm := memoryFrontmatter{
+		Key:         normalizedKey,
+		Description: truncateForDescription(params.Value),
+		Scope:       strings.TrimSpace(params.Scope),
+		Category:    strings.TrimSpace(params.Category),
+		Type:        strings.TrimSpace(params.Type),
+		Tags:        normalizeTags(params.Tags),
 	}
 
-	data.Entries[normalizedKey] = normalizeEntry(Entry{
-		Key:       normalizedKey,
-		Value:     params.Value,
-		Scope:     params.Scope,
-		Category:  params.Category,
-		Type:      params.Type,
-		Tags:      params.Tags,
-		UpdatedAt: time.Now().UnixNano(),
-	}, normalizedKey)
-	if err := s.writeDataLocked(data); err != nil {
-		return err
+	filePath := s.entryFilePath(normalizedKey)
+	content := buildMemoryFileContent(fm, params.Value)
+	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+		return fmt.Errorf("writing memory file: %w", err)
 	}
-	return s.appendAuditLocked("store", normalizedKey)
+
+	if err := s.rebuildIndexLocked(); err != nil {
+		return fmt.Errorf("rebuilding index: %w", err)
+	}
+	return nil
 }
 
 func (s *service) Get(ctx context.Context, key string) (Entry, error) {
@@ -157,16 +156,7 @@ func (s *service) Get(ctx context.Context, key string) (Entry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	data, err := s.readDataLocked()
-	if err != nil {
-		return Entry{}, err
-	}
-
-	entry, ok := data.Entries[normalizedKey]
-	if !ok {
-		return Entry{}, ErrNotFound
-	}
-	return entry, nil
+	return s.readEntryLocked(normalizedKey)
 }
 
 func (s *service) Delete(ctx context.Context, key string) error {
@@ -182,19 +172,19 @@ func (s *service) Delete(ctx context.Context, key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	data, err := s.readDataLocked()
-	if err != nil {
-		return err
+	filePath := s.entryFilePath(normalizedKey)
+	if _, err := os.Stat(filePath); err != nil {
+		if os.IsNotExist(err) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("checking memory file: %w", err)
 	}
 
-	if _, ok := data.Entries[normalizedKey]; !ok {
-		return ErrNotFound
+	if err := os.Remove(filePath); err != nil {
+		return fmt.Errorf("deleting memory file: %w", err)
 	}
-	delete(data.Entries, normalizedKey)
-	if err := s.writeDataLocked(data); err != nil {
-		return err
-	}
-	return s.appendAuditLocked("delete", normalizedKey)
+
+	return s.rebuildIndexLocked()
 }
 
 func (s *service) Search(ctx context.Context, params SearchParams) ([]Entry, error) {
@@ -216,13 +206,13 @@ func (s *service) Search(ctx context.Context, params SearchParams) ([]Entry, err
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	data, err := s.readDataLocked()
+	entries, err := s.loadAllEntriesLocked()
 	if err != nil {
 		return nil, err
 	}
 
-	results := make([]Entry, 0, len(data.Entries))
-	for _, entry := range data.Entries {
+	results := make([]Entry, 0, len(entries))
+	for _, entry := range entries {
 		if !matchesEntryFilters(entry, filters) {
 			continue
 		}
@@ -248,13 +238,13 @@ func (s *service) List(ctx context.Context, params ListParams) ([]Entry, error) 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	data, err := s.readDataLocked()
+	entries, err := s.loadAllEntriesLocked()
 	if err != nil {
 		return nil, err
 	}
 
-	results := make([]Entry, 0, len(data.Entries))
-	for _, entry := range data.Entries {
+	results := make([]Entry, 0, len(entries))
+	for _, entry := range entries {
 		if !matchesEntryFilters(entry, filters) {
 			continue
 		}
@@ -264,96 +254,192 @@ func (s *service) List(ctx context.Context, params ListParams) ([]Entry, error) 
 	return applyLimit(results, params.Limit), nil
 }
 
-func (s *service) ensureStoreFile() error {
+func (s *service) ensureIndexFile() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, err := os.Stat(s.storePath); err == nil {
+	if _, err := os.Stat(s.indexPath); err == nil {
 		return nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("checking memory store: %w", err)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("checking memory index: %w", err)
 	}
 
-	return s.writeDataLocked(persistedData{Entries: map[string]Entry{}})
+	return os.WriteFile(s.indexPath, []byte("# Memory Index\n\n"), 0o644)
 }
 
-func (s *service) readDataLocked() (persistedData, error) {
-	content, err := os.ReadFile(s.storePath)
+func (s *service) entryFilePath(key string) string {
+	safeKey := sanitizeFilename(key)
+	return filepath.Join(s.memoryDir, safeKey+".md")
+}
+
+func (s *service) readEntryLocked(key string) (Entry, error) {
+	filePath := s.entryFilePath(key)
+	content, err := os.ReadFile(filePath)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return persistedData{Entries: map[string]Entry{}}, nil
+		if os.IsNotExist(err) {
+			return Entry{}, ErrNotFound
 		}
-		return persistedData{}, fmt.Errorf("reading memory store: %w", err)
+		return Entry{}, fmt.Errorf("reading memory file: %w", err)
 	}
 
-	if len(content) == 0 {
-		return persistedData{Entries: map[string]Entry{}}, nil
-	}
-
-	var data persistedData
-	if err := json.Unmarshal(content, &data); err != nil {
-		return persistedData{}, fmt.Errorf("parsing memory store: %w", err)
-	}
-	if data.Entries == nil {
-		data.Entries = map[string]Entry{}
-	}
-	for key, entry := range data.Entries {
-		data.Entries[key] = normalizeEntry(entry, key)
-	}
-	return data, nil
-}
-
-func (s *service) writeDataLocked(data persistedData) error {
-	if data.Entries == nil {
-		data.Entries = map[string]Entry{}
-	}
-	for key, entry := range data.Entries {
-		data.Entries[key] = normalizeEntry(entry, key)
-	}
-
-	payload, err := json.MarshalIndent(data, "", "  ")
+	fm, body, err := parseMemoryFile(content)
 	if err != nil {
-		return fmt.Errorf("encoding memory store: %w", err)
-	}
-	if err := os.WriteFile(s.storePath, payload, 0o644); err != nil {
-		return fmt.Errorf("writing memory store: %w", err)
-	}
-	return nil
-}
-
-func (s *service) appendAuditLocked(action, key string) error {
-	record := auditRecord{Action: action, Key: key, Timestamp: time.Now().Unix()}
-	payload, err := json.Marshal(record)
-	if err != nil {
-		return fmt.Errorf("encoding memory audit record: %w", err)
+		return Entry{}, fmt.Errorf("parsing memory file: %w", err)
 	}
 
-	file, err := os.OpenFile(s.auditPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("opening memory audit log: %w", err)
+	info, statErr := os.Stat(filePath)
+	updatedAt := time.Now().UnixNano()
+	if statErr == nil {
+		updatedAt = info.ModTime().UnixNano()
 	}
-	defer file.Close()
 
-	if _, err := file.Write(append(payload, '\n')); err != nil {
-		return fmt.Errorf("writing memory audit log: %w", err)
-	}
-	return nil
-}
-
-func normalizeEntry(entry Entry, key string) Entry {
-	normalizedKey := strings.TrimSpace(entry.Key)
-	if normalizedKey == "" {
-		normalizedKey = strings.TrimSpace(key)
-	}
 	return Entry{
-		Key:       normalizedKey,
-		Value:     entry.Value,
-		Scope:     strings.TrimSpace(entry.Scope),
-		Category:  strings.TrimSpace(entry.Category),
-		Type:      strings.TrimSpace(entry.Type),
-		Tags:      normalizeTags(entry.Tags),
-		UpdatedAt: entry.UpdatedAt,
+		Key:       fm.Key,
+		Value:     strings.TrimSpace(body),
+		Scope:     fm.Scope,
+		Category:  fm.Category,
+		Type:      fm.Type,
+		Tags:      normalizeTags(fm.Tags),
+		UpdatedAt: updatedAt,
+	}, nil
+}
+
+func (s *service) loadAllEntriesLocked() ([]Entry, error) {
+	files, err := os.ReadDir(s.memoryDir)
+	if err != nil {
+		return nil, fmt.Errorf("reading memory directory: %w", err)
 	}
+
+	type fileStat struct {
+		name    string
+		modTime time.Time
+	}
+	var mdFiles []fileStat
+	for _, f := range files {
+		if f.IsDir() || !strings.HasSuffix(f.Name(), ".md") || f.Name() == indexFilename {
+			continue
+		}
+		info, err := f.Info()
+		if err != nil {
+			continue
+		}
+		mdFiles = append(mdFiles, fileStat{name: f.Name(), modTime: info.ModTime()})
+	}
+
+	sort.Slice(mdFiles, func(i, j int) bool {
+		return mdFiles[i].modTime.After(mdFiles[j].modTime)
+	})
+
+	if len(mdFiles) > maxMemoryFiles {
+		mdFiles = mdFiles[:maxMemoryFiles]
+	}
+
+	entries := make([]Entry, 0, len(mdFiles))
+	for _, fs := range mdFiles {
+		content, err := os.ReadFile(filepath.Join(s.memoryDir, fs.name))
+		if err != nil {
+			continue
+		}
+		fm, body, err := parseMemoryFile(content)
+		if err != nil {
+			continue
+		}
+		entries = append(entries, Entry{
+			Key:       fm.Key,
+			Value:     strings.TrimSpace(body),
+			Scope:     fm.Scope,
+			Category:  fm.Category,
+			Type:      fm.Type,
+			Tags:      normalizeTags(fm.Tags),
+			UpdatedAt: fs.modTime.UnixNano(),
+		})
+	}
+	return entries, nil
+}
+
+func (s *service) rebuildIndexLocked() error {
+	entries, err := s.loadAllEntriesLocked()
+	if err != nil {
+		return err
+	}
+
+	var sb strings.Builder
+	sb.WriteString("# Memory Index\n\n")
+	sb.WriteString("Auto-generated index of memory entries. Do not edit manually.\n\n")
+	for _, entry := range entries {
+		desc := truncateForDescription(entry.Value)
+		fileName := sanitizeFilename(entry.Key) + ".md"
+		sb.WriteString(fmt.Sprintf("- [%s](%s) — %s\n", entry.Key, fileName, desc))
+	}
+	return os.WriteFile(s.indexPath, []byte(sb.String()), 0o644)
+}
+
+func parseMemoryFile(content []byte) (memoryFrontmatter, string, error) {
+	text := string(content)
+	if !strings.HasPrefix(text, "---\n") {
+		return memoryFrontmatter{}, text, nil
+	}
+
+	endIdx := strings.Index(text[4:], "\n---\n")
+	if endIdx < 0 {
+		return memoryFrontmatter{}, text, nil
+	}
+	endIdx += 4
+
+	fmText := text[4:endIdx]
+	body := strings.TrimSpace(text[endIdx+5:])
+
+	var fm memoryFrontmatter
+	if err := yaml.Unmarshal([]byte(fmText), &fm); err != nil {
+		return memoryFrontmatter{}, "", fmt.Errorf("parsing frontmatter: %w", err)
+	}
+
+	return fm, body, nil
+}
+
+func buildMemoryFileContent(fm memoryFrontmatter, body string) string {
+	fmBytes, err := yaml.Marshal(fm)
+	if err != nil {
+		fmBytes = []byte(fmt.Sprintf("key: %s\n", fm.Key))
+	}
+
+	var sb strings.Builder
+	sb.WriteString("---\n")
+	sb.Write(fmBytes)
+	sb.WriteString("---\n\n")
+	sb.WriteString(body)
+	if !strings.HasSuffix(body, "\n") {
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
+func sanitizeFilename(key string) string {
+	replacer := strings.NewReplacer(
+		"/", "__",
+		"\\", "__",
+		" ", "_",
+		":", "-",
+		"*", "",
+		"?", "",
+		"\"", "",
+		"<", "",
+		">", "",
+		"|", "",
+	)
+	safe := replacer.Replace(key)
+	if safe == "" {
+		safe = "unnamed"
+	}
+	return safe
+}
+
+func truncateForDescription(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if len([]rune(trimmed)) <= 120 {
+		return trimmed
+	}
+	return string([]rune(trimmed)[:120]) + "…"
 }
 
 func normalizeTags(tags []string) []string {
@@ -384,6 +470,13 @@ func normalizeTags(tags []string) []string {
 		result = append(result, seen[key])
 	}
 	return result
+}
+
+type entryFilters struct {
+	Scope    string
+	Category string
+	Type     string
+	Tags     []string
 }
 
 func matchesEntryFilters(entry Entry, filters entryFilters) bool {
@@ -450,4 +543,91 @@ func applyLimit(entries []Entry, limit int) []Entry {
 		return entries
 	}
 	return entries[:normalized]
+}
+
+// ReadIndex returns the raw content of the MEMORY.md index file.
+func (s *service) ReadIndex() (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	content, err := os.ReadFile(s.indexPath)
+	if err != nil {
+		return "", fmt.Errorf("reading memory index: %w", err)
+	}
+	return string(content), nil
+}
+
+// MemoryFileInfo holds metadata about a memory file without loading full content.
+type MemoryFileInfo struct {
+	Key         string
+	FileName    string
+	Description string
+	Scope       string
+	Category    string
+	Type        string
+	Tags        []string
+	UpdatedAt   int64
+}
+
+// ListMemoryFiles returns metadata about all memory files without loading full content.
+func (s *service) ListMemoryFiles() ([]MemoryFileInfo, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	files, err := os.ReadDir(s.memoryDir)
+	if err != nil {
+		return nil, fmt.Errorf("reading memory directory: %w", err)
+	}
+
+	var infos []MemoryFileInfo
+	for _, f := range files {
+		if f.IsDir() || !strings.HasSuffix(f.Name(), ".md") || f.Name() == indexFilename {
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(s.memoryDir, f.Name()))
+		if err != nil {
+			continue
+		}
+		fm, _, err := parseMemoryFile(content)
+		if err != nil {
+			continue
+		}
+		info, statErr := f.Info()
+		updatedAt := time.Now().UnixNano()
+		if statErr == nil {
+			updatedAt = info.ModTime().UnixNano()
+		}
+		infos = append(infos, MemoryFileInfo{
+			Key:         fm.Key,
+			FileName:    f.Name(),
+			Description: fm.Description,
+			Scope:       fm.Scope,
+			Category:    fm.Category,
+			Type:        fm.Type,
+			Tags:        normalizeTags(fm.Tags),
+			UpdatedAt:   updatedAt,
+		})
+	}
+
+	sort.Slice(infos, func(i, j int) bool {
+		return infos[i].UpdatedAt > infos[j].UpdatedAt
+	})
+
+	if len(infos) > maxMemoryFiles {
+		infos = infos[:maxMemoryFiles]
+	}
+	return infos, nil
+}
+
+// ReadMemoryFileBody reads just the body content of a memory file by filename.
+func (s *service) ReadMemoryFileBody(fileName string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	content, err := os.ReadFile(filepath.Join(s.memoryDir, fileName))
+	if err != nil {
+		return "", fmt.Errorf("reading memory file: %w", err)
+	}
+	_, body, err := parseMemoryFile(content)
+	return strings.TrimSpace(body), err
 }

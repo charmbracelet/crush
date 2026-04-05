@@ -59,7 +59,10 @@ const (
 	SelectedModelTypeAutoClassifier SelectedModelType = "auto_classifier"
 	SelectedModelTypeLarge          SelectedModelType = "large"
 	SelectedModelTypeSmall          SelectedModelType = "small"
-	SelectedModelTypeHandoff        SelectedModelType = "handoff"
+	SelectedModelTypeBackground     SelectedModelType = "background_model"
+
+	// Deprecated: kept only for backward-compatible config loading.
+	SelectedModelTypeHandoff SelectedModelType = "handoff"
 
 	// Deprecated: kept only for backward-compatible config loading.
 	SelectedModelTypeAutoClassifierFast SelectedModelType = "auto_classifier_fast"
@@ -670,12 +673,18 @@ func (c *Config) SmallModel() *catwalk.Model {
 	return c.GetModel(model.Provider, model.Model)
 }
 
-func (c *Config) HandoffModel() *catwalk.Model {
-	model, ok := c.Models[SelectedModelTypeHandoff]
+func (c *Config) BackgroundModel() *catwalk.Model {
+	model, ok := c.Models[SelectedModelTypeBackground]
 	if !ok {
 		return nil
 	}
 	return c.GetModel(model.Provider, model.Model)
+}
+
+// HandoffModel returns the model used for handoff draft generation.
+// Deprecated: use BackgroundModel instead.
+func (c *Config) HandoffModel() *catwalk.Model {
+	return c.BackgroundModel()
 }
 
 func (c *Config) AutoClassifierModel() *catwalk.Model {

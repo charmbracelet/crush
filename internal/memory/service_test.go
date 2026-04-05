@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -74,43 +75,85 @@ func TestMemoryServiceSearchAndList(t *testing.T) {
 	require.Equal(t, "session-note", tagFiltered[0].Key)
 }
 
-func TestMemoryServiceReadsLegacyStoreFormat(t *testing.T) {
+func TestMemoryServiceStoresAsMarkdownFiles(t *testing.T) {
 	t.Parallel()
 
 	dataDir := t.TempDir()
-	memoryDir := filepath.Join(dataDir, "memory")
-	require.NoError(t, os.MkdirAll(memoryDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(memoryDir, "entries.json"), []byte(`{"entries":{"legacy":{"key":"legacy","value":"old value","scope":"project","updated_at":123}}}`), 0o644))
-
 	service, err := NewService(dataDir)
 	require.NoError(t, err)
 
-	entry, err := service.Get(context.Background(), "legacy")
+	require.NoError(t, service.Store(context.Background(), StoreParams{Key: "test-entry", Value: "hello world", Scope: "project", Type: "fact"}))
+
+	memoryDir := filepath.Join(dataDir, "memory")
+	files, err := os.ReadDir(memoryDir)
 	require.NoError(t, err)
-	require.Equal(t, "legacy", entry.Key)
-	require.Equal(t, "old value", entry.Value)
-	require.Equal(t, "project", entry.Scope)
-	require.Empty(t, entry.Category)
-	require.Empty(t, entry.Type)
-	require.Nil(t, entry.Tags)
+
+	var mdFiles []string
+	for _, f := range files {
+		if strings.HasSuffix(f.Name(), ".md") && f.Name() != indexFilename {
+			mdFiles = append(mdFiles, f.Name())
+		}
+	}
+	require.Len(t, mdFiles, 1)
+	require.True(t, strings.HasSuffix(mdFiles[0], ".md"))
+
+	content, err := os.ReadFile(filepath.Join(memoryDir, mdFiles[0]))
+	require.NoError(t, err)
+	require.True(t, strings.HasPrefix(string(content), "---\n"))
+	require.Contains(t, string(content), "key: test-entry")
+	require.Contains(t, string(content), "---\n\nhello world")
 }
 
-func TestMemoryServiceWritesAuditLog(t *testing.T) {
+func TestMemoryServiceRebuildsIndex(t *testing.T) {
 	t.Parallel()
 
 	dataDir := t.TempDir()
 	service, err := NewService(dataDir)
 	require.NoError(t, err)
 
-	require.NoError(t, service.Store(context.Background(), StoreParams{Key: "k1", Value: "v1", Scope: "project"}))
-	require.NoError(t, service.Delete(context.Background(), "k1"))
+	require.NoError(t, service.Store(context.Background(), StoreParams{Key: "entry-one", Value: "first value"}))
+	require.NoError(t, service.Store(context.Background(), StoreParams{Key: "entry-two", Value: "second value"}))
 
-	auditFile := filepath.Join(dataDir, "memory", "audit.log")
-	content, err := os.ReadFile(auditFile)
+	indexContent, err := service.ReadIndex()
 	require.NoError(t, err)
-	require.Contains(t, string(content), `"action":"store"`)
-	require.Contains(t, string(content), `"action":"delete"`)
-	require.Contains(t, string(content), `"key":"k1"`)
+	require.Contains(t, indexContent, "entry-one")
+	require.Contains(t, indexContent, "entry-two")
+
+	require.NoError(t, service.Delete(context.Background(), "entry-one"))
+
+	indexContent, err = service.ReadIndex()
+	require.NoError(t, err)
+	require.NotContains(t, indexContent, "entry-one")
+	require.Contains(t, indexContent, "entry-two")
+}
+
+func TestMemoryServiceListMemoryFiles(t *testing.T) {
+	t.Parallel()
+
+	service, err := NewService(t.TempDir())
+	require.NoError(t, err)
+
+	require.NoError(t, service.Store(context.Background(), StoreParams{Key: "k1", Value: "value one", Type: "user"}))
+	require.NoError(t, service.Store(context.Background(), StoreParams{Key: "k2", Value: "value two", Type: "feedback"}))
+
+	infos, err := service.ListMemoryFiles()
+	require.NoError(t, err)
+	require.Len(t, infos, 2)
+	require.Equal(t, "k2", infos[0].Key)
+	require.Equal(t, "k1", infos[1].Key)
+}
+
+func TestMemoryServiceReadMemoryFileBody(t *testing.T) {
+	t.Parallel()
+
+	service, err := NewService(t.TempDir())
+	require.NoError(t, err)
+
+	require.NoError(t, service.Store(context.Background(), StoreParams{Key: "body-test", Value: "the actual body content"}))
+
+	body, err := service.ReadMemoryFileBody("body-test.md")
+	require.NoError(t, err)
+	require.Equal(t, "the actual body content", body)
 }
 
 func TestMemoryServiceValidation(t *testing.T) {
@@ -143,4 +186,25 @@ func TestMemoryServiceContextCancellation(t *testing.T) {
 
 	err = service.Store(ctx, StoreParams{Key: "key", Value: "value"})
 	require.True(t, errors.Is(err, context.Canceled))
+}
+
+func TestMemoryServiceSanitizeFilename(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "hello_world", sanitizeFilename("hello world"))
+	require.Equal(t, "path__to__file", sanitizeFilename("path/to/file"))
+	require.Equal(t, "___", sanitizeFilename("   "))
+	require.Equal(t, "colon-separated", sanitizeFilename("colon:separated"))
+}
+
+func TestMemoryServiceTruncateForDescription(t *testing.T) {
+	t.Parallel()
+
+	short := "short value"
+	require.Equal(t, short, truncateForDescription(short))
+
+	long := strings.Repeat("a", 200)
+	result := truncateForDescription(long)
+	require.Len(t, []rune(result), 121)
+	require.True(t, strings.HasSuffix(result, "…"))
 }

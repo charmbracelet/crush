@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestConfigureSelectedModels_DefaultsHandoffToLarge(t *testing.T) {
+func TestConfigureSelectedModels_DefaultsBackgroundToLarge(t *testing.T) {
 	t.Parallel()
 
 	knownProviders := []catwalk.Provider{
@@ -44,11 +44,59 @@ func TestConfigureSelectedModels_DefaultsHandoffToLarge(t *testing.T) {
 	require.NoError(t, cfg.configureProviders(testStore(cfg), env.NewFromMap(map[string]string{}), resolver, knownProviders))
 	require.NoError(t, configureSelectedModels(testStore(cfg), knownProviders))
 
-	require.Equal(t, cfg.Models[SelectedModelTypeLarge], cfg.Models[SelectedModelTypeHandoff])
+	require.Equal(t, cfg.Models[SelectedModelTypeLarge], cfg.Models[SelectedModelTypeBackground])
 	require.Equal(t, cfg.Models[SelectedModelTypeSmall], cfg.Models[SelectedModelTypeAutoClassifier])
 }
 
-func TestConfigureSelectedModels_UsesExplicitHandoff(t *testing.T) {
+func TestConfigureSelectedModels_UsesExplicitBackground(t *testing.T) {
+	t.Parallel()
+
+	knownProviders := []catwalk.Provider{
+		{
+			ID:                  "openai",
+			Name:                "OpenAI",
+			APIEndpoint:         "https://api.openai.com/v1",
+			DefaultLargeModelID: "gpt-5",
+			DefaultSmallModelID: "gpt-5-mini",
+			Models: []catwalk.Model{
+				{ID: "gpt-5", DefaultMaxTokens: 32000},
+				{ID: "gpt-5-mini", DefaultMaxTokens: 16000},
+				{ID: "gpt-4.1", DefaultMaxTokens: 12000},
+			},
+		},
+	}
+
+	cfg := &Config{
+		Providers: csync.NewMap[string, ProviderConfig](),
+		Models: map[SelectedModelType]SelectedModel{
+			SelectedModelTypeBackground: {
+				Provider: "openai",
+				Model:    "gpt-4.1",
+			},
+		},
+	}
+	cfg.setDefaults(t.TempDir(), "")
+	cfg.Providers.Set("openai", ProviderConfig{
+		ID:     "openai",
+		Name:   "OpenAI",
+		APIKey: "test-key",
+		Models: []catwalk.Model{
+			{ID: "gpt-5", DefaultMaxTokens: 32000},
+			{ID: "gpt-5-mini", DefaultMaxTokens: 16000},
+			{ID: "gpt-4.1", DefaultMaxTokens: 12000},
+		},
+	})
+
+	envMap := env.NewFromMap(map[string]string{})
+	resolver := NewEnvironmentVariableResolver(envMap)
+	require.NoError(t, cfg.configureProviders(testStore(cfg), envMap, resolver, knownProviders))
+	require.NoError(t, configureSelectedModels(testStore(cfg), knownProviders))
+
+	require.Equal(t, "gpt-4.1", cfg.Models[SelectedModelTypeBackground].Model)
+	require.Equal(t, "openai", cfg.Models[SelectedModelTypeBackground].Provider)
+}
+
+func TestConfigureSelectedModels_MigratesLegacyHandoffToBackground(t *testing.T) {
 	t.Parallel()
 
 	knownProviders := []catwalk.Provider{
@@ -92,8 +140,8 @@ func TestConfigureSelectedModels_UsesExplicitHandoff(t *testing.T) {
 	require.NoError(t, cfg.configureProviders(testStore(cfg), envMap, resolver, knownProviders))
 	require.NoError(t, configureSelectedModels(testStore(cfg), knownProviders))
 
-	require.Equal(t, "gpt-4.1", cfg.Models[SelectedModelTypeHandoff].Model)
-	require.Equal(t, "openai", cfg.Models[SelectedModelTypeHandoff].Provider)
+	require.Equal(t, "gpt-4.1", cfg.Models[SelectedModelTypeBackground].Model)
+	require.Equal(t, "openai", cfg.Models[SelectedModelTypeBackground].Provider)
 }
 
 func TestConfigureSelectedModels_UsesExplicitAutoClassifier(t *testing.T) {

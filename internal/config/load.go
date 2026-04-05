@@ -597,7 +597,6 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 		return fmt.Errorf("failed to select default models: %w", err)
 	}
 	large, small := defaultLarge, defaultSmall
-	handoff := defaultLarge
 
 	largeModelSelected, largeModelConfigured := c.Models[SelectedModelTypeLarge]
 	if largeModelConfigured {
@@ -684,62 +683,68 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 			}
 		}
 	}
-	handoffModelSelected, handoffModelConfigured := c.Models[SelectedModelTypeHandoff]
-	if handoffModelConfigured {
-		handoff = large
-		if handoffModelSelected.Model != "" {
-			handoff.Model = handoffModelSelected.Model
+	background := large
+	backgroundModelSelected, backgroundModelConfigured := c.Models[SelectedModelTypeBackground]
+	if !backgroundModelConfigured {
+		handoffModelSelected, handoffModelConfigured := c.Models[SelectedModelTypeHandoff]
+		if handoffModelConfigured {
+			backgroundModelSelected = handoffModelSelected
+			backgroundModelConfigured = true
 		}
-		if handoffModelSelected.Provider != "" {
-			handoff.Provider = handoffModelSelected.Provider
+	}
+	if backgroundModelConfigured {
+		background = large
+		if backgroundModelSelected.Model != "" {
+			background.Model = backgroundModelSelected.Model
+		}
+		if backgroundModelSelected.Provider != "" {
+			background.Provider = backgroundModelSelected.Provider
 		}
 
-		model := c.GetModel(handoff.Provider, handoff.Model)
+		model := c.GetModel(background.Provider, background.Model)
 		if model == nil {
-			handoff = large
-			err := store.UpdatePreferredModel(ScopeGlobal, SelectedModelTypeHandoff, handoff)
+			background = large
+			err := store.UpdatePreferredModel(ScopeGlobal, SelectedModelTypeBackground, background)
 			if err != nil {
-				return fmt.Errorf("failed to update preferred handoff model: %w", err)
+				return fmt.Errorf("failed to update preferred background model: %w", err)
 			}
 		} else {
-			if handoffModelSelected.MaxTokens > 0 {
-				handoff.MaxTokens = handoffModelSelected.MaxTokens
+			if backgroundModelSelected.MaxTokens > 0 {
+				background.MaxTokens = backgroundModelSelected.MaxTokens
 			} else {
-				handoff.MaxTokens = model.DefaultMaxTokens
+				background.MaxTokens = model.DefaultMaxTokens
 			}
-			if handoffModelSelected.ContextWindow > 0 {
-				handoff.ContextWindow = handoffModelSelected.ContextWindow
+			if backgroundModelSelected.ContextWindow > 0 {
+				background.ContextWindow = backgroundModelSelected.ContextWindow
 			}
-			if handoffModelSelected.Temperature != nil {
-				handoff.Temperature = handoffModelSelected.Temperature
+			if backgroundModelSelected.Temperature != nil {
+				background.Temperature = backgroundModelSelected.Temperature
 			}
-			if handoffModelSelected.TopP != nil {
-				handoff.TopP = handoffModelSelected.TopP
+			if backgroundModelSelected.TopP != nil {
+				background.TopP = backgroundModelSelected.TopP
 			}
-			if handoffModelSelected.TopK != nil {
-				handoff.TopK = handoffModelSelected.TopK
+			if backgroundModelSelected.TopK != nil {
+				background.TopK = backgroundModelSelected.TopK
 			}
-			if handoffModelSelected.FrequencyPenalty != nil {
-				handoff.FrequencyPenalty = handoffModelSelected.FrequencyPenalty
+			if backgroundModelSelected.FrequencyPenalty != nil {
+				background.FrequencyPenalty = backgroundModelSelected.FrequencyPenalty
 			}
-			if handoffModelSelected.PresencePenalty != nil {
-				handoff.PresencePenalty = handoffModelSelected.PresencePenalty
+			if backgroundModelSelected.PresencePenalty != nil {
+				background.PresencePenalty = backgroundModelSelected.PresencePenalty
 			}
-			if handoffModelSelected.Think != nil {
-				handoff.Think = handoffModelSelected.Think
+			if backgroundModelSelected.Think != nil {
+				background.Think = backgroundModelSelected.Think
 			}
-			if handoffModelSelected.ReasoningEffort != "" {
-				handoff.ReasoningEffort = handoffModelSelected.ReasoningEffort
+			if backgroundModelSelected.ReasoningEffort != "" {
+				background.ReasoningEffort = backgroundModelSelected.ReasoningEffort
 			}
 		}
-	} else {
-		handoff = large
 	}
 	migrateLegacyAutoClassifierSelection(c.Models)
-	autoClassifier := resolveConfiguredModel(store, c, SelectedModelTypeAutoClassifier, resolveAutoClassifierFallback(c, handoffModelConfigured, handoff, small, large))
+	autoClassifier := resolveConfiguredModel(store, c, SelectedModelTypeAutoClassifier, resolveAutoClassifierFallback(c, backgroundModelConfigured, background, small, large))
 	c.Models[SelectedModelTypeLarge] = large
 	c.Models[SelectedModelTypeSmall] = small
-	c.Models[SelectedModelTypeHandoff] = handoff
+	c.Models[SelectedModelTypeBackground] = background
 	c.Models[SelectedModelTypeAutoClassifier] = autoClassifier
 	return nil
 }
@@ -816,13 +821,13 @@ func resolveConfiguredModel(store *ConfigStore, c *Config, modelType SelectedMod
 	return resolved
 }
 
-func resolveAutoClassifierFallback(c *Config, handoffConfigured bool, handoff, small, large SelectedModel) SelectedModel {
+func resolveAutoClassifierFallback(c *Config, backgroundConfigured bool, background, small, large SelectedModel) SelectedModel {
 	if model := c.GetModel(small.Provider, small.Model); model != nil && model.CanReason {
 		return small
 	}
-	if handoffConfigured {
-		if model := c.GetModel(handoff.Provider, handoff.Model); model != nil {
-			return handoff
+	if backgroundConfigured {
+		if model := c.GetModel(background.Provider, background.Model); model != nil {
+			return background
 		}
 	}
 	if model := c.GetModel(small.Provider, small.Model); model != nil {

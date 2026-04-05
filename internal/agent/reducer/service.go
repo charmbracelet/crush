@@ -85,8 +85,8 @@ func summarizeText(content string) string {
 	}
 	content = strings.Join(strings.Fields(content), " ")
 	const maxLen = 160
-	if len(content) <= maxLen {
+	if len([]rune(content)) <= maxLen {
 		return content
 	}
-	return content[:maxLen] + "..."
+	return string([]rune(content)[:maxLen]) + "..."
 }

@@ -634,8 +634,8 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		ReviewToolResult: func(callCtx context.Context, sessionID string, toolResult message.ToolResult, permissionMode session.PermissionMode) (message.ToolResult, error) {
 			return c.reviewToolResultForPromptInjection(callCtx, sessionID, toolResult, permissionMode)
 		},
-		Tools:  nil,
-		Notify: c.notify,
+		Tools:       nil,
+		Notify:      c.notify,
 		HookManager: c.hookManager,
 		Filetracker: c.filetracker,
 		Checkpoint:  c.checkpoint,
@@ -1626,7 +1626,8 @@ func (c *coordinator) runTaskGraphDirect(ctx context.Context, params taskGraphPa
 		return fantasy.NewTextErrorResponse("tasks is required"), nil
 	}
 
-	ctx = taskGraphContextWithBudget(ctx, params.Tasks, c.cfg.Config().Agents)
+	ctx, budgetCancel := taskGraphContextWithBudget(ctx, params.Tasks, c.cfg.Config().Agents)
+	defer budgetCancel()
 	ctx = toolruntime.WithToolCallID(ctx, params.ToolCallID)
 	graph := taskgraph.TaskGraph{Nodes: make([]taskgraph.TaskNode, 0, len(params.Tasks))}
 	tasksByID := make(map[string]taskGraphTask, len(params.Tasks))
@@ -1790,13 +1791,14 @@ func (c *coordinator) runTaskGraphDirect(ctx context.Context, params taskGraphPa
 							break
 						}
 					}
-					attemptCtx := taskGraphAttemptContext(ctx, agentCfg, task.ID)
-					cancel := func() {}
+					attemptCtx, attemptCancel := taskGraphAttemptContext(ctx, agentCfg, task.ID)
+					timeoutCancel := func() {}
 					if agentCfg.TaskGovernance != nil {
 						if timeout := agentCfg.TaskGovernance.Timeout(); timeout > 0 {
-							attemptCtx, cancel = context.WithTimeout(attemptCtx, timeout)
+							attemptCtx, timeoutCancel = context.WithTimeout(attemptCtx, timeout)
 						}
 					}
+					cancel := func() { timeoutCancel(); attemptCancel() }
 
 					if c.hookManager != nil {
 						c.hookManager.RunSubagentStart(attemptCtx, taskGraphAttemptToolCallID(taskToolCallID, attempt), subagentType, params.SessionID)
@@ -1929,7 +1931,7 @@ func taskGraphSemaphoreForAgent(agentCfg config.Agent, semaphores map[string]cha
 	return semaphore
 }
 
-func taskGraphContextWithBudget(ctx context.Context, tasks []taskGraphTask, agents map[string]config.Agent) context.Context {
+func taskGraphContextWithBudget(ctx context.Context, tasks []taskGraphTask, agents map[string]config.Agent) (context.Context, context.CancelFunc) {
 	var graphTimeout time.Duration
 	var runtimeBudget time.Duration
 	var failureBudget int
@@ -1952,16 +1954,16 @@ func taskGraphContextWithBudget(ctx context.Context, tasks []taskGraphTask, agen
 			failureDomain = agentCfg.TaskGovernance.FailureDomainName()
 		}
 	}
-	ctx = toolruntime.WithGovernance(ctx, toolruntime.Governance{
+	ctx, govCancel := toolruntime.WithGovernance(ctx, toolruntime.Governance{
 		RuntimeBudget: runtimeBudget,
 		FailureBudget: failureBudget,
 		FailureDomain: cmp.Or(strings.TrimSpace(failureDomain), "task_graph"),
 	})
 	if graphTimeout == 0 {
-		return ctx
+		return ctx, govCancel
 	}
-	budgetCtx, _ := context.WithTimeout(ctx, graphTimeout)
-	return budgetCtx
+	budgetCtx, cancel := context.WithTimeout(ctx, graphTimeout)
+	return budgetCtx, func() { cancel(); govCancel() }
 }
 
 func taskGraphFailFastEnabled(task taskGraphTask, agents map[string]config.Agent) bool {
@@ -1972,7 +1974,7 @@ func taskGraphFailFastEnabled(task taskGraphTask, agents map[string]config.Agent
 	return agentCfg.TaskGovernance.FailFastEnabled()
 }
 
-func taskGraphAttemptContext(ctx context.Context, agentCfg config.Agent, taskID string) context.Context {
+func taskGraphAttemptContext(ctx context.Context, agentCfg config.Agent, taskID string) (context.Context, context.CancelFunc) {
 	attemptCtx := ctx
 	governance := toolruntime.Governance{FailureDomain: taskGraphFailureDomain(agentCfg, taskID)}
 	if agentCfg.TaskGovernance != nil {
@@ -1984,8 +1986,8 @@ func taskGraphAttemptContext(ctx context.Context, agentCfg config.Agent, taskID 
 			governance.FailureDomain = cmp.Or(agentCfg.TaskGovernance.FailureDomainName(), taskID)
 		}
 	}
-	attemptCtx = toolruntime.WithGovernance(attemptCtx, governance)
-	return attemptCtx
+	attemptCtx, cancel := toolruntime.WithGovernance(attemptCtx, governance)
+	return attemptCtx, cancel
 }
 
 func taskGraphFailureDomain(agentCfg config.Agent, taskID string) string {
@@ -2454,13 +2456,14 @@ func (c *coordinator) runBackgroundTaskNode(
 	// Launch the task in a background goroutine.
 	go func() {
 		bgCtx := context.Background()
-		attemptCtx := taskGraphAttemptContext(bgCtx, agentCfg, task.ID)
-		cancel := func() {}
+		attemptCtx, attemptCancel := taskGraphAttemptContext(bgCtx, agentCfg, task.ID)
+		timeoutCancel := func() {}
 		if agentCfg.TaskGovernance != nil {
 			if timeout := agentCfg.TaskGovernance.Timeout(); timeout > 0 {
-				attemptCtx, cancel = context.WithTimeout(attemptCtx, timeout)
+				attemptCtx, timeoutCancel = context.WithTimeout(attemptCtx, timeout)
 			}
 		}
+		cancel := func() { timeoutCancel(); attemptCancel() }
 
 		if c.hookManager != nil {
 			c.hookManager.RunSubagentStart(attemptCtx, agentID, subagentType, params.SessionID)
@@ -2495,14 +2498,15 @@ func (c *coordinator) runBackgroundTaskNode(
 		if content == "" {
 			content = "Background agent completed with no output."
 		}
-		c.backgroundAgents.Complete(agentID, content)
 
-		// Extract child session ID from metadata if present.
+		// Extract child session ID from metadata before publishing completion event.
 		if response.Metadata != "" {
 			if sub, ok := message.ParseToolResultSubtaskResult(response.Metadata); ok && sub.ChildSessionID != "" {
 				c.backgroundAgents.SetChildSession(agentID, sub.ChildSessionID)
 			}
 		}
+
+		c.backgroundAgents.Complete(agentID, content)
 	}()
 
 	return agentID

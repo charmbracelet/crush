@@ -916,6 +916,39 @@
           "examples": [
             2
           ]
+        },
+        "graph_timeout_seconds": {
+          "type": "integer",
+          "description": "Maximum number of seconds the entire task graph may run before remaining tasks are canceled",
+          "examples": [
+            900
+          ]
+        },
+        "fail_fast": {
+          "type": "boolean",
+          "description": "Stop launching new task graph work after the first task failure",
+          "default": false
+        },
+        "runtime_budget_seconds": {
+          "type": "integer",
+          "description": "Maximum number of seconds a shared runtime budget may remain active across delegated work",
+          "examples": [
+            600
+          ]
+        },
+        "failure_budget": {
+          "type": "integer",
+          "description": "Maximum number of failures allowed within the configured failure domain before remaining delegated work is canceled",
+          "examples": [
+            3
+          ]
+        },
+        "failure_domain": {
+          "type": "string",
+          "description": "Logical failure domain name shared by related delegated work",
+          "examples": [
+            "task_graph"
+          ]
         }
       },
       "additionalProperties": false,

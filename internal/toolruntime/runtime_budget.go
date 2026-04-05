@@ -25,7 +25,7 @@ type runtimeBudgetController struct {
 	failureCount map[string]int
 }
 
-func WithGovernance(ctx context.Context, governance Governance) context.Context {
+func WithGovernance(ctx context.Context, governance Governance) (context.Context, context.CancelFunc) {
 	controller := controllerFromContext(ctx)
 	if controller == nil && governance.FailureBudget > 0 {
 		var cancel context.CancelCauseFunc
@@ -50,15 +50,17 @@ func WithGovernance(ctx context.Context, governance Governance) context.Context 
 		ctx = context.WithValue(ctx, runtimeBudgetContextKey{}, controller)
 	}
 
+	var cancel context.CancelFunc = func() {}
 	if governance.RuntimeBudget > 0 {
-		budgetCtx, _ := context.WithTimeout(ctx, governance.RuntimeBudget)
+		var budgetCtx context.Context
+		budgetCtx, cancel = context.WithTimeout(ctx, governance.RuntimeBudget)
 		ctx = budgetCtx
 		if controller != nil {
 			ctx = context.WithValue(ctx, runtimeBudgetContextKey{}, controller)
 		}
 	}
 
-	return ctx
+	return ctx, cancel
 }
 
 func FailureDomainFromContext(ctx context.Context) string {

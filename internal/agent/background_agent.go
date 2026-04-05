@@ -7,9 +7,10 @@ import (
 	"sync"
 	"time"
 
+	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
-	"charm.land/fantasy"
+	"github.com/google/uuid"
 )
 
 // backgroundAgentStatus represents the lifecycle state of a background agent.
@@ -134,7 +135,7 @@ func (r *backgroundAgentRegistry) Cancel(agentID, reason string) {
 func (r *backgroundAgentRegistry) Get(agentID string) (*backgroundAgentEntry, bool) {
 	r.mu.RLock()
 	entry, ok := r.agents[agentID]
-	r.mu.Unlock()
+	r.mu.RUnlock()
 	if !ok {
 		return nil, false
 	}
@@ -174,7 +175,7 @@ func (r *backgroundAgentRegistry) Lookup() LookupFunc {
 
 // generateAgentID creates a short unique identifier for background agents.
 func generateAgentID() string {
-	return fmt.Sprintf("%d", time.Now().UnixMilli()%10000000)
+	return uuid.New().String()[:8]
 }
 
 // backgroundAgentResultNotification is the XML-formatted notification injected
@@ -239,14 +240,18 @@ func (c *coordinator) runBackgroundTask(ctx context.Context, params taskGraphPar
 		if content == "" {
 			content = "Background agent completed with no output."
 		}
-		c.backgroundAgents.Complete(agentID, content)
 
-		// Extract child session ID from metadata if present.
+		// Extract child session ID from metadata before publishing completion event.
+		var childSessionID string
 		if result.Metadata != "" {
 			if sub, ok := message.ParseToolResultSubtaskResult(result.Metadata); ok && sub.ChildSessionID != "" {
-				c.backgroundAgents.SetChildSession(agentID, sub.ChildSessionID)
+				childSessionID = sub.ChildSessionID
+				c.backgroundAgents.SetChildSession(agentID, childSessionID)
 			}
 		}
+
+		_ = childSessionID
+		c.backgroundAgents.Complete(agentID, content)
 	}()
 
 	return fantasy.NewTextResponse(fmt.Sprintf(

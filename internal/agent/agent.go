@@ -43,6 +43,7 @@ import (
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/hooks"
+	"github.com/charmbracelet/crush/internal/memory"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -285,6 +286,8 @@ type sessionAgent struct {
 	isSubAgent           bool
 	sessions             session.Service
 	messages             message.Service
+	memory               memory.Service
+	backgroundModel      *backgroundModel
 	reviewToolResult     func(context.Context, string, message.ToolResult, session.PermissionMode) (message.ToolResult, error)
 	disableAutoSummarize bool
 	isYolo               bool
@@ -297,6 +300,10 @@ type sessionAgent struct {
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, context.CancelFunc]
 	pausedQueues   *csync.Map[string, bool]
+
+	extractionMu        sync.Mutex
+	pendingExtractions  map[string][]context.CancelFunc
+	extractionTurnCount map[string]int
 }
 
 type SessionAgentOptions struct {
@@ -313,6 +320,8 @@ type SessionAgentOptions struct {
 	IsYolo               bool
 	Sessions             session.Service
 	Messages             message.Service
+	Memory               memory.Service
+	BackgroundModel      *backgroundModel
 	ReviewToolResult     func(context.Context, string, message.ToolResult, session.PermissionMode) (message.ToolResult, error)
 	Tools                []fantasy.AgentTool
 	Notify               pubsub.Publisher[notify.Notification]
@@ -358,6 +367,8 @@ func NewSessionAgent(
 		isSubAgent:           opts.IsSubAgent,
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
+		memory:               opts.Memory,
+		backgroundModel:      opts.BackgroundModel,
 		reviewToolResult:     opts.ReviewToolResult,
 		disableAutoSummarize: opts.DisableAutoSummarize,
 		tools:                csync.NewSliceFrom(opts.Tools),
@@ -369,6 +380,8 @@ func NewSessionAgent(
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, context.CancelFunc](),
 		pausedQueues:         csync.NewMap[string, bool](),
+		pendingExtractions:   make(map[string][]context.CancelFunc),
+		extractionTurnCount:  make(map[string]int),
 	}
 }
 
@@ -598,7 +611,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	var shouldSummarize bool
 	var compactionTrigger sessionCompactionTrigger
 	var contextWindowExceeded bool
-	var contextWindowAutoResumeAllowed = true
+	contextWindowAutoResumeAllowed := true
 	var currentAssistant *message.Message
 	var currentStepToolMessageIDs []string
 	var currentStepToolResultChars int
@@ -1450,6 +1463,23 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	cancel()
 	wg.Wait()
 
+	if !a.isSubAgent && a.memory != nil && a.backgroundModel != nil && !shouldSummarize && a.QueuedPrompts(call.SessionID) == 0 {
+		a.extractionMu.Lock()
+		a.extractionTurnCount[call.SessionID]++
+		turns := a.extractionTurnCount[call.SessionID]
+		if shouldExtractMemories(turns) {
+			a.extractionTurnCount[call.SessionID] = 0
+			historyForExtraction := a.getHistoryForMemoryExtraction(ctx, call.SessionID)
+			go func() {
+				extractMemories(context.Background(), a.memory, a.backgroundModel, call.SessionID, call.Prompt, historyForExtraction)
+				a.extractionMu.Lock()
+				delete(a.pendingExtractions, call.SessionID)
+				a.extractionMu.Unlock()
+			}()
+		}
+		a.extractionMu.Unlock()
+	}
+
 	if a.QueuedPrompts(call.SessionID) == 0 {
 		return result, err
 	}
@@ -2022,6 +2052,28 @@ func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.S
 		}
 	}
 	return filterAutoModePromptMessages(msgs, session.PermissionMode), nil
+}
+
+func (a *sessionAgent) getHistoryForMemoryExtraction(ctx context.Context, sessionID string) []string {
+	msgs, err := a.messages.List(ctx, sessionID)
+	if err != nil {
+		return nil
+	}
+
+	var history []string
+	for _, msg := range msgs {
+		switch msg.Role {
+		case message.User:
+			if text := msg.Content().Text; text != "" {
+				history = append(history, "USER: "+text)
+			}
+		case message.Assistant:
+			if text := msg.Content().Text; text != "" {
+				history = append(history, "ASSISTANT: "+text)
+			}
+		}
+	}
+	return history
 }
 
 func shouldGenerateSessionTitle(title string) bool {
@@ -2722,6 +2774,14 @@ func (a *sessionAgent) CancelAll() {
 		default:
 			time.Sleep(200 * time.Millisecond)
 		}
+	}
+
+	a.extractionMu.Lock()
+	pending := len(a.pendingExtractions)
+	a.extractionMu.Unlock()
+	if pending > 0 {
+		slog.Debug("Waiting for pending memory extractions", "count", pending)
+		time.Sleep(2 * time.Second)
 	}
 }
 

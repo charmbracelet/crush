@@ -645,6 +645,8 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		IsYolo:               c.permissions.SkipRequests(),
 		Sessions:             c.sessions,
 		Messages:             c.messages,
+		Memory:               c.longTermMemory,
+		BackgroundModel:      bgModel,
 		ReviewToolResult: func(callCtx context.Context, sessionID string, toolResult message.ToolResult, permissionMode session.PermissionMode) (message.ToolResult, error) {
 			return c.reviewToolResultForPromptInjection(callCtx, sessionID, toolResult, permissionMode)
 		},
@@ -1610,9 +1612,11 @@ type taskGraphNodeResult struct {
 	Content        string
 }
 
-type subAgentScheduler func(context.Context, subAgentParams) (fantasy.ToolResponse, error)
-type subAgentFactory func(context.Context, string) (SessionAgent, config.Agent, error)
-type taskGraphScheduler func(context.Context, taskGraphParams) (fantasy.ToolResponse, error)
+type (
+	subAgentScheduler  func(context.Context, subAgentParams) (fantasy.ToolResponse, error)
+	subAgentFactory    func(context.Context, string) (SessionAgent, config.Agent, error)
+	taskGraphScheduler func(context.Context, taskGraphParams) (fantasy.ToolResponse, error)
+)
 
 func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (fantasy.ToolResponse, error) {
 	scheduler := c.subAgentScheduler

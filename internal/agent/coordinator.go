@@ -366,8 +366,9 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		}
 	}
 
-	// Get reasoning effort from model selection override, falling back to model default.
-	reasoningEffort := cmp.Or(model.ModelCfg.ReasoningEffort, model.CatwalkCfg.DefaultReasoningEffort)
+	// Reasoning effort now follows provider/model defaults; legacy selected
+	// overrides are intentionally ignored.
+	reasoningEffort := model.CatwalkCfg.DefaultReasoningEffort
 
 	switch providerType {
 	case openai.Name, azure.Name:

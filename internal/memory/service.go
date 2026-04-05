@@ -375,7 +375,7 @@ func (s *service) rebuildIndexLocked() error {
 	for _, entry := range entries {
 		desc := truncateForDescription(entry.Value)
 		fileName := sanitizeFilename(entry.Key) + ".md"
-		sb.WriteString(fmt.Sprintf("- [%s](%s) — %s\n", entry.Key, fileName, desc))
+		fmt.Fprintf(&sb, "- [%s](%s) — %s\n", entry.Key, fileName, desc)
 	}
 	return os.WriteFile(s.indexPath, []byte(sb.String()), 0o644)
 }

@@ -735,9 +735,7 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 			if backgroundModelSelected.Think != nil {
 				background.Think = backgroundModelSelected.Think
 			}
-			if backgroundModelSelected.ReasoningEffort != "" {
-				background.ReasoningEffort = backgroundModelSelected.ReasoningEffort
-			}
+
 		}
 	}
 	migrateLegacyAutoClassifierSelection(c.Models)
@@ -816,9 +814,7 @@ func resolveConfiguredModel(store *ConfigStore, c *Config, modelType SelectedMod
 	if selected.Think != nil {
 		resolved.Think = selected.Think
 	}
-	if selected.ReasoningEffort != "" {
-		resolved.ReasoningEffort = selected.ReasoningEffort
-	}
+
 	return resolved
 }
 

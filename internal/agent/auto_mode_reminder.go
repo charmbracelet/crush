@@ -80,7 +80,7 @@ func filterAutoModePromptMessages(msgs []message.Message, permissionMode session
 		if promptType, ok := message.ParseAutoModePrompt(msg); !ok {
 			filtered = append(filtered, msg)
 			continue
-		} else if i == pendingPromptIndex && !(promptType == message.AutoModePromptTypeExit && permissionMode != session.PermissionModeAuto) {
+		} else if i == pendingPromptIndex && (promptType != message.AutoModePromptTypeExit || permissionMode == session.PermissionModeAuto) {
 			filtered = append(filtered, msg)
 		}
 	}

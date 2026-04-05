@@ -20,7 +20,9 @@ func TestWrapActivityTrackingHTTPClientNil(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	resp, err := client.Get(ts.URL)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL, nil)
+	require.NoError(t, err)
+	resp, err := client.Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -78,7 +80,9 @@ func TestActivityTrackingNoSignalWithoutContext(t *testing.T) {
 
 	client := WrapActivityTrackingHTTPClient(nil)
 
-	resp, err := client.Get(ts.URL)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL, nil)
+	require.NoError(t, err)
+	resp, err := client.Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 

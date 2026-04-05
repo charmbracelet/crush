@@ -506,9 +506,10 @@ func (h *Handler) handleToolRuntimeEvent(sessionID string, event pubsub.Event[to
 	delete(snapshotHashes, state.ToolCallID)
 
 	status := ToolCallStatusCompleted
-	if state.Status == toolruntime.StatusFailed {
+	switch state.Status {
+	case toolruntime.StatusFailed:
 		status = ToolCallStatusFailed
-	} else if state.Status == toolruntime.StatusCanceled {
+	case toolruntime.StatusCanceled:
 		status = ToolCallStatusCanceled
 	}
 

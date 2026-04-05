@@ -664,7 +664,7 @@ func (p *persistentPlugin) sessionCompacting(ctx context.Context, input SessionC
 }
 
 func newPersistentPluginManager(ctx context.Context, cfg resolvedCommandPluginConfig) (*persistentPluginManager, error) {
-	cmd := exec.Command(cfg.command, cfg.args...)
+	cmd := exec.CommandContext(ctx, cfg.command, cfg.args...)
 	cmd.Dir = cfg.cwd
 	cmd.Env = append(os.Environ(), cfg.env...)
 	cmd.Env = append(cmd.Env,

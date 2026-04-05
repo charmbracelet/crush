@@ -76,11 +76,7 @@ func NewLSPDeclarationTool(lspManager *lsp.Manager) fantasy.AgentTool {
 		LSPDeclarationToolName,
 		string(lspDeclarationDescription),
 		func(ctx context.Context, params LSPDefinitionParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			client, absPath, response, ok := lspClientForPosition(ctx, lspManager, lspPositionParams{
-				FilePath:  params.FilePath,
-				Line:      params.Line,
-				Character: params.Character,
-			})
+			client, absPath, response, ok := lspClientForPosition(ctx, lspManager, lspPositionParams(params))
 			if !ok {
 				return response, nil
 			}
@@ -102,11 +98,7 @@ func NewLSPDefinitionTool(lspManager *lsp.Manager) fantasy.AgentTool {
 		LSPDefinitionToolName,
 		string(lspDefinitionDescription),
 		func(ctx context.Context, params LSPDefinitionParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			client, absPath, response, ok := lspClientForPosition(ctx, lspManager, lspPositionParams{
-				FilePath:  params.FilePath,
-				Line:      params.Line,
-				Character: params.Character,
-			})
+			client, absPath, response, ok := lspClientForPosition(ctx, lspManager, lspPositionParams(params))
 			if !ok {
 				return response, nil
 			}
@@ -128,11 +120,7 @@ func NewLSPImplementationTool(lspManager *lsp.Manager) fantasy.AgentTool {
 		LSPImplementationToolName,
 		string(lspImplementationDescription),
 		func(ctx context.Context, params LSPDefinitionParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			client, absPath, response, ok := lspClientForPosition(ctx, lspManager, lspPositionParams{
-				FilePath:  params.FilePath,
-				Line:      params.Line,
-				Character: params.Character,
-			})
+			client, absPath, response, ok := lspClientForPosition(ctx, lspManager, lspPositionParams(params))
 			if !ok {
 				return response, nil
 			}
@@ -154,11 +142,7 @@ func NewLSPTypeDefinitionTool(lspManager *lsp.Manager) fantasy.AgentTool {
 		LSPTypeDefinitionToolName,
 		string(lspTypeDefinitionDescription),
 		func(ctx context.Context, params LSPDefinitionParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			client, absPath, response, ok := lspClientForPosition(ctx, lspManager, lspPositionParams{
-				FilePath:  params.FilePath,
-				Line:      params.Line,
-				Character: params.Character,
-			})
+			client, absPath, response, ok := lspClientForPosition(ctx, lspManager, lspPositionParams(params))
 			if !ok {
 				return response, nil
 			}
@@ -180,11 +164,7 @@ func NewLSPHoverTool(lspManager *lsp.Manager) fantasy.AgentTool {
 		LSPHoverToolName,
 		string(lspHoverDescription),
 		func(ctx context.Context, params LSPHoverParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			client, absPath, response, ok := lspClientForPosition(ctx, lspManager, lspPositionParams{
-				FilePath:  params.FilePath,
-				Line:      params.Line,
-				Character: params.Character,
-			})
+			client, absPath, response, ok := lspClientForPosition(ctx, lspManager, lspPositionParams(params))
 			if !ok {
 				return response, nil
 			}

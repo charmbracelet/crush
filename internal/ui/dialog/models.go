@@ -296,13 +296,14 @@ func (m *Models) modelTypeRadioView() string {
 	smallRadioStyle := t.RadioOff
 	handoffRadioStyle := t.RadioOff
 	autoClassifierRadioStyle := t.RadioOff
-	if m.modelType == ModelTypeLarge {
+	switch m.modelType {
+	case ModelTypeLarge:
 		largeRadioStyle = t.RadioOn
-	} else if m.modelType == ModelTypeSmall {
+	case ModelTypeSmall:
 		smallRadioStyle = t.RadioOn
-	} else if m.modelType == ModelTypeBackground {
+	case ModelTypeBackground:
 		handoffRadioStyle = t.RadioOn
-	} else {
+	default:
 		autoClassifierRadioStyle = t.RadioOn
 	}
 

@@ -1,7 +1,6 @@
 package model
 
 import (
-	"cmp"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -30,7 +29,7 @@ func (m *UI) modelInfo(width int) string {
 
 			// Only check reasoning if model can reason.
 			if model.CatwalkCfg.CanReason {
-				effectiveEffort := cmp.Or(model.ModelCfg.ReasoningEffort, model.CatwalkCfg.DefaultReasoningEffort)
+				effectiveEffort := model.CatwalkCfg.DefaultReasoningEffort
 				if len(model.CatwalkCfg.ReasoningLevels) == 0 {
 					// Anthropic-style thinking models. Think==nil or true means on
 					// (default), Think==&false means explicitly disabled.
@@ -38,7 +37,10 @@ func (m *UI) modelInfo(width int) string {
 					if thinkingDisabled {
 						reasoningInfo = "Thinking Off"
 					} else {
-						displayEffort := cmp.Or(effectiveEffort, "high")
+						displayEffort := effectiveEffort
+						if displayEffort == "" {
+							displayEffort = "high"
+						}
 						reasoningInfo = fmt.Sprintf("Thinking On (%s)", common.FormatReasoningEffort(displayEffort))
 					}
 				} else {
@@ -47,7 +49,10 @@ func (m *UI) modelInfo(width int) string {
 					if thinkingDisabled {
 						reasoningInfo = "Reasoning Off"
 					} else {
-						displayEffort := cmp.Or(effectiveEffort, "high")
+						displayEffort := effectiveEffort
+						if displayEffort == "" {
+							displayEffort = "high"
+						}
 						reasoningInfo = fmt.Sprintf("Reasoning %s", common.FormatReasoningEffort(displayEffort))
 					}
 				}

@@ -224,7 +224,6 @@ func (r *Reasoning) setReasoningItems() error {
 		return errors.New("agent configuration not found")
 	}
 
-	selectedModel := cfg.Models[agentCfg.Model]
 	model := cfg.GetModelByType(agentCfg.Model)
 	if model == nil {
 		return errors.New("model configuration not found")
@@ -234,10 +233,7 @@ func (r *Reasoning) setReasoningItems() error {
 		return errors.New("no reasoning levels available")
 	}
 
-	currentEffort := selectedModel.ReasoningEffort
-	if currentEffort == "" {
-		currentEffort = model.DefaultReasoningEffort
-	}
+	currentEffort := model.DefaultReasoningEffort
 
 	items := make([]list.FilterableItem, 0, len(model.ReasoningLevels))
 	selectedIndex := 0

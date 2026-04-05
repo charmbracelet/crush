@@ -106,7 +106,7 @@ func NewSubtaskResultTool(messages message.Service) fantasy.AgentTool {
 			}
 
 			var b strings.Builder
-			b.WriteString(fmt.Sprintf("Session: %s\n\n", sessionID))
+			fmt.Fprintf(&b, "Session: %s\n\n", sessionID)
 
 			for i := len(msgs) - 1; i >= 0; i-- {
 				msg := msgs[i]

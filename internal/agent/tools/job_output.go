@@ -56,15 +56,7 @@ func NewJobOutputTool() fantasy.AgentTool {
 			}
 
 			result, meta := formatJobToolResponse(bgShell, params.ShellID, params.Wait)
-			metadata := JobOutputResponseMetadata{
-				ShellID:          meta.ShellID,
-				Command:          meta.Command,
-				Description:      meta.Description,
-				Done:             meta.Done,
-				ExitCode:         meta.ExitCode,
-				WorkingDirectory: meta.WorkingDirectory,
-				DeprecationNotes: meta.DeprecationNotes,
-			}
+			metadata := JobOutputResponseMetadata(meta)
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(result), metadata), nil
 		})
 }

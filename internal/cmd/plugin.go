@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"archive/zip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -155,7 +156,7 @@ func installFromLocalDir(source, pluginsDir string) error {
 	// Install dependencies if package.json exists.
 	packageJSONPath := filepath.Join(pluginDir, "package.json")
 	if _, err := os.Stat(packageJSONPath); err == nil {
-		if err := installNPMDependencies(pluginDir); err != nil {
+		if err := installNPMDependencies(context.Background(), pluginDir); err != nil {
 			return fmt.Errorf("failed to install dependencies: %w", err)
 		}
 	}
@@ -197,7 +198,7 @@ func installFromURL(pluginURL, pluginsDir string) error {
 }
 
 func downloadFile(url, dest string) error {
-	resp, err := httpGet(url)
+	resp, err := httpGet(context.Background(), url)
 	if err != nil {
 		return err
 	}
@@ -217,9 +218,13 @@ func downloadFile(url, dest string) error {
 	return err
 }
 
-func httpGet(url string) (*http.Response, error) {
+func httpGet(ctx context.Context, url string) (*http.Response, error) {
 	client := &http.Client{Timeout: 30 * time.Second}
-	return client.Get(url)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	return client.Do(req)
 }
 
 func extractZip(src, dest string) error {
@@ -391,7 +396,7 @@ func validatePluginName(name string) error {
 	return nil
 }
 
-func installNPMDependencies(dir string) error {
+func installNPMDependencies(ctx context.Context, dir string) error {
 	// Check if node_modules already exists.
 	if _, err := os.Stat(filepath.Join(dir, "node_modules")); err == nil {
 		// node_modules already exists.
@@ -401,7 +406,7 @@ func installNPMDependencies(dir string) error {
 	// Prefer pnpm to avoid duplicate node_modules and save disk space.
 	if _, err := exec.LookPath("pnpm"); err == nil {
 		fmt.Printf("Installing dependencies with pnpm in %s...\n", dir)
-		cmd := exec.Command("pnpm", "install")
+		cmd := exec.CommandContext(ctx, "pnpm", "install")
 		cmd.Dir = dir
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -415,7 +420,7 @@ func installNPMDependencies(dir string) error {
 	if _, err := exec.LookPath("npm"); err == nil {
 		fmt.Printf("pnpm not found, falling back to npm in %s...\n", dir)
 		fmt.Println("Tip: Install pnpm for better disk usage: npm install -g pnpm")
-		cmd := exec.Command("npm", "install")
+		cmd := exec.CommandContext(ctx, "npm", "install")
 		cmd.Dir = dir
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr

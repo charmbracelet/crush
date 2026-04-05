@@ -1698,7 +1698,6 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 	if resolvedToolCallID == "" {
 		return nil
 	}
-	toolCallID = resolvedToolCallID
 
 	if agentItem == nil {
 		return nil
@@ -2144,8 +2143,17 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 
 		currentModel := cfg.Models[agentCfg.Model]
-		currentModel.ReasoningEffort = msg.Effort
+		// Keep legacy field untouched; apply reasoning via provider options.
+		if currentModel.ProviderOptions == nil {
+			currentModel.ProviderOptions = map[string]any{}
+		}
+		currentModel.ProviderOptions["reasoning_effort"] = msg.Effort
 		if err := m.com.Store().UpdatePreferredModel(config.ScopeGlobal, agentCfg.Model, currentModel); err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
+		providerKey := fmt.Sprintf("models.%s.provider_options.reasoning_effort", agentCfg.Model)
+		if err := m.com.Store().SetConfigField(config.ScopeGlobal, providerKey, msg.Effort); err != nil {
 			cmds = append(cmds, util.ReportError(err))
 			break
 		}

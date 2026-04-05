@@ -69,9 +69,8 @@ func (a *autoSummarizeTestAgent) Generate(context.Context, fantasy.AgentCall) (*
 
 func (a *autoSummarizeTestAgent) Stream(ctx context.Context, call fantasy.AgentStreamCall) (*fantasy.AgentResult, error) {
 	if call.PrepareStep != nil {
-		preparedCtx, _, err := call.PrepareStep(ctx, fantasy.PrepareStepFunctionOptions{Messages: call.Messages})
+		_, _, err := call.PrepareStep(ctx, fantasy.PrepareStepFunctionOptions{Messages: call.Messages})
 		require.NoError(a.t, err)
-		ctx = preparedCtx
 	}
 
 	isSummary := call.OnStepFinish == nil

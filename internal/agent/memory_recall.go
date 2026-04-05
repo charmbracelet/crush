@@ -130,9 +130,9 @@ func selectRelevantMemories(ctx context.Context, memorySvc memory.Service, model
 func buildMemoryManifest(infos []memory.MemoryFileInfo) string {
 	var sb strings.Builder
 	for i, info := range infos {
-		sb.WriteString(fmt.Sprintf("%d. [%s] %s — %s", i+1, info.Type, info.Key, info.Description))
+		fmt.Fprintf(&sb, "%d. [%s] %s — %s", i+1, info.Type, info.Key, info.Description)
 		if len(info.Tags) > 0 {
-			sb.WriteString(fmt.Sprintf(" (#%s)", strings.Join(info.Tags, " #")))
+			fmt.Fprintf(&sb, " (#%s)", strings.Join(info.Tags, " #"))
 		}
 		sb.WriteString("\n")
 	}

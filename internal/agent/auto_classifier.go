@@ -141,7 +141,7 @@ func buildAutoClassifierPrompt(cfg *config.Config, workingDir string, sess sessi
 	if data, err := json.Marshal(req.Params); err == nil {
 		sb.Write(data)
 	} else {
-		sb.WriteString(fmt.Sprintf("%v", req.Params))
+		fmt.Fprintf(&sb, "%v", req.Params)
 	}
 
 	if cfg != nil && cfg.Permissions != nil && cfg.Permissions.AutoMode != nil {

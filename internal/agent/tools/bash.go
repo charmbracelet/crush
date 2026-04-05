@@ -375,14 +375,7 @@ func requestBashPermission(ctx context.Context, permissions permission.Service, 
 			ToolName:           BashToolName,
 			Action:             "execute",
 			Description:        fmt.Sprintf("Execute command: %s", params.Command),
-			Params: BashPermissionsParams{
-				Description:         params.Description,
-				Command:             params.Command,
-				WorkingDir:          params.WorkingDir,
-				RunInBackground:     params.RunInBackground,
-				TimeoutSeconds:      params.TimeoutSeconds,
-				AutoBackgroundAfter: params.AutoBackgroundAfter,
-			},
+			Params:             BashPermissionsParams(params),
 		},
 	)
 	if err != nil {

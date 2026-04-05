@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -304,6 +305,7 @@ type fakeApp struct {
 type recordingPermissionService struct {
 	permission.Service
 	requests              *pubsub.Broker[permission.PermissionRequest]
+	mu                    sync.RWMutex
 	lastGrantedPersistent permission.PermissionRequest
 	lastGranted           permission.PermissionRequest
 	lastDenied            permission.PermissionRequest
@@ -318,18 +320,30 @@ func (r *recordingPermissionService) PublishRequest(req permission.PermissionReq
 }
 
 func (r *recordingPermissionService) GrantPersistent(req permission.PermissionRequest) {
+	r.mu.Lock()
 	r.lastGrantedPersistent = req
+	r.mu.Unlock()
 	r.Service.GrantPersistent(req)
 }
 
 func (r *recordingPermissionService) Grant(req permission.PermissionRequest) {
+	r.mu.Lock()
 	r.lastGranted = req
+	r.mu.Unlock()
 	r.Service.Grant(req)
 }
 
 func (r *recordingPermissionService) Deny(req permission.PermissionRequest) {
+	r.mu.Lock()
 	r.lastDenied = req
+	r.mu.Unlock()
 	r.Service.Deny(req)
+}
+
+func (r *recordingPermissionService) LastGranted() permission.PermissionRequest {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.lastGranted
 }
 
 func (a *fakeApp) GetSessions() session.Service      { return a.sessions }
@@ -750,8 +764,6 @@ func TestSessionSetModeAutoExitCreatesReminder(t *testing.T) {
 }
 
 func TestSessionSetConfigOptionModePersistsPermissionMode(t *testing.T) {
-	t.Parallel()
-
 	baseDir := t.TempDir()
 	workingDir := filepath.Join(baseDir, "workspace")
 	require.NoError(t, os.MkdirAll(workingDir, 0o755))
@@ -761,7 +773,7 @@ func TestSessionSetConfigOptionModePersistsPermissionMode(t *testing.T) {
 		0o644,
 	))
 
-	store, err := config.Init(workingDir, filepath.Join(baseDir, "state"), false)
+	store, err := config.Init(workingDir, filepath.Join(baseDir, "state-mode"), false)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, log.ResetForTesting())
@@ -792,8 +804,6 @@ func TestSessionSetConfigOptionModePersistsPermissionMode(t *testing.T) {
 }
 
 func TestSessionSetConfigOptionModeAutoExitCreatesReminder(t *testing.T) {
-	t.Parallel()
-
 	baseDir := t.TempDir()
 	workingDir := filepath.Join(baseDir, "workspace")
 	require.NoError(t, os.MkdirAll(workingDir, 0o755))
@@ -803,7 +813,7 @@ func TestSessionSetConfigOptionModeAutoExitCreatesReminder(t *testing.T) {
 		0o644,
 	))
 
-	store, err := config.Init(workingDir, filepath.Join(baseDir, "state"), false)
+	store, err := config.Init(workingDir, filepath.Join(baseDir, "state-auto-exit"), false)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, log.ResetForTesting())
@@ -1157,7 +1167,7 @@ func TestPermissionBridgeForwardsAuthoritySessionID(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
-		return perms.lastGranted.ToolCallID == "tool-1"
+		return perms.LastGranted().ToolCallID == "tool-1"
 	}, time.Second, 10*time.Millisecond)
 }
 

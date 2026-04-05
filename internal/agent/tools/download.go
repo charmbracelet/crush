@@ -77,6 +77,7 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 			permissionResponse, err := RequestPermission(ctx, permissions,
 				permission.CreatePermissionRequest{
 					SessionID:   sessionID,
+					ToolCallID:  call.ID,
 					Path:        filePath,
 					ToolName:    DownloadToolName,
 					Action:      "download",

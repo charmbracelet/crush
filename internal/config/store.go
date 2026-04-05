@@ -48,6 +48,8 @@ type ConfigStore struct {
 	overrides          RuntimeOverrides
 	trackedConfigPaths []string                // unique, normalized config file paths
 	snapshots          map[string]fileSnapshot // path -> snapshot at last capture
+	autoReloadDisabled bool                    // set during load/reload to prevent re-entrancy
+	reloadInProgress   bool                    // set during reload to avoid disk writes mid-reload
 }
 
 // Config returns the pure-data config struct (read-only after load).
@@ -121,6 +123,8 @@ func (s *ConfigStore) HasConfigField(scope Scope, key string) bool {
 }
 
 // SetConfigField sets a key/value pair in the config file for the given scope.
+// After a successful write, it automatically reloads config to keep in-memory
+// state fresh.
 func (s *ConfigStore) SetConfigField(scope Scope, key string, value any) error {
 	path, err := s.configPath(scope)
 	if err != nil {
@@ -145,10 +149,21 @@ func (s *ConfigStore) SetConfigField(scope Scope, key string, value any) error {
 	if err := os.WriteFile(path, []byte(newValue), 0o600); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
+
+	// Auto-reload to keep in-memory state fresh after config edits.
+	// We use context.Background() since this is an internal operation that
+	// shouldn't be cancelled by user context.
+	if err := s.autoReload(context.Background()); err != nil {
+		// Log warning but don't fail the write - disk is already updated.
+		slog.Warn("Config file updated but failed to reload in-memory state", "error", err)
+	}
+
 	return nil
 }
 
 // RemoveConfigField removes a key from the config file for the given scope.
+// After a successful write, it automatically reloads config to keep in-memory
+// state fresh.
 func (s *ConfigStore) RemoveConfigField(scope Scope, key string) error {
 	path, err := s.configPath(scope)
 	if err != nil {
@@ -169,6 +184,12 @@ func (s *ConfigStore) RemoveConfigField(scope Scope, key string) error {
 	if err := os.WriteFile(path, []byte(newValue), 0o600); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
+
+	// Auto-reload to keep in-memory state fresh after config edits.
+	if err := s.autoReload(context.Background()); err != nil {
+		slog.Warn("Config file updated but failed to reload in-memory state", "error", err)
+	}
+
 	return nil
 }
 
@@ -529,11 +550,20 @@ func (s *ConfigStore) captureStalenessSnapshot(paths []string) {
 }
 
 // ReloadFromDisk re-runs the config load/merge flow and updates the in-memory
-// config safely. It rebuilds the staleness snapshot after successful reload.
+// config atomically. It rebuilds the staleness snapshot after successful reload.
+// On failure, the store state is rolled back to its previous state.
 func (s *ConfigStore) ReloadFromDisk(ctx context.Context) error {
 	if s.workingDir == "" {
 		return fmt.Errorf("cannot reload: working directory not set")
 	}
+
+	// Disable auto-reload during reload to prevent nested/re-entrant calls.
+	s.autoReloadDisabled = true
+	s.reloadInProgress = true
+	defer func() {
+		s.autoReloadDisabled = false
+		s.reloadInProgress = false
+	}()
 
 	configPaths := lookupConfigs(s.workingDir)
 	cfg, loadedPaths, err := loadFromConfigPaths(configPaths)
@@ -575,6 +605,14 @@ func (s *ConfigStore) ReloadFromDisk(ctx context.Context) error {
 		return fmt.Errorf("failed to configure providers during reload: %w", err)
 	}
 
+	// Save current state for potential rollback
+	oldConfig := s.config
+	oldLoadedPaths := s.loadedPaths
+	oldResolver := s.resolver
+	oldKnownProviders := s.knownProviders
+	oldOverrides := s.overrides
+	oldWorkspacePath := s.workspacePath
+
 	// Update store state BEFORE running model/agent setup (so they see new config)
 	s.config = cfg
 	s.loadedPaths = loadedPaths
@@ -584,17 +622,44 @@ func (s *ConfigStore) ReloadFromDisk(ctx context.Context) error {
 	s.workspacePath = workspacePath
 
 	// Mirror startup flow: setup models and agents against NEW config
+	var setupErr error
 	if !cfg.IsConfigured() {
 		slog.Warn("No providers configured after reload")
 	} else {
-		if err := configureSelectedModels(s, providers); err != nil {
-			return fmt.Errorf("failed to configure selected models during reload: %w", err)
+		if err := configureSelectedModels(s, providers, false); err != nil {
+			setupErr = fmt.Errorf("failed to configure selected models during reload: %w", err)
+		} else {
+			s.SetupAgents()
 		}
-		s.SetupAgents()
+	}
+
+	// Rollback on setup failure
+	if setupErr != nil {
+		s.config = oldConfig
+		s.loadedPaths = oldLoadedPaths
+		s.resolver = oldResolver
+		s.knownProviders = oldKnownProviders
+		s.overrides = oldOverrides
+		s.workspacePath = oldWorkspacePath
+		return setupErr
 	}
 
 	// Rebuild staleness tracking
 	s.captureStalenessSnapshot(loadedPaths)
 
 	return nil
+}
+
+// autoReload conditionally reloads config from disk after writes.
+// It returns nil (no error) for expected skip cases: when auto-reload is
+// disabled during load/reload flows, or when working directory is not set
+// (e.g., during testing). Only actual reload failures return an error.
+func (s *ConfigStore) autoReload(ctx context.Context) error {
+	if s.autoReloadDisabled {
+		return nil // Expected skip: already in load/reload flow
+	}
+	if s.workingDir == "" {
+		return nil // Expected skip: working directory not set
+	}
+	return s.ReloadFromDisk(ctx)
 }

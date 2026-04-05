@@ -91,6 +91,12 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	// Configure providers
 	valueResolver := NewShellVariableResolver(env)
 	store.resolver = valueResolver
+
+	// Disable auto-reload during initial load to prevent nested calls from
+	// config-modifying operations inside configureProviders.
+	store.autoReloadDisabled = true
+	defer func() { store.autoReloadDisabled = false }()
+
 	if err := cfg.configureProviders(store, env, valueResolver, store.knownProviders); err != nil {
 		return nil, fmt.Errorf("failed to configure providers: %w", err)
 	}
@@ -100,7 +106,7 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		return store, nil
 	}
 
-	if err := configureSelectedModels(store, store.knownProviders); err != nil {
+	if err := configureSelectedModels(store, store.knownProviders, true); err != nil {
 		return nil, fmt.Errorf("failed to configure selected models: %w", err)
 	}
 	store.SetupAgents()
@@ -236,7 +242,9 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 		switch {
 		case p.ID == catwalk.InferenceProviderAnthropic && config.OAuthToken != nil:
 			// Claude Code subscription is not supported anymore. Remove to show onboarding.
-			store.RemoveConfigField(ScopeGlobal, "providers.anthropic")
+			if !store.reloadInProgress {
+				store.RemoveConfigField(ScopeGlobal, "providers.anthropic")
+			}
 			c.Providers.Del(string(p.ID))
 			continue
 		case p.ID == catwalk.InferenceProviderCopilot && config.OAuthToken != nil:
@@ -553,7 +561,7 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 	return largeModel, smallModel, err
 }
 
-func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provider) error {
+func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provider, persist bool) error {
 	c := store.config
 	defaultLarge, defaultSmall, err := c.defaultModelSelection(knownProviders)
 	if err != nil {
@@ -572,10 +580,10 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 		model := c.GetModel(large.Provider, large.Model)
 		if model == nil {
 			large = defaultLarge
-			// override the model type to large
-			err := store.UpdatePreferredModel(ScopeGlobal, SelectedModelTypeLarge, large)
-			if err != nil {
-				return fmt.Errorf("failed to update preferred large model: %w", err)
+			if persist {
+				if err := store.UpdatePreferredModel(ScopeGlobal, SelectedModelTypeLarge, large); err != nil {
+					return fmt.Errorf("failed to update preferred large model: %w", err)
+				}
 			}
 		} else {
 			if largeModelSelected.MaxTokens > 0 {
@@ -616,10 +624,10 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 		model := c.GetModel(small.Provider, small.Model)
 		if model == nil {
 			small = defaultSmall
-			// override the model type to small
-			err := store.UpdatePreferredModel(ScopeGlobal, SelectedModelTypeSmall, small)
-			if err != nil {
-				return fmt.Errorf("failed to update preferred small model: %w", err)
+			if persist {
+				if err := store.UpdatePreferredModel(ScopeGlobal, SelectedModelTypeSmall, small); err != nil {
+					return fmt.Errorf("failed to update preferred small model: %w", err)
+				}
 			}
 		} else {
 			if smallModelSelected.MaxTokens > 0 {

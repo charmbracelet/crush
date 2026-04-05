@@ -94,6 +94,10 @@ func (f *fakeSessionService) List(_ context.Context) ([]session.Session, error) 
 	return list, nil
 }
 
+func (f *fakeSessionService) ListChildren(_ context.Context, _ string) ([]session.Session, error) {
+	return nil, nil
+}
+
 func (f *fakeSessionService) Save(_ context.Context, s session.Session) (session.Session, error) {
 	f.sessions[s.ID] = s
 	return s, nil
@@ -595,25 +599,25 @@ func TestSessionLoadReplaysHistoryBeforeResponse(t *testing.T) {
 	_, err := fmt.Fprint(inWriter, buildRequest(t, 1, "session/load", acp.SessionLoadParams{SessionID: sessionID}))
 	require.NoError(t, err)
 
-	require.True(t, outScanner.Scan(), "expected first line")
-	firstLine := outScanner.Bytes()
-	var firstMsg map[string]any
-	require.NoError(t, json.Unmarshal(firstLine, &firstMsg))
-	require.Equal(t, "session/update", firstMsg["method"])
+	var updates []map[string]any
+	for range 10 {
+		require.True(t, outScanner.Scan(), "expected more output")
+		line := outScanner.Bytes()
+		var msg map[string]any
+		require.NoError(t, json.Unmarshal(line, &msg))
+		if _, ok := msg["result"]; ok {
+			var resp acp.Response
+			require.NoError(t, json.Unmarshal(line, &resp))
+			require.NotNil(t, resp.ID)
+			require.EqualValues(t, 1, *resp.ID)
+			require.Nil(t, resp.Error)
+			break
+		}
+		require.Equal(t, "session/update", msg["method"])
+		updates = append(updates, msg)
+	}
 
-	require.True(t, outScanner.Scan(), "expected second line")
-	secondLine := outScanner.Bytes()
-	var secondMsg map[string]any
-	require.NoError(t, json.Unmarshal(secondLine, &secondMsg))
-	require.Equal(t, "session/update", secondMsg["method"])
-
-	require.True(t, outScanner.Scan(), "expected response line")
-	thirdLine := outScanner.Bytes()
-	var resp acp.Response
-	require.NoError(t, json.Unmarshal(thirdLine, &resp))
-	require.NotNil(t, resp.ID)
-	require.EqualValues(t, 1, *resp.ID)
-	require.Nil(t, resp.Error)
+	require.Len(t, updates, 2)
 }
 
 func TestSessionLoadPersistsCWD(t *testing.T) {

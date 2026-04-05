@@ -199,25 +199,25 @@ func (h *Handler) replayHistory(ctx context.Context, sessionID string) {
 		case message.User:
 			content := msg.Content().Text
 			if content != "" {
-				h.sendUpdateWithContext(ctx, sessionID, SessionUpdate{
+				h.sendUpdateSyncWithContext(ctx, sessionID, SessionUpdate{
 					SessionUpdate: SessionUpdateUserMessageChunk,
 					Content:       TextBlock(content),
 				})
 			}
 		case message.Tool:
 			for _, tr := range msg.ToolResults() {
-				h.sendUpdateWithContext(ctx, sessionID, h.sessionUpdateFromToolResult(tr))
+				h.sendUpdateSyncWithContext(ctx, sessionID, h.sessionUpdateFromToolResult(tr))
 			}
 		case message.Assistant:
 			content := msg.Content().Text
 			if content != "" {
-				h.sendUpdateWithContext(ctx, sessionID, SessionUpdate{
+				h.sendUpdateSyncWithContext(ctx, sessionID, SessionUpdate{
 					SessionUpdate: SessionUpdateAgentMessageChunk,
 					Content:       TextBlock(content),
 				})
 			}
 			for _, tc := range msg.ToolCalls() {
-				h.sendUpdateWithContext(ctx, sessionID, SessionUpdate{
+				h.sendUpdateSyncWithContext(ctx, sessionID, SessionUpdate{
 					SessionUpdate: SessionUpdateToolCall,
 					ToolCallID:    tc.ID,
 					Title:         tc.Name,

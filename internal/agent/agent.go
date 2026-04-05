@@ -1470,6 +1470,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		if shouldExtractMemories(turns) {
 			a.extractionTurnCount[call.SessionID] = 0
 			historyForExtraction := a.getHistoryForMemoryExtraction(ctx, call.SessionID)
+			// Track pending extraction for graceful shutdown
+			a.pendingExtractions[call.SessionID] = append(a.pendingExtractions[call.SessionID], cancel)
 			go func() {
 				extractMemories(context.Background(), a.memory, a.backgroundModel, call.SessionID, call.Prompt, historyForExtraction)
 				a.extractionMu.Lock()

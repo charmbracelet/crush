@@ -78,7 +78,7 @@ var titlePrompt []byte
 var summaryPrompt []byte
 
 // Used to remove <think> tags from generated titles.
-var thinkTagRegex = regexp.MustCompile(`<think>.*?</think>`)
+var thinkTagRegex = regexp.MustCompile(`(?s)<think>.*?</think>`)
 
 const autoResumePromptPrefix = "The previous session was interrupted because it got too long, the initial user request was: `"
 

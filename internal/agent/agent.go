@@ -685,10 +685,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 				queuedCalls := a.takeJoinActiveRunCalls(call.SessionID)
 				remainingJoinBudget := joinActiveRunPromptCharsBudget
-				injectedCalls := 0
+
+				type selectedCall struct {
+					index int
+					call  SessionAgentCall
+				}
+				var selected []selectedCall
 				for i := len(queuedCalls) - 1; i >= 0; i-- {
 					queued := queuedCalls[i]
-					if injectedCalls >= joinActiveRunMaxInjectedCalls || remainingJoinBudget <= 0 {
+					if len(selected) >= joinActiveRunMaxInjectedCalls || remainingJoinBudget <= 0 {
 						a.enqueueQueuedCall(call.SessionID, queued)
 						continue
 					}
@@ -706,13 +711,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 						prompt = string(promptRunes[:remainingJoinBudget-1]) + "…"
 					}
 					queued.Prompt = prompt
-					userMessage, createErr := a.createUserMessage(callContext, queued)
+					selected = append(selected, selectedCall{index: i, call: queued})
+					remainingJoinBudget -= len([]rune(prompt))
+				}
+
+				for s := len(selected) - 1; s >= 0; s-- {
+					userMessage, createErr := a.createUserMessage(callContext, selected[s].call)
 					if createErr != nil {
 						return callContext, prepared, createErr
 					}
 					prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
-					remainingJoinBudget -= len([]rune(prompt))
-					injectedCalls++
 				}
 
 				prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel)

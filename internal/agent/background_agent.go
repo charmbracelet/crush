@@ -197,8 +197,8 @@ func formatBackgroundAgentNotification(entry *backgroundAgentEntry) string {
 		action = "was canceled"
 	}
 	content := entry.Content
-	if len(content) > 2000 {
-		content = content[:2000] + "\n…[truncated]"
+	if len([]rune(content)) > 2000 {
+		content = string([]rune(content)[:2000]) + "\n…[truncated]"
 	}
 	return fmt.Sprintf(backgroundAgentResultNotification, entry.AgentID, status, entry.Description, action, content)
 }

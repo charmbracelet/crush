@@ -271,6 +271,17 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 	return testSessionAgent(env, large, small, systemPrompt, allTools...), nil
 }
 
+func coderAgentNoTitle(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel) (SessionAgent, error) {
+	agent, err := coderAgent(r, env, large, small)
+	if err != nil {
+		return nil, err
+	}
+	if sa, ok := agent.(*sessionAgent); ok {
+		sa.disableAutoSummarize = true
+	}
+	return agent, nil
+}
+
 func normalizeCoderPromptForFixtures(systemPrompt string) string {
 	lines := strings.Split(systemPrompt, "\n")
 	out := make([]string, 0, len(lines))

@@ -18,6 +18,7 @@ func TestAutoModePromptRoundTrip(t *testing.T) {
 
 	for _, promptType := range tests {
 		t.Run(string(promptType), func(t *testing.T) {
+			t.Parallel()
 			params := NewAutoModePromptMessage(promptType)
 			require.Equal(t, System, params.Role)
 			require.Len(t, params.Parts, 1)

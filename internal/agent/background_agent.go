@@ -373,9 +373,10 @@ const backgroundAgentResultNotification = `<task-notification>
 func formatBackgroundAgentNotification(entry *backgroundAgentEntry) string {
 	status := string(entry.Status)
 	action := "completed"
-	if entry.Status == backgroundAgentStatusFailed {
+	switch entry.Status {
+	case backgroundAgentStatusFailed:
 		action = "failed"
-	} else if entry.Status == backgroundAgentStatusCanceled {
+	case backgroundAgentStatusCanceled:
 		action = "was canceled"
 	}
 	content := entry.Content
@@ -388,9 +389,10 @@ func formatBackgroundAgentNotification(entry *backgroundAgentEntry) string {
 // backgroundAgentSubtaskResult converts a backgroundAgentEntry to a ToolResultSubtaskResult.
 func backgroundAgentSubtaskResult(entry *backgroundAgentEntry) message.ToolResultSubtaskResult {
 	status := message.ToolResultSubtaskStatusCompleted
-	if entry.Status == backgroundAgentStatusFailed {
+	switch entry.Status {
+	case backgroundAgentStatusFailed:
 		status = message.ToolResultSubtaskStatusFailed
-	} else if entry.Status == backgroundAgentStatusCanceled {
+	case backgroundAgentStatusCanceled:
 		status = message.ToolResultSubtaskStatusCanceled
 	}
 	return message.ToolResultSubtaskResult{

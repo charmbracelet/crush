@@ -65,8 +65,8 @@ func isRetriableError(err error) bool {
 		if strings.Contains(msg, "rate limit") ||
 			strings.Contains(msg, "too many requests") ||
 			strings.Contains(msg, "overloaded") ||
-			strings.Contains(msg, "temporarily unavailable") ||
-			strings.Contains(msg, "accounts exhausted") {
+			strings.Contains(msg, "accounts exhausted") ||
+			strings.Contains(msg, "temporarily unavailable") {
 			return true
 		}
 	}

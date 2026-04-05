@@ -723,7 +723,6 @@ func TestCollectTaskGraphArtifactsExtractsFilesAndShells(t *testing.T) {
 	require.NoError(t, err)
 
 	writeMeta, err := json.Marshal(agenttools.WriteResponseMetadata{
-		FilePath:  "/tmp/example.go",
 		Diff:      "diff",
 		Additions: 3,
 		Removals:  1,

@@ -234,6 +234,13 @@ func (r *Reasoning) setReasoningItems() error {
 	}
 
 	currentEffort := model.DefaultReasoningEffort
+	if selectedModel, ok := cfg.Models[agentCfg.Model]; ok {
+		if selectedModel.ProviderOptions != nil {
+			if effort, ok := selectedModel.ProviderOptions["reasoning_effort"].(string); ok && effort != "" {
+				currentEffort = effort
+			}
+		}
+	}
 
 	items := make([]list.FilterableItem, 0, len(model.ReasoningLevels))
 	selectedIndex := 0

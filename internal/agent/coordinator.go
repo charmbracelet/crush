@@ -333,6 +333,13 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		}
 	}
 
+	if model.ModelCfg.ProviderOptions != nil {
+		data, err := json.Marshal(model.ModelCfg.ProviderOptions)
+		if err == nil {
+			cfgOpts = data
+		}
+	}
+
 	readers := []io.Reader{
 		bytes.NewReader(catwalkOpts),
 		bytes.NewReader(providerCfgOpts),
@@ -366,8 +373,8 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		}
 	}
 
-	// Reasoning effort now follows provider/model defaults; legacy selected
-	// overrides are intentionally ignored.
+	// Reasoning effort: use user selection if set (via ModelCfg.ProviderOptions),
+	// otherwise fall back to model's default.
 	reasoningEffort := model.CatwalkCfg.DefaultReasoningEffort
 
 	switch providerType {
@@ -2328,7 +2335,7 @@ func (c *coordinator) runSubAgentDirect(ctx context.Context, params subAgentPara
 		ctx = toolruntime.WithDelegationMailbox(ctx, params.DelegationMailbox)
 	}
 
-	// Inject worker identity for permission escalation
+	// Inject worker identity for permission escalation.
 	if c.escalationBridge != nil {
 		workerIdentity := permission.WorkerIdentity{
 			AgentID:   subSession.ID,
@@ -2727,7 +2734,7 @@ func (c *coordinator) runBackgroundTaskNode(
 	var childSessionID string
 	var agentID string
 
-	// Generate a name for the agent based on task ID or description
+	// Generate a name for the agent based on task ID or description.
 	agentName := fmt.Sprintf("%s-%s", task.ID, generateAgentID())
 
 	runner := func(_ context.Context, command backgroundAgentCommand) backgroundAgentRunResult {

@@ -121,7 +121,7 @@ func (r *backgroundAgentRegistry) Register(description string) string {
 func (r *backgroundAgentRegistry) RegisterNamed(name, agentType, description string, runner backgroundAgentRunner) string {
 	agentID := fmt.Sprintf("a-%s", generateAgentID())
 
-	// Auto-generate name if not provided
+	// Auto-generate name if not provided.
 	if name == "" {
 		name = fmt.Sprintf("agent-%s", agentID)
 	}
@@ -146,7 +146,7 @@ func (r *backgroundAgentRegistry) RegisterNamed(name, agentType, description str
 	r.mu.Unlock()
 	r.broker.Publish(pubsub.CreatedEvent, *entry)
 
-	// Start command processor if runner provided
+	// Start command processor if runner provided.
 	if runner != nil {
 		go r.processQueuedCommands(agentID, entry)
 	}
@@ -329,6 +329,7 @@ func (r *backgroundAgentRegistry) Stop(agentID string) {
 	if entry, ok := r.agents[agentID]; ok && entry.stopChan != nil {
 		close(entry.stopChan)
 		entry.stopChan = nil
+		entry.runner = nil
 	}
 	r.mu.Unlock()
 }

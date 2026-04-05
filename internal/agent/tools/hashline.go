@@ -40,6 +40,7 @@ type HashlineEditPermissionsParams struct {
 }
 
 type HashlineEditResponseMetadata struct {
+	FilePath   string `json:"file_path,omitempty"`
 	Additions  int    `json:"additions"`
 	Removals   int    `json:"removals"`
 	OldContent string `json:"old_content,omitempty"`

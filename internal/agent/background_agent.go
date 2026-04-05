@@ -74,6 +74,7 @@ type backgroundAgentEntry struct {
 
 	commands chan backgroundAgentCommand
 	runner   backgroundAgentRunner
+	stopChan chan struct{}
 }
 
 // ToInfo converts the entry to a public-safe struct.
@@ -136,6 +137,7 @@ func (r *backgroundAgentRegistry) RegisterNamed(name, agentType, description str
 	}
 	if runner != nil {
 		entry.commands = make(chan backgroundAgentCommand, 16)
+		entry.stopChan = make(chan struct{})
 	}
 
 	r.mu.Lock()
@@ -296,21 +298,39 @@ func (r *backgroundAgentRegistry) UpdateArtifacts(agentID string, summary string
 }
 
 func (r *backgroundAgentRegistry) processQueuedCommands(agentID string, entry *backgroundAgentEntry) {
-	for command := range entry.commands {
-		r.markRunning(agentID)
-		result := entry.runner(context.Background(), command)
-		if result.ChildSessionID != "" {
-			r.SetChildSession(agentID, result.ChildSessionID)
-		}
-		switch result.Status {
-		case backgroundAgentStatusFailed:
-			r.Fail(agentID, result.Content)
-		case backgroundAgentStatusCanceled:
-			r.Cancel(agentID, result.Content)
-		default:
-			r.Complete(agentID, result.Content)
+	for {
+		select {
+		case <-entry.stopChan:
+			return
+		case command, ok := <-entry.commands:
+			if !ok {
+				return
+			}
+			r.markRunning(agentID)
+			result := entry.runner(context.Background(), command)
+			if result.ChildSessionID != "" {
+				r.SetChildSession(agentID, result.ChildSessionID)
+			}
+			switch result.Status {
+			case backgroundAgentStatusFailed:
+				r.Fail(agentID, result.Content)
+			case backgroundAgentStatusCanceled:
+				r.Cancel(agentID, result.Content)
+			default:
+				r.Complete(agentID, result.Content)
+			}
 		}
 	}
+}
+
+// Stop terminates a background agent's command processor goroutine.
+func (r *backgroundAgentRegistry) Stop(agentID string) {
+	r.mu.Lock()
+	if entry, ok := r.agents[agentID]; ok && entry.stopChan != nil {
+		close(entry.stopChan)
+		entry.stopChan = nil
+	}
+	r.mu.Unlock()
 }
 
 // Get retrieves a background agent entry by ID.

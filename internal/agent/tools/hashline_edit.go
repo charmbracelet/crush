@@ -166,6 +166,7 @@ func NewHashlineEditTool(
 			response := fantasy.WithResponseMetadata(
 				fantasy.NewTextResponse(fmt.Sprintf("Applied %d hashline operation(s) to file: %s", len(operations), params.FilePath)),
 				HashlineEditResponseMetadata{
+					FilePath:   params.FilePath,
 					OldContent: oldContent,
 					NewContent: newContent,
 					Additions:  additions,

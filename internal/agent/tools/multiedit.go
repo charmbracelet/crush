@@ -45,6 +45,7 @@ type FailedEdit struct {
 }
 
 type MultiEditResponseMetadata struct {
+	FilePath     string       `json:"file_path,omitempty"`
 	Additions    int          `json:"additions"`
 	Removals     int          `json:"removals"`
 	OldContent   string       `json:"old_content,omitempty"`
@@ -232,6 +233,7 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse(message),
 		MultiEditResponseMetadata{
+			FilePath:     params.FilePath,
 			OldContent:   "",
 			NewContent:   currentContent,
 			Additions:    additions,
@@ -307,6 +309,7 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 			return fantasy.WithResponseMetadata(
 				fantasy.NewTextErrorResponse(fmt.Sprintf("no changes made - all %d edit(s) failed", len(failedEdits))),
 				MultiEditResponseMetadata{
+					FilePath:     params.FilePath,
 					EditsApplied: 0,
 					EditsFailed:  failedEdits,
 				},
@@ -390,6 +393,7 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse(message),
 		MultiEditResponseMetadata{
+			FilePath:     params.FilePath,
 			OldContent:   oldContent,
 			NewContent:   currentContent,
 			Additions:    additions,

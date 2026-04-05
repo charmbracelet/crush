@@ -37,6 +37,7 @@ type WritePermissionsParams struct {
 }
 
 type WriteResponseMetadata struct {
+	FilePath  string `json:"file_path,omitempty"`
 	Diff      string `json:"diff"`
 	Additions int    `json:"additions"`
 	Removals  int    `json:"removals"`
@@ -170,6 +171,7 @@ func NewWriteTool(
 			result += getDiagnostics(filePath, lspManager)
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(result),
 				WriteResponseMetadata{
+					FilePath:  filePath,
 					Diff:      diff,
 					Additions: additions,
 					Removals:  removals,

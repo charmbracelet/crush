@@ -110,7 +110,7 @@ func NewHashlineEditTool(
 				strings.TrimPrefix(params.FilePath, effectiveWorkingDir),
 			)
 
-			p, err := permissions.Request(ctx,
+			permissionResponse, err := RequestPermission(ctx, permissions,
 				permission.CreatePermissionRequest{
 					SessionID:          sessionID,
 					AuthoritySessionID: ResolveAuthoritySessionID(ctx, sessionID),
@@ -129,8 +129,8 @@ func NewHashlineEditTool(
 			if err != nil {
 				return fantasy.ToolResponse{}, err
 			}
-			if !p {
-				return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
+			if permissionResponse != nil {
+				return *permissionResponse, nil
 			}
 
 			if isCrlf {

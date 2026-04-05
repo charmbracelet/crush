@@ -83,7 +83,11 @@ func taskGraphPromptWithMailboxMessages(basePrompt string, messages []string) st
 	if omitted := start; omitted > 0 {
 		selected = append(selected, fmt.Sprintf("… %d earlier mailbox message(s) omitted.", omitted))
 	}
-	if omitted := len(messages) - start - len(selected); omitted > 0 {
+	actualMessages := len(selected)
+	if start > 0 {
+		actualMessages--
+	}
+	if omitted := len(messages) - start - actualMessages; omitted > 0 {
 		selected = append(selected, fmt.Sprintf("… %d mailbox message(s) omitted due to context budget.", omitted))
 	}
 	return base + "\n\nMailbox messages:\n- " + strings.Join(selected, "\n- ")

@@ -11,12 +11,21 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
+	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/oauth/hyper"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
+
+// fileSnapshot captures metadata about a config file at a point in time.
+type fileSnapshot struct {
+	Path    string
+	Exists  bool
+	Size    int64
+	ModTime int64 // UnixNano
+}
 
 // RuntimeOverrides holds per-session settings that are never persisted to
 // disk. They are applied on top of the loaded Config and survive only for
@@ -29,14 +38,16 @@ type RuntimeOverrides struct {
 // pure-data Config, runtime state (working directory, resolver, known
 // providers), and persistence to both global and workspace config files.
 type ConfigStore struct {
-	config         *Config
-	workingDir     string
-	resolver       VariableResolver
-	globalDataPath string   // ~/.local/share/crush/crush.json
-	workspacePath  string   // .crush/crush.json
-	loadedPaths    []string // config files that were successfully loaded
-	knownProviders []catwalk.Provider
-	overrides      RuntimeOverrides
+	config             *Config
+	workingDir         string
+	resolver           VariableResolver
+	globalDataPath     string   // ~/.local/share/crush/crush.json
+	workspacePath      string   // .crush/crush.json
+	loadedPaths        []string // config files that were successfully loaded
+	knownProviders     []catwalk.Provider
+	overrides          RuntimeOverrides
+	trackedConfigPaths []string                // unique, normalized config file paths
+	snapshots          map[string]fileSnapshot // path -> snapshot at last capture
 }
 
 // Config returns the pure-data config struct (read-only after load).
@@ -382,4 +393,208 @@ func (s *ConfigStore) ImportCopilot() (*oauth.Token, bool) {
 
 	slog.Info("GitHub Copilot successfully imported")
 	return token, true
+}
+
+// StalenessResult contains the result of a staleness check.
+type StalenessResult struct {
+	Dirty   bool
+	Changed []string
+	Missing []string
+	Errors  map[string]error // stat errors by path
+}
+
+// ConfigStaleness checks whether any tracked config files have changed on disk
+// since the last snapshot. Returns dirty=true if any files changed or went
+// missing, along with sorted lists of affected paths. Stat errors are
+// captured in Errors map but still treated as non-existence for dirty detection.
+func (s *ConfigStore) ConfigStaleness() StalenessResult {
+	var result StalenessResult
+	result.Errors = make(map[string]error)
+
+	for _, path := range s.trackedConfigPaths {
+		snapshot, hadSnapshot := s.snapshots[path]
+
+		info, err := os.Stat(path)
+		exists := err == nil && !info.IsDir()
+
+		if err != nil && !os.IsNotExist(err) {
+			// Capture permission/IO errors separately from non-existence
+			result.Errors[path] = err
+			result.Dirty = true
+		}
+
+		if !exists {
+			if hadSnapshot && snapshot.Exists {
+				// File existed before but now missing
+				result.Missing = append(result.Missing, path)
+				result.Dirty = true
+			}
+			continue
+		}
+
+		// File exists now
+		if !hadSnapshot || !snapshot.Exists {
+			// File didn't exist before but does now
+			result.Changed = append(result.Changed, path)
+			result.Dirty = true
+			continue
+		}
+
+		// Check for content or metadata changes
+		if snapshot.Size != info.Size() || snapshot.ModTime != info.ModTime().UnixNano() {
+			result.Changed = append(result.Changed, path)
+			result.Dirty = true
+		}
+	}
+
+	// Sort for deterministic output
+	slices.Sort(result.Changed)
+	slices.Sort(result.Missing)
+
+	return result
+}
+
+// RefreshStalenessSnapshot captures fresh snapshots of all tracked config files.
+// Call this after reloading config to clear dirty state.
+func (s *ConfigStore) RefreshStalenessSnapshot() error {
+	if s.snapshots == nil {
+		s.snapshots = make(map[string]fileSnapshot)
+	}
+
+	for _, path := range s.trackedConfigPaths {
+		info, err := os.Stat(path)
+		exists := err == nil && !info.IsDir()
+
+		snapshot := fileSnapshot{
+			Path:   path,
+			Exists: exists,
+		}
+
+		if exists {
+			snapshot.Size = info.Size()
+			snapshot.ModTime = info.ModTime().UnixNano()
+		}
+
+		s.snapshots[path] = snapshot
+	}
+
+	return nil
+}
+
+// CaptureStalenessSnapshot captures snapshots for the given paths, building the
+// tracked config paths list. Paths are deduplicated and normalized.
+func (s *ConfigStore) CaptureStalenessSnapshot(paths []string) {
+	// Build unique set of normalized paths
+	seen := make(map[string]struct{})
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		// Normalize path
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			abs = p
+		}
+		seen[abs] = struct{}{}
+	}
+
+	// Also track workspace and global config paths if set
+	if s.workspacePath != "" {
+		abs, err := filepath.Abs(s.workspacePath)
+		if err == nil {
+			seen[abs] = struct{}{}
+		}
+	}
+	if s.globalDataPath != "" {
+		abs, err := filepath.Abs(s.globalDataPath)
+		if err == nil {
+			seen[abs] = struct{}{}
+		}
+	}
+
+	// Build sorted list for deterministic ordering
+	s.trackedConfigPaths = make([]string, 0, len(seen))
+	for p := range seen {
+		s.trackedConfigPaths = append(s.trackedConfigPaths, p)
+	}
+	slices.Sort(s.trackedConfigPaths)
+
+	// Capture initial snapshots
+	s.RefreshStalenessSnapshot()
+}
+
+// captureStalenessSnapshot is an alias for CaptureStalenessSnapshot for internal use.
+func (s *ConfigStore) captureStalenessSnapshot(paths []string) {
+	s.CaptureStalenessSnapshot(paths)
+}
+
+// ReloadFromDisk re-runs the config load/merge flow and updates the in-memory
+// config safely. It rebuilds the staleness snapshot after successful reload.
+func (s *ConfigStore) ReloadFromDisk(ctx context.Context) error {
+	if s.workingDir == "" {
+		return fmt.Errorf("cannot reload: working directory not set")
+	}
+
+	configPaths := lookupConfigs(s.workingDir)
+	cfg, loadedPaths, err := loadFromConfigPaths(configPaths)
+	if err != nil {
+		return fmt.Errorf("failed to reload config: %w", err)
+	}
+
+	// Apply defaults (using existing data directory if set)
+	var dataDir string
+	if s.config != nil && s.config.Options != nil {
+		dataDir = s.config.Options.DataDirectory
+	}
+	cfg.setDefaults(s.workingDir, dataDir)
+
+	// Merge workspace config if present
+	workspacePath := filepath.Join(cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName))
+	if wsData, err := os.ReadFile(workspacePath); err == nil && len(wsData) > 0 {
+		merged, mergeErr := loadFromBytes(append([][]byte{mustMarshalConfig(cfg)}, wsData))
+		if mergeErr == nil {
+			dataDir := cfg.Options.DataDirectory
+			*cfg = *merged
+			cfg.setDefaults(s.workingDir, dataDir)
+			loadedPaths = append(loadedPaths, workspacePath)
+		}
+	}
+
+	// Preserve runtime overrides
+	overrides := s.overrides
+
+	// Reconfigure providers
+	env := env.New()
+	resolver := NewShellVariableResolver(env)
+	providers, err := Providers(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to load providers during reload: %w", err)
+	}
+
+	if err := cfg.configureProviders(s, env, resolver, providers); err != nil {
+		return fmt.Errorf("failed to configure providers during reload: %w", err)
+	}
+
+	// Update store state BEFORE running model/agent setup (so they see new config)
+	s.config = cfg
+	s.loadedPaths = loadedPaths
+	s.resolver = resolver
+	s.knownProviders = providers
+	s.overrides = overrides
+	s.workspacePath = workspacePath
+
+	// Mirror startup flow: setup models and agents against NEW config
+	if !cfg.IsConfigured() {
+		slog.Warn("No providers configured after reload")
+	} else {
+		if err := configureSelectedModels(s, providers); err != nil {
+			return fmt.Errorf("failed to configure selected models during reload: %w", err)
+		}
+		s.SetupAgents()
+	}
+
+	// Rebuild staleness tracking
+	s.captureStalenessSnapshot(loadedPaths)
+
+	return nil
 }

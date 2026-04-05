@@ -2,6 +2,8 @@ package tools
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -297,4 +299,74 @@ func TestCrushInfo_EmptySectionsOmitted(t *testing.T) {
 	require.NotContains(t, output, "[permissions]")
 	require.NotContains(t, output, "[lsp]")
 	require.NotContains(t, output, "[mcp]")
+}
+
+func TestCrushInfo_ConfigStaleness_Clean(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "crush.json")
+	require.NoError(t, os.WriteFile(configPath, []byte(`{}`), 0o600))
+
+	store := config.NewTestStore(&config.Config{
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+	}, configPath)
+
+	// Capture snapshot (normally done in Load)
+	store.CaptureStalenessSnapshot([]string{configPath})
+
+	output := buildCrushInfo(store, nil)
+	require.Contains(t, output, "[config]")
+	require.Contains(t, output, "dirty = false")
+	require.NotContains(t, output, "changed_paths")
+	require.NotContains(t, output, "missing_paths")
+}
+
+func TestCrushInfo_ConfigStaleness_Dirty(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "crush.json")
+	require.NoError(t, os.WriteFile(configPath, []byte(`{"debug": false}`), 0o600))
+
+	store := config.NewTestStore(&config.Config{
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+	}, configPath)
+
+	// Capture initial snapshot
+	store.CaptureStalenessSnapshot([]string{configPath})
+
+	// Modify file to trigger dirty state
+	time.Sleep(10 * time.Millisecond)
+	require.NoError(t, os.WriteFile(configPath, []byte(`{"debug": true}`), 0o600))
+
+	output := buildCrushInfo(store, nil)
+	require.Contains(t, output, "[config]")
+	require.Contains(t, output, "dirty = true")
+	require.Contains(t, output, "changed_paths")
+	require.Contains(t, output, configPath)
+}
+
+func TestCrushInfo_ConfigStaleness_MissingPath(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "crush.json")
+	require.NoError(t, os.WriteFile(configPath, []byte(`{}`), 0o600))
+
+	store := config.NewTestStore(&config.Config{
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+	}, configPath)
+
+	// Capture initial snapshot
+	store.CaptureStalenessSnapshot([]string{configPath})
+
+	// Delete file to trigger missing state
+	require.NoError(t, os.Remove(configPath))
+
+	output := buildCrushInfo(store, nil)
+	require.Contains(t, output, "[config]")
+	require.Contains(t, output, "dirty = true")
+	require.Contains(t, output, "missing_paths")
+	require.Contains(t, output, configPath)
 }

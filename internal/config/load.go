@@ -104,6 +104,10 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		return nil, fmt.Errorf("failed to configure selected models: %w", err)
 	}
 	store.SetupAgents()
+
+	// Capture initial staleness snapshot
+	store.captureStalenessSnapshot(loadedPaths)
+
 	return store, nil
 }
 

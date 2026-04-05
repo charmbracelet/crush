@@ -36,6 +36,7 @@ func buildCrushInfo(cfg *config.ConfigStore, lspManager *lsp.Manager) string {
 	var b strings.Builder
 
 	writeConfigFiles(&b, cfg)
+	writeConfigStaleness(&b, cfg)
 	writeModels(&b, cfg)
 	writeProviders(&b, cfg)
 	writeLSP(&b, lspManager, cfg)
@@ -53,6 +54,36 @@ func writeConfigFiles(b *strings.Builder, cfg *config.ConfigStore) {
 	for _, p := range paths {
 		b.WriteString(p + "\n")
 	}
+	b.WriteString("\n")
+}
+
+func writeConfigStaleness(b *strings.Builder, cfg *config.ConfigStore) {
+	staleness := cfg.ConfigStaleness()
+
+	b.WriteString("[config]\n")
+	fmt.Fprintf(b, "dirty = %v\n", staleness.Dirty)
+
+	if len(staleness.Changed) > 0 {
+		sorted := slices.Clone(staleness.Changed)
+		slices.Sort(sorted)
+		fmt.Fprintf(b, "changed_paths = %s\n", strings.Join(sorted, ", "))
+	}
+
+	if len(staleness.Missing) > 0 {
+		sorted := slices.Clone(staleness.Missing)
+		slices.Sort(sorted)
+		fmt.Fprintf(b, "missing_paths = %s\n", strings.Join(sorted, ", "))
+	}
+
+	if len(staleness.Errors) > 0 {
+		var paths []string
+		for path := range staleness.Errors {
+			paths = append(paths, path)
+		}
+		slices.Sort(paths)
+		fmt.Fprintf(b, "errors = %s\n", strings.Join(paths, ", "))
+	}
+
 	b.WriteString("\n")
 }
 

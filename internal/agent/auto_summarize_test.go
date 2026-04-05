@@ -174,7 +174,7 @@ func newAutoSummarizeTestSessionAgent(_ *testing.T, env fakeEnv, fakeAgent fanta
 		SmallModel:   model,
 		SystemPrompt: "",
 		WorkingDir:   env.workingDir,
-		AutoRecall:   buildAutoRecall(env.history, env.memory),
+		AutoRecall:   buildAutoRecall(env.history, env.memory, nil),
 		IsYolo:       true,
 		Sessions:     env.sessions,
 		Messages:     messages,

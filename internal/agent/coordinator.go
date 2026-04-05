@@ -589,6 +589,17 @@ func mergeCallOptions(model Model, cfg config.ProviderConfig) (fantasy.ProviderO
 	return modelOptions, temp, topP, topK, freqPenalty, presPenalty
 }
 
+func (c *coordinator) resolveBackgroundModel(ctx context.Context) *backgroundModel {
+	model, providerCfg, err := c.selectedModel(ctx, config.SelectedModelTypeBackground, false)
+	if err != nil {
+		return nil
+	}
+	return &backgroundModel{
+		model:    model,
+		provider: providerCfg,
+	}
+}
+
 func effectiveMaxOutputTokens(model Model) (int64, bool) {
 	maxTokens := model.CatwalkCfg.DefaultMaxTokens
 	if model.ModelCfg.MaxTokens == 0 {
@@ -615,6 +626,9 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 			inferenceProviderCfg = cfg
 		}
 	}
+
+	bgModel := c.resolveBackgroundModel(ctx)
+
 	var result SessionAgent
 	result = NewSessionAgent(SessionAgentOptions{
 		LargeModel:         inferenceModel,
@@ -622,7 +636,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		SystemPromptPrefix: inferenceProviderCfg.SystemPromptPrefix,
 		SystemPrompt:       "",
 		WorkingDir:         c.cfg.WorkingDir(),
-		AutoRecall:         buildAutoRecall(c.history, c.longTermMemory),
+		AutoRecall:         buildAutoRecall(c.history, c.longTermMemory, bgModel),
 		RefreshCallConfig: func(callCtx context.Context) (sessionAgentRuntimeConfig, error) {
 			return c.refreshSessionAgentRuntimeConfig(callCtx, result, prompt, agent, isSubAgent)
 		},
@@ -631,6 +645,8 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		IsYolo:               c.permissions.SkipRequests(),
 		Sessions:             c.sessions,
 		Messages:             c.messages,
+		Memory:               c.longTermMemory,
+		BackgroundModel:      bgModel,
 		ReviewToolResult: func(callCtx context.Context, sessionID string, toolResult message.ToolResult, permissionMode session.PermissionMode) (message.ToolResult, error) {
 			return c.reviewToolResultForPromptInjection(callCtx, sessionID, toolResult, permissionMode)
 		},
@@ -1596,9 +1612,11 @@ type taskGraphNodeResult struct {
 	Content        string
 }
 
-type subAgentScheduler func(context.Context, subAgentParams) (fantasy.ToolResponse, error)
-type subAgentFactory func(context.Context, string) (SessionAgent, config.Agent, error)
-type taskGraphScheduler func(context.Context, taskGraphParams) (fantasy.ToolResponse, error)
+type (
+	subAgentScheduler  func(context.Context, subAgentParams) (fantasy.ToolResponse, error)
+	subAgentFactory    func(context.Context, string) (SessionAgent, config.Agent, error)
+	taskGraphScheduler func(context.Context, taskGraphParams) (fantasy.ToolResponse, error)
+)
 
 func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (fantasy.ToolResponse, error) {
 	scheduler := c.subAgentScheduler

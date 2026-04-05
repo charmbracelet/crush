@@ -2,6 +2,8 @@ package memory
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -269,7 +271,11 @@ func (s *service) ensureIndexFile() error {
 
 func (s *service) entryFilePath(key string) string {
 	safeKey := sanitizeFilename(key)
-	return filepath.Join(s.memoryDir, safeKey+".md")
+	if safeKey+".md" == indexFilename {
+		safeKey = "_" + safeKey
+	}
+	filename := safeKey + ".md"
+	return filepath.Join(s.memoryDir, filename)
 }
 
 func (s *service) readEntryLocked(key string) (Entry, error) {
@@ -431,7 +437,14 @@ func sanitizeFilename(key string) string {
 	if safe == "" {
 		safe = "unnamed"
 	}
-	return safe
+
+	hash := sha256.Sum256([]byte(key))
+	hashStr := hex.EncodeToString(hash[:4])
+
+	if len(safe) > 50 {
+		safe = safe[:50]
+	}
+	return safe + "_" + hashStr
 }
 
 func truncateForDescription(value string) string {
@@ -624,7 +637,14 @@ func (s *service) ReadMemoryFileBody(fileName string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	content, err := os.ReadFile(filepath.Join(s.memoryDir, fileName))
+	fullPath := filepath.Join(s.memoryDir, fileName)
+	cleanPath := filepath.Clean(fullPath)
+	cleanDir := filepath.Clean(s.memoryDir) + string(filepath.Separator)
+	if !strings.HasPrefix(cleanPath, cleanDir) {
+		return "", fmt.Errorf("invalid memory file path")
+	}
+
+	content, err := os.ReadFile(fullPath)
 	if err != nil {
 		return "", fmt.Errorf("reading memory file: %w", err)
 	}

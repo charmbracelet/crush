@@ -746,6 +746,7 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 	c.Models[SelectedModelTypeSmall] = small
 	c.Models[SelectedModelTypeBackground] = background
 	c.Models[SelectedModelTypeAutoClassifier] = autoClassifier
+	delete(c.Models, SelectedModelTypeHandoff)
 	return nil
 }
 
@@ -967,6 +968,7 @@ func assignIfNil[T any](ptr **T, val T) {
 func shouldUseGlobalWorkspaceDataDir(workingDir string) bool {
 	return shouldUseGlobalWorkspaceDataDirForOS(runtime.GOOS, workingDir, os.Getenv("WINDIR"))
 }
+
 func shouldUseGlobalWorkspaceDataDirForOS(goos, workingDir, windowsDir string) bool {
 	clean := filepath.Clean(strings.TrimSpace(workingDir))
 	if clean == "" || clean == "." {

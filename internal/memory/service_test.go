@@ -151,9 +151,16 @@ func TestMemoryServiceReadMemoryFileBody(t *testing.T) {
 
 	require.NoError(t, service.Store(context.Background(), StoreParams{Key: "body-test", Value: "the actual body content"}))
 
-	body, err := service.ReadMemoryFileBody("body-test.md")
+	infos, err := service.ListMemoryFiles()
+	require.NoError(t, err)
+	require.Len(t, infos, 1)
+
+	body, err := service.ReadMemoryFileBody(infos[0].FileName)
 	require.NoError(t, err)
 	require.Equal(t, "the actual body content", body)
+
+	_, err = service.ReadMemoryFileBody("../../../etc/passwd")
+	require.ErrorContains(t, err, "invalid memory file path")
 }
 
 func TestMemoryServiceValidation(t *testing.T) {
@@ -191,10 +198,14 @@ func TestMemoryServiceContextCancellation(t *testing.T) {
 func TestMemoryServiceSanitizeFilename(t *testing.T) {
 	t.Parallel()
 
-	require.Equal(t, "hello_world", sanitizeFilename("hello world"))
-	require.Equal(t, "path__to__file", sanitizeFilename("path/to/file"))
-	require.Equal(t, "___", sanitizeFilename("   "))
-	require.Equal(t, "colon-separated", sanitizeFilename("colon:separated"))
+	require.Contains(t, sanitizeFilename("hello world"), "hello_world")
+	require.Contains(t, sanitizeFilename("path/to/file"), "path__to__file")
+	require.Contains(t, sanitizeFilename("   "), "___")
+	require.Contains(t, sanitizeFilename("colon:separated"), "colon-separated")
+
+	require.NotEqual(t, sanitizeFilename("hello world"), sanitizeFilename("hello_world"))
+	require.Contains(t, sanitizeFilename("hello world"), "_")
+	require.Contains(t, sanitizeFilename("hello_world"), "_")
 }
 
 func TestMemoryServiceTruncateForDescription(t *testing.T) {

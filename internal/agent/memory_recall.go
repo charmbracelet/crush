@@ -12,7 +12,11 @@ import (
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/memory"
+	"github.com/charmbracelet/crush/internal/oauth/copilot"
+	"github.com/charmbracelet/crush/internal/version"
 )
+
+var memoryUserAgent = fmt.Sprintf("Charm-Crush/%s (https://charm.land/crush)", version.Version)
 
 const (
 	memoryRelevanceMaxSelected = 5
@@ -49,6 +53,20 @@ func selectRelevantMemories(ctx context.Context, memorySvc memory.Service, model
 		return nil
 	}
 
+	if scope != "" {
+		filtered := make([]memory.MemoryFileInfo, 0, len(infos))
+		for _, info := range infos {
+			if strings.EqualFold(info.Scope, scope) {
+				filtered = append(filtered, info)
+			}
+		}
+		infos = filtered
+	}
+
+	if len(infos) == 0 {
+		return nil
+	}
+
 	if len(infos) > memoryRelevanceMaxFiles {
 		infos = infos[:memoryRelevanceMaxFiles]
 	}
@@ -61,11 +79,22 @@ func selectRelevantMemories(ctx context.Context, memorySvc memory.Service, model
 		model.Model,
 		fantasy.WithSystemPrompt(memoryRelevancePrompt),
 		fantasy.WithMaxOutputTokens(512),
+		fantasy.WithUserAgent(memoryUserAgent),
 	)
 
-	resp, err := agent.Stream(ctx, fantasy.AgentStreamCall{
+	resp, err := agent.Stream(copilot.ContextWithInitiatorType(ctx, copilot.InitiatorAgent), fantasy.AgentStreamCall{
 		Prompt:          prompt,
 		ProviderOptions: getProviderOptions(model, providerCfg),
+		PrepareStep: func(callCtx context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
+			callCtx = copilot.ContextWithInitiatorType(callCtx, copilot.InitiatorAgent)
+			prepared.Messages = options.Messages
+			if providerCfg.SystemPromptPrefix != "" {
+				prepared.Messages = append([]fantasy.Message{
+					fantasy.NewSystemMessage(providerCfg.SystemPromptPrefix),
+				}, prepared.Messages...)
+			}
+			return callCtx, prepared, nil
+		},
 	})
 	if err != nil {
 		slog.Warn("LLM memory relevance selection failed, falling back to string matching", "error", err)
@@ -85,7 +114,9 @@ func selectRelevantMemories(ctx context.Context, memorySvc memory.Service, model
 	for _, key := range selectedKeys {
 		entry, err := memorySvc.Get(ctx, key)
 		if err == nil {
-			entries = append(entries, entry)
+			if scope == "" || strings.EqualFold(entry.Scope, scope) {
+				entries = append(entries, entry)
+			}
 		}
 	}
 
@@ -236,14 +267,25 @@ func extractMemories(ctx context.Context, memorySvc memory.Service, bgModel *bac
 		bgModel.model.Model,
 		fantasy.WithSystemPrompt(memoryExtractPrompt),
 		fantasy.WithMaxOutputTokens(2048),
+		fantasy.WithUserAgent(memoryUserAgent),
 	)
 
 	extractCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	resp, err := agent.Stream(extractCtx, fantasy.AgentStreamCall{
+	resp, err := agent.Stream(copilot.ContextWithInitiatorType(extractCtx, copilot.InitiatorAgent), fantasy.AgentStreamCall{
 		Prompt:          extractPrompt,
 		ProviderOptions: getProviderOptions(bgModel.model, bgModel.provider),
+		PrepareStep: func(callCtx context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
+			callCtx = copilot.ContextWithInitiatorType(callCtx, copilot.InitiatorAgent)
+			prepared.Messages = options.Messages
+			if bgModel.provider.SystemPromptPrefix != "" {
+				prepared.Messages = append([]fantasy.Message{
+					fantasy.NewSystemMessage(bgModel.provider.SystemPromptPrefix),
+				}, prepared.Messages...)
+			}
+			return callCtx, prepared, nil
+		},
 	})
 	if err != nil {
 		slog.Warn("Memory extraction failed", "error", err, "session_id", sessionID)

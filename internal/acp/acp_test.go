@@ -280,6 +280,9 @@ func (f *fakeCoordinator) ClassifyPermission(_ context.Context, _ permission.Per
 	return permission.AutoClassification{}, nil
 }
 func (f *fakeCoordinator) Model() agent.Model { return agent.Model{} }
+func (f *fakeCoordinator) EscalationBridge() *permission.EscalationBridge {
+	return nil
+}
 func (f *fakeCoordinator) PrepareModelSwitch(_ context.Context, _ string, _ config.SelectedModelType, _ config.SelectedModel) error {
 	return nil
 }

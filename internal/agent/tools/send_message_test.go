@@ -6,6 +6,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/mailbox"
+	"github.com/charmbracelet/crush/internal/toolruntime"
 	"github.com/stretchr/testify/require"
 )
 
@@ -47,4 +48,53 @@ func TestSendMessageToolReturnsErrorForUnknownMailbox(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, resp.IsError)
 	require.Contains(t, resp.Content, `mailbox "missing" not found`)
+}
+
+func TestSendMessageToolQueuesFollowUpPromptForBackgroundAgent(t *testing.T) {
+	t.Parallel()
+
+	tool := NewSendMessageTool(mailbox.NewService())
+	called := false
+	ctx := toolruntime.WithBackgroundAgentMessenger(context.Background(), func(_ context.Context, agentID, prompt string) (string, bool, error) {
+		called = true
+		require.Equal(t, "a-123", agentID)
+		require.Equal(t, "continue with tests", prompt)
+		return "queued", true, nil
+	})
+	ctx = context.WithValue(ctx, SessionIDContextKey, "session-1")
+	ctx = context.WithValue(ctx, MessageIDContextKey, "msg-1")
+	ctx = context.WithValue(ctx, ToolCallIDContextKey, "call-1")
+
+	resp, err := tool.Run(ctx, fantasy.ToolCall{
+		ID:    "call-1",
+		Name:  SendMessageToolName,
+		Input: `{"agent_id":"a-123","message":"continue with tests"}`,
+	})
+	require.NoError(t, err)
+	require.True(t, called)
+	require.False(t, resp.IsError)
+	require.Contains(t, resp.Content, "queued for background agent a-123")
+}
+
+func TestSendMessageToolSupportsBackgroundAgentNameAddressing(t *testing.T) {
+	t.Parallel()
+
+	tool := NewSendMessageTool(mailbox.NewService())
+	called := false
+	ctx := toolruntime.WithBackgroundAgentMessenger(context.Background(), func(_ context.Context, agentID, prompt string) (string, bool, error) {
+		called = true
+		require.Equal(t, "researcher", agentID)
+		require.Equal(t, "continue investigating", prompt)
+		return "started", true, nil
+	})
+
+	resp, err := tool.Run(ctx, fantasy.ToolCall{
+		ID:    "call-2",
+		Name:  SendMessageToolName,
+		Input: `{"agent_id":"researcher","message":"continue investigating"}`,
+	})
+	require.NoError(t, err)
+	require.True(t, called)
+	require.False(t, resp.IsError)
+	require.Contains(t, resp.Content, "sent to background agent researcher")
 }

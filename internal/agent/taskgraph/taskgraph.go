@@ -14,6 +14,13 @@ type TaskGraph struct {
 	Nodes []TaskNode
 }
 
+type ExecutionPlan struct {
+	NodesByID             map[string]TaskNode
+	Dependents            map[string][]string
+	RemainingDependencies map[string]int
+	Ready                 []string
+}
+
 func Validate(graph TaskGraph) error {
 	nodes, err := indexNodes(graph)
 	if err != nil {
@@ -47,34 +54,57 @@ func Validate(graph TaskGraph) error {
 	return nil
 }
 
-func TopologicalLayers(graph TaskGraph) ([][]TaskNode, error) {
+func BuildExecutionPlan(graph TaskGraph) (ExecutionPlan, error) {
 	nodes, err := indexNodes(graph)
 	if err != nil {
-		return nil, err
+		return ExecutionPlan{}, err
 	}
 	if err := Validate(graph); err != nil {
-		return nil, err
+		return ExecutionPlan{}, err
 	}
 
-	inDegree := make(map[string]int, len(nodes))
-	dependents := make(map[string][]string, len(nodes))
+	plan := ExecutionPlan{
+		NodesByID:             nodes,
+		Dependents:            make(map[string][]string, len(nodes)),
+		RemainingDependencies: make(map[string]int, len(nodes)),
+		Ready:                 make([]string, 0, len(nodes)),
+	}
 	for id := range nodes {
-		inDegree[id] = 0
+		plan.RemainingDependencies[id] = 0
 	}
 	for _, node := range graph.Nodes {
 		for _, dependencyID := range node.Dependencies {
-			inDegree[node.ID]++
-			dependents[dependencyID] = append(dependents[dependencyID], node.ID)
+			plan.RemainingDependencies[node.ID]++
+			plan.Dependents[dependencyID] = append(plan.Dependents[dependencyID], node.ID)
 		}
 	}
-
-	ready := make([]string, 0)
-	for id, degree := range inDegree {
+	for dependencyID := range plan.Dependents {
+		slices.Sort(plan.Dependents[dependencyID])
+	}
+	for id, degree := range plan.RemainingDependencies {
 		if degree == 0 {
-			ready = append(ready, id)
+			plan.Ready = append(plan.Ready, id)
 		}
 	}
-	slices.Sort(ready)
+	slices.Sort(plan.Ready)
+	return plan, nil
+}
+
+func TopologicalLayers(graph TaskGraph) ([][]TaskNode, error) {
+	plan, err := BuildExecutionPlan(graph)
+	if err != nil {
+		return nil, err
+	}
+	nodes := plan.NodesByID
+	inDegree := make(map[string]int, len(plan.RemainingDependencies))
+	for id, degree := range plan.RemainingDependencies {
+		inDegree[id] = degree
+	}
+	dependents := make(map[string][]string, len(plan.Dependents))
+	for id, next := range plan.Dependents {
+		dependents[id] = slices.Clone(next)
+	}
+	ready := slices.Clone(plan.Ready)
 
 	layers := make([][]TaskNode, 0)
 	processed := 0

@@ -10,13 +10,17 @@ import (
 func TestReduce(t *testing.T) {
 	t.Run("all completed", func(t *testing.T) {
 		result := Reduce([]TaskResult{
-			{ID: "a", Description: "Fetch", Status: message.ToolResultSubtaskStatusCompleted, ChildSessionID: "s1"},
-			{ID: "b", Description: "Analyze", Status: message.ToolResultSubtaskStatusCompleted, ChildSessionID: "s2"},
+			{ID: "a", Description: "Fetch", Status: message.ToolResultSubtaskStatusCompleted, ChildSessionID: "s1", FilesTouched: []string{"/tmp/a.go"}, PatchPlan: []string{"collect baseline"}, TestResults: []string{"fetch smoke passed"}, Followups: []string{"Need API throttling review?"}},
+			{ID: "b", Description: "Analyze", Status: message.ToolResultSubtaskStatusCompleted, ChildSessionID: "s2", Artifacts: []string{"shell:bg-1"}, FilesTouched: []string{"/tmp/b.go"}, PatchPlan: []string{"apply optimization"}, TestResults: []string{"analysis tests passed"}, Followups: []string{"Should we add benchmark CI?"}},
 		})
 
 		require.Equal(t, "Completed 2/2 subtasks.", result.Summary)
 		require.Equal(t, "high", result.Confidence)
-		require.Len(t, result.Artifacts, 2)
+		require.Len(t, result.Artifacts, 3)
+		require.Equal(t, []string{"/tmp/a.go", "/tmp/b.go"}, result.FilesTouched)
+		require.Equal(t, []string{"collect baseline", "apply optimization"}, result.PatchPlan)
+		require.Equal(t, []string{"fetch smoke passed", "analysis tests passed"}, result.TestResults)
+		require.Equal(t, []string{"Need API throttling review?", "Should we add benchmark CI?"}, result.FollowupQuestions)
 		require.Empty(t, result.Risks)
 		require.Contains(t, result.NextActions, "Review child session outputs and integrate accepted results.")
 	})

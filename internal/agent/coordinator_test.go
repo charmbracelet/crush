@@ -2,10 +2,12 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"reflect"
 	"testing"
+	"time"
 	"unsafe"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -593,6 +595,174 @@ func TestRunSubAgent(t *testing.T) {
 		require.NoError(t, err)
 		assert.InDelta(t, 0.05, updated.Cost, 1e-9)
 	})
+}
+
+func TestBackgroundAgentMessengerReusesChildSession(t *testing.T) {
+	const providerID = "test-provider"
+	providerCfg := config.ProviderConfig{ID: providerID}
+
+	env := testEnv(t)
+	coord := newTestCoordinator(t, env, providerID, providerCfg)
+	coord.backgroundAgents = newBackgroundAgentRegistry()
+
+	parentSession, err := env.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+
+	type callRecord struct {
+		sessionID string
+		prompt    string
+	}
+	records := make(chan callRecord, 2)
+	agent := newMockAgent(providerID, 4096, func(_ context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
+		records <- callRecord{sessionID: call.SessionID, prompt: call.Prompt}
+		return agentResultWithText("done"), nil
+	})
+
+	agentID := coord.runBackgroundTaskNode(
+		t.Context(),
+		taskGraphParams{
+			SessionID:      parentSession.ID,
+			AgentMessageID: "msg-1",
+			ToolCallID:     "call-1",
+		},
+		taskGraphTask{
+			ID:           "task-a",
+			Prompt:       "initial prompt",
+			SubagentType: "general",
+		},
+		agent,
+		config.Agent{ID: "general", Description: "general", Mode: config.AgentModeSubagent},
+		"Background test",
+		"general",
+	)
+
+	require.Eventually(t, func() bool {
+		entry, ok := coord.backgroundAgents.Get(agentID)
+		return ok && entry.Status == backgroundAgentStatusCompleted && entry.ChildSessionID != ""
+	}, 2*time.Second, 20*time.Millisecond)
+
+	ctx := context.WithValue(context.Background(), agenttools.SessionIDContextKey, parentSession.ID)
+	ctx = context.WithValue(ctx, agenttools.MessageIDContextKey, "msg-2")
+	ctx = context.WithValue(ctx, agenttools.ToolCallIDContextKey, "call-2")
+	disposition, found, err := coord.backgroundAgentMessenger()(ctx, agentID, "follow-up prompt")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "started", disposition)
+
+	require.Eventually(t, func() bool {
+		return len(records) == 2
+	}, 2*time.Second, 20*time.Millisecond)
+
+	first := <-records
+	second := <-records
+	require.Equal(t, "initial prompt", first.prompt)
+	require.Equal(t, "follow-up prompt", second.prompt)
+	require.NotEmpty(t, first.sessionID)
+	require.Equal(t, first.sessionID, second.sessionID)
+}
+
+func TestBackgroundAgentMessengerResolvesAgentName(t *testing.T) {
+	const providerID = "test-provider"
+	providerCfg := config.ProviderConfig{ID: providerID}
+
+	env := testEnv(t)
+	coord := newTestCoordinator(t, env, providerID, providerCfg)
+	coord.backgroundAgents = newBackgroundAgentRegistry()
+
+	parentSession, err := env.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+
+	records := make(chan SessionAgentCall, 2)
+	agent := newMockAgent(providerID, 4096, func(_ context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
+		records <- call
+		return agentResultWithText("done"), nil
+	})
+
+	agentID := coord.runBackgroundTaskNode(
+		t.Context(),
+		taskGraphParams{SessionID: parentSession.ID, AgentMessageID: "msg-1", ToolCallID: "call-1"},
+		taskGraphTask{ID: "task-a", Prompt: "initial prompt", SubagentType: "general"},
+		agent,
+		config.Agent{ID: "general", Description: "general", Mode: config.AgentModeSubagent},
+		"Background test",
+		"general",
+	)
+
+	require.Eventually(t, func() bool {
+		entry, ok := coord.backgroundAgents.Get(agentID)
+		return ok && entry.Status == backgroundAgentStatusCompleted && entry.AgentName != ""
+	}, 2*time.Second, 20*time.Millisecond)
+
+	entry, ok := coord.backgroundAgents.Get(agentID)
+	require.True(t, ok)
+	require.NotEmpty(t, entry.AgentName)
+
+	ctx := context.WithValue(context.Background(), agenttools.SessionIDContextKey, parentSession.ID)
+	ctx = context.WithValue(ctx, agenttools.MessageIDContextKey, "msg-2")
+	ctx = context.WithValue(ctx, agenttools.ToolCallIDContextKey, "call-2")
+	disposition, found, err := coord.backgroundAgentMessenger()(ctx, entry.AgentName, "follow-up by name")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "started", disposition)
+
+	require.Eventually(t, func() bool { return len(records) == 2 }, 2*time.Second, 20*time.Millisecond)
+	first := <-records
+	second := <-records
+	require.Equal(t, "initial prompt", first.Prompt)
+	require.Equal(t, "follow-up by name", second.Prompt)
+}
+
+func TestCollectTaskGraphArtifactsExtractsFilesAndShells(t *testing.T) {
+	const providerID = "test-provider"
+	providerCfg := config.ProviderConfig{ID: providerID}
+
+	env := testEnv(t)
+	coord := newTestCoordinator(t, env, providerID, providerCfg)
+
+	childSession, err := env.sessions.Create(t.Context(), "Child")
+	require.NoError(t, err)
+
+	writeMeta, err := json.Marshal(agenttools.WriteResponseMetadata{
+		FilePath:  "/tmp/example.go",
+		Diff:      "diff",
+		Additions: 3,
+		Removals:  1,
+	})
+	require.NoError(t, err)
+	bashMeta, err := json.Marshal(agenttools.BashResponseMetadata{
+		ShellID:          "shell-1",
+		Description:      "run tests",
+		WorkingDirectory: "/tmp",
+	})
+	require.NoError(t, err)
+
+	_, err = env.messages.Create(t.Context(), childSession.ID, message.CreateMessageParams{
+		Role: message.Tool,
+		Parts: []message.ContentPart{
+			message.ToolResult{
+				ToolCallID: "tool-1",
+				Name:       agenttools.WriteToolName,
+				Metadata:   string(writeMeta),
+			},
+			message.ToolResult{
+				ToolCallID: "tool-2",
+				Name:       agenttools.BashToolName,
+				Metadata:   string(bashMeta),
+			}.WithReducer(message.ToolResultReducer{
+				PatchPlan:         []string{"apply generated patch"},
+				TestResults:       []string{"go test ./... ok"},
+				FollowupQuestions: []string{"Need smoke test on staging?"},
+			}),
+		},
+	})
+	require.NoError(t, err)
+
+	artifacts, filesTouched, patchPlan, testResults, followups := coord.collectTaskGraphArtifacts(t.Context(), childSession.ID)
+	require.Equal(t, []string{"file:/tmp/example.go", "shell:shell-1"}, artifacts)
+	require.Equal(t, []string{"/tmp/example.go"}, filesTouched)
+	require.Equal(t, []string{"apply generated patch"}, patchPlan)
+	require.Equal(t, []string{"go test ./... ok"}, testResults)
+	require.Equal(t, []string{"Need smoke test on staging?"}, followups)
 }
 
 func TestPrepareModelSwitch(t *testing.T) {

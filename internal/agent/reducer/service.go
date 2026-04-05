@@ -13,6 +13,11 @@ type TaskResult struct {
 	Status         message.ToolResultSubtaskStatus
 	ChildSessionID string
 	Content        string
+	Artifacts      []string
+	FilesTouched   []string
+	PatchPlan      []string
+	TestResults    []string
+	Followups      []string
 }
 
 func Reduce(results []TaskResult) message.ToolResultReducer {
@@ -20,8 +25,72 @@ func Reduce(results []TaskResult) message.ToolResultReducer {
 	failed := 0
 	canceled := 0
 	artifacts := make([]string, 0, len(results))
+	filesTouched := make([]string, 0, len(results))
+	patchPlan := make([]string, 0, len(results))
+	testResults := make([]string, 0, len(results))
+	followupQuestions := make([]string, 0, len(results))
 	risks := make([]string, 0)
 	nextActions := make([]string, 0, 2)
+	seenArtifacts := make(map[string]struct{}, len(results)*2)
+	seenFiles := make(map[string]struct{}, len(results)*2)
+	seenPatchPlan := make(map[string]struct{}, len(results)*2)
+	seenTests := make(map[string]struct{}, len(results)*2)
+	seenFollowups := make(map[string]struct{}, len(results)*2)
+	addArtifact := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		if _, ok := seenArtifacts[value]; ok {
+			return
+		}
+		seenArtifacts[value] = struct{}{}
+		artifacts = append(artifacts, value)
+	}
+	addFile := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		if _, ok := seenFiles[value]; ok {
+			return
+		}
+		seenFiles[value] = struct{}{}
+		filesTouched = append(filesTouched, value)
+	}
+	addPatchPlan := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		if _, ok := seenPatchPlan[value]; ok {
+			return
+		}
+		seenPatchPlan[value] = struct{}{}
+		patchPlan = append(patchPlan, value)
+	}
+	addTestResult := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		if _, ok := seenTests[value]; ok {
+			return
+		}
+		seenTests[value] = struct{}{}
+		testResults = append(testResults, value)
+	}
+	addFollowup := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		if _, ok := seenFollowups[value]; ok {
+			return
+		}
+		seenFollowups[value] = struct{}{}
+		followupQuestions = append(followupQuestions, value)
+	}
 
 	for _, result := range results {
 		title := strings.TrimSpace(result.Description)
@@ -41,7 +110,22 @@ func Reduce(results []TaskResult) message.ToolResultReducer {
 		}
 
 		if strings.TrimSpace(result.ChildSessionID) != "" {
-			artifacts = append(artifacts, fmt.Sprintf("%s session: %s", title, result.ChildSessionID))
+			addArtifact(fmt.Sprintf("%s session: %s", title, result.ChildSessionID))
+		}
+		for _, artifact := range result.Artifacts {
+			addArtifact(artifact)
+		}
+		for _, filePath := range result.FilesTouched {
+			addFile(filePath)
+		}
+		for _, step := range result.PatchPlan {
+			addPatchPlan(step)
+		}
+		for _, test := range result.TestResults {
+			addTestResult(test)
+		}
+		for _, question := range result.Followups {
+			addFollowup(question)
 		}
 	}
 
@@ -70,11 +154,15 @@ func Reduce(results []TaskResult) message.ToolResultReducer {
 	}
 
 	return message.ToolResultReducer{
-		Summary:     summary,
-		Artifacts:   artifacts,
-		Risks:       risks,
-		NextActions: nextActions,
-		Confidence:  confidence,
+		Summary:           summary,
+		Artifacts:         artifacts,
+		FilesTouched:      filesTouched,
+		PatchPlan:         patchPlan,
+		TestResults:       testResults,
+		FollowupQuestions: followupQuestions,
+		Risks:             risks,
+		NextActions:       nextActions,
+		Confidence:        confidence,
 	}
 }
 

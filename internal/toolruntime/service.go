@@ -201,6 +201,19 @@ func BackgroundAgentLookupFromContext(ctx context.Context) BackgroundAgentLookup
 	return lookup
 }
 
+type BackgroundAgentMessenger func(ctx context.Context, agentID, prompt string) (disposition string, found bool, err error)
+
+type backgroundAgentMessengerKey struct{}
+
+func WithBackgroundAgentMessenger(ctx context.Context, messenger BackgroundAgentMessenger) context.Context {
+	return context.WithValue(ctx, backgroundAgentMessengerKey{}, messenger)
+}
+
+func BackgroundAgentMessengerFromContext(ctx context.Context) BackgroundAgentMessenger {
+	messenger, _ := ctx.Value(backgroundAgentMessengerKey{}).(BackgroundAgentMessenger)
+	return messenger
+}
+
 func ServiceFromContext(ctx context.Context) Service {
 	service, _ := ctx.Value(serviceContextKey{}).(Service)
 	return service

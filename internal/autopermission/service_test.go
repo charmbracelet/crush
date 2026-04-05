@@ -2,8 +2,10 @@ package autopermission
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -69,7 +71,8 @@ func (m *mockPermissionService) SubscribeNotifications(context.Context) <-chan p
 }
 
 type mockSessionService struct {
-	mode session.PermissionMode
+	mode  session.PermissionMode
+	modes map[string]session.PermissionMode
 }
 
 func (m *mockSessionService) Subscribe(context.Context) <-chan pubsub.Event[session.Session] {
@@ -92,8 +95,14 @@ func (m *mockSessionService) CreateHandoffSession(context.Context, string, strin
 	return session.Session{}, nil
 }
 
-func (m *mockSessionService) Get(context.Context, string) (session.Session, error) {
-	return session.Session{CollaborationMode: session.CollaborationModeDefault, PermissionMode: m.mode}, nil
+func (m *mockSessionService) Get(_ context.Context, sessionID string) (session.Session, error) {
+	mode := m.mode
+	if m.modes != nil {
+		if specific, ok := m.modes[sessionID]; ok {
+			mode = specific
+		}
+	}
+	return session.Session{CollaborationMode: session.CollaborationModeDefault, PermissionMode: mode}, nil
 }
 
 func (m *mockSessionService) GetLast(context.Context) (session.Session, error) {
@@ -103,6 +112,7 @@ func (m *mockSessionService) List(context.Context) ([]session.Session, error) { 
 func (m *mockSessionService) ListChildren(context.Context, string) ([]session.Session, error) {
 	return nil, nil
 }
+
 func (m *mockSessionService) Save(context.Context, session.Session) (session.Session, error) {
 	return session.Session{}, nil
 }
@@ -215,6 +225,88 @@ func TestAutoPermission_AutoModeClassifierAllowSkipsPrompt(t *testing.T) {
 	require.True(t, granted)
 	require.Zero(t, base.promptCalls)
 	require.Equal(t, 1, classifier.calls)
+}
+
+func TestAutoPermission_UsesAuthoritySessionModeForSubagentRequests(t *testing.T) {
+	t.Parallel()
+
+	base := &mockPermissionService{
+		Broker: pubsub.NewBroker[permission.PermissionRequest](),
+		evalResult: permission.EvaluationResult{
+			Decision: permission.EvaluationDecisionAsk,
+			Permission: permission.PermissionRequest{
+				SessionID:          "child-session",
+				AuthoritySessionID: "parent-session",
+				ToolName:           "edit",
+				Action:             "write",
+			},
+		},
+		promptGrant: true,
+	}
+	classifier := &mockClassifier{result: permission.AutoClassification{AllowAuto: true}}
+	svc := New(base, &mockSessionService{
+		mode:  session.PermissionModeDefault,
+		modes: map[string]session.PermissionMode{"parent-session": session.PermissionModeAuto},
+	}, func() permission.Classifier { return classifier }, "", false, nil)
+
+	granted, err := svc.Request(t.Context(), permission.CreatePermissionRequest{})
+	require.NoError(t, err)
+	require.True(t, granted)
+	require.Zero(t, base.promptCalls)
+	require.Equal(t, 1, classifier.calls)
+}
+
+func TestAutoPermission_EscalatesToLeaderWhenWorkerIdentityPresent(t *testing.T) {
+	t.Parallel()
+
+	base := &mockPermissionService{
+		Broker: pubsub.NewBroker[permission.PermissionRequest](),
+		evalResult: permission.EvaluationResult{Decision: permission.EvaluationDecisionAsk, Permission: permission.PermissionRequest{
+			SessionID: "s1",
+			ToolName:  tools.BashToolName,
+			Action:    "execute",
+			Params: tools.BashPermissionsParams{
+				Command: "rm -rf /tmp/safe-test",
+			},
+			Description: "run bash command",
+		}},
+		promptGrant: false,
+	}
+
+	classifier := &mockClassifier{result: permission.AutoClassification{AllowAuto: false}}
+	svc := New(base, &mockSessionService{mode: session.PermissionModeAuto}, func() permission.Classifier { return classifier }, "", false, nil)
+
+	bridge := permission.NewEscalationBridge()
+	ctx := permission.WithEscalationBridge(t.Context(), bridge)
+	ctx = permission.WithWorkerIdentity(ctx, permission.WorkerIdentity{AgentID: "worker-1", AgentName: "researcher"})
+
+	errCh := make(chan error, 1)
+	go func() {
+		deadline := time.After(500 * time.Millisecond)
+		tick := time.NewTicker(5 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			select {
+			case <-deadline:
+				errCh <- fmt.Errorf("timeout waiting for pending escalation")
+				return
+			case <-tick.C:
+				pending := bridge.GetPendingEscalations()
+				if len(pending) == 0 {
+					continue
+				}
+				err := bridge.RespondToEscalation(permission.EscalationResponse{RequestID: pending[0].RequestID, Approved: true})
+				errCh <- err
+				return
+			}
+		}
+	}()
+
+	granted, err := svc.Request(ctx, permission.CreatePermissionRequest{})
+	require.NoError(t, err)
+	require.True(t, granted)
+	require.Zero(t, base.promptCalls)
+	require.NoError(t, <-errCh)
 }
 
 func TestAutoPermission_DefaultModeExplicitAllowListSkipsClassifierAndPrompt(t *testing.T) {

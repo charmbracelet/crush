@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -55,9 +56,11 @@ func (m *taskGraphMockSessionAgent) ResumeQueue(sessionID string) {}
 func (m *taskGraphMockSessionAgent) IsQueuePaused(sessionID string) bool {
 	return false
 }
+
 func (m *taskGraphMockSessionAgent) PrioritizeQueuedPrompt(sessionID string, index int) bool {
 	return false
 }
+
 func (m *taskGraphMockSessionAgent) Summarize(context.Context, string, fantasy.ProviderOptions) error {
 	return nil
 }
@@ -164,8 +167,11 @@ func TestRunTaskGraphDirect_ParallelAndDependencies(t *testing.T) {
 		}
 	}
 	require.Equal(t, 2, idxC)
-	_, hasReducer := message.ParseToolResultReducer(resp.Metadata)
+	reducerMeta, hasReducer := message.ParseToolResultReducer(resp.Metadata)
 	require.True(t, hasReducer)
+	require.Empty(t, reducerMeta.PatchPlan)
+	require.Empty(t, reducerMeta.TestResults)
+	require.Empty(t, reducerMeta.FollowupQuestions)
 }
 
 func TestRunTaskGraphDirect_PropagatesFailureToDependents(t *testing.T) {
@@ -222,6 +228,9 @@ func TestRunTaskGraphDirect_PropagatesFailureToDependents(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "low", reducerMeta.Confidence)
 	require.NotEmpty(t, reducerMeta.Risks)
+	require.Empty(t, reducerMeta.PatchPlan)
+	require.Empty(t, reducerMeta.TestResults)
+	require.Empty(t, reducerMeta.FollowupQuestions)
 
 	loadedSession, err := env.sessions.Get(context.Background(), rootSession.ID)
 	require.NoError(t, err)
@@ -349,6 +358,76 @@ func TestRunTaskGraphDirect_HonorsMaxConcurrentPerAgent(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, resp.IsError)
 	require.Equal(t, int32(1), atomic.LoadInt32(&maxRunning))
+}
+
+func TestRunTaskGraphDirect_ReadyQueueStartsDependentsBeforePeerRootsFinish(t *testing.T) {
+	env := testEnv(t)
+	cfg, err := config.Init(env.workingDir, "", false)
+	require.NoError(t, err)
+	coord := &coordinator{cfg: cfg, mailbox: mailbox.NewService(), sessions: env.sessions}
+
+	var eventMu sync.Mutex
+	events := make([]string, 0, 6)
+	record := func(event string) {
+		eventMu.Lock()
+		events = append(events, event)
+		eventMu.Unlock()
+	}
+
+	coord.subAgentFactory = func(_ context.Context, requestedType string) (SessionAgent, config.Agent, error) {
+		agent := &taskGraphMockSessionAgent{
+			model: Model{CatwalkCfg: catwalk.Model{DefaultMaxTokens: 1000}, ModelCfg: config.SelectedModel{Provider: "test-provider", Model: "test-model"}},
+			runFunc: func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+				record(requestedType + "-start")
+				switch requestedType {
+				case "a":
+					time.Sleep(20 * time.Millisecond)
+					record("a-done")
+				case "b":
+					time.Sleep(120 * time.Millisecond)
+					record("b-done")
+				case "c":
+					record("c-done")
+				}
+				return &fantasy.AgentResult{Response: fantasy.Response{Content: fantasy.ResponseContent{fantasy.TextContent{Text: "ok"}}}}, nil
+			},
+		}
+		return agent, config.Agent{ID: requestedType, Description: requestedType, Mode: config.AgentModeSubagent}, nil
+	}
+	coord.subAgentScheduler = func(ctx context.Context, params subAgentParams) (fantasy.ToolResponse, error) {
+		_, err := params.Agent.Run(ctx, SessionAgentCall{Prompt: params.Prompt})
+		require.NoError(t, err)
+		return withSubtaskToolResponseMetadata(
+			fantasy.NewTextResponse("ok"),
+			params.ToolCallID,
+			params.ToolCallID,
+			params.ParentMessageID,
+			message.ToolResultSubtaskStatusCompleted,
+		), nil
+	}
+
+	resp, err := coord.runTaskGraphDirect(t.Context(), taskGraphParams{
+		SessionID:      "session-1",
+		AgentMessageID: "msg-1",
+		ToolCallID:     "call-ready",
+		Tasks: []taskGraphTask{
+			{ID: "a", Prompt: "task-a", SubagentType: "a"},
+			{ID: "b", Prompt: "task-b", SubagentType: "b"},
+			{ID: "c", Prompt: "task-c", SubagentType: "c", DependsOn: []string{"a"}},
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, resp.IsError)
+
+	eventMu.Lock()
+	defer eventMu.Unlock()
+	require.Contains(t, events, "c-start")
+	require.Contains(t, events, "b-done")
+	cIdx := slices.Index(events, "c-start")
+	bDoneIdx := slices.Index(events, "b-done")
+	require.NotEqual(t, -1, cIdx)
+	require.NotEqual(t, -1, bDoneIdx)
+	require.Less(t, cIdx, bDoneIdx)
 }
 
 func TestRunTaskGraphDirect_RetriesFailuresWithinBudget(t *testing.T) {

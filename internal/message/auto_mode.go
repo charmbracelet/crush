@@ -31,7 +31,7 @@ type ToolResultSubtaskStatus string
 const (
 	ToolResultSubtaskStatusPending    ToolResultSubtaskStatus = "pending"
 	ToolResultSubtaskStatusInProgress ToolResultSubtaskStatus = "in_progress"
-	ToolResultSubtaskStatusRunning    ToolResultSubtaskStatus = "running"    // Background agent still executing
+	ToolResultSubtaskStatusRunning    ToolResultSubtaskStatus = "running" // Background agent still executing
 	ToolResultSubtaskStatusCompleted  ToolResultSubtaskStatus = "completed"
 	ToolResultSubtaskStatusFailed     ToolResultSubtaskStatus = "failed"
 	ToolResultSubtaskStatusCanceled   ToolResultSubtaskStatus = "canceled"
@@ -44,18 +44,26 @@ type ToolResultSubtaskResult struct {
 	Status           ToolResultSubtaskStatus `json:"status,omitempty"`
 }
 type ToolResultReducer struct {
-	Summary     string   `json:"summary,omitempty"`
-	Artifacts   []string `json:"artifacts,omitempty"`
-	Risks       []string `json:"risks,omitempty"`
-	NextActions []string `json:"next_actions,omitempty"`
-	Confidence  string   `json:"confidence,omitempty"`
-	MailboxID   string   `json:"mailbox_id,omitempty"`
-	Messages    []string `json:"messages,omitempty"`
+	Summary           string   `json:"summary,omitempty"`
+	Artifacts         []string `json:"artifacts,omitempty"`
+	FilesTouched      []string `json:"files_touched,omitempty"`
+	PatchPlan         []string `json:"patch_plan,omitempty"`
+	TestResults       []string `json:"test_results,omitempty"`
+	FollowupQuestions []string `json:"followup_questions,omitempty"`
+	Risks             []string `json:"risks,omitempty"`
+	NextActions       []string `json:"next_actions,omitempty"`
+	Confidence        string   `json:"confidence,omitempty"`
+	MailboxID         string   `json:"mailbox_id,omitempty"`
+	Messages          []string `json:"messages,omitempty"`
 }
 
 func (r ToolResultReducer) isEmpty() bool {
 	return strings.TrimSpace(r.Summary) == "" &&
 		len(r.Artifacts) == 0 &&
+		len(r.FilesTouched) == 0 &&
+		len(r.PatchPlan) == 0 &&
+		len(r.TestResults) == 0 &&
+		len(r.FollowupQuestions) == 0 &&
 		len(r.Risks) == 0 &&
 		len(r.NextActions) == 0 &&
 		strings.TrimSpace(r.Confidence) == "" &&

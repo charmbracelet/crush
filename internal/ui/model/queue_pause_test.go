@@ -50,11 +50,14 @@ func (m *mockQueueCoordinator) ClassifyPermission(context.Context, permission.Pe
 	return permission.AutoClassification{}, nil
 }
 func (m *mockQueueCoordinator) Model() agent.Model { return agent.Model{} }
+func (m *mockQueueCoordinator) EscalationBridge() *permission.EscalationBridge {
+	return nil
+}
 func (m *mockQueueCoordinator) PrepareModelSwitch(context.Context, string, config.SelectedModelType, config.SelectedModel) error {
 	return nil
 }
-func (m *mockQueueCoordinator) UpdateModels(context.Context) error { return nil }
-func (m *mockQueueCoordinator) RefreshTools(context.Context) error { return nil }
+func (m *mockQueueCoordinator) UpdateModels(context.Context) error      { return nil }
+func (m *mockQueueCoordinator) RefreshTools(context.Context) error      { return nil }
 func (m *mockQueueCoordinator) PrioritizeQueuedPrompt(string, int) bool { return false }
 
 func TestSyncPromptQueueTracksPausedState(t *testing.T) {

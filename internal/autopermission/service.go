@@ -142,7 +142,7 @@ func (s *service) EvaluateRequest(ctx context.Context, opts permission.CreatePer
 }
 
 func (s *service) Prompt(ctx context.Context, p permission.PermissionRequest) (bool, error) {
-	return s.base.Prompt(ctx, p)
+	return s.promptWithEscalation(ctx, p)
 }
 
 func (s *service) Request(ctx context.Context, opts permission.CreatePermissionRequest) (bool, error) {
@@ -158,9 +158,10 @@ func (s *service) Request(ctx context.Context, opts permission.CreatePermissionR
 		return false, permission.ErrorPermissionBlocked
 	}
 
-	mode, err := s.sessionPermissionMode(ctx, eval.Permission.SessionID)
+	sessionAuthorityID := effectivePermissionSessionID(eval.Permission)
+	mode, err := s.sessionPermissionMode(ctx, sessionAuthorityID)
 	if err != nil {
-		return s.base.Prompt(ctx, eval.Permission)
+		return s.promptWithEscalation(ctx, eval.Permission)
 	}
 
 	if mode == session.PermissionModeYolo {
@@ -169,12 +170,12 @@ func (s *service) Request(ctx context.Context, opts permission.CreatePermissionR
 
 	if s.base.HasPersistentPermission(eval.Permission) {
 		slog.Debug("Permission allowed via session grant",
-			"session_id", eval.Permission.SessionID,
+			"session_id", sessionAuthorityID,
 			"tool", eval.Permission.ToolName,
 			"action", eval.Permission.Action,
 		)
 		if mode == session.PermissionModeAuto {
-			s.resetClassifierBlocks(eval.Permission.SessionID)
+			s.resetClassifierBlocks(sessionAuthorityID)
 		}
 		return true, nil
 	}
@@ -182,18 +183,18 @@ func (s *service) Request(ctx context.Context, opts permission.CreatePermissionR
 	if s.isExplicitlyAllowed(opts, eval.Permission) {
 		if mode == session.PermissionModeAuto && isAlwaysManual(eval.Permission, s.workingDir) {
 			slog.Debug("Auto Mode explicit allowlist still requires manual confirmation",
-				"session_id", eval.Permission.SessionID,
+				"session_id", sessionAuthorityID,
 				"tool", eval.Permission.ToolName,
 				"action", eval.Permission.Action,
 			)
 		} else {
 			slog.Debug("Permission explicitly allowed",
-				"session_id", eval.Permission.SessionID,
+				"session_id", sessionAuthorityID,
 				"tool", eval.Permission.ToolName,
 				"action", eval.Permission.Action,
 			)
 			if mode == session.PermissionModeAuto {
-				s.resetClassifierBlocks(eval.Permission.SessionID)
+				s.resetClassifierBlocks(sessionAuthorityID)
 			}
 			return true, nil
 		}
@@ -207,20 +208,20 @@ func (s *service) Request(ctx context.Context, opts permission.CreatePermissionR
 	}
 
 	if mode == session.PermissionModeDefault {
-		return s.base.Prompt(ctx, eval.Permission)
+		return s.promptWithEscalation(ctx, eval.Permission)
 	}
 
 	if mode != session.PermissionModeAuto {
-		return s.base.Prompt(ctx, eval.Permission)
+		return s.promptWithEscalation(ctx, eval.Permission)
 	}
 
-	if s.shouldSuspendAutoApproval(eval.Permission.SessionID, mode) {
+	if s.shouldSuspendAutoApproval(sessionAuthorityID, mode) {
 		slog.Debug("Auto Mode permission auto-approval suspended",
-			"session_id", eval.Permission.SessionID,
+			"session_id", sessionAuthorityID,
 			"tool", eval.Permission.ToolName,
 			"action", eval.Permission.Action,
 		)
-		return s.base.Prompt(ctx, withAutoReview(eval.Permission, permission.AutoReview{
+		return s.promptWithEscalation(ctx, withAutoReview(eval.Permission, permission.AutoReview{
 			Trigger: permission.AutoReviewTriggerClassifierSuspended,
 			Reason:  "Auto approval is paused after repeated classifier blocks.",
 		}))
@@ -228,11 +229,11 @@ func (s *service) Request(ctx context.Context, opts permission.CreatePermissionR
 
 	if isAlwaysManual(eval.Permission, s.workingDir) {
 		slog.Debug("Auto Mode permission requires manual confirmation",
-			"session_id", eval.Permission.SessionID,
+			"session_id", sessionAuthorityID,
 			"tool", eval.Permission.ToolName,
 			"action", eval.Permission.Action,
 		)
-		return s.base.Prompt(ctx, withAutoReview(eval.Permission, permission.AutoReview{
+		return s.promptWithEscalation(ctx, withAutoReview(eval.Permission, permission.AutoReview{
 			Trigger: permission.AutoReviewTriggerAlwaysManual,
 			Reason:  "This action always requires manual confirmation in Auto Mode.",
 		}))
@@ -240,31 +241,31 @@ func (s *service) Request(ctx context.Context, opts permission.CreatePermissionR
 
 	if isAcceptEditsEquivalentRequest(eval.Permission, s.workingDir) {
 		slog.Debug("Auto Mode permission allowed via accept-edits equivalent request",
-			"session_id", eval.Permission.SessionID,
+			"session_id", sessionAuthorityID,
 			"tool", eval.Permission.ToolName,
 			"action", eval.Permission.Action,
 		)
-		s.resetClassifierBlocks(eval.Permission.SessionID)
+		s.resetClassifierBlocks(sessionAuthorityID)
 		return true, nil
 	}
 
 	if isAutoModeAllowlistedRequest(eval.Permission) {
 		slog.Debug("Auto Mode permission allowed via allowlist",
-			"session_id", eval.Permission.SessionID,
+			"session_id", sessionAuthorityID,
 			"tool", eval.Permission.ToolName,
 			"action", eval.Permission.Action,
 		)
-		s.resetClassifierBlocks(eval.Permission.SessionID)
+		s.resetClassifierBlocks(sessionAuthorityID)
 		return true, nil
 	}
 
 	if isSafeReadOnlyBashRequest(eval.Permission) {
 		slog.Debug("Auto Mode permission allowed via safe read-only bash",
-			"session_id", eval.Permission.SessionID,
+			"session_id", sessionAuthorityID,
 			"tool", eval.Permission.ToolName,
 			"action", eval.Permission.Action,
 		)
-		s.resetClassifierBlocks(eval.Permission.SessionID)
+		s.resetClassifierBlocks(sessionAuthorityID)
 		return true, nil
 	}
 
@@ -279,30 +280,37 @@ func (s *service) Request(ctx context.Context, opts permission.CreatePermissionR
 	}
 	if classification.AllowAuto {
 		slog.Debug("Auto Mode permission allowed by classifier",
-			"session_id", eval.Permission.SessionID,
+			"session_id", sessionAuthorityID,
 			"tool", eval.Permission.ToolName,
 			"action", eval.Permission.Action,
 			"reason", strings.TrimSpace(classification.Reason),
 			"confidence", classification.Confidence,
 		)
-		s.resetClassifierBlocks(eval.Permission.SessionID)
+		s.resetClassifierBlocks(sessionAuthorityID)
 		return true, nil
 	}
 
 	slog.Debug("Auto Mode permission blocked by classifier",
-		"session_id", eval.Permission.SessionID,
+		"session_id", sessionAuthorityID,
 		"tool", eval.Permission.ToolName,
 		"action", eval.Permission.Action,
 		"reason", strings.TrimSpace(classification.Reason),
 		"confidence", classification.Confidence,
 	)
 
-	s.recordClassifierBlock(eval.Permission.SessionID)
-	return s.base.Prompt(ctx, withAutoReview(eval.Permission, permission.AutoReview{
+	s.recordClassifierBlock(sessionAuthorityID)
+	return s.promptWithEscalation(ctx, withAutoReview(eval.Permission, permission.AutoReview{
 		Trigger:    permission.AutoReviewTriggerClassifierBlock,
 		Reason:     firstNonEmpty(classification.Reason, "The classifier could not confirm this action is safe to auto-approve."),
 		Confidence: classification.Confidence,
 	}))
+}
+
+func effectivePermissionSessionID(req permission.PermissionRequest) string {
+	if strings.TrimSpace(req.AuthoritySessionID) != "" {
+		return strings.TrimSpace(req.AuthoritySessionID)
+	}
+	return strings.TrimSpace(req.SessionID)
 }
 
 func (s *service) AutoApproveSession(sessionID string) {
@@ -346,7 +354,7 @@ func (s *service) handleClassifierUnavailable(ctx context.Context, req permissio
 	if s.failClosedOnClassifierError {
 		return false, permission.NewPermissionBlockedError(message, "Set permissions.fail_closed_on_classifier_error=false to fall back to manual confirmation.")
 	}
-	return s.base.Prompt(ctx, withAutoReview(req, permission.AutoReview{
+	return s.promptWithEscalation(ctx, withAutoReview(req, permission.AutoReview{
 		Trigger: permission.AutoReviewTriggerClassifierUnavailable,
 		Reason:  message,
 	}))
@@ -376,10 +384,26 @@ func (s *service) handleClassifierFailure(ctx context.Context, req permission.Pe
 		"tool", req.ToolName,
 		"action", req.Action,
 	)
-	return s.base.Prompt(ctx, withAutoReview(req, permission.AutoReview{
+	return s.promptWithEscalation(ctx, withAutoReview(req, permission.AutoReview{
 		Trigger: permission.AutoReviewTriggerClassifierFailed,
 		Reason:  reason,
 	}))
+}
+
+func (s *service) promptWithEscalation(ctx context.Context, req permission.PermissionRequest) (bool, error) {
+	if permission.ShouldEscalate(ctx, "ask") {
+		resp, err := permission.EscalateToLeader(ctx, req.ToolName, req.Params, req.Description)
+		if err != nil {
+			return false, err
+		}
+		if resp != nil {
+			if !resp.Approved {
+				return false, nil
+			}
+			return true, nil
+		}
+	}
+	return s.base.Prompt(ctx, req)
 }
 
 func withAutoReview(req permission.PermissionRequest, review permission.AutoReview) permission.PermissionRequest {

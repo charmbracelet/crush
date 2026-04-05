@@ -204,11 +204,15 @@ func TestToolResultReducerRoundTripUsesStructuredMetadata(t *testing.T) {
 	t.Parallel()
 
 	reducer := ToolResultReducer{
-		Summary:     "Done",
-		Artifacts:   []string{"a.txt"},
-		Risks:       []string{"timeout"},
-		NextActions: []string{"monitor"},
-		Confidence:  "medium",
+		Summary:           "Done",
+		Artifacts:         []string{"a.txt"},
+		FilesTouched:      []string{"/tmp/a.go"},
+		PatchPlan:         []string{"apply auth refactor"},
+		TestResults:       []string{"go test ./... passed"},
+		FollowupQuestions: []string{"Need migration rollback plan?"},
+		Risks:             []string{"timeout"},
+		NextActions:       []string{"monitor"},
+		Confidence:        "medium",
 	}
 
 	result := ToolResult{Metadata: `{"existing":"value"}`}.WithReducer(reducer)

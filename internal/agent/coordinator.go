@@ -589,6 +589,17 @@ func mergeCallOptions(model Model, cfg config.ProviderConfig) (fantasy.ProviderO
 	return modelOptions, temp, topP, topK, freqPenalty, presPenalty
 }
 
+func (c *coordinator) resolveBackgroundModel(ctx context.Context) *backgroundModel {
+	model, providerCfg, err := c.selectedModel(ctx, config.SelectedModelTypeBackground, false)
+	if err != nil {
+		return nil
+	}
+	return &backgroundModel{
+		model:    model,
+		provider: providerCfg,
+	}
+}
+
 func effectiveMaxOutputTokens(model Model) (int64, bool) {
 	maxTokens := model.CatwalkCfg.DefaultMaxTokens
 	if model.ModelCfg.MaxTokens == 0 {
@@ -615,6 +626,9 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 			inferenceProviderCfg = cfg
 		}
 	}
+
+	bgModel := c.resolveBackgroundModel(ctx)
+
 	var result SessionAgent
 	result = NewSessionAgent(SessionAgentOptions{
 		LargeModel:         inferenceModel,
@@ -622,7 +636,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		SystemPromptPrefix: inferenceProviderCfg.SystemPromptPrefix,
 		SystemPrompt:       "",
 		WorkingDir:         c.cfg.WorkingDir(),
-		AutoRecall:         buildAutoRecall(c.history, c.longTermMemory),
+		AutoRecall:         buildAutoRecall(c.history, c.longTermMemory, bgModel),
 		RefreshCallConfig: func(callCtx context.Context) (sessionAgentRuntimeConfig, error) {
 			return c.refreshSessionAgentRuntimeConfig(callCtx, result, prompt, agent, isSubAgent)
 		},

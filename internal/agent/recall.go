@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/memory"
 )
@@ -27,16 +28,23 @@ var recallIdentPattern = regexp.MustCompile(`\b[A-Z][A-Za-z0-9]{3,}\b`)
 
 // buildAutoRecall returns a closure that, given a session and prompt, retrieves
 // relevant long-term memories and session history to inject into the system prompt.
-func buildAutoRecall(historySvc history.Service, memorySvc memory.Service) func(context.Context, string, string) string {
+func buildAutoRecall(historySvc history.Service, memorySvc memory.Service, bgModel *backgroundModel) func(context.Context, string, string) string {
 	if historySvc == nil && memorySvc == nil {
 		return nil
 	}
 	return func(ctx context.Context, sessionID, prompt string) string {
-		return buildAutoRecallBlock(ctx, historySvc, memorySvc, sessionID, prompt)
+		return buildAutoRecallBlock(ctx, historySvc, memorySvc, bgModel, sessionID, prompt)
 	}
 }
 
-func buildAutoRecallBlock(ctx context.Context, historySvc history.Service, memorySvc memory.Service, sessionID, prompt string) string {
+// backgroundModel holds the resolved model and provider config for background tasks
+// like memory relevance selection.
+type backgroundModel struct {
+	model    Model
+	provider config.ProviderConfig
+}
+
+func buildAutoRecallBlock(ctx context.Context, historySvc history.Service, memorySvc memory.Service, bgModel *backgroundModel, sessionID, prompt string) string {
 	query := extractRecallQuery(prompt)
 	if query == "" {
 		return ""
@@ -47,12 +55,21 @@ func buildAutoRecallBlock(ctx context.Context, historySvc history.Service, memor
 	if memorySvc != nil {
 		scope, includeMemory := autoRecallMemoryScope(ctx)
 		if includeMemory {
-			search := memory.SearchParams{Query: query, Limit: autoRecallMemoryLimit}
-			if scope != "" {
-				search.Scope = scope
+			var entries []memory.Entry
+			if bgModel != nil {
+				entries = selectRelevantMemories(ctx, memorySvc, bgModel.model, bgModel.provider, query, scope)
+			} else {
+				search := memory.SearchParams{Query: query, Limit: autoRecallMemoryLimit}
+				if scope != "" {
+					search.Scope = scope
+				}
+				var err error
+				entries, err = memorySvc.Search(ctx, search)
+				if err != nil {
+					entries = nil
+				}
 			}
-			entries, err := memorySvc.Search(ctx, search)
-			if err == nil && len(entries) > 0 {
+			if len(entries) > 0 {
 				sections = append(sections, formatAutoRecallMemory(entries))
 			}
 		}

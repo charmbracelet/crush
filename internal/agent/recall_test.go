@@ -25,7 +25,7 @@ func TestBuildAutoRecallBlockIncludesMemoryAndHistory(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	block := buildAutoRecallBlock(context.Background(), env.history, env.memory, sess.ID, "search")
+	block := buildAutoRecallBlock(context.Background(), env.history, env.memory, nil, sess.ID, "search")
 	require.Contains(t, block, "Relevant long-term memory:")
 	require.Contains(t, block, "project/goal")
 	require.Contains(t, block, "product/goal")
@@ -41,7 +41,7 @@ func TestBuildAutoRecallBlockSkipsEmptyResults(t *testing.T) {
 	sess, err := env.sessions.Create(t.Context(), "recall-empty")
 	require.NoError(t, err)
 
-	block := buildAutoRecallBlock(context.Background(), env.history, env.memory, sess.ID, "unmatched query")
+	block := buildAutoRecallBlock(context.Background(), env.history, env.memory, nil, sess.ID, "unmatched query")
 	require.Empty(t, block)
 }
 
@@ -56,12 +56,12 @@ func TestBuildAutoRecallBlockFiltersMemoryByAgentPolicy(t *testing.T) {
 	require.NoError(t, env.memory.Store(t.Context(), memory.StoreParams{Key: "scope/session", Value: "Session memory", Scope: "session"}))
 
 	ctx := context.WithValue(context.Background(), tools.AgentMemoryContextKey, "isolated")
-	block := buildAutoRecallBlock(ctx, env.history, env.memory, sess.ID, "memory")
+	block := buildAutoRecallBlock(ctx, env.history, env.memory, nil, sess.ID, "memory")
 	require.Contains(t, block, "scope/session")
 	require.NotContains(t, block, "scope/project")
 
 	ephemeralCtx := context.WithValue(context.Background(), tools.AgentMemoryContextKey, "ephemeral")
-	ephemeralBlock := buildAutoRecallBlock(ephemeralCtx, env.history, env.memory, sess.ID, "memory")
+	ephemeralBlock := buildAutoRecallBlock(ephemeralCtx, env.history, env.memory, nil, sess.ID, "memory")
 	require.NotContains(t, ephemeralBlock, "Relevant long-term memory:")
 }
 

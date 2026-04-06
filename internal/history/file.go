@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/crush/internal/db"
@@ -60,16 +61,39 @@ type Service interface {
 
 type service struct {
 	*pubsub.Broker[File]
-	db *sql.DB
-	q  *db.Queries
+	db         *sql.DB
+	q          *db.Queries
+	workingDir string
 }
 
-func NewService(q *db.Queries, db *sql.DB) Service {
+func NewService(q *db.Queries, db *sql.DB, workingDir string) Service {
 	return &service{
-		Broker: pubsub.NewBroker[File](),
-		q:      q,
-		db:     db,
+		Broker:     pubsub.NewBroker[File](),
+		q:          q,
+		db:         db,
+		workingDir: workingDir,
 	}
+}
+
+// isPathSafe returns true when p is within the service's working directory.
+// This prevents undo/redo from writing or deleting files outside the workspace.
+func (s *service) isPathSafe(p string) bool {
+	if s.workingDir == "" {
+		return true // No constraint configured — allow all.
+	}
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return false
+	}
+	root, err := filepath.Abs(s.workingDir)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(root, abs)
+	if err != nil {
+		return false
+	}
+	return !strings.HasPrefix(rel, "..")
 }
 
 func (s *service) Create(ctx context.Context, sessionID, path, content string) (File, error) {
@@ -221,30 +245,53 @@ func (s *service) DeleteSessionFiles(ctx context.Context, sessionID string) erro
 	return nil
 }
 
-// RestoreToTimestamp restores all session files to their state before
-// timestamp. Files that did not exist before that point are deleted from disk.
+// RestoreToTimestamp restores all session files to their state at the given
+// timestamp boundary. Files that have no version at or before that boundary
+// are deleted from disk. Uses (created_at, version) ordering as a tie-breaker
+// to handle second-resolution timestamp collisions correctly.
 func (s *service) RestoreToTimestamp(ctx context.Context, sessionID string, timestamp int64) error {
-	paths, err := s.q.ListDistinctFilePathsBySession(ctx, sessionID)
+	allFiles, err := s.q.ListFilesBySession(ctx, sessionID)
 	if err != nil {
-		return fmt.Errorf("listing file paths: %w", err)
+		return fmt.Errorf("listing file versions: %w", err)
 	}
-	for _, path := range paths {
-		f, err := s.q.GetFileVersionBefore(ctx, db.GetFileVersionBeforeParams{
-			SessionID: sessionID,
-			Path:      path,
-			CreatedAt: timestamp,
-		})
-		if errors.Is(err, sql.ErrNoRows) {
-			// File was created after the revert point — remove from disk.
-			if removeErr := os.Remove(path); removeErr != nil && !os.IsNotExist(removeErr) {
-				return fmt.Errorf("removing file %s: %w", path, removeErr)
+
+	// Group versions by path.
+	byPath := make(map[string][]db.File)
+	for _, f := range allFiles {
+		byPath[f.Path] = append(byPath[f.Path], f)
+	}
+
+	for path, versions := range byPath {
+		var (
+			best      db.File
+			hasBest   bool
+			hasFuture bool
+		)
+		for _, v := range versions {
+			if v.CreatedAt < timestamp {
+				// Strictly before the boundary — keep the highest versioned one.
+				if !hasBest || v.CreatedAt > best.CreatedAt || (v.CreatedAt == best.CreatedAt && v.Version > best.Version) {
+					best = v
+					hasBest = true
+				}
+			} else {
+				hasFuture = true
+			}
+		}
+
+		if !s.isPathSafe(path) {
+			continue // Skip paths outside the workspace root.
+		}
+		if !hasBest {
+			if hasFuture {
+				// File was created entirely after the revert point — delete it.
+				if removeErr := os.Remove(path); removeErr != nil && !os.IsNotExist(removeErr) {
+					return fmt.Errorf("removing file %s: %w", path, removeErr)
+				}
 			}
 			continue
 		}
-		if err != nil {
-			return fmt.Errorf("getting file version before timestamp for %s: %w", path, err)
-		}
-		if writeErr := os.WriteFile(path, []byte(f.Content), 0o644); writeErr != nil {
+		if writeErr := os.WriteFile(path, []byte(best.Content), 0o644); writeErr != nil {
 			return fmt.Errorf("restoring file %s: %w", path, writeErr)
 		}
 	}
@@ -258,6 +305,9 @@ func (s *service) RestoreToLatest(ctx context.Context, sessionID string) error {
 		return fmt.Errorf("listing file paths: %w", err)
 	}
 	for _, path := range paths {
+		if !s.isPathSafe(path) {
+			continue // Skip paths outside the workspace root.
+		}
 		f, err := s.q.GetLatestFileVersion(ctx, db.GetLatestFileVersionParams{
 			SessionID: sessionID,
 			Path:      path,

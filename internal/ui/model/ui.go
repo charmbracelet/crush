@@ -915,23 +915,19 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	var cmds []tea.Cmd
 
 	// When the session is in a revert state, hide messages at or after the
-	// revert boundary so the user only sees the rolled-back history.
+	// revert boundary so the user only sees the rolled-back history. Use
+	// index-based slicing rather than timestamp comparison to avoid
+	// same-second ambiguity with second-resolution created_at values.
 	if m.session != nil && m.session.RevertMessageID != "" {
-		var cutoff int64
-		for _, msg := range msgs {
+		revertIdx := -1
+		for i, msg := range msgs {
 			if msg.ID == m.session.RevertMessageID {
-				cutoff = msg.CreatedAt
+				revertIdx = i
 				break
 			}
 		}
-		if cutoff > 0 {
-			filtered := msgs[:0]
-			for _, msg := range msgs {
-				if msg.CreatedAt < cutoff {
-					filtered = append(filtered, msg)
-				}
-			}
-			msgs = filtered
+		if revertIdx >= 0 {
+			msgs = msgs[:revertIdx]
 		}
 	}
 
@@ -3079,11 +3075,15 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 	})
 
 	// If the session is in a revert state, permanently discard the hidden
-	// messages and file records before sending the new prompt.
+	// messages and file records before sending the new prompt. Surface any
+	// cleanup failure as a warning rather than silently ignoring it, so the
+	// user knows the reverted data may not have been fully discarded.
 	if m.session != nil && m.session.RevertMessageID != "" {
 		sessionIDForCleanup := m.session.ID
 		cmds = append(cmds, func() tea.Msg {
-			_ = m.com.Workspace.CleanupRevert(context.Background(), sessionIDForCleanup)
+			if err := m.com.Workspace.CleanupRevert(context.Background(), sessionIDForCleanup); err != nil {
+				return util.ReportWarn(fmt.Sprintf("Failed to clean up reverted history: %s", err))()
+			}
 			return nil
 		})
 	}

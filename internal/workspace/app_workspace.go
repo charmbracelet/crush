@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"time"
@@ -235,8 +236,11 @@ func (w *AppWorkspace) UndoLastMessage(ctx context.Context, sessionID string) er
 	} else {
 		// Already in revert — step back one more user message.
 		prev, err := w.app.Messages.FindPreviousUserMessage(ctx, sessionID, sess.RevertMessageID)
-		if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
 			return errors.New("nothing more to undo")
+		}
+		if err != nil {
+			return fmt.Errorf("finding previous user message: %w", err)
 		}
 		targetMsg = prev
 	}
@@ -259,7 +263,10 @@ func (w *AppWorkspace) RedoMessage(ctx context.Context, sessionID string) error 
 	}
 
 	next, err := w.app.Messages.FindNextUserMessage(ctx, sessionID, sess.RevertMessageID)
-	if err != nil {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("finding next user message: %w", err)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
 		// No later user message — redo to head state (unrevert).
 		if err := w.app.History.RestoreToLatest(ctx, sessionID); err != nil {
 			return fmt.Errorf("restoring files to latest: %w", err)
@@ -286,15 +293,23 @@ func (w *AppWorkspace) CleanupRevert(ctx context.Context, sessionID string) erro
 		return nil // Nothing to clean up.
 	}
 
-	revertMsg, err := w.app.Messages.Get(ctx, sess.RevertMessageID)
+	// Use the first undone message (the one after the revert marker) as the
+	// deletion boundary rather than the revert message itself. This avoids
+	// deleting records that merely share the same second-resolution timestamp
+	// as the kept revert message.
+	nextMsg, err := w.app.Messages.FindNextUserMessage(ctx, sessionID, sess.RevertMessageID)
+	if errors.Is(err, sql.ErrNoRows) {
+		// No next message — nothing to delete; just clear the marker.
+		return w.app.Sessions.ClearRevert(ctx, sessionID)
+	}
 	if err != nil {
-		return fmt.Errorf("getting revert message: %w", err)
+		return fmt.Errorf("finding first undone message: %w", err)
 	}
 
-	if err := w.app.Messages.DeleteMessagesAfterTimestamp(ctx, sessionID, revertMsg.CreatedAt); err != nil {
+	if err := w.app.Messages.DeleteMessagesAfterTimestamp(ctx, sessionID, nextMsg.CreatedAt); err != nil {
 		return fmt.Errorf("deleting messages: %w", err)
 	}
-	if err := w.app.History.CleanupAfterTimestamp(ctx, sessionID, revertMsg.CreatedAt); err != nil {
+	if err := w.app.History.CleanupAfterTimestamp(ctx, sessionID, nextMsg.CreatedAt); err != nil {
 		return fmt.Errorf("cleaning up file versions: %w", err)
 	}
 	return w.app.Sessions.ClearRevert(ctx, sessionID)

@@ -37,12 +37,12 @@ type Service interface {
 
 	// FindPreviousUserMessage returns the user message that appears immediately
 	// before the message with the given ID within the session. Returns
-	// ErrNotFound when no earlier user message exists.
+	// sql.ErrNoRows when no earlier user message exists.
 	FindPreviousUserMessage(ctx context.Context, sessionID, beforeMessageID string) (Message, error)
 
 	// FindNextUserMessage returns the user message that appears immediately
 	// after the message with the given ID within the session. Returns
-	// ErrNotFound when no later user message exists.
+	// sql.ErrNoRows when no later user message exists.
 	FindNextUserMessage(ctx context.Context, sessionID, afterMessageID string) (Message, error)
 }
 

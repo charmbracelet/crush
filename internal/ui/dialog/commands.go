@@ -428,7 +428,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 
 	// Undo / Redo — only when there is an active session.
 	if c.hasSession {
-		commands = append(commands, NewCommandItem(c.com.Styles, "undo", "Undo Last Message", "ctrl+z", ActionUndo{}))
+		commands = append(commands, NewCommandItem(c.com.Styles, "undo", "Undo Last Message", "ctrl+u", ActionUndo{}))
 	}
 	if c.hasRevert {
 		commands = append(commands, NewCommandItem(c.com.Styles, "redo", "Redo", "ctrl+y", ActionRedo{}))

@@ -118,7 +118,7 @@ func testEnv(t *testing.T) fakeEnv {
 	messages := message.NewService(q)
 
 	permissions := permission.NewPermissionService(workingDir, true, []string{})
-	history := history.NewService(q, conn)
+	history := history.NewService(q, conn, workingDir)
 	filetrackerService := filetracker.NewService(q)
 	lspClients := csync.NewMap[string, *lsp.Client]()
 

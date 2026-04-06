@@ -30,6 +30,12 @@ func (m *UI) modelInfo(width int) string {
 			// Only check reasoning if model can reason.
 			if model.CatwalkCfg.CanReason {
 				effectiveEffort := model.CatwalkCfg.DefaultReasoningEffort
+				// Check for user-selected reasoning effort in ProviderOptions.
+				if model.ModelCfg.ProviderOptions != nil {
+					if effort, ok := model.ModelCfg.ProviderOptions["reasoning_effort"].(string); ok && effort != "" {
+						effectiveEffort = effort
+					}
+				}
 				if len(model.CatwalkCfg.ReasoningLevels) == 0 {
 					// Anthropic-style thinking models. Think==nil or true means on
 					// (default), Think==&false means explicitly disabled.

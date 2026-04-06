@@ -245,17 +245,22 @@ func (r *backgroundAgentRegistry) Cancel(agentID, reason string) {
 func (r *backgroundAgentRegistry) Enqueue(agentID string, command backgroundAgentCommand) (int, error) {
 	r.mu.RLock()
 	entry, ok := r.agents[agentID]
-	r.mu.RUnlock()
 	if !ok {
+		r.mu.RUnlock()
 		return 0, fmt.Errorf("background agent %q not found", agentID)
 	}
-	if entry.runner == nil || entry.commands == nil {
+	// Copy references while holding lock to avoid race with Stop().
+	runner := entry.runner
+	commands := entry.commands
+	r.mu.RUnlock()
+
+	if runner == nil || commands == nil {
 		return 0, fmt.Errorf("background agent %q does not accept follow-up prompts", agentID)
 	}
 
-	depth := len(entry.commands) + 1
+	depth := len(commands) + 1
 	select {
-	case entry.commands <- command:
+	case commands <- command:
 		return depth, nil
 	default:
 		return 0, fmt.Errorf("background agent %q queue is full", agentID)
@@ -330,6 +335,10 @@ func (r *backgroundAgentRegistry) Stop(agentID string) {
 		close(entry.stopChan)
 		entry.stopChan = nil
 		entry.runner = nil
+		if entry.commands != nil {
+			close(entry.commands)
+			entry.commands = nil
+		}
 	}
 	r.mu.Unlock()
 }

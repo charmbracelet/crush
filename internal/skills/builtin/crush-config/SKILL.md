@@ -173,3 +173,15 @@ skills discovered from disk paths.
 - `openai` - For OpenAI or OpenAI-compatible APIs that route through OpenAI
 - `openai-compat` - For non-OpenAI providers with OpenAI-compatible APIs
 - `anthropic` - For Anthropic-compatible APIs
+
+## Viewing docs for the running version
+
+```bash
+crush -v | head -1
+```
+
+This prints something like `crush version VERSION`. Use the version and agentic fetch to get info for the current version when needed.
+
+```
+https://raw.githubusercontent.com/charmbracelet/crush/refs/tags/VERSION/README.md
+```

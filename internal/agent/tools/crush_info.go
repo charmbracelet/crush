@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/lsp"
+	"github.com/charmbracelet/crush/internal/skills"
 )
 
 const CrushInfoToolName = "crush_info"
@@ -23,16 +24,19 @@ type CrushInfoParams struct{}
 func NewCrushInfoTool(
 	cfg *config.ConfigStore,
 	lspManager *lsp.Manager,
+	allSkills []*skills.Skill,
+	activeSkills []*skills.Skill,
+	skillTracker *skills.Tracker,
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		CrushInfoToolName,
 		string(crushInfoDescription),
 		func(ctx context.Context, _ CrushInfoParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			return fantasy.NewTextResponse(buildCrushInfo(cfg, lspManager)), nil
+			return fantasy.NewTextResponse(buildCrushInfo(cfg, lspManager, allSkills, activeSkills, skillTracker)), nil
 		})
 }
 
-func buildCrushInfo(cfg *config.ConfigStore, lspManager *lsp.Manager) string {
+func buildCrushInfo(cfg *config.ConfigStore, lspManager *lsp.Manager, allSkills []*skills.Skill, activeSkills []*skills.Skill, skillTracker *skills.Tracker) string {
 	var b strings.Builder
 
 	writeConfigFiles(&b, cfg)
@@ -41,6 +45,7 @@ func buildCrushInfo(cfg *config.ConfigStore, lspManager *lsp.Manager) string {
 	writeProviders(&b, cfg)
 	writeLSP(&b, lspManager, cfg)
 	writeMCP(&b, mcp.GetStates(), cfg)
+	writeSkills(&b, allSkills, activeSkills, skillTracker, cfg)
 	writePermissions(&b, cfg)
 	writeDisabledTools(&b, cfg)
 	writeOptions(&b, cfg)
@@ -282,6 +287,59 @@ func writeMCP(b *strings.Builder, states map[string]mcp.ClientInfo, cfg *config.
 			b.WriteString("\n")
 		}
 	}
+}
+
+func writeSkills(b *strings.Builder, allSkills []*skills.Skill, activeSkills []*skills.Skill, tracker *skills.Tracker, cfg *config.ConfigStore) {
+	var disabled []string
+	if cfg.Config().Options != nil {
+		disabled = cfg.Config().Options.DisabledSkills
+	}
+	if len(activeSkills) == 0 && len(disabled) == 0 {
+		return
+	}
+
+	// Build origin map from the pre-filter list.
+	originMap := make(map[string]string, len(allSkills))
+	for _, s := range allSkills {
+		if s.Builtin {
+			originMap[s.Name] = "builtin"
+		} else {
+			originMap[s.Name] = "user"
+		}
+	}
+
+	type entry struct {
+		name   string
+		origin string
+		state  string
+	}
+	var entries []entry
+
+	// Active skills: loaded or unloaded.
+	for _, s := range activeSkills {
+		state := "unloaded"
+		if tracker.IsLoaded(s.Name) {
+			state = "loaded"
+		}
+		origin := originMap[s.Name]
+		entries = append(entries, entry{name: s.Name, origin: origin, state: state})
+	}
+
+	// Disabled skills.
+	for _, name := range disabled {
+		origin := originMap[name]
+		if origin == "" {
+			origin = "user"
+		}
+		entries = append(entries, entry{name: name, origin: origin, state: "disabled"})
+	}
+
+	slices.SortFunc(entries, func(a, b entry) int { return strings.Compare(a.name, b.name) })
+	b.WriteString("[skills]\n")
+	for _, e := range entries {
+		fmt.Fprintf(b, "%s = %s, %s\n", e.name, e.origin, e.state)
+	}
+	b.WriteString("\n")
 }
 
 func writePermissions(b *strings.Builder, cfg *config.ConfigStore) {

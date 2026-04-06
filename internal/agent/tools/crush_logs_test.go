@@ -3,6 +3,7 @@ package tools
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,9 +44,7 @@ func makeLogEntry(level, msg, source string, line int, extra map[string]any) map
 			"line": line,
 		},
 	}
-	for k, v := range extra {
-		entry[k] = v
-	}
+	maps.Copy(entry, extra)
 	return entry
 }
 
@@ -88,7 +87,7 @@ func TestCrushLogs_DefaultLines(t *testing.T) {
 	t.Parallel()
 	// Create 100 log entries.
 	var entries []map[string]any
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		entries = append(entries, makeLogEntry("INFO", fmt.Sprintf("Entry %d", i), "app.go", i, nil))
 	}
 
@@ -109,7 +108,7 @@ func TestCrushLogs_MaxCap(t *testing.T) {
 	t.Parallel()
 	// Create 200 log entries.
 	var entries []map[string]any
-	for i := 0; i < 200; i++ {
+	for i := range 200 {
 		entries = append(entries, makeLogEntry("INFO", fmt.Sprintf("Entry %d", i), "app.go", i, nil))
 	}
 
@@ -350,7 +349,7 @@ func TestCrushLogs_PartialTrailingLine(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create valid entries.
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		entry := makeLogEntry("INFO", fmt.Sprintf("Entry %d", i), "app.go", i, nil)
 		line, _ := json.Marshal(entry)
 		file.WriteString(string(line) + "\n")

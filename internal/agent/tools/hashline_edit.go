@@ -299,6 +299,12 @@ func applyHashlineOperations(originalLines []string, operations []parsedHashline
 		mapping[line] = line
 	}
 
+	// Track cumulative insert offsets for each original line.
+	// prependOffsets[line] = total lines prepended before line
+	// appendOffsets[line] = total lines appended after line
+	prependOffsets := make([]int, len(originalLines)+1)
+	appendOffsets := make([]int, len(originalLines)+1)
+
 	for i, operation := range operations {
 		var err error
 		switch operation.Operation {
@@ -307,9 +313,9 @@ func applyHashlineOperations(originalLines []string, operations []parsedHashline
 		case hashlineEditOpReplaceRange:
 			currentLines, mapping, err = replaceOriginalRange(currentLines, mapping, operation.Start.Line, operation.End.Line, operation.ContentLines)
 		case hashlineEditOpPrepend:
-			currentLines, mapping, err = insertRelativeToOriginalLine(currentLines, mapping, operation.Line.Line, true, operation.ContentLines)
+			currentLines, mapping, prependOffsets, err = insertRelativeToOriginalLine(currentLines, mapping, prependOffsets, appendOffsets, operation.Line.Line, true, operation.ContentLines)
 		case hashlineEditOpAppend:
-			currentLines, mapping, err = insertRelativeToOriginalLine(currentLines, mapping, operation.Line.Line, false, operation.ContentLines)
+			currentLines, mapping, appendOffsets, err = insertRelativeToOriginalLine(currentLines, mapping, prependOffsets, appendOffsets, operation.Line.Line, false, operation.ContentLines)
 		default:
 			err = fmt.Errorf("unsupported operation %q", operation.Operation)
 		}
@@ -366,19 +372,33 @@ func replaceOriginalRange(lines []string, mapping []int, startOriginal, endOrigi
 	return updatedLines, updatedMapping, nil
 }
 
-func insertRelativeToOriginalLine(lines []string, mapping []int, originalLine int, before bool, contentLines []string) ([]string, []int, error) {
+func insertRelativeToOriginalLine(lines []string, mapping []int, prependOffsets []int, appendOffsets []int, originalLine int, before bool, contentLines []string) ([]string, []int, []int, error) {
 	if len(contentLines) == 0 {
-		return lines, mapping, nil
+		if before {
+			return lines, mapping, prependOffsets, nil
+		}
+		return lines, mapping, appendOffsets, nil
 	}
 
-	lineCurrent, err := resolveCurrentLine(mapping, originalLine)
-	if err != nil {
-		return nil, nil, err
+	// Check if the anchor line was deleted
+	if originalLine >= len(mapping) || mapping[originalLine] == 0 {
+		return nil, nil, nil, fmt.Errorf("line %d no longer exists after previous operations", originalLine)
 	}
 
+	// Calculate current position: original position + all inserts before this line + own prepends
+	lineCurrent := originalLine
+	for prevLine := 1; prevLine < originalLine; prevLine++ {
+		if mapping[prevLine] > 0 {
+			lineCurrent += prependOffsets[prevLine] + appendOffsets[prevLine]
+		}
+	}
+	lineCurrent += prependOffsets[originalLine]
+
+	// For prepend: insert before the line (at its current position)
+	// For append: insert after the line (after existing appends)
 	insertAt := lineCurrent
 	if !before {
-		insertAt = lineCurrent + 1
+		insertAt = lineCurrent + 1 + appendOffsets[originalLine]
 	}
 
 	updatedLines := make([]string, 0, len(lines)+len(contentLines))
@@ -386,18 +406,36 @@ func insertRelativeToOriginalLine(lines []string, mapping []int, originalLine in
 	updatedLines = append(updatedLines, contentLines...)
 	updatedLines = append(updatedLines, lines[insertAt-1:]...)
 
-	updatedMapping := append([]int(nil), mapping...)
-	for original := 1; original < len(updatedMapping); original++ {
-		position := mapping[original]
-		if position == 0 {
-			continue
-		}
-		if position >= insertAt {
-			updatedMapping[original] = position + len(contentLines)
-		}
+	// Update the appropriate offset
+	updatedPrepend := append([]int(nil), prependOffsets...)
+	updatedAppend := append([]int(nil), appendOffsets...)
+	if before {
+		updatedPrepend[originalLine] += len(contentLines)
+	} else {
+		updatedAppend[originalLine] += len(contentLines)
 	}
 
-	return updatedLines, updatedMapping, nil
+	// Recalculate mapping based on new offsets (mapping tracks where each original line currently is)
+	updatedMapping := make([]int, len(mapping))
+	for orig := 1; orig < len(mapping); orig++ {
+		if mapping[orig] == 0 {
+			continue // Line was deleted
+		}
+		// Position = original line number + inserts before it + own prepends
+		pos := orig
+		for prev := 1; prev < orig; prev++ {
+			if mapping[prev] > 0 {
+				pos += updatedPrepend[prev] + updatedAppend[prev]
+			}
+		}
+		pos += updatedPrepend[orig]
+		updatedMapping[orig] = pos
+	}
+
+	if before {
+		return updatedLines, updatedMapping, updatedPrepend, nil
+	}
+	return updatedLines, updatedMapping, updatedAppend, nil
 }
 
 func resolveCurrentLine(mapping []int, originalLine int) (int, error) {

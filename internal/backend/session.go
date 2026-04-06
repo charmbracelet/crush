@@ -2,6 +2,8 @@ package backend
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
@@ -123,4 +125,106 @@ func (b *Backend) ListAllUserMessages(ctx context.Context, workspaceID string) (
 	}
 
 	return ws.Messages.ListAllUserMessages(ctx)
+}
+
+// UndoLastMessage rolls the session back by one user message.
+func (b *Backend) UndoLastMessage(ctx context.Context, workspaceID, sessionID string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+	return backendUndo(ctx, ws, sessionID)
+}
+
+// RedoMessage moves the revert marker forward by one user message or clears it.
+func (b *Backend) RedoMessage(ctx context.Context, workspaceID, sessionID string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+	return backendRedo(ctx, ws, sessionID)
+}
+
+// CleanupRevert permanently discards the hidden messages and file records.
+func (b *Backend) CleanupRevert(ctx context.Context, workspaceID, sessionID string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+	return backendCleanupRevert(ctx, ws, sessionID)
+}
+
+// backendUndo performs the undo logic directly against app services to avoid
+// an import cycle between backend and workspace.
+func backendUndo(ctx context.Context, ws *Workspace, sessionID string) error {
+	sess, err := ws.Sessions.Get(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("getting session: %w", err)
+	}
+	var targetMsg message.Message
+	if sess.RevertMessageID == "" {
+		msgs, err := ws.Messages.ListUserMessages(ctx, sessionID)
+		if err != nil {
+			return fmt.Errorf("listing user messages: %w", err)
+		}
+		if len(msgs) == 0 {
+			return errors.New("nothing to undo")
+		}
+		targetMsg = msgs[0]
+	} else {
+		prev, err := ws.Messages.FindPreviousUserMessage(ctx, sessionID, sess.RevertMessageID)
+		if err != nil {
+			return errors.New("nothing more to undo")
+		}
+		targetMsg = prev
+	}
+	if err := ws.History.RestoreToTimestamp(ctx, sessionID, targetMsg.CreatedAt); err != nil {
+		return fmt.Errorf("restoring files: %w", err)
+	}
+	return ws.Sessions.SetRevert(ctx, sessionID, targetMsg.ID)
+}
+
+// backendRedo performs the redo logic directly against app services.
+func backendRedo(ctx context.Context, ws *Workspace, sessionID string) error {
+	sess, err := ws.Sessions.Get(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("getting session: %w", err)
+	}
+	if sess.RevertMessageID == "" {
+		return errors.New("nothing to redo")
+	}
+	next, err := ws.Messages.FindNextUserMessage(ctx, sessionID, sess.RevertMessageID)
+	if err != nil {
+		// No later user message — restore to head state.
+		if err := ws.History.RestoreToLatest(ctx, sessionID); err != nil {
+			return fmt.Errorf("restoring files to latest: %w", err)
+		}
+		return ws.Sessions.ClearRevert(ctx, sessionID)
+	}
+	if err := ws.History.RestoreToTimestamp(ctx, sessionID, next.CreatedAt); err != nil {
+		return fmt.Errorf("restoring files: %w", err)
+	}
+	return ws.Sessions.SetRevert(ctx, sessionID, next.ID)
+}
+
+// backendCleanupRevert permanently discards the undone messages and file records.
+func backendCleanupRevert(ctx context.Context, ws *Workspace, sessionID string) error {
+	sess, err := ws.Sessions.Get(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("getting session: %w", err)
+	}
+	if sess.RevertMessageID == "" {
+		return nil
+	}
+	revertMsg, err := ws.Messages.Get(ctx, sess.RevertMessageID)
+	if err != nil {
+		return fmt.Errorf("getting revert message: %w", err)
+	}
+	if err := ws.Messages.DeleteMessagesAfterTimestamp(ctx, sessionID, revertMsg.CreatedAt); err != nil {
+		return fmt.Errorf("deleting messages: %w", err)
+	}
+	if err := ws.History.CleanupAfterTimestamp(ctx, sessionID, revertMsg.CreatedAt); err != nil {
+		return fmt.Errorf("cleaning up file versions: %w", err)
+	}
+	return ws.Sessions.ClearRevert(ctx, sessionID)
 }

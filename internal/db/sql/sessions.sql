@@ -72,3 +72,13 @@ WHERE id = ?;
 -- name: DeleteSession :exec
 DELETE FROM sessions
 WHERE id = ?;
+
+-- name: SetSessionRevert :exec
+UPDATE sessions
+SET revert_message_id = ?
+WHERE id = ?;
+
+-- name: ClearSessionRevert :exec
+UPDATE sessions
+SET revert_message_id = NULL
+WHERE id = ?;

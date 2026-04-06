@@ -332,6 +332,20 @@ func (w *ClientWorkspace) ListSessionHistory(ctx context.Context, sessionID stri
 	return protoToFiles(files), nil
 }
 
+// -- Undo / Redo --
+
+func (w *ClientWorkspace) UndoLastMessage(ctx context.Context, sessionID string) error {
+	return w.client.UndoLastMessage(ctx, w.workspaceID(), sessionID)
+}
+
+func (w *ClientWorkspace) RedoMessage(ctx context.Context, sessionID string) error {
+	return w.client.RedoMessage(ctx, w.workspaceID(), sessionID)
+}
+
+func (w *ClientWorkspace) CleanupRevert(ctx context.Context, sessionID string) error {
+	return w.client.CleanupRevert(ctx, w.workspaceID(), sessionID)
+}
+
 // -- LSP --
 
 func (w *ClientWorkspace) LSPStart(ctx context.Context, path string) {

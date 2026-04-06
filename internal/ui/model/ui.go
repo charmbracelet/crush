@@ -141,6 +141,12 @@ type (
 	sessionFilesUpdatesMsg struct {
 		sessionFiles []SessionFile
 	}
+
+	// reloadSessionMessagesMsg is sent to reload the chat after an undo/redo
+	// so the message list reflects the new revert state.
+	reloadSessionMessagesMsg struct {
+		messages []message.Message
+	}
 )
 
 // UI represents the main user interface model.
@@ -519,6 +525,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.loadPromptHistory())
 		m.updateLayoutAndSize()
 
+	case reloadSessionMessagesMsg:
+		if cmd := m.setSessionMessages(msg.messages); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+
 	case sessionFilesUpdatesMsg:
 		m.sessionFiles = msg.sessionFiles
 		var paths []string
@@ -575,11 +586,24 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.session != nil && msg.Payload.ID == m.session.ID {
 			prevHasInProgress := hasInProgressTodo(m.session.Todos)
+			prevRevertID := m.session.RevertMessageID
 			m.session = &msg.Payload
 			if !prevHasInProgress && hasInProgressTodo(m.session.Todos) {
 				m.todoIsSpinning = true
 				cmds = append(cmds, m.todoSpinner.Tick)
 				m.updateLayoutAndSize()
+			}
+			// When the revert marker changes, reload messages so the chat
+			// view shows or hides the rolled-back content immediately.
+			if m.session.RevertMessageID != prevRevertID {
+				sessionID := m.session.ID
+				cmds = append(cmds, func() tea.Msg {
+					msgs, err := m.com.Workspace.ListMessages(context.Background(), sessionID)
+					if err != nil {
+						return util.ReportError(err)()
+					}
+					return reloadSessionMessagesMsg{messages: msgs}
+				})
 			}
 		}
 	case pubsub.Event[message.Message]:
@@ -889,6 +913,28 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // setSessionMessages sets the messages for the current session in the chat
 func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	var cmds []tea.Cmd
+
+	// When the session is in a revert state, hide messages at or after the
+	// revert boundary so the user only sees the rolled-back history.
+	if m.session != nil && m.session.RevertMessageID != "" {
+		var cutoff int64
+		for _, msg := range msgs {
+			if msg.ID == m.session.RevertMessageID {
+				cutoff = msg.CreatedAt
+				break
+			}
+		}
+		if cutoff > 0 {
+			filtered := msgs[:0]
+			for _, msg := range msgs {
+				if msg.CreatedAt < cutoff {
+					filtered = append(filtered, msg)
+				}
+			}
+			msgs = filtered
+		}
+	}
+
 	// Build tool result map to link tool calls with their results
 	msgPtrs := make([]*message.Message, len(msgs))
 	for i := range msgs {
@@ -1405,6 +1451,20 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionDisableDockerMCP:
 		m.dialog.CloseDialog(dialog.CommandsID)
 		cmds = append(cmds, m.disableDockerMCP)
+	case dialog.ActionUndo:
+		if m.isAgentBusy() {
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before undoing..."))
+			break
+		}
+		cmds = append(cmds, m.handleUndoCommand())
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionRedo:
+		if m.isAgentBusy() {
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before redoing..."))
+			break
+		}
+		cmds = append(cmds, m.handleRedoCommand())
+		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionInitializeProject:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
@@ -1738,6 +1798,20 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 				cmds = append(cmds, m.pasteImageFromClipboard)
 
+			case key.Matches(msg, m.keyMap.Undo) && m.hasSession():
+				if m.isAgentBusy() {
+					cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before undoing..."))
+					break
+				}
+				cmds = append(cmds, m.handleUndoCommand())
+
+			case key.Matches(msg, m.keyMap.Redo) && m.hasSession():
+				if m.isAgentBusy() {
+					cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before redoing..."))
+					break
+				}
+				cmds = append(cmds, m.handleRedoCommand())
+
 			case key.Matches(msg, m.keyMap.Editor.SendMessage):
 				prevHeight := m.textarea.Height()
 				value := m.textarea.Value()
@@ -1759,6 +1833,20 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				value = strings.TrimSpace(value)
 				if value == "exit" || value == "quit" {
 					return m.openQuitDialog()
+				}
+				if value == "/undo" {
+					m.textarea.Reset()
+					if m.isAgentBusy() {
+						return util.ReportWarn("Agent is busy, please wait before undoing...")
+					}
+					return m.handleUndoCommand()
+				}
+				if value == "/redo" {
+					m.textarea.Reset()
+					if m.isAgentBusy() {
+						return util.ReportWarn("Agent is busy, please wait before redoing...")
+					}
+					return m.handleRedoCommand()
 				}
 
 				attachments := m.attachments.List()
@@ -2921,6 +3009,44 @@ func (m *UI) cacheSidebarLogo(width int) {
 	m.sidebarLogo = renderLogo(m.com.Styles, true, width)
 }
 
+// handleUndoCommand undoes the last user message and restores files.
+func (m *UI) handleUndoCommand() tea.Cmd {
+	return func() tea.Msg {
+		if !m.hasSession() {
+			return util.ReportWarn("No active session to undo.")
+		}
+		ctx := context.Background()
+		sessionID := m.session.ID
+		if err := m.com.Workspace.UndoLastMessage(ctx, sessionID); err != nil {
+			return util.ReportError(err)()
+		}
+		msgs, err := m.com.Workspace.ListMessages(ctx, sessionID)
+		if err != nil {
+			return util.ReportError(err)()
+		}
+		return reloadSessionMessagesMsg{messages: msgs}
+	}
+}
+
+// handleRedoCommand redoes the next user message and restores files.
+func (m *UI) handleRedoCommand() tea.Cmd {
+	return func() tea.Msg {
+		if !m.hasSession() {
+			return util.ReportWarn("No active session to redo.")
+		}
+		ctx := context.Background()
+		sessionID := m.session.ID
+		if err := m.com.Workspace.RedoMessage(ctx, sessionID); err != nil {
+			return util.ReportError(err)()
+		}
+		msgs, err := m.com.Workspace.ListMessages(ctx, sessionID)
+		if err != nil {
+			return util.ReportError(err)()
+		}
+		return reloadSessionMessagesMsg{messages: msgs}
+	}
+}
+
 // sendMessage sends a message with the given content and attachments.
 func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.Cmd {
 	if !m.com.Workspace.AgentIsReady() {
@@ -2951,6 +3077,16 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 		}
 		return nil
 	})
+
+	// If the session is in a revert state, permanently discard the hidden
+	// messages and file records before sending the new prompt.
+	if m.session != nil && m.session.RevertMessageID != "" {
+		sessionIDForCleanup := m.session.ID
+		cmds = append(cmds, func() tea.Msg {
+			_ = m.com.Workspace.CleanupRevert(context.Background(), sessionIDForCleanup)
+			return nil
+		})
+	}
 
 	// Capture session ID to avoid race with main goroutine updating m.session.
 	sessionID := m.session.ID
@@ -3094,10 +3230,11 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 	if hasSession {
 		sessionID = m.session.ID
 	}
+	hasRevert := hasSession && m.session.RevertMessageID != ""
 	hasTodos := hasSession && hasIncompleteTodos(m.session.Todos)
 	hasQueue := m.promptQueue > 0
 
-	commands, err := dialog.NewCommands(m.com, sessionID, hasSession, hasTodos, hasQueue, m.customCommands, m.mcpPrompts)
+	commands, err := dialog.NewCommands(m.com, sessionID, hasSession, hasRevert, hasTodos, hasQueue, m.customCommands, m.mcpPrompts)
 	if err != nil {
 		return util.ReportError(err)
 	}

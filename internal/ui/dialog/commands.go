@@ -55,6 +55,7 @@ type Commands struct {
 
 	sessionID  string
 	hasSession bool
+	hasRevert  bool // true when session has an active revert marker (undo was performed)
 	hasTodos   bool
 	hasQueue   bool
 	selected   CommandType
@@ -78,12 +79,13 @@ type Commands struct {
 var _ Dialog = (*Commands)(nil)
 
 // NewCommands creates a new commands dialog.
-func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, hasQueue bool, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) (*Commands, error) {
+func NewCommands(com *common.Common, sessionID string, hasSession, hasRevert, hasTodos, hasQueue bool, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) (*Commands, error) {
 	c := &Commands{
 		com:            com,
 		selected:       SystemCommands,
 		sessionID:      sessionID,
 		hasSession:     hasSession,
+		hasRevert:      hasRevert,
 		hasTodos:       hasTodos,
 		hasQueue:       hasQueue,
 		customCommands: customCommands,
@@ -422,6 +424,14 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		NewCommandItem(c.com.Styles, "new_session", "New Session", "ctrl+n", ActionNewSession{}),
 		NewCommandItem(c.com.Styles, "switch_session", "Sessions", "ctrl+s", ActionOpenDialog{SessionsID}),
 		NewCommandItem(c.com.Styles, "switch_model", "Switch Model", "ctrl+l", ActionOpenDialog{ModelsID}),
+	}
+
+	// Undo / Redo — only when there is an active session.
+	if c.hasSession {
+		commands = append(commands, NewCommandItem(c.com.Styles, "undo", "Undo Last Message", "ctrl+z", ActionUndo{}))
+	}
+	if c.hasRevert {
+		commands = append(commands, NewCommandItem(c.com.Styles, "redo", "Redo", "ctrl+y", ActionRedo{}))
 	}
 
 	// Only show compact command if there's an active session

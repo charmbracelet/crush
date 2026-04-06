@@ -89,6 +89,14 @@ func (m *mockSessionService) IsAgentToolSession(sessionID string) bool {
 	return ok
 }
 
+func (m *mockSessionService) SetRevert(_ context.Context, _, _ string) error {
+	return nil
+}
+
+func (m *mockSessionService) ClearRevert(_ context.Context, _ string) error {
+	return nil
+}
+
 func newTestApp(sessions session.Service) *App {
 	return &App{Sessions: sessions}
 }

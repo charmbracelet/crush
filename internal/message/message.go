@@ -30,6 +30,20 @@ type Service interface {
 	ListAllUserMessages(ctx context.Context) ([]Message, error)
 	Delete(ctx context.Context, id string) error
 	DeleteSessionMessages(ctx context.Context, sessionID string) error
+
+	// DeleteMessagesAfterTimestamp deletes all messages in a session whose
+	// created_at is >= the given Unix timestamp. Used during revert cleanup.
+	DeleteMessagesAfterTimestamp(ctx context.Context, sessionID string, timestamp int64) error
+
+	// FindPreviousUserMessage returns the user message that appears immediately
+	// before the message with the given ID within the session. Returns
+	// ErrNotFound when no earlier user message exists.
+	FindPreviousUserMessage(ctx context.Context, sessionID, beforeMessageID string) (Message, error)
+
+	// FindNextUserMessage returns the user message that appears immediately
+	// after the message with the given ID within the session. Returns
+	// ErrNotFound when no later user message exists.
+	FindNextUserMessage(ctx context.Context, sessionID, afterMessageID string) (Message, error)
 }
 
 type service struct {
@@ -109,6 +123,60 @@ func (s *service) DeleteSessionMessages(ctx context.Context, sessionID string) e
 		}
 	}
 	return nil
+}
+
+// DeleteMessagesAfterTimestamp deletes all messages in the session whose
+// created_at is at or after the given Unix timestamp.
+func (s *service) DeleteMessagesAfterTimestamp(ctx context.Context, sessionID string, timestamp int64) error {
+	return s.q.DeleteMessagesAfterTimestamp(ctx, db.DeleteMessagesAfterTimestampParams{
+		SessionID: sessionID,
+		CreatedAt: timestamp,
+	})
+}
+
+// FindPreviousUserMessage returns the user message immediately before the one
+// with beforeMessageID, ordered by created_at ascending. Returns sql.ErrNoRows
+// when no earlier user message exists.
+func (s *service) FindPreviousUserMessage(ctx context.Context, sessionID, beforeMessageID string) (Message, error) {
+	userMsgs, err := s.ListUserMessages(ctx, sessionID)
+	if err != nil {
+		return Message{}, fmt.Errorf("listing user messages: %w", err)
+	}
+	// ListUserMessages returns DESC order; reverse to find the one before.
+	// Walk forward (ascending) and return the message just before beforeMessageID.
+	var prev *Message
+	for i := len(userMsgs) - 1; i >= 0; i-- {
+		msg := userMsgs[i]
+		if msg.ID == beforeMessageID {
+			if prev == nil {
+				return Message{}, sql.ErrNoRows
+			}
+			return *prev, nil
+		}
+		prev = &userMsgs[i]
+	}
+	return Message{}, sql.ErrNoRows
+}
+
+// FindNextUserMessage returns the user message immediately after the one with
+// afterMessageID, ordered by created_at ascending. Returns sql.ErrNoRows when
+// no later user message exists.
+func (s *service) FindNextUserMessage(ctx context.Context, sessionID, afterMessageID string) (Message, error) {
+	userMsgs, err := s.ListUserMessages(ctx, sessionID)
+	if err != nil {
+		return Message{}, fmt.Errorf("listing user messages: %w", err)
+	}
+	// ListUserMessages returns DESC; the "next" in ascending order = the one
+	// that appears earlier in the DESC slice.
+	for i := len(userMsgs) - 1; i >= 0; i-- {
+		if userMsgs[i].ID == afterMessageID {
+			if i == 0 {
+				return Message{}, sql.ErrNoRows
+			}
+			return userMsgs[i-1], nil
+		}
+	}
+	return Message{}, sql.ErrNoRows
 }
 
 func (s *service) Update(ctx context.Context, message Message) error {

@@ -10,6 +10,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -147,6 +148,24 @@ func TestViewTool_RejectsLargeNonImageFiles(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, resp.IsError)
 	require.Contains(t, resp.Content, "File is too large")
+}
+
+func TestViewTool_InvalidPathSyntaxReturnsToolErrorResponse(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-specific invalid path syntax behavior")
+	}
+
+	tmpDir := t.TempDir()
+	permissions := &mockPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
+	tool := NewViewTool(nil, permissions, &mockFileTracker{}, tmpDir)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	resp, err := runViewTool(t, tool, ctx, ViewParams{FilePath: "*.go"})
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "error accessing file")
 }
 
 func runViewTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, params ViewParams) (fantasy.ToolResponse, error) {

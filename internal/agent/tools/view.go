@@ -157,7 +157,7 @@ func NewViewTool(
 
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("File not found: %s", filePath)), nil
 				}
-				return fantasy.ToolResponse{}, fmt.Errorf("error accessing file: %w", err)
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("error accessing file: %v", err)), nil
 			}
 
 			// Check if it's a directory

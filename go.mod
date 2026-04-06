@@ -5,7 +5,7 @@ go 1.26.1
 require (
 	charm.land/bubbles/v2 v2.1.0
 	charm.land/bubbletea/v2 v2.0.2
-	charm.land/catwalk v0.33.2
+	charm.land/catwalk v0.34.3
 	charm.land/fang/v2 v2.0.1
 	charm.land/fantasy v0.17.1
 	charm.land/glamour/v2 v2.0.0
@@ -41,7 +41,7 @@ require (
 	github.com/disintegration/imaging v1.6.2
 	github.com/dustin/go-humanize v1.0.1
 	github.com/gen2brain/beeep v0.11.2
-	github.com/go-git/go-git/v5 v5.17.1
+	github.com/go-git/go-git/v5 v5.17.2
 	github.com/google/uuid v1.6.0
 	github.com/invopop/jsonschema v0.13.0
 	github.com/joho/godotenv v1.5.1
@@ -72,7 +72,7 @@ require (
 	golang.org/x/text v0.35.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.48.0
+	modernc.org/sqlite v1.48.1
 	mvdan.cc/sh/moreinterp v0.0.0-20250902163504-3cf4fd5717a5
 	mvdan.cc/sh/v3 v3.13.0
 )

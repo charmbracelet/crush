@@ -704,10 +704,6 @@ func (c *coordinator) refreshSessionAgentRuntimeConfig(ctx context.Context, curr
 		return sessionAgentRuntimeConfig{}, errModelProviderNotConfigured
 	}
 
-	systemPrompt, err := promptBuilder.Build(ctx, inferenceModel.Model.Provider(), inferenceModel.Model.Model(), c.cfg)
-	if err != nil {
-		return sessionAgentRuntimeConfig{}, err
-	}
 	mode, err := c.collaborationModeForContext(ctx)
 	if err != nil {
 		return sessionAgentRuntimeConfig{}, err
@@ -716,11 +712,20 @@ func (c *coordinator) refreshSessionAgentRuntimeConfig(ctx context.Context, curr
 	if err != nil {
 		return sessionAgentRuntimeConfig{}, err
 	}
-	systemPrompt = buildSystemPromptForModes(systemPrompt, mode, permissionMode)
 
-	toolSet, err := c.buildTools(ctx, agentCfg, mode)
+	toolBuild, err := c.buildToolsWithContext(ctx, agentCfg, mode)
 	if err != nil {
 		return sessionAgentRuntimeConfig{}, err
+	}
+	toolSet := toolBuild.Tools
+
+	systemPrompt, err := promptBuilder.Build(ctx, inferenceModel.Model.Provider(), inferenceModel.Model.Model(), c.cfg)
+	if err != nil {
+		return sessionAgentRuntimeConfig{}, err
+	}
+	systemPrompt = buildSystemPromptForModes(systemPrompt, mode, permissionMode)
+	if hasTool(toolSet, tools.ToolSearchToolName) {
+		systemPrompt = appendDeferredToolsPromptSection(systemPrompt, toolBuild.DeferredHints)
 	}
 
 	if shouldPersistRuntimeOnAgent(ctx, isSubAgent) {
@@ -793,10 +798,23 @@ func (c *coordinator) permissionModeForContext(ctx context.Context) (session.Per
 }
 
 func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, mode session.CollaborationMode) ([]fantasy.AgentTool, error) {
+	build, err := c.buildToolsWithContext(ctx, agent, mode)
+	if err != nil {
+		return nil, err
+	}
+	return build.Tools, nil
+}
+
+type buildToolsResult struct {
+	Tools         []fantasy.AgentTool
+	DeferredHints []tools.RegistryEntry
+}
+
+func (c *coordinator) buildToolsWithContext(ctx context.Context, agent config.Agent, mode session.CollaborationMode) (buildToolsResult, error) {
 	registry := newToolRegistry()
 	registeredTools, err := c.registerAgentTools(ctx, agent, mode, registry)
 	if err != nil {
-		return nil, err
+		return buildToolsResult{}, err
 	}
 
 	allowedToolNames := filterToolsForRiskPolicy(agent.AllowedTools, mode, c.cfg.Config().Options.DisabledTools)
@@ -839,18 +857,14 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, mode s
 		entry.Exposed = exposedByName[entry.Name]
 		registry.entries[entry.Name] = entry
 	}
+	deferredHints := collectDeferredToolHints(registry.entries, disabledSet)
 
 	if mode == session.CollaborationModePlan {
 		filteredTools = removeNonPlanSafeCustomTools(filteredTools, registry)
 		slices.SortFunc(filteredTools, func(a, b fantasy.AgentTool) int {
 			return strings.Compare(a.Info().Name, b.Info().Name)
 		})
-		return filteredTools, nil
-	}
-
-	for _, entry := range registry.entries {
-		entry.Exposed = exposedByName[entry.Name]
-		registry.entries[entry.Name] = entry
+		return buildToolsResult{Tools: filteredTools}, nil
 	}
 
 	for i, tool := range filteredTools {
@@ -860,7 +874,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, mode s
 	slices.SortFunc(filteredTools, func(a, b fantasy.AgentTool) int {
 		return strings.Compare(a.Info().Name, b.Info().Name)
 	})
-	return filteredTools, nil
+	return buildToolsResult{Tools: filteredTools, DeferredHints: deferredHints}, nil
 }
 
 func removeNonPlanSafeCustomTools(toolsList []fantasy.AgentTool, registry *toolRegistry) []fantasy.AgentTool {

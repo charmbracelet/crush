@@ -162,6 +162,7 @@ func metadataForMCPTool(tool *agenttools.Tool) agenttools.ToolMetadata {
 		ReadOnly:        false,
 		ConcurrencySafe: false,
 		RiskHint:        "network",
+		Exposure:        agenttools.ToolExposureDeferred,
 		SearchHint:      fmt.Sprintf("invoke MCP tool %s", tool.MCPToolName()),
 		SearchTags:      []string{"mcp", tool.MCP(), tool.MCPToolName()},
 	}

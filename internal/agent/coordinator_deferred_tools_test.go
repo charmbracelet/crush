@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/agent/mailbox"
@@ -57,4 +58,37 @@ func TestClearDeferredToolActivationsForSession(t *testing.T) {
 
 	coord.clearDeferredToolActivationsForSession("session-1")
 	require.Empty(t, coord.activatedDeferredBySession)
+}
+
+func TestBuildToolsDoesNotExposeDeferredMCPUntilActivated(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	cfg, err := config.Init(env.workingDir, "", false)
+	require.NoError(t, err)
+	coord := &coordinator{
+		cfg:                        cfg,
+		sessions:                   env.sessions,
+		messages:                   env.messages,
+		permissions:                env.permissions,
+		history:                    env.history,
+		filetracker:                *env.filetracker,
+		lspManager:                 lsp.NewManager(cfg),
+		mailbox:                    mailbox.NewService(),
+		activatedDeferredBySession: map[string]map[string]struct{}{},
+	}
+
+	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "session-1")
+	coder := cfg.Config().Agents[config.AgentCoder]
+	toolSet, err := coord.buildTools(ctx, coder, session.CollaborationModeDefault)
+	require.NoError(t, err)
+
+	foundMCP := false
+	for _, tool := range toolSet {
+		if strings.HasPrefix(tool.Info().Name, "mcp_") {
+			foundMCP = true
+			break
+		}
+	}
+	require.False(t, foundMCP)
 }

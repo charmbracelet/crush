@@ -32,16 +32,18 @@ func (d Decision) String() string {
 
 // HookResult holds the parsed output of a single hook execution.
 type HookResult struct {
-	Decision Decision
-	Reason   string
-	Context  string
+	Decision     Decision
+	Reason       string
+	Context      string
+	UpdatedInput string // Replacement tool input JSON (opaque string).
 }
 
 // AggregateResult holds the combined outcome of all hooks for an event.
 type AggregateResult struct {
-	Decision Decision
-	Reason   string // Concatenated deny reasons (newline-separated).
-	Context  string // Concatenated context from all hooks.
+	Decision     Decision
+	Reason       string // Concatenated deny reasons (newline-separated).
+	Context      string // Concatenated context from all hooks.
+	UpdatedInput string // Last non-empty updated_input wins.
 }
 
 // aggregate merges multiple HookResults into a single AggregateResult.
@@ -49,9 +51,10 @@ type AggregateResult struct {
 // context strings are concatenated.
 func aggregate(results []HookResult) AggregateResult {
 	var (
-		decision Decision
-		reasons  []string
-		contexts []string
+		decision     Decision
+		reasons      []string
+		contexts     []string
+		updatedInput string
 	)
 	for _, r := range results {
 		switch r.Decision {
@@ -70,9 +73,12 @@ func aggregate(results []HookResult) AggregateResult {
 		if r.Context != "" {
 			contexts = append(contexts, r.Context)
 		}
+		if r.UpdatedInput != "" {
+			updatedInput = r.UpdatedInput
+		}
 	}
 
-	agg := AggregateResult{Decision: decision}
+	agg := AggregateResult{Decision: decision, UpdatedInput: updatedInput}
 	if len(reasons) > 0 {
 		for i, r := range reasons {
 			if i > 0 {

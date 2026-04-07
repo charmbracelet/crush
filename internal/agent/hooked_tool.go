@@ -44,6 +44,10 @@ func (h *hookedTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.To
 		return fantasy.NewTextErrorResponse(result.Reason), nil
 	}
 
+	if result.UpdatedInput != "" {
+		call.Input = result.UpdatedInput
+	}
+
 	resp, err := h.inner.Run(ctx, call)
 	if err != nil {
 		return resp, err

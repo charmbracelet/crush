@@ -141,8 +141,11 @@ func splitFirst(s, sep string) []string {
 func TestBuildPayload(t *testing.T) {
 	t.Parallel()
 	payload := BuildPayload(EventPreToolUse, "sess-1", "/work", "bash", `{"command":"ls"}`)
-	require.Contains(t, string(payload), `"event":"`+EventPreToolUse+`"`)
-	require.Contains(t, string(payload), `"tool_name":"bash"`)
+	s := string(payload)
+	require.Contains(t, s, `"event":"`+EventPreToolUse+`"`)
+	require.Contains(t, s, `"tool_name":"bash"`)
+	// tool_input should be an object, not a string.
+	require.Contains(t, s, `"tool_input":{"command":"ls"}`)
 }
 
 func TestRunnerExitCode0Allow(t *testing.T) {
@@ -334,4 +337,103 @@ func TestRunnerEnvVarsPropagated(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, DecisionAllow, result.Decision)
 	require.Equal(t, "bash", result.Context)
+}
+
+func TestParseStdoutUpdatedInput(t *testing.T) {
+	t.Parallel()
+
+	t.Run("updated_input parsed", func(t *testing.T) {
+		t.Parallel()
+		r := parseStdout(`{"decision":"allow","updated_input":"{\"command\":\"rtk cat foo.go\"}"}`)
+		require.Equal(t, DecisionAllow, r.Decision)
+		require.Equal(t, `{"command":"rtk cat foo.go"}`, r.UpdatedInput)
+	})
+
+	t.Run("no updated_input", func(t *testing.T) {
+		t.Parallel()
+		r := parseStdout(`{"decision":"allow"}`)
+		require.Empty(t, r.UpdatedInput)
+	})
+}
+
+func TestAggregationUpdatedInput(t *testing.T) {
+	t.Parallel()
+
+	t.Run("last non-empty wins", func(t *testing.T) {
+		t.Parallel()
+		agg := aggregate([]HookResult{
+			{Decision: DecisionAllow, UpdatedInput: `{"command":"first"}`},
+			{Decision: DecisionAllow, UpdatedInput: `{"command":"second"}`},
+		})
+		require.Equal(t, DecisionAllow, agg.Decision)
+		require.Equal(t, `{"command":"second"}`, agg.UpdatedInput)
+	})
+
+	t.Run("deny ignores updated_input", func(t *testing.T) {
+		t.Parallel()
+		agg := aggregate([]HookResult{
+			{Decision: DecisionAllow, UpdatedInput: `{"command":"rewritten"}`},
+			{Decision: DecisionDeny, Reason: "blocked"},
+		})
+		require.Equal(t, DecisionDeny, agg.Decision)
+	})
+
+	t.Run("empty updated_input does not overwrite", func(t *testing.T) {
+		t.Parallel()
+		agg := aggregate([]HookResult{
+			{Decision: DecisionAllow, UpdatedInput: `{"command":"rewritten"}`},
+			{Decision: DecisionNone},
+		})
+		require.Equal(t, `{"command":"rewritten"}`, agg.UpdatedInput)
+	})
+}
+
+func TestRunnerUpdatedInput(t *testing.T) {
+	t.Parallel()
+	hookCfg := config.HookConfig{
+		Command: `echo '{"decision":"allow","updated_input":"{\"command\":\"echo rewritten\"}"}'`,
+	}
+	r := NewRunner([]config.HookConfig{hookCfg}, t.TempDir(), t.TempDir())
+	result, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{"command":"echo original"}`)
+	require.NoError(t, err)
+	require.Equal(t, DecisionAllow, result.Decision)
+	require.Equal(t, `{"command":"echo rewritten"}`, result.UpdatedInput)
+}
+
+func TestParseStdoutClaudeCodeFormat(t *testing.T) {
+	t.Parallel()
+
+	t.Run("allow with reason", func(t *testing.T) {
+		t.Parallel()
+		r := parseStdout(`{"hookSpecificOutput":{"permissionDecision":"allow","permissionDecisionReason":"RTK auto-rewrite"}}`)
+		require.Equal(t, DecisionAllow, r.Decision)
+		require.Equal(t, "RTK auto-rewrite", r.Reason)
+	})
+
+	t.Run("allow with updatedInput", func(t *testing.T) {
+		t.Parallel()
+		r := parseStdout(`{"hookSpecificOutput":{"permissionDecision":"allow","updatedInput":{"command":"rtk cat foo.go"}}}`)
+		require.Equal(t, DecisionAllow, r.Decision)
+		require.Equal(t, `{"command":"rtk cat foo.go"}`, r.UpdatedInput)
+	})
+
+	t.Run("deny", func(t *testing.T) {
+		t.Parallel()
+		r := parseStdout(`{"hookSpecificOutput":{"permissionDecision":"deny","permissionDecisionReason":"not allowed"}}`)
+		require.Equal(t, DecisionDeny, r.Decision)
+		require.Equal(t, "not allowed", r.Reason)
+	})
+
+	t.Run("no permissionDecision", func(t *testing.T) {
+		t.Parallel()
+		r := parseStdout(`{"hookSpecificOutput":{}}`)
+		require.Equal(t, DecisionNone, r.Decision)
+	})
+
+	t.Run("crush format still works", func(t *testing.T) {
+		t.Parallel()
+		r := parseStdout(`{"decision":"allow","context":"hello"}`)
+		require.Equal(t, DecisionAllow, r.Decision)
+		require.Equal(t, "hello", r.Context)
+	})
 }

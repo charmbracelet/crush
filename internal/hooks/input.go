@@ -10,22 +10,29 @@ import (
 )
 
 // Payload is the JSON structure piped to hook commands via stdin.
+// ToolInput is emitted as a parsed JSON object for compatibility with
+// Claude Code hooks (which expect tool_input to be an object, not a
+// string).
 type Payload struct {
-	Event     string `json:"event"`
-	SessionID string `json:"session_id"`
-	CWD       string `json:"cwd"`
-	ToolName  string `json:"tool_name"`
-	ToolInput string `json:"tool_input"`
+	Event     string          `json:"event"`
+	SessionID string          `json:"session_id"`
+	CWD       string          `json:"cwd"`
+	ToolName  string          `json:"tool_name"`
+	ToolInput json.RawMessage `json:"tool_input"`
 }
 
 // BuildPayload constructs the JSON stdin payload for a hook command.
 func BuildPayload(eventName, sessionID, cwd, toolName, toolInputJSON string) []byte {
+	toolInput := json.RawMessage(toolInputJSON)
+	if !json.Valid(toolInput) {
+		toolInput = json.RawMessage("{}")
+	}
 	p := Payload{
 		Event:     eventName,
 		SessionID: sessionID,
 		CWD:       cwd,
 		ToolName:  toolName,
-		ToolInput: toolInputJSON,
+		ToolInput: toolInput,
 	}
 	data, err := json.Marshal(p)
 	if err != nil {
@@ -60,33 +67,74 @@ func BuildEnv(eventName, toolName, sessionID, cwd, projectDir, toolInputJSON str
 }
 
 // parseStdout parses the JSON output from a hook command's stdout.
-// Expected format: {"decision": "allow"|"deny"|"", "reason": "...", "context": "..."}
+// Supports both Crush format and Claude Code format (hookSpecificOutput).
 func parseStdout(stdout string) HookResult {
 	stdout = strings.TrimSpace(stdout)
 	if stdout == "" {
 		return HookResult{Decision: DecisionNone}
 	}
 
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(stdout), &raw); err != nil {
+		return HookResult{Decision: DecisionNone}
+	}
+
+	// Claude Code compat: if hookSpecificOutput is present, parse that.
+	if hso, ok := raw["hookSpecificOutput"]; ok {
+		return parseClaudeCodeOutput(hso)
+	}
+
 	var parsed struct {
-		Decision string `json:"decision"`
-		Reason   string `json:"reason"`
-		Context  string `json:"context"`
+		Decision     string `json:"decision"`
+		Reason       string `json:"reason"`
+		Context      string `json:"context"`
+		UpdatedInput string `json:"updated_input"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &parsed); err != nil {
 		return HookResult{Decision: DecisionNone}
 	}
 
 	result := HookResult{
-		Reason:  parsed.Reason,
-		Context: parsed.Context,
+		Reason:       parsed.Reason,
+		Context:      parsed.Context,
+		UpdatedInput: parsed.UpdatedInput,
 	}
-	switch strings.ToLower(parsed.Decision) {
-	case "allow":
-		result.Decision = DecisionAllow
-	case "deny":
-		result.Decision = DecisionDeny
-	default:
-		result.Decision = DecisionNone
-	}
+	result.Decision = parseDecision(parsed.Decision)
 	return result
+}
+
+// parseClaudeCodeOutput handles the Claude Code hook output format:
+// {"hookSpecificOutput": {"permissionDecision": "allow", ...}}
+func parseClaudeCodeOutput(data json.RawMessage) HookResult {
+	var hso struct {
+		PermissionDecision       string          `json:"permissionDecision"`
+		PermissionDecisionReason string          `json:"permissionDecisionReason"`
+		UpdatedInput             json.RawMessage `json:"updatedInput"`
+	}
+	if err := json.Unmarshal(data, &hso); err != nil {
+		return HookResult{Decision: DecisionNone}
+	}
+
+	result := HookResult{
+		Decision: parseDecision(hso.PermissionDecision),
+		Reason:   hso.PermissionDecisionReason,
+	}
+
+	// Marshal updatedInput back to a string for our opaque format.
+	if len(hso.UpdatedInput) > 0 && string(hso.UpdatedInput) != "null" {
+		result.UpdatedInput = string(hso.UpdatedInput)
+	}
+
+	return result
+}
+
+func parseDecision(s string) Decision {
+	switch strings.ToLower(s) {
+	case "allow":
+		return DecisionAllow
+	case "deny":
+		return DecisionDeny
+	default:
+		return DecisionNone
+	}
 }

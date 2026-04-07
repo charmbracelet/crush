@@ -2453,14 +2453,34 @@ func estimateTextTokensFromUnits(asciiBytes, nonASCIIRunes int64, roundUpASCII b
 	return asciiTokens + nonASCIIRunes
 }
 
+// estimatedImageTokens is a rough estimate for a compressed image.
+// Anthropic's vision token calculation is based on resolution:
+// ~1333x1000 pixels ≈ 1500 tokens. Since images are compressed to max
+// 2048px dimension, we use 2000 as a reasonable upper bound estimate.
+// This is far more accurate than treating base64 bytes as text (which
+// would estimate ~250,000 tokens for an 800KB image).
+const estimatedImageTokens = 2000
+
 func estimateMessageContentTokens(parts []fantasy.MessagePart) int64 {
 	var asciiBytes int64
 	var nonASCIIRunes int64
+	var imageCount int64
 
 	accumulate := func(s string) {
 		partASCII, partNonASCII := estimateTextTokenUnits(s)
 		asciiBytes += partASCII
 		nonASCIIRunes += partNonASCII
+	}
+
+	accumulateData := func(data []byte, mediaType string) {
+		if len(data) == 0 {
+			return
+		}
+		if isImageMediaType(mediaType) {
+			imageCount++
+		} else {
+			asciiBytes += int64(len(data))
+		}
 	}
 
 	for _, part := range parts {
@@ -2472,7 +2492,7 @@ func estimateMessageContentTokens(parts []fantasy.MessagePart) int64 {
 		case fantasy.ToolCallPart:
 			accumulate(p.Input)
 		case fantasy.FilePart:
-			asciiBytes += int64(len(p.Data))
+			accumulateData(p.Data, p.MediaType)
 			accumulate(p.Filename)
 			accumulate(p.MediaType)
 		case fantasy.ToolResultPart:
@@ -2481,14 +2501,23 @@ func estimateMessageContentTokens(parts []fantasy.MessagePart) int64 {
 			} else if errOut, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentError](p.Output); ok && errOut.Error != nil {
 				accumulate(errOut.Error.Error())
 			} else if mediaOut, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentMedia](p.Output); ok {
-				asciiBytes += int64(len(mediaOut.Data))
+				accumulateData([]byte(mediaOut.Data), mediaOut.MediaType)
 				accumulate(mediaOut.MediaType)
 				accumulate(mediaOut.Text)
 			}
 		}
 	}
 
-	return estimateTextTokensFromUnits(asciiBytes, nonASCIIRunes, false)
+	textTokens := estimateTextTokensFromUnits(asciiBytes, nonASCIIRunes, false)
+	return textTokens + (imageCount * estimatedImageTokens)
+}
+
+func isImageMediaType(mediaType string) bool {
+	return mediaType == "image/png" ||
+		mediaType == "image/jpeg" ||
+		mediaType == "image/gif" ||
+		mediaType == "image/webp" ||
+		mediaType == "image/bmp"
 }
 
 func (a *sessionAgent) estimateSessionPromptTokens(history []fantasy.Message, prompt string, attachments []message.Attachment, tools []fantasy.AgentTool, systemPrompt string, promptPrefix string) int64 {

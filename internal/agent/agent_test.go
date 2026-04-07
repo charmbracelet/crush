@@ -1052,7 +1052,7 @@ func TestEstimatePromptTokens(t *testing.T) {
 	// 400 / 4 = 100.
 	require.Equal(t, int64(100), estimatePromptTokens(msgs3, nil))
 
-	// ToolResultPart media payloads are counted by byte size and metadata text.
+	// ToolResultPart media payloads use fixed image token estimate plus metadata text.
 	msgsMedia := []fantasy.Message{
 		{
 			Role: fantasy.MessageRoleTool,
@@ -1065,10 +1065,10 @@ func TestEstimatePromptTokens(t *testing.T) {
 			}},
 		},
 	}
-	// data(64) + media type(9) + text(7) => 20 tokens.
-	require.Equal(t, int64(20), estimatePromptTokens(msgsMedia, nil))
+	// image(2000) + media type(9)/4 + text(7)/4 => 2004 tokens.
+	require.Equal(t, int64(2004), estimatePromptTokens(msgsMedia, nil))
 
-	// FilePart attachments are counted by byte size and metadata text.
+	// FilePart attachments use fixed image token estimate plus metadata text.
 	msgsFile := []fantasy.Message{
 		{
 			Role: fantasy.MessageRoleUser,
@@ -1079,8 +1079,8 @@ func TestEstimatePromptTokens(t *testing.T) {
 			}},
 		},
 	}
-	// data(8) + filename(7) + media type(9) => 6 tokens.
-	require.Equal(t, int64(6), estimatePromptTokens(msgsFile, nil))
+	// image(2000) + filename(7)/4 + media type(9)/4 => 2004 tokens.
+	require.Equal(t, int64(2004), estimatePromptTokens(msgsFile, nil))
 
 	msgs4 := []fantasy.Message{
 		fantasy.NewUserMessage("你好世界"),
@@ -1104,6 +1104,59 @@ func TestEstimatePromptTokens_AggregatesShortASCIIFragments(t *testing.T) {
 	}
 
 	require.Equal(t, int64(6), estimatePromptTokens(messages, nil))
+}
+
+func TestEstimatePromptTokens_ImageTokenEstimation(t *testing.T) {
+	t.Parallel()
+
+	// Non-image media types should not get the fixed image token estimate.
+	msgsPDF := []fantasy.Message{
+		{
+			Role: fantasy.MessageRoleUser,
+			Content: []fantasy.MessagePart{fantasy.FilePart{
+				Filename:  "doc.pdf",
+				MediaType: "application/pdf",
+				Data:      []byte(strings.Repeat("x", 100)),
+			}},
+		},
+	}
+	// 100 bytes / 4 = 25 tokens for data, plus filename(7)/4 + media type(15)/4 = 30.
+	require.Equal(t, int64(30), estimatePromptTokens(msgsPDF, nil))
+
+	// Empty image data should not count as an image.
+	msgsEmpty := []fantasy.Message{
+		{
+			Role: fantasy.MessageRoleUser,
+			Content: []fantasy.MessagePart{fantasy.FilePart{
+				Filename:  "empty.png",
+				MediaType: "image/png",
+				Data:      nil,
+			}},
+		},
+	}
+	// Only filename(9)/4 + media type(9)/4 = 4 tokens (integer division).
+	require.Equal(t, int64(4), estimatePromptTokens(msgsEmpty, nil))
+
+	// Multiple images should each get the fixed estimate.
+	msgsMulti := []fantasy.Message{
+		{
+			Role: fantasy.MessageRoleUser,
+			Content: []fantasy.MessagePart{
+				fantasy.FilePart{
+					Filename:  "img1.png",
+					MediaType: "image/png",
+					Data:      []byte(strings.Repeat("a", 10000)),
+				},
+				fantasy.FilePart{
+					Filename:  "img2.jpg",
+					MediaType: "image/jpeg",
+					Data:      []byte(strings.Repeat("b", 20000)),
+				},
+			},
+		},
+	}
+	// 2 images * 2000 = 4000, plus filename(7)/4 + media type(9)/4 * 2 = 8 => 4008.
+	require.Equal(t, int64(4008), estimatePromptTokens(msgsMulti, nil))
 }
 
 // mockAgentTool implements fantasy.AgentTool for testing.

@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -36,6 +37,7 @@ type ToolSearchResponse struct {
 	Results           []ToolSearchResult `json:"results,omitempty"`
 	TotalDeferred     int                `json:"total_deferred_tools"`
 	PendingMCPServers []string           `json:"pending_mcp_servers,omitempty"`
+	ActivationHint    string             `json:"activation_hint,omitempty"`
 }
 
 type (
@@ -73,14 +75,16 @@ func NewToolSearchTool(registry Registry, activateDeferred DeferredToolActivator
 			if selectedNames, selectQuery := parseToolSelectQuery(query); selectQuery {
 				results := selectToolEntries(ctx, registry, activateDeferred, selectedNames)
 				pendingMCP := noMatchPendingServers(results, pendingServersProvider)
-				return marshalToolSearchResponse(buildToolSearchResponse(query, results, totalDeferred, pendingMCP))
+				activatedTools := extractActivatedTools(results)
+				return marshalToolSearchResponse(buildToolSearchResponse(query, results, totalDeferred, pendingMCP, activatedTools))
 			}
 
 			if query != "" {
 				if entry, ok := resolveRegistryEntryByName(registry, query); ok && isRegistryEntrySearchable(entry) {
 					results := selectToolEntries(ctx, registry, activateDeferred, []string{entry.Name})
 					pendingMCP := noMatchPendingServers(results, pendingServersProvider)
-					return marshalToolSearchResponse(buildToolSearchResponse(query, results, totalDeferred, pendingMCP))
+					activatedTools := extractActivatedTools(results)
+					return marshalToolSearchResponse(buildToolSearchResponse(query, results, totalDeferred, pendingMCP, activatedTools))
 				}
 			}
 
@@ -112,7 +116,8 @@ func NewToolSearchTool(registry Registry, activateDeferred DeferredToolActivator
 				}
 			}
 			pendingMCP := noMatchPendingServers(results, pendingServersProvider)
-			return marshalToolSearchResponse(buildToolSearchResponse(query, results, totalDeferred, pendingMCP))
+			activatedTools := extractActivatedTools(results)
+			return marshalToolSearchResponse(buildToolSearchResponse(query, results, totalDeferred, pendingMCP, activatedTools))
 		},
 	)
 }
@@ -193,6 +198,16 @@ func noMatchPendingServers(results []ToolSearchResult, provider PendingServersPr
 		return nil
 	}
 	return append([]string(nil), pending...)
+}
+
+func extractActivatedTools(results []ToolSearchResult) []string {
+	var activated []string
+	for _, result := range results {
+		if result.Activated && !result.Exposed {
+			activated = append(activated, result.Name)
+		}
+	}
+	return activated
 }
 
 func searchableRegistryEntries(registry Registry, opts RegistrySearchOptions) []RegistryEntry {
@@ -595,7 +610,7 @@ func cloneMap(input map[string]any) map[string]any {
 	return out
 }
 
-func buildToolSearchResponse(query string, results []ToolSearchResult, totalDeferred int, pendingMCP []string) ToolSearchResponse {
+func buildToolSearchResponse(query string, results []ToolSearchResult, totalDeferred int, pendingMCP []string, activatedTools []string) ToolSearchResponse {
 	matches := make([]string, 0, len(results))
 	for _, result := range results {
 		matches = append(matches, result.Name)
@@ -609,6 +624,9 @@ func buildToolSearchResponse(query string, results []ToolSearchResult, totalDefe
 	}
 	if len(pendingMCP) > 0 {
 		response.PendingMCPServers = append([]string(nil), pendingMCP...)
+	}
+	if len(activatedTools) > 0 {
+		response.ActivationHint = fmt.Sprintf("Deferred tools activated: %s. These tools are now available for use in your NEXT response.", strings.Join(activatedTools, ", "))
 	}
 	return response
 }

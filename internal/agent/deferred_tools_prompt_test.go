@@ -60,7 +60,7 @@ func TestAppendDeferredToolsPromptSection(t *testing.T) {
 
 	result := appendDeferredToolsPromptSection(base, entries)
 	require.Contains(t, result, "<available_deferred_tools>")
-	require.Contains(t, result, "Use tool_search")
+	require.Contains(t, result, "tool_search")
 	require.Contains(t, result, "sourcegraph")
 	require.True(t, strings.HasPrefix(result, base))
 }

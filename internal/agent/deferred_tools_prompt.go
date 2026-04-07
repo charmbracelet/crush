@@ -51,9 +51,14 @@ func appendDeferredToolsPromptSection(basePrompt string, deferredEntries []tools
 
 	lines := []string{
 		"<available_deferred_tools>",
-		"The following deferred tools are available. Use tool_search with a query to get their full schemas before calling them.",
+		"The following deferred tools are available. These tools are not loaded yet - you MUST call tool_search to activate them before use.",
 		"",
-		strings.Join(names, ", "),
+		"Usage workflow:",
+		"1. Call tool_search with query \"select:tool_name\" to get the full schema",
+		"2. The tool will be activated and available in your NEXT response",
+		"3. Call the tool with the correct parameters from the schema",
+		"",
+		"Available tools: " + strings.Join(names, ", "),
 		"</available_deferred_tools>",
 	}
 

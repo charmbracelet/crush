@@ -24,14 +24,15 @@ const (
 type RequestUserInput struct {
 	com *common.Common
 
-	request     userinput.Request
-	current     int
-	selected    int
-	customMode  bool
-	customInput textinput.Model
-	answers     map[string]userinput.Answer
-	help        help.Model
-	keyMap      requestUserInputKeyMap
+	request          userinput.Request
+	current          int
+	selected         int
+	customMode       bool
+	customInput      textinput.Model
+	answers          map[string]userinput.Answer
+	help             help.Model
+	keyMap           requestUserInputKeyMap
+	dialogInnerWidth int
 }
 
 type requestUserInputKeyMap struct {
@@ -81,13 +82,17 @@ func (r *RequestUserInput) Cursor() *tea.Cursor {
 	if !r.customMode {
 		return nil
 	}
-	question := r.currentQuestion()
-	helper := r.com.Styles.Dialog.SecondaryText.Render("Provide a custom answer and press Enter to continue.")
 	cur := InputCursor(r.com.Styles, r.customInput.Cursor())
 	if cur == nil {
 		return nil
 	}
-	cur.Y += titleContentHeight + 3 + lipgloss.Height(question.Question) + lipgloss.Height(helper)
+
+	innerWidth := max(0, r.dialogInnerWidth)
+	question := r.currentQuestion()
+	questionRendered := lipgloss.NewStyle().Width(innerWidth).Render(question.Question)
+	helperRendered := r.com.Styles.Dialog.SecondaryText.Width(innerWidth).Render("Provide a custom answer and press Enter to continue.")
+
+	cur.Y += titleContentHeight + 3 + lipgloss.Height(questionRendered) + lipgloss.Height(helperRendered)
 	return cur
 }
 
@@ -189,7 +194,8 @@ func (r *RequestUserInput) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	content := strings.Join(parts, "\n")
 	dialogWidth := min(area.Dx(), requestUserInputMaxWidth)
-	r.customInput.SetWidth(max(0, dialogWidth-r.com.Styles.Dialog.View.GetHorizontalFrameSize()-r.com.Styles.Dialog.InputPrompt.GetHorizontalFrameSize()-1))
+	r.dialogInnerWidth = max(0, dialogWidth-r.com.Styles.Dialog.View.GetHorizontalFrameSize())
+	r.customInput.SetWidth(max(0, r.dialogInnerWidth-r.com.Styles.Dialog.InputPrompt.GetHorizontalFrameSize()-1))
 	rendered := r.com.Styles.Dialog.View.Width(dialogWidth).Render(content)
 	cur := r.Cursor()
 	DrawCenterCursor(scr, area, rendered, cur)

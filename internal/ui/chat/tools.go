@@ -270,6 +270,8 @@ func NewToolMessageItem(
 		item = NewWebSearchToolMessageItem(sty, toolCall, result, canceled)
 	case tools.TodosToolName:
 		item = NewTodosToolMessageItem(sty, toolCall, result, canceled)
+	case tools.RequestUserInputToolName:
+		item = NewRequestUserInputToolMessageItem(sty, toolCall, result, canceled)
 	case tools.ReferencesToolName:
 		item = NewReferencesToolMessageItem(sty, toolCall, result, canceled)
 	case tools.LSPRestartToolName:
@@ -1508,6 +1510,8 @@ func prettifyToolName(name string) string {
 		return "Sourcegraph"
 	case tools.TodosToolName:
 		return "To-Do"
+	case tools.RequestUserInputToolName:
+		return "Request User Input"
 	case tools.ViewToolName:
 		return "View"
 	case tools.WriteToolName:

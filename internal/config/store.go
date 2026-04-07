@@ -28,7 +28,8 @@ type ConfigStore struct {
 	workingDirMu   sync.RWMutex // protects workingDir
 	resolver       VariableResolver
 	globalDataPath string // ~/.local/share/crush/crush.json
-	workspacePath  string // .crush/crush.json
+	workspacePath  string // <workspace>/.crush/crush.json
+	projectDataDir string // ~/.local/share/crush/projects/<slug>/
 	knownProviders []catwalk.Provider
 }
 
@@ -72,6 +73,12 @@ func (s *ConfigStore) KnownProviders() []catwalk.Provider {
 // SetupAgents configures the built-in agents and merges configured overrides.
 func (s *ConfigStore) SetupAgents() {
 	s.config.SetupAgents()
+}
+
+// ProjectDataDir returns the centralized project data directory path.
+// This is where sessions, memory, and logs are stored.
+func (s *ConfigStore) ProjectDataDir() string {
+	return s.projectDataDir
 }
 
 // configPath returns the file path for the given scope.

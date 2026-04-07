@@ -91,6 +91,7 @@ type Coordinator interface {
 	IsQueuePaused(sessionID string) bool
 	PrioritizeQueuedPrompt(sessionID string, index int) bool
 	Summarize(context.Context, string, fantasy.ProviderOptions) error
+	Dream(ctx context.Context, sessionID string, force bool) error
 	GenerateHandoff(ctx context.Context, sourceSessionID, goal string) (HandoffDraft, error)
 	ClassifyPermission(ctx context.Context, req permission.PermissionRequest) (permission.AutoClassification, error)
 	Model() Model
@@ -298,15 +299,19 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 				return nil, originalErr
 			}
 			slog.Debug("Retrying request with refreshed OAuth token", "provider", providerCfg.ID)
-			return run()
+			result, originalErr = run()
 		case strings.Contains(providerCfg.APIKeyTemplate, "$"):
 			slog.Debug("Received 401. Refreshing API Key template and retrying", "provider", providerCfg.ID)
 			if err := c.refreshApiKeyTemplate(ctx, providerCfg); err != nil {
 				return nil, originalErr
 			}
 			slog.Debug("Retrying request with refreshed API key", "provider", providerCfg.ID)
-			return run()
+			result, originalErr = run()
 		}
+	}
+
+	if originalErr == nil && result != nil && !c.cfg.Config().Options.DisableAutoMemory {
+		c.maybeStartMemoryDream(context.Background(), sessionID)
 	}
 
 	return result, originalErr
@@ -658,6 +663,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		},
 		IsSubAgent:           isSubAgent,
 		DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
+		DisableAutoMemory:    c.cfg.Config().Options.DisableAutoMemory,
 		IsYolo:               c.permissions.SkipRequests(),
 		Sessions:             c.sessions,
 		Messages:             c.messages,

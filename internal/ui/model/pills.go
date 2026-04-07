@@ -160,8 +160,8 @@ func (m *UI) togglePillsExpanded() tea.Cmd {
 	if !m.hasSession() {
 		return nil
 	}
-	hasPills := hasIncompleteTodos(m.session.Todos) || m.promptQueue > 0
-	if !hasPills {
+	hasQueue := m.promptQueue > 0
+	if !hasQueue {
 		return nil
 	}
 
@@ -170,12 +170,8 @@ func (m *UI) togglePillsExpanded() tea.Cmd {
 	var cmd tea.Cmd
 	if opening {
 		m.pillsPreviousFocus = m.focus
-		if hasIncompleteTodos(m.session.Todos) {
-			m.focusedPillSection = pillSectionTodos
-		} else {
-			m.focusedPillSection = pillSectionQueue
-			m.selectedQueueIndex = 0
-		}
+		m.focusedPillSection = pillSectionQueue
+		m.selectedQueueIndex = 0
 		m.focus = uiFocusMain
 		m.textarea.Blur()
 		m.chat.Focus()
@@ -202,25 +198,8 @@ func (m *UI) togglePillsExpanded() tea.Cmd {
 	return cmd
 }
 
-// switchPillSection changes focus between todo and queue sections.
+// switchPillSection is a no-op now that only queue pills exist.
 func (m *UI) switchPillSection(dir int) tea.Cmd {
-	if !m.pillsExpanded || !m.hasSession() {
-		return nil
-	}
-	hasIncompleteTodos := hasIncompleteTodos(m.session.Todos)
-	hasQueue := m.promptQueue > 0
-
-	if dir < 0 && m.focusedPillSection == pillSectionQueue && hasIncompleteTodos {
-		m.focusedPillSection = pillSectionTodos
-		m.updateLayoutAndSize()
-		return nil
-	}
-	if dir > 0 && m.focusedPillSection == pillSectionTodos && hasQueue {
-		m.focusedPillSection = pillSectionQueue
-		m.selectedQueueIndex = 0
-		m.updateLayoutAndSize()
-		return nil
-	}
 	return nil
 }
 
@@ -229,20 +208,14 @@ func (m *UI) pillsAreaHeight() int {
 	if !m.hasSession() {
 		return 0
 	}
-	hasIncomplete := hasIncompleteTodos(m.session.Todos)
 	hasQueue := m.promptQueue > 0
-	hasPills := hasIncomplete || hasQueue
-	if !hasPills {
+	if !hasQueue {
 		return 0
 	}
 
 	pillsAreaHeight := pillHeightWithBorder
-	if m.pillsExpanded {
-		if m.focusedPillSection == pillSectionTodos && hasIncomplete {
-			pillsAreaHeight += len(m.session.Todos)
-		} else if m.focusedPillSection == pillSectionQueue && hasQueue {
-			pillsAreaHeight += m.promptQueue
-		}
+	if m.pillsExpanded && m.focusedPillSection == pillSectionQueue && hasQueue {
+		pillsAreaHeight += m.promptQueue
 	}
 	return pillsAreaHeight
 }
@@ -260,41 +233,26 @@ func (m *UI) renderPills() {
 	}
 
 	paddingLeft := 3
-	contentWidth := max(width-paddingLeft, 0)
 
-	hasIncomplete := hasIncompleteTodos(m.session.Todos)
 	hasQueue := m.promptQueue > 0
 
-	if !hasIncomplete && !hasQueue {
+	if !hasQueue {
 		return
 	}
 
 	t := m.com.Styles
-	todosFocused := m.pillsExpanded && m.focusedPillSection == pillSectionTodos
 	queueFocused := m.pillsExpanded && m.focusedPillSection == pillSectionQueue
 
-	inProgressIcon := t.Tool.TodoInProgressIcon.Render(styles.SpinnerIcon)
-	if m.todoIsSpinning {
-		inProgressIcon = m.todoSpinner.View()
-	}
-
 	var pills []string
-	if hasIncomplete {
-		pills = append(pills, todoPill(m.session.Todos, inProgressIcon, todosFocused, m.pillsExpanded, t))
-	}
 	if hasQueue {
 		pills = append(pills, queuePill(m.promptQueue, m.queuePaused, queueFocused, m.pillsExpanded, t))
 	}
 
 	var expandedList string
-	if m.pillsExpanded {
-		if todosFocused && hasIncomplete {
-			expandedList = todoList(m.session.Todos, inProgressIcon, t, contentWidth)
-		} else if queueFocused && hasQueue {
-			if m.com.App != nil && m.com.App.AgentCoordinator != nil {
-				queueItems := m.com.App.AgentCoordinator.QueuedPromptsList(m.session.ID)
-				expandedList = queueList(queueItems, m.selectedQueueIndex, t)
-			}
+	if m.pillsExpanded && queueFocused && hasQueue {
+		if m.com.App != nil && m.com.App.AgentCoordinator != nil {
+			queueItems := m.com.App.AgentCoordinator.QueuedPromptsList(m.session.ID)
+			expandedList = queueList(queueItems, m.selectedQueueIndex, t)
 		}
 	}
 

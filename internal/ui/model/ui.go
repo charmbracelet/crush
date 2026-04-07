@@ -148,6 +148,13 @@ type (
 		SessionID string
 		Status    string
 	}
+	memoryDreamStartedMsg struct {
+		SessionID string
+	}
+	memoryDreamRefreshMsg struct{}
+	memoryFreshnessRefreshedMsg struct {
+		Warning string
+	}
 
 	// closeDialogMsg is sent to close the current dialog.
 	closeDialogMsg struct{}
@@ -203,6 +210,7 @@ type UI struct {
 	lastUserMessageTime int64
 	latestProposedPlan  string
 	lastPromptedPlanMsg string
+	memoryFreshnessNote string
 
 	// The width and height of the terminal in cells.
 	width  int
@@ -558,7 +566,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setState(uiChat, m.focus)
 		m.isCanceling = false
 		m.todoIsSpinning = false
+		m.memoryFreshnessNote = ""
 		m.session = msg.session
+		cmds = append(cmds, m.refreshMemoryFreshnessNoteCmd())
 		m.sessionFiles = msg.files
 		m.childSessionInfoCache = msg.childSessionInfo
 		m.timelineEvents = nil
@@ -588,8 +598,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if hasInProgressTodo(m.session.Todos) {
-			// only start spinner if there is an in-progress todo
-			if m.isAgentBusy() {
+			// only start spinner if there is active or queued work
+			if m.hasLiveSessionActivity() {
 				m.todoIsSpinning = true
 				cmds = append(cmds, m.todoSpinner.Tick)
 			}
@@ -614,7 +624,21 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sessionUsageRefreshedMsg:
 		if msg.session != nil && m.session != nil && msg.session.ID == m.session.ID {
 			m.session = msg.session
+			cmds = append(cmds, m.refreshMemoryFreshnessNoteCmd())
 		}
+
+	case memoryDreamStartedMsg:
+		if msg.SessionID != "" && (m.session == nil || m.session.ID != msg.SessionID) {
+			cmds = append(cmds, m.loadSession(msg.SessionID))
+		} else {
+			cmds = append(cmds, m.refreshMemoryFreshnessNoteCmd())
+		}
+
+	case memoryDreamRefreshMsg:
+		cmds = append(cmds, m.refreshMemoryFreshnessNoteCmd())
+
+	case memoryFreshnessRefreshedMsg:
+		m.memoryFreshnessNote = msg.Warning
 
 	case sendMessageMsg:
 		cmds = append(cmds, m.sendMessage(msg.Content, msg.Attachments...))
@@ -1115,14 +1139,13 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	}
 	m.latestProposedPlan = ""
 
-	// Add messages to chat with linked tool results
-	// Filter out incomplete summary messages that have no content (these are
-	// leftover loading states from interrupted summarization and should not
-	// be displayed when restoring a session).
+	// Add messages to chat with linked tool results.
+	// Filter out incomplete summary messages with no content only when the
+	// session has no active or queued work left. Otherwise they represent a
+	// live summarization spinner that should remain visible across restores.
 	items := make([]chat.MessageItem, 0, len(msgs)*2)
 	for _, msg := range msgPtrs {
-		// Skip incomplete summary messages with no content (interrupted loading states)
-		if msg.IsSummaryMessage && !msg.IsFinished() && strings.TrimSpace(msg.Content().Text) == "" {
+		if msg.IsSummaryMessage && !msg.IsFinished() && strings.TrimSpace(msg.Content().Text) == "" && !m.hasLiveSessionActivity() {
 			continue
 		}
 		switch msg.Role {
@@ -1151,17 +1174,15 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	items = m.restoreTaskNodes(items, toolResultMap)
 
 	// Restored sessions can contain incomplete assistant/tool messages left
-	// behind by interruption. Keep their content, but suppress loading UI when
-	// the coordinator is no longer actively working that session.
-	if !m.isAgentBusy() {
+	// behind by interruption. Keep their content, but suppress loading UI only
+	// when there is no active or queued work left for the session.
+	if !m.hasLiveSessionActivity() {
 		m.setLoadingStateVisible(items, false)
 	}
 
-	// If the user switches between sessions while the agent is working we want
-	// to make sure the animations are shown. Only start animations if the
-	// agent is actually busy; otherwise we are restoring a historical session
-	// and nothing should be spinning.
-	if m.isAgentBusy() {
+	// If the user switches between sessions while the agent still has active or
+	// queued work, keep the loading animations visible.
+	if m.hasLiveSessionActivity() {
 		for _, item := range items {
 			if animatable, ok := item.(chat.Animatable); ok {
 				if cmd := animatable.StartAnimation(); cmd != nil {
@@ -1663,6 +1684,7 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 						switch finish.Reason {
 						case message.FinishReasonEndTurn:
 							taskNode.SetCompletionStatus(message.ToolResultSubtaskStatusCompleted)
+							taskNode.ClearChildSessionStatus()
 						case message.FinishReasonError:
 							taskNode.SetCompletionStatus(message.ToolResultSubtaskStatusFailed)
 						case message.FinishReasonCanceled:
@@ -1943,6 +1965,13 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			}
 			return nil
 		})
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionDream:
+		if m.isAgentBusy() {
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before dreaming..."))
+			break
+		}
+		cmds = append(cmds, m.startMemoryDream(msg.SessionID, msg.Force))
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionGenerateHandoff:
 		if m.isAgentBusy() {
@@ -2471,6 +2500,10 @@ func (m *UI) refreshEditorPlaceholder() {
 	}
 	if m.session != nil && m.session.CollaborationMode == session.CollaborationModePlan {
 		m.textarea.Placeholder = "Plan Mode: explore, clarify, and propose a plan"
+		return
+	}
+	if strings.TrimSpace(m.memoryFreshnessNote) != "" {
+		m.textarea.Placeholder = m.memoryFreshnessNote
 		return
 	}
 	switch m.currentExecutionMode() {
@@ -3833,6 +3866,49 @@ func (m *UI) isAgentBusy() bool {
 		m.com.App.AgentCoordinator.IsSessionBusy(m.session.ID)
 }
 
+func (m *UI) hasLiveSessionActivity() bool {
+	return m.isAgentBusy() || m.hasQueuedPrompts()
+}
+
+func (m *UI) refreshMemoryFreshnessNoteCmd() tea.Cmd {
+	return func() tea.Msg {
+		if m.com == nil || m.com.App == nil || m.com.App.AgentCoordinator == nil {
+			return memoryFreshnessRefreshedMsg{}
+		}
+		fresher, ok := m.com.App.AgentCoordinator.(interface {
+			MemoryFreshness(context.Context) (agent.MemoryFreshnessStatus, error)
+		})
+		if !ok {
+			return memoryFreshnessRefreshedMsg{}
+		}
+		status, err := fresher.MemoryFreshness(context.Background())
+		if err != nil {
+			slog.Debug("Failed to refresh memory freshness", "error", err)
+			return memoryFreshnessRefreshedMsg{}
+		}
+		return memoryFreshnessRefreshedMsg{Warning: strings.TrimSpace(status.Warning)}
+	}
+}
+
+func (m *UI) refreshMemoryFreshnessNote() {
+	m.memoryFreshnessNote = ""
+	if m.com == nil || m.com.App == nil || m.com.App.AgentCoordinator == nil {
+		return
+	}
+	fresher, ok := m.com.App.AgentCoordinator.(interface {
+		MemoryFreshness(context.Context) (agent.MemoryFreshnessStatus, error)
+	})
+	if !ok {
+		return
+	}
+	status, err := fresher.MemoryFreshness(context.Background())
+	if err != nil {
+		slog.Debug("Failed to refresh memory freshness", "error", err)
+		return
+	}
+	m.memoryFreshnessNote = strings.TrimSpace(status.Warning)
+}
+
 // hasSession returns true if there is an active session with a valid ID.
 func (m *UI) hasSession() bool {
 	return m.session != nil && m.session.ID != ""
@@ -3907,10 +3983,32 @@ func (m *UI) cacheSidebarLogo(width int) {
 	m.sidebarLogo = renderLogo(m.com.Styles, true, width)
 }
 
-// sendMessage sends a message with the given content and attachments.
+// startMemoryDream triggers a memory dream consolidation for the given session.
+func (m *UI) startMemoryDream(sessionID string, force bool) tea.Cmd {
+	if m.com == nil || m.com.App == nil || m.com.App.AgentCoordinator == nil {
+		return util.ReportError(fmt.Errorf("coder agent is not initialized"))
+	}
+	return func() tea.Msg {
+		err := m.com.App.AgentCoordinator.Dream(context.Background(), sessionID, force)
+		if err != nil {
+			return util.ReportError(err)()
+		}
+		return memoryDreamStartedMsg{SessionID: sessionID}
+	}
+}
+
 func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.Cmd {
 	if m.com.App.AgentCoordinator == nil {
 		return util.ReportError(fmt.Errorf("coder agent is not initialized"))
+	}
+
+	trimmedContent := strings.TrimSpace(content)
+	if len(attachments) == 0 && trimmedContent == "/dream" {
+		sessionID := ""
+		if m.hasSession() {
+			sessionID = m.session.ID
+		}
+		return m.startMemoryDream(sessionID, true)
 	}
 
 	if !m.hasSession() {
@@ -3931,7 +4029,7 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 		m.setState(uiChat, m.focus)
 	}
 
-	trimmedContent := strings.TrimSpace(content)
+	trimmedContent = strings.TrimSpace(content)
 	if m.session != nil &&
 		m.session.CollaborationMode == session.CollaborationModePlan &&
 		strings.TrimSpace(m.latestProposedPlan) != "" &&
@@ -4399,6 +4497,33 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 			Title:   "Crush finished turn",
 			Message: fmt.Sprintf("Agent's turn completed in \"%s\"", n.SessionTitle),
 		})
+	case notify.TypeMemoryDreamStarted:
+		return tea.Batch(
+			util.ReportInfo("Memory dream started"),
+			util.CmdHandler(memoryDreamStartedMsg{SessionID: n.SessionID}),
+			m.sendNotification(notification.Notification{
+				Title:   "Memory dream started",
+				Message: fmt.Sprintf("Consolidating memories for \"%s\"", n.SessionTitle),
+			}),
+		)
+	case notify.TypeMemoryDreamFinished:
+		return tea.Batch(
+			util.ReportInfo("Memory dream finished"),
+			util.CmdHandler(memoryDreamRefreshMsg{}),
+			m.sendNotification(notification.Notification{
+				Title:   "Memory dream finished",
+				Message: fmt.Sprintf("Consolidated memories for \"%s\"", n.SessionTitle),
+			}),
+		)
+	case notify.TypeMemoryDreamFailed:
+		return tea.Batch(
+			util.ReportWarn("Memory dream failed"),
+			util.CmdHandler(memoryDreamRefreshMsg{}),
+			m.sendNotification(notification.Notification{
+				Title:   "Memory dream failed",
+				Message: fmt.Sprintf("Could not consolidate memories for \"%s\"", n.SessionTitle),
+			}),
+		)
 	default:
 		return nil
 	}

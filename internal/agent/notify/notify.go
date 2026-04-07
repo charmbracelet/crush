@@ -8,7 +8,10 @@ type Type string
 
 const (
 	// TypeAgentFinished indicates the agent has completed its turn.
-	TypeAgentFinished Type = "agent_finished"
+	TypeAgentFinished       Type = "agent_finished"
+	TypeMemoryDreamStarted  Type = "memory_dream_started"
+	TypeMemoryDreamFinished Type = "memory_dream_finished"
+	TypeMemoryDreamFailed   Type = "memory_dream_failed"
 )
 
 // Notification represents a domain event published by the agent.

@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,10 +19,12 @@ import (
 )
 
 const (
-	defaultLimit   = 20
-	maxLimit       = 100
-	maxMemoryFiles = 200
-	indexFilename  = "MEMORY.md"
+	defaultLimit              = 20
+	maxLimit                  = 100
+	maxMemoryFiles            = 200
+	indexFilename             = "MEMORY.md"
+	consolidatedAtFilename    = ".last_consolidated_at"
+	consolidationLockFilename = ".consolidation.lock"
 )
 
 var ErrNotFound = errors.New("memory key not found")
@@ -70,6 +74,10 @@ type Service interface {
 	ReadIndex() (string, error)
 	ListMemoryFiles() ([]MemoryFileInfo, error)
 	ReadMemoryFileBody(string) (string, error)
+	ReadLastConsolidatedAt() (time.Time, error)
+	WriteLastConsolidatedAt(time.Time) error
+	TryAcquireConsolidationLock(string, time.Duration) (bool, error)
+	ReleaseConsolidationLock(string) error
 }
 
 type service struct {
@@ -650,4 +658,163 @@ func (s *service) ReadMemoryFileBody(fileName string) (string, error) {
 	}
 	_, body, err := parseMemoryFile(content)
 	return strings.TrimSpace(body), err
+}
+
+type consolidationLockState struct {
+	Owner      string `json:"owner"`
+	AcquiredAt int64  `json:"acquired_at"`
+}
+
+func (s *service) consolidatedAtPath() string {
+	return filepath.Join(s.memoryDir, consolidatedAtFilename)
+}
+
+func (s *service) consolidationLockPath() string {
+	return filepath.Join(s.memoryDir, consolidationLockFilename)
+}
+
+func (s *service) ReadLastConsolidatedAt() (time.Time, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.readLastConsolidatedAtLocked()
+}
+
+func (s *service) readLastConsolidatedAtLocked() (time.Time, error) {
+	content, err := os.ReadFile(s.consolidatedAtPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return time.Time{}, nil
+		}
+		return time.Time{}, fmt.Errorf("reading last consolidated timestamp: %w", err)
+	}
+
+	trimmed := strings.TrimSpace(string(content))
+	if trimmed == "" {
+		return time.Time{}, nil
+	}
+
+	unixSeconds, err := strconv.ParseInt(trimmed, 10, 64)
+	if err == nil {
+		return time.Unix(unixSeconds, 0), nil
+	}
+
+	parsed, parseErr := time.Parse(time.RFC3339Nano, trimmed)
+	if parseErr != nil {
+		return time.Time{}, fmt.Errorf("parsing last consolidated timestamp: %w", parseErr)
+	}
+	return parsed, nil
+}
+
+func (s *service) WriteLastConsolidatedAt(at time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	content := strconv.FormatInt(at.Unix(), 10)
+	if err := os.WriteFile(s.consolidatedAtPath(), []byte(content+"\n"), 0o644); err != nil {
+		return fmt.Errorf("writing last consolidated timestamp: %w", err)
+	}
+	return nil
+}
+
+func (s *service) TryAcquireConsolidationLock(owner string, staleAfter time.Duration) (bool, error) {
+	normalizedOwner := strings.TrimSpace(owner)
+	if normalizedOwner == "" {
+		return false, fmt.Errorf("owner is required")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	lockPath := s.consolidationLockPath()
+	now := time.Now()
+	payload, err := json.Marshal(consolidationLockState{Owner: normalizedOwner, AcquiredAt: now.Unix()})
+	if err != nil {
+		return false, fmt.Errorf("marshaling consolidation lock: %w", err)
+	}
+
+	writeLock := func() (bool, error) {
+		file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err == nil {
+			defer file.Close()
+			if _, err := file.Write(payload); err != nil {
+				return false, fmt.Errorf("writing consolidation lock: %w", err)
+			}
+			return true, nil
+		}
+		if os.IsExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("creating consolidation lock: %w", err)
+	}
+
+	acquired, err := writeLock()
+	if err != nil || acquired {
+		return acquired, err
+	}
+
+	existingBytes, err := os.ReadFile(lockPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return writeLock()
+		}
+		return false, fmt.Errorf("reading consolidation lock: %w", err)
+	}
+
+	var existing consolidationLockState
+	if err := json.Unmarshal(existingBytes, &existing); err != nil {
+		if removeErr := os.Remove(lockPath); removeErr != nil && !os.IsNotExist(removeErr) {
+			return false, fmt.Errorf("removing corrupt consolidation lock: %w", removeErr)
+		}
+		return writeLock()
+	}
+
+	if existing.Owner == normalizedOwner {
+		return true, nil
+	}
+
+	if staleAfter > 0 && existing.AcquiredAt > 0 && now.Sub(time.Unix(existing.AcquiredAt, 0)) >= staleAfter {
+		if err := os.Remove(lockPath); err != nil && !os.IsNotExist(err) {
+			return false, fmt.Errorf("removing stale consolidation lock: %w", err)
+		}
+		return writeLock()
+	}
+
+	return false, nil
+}
+
+func (s *service) ReleaseConsolidationLock(owner string) error {
+	normalizedOwner := strings.TrimSpace(owner)
+	if normalizedOwner == "" {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	lockPath := s.consolidationLockPath()
+	content, err := os.ReadFile(lockPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("reading consolidation lock: %w", err)
+	}
+
+	var existing consolidationLockState
+	if err := json.Unmarshal(content, &existing); err != nil {
+		if removeErr := os.Remove(lockPath); removeErr != nil && !os.IsNotExist(removeErr) {
+			return fmt.Errorf("removing corrupt consolidation lock: %w", removeErr)
+		}
+		return nil
+	}
+
+	if existing.Owner != "" && existing.Owner != normalizedOwner {
+		return nil
+	}
+
+	if err := os.Remove(lockPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("removing consolidation lock: %w", err)
+	}
+	return nil
 }

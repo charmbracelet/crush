@@ -348,6 +348,7 @@ type Options struct {
 	Debug                      bool         `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
 	DebugLSP                   bool         `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
 	DisableAutoSummarize       bool         `json:"disable_auto_summarize,omitempty" jsonschema:"description=Disable automatic conversation summarization,default=false"`
+	DisableAutoMemory          bool         `json:"disable_auto_memory,omitempty" jsonschema:"description=Disable automatic long-term memory extraction and background consolidation,default=false"`
 	DataDirectory              string       `json:"data_directory,omitempty" jsonschema:"description=Directory for storing project-scoped application data (defaults to .crush in the working directory; falls back to a safe global workspace path when startup cwd is unsafe),default=.crush,example=.crush"`
 	DisabledTools              []string     `json:"disabled_tools,omitempty" jsonschema:"description=List of built-in tools to disable and hide from the agent,example=bash,example=sourcegraph"`
 	DisableProviderAutoUpdate  bool         `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`

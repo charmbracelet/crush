@@ -106,7 +106,9 @@ func TestConfig_setDefaults(t *testing.T) {
 	require.NotNil(t, cfg.Models)
 	require.NotNil(t, cfg.LSP)
 	require.NotNil(t, cfg.MCP)
-	require.Equal(t, filepath.Join("/tmp", ".crush"), cfg.Options.DataDirectory)
+	// DataDirectory is now centralized based on project identity
+	require.NotEmpty(t, cfg.Options.DataDirectory)
+	require.Contains(t, cfg.Options.DataDirectory, "projects")
 	require.Equal(t, "AGENTS.md", cfg.Options.InitializeAs)
 	require.Equal(t, "auto", cfg.Options.PreferredPermissionMode)
 	for _, path := range defaultContextPaths {
@@ -137,23 +139,20 @@ func TestWorkspaceDataDirNameStable(t *testing.T) {
 	require.NotEmpty(t, nameA)
 }
 
-func TestConfig_setDefaultsUsesGlobalWorkspaceDataDirForUnsafeWorkingDir(t *testing.T) {
+func TestConfig_setDefaultsUsesCentralizedProjectDataDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("CRUSH_GLOBAL_DATA", filepath.Join(tmpDir, "global-data"))
 
-	unsafeWorkingDir := string(filepath.Separator)
+	workingDir := "/tmp/my-project"
 	if runtime.GOOS == "windows" {
-		windowsDir := os.Getenv("WINDIR")
-		if windowsDir == "" {
-			windowsDir = `C:\Windows`
-		}
-		unsafeWorkingDir = filepath.Join(windowsDir, "System32")
+		workingDir = `C:\tmp\my-project`
 	}
 
 	cfg := &Config{}
-	cfg.setDefaults(unsafeWorkingDir, "")
+	cfg.setDefaults(workingDir, "")
 
-	expectedRoot := filepath.Join(tmpDir, "global-data", "workspaces")
+	// DataDirectory should be centralized under projects/
+	expectedRoot := filepath.Join(tmpDir, "global-data", "projects")
 	require.True(t, isPathWithin(cfg.Options.DataDirectory, expectedRoot))
 }
 

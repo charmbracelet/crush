@@ -290,6 +290,7 @@ type sessionAgent struct {
 	backgroundModel      *backgroundModel
 	reviewToolResult     func(context.Context, string, message.ToolResult, session.PermissionMode) (message.ToolResult, error)
 	disableAutoSummarize bool
+	disableAutoMemory    bool
 	isYolo               bool
 	notify               pubsub.Publisher[notify.Notification]
 	hookManager          *hooks.Manager
@@ -317,6 +318,7 @@ type SessionAgentOptions struct {
 	RefreshCallConfig    func(context.Context) (sessionAgentRuntimeConfig, error)
 	IsSubAgent           bool
 	DisableAutoSummarize bool
+	DisableAutoMemory    bool
 	IsYolo               bool
 	Sessions             session.Service
 	Messages             message.Service
@@ -371,6 +373,7 @@ func NewSessionAgent(
 		backgroundModel:      opts.BackgroundModel,
 		reviewToolResult:     opts.ReviewToolResult,
 		disableAutoSummarize: opts.DisableAutoSummarize,
+		disableAutoMemory:    opts.DisableAutoMemory,
 		tools:                csync.NewSliceFrom(opts.Tools),
 		isYolo:               opts.IsYolo,
 		notify:               opts.Notify,
@@ -1463,7 +1466,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	cancel()
 	wg.Wait()
 
-	if !a.isSubAgent && a.memory != nil && a.backgroundModel != nil && !shouldSummarize && a.QueuedPrompts(call.SessionID) == 0 {
+	if !a.isSubAgent && a.memory != nil && a.backgroundModel != nil && !a.disableAutoMemory && !shouldSummarize && a.QueuedPrompts(call.SessionID) == 0 {
 		a.extractionMu.Lock()
 		a.extractionTurnCount[call.SessionID]++
 		turns := a.extractionTurnCount[call.SessionID]

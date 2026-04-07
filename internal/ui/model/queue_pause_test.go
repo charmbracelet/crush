@@ -44,6 +44,7 @@ func (m *mockQueueCoordinator) IsQueuePaused(string) bool           { return m.p
 func (m *mockQueueCoordinator) Summarize(context.Context, string, fantasy.ProviderOptions) error {
 	return nil
 }
+func (m *mockQueueCoordinator) Dream(context.Context, string, bool) error { return nil }
 
 func (m *mockQueueCoordinator) GenerateHandoff(context.Context, string, string) (agent.HandoffDraft, error) {
 	return agent.HandoffDraft{}, nil

@@ -609,6 +609,12 @@ func ParseTaskStatusesFromAgentResult(result *message.ToolResult) map[string]mes
 }
 
 func summarizeTaskStatusCounts(tasks []agentTaskRenderEntry, statuses map[string]message.ToolResultSubtaskStatus) (completed, failed, canceled, inProgress, pending int) {
+	completedSet := make(map[string]struct{}, len(tasks))
+	for _, task := range tasks {
+		if statuses[task.id] == message.ToolResultSubtaskStatusCompleted {
+			completedSet[task.id] = struct{}{}
+		}
+	}
 	for _, task := range tasks {
 		status := statuses[task.id]
 		switch status {
@@ -619,10 +625,17 @@ func summarizeTaskStatusCounts(tasks []agentTaskRenderEntry, statuses map[string
 		case message.ToolResultSubtaskStatusCanceled:
 			canceled++
 		default:
-			if len(task.dependsOn) == 0 {
-				inProgress++
-			} else {
+			blocked := false
+			for _, dep := range task.dependsOn {
+				if _, ok := completedSet[strings.TrimSpace(dep)]; !ok {
+					blocked = true
+					break
+				}
+			}
+			if blocked {
 				pending++
+			} else {
+				inProgress++
 			}
 		}
 	}

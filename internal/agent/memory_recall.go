@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"time"
 
@@ -192,6 +193,8 @@ const memoryExtractMaxTurns = 5
 
 const memoryExtractionThrottleTurns = 1
 
+var memoryStoreActionPattern = regexp.MustCompile(`(?i)(^|[^a-z0-9_])["']?action["']?\s*[:=]\s*["']?store["']?([^a-z0-9_]|$)`)
+
 const memoryExtractPrompt = `You are a memory extraction agent. Analyze the conversation transcript and extract durable knowledge that should be remembered for future sessions.
 
 Rules:
@@ -223,9 +226,21 @@ func shouldExtractMemories(turnsSinceLastExtraction int) bool {
 	return turnsSinceLastExtraction >= memoryExtractionThrottleTurns
 }
 
+func isMemoryStoreToolCallLine(line string) bool {
+	if line == "" {
+		return false
+	}
+
+	if !strings.Contains(strings.ToLower(line), "long_term_memory") {
+		return false
+	}
+
+	return memoryStoreActionPattern.MatchString(line)
+}
+
 func hasMemoryWritesInHistory(history []string) bool {
 	for _, h := range history {
-		if strings.Contains(h, "memory") && strings.Contains(h, "store") {
+		if isMemoryStoreToolCallLine(h) {
 			return true
 		}
 	}

@@ -42,7 +42,24 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		return nil, fmt.Errorf("failed to load config from paths %v: %w", configPaths, err)
 	}
 
-	cfg.setDefaults(workingDir, dataDir)
+	workspaceDir := workspaceIdentityDir(workingDir)
+
+	// Determine paths:
+	// - workspaceConfigPath: project-level config in .crush/crush.json (can be committed)
+	// - projectDataDir: centralized data storage (sessions, memory, logs)
+	// 
+	// For workspaceConfigPath, we use workingDir directly (not workspaceIdentityDir)
+	// because workspaceIdentityDir may resolve to a different path via env vars like PWD.
+	// We want the config to be at <workingDir>/.crush/crush.json.
+	workspaceConfigPath := filepath.Join(workingDir, defaultDataDirectory, fmt.Sprintf("%s.json", appName))
+	projectDataDir := ProjectDataDir(workingDir)
+
+	// Allow explicit override via dataDir parameter or config
+	if dataDir != "" {
+		projectDataDir = dataDir
+	}
+
+	cfg.setDefaults(workingDir, projectDataDir)
 
 	// Load SkipRequests (YOLO mode) from global data config only.
 	// This field is marked json:"-" to prevent loading from untrusted project configs.
@@ -55,21 +72,21 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		}
 	}
 
-	workspaceDir := workspaceIdentityDir(workingDir)
 	store := &ConfigStore{
 		config:         cfg,
 		workingDir:     workspaceDir,
 		globalDataPath: GlobalConfigData(),
-		workspacePath:  filepath.Join(cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName)),
+		workspacePath:  workspaceConfigPath,
+		projectDataDir: projectDataDir,
 	}
 
 	if debug {
 		cfg.Options.Debug = true
 	}
 
-	// Setup logs
+	// Setup logs in centralized project data directory
 	log.Setup(
-		filepath.Join(cfg.Options.DataDirectory, "logs", fmt.Sprintf("%s.log", appName)),
+		filepath.Join(projectDataDir, "logs", fmt.Sprintf("%s.log", appName)),
 		cfg.Options.Debug,
 	)
 
@@ -79,10 +96,10 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	if wsData, err := os.ReadFile(store.workspacePath); err == nil && len(wsData) > 0 {
 		merged, mergeErr := loadFromBytes(append([][]byte{mustMarshalConfig(cfg)}, wsData))
 		if mergeErr == nil {
-			// Preserve defaults that setDefaults already applied.
-			dataDir := cfg.Options.DataDirectory
+			// Preserve project data directory from setDefaults.
+			savedDataDir := projectDataDir
 			*cfg = *merged
-			cfg.setDefaults(workingDir, dataDir)
+			cfg.setDefaults(workingDir, savedDataDir)
 			store.config = cfg
 		}
 	}
@@ -398,25 +415,18 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 	return nil
 }
 
-func (c *Config) setDefaults(workingDir, dataDir string) {
+func (c *Config) setDefaults(workingDir, projectDataDir string) {
 	if c.Options == nil {
 		c.Options = &Options{}
 	}
 	if c.Options.TUI == nil {
 		c.Options.TUI = &TUIOptions{}
 	}
-	if dataDir != "" {
-		c.Options.DataDirectory = dataDir
-	} else if c.Options.DataDirectory == "" {
-		if path, ok := fsext.LookupClosest(workingDir, defaultDataDirectory); ok {
-			c.Options.DataDirectory = path
-		} else if shouldUseGlobalWorkspaceDataDir(workingDir) {
-			workspaceIdentity := workspaceIdentityDir(workingDir)
-			c.Options.DataDirectory = globalWorkspaceDataDir(workspaceIdentity)
-			slog.Warn("Using global workspace data directory", "working_dir", workingDir, "workspace_identity", workspaceIdentity, "data_dir", c.Options.DataDirectory)
-		} else {
-			c.Options.DataDirectory = filepath.Join(workingDir, defaultDataDirectory)
-		}
+	// DataDirectory is now always the centralized project data directory
+	if projectDataDir != "" {
+		c.Options.DataDirectory = projectDataDir
+	} else {
+		c.Options.DataDirectory = ProjectDataDir(workingDir)
 	}
 	if c.Providers == nil {
 		c.Providers = csync.NewMap[string, ProviderConfig]()
@@ -917,6 +927,78 @@ func hasAWSCredentials(env env.Env) bool {
 	}
 
 	return false
+}
+
+// ProjectDataDir returns the centralized project data directory path.
+// This is used for storing project-scoped data like sessions, memory, and logs
+// in a central location rather than in the project directory itself.
+// The path is: <global-data-root>/projects/<project-slug>/
+// where project-slug is based on the git root (if available) or working directory.
+func ProjectDataDir(workingDir string) string {
+	root := filepath.Dir(GlobalConfigData())
+	projectSlug := projectSlugFromDir(workingDir)
+	return filepath.Join(root, "projects", projectSlug)
+}
+
+// projectSlugFromDir generates a unique, readable slug for a project directory.
+// It uses the git root if available, otherwise the working directory.
+// Format: <basename>-<hash6> (e.g., "crush-a1b2c3")
+func projectSlugFromDir(workingDir string) string {
+	identity := workspaceIdentityDir(workingDir)
+
+	// Try to get git root for better identity
+	gitRoot := findGitRoot(identity)
+	if gitRoot != "" {
+		identity = gitRoot
+	}
+
+	return workspaceDataDirName(identity)
+}
+
+// findGitRoot finds the canonical git repository root.
+// For worktrees, it returns the main repo's common dir (not the worktree-specific .git).
+// This ensures all worktrees of the same repo share the same project data.
+func findGitRoot(workingDir string) string {
+	// Use --git-common-dir to get the main repo's .git path for worktrees
+	cmd := exec.Command("git", "rev-parse", "--git-common-dir")
+	cmd.Dir = workingDir
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+
+	gitCommonDir := strings.TrimSpace(string(output))
+	if gitCommonDir == "" {
+		return ""
+	}
+
+	// gitCommonDir could be relative or absolute
+	if !filepath.IsAbs(gitCommonDir) {
+		gitCommonDir = filepath.Join(workingDir, gitCommonDir)
+	}
+
+	// The git root is the parent of .git (or .git/worktrees/xxx for worktrees)
+	// For worktrees, we want the main repo's root, so we navigate up from .git
+	gitDir := filepath.Clean(gitCommonDir)
+
+	// Handle worktree case: .git/worktrees/<name>
+	// Navigate to find the actual repository root
+	if filepath.Base(filepath.Dir(gitDir)) == "worktrees" {
+		// This is a worktree, the common dir is in the main repo's .git
+		// Go up to find the main repo's root
+		gitDir = filepath.Dir(filepath.Dir(gitDir))
+	}
+
+	// Now gitDir should be the .git directory, parent is the repo root
+	repoRoot := filepath.Dir(gitDir)
+
+	// Verify this is actually the root by checking if .git exists there.
+	// .git might be a file (worktree pointing to main repo), which is fine.
+	if _, err := os.Stat(filepath.Join(repoRoot, ".git")); err != nil {
+		return ""
+	}
+
+	return repoRoot
 }
 
 // GlobalConfig returns the global configuration file path for the application.

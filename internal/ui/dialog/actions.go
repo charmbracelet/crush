@@ -76,6 +76,10 @@ type (
 	ActionSummarize         struct {
 		SessionID string
 	}
+	ActionDream struct {
+		SessionID string
+		Force     bool
+	}
 	ActionGenerateHandoff struct {
 		SessionID string
 		Goal      string

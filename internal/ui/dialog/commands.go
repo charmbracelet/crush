@@ -437,6 +437,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	// Only show compact command if there's an active session
 	if c.hasSession {
 		commands = append(commands, NewCommandItem(c.com.Styles, "summarize", "Summarize Session", "", ActionSummarize{SessionID: c.sessionID}))
+		commands = append(commands, NewCommandItem(c.com.Styles, "dream", "Dream", "", ActionDream{SessionID: c.sessionID, Force: true}))
 		commands = append(commands, NewCommandItem(c.com.Styles, "handoff", "Handoff", "", ActionOpenDialog{HandoffID}))
 		if c.mode == session.CollaborationModePlan {
 			commands = append(commands, NewCommandItem(c.com.Styles, "toggle_plan_mode", "Exit Plan Mode", "", ActionTogglePlanMode{SessionID: c.sessionID, NextMode: session.CollaborationModeDefault}))
@@ -525,17 +526,8 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		commands = append(commands, NewCommandItem(c.com.Styles, "disable_docker_mcp", "Disable Docker MCP Catalog", "", ActionDisableDockerMCP{}))
 	}
 
-	if c.hasTodos || c.hasQueue {
-		var label string
-		switch {
-		case c.hasTodos && c.hasQueue:
-			label = "Toggle To-Dos/Queue"
-		case c.hasQueue:
-			label = "Toggle Queue"
-		default:
-			label = "Toggle To-Dos"
-		}
-		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_pills", label, "ctrl+t", ActionTogglePills{}))
+	if c.hasQueue {
+		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_pills", "Toggle Queue", "ctrl+t", ActionTogglePills{}))
 	}
 
 	// Add queue pause/resume command when there's an active queue.

@@ -530,7 +530,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		} else if isPermissionErr {
 			currentAssistant.AddFinish(message.FinishReasonPermissionDenied, "User denied permission", "")
 		} else if errors.Is(err, hyper.ErrUnauthorized) {
-			currentAssistant.AddFinish(message.FinishReasonError, "Unauthorized", `Authentication with Hyper failed. Please run "crush auth" to re-authenticate.`)
+			currentAssistant.AddFinish(message.FinishReasonError, "Unauthorized", `Please re-authenticate with Hyper. You can also run "crush auth" to re-authenticate.`)
 			if a.notify != nil {
 				a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
 					SessionID:    call.SessionID,

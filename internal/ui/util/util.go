@@ -4,7 +4,6 @@ package util
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"os/exec"
 	"time"
 
@@ -23,7 +22,6 @@ func CmdHandler(msg tea.Msg) tea.Cmd {
 }
 
 func ReportError(err error) tea.Cmd {
-	slog.Error("Error reported", "error", err)
 	return CmdHandler(NewErrorMsg(err))
 }
 

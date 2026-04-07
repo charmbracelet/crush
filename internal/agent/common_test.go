@@ -192,6 +192,7 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 
 	// Clear some fields to avoid issues with VCR cassette matching.
 	cfg.Config().Options.SkillsPaths = nil
+	cfg.Config().Options.DisabledSkills = []string{"crush-config"}
 	cfg.Config().Options.ContextPaths = nil
 	cfg.Config().LSP = nil
 

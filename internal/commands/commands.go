@@ -91,31 +91,20 @@ func LoadMCPPrompts() ([]MCPPrompt, error) {
 }
 
 func buildCommandSources(cfg *config.Config) []commandSource {
-	var sources []commandSource
-
-	// XDG config directory
-	if dir := getXDGCommandsDir(); dir != "" {
-		sources = append(sources, commandSource{
-			path:   dir,
+	return []commandSource{
+		{
+			path:   filepath.Join(home.Config(), "crush", "commands"),
 			prefix: userCommandPrefix,
-		})
-	}
-
-	// Home directory
-	if home := home.Dir(); home != "" {
-		sources = append(sources, commandSource{
-			path:   filepath.Join(home, ".crush", "commands"),
+		},
+		{
+			path:   filepath.Join(home.Dir(), ".crush", "commands"),
 			prefix: userCommandPrefix,
-		})
+		},
+		{
+			path:   filepath.Join(cfg.Options.DataDirectory, "commands"),
+			prefix: projectCommandPrefix,
+		},
 	}
-
-	// Project directory
-	sources = append(sources, commandSource{
-		path:   filepath.Join(cfg.Options.DataDirectory, "commands"),
-		prefix: projectCommandPrefix,
-	})
-
-	return sources
 }
 
 func loadAll(sources []commandSource) ([]CustomCommand, error) {
@@ -202,19 +191,6 @@ func buildCommandID(path, baseDir, prefix string) string {
 	}
 
 	return prefix + strings.Join(parts, ":")
-}
-
-func getXDGCommandsDir() string {
-	xdgHome := os.Getenv("XDG_CONFIG_HOME")
-	if xdgHome == "" {
-		if home := home.Dir(); home != "" {
-			xdgHome = filepath.Join(home, ".config")
-		}
-	}
-	if xdgHome != "" {
-		return filepath.Join(xdgHome, "crush", "commands")
-	}
-	return ""
 }
 
 func isMarkdownFile(name string) bool {

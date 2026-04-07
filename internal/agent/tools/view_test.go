@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -84,4 +85,55 @@ func TestReadTextFileTruncatesLongLines(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, hasMore)
 	require.Equal(t, strings.Repeat("a", MaxLineLength)+"...", content)
+}
+
+func TestReadBuiltinFile(t *testing.T) {
+	t.Parallel()
+
+	t.Run("reads crush-config skill", func(t *testing.T) {
+		t.Parallel()
+
+		resp, err := readBuiltinFile(ViewParams{
+			FilePath: "crush://skills/crush-config/SKILL.md",
+		})
+		require.NoError(t, err)
+		require.NotEmpty(t, resp.Content)
+		require.Contains(t, resp.Content, "Crush Configuration")
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		t.Parallel()
+
+		resp, err := readBuiltinFile(ViewParams{
+			FilePath: "crush://skills/nonexistent/SKILL.md",
+		})
+		require.NoError(t, err)
+		require.True(t, resp.IsError)
+	})
+
+	t.Run("metadata has skill info", func(t *testing.T) {
+		t.Parallel()
+
+		resp, err := readBuiltinFile(ViewParams{
+			FilePath: "crush://skills/crush-config/SKILL.md",
+		})
+		require.NoError(t, err)
+
+		var meta ViewResponseMetadata
+		require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+		require.Equal(t, ViewResourceSkill, meta.ResourceType)
+		require.Equal(t, "crush-config", meta.ResourceName)
+		require.NotEmpty(t, meta.ResourceDescription)
+	})
+
+	t.Run("respects offset", func(t *testing.T) {
+		t.Parallel()
+
+		resp, err := readBuiltinFile(ViewParams{
+			FilePath: "crush://skills/crush-config/SKILL.md",
+			Offset:   5,
+		})
+		require.NoError(t, err)
+		require.NotContains(t, resp.Content, "     1|")
+	})
 }

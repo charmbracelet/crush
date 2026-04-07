@@ -1,0 +1,2361 @@
+basePath: /v1
+definitions:
+  catwalk.Model:
+    properties:
+      can_reason:
+        type: boolean
+      context_window:
+        type: integer
+      cost_per_1m_in:
+        type: number
+      cost_per_1m_in_cached:
+        type: number
+      cost_per_1m_out:
+        type: number
+      cost_per_1m_out_cached:
+        type: number
+      default_max_tokens:
+        type: integer
+      default_reasoning_effort:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      options:
+        $ref: '#/definitions/catwalk.ModelOptions'
+      reasoning_levels:
+        items:
+          type: string
+        type: array
+      supports_attachments:
+        type: boolean
+    type: object
+  catwalk.ModelOptions:
+    properties:
+      frequency_penalty:
+        type: number
+      presence_penalty:
+        type: number
+      provider_options:
+        additionalProperties: {}
+        type: object
+      temperature:
+        type: number
+      top_k:
+        type: integer
+      top_p:
+        type: number
+    type: object
+  config.Attribution:
+    properties:
+      co_authored_by:
+        type: boolean
+      generated_with:
+        type: boolean
+      trailer_style:
+        $ref: '#/definitions/config.TrailerStyle'
+    type: object
+  config.Completions:
+    properties:
+      max_depth:
+        type: integer
+      max_items:
+        type: integer
+    type: object
+  config.LSPConfig:
+    properties:
+      args:
+        items:
+          type: string
+        type: array
+      command:
+        type: string
+      disabled:
+        type: boolean
+      env:
+        additionalProperties:
+          type: string
+        type: object
+      filetypes:
+        items:
+          type: string
+        type: array
+      init_options:
+        additionalProperties: {}
+        type: object
+      options:
+        additionalProperties: {}
+        type: object
+      root_markers:
+        items:
+          type: string
+        type: array
+      timeout:
+        type: integer
+    type: object
+  config.LSPs:
+    additionalProperties:
+      $ref: '#/definitions/config.LSPConfig'
+    type: object
+  config.MCPConfig:
+    properties:
+      args:
+        items:
+          type: string
+        type: array
+      command:
+        type: string
+      disabled:
+        type: boolean
+      disabled_tools:
+        items:
+          type: string
+        type: array
+      env:
+        additionalProperties:
+          type: string
+        type: object
+      headers:
+        additionalProperties:
+          type: string
+        description: 'TODO: maybe make it possible to get the value from the env'
+        type: object
+      timeout:
+        type: integer
+      type:
+        $ref: '#/definitions/config.MCPType'
+      url:
+        type: string
+    type: object
+  config.MCPType:
+    enum:
+    - stdio
+    - sse
+    - http
+    type: string
+    x-enum-varnames:
+    - MCPStdio
+    - MCPSSE
+    - MCPHttp
+  config.MCPs:
+    additionalProperties:
+      $ref: '#/definitions/config.MCPConfig'
+    type: object
+  config.Permissions:
+    properties:
+      allowed_tools:
+        items:
+          type: string
+        type: array
+    type: object
+  config.Scope:
+    enum:
+    - 0
+    - 1
+    type: integer
+    x-enum-varnames:
+    - ScopeGlobal
+    - ScopeWorkspace
+  config.SelectedModel:
+    properties:
+      frequency_penalty:
+        type: number
+      max_tokens:
+        description: Overrides the default model configuration.
+        type: integer
+      model:
+        description: |-
+          The model id as used by the provider API.
+          Required.
+        type: string
+      presence_penalty:
+        type: number
+      provider:
+        description: |-
+          The model provider, same as the key/id used in the providers config.
+          Required.
+        type: string
+      provider_options:
+        additionalProperties: {}
+        description: Override provider specific options.
+        type: object
+      reasoning_effort:
+        description: Only used by models that use the openai provider and need this
+          set.
+        type: string
+      temperature:
+        type: number
+      think:
+        description: Used by anthropic models that can reason to indicate if the model
+          should think.
+        type: boolean
+      top_k:
+        type: integer
+      top_p:
+        type: number
+    type: object
+  config.SelectedModelType:
+    enum:
+    - large
+    - small
+    type: string
+    x-enum-varnames:
+    - SelectedModelTypeLarge
+    - SelectedModelTypeSmall
+  config.TUIOptions:
+    properties:
+      compact_mode:
+        type: boolean
+      completions:
+        $ref: '#/definitions/config.Completions'
+      diff_mode:
+        type: string
+      transparent:
+        type: boolean
+    type: object
+  config.ToolGrep:
+    properties:
+      timeout:
+        $ref: '#/definitions/time.Duration'
+    type: object
+  config.ToolLs:
+    properties:
+      max_depth:
+        type: integer
+      max_items:
+        type: integer
+    type: object
+  config.Tools:
+    properties:
+      grep:
+        $ref: '#/definitions/config.ToolGrep'
+      ls:
+        $ref: '#/definitions/config.ToolLs'
+    type: object
+  config.TrailerStyle:
+    enum:
+    - none
+    - co-authored-by
+    - assisted-by
+    type: string
+    x-enum-varnames:
+    - TrailerStyleNone
+    - TrailerStyleCoAuthoredBy
+    - TrailerStyleAssistedBy
+  csync.Map-string-config_ProviderConfig:
+    type: object
+  github_com_charmbracelet_crush_internal_config.Config:
+    properties:
+      $schema:
+        type: string
+      lsp:
+        $ref: '#/definitions/config.LSPs'
+      mcp:
+        $ref: '#/definitions/config.MCPs'
+      models:
+        additionalProperties:
+          $ref: '#/definitions/config.SelectedModel'
+        description: We currently only support large/small as values here.
+        type: object
+      options:
+        $ref: '#/definitions/github_com_charmbracelet_crush_internal_config.Options'
+      permissions:
+        $ref: '#/definitions/config.Permissions'
+      providers:
+        allOf:
+        - $ref: '#/definitions/csync.Map-string-config_ProviderConfig'
+        description: The providers that are configured
+      recent_models:
+        additionalProperties:
+          items:
+            $ref: '#/definitions/config.SelectedModel'
+          type: array
+        description: Recently used models stored in the data directory config.
+        type: object
+      tools:
+        $ref: '#/definitions/config.Tools'
+    type: object
+  github_com_charmbracelet_crush_internal_config.Options:
+    properties:
+      attribution:
+        $ref: '#/definitions/config.Attribution'
+      auto_lsp:
+        type: boolean
+      context_paths:
+        items:
+          type: string
+        type: array
+      data_directory:
+        description: Relative to the cwd
+        type: string
+      debug:
+        type: boolean
+      debug_lsp:
+        type: boolean
+      disable_auto_summarize:
+        type: boolean
+      disable_default_providers:
+        type: boolean
+      disable_metrics:
+        type: boolean
+      disable_notifications:
+        type: boolean
+      disable_provider_auto_update:
+        type: boolean
+      disabled_tools:
+        items:
+          type: string
+        type: array
+      initialize_as:
+        type: string
+      progress:
+        type: boolean
+      skills_paths:
+        items:
+          type: string
+        type: array
+      tui:
+        $ref: '#/definitions/config.TUIOptions'
+    type: object
+  github_com_charmbracelet_crush_internal_proto.Message:
+    properties:
+      created_at:
+        type: integer
+      id:
+        type: string
+      model:
+        type: string
+      parts:
+        items: {}
+        type: array
+      provider:
+        type: string
+      role:
+        $ref: '#/definitions/proto.MessageRole'
+      session_id:
+        type: string
+      updated_at:
+        type: integer
+    type: object
+  lsp.ServerState:
+    enum:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    type: integer
+    x-enum-varnames:
+    - StateUnstarted
+    - StateStarting
+    - StateReady
+    - StateError
+    - StateStopped
+    - StateDisabled
+  proto.AgentInfo:
+    properties:
+      is_busy:
+        type: boolean
+      is_ready:
+        type: boolean
+      model:
+        $ref: '#/definitions/catwalk.Model'
+      model_cfg:
+        $ref: '#/definitions/config.SelectedModel'
+    type: object
+  proto.AgentMessage:
+    properties:
+      attachments:
+        items:
+          $ref: '#/definitions/proto.Attachment'
+        type: array
+      prompt:
+        type: string
+      session_id:
+        type: string
+    type: object
+  proto.AgentSession:
+    properties:
+      completion_tokens:
+        type: integer
+      cost:
+        type: number
+      created_at:
+        type: integer
+      id:
+        type: string
+      is_busy:
+        type: boolean
+      message_count:
+        type: integer
+      parent_session_id:
+        type: string
+      prompt_tokens:
+        type: integer
+      summary_message_id:
+        type: string
+      title:
+        type: string
+      updated_at:
+        type: integer
+    type: object
+  proto.Attachment:
+    properties:
+      content:
+        items:
+          type: integer
+        type: array
+      file_name:
+        type: string
+      file_path:
+        type: string
+      mime_type:
+        type: string
+    type: object
+  proto.ConfigCompactRequest:
+    properties:
+      enabled:
+        type: boolean
+      scope:
+        $ref: '#/definitions/config.Scope'
+    type: object
+  proto.ConfigModelRequest:
+    properties:
+      model:
+        $ref: '#/definitions/config.SelectedModel'
+      model_type:
+        $ref: '#/definitions/config.SelectedModelType'
+      scope:
+        $ref: '#/definitions/config.Scope'
+    type: object
+  proto.ConfigProviderKeyRequest:
+    properties:
+      api_key: {}
+      provider_id:
+        type: string
+      scope:
+        $ref: '#/definitions/config.Scope'
+    type: object
+  proto.ConfigRefreshOAuthRequest:
+    properties:
+      provider_id:
+        type: string
+      scope:
+        $ref: '#/definitions/config.Scope'
+    type: object
+  proto.ConfigRemoveRequest:
+    properties:
+      key:
+        type: string
+      scope:
+        $ref: '#/definitions/config.Scope'
+    type: object
+  proto.ConfigSetRequest:
+    properties:
+      key:
+        type: string
+      scope:
+        $ref: '#/definitions/config.Scope'
+      value: {}
+    type: object
+  proto.Error:
+    properties:
+      message:
+        type: string
+    type: object
+  proto.File:
+    properties:
+      content:
+        type: string
+      created_at:
+        type: integer
+      id:
+        type: string
+      path:
+        type: string
+      session_id:
+        type: string
+      updated_at:
+        type: integer
+      version:
+        type: integer
+    type: object
+  proto.FileTrackerReadRequest:
+    properties:
+      path:
+        type: string
+      session_id:
+        type: string
+    type: object
+  proto.ImportCopilotResponse:
+    properties:
+      success:
+        type: boolean
+      token: {}
+    type: object
+  proto.LSPClientInfo:
+    properties:
+      connected_at:
+        type: string
+      diagnostic_count:
+        type: integer
+      error: {}
+      name:
+        type: string
+      state:
+        $ref: '#/definitions/lsp.ServerState'
+    type: object
+  proto.LSPStartRequest:
+    properties:
+      path:
+        type: string
+    type: object
+  proto.MCPClientInfo:
+    properties:
+      connected_at:
+        type: string
+      error: {}
+      name:
+        type: string
+      prompt_count:
+        type: integer
+      resource_count:
+        type: integer
+      state:
+        $ref: '#/definitions/proto.MCPState'
+      tool_count:
+        type: integer
+    type: object
+  proto.MCPGetPromptRequest:
+    properties:
+      args:
+        additionalProperties:
+          type: string
+        type: object
+      client_id:
+        type: string
+      prompt_id:
+        type: string
+    type: object
+  proto.MCPGetPromptResponse:
+    properties:
+      prompt:
+        type: string
+    type: object
+  proto.MCPNameRequest:
+    properties:
+      name:
+        type: string
+    type: object
+  proto.MCPReadResourceRequest:
+    properties:
+      name:
+        type: string
+      uri:
+        type: string
+    type: object
+  proto.MCPState:
+    enum:
+    - 0
+    - 1
+    - 2
+    - 3
+    type: integer
+    x-enum-varnames:
+    - MCPStateDisabled
+    - MCPStateStarting
+    - MCPStateConnected
+    - MCPStateError
+  proto.MessageRole:
+    enum:
+    - assistant
+    - user
+    - system
+    - tool
+    type: string
+    x-enum-varnames:
+    - Assistant
+    - User
+    - System
+    - Tool
+  proto.PermissionAction:
+    enum:
+    - allow
+    - allow_session
+    - deny
+    type: string
+    x-enum-varnames:
+    - PermissionAllow
+    - PermissionAllowForSession
+    - PermissionDeny
+  proto.PermissionGrant:
+    properties:
+      action:
+        $ref: '#/definitions/proto.PermissionAction'
+      permission:
+        $ref: '#/definitions/proto.PermissionRequest'
+    type: object
+  proto.PermissionRequest:
+    properties:
+      action:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      params: {}
+      path:
+        type: string
+      session_id:
+        type: string
+      tool_call_id:
+        type: string
+      tool_name:
+        type: string
+    type: object
+  proto.PermissionSkipRequest:
+    properties:
+      skip:
+        type: boolean
+    type: object
+  proto.ProjectInitPromptResponse:
+    properties:
+      prompt:
+        type: string
+    type: object
+  proto.ProjectNeedsInitResponse:
+    properties:
+      needs_init:
+        type: boolean
+    type: object
+  proto.ServerControl:
+    properties:
+      command:
+        type: string
+    type: object
+  proto.Session:
+    properties:
+      completion_tokens:
+        type: integer
+      cost:
+        type: number
+      created_at:
+        type: integer
+      id:
+        type: string
+      message_count:
+        type: integer
+      parent_session_id:
+        type: string
+      prompt_tokens:
+        type: integer
+      summary_message_id:
+        type: string
+      title:
+        type: string
+      updated_at:
+        type: integer
+    type: object
+  proto.VersionInfo:
+    properties:
+      commit:
+        type: string
+      go_version:
+        type: string
+      platform:
+        type: string
+      version:
+        type: string
+    type: object
+  proto.Workspace:
+    properties:
+      config:
+        $ref: '#/definitions/github_com_charmbracelet_crush_internal_config.Config'
+      data_dir:
+        type: string
+      debug:
+        type: boolean
+      env:
+        items:
+          type: string
+        type: array
+      id:
+        type: string
+      path:
+        type: string
+      version:
+        type: string
+      yolo:
+        type: boolean
+    type: object
+  time.Duration:
+    enum:
+    - -9223372036854775808
+    - 9223372036854775807
+    - 1
+    - 1000
+    - 1000000
+    - 1000000000
+    - 60000000000
+    - 3600000000000
+    format: int64
+    type: integer
+    x-enum-varnames:
+    - minDuration
+    - maxDuration
+    - Nanosecond
+    - Microsecond
+    - Millisecond
+    - Second
+    - Minute
+    - Hour
+info:
+  contact:
+    name: Charm
+    url: https://charm.sh
+  description: Crush is a terminal-based AI coding assistant. This API is served over
+    a Unix socket (or Windows named pipe) and provides programmatic access to workspaces,
+    sessions, agents, LSP, MCP, and more.
+  license:
+    name: MIT
+    url: https://github.com/charmbracelet/crush/blob/main/LICENSE
+  title: Crush API
+  version: "1.0"
+paths:
+  /config:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+      summary: Get server config
+      tags:
+      - system
+  /control:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Control command (e.g. shutdown)
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.ServerControl'
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Send server control command
+      tags:
+      - system
+  /health:
+    get:
+      responses:
+        "200":
+          description: OK
+      summary: Health check
+      tags:
+      - system
+  /version:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/proto.VersionInfo'
+      summary: Get server version
+      tags:
+      - system
+  /workspaces:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/proto.Workspace'
+            type: array
+      summary: List workspaces
+      tags:
+      - workspaces
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace creation params
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.Workspace'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/proto.Workspace'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Create workspace
+      tags:
+      - workspaces
+  /workspaces/{id}:
+    delete:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Delete workspace
+      tags:
+      - workspaces
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/proto.Workspace'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Get workspace
+      tags:
+      - workspaces
+  /workspaces/{id}/agent:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/proto.AgentInfo'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Get agent info
+      tags:
+      - agent
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Agent message
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.AgentMessage'
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Send message to agent
+      tags:
+      - agent
+  /workspaces/{id}/agent/default-small-model:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Provider ID
+        in: query
+        name: provider_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Get default small model
+      tags:
+      - agent
+  /workspaces/{id}/agent/init:
+    post:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Initialize agent
+      tags:
+      - agent
+  /workspaces/{id}/agent/sessions/{sid}:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: sid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/proto.AgentSession'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Get agent session
+      tags:
+      - agent
+  /workspaces/{id}/agent/sessions/{sid}/cancel:
+    post:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: sid
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Cancel agent session
+      tags:
+      - agent
+  /workspaces/{id}/agent/sessions/{sid}/prompts/clear:
+    post:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: sid
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Clear prompt queue
+      tags:
+      - agent
+  /workspaces/{id}/agent/sessions/{sid}/prompts/list:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: sid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              type: string
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: List queued prompts
+      tags:
+      - agent
+  /workspaces/{id}/agent/sessions/{sid}/prompts/queued:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: sid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Get queued prompt status
+      tags:
+      - agent
+  /workspaces/{id}/agent/sessions/{sid}/summarize:
+    post:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: sid
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Summarize session
+      tags:
+      - agent
+  /workspaces/{id}/agent/update:
+    post:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Update agent
+      tags:
+      - agent
+  /workspaces/{id}/config:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Get workspace config
+      tags:
+      - workspaces
+  /workspaces/{id}/config/compact:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Config compact request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.ConfigCompactRequest'
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Set compact mode
+      tags:
+      - config
+  /workspaces/{id}/config/import-copilot:
+    post:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/proto.ImportCopilotResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Import Copilot credentials
+      tags:
+      - config
+  /workspaces/{id}/config/model:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Config model request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.ConfigModelRequest'
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Set the preferred model
+      tags:
+      - config
+  /workspaces/{id}/config/provider-key:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Config provider key request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.ConfigProviderKeyRequest'
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Set provider API key
+      tags:
+      - config
+  /workspaces/{id}/config/refresh-oauth:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Refresh OAuth request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.ConfigRefreshOAuthRequest'
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Refresh OAuth token
+      tags:
+      - config
+  /workspaces/{id}/config/remove:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Config remove request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.ConfigRemoveRequest'
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Remove a config field
+      tags:
+      - config
+  /workspaces/{id}/config/set:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Config set request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.ConfigSetRequest'
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Set a config field
+      tags:
+      - config
+  /workspaces/{id}/events:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Stream workspace events (SSE)
+      tags:
+      - workspaces
+  /workspaces/{id}/filetracker/lastread:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Session ID
+        in: query
+        name: session_id
+        type: string
+      - description: File path
+        in: query
+        name: path
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Get last read time for file
+      tags:
+      - filetracker
+  /workspaces/{id}/filetracker/read:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: File tracker read request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.FileTrackerReadRequest'
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Record file read
+      tags:
+      - filetracker
+  /workspaces/{id}/lsps:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/proto.LSPClientInfo'
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: List LSP clients
+      tags:
+      - lsp
+  /workspaces/{id}/lsps/{lsp}/diagnostics:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: LSP client name
+        in: path
+        name: lsp
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Get LSP diagnostics
+      tags:
+      - lsp
+  /workspaces/{id}/lsps/start:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: LSP start request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.LSPStartRequest'
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Start LSP server
+      tags:
+      - lsp
+  /workspaces/{id}/lsps/stop:
+    post:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Stop all LSP servers
+      tags:
+      - lsp
+  /workspaces/{id}/mcp/get-prompt:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: MCP get prompt request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.MCPGetPromptRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/proto.MCPGetPromptResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Get MCP prompt
+      tags:
+      - mcp
+  /workspaces/{id}/mcp/read-resource:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: MCP read resource request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.MCPReadResourceRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Read MCP resource
+      tags:
+      - mcp
+  /workspaces/{id}/mcp/refresh-prompts:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: MCP name request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.MCPNameRequest'
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Refresh MCP prompts
+      tags:
+      - mcp
+  /workspaces/{id}/mcp/refresh-resources:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: MCP name request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.MCPNameRequest'
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Refresh MCP resources
+      tags:
+      - mcp
+  /workspaces/{id}/mcp/refresh-tools:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: MCP name request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.MCPNameRequest'
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Refresh MCP tools
+      tags:
+      - mcp
+  /workspaces/{id}/mcp/states:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/proto.MCPClientInfo'
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Get MCP client states
+      tags:
+      - mcp
+  /workspaces/{id}/messages/user:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_charmbracelet_crush_internal_proto.Message'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Get all user messages for workspace
+      tags:
+      - workspaces
+  /workspaces/{id}/permissions/grant:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Permission grant
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.PermissionGrant'
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Grant permission
+      tags:
+      - permissions
+  /workspaces/{id}/permissions/skip:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/proto.PermissionSkipRequest'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Get skip permissions status
+      tags:
+      - permissions
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Permission skip request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.PermissionSkipRequest'
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Set skip permissions
+      tags:
+      - permissions
+  /workspaces/{id}/project/init:
+    post:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Mark project as initialized
+      tags:
+      - project
+  /workspaces/{id}/project/init-prompt:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/proto.ProjectInitPromptResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Get project initialization prompt
+      tags:
+      - project
+  /workspaces/{id}/project/needs-init:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/proto.ProjectNeedsInitResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Check if project needs initialization
+      tags:
+      - project
+  /workspaces/{id}/providers:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Get workspace providers
+      tags:
+      - workspaces
+  /workspaces/{id}/sessions:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/proto.Session'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: List sessions
+      tags:
+      - sessions
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Session creation params (title)
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.Session'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/proto.Session'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Create session
+      tags:
+      - sessions
+  /workspaces/{id}/sessions/{sid}:
+    delete:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: sid
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Delete session
+      tags:
+      - sessions
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: sid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/proto.Session'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Get session
+      tags:
+      - sessions
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: sid
+        required: true
+        type: string
+      - description: Updated session
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.Session'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/proto.Session'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Update session
+      tags:
+      - sessions
+  /workspaces/{id}/sessions/{sid}/filetracker/files:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: sid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              type: string
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: List tracked files for session
+      tags:
+      - filetracker
+  /workspaces/{id}/sessions/{sid}/history:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: sid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/proto.File'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Get session history
+      tags:
+      - sessions
+  /workspaces/{id}/sessions/{sid}/messages:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: sid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_charmbracelet_crush_internal_proto.Message'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Get session messages
+      tags:
+      - sessions
+  /workspaces/{id}/sessions/{sid}/messages/user:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: sid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_charmbracelet_crush_internal_proto.Message'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Get user messages for session
+      tags:
+      - sessions
+swagger: "2.0"

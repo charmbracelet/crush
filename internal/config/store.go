@@ -18,6 +18,13 @@ import (
 	"github.com/tidwall/sjson"
 )
 
+// RuntimeOverrides holds per-session settings that are never persisted to
+// disk. They are applied on top of the loaded Config and survive only for
+// the lifetime of the process (or workspace).
+type RuntimeOverrides struct {
+	SkipPermissionRequests bool
+}
+
 // ConfigStore is the single entry point for all config access. It owns the
 // pure-data Config, runtime state (working directory, resolver, known
 // providers), and persistence to both global and workspace config files.
@@ -28,6 +35,7 @@ type ConfigStore struct {
 	globalDataPath string // ~/.local/share/crush/crush.json
 	workspacePath  string // .crush/crush.json
 	knownProviders []catwalk.Provider
+	overrides      RuntimeOverrides
 }
 
 // Config returns the pure-data config struct (read-only after load).
@@ -63,20 +71,32 @@ func (s *ConfigStore) SetupAgents() {
 	s.config.SetupAgents()
 }
 
+// Overrides returns the runtime overrides for this store.
+func (s *ConfigStore) Overrides() *RuntimeOverrides {
+	return &s.overrides
+}
+
 // configPath returns the file path for the given scope.
-func (s *ConfigStore) configPath(scope Scope) string {
+func (s *ConfigStore) configPath(scope Scope) (string, error) {
 	switch scope {
 	case ScopeWorkspace:
-		return s.workspacePath
+		if s.workspacePath == "" {
+			return "", ErrNoWorkspaceConfig
+		}
+		return s.workspacePath, nil
 	default:
-		return s.globalDataPath
+		return s.globalDataPath, nil
 	}
 }
 
 // HasConfigField checks whether a key exists in the config file for the given
 // scope.
 func (s *ConfigStore) HasConfigField(scope Scope, key string) bool {
-	data, err := os.ReadFile(s.configPath(scope))
+	path, err := s.configPath(scope)
+	if err != nil {
+		return false
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return false
 	}
@@ -85,7 +105,10 @@ func (s *ConfigStore) HasConfigField(scope Scope, key string) bool {
 
 // SetConfigField sets a key/value pair in the config file for the given scope.
 func (s *ConfigStore) SetConfigField(scope Scope, key string, value any) error {
-	path := s.configPath(scope)
+	path, err := s.configPath(scope)
+	if err != nil {
+		return fmt.Errorf("%s: %w", key, err)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -110,7 +133,10 @@ func (s *ConfigStore) SetConfigField(scope Scope, key string, value any) error {
 
 // RemoveConfigField removes a key from the config file for the given scope.
 func (s *ConfigStore) RemoveConfigField(scope Scope, key string) error {
-	path := s.configPath(scope)
+	path, err := s.configPath(scope)
+	if err != nil {
+		return fmt.Errorf("%s: %w", key, err)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("failed to read config file: %w", err)

@@ -921,7 +921,8 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 
 func (c *coordinator) isUnauthorized(err error) bool {
 	var providerErr *fantasy.ProviderError
-	return errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized
+	return (errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized) ||
+		errors.Is(err, hyper.ErrUnauthorized)
 }
 
 func (c *coordinator) refreshOAuth2Token(ctx context.Context, providerCfg config.ProviderConfig) error {

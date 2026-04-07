@@ -3203,9 +3203,27 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 			Title:   "Crush is waiting...",
 			Message: fmt.Sprintf("Agent's turn completed in \"%s\"", n.SessionTitle),
 		})
+	case notify.TypeReAuthenticate:
+		return m.handleReAuthenticate(n.ProviderID)
 	default:
 		return nil
 	}
+}
+
+func (m *UI) handleReAuthenticate(providerID string) tea.Cmd {
+	cfg := m.com.Config()
+	if cfg == nil {
+		return nil
+	}
+	providerCfg, ok := cfg.Providers.Get(providerID)
+	if !ok {
+		return nil
+	}
+	agentCfg, ok := cfg.Agents[config.AgentCoder]
+	if !ok {
+		return nil
+	}
+	return m.openAuthenticationDialog(providerCfg.ToProvider(), cfg.Models[agentCfg.Model], agentCfg.Model)
 }
 
 // newSession clears the current session state and prepares for a new session.

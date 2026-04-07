@@ -405,6 +405,90 @@
       "additionalProperties": false,
       "type": "object"
     },
+    "ProviderConfig": {
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the provider",
+          "examples": [
+            "openai"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "description": "Human-readable name for the provider",
+          "examples": [
+            "OpenAI"
+          ]
+        },
+        "base_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Base URL for the provider's API",
+          "examples": [
+            "https://api.openai.com/v1"
+          ]
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "openai",
+            "openai-compat",
+            "anthropic",
+            "gemini",
+            "azure",
+            "vertexai",
+            "alibaba-coding-plan"
+          ],
+          "description": "Provider type that determines the API format",
+          "default": "openai"
+        },
+        "api_key": {
+          "type": "string",
+          "description": "API key for authentication with the provider",
+          "examples": [
+            "$OPENAI_API_KEY"
+          ]
+        },
+        "oauth": {
+          "$ref": "#/$defs/Token",
+          "description": "OAuth2 token for authentication with the provider"
+        },
+        "disable": {
+          "type": "boolean",
+          "description": "Whether this provider is disabled",
+          "default": false
+        },
+        "system_prompt_prefix": {
+          "type": "string",
+          "description": "Custom prefix to add to system prompts for this provider"
+        },
+        "extra_headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "Additional HTTP headers to send with requests"
+        },
+        "extra_body": {
+          "type": "object",
+          "description": "Additional fields to include in request bodies"
+        },
+        "provider_options": {
+          "type": "object",
+          "description": "Additional provider-specific options for this provider"
+        },
+        "models": {
+          "items": {
+            "$ref": "#/$defs/Model"
+          },
+          "type": "array",
+          "description": "List of models available from this provider"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "SelectedModel": {
       "properties": {
         "model": {

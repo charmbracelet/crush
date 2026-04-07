@@ -12,6 +12,8 @@ import (
 	"maps"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -2326,6 +2328,20 @@ func (c *coordinator) runSubAgentDirect(ctx context.Context, params subAgentPara
 		params.SessionSetup(subSession.ID)
 	}
 
+	effectiveIsolation := strings.TrimSpace(params.AgentIsolation)
+	subSession, sessionWorkingDir, effectiveIsolation, err := c.prepareSubagentWorkspace(ctx, parentSession, subSession, effectiveIsolation)
+	if err != nil {
+		return fantasy.ToolResponse{}, err
+	}
+
+	// Track worktree for cleanup after subagent completes.
+	usedWorktree := effectiveIsolation == "worktree" && subSession.WorkspaceCWD != parentSession.WorkspaceCWD
+	if usedWorktree {
+		defer func() {
+			c.cleanupWorktreeIfNeeded(subSession.WorkspaceCWD)
+		}()
+	}
+
 	model := params.Agent.Model()
 	maxTokens := model.CatwalkCfg.DefaultMaxTokens
 	if model.ModelCfg.MaxTokens != 0 {
@@ -2344,11 +2360,12 @@ func (c *coordinator) runSubAgentDirect(ctx context.Context, params subAgentPara
 	ctx = context.WithValue(ctx, sessionAgentRuntimeConfigContextKey{}, (*sessionAgentRuntimeConfig)(nil))
 	ctx = context.WithValue(ctx, tools.SessionIDContextKey, subSession.ID)
 	ctx = context.WithValue(ctx, tools.ToolCallIDContextKey, params.ToolCallID)
+	ctx = context.WithValue(ctx, tools.WorkingDirContextKey, sessionWorkingDir)
 	ctx = toolruntime.WithSessionID(ctx, subSession.ID)
 	ctx = toolruntime.WithToolCallID(ctx, params.ToolCallID)
 	ctx = withAgentPolicyContext(ctx, config.Agent{
 		Memory:     params.AgentMemory,
-		Isolation:  params.AgentIsolation,
+		Isolation:  effectiveIsolation,
 		Background: params.AgentBackground,
 	})
 	if params.DelegationMailbox != "" {
@@ -2464,6 +2481,226 @@ func withAgentPolicyContext(ctx context.Context, agentCfg config.Agent) context.
 		ctx = context.WithValue(ctx, tools.AgentBackgroundContextKey, *agentCfg.Background)
 	}
 	return ctx
+}
+
+func (c *coordinator) prepareSubagentWorkspace(ctx context.Context, parentSession, subSession session.Session, requestedIsolation string) (session.Session, string, string, error) {
+	effectiveIsolation := strings.ToLower(strings.TrimSpace(requestedIsolation))
+	if effectiveIsolation == "" {
+		effectiveIsolation = "session"
+	}
+
+	sessionWorkingDir := strings.TrimSpace(parentSession.WorkspaceCWD)
+	if sessionWorkingDir == "" {
+		sessionWorkingDir = c.cfg.WorkingDir()
+	}
+
+	if effectiveIsolation != "worktree" {
+		if strings.TrimSpace(subSession.WorkspaceCWD) == "" {
+			subSession.WorkspaceCWD = sessionWorkingDir
+			updatedSession, saveErr := c.sessions.Save(ctx, subSession)
+			if saveErr != nil {
+				return subSession, "", effectiveIsolation, fmt.Errorf("save subagent session workspace cwd: %w", saveErr)
+			}
+			subSession = updatedSession
+		}
+		return subSession, sessionWorkingDir, effectiveIsolation, nil
+	}
+
+	worktreeDir, err := c.createSubagentWorktreeDir(sessionWorkingDir, subSession.ID)
+	if err != nil {
+		slog.Warn("Worktree isolation unavailable, falling back to session isolation", "session", subSession.ID, "error", err)
+		effectiveIsolation = "session"
+		if strings.TrimSpace(subSession.WorkspaceCWD) == "" {
+			subSession.WorkspaceCWD = sessionWorkingDir
+			updatedSession, saveErr := c.sessions.Save(ctx, subSession)
+			if saveErr != nil {
+				return subSession, "", effectiveIsolation, fmt.Errorf("save subagent fallback workspace cwd: %w", saveErr)
+			}
+			subSession = updatedSession
+		}
+		return subSession, sessionWorkingDir, effectiveIsolation, nil
+	}
+
+	subSession.WorkspaceCWD = worktreeDir
+	updatedSession, saveErr := c.sessions.Save(ctx, subSession)
+	if saveErr != nil {
+		return subSession, "", effectiveIsolation, fmt.Errorf("save subagent worktree workspace cwd: %w", saveErr)
+	}
+	return updatedSession, worktreeDir, effectiveIsolation, nil
+}
+
+func (c *coordinator) createSubagentWorktreeDir(baseDir, subSessionID string) (string, error) {
+	baseDir = strings.TrimSpace(baseDir)
+	if baseDir == "" {
+		return "", fmt.Errorf("base directory is empty")
+	}
+
+	cmd := exec.Command("git", "-C", baseDir, "rev-parse", "--show-toplevel")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("resolve git root: %w", err)
+	}
+	gitRoot := strings.TrimSpace(string(output))
+	if gitRoot == "" {
+		return "", fmt.Errorf("git root is empty")
+	}
+
+	slug := strings.ReplaceAll(subSessionID, "$$", "-")
+	slug = strings.ReplaceAll(slug, "/", "-")
+	if len(slug) > 40 {
+		slug = slug[:40]
+	}
+	branchName := fmt.Sprintf("crush-agent-%s", slug)
+	worktreeRoot := filepath.Join(gitRoot, ".crush", "worktrees")
+	worktreeDir := filepath.Join(worktreeRoot, branchName)
+	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
+		return "", fmt.Errorf("create worktree root: %w", err)
+	}
+
+	if info, statErr := os.Stat(worktreeDir); statErr == nil && info.IsDir() {
+		return worktreeDir, nil
+	}
+
+	addCmd := exec.Command("git", "-C", gitRoot, "worktree", "add", "-B", branchName, worktreeDir, "HEAD")
+	addOutput, addErr := addCmd.CombinedOutput()
+	if addErr != nil {
+		return "", fmt.Errorf("create worktree: %w: %s", addErr, strings.TrimSpace(string(addOutput)))
+	}
+	return worktreeDir, nil
+}
+
+// removeSubagentWorktree removes a worktree directory and its branch.
+func (c *coordinator) removeSubagentWorktree(worktreeDir string) error {
+	worktreeDir = strings.TrimSpace(worktreeDir)
+	if worktreeDir == "" {
+		return nil
+	}
+
+	if _, err := os.Stat(worktreeDir); os.IsNotExist(err) {
+		return nil
+	}
+
+	// Use --git-common-dir to find the main repo root (works correctly in worktrees)
+	// In a worktree, --show-toplevel returns the worktree's own root, not the main repo.
+	cmd := exec.Command("git", "-C", worktreeDir, "rev-parse", "--git-common-dir")
+	output, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("resolve git common dir: %w", err)
+	}
+	gitCommonDir := strings.TrimSpace(string(output))
+	if gitCommonDir == "" {
+		return fmt.Errorf("git common dir is empty")
+	}
+
+	// Resolve relative path if needed.
+	if !filepath.IsAbs(gitCommonDir) {
+		gitCommonDir = filepath.Join(worktreeDir, gitCommonDir)
+	}
+
+	// Navigate from .git/worktrees/<name> to the main repo's .git, then to repo root.
+	gitDir := filepath.Clean(gitCommonDir)
+	if filepath.Base(filepath.Dir(gitDir)) == "worktrees" {
+		gitDir = filepath.Dir(filepath.Dir(gitDir))
+	}
+	gitRoot := filepath.Dir(gitDir)
+
+	branchName := filepath.Base(worktreeDir)
+
+	removeCmd := exec.Command("git", "-C", gitRoot, "worktree", "remove", "--force", worktreeDir)
+	if output, err := removeCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("remove worktree %s: %w, output: %s", worktreeDir, err, string(output))
+	}
+
+	branchCmd := exec.Command("git", "-C", gitRoot, "branch", "-D", branchName)
+	if output, err := branchCmd.CombinedOutput(); err != nil {
+		slog.Debug("Failed to delete worktree branch (may not exist)", "branch", branchName, "error", err, "output", string(output))
+	}
+
+	return nil
+}
+
+// hasWorktreeChanges checks if a worktree has uncommitted changes.
+func (c *coordinator) hasWorktreeChanges(worktreeDir string) (bool, error) {
+	cmd := exec.Command("git", "-C", worktreeDir, "status", "--porcelain")
+	output, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("check worktree status: %w", err)
+	}
+	return len(strings.TrimSpace(string(output))) > 0, nil
+}
+
+// cleanupWorktreeIfNeeded removes a worktree if it has no changes.
+func (c *coordinator) cleanupWorktreeIfNeeded(worktreeDir string) {
+	worktreeDir = strings.TrimSpace(worktreeDir)
+	if worktreeDir == "" {
+		return
+	}
+
+	hasChanges, err := c.hasWorktreeChanges(worktreeDir)
+	if err != nil {
+		slog.Warn("Failed to check worktree changes, skipping cleanup", "path", worktreeDir, "error", err)
+		return
+	}
+
+	if hasChanges {
+		slog.Debug("Worktree has changes, preserving", "path", worktreeDir)
+		return
+	}
+
+	if err := c.removeSubagentWorktree(worktreeDir); err != nil {
+		slog.Warn("Failed to cleanup worktree", "path", worktreeDir, "error", err)
+	}
+}
+
+// CleanupStaleWorktrees removes worktrees older than the cutoff duration.
+func (c *coordinator) CleanupStaleWorktrees(ctx context.Context, cutoffDays int) error {
+	workingDir := c.cfg.WorkingDir()
+
+	cmd := exec.Command("git", "-C", workingDir, "rev-parse", "--show-toplevel")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	gitRoot := strings.TrimSpace(string(output))
+
+	worktreesDir := filepath.Join(gitRoot, ".crush", "worktrees")
+	entries, err := os.ReadDir(worktreesDir)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read worktrees directory: %w", err)
+	}
+
+	cutoffTime := time.Now().AddDate(0, 0, -cutoffDays)
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		worktreePath := filepath.Join(worktreesDir, entry.Name())
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+
+		if info.ModTime().Before(cutoffTime) {
+			hasChanges, chkErr := c.hasWorktreeChanges(worktreePath)
+			if chkErr != nil {
+				slog.Warn("Failed to check worktree changes, skipping cleanup", "path", worktreePath, "error", chkErr)
+				continue
+			}
+			if !hasChanges {
+				if err := c.removeSubagentWorktree(worktreePath); err != nil {
+					slog.Warn("Failed to cleanup stale worktree", "path", worktreePath, "error", err)
+				} else {
+					slog.Debug("Cleaned up stale worktree", "path", worktreePath)
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 func withSubtaskToolResponseMetadata(response fantasy.ToolResponse, parentToolCallID, childSessionID, parentMessageID string, status message.ToolResultSubtaskStatus) fantasy.ToolResponse {

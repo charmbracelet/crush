@@ -241,6 +241,9 @@ func TestCreateTaskSessionInheritsParentModes(t *testing.T) {
 
 	parent, err := svc.Create(context.Background(), "Parent")
 	require.NoError(t, err)
+	parent.WorkspaceCWD = t.TempDir()
+	parent, err = svc.Save(context.Background(), parent)
+	require.NoError(t, err)
 	_, err = svc.UpdateCollaborationMode(context.Background(), parent.ID, CollaborationModePlan)
 	require.NoError(t, err)
 	_, err = svc.UpdatePermissionMode(context.Background(), parent.ID, PermissionModeYolo)
@@ -249,6 +252,7 @@ func TestCreateTaskSessionInheritsParentModes(t *testing.T) {
 	child, err := svc.CreateTaskSession(context.Background(), "tool-1", parent.ID, "Child")
 	require.NoError(t, err)
 	require.Equal(t, parent.ID, child.ParentSessionID)
+	require.Equal(t, parent.WorkspaceCWD, child.WorkspaceCWD)
 	require.Equal(t, CollaborationModePlan, child.CollaborationMode)
 	require.Equal(t, PermissionModeYolo, child.PermissionMode)
 }

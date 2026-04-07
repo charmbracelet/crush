@@ -494,6 +494,43 @@ func TestRunSubAgent(t *testing.T) {
 		require.NoError(t, err)
 	})
 
+	t.Run("falls back from worktree isolation and propagates workspace cwd", func(t *testing.T) {
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, providerID, providerCfg)
+
+		parentSession, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+		parentSession.WorkspaceCWD = env.workingDir
+		parentSession, err = env.sessions.Save(t.Context(), parentSession)
+		require.NoError(t, err)
+
+		agent := newMockAgent(providerID, 4096, func(ctx context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+			require.Equal(t, "session", agenttools.GetAgentIsolationFromContext(ctx))
+			require.Equal(t, env.workingDir, agenttools.GetWorkingDirFromContext(ctx))
+			return agentResultWithText("ok"), nil
+		})
+
+		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:           agent,
+			SessionID:       parentSession.ID,
+			AgentMessageID:  "msg-1",
+			ParentMessageID: "msg-1",
+			ToolCallID:      "call-worktree",
+			Prompt:          "test",
+			SessionTitle:    "Test",
+			AgentIsolation:  "worktree",
+		})
+		require.NoError(t, err)
+
+		subtask, ok := message.ParseToolResultSubtaskResult(resp.Metadata)
+		require.True(t, ok)
+		require.NotEmpty(t, subtask.ChildSessionID)
+
+		childSession, err := env.sessions.Get(t.Context(), subtask.ChildSessionID)
+		require.NoError(t, err)
+		require.Equal(t, env.workingDir, childSession.WorkspaceCWD)
+	})
+
 	t.Run("clears inherited parent runtime config before subagent run", func(t *testing.T) {
 		env := testEnv(t)
 		coord := newTestCoordinator(t, env, providerID, providerCfg)

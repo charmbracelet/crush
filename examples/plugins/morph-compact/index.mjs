@@ -87,7 +87,7 @@ function recordCompaction(sessionId, charsBefore, charsAfter, ms, compactedCount
       timestamp: Date.now(),
       charsBefore,
       charsAfter,
-      ratio: charsAfter / charsBefore,
+      ratio: charsBefore > 0 ? charsAfter / charsBefore : 0,
       ms,
       compactedCount,
       frozenCount,
@@ -297,71 +297,94 @@ async function handleChatMessagesTransform(id, input, output) {
     ? input.model.context_window
     : defaultModelContextTokens;
 
-  const state = stateMap.get(sessionId);
-  if (!allowCompaction) {
-    if (!state) {
-      return writeResponse({ id, output });
-    }
-    const validFrozenMessages = Array.isArray(state.frozenMessages) ? state.frozenMessages : [];
-    const rawIndex = Number.isInteger(state.compactedUpToIndex) ? state.compactedUpToIndex : 0;
-    const staleState = rawIndex < 0 || rawIndex > messages.length;
-    if (staleState) {
-      stateMap.delete(sessionId);
-      return writeResponse({ id, output });
-    }
-    const uncompacted = messages.slice(rawIndex);
-    return writeResponse({ id, output: { ...output, messages: [...validFrozenMessages, ...uncompacted] } });
-  }
   const charThreshold = compactTokenLimit
     ? compactTokenLimit * charsPerToken
     : modelContextTokens * compactContextThreshold * charsPerToken;
 
-  if (state) {
-    const validFrozenMessages = Array.isArray(state.frozenMessages) ? state.frozenMessages : [];
-    const validFrozenChars = Number.isFinite(state.frozenChars) ? state.frozenChars : estimateTotalChars(validFrozenMessages);
-    const rawIndex = Number.isInteger(state.compactedUpToIndex) ? state.compactedUpToIndex : 0;
-    const staleState = rawIndex < 0 || rawIndex > messages.length;
-    const frozenMessages = staleState ? [] : validFrozenMessages;
-    const frozenChars = staleState ? 0 : validFrozenChars;
-    const compactedUpToIndex = staleState ? 0 : rawIndex;
-    if (staleState) {
-      stateMap.set(sessionId, {
-        frozenMessages,
-        compactedUpToIndex,
-        frozenChars,
-      });
+  const state = stateMap.get(sessionId);
+
+  // Check if we have frozen messages from previous compaction
+  if (state && Array.isArray(state.frozenMessages) && state.frozenMessages.length > 0) {
+    // Build a map from original IDs to their compacted versions
+    // frozenMessages contains messages with morph-compact- prefixed IDs
+    // We need to match incoming messages by their original ID (stored in the compacted message)
+    const originalToCompacted = new Map();
+    for (const msg of state.frozenMessages) {
+      // The ID format is: morph-compact-<originalId>
+      // Extract the original ID
+      let originalId = msg.id;
+      if (originalId.startsWith("morph-compact-")) {
+        originalId = originalId.slice("morph-compact-".length);
+      }
+      originalToCompacted.set(originalId, msg);
+      // Also map the compacted ID to itself for direct matching
+      originalToCompacted.set(msg.id, msg);
     }
 
-    const uncompacted = messages.slice(compactedUpToIndex);
-    const effectiveChars = frozenChars + estimateTotalChars(uncompacted);
-    if (effectiveChars < charThreshold) {
-      return writeResponse({ id, output: { ...output, messages: [...frozenMessages, ...uncompacted] } });
+    // Separate messages into: already compacted (use frozen version) vs truly new
+    const frozenMessages = [];
+    const newMessages = [];
+
+    for (const msg of messages) {
+      const compacted = originalToCompacted.get(msg.id);
+      if (compacted) {
+        // Use the compacted version instead of the original
+        frozenMessages.push(compacted);
+      } else {
+        // This is a new message we haven't seen
+        newMessages.push(msg);
+      }
     }
-    if (uncompacted.length <= compactPreserveRecent) {
-      return writeResponse({ id, output: { ...output, messages: [...frozenMessages, ...uncompacted] } });
+
+    // Combine frozen (compacted) + new messages
+    const combinedMessages = [...frozenMessages, ...newMessages];
+
+    if (!allowCompaction) {
+      return writeResponse({ id, output: { ...output, messages: combinedMessages } });
     }
-    const next = await compactMessages(sessionId, messages, uncompacted, false);
-    return writeResponse({ id, output: { ...output, messages: next } });
+
+    // Check if compaction is needed
+    const totalChars = estimateTotalChars(combinedMessages);
+    if (totalChars < charThreshold) {
+      return writeResponse({ id, output: { ...output, messages: combinedMessages } });
+    }
+
+    // Only compact the new messages (not already frozen ones)
+    if (newMessages.length <= compactPreserveRecent) {
+      return writeResponse({ id, output: { ...output, messages: combinedMessages } });
+    }
+
+    // Compact new messages
+    const compactedNew = await compactNewMessages(sessionId, frozenMessages, estimateTotalChars(frozenMessages), newMessages, charThreshold);
+    return writeResponse({ id, output: { ...output, messages: compactedNew } });
   }
 
-  if (estimateTotalChars(messages) < charThreshold) {
+  // No previous frozen messages - check if compaction is needed
+  if (!allowCompaction) {
     return writeResponse({ id, output });
   }
 
-  const next = await compactMessages(sessionId, messages, messages, true);
+  const totalChars = estimateTotalChars(messages);
+  if (totalChars < charThreshold) {
+    return writeResponse({ id, output });
+  }
+
+  // First-time compaction
+  const next = await compactMessages(sessionId, messages);
   return writeResponse({ id, output: { ...output, messages: next } });
 }
 
-async function compactMessages(sessionId, allMessages, sourceMessages, firstCompaction) {
-  const toCompact = sourceMessages.slice(0, -compactPreserveRecent);
-  const recent = sourceMessages.slice(-compactPreserveRecent);
+async function compactMessages(sessionId, messages) {
+  // First-time compaction: compact all but recent messages
+  const toCompact = messages.slice(0, -compactPreserveRecent);
+  const recent = messages.slice(-compactPreserveRecent);
   if (toCompact.length === 0) {
-    return allMessages;
+    return messages;
   }
 
   const compactInput = messagesToCompactInput(toCompact);
   if (compactInput.length === 0) {
-    return allMessages;
+    return messages;
   }
 
   const charsBefore = estimateTotalChars(toCompact);
@@ -376,28 +399,121 @@ async function compactMessages(sessionId, allMessages, sourceMessages, firstComp
     const ms = Date.now() - startMs;
     const frozen = buildCompactedMessages(toCompact, result, sessionId);
     const frozenChars = estimateTotalChars(frozen);
-    const compactedUpToIndex = allMessages.length - recent.length;
+
+    // All messages we return (frozen + recent) become the "known" set for next time
+    const returnedMessages = [...frozen, ...recent];
+    const returnedChars = frozenChars + estimateTotalChars(recent);
+
+    // Store only frozen (compacted) messages for future incremental compaction
+    // Recent messages are NOT stored - they will be re-evaluated next time
     stateMap.set(sessionId, {
       frozenMessages: frozen,
-      compactedUpToIndex,
       frozenChars,
     });
 
-    const nextMessages = [...frozen, ...recent];
     const messagesBefore = saveCompactionText ? toCompact : undefined;
     const messagesAfter = saveCompactionText ? frozen : undefined;
 
-    // 记录统计
     recordCompaction(sessionId, charsBefore, frozenChars, ms, toCompact.length, frozen.length, recent.length, result, messagesBefore, messagesAfter);
 
-    return nextMessages;
+    return returnedMessages;
   } catch {
-    const state = stateMap.get(sessionId);
-    if (state) {
-      const uncompacted = allMessages.slice(state.compactedUpToIndex);
-      return [...state.frozenMessages, ...uncompacted];
-    }
-    return allMessages;
+    return messages;
+  }
+}
+
+async function compactNewMessages(sessionId, existingFrozen, existingFrozenChars, newMessages, charThreshold) {
+  // Check if we need to compact new messages
+  const newChars = estimateTotalChars(newMessages);
+  const totalChars = existingFrozenChars + newChars;
+
+  if (totalChars < charThreshold) {
+    // No compaction needed, return frozen + new
+    const returned = [...existingFrozen, ...newMessages];
+    // Only store frozen messages in state
+    stateMap.set(sessionId, {
+      frozenMessages: existingFrozen,
+      frozenChars: existingFrozenChars,
+    });
+    return returned;
+  }
+
+  if (newMessages.length <= compactPreserveRecent) {
+    // Not enough new messages to compact
+    const returned = [...existingFrozen, ...newMessages];
+    // Only store frozen messages in state
+    stateMap.set(sessionId, {
+      frozenMessages: existingFrozen,
+      frozenChars: existingFrozenChars,
+    });
+    return returned;
+  }
+
+  // Compact new messages
+  const toCompact = newMessages.slice(0, -compactPreserveRecent);
+  const recent = newMessages.slice(-compactPreserveRecent);
+
+  if (toCompact.length === 0) {
+    // Nothing to compact, only store frozen messages
+    stateMap.set(sessionId, {
+      frozenMessages: existingFrozen,
+      frozenChars: existingFrozenChars,
+    });
+    return [...existingFrozen, ...newMessages];
+  }
+
+  const compactInput = messagesToCompactInput(toCompact);
+  if (compactInput.length === 0) {
+    // Nothing to compact, only store frozen messages
+    stateMap.set(sessionId, {
+      frozenMessages: existingFrozen,
+      frozenChars: existingFrozenChars,
+    });
+    return [...existingFrozen, ...newMessages];
+  }
+
+  const charsBefore = estimateTotalChars(toCompact);
+  const startMs = Date.now();
+
+  try {
+    const result = await compactClient.compact({
+      messages: compactInput,
+      compressionRatio: compactRatio,
+      preserveRecent: 0,
+    });
+    const ms = Date.now() - startMs;
+    const newFrozen = buildCompactedMessages(toCompact, result, sessionId);
+    const newFrozenChars = estimateTotalChars(newFrozen);
+
+    // Merge with existing frozen messages
+    const combinedFrozen = [...existingFrozen, ...newFrozen];
+    const recentChars = estimateTotalChars(recent);
+    const combinedChars = existingFrozenChars + newFrozenChars + recentChars;
+
+    // All returned messages (combinedFrozen + recent) become the new known set
+    const returnedMessages = [...combinedFrozen, ...recent];
+
+    // Only update state if we actually compacted something
+    // Store only frozen messages - recent ones will be re-evaluated next time
+    stateMap.set(sessionId, {
+      frozenMessages: combinedFrozen,
+      frozenChars: existingFrozenChars + newFrozenChars,
+    });
+
+    const messagesBefore = saveCompactionText ? toCompact : undefined;
+    const messagesAfter = saveCompactionText ? newFrozen : undefined;
+
+    recordCompaction(sessionId, charsBefore, newFrozenChars, ms, toCompact.length, newFrozen.length, recent.length, result, messagesBefore, messagesAfter);
+
+    return returnedMessages;
+  } catch {
+    // On error, return frozen + new messages without compaction
+    // Only store frozen messages - new messages will be re-evaluated next time
+    stateMap.set(sessionId, {
+      frozenMessages: existingFrozen,
+      frozenChars: existingFrozenChars,
+    });
+    return [...existingFrozen, ...newMessages];
   }
 }
 
@@ -419,7 +535,16 @@ function buildCompactedMessages(originalMessages, result, sessionId) {
 }
 
 function buildSyntheticMessage(original, text, sessionId, role) {
-  const sourceId = original?.id || createHash("sha256").update(text).digest("hex").slice(0, 12);
+  // Use original ID (without morph-compact prefix) as source
+  let sourceId = original?.id || "";
+  // If already a morph-compact ID, extract the original part
+  if (sourceId.startsWith("morph-compact-")) {
+    sourceId = sourceId.slice("morph-compact-".length);
+  }
+  // If no valid ID, generate from text hash
+  if (!sourceId) {
+    sourceId = createHash("sha256").update(text).digest("hex").slice(0, 12);
+  }
   return {
     ...original,
     id: `morph-compact-${sourceId}`,
@@ -492,6 +617,8 @@ function estimateTotalChars(messages) {
     for (const part of message.parts || []) {
       if (part.type === "text") {
         total += (part.data?.text || "").length;
+      } else if (part.type === "reasoning") {
+        total += (part.data?.thinking || "").length;
       } else if (part.type === "tool_call") {
         total += serializeField(part.data?.input).length;
       } else if (part.type === "tool_result") {

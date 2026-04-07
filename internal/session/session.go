@@ -330,10 +330,13 @@ func (s *service) CreateTaskSession(ctx context.Context, toolCallID, parentSessi
 	}
 
 	dbSession, err := s.q.CreateSession(ctx, db.CreateSessionParams{
-		ID:                   toolCallID,
-		ParentSessionID:      sql.NullString{String: parentSessionID, Valid: true},
-		Title:                title,
-		WorkspaceCwd:         sql.NullString{},
+		ID:              toolCallID,
+		ParentSessionID: sql.NullString{String: parentSessionID, Valid: true},
+		Title:           title,
+		WorkspaceCwd: sql.NullString{
+			String: parentSession.WorkspaceCWD,
+			Valid:  parentSession.WorkspaceCWD != "",
+		},
 		CollaborationMode:    string(parentSession.CollaborationMode),
 		PermissionMode:       string(parentSession.PermissionMode),
 		Kind:                 string(KindNormal),

@@ -859,11 +859,32 @@ func ProjectSkillsDir(workingDir string) []string {
 
 func isAppleTerminal() bool { return os.Getenv("TERM_PROGRAM") == "Apple_Terminal" }
 
-// ValidateHooks compiles matcher regexes for all configured hooks and returns
-// an error if any regex is invalid.
+// normalizeHookEvent maps user-provided event names to their canonical
+// form. Matching is case-insensitive and accepts snake_case variants
+// (e.g. "pre_tool_use" → "PreToolUse").
+func normalizeHookEvent(name string) string {
+	switch strings.ToLower(strings.ReplaceAll(name, "_", "")) {
+	case "pretooluse":
+		return "PreToolUse"
+	default:
+		return name
+	}
+}
+
+// ValidateHooks normalizes event names and compiles matcher regexes for all
+// configured hooks. Returns an error if any regex is invalid.
 func (c *Config) ValidateHooks() error {
-	for event, hooks := range c.Hooks {
-		for i := range hooks {
+	// Normalize event name keys.
+	for event, eventHooks := range c.Hooks {
+		canonical := normalizeHookEvent(event)
+		if canonical != event {
+			c.Hooks[canonical] = append(c.Hooks[canonical], eventHooks...)
+			delete(c.Hooks, event)
+		}
+	}
+
+	for event, eventHooks := range c.Hooks {
+		for i := range eventHooks {
 			h := &c.Hooks[event][i]
 			if h.Command == "" {
 				return fmt.Errorf("hook %s[%d]: command is required", event, i)

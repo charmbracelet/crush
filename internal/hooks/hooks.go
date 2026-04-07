@@ -19,6 +19,17 @@ const (
 	DecisionDeny
 )
 
+func (d Decision) String() string {
+	switch d {
+	case DecisionAllow:
+		return "allow"
+	case DecisionDeny:
+		return "deny"
+	default:
+		return "none"
+	}
+}
+
 // HookResult holds the parsed output of a single hook execution.
 type HookResult struct {
 	Decision Decision

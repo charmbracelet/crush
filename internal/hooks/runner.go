@@ -61,7 +61,14 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 	}
 	wg.Wait()
 
-	return aggregate(results), nil
+	agg := aggregate(results)
+	slog.Info("Hook completed",
+		"event", eventName,
+		"tool", toolName,
+		"hooks", len(deduped),
+		"decision", agg.Decision.String(),
+	)
+	return agg, nil
 }
 
 // matchingHooks returns hooks whose matcher matches the tool name (or has
@@ -129,5 +136,10 @@ func (r *Runner) runOne(parentCtx context.Context, hook config.HookConfig, envVa
 	}
 
 	// Exit code 0 — parse stdout JSON.
-	return parseStdout(stdout.String())
+	result := parseStdout(stdout.String())
+	slog.Debug("Hook executed",
+		"command", hook.Command,
+		"decision", result.Decision.String(),
+	)
+	return result
 }

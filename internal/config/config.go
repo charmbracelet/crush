@@ -9,6 +9,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -369,6 +370,35 @@ func (t ToolGrep) GetTimeout() time.Duration {
 	return ptrValOr(t.Timeout, 5*time.Second)
 }
 
+// HookConfig defines a user-configured shell command that fires on a hook
+// event (e.g. PreToolUse).
+type HookConfig struct {
+	// Regex pattern tested against the tool name. Empty means match all.
+	Matcher string `json:"matcher,omitempty" jsonschema:"description=Regex pattern tested against the tool name. Empty means match all tools."`
+	// Shell command to execute.
+	Command string `json:"command" jsonschema:"required,description=Shell command to execute when the hook fires"`
+	// Timeout in seconds. Default 30.
+	Timeout int `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for the hook command,default=30"`
+
+	// Compiled matcher regex. Not serialized.
+	matcherRegex *regexp.Regexp
+}
+
+// MatcherRegex returns the compiled matcher regex, or nil if no matcher is
+// set.
+func (h *HookConfig) MatcherRegex() *regexp.Regexp {
+	return h.matcherRegex
+}
+
+// TimeoutDuration returns the hook timeout as a time.Duration, defaulting
+// to 30s.
+func (h *HookConfig) TimeoutDuration() time.Duration {
+	if h.Timeout <= 0 {
+		return 30 * time.Second
+	}
+	return time.Duration(h.Timeout) * time.Second
+}
+
 // Config holds the configuration for crush.
 type Config struct {
 	Schema string `json:"$schema,omitempty"`
@@ -391,6 +421,8 @@ type Config struct {
 	Permissions *Permissions `json:"permissions,omitempty" jsonschema:"description=Permission settings for tool usage"`
 
 	Tools Tools `json:"tools,omitzero" jsonschema:"description=Tool configurations"`
+
+	Hooks map[string][]HookConfig `json:"hooks,omitempty" jsonschema:"description=User-defined shell commands that fire on hook events (e.g. PreToolUse)"`
 
 	Agents map[string]Agent `json:"-"`
 }

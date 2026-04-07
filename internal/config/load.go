@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strconv"
@@ -61,6 +62,12 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 			cfg.setDefaults(workingDir, dataDir)
 			store.config = cfg
 		}
+	}
+
+	// Validate hooks after all config merging is complete so workspace
+	// hooks also get their matcher regexes compiled.
+	if err := cfg.ValidateHooks(); err != nil {
+		return nil, fmt.Errorf("invalid hook configuration: %w", err)
 	}
 
 	if !isInsideWorktree() {
@@ -851,3 +858,24 @@ func ProjectSkillsDir(workingDir string) []string {
 }
 
 func isAppleTerminal() bool { return os.Getenv("TERM_PROGRAM") == "Apple_Terminal" }
+
+// ValidateHooks compiles matcher regexes for all configured hooks and returns
+// an error if any regex is invalid.
+func (c *Config) ValidateHooks() error {
+	for event, hooks := range c.Hooks {
+		for i := range hooks {
+			h := &c.Hooks[event][i]
+			if h.Command == "" {
+				return fmt.Errorf("hook %s[%d]: command is required", event, i)
+			}
+			if h.Matcher != "" {
+				re, err := regexp.Compile(h.Matcher)
+				if err != nil {
+					return fmt.Errorf("hook %s[%d]: invalid matcher regex %q: %w", event, i, h.Matcher, err)
+				}
+				h.matcherRegex = re
+			}
+		}
+	}
+	return nil
+}

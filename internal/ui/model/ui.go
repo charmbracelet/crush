@@ -2964,7 +2964,7 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 			}
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
-				Msg:  fmt.Sprintf("Failed to run agent: %v", err),
+				Msg:  fmt.Sprintf("%v", err),
 			}
 		}
 		return nil

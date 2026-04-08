@@ -71,4 +71,5 @@ type Session struct {
 	HandoffDraftPrompt     string         `json:"handoff_draft_prompt"`
 	HandoffRelevantFiles   string         `json:"handoff_relevant_files"`
 	PermissionMode         string         `json:"permission_mode"`
+	LastSummaryAt          sql.NullInt64  `json:"last_summary_at"`
 }

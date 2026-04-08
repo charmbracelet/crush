@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/env"
+	"github.com/charmbracelet/crushcl/internal/csync"
+	"github.com/charmbracelet/crushcl/internal/env"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

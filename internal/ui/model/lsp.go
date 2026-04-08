@@ -7,10 +7,10 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/ui/styles"
-	"github.com/charmbracelet/crush/internal/workspace"
+	"github.com/charmbracelet/crushcl/internal/lsp"
+	"github.com/charmbracelet/crushcl/internal/ui/common"
+	"github.com/charmbracelet/crushcl/internal/ui/styles"
+	"github.com/charmbracelet/crushcl/internal/workspace"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 

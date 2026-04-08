@@ -22,20 +22,20 @@ import (
 	fang "charm.land/fang/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
-	"github.com/charmbracelet/crush/internal/app"
-	"github.com/charmbracelet/crush/internal/client"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/db"
-	"github.com/charmbracelet/crush/internal/event"
-	crushlog "github.com/charmbracelet/crush/internal/log"
-	"github.com/charmbracelet/crush/internal/projects"
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/server"
-	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/crush/internal/ui/common"
-	ui "github.com/charmbracelet/crush/internal/ui/model"
-	"github.com/charmbracelet/crush/internal/version"
-	"github.com/charmbracelet/crush/internal/workspace"
+	"github.com/charmbracelet/crushcl/internal/app"
+	"github.com/charmbracelet/crushcl/internal/client"
+	"github.com/charmbracelet/crushcl/internal/config"
+	"github.com/charmbracelet/crushcl/internal/db"
+	"github.com/charmbracelet/crushcl/internal/event"
+	crushlog "github.com/charmbracelet/crushcl/internal/log"
+	"github.com/charmbracelet/crushcl/internal/projects"
+	"github.com/charmbracelet/crushcl/internal/proto"
+	"github.com/charmbracelet/crushcl/internal/server"
+	"github.com/charmbracelet/crushcl/internal/session"
+	"github.com/charmbracelet/crushcl/internal/ui/common"
+	ui "github.com/charmbracelet/crushcl/internal/ui/model"
+	"github.com/charmbracelet/crushcl/internal/version"
+	"github.com/charmbracelet/crushcl/internal/workspace"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
@@ -54,7 +54,11 @@ func init() {
 	rootCmd.Flags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
 	rootCmd.Flags().StringP("session", "s", "", "Continue a previous session by ID")
 	rootCmd.Flags().BoolP("continue", "C", false, "Continue the most recent session")
+	rootCmd.Flags().BoolP("cl", "", false, "Force using CL Native executor (CrushCL native mode)")
+	rootCmd.Flags().BoolP("cc", "", false, "Force using Claude Code executor")
+	rootCmd.Flags().BoolP("hybrid", "", false, "Use hybrid mode with auto-selection (default)")
 	rootCmd.MarkFlagsMutuallyExclusive("session", "continue")
+	rootCmd.MarkFlagsMutuallyExclusive("cl", "cc", "hybrid")
 
 	rootCmd.AddCommand(
 		runCmd,
@@ -66,41 +70,66 @@ func init() {
 		loginCmd,
 		statsCmd,
 		sessionCmd,
+		crushclCmd,
 	)
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "crush",
-	Short: "A terminal-first AI assistant for software development",
-	Long:  "A glamorous, terminal-first AI assistant for software development and adjacent tasks",
+	Use:   "crushcl",
+	Short: "crushcl: A terminal-first AI assistant for software development",
+	Long:  "crushcl is a glamorous, terminal-first AI assistant for software development and adjacent tasks",
 	Example: `
-# Run in interactive mode
-crush
+ # Run in interactive mode
+ crushcl
 
-# Run non-interactively
-crush run "Guess my 5 favorite Pokémon"
+ # Run non-interactively
+ crushcl run "Guess my 5 favorite Pokémon"
 
-# Run a non-interactively with pipes and redirection
-cat README.md | crush run "make this more glamorous" > GLAMOROUS_README.md
+ # Run a non-interactively with pipes and redirection
+ cat README.md | crushcl run "make this more glamorous" > GLAMOROUS_README.md
 
-# Run with debug logging in a specific directory
-crush --debug --cwd /path/to/project
+ # Run with debug logging in a specific directory
+ crushcl --debug --cwd /path/to/project
 
-# Run in yolo mode (auto-accept all permissions; use with care)
-crush --yolo
+ # Run in yolo mode (auto-accept all permissions; use with care)
+ crushcl --yolo
 
-# Run with custom data directory
-crush --data-dir /path/to/custom/.crush
+ # Run with custom data directory
+ crushcl --data-dir /path/to/custom/.crush
 
-# Continue a previous session
-crush --session {session-id}
+ # Continue a previous session
+ crushcl --session {session-id}
 
-# Continue the most recent session
-crush --continue
-  `,
+ # Continue the most recent session
+ crushcl --continue
+
+ # Force using CL Native executor (CrushCL native mode)
+ crushcl --cl "Analyze this code"
+
+ # Force using Claude Code executor
+ crushcl --cc "Refactor the auth module"
+
+ # Use hybrid mode with auto-selection (default)
+ crushcl --hybrid "Build user authentication"
+   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		sessionID, _ := cmd.Flags().GetString("session")
 		continueLast, _ := cmd.Flags().GetBool("continue")
+
+		// Handle executor flags - set environment variables for execution layer
+		clMode, _ := cmd.Flags().GetBool("cl")
+		ccMode, _ := cmd.Flags().GetBool("cc")
+		hybridMode, _ := cmd.Flags().GetBool("hybrid")
+
+		if clMode {
+			os.Setenv("CRUSH_EXECUTOR_MODE", "cl")
+		} else if ccMode {
+			os.Setenv("CRUSH_EXECUTOR_MODE", "cc")
+		} else if hybridMode {
+			os.Setenv("CRUSH_EXECUTOR_MODE", "hybrid")
+		} else {
+			os.Setenv("CRUSH_EXECUTOR_MODE", "hybrid") // Default to hybrid
+		}
 
 		ws, cleanup, err := setupWorkspaceWithProgressBar(cmd)
 		if err != nil {
@@ -133,7 +162,7 @@ crush --continue
 		if _, err := program.Run(); err != nil {
 			event.Error(err)
 			slog.Error("TUI run error", "error", err)
-			return errors.New("Crush crashed. If metrics are enabled, we were notified about it. If you'd like to report it, please copy the stacktrace above and open an issue at https://github.com/charmbracelet/crush/issues/new?template=bug.yml") //nolint:staticcheck
+			return errors.New("Crush crashed. If metrics are enabled, we were notified about it. If you'd like to report it, please copy the stacktrace above and open an issue at https://github.com/charmbracelet/crushcl/issues/new?template=bug.yml") //nolint:staticcheck
 		}
 		return nil
 	},

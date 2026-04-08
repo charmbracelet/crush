@@ -2,24 +2,22 @@ package model
 
 import (
 	"fmt"
-	"log/slog"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/charmbracelet/crush/internal/home"
-	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/ui/util"
+	"github.com/charmbracelet/crushcl/internal/home"
+	"github.com/charmbracelet/crushcl/internal/ui/common"
+	"github.com/charmbracelet/crushcl/internal/ui/util"
 )
 
 // markProjectInitialized marks the current project as initialized in the config.
 func (m *UI) markProjectInitialized() tea.Msg {
-	// TODO: handle error so we show it in the tui footer
 	err := m.com.Workspace.MarkProjectInitialized()
 	if err != nil {
-		slog.Error(err.Error())
+		return util.NewErrorMsg(err)
 	}
 	return nil
 }

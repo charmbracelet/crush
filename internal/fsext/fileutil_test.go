@@ -28,7 +28,7 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, truncated)
 
-		require.Equal(t, matches, []string{mainGo})
+		require.Equal(t, []string{filepath.ToSlash(mainGo)}, matches)
 	})
 
 	t.Run("finds directories matching pattern", func(t *testing.T) {
@@ -51,7 +51,7 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, truncated)
 
-		require.Equal(t, matches, []string{pkgDir})
+		require.Equal(t, []string{filepath.ToSlash(pkgDir)}, matches)
 	})
 
 	t.Run("finds nested directories with wildcard patterns", func(t *testing.T) {
@@ -147,7 +147,7 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, truncated)
 
-		require.Equal(t, []string{file1}, matches)
+		require.Equal(t, []string{filepath.ToSlash(file1)}, matches)
 	})
 
 	t.Run("returns results sorted by modification time (newest first)", func(t *testing.T) {
@@ -175,7 +175,7 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, truncated)
 
-		require.Equal(t, []string{file3, file2, file1}, matches)
+		require.Equal(t, []string{filepath.ToSlash(file3), filepath.ToSlash(file2), filepath.ToSlash(file1)}, matches)
 	})
 
 	t.Run("handles empty directory", func(t *testing.T) {
@@ -185,7 +185,7 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, truncated)
 		// Even empty directories should return the directory itself
-		require.Equal(t, []string{testDir}, matches)
+		require.Equal(t, []string{filepath.ToSlash(testDir)}, matches)
 	})
 
 	t.Run("handles non-existent search path", func(t *testing.T) {
@@ -232,7 +232,7 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		matches, truncated, err = GlobGitignoreAware("*.txt", testDir, 0)
 		require.NoError(t, err)
 		require.False(t, truncated)
-		require.Equal(t, []string{goodFile}, matches)
+		require.Equal(t, []string{filepath.ToSlash(goodFile)}, matches)
 	})
 
 	t.Run("handles mixed file and directory matching with sorting", func(t *testing.T) {
@@ -264,6 +264,6 @@ func TestGlobWithDoubleStar(t *testing.T) {
 
 		// Results should be sorted by mod time, but we set the oldestFile
 		// to have the most recent mod time
-		require.Equal(t, []string{oldestFile, middleDir, newestFile}, matches)
+		require.Equal(t, []string{filepath.ToSlash(oldestFile), filepath.ToSlash(middleDir), filepath.ToSlash(newestFile)}, matches)
 	})
 }

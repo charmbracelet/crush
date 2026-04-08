@@ -8,10 +8,10 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/table"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/stringext"
-	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/crushcl/internal/config"
+	"github.com/charmbracelet/crushcl/internal/message"
+	"github.com/charmbracelet/crushcl/internal/stringext"
+	"github.com/charmbracelet/crushcl/internal/ui/styles"
 )
 
 // DockerMCPToolMessageItem is a message item that represents a Docker MCP tool call.

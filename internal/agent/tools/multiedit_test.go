@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/history"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crushcl/internal/history"
+	"github.com/charmbracelet/crushcl/internal/permission"
+	"github.com/charmbracelet/crushcl/internal/pubsub"
 	"github.com/stretchr/testify/require"
 )
 

@@ -14,23 +14,24 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
-	"github.com/charmbracelet/crush/internal/agent/hyper"
-	"github.com/charmbracelet/crush/internal/agent/notify"
-	"github.com/charmbracelet/crush/internal/agent/prompt"
-	"github.com/charmbracelet/crush/internal/agent/tools"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/filetracker"
-	"github.com/charmbracelet/crush/internal/history"
-	"github.com/charmbracelet/crush/internal/log"
-	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/oauth/copilot"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crushcl/internal/agent/hyper"
+	"github.com/charmbracelet/crushcl/internal/agent/notify"
+	"github.com/charmbracelet/crushcl/internal/agent/prompt"
+	"github.com/charmbracelet/crushcl/internal/agent/tools"
+	"github.com/charmbracelet/crushcl/internal/config"
+	"github.com/charmbracelet/crushcl/internal/filetracker"
+	"github.com/charmbracelet/crushcl/internal/history"
+	"github.com/charmbracelet/crushcl/internal/log"
+	"github.com/charmbracelet/crushcl/internal/lsp"
+	"github.com/charmbracelet/crushcl/internal/message"
+	"github.com/charmbracelet/crushcl/internal/oauth/copilot"
+	"github.com/charmbracelet/crushcl/internal/permission"
+	"github.com/charmbracelet/crushcl/internal/pubsub"
+	"github.com/charmbracelet/crushcl/internal/session"
 	"golang.org/x/sync/errgroup"
 
 	"charm.land/fantasy/providers/anthropic"
@@ -99,6 +100,7 @@ func NewCoordinator(
 	filetracker filetracker.Service,
 	lspManager *lsp.Manager,
 	notify pubsub.Publisher[notify.Notification],
+	agentType string,
 ) (Coordinator, error) {
 	c := &coordinator{
 		cfg:         cfg,
@@ -112,13 +114,19 @@ func NewCoordinator(
 		agents:      make(map[string]SessionAgent),
 	}
 
-	agentCfg, ok := cfg.Config().Agents[config.AgentCoder]
-	if !ok {
-		return nil, errCoderAgentNotConfigured
+	// Default to AgentCoder if not specified
+	if agentType == "" {
+		agentType = config.AgentCoder
 	}
 
-	// TODO: make this dynamic when we support multiple agents
-	prompt, err := coderPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	agentCfg, ok := cfg.Config().Agents[agentType]
+	if !ok {
+		return nil, fmt.Errorf("agent configuration not found for type: %s", agentType)
+	}
+
+	// Dynamic prompt selection based on agent type
+	promptFn := promptForAgentType(agentType)
+	prompt, err := promptFn(prompt.WithWorkingDir(c.cfg.WorkingDir()))
 	if err != nil {
 		return nil, err
 	}
@@ -128,13 +136,18 @@ func NewCoordinator(
 		return nil, err
 	}
 	c.currentAgent = agent
-	c.agents[config.AgentCoder] = agent
+	c.agents[agentType] = agent
 	return c, nil
 }
 
 // Run implements Coordinator.
 func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
 	if err := c.readyWg.Wait(); err != nil {
+		return nil, err
+	}
+
+	// refresh models before each run
+	if err := c.UpdateModels(ctx); err != nil {
 		return nil, err
 	}
 
@@ -175,7 +188,7 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	}
 
 	run := func() (*fantasy.AgentResult, error) {
-		return c.currentAgent.Run(ctx, SessionAgentCall{
+		result, err := c.currentAgent.Run(ctx, SessionAgentCall{
 			SessionID:        sessionID,
 			Prompt:           prompt,
 			Attachments:      attachments,
@@ -187,6 +200,7 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 			FrequencyPenalty: freqPenalty,
 			PresencePenalty:  presPenalty,
 		})
+		return result, err
 	}
 	result, originalErr := run()
 
@@ -595,15 +609,70 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 		}, nil
 }
 
+// retryTransport wraps an http.RoundTripper with retry logic for transient failures.
+type retryTransport struct {
+	transport  http.RoundTripper
+	maxRetries int
+}
+
+func (rt *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	var resp *http.Response
+	var err error
+
+	for attempt := 0; attempt <= rt.maxRetries; attempt++ {
+		if attempt > 0 {
+			backoff := time.Duration(1<<uint(attempt-1)) * time.Second
+			if backoff > 10*time.Second {
+				backoff = 10 * time.Second
+			}
+			// Add ±50% jitter: modulo full backoff to get 0 to backoff-1, then subtract backoff/2 to center
+			jitter := time.Duration(time.Now().UnixNano()%int64(backoff) - int64(backoff/2))
+			time.Sleep(backoff + jitter)
+		}
+
+		resp, err = rt.transport.RoundTrip(req)
+		if err != nil {
+			continue
+		}
+
+		// Retry on 5xx errors or 429 (rate limit)
+		if resp.StatusCode >= 500 || resp.StatusCode == 429 {
+			resp.Body.Close()
+			continue
+		}
+		return resp, nil
+	}
+
+	// Retries exhausted - if we have a response, close its body and return error
+	var lastStatus int
+	if resp != nil {
+		lastStatus = resp.StatusCode
+		resp.Body.Close()
+	}
+	return nil, fmt.Errorf("retry transport: exhausted %d retries, last status: %d", rt.maxRetries, lastStatus)
+}
+
+// newRetryHTTPClient creates an HTTP client with retry logic for MINIMAX and similar providers.
+func newRetryHTTPClient(maxRetries int) *http.Client {
+	return &http.Client{
+		Transport: &retryTransport{
+			transport:  http.DefaultTransport,
+			maxRetries: maxRetries,
+		},
+		Timeout: 120 * time.Second,
+	}
+}
+
 func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID string) (fantasy.Provider, error) {
 	var opts []anthropic.Option
+	isMiniMax := providerID == string(catwalk.InferenceProviderMiniMax) || providerID == string(catwalk.InferenceProviderMiniMaxChina)
 
 	switch {
 	case strings.HasPrefix(apiKey, "Bearer "):
 		// NOTE: Prevent the SDK from picking up the API key from env.
 		os.Setenv("ANTHROPIC_API_KEY", "")
 		headers["Authorization"] = apiKey
-	case providerID == string(catwalk.InferenceProviderMiniMax) || providerID == string(catwalk.InferenceProviderMiniMaxChina):
+	case isMiniMax:
 		// NOTE: Prevent the SDK from picking up the API key from env.
 		os.Setenv("ANTHROPIC_API_KEY", "")
 		headers["Authorization"] = "Bearer " + apiKey
@@ -620,7 +689,11 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 		opts = append(opts, anthropic.WithBaseURL(baseURL))
 	}
 
-	if c.cfg.Config().Options.Debug {
+	// Use retry client for MINIMAX to handle transient failures
+	if isMiniMax {
+		httpClient := newRetryHTTPClient(3)
+		opts = append(opts, anthropic.WithHTTPClient(httpClient))
+	} else if c.cfg.Config().Options.Debug {
 		httpClient := log.NewHTTPClient()
 		opts = append(opts, anthropic.WithHTTPClient(httpClient))
 	}
@@ -883,18 +956,23 @@ func (c *coordinator) Model() Model {
 }
 
 func (c *coordinator) UpdateModels(ctx context.Context) error {
+	slog.Debug("UpdateModels: starting")
 	// build the models again so we make sure we get the latest config
 	large, small, err := c.buildAgentModels(ctx, false)
 	if err != nil {
+		slog.Debug("UpdateModels: buildAgentModels failed", "err", err)
 		return err
 	}
+	slog.Debug("UpdateModels: buildAgentModels succeeded")
 	c.currentAgent.SetModels(large, small)
 
 	agentCfg, ok := c.cfg.Config().Agents[config.AgentCoder]
 	if !ok {
+		slog.Debug("UpdateModels: AgentCoder not configured")
 		return errCoderAgentNotConfigured
 	}
 
+	slog.Debug("UpdateModels: about to call buildTools")
 	tools, err := c.buildTools(ctx, agentCfg)
 	if err != nil {
 		return err

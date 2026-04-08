@@ -18,26 +18,26 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/crush/internal/agent"
-	"github.com/charmbracelet/crush/internal/agent/notify"
-	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/db"
-	"github.com/charmbracelet/crush/internal/event"
-	"github.com/charmbracelet/crush/internal/filetracker"
-	"github.com/charmbracelet/crush/internal/format"
-	"github.com/charmbracelet/crush/internal/history"
-	"github.com/charmbracelet/crush/internal/log"
-	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/crush/internal/shell"
-	"github.com/charmbracelet/crush/internal/ui/anim"
-	"github.com/charmbracelet/crush/internal/ui/styles"
-	"github.com/charmbracelet/crush/internal/update"
-	"github.com/charmbracelet/crush/internal/version"
+	"github.com/charmbracelet/crushcl/internal/agent"
+	"github.com/charmbracelet/crushcl/internal/agent/notify"
+	"github.com/charmbracelet/crushcl/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crushcl/internal/config"
+	"github.com/charmbracelet/crushcl/internal/db"
+	"github.com/charmbracelet/crushcl/internal/event"
+	"github.com/charmbracelet/crushcl/internal/filetracker"
+	"github.com/charmbracelet/crushcl/internal/format"
+	"github.com/charmbracelet/crushcl/internal/history"
+	"github.com/charmbracelet/crushcl/internal/log"
+	"github.com/charmbracelet/crushcl/internal/lsp"
+	"github.com/charmbracelet/crushcl/internal/message"
+	"github.com/charmbracelet/crushcl/internal/permission"
+	"github.com/charmbracelet/crushcl/internal/pubsub"
+	"github.com/charmbracelet/crushcl/internal/session"
+	"github.com/charmbracelet/crushcl/internal/shell"
+	"github.com/charmbracelet/crushcl/internal/ui/anim"
+	"github.com/charmbracelet/crushcl/internal/ui/styles"
+	"github.com/charmbracelet/crushcl/internal/update"
+	"github.com/charmbracelet/crushcl/internal/version"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/charmbracelet/x/term"
@@ -119,11 +119,6 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 		func(ctx context.Context) error { return mcp.Close(ctx) },
 	)
 
-	// TODO: remove the concept of agent config, most likely.
-	if !cfg.IsConfigured() {
-		slog.Warn("No agent configuration found")
-		return app, nil
-	}
 	if err := app.InitCoderAgent(ctx); err != nil {
 		return nil, fmt.Errorf("failed to initialize coder agent: %w", err)
 	}
@@ -268,7 +263,9 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	}
 
 	// force update of agent models before running so mcp tools are loaded
+	slog.Debug("APP: about to call UpdateModels")
 	app.AgentCoordinator.UpdateModels(ctx)
+	slog.Debug("APP: UpdateModels completed")
 
 	defer stopSpinner()
 
@@ -276,7 +273,6 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	if err != nil {
 		return fmt.Errorf("failed to create session for non-interactive mode: %w", err)
 	}
-
 	if continueSessionID != "" || useLast {
 		slog.Info("Continuing session for non-interactive run", "session_id", sess.ID)
 	} else {
@@ -552,6 +548,7 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.FileTracker,
 		app.LSPManager,
 		app.agentNotifications,
+		config.AgentCoder,
 	)
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)

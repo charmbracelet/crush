@@ -3,16 +3,46 @@ package copilot
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
+	"runtime"
 
-	"github.com/charmbracelet/crush/internal/log"
+	"github.com/charmbracelet/crushcl/internal/log"
+)
+
+const (
+	// UserAgent is the User-Agent header sent with Copilot API requests.
+	UserAgent = "GitHubCopilotChat/0.32.4"
+	// EditorVersion is the editor version header.
+	EditorVersion = "vscode/1.105.1"
+	// EditorPluginVersion is the Copilot chat plugin version.
+	EditorPluginVersion = "copilot-chat/0.32.4"
+	// IntegrationID is the Copilot integration ID.
+	IntegrationID = "vscode-chat"
+
+	// SignupURL is the URL for signing up for GitHub Copilot.
+	SignupURL = "https://github.com/github-copilot/signup?editor=crush"
+	// FreeURL is the URL for getting free access to Copilot Pro.
+	FreeURL = "https://docs.github.com/en/copilot/how-tos/manage-your-account/get-free-access-to-copilot-pro"
 )
 
 var assistantRolePattern = regexp.MustCompile(`"role"\s*:\s*"assistant"`)
+
+// Headers returns the HTTP headers to include with Copilot API requests.
+func Headers() map[string]string {
+	return map[string]string{
+		"User-Agent":             UserAgent,
+		"Editor-Version":         EditorVersion,
+		"Editor-Plugin-Version":  EditorPluginVersion,
+		"Copilot-Integration-Id": IntegrationID,
+	}
+}
 
 // NewClient creates a new HTTP client with a custom transport that adds the
 // X-Initiator header based on message history in the request body.
@@ -76,4 +106,33 @@ func (t *initiatorTransport) roundTrip(req *http.Request) (*http.Response, error
 		return log.NewHTTPClient().Transport.RoundTrip(req)
 	}
 	return http.DefaultTransport.RoundTrip(req)
+}
+
+// RefreshTokenFromDisk reads the GitHub OAuth token from the disk cache.
+func RefreshTokenFromDisk() (string, bool) {
+	data, err := os.ReadFile(tokenFilePath())
+	if err != nil {
+		return "", false
+	}
+	var content map[string]struct {
+		User        string `json:"user"`
+		OAuthToken  string `json:"oauth_token"`
+		GitHubAppID string `json:"githubAppId"`
+	}
+	if err := json.Unmarshal(data, &content); err != nil {
+		return "", false
+	}
+	if app, ok := content["github.com:Iv1.b507a08c87ecfe98"]; ok {
+		return app.OAuthToken, true
+	}
+	return "", false
+}
+
+func tokenFilePath() string {
+	switch runtime.GOOS {
+	case "windows":
+		return filepath.Join(os.Getenv("LOCALAPPDATA"), "github-copilot/apps.json")
+	default:
+		return filepath.Join(os.Getenv("HOME"), ".config/github-copilot/apps.json")
+	}
 }

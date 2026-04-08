@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -12,10 +11,9 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/home"
-	"github.com/charmbracelet/crush/internal/shell"
-	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crushcl/internal/config"
+	"github.com/charmbracelet/crushcl/internal/home"
+	"github.com/charmbracelet/crushcl/internal/shell"
 )
 
 // Prompt represents a template-based prompt generator.
@@ -166,39 +164,40 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		files[pathKey] = content
 	}
 
-	// Discover and load skills metadata.
-	var availSkillXML string
+	// [DISABLED FOR DEBUG] Discover and load skills metadata.
+	// var availSkillXML string
 
-	// Start with builtin skills.
-	allSkills := skills.DiscoverBuiltin()
-	builtinNames := make(map[string]bool, len(allSkills))
-	for _, s := range allSkills {
-		builtinNames[s.Name] = true
-	}
+	// // Start with builtin skills.
+	// allSkills := skills.DiscoverBuiltin()
+	// builtinNames := make(map[string]bool, len(allSkills))
+	// for _, s := range allSkills {
+	// 	builtinNames[s.Name] = true
+	// }
 
-	// Discover user skills from configured paths.
-	if len(cfg.Options.SkillsPaths) > 0 {
-		expandedPaths := make([]string, 0, len(cfg.Options.SkillsPaths))
-		for _, pth := range cfg.Options.SkillsPaths {
-			expandedPaths = append(expandedPaths, expandPath(pth, store))
-		}
-		for _, userSkill := range skills.Discover(expandedPaths) {
-			if builtinNames[userSkill.Name] {
-				slog.Warn("User skill overrides builtin skill", "name", userSkill.Name)
-			}
-			allSkills = append(allSkills, userSkill)
-		}
-	}
+	// // Discover user skills from configured paths.
+	// if len(cfg.Options.SkillsPaths) > 0 {
+	// 	expandedPaths := make([]string, 0, len(cfg.Options.SkillsPaths))
+	// 	for _, pth := range cfg.Options.SkillsPaths {
+	// 		expandedPaths = append(expandedPaths, expandPath(pth, store))
+	// 	}
+	// 	for _, userSkill := range skills.Discover(expandedPaths) {
+	// 		if builtinNames[userSkill.Name] {
+	// 			slog.Warn("User skill overrides builtin skill", "name", userSkill.Name)
+	// 		}
+	// 		allSkills = append(allSkills, userSkill)
+	// 	}
+	// }
 
-	// Deduplicate: user skills override builtins with the same name.
-	allSkills = skills.Deduplicate(allSkills)
+	// // Deduplicate: user skills override builtins with the same name.
+	// allSkills = skills.Deduplicate(allSkills)
 
-	// Filter out disabled skills.
-	allSkills = skills.Filter(allSkills, cfg.Options.DisabledSkills)
+	// // Filter out disabled skills.
+	// allSkills = skills.Filter(allSkills, cfg.Options.DisabledSkills)
 
-	if len(allSkills) > 0 {
-		availSkillXML = skills.ToPromptXML(allSkills)
-	}
+	// if len(allSkills) > 0 {
+	// 	availSkillXML = skills.ToPromptXML(allSkills)
+	// }
+	availSkillXML := ""
 
 	isGit := isGitRepo(store.WorkingDir())
 	data := PromptDat{

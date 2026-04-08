@@ -10,9 +10,9 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/ui/util"
+	"github.com/charmbracelet/crushcl/internal/config"
+	"github.com/charmbracelet/crushcl/internal/ui/common"
+	"github.com/charmbracelet/crushcl/internal/ui/util"
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
@@ -484,10 +484,11 @@ func (m *Models) setProviderItems() error {
 		}
 
 		if len(validRecentItems) != len(recentItems) {
-			// FIXME: Does this need to be here? Is it mutating the config during a read?
-			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, fmt.Sprintf("recent_models.%s", selectedType), validRecentItems); err != nil {
-				return fmt.Errorf("failed to update recent models: %w", err)
-			}
+			// Async write-back to avoid mutating config during read.
+			// This cleans up recent models list when some models are no longer available.
+			go func() {
+				_ = m.com.Workspace.SetConfigField(config.ScopeGlobal, fmt.Sprintf("recent_models.%s", selectedType), validRecentItems)
+			}()
 		}
 
 		if len(recentGroup.Items) > 0 {

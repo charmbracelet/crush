@@ -4,8 +4,8 @@ import (
 	"context"
 	_ "embed"
 
-	"github.com/charmbracelet/crush/internal/agent/prompt"
-	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crushcl/internal/agent/prompt"
+	"github.com/charmbracelet/crushcl/internal/config"
 )
 
 //go:embed templates/coder.md.tpl
@@ -31,6 +31,16 @@ func taskPrompt(opts ...prompt.Option) (*prompt.Prompt, error) {
 		return nil, err
 	}
 	return systemPrompt, nil
+}
+
+// promptForAgentType returns the appropriate prompt function for the given agent type.
+func promptForAgentType(agentType string) func(...prompt.Option) (*prompt.Prompt, error) {
+	switch agentType {
+	case config.AgentTask:
+		return taskPrompt
+	default:
+		return coderPrompt
+	}
 }
 
 func InitializePrompt(cfg *config.ConfigStore) (string, error) {

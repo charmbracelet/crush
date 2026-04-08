@@ -15,7 +15,7 @@ const docTemplate = `{
         },
         "license": {
             "name": "MIT",
-            "url": "https://github.com/charmbracelet/crush/blob/main/LICENSE"
+            "url": "https://github.com/charmbracelet/crushcl/blob/main/LICENSE"
         },
         "version": "{{.Version}}"
     },

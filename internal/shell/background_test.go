@@ -286,7 +286,10 @@ func TestBackgroundShellManager_KillAll(t *testing.T) {
 func TestBackgroundShellManager_KillAll_Timeout(t *testing.T) {
 	t.Parallel()
 
-	// XXX: can't use synctest here - causes --race to trip.
+	// XXX: Cannot use synctest here - it causes --race to trip due to
+	// timing-sensitive nature of this test involving signal handling and
+	// process termination. This is a known incompatibility between synctest
+	// and tests that involve race detection with timing-sensitive operations.
 
 	workingDir := t.TempDir()
 	manager := newBackgroundShellManager()

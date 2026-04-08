@@ -1730,11 +1730,17 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 			switch {
 			case key.Matches(msg, m.keyMap.Editor.AddImage):
+				if !m.currentModelSupportsImages() {
+					break
+				}
 				if cmd := m.openFilesDialog(); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
 
 			case key.Matches(msg, m.keyMap.Editor.PasteImage):
+				if !m.currentModelSupportsImages() {
+					break
+				}
 				cmds = append(cmds, m.pasteImageFromClipboard)
 
 			case key.Matches(msg, m.keyMap.Editor.SendMessage):
@@ -2267,15 +2273,15 @@ func (m *UI) FullHelp() [][]key.Binding {
 
 		switch m.focus {
 		case uiFocusEditor:
-			binds = append(binds,
-				[]key.Binding{
-					k.Editor.Newline,
-					k.Editor.AddImage,
-					k.Editor.PasteImage,
-					k.Editor.MentionFile,
-					k.Editor.OpenEditor,
-				},
-			)
+			editorBinds := []key.Binding{
+				k.Editor.Newline,
+				k.Editor.MentionFile,
+				k.Editor.OpenEditor,
+			}
+			if m.currentModelSupportsImages() {
+				editorBinds = append(editorBinds, k.Editor.AddImage, k.Editor.PasteImage)
+			}
+			binds = append(binds, editorBinds)
 			if hasAttachments {
 				binds = append(binds,
 					[]key.Binding{
@@ -2317,14 +2323,16 @@ func (m *UI) FullHelp() [][]key.Binding {
 					k.Models,
 					k.Sessions,
 				},
-				[]key.Binding{
-					k.Editor.Newline,
-					k.Editor.AddImage,
-					k.Editor.PasteImage,
-					k.Editor.MentionFile,
-					k.Editor.OpenEditor,
-				},
 			)
+			editorBinds := []key.Binding{
+				k.Editor.Newline,
+				k.Editor.MentionFile,
+				k.Editor.OpenEditor,
+			}
+			if m.currentModelSupportsImages() {
+				editorBinds = append(editorBinds, k.Editor.AddImage, k.Editor.PasteImage)
+			}
+			binds = append(binds, editorBinds)
 			if hasAttachments {
 				binds = append(binds,
 					[]key.Binding{
@@ -2345,6 +2353,19 @@ func (m *UI) FullHelp() [][]key.Binding {
 	)
 
 	return binds
+}
+
+func (m *UI) currentModelSupportsImages() bool {
+	cfg := m.com.Config()
+	if cfg == nil {
+		return false
+	}
+	agentCfg, ok := cfg.Agents[config.AgentCoder]
+	if !ok {
+		return false
+	}
+	model := cfg.GetModelByType(agentCfg.Model)
+	return model != nil && model.SupportsImages
 }
 
 // toggleCompactMode toggles compact mode between uiChat and uiChatCompact states.
@@ -2619,13 +2640,14 @@ func (m *UI) openEditor(value string) tea.Cmd {
 	if err != nil {
 		return util.ReportError(err)
 	}
+	tmpPath := tmpfile.Name()
 	defer tmpfile.Close() //nolint:errcheck
 	if _, err := tmpfile.WriteString(value); err != nil {
 		return util.ReportError(err)
 	}
 	cmd, err := editor.Command(
 		"crush",
-		tmpfile.Name(),
+		tmpPath,
 		editor.AtPosition(
 			m.textarea.Line()+1,
 			m.textarea.Column()+1,
@@ -2635,17 +2657,20 @@ func (m *UI) openEditor(value string) tea.Cmd {
 		return util.ReportError(err)
 	}
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		defer func() {
+			_ = os.Remove(tmpPath)
+		}()
+
 		if err != nil {
 			return util.ReportError(err)
 		}
-		content, err := os.ReadFile(tmpfile.Name())
+		content, err := os.ReadFile(tmpPath)
 		if err != nil {
 			return util.ReportError(err)
 		}
 		if len(content) == 0 {
 			return util.ReportWarn("Message is empty")
 		}
-		os.Remove(tmpfile.Name())
 		return openEditorMsg{
 			Text: strings.TrimSpace(string(content)),
 		}

@@ -254,6 +254,69 @@ func TestConfig_configureProvidersBedrockWithoutUnsupportedModel(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestConfig_configureProvidersBedrockCrossRegionModel(t *testing.T) {
+	knownProviders := []catwalk.Provider{
+		{
+			ID:          catwalk.InferenceProviderBedrock,
+			APIKey:      "",
+			APIEndpoint: "",
+			Models: []catwalk.Model{{
+				ID: "us.anthropic.claude-opus-4-6-v1:1m",
+			}},
+		},
+	}
+
+	cfg := &Config{}
+	cfg.setDefaults("/tmp", "")
+	env := env.NewFromMap(map[string]string{
+		"AWS_ACCESS_KEY_ID":     "test-key-id",
+		"AWS_SECRET_ACCESS_KEY": "test-secret-key",
+	})
+	resolver := NewEnvironmentVariableResolver(env)
+	err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
+	require.NoError(t, err)
+
+	bedrockProvider, ok := cfg.Providers.Get("bedrock")
+	require.True(t, ok, "Bedrock provider should be present")
+	require.Equal(t, "us.anthropic.claude-opus-4-6-v1:1m", bedrockProvider.Models[0].ID)
+}
+
+func TestAnnotateBedrockModelNames(t *testing.T) {
+	models := []catwalk.Model{
+		{
+			ID:            "anthropic.claude-opus-4-6-v1",
+			Name:          "AWS Claude Opus 4.6",
+			ContextWindow: 1_000_000,
+		},
+		{
+			ID:            "anthropic.claude-sonnet-4-6",
+			Name:          "AWS Claude Sonnet 4.6",
+			ContextWindow: 1_000_000,
+		},
+		{
+			ID:            "anthropic.claude-haiku-4-5-20251001-v1:0",
+			Name:          "AWS Claude Haiku 4.5",
+			ContextWindow: 200_000,
+		},
+	}
+
+	result := annotateBedrockModelNames(models)
+
+	require.Len(t, result, 3)
+	require.Equal(t, "AWS Claude Opus 4.6 (1M)", result[0].Name)
+	require.Equal(t, "AWS Claude Sonnet 4.6 (1M)", result[1].Name)
+	require.Equal(t, "AWS Claude Haiku 4.5", result[2].Name) // no annotation, <1M
+}
+
+func TestIsBedrockAnthropicModel(t *testing.T) {
+	require.True(t, isBedrockAnthropicModel("anthropic.claude-sonnet-4-20250514-v1:0"))
+	require.True(t, isBedrockAnthropicModel("us.anthropic.claude-opus-4-6-v1:1m"))
+	require.True(t, isBedrockAnthropicModel("eu.anthropic.claude-sonnet-4-6:1m"))
+	require.True(t, isBedrockAnthropicModel("ap.anthropic.claude-opus-4-6-v1:1m"))
+	require.False(t, isBedrockAnthropicModel("some-random-model"))
+	require.False(t, isBedrockAnthropicModel("openai.gpt-4"))
+}
+
 func TestConfig_configureProvidersVertexAIWithCredentials(t *testing.T) {
 	knownProviders := []catwalk.Provider{
 		{

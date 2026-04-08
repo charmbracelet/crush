@@ -115,6 +115,25 @@ func mustMarshalConfig(cfg *Config) []byte {
 	return data
 }
 
+// isBedrockAnthropicModel returns true if the model ID is an Anthropic model
+// on AWS Bedrock. This accepts both standard IDs (anthropic.claude-*) and
+// cross-region inference IDs (us.anthropic.claude-*, eu.anthropic.claude-*, etc).
+func isBedrockAnthropicModel(id string) bool {
+	return strings.HasPrefix(id, "anthropic.") || strings.Contains(id, ".anthropic.")
+}
+
+// annotateBedrockModelNames adds a "(1M)" suffix to the display names of
+// Bedrock models that have a 1M context window, so users can identify them
+// in the model selection dropdown.
+func annotateBedrockModelNames(models []catwalk.Model) []catwalk.Model {
+	for i := range models {
+		if models[i].ContextWindow >= 1_000_000 && !strings.Contains(models[i].Name, "1M") {
+			models[i].Name = models[i].Name + " (1M)"
+		}
+	}
+	return models
+}
+
 func PushPopCrushEnv() func() {
 	var found []string
 	for _, ev := range os.Environ() {
@@ -277,10 +296,11 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 				prepared.ExtraParams["region"] = env.Get("AWS_DEFAULT_REGION")
 			}
 			for _, model := range p.Models {
-				if !strings.HasPrefix(model.ID, "anthropic.") {
+				if !isBedrockAnthropicModel(model.ID) {
 					return fmt.Errorf("bedrock provider only supports anthropic models for now, found: %s", model.ID)
 				}
 			}
+			prepared.Models = annotateBedrockModelNames(p.Models)
 		default:
 			// if the provider api or endpoint are missing we skip them
 			v, err := resolver.ResolveValue(p.APIKey)

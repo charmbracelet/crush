@@ -258,7 +258,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		if call.ContextWindow > 0 {
 			cw := call.ContextWindow
 			tokens := currentSession.CompletionTokens + currentSession.PromptTokens
-			remaining := max(cw - tokens, 0)
+			remaining := max(cw-tokens, 0)
 			maxTokens = min(maxTokens, remaining)
 		}
 		if maxTokens > 0 {

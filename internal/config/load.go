@@ -295,6 +295,20 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 					return fmt.Errorf("bedrock provider only supports anthropic models for now, found: %s", model.ID)
 				}
 			}
+		case catwalk.InferenceProvider("hyper"):
+			if apiKey := env.Get("HYPER_API_KEY"); apiKey != "" {
+				prepared.APIKey = apiKey
+				prepared.APIKeyTemplate = apiKey
+			} else {
+				v, err := resolver.ResolveValue(p.APIKey)
+				if v == "" || err != nil {
+					if configExists {
+						slog.Warn("Skipping Hyper provider due to missing API key", "provider", p.ID)
+						c.Providers.Del(string(p.ID))
+					}
+					continue
+				}
+			}
 		default:
 			// if the provider api or endpoint are missing we skip them
 			v, err := resolver.ResolveValue(p.APIKey)

@@ -11,8 +11,8 @@ import (
 	"sync"
 
 	"github.com/charlievieth/fastwalk"
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/crushcl/internal/csync"
+	"github.com/charmbracelet/crushcl/internal/home"
 	gitconfig "github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
 )
@@ -272,6 +272,9 @@ func ListDirectory(initialPath string, ignorePatterns []string, depth, limit int
 	found := csync.NewSlice[string]()
 	dl := NewDirectoryLister(initialPath)
 
+	// Normalize initialPath to forward slash for consistent comparison with fastwalk output
+	initialPath = filepath.ToSlash(initialPath)
+
 	slog.Debug("Listing directory", "path", initialPath, "depth", depth, "limit", limit, "ignorePatterns", ignorePatterns)
 
 	conf := fastwalk.Config{
@@ -296,7 +299,7 @@ func ListDirectory(initialPath string, ignorePatterns []string, depth, limit int
 
 		if path != initialPath {
 			if isDir {
-				path = path + string(filepath.Separator)
+				path = path + "/"
 			}
 			found.Append(path)
 		}

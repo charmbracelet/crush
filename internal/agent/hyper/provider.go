@@ -24,7 +24,7 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"charm.land/fantasy/object"
-	"github.com/charmbracelet/crush/internal/event"
+	"github.com/charmbracelet/crushcl/internal/event"
 )
 
 //go:generate wget -O provider.json https://hyper.charm.land/api/v1/provider

@@ -1,7 +1,7 @@
 package dialog
 
 import (
-	"os"
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/help"
@@ -9,11 +9,11 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/commands"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/ui/list"
-	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/crushcl/internal/commands"
+	"github.com/charmbracelet/crushcl/internal/config"
+	"github.com/charmbracelet/crushcl/internal/ui/common"
+	"github.com/charmbracelet/crushcl/internal/ui/list"
+	"github.com/charmbracelet/crushcl/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
@@ -73,6 +73,8 @@ type Commands struct {
 
 	dockerMCPAvailable     *bool
 	dockerMCPCheckInFlight bool
+
+	externalEditorAvailable bool
 }
 
 var _ Dialog = (*Commands)(nil)
@@ -162,6 +164,10 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 		if c.selected == SystemCommands {
 			c.setCommandItems(c.selected)
 		}
+		return nil
+	case tea.EnvMsg:
+		c.externalEditorAvailable = slices.Contains(msg, "EDITOR")
+		c.setCommandItems(c.selected)
 		return nil
 	case spinner.TickMsg:
 		if c.loading {
@@ -470,11 +476,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	}
 
 	// Add external editor command if $EDITOR is available.
-	//
-	// TODO: Use [tea.EnvMsg] to get environment variable instead of os.Getenv;
-	// because os.Getenv does IO is breaks the TEA paradigm and is generally an
-	// antipattern.
-	if os.Getenv("EDITOR") != "" {
+	if c.externalEditorAvailable {
 		commands = append(commands, NewCommandItem(c.com.Styles, "open_external_editor", "Open External Editor", "ctrl+o", ActionExternalEditor{}))
 	}
 

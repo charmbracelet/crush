@@ -25,9 +25,12 @@ func BenchmarkShellQuickCommands(b *testing.B) {
 }
 
 func TestTestTimeout(t *testing.T) {
-	// XXX(@andreynering): This fails on Windows. Address once possible.
+	// XXX(@andreynering): This fails on Windows due to differences in signal
+	// handling. Windows uses different mechanisms for process termination.
+	// To enable this test on Windows, investigate using job objects or
+	// Process.Kill instead of signals for timeout handling.
 	if runtime.GOOS == "windows" {
-		t.Skip("Skipping test on Windows")
+		t.Skip("Skipping test on Windows - signal handling differs from Unix")
 	}
 
 	ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond)

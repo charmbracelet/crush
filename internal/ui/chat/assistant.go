@@ -6,10 +6,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/ui/anim"
-	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/crushcl/internal/message"
+	"github.com/charmbracelet/crushcl/internal/ui/anim"
+	"github.com/charmbracelet/crushcl/internal/ui/common"
+	"github.com/charmbracelet/crushcl/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -107,11 +107,12 @@ func (a *AssistantMessageItem) RawRender(width int) string {
 
 // Render implements MessageItem.
 func (a *AssistantMessageItem) Render(width int) string {
-	// XXX: Here, we're manually applying the focused/blurred styles because
-	// using lipgloss.Render can degrade performance for long messages due to
-	// it's wrapping logic.
-	// We already know that the content is wrapped to the correct width in
-	// RawRender, so we can just apply the styles directly to each line.
+	// NOTE: This is an intentional performance optimization. We manually apply
+	// the focused/blurred styles because lipgloss.Render degrades performance
+	// for long messages due to its wrapping logic. Since the content is already
+	// wrapped to the correct width in RawRender, we can apply styles directly
+	// to each line. This is acceptable technical debt - revisit if lipgloss
+	// improves or if the performance impact becomes noticeable.
 	focused := a.sty.Chat.Message.AssistantFocused.Render()
 	blurred := a.sty.Chat.Message.AssistantBlurred.Render()
 	rendered := a.RawRender(width)

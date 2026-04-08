@@ -31,18 +31,21 @@ import (
 	"charm.land/fantasy/providers/openrouter"
 	"charm.land/fantasy/providers/vercel"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/crush/internal/agent/hyper"
-	"github.com/charmbracelet/crush/internal/agent/notify"
-	"github.com/charmbracelet/crush/internal/agent/tools"
-	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/crush/internal/stringext"
-	"github.com/charmbracelet/crush/internal/version"
+	"github.com/charmbracelet/crushcl/internal/agent/hyper"
+	"github.com/charmbracelet/crushcl/internal/agent/notify"
+	"github.com/charmbracelet/crushcl/internal/agent/tools"
+	"github.com/charmbracelet/crushcl/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crushcl/internal/config"
+	"github.com/charmbracelet/crushcl/internal/csync"
+	kctx "github.com/charmbracelet/crushcl/internal/kernel/context"
+	"github.com/charmbracelet/crushcl/internal/kernel/memory"
+	"github.com/charmbracelet/crushcl/internal/kernel/registry"
+	"github.com/charmbracelet/crushcl/internal/message"
+	"github.com/charmbracelet/crushcl/internal/permission"
+	"github.com/charmbracelet/crushcl/internal/pubsub"
+	"github.com/charmbracelet/crushcl/internal/session"
+	"github.com/charmbracelet/crushcl/internal/stringext"
+	"github.com/charmbracelet/crushcl/internal/version"
 	"github.com/charmbracelet/x/exp/charmtone"
 )
 
@@ -118,6 +121,18 @@ type sessionAgent struct {
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, context.CancelFunc]
+
+	// Magical components: enhanced agent capabilities
+	circuitBreaker   *CircuitBreaker
+	contextManager   *contextManager
+	swarm            *swarm
+	streamingMonitor *streamingMonitor
+
+	// Kernel components: Claude Code architectural patterns
+	compactor      *kctx.ContextCompactor
+	memStore       *memory.MemoryStore
+	toolRegistry   *registry.ToolRegistry
+	tokenEstimator *tokenEstimator // Accurate token counting for mixed content
 }
 
 type SessionAgentOptions struct {
@@ -137,7 +152,15 @@ type SessionAgentOptions struct {
 func NewSessionAgent(
 	opts SessionAgentOptions,
 ) SessionAgent {
-	return &sessionAgent{
+	// Calculate max token budget based on model's context window
+	// Use CalculateSafeBudget to account for estimation errors (20% margin + 10% safety)
+	maxTokenBudget := 200000 // default fallback
+	if opts.LargeModel.CatwalkCfg.ContextWindow > 0 {
+		// Apply 20% error margin + 10% safety buffer = ~72% of actual window
+		maxTokenBudget = CalculateSafeBudget(int(opts.LargeModel.CatwalkCfg.ContextWindow), 0.20)
+	}
+
+	agent := &sessionAgent{
 		largeModel:           csync.NewValue(opts.LargeModel),
 		smallModel:           csync.NewValue(opts.SmallModel),
 		systemPromptPrefix:   csync.NewValue(opts.SystemPromptPrefix),
@@ -151,7 +174,23 @@ func NewSessionAgent(
 		notify:               opts.Notify,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, context.CancelFunc](),
+		// Initialize magical components
+		circuitBreaker:   NewCircuitBreaker(5, 2, 30*time.Second),
+		contextManager:   newContextManager(),
+		swarm:            newSwarm(5 * time.Minute),
+		streamingMonitor: newStreamingMonitor(),
+		// Initialize kernel components (Claude Code patterns)
+		// Budget calculated with error margin for accurate token estimation
+		compactor:      kctx.NewContextCompactor(maxTokenBudget),
+		memStore:       memory.NewMemoryStore(""), // Data dir set by caller if needed
+		toolRegistry:   registry.NewToolRegistry(),
+		tokenEstimator: newTokenEstimator(),
 	}
+
+	// Wire up L3ForkSummarize callback
+	agent.compactor.ForkSummarizeCallback = agent.forkSummarize
+
+	return agent
 }
 
 func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
@@ -222,10 +261,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	if len(msgs) == 0 {
 		titleCtx := ctx // Copy to avoid race with ctx reassignment below.
 		wg.Go(func() {
+			slog.Debug("sessionAgent.Run: starting generateTitle goroutine")
 			a.generateTitle(titleCtx, call.SessionID, call.Prompt)
+			slog.Debug("sessionAgent.Run: generateTitle goroutine completed")
 		})
 	}
-	defer wg.Wait()
+	defer func() {
+		wg.Wait()
+	}()
 
 	// Add the user message to the session.
 	_, err = a.createUserMessage(ctx, call)
@@ -306,6 +349,77 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(promptPrefix)}, prepared.Messages...)
 			}
 
+			// Claude Code 4-tier Compression System
+			// Integrated with ContextManager and ContextCompactor
+			if a.compactor != nil {
+				// Use enhanced estimation that includes tools and system prompt overhead
+				// This is more accurate because API counts tokens differently than our estimation
+				totalTokens := a.estimateTotalTokensWithOverhead(prepared.Messages, prepared.Tools, systemPrompt)
+				compressionLevel := a.compactor.GetCompressionLevel(totalTokens)
+
+				switch compressionLevel {
+				case kctx.L1Microcompact:
+					// L1: Rule-based cleanup (<1ms)
+					slog.Info("L1 Compression: Microcompact", "tokens", totalTokens, "budget", a.compactor.MaxTokenBudget())
+					prepared.Messages = a.compactor.L1Microcompact(prepared.Messages)
+
+				case kctx.L2AutoCompact:
+					// L2: Threshold-triggered summarization (~100ms)
+					slog.Info("L2 Compression: AutoCompact triggered", "tokens", totalTokens, "budget", a.compactor.MaxTokenBudget())
+					prepared.Messages = a.compactor.L2AutoCompact(prepared.Messages, call.SessionID)
+
+				case kctx.L3FullCompact:
+					// L3: Fork agent summarization (5-30s)
+					// Uses small model for async summarization via callback
+					slog.Info("L3 Compression: ForkSummarize triggered", "tokens", totalTokens, "budget", a.compactor.MaxTokenBudget())
+					compressed, _, err := a.compactor.TriggerForkSummarize(callContext, prepared.Messages, call.SessionID)
+					if err != nil {
+						slog.Error("L3 ForkSummarize failed, falling back to L2", "error", err)
+						compressed = a.compactor.L2AutoCompact(prepared.Messages, call.SessionID)
+					}
+					prepared.Messages = compressed
+
+				case kctx.L4SessionMemory:
+					// L4: Use existing collapse summaries (<10ms)
+					slog.Info("L4 Compression: SessionMemory projection", "tokens", totalTokens)
+					prepared.Messages = a.compactor.L4SessionMemory(prepared.Messages)
+
+				default:
+					// No compression needed
+					if totalTokens > a.compactor.MaxTokenBudget()/2 {
+						slog.Debug("Context approaching threshold", "tokens", totalTokens, "budget", a.compactor.MaxTokenBudget())
+					}
+				}
+
+				// Safety check: verify context is within limits after compression
+				// Use enhanced estimation with tools/system prompt overhead
+				finalTokens := a.estimateTotalTokensWithOverhead(prepared.Messages, prepared.Tools, systemPrompt)
+				maxBudget := a.compactor.MaxTokenBudget()
+				if finalTokens > maxBudget {
+					slog.Warn("Context still exceeds budget after compression, applying emergency truncation",
+						"tokens", finalTokens, "budget", maxBudget)
+					prepared.Messages = a.compactor.EmergencyCompact(prepared.Messages, call.SessionID)
+
+					// Final check - if still over limit, truncate from middle
+					// Use enhanced estimation with tools/system prompt overhead
+					finalTokens = a.estimateTotalTokensWithOverhead(prepared.Messages, prepared.Tools, systemPrompt)
+					if finalTokens > maxBudget {
+						slog.Error("Context exceeds model limit even after emergency compression",
+							"tokens", finalTokens, "budget", maxBudget, "model", largeModel.Model)
+						return callContext, prepared, fmt.Errorf("context window exceeds model limit: %d tokens > %d budget (model: %s)",
+							finalTokens, maxBudget, largeModel.Model)
+					}
+				}
+
+				// Record compression metrics
+				if compressionLevel > 0 {
+					slog.Info("Compression applied",
+						"level", compressionLevel,
+						"total_compactions", a.compactor.TotalCompactions(),
+						"metrics", a.compactor.Metrics())
+				}
+			}
+
 			var assistantMsg message.Message
 			assistantMsg, err = a.messages.Create(callContext, call.SessionID, message.CreateMessageParams{
 				Role:     message.Assistant,
@@ -362,6 +476,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		OnToolInputStart: func(id string, toolName string) error {
+			// Magical: Track tool execution start
+			slog.Debug("Magical: Tool started", "tool", toolName, "id", id)
+			a.streamingMonitor.StartTool(id, toolName, "")
 			toolCall := message.ToolCall{
 				ID:               id,
 				Name:             toolName,
@@ -374,7 +491,18 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return a.messages.Update(ctx, *currentAssistant)
 		},
 		OnRetry: func(err *fantasy.ProviderError, delay time.Duration) {
-			// TODO: implement
+			// Magical: Circuit breaker handles retry with exponential backoff
+			if err != nil {
+				slog.Debug("Magical: Recording retry error", "message", err.Message)
+				a.contextManager.OnRetry(err, delay)
+				a.circuitBreaker.RecordFailure(err)
+				slog.Debug("Magical: Circuit breaker state", "state", a.circuitBreaker.State())
+			}
+			// Use circuit breaker delay if circuit is open
+			if !a.circuitBreaker.Allow() {
+				slog.Warn("Circuit breaker open, skipping retry")
+				return
+			}
 		},
 		OnToolCall: func(tc fantasy.ToolCallContent) error {
 			toolCall := message.ToolCall{
@@ -390,6 +518,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return a.messages.Update(ctx, *currentAssistant)
 		},
 		OnToolResult: func(result fantasy.ToolResultContent) error {
+			// Magical: Track tool execution completion
+			a.streamingMonitor.CompleteTool(result.ToolCallID, "")
 			toolResult := a.convertToToolResult(result)
 			// Use parent ctx instead of genCtx to ensure the message is created
 			// even if the request is canceled mid-stream
@@ -1057,6 +1187,13 @@ func (a *sessionAgent) QueuedPromptsList(sessionID string) []string {
 func (a *sessionAgent) SetModels(large Model, small Model) {
 	a.largeModel.Set(large)
 	a.smallModel.Set(small)
+
+	// 重新計算 compactor budget
+	maxTokenBudget := 200000
+	if large.CatwalkCfg.ContextWindow > 0 {
+		maxTokenBudget = CalculateSafeBudget(int(large.CatwalkCfg.ContextWindow), 0.20)
+	}
+	a.compactor.UpdateMaxTokenBudget(maxTokenBudget)
 }
 
 func (a *sessionAgent) SetTools(tools []fantasy.AgentTool) {
@@ -1206,4 +1343,370 @@ func buildSummaryPrompt(todos []session.Todo) string {
 		sb.WriteString("Instruct the resuming assistant to use the `todos` tool to continue tracking progress on these tasks.")
 	}
 	return sb.String()
+}
+
+// MaxTokenBudget returns the max token budget from the compactor
+func (a *sessionAgent) MaxTokenBudget() int {
+	if a.compactor != nil {
+		return a.compactor.MaxTokenBudget()
+	}
+	return 200000
+}
+
+// estimateTokenCount estimates total tokens in messages using accurate token counting
+// Handles mixed content (English, Chinese, code) with appropriate ratios
+func (a *sessionAgent) estimateTokenCount(messages []fantasy.Message) int {
+	if a.tokenEstimator == nil {
+		return a.estimateTokenCountFallback(messages)
+	}
+
+	var contents []MessageContent
+	for _, msg := range messages {
+		var text string
+		for _, part := range msg.Content {
+			if textPart, ok := fantasy.AsMessagePart[fantasy.TextPart](part); ok {
+				text += textPart.Text
+			}
+			if toolResult, ok := fantasy.AsMessagePart[fantasy.ToolResultPart](part); ok {
+				if output, ok := toolResult.Output.(fantasy.ToolResultOutputContentText); ok {
+					text += output.Text
+				}
+			}
+		}
+		contents = append(contents, MessageContent{
+			Role:    string(msg.Role),
+			Content: text,
+		})
+	}
+
+	return a.tokenEstimator.EstimateMessagesTokens(contents)
+}
+
+// estimateTotalTokensWithOverhead estimates total tokens including tools and system prompt overhead
+// This is more accurate than estimateTokenCount alone because:
+// - Tools can be 500-2000 tokens each depending on complexity
+// - System prompt adds baseline overhead
+// - API may count tokens differently than our estimation
+func (a *sessionAgent) estimateTotalTokensWithOverhead(messages []fantasy.Message, tools []fantasy.AgentTool, systemPrompt string) int {
+	// Base message tokens
+	messageTokens := a.estimateTokenCount(messages)
+
+	// Estimate tool tokens: ~800 tokens per tool as baseline
+	// AgentTools have substantial schemas that can be 500-1500 tokens each
+	// This accounts for tool name, description, and parameter schemas
+	toolTokens := len(tools) * 800
+
+	// System prompt overhead
+	systemPromptTokens := a.tokenEstimator.EstimateTokens(systemPrompt)
+
+	// Conservative multiplier for estimation error (20%)
+	// API tokenizers may count differently than our estimation
+	total := messageTokens + toolTokens + systemPromptTokens
+	errorMargin := float64(total) * 0.20
+
+	return total + int(errorMargin)
+}
+
+// estimateTokenCountFallback provides rough estimation when tokenEstimator unavailable
+func (a *sessionAgent) estimateTokenCountFallback(messages []fantasy.Message) int {
+	total := 0
+	for _, msg := range messages {
+		for _, part := range msg.Content {
+			if textPart, ok := fantasy.AsMessagePart[fantasy.TextPart](part); ok {
+				total += len(textPart.Text) / 4
+			}
+			if toolResult, ok := fantasy.AsMessagePart[fantasy.ToolResultPart](part); ok {
+				if text, ok := toolResult.Output.(fantasy.ToolResultOutputContentText); ok {
+					total += len(text.Text) / 4
+				}
+			}
+		}
+		total += 10 // Role overhead
+	}
+	return total
+}
+
+// performCompression compresses old messages when context is too long
+// Keeps recent messages and system prompt, summarizes middle messages
+func (a *sessionAgent) performCompression(messages []fantasy.Message, sessionID string) []fantasy.Message {
+	if len(messages) <= 6 {
+		return messages
+	}
+
+	// Keep: first system message + last 4 messages (recent context)
+	// Compress: everything in between
+	var systemMsgs []fantasy.Message
+	var recentMsgs []fantasy.Message
+	var middleMsgs []fantasy.Message
+
+	for i, msg := range messages {
+		if i == 0 && msg.Role == fantasy.MessageRoleSystem {
+			systemMsgs = append(systemMsgs, msg)
+		} else if i >= len(messages)-4 {
+			recentMsgs = append(recentMsgs, msg)
+		} else {
+			middleMsgs = append(middleMsgs, msg)
+		}
+	}
+
+	// If no middle messages to compress, return as-is
+	if len(middleMsgs) == 0 {
+		return messages
+	}
+
+	// Build summary of middle messages
+	var summary strings.Builder
+	summary.WriteString("## Previous Conversation Summary\n\n")
+
+	userCount := 0
+	assistantCount := 0
+	for _, msg := range middleMsgs {
+		switch msg.Role {
+		case fantasy.MessageRoleUser:
+			userCount++
+			for _, part := range msg.Content {
+				if textPart, ok := fantasy.AsMessagePart[fantasy.TextPart](part); ok {
+					text := textPart.Text
+					if len(text) > 200 {
+						text = text[:200] + "..."
+					}
+					summary.WriteString(fmt.Sprintf("**User %d**: %s\n\n", userCount, text))
+				}
+			}
+		case fantasy.MessageRoleAssistant:
+			assistantCount++
+			hasToolCalls := false
+			for _, part := range msg.Content {
+				if _, ok := fantasy.AsMessagePart[fantasy.ToolResultPart](part); ok {
+					hasToolCalls = true
+					break
+				}
+			}
+			if hasToolCalls {
+				summary.WriteString(fmt.Sprintf("**Assistant %d**: [Used %d tool(s)]\n\n", assistantCount, assistantCount))
+			} else {
+				summary.WriteString(fmt.Sprintf("**Assistant %d**: [Response omitted]\n\n", assistantCount))
+			}
+		case fantasy.MessageRoleTool:
+			// Skip tool results in summary - they're noise
+		}
+	}
+
+	summary.WriteString("---\n*Above conversation has been summarized due to length. Key context preserved.*\n\n")
+
+	// Build compressed message list
+	var result []fantasy.Message
+	result = append(result, systemMsgs...)
+	result = append(result, fantasy.NewUserMessage(summary.String()))
+	result = append(result, recentMsgs...)
+
+	slog.Info("Context compressed", "original", len(messages), "compressed", len(result), "middle_removed", len(middleMsgs))
+
+	return result
+}
+
+// forkSummarize creates a summary using the small model for L3 FullCompact compression
+// This is used when context exceeds 95% of the token budget
+// Runs asynchronously and stores result in compactor via callback
+func (a *sessionAgent) forkSummarize(ctx context.Context, messages []fantasy.Message, sessionID string) ([]fantasy.Message, string, error) {
+	smallModel := a.smallModel.Get()
+	if smallModel.Model == nil {
+		return nil, "", fmt.Errorf("small model not available for summarization")
+	}
+
+	// Separate messages into system, middle, and recent
+	var systemMsgs []fantasy.Message
+	var recentMsgs []fantasy.Message
+	var middleMsgs []fantasy.Message
+
+	for i, msg := range messages {
+		switch msg.Role {
+		case fantasy.MessageRoleSystem:
+			systemMsgs = append(systemMsgs, msg)
+		default:
+			// Preserve recent messages (last 8 messages for context)
+			if i >= len(messages)-8 {
+				recentMsgs = append(recentMsgs, msg)
+			} else {
+				middleMsgs = append(middleMsgs, msg)
+			}
+		}
+	}
+
+	// If nothing to summarize, return as-is
+	if len(middleMsgs) == 0 {
+		slog.Info("L3ForkSummarize: No middle messages to summarize")
+		return messages, "", nil
+	}
+
+	// Build summarization prompt
+	var prompt strings.Builder
+	prompt.WriteString("## Task: Summarize Conversation History\n\n")
+	prompt.WriteString("Please analyze the following conversation and provide a concise summary preserving:\n")
+	prompt.WriteString("1. Key decisions and their rationale\n")
+	prompt.WriteString("2. Important code changes or file modifications\n")
+	prompt.WriteString("3. User requirements stated\n")
+	prompt.WriteString("4. Current state of work and next steps\n\n")
+	prompt.WriteString("## Messages to Summarize\n\n")
+
+	for _, msg := range middleMsgs {
+		roleStr := "Unknown"
+		switch msg.Role {
+		case fantasy.MessageRoleUser:
+			roleStr = "User"
+		case fantasy.MessageRoleAssistant:
+			roleStr = "Assistant"
+		case fantasy.MessageRoleTool:
+			roleStr = "Tool"
+		}
+
+		prompt.WriteString(fmt.Sprintf("**[%s]**\n", roleStr))
+		if content := extractTextFromMessage(msg); len(content) > 0 {
+			if len(content) > 800 {
+				prompt.WriteString(content[:800] + "... [truncated]\n\n")
+			} else {
+				prompt.WriteString(content + "\n\n")
+			}
+		}
+	}
+
+	prompt.WriteString("\n## Summary Format\n\n")
+	prompt.WriteString("Provide a structured summary:\n\n")
+	prompt.WriteString("### Key Decisions\n- [decision]\n\n")
+	prompt.WriteString("### Changes Made\n- [change]\n\n")
+	prompt.WriteString("### Current State\n[current state]\n\n")
+	prompt.WriteString("### Next Steps\n[next steps]")
+
+	// Use fantasy.NewAgent with the small model for summarization
+	systemPrompt := "You are a helpful assistant that summarizes conversations concisely."
+	agent := fantasy.NewAgent(
+		smallModel.Model,
+		fantasy.WithSystemPrompt(systemPrompt),
+		fantasy.WithMaxOutputTokens(2048),
+		fantasy.WithUserAgent(userAgent),
+	)
+
+	// Create context for summarization
+	sumCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	// Run summarization
+	var summaryText string
+	resp, err := agent.Stream(sumCtx, fantasy.AgentStreamCall{
+		Prompt: prompt.String(),
+		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
+			prepared.Messages = options.Messages
+			return callContext, prepared, nil
+		},
+		OnTextDelta: func(id string, text string) error {
+			summaryText += text
+			return nil
+		},
+	})
+
+	if err != nil {
+		slog.Error("L3ForkSummarize: Summarization failed", "error", err)
+		return nil, "", fmt.Errorf("summarization failed: %w", err)
+	}
+
+	// Clean up summary text
+	summaryText = strings.TrimSpace(summaryText)
+
+	// Build compressed result
+	var result []fantasy.Message
+	result = append(result, systemMsgs...)
+
+	// Insert summary as a user message marking the collapse
+	summaryMsg := fantasy.NewUserMessage(
+		fmt.Sprintf("## Prior Conversation Summary\n\n%s\n\n---\n*The above conversation has been compressed via L3 fork summarization.*", summaryText),
+	)
+	result = append(result, summaryMsg)
+	result = append(result, recentMsgs...)
+
+	// Log compression stats
+	originalTokens := a.estimateTokenCount(messages)
+	compressedTokens := a.estimateTokenCount(result)
+	slog.Info("L3ForkSummarize: Completed",
+		"original_tokens", originalTokens,
+		"compressed_tokens", compressedTokens,
+		"reduction", fmt.Sprintf("%.1f%%", 100*(1-float64(compressedTokens)/float64(originalTokens))),
+		"steps", len(resp.Steps),
+	)
+
+	// Record collapse in compactor if available
+	if a.compactor != nil {
+		commit := kctx.CollapseCommit{
+			ID:        sessionID,
+			Timestamp: time.Now(),
+			Messages:  messages,
+			Summary:   summaryText,
+		}
+		a.compactor.GetContextManager().AddCollapse(commit)
+	}
+
+	return result, summaryText, nil
+}
+
+// countUserMessages counts user messages
+func countUserMessages(messages []fantasy.Message) int {
+	count := 0
+	for _, msg := range messages {
+		if msg.Role == fantasy.MessageRoleUser {
+			count++
+		}
+	}
+	return count
+}
+
+// countAssistantMessages counts assistant messages
+func countAssistantMessages(messages []fantasy.Message) int {
+	count := 0
+	for _, msg := range messages {
+		if msg.Role == fantasy.MessageRoleAssistant {
+			count++
+		}
+	}
+	return count
+}
+
+// extractTextFromMessage extracts text content from a message
+func extractTextFromMessage(msg fantasy.Message) string {
+	var sb strings.Builder
+	for _, part := range msg.Content {
+		if textPart, ok := fantasy.AsMessagePart[fantasy.TextPart](part); ok {
+			sb.WriteString(textPart.Text)
+		}
+	}
+	return sb.String()
+}
+
+// recordToolForCompression records a tool result for potential compression
+// Called after each tool execution
+func (a *sessionAgent) recordToolForCompression(toolID, toolName, content string) {
+	if a.compactor != nil {
+		a.compactor.RecordToolResult(toolID, toolName, content)
+	}
+}
+
+// freezeToolResult marks a tool result as frozen (protected from compression)
+// Called when a tool result is deemed important
+func (a *sessionAgent) freezeToolResult(toolID string) {
+	if a.compactor != nil {
+		a.compactor.Freeze(toolID)
+	}
+}
+
+// GetCompressionMetrics returns current compression metrics
+func (a *sessionAgent) GetCompressionMetrics() map[string]interface{} {
+	if a.compactor == nil {
+		return nil
+	}
+	return a.compactor.Metrics()
+}
+
+// ResetCompression resets the compactor state
+func (a *sessionAgent) ResetCompression() {
+	if a.compactor != nil {
+		a.compactor.FullReset()
+	}
 }

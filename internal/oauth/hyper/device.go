@@ -13,10 +13,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/agent/hyper"
-	"github.com/charmbracelet/crush/internal/event"
-	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/charmbracelet/crushcl/internal/agent/hyper"
+	"github.com/charmbracelet/crushcl/internal/event"
+	"github.com/charmbracelet/crushcl/internal/oauth"
 )
+
+const httpTimeout = 30 * time.Second
+
+var httpClient = &http.Client{Timeout: httpTimeout}
 
 // DeviceAuthResponse contains the response from the device authorization endpoint.
 type DeviceAuthResponse struct {
@@ -24,6 +28,16 @@ type DeviceAuthResponse struct {
 	UserCode        string `json:"user_code"`
 	VerificationURL string `json:"verification_url"`
 	ExpiresIn       int    `json:"expires_in"`
+}
+
+// ToDeviceCodeResponse converts DeviceAuthResponse to the common DeviceCodeResponse type.
+func (d *DeviceAuthResponse) ToDeviceCodeResponse() *oauth.DeviceCodeResponse {
+	return &oauth.DeviceCodeResponse{
+		DeviceCode:      d.DeviceCode,
+		UserCode:        d.UserCode,
+		VerificationURI: d.VerificationURL,
+		ExpiresIn:       d.ExpiresIn,
+	}
 }
 
 // TokenResponse contains the response from the polling endpoint.
@@ -51,8 +65,7 @@ func InitiateDeviceAuth(ctx context.Context) (*DeviceAuthResponse, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "crush")
 
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("execute request: %w", err)
 	}
@@ -126,8 +139,7 @@ func pollOnce(ctx context.Context, deviceCode string) (TokenResponse, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "crush")
 
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return result, fmt.Errorf("execute request: %w", err)
 	}
@@ -169,8 +181,7 @@ func ExchangeToken(ctx context.Context, refreshToken string) (*oauth.Token, erro
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "crush")
 
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("execute request: %w", err)
 	}
@@ -190,7 +201,7 @@ func ExchangeToken(ctx context.Context, refreshToken string) (*oauth.Token, erro
 		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}
 
-	token.SetExpiresAt()
+	token.SetExpiryFromNow()
 	return &token, nil
 }
 
@@ -226,8 +237,7 @@ func IntrospectToken(ctx context.Context, accessToken string) (*IntrospectTokenR
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "crush")
 
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("execute request: %w", err)
 	}

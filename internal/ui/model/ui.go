@@ -25,31 +25,31 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/crush/internal/agent/notify"
-	agenttools "github.com/charmbracelet/crush/internal/agent/tools"
-	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
-	"github.com/charmbracelet/crush/internal/commands"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/crush/internal/history"
-	"github.com/charmbracelet/crush/internal/home"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/crush/internal/ui/anim"
-	"github.com/charmbracelet/crush/internal/ui/attachments"
-	"github.com/charmbracelet/crush/internal/ui/chat"
-	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/ui/completions"
-	"github.com/charmbracelet/crush/internal/ui/dialog"
-	fimage "github.com/charmbracelet/crush/internal/ui/image"
-	"github.com/charmbracelet/crush/internal/ui/logo"
-	"github.com/charmbracelet/crush/internal/ui/notification"
-	"github.com/charmbracelet/crush/internal/ui/styles"
-	"github.com/charmbracelet/crush/internal/ui/util"
-	"github.com/charmbracelet/crush/internal/version"
-	"github.com/charmbracelet/crush/internal/workspace"
+	"github.com/charmbracelet/crushcl/internal/agent/notify"
+	agenttools "github.com/charmbracelet/crushcl/internal/agent/tools"
+	"github.com/charmbracelet/crushcl/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crushcl/internal/commands"
+	"github.com/charmbracelet/crushcl/internal/config"
+	"github.com/charmbracelet/crushcl/internal/fsext"
+	"github.com/charmbracelet/crushcl/internal/history"
+	"github.com/charmbracelet/crushcl/internal/home"
+	"github.com/charmbracelet/crushcl/internal/message"
+	"github.com/charmbracelet/crushcl/internal/permission"
+	"github.com/charmbracelet/crushcl/internal/pubsub"
+	"github.com/charmbracelet/crushcl/internal/session"
+	"github.com/charmbracelet/crushcl/internal/ui/anim"
+	"github.com/charmbracelet/crushcl/internal/ui/attachments"
+	"github.com/charmbracelet/crushcl/internal/ui/chat"
+	"github.com/charmbracelet/crushcl/internal/ui/common"
+	"github.com/charmbracelet/crushcl/internal/ui/completions"
+	"github.com/charmbracelet/crushcl/internal/ui/dialog"
+	fimage "github.com/charmbracelet/crushcl/internal/ui/image"
+	"github.com/charmbracelet/crushcl/internal/ui/logo"
+	"github.com/charmbracelet/crushcl/internal/ui/notification"
+	"github.com/charmbracelet/crushcl/internal/ui/styles"
+	"github.com/charmbracelet/crushcl/internal/ui/util"
+	"github.com/charmbracelet/crushcl/internal/version"
+	"github.com/charmbracelet/crushcl/internal/workspace"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/layout"
 	"github.com/charmbracelet/ultraviolet/screen"
@@ -2134,8 +2134,9 @@ func (m *UI) View() tea.View {
 
 	v.Content = content
 	if m.progressBarEnabled && m.sendProgressBar && m.isAgentBusy() {
-		// HACK: use a random percentage to prevent ghostty from hiding it
-		// after a timeout.
+		// HACK: Ghostty hides indeterminate progress bars after a timeout.
+		// Using a random percentage makes it non-indeterminate, preventing
+		// Ghostty from hiding it. This is a terminal-specific workaround.
 		v.ProgressBar = tea.NewProgressBar(tea.ProgressBarIndeterminate, rand.Intn(100))
 	}
 

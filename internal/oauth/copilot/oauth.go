@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/charmbracelet/crushcl/internal/oauth"
 )
 
 const (
@@ -24,13 +24,9 @@ const (
 
 var ErrNotAvailable = errors.New("github copilot not available")
 
-type DeviceCode struct {
-	DeviceCode      string `json:"device_code"`
-	UserCode        string `json:"user_code"`
-	VerificationURI string `json:"verification_uri"`
-	ExpiresIn       int    `json:"expires_in"`
-	Interval        int    `json:"interval"`
-}
+// DeviceCode is the GitHub Copilot specific device code response.
+// It is an alias for the common oauth.DeviceCodeResponse type.
+type DeviceCode = oauth.DeviceCodeResponse
 
 // RequestDeviceCode initiates the device code flow with GitHub.
 func RequestDeviceCode(ctx context.Context) (*DeviceCode, error) {
@@ -44,7 +40,7 @@ func RequestDeviceCode(ctx context.Context) (*DeviceCode, error) {
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", UserAgent)
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
@@ -114,7 +110,7 @@ func tryGetToken(ctx context.Context, deviceCode string) (*oauth.Token, error) {
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", UserAgent)
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
@@ -189,7 +185,7 @@ func getCopilotToken(ctx context.Context, githubToken string) (*oauth.Token, err
 		RefreshToken: githubToken,
 		ExpiresAt:    result.ExpiresAt,
 	}
-	copilotToken.SetExpiresIn()
+	copilotToken.UpdateExpiryFromTimestamp()
 
 	return copilotToken, nil
 }

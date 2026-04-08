@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"maps"
 	"net/http"
 	"net/url"
@@ -14,10 +13,10 @@ import (
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/env"
-	"github.com/charmbracelet/crush/internal/oauth"
-	"github.com/charmbracelet/crush/internal/oauth/copilot"
+	"github.com/charmbracelet/crushcl/internal/csync"
+	"github.com/charmbracelet/crushcl/internal/env"
+	"github.com/charmbracelet/crushcl/internal/oauth"
+	"github.com/charmbracelet/crushcl/internal/oauth/copilot"
 	"github.com/invopop/jsonschema"
 )
 
@@ -175,9 +174,7 @@ type MCPConfig struct {
 	Disabled      bool              `json:"disabled,omitempty" jsonschema:"description=Whether this MCP server is disabled,default=false"`
 	DisabledTools []string          `json:"disabled_tools,omitempty" jsonschema:"description=List of tools from this MCP server to disable,example=get-library-doc"`
 	Timeout       int               `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for MCP server connections,default=15,example=30,example=60,example=120"`
-
-	// TODO: maybe make it possible to get the value from the env
-	Headers map[string]string `json:"headers,omitempty" jsonschema:"description=HTTP headers for HTTP/SSE MCP servers"`
+	Headers       map[string]string `json:"headers,omitempty" jsonschema:"description=HTTP headers for HTTP/SSE MCP servers (supports ${ENV_VAR} expansion)"`
 }
 
 type LSPConfig struct {
@@ -315,8 +312,8 @@ func (m MCPConfig) ResolvedHeaders() map[string]string {
 		var err error
 		m.Headers[e], err = resolver.ResolveValue(v)
 		if err != nil {
-			slog.Error("Error resolving header variable", "error", err, "variable", e, "value", v)
-			continue
+			// Skip invalid variables - non-fatal, log at higher level if needed
+			delete(m.Headers, e)
 		}
 	}
 	return m.Headers
@@ -547,12 +544,16 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 
 	switch providerID {
 	case catwalk.InferenceProviderMiniMax, catwalk.InferenceProviderMiniMaxChina:
-		// NOTE: MiniMax has no good endpoint we can use to validate the API key.
-		// Let's at least check the pattern.
-		if !strings.HasPrefix(apiKey, "sk-") {
-			return fmt.Errorf("invalid API key format for provider %s", c.ID)
-		}
-		return nil
+		// MiniMax uses Anthropic SDK with OpenAI-compatible Bearer auth
+		baseURL, _ := resolver.ResolveValue(c.BaseURL)
+		baseURL = cmp.Or(baseURL, "https://api.minimax.io/anthropic")
+		testURL = baseURL + "/v1/messages"
+		headers["Authorization"] = "Bearer " + apiKey
+		headers["Content-Type"] = "application/json"
+		headers["anthropic-version"] = "2023-06-01"
+		// Don't return early - fall through to HTTP test below
+		// But we need POST with body for MiniMax, so handle separately below
+		return c.testMiniMaxConnection(resolver, testURL, headers, apiKey)
 	}
 
 	switch c.Type {
@@ -609,10 +610,11 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	if err != nil {
 		return fmt.Errorf("failed to create request for provider %s: %w", c.ID, err)
 	}
-	for k, v := range headers {
+	// ExtraHeaders as base, then explicitly set headers override
+	for k, v := range c.ExtraHeaders {
 		req.Header.Set(k, v)
 	}
-	for k, v := range c.ExtraHeaders {
+	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
 
@@ -635,20 +637,58 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	return nil
 }
 
-func resolveEnvs(envs map[string]string) []string {
-	resolver := NewShellVariableResolver(env.New())
-	for e, v := range envs {
-		var err error
-		envs[e], err = resolver.ResolveValue(v)
-		if err != nil {
-			slog.Error("Error resolving environment variable", "error", err, "variable", e, "value", v)
-			continue
-		}
+// testMiniMaxConnection tests MiniMax API connection using POST /v1/messages
+// MiniMax does NOT have /models endpoint (returns 404), so we use /messages instead
+func (c *ProviderConfig) testMiniMaxConnection(resolver VariableResolver, testURL string, headers map[string]string, apiKey string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Get model name from config, or use default MiniMax model
+	modelName := "MiniMax-M2.7-highspeed"
+	if c.Models != nil && len(c.Models) > 0 {
+		modelName = c.Models[0].ID
 	}
 
+	// Minimal health check request body
+	body := fmt.Sprintf(`{"model":"%s","messages":[{"role":"user","content":"hi"}],"max_tokens":1}`, modelName)
+
+	client := &http.Client{}
+	req, err := http.NewRequestWithContext(ctx, "POST", testURL, strings.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to create request for provider %s: %w", c.ID, err)
+	}
+
+	// ExtraHeaders as base, then explicitly set headers override
+	for k, v := range c.ExtraHeaders {
+		req.Header.Set(k, v)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to connect to provider %s: %w", c.ID, err)
+	}
+	defer resp.Body.Close()
+
+	// Health check should only accept OK - reject 400 (bad request) as it indicates API issue
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("health check failed for provider %s: %s", c.ID, resp.Status)
+	}
+	return nil
+}
+
+func resolveEnvs(envs map[string]string) []string {
+	resolver := NewShellVariableResolver(env.New())
 	res := make([]string, 0, len(envs))
 	for k, v := range envs {
-		res = append(res, fmt.Sprintf("%s=%s", k, v))
+		resolved, err := resolver.ResolveValue(v)
+		if err != nil {
+			// Skip failed variables - non-fatal
+			continue
+		}
+		res = append(res, fmt.Sprintf("%s=%s", k, resolved))
 	}
 	return res
 }

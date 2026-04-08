@@ -13,9 +13,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crushcl/internal/config"
+	"github.com/charmbracelet/crushcl/internal/csync"
+	"github.com/charmbracelet/crushcl/internal/fsext"
 	powernapconfig "github.com/charmbracelet/x/powernap/pkg/config"
 	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
 	"github.com/sourcegraph/jsonrpc2"
@@ -44,8 +44,10 @@ func NewManager(cfg *config.ConfigStore) *Manager {
 			continue
 		}
 
-		// HACK: the user might have the command name in their config instead
-		// of the actual name. Find and use the correct name.
+		// HACK: Users may specify the command name (e.g., "gopls") instead of the
+		// actual server name in their config. This function resolves the command
+		// name to the correct server name. Consider improving config validation
+		// to only accept valid server names.
 		actualName := resolveServerName(manager, name)
 		manager.AddServer(actualName, &powernapconfig.ServerConfig{
 			Command:     clientConfig.Command,

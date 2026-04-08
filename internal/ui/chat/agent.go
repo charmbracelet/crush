@@ -771,9 +771,17 @@ type TaskNodeItem struct {
 	childStatusText    string
 	childStatusIsError bool
 	completionStatus   message.ToolResultSubtaskStatus
+
+	// nestedTools holds the compact tool call summary from the child session.
+	nestedTools    []ToolMessageItem
+	nestedExpanded bool
 }
 
-var _ ChildSessionStatusSetter = (*TaskNodeItem)(nil)
+var (
+	_ ChildSessionStatusSetter = (*TaskNodeItem)(nil)
+	_ NestedToolContainer      = (*TaskNodeItem)(nil)
+	_ Expandable               = (*TaskNodeItem)(nil)
+)
 
 func NewTaskNodeItem(sty *styles.Styles, parentToolCallID, taskID, description, prompt, subagentType, childSessionID string) *TaskNodeItem {
 	return &TaskNodeItem{
@@ -827,6 +835,33 @@ func (t *TaskNodeItem) SetCompletionStatus(status message.ToolResultSubtaskStatu
 // CompletionStatus returns the final completion status for this task node.
 func (t *TaskNodeItem) CompletionStatus() message.ToolResultSubtaskStatus {
 	return t.completionStatus
+}
+
+// NestedTools returns the nested tool calls from the child session.
+func (t *TaskNodeItem) NestedTools() []ToolMessageItem {
+	return t.nestedTools
+}
+
+// SetNestedTools sets the nested tool calls.
+func (t *TaskNodeItem) SetNestedTools(tools []ToolMessageItem) {
+	t.nestedTools = tools
+	t.clearCache()
+}
+
+// AddNestedTool adds a nested tool call.
+func (t *TaskNodeItem) AddNestedTool(tool ToolMessageItem) {
+	if s, ok := tool.(Compactable); ok {
+		s.SetCompact(true)
+	}
+	t.nestedTools = append(t.nestedTools, tool)
+	t.clearCache()
+}
+
+// ToggleExpanded toggles the nested tool list expansion state.
+func (t *TaskNodeItem) ToggleExpanded() bool {
+	t.nestedExpanded = !t.nestedExpanded
+	t.clearCache()
+	return t.nestedExpanded
 }
 
 func (t *TaskNodeItem) SetFocused(focused bool) {
@@ -899,5 +934,38 @@ func (t *TaskNodeItem) renderContent(width int) string {
 	labelText := t.sty.Tool.AgentPrompt.Width(availWidth).Render(
 		ansi.Truncate(label, availWidth, "…"),
 	)
-	return lipgloss.JoinHorizontal(lipgloss.Left, statusIcon, arrow, tag, labelText)
+	headerLine := lipgloss.JoinHorizontal(lipgloss.Left, statusIcon, arrow, tag, labelText)
+
+	// If there are no nested tools, return the single header line.
+	if len(t.nestedTools) == 0 {
+		return headerLine
+	}
+
+	lines := []string{headerLine}
+
+	// Show a collapsible operations summary.
+	const nestedIndent = 6
+	nestedWidth := max(0, width-nestedIndent)
+	indent := strings.Repeat(" ", nestedIndent)
+
+	if t.nestedExpanded {
+		toggle := t.sty.Tool.AgenticFetchPromptTag.Render(
+			fmt.Sprintf("▾ %d operations", len(t.nestedTools)),
+		)
+		lines = append(lines, indent+toggle)
+		visible, _ := agentNestedToolWindow(t.nestedTools, true)
+		for _, tool := range visible {
+			toolView := tool.Render(nestedWidth)
+			for _, ln := range strings.Split(toolView, "\n") {
+				lines = append(lines, indent+ln)
+			}
+		}
+	} else {
+		toggle := t.sty.Tool.AgenticFetchPromptTag.Render(
+			fmt.Sprintf("▸ %d operations", len(t.nestedTools)),
+		)
+		lines = append(lines, indent+toggle)
+	}
+
+	return strings.Join(lines, "\n")
 }

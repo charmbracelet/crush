@@ -458,10 +458,31 @@ type openChildSessionMsg struct {
 	sessionID string
 }
 
+// captureViewState saves the current session's selected item ID so it can
+// be restored when navigating back from a child session.
+func (m *UI) captureViewState() {
+	if m.session == nil {
+		return
+	}
+	selectedID := ""
+	if sel := m.chat.SelectedMessageItem(); sel != nil {
+		selectedID = sel.ID()
+	}
+	if m.viewStateCache == nil {
+		m.viewStateCache = make(map[string]sessionViewState)
+	}
+	m.viewStateCache[m.session.ID] = sessionViewState{
+		SelectedItemID: selectedID,
+	}
+}
+
 func (m *UI) openSelectedChildSession() tea.Cmd {
 	if m.session == nil {
 		return nil
 	}
+
+	// Save current view state before navigating into the child session.
+	m.captureViewState()
 
 	selected := m.chat.SelectedMessageItem()
 	if selected == nil {
@@ -522,16 +543,23 @@ func (m *UI) openParentSession() tea.Cmd {
 		return nil
 	}
 
+	parentID := m.session.ParentSessionID
+
+	// Prefer the cached selected item from before the user entered this child.
+	if cached, ok := m.viewStateCache[parentID]; ok {
+		return m.loadSessionWithSelection(parentID, cached.SelectedItemID)
+	}
+
 	_, toolCallID, ok := m.com.App.Sessions.ParseAgentToolSessionID(m.session.ID)
 	if ok {
 		outerToolCallID := toolCallID
 		if idx := strings.Index(toolCallID, "::"); idx != -1 {
 			outerToolCallID = toolCallID[:idx]
 		}
-		return m.loadSessionWithSelection(m.session.ParentSessionID, outerToolCallID)
+		return m.loadSessionWithSelection(parentID, outerToolCallID)
 	}
 
-	return m.loadSession(m.session.ParentSessionID)
+	return m.loadSession(parentID)
 }
 
 func (m *UI) cycleSiblingChildSession(step int) tea.Cmd {

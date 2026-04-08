@@ -151,7 +151,7 @@ type (
 	memoryDreamStartedMsg struct {
 		SessionID string
 	}
-	memoryDreamRefreshMsg struct{}
+	memoryDreamRefreshMsg       struct{}
 	memoryFreshnessRefreshedMsg struct {
 		Warning string
 	}
@@ -161,6 +161,13 @@ type (
 
 	// copyChatHighlightMsg is sent to copy the current chat highlight to clipboard.
 	copyChatHighlightMsg struct{}
+
+	// sessionViewState captures the view state of a session so it can be
+	// restored when navigating back from a child session.
+	sessionViewState struct {
+		SelectedItemID string
+		ExpandedItems  map[string]bool
+	}
 
 	// sessionFilesUpdatesMsg is sent when the files for this session have been updated
 	sessionFilesUpdatesMsg struct {
@@ -304,6 +311,10 @@ type UI struct {
 	// Events with this session ID are ignored until loadSessionMsg arrives,
 	// avoiding the race where m.session.ID hasn't switched yet.
 	pendingSessionLoad string
+
+	// viewStateCache caches view state per session ID so returning from a
+	// child session can restore scroll position and expand states.
+	viewStateCache map[string]sessionViewState
 
 	// Todo spinner
 	todoSpinner    spinner.Model
@@ -563,7 +574,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.forceCompactMode {
 			m.isCompact = true
 		}
-		m.setState(uiChat, m.focus)
+		// Force focus to the main chat list when entering a subagent
+		// session because the editor is hidden (read-only view).
+		initialFocus := m.focus
+		if msg.session != nil && msg.session.ParentSessionID != "" {
+			initialFocus = uiFocusMain
+		}
+		m.setState(uiChat, initialFocus)
 		m.isCanceling = false
 		m.todoIsSpinning = false
 		m.memoryFreshnessNote = ""
@@ -1173,6 +1190,9 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	// them from the stored message data.
 	items = m.restoreTaskNodes(items, toolResultMap)
 
+	// Load nested tool calls for each TaskNodeItem from its child session.
+	m.loadTaskNodeNestedTools(items)
+
 	// Restored sessions can contain incomplete assistant/tool messages left
 	// behind by interruption. Keep their content, but suppress loading UI only
 	// when there is no active or queued work left for the session.
@@ -1359,6 +1379,50 @@ func (m *UI) propagateTaskStatusesToNodes(toolCallID string, result *message.Too
 			if taskNode, ok := nodeItem.(*chat.TaskNodeItem); ok {
 				taskNode.SetCompletionStatus(status)
 			}
+		}
+	}
+}
+
+// loadTaskNodeNestedTools loads nested tool calls from child sessions into
+// each TaskNodeItem. This provides the third-level collapsible operations
+// inside each sub-task.
+func (m *UI) loadTaskNodeNestedTools(items []chat.MessageItem) {
+	for _, item := range items {
+		taskNode, ok := item.(*chat.TaskNodeItem)
+		if !ok {
+			continue
+		}
+		childSessionID := taskNode.ChildSessionID()
+		if childSessionID == "" {
+			continue
+		}
+
+		nestedMsgs, err := m.com.App.Messages.List(context.Background(), childSessionID)
+		if err != nil || len(nestedMsgs) == 0 {
+			continue
+		}
+
+		nestedMsgPtrs := make([]*message.Message, len(nestedMsgs))
+		for i := range nestedMsgs {
+			nestedMsgPtrs[i] = &nestedMsgs[i]
+		}
+		nestedToolResultMap := chat.BuildToolResultMap(nestedMsgPtrs)
+
+		var nestedTools []chat.ToolMessageItem
+		for _, nestedMsg := range nestedMsgPtrs {
+			nestedItems := chat.ExtractMessageItems(m.com.Styles, nestedMsg, nestedToolResultMap)
+			for _, nestedItem := range nestedItems {
+				if nestedToolItem, ok := nestedItem.(chat.ToolMessageItem); ok {
+					if compactable, ok := nestedToolItem.(chat.Compactable); ok {
+						compactable.SetCompact(true)
+					}
+					nestedTools = append(nestedTools, nestedToolItem)
+				}
+			}
+		}
+
+		if len(nestedTools) > 0 {
+			taskNode.SetNestedTools(nestedTools)
 		}
 	}
 }
@@ -2905,6 +2969,10 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		case uiFocusMain:
 			switch {
 			case key.Matches(msg, m.keyMap.Tab):
+				// Block focus switch to editor in subagent sessions (read-only).
+				if m.isSubagentSession() {
+					break
+				}
 				m.focus = uiFocusEditor
 				cmds = append(cmds, m.textarea.Focus())
 				m.chat.Blur()
@@ -3072,12 +3140,22 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			uv.NewStyledString(m.pillsView).Draw(scr, layout.pills)
 		}
 
-		editorWidth := scr.Bounds().Dx()
-		if !m.isCompact {
-			editorWidth -= layout.sidebar.Dx()
+		if m.isSubagentSession() {
+			// Show a read-only banner instead of the editor.
+			bannerWidth := scr.Bounds().Dx()
+			if !m.isCompact {
+				bannerWidth -= layout.sidebar.Dx()
+			}
+			banner := uv.NewStyledString(m.renderSubagentBanner(bannerWidth))
+			banner.Draw(scr, layout.editor)
+		} else {
+			editorWidth := scr.Bounds().Dx()
+			if !m.isCompact {
+				editorWidth -= layout.sidebar.Dx()
+			}
+			editor := uv.NewStyledString(m.renderEditorView(editorWidth))
+			editor.Draw(scr, layout.editor)
 		}
-		editor := uv.NewStyledString(m.renderEditorView(editorWidth))
-		editor.Draw(scr, layout.editor)
 
 		// Draw details overlay in compact mode when open
 		if m.isCompact && m.detailsOpen {
@@ -3534,14 +3612,19 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 		uiLayout.editor = editorRect
 
 	case uiChat:
+		// Hide the editor when viewing a subagent session (read-only).
+		showEditor := !m.isSubagentSession()
+
 		if m.isCompact {
 			// Layout
 			//
 			// compact-header
 			// ------
+			// (subagent-banner — only in subagent sessions)
+			// ------
 			// main
 			// ------
-			// editor
+			// editor (hidden in subagent)
 			// ------
 			// help
 			const compactHeaderHeight = 1
@@ -3552,49 +3635,83 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 			uiLayout.sessionDetails.Min.Y += compactHeaderHeight // adjust for header
 			// Add one line gap between header and main content
 			mainRect.Min.Y += 1
-			mainRect, editorRect := layout.SplitVertical(mainRect, layout.Fixed(mainRect.Dy()-editorHeight))
-			mainRect.Max.X -= 1 // Add padding right
-			uiLayout.header = headerRect
-			pillsHeight := m.pillsAreaHeight()
-			if pillsHeight > 0 {
-				pillsHeight = min(pillsHeight, mainRect.Dy())
-				chatRect, pillsRect := layout.SplitVertical(mainRect, layout.Fixed(mainRect.Dy()-pillsHeight))
-				uiLayout.main = chatRect
-				uiLayout.pills = pillsRect
+			if showEditor {
+				mainRect, editorRect := layout.SplitVertical(mainRect, layout.Fixed(mainRect.Dy()-editorHeight))
+				uiLayout.editor = editorRect
+				mainRect.Max.X -= 1 // Add padding right
+				uiLayout.header = headerRect
+				pillsHeight := m.pillsAreaHeight()
+				if pillsHeight > 0 {
+					pillsHeight = min(pillsHeight, mainRect.Dy())
+					chatRect, pillsRect := layout.SplitVertical(mainRect, layout.Fixed(mainRect.Dy()-pillsHeight))
+					uiLayout.main = chatRect
+					uiLayout.pills = pillsRect
+				} else {
+					uiLayout.main = mainRect
+				}
 			} else {
-				uiLayout.main = mainRect
+				mainRect.Max.X -= 1 // Add padding right
+				uiLayout.header = headerRect
+				// Reserve one line for the subagent banner at the bottom.
+				mainRect, bannerRect := layout.SplitVertical(mainRect, layout.Fixed(mainRect.Dy()-1))
+				uiLayout.editor = bannerRect // reuse editor slot for banner
+				pillsHeight := m.pillsAreaHeight()
+				if pillsHeight > 0 {
+					pillsHeight = min(pillsHeight, mainRect.Dy())
+					chatRect, pillsRect := layout.SplitVertical(mainRect, layout.Fixed(mainRect.Dy()-pillsHeight))
+					uiLayout.main = chatRect
+					uiLayout.pills = pillsRect
+				} else {
+					uiLayout.main = mainRect
+				}
 			}
 			// Add bottom margin to main
 			uiLayout.main.Max.Y -= 1
-			uiLayout.editor = editorRect
 		} else {
 			// Layout
 			//
 			// ------|---
 			// main  |
 			// ------| side
-			// editor|
+			// editor|  (hidden in subagent, replaced by banner)
 			// ----------
 			// help
 
 			mainRect, sideRect := layout.SplitHorizontal(appRect, layout.Fixed(appRect.Dx()-sidebarWidth))
 			// Add padding left
 			sideRect.Min.X += 1
-			mainRect, editorRect := layout.SplitVertical(mainRect, layout.Fixed(mainRect.Dy()-editorHeight))
-			mainRect.Max.X -= 1 // Add padding right
-			uiLayout.sidebar = sideRect
-			pillsHeight := m.pillsAreaHeight()
-			if pillsHeight > 0 {
-				pillsHeight = min(pillsHeight, mainRect.Dy())
-				chatRect, pillsRect := layout.SplitVertical(mainRect, layout.Fixed(mainRect.Dy()-pillsHeight))
-				uiLayout.main = chatRect
-				uiLayout.pills = pillsRect
+			if showEditor {
+				mainRect, editorRect := layout.SplitVertical(mainRect, layout.Fixed(mainRect.Dy()-editorHeight))
+				uiLayout.editor = editorRect
+				mainRect.Max.X -= 1 // Add padding right
+				uiLayout.sidebar = sideRect
+				pillsHeight := m.pillsAreaHeight()
+				if pillsHeight > 0 {
+					pillsHeight = min(pillsHeight, mainRect.Dy())
+					chatRect, pillsRect := layout.SplitVertical(mainRect, layout.Fixed(mainRect.Dy()-pillsHeight))
+					uiLayout.main = chatRect
+					uiLayout.pills = pillsRect
+				} else {
+					uiLayout.main = mainRect
+				}
 			} else {
-				uiLayout.main = mainRect
+				// Reserve one line for the subagent banner at the bottom.
+				mainRect, bannerRect := layout.SplitVertical(mainRect, layout.Fixed(mainRect.Dy()-1))
+				uiLayout.editor = bannerRect // reuse editor slot for banner
+				mainRect.Max.X -= 1          // Add padding right
+				uiLayout.sidebar = sideRect
+				pillsHeight := m.pillsAreaHeight()
+				if pillsHeight > 0 {
+					pillsHeight = min(pillsHeight, mainRect.Dy())
+					chatRect, pillsRect := layout.SplitVertical(mainRect, layout.Fixed(mainRect.Dy()-pillsHeight))
+					uiLayout.main = chatRect
+					uiLayout.pills = pillsRect
+				} else {
+					uiLayout.main = mainRect
+				}
 			}
 			// Add bottom margin to main
 			uiLayout.main.Max.Y -= 1
-			uiLayout.editor = editorRect
 		}
 	}
 
@@ -3914,6 +4031,12 @@ func (m *UI) hasSession() bool {
 	return m.session != nil && m.session.ID != ""
 }
 
+// isSubagentSession returns true when the current session is a child of
+// another session (i.e. the user navigated into a subagent view).
+func (m *UI) isSubagentSession() bool {
+	return m.session != nil && m.session.ParentSessionID != ""
+}
+
 func (m *UI) shouldRefreshSessionUsage(eventType pubsub.EventType, msg message.Message) bool {
 	if eventType != pubsub.UpdatedEvent || msg.Role != message.Assistant {
 		return false
@@ -3963,6 +4086,17 @@ var workingPlaceholders = [...]string{
 func (m *UI) randomizePlaceholders() {
 	m.workingPlaceholder = workingPlaceholders[rand.Intn(len(workingPlaceholders))]
 	m.readyPlaceholder = readyPlaceholders[rand.Intn(len(readyPlaceholders))]
+}
+
+// renderSubagentBanner renders a read-only banner shown instead of the editor
+// when the user is viewing a subagent session.
+func (m *UI) renderSubagentBanner(width int) string {
+	t := m.com.Styles
+	roleLabel := strings.ToUpper(m.sessionRoleLabel(m.session))
+	tag := t.Tool.SubagentBanner.Render("SUBAGENT " + roleLabel)
+	hint := t.Muted.Render("  read-only  [ back")
+	line := lipgloss.JoinHorizontal(lipgloss.Left, tag, hint)
+	return lipgloss.NewStyle().Width(width).PaddingLeft(1).Render(line)
 }
 
 // renderEditorView renders the editor view with attachments if any.

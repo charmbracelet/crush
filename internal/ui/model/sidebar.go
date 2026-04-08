@@ -136,7 +136,11 @@ func (m *UI) modeInfo(width int) string {
 	}
 
 	modes := make([]string, 0, 2)
-	modes = append(modes, "SESSION "+strings.ToUpper(m.sessionRoleLabel(m.session)))
+	if m.isSubagentSession() {
+		modes = append(modes, "SUBAGENT "+strings.ToUpper(m.sessionRoleLabel(m.session)))
+	} else {
+		modes = append(modes, "SESSION "+strings.ToUpper(m.sessionRoleLabel(m.session)))
+	}
 	if m.session.CollaborationMode == sessionpkg.CollaborationModePlan {
 		modes = append(modes, "PLAN")
 	} else {

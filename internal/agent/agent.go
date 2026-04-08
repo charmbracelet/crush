@@ -72,6 +72,7 @@ type SessionAgentCall struct {
 	ProviderOptions  fantasy.ProviderOptions
 	Attachments      []message.Attachment
 	MaxOutputTokens  int64
+	ContextWindow    int64
 	Temperature      *float64
 	TopP             *float64
 	TopK             *int64
@@ -249,10 +250,20 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	var currentAssistant *message.Message
 	var shouldSummarize bool
-	// Don't send MaxOutputTokens if 0 — some providers (e.g. LM Studio) reject it
+	// Constrain MaxOutputTokens by remaining context window to avoid overflow errors.
+	// Don't send MaxOutputTokens if 0 — some providers (e.g. LM Studio) reject it.
 	var maxOutputTokens *int64
 	if call.MaxOutputTokens > 0 {
-		maxOutputTokens = &call.MaxOutputTokens
+		maxTokens := call.MaxOutputTokens
+		if call.ContextWindow > 0 {
+			cw := call.ContextWindow
+			tokens := currentSession.CompletionTokens + currentSession.PromptTokens
+			remaining := max(cw - tokens, 0)
+			maxTokens = min(maxTokens, remaining)
+		}
+		if maxTokens > 0 {
+			maxOutputTokens = &maxTokens
+		}
 	}
 	result, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
@@ -428,15 +439,23 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		StopWhen: []fantasy.StopCondition{
-			func(_ []fantasy.StepResult) bool {
+			func(steps []fantasy.StepResult) bool {
 				cw := int64(largeModel.CatwalkCfg.ContextWindow)
 				// If context window is unknown (0), skip auto-summarize
 				// to avoid immediately truncating custom/local models.
 				if cw == 0 {
 					return false
 				}
-				tokens := currentSession.CompletionTokens + currentSession.PromptTokens
-				remaining := cw - tokens
+				// StopWhen is called AFTER OnStepFinish for each step, so the steps
+				// slice contains all steps including the current one. Use cumulative
+				// token counts from the steps rather than the session fields which
+				// may lag behind when the current Run started.
+				var totalInput, totalOutput int64
+				for _, step := range steps {
+					totalInput += step.Usage.InputTokens
+					totalOutput += step.Usage.OutputTokens
+				}
+				remaining := cw - (totalInput + totalOutput)
 				var threshold int64
 				if cw > largeContextWindowThreshold {
 					threshold = largeContextWindowBuffer
@@ -544,7 +563,31 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			link := linkStyle.Hyperlink(url, "id=hyper").Render(url)
 			currentAssistant.AddFinish(message.FinishReasonError, "No credits", "You're out of credits. Add more at "+link)
 		} else if errors.As(err, &providerErr) {
-			if providerErr.Message == "The requested model is not supported." {
+			if providerErr.IsContextTooLarge() {
+				// Context overflow — trigger compaction instead of surfacing the error.
+				currentAssistant.AddFinish(
+					message.FinishReasonError,
+					"Context limit reached",
+					"The conversation is too long, compacting session to continue...",
+				)
+				updateErr := a.messages.Update(ctx, *currentAssistant)
+				if updateErr != nil {
+					return nil, updateErr
+				}
+				// Summarize to compact the session, then re-queue the prompt.
+				a.activeRequests.Del(call.SessionID)
+				if summarizeErr := a.Summarize(ctx, call.SessionID, call.ProviderOptions); summarizeErr != nil {
+					return nil, summarizeErr
+				}
+				existing, ok := a.messageQueue.Get(call.SessionID)
+				if !ok {
+					existing = []SessionAgentCall{}
+				}
+				call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
+				existing = append(existing, call)
+				a.messageQueue.Set(call.SessionID, existing)
+				return nil, nil
+			} else if providerErr.Message == "The requested model is not supported." {
 				url := "https://github.com/settings/copilot/features"
 				link := linkStyle.Hyperlink(url, "id=copilot").Render(url)
 				currentAssistant.AddFinish(

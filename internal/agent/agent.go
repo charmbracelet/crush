@@ -8,6 +8,7 @@
 package agent
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	_ "embed"
@@ -563,7 +564,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			link := linkStyle.Hyperlink(url, "id=hyper").Render(url)
 			currentAssistant.AddFinish(message.FinishReasonError, "No credits", "You're out of credits. Add more at "+link)
 		} else if errors.As(err, &providerErr) {
-			if providerErr.IsContextTooLarge() || strings.Contains(err.Error(), "Requested token count exceeds") {
+			if providerErr.IsContextTooLarge() || bytes.Contains(providerErr.ResponseBody, []byte("Requested token count exceeds")) {
 				// Context overflow — trigger compaction instead of surfacing the error.
 				currentAssistant.AddFinish(
 					message.FinishReasonError,

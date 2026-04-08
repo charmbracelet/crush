@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/message"
 )
@@ -312,18 +313,22 @@ func TriggerChatAfterResponse(ctx context.Context, input ChatAfterResponseInput)
 
 // TriggerChatMessagesTransform executes all registered ChatMessagesTransform hooks in order.
 func TriggerChatMessagesTransform(ctx context.Context, input ChatMessagesTransformInput, output ChatMessagesTransformOutput) (ChatMessagesTransformOutput, error) {
+	start := time.Now()
 	mu.RLock()
 	hooks := append([]Hooks(nil), initializedHooks...)
 	mu.RUnlock()
 
-	for _, hook := range hooks {
+	for i, hook := range hooks {
 		if hook.ChatMessagesTransform == nil {
 			continue
 		}
+		hookStart := time.Now()
 		if err := hook.ChatMessagesTransform(ctx, input, &output); err != nil {
 			return output, err
 		}
+		slog.Debug("[PERF] ChatMessagesTransform hook completed", "hook_index", i, "duration", time.Since(hookStart), "session_id", input.SessionID)
 	}
+	slog.Debug("[PERF] ChatMessagesTransform all hooks done", "total_duration", time.Since(start), "session_id", input.SessionID, "msg_count", len(output.Messages))
 	return output, nil
 }
 

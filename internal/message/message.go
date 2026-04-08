@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/db"
@@ -145,10 +146,12 @@ func (s *service) Get(ctx context.Context, id string) (Message, error) {
 }
 
 func (s *service) List(ctx context.Context, sessionID string) ([]Message, error) {
+	start := time.Now()
 	dbMessages, err := s.q.ListMessagesBySession(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
+	slog.Debug("[PERF] message.List: DB query done", "duration", time.Since(start), "session_id", sessionID, "count", len(dbMessages))
 	messages := make([]Message, len(dbMessages))
 	for i, dbMessage := range dbMessages {
 		messages[i], err = s.fromDBItem(dbMessage)
@@ -156,6 +159,7 @@ func (s *service) List(ctx context.Context, sessionID string) ([]Message, error)
 			return nil, err
 		}
 	}
+	slog.Debug("[PERF] message.List: fromDBItem conversion done", "duration", time.Since(start), "session_id", sessionID)
 	return messages, nil
 }
 

@@ -87,7 +87,6 @@ func createAgentWithHooksForTest(env fakeEnv, fakeAgent fantasy.Agent) SessionAg
 		SmallModel:   model,
 		SystemPrompt: "",
 		WorkingDir:   env.workingDir,
-		AutoRecall:   buildAutoRecall(env.history, env.memory, nil),
 		IsYolo:       true,
 		Sessions:     env.sessions,
 		Messages:     env.messages,

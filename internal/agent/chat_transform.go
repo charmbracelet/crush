@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/message"
@@ -128,18 +130,22 @@ func (a *sessionAgent) transformSystemPrompt(ctx context.Context, input chatRequ
 }
 
 func (a *sessionAgent) buildChatRequestState(ctx context.Context, input chatRequestStateInput) (chatRequestState, error) {
+	start := time.Now()
 	transformedMessages, err := a.transformSessionMessages(ctx, input)
 	if err != nil {
 		return chatRequestState{}, err
 	}
+	slog.Debug("[PERF] buildChatRequestState: transformSessionMessages done", "duration", time.Since(start), "session_id", input.SessionID, "msg_count", len(transformedMessages))
 	systemPrompt, promptPrefix, err := a.transformSystemPrompt(ctx, input)
 	if err != nil {
 		return chatRequestState{}, err
 	}
+	slog.Debug("[PERF] buildChatRequestState: transformSystemPrompt done", "duration", time.Since(start), "session_id", input.SessionID)
 	if autoModePrompt, ok := pendingAutoModePromptText(transformedMessages, input.PermissionMode); ok {
 		systemPrompt = joinSystemSections([]string{systemPrompt, autoModePrompt})
 	}
 	history, files := a.preparePrompt(transformedMessages, input.Attachments...)
+	slog.Debug("[PERF] buildChatRequestState: preparePrompt done", "duration", time.Since(start), "session_id", input.SessionID)
 	return chatRequestState{
 		Messages:     transformedMessages,
 		History:      history,

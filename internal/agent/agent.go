@@ -213,13 +213,6 @@ func (a *sessionAgent) postCompactSessionMessages(ctx context.Context, sessionID
 	})
 }
 
-func (a *sessionAgent) autoRecallBlock(ctx context.Context, sessionID, prompt string) string {
-	if a.autoRecall == nil {
-		return ""
-	}
-	return strings.TrimSpace(a.autoRecall(ctx, sessionID, prompt))
-}
-
 type SessionAgentCall struct {
 	SessionID     string
 	Prompt        string
@@ -239,6 +232,9 @@ type SessionAgentCall struct {
 	PresencePenalty  *float64
 	NonInteractive   bool
 	UserMessage      *message.Message
+	// MemoryPrefetch is an async channel for memory recall results.
+	// If non-nil and data is available, it will be injected into the system prompt.
+	MemoryPrefetch chan string
 	// OnProgress is called after each completed LLM step with accumulated
 	// tool call count and the name of the last tool invoked.
 	OnProgress func(toolUses int, lastTool string)
@@ -281,7 +277,6 @@ type sessionAgent struct {
 	workingDir         string
 	tools              *csync.Slice[fantasy.AgentTool]
 	agentFactory       func(model fantasy.LanguageModel, opts ...fantasy.AgentOption) fantasy.Agent
-	autoRecall         func(context.Context, string, string) string
 
 	refreshCallConfig    func(context.Context) (sessionAgentRuntimeConfig, error)
 	isSubAgent           bool
@@ -315,7 +310,6 @@ type SessionAgentOptions struct {
 	SystemPrompt         string
 	WorkingDir           string
 	AgentFactory         func(model fantasy.LanguageModel, opts ...fantasy.AgentOption) fantasy.Agent
-	AutoRecall           func(context.Context, string, string) string
 	RefreshCallConfig    func(context.Context) (sessionAgentRuntimeConfig, error)
 	IsSubAgent           bool
 	DisableAutoSummarize bool
@@ -365,7 +359,6 @@ func NewSessionAgent(
 		systemPrompt:         csync.NewValue(opts.SystemPrompt),
 		workingDir:           opts.WorkingDir,
 		agentFactory:         agentFactory,
-		autoRecall:           opts.AutoRecall,
 		refreshCallConfig:    opts.RefreshCallConfig,
 		isSubAgent:           opts.IsSubAgent,
 		sessions:             opts.Sessions,
@@ -390,6 +383,11 @@ func NewSessionAgent(
 }
 
 func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
+	start := time.Now()
+	defer func() {
+		slog.Debug("[PERF] sessionAgent.Run total", "duration", time.Since(start), "session_id", call.SessionID)
+	}()
+
 	if call.InitiatorType != "" {
 		ctx = copilot.ContextWithInitiatorType(ctx, call.InitiatorType)
 	} else if a.isSubAgent {
@@ -436,6 +434,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	if err != nil {
 		return nil, err
 	}
+	slog.Debug("[PERF] sessionAgent: initial setup done", "duration", time.Since(start), "session_id", call.SessionID)
 
 	// Copy mutable fields under lock to avoid races with SetTools/SetModels.
 	agentTools := a.tools.Copy()
@@ -472,9 +471,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		systemPrompt += "\n\n<mcp-instructions>\n" + s + "\n</mcp-instructions>"
 	}
 
-	if !a.isSubAgent {
-		if recall := a.autoRecallBlock(ctx, call.SessionID, call.Prompt); recall != "" {
-			systemPrompt += "\n\n<auto_recall>\n" + recall + "\n</auto_recall>"
+	if !a.isSubAgent && call.MemoryPrefetch != nil {
+		select {
+		case recall := <-call.MemoryPrefetch:
+			if recall != "" {
+				systemPrompt += "\n\n<auto_recall>\n" + recall + "\n</auto_recall>"
+				slog.Debug("[PERF] sessionAgent: injected prefetched memory recall", "session_id", call.SessionID)
+			}
+		default:
+			slog.Debug("[PERF] sessionAgent: memory prefetch not ready, skipping", "session_id", call.SessionID)
 		}
 	}
 
@@ -496,6 +501,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		return nil, fmt.Errorf("failed to get session messages: %w", err)
 	}
 	msgs = excludeCurrentUserMessage(msgs, call.UserMessage)
+	slog.Debug("[PERF] sessionAgent: got session messages", "duration", time.Since(start), "count", len(msgs), "session_id", call.SessionID)
 	promptPrefix = buildDelegationPromptPrefix(promptPrefix, agentTools, a.isSubAgent)
 	if len(msgs) > 0 {
 		microCompacted, compactErr := a.microCompactSessionMessages(ctx, call.SessionID, largeModel, providerCtx, msgs)
@@ -513,6 +519,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			msgs = collapsed
 		}
 	}
+	slog.Debug("[PERF] sessionAgent: micro compact done", "duration", time.Since(start), "session_id", call.SessionID)
 
 	preflightState, err := a.buildChatRequestState(ctx, chatRequestStateInput{
 		SessionID:      call.SessionID,
@@ -530,6 +537,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	if err != nil {
 		return nil, err
 	}
+	slog.Debug("[PERF] sessionAgent: preflight estimate done", "duration", time.Since(start), "session_id", call.SessionID)
 	if !a.disableAutoSummarize && len(msgs) > 0 {
 		// Estimate input tokens only. The shouldAutoSummarize function handles
 		// output token reservation internally, so we don't need to add maxOutputTokens here.
@@ -555,6 +563,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			msgs = excludeCurrentUserMessage(msgs, call.UserMessage)
 		}
 	}
+	slog.Debug("[PERF] sessionAgent: auto summarize check done", "duration", time.Since(start), "session_id", call.SessionID)
 
 	var wg sync.WaitGroup
 	if !call.NonInteractive && shouldGenerateSessionTitle(currentSession.Title) {
@@ -579,6 +588,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return nil, err
 		}
 	}
+	slog.Debug("[PERF] sessionAgent: user message created (animation starts here)", "duration", time.Since(start), "session_id", call.SessionID)
 
 	// Add the session to the context.
 	ctx = context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
@@ -606,6 +616,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	if err != nil {
 		return nil, err
 	}
+	slog.Debug("[PERF] sessionAgent: buildChatRequestState done", "duration", time.Since(start), "session_id", call.SessionID)
 	if len(agentTools) > 0 {
 		// Add Anthropic caching to the last tool.
 		agentTools[len(agentTools)-1].SetProviderOptions(a.getCacheControlOptions())
@@ -706,6 +717,39 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				prepared.Messages = options.Messages
 				for i := range prepared.Messages {
 					prepared.Messages[i].ProviderOptions = nil
+				}
+
+				// Trigger messages.transform plugin on every step (including tool result steps)
+				// This allows plugins like morph_compact to compress messages after tool calls.
+				if len(prepared.Messages) > 0 {
+					originalTokens := estimatePromptTokens(prepared.Messages, nil)
+					internalMsgs := message.FromFantasyMessages(prepared.Messages)
+					transformedMsgs, transformErr := plugin.TriggerChatMessagesTransform(callContext, plugin.ChatMessagesTransformInput{
+						SessionID: call.SessionID,
+						Agent:     "session",
+						Model:     agentModelInfo(largeModel),
+						Provider:  providerCtx,
+						Purpose:   requestPurpose,
+					}, plugin.ChatMessagesTransformOutput{Messages: internalMsgs})
+					if transformErr != nil {
+						slog.Warn("Failed to transform messages in PrepareStep", "error", transformErr, "session_id", call.SessionID)
+					} else if len(transformedMsgs.Messages) > 0 {
+						// Convert back to fantasy.Messages
+						prepared.Messages, _ = a.preparePrompt(transformedMsgs.Messages)
+						newTokens := estimatePromptTokens(prepared.Messages, nil)
+						// If morph compression reduced tokens significantly, update session's
+						// LastPromptTokens so UI and auto-summarize checks use the correct value.
+						// We only update the in-memory session here; the persisted value will
+						// be updated after the actual LLM call completes.
+						if newTokens < originalTokens {
+							slog.Debug("Messages transformed (compressed) in PrepareStep", "original_tokens", originalTokens, "new_tokens", newTokens, "session_id", call.SessionID)
+							sessionLock.Lock()
+							if newTokens < currentSession.LastPromptTokens {
+								currentSession.LastPromptTokens = newTokens
+							}
+							sessionLock.Unlock()
+						}
+					}
 				}
 
 				queuedCalls := a.takeJoinActiveRunCalls(call.SessionID)
@@ -2050,10 +2094,12 @@ func (a *sessionAgent) cleanupFailedAttempt(ctx context.Context, assistant *mess
 }
 
 func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.Session) ([]message.Message, error) {
+	start := time.Now()
 	msgs, err := a.messages.List(ctx, session.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list messages: %w", err)
 	}
+	slog.Debug("[PERF] getSessionMessages: messages.List done", "duration", time.Since(start), "session_id", session.ID, "count", len(msgs))
 
 	if session.SummaryMessageID != "" {
 		summaryMsgIndex := -1

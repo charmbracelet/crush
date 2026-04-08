@@ -59,8 +59,9 @@ const (
 )
 
 const (
-	AgentCoder string = "coder"
-	AgentTask  string = "task"
+	AgentCoder  string = "coder"
+	AgentTask   string = "task"
+	AgentSecOps string = "secops"
 )
 
 type SelectedModel struct {
@@ -481,6 +482,14 @@ func allToolNames() []string {
 		"write",
 		"list_mcp_resources",
 		"read_mcp_resource",
+		// SecOps tools
+		"log_analyze",
+		"compliance_check",
+		"security_scan",
+		"monitoring_query",
+		"network_diagnostics",
+		"certificate_audit",
+		"audit_viewer",
 	}
 }
 
@@ -496,6 +505,20 @@ func resolveReadOnlyTools(tools []string) []string {
 	readOnlyTools := []string{"glob", "grep", "ls", "sourcegraph", "view"}
 	// filter to only include tools that are in allowedtools (include mode)
 	return filterSlice(tools, readOnlyTools, true)
+}
+
+func resolveSecOpsTools(tools []string) []string {
+	secOpsTools := []string{
+		// SecOps-specific tools
+		"log_analyze", "compliance_check", "security_scan",
+		"monitoring_query", "network_diagnostics", "certificate_audit",
+		"audit_viewer",
+		// Read-only tools for context
+		"glob", "grep", "ls", "view", "todos",
+		// Bash for flexible operations (sandboxed by SecOps layer)
+		"bash", "job_output", "job_kill",
+	}
+	return filterSlice(tools, secOpsTools, true)
 }
 
 func filterSlice(data []string, mask []string, include bool) []string {
@@ -532,6 +555,16 @@ func (c *Config) SetupAgents() {
 			AllowedTools: resolveReadOnlyTools(allowedTools),
 			// NO MCPs or LSPs by default
 			AllowedMCP: map[string][]string{},
+		},
+
+		AgentSecOps: {
+			ID:          AgentSecOps,
+			Name:        "SecOps",
+			Description: "A security operations agent for infrastructure diagnostics, vulnerability scanning, compliance checking, and incident response.",
+			Model:       SelectedModelTypeLarge,
+			ContextPaths: c.Options.ContextPaths,
+			AllowedTools: resolveSecOpsTools(allowedTools),
+			AllowedMCP:   map[string][]string{},
 		},
 	}
 	c.Agents = agents

@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/anim"
+	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -781,6 +782,7 @@ var (
 	_ ChildSessionStatusSetter = (*TaskNodeItem)(nil)
 	_ NestedToolContainer      = (*TaskNodeItem)(nil)
 	_ Expandable               = (*TaskNodeItem)(nil)
+	_ list.MouseClickable      = (*TaskNodeItem)(nil)
 )
 
 func NewTaskNodeItem(sty *styles.Styles, parentToolCallID, taskID, description, prompt, subagentType, childSessionID string) *TaskNodeItem {
@@ -862,6 +864,19 @@ func (t *TaskNodeItem) ToggleExpanded() bool {
 	t.nestedExpanded = !t.nestedExpanded
 	t.clearCache()
 	return t.nestedExpanded
+}
+
+// HandleMouseClick implements MouseClickable.
+func (t *TaskNodeItem) HandleMouseClick(btn ansi.MouseButton, x, y int) bool {
+	if btn != ansi.MouseLeft {
+		return false
+	}
+	// Toggle expanded state if there are nested tools.
+	if len(t.nestedTools) > 0 {
+		t.ToggleExpanded()
+		return true
+	}
+	return false
 }
 
 func (t *TaskNodeItem) SetFocused(focused bool) {

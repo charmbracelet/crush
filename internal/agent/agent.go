@@ -238,6 +238,7 @@ type SessionAgentCall struct {
 	FrequencyPenalty *float64
 	PresencePenalty  *float64
 	NonInteractive   bool
+	UserMessage      *message.Message
 	// OnProgress is called after each completed LLM step with accumulated
 	// tool call count and the name of the last tool invoked.
 	OnProgress func(toolUses int, lastTool string)
@@ -494,6 +495,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session messages: %w", err)
 	}
+	msgs = excludeCurrentUserMessage(msgs, call.UserMessage)
 	promptPrefix = buildDelegationPromptPrefix(promptPrefix, agentTools, a.isSubAgent)
 	if len(msgs) > 0 {
 		microCompacted, compactErr := a.microCompactSessionMessages(ctx, call.SessionID, largeModel, providerCtx, msgs)
@@ -550,6 +552,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			if err != nil {
 				return nil, fmt.Errorf("failed to reload session messages after summarization: %w", err)
 			}
+			msgs = excludeCurrentUserMessage(msgs, call.UserMessage)
 		}
 	}
 
@@ -566,9 +569,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	defer wg.Wait()
 
 	// Add the user message to the session.
-	userMessage, err := a.createUserMessage(ctx, call)
-	if err != nil {
-		return nil, err
+	var userMessage message.Message
+	if call.UserMessage != nil {
+		userMessage = *call.UserMessage
+	} else {
+		var err error
+		userMessage, err = a.createUserMessage(ctx, call)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Add the session to the context.
@@ -1040,6 +1049,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 						"error", getMsgsErr, "session_id", call.SessionID)
 					break
 				}
+				retryMsgs = excludeCurrentUserMessage(retryMsgs, call.UserMessage)
 				retryState, buildErr := a.buildChatRequestState(genCtx, chatRequestStateInput{
 					SessionID:      call.SessionID,
 					Agent:          "session",
@@ -1137,6 +1147,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			if getMsgsErr != nil {
 				return nil, getMsgsErr
 			}
+			retryMsgs = excludeCurrentUserMessage(retryMsgs, call.UserMessage)
 			retryState, buildErr := a.buildChatRequestState(genCtx, chatRequestStateInput{
 				SessionID:      call.SessionID,
 				Agent:          "session",
@@ -2058,6 +2069,26 @@ func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.S
 		}
 	}
 	return filterAutoModePromptMessages(msgs, session.PermissionMode), nil
+}
+
+func excludeCurrentUserMessage(msgs []message.Message, userMessage *message.Message) []message.Message {
+	if userMessage == nil || userMessage.ID == "" || len(msgs) == 0 {
+		return msgs
+	}
+
+	filtered := make([]message.Message, 0, len(msgs)-1)
+	removed := false
+	for _, msg := range msgs {
+		if !removed && msg.ID == userMessage.ID {
+			removed = true
+			continue
+		}
+		filtered = append(filtered, msg)
+	}
+	if !removed {
+		return msgs
+	}
+	return filtered
 }
 
 func (a *sessionAgent) getHistoryForMemoryExtraction(ctx context.Context, sessionID string) []string {

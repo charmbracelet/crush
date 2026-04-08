@@ -921,6 +921,90 @@ func TestBuildAgentModels_ContextWindowOverride(t *testing.T) {
 	require.Equal(t, int64(262_144), large.CatwalkCfg.Options.ProviderOptions["max_prompt_tokens"])
 }
 
+func TestFilterAttachmentsForModelSupport(t *testing.T) {
+	t.Run("keeps all attachments when model supports images", func(t *testing.T) {
+		attachments := []message.Attachment{
+			{FilePath: "a.txt", MimeType: "text/plain", Content: []byte("hello")},
+			{FilePath: "a.png", MimeType: "image/png", Content: []byte{1, 2, 3}},
+		}
+
+		filtered := filterAttachmentsForModelSupport(attachments, true)
+		require.Equal(t, attachments, filtered)
+	})
+
+	t.Run("filters out non-text attachments when model does not support images", func(t *testing.T) {
+		attachments := []message.Attachment{
+			{FilePath: "a.txt", MimeType: "text/plain", Content: []byte("hello")},
+			{FilePath: "a.png", MimeType: "image/png", Content: []byte{1, 2, 3}},
+			{FilePath: "a.jpg", MimeType: "image/jpeg", Content: []byte{4, 5, 6}},
+		}
+
+		filtered := filterAttachmentsForModelSupport(attachments, false)
+		require.Equal(t, []message.Attachment{attachments[0]}, filtered)
+	})
+
+	t.Run("returns nil when attachments are nil", func(t *testing.T) {
+		var attachments []message.Attachment
+		require.Nil(t, filterAttachmentsForModelSupport(attachments, false))
+	})
+}
+
+func TestResolveCoderModelSupportsImages(t *testing.T) {
+	t.Run("returns image support flag from configured coder model", func(t *testing.T) {
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, "test-provider", config.ProviderConfig{
+			ID: "test-provider",
+			Models: []catwalk.Model{
+				{ID: "vision-model", SupportsImages: true},
+			},
+		})
+		coord.cfg.Config().Agents[config.AgentCoder] = config.Agent{Model: config.SelectedModelTypeLarge}
+		coord.cfg.Config().Models[config.SelectedModelTypeLarge] = config.SelectedModel{
+			Provider: "test-provider",
+			Model:    "vision-model",
+		}
+
+		supportsImages, err := coord.resolveCoderModelSupportsImages()
+		require.NoError(t, err)
+		require.True(t, supportsImages)
+	})
+
+	t.Run("returns false when configured model does not support images", func(t *testing.T) {
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, "test-provider", config.ProviderConfig{
+			ID: "test-provider",
+			Models: []catwalk.Model{
+				{ID: "text-model", SupportsImages: false},
+			},
+		})
+		coord.cfg.Config().Agents[config.AgentCoder] = config.Agent{Model: config.SelectedModelTypeLarge}
+		coord.cfg.Config().Models[config.SelectedModelTypeLarge] = config.SelectedModel{
+			Provider: "test-provider",
+			Model:    "text-model",
+		}
+
+		supportsImages, err := coord.resolveCoderModelSupportsImages()
+		require.NoError(t, err)
+		require.False(t, supportsImages)
+	})
+
+	t.Run("returns error when selected model is missing from provider config", func(t *testing.T) {
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, "test-provider", config.ProviderConfig{
+			ID:     "test-provider",
+			Models: []catwalk.Model{{ID: "other-model", SupportsImages: false}},
+		})
+		coord.cfg.Config().Agents[config.AgentCoder] = config.Agent{Model: config.SelectedModelTypeLarge}
+		coord.cfg.Config().Models[config.SelectedModelTypeLarge] = config.SelectedModel{
+			Provider: "test-provider",
+			Model:    "missing-model",
+		}
+
+		_, err := coord.resolveCoderModelSupportsImages()
+		require.ErrorContains(t, err, "model \"missing-model\" not found")
+	})
+}
+
 func TestUpdateParentSessionCost(t *testing.T) {
 	t.Run("accumulates cost correctly", func(t *testing.T) {
 		env := testEnv(t)

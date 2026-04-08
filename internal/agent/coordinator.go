@@ -240,6 +240,24 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 		return nil, fmt.Errorf("failed to append auto mode reminder: %w", err)
 	}
 
+	supportsImages, supportsImagesErr := c.resolveCoderModelSupportsImages()
+	if supportsImagesErr != nil {
+		slog.Warn("Failed to resolve model image support; keeping original attachments", "error", supportsImagesErr, "session_id", sessionID)
+		supportsImages = true
+	}
+	filteredAttachments := filterAttachmentsForModelSupport(attachments, supportsImages)
+	parts := []message.ContentPart{message.TextContent{Text: prompt}}
+	for _, attachment := range filteredAttachments {
+		parts = append(parts, message.BinaryContent{Path: attachment.FilePath, MIMEType: attachment.MimeType, Data: attachment.Content})
+	}
+	userMessage, err := c.messages.Create(ctx, sessionID, message.CreateMessageParams{
+		Role:  message.User,
+		Parts: parts,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create user message: %w", err)
+	}
+
 	// refresh models before each run
 	runtimeConfig, err := c.updateCurrentAgentRuntime(ctx)
 	if err != nil {
@@ -250,17 +268,6 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	maxTokens := runtimeConfig.MaxOutputTokens
 	if maxTokens == 0 {
 		maxTokens = model.CatwalkCfg.DefaultMaxTokens
-	}
-
-	if !model.CatwalkCfg.SupportsImages && attachments != nil {
-		// filter out image attachments
-		filteredAttachments := make([]message.Attachment, 0, len(attachments))
-		for _, att := range attachments {
-			if att.IsText() {
-				filteredAttachments = append(filteredAttachments, att)
-			}
-		}
-		attachments = filteredAttachments
 	}
 
 	ctx = context.WithValue(ctx, sessionAgentRuntimeConfigContextKey{}, runtimeConfig)
@@ -281,7 +288,7 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 		return c.currentAgent.Run(ctx, SessionAgentCall{
 			SessionID:        sessionID,
 			Prompt:           prompt,
-			Attachments:      attachments,
+			Attachments:      filteredAttachments,
 			MaxOutputTokens:  maxTokens,
 			ProviderOptions:  runtimeConfig.ProviderOptions,
 			Temperature:      runtimeConfig.Temperature,
@@ -289,6 +296,7 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 			TopK:             runtimeConfig.TopK,
 			FrequencyPenalty: runtimeConfig.FrequencyPenalty,
 			PresencePenalty:  runtimeConfig.PresencePenalty,
+			UserMessage:      &userMessage,
 		})
 	}
 	result, originalErr := run()
@@ -1386,6 +1394,40 @@ func (c *coordinator) IsSessionBusy(sessionID string) bool {
 
 func (c *coordinator) Model() Model {
 	return c.currentAgent.Model()
+}
+
+func filterAttachmentsForModelSupport(attachments []message.Attachment, supportsImages bool) []message.Attachment {
+	if supportsImages || attachments == nil {
+		return attachments
+	}
+	filtered := make([]message.Attachment, 0, len(attachments))
+	for _, att := range attachments {
+		if att.IsText() {
+			filtered = append(filtered, att)
+		}
+	}
+	return filtered
+}
+
+func (c *coordinator) resolveCoderModelSupportsImages() (bool, error) {
+	agentCfg, ok := c.cfg.Config().Agents[config.AgentCoder]
+	if !ok {
+		return false, errCoderAgentNotConfigured
+	}
+	modelCfg, ok := c.cfg.Config().Models[agentCfg.Model]
+	if !ok {
+		return false, fmt.Errorf("selected model %q not configured", agentCfg.Model)
+	}
+	providerCfg, ok := c.cfg.Config().Providers.Get(modelCfg.Provider)
+	if !ok {
+		return false, errModelProviderNotConfigured
+	}
+	for i := range providerCfg.Models {
+		if providerCfg.Models[i].ID == modelCfg.Model {
+			return providerCfg.Models[i].SupportsImages, nil
+		}
+	}
+	return false, fmt.Errorf("model %q not found in provider config", modelCfg.Model)
 }
 
 func (c *coordinator) EscalationBridge() *permission.EscalationBridge {

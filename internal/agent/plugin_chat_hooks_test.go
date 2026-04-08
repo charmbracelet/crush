@@ -501,3 +501,43 @@ func TestSessionAgentRunAppliesChatTransforms(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "plugin prefix", textPart.Text)
 }
+
+func TestSessionAgentRunWithPrecreatedUserMessageDoesNotDuplicateCurrentPromptInHistory(t *testing.T) {
+	plugin.Reset()
+	t.Cleanup(plugin.Reset)
+
+	env := testEnv(t)
+	testSession, err := env.sessions.Create(t.Context(), "precreated user message")
+	require.NoError(t, err)
+	createSeedHistoryMessage(t, env, testSession.ID)
+
+	userPrompt := "hello from persisted user message"
+	precreatedUserMessage, err := env.messages.Create(t.Context(), testSession.ID, message.CreateMessageParams{
+		Role:  message.User,
+		Parts: []message.ContentPart{message.TextContent{Text: userPrompt}},
+	})
+	require.NoError(t, err)
+
+	fakeAgent := &chatHookTestAgent{t: t, responseText: "ok"}
+	sessionAgent := createAgentWithHooksForTest(env, fakeAgent)
+
+	result, err := sessionAgent.Run(t.Context(), SessionAgentCall{
+		Prompt:          userPrompt,
+		SessionID:       testSession.ID,
+		MaxOutputTokens: 1000,
+		UserMessage:     &precreatedUserMessage,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, userPrompt, fakeAgent.lastCall.Prompt)
+
+	promptCount := 0
+	for _, msg := range fakeAgent.lastCall.Messages {
+		for _, part := range msg.Content {
+			if textPart, ok := part.(fantasy.TextPart); ok && textPart.Text == userPrompt {
+				promptCount++
+			}
+		}
+	}
+	require.Zero(t, promptCount)
+}

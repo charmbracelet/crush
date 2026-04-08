@@ -171,10 +171,7 @@ func runSessionList(cmd *cobra.Command, _ []string) error {
 		width = tw
 	}
 	// 7 (hash) + 1 (space) + 25 (RFC3339 date) + 1 (space) = 34 chars prefix.
-	titleWidth := width - 34
-	if titleWidth < 10 {
-		titleWidth = 10
-	}
+	titleWidth := max(width-34, 10)
 
 	var writeErr error
 	for _, s := range list {

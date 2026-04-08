@@ -57,10 +57,10 @@ var (
 
 // Internal ID management. Used during animating to ensure that frame messages
 // are received only by spinner components that sent them.
-var lastID int64
+var lastID atomic.Int64
 
 func nextID() int {
-	return int(atomic.AddInt64(&lastID, 1))
+	return int(lastID.Add(1))
 }
 
 // Cache for expensive animation calculations

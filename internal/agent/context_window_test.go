@@ -89,6 +89,11 @@ func TestIsContextWindowExceededError(t *testing.T) {
 			err:  &fantasy.ProviderError{StatusCode: 400, Message: "Error code: 400 - {'error': {'message': '<400> InternalError.Algo.InvalidParameter: Range of input length should be [1, 202752]', 'type': 'invalid_request_error', 'param': None, 'code': 'invalid_parameter_error'}}"},
 			want: true,
 		},
+		{
+			name: "request body too large",
+			err:  &fantasy.ProviderError{StatusCode: 400, Message: `{"type":"error", "error":{"type":"api_error", "message": "Request body too large."}}`},
+			want: true,
+		},
 	}
 
 	for _, tt := range tests {

@@ -1557,6 +1557,7 @@ func isContextLengthError(err error) bool {
 		"input length exceeds",
 		"prompt is too long",
 		"token limit exceeded",
+		"request body too large",
 	}
 	lowerErr := strings.ToLower(errStr)
 	for _, indicator := range contextLengthIndicators {

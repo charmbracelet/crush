@@ -57,7 +57,8 @@ func isContextWindowExceededError(err error) bool {
 		strings.Contains(msg, "input length should be") ||
 		strings.Contains(msg, "range of input length should be") ||
 		strings.Contains(msg, "too many tokens") ||
-		strings.Contains(msg, "prompt is too long")
+		strings.Contains(msg, "prompt is too long") ||
+		strings.Contains(msg, "request body too large")
 }
 
 func (a *sessionAgent) truncateToolResult(sessionID string, tr message.ToolResult) (message.ToolResult, bool) {

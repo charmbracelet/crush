@@ -83,6 +83,32 @@ func (q *Queries) DeleteSession(ctx context.Context, id string) error {
 	return err
 }
 
+const getLastSession = `-- name: GetLastSession :one
+SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos
+FROM sessions
+ORDER BY updated_at DESC
+LIMIT 1
+`
+
+func (q *Queries) GetLastSession(ctx context.Context) (Session, error) {
+	row := q.queryRow(ctx, q.getLastSessionStmt, getLastSession)
+	var i Session
+	err := row.Scan(
+		&i.ID,
+		&i.ParentSessionID,
+		&i.Title,
+		&i.MessageCount,
+		&i.PromptTokens,
+		&i.CompletionTokens,
+		&i.Cost,
+		&i.UpdatedAt,
+		&i.CreatedAt,
+		&i.SummaryMessageID,
+		&i.Todos,
+	)
+	return i, err
+}
+
 const getSessionByID = `-- name: GetSessionByID :one
 SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos
 FROM sessions
@@ -150,6 +176,23 @@ func (q *Queries) ListSessions(ctx context.Context) ([]Session, error) {
 	return items, nil
 }
 
+const renameSession = `-- name: RenameSession :exec
+UPDATE sessions
+SET
+    title = ?
+WHERE id = ?
+`
+
+type RenameSessionParams struct {
+	Title string `json:"title"`
+	ID    string `json:"id"`
+}
+
+func (q *Queries) RenameSession(ctx context.Context, arg RenameSessionParams) error {
+	_, err := q.exec(ctx, q.renameSessionStmt, renameSession, arg.Title, arg.ID)
+	return err
+}
+
 const updateSession = `-- name: UpdateSession :one
 UPDATE sessions
 SET
@@ -206,7 +249,8 @@ SET
     title = ?,
     prompt_tokens = prompt_tokens + ?,
     completion_tokens = completion_tokens + ?,
-    cost = cost + ?
+    cost = cost + ?,
+    updated_at = strftime('%s', 'now')
 WHERE id = ?
 `
 

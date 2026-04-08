@@ -248,7 +248,7 @@ func (dv *DiffView) computeDiff() error {
 		return dv.err
 	}
 	dv.isComputed = true
-	dv.edits = udiff.Strings(
+	dv.edits = udiff.Lines(
 		dv.before.content,
 		dv.after.content,
 	)

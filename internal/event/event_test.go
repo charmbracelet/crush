@@ -4,7 +4,10 @@ package event
 // scenarios. These tests will not log anything.
 
 import (
+	"reflect"
 	"testing"
+
+	"github.com/posthog/posthog-go"
 )
 
 func TestError(t *testing.T) {
@@ -56,6 +59,33 @@ func TestError(t *testing.T) {
 			"severity", "high",
 			"source", "unit-test",
 		)
+	})
+}
+
+func TestPairsToProps(t *testing.T) {
+	t.Run("sets valid key value pairs", func(t *testing.T) {
+		got := pairsToProps("foo", "bar", "count", 3)
+		want := posthog.NewProperties().
+			Set("foo", "bar").
+			Set("count", 3)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("pairsToProps() = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("returns empty properties for odd pairs", func(t *testing.T) {
+		got := pairsToProps("foo", "bar", "count")
+		if len(got) != 0 {
+			t.Fatalf("pairsToProps() should return empty properties, got %#v", got)
+		}
+	})
+
+	t.Run("ignores non-string key and continues", func(t *testing.T) {
+		got := pairsToProps(123, "bad", "ok", true)
+		want := posthog.NewProperties().Set("ok", true)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("pairsToProps() = %#v, want %#v", got, want)
+		}
 	})
 }
 

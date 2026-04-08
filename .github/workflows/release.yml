@@ -15,7 +15,7 @@ jobs:
   goreleaser:
     uses: charmbracelet/meta/.github/workflows/goreleaser.yml@main
     with:
-      go_version: "1.25"
+      go_version: "1.26"
       macos_sign_entitlements: "./.github/entitlements.plist"
       # XXX: remove it after goreleaser 2.14.
       goreleaser_version: nightly

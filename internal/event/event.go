@@ -17,7 +17,9 @@ const (
 	endpoint = "https://data.charm.land"
 	key      = "phc_4zt4VgDWLqbYnJYEwLRxFoaTL2noNrQij0C6E8k3I0V"
 
-	nonInteractiveEventName = "NonInteractive"
+	nonInteractiveAttrName      = "NonInteractive"
+	continueSessionByIDAttrName = "ContinueSessionByID"
+	continueLastSessionAttrName = "ContinueLastSession"
 )
 
 var (
@@ -30,11 +32,19 @@ var (
 			Set("SHELL", filepath.Base(os.Getenv("SHELL"))).
 			Set("Version", version.Version).
 			Set("GoVersion", runtime.Version()).
-			Set(nonInteractiveEventName, false)
+			Set(nonInteractiveAttrName, false)
 )
 
 func SetNonInteractive(nonInteractive bool) {
-	baseProps = baseProps.Set(nonInteractiveEventName, nonInteractive)
+	baseProps = baseProps.Set(nonInteractiveAttrName, nonInteractive)
+}
+
+func SetContinueBySessionID(continueBySessionID bool) {
+	baseProps = baseProps.Set(continueSessionByIDAttrName, continueBySessionID)
+}
+
+func SetContinueLastSession(continueLastSession bool) {
+	baseProps = baseProps.Set(continueLastSessionAttrName, continueLastSession)
 }
 
 func Init() {
@@ -84,7 +94,7 @@ func send(event string, props ...any) {
 
 // Error logs an error event to PostHog with the error type and message.
 func Error(errToLog any, props ...any) {
-	if client == nil {
+	if client == nil || distinctId == "" || errToLog == nil {
 		return
 	}
 	posthogErr := client.Enqueue(posthog.NewDefaultException(
@@ -117,7 +127,11 @@ func pairsToProps(props ...any) posthog.Properties {
 	}
 
 	for i := 0; i < len(props); i += 2 {
-		key := props[i].(string)
+		key, ok := props[i].(string)
+		if !ok {
+			slog.Error("Event property key must be a string", "key", props[i], "index", i)
+			continue
+		}
 		value := props[i+1]
 		p = p.Set(key, value)
 	}

@@ -16,6 +16,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/event"
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
 )
@@ -120,6 +121,8 @@ type HourDayHeatmapPt struct {
 }
 
 func runStats(cmd *cobra.Command, _ []string) error {
+	event.StatsViewed()
+
 	dataDir, _ := cmd.Flags().GetString("data-dir")
 	ctx := cmd.Context()
 
@@ -128,7 +131,7 @@ func runStats(cmd *cobra.Command, _ []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to initialize config: %w", err)
 		}
-		dataDir = cfg.Options.DataDirectory
+		dataDir = cfg.Config().Options.DataDirectory
 	}
 
 	conn, err := db.Connect(ctx, dataDir)

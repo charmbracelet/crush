@@ -41,7 +41,7 @@ type TodosToolRenderContext struct{}
 func (t *TodosToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
-		return pendingTool(sty, "To-Do", opts.Anim)
+		return pendingTool(sty, "To-Do", opts.Anim, opts.Compact)
 	}
 
 	var params tools.TodosParams

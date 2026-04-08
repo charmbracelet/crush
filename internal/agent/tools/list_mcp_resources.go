@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"cmp"
 	"context"
 	_ "embed"
 	"fmt"
@@ -27,7 +28,7 @@ const ListMCPResourcesToolName = "list_mcp_resources"
 //go:embed list_mcp_resources.md
 var listMCPResourcesDescription []byte
 
-func NewListMCPResourcesTool(cfg *config.Config, permissions permission.Service) fantasy.AgentTool {
+func NewListMCPResourcesTool(cfg *config.ConfigStore, permissions permission.Service) fantasy.AgentTool {
 	return fantasy.NewParallelAgentTool(
 		ListMCPResourcesToolName,
 		string(listMCPResourcesDescription),
@@ -74,13 +75,7 @@ func NewListMCPResourcesTool(cfg *config.Config, permissions permission.Service)
 				if resource == nil {
 					continue
 				}
-				title := resource.Title
-				if title == "" {
-					title = resource.Name
-				}
-				if title == "" {
-					title = resource.URI
-				}
+				title := cmp.Or(resource.Title, resource.Name, resource.URI)
 				line := fmt.Sprintf("- %s", title)
 				if resource.URI != "" {
 					line = fmt.Sprintf("%s (%s)", line, resource.URI)

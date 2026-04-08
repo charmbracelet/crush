@@ -224,6 +224,10 @@ Crush’s default model listing is managed in [Catwalk](https://github.com/charm
 
 ## Configuration
 
+> [!TIP]
+> Crush ships with a builtin `crush-config` skill for configuring itself. In
+> many cases you can simply ask Crush to configure itself.
+
 Crush runs great with no configuration. That said, if you do need or want to
 customize Crush, configuration can be added either local to the project itself,
 or globally, with the following priority:
@@ -241,7 +245,8 @@ Configuration itself is stored as a JSON object:
 }
 ```
 
-As an additional note, Crush also stores ephemeral data, such as application state, in one additional location:
+As an additional note, Crush also stores ephemeral data, such as application
+state, in one additional location:
 
 ```bash
 # Unix
@@ -253,8 +258,9 @@ $HOME/.local/share/crush/crush.json
 
 > [!TIP]
 > You can override the user and data config locations by setting:
-> * `CRUSH_GLOBAL_CONFIG`
-> * `CRUSH_GLOBAL_DATA`
+>
+> - `CRUSH_GLOBAL_CONFIG`
+> - `CRUSH_GLOBAL_DATA`
 
 ### LSPs
 
@@ -371,15 +377,27 @@ completely hidden from the agent.
 {
   "$schema": "https://charm.land/crush.json",
   "options": {
-    "disabled_tools": [
-      "bash",
-      "sourcegraph"
-    ]
+    "disabled_tools": ["bash", "sourcegraph"]
   }
 }
 ```
 
 To disable tools from MCP servers, see the [MCP config section](#mcps).
+
+### Disabling Skills
+
+If you'd like to prevent Crush from using certain skills entirely, you can
+disable them via the `options.disabled_skills` list. Disabled skills are hidden
+from the agent, including builtin skills and skills discovered from disk.
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "disabled_skills": ["crush-config"]
+  }
+}
+```
 
 ### Agent Skills
 
@@ -388,11 +406,23 @@ extending agent capabilities with reusable skill packages. Skills are folders
 containing a `SKILL.md` file with instructions that Crush can discover and
 activate on demand.
 
-Skills are discovered from:
+The global paths we looks for skills are:
 
-- `~/.config/crush/skills/` on Unix (default, can be overridden with `CRUSH_SKILLS_DIR`)
-- `%LOCALAPPDATA%\crush\skills\` on Windows (default, can be overridden with `CRUSH_SKILLS_DIR`)
-- Additional paths configured via `options.skills_paths`
+* `$CRUSH_SKILLS_DIR`
+* `$XDG_CONFIG_HOME/agents/skills` or `~/.config/agents/skills/`
+* `$XDG_CONFIG_HOME/crush/skills` or `~/.config/crush/skills/`
+* On Windows, we _also_ look at
+  * `%LOCALAPPDATA%\agents\skills\` or `%USERPROFILE%\AppData\Local\agents\skills\`
+  * `%LOCALAPPDATA%\crush\skills\` or `%USERPROFILE%\AppData\Local\crush\skills\`
+* Additional paths configured via `options.skills_paths`
+
+On top of that, we _also_ load skills in your project from the following
+relative paths:
+
+* `.agents/skills`
+* `.crush/skills`
+* `.claude/skills`
+* `.cursor/skills`
 
 ```jsonc
 {
@@ -400,9 +430,9 @@ Skills are discovered from:
   "options": {
     "skills_paths": [
       "~/.config/crush/skills", // Windows: "%LOCALAPPDATA%\\crush\\skills",
-      "./project-skills"
-    ]
-  }
+      "./project-skills",
+    ],
+  },
 }
 ```
 
@@ -423,6 +453,25 @@ cd "$env:LOCALAPPDATA\crush\skills"
 git clone https://github.com/anthropics/skills.git _temp
 mv _temp/skills/* . ; rm -r -force _temp
 ```
+
+### Desktop notifications
+
+Crush sends desktop notifications when a tool call requires permission and when
+the agent finishes its turn. They're only sent when the terminal window isn't
+focused _and_ your terminal supports reporting the focus state.
+
+```jsonc
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "disable_notifications": false, // default
+  },
+}
+```
+
+To disable desktop notifications, set `disable_notifications` to `true` in your
+configuration. On macOS, notifications currently lack icons due to platform
+limitations.
 
 ### Initialization
 
@@ -465,10 +514,10 @@ it creates. You can customize this behavior with the `attribution` option:
 
 - `trailer_style`: Controls the attribution trailer added to commit messages
   (default: `assisted-by`)
-	- `assisted-by`: Adds `Assisted-by: [Model Name] via Crush <crush@charm.land>`
-	  (includes the model name)
-	- `co-authored-by`: Adds `Co-Authored-By: Crush <crush@charm.land>`
-	- `none`: No attribution trailer
+  - `assisted-by`: Adds `Assisted-by: [Model Name] via Crush <crush@charm.land>`
+    (includes the model name)
+  - `co-authored-by`: Adds `Co-Authored-By: Crush <crush@charm.land>`
+  - `none`: No attribution trailer
 - `generated_with`: When true (default), adds `💘 Generated with Crush` line to
   commit messages and PR descriptions
 
@@ -480,8 +529,9 @@ Anthropic-compatible APIs.
 > [!NOTE]
 > Note that we support two "types" for OpenAI. Make sure to choose the right one
 > to ensure the best experience!
-> * `openai` should be used when proxying or routing requests through OpenAI.
-> * `openai-compat` should be used when using non-OpenAI providers that have OpenAI-compatible APIs.
+>
+> - `openai` should be used when proxying or routing requests through OpenAI.
+> - `openai-compat` should be used when using non-OpenAI providers that have OpenAI-compatible APIs.
 
 #### OpenAI-Compatible APIs
 
@@ -752,6 +802,19 @@ Or by setting the following in your config:
 
 Crush also respects the `DO_NOT_TRACK` convention which can be enabled via
 `export DO_NOT_TRACK=1`.
+
+## Q&A
+
+### Why is clipboard copy and paste not working?
+
+Installing an extra tool might be needed on Unix-like environments.
+
+| Environment         | Tool                     |
+| ------------------- | ------------------------ |
+| Windows             | Native support           |
+| macOS               | Native support           |
+| Linux/BSD + Wayland | `wl-copy` and `wl-paste` |
+| Linux/BSD + X11     | `xclip` or `xsel`        |
 
 ## Contributing
 

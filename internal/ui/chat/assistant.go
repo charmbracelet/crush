@@ -107,11 +107,23 @@ func (a *AssistantMessageItem) RawRender(width int) string {
 
 // Render implements MessageItem.
 func (a *AssistantMessageItem) Render(width int) string {
-	style := a.sty.Chat.Message.AssistantBlurred
-	if a.focused {
-		style = a.sty.Chat.Message.AssistantFocused
+	// XXX: Here, we're manually applying the focused/blurred styles because
+	// using lipgloss.Render can degrade performance for long messages due to
+	// it's wrapping logic.
+	// We already know that the content is wrapped to the correct width in
+	// RawRender, so we can just apply the styles directly to each line.
+	focused := a.sty.Chat.Message.AssistantFocused.Render()
+	blurred := a.sty.Chat.Message.AssistantBlurred.Render()
+	rendered := a.RawRender(width)
+	lines := strings.Split(rendered, "\n")
+	for i, line := range lines {
+		if a.focused {
+			lines[i] = focused + line
+		} else {
+			lines[i] = blurred + line
+		}
 	}
-	return style.Render(a.RawRender(width))
+	return strings.Join(lines, "\n")
 }
 
 // renderMessageContent renders the message content including thinking, main content, and finish reason.

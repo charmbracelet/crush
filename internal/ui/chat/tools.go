@@ -255,7 +255,9 @@ func NewToolMessageItem(
 	case tools.LSPRestartToolName:
 		item = NewLSPRestartToolMessageItem(sty, toolCall, result, canceled)
 	default:
-		if strings.HasPrefix(toolCall.Name, "mcp_") {
+		if IsDockerMCPTool(toolCall.Name) {
+			item = NewDockerMCPToolMessageItem(sty, toolCall, result, canceled)
+		} else if strings.HasPrefix(toolCall.Name, "mcp_") {
 			item = NewMCPToolMessageItem(sty, toolCall, result, canceled)
 		} else {
 			item = NewGenericToolMessageItem(sty, toolCall, result, canceled)
@@ -321,16 +323,19 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 
 // Render renders the tool message item at the given width.
 func (t *baseToolMessageItem) Render(width int) string {
-	style := t.sty.Chat.Message.ToolCallBlurred
-	if t.focused {
-		style = t.sty.Chat.Message.ToolCallFocused
-	}
-
+	var prefix string
 	if t.isCompact {
-		style = t.sty.Chat.Message.ToolCallCompact
+		prefix = t.sty.Chat.Message.ToolCallCompact.Render()
+	} else if t.focused {
+		prefix = t.sty.Chat.Message.ToolCallFocused.Render()
+	} else {
+		prefix = t.sty.Chat.Message.ToolCallBlurred.Render()
 	}
-
-	return style.Render(t.RawRender(width))
+	lines := strings.Split(t.RawRender(width), "\n")
+	for i, ln := range lines {
+		lines[i] = prefix + ln
+	}
+	return strings.Join(lines, "\n")
 }
 
 // ToolCall returns the tool call associated with this message item.
@@ -421,9 +426,13 @@ func (t *baseToolMessageItem) HandleKeyEvent(key tea.KeyMsg) (bool, tea.Cmd) {
 }
 
 // pendingTool renders a tool that is still in progress with an animation.
-func pendingTool(sty *styles.Styles, name string, anim *anim.Anim) string {
+func pendingTool(sty *styles.Styles, name string, anim *anim.Anim, nested bool) string {
 	icon := sty.Tool.IconPending.Render()
-	toolName := sty.Tool.NameNormal.Render(name)
+	nameStyle := sty.Tool.NameNormal
+	if nested {
+		nameStyle = sty.Tool.NameNested
+	}
+	toolName := nameStyle.Render(name)
 
 	var animView string
 	if anim != nil {
@@ -620,12 +629,24 @@ func toolOutputImageContent(sty *styles.Styles, data, mediaType string) string {
 	dataSize := len(data) * 3 / 4
 	sizeStr := formatSize(dataSize)
 
-	loaded := sty.Base.Foreground(sty.Green).Render("Loaded")
-	arrow := sty.Base.Foreground(sty.GreenDark).Render("→")
-	typeStyled := sty.Base.Render(mediaType)
-	sizeStyled := sty.Subtle.Render(sizeStr)
+	return sty.Tool.Body.Render(fmt.Sprintf(
+		"%s %s %s %s",
+		sty.Tool.ResourceLoadedText.Render("Loaded Image"),
+		sty.Tool.ResourceLoadedIndicator.Render(styles.ArrowRightIcon),
+		sty.Tool.MediaType.Render(mediaType),
+		sty.Tool.ResourceSize.Render(sizeStr),
+	))
+}
 
-	return sty.Tool.Body.Render(fmt.Sprintf("%s %s %s %s", loaded, arrow, typeStyled, sizeStyled))
+// toolOutputSkillContent renders a skill loaded indicator.
+func toolOutputSkillContent(sty *styles.Styles, name, description string) string {
+	return sty.Tool.Body.Render(fmt.Sprintf(
+		"%s %s %s %s",
+		sty.Tool.ResourceLoadedText.Render("Loaded Skill"),
+		sty.Tool.ResourceLoadedIndicator.Render(styles.ArrowRightIcon),
+		sty.Tool.ResourceName.Render(name),
+		sty.Tool.ResourceSize.Render(description),
+	))
 }
 
 // getDigits returns the number of digits in a number.
@@ -1322,7 +1343,7 @@ func (t *baseToolMessageItem) formatWebFetchResultForCopy() string {
 	}
 
 	var result strings.Builder
-	result.WriteString(fmt.Sprintf("URL: %s\n\n", params.URL))
+	fmt.Fprintf(&result, "URL: %s\n\n", params.URL)
 	result.WriteString("```markdown\n")
 	result.WriteString(t.result.Content)
 	result.WriteString("\n```")
@@ -1339,7 +1360,7 @@ func (t *baseToolMessageItem) formatAgentResultForCopy() string {
 	var result strings.Builder
 
 	if t.result.Content != "" {
-		result.WriteString(fmt.Sprintf("```markdown\n%s\n```", t.result.Content))
+		fmt.Fprintf(&result, "```markdown\n%s\n```", t.result.Content)
 	}
 
 	return result.String()

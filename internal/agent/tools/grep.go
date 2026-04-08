@@ -3,6 +3,7 @@ package tools
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -115,10 +116,7 @@ func NewGrepTool(workingDir string, config config.ToolGrep) fantasy.AgentTool {
 				searchPattern = escapeRegexPattern(params.Pattern)
 			}
 
-			searchPath := params.Path
-			if searchPath == "" {
-				searchPath = workingDir
-			}
+			searchPath := cmp.Or(params.Path, workingDir)
 
 			searchCtx, cancel := context.WithTimeout(ctx, config.GetTimeout())
 			defer cancel()

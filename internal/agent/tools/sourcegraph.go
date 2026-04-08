@@ -145,7 +145,7 @@ func formatSourcegraphResults(result map[string]any, contextWindow int) (string,
 		for _, err := range errors {
 			if errMap, ok := err.(map[string]any); ok {
 				if message, ok := errMap["message"].(string); ok {
-					buffer.WriteString(fmt.Sprintf("- %s\n", message))
+					fmt.Fprintf(&buffer, "- %s\n", message)
 				}
 			}
 		}
@@ -172,7 +172,7 @@ func formatSourcegraphResults(result map[string]any, contextWindow int) (string,
 	limitHit, _ := searchResults["limitHit"].(bool)
 
 	buffer.WriteString("# Sourcegraph Search Results\n\n")
-	buffer.WriteString(fmt.Sprintf("Found %d matches across %d results\n", int(matchCount), int(resultCount)))
+	fmt.Fprintf(&buffer, "Found %d matches across %d results\n", int(matchCount), int(resultCount))
 
 	if limitHit {
 		buffer.WriteString("(Result limit reached, try a more specific query)\n")
@@ -215,10 +215,10 @@ func formatSourcegraphResults(result map[string]any, contextWindow int) (string,
 		fileURL, _ := file["url"].(string)
 		fileContent, _ := file["content"].(string)
 
-		buffer.WriteString(fmt.Sprintf("## Result %d: %s/%s\n\n", i+1, repoName, filePath))
+		fmt.Fprintf(&buffer, "## Result %d: %s/%s\n\n", i+1, repoName, filePath)
 
 		if fileURL != "" {
-			buffer.WriteString(fmt.Sprintf("URL: %s\n\n", fileURL))
+			fmt.Fprintf(&buffer, "URL: %s\n\n", fileURL)
 		}
 
 		if len(lineMatches) > 0 {
@@ -240,24 +240,24 @@ func formatSourcegraphResults(result map[string]any, contextWindow int) (string,
 
 					for j := startLine - 1; j < int(lineNumber)-1 && j < len(lines); j++ {
 						if j >= 0 {
-							buffer.WriteString(fmt.Sprintf("%d| %s\n", j+1, lines[j]))
+							fmt.Fprintf(&buffer, "%d| %s\n", j+1, lines[j])
 						}
 					}
 
-					buffer.WriteString(fmt.Sprintf("%d|  %s\n", int(lineNumber), preview))
+					fmt.Fprintf(&buffer, "%d|  %s\n", int(lineNumber), preview)
 
 					endLine := int(lineNumber) + contextWindow
 
 					for j := int(lineNumber); j < endLine && j < len(lines); j++ {
 						if j < len(lines) {
-							buffer.WriteString(fmt.Sprintf("%d| %s\n", j+1, lines[j]))
+							fmt.Fprintf(&buffer, "%d| %s\n", j+1, lines[j])
 						}
 					}
 
 					buffer.WriteString("```\n\n")
 				} else {
 					buffer.WriteString("```\n")
-					buffer.WriteString(fmt.Sprintf("%d| %s\n", int(lineNumber), preview))
+					fmt.Fprintf(&buffer, "%d| %s\n", int(lineNumber), preview)
 					buffer.WriteString("```\n\n")
 				}
 			}

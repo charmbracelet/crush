@@ -7,9 +7,11 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"charm.land/fantasy"
@@ -17,6 +19,7 @@ import (
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/skills"
 )
 
 //go:embed view.md
@@ -34,14 +37,24 @@ type ViewPermissionsParams struct {
 	Limit    int    `json:"limit"`
 }
 
+type ViewResourceType string
+
+const (
+	ViewResourceUnset ViewResourceType = ""
+	ViewResourceSkill ViewResourceType = "skill"
+)
+
 type ViewResponseMetadata struct {
-	FilePath string `json:"file_path"`
-	Content  string `json:"content"`
+	FilePath            string           `json:"file_path"`
+	Content             string           `json:"content"`
+	ResourceType        ViewResourceType `json:"resource_type,omitempty"`
+	ResourceName        string           `json:"resource_name,omitempty"`
+	ResourceDescription string           `json:"resource_description,omitempty"`
 }
 
 const (
 	ViewToolName     = "view"
-	MaxReadSize      = 5 * 1024 * 1024 // 5MB
+	MaxViewSize      = 1 * 1024 * 1024 // 1MB
 	DefaultReadLimit = 2000
 	MaxLineLength    = 2000
 )
@@ -59,6 +72,11 @@ func NewViewTool(
 		func(ctx context.Context, params ViewParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.FilePath == "" {
 				return fantasy.NewTextErrorResponse("file_path is required"), nil
+			}
+
+			// Handle builtin skill files (crush: prefix).
+			if strings.HasPrefix(params.FilePath, skills.BuiltinPrefix) {
+				return readBuiltinFile(params)
 			}
 
 			// Handle relative paths
@@ -86,7 +104,7 @@ func NewViewTool(
 
 			// Request permission for files outside working directory, unless it's a skill file.
 			if isOutsideWorkDir && !isSkillFile {
-				granted, err := permissions.Request(ctx,
+				granted, permReqErr := permissions.Request(ctx,
 					permission.CreatePermissionRequest{
 						SessionID:   sessionID,
 						Path:        absFilePath,
@@ -97,8 +115,8 @@ func NewViewTool(
 						Params:      ViewPermissionsParams(params),
 					},
 				)
-				if err != nil {
-					return fantasy.ToolResponse{}, err
+				if permReqErr != nil {
+					return fantasy.ToolResponse{}, permReqErr
 				}
 				if !granted {
 					return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
@@ -143,9 +161,9 @@ func NewViewTool(
 			}
 
 			// Based on the specifications we should not limit the skills read.
-			if !isSkillFile && fileInfo.Size() > MaxReadSize {
+			if !isSkillFile && fileInfo.Size() > MaxViewSize {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("File is too large (%d bytes). Maximum size is %d bytes",
-					fileInfo.Size(), MaxReadSize)), nil
+					fileInfo.Size(), MaxViewSize)), nil
 			}
 
 			// Set default limit if not provided (no limit for SKILL.md files)
@@ -164,9 +182,9 @@ func NewViewTool(
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("This model (%s) does not support image data.", modelName)), nil
 				}
 
-				imageData, err := os.ReadFile(filePath)
-				if err != nil {
-					return fantasy.ToolResponse{}, fmt.Errorf("error reading image file: %w", err)
+				imageData, readErr := os.ReadFile(filePath)
+				if readErr != nil {
+					return fantasy.ToolResponse{}, fmt.Errorf("error reading image file: %w", readErr)
 				}
 
 				encoded := base64.StdEncoding.EncodeToString(imageData)
@@ -174,34 +192,42 @@ func NewViewTool(
 			}
 
 			// Read the file content
-			content, lineCount, err := readTextFile(filePath, params.Offset, params.Limit)
-			isValidUt8 := utf8.ValidString(content)
-			if !isValidUt8 {
-				return fantasy.NewTextErrorResponse("File content is not valid UTF-8"), nil
-			}
+			content, hasMore, err := readTextFile(filePath, params.Offset, params.Limit)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error reading file: %w", err)
 			}
+			if !utf8.ValidString(content) {
+				return fantasy.NewTextErrorResponse("File content is not valid UTF-8"), nil
+			}
 
-			notifyLSPs(ctx, lspManager, filePath)
+			openInLSPs(ctx, lspManager, filePath)
+			waitForLSPDiagnostics(ctx, lspManager, filePath, 300*time.Millisecond)
 			output := "<file>\n"
-			// Format the output with line numbers
 			output += addLineNumbers(content, params.Offset+1)
 
-			// Add a note if the content was truncated
-			if lineCount > params.Offset+len(strings.Split(content, "\n")) {
+			if hasMore {
 				output += fmt.Sprintf("\n\n(File has more lines. Use 'offset' parameter to read beyond line %d)",
 					params.Offset+len(strings.Split(content, "\n")))
 			}
 			output += "\n</file>\n"
 			output += getDiagnostics(filePath, lspManager)
 			filetracker.RecordRead(ctx, sessionID, filePath)
+
+			meta := ViewResponseMetadata{
+				FilePath: filePath,
+				Content:  content,
+			}
+			if isSkillFile {
+				if skill, err := skills.Parse(filePath); err == nil {
+					meta.ResourceType = ViewResourceSkill
+					meta.ResourceName = skill.Name
+					meta.ResourceDescription = skill.Description
+				}
+			}
+
 			return fantasy.WithResponseMetadata(
 				fantasy.NewTextResponse(output),
-				ViewResponseMetadata{
-					FilePath: filePath,
-					Content:  content,
-				},
+				meta,
 			), nil
 		})
 }
@@ -231,38 +257,28 @@ func addLineNumbers(content string, startLine int) string {
 	return strings.Join(result, "\n")
 }
 
-func readTextFile(filePath string, offset, limit int) (string, int, error) {
+func readTextFile(filePath string, offset, limit int) (string, bool, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
-		return "", 0, err
+		return "", false, err
 	}
 	defer file.Close()
 
-	lineCount := 0
-
 	scanner := NewLineScanner(file)
 	if offset > 0 {
-		for lineCount < offset && scanner.Scan() {
-			lineCount++
+		skipped := 0
+		for skipped < offset && scanner.Scan() {
+			skipped++
 		}
 		if err = scanner.Err(); err != nil {
-			return "", 0, err
+			return "", false, err
 		}
 	}
 
-	if offset == 0 {
-		_, err = file.Seek(0, io.SeekStart)
-		if err != nil {
-			return "", 0, err
-		}
-	}
-
-	// Pre-allocate slice with expected capacity
+	// Pre-allocate slice with expected capacity.
 	lines := make([]string, 0, limit)
-	lineCount = offset
 
-	for scanner.Scan() && len(lines) < limit {
-		lineCount++
+	for len(lines) < limit && scanner.Scan() {
 		lineText := scanner.Text()
 		if len(lineText) > MaxLineLength {
 			lineText = lineText[:MaxLineLength] + "..."
@@ -270,16 +286,14 @@ func readTextFile(filePath string, offset, limit int) (string, int, error) {
 		lines = append(lines, lineText)
 	}
 
-	// Continue scanning to get total line count
-	for scanner.Scan() {
-		lineCount++
-	}
+	// Peek one more line only when we filled the limit.
+	hasMore := len(lines) == limit && scanner.Scan()
 
 	if err := scanner.Err(); err != nil {
-		return "", 0, err
+		return "", false, err
 	}
 
-	return strings.Join(lines, "\n"), lineCount, nil
+	return strings.Join(lines, "\n"), hasMore, nil
 }
 
 func getImageMimeType(filePath string) (bool, string) {
@@ -364,4 +378,57 @@ func isInSkillsPath(filePath string, skillsPaths []string) bool {
 	}
 
 	return false
+}
+
+// readBuiltinFile reads a file from the embedded builtin skills filesystem.
+func readBuiltinFile(params ViewParams) (fantasy.ToolResponse, error) {
+	embeddedPath := "builtin/" + strings.TrimPrefix(params.FilePath, skills.BuiltinPrefix)
+	builtinFS := skills.BuiltinFS()
+
+	data, err := fs.ReadFile(builtinFS, embeddedPath)
+	if err != nil {
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("Builtin file not found: %s", params.FilePath)), nil
+	}
+
+	content := string(data)
+	if !utf8.ValidString(content) {
+		return fantasy.NewTextErrorResponse("File content is not valid UTF-8"), nil
+	}
+
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 1000000 // Effectively no limit for skill files.
+	}
+
+	lines := strings.Split(content, "\n")
+	offset := min(params.Offset, len(lines))
+	lines = lines[offset:]
+
+	hasMore := len(lines) > limit
+	if hasMore {
+		lines = lines[:limit]
+	}
+
+	output := "<file>\n"
+	output += addLineNumbers(strings.Join(lines, "\n"), offset+1)
+	if hasMore {
+		output += fmt.Sprintf("\n\n(File has more lines. Use 'offset' parameter to read beyond line %d)",
+			offset+len(lines))
+	}
+	output += "\n</file>\n"
+
+	meta := ViewResponseMetadata{
+		FilePath: params.FilePath,
+		Content:  strings.Join(lines, "\n"),
+	}
+	if skill, err := skills.ParseContent(data); err == nil {
+		meta.ResourceType = ViewResourceSkill
+		meta.ResourceName = skill.Name
+		meta.ResourceDescription = skill.Description
+	}
+
+	return fantasy.WithResponseMetadata(
+		fantasy.NewTextResponse(output),
+		meta,
+	), nil
 }

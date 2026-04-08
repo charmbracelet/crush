@@ -451,6 +451,21 @@
           "type": "boolean",
           "description": "Show indeterminate progress updates during long operations",
           "default": true
+        },
+        "disable_notifications": {
+          "type": "boolean",
+          "description": "Disable desktop notifications",
+          "default": false
+        },
+        "disabled_skills": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "crush-config"
+            ]
+          },
+          "type": "array",
+          "description": "List of skill names to disable and hide from the agent"
         }
       },
       "additionalProperties": false,

@@ -66,7 +66,7 @@ type SessionFile struct {
 // returns a sessionFilesLoadedMsg containing the processed session files.
 func (m *UI) loadSession(sessionID string) tea.Cmd {
 	return func() tea.Msg {
-		session, err := m.com.App.Sessions.Get(context.Background(), sessionID)
+		session, err := m.com.Workspace.GetSession(context.Background(), sessionID)
 		if err != nil {
 			return util.ReportError(err)
 		}
@@ -76,7 +76,7 @@ func (m *UI) loadSession(sessionID string) tea.Cmd {
 			return util.ReportError(err)
 		}
 
-		readFiles, err := m.com.App.FileTracker.ListReadFiles(context.Background(), sessionID)
+		readFiles, err := m.com.Workspace.FileTrackerListReadFiles(context.Background(), sessionID)
 		if err != nil {
 			slog.Error("Failed to load read files for session", "error", err)
 		}
@@ -90,7 +90,7 @@ func (m *UI) loadSession(sessionID string) tea.Cmd {
 }
 
 func (m *UI) loadSessionFiles(sessionID string) ([]SessionFile, error) {
-	files, err := m.com.App.History.ListBySession(context.Background(), sessionID)
+	files, err := m.com.Workspace.ListSessionHistory(context.Background(), sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +241,7 @@ func (m *UI) startLSPs(paths []string) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 		for _, path := range paths {
-			m.com.App.LSPManager.Start(ctx, path)
+			m.com.Workspace.LSPStart(ctx, path)
 		}
 		return nil
 	}

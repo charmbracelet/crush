@@ -2,6 +2,7 @@ package completions
 
 import (
 	"cmp"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -21,6 +22,11 @@ const (
 	maxHeight = 10
 	minWidth  = 10
 	maxWidth  = 100
+
+	tierExactName = iota
+	tierPrefixName
+	tierPathSegment
+	tierFallback
 )
 
 // SelectionMsg is sent when a completion is selected.
@@ -58,6 +64,35 @@ type Completions struct {
 	normalStyle  lipgloss.Style
 	focusedStyle lipgloss.Style
 	matchStyle   lipgloss.Style
+
+	allItems []list.FilterableItem
+	filtered []list.FilterableItem
+}
+
+type namePriorityRule struct {
+	tier  int
+	match func(pathLower, baseLower, stemLower, queryLower string) bool
+}
+
+var namePriorityRules = []namePriorityRule{
+	{
+		tier: tierExactName,
+		match: func(_ string, baseLower, stemLower, queryLower string) bool {
+			return baseLower == queryLower || stemLower == queryLower
+		},
+	},
+	{
+		tier: tierPrefixName,
+		match: func(_ string, baseLower, _ string, queryLower string) bool {
+			return strings.HasPrefix(baseLower, queryLower)
+		},
+	},
+	{
+		tier: tierPathSegment,
+		match: func(pathLower, _ string, _ string, queryLower string) bool {
+			return hasPathSegment(pathLower, queryLower)
+		},
+	},
 }
 
 // New creates a new completions component.
@@ -87,7 +122,7 @@ func (c *Completions) Query() string {
 
 // Size returns the visible size of the popup.
 func (c *Completions) Size() (width, height int) {
-	visible := len(c.list.FilteredItems())
+	visible := len(c.filtered)
 	return c.width, min(visible, c.height)
 }
 
@@ -142,7 +177,9 @@ func (c *Completions) SetItems(files []FileCompletionValue, resources []Resource
 
 	c.open = true
 	c.query = ""
-	c.list.SetItems(items...)
+	c.allItems = items
+	c.filtered = append([]list.FilterableItem(nil), items...)
+	c.list.SetItems(c.filtered...)
 	c.list.SetFilter("")
 	c.list.Focus()
 
@@ -171,13 +208,62 @@ func (c *Completions) Filter(query string) {
 	}
 
 	c.query = query
-	c.list.SetFilter(query)
+	c.applyNamePriorityFilter(query)
 
 	c.updateSize()
 }
 
+func (c *Completions) applyNamePriorityFilter(query string) {
+	if query == "" {
+		c.filtered = append([]list.FilterableItem(nil), c.allItems...)
+		c.list.SetItems(c.filtered...)
+		return
+	}
+
+	c.list.SetItems(c.allItems...)
+	c.list.SetFilter(query)
+	raw := c.list.FilteredItems()
+	filtered := make([]list.FilterableItem, 0, len(raw))
+	for _, item := range raw {
+		filterable, ok := item.(list.FilterableItem)
+		if !ok {
+			continue
+		}
+		filtered = append(filtered, filterable)
+	}
+
+	queryLower := strings.ToLower(strings.TrimSpace(query))
+	slices.SortStableFunc(filtered, func(a, b list.FilterableItem) int {
+		return namePriorityTier(a.Filter(), queryLower) - namePriorityTier(b.Filter(), queryLower)
+	})
+	c.filtered = filtered
+	c.list.SetItems(c.filtered...)
+}
+
+func namePriorityTier(path, queryLower string) int {
+	if queryLower == "" {
+		return tierFallback
+	}
+
+	pathLower := strings.ToLower(path)
+	baseLower := strings.ToLower(filepath.Base(strings.ReplaceAll(path, `\`, `/`)))
+	stemLower := strings.TrimSuffix(baseLower, filepath.Ext(baseLower))
+	for _, rule := range namePriorityRules {
+		if rule.match(pathLower, baseLower, stemLower, queryLower) {
+			return rule.tier
+		}
+	}
+	return tierFallback
+}
+
+func hasPathSegment(pathLower, queryLower string) bool {
+	return slices.Contains(strings.FieldsFunc(pathLower, func(r rune) bool {
+		return r == '/' || r == '\\'
+	}), queryLower)
+}
+
 func (c *Completions) updateSize() {
-	items := c.list.FilteredItems()
+	items := c.filtered
 	start, end := c.list.VisibleItemIndices()
 	width := 0
 	for i := start; i <= end; i++ {
@@ -197,7 +283,7 @@ func (c *Completions) updateSize() {
 
 // HasItems returns whether there are visible items.
 func (c *Completions) HasItems() bool {
-	return len(c.list.FilteredItems()) > 0
+	return len(c.filtered) > 0
 }
 
 // Update handles key events for the completions.
@@ -236,7 +322,7 @@ func (c *Completions) Update(msg tea.KeyPressMsg) (tea.Msg, bool) {
 
 // selectPrev selects the previous item with circular navigation.
 func (c *Completions) selectPrev() {
-	items := c.list.FilteredItems()
+	items := c.filtered
 	if len(items) == 0 {
 		return
 	}
@@ -248,7 +334,7 @@ func (c *Completions) selectPrev() {
 
 // selectNext selects the next item with circular navigation.
 func (c *Completions) selectNext() {
-	items := c.list.FilteredItems()
+	items := c.filtered
 	if len(items) == 0 {
 		return
 	}
@@ -260,7 +346,7 @@ func (c *Completions) selectNext() {
 
 // selectCurrent returns a command with the currently selected item.
 func (c *Completions) selectCurrent(keepOpen bool) tea.Msg {
-	items := c.list.FilteredItems()
+	items := c.filtered
 	if len(items) == 0 {
 		return nil
 	}
@@ -301,12 +387,12 @@ func (c *Completions) Render() string {
 		return ""
 	}
 
-	items := c.list.FilteredItems()
+	items := c.filtered
 	if len(items) == 0 {
 		return ""
 	}
 
-	return c.list.Render()
+	return c.list.List.Render()
 }
 
 func loadFiles(depth, limit int) []FileCompletionValue {

@@ -10,10 +10,12 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
 	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
+	"github.com/charmbracelet/crush/internal/client"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/oauth/hyper"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
 )
@@ -40,11 +42,17 @@ crush login copilot
 	},
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		app, err := setupAppWithProgressBar(cmd)
+		c, ws, cleanup, err := connectToServer(cmd)
 		if err != nil {
 			return err
 		}
-		defer app.Shutdown()
+		defer cleanup()
+
+		progressEnabled := ws.Config.Options.Progress == nil || *ws.Config.Options.Progress
+		if progressEnabled && supportsProgressBar() {
+			_, _ = fmt.Fprintf(os.Stderr, ansi.SetIndeterminateProgressBar)
+			defer func() { _, _ = fmt.Fprintf(os.Stderr, ansi.ResetProgressBar) }()
+		}
 
 		provider := "hyper"
 		if len(args) > 0 {
@@ -52,16 +60,16 @@ crush login copilot
 		}
 		switch provider {
 		case "hyper":
-			return loginHyper(app.Config())
+			return loginHyper(c, ws.ID)
 		case "copilot", "github", "github-copilot":
-			return loginCopilot(app.Config())
+			return loginCopilot(cmd.Context(), c, ws.ID)
 		default:
 			return fmt.Errorf("unknown platform: %s", args[0])
 		}
 	},
 }
 
-func loginHyper(cfg *config.Config) error {
+func loginHyper(c *client.Client, wsID string) error {
 	if !hyperp.Enabled() {
 		return fmt.Errorf("hyper not enabled")
 	}
@@ -112,8 +120,8 @@ func loginHyper(cfg *config.Config) error {
 	}
 
 	if err := cmp.Or(
-		cfg.SetConfigField("providers.hyper.api_key", token.AccessToken),
-		cfg.SetConfigField("providers.hyper.oauth", token),
+		c.SetConfigField(ctx, wsID, config.ScopeGlobal, "providers.hyper.api_key", token.AccessToken),
+		c.SetConfigField(ctx, wsID, config.ScopeGlobal, "providers.hyper.oauth", token),
 	); err != nil {
 		return err
 	}
@@ -123,12 +131,15 @@ func loginHyper(cfg *config.Config) error {
 	return nil
 }
 
-func loginCopilot(cfg *config.Config) error {
-	ctx := getLoginContext()
+func loginCopilot(ctx context.Context, c *client.Client, wsID string) error {
+	loginCtx := getLoginContext()
 
-	if cfg.HasConfigField("providers.copilot.oauth") {
-		fmt.Println("You are already logged in to GitHub Copilot.")
-		return nil
+	cfg, err := c.GetConfig(ctx, wsID)
+	if err == nil && cfg != nil {
+		if pc, ok := cfg.Providers.Get("copilot"); ok && pc.OAuthToken != nil {
+			fmt.Println("You are already logged in to GitHub Copilot.")
+			return nil
+		}
 	}
 
 	diskToken, hasDiskToken := copilot.RefreshTokenFromDisk()
@@ -138,14 +149,14 @@ func loginCopilot(cfg *config.Config) error {
 	case hasDiskToken:
 		fmt.Println("Found existing GitHub Copilot token on disk. Using it to authenticate...")
 
-		t, err := copilot.RefreshToken(ctx, diskToken)
+		t, err := copilot.RefreshToken(loginCtx, diskToken)
 		if err != nil {
 			return fmt.Errorf("unable to refresh token from disk: %w", err)
 		}
 		token = t
 	default:
 		fmt.Println("Requesting device code from GitHub...")
-		dc, err := copilot.RequestDeviceCode(ctx)
+		dc, err := copilot.RequestDeviceCode(loginCtx)
 		if err != nil {
 			return err
 		}
@@ -159,7 +170,7 @@ func loginCopilot(cfg *config.Config) error {
 		fmt.Println()
 		fmt.Println("Waiting for authorization...")
 
-		t, err := copilot.PollForToken(ctx, dc)
+		t, err := copilot.PollForToken(loginCtx, dc)
 		if err == copilot.ErrNotAvailable {
 			fmt.Println()
 			fmt.Println("GitHub Copilot is unavailable for this account. To signup, go to the following page:")
@@ -177,8 +188,8 @@ func loginCopilot(cfg *config.Config) error {
 	}
 
 	if err := cmp.Or(
-		cfg.SetConfigField("providers.copilot.api_key", token.AccessToken),
-		cfg.SetConfigField("providers.copilot.oauth", token),
+		c.SetConfigField(loginCtx, wsID, config.ScopeGlobal, "providers.copilot.api_key", token.AccessToken),
+		c.SetConfigField(loginCtx, wsID, config.ScopeGlobal, "providers.copilot.oauth", token),
 	); err != nil {
 		return err
 	}

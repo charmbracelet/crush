@@ -6,9 +6,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -17,10 +15,11 @@ import (
 )
 
 const (
-	headerDiag     = "╱"
-	minHeaderDiags = 3
-	leftPadding    = 1
-	rightPadding   = 1
+	headerDiag           = "╱"
+	minHeaderDiags       = 3
+	leftPadding          = 1
+	rightPadding         = 1
+	diagToDetailsSpacing = 1 // space between diagonal pattern and details section
 )
 
 type header struct {
@@ -61,7 +60,7 @@ func (h *header) drawHeader(
 	h.width = width
 	h.compact = compact
 
-	if !compact || session == nil || h.com.App == nil {
+	if !compact || session == nil {
 		uv.NewStyledString(h.logo).Draw(scr, area)
 		return
 	}
@@ -73,11 +72,15 @@ func (h *header) drawHeader(
 	var b strings.Builder
 	b.WriteString(h.compactLogo)
 
-	availDetailWidth := width - leftPadding - rightPadding - lipgloss.Width(b.String()) - minHeaderDiags
+	availDetailWidth := width - leftPadding - rightPadding - lipgloss.Width(b.String()) - minHeaderDiags - diagToDetailsSpacing
+	lspErrorCount := 0
+	for _, info := range h.com.Workspace.LSPGetStates() {
+		lspErrorCount += info.DiagnosticCount
+	}
 	details := renderHeaderDetails(
 		h.com,
 		session,
-		h.com.App.LSPManager.Clients(),
+		lspErrorCount,
 		detailsOpen,
 		availDetailWidth,
 	)
@@ -86,7 +89,8 @@ func (h *header) drawHeader(
 		lipgloss.Width(b.String()) -
 		lipgloss.Width(details) -
 		leftPadding -
-		rightPadding
+		rightPadding -
+		diagToDetailsSpacing
 
 	if remainingWidth > 0 {
 		b.WriteString(t.Header.Diagonals.Render(
@@ -106,7 +110,7 @@ func (h *header) drawHeader(
 func renderHeaderDetails(
 	com *common.Common,
 	session *session.Session,
-	lspClients *csync.Map[string, *lsp.Client],
+	lspErrorCount int,
 	detailsOpen bool,
 	availWidth int,
 ) string {
@@ -114,20 +118,17 @@ func renderHeaderDetails(
 
 	var parts []string
 
-	errorCount := 0
-	for l := range lspClients.Seq() {
-		errorCount += l.GetDiagnosticCounts().Error
-	}
-
-	if errorCount > 0 {
-		parts = append(parts, t.LSP.ErrorDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPErrorIcon, errorCount)))
+	if lspErrorCount > 0 {
+		parts = append(parts, t.LSP.ErrorDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPErrorIcon, lspErrorCount)))
 	}
 
 	agentCfg := com.Config().Agents[config.AgentCoder]
 	model := com.Config().GetModelByType(agentCfg.Model)
-	percentage := (float64(session.CompletionTokens+session.PromptTokens) / float64(model.ContextWindow)) * 100
-	formattedPercentage := t.Header.Percentage.Render(fmt.Sprintf("%d%%", int(percentage)))
-	parts = append(parts, formattedPercentage)
+	if model != nil && model.ContextWindow > 0 {
+		percentage := (float64(session.CompletionTokens+session.PromptTokens) / float64(model.ContextWindow)) * 100
+		formattedPercentage := t.Header.Percentage.Render(fmt.Sprintf("%d%%", int(percentage)))
+		parts = append(parts, formattedPercentage)
+	}
 
 	const keystroke = "ctrl+d"
 	if detailsOpen {
@@ -141,10 +142,9 @@ func renderHeaderDetails(
 	metadata = dot + metadata
 
 	const dirTrimLimit = 4
-	cfg := com.Config()
-	cwd := fsext.DirTrim(fsext.PrettyPath(cfg.WorkingDir()), dirTrimLimit)
-	cwd = ansi.Truncate(cwd, max(0, availWidth-lipgloss.Width(metadata)), "…")
+	cwd := fsext.DirTrim(fsext.PrettyPath(com.Workspace.WorkingDir()), dirTrimLimit)
 	cwd = t.Header.WorkingDir.Render(cwd)
 
-	return cwd + metadata
+	result := cwd + metadata
+	return ansi.Truncate(result, max(0, availWidth), "…")
 }

@@ -39,7 +39,7 @@ type ViewToolRenderContext struct{}
 func (v *ViewToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
-		return pendingTool(sty, "View", opts.Anim)
+		return pendingTool(sty, "View", opts.Anim, opts.Compact)
 	}
 
 	var params tools.ViewParams
@@ -82,6 +82,12 @@ func (v *ViewToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		content = meta.Content
 	}
 
+	// Handle skill content.
+	if meta.ResourceType == tools.ViewResourceSkill {
+		body := toolOutputSkillContent(sty, meta.ResourceName, meta.ResourceDescription)
+		return joinToolParts(header, body)
+	}
+
 	if content == "" {
 		return header
 	}
@@ -119,7 +125,7 @@ type WriteToolRenderContext struct{}
 func (w *WriteToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
-		return pendingTool(sty, "Write", opts.Anim)
+		return pendingTool(sty, "Write", opts.Anim, opts.Compact)
 	}
 
 	var params tools.WriteParams
@@ -174,7 +180,7 @@ type EditToolRenderContext struct{}
 func (e *EditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	// Edit tool uses full width for diffs.
 	if opts.IsPending() {
-		return pendingTool(sty, "Edit", opts.Anim)
+		return pendingTool(sty, "Edit", opts.Anim, opts.Compact)
 	}
 
 	var params tools.EditParams
@@ -237,7 +243,7 @@ type MultiEditToolRenderContext struct{}
 func (m *MultiEditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	// MultiEdit tool uses full width for diffs.
 	if opts.IsPending() {
-		return pendingTool(sty, "Multi-Edit", opts.Anim)
+		return pendingTool(sty, "Multi-Edit", opts.Anim, opts.Compact)
 	}
 
 	var params tools.MultiEditParams
@@ -305,7 +311,7 @@ type DownloadToolRenderContext struct{}
 func (d *DownloadToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
-		return pendingTool(sty, "Download", opts.Anim)
+		return pendingTool(sty, "Download", opts.Anim, opts.Compact)
 	}
 
 	var params tools.DownloadParams

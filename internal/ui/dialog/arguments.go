@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"cmp"
 	"strings"
 
 	"charm.land/bubbles/v2/help"
@@ -311,10 +312,7 @@ func (a *Arguments) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	// Use standard header
 	titleStyle := s.Dialog.Title
 
-	titleText := a.title
-	if titleText == "" {
-		titleText = "Arguments"
-	}
+	titleText := cmp.Or(a.title, "Arguments")
 
 	header := common.DialogTitle(s, titleText, width, s.Primary, s.Secondary)
 

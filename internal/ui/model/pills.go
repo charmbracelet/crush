@@ -139,11 +139,6 @@ func (m *UI) togglePillsExpanded() tea.Cmd {
 	if !m.hasSession() {
 		return nil
 	}
-	if m.layout.pills.Dy() > 0 {
-		if cmd := m.chat.ScrollByAndAnimate(0); cmd != nil {
-			return cmd
-		}
-	}
 	hasPills := hasIncompleteTodos(m.session.Todos) || m.promptQueue > 0
 	if !hasPills {
 		return nil
@@ -157,6 +152,12 @@ func (m *UI) togglePillsExpanded() tea.Cmd {
 		}
 	}
 	m.updateLayoutAndSize()
+
+	// Make sure to follow scroll if follow is enabled when toggling pills.
+	if m.chat.Follow() {
+		m.chat.ScrollToBottom()
+	}
+
 	return nil
 }
 
@@ -248,8 +249,8 @@ func (m *UI) renderPills() {
 		if todosFocused && hasIncomplete {
 			expandedList = todoList(m.session.Todos, inProgressIcon, t, contentWidth)
 		} else if queueFocused && hasQueue {
-			if m.com.App != nil && m.com.App.AgentCoordinator != nil {
-				queueItems := m.com.App.AgentCoordinator.QueuedPromptsList(m.session.ID)
+			if m.com.Workspace.AgentIsReady() {
+				queueItems := m.com.Workspace.AgentQueuedPromptsList(m.session.ID)
 				expandedList = queueList(queueItems, t)
 			}
 		}

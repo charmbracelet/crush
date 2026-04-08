@@ -49,6 +49,9 @@ tasks:
     sources:
       - ./**/*.go
       - go.mod
+      - internal/agent/**/*.md
+      - internal/agent/**/*.md.tpl
+      - internal/agent/hyper/provider.json
     generates:
       - crush{{exeExt}}
 
@@ -74,7 +77,7 @@ tasks:
     cmds:
       - task: build
       - rm -rf tmp/onboarding
-      - ./crush{exeExt} {{.CLI_ARGS}}
+      - ./crush{{exeExt}} {{.CLI_ARGS}}
 
   test:
     desc: Run tests
@@ -120,6 +123,9 @@ tasks:
     sources:
       - ./**/*.go
       - go.mod
+      - internal/agent/**/*.md
+      - internal/agent/**/*.md.tpl
+      - internal/agent/hyper/provider.json
 
   profile:cpu:
     desc: 10s CPU profile
@@ -180,7 +186,30 @@ tasks:
 
   deps:
     desc: Update Fantasy and Catwalk
+    env:
+      # The Go proxy takes a bit of time to see the latest release. Setting
+      # these bypass it to ensure we can update to a release from a minute ago.
+      GOPROXY: direct
+      GONOSUMDB: charm.land/*
     cmds:
-      - go get charm.land/fantasy
-      - go get charm.land/catwalk
+      - go get charm.land/fantasy@latest
+      - go get charm.land/catwalk@latest
       - go mod tidy
+
+  swag:
+    desc: Generate OpenAPI spec from swag annotations
+    cmds:
+      - go run github.com/swaggo/swag/cmd/swag@v1.16.6 init --generalInfo main.go --dir . --output internal/swagger --packageName swagger --parseDependency --parseInternal --parseDepth 5
+    sources:
+      - internal/server/*.go
+      - internal/proto/*.go
+      - main.go
+    generates:
+      - internal/swagger/docs.go
+      - internal/swagger/swagger.json
+      - internal/swagger/swagger.yaml
+
+  sqlc:
+    desc: Generate code using SQLC
+    cmds:
+      - sqlc generate

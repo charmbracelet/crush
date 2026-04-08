@@ -32,25 +32,30 @@ import (
 	"charm.land/fantasy/providers/vercel"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
+	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/stringext"
+	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/x/exp/charmtone"
 )
 
 const (
-	defaultSessionName = "Untitled Session"
+	DefaultSessionName = "Untitled Session"
 
 	// Constants for auto-summarization thresholds
 	largeContextWindowThreshold = 200_000
 	largeContextWindowBuffer    = 20_000
 	smallContextWindowRatio     = 0.2
 )
+
+var userAgent = fmt.Sprintf("Charm-Crush/%s (https://charm.land/crush)", version.Version)
 
 //go:embed templates/title.md
 var titlePrompt []byte
@@ -72,6 +77,7 @@ type SessionAgentCall struct {
 	TopK             *int64
 	FrequencyPenalty *float64
 	PresencePenalty  *float64
+	NonInteractive   bool
 }
 
 type SessionAgent interface {
@@ -108,6 +114,7 @@ type sessionAgent struct {
 	messages             message.Service
 	disableAutoSummarize bool
 	isYolo               bool
+	notify               pubsub.Publisher[notify.Notification]
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, context.CancelFunc]
@@ -124,6 +131,7 @@ type SessionAgentOptions struct {
 	Sessions             session.Service
 	Messages             message.Service
 	Tools                []fantasy.AgentTool
+	Notify               pubsub.Publisher[notify.Notification]
 }
 
 func NewSessionAgent(
@@ -140,6 +148,7 @@ func NewSessionAgent(
 		disableAutoSummarize: opts.DisableAutoSummarize,
 		tools:                csync.NewSliceFrom(opts.Tools),
 		isYolo:               opts.IsYolo,
+		notify:               opts.Notify,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, context.CancelFunc](),
 	}
@@ -194,6 +203,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		largeModel.Model,
 		fantasy.WithSystemPrompt(systemPrompt),
 		fantasy.WithTools(agentTools...),
+		fantasy.WithUserAgent(userAgent),
 	)
 
 	sessionLock := sync.Mutex{}
@@ -239,12 +249,17 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	var currentAssistant *message.Message
 	var shouldSummarize bool
+	// Don't send MaxOutputTokens if 0 — some providers (e.g. LM Studio) reject it
+	var maxOutputTokens *int64
+	if call.MaxOutputTokens > 0 {
+		maxOutputTokens = &call.MaxOutputTokens
+	}
 	result, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
 		Files:            files,
 		Messages:         history,
 		ProviderOptions:  call.ProviderOptions,
-		MaxOutputTokens:  &call.MaxOutputTokens,
+		MaxOutputTokens:  maxOutputTokens,
 		TopP:             call.TopP,
 		Temperature:      call.Temperature,
 		PresencePenalty:  call.PresencePenalty,
@@ -255,6 +270,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			for i := range prepared.Messages {
 				prepared.Messages[i].ProviderOptions = nil
 			}
+
+			// Use latest tools (updated by SetTools when MCP tools change).
+			prepared.Tools = a.tools.Copy()
 
 			queuedCalls, _ := a.messageQueue.Get(call.SessionID)
 			a.messageQueue.Del(call.SessionID)
@@ -351,7 +369,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				Finished:         false,
 			}
 			currentAssistant.AddToolCall(toolCall)
-			return a.messages.Update(genCtx, *currentAssistant)
+			// Use parent ctx instead of genCtx to ensure the update succeeds
+			// even if the request is canceled mid-stream
+			return a.messages.Update(ctx, *currentAssistant)
 		},
 		OnRetry: func(err *fantasy.ProviderError, delay time.Duration) {
 			// TODO: implement
@@ -365,11 +385,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				Finished:         true,
 			}
 			currentAssistant.AddToolCall(toolCall)
-			return a.messages.Update(genCtx, *currentAssistant)
+			// Use parent ctx instead of genCtx to ensure the update succeeds
+			// even if the request is canceled mid-stream
+			return a.messages.Update(ctx, *currentAssistant)
 		},
 		OnToolResult: func(result fantasy.ToolResultContent) error {
 			toolResult := a.convertToToolResult(result)
-			_, createMsgErr := a.messages.Create(genCtx, currentAssistant.SessionID, message.CreateMessageParams{
+			// Use parent ctx instead of genCtx to ensure the message is created
+			// even if the request is canceled mid-stream
+			_, createMsgErr := a.messages.Create(ctx, currentAssistant.SessionID, message.CreateMessageParams{
 				Role: message.Tool,
 				Parts: []message.ContentPart{
 					toolResult,
@@ -406,6 +430,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		StopWhen: []fantasy.StopCondition{
 			func(_ []fantasy.StepResult) bool {
 				cw := int64(largeModel.CatwalkCfg.ContextWindow)
+				// If context window is unknown (0), skip auto-summarize
+				// to avoid immediately truncating custom/local models.
+				if cw == 0 {
+					return false
+				}
 				tokens := currentSession.CompletionTokens + currentSession.PromptTokens
 				remaining := cw - tokens
 				var threshold int64
@@ -472,7 +501,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			}
 			content := "There was an error while executing the tool"
 			if isCancelErr {
-				content = "Tool execution canceled by user"
+				content = "Error: user cancelled assistant tool calling"
 			} else if isPermissionErr {
 				content = "User denied permission"
 			}
@@ -500,6 +529,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
 		} else if isPermissionErr {
 			currentAssistant.AddFinish(message.FinishReasonPermissionDenied, "User denied permission", "")
+		} else if errors.Is(err, hyper.ErrUnauthorized) {
+			currentAssistant.AddFinish(message.FinishReasonError, "Unauthorized", `Please re-authenticate with Hyper. You can also run "crush auth" to re-authenticate.`)
+			if a.notify != nil {
+				a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+					SessionID:    call.SessionID,
+					SessionTitle: currentSession.Title,
+					Type:         notify.TypeReAuthenticate,
+					ProviderID:   largeModel.ModelCfg.Provider,
+				})
+			}
 		} else if errors.Is(err, hyper.ErrNoCredits) {
 			url := hyper.BaseURL()
 			link := linkStyle.Hyperlink(url, "id=hyper").Render(url)
@@ -528,6 +567,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return nil, updateErr
 		}
 		return nil, err
+	}
+
+	// Send notification that agent has finished its turn (skip for
+	// nested/non-interactive sessions).
+	if !call.NonInteractive && a.notify != nil {
+		a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+			SessionID:    call.SessionID,
+			SessionTitle: currentSession.Title,
+			Type:         notify.TypeAgentFinished,
+		})
 	}
 
 	if shouldSummarize {
@@ -592,6 +641,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 
 	agent := fantasy.NewAgent(largeModel.Model,
 		fantasy.WithSystemPrompt(string(summaryPrompt)),
+		fantasy.WithUserAgent(userAgent),
 	)
 	summaryMessage, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
 		Role:             message.Assistant,
@@ -787,6 +837,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		return fantasy.NewAgent(m,
 			fantasy.WithSystemPrompt(string(p)+"\n /no_think"),
 			fantasy.WithMaxOutputTokens(tok),
+			fantasy.WithUserAgent(userAgent),
 		)
 	}
 
@@ -822,9 +873,9 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 			// Welp, the large model didn't work either. Use the default
 			// session name and return.
 			slog.Error("Error generating title with large model", "err", err)
-			saveErr := a.sessions.UpdateTitleAndUsage(ctx, sessionID, defaultSessionName, 0, 0, 0)
+			saveErr := a.sessions.Rename(ctx, sessionID, DefaultSessionName)
 			if saveErr != nil {
-				slog.Error("Failed to save session title and usage", "error", saveErr)
+				slog.Error("Failed to save session title", "error", saveErr)
 			}
 			return
 		}
@@ -834,9 +885,9 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		// Actually, we didn't get a response so we can't. Use the default
 		// session name and return.
 		slog.Error("Response is nil; can't generate title")
-		saveErr := a.sessions.UpdateTitleAndUsage(ctx, sessionID, defaultSessionName, 0, 0, 0)
+		saveErr := a.sessions.Rename(ctx, sessionID, DefaultSessionName)
 		if saveErr != nil {
-			slog.Error("Failed to save session title and usage", "error", saveErr)
+			slog.Error("Failed to save session title", "error", saveErr)
 		}
 		return
 	}
@@ -849,10 +900,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	title = thinkTagRegex.ReplaceAllString(title, "")
 
 	title = strings.TrimSpace(title)
-	if title == "" {
-		slog.Debug("Empty title; using fallback")
-		title = defaultSessionName
-	}
+	title = cmp.Or(title, DefaultSessionName)
 
 	// Calculate usage and cost.
 	var openrouterCost *float64

@@ -9,6 +9,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -169,6 +170,7 @@ const (
 type MCPConfig struct {
 	Command       string            `json:"command,omitempty" jsonschema:"description=Command to execute for stdio MCP servers,example=npx"`
 	Env           map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set for the MCP server"`
+	EnvFiles map[string]string `json:"env_files,omitempty" jsonschema:"description=Map of env var names to file paths; file contents are read and set as environment variable values"`
 	Args          []string          `json:"args,omitempty" jsonschema:"description=Arguments to pass to the MCP server command"`
 	Type          MCPType           `json:"type" jsonschema:"required,description=Type of MCP connection,enum=stdio,enum=sse,enum=http,default=stdio"`
 	URL           string            `json:"url,omitempty" jsonschema:"description=URL for HTTP or SSE MCP servers,format=uri,example=http://localhost:3000/mcp"`
@@ -306,7 +308,7 @@ func (l LSPConfig) ResolvedEnv() []string {
 }
 
 func (m MCPConfig) ResolvedEnv() []string {
-	return resolveEnvs(m.Env)
+	return append(resolveEnvs(m.Env), resolveEnvFiles(m.EnvFiles)...)
 }
 
 func (m MCPConfig) ResolvedHeaders() map[string]string {
@@ -651,6 +653,22 @@ func resolveEnvs(envs map[string]string) []string {
 	res := make([]string, 0, len(envs))
 	for k, v := range envs {
 		res = append(res, fmt.Sprintf("%s=%s", k, v))
+	}
+	return res
+}
+
+// resolveEnvFiles reads file contents for each entry in envFiles and returns
+// the resolved key=value pairs. Entries whose files cannot be read are skipped.
+func resolveEnvFiles(envFiles map[string]string) []string {
+	res := make([]string, 0, len(envFiles))
+	for varName, filePath := range envFiles {
+		content, err := os.ReadFile(filePath)
+		if err != nil {
+			slog.Error("Error reading env file", "error", err, "variable", varName, "path", filePath)
+			continue
+		}
+		// trim trailing newlines, consistent with $(cat file) behavior
+		res = append(res, fmt.Sprintf("%s=%s", varName, strings.TrimRight(string(content), "\n\r")))
 	}
 	return res
 }

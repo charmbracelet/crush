@@ -49,6 +49,7 @@ func buildCrushInfo(cfg *config.ConfigStore, lspManager *lsp.Manager, allSkills 
 	writePermissions(&b, cfg)
 	writeDisabledTools(&b, cfg)
 	writeOptions(&b, cfg)
+	writeAttribution(&b, cfg)
 
 	return b.String()
 }
@@ -400,6 +401,21 @@ func writeOptions(b *strings.Builder, cfg *config.ConfigStore) {
 	for _, o := range opts {
 		fmt.Fprintf(b, "%s = %s\n", o.key, o.value)
 	}
+	b.WriteString("\n")
+}
+
+func writeAttribution(b *strings.Builder, cfg *config.ConfigStore) {
+	c := cfg.Config()
+	if c.Options == nil || c.Options.Attribution == nil {
+		return
+	}
+	b.WriteString("[attribution]\n")
+	trailerStyle := c.Options.Attribution.TrailerStyle
+	if trailerStyle == "" {
+		trailerStyle = config.TrailerStyleCoAuthoredBy
+	}
+	fmt.Fprintf(b, "trailer_style = %s\n", trailerStyle)
+	fmt.Fprintf(b, "generated_with = %v\n", c.Options.Attribution.GeneratedWith)
 	b.WriteString("\n")
 }
 

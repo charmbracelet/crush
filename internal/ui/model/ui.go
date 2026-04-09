@@ -4812,9 +4812,6 @@ func (m *UI) handleFilePathPaste(path string) tea.Cmd {
 		if fileInfo.IsDir() {
 			return util.ReportWarn("Cannot attach a directory")
 		}
-		if fileInfo.Size() > common.MaxAttachmentSize {
-			return util.ReportWarn("File is too big (>5mb)")
-		}
 
 		content, err := os.ReadFile(path)
 		if err != nil {
@@ -4836,6 +4833,9 @@ func (m *UI) handleFilePathPaste(path string) tea.Cmd {
 				content = result.Data
 				mimeType = result.MimeType
 			}
+		}
+		if int64(len(content)) > common.MaxAttachmentSize {
+			return util.ReportWarn("File is too big (>5mb)")
 		}
 
 		return message.Attachment{
@@ -4895,15 +4895,6 @@ func (m *UI) handleClipboardImageMsg(msg clipboardImageMsg) tea.Cmd {
 		return nil
 	}
 
-	if int64(len(msg.imageData)) > common.MaxAttachmentSize {
-		return func() tea.Msg {
-			return util.InfoMsg{
-				Type: util.InfoTypeError,
-				Msg:  "File too large, max 5MB",
-			}
-		}
-	}
-
 	// Return a command that compresses the image.
 	pasteIdx := m.pasteIdx()
 	return func() tea.Msg {
@@ -4918,6 +4909,12 @@ func (m *UI) handleClipboardImageMsg(msg clipboardImageMsg) tea.Cmd {
 		} else if result.WasCompressed {
 			imageData = result.Data
 			mimeType = result.MimeType
+		}
+		if int64(len(imageData)) > common.MaxAttachmentSize {
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
+				Msg:  "File too large, max 5MB",
+			}
 		}
 
 		// Determine file extension based on MIME type.
@@ -4977,14 +4974,6 @@ func attachmentFromClipboardPath(rawPath string) (message.Attachment, error) {
 		return message.Attachment{}, fmt.Errorf("clipboard path is not a supported image")
 	}
 
-	fileInfo, statErr := os.Stat(path)
-	if statErr != nil {
-		return message.Attachment{}, statErr
-	}
-	if fileInfo.Size() > common.MaxAttachmentSize {
-		return message.Attachment{}, fmt.Errorf("file too large")
-	}
-
 	content, readErr := os.ReadFile(path)
 	if readErr != nil {
 		return message.Attachment{}, readErr
@@ -5000,6 +4989,9 @@ func attachmentFromClipboardPath(rawPath string) (message.Attachment, error) {
 	} else if result.WasCompressed {
 		content = result.Data
 		mimeType = result.MimeType
+	}
+	if int64(len(content)) > common.MaxAttachmentSize {
+		return message.Attachment{}, fmt.Errorf("file too large")
 	}
 
 	return message.Attachment{

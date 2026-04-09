@@ -1,7 +1,7 @@
 package styles
 
 // buildBuiltinThemes returns the complete map of built-in theme palettes.
-// This is called once from init() via sync.Once.
+// Called once during package-level var initialization.
 func buildBuiltinThemes() map[string]ThemePalette {
 	return map[string]ThemePalette{
 		"charm":                DefaultPalette(),

@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/lipgloss/v2"
 	"charm.land/log/v2"
 	"github.com/charmbracelet/crush/internal/client"
 	"github.com/charmbracelet/crush/internal/config"
@@ -176,25 +175,17 @@ func runNonInteractive(
 
 	var (
 		spinner   *format.Spinner
-		stdoutTTY bool
 		stderrTTY bool
-		stdinTTY  bool
 		progress  bool
 	)
 
-	stdoutTTY = term.IsTerminal(os.Stdout.Fd())
 	stderrTTY = term.IsTerminal(os.Stderr.Fd())
-	stdinTTY = term.IsTerminal(os.Stdin.Fd())
 	progress = ws.Config.Options.Progress == nil || *ws.Config.Options.Progress
 
 	if !hideSpinner && stderrTTY {
 		t := common.StylesFromConfig(ws.Config)
 
-		hasDarkBG := true
-		if stdinTTY && stdoutTTY {
-			hasDarkBG = lipgloss.HasDarkBackground(os.Stdin, os.Stdout)
-		}
-		defaultFG := lipgloss.LightDark(hasDarkBG)(t.BgBase, t.FgBase)
+		defaultFG := t.FgBase
 
 		spinner = format.NewSpinner(ctx, cancel, anim.Settings{
 			Size:        10,

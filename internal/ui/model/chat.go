@@ -442,6 +442,16 @@ func (m *Chat) ClearMessages() {
 	m.ClearMouse()
 }
 
+// InvalidateRenderCaches clears cached rendered output on all message items,
+// forcing them to re-render with current styles on the next draw.
+func (m *Chat) InvalidateRenderCaches() {
+	for i := range m.list.Len() {
+		if item, ok := m.list.ItemAt(i).(chat.CacheClearable); ok {
+			item.ClearCache()
+		}
+	}
+}
+
 // RemoveMessage removes a message from the chat list by its ID.
 func (m *Chat) RemoveMessage(id string) {
 	idx, ok := m.idInxMap[id]

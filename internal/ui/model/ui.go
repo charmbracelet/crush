@@ -3019,6 +3019,8 @@ func (m *UI) refreshStyledComponents() {
 	m.completions.SetStyles(t.Completions.Normal, t.Completions.Focused, t.Completions.Match)
 	m.attachments.SetRendererStyles(t.Attachments.Normal, t.Attachments.Deleting, t.Attachments.Image, t.Attachments.Text)
 	m.todoSpinner.Style = t.Pills.TodoSpinner
+	m.status.help.Styles = t.Help
+	m.chat.InvalidateRenderCaches()
 }
 
 // openThemeDialog opens the theme picker dialog.

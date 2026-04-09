@@ -269,17 +269,17 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	// This allows the memory recall to happen in parallel with other setup work.
 	// Modeled after Claude Code's approach: start prefetch, cache result when
 	// settled, and check readiness non-blocking at consume time.
+	// Note: DisableAutoMemory only disables automatic memory writes (dreaming),
+	// not recall. Users should still get relevant memories in their context.
 	var memoryPrefetch *MemoryPrefetch
-	if !c.cfg.Config().Options.DisableAutoMemory {
-		memoryPrefetch = &MemoryPrefetch{}
-		bgModel := c.resolveBackgroundModel(ctx)
-		go func(prefetchCtx context.Context) {
-			recall := buildAutoRecallBlock(prefetchCtx, c.history, c.longTermMemory, bgModel, sessionID, prompt)
-			memoryPrefetch.Settle(recall)
-			slog.Debug("[PERF] coordinator: memory prefetch completed", "has_recall", recall != "", "session_id", sessionID)
-		}(ctx)
-		slog.Debug("[PERF] coordinator: started memory prefetch", "session_id", sessionID)
-	}
+	memoryPrefetch = &MemoryPrefetch{}
+	bgModel := c.resolveBackgroundModel(ctx)
+	go func(prefetchCtx context.Context) {
+		recall := buildAutoRecallBlock(prefetchCtx, c.history, c.longTermMemory, bgModel, sessionID, prompt)
+		memoryPrefetch.Settle(recall)
+		slog.Debug("[PERF] coordinator: memory prefetch completed", "has_recall", recall != "", "session_id", sessionID)
+	}(ctx)
+	slog.Debug("[PERF] coordinator: started memory prefetch", "session_id", sessionID)
 
 	// refresh models before each run
 	runtimeConfig, err := c.updateCurrentAgentRuntime(ctx)

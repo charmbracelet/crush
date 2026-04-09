@@ -3317,14 +3317,11 @@ func buildSummaryPrompt(todos []session.Todo) string {
 	var sb strings.Builder
 	sb.WriteString("Provide a detailed summary of our conversation above.")
 	if len(todos) > 0 {
-		sb.WriteString(" Include information about these pending todos:")
-		for i, todo := range todos {
-			if i > 0 {
-				sb.WriteString(",")
-			}
-			sb.WriteString(" ")
-			sb.WriteString(todo.Content)
+		sb.WriteString("\n\n## Tracked Tasks\n\n")
+		for _, todo := range todos {
+			fmt.Fprintf(&sb, "- [%s] %s\n", todo.Status, todo.Content)
 		}
+		sb.WriteString("\nInclude these tasks and their statuses in your summary.")
 	}
 	return sb.String()
 }

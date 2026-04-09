@@ -429,13 +429,35 @@ func (m *UI) sendNotification(n notification.Notification) tea.Cmd {
 		return nil
 	}
 
-	backend := m.notifyBackend
-	return func() tea.Msg {
-		if err := backend.Send(n); err != nil {
-			slog.Error("Failed to send notification", "error", err)
+	return m.notifyBackend.Send(n)
+}
+
+// selectNotificationBackend chooses the appropriate notification backend based
+// on terminal capabilities and environment. This is a pure function that should
+// be called once during initialization or when capabilities change.
+func selectNotificationBackend(caps common.Capabilities) notification.Backend {
+	_, isSSH := caps.Env.LookupEnv("SSH_TTY")
+
+	// SSH sessions use terminal-based notifications (OSC 99 or 777).
+	if isSSH {
+		if caps.OSC99Notifications {
+			return notification.NewOSC99Backend(notification.Icon)
 		}
-		return nil
+		return notification.NewOSC777Backend()
 	}
+
+	// Local sessions use native OS notifications if focus events are supported.
+	// Without focus events, we can't suppress notifications when focused, so
+	// we disable them entirely to avoid spamming the user.
+	if caps.ReportFocusEvents {
+		return notification.NewNativeBackend(notification.Icon)
+	}
+
+	return notification.NoopBackend{}
+}
+
+func (m *UI) updateNotificationBackend() {
+	m.notifyBackend = selectNotificationBackend(m.caps)
 }
 
 // shouldSendNotification returns true if notifications should be sent based on
@@ -505,9 +527,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmds = append(cmds, common.QueryCmd(uv.Environ(msg)))
 	case tea.ModeReportMsg:
-		if m.caps.ReportFocusEvents {
-			m.notifyBackend = notification.NewNativeBackend(notification.Icon)
-		}
+		m.updateNotificationBackend()
+	case uv.UnknownOscEvent:
+		m.updateNotificationBackend()
 	case tea.FocusMsg:
 		m.notifyWindowFocused = true
 	case tea.BlurMsg:

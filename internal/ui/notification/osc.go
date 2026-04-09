@@ -5,12 +5,16 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 
 	tea "charm.land/bubbletea/v2"
 )
 
+// notifySeq is an atomic counter for generating unique notification IDs.
+var notifySeq atomic.Uint64
+
 // OSCBackend sends desktop notifications using the OSC 99 (kitty) desktop
-// notification protocol. 
+// notification protocol.
 type OSCBackend struct {
 	icon []byte
 }
@@ -30,7 +34,7 @@ func (b *OSCBackend) Send(n Notification) tea.Cmd {
 	slog.Debug("Sending OSC notification", "title", n.Title, "message", n.Message)
 
 	var sb strings.Builder
-	id := "crush-notify"
+	id := fmt.Sprintf("crush-%d", notifySeq.Add(1))
 
 	sb.WriteString(osc99(n.Title, "i="+id, "d=0", "p=title"))
 

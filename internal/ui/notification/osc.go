@@ -16,10 +16,8 @@ import (
 var notifySeq atomic.Uint64
 
 // OSCBackend sends desktop notifications using multiple OSC protocols to
-// maximize terminal compatibility. It emits OSC 99 (kitty), OSC 777
-// (rxvt-unicode/VTE), and OSC 9 (iTerm2/WezTerm/Windows Terminal) in a
-// single write. Terminals silently ignore escape sequences they don't
-// recognize, so this is safe.
+// maximize terminal compatibility. It emits OSC 99 and OSC 777 in a 
+// single write.
 type OSCBackend struct {
 	icon []byte
 }
@@ -34,10 +32,9 @@ func NewOSCBackend(icon any) *OSCBackend {
 }
 
 // Send returns a [tea.Raw] command that writes OSC escape sequences to the
-// terminal. It emits three protocols:
+// terminal. It emits two protocols:
 //   - OSC 99: title, body, icon.
 //   - OSC 777: title, body.
-//   - OSC 9: single message string.
 func (b *OSCBackend) Send(n Notification) tea.Cmd {
 	slog.Debug("Sending OSC notification", "title", n.Title, "message", n.Message)
 
@@ -60,13 +57,6 @@ func (b *OSCBackend) Send(n Notification) tea.Cmd {
 
 	// OSC 777
 	sb.WriteString(ansi.URxvtExt("notify", n.Title, n.Message))
-
-	// OSC 9
-	if n.Message != "" {
-		sb.WriteString(ansi.Notify(n.Title + ": " + n.Message))
-	} else {
-		sb.WriteString(ansi.Notify(n.Title))
-	}
 
 	return tea.Raw(sb.String())
 }

@@ -510,13 +510,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	// Check if memory prefetch is ready (non-blocking). If settled, use cached
 	// result. This approach mirrors Claude Code's design: the result is cached
 	// after settlement, so retries get the same data without re-running.
-	prefetchedRecallInjected := false
+	prefetchedRecallInSystemPrompt := false
 	prefetchNotReadyLogged := false
 	if !a.isSubAgent && call.MemoryPrefetch != nil {
 		if result, settled := call.MemoryPrefetch.GetSettled(); settled {
-			prefetchedRecallInjected = true
 			if result != "" {
 				systemPrompt += "\n\n<auto_recall>\n" + result + "\n</auto_recall>"
+				prefetchedRecallInSystemPrompt = true
 				slog.Debug("[PERF] sessionAgent: injected prefetched memory recall", "session_id", call.SessionID)
 			}
 		} else {
@@ -686,6 +686,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	var runToolUses int
 	var runLastTool string
 	runStream := func(providerOptions fantasy.ProviderOptions, billFirstStepAsUser bool) (*fantasy.AgentResult, error) {
+		prefetchedRecallInjected := prefetchedRecallInSystemPrompt
 		currentAssistant = nil
 		currentStepToolMessageIDs = nil
 		currentStepToolResultChars = 0

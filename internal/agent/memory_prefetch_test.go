@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"charm.land/fantasy"
+	"charm.land/fantasy/providers/anthropic"
 	"github.com/stretchr/testify/require"
 )
 
@@ -62,6 +63,45 @@ func (a *memoryPrefetchSingleStepAgent) Stream(ctx context.Context, call fantasy
 	_, prepared, err := call.PrepareStep(ctx, fantasy.PrepareStepFunctionOptions{Messages: call.Messages})
 	require.NoError(a.t, err)
 	a.preparedByRun = append(a.preparedByRun, append([]fantasy.Message(nil), prepared.Messages...))
+
+	if call.OnTextDelta != nil {
+		require.NoError(a.t, call.OnTextDelta("reply", "ok"))
+	}
+	if call.OnStepFinish != nil {
+		require.NoError(a.t, call.OnStepFinish(fantasy.StepResult{Response: fantasy.Response{FinishReason: fantasy.FinishReasonStop}}))
+	}
+
+	return &fantasy.AgentResult{}, nil
+}
+
+type memoryPrefetchAnthropicRetryAgent struct {
+	t                        *testing.T
+	onFirstAttemptBeforeStep func()
+	attempts                 int
+	preparedByAttempt        [][]fantasy.Message
+}
+
+func (memoryPrefetchAnthropicRetryAgent) Generate(context.Context, fantasy.AgentCall) (*fantasy.AgentResult, error) {
+	return &fantasy.AgentResult{}, nil
+}
+
+func (a *memoryPrefetchAnthropicRetryAgent) Stream(ctx context.Context, call fantasy.AgentStreamCall) (*fantasy.AgentResult, error) {
+	a.attempts++
+	if a.attempts == 1 && a.onFirstAttemptBeforeStep != nil {
+		a.onFirstAttemptBeforeStep()
+		a.onFirstAttemptBeforeStep = nil
+	}
+
+	_, prepared, err := call.PrepareStep(ctx, fantasy.PrepareStepFunctionOptions{Messages: call.Messages})
+	require.NoError(a.t, err)
+	a.preparedByAttempt = append(a.preparedByAttempt, append([]fantasy.Message(nil), prepared.Messages...))
+
+	if a.attempts == 1 {
+		return nil, &fantasy.ProviderError{
+			StatusCode: 400,
+			Message:    "thinking is enabled but reasoning_content is missing in assistant tool call message at index 86",
+		}
+	}
 
 	if call.OnTextDelta != nil {
 		require.NoError(a.t, call.OnTextDelta("reply", "ok"))
@@ -146,6 +186,41 @@ func TestMemoryPrefetchCanBeReusedAcrossRuns(t *testing.T) {
 	require.True(t, settled1)
 	require.True(t, settled2)
 	require.Equal(t, result1, result2)
+}
+
+func TestRunReinjectsMemoryPrefetchAfterAnthropicRetry(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	prefetch := &MemoryPrefetch{}
+	fakeAgent := &memoryPrefetchAnthropicRetryAgent{t: t}
+	sessionAgent := newQueuePrepareTestSessionAgent(env, fakeAgent)
+
+	sess, err := env.sessions.Create(t.Context(), "memory prefetch anthropic retry")
+	require.NoError(t, err)
+
+	fakeAgent.onFirstAttemptBeforeStep = func() {
+		prefetch.Settle("retry recall should still be present")
+	}
+
+	result, err := sessionAgent.Run(t.Context(), SessionAgentCall{
+		SessionID:       sess.ID,
+		Prompt:          "retry with anthropic thinking",
+		MaxOutputTokens: 1000,
+		NonInteractive:  true,
+		MemoryPrefetch:  prefetch,
+		ProviderOptions: fantasy.ProviderOptions{
+			anthropic.Name: &anthropic.ProviderOptions{
+				Thinking: &anthropic.ThinkingProviderOption{BudgetTokens: 2000},
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, fakeAgent.preparedByAttempt, 2)
+
+	require.True(t, hasAutoRecallBlock(fakeAgent.preparedByAttempt[0], "retry recall should still be present"))
+	require.True(t, hasAutoRecallBlock(fakeAgent.preparedByAttempt[1], "retry recall should still be present"))
 }
 
 func hasAutoRecallBlock(messages []fantasy.Message, snippet string) bool {

@@ -10,7 +10,7 @@ type Notification struct {
 }
 
 // Backend defines the interface for sending desktop notifications. Each
-// backend controls its own execution model. Implementations are pure transport 
+// backend controls its own execution model. Implementations are pure transport
 // - policy decisions (config, focus state) are handled by the caller.
 type Backend interface {
 	Send(n Notification) tea.Cmd

@@ -21,6 +21,22 @@ func TestMain(m *testing.M) {
 	os.Exit(exitVal)
 }
 
+func TestConfig_LoadAgentsFromJSON(t *testing.T) {
+	data := []byte(`{"agents": {"task": {"model": "small"}, "coder": {"model": "large"}}}`)
+
+	loadedConfig, err := loadFromBytes([][]byte{data})
+	require.NoError(t, err)
+	require.NotNil(t, loadedConfig)
+
+	taskAgent, ok := loadedConfig.Agents[AgentTask]
+	require.True(t, ok)
+	assert.Equal(t, SelectedModelTypeSmall, taskAgent.Model)
+
+	coderAgent, ok := loadedConfig.Agents[AgentCoder]
+	require.True(t, ok)
+	assert.Equal(t, SelectedModelTypeLarge, coderAgent.Model)
+}
+
 func TestConfig_LoadFromBytes(t *testing.T) {
 	data1 := []byte(`{"providers": {"openai": {"api_key": "key1", "base_url": "https://api.openai.com/v1"}}}`)
 	data2 := []byte(`{"providers": {"openai": {"api_key": "key2", "base_url": "https://api.openai.com/v2"}}}`)
@@ -495,6 +511,47 @@ func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
 	assert.Equal(t, []string{"glob", "ls", "sourcegraph", "view"}, taskAgent.AllowedTools)
+}
+
+func TestConfig_setupAgentsWithModelConfig(t *testing.T) {
+	cfg := &Config{
+		Agents: map[string]Agent{
+			AgentTask: {
+				Model: SelectedModelTypeSmall,
+			},
+		},
+		Options: &Options{
+			DisabledTools: []string{},
+		},
+	}
+
+	cfg.SetupAgents()
+
+	coderAgent, ok := cfg.Agents[AgentCoder]
+	require.True(t, ok)
+	assert.Equal(t, SelectedModelTypeLarge, coderAgent.Model)
+
+	taskAgent, ok := cfg.Agents[AgentTask]
+	require.True(t, ok)
+	assert.Equal(t, SelectedModelTypeSmall, taskAgent.Model)
+}
+
+func TestConfig_setupAgentsWithNoModelConfig(t *testing.T) {
+	cfg := &Config{
+		Options: &Options{
+			DisabledTools: []string{},
+		},
+	}
+
+	cfg.SetupAgents()
+
+	coderAgent, ok := cfg.Agents[AgentCoder]
+	require.True(t, ok)
+	assert.Equal(t, SelectedModelTypeLarge, coderAgent.Model)
+
+	taskAgent, ok := cfg.Agents[AgentTask]
+	require.True(t, ok)
+	assert.Equal(t, SelectedModelTypeLarge, taskAgent.Model)
 }
 
 func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {

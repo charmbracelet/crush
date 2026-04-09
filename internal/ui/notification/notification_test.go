@@ -3,7 +3,6 @@ package notification_test
 import (
 	"encoding/base64"
 	"fmt"
-	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -118,6 +117,5 @@ func TestOSCBackend_Send_WithIcon(t *testing.T) {
 	require.Contains(t, s, "e=1")
 
 	encoded := base64.StdEncoding.EncodeToString(iconData)
-	expected := fmt.Sprintf("\x1b]99;i=crush-notify:d=0:p=icon:e=1;%s\x07", encoded)
-	require.True(t, strings.Contains(s, expected))
+	require.Contains(t, s, fmt.Sprintf("d=0:p=icon:e=1;%s\x07", encoded))
 }

@@ -775,7 +775,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 					}
 				}
 
-				// Trigger messages.transform plugin on every step (including tool result steps)
+				// Trigger messages.transform plugin on every step (including tool result steps).
 				// This allows plugins like morph_compact to compress messages after tool calls.
 				if len(prepared.Messages) > 0 {
 					originalTokens := estimatePromptTokens(prepared.Messages, nil)
@@ -790,7 +790,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 					if transformErr != nil {
 						slog.Warn("Failed to transform messages in PrepareStep", "error", transformErr, "session_id", call.SessionID)
 					} else if len(transformedMsgs.Messages) > 0 {
-						// Convert back to fantasy.Messages
+						// Convert back to fantasy messages.
 						prepared.Messages, _ = a.preparePrompt(transformedMsgs.Messages)
 						newTokens := estimatePromptTokens(prepared.Messages, nil)
 						// If morph compression reduced tokens significantly, update session's

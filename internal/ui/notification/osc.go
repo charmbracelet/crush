@@ -16,7 +16,7 @@ import (
 var notifySeq atomic.Uint64
 
 // OSCBackend sends desktop notifications using multiple OSC protocols to
-// maximize terminal compatibility. It emits OSC 99 and OSC 777 in a 
+// maximize terminal compatibility. It emits OSC 99 and OSC 777 in a
 // single write.
 type OSCBackend struct {
 	icon []byte

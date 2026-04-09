@@ -447,6 +447,12 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	// Queue the message if busy
 	if a.IsSessionBusy(call.SessionID) {
+		if call.UserMessage != nil && call.UserMessage.ID != "" && a.messages != nil {
+			if err := a.messages.Delete(ctx, call.UserMessage.ID); err != nil {
+				slog.Warn("Failed to remove queued user message", "session_id", call.SessionID, "message_id", call.UserMessage.ID, "error", err)
+			}
+			call.UserMessage = nil
+		}
 		a.enqueueQueuedCall(call.SessionID, call)
 		return nil, nil
 	}

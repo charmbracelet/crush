@@ -414,3 +414,44 @@ func TestPrioritizeQueuedPromptInvalidIndexReturnsFalse(t *testing.T) {
 	require.False(t, a.PrioritizeQueuedPrompt(sess.ID, -1))
 	require.False(t, a.PrioritizeQueuedPrompt(sess.ID, 5))
 }
+
+func TestBusyRunRemovesPrecreatedUserMessageBeforeQueueing(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	a := newQueueControlTestAgent(env)
+
+	sess, err := env.sessions.Create(t.Context(), "queue precreated user message")
+	require.NoError(t, err)
+
+	queuedUser, err := env.messages.Create(t.Context(), sess.ID, message.CreateMessageParams{
+		Role: message.User,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "queued but should not render yet"},
+		},
+	})
+	require.NoError(t, err)
+
+	a.activeRequests.Set(sess.ID, func() {})
+
+	result, err := a.Run(t.Context(), SessionAgentCall{
+		SessionID:       sess.ID,
+		Prompt:          "queued but should not render yet",
+		MaxOutputTokens: 1000,
+		UserMessage:     &queuedUser,
+	})
+	require.NoError(t, err)
+	require.Nil(t, result)
+
+	queue := a.queuedCallsSnapshot(sess.ID)
+	require.Len(t, queue, 1)
+	require.Nil(t, queue[0].UserMessage)
+
+	msgs, err := env.messages.List(t.Context(), sess.ID)
+	require.NoError(t, err)
+	for _, msg := range msgs {
+		if msg.ID == queuedUser.ID {
+			t.Fatalf("queued user message %q should have been deleted while waiting", queuedUser.ID)
+		}
+	}
+}

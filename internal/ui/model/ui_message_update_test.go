@@ -1,9 +1,15 @@
 package model
 
 import (
+	"context"
 	"testing"
 
+	"github.com/charmbracelet/crush/internal/agent"
 	agenttools "github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/db"
+	"github.com/charmbracelet/crush/internal/filetracker"
+	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/planmode"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -356,7 +362,7 @@ func TestHandleChildSessionMessageRemovesStaleNestedToolsAfterRetryReset(t *test
 	require.Empty(t, parentTool.NestedTools())
 }
 
-func TestHandleChildSessionMessageMapsTaskGraphRetrySessionsToParentAgentTool(t *testing.T) {
+func TestHandleChildSessionMessageMapsTaskGraphRetrySessionsToTaskNode(t *testing.T) {
 	t.Parallel()
 
 	ui, parent, generalChild, _, _, _ := testSessionUI(t)
@@ -368,7 +374,11 @@ func TestHandleChildSessionMessageMapsTaskGraphRetrySessionsToParentAgentTool(t 
 
 	toolCalls := msgs[0].ToolCalls()
 	require.NotEmpty(t, toolCalls)
-	ui.chat.SetMessages(chat.NewToolMessageItem(ui.com.Styles, msgs[0].ID, toolCalls[0], nil, false))
+	taskSessionID := ui.com.App.Sessions.CreateAgentToolSessionID(msgs[0].ID, "call-general::task-a")
+	ui.chat.SetMessages(
+		chat.NewToolMessageItem(ui.com.Styles, msgs[0].ID, toolCalls[0], nil, false),
+		chat.NewTaskNodeItem(ui.com.Styles, toolCalls[0].ID, "task-a", "Task A", "Run task A", "general", taskSessionID),
+	)
 
 	retryChildSessionID := ui.com.App.Sessions.CreateAgentToolSessionID(msgs[0].ID, "call-general::task-a::retry-1")
 	retryChild, err := ui.com.App.Sessions.CreateTaskSession(t.Context(), retryChildSessionID, parent.ID, "Retry child")
@@ -394,10 +404,100 @@ func TestHandleChildSessionMessageMapsTaskGraphRetrySessionsToParentAgentTool(t 
 		Payload: retryEvent,
 	})
 
+	taskNode, ok := ui.chat.MessageItem(chat.TaskNodeItemID(toolCalls[0].ID, "task-a")).(chat.NestedToolContainer)
+	require.True(t, ok)
+	require.Len(t, taskNode.NestedTools(), 1)
+	require.Equal(t, "retry-nested-1", taskNode.NestedTools()[0].ToolCall().ID)
+
 	parentTool, ok := ui.chat.MessageItem(toolCalls[0].ID).(chat.NestedToolContainer)
 	require.True(t, ok)
-	require.Len(t, parentTool.NestedTools(), 1)
-	require.Equal(t, "retry-nested-1", parentTool.NestedTools()[0].ToolCall().ID)
+	require.Empty(t, parentTool.NestedTools())
+}
+
+func TestSetSessionMessagesLoadsTaskNodeNestedToolsFromRetrySessions(t *testing.T) {
+	t.Parallel()
+
+	conn, err := db.Connect(context.Background(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = conn.Close()
+	})
+
+	q := db.New(conn)
+	sessions := session.NewService(q, conn)
+	messages := message.NewService(q)
+	fileTracker := filetracker.NewService(q)
+	historyService := history.NewService(q, conn)
+
+	parent, err := sessions.Create(context.Background(), "Parent")
+	require.NoError(t, err)
+
+	assistantMsg, err := messages.Create(context.Background(), parent.ID, message.CreateMessageParams{
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.ToolCall{
+				ID:   "call-general",
+				Name: agent.AgentToolName,
+				Input: `{"tasks":[{"id":"task-a","description":"Search references","prompt":"Find usages","subagent_type":"explore"},` +
+					`{"id":"task-b","description":"Apply patch","prompt":"Implement fix","subagent_type":"general"}]}`,
+				Finished: true,
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	baseTaskSessionID := sessions.CreateAgentToolSessionID(assistantMsg.ID, "call-general::task-a")
+	baseTaskSession, err := sessions.CreateTaskSession(context.Background(), baseTaskSessionID, parent.ID, "Task A")
+	require.NoError(t, err)
+
+	retryTaskSessionID := sessions.CreateAgentToolSessionID(assistantMsg.ID, "call-general::task-a::retry-1")
+	retryTaskSession, err := sessions.CreateTaskSession(context.Background(), retryTaskSessionID, parent.ID, "Task A retry")
+	require.NoError(t, err)
+
+	_, err = messages.Create(context.Background(), baseTaskSession.ID, message.CreateMessageParams{
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.ToolCall{ID: "base-view", Name: "view", Input: `{"file_path":"a.txt"}`, Finished: true},
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = messages.Create(context.Background(), retryTaskSession.ID, message.CreateMessageParams{
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.ToolCall{ID: "retry-view", Name: "view", Input: `{"file_path":"b.txt"}`, Finished: true},
+		},
+	})
+	require.NoError(t, err)
+
+	theme := styles.DefaultStyles()
+	com := &common.Common{
+		App:    &app.App{Sessions: sessions, Messages: messages, History: historyService, FileTracker: fileTracker},
+		Styles: &theme,
+	}
+	ui := &UI{
+		com:     com,
+		chat:    NewChat(com),
+		session: &parent,
+	}
+
+	_ = ui.setSessionMessages([]message.Message{assistantMsg})
+
+	taskNodeID := chat.TaskNodeItemID("call-general", "task-a")
+	taskNode, ok := ui.chat.MessageItem(taskNodeID).(*chat.TaskNodeItem)
+	require.True(t, ok)
+	require.Len(t, taskNode.NestedTools(), 2)
+
+	nestedToolIDs := []string{
+		taskNode.NestedTools()[0].ToolCall().ID,
+		taskNode.NestedTools()[1].ToolCall().ID,
+	}
+	require.ElementsMatch(t, []string{"base-view", "retry-view"}, nestedToolIDs)
+
+	_ = ui.setSessionMessages([]message.Message{assistantMsg})
+	taskNode, ok = ui.chat.MessageItem(taskNodeID).(*chat.TaskNodeItem)
+	require.True(t, ok)
+	require.Len(t, taskNode.NestedTools(), 2)
 }
 
 func TestUpdateLatestProposedPlanRequiresPlanModeAndPlanExit(t *testing.T) {

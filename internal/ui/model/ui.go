@@ -1387,6 +1387,11 @@ func (m *UI) propagateTaskStatusesToNodes(toolCallID string, result *message.Too
 // each TaskNodeItem. This provides the third-level collapsible operations
 // inside each sub-task.
 func (m *UI) loadTaskNodeNestedTools(items []chat.MessageItem) {
+	parentSessionID := ""
+	if m.session != nil {
+		parentSessionID = m.session.ID
+	}
+
 	for _, item := range items {
 		taskNode, ok := item.(*chat.TaskNodeItem)
 		if !ok {
@@ -1397,26 +1402,28 @@ func (m *UI) loadTaskNodeNestedTools(items []chat.MessageItem) {
 			continue
 		}
 
-		nestedMsgs, err := m.com.App.Messages.List(context.Background(), childSessionID)
-		if err != nil || len(nestedMsgs) == 0 {
-			continue
-		}
-
-		nestedMsgPtrs := make([]*message.Message, len(nestedMsgs))
-		for i := range nestedMsgs {
-			nestedMsgPtrs[i] = &nestedMsgs[i]
-		}
-		nestedToolResultMap := chat.BuildToolResultMap(nestedMsgPtrs)
-
 		var nestedTools []chat.ToolMessageItem
-		for _, nestedMsg := range nestedMsgPtrs {
-			nestedItems := chat.ExtractMessageItems(m.com.Styles, nestedMsg, nestedToolResultMap)
-			for _, nestedItem := range nestedItems {
-				if nestedToolItem, ok := nestedItem.(chat.ToolMessageItem); ok {
-					if compactable, ok := nestedToolItem.(chat.Compactable); ok {
-						compactable.SetCompact(true)
+		for _, sessionID := range m.taskNodeChildSessionIDs(parentSessionID, childSessionID) {
+			nestedMsgs, err := m.com.App.Messages.List(context.Background(), sessionID)
+			if err != nil || len(nestedMsgs) == 0 {
+				continue
+			}
+
+			nestedMsgPtrs := make([]*message.Message, len(nestedMsgs))
+			for i := range nestedMsgs {
+				nestedMsgPtrs[i] = &nestedMsgs[i]
+			}
+			nestedToolResultMap := chat.BuildToolResultMap(nestedMsgPtrs)
+
+			for _, nestedMsg := range nestedMsgPtrs {
+				nestedItems := chat.ExtractMessageItems(m.com.Styles, nestedMsg, nestedToolResultMap)
+				for _, nestedItem := range nestedItems {
+					if nestedToolItem, ok := nestedItem.(chat.ToolMessageItem); ok {
+						if compactable, ok := nestedToolItem.(chat.Compactable); ok {
+							compactable.SetCompact(true)
+						}
+						nestedTools = append(nestedTools, nestedToolItem)
 					}
-					nestedTools = append(nestedTools, nestedToolItem)
 				}
 			}
 		}
@@ -1425,6 +1432,33 @@ func (m *UI) loadTaskNodeNestedTools(items []chat.MessageItem) {
 			taskNode.SetNestedTools(nestedTools)
 		}
 	}
+}
+
+func (m *UI) taskNodeChildSessionIDs(parentSessionID, childSessionID string) []string {
+	childSessionID = strings.TrimSpace(childSessionID)
+	if childSessionID == "" {
+		return nil
+	}
+
+	sessionIDs := []string{childSessionID}
+	if strings.TrimSpace(parentSessionID) == "" || m.com == nil || m.com.App == nil || m.com.App.Sessions == nil {
+		return sessionIDs
+	}
+
+	children, err := m.com.App.Sessions.ListChildren(context.Background(), parentSessionID)
+	if err != nil {
+		return sessionIDs
+	}
+
+	prefix := childSessionID + "::"
+	var retries []string
+	for _, child := range children {
+		if strings.HasPrefix(child.ID, prefix) {
+			retries = append(retries, child.ID)
+		}
+	}
+	slices.Reverse(retries)
+	return append(sessionIDs, retries...)
 }
 
 // appendSessionMessage appends a new message to the current session in the chat
@@ -1760,14 +1794,25 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 		}
 	}
 
-	// Find the parent agent tool item.
-	var agentItem chat.NestedToolContainer
+	// Resolve nested tool target: task node first for task graph sessions,
+	// otherwise fall back to the parent agent tool item.
+	var nestedTarget chat.NestedToolContainer
+	if tcPart, taskPart, found := strings.Cut(toolCallID, "::"); found && taskPart != "" {
+		baseTaskID, _, _ := strings.Cut(taskPart, "::")
+		nodeID := chat.TaskNodeItemID(tcPart, baseTaskID)
+		if nodeItem := m.chat.MessageItem(nodeID); nodeItem != nil {
+			if target, ok := nodeItem.(chat.NestedToolContainer); ok {
+				nestedTarget = target
+			}
+		}
+	}
+
 	resolveParentToolCallID := func(candidate string) string {
 		for candidate != "" {
 			if item := m.chat.MessageItem(candidate); item != nil {
 				if nested, ok := item.(chat.NestedToolContainer); ok {
 					if toolMessageItem, ok := item.(chat.ToolMessageItem); ok && toolMessageItem.ToolCall().ID == candidate {
-						agentItem = nested
+						nestedTarget = nested
 						return candidate
 					}
 				}
@@ -1780,16 +1825,15 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 		}
 		return ""
 	}
-	resolvedToolCallID := resolveParentToolCallID(toolCallID)
-	if resolvedToolCallID == "" {
+	if nestedTarget == nil && resolveParentToolCallID(toolCallID) == "" {
 		return nil
 	}
 
-	if agentItem == nil {
+	if nestedTarget == nil {
 		return nil
 	}
 
-	if statusItem, ok := agentItem.(chat.ChildSessionStatusSetter); ok && event.Payload.Role == message.Assistant {
+	if statusItem, ok := nestedTarget.(chat.ChildSessionStatusSetter); ok && event.Payload.Role == message.Assistant {
 		if statusText, isError, ok := childSessionStatus(event.Payload); ok {
 			if event.Type == pubsub.DeletedEvent {
 				statusItem.ClearChildSessionStatus()
@@ -1802,7 +1846,7 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 	}
 
 	// Get existing nested tools.
-	nestedTools := agentItem.NestedTools()
+	nestedTools := nestedTarget.NestedTools()
 
 	if event.Payload.Role == message.Assistant {
 		toolCallIDs := make(map[string]struct{}, len(event.Payload.ToolCalls()))
@@ -1814,13 +1858,13 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 
 	// Only process tool call and result updates below this point.
 	if len(event.Payload.ToolCalls()) == 0 && len(event.Payload.ToolResults()) == 0 {
-		agentItem.SetNestedTools(nestedTools)
+		nestedTarget.SetNestedTools(nestedTools)
 		m.chat.rebuildIDIndexMap()
 		return nil
 	}
 
 	if event.Type == pubsub.DeletedEvent {
-		agentItem.SetNestedTools(nestedTools)
+		nestedTarget.SetNestedTools(nestedTools)
 		m.chat.rebuildIDIndexMap()
 		return nil
 	}
@@ -1861,7 +1905,7 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 	}
 
 	// Update the agent item with the new nested tools.
-	agentItem.SetNestedTools(nestedTools)
+	nestedTarget.SetNestedTools(nestedTools)
 
 	// Rebuild the ID map so removed nested tools stop resolving to the parent.
 	m.chat.rebuildIDIndexMap()

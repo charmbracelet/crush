@@ -1796,19 +1796,12 @@ func (c *coordinator) runTaskGraphDirect(ctx context.Context, params taskGraphPa
 	runningTasks := 0
 	launchTask := func(task taskGraphTask) {
 		go func() {
-			mailboxBridge.MarkPending(task.ID)
-			stateMu.Lock()
-			var blockedBy string
-			for _, dependencyID := range task.DependsOn {
-				dependencyResult := results[dependencyID]
-				if dependencyResult.Status != message.ToolResultSubtaskStatusCompleted {
-					blockedBy = dependencyID
-					break
-				}
-			}
-			stateMu.Unlock()
-
+			finalized := false
 			finalize := func(result taskGraphNodeResult) {
+				if finalized {
+					return
+				}
+				finalized = true
 				mailboxBridge.MarkResult(task.ID, result.Status, result.Content)
 				stateMu.Lock()
 				results[task.ID] = result
@@ -1828,6 +1821,29 @@ func (c *coordinator) runTaskGraphDirect(ctx context.Context, params taskGraphPa
 				cond.Broadcast()
 				stateMu.Unlock()
 			}
+
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					slog.Error("Task graph task panicked", "task_id", task.ID, "panic", recovered)
+					finalize(taskGraphNodeResult{
+						Task:    task,
+						Status:  message.ToolResultSubtaskStatusFailed,
+						Content: fmt.Sprintf("Task %q panicked: %v", task.ID, recovered),
+					})
+				}
+			}()
+
+			mailboxBridge.MarkPending(task.ID)
+			stateMu.Lock()
+			var blockedBy string
+			for _, dependencyID := range task.DependsOn {
+				dependencyResult := results[dependencyID]
+				if dependencyResult.Status != message.ToolResultSubtaskStatusCompleted {
+					blockedBy = dependencyID
+					break
+				}
+			}
+			stateMu.Unlock()
 
 			if taskGraphFailFastEnabled(task, c.cfg.Config().Agents) && firstFailure.Load() {
 				finalize(taskGraphNodeResult{
@@ -1933,28 +1949,62 @@ func (c *coordinator) runTaskGraphDirect(ctx context.Context, params taskGraphPa
 					c.hookManager.RunSubagentStart(attemptCtx, taskGraphAttemptToolCallID(taskToolCallID, attempt), subagentType, params.SessionID)
 				}
 
-				response, runErr := c.runSubAgent(attemptCtx, subAgentParams{
-					Agent:             subAgent,
-					SessionID:         params.SessionID,
-					AgentMessageID:    params.AgentMessageID,
-					ParentMessageID:   params.AgentMessageID,
-					ToolCallID:        taskGraphAttemptToolCallID(taskToolCallID, attempt),
-					Prompt:            attemptPrompt,
-					SessionTitle:      formatSubagentSessionTitle(description, subagentType),
-					DelegationMailbox: params.ToolCallID,
-					AgentMemory:       agentCfg.Memory,
-					AgentIsolation:    agentCfg.Isolation,
-					AgentBackground:   agentCfg.Background,
-				})
+				taskRunCh := make(chan struct {
+					response fantasy.ToolResponse
+					err      error
+				}, 1)
+				go func() {
+					defer func() {
+						if recovered := recover(); recovered != nil {
+							taskRunCh <- struct {
+								response fantasy.ToolResponse
+								err      error
+							}{err: fmt.Errorf("task %q subagent panicked: %v", task.ID, recovered)}
+						}
+					}()
+					response, runErr := c.runSubAgent(attemptCtx, subAgentParams{
+						Agent:             subAgent,
+						SessionID:         params.SessionID,
+						AgentMessageID:    params.AgentMessageID,
+						ParentMessageID:   params.AgentMessageID,
+						ToolCallID:        taskGraphAttemptToolCallID(taskToolCallID, attempt),
+						Prompt:            attemptPrompt,
+						SessionTitle:      formatSubagentSessionTitle(description, subagentType),
+						DelegationMailbox: params.ToolCallID,
+						AgentMemory:       agentCfg.Memory,
+						AgentIsolation:    agentCfg.Isolation,
+						AgentBackground:   agentCfg.Background,
+					})
+					taskRunCh <- struct {
+						response fantasy.ToolResponse
+						err      error
+					}{response: response, err: runErr}
+				}()
+
+				var (
+					response fantasy.ToolResponse
+					runErr   error
+				)
+				select {
+				case run := <-taskRunCh:
+					response = run.response
+					runErr = run.err
+				case <-attemptCtx.Done():
+					runErr = taskGraphRuntimeBudgetCause(attemptCtx)
+				}
 				cancel()
 				if c.hookManager != nil {
 					c.hookManager.RunSubagentStop(ctx, taskGraphAttemptToolCallID(taskToolCallID, attempt), subagentType, params.SessionID)
 				}
 				if runErr != nil {
 					_ = toolruntime.ReportFailure(attemptCtx, "subagent_run", runErr)
+					status := message.ToolResultSubtaskStatusFailed
+					if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) || attemptCtx.Err() != nil {
+						status = message.ToolResultSubtaskStatusCanceled
+					}
 					result = taskGraphNodeResult{
 						Task:    task,
-						Status:  message.ToolResultSubtaskStatusFailed,
+						Status:  status,
 						Content: strings.TrimSpace(runErr.Error()),
 					}
 				} else {

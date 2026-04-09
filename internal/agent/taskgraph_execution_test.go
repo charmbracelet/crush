@@ -751,3 +751,38 @@ func TestTaskGraphPromptWithMailboxMessagesKeepsUTF8WhenTrimmed(t *testing.T) {
 	require.True(t, utf8.ValidString(prompt))
 	require.Contains(t, prompt, "…")
 }
+
+func TestRunTaskGraphDirect_RecoversFromTaskPanic(t *testing.T) {
+	env := testEnv(t)
+	cfg, err := config.Init(env.workingDir, "", false)
+	require.NoError(t, err)
+	coord := &coordinator{cfg: cfg, mailbox: mailbox.NewService(), sessions: env.sessions}
+
+	coord.subAgentFactory = func(_ context.Context, requestedType string) (SessionAgent, config.Agent, error) {
+		agent := &taskGraphMockSessionAgent{
+			model: Model{CatwalkCfg: catwalk.Model{DefaultMaxTokens: 1000}, ModelCfg: config.SelectedModel{Provider: "test-provider", Model: "test-model"}},
+			runFunc: func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+				return &fantasy.AgentResult{Response: fantasy.Response{Content: fantasy.ResponseContent{fantasy.TextContent{Text: "ok"}}}}, nil
+			},
+		}
+		return agent, config.Agent{ID: requestedType, Description: requestedType, Mode: config.AgentModeSubagent}, nil
+	}
+
+	coord.subAgentScheduler = func(_ context.Context, _ subAgentParams) (fantasy.ToolResponse, error) {
+		panic("scheduler crashed")
+	}
+
+	resp, err := coord.runTaskGraphDirect(t.Context(), taskGraphParams{
+		SessionID:      "session-1",
+		AgentMessageID: "msg-1",
+		ToolCallID:     "call-panic",
+		Tasks: []taskGraphTask{
+			{ID: "a", Prompt: "task-a", SubagentType: "general"},
+			{ID: "b", Prompt: "task-b", SubagentType: "general"},
+		},
+	})
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "a: failed")
+	require.Contains(t, resp.Content, "b: failed")
+}

@@ -273,11 +273,11 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	if !c.cfg.Config().Options.DisableAutoMemory {
 		memoryPrefetch = &MemoryPrefetch{}
 		bgModel := c.resolveBackgroundModel(ctx)
-		go func() {
-			recall := buildAutoRecallBlock(ctx, c.history, c.longTermMemory, bgModel, sessionID, prompt)
+		go func(prefetchCtx context.Context) {
+			recall := buildAutoRecallBlock(prefetchCtx, c.history, c.longTermMemory, bgModel, sessionID, prompt)
 			memoryPrefetch.Settle(recall)
 			slog.Debug("[PERF] coordinator: memory prefetch completed", "has_recall", recall != "", "session_id", sessionID)
-		}()
+		}(ctx)
 		slog.Debug("[PERF] coordinator: started memory prefetch", "session_id", sessionID)
 	}
 

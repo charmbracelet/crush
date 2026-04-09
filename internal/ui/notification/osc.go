@@ -7,14 +7,19 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/charmbracelet/x/ansi"
+
 	tea "charm.land/bubbletea/v2"
 )
 
 // notifySeq is an atomic counter for generating unique notification IDs.
 var notifySeq atomic.Uint64
 
-// OSCBackend sends desktop notifications using the OSC 99 (kitty) desktop
-// notification protocol.
+// OSCBackend sends desktop notifications using multiple OSC protocols to
+// maximize terminal compatibility. It emits OSC 99 (kitty), OSC 777
+// (rxvt-unicode/VTE), and OSC 9 (iTerm2/WezTerm/Windows Terminal) in a
+// single write. Terminals silently ignore escape sequences they don't
+// recognize, so this is safe.
 type OSCBackend struct {
 	icon []byte
 }
@@ -28,31 +33,40 @@ func NewOSCBackend(icon any) *OSCBackend {
 	return b
 }
 
-// Send returns a [tea.Raw] command that writes OSC 99 escape sequences to
-// the terminal.
+// Send returns a [tea.Raw] command that writes OSC escape sequences to the
+// terminal. It emits three protocols:
+//   - OSC 99: title, body, icon.
+//   - OSC 777: title, body.
+//   - OSC 9: single message string.
 func (b *OSCBackend) Send(n Notification) tea.Cmd {
 	slog.Debug("Sending OSC notification", "title", n.Title, "message", n.Message)
 
 	var sb strings.Builder
 	id := fmt.Sprintf("crush-%d", notifySeq.Add(1))
 
-	sb.WriteString(osc99(n.Title, "i="+id, "d=0", "p=title"))
+	// OSC 99
+	sb.WriteString(ansi.DesktopNotification(n.Title, "i="+id, "d=0", "p=title"))
 
 	if n.Message != "" {
-		sb.WriteString(osc99(n.Message, "i="+id, "d=0", "p=body"))
+		sb.WriteString(ansi.DesktopNotification(n.Message, "i="+id, "d=0", "p=body"))
 	}
 
 	if len(b.icon) > 0 {
 		encoded := base64.StdEncoding.EncodeToString(b.icon)
-		sb.WriteString(osc99(encoded, "i="+id, "d=0", "p=icon", "e=1"))
+		sb.WriteString(ansi.DesktopNotification(encoded, "i="+id, "d=0", "p=icon", "e=1"))
 	}
 
-	sb.WriteString(osc99("", "i="+id, "d=1"))
+	sb.WriteString(ansi.DesktopNotification("", "i="+id, "d=1"))
+
+	// OSC 777
+	sb.WriteString(ansi.URxvtExt("notify", n.Title, n.Message))
+
+	// OSC 9
+	if n.Message != "" {
+		sb.WriteString(ansi.Notify(n.Title + ": " + n.Message))
+	} else {
+		sb.WriteString(ansi.Notify(n.Title))
+	}
 
 	return tea.Raw(sb.String())
-}
-
-// osc99 builds a single OSC 99 escape sequence.
-func osc99(payload string, metadata ...string) string {
-	return fmt.Sprintf("\x1b]99;%s;%s\x07", strings.Join(metadata, ":"), payload)
 }

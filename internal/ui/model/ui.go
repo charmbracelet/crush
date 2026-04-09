@@ -1422,7 +1422,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 		if m.preThemeStyles == nil {
-			saved := *m.com.Styles
+			saved := m.com.Styles.Clone()
 			m.preThemeStyles = &saved
 		}
 		m.applyTheme(palette)

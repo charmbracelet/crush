@@ -63,6 +63,13 @@ func ThemeFromConfig(cfg *config.Config) styles.ThemePalette {
 	return palette
 }
 
+// StylesFromConfig resolves the user's theme from config and returns the
+// corresponding Styles. This is a convenience for non-TUI callers (spinners,
+// session output) that need themed colors without a full Common/workspace.
+func StylesFromConfig(cfg *config.Config) styles.Styles {
+	return styles.NewStyles(ThemeFromConfig(cfg))
+}
+
 // CenterRect returns a new [Rectangle] centered within the given area with the
 // specified width and height.
 func CenterRect(area uv.Rectangle, width, height int) uv.Rectangle {

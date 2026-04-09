@@ -1,6 +1,7 @@
 package styles
 
 import (
+	"encoding/json"
 	"image/color"
 	"strings"
 
@@ -502,37 +503,72 @@ func DefaultStyles() Styles {
 	return NewStyles(DefaultPalette())
 }
 
+// Clone returns a deep copy of the Styles struct, ensuring pointer fields
+// (particularly within ansi.StyleConfig) are not aliased. This is used to
+// safely snapshot styles before a theme preview.
+func (s *Styles) Clone() Styles {
+	clone := *s
+	clone.Markdown = cloneStyleConfig(s.Markdown)
+	clone.PlainMarkdown = cloneStyleConfig(s.PlainMarkdown)
+	return clone
+}
+
+// cloneStyleConfig deep-copies an ansi.StyleConfig by JSON round-tripping.
+// This ensures all *string, *bool, and *uint pointer fields are independent.
+func cloneStyleConfig(src ansi.StyleConfig) ansi.StyleConfig {
+	data, err := json.Marshal(src)
+	if err != nil {
+		return src
+	}
+	var dst ansi.StyleConfig
+	if err := json.Unmarshal(data, &dst); err != nil {
+		return src
+	}
+	return dst
+}
+
 // NewStyles constructs a complete Styles from the given theme palette.
 func NewStyles(palette ThemePalette) Styles {
-	p := palette.Colors.resolve()
+	c := &palette.Colors
 
 	var (
-		primary       = p.primary
-		secondary     = p.secondary
-		tertiary      = p.tertiary
-		bgBase        = p.bgBase
-		bgBaseLighter = p.bgBaseLighter
-		bgSubtle      = p.bgSubtle
-		bgOverlay     = p.bgOverlay
-		fgBase        = p.fgBase
-		fgMuted       = p.fgMuted
-		fgHalfMuted   = p.fgHalfMuted
-		fgSubtle      = p.fgSubtle
-		border        = p.border
-		borderFocus   = p.borderFocus
-		errorColor    = p.errorColor
-		warning       = p.warningColor
-		info          = p.infoColor
-		white         = p.white
-		blueLight     = p.blueLight
-		blue          = p.blue
-		blueDark      = p.blueDark
-		greenLight    = p.greenLight
-		green         = p.green
-		greenDark     = p.greenDark
-		red           = p.red
-		redDark       = p.redDark
-		yellow        = p.yellow
+		primary       = hexColor(c.Primary)
+		secondary     = hexColor(c.Secondary)
+		tertiary      = hexColor(c.Tertiary)
+		bgBase        = hexColor(c.BgBase)
+		bgBaseLighter = hexColor(c.BgBaseLighter)
+		bgSubtle      = hexColor(c.BgSubtle)
+		bgOverlay     = hexColor(c.BgOverlay)
+		fgBase        = hexColor(c.FgBase)
+		fgMuted       = hexColor(c.FgMuted)
+		fgHalfMuted   = hexColor(c.FgHalfMuted)
+		fgSubtle      = hexColor(c.FgSubtle)
+		border        = hexColor(c.Border)
+		borderFocus   = hexColor(c.BorderFocus)
+		errorColor    = hexColor(c.Error)
+		warning       = hexColor(c.Warning)
+		info          = hexColor(c.Info)
+		white         = hexColor(c.White)
+		blueLight     = hexColor(c.BlueLight)
+		blue          = hexColor(c.Blue)
+		blueDark      = hexColor(c.BlueDark)
+		greenLight    = hexColor(c.GreenLight)
+		green         = hexColor(c.Green)
+		greenDark     = hexColor(c.GreenDark)
+		red           = hexColor(c.Red)
+		redDark       = hexColor(c.RedDark)
+		yellow        = hexColor(c.Yellow)
+	)
+
+	// Compute diff colors, deriving sensible defaults from the palette.
+	dInsertFg, dInsertBg, dInsertBgLight, dDeleteFg, dDeleteBg, dDeleteBgLight := c.DiffDefaults()
+	var (
+		diffInsertFg      = hexColor(dInsertFg)
+		diffInsertBg      = hexColor(dInsertBg)
+		diffInsertBgLight = hexColor(dInsertBgLight)
+		diffDeleteFg      = hexColor(dDeleteFg)
+		diffDeleteBg      = hexColor(dDeleteBg)
+		diffDeleteBgLight = hexColor(dDeleteBgLight)
 	)
 
 	normalBorder := lipgloss.NormalBorder()
@@ -1021,23 +1057,23 @@ func NewStyles(palette ThemePalette) Styles {
 		},
 		InsertLine: diffview.LineStyle{
 			LineNumber: lipgloss.NewStyle().
-				Foreground(p.diffInsertFg).
-				Background(p.diffInsertBg),
+				Foreground(diffInsertFg).
+				Background(diffInsertBg),
 			Symbol: lipgloss.NewStyle().
-				Foreground(p.diffInsertFg).
-				Background(p.diffInsertBgLight),
+				Foreground(diffInsertFg).
+				Background(diffInsertBgLight),
 			Code: lipgloss.NewStyle().
-				Background(p.diffInsertBgLight),
+				Background(diffInsertBgLight),
 		},
 		DeleteLine: diffview.LineStyle{
 			LineNumber: lipgloss.NewStyle().
-				Foreground(p.diffDeleteFg).
-				Background(p.diffDeleteBg),
+				Foreground(diffDeleteFg).
+				Background(diffDeleteBg),
 			Symbol: lipgloss.NewStyle().
-				Foreground(p.diffDeleteFg).
-				Background(p.diffDeleteBgLight),
+				Foreground(diffDeleteFg).
+				Background(diffDeleteBgLight),
 			Code: lipgloss.NewStyle().
-				Background(p.diffDeleteBgLight),
+				Background(diffDeleteBgLight),
 		},
 	}
 

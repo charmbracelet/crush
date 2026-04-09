@@ -25,7 +25,6 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 )
@@ -101,6 +100,7 @@ func init() {
 type sessionServices struct {
 	sessions session.Service
 	messages message.Service
+	cfg      *config.Config
 }
 
 func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func(), error) {
@@ -111,10 +111,11 @@ func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func()
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to initialize config: %w", err)
 	}
+	cfgData := cfg.Config()
 	if dataDir == "" {
-		dataDir = cfg.Config().Options.DataDirectory
+		dataDir = cfgData.Options.DataDirectory
 	}
-	if shouldEnableMetrics(cfg.Config()) {
+	if shouldEnableMetrics(cfgData) {
 		event.Init()
 	}
 
@@ -127,6 +128,7 @@ func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func()
 	svc := &sessionServices{
 		sessions: session.NewService(queries, conn),
 		messages: message.NewService(queries),
+		cfg:      cfgData,
 	}
 	return ctx, svc, func() { conn.Close() }, nil
 }
@@ -167,8 +169,9 @@ func runSessionList(cmd *cobra.Command, _ []string) error {
 	w, cleanup, usingPager := sessionWriter(ctx, len(list))
 	defer cleanup()
 
-	hashStyle := lipgloss.NewStyle().Foreground(charmtone.Malibu)
-	dateStyle := lipgloss.NewStyle().Foreground(charmtone.Damson)
+	sty := stylesFromSessionConfig(svc.cfg)
+	hashStyle := lipgloss.NewStyle().Foreground(sty.Blue)
+	dateStyle := lipgloss.NewStyle().Foreground(sty.BlueDark)
 
 	width := sessionOutputWidth
 	if tw, _, err := term.GetSize(os.Stdout.Fd()); err == nil && tw > 0 {
@@ -280,7 +283,7 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 	if sessionShowJSON {
 		return outputSessionJSON(cmd.OutOrStdout(), sess, msgPtrs)
 	}
-	return outputSessionHuman(ctx, sess, msgPtrs)
+	return outputSessionHuman(ctx, svc.cfg, sess, msgPtrs)
 }
 
 func runSessionDelete(cmd *cobra.Command, args []string) error {
@@ -387,7 +390,7 @@ func runSessionLast(cmd *cobra.Command, _ []string) error {
 	if sessionLastJSON {
 		return outputSessionJSON(cmd.OutOrStdout(), sess, msgPtrs)
 	}
-	return outputSessionHuman(ctx, sess, msgPtrs)
+	return outputSessionHuman(ctx, svc.cfg, sess, msgPtrs)
 }
 
 const (
@@ -437,8 +440,8 @@ func outputSessionJSON(w io.Writer, sess session.Session, msgs []*message.Messag
 	return enc.Encode(output)
 }
 
-func outputSessionHuman(ctx context.Context, sess session.Session, msgs []*message.Message) error {
-	sty := styles.DefaultStyles()
+func outputSessionHuman(ctx context.Context, cfg *config.Config, sess session.Session, msgs []*message.Message) error {
+	sty := stylesFromSessionConfig(cfg)
 	toolResults := chat.BuildToolResultMap(msgs)
 
 	width := sessionOutputWidth
@@ -447,8 +450,8 @@ func outputSessionHuman(ctx context.Context, sess session.Session, msgs []*messa
 	}
 	contentWidth := min(width, sessionMaxContentWidth)
 
-	keyStyle := lipgloss.NewStyle().Foreground(charmtone.Damson)
-	valStyle := lipgloss.NewStyle().Foreground(charmtone.Malibu)
+	keyStyle := lipgloss.NewStyle().Foreground(sty.BlueDark)
+	valStyle := lipgloss.NewStyle().Foreground(sty.Blue)
 
 	hash := session.HashID(sess.ID)[:12]
 	created := time.Unix(sess.CreatedAt, 0).Format("Mon Jan 2 15:04:05 2006 -0700")
@@ -719,4 +722,15 @@ func convertParts(parts []message.ContentPart) []sessionShowPart {
 type sessionShowOutput struct {
 	Meta     sessionShowMeta      `json:"meta"`
 	Messages []sessionShowMessage `json:"messages"`
+}
+
+func stylesFromSessionConfig(cfg *config.Config) styles.Styles {
+	if cfg == nil || cfg.Options == nil || cfg.Options.TUI == nil || cfg.Options.TUI.Theme == "" {
+		return styles.DefaultStyles()
+	}
+	palette, err := styles.LoadTheme(cfg.Options.TUI.Theme)
+	if err != nil {
+		return styles.DefaultStyles()
+	}
+	return styles.NewStyles(palette)
 }

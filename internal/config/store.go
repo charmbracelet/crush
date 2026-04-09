@@ -224,18 +224,6 @@ func (s *ConfigStore) SetTransparentBackground(scope Scope, enabled bool) error 
 	return s.SetConfigField(scope, "options.tui.transparent", enabled)
 }
 
-// SetTheme sets the TUI theme and persists it.
-func (s *ConfigStore) SetTheme(scope Scope, theme string) error {
-	if s.config.Options == nil {
-		s.config.Options = &Options{}
-	}
-	if s.config.Options.TUI == nil {
-		s.config.Options.TUI = &TUIOptions{}
-	}
-	s.config.Options.TUI.Theme = theme
-	return s.SetConfigField(scope, "options.tui.theme", theme)
-}
-
 // SetProviderAPIKey sets the API key for a provider and persists it.
 func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey any) error {
 	var providerConfig ProviderConfig

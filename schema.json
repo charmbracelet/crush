@@ -3,6 +3,57 @@
   "$id": "https://github.com/charmbracelet/crush/internal/config/config",
   "$ref": "#/$defs/Config",
   "$defs": {
+    "Agent": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "disabled": {
+          "type": "boolean"
+        },
+        "model": {
+          "type": "string",
+          "enum": [
+            "large",
+            "small"
+          ],
+          "description": "The model type to use for this agent",
+          "default": "large"
+        },
+        "allowed_tools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "allowed_mcp": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "object"
+        },
+        "context_paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "model"
+      ]
+    },
     "Attribution": {
       "properties": {
         "trailer_style": {
@@ -90,40 +141,18 @@
           "$ref": "#/$defs/Tools",
           "description": "Tool configurations"
         },
-        "hooks": {
+        "agents": {
           "additionalProperties": {
-            "items": {
-              "$ref": "#/$defs/HookConfig"
-            },
-            "type": "array"
+            "$ref": "#/$defs/Agent"
           },
           "type": "object",
-          "description": "User-defined shell commands that fire on hook events (e.g. PreToolUse)"
-        }
-      },
-      "additionalProperties": false,
-      "type": "object"
-    },
-    "HookConfig": {
-      "properties": {
-        "matcher": {
-          "type": "string",
-          "description": "Regex pattern tested against the tool name. Empty means match all tools."
-        },
-        "command": {
-          "type": "string",
-          "description": "Shell command to execute when the hook fires"
-        },
-        "timeout": {
-          "type": "integer",
-          "description": "Timeout in seconds for the hook command",
-          "default": 30
+          "description": "Agent configurations"
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
-        "command"
+        "tools"
       ]
     },
     "LSPConfig": {
@@ -264,16 +293,6 @@
           "type": "array",
           "description": "List of tools from this MCP server to disable"
         },
-        "enabled_tools": {
-          "items": {
-            "type": "string",
-            "examples": [
-              "get-library-doc"
-            ]
-          },
-          "type": "array",
-          "description": "Allow list of tools from this MCP server"
-        },
         "timeout": {
           "type": "integer",
           "description": "Timeout in seconds for MCP server connections",
@@ -361,7 +380,8 @@
         "context_window",
         "default_max_tokens",
         "can_reason",
-        "supports_attachments"
+        "supports_attachments",
+        "options"
       ]
     },
     "ModelOptions": {
@@ -433,7 +453,7 @@
         },
         "data_directory": {
           "type": "string",
-          "description": "Directory for storing application data. Relative paths are resolved against the working directory; absolute paths are used as-is.",
+          "description": "Directory for storing application data (relative to working directory)",
           "default": ".crush",
           "examples": [
             ".crush"
@@ -457,7 +477,7 @@
         },
         "disable_default_providers": {
           "type": "boolean",
-          "description": "Ignore all default/embedded providers. When enabled, providers must be fully specified in the config file with base_url, models, and api_key - no merging with defaults occurs",
+          "description": "Ignore all default/embedded providers. When enabled",
           "default": false
         },
         "attribution": {
@@ -592,15 +612,11 @@
         },
         "extra_body": {
           "type": "object",
-          "description": "Additional fields to include in request bodies, only works with openai-compatible providers"
+          "description": "Additional fields to include in request bodies"
         },
         "provider_options": {
           "type": "object",
           "description": "Additional provider-specific options for this provider"
-        },
-        "flat_rate": {
-          "type": "boolean",
-          "description": "Flat-rate mode for this provider"
         },
         "models": {
           "items": {
@@ -718,7 +734,10 @@
         }
       },
       "additionalProperties": false,
-      "type": "object"
+      "type": "object",
+      "required": [
+        "completions"
+      ]
     },
     "Token": {
       "properties": {
@@ -786,7 +805,11 @@
         }
       },
       "additionalProperties": false,
-      "type": "object"
+      "type": "object",
+      "required": [
+        "ls",
+        "grep"
+      ]
     }
   }
 }

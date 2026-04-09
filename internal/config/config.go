@@ -257,6 +257,19 @@ type Options struct {
 	Progress                  *bool        `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
 	DisableNotifications      bool         `json:"disable_notifications,omitempty" jsonschema:"description=Disable desktop notifications,default=false"`
 	DisabledSkills            []string     `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
+
+	// RequestTimeout is the maximum time in minutes to wait for a provider
+	// response before canceling the request. A value of 0 disables the timeout.
+	RequestTimeout *int64 `json:"request_timeout,omitempty" jsonschema:"description=Maximum time in minutes to wait for a provider response before canceling,default=10,example=5,example=15"`
+}
+
+// RequestTimeoutDuration returns the request timeout as a time.Duration.
+// Returns 0 if no timeout is configured.
+func (o Options) RequestTimeoutDuration() time.Duration {
+	if o.RequestTimeout == nil || *o.RequestTimeout <= 0 {
+		return 0
+	}
+	return time.Duration(*o.RequestTimeout) * time.Minute
 }
 
 type MCPs map[string]MCPConfig

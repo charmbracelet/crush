@@ -868,15 +868,7 @@ func (t *TaskNodeItem) ToggleExpanded() bool {
 
 // HandleMouseClick implements MouseClickable.
 func (t *TaskNodeItem) HandleMouseClick(btn ansi.MouseButton, x, y int) bool {
-	if btn != ansi.MouseLeft {
-		return false
-	}
-	// Toggle expanded state if there are nested tools.
-	if len(t.nestedTools) > 0 {
-		t.ToggleExpanded()
-		return true
-	}
-	return false
+	return btn == ansi.MouseLeft
 }
 
 func (t *TaskNodeItem) SetFocused(focused bool) {

@@ -775,6 +775,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 					}
 				}
 
+				// Save the auto_recall content in case transform removes it.
+				var autoRecallContent string
+				if prefetchedRecallInjected && call.MemoryPrefetch != nil {
+					if result, settled := call.MemoryPrefetch.GetSettled(); settled && result != "" {
+						autoRecallContent = result
+					}
+				}
+
 				// Trigger messages.transform plugin on every step (including tool result steps).
 				// This allows plugins like morph_compact to compress messages after tool calls.
 				if len(prepared.Messages) > 0 {
@@ -792,6 +800,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 					} else if len(transformedMsgs.Messages) > 0 {
 						// Convert back to fantasy messages.
 						prepared.Messages, _ = a.preparePrompt(transformedMsgs.Messages)
+
+						// Re-inject auto_recall if transform removed it.
+						if autoRecallContent != "" && !hasAutoRecallInMessages(prepared.Messages) {
+							prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage("<auto_recall>\n" + autoRecallContent + "\n</auto_recall>")}, prepared.Messages...)
+							slog.Debug("[PERF] sessionAgent: re-injected auto_recall after transform", "session_id", call.SessionID)
+						}
+
 						newTokens := estimatePromptTokens(prepared.Messages, nil)
 						// If morph compression reduced tokens significantly, update session's
 						// LastPromptTokens so UI and auto-summarize checks use the correct value.
@@ -3302,11 +3317,31 @@ func buildSummaryPrompt(todos []session.Todo) string {
 	var sb strings.Builder
 	sb.WriteString("Provide a detailed summary of our conversation above.")
 	if len(todos) > 0 {
-		sb.WriteString("\n\n## Tracked Tasks\n\n")
-		for _, t := range todos {
-			fmt.Fprintf(&sb, "- [%s] %s\n", t.Status, t.Content)
+		sb.WriteString(" Include information about these pending todos:")
+		for i, todo := range todos {
+			if i > 0 {
+				sb.WriteString(",")
+			}
+			sb.WriteString(" ")
+			sb.WriteString(todo.Content)
 		}
-		sb.WriteString("\nInclude these tasks and their statuses in your summary.")
 	}
 	return sb.String()
+}
+
+// hasAutoRecallInMessages checks if any system message contains auto_recall.
+func hasAutoRecallInMessages(messages []fantasy.Message) bool {
+	for _, msg := range messages {
+		if msg.Role != fantasy.MessageRoleSystem {
+			continue
+		}
+		for _, part := range msg.Content {
+			if textPart, ok := part.(fantasy.TextPart); ok {
+				if strings.Contains(textPart.Text, "<auto_recall>") {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

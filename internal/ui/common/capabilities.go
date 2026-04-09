@@ -72,12 +72,12 @@ func QueryCmd(env uv.Environ) tea.Cmd {
 	var sb strings.Builder
 	sb.WriteString(ansi.RequestPrimaryDeviceAttributes)
 	sb.WriteString(ansi.QueryModifyOtherKeys)
+	sb.WriteString(ansi.RequestModeFocusEvent)
 
 	// Queries that should only be sent to "smart" normal terminals.
 	shouldQueryFor := shouldQueryCapabilities(env)
 	if shouldQueryFor {
 		sb.WriteString(ansi.RequestNameVersion)
-		sb.WriteString(ansi.RequestModeFocusEvent)
 		sb.WriteString(ansi.WindowOp(14)) // Window size in pixels
 		kittyReq := ansi.KittyGraphics([]byte("AAAA"), "i=31", "s=1", "v=1", "a=q", "t=d", "f=24")
 		if _, isTmux := env.LookupEnv("TMUX"); isTmux {

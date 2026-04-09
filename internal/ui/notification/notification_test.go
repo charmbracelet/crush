@@ -69,18 +69,17 @@ func TestOSCBackend_Send(t *testing.T) {
 		Message: "Agent's turn completed",
 	}))
 
-	// OSC 99 (kitty).
+	// OSC 99
 	require.Contains(t, s, "p=title")
 	require.Contains(t, s, "p=body")
 	require.Contains(t, s, "Crush is waiting...")
 	require.Contains(t, s, "Agent's turn completed")
 	require.NotContains(t, s, "p=icon")
 
-	// OSC 777 (VTE).
+	// OSC 777
 	require.Contains(t, s, "\x1b]777;notify;Crush is waiting...;Agent's turn completed\x07")
 
-	// OSC 9 (iTerm2/WezTerm).
-	require.Contains(t, s, "\x1b]9;Crush is waiting...: Agent's turn completed\x07")
+	require.NotContains(t, s, "\x1b]9;")
 }
 
 func TestOSCBackend_Send_TitleOnly(t *testing.T) {
@@ -98,8 +97,8 @@ func TestOSCBackend_Send_TitleOnly(t *testing.T) {
 	// OSC 777 — title with empty body.
 	require.Contains(t, s, "\x1b]777;notify;Crush is waiting...;\x07")
 
-	// OSC 9 — title only.
-	require.Contains(t, s, "\x1b]9;Crush is waiting...\x07")
+	// No OSC 9.
+	require.NotContains(t, s, "\x1b]9;")
 }
 
 func TestOSCBackend_Send_WithIcon(t *testing.T) {
@@ -122,6 +121,6 @@ func TestOSCBackend_Send_WithIcon(t *testing.T) {
 	// OSC 777.
 	require.Contains(t, s, "\x1b]777;notify;Test;With icon\x07")
 
-	// OSC 9.
-	require.Contains(t, s, "\x1b]9;Test: With icon\x07")
+	// No OSC 9.
+	require.NotContains(t, s, "\x1b]9;")
 }

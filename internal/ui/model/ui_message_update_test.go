@@ -197,6 +197,38 @@ func TestSetSessionMessagesSuppressesStaleLoadingStateForRestoredSession(t *test
 	require.NotContains(t, toolRendered, "Waiting for tool response...")
 }
 
+func TestStopStaleLoadingIndicatorsStopsAgentSpinnerWhenRunAlreadyEnded(t *testing.T) {
+	t.Parallel()
+
+	theme := styles.DefaultStyles()
+	com := &common.Common{Styles: &theme}
+	ui := &UI{
+		com:     com,
+		chat:    NewChat(com),
+		session: &session.Session{ID: "session-1"},
+	}
+
+	msg := message.Message{
+		ID:   "assistant-1",
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.ReasoningContent{Thinking: "still thinking"},
+		},
+	}
+	ui.chat.SetMessages(chat.ExtractMessageItems(ui.com.Styles, &msg, nil)...)
+
+	assistantItem := ui.chat.MessageItem("assistant-1")
+	require.NotNil(t, assistantItem)
+	before := ansi.Strip(assistantItem.Render(100))
+	require.Contains(t, before, "Thinking")
+
+	ui.stopStaleLoadingIndicators()
+
+	after := ansi.Strip(assistantItem.Render(100))
+	require.NotContains(t, after, "Thinking")
+	require.Contains(t, after, "still thinking")
+}
+
 func TestHandleChildSessionMessageShowsAndClearsRetryStatus(t *testing.T) {
 	t.Parallel()
 

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
@@ -57,6 +58,7 @@ type autoSummarizeTestAgent struct {
 	afterStep               func()
 	runErr                  error
 	runErrs                 []error
+	summaryErrs             []error
 	errAfterStep            bool
 	startToolBeforeRunError bool
 	toolCallID              string
@@ -76,6 +78,13 @@ func (a *autoSummarizeTestAgent) Stream(ctx context.Context, call fantasy.AgentS
 	isSummary := call.OnStepFinish == nil
 	if isSummary {
 		a.summaryCalls++
+		if len(a.summaryErrs) > 0 {
+			summaryErr := a.summaryErrs[0]
+			a.summaryErrs = a.summaryErrs[1:]
+			if summaryErr != nil {
+				return nil, summaryErr
+			}
+		}
 		if call.OnTextDelta != nil {
 			require.NoError(a.t, call.OnTextDelta("summary", "summary"))
 		}
@@ -178,6 +187,9 @@ func newAutoSummarizeTestSessionAgent(_ *testing.T, env fakeEnv, fakeAgent fanta
 		Messages:     messages,
 		AgentFactory: func(model fantasy.LanguageModel, opts ...fantasy.AgentOption) fantasy.Agent {
 			return fakeAgent
+		},
+		RetryWaitFunc: func(context.Context, time.Duration) error {
+			return nil
 		},
 	})
 }
@@ -484,6 +496,13 @@ func TestRunNormalSummarizeUsesSummarizePurpose(t *testing.T) {
 		t: t,
 		afterStep: func() {
 			_, createErr := env.messages.Create(t.Context(), testSession.ID, message.CreateMessageParams{
+				Role: message.Assistant,
+				Parts: []message.ContentPart{
+					message.ToolCall{ID: "tc-1", Name: "view", Input: "{}"},
+				},
+			})
+			require.NoError(t, createErr)
+			_, createErr = env.messages.Create(t.Context(), testSession.ID, message.CreateMessageParams{
 				Role: message.Tool,
 				Parts: []message.ContentPart{
 					message.ToolResult{ToolCallID: "tc-1", Name: "view", Content: strings.Repeat("x", 30000)},
@@ -568,4 +587,81 @@ func TestSummarizeSkipsAutoCompactForTinyHistory(t *testing.T) {
 	require.Contains(t, purposeTracker.messagePurposes, plugin.ChatTransformPurposeCollapse)
 	require.NotContains(t, purposeTracker.messagePurposes, plugin.ChatTransformPurposeAutoCompact)
 	require.NotContains(t, purposeTracker.messagePurposes, plugin.ChatTransformPurposePostCompact)
+}
+
+func TestSummarizeRetryableErrorRetriesAndSucceeds(t *testing.T) {
+	plugin.Reset()
+	t.Cleanup(plugin.Reset)
+
+	env := testEnv(t)
+	testSession, err := env.sessions.Create(t.Context(), "summarize retry success")
+	require.NoError(t, err)
+
+	_, err = env.messages.Create(t.Context(), testSession.ID, message.CreateMessageParams{
+		Role:  message.User,
+		Parts: []message.ContentPart{message.TextContent{Text: strings.Repeat("x", 4000)}},
+	})
+	require.NoError(t, err)
+
+	fakeAgent := &autoSummarizeTestAgent{
+		t:           t,
+		summaryErrs: []error{&fantasy.ProviderError{StatusCode: 503, Message: "service unavailable"}, nil},
+	}
+	sessionAgent := newAutoSummarizeTestSessionAgent(t, env, fakeAgent, env.messages, 10000)
+
+	err = sessionAgent.Summarize(t.Context(), testSession.ID, nil)
+	require.NoError(t, err)
+	require.Equal(t, 2, fakeAgent.summaryCalls)
+
+	msgs, err := env.messages.List(t.Context(), testSession.ID)
+	require.NoError(t, err)
+	var summaryMsg *message.Message
+	for i := range msgs {
+		if msgs[i].IsSummaryMessage {
+			summaryMsg = &msgs[i]
+		}
+	}
+	require.NotNil(t, summaryMsg)
+	require.Equal(t, message.FinishReasonEndTurn, summaryMsg.FinishReason())
+}
+
+func TestSummarizeRetryableErrorExhaustedMarksFailure(t *testing.T) {
+	plugin.Reset()
+	t.Cleanup(plugin.Reset)
+
+	env := testEnv(t)
+	testSession, err := env.sessions.Create(t.Context(), "summarize retry failed")
+	require.NoError(t, err)
+
+	_, err = env.messages.Create(t.Context(), testSession.ID, message.CreateMessageParams{
+		Role:  message.User,
+		Parts: []message.ContentPart{message.TextContent{Text: strings.Repeat("x", 4000)}},
+	})
+	require.NoError(t, err)
+
+	summaryErrs := make([]error, maxRetriableAttempts+1)
+	for i := range summaryErrs {
+		summaryErrs[i] = &fantasy.ProviderError{StatusCode: 503, Message: "service unavailable"}
+	}
+	fakeAgent := &autoSummarizeTestAgent{t: t, summaryErrs: summaryErrs}
+	sessionAgent := newAutoSummarizeTestSessionAgent(t, env, fakeAgent, env.messages, 10000)
+
+	start := time.Now()
+	err = sessionAgent.Summarize(t.Context(), testSession.ID, nil)
+	require.Error(t, err)
+	require.Equal(t, maxRetriableAttempts+1, fakeAgent.summaryCalls)
+	require.Less(t, time.Since(start), 2*time.Second)
+
+	msgs, listErr := env.messages.List(t.Context(), testSession.ID)
+	require.NoError(t, listErr)
+	var summaryMsg *message.Message
+	for i := range msgs {
+		if msgs[i].IsSummaryMessage {
+			summaryMsg = &msgs[i]
+		}
+	}
+	require.NotNil(t, summaryMsg)
+	require.Equal(t, message.FinishReasonError, summaryMsg.FinishReason())
+	require.Equal(t, "Summarization failed", summaryMsg.FinishPart().Message)
+	require.Contains(t, summaryMsg.FinishPart().Details, "Retried")
 }

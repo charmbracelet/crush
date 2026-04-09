@@ -68,6 +68,7 @@ const (
 
 	joinActiveRunMaxInjectedCalls  = 2
 	joinActiveRunPromptCharsBudget = 1_600
+	maxTextualToolProtocolRetries  = 2
 )
 
 var userAgent = fmt.Sprintf("Charm-Crush/%s (https://charm.land/crush)", version.Version)
@@ -80,6 +81,8 @@ var summaryPrompt []byte
 
 // Used to remove <think> tags from generated titles.
 var thinkTagRegex = regexp.MustCompile(`(?s)<think>.*?</think>`)
+
+var textualToolCallProtocolRegex = regexp.MustCompile(`(?is)<\|tool_calls_section_begin\|>.*?<\|tool_call_begin\|>.*?functions\.[a-zA-Z0-9_]+:\d+`)
 
 const autoResumePromptPrefix = "The previous session was interrupted because it got too long, the initial user request was: `"
 
@@ -328,6 +331,8 @@ type sessionAgent struct {
 	hookManager          *hooks.Manager
 	filetracker          filetracker.Service
 	checkpoint           checkpoint.Service
+	retryDelayFunc       func(attempt int, serverRetryAfter time.Duration) time.Duration
+	retryWaitFunc        func(context.Context, time.Duration) error
 
 	queueMu        sync.Mutex
 	messageQueue   *csync.Map[string, []SessionAgentCall]
@@ -361,6 +366,8 @@ type SessionAgentOptions struct {
 	HookManager          *hooks.Manager
 	Filetracker          filetracker.Service
 	Checkpoint           checkpoint.Service
+	RetryDelayFunc       func(attempt int, serverRetryAfter time.Duration) time.Duration
+	RetryWaitFunc        func(context.Context, time.Duration) error
 }
 
 type sessionAgentRuntimeConfig struct {
@@ -388,6 +395,14 @@ func NewSessionAgent(
 	if agentFactory == nil {
 		agentFactory = fantasy.NewAgent
 	}
+	retryDelayFunc := opts.RetryDelayFunc
+	if retryDelayFunc == nil {
+		retryDelayFunc = retryDelay
+	}
+	retryWaitFunc := opts.RetryWaitFunc
+	if retryWaitFunc == nil {
+		retryWaitFunc = waitForRetryDelay
+	}
 	return &sessionAgent{
 		largeModel:           csync.NewValue(opts.LargeModel),
 		smallModel:           csync.NewValue(opts.SmallModel),
@@ -410,6 +425,8 @@ func NewSessionAgent(
 		hookManager:          opts.HookManager,
 		filetracker:          opts.Filetracker,
 		checkpoint:           opts.Checkpoint,
+		retryDelayFunc:       retryDelayFunc,
+		retryWaitFunc:        retryWaitFunc,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, context.CancelFunc](),
 		pausedQueues:         csync.NewMap[string, bool](),
@@ -714,7 +731,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			Provider: providerCtx,
 			Message:  userMessage,
 		}); err != nil {
-			return nil, err
+			return nil, markNonRetriableError(err)
 		}
 
 		result, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
@@ -1106,9 +1123,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			Error:   err,
 		}); hookErr != nil {
 			if err != nil {
-				return nil, fmt.Errorf("stream error: %w; hook error: %w", err, hookErr)
+				return nil, fmt.Errorf("stream error: %w; hook error: %w", err, markNonRetriableError(hookErr))
 			}
-			return nil, hookErr
+			return nil, markNonRetriableError(hookErr)
 		}
 		return result, err
 	}
@@ -1116,8 +1133,55 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	providerOptions := call.ProviderOptions
 	var result *fantasy.AgentResult
 	var retryAttempt int
+	var textualToolProtocolRetryAttempt int
 	for {
 		result, err = runStream(providerOptions, retryAttempt == 0)
+
+		if err == nil && shouldRetryForTextualToolCallProtocol(currentAssistant) {
+			if cleanupErr := a.cleanupFailedAttempt(ctx, currentAssistant, currentStepToolMessageIDs); cleanupErr != nil {
+				return nil, cleanupErr
+			}
+			currentAssistant = nil
+			currentStepToolMessageIDs = nil
+			currentStepToolResultChars = 0
+			if completedStepsThisRun > 0 {
+				retryMsgs, getMsgsErr := a.getSessionMessages(ctx, currentSession)
+				if getMsgsErr != nil {
+					return nil, getMsgsErr
+				}
+				retryMsgs = excludeCurrentUserMessage(retryMsgs, call.UserMessage)
+				retryState, buildErr := a.buildChatRequestState(genCtx, chatRequestStateInput{
+					SessionID:      call.SessionID,
+					Agent:          "session",
+					Model:          largeModel,
+					Provider:       providerCtx,
+					Purpose:        requestPurpose,
+					Messages:       retryMsgs,
+					Message:        userMessage,
+					Attachments:    call.Attachments,
+					SystemPrompt:   systemPrompt,
+					PromptPrefix:   promptPrefix,
+					PermissionMode: currentSession.PermissionMode,
+				})
+				if buildErr != nil {
+					return nil, buildErr
+				}
+				requestState = retryState
+			}
+			if textualToolProtocolRetryAttempt >= maxTextualToolProtocolRetries {
+				err = fmt.Errorf("model emitted textual tool-call protocol instead of structured tool calls")
+				break
+			}
+			textualToolProtocolRetryAttempt++
+			slog.Warn("Retrying after model emitted textual tool-call protocol",
+				"session_id", call.SessionID,
+				"model", largeModel.ModelCfg.Model,
+				"provider", largeModel.ModelCfg.Provider,
+				"attempt", textualToolProtocolRetryAttempt,
+				"max_attempts", maxTextualToolProtocolRetries,
+			)
+			continue
+		}
 
 		if err != nil && isRetriableError(err) && !a.disableAutoSummarize {
 			observedPromptTokens := max(currentSession.LastInputTokens(), estimatedPromptTokens)
@@ -1151,7 +1215,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			}
 		}
 
-		// Check for retriable errors (429, 503, network issues).
+		if err != nil && (isContextWindowExceededError(err) || isContextLengthError(err)) {
+			break
+		}
+
 		if err != nil && isRetriableError(err) && retryAttempt < maxRetriableAttempts {
 			if completedStepsThisRun > 0 {
 				// Steps already completed — only clean up the current
@@ -1205,7 +1272,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				}
 			}
 			retryAttempt++
-			delay := retryDelay(retryAttempt, retryAfterFromError(err))
+			delay := a.retryDelayFunc(retryAttempt, retryAfterFromError(err))
 			slog.Warn("Retrying after transient error",
 				"error", err,
 				"attempt", retryAttempt,
@@ -1231,14 +1298,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				Provider: largeModel.ModelCfg.Provider,
 			})
 
-			select {
-			case <-ctx.Done():
+			waitErr := a.retryWaitFunc(ctx, delay)
+			if waitErr != nil {
 				// Clean up the retry message before returning.
 				if retryMsgErr == nil {
 					_ = a.messages.Delete(ctx, retryMsg.ID)
 				}
-				return nil, ctx.Err()
-			case <-time.After(delay):
+				return nil, waitErr
 			}
 
 			// Remove the temporary retry message before the next attempt.
@@ -1934,43 +2000,52 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		}
 	}
 
-	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
-		Prompt:          summaryPromptText,
-		Messages:        aiMsgs,
-		ProviderOptions: opts,
-		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
-			// Summarization is always agent-initiated (never billable).
-			callContext = copilot.ContextWithInitiatorType(callContext, copilot.InitiatorAgent)
-			prepared.Messages = options.Messages
-			if systemPromptPrefix != "" {
-				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(systemPromptPrefix)}, prepared.Messages...)
-			}
-			return callContext, prepared, nil
-		},
-		OnReasoningDelta: func(id string, text string) error {
-			summaryMessage.AppendReasoningContent(text)
-			return a.messages.Update(genCtx, summaryMessage)
-		},
-		OnReasoningEnd: func(id string, reasoning fantasy.ReasoningContent) error {
-			// Handle anthropic signature.
-			if anthropicData, ok := reasoning.ProviderMetadata["anthropic"]; ok {
-				if signature, ok := anthropicData.(*anthropic.ReasoningOptionMetadata); ok && signature.Signature != "" {
-					summaryMessage.AppendReasoningSignature(signature.Signature)
+	summaryStream := func() (*fantasy.AgentResult, error) {
+		return agent.Stream(genCtx, fantasy.AgentStreamCall{
+			Prompt:          summaryPromptText,
+			Messages:        aiMsgs,
+			ProviderOptions: opts,
+			PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
+				callContext = copilot.ContextWithInitiatorType(callContext, copilot.InitiatorAgent)
+				prepared.Messages = options.Messages
+				if systemPromptPrefix != "" {
+					prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(systemPromptPrefix)}, prepared.Messages...)
 				}
-			}
-			summaryMessage.FinishThinking()
-			return a.messages.Update(genCtx, summaryMessage)
-		},
-		OnTextDelta: func(id, text string) error {
-			summaryMessage.AppendContent(text)
-			return a.messages.Update(genCtx, summaryMessage)
-		},
-	})
-	if err != nil {
+				return callContext, prepared, nil
+			},
+			OnReasoningDelta: func(id string, text string) error {
+				summaryMessage.AppendReasoningContent(text)
+				return a.messages.Update(genCtx, summaryMessage)
+			},
+			OnReasoningEnd: func(id string, reasoning fantasy.ReasoningContent) error {
+				if anthropicData, ok := reasoning.ProviderMetadata["anthropic"]; ok {
+					if signature, ok := anthropicData.(*anthropic.ReasoningOptionMetadata); ok && signature.Signature != "" {
+						summaryMessage.AppendReasoningSignature(signature.Signature)
+					}
+				}
+				summaryMessage.FinishThinking()
+				return a.messages.Update(genCtx, summaryMessage)
+			},
+			OnTextDelta: func(id, text string) error {
+				summaryMessage.AppendContent(text)
+				return a.messages.Update(genCtx, summaryMessage)
+			},
+		})
+	}
+
+	var (
+		resp         *fantasy.AgentResult
+		summaryRetry int
+	)
+	for {
+		resp, err = summaryStream()
+		if err == nil {
+			break
+		}
+
 		isCancelErr := errors.Is(err, context.Canceled)
 		isContextLengthErr := isContextLengthError(err)
 		if isCancelErr || isContextLengthErr {
-			// User cancelled or context too long - remove the summary message.
 			deleteErr := a.messages.Delete(ctx, summaryMessage.ID)
 			if isContextLengthErr {
 				if deleteErr != nil {
@@ -1980,7 +2055,42 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 			}
 			return deleteErr
 		}
-		return err
+
+		if !isRetriableError(err) || summaryRetry >= maxRetriableAttempts {
+			summaryMessage.FinishThinking()
+			summaryMessage.AddFinish(
+				message.FinishReasonError,
+				"Summarization failed",
+				withRetryFailureDetails(err.Error(), summaryRetry),
+			)
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			updateErr := a.messages.Update(cleanupCtx, summaryMessage)
+			cleanupCancel()
+			if updateErr != nil {
+				slog.Warn("Failed to persist summary failure message", "error", updateErr, "session_id", sessionID, "message_id", summaryMessage.ID)
+				if deleteErr := a.messages.Delete(context.Background(), summaryMessage.ID); deleteErr != nil {
+					slog.Warn("Failed to delete summary message after persist failure", "error", deleteErr, "session_id", sessionID, "message_id", summaryMessage.ID)
+				}
+			}
+			return err
+		}
+
+		summaryRetry++
+		delay := a.retryDelayFunc(summaryRetry, retryAfterFromError(err))
+		slog.Warn("Retrying summarization after transient error",
+			"error", err,
+			"attempt", summaryRetry,
+			"delay", delay,
+			"session_id", sessionID,
+		)
+		summaryMessage.Parts = nil
+		if resetErr := a.messages.Update(genCtx, summaryMessage); resetErr != nil {
+			slog.Warn("Failed to reset summary message before retry", "error", resetErr, "session_id", sessionID, "message_id", summaryMessage.ID)
+			return resetErr
+		}
+		if waitErr := a.retryWaitFunc(genCtx, delay); waitErr != nil {
+			return waitErr
+		}
 	}
 
 	summaryMessage.AddFinish(message.FinishReasonEndTurn, "", "")
@@ -2050,10 +2160,17 @@ func (a *sessionAgent) createUserMessage(ctx context.Context, call SessionAgentC
 
 func (a *sessionAgent) preparePrompt(msgs []message.Message, attachments ...message.Attachment) ([]fantasy.Message, []fantasy.FilePart) {
 	var history []fantasy.Message
-	// Build a set of tool-call IDs that already have a tool-result so we can
-	// detect orphaned tool_use blocks below.
+
+	// Build sets of tool-call and tool-result IDs so we can reconcile stale
+	// history before it reaches the provider.
+	toolCallIDs := make(map[string]bool)
 	toolResultIDs := make(map[string]bool)
 	for _, m := range msgs {
+		if m.Role == message.Assistant {
+			for _, tc := range m.ToolCalls() {
+				toolCallIDs[tc.ID] = true
+			}
+		}
 		if m.Role == message.Tool {
 			for _, tr := range m.ToolResults() {
 				toolResultIDs[tr.ToolCallID] = true
@@ -2070,6 +2187,33 @@ func (a *sessionAgent) preparePrompt(msgs []message.Message, attachments ...mess
 		if m.Role == message.Assistant && len(m.ToolCalls()) == 0 && m.Content().Text == "" && m.ReasoningContent().String() == "" {
 			continue
 		}
+
+		if m.Role == message.Tool {
+			toolResults := m.ToolResults()
+			if len(toolResults) == 0 {
+				continue
+			}
+			filteredToolResults := make([]message.ToolResult, 0, len(toolResults))
+			for _, tr := range toolResults {
+				if toolCallIDs[tr.ToolCallID] {
+					filteredToolResults = append(filteredToolResults, tr)
+					continue
+				}
+				slog.Warn("Dropping orphaned tool_result without matching tool_call",
+					"tool_call_id", tr.ToolCallID,
+					"tool_name", tr.Name,
+				)
+			}
+			if len(filteredToolResults) == 0 {
+				continue
+			}
+			filtered := m
+			filtered.Parts = nil
+			filtered.SetToolResults(filteredToolResults)
+			history = append(history, filtered.ToAIMessage()...)
+			continue
+		}
+
 		history = append(history, m.ToAIMessage()...)
 
 		// Defensive: if this assistant message contains tool_use blocks
@@ -2156,6 +2300,33 @@ func shouldRetryWithoutAnthropicThinking(err error, opts fantasy.ProviderOptions
 	hasMissing := strings.Contains(msg, "missing") || strings.Contains(msg, "required")
 	isToolContext := strings.Contains(msg, "tool call") || strings.Contains(msg, "tool_use") || strings.Contains(msg, "tool use")
 	return hasThinking && hasReasoning && hasMissing && isToolContext
+}
+
+func hasTextualToolCallProtocol(text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return false
+	}
+	if !strings.Contains(text, "<|tool_calls_section_begin|>") || !strings.Contains(text, "<|tool_call_begin|>") {
+		return false
+	}
+	if !strings.Contains(text, "functions.") {
+		return false
+	}
+	return textualToolCallProtocolRegex.MatchString(text)
+}
+
+func shouldRetryForTextualToolCallProtocol(assistant *message.Message) bool {
+	if assistant == nil {
+		return false
+	}
+	if len(assistant.ToolCalls()) != 0 {
+		return false
+	}
+	if reason := assistant.FinishReason(); reason != message.FinishReasonEndTurn && reason != message.FinishReasonUnknown {
+		return false
+	}
+	return hasTextualToolCallProtocol(assistant.Content().Text)
 }
 
 func (a *sessionAgent) cleanupFailedAttempt(ctx context.Context, assistant *message.Message, toolMessageIDs []string) error {

@@ -1575,3 +1575,259 @@ func TestRunWaitsForTitleGenerationBeforeDequeuing(t *testing.T) {
 		return hasUserPrompt("queued later")
 	}, time.Second, 10*time.Millisecond)
 }
+
+type textualToolProtocolTestAgent struct {
+	t          *testing.T
+	mu         sync.Mutex
+	calls      int
+	alwaysText bool
+}
+
+func (a *textualToolProtocolTestAgent) Generate(context.Context, fantasy.AgentCall) (*fantasy.AgentResult, error) {
+	return &fantasy.AgentResult{}, nil
+}
+
+func (a *textualToolProtocolTestAgent) Stream(ctx context.Context, call fantasy.AgentStreamCall) (*fantasy.AgentResult, error) {
+	if call.PrepareStep != nil {
+		_, _, err := call.PrepareStep(ctx, fantasy.PrepareStepFunctionOptions{Messages: call.Messages})
+		require.NoError(a.t, err)
+	}
+
+	a.mu.Lock()
+	a.calls++
+	attempt := a.calls
+	a.mu.Unlock()
+
+	if attempt == 1 || a.alwaysText {
+		if call.OnTextDelta != nil {
+			require.NoError(a.t, call.OnTextDelta(
+				"assistant",
+				"<|tool_calls_section_begin|><|tool_call_begin|>functions.view:15<|tool_call_argument_begin|>{\"file_path\":\"main.go\"}<|tool_call_end|><|tool_calls_section_end|>",
+			))
+		}
+		if call.OnStepFinish != nil {
+			require.NoError(a.t, call.OnStepFinish(fantasy.StepResult{
+				Response: fantasy.Response{FinishReason: fantasy.FinishReasonStop},
+			}))
+		}
+		return &fantasy.AgentResult{}, nil
+	}
+
+	if call.OnToolCall != nil {
+		require.NoError(a.t, call.OnToolCall(fantasy.ToolCallContent{
+			ToolCallID: "call-recovered",
+			ToolName:   agenttools.ViewToolName,
+			Input:      `{"file_path":"main.go"}`,
+		}))
+	}
+	if call.OnToolResult != nil {
+		require.NoError(a.t, call.OnToolResult(fantasy.ToolResultContent{
+			ToolCallID: "call-recovered",
+			ToolName:   agenttools.ViewToolName,
+			Result: fantasy.ToolResultOutputContentText{
+				Text: "module example.com/recovered",
+			},
+		}))
+	}
+	if call.OnStepFinish != nil {
+		require.NoError(a.t, call.OnStepFinish(fantasy.StepResult{
+			Response: fantasy.Response{FinishReason: fantasy.FinishReasonToolCalls},
+		}))
+	}
+	return &fantasy.AgentResult{}, nil
+}
+
+func (a *textualToolProtocolTestAgent) callCount() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.calls
+}
+
+func TestRunRecoversFromTextualToolCallProtocol(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	testSession, err := env.sessions.Create(t.Context(), "Text protocol recover")
+	require.NoError(t, err)
+
+	model := Model{
+		CatwalkCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 1000},
+		ModelCfg:   config.SelectedModel{Model: "test", Provider: "test"},
+	}
+
+	testAgent := &textualToolProtocolTestAgent{t: t}
+	sessAgent := NewSessionAgent(SessionAgentOptions{
+		LargeModel:           model,
+		SmallModel:           model,
+		SystemPrompt:         "",
+		WorkingDir:           env.workingDir,
+		IsYolo:               true,
+		Sessions:             env.sessions,
+		Messages:             env.messages,
+		DisableAutoSummarize: true,
+		AgentFactory: func(fantasy.LanguageModel, ...fantasy.AgentOption) fantasy.Agent {
+			return testAgent
+		},
+	}).(*sessionAgent)
+
+	_, err = sessAgent.Run(t.Context(), SessionAgentCall{
+		SessionID:       testSession.ID,
+		Prompt:          "please inspect and fix",
+		MaxOutputTokens: 1000,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, testAgent.callCount())
+
+	msgs, err := env.messages.List(t.Context(), testSession.ID)
+	require.NoError(t, err)
+
+	foundRecoveredToolResult := false
+	for _, msg := range msgs {
+		if msg.Role == message.Assistant {
+			require.NotContains(t, msg.Content().Text, "<|tool_calls_section_begin|>")
+		}
+		if msg.Role != message.Tool {
+			continue
+		}
+		for _, tr := range msg.ToolResults() {
+			if tr.ToolCallID == "call-recovered" {
+				foundRecoveredToolResult = true
+				require.False(t, tr.IsError)
+				require.Contains(t, tr.Content, "module example.com/recovered")
+			}
+		}
+	}
+	require.True(t, foundRecoveredToolResult)
+}
+
+func TestRunFailsAfterRepeatedTextualToolCallProtocol(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	testSession, err := env.sessions.Create(t.Context(), "Text protocol fail")
+	require.NoError(t, err)
+
+	model := Model{
+		CatwalkCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 1000},
+		ModelCfg:   config.SelectedModel{Model: "test", Provider: "test"},
+	}
+
+	testAgent := &textualToolProtocolTestAgent{t: t, alwaysText: true}
+	sessAgent := NewSessionAgent(SessionAgentOptions{
+		LargeModel:           model,
+		SmallModel:           model,
+		SystemPrompt:         "",
+		WorkingDir:           env.workingDir,
+		IsYolo:               true,
+		Sessions:             env.sessions,
+		Messages:             env.messages,
+		DisableAutoSummarize: true,
+		AgentFactory: func(fantasy.LanguageModel, ...fantasy.AgentOption) fantasy.Agent {
+			return testAgent
+		},
+	}).(*sessionAgent)
+
+	_, err = sessAgent.Run(t.Context(), SessionAgentCall{
+		SessionID:       testSession.ID,
+		Prompt:          "please inspect and fix",
+		MaxOutputTokens: 1000,
+	})
+	require.ErrorContains(t, err, "model emitted textual tool-call protocol instead of structured tool calls")
+	require.Equal(t, maxTextualToolProtocolRetries+1, testAgent.callCount())
+
+	msgs, err := env.messages.List(t.Context(), testSession.ID)
+	require.NoError(t, err)
+
+	assistantCount := 0
+	for _, msg := range msgs {
+		if msg.Role == message.Assistant {
+			assistantCount++
+			require.NotContains(t, msg.Content().Text, "<|tool_calls_section_begin|>")
+		}
+		if msg.Role == message.Tool {
+			for _, tr := range msg.ToolResults() {
+				require.NotEqual(t, "call-recovered", tr.ToolCallID)
+			}
+		}
+	}
+	require.Equal(t, 0, assistantCount)
+}
+
+func TestPreparePromptDropsOrphanedToolResultsWithoutMatchingToolCall(t *testing.T) {
+	t.Parallel()
+
+	a := &sessionAgent{}
+	history, _ := a.preparePrompt([]message.Message{
+		{
+			ID:   "assistant-1",
+			Role: message.Assistant,
+			Parts: []message.ContentPart{
+				message.ToolCall{ID: "call-1", Name: agenttools.ViewToolName, Input: `{"file_path":"main.go"}`, Finished: true},
+			},
+		},
+		{
+			ID:   "tool-valid",
+			Role: message.Tool,
+			Parts: []message.ContentPart{
+				message.ToolResult{ToolCallID: "call-1", Name: agenttools.ViewToolName, Content: "ok"},
+			},
+		},
+		{
+			ID:   "tool-orphan",
+			Role: message.Tool,
+			Parts: []message.ContentPart{
+				message.ToolResult{ToolCallID: "call-orphan", Name: agenttools.ViewToolName, Content: "orphan"},
+			},
+		},
+	})
+
+	var toolResultIDs []string
+	for _, msg := range history {
+		if msg.Role != fantasy.MessageRoleTool {
+			continue
+		}
+		for _, part := range msg.Content {
+			toolResultPart, ok := part.(fantasy.ToolResultPart)
+			if !ok {
+				continue
+			}
+			toolResultIDs = append(toolResultIDs, toolResultPart.ToolCallID)
+		}
+	}
+
+	require.Contains(t, toolResultIDs, "call-1")
+	require.NotContains(t, toolResultIDs, "call-orphan")
+}
+
+func TestPreparePromptInjectsSyntheticToolResultForMissingToolCallResult(t *testing.T) {
+	t.Parallel()
+
+	a := &sessionAgent{}
+	history, _ := a.preparePrompt([]message.Message{
+		{
+			ID:   "assistant-1",
+			Role: message.Assistant,
+			Parts: []message.ContentPart{
+				message.ToolCall{ID: "call-missing", Name: agenttools.ViewToolName, Input: `{"file_path":"main.go"}`, Finished: true},
+			},
+		},
+	})
+
+	foundSynthetic := false
+	for _, msg := range history {
+		if msg.Role != fantasy.MessageRoleTool {
+			continue
+		}
+		for _, part := range msg.Content {
+			toolResultPart, ok := part.(fantasy.ToolResultPart)
+			if !ok || toolResultPart.ToolCallID != "call-missing" {
+				continue
+			}
+			errOutput, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentError](toolResultPart.Output)
+			require.True(t, ok)
+			require.ErrorContains(t, errOutput.Error, "tool execution was interrupted")
+			foundSynthetic = true
+		}
+	}
+	require.True(t, foundSynthetic)
+}

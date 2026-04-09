@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"math/rand/v2"
 	"strings"
@@ -33,88 +34,86 @@ const (
 	retryMaxDelay = 48 * time.Second
 )
 
-// isRetriableError reports whether the error is a transient error that
-// should be retried with exponential backoff. This includes:
-//   - 429 Too Many Requests (rate limiting)
-//   - 503 Service Unavailable (temporary overload)
-//   - Network-level errors that may be transient
+// isRetriableError reports whether the error should be retried with exponential
+// backoff. Uses a "default retriable" strategy: only explicitly non-retriable
+// errors return false, everything else is retriable.
+//
+// Non-retriable errors include:
+//   - 400 Bad Request (malformed request)
+//   - 401 Unauthorized (authentication failed)
+//   - 403 Forbidden (permission denied)
+//   - 404 Not Found (resource doesn't exist)
+//   - Context cancellation (user aborted)
+type nonRetriableError struct {
+	err error
+}
+
+func (e *nonRetriableError) Error() string {
+	return e.err.Error()
+}
+
+func (e *nonRetriableError) Unwrap() error {
+	return e.err
+}
+
+func markNonRetriableError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &nonRetriableError{err: err}
+}
+
 func isRetriableError(err error) bool {
 	if err == nil {
 		return false
 	}
 
-	var providerErr *fantasy.ProviderError
-	if errors.As(err, &providerErr) {
-		// 429: Rate limit exceeded - always retriable.
-		if providerErr.StatusCode == 429 {
-			return true
-		}
-
-		// 503: Service unavailable - retriable.
-		if providerErr.StatusCode == 503 {
-			return true
-		}
-
-		// 502/504: Gateway errors - often transient.
-		if providerErr.StatusCode == 502 || providerErr.StatusCode == 504 {
-			return true
-		}
-
-		// Check message for rate-limit indicators even with other status codes.
-		msg := strings.ToLower(providerErr.Message)
-		if strings.Contains(msg, "rate limit") ||
-			strings.Contains(msg, "too many requests") ||
-			strings.Contains(msg, "overloaded") ||
-			strings.Contains(msg, "accounts exhausted") ||
-			strings.Contains(msg, "temporarily unavailable") {
-			return true
-		}
-	}
-
-	// Fallback: check the full error string for HTTP status codes that
-	// indicate transient failures. This catches errors that are not
-	// wrapped as *fantasy.ProviderError (e.g. *fantasy.Error or raw
-	// HTTP client errors).
-	// Use descriptive strings instead of bare numbers to avoid false positives
-	// with port numbers, request IDs, or other numeric content.
-	errStr := strings.ToLower(err.Error())
-	if strings.Contains(errStr, "service unavailable") ||
-		strings.Contains(errStr, "bad gateway") ||
-		strings.Contains(errStr, "gateway timeout") ||
-		strings.Contains(errStr, "too many requests") ||
-		strings.Contains(errStr, "rate limit") ||
-		strings.Contains(errStr, "overloaded") ||
-		strings.Contains(errStr, "accounts exhausted") ||
-		strings.Contains(errStr, "status: 503") ||
-		strings.Contains(errStr, "status: 502") ||
-		strings.Contains(errStr, "status: 504") ||
-		strings.Contains(errStr, "status: 429") ||
-		strings.Contains(errStr, "http 503") ||
-		strings.Contains(errStr, "http 502") ||
-		strings.Contains(errStr, "http 504") ||
-		strings.Contains(errStr, "http 429") {
-		return true
-	}
-
-	return isTransientNetworkError(err)
-}
-
-// isTransientNetworkError reports whether a non-ProviderError is a transient
-// network issue that should be retried.
-func isTransientNetworkError(err error) bool {
-	if err == nil {
+	var nonRetriable *nonRetriableError
+	if errors.As(err, &nonRetriable) {
 		return false
 	}
 
-	// Check for common transient network errors.
+	if isToolResultProtocolMismatchError(err.Error()) {
+		return true
+	}
+
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+
+	var providerErr *fantasy.ProviderError
+	if errors.As(err, &providerErr) {
+		if isToolResultProtocolMismatchError(providerErr.Message) {
+			return true
+		}
+		if providerErr.StatusCode >= 400 && providerErr.StatusCode < 500 {
+			if providerErr.StatusCode == 429 {
+				return true
+			}
+			return false
+		}
+		return true
+	}
+
 	errStr := strings.ToLower(err.Error())
-	return strings.Contains(errStr, "timeout") ||
-		strings.Contains(errStr, "connection reset") ||
-		strings.Contains(errStr, "connection refused") ||
-		strings.Contains(errStr, "temporary failure") ||
-		strings.Contains(errStr, "unexpected eof") ||
-		strings.HasSuffix(errStr, "eof") ||
-		strings.Contains(errStr, "broken pipe")
+	if strings.Contains(errStr, "status: 400") ||
+		strings.Contains(errStr, "status: 401") ||
+		strings.Contains(errStr, "status: 403") ||
+		strings.Contains(errStr, "status: 404") ||
+		strings.Contains(errStr, "http 400") ||
+		strings.Contains(errStr, "http 401") ||
+		strings.Contains(errStr, "http 403") ||
+		strings.Contains(errStr, "http 404") ||
+		strings.Contains(errStr, "bad request") ||
+		strings.Contains(errStr, "unauthorized") ||
+		strings.Contains(errStr, "forbidden") ||
+		strings.Contains(errStr, "not found") ||
+		strings.Contains(errStr, "context canceled") ||
+		strings.Contains(errStr, "context deadline exceeded") {
+		return false
+	}
+
+	return true
 }
 
 // retryDelay calculates the delay for the given attempt number using
@@ -125,6 +124,26 @@ func isTransientNetworkError(err error) bool {
 //
 // If serverRetryAfter is positive (from a Retry-After header), the
 // returned delay is max(exponentialBackoff, serverRetryAfter).
+func isToolResultProtocolMismatchError(msg string) bool {
+	msg = strings.ToLower(strings.TrimSpace(msg))
+	if msg == "" {
+		return false
+	}
+	if strings.Contains(msg, "no tool call found for function call output") {
+		return true
+	}
+	if strings.Contains(msg, "no tool call found for tool call output") {
+		return true
+	}
+	if strings.Contains(msg, "unexpected `tool_use_id` found in `tool_result` blocks") {
+		return true
+	}
+	if strings.Contains(msg, "unexpected tool_use_id found in tool_result blocks") {
+		return true
+	}
+	return false
+}
+
 func retryDelay(attempt int, serverRetryAfter time.Duration) time.Duration {
 	delay := retryBaseDelay
 	for i := 1; i < attempt; i++ {
@@ -139,6 +158,21 @@ func retryDelay(attempt int, serverRetryAfter time.Duration) time.Duration {
 		return serverRetryAfter
 	}
 	return backoff
+}
+
+func waitForRetryDelay(ctx context.Context, delay time.Duration) error {
+	if delay <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // addJitter adds ±25% random jitter to a duration so that concurrent

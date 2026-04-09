@@ -513,7 +513,7 @@ func TestRunTaskGraphDirect_TimesOutTaskAttempts(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.True(t, resp.IsError)
-	require.Contains(t, resp.Content, "a: failed")
+	require.Contains(t, resp.Content, "a: canceled")
 }
 
 func TestRunTaskGraphDirect_FailFastStopsLaterLayers(t *testing.T) {

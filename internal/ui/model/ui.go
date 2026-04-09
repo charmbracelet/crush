@@ -769,6 +769,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.todoIsSpinning && !m.isAgentBusy() {
 			m.todoIsSpinning = false
 		}
+		if !m.hasLiveSessionActivity() {
+			m.stopStaleLoadingIndicators()
+		}
 		// there is a number of things that could change the pills here so we want to re-render
 		m.renderPills()
 	case pubsub.Event[toolruntime.State]:
@@ -1900,6 +1903,14 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 			if nestedTool.ToolCall().ID == tr.ToolCallID {
 				nestedTool.SetResult(&tr)
 				break
+			}
+		}
+	}
+
+	if !m.hasLiveSessionActivity() {
+		for _, nestedTool := range nestedTools {
+			if controllable, ok := nestedTool.(chat.LoadingStateControllable); ok {
+				controllable.SetLoadingStateVisible(false)
 			}
 		}
 	}
@@ -4029,6 +4040,10 @@ func (m *UI) isAgentBusy() bool {
 
 func (m *UI) hasLiveSessionActivity() bool {
 	return m.isAgentBusy() || m.hasQueuedPrompts()
+}
+
+func (m *UI) stopStaleLoadingIndicators() {
+	m.setLoadingStateVisible(m.chat.MessageItems(), false)
 }
 
 func (m *UI) refreshMemoryFreshnessNoteCmd() tea.Cmd {

@@ -19,6 +19,11 @@ func TestIsRetriableError(t *testing.T) {
 		require.False(t, isRetriableError(nil))
 	})
 
+	t.Run("marked non-retriable error", func(t *testing.T) {
+		t.Parallel()
+		require.False(t, isRetriableError(markNonRetriableError(errors.New("chat after failed"))))
+	})
+
 	t.Run("429 rate limit", func(t *testing.T) {
 		t.Parallel()
 		require.True(t, isRetriableError(&fantasy.ProviderError{
@@ -102,9 +107,19 @@ func TestIsRetriableError(t *testing.T) {
 		require.True(t, isRetriableError(errors.New("request timeout")))
 	})
 
-	t.Run("unrelated error is not retriable", func(t *testing.T) {
+	t.Run("tool call output mismatch is retriable", func(t *testing.T) {
 		t.Parallel()
-		require.False(t, isRetriableError(errors.New("permission denied")))
+		require.True(t, isRetriableError(errors.New("received error while streaming: {\"message\":\"{\\\"error\\\":{\\\"message\\\":\\\"No tool call found for function call output with call_id call_abc.\\\",\\\"code\\\":\\\"invalid_request_body\\\"}}\",\"type\":\"error\"}")))
+	})
+
+	t.Run("unexpected tool_use_id mismatch is retriable", func(t *testing.T) {
+		t.Parallel()
+		require.True(t, isRetriableError(errors.New("received error while streaming: {\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"messages.22.content.0: unexpected `tool_use_id` found in `tool_result` blocks: toolu_abc\"}}")))
+	})
+
+	t.Run("unrelated error is retriable by default", func(t *testing.T) {
+		t.Parallel()
+		require.True(t, isRetriableError(errors.New("permission denied")))
 	})
 }
 

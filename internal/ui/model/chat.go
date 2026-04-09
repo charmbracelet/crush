@@ -538,6 +538,19 @@ func (m *Chat) MessageItem(id string) chat.MessageItem {
 	return item
 }
 
+// MessageItems returns all top-level message items in list order.
+func (m *Chat) MessageItems() []chat.MessageItem {
+	items := make([]chat.MessageItem, 0, m.list.Len())
+	for i := 0; i < m.list.Len(); i++ {
+		item, ok := m.list.ItemAt(i).(chat.MessageItem)
+		if !ok || item == nil {
+			continue
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
 // SelectMessage selects the list item associated with the given message/tool ID.
 // Returns false if the ID is unknown.
 func (m *Chat) SelectMessage(id string) bool {

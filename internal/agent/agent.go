@@ -213,6 +213,41 @@ func (a *sessionAgent) postCompactSessionMessages(ctx context.Context, sessionID
 	})
 }
 
+// MemoryPrefetch is an async memory recall handle. Modeled after Claude Code's
+// approach: the coordinator starts prefetch once, the result is cached on
+// settle, and consumers can poll readiness multiple times without blocking.
+type MemoryPrefetch struct {
+	// SettledAt is set (non-nil) when the prefetch completes.
+	// Uses *time.Time so nil means "not settled" and the pointer value
+	// distinguishes "settled with empty result" from "not settled".
+	SettledAt *time.Time
+	// Result caches the prefetch result after it settles.
+	Result string
+	// settledMu protects SettledAt and Result.
+	settledMu sync.Mutex
+}
+
+// Settle marks the prefetch as complete and caches the result.
+// Called by the coordinator prefetch goroutine.
+func (m *MemoryPrefetch) Settle(result string) {
+	m.settledMu.Lock()
+	defer m.settledMu.Unlock()
+	m.Result = result
+	now := time.Now()
+	m.SettledAt = &now
+}
+
+// GetSettled returns the cached result when prefetch has settled.
+// settled=false means prefetch is not ready yet.
+func (m *MemoryPrefetch) GetSettled() (result string, settled bool) {
+	m.settledMu.Lock()
+	defer m.settledMu.Unlock()
+	if m.SettledAt == nil {
+		return "", false
+	}
+	return m.Result, true
+}
+
 type SessionAgentCall struct {
 	SessionID     string
 	Prompt        string
@@ -232,9 +267,10 @@ type SessionAgentCall struct {
 	PresencePenalty  *float64
 	NonInteractive   bool
 	UserMessage      *message.Message
-	// MemoryPrefetch is an async channel for memory recall results.
-	// If non-nil and data is available, it will be injected into the system prompt.
-	MemoryPrefetch chan string
+	// MemoryPrefetch is an async memory recall result. The coordinator starts
+	// the prefetch goroutine, and the agent consumes it if ready. The result
+	// is cached so retries can reuse it. Modeled after Claude Code's approach.
+	MemoryPrefetch *MemoryPrefetch
 	// OnProgress is called after each completed LLM step with accumulated
 	// tool call count and the name of the last tool invoked.
 	OnProgress func(toolUses int, lastTool string)
@@ -471,15 +507,21 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		systemPrompt += "\n\n<mcp-instructions>\n" + s + "\n</mcp-instructions>"
 	}
 
+	// Check if memory prefetch is ready (non-blocking). If settled, use cached
+	// result. This approach mirrors Claude Code's design: the result is cached
+	// after settlement, so retries get the same data without re-running.
+	prefetchedRecallInjected := false
+	prefetchNotReadyLogged := false
 	if !a.isSubAgent && call.MemoryPrefetch != nil {
-		select {
-		case recall := <-call.MemoryPrefetch:
-			if recall != "" {
-				systemPrompt += "\n\n<auto_recall>\n" + recall + "\n</auto_recall>"
+		if result, settled := call.MemoryPrefetch.GetSettled(); settled {
+			prefetchedRecallInjected = true
+			if result != "" {
+				systemPrompt += "\n\n<auto_recall>\n" + result + "\n</auto_recall>"
 				slog.Debug("[PERF] sessionAgent: injected prefetched memory recall", "session_id", call.SessionID)
 			}
-		default:
-			slog.Debug("[PERF] sessionAgent: memory prefetch not ready, skipping", "session_id", call.SessionID)
+		} else {
+			prefetchNotReadyLogged = true
+			slog.Debug("[PERF] sessionAgent: memory prefetch not ready, will retry on next step", "session_id", call.SessionID)
 		}
 	}
 
@@ -717,6 +759,19 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				prepared.Messages = options.Messages
 				for i := range prepared.Messages {
 					prepared.Messages[i].ProviderOptions = nil
+				}
+
+				if !a.isSubAgent && call.MemoryPrefetch != nil && !prefetchedRecallInjected {
+					if result, settled := call.MemoryPrefetch.GetSettled(); settled {
+						prefetchedRecallInjected = true
+						if result != "" {
+							prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage("<auto_recall>\n" + result + "\n</auto_recall>")}, prepared.Messages...)
+							slog.Debug("[PERF] sessionAgent: injected settled memory prefetch during step", "session_id", call.SessionID)
+						}
+					} else if !prefetchNotReadyLogged {
+						prefetchNotReadyLogged = true
+						slog.Debug("[PERF] sessionAgent: memory prefetch not ready, will retry on next step", "session_id", call.SessionID)
+					}
 				}
 
 				// Trigger messages.transform plugin on every step (including tool result steps)

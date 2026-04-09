@@ -267,13 +267,15 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 
 	// Start async memory prefetch immediately after user message creation.
 	// This allows the memory recall to happen in parallel with other setup work.
-	var memoryPrefetchChan chan string
+	// Modeled after Claude Code's approach: start prefetch, cache result when
+	// settled, and check readiness non-blocking at consume time.
+	var memoryPrefetch *MemoryPrefetch
 	if !c.cfg.Config().Options.DisableAutoMemory {
-		memoryPrefetchChan = make(chan string, 1)
+		memoryPrefetch = &MemoryPrefetch{}
 		bgModel := c.resolveBackgroundModel(ctx)
 		go func() {
 			recall := buildAutoRecallBlock(ctx, c.history, c.longTermMemory, bgModel, sessionID, prompt)
-			memoryPrefetchChan <- recall
+			memoryPrefetch.Settle(recall)
 			slog.Debug("[PERF] coordinator: memory prefetch completed", "has_recall", recall != "", "session_id", sessionID)
 		}()
 		slog.Debug("[PERF] coordinator: started memory prefetch", "session_id", sessionID)
@@ -320,7 +322,7 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 			FrequencyPenalty: runtimeConfig.FrequencyPenalty,
 			PresencePenalty:  runtimeConfig.PresencePenalty,
 			UserMessage:      &userMessage,
-			MemoryPrefetch:   memoryPrefetchChan,
+			MemoryPrefetch:   memoryPrefetch,
 		})
 	}
 	result, originalErr := run()

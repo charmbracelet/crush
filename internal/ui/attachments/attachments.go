@@ -39,6 +39,10 @@ type Attachments struct {
 func (m *Attachments) List() []message.Attachment { return m.list }
 func (m *Attachments) Reset()                     { m.list = nil }
 
+func (m *Attachments) SetRendererStyles(normalStyle, deletingStyle, imageStyle, textStyle lipgloss.Style) {
+	m.renderer.SetStyles(normalStyle, deletingStyle, imageStyle, textStyle)
+}
+
 func (m *Attachments) Update(msg tea.Msg) bool {
 	switch msg := msg.(type) {
 	case message.Attachment:
@@ -89,6 +93,13 @@ func NewRenderer(normalStyle, deletingStyle, imageStyle, textStyle lipgloss.Styl
 
 type Renderer struct {
 	normalStyle, textStyle, imageStyle, deletingStyle lipgloss.Style
+}
+
+func (r *Renderer) SetStyles(normalStyle, deletingStyle, imageStyle, textStyle lipgloss.Style) {
+	r.normalStyle = normalStyle
+	r.deletingStyle = deletingStyle
+	r.imageStyle = imageStyle
+	r.textStyle = textStyle
 }
 
 func (r *Renderer) Render(attachments []message.Attachment, deleting bool, width int) string {

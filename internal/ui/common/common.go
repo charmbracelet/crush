@@ -40,6 +40,29 @@ func DefaultCommon(ws workspace.Workspace) *Common {
 	}
 }
 
+// NewCommon returns common UI configurations using the given theme palette.
+func NewCommon(ws workspace.Workspace, palette styles.ThemePalette) *Common {
+	s := styles.NewStyles(palette)
+	return &Common{
+		Workspace: ws,
+		Styles:    &s,
+	}
+}
+
+// ThemeFromConfig resolves the theme palette from config. If the theme cannot
+// be loaded, it falls back to the default palette and logs a warning to stderr.
+func ThemeFromConfig(cfg *config.Config) styles.ThemePalette {
+	if cfg == nil || cfg.Options == nil || cfg.Options.TUI == nil || cfg.Options.TUI.Theme == "" {
+		return styles.DefaultPalette()
+	}
+	palette, err := styles.LoadTheme(cfg.Options.TUI.Theme)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not load theme %q: %v. Using default theme.\n", cfg.Options.TUI.Theme, err)
+		return styles.DefaultPalette()
+	}
+	return palette
+}
+
 // CenterRect returns a new [Rectangle] centered within the given area with the
 // specified width and height.
 func CenterRect(area uv.Rectangle, width, height int) uv.Rectangle {

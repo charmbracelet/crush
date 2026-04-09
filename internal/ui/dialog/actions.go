@@ -53,7 +53,14 @@ type (
 	ActionToggleYoloMode              struct{}
 	ActionToggleNotifications         struct{}
 	ActionToggleTransparentBackground struct{}
-	ActionInitializeProject           struct{}
+	ActionSwitchTheme                 struct {
+		Theme string
+	}
+	ActionPreviewTheme struct {
+		Theme string
+	}
+	ActionRevertThemePreview struct{}
+	ActionInitializeProject  struct{}
 	ActionSummarize                   struct {
 		SessionID string
 	}

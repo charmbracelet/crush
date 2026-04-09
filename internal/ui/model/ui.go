@@ -222,6 +222,9 @@ type UI struct {
 	// sidebarLogo keeps a cached version of the sidebar sidebarLogo.
 	sidebarLogo string
 
+	// preThemeStyles stores the styles before a theme preview so we can revert.
+	preThemeStyles *styles.Styles
+
 	// Notification state
 	notifyBackend       notification.Backend
 	notifyWindowFocused bool
@@ -1398,6 +1401,38 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			return util.NewInfoMsg("Transparent background " + status)
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionSwitchTheme:
+		themeName := msg.Theme
+		palette, err := styles.LoadTheme(themeName)
+		if err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
+		m.applyTheme(palette)
+		m.preThemeStyles = nil
+		if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.theme", themeName); err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
+		cmds = append(cmds, util.ReportInfo("Theme switched to "+themeName))
+		m.dialog.CloseDialog(dialog.ThemeID)
+	case dialog.ActionPreviewTheme:
+		palette, err := styles.LoadTheme(msg.Theme)
+		if err != nil {
+			break
+		}
+		if m.preThemeStyles == nil {
+			saved := *m.com.Styles
+			m.preThemeStyles = &saved
+		}
+		m.applyTheme(palette)
+	case dialog.ActionRevertThemePreview:
+		if m.preThemeStyles != nil {
+			*m.com.Styles = *m.preThemeStyles
+			m.refreshStyledComponents()
+			m.preThemeStyles = nil
+		}
+		m.dialog.CloseDialog(dialog.ThemeID)
 	case dialog.ActionQuit:
 		cmds = append(cmds, tea.Quit)
 	case dialog.ActionEnableDockerMCP:
@@ -2966,6 +3001,36 @@ func (m *UI) cacheSidebarLogo(width int) {
 	m.sidebarLogo = renderLogo(m.com.Styles, true, width)
 }
 
+// applyTheme applies a new theme palette, updating the shared Styles and
+// refreshing all cached/pre-rendered UI elements.
+func (m *UI) applyTheme(palette styles.ThemePalette) {
+	newStyles := styles.NewStyles(palette)
+	*m.com.Styles = newStyles
+	m.refreshStyledComponents()
+}
+
+// refreshStyledComponents invalidates all cached/pre-rendered elements that
+// bake in style values at construction time.
+func (m *UI) refreshStyledComponents() {
+	t := m.com.Styles
+	m.header.invalidateLogos()
+	m.cacheSidebarLogo(m.layout.sidebar.Dx())
+	m.textarea.SetStyles(t.TextArea)
+	m.completions.SetStyles(t.Completions.Normal, t.Completions.Focused, t.Completions.Match)
+	m.attachments.SetRendererStyles(t.Attachments.Normal, t.Attachments.Deleting, t.Attachments.Image, t.Attachments.Text)
+	m.todoSpinner.Style = t.Pills.TodoSpinner
+}
+
+// openThemeDialog opens the theme picker dialog.
+func (m *UI) openThemeDialog() {
+	if m.dialog.ContainsDialog(dialog.ThemeID) {
+		m.dialog.BringToFront(dialog.ThemeID)
+		return
+	}
+	themeDialog := dialog.NewTheme(m.com)
+	m.dialog.OpenDialog(themeDialog)
+}
+
 // sendMessage sends a message with the given content and attachments.
 func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.Cmd {
 	if !m.com.Workspace.AgentIsReady() {
@@ -3079,6 +3144,8 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openReasoningDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.ThemeID:
+		m.openThemeDialog()
 	case dialog.FilePickerID:
 		if cmd := m.openFilesDialog(); cmd != nil {
 			cmds = append(cmds, cmd)

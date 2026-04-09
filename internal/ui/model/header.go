@@ -37,10 +37,20 @@ func newHeader(com *common.Common) *header {
 	h := &header{
 		com: com,
 	}
-	t := com.Styles
+	h.rebuildCompactLogo()
+	return h
+}
+
+func (h *header) rebuildCompactLogo() {
+	t := h.com.Styles
 	h.compactLogo = t.Header.Charm.Render("Charm™") + " " +
 		styles.ApplyBoldForegroundGrad(t, "CRUSH", t.Secondary, t.Primary) + " "
-	return h
+}
+
+func (h *header) invalidateLogos() {
+	h.rebuildCompactLogo()
+	h.width = 0
+	h.compact = false
 }
 
 // drawHeader draws the header for the given session.

@@ -10,7 +10,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"sync"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/charmtone"
@@ -285,26 +284,11 @@ func DefaultPalette() ThemePalette {
 }
 
 // builtinThemes maps theme names to their palette definitions.
-// This map is populated once in init() and never modified afterwards.
-var builtinThemes map[string]ThemePalette
-
-// builtinOnce ensures the builtin themes map is only built once and is safe
-// for concurrent reads after initialization.
-var builtinOnce sync.Once
-
-func initBuiltinThemes() {
-	builtinOnce.Do(func() {
-		builtinThemes = buildBuiltinThemes()
-	})
-}
-
-func init() {
-	initBuiltinThemes()
-}
+// Populated once in init() and never modified afterwards.
+var builtinThemes = buildBuiltinThemes()
 
 // BuiltinThemeNames returns the names of all built-in themes, sorted.
 func BuiltinThemeNames() []string {
-	initBuiltinThemes()
 	names := make([]string, 0, len(builtinThemes))
 	for name := range builtinThemes {
 		names = append(names, name)
@@ -346,7 +330,6 @@ func DiscoverThemes() []DiscoveredTheme {
 		return nil
 	}
 
-	initBuiltinThemes()
 	var themes []DiscoveredTheme
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(strings.ToLower(e.Name()), ".json") {
@@ -397,7 +380,6 @@ func LoadTheme(nameOrPath string) (ThemePalette, error) {
 		return DefaultPalette(), nil
 	}
 
-	initBuiltinThemes()
 	if theme, ok := builtinThemes[strings.ToLower(nameOrPath)]; ok {
 		return theme, nil
 	}

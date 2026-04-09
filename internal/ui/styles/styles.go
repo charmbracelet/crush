@@ -2,6 +2,7 @@ package styles
 
 import (
 	"encoding/json"
+	"fmt"
 	"image/color"
 	"strings"
 
@@ -515,14 +516,16 @@ func (s *Styles) Clone() Styles {
 
 // cloneStyleConfig deep-copies an ansi.StyleConfig by JSON round-tripping.
 // This ensures all *string, *bool, and *uint pointer fields are independent.
+// Panics if marshaling fails, since ansi.StyleConfig is always JSON-serializable
+// and a failure here would indicate a programming error.
 func cloneStyleConfig(src ansi.StyleConfig) ansi.StyleConfig {
 	data, err := json.Marshal(src)
 	if err != nil {
-		return src
+		panic(fmt.Sprintf("styles: failed to marshal StyleConfig for clone: %v", err))
 	}
 	var dst ansi.StyleConfig
 	if err := json.Unmarshal(data, &dst); err != nil {
-		return src
+		panic(fmt.Sprintf("styles: failed to unmarshal StyleConfig for clone: %v", err))
 	}
 	return dst
 }

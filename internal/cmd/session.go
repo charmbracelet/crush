@@ -23,7 +23,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/chat"
-	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
@@ -169,7 +169,7 @@ func runSessionList(cmd *cobra.Command, _ []string) error {
 	w, cleanup, usingPager := sessionWriter(ctx, len(list))
 	defer cleanup()
 
-	sty := stylesFromSessionConfig(svc.cfg)
+	sty := common.StylesFromConfig(svc.cfg)
 	hashStyle := lipgloss.NewStyle().Foreground(sty.Blue)
 	dateStyle := lipgloss.NewStyle().Foreground(sty.BlueDark)
 
@@ -441,7 +441,7 @@ func outputSessionJSON(w io.Writer, sess session.Session, msgs []*message.Messag
 }
 
 func outputSessionHuman(ctx context.Context, cfg *config.Config, sess session.Session, msgs []*message.Message) error {
-	sty := stylesFromSessionConfig(cfg)
+	sty := common.StylesFromConfig(cfg)
 	toolResults := chat.BuildToolResultMap(msgs)
 
 	width := sessionOutputWidth
@@ -722,15 +722,4 @@ func convertParts(parts []message.ContentPart) []sessionShowPart {
 type sessionShowOutput struct {
 	Meta     sessionShowMeta      `json:"meta"`
 	Messages []sessionShowMessage `json:"messages"`
-}
-
-func stylesFromSessionConfig(cfg *config.Config) styles.Styles {
-	if cfg == nil || cfg.Options == nil || cfg.Options.TUI == nil || cfg.Options.TUI.Theme == "" {
-		return styles.DefaultStyles()
-	}
-	palette, err := styles.LoadTheme(cfg.Options.TUI.Theme)
-	if err != nil {
-		return styles.DefaultStyles()
-	}
-	return styles.NewStyles(palette)
 }

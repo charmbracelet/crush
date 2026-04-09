@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -477,4 +478,61 @@ func indexOf(s, sub string) int {
 		}
 	}
 	return -1
+}
+
+func TestRequiredColorFieldsCoversAllStructFields(t *testing.T) {
+	tc := &ThemeColors{}
+	required := requiredColorFields(tc)
+	requiredNames := make(map[string]bool)
+	for _, f := range required {
+		requiredNames[f.Name] = true
+	}
+
+	optionalFields := map[string]bool{
+		"diff_insert_fg":       true,
+		"diff_insert_bg":       true,
+		"diff_insert_bg_light": true,
+		"diff_delete_fg":       true,
+		"diff_delete_bg":       true,
+		"diff_delete_bg_light": true,
+	}
+
+	typ := reflect.TypeOf(ThemeColors{})
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+		jsonTag := field.Tag.Get("json")
+		if jsonTag == "" || jsonTag == "-" {
+			continue
+		}
+		name := jsonTag
+		if idx := indexOf(name, ","); idx >= 0 {
+			name = name[:idx]
+		}
+		if optionalFields[name] {
+			continue
+		}
+		if !requiredNames[name] {
+			t.Errorf("ThemeColors field %q (json:%q) is not covered by requiredColorFields()", field.Name, name)
+		}
+	}
+}
+
+func TestCloneDoesNotAlias(t *testing.T) {
+	s := DefaultStyles()
+	clone := s.Clone()
+
+	origColor := s.Markdown.Document.Color
+	if origColor == nil {
+		t.Fatal("expected non-nil Document.Color in default styles")
+	}
+
+	newColor := "#ff0000"
+	clone.Markdown.Document.Color = &newColor
+
+	if s.Markdown.Document.Color == clone.Markdown.Document.Color {
+		t.Error("Clone() aliased Markdown.Document.Color pointer — shallow copy detected")
+	}
+	if *s.Markdown.Document.Color == "#ff0000" {
+		t.Error("modifying clone mutated original — pointer aliasing")
+	}
 }

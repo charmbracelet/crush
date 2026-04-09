@@ -207,6 +207,11 @@ func NewCoordinator(
 
 // Run implements Coordinator.
 func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
+	start := time.Now()
+	defer func() {
+		slog.Debug("[PERF] coordinator.Run total", "duration", time.Since(start), "session_id", sessionID)
+	}()
+
 	if err := c.readyWg.Wait(); err != nil {
 		return nil, err
 	}
@@ -217,6 +222,7 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session: %w", err)
 	}
+	slog.Debug("[PERF] coordinator: got session", "duration", time.Since(start), "session_id", sessionID)
 
 	// Set session-specific working directory in context.
 	// Tools will use this instead of the global working dir to avoid
@@ -257,12 +263,31 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	if err != nil {
 		return nil, fmt.Errorf("failed to create user message: %w", err)
 	}
+	slog.Debug("[PERF] coordinator: created user message", "duration", time.Since(start), "session_id", sessionID)
+
+	// Start async memory prefetch immediately after user message creation.
+	// This allows the memory recall to happen in parallel with other setup work.
+	// Modeled after Claude Code's approach: start prefetch, cache result when
+	// settled, and check readiness non-blocking at consume time.
+	// Note: DisableAutoMemory only disables automatic memory writes (dreaming),
+	// not recall. Users should still get relevant memories in their context.
+	prefetchCtx, prefetchCancel := context.WithCancel(ctx)
+	defer prefetchCancel()
+	memoryPrefetch := &MemoryPrefetch{}
+	bgModel := c.resolveBackgroundModel(ctx)
+	go func() {
+		recall := buildAutoRecallBlock(prefetchCtx, c.history, c.longTermMemory, bgModel, sessionID, prompt)
+		memoryPrefetch.Settle(recall)
+		slog.Debug("[PERF] coordinator: memory prefetch completed", "has_recall", recall != "", "session_id", sessionID)
+	}()
+	slog.Debug("[PERF] coordinator: started memory prefetch", "session_id", sessionID)
 
 	// refresh models before each run
 	runtimeConfig, err := c.updateCurrentAgentRuntime(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update models: %w", err)
 	}
+	slog.Debug("[PERF] coordinator: updated agent runtime", "duration", time.Since(start), "session_id", sessionID)
 
 	model := c.currentAgent.Model()
 	maxTokens := runtimeConfig.MaxOutputTokens
@@ -285,6 +310,7 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	}
 
 	run := func() (*fantasy.AgentResult, error) {
+		slog.Debug("[PERF] coordinator: starting sessionAgent.Run", "duration", time.Since(start), "session_id", sessionID)
 		return c.currentAgent.Run(ctx, SessionAgentCall{
 			SessionID:        sessionID,
 			Prompt:           prompt,
@@ -297,6 +323,7 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 			FrequencyPenalty: runtimeConfig.FrequencyPenalty,
 			PresencePenalty:  runtimeConfig.PresencePenalty,
 			UserMessage:      &userMessage,
+			MemoryPrefetch:   memoryPrefetch,
 		})
 	}
 	result, originalErr := run()
@@ -667,7 +694,6 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		SystemPromptPrefix: inferenceProviderCfg.SystemPromptPrefix,
 		SystemPrompt:       "",
 		WorkingDir:         c.cfg.WorkingDir(),
-		AutoRecall:         buildAutoRecall(c.history, c.longTermMemory, bgModel),
 		RefreshCallConfig: func(callCtx context.Context) (sessionAgentRuntimeConfig, error) {
 			return c.refreshSessionAgentRuntimeConfig(callCtx, result, prompt, agent, isSubAgent)
 		},

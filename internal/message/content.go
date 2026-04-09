@@ -581,3 +581,92 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 	}
 	return messages
 }
+
+// FromFantasyMessages converts fantasy.Messages to message.Messages.
+// This is used when we need to pass messages to plugins that expect the internal message format.
+func FromFantasyMessages(msgs []fantasy.Message) []Message {
+	result := make([]Message, 0, len(msgs))
+	for _, msg := range msgs {
+		m := Message{
+			ID:      "",
+			Parts:   make([]ContentPart, 0),
+		}
+		switch msg.Role {
+		case fantasy.MessageRoleSystem:
+			m.Role = System
+			for _, part := range msg.Content {
+				if tp, ok := part.(fantasy.TextPart); ok {
+					m.Parts = append(m.Parts, TextContent{Text: tp.Text})
+				}
+			}
+		case fantasy.MessageRoleUser:
+			m.Role = User
+			for _, part := range msg.Content {
+				switch p := part.(type) {
+				case fantasy.TextPart:
+					m.Parts = append(m.Parts, TextContent{Text: p.Text})
+				case fantasy.FilePart:
+					m.Parts = append(m.Parts, BinaryContent{
+						Path:     p.Filename,
+						MIMEType: p.MediaType,
+						Data:     p.Data,
+					})
+				}
+			}
+		case fantasy.MessageRoleAssistant:
+			m.Role = Assistant
+			for _, part := range msg.Content {
+				switch p := part.(type) {
+				case fantasy.TextPart:
+					m.Parts = append(m.Parts, TextContent{Text: p.Text})
+				case fantasy.ReasoningPart:
+					rc := ReasoningContent{Thinking: p.Text}
+					if p.ProviderOptions != nil {
+						if anthMeta, ok := p.ProviderOptions[anthropic.Name].(*anthropic.ReasoningOptionMetadata); ok {
+							rc.Signature = anthMeta.Signature
+						}
+						if respData, ok := p.ProviderOptions[openai.Name].(*openai.ResponsesReasoningMetadata); ok {
+							rc.ResponsesData = respData
+						}
+						if googleMeta, ok := p.ProviderOptions[google.Name].(*google.ReasoningMetadata); ok {
+							rc.ThoughtSignature = googleMeta.Signature
+							rc.ToolID = googleMeta.ToolID
+						}
+					}
+					m.Parts = append(m.Parts, rc)
+				case fantasy.ToolCallPart:
+					m.Parts = append(m.Parts, ToolCall{
+						ID:               p.ToolCallID,
+						Name:             p.ToolName,
+						Input:            p.Input,
+						ProviderExecuted: p.ProviderExecuted,
+					})
+				}
+			}
+		case fantasy.MessageRoleTool:
+			m.Role = Tool
+			for _, part := range msg.Content {
+				if tr, ok := part.(fantasy.ToolResultPart); ok {
+					result := ToolResult{
+						ToolCallID: tr.ToolCallID,
+					}
+					switch out := tr.Output.(type) {
+					case fantasy.ToolResultOutputContentText:
+						result.Content = out.Text
+					case fantasy.ToolResultOutputContentError:
+						result.Content = out.Error.Error()
+						result.IsError = true
+					case fantasy.ToolResultOutputContentMedia:
+						result.Data = out.Data
+						result.MIMEType = out.MediaType
+					}
+					m.Parts = append(m.Parts, result)
+				}
+			}
+		}
+		if len(m.Parts) > 0 || m.Role == System {
+			result = append(result, m)
+		}
+	}
+	return result
+}

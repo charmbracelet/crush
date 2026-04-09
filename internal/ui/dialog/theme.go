@@ -15,7 +15,7 @@ import (
 const (
 	ThemeID              = "theme"
 	themeDialogMaxWidth  = 50
-	themeDialogMaxHeight = 14
+	themeDialogMaxHeight = 20
 )
 
 type Theme struct {
@@ -225,10 +225,11 @@ func (th *Theme) setThemeItems() {
 		currentTheme = "charm"
 	}
 
-	names := styles.BuiltinThemeNames()
-	items := make([]list.FilterableItem, 0, len(names))
+	builtins, custom := styles.AllThemeNames()
+	items := make([]list.FilterableItem, 0, len(builtins)+len(custom))
 	selectedIndex := 0
-	for i, name := range names {
+
+	for i, name := range builtins {
 		item := &ThemeItem{
 			name:      name,
 			label:     name,
@@ -238,6 +239,20 @@ func (th *Theme) setThemeItems() {
 		items = append(items, item)
 		if name == currentTheme {
 			selectedIndex = i
+		}
+	}
+
+	for _, dt := range custom {
+		isCurrent := dt.Path == currentTheme || dt.Name == currentTheme
+		item := &ThemeItem{
+			name:      dt.Path,
+			label:     dt.Name,
+			isCurrent: isCurrent,
+			t:         th.com.Styles,
+		}
+		items = append(items, item)
+		if isCurrent {
+			selectedIndex = len(items) - 1
 		}
 	}
 

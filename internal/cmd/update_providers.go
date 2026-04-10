@@ -60,6 +60,7 @@ crush update-providers --source=hyper https://hyper.example.com
 
 		// NOTE(@andreynering): This style is more-or-less copied from Fang's
 		// error message, adapted for success.
+		// Uses DefaultPalette() because config is not loaded in this command context.
 		pal := styles.DefaultPalette()
 		headerStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color(pal.Colors.White)).

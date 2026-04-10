@@ -269,7 +269,7 @@ Crush ships with built-in color themes.
 
 #### Switching Themes
 
-Open the command palette with `ctrl+k`, select **Switch Theme**, and browse
+Open the command palette with `ctrl+p`, select **Switch Theme**, and browse
 the list. The UI previews each theme as you navigate, and pressing `enter`
 confirms the selection. Press `esc` to cancel and revert.
 

@@ -38,10 +38,7 @@ func gruvboxDark() ThemePalette {
 			White:      "#fbf1c7",
 			BlueLight:  "#83a598",
 			Blue:       "#83a598",
-			// BlueDark uses bg3 rather than Gruvbox's dark blue (#458588)
-			// because this slot is used for muted UI accents (e.g. date text
-			// in session lists), not for blue syntax highlighting.
-			BlueDark:   "#665c54",
+			BlueDark:   "#458588",
 			GreenLight: "#b8bb26",
 			Green:      "#b8bb26",
 			GreenDark:  "#8ec07c",

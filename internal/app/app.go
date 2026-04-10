@@ -232,7 +232,11 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	progress = app.config.Config().Options.Progress == nil || *app.config.Config().Options.Progress
 
 	if !hideSpinner && stderrTTY {
-		palette, _ := styles.LoadTheme(styles.ThemeNameFromConfig(app.config.Config()))
+		themeName := ""
+		if cfg := app.config.Config(); cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil {
+			themeName = cfg.Options.TUI.Theme
+		}
+		palette, _ := styles.LoadTheme(themeName)
 		t := styles.NewStyles(palette)
 
 		hasDarkBG := true

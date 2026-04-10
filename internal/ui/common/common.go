@@ -40,10 +40,19 @@ func NewCommon(ws workspace.Workspace, palette styles.ThemePalette) *Common {
 	}
 }
 
+// ThemeNameFromConfig extracts the theme name from config, returning ""
+// (which styles.LoadTheme treats as the default) when config is nil or unset.
+func ThemeNameFromConfig(cfg *config.Config) string {
+	if cfg == nil || cfg.Options == nil || cfg.Options.TUI == nil {
+		return ""
+	}
+	return cfg.Options.TUI.Theme
+}
+
 // ThemeFromConfig resolves the theme palette from config. If the theme cannot
 // be loaded, it falls back to the default palette and logs a warning to stderr.
 func ThemeFromConfig(cfg *config.Config) styles.ThemePalette {
-	palette, err := styles.LoadTheme(styles.ThemeNameFromConfig(cfg))
+	palette, err := styles.LoadTheme(ThemeNameFromConfig(cfg))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not load theme %q: %v. Using default theme.\n", cfg.Options.TUI.Theme, err)
 		return styles.DefaultPalette()

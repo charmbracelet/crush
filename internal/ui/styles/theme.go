@@ -9,8 +9,6 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/x/exp/charmtone"
 )
 
 // hexColorPattern validates hex color format: #RRGGBB or #RGB.
@@ -173,55 +171,6 @@ func parseHexRGB(hex string) (r, g, b uint8) {
 	return uint8(val >> 16), uint8(val >> 8), uint8(val)
 }
 
-// DefaultPalette returns the default Crush theme palette using charmtone
-// colors from the upstream charmbracelet/x/exp/charmtone package.
-func DefaultPalette() ThemePalette {
-	return ThemePalette{
-		Name:   "Charmtone",
-		Author: "Charmbracelet",
-		Colors: ThemeColors{
-			Primary:   charmtone.Charple.Hex(),
-			Secondary: charmtone.Dolly.Hex(),
-			Tertiary:  charmtone.Bok.Hex(),
-
-			BgBase:        charmtone.Pepper.Hex(),
-			BgBaseLighter: charmtone.BBQ.Hex(),
-			BgSubtle:      charmtone.Charcoal.Hex(),
-			BgOverlay:     charmtone.Iron.Hex(),
-
-			FgBase:      charmtone.Ash.Hex(),
-			FgMuted:     charmtone.Squid.Hex(),
-			FgHalfMuted: charmtone.Smoke.Hex(),
-			FgSubtle:    charmtone.Oyster.Hex(),
-
-			Border:      charmtone.Charcoal.Hex(),
-			BorderFocus: charmtone.Charple.Hex(),
-
-			Error:   charmtone.Sriracha.Hex(),
-			Warning: charmtone.Zest.Hex(),
-			Info:    charmtone.Malibu.Hex(),
-
-			White:      charmtone.Butter.Hex(),
-			BlueLight:  charmtone.Sardine.Hex(),
-			Blue:       charmtone.Malibu.Hex(),
-			BlueDark:   charmtone.Damson.Hex(),
-			GreenLight: charmtone.Bok.Hex(),
-			Green:      charmtone.Julep.Hex(),
-			GreenDark:  charmtone.Guac.Hex(),
-			Red:        charmtone.Coral.Hex(),
-			RedDark:    charmtone.Sriracha.Hex(),
-			Yellow:     charmtone.Mustard.Hex(),
-
-			DiffInsertFg:      "#629657",
-			DiffInsertBg:      "#2b322a",
-			DiffInsertBgLight: "#323931",
-			DiffDeleteFg:      "#a45c59",
-			DiffDeleteBg:      "#312929",
-			DiffDeleteBgLight: "#383030",
-		},
-	}
-}
-
 // builtinThemes maps theme names to their palette definitions.
 // Populated once during package-level var initialization.
 var builtinThemes = buildBuiltinThemes()
@@ -234,15 +183,6 @@ func BuiltinThemeNames() []string {
 	}
 	sort.Strings(names)
 	return names
-}
-
-// ThemeNameFromConfig extracts the theme name from config, returning ""
-// (which LoadTheme treats as the default) when config is nil or unset.
-func ThemeNameFromConfig(cfg *config.Config) string {
-	if cfg == nil || cfg.Options == nil || cfg.Options.TUI == nil {
-		return ""
-	}
-	return cfg.Options.TUI.Theme
 }
 
 // LoadTheme loads a theme by built-in name. Returns the default palette

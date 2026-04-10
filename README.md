@@ -265,8 +265,7 @@ $HOME/.local/share/crush/crush.json
 
 ### Themes
 
-Crush ships with 23 built-in color themes and supports custom themes via JSON
-files.
+Crush ships with built-in color themes.
 
 #### Switching Themes
 
@@ -281,7 +280,7 @@ You can also set a theme directly in your config:
   "$schema": "https://charm.land/crush.json",
   "options": {
     "tui": {
-      "theme": "catppuccin-mocha"
+      "theme": "gruvbox-dark"
     }
   }
 }
@@ -289,91 +288,10 @@ You can also set a theme directly in your config:
 
 #### Built-In Themes
 
-| Theme | Variants |
+| Theme | Name |
 | --- | --- |
-| Charm | `charm` (default) |
-| Catppuccin | `catppuccin-mocha`, `catppuccin-macchiato`, `catppuccin-latte` |
-| Dracula | `dracula` |
-| Everforest | `everforest-dark`, `everforest-light` |
-| Gruvbox | `gruvbox-dark`, `gruvbox-light` |
-| Kanagawa | `kanagawa-wave`, `kanagawa-lotus` |
-| Material | `material-darker`, `material-lighter` |
-| Nord | `nord` |
-| One Dark | `one-dark` |
-| Rosé Pine | `rose-pine`, `rose-pine-moon`, `rose-pine-dawn` |
-| Solarized | `solarized-dark`, `solarized-light` |
-| Tokyo Night | `tokyo-night`, `tokyo-night-day` |
-
-#### Custom Themes
-
-Create a JSON file in `~/.config/crush/themes/` and it will appear
-automatically in the theme picker alongside the built-in themes.
-
-A theme file defines 26 required semantic color slots (hex values) plus 6
-optional diff colors:
-
-```json
-{
-  "name": "My Theme",
-  "author": "Your Name",
-  "colors": {
-    "primary": "#7aa2f7",
-    "secondary": "#bb9af7",
-    "tertiary": "#9ece6a",
-
-    "bg_base": "#1a1b26",
-    "bg_base_lighter": "#292e42",
-    "bg_subtle": "#283457",
-    "bg_overlay": "#565f89",
-
-    "fg_base": "#c0caf5",
-    "fg_muted": "#565f89",
-    "fg_half_muted": "#737aa2",
-    "fg_subtle": "#565f89",
-
-    "border": "#283457",
-    "border_focus": "#7aa2f7",
-
-    "error": "#f7768e",
-    "warning": "#e0af68",
-    "info": "#7dcfff",
-
-    "white": "#c0caf5",
-    "blue_light": "#7dcfff",
-    "blue": "#7aa2f7",
-    "blue_dark": "#3d59a1",
-    "green_light": "#9ece6a",
-    "green": "#9ece6a",
-    "green_dark": "#73daca",
-    "red": "#f7768e",
-    "red_dark": "#db4b4b",
-    "yellow": "#e0af68",
-
-    "diff_insert_fg": "#9ece6a",
-    "diff_insert_bg": "#1a2e1a",
-    "diff_insert_bg_light": "#253525",
-    "diff_delete_fg": "#f7768e",
-    "diff_delete_bg": "#2e1a1e",
-    "diff_delete_bg_light": "#352528"
-  }
-}
-```
-
-You can also point to a theme file anywhere on disk by path:
-
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "options": {
-    "tui": {
-      "theme": "~/my-themes/custom.json"
-    }
-  }
-}
-```
-
-> [!TIP]
-> The `diff_*` colors are optional. If omitted, sensible defaults are used.
+| Charmtone | `charmtone` (default) |
+| Gruvbox Dark | `gruvbox-dark` |
 
 ### LSPs
 

@@ -222,11 +222,11 @@ func (th *Theme) setThemeItems() {
 		currentTheme = cfg.Options.TUI.Theme
 	}
 	if currentTheme == "" {
-		currentTheme = "charm"
+		currentTheme = "charmtone"
 	}
 
-	builtins, custom := styles.AllThemeNames()
-	items := make([]list.FilterableItem, 0, len(builtins)+len(custom))
+	builtins := styles.BuiltinThemeNames()
+	items := make([]list.FilterableItem, 0, len(builtins))
 	selectedIndex := 0
 
 	for i, name := range builtins {
@@ -239,20 +239,6 @@ func (th *Theme) setThemeItems() {
 		items = append(items, item)
 		if name == currentTheme {
 			selectedIndex = i
-		}
-	}
-
-	for _, dt := range custom {
-		isCurrent := dt.Path == currentTheme || dt.Name == currentTheme
-		item := &ThemeItem{
-			name:      dt.Path,
-			label:     dt.Name,
-			isCurrent: isCurrent,
-			t:         th.com.Styles,
-		}
-		items = append(items, item)
-		if isCurrent {
-			selectedIndex = len(items) - 1
 		}
 	}
 

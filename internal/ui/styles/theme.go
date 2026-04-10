@@ -1,12 +1,8 @@
 package styles
 
 import (
-	"encoding/json"
 	"fmt"
 	"image/color"
-	"log/slog"
-	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -69,16 +65,8 @@ type ThemeColors struct {
 	DiffDeleteBgLight string `json:"diff_delete_bg_light,omitempty"`
 }
 
-// Color resolves a ThemeColors hex field to a color.Color.
+// hexColor resolves a hex string to a color.Color.
 func hexColor(hex string) color.Color {
-	return lipgloss.Color(hex)
-}
-
-// hexColorOr returns the parsed hex color, falling back to fallback if hex is empty.
-func hexColorOr(hex, fallback string) color.Color {
-	if hex == "" {
-		return lipgloss.Color(fallback)
-	}
 	return lipgloss.Color(hex)
 }
 
@@ -152,7 +140,6 @@ func (tc *ThemeColors) validate() error {
 		errs = append(errs, "missing required colors: "+strings.Join(missing, ", "))
 	}
 
-	// Also validate optional diff color fields if present.
 	optionalFields := []struct {
 		Name  string
 		Value string
@@ -234,11 +221,11 @@ func parseHexRGB(hex string) (r, g, b uint8) {
 	return uint8(val >> 16), uint8(val >> 8), uint8(val)
 }
 
-// DefaultPalette returns the default Crush theme palette matching the
-// current charmtone-based appearance.
+// DefaultPalette returns the default Crush theme palette using charmtone
+// colors from the upstream charmbracelet/x/exp/charmtone package.
 func DefaultPalette() ThemePalette {
 	return ThemePalette{
-		Name:   "Charm",
+		Name:   "Charmtone",
 		Author: "Charmbracelet",
 		Colors: ThemeColors{
 			Primary:   charmtone.Charple.Hex(),
@@ -284,7 +271,7 @@ func DefaultPalette() ThemePalette {
 }
 
 // builtinThemes maps theme names to their palette definitions.
-// Populated once in init() and never modified afterwards.
+// Populated once during package-level var initialization.
 var builtinThemes = buildBuiltinThemes()
 
 // BuiltinThemeNames returns the names of all built-in themes, sorted.
@@ -297,119 +284,16 @@ func BuiltinThemeNames() []string {
 	return names
 }
 
-// DiscoveredTheme holds metadata about a theme found on disk.
-type DiscoveredTheme struct {
-	Name string
-	Path string
-}
-
-// themeConfigDir returns the theme directory path, respecting XDG_CONFIG_HOME
-// on Linux and falling back to ~/.config/crush/themes otherwise.
-func themeConfigDir() string {
-	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Join(xdg, "crush", "themes")
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".config", "crush", "themes")
-}
-
-// DiscoverThemes scans the theme config directory for custom theme JSON files.
-// It returns themes sorted by name, skipping files that fail to parse or
-// that shadow a built-in theme name. Invalid files are logged as warnings.
-func DiscoverThemes() []DiscoveredTheme {
-	dir := themeConfigDir()
-	if dir == "" {
-		return nil
-	}
-
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
-	}
-
-	var themes []DiscoveredTheme
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(strings.ToLower(e.Name()), ".json") {
-			continue
-		}
-
-		path := filepath.Join(dir, e.Name())
-		data, err := os.ReadFile(path)
-		if err != nil {
-			slog.Warn("could not read custom theme file", "path", path, "error", err)
-			continue
-		}
-
-		palette, err := ParseTheme(data)
-		if err != nil {
-			slog.Warn("could not parse custom theme file", "path", path, "error", err)
-			continue
-		}
-
-		name := strings.TrimSuffix(e.Name(), filepath.Ext(e.Name()))
-		if palette.Name != "" {
-			name = palette.Name
-		}
-
-		if _, isBuiltin := builtinThemes[strings.ToLower(name)]; isBuiltin {
-			slog.Warn("custom theme shadows built-in theme, skipping", "name", name, "path", path)
-			continue
-		}
-
-		themes = append(themes, DiscoveredTheme{Name: name, Path: path})
-	}
-
-	sort.Slice(themes, func(i, j int) bool {
-		return themes[i].Name < themes[j].Name
-	})
-	return themes
-}
-
-// AllThemeNames returns built-in theme names followed by discovered custom
-// theme names, each group sorted alphabetically.
-func AllThemeNames() (builtins []string, custom []DiscoveredTheme) {
-	return BuiltinThemeNames(), DiscoverThemes()
-}
-
-// LoadTheme loads a theme by built-in name or file path.
-func LoadTheme(nameOrPath string) (ThemePalette, error) {
-	if nameOrPath == "" {
+// LoadTheme loads a theme by built-in name. Returns the default palette
+// for an empty name. Returns an error if the name is not recognized.
+func LoadTheme(name string) (ThemePalette, error) {
+	if name == "" {
 		return DefaultPalette(), nil
 	}
 
-	if theme, ok := builtinThemes[strings.ToLower(nameOrPath)]; ok {
+	if theme, ok := builtinThemes[strings.ToLower(name)]; ok {
 		return theme, nil
 	}
 
-	expanded := nameOrPath
-	if strings.HasPrefix(expanded, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return ThemePalette{}, fmt.Errorf("expanding home dir: %w", err)
-		}
-		expanded = filepath.Join(home, expanded[2:])
-	}
-
-	data, err := os.ReadFile(expanded)
-	if err != nil {
-		return ThemePalette{}, fmt.Errorf("reading theme file %q: %w", expanded, err)
-	}
-
-	return ParseTheme(data)
+	return ThemePalette{}, fmt.Errorf("unknown theme %q; available themes: %s", name, strings.Join(BuiltinThemeNames(), ", "))
 }
-
-// ParseTheme parses a theme palette from JSON.
-func ParseTheme(data []byte) (ThemePalette, error) {
-	var theme ThemePalette
-	if err := json.Unmarshal(data, &theme); err != nil {
-		return ThemePalette{}, fmt.Errorf("parsing theme: %w", err)
-	}
-	if err := theme.Colors.validate(); err != nil {
-		return ThemePalette{}, err
-	}
-	return theme, nil
-}
-

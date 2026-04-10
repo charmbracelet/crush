@@ -2,11 +2,14 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/hooks"
+	"github.com/tidwall/sjson"
 )
 
 // hookedTool wraps a fantasy.AgentTool to run PreToolUse hooks before
@@ -41,7 +44,13 @@ func (h *hookedTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.To
 	}
 
 	if result.Decision == hooks.DecisionDeny {
-		return fantasy.NewTextErrorResponse(result.Reason), nil
+		reason := fmt.Sprintf(
+			"This tool call was blocked by a hook and must not be retried. Reason: %s",
+			result.Reason,
+		)
+		resp := fantasy.NewTextErrorResponse(reason)
+		resp.Metadata = hookMetadataJSON(result)
+		return resp, nil
 	}
 
 	if result.UpdatedInput != "" {
@@ -60,5 +69,47 @@ func (h *hookedTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.To
 		resp.Content += result.Context
 	}
 
+	resp.Metadata = mergeHookMetadata(resp.Metadata, result)
 	return resp, nil
+}
+
+// buildHookMetadata creates a HookMetadata from an AggregateResult.
+func buildHookMetadata(result hooks.AggregateResult) hooks.HookMetadata {
+	return hooks.HookMetadata{
+		HookCount:    result.HookCount,
+		Decision:     result.Decision.String(),
+		Reason:       result.Reason,
+		InputRewrite: result.UpdatedInput != "",
+		Hooks:        result.Hooks,
+	}
+}
+
+// hookMetadataJSON builds a JSON string containing only the hook metadata.
+func hookMetadataJSON(result hooks.AggregateResult) string {
+	meta := buildHookMetadata(result)
+	data, err := json.Marshal(meta)
+	if err != nil {
+		return ""
+	}
+	return `{"hook":` + string(data) + `}`
+}
+
+// mergeHookMetadata injects hook metadata into existing tool metadata.
+func mergeHookMetadata(existing string, result hooks.AggregateResult) string {
+	if result.HookCount == 0 {
+		return existing
+	}
+	meta := buildHookMetadata(result)
+	data, err := json.Marshal(meta)
+	if err != nil {
+		return existing
+	}
+	if existing == "" {
+		existing = "{}"
+	}
+	merged, err := sjson.SetRaw(existing, "hook", string(data))
+	if err != nil {
+		return existing
+	}
+	return merged
 }

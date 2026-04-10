@@ -5,6 +5,7 @@ import (
 	"context"
 	"log/slog"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -62,6 +63,16 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 	wg.Wait()
 
 	agg := aggregate(results)
+	agg.Hooks = make([]HookInfo, len(deduped))
+	for i, h := range deduped {
+		agg.Hooks[i] = HookInfo{
+			Name:         filepath.Base(h.Command),
+			Matcher:      h.Matcher,
+			Decision:     results[i].Decision.String(),
+			Reason:       results[i].Reason,
+			InputRewrite: results[i].UpdatedInput != "",
+		}
+	}
 	slog.Info("Hook completed",
 		"event", eventName,
 		"tool", toolName,

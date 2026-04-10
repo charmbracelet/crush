@@ -332,6 +332,18 @@ type Styles struct {
 		// Docker MCP tools
 		DockerMCPActionAdd lipgloss.Style // Docker MCP add action (green)
 		DockerMCPActionDel lipgloss.Style // Docker MCP remove action (red)
+
+		// Hooks
+		HookLabel        lipgloss.Style // "Hook" label
+		HookName         lipgloss.Style // Hook command name
+		HookMatcher      lipgloss.Style // Matcher regex pattern
+		HookArrow        lipgloss.Style // Arrow indicator
+		HookDetail       lipgloss.Style // Decision detail text
+		HookOK           lipgloss.Style // "OK" status
+		HookDenied       lipgloss.Style // "Denied" status
+		HookDeniedLabel  lipgloss.Style // "Hook" label when denied
+		HookDeniedReason lipgloss.Style // Denied reason text
+		HookRewrote      lipgloss.Style // "Rewrote Input" indicator
 	}
 
 	// Dialog styles
@@ -1189,6 +1201,18 @@ func DefaultStyles() Styles {
 	// Docker MCP styles
 	s.Tool.DockerMCPActionAdd = base.Foreground(greenLight)
 	s.Tool.DockerMCPActionDel = base.Foreground(red)
+
+	// Hook styles
+	s.Tool.HookLabel = base.Foreground(green)
+	s.Tool.HookName = base
+	s.Tool.HookMatcher = base.Foreground(fgMuted)
+	s.Tool.HookArrow = base.Foreground(green)
+	s.Tool.HookDetail = base.Foreground(fgMuted)
+	s.Tool.HookOK = base.Foreground(charmtone.Guac)
+	s.Tool.HookDenied = base.Foreground(charmtone.Sriracha)
+	s.Tool.HookDeniedLabel = base.Foreground(red)
+	s.Tool.HookDeniedReason = base.Foreground(charmtone.Iron)
+	s.Tool.HookRewrote = base.Foreground(charmtone.Iron)
 
 	// Buttons
 	s.ButtonFocus = lipgloss.NewStyle().Foreground(white).Background(secondary)

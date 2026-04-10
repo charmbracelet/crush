@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/stringext"
 	"github.com/charmbracelet/crush/internal/ui/anim"
@@ -313,6 +314,14 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 			IsSpinning:      t.isSpinning(),
 			Status:          t.computeStatus(),
 		})
+
+		// Prepend hook indicator if hooks ran for this tool call.
+		if t.result != nil {
+			if hookLine := toolOutputHookIndicator(t.sty, t.result.Metadata); hookLine != "" {
+				content = hookLine + "\n\n" + content
+			}
+		}
+
 		height = lipgloss.Height(content)
 		// cache the rendered content
 		t.setCachedRender(content, toolItemWidth, height)
@@ -647,6 +656,104 @@ func toolOutputSkillContent(sty *styles.Styles, name, description string) string
 		sty.Tool.ResourceName.Render(name),
 		sty.Tool.ResourceSize.Render(description),
 	))
+}
+
+// toolOutputHookIndicator renders hook indicator lines from tool metadata.
+// Returns empty string if no hook metadata is present.
+func toolOutputHookIndicator(sty *styles.Styles, metadata string) string {
+	if metadata == "" {
+		return ""
+	}
+	var meta struct {
+		Hook *hooks.HookMetadata `json:"hook"`
+	}
+	if err := json.Unmarshal([]byte(metadata), &meta); err != nil || meta.Hook == nil {
+		return ""
+	}
+	h := meta.Hook
+	if len(h.Hooks) == 0 {
+		return ""
+	}
+
+	// Compute max widths for name and matcher columns so they align.
+	maxNameWidth := 0
+	maxMatcherWidth := 0
+	for _, hi := range h.Hooks {
+		w := lipgloss.Width(sty.Tool.HookName.Render(hi.Name))
+		if w > maxNameWidth {
+			maxNameWidth = w
+		}
+		if hi.Matcher != "" {
+			mw := lipgloss.Width(sty.Tool.HookMatcher.Render(hi.Matcher))
+			if mw > maxMatcherWidth {
+				maxMatcherWidth = mw
+			}
+		}
+	}
+
+	var lines []string
+	for _, hi := range h.Hooks {
+		lines = append(lines, renderHookLine(sty, hi, maxNameWidth, maxMatcherWidth))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// renderHookLine renders a single hook indicator line with aligned columns.
+func renderHookLine(sty *styles.Styles, hi hooks.HookInfo, maxNameWidth, maxMatcherWidth int) string {
+	detail := hookDetail(sty, hi)
+
+	name := sty.Tool.HookName.Render(hi.Name)
+	namePad := strings.Repeat(" ", maxNameWidth-lipgloss.Width(name))
+
+	var matcherPart string
+	if maxMatcherWidth > 0 {
+		if hi.Matcher != "" {
+			matcher := sty.Tool.HookMatcher.Render(hi.Matcher)
+			matcherPad := strings.Repeat(" ", maxMatcherWidth-lipgloss.Width(matcher))
+			matcherPart = " " + matcher + matcherPad
+		} else {
+			matcherPart = " " + strings.Repeat(" ", maxMatcherWidth)
+		}
+	}
+
+	labelStyle := sty.Tool.HookLabel
+	arrowStyle := sty.Tool.HookArrow
+	if hi.Decision == "deny" {
+		labelStyle = sty.Tool.HookDeniedLabel
+		arrowStyle = sty.Tool.HookDeniedLabel
+	}
+
+	return fmt.Sprintf("%s %s%s%s %s %s",
+		labelStyle.Render("Hook"),
+		name,
+		namePad,
+		matcherPart,
+		arrowStyle.Render(styles.ArrowRightIcon),
+		detail,
+	)
+}
+
+// hookDetail returns the styled detail text for a single hook result.
+func hookDetail(sty *styles.Styles, hi hooks.HookInfo) string {
+	switch hi.Decision {
+	case "deny":
+		if hi.Reason != "" {
+			return sty.Tool.HookDenied.Render("Denied") + " " + sty.Tool.HookDeniedReason.Render(hi.Reason)
+		}
+		return sty.Tool.HookDenied.Render("Denied")
+	case "allow":
+		result := sty.Tool.HookOK.Render("OK")
+		if hi.InputRewrite {
+			result += " " + sty.Tool.HookRewrote.Render("Rewrote Input")
+		}
+		return result
+	default:
+		result := sty.Tool.HookOK.Render("OK")
+		if hi.InputRewrite {
+			result += " " + sty.Tool.HookRewrote.Render("Rewrote Input")
+		}
+		return result
+	}
 }
 
 // getDigits returns the number of digits in a number.

@@ -7,6 +7,25 @@ const (
 	EventPreToolUse = "PreToolUse"
 )
 
+// HookMetadata is embedded in tool response metadata so the UI can
+// display a hook indicator.
+type HookMetadata struct {
+	HookCount    int        `json:"hook_count"`
+	Decision     string     `json:"decision"`
+	Reason       string     `json:"reason,omitempty"`
+	InputRewrite bool       `json:"input_rewrite,omitempty"`
+	Hooks        []HookInfo `json:"hooks,omitempty"`
+}
+
+// HookInfo identifies a single hook that ran and its individual result.
+type HookInfo struct {
+	Name         string `json:"name"`
+	Matcher      string `json:"matcher,omitempty"`
+	Decision     string `json:"decision"`
+	Reason       string `json:"reason,omitempty"`
+	InputRewrite bool   `json:"input_rewrite,omitempty"`
+}
+
 // Decision represents the outcome of a single hook execution.
 type Decision int
 
@@ -41,9 +60,11 @@ type HookResult struct {
 // AggregateResult holds the combined outcome of all hooks for an event.
 type AggregateResult struct {
 	Decision     Decision
-	Reason       string // Concatenated deny reasons (newline-separated).
-	Context      string // Concatenated context from all hooks.
-	UpdatedInput string // Last non-empty updated_input wins.
+	HookCount    int        // Number of hooks that ran.
+	Hooks        []HookInfo // Info about each hook that ran.
+	Reason       string     // Concatenated deny reasons (newline-separated).
+	Context      string     // Concatenated context from all hooks.
+	UpdatedInput string     // Last non-empty updated_input wins.
 }
 
 // aggregate merges multiple HookResults into a single AggregateResult.
@@ -78,7 +99,7 @@ func aggregate(results []HookResult) AggregateResult {
 		}
 	}
 
-	agg := AggregateResult{Decision: decision, UpdatedInput: updatedInput}
+	agg := AggregateResult{Decision: decision, HookCount: len(results), UpdatedInput: updatedInput}
 	if len(reasons) > 0 {
 		for i, r := range reasons {
 			if i > 0 {

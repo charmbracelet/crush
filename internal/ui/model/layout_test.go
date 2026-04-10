@@ -8,6 +8,7 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 )
 
 // testMessageItem is a minimal chat item used to populate the chat list
@@ -27,7 +28,7 @@ var _ chat.MessageItem = testMessageItem{}
 // It intentionally keeps dependencies minimal so layout behavior can be tested
 // in isolation.
 func newTestUI() *UI {
-	com := common.DefaultCommon(nil)
+	com := common.NewCommon(nil, styles.DefaultPalette())
 
 	ta := textarea.New()
 	ta.SetStyles(com.Styles.TextArea)

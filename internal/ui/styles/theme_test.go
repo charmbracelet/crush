@@ -1,7 +1,6 @@
 package styles
 
 import (
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -186,45 +185,8 @@ func TestDefaultPaletteUsesCharmtone(t *testing.T) {
 	}
 }
 
-func TestRequiredColorFieldsCoversAllStructFields(t *testing.T) {
-	tc := &ThemeColors{}
-	required := requiredColorFields(tc)
-	requiredNames := make(map[string]bool)
-	for _, f := range required {
-		requiredNames[f.Name] = true
-	}
-
-	optionalFields := map[string]bool{
-		"diff_insert_fg":       true,
-		"diff_insert_bg":       true,
-		"diff_insert_bg_light": true,
-		"diff_delete_fg":       true,
-		"diff_delete_bg":       true,
-		"diff_delete_bg_light": true,
-	}
-
-	typ := reflect.TypeOf(ThemeColors{})
-	for i := 0; i < typ.NumField(); i++ {
-		field := typ.Field(i)
-		jsonTag := field.Tag.Get("json")
-		if jsonTag == "" || jsonTag == "-" {
-			continue
-		}
-		name := jsonTag
-		if idx := strings.Index(name, ","); idx >= 0 {
-			name = name[:idx]
-		}
-		if optionalFields[name] {
-			continue
-		}
-		if !requiredNames[name] {
-			t.Errorf("ThemeColors field %q (json:%q) is not covered by requiredColorFields()", field.Name, name)
-		}
-	}
-}
-
 func TestCloneDoesNotAlias(t *testing.T) {
-	s := DefaultStyles()
+	s := NewStyles(DefaultPalette())
 	clone := s.Clone()
 
 	origColor := s.Markdown.Document.Color

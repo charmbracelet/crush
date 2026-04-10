@@ -3,11 +3,13 @@ package styles
 import (
 	"fmt"
 	"image/color"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/x/exp/charmtone"
 )
 
@@ -70,93 +72,43 @@ func hexColor(hex string) color.Color {
 	return lipgloss.Color(hex)
 }
 
-// hexStr returns the hex string representation of a color.Color.
-func hexStr(c color.Color) string {
-	r, g, b, _ := c.RGBA()
-	return fmt.Sprintf("#%02x%02x%02x", r>>8, g>>8, b>>8)
-}
-
-// newHex returns a pointer to the hex string of a color, for use with
-// glamour/ansi style fields.
-func newHex(c color.Color) *string {
-	s := hexStr(c)
+// ptrStr returns a pointer to the given string, for use with
+// glamour/ansi style fields that take *string.
+func ptrStr(s string) *string {
 	return &s
 }
 
-// requiredColorFields returns the list of required color field names and their
-// values in deterministic order.
-func requiredColorFields(tc *ThemeColors) []struct {
-	Name  string
-	Value string
-} {
-	return []struct {
-		Name  string
-		Value string
-	}{
-		{"bg_base", tc.BgBase},
-		{"bg_base_lighter", tc.BgBaseLighter},
-		{"bg_overlay", tc.BgOverlay},
-		{"bg_subtle", tc.BgSubtle},
-		{"blue", tc.Blue},
-		{"blue_dark", tc.BlueDark},
-		{"blue_light", tc.BlueLight},
-		{"border", tc.Border},
-		{"border_focus", tc.BorderFocus},
-		{"error", tc.Error},
-		{"fg_base", tc.FgBase},
-		{"fg_half_muted", tc.FgHalfMuted},
-		{"fg_muted", tc.FgMuted},
-		{"fg_subtle", tc.FgSubtle},
-		{"green", tc.Green},
-		{"green_dark", tc.GreenDark},
-		{"green_light", tc.GreenLight},
-		{"info", tc.Info},
-		{"primary", tc.Primary},
-		{"red", tc.Red},
-		{"red_dark", tc.RedDark},
-		{"secondary", tc.Secondary},
-		{"tertiary", tc.Tertiary},
-		{"warning", tc.Warning},
-		{"white", tc.White},
-		{"yellow", tc.Yellow},
-	}
-}
-
 func (tc *ThemeColors) validate() error {
-	fields := requiredColorFields(tc)
+	val := reflect.ValueOf(*tc)
+	typ := val.Type()
 
 	var missing []string
 	var invalid []string
-	for _, f := range fields {
-		if f.Value == "" {
-			missing = append(missing, f.Name)
-		} else if !hexColorPattern.MatchString(f.Value) {
-			invalid = append(invalid, fmt.Sprintf("%s (%q)", f.Name, f.Value))
+
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+		tag := field.Tag.Get("json")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		name, _, _ := strings.Cut(tag, ",")
+		optional := strings.Contains(tag, "omitempty")
+		value := val.Field(i).String()
+
+		if value == "" {
+			if !optional {
+				missing = append(missing, name)
+			}
+		} else if !hexColorPattern.MatchString(value) {
+			invalid = append(invalid, fmt.Sprintf("%s (%q)", name, value))
 		}
 	}
 
 	var errs []string
 	if len(missing) > 0 {
+		sort.Strings(missing)
 		errs = append(errs, "missing required colors: "+strings.Join(missing, ", "))
 	}
-
-	optionalFields := []struct {
-		Name  string
-		Value string
-	}{
-		{"diff_insert_fg", tc.DiffInsertFg},
-		{"diff_insert_bg", tc.DiffInsertBg},
-		{"diff_insert_bg_light", tc.DiffInsertBgLight},
-		{"diff_delete_fg", tc.DiffDeleteFg},
-		{"diff_delete_bg", tc.DiffDeleteBg},
-		{"diff_delete_bg_light", tc.DiffDeleteBgLight},
-	}
-	for _, f := range optionalFields {
-		if f.Value != "" && !hexColorPattern.MatchString(f.Value) {
-			invalid = append(invalid, fmt.Sprintf("%s (%q)", f.Name, f.Value))
-		}
-	}
-
 	if len(invalid) > 0 {
 		errs = append(errs, "invalid hex colors: "+strings.Join(invalid, ", "))
 	}
@@ -282,6 +234,15 @@ func BuiltinThemeNames() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// ThemeNameFromConfig extracts the theme name from config, returning ""
+// (which LoadTheme treats as the default) when config is nil or unset.
+func ThemeNameFromConfig(cfg *config.Config) string {
+	if cfg == nil || cfg.Options == nil || cfg.Options.TUI == nil {
+		return ""
+	}
+	return cfg.Options.TUI.Theme
 }
 
 // LoadTheme loads a theme by built-in name. Returns the default palette

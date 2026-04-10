@@ -31,15 +31,6 @@ func (c *Common) Config() *config.Config {
 	return c.Workspace.Config()
 }
 
-// DefaultCommon returns the default common UI configurations.
-func DefaultCommon(ws workspace.Workspace) *Common {
-	s := styles.DefaultStyles()
-	return &Common{
-		Workspace: ws,
-		Styles:    &s,
-	}
-}
-
 // NewCommon returns common UI configurations using the given theme palette.
 func NewCommon(ws workspace.Workspace, palette styles.ThemePalette) *Common {
 	s := styles.NewStyles(palette)
@@ -52,10 +43,7 @@ func NewCommon(ws workspace.Workspace, palette styles.ThemePalette) *Common {
 // ThemeFromConfig resolves the theme palette from config. If the theme cannot
 // be loaded, it falls back to the default palette and logs a warning to stderr.
 func ThemeFromConfig(cfg *config.Config) styles.ThemePalette {
-	if cfg == nil || cfg.Options == nil || cfg.Options.TUI == nil || cfg.Options.TUI.Theme == "" {
-		return styles.DefaultPalette()
-	}
-	palette, err := styles.LoadTheme(cfg.Options.TUI.Theme)
+	palette, err := styles.LoadTheme(styles.ThemeNameFromConfig(cfg))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not load theme %q: %v. Using default theme.\n", cfg.Options.TUI.Theme, err)
 		return styles.DefaultPalette()

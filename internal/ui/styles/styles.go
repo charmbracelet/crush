@@ -498,12 +498,6 @@ func (s *Styles) DialogHelpStyles() help.Styles {
 	return help.Styles(s.Dialog.Help)
 }
 
-// DefaultStyles returns the default styles for the UI using the default
-// Charm theme palette.
-func DefaultStyles() Styles {
-	return NewStyles(DefaultPalette())
-}
-
 // Clone returns a deep copy of the Styles struct, ensuring pointer fields
 // (particularly within ansi.StyleConfig) are not aliased. This is used to
 // safely snapshot styles before a theme preview.
@@ -664,7 +658,7 @@ func NewStyles(palette ThemePalette) Styles {
 	s.Markdown = ansi.StyleConfig{
 		Document: ansi.StyleBlock{
 			StylePrimitive: ansi.StylePrimitive{
-				Color: newHex(fgHalfMuted),
+				Color: ptrStr(c.FgHalfMuted),
 			},
 		},
 		BlockQuote: ansi.StyleBlock{
@@ -678,7 +672,7 @@ func NewStyles(palette ThemePalette) Styles {
 		Heading: ansi.StyleBlock{
 			StylePrimitive: ansi.StylePrimitive{
 				BlockSuffix: "\n",
-				Color:       newHex(info),
+				Color:       ptrStr(c.Info),
 				Bold:        new(true),
 			},
 		},
@@ -686,8 +680,8 @@ func NewStyles(palette ThemePalette) Styles {
 			StylePrimitive: ansi.StylePrimitive{
 				Prefix:          " ",
 				Suffix:          " ",
-				Color:           newHex(warning),
-				BackgroundColor: newHex(primary),
+				Color:           ptrStr(c.Warning),
+				BackgroundColor: ptrStr(c.Primary),
 				Bold:            new(true),
 			},
 		},
@@ -714,7 +708,7 @@ func NewStyles(palette ThemePalette) Styles {
 		H6: ansi.StyleBlock{
 			StylePrimitive: ansi.StylePrimitive{
 				Prefix: "###### ",
-				Color:  newHex(greenDark),
+				Color:  ptrStr(c.GreenDark),
 				Bold:   new(false),
 			},
 		},
@@ -728,7 +722,7 @@ func NewStyles(palette ThemePalette) Styles {
 			Bold: new(true),
 		},
 		HorizontalRule: ansi.StylePrimitive{
-			Color:  newHex(bgSubtle),
+			Color:  ptrStr(c.BgSubtle),
 			Format: "\n--------\n",
 		},
 		Item: ansi.StylePrimitive{
@@ -743,117 +737,117 @@ func NewStyles(palette ThemePalette) Styles {
 			Unticked:       "[ ] ",
 		},
 		Link: ansi.StylePrimitive{
-			Color:     newHex(greenDark),
+			Color:     ptrStr(c.GreenDark),
 			Underline: new(true),
 		},
 		LinkText: ansi.StylePrimitive{
-			Color: newHex(greenDark),
+			Color: ptrStr(c.GreenDark),
 			Bold:  new(true),
 		},
 		Image: ansi.StylePrimitive{
-			Color:     newHex(secondary),
+			Color:     ptrStr(c.Secondary),
 			Underline: new(true),
 		},
 		ImageText: ansi.StylePrimitive{
-			Color:  newHex(fgMuted),
+			Color:  ptrStr(c.FgMuted),
 			Format: "Image: {{.text}} →",
 		},
 		Code: ansi.StyleBlock{
 			StylePrimitive: ansi.StylePrimitive{
 				Prefix:          " ",
 				Suffix:          " ",
-				Color:           newHex(red),
-				BackgroundColor: newHex(bgSubtle),
+				Color:           ptrStr(c.Red),
+				BackgroundColor: ptrStr(c.BgSubtle),
 			},
 		},
 		CodeBlock: ansi.StyleCodeBlock{
 			StyleBlock: ansi.StyleBlock{
 				StylePrimitive: ansi.StylePrimitive{
-					Color: newHex(bgSubtle),
+					Color: ptrStr(c.BgSubtle),
 				},
 				Margin: new(uint(defaultMargin)),
 			},
 			Chroma: &ansi.Chroma{
 				Text: ansi.StylePrimitive{
-					Color: newHex(fgHalfMuted),
+					Color: ptrStr(c.FgHalfMuted),
 				},
 				Error: ansi.StylePrimitive{
-					Color:           newHex(white),
-					BackgroundColor: newHex(errorColor),
+					Color:           ptrStr(c.White),
+					BackgroundColor: ptrStr(c.Error),
 				},
 				Comment: ansi.StylePrimitive{
-					Color: newHex(fgSubtle),
+					Color: ptrStr(c.FgSubtle),
 				},
 				CommentPreproc: ansi.StylePrimitive{
-					Color: newHex(red),
+					Color: ptrStr(c.Red),
 				},
 				Keyword: ansi.StylePrimitive{
-					Color: newHex(info),
+					Color: ptrStr(c.Info),
 				},
 				KeywordReserved: ansi.StylePrimitive{
-					Color: newHex(secondary),
+					Color: ptrStr(c.Secondary),
 				},
 				KeywordNamespace: ansi.StylePrimitive{
-					Color: newHex(secondary),
+					Color: ptrStr(c.Secondary),
 				},
 				KeywordType: ansi.StylePrimitive{
-					Color: newHex(blue),
+					Color: ptrStr(c.Blue),
 				},
 				Operator: ansi.StylePrimitive{
-					Color: newHex(red),
+					Color: ptrStr(c.Red),
 				},
 				Punctuation: ansi.StylePrimitive{
-					Color: newHex(warning),
+					Color: ptrStr(c.Warning),
 				},
 				Name: ansi.StylePrimitive{
-					Color: newHex(fgHalfMuted),
+					Color: ptrStr(c.FgHalfMuted),
 				},
 				NameBuiltin: ansi.StylePrimitive{
-					Color: newHex(secondary),
+					Color: ptrStr(c.Secondary),
 				},
 				NameTag: ansi.StylePrimitive{
-					Color: newHex(secondary),
+					Color: ptrStr(c.Secondary),
 				},
 				NameAttribute: ansi.StylePrimitive{
-					Color: newHex(primary),
+					Color: ptrStr(c.Primary),
 				},
 				NameClass: ansi.StylePrimitive{
-					Color:     newHex(white),
+					Color:     ptrStr(c.White),
 					Underline: new(true),
 					Bold:      new(true),
 				},
 				NameDecorator: ansi.StylePrimitive{
-					Color: newHex(yellow),
+					Color: ptrStr(c.Yellow),
 				},
 				NameFunction: ansi.StylePrimitive{
-					Color: newHex(greenDark),
+					Color: ptrStr(c.GreenDark),
 				},
 				LiteralNumber: ansi.StylePrimitive{
-					Color: newHex(green),
+					Color: ptrStr(c.Green),
 				},
 				LiteralString: ansi.StylePrimitive{
-					Color: newHex(yellow),
+					Color: ptrStr(c.Yellow),
 				},
 				LiteralStringEscape: ansi.StylePrimitive{
-					Color: newHex(tertiary),
+					Color: ptrStr(c.Tertiary),
 				},
 				GenericDeleted: ansi.StylePrimitive{
-					Color: newHex(red),
+					Color: ptrStr(c.Red),
 				},
 				GenericEmph: ansi.StylePrimitive{
 					Italic: new(true),
 				},
 				GenericInserted: ansi.StylePrimitive{
-					Color: newHex(greenDark),
+					Color: ptrStr(c.GreenDark),
 				},
 				GenericStrong: ansi.StylePrimitive{
 					Bold: new(true),
 				},
 				GenericSubheading: ansi.StylePrimitive{
-					Color: newHex(fgMuted),
+					Color: ptrStr(c.FgMuted),
 				},
 				Background: ansi.StylePrimitive{
-					BackgroundColor: newHex(bgSubtle),
+					BackgroundColor: ptrStr(c.BgSubtle),
 				},
 			},
 		},
@@ -868,8 +862,8 @@ func NewStyles(palette ThemePalette) Styles {
 	}
 
 	// PlainMarkdown style - muted colors on subtle background for thinking content.
-	plainBg := newHex(bgBaseLighter)
-	plainFg := newHex(fgMuted)
+	plainBg := ptrStr(c.BgBaseLighter)
+	plainFg := ptrStr(c.FgMuted)
 	s.PlainMarkdown = ansi.StyleConfig{
 		Document: ansi.StyleBlock{
 			StylePrimitive: ansi.StylePrimitive{

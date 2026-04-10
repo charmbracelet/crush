@@ -53,13 +53,6 @@ const (
 	largeContextWindowThreshold = 200_000
 	largeContextWindowBuffer    = 20_000
 	smallContextWindowRatio     = 0.2
-
-	// DefaultRequestTimeout is the default timeout for provider requests (10 minutes).
-	defaultRequestTimeout = 10 * time.Minute
-	// StaleRequestThreshold is how long a request can be active before we consider it stale.
-	staleRequestThreshold = 15 * time.Minute
-	// MaxRetries is the maximum number of retries for provider requests.
-	maxRetries = 3
 )
 
 var userAgent = fmt.Sprintf("Charm-Crush/%s (https://charm.land/crush)", version.Version)
@@ -125,24 +118,6 @@ type sessionAgent struct {
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, context.CancelFunc]
-	// requestStartTimes tracks when each request started for stale detection.
-	requestStartTimes *csync.Map[string, time.Time]
-}
-
-// isRequestStale returns true if the request has been active longer than the threshold.
-func (a *sessionAgent) isRequestStale(sessionID string) bool {
-	startTime, ok := a.requestStartTimes.Get(sessionID)
-	if !ok {
-		return false
-	}
-	return time.Since(startTime) > staleRequestThreshold
-}
-
-// clearStaleRequest clears a stale request from activeRequests and requestStartTimes.
-func (a *sessionAgent) clearStaleRequest(sessionID string) {
-	a.activeRequests.Del(sessionID)
-	a.requestStartTimes.Del(sessionID)
-	slog.Warn("Cleared stale request", "session_id", sessionID)
 }
 
 type SessionAgentOptions struct {
@@ -176,7 +151,6 @@ func NewSessionAgent(
 		notify:               opts.Notify,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, context.CancelFunc](),
-		requestStartTimes:    csync.NewMap[string, time.Time](),
 	}
 }
 
@@ -188,21 +162,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		return nil, ErrSessionMissing
 	}
 
-	// Queue the message if busy.
-	// First, check if the current request is stale and clear it if so.
+	// Queue the message if busy
 	if a.IsSessionBusy(call.SessionID) {
-		if a.isRequestStale(call.SessionID) {
-			a.clearStaleRequest(call.SessionID)
-		} else {
-			// Session is genuinely busy, queue the message.
-			existing, ok := a.messageQueue.Get(call.SessionID)
-			if !ok {
-				existing = []SessionAgentCall{}
-			}
-			existing = append(existing, call)
-			a.messageQueue.Set(call.SessionID, existing)
-			return nil, nil
+		existing, ok := a.messageQueue.Get(call.SessionID)
+		if !ok {
+			existing = []SessionAgentCall{}
 		}
+		existing = append(existing, call)
+		a.messageQueue.Set(call.SessionID, existing)
+		return nil, nil
 	}
 
 	// Copy mutable fields under lock to avoid races with SetTools/SetModels.
@@ -268,14 +236,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	// Add the session to the context.
 	ctx = context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
 
-	// Apply a hard timeout to prevent stuck requests.
-	genCtx, cancel := context.WithTimeout(ctx, defaultRequestTimeout)
+	genCtx, cancel := context.WithCancel(ctx)
 	a.activeRequests.Set(call.SessionID, cancel)
-	a.requestStartTimes.Set(call.SessionID, time.Now())
 
 	defer cancel()
 	defer a.activeRequests.Del(call.SessionID)
-	defer a.requestStartTimes.Del(call.SessionID)
 
 	history, files := a.preparePrompt(msgs, call.Attachments...)
 
@@ -289,7 +254,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	if call.MaxOutputTokens > 0 {
 		maxOutputTokens = &call.MaxOutputTokens
 	}
-	maxRetriesVal := maxRetries
 	result, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
 		Files:            files,
@@ -301,7 +265,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		PresencePenalty:  call.PresencePenalty,
 		TopK:             call.TopK,
 		FrequencyPenalty: call.FrequencyPenalty,
-		MaxRetries:       &maxRetriesVal,
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = options.Messages
 			for i := range prepared.Messages {
@@ -671,12 +634,9 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 
 	aiMsgs, _ := a.preparePrompt(msgs)
 
-	// Apply a hard timeout to prevent stuck summarize requests.
-	genCtx, cancel := context.WithTimeout(ctx, defaultRequestTimeout)
+	genCtx, cancel := context.WithCancel(ctx)
 	a.activeRequests.Set(sessionID, cancel)
-	a.requestStartTimes.Set(sessionID, time.Now())
 	defer a.activeRequests.Del(sessionID)
-	defer a.requestStartTimes.Del(sessionID)
 	defer cancel()
 
 	agent := fantasy.NewAgent(largeModel.Model,
@@ -695,12 +655,10 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 
 	summaryPromptText := buildSummaryPrompt(currentSession.Todos)
 
-	maxRetriesVal := maxRetries
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:          summaryPromptText,
 		Messages:        aiMsgs,
 		ProviderOptions: opts,
-		MaxRetries:      &maxRetriesVal,
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = options.Messages
 			if systemPromptPrefix != "" {

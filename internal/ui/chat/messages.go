@@ -128,9 +128,19 @@ func defaultHighlighter(sty *styles.Styles) *highlightableMessageItem {
 	}
 }
 
-// CacheClearable is implemented by message items that cache rendered output.
-type CacheClearable interface {
-	ClearCache()
+// cacheClearable is implemented by message items that cache rendered output.
+type cacheClearable interface {
+	clearCache()
+}
+
+// ClearItemCaches clears cached rendered output on a slice of items,
+// forcing them to re-render with current styles on the next draw.
+func ClearItemCaches(items []MessageItem) {
+	for _, item := range items {
+		if cc, ok := item.(cacheClearable); ok {
+			cc.clearCache()
+		}
+	}
 }
 
 // cachedMessageItem caches rendered message content to avoid re-rendering.
@@ -162,8 +172,8 @@ func (c *cachedMessageItem) setCachedRender(rendered string, width, height int) 
 	c.height = height
 }
 
-// ClearCache clears the cached render.
-func (c *cachedMessageItem) ClearCache() {
+// clearCache clears the cached render.
+func (c *cachedMessageItem) clearCache() {
 	c.rendered = ""
 	c.width = 0
 	c.height = 0

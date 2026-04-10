@@ -79,7 +79,7 @@ func (a *AgentToolMessageItem) NestedTools() []ToolMessageItem {
 // SetNestedTools sets the nested tools.
 func (a *AgentToolMessageItem) SetNestedTools(tools []ToolMessageItem) {
 	a.nestedTools = tools
-	a.ClearCache()
+	a.clearCache()
 }
 
 // AddNestedTool adds a nested tool.
@@ -89,7 +89,7 @@ func (a *AgentToolMessageItem) AddNestedTool(tool ToolMessageItem) {
 		s.SetCompact(true)
 	}
 	a.nestedTools = append(a.nestedTools, tool)
-	a.ClearCache()
+	a.clearCache()
 }
 
 // AgentToolRenderContext renders agent tool messages.
@@ -204,7 +204,7 @@ func (a *AgenticFetchToolMessageItem) NestedTools() []ToolMessageItem {
 // SetNestedTools sets the nested tools.
 func (a *AgenticFetchToolMessageItem) SetNestedTools(tools []ToolMessageItem) {
 	a.nestedTools = tools
-	a.ClearCache()
+	a.clearCache()
 }
 
 // AddNestedTool adds a nested tool.
@@ -214,7 +214,7 @@ func (a *AgenticFetchToolMessageItem) AddNestedTool(tool ToolMessageItem) {
 		s.SetCompact(true)
 	}
 	a.nestedTools = append(a.nestedTools, tool)
-	a.ClearCache()
+	a.clearCache()
 }
 
 // AgenticFetchToolRenderContext renders agentic fetch tool messages.

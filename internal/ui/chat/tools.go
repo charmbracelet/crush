@@ -270,7 +270,7 @@ func NewToolMessageItem(
 // SetCompact implements the Compactable interface.
 func (t *baseToolMessageItem) SetCompact(compact bool) {
 	t.isCompact = compact
-	t.ClearCache()
+	t.clearCache()
 }
 
 // ID returns the unique identifier for this tool message item.
@@ -346,13 +346,13 @@ func (t *baseToolMessageItem) ToolCall() message.ToolCall {
 // SetToolCall sets the tool call associated with this message item.
 func (t *baseToolMessageItem) SetToolCall(tc message.ToolCall) {
 	t.toolCall = tc
-	t.ClearCache()
+	t.clearCache()
 }
 
 // SetResult sets the tool result associated with this message item.
 func (t *baseToolMessageItem) SetResult(res *message.ToolResult) {
 	t.result = res
-	t.ClearCache()
+	t.clearCache()
 }
 
 // MessageID returns the ID of the message containing this tool call.
@@ -368,7 +368,7 @@ func (t *baseToolMessageItem) SetMessageID(id string) {
 // SetStatus sets the tool status.
 func (t *baseToolMessageItem) SetStatus(status ToolStatus) {
 	t.status = status
-	t.ClearCache()
+	t.clearCache()
 }
 
 // Status returns the current tool status.
@@ -407,7 +407,7 @@ func (t *baseToolMessageItem) SetSpinningFunc(fn SpinningFunc) {
 // ToggleExpanded toggles the expanded state of the thinking box.
 func (t *baseToolMessageItem) ToggleExpanded() bool {
 	t.expandedContent = !t.expandedContent
-	t.ClearCache()
+	t.clearCache()
 	return t.expandedContent
 }
 

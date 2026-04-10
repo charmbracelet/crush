@@ -2,6 +2,7 @@ package styles
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -84,8 +85,8 @@ func TestValidate_SortedMissingFields(t *testing.T) {
 		t.Fatal("expected error")
 	}
 	msg := err.Error()
-	bgIdx := indexOf(msg, "bg_base")
-	priIdx := indexOf(msg, "primary")
+	bgIdx := strings.Index(msg, "bg_base")
+	priIdx := strings.Index(msg, "primary")
 	if bgIdx < 0 || priIdx < 0 {
 		t.Fatalf("expected both bg_base and primary in error: %s", msg)
 	}
@@ -210,7 +211,7 @@ func TestRequiredColorFieldsCoversAllStructFields(t *testing.T) {
 			continue
 		}
 		name := jsonTag
-		if idx := indexOf(name, ","); idx >= 0 {
+		if idx := strings.Index(name, ","); idx >= 0 {
 			name = name[:idx]
 		}
 		if optionalFields[name] {
@@ -292,13 +293,4 @@ func validTestPalette() ThemePalette {
 			Yellow:        "#ffff00",
 		},
 	}
-}
-
-func indexOf(s, sub string) int {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
-		}
-	}
-	return -1
 }

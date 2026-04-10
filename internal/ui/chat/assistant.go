@@ -242,7 +242,7 @@ func (a *AssistantMessageItem) isSpinning() bool {
 func (a *AssistantMessageItem) SetMessage(message *message.Message) tea.Cmd {
 	wasSpinning := a.isSpinning()
 	a.message = message
-	a.ClearCache()
+	a.clearCache()
 	if !wasSpinning && a.isSpinning() {
 		return a.StartAnimation()
 	}
@@ -252,7 +252,7 @@ func (a *AssistantMessageItem) SetMessage(message *message.Message) tea.Cmd {
 // ToggleExpanded toggles the expanded state of the thinking box.
 func (a *AssistantMessageItem) ToggleExpanded() {
 	a.thinkingExpanded = !a.thinkingExpanded
-	a.ClearCache()
+	a.clearCache()
 }
 
 // HandleMouseClick implements MouseClickable.

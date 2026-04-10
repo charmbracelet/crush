@@ -518,6 +518,11 @@ func (s *Styles) Clone() Styles {
 // This ensures all *string, *bool, and *uint pointer fields are independent.
 // Panics if marshaling fails, since ansi.StyleConfig is always JSON-serializable
 // and a failure here would indicate a programming error.
+//
+// NOTE: This assumes ansi.StyleConfig remains fully JSON-round-trippable.
+// If the glamour library adds non-serializable fields (functions, channels,
+// etc.), this approach will need to be replaced with a reflect-based deep
+// copy or code generation.
 func cloneStyleConfig(src ansi.StyleConfig) ansi.StyleConfig {
 	data, err := json.Marshal(src)
 	if err != nil {

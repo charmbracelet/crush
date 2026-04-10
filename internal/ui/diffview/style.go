@@ -1,8 +1,6 @@
 package diffview
 
 import (
-	"image/color"
-
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/charmtone"
 )
@@ -26,120 +24,101 @@ type Style struct {
 }
 
 // DefaultLightStyle provides a default light theme style for the diff view.
-// These use charmtone colors as a fallback; prefer constructing styles via
-// the themed palette in styles.NewStyles() for TUI use.
 func DefaultLightStyle() Style {
-	dividerFg := charmtone.Iron
-	dividerBg := charmtone.Thunder
-	dividerCodeFg := charmtone.Oyster
-	dividerCodeBg := charmtone.Anchovy
-	missingBg := charmtone.Ash
-	equalFg := charmtone.Charcoal
-	equalBg := charmtone.Ash
-	equalCodeFg := charmtone.Pepper
-	equalCodeBg := charmtone.Salt
-	insertFg := charmtone.Turtle
-	insertBg := lipgloss.Color("#c8e6c9")
-	insertCodeBg := lipgloss.Color("#e8f5e9")
-	deleteFg := charmtone.Cherry
-	deleteBg := lipgloss.Color("#ffcdd2")
-	deleteCodeBg := lipgloss.Color("#ffebee")
-	codeFg := charmtone.Pepper
-
-	return buildDiffStyle(
-		dividerFg, dividerBg, dividerCodeFg, dividerCodeBg,
-		missingBg,
-		equalFg, equalBg, equalCodeFg, equalCodeBg,
-		insertFg, insertBg, insertCodeBg,
-		deleteFg, deleteBg, deleteCodeBg,
-		codeFg,
-	)
-}
-
-// DefaultDarkStyle provides a default dark theme style for the diff view.
-// These use charmtone colors as a fallback; prefer constructing styles via
-// the themed palette in styles.NewStyles() for TUI use.
-func DefaultDarkStyle() Style {
-	dividerFg := charmtone.Smoke
-	dividerBg := charmtone.Sapphire
-	dividerCodeFg := charmtone.Smoke
-	dividerCodeBg := charmtone.Ox
-	missingBg := charmtone.Charcoal
-	equalFg := charmtone.Ash
-	equalBg := charmtone.Charcoal
-	equalCodeFg := charmtone.Salt
-	equalCodeBg := charmtone.Pepper
-	insertFg := charmtone.Turtle
-	insertBg := lipgloss.Color("#293229")
-	insertCodeBg := lipgloss.Color("#303a30")
-	deleteFg := charmtone.Cherry
-	deleteBg := lipgloss.Color("#332929")
-	deleteCodeBg := lipgloss.Color("#3a3030")
-	codeFg := charmtone.Salt
-
-	return buildDiffStyle(
-		dividerFg, dividerBg, dividerCodeFg, dividerCodeBg,
-		missingBg,
-		equalFg, equalBg, equalCodeFg, equalCodeBg,
-		insertFg, insertBg, insertCodeBg,
-		deleteFg, deleteBg, deleteCodeBg,
-		codeFg,
-	)
-}
-
-// buildDiffStyle constructs a Style from individual color values.
-func buildDiffStyle(
-	dividerFg, dividerBg, dividerCodeFg, dividerCodeBg,
-	missingBg,
-	equalFg, equalBg, equalCodeFg, equalCodeBg color.Color,
-	insertFg color.Color, insertBg, insertCodeBg color.Color,
-	deleteFg color.Color, deleteBg, deleteCodeBg color.Color,
-	codeFg color.Color,
-) Style {
 	return Style{
 		DividerLine: LineStyle{
 			LineNumber: lipgloss.NewStyle().
-				Foreground(dividerFg).
-				Background(dividerBg),
+				Foreground(charmtone.Iron).
+				Background(charmtone.Thunder),
 			Code: lipgloss.NewStyle().
-				Foreground(dividerCodeFg).
-				Background(dividerCodeBg),
+				Foreground(charmtone.Oyster).
+				Background(charmtone.Anchovy),
 		},
 		MissingLine: LineStyle{
 			LineNumber: lipgloss.NewStyle().
-				Background(missingBg),
+				Background(charmtone.Ash),
 			Code: lipgloss.NewStyle().
-				Background(missingBg),
+				Background(charmtone.Ash),
 		},
 		EqualLine: LineStyle{
 			LineNumber: lipgloss.NewStyle().
-				Foreground(equalFg).
-				Background(equalBg),
+				Foreground(charmtone.Charcoal).
+				Background(charmtone.Ash),
 			Code: lipgloss.NewStyle().
-				Foreground(equalCodeFg).
-				Background(equalCodeBg),
+				Foreground(charmtone.Pepper).
+				Background(charmtone.Salt),
 		},
 		InsertLine: LineStyle{
 			LineNumber: lipgloss.NewStyle().
-				Foreground(insertFg).
-				Background(insertBg),
+				Foreground(charmtone.Turtle).
+				Background(lipgloss.Color("#c8e6c9")),
 			Symbol: lipgloss.NewStyle().
-				Foreground(insertFg).
-				Background(insertCodeBg),
+				Foreground(charmtone.Turtle).
+				Background(lipgloss.Color("#e8f5e9")),
 			Code: lipgloss.NewStyle().
-				Foreground(codeFg).
-				Background(insertCodeBg),
+				Foreground(charmtone.Pepper).
+				Background(lipgloss.Color("#e8f5e9")),
 		},
 		DeleteLine: LineStyle{
 			LineNumber: lipgloss.NewStyle().
-				Foreground(deleteFg).
-				Background(deleteBg),
+				Foreground(charmtone.Cherry).
+				Background(lipgloss.Color("#ffcdd2")),
 			Symbol: lipgloss.NewStyle().
-				Foreground(deleteFg).
-				Background(deleteCodeBg),
+				Foreground(charmtone.Cherry).
+				Background(lipgloss.Color("#ffebee")),
 			Code: lipgloss.NewStyle().
-				Foreground(codeFg).
-				Background(deleteCodeBg),
+				Foreground(charmtone.Pepper).
+				Background(lipgloss.Color("#ffebee")),
+		},
+	}
+}
+
+// DefaultDarkStyle provides a default dark theme style for the diff view.
+func DefaultDarkStyle() Style {
+	return Style{
+		DividerLine: LineStyle{
+			LineNumber: lipgloss.NewStyle().
+				Foreground(charmtone.Smoke).
+				Background(charmtone.Sapphire),
+			Code: lipgloss.NewStyle().
+				Foreground(charmtone.Smoke).
+				Background(charmtone.Ox),
+		},
+		MissingLine: LineStyle{
+			LineNumber: lipgloss.NewStyle().
+				Background(charmtone.Charcoal),
+			Code: lipgloss.NewStyle().
+				Background(charmtone.Charcoal),
+		},
+		EqualLine: LineStyle{
+			LineNumber: lipgloss.NewStyle().
+				Foreground(charmtone.Ash).
+				Background(charmtone.Charcoal),
+			Code: lipgloss.NewStyle().
+				Foreground(charmtone.Salt).
+				Background(charmtone.Pepper),
+		},
+		InsertLine: LineStyle{
+			LineNumber: lipgloss.NewStyle().
+				Foreground(charmtone.Turtle).
+				Background(lipgloss.Color("#293229")),
+			Symbol: lipgloss.NewStyle().
+				Foreground(charmtone.Turtle).
+				Background(lipgloss.Color("#303a30")),
+			Code: lipgloss.NewStyle().
+				Foreground(charmtone.Salt).
+				Background(lipgloss.Color("#303a30")),
+		},
+		DeleteLine: LineStyle{
+			LineNumber: lipgloss.NewStyle().
+				Foreground(charmtone.Cherry).
+				Background(lipgloss.Color("#332929")),
+			Symbol: lipgloss.NewStyle().
+				Foreground(charmtone.Cherry).
+				Background(lipgloss.Color("#3a3030")),
+			Code: lipgloss.NewStyle().
+				Foreground(charmtone.Salt).
+				Background(lipgloss.Color("#3a3030")),
 		},
 	}
 }

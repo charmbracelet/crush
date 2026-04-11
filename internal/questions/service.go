@@ -11,21 +11,20 @@ import (
 
 // Option represents a single answer option for a question.
 type Option struct {
-	Label       string `json:"label"`
-	Description string `json:"description"`
+	Label       string `json:"label" description:"Short label identifying the option"`
+	Description string `json:"description" description:"Optional description of the option"`
 }
 
 // Question represents a single question to be asked.
 type Question struct {
-	ID       string `json:"id"`
-	Question string `json:"question"`
-	Header   string `json:"header"`
+	ID       string `json:"id" description:"UUID of originating question: used to correlate question and answer"`
+	Question string `json:"question" description:"Short question to ask the user"`
 
 	// Options are the possible Answer(s) to the question.
-	Options []Option `json:"options"`
+	Options []Option `json:"options" description:"Array of options from which user will select one or more answers"`
 
 	// MultiSelect indicates whether the user can Answer by selecting multiple Option(s).
-	MultiSelect bool `json:"multi_select"`
+	MultiSelect bool `json:"multi_select" description:"Indicates if user can answer selecting multiple options"`
 }
 
 // QuestionsRequest represents a request to ask a set of Question(s).
@@ -51,10 +50,10 @@ type Answer struct {
 	// ID is the ID of the original Question.
 	// This ensures that even if the LLM asks multiple Question(s),
 	// the Answer(s) can be easily correlated to the original Question.
-	ID string `json:"id"`
+	ID string `json:"id" description:"UUID of originating question"`
 
 	// Selected is the index of the selected Option.
-	Selected []string `json:"selected"`
+	Selected []string `json:"selected" description:"Array of options' labels selected by user"`
 }
 
 func NewAnswer(question Question) Answer {

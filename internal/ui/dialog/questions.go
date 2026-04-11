@@ -197,9 +197,8 @@ func (q *Questions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	rc := NewRenderContext(t, width)
 
-	// Render: Title and Question's Header
+	// Render: Title
 	rc.Title = "Question"
-	rc.TitleInfo = t.HalfMuted.Padding(0, 1).Render(currQ.Header)
 
 	// Render: Question
 	questionText := t.Dialog.TitleAccent.Italic(true).Padding(1, 2).Render(currQ.Question)

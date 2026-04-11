@@ -395,10 +395,7 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	if c.Options.TUI == nil {
 		c.Options.TUI = &TUIOptions{}
 	}
-	if c.Options.ContextPaths == nil {
-		c.Options.ContextPaths = []string{}
-	}
-	if c.Options.MemoryPaths == nil {
+	if len(c.Options.MemoryPaths) == 0 {
 		crushConfigDir := filepath.Dir(GlobalConfig())
 		c.Options.MemoryPaths = []string{
 			filepath.Join(crushConfigDir, "CRUSH.md"),
@@ -406,9 +403,6 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 		}
 	}
 	c.Options.ContextPaths = append(c.Options.ContextPaths, c.Options.MemoryPaths...)
-	if c.Options.SkillsPaths == nil {
-		c.Options.SkillsPaths = []string{}
-	}
 	if dataDir != "" {
 		c.Options.DataDirectory = dataDir
 	} else if c.Options.DataDirectory == "" {

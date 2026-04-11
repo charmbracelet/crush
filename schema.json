@@ -363,12 +363,12 @@
           "type": "array",
           "description": "Paths to files containing context information for the AI"
         },
-        "memory_paths": {
+        "global_context_paths": {
           "items": {
             "type": "string"
           },
           "type": "array",
-          "description": "Paths to files containing memory information for the AI",
+          "description": "Paths to files containing global context information for the AI",
           "default": [
             "~/.config/crush/CRUSH.md",
             "~/.config/AGENTS.md"

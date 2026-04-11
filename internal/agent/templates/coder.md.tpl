@@ -397,11 +397,11 @@ Make sure to follow the instructions in the context below.
 </project_context>
 {{end}}
 
-{{if .MemoryFiles}}
+{{if .GlobalContextFiles}}
 # User context
 The following is personal content added by the user that they'd like you to follow no matter what project you're working in.
 <user_preferences>
-{{range .MemoryFiles}}
+{{range .GlobalContextFiles}}
 <file path="{{.Path}}">
 {{.Content}}
 </file>

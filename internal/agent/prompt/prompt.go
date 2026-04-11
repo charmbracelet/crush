@@ -29,17 +29,17 @@ type Prompt struct {
 }
 
 type PromptDat struct {
-	Provider      string
-	Model         string
-	Config        config.Config
-	WorkingDir    string
-	IsGitRepo     bool
-	Platform      string
-	Date          string
-	GitStatus     string
-	ContextFiles  []ContextFile
-	MemoryFiles   []ContextFile
-	AvailSkillXML string
+	Provider           string
+	Model              string
+	Config             config.Config
+	WorkingDir         string
+	IsGitRepo          bool
+	Platform           string
+	Date               string
+	GitStatus          string
+	ContextFiles       []ContextFile
+	GlobalContextFiles []ContextFile
+	AvailSkillXML      string
 }
 
 type ContextFile struct {
@@ -156,7 +156,7 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 	platform := cmp.Or(p.platform, runtime.GOOS)
 
 	contextFiles := map[string][]ContextFile{}
-	memoryFiles := map[string][]ContextFile{}
+	globalContextFiles := map[string][]ContextFile{}
 
 	cfg := store.Config()
 	for _, pth := range cfg.Options.ContextPaths {
@@ -169,14 +169,14 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		contextFiles[pathKey] = content
 	}
 
-	for _, pth := range cfg.Options.MemoryPaths {
+	for _, pth := range cfg.Options.GlobalContextPaths {
 		expanded := expandPath(pth, store)
 		pathKey := strings.ToLower(expanded)
-		if _, ok := memoryFiles[pathKey]; ok {
+		if _, ok := globalContextFiles[pathKey]; ok {
 			continue
 		}
 		content := processContextPath(expanded, store)
-		memoryFiles[pathKey] = content
+		globalContextFiles[pathKey] = content
 	}
 
 	// Discover and load skills metadata.
@@ -236,8 +236,8 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		data.ContextFiles = append(data.ContextFiles, files...)
 	}
 	if !testing.Testing() {
-		for _, files := range memoryFiles {
-			data.MemoryFiles = append(data.MemoryFiles, files...)
+		for _, files := range globalContextFiles {
+			data.GlobalContextFiles = append(data.GlobalContextFiles, files...)
 		}
 	}
 	return data, nil

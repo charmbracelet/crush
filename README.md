@@ -335,7 +335,7 @@ using `$(echo $VAR)` syntax.
 }
 ```
 
-### Memory files
+### Global context files
 
 Crush automatically includes two files for cross-project instructions.
 
@@ -345,15 +345,15 @@ Crush automatically includes two files for cross-project instructions.
 - `~/.config/AGENTS.md`: generic instructions that other coding tools might
   read. Avoid referring to Crush-specific tools or workflows here.
 
-You can customize these paths using the `memory_paths` option in your
+You can customize these paths using the `global_context_paths` option in your
 configuration:
 
 ```jsonc
 {
   "$schema": "https://charm.land/crush.json",
   "options": {
-    "memory_paths": [
-      "~/path/to/custom/memory/file.md",
+    "global_context_paths": [
+      "~/path/to/custom/context/file.md",
       "/full/path/to/folder/of/files/" // recursively load all .md files in folder
     ]
   }

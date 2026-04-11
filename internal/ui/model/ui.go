@@ -644,6 +644,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case pubsub.Event[permission.PermissionNotification]:
 		m.handlePermissionNotification(msg.Payload)
+	case pubsub.Event[ask_question.QuestionsRequest]:
+		d := dialog.NewAskQuestionDialog(m.com, msg.Payload)
+		m.dialog.OpenDialog(d)
+		cmds = append(cmds, m.sendNotification(notification.Notification{
+			Title:   "Crush is waiting...",
+			Message: "There is a question for you.",
+		}))
 	case cancelTimerExpiredMsg:
 		m.isCanceling = false
 	case tea.TerminalVersionMsg:
@@ -1506,6 +1513,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			return util.NewInfoMsg("Reasoning effort set to " + msg.Effort)
 		})
 		m.dialog.CloseDialog(dialog.ReasoningID)
+	case dialog.ActionAskQuestionResponse:
+		m.com.Workspace.AskQuestionAnswer(msg.Response)
+		m.dialog.CloseDialog(dialog.QuestionsID)
 	case dialog.ActionPermissionResponse:
 		m.dialog.CloseDialog(dialog.PermissionsID)
 		switch msg.Action {

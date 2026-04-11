@@ -343,7 +343,9 @@ Crush automatically includes two files for cross-project instructions.
   agentic coding tools. If you only use Crush, this is the only one you need to
   edit.
 - `~/.config/AGENTS.md`: generic instructions that other coding tools might
-  read. Avoid referring to Crush-specific tools or workflows here.
+  read. Avoid referring to Crush-specific features or workflows here. You
+  probably only care about this if you use multiple agentic coding tools and
+  want to share instructions between them.
 
 You can customize these paths using the `global_context_paths` option in your
 configuration:

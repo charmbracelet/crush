@@ -399,6 +399,7 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 		crushConfigDir := filepath.Dir(GlobalConfig())
 		c.Options.GlobalContextPaths = []string{
 			filepath.Join(crushConfigDir, "CRUSH.md"),
+			filepath.Join(crushConfigDir, "AGENTS.md"),
 			filepath.Join(filepath.Dir(crushConfigDir), "AGENTS.md"),
 		}
 	}

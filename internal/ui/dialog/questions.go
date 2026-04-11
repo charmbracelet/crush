@@ -6,7 +6,7 @@ import (
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/ask_question"
+	"github.com/charmbracelet/crush/internal/questions"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	uv "github.com/charmbracelet/ultraviolet"
 )
@@ -17,7 +17,7 @@ type Questions struct {
 	com *common.Common
 
 	// Input
-	req ask_question.QuestionsRequest
+	req questions.QuestionsRequest
 
 	// State
 	currQuestion           int
@@ -38,7 +38,7 @@ type Questions struct {
 	help help.Model
 }
 
-func NewAskQuestionDialog(com *common.Common, req ask_question.QuestionsRequest) *Questions {
+func NewQuestionsDialog(com *common.Common, req questions.QuestionsRequest) *Questions {
 	d := &Questions{
 		com:                    com,
 		req:                    req,
@@ -110,7 +110,7 @@ func (q *Questions) HandleMsg(msg tea.Msg) Action {
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, q.keyMap.Close):
-			return ActionAskQuestionResponse{Response: ask_question.AnswersResponse{}}
+			return ActionQuestionsResponse{Response: questions.QuestionsResponse{}}
 		case key.Matches(msg, q.keyMap.Previous):
 			q.list.Focus()
 			if q.list.IsSelectedFirst() {
@@ -146,10 +146,10 @@ func (q *Questions) HandleMsg(msg tea.Msg) Action {
 				q.initList()
 			} else {
 				// Loop over all the Questions to assemble the Answers response
-				res := ask_question.NewAnswersResponse(&q.req)
+				res := questions.NewQuestionsResponse(&q.req)
 				for questIdx, quest := range q.req.Questions {
 					// Create an Answer for each Question
-					ans := ask_question.NewAnswer(quest)
+					ans := questions.NewAnswer(quest)
 					for optIdx, optSelected := range q.selectedOptsByQuestion[questIdx] {
 						// If the option is selected, select it on the Answer too
 						if optSelected {
@@ -161,10 +161,10 @@ func (q *Questions) HandleMsg(msg tea.Msg) Action {
 
 				// Check if the response is complete: this should always be true
 				if !res.IsComplete() {
-					slog.Warn("AskQuestionDialog: incomplete response, missing answers", "want", cap(res.Answers), "got", len(res.Answers))
+					slog.Warn("QuestionsDialog: incomplete response, missing answers", "want", cap(res.Answers), "got", len(res.Answers))
 				}
 
-				return ActionAskQuestionResponse{Response: res}
+				return ActionQuestionsResponse{Response: res}
 			}
 		}
 	}

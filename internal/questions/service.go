@@ -1,4 +1,4 @@
-package ask_question
+package questions
 
 import (
 	"context"
@@ -69,62 +69,62 @@ func (ans *Answer) Select(label ...string) {
 	ans.Selected = append(ans.Selected, label...)
 }
 
-// AnswersResponse represents the set of Answer(s) to a set of Question(s)
+// QuestionsResponse represents the set of Answer(s) to a set of Question(s)
 // contained in the originating QuestionsRequest.
 // The originating QuestionsRequest is identified by the RequestID.
-type AnswersResponse struct {
+type QuestionsResponse struct {
 	RequestID string   `json:"request_id"`
 	Answers   []Answer `json:"answers"`
 }
 
-func NewAnswersResponse(req *QuestionsRequest) AnswersResponse {
-	return AnswersResponse{
+func NewQuestionsResponse(req *QuestionsRequest) QuestionsResponse {
+	return QuestionsResponse{
 		RequestID: req.ID,
 		Answers:   make([]Answer, len(req.Questions)),
 	}
 }
 
 // SetAnswerAt sets the Answer at the given index.
-func (res *AnswersResponse) SetAnswerAt(idx int, ans Answer) {
+func (res *QuestionsResponse) SetAnswerAt(idx int, ans Answer) {
 	res.Answers[idx] = ans
 }
 
-// IsComplete returns true if the AnswersResponse contains all the expected Answer(s).
-func (res *AnswersResponse) IsComplete() bool {
+// IsComplete returns true if the QuestionsResponse contains all the expected Answer(s).
+func (res *QuestionsResponse) IsComplete() bool {
 	return len(res.Answers) == cap(res.Answers)
 }
 
-// Service is the interface for the AskQuestion service.
+// Service is the interface for the questionsService.
 // When Ask is invoked, a new QuestionsRequest is published to the service.
 // When the user answers the Question(s), the Answer(s) are sent back via the Answer method.
 type Service interface {
 	pubsub.Subscriber[QuestionsRequest]
 
-	Ask(ctx context.Context, req QuestionsRequest) (AnswersResponse, error)
-	Answer(response AnswersResponse)
+	Ask(ctx context.Context, req QuestionsRequest) (QuestionsResponse, error)
+	Answer(response QuestionsResponse)
 }
 
-// service is a pubsub.Broker[QuestionsRequest] that tracks the pending
-// AnswersResponse channels for each submitted QuestionsRequest.
-type service struct {
+// questionsService is a pubsub.Broker[QuestionsRequest] that tracks the pending
+// QuestionsResponse channels for each submitted QuestionsRequest.
+type questionsService struct {
 	*pubsub.Broker[QuestionsRequest]
 
 	// pendingRequests maps a QuestionsRequest.ID to a channel that will be used to
-	// send the AnswersResponse back when the user answers the Question(s).
-	pendingRequests *csync.Map[string, chan AnswersResponse]
+	// send the QuestionsResponse back when the user answers the Question(s).
+	pendingRequests *csync.Map[string, chan QuestionsResponse]
 }
 
-// NewService creates a new AskQuestion service.
+// NewService creates a new questionsService.
 func NewService() Service {
-	return &service{
+	return &questionsService{
 		Broker:          pubsub.NewBroker[QuestionsRequest](),
-		pendingRequests: csync.NewMap[string, chan AnswersResponse](),
+		pendingRequests: csync.NewMap[string, chan QuestionsResponse](),
 	}
 }
 
-func (s *service) Ask(ctx context.Context, req QuestionsRequest) (AnswersResponse, error) {
+func (s *questionsService) Ask(ctx context.Context, req QuestionsRequest) (QuestionsResponse, error) {
 	slog.Debug("Ask", "request_id", req.ID, "session_id", req.SessionID, "tool_call_id", req.ToolCallID, "questions", len(req.Questions))
-	ch := make(chan AnswersResponse, 1)
+	ch := make(chan QuestionsResponse, 1)
 	s.pendingRequests.Set(req.ID, ch)
 	defer s.pendingRequests.Del(req.ID)
 
@@ -134,18 +134,18 @@ func (s *service) Ask(ctx context.Context, req QuestionsRequest) (AnswersRespons
 	// If the context is cancelled, return and empty AnswersResponse and the error.
 	case <-ctx.Done():
 		slog.Debug("Ask cancelled", "request_id", req.ID)
-		return AnswersResponse{RequestID: req.ID}, ctx.Err()
+		return QuestionsResponse{RequestID: req.ID}, ctx.Err()
 	// Otherwise, wait for the user to answer the Question(s).
 	case resp := <-ch:
 		return resp, nil
 	}
 }
 
-func (s *service) Answer(res AnswersResponse) {
+func (s *questionsService) Answer(res QuestionsResponse) {
 	if ch, found := s.pendingRequests.Get(res.RequestID); found {
-		slog.Debug("Answer", "request_id", res.RequestID, "answers", len(res.Answers))
+		slog.Debug("Answer", "request_id", res.RequestID, "answers", res.Answers)
 		ch <- res
 	} else {
-		slog.Warn("Received answers for unknown questions", "request_id", res.RequestID)
+		slog.Warn("Received answers for unknown questions", "request_id", res.RequestID, "answers", res.Answers)
 	}
 }

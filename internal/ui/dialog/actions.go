@@ -8,12 +8,12 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/ask_question"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/questions"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/util"
@@ -86,9 +86,9 @@ type (
 	ActionEnableDockerMCP struct{}
 	// ActionDisableDockerMCP is a message to disable Docker MCP.
 	ActionDisableDockerMCP struct{}
-	// ActionAskQuestionResponse is sent when the user completes an ask_question dialog.
-	ActionAskQuestionResponse struct {
-		Response ask_question.AnswersResponse
+	// ActionQuestionsResponse is sent when the user completes an ask_question dialog.
+	ActionQuestionsResponse struct {
+		Response questions.QuestionsResponse
 	}
 )
 

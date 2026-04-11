@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/crush/internal/ask_question"
+	"github.com/charmbracelet/crush/internal/questions"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
@@ -29,7 +29,7 @@ func newQuestionOptionsList(sty *styles.Styles) *questionOptionsList {
 
 // SetQuestion sets the question's options in the list,
 // and a map of which option is selected.
-func (l *questionOptionsList) SetQuestion(q ask_question.Question, selOpts map[int]bool) {
+func (l *questionOptionsList) SetQuestion(q questions.Question, selOpts map[int]bool) {
 	var items []list.Item
 	for i, opt := range q.Options {
 		items = append(items, &questionOptionsListItem{
@@ -45,7 +45,7 @@ func (l *questionOptionsList) SetQuestion(q ask_question.Question, selOpts map[i
 // questionOptionsListItem is a list item for a question's option.
 type questionOptionsListItem struct {
 	parent   *questionOptionsList
-	opt      ask_question.Option
+	opt      questions.Option
 	selected bool
 	focused  bool
 	index    int

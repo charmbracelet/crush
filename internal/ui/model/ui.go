@@ -37,6 +37,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/questions"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
@@ -644,8 +645,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case pubsub.Event[permission.PermissionNotification]:
 		m.handlePermissionNotification(msg.Payload)
-	case pubsub.Event[ask_question.QuestionsRequest]:
-		d := dialog.NewAskQuestionDialog(m.com, msg.Payload)
+	case pubsub.Event[questions.QuestionsRequest]:
+		d := dialog.NewQuestionsDialog(m.com, msg.Payload)
 		m.dialog.OpenDialog(d)
 		cmds = append(cmds, m.sendNotification(notification.Notification{
 			Title:   "Crush is waiting...",
@@ -1513,8 +1514,8 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			return util.NewInfoMsg("Reasoning effort set to " + msg.Effort)
 		})
 		m.dialog.CloseDialog(dialog.ReasoningID)
-	case dialog.ActionAskQuestionResponse:
-		m.com.Workspace.AskQuestionAnswer(msg.Response)
+	case dialog.ActionQuestionsResponse:
+		m.com.Workspace.QuestionsAnswer(msg.Response)
 		m.dialog.CloseDialog(dialog.QuestionsID)
 	case dialog.ActionPermissionResponse:
 		m.dialog.CloseDialog(dialog.PermissionsID)

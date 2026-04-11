@@ -1,4 +1,4 @@
-package ask_question
+package questions
 
 import (
 	"context"
@@ -16,7 +16,7 @@ func TestService_AskAndAnswer(t *testing.T) {
 		questionsReq    QuestionsRequest
 		handleAnswering func(srv Service, req QuestionsRequest)
 		expErr          error
-		expAnswersRes   AnswersResponse
+		expAnswersRes   QuestionsResponse
 	}{
 		{
 			name: "successful single answer",
@@ -32,12 +32,12 @@ func TestService_AskAndAnswer(t *testing.T) {
 				},
 			}),
 			handleAnswering: func(srv Service, req QuestionsRequest) {
-				srv.Answer(AnswersResponse{
+				srv.Answer(QuestionsResponse{
 					RequestID: req.ID,
 					Answers:   []Answer{{ID: "q1", Selected: []string{"opt1"}}},
 				})
 			},
-			expAnswersRes: AnswersResponse{
+			expAnswersRes: QuestionsResponse{
 				Answers: []Answer{{ID: "q1", Selected: []string{"opt1"}}},
 			},
 		},
@@ -59,12 +59,12 @@ func TestService_AskAndAnswer(t *testing.T) {
 				},
 			}),
 			handleAnswering: func(srv Service, req QuestionsRequest) {
-				srv.Answer(AnswersResponse{
+				srv.Answer(QuestionsResponse{
 					RequestID: req.ID,
 					Answers:   []Answer{{ID: "q2", Selected: []string{"B"}}},
 				})
 			},
-			expAnswersRes: AnswersResponse{
+			expAnswersRes: QuestionsResponse{
 				Answers: []Answer{{ID: "q2", Selected: []string{"B"}}},
 			},
 		},
@@ -86,12 +86,12 @@ func TestService_AskAndAnswer(t *testing.T) {
 				},
 			}),
 			handleAnswering: func(srv Service, req QuestionsRequest) {
-				srv.Answer(AnswersResponse{
+				srv.Answer(QuestionsResponse{
 					RequestID: req.ID,
 					Answers:   []Answer{{ID: "q3", Selected: []string{"Apple", "Cherry"}}},
 				})
 			},
-			expAnswersRes: AnswersResponse{
+			expAnswersRes: QuestionsResponse{
 				Answers: []Answer{{ID: "q3", Selected: []string{"Apple", "Cherry"}}},
 			},
 		},
@@ -111,7 +111,7 @@ func TestService_AskAndAnswer(t *testing.T) {
 			},
 			expErr: context.Canceled,
 			// When cancelled, it sets RequestID to the requested ID
-			expAnswersRes: AnswersResponse{},
+			expAnswersRes: QuestionsResponse{},
 		},
 	}
 
@@ -151,7 +151,7 @@ func TestService_AskAndAnswer(t *testing.T) {
 			require.Equal(t, tt.expAnswersRes, resp)
 
 			// Verify cleanup
-			s := srv.(*service)
+			s := srv.(*questionsService)
 			require.Equal(t, 0, s.pendingRequests.Len(), "pendingRequests should be empty after Ask returns")
 		})
 	}
@@ -161,7 +161,7 @@ func TestService_OrphanedAnswer(t *testing.T) {
 	srv := NewService()
 	// Answering an ID that doesn't exist should not panic or block
 	require.NotPanics(t, func() {
-		srv.Answer(AnswersResponse{RequestID: "fake-id"})
+		srv.Answer(QuestionsResponse{RequestID: "fake-id"})
 	})
 }
 
@@ -179,7 +179,7 @@ func TestService_Concurrency(t *testing.T) {
 	// Single goroutine to answer all questions as they come in via the pub/sub
 	go func() {
 		for event := range sub {
-			srv.Answer(AnswersResponse{
+			srv.Answer(QuestionsResponse{
 				RequestID: event.Payload.ID,
 				Answers:   []Answer{{ID: "q1", Selected: []string{"opt1"}}},
 			})
@@ -207,6 +207,6 @@ func TestService_Concurrency(t *testing.T) {
 	wg.Wait()
 
 	// Verify cleanup
-	s := srv.(*service)
+	s := srv.(*questionsService)
 	require.Equal(t, 0, s.pendingRequests.Len(), "pendingRequests should be empty after all Asks return")
 }

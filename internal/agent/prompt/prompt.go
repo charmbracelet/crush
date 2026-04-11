@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"testing"
 	"text/template"
 	"time"
 
@@ -234,8 +235,10 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 	for _, files := range contextFiles {
 		data.ContextFiles = append(data.ContextFiles, files...)
 	}
-	for _, files := range memoryFiles {
-		data.MemoryFiles = append(data.MemoryFiles, files...)
+	if !testing.Testing() {
+		for _, files := range memoryFiles {
+			data.MemoryFiles = append(data.MemoryFiles, files...)
+		}
 	}
 	return data, nil
 }

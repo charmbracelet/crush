@@ -141,8 +141,12 @@ func (s *questionsService) Ask(ctx context.Context, req QuestionsRequest) (Quest
 }
 
 func (s *questionsService) Answer(res QuestionsResponse) {
+	if !res.IsComplete() {
+		slog.Warn("Incomplete response - missing answers", "want", cap(res.Answers), "got", len(res.Answers))
+	}
+
 	if ch, found := s.pendingRequests.Get(res.RequestID); found {
-		slog.Debug("Answer", "request_id", res.RequestID, "answers", res.Answers)
+		slog.Debug("Reporting answers from user", "request_id", res.RequestID, "answers", res.Answers)
 		ch <- res
 	} else {
 		slog.Warn("Received answers for unknown questions", "request_id", res.RequestID, "answers", res.Answers)

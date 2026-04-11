@@ -109,8 +109,6 @@ func (q *Questions) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch {
-		case key.Matches(msg, q.keyMap.Close):
-			return ActionQuestionsResponse{Response: questions.QuestionsResponse{}}
 		case key.Matches(msg, q.keyMap.Previous):
 			q.list.Focus()
 			if q.list.IsSelectedFirst() {
@@ -145,6 +143,8 @@ func (q *Questions) HandleMsg(msg tea.Msg) Action {
 				q.currQuestion++
 				q.initList()
 			} else {
+				slog.Info("Submitting QuestionsDialog with selected answers")
+
 				// Loop over all the Questions to assemble the Answers response
 				res := questions.NewQuestionsResponse(&q.req)
 				for questIdx, quest := range q.req.Questions {
@@ -159,12 +159,12 @@ func (q *Questions) HandleMsg(msg tea.Msg) Action {
 					res.SetAnswerAt(questIdx, ans)
 				}
 
-				// Check if the response is complete: this should always be true
-				if !res.IsComplete() {
-					slog.Warn("QuestionsDialog: incomplete response, missing answers", "want", cap(res.Answers), "got", len(res.Answers))
-				}
-
 				return ActionQuestionsResponse{Response: res}
+			}
+		case key.Matches(msg, q.keyMap.Close):
+			{
+				slog.Info("Closing QuestionsDialog: no answers provided, returning empty response")
+				return ActionQuestionsResponse{Response: questions.NewQuestionsResponse(&q.req)}
 			}
 		}
 	}

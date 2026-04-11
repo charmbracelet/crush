@@ -257,14 +257,9 @@ func namePriorityTier(path, queryLower string) int {
 }
 
 func hasPathSegment(pathLower, queryLower string) bool {
-	for _, part := range strings.FieldsFunc(pathLower, func(r rune) bool {
+	return slices.Contains(strings.FieldsFunc(pathLower, func(r rune) bool {
 		return r == '/' || r == '\\'
-	}) {
-		if part == queryLower {
-			return true
-		}
-	}
-	return false
+	}), queryLower)
 }
 
 func (c *Completions) updateSize() {

@@ -56,7 +56,7 @@ type BackgroundShell struct {
 	stderr      *syncBuffer
 	done        chan struct{}
 	exitErr     error
-	completedAt int64 // Unix timestamp when job completed (0 if still running)
+	completedAt atomic.Int64 // Unix timestamp when job completed (0 if still running)
 }
 
 // BackgroundShellManager manages background shell instances.
@@ -122,7 +122,7 @@ func (m *BackgroundShellManager) Start(ctx context.Context, workingDir string, b
 		err := shell.ExecStream(shellCtx, command, bgShell.stdout, bgShell.stderr)
 
 		bgShell.exitErr = err
-		atomic.StoreInt64(&bgShell.completedAt, time.Now().Unix())
+		bgShell.completedAt.Store(time.Now().Unix())
 	}()
 
 	return bgShell, nil
@@ -178,7 +178,7 @@ func (m *BackgroundShellManager) Cleanup() int {
 
 	var toRemove []string
 	for shell := range m.shells.Seq() {
-		completedAt := atomic.LoadInt64(&shell.completedAt)
+		completedAt := shell.completedAt.Load()
 		if completedAt > 0 && now-completedAt > retentionSeconds {
 			toRemove = append(toRemove, shell.ID)
 		}

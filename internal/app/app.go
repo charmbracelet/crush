@@ -81,7 +81,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 	messages := message.NewService(q)
 	files := history.NewService(q, conn)
 	cfg := store.Config()
-	skipPermissionsRequests := cfg.Permissions != nil && cfg.Permissions.SkipRequests
+	skipPermissionsRequests := store.Overrides().SkipPermissionRequests
 	var allowedTools []string
 	if cfg.Permissions != nil && cfg.Permissions.AllowedTools != nil {
 		allowedTools = cfg.Permissions.AllowedTools
@@ -150,6 +150,20 @@ func (app *App) Config() *config.Config {
 // Store returns the config store.
 func (app *App) Store() *config.ConfigStore {
 	return app.config
+}
+
+// Events returns the events channel for the application.
+func (app *App) Events() <-chan tea.Msg {
+	return app.events
+}
+
+// SendEvent pushes a message into the application's events channel.
+// It is non-blocking; the message is dropped if the channel is full.
+func (app *App) SendEvent(msg tea.Msg) {
+	select {
+	case app.events <- msg:
+	default:
+	}
 }
 
 // AgentNotifications returns the broker for agent notification events.
@@ -593,7 +607,7 @@ func (app *App) Shutdown() {
 	var wg sync.WaitGroup
 
 	// Shared shutdown context for all timeout-bounded cleanup.
-	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(app.globalCtx), 5*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	// Send exit event

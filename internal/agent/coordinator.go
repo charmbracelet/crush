@@ -12,6 +12,7 @@ import (
 	"maps"
 	"net/http"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
@@ -31,6 +33,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/skills"
 	"golang.org/x/sync/errgroup"
 
 	"charm.land/fantasy/providers/anthropic"
@@ -86,6 +89,11 @@ type coordinator struct {
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
 
+	// Skills discovery results (session-start snapshot).
+	allSkills    []*skills.Skill // Pre-filter: all discovered after dedup.
+	activeSkills []*skills.Skill // Post-filter: active skills only.
+	skillTracker *skills.Tracker
+
 	readyWg errgroup.Group
 }
 
@@ -100,16 +108,23 @@ func NewCoordinator(
 	lspManager *lsp.Manager,
 	notify pubsub.Publisher[notify.Notification],
 ) (Coordinator, error) {
+	// Discover skills once at session start.
+	allSkills, activeSkills := discoverSkills(cfg)
+	skillTracker := skills.NewTracker(activeSkills)
+
 	c := &coordinator{
-		cfg:         cfg,
-		sessions:    sessions,
-		messages:    messages,
-		permissions: permissions,
-		history:     history,
-		filetracker: filetracker,
-		lspManager:  lspManager,
-		notify:      notify,
-		agents:      make(map[string]SessionAgent),
+		cfg:          cfg,
+		sessions:     sessions,
+		messages:     messages,
+		permissions:  permissions,
+		history:      history,
+		filetracker:  filetracker,
+		lspManager:   lspManager,
+		notify:       notify,
+		agents:       make(map[string]SessionAgent),
+		allSkills:    allSkills,
+		activeSkills: activeSkills,
+		skillTracker: skillTracker,
 	}
 
 	agentCfg, ok := cfg.Config().Agents[config.AgentCoder]
@@ -445,8 +460,12 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		}
 	}
 
+	logFile := filepath.Join(c.cfg.Config().Options.DataDirectory, "logs", "crush.log")
+
 	allTools = append(allTools,
 		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelName),
+		tools.NewCrushInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
+		tools.NewCrushLogsTool(logFile),
 		tools.NewJobOutputTool(),
 		tools.NewJobKillTool(),
 		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),
@@ -458,7 +477,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		tools.NewLsTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Tools.Ls),
 		tools.NewSourcegraphTool(nil),
 		tools.NewTodosTool(c.sessions),
-		tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, c.cfg.WorkingDir(), c.cfg.Config().Options.SkillsPaths...),
+		tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, c.skillTracker, c.cfg.WorkingDir(), c.cfg.Config().Options.SkillsPaths...),
 		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 	)
 
@@ -921,7 +940,8 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 
 func (c *coordinator) isUnauthorized(err error) bool {
 	var providerErr *fantasy.ProviderError
-	return errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized
+	return (errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized) ||
+		errors.Is(err, hyper.ErrUnauthorized)
 }
 
 func (c *coordinator) refreshOAuth2Token(ctx context.Context, providerCfg config.ProviderConfig) error {
@@ -1036,4 +1056,33 @@ func (c *coordinator) updateParentSessionCost(ctx context.Context, childSessionI
 	}
 
 	return nil
+}
+
+// discoverSkills runs the skill discovery pipeline and returns both the
+// pre-filter (all discovered, after dedup) and post-filter (active) lists.
+func discoverSkills(cfg *config.ConfigStore) (allSkills, activeSkills []*skills.Skill) {
+	discovered := skills.DiscoverBuiltin()
+
+	opts := cfg.Config().Options
+	if opts != nil && len(opts.SkillsPaths) > 0 {
+		expandedPaths := make([]string, 0, len(opts.SkillsPaths))
+		for _, pth := range opts.SkillsPaths {
+			expanded := home.Long(pth)
+			if strings.HasPrefix(expanded, "$") {
+				if resolved, err := cfg.Resolver().ResolveValue(expanded); err == nil {
+					expanded = resolved
+				}
+			}
+			expandedPaths = append(expandedPaths, expanded)
+		}
+		discovered = append(discovered, skills.Discover(expandedPaths)...)
+	}
+
+	allSkills = skills.Deduplicate(discovered)
+	var disabledSkills []string
+	if opts != nil {
+		disabledSkills = opts.DisabledSkills
+	}
+	activeSkills = skills.Filter(allSkills, disabledSkills)
+	return allSkills, activeSkills
 }

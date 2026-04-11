@@ -193,6 +193,7 @@ That said, you can also set environment variables for preferred providers.
 | `OPENROUTER_API_KEY`        | OpenRouter                                         |
 | `IONET_API_KEY`             | io.net                                             |
 | `GROQ_API_KEY`              | Groq                                               |
+| `AVIAN_API_KEY`             | Avian                                              |
 | `VERTEXAI_PROJECT`          | Google Cloud VertexAI (Gemini)                     |
 | `VERTEXAI_LOCATION`         | Google Cloud VertexAI (Gemini)                     |
 | `AWS_ACCESS_KEY_ID`         | Amazon Bedrock (Claude)                            |
@@ -224,6 +225,10 @@ Crush’s default model listing is managed in [Catwalk](https://github.com/charm
 
 ## Configuration
 
+> [!TIP]
+> Crush ships with a builtin `crush-config` skill for configuring itself. In
+> many cases you can simply ask Crush to configure itself.
+
 Crush runs great with no configuration. That said, if you do need or want to
 customize Crush, configuration can be added either local to the project itself,
 or globally, with the following priority:
@@ -241,7 +246,8 @@ Configuration itself is stored as a JSON object:
 }
 ```
 
-As an additional note, Crush also stores ephemeral data, such as application state, in one additional location:
+As an additional note, Crush also stores ephemeral data, such as application
+state, in one additional location:
 
 ```bash
 # Unix
@@ -253,8 +259,9 @@ $HOME/.local/share/crush/crush.json
 
 > [!TIP]
 > You can override the user and data config locations by setting:
-> * `CRUSH_GLOBAL_CONFIG`
-> * `CRUSH_GLOBAL_DATA`
+>
+> - `CRUSH_GLOBAL_CONFIG`
+> - `CRUSH_GLOBAL_DATA`
 
 ### LSPs
 
@@ -371,15 +378,27 @@ completely hidden from the agent.
 {
   "$schema": "https://charm.land/crush.json",
   "options": {
-    "disabled_tools": [
-      "bash",
-      "sourcegraph"
-    ]
+    "disabled_tools": ["bash", "sourcegraph"]
   }
 }
 ```
 
 To disable tools from MCP servers, see the [MCP config section](#mcps).
+
+### Disabling Skills
+
+If you'd like to prevent Crush from using certain skills entirely, you can
+disable them via the `options.disabled_skills` list. Disabled skills are hidden
+from the agent, including builtin skills and skills discovered from disk.
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "disabled_skills": ["crush-config"]
+  }
+}
+```
 
 ### Agent Skills
 
@@ -412,9 +431,9 @@ relative paths:
   "options": {
     "skills_paths": [
       "~/.config/crush/skills", // Windows: "%LOCALAPPDATA%\\crush\\skills",
-      "./project-skills"
-    ]
-  }
+      "./project-skills",
+    ],
+  },
 }
 ```
 
@@ -446,8 +465,8 @@ focused _and_ your terminal supports reporting the focus state.
 {
   "$schema": "https://charm.land/crush.json",
   "options": {
-    "disable_notifications": false // default
-  }
+    "disable_notifications": false, // default
+  },
 }
 ```
 
@@ -496,10 +515,10 @@ it creates. You can customize this behavior with the `attribution` option:
 
 - `trailer_style`: Controls the attribution trailer added to commit messages
   (default: `assisted-by`)
-	- `assisted-by`: Adds `Assisted-by: [Model Name] via Crush <crush@charm.land>`
-	  (includes the model name)
-	- `co-authored-by`: Adds `Co-Authored-By: Crush <crush@charm.land>`
-	- `none`: No attribution trailer
+  - `assisted-by`: Adds `Assisted-by: [Model Name] via Crush <crush@charm.land>`
+    (includes the model name)
+  - `co-authored-by`: Adds `Co-Authored-By: Crush <crush@charm.land>`
+  - `none`: No attribution trailer
 - `generated_with`: When true (default), adds `💘 Generated with Crush` line to
   commit messages and PR descriptions
 
@@ -511,8 +530,9 @@ Anthropic-compatible APIs.
 > [!NOTE]
 > Note that we support two "types" for OpenAI. Make sure to choose the right one
 > to ensure the best experience!
-> * `openai` should be used when proxying or routing requests through OpenAI.
-> * `openai-compat` should be used when using non-OpenAI providers that have OpenAI-compatible APIs.
+>
+> - `openai` should be used when proxying or routing requests through OpenAI.
+> - `openai-compat` should be used when using non-OpenAI providers that have OpenAI-compatible APIs.
 
 #### OpenAI-Compatible APIs
 

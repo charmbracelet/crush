@@ -249,12 +249,17 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	var currentAssistant *message.Message
 	var shouldSummarize bool
+	// Don't send MaxOutputTokens if 0 — some providers (e.g. LM Studio) reject it
+	var maxOutputTokens *int64
+	if call.MaxOutputTokens > 0 {
+		maxOutputTokens = &call.MaxOutputTokens
+	}
 	result, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
 		Files:            files,
 		Messages:         history,
 		ProviderOptions:  call.ProviderOptions,
-		MaxOutputTokens:  &call.MaxOutputTokens,
+		MaxOutputTokens:  maxOutputTokens,
 		TopP:             call.TopP,
 		Temperature:      call.Temperature,
 		PresencePenalty:  call.PresencePenalty,
@@ -425,6 +430,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		StopWhen: []fantasy.StopCondition{
 			func(_ []fantasy.StepResult) bool {
 				cw := int64(largeModel.CatwalkCfg.ContextWindow)
+				// If context window is unknown (0), skip auto-summarize
+				// to avoid immediately truncating custom/local models.
+				if cw == 0 {
+					return false
+				}
 				tokens := currentSession.CompletionTokens + currentSession.PromptTokens
 				remaining := cw - tokens
 				var threshold int64
@@ -519,6 +529,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
 		} else if isPermissionErr {
 			currentAssistant.AddFinish(message.FinishReasonPermissionDenied, "User denied permission", "")
+		} else if errors.Is(err, hyper.ErrUnauthorized) {
+			currentAssistant.AddFinish(message.FinishReasonError, "Unauthorized", `Please re-authenticate with Hyper. You can also run "crush auth" to re-authenticate.`)
+			if a.notify != nil {
+				a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+					SessionID:    call.SessionID,
+					SessionTitle: currentSession.Title,
+					Type:         notify.TypeReAuthenticate,
+					ProviderID:   largeModel.ModelCfg.Provider,
+				})
+			}
 		} else if errors.Is(err, hyper.ErrNoCredits) {
 			url := hyper.BaseURL()
 			link := linkStyle.Hyperlink(url, "id=hyper").Render(url)

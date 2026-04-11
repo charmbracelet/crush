@@ -249,8 +249,8 @@ func (m *UI) renderPills() {
 		if todosFocused && hasIncomplete {
 			expandedList = todoList(m.session.Todos, inProgressIcon, t, contentWidth)
 		} else if queueFocused && hasQueue {
-			if m.com.App != nil && m.com.App.AgentCoordinator != nil {
-				queueItems := m.com.App.AgentCoordinator.QueuedPromptsList(m.session.ID)
+			if m.com.Workspace.AgentIsReady() {
+				queueItems := m.com.Workspace.AgentQueuedPromptsList(m.session.ID)
 				expandedList = queueList(queueItems, t)
 			}
 		}

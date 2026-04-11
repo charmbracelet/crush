@@ -22,9 +22,9 @@ func (m *UI) loadPromptHistory() tea.Cmd {
 		var err error
 
 		if m.session != nil {
-			messages, err = m.com.App.Messages.ListUserMessages(ctx, m.session.ID)
+			messages, err = m.com.Workspace.ListUserMessages(ctx, m.session.ID)
 		} else {
-			messages, err = m.com.App.Messages.ListAllUserMessages(ctx)
+			messages, err = m.com.Workspace.ListAllUserMessages(ctx)
 		}
 		if err != nil {
 			slog.Error("Failed to load prompt history", "error", err)

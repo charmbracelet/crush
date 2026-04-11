@@ -91,13 +91,9 @@ var gitGlobalIgnorePatterns = sync.OnceValue(func() []gitignore.Pattern {
 		return nil
 	}
 
-	configPath := cmp.Or(
-		os.Getenv("XDG_CONFIG_HOME"),
-		filepath.Join(home.Dir(), ".config"),
-	)
 	excludesFilePath := cmp.Or(
 		cfg.Raw.Section("core").Options.Get("excludesfile"),
-		filepath.Join(configPath, "git", "ignore"),
+		filepath.Join(home.Config(), "git", "ignore"),
 	)
 	excludesFilePath = home.Long(excludesFilePath)
 
@@ -115,11 +111,7 @@ var gitGlobalIgnorePatterns = sync.OnceValue(func() []gitignore.Pattern {
 // crushGlobalIgnorePatterns returns patterns from the user's
 // ~/.config/crush/ignore file.
 var crushGlobalIgnorePatterns = sync.OnceValue(func() []gitignore.Pattern {
-	configPath := cmp.Or(
-		os.Getenv("XDG_CONFIG_HOME"),
-		filepath.Join(home.Dir(), ".config"),
-	)
-	name := filepath.Join(configPath, "crush", "ignore")
+	name := filepath.Join(home.Config(), "crush", "ignore")
 	bts, err := os.ReadFile(name)
 	if err != nil {
 		if !os.IsNotExist(err) {

@@ -53,7 +53,7 @@ func BenchmarkLoadFromConfigPaths(b *testing.B) {
 
 	b.ReportAllocs()
 	for b.Loop() {
-		_, err := loadFromConfigPaths(configPaths)
+		_, _, err := loadFromConfigPaths(configPaths)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -78,7 +78,7 @@ func BenchmarkLoadFromConfigPaths_MissingFiles(b *testing.B) {
 
 	b.ReportAllocs()
 	for b.Loop() {
-		_, err := loadFromConfigPaths(configPaths)
+		_, _, err := loadFromConfigPaths(configPaths)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -95,7 +95,7 @@ func BenchmarkLoadFromConfigPaths_Empty(b *testing.B) {
 
 	b.ReportAllocs()
 	for b.Loop() {
-		_, err := loadFromConfigPaths(configPaths)
+		_, _, err := loadFromConfigPaths(configPaths)
 		if err != nil {
 			b.Fatal(err)
 		}

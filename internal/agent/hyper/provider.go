@@ -69,7 +69,10 @@ var BaseURL = sync.OnceValue(func() string {
 	return cmp.Or(os.Getenv("HYPER_URL"), defaultBaseURL)
 })
 
-var ErrNoCredits = errors.New("you're out of credits")
+var (
+	ErrNoCredits    = errors.New("you're out of credits")
+	ErrUnauthorized = errors.New("unauthorized")
+)
 
 type options struct {
 	baseURL string
@@ -183,7 +186,7 @@ func (m *languageModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.
 		return nil, toProviderError(resp, retryAfter(resp))
 	case http.StatusUnauthorized:
 		_ = resp.Body.Close()
-		return nil, toProviderError(resp, "")
+		return nil, ErrUnauthorized
 	case http.StatusPaymentRequired:
 		_ = resp.Body.Close()
 		return nil, ErrNoCredits

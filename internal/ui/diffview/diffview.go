@@ -36,6 +36,7 @@ type DiffView struct {
 	layout          layout
 	before          file
 	after           file
+	fileName        string
 	contextLines    int
 	lineNumbers     bool
 	height          int
@@ -107,6 +108,12 @@ func (dv *DiffView) After(path, content string) *DiffView {
 	dv.after = file{path: path, content: content}
 	// Clear caches when content changes
 	dv.clearCaches()
+	return dv
+}
+
+// FileName sets the file name header to display above the diff.
+func (dv *DiffView) FileName(name string) *DiffView {
+	dv.fileName = name
 	return dv
 }
 
@@ -285,6 +292,7 @@ func (dv *DiffView) adjustStyles() {
 	dv.style.EqualLine.LineNumber = setPadding(dv.style.EqualLine.LineNumber)
 	dv.style.InsertLine.LineNumber = setPadding(dv.style.InsertLine.LineNumber)
 	dv.style.DeleteLine.LineNumber = setPadding(dv.style.DeleteLine.LineNumber)
+	dv.style.Filename.LineNumber = setPadding(dv.style.Filename.LineNumber)
 }
 
 // detectNumDigits calculates the maximum number of digits needed for before and
@@ -301,6 +309,10 @@ func (dv *DiffView) detectNumDigits() {
 
 func (dv *DiffView) detectTotalLines() {
 	dv.totalLines = 0
+
+	if dv.fileName != "" {
+		dv.totalLines++
+	}
 
 	switch dv.layout {
 	case layoutUnified:
@@ -413,6 +425,20 @@ func (dv *DiffView) renderUnified() string {
 
 outer:
 	for i, h := range dv.unified.Hunks {
+		// Render file name header before the first hunk.
+		if i == 0 && dv.fileName != "" {
+			if shouldWrite() {
+				ls := dv.style.Filename
+				if dv.lineNumbers {
+					b.WriteString(ls.LineNumber.Render(pad("…", dv.beforeNumDigits)))
+					b.WriteString(ls.LineNumber.Render(pad("…", dv.afterNumDigits)))
+				}
+				content := ansi.Truncate("  "+dv.fileName, dv.fullCodeWidth, "…")
+				b.WriteString(ls.Code.Width(dv.fullCodeWidth).Render(content))
+				b.WriteString("\n")
+			}
+			printedLines++
+		}
 		if shouldWrite() {
 			ls := dv.style.DividerLine
 			if dv.lineNumbers {
@@ -523,6 +549,23 @@ func (dv *DiffView) renderSplit() string {
 
 outer:
 	for i, h := range dv.splitHunks {
+		// Render file name header before the first hunk.
+		if i == 0 && dv.fileName != "" {
+			if shouldWrite() {
+				ls := dv.style.Filename
+				if dv.lineNumbers {
+					b.WriteString(ls.LineNumber.Render(pad("…", dv.beforeNumDigits)))
+				}
+				content := ansi.Truncate("  "+dv.fileName, dv.fullCodeWidth, "…")
+				b.WriteString(ls.Code.Width(dv.fullCodeWidth).Render(content))
+				if dv.lineNumbers {
+					b.WriteString(ls.LineNumber.Render(pad("…", dv.afterNumDigits)))
+				}
+				b.WriteString(ls.Code.Width(dv.fullCodeWidth + btoi(dv.extraColOnAfter)).Render(" "))
+				b.WriteRune('\n')
+			}
+			printedLines++
+		}
 		if shouldWrite() {
 			ls := dv.style.DividerLine
 			if dv.lineNumbers {

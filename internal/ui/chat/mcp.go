@@ -279,15 +279,22 @@ func toolOutputDiffContentFromUnified(sty *styles.Styles, content string, width 
 	}
 	bodyWidth := width - toolBodyLeftPaddingTotal
 	var blocks []string
-	for _, f := range files {
+	for i, f := range files {
 		formatter := common.DiffFormatter(sty).
 			Before(f.path, f.before).
 			After(f.path, f.after).
 			Width(bodyWidth)
+		if len(files) > 1 {
+			formatter = formatter.FileName(f.path)
+		}
 		if width > maxTextWidth {
 			formatter = formatter.Split()
 		}
-		blocks = append(blocks, formatter.String())
+		formatted := formatter.String()
+		if i < len(files)-1 {
+			formatted += "\n"
+		}
+		blocks = append(blocks, formatted)
 	}
 	combined := strings.Join(blocks, "\n")
 	lines := strings.Split(combined, "\n")

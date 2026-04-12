@@ -72,6 +72,66 @@ func TestReadTextFileBoundaryCases(t *testing.T) {
 	}
 }
 
+func TestIsInAdditionalDir(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	allowedDir := filepath.Join(tmpDir, "allowed")
+	nestedFile := filepath.Join(allowedDir, "sub", "file.go")
+	outsideFile := filepath.Join(tmpDir, "outside", "file.go")
+
+	require.NoError(t, os.MkdirAll(filepath.Join(allowedDir, "sub"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "outside"), 0o755))
+	require.NoError(t, os.WriteFile(nestedFile, []byte("package main"), 0o644))
+	require.NoError(t, os.WriteFile(outsideFile, []byte("package main"), 0o644))
+
+	tests := []struct {
+		name           string
+		filePath       string
+		additionalDirs []string
+		want           bool
+	}{
+		{
+			name:           "file inside additional dir",
+			filePath:       nestedFile,
+			additionalDirs: []string{allowedDir},
+			want:           true,
+		},
+		{
+			name:           "file at root of additional dir",
+			filePath:       filepath.Join(allowedDir, "root.go"),
+			additionalDirs: []string{allowedDir},
+			want:           false, // file doesn't exist, EvalSymlinks fails
+		},
+		{
+			name:           "file outside additional dir",
+			filePath:       outsideFile,
+			additionalDirs: []string{allowedDir},
+			want:           false,
+		},
+		{
+			name:           "empty additional dirs",
+			filePath:       nestedFile,
+			additionalDirs: nil,
+			want:           false,
+		},
+		{
+			name:           "multiple dirs second matches",
+			filePath:       nestedFile,
+			additionalDirs: []string{filepath.Join(tmpDir, "other"), allowedDir},
+			want:           true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := isInAdditionalDir(tt.filePath, tt.additionalDirs)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
 func TestReadTextFileTruncatesLongLines(t *testing.T) {
 	t.Parallel()
 

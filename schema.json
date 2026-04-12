@@ -374,6 +374,17 @@
           "type": "array",
           "description": "Paths to directories containing Agent Skills (folders with SKILL.md files)"
         },
+        "additional_dirs": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "~/projects/shared-lib",
+              "/opt/dependencies/my-lib"
+            ]
+          },
+          "type": "array",
+          "description": "Additional directories the agent can access without permission prompts (for reading and listing files outside the working directory)"
+        },
         "tui": {
           "$ref": "#/$defs/TUIOptions",
           "description": "Terminal user interface options"

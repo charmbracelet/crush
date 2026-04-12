@@ -1,4 +1,4 @@
-Reads a resource from an MCP server and returns its contents.
+Read a resource by URI from an MCP server; returns text content.
 
 <when_to_use>
 Use this tool to fetch a specific resource URI exposed by an MCP server.

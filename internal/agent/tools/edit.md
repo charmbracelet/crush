@@ -1,4 +1,4 @@
-Edits files by replacing text, creating new files, or deleting content. For moving/renaming use Bash 'mv'. For large edits use Write tool.
+Edit a file by exact find-and-replace; can also create or delete content. For renames/moves use bash. For large edits use write.
 
 <prerequisites>
 1. Use View tool to understand file contents and context

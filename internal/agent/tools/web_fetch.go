@@ -31,7 +31,7 @@ func NewWebFetchTool(workingDir string, client *http.Client) fantasy.AgentTool {
 
 	return fantasy.NewParallelAgentTool(
 		WebFetchToolName,
-		string(webFetchToolDescription),
+		FirstLineDescription(webFetchToolDescription),
 		func(ctx context.Context, params WebFetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.URL == "" {
 				return fantasy.NewTextErrorResponse("url is required"), nil
@@ -60,11 +60,11 @@ func NewWebFetchTool(workingDir string, client *http.Client) fantasy.AgentTool {
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to close temporary file: %s", err)), nil
 				}
 
-				result.WriteString(fmt.Sprintf("Fetched content from %s (large page)\n\n", params.URL))
-				result.WriteString(fmt.Sprintf("Content saved to: %s\n\n", tempFilePath))
+				fmt.Fprintf(&result, "Fetched content from %s (large page)\n\n", params.URL)
+				fmt.Fprintf(&result, "Content saved to: %s\n\n", tempFilePath)
 				result.WriteString("Use the view and grep tools to analyze this file.")
 			} else {
-				result.WriteString(fmt.Sprintf("Fetched content from %s:\n\n", params.URL))
+				fmt.Fprintf(&result, "Fetched content from %s:\n\n", params.URL)
 				result.WriteString(content)
 			}
 

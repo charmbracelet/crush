@@ -24,7 +24,7 @@ const (
 )
 
 func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) {
-	agentCfg, ok := c.cfg.Agents[config.AgentTask]
+	agentCfg, ok := c.cfg.Config().Agents[config.AgentTask]
 	if !ok {
 		return nil, errors.New("task agent not configured")
 	}
@@ -39,7 +39,7 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 	}
 	return fantasy.NewParallelAgentTool(
 		AgentToolName,
-		string(agentToolDescription),
+		tools.FirstLineDescription(agentToolDescription),
 		func(ctx context.Context, params AgentParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Prompt == "" {
 				return fantasy.NewTextErrorResponse("prompt is required"), nil

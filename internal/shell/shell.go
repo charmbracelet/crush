@@ -82,6 +82,14 @@ func NewShell(opts *Options) *Shell {
 		env = os.Environ()
 	}
 
+	// Allow tools to detect execution by Crush.
+	env = append(
+		env,
+		"CRUSH=1",
+		"AGENT=crush",
+		"AI_AGENT=crush",
+	)
+
 	logger := opts.Logger
 	if logger == nil {
 		logger = noopLogger{}

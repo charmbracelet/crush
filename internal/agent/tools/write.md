@@ -1,4 +1,4 @@
-Creates or updates files in filesystem for saving/modifying text content.
+Create or overwrite a file with given content; auto-creates parent dirs. Cannot append. Read the file first to avoid conflicts. For surgical changes use edit or multiedit.
 
 <usage>
 - Provide file path to write

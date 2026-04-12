@@ -8,6 +8,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -125,19 +126,38 @@ func (c *Client) Initialize(ctx context.Context, workspaceDir string) (*protocol
 	return result, nil
 }
 
+// closeTimeout is the maximum time to wait for a graceful LSP shutdown.
+const closeTimeout = 5 * time.Second
+
 // Kill kills the client without doing anything else.
 func (c *Client) Kill() { c.client.Kill() }
 
-// Close closes all open files in the client, then the client.
+// Close closes all open files in the client, then shuts down gracefully.
+// If shutdown takes longer than closeTimeout, it falls back to Kill().
 func (c *Client) Close(ctx context.Context) error {
 	c.CloseAllFiles(ctx)
 
-	// Shutdown and exit the client
-	if err := c.client.Shutdown(ctx); err != nil {
-		slog.Warn("Failed to shutdown LSP client", "error", err)
-	}
+	// Use a timeout to prevent hanging on unresponsive LSP servers.
+	// jsonrpc2's send lock doesn't respect context cancellation, so we
+	// need to fall back to Kill() which closes the underlying connection.
+	closeCtx, cancel := context.WithTimeout(ctx, closeTimeout)
+	defer cancel()
 
-	return c.client.Exit()
+	done := make(chan error, 1)
+	go func() {
+		if err := c.client.Shutdown(closeCtx); err != nil {
+			slog.Warn("Failed to shutdown LSP client", "error", err)
+		}
+		done <- c.client.Exit()
+	}()
+
+	select {
+	case err := <-done:
+		return err
+	case <-closeCtx.Done():
+		c.client.Kill()
+		return closeCtx.Err()
+	}
 }
 
 // createPowernapClient creates a new powernap client with the current configuration.
@@ -175,7 +195,7 @@ func (c *Client) createPowernapClient() error {
 
 // registerHandlers registers the standard LSP notification and request handlers.
 func (c *Client) registerHandlers() {
-	c.RegisterServerRequestHandler("workspace/applyEdit", HandleApplyEdit)
+	c.RegisterServerRequestHandler("workspace/applyEdit", HandleApplyEdit(c.client.GetOffsetEncoding()))
 	c.RegisterServerRequestHandler("workspace/configuration", HandleWorkspaceConfiguration)
 	c.RegisterServerRequestHandler("client/registerCapability", HandleRegisterCapability)
 	c.RegisterNotificationHandler("window/showMessage", func(ctx context.Context, method string, params json.RawMessage) {
@@ -265,6 +285,11 @@ func (c *Client) SetServerState(state ServerState) {
 // GetName returns the name of the LSP client
 func (c *Client) GetName() string {
 	return c.name
+}
+
+// FileTypes returns the file types this LSP client handles
+func (c *Client) FileTypes() []string {
+	return slices.Clone(c.fileTypes)
 }
 
 // SetDiagnosticsCallback sets the callback function for diagnostic changes

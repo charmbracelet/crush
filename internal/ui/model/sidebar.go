@@ -9,8 +9,6 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/logo"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/layout"
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 )
 
 // modelInfo renders the current model information including reasoning
@@ -35,9 +33,8 @@ func (m *UI) modelInfo(width int) string {
 						reasoningInfo = "Thinking Off"
 					}
 				} else {
-					formatter := cases.Title(language.English, cases.NoLower)
 					reasoningEffort := cmp.Or(model.ModelCfg.ReasoningEffort, model.CatwalkCfg.DefaultReasoningEffort)
-					reasoningInfo = formatter.String(fmt.Sprintf("Reasoning %s", reasoningEffort))
+					reasoningInfo = fmt.Sprintf("Reasoning %s", common.FormatReasoningEffort(reasoningEffort))
 				}
 			}
 		}
@@ -51,7 +48,11 @@ func (m *UI) modelInfo(width int) string {
 			ModelContext: model.CatwalkCfg.ContextWindow,
 		}
 	}
-	return common.ModelInfo(m.com.Styles, model.CatwalkCfg.Name, providerName, reasoningInfo, modelContext, width)
+	var modelName string
+	if model != nil {
+		modelName = model.CatwalkCfg.Name
+	}
+	return common.ModelInfo(m.com.Styles, modelName, providerName, reasoningInfo, modelContext, width)
 }
 
 // getDynamicHeightLimits will give us the num of items to show in each section based on the hight
@@ -115,7 +116,7 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	height := area.Dy()
 
 	title := t.Muted.Width(width).MaxHeight(2).Render(m.session.Title)
-	cwd := common.PrettyPath(t, m.com.Config().WorkingDir(), width)
+	cwd := common.PrettyPath(t, m.com.Workspace.WorkingDir(), width)
 	sidebarLogo := m.sidebarLogo
 	if height < logoHeightBreakpoint {
 		sidebarLogo = logo.SmallRender(m.com.Styles, width)
@@ -141,7 +142,7 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 
 	lspSection := m.lspInfo(width, maxLSPs, true)
 	mcpSection := m.mcpInfo(width, maxMCPs, true)
-	filesSection := m.filesInfo(m.com.Config().WorkingDir(), width, maxFiles, true)
+	filesSection := m.filesInfo(m.com.Workspace.WorkingDir(), width, maxFiles, true)
 
 	uv.NewStyledString(
 		lipgloss.NewStyle().

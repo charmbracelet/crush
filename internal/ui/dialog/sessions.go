@@ -61,7 +61,7 @@ func NewSessions(com *common.Common, selectedSessionID string) (*Session, error)
 	s := new(Session)
 	s.sessionsMode = sessionsModeNormal
 	s.com = com
-	sessions, err := com.App.Sessions.List(context.TODO())
+	sessions, err := com.Workspace.ListSessions(context.TODO())
 	if err != nil {
 		return nil, err
 	}
@@ -349,7 +349,7 @@ func (s *Session) removeSession(id string) {
 
 func (s *Session) deleteSessionCmd(id string) tea.Cmd {
 	return func() tea.Msg {
-		err := s.com.App.Sessions.Delete(context.TODO(), id)
+		err := s.com.Workspace.DeleteSession(context.TODO(), id)
 		if err != nil {
 			return util.NewErrorMsg(err)
 		}
@@ -385,7 +385,7 @@ func (s *Session) updateSession(session session.Session) {
 
 func (s *Session) updateSessionCmd(session session.Session) tea.Cmd {
 	return func() tea.Msg {
-		_, err := s.com.App.Sessions.Save(context.TODO(), session)
+		_, err := s.com.Workspace.SaveSession(context.TODO(), session)
 		if err != nil {
 			return util.NewErrorMsg(err)
 		}
@@ -399,11 +399,11 @@ func (s *Session) isCurrentSessionBusy() bool {
 		return false
 	}
 
-	if s.com.App.AgentCoordinator == nil {
+	if !s.com.Workspace.AgentIsReady() {
 		return false
 	}
 
-	return s.com.App.AgentCoordinator.IsSessionBusy(sessionItem.ID())
+	return s.com.Workspace.AgentIsSessionBusy(sessionItem.ID())
 }
 
 // ShortHelp implements [help.KeyMap].

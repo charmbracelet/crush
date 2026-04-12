@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"iter"
@@ -32,7 +33,7 @@ func Tools() iter.Seq2[string, []*Tool] {
 }
 
 // RunTool runs an MCP tool with the given input parameters.
-func RunTool(ctx context.Context, cfg *config.Config, name, toolName string, input string) (ToolResult, error) {
+func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string, input string) (ToolResult, error) {
 	var args map[string]any
 	if err := json.Unmarshal([]byte(input), &args); err != nil {
 		return ToolResult{}, fmt.Errorf("error parsing parameters: %s", err)
@@ -81,12 +82,13 @@ func RunTool(ctx context.Context, cfg *config.Config, name, toolName string, inp
 
 	textContent := strings.Join(textParts, "\n")
 
-	// MCP SDK returns Data as already base64-encoded, so we use it directly.
+	// We need to make sure the data is base64
+	// when using something like docker + playwright the data was not returned correctly.
 	if imageData != nil {
 		return ToolResult{
 			Type:      "image",
 			Content:   textContent,
-			Data:      imageData,
+			Data:      ensureRawBytes(imageData),
 			MediaType: imageMimeType,
 		}, nil
 	}
@@ -95,7 +97,7 @@ func RunTool(ctx context.Context, cfg *config.Config, name, toolName string, inp
 		return ToolResult{
 			Type:      "media",
 			Content:   textContent,
-			Data:      audioData,
+			Data:      ensureRawBytes(audioData),
 			MediaType: audioMimeType,
 		}, nil
 	}
@@ -108,7 +110,7 @@ func RunTool(ctx context.Context, cfg *config.Config, name, toolName string, inp
 
 // RefreshTools gets the updated list of tools from the MCP and updates the
 // global state.
-func RefreshTools(ctx context.Context, cfg *config.Config, name string) {
+func RefreshTools(ctx context.Context, cfg *config.ConfigStore, name string) {
 	session, ok := sessions.Get(name)
 	if !ok {
 		slog.Warn("Refresh tools: no session", "name", name)
@@ -139,7 +141,7 @@ func getTools(ctx context.Context, session *ClientSession) ([]*Tool, error) {
 	return result.Tools, nil
 }
 
-func updateTools(cfg *config.Config, name string, tools []*Tool) int {
+func updateTools(cfg *config.ConfigStore, name string, tools []*Tool) int {
 	tools = filterDisabledTools(cfg, name, tools)
 	if len(tools) == 0 {
 		allTools.Del(name)
@@ -150,8 +152,8 @@ func updateTools(cfg *config.Config, name string, tools []*Tool) int {
 }
 
 // filterDisabledTools removes tools that are disabled via config.
-func filterDisabledTools(cfg *config.Config, mcpName string, tools []*Tool) []*Tool {
-	mcpCfg, ok := cfg.MCP[mcpName]
+func filterDisabledTools(cfg *config.ConfigStore, mcpName string, tools []*Tool) []*Tool {
+	mcpCfg, ok := cfg.Config().MCP[mcpName]
 	if !ok || len(mcpCfg.DisabledTools) == 0 {
 		return tools
 	}
@@ -163,4 +165,57 @@ func filterDisabledTools(cfg *config.Config, mcpName string, tools []*Tool) []*T
 		}
 	}
 	return filtered
+}
+
+// ensureRawBytes normalizes MCP media data into raw binary bytes.
+//
+// The MCP Go SDK's json.Unmarshal normally base64-decodes
+// ImageContent.Data into raw bytes automatically. However, some MCP
+// transports (notably Docker over stdio) can deliver data in
+// unexpected formats. This function handles both cases:
+//
+//   - If data looks like a valid base64 string (ASCII-only, decodable)
+//     it is decoded and the raw bytes are returned.
+//   - If data is already raw binary (contains bytes > 127) it is
+//     returned as-is.
+func ensureRawBytes(data []byte) []byte {
+	if len(data) == 0 {
+		return data
+	}
+
+	normalized := normalizeBase64Input(data)
+	if decoded, ok := decodeBase64(normalized); ok {
+		return decoded
+	}
+
+	// Already raw binary — return unchanged.
+	return data
+}
+
+func normalizeBase64Input(data []byte) []byte {
+	normalized := strings.Join(strings.Fields(string(data)), "")
+	return []byte(normalized)
+}
+
+func decodeBase64(data []byte) ([]byte, bool) {
+	if len(data) == 0 {
+		return data, true
+	}
+
+	for _, b := range data {
+		if b > 127 {
+			return nil, false
+		}
+	}
+
+	s := string(data)
+	decoded, err := base64.StdEncoding.DecodeString(s)
+	if err == nil {
+		return decoded, true
+	}
+	decoded, err = base64.RawStdEncoding.DecodeString(s)
+	if err == nil {
+		return decoded, true
+	}
+	return nil, false
 }

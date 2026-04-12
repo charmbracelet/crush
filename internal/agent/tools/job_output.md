@@ -1,4 +1,4 @@
-Retrieves the current output from a background shell.
+Get stdout/stderr from a background shell by ID; set wait=true to block until completion.
 
 <usage>
 - Provide the shell ID returned from a background bash execution

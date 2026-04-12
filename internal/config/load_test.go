@@ -36,6 +36,11 @@ func TestConfig_LoadFromBytes(t *testing.T) {
 	require.Equal(t, "https://api.openai.com/v2", pc.BaseURL)
 }
 
+// testStore wraps a Config in a minimal ConfigStore for testing.
+func testStore(cfg *Config) *ConfigStore {
+	return &ConfigStore{config: cfg}
+}
+
 func TestConfig_setDefaults(t *testing.T) {
 	cfg := &Config{}
 
@@ -53,7 +58,6 @@ func TestConfig_setDefaults(t *testing.T) {
 	for _, path := range defaultContextPaths {
 		require.Contains(t, cfg.Options.ContextPaths, path)
 	}
-	require.Equal(t, "/tmp", cfg.workingDir)
 }
 
 func TestConfig_configureProviders(t *testing.T) {
@@ -74,7 +78,7 @@ func TestConfig_configureProviders(t *testing.T) {
 		"OPENAI_API_KEY": "test-key",
 	})
 	resolver := NewEnvironmentVariableResolver(env)
-	err := cfg.configureProviders(env, resolver, knownProviders)
+	err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
 	require.NoError(t, err)
 	require.Equal(t, 1, cfg.Providers.Len())
 
@@ -117,7 +121,7 @@ func TestConfig_configureProvidersWithOverride(t *testing.T) {
 		"OPENAI_API_KEY": "test-key",
 	})
 	resolver := NewEnvironmentVariableResolver(env)
-	err := cfg.configureProviders(env, resolver, knownProviders)
+	err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
 	require.NoError(t, err)
 	require.Equal(t, 1, cfg.Providers.Len())
 
@@ -159,7 +163,7 @@ func TestConfig_configureProvidersWithNewProvider(t *testing.T) {
 		"OPENAI_API_KEY": "test-key",
 	})
 	resolver := NewEnvironmentVariableResolver(env)
-	err := cfg.configureProviders(env, resolver, knownProviders)
+	err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
 	require.NoError(t, err)
 	// Should be to because of the env variable
 	require.Equal(t, cfg.Providers.Len(), 2)
@@ -195,7 +199,7 @@ func TestConfig_configureProvidersBedrockWithCredentials(t *testing.T) {
 		"AWS_SECRET_ACCESS_KEY": "test-secret-key",
 	})
 	resolver := NewEnvironmentVariableResolver(env)
-	err := cfg.configureProviders(env, resolver, knownProviders)
+	err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
 	require.NoError(t, err)
 	require.Equal(t, cfg.Providers.Len(), 1)
 
@@ -221,7 +225,7 @@ func TestConfig_configureProvidersBedrockWithoutCredentials(t *testing.T) {
 	cfg.setDefaults("/tmp", "")
 	env := env.NewFromMap(map[string]string{})
 	resolver := NewEnvironmentVariableResolver(env)
-	err := cfg.configureProviders(env, resolver, knownProviders)
+	err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
 	require.NoError(t, err)
 	// Provider should not be configured without credentials
 	require.Equal(t, cfg.Providers.Len(), 0)
@@ -246,7 +250,7 @@ func TestConfig_configureProvidersBedrockWithoutUnsupportedModel(t *testing.T) {
 		"AWS_SECRET_ACCESS_KEY": "test-secret-key",
 	})
 	resolver := NewEnvironmentVariableResolver(env)
-	err := cfg.configureProviders(env, resolver, knownProviders)
+	err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
 	require.Error(t, err)
 }
 
@@ -269,7 +273,7 @@ func TestConfig_configureProvidersVertexAIWithCredentials(t *testing.T) {
 		"VERTEXAI_LOCATION": "us-central1",
 	})
 	resolver := NewEnvironmentVariableResolver(env)
-	err := cfg.configureProviders(env, resolver, knownProviders)
+	err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
 	require.NoError(t, err)
 	require.Equal(t, cfg.Providers.Len(), 1)
 
@@ -301,7 +305,7 @@ func TestConfig_configureProvidersVertexAIWithoutCredentials(t *testing.T) {
 		"GOOGLE_CLOUD_LOCATION":     "us-central1",
 	})
 	resolver := NewEnvironmentVariableResolver(env)
-	err := cfg.configureProviders(env, resolver, knownProviders)
+	err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
 	require.NoError(t, err)
 	// Provider should not be configured without proper credentials
 	require.Equal(t, cfg.Providers.Len(), 0)
@@ -326,7 +330,7 @@ func TestConfig_configureProvidersVertexAIMissingProject(t *testing.T) {
 		"GOOGLE_CLOUD_LOCATION":     "us-central1",
 	})
 	resolver := NewEnvironmentVariableResolver(env)
-	err := cfg.configureProviders(env, resolver, knownProviders)
+	err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
 	require.NoError(t, err)
 	// Provider should not be configured without project
 	require.Equal(t, cfg.Providers.Len(), 0)
@@ -350,7 +354,7 @@ func TestConfig_configureProvidersSetProviderID(t *testing.T) {
 		"OPENAI_API_KEY": "test-key",
 	})
 	resolver := NewEnvironmentVariableResolver(env)
-	err := cfg.configureProviders(env, resolver, knownProviders)
+	err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
 	require.NoError(t, err)
 	require.Equal(t, cfg.Providers.Len(), 1)
 
@@ -486,7 +490,7 @@ func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
 
-	assert.Equal(t, []string{"agent", "bash", "job_output", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "glob", "ls", "sourcegraph", "todos", "view", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "bash", "crush_info", "crush_logs", "job_output", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "glob", "ls", "sourcegraph", "todos", "view", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
@@ -509,7 +513,7 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 	cfg.SetupAgents()
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
-	assert.Equal(t, []string{"agent", "bash", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "todos", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "bash", "crush_info", "crush_logs", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "todos", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
@@ -541,7 +545,7 @@ func TestConfig_configureProvidersWithDisabledProvider(t *testing.T) {
 		"OPENAI_API_KEY": "test-key",
 	})
 	resolver := NewEnvironmentVariableResolver(env)
-	err := cfg.configureProviders(env, resolver, knownProviders)
+	err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
 	require.NoError(t, err)
 
 	require.Equal(t, cfg.Providers.Len(), 1)
@@ -569,7 +573,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewEnvironmentVariableResolver(env)
-		err := cfg.configureProviders(env, resolver, []catwalk.Provider{})
+		err := cfg.configureProviders(testStore(cfg), env, resolver, []catwalk.Provider{})
 		require.NoError(t, err)
 
 		require.Equal(t, cfg.Providers.Len(), 1)
@@ -592,7 +596,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewEnvironmentVariableResolver(env)
-		err := cfg.configureProviders(env, resolver, []catwalk.Provider{})
+		err := cfg.configureProviders(testStore(cfg), env, resolver, []catwalk.Provider{})
 		require.NoError(t, err)
 
 		require.Equal(t, cfg.Providers.Len(), 0)
@@ -614,7 +618,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewEnvironmentVariableResolver(env)
-		err := cfg.configureProviders(env, resolver, []catwalk.Provider{})
+		err := cfg.configureProviders(testStore(cfg), env, resolver, []catwalk.Provider{})
 		require.NoError(t, err)
 
 		require.Equal(t, cfg.Providers.Len(), 0)
@@ -639,7 +643,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewEnvironmentVariableResolver(env)
-		err := cfg.configureProviders(env, resolver, []catwalk.Provider{})
+		err := cfg.configureProviders(testStore(cfg), env, resolver, []catwalk.Provider{})
 		require.NoError(t, err)
 
 		require.Equal(t, cfg.Providers.Len(), 0)
@@ -664,7 +668,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewEnvironmentVariableResolver(env)
-		err := cfg.configureProviders(env, resolver, []catwalk.Provider{})
+		err := cfg.configureProviders(testStore(cfg), env, resolver, []catwalk.Provider{})
 		require.NoError(t, err)
 
 		require.Equal(t, cfg.Providers.Len(), 1)
@@ -692,7 +696,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewEnvironmentVariableResolver(env)
-		err := cfg.configureProviders(env, resolver, []catwalk.Provider{})
+		err := cfg.configureProviders(testStore(cfg), env, resolver, []catwalk.Provider{})
 		require.NoError(t, err)
 
 		require.Equal(t, cfg.Providers.Len(), 1)
@@ -722,7 +726,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewEnvironmentVariableResolver(env)
-		err := cfg.configureProviders(env, resolver, []catwalk.Provider{})
+		err := cfg.configureProviders(testStore(cfg), env, resolver, []catwalk.Provider{})
 		require.NoError(t, err)
 
 		require.Equal(t, cfg.Providers.Len(), 0)
@@ -757,7 +761,7 @@ func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {
 			"GOOGLE_GENAI_USE_VERTEXAI": "false",
 		})
 		resolver := NewEnvironmentVariableResolver(env)
-		err := cfg.configureProviders(env, resolver, knownProviders)
+		err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
 		require.NoError(t, err)
 
 		require.Equal(t, cfg.Providers.Len(), 0)
@@ -788,7 +792,7 @@ func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewEnvironmentVariableResolver(env)
-		err := cfg.configureProviders(env, resolver, knownProviders)
+		err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
 		require.NoError(t, err)
 
 		require.Equal(t, cfg.Providers.Len(), 0)
@@ -819,7 +823,7 @@ func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewEnvironmentVariableResolver(env)
-		err := cfg.configureProviders(env, resolver, knownProviders)
+		err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
 		require.NoError(t, err)
 
 		require.Equal(t, cfg.Providers.Len(), 0)
@@ -852,7 +856,7 @@ func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {
 			"OPENAI_API_KEY": "test-key",
 		})
 		resolver := NewEnvironmentVariableResolver(env)
-		err := cfg.configureProviders(env, resolver, knownProviders)
+		err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
 		require.NoError(t, err)
 
 		require.Equal(t, cfg.Providers.Len(), 1)
@@ -886,7 +890,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		cfg.setDefaults("/tmp", "")
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewEnvironmentVariableResolver(env)
-		err := cfg.configureProviders(env, resolver, knownProviders)
+		err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
 		require.NoError(t, err)
 
 		large, small, err := cfg.defaultModelSelection(knownProviders)
@@ -922,7 +926,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		cfg.setDefaults("/tmp", "")
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewEnvironmentVariableResolver(env)
-		err := cfg.configureProviders(env, resolver, knownProviders)
+		err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
 		require.NoError(t, err)
 
 		_, _, err = cfg.defaultModelSelection(knownProviders)
@@ -952,7 +956,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		cfg.setDefaults("/tmp", "")
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewEnvironmentVariableResolver(env)
-		err := cfg.configureProviders(env, resolver, knownProviders)
+		err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
 		require.NoError(t, err)
 		_, _, err = cfg.defaultModelSelection(knownProviders)
 		require.Error(t, err)
@@ -995,7 +999,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		cfg.setDefaults("/tmp", "")
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewEnvironmentVariableResolver(env)
-		err := cfg.configureProviders(env, resolver, knownProviders)
+		err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
 		require.NoError(t, err)
 		large, small, err := cfg.defaultModelSelection(knownProviders)
 		require.NoError(t, err)
@@ -1039,7 +1043,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		cfg.setDefaults("/tmp", "")
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewEnvironmentVariableResolver(env)
-		err := cfg.configureProviders(env, resolver, knownProviders)
+		err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
 		require.NoError(t, err)
 		_, _, err = cfg.defaultModelSelection(knownProviders)
 		require.Error(t, err)
@@ -1081,7 +1085,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		cfg.setDefaults("/tmp", "")
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewEnvironmentVariableResolver(env)
-		err := cfg.configureProviders(env, resolver, knownProviders)
+		err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
 		require.NoError(t, err)
 		large, small, err := cfg.defaultModelSelection(knownProviders)
 		require.NoError(t, err)
@@ -1126,7 +1130,7 @@ func TestConfig_configureProvidersDisableDefaultProviders(t *testing.T) {
 			"OPENAI_API_KEY": "test-key",
 		})
 		resolver := NewEnvironmentVariableResolver(env)
-		err := cfg.configureProviders(env, resolver, knownProviders)
+		err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
 		require.ErrorContains(t, err, "no custom providers")
 
 		// openai should NOT be present because it lacks base_url and models.
@@ -1169,7 +1173,7 @@ func TestConfig_configureProvidersDisableDefaultProviders(t *testing.T) {
 			"OPENAI_API_KEY": "test-key",
 		})
 		resolver := NewEnvironmentVariableResolver(env)
-		err := cfg.configureProviders(env, resolver, knownProviders)
+		err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
 		require.NoError(t, err)
 
 		// Only fully specified provider should be present.
@@ -1223,7 +1227,7 @@ func TestConfig_configureProvidersDisableDefaultProviders(t *testing.T) {
 			"ANTHROPIC_API_KEY": "test-key",
 		})
 		resolver := NewEnvironmentVariableResolver(env)
-		err := cfg.configureProviders(env, resolver, knownProviders)
+		err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
 		require.NoError(t, err)
 
 		// Both providers should be present.
@@ -1251,7 +1255,7 @@ func TestConfig_configureProvidersDisableDefaultProviders(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewEnvironmentVariableResolver(env)
-		err := cfg.configureProviders(env, resolver, []catwalk.Provider{})
+		err := cfg.configureProviders(testStore(cfg), env, resolver, []catwalk.Provider{})
 		require.ErrorContains(t, err, "no custom providers")
 
 		// Provider should be rejected for missing models.
@@ -1275,7 +1279,7 @@ func TestConfig_configureProvidersDisableDefaultProviders(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewEnvironmentVariableResolver(env)
-		err := cfg.configureProviders(env, resolver, []catwalk.Provider{})
+		err := cfg.configureProviders(testStore(cfg), env, resolver, []catwalk.Provider{})
 		require.ErrorContains(t, err, "no custom providers")
 
 		// Provider should be rejected for missing base_url.
@@ -1306,6 +1310,49 @@ func TestConfig_setDefaultsDisableDefaultProvidersEnvVar(t *testing.T) {
 }
 
 func TestConfig_configureSelectedModels(t *testing.T) {
+	t.Run("reload mode should not persist fallback defaults", func(t *testing.T) {
+		dir := t.TempDir()
+		globalPath := filepath.Join(dir, "crush.json")
+		require.NoError(t, os.WriteFile(globalPath, []byte(`{"models":{"large":{"provider":"ghost","model":"missing"}}}`), 0o600))
+
+		knownProviders := []catwalk.Provider{
+			{
+				ID:                  "openai",
+				APIKey:              "abc",
+				DefaultLargeModelID: "large-model",
+				DefaultSmallModelID: "small-model",
+				Models: []catwalk.Model{
+					{ID: "large-model", DefaultMaxTokens: 1000},
+					{ID: "small-model", DefaultMaxTokens: 500},
+				},
+			},
+		}
+
+		cfg := &Config{
+			Models: map[SelectedModelType]SelectedModel{
+				SelectedModelTypeLarge: {Provider: "ghost", Model: "missing"},
+			},
+		}
+		cfg.setDefaults(dir, "")
+		store := &ConfigStore{config: cfg, globalDataPath: globalPath}
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(store, env, resolver, knownProviders)
+		require.NoError(t, err)
+
+		err = configureSelectedModels(store, knownProviders, false)
+		require.NoError(t, err)
+
+		// In-memory falls back to default.
+		require.Equal(t, "openai", cfg.Models[SelectedModelTypeLarge].Provider)
+		require.Equal(t, "large-model", cfg.Models[SelectedModelTypeLarge].Model)
+
+		// Disk remains unchanged in reload mode.
+		data, readErr := os.ReadFile(globalPath)
+		require.NoError(t, readErr)
+		require.Contains(t, string(data), `"provider":"ghost"`)
+		require.Contains(t, string(data), `"model":"missing"`)
+	})
 	t.Run("should override defaults", func(t *testing.T) {
 		knownProviders := []catwalk.Provider{
 			{
@@ -1340,10 +1387,10 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		cfg.setDefaults("/tmp", "")
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewEnvironmentVariableResolver(env)
-		err := cfg.configureProviders(env, resolver, knownProviders)
+		err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
 		require.NoError(t, err)
 
-		err = cfg.configureSelectedModels(knownProviders)
+		err = configureSelectedModels(testStore(cfg), knownProviders, true)
 		require.NoError(t, err)
 		large := cfg.Models[SelectedModelTypeLarge]
 		small := cfg.Models[SelectedModelTypeSmall]
@@ -1402,10 +1449,10 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		cfg.setDefaults("/tmp", "")
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewEnvironmentVariableResolver(env)
-		err := cfg.configureProviders(env, resolver, knownProviders)
+		err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
 		require.NoError(t, err)
 
-		err = cfg.configureSelectedModels(knownProviders)
+		err = configureSelectedModels(testStore(cfg), knownProviders, true)
 		require.NoError(t, err)
 		large := cfg.Models[SelectedModelTypeLarge]
 		small := cfg.Models[SelectedModelTypeSmall]
@@ -1447,14 +1494,98 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		cfg.setDefaults("/tmp", "")
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewEnvironmentVariableResolver(env)
-		err := cfg.configureProviders(env, resolver, knownProviders)
+		err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
 		require.NoError(t, err)
 
-		err = cfg.configureSelectedModels(knownProviders)
+		err = configureSelectedModels(testStore(cfg), knownProviders, true)
 		require.NoError(t, err)
 		large := cfg.Models[SelectedModelTypeLarge]
 		require.Equal(t, "large-model", large.Model)
 		require.Equal(t, "openai", large.Provider)
 		require.Equal(t, int64(100), large.MaxTokens)
 	})
+}
+
+func TestConfig_configureProviders_HyperAPIKeyFromEnv(t *testing.T) {
+	// Test that HYPER_API_KEY environment variable works without config
+	knownProviders := []catwalk.Provider{
+		{
+			ID:                  "hyper",
+			APIKey:              "", // No API key in provider definition
+			DefaultLargeModelID: "large-model",
+			DefaultSmallModelID: "small-model",
+			Models: []catwalk.Model{
+				{
+					ID:               "large-model",
+					DefaultMaxTokens: 1000,
+				},
+				{
+					ID:               "small-model",
+					DefaultMaxTokens: 500,
+				},
+			},
+		},
+	}
+
+	cfg := &Config{}
+	cfg.setDefaults("/tmp", "")
+	env := env.NewFromMap(map[string]string{
+		"HYPER_API_KEY": "env-api-key",
+	})
+	resolver := NewEnvironmentVariableResolver(env)
+	err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
+	require.NoError(t, err)
+	require.Equal(t, 1, cfg.Providers.Len())
+
+	// Verify Hyper provider is configured with the env var API key
+	pc, ok := cfg.Providers.Get("hyper")
+	require.True(t, ok, "Hyper provider should be configured")
+	require.Equal(t, "env-api-key", pc.APIKey)
+	require.Equal(t, "env-api-key", pc.APIKeyTemplate)
+}
+
+func TestConfig_configureProviders_HyperAPIKeyFromConfigOverrides(t *testing.T) {
+	// Test that config API key takes precedence when HYPER_API_KEY is also set
+	knownProviders := []catwalk.Provider{
+		{
+			ID:                  "hyper",
+			APIKey:              "provider-api-key",
+			DefaultLargeModelID: "large-model",
+			DefaultSmallModelID: "small-model",
+			Models: []catwalk.Model{
+				{
+					ID:               "large-model",
+					DefaultMaxTokens: 1000,
+				},
+				{
+					ID:               "small-model",
+					DefaultMaxTokens: 500,
+				},
+			},
+		},
+	}
+
+	// User has Hyper configured with an API key
+	cfg := &Config{
+		Providers: csync.NewMapFrom(map[string]ProviderConfig{
+			"hyper": {
+				APIKey: "config-api-key",
+			},
+		}),
+	}
+	cfg.setDefaults("/tmp", "")
+
+	// But they also have HYPER_API_KEY set - env var should take precedence
+	env := env.NewFromMap(map[string]string{
+		"HYPER_API_KEY": "env-api-key",
+	})
+	resolver := NewEnvironmentVariableResolver(env)
+	err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
+	require.NoError(t, err)
+	require.Equal(t, 1, cfg.Providers.Len())
+
+	// Verify env var takes precedence (as per requirements)
+	pc, ok := cfg.Providers.Get("hyper")
+	require.True(t, ok, "Hyper provider should be configured")
+	require.Equal(t, "env-api-key", pc.APIKey)
 }

@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -76,13 +77,13 @@ func NewPrompt(name, promptTemplate string, opts ...Option) (*Prompt, error) {
 	return p, nil
 }
 
-func (p *Prompt) Build(ctx context.Context, provider, model string, cfg config.Config) (string, error) {
+func (p *Prompt) Build(ctx context.Context, provider, model string, store *config.ConfigStore) (string, error) {
 	t, err := template.New(p.name).Parse(p.template)
 	if err != nil {
 		return "", fmt.Errorf("parsing template: %w", err)
 	}
 	var sb strings.Builder
-	d, err := p.promptData(ctx, provider, model, cfg)
+	d, err := p.promptData(ctx, provider, model, store)
 	if err != nil {
 		return "", err
 	}
@@ -104,11 +105,11 @@ func processFile(filePath string) *ContextFile {
 	}
 }
 
-func processContextPath(p string, cfg config.Config) []ContextFile {
+func processContextPath(p string, store *config.ConfigStore) []ContextFile {
 	var contexts []ContextFile
 	fullPath := p
 	if !filepath.IsAbs(p) {
-		fullPath = filepath.Join(cfg.WorkingDir(), p)
+		fullPath = filepath.Join(store.WorkingDir(), p)
 	}
 	info, err := os.Stat(fullPath)
 	if err != nil {
@@ -136,11 +137,11 @@ func processContextPath(p string, cfg config.Config) []ContextFile {
 }
 
 // expandPath expands ~ and environment variables in file paths
-func expandPath(path string, cfg config.Config) string {
+func expandPath(path string, store *config.ConfigStore) string {
 	path = home.Long(path)
 	// Handle environment variable expansion using the same pattern as config
 	if strings.HasPrefix(path, "$") {
-		if expanded, err := cfg.Resolver().ResolveValue(path); err == nil {
+		if expanded, err := store.Resolver().ResolveValue(path); err == nil {
 			path = expanded
 		}
 	}
@@ -148,39 +149,62 @@ func expandPath(path string, cfg config.Config) string {
 	return path
 }
 
-func (p *Prompt) promptData(ctx context.Context, provider, model string, cfg config.Config) (PromptDat, error) {
-	workingDir := cmp.Or(p.workingDir, cfg.WorkingDir())
+func (p *Prompt) promptData(ctx context.Context, provider, model string, store *config.ConfigStore) (PromptDat, error) {
+	workingDir := cmp.Or(p.workingDir, store.WorkingDir())
 	platform := cmp.Or(p.platform, runtime.GOOS)
 
 	files := map[string][]ContextFile{}
 
+	cfg := store.Config()
 	for _, pth := range cfg.Options.ContextPaths {
-		expanded := expandPath(pth, cfg)
+		expanded := expandPath(pth, store)
 		pathKey := strings.ToLower(expanded)
 		if _, ok := files[pathKey]; ok {
 			continue
 		}
-		content := processContextPath(expanded, cfg)
+		content := processContextPath(expanded, store)
 		files[pathKey] = content
 	}
 
 	// Discover and load skills metadata.
 	var availSkillXML string
+
+	// Start with builtin skills.
+	allSkills := skills.DiscoverBuiltin()
+	builtinNames := make(map[string]bool, len(allSkills))
+	for _, s := range allSkills {
+		builtinNames[s.Name] = true
+	}
+
+	// Discover user skills from configured paths.
 	if len(cfg.Options.SkillsPaths) > 0 {
 		expandedPaths := make([]string, 0, len(cfg.Options.SkillsPaths))
 		for _, pth := range cfg.Options.SkillsPaths {
-			expandedPaths = append(expandedPaths, expandPath(pth, cfg))
+			expandedPaths = append(expandedPaths, expandPath(pth, store))
 		}
-		if discoveredSkills := skills.Discover(expandedPaths); len(discoveredSkills) > 0 {
-			availSkillXML = skills.ToPromptXML(discoveredSkills)
+		for _, userSkill := range skills.Discover(expandedPaths) {
+			if builtinNames[userSkill.Name] {
+				slog.Warn("User skill overrides builtin skill", "name", userSkill.Name)
+			}
+			allSkills = append(allSkills, userSkill)
 		}
 	}
 
-	isGit := isGitRepo(cfg.WorkingDir())
+	// Deduplicate: user skills override builtins with the same name.
+	allSkills = skills.Deduplicate(allSkills)
+
+	// Filter out disabled skills.
+	allSkills = skills.Filter(allSkills, cfg.Options.DisabledSkills)
+
+	if len(allSkills) > 0 {
+		availSkillXML = skills.ToPromptXML(allSkills)
+	}
+
+	isGit := isGitRepo(store.WorkingDir())
 	data := PromptDat{
 		Provider:      provider,
 		Model:         model,
-		Config:        cfg,
+		Config:        *cfg,
 		WorkingDir:    filepath.ToSlash(workingDir),
 		IsGitRepo:     isGit,
 		Platform:      platform,
@@ -189,7 +213,7 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, cfg con
 	}
 	if isGit {
 		var err error
-		data.GitStatus, err = getGitStatus(ctx, cfg.WorkingDir())
+		data.GitStatus, err = getGitStatus(ctx, store.WorkingDir())
 		if err != nil {
 			return PromptDat{}, err
 		}

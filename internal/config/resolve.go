@@ -14,6 +14,20 @@ type VariableResolver interface {
 	ResolveValue(value string) (string, error)
 }
 
+// identityResolver is a no-op resolver that returns values unchanged.
+// Used in client mode where variable resolution is handled server-side.
+type identityResolver struct{}
+
+func (identityResolver) ResolveValue(value string) (string, error) {
+	return value, nil
+}
+
+// IdentityResolver returns a VariableResolver that passes values through
+// unchanged.
+func IdentityResolver() VariableResolver {
+	return identityResolver{}
+}
+
 type Shell interface {
 	Exec(ctx context.Context, command string) (stdout, stderr string, err error)
 }

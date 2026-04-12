@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/skills"
@@ -14,9 +15,22 @@ import (
 
 type skillStatusItem struct {
 	icon  string
+	name  string
 	title string
 	// description is reserved for future use (e.g. showing error details).
 	description string
+}
+
+var builtinSkillsCache struct {
+	once   sync.Once
+	skills []*skills.Skill
+}
+
+func cachedBuiltinSkills() []*skills.Skill {
+	builtinSkillsCache.once.Do(func() {
+		builtinSkillsCache.skills = skills.DiscoverBuiltin()
+	})
+	return builtinSkillsCache.skills
 }
 
 // skillsInfo renders the skill discovery status section showing loaded and
@@ -42,26 +56,41 @@ func (m *UI) skillsInfo(width, maxItems int, isSection bool) string {
 func (m *UI) skillStatusItems() []skillStatusItem {
 	t := m.com.Styles
 	var items []skillStatusItem
+	stateNames := make(map[string]struct{}, len(m.skillStates))
 
 	states := slices.Clone(m.skillStates)
 	slices.SortFunc(states, func(a, b *skills.SkillState) int {
 		return strings.Compare(a.Path, b.Path)
 	})
 	for _, state := range states {
-		title := state.Name
-		if title == "" {
-			title = filepath.Base(state.Path)
+		name := state.Name
+		if name == "" {
+			name = filepath.Base(filepath.Dir(state.Path))
 		}
-		if title == skills.SkillFileName {
-			title = filepath.Base(filepath.Dir(state.Path))
-		}
+		stateNames[name] = struct{}{}
 		icon := t.ResourceOnlineIcon.String()
 		if state.State == skills.StateError {
 			icon = t.ResourceErrorIcon.String()
 		}
 		items = append(items, skillStatusItem{
 			icon:  icon,
-			title: t.ResourceName.Render(title),
+			name:  name,
+			title: t.ResourceName.Render(name),
+		})
+	}
+
+	builtin := cachedBuiltinSkills()
+	slices.SortFunc(builtin, func(a, b *skills.Skill) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+	for _, skill := range builtin {
+		if _, ok := stateNames[skill.Name]; ok {
+			continue
+		}
+		items = append(items, skillStatusItem{
+			icon:  t.ResourceOnlineIcon.String(),
+			name:  skill.Name,
+			title: t.ResourceName.Render(skill.Name),
 		})
 	}
 
@@ -77,6 +106,7 @@ func skillsList(t *styles.Styles, items []skillStatusItem, width, maxItems int) 
 		visibleItems := items[:maxItems-1]
 		remaining := len(items) - (maxItems - 1)
 		items = append(visibleItems, skillStatusItem{
+			name:  "more",
 			title: t.ResourceAdditionalText.Render(fmt.Sprintf("…and %d more", remaining)),
 		})
 	}

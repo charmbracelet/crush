@@ -80,6 +80,8 @@ func (g *GenericToolRenderContext) RenderTool(sty *styles.Styles, width int, opt
 		} else {
 			body = sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
 		}
+	} else if looksLikeDiff(opts.Result.Content) {
+		body = toolOutputDiffContentFromUnified(sty, opts.Result.Content, cappedWidth, opts.ExpandedContent)
 	} else if looksLikeMarkdown(opts.Result.Content) {
 		body = sty.Tool.Body.Render(toolOutputCodeContent(sty, "result.md", opts.Result.Content, 0, bodyWidth, opts.ExpandedContent))
 	} else {

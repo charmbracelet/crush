@@ -25,10 +25,10 @@ func TestDirRestrictions_DenyIfRestricted(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(outsideDir, "file.go"), []byte("package out"), 0o644))
 
 	tests := []struct {
-		name        string
+		name         string
 		restrictions DirRestrictions
-		absPath     string
-		wantDenied  bool
+		absPath      string
+		wantDenied   bool
 	}{
 		{
 			name: "restricted mode off allows everything",

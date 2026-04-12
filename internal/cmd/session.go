@@ -62,15 +62,15 @@ var sessionShowCmd = &cobra.Command{
 	Use:   "show <id>",
 	Short: "Show session details",
 	Long:  "Show session details. Use --json, --markdown, or -o <file> for export. ID can be a UUID, full hash, or hash prefix.",
-	Args: cobra.ExactArgs(1),
-	RunE: runSessionShow,
+	Args:  cobra.ExactArgs(1),
+	RunE:  runSessionShow,
 }
 
 var sessionLastCmd = &cobra.Command{
 	Use:   "last",
 	Short: "Show most recent session",
 	Long:  "Show the last updated session. Supports --json, --markdown, and -o <file>.",
-	RunE: runSessionLast,
+	RunE:  runSessionLast,
 }
 
 var sessionDeleteCmd = &cobra.Command{

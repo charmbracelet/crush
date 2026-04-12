@@ -1,4 +1,4 @@
-Fetches raw content from URL and returns it in specified format without any AI processing.
+Fetch raw content from a URL as text, markdown, or html (max 5MB); no AI processing. For analysis or extraction use agentic_fetch.
 
 <when_to_use>
 Use this tool when you need:

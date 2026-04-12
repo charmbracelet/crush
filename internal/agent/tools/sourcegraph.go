@@ -45,7 +45,7 @@ func NewSourcegraphTool(client *http.Client) fantasy.AgentTool {
 	}
 	return fantasy.NewParallelAgentTool(
 		SourcegraphToolName,
-		string(sourcegraphDescription),
+		FirstLineDescription(sourcegraphDescription),
 		func(ctx context.Context, params SourcegraphParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Query == "" {
 				return fantasy.NewTextErrorResponse("Query parameter is required"), nil

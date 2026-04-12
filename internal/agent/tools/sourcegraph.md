@@ -1,4 +1,4 @@
-Search code across public repositories using Sourcegraph's GraphQL API.
+Search code across public GitHub repositories via Sourcegraph; supports regex, language/repo/file filters, and symbol search (max 20 results). Only searches public repos.
 
 <usage>
 - Provide search query using Sourcegraph syntax

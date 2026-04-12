@@ -88,7 +88,7 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 		return ToolResult{
 			Type:      "image",
 			Content:   textContent,
-			Data:      ensureBase64(imageData),
+			Data:      ensureRawBytes(imageData),
 			MediaType: imageMimeType,
 		}, nil
 	}
@@ -97,7 +97,7 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 		return ToolResult{
 			Type:      "media",
 			Content:   textContent,
-			Data:      ensureBase64(audioData),
+			Data:      ensureRawBytes(audioData),
 			MediaType: audioMimeType,
 		}, nil
 	}
@@ -167,23 +167,29 @@ func filterDisabledTools(cfg *config.ConfigStore, mcpName string, tools []*Tool)
 	return filtered
 }
 
-// ensureBase64 normalizes valid base64 input and guarantees padded
-// base64.StdEncoding output; otherwise it encodes raw binary data.
-func ensureBase64(data []byte) []byte {
+// ensureRawBytes normalizes MCP media data into raw binary bytes.
+//
+// The MCP Go SDK's json.Unmarshal normally base64-decodes
+// ImageContent.Data into raw bytes automatically. However, some MCP
+// transports (notably Docker over stdio) can deliver data in
+// unexpected formats. This function handles both cases:
+//
+//   - If data looks like a valid base64 string (ASCII-only, decodable)
+//     it is decoded and the raw bytes are returned.
+//   - If data is already raw binary (contains bytes > 127) it is
+//     returned as-is.
+func ensureRawBytes(data []byte) []byte {
 	if len(data) == 0 {
 		return data
 	}
 
 	normalized := normalizeBase64Input(data)
 	if decoded, ok := decodeBase64(normalized); ok {
-		encoded := make([]byte, base64.StdEncoding.EncodedLen(len(decoded)))
-		base64.StdEncoding.Encode(encoded, decoded)
-		return encoded
+		return decoded
 	}
 
-	encoded := make([]byte, base64.StdEncoding.EncodedLen(len(data)))
-	base64.StdEncoding.Encode(encoded, data)
-	return encoded
+	// Already raw binary — return unchanged.
+	return data
 }
 
 func normalizeBase64Input(data []byte) []byte {
@@ -212,25 +218,4 @@ func decodeBase64(data []byte) ([]byte, bool) {
 		return decoded, true
 	}
 	return nil, false
-}
-
-// isValidBase64 checks if the data appears to be valid base64-encoded content.
-func isValidBase64(data []byte) bool {
-	if len(data) == 0 {
-		return true
-	}
-
-	// Base64 strings should only contain ASCII characters.
-	for _, b := range data {
-		if b > 127 {
-			return false
-		}
-	}
-
-	s := string(data)
-	if _, err := base64.StdEncoding.DecodeString(s); err == nil {
-		return true
-	}
-	_, err := base64.RawStdEncoding.DecodeString(s)
-	return err == nil
 }

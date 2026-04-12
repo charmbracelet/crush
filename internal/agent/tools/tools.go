@@ -2,6 +2,10 @@ package tools
 
 import (
 	"context"
+	"os"
+	"strconv"
+	"strings"
+	"testing"
 )
 
 type (
@@ -53,4 +57,22 @@ func GetSupportsImagesFromContext(ctx context.Context) bool {
 // GetModelNameFromContext retrieves the model name from the context.
 func GetModelNameFromContext(ctx context.Context) string {
 	return getContextValue(ctx, ModelNameContextKey, "")
+}
+
+// FirstLineDescription returns just the first non-empty line from the embedded
+// markdown description when CRUSH_SHORT_TOOL_DESCRIPTIONS is set, significantly
+// reducing token usage. Otherwise returns the full description.
+func FirstLineDescription(content []byte) string {
+	if !testing.Testing() {
+		if v, _ := strconv.ParseBool(os.Getenv("CRUSH_SHORT_TOOL_DESCRIPTIONS")); !v {
+			return strings.TrimSpace(string(content))
+		}
+	}
+	for line := range strings.SplitSeq(string(content), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			return line
+		}
+	}
+	return ""
 }

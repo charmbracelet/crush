@@ -34,7 +34,7 @@ type GlobResponseMetadata struct {
 func NewGlobTool(workingDir string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		GlobToolName,
-		string(globDescription),
+		FirstLineDescription(globDescription),
 		func(ctx context.Context, params GlobParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Pattern == "" {
 				return fantasy.NewTextErrorResponse("pattern is required"), nil

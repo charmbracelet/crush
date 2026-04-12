@@ -65,7 +65,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 
 	return fantasy.NewParallelAgentTool(
 		tools.AgenticFetchToolName,
-		string(agenticFetchToolDescription),
+		tools.FirstLineDescription(agenticFetchToolDescription),
 		func(ctx context.Context, params tools.AgenticFetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			validationResult, err := validateAgenticFetchParams(ctx, params)
 			if err != nil {

@@ -1,4 +1,4 @@
-Creates and manages a structured task list for tracking progress on complex, multi-step coding tasks.
+Manage a structured task list for multi-step work; each task has pending/in_progress/completed state. Keep exactly one task in_progress at a time. Skip for simple or single-step tasks.
 
 <when_to_use>
 Use this tool proactively in these scenarios:

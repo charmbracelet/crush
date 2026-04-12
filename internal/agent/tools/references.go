@@ -36,7 +36,7 @@ var referencesDescription []byte
 func NewReferencesTool(lspManager *lsp.Manager) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		ReferencesToolName,
-		string(referencesDescription),
+		FirstLineDescription(referencesDescription),
 		func(ctx context.Context, params ReferencesParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Symbol == "" {
 				return fantasy.NewTextErrorResponse("symbol is required"), nil

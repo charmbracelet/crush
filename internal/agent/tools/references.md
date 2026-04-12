@@ -1,4 +1,4 @@
-Find all references to/usage of a symbol by name using the Language Server Protocol (LSP).
+Find all references to a symbol by name via LSP; more accurate than grep for code symbols.
 
 <usage>
 - Provide symbol name (e.g., "MyFunction", "myVariable", "MyType").

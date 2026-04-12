@@ -1,4 +1,4 @@
-Shows files and subdirectories in tree structure for exploring project organization.
+List files and directories as a tree; skips hidden files and common system dirs; max 1000 files. Use glob to find files by pattern, grep to search contents.
 
 <usage>
 - Provide path to list (defaults to current working directory)

@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	_ "embed"
-	"encoding/base64"
 	"fmt"
 	"io"
 	"io/fs"
@@ -70,7 +69,7 @@ func NewViewTool(
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		ViewToolName,
-		string(viewDescription),
+		FirstLineDescription(viewDescription),
 		func(ctx context.Context, params ViewParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.FilePath == "" {
 				return fantasy.NewTextErrorResponse("file_path is required"), nil
@@ -197,8 +196,7 @@ func NewViewTool(
 					return fantasy.ToolResponse{}, fmt.Errorf("error reading image file: %w", readErr)
 				}
 
-				encoded := base64.StdEncoding.EncodeToString(imageData)
-				return fantasy.NewImageResponse([]byte(encoded), mimeType), nil
+				return fantasy.NewImageResponse(imageData, mimeType), nil
 			}
 
 			// Read the file content

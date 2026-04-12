@@ -1091,13 +1091,22 @@ func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) mes
 		}
 	case fantasy.ToolResultContentTypeMedia:
 		if r, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentMedia](result.Result); ok {
-			content := r.Text
-			if content == "" {
-				content = fmt.Sprintf("Loaded %s content", r.MediaType)
+			if !stringext.IsValidBase64(r.Data) {
+				slog.Warn("Tool returned media with invalid base64 data, discarding image",
+					"tool", result.ToolName,
+					"tool_call_id", result.ToolCallID,
+				)
+				baseResult.Content = "Tool returned image data with invalid encoding"
+				baseResult.IsError = true
+			} else {
+				content := r.Text
+				if content == "" {
+					content = fmt.Sprintf("Loaded %s content", r.MediaType)
+				}
+				baseResult.Content = content
+				baseResult.Data = r.Data
+				baseResult.MIMEType = r.MediaType
 			}
-			baseResult.Content = content
-			baseResult.Data = r.Data
-			baseResult.MIMEType = r.MediaType
 		}
 	}
 

@@ -27,7 +27,7 @@ var diagnosticsDescription []byte
 func NewDiagnosticsTool(lspManager *lsp.Manager) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		DiagnosticsToolName,
-		string(diagnosticsDescription),
+		FirstLineDescription(diagnosticsDescription),
 		func(ctx context.Context, params DiagnosticsParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if lspManager.Clients().Len() == 0 {
 				return fantasy.NewTextErrorResponse("no LSP clients available"), nil

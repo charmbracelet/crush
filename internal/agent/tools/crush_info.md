@@ -1,5 +1,4 @@
-Get information about Crush's current runtime configuration and service
-state.
+Get Crush's current runtime state: active model, provider, LSP/MCP status, skills, permissions, and disabled tools. No parameters needed.
 
 <usage>
 - Shows active model and provider, LSP/MCP server status, skills,

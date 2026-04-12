@@ -61,12 +61,7 @@ var sessionListCmd = &cobra.Command{
 var sessionShowCmd = &cobra.Command{
 	Use:   "show <id>",
 	Short: "Show session details",
-	Long: `Show session details. Use --json for machine-readable output or --markdown
-for a portable markdown document. Use -o to write directly to a file (format is
-auto-detected from the extension: .md → markdown, .json → JSON). When stdout is
-not a TTY and no format flag is given, defaults to markdown.
-
-ID can be a UUID, full hash, or hash prefix.`,
+	Long:  "Show session details. Use --json, --markdown, or -o <file> for export. ID can be a UUID, full hash, or hash prefix.",
 	Args: cobra.ExactArgs(1),
 	RunE: runSessionShow,
 }
@@ -74,8 +69,7 @@ ID can be a UUID, full hash, or hash prefix.`,
 var sessionLastCmd = &cobra.Command{
 	Use:   "last",
 	Short: "Show most recent session",
-	Long: `Show the last updated session. Supports the same output flags as "session show":
---json, --markdown, and -o <file>.`,
+	Long:  "Show the last updated session. Supports --json, --markdown, and -o <file>.",
 	RunE: runSessionLast,
 }
 
@@ -98,18 +92,14 @@ var sessionRenameCmd = &cobra.Command{
 
 func init() {
 	sessionListCmd.Flags().BoolVar(&sessionListJSON, "json", false, "output in JSON format")
-
 	sessionShowCmd.Flags().BoolVar(&sessionShowJSON, "json", false, "output in JSON format")
 	sessionShowCmd.Flags().BoolVar(&sessionShowMD, "markdown", false, "output as markdown")
 	sessionShowCmd.Flags().StringVarP(&sessionShowOutFile, "output", "o", "", "write output to file (format detected from extension: .md, .json)")
-
 	sessionLastCmd.Flags().BoolVar(&sessionLastJSON, "json", false, "output in JSON format")
 	sessionLastCmd.Flags().BoolVar(&sessionLastMD, "markdown", false, "output as markdown")
 	sessionLastCmd.Flags().StringVarP(&sessionLastOutFile, "output", "o", "", "write output to file (format detected from extension: .md, .json)")
-
 	sessionDeleteCmd.Flags().BoolVar(&sessionDeleteJSON, "json", false, "output in JSON format")
 	sessionRenameCmd.Flags().BoolVar(&sessionRenameJSON, "json", false, "output in JSON format")
-
 	sessionCmd.AddCommand(sessionListCmd)
 	sessionCmd.AddCommand(sessionShowCmd)
 	sessionCmd.AddCommand(sessionLastCmd)

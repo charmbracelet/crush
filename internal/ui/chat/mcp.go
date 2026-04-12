@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/crush/internal/diffdetect"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/stringext"
+	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 )
 
@@ -267,16 +268,38 @@ func parseUnifiedDiff(content string) []parsedDiffFile {
 // toolOutputDiffContentFromUnified renders a raw unified diff string using the
 // diff viewer by parsing it into before/after content. Each file in the diff
 // gets its own diff block; if parsing yields no files, falls back to a
-// syntax-highlighted code block.
+// syntax-highlighted code block. Truncation is applied globally across all
+// file blocks, not per-file, so multi-file diffs show a single "click to
+// expand" indicator.
 func toolOutputDiffContentFromUnified(sty *styles.Styles, content string, width int, expanded bool) string {
 	files := parseUnifiedDiff(content)
 	if len(files) == 0 {
 		bodyWidth := width - toolBodyLeftPaddingTotal
 		return sty.Tool.Body.Render(toolOutputCodeContent(sty, "result.diff", content, 0, bodyWidth, expanded))
 	}
+	bodyWidth := width - toolBodyLeftPaddingTotal
 	var blocks []string
 	for _, f := range files {
-		blocks = append(blocks, toolOutputDiffContent(sty, f.path, f.before, f.after, width, expanded))
+		formatter := common.DiffFormatter(sty).
+			Before(f.path, f.before).
+			After(f.path, f.after).
+			Width(bodyWidth)
+		if width > maxTextWidth {
+			formatter = formatter.Split()
+		}
+		blocks = append(blocks, formatter.String())
 	}
-	return strings.Join(blocks, "\n")
+	combined := strings.Join(blocks, "\n")
+	lines := strings.Split(combined, "\n")
+	maxLines := responseContextHeight
+	if expanded {
+		maxLines = len(lines)
+	}
+	if len(lines) > maxLines && !expanded {
+		truncMsg := sty.Tool.DiffTruncation.
+			Width(bodyWidth).
+			Render(fmt.Sprintf(assistantMessageTruncateFormat, len(lines)-maxLines))
+		combined = strings.Join(lines[:maxLines], "\n") + "\n" + truncMsg
+	}
+	return sty.Tool.Body.Render(combined)
 }

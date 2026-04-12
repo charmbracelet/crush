@@ -32,19 +32,19 @@ func TestInspect(t *testing.T) {
 			want: Signal{HasHunk: true, HasFileHeader: true, HasGitHeader: false},
 		},
 		{
-			name: "plain text",
+			name:    "plain text",
 			content: "hello world",
-			want: Signal{},
+			want:    Signal{},
 		},
 		{
-			name: "hunk only",
+			name:    "hunk only",
 			content: "@@ -1 +1 @@\n-old\n+new\n",
-			want: Signal{HasHunk: true},
+			want:    Signal{HasHunk: true},
 		},
 		{
-			name: "headers only",
+			name:    "headers only",
 			content: "--- a/file\n+++ b/file\n",
-			want: Signal{HasFileHeader: true},
+			want:    Signal{HasFileHeader: true},
 		},
 	}
 

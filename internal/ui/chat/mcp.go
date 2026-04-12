@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/crush/internal/diffdetect"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/stringext"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -122,29 +123,9 @@ func looksLikeMarkdown(content string) bool {
 	return false
 }
 
-// looksLikeDiff checks if content appears to be a unified diff by looking for
-// the combination of hunk markers (@@) and file headers (--- / +++), which are
-// strong signals that distinguish diffs from markdown or plain text with
-// leading +/- characters.
+// looksLikeDiff reports whether content appears to be a unified diff.
 func looksLikeDiff(content string) bool {
-	hasHunk := false
-	hasFileHeader := false
-	hasDiffGit := false
-	for line := range strings.SplitSeq(content, "\n") {
-		if strings.HasPrefix(line, "@@") {
-			hasHunk = true
-		}
-		if strings.HasPrefix(line, "--- ") {
-			hasFileHeader = true
-		}
-		if strings.HasPrefix(line, "diff --git ") {
-			hasDiffGit = true
-		}
-	}
-	if hasDiffGit && hasFileHeader {
-		return true
-	}
-	return hasHunk && hasFileHeader
+	return diffdetect.IsUnifiedDiff(content)
 }
 
 // parsedDiffFile holds the before and after content extracted from one file in

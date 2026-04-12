@@ -3540,13 +3540,14 @@ func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
 	remainingHeight := height - lipgloss.Height(detailsHeader) - lipgloss.Height(version)
 
 	const maxSectionWidth = 50
-	sectionWidth := min(maxSectionWidth, width/3-2) // account for 2 spaces
-	maxItemsPerSection := remainingHeight - 3       // Account for section title and spacing
+	sectionWidth := max(1, min(maxSectionWidth, width/4-2)) // account for spacing between sections
+	maxItemsPerSection := remainingHeight - 3               // Account for section title and spacing
 
 	lspSection := m.lspInfo(sectionWidth, maxItemsPerSection, false)
 	mcpSection := m.mcpInfo(sectionWidth, maxItemsPerSection, false)
+	skillsSection := m.skillsInfo(sectionWidth, maxItemsPerSection, false)
 	filesSection := m.filesInfo(m.com.Workspace.WorkingDir(), sectionWidth, maxItemsPerSection, false)
-	sections := lipgloss.JoinHorizontal(lipgloss.Top, filesSection, " ", lspSection, " ", mcpSection)
+	sections := lipgloss.JoinHorizontal(lipgloss.Top, filesSection, " ", lspSection, " ", mcpSection, " ", skillsSection)
 	uv.NewStyledString(
 		s.CompactDetails.View.
 			Width(area.Dx()).

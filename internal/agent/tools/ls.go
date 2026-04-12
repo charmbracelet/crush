@@ -55,7 +55,7 @@ const (
 //go:embed ls.md
 var lsDescription []byte
 
-func NewLsTool(permissions permission.Service, workingDir string, lsConfig config.ToolLs, additionalDirs []string) fantasy.AgentTool {
+func NewLsTool(permissions permission.Service, workingDir string, lsConfig config.ToolLs, dirRestrictions DirRestrictions) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		LSToolName,
 		string(lsDescription),
@@ -79,8 +79,12 @@ func NewLsTool(permissions permission.Service, workingDir string, lsConfig confi
 			}
 
 			relPath, err := filepath.Rel(absWorkingDir, absSearchPath)
-			if (err != nil || strings.HasPrefix(relPath, "..")) && !isInAdditionalDir(absSearchPath, additionalDirs) {
-				// Directory is outside working directory and not in additional dirs, request permission
+			if (err != nil || strings.HasPrefix(relPath, "..")) && !isInAdditionalDir(absSearchPath, dirRestrictions.AdditionalDirs) {
+				// Directory is outside working directory and not in additional dirs.
+				// In restricted mode, deny outright instead of prompting.
+				if denied := dirRestrictions.DenyIfRestricted(absSearchPath, LSToolName); denied != nil {
+					return *denied, nil
+				}
 				sessionID := GetSessionFromContext(ctx)
 				if sessionID == "" {
 					return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for accessing directories outside working directory")

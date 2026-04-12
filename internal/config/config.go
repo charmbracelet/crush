@@ -243,6 +243,7 @@ type Options struct {
 	ContextPaths              []string     `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=CRUSH.md"`
 	SkillsPaths               []string     `json:"skills_paths,omitempty" jsonschema:"description=Paths to directories containing Agent Skills (folders with SKILL.md files),example=~/.config/crush/skills,example=./skills"`
 	AdditionalDirs            []string     `json:"additional_dirs,omitempty" jsonschema:"description=Additional directories the agent can access without permission prompts (for reading and listing files outside the working directory),example=~/projects/shared-lib,example=/opt/dependencies/my-lib"`
+	RestrictToProject         bool         `json:"restrict_to_project,omitempty" jsonschema:"description=When enabled restricts all tools to only operate within the working directory and additional_dirs. Access outside these directories is denied outright instead of prompting for permission,default=false"`
 	TUI                       *TUIOptions  `json:"tui,omitempty" jsonschema:"description=Terminal user interface options"`
 	Debug                     bool         `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
 	DebugLSP                  bool         `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`

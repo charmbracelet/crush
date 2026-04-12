@@ -464,7 +464,9 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 
 	// Expand additional directories (resolve ~ and environment variables).
 	var additionalDirs []string
+	var restrictToProject bool
 	if opts := c.cfg.Config().Options; opts != nil {
+		restrictToProject = opts.RestrictToProject
 		for _, dir := range opts.AdditionalDirs {
 			expanded := home.Long(dir)
 			if strings.HasPrefix(expanded, "$") {
@@ -476,23 +478,29 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		}
 	}
 
+	dirRestrictions := tools.DirRestrictions{
+		WorkingDir:        c.cfg.WorkingDir(),
+		AdditionalDirs:    additionalDirs,
+		RestrictToProject: restrictToProject,
+	}
+
 	allTools = append(allTools,
-		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelName),
+		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelName, dirRestrictions),
 		tools.NewCrushInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
 		tools.NewCrushLogsTool(logFile),
 		tools.NewJobOutputTool(),
 		tools.NewJobKillTool(),
-		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),
-		tools.NewEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
-		tools.NewMultiEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
+		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil, dirRestrictions),
+		tools.NewEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir(), dirRestrictions),
+		tools.NewMultiEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir(), dirRestrictions),
 		tools.NewFetchTool(c.permissions, c.cfg.WorkingDir(), nil),
 		tools.NewGlobTool(c.cfg.WorkingDir()),
 		tools.NewGrepTool(c.cfg.WorkingDir(), c.cfg.Config().Tools.Grep),
-		tools.NewLsTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Tools.Ls, additionalDirs),
+		tools.NewLsTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Tools.Ls, dirRestrictions),
 		tools.NewSourcegraphTool(nil),
 		tools.NewTodosTool(c.sessions),
-		tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, c.skillTracker, c.cfg.WorkingDir(), additionalDirs, c.cfg.Config().Options.SkillsPaths...),
-		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
+		tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, c.skillTracker, c.cfg.WorkingDir(), dirRestrictions, c.cfg.Config().Options.SkillsPaths...),
+		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir(), dirRestrictions),
 	)
 
 	// Add LSP tools if user has configured LSPs or auto_lsp is enabled (nil or true).

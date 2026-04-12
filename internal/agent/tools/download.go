@@ -34,7 +34,7 @@ const DownloadToolName = "download"
 //go:embed download.md
 var downloadDescription []byte
 
-func NewDownloadTool(permissions permission.Service, workingDir string, client *http.Client) fantasy.AgentTool {
+func NewDownloadTool(permissions permission.Service, workingDir string, client *http.Client, dirRestrictions DirRestrictions) fantasy.AgentTool {
 	if client == nil {
 		transport := http.DefaultTransport.(*http.Transport).Clone()
 		transport.MaxIdleConns = 100
@@ -65,6 +65,12 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 			filePath := filepathext.SmartJoin(workingDir, params.FilePath)
 			relPath, _ := filepath.Rel(workingDir, filePath)
 			relPath = filepath.ToSlash(cmp.Or(relPath, filePath))
+
+			// In restricted mode, deny downloads outside allowed directories.
+			absFilePath, _ := filepath.Abs(filePath)
+			if denied := dirRestrictions.DenyIfRestricted(absFilePath, DownloadToolName); denied != nil {
+				return *denied, nil
+			}
 
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {

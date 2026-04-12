@@ -82,7 +82,7 @@ func TestBashTool_CustomAutoBackgroundThreshold(t *testing.T) {
 func newBashToolForTest(workingDir string) fantasy.AgentTool {
 	permissions := &mockBashPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
 	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
-	return NewBashTool(permissions, workingDir, attribution, "test-model")
+	return NewBashTool(permissions, workingDir, attribution, "test-model", DirRestrictions{})
 }
 
 func runBashTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, params BashParams) fantasy.ToolResponse {

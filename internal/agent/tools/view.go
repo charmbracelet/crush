@@ -65,7 +65,7 @@ func NewViewTool(
 	filetracker filetracker.Service,
 	skillTracker *skills.Tracker,
 	workingDir string,
-	additionalDirs []string,
+	dirRestrictions DirRestrictions,
 	skillsPaths ...string,
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
@@ -107,8 +107,13 @@ func NewViewTool(
 
 			// Request permission for files outside working directory,
 			// unless it's a skill file or in an additional directory.
-			isAdditionalDir := isInAdditionalDir(absFilePath, additionalDirs)
+			isAdditionalDir := isInAdditionalDir(absFilePath, dirRestrictions.AdditionalDirs)
 			if isOutsideWorkDir && !isSkillFile && !isAdditionalDir {
+				// In restricted mode, deny outright instead of prompting.
+				if denied := dirRestrictions.DenyIfRestricted(absFilePath, ViewToolName); denied != nil {
+					return *denied, nil
+				}
+
 				granted, permReqErr := permissions.Request(ctx,
 					permission.CreatePermissionRequest{
 						SessionID:   sessionID,

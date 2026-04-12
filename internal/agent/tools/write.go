@@ -49,6 +49,7 @@ func NewWriteTool(
 	files history.Service,
 	filetracker filetracker.Service,
 	workingDir string,
+	dirRestrictions DirRestrictions,
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		WriteToolName,
@@ -60,6 +61,12 @@ func NewWriteTool(
 
 			if params.Content == "" {
 				return fantasy.NewTextErrorResponse("content is required"), nil
+			}
+
+			// In restricted mode, deny writes outside allowed directories.
+			absFilePath, _ := filepath.Abs(filepathext.SmartJoin(workingDir, params.FilePath))
+			if denied := dirRestrictions.DenyIfRestricted(absFilePath, WriteToolName); denied != nil {
+				return *denied, nil
 			}
 
 			sessionID := GetSessionFromContext(ctx)

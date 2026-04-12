@@ -59,7 +59,7 @@ func (m *UI) skillStatusItems() []skillStatusItem {
 	stateNames := make(map[string]struct{}, len(m.skillStates))
 
 	states := slices.Clone(m.skillStates)
-	slices.SortFunc(states, func(a, b *skills.SkillState) int {
+	slices.SortStableFunc(states, func(a, b *skills.SkillState) int {
 		return strings.Compare(a.Path, b.Path)
 	})
 	for _, state := range states {
@@ -80,7 +80,7 @@ func (m *UI) skillStatusItems() []skillStatusItem {
 	}
 
 	builtin := cachedBuiltinSkills()
-	slices.SortFunc(builtin, func(a, b *skills.Skill) int {
+	slices.SortStableFunc(builtin, func(a, b *skills.Skill) int {
 		return strings.Compare(a.Name, b.Name)
 	})
 	for _, skill := range builtin {
@@ -93,6 +93,10 @@ func (m *UI) skillStatusItems() []skillStatusItem {
 			title: t.ResourceName.Render(skill.Name),
 		})
 	}
+
+	slices.SortStableFunc(items, func(a, b skillStatusItem) int {
+		return strings.Compare(a.name, b.name)
+	})
 
 	return items
 }

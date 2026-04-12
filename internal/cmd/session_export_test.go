@@ -2,11 +2,13 @@ package cmd
 
 import (
 	"bytes"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
 
@@ -286,6 +288,69 @@ func TestOutputSessionMarkdown_NoCostOrTokens(t *testing.T) {
 	// Should not contain cost or tokens lines when zero.
 	require.NotContains(t, out, "cost:")
 	require.NotContains(t, out, "tokens:")
+}
+
+func TestOutputSessionMarkdown_TitleNewlineSanitized(t *testing.T) {
+	t.Parallel()
+
+	sess := session.Session{
+		ID:        "test-uuid-newline",
+		Title:     "Line one\nLine two",
+		CreatedAt: 1712000000,
+		UpdatedAt: 1712001000,
+	}
+
+	var buf bytes.Buffer
+	err := outputSessionMarkdown(&buf, sess, nil)
+	require.NoError(t, err)
+
+	out := buf.String()
+
+	// The heading must stay on a single line.
+	require.Contains(t, out, "# Line one Line two\n")
+	require.NotContains(t, out, "# Line one\nLine two")
+}
+
+func TestRenderSession_FileOutputDefaultsToMarkdown(t *testing.T) {
+	t.Parallel()
+
+	sess := session.Session{
+		ID:        "test-uuid-fileout",
+		Title:     "File output test",
+		CreatedAt: 1712000000,
+		UpdatedAt: 1712001000,
+	}
+
+	msgs := []*message.Message{
+		{
+			ID:        "msg-1",
+			Role:      message.User,
+			SessionID: sess.ID,
+			CreatedAt: 1712000000,
+			Parts: []message.ContentPart{
+				message.TextContent{Text: "Hello"},
+			},
+		},
+	}
+
+	// Write to a file with an unrecognised extension (.txt).
+	// Without the fix this would resolve to "human" and produce an empty file.
+	outPath := t.TempDir() + "/out.txt"
+
+	cmd := &cobra.Command{}
+	cmd.SetContext(t.Context())
+
+	err := renderSession(cmd, t.Context(), sess, msgs, false, false, outPath)
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(outPath)
+	require.NoError(t, err)
+
+	out := string(data)
+	// Should contain markdown content, not be empty.
+	require.Contains(t, out, "# File output test")
+	require.Contains(t, out, "## User")
+	require.Contains(t, out, "Hello")
 }
 
 func TestSessionOutputFormat(t *testing.T) {

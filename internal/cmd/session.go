@@ -392,6 +392,12 @@ func sessionOutputFormat(jsonFlag, mdFlag bool, outputPath string) string {
 func renderSession(cmd *cobra.Command, ctx context.Context, sess session.Session, msgs []*message.Message, jsonFlag, mdFlag bool, outputPath string) error {
 	format := sessionOutputFormat(jsonFlag, mdFlag, outputPath)
 
+	// When writing to a file, always use a structured format — human/pager output
+	// doesn't make sense for file destinations.
+	if outputPath != "" && format == "human" {
+		format = "markdown"
+	}
+
 	// Determine the writer: file or stdout.
 	var w io.Writer
 	if outputPath != "" {
@@ -436,8 +442,9 @@ func outputSessionMarkdown(w io.Writer, sess session.Session, msgs []*message.Me
 	fmt.Fprintln(&buf, "---")
 	fmt.Fprintln(&buf)
 
-	// Title.
-	fmt.Fprintf(&buf, "# %s\n\n", sess.Title)
+	// Title (sanitize newlines so the heading stays on one line).
+	safeTitle := strings.ReplaceAll(sess.Title, "\n", " ")
+	fmt.Fprintf(&buf, "# %s\n\n", safeTitle)
 
 	for _, msg := range msgs {
 		if msg.Role == message.System {

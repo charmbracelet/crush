@@ -2,11 +2,12 @@ package tools
 
 import (
 	"context"
-	"charm.land/fantasy"
 	"os"
 	"strconv"
 	"strings"
 	"testing"
+
+	"charm.land/fantasy"
 )
 
 type (

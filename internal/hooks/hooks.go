@@ -2,6 +2,8 @@
 // (e.g. PreToolUse), returning decisions that control agent behavior.
 package hooks
 
+import "strings"
+
 // Hook event name constants.
 const (
 	EventPreToolUse = "PreToolUse"
@@ -101,20 +103,10 @@ func aggregate(results []HookResult) AggregateResult {
 
 	agg := AggregateResult{Decision: decision, HookCount: len(results), UpdatedInput: updatedInput}
 	if len(reasons) > 0 {
-		for i, r := range reasons {
-			if i > 0 {
-				agg.Reason += "\n"
-			}
-			agg.Reason += r
-		}
+		agg.Reason = strings.Join(reasons, "\n")
 	}
 	if len(contexts) > 0 {
-		for i, c := range contexts {
-			if i > 0 {
-				agg.Context += "\n"
-			}
-			agg.Context += c
-		}
+		agg.Context = strings.Join(contexts, "\n")
 	}
 	return agg
 }

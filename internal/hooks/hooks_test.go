@@ -2,6 +2,7 @@ package hooks
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -128,14 +129,11 @@ func TestBuildEnv(t *testing.T) {
 }
 
 func splitFirst(s, sep string) []string {
-	idx := 0
-	for i := range s {
-		if s[i:i+len(sep)] == sep {
-			return []string{s[:i], s[i+len(sep):]}
-		}
-		idx++
+	before, after, found := strings.Cut(s, sep)
+	if !found {
+		return []string{s}
 	}
-	return []string{s}
+	return []string{before, after}
 }
 
 func TestBuildPayload(t *testing.T) {

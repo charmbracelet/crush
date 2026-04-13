@@ -335,3 +335,14 @@ func (m *manager) ExecuteStop(ctx context.Context, sessionID, workingDir string,
 
 	return m.executeHooks(ctx, HookStop, hookCtx)
 }
+
+// ExecuteNotification executes notification hooks.
+func (m *manager) ExecuteNotification(ctx context.Context, sessionID, workingDir string, data NotificationData) (HookResult, error) {
+	hookCtx := HookContext{
+		SessionID:  sessionID,
+		WorkingDir: workingDir,
+		Data:       data,
+	}
+
+	return m.executeHooks(ctx, HookNotification, hookCtx)
+}

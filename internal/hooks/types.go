@@ -22,7 +22,16 @@ const (
 
 	// HookStop executes when agent conversation loop stops or is cancelled.
 	HookStop HookType = "stop"
+
+	// HookNotification executes when a notification is sent (e.g. permission request).
+	HookNotification HookType = "notification"
 )
+
+// NotificationData contains data for Notification hooks.
+type NotificationData struct {
+	Type    string `json:"type"`
+	Matcher string `json:"matcher,omitempty"`
+}
 
 // HookContext contains the data passed to hooks.
 type HookContext struct {
@@ -106,6 +115,9 @@ type Manager interface {
 
 	// ExecuteStop executes the Stop event
 	ExecuteStop(ctx context.Context, sessionID, workingDir string, data StopData) (HookResult, error)
+
+	// ExecuteNotification executes the Notification event
+	ExecuteNotification(ctx context.Context, sessionID, workingDir string, data NotificationData) (HookResult, error)
 }
 
 type UserPromptSubmitData struct {

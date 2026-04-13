@@ -278,6 +278,33 @@ func (app *App) setupEvents() {
 	setupSubscriber(ctx, app.serviceEventsWG, "history", app.History.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "mcp", mcp.SubscribeEvents, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "lsp", SubscribeLSPEvents, app.events)
+
+	// Trigger notification hooks for permission requests
+	app.serviceEventsWG.Add(1)
+	go func() {
+		defer app.serviceEventsWG.Done()
+		subCh := app.Permissions.Subscribe(ctx)
+		for {
+			select {
+			case event, ok := <-subCh:
+				if !ok {
+					return
+				}
+				if event.Type == pubsub.CreatedEvent {
+					_, err := app.HooksManager.ExecuteNotification(ctx, event.Payload.SessionID, app.config.WorkingDir(), hooks.NotificationData{
+						Type:    "Notification",
+						Matcher: "ToolPermission",
+					})
+					if err != nil {
+						slog.Error("Failed to execute notification hook", "error", err)
+					}
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
 	cleanupFunc := func() error {
 		cancel()
 		app.serviceEventsWG.Wait()

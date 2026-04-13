@@ -28,6 +28,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	agenttools "github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/fsext"
@@ -213,7 +214,7 @@ type UI struct {
 	}
 
 	// lsp
-	lspStates map[string]workspace.LSPClientInfo
+	lspStates map[string]app.LSPClientInfo
 
 	// mcp
 	mcpStates map[string]mcp.ClientInfo
@@ -315,7 +316,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		completions:         comp,
 		attachments:         attachments,
 		todoSpinner:         todoSpinner,
-		lspStates:           make(map[string]workspace.LSPClientInfo),
+		lspStates:           make(map[string]app.LSPClientInfo),
 		mcpStates:           make(map[string]mcp.ClientInfo),
 		notifyBackend:       notification.NoopBackend{},
 		notifyWindowFocused: true,
@@ -615,8 +616,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.renderPills()
 	case pubsub.Event[history.File]:
 		cmds = append(cmds, m.handleFileEvent(msg.Payload))
-	case pubsub.Event[workspace.LSPEvent]:
-		m.lspStates = m.com.Workspace.LSPGetStates()
+	case pubsub.Event[app.LSPEvent]:
+		m.lspStates = app.GetLSPStates()
 	case pubsub.Event[mcp.Event]:
 		switch msg.Payload.Type {
 		case mcp.EventStateChanged:
@@ -2480,7 +2481,11 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 	}
 
 	// Add app margins
-	appRect, helpRect := layout.SplitVertical(area, layout.Fixed(area.Dy()-helpHeight))
+	var appRect, helpRect image.Rectangle
+	layout.Vertical(
+		layout.Len(area.Dy()-helpHeight),
+		layout.Fill(1),
+	).Split(area).Assign(&appRect, &helpRect)
 	appRect.Min.Y += 1
 	appRect.Max.Y -= 1
 	helpRect.Min.Y -= 1
@@ -2509,7 +2514,11 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 		// ------
 		// help
 
-		headerRect, mainRect := layout.SplitVertical(appRect, layout.Fixed(landingHeaderHeight))
+		var headerRect, mainRect image.Rectangle
+		layout.Vertical(
+			layout.Len(landingHeaderHeight),
+			layout.Fill(1),
+		).Split(appRect).Assign(&headerRect, &mainRect)
 		uiLayout.header = headerRect
 		uiLayout.main = mainRect
 
@@ -2523,8 +2532,16 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 		// editor
 		// ------
 		// help
-		headerRect, mainRect := layout.SplitVertical(appRect, layout.Fixed(landingHeaderHeight))
-		mainRect, editorRect := layout.SplitVertical(mainRect, layout.Fixed(mainRect.Dy()-editorHeight))
+		var headerRect, mainRect image.Rectangle
+		layout.Vertical(
+			layout.Len(landingHeaderHeight),
+			layout.Fill(1),
+		).Split(appRect).Assign(&headerRect, &mainRect)
+		var editorRect image.Rectangle
+		layout.Vertical(
+			layout.Len(mainRect.Dy()-editorHeight),
+			layout.Fill(1),
+		).Split(mainRect).Assign(&mainRect, &editorRect)
 		// Remove extra padding from editor (but keep it for header and main)
 		editorRect.Min.X -= 1
 		editorRect.Max.X += 1
@@ -2544,20 +2561,36 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 			// ------
 			// help
 			const compactHeaderHeight = 1
-			headerRect, mainRect := layout.SplitVertical(appRect, layout.Fixed(compactHeaderHeight))
+			var headerRect, mainRect image.Rectangle
+			layout.Vertical(
+				layout.Len(compactHeaderHeight),
+				layout.Fill(1),
+			).Split(appRect).Assign(&headerRect, &mainRect)
 			detailsHeight := min(sessionDetailsMaxHeight, area.Dy()-1) // One row for the header
-			sessionDetailsArea, _ := layout.SplitVertical(appRect, layout.Fixed(detailsHeight))
+			var sessionDetailsArea image.Rectangle
+			layout.Vertical(
+				layout.Len(detailsHeight),
+				layout.Fill(1),
+			).Split(appRect).Assign(&sessionDetailsArea, new(image.Rectangle))
 			uiLayout.sessionDetails = sessionDetailsArea
 			uiLayout.sessionDetails.Min.Y += compactHeaderHeight // adjust for header
 			// Add one line gap between header and main content
 			mainRect.Min.Y += 1
-			mainRect, editorRect := layout.SplitVertical(mainRect, layout.Fixed(mainRect.Dy()-editorHeight))
+			var editorRect image.Rectangle
+			layout.Vertical(
+				layout.Len(mainRect.Dy()-editorHeight),
+				layout.Fill(1),
+			).Split(mainRect).Assign(&mainRect, &editorRect)
 			mainRect.Max.X -= 1 // Add padding right
 			uiLayout.header = headerRect
 			pillsHeight := m.pillsAreaHeight()
 			if pillsHeight > 0 {
 				pillsHeight = min(pillsHeight, mainRect.Dy())
-				chatRect, pillsRect := layout.SplitVertical(mainRect, layout.Fixed(mainRect.Dy()-pillsHeight))
+				var chatRect, pillsRect image.Rectangle
+				layout.Vertical(
+					layout.Len(mainRect.Dy()-pillsHeight),
+					layout.Fill(1),
+				).Split(mainRect).Assign(&chatRect, &pillsRect)
 				uiLayout.main = chatRect
 				uiLayout.pills = pillsRect
 			} else {
@@ -2576,16 +2609,28 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 			// ----------
 			// help
 
-			mainRect, sideRect := layout.SplitHorizontal(appRect, layout.Fixed(appRect.Dx()-sidebarWidth))
+			var mainRect, sideRect image.Rectangle
+			layout.Horizontal(
+				layout.Len(appRect.Dx()-sidebarWidth),
+				layout.Fill(1),
+			).Split(appRect).Assign(&mainRect, &sideRect)
 			// Add padding left
 			sideRect.Min.X += 1
-			mainRect, editorRect := layout.SplitVertical(mainRect, layout.Fixed(mainRect.Dy()-editorHeight))
+			var editorRect image.Rectangle
+			layout.Vertical(
+				layout.Len(mainRect.Dy()-editorHeight),
+				layout.Fill(1),
+			).Split(mainRect).Assign(&mainRect, &editorRect)
 			mainRect.Max.X -= 1 // Add padding right
 			uiLayout.sidebar = sideRect
 			pillsHeight := m.pillsAreaHeight()
 			if pillsHeight > 0 {
 				pillsHeight = min(pillsHeight, mainRect.Dy())
-				chatRect, pillsRect := layout.SplitVertical(mainRect, layout.Fixed(mainRect.Dy()-pillsHeight))
+				var chatRect, pillsRect image.Rectangle
+				layout.Vertical(
+					layout.Len(mainRect.Dy()-pillsHeight),
+					layout.Fill(1),
+				).Split(mainRect).Assign(&chatRect, &pillsRect)
 				uiLayout.main = chatRect
 				uiLayout.pills = pillsRect
 			} else {
@@ -2963,7 +3008,7 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 			}
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
-				Msg:  fmt.Sprintf("Failed to run agent: %v", err),
+				Msg:  fmt.Sprintf("%v", err),
 			}
 		}
 		return nil
@@ -3202,9 +3247,27 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 			Title:   "Crush is waiting...",
 			Message: fmt.Sprintf("Agent's turn completed in \"%s\"", n.SessionTitle),
 		})
+	case notify.TypeReAuthenticate:
+		return m.handleReAuthenticate(n.ProviderID)
 	default:
 		return nil
 	}
+}
+
+func (m *UI) handleReAuthenticate(providerID string) tea.Cmd {
+	cfg := m.com.Config()
+	if cfg == nil {
+		return nil
+	}
+	providerCfg, ok := cfg.Providers.Get(providerID)
+	if !ok {
+		return nil
+	}
+	agentCfg, ok := cfg.Agents[config.AgentCoder]
+	if !ok {
+		return nil
+	}
+	return m.openAuthenticationDialog(providerCfg.ToProvider(), cfg.Models[agentCfg.Model], agentCfg.Model)
 }
 
 // newSession clears the current session state and prepares for a new session.

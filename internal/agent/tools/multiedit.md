@@ -1,4 +1,4 @@
-Makes multiple edits to a single file in one operation. Built on Edit tool for efficient multiple find-and-replace operations. Prefer over Edit tool for multiple edits to same file.
+Apply multiple find-and-replace edits to a single file in one operation; edits run sequentially. Prefer over edit for multiple changes to the same file. Same exact-match rules as edit apply.
 
 <prerequisites>
 1. Use View tool to understand file contents and context

@@ -107,12 +107,15 @@ func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func()
 	dataDir, _ := cmd.Flags().GetString("data-dir")
 	ctx := cmd.Context()
 
+	cfg, err := config.Init("", dataDir, false)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to initialize config: %w", err)
+	}
 	if dataDir == "" {
-		cfg, err := config.Init("", "", false)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to initialize config: %w", err)
-		}
 		dataDir = cfg.Config().Options.DataDirectory
+	}
+	if shouldEnableMetrics(cfg.Config()) {
+		event.Init()
 	}
 
 	conn, err := db.Connect(ctx, dataDir)
@@ -130,13 +133,14 @@ func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func()
 
 func runSessionList(cmd *cobra.Command, _ []string) error {
 	event.SetNonInteractive(true)
-	event.SessionListed(sessionListJSON)
 
 	ctx, svc, cleanup, err := sessionSetup(cmd)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
+
+	event.SessionListed(sessionListJSON)
 
 	list, err := svc.sessions.List(ctx)
 	if err != nil {
@@ -253,13 +257,14 @@ func resolveSessionID(ctx context.Context, svc session.Service, id string) (sess
 
 func runSessionShow(cmd *cobra.Command, args []string) error {
 	event.SetNonInteractive(true)
-	event.SessionShown(sessionShowJSON)
 
 	ctx, svc, cleanup, err := sessionSetup(cmd)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
+
+	event.SessionShown(sessionShowJSON)
 
 	sess, err := resolveSessionID(ctx, svc.sessions, args[0])
 	if err != nil {
@@ -280,13 +285,14 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 
 func runSessionDelete(cmd *cobra.Command, args []string) error {
 	event.SetNonInteractive(true)
-	event.SessionDeletedCommand(sessionDeleteJSON)
 
 	ctx, svc, cleanup, err := sessionSetup(cmd)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
+
+	event.SessionDeletedCommand(sessionDeleteJSON)
 
 	sess, err := resolveSessionID(ctx, svc.sessions, args[0])
 	if err != nil {
@@ -315,13 +321,14 @@ func runSessionDelete(cmd *cobra.Command, args []string) error {
 
 func runSessionRename(cmd *cobra.Command, args []string) error {
 	event.SetNonInteractive(true)
-	event.SessionRenamed(sessionRenameJSON)
 
 	ctx, svc, cleanup, err := sessionSetup(cmd)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
+
+	event.SessionRenamed(sessionRenameJSON)
 
 	sess, err := resolveSessionID(ctx, svc.sessions, args[0])
 	if err != nil {
@@ -351,13 +358,14 @@ func runSessionRename(cmd *cobra.Command, args []string) error {
 
 func runSessionLast(cmd *cobra.Command, _ []string) error {
 	event.SetNonInteractive(true)
-	event.SessionLastShown(sessionLastJSON)
 
 	ctx, svc, cleanup, err := sessionSetup(cmd)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
+
+	event.SessionLastShown(sessionLastJSON)
 
 	list, err := svc.sessions.List(ctx)
 	if err != nil {

@@ -7,16 +7,16 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
-	"github.com/charmbracelet/crush/internal/workspace"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
 // LSPInfo wraps LSP client information with diagnostic counts by severity.
 type LSPInfo struct {
-	workspace.LSPClientInfo
+	app.LSPClientInfo
 	Diagnostics map[protocol.DiagnosticSeverity]int
 }
 
@@ -25,7 +25,7 @@ type LSPInfo struct {
 func (m *UI) lspInfo(width, maxItems int, isSection bool) string {
 	t := m.com.Styles
 
-	states := slices.SortedFunc(maps.Values(m.lspStates), func(a, b workspace.LSPClientInfo) int {
+	states := slices.SortedFunc(maps.Values(m.lspStates), func(a, b app.LSPClientInfo) int {
 		return strings.Compare(a.Name, b.Name)
 	})
 

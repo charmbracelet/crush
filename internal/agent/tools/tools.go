@@ -2,8 +2,11 @@ package tools
 
 import (
 	"context"
-
 	"charm.land/fantasy"
+	"os"
+	"strconv"
+	"strings"
+	"testing"
 )
 
 type (
@@ -63,4 +66,22 @@ func NewPermissionDeniedResponse() fantasy.ToolResponse {
 	resp := fantasy.NewTextErrorResponse("User denied permission")
 	resp.StopTurn = true
 	return resp
+}
+
+// FirstLineDescription returns just the first non-empty line from the embedded
+// markdown description when CRUSH_SHORT_TOOL_DESCRIPTIONS is set, significantly
+// reducing token usage. Otherwise returns the full description.
+func FirstLineDescription(content []byte) string {
+	if !testing.Testing() {
+		if v, _ := strconv.ParseBool(os.Getenv("CRUSH_SHORT_TOOL_DESCRIPTIONS")); !v {
+			return strings.TrimSpace(string(content))
+		}
+	}
+	for line := range strings.SplitSeq(string(content), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			return line
+		}
+	}
+	return ""
 }

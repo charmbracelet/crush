@@ -193,6 +193,7 @@ That said, you can also set environment variables for preferred providers.
 | `OPENROUTER_API_KEY`        | OpenRouter                                         |
 | `IONET_API_KEY`             | io.net                                             |
 | `GROQ_API_KEY`              | Groq                                               |
+| `AVIAN_API_KEY`             | Avian                                              |
 | `VERTEXAI_PROJECT`          | Google Cloud VertexAI (Gemini)                     |
 | `VERTEXAI_LOCATION`         | Google Cloud VertexAI (Gemini)                     |
 | `AWS_ACCESS_KEY_ID`         | Amazon Bedrock (Claude)                            |

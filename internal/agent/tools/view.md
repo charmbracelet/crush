@@ -1,4 +1,4 @@
-Reads and displays file contents with line numbers for examining code, logs, or text data.
+Read a file by path with line numbers; supports offset and line limit (default 2000, max 5MB); renders images (PNG, JPEG, GIF, BMP, SVG, WebP); use ls for directories.
 
 <usage>
 - Provide file path to read

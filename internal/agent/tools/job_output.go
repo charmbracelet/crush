@@ -33,7 +33,7 @@ type JobOutputResponseMetadata struct {
 func NewJobOutputTool() fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		JobOutputToolName,
-		string(jobOutputDescription),
+		FirstLineDescription(jobOutputDescription),
 		func(ctx context.Context, params JobOutputParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.ShellID == "" {
 				return fantasy.NewTextErrorResponse("missing shell_id"), nil

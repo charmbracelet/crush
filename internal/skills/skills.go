@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
 
@@ -23,7 +25,10 @@ const (
 	MaxCompatibilityLength = 500
 )
 
-var namePattern = regexp.MustCompile(`^[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*$`)
+var (
+	namePattern    = regexp.MustCompile(`^[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*$`)
+	promptReplacer = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\"", "&quot;", "'", "&apos;")
+)
 
 // Skill represents a parsed SKILL.md file.
 type Skill struct {
@@ -106,19 +111,31 @@ func ParseContent(content []byte) (*Skill, error) {
 
 // splitFrontmatter extracts YAML frontmatter and body from markdown content.
 func splitFrontmatter(content string) (frontmatter, body string, err error) {
+	// Strip UTF-8 BOM for compatibility with editors that include it.
+	content = strings.TrimPrefix(content, "\uFEFF")
 	// Normalize line endings to \n for consistent parsing.
 	content = strings.ReplaceAll(content, "\r\n", "\n")
-	if !strings.HasPrefix(content, "---\n") {
+	content = strings.ReplaceAll(content, "\r", "\n")
+
+	lines := strings.Split(content, "\n")
+	start := slices.IndexFunc(lines, func(line string) bool {
+		return strings.TrimSpace(line) != ""
+	})
+	if start == -1 || strings.TrimSpace(lines[start]) != "---" {
 		return "", "", errors.New("no YAML frontmatter found")
 	}
 
-	rest := strings.TrimPrefix(content, "---\n")
-	before, after, ok := strings.Cut(rest, "\n---")
-	if !ok {
+	endOffset := slices.IndexFunc(lines[start+1:], func(line string) bool {
+		return strings.TrimSpace(line) == "---"
+	})
+	if endOffset == -1 {
 		return "", "", errors.New("unclosed frontmatter")
 	}
+	end := start + 1 + endOffset
 
-	return before, after, nil
+	frontmatter = strings.Join(lines[start+1:end], "\n")
+	body = strings.Join(lines[end+1:], "\n")
+	return frontmatter, body, nil
 }
 
 // Discover finds all valid skills in the given paths.
@@ -136,8 +153,9 @@ func Discover(paths []string) []*Skill {
 			Follow:  true,
 			ToSlash: fastwalk.DefaultToSlash(),
 		}
-		fastwalk.Walk(&conf, base, func(path string, d os.DirEntry, err error) error {
+		err := fastwalk.Walk(&conf, base, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
+				slog.Warn("Failed to walk skills path entry", "base", base, "path", path, "error", err)
 				return nil
 			}
 			if d.IsDir() || d.Name() != SkillFileName {
@@ -165,7 +183,20 @@ func Discover(paths []string) []*Skill {
 			mu.Unlock()
 			return nil
 		})
+		if err != nil {
+			slog.Warn("Failed to walk skills path", "path", base, "error", err)
+		}
 	}
+
+	// fastwalk traversal order is non-deterministic, so sort for stable output.
+	sort.SliceStable(skills, func(i, j int) bool {
+		left := strings.ToLower(skills[i].SkillFilePath)
+		right := strings.ToLower(skills[j].SkillFilePath)
+		if left == right {
+			return skills[i].SkillFilePath < skills[j].SkillFilePath
+		}
+		return left < right
+	})
 
 	return skills
 }
@@ -193,8 +224,7 @@ func ToPromptXML(skills []*Skill) string {
 }
 
 func escape(s string) string {
-	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\"", "&quot;", "'", "&apos;")
-	return r.Replace(s)
+	return promptReplacer.Replace(s)
 }
 
 // Deduplicate removes duplicate skills by name. When duplicates exist, the

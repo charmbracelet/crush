@@ -1,4 +1,4 @@
-Executes bash commands with automatic background conversion for long-running tasks.
+Execute shell commands; long-running commands automatically move to background and return a shell ID.
 
 <cross_platform>
 Uses mvdan/sh interpreter (Bash-compatible on all platforms including Windows).

@@ -2958,8 +2958,7 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 		err := m.com.Workspace.AgentRun(context.Background(), sessionID, content, attachments...)
 		if err != nil {
 			isCancelErr := errors.Is(err, context.Canceled)
-			isPermissionErr := errors.Is(err, permission.ErrorPermissionDenied)
-			if isCancelErr || isPermissionErr {
+			if isCancelErr {
 				return nil
 			}
 			return util.InfoMsg{

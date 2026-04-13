@@ -13,6 +13,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/permission"
 )
 
@@ -95,7 +96,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				return fantasy.ToolResponse{}, err
 			}
 			if !p {
-				return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
+				return tools.NewPermissionDeniedResponse(), nil
 			}
 
 			tmpDir, err := os.MkdirTemp(c.cfg.Config().Options.DataDirectory, "crush-fetch-*")
@@ -170,6 +171,14 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				tools.NewGrepTool(tmpDir, c.cfg.Config().Tools.Grep),
 				tools.NewSourcegraphTool(client),
 				tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, tmpDir),
+			}
+
+			// Wrap tools with hook interception if PreToolUse hooks are configured.
+			if preToolHooks := c.cfg.Config().Hooks[hooks.EventPreToolUse]; len(preToolHooks) > 0 {
+				runner := hooks.NewRunner(preToolHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
+				for i, tool := range fetchTools {
+					fetchTools[i] = newHookedTool(tool, runner)
+				}
 			}
 
 			agent := NewSessionAgent(SessionAgentOptions{

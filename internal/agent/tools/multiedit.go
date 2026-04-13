@@ -195,7 +195,7 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 		return fantasy.ToolResponse{}, err
 	}
 	if !p {
-		return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
+		return NewPermissionDeniedResponse(), nil
 	}
 
 	// Write the file
@@ -337,7 +337,7 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 		return fantasy.ToolResponse{}, err
 	}
 	if !p {
-		return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
+		return NewPermissionDeniedResponse(), nil
 	}
 
 	if isCrlf {

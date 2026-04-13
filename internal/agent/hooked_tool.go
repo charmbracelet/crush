@@ -44,11 +44,9 @@ func (h *hookedTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.To
 	}
 
 	if result.Decision == hooks.DecisionDeny {
-		reason := fmt.Sprintf(
-			"This tool call was blocked by a hook and must not be retried. Reason: %s",
-			result.Reason,
-		)
+		reason := fmt.Sprintf("Tool call blocked by hook. Reason: %s", result.Reason)
 		resp := fantasy.NewTextErrorResponse(reason)
+		resp.StopTurn = true
 		resp.Metadata = hookMetadataJSON(result)
 		return resp, nil
 	}

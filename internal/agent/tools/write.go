@@ -128,7 +128,7 @@ func NewWriteTool(
 				return fantasy.ToolResponse{}, err
 			}
 			if !p {
-				return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
+				return NewPermissionDeniedResponse(), nil
 			}
 
 			err = os.WriteFile(filePath, []byte(params.Content), 0o644)

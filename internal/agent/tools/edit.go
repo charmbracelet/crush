@@ -152,7 +152,7 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 		return fantasy.ToolResponse{}, err
 	}
 	if !p {
-		return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
+		return NewPermissionDeniedResponse(), nil
 	}
 
 	err = os.WriteFile(filePath, []byte(content), 0o644)
@@ -271,7 +271,7 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 		return fantasy.ToolResponse{}, err
 	}
 	if !p {
-		return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
+		return NewPermissionDeniedResponse(), nil
 	}
 
 	if isCrlf {
@@ -402,7 +402,7 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 		return fantasy.ToolResponse{}, err
 	}
 	if !p {
-		return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
+		return NewPermissionDeniedResponse(), nil
 	}
 
 	if isCrlf {

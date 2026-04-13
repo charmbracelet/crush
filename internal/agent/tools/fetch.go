@@ -74,7 +74,7 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 				return fantasy.ToolResponse{}, err
 			}
 			if !p {
-				return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
+				return NewPermissionDeniedResponse(), nil
 			}
 
 			// maxFetchTimeoutSeconds is the maximum allowed timeout for fetch requests (2 minutes)

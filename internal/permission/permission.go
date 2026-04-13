@@ -2,7 +2,6 @@ package permission
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -12,8 +11,6 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
 )
-
-var ErrorPermissionDenied = errors.New("user denied permission")
 
 type CreatePermissionRequest struct {
 	SessionID   string `json:"session_id"`

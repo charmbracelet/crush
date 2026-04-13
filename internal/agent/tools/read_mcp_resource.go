@@ -65,7 +65,7 @@ func NewReadMCPResourceTool(cfg *config.ConfigStore, permissions permission.Serv
 				return fantasy.ToolResponse{}, err
 			}
 			if !p {
-				return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
+				return NewPermissionDeniedResponse(), nil
 			}
 
 			contents, err := mcp.ReadResource(ctx, cfg, params.MCPName, params.URI)

@@ -85,7 +85,7 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 				return fantasy.ToolResponse{}, err
 			}
 			if !p {
-				return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
+				return NewPermissionDeniedResponse(), nil
 			}
 
 			// Handle timeout with context

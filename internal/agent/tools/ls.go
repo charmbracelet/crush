@@ -101,7 +101,7 @@ func NewLsTool(permissions permission.Service, workingDir string, lsConfig confi
 					return fantasy.ToolResponse{}, err
 				}
 				if !granted {
-					return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
+					return NewPermissionDeniedResponse(), nil
 				}
 			}
 

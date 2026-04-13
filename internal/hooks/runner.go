@@ -123,7 +123,10 @@ func (r *Runner) runOne(parentCtx context.Context, hook config.HookConfig, envVa
 	}
 
 	if err != nil {
-		exitCode := cmd.ProcessState.ExitCode()
+		exitCode := -1
+		if cmd.ProcessState != nil {
+			exitCode = cmd.ProcessState.ExitCode()
+		}
 		switch exitCode {
 		case 2:
 			// Exit code 2 = block. Stderr is the reason.

@@ -322,6 +322,11 @@ func (s *service) UpdateSessionModels(ctx context.Context, id string, models map
 	return err
 }
 
+// SaveWithModels saves the session and then persists the models column as a
+// second operation. This is intentionally non-atomic: if the models update
+// fails, the session fields are still saved (which is equivalent to the
+// pre-feature behavior where models were never persisted). The next agent turn
+// will retry the models write, so transient failures are self-healing.
 func (s *service) SaveWithModels(ctx context.Context, session Session, models map[config.SelectedModelType]config.SelectedModel) (Session, error) {
 	saved, err := s.Save(ctx, session)
 	if err != nil {

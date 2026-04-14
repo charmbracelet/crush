@@ -498,6 +498,29 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setState(uiChat, m.focus)
 		m.session = msg.session
 		m.sessionFiles = msg.files
+		if msg.session.Models != nil {
+			cfg := m.com.Config()
+			anyChanged := false
+			for modelType, selectedModel := range msg.session.Models {
+				if current, ok := cfg.Models[modelType]; ok && current.Equal(selectedModel) {
+					continue
+				}
+				if cfg.GetModel(selectedModel.Provider, selectedModel.Model) != nil {
+					if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, modelType, selectedModel); err != nil {
+						slog.Error("Failed to restore model", "type", modelType, "error", err)
+					}
+					anyChanged = true
+				}
+			}
+			if anyChanged {
+				cmds = append(cmds, func() tea.Msg {
+					if err := m.com.Workspace.UpdateAgentModel(context.TODO()); err != nil {
+						return util.ReportError(err)
+					}
+					return nil
+				})
+			}
+		}
 		cmds = append(cmds, m.startLSPs(msg.lspFilePaths()))
 		msgs, err := m.com.Workspace.ListMessages(context.Background(), m.session.ID)
 		if err != nil {
@@ -1376,6 +1399,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			}
 			return util.NewInfoMsg("Thinking mode " + status)
 		})
+		if m.session != nil {
+			cmds = append(cmds, m.saveSessionModels())
+		}
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleTransparentBackground:
 		cmds = append(cmds, func() tea.Msg {
@@ -1465,6 +1491,10 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			return util.NewInfoMsg(modelMsg)
 		})
 
+		if m.session != nil {
+			cmds = append(cmds, m.saveSessionModels())
+		}
+
 		m.dialog.CloseDialog(dialog.APIKeyInputID)
 		m.dialog.CloseDialog(dialog.OAuthID)
 		m.dialog.CloseDialog(dialog.ModelsID)
@@ -1505,6 +1535,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			m.com.Workspace.UpdateAgentModel(context.TODO())
 			return util.NewInfoMsg("Reasoning effort set to " + msg.Effort)
 		})
+		if m.session != nil {
+			cmds = append(cmds, m.saveSessionModels())
+		}
 		m.dialog.CloseDialog(dialog.ReasoningID)
 	case dialog.ActionPermissionResponse:
 		m.dialog.CloseDialog(dialog.PermissionsID)
@@ -3651,4 +3684,19 @@ func renderLogo(t *styles.Styles, compact bool, width int) string {
 		VersionColor: t.LogoVersionColor,
 		Width:        width,
 	})
+}
+
+func (m *UI) saveSessionModels() tea.Cmd {
+	session := m.session
+	if session == nil {
+		return nil
+	}
+	models := m.com.Config().Models
+	return func() tea.Msg {
+		err := m.com.Workspace.UpdateSessionModels(context.Background(), session.ID, models)
+		if err != nil {
+			return util.ReportError(err)
+		}
+		return nil
+	}
 }

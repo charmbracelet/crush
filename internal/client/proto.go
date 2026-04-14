@@ -585,6 +585,23 @@ func (c *Client) DeleteSession(ctx context.Context, id string, sessionID string)
 	return nil
 }
 
+// UpdateSessionModels updates the models for a session.
+func (c *Client) UpdateSessionModels(ctx context.Context, workspaceID, sessionID string, models map[config.SelectedModelType]config.SelectedModel) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/sessions/%s/models", workspaceID, sessionID), nil,
+		jsonBody(struct {
+			Models map[config.SelectedModelType]config.SelectedModel `json:"models"`
+		}{Models: models}),
+		http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to update session models: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("failed to update session models: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
 // ListUserMessages retrieves user-role messages for a session as proto types.
 func (c *Client) ListUserMessages(ctx context.Context, id string, sessionID string) ([]proto.Message, error) {
 	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/sessions/%s/messages/user", id, sessionID), nil, nil)

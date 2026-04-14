@@ -89,6 +89,27 @@ type SelectedModel struct {
 	ProviderOptions map[string]any `json:"provider_options,omitempty" jsonschema:"description=Additional provider-specific options for the model"`
 }
 
+func (a SelectedModel) Equal(b SelectedModel) bool {
+	return a.Model == b.Model &&
+		a.Provider == b.Provider &&
+		a.ReasoningEffort == b.ReasoningEffort &&
+		a.Think == b.Think &&
+		a.MaxTokens == b.MaxTokens &&
+		ptrEqual(a.Temperature, b.Temperature) &&
+		ptrEqual(a.TopP, b.TopP) &&
+		ptrEqual(a.TopK, b.TopK) &&
+		ptrEqual(a.FrequencyPenalty, b.FrequencyPenalty) &&
+		ptrEqual(a.PresencePenalty, b.PresencePenalty) &&
+		maps.Equal(a.ProviderOptions, b.ProviderOptions)
+}
+
+func ptrEqual[T comparable](a, b *T) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
 type ProviderConfig struct {
 	// The provider's id.
 	ID string `json:"id,omitempty" jsonschema:"description=Unique identifier for the provider,example=openai"`

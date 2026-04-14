@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/session"
 )
 
@@ -33,7 +34,7 @@ type TodosResponseMetadata struct {
 	Total         int            `json:"total"`
 }
 
-func NewTodosTool(sessions session.Service) fantasy.AgentTool {
+func NewTodosTool(sessions session.Service, cfg *config.ConfigStore) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		TodosToolName,
 		FirstLineDescription(todosDescription),
@@ -96,7 +97,7 @@ func NewTodosTool(sessions session.Service) fantasy.AgentTool {
 			}
 
 			currentSession.Todos = todos
-			_, err = sessions.Save(ctx, currentSession)
+			_, err = sessions.SaveWithModels(ctx, currentSession, cfg.Config().Models)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("failed to save todos: %w", err)
 			}

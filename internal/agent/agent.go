@@ -423,7 +423,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				return getSessionErr
 			}
 			a.updateSessionUsage(largeModel, &updatedSession, stepResult.Usage, a.openrouterCost(stepResult.ProviderMetadata))
-			_, sessionErr := a.sessions.Save(ctx, updatedSession)
+			_, sessionErr := a.sessions.SaveWithModels(ctx, updatedSession, map[config.SelectedModelType]config.SelectedModel{
+				config.SelectedModelTypeLarge: a.largeModel.Get().ModelCfg,
+				config.SelectedModelTypeSmall: a.smallModel.Get().ModelCfg,
+			})
 			if sessionErr != nil {
 				return sessionErr
 			}
@@ -723,7 +726,10 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	currentSession.SummaryMessageID = summaryMessage.ID
 	currentSession.CompletionTokens = usage.OutputTokens
 	currentSession.PromptTokens = 0
-	_, err = a.sessions.Save(genCtx, currentSession)
+	_, err = a.sessions.SaveWithModels(genCtx, currentSession, map[config.SelectedModelType]config.SelectedModel{
+		config.SelectedModelTypeLarge: a.largeModel.Get().ModelCfg,
+		config.SelectedModelTypeSmall: a.smallModel.Get().ModelCfg,
+	})
 	return err
 }
 

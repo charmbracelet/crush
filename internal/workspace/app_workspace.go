@@ -59,6 +59,10 @@ func (w *AppWorkspace) DeleteSession(ctx context.Context, sessionID string) erro
 	return w.app.Sessions.Delete(ctx, sessionID)
 }
 
+func (w *AppWorkspace) UpdateSessionModels(ctx context.Context, sessionID string, models map[config.SelectedModelType]config.SelectedModel) error {
+	return w.app.Sessions.UpdateSessionModels(ctx, sessionID, models)
+}
+
 func (w *AppWorkspace) CreateAgentToolSessionID(messageID, toolCallID string) string {
 	return w.app.Sessions.CreateAgentToolSessionID(messageID, toolCallID)
 }

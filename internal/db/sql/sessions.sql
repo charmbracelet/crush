@@ -69,6 +69,12 @@ SET
     title = ?
 WHERE id = ?;
 
+-- name: UpdateSessionModels :one
+UPDATE sessions
+SET models = ?
+WHERE id = ?
+RETURNING *;
+
 -- name: DeleteSession :exec
 DELETE FROM sessions
 WHERE id = ?;

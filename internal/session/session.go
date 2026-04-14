@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -56,6 +57,7 @@ type Session struct {
 	SummaryMessageID string
 	Cost             float64
 	Todos            []Todo
+	Models           map[config.SelectedModelType]config.SelectedModel
 	CreatedAt        int64
 	UpdatedAt        int64
 }
@@ -69,6 +71,8 @@ type Service interface {
 	GetLast(ctx context.Context) (Session, error)
 	List(ctx context.Context) ([]Session, error)
 	Save(ctx context.Context, session Session) (Session, error)
+	SaveWithModels(ctx context.Context, session Session, models map[config.SelectedModelType]config.SelectedModel) (Session, error)
+	UpdateSessionModels(ctx context.Context, id string, models map[config.SelectedModelType]config.SelectedModel) error
 	UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error
 	Rename(ctx context.Context, id string, title string) error
 	Delete(ctx context.Context, id string) error
@@ -242,6 +246,10 @@ func (s service) fromDBItem(item db.Session) Session {
 	if err != nil {
 		slog.Error("Failed to unmarshal todos", "session_id", item.ID, "error", err)
 	}
+	models, err := unmarshalModels(item.Models.String)
+	if err != nil {
+		slog.Error("Failed to unmarshal models", "session_id", item.ID, "error", err)
+	}
 	return Session{
 		ID:               item.ID,
 		ParentSessionID:  item.ParentSessionID.String,
@@ -252,6 +260,7 @@ func (s service) fromDBItem(item db.Session) Session {
 		SummaryMessageID: item.SummaryMessageID.String,
 		Cost:             item.Cost,
 		Todos:            todos,
+		Models:           models,
 		CreatedAt:        item.CreatedAt,
 		UpdatedAt:        item.UpdatedAt,
 	}
@@ -277,6 +286,51 @@ func unmarshalTodos(data string) ([]Todo, error) {
 		return []Todo{}, err
 	}
 	return todos, nil
+}
+
+func marshalModels(models map[config.SelectedModelType]config.SelectedModel) (string, error) {
+	if len(models) == 0 {
+		return "", nil
+	}
+	data, err := json.Marshal(models)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func unmarshalModels(data string) (map[config.SelectedModelType]config.SelectedModel, error) {
+	if data == "" {
+		return nil, nil
+	}
+	var models map[config.SelectedModelType]config.SelectedModel
+	if err := json.Unmarshal([]byte(data), &models); err != nil {
+		return nil, err
+	}
+	return models, nil
+}
+
+func (s *service) UpdateSessionModels(ctx context.Context, id string, models map[config.SelectedModelType]config.SelectedModel) error {
+	modelsJSON, err := marshalModels(models)
+	if err != nil {
+		return fmt.Errorf("failed to marshal models: %w", err)
+	}
+	_, err = s.q.UpdateSessionModels(ctx, db.UpdateSessionModelsParams{
+		Models: sql.NullString{String: modelsJSON, Valid: modelsJSON != ""},
+		ID:     id,
+	})
+	return err
+}
+
+func (s *service) SaveWithModels(ctx context.Context, session Session, models map[config.SelectedModelType]config.SelectedModel) (Session, error) {
+	saved, err := s.Save(ctx, session)
+	if err != nil {
+		return Session{}, err
+	}
+	if err := s.UpdateSessionModels(ctx, session.ID, models); err != nil {
+		return Session{}, fmt.Errorf("failed to persist models: %w", err)
+	}
+	return saved, nil
 }
 
 func NewService(q *db.Queries, conn *sql.DB) Service {

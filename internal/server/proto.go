@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/charmbracelet/crush/internal/backend"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/session"
 )
@@ -458,6 +459,39 @@ func (c *controllerV1) handleDeleteWorkspaceSession(w http.ResponseWriter, r *ht
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+// handlePostWorkspaceSessionModels updates the models for a session.
+//
+//	@Summary		Update session models
+//	@Tags			sessions
+//	@Accept			json
+//	@Param			id		path		string										true	"Workspace ID"
+//	@Param			sid		path		string										true	"Session ID"
+//	@Param			body	body		map[config.SelectedModelType]config.SelectedModel	true	"Models"
+//	@Success		204
+//	@Failure		400	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/sessions/{sid}/models [post]
+func (c *controllerV1) handlePostWorkspaceSessionModels(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.PathValue("id")
+	sessionID := r.PathValue("sid")
+
+	var req struct {
+		Models map[config.SelectedModelType]config.SelectedModel `json:"models"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+
+	if err := c.backend.UpdateSessionModels(r.Context(), workspaceID, sessionID, req.Models); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // handleGetWorkspaceSessionUserMessages returns user messages for a session.

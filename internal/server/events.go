@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -137,7 +138,31 @@ func sessionToProto(s session.Session) proto.Session {
 		Cost:             s.Cost,
 		CreatedAt:        s.CreatedAt,
 		UpdatedAt:        s.UpdatedAt,
+		Models:           convertModelsToProto(s.Models),
 	}
+}
+
+func convertModelsToProto(models map[config.SelectedModelType]config.SelectedModel) map[proto.SelectedModelType]proto.SelectedModel {
+	if models == nil {
+		return nil
+	}
+	result := make(map[proto.SelectedModelType]proto.SelectedModel, len(models))
+	for k, v := range models {
+		result[proto.SelectedModelType(k)] = proto.SelectedModel{
+			Model:            v.Model,
+			Provider:         v.Provider,
+			ReasoningEffort:  v.ReasoningEffort,
+			Think:            v.Think,
+			MaxTokens:        v.MaxTokens,
+			Temperature:      v.Temperature,
+			TopP:             v.TopP,
+			TopK:             v.TopK,
+			FrequencyPenalty: v.FrequencyPenalty,
+			PresencePenalty:  v.PresencePenalty,
+			ProviderOptions:  v.ProviderOptions,
+		}
+	}
+	return result
 }
 
 func fileToProto(f history.File) proto.File {

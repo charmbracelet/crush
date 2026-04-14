@@ -119,6 +119,10 @@ func (w *ClientWorkspace) DeleteSession(ctx context.Context, sessionID string) e
 	return w.client.DeleteSession(ctx, w.workspaceID(), sessionID)
 }
 
+func (w *ClientWorkspace) UpdateSessionModels(ctx context.Context, sessionID string, models map[config.SelectedModelType]config.SelectedModel) error {
+	return w.client.UpdateSessionModels(ctx, w.workspaceID(), sessionID, models)
+}
+
 func (w *ClientWorkspace) CreateAgentToolSessionID(messageID, toolCallID string) string {
 	return fmt.Sprintf("%s$$%s", messageID, toolCallID)
 }
@@ -673,6 +677,7 @@ func protoToSession(s proto.Session) session.Session {
 		Cost:             s.Cost,
 		CreatedAt:        s.CreatedAt,
 		UpdatedAt:        s.UpdatedAt,
+		Models:           convertModelsFromProto(s.Models),
 	}
 }
 
@@ -769,5 +774,52 @@ func sessionToProto(s session.Session) proto.Session {
 		Cost:             s.Cost,
 		CreatedAt:        s.CreatedAt,
 		UpdatedAt:        s.UpdatedAt,
+		Models:           convertModelsToProtoClient(s.Models),
 	}
+}
+
+func convertModelsFromProto(models map[proto.SelectedModelType]proto.SelectedModel) map[config.SelectedModelType]config.SelectedModel {
+	if models == nil {
+		return nil
+	}
+	result := make(map[config.SelectedModelType]config.SelectedModel, len(models))
+	for k, v := range models {
+		result[config.SelectedModelType(k)] = config.SelectedModel{
+			Model:            v.Model,
+			Provider:         v.Provider,
+			ReasoningEffort:  v.ReasoningEffort,
+			Think:            v.Think,
+			MaxTokens:        v.MaxTokens,
+			Temperature:      v.Temperature,
+			TopP:             v.TopP,
+			TopK:             v.TopK,
+			FrequencyPenalty: v.FrequencyPenalty,
+			PresencePenalty:  v.PresencePenalty,
+			ProviderOptions:  v.ProviderOptions,
+		}
+	}
+	return result
+}
+
+func convertModelsToProtoClient(models map[config.SelectedModelType]config.SelectedModel) map[proto.SelectedModelType]proto.SelectedModel {
+	if models == nil {
+		return nil
+	}
+	result := make(map[proto.SelectedModelType]proto.SelectedModel, len(models))
+	for k, v := range models {
+		result[proto.SelectedModelType(k)] = proto.SelectedModel{
+			Model:            v.Model,
+			Provider:         v.Provider,
+			ReasoningEffort:  v.ReasoningEffort,
+			Think:            v.Think,
+			MaxTokens:        v.MaxTokens,
+			Temperature:      v.Temperature,
+			TopP:             v.TopP,
+			TopK:             v.TopK,
+			FrequencyPenalty: v.FrequencyPenalty,
+			PresencePenalty:  v.PresencePenalty,
+			ProviderOptions:  v.ProviderOptions,
+		}
+	}
+	return result
 }

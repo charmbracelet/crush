@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/session"
@@ -103,6 +104,15 @@ func (b *Backend) DeleteSession(ctx context.Context, workspaceID, sessionID stri
 	}
 
 	return ws.Sessions.Delete(ctx, sessionID)
+}
+
+// UpdateSessionModels updates the models for a session in the given workspace.
+func (b *Backend) UpdateSessionModels(ctx context.Context, workspaceID, sessionID string, models map[config.SelectedModelType]config.SelectedModel) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+	return ws.Sessions.UpdateSessionModels(ctx, sessionID, models)
 }
 
 // ListUserMessages returns user-role messages for a session.

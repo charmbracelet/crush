@@ -87,12 +87,27 @@ func waitForLSPDiagnostics(
 
 // notifyLSPs notifies LSP servers that a file has changed and waits for
 // updated diagnostics. Use this after edit/multiedit operations.
+// When filepath is empty, refreshes all open files across all LSP clients
+// and sends a workspace-level change notification for full re-analysis.
 func notifyLSPs(
 	ctx context.Context,
 	manager *lsp.Manager,
 	filepath string,
 ) {
 	if filepath == "" || manager == nil {
+		if manager == nil {
+			return
+		}
+		// No specific file — refresh all open files for all clients.
+		var wg sync.WaitGroup
+		for client := range manager.Clients().Seq() {
+			wg.Go(func() {
+				client.RefreshOpenFiles(ctx)
+				client.NotifyWorkspaceChange(ctx)
+				client.WaitForDiagnostics(ctx, 5*time.Second)
+			})
+		}
+		wg.Wait()
 		return
 	}
 

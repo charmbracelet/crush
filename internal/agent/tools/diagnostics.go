@@ -106,7 +106,6 @@ func notifyLSPs(
 				if err := client.NotifyWorkspaceChange(ctx); err != nil {
 					slog.WarnContext(ctx, "Failed to notify workspace change", "error", err)
 				}
-				client.WaitForDiagnostics(ctx, 5*time.Second)
 			})
 		}
 		wg.Wait()
@@ -121,7 +120,6 @@ func notifyLSPs(
 		}
 		_ = client.OpenFileOnDemand(ctx, filepath)
 		_ = client.NotifyChange(ctx, filepath)
-		client.WaitForDiagnostics(ctx, 5*time.Second)
 	}
 }
 

@@ -651,3 +651,144 @@ func BenchmarkBuildSummaryPrompt(b *testing.B) {
 		})
 	}
 }
+
+func TestPreparePrompt_OrphanedToolUse(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	sa := testSessionAgent(env, nil, nil, "test prompt")
+	agent := sa.(*sessionAgent)
+
+	ctx := t.Context()
+	sess, err := env.sessions.Create(ctx, "test")
+	require.NoError(t, err)
+
+	// Create a user message.
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.User,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "hello"},
+		},
+	})
+	require.NoError(t, err)
+
+	// Create an assistant message with a tool call but no tool result —
+	// this simulates a cancelled/interrupted agent tool call.
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "let me check"},
+			message.ToolCall{
+				ID:       "call_orphaned_1",
+				Name:     "agent",
+				Input:    `{"prompt":"do something"}`,
+				Finished: true,
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	// Create the next user message (the one that interrupted the tool call).
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.User,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "Fix #2"},
+		},
+	})
+	require.NoError(t, err)
+
+	msgs, err := env.messages.List(ctx, sess.ID)
+	require.NoError(t, err)
+
+	history, _ := agent.preparePrompt(msgs)
+
+	// The history must contain a synthetic tool result for the orphaned call.
+	found := false
+	for _, msg := range history {
+		if msg.Role != fantasy.MessageRoleTool {
+			continue
+		}
+		for _, part := range msg.Content {
+			if tr, ok := fantasy.AsMessagePart[fantasy.ToolResultPart](part); ok {
+				if tr.ToolCallID == "call_orphaned_1" {
+					found = true
+					_, isError := tr.Output.(fantasy.ToolResultOutputContentError)
+					require.True(t, isError, "orphaned tool result should be an error")
+				}
+			}
+		}
+	}
+	require.True(t, found, "expected synthetic tool result for orphaned tool call")
+}
+
+func TestPreparePrompt_OrphanedToolUseMixed(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	sa := testSessionAgent(env, nil, nil, "test prompt")
+	agent := sa.(*sessionAgent)
+
+	ctx := t.Context()
+	sess, err := env.sessions.Create(ctx, "test")
+	require.NoError(t, err)
+
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.User,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "hello"},
+		},
+	})
+	require.NoError(t, err)
+
+	// Assistant with 2 tool calls: one has a result, one is orphaned.
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.ToolCall{
+				ID:       "call_ok",
+				Name:     "view",
+				Input:    `{"path":"/foo"}`,
+				Finished: true,
+			},
+			message.ToolCall{
+				ID:       "call_orphaned",
+				Name:     "agent",
+				Input:    `{"prompt":"search"}`,
+				Finished: true,
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	// Only one tool result — for call_ok.
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.Tool,
+		Parts: []message.ContentPart{
+			message.ToolResult{
+				ToolCallID: "call_ok",
+				Name:       "view",
+				Content:    "file contents",
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	msgs, err := env.messages.List(ctx, sess.ID)
+	require.NoError(t, err)
+
+	history, _ := agent.preparePrompt(msgs)
+
+	// Should have a synthetic result only for the orphaned call.
+	var syntheticCount int
+	for _, msg := range history {
+		if msg.Role != fantasy.MessageRoleTool {
+			continue
+		}
+		for _, part := range msg.Content {
+			if tr, ok := fantasy.AsMessagePart[fantasy.ToolResultPart](part); ok {
+				if tr.ToolCallID == "call_orphaned" {
+					syntheticCount++
+				}
+			}
+		}
+	}
+	require.Equal(t, 1, syntheticCount, "expected exactly one synthetic result for the orphaned call")
+}

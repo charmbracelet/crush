@@ -810,9 +810,9 @@ If not, please feel free to ignore. Again do not mention this message to the use
 
 		// For assistant messages with tool calls, inject synthetic tool
 		// results for any calls that have no matching result in the session
-		// history. The Anthropic API requires every tool_use to be followed
-		// by a tool_result; an interrupted session can leave orphaned
-		// tool_use blocks that permanently lock the conversation.
+		// history. LLM APIs require every tool_use to be immediately followed
+		// by a tool_result; an interrupted session can leave orphaned tool_use
+		// blocks that permanently lock the conversation.
 		if m.Role == message.Assistant {
 			var syntheticParts []fantasy.MessagePart
 			for _, tc := range m.ToolCalls() {

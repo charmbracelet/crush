@@ -473,3 +473,33 @@ func TestCrushInfo_Skills_BuiltinOrigin(t *testing.T) {
 	require.Contains(t, output, "crush-config = builtin, unloaded")
 	require.Contains(t, output, "my-skill = user, unloaded")
 }
+
+func TestCrushInfo_Hooks(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.NewTestStore(&config.Config{
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Hooks: map[string][]config.HookConfig{
+			"PreToolUse": {
+				{Command: "check-privates.sh", Matcher: "edit|write"},
+				{Command: "audit.sh"},
+			},
+		},
+	})
+
+	output := buildCrushInfo(cfg, nil, nil, nil, nil)
+	require.Contains(t, output, "[hooks]")
+	require.Contains(t, output, "PreToolUse (matcher: edit|write) = check-privates.sh")
+	require.Contains(t, output, "PreToolUse = audit.sh")
+}
+
+func TestCrushInfo_Hooks_NoHooks(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.NewTestStore(&config.Config{
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+	})
+
+	output := buildCrushInfo(cfg, nil, nil, nil, nil)
+	require.NotContains(t, output, "[hooks]")
+}

@@ -46,6 +46,7 @@ func buildCrushInfo(cfg *config.ConfigStore, lspManager *lsp.Manager, allSkills 
 	writeLSP(&b, lspManager, cfg)
 	writeMCP(&b, mcp.GetStates(), cfg)
 	writeSkills(&b, allSkills, activeSkills, skillTracker, cfg)
+	writeHooks(&b, cfg)
 	writePermissions(&b, cfg)
 	writeDisabledTools(&b, cfg)
 	writeOptions(&b, cfg)
@@ -416,6 +417,51 @@ func writeAttribution(b *strings.Builder, cfg *config.ConfigStore) {
 	}
 	fmt.Fprintf(b, "trailer_style = %s\n", trailerStyle)
 	fmt.Fprintf(b, "generated_with = %v\n", c.Options.Attribution.GeneratedWith)
+	b.WriteString("\n")
+}
+
+func writeHooks(b *strings.Builder, cfg *config.ConfigStore) {
+	c := cfg.Config()
+	if len(c.Hooks) == 0 {
+		return
+	}
+
+	type entry struct {
+		event   string
+		matcher string
+		command string
+		timeout int
+	}
+	var entries []entry
+	for event, hookList := range c.Hooks {
+		for _, h := range hookList {
+			entries = append(entries, entry{
+				event:   event,
+				matcher: h.Matcher,
+				command: h.Command,
+				timeout: h.Timeout,
+			})
+		}
+	}
+	slices.SortFunc(entries, func(a, b entry) int {
+		if a.event != b.event {
+			return strings.Compare(a.event, b.event)
+		}
+		return strings.Compare(a.command, b.command)
+	})
+
+	b.WriteString("[hooks]\n")
+	for _, e := range entries {
+		line := fmt.Sprintf("%s = %s", e.event, e.command)
+		if e.matcher != "" {
+			line = fmt.Sprintf("%s (matcher: %s) = %s", e.event, e.matcher, e.command)
+		}
+		if e.timeout > 0 && e.timeout != 30 {
+			line += fmt.Sprintf(" (timeout: %ds)", e.timeout)
+		}
+		b.WriteString(line + "\n")
+	}
+
 	b.WriteString("\n")
 }
 

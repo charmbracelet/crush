@@ -28,6 +28,11 @@ func NewRunner(hooks []config.HookConfig, cwd, projectDir string) *Runner {
 	}
 }
 
+// Hooks returns the hook configs the runner was created with.
+func (r *Runner) Hooks() []config.HookConfig {
+	return r.hooks
+}
+
 // Run executes all matching hooks for the given event and tool, returning
 // an aggregated result.
 func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolInputJSON string) (AggregateResult, error) {

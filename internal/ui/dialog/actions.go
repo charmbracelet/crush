@@ -81,6 +81,12 @@ type (
 		Arguments   []commands.Argument
 		Args        map[string]string // Actual argument values
 	}
+	// ActionAttachSkill is sent when a skill is selected from the skills
+	// dialog to be attached to the conversation.
+	ActionAttachSkill struct {
+		ID   string
+		Name string
+	}
 	// ActionEnableDockerMCP is a message to enable Docker MCP.
 	ActionEnableDockerMCP struct{}
 	// ActionDisableDockerMCP is a message to disable Docker MCP.

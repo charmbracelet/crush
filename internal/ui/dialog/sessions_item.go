@@ -141,34 +141,7 @@ func renderItem(t ListItemStyles, title string, info string, focused bool, width
 	title = ansi.Truncate(title, max(0, lineWidth-infoWidth), "…")
 	titleWidth := lipgloss.Width(title)
 	gap := strings.Repeat(" ", max(0, lineWidth-titleWidth-infoWidth))
-	content := title
-	if m != nil && len(m.MatchedIndexes) > 0 {
-		var lastPos int
-		parts := make([]string, 0)
-		ranges := matchedRanges(m.MatchedIndexes)
-		for _, rng := range ranges {
-			start, stop := bytePosToVisibleCharPos(title, rng)
-			if start > lastPos {
-				parts = append(parts, ansi.Cut(title, lastPos, start))
-			}
-			// NOTE: We're using [ansi.Style] here instead of [lipglosStyle]
-			// because we can control the underline start and stop more
-			// precisely via [ansi.AttrUnderline] and [ansi.AttrNoUnderline]
-			// which only affect the underline attribute without interfering
-			// with other style attributes.
-			parts = append(parts,
-				ansi.NewStyle().Underline(true).String(),
-				ansi.Cut(title, start, stop+1),
-				ansi.NewStyle().Underline(false).String(),
-			)
-			lastPos = stop + 1
-		}
-		if lastPos < ansi.StringWidth(title) {
-			parts = append(parts, ansi.Cut(title, lastPos, ansi.StringWidth(title)))
-		}
-
-		content = strings.Join(parts, "")
-	}
+	content := underlineMatches(title, m)
 
 	content = style.Render(content + gap + infoText)
 	cache[width] = content
@@ -203,6 +176,41 @@ func sessionItems(t *styles.Styles, mode sessionsMode, sessions ...session.Sessi
 	return items
 }
 
+// underlineMatches applies fuzzy-match underline highlighting to a
+// rendered title string. It converts the byte-based match indices into
+// visible character positions and wraps matching runs in ANSI
+// underline sequences.
+func underlineMatches(title string, m *fuzzy.Match) string {
+	if m == nil || len(m.MatchedIndexes) == 0 {
+		return title
+	}
+	var lastPos int
+	parts := make([]string, 0)
+	ranges := matchedRanges(m.MatchedIndexes)
+	for _, rng := range ranges {
+		start, stop := bytePosToVisibleCharPos(title, rng)
+		if start > lastPos {
+			parts = append(parts, ansi.Cut(title, lastPos, start))
+		}
+		// NOTE: We use [ansi.Style] instead of [lipgloss.Style]
+		// because we can control the underline start and stop
+		// more precisely via [ansi.AttrUnderline] and
+		// [ansi.AttrNoUnderline] which only affect the underline
+		// attribute without interfering with other style
+		// attributes.
+		parts = append(parts,
+			ansi.NewStyle().Underline(true).String(),
+			ansi.Cut(title, start, stop+1),
+			ansi.NewStyle().Underline(false).String(),
+		)
+		lastPos = stop + 1
+	}
+	if lastPos < ansi.StringWidth(title) {
+		parts = append(parts, ansi.Cut(title, lastPos, ansi.StringWidth(title)))
+	}
+	return strings.Join(parts, "")
+}
+
 func matchedRanges(in []int) [][2]int {
 	if len(in) == 0 {
 		return [][2]int{}
@@ -221,6 +229,19 @@ func matchedRanges(in []int) [][2]int {
 		}
 	}
 	out = append(out, current)
+	return out
+}
+
+// clipIndices returns only the indices from in that fall within
+// [0, limit). This is used when a fuzzy match is computed against a
+// composite string but highlighting is applied to a prefix only.
+func clipIndices(in []int, limit int) []int {
+	out := make([]int, 0, len(in))
+	for _, idx := range in {
+		if idx < limit {
+			out = append(out, idx)
+		}
+	}
 	return out
 }
 

@@ -28,6 +28,35 @@ type Error struct {
 	Message string `json:"message"`
 }
 
+// SkillInfo describes a visible skill exposed to a frontend.
+type SkillInfo struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Label       string `json:"label"`
+	Source      string `json:"source"`
+}
+
+// ReadSkillRequest is the request body for reading a skill's content.
+type ReadSkillRequest struct {
+	SkillID string `json:"skill_id"`
+}
+
+// ReadSkillResponse is the response for reading a skill's content.
+type ReadSkillResponse struct {
+	Content []byte          `json:"content"`
+	Result  SkillReadResult `json:"result"`
+}
+
+// SkillReadResult holds metadata about a skill returned alongside its
+// content.
+type SkillReadResult struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Source      string `json:"source"`
+	Builtin     bool   `json:"builtin"`
+}
+
 // AgentInfo represents information about the agent.
 type AgentInfo struct {
 	IsBusy   bool                 `json:"is_busy"`

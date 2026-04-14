@@ -130,14 +130,13 @@ type ActionFilePickerSelected struct {
 }
 
 // Cmd returns a command that reads the file at path and sends a
-// [message.Attachement] to the program.
+// [message.Attachment] to the program.
 func (a ActionFilePickerSelected) Cmd() tea.Cmd {
-	path := a.Path
-	if path == "" {
+	if a.Path == "" {
 		return nil
 	}
 	return func() tea.Msg {
-		isFileLarge, err := common.IsFileTooBig(path, common.MaxAttachmentSize)
+		isFileLarge, err := common.IsFileTooBig(a.Path, common.MaxAttachmentSize)
 		if err != nil {
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
@@ -151,7 +150,7 @@ func (a ActionFilePickerSelected) Cmd() tea.Cmd {
 			}
 		}
 
-		content, err := os.ReadFile(path)
+		content, err := os.ReadFile(a.Path)
 		if err != nil {
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
@@ -161,11 +160,10 @@ func (a ActionFilePickerSelected) Cmd() tea.Cmd {
 
 		mimeBufferSize := min(512, len(content))
 		mimeType := http.DetectContentType(content[:mimeBufferSize])
-		fileName := filepath.Base(path)
 
 		return message.Attachment{
-			FilePath: path,
-			FileName: fileName,
+			FilePath: a.Path,
+			FileName: filepath.Base(a.Path),
 			MimeType: mimeType,
 			Content:  content,
 		}

@@ -772,12 +772,21 @@ If not, please feel free to ignore. Again do not mention this message to the use
 			),
 		))
 	}
-	// Collect all tool call IDs present in assistant messages.
+	// Collect all tool call IDs present in assistant messages and all tool
+	// result IDs present in tool messages. This lets us detect both orphaned
+	// tool results (result without a call) and orphaned tool calls (call
+	// without a result).
 	knownToolCallIDs := make(map[string]struct{})
+	knownToolResultIDs := make(map[string]struct{})
 	for _, m := range msgs {
 		if m.Role == message.Assistant {
 			for _, tc := range m.ToolCalls() {
 				knownToolCallIDs[tc.ID] = struct{}{}
+			}
+		}
+		if m.Role == message.Tool {
+			for _, tr := range m.ToolResults() {
+				knownToolResultIDs[tr.ToolCallID] = struct{}{}
 			}
 		}
 	}
@@ -798,6 +807,35 @@ If not, please feel free to ignore. Again do not mention this message to the use
 			continue
 		}
 		history = append(history, m.ToAIMessage()...)
+
+		// For assistant messages with tool calls, inject synthetic tool
+		// results for any calls that have no matching result in the session
+		// history. The Anthropic API requires every tool_use to be followed
+		// by a tool_result; an interrupted session can leave orphaned
+		// tool_use blocks that permanently lock the conversation.
+		if m.Role == message.Assistant {
+			var syntheticParts []fantasy.MessagePart
+			for _, tc := range m.ToolCalls() {
+				if _, hasResult := knownToolResultIDs[tc.ID]; !hasResult {
+					slog.Warn("Injecting synthetic tool result for orphaned tool call",
+						"tool_call_id", tc.ID,
+						"tool_name", tc.Name,
+					)
+					syntheticParts = append(syntheticParts, fantasy.ToolResultPart{
+						ToolCallID: tc.ID,
+						Output: fantasy.ToolResultOutputContentError{
+							Error: errors.New("Tool call was interrupted and did not produce a result."),
+						},
+					})
+				}
+			}
+			if len(syntheticParts) > 0 {
+				history = append(history, fantasy.Message{
+					Role:    fantasy.MessageRoleTool,
+					Content: syntheticParts,
+				})
+			}
+		}
 	}
 
 	var files []fantasy.FilePart

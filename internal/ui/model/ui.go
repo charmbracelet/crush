@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"image"
 	"log/slog"
+	"maps"
 	"math/rand"
 	"net/http"
 	"os"
@@ -3691,7 +3692,11 @@ func (m *UI) saveSessionModels() tea.Cmd {
 	if session == nil {
 		return nil
 	}
-	models := m.com.Config().Models
+	models := maps.Clone(m.com.Config().Models)
+	for name, model := range models {
+		model.ProviderOptions = maps.Clone(model.ProviderOptions)
+		models[name] = model
+	}
 	return func() tea.Msg {
 		err := m.com.Workspace.UpdateSessionModels(context.Background(), session.ID, models)
 		if err != nil {

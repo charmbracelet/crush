@@ -468,7 +468,7 @@ func (c *controllerV1) handleDeleteWorkspaceSession(w http.ResponseWriter, r *ht
 //	@Accept			json
 //	@Param			id		path		string										true	"Workspace ID"
 //	@Param			sid		path		string										true	"Session ID"
-//	@Param			body	body		map[config.SelectedModelType]config.SelectedModel	true	"Models"
+//	@Param			body	body		object	true	"Models"	example({"models":{"large":{"model":"gpt-4o","provider":"openai"}}})
 //	@Success		204
 //	@Failure		400	{object}	proto.Error
 //	@Failure		500	{object}	proto.Error

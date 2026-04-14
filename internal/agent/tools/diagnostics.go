@@ -103,7 +103,9 @@ func notifyLSPs(
 		for client := range manager.Clients().Seq() {
 			wg.Go(func() {
 				client.RefreshOpenFiles(ctx)
-				client.NotifyWorkspaceChange(ctx)
+				if err := client.NotifyWorkspaceChange(ctx); err != nil {
+					slog.WarnContext(ctx, "Failed to notify workspace change", "error", err)
+				}
 				client.WaitForDiagnostics(ctx, 5*time.Second)
 			})
 		}

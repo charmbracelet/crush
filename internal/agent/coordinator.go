@@ -1051,7 +1051,12 @@ func (c *coordinator) updateParentSessionCost(ctx context.Context, childSessionI
 
 	parentSession.Cost += childSession.Cost
 
-	if _, err := c.sessions.SaveWithModels(ctx, parentSession, c.cfg.Config().Models); err != nil {
+	models := maps.Clone(c.cfg.Config().Models)
+	for name, model := range models {
+		model.ProviderOptions = maps.Clone(model.ProviderOptions)
+		models[name] = model
+	}
+	if _, err := c.sessions.SaveWithModels(ctx, parentSession, models); err != nil {
 		return fmt.Errorf("save parent session: %w", err)
 	}
 

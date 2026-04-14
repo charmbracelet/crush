@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"maps"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/config"
@@ -97,7 +98,12 @@ func NewTodosTool(sessions session.Service, cfg *config.ConfigStore) fantasy.Age
 			}
 
 			currentSession.Todos = todos
-			_, err = sessions.SaveWithModels(ctx, currentSession, cfg.Config().Models)
+			models := maps.Clone(cfg.Config().Models)
+			for name, model := range models {
+				model.ProviderOptions = maps.Clone(model.ProviderOptions)
+				models[name] = model
+			}
+			_, err = sessions.SaveWithModels(ctx, currentSession, models)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("failed to save todos: %w", err)
 			}

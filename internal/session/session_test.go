@@ -114,7 +114,7 @@ func TestFromDBItemWithModels(t *testing.T) {
 	t.Run("empty models", func(t *testing.T) {
 		t.Parallel()
 		item := testDBSession()
-		item.Models = sql.NullString{String: "", Valid: false}
+		item.Models = sql.NullString{String: "", Valid: true}
 		result := service{}.fromDBItem(item)
 		require.Nil(t, result.Models)
 	})

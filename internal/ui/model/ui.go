@@ -55,6 +55,7 @@ import (
 	"github.com/charmbracelet/ultraviolet/layout"
 	"github.com/charmbracelet/ultraviolet/screen"
 	"github.com/charmbracelet/x/editor"
+	xstrings "github.com/charmbracelet/x/exp/strings"
 )
 
 // MouseScrollThreshold defines how many lines to scroll the chat when a mouse
@@ -650,7 +651,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		termVersion := strings.ToLower(msg.Name)
 		// Only enable progress bar for the following terminals.
 		if !m.sendProgressBar {
-			m.sendProgressBar = strings.Contains(termVersion, "ghostty")
+			m.sendProgressBar = xstrings.ContainsAnyOf(termVersion, "ghostty", "rio")
 		}
 		return m, nil
 	case tea.WindowSizeMsg:

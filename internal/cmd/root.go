@@ -39,6 +39,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
+	xstrings "github.com/charmbracelet/x/exp/strings"
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 )
@@ -200,7 +201,7 @@ func supportsProgressBar() bool {
 	termProg := os.Getenv("TERM_PROGRAM")
 	_, isWindowsTerminal := os.LookupEnv("WT_SESSION")
 
-	return isWindowsTerminal || strings.Contains(strings.ToLower(termProg), "ghostty")
+	return isWindowsTerminal || xstrings.ContainsAnyOf(strings.ToLower(termProg), "ghostty", "rio")
 }
 
 // useClientServer returns true when the client/server architecture is

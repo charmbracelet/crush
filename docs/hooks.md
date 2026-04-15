@@ -12,12 +12,12 @@ effectively be written in any language. In this document we'll primarily focus
 on Bash for simplicity's sake, though we'll include some examples in other
 languages at the end, too.
 
-## Hot Hook Facts
+### Hook Facts
 
 - Hooks run before permission checks. If a hook denies a tool call, you'll
   never see a permission prompt for it.
 - Hooks are also compatible with hooks in Claude Code, however this document
-  covers hooks in Crush only.
+  covers the Crush-specific API only.
 - Crush currently supports just one hook, `PreToolUse`, with plans to support
   the full gamut. If there's a hook you’d like to see, let us know.
 
@@ -73,7 +73,7 @@ printf "%s: %s / %s" \
     "$CRUSH_TOOL_INPUT_COMMAND" >> ./bash.log
 ```
 
-For the full rundown on how hooks work, read on.
+That's basically it. For the full guide on how hooks work, however, read on.
 
 ## Building Hooks
 

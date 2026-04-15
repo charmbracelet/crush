@@ -369,7 +369,14 @@ func TestRunnerEnvVarsPropagated(t *testing.T) {
 func TestParseStdoutUpdatedInput(t *testing.T) {
 	t.Parallel()
 
-	t.Run("updated_input parsed", func(t *testing.T) {
+	t.Run("nested object", func(t *testing.T) {
+		t.Parallel()
+		r := parseStdout(`{"decision":"allow","updated_input":{"command":"rtk cat foo.go"}}`)
+		require.Equal(t, DecisionAllow, r.Decision)
+		require.Equal(t, `{"command":"rtk cat foo.go"}`, r.UpdatedInput)
+	})
+
+	t.Run("stringified backward compat", func(t *testing.T) {
 		t.Parallel()
 		r := parseStdout(`{"decision":"allow","updated_input":"{\"command\":\"rtk cat foo.go\"}"}`)
 		require.Equal(t, DecisionAllow, r.Decision)
@@ -418,7 +425,7 @@ func TestAggregationUpdatedInput(t *testing.T) {
 func TestRunnerUpdatedInput(t *testing.T) {
 	t.Parallel()
 	hookCfg := config.HookConfig{
-		Command: `echo '{"decision":"allow","updated_input":"{\"command\":\"echo rewritten\"}"}'`,
+		Command: `echo '{"decision":"allow","updated_input":{"command":"echo rewritten"}}'`,
 	}
 	r := NewRunner([]config.HookConfig{hookCfg}, t.TempDir(), t.TempDir())
 	result, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{"command":"echo original"}`)

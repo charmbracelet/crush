@@ -85,21 +85,21 @@ func parseStdout(stdout string) HookResult {
 	}
 
 	var parsed struct {
-		Decision     string `json:"decision"`
-		Reason       string `json:"reason"`
-		Context      string `json:"context"`
-		UpdatedInput string `json:"updated_input"`
+		Decision     string          `json:"decision"`
+		Reason       string          `json:"reason"`
+		Context      string          `json:"context"`
+		UpdatedInput json.RawMessage `json:"updated_input"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &parsed); err != nil {
 		return HookResult{Decision: DecisionNone}
 	}
 
 	result := HookResult{
-		Reason:       parsed.Reason,
-		Context:      parsed.Context,
-		UpdatedInput: parsed.UpdatedInput,
+		Reason:  parsed.Reason,
+		Context: parsed.Context,
 	}
 	result.Decision = parseDecision(parsed.Decision)
+	result.UpdatedInput = rawToString(parsed.UpdatedInput)
 	return result
 }
 
@@ -126,6 +126,24 @@ func parseClaudeCodeOutput(data json.RawMessage) HookResult {
 	}
 
 	return result
+}
+
+// rawToString converts a json.RawMessage to a string suitable for use
+// as opaque tool input. It accepts both a JSON object (nested) and a
+// JSON string (stringified, for backward compatibility).
+func rawToString(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	// If it's a JSON string, unwrap it.
+	if raw[0] == '"' {
+		var s string
+		if err := json.Unmarshal(raw, &s); err == nil {
+			return s
+		}
+	}
+	// Otherwise it's an object/array — use as-is.
+	return string(raw)
 }
 
 func parseDecision(s string) Decision {

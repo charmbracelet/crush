@@ -560,6 +560,10 @@
           "type": "object",
           "description": "Additional provider-specific options for this provider"
         },
+        "flat_rate": {
+          "type": "boolean",
+          "description": "Flat-rate mode for this provider"
+        },
         "models": {
           "items": {
             "$ref": "#/$defs/Model"

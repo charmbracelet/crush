@@ -103,6 +103,7 @@ type Model struct {
 	Model      fantasy.LanguageModel
 	CatwalkCfg catwalk.Model
 	ModelCfg   config.SelectedModel
+	FlatRate   bool
 }
 
 type sessionAgent struct {
@@ -979,6 +980,11 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		cost = *openrouterCost
 	}
 
+	// Skip cost accumulation
+	if model.FlatRate {
+		cost = 0
+	}
+
 	promptTokens := resp.TotalUsage.InputTokens + resp.TotalUsage.CacheCreationTokens
 	completionTokens := resp.TotalUsage.OutputTokens
 
@@ -1013,12 +1019,17 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 
 	a.eventTokensUsed(session.ID, model, usage, cost)
 
+	// Use override cost if available (e.g., from OpenRouter).
 	if overrideCost != nil {
-		session.Cost += *overrideCost
-	} else {
-		session.Cost += cost
+		cost = *overrideCost
 	}
 
+	// Skip cost accumulation
+	if model.FlatRate {
+		cost = 0
+	}
+
+	session.Cost += cost
 	session.CompletionTokens = usage.OutputTokens
 	session.PromptTokens = usage.InputTokens + usage.CacheReadTokens
 }

@@ -296,11 +296,10 @@ tool call always proceeds.
 {"command": "echo \"$(date -Iseconds) $CRUSH_TOOL_NAME\" >> ./tools.log"}
 ```
 
-### Rewrite bash commands with RTK
+### A real-world Example:
 
-Use [RTK](https://github.com/rtk-ai/rtk) to rewrite commands for token
-savings. See `/examples/hooks/rtk-rewrite.sh` for the full script. It uses
-`updated_input` to swap the command before the bash tool executes it.
+For a more practical example, see [`rtk-rewrite.sh`](./examples/rtk-rewrite.sh),
+which demonstrates how to rewrite tool input using [RTK](https://github.com/rtk-ai/rtk) to save tokens.
 
 ### Using other languages
 

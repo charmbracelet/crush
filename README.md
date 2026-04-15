@@ -338,7 +338,7 @@ using `$(echo $VAR)` syntax.
 ### Hooks
 
 Crush has preliminary support for hooks. For details, see
-[the hook guide](./docs/hooks.md)
+[the hook guide](./docs/hooks/).
 
 ### Ignoring Files
 

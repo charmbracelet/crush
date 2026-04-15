@@ -334,6 +334,11 @@ using `$(echo $VAR)` syntax.
 }
 ```
 
+### Hooks
+
+Crush has preliminary support for hooks. For details, see
+[the hook guide](./docs/hooks.md)
+
 ### Ignoring Files
 
 Crush respects `.gitignore` files by default, but you can also create a
@@ -841,7 +846,7 @@ We’d love to hear your thoughts on this project. Need help? We gotchu. You can
 
 Part of [Charm](https://charm.land).
 
-<a href="https://charm.land/"><img alt="The Charm logo" width="400" src="https://stuff.charm.sh/charm-banner-next.jpg" /></a>
+<a href="https://charm.land/"><img alt="The Charm logo" width="400" src="https://stuff.charm.sh/charm-banner-softy.jpg" /></a>
 
 <!--prettier-ignore-->
 Charm热爱开源 • Charm loves open source

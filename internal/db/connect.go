@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"testing"
 
 	"github.com/pressly/goose/v3"
 )
@@ -38,6 +39,10 @@ func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 	}
 
 	goose.SetBaseFS(FS)
+
+	if testing.Testing() {
+		goose.SetLogger(goose.NopLogger())
+	}
 
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		slog.Error("Failed to set dialect", "error", err)

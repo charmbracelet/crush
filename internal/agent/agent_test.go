@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -18,6 +19,11 @@ import (
 
 	_ "github.com/joho/godotenv/autoload"
 )
+
+func TestMain(m *testing.M) {
+	slog.SetLogLoggerLevel(slog.LevelError)
+	m.Run()
+}
 
 var modelPairs = []modelPair{
 	{"anthropic-sonnet", anthropicBuilder("claude-sonnet-4-6"), anthropicBuilder("claude-haiku-4-5-20251001")},

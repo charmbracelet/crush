@@ -779,12 +779,12 @@ If not, please feel free to ignore. Again do not mention this message to the use
 	knownToolCallIDs := make(map[string]struct{})
 	knownToolResultIDs := make(map[string]struct{})
 	for _, m := range msgs {
-		if m.Role == message.Assistant {
+		switch m.Role {
+		case message.Assistant:
 			for _, tc := range m.ToolCalls() {
 				knownToolCallIDs[tc.ID] = struct{}{}
 			}
-		}
-		if m.Role == message.Tool {
+		case message.Tool:
 			for _, tr := range m.ToolResults() {
 				knownToolResultIDs[tr.ToolCallID] = struct{}{}
 			}
@@ -795,8 +795,7 @@ If not, please feel free to ignore. Again do not mention this message to the use
 		if len(m.Parts) == 0 {
 			continue
 		}
-		// Assistant message without content or tool calls (cancelled before it
-		// returned anything).
+		// Assistant message without content or tool calls (cancelled before it returned anything).
 		if m.Role == message.Assistant && len(m.ToolCalls()) == 0 && m.Content().Text == "" && m.ReasoningContent().String() == "" {
 			continue
 		}

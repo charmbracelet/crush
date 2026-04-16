@@ -24,6 +24,7 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"charm.land/fantasy/object"
+	"github.com/bytedance/sonic"
 	"github.com/charmbracelet/crush/internal/event"
 )
 
@@ -48,7 +49,7 @@ var Enabled = sync.OnceValue(func() bool {
 // Embedded returns the embedded Hyper provider.
 var Embedded = sync.OnceValue(func() catwalk.Provider {
 	var provider catwalk.Provider
-	if err := json.Unmarshal(embedded, &provider); err != nil {
+	if err := sonic.Unmarshal(embedded, &provider); err != nil {
 		slog.Error("Could not use embedded provider data", "err", err)
 	}
 	if e := os.Getenv("HYPER_URL"); e != "" {
@@ -219,7 +220,7 @@ func (m *languageModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.
 					return true
 				}
 				var part fantasy.StreamPart
-				if err := json.Unmarshal(dataBuf.Bytes(), &part); err != nil {
+				if err := sonic.Unmarshal(dataBuf.Bytes(), &part); err != nil {
 					return yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeError, Error: err})
 				}
 				if part.Type == fantasy.StreamPartTypeFinish {
@@ -287,7 +288,7 @@ func (m *languageModel) doRequest(ctx context.Context, stream bool, call fantasy
 		addr = addr.JoinPath("generate")
 	}
 
-	body, err := json.Marshal(call)
+	body, err := sonic.Marshal(call)
 	if err != nil {
 		return nil, err
 	}

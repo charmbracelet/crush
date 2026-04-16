@@ -8,6 +8,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/table"
+	"github.com/bytedance/sonic"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/stringext"
@@ -39,7 +40,7 @@ func (d *DockerMCPToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 	cappedWidth := cappedMessageWidth(width)
 
 	var params map[string]any
-	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
+	if err := sonic.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
 		params = make(map[string]any)
 	}
 
@@ -58,7 +59,7 @@ func (d *DockerMCPToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 			if k == "query" {
 				continue
 			}
-			data, _ := json.Marshal(v)
+			data, _ := sonic.Marshal(v)
 			extraArgs[k] = string(data)
 		}
 	case "mcp-add":
@@ -71,7 +72,7 @@ func (d *DockerMCPToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 			if k == "name" {
 				continue
 			}
-			data, _ := json.Marshal(v)
+			data, _ := sonic.Marshal(v)
 			extraArgs[k] = string(data)
 		}
 	case "mcp-remove":
@@ -84,7 +85,7 @@ func (d *DockerMCPToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 			if k == "name" {
 				continue
 			}
-			data, _ := json.Marshal(v)
+			data, _ := sonic.Marshal(v)
 			extraArgs[k] = string(data)
 		}
 	case "mcp-exec":
@@ -140,8 +141,8 @@ func (d *DockerMCPToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 	if opts.Result.Content != "" {
 		var body string
 		var result json.RawMessage
-		if err := json.Unmarshal([]byte(opts.Result.Content), &result); err == nil {
-			prettyResult, err := json.MarshalIndent(result, "", "  ")
+		if err := sonic.Unmarshal([]byte(opts.Result.Content), &result); err == nil {
+			prettyResult, err := sonic.MarshalIndent(result, "", "  ")
 			if err == nil {
 				body = sty.Tool.Body.Render(toolOutputCodeContent(sty, "result.json", string(prettyResult), 0, bodyWidth, opts.ExpandedContent))
 			} else {
@@ -181,7 +182,7 @@ func (d *DockerMCPToolRenderContext) renderMCPServers(sty *styles.Styles, opts *
 	}
 
 	var result FindMCPResponse
-	if err := json.Unmarshal([]byte(opts.Result.Content), &result); err != nil {
+	if err := sonic.Unmarshal([]byte(opts.Result.Content), &result); err != nil {
 		return toolOutputPlainContent(sty, opts.Result.Content, width-toolBodyLeftPaddingTotal, opts.ExpandedContent)
 	}
 

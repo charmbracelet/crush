@@ -3,13 +3,13 @@ package mcp
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"iter"
 	"log/slog"
 	"slices"
 	"strings"
 
+	"github.com/bytedance/sonic"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -35,7 +35,7 @@ func Tools() iter.Seq2[string, []*Tool] {
 // RunTool runs an MCP tool with the given input parameters.
 func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string, input string) (ToolResult, error) {
 	var args map[string]any
-	if err := json.Unmarshal([]byte(input), &args); err != nil {
+	if err := sonic.Unmarshal([]byte(input), &args); err != nil {
 		return ToolResult{}, fmt.Errorf("error parsing parameters: %s", err)
 	}
 

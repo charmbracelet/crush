@@ -2,10 +2,10 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 
 	"charm.land/fantasy"
+	"github.com/bytedance/sonic"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -51,7 +51,7 @@ func TestBashTool_DefaultAutoBackgroundThreshold(t *testing.T) {
 
 	require.False(t, resp.IsError)
 	var meta BashResponseMetadata
-	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	require.NoError(t, sonic.Unmarshal([]byte(resp.Metadata), &meta))
 	require.False(t, meta.Background)
 	require.Empty(t, meta.ShellID)
 	require.Contains(t, meta.Output, "done")
@@ -70,7 +70,7 @@ func TestBashTool_CustomAutoBackgroundThreshold(t *testing.T) {
 
 	require.False(t, resp.IsError)
 	var meta BashResponseMetadata
-	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	require.NoError(t, sonic.Unmarshal([]byte(resp.Metadata), &meta))
 	require.True(t, meta.Background)
 	require.NotEmpty(t, meta.ShellID)
 	require.Contains(t, resp.Content, "moved to background")
@@ -88,7 +88,7 @@ func newBashToolForTest(workingDir string) fantasy.AgentTool {
 func runBashTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, params BashParams) fantasy.ToolResponse {
 	t.Helper()
 
-	input, err := json.Marshal(params)
+	input, err := sonic.Marshal(params)
 	require.NoError(t, err)
 
 	call := fantasy.ToolCall{

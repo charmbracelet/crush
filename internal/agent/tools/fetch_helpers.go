@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	md "github.com/JohannesKaufmann/html-to-markdown"
+	"github.com/bytedance/sonic"
 	"golang.org/x/net/html"
 )
 
@@ -160,7 +161,7 @@ func ConvertHTMLToMarkdown(htmlContent string) (string, error) {
 // FormatJSON formats JSON content with proper indentation.
 func FormatJSON(content string) (string, error) {
 	var data any
-	if err := json.Unmarshal([]byte(content), &data); err != nil {
+	if err := sonic.Unmarshal([]byte(content), &data); err != nil {
 		return "", err
 	}
 

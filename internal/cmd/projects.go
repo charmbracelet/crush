@@ -1,11 +1,11 @@
 package cmd
 
 import (
-	"encoding/json"
 	"os"
 
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/table"
+	"github.com/bytedance/sonic"
 	"github.com/charmbracelet/crush/internal/projects"
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
@@ -35,7 +35,7 @@ crush projects --json
 				Projects []projects.Project `json:"projects"`
 			}{Projects: projectList}
 
-			data, err := json.Marshal(output)
+			data, err := sonic.Marshal(output)
 			if err != nil {
 				return err
 			}

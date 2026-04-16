@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
+	"github.com/bytedance/sonic"
 	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
@@ -631,7 +632,7 @@ func extractSkillsFromMessages(msgs []*message.Message) []sessionShowSkill {
 		for _, part := range msg.Parts {
 			if tr, ok := part.(message.ToolResult); ok && tr.Metadata != "" {
 				var meta tools.ViewResponseMetadata
-				if err := json.Unmarshal([]byte(tr.Metadata), &meta); err == nil {
+				if err := sonic.Unmarshal([]byte(tr.Metadata), &meta); err == nil {
 					if meta.ResourceType == tools.ViewResourceSkill && meta.ResourceName != "" {
 						if !seen[meta.ResourceName] {
 							seen[meta.ResourceName] = true

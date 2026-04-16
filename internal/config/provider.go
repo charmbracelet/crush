@@ -3,7 +3,6 @@ package config
 import (
 	"cmp"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -17,6 +16,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/catwalk/pkg/embedded"
+	"github.com/bytedance/sonic"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/home"
@@ -73,7 +73,7 @@ func UpdateProviders(pathOrURL string) error {
 		if err != nil {
 			return fmt.Errorf("failed to read file: %w", err)
 		}
-		if err := json.Unmarshal(content, &providers); err != nil {
+		if err := sonic.Unmarshal(content, &providers); err != nil {
 			return fmt.Errorf("failed to unmarshal provider data: %w", err)
 		}
 		if len(providers) == 0 {
@@ -112,7 +112,7 @@ func UpdateHyper(pathOrURL string) error {
 		if err != nil {
 			return fmt.Errorf("failed to read file: %w", err)
 		}
-		if err := json.Unmarshal(content, &provider); err != nil {
+		if err := sonic.Unmarshal(content, &provider); err != nil {
 			return fmt.Errorf("failed to unmarshal provider data: %w", err)
 		}
 	}
@@ -206,7 +206,7 @@ func (c cache[T]) Get() (T, string, error) {
 		return v, "", fmt.Errorf("failed to read provider cache file: %w", err)
 	}
 
-	if err := json.Unmarshal(data, &v); err != nil {
+	if err := sonic.Unmarshal(data, &v); err != nil {
 		return v, "", fmt.Errorf("failed to unmarshal provider data from cache: %w", err)
 	}
 
@@ -219,7 +219,7 @@ func (c cache[T]) Store(v T) error {
 		return fmt.Errorf("failed to create directory for provider cache: %w", err)
 	}
 
-	data, err := json.Marshal(v)
+	data, err := sonic.Marshal(v)
 	if err != nil {
 		return fmt.Errorf("failed to marshal provider data: %w", err)
 	}

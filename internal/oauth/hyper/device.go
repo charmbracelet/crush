@@ -4,7 +4,6 @@ package hyper
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bytedance/sonic"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/oauth"
@@ -68,7 +68,7 @@ func InitiateDeviceAuth(ctx context.Context) (*DeviceAuthResponse, error) {
 	}
 
 	var authResp DeviceAuthResponse
-	if err := json.Unmarshal(body, &authResp); err != nil {
+	if err := sonic.Unmarshal(body, &authResp); err != nil {
 		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}
 
@@ -138,7 +138,7 @@ func pollOnce(ctx context.Context, deviceCode string) (TokenResponse, error) {
 		return result, fmt.Errorf("read response: %w", err)
 	}
 
-	if err := json.Unmarshal(body, &result); err != nil {
+	if err := sonic.Unmarshal(body, &result); err != nil {
 		return result, fmt.Errorf("unmarshal response: %w: %s", err, string(body))
 	}
 
@@ -155,7 +155,7 @@ func ExchangeToken(ctx context.Context, refreshToken string) (*oauth.Token, erro
 		"refresh_token": refreshToken,
 	}
 
-	data, err := json.Marshal(reqBody)
+	data, err := sonic.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
@@ -186,7 +186,7 @@ func ExchangeToken(ctx context.Context, refreshToken string) (*oauth.Token, erro
 	}
 
 	var token oauth.Token
-	if err := json.Unmarshal(body, &token); err != nil {
+	if err := sonic.Unmarshal(body, &token); err != nil {
 		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}
 
@@ -212,7 +212,7 @@ func IntrospectToken(ctx context.Context, accessToken string) (*IntrospectTokenR
 		"token": accessToken,
 	}
 
-	data, err := json.Marshal(reqBody)
+	data, err := sonic.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
@@ -243,7 +243,7 @@ func IntrospectToken(ctx context.Context, accessToken string) (*IntrospectTokenR
 	}
 
 	var result IntrospectTokenResponse
-	if err := json.Unmarshal(body, &result); err != nil {
+	if err := sonic.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}
 

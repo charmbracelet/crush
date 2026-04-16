@@ -6,7 +6,6 @@ import (
 	"cmp"
 	"context"
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,6 +18,7 @@ import (
 	"time"
 
 	"charm.land/fantasy"
+	"github.com/bytedance/sonic"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/fsext"
@@ -220,7 +220,7 @@ func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]gr
 			continue
 		}
 		var match ripgrepMatch
-		if err := json.Unmarshal(line, &match); err != nil {
+		if err := sonic.Unmarshal(line, &match); err != nil {
 			continue
 		}
 		if match.Type != "match" {

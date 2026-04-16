@@ -1,13 +1,13 @@
 package projects
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
 	"sync"
 	"time"
 
+	"github.com/bytedance/sonic"
 	"github.com/charmbracelet/crush/internal/config"
 )
 
@@ -47,7 +47,7 @@ func Load() (*ProjectList, error) {
 	}
 
 	var list ProjectList
-	if err := json.Unmarshal(data, &list); err != nil {
+	if err := sonic.Unmarshal(data, &list); err != nil {
 		return nil, err
 	}
 
@@ -66,7 +66,7 @@ func Save(list *ProjectList) error {
 		return err
 	}
 
-	data, err := json.MarshalIndent(list, "", "  ")
+	data, err := sonic.MarshalIndent(list, "", "  ")
 	if err != nil {
 		return err
 	}

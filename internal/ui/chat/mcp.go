@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/bytedance/sonic"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/stringext"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -50,13 +51,13 @@ func (b *MCPToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *T
 	}
 
 	var params map[string]any
-	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
+	if err := sonic.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
 		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
 	}
 
 	var toolParams []string
 	if len(params) > 0 {
-		parsed, _ := json.Marshal(params)
+		parsed, _ := sonic.Marshal(params)
 		toolParams = append(toolParams, string(parsed))
 	}
 
@@ -77,8 +78,8 @@ func (b *MCPToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *T
 	// see if the result is json
 	var result json.RawMessage
 	var body string
-	if err := json.Unmarshal([]byte(opts.Result.Content), &result); err == nil {
-		prettyResult, err := json.MarshalIndent(result, "", "  ")
+	if err := sonic.Unmarshal([]byte(opts.Result.Content), &result); err == nil {
+		prettyResult, err := sonic.MarshalIndent(result, "", "  ")
 		if err == nil {
 			body = sty.Tool.Body.Render(toolOutputCodeContent(sty, "result.json", string(prettyResult), 0, bodyWidth, opts.ExpandedContent))
 		} else {

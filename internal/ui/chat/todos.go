@@ -1,11 +1,11 @@
 package chat
 
 import (
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
 
+	"github.com/bytedance/sonic"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
@@ -50,7 +50,7 @@ func (t *TodosToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	var body string
 
 	// Parse params for pending state (before result is available).
-	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err == nil {
+	if err := sonic.Unmarshal([]byte(opts.ToolCall.Input), &params); err == nil {
 		completedCount := 0
 		inProgressTask := ""
 		for _, todo := range params.Todos {
@@ -75,7 +75,7 @@ func (t *TodosToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 
 		// If we have metadata, use it for richer display.
 		if opts.HasResult() && opts.Result.Metadata != "" {
-			if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil {
+			if err := sonic.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil {
 				if meta.IsNew {
 					if meta.JustStarted != "" {
 						headerText = fmt.Sprintf("created %d todos, starting first", meta.Total)

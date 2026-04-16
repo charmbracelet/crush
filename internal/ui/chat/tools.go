@@ -1,7 +1,6 @@
 package chat
 
 import (
-	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -10,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/tree"
+	"github.com/bytedance/sonic"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/diff"
@@ -871,14 +871,14 @@ func (t *baseToolMessageItem) formatParametersForCopy() string {
 	switch t.toolCall.Name {
 	case tools.BashToolName:
 		var params tools.BashParams
-		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
+		if sonic.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
 			cmd := strings.ReplaceAll(params.Command, "\n", " ")
 			cmd = strings.ReplaceAll(cmd, "\t", "    ")
 			return fmt.Sprintf("**Command:** %s", cmd)
 		}
 	case tools.ViewToolName:
 		var params tools.ViewParams
-		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
+		if sonic.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
 			var parts []string
 			parts = append(parts, fmt.Sprintf("**File:** %s", fsext.PrettyPath(params.FilePath)))
 			if params.Limit > 0 {
@@ -891,12 +891,12 @@ func (t *baseToolMessageItem) formatParametersForCopy() string {
 		}
 	case tools.EditToolName:
 		var params tools.EditParams
-		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
+		if sonic.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
 			return fmt.Sprintf("**File:** %s", fsext.PrettyPath(params.FilePath))
 		}
 	case tools.MultiEditToolName:
 		var params tools.MultiEditParams
-		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
+		if sonic.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
 			var parts []string
 			parts = append(parts, fmt.Sprintf("**File:** %s", fsext.PrettyPath(params.FilePath)))
 			parts = append(parts, fmt.Sprintf("**Edits:** %d", len(params.Edits)))
@@ -904,12 +904,12 @@ func (t *baseToolMessageItem) formatParametersForCopy() string {
 		}
 	case tools.WriteToolName:
 		var params tools.WriteParams
-		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
+		if sonic.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
 			return fmt.Sprintf("**File:** %s", fsext.PrettyPath(params.FilePath))
 		}
 	case tools.FetchToolName:
 		var params tools.FetchParams
-		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
+		if sonic.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
 			var parts []string
 			parts = append(parts, fmt.Sprintf("**URL:** %s", params.URL))
 			if params.Format != "" {
@@ -922,7 +922,7 @@ func (t *baseToolMessageItem) formatParametersForCopy() string {
 		}
 	case tools.AgenticFetchToolName:
 		var params tools.AgenticFetchParams
-		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
+		if sonic.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
 			var parts []string
 			if params.URL != "" {
 				parts = append(parts, fmt.Sprintf("**URL:** %s", params.URL))
@@ -934,12 +934,12 @@ func (t *baseToolMessageItem) formatParametersForCopy() string {
 		}
 	case tools.WebFetchToolName:
 		var params tools.WebFetchParams
-		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
+		if sonic.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
 			return fmt.Sprintf("**URL:** %s", params.URL)
 		}
 	case tools.GrepToolName:
 		var params tools.GrepParams
-		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
+		if sonic.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
 			var parts []string
 			parts = append(parts, fmt.Sprintf("**Pattern:** %s", params.Pattern))
 			if params.Path != "" {
@@ -955,7 +955,7 @@ func (t *baseToolMessageItem) formatParametersForCopy() string {
 		}
 	case tools.GlobToolName:
 		var params tools.GlobParams
-		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
+		if sonic.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
 			var parts []string
 			parts = append(parts, fmt.Sprintf("**Pattern:** %s", params.Pattern))
 			if params.Path != "" {
@@ -965,7 +965,7 @@ func (t *baseToolMessageItem) formatParametersForCopy() string {
 		}
 	case tools.LSToolName:
 		var params tools.LSParams
-		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
+		if sonic.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
 			path := params.Path
 			if path == "" {
 				path = "."
@@ -974,7 +974,7 @@ func (t *baseToolMessageItem) formatParametersForCopy() string {
 		}
 	case tools.DownloadToolName:
 		var params tools.DownloadParams
-		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
+		if sonic.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
 			var parts []string
 			parts = append(parts, fmt.Sprintf("**URL:** %s", params.URL))
 			parts = append(parts, fmt.Sprintf("**File Path:** %s", fsext.PrettyPath(params.FilePath)))
@@ -985,7 +985,7 @@ func (t *baseToolMessageItem) formatParametersForCopy() string {
 		}
 	case tools.SourcegraphToolName:
 		var params tools.SourcegraphParams
-		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
+		if sonic.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
 			var parts []string
 			parts = append(parts, fmt.Sprintf("**Query:** %s", params.Query))
 			if params.Count > 0 {
@@ -1000,13 +1000,13 @@ func (t *baseToolMessageItem) formatParametersForCopy() string {
 		return "**Project:** diagnostics"
 	case agent.AgentToolName:
 		var params agent.AgentParams
-		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
+		if sonic.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
 			return fmt.Sprintf("**Task:**\n%s", params.Prompt)
 		}
 	}
 
 	var params map[string]any
-	if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
+	if sonic.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
 		var parts []string
 		for key, value := range params {
 			displayKey := strings.ReplaceAll(key, "_", " ")
@@ -1068,7 +1068,7 @@ func (t *baseToolMessageItem) formatBashResultForCopy() string {
 
 	var meta tools.BashResponseMetadata
 	if t.result.Metadata != "" {
-		json.Unmarshal([]byte(t.result.Metadata), &meta)
+		sonic.Unmarshal([]byte(t.result.Metadata), &meta)
 	}
 
 	output := meta.Output
@@ -1091,7 +1091,7 @@ func (t *baseToolMessageItem) formatViewResultForCopy() string {
 
 	var meta tools.ViewResponseMetadata
 	if t.result.Metadata != "" {
-		json.Unmarshal([]byte(t.result.Metadata), &meta)
+		sonic.Unmarshal([]byte(t.result.Metadata), &meta)
 	}
 
 	if meta.Content == "" {
@@ -1157,12 +1157,12 @@ func (t *baseToolMessageItem) formatEditResultForCopy() string {
 	}
 
 	var meta tools.EditResponseMetadata
-	if json.Unmarshal([]byte(t.result.Metadata), &meta) != nil {
+	if sonic.Unmarshal([]byte(t.result.Metadata), &meta) != nil {
 		return t.result.Content
 	}
 
 	var params tools.EditParams
-	json.Unmarshal([]byte(t.toolCall.Input), &params)
+	sonic.Unmarshal([]byte(t.toolCall.Input), &params)
 
 	var result strings.Builder
 
@@ -1192,12 +1192,12 @@ func (t *baseToolMessageItem) formatMultiEditResultForCopy() string {
 	}
 
 	var meta tools.MultiEditResponseMetadata
-	if json.Unmarshal([]byte(t.result.Metadata), &meta) != nil {
+	if sonic.Unmarshal([]byte(t.result.Metadata), &meta) != nil {
 		return t.result.Content
 	}
 
 	var params tools.MultiEditParams
-	json.Unmarshal([]byte(t.toolCall.Input), &params)
+	sonic.Unmarshal([]byte(t.toolCall.Input), &params)
 
 	var result strings.Builder
 	if meta.OldContent != "" || meta.NewContent != "" {
@@ -1223,7 +1223,7 @@ func (t *baseToolMessageItem) formatWriteResultForCopy() string {
 	}
 
 	var params tools.WriteParams
-	if json.Unmarshal([]byte(t.toolCall.Input), &params) != nil {
+	if sonic.Unmarshal([]byte(t.toolCall.Input), &params) != nil {
 		return t.result.Content
 	}
 
@@ -1284,7 +1284,7 @@ func (t *baseToolMessageItem) formatFetchResultForCopy() string {
 	}
 
 	var params tools.FetchParams
-	if json.Unmarshal([]byte(t.toolCall.Input), &params) != nil {
+	if sonic.Unmarshal([]byte(t.toolCall.Input), &params) != nil {
 		return t.result.Content
 	}
 
@@ -1312,7 +1312,7 @@ func (t *baseToolMessageItem) formatAgenticFetchResultForCopy() string {
 	}
 
 	var params tools.AgenticFetchParams
-	if json.Unmarshal([]byte(t.toolCall.Input), &params) != nil {
+	if sonic.Unmarshal([]byte(t.toolCall.Input), &params) != nil {
 		return t.result.Content
 	}
 
@@ -1338,7 +1338,7 @@ func (t *baseToolMessageItem) formatWebFetchResultForCopy() string {
 	}
 
 	var params tools.WebFetchParams
-	if json.Unmarshal([]byte(t.toolCall.Input), &params) != nil {
+	if sonic.Unmarshal([]byte(t.toolCall.Input), &params) != nil {
 		return t.result.Content
 	}
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/bytedance/sonic"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
@@ -254,13 +255,13 @@ func marshalParts(parts []ContentPart) ([]byte, error) {
 			Data: part,
 		}
 	}
-	return json.Marshal(wrappedParts)
+	return sonic.Marshal(wrappedParts)
 }
 
 func unmarshalParts(data []byte) ([]ContentPart, error) {
 	temp := []json.RawMessage{}
 
-	if err := json.Unmarshal(data, &temp); err != nil {
+	if err := sonic.Unmarshal(data, &temp); err != nil {
 		return nil, err
 	}
 
@@ -272,50 +273,50 @@ func unmarshalParts(data []byte) ([]ContentPart, error) {
 			Data json.RawMessage `json:"data"`
 		}
 
-		if err := json.Unmarshal(rawPart, &wrapper); err != nil {
+		if err := sonic.Unmarshal(rawPart, &wrapper); err != nil {
 			return nil, err
 		}
 
 		switch wrapper.Type {
 		case reasoningType:
 			part := ReasoningContent{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
+			if err := sonic.Unmarshal(wrapper.Data, &part); err != nil {
 				return nil, err
 			}
 			parts = append(parts, part)
 		case textType:
 			part := TextContent{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
+			if err := sonic.Unmarshal(wrapper.Data, &part); err != nil {
 				return nil, err
 			}
 			parts = append(parts, part)
 		case imageURLType:
 			part := ImageURLContent{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
+			if err := sonic.Unmarshal(wrapper.Data, &part); err != nil {
 				return nil, err
 			}
 			parts = append(parts, part)
 		case binaryType:
 			part := BinaryContent{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
+			if err := sonic.Unmarshal(wrapper.Data, &part); err != nil {
 				return nil, err
 			}
 			parts = append(parts, part)
 		case toolCallType:
 			part := ToolCall{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
+			if err := sonic.Unmarshal(wrapper.Data, &part); err != nil {
 				return nil, err
 			}
 			parts = append(parts, part)
 		case toolResultType:
 			part := ToolResult{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
+			if err := sonic.Unmarshal(wrapper.Data, &part); err != nil {
 				return nil, err
 			}
 			parts = append(parts, part)
 		case finishType:
 			part := Finish{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
+			if err := sonic.Unmarshal(wrapper.Data, &part); err != nil {
 				return nil, err
 			}
 			parts = append(parts, part)

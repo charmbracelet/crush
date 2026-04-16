@@ -656,7 +656,6 @@ func BenchmarkBuildSummaryPrompt(b *testing.B) {
 }
 
 func TestPreparePrompt_OrphanedToolUse(t *testing.T) {
-	t.Parallel()
 	env := testEnv(t)
 	sa := testSessionAgent(env, nil, nil, "test prompt")
 	agent := sa.(*sessionAgent)
@@ -724,7 +723,6 @@ func TestPreparePrompt_OrphanedToolUse(t *testing.T) {
 }
 
 func TestPreparePrompt_OrphanedToolUseMixed(t *testing.T) {
-	t.Parallel()
 	env := testEnv(t)
 	sa := testSessionAgent(env, nil, nil, "test prompt")
 	agent := sa.(*sessionAgent)

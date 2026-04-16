@@ -772,12 +772,21 @@ If not, please feel free to ignore. Again do not mention this message to the use
 			),
 		))
 	}
-	// Collect all tool call IDs present in assistant messages.
+	// Collect all tool call IDs present in assistant messages and all tool
+	// result IDs present in tool messages. This lets us detect both orphaned
+	// tool results (result without a call) and orphaned tool calls (call
+	// without a result).
 	knownToolCallIDs := make(map[string]struct{})
+	knownToolResultIDs := make(map[string]struct{})
 	for _, m := range msgs {
-		if m.Role == message.Assistant {
+		switch m.Role {
+		case message.Assistant:
 			for _, tc := range m.ToolCalls() {
 				knownToolCallIDs[tc.ID] = struct{}{}
+			}
+		case message.Tool:
+			for _, tr := range m.ToolResults() {
+				knownToolResultIDs[tr.ToolCallID] = struct{}{}
 			}
 		}
 	}
@@ -786,8 +795,7 @@ If not, please feel free to ignore. Again do not mention this message to the use
 		if len(m.Parts) == 0 {
 			continue
 		}
-		// Assistant message without content or tool calls (cancelled before it
-		// returned anything).
+		// Assistant message without content or tool calls (cancelled before it returned anything).
 		if m.Role == message.Assistant && len(m.ToolCalls()) == 0 && m.Content().Text == "" && m.ReasoningContent().String() == "" {
 			continue
 		}
@@ -798,6 +806,12 @@ If not, please feel free to ignore. Again do not mention this message to the use
 			continue
 		}
 		history = append(history, m.ToAIMessage()...)
+
+		if m.Role == message.Assistant {
+			if msg, ok := syntheticToolResultsForOrphanedCalls(m, knownToolResultIDs); ok {
+				history = append(history, msg)
+			}
+		}
 	}
 
 	var files []fantasy.FilePart
@@ -846,6 +860,39 @@ func filterOrphanedToolResults(m message.Message, knownToolCallIDs map[string]st
 	msg := aiMsgs[0]
 	msg.Content = validParts
 	return msg, true
+}
+
+// syntheticToolResultsForOrphanedCalls returns a tool message containing
+// synthetic tool results for any tool calls in the assistant message that
+// have no matching result in knownToolResultIDs. LLM APIs require every
+// tool_use to be immediately followed by a tool_result; an interrupted
+// session can leave orphaned tool_use blocks that permanently lock the
+// conversation. Returns the message and true if any synthetic results were
+// produced.
+func syntheticToolResultsForOrphanedCalls(m message.Message, knownToolResultIDs map[string]struct{}) (fantasy.Message, bool) {
+	var syntheticParts []fantasy.MessagePart
+	for _, tc := range m.ToolCalls() {
+		if _, hasResult := knownToolResultIDs[tc.ID]; hasResult {
+			continue
+		}
+		slog.Warn("Injecting synthetic tool result for orphaned tool call",
+			"tool_call_id", tc.ID,
+			"tool_name", tc.Name,
+		)
+		syntheticParts = append(syntheticParts, fantasy.ToolResultPart{
+			ToolCallID: tc.ID,
+			Output: fantasy.ToolResultOutputContentError{
+				Error: errors.New("tool call was interrupted and did not produce a result, you may retry this call if the result is still needed"),
+			},
+		})
+	}
+	if len(syntheticParts) == 0 {
+		return fantasy.Message{}, false
+	}
+	return fantasy.Message{
+		Role:    fantasy.MessageRoleTool,
+		Content: syntheticParts,
+	}, true
 }
 
 func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.Session) ([]message.Message, error) {

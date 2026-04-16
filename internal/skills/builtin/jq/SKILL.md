@@ -1,6 +1,6 @@
 ---
 name: jq
-description: Use when the user needs to query, filter, reshape, extract, create, or construct JSON data — including API responses, config files, log output, or any structured data — or when helping the user write or debug JSON transformations.
+description: Use when the user needs to query, filter, reshape, extract, create, construct, count, sum, or aggregate JSON data — including API responses, config files, log output, or any structured data — or when helping the user write or debug JSON transformations, or when answering "how many", "how much", "which", or "what are the" questions over JSON or arrays.
 ---
 
 # jq — Built-in JSON Processor
@@ -95,3 +95,19 @@ jq -n --arg msg hello '{"message": $msg}'
 - Use `try` to suppress errors on missing keys: `jq 'try .foo.bar'`
 - Use `// "default"` for fallback values: `jq '.name // "unknown"'`
 - Use `@csv`, `@tsv`, `@base64`, `@html`, `@uri` for format strings.
+
+## Filtering remote JSON with `fetch`
+
+The `fetch` tool accepts an optional `jq` parameter that applies a jq
+expression to the response body server-side. Prefer it over pulling entire
+JSON payloads into context — it's faster, cheaper, and avoids manual
+counting mistakes.
+
+```text
+fetch(url="https://api.example.com/items", format="text", jq="length")
+fetch(url="https://api.example.com/items", format="text", jq="[.[].name]")
+fetch(url="https://catwalk.charm.sh/v2/providers", format="text",
+      jq="[.[].models | length] | add")
+```
+
+When `jq` is set, `format` is ignored and the body is parsed as JSON.

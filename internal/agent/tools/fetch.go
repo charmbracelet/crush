@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	md "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/itchyny/gojq"
 )
 
 const (
@@ -121,6 +123,17 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 			}
 			contentType := resp.Header.Get("Content-Type")
 
+			// If a jq expression was provided, parse the body as JSON,
+			// apply the filter, and return the result directly (format is
+			// ignored).
+			if params.JQ != "" {
+				filtered, err := applyJQ(content, params.JQ)
+				if err != nil {
+					return fantasy.NewTextErrorResponse("jq: " + err.Error()), nil
+				}
+				return fantasy.NewTextResponse(filtered), nil
+			}
+
 			switch format {
 			case "text":
 				if strings.Contains(contentType, "text/html") {
@@ -190,4 +203,56 @@ func convertHTMLToMarkdown(html string) (string, error) {
 	}
 
 	return markdown, nil
+}
+
+// applyJQ parses body as JSON and runs the given jq expression against it,
+// returning pretty-printed results joined by newlines. Multiple top-level
+// JSON values in the body are supported (each is filtered independently).
+func applyJQ(body, expr string) (string, error) {
+	query, err := gojq.Parse(expr)
+	if err != nil {
+		return "", fmt.Errorf("parse: %w", err)
+	}
+	code, err := gojq.Compile(query)
+	if err != nil {
+		return "", fmt.Errorf("compile: %w", err)
+	}
+
+	dec := json.NewDecoder(strings.NewReader(body))
+	dec.UseNumber()
+	var inputs []any
+	for {
+		var v any
+		if err := dec.Decode(&v); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return "", fmt.Errorf("invalid JSON: %w", err)
+		}
+		inputs = append(inputs, v)
+	}
+	if len(inputs) == 0 {
+		return "", fmt.Errorf("empty response body")
+	}
+
+	var out strings.Builder
+	for _, in := range inputs {
+		iter := code.Run(in)
+		for {
+			v, ok := iter.Next()
+			if !ok {
+				break
+			}
+			if e, ok := v.(error); ok {
+				return "", e
+			}
+			bs, err := json.MarshalIndent(v, "", "  ")
+			if err != nil {
+				return "", err
+			}
+			out.Write(bs)
+			out.WriteByte('\n')
+		}
+	}
+	return strings.TrimRight(out.String(), "\n"), nil
 }

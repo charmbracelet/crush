@@ -1,4 +1,4 @@
-Fetch raw content from a URL as text, markdown, or html (max 5MB); no AI processing. For analysis or extraction use agentic_fetch.
+Fetch raw content from a URL as text, markdown, or html (max 5MB); no AI processing. Optional `jq` parameter filters JSON responses server-side — use it for counting, extracting, or aggregating API data instead of loading the full payload. For analysis or extraction of prose/HTML use agentic_fetch.
 
 <when_to_use>
 Use this tool when you need:
@@ -7,6 +7,7 @@ Use this tool when you need:
 - HTML/text/markdown content without interpretation
 - Simple, fast content retrieval without analysis
 - To save tokens by avoiding AI processing
+- To count, sum, or extract fields from a JSON API response (use the `jq` parameter)
 
 DO NOT use this tool when you need to:
 - Extract specific information from a webpage (use agentic_fetch instead)
@@ -18,6 +19,11 @@ DO NOT use this tool when you need to:
 - Provide URL to fetch content from
 - Specify desired output format (text, markdown, or html)
 - Optional timeout for request
+- Optional `jq` expression to filter JSON responses. When set, the body is parsed as JSON and the expression is applied server-side; `format` is ignored. Examples:
+  - `jq: "length"` — count items in a top-level array
+  - `jq: "[.[].name]"` — extract names from an array of objects
+  - `jq: "[.[].models | length] | add"` — sum nested array lengths
+  - `jq: ".data | keys"` — list keys of a nested object
 </usage>
 
 <features>

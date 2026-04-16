@@ -824,7 +824,7 @@ If not, please feel free to ignore. Again do not mention this message to the use
 					syntheticParts = append(syntheticParts, fantasy.ToolResultPart{
 						ToolCallID: tc.ID,
 						Output: fantasy.ToolResultOutputContentError{
-							Error: errors.New("Tool call was interrupted and did not produce a result. You may retry this call if the result is still needed."),
+							Error: errors.New("tool call was interrupted and did not produce a result, you may retry this call if the result is still needed"),
 						},
 					})
 				}

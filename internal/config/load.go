@@ -403,7 +403,9 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 			filepath.Join(filepath.Dir(crushConfigDir), "AGENTS.md"),
 		}
 	}
-	c.Options.ContextPaths = append(c.Options.ContextPaths, c.Options.GlobalContextPaths...)
+	slices.Sort(c.Options.GlobalContextPaths)
+	c.Options.GlobalContextPaths = slices.Compact(c.Options.GlobalContextPaths)
+
 	if dataDir != "" {
 		c.Options.DataDirectory = dataDir
 	} else if c.Options.DataDirectory == "" {

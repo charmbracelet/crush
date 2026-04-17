@@ -201,7 +201,7 @@ func supportsProgressBar() bool {
 	termProg := os.Getenv("TERM_PROGRAM")
 	_, isWindowsTerminal := os.LookupEnv("WT_SESSION")
 
-	return isWindowsTerminal || xstrings.ContainsAnyOf(strings.ToLower(termProg), "ghostty", "rio")
+	return isWindowsTerminal || xstrings.ContainsAnyOf(strings.ToLower(termProg), "ghostty", "iterm2", "rio")
 }
 
 // useClientServer returns true when the client/server architecture is

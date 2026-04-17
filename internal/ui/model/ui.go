@@ -657,7 +657,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		termVersion := strings.ToLower(msg.Name)
 		// Only enable progress bar for the following terminals.
 		if !m.sendProgressBar {
-			m.sendProgressBar = xstrings.ContainsAnyOf(termVersion, "ghostty", "rio")
+			m.sendProgressBar = xstrings.ContainsAnyOf(termVersion, "ghostty", "iterm2", "rio")
 		}
 		return m, nil
 	case tea.WindowSizeMsg:

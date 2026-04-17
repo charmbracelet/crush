@@ -459,6 +459,8 @@ func (s *Styles) ChromaTheme() chroma.StyleEntries {
 
 	return chroma.StyleEntries{
 		chroma.Text:                chromaStyle(rules.Chroma.Text),
+		chroma.TextWhitespace:      chromaStyle(rules.Chroma.Text),
+		chroma.Other:               chromaStyle(rules.Chroma.Text),
 		chroma.Error:               chromaStyle(rules.Chroma.Error),
 		chroma.Comment:             chromaStyle(rules.Chroma.Comment),
 		chroma.CommentPreproc:      chromaStyle(rules.Chroma.CommentPreproc),
@@ -483,12 +485,48 @@ func (s *Styles) ChromaTheme() chroma.StyleEntries {
 		chroma.LiteralDate:         chromaStyle(rules.Chroma.LiteralDate),
 		chroma.LiteralString:       chromaStyle(rules.Chroma.LiteralString),
 		chroma.LiteralStringEscape: chromaStyle(rules.Chroma.LiteralStringEscape),
+		chroma.LiteralOther:        chromaStyle(rules.Chroma.Text),
 		chroma.GenericDeleted:      chromaStyle(rules.Chroma.GenericDeleted),
 		chroma.GenericEmph:         chromaStyle(rules.Chroma.GenericEmph),
 		chroma.GenericInserted:     chromaStyle(rules.Chroma.GenericInserted),
 		chroma.GenericStrong:       chromaStyle(rules.Chroma.GenericStrong),
 		chroma.GenericSubheading:   chromaStyle(rules.Chroma.GenericSubheading),
 		chroma.Background:          chromaStyle(rules.Chroma.Background),
+		// Additional Chroma token types that map to parent categories
+		// chroma.KeywordConstant:        chromaStyle(rules.Chroma.Keyword),
+		// chroma.KeywordDeclaration:     chromaStyle(rules.Chroma.Keyword),
+		// chroma.KeywordPseudo:          chromaStyle(rules.Chroma.Keyword),
+		// chroma.NameVariable:           chromaStyle(rules.Chroma.Name),
+		// chroma.NameLabel:              chromaStyle(rules.Chroma.Name),
+		// chroma.NameNamespace:          chromaStyle(rules.Chroma.Name),
+		// chroma.NameProperty:           chromaStyle(rules.Chroma.Name),
+		// chroma.NameEntity:             chromaStyle(rules.Chroma.Name),
+		// chroma.NameKeyword:            chromaStyle(rules.Chroma.Keyword),
+		// chroma.NameOperator:           chromaStyle(rules.Chroma.Operator),
+		// chroma.OperatorWord:           chromaStyle(rules.Chroma.Operator),
+		// chroma.CommentHashbang:        chromaStyle(rules.Chroma.Comment),
+		// chroma.CommentMultiline:       chromaStyle(rules.Chroma.Comment),
+		// chroma.CommentSingle:          chromaStyle(rules.Chroma.Comment),
+		// chroma.CommentSpecial:         chromaStyle(rules.Chroma.Comment),
+		// chroma.LiteralStringAffix:     chromaStyle(rules.Chroma.LiteralString),
+		// chroma.LiteralStringBacktick:  chromaStyle(rules.Chroma.LiteralString),
+		// chroma.LiteralStringChar:      chromaStyle(rules.Chroma.LiteralString),
+		// chroma.LiteralStringDelimiter: chromaStyle(rules.Chroma.LiteralString),
+		// chroma.LiteralStringDoc:       chromaStyle(rules.Chroma.LiteralString),
+		// chroma.LiteralStringDouble:    chromaStyle(rules.Chroma.LiteralString),
+		// chroma.LiteralStringHeredoc:   chromaStyle(rules.Chroma.LiteralString),
+		// chroma.LiteralStringInterpol:  chromaStyle(rules.Chroma.LiteralString),
+		// chroma.LiteralStringName:      chromaStyle(rules.Chroma.LiteralString),
+		// chroma.LiteralStringOther:     chromaStyle(rules.Chroma.LiteralString),
+		// chroma.LiteralStringRegex:     chromaStyle(rules.Chroma.LiteralString),
+		// chroma.LiteralStringSingle:    chromaStyle(rules.Chroma.LiteralString),
+		// chroma.LiteralStringSymbol:    chromaStyle(rules.Chroma.LiteralString),
+		// chroma.LiteralNumberBin:       chromaStyle(rules.Chroma.LiteralNumber),
+		// chroma.LiteralNumberFloat:     chromaStyle(rules.Chroma.LiteralNumber),
+		// chroma.LiteralNumberHex:       chromaStyle(rules.Chroma.LiteralNumber),
+		// chroma.LiteralNumberInteger:   chromaStyle(rules.Chroma.LiteralNumber),
+		// chroma.LiteralNumberOct:       chromaStyle(rules.Chroma.LiteralNumber),
+		// chroma.LiteralNumberByte:      chromaStyle(rules.Chroma.LiteralNumber),
 	}
 }
 
@@ -641,9 +679,16 @@ func DefaultStyles() Styles {
 			// Margin: new(uint(defaultMargin)),
 		},
 		BlockQuote: ansi.StyleBlock{
-			StylePrimitive: ansi.StylePrimitive{},
-			Indent:         new(uint(1)),
-			IndentToken:    new("│ "),
+			StylePrimitive: ansi.StylePrimitive{
+				Color: new(charmtone.Smoke.Hex()),
+			},
+			Indent:      new(uint(1)),
+			IndentToken: new("│ "),
+		},
+		Paragraph: ansi.StyleBlock{
+			StylePrimitive: ansi.StylePrimitive{
+				Color: new(charmtone.Smoke.Hex()),
+			},
 		},
 		List: ansi.StyleList{
 			LevelIndent: defaultListIndent,
@@ -693,12 +738,15 @@ func DefaultStyles() Styles {
 		},
 		Strikethrough: ansi.StylePrimitive{
 			CrossedOut: new(true),
+			Color:      new(charmtone.Smoke.Hex()),
 		},
 		Emph: ansi.StylePrimitive{
 			Italic: new(true),
+			Color:  new(charmtone.Smoke.Hex()),
 		},
 		Strong: ansi.StylePrimitive{
-			Bold: new(true),
+			Bold:  new(true),
+			Color: new(charmtone.Smoke.Hex()),
 		},
 		HorizontalRule: ansi.StylePrimitive{
 			Color:  new(charmtone.Charcoal.Hex()),
@@ -706,14 +754,21 @@ func DefaultStyles() Styles {
 		},
 		Item: ansi.StylePrimitive{
 			BlockPrefix: "• ",
+			Color:       new(charmtone.Smoke.Hex()),
 		},
 		Enumeration: ansi.StylePrimitive{
 			BlockPrefix: ". ",
+			Color:       new(charmtone.Smoke.Hex()),
+		},
+		Text: ansi.StylePrimitive{
+			Color: new(charmtone.Smoke.Hex()),
 		},
 		Task: ansi.StyleTask{
-			StylePrimitive: ansi.StylePrimitive{},
-			Ticked:         "[✓] ",
-			Unticked:       "[ ] ",
+			StylePrimitive: ansi.StylePrimitive{
+				Color: new(charmtone.Smoke.Hex()),
+			},
+			Ticked:   "[✓] ",
+			Unticked: "[ ] ",
 		},
 		Link: ansi.StylePrimitive{
 			Color:     new(charmtone.Zinc.Hex()),
@@ -742,7 +797,7 @@ func DefaultStyles() Styles {
 		CodeBlock: ansi.StyleCodeBlock{
 			StyleBlock: ansi.StyleBlock{
 				StylePrimitive: ansi.StylePrimitive{
-					Color: new(charmtone.Charcoal.Hex()),
+					Color: new(charmtone.Smoke.Hex()),
 				},
 				Margin: new(uint(defaultMargin)),
 			},
@@ -832,11 +887,24 @@ func DefaultStyles() Styles {
 		},
 		Table: ansi.StyleTable{
 			StyleBlock: ansi.StyleBlock{
-				StylePrimitive: ansi.StylePrimitive{},
+				StylePrimitive: ansi.StylePrimitive{
+					Color: new(charmtone.Smoke.Hex()),
+				},
 			},
 		},
 		DefinitionDescription: ansi.StylePrimitive{
 			BlockPrefix: "\n ",
+			Color:       new(charmtone.Smoke.Hex()),
+		},
+		HTMLBlock: ansi.StyleBlock{
+			StylePrimitive: ansi.StylePrimitive{
+				Color: new(charmtone.Smoke.Hex()),
+			},
+		},
+		HTMLSpan: ansi.StyleBlock{
+			StylePrimitive: ansi.StylePrimitive{
+				Color: new(charmtone.Smoke.Hex()),
+			},
 		},
 	}
 
@@ -857,6 +925,12 @@ func DefaultStyles() Styles {
 			},
 			Indent:      new(uint(1)),
 			IndentToken: new("│ "),
+		},
+		Paragraph: ansi.StyleBlock{
+			StylePrimitive: ansi.StylePrimitive{
+				Color:           plainFg,
+				BackgroundColor: plainBg,
+			},
 		},
 		List: ansi.StyleList{
 			LevelIndent: defaultListIndent,
@@ -943,6 +1017,10 @@ func DefaultStyles() Styles {
 			Color:           plainFg,
 			BackgroundColor: plainBg,
 		},
+		Text: ansi.StylePrimitive{
+			Color:           plainFg,
+			BackgroundColor: plainBg,
+		},
 		Task: ansi.StyleTask{
 			StylePrimitive: ansi.StylePrimitive{
 				Color:           plainFg,
@@ -982,10 +1060,90 @@ func DefaultStyles() Styles {
 		CodeBlock: ansi.StyleCodeBlock{
 			StyleBlock: ansi.StyleBlock{
 				StylePrimitive: ansi.StylePrimitive{
-					Color:           plainFg,
 					BackgroundColor: plainBg,
 				},
 				Margin: new(uint(defaultMargin)),
+			},
+			Chroma: &ansi.Chroma{
+				Text: ansi.StylePrimitive{
+					Color: plainFg,
+				},
+				Error: ansi.StylePrimitive{
+					Color:           new(charmtone.Butter.Hex()),
+					BackgroundColor: new(charmtone.Sriracha.Hex()),
+				},
+				Comment: ansi.StylePrimitive{
+					Color: plainFg,
+				},
+				CommentPreproc: ansi.StylePrimitive{
+					Color: plainFg,
+				},
+				Keyword: ansi.StylePrimitive{
+					Color: plainFg,
+				},
+				KeywordReserved: ansi.StylePrimitive{
+					Color: plainFg,
+				},
+				KeywordNamespace: ansi.StylePrimitive{
+					Color: plainFg,
+				},
+				KeywordType: ansi.StylePrimitive{
+					Color: plainFg,
+				},
+				Operator: ansi.StylePrimitive{
+					Color: plainFg,
+				},
+				Punctuation: ansi.StylePrimitive{
+					Color: plainFg,
+				},
+				Name: ansi.StylePrimitive{
+					Color: plainFg,
+				},
+				NameBuiltin: ansi.StylePrimitive{
+					Color: plainFg,
+				},
+				NameTag: ansi.StylePrimitive{
+					Color: plainFg,
+				},
+				NameAttribute: ansi.StylePrimitive{
+					Color: plainFg,
+				},
+				NameClass: ansi.StylePrimitive{
+					Color: plainFg,
+				},
+				NameDecorator: ansi.StylePrimitive{
+					Color: plainFg,
+				},
+				NameFunction: ansi.StylePrimitive{
+					Color: plainFg,
+				},
+				LiteralNumber: ansi.StylePrimitive{
+					Color: plainFg,
+				},
+				LiteralString: ansi.StylePrimitive{
+					Color: plainFg,
+				},
+				LiteralStringEscape: ansi.StylePrimitive{
+					Color: plainFg,
+				},
+				GenericDeleted: ansi.StylePrimitive{
+					Color: plainFg,
+				},
+				GenericEmph: ansi.StylePrimitive{
+					Italic: new(true),
+				},
+				GenericInserted: ansi.StylePrimitive{
+					Color: plainFg,
+				},
+				GenericStrong: ansi.StylePrimitive{
+					Bold: new(true),
+				},
+				GenericSubheading: ansi.StylePrimitive{
+					Color: plainFg,
+				},
+				Background: ansi.StylePrimitive{
+					BackgroundColor: plainBg,
+				},
 			},
 		},
 		Table: ansi.StyleTable{
@@ -1000,6 +1158,18 @@ func DefaultStyles() Styles {
 			BlockPrefix:     "\n ",
 			Color:           plainFg,
 			BackgroundColor: plainBg,
+		},
+		HTMLBlock: ansi.StyleBlock{
+			StylePrimitive: ansi.StylePrimitive{
+				Color:           plainFg,
+				BackgroundColor: plainBg,
+			},
+		},
+		HTMLSpan: ansi.StyleBlock{
+			StylePrimitive: ansi.StylePrimitive{
+				Color:           plainFg,
+				BackgroundColor: plainBg,
+			},
 		},
 	}
 

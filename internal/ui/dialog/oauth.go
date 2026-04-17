@@ -350,25 +350,22 @@ func (d *OAuth) copyCode() tea.Cmd {
 	if d.State != OAuthStateDisplay {
 		return nil
 	}
-	return tea.Sequence(
-		tea.SetClipboard(d.userCode),
-		util.ReportInfo("Code copied to clipboard"),
-	)
+	return common.CopyToClipboard(d.userCode, "Code copied to clipboard")
 }
 
 func (d *OAuth) copyCodeAndOpenURL() tea.Cmd {
 	if d.State != OAuthStateDisplay {
 		return nil
 	}
-	return tea.Sequence(
-		tea.SetClipboard(d.userCode),
+	return common.CopyToClipboardWithCallback(
+		d.userCode,
+		"Code copied and URL opened",
 		func() tea.Msg {
 			if err := browser.OpenURL(d.verificationURL); err != nil {
 				return ActionOAuthErrored{fmt.Errorf("failed to open browser: %w", err)}
 			}
 			return nil
 		},
-		util.ReportInfo("Code copied and URL opened"),
 	)
 }
 

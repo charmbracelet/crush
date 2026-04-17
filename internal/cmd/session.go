@@ -479,7 +479,7 @@ func outputSessionHuman(ctx context.Context, sess session.Session, msgs []*messa
 
 	first := true
 	for _, msg := range msgs {
-		items := chat.ExtractMessageItems(&sty, msg, toolResults)
+		items := chat.ExtractMessageItems(&sty, msg, toolResults, true)
 		for _, item := range items {
 			if !first {
 				fmt.Fprintln(&buf)

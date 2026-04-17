@@ -32,17 +32,19 @@ type AssistantMessageItem struct {
 	sty               *styles.Styles
 	anim              *anim.Anim
 	thinkingExpanded  bool
-	thinkingBoxHeight int // Tracks the rendered thinking box height for click detection.
+	thinkingBoxHeight int  // Tracks the rendered thinking box height for click detection.
+	showThinking      bool // Controls visibility of reasoning content
 }
 
 // NewAssistantMessageItem creates a new AssistantMessageItem.
-func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) MessageItem {
+func NewAssistantMessageItem(sty *styles.Styles, message *message.Message, showThinking bool) MessageItem {
 	a := &AssistantMessageItem{
 		highlightableMessageItem: defaultHighlighter(sty),
 		cachedMessageItem:        &cachedMessageItem{},
 		focusableMessageItem:     &focusableMessageItem{},
 		message:                  message,
 		sty:                      sty,
+		showThinking:             showThinking,
 	}
 
 	a.anim = anim.New(anim.Settings{
@@ -86,12 +88,21 @@ func (a *AssistantMessageItem) RawRender(width int) string {
 		spinner = a.renderSpinning()
 	}
 
-	content, height, ok := a.getCachedRender(cappedWidth)
-	if !ok {
+	// Bypass cache during streaming to ensure real-time updates
+	var content string
+	var height int
+	if a.isSpinning() {
 		content = a.renderMessageContent(cappedWidth)
 		height = lipgloss.Height(content)
-		// cache the rendered content
-		a.setCachedRender(content, cappedWidth, height)
+	} else {
+		var ok bool
+		content, height, ok = a.getCachedRender(cappedWidth)
+		if !ok {
+			content = a.renderMessageContent(cappedWidth)
+			height = lipgloss.Height(content)
+			// cache the rendered content
+			a.setCachedRender(content, cappedWidth, height)
+		}
 	}
 
 	highlightedContent := a.renderHighlighted(content, cappedWidth, height)
@@ -131,8 +142,8 @@ func (a *AssistantMessageItem) renderMessageContent(width int) string {
 	var messageParts []string
 	thinking := strings.TrimSpace(a.message.ReasoningContent().Thinking)
 	content := strings.TrimSpace(a.message.Content().Text)
-	// if the massage has reasoning content add that first
-	if thinking != "" {
+	// if the message has reasoning content add that first (respecting visibility toggle)
+	if thinking != "" && a.showThinking {
 		messageParts = append(messageParts, a.renderThinking(a.message.ReasoningContent().Thinking, width))
 	}
 

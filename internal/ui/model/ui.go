@@ -276,6 +276,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	ta.DynamicHeight = true
 	ta.MinHeight = TextareaMinHeight
 	ta.MaxHeight = TextareaMaxHeight
+	configureTextareaKeyMap(&ta)
 	ta.Focus()
 
 	ch := NewChat(com)
@@ -1808,6 +1809,24 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				m.textarea.InsertRune('\n')
 				m.closeCompletions()
 				cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
+			case key.Matches(msg, m.keyMap.Editor.MoveWordBackward):
+				m.moveTextareaGroupBackward()
+			case key.Matches(msg, m.keyMap.Editor.MoveWordForward):
+				m.moveTextareaGroupForward()
+			case key.Matches(msg, m.keyMap.Editor.DeleteWordBackward):
+				oldValue := m.textarea.Value()
+				if cmd := m.deleteTextareaGroupBackward(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				m.updateHistoryDraft(oldValue)
+				m.updateEditorCompletionsAfterEdit()
+			case key.Matches(msg, m.keyMap.Editor.DeleteWordForward):
+				oldValue := m.textarea.Value()
+				if cmd := m.deleteTextareaGroupForward(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				m.updateHistoryDraft(oldValue)
+				m.updateEditorCompletionsAfterEdit()
 			case key.Matches(msg, m.keyMap.Editor.HistoryPrev):
 				cmd := m.handleHistoryUp(msg)
 				if cmd != nil {
@@ -2907,6 +2926,28 @@ func (m *UI) completionsPosition() image.Point {
 // textareaWord returns the current word at the cursor position.
 func (m *UI) textareaWord() string {
 	return m.textarea.Word()
+}
+
+func (m *UI) updateEditorCompletionsAfterEdit() {
+	if !m.completionsOpen {
+		return
+	}
+
+	newValue := m.textarea.Value()
+	newIdx := len(newValue)
+	if newIdx <= m.completionsStartIndex {
+		m.closeCompletions()
+		return
+	}
+
+	word := m.textareaWord()
+	if strings.HasPrefix(word, "@") {
+		m.completionsQuery = word[1:]
+		m.completions.Filter(m.completionsQuery)
+		return
+	}
+
+	m.closeCompletions()
 }
 
 // isWhitespace returns true if the byte is a whitespace character.

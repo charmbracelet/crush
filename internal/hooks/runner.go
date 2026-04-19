@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
 )
@@ -107,6 +108,7 @@ func (r *Runner) runOne(parentCtx context.Context, hook config.HookConfig, envVa
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", hook.Command)
+	cmd.WaitDelay = time.Second
 	cmd.Env = envVars
 	cmd.Dir = r.cwd
 	cmd.Stdin = bytes.NewReader(payload)

@@ -1,6 +1,9 @@
 package skills
 
-import "sync"
+import (
+	"sort"
+	"sync"
+)
 
 // Tracker tracks which skills have been loaded (read) during a session.
 // It is safe for concurrent use.
@@ -50,4 +53,34 @@ func (t *Tracker) IsLoaded(name string) bool {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.loaded[name]
+}
+
+// LoadedNames returns the names of all skills that have been loaded, sorted
+// alphabetically. Safe to call on a nil Tracker (returns nil).
+func (t *Tracker) LoadedNames() []string {
+	if t == nil {
+		return nil
+	}
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	if len(t.loaded) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(t.loaded))
+	for name := range t.loaded {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// LoadedCount returns the number of unique skills that have been loaded.
+// Safe to call on a nil Tracker (returns 0).
+func (t *Tracker) LoadedCount() int {
+	if t == nil {
+		return 0
+	}
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return len(t.loaded)
 }

@@ -3,10 +3,12 @@ package db
 import (
 	"context"
 	"database/sql"
+	"embed"
 	"fmt"
 	"log/slog"
 	"path/filepath"
 	"sync"
+	"testing"
 
 	"github.com/pressly/goose/v3"
 )
@@ -24,6 +26,17 @@ var (
 	gooseInitOnce sync.Once
 	gooseInitErr  error
 )
+
+//go:embed migrations/*.sql
+var FS embed.FS
+
+func init() {
+	goose.SetBaseFS(FS)
+
+	if testing.Testing() {
+		goose.SetLogger(goose.NopLogger())
+	}
+}
 
 // Connect opens a SQLite database connection and runs migrations.
 func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {

@@ -39,7 +39,7 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 
 	return fantasy.NewParallelAgentTool(
 		FetchToolName,
-		string(fetchDescription),
+		FirstLineDescription(fetchDescription),
 		func(ctx context.Context, params FetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.URL == "" {
 				return fantasy.NewTextErrorResponse("URL parameter is required"), nil
@@ -160,7 +160,7 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 				}
 			}
 			// truncate content if it exceeds max read size
-			if int64(len(content)) > MaxFetchSize {
+			if int64(len(content)) >= MaxFetchSize {
 				content = content[:MaxFetchSize]
 				content += fmt.Sprintf("\n\n[Content truncated to %d bytes]", MaxFetchSize)
 			}

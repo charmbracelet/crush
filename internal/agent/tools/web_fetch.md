@@ -1,4 +1,4 @@
-Fetches content from a web URL (for use by sub-agents).
+Fetch a web URL and return content as markdown; for use inside sub-agents. Large pages (>50KB) are saved to a temp file for grep/view.
 
 <usage>
 - Provide a URL to fetch

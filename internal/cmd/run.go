@@ -86,7 +86,6 @@ crush run --continue "Follow up on your last response"
 		}
 
 		event.SetNonInteractive(true)
-		event.AppInitialized()
 
 		switch {
 		case sessionID != "":
@@ -101,6 +100,8 @@ crush run --continue "Follow up on your last response"
 				return err
 			}
 			defer cleanup()
+
+			event.AppInitialized()
 
 			if sessionID != "" {
 				sess, err := resolveSessionByID(ctx, c, ws.ID, sessionID)
@@ -126,6 +127,8 @@ crush run --continue "Follow up on your last response"
 			return err
 		}
 		defer cleanup()
+
+		event.AppInitialized()
 
 		if !ws.Config().IsConfigured() {
 			return fmt.Errorf("no providers configured - please run 'crush' to set up a provider interactively")

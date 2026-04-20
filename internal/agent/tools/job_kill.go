@@ -29,7 +29,7 @@ type JobKillResponseMetadata struct {
 func NewJobKillTool() fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		JobKillToolName,
-		string(jobKillDescription),
+		FirstLineDescription(jobKillDescription),
 		func(ctx context.Context, params JobKillParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.ShellID == "" {
 				return fantasy.NewTextErrorResponse("missing shell_id"), nil

@@ -95,7 +95,7 @@ func TestReadBuiltinFile(t *testing.T) {
 
 		resp, err := readBuiltinFile(ViewParams{
 			FilePath: "crush://skills/crush-config/SKILL.md",
-		})
+		}, nil)
 		require.NoError(t, err)
 		require.NotEmpty(t, resp.Content)
 		require.Contains(t, resp.Content, "Crush Configuration")
@@ -106,7 +106,7 @@ func TestReadBuiltinFile(t *testing.T) {
 
 		resp, err := readBuiltinFile(ViewParams{
 			FilePath: "crush://skills/nonexistent/SKILL.md",
-		})
+		}, nil)
 		require.NoError(t, err)
 		require.True(t, resp.IsError)
 	})
@@ -116,7 +116,7 @@ func TestReadBuiltinFile(t *testing.T) {
 
 		resp, err := readBuiltinFile(ViewParams{
 			FilePath: "crush://skills/crush-config/SKILL.md",
-		})
+		}, nil)
 		require.NoError(t, err)
 
 		var meta ViewResponseMetadata
@@ -132,7 +132,7 @@ func TestReadBuiltinFile(t *testing.T) {
 		resp, err := readBuiltinFile(ViewParams{
 			FilePath: "crush://skills/crush-config/SKILL.md",
 			Offset:   5,
-		})
+		}, nil)
 		require.NoError(t, err)
 		require.NotContains(t, resp.Content, "     1|")
 	})

@@ -1,4 +1,4 @@
-Searches the web using DuckDuckGo and returns search results.
+Search the web via DuckDuckGo; returns titles, URLs, and snippets. Follow up with web_fetch to get full page content.
 
 <usage>
 - Provide a search query to find information on the web

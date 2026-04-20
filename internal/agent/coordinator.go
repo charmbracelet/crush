@@ -12,6 +12,7 @@ import (
 	"maps"
 	"net/http"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -22,8 +23,10 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
@@ -31,6 +34,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/skills"
 	"golang.org/x/sync/errgroup"
 
 	"charm.land/fantasy/providers/anthropic"
@@ -86,6 +90,11 @@ type coordinator struct {
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
 
+	// Skills discovery results (session-start snapshot).
+	allSkills    []*skills.Skill // Pre-filter: all discovered after dedup.
+	activeSkills []*skills.Skill // Post-filter: active skills only.
+	skillTracker *skills.Tracker
+
 	readyWg errgroup.Group
 }
 
@@ -100,16 +109,23 @@ func NewCoordinator(
 	lspManager *lsp.Manager,
 	notify pubsub.Publisher[notify.Notification],
 ) (Coordinator, error) {
+	// Discover skills once at session start.
+	allSkills, activeSkills := discoverSkills(cfg)
+	skillTracker := skills.NewTracker(activeSkills)
+
 	c := &coordinator{
-		cfg:         cfg,
-		sessions:    sessions,
-		messages:    messages,
-		permissions: permissions,
-		history:     history,
-		filetracker: filetracker,
-		lspManager:  lspManager,
-		notify:      notify,
-		agents:      make(map[string]SessionAgent),
+		cfg:          cfg,
+		sessions:     sessions,
+		messages:     messages,
+		permissions:  permissions,
+		history:      history,
+		filetracker:  filetracker,
+		lspManager:   lspManager,
+		notify:       notify,
+		agents:       make(map[string]SessionAgent),
+		allSkills:    allSkills,
+		activeSkills: activeSkills,
+		skillTracker: skillTracker,
 	}
 
 	agentCfg, ok := cfg.Config().Agents[config.AgentCoder]
@@ -188,7 +204,9 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 			PresencePenalty:  presPenalty,
 		})
 	}
+	beforeLoaded := c.skillTracker.LoadedNames()
 	result, originalErr := run()
+	logTurnSkillUsage(sessionID, prompt, c.activeSkills, c.skillTracker, beforeLoaded)
 
 	if c.isUnauthorized(originalErr) {
 		switch {
@@ -445,8 +463,12 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		}
 	}
 
+	logFile := filepath.Join(c.cfg.Config().Options.DataDirectory, "logs", "crush.log")
+
 	allTools = append(allTools,
 		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelName),
+		tools.NewCrushInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
+		tools.NewCrushLogsTool(logFile),
 		tools.NewJobOutputTool(),
 		tools.NewJobKillTool(),
 		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),
@@ -458,7 +480,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		tools.NewLsTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Tools.Ls),
 		tools.NewSourcegraphTool(nil),
 		tools.NewTodosTool(c.sessions),
-		tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, c.cfg.WorkingDir(), c.cfg.Config().Options.SkillsPaths...),
+		tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, c.skillTracker, c.cfg.WorkingDir(), c.cfg.Config().Options.SkillsPaths...),
 		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 	)
 
@@ -778,17 +800,6 @@ func (c *coordinator) buildGoogleVertexProvider(headers map[string]string, optio
 	return google.New(opts...)
 }
 
-func (c *coordinator) buildHyperProvider(apiKey string) (fantasy.Provider, error) {
-	opts := []hyper.Option{
-		hyper.WithAPIKey(apiKey),
-	}
-	if c.cfg.Config().Options.Debug {
-		httpClient := log.NewHTTPClient()
-		opts = append(opts, hyper.WithHTTPClient(httpClient))
-	}
-	return hyper.New(opts...)
-}
-
 func (c *coordinator) isAnthropicThinking(model config.SelectedModel) bool {
 	if model.Think {
 		return true
@@ -832,16 +843,18 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		return c.buildGoogleProvider(baseURL, apiKey, headers)
 	case "google-vertex":
 		return c.buildGoogleVertexProvider(headers, providerCfg.ExtraParams)
-	case openaicompat.Name:
-		if providerCfg.ID == string(catwalk.InferenceProviderZAI) {
+	case openaicompat.Name, hyper.Name:
+		switch providerCfg.ID {
+		case hyper.Name:
+			baseURL = hyper.BaseURL() + "/v1"
+			headers["x-crush-id"] = event.GetID()
+		case string(catwalk.InferenceProviderZAI):
 			if providerCfg.ExtraBody == nil {
 				providerCfg.ExtraBody = map[string]any{}
 			}
 			providerCfg.ExtraBody["tool_stream"] = true
 		}
 		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent)
-	case hyper.Name:
-		return c.buildHyperProvider(apiKey)
 	default:
 		return nil, fmt.Errorf("provider type not supported: %q", providerCfg.Type)
 	}
@@ -1036,4 +1049,134 @@ func (c *coordinator) updateParentSessionCost(ctx context.Context, childSessionI
 	}
 
 	return nil
+}
+
+// discoverSkills runs the skill discovery pipeline and returns both the
+// pre-filter (all discovered, after dedup) and post-filter (active) lists.
+// It also emits a single diagnostic log line summarising the outcome to
+// help track skill-loading health over time.
+func discoverSkills(cfg *config.ConfigStore) (allSkills, activeSkills []*skills.Skill) {
+	builtin, builtinStates := skills.DiscoverBuiltinWithStates()
+	discovered := append([]*skills.Skill(nil), builtin...)
+
+	var userStates []*skills.SkillState
+	var userPaths []string
+
+	opts := cfg.Config().Options
+	if opts != nil && len(opts.SkillsPaths) > 0 {
+		userPaths = make([]string, 0, len(opts.SkillsPaths))
+		for _, pth := range opts.SkillsPaths {
+			expanded := home.Long(pth)
+			if strings.HasPrefix(expanded, "$") {
+				if resolved, err := cfg.Resolver().ResolveValue(expanded); err == nil {
+					expanded = resolved
+				}
+			}
+			userPaths = append(userPaths, expanded)
+		}
+		var userSkills []*skills.Skill
+		userSkills, userStates = skills.DiscoverWithStates(userPaths)
+		discovered = append(discovered, userSkills...)
+	}
+
+	allSkills = skills.Deduplicate(discovered)
+	var disabledSkills []string
+	if opts != nil {
+		disabledSkills = opts.DisabledSkills
+	}
+	activeSkills = skills.Filter(allSkills, disabledSkills)
+
+	logDiscoveryStats(builtin, builtinStates, userStates, userPaths, allSkills, activeSkills, disabledSkills)
+	return allSkills, activeSkills
+}
+
+// logTurnSkillUsage emits a per-turn diagnostic line showing which skills
+// (if any) were loaded during this turn and which looked relevant based on
+// a cheap keyword match against the user prompt. The goal is to surface
+// "should-have-loaded but didn't" situations for later analysis.
+//
+// Logged at Info level under component=skills; heavy fields are elided when
+// there is nothing interesting to report.
+func logTurnSkillUsage(
+	sessionID string,
+	prompt string,
+	activeSkills []*skills.Skill,
+	tracker *skills.Tracker,
+	before []string,
+) {
+	if tracker == nil || len(activeSkills) == 0 {
+		return
+	}
+
+	after := tracker.LoadedNames()
+
+	beforeSet := make(map[string]bool, len(before))
+	for _, n := range before {
+		beforeSet[n] = true
+	}
+	var loadedThisTurn []string
+	for _, n := range after {
+		if !beforeSet[n] {
+			loadedThisTurn = append(loadedThisTurn, n)
+		}
+	}
+
+	slog.Info("Skill turn summary",
+		"component", "skills",
+		"session_id", sessionID,
+		"prompt_len", len(prompt),
+		"active_total", len(activeSkills),
+		"loaded_total", len(after),
+		"loaded_this_turn", loadedThisTurn,
+	)
+}
+
+// logDiscoveryStats emits a single structured log line summarising skill
+// discovery for the current session. It is intentionally low-volume: one
+// line per session start.
+func logDiscoveryStats(
+	builtin []*skills.Skill,
+	builtinStates, userStates []*skills.SkillState,
+	userPaths []string,
+	allSkills, activeSkills []*skills.Skill,
+	disabled []string,
+) {
+	countErrors := func(states []*skills.SkillState) int {
+		n := 0
+		for _, s := range states {
+			if s.State == skills.StateError {
+				n++
+			}
+		}
+		return n
+	}
+
+	userOK := 0
+	for _, s := range userStates {
+		if s.State == skills.StateNormal {
+			userOK++
+		}
+	}
+
+	activeNames := make([]string, 0, len(activeSkills))
+	for _, s := range activeSkills {
+		activeNames = append(activeNames, s.Name)
+	}
+
+	xml := skills.ToPromptXML(activeSkills)
+
+	slog.Info("Skill discovery complete",
+		"component", "skills",
+		"builtin_ok", len(builtin),
+		"builtin_errors", countErrors(builtinStates),
+		"user_ok", userOK,
+		"user_errors", countErrors(userStates),
+		"user_paths", len(userPaths),
+		"deduped_total", len(allSkills),
+		"active", len(activeSkills),
+		"disabled", len(disabled),
+		"prompt_bytes", len(xml),
+		"prompt_tok_est", skills.ApproxTokenCount(xml),
+		"active_names", activeNames,
+	)
 }

@@ -463,6 +463,8 @@ func allToolNames() []string {
 	return []string{
 		"agent",
 		"bash",
+		"crush_info",
+		"crush_logs",
 		"job_output",
 		"job_kill",
 		"download",
@@ -564,6 +566,8 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 		switch providerID {
 		case catwalk.InferenceProviderOpenRouter:
 			testURL = baseURL + "/credits"
+		case catwalk.InferenceProviderOpenCodeGo:
+			testURL = strings.Replace(baseURL, "/go", "", 1) + "/models"
 		default:
 			testURL = baseURL + "/models"
 		}

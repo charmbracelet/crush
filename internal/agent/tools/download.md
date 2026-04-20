@@ -1,4 +1,4 @@
-Downloads binary data from URL and saves to local file.
+Download a URL directly to a local file (binary-safe, streaming, max 100MB); overwrites without warning. For reading content into context use fetch.
 
 <usage>
 - Provide URL to download from

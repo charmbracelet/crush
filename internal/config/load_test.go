@@ -490,7 +490,7 @@ func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
 
-	assert.Equal(t, []string{"agent", "bash", "job_output", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "glob", "ls", "sourcegraph", "todos", "view", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "bash", "crush_info", "crush_logs", "job_output", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "glob", "ls", "sourcegraph", "todos", "view", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
@@ -513,7 +513,7 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 	cfg.SetupAgents()
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
-	assert.Equal(t, []string{"agent", "bash", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "todos", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "bash", "crush_info", "crush_logs", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "todos", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
@@ -1310,6 +1310,49 @@ func TestConfig_setDefaultsDisableDefaultProvidersEnvVar(t *testing.T) {
 }
 
 func TestConfig_configureSelectedModels(t *testing.T) {
+	t.Run("reload mode should not persist fallback defaults", func(t *testing.T) {
+		dir := t.TempDir()
+		globalPath := filepath.Join(dir, "crush.json")
+		require.NoError(t, os.WriteFile(globalPath, []byte(`{"models":{"large":{"provider":"ghost","model":"missing"}}}`), 0o600))
+
+		knownProviders := []catwalk.Provider{
+			{
+				ID:                  "openai",
+				APIKey:              "abc",
+				DefaultLargeModelID: "large-model",
+				DefaultSmallModelID: "small-model",
+				Models: []catwalk.Model{
+					{ID: "large-model", DefaultMaxTokens: 1000},
+					{ID: "small-model", DefaultMaxTokens: 500},
+				},
+			},
+		}
+
+		cfg := &Config{
+			Models: map[SelectedModelType]SelectedModel{
+				SelectedModelTypeLarge: {Provider: "ghost", Model: "missing"},
+			},
+		}
+		cfg.setDefaults(dir, "")
+		store := &ConfigStore{config: cfg, globalDataPath: globalPath}
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(store, env, resolver, knownProviders)
+		require.NoError(t, err)
+
+		err = configureSelectedModels(store, knownProviders, false)
+		require.NoError(t, err)
+
+		// In-memory falls back to default.
+		require.Equal(t, "openai", cfg.Models[SelectedModelTypeLarge].Provider)
+		require.Equal(t, "large-model", cfg.Models[SelectedModelTypeLarge].Model)
+
+		// Disk remains unchanged in reload mode.
+		data, readErr := os.ReadFile(globalPath)
+		require.NoError(t, readErr)
+		require.Contains(t, string(data), `"provider":"ghost"`)
+		require.Contains(t, string(data), `"model":"missing"`)
+	})
 	t.Run("should override defaults", func(t *testing.T) {
 		knownProviders := []catwalk.Provider{
 			{
@@ -1347,7 +1390,7 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
 		require.NoError(t, err)
 
-		err = configureSelectedModels(testStore(cfg), knownProviders)
+		err = configureSelectedModels(testStore(cfg), knownProviders, true)
 		require.NoError(t, err)
 		large := cfg.Models[SelectedModelTypeLarge]
 		small := cfg.Models[SelectedModelTypeSmall]
@@ -1409,7 +1452,7 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
 		require.NoError(t, err)
 
-		err = configureSelectedModels(testStore(cfg), knownProviders)
+		err = configureSelectedModels(testStore(cfg), knownProviders, true)
 		require.NoError(t, err)
 		large := cfg.Models[SelectedModelTypeLarge]
 		small := cfg.Models[SelectedModelTypeSmall]
@@ -1454,11 +1497,95 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
 		require.NoError(t, err)
 
-		err = configureSelectedModels(testStore(cfg), knownProviders)
+		err = configureSelectedModels(testStore(cfg), knownProviders, true)
 		require.NoError(t, err)
 		large := cfg.Models[SelectedModelTypeLarge]
 		require.Equal(t, "large-model", large.Model)
 		require.Equal(t, "openai", large.Provider)
 		require.Equal(t, int64(100), large.MaxTokens)
 	})
+}
+
+func TestConfig_configureProviders_HyperAPIKeyFromEnv(t *testing.T) {
+	// Test that HYPER_API_KEY environment variable works without config
+	knownProviders := []catwalk.Provider{
+		{
+			ID:                  "hyper",
+			APIKey:              "", // No API key in provider definition
+			DefaultLargeModelID: "large-model",
+			DefaultSmallModelID: "small-model",
+			Models: []catwalk.Model{
+				{
+					ID:               "large-model",
+					DefaultMaxTokens: 1000,
+				},
+				{
+					ID:               "small-model",
+					DefaultMaxTokens: 500,
+				},
+			},
+		},
+	}
+
+	cfg := &Config{}
+	cfg.setDefaults("/tmp", "")
+	env := env.NewFromMap(map[string]string{
+		"HYPER_API_KEY": "env-api-key",
+	})
+	resolver := NewEnvironmentVariableResolver(env)
+	err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
+	require.NoError(t, err)
+	require.Equal(t, 1, cfg.Providers.Len())
+
+	// Verify Hyper provider is configured with the env var API key
+	pc, ok := cfg.Providers.Get("hyper")
+	require.True(t, ok, "Hyper provider should be configured")
+	require.Equal(t, "env-api-key", pc.APIKey)
+	require.Equal(t, "env-api-key", pc.APIKeyTemplate)
+}
+
+func TestConfig_configureProviders_HyperAPIKeyFromConfigOverrides(t *testing.T) {
+	// Test that config API key takes precedence when HYPER_API_KEY is also set
+	knownProviders := []catwalk.Provider{
+		{
+			ID:                  "hyper",
+			APIKey:              "provider-api-key",
+			DefaultLargeModelID: "large-model",
+			DefaultSmallModelID: "small-model",
+			Models: []catwalk.Model{
+				{
+					ID:               "large-model",
+					DefaultMaxTokens: 1000,
+				},
+				{
+					ID:               "small-model",
+					DefaultMaxTokens: 500,
+				},
+			},
+		},
+	}
+
+	// User has Hyper configured with an API key
+	cfg := &Config{
+		Providers: csync.NewMapFrom(map[string]ProviderConfig{
+			"hyper": {
+				APIKey: "config-api-key",
+			},
+		}),
+	}
+	cfg.setDefaults("/tmp", "")
+
+	// But they also have HYPER_API_KEY set - env var should take precedence
+	env := env.NewFromMap(map[string]string{
+		"HYPER_API_KEY": "env-api-key",
+	})
+	resolver := NewEnvironmentVariableResolver(env)
+	err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
+	require.NoError(t, err)
+	require.Equal(t, 1, cfg.Providers.Len())
+
+	// Verify env var takes precedence (as per requirements)
+	pc, ok := cfg.Providers.Get("hyper")
+	require.True(t, ok, "Hyper provider should be configured")
+	require.Equal(t, "env-api-key", pc.APIKey)
 }

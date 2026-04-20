@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	_ "embed"
-	"encoding/base64"
 	"fmt"
 	"io"
 	"io/fs"
@@ -63,12 +62,13 @@ func NewViewTool(
 	lspManager *lsp.Manager,
 	permissions permission.Service,
 	filetracker filetracker.Service,
+	skillTracker *skills.Tracker,
 	workingDir string,
 	skillsPaths ...string,
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		ViewToolName,
-		string(viewDescription),
+		FirstLineDescription(viewDescription),
 		func(ctx context.Context, params ViewParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.FilePath == "" {
 				return fantasy.NewTextErrorResponse("file_path is required"), nil
@@ -76,7 +76,8 @@ func NewViewTool(
 
 			// Handle builtin skill files (crush: prefix).
 			if strings.HasPrefix(params.FilePath, skills.BuiltinPrefix) {
-				return readBuiltinFile(params)
+				resp, err := readBuiltinFile(params, skillTracker)
+				return resp, err
 			}
 
 			// Handle relative paths
@@ -187,8 +188,7 @@ func NewViewTool(
 					return fantasy.ToolResponse{}, fmt.Errorf("error reading image file: %w", readErr)
 				}
 
-				encoded := base64.StdEncoding.EncodeToString(imageData)
-				return fantasy.NewImageResponse([]byte(encoded), mimeType), nil
+				return fantasy.NewImageResponse(imageData, mimeType), nil
 			}
 
 			// Read the file content
@@ -222,6 +222,7 @@ func NewViewTool(
 					meta.ResourceType = ViewResourceSkill
 					meta.ResourceName = skill.Name
 					meta.ResourceDescription = skill.Description
+					skillTracker.MarkLoaded(skill.Name)
 				}
 			}
 
@@ -381,7 +382,7 @@ func isInSkillsPath(filePath string, skillsPaths []string) bool {
 }
 
 // readBuiltinFile reads a file from the embedded builtin skills filesystem.
-func readBuiltinFile(params ViewParams) (fantasy.ToolResponse, error) {
+func readBuiltinFile(params ViewParams, skillTracker *skills.Tracker) (fantasy.ToolResponse, error) {
 	embeddedPath := "builtin/" + strings.TrimPrefix(params.FilePath, skills.BuiltinPrefix)
 	builtinFS := skills.BuiltinFS()
 
@@ -425,6 +426,7 @@ func readBuiltinFile(params ViewParams) (fantasy.ToolResponse, error) {
 		meta.ResourceType = ViewResourceSkill
 		meta.ResourceName = skill.Name
 		meta.ResourceDescription = skill.Description
+		skillTracker.MarkLoaded(skill.Name)
 	}
 
 	return fantasy.WithResponseMetadata(

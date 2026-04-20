@@ -31,7 +31,7 @@ var listMCPResourcesDescription []byte
 func NewListMCPResourcesTool(cfg *config.ConfigStore, permissions permission.Service) fantasy.AgentTool {
 	return fantasy.NewParallelAgentTool(
 		ListMCPResourcesToolName,
-		string(listMCPResourcesDescription),
+		FirstLineDescription(listMCPResourcesDescription),
 		func(ctx context.Context, params ListMCPResourcesParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			params.MCPName = strings.TrimSpace(params.MCPName)
 			if params.MCPName == "" {

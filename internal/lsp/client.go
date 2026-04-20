@@ -8,6 +8,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -284,6 +285,11 @@ func (c *Client) SetServerState(state ServerState) {
 // GetName returns the name of the LSP client
 func (c *Client) GetName() string {
 	return c.name
+}
+
+// FileTypes returns the file types this LSP client handles
+func (c *Client) FileTypes() []string {
+	return slices.Clone(c.fileTypes)
 }
 
 // SetDiagnosticsCallback sets the callback function for diagnostic changes

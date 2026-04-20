@@ -1,4 +1,4 @@
-Get diagnostics for file and/or project.
+Get LSP errors, warnings, and hints for a file or the whole project.
 
 <usage>
 - Provide file path to get diagnostics for that file

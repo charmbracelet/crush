@@ -66,7 +66,7 @@ type App struct {
 
 	serviceEventsWG *sync.WaitGroup
 	eventsCtx       context.Context
-	events          chan tea.Msg
+	events          *pubsub.Broker[tea.Msg]
 	tuiWG           *sync.WaitGroup
 
 	// global context and cleanup functions
@@ -100,7 +100,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 
 		config: store,
 
-		events:             make(chan tea.Msg, 100),
+		events:             pubsub.NewBroker[tea.Msg](),
 		serviceEventsWG:    &sync.WaitGroup{},
 		tuiWG:              &sync.WaitGroup{},
 		agentNotifications: pubsub.NewBroker[notify.Notification](),
@@ -153,18 +153,15 @@ func (app *App) Store() *config.ConfigStore {
 	return app.config
 }
 
-// Events returns the events channel for the application.
-func (app *App) Events() <-chan tea.Msg {
-	return app.events
+// Events returns a per-caller subscription channel for application events.
+// Each caller receives its own channel; all callers receive every event.
+func (app *App) Events(ctx context.Context) <-chan pubsub.Event[tea.Msg] {
+	return app.events.Subscribe(ctx)
 }
 
-// SendEvent pushes a message into the application's events channel.
-// It is non-blocking; the message is dropped if the channel is full.
+// SendEvent publishes a message to all event subscribers.
 func (app *App) SendEvent(msg tea.Msg) {
-	select {
-	case app.events <- msg:
-	default:
-	}
+	app.events.Publish(pubsub.UpdatedEvent, msg)
 }
 
 // AgentNotifications returns the broker for agent notification events.
@@ -486,26 +483,21 @@ func (app *App) setupEvents() {
 	cleanupFunc := func(context.Context) error {
 		cancel()
 		app.serviceEventsWG.Wait()
+		app.events.Shutdown()
 		return nil
 	}
 	app.cleanupFuncs = append(app.cleanupFuncs, cleanupFunc)
 }
-
-const subscriberSendTimeout = 2 * time.Second
 
 func setupSubscriber[T any](
 	ctx context.Context,
 	wg *sync.WaitGroup,
 	name string,
 	subscriber func(context.Context) <-chan pubsub.Event[T],
-	outputCh chan<- tea.Msg,
+	broker *pubsub.Broker[tea.Msg],
 ) {
 	wg.Go(func() {
 		subCh := subscriber(ctx)
-		sendTimer := time.NewTimer(0)
-		<-sendTimer.C
-		defer sendTimer.Stop()
-
 		for {
 			select {
 			case event, ok := <-subCh:
@@ -513,23 +505,7 @@ func setupSubscriber[T any](
 					slog.Debug("Subscription channel closed", "name", name)
 					return
 				}
-				var msg tea.Msg = event
-				if !sendTimer.Stop() {
-					select {
-					case <-sendTimer.C:
-					default:
-					}
-				}
-				sendTimer.Reset(subscriberSendTimeout)
-
-				select {
-				case outputCh <- msg:
-				case <-sendTimer.C:
-					slog.Debug("Message dropped due to slow consumer", "name", name)
-				case <-ctx.Done():
-					slog.Debug("Subscription cancelled", "name", name)
-					return
-				}
+				broker.Publish(pubsub.UpdatedEvent, tea.Msg(event))
 			case <-ctx.Done():
 				slog.Debug("Subscription cancelled", "name", name)
 				return
@@ -579,17 +555,18 @@ func (app *App) Subscribe(program *tea.Program) {
 	})
 	defer app.tuiWG.Done()
 
+	events := app.events.Subscribe(tuiCtx)
 	for {
 		select {
 		case <-tuiCtx.Done():
 			slog.Debug("TUI message handler shutting down")
 			return
-		case msg, ok := <-app.events:
+		case ev, ok := <-events:
 			if !ok {
 				slog.Debug("TUI message channel closed")
 				return
 			}
-			program.Send(msg)
+			program.Send(ev.Payload)
 		}
 	}
 }
@@ -649,9 +626,9 @@ func (app *App) checkForUpdates(ctx context.Context) {
 	if err != nil || !info.Available() {
 		return
 	}
-	app.events <- UpdateAvailableMsg{
+	app.events.Publish(pubsub.UpdatedEvent, UpdateAvailableMsg{
 		CurrentVersion: info.Current,
 		LatestVersion:  info.Latest,
 		IsDevelopment:  info.IsDevelopment(),
-	}
+	})
 }

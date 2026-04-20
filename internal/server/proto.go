@@ -199,7 +199,7 @@ func (c *controllerV1) handleGetWorkspaceProviders(w http.ResponseWriter, r *htt
 func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.Request) {
 	flusher := http.NewResponseController(w)
 	id := r.PathValue("id")
-	events, err := c.backend.SubscribeEvents(id)
+	events, err := c.backend.SubscribeEvents(r.Context(), id)
 	if err != nil {
 		c.handleError(w, r, err)
 		return
@@ -218,8 +218,8 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 			if !ok {
 				return
 			}
-			c.server.logDebug(r, "Sending event", "event", fmt.Sprintf("%T %+v", ev, ev))
-			wrapped := wrapEvent(ev)
+			c.server.logDebug(r, "Sending event", "event", fmt.Sprintf("%T %+v", ev.Payload, ev.Payload))
+			wrapped := wrapEvent(ev.Payload)
 			if wrapped == nil {
 				continue
 			}

@@ -53,7 +53,7 @@ type ViewResponseMetadata struct {
 
 const (
 	ViewToolName     = "view"
-	MaxViewSize      = 1 * 1024 * 1024 // 1MB
+	MaxViewSize      = 100 * 1024 // 100KB
 	DefaultReadLimit = 2000
 	MaxLineLength    = 2000
 )

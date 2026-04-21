@@ -94,10 +94,10 @@ func notifyLSPs(
 	manager *lsp.Manager,
 	filepath string,
 ) {
-	if filepath == "" || manager == nil {
-		if manager == nil {
-			return
-		}
+	if manager == nil {
+		return
+	}
+	if filepath == "" {
 		// No specific file — refresh all open files for all clients.
 		var wg sync.WaitGroup
 		for client := range manager.Clients().Seq() {

@@ -138,22 +138,7 @@ func (d *DockerMCPToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 
 	// Handle text content.
 	if opts.Result.Content != "" {
-		var body string
-		var result json.RawMessage
-		if err := json.Unmarshal([]byte(opts.Result.Content), &result); err == nil {
-			prettyResult, err := json.MarshalIndent(result, "", "  ")
-			if err == nil {
-				body = sty.Tool.Body.Render(toolOutputCodeContent(sty, "result.json", string(prettyResult), 0, bodyWidth, opts.ExpandedContent))
-			} else {
-				body = sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
-			}
-		} else if looksLikeDiff(opts.Result.Content) {
-			body = toolOutputDiffContentFromUnified(sty, opts.Result.Content, cappedWidth, opts.ExpandedContent)
-		} else if looksLikeMarkdown(opts.Result.Content) {
-			body = sty.Tool.Body.Render(toolOutputCodeContent(sty, "result.md", opts.Result.Content, 0, bodyWidth, opts.ExpandedContent))
-		} else {
-			body = sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
-		}
+		body := renderToolResultTextContent(sty, opts.Result.Content, toolResultContentWidths{Body: bodyWidth, Diff: cappedWidth}, opts.ExpandedContent)
 		parts = append(parts, body)
 	}
 

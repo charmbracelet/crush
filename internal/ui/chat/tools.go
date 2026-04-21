@@ -1406,6 +1406,6 @@ func prettifyToolName(name string) string {
 	case tools.WriteToolName:
 		return "Write"
 	default:
-		return genericPrettyName(name)
+		return humanizedToolName(name)
 	}
 }

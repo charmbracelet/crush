@@ -341,6 +341,24 @@ diff --git a/two.txt b/two.txt
 				},
 			},
 		},
+		{
+			name: "hunk content starting with header-like prefixes",
+			input: `diff --git a/file.txt b/file.txt
+--- a/file.txt
++++ b/file.txt
+@@ -1,3 +1,3 @@
+---- tricky
+++++ newer
+ keep
+`,
+			want: []parsedDiffFile{
+				{
+					path:   "file.txt",
+					before: "--- tricky\nkeep",
+					after:  "+++ newer\nkeep",
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {

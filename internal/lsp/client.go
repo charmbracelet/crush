@@ -588,8 +588,10 @@ func (c *Client) WaitForDiagnostics(ctx context.Context, timeout time.Duration) 
 		settleDuration      = 300 * time.Millisecond
 	)
 
-	deadline := time.After(timeout)
-	firstChangeDeadline := time.After(min(timeout, firstChangeDuration))
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	firstChangeTimer := time.NewTimer(min(timeout, firstChangeDuration))
+	defer firstChangeTimer.Stop()
 	previousVersion := c.diagnostics.Version()
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
@@ -598,16 +600,16 @@ func (c *Client) WaitForDiagnostics(ctx context.Context, timeout time.Duration) 
 		select {
 		case <-ctx.Done():
 			return
-		case <-deadline:
+		case <-deadline.C:
 			return
-		case <-firstChangeDeadline:
+		case <-firstChangeTimer.C:
 			// No change arrived quickly — server isn't republishing.
 			return
 		case <-ticker.C:
 			currentVersion := c.diagnostics.Version()
 			if currentVersion != previousVersion {
 				// Diagnostics changed — now wait for them to settle.
-				c.waitForDiagnosticsToSettle(ctx, deadline, settleDuration)
+				c.waitForDiagnosticsToSettle(ctx, deadline.C, settleDuration)
 				return
 			}
 		}

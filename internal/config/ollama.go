@@ -2,21 +2,20 @@ package config
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
+	ollamaapi "github.com/ollama/ollama/api"
+	"github.com/ollama/ollama/envconfig"
 )
 
 const (
 	ollamaProviderID   = "ollama"
 	ollamaProviderName = "Ollama"
 	ollamaDefaultHost  = "http://localhost:11434"
-	ollamaAPIPath      = "/api/tags"
 	// Ollama exposes an OpenAI-compatible endpoint at /v1.
 	ollamaOpenAIPath = "/v1/"
 
@@ -25,31 +24,6 @@ const (
 	// delayed when Ollama is not running.
 	ollamaTimeout = 2 * time.Second
 )
-
-// ollamaTagsResponse mirrors the JSON returned by Ollama's GET /api/tags
-// endpoint. See https://docs.ollama.com/api/tags.
-type ollamaTagsResponse struct {
-	Models []ollamaModel `json:"models"`
-}
-
-// ollamaModel is a single entry in the /api/tags response.
-type ollamaModel struct {
-	Name       string         `json:"name"`
-	Model      string         `json:"model"`
-	ModifiedAt string         `json:"modified_at"`
-	Size       int64          `json:"size"`
-	Details    ollamaDetails  `json:"details"`
-	ModelInfo  map[string]any `json:"model_info,omitempty"`
-}
-
-// ollamaDetails holds metadata about a model.
-type ollamaDetails struct {
-	ParameterSize   string   `json:"parameter_size"`
-	QuantizationLvl string   `json:"quantization_level"`
-	Family          string   `json:"family"`
-	Families        []string `json:"families"`
-	Format          string   `json:"format"`
-}
 
 // ollamaBaseURL returns the Ollama host, respecting the OLLAMA_HOST
 // environment variable that Ollama itself honours.
@@ -60,40 +34,28 @@ func ollamaBaseURL() string {
 	return ollamaDefaultHost
 }
 
+// newOllamaClient creates an official Ollama API client using the
+// environment-configured host (via OLLAMA_HOST) and a short-timeout
+// HTTP client so startup is not noticeably delayed.
+func newOllamaClient() *ollamaapi.Client {
+	return ollamaapi.NewClient(envconfig.Host(), &http.Client{Timeout: ollamaTimeout})
+}
+
 // discoverOllamaModels queries a running Ollama instance and returns
 // the models it has available. If Ollama is unreachable or returns an
 // error, it returns nil and a non-nil error.
 func discoverOllamaModels(ctx context.Context) ([]catwalk.Model, error) {
-	base := ollamaBaseURL()
-	url := base + ollamaAPIPath
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	resp, err := newOllamaClient().List(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create ollama request: %w", err)
+		return nil, err
 	}
 
-	client := &http.Client{Timeout: ollamaTimeout}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to reach ollama at %s: %w", url, err)
-	}
-	defer resp.Body.Close() //nolint:errcheck
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("ollama returned status %d from %s", resp.StatusCode, url)
-	}
-
-	var tags ollamaTagsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tags); err != nil {
-		return nil, fmt.Errorf("failed to decode Ollama response: %w", err)
-	}
-
-	if len(tags.Models) == 0 {
+	if len(resp.Models) == 0 {
 		return nil, nil
 	}
 
-	models := make([]catwalk.Model, 0, len(tags.Models))
-	for _, m := range tags.Models {
+	models := make([]catwalk.Model, 0, len(resp.Models))
+	for _, m := range resp.Models {
 		id := m.Name
 		if id == "" {
 			id = m.Model

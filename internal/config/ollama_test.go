@@ -5,21 +5,32 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
+	ollamaapi "github.com/ollama/ollama/api"
 	"github.com/stretchr/testify/require"
 )
+
+// ollamaTestClient returns an Ollama API client pointed at the given test
+// server URL, using a short-timeout HTTP client.
+func ollamaTestClient(t *testing.T, serverURL string) *ollamaapi.Client {
+	t.Helper()
+	u, err := url.Parse(serverURL)
+	require.NoError(t, err)
+	return ollamaapi.NewClient(u, &http.Client{})
+}
 
 func TestDiscoverOllamaModels(t *testing.T) {
 	t.Run("success with models", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			require.Equal(t, "/api/tags", r.URL.Path)
-			resp := ollamaTagsResponse{
-				Models: []ollamaModel{
-					{Name: "llama3:latest", Details: ollamaDetails{ParameterSize: "8B"}},
-					{Name: "qwen3:30b", Details: ollamaDetails{ParameterSize: "30B"}},
+			resp := ollamaapi.ListResponse{
+				Models: []ollamaapi.ListModelResponse{
+					{Name: "llama3:latest"},
+					{Name: "qwen3:30b"},
 				},
 			}
 			w.Header().Set("Content-Type", "application/json")
@@ -63,15 +74,14 @@ func TestDiscoverOllamaModels(t *testing.T) {
 		t.Setenv("OLLAMA_HOST", srv.URL)
 		_, err := discoverOllamaModels(t.Context())
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "status 500")
 	})
 }
 
 func TestMaybeAutoDetectOllama(t *testing.T) {
 	t.Run("registers provider when Ollama is available", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			resp := ollamaTagsResponse{
-				Models: []ollamaModel{
+			resp := ollamaapi.ListResponse{
+				Models: []ollamaapi.ListModelResponse{
 					{Name: "mistral:latest"},
 				},
 			}
@@ -97,8 +107,8 @@ func TestMaybeAutoDetectOllama(t *testing.T) {
 
 	t.Run("skips when already configured", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			resp := ollamaTagsResponse{
-				Models: []ollamaModel{
+			resp := ollamaapi.ListResponse{
+				Models: []ollamaapi.ListModelResponse{
 					{Name: "mistral:latest"},
 				},
 			}
@@ -132,8 +142,8 @@ func TestMaybeAutoDetectOllama(t *testing.T) {
 
 	t.Run("skips when disabled", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			resp := ollamaTagsResponse{
-				Models: []ollamaModel{
+			resp := ollamaapi.ListResponse{
+				Models: []ollamaapi.ListModelResponse{
 					{Name: "mistral:latest"},
 				},
 			}

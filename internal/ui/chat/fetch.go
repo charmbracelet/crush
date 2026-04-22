@@ -48,6 +48,9 @@ func (f *FetchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	if params.Format != "" {
 		toolParams = append(toolParams, "format", params.Format)
 	}
+	if params.JQ != "" {
+		toolParams = append(toolParams, "jq", params.JQ)
+	}
 	if params.Timeout != 0 {
 		toolParams = append(toolParams, "timeout", formatTimeout(params.Timeout))
 	}

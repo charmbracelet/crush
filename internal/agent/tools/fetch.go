@@ -1,12 +1,14 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -21,6 +23,13 @@ import (
 const (
 	FetchToolName = "fetch"
 	MaxFetchSize  = 1 * 1024 * 1024 // 1MB
+	// jqHintThreshold is the response size above which fetch will
+	// append a trailing [crush-hint: ...] banner nudging the caller
+	// toward the `jq` parameter when the body looks like JSON and no
+	// filter was provided. Appended (not prepended) so that any
+	// downstream consumer that parses the body from the start still
+	// sees valid JSON up to the banner.
+	jqHintThreshold = 50 * 1024 // 50 KB
 )
 
 //go:embed fetch.md
@@ -47,9 +56,21 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 				return fantasy.NewTextErrorResponse("URL parameter is required"), nil
 			}
 
+			// When a jq expression is provided, format is ignored. We
+			// skip validation entirely in that case and normalize format
+			// to "text" so any later code paths inspecting it see a
+			// valid value. Without jq, format must be one of the
+			// supported values.
 			format := strings.ToLower(params.Format)
-			if format != "text" && format != "markdown" && format != "html" {
-				return fantasy.NewTextErrorResponse("Format must be one of: text, markdown, html"), nil
+			if params.JQ != "" {
+				format = "text"
+			} else if format != "text" && format != "markdown" && format != "html" {
+				return fantasy.NewTextErrorResponse(
+					"Format must be one of: text, markdown, html. " +
+						"For JSON responses, set the `jq` parameter to filter " +
+						"server-side — format then becomes optional " +
+						"(e.g. fetch(url=..., jq=\"length\")).",
+				), nil
 			}
 
 			if !strings.HasPrefix(params.URL, "http://") && !strings.HasPrefix(params.URL, "https://") {
@@ -134,6 +155,10 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 				return fantasy.NewTextResponse(filtered), nil
 			}
 
+			largeJSONWithoutFilter := format == "text" &&
+				len(body) > jqHintThreshold &&
+				looksLikeJSON(contentType, body)
+
 			switch format {
 			case "text":
 				if strings.Contains(contentType, "text/html") {
@@ -178,6 +203,20 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 				content += fmt.Sprintf("\n\n[Content truncated to %d bytes]", MaxFetchSize)
 			}
 
+			// Append the jq hint last so it's always at the true end of
+			// the response, even if the format switch above rewrote the
+			// content (HTML extraction, markdown wrapping, etc.) and
+			// after MaxFetchSize truncation.
+			if largeJSONWithoutFilter {
+				content += fmt.Sprintf(
+					"\n\n[crush-hint: response body is %d bytes of JSON. "+
+						"Prefer re-calling fetch() with a `jq` expression to "+
+						"filter server-side (e.g. jq=\"length\", jq=\"[.[].name]\") "+
+						"instead of loading the full payload into context.]",
+					len(body),
+				)
+			}
+
 			return fantasy.NewTextResponse(content), nil
 		})
 }
@@ -208,6 +247,10 @@ func convertHTMLToMarkdown(html string) (string, error) {
 // applyJQ parses body as JSON and runs the given jq expression against it,
 // returning pretty-printed results joined by newlines. Multiple top-level
 // JSON values in the body are supported (each is filtered independently).
+//
+// When the filter errors against the actual shape of the body, the error
+// is annotated with a short shape description so the caller (usually an
+// LLM) can fix the filter on the next attempt instead of guessing.
 func applyJQ(body, expr string) (string, error) {
 	query, err := gojq.Parse(expr)
 	if err != nil {
@@ -244,7 +287,7 @@ func applyJQ(body, expr string) (string, error) {
 				break
 			}
 			if e, ok := v.(error); ok {
-				return "", e
+				return "", fmt.Errorf("%w (input shape: %s)", e, describeShape(in))
 			}
 			bs, err := json.MarshalIndent(v, "", "  ")
 			if err != nil {
@@ -255,4 +298,52 @@ func applyJQ(body, expr string) (string, error) {
 		}
 	}
 	return strings.TrimRight(out.String(), "\n"), nil
+}
+
+// describeShape returns a short, human-readable description of v. Used in
+// jq error messages so the caller can see what the body actually looks
+// like without us dumping the whole payload back.
+func describeShape(v any) string {
+	switch x := v.(type) {
+	case nil:
+		return "null"
+	case bool:
+		return "boolean"
+	case json.Number:
+		return "number"
+	case string:
+		return "string"
+	case []any:
+		if len(x) == 0 {
+			return "empty array"
+		}
+		return fmt.Sprintf("array of %d items; first item is %s", len(x), describeShape(x[0]))
+	case map[string]any:
+		if len(x) == 0 {
+			return "empty object"
+		}
+		keys := make([]string, 0, len(x))
+		for k := range x {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		const maxKeys = 8
+		suffix := ""
+		if len(keys) > maxKeys {
+			keys = keys[:maxKeys]
+			suffix = ", ..."
+		}
+		return fmt.Sprintf("object with keys: %s%s", strings.Join(keys, ", "), suffix)
+	}
+	return fmt.Sprintf("unknown (%T)", v)
+}
+
+// looksLikeJSON reports whether body is most likely JSON based on the
+// Content-Type header and/or the first non-whitespace byte.
+func looksLikeJSON(contentType string, body []byte) bool {
+	if strings.Contains(strings.ToLower(contentType), "json") {
+		return true
+	}
+	trimmed := bytes.TrimLeft(body, " \t\r\n")
+	return len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[')
 }

@@ -104,10 +104,32 @@ JSON payloads into context — it's faster, cheaper, and avoids manual
 counting mistakes.
 
 ```text
-fetch(url="https://api.example.com/items", format="text", jq="length")
-fetch(url="https://api.example.com/items", format="text", jq="[.[].name]")
-fetch(url="https://catwalk.charm.sh/v2/providers", format="text",
+fetch(url="https://api.example.com/items", jq="length")
+fetch(url="https://api.example.com/items", jq="[.[].name]")
+fetch(url="https://catwalk.charm.sh/v2/providers",
       jq="[.[].models | length] | add")
 ```
 
-When `jq` is set, `format` is ignored and the body is parsed as JSON.
+When `jq` is set, `format` is ignored (and optional) and the body is
+parsed as JSON.
+
+### Fixing jq filter errors
+
+If your jq filter assumes the wrong top-level shape, `fetch` returns an
+error with an `(input shape: ...)` hint. **Fix the filter using that
+hint** — do not retry without a filter. Common corrections:
+
+| Hint | Your filter | Fixed filter |
+|---|---|---|
+| `array of N items; first item is object with keys: ...` | `.providers[].name` | `.[].name` |
+| `object with keys: data, meta, ...` | `.[].name` | `.data[].name` |
+| `object with keys: items, ...` | `length` | `.items \| length` |
+
+### Large JSON without a filter
+
+If `fetch` ends its response with a `[crush-hint: response body is N bytes
+of JSON. Prefer re-calling fetch() with a jq expression ...]` banner,
+re-issue the call with a `jq` expression. Loading multi-hundred-KB JSON
+payloads into context tends to trigger context-overflow errors on
+downstream providers. The banner is appended (not prepended), so the
+JSON body above it is still valid and parseable on its own.

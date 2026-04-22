@@ -915,6 +915,9 @@ func (t *baseToolMessageItem) formatParametersForCopy() string {
 			if params.Format != "" {
 				parts = append(parts, fmt.Sprintf("**Format:** %s", params.Format))
 			}
+			if params.JQ != "" {
+				parts = append(parts, fmt.Sprintf("**jq:** %s", params.JQ))
+			}
 			if params.Timeout > 0 {
 				parts = append(parts, fmt.Sprintf("**Timeout:** %ds", params.Timeout))
 			}
@@ -1294,6 +1297,9 @@ func (t *baseToolMessageItem) formatFetchResultForCopy() string {
 	}
 	if params.Format != "" {
 		fmt.Fprintf(&result, "Format: %s\n", params.Format)
+	}
+	if params.JQ != "" {
+		fmt.Fprintf(&result, "jq: %s\n", params.JQ)
 	}
 	if params.Timeout > 0 {
 		fmt.Fprintf(&result, "Timeout: %ds\n", params.Timeout)

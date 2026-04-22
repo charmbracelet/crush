@@ -17,13 +17,25 @@ DO NOT use this tool when you need to:
 
 <usage>
 - Provide URL to fetch content from
-- Specify desired output format (text, markdown, or html)
+- Specify desired output format (text, markdown, or html) — optional when `jq` is set
 - Optional timeout for request
 - Optional `jq` expression to filter JSON responses. When set, the body is parsed as JSON and the expression is applied server-side; `format` is ignored. Examples:
   - `jq: "length"` — count items in a top-level array
   - `jq: "[.[].name]"` — extract names from an array of objects
   - `jq: "[.[].models | length] | add"` — sum nested array lengths
   - `jq: ".data | keys"` — list keys of a nested object
+
+If a jq filter fails because it assumed the wrong shape, the error message
+will include an `(input shape: ...)` hint describing the actual top-level
+structure (e.g. `array of 32 items; first item is object with keys: id,
+name, models`). Use that hint to fix the filter — do NOT fall back to
+fetching the raw payload.
+
+When fetching a large JSON response without a `jq` filter, the tool
+appends a trailing `[crush-hint: ...]` banner suggesting you re-issue
+the call with a `jq` expression. Heed it — dumping big JSON into context
+causes context-overflow errors on many providers. The banner is at the
+end of the body so that parsing from the start still works until it.
 </usage>
 
 <features>

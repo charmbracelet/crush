@@ -38,7 +38,7 @@ type WebSearchParams struct {
 // FetchParams defines the parameters for the simple fetch tool.
 type FetchParams struct {
 	URL     string `json:"url" description:"The URL to fetch content from"`
-	Format  string `json:"format" description:"The format to return the content in (text, markdown, or html)"`
+	Format  string `json:"format,omitempty" description:"The format to return the content in (text, markdown, or html). Required unless jq is set, in which case format is ignored."`
 	Timeout int    `json:"timeout,omitempty" description:"Optional timeout in seconds (max 120)"`
 	JQ      string `json:"jq,omitempty" description:"Optional jq expression to apply to the fetched content (assumes JSON). When set, the response body is parsed as JSON and filtered server-side; format is ignored. Use for counting, extracting, or reshaping JSON API responses without loading the full payload into context."`
 }
@@ -46,7 +46,7 @@ type FetchParams struct {
 // FetchPermissionsParams defines the permission parameters for the simple fetch tool.
 type FetchPermissionsParams struct {
 	URL     string `json:"url"`
-	Format  string `json:"format"`
+	Format  string `json:"format,omitempty"`
 	Timeout int    `json:"timeout,omitempty"`
 	JQ      string `json:"jq,omitempty"`
 }

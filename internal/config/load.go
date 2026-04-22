@@ -26,7 +26,7 @@ import (
 	"github.com/qjebbs/go-jsons"
 )
 
-const defaultCatwalkURL = "https://catwalk.charm.sh"
+const defaultCatwalkURL = "https://catwalk.charm.land"
 
 // Load loads the configuration from the default paths and returns a
 // ConfigStore that owns both the pure-data Config and all runtime state.

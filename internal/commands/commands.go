@@ -14,7 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/home"
 )
 
-var namedArgPattern = regexp.MustCompile(`\$([A-Z][A-Z0-9_]*)`)
+var namedArgPattern = regexp.MustCompile(`\$([\p{L}_][\p{L}\p{N}_]*)`)
 
 const (
 	userCommandPrefix    = "user:"

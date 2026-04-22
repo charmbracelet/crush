@@ -140,3 +140,26 @@ func BenchmarkPromptWithTextAttachments(b *testing.B) {
 		})
 	}
 }
+
+func TestToAIMessage_EmptyToolCallInputIsNormalized(t *testing.T) {
+	t.Parallel()
+
+	msg := &Message{
+		Role: Assistant,
+		Parts: []ContentPart{
+			ToolCall{
+				ID:    "call_1",
+				Name:  "write",
+				Input: "",
+			},
+		},
+	}
+
+	messages := msg.ToAIMessage()
+	require.Len(t, messages, 1)
+	require.Len(t, messages[0].Content, 1)
+
+	part, ok := messages[0].Content[0].(fantasy.ToolCallPart)
+	require.True(t, ok)
+	require.Equal(t, "{}", part.Input)
+}

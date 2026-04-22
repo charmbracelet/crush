@@ -133,6 +133,96 @@ func TestConfig_configureProvidersWithOverride(t *testing.T) {
 	require.Equal(t, "Updated", pc.Models[0].Name)
 }
 
+func TestConfig_configureProviders_OpenAIBaseURLFromEnv(t *testing.T) {
+	knownProviders := []catwalk.Provider{
+		{
+			ID:          "openai",
+			APIKey:      "$OPENAI_API_KEY",
+			APIEndpoint: "https://api.openai.com/v1",
+			Models: []catwalk.Model{{
+				ID: "test-model",
+			}},
+		},
+	}
+
+	cfg := &Config{}
+	cfg.setDefaults("/tmp", "")
+	env := env.NewFromMap(map[string]string{
+		"OPENAI_API_KEY": "test-key",
+		"OPENAI_BASE_URL": "https://proxy.example.com/v1",
+	})
+	resolver := NewEnvironmentVariableResolver(env)
+	err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
+	require.NoError(t, err)
+
+	pc, ok := cfg.Providers.Get("openai")
+	require.True(t, ok)
+	require.Equal(t, "https://proxy.example.com/v1", pc.BaseURL)
+}
+
+func TestConfig_configureProviders_GlobalAPIEnvTargetsOpenAIDefault(t *testing.T) {
+	knownProviders := []catwalk.Provider{
+		{
+			ID:          "openai",
+			APIKey:      "$OPENAI_API_KEY",
+			APIEndpoint: "https://api.openai.com/v1",
+			Models: []catwalk.Model{{
+				ID: "gpt-test",
+			}},
+		},
+	}
+
+	cfg := &Config{}
+	cfg.setDefaults("/tmp", "")
+	env := env.NewFromMap(map[string]string{
+		"APIKEY": "global-key",
+		"APIURL": "https://global.example.com/v1",
+	})
+	resolver := NewEnvironmentVariableResolver(env)
+	err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
+	require.NoError(t, err)
+
+	pc, ok := cfg.Providers.Get("openai")
+	require.True(t, ok)
+	require.Equal(t, "https://global.example.com/v1", pc.BaseURL)
+	require.Equal(t, "global-key", pc.APIKey)
+}
+
+func TestConfig_configureProviders_GlobalAPIEnvTargetsCustomProvider(t *testing.T) {
+	knownProviders := []catwalk.Provider{
+		{
+			ID:          "openai",
+			APIKey:      "$OPENAI_API_KEY",
+			APIEndpoint: "https://api.openai.com/v1",
+			Models: []catwalk.Model{{ID: "gpt-test"}},
+		},
+	}
+
+	cfg := &Config{
+		Providers: csync.NewMapFrom(map[string]ProviderConfig{
+			"my-provider": {
+				BaseURL: "https://old.example.com/v1",
+				Models:  []catwalk.Model{{ID: "x"}},
+			},
+		}),
+	}
+	cfg.setDefaults("/tmp", "")
+	env := env.NewFromMap(map[string]string{
+		"CRUSH_PROVIDER": "my-provider",
+		"CRUSH_API_KEY":  "custom-key",
+		"CRUSH_API_URL":  "https://custom.example.com/v1",
+		"OPENAI_API_KEY": "openai-key",
+	})
+	resolver := NewEnvironmentVariableResolver(env)
+	err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
+	require.NoError(t, err)
+
+	custom, ok := cfg.Providers.Get("my-provider")
+	require.True(t, ok)
+	require.Equal(t, "https://custom.example.com/v1", custom.BaseURL)
+	require.Equal(t, "custom-key", custom.APIKey)
+}
+
 func TestConfig_configureProvidersWithNewProvider(t *testing.T) {
 	knownProviders := []catwalk.Provider{
 		{

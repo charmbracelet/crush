@@ -172,6 +172,14 @@ func splitFrontmatter(content string) (frontmatter, body string, err error) {
 
 // Discover finds all valid skills in the given paths.
 func Discover(paths []string) []*Skill {
+	skills, _ := DiscoverWithStates(paths)
+	return skills
+}
+
+// DiscoverWithStates finds all valid skills in the given paths and also
+// returns a per-file state slice describing parse/validation outcomes. Useful
+// for diagnostics and UI reporting.
+func DiscoverWithStates(paths []string) ([]*Skill, []*SkillState) {
 	var skills []*Skill
 	var states []*SkillState
 	var mu sync.Mutex
@@ -246,7 +254,7 @@ func Discover(paths []string) []*Skill {
 	})
 
 	broker.Publish(pubsub.UpdatedEvent, Event{States: states})
-	return skills
+	return skills, states
 }
 
 // ToPromptXML generates XML for injection into the system prompt.
@@ -291,6 +299,16 @@ func Deduplicate(all []*Skill) []*Skill {
 		}
 	}
 	return result
+}
+
+// ApproxTokenCount returns a rough estimate of how many tokens a string
+// occupies when sent to an LLM. Uses the common ~4-chars-per-token heuristic
+// that approximates GPT/Claude tokenizers well enough for diagnostic logging.
+func ApproxTokenCount(s string) int {
+	if s == "" {
+		return 0
+	}
+	return (len(s) + 3) / 4
 }
 
 // Filter removes skills whose names appear in the disabled list.

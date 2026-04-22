@@ -1,6 +1,6 @@
 ---
 name: shell-builtins
-description: Guide for adding and modifying shell builtin commands in Crush's embedded shell (internal/shell/). Use when creating a new builtin command, editing an existing one, or understanding how commands are intercepted in the mvdan/sh interpreter.
+description: Use when creating a new shell builtin command for Crush (internal/shell/), editing an existing one, or when the user needs to understand how commands are intercepted in Crush's embedded shell.
 ---
 
 # Shell Builtins

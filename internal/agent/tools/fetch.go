@@ -18,7 +18,7 @@ import (
 
 const (
 	FetchToolName = "fetch"
-	MaxFetchSize  = 1 * 1024 * 1024 // 1MB
+	MaxFetchSize  = 100 * 1024 // 100KB
 )
 
 //go:embed fetch.md

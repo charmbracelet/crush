@@ -1,6 +1,6 @@
 ---
 name: jq
-description: Process, filter, transform, generate, and construct JSON data using the jq command-line processor. Crush includes a built-in jq implementation (powered by gojq) available in the bash tool. Use when the user needs to query, filter, reshape, extract, create, or construct JSON — including API responses, config files, log output, or any structured data. Also use when generating JSON from scratch with jq -n, or when helping users write or debug jq expressions.
+description: Use when the user needs to query, filter, reshape, extract, create, or construct JSON data — including API responses, config files, log output, or any structured data — or when helping the user write or debug JSON transformations.
 ---
 
 # jq — Built-in JSON Processor

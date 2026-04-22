@@ -338,6 +338,7 @@ func writeSkills(b *strings.Builder, allSkills []*skills.Skill, activeSkills []*
 
 	slices.SortFunc(entries, func(a, b entry) int { return strings.Compare(a.name, b.name) })
 	b.WriteString("[skills]\n")
+	fmt.Fprintf(b, "loaded_this_session = %d/%d\n", tracker.LoadedCount(), len(activeSkills))
 	for _, e := range entries {
 		fmt.Fprintf(b, "%s = %s, %s\n", e.name, e.origin, e.state)
 	}

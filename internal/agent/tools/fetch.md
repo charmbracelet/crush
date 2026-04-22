@@ -1,4 +1,4 @@
-Fetch raw content from a URL as text, markdown, or html (max 5MB); no AI processing. For analysis or extraction use agentic_fetch.
+Fetch raw content from a URL as text, markdown, or html (max 100KB); no AI processing. For analysis or extraction use agentic_fetch.
 
 <when_to_use>
 Use this tool when you need:
@@ -29,7 +29,7 @@ DO NOT use this tool when you need to:
 </features>
 
 <limitations>
-- Max response size: 5MB
+- Max response size: 100KB
 - Only supports HTTP and HTTPS protocols
 - Cannot handle authentication or cookies
 - Some websites may block automated requests

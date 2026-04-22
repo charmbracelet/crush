@@ -1068,6 +1068,14 @@ func DefaultStyles() Styles {
 			Code: lipgloss.NewStyle().
 				Background(lipgloss.Color("#383030")),
 		},
+		Filename: diffview.LineStyle{
+			LineNumber: lipgloss.NewStyle().
+				Foreground(fgHalfMuted).
+				Background(bgBaseLighter),
+			Code: lipgloss.NewStyle().
+				Foreground(fgHalfMuted).
+				Background(bgBaseLighter),
+		},
 	}
 
 	s.FilePicker = filepicker.Styles{

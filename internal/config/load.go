@@ -309,6 +309,36 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 					continue
 				}
 			}
+		case catwalk.InferenceProviderMoonshot:
+			apiKey := cmp.Or(env.Get("MOONSHOT_API_KEY"), env.Get("KIMI_API_KEY"))
+			if apiKey != "" {
+				prepared.APIKey = apiKey
+				prepared.APIKeyTemplate = apiKey
+			} else {
+				v, err := resolver.ResolveValue(p.APIKey)
+				if v == "" || err != nil {
+					if configExists {
+						slog.Warn("Skipping Moonshot provider due to missing API key", "provider", p.ID)
+						c.Providers.Del(string(p.ID))
+					}
+					continue
+				}
+			}
+		case catwalk.InferenceProviderMoonshotChina:
+			apiKey := cmp.Or(env.Get("MOONSHOT_CN_API_KEY"), env.Get("KIMI_CN_API_KEY"))
+			if apiKey != "" {
+				prepared.APIKey = apiKey
+				prepared.APIKeyTemplate = apiKey
+			} else {
+				v, err := resolver.ResolveValue(p.APIKey)
+				if v == "" || err != nil {
+					if configExists {
+						slog.Warn("Skipping Moonshot China provider due to missing API key", "provider", p.ID)
+						c.Providers.Del(string(p.ID))
+					}
+					continue
+				}
+			}
 		default:
 			// if the provider api or endpoint are missing we skip them
 			v, err := resolver.ResolveValue(p.APIKey)

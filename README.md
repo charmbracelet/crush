@@ -192,6 +192,8 @@ That said, you can also set environment variables for preferred providers.
 | `CEREBRAS_API_KEY`          | Cerebras                                           |
 | `OPENROUTER_API_KEY`        | OpenRouter                                         |
 | `IONET_API_KEY`             | io.net                                             |
+| `MOONSHOT_API_KEY`          | Kimi (Moonshot, international / platform.moonshot.ai) |
+| `MOONSHOT_CN_API_KEY`      | Kimi (Moonshot, China / platform.moonshot.cn)        |
 | `GROQ_API_KEY`              | Groq                                               |
 | `AVIAN_API_KEY`             | Avian                                              |
 | `OPENCODE_API_KEY`          | OpenCode Zen & Go                                  |
@@ -205,6 +207,8 @@ That said, you can also set environment variables for preferred providers.
 | `AZURE_OPENAI_API_ENDPOINT` | Azure OpenAI models                                |
 | `AZURE_OPENAI_API_KEY`      | Azure OpenAI models (optional when using Entra ID) |
 | `AZURE_OPENAI_API_VERSION`  | Azure OpenAI models                                |
+
+`KIMI_API_KEY` is an alias for `MOONSHOT_API_KEY` (international). `KIMI_CN_API_KEY` is an alias for `MOONSHOT_CN_API_KEY` (China). Pick the provider `moonshot` or `moonshot-cn` in the UI to match your key.
 
 ### Subscriptions
 

@@ -1589,3 +1589,95 @@ func TestConfig_configureProviders_HyperAPIKeyFromConfigOverrides(t *testing.T) 
 	require.True(t, ok, "Hyper provider should be configured")
 	require.Equal(t, "env-api-key", pc.APIKey)
 }
+
+func TestConfig_configureProviders_MoonshotAPIKeyFromEnv(t *testing.T) {
+	knownProviders := []catwalk.Provider{
+		{
+			ID:                  catwalk.InferenceProviderMoonshot,
+			APIKey:              "",
+			Type:                catwalk.TypeOpenAICompat,
+			APIEndpoint:         "https://api.moonshot.ai/v1",
+			DefaultLargeModelID: "kimi-k2.6",
+			DefaultSmallModelID: "kimi-k2.5",
+			Models: []catwalk.Model{
+				{ID: "kimi-k2.6", DefaultMaxTokens: 1000},
+				{ID: "kimi-k2.5", DefaultMaxTokens: 500},
+			},
+		},
+	}
+
+	cfg := &Config{}
+	cfg.setDefaults("/tmp", "")
+	env := env.NewFromMap(map[string]string{
+		"MOONSHOT_API_KEY": "env-moonshot-key",
+	})
+	resolver := NewEnvironmentVariableResolver(env)
+	err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
+	require.NoError(t, err)
+	require.Equal(t, 1, cfg.Providers.Len())
+
+	pc, ok := cfg.Providers.Get("moonshot")
+	require.True(t, ok, "Moonshot provider should be configured")
+	require.Equal(t, "env-moonshot-key", pc.APIKey)
+	require.Equal(t, "env-moonshot-key", pc.APIKeyTemplate)
+}
+
+func TestConfig_configureProviders_MoonshotAPIKeyFromKimiEnv(t *testing.T) {
+	knownProviders := []catwalk.Provider{
+		{
+			ID:                  catwalk.InferenceProviderMoonshot,
+			APIKey:              "",
+			Type:                catwalk.TypeOpenAICompat,
+			APIEndpoint:         "https://api.moonshot.ai/v1",
+			DefaultLargeModelID: "kimi-k2.6",
+			DefaultSmallModelID: "kimi-k2.5",
+			Models: []catwalk.Model{
+				{ID: "kimi-k2.6", DefaultMaxTokens: 1000},
+				{ID: "kimi-k2.5", DefaultMaxTokens: 500},
+			},
+		},
+	}
+
+	cfg := &Config{}
+	cfg.setDefaults("/tmp", "")
+	env := env.NewFromMap(map[string]string{
+		"KIMI_API_KEY": "env-kimi-alias-key",
+	})
+	resolver := NewEnvironmentVariableResolver(env)
+	err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
+	require.NoError(t, err)
+
+	pc, ok := cfg.Providers.Get("moonshot")
+	require.True(t, ok, "Moonshot provider should be configured")
+	require.Equal(t, "env-kimi-alias-key", pc.APIKey)
+}
+
+func TestConfig_configureProviders_MoonshotCNAPIKeyFromEnv(t *testing.T) {
+	knownProviders := []catwalk.Provider{
+		{
+			ID:                  catwalk.InferenceProviderMoonshotChina,
+			APIKey:              "",
+			Type:                catwalk.TypeOpenAICompat,
+			APIEndpoint:         "https://api.moonshot.cn/v1",
+			DefaultLargeModelID: "kimi-k2.6",
+			DefaultSmallModelID: "kimi-k2.5",
+			Models: []catwalk.Model{
+				{ID: "kimi-k2.6", DefaultMaxTokens: 1000},
+				{ID: "kimi-k2.5", DefaultMaxTokens: 500},
+			},
+		},
+	}
+
+	cfg := &Config{}
+	cfg.setDefaults("/tmp", "")
+	env := env.NewFromMap(map[string]string{
+		"MOONSHOT_CN_API_KEY": "env-cn-key",
+	})
+	resolver := NewEnvironmentVariableResolver(env)
+	err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
+	require.NoError(t, err)
+
+	pc, ok := cfg.Providers.Get("moonshot-cn")
+	require.True(t, ok, "Moonshot China provider should be configured")
+	require.Equal(t, "env-cn-key", pc.APIKey)
+}

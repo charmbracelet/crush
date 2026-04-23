@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
-	"os"
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -25,20 +24,18 @@ const (
 	ollamaTimeout = 2 * time.Second
 )
 
-// ollamaBaseURL returns the Ollama host, respecting the OLLAMA_HOST
-// environment variable that Ollama itself honours.
+// ollamaBaseURL returns the normalized, client-connectable Ollama host,
+// respecting the OLLAMA_HOST environment variable that Ollama itself
+// honours.
 func ollamaBaseURL() string {
-	if host := os.Getenv("OLLAMA_HOST"); host != "" {
-		return host
-	}
-	return ollamaDefaultHost
+	return envconfig.ConnectableHost().String()
 }
 
 // newOllamaClient creates an official Ollama API client using the
 // environment-configured host (via OLLAMA_HOST) and a short-timeout
 // HTTP client so startup is not noticeably delayed.
 func newOllamaClient() *ollamaapi.Client {
-	return ollamaapi.NewClient(envconfig.Host(), &http.Client{Timeout: ollamaTimeout})
+	return ollamaapi.NewClient(envconfig.ConnectableHost(), &http.Client{Timeout: ollamaTimeout})
 }
 
 // discoverOllamaModels queries a running Ollama instance and returns

@@ -46,6 +46,29 @@ func TestDiscoverOllamaModels(t *testing.T) {
 		require.Equal(t, "qwen3:30b", models[1].ID)
 	})
 
+	t.Run("success with host missing scheme", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			require.Equal(t, "/api/tags", r.URL.Path)
+			resp := ollamaapi.ListResponse{
+				Models: []ollamaapi.ListModelResponse{
+					{Name: "llama3:latest"},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp) //nolint:errcheck
+		}))
+		defer srv.Close()
+
+		u, err := url.Parse(srv.URL)
+		require.NoError(t, err)
+
+		t.Setenv("OLLAMA_HOST", u.Host)
+		models, err := discoverOllamaModels(t.Context())
+		require.NoError(t, err)
+		require.Len(t, models, 1)
+		require.Equal(t, "llama3:latest", models[0].ID)
+	})
+
 	t.Run("no models", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
@@ -103,6 +126,32 @@ func TestMaybeAutoDetectOllama(t *testing.T) {
 		require.Len(t, pc.Models, 1)
 		require.Equal(t, "mistral:latest", pc.Models[0].ID)
 		require.Equal(t, srv.URL+ollamaOpenAIPath, pc.BaseURL)
+	})
+
+	t.Run("normalizes provider base URL when host omits scheme", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			resp := ollamaapi.ListResponse{
+				Models: []ollamaapi.ListModelResponse{
+					{Name: "mistral:latest"},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp) //nolint:errcheck
+		}))
+		defer srv.Close()
+
+		u, err := url.Parse(srv.URL)
+		require.NoError(t, err)
+
+		t.Setenv("OLLAMA_HOST", u.Host)
+		cfg := &Config{}
+		cfg.setDefaults("/tmp", "")
+
+		maybeAutoDetectOllama(cfg)
+
+		pc, ok := cfg.Providers.Get(ollamaProviderID)
+		require.True(t, ok, "Ollama provider should be registered")
+		require.Equal(t, "http://"+u.Host+ollamaOpenAIPath, pc.BaseURL)
 	})
 
 	t.Run("skips when already configured", func(t *testing.T) {

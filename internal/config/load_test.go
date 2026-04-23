@@ -17,7 +17,16 @@ import (
 func TestMain(m *testing.M) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
 
+	originalOllamaHost, hadOllamaHost := os.LookupEnv("OLLAMA_HOST")
+	os.Setenv("OLLAMA_HOST", "http://127.0.0.1:1")
+
 	exitVal := m.Run()
+
+	if hadOllamaHost {
+		os.Setenv("OLLAMA_HOST", originalOllamaHost)
+	} else {
+		os.Unsetenv("OLLAMA_HOST")
+	}
 	os.Exit(exitVal)
 }
 

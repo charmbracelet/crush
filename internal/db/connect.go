@@ -45,6 +45,18 @@ func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 		return nil, err
 	}
 
+	// SQLite is a single-writer database. Parallel sub-agents (session,
+	// message, history, and filetracker services share this *sql.DB)
+	// previously opened an unbounded number of concurrent SQLite handles
+	// through Go's default pool. Interleaved WAL frames + auto-checkpoints
+	// from those handles, combined with mid-checkpoint cancellation
+	// (context cancel, SIGINT, OOM), desynced the main DB file from the
+	// WAL and surfaced at next open as SQLITE_NOTADB (26) — making the
+	// project session unrecoverable without deleting .crush/crush.db.
+	// Cap the pool at one writer; busy_timeout (30s) queues concurrent
+	// callers while this handle is in use.
+	db.SetMaxOpenConns(1)
+
 	if err = db.PingContext(ctx); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to connect to database: %w", err)

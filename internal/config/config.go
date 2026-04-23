@@ -550,10 +550,6 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	switch providerID {
 	case catwalk.InferenceProviderMiniMax, catwalk.InferenceProviderMiniMaxChina:
 		// NOTE: MiniMax has no good endpoint we can use to validate the API key.
-		// Let's at least check the pattern.
-		// if !strings.HasPrefix(apiKey, "sk-") {
-		// 	return fmt.Errorf("invalid API key format for provider %s", c.ID)
-		// }
 		return nil
 	}
 

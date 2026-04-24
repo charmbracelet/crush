@@ -69,8 +69,8 @@ func (c *CommandItem) Render(width int) string {
 	styles := ListItemStyles{
 		ItemBlurred:     c.t.Dialog.NormalItem,
 		ItemFocused:     c.t.Dialog.SelectedItem,
-		InfoTextBlurred: c.t.Base,
-		InfoTextFocused: c.t.Base,
+		InfoTextBlurred: c.t.Dialog.ListItem.InfoBlurred,
+		InfoTextFocused: c.t.Dialog.ListItem.InfoFocused,
 	}
 	return renderItem(styles, c.title, c.shortcut, c.focused, width, c.cache, &c.m)
 }

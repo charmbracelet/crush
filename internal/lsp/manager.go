@@ -21,14 +21,16 @@ import (
 	"github.com/sourcegraph/jsonrpc2"
 )
 
-var unavailable = csync.NewMap[string, struct{}]()
+const unavailableRetryDelay = 30 * time.Second
 
 // Manager handles lazy initialization of LSP clients based on file types.
 type Manager struct {
-	clients  *csync.Map[string, *Client]
-	cfg      *config.ConfigStore
-	manager  *powernapconfig.Manager
-	callback func(name string, client *Client)
+	clients     *csync.Map[string, *Client]
+	unavailable *csync.Map[string, time.Time]
+	cfg         *config.ConfigStore
+	manager     *powernapconfig.Manager
+	callback    func(name string, client *Client)
+	now         func() time.Time
 }
 
 // NewManager creates a new LSP manager service.
@@ -59,10 +61,12 @@ func NewManager(cfg *config.ConfigStore) *Manager {
 	}
 
 	return &Manager{
-		clients:  csync.NewMap[string, *Client](),
-		cfg:      cfg,
-		manager:  manager,
-		callback: func(string, *Client) {}, // default no-op callback
+		clients:     csync.NewMap[string, *Client](),
+		unavailable: csync.NewMap[string, time.Time](),
+		cfg:         cfg,
+		manager:     manager,
+		callback:    func(string, *Client) {}, // default no-op callback
+		now:         time.Now,
 	}
 }
 
@@ -155,10 +159,6 @@ func (s *Manager) startServer(ctx context.Context, name, filepath string, server
 		return
 	}
 
-	if _, exists := unavailable.Get(name); exists {
-		return
-	}
-
 	if client, ok := s.clients.Get(name); ok {
 		switch client.GetServerState() {
 		case StateReady, StateStarting, StateDisabled:
@@ -169,11 +169,15 @@ func (s *Manager) startServer(ctx context.Context, name, filepath string, server
 	}
 
 	if !isUserConfigured {
-		if _, err := exec.LookPath(server.Command); err != nil {
-			slog.Debug("LSP server not installed, skipping", "name", name, "command", server.Command)
-			unavailable.Set(name, struct{}{})
+		if s.recentlyUnavailable(name) {
 			return
 		}
+		if _, err := exec.LookPath(server.Command); err != nil {
+			slog.Debug("LSP server not installed, skipping", "name", name, "command", server.Command)
+			s.markUnavailable(name)
+			return
+		}
+		s.clearUnavailable(name)
 		if skipAutoStartCommands[server.Command] {
 			slog.Debug("LSP command too generic for auto-start, skipping", "name", name, "command", server.Command)
 			return
@@ -253,6 +257,26 @@ func (s *Manager) startServer(ctx context.Context, name, filepath string, server
 func (s *Manager) isUserConfigured(name string) bool {
 	cfg, ok := s.cfg.Config().LSP[name]
 	return ok && !cfg.Disabled
+}
+
+func (s *Manager) recentlyUnavailable(name string) bool {
+	lastUnavailableAt, exists := s.unavailable.Get(name)
+	if !exists {
+		return false
+	}
+	if s.now().Sub(lastUnavailableAt) < unavailableRetryDelay {
+		return true
+	}
+	s.unavailable.Del(name)
+	return false
+}
+
+func (s *Manager) markUnavailable(name string) {
+	s.unavailable.Set(name, s.now())
+}
+
+func (s *Manager) clearUnavailable(name string) {
+	s.unavailable.Del(name)
 }
 
 func (s *Manager) buildConfig(name string, server *powernapconfig.ServerConfig) config.LSPConfig {

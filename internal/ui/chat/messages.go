@@ -221,7 +221,7 @@ func (a *AssistantInfoItem) RawRender(width int) string {
 
 // Render implements MessageItem.
 func (a *AssistantInfoItem) Render(width int) string {
-	prefix := a.sty.Chat.Message.SectionHeader.Render()
+	prefix := a.sty.Messages.SectionHeader.Render()
 	lines := strings.Split(a.RawRender(width), "\n")
 	for i, line := range lines {
 		lines[i] = prefix + line
@@ -236,18 +236,18 @@ func (a *AssistantInfoItem) renderContent(width int) string {
 	}
 	finishTime := time.Unix(finishData.Time, 0)
 	duration := finishTime.Sub(a.lastUserMessageTime)
-	infoMsg := a.sty.Chat.Message.AssistantInfoDuration.Render(duration.String())
-	icon := a.sty.Chat.Message.AssistantInfoIcon.Render(styles.ModelIcon)
+	infoMsg := a.sty.Messages.AssistantInfoDuration.Render(duration.String())
+	icon := a.sty.Messages.AssistantInfoIcon.Render(styles.ModelIcon)
 	model := a.cfg.GetModel(a.message.Provider, a.message.Model)
 	if model == nil {
 		model = &catwalk.Model{Name: "Unknown Model"}
 	}
-	modelFormatted := a.sty.Chat.Message.AssistantInfoModel.Render(model.Name)
+	modelFormatted := a.sty.Messages.AssistantInfoModel.Render(model.Name)
 	providerName := a.message.Provider
 	if providerConfig, ok := a.cfg.Providers.Get(a.message.Provider); ok {
 		providerName = providerConfig.Name
 	}
-	provider := a.sty.Chat.Message.AssistantInfoProvider.Render(fmt.Sprintf("via %s", providerName))
+	provider := a.sty.Messages.AssistantInfoProvider.Render(fmt.Sprintf("via %s", providerName))
 	assistant := fmt.Sprintf("%s %s %s %s", icon, modelFormatted, provider, infoMsg)
 	return common.Section(a.sty, assistant, width)
 }

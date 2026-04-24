@@ -29,11 +29,11 @@ func MarkdownRenderer(sty *styles.Styles, width int) *glamour.TermRenderer {
 	return r
 }
 
-// PlainMarkdownRenderer returns a glamour [glamour.TermRenderer] with no colors
+// QuietMarkdownRenderer returns a glamour [glamour.TermRenderer] with no colors
 // (plain text with structure) and the given width.
-func PlainMarkdownRenderer(sty *styles.Styles, width int) *glamour.TermRenderer {
+func QuietMarkdownRenderer(sty *styles.Styles, width int) *glamour.TermRenderer {
 	r, _ := glamour.NewTermRenderer(
-		glamour.WithStyles(sty.PlainMarkdown),
+		glamour.WithStyles(sty.QuietMarkdown),
 		glamour.WithWordWrap(width),
 		glamour.WithChromaFormatter(formatterName),
 	)

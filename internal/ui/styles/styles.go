@@ -58,28 +58,19 @@ const (
 )
 
 type Styles struct {
-	WindowTooSmall lipgloss.Style
-
-	// Reusable text styles
-	Base      lipgloss.Style
-	Muted     lipgloss.Style
-	HalfMuted lipgloss.Style
-	Subtle    lipgloss.Style
-
-	// Tags
-	TagBase  lipgloss.Style
-	TagError lipgloss.Style
-	TagInfo  lipgloss.Style
-
 	// Header
 	Header struct {
-		Charm        lipgloss.Style // Style for "Charm™" label
-		Diagonals    lipgloss.Style // Style for diagonal separators (╱)
-		Percentage   lipgloss.Style // Style for context percentage
-		Keystroke    lipgloss.Style // Style for keystroke hints (e.g., "ctrl+d")
-		KeystrokeTip lipgloss.Style // Style for keystroke action text (e.g., "open", "close")
-		WorkingDir   lipgloss.Style // Style for current working directory
-		Separator    lipgloss.Style // Style for separator dots (•)
+		Charm             lipgloss.Style // Style for "Charm™" label
+		Diagonals         lipgloss.Style // Style for diagonal separators (╱)
+		Percentage        lipgloss.Style // Style for context percentage
+		Keystroke         lipgloss.Style // Style for keystroke hints (e.g., "ctrl+d")
+		KeystrokeTip      lipgloss.Style // Style for keystroke action text (e.g., "open", "close")
+		WorkingDir        lipgloss.Style // Style for current working directory
+		Separator         lipgloss.Style // Style for separator dots (•)
+		Wrapper           lipgloss.Style // Outer container for the entire header row
+		LogoGradCanvas    lipgloss.Style // Canvas for the compact "CRUSH" gradient
+		LogoGradFromColor color.Color    // "CRUSH" wordmark gradient start
+		LogoGradToColor   color.Color    // "CRUSH" wordmark gradient end
 	}
 
 	CompactDetails struct {
@@ -88,43 +79,18 @@ type Styles struct {
 		Title   lipgloss.Style
 	}
 
-	// Panels
-	PanelMuted lipgloss.Style
-	PanelBase  lipgloss.Style
-
-	// Line numbers for code blocks
-	LineNumber lipgloss.Style
-
-	// Message borders
-	FocusedMessageBorder lipgloss.Border
-
 	// Tool calls
-	ToolCallPending   lipgloss.Style
-	ToolCallError     lipgloss.Style
-	ToolCallSuccess   lipgloss.Style
-	ToolCallCancelled lipgloss.Style
-	EarlyStateMessage lipgloss.Style
+	ToolCallSuccess lipgloss.Style
 
 	// Text selection
 	TextSelection lipgloss.Style
 
-	// LSP and MCP status indicators
-	ResourceGroupTitle     lipgloss.Style
-	ResourceOfflineIcon    lipgloss.Style
-	ResourceBusyIcon       lipgloss.Style
-	ResourceErrorIcon      lipgloss.Style
-	ResourceOnlineIcon     lipgloss.Style
-	ResourceName           lipgloss.Style
-	ResourceStatus         lipgloss.Style
-	ResourceAdditionalText lipgloss.Style
-
 	// Markdown & Chroma
 	Markdown      ansi.StyleConfig
-	PlainMarkdown ansi.StyleConfig
+	QuietMarkdown ansi.StyleConfig
 
 	// Inputs
 	TextInput textinput.Styles
-	TextArea  textarea.Styles
 
 	// Help
 	Help help.Styles
@@ -136,62 +102,55 @@ type Styles struct {
 	FilePicker filepicker.Styles
 
 	// Buttons
-	ButtonFocus lipgloss.Style
-	ButtonBlur  lipgloss.Style
-
-	// Borders
-	BorderFocus lipgloss.Style
-	BorderBlur  lipgloss.Style
+	Button struct {
+		Focused lipgloss.Style
+		Blurred lipgloss.Style
+	}
 
 	// Editor
-	EditorPromptNormalFocused   lipgloss.Style
-	EditorPromptNormalBlurred   lipgloss.Style
-	EditorPromptYoloIconFocused lipgloss.Style
-	EditorPromptYoloIconBlurred lipgloss.Style
-	EditorPromptYoloDotsFocused lipgloss.Style
-	EditorPromptYoloDotsBlurred lipgloss.Style
+	Editor struct {
+		Textarea textarea.Styles
+
+		// Normal mode prompt (default "::: ").
+		PromptNormalFocused lipgloss.Style
+		PromptNormalBlurred lipgloss.Style
+
+		// YOLO mode prompt (" ! " icon + ":::" dots).
+		PromptYoloIconFocused lipgloss.Style
+		PromptYoloIconBlurred lipgloss.Style
+		PromptYoloDotsFocused lipgloss.Style
+		PromptYoloDotsBlurred lipgloss.Style
+	}
 
 	// Radio
-	RadioOn  lipgloss.Style
-	RadioOff lipgloss.Style
+	Radio struct {
+		On    lipgloss.Style
+		Off   lipgloss.Style
+		Label lipgloss.Style // Text next to a radio button
+	}
 
 	// Background
 	Background color.Color
 
 	// Logo
-	LogoFieldColor   color.Color
-	LogoTitleColorA  color.Color
-	LogoTitleColorB  color.Color
-	LogoCharmColor   color.Color
-	LogoVersionColor color.Color
+	Logo struct {
+		FieldColor         color.Color
+		TitleColorA        color.Color
+		TitleColorB        color.Color
+		CharmColor         color.Color
+		VersionColor       color.Color
+		SmallCharm         lipgloss.Style // "Charm™" label in SmallRender
+		SmallDiagonals     lipgloss.Style // Diagonal line fill in SmallRender
+		GradCanvas         lipgloss.Style // Blank canvas for gradient painting
+		SmallGradFromColor color.Color    // Small "Crush" wordmark gradient start
+		SmallGradToColor   color.Color    // Small "Crush" wordmark gradient end
+	}
 
-	// Colors - semantic colors for tool rendering.
-	Primary       color.Color
-	Secondary     color.Color
-	Tertiary      color.Color
-	BgBase        color.Color
-	BgBaseLighter color.Color
-	BgSubtle      color.Color
-	BgOverlay     color.Color
-	FgBase        color.Color
-	FgMuted       color.Color
-	FgHalfMuted   color.Color
-	FgSubtle      color.Color
-	Border        color.Color
-	BorderColor   color.Color // Border focus color
-	Error         color.Color
-	Warning       color.Color
-	Info          color.Color
-	White         color.Color
-	BlueLight     color.Color
-	Blue          color.Color
-	BlueDark      color.Color
-	GreenLight    color.Color
-	Green         color.Color
-	GreenDark     color.Color
-	Red           color.Color
-	RedDark       color.Color
-	Yellow        color.Color
+	// Working indicator gradient (spinners/shimmers on assistant "thinking",
+	// tool-call pending, CLI generating, startup).
+	WorkingGradFromColor color.Color
+	WorkingGradToColor   color.Color
+	WorkingLabelColor    color.Color // Label text color next to the indicator
 
 	// Section Title
 	Section struct {
@@ -214,41 +173,80 @@ type Styles struct {
 		InfoDiagnostic    lipgloss.Style
 	}
 
+	// Sidebar
+	Sidebar struct {
+		SessionTitle lipgloss.Style // Current session title at top of sidebar
+		WorkingDir   lipgloss.Style // Working directory path (PrettyPath)
+	}
+
+	// ModelInfo (model name, provider, reasoning, token/cost summary)
+	ModelInfo struct {
+		Icon             lipgloss.Style // Model icon (◇)
+		Name             lipgloss.Style // Model name text
+		Provider         lipgloss.Style // "via <provider>" text
+		ProviderFallback lipgloss.Style // Provider on its own second line
+		Reasoning        lipgloss.Style // Reasoning effort text
+		TokenCount       lipgloss.Style // "(42K)" token count
+		TokenPercentage  lipgloss.Style // "42%" percent of context window
+		Cost             lipgloss.Style // "$0.42" cost readout
+	}
+
+	// Resource styles the LSP/MCP/skills sidebar lists: their heading,
+	// each row's status icon, name, status text, and truncation hints.
+	Resource struct {
+		Heading         lipgloss.Style // Section header ("LSPs", "MCPs", "Skills")
+		Name            lipgloss.Style // Resource name (e.g. "gopls")
+		StatusText      lipgloss.Style // Row status description (e.g. "starting...")
+		OfflineIcon     lipgloss.Style // Offline/unstarted/stopped status icon
+		DisabledIcon    lipgloss.Style // Disabled status icon
+		BusyIcon        lipgloss.Style // Busy/starting status icon
+		ErrorIcon       lipgloss.Style // Error status icon
+		OnlineIcon      lipgloss.Style // Online/ready status icon
+		AdditionalText  lipgloss.Style // "None" and "…and N more" text
+		CapabilityCount lipgloss.Style // "N tools" / "N prompts" / "N resources"
+		RowTitleBase    lipgloss.Style // Base style applied over row titles in common.Status
+		RowDescBase     lipgloss.Style // Base style applied over row descriptions in common.Status
+		DefaultTitleFg  color.Color    // Default title color when opt is zero
+		DefaultDescFg   color.Color    // Default description color when opt is zero
+	}
+
 	// Files
 	Files struct {
-		Path      lipgloss.Style
-		Additions lipgloss.Style
-		Deletions lipgloss.Style
+		Path           lipgloss.Style
+		Additions      lipgloss.Style
+		Deletions      lipgloss.Style
+		SectionTitle   lipgloss.Style // "Modified Files" heading
+		EmptyMessage   lipgloss.Style // "None" placeholder when no files
+		TruncationHint lipgloss.Style // "…and N more" message
 	}
 
 	// Chat
-	Chat struct {
-		// Message item styles
-		Message struct {
-			UserBlurred      lipgloss.Style
-			UserFocused      lipgloss.Style
-			AssistantBlurred lipgloss.Style
-			AssistantFocused lipgloss.Style
-			NoContent        lipgloss.Style
-			Thinking         lipgloss.Style
-			ErrorTag         lipgloss.Style
-			ErrorTitle       lipgloss.Style
-			ErrorDetails     lipgloss.Style
-			ToolCallFocused  lipgloss.Style
-			ToolCallCompact  lipgloss.Style
-			ToolCallBlurred  lipgloss.Style
-			SectionHeader    lipgloss.Style
+	// Messages - chat message item styles
+	Messages struct {
+		UserBlurred      lipgloss.Style
+		UserFocused      lipgloss.Style
+		AssistantBlurred lipgloss.Style
+		AssistantFocused lipgloss.Style
+		NoContent        lipgloss.Style
+		Thinking         lipgloss.Style
+		ErrorTag         lipgloss.Style
+		ErrorTitle       lipgloss.Style
+		ErrorDetails     lipgloss.Style
+		ToolCallFocused  lipgloss.Style
+		ToolCallCompact  lipgloss.Style
+		ToolCallBlurred  lipgloss.Style
+		SectionHeader    lipgloss.Style
 
-			// Thinking section styles
-			ThinkingBox            lipgloss.Style // Background for thinking content
-			ThinkingTruncationHint lipgloss.Style // "… (N lines hidden)" hint
-			ThinkingFooterTitle    lipgloss.Style // "Thought for" text
-			ThinkingFooterDuration lipgloss.Style // Duration value
-			AssistantInfoIcon      lipgloss.Style
-			AssistantInfoModel     lipgloss.Style
-			AssistantInfoProvider  lipgloss.Style
-			AssistantInfoDuration  lipgloss.Style
-		}
+		// Thinking section styles
+		ThinkingBox            lipgloss.Style // Background for thinking content
+		ThinkingTruncationHint lipgloss.Style // "… (N lines hidden)" hint
+		ThinkingFooterTitle    lipgloss.Style // "Thought for" text
+		ThinkingFooterDuration lipgloss.Style // Duration value
+		AssistantInfoIcon      lipgloss.Style
+		AssistantInfoModel     lipgloss.Style
+		AssistantInfoProvider  lipgloss.Style
+		AssistantInfoDuration  lipgloss.Style
+		AssistantCanceled      lipgloss.Style // Italic "Canceled" footer
 	}
 
 	// Tool - styles for tool call rendering
@@ -316,6 +314,9 @@ type Styles struct {
 		TodoCompletedIcon  lipgloss.Style // Completed todo icon
 		TodoInProgressIcon lipgloss.Style // In-progress todo icon
 		TodoPendingIcon    lipgloss.Style // Pending todo icon
+		TodoStatusNote     lipgloss.Style // " · completed N" / " · starting task" trailing note
+		TodoItem           lipgloss.Style // Default body text for todo list items
+		TodoJustStarted    lipgloss.Style // Text of the just-started todo in tool-call bodies
 
 		// MCP tools
 		MCPName     lipgloss.Style // The mcp name
@@ -329,10 +330,6 @@ type Styles struct {
 		ResourceSize            lipgloss.Style
 		MediaType               lipgloss.Style
 
-		// Docker MCP tools
-		DockerMCPActionAdd lipgloss.Style // Docker MCP add action (green)
-		DockerMCPActionDel lipgloss.Style // Docker MCP remove action (red)
-
 		// Hooks
 		HookLabel        lipgloss.Style // "Hook" label
 		HookName         lipgloss.Style // Hook command name
@@ -344,14 +341,27 @@ type Styles struct {
 		HookDeniedLabel  lipgloss.Style // "Hook" label when denied
 		HookDeniedReason lipgloss.Style // Denied reason text
 		HookRewrote      lipgloss.Style // "Rewrote Input" indicator
+
+		// Action verb colors for tool-call headers.
+		ActionCreate  lipgloss.Style // Constructive actions (e.g. "Add", "Create")
+		ActionDestroy lipgloss.Style // Destructive actions (e.g. "Remove", "Delete")
+
+		// Tool result helpers.
+		ResultEmpty      lipgloss.Style // "No results" placeholder
+		ResultTruncation lipgloss.Style // "… and N more" truncation line
+		ResultItemName   lipgloss.Style // Item name (left column in result lists)
+		ResultItemDesc   lipgloss.Style // Item description (right column)
 	}
 
 	// Dialog styles
 	Dialog struct {
-		Title       lipgloss.Style
-		TitleText   lipgloss.Style
-		TitleError  lipgloss.Style
-		TitleAccent lipgloss.Style
+		Title              lipgloss.Style
+		TitleText          lipgloss.Style
+		TitleError         lipgloss.Style
+		TitleAccent        lipgloss.Style
+		TitleLineBase      lipgloss.Style // Base for the gradient ╱╱╱ next to dialog titles
+		TitleGradFromColor color.Color    // Default dialog title ╱╱╱ gradient start
+		TitleGradToColor   color.Color    // Default dialog title ╱╱╱ gradient end
 		// View is the main content area style.
 		View          lipgloss.Style
 		PrimaryText   lipgloss.Style
@@ -393,7 +403,43 @@ type Styles struct {
 			InputRequiredMarkFocused lipgloss.Style
 		}
 
-		Commands struct{}
+		// ListItem styles the info-text rendered alongside list items (commands,
+		// models, reasoning options). Sessions have their own overrides below.
+		ListItem struct {
+			InfoBlurred lipgloss.Style
+			InfoFocused lipgloss.Style
+		}
+
+		Models struct {
+			ConfiguredText lipgloss.Style // "Configured" badge shown on the ModelGroup header
+		}
+
+		Permissions struct {
+			KeyText   lipgloss.Style // Left key cell of a key/value row
+			ValueText lipgloss.Style // Right value cell of a key/value row
+			ParamsBg  color.Color    // Background color behind highlighted JSON parameters
+		}
+
+		Quit struct {
+			Content lipgloss.Style // Wrapper for the quit dialog's inner content
+			Frame   lipgloss.Style // Outer rounded border framing the quit dialog
+		}
+
+		APIKey struct {
+			Spinner lipgloss.Style // Loading spinner while validating the key
+		}
+
+		OAuth struct {
+			Spinner      lipgloss.Style // Loading spinner
+			Instructions lipgloss.Style // Emphasized instruction text
+			UserCode     lipgloss.Style // Prominent user code display
+			Success      lipgloss.Style // Positive status text (e.g. "Authentication successful!")
+			Link         lipgloss.Style // Underlined verification URL
+			Enter        lipgloss.Style // "enter" keyword highlight in instructions
+			ErrorText    lipgloss.Style // Error message when authentication fails
+			StatusText   lipgloss.Style // Narrative status text ("Initializing...", "Verifying...", etc.)
+			UserCodeBg   color.Color    // Background color of the centered user-code box
+		}
 
 		ImagePreview lipgloss.Style
 
@@ -416,6 +462,9 @@ type Styles struct {
 			RenamingTitleGradientFromColor color.Color
 			RenamingTitleGradientToColor   color.Color
 			RenamingPlaceholder            lipgloss.Style
+
+			InfoBlurred lipgloss.Style // Timestamp text on unfocused session items
+			InfoFocused lipgloss.Style // Timestamp text on the focused session item
 		}
 	}
 
@@ -453,14 +502,22 @@ type Styles struct {
 
 	// Pills styles for todo/queue pills
 	Pills struct {
-		Base            lipgloss.Style // Base pill style with padding
-		Focused         lipgloss.Style // Focused pill with visible border
-		Blurred         lipgloss.Style // Blurred pill with hidden border
-		QueueItemPrefix lipgloss.Style // Prefix for queue list items
-		HelpKey         lipgloss.Style // Keystroke hint style
-		HelpText        lipgloss.Style // Help action text style
-		Area            lipgloss.Style // Pills area container
-		TodoSpinner     lipgloss.Style // Todo spinner style
+		Base               lipgloss.Style // Base pill style with padding
+		Focused            lipgloss.Style // Focused pill with visible border
+		Blurred            lipgloss.Style // Blurred pill with hidden border
+		QueueItemPrefix    lipgloss.Style // Prefix for queue list items
+		QueueItemText      lipgloss.Style // Queue list item body text
+		QueueLabel         lipgloss.Style // "N Queued" label text
+		QueueIconBase      lipgloss.Style // Base style for queue gradient triangles
+		QueueGradFromColor color.Color    // Start color for queue indicator gradient
+		QueueGradToColor   color.Color    // End color for queue indicator gradient
+		TodoLabel          lipgloss.Style // "To-Do" label
+		TodoProgress       lipgloss.Style // Todo ratio (e.g. "2/5")
+		TodoCurrentTask    lipgloss.Style // Current in-progress task name
+		TodoSpinner        lipgloss.Style // Todo spinner style
+		HelpKey            lipgloss.Style // Keystroke hint style
+		HelpText           lipgloss.Style // Help action text style
+		Area               lipgloss.Style // Pills area container
 	}
 }
 
@@ -564,38 +621,17 @@ func DefaultStyles() Styles {
 	normalBorder := lipgloss.NormalBorder()
 
 	base := lipgloss.NewStyle().Foreground(fgBase)
+	muted := lipgloss.NewStyle().Foreground(fgMuted)
+	subtle := lipgloss.NewStyle().Foreground(fgSubtle)
 
 	s := Styles{}
 
 	s.Background = bgBase
 
 	// Populate color fields
-	s.Primary = primary
-	s.Secondary = secondary
-	s.Tertiary = tertiary
-	s.BgBase = bgBase
-	s.BgBaseLighter = bgBaseLighter
-	s.BgSubtle = bgSubtle
-	s.BgOverlay = bgOverlay
-	s.FgBase = fgBase
-	s.FgMuted = fgMuted
-	s.FgHalfMuted = fgHalfMuted
-	s.FgSubtle = fgSubtle
-	s.Border = border
-	s.BorderColor = borderFocus
-	s.Error = error
-	s.Warning = warning
-	s.Info = info
-	s.White = white
-	s.BlueLight = blueLight
-	s.Blue = blue
-	s.BlueDark = blueDark
-	s.GreenLight = greenLight
-	s.Green = green
-	s.GreenDark = greenDark
-	s.Red = red
-	s.RedDark = redDark
-	s.Yellow = yellow
+	s.WorkingGradFromColor = primary
+	s.WorkingGradToColor = secondary
+	s.WorkingLabelColor = fgBase
 
 	s.TextInput = textinput.Styles{
 		Focused: textinput.StyleState{
@@ -617,7 +653,7 @@ func DefaultStyles() Styles {
 		},
 	}
 
-	s.TextArea = textarea.Styles{
+	s.Editor.Textarea = textarea.Styles{
 		Focused: textarea.StyleState{
 			Base:             base,
 			Text:             base,
@@ -852,10 +888,10 @@ func DefaultStyles() Styles {
 		},
 	}
 
-	// PlainMarkdown style - muted colors on subtle background for thinking content.
+	// QuietMarkdown style - muted colors on subtle background for thinking content.
 	plainBg := new(bgBaseLighter.Hex())
 	plainFg := new(fgMuted.Hex())
-	s.PlainMarkdown = ansi.StyleConfig{
+	s.QuietMarkdown = ansi.StyleConfig{
 		Document: ansi.StyleBlock{
 			StylePrimitive: ansi.StylePrimitive{
 				Color:           plainFg,
@@ -1093,72 +1129,47 @@ func DefaultStyles() Styles {
 	}
 
 	// borders
-	s.FocusedMessageBorder = lipgloss.Border{Left: BorderThick}
+	s.ToolCallSuccess = lipgloss.NewStyle().Foreground(green).SetString(ToolSuccess)
 
-	// text presets
-	s.Base = lipgloss.NewStyle().Foreground(fgBase)
-	s.Muted = lipgloss.NewStyle().Foreground(fgMuted)
-	s.HalfMuted = lipgloss.NewStyle().Foreground(fgHalfMuted)
-	s.Subtle = lipgloss.NewStyle().Foreground(fgSubtle)
-
-	s.WindowTooSmall = s.Muted
-
-	// tag presets
-	s.TagBase = lipgloss.NewStyle().Padding(0, 1).Foreground(white)
-	s.TagError = s.TagBase.Background(redDark)
-	s.TagInfo = s.TagBase.Background(blueLight)
-
-	// Compact header styles
 	s.Header.Charm = base.Foreground(secondary)
 	s.Header.Diagonals = base.Foreground(primary)
-	s.Header.Percentage = s.Muted
-	s.Header.Keystroke = s.Muted
-	s.Header.KeystrokeTip = s.Subtle
-	s.Header.WorkingDir = s.Muted
-	s.Header.Separator = s.Subtle
+	s.Header.Percentage = muted
+	s.Header.Keystroke = muted
+	s.Header.KeystrokeTip = subtle
+	s.Header.WorkingDir = muted
+	s.Header.Separator = subtle
+	s.Header.Wrapper = lipgloss.NewStyle().Foreground(fgBase)
+	s.Header.LogoGradCanvas = lipgloss.NewStyle()
+	s.Header.LogoGradFromColor = secondary
+	s.Header.LogoGradToColor = primary
 
-	s.CompactDetails.Title = s.Base
-	s.CompactDetails.View = s.Base.Padding(0, 1, 1, 1).Border(lipgloss.RoundedBorder()).BorderForeground(borderFocus)
-	s.CompactDetails.Version = s.Muted
-
-	// panels
-	s.PanelMuted = s.Muted.Background(bgBaseLighter)
-	s.PanelBase = lipgloss.NewStyle().Background(bgBase)
-
-	// code line number
-	s.LineNumber = lipgloss.NewStyle().Foreground(fgMuted).Background(bgBase).PaddingRight(1).PaddingLeft(1)
-
-	// Tool calls
-	s.ToolCallPending = lipgloss.NewStyle().Foreground(greenDark).SetString(ToolPending)
-	s.ToolCallError = lipgloss.NewStyle().Foreground(redDark).SetString(ToolError)
-	s.ToolCallSuccess = lipgloss.NewStyle().Foreground(green).SetString(ToolSuccess)
-	// Cancelled uses muted tone but same glyph as pending
-	s.ToolCallCancelled = s.Muted.SetString(ToolPending)
-	s.EarlyStateMessage = s.Subtle.PaddingLeft(2)
+	s.CompactDetails.Title = base
+	s.CompactDetails.View = base.Padding(0, 1, 1, 1).Border(lipgloss.RoundedBorder()).BorderForeground(borderFocus)
+	s.CompactDetails.Version = lipgloss.NewStyle().Foreground(border)
 
 	// Tool rendering styles
 	s.Tool.IconPending = base.Foreground(greenDark).SetString(ToolPending)
 	s.Tool.IconSuccess = base.Foreground(green).SetString(ToolSuccess)
 	s.Tool.IconError = base.Foreground(redDark).SetString(ToolError)
-	s.Tool.IconCancelled = s.Muted.SetString(ToolPending)
+	s.Tool.IconCancelled = muted.SetString(ToolPending)
 
 	s.Tool.NameNormal = base.Foreground(blue)
 	s.Tool.NameNested = base.Foreground(blue)
 
-	s.Tool.ParamMain = s.Subtle
-	s.Tool.ParamKey = s.Subtle
+	s.Tool.ParamMain = subtle
+	s.Tool.ParamKey = subtle
 
 	// Content rendering - prepared styles that accept width parameter
-	s.Tool.ContentLine = s.Muted.Background(bgBaseLighter)
-	s.Tool.ContentTruncation = s.Muted.Background(bgBaseLighter)
-	s.Tool.ContentCodeLine = s.Base.Background(bgBase).PaddingLeft(2)
-	s.Tool.ContentCodeTruncation = s.Muted.Background(bgBase).PaddingLeft(2)
+	s.Tool.ContentLine = muted.Background(bgBaseLighter)
+	s.Tool.ContentTruncation = muted.Background(bgBaseLighter)
+	s.Tool.ContentCodeLine = base.Background(bgBase).PaddingLeft(2)
+	s.Tool.ContentCodeTruncation = muted.Background(bgBase).PaddingLeft(2)
 	s.Tool.ContentCodeBg = bgBase
 	s.Tool.Body = base.PaddingLeft(2)
 
 	// Deprecated - kept for backward compatibility
-	s.Tool.ContentBg = s.Muted.Background(bgBaseLighter)
-	s.Tool.ContentText = s.Muted
+	s.Tool.ContentBg = muted.Background(bgBaseLighter)
+	s.Tool.ContentText = muted
 	s.Tool.ContentLineNumber = base.Foreground(fgMuted).Background(bgBase).PaddingRight(1).PaddingLeft(1)
 
 	s.Tool.StateWaiting = base.Foreground(fgSubtle)
@@ -1168,7 +1179,7 @@ func DefaultStyles() Styles {
 	s.Tool.ErrorMessage = base.Foreground(fgHalfMuted)
 
 	// Diff and multi-edit styles
-	s.Tool.DiffTruncation = s.Muted.Background(bgBaseLighter).PaddingLeft(2)
+	s.Tool.DiffTruncation = muted.Background(bgBaseLighter).PaddingLeft(2)
 	s.Tool.NoteTag = base.Padding(0, 1).Background(info).Foreground(white)
 	s.Tool.NoteMessage = base.Foreground(fgHalfMuted)
 
@@ -1178,12 +1189,12 @@ func DefaultStyles() Styles {
 	s.Tool.JobIconSuccess = base.Foreground(green)
 	s.Tool.JobToolName = base.Foreground(blue)
 	s.Tool.JobAction = base.Foreground(blueDark)
-	s.Tool.JobPID = s.Muted
-	s.Tool.JobDescription = s.Subtle
+	s.Tool.JobPID = muted
+	s.Tool.JobDescription = subtle
 
 	// Agent task styles
 	s.Tool.AgentTaskTag = base.Bold(true).Padding(0, 1).MarginLeft(2).Background(blueLight).Foreground(white)
-	s.Tool.AgentPrompt = s.Muted
+	s.Tool.AgentPrompt = muted
 
 	// Agentic fetch styles
 	s.Tool.AgenticFetchPromptTag = base.Bold(true).Padding(0, 1).MarginLeft(2).Background(green).Foreground(border)
@@ -1193,6 +1204,9 @@ func DefaultStyles() Styles {
 	s.Tool.TodoCompletedIcon = base.Foreground(green)
 	s.Tool.TodoInProgressIcon = base.Foreground(greenDark)
 	s.Tool.TodoPendingIcon = base.Foreground(fgMuted)
+	s.Tool.TodoStatusNote = lipgloss.NewStyle().Foreground(fgSubtle)
+	s.Tool.TodoItem = lipgloss.NewStyle().Foreground(fgBase)
+	s.Tool.TodoJustStarted = lipgloss.NewStyle().Foreground(fgBase)
 
 	// MCP styles
 	s.Tool.MCPName = base.Foreground(blue)
@@ -1206,9 +1220,13 @@ func DefaultStyles() Styles {
 	s.Tool.MediaType = base
 	s.Tool.ResourceSize = base.Foreground(fgMuted)
 
-	// Docker MCP styles
-	s.Tool.DockerMCPActionAdd = base.Foreground(greenLight)
-	s.Tool.DockerMCPActionDel = base.Foreground(red)
+	// Tool-call action verbs and result-list styling.
+	s.Tool.ActionCreate = lipgloss.NewStyle().Foreground(greenLight)
+	s.Tool.ActionDestroy = lipgloss.NewStyle().Foreground(red)
+	s.Tool.ResultEmpty = lipgloss.NewStyle().Foreground(fgSubtle)
+	s.Tool.ResultTruncation = lipgloss.NewStyle().Foreground(fgSubtle)
+	s.Tool.ResultItemName = lipgloss.NewStyle().Foreground(fgBase)
+	s.Tool.ResultItemDesc = lipgloss.NewStyle().Foreground(fgSubtle)
 
 	// Hook styles
 	s.Tool.HookLabel = base.Foreground(green)
@@ -1223,98 +1241,129 @@ func DefaultStyles() Styles {
 	s.Tool.HookRewrote = base.Foreground(charmtone.Iron)
 
 	// Buttons
-	s.ButtonFocus = lipgloss.NewStyle().Foreground(white).Background(secondary)
-	s.ButtonBlur = s.Base.Background(bgSubtle)
-
-	// Borders
-	s.BorderFocus = lipgloss.NewStyle().BorderForeground(borderFocus).Border(lipgloss.RoundedBorder()).Padding(1, 2)
+	s.Button.Focused = lipgloss.NewStyle().Foreground(white).Background(secondary)
+	s.Button.Blurred = lipgloss.NewStyle().Foreground(fgBase).Background(bgSubtle)
 
 	// Editor
-	s.EditorPromptNormalFocused = lipgloss.NewStyle().Foreground(greenDark).SetString("::: ")
-	s.EditorPromptNormalBlurred = s.EditorPromptNormalFocused.Foreground(fgMuted)
-	s.EditorPromptYoloIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(charmtone.Oyster).Background(charmtone.Citron).Bold(true).SetString(" ! ")
-	s.EditorPromptYoloIconBlurred = s.EditorPromptYoloIconFocused.Foreground(charmtone.Pepper).Background(charmtone.Squid)
-	s.EditorPromptYoloDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(charmtone.Zest).SetString(":::")
-	s.EditorPromptYoloDotsBlurred = s.EditorPromptYoloDotsFocused.Foreground(charmtone.Squid)
+	s.Editor.PromptNormalFocused = lipgloss.NewStyle().Foreground(greenDark).SetString("::: ")
+	s.Editor.PromptNormalBlurred = s.Editor.PromptNormalFocused.Foreground(fgMuted)
+	s.Editor.PromptYoloIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(charmtone.Oyster).Background(charmtone.Citron).Bold(true).SetString(" ! ")
+	s.Editor.PromptYoloIconBlurred = s.Editor.PromptYoloIconFocused.Foreground(charmtone.Pepper).Background(charmtone.Squid)
+	s.Editor.PromptYoloDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(charmtone.Zest).SetString(":::")
+	s.Editor.PromptYoloDotsBlurred = s.Editor.PromptYoloDotsFocused.Foreground(charmtone.Squid)
 
-	s.RadioOn = s.HalfMuted.SetString(RadioOn)
-	s.RadioOff = s.HalfMuted.SetString(RadioOff)
+	s.Radio.On = lipgloss.NewStyle().Foreground(fgHalfMuted).SetString(RadioOn)
+	s.Radio.Off = lipgloss.NewStyle().Foreground(fgHalfMuted).SetString(RadioOff)
+	s.Radio.Label = lipgloss.NewStyle().Foreground(fgHalfMuted)
 
-	// Logo colors
-	s.LogoFieldColor = primary
-	s.LogoTitleColorA = secondary
-	s.LogoTitleColorB = primary
-	s.LogoCharmColor = secondary
-	s.LogoVersionColor = primary
+	// Logo
+	s.Logo.FieldColor = primary
+	s.Logo.TitleColorA = secondary
+	s.Logo.TitleColorB = primary
+	s.Logo.CharmColor = secondary
+	s.Logo.VersionColor = primary
+	s.Logo.SmallCharm = lipgloss.NewStyle().Foreground(secondary)
+	s.Logo.SmallDiagonals = lipgloss.NewStyle().Foreground(primary)
+	s.Logo.GradCanvas = lipgloss.NewStyle()
+	s.Logo.SmallGradFromColor = secondary
+	s.Logo.SmallGradToColor = primary
 
 	// Section
-	s.Section.Title = s.Subtle
-	s.Section.Line = s.Base.Foreground(charmtone.Charcoal)
+	s.Section.Title = subtle
+	s.Section.Line = base.Foreground(charmtone.Charcoal)
 
 	// Initialize
-	s.Initialize.Header = s.Base
-	s.Initialize.Content = s.Muted
-	s.Initialize.Accent = s.Base.Foreground(greenDark)
+	s.Initialize.Header = base
+	s.Initialize.Content = muted
+	s.Initialize.Accent = base.Foreground(greenDark)
 
-	// LSP and MCP status.
-	s.ResourceGroupTitle = lipgloss.NewStyle().Foreground(charmtone.Oyster)
-	s.ResourceOfflineIcon = lipgloss.NewStyle().Foreground(charmtone.Iron).SetString("●")
-	s.ResourceBusyIcon = s.ResourceOfflineIcon.Foreground(charmtone.Citron)
-	s.ResourceErrorIcon = s.ResourceOfflineIcon.Foreground(charmtone.Coral)
-	s.ResourceOnlineIcon = s.ResourceOfflineIcon.Foreground(charmtone.Guac)
-	s.ResourceName = lipgloss.NewStyle().Foreground(charmtone.Squid)
-	s.ResourceStatus = lipgloss.NewStyle().Foreground(charmtone.Oyster)
-	s.ResourceAdditionalText = lipgloss.NewStyle().Foreground(charmtone.Oyster)
+	// ResourceGroup (LSP/MCP/skills sidebar lists).
+	s.Resource.Heading = lipgloss.NewStyle().Foreground(charmtone.Oyster)
+	s.Resource.Name = lipgloss.NewStyle().Foreground(charmtone.Squid)
+	s.Resource.StatusText = lipgloss.NewStyle().Foreground(charmtone.Oyster)
+	s.Resource.OfflineIcon = lipgloss.NewStyle().Foreground(charmtone.Iron).SetString("●")
+	s.Resource.BusyIcon = s.Resource.OfflineIcon.Foreground(charmtone.Citron)
+	s.Resource.ErrorIcon = s.Resource.OfflineIcon.Foreground(charmtone.Coral)
+	s.Resource.OnlineIcon = s.Resource.OfflineIcon.Foreground(charmtone.Guac)
+	s.Resource.DisabledIcon = lipgloss.NewStyle().Foreground(fgMuted).SetString("●")
+	s.Resource.AdditionalText = lipgloss.NewStyle().Foreground(charmtone.Oyster)
+	s.Resource.CapabilityCount = lipgloss.NewStyle().Foreground(fgSubtle)
+	s.Resource.RowTitleBase = lipgloss.NewStyle().Foreground(fgBase)
+	s.Resource.RowDescBase = lipgloss.NewStyle().Foreground(fgBase)
+	s.Resource.DefaultTitleFg = fgMuted
+	s.Resource.DefaultDescFg = fgSubtle
 
 	// LSP
-	s.LSP.ErrorDiagnostic = s.Base.Foreground(redDark)
-	s.LSP.WarningDiagnostic = s.Base.Foreground(warning)
-	s.LSP.HintDiagnostic = s.Base.Foreground(fgHalfMuted)
-	s.LSP.InfoDiagnostic = s.Base.Foreground(info)
+	s.LSP.ErrorDiagnostic = base.Foreground(redDark)
+	s.LSP.WarningDiagnostic = base.Foreground(warning)
+	s.LSP.HintDiagnostic = base.Foreground(fgHalfMuted)
+	s.LSP.InfoDiagnostic = base.Foreground(info)
 
 	// Files
-	s.Files.Path = s.Muted
-	s.Files.Additions = s.Base.Foreground(greenDark)
-	s.Files.Deletions = s.Base.Foreground(redDark)
+	s.Files.Path = lipgloss.NewStyle().Foreground(fgMuted)
+	s.Files.Additions = lipgloss.NewStyle().Foreground(greenDark)
+	s.Files.Deletions = lipgloss.NewStyle().Foreground(redDark)
+	s.Files.SectionTitle = lipgloss.NewStyle().Foreground(fgSubtle)
+	s.Files.EmptyMessage = lipgloss.NewStyle().Foreground(fgSubtle)
+	s.Files.TruncationHint = lipgloss.NewStyle().Foreground(fgSubtle)
+
+	// Sidebar
+	s.Sidebar.SessionTitle = lipgloss.NewStyle().Foreground(fgMuted)
+	s.Sidebar.WorkingDir = lipgloss.NewStyle().Foreground(fgMuted)
+
+	// ModelInfo
+	s.ModelInfo.Icon = lipgloss.NewStyle().Foreground(fgSubtle)
+	s.ModelInfo.Name = lipgloss.NewStyle().Foreground(fgBase)
+	s.ModelInfo.Provider = lipgloss.NewStyle().Foreground(fgMuted)
+	s.ModelInfo.ProviderFallback = lipgloss.NewStyle().Foreground(fgMuted).PaddingLeft(2)
+	s.ModelInfo.Reasoning = lipgloss.NewStyle().Foreground(fgSubtle).PaddingLeft(2)
+	s.ModelInfo.TokenCount = lipgloss.NewStyle().Foreground(fgSubtle)
+	s.ModelInfo.TokenPercentage = lipgloss.NewStyle().Foreground(fgMuted)
+	s.ModelInfo.Cost = lipgloss.NewStyle().Foreground(fgMuted)
+
+	// ResourceGroup
+	s.Resource.DefaultTitleFg = fgMuted
+	s.Resource.DefaultDescFg = fgSubtle
 
 	// Chat
 	messageFocussedBorder := lipgloss.Border{
 		Left: "▌",
 	}
 
-	s.Chat.Message.NoContent = lipgloss.NewStyle().Foreground(fgBase)
-	s.Chat.Message.UserBlurred = s.Chat.Message.NoContent.PaddingLeft(1).BorderLeft(true).
+	s.Messages.NoContent = lipgloss.NewStyle().Foreground(fgBase)
+	s.Messages.UserBlurred = s.Messages.NoContent.PaddingLeft(1).BorderLeft(true).
 		BorderForeground(primary).BorderStyle(normalBorder)
-	s.Chat.Message.UserFocused = s.Chat.Message.NoContent.PaddingLeft(1).BorderLeft(true).
+	s.Messages.UserFocused = s.Messages.NoContent.PaddingLeft(1).BorderLeft(true).
 		BorderForeground(primary).BorderStyle(messageFocussedBorder)
-	s.Chat.Message.AssistantBlurred = s.Chat.Message.NoContent.PaddingLeft(2)
-	s.Chat.Message.AssistantFocused = s.Chat.Message.NoContent.PaddingLeft(1).BorderLeft(true).
+	s.Messages.AssistantBlurred = s.Messages.NoContent.PaddingLeft(2)
+	s.Messages.AssistantFocused = s.Messages.NoContent.PaddingLeft(1).BorderLeft(true).
 		BorderForeground(greenDark).BorderStyle(messageFocussedBorder)
-	s.Chat.Message.Thinking = lipgloss.NewStyle().MaxHeight(10)
-	s.Chat.Message.ErrorTag = lipgloss.NewStyle().Padding(0, 1).
+	s.Messages.Thinking = lipgloss.NewStyle().MaxHeight(10)
+	s.Messages.ErrorTag = lipgloss.NewStyle().Padding(0, 1).
 		Background(red).Foreground(white)
-	s.Chat.Message.ErrorTitle = lipgloss.NewStyle().Foreground(fgHalfMuted)
-	s.Chat.Message.ErrorDetails = lipgloss.NewStyle().Foreground(fgSubtle)
+	s.Messages.ErrorTitle = lipgloss.NewStyle().Foreground(fgHalfMuted)
+	s.Messages.ErrorDetails = lipgloss.NewStyle().Foreground(fgSubtle)
 
 	// Message item styles
-	s.Chat.Message.ToolCallFocused = s.Muted.PaddingLeft(1).
+	s.Messages.ToolCallFocused = muted.PaddingLeft(1).
 		BorderStyle(messageFocussedBorder).
 		BorderLeft(true).
 		BorderForeground(greenDark)
-	s.Chat.Message.ToolCallBlurred = s.Muted.PaddingLeft(2)
+	s.Messages.ToolCallBlurred = muted.PaddingLeft(2)
 	// No padding or border for compact tool calls within messages
-	s.Chat.Message.ToolCallCompact = s.Muted
-	s.Chat.Message.SectionHeader = s.Base.PaddingLeft(2)
-	s.Chat.Message.AssistantInfoIcon = s.Subtle
-	s.Chat.Message.AssistantInfoModel = s.Muted
-	s.Chat.Message.AssistantInfoProvider = s.Subtle
-	s.Chat.Message.AssistantInfoDuration = s.Subtle
+	s.Messages.ToolCallCompact = muted
+	s.Messages.SectionHeader = base.PaddingLeft(2)
+	s.Messages.AssistantInfoIcon = subtle
+	s.Messages.AssistantInfoModel = muted
+	s.Messages.AssistantInfoProvider = subtle
+	s.Messages.AssistantInfoDuration = subtle
+	s.Messages.AssistantCanceled = lipgloss.NewStyle().Foreground(fgBase).Italic(true)
 
 	// Thinking section styles
-	s.Chat.Message.ThinkingBox = s.Subtle.Background(bgBaseLighter)
-	s.Chat.Message.ThinkingTruncationHint = s.Muted
-	s.Chat.Message.ThinkingFooterTitle = s.Muted
-	s.Chat.Message.ThinkingFooterDuration = s.Subtle
+	s.Messages.ThinkingBox = subtle.Background(bgBaseLighter)
+	s.Messages.ThinkingTruncationHint = muted
+	s.Messages.ThinkingFooterTitle = muted
+	s.Messages.ThinkingFooterDuration = subtle
 
 	// Text selection.
 	s.TextSelection = lipgloss.NewStyle().Foreground(charmtone.Salt).Background(charmtone.Charple)
@@ -1324,6 +1373,25 @@ func DefaultStyles() Styles {
 	s.Dialog.TitleText = base.Foreground(primary)
 	s.Dialog.TitleError = base.Foreground(red)
 	s.Dialog.TitleAccent = base.Foreground(green).Bold(true)
+	s.Dialog.TitleLineBase = lipgloss.NewStyle()
+	s.Dialog.TitleGradFromColor = primary
+	s.Dialog.TitleGradToColor = secondary
+
+	// Dialog.ListItem (commands, reasoning, models)
+	s.Dialog.ListItem.InfoBlurred = lipgloss.NewStyle().Foreground(fgBase)
+	s.Dialog.ListItem.InfoFocused = lipgloss.NewStyle().Foreground(fgBase)
+
+	// Dialog.Models
+	s.Dialog.Models.ConfiguredText = lipgloss.NewStyle().Foreground(fgSubtle)
+
+	// Dialog.Permissions
+	s.Dialog.Permissions.KeyText = lipgloss.NewStyle().Foreground(fgMuted)
+	s.Dialog.Permissions.ValueText = lipgloss.NewStyle().Foreground(fgBase)
+	s.Dialog.Permissions.ParamsBg = bgSubtle
+
+	// Dialog.Quit
+	s.Dialog.Quit.Content = lipgloss.NewStyle().Foreground(fgBase)
+	s.Dialog.Quit.Frame = lipgloss.NewStyle().BorderForeground(borderFocus).Border(lipgloss.RoundedBorder()).Padding(1, 2)
 	s.Dialog.View = base.Border(lipgloss.RoundedBorder()).BorderForeground(borderFocus)
 	s.Dialog.PrimaryText = base.Padding(0, 1).Foreground(primary)
 	s.Dialog.SecondaryText = base.Padding(0, 1).Foreground(fgSubtle)
@@ -1347,6 +1415,20 @@ func DefaultStyles() Styles {
 
 	s.Dialog.ImagePreview = lipgloss.NewStyle().Padding(0, 1).Foreground(fgSubtle)
 
+	// API key input dialog
+	s.Dialog.APIKey.Spinner = base.Foreground(green)
+
+	// OAuth dialog
+	s.Dialog.OAuth.Spinner = base.Foreground(greenLight)
+	s.Dialog.OAuth.Instructions = lipgloss.NewStyle().Foreground(white)
+	s.Dialog.OAuth.UserCode = lipgloss.NewStyle().Bold(true).Foreground(white)
+	s.Dialog.OAuth.Success = lipgloss.NewStyle().Foreground(greenLight)
+	s.Dialog.OAuth.Link = lipgloss.NewStyle().Foreground(greenDark).Underline(true)
+	s.Dialog.OAuth.Enter = lipgloss.NewStyle().Foreground(primary)
+	s.Dialog.OAuth.ErrorText = lipgloss.NewStyle().Foreground(error)
+	s.Dialog.OAuth.StatusText = lipgloss.NewStyle().Foreground(fgMuted)
+	s.Dialog.OAuth.UserCodeBg = bgBaseLighter
+
 	s.Dialog.Arguments.Content = base.Padding(1)
 	s.Dialog.Arguments.Description = base.MarginBottom(1).MaxHeight(3)
 	s.Dialog.Arguments.InputLabelBlurred = base.Foreground(fgMuted)
@@ -1356,20 +1438,22 @@ func DefaultStyles() Styles {
 
 	s.Dialog.Sessions.DeletingTitle = s.Dialog.Title.Foreground(red)
 	s.Dialog.Sessions.DeletingView = s.Dialog.View.BorderForeground(red)
-	s.Dialog.Sessions.DeletingMessage = s.Base.Padding(1)
+	s.Dialog.Sessions.DeletingMessage = base.Padding(1)
 	s.Dialog.Sessions.DeletingTitleGradientFromColor = red
-	s.Dialog.Sessions.DeletingTitleGradientToColor = s.Primary
+	s.Dialog.Sessions.DeletingTitleGradientToColor = primary
 	s.Dialog.Sessions.DeletingItemBlurred = s.Dialog.NormalItem.Foreground(fgSubtle)
 	s.Dialog.Sessions.DeletingItemFocused = s.Dialog.SelectedItem.Background(red).Foreground(charmtone.Butter)
 
 	s.Dialog.Sessions.RenamingingTitle = s.Dialog.Title.Foreground(charmtone.Zest)
 	s.Dialog.Sessions.RenamingView = s.Dialog.View.BorderForeground(charmtone.Zest)
-	s.Dialog.Sessions.RenamingingMessage = s.Base.Padding(1)
+	s.Dialog.Sessions.RenamingingMessage = base.Padding(1)
 	s.Dialog.Sessions.RenamingTitleGradientFromColor = charmtone.Zest
 	s.Dialog.Sessions.RenamingTitleGradientToColor = charmtone.Bok
 	s.Dialog.Sessions.RenamingItemBlurred = s.Dialog.NormalItem.Foreground(fgSubtle)
 	s.Dialog.Sessions.RenamingingItemFocused = s.Dialog.SelectedItem.UnsetBackground().UnsetForeground()
 	s.Dialog.Sessions.RenamingPlaceholder = base.Foreground(charmtone.Squid)
+	s.Dialog.Sessions.InfoBlurred = lipgloss.NewStyle().Foreground(fgSubtle)
+	s.Dialog.Sessions.InfoFocused = lipgloss.NewStyle().Foreground(fgBase)
 
 	s.Status.Help = lipgloss.NewStyle().Padding(0, 1)
 	s.Status.SuccessIndicator = base.Foreground(bgSubtle).Background(green).Padding(0, 1).Bold(true).SetString("OKAY!")
@@ -1399,11 +1483,19 @@ func DefaultStyles() Styles {
 	s.Pills.Base = base.Padding(0, 1)
 	s.Pills.Focused = base.Padding(0, 1).BorderStyle(lipgloss.RoundedBorder()).BorderForeground(bgOverlay)
 	s.Pills.Blurred = base.Padding(0, 1).BorderStyle(lipgloss.HiddenBorder())
-	s.Pills.QueueItemPrefix = s.Muted.SetString("  •")
-	s.Pills.HelpKey = s.Muted
-	s.Pills.HelpText = s.Subtle
+	s.Pills.QueueItemPrefix = lipgloss.NewStyle().Foreground(fgMuted).SetString("  •")
+	s.Pills.QueueItemText = lipgloss.NewStyle().Foreground(fgMuted)
+	s.Pills.QueueLabel = lipgloss.NewStyle().Foreground(fgBase)
+	s.Pills.QueueIconBase = lipgloss.NewStyle().Foreground(fgBase)
+	s.Pills.QueueGradFromColor = redDark
+	s.Pills.QueueGradToColor = secondary
+	s.Pills.TodoLabel = lipgloss.NewStyle().Foreground(fgBase)
+	s.Pills.TodoProgress = lipgloss.NewStyle().Foreground(fgMuted)
+	s.Pills.TodoCurrentTask = lipgloss.NewStyle().Foreground(fgSubtle)
+	s.Pills.TodoSpinner = lipgloss.NewStyle().Foreground(greenDark)
+	s.Pills.HelpKey = lipgloss.NewStyle().Foreground(fgMuted)
+	s.Pills.HelpText = lipgloss.NewStyle().Foreground(fgSubtle)
 	s.Pills.Area = base
-	s.Pills.TodoSpinner = base.Foreground(greenDark)
 
 	return s
 }

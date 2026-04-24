@@ -39,7 +39,7 @@ func newHeader(com *common.Common) *header {
 	}
 	t := com.Styles
 	h.compactLogo = t.Header.Charm.Render("Charm™") + " " +
-		styles.ApplyBoldForegroundGrad(t, "CRUSH", t.Secondary, t.Primary) + " "
+		styles.ApplyBoldForegroundGrad(t.Header.LogoGradCanvas, "CRUSH", t.Header.LogoGradFromColor, t.Header.LogoGradToColor) + " "
 	return h
 }
 
@@ -102,7 +102,7 @@ func (h *header) drawHeader(
 	b.WriteString(details)
 
 	view := uv.NewStyledString(
-		t.Base.Padding(0, rightPadding, 0, leftPadding).Render(b.String()))
+		t.Header.Wrapper.Padding(0, rightPadding, 0, leftPadding).Render(b.String()))
 	view.Draw(scr, area)
 }
 

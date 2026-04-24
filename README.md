@@ -169,7 +169,7 @@ go install github.com/charmbracelet/crush@latest
 > [!WARNING]
 > Productivity may increase when using Crush and you may find yourself nerd
 > sniped when first using the application. If the symptoms persist, join the
-> [Discord][discord] and nerd snipe the rest of us.
+> [Slack][slack] or [Discord][discord] and nerd snipe the rest of us.
 
 ## Getting Started
 
@@ -807,8 +807,8 @@ Or by setting the following in your config:
 }
 ```
 
-Crush also respects the `DO_NOT_TRACK` convention which can be enabled via
-`export DO_NOT_TRACK=1`.
+Crush also respects the [`DO_NOT_TRACK`](https://donottrack.sh/) convention
+which can be enabled via `export DO_NOT_TRACK=1`.
 
 ## Q&A
 
@@ -832,11 +832,12 @@ See the [contributing guide](https://github.com/charmbracelet/crush?tab=contribu
 We’d love to hear your thoughts on this project. Need help? We gotchu. You can find us on:
 
 - [Twitter](https://twitter.com/charmcli)
-- [Slack](https://charm.land/slack)
+- [Slack][slack]
 - [Discord][discord]
 - [The Fediverse](https://mastodon.social/@charmcli)
 - [Bluesky](https://bsky.app/profile/charm.land)
 
+[slack]: https://charm.land/slack
 [discord]: https://charm.land/discord
 
 ## License

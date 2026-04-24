@@ -377,7 +377,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return a.messages.Update(ctx, *currentAssistant)
 		},
 		OnRetry: func(err *fantasy.ProviderError, delay time.Duration) {
-			// TODO: implement
+			slog.Warn("Provider request failed, retrying", providerRetryLogFields(err, delay)...)
 		},
 		OnToolCall: func(tc fantasy.ToolCallContent) error {
 			toolCall := message.ToolCall{
@@ -1311,4 +1311,21 @@ func buildSummaryPrompt(todos []session.Todo) string {
 		sb.WriteString("Instruct the resuming assistant to use the `todos` tool to continue tracking progress on these tasks.")
 	}
 	return sb.String()
+}
+
+func providerRetryLogFields(err *fantasy.ProviderError, delay time.Duration) []any {
+	fields := []any{
+		"retry_delay", delay.String(),
+	}
+	if err == nil {
+		return fields
+	}
+	fields = append(fields, "status_code", err.StatusCode)
+	if err.Title != "" {
+		fields = append(fields, "title", err.Title)
+	}
+	if err.Message != "" {
+		fields = append(fields, "message", err.Message)
+	}
+	return fields
 }

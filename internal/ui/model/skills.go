@@ -38,14 +38,14 @@ func cachedBuiltinSkills() []*skills.Skill {
 func (m *UI) skillsInfo(width, maxItems int, isSection bool) string {
 	t := m.com.Styles
 
-	title := t.ResourceGroupTitle.Render("Skills")
+	title := t.Resource.Heading.Render("Skills")
 	if isSection {
 		title = common.Section(t, title, width)
 	}
 
 	items := m.skillStatusItems()
 	if len(items) == 0 {
-		list := t.ResourceAdditionalText.Render("None")
+		list := t.Resource.AdditionalText.Render("None")
 		return lipgloss.NewStyle().Width(width).Render(fmt.Sprintf("%s\n\n%s", title, list))
 	}
 
@@ -68,14 +68,14 @@ func (m *UI) skillStatusItems() []skillStatusItem {
 			name = filepath.Base(filepath.Dir(state.Path))
 		}
 		stateNames[name] = struct{}{}
-		icon := t.ResourceOnlineIcon.String()
+		icon := t.Resource.OnlineIcon.String()
 		if state.State == skills.StateError {
-			icon = t.ResourceErrorIcon.String()
+			icon = t.Resource.ErrorIcon.String()
 		}
 		items = append(items, skillStatusItem{
 			icon:  icon,
 			name:  name,
-			title: t.ResourceName.Render(name),
+			title: t.Resource.Name.Render(name),
 		})
 	}
 
@@ -88,9 +88,9 @@ func (m *UI) skillStatusItems() []skillStatusItem {
 			continue
 		}
 		items = append(items, skillStatusItem{
-			icon:  t.ResourceOnlineIcon.String(),
+			icon:  t.Resource.OnlineIcon.String(),
 			name:  skill.Name,
-			title: t.ResourceName.Render(skill.Name),
+			title: t.Resource.Name.Render(skill.Name),
 		})
 	}
 
@@ -111,7 +111,7 @@ func skillsList(t *styles.Styles, items []skillStatusItem, width, maxItems int) 
 		remaining := len(items) - (maxItems - 1)
 		items = append(visibleItems, skillStatusItem{
 			name:  "more",
-			title: t.ResourceAdditionalText.Render(fmt.Sprintf("…and %d more", remaining)),
+			title: t.Resource.AdditionalText.Render(fmt.Sprintf("…and %d more", remaining)),
 		})
 	}
 

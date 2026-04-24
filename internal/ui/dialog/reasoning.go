@@ -293,8 +293,8 @@ func (r *ReasoningItem) Render(width int) string {
 	styles := ListItemStyles{
 		ItemBlurred:     r.t.Dialog.NormalItem,
 		ItemFocused:     r.t.Dialog.SelectedItem,
-		InfoTextBlurred: r.t.Base,
-		InfoTextFocused: r.t.Base,
+		InfoTextBlurred: r.t.Dialog.ListItem.InfoBlurred,
+		InfoTextFocused: r.t.Dialog.ListItem.InfoFocused,
 	}
 	return renderItem(styles, r.title, info, r.focused, width, r.cache, &r.m)
 }

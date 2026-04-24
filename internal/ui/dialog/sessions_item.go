@@ -79,8 +79,8 @@ func (s *SessionItem) Render(width int) string {
 	styles := ListItemStyles{
 		ItemBlurred:     s.t.Dialog.NormalItem,
 		ItemFocused:     s.t.Dialog.SelectedItem,
-		InfoTextBlurred: s.t.Subtle,
-		InfoTextFocused: s.t.Base,
+		InfoTextBlurred: s.t.Dialog.Sessions.InfoBlurred,
+		InfoTextFocused: s.t.Dialog.Sessions.InfoFocused,
 	}
 
 	switch s.sessionsMode {

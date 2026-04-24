@@ -38,7 +38,7 @@ func (m *ModelGroup) Render(width int) string {
 	var configured string
 	if m.configured {
 		configuredIcon := m.t.ToolCallSuccess.Render()
-		configuredText := m.t.Subtle.Render("Configured")
+		configuredText := m.t.Dialog.Models.ConfiguredText.Render("Configured")
 		configured = configuredIcon + " " + configuredText
 	}
 
@@ -109,8 +109,8 @@ func (m *ModelItem) Render(width int) string {
 	styles := ListItemStyles{
 		ItemBlurred:     m.t.Dialog.NormalItem,
 		ItemFocused:     m.t.Dialog.SelectedItem,
-		InfoTextBlurred: m.t.Base,
-		InfoTextFocused: m.t.Base,
+		InfoTextBlurred: m.t.Dialog.ListItem.InfoBlurred,
+		InfoTextFocused: m.t.Dialog.ListItem.InfoFocused,
 	}
 	return renderItem(styles, m.model.Name, providerInfo, m.focused, width, m.cache, &m.m)
 }

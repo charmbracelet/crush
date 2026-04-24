@@ -28,7 +28,7 @@ func TestSkillStatusItemsIncludesBuiltinSkills(t *testing.T) {
 
 	var hasGoDoc bool
 	for _, item := range items {
-		if item.title == st.ResourceName.Render("go-doc") {
+		if item.title == st.Resource.Name.Render("go-doc") {
 			hasGoDoc = true
 			break
 		}
@@ -43,7 +43,7 @@ func TestSkillStatusItemsIncludesBuiltinSkills(t *testing.T) {
 		if skill.Name == "go-doc" {
 			continue
 		}
-		expected := st.ResourceName.Render(skill.Name)
+		expected := st.Resource.Name.Render(skill.Name)
 		for _, item := range items {
 			if item.title == expected {
 				hasBuiltin = true

@@ -443,7 +443,7 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 func (p *Permissions) renderHeader(contentWidth int) string {
 	t := p.com.Styles
 
-	title := common.DialogTitle(t, "Permission Required", contentWidth-t.Dialog.Title.GetHorizontalFrameSize(), t.Primary, t.Secondary)
+	title := common.DialogTitle(t, "Permission Required", contentWidth-t.Dialog.Title.GetHorizontalFrameSize(), t.Dialog.TitleGradFromColor, t.Dialog.TitleGradToColor)
 	title = t.Dialog.Title.Render(title)
 
 	// Tool info.
@@ -489,8 +489,8 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 
 func (p *Permissions) renderKeyValue(key, value string, width int) string {
 	t := p.com.Styles
-	keyStyle := t.Muted
-	valueStyle := t.Base
+	keyStyle := t.Dialog.Permissions.KeyText
+	valueStyle := t.Dialog.Permissions.ValueText
 
 	keyStr := keyStyle.Render(key)
 	valueStr := valueStyle.Width(width - lipgloss.Width(keyStr) - 1).Render(" " + value)
@@ -699,7 +699,7 @@ func (p *Permissions) renderDefaultContent(width int) string {
 		if err := json.Unmarshal([]byte(paramStr), &parsed); err == nil {
 			if b, err := json.MarshalIndent(parsed, "", "  "); err == nil {
 				jsonContent := string(b)
-				highlighted, err := common.SyntaxHighlight(t, jsonContent, "params.json", t.BgSubtle)
+				highlighted, err := common.SyntaxHighlight(t, jsonContent, "params.json", t.Dialog.Permissions.ParamsBg)
 				if err == nil {
 					jsonContent = highlighted
 				}

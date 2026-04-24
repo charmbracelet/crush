@@ -269,7 +269,7 @@ type UI struct {
 func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	// Editor components
 	ta := textarea.New()
-	ta.SetStyles(com.Styles.TextArea)
+	ta.SetStyles(com.Styles.Editor.Textarea)
 	ta.ShowLineNumbers = false
 	ta.CharLimit = -1
 	ta.SetVirtualCursor(false)
@@ -2745,9 +2745,9 @@ func (m *UI) normalPromptFunc(info textarea.PromptInfo) string {
 		return "::: "
 	}
 	if info.Focused {
-		return t.EditorPromptNormalFocused.Render()
+		return t.Editor.PromptNormalFocused.Render()
 	}
-	return t.EditorPromptNormalBlurred.Render()
+	return t.Editor.PromptNormalBlurred.Render()
 }
 
 // yoloPromptFunc returns the yolo mode editor prompt style with warning icon
@@ -2756,15 +2756,15 @@ func (m *UI) yoloPromptFunc(info textarea.PromptInfo) string {
 	t := m.com.Styles
 	if info.LineNumber == 0 {
 		if info.Focused {
-			return t.EditorPromptYoloIconFocused.Render()
+			return t.Editor.PromptYoloIconFocused.Render()
 		} else {
-			return t.EditorPromptYoloIconBlurred.Render()
+			return t.Editor.PromptYoloIconBlurred.Render()
 		}
 	}
 	if info.Focused {
-		return t.EditorPromptYoloDotsFocused.Render()
+		return t.Editor.PromptYoloDotsFocused.Render()
 	}
-	return t.EditorPromptYoloDotsBlurred.Render()
+	return t.Editor.PromptYoloDotsBlurred.Render()
 }
 
 // closeCompletions closes the completions popup and resets state.
@@ -3535,7 +3535,7 @@ func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
 		blocks...,
 	)
 
-	version := s.CompactDetails.Version.Foreground(s.Border).Width(width).AlignHorizontal(lipgloss.Right).Render(version.Version)
+	version := s.CompactDetails.Version.Width(width).AlignHorizontal(lipgloss.Right).Render(version.Version)
 
 	remainingHeight := height - lipgloss.Height(detailsHeader) - lipgloss.Height(version)
 
@@ -3650,12 +3650,12 @@ func (m *UI) disableDockerMCP() tea.Msg {
 
 // renderLogo renders the Crush logo with the given styles and dimensions.
 func renderLogo(t *styles.Styles, compact bool, width int) string {
-	return logo.Render(t, version.Version, compact, logo.Opts{
-		FieldColor:   t.LogoFieldColor,
-		TitleColorA:  t.LogoTitleColorA,
-		TitleColorB:  t.LogoTitleColorB,
-		CharmColor:   t.LogoCharmColor,
-		VersionColor: t.LogoVersionColor,
+	return logo.Render(t.Logo.GradCanvas, version.Version, compact, logo.Opts{
+		FieldColor:   t.Logo.FieldColor,
+		TitleColorA:  t.Logo.TitleColorA,
+		TitleColorB:  t.Logo.TitleColorB,
+		CharmColor:   t.Logo.CharmColor,
+		VersionColor: t.Logo.VersionColor,
 		Width:        width,
 	})
 }

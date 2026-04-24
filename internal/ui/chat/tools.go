@@ -190,9 +190,9 @@ func newBaseToolMessageItem(
 	t.anim = anim.New(anim.Settings{
 		ID:          toolCall.ID,
 		Size:        15,
-		GradColorA:  sty.Primary,
-		GradColorB:  sty.Secondary,
-		LabelColor:  sty.FgBase,
+		GradColorA:  sty.WorkingGradFromColor,
+		GradColorB:  sty.WorkingGradToColor,
+		LabelColor:  sty.WorkingLabelColor,
 		CycleColors: true,
 	})
 
@@ -334,11 +334,11 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 func (t *baseToolMessageItem) Render(width int) string {
 	var prefix string
 	if t.isCompact {
-		prefix = t.sty.Chat.Message.ToolCallCompact.Render()
+		prefix = t.sty.Messages.ToolCallCompact.Render()
 	} else if t.focused {
-		prefix = t.sty.Chat.Message.ToolCallFocused.Render()
+		prefix = t.sty.Messages.ToolCallFocused.Render()
 	} else {
-		prefix = t.sty.Chat.Message.ToolCallBlurred.Render()
+		prefix = t.sty.Messages.ToolCallBlurred.Render()
 	}
 	lines := strings.Split(t.RawRender(width), "\n")
 	for i, ln := range lines {
@@ -906,7 +906,7 @@ func toolOutputMarkdownContent(sty *styles.Styles, content string, width int, ex
 		width = maxTextWidth
 	}
 
-	renderer := common.PlainMarkdownRenderer(sty, width)
+	renderer := common.QuietMarkdownRenderer(sty, width)
 	rendered, err := renderer.Render(content)
 	if err != nil {
 		return toolOutputPlainContent(sty, content, width, expanded)

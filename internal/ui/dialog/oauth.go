@@ -94,7 +94,7 @@ func newOAuth(
 
 	m.spinner = spinner.New(
 		spinner.WithSpinner(spinner.Dot),
-		spinner.WithStyle(t.Base.Foreground(t.GreenLight)),
+		spinner.WithStyle(t.Dialog.OAuth.Spinner),
 	)
 
 	m.help = help.New()
@@ -227,18 +227,18 @@ func (m *OAuth) headerContent() string {
 	if m.isOnboarding {
 		return textStyle.Render(dialogTitle)
 	}
-	return common.DialogTitle(t, titleStyle.Render(dialogTitle), m.width-headerOffset, t.Primary, t.Secondary)
+	return common.DialogTitle(t, titleStyle.Render(dialogTitle), m.width-headerOffset, t.Dialog.TitleGradFromColor, t.Dialog.TitleGradToColor)
 }
 
 func (m *OAuth) innerDialogContent() string {
 	var (
 		t            = m.com.Styles
-		whiteStyle   = lipgloss.NewStyle().Foreground(t.White)
-		primaryStyle = lipgloss.NewStyle().Foreground(t.Primary)
-		greenStyle   = lipgloss.NewStyle().Foreground(t.GreenLight)
-		linkStyle    = lipgloss.NewStyle().Foreground(t.GreenDark).Underline(true)
-		errorStyle   = lipgloss.NewStyle().Foreground(t.Error)
-		mutedStyle   = lipgloss.NewStyle().Foreground(t.FgMuted)
+		whiteStyle   = t.Dialog.OAuth.Instructions
+		primaryStyle = t.Dialog.OAuth.Enter
+		greenStyle   = t.Dialog.OAuth.Success
+		linkStyle    = t.Dialog.OAuth.Link
+		errorStyle   = t.Dialog.OAuth.ErrorText
+		mutedStyle   = t.Dialog.OAuth.StatusText
 	)
 
 	switch m.State {
@@ -266,13 +266,10 @@ func (m *OAuth) innerDialogContent() string {
 			Width(m.width-2).
 			Height(7).
 			Align(lipgloss.Center, lipgloss.Center).
-			Background(t.BgBaseLighter).
+			Background(t.Dialog.OAuth.UserCodeBg).
 			Margin(0, 1).
 			Render(
-				lipgloss.NewStyle().
-					Bold(true).
-					Foreground(t.White).
-					Render(m.userCode),
+				t.Dialog.OAuth.UserCode.Render(m.userCode),
 			)
 
 		link := linkStyle.Hyperlink(m.verificationURL, "id=oauth-verify").Render(m.verificationURL)

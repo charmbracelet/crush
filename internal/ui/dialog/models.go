@@ -236,13 +236,13 @@ func (m *Models) Cursor() *tea.Cursor {
 // modelTypeRadioView returns the radio view for model type selection.
 func (m *Models) modelTypeRadioView() string {
 	t := m.com.Styles
-	textStyle := t.HalfMuted
-	largeRadioStyle := t.RadioOff
-	smallRadioStyle := t.RadioOff
+	textStyle := t.Radio.Label
+	largeRadioStyle := t.Radio.Off
+	smallRadioStyle := t.Radio.Off
 	if m.modelType == ModelTypeLarge {
-		largeRadioStyle = t.RadioOn
+		largeRadioStyle = t.Radio.On
 	} else {
-		smallRadioStyle = t.RadioOn
+		smallRadioStyle = t.Radio.On
 	}
 
 	largeRadio := largeRadioStyle.Padding(0, 1).Render()

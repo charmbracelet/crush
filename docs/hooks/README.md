@@ -12,7 +12,7 @@ to effectively be written in any language. In this document we'll primarily
 focus on Bash for simplicity's sake, though we'll include some examples in
 other languages at the end, too.
 
-### Hook Facts
+### Hot Hook Facts
 
 - Hooks run before permission checks. If a hook denies a tool call, you'll
   never see a permission prompt for it.
@@ -190,8 +190,8 @@ the input, or still deny/halt with a reason:
   "version": 1,                     // Output envelope version. Optional; defaults to 1.
   "decision": "allow",              // "allow", "deny", or null. Omit for no opinion.
   "halt": false,                    // If true, halts the turn entirely.
-  "reason": "not allowed",          // Shown when denying or halting.
-  "context": "Rewrote with RTK",    // String or array of strings. Appended to what the model sees.
+  "reason": "LGTM",                 // Shown when denying or halting.
+  "context": "Scrubbed secrets",    // String or array of strings. Appended to what the model sees.
   "updated_input": {"command": "…"} // Shallow-merged into the tool's input before execution.
 }
 ```
@@ -224,12 +224,12 @@ Here's a full shell script that produces this JSON:
 
 read -r input
 original_cmd=$(echo "$input" | jq -r '.tool_input.command')
-rewritten=$(rtk rewrite "$original_cmd")
+rewritten=$(secret-scrubber rewrite "$original_cmd")
 
 cat <<EOF
 {
   "decision": "allow",
-  "context": "Rewrote with RTK for token savings",
+  "context": "Scrubbed secrets",
   "updated_input": {"command": "$rewritten"}
 }
 EOF

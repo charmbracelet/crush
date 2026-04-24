@@ -94,6 +94,8 @@ type Workspace interface {
 	PermissionDeny(perm permission.PermissionRequest)
 	PermissionSkipRequests() bool
 	PermissionSetSkipRequests(skip bool)
+	PermissionMode() permission.PermissionMode
+	PermissionSetMode(mode permission.PermissionMode)
 
 	// FileTracker
 	FileTrackerRecordRead(ctx context.Context, sessionID, path string)

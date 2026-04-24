@@ -15,6 +15,20 @@ import (
 
 var ErrorPermissionDenied = errors.New("user denied permission")
 
+// PermissionMode represents the current permission mode.
+type PermissionMode int
+
+const (
+	// PermissionModeNormal prompts for all non-safe commands.
+	PermissionModeNormal PermissionMode = iota
+	// PermissionModeYolo auto-approves non-dangerous commands, prompts for
+	// dangerous ones.
+	PermissionModeYolo
+	// PermissionModeSuperYolo auto-approves everything including dangerous
+	// commands.
+	PermissionModeSuperYolo
+)
+
 type CreatePermissionRequest struct {
 	SessionID   string `json:"session_id"`
 	ToolCallID  string `json:"tool_call_id"`
@@ -53,6 +67,8 @@ type Service interface {
 	AutoApproveSession(sessionID string)
 	SetSkipRequests(skip bool)
 	SkipRequests() bool
+	SetPermissionMode(mode PermissionMode)
+	PermissionMode() PermissionMode
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
 }
 
@@ -67,7 +83,9 @@ type permissionService struct {
 	autoApproveSessions   map[string]bool
 	autoApproveSessionsMu sync.RWMutex
 	skip                  bool
+	superSkip             bool
 	allowedTools          []string
+	mode                  PermissionMode
 
 	// used to make sure we only process one request at a time
 	requestMu       sync.Mutex
@@ -132,8 +150,12 @@ func (s *permissionService) Deny(permission PermissionRequest) {
 }
 
 func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRequest) (bool, error) {
-	// In skip (yolo) mode, auto-approve non-dangerous commands but still
-	// prompt for dangerous ones.
+	// Super yolo mode: auto-approve everything including dangerous commands.
+	if s.superSkip {
+		return true, nil
+	}
+	// Yolo mode: auto-approve non-dangerous commands but still prompt for
+	// dangerous ones.
 	if s.skip && !opts.Dangerous {
 		return true, nil
 	}
@@ -238,7 +260,30 @@ func (s *permissionService) SkipRequests() bool {
 	return s.skip
 }
 
+func (s *permissionService) SetPermissionMode(mode PermissionMode) {
+	s.mode = mode
+	switch mode {
+	case PermissionModeNormal:
+		s.skip = false
+		s.superSkip = false
+	case PermissionModeYolo:
+		s.skip = true
+		s.superSkip = false
+	case PermissionModeSuperYolo:
+		s.skip = true
+		s.superSkip = true
+	}
+}
+
+func (s *permissionService) PermissionMode() PermissionMode {
+	return s.mode
+}
+
 func NewPermissionService(workingDir string, skip bool, allowedTools []string) Service {
+	mode := PermissionModeNormal
+	if skip {
+		mode = PermissionModeYolo
+	}
 	return &permissionService{
 		Broker:              pubsub.NewBroker[PermissionRequest](),
 		notificationBroker:  pubsub.NewBroker[PermissionNotification](),
@@ -246,6 +291,7 @@ func NewPermissionService(workingDir string, skip bool, allowedTools []string) S
 		sessionPermissions:  make([]PermissionRequest, 0),
 		autoApproveSessions: make(map[string]bool),
 		skip:                skip,
+		mode:                mode,
 		allowedTools:        allowedTools,
 		pendingRequests:     csync.NewMap[string, chan bool](),
 	}

@@ -144,12 +144,16 @@ type Styles struct {
 	BorderBlur  lipgloss.Style
 
 	// Editor
-	EditorPromptNormalFocused   lipgloss.Style
-	EditorPromptNormalBlurred   lipgloss.Style
-	EditorPromptYoloIconFocused lipgloss.Style
-	EditorPromptYoloIconBlurred lipgloss.Style
-	EditorPromptYoloDotsFocused lipgloss.Style
-	EditorPromptYoloDotsBlurred lipgloss.Style
+	EditorPromptNormalFocused        lipgloss.Style
+	EditorPromptNormalBlurred        lipgloss.Style
+	EditorPromptYoloIconFocused      lipgloss.Style
+	EditorPromptYoloIconBlurred      lipgloss.Style
+	EditorPromptYoloDotsFocused      lipgloss.Style
+	EditorPromptYoloDotsBlurred      lipgloss.Style
+	EditorPromptSuperYoloIconFocused lipgloss.Style
+	EditorPromptSuperYoloIconBlurred lipgloss.Style
+	EditorPromptSuperYoloDotsFocused lipgloss.Style
+	EditorPromptSuperYoloDotsBlurred lipgloss.Style
 
 	// Radio
 	RadioOn  lipgloss.Style
@@ -1212,6 +1216,13 @@ func DefaultStyles() Styles {
 	s.EditorPromptYoloIconBlurred = s.EditorPromptYoloIconFocused.Foreground(charmtone.Pepper).Background(charmtone.Squid)
 	s.EditorPromptYoloDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(charmtone.Zest).SetString(":::")
 	s.EditorPromptYoloDotsBlurred = s.EditorPromptYoloDotsFocused.Foreground(charmtone.Squid)
+
+	// Super Yolo: red background " # " icon (focused) / dark background (blurred)
+	s.EditorPromptSuperYoloIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(white).Background(red).Bold(true).SetString(" # ")
+	s.EditorPromptSuperYoloIconBlurred = s.EditorPromptSuperYoloIconFocused.Foreground(charmtone.Pepper).Background(charmtone.Squid)
+	// Super Yolo: red ":::" dots (focused) / dark dots (blurred)
+	s.EditorPromptSuperYoloDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(red).SetString(":::")
+	s.EditorPromptSuperYoloDotsBlurred = s.EditorPromptSuperYoloDotsFocused.Foreground(charmtone.Squid)
 
 	s.RadioOn = s.HalfMuted.SetString(RadioOn)
 	s.RadioOff = s.HalfMuted.SetString(RadioOff)

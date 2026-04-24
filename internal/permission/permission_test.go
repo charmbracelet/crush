@@ -124,6 +124,39 @@ func TestPermissionService_SkipMode(t *testing.T) {
 		service.Grant(event.Payload)
 		<-done
 	})
+
+	t.Run("super yolo mode auto-approves dangerous commands", func(t *testing.T) {
+		service := NewPermissionService("/tmp", true, []string{})
+		service.SetPermissionMode(PermissionModeSuperYolo)
+
+		result, err := service.Request(t.Context(), CreatePermissionRequest{
+			SessionID:   "test-session",
+			ToolName:    "bash",
+			Action:      "execute",
+			Description: "dangerous command",
+			Path:        "/tmp",
+			Dangerous:   true,
+		})
+		require.NoError(t, err)
+		assert.True(t, result, "expected dangerous permission to be granted in super yolo mode")
+	})
+
+	t.Run("permission mode cycling", func(t *testing.T) {
+		service := NewPermissionService("/tmp", false, []string{})
+		assert.Equal(t, PermissionModeNormal, service.PermissionMode())
+
+		service.SetPermissionMode(PermissionModeYolo)
+		assert.Equal(t, PermissionModeYolo, service.PermissionMode())
+		assert.True(t, service.SkipRequests())
+
+		service.SetPermissionMode(PermissionModeSuperYolo)
+		assert.Equal(t, PermissionModeSuperYolo, service.PermissionMode())
+		assert.True(t, service.SkipRequests())
+
+		service.SetPermissionMode(PermissionModeNormal)
+		assert.Equal(t, PermissionModeNormal, service.PermissionMode())
+		assert.False(t, service.SkipRequests())
+	})
 }
 
 func TestPermissionService_SequentialProperties(t *testing.T) {

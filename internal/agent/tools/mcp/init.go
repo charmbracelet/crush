@@ -447,7 +447,17 @@ func createTransport(ctx context.Context, m config.MCPConfig, resolver config.Va
 		if strings.TrimSpace(command) == "" {
 			return nil, fmt.Errorf("mcp stdio config requires a non-empty 'command' field")
 		}
-		cmd := exec.CommandContext(ctx, home.Long(command), m.Args...)
+		resolvedArgs := make([]string, len(m.Args))
+		for i, arg := range m.Args {
+			resolved, resolveErr := resolver.ResolveValue(arg)
+			if resolveErr != nil {
+				slog.Error("Error resolving MCP arg", "error", resolveErr, "arg", arg)
+				resolvedArgs[i] = arg
+				continue
+			}
+			resolvedArgs[i] = resolved
+		}
+		cmd := exec.CommandContext(ctx, home.Long(command), resolvedArgs...)
 		cmd.Env = append(os.Environ(), m.ResolvedEnv()...)
 		return &mcp.CommandTransport{
 			Command: cmd,

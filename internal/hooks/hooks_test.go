@@ -237,10 +237,10 @@ func TestRunnerExitCode2Deny(t *testing.T) {
 	require.Equal(t, "forbidden", result.Reason)
 }
 
-func TestRunnerExitCode78Halt(t *testing.T) {
+func TestRunnerExitCode49Halt(t *testing.T) {
 	t.Parallel()
 	hookCfg := config.HookConfig{
-		Command: `echo "stop the turn" >&2; exit 78`,
+		Command: `echo "stop the turn" >&2; exit 49`,
 	}
 	r := NewRunner([]config.HookConfig{hookCfg}, t.TempDir(), t.TempDir())
 	result, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{}`)

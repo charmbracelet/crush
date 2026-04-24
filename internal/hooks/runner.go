@@ -147,7 +147,7 @@ func (r *Runner) runOne(parentCtx context.Context, hook config.HookConfig, envVa
 				Reason:   reason,
 			}
 		case HaltExitCode:
-			// Exit code 78 = halt the whole turn. Stderr is the reason.
+			// Exit code 49 = halt the whole turn. Stderr is the reason.
 			reason := strings.TrimSpace(stderr.String())
 			if reason == "" {
 				reason = "turn halted by hook"

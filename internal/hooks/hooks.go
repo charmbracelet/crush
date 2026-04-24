@@ -16,9 +16,10 @@ const (
 )
 
 // HaltExitCode is the exit code that halts the whole turn. 2 blocks the
-// current tool call; 78 is deliberately unusual so it can't be hit by
-// accident (crashes typically exit 1, 127, 130, 139).
-const HaltExitCode = 78
+// current tool call; 49 sits in the no-man's-land between the
+// generic-error range (1-30), the sysexits range (64-78), and the
+// killed-by-signal range (128+) so it can't be hit by accident.
+const HaltExitCode = 49
 
 // HookMetadata is embedded in tool response metadata so the UI can
 // display a hook indicator.

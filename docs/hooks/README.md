@@ -394,6 +394,10 @@ A strict-form summary of the narrative above. When prose and this section
 disagree, the prose is canonical for intent; this section is canonical for
 shape.
 
+Both the stdin payload and the output envelope have **common fields** that
+apply to every event and **per-event fields** that only some events
+recognize. When an event doesn't understand a field, it's ignored.
+
 ### Hook config
 
 Each entry under a `hooks.<EventName>` array:
@@ -404,52 +408,75 @@ Each entry under a `hooks.<EventName>` array:
 | `command` | `string` | **yes**  | —             | Shell command to execute.                     |
 | `timeout` | `number` | no       | `30`          | Seconds before the hook is killed.            |
 
-### Stdin payload
+### Stdin payload (common)
 
-The JSON piped to each hook on stdin:
+Present in every hook event:
 
-| Field        | Type     | Description                                                    |
-| ------------ | -------- | -------------------------------------------------------------- |
-| `event`      | `string` | Hook event name (e.g. `"PreToolUse"`).                         |
-| `session_id` | `string` | Current session ID.                                            |
-| `cwd`        | `string` | Working directory when the hook was invoked.                   |
-| `tool_name`  | `string` | The tool being called (e.g. `"bash"`).                         |
-| `tool_input` | `object` | Raw JSON input the model sent to the tool. Shape is per-tool.  |
+| Field        | Type     | Description                                   |
+| ------------ | -------- | --------------------------------------------- |
+| `event`      | `string` | Hook event name (e.g. `"PreToolUse"`).        |
+| `session_id` | `string` | Current session ID.                           |
+| `cwd`        | `string` | Working directory when the hook was invoked.  |
 
-### Output envelope
+### Stdin payload — PreToolUse
 
-Fields a hook may print to stdout on exit 0. All fields are optional:
+Adds to the common payload:
+
+| Field        | Type     | Description                                                   |
+| ------------ | -------- | ------------------------------------------------------------- |
+| `tool_name`  | `string` | The tool being called (e.g. `"bash"`).                        |
+| `tool_input` | `object` | Raw JSON input the model sent to the tool. Shape is per-tool. |
+
+### Output envelope (common)
+
+Fields a hook may print to stdout on exit 0. All are optional and apply
+to every event:
+
+| Field        | Type                  | Default  | Description                                                                        |
+| ------------ | --------------------- | -------- | ---------------------------------------------------------------------------------- |
+| `version`    | `number`              | `1`      | Envelope version. Unknown higher values still parse; exists for forward-compat.    |
+| `halt`       | `boolean`             | `false`  | If `true`, ends the turn entirely. User takes over.                                |
+| `reason`     | `string`              | `""`     | Shown when denying (to the model) or halting (to the model and user).              |
+| `context`    | `string \| string[]`  | `""`     | Appended to what the model sees. Empty strings and empty entries are dropped.      |
+
+### Output envelope — PreToolUse
+
+Adds to the common envelope:
 
 | Field           | Type                          | Default     | Description                                                                                                      |
 | --------------- | ----------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------- |
-| `version`       | `number`                      | `1`         | Envelope version. Unknown higher values still parse; exists for forward-compat.                                  |
 | `decision`      | `"allow" \| "deny" \| null`   | `null`      | `null`/omitted = no opinion. `"deny"` blocks the tool call; the model sees the error and may try something else. |
-| `halt`          | `boolean`                     | `false`     | If `true`, ends the turn entirely after the tool call is blocked. User takes over.                               |
-| `reason`        | `string`                      | `""`        | Shown when denying (to the model) or halting (to the model and user).                                            |
-| `context`       | `string \| string[]`          | `""`        | Appended to what the model sees. Empty strings and empty entries are dropped.                                    |
 | `updated_input` | `object`                      | `{}` no-op  | Shallow-merge patch against `tool_input`. Nested objects are replaced wholesale, not deep-merged.                |
 
 ### Exit codes
 
 | Code    | Meaning                                                                                              |
 | ------- | ---------------------------------------------------------------------------------------------------- |
-| `0`     | Success. Stdout is parsed as the [Output envelope](#output-envelope).                                |
+| `0`     | Success. Stdout is parsed as the output envelope.                                                    |
 | `2`     | Block this tool call. Stderr becomes the deny reason. Stdout is ignored.                             |
 | `49`    | Halt the whole turn. Stderr becomes the halt reason. Stdout is ignored.                              |
 | other   | Non-blocking error. Logged and ignored; the tool call proceeds.                                      |
 
+Exit `2` only applies to events that can block something. On events where
+there's nothing to block, it's treated as a non-blocking error.
+
 ### Aggregation
 
-When multiple hooks match the same tool call, results compose in **config
-order**:
+When multiple hooks match the same event, results compose in **config
+order**.
+
+Universal rules:
 
 1. `halt` is sticky: if any hook halts, the turn ends.
-2. `decision` precedence: `deny` > `allow` > `null`. First deny determines
-   the outcome; subsequent allows don't override.
-3. `reason` values concatenate with `\n` in config order. Halt-only hooks
+2. `reason` values concatenate with `\n` in config order. Halt-only hooks
    without a deny still contribute their reason.
-4. `context` values concatenate with `\n` in config order. String entries
+3. `context` values concatenate with `\n` in config order. String entries
    and array entries flatten uniformly.
+
+PreToolUse-specific rules:
+
+4. `decision` precedence: `deny` > `allow` > `null`. First deny determines
+   the outcome; subsequent allows don't override.
 5. `updated_input` patches shallow-merge sequentially against the original
    `tool_input`. Later patches override earlier ones on colliding keys.
    Patches are **ignored** if the final decision is deny or halt.

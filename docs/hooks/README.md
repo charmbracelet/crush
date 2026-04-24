@@ -4,22 +4,24 @@
 > This document was designed for both humans and agents.
 
 Hooks are user-defined shell commands that fire at specific points during
-Crush's execution, giving you deterministic control over an agent’s wily
+Crush's execution, giving you deterministic control over an agent's wily
 behavior.
 
-Hooks in Crush are shell-based, with a focus on simplicity. This allows hooks to
-effectively be written in any language. In this document we'll primarily focus
-on Bash for simplicity's sake, though we'll include some examples in other
-languages at the end, too.
+Hooks in Crush are shell-based, with a focus on simplicity. This allows hooks
+to effectively be written in any language. In this document we'll primarily
+focus on Bash for simplicity's sake, though we'll include some examples in
+other languages at the end, too.
 
 ### Hook Facts
 
 - Hooks run before permission checks. If a hook denies a tool call, you'll
   never see a permission prompt for it.
 - Hooks are also compatible with hooks in Claude Code, however this document
-  covers the Crush-specific API only.
+  covers the Crush-specific API only. One intentional divergence: Crush
+  treats `updated_input` as a shallow-merge patch rather than a full
+  replacement — see [Output](#output) below.
 - Crush currently supports just one hook, `PreToolUse`, with plans to support
-  the full gamut. If there's a hook you’d like to see, let us know.
+  the full gamut. If there's a hook you'd like to see, let us know.
 
 ## Configuration
 
@@ -33,7 +35,7 @@ with project level hooks taking precedence.
       {
         "matcher": "bash",                   // regex tested against the tool name
         "command": "./hooks/my-hot-hook.sh", // the path to the hook
-        "timeout": 10,
+        "timeout": 10,                       // in seconds; default 30
       },
     ],
   },
@@ -59,7 +61,7 @@ enforce policies, rewrite tool input, or inject context the model should see.
 > Event names are case insensitive and snake-caseable, so `PreToolUse`,
 > `pretooluse`, `PRETOOLUSE`, `pre_tool_use`, and `PRE_TOOL_USE` all work.
 
-## Baby’s First Hook
+## Baby's First Hook
 
 Hooks are just shell scripts. Go crazy.
 
@@ -79,21 +81,23 @@ That's basically it. For the full guide on how hooks work, however, read on.
 
 When a hook fires, Crush:
 
-1. Filters hooks whose `matcher` regex matches the tool name (no matcher = match
-   all).
+1. Filters hooks whose `matcher` regex matches the tool name (no matcher =
+   match all).
 2. Deduplicates by `command` (identical commands run once).
 3. Runs all matching hooks **in parallel** as subprocesses.
-4. Aggregates results: **deny wins** over allow, allow wins over none.
+4. Waits for all to finish (or time out), then aggregates results **in config
+   order**: deny wins over allow, allow wins over none; `updated_input`
+   patches shallow-merge in order.
 
-Note that you can omit `matcher` and match in your shell script instead, however
-you'll incur some additional overhead as Crush will `exec` each script.
+Note that you can omit `matcher` and match in your shell script instead,
+however you'll incur some additional overhead as Crush will `exec` each
+script.
 
 ### Input
 
-Each hook receives data two ways: environment variables and stdin (as
-JSON). Environment variables are typically easier to work with, with JSON being
+Each hook receives data two ways: environment variables and stdin (as JSON).
+Environment variables are typically easier to work with, with JSON being
 available when input is more complex.
-
 
 #### Environment Variables
 
@@ -149,7 +153,7 @@ command = data.get("tool_input", {}).get("command", "")
 ### Output
 
 Hooks communicate back to Crush via **exit code** and `stdout`/`stderr`. The
-simplest way to do this is to simply return an error code and print additional
+simplest way to do this is to return an error code and print additional
 context to stderr. For example:
 
 ```bash
@@ -162,22 +166,55 @@ fi
 
 | Exit Code | Meaning                                                          |
 | --------- | ---------------------------------------------------------------- |
-| 0         | Success. Stdout is parsed as JSON (see fields above).            |
+| 0         | Success. Stdout is parsed as JSON (see fields below).            |
 | 2         | **Block the tool.** Stderr is used as the deny reason (no JSON). |
+| 78        | **Halt the turn.** Stderr is used as the halt reason (no JSON).  |
 | Other     | Non-blocking error. Logged and ignored — the tool call proceeds. |
+
+The difference between exit 2 and exit 78:
+
+- **Exit 2** blocks the current tool call. The agent sees the error and can
+  try something else.
+- **Exit 78** halts the whole turn. The agent doesn't get to respond further;
+  the user takes over. Use this when something is wrong enough that the agent
+  shouldn't keep trying. 78 is deliberately unusual — scripts that crash
+  typically exit with 1, 127, 130, 139 — so hitting 78 reads as clearly
+  intentional.
 
 That said, if you need more control, or if you need to rewrite input, you can
 use JSON on stdout. Exit 0 and print a JSON object to provide context, update
-the input, or still deny with a reason:
+the input, or still deny/halt with a reason:
 
 ```jsonc
 {
+  "version": 1,                     // Output envelope version. Optional; defaults to 1.
   "decision": "allow",              // "allow", "deny", or null. Omit for no opinion.
-  "reason": "not allowed",          // Shown to the model when denying.
-  "context": "Rewrote with RTK",    // Appended to the tool response the model sees.
-  "updated_input": {"command": "…"} // Replaces the tool's input before execution.
+  "halt": false,                    // If true, halts the turn entirely.
+  "reason": "not allowed",          // Shown when denying or halting.
+  "context": "Rewrote with RTK",    // String or array of strings. Appended to what the model sees.
+  "updated_input": {"command": "…"} // Shallow-merged into the tool's input before execution.
 }
 ```
+
+`version` is an optional integer at the top of the envelope. It defaults to
+`1` if omitted. Unknown higher versions are still parsed; the field exists so
+the envelope can evolve without a compatibility shim.
+
+`updated_input` is a shallow-merge patch. Keys you include overwrite matching
+keys in `tool_input`; keys you don't include are preserved. If the model
+called `bash` with `{"command": "npm test", "timeout": 60000}` and your hook
+returns `{"updated_input": {"command": "bun test"}}`, the tool runs with
+`{"command": "bun test", "timeout": 60000}` — the timeout isn't dropped.
+The merge is shallow: nested objects are replaced wholesale, not deep-merged.
+
+`halt: true` stops the turn entirely. The agent doesn't get to respond
+further; the user takes over. The exit-code shorthand is `exit 78` with
+stderr as the reason.
+
+`context` accepts either a string or an array of strings. Use the string form
+for a single observation; use the array form when a hook produces multiple
+distinct notes and you'd rather not concatenate them by hand. Empty strings
+and empty array entries are dropped.
 
 Here's a full shell script that produces this JSON:
 
@@ -200,19 +237,27 @@ EOF
 
 ### Multiple Hooks
 
+Hooks run in parallel, but their results compose in config order. Whichever
+hook finishes first doesn't get to "win" by virtue of timing; composition is
+deterministic based on the order hooks appear in `crush.json`.
+
 When multiple hooks match the same tool call:
 
-- If **any** hook denies, the tool call is blocked. All deny reasons are
-  concatenated (newline-separated).
-- If no hook denies but at least one allows, the tool call proceeds.
-- Context strings from all hooks are concatenated.
-- The last non-empty `updated_input` wins. If denied, `updated_input` is
-  ignored.
+- If **any** hook denies, the tool call is blocked. `reason` values are
+  concatenated in config order (newline-separated).
+- If **any** hook halts, the turn ends after the tool call is blocked.
+- If no hook denies or halts but at least one allows, the tool call proceeds.
+- `context` values are concatenated in config order. Strings and arrays
+  compose uniformly — each string becomes one entry, and array entries are
+  flattened in.
+- `updated_input` patches shallow-merge in config order against the original
+  tool input. Later hooks override earlier ones on colliding keys. If denied
+  or halted, `updated_input` patches are ignored.
 
 ### Timeouts
 
-If a hook exceeds its timeout, the process is killed and treated as
-a non-blocking error and the tool call proceeds. The default timeout is 30
+If a hook exceeds its timeout, the process is killed and treated as a
+non-blocking error and the tool call proceeds. The default timeout is 30
 seconds.
 
 ## Examples
@@ -345,8 +390,8 @@ process.stdin.on("end", () => {
 
 ## Whatcha think?
 
-We’d love to hear your thoughts on this project. Need help? We gotchu. You can
-find us on:
+We'd love to hear your thoughts on this project. Need help? We gotchu. You
+can find us on:
 
 - [Twitter](https://twitter.com/charmcli)
 - [Slack](https://charm.land/slack)

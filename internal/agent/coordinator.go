@@ -186,7 +186,9 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	if providerCfg.OAuthToken != nil && providerCfg.OAuthToken.IsExpired() {
 		slog.Debug("Token needs to be refreshed", "provider", providerCfg.ID)
 		if err := c.refreshOAuth2Token(ctx, providerCfg); err != nil {
-			return nil, err
+			// NOTE(@andreynering): We don't return here because the event handling to ask the user to reauthenticate
+			// depends on the flow below. If refresh fails, proceed with the token we have.
+			slog.Error("Failed to refresh OAuth2 token. Proceeding with existing token.", "error", err)
 		}
 	}
 

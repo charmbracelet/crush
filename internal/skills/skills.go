@@ -213,12 +213,19 @@ func DiscoverWithStates(paths []string) ([]*Skill, []*SkillState) {
 			if d.IsDir() || d.Name() != SkillFileName {
 				return nil
 			}
+			// Resolve symlinks so that a skill file reachable via multiple
+			// discovery paths (e.g. the project dir and a symlinked user dir
+			// both pointing to the same directory) is only loaded once.
+			realPath := path
+			if resolved, resolveErr := filepath.EvalSymlinks(path); resolveErr == nil {
+				realPath = resolved
+			}
 			mu.Lock()
-			if seen[path] {
+			if seen[realPath] {
 				mu.Unlock()
 				return nil
 			}
-			seen[path] = true
+			seen[realPath] = true
 			mu.Unlock()
 			skill, err := Parse(path)
 			if err != nil {

@@ -128,6 +128,22 @@ func defaultHighlighter(sty *styles.Styles) *highlightableMessageItem {
 	}
 }
 
+// cacheClearable is implemented by message items that cache rendered
+// output and can be asked to drop the cache.
+type cacheClearable interface {
+	clearCache()
+}
+
+// ClearItemCaches drops any cached rendered output on each item so the
+// next render uses the current styles.
+func ClearItemCaches(items []MessageItem) {
+	for _, item := range items {
+		if cc, ok := item.(cacheClearable); ok {
+			cc.clearCache()
+		}
+	}
+}
+
 // cachedMessageItem caches rendered message content to avoid re-rendering.
 //
 // This should be used by any message that can store a cached version of its render. e.x user,assistant... and so on

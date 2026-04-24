@@ -1461,11 +1461,18 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 		if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, msg.ModelType, msg.Model); err != nil {
 			cmds = append(cmds, util.ReportError(err))
-		} else if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
-			// Ensure small model is set is unset.
-			smallModel := m.com.Workspace.GetDefaultSmallModel(providerID)
-			if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeSmall, smallModel); err != nil {
-				cmds = append(cmds, util.ReportError(err))
+		} else {
+			if msg.ModelType == config.SelectedModelTypeLarge {
+				// Swap the theme live based on the newly selected large
+				// model's provider.
+				m.applyTheme(styles.ThemeForProvider(providerID))
+			}
+			if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
+				// Ensure small model is set is unset.
+				smallModel := m.com.Workspace.GetDefaultSmallModel(providerID)
+				if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeSmall, smallModel); err != nil {
+					cmds = append(cmds, util.ReportError(err))
+				}
 			}
 		}
 
@@ -2978,6 +2985,34 @@ func (m *UI) renderEditorView(width int) string {
 // cacheSidebarLogo renders and caches the sidebar logo at the specified width.
 func (m *UI) cacheSidebarLogo(width int) {
 	m.sidebarLogo = renderLogo(m.com.Styles, true, width)
+}
+
+// applyTheme replaces the active styles with the given theme and
+// refreshes every component that caches style data.
+func (m *UI) applyTheme(s styles.Styles) {
+	*m.com.Styles = s
+	m.refreshStyles()
+}
+
+// refreshStyles pushes the current *m.com.Styles into every subcomponent
+// that copies or pre-renders style-dependent values at construction time.
+func (m *UI) refreshStyles() {
+	t := m.com.Styles
+	m.header.refresh()
+	if m.layout.sidebar.Dx() > 0 {
+		m.cacheSidebarLogo(m.layout.sidebar.Dx())
+	}
+	m.textarea.SetStyles(t.Editor.Textarea)
+	m.completions.SetStyles(t.Completions.Normal, t.Completions.Focused, t.Completions.Match)
+	m.attachments.Renderer().SetStyles(
+		t.Attachments.Normal,
+		t.Attachments.Deleting,
+		t.Attachments.Image,
+		t.Attachments.Text,
+	)
+	m.todoSpinner.Style = t.Pills.TodoSpinner
+	m.status.help.Styles = t.Help
+	m.chat.InvalidateRenderCaches()
 }
 
 // sendMessage sends a message with the given content and attachments.

@@ -142,6 +142,13 @@ type Message struct {
 	IsSummaryMessage bool
 }
 
+func normalizeToolCallInput(input string) string {
+	if strings.TrimSpace(input) == "" {
+		return "{}"
+	}
+	return input
+}
+
 func (m *Message) Content() TextContent {
 	for _, part := range m.Parts {
 		if c, ok := part.(TextContent); ok {
@@ -530,7 +537,7 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 			parts = append(parts, fantasy.ToolCallPart{
 				ToolCallID:       call.ID,
 				ToolName:         call.Name,
-				Input:            call.Input,
+				Input:            normalizeToolCallInput(call.Input),
 				ProviderExecuted: call.ProviderExecuted,
 			})
 		}

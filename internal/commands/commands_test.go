@@ -51,3 +51,16 @@ func TestLoadAll_MixedSources(t *testing.T) {
 	require.Len(t, cmds, 1)
 	require.Equal(t, "user:cmd", cmds[0].ID)
 }
+
+func TestExtractArgNames_UnicodePlaceholders(t *testing.T) {
+	t.Parallel()
+
+	content := "run $DATA_DIR then $数据目录 and $ДАННЫЕ_1 and $ÅR2 and $DATA_DIR again"
+
+	args := extractArgNames(content)
+	require.Len(t, args, 4)
+	require.Equal(t, "DATA_DIR", args[0].ID)
+	require.Equal(t, "数据目录", args[1].ID)
+	require.Equal(t, "ДАННЫЕ_1", args[2].ID)
+	require.Equal(t, "ÅR2", args[3].ID)
+}

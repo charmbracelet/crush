@@ -793,3 +793,11 @@ func TestPreparePrompt_OrphanedToolUseMixed(t *testing.T) {
 	}
 	require.Equal(t, 1, syntheticCount, "expected exactly one synthetic result for the orphaned call")
 }
+
+func TestNormalizeToolCallInput(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "{}", normalizeToolCallInput(""))
+	require.Equal(t, "{}", normalizeToolCallInput("   \n\t "))
+	require.Equal(t, `{"file_path":"a.txt","content":"hello"}`, normalizeToolCallInput(`{"file_path":"a.txt","content":"hello"}`))
+}

@@ -168,18 +168,18 @@ fi
 | --------- | ---------------------------------------------------------------- |
 | 0         | Success. Stdout is parsed as JSON (see fields below).            |
 | 2         | **Block the tool.** Stderr is used as the deny reason (no JSON). |
-| 78        | **Halt the turn.** Stderr is used as the halt reason (no JSON).  |
+| 49        | **Halt the turn.** Stderr is used as the halt reason (no JSON).  |
 | Other     | Non-blocking error. Logged and ignored — the tool call proceeds. |
 
-The difference between exit 2 and exit 78:
+The difference between exit 2 and exit 49:
 
 - **Exit 2** blocks the current tool call. The agent sees the error and can
   try something else.
-- **Exit 78** halts the whole turn. The agent doesn't get to respond further;
+- **Exit 49** halts the whole turn. The agent doesn't get to respond further;
   the user takes over. Use this when something is wrong enough that the agent
-  shouldn't keep trying. 78 is deliberately unusual — scripts that crash
-  typically exit with 1, 127, 130, 139 — so hitting 78 reads as clearly
-  intentional.
+  shouldn't keep trying. 49 sits in an empty slice of the exit-code space —
+  between the generic-error range (1-30), the BSD `sysexits.h` range (64-78),
+  and the killed-by-signal range (128+) — so it can't be hit by accident.
 
 That said, if you need more control, or if you need to rewrite input, you can
 use JSON on stdout. Exit 0 and print a JSON object to provide context, update
@@ -208,7 +208,7 @@ returns `{"updated_input": {"command": "bun test"}}`, the tool runs with
 The merge is shallow: nested objects are replaced wholesale, not deep-merged.
 
 `halt: true` stops the turn entirely. The agent doesn't get to respond
-further; the user takes over. The exit-code shorthand is `exit 78` with
+further; the user takes over. The exit-code shorthand is `exit 49` with
 stderr as the reason.
 
 `context` accepts either a string or an array of strings. Use the string form

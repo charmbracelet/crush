@@ -19,6 +19,7 @@ import (
 	powernapconfig "github.com/charmbracelet/x/powernap/pkg/config"
 	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
 	"github.com/sourcegraph/jsonrpc2"
+	"golang.org/x/sync/singleflight"
 )
 
 var unavailable = csync.NewMap[string, struct{}]()
@@ -29,6 +30,8 @@ type Manager struct {
 	cfg      *config.ConfigStore
 	manager  *powernapconfig.Manager
 	callback func(name string, client *Client)
+	// requestGroup coalesces concurrent startup requests per server.
+	requestGroup singleflight.Group
 }
 
 // NewManager creates a new LSP manager service.
@@ -159,13 +162,9 @@ func (s *Manager) startServer(ctx context.Context, name, filepath string, server
 		return
 	}
 
-	if client, ok := s.clients.Get(name); ok {
-		switch client.GetServerState() {
-		case StateReady, StateStarting, StateDisabled:
-			s.callback(name, client)
-			// already done, return
-			return
-		}
+	if client, ok := s.getActiveClient(name); ok {
+		s.callback(name, client)
+		return
 	}
 
 	if !isUserConfigured {
@@ -186,68 +185,99 @@ func (s *Manager) startServer(ctx context.Context, name, filepath string, server
 		return
 	}
 
-	// Check again in case another goroutine started it in the meantime.
-	if client, ok := s.clients.Get(name); ok {
-		switch client.GetServerState() {
-		case StateReady, StateStarting, StateDisabled:
-			s.callback(name, client)
-			return
+	ch := s.requestGroup.DoChan(name, func() (any, error) {
+		// Double-check in case another goroutine started it in the meantime.
+		if client, ok := s.getActiveClient(name); ok {
+			return client, nil
 		}
-	}
 
-	client, err := New(
-		ctx,
-		name,
-		cfg,
-		s.cfg.Resolver(),
-		s.cfg.WorkingDir(),
-		s.cfg.Config().Options.DebugLSP,
-	)
-	if err != nil {
-		slog.Error("Failed to create LSP client", "name", name, "error", err)
+		// Keep shared startup alive even if one caller's context is canceled.
+		baseCtx := context.WithoutCancel(ctx)
+
+		client, err := New(
+			baseCtx,
+			name,
+			cfg,
+			s.cfg.Resolver(),
+			s.cfg.WorkingDir(),
+			s.cfg.Config().Options.DebugLSP,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		// If another goroutine won the race, prefer the existing active client.
+		if existing, ok := s.getActiveClient(name); ok {
+			_ = client.Close(baseCtx)
+			return existing, nil
+		}
+
+		client.SetServerState(StateStarting)
+		s.clients.Set(name, client)
+
+		timeout := time.Duration(cmp.Or(cfg.Timeout, 30)) * time.Second
+		initCtx, cancel := context.WithTimeout(baseCtx, timeout)
+		defer cancel()
+
+		if _, err := client.Initialize(initCtx, s.cfg.WorkingDir()); err != nil {
+			client.SetServerState(StateError)
+			_ = client.Close(baseCtx)
+			s.clients.Del(name)
+			return nil, err
+		}
+
+		if err := client.WaitForServerReady(initCtx); err != nil {
+			slog.Warn("LSP server not fully ready, continuing anyway", "name", name, "error", err)
+			client.SetServerState(StateError)
+		} else {
+			client.SetServerState(StateReady)
+		}
+
+		return client, nil
+	})
+
+	select {
+	case <-ctx.Done():
+		slog.Debug("Context canceled while waiting for LSP start", "name", name)
 		return
-	}
-	// Only store non-nil clients. If another goroutine raced us,
-	// prefer the already-stored client.
-	if existing, ok := s.clients.Get(name); ok {
-		switch existing.GetServerState() {
-		case StateReady, StateStarting, StateDisabled:
-			_ = client.Close(ctx)
-			s.callback(name, existing)
+	case res := <-ch:
+		if res.Err != nil {
+			if !res.Shared {
+				slog.Error("Failed to start LSP client", "name", name, "error", res.Err)
+			} else {
+				slog.Debug("Failed to start LSP client (shared result)", "name", name, "error", res.Err)
+			}
 			return
 		}
-	}
-	s.clients.Set(name, client)
-	defer func() {
-		s.callback(name, client)
-	}()
 
+		client, ok := res.Val.(*Client)
+		if !ok || client == nil {
+			slog.Error("Invalid LSP client result type", "name", name)
+			return
+		}
+
+		s.callback(name, client)
+	}
+}
+
+func isActiveClient(client *Client) bool {
+	if client == nil {
+		return false
+	}
 	switch client.GetServerState() {
 	case StateReady, StateStarting, StateDisabled:
-		// already done, return
-		return
+		return true
+	default:
+		return false
 	}
+}
 
-	client.serverState.Store(StateStarting)
-
-	initCtx, cancel := context.WithTimeout(ctx, time.Duration(cmp.Or(cfg.Timeout, 30))*time.Second)
-	defer cancel()
-
-	if _, err := client.Initialize(initCtx, s.cfg.WorkingDir()); err != nil {
-		slog.Error("LSP client initialization failed", "name", name, "error", err)
-		_ = client.Close(ctx)
-		s.clients.Del(name)
-		return
+func (s *Manager) getActiveClient(name string) (*Client, bool) {
+	client, ok := s.clients.Get(name)
+	if !ok || !isActiveClient(client) {
+		return nil, false
 	}
-
-	if err := client.WaitForServerReady(initCtx); err != nil {
-		slog.Warn("LSP server not fully ready, continuing anyway", "name", name, "error", err)
-		client.SetServerState(StateError)
-	} else {
-		client.SetServerState(StateReady)
-	}
-
-	slog.Debug("LSP client started", "name", name)
+	return client, true
 }
 
 func (s *Manager) isUserConfigured(name string) bool {

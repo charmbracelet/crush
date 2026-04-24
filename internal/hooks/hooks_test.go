@@ -15,17 +15,18 @@ func TestAggregation(t *testing.T) {
 
 	t.Run("empty results", func(t *testing.T) {
 		t.Parallel()
-		agg := aggregate(nil)
+		agg := aggregate(nil, "{}")
 		require.Equal(t, DecisionNone, agg.Decision)
 		require.Empty(t, agg.Reason)
 		require.Empty(t, agg.Context)
+		require.False(t, agg.Halt)
 	})
 
 	t.Run("single allow", func(t *testing.T) {
 		t.Parallel()
 		agg := aggregate([]HookResult{
 			{Decision: DecisionAllow},
-		})
+		}, "{}")
 		require.Equal(t, DecisionAllow, agg.Decision)
 	})
 
@@ -34,7 +35,7 @@ func TestAggregation(t *testing.T) {
 		agg := aggregate([]HookResult{
 			{Decision: DecisionAllow, Context: "ctx1"},
 			{Decision: DecisionDeny, Reason: "blocked"},
-		})
+		}, "{}")
 		require.Equal(t, DecisionDeny, agg.Decision)
 		require.Equal(t, "blocked", agg.Reason)
 		require.Equal(t, "ctx1", agg.Context)
@@ -45,7 +46,7 @@ func TestAggregation(t *testing.T) {
 		agg := aggregate([]HookResult{
 			{Decision: DecisionDeny, Reason: "reason1"},
 			{Decision: DecisionDeny, Reason: "reason2"},
-		})
+		}, "{}")
 		require.Equal(t, DecisionDeny, agg.Decision)
 		require.Equal(t, "reason1\nreason2", agg.Reason)
 	})
@@ -55,7 +56,7 @@ func TestAggregation(t *testing.T) {
 		agg := aggregate([]HookResult{
 			{Decision: DecisionAllow, Context: "ctx-a"},
 			{Decision: DecisionNone, Context: "ctx-b"},
-		})
+		}, "{}")
 		require.Equal(t, DecisionAllow, agg.Decision)
 		require.Equal(t, "ctx-a\nctx-b", agg.Context)
 	})
@@ -65,8 +66,28 @@ func TestAggregation(t *testing.T) {
 		agg := aggregate([]HookResult{
 			{Decision: DecisionNone},
 			{Decision: DecisionAllow},
-		})
+		}, "{}")
 		require.Equal(t, DecisionAllow, agg.Decision)
+	})
+
+	t.Run("halt is sticky across results", func(t *testing.T) {
+		t.Parallel()
+		agg := aggregate([]HookResult{
+			{Decision: DecisionAllow},
+			{Halt: true, Reason: "stop now"},
+		}, "{}")
+		require.True(t, agg.Halt)
+		require.Contains(t, agg.Reason, "stop now")
+	})
+
+	t.Run("halt with deny only records reason once", func(t *testing.T) {
+		t.Parallel()
+		agg := aggregate([]HookResult{
+			{Decision: DecisionDeny, Halt: true, Reason: "stop"},
+		}, "{}")
+		require.True(t, agg.Halt)
+		require.Equal(t, DecisionDeny, agg.Decision)
+		require.Equal(t, "stop", agg.Reason)
 	})
 }
 
@@ -103,6 +124,51 @@ func TestParseStdout(t *testing.T) {
 		t.Parallel()
 		r := parseStdout(`{"decision":"maybe"}`)
 		require.Equal(t, DecisionNone, r.Decision)
+	})
+
+	t.Run("version 1 accepted", func(t *testing.T) {
+		t.Parallel()
+		r := parseStdout(`{"version":1,"decision":"allow"}`)
+		require.Equal(t, DecisionAllow, r.Decision)
+	})
+
+	t.Run("unknown higher version still parses", func(t *testing.T) {
+		t.Parallel()
+		r := parseStdout(`{"version":99,"decision":"deny","reason":"future"}`)
+		require.Equal(t, DecisionDeny, r.Decision)
+		require.Equal(t, "future", r.Reason)
+	})
+
+	t.Run("halt true without decision", func(t *testing.T) {
+		t.Parallel()
+		r := parseStdout(`{"halt":true,"reason":"turn over"}`)
+		require.True(t, r.Halt)
+		require.Equal(t, "turn over", r.Reason)
+		require.Equal(t, DecisionNone, r.Decision)
+	})
+
+	t.Run("context string form", func(t *testing.T) {
+		t.Parallel()
+		r := parseStdout(`{"decision":"allow","context":"one note"}`)
+		require.Equal(t, "one note", r.Context)
+	})
+
+	t.Run("context array form", func(t *testing.T) {
+		t.Parallel()
+		r := parseStdout(`{"decision":"allow","context":["first","second"]}`)
+		require.Equal(t, "first\nsecond", r.Context)
+	})
+
+	t.Run("context array drops empty entries", func(t *testing.T) {
+		t.Parallel()
+		r := parseStdout(`{"decision":"allow","context":["","keep",""]}`)
+		require.Equal(t, "keep", r.Context)
+	})
+
+	t.Run("context null becomes empty", func(t *testing.T) {
+		t.Parallel()
+		r := parseStdout(`{"decision":"allow","context":null}`)
+		require.Empty(t, r.Context)
 	})
 }
 
@@ -167,7 +233,33 @@ func TestRunnerExitCode2Deny(t *testing.T) {
 	result, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{}`)
 	require.NoError(t, err)
 	require.Equal(t, DecisionDeny, result.Decision)
+	require.False(t, result.Halt)
 	require.Equal(t, "forbidden", result.Reason)
+}
+
+func TestRunnerExitCode78Halt(t *testing.T) {
+	t.Parallel()
+	hookCfg := config.HookConfig{
+		Command: `echo "stop the turn" >&2; exit 78`,
+	}
+	r := NewRunner([]config.HookConfig{hookCfg}, t.TempDir(), t.TempDir())
+	result, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{}`)
+	require.NoError(t, err)
+	require.True(t, result.Halt)
+	require.Equal(t, DecisionDeny, result.Decision)
+	require.Equal(t, "stop the turn", result.Reason)
+}
+
+func TestRunnerHaltViaJSON(t *testing.T) {
+	t.Parallel()
+	hookCfg := config.HookConfig{
+		Command: `echo '{"halt":true,"reason":"via json"}'`,
+	}
+	r := NewRunner([]config.HookConfig{hookCfg}, t.TempDir(), t.TempDir())
+	result, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{}`)
+	require.NoError(t, err)
+	require.True(t, result.Halt)
+	require.Equal(t, "via json", result.Reason)
 }
 
 func TestRunnerExitCodeOtherNonBlocking(t *testing.T) {
@@ -393,32 +485,86 @@ func TestParseStdoutUpdatedInput(t *testing.T) {
 func TestAggregationUpdatedInput(t *testing.T) {
 	t.Parallel()
 
-	t.Run("last non-empty wins", func(t *testing.T) {
+	t.Run("patches merge in config order with later overriding", func(t *testing.T) {
 		t.Parallel()
 		agg := aggregate([]HookResult{
-			{Decision: DecisionAllow, UpdatedInput: `{"command":"first"}`},
+			{Decision: DecisionAllow, UpdatedInput: `{"command":"first","keep":"me"}`},
 			{Decision: DecisionAllow, UpdatedInput: `{"command":"second"}`},
-		})
+		}, `{"command":"orig","timeout":60}`)
 		require.Equal(t, DecisionAllow, agg.Decision)
-		require.Equal(t, `{"command":"second"}`, agg.UpdatedInput)
+		// command overridden by second patch; keep preserved from first
+		// patch; timeout preserved from original input.
+		require.JSONEq(t,
+			`{"command":"second","keep":"me","timeout":60}`,
+			agg.UpdatedInput,
+		)
 	})
 
-	t.Run("deny ignores updated_input", func(t *testing.T) {
+	t.Run("shallow: nested objects are replaced wholesale", func(t *testing.T) {
+		t.Parallel()
+		agg := aggregate([]HookResult{
+			{Decision: DecisionAllow, UpdatedInput: `{"env":{"FOO":"bar"}}`},
+		}, `{"env":{"BAZ":"qux"},"command":"ls"}`)
+		// "env" is replaced entirely; "command" preserved.
+		require.JSONEq(t,
+			`{"env":{"FOO":"bar"},"command":"ls"}`,
+			agg.UpdatedInput,
+		)
+	})
+
+	t.Run("deny still reports merged input (caller ignores it)", func(t *testing.T) {
 		t.Parallel()
 		agg := aggregate([]HookResult{
 			{Decision: DecisionAllow, UpdatedInput: `{"command":"rewritten"}`},
 			{Decision: DecisionDeny, Reason: "blocked"},
-		})
+		}, `{"command":"orig"}`)
 		require.Equal(t, DecisionDeny, agg.Decision)
 	})
 
-	t.Run("empty updated_input does not overwrite", func(t *testing.T) {
+	t.Run("no patches leaves updated_input empty", func(t *testing.T) {
 		t.Parallel()
 		agg := aggregate([]HookResult{
-			{Decision: DecisionAllow, UpdatedInput: `{"command":"rewritten"}`},
+			{Decision: DecisionAllow},
 			{Decision: DecisionNone},
-		})
-		require.Equal(t, `{"command":"rewritten"}`, agg.UpdatedInput)
+		}, `{"command":"orig"}`)
+		require.Empty(t, agg.UpdatedInput)
+	})
+
+	t.Run("invalid patch is ignored", func(t *testing.T) {
+		t.Parallel()
+		agg := aggregate([]HookResult{
+			{Decision: DecisionAllow, UpdatedInput: `"not-an-object"`},
+			{Decision: DecisionAllow, UpdatedInput: `{"command":"good"}`},
+		}, `{"command":"orig"}`)
+		require.JSONEq(t, `{"command":"good"}`, agg.UpdatedInput)
+	})
+
+	t.Run("malformed patch JSON is ignored and merge continues", func(t *testing.T) {
+		t.Parallel()
+		agg := aggregate([]HookResult{
+			{Decision: DecisionAllow, UpdatedInput: `{broken json`},
+			{Decision: DecisionAllow, UpdatedInput: `{"command":"good"}`},
+		}, `{"command":"orig"}`)
+		require.JSONEq(t, `{"command":"good"}`, agg.UpdatedInput)
+	})
+
+	t.Run("non-object tool_input rejects all patches", func(t *testing.T) {
+		t.Parallel()
+		agg := aggregate([]HookResult{
+			{Decision: DecisionAllow, UpdatedInput: `{"command":"rewrite"}`},
+		}, `"just-a-string"`)
+		require.Empty(t, agg.UpdatedInput)
+	})
+
+	t.Run("null updated_input is a no-op", func(t *testing.T) {
+		t.Parallel()
+		// parseStdout converts null updated_input to "", so aggregate
+		// never sees a patch — the merged input is empty and the
+		// original tool_input is used unchanged.
+		r := parseStdout(`{"decision":"allow","updated_input":null}`)
+		require.Empty(t, r.UpdatedInput)
+		agg := aggregate([]HookResult{r}, `{"command":"orig"}`)
+		require.Empty(t, agg.UpdatedInput)
 	})
 }
 
@@ -428,10 +574,13 @@ func TestRunnerUpdatedInput(t *testing.T) {
 		Command: `echo '{"decision":"allow","updated_input":{"command":"echo rewritten"}}'`,
 	}
 	r := NewRunner([]config.HookConfig{hookCfg}, t.TempDir(), t.TempDir())
-	result, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{"command":"echo original"}`)
+	result, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{"command":"echo original","timeout":60}`)
 	require.NoError(t, err)
 	require.Equal(t, DecisionAllow, result.Decision)
-	require.Equal(t, `{"command":"echo rewritten"}`, result.UpdatedInput)
+	require.JSONEq(t,
+		`{"command":"echo rewritten","timeout":60}`,
+		result.UpdatedInput,
+	)
 }
 
 func TestParseStdoutClaudeCodeFormat(t *testing.T) {

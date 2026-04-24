@@ -3,11 +3,17 @@ package hooks
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 
 	"github.com/tidwall/gjson"
 )
+
+// SupportedOutputVersion is the highest envelope version this build
+// understands. Hooks may omit `version` entirely (treated as 1) or pin
+// an older version. Unknown higher versions are still parsed but logged.
+const SupportedOutputVersion = 1
 
 // Payload is the JSON structure piped to hook commands via stdin.
 // ToolInput is emitted as a parsed JSON object for compatibility with
@@ -85,22 +91,63 @@ func parseStdout(stdout string) HookResult {
 	}
 
 	var parsed struct {
+		Version      int             `json:"version"`
 		Decision     string          `json:"decision"`
+		Halt         bool            `json:"halt"`
 		Reason       string          `json:"reason"`
-		Context      string          `json:"context"`
+		Context      json.RawMessage `json:"context"`
 		UpdatedInput json.RawMessage `json:"updated_input"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &parsed); err != nil {
 		return HookResult{Decision: DecisionNone}
 	}
 
+	if parsed.Version > SupportedOutputVersion {
+		slog.Debug("Hook output declared a newer envelope version than this build supports",
+			"version", parsed.Version,
+			"supported", SupportedOutputVersion,
+		)
+	}
+
 	result := HookResult{
+		Halt:    parsed.Halt,
 		Reason:  parsed.Reason,
-		Context: parsed.Context,
+		Context: parseContext(parsed.Context),
 	}
 	result.Decision = parseDecision(parsed.Decision)
 	result.UpdatedInput = rawToString(parsed.UpdatedInput)
 	return result
+}
+
+// parseContext accepts either a single string or an array of strings and
+// returns a newline-joined value with empty entries dropped.
+func parseContext(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	// String form.
+	if raw[0] == '"' {
+		var s string
+		if err := json.Unmarshal(raw, &s); err == nil {
+			return s
+		}
+		return ""
+	}
+	// Array form.
+	if raw[0] == '[' {
+		var items []string
+		if err := json.Unmarshal(raw, &items); err != nil {
+			return ""
+		}
+		out := items[:0]
+		for _, s := range items {
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+		return strings.Join(out, "\n")
+	}
+	return ""
 }
 
 // parseClaudeCodeOutput handles the Claude Code hook output format:

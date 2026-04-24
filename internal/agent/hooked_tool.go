@@ -43,10 +43,15 @@ func (h *hookedTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.To
 			"tool", call.Name, "error", err)
 	}
 
-	if result.Decision == hooks.DecisionDeny {
+	if result.Decision == hooks.DecisionDeny || result.Halt {
 		reason := fmt.Sprintf("Tool call blocked by hook. Reason: %s", result.Reason)
+		if result.Halt {
+			reason = fmt.Sprintf("Turn halted by hook. Reason: %s", result.Reason)
+		}
 		resp := fantasy.NewTextErrorResponse(reason)
-		resp.StopTurn = true
+		// Halt ends the whole turn; a plain deny only blocks this tool
+		// call so the model can see the error and try something else.
+		resp.StopTurn = result.Halt
 		resp.Metadata = hookMetadataJSON(result)
 		return resp, nil
 	}
@@ -76,6 +81,7 @@ func buildHookMetadata(result hooks.AggregateResult) hooks.HookMetadata {
 	return hooks.HookMetadata{
 		HookCount:    result.HookCount,
 		Decision:     result.Decision.String(),
+		Halt:         result.Halt,
 		Reason:       result.Reason,
 		InputRewrite: result.UpdatedInput != "",
 		Hooks:        result.Hooks,

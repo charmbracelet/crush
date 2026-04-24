@@ -68,13 +68,14 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 	}
 	wg.Wait()
 
-	agg := aggregate(results)
+	agg := aggregate(results, toolInputJSON)
 	agg.Hooks = make([]HookInfo, len(deduped))
 	for i, h := range deduped {
 		agg.Hooks[i] = HookInfo{
 			Name:         filepath.Base(h.Command),
 			Matcher:      h.Matcher,
 			Decision:     results[i].Decision.String(),
+			Halt:         results[i].Halt,
 			Reason:       results[i].Reason,
 			InputRewrite: results[i].UpdatedInput != "",
 		}
@@ -136,13 +137,24 @@ func (r *Runner) runOne(parentCtx context.Context, hook config.HookConfig, envVa
 		}
 		switch exitCode {
 		case 2:
-			// Exit code 2 = block. Stderr is the reason.
+			// Exit code 2 = block this tool call. Stderr is the reason.
 			reason := strings.TrimSpace(stderr.String())
 			if reason == "" {
 				reason = "blocked by hook"
 			}
 			return HookResult{
 				Decision: DecisionDeny,
+				Reason:   reason,
+			}
+		case HaltExitCode:
+			// Exit code 78 = halt the whole turn. Stderr is the reason.
+			reason := strings.TrimSpace(stderr.String())
+			if reason == "" {
+				reason = "turn halted by hook"
+			}
+			return HookResult{
+				Decision: DecisionDeny,
+				Halt:     true,
 				Reason:   reason,
 			}
 		default:

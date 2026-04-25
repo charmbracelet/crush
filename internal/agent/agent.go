@@ -440,7 +440,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				return sessionErr
 			}
 			currentSession = updatedSession
-			return a.messages.Update(genCtx, *currentAssistant)
+			// Use parent ctx so the terminal finish part still lands even if
+			// genCtx was cancelled right after the stream finished. fantasy
+			// swallows the error returned here, so a failed Update would
+			// otherwise leave the UI spinner running forever.
+			return a.messages.Update(ctx, *currentAssistant)
 		},
 		StopWhen: []fantasy.StopCondition{
 			func(_ []fantasy.StepResult) bool {
@@ -585,6 +589,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		return nil, err
 	}
 
+	// Defense in depth: if the stream returned no error but the assistant
+	// message never got a terminal finish part persisted (fantasy swallows
+	// OnStepFinish errors, and that callback's Update can fail when genCtx
+	// was cancelled right after stream completion), write one with a
+	// detached ctx so the UI spinner always stops.
+	a.ensureAssistantFinished(call.SessionID, currentAssistant)
+
 	// Send notification that agent has finished its turn (skip for
 	// nested/non-interactive sessions).
 	if !call.NonInteractive && a.notify != nil {
@@ -624,6 +635,28 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	firstQueuedMessage := queuedMessages[0]
 	a.messageQueue.Set(call.SessionID, queuedMessages[1:])
 	return a.Run(ctx, firstQueuedMessage)
+}
+
+// ensureAssistantFinished is a defense-in-depth fallback: if the assistant
+// message from a successful stream has no terminal finish part persisted —
+// which can happen when fantasy swallows an OnStepFinish error and the
+// underlying Update failed because genCtx was cancelled right after stream
+// completion — write FinishReasonEndTurn with a detached ctx so the UI
+// spinner cannot hang. No-ops for nil or already-finished messages.
+func (a *sessionAgent) ensureAssistantFinished(sessionID string, assistant *message.Message) {
+	if assistant == nil || assistant.IsFinished() {
+		return
+	}
+	slog.Warn("Run completed without persisted finish part; writing fallback terminal state",
+		"session_id", sessionID,
+		"message_id", assistant.ID)
+	assistant.AddFinish(message.FinishReasonEndTurn, "", "")
+	if err := a.messages.Update(context.Background(), *assistant); err != nil {
+		slog.Error("Run terminal-state fallback write failed; spinner may hang",
+			"session_id", sessionID,
+			"message_id", assistant.ID,
+			"err", err)
+	}
 }
 
 func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions) error {

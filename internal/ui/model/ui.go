@@ -250,6 +250,9 @@ type UI struct {
 	promptQueue        int
 	pillsView          string
 
+	// showThinking controls visibility of reasoning content in the UI
+	showThinking bool
+
 	// Todo spinner
 	todoSpinner    spinner.Model
 	todoIsSpinning bool
@@ -327,6 +330,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		notifyWindowFocused: true,
 		initialSessionID:    initialSessionID,
 		continueLastSession: continueLast,
+		showThinking:        true, // Default to showing reasoning content
 	}
 
 	status := NewStatus(com, ui)
@@ -894,6 +898,19 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+// refreshMessages refreshes the current session messages to apply UI state changes
+// (like showThinking toggle) without reloading from the database.
+func (m *UI) refreshMessages() tea.Cmd {
+	if m.session == nil {
+		return nil
+	}
+	msgs, err := m.com.Workspace.ListMessages(context.Background(), m.session.ID)
+	if err != nil {
+		return util.ReportError(err)
+	}
+	return m.setSessionMessages(msgs)
+}
+
 // setSessionMessages sets the messages for the current session in the chat
 func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	var cmds []tea.Cmd
@@ -913,15 +930,15 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 		switch msg.Role {
 		case message.User:
 			m.lastUserMessageTime = msg.CreatedAt
-			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap)...)
+			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap, m.showThinking)...)
 		case message.Assistant:
-			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap)...)
+			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap, m.showThinking)...)
 			if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
 				infoItem := chat.NewAssistantInfoItem(m.com.Styles, msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
 				items = append(items, infoItem)
 			}
 		default:
-			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap)...)
+			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap, m.showThinking)...)
 		}
 	}
 
@@ -980,7 +997,7 @@ func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
 		// Extract nested tool items.
 		var nestedTools []chat.ToolMessageItem
 		for _, nestedMsg := range nestedMsgPtrs {
-			nestedItems := chat.ExtractMessageItems(m.com.Styles, nestedMsg, nestedToolResultMap)
+			nestedItems := chat.ExtractMessageItems(m.com.Styles, nestedMsg, nestedToolResultMap, m.showThinking)
 			for _, nestedItem := range nestedItems {
 				if nestedToolItem, ok := nestedItem.(chat.ToolMessageItem); ok {
 					// Mark nested tools as simple (compact) rendering.
@@ -1018,7 +1035,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 	switch msg.Role {
 	case message.User:
 		m.lastUserMessageTime = msg.CreatedAt
-		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil)
+		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil, m.showThinking)
 		for _, item := range items {
 			if animatable, ok := item.(chat.Animatable); ok {
 				if cmd := animatable.StartAnimation(); cmd != nil {
@@ -1031,7 +1048,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	case message.Assistant:
-		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil)
+		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil, m.showThinking)
 		for _, item := range items {
 			if animatable, ok := item.(chat.Animatable); ok {
 				if cmd := animatable.StartAnimation(); cmd != nil {
@@ -1383,6 +1400,18 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			}
 			return util.NewInfoMsg("Thinking mode " + status)
 		})
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionToggleThinkingVisibility:
+		m.showThinking = !m.showThinking
+		status := "hidden"
+		if m.showThinking {
+			status = "visible"
+		}
+		cmds = append(cmds, func() tea.Msg {
+			return util.NewInfoMsg("Thinking content " + status)
+		})
+		// Refresh chat to apply visibility change
+		cmds = append(cmds, m.refreshMessages())
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleTransparentBackground:
 		cmds = append(cmds, func() tea.Msg {

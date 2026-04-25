@@ -48,6 +48,7 @@ type (
 	ActionToggleHelp                  struct{}
 	ActionToggleCompactMode           struct{}
 	ActionToggleThinking              struct{}
+	ActionToggleThinkingVisibility    struct{} // Toggle display of reasoning content in UI
 	ActionTogglePills                 struct{}
 	ActionExternalEditor              struct{}
 	ActionToggleYoloMode              struct{}

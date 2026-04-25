@@ -454,6 +454,11 @@ func (c *Commands) defaultCommands() []*CommandItem {
 			}
 		}
 	}
+
+	// Universal toggle for hiding/showing reasoning content in UI (works with any model)
+	if c.hasSession {
+		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_thinking_visibility", "Hide/Show Thinking", "", ActionToggleThinkingVisibility{}))
+	}
 	// Only show toggle compact mode command if window width is larger than compact breakpoint (120)
 	if c.windowWidth >= sidebarCompactModeBreakpoint && c.hasSession {
 		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_sidebar", "Toggle Sidebar", "", ActionToggleCompactMode{}))

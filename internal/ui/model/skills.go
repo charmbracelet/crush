@@ -58,6 +58,15 @@ func (m *UI) skillStatusItems() []skillStatusItem {
 	var items []skillStatusItem
 	stateNames := make(map[string]struct{}, len(m.skillStates))
 
+	disabledSet := make(map[string]bool)
+	if m.com != nil && m.com.Workspace != nil {
+		if cfg := m.com.Config(); cfg != nil {
+			for _, name := range cfg.Options.DisabledSkills {
+				disabledSet[name] = true
+			}
+		}
+	}
+
 	states := slices.Clone(m.skillStates)
 	slices.SortStableFunc(states, func(a, b *skills.SkillState) int {
 		return strings.Compare(a.Path, b.Path)
@@ -66,6 +75,9 @@ func (m *UI) skillStatusItems() []skillStatusItem {
 		name := state.Name
 		if name == "" {
 			name = filepath.Base(filepath.Dir(state.Path))
+		}
+		if disabledSet[name] {
+			continue
 		}
 		stateNames[name] = struct{}{}
 		icon := t.Resource.OnlineIcon.String()
@@ -85,6 +97,9 @@ func (m *UI) skillStatusItems() []skillStatusItem {
 	})
 	for _, skill := range builtin {
 		if _, ok := stateNames[skill.Name]; ok {
+			continue
+		}
+		if disabledSet[skill.Name] {
 			continue
 		}
 		items = append(items, skillStatusItem{

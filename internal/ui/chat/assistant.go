@@ -2,7 +2,9 @@ package chat
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -20,6 +22,15 @@ const assistantMessageTruncateFormat = "… (%d lines hidden) [click or space to
 // maxCollapsedThinkingHeight defines the maximum height of the thinking
 const maxCollapsedThinkingHeight = 10
 
+// summarySpinnerStallTimeout forces the spinner off when a summary message
+// has not been updated for this long. This is a defense-in-depth guard for
+// the Summarize path: if the agent fails to persist a terminal finish part
+// (e.g. the genCtx is cancelled between stream completion and the final
+// Update), the UI would otherwise keep spinning forever. Scoped to summary
+// messages only so normal assistant streams — which can legitimately run
+// for a long time on reasoning-heavy models — are never affected.
+const summarySpinnerStallTimeout = 5 * time.Minute
+
 // AssistantMessageItem represents an assistant message in the chat UI.
 //
 // This item includes thinking, and the content but does not include the tool calls.
@@ -32,7 +43,8 @@ type AssistantMessageItem struct {
 	sty               *styles.Styles
 	anim              *anim.Anim
 	thinkingExpanded  bool
-	thinkingBoxHeight int // Tracks the rendered thinking box height for click detection.
+	thinkingBoxHeight int  // Tracks the rendered thinking box height for click detection.
+	stallLogged       bool // Ensures summary stall-guard telemetry fires at most once per message.
 }
 
 // NewAssistantMessageItem creates a new AssistantMessageItem.
@@ -235,7 +247,31 @@ func (a *AssistantMessageItem) isSpinning() bool {
 	isFinished := a.message.IsFinished()
 	hasContent := strings.TrimSpace(a.message.Content().Text) != ""
 	hasToolCalls := len(a.message.ToolCalls()) > 0
-	return (isThinking || !isFinished) && !hasContent && !hasToolCalls
+	if !((isThinking || !isFinished) && !hasContent && !hasToolCalls) {
+		return false
+	}
+	// Stall-guard: only applied to summary messages. The Summarize path has
+	// a narrow window where a terminal finish part can fail to persist,
+	// leaving the spinner running indefinitely. Normal assistant streams are
+	// driven by the agent loop and always emit a finish part, so they are
+	// left alone.
+	if a.message.IsSummaryMessage {
+		ts := a.message.UpdatedAt
+		if ts == 0 {
+			ts = a.message.CreatedAt
+		}
+		if ts > 0 && time.Since(time.Unix(ts, 0)) > summarySpinnerStallTimeout {
+			if !a.stallLogged {
+				slog.Warn("summary spinner stall-guard tripped; treating message as finished",
+					"message_id", a.message.ID,
+					"session_id", a.message.SessionID,
+					"stale", time.Since(time.Unix(ts, 0)).String())
+				a.stallLogged = true
+			}
+			return false
+		}
+	}
+	return true
 }
 
 // SetMessage is used to update the underlying message.
@@ -243,6 +279,7 @@ func (a *AssistantMessageItem) SetMessage(message *message.Message) tea.Cmd {
 	wasSpinning := a.isSpinning()
 	a.message = message
 	a.clearCache()
+	a.stallLogged = false
 	if !wasSpinning && a.isSpinning() {
 		return a.StartAnimation()
 	}

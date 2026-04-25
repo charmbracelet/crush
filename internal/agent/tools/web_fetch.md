@@ -19,6 +19,7 @@ Fetch a web URL and return content as markdown; for use inside sub-agents. Large
 - Only supports HTTP and HTTPS protocols
 - Cannot handle authentication or cookies
 - Some websites may block automated requests
+- For GitHub content when an exact repo, issue, or PR link is provided, use `gh` CLI in bash instead
 </limitations>
 
 <tips>

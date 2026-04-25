@@ -299,6 +299,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		attachments.NewRenderer(
 			com.Styles.Attachments.Normal,
 			com.Styles.Attachments.Deleting,
+			com.Styles.Attachments.CopySelecting,
 			com.Styles.Attachments.Image,
 			com.Styles.Attachments.Text,
 		),

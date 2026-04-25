@@ -3,18 +3,13 @@
 package notification
 
 import (
-	_ "embed"
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/gen2brain/beeep"
 )
-
-//go:embed crush-icon-solo.png
-var iconData []byte
 
 // terminalBundleIDs maps TERM_PROGRAM values to macOS bundle identifiers.
 var terminalBundleIDs = map[string]string{
@@ -36,8 +31,6 @@ type NativeBackend struct {
 	terminalBundleID string
 	// hasTerminalNotifier indicates if terminal-notifier is available.
 	hasTerminalNotifier bool
-	// iconPath is the path to the icon file for notifications.
-	iconPath string
 	// icon is the notification icon data (unused on darwin, kept for interface compat).
 	icon any
 	// notifyFunc is the fallback function used when terminal-notifier is unavailable.
@@ -58,9 +51,6 @@ func NewNativeBackend(icon any) *NativeBackend {
 	if path, err := exec.LookPath("terminal-notifier"); err == nil {
 		b.hasTerminalNotifier = true
 		slog.Debug("Found terminal-notifier", "path", path)
-
-		// Write the embedded icon to a temp file for terminal-notifier.
-		b.iconPath = writeIconToTemp()
 	}
 
 	// Detect the terminal bundle ID from TERM_PROGRAM.
@@ -78,24 +68,6 @@ func NewNativeBackend(icon any) *NativeBackend {
 	}
 
 	return b
-}
-
-// writeIconToTemp writes the embedded icon to a temp file and returns the path.
-func writeIconToTemp() string {
-	tmpDir := os.TempDir()
-	iconPath := filepath.Join(tmpDir, "crush-notification-icon.png")
-
-	// Check if the file already exists and is the right size.
-	if info, err := os.Stat(iconPath); err == nil && info.Size() == int64(len(iconData)) {
-		return iconPath
-	}
-
-	if err := os.WriteFile(iconPath, iconData, 0o644); err != nil {
-		slog.Debug("Failed to write notification icon", "error", err)
-		return ""
-	}
-
-	return iconPath
 }
 
 // lookupBundleID attempts to find the bundle ID for an app name using osascript.
@@ -142,11 +114,6 @@ func (b *NativeBackend) sendWithTerminalNotifier(n Notification) error {
 	// If we know the terminal, activate it when the notification is clicked.
 	if b.terminalBundleID != "" {
 		args = append(args, "-activate", b.terminalBundleID)
-	}
-
-	// Add the icon if available.
-	if b.iconPath != "" {
-		args = append(args, "-appIcon", b.iconPath)
 	}
 
 	cmd := exec.Command("terminal-notifier", args...)

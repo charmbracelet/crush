@@ -188,7 +188,7 @@ func blockFuncs() []shell.BlockFunc {
 	}
 }
 
-func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelName string) fantasy.AgentTool {
+func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelName string, dirRestrictions DirRestrictions) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		BashToolName,
 		string(bashDescription(attribution, modelName)),
@@ -199,6 +199,12 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 
 			// Determine working directory
 			execWorkingDir := cmp.Or(params.WorkingDir, workingDir)
+
+			// In restricted mode, deny execution in directories outside allowed dirs.
+			absExecDir, _ := filepath.Abs(execWorkingDir)
+			if denied := dirRestrictions.DenyIfRestricted(absExecDir, BashToolName); denied != nil {
+				return *denied, nil
+			}
 
 			isSafeReadOnly := false
 			cmdLower := strings.ToLower(params.Command)

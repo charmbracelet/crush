@@ -63,6 +63,7 @@ func NewMultiEditTool(
 	files history.Service,
 	filetracker filetracker.Service,
 	workingDir string,
+	dirRestrictions DirRestrictions,
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		MultiEditToolName,
@@ -77,6 +78,12 @@ func NewMultiEditTool(
 			}
 
 			params.FilePath = filepathext.SmartJoin(workingDir, params.FilePath)
+
+			// In restricted mode, deny edits outside allowed directories.
+			absFilePath, _ := filepath.Abs(params.FilePath)
+			if denied := dirRestrictions.DenyIfRestricted(absFilePath, MultiEditToolName); denied != nil {
+				return *denied, nil
+			}
 
 			// Validate all edits before applying any
 			if err := validateEdits(params.Edits); err != nil {

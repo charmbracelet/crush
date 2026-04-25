@@ -64,6 +64,7 @@ func NewViewTool(
 	filetracker filetracker.Service,
 	skillTracker *skills.Tracker,
 	workingDir string,
+	dirRestrictions DirRestrictions,
 	skillsPaths ...string,
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
@@ -103,8 +104,15 @@ func NewViewTool(
 				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for accessing files outside working directory")
 			}
 
-			// Request permission for files outside working directory, unless it's a skill file.
-			if isOutsideWorkDir && !isSkillFile {
+			// Request permission for files outside working directory,
+			// unless it's a skill file or in an additional directory.
+			isAdditionalDir := isInAdditionalDir(absFilePath, dirRestrictions.AdditionalDirs)
+			if isOutsideWorkDir && !isSkillFile && !isAdditionalDir {
+				// In restricted mode, deny outright instead of prompting.
+				if denied := dirRestrictions.DenyIfRestricted(absFilePath, ViewToolName); denied != nil {
+					return *denied, nil
+				}
+
 				granted, permReqErr := permissions.Request(ctx,
 					permission.CreatePermissionRequest{
 						SessionID:   sessionID,
@@ -373,6 +381,44 @@ func isInSkillsPath(filePath string, skillsPaths []string) bool {
 		}
 
 		relPath, err := filepath.Rel(evalSkillsPath, evalFilePath)
+		if err == nil && !strings.HasPrefix(relPath, "..") {
+			return true
+		}
+	}
+
+	return false
+}
+
+// isInAdditionalDir checks if filePath is within any of the configured
+// additional directories. Returns true for files that can be read/listed
+// without permission prompts.
+func isInAdditionalDir(filePath string, additionalDirs []string) bool {
+	if len(additionalDirs) == 0 {
+		return false
+	}
+
+	absFilePath, err := filepath.Abs(filePath)
+	if err != nil {
+		return false
+	}
+
+	evalFilePath, err := filepath.EvalSymlinks(absFilePath)
+	if err != nil {
+		return false
+	}
+
+	for _, dir := range additionalDirs {
+		absDir, err := filepath.Abs(dir)
+		if err != nil {
+			continue
+		}
+
+		evalDir, err := filepath.EvalSymlinks(absDir)
+		if err != nil {
+			continue
+		}
+
+		relPath, err := filepath.Rel(evalDir, evalFilePath)
 		if err == nil && !strings.HasPrefix(relPath, "..") {
 			return true
 		}

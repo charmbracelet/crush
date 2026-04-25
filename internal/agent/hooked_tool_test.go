@@ -112,3 +112,36 @@ func TestHookedTool_DenySkipsInnerTool(t *testing.T) {
 	require.True(t, resp.IsError)
 	require.Contains(t, resp.Content, "blocked")
 }
+
+func TestWrapToolsWithHooks(t *testing.T) {
+	t.Parallel()
+
+	runner := newRunner(t, `exit 0`)
+	inputs := []fantasy.AgentTool{&fakeTool{name: "a"}, &fakeTool{name: "b"}}
+
+	t.Run("top-level agent wraps every tool", func(t *testing.T) {
+		t.Parallel()
+		out := wrapToolsWithHooks(inputs, runner, false)
+		require.Len(t, out, len(inputs))
+		for i, tool := range out {
+			_, ok := tool.(*hookedTool)
+			require.Truef(t, ok, "tool %d should be a *hookedTool", i)
+		}
+	})
+
+	t.Run("sub-agent skips the wrap", func(t *testing.T) {
+		t.Parallel()
+		out := wrapToolsWithHooks(inputs, runner, true)
+		require.Equal(t, inputs, out, "sub-agent tools should be returned unwrapped")
+		for _, tool := range out {
+			_, isHooked := tool.(*hookedTool)
+			require.False(t, isHooked, "sub-agent tool should not be wrapped")
+		}
+	})
+
+	t.Run("nil runner skips the wrap for both agent kinds", func(t *testing.T) {
+		t.Parallel()
+		require.Equal(t, inputs, wrapToolsWithHooks(inputs, nil, false))
+		require.Equal(t, inputs, wrapToolsWithHooks(inputs, nil, true))
+	})
+}

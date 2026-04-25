@@ -13,7 +13,6 @@ import (
 
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
-	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/permission"
 )
 
@@ -173,13 +172,10 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, nil, tmpDir),
 			}
 
-			// Wrap tools with hook interception if PreToolUse hooks are configured.
-			if preToolHooks := c.cfg.Config().Hooks[hooks.EventPreToolUse]; len(preToolHooks) > 0 {
-				runner := hooks.NewRunner(preToolHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
-				for i, tool := range fetchTools {
-					fetchTools[i] = newHookedTool(tool, runner)
-				}
-			}
+			// Sub-agent tools run without hook interception. The top-level
+			// `agentic_fetch` call itself is already wrapped from the coder's
+			// side; firing hooks again for every inner tool call would run
+			// the user's hooks N times per delegated turn.
 
 			agent := NewSessionAgent(SessionAgentOptions{
 				LargeModel:           small, // Use small model for both (fetch doesn't need large)

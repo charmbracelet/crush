@@ -427,7 +427,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	})
 
 	c.readyWg.Go(func() error {
-		tools, err := c.buildTools(ctx, agent)
+		tools, err := c.buildTools(ctx, agent, isSubAgent)
 		if err != nil {
 			return err
 		}
@@ -438,7 +438,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	return result, nil
 }
 
-func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fantasy.AgentTool, error) {
+func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool) ([]fantasy.AgentTool, error) {
 	var allTools []fantasy.AgentTool
 	if slices.Contains(agent.AllowedTools, AgentToolName) {
 		agentTool, err := c.agentTool(ctx)
@@ -538,12 +538,12 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		return strings.Compare(a.Info().Name, b.Info().Name)
 	})
 
-	// Wrap tools with hook interception if hook runner was created.
-	if hookRunner != nil {
-		for i, tool := range filteredTools {
-			filteredTools[i] = newHookedTool(tool, hookRunner)
-		}
-	}
+	// Wrap tools with hook interception for the top-level agent only.
+	// Sub-agents (the `agent` task tool, `agentic_fetch`, etc.) run
+	// without hook interception to avoid firing the user's hook N times
+	// per delegated turn. The top-level invocation of the sub-agent tool
+	// itself is still wrapped from the coder's side.
+	filteredTools = wrapToolsWithHooks(filteredTools, hookRunner, isSubAgent)
 
 	return filteredTools, nil
 }
@@ -923,7 +923,7 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 		return errCoderAgentNotConfigured
 	}
 
-	tools, err := c.buildTools(ctx, agentCfg)
+	tools, err := c.buildTools(ctx, agentCfg, false)
 	if err != nil {
 		return err
 	}

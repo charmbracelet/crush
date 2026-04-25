@@ -17,6 +17,11 @@ languages at the end, too.
   never see a permission prompt for it. If a hook explicitly allows a tool
   call, you'll _also_ never see a prompt — Crush treats `"decision": "allow"`
   as affirmative pre-approval.
+- Hooks only fire on the **top-level agent's** tool calls. Sub-agents (the
+  `agent` task tool, `agentic_fetch`, etc.) run without hook interception so
+  a single delegated turn doesn't trigger your hook N times. The outer
+  sub-agent tool call itself _is_ hooked, so policy like "never let the
+  agent spawn sub-agents" still works.
 - Hooks are also compatible with hooks in Claude Code, however this document
   covers the Crush-specific API only. One intentional divergence: Crush treats
   `updated_input` as a shallow-merge patch rather than a full replacement — see

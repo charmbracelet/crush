@@ -335,6 +335,33 @@ using `$(echo $VAR)` syntax.
 }
 ```
 
+### Global context files
+
+Crush automatically includes two files for cross-project instructions.
+
+- `~/.config/crush/CRUSH.md`: Crush-specific rules that would confuse other
+  agentic coding tools. If you only use Crush, this is the only one you need to
+  edit.
+- `~/.config/AGENTS.md`: generic instructions that other coding tools might
+  read. Avoid referring to Crush-specific features or workflows here. You
+  probably only care about this if you use multiple agentic coding tools and
+  want to share instructions between them.
+
+You can customize these paths using the `global_context_paths` option in your
+configuration:
+
+```jsonc
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "global_context_paths": [
+      "~/path/to/custom/context/file.md",
+      "/full/path/to/folder/of/files/" // recursively load all .md files in folder
+    ]
+  }
+}
+```
+
 ### Ignoring Files
 
 Crush respects `.gitignore` files by default, but you can also create a

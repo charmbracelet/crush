@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"testing"
 	"text/template"
 	"time"
 
@@ -28,16 +29,17 @@ type Prompt struct {
 }
 
 type PromptDat struct {
-	Provider      string
-	Model         string
-	Config        config.Config
-	WorkingDir    string
-	IsGitRepo     bool
-	Platform      string
-	Date          string
-	GitStatus     string
-	ContextFiles  []ContextFile
-	AvailSkillXML string
+	Provider           string
+	Model              string
+	Config             config.Config
+	WorkingDir         string
+	IsGitRepo          bool
+	Platform           string
+	Date               string
+	GitStatus          string
+	ContextFiles       []ContextFile
+	GlobalContextFiles []ContextFile
+	AvailSkillXML      string
 }
 
 type ContextFile struct {
@@ -153,17 +155,28 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 	workingDir := cmp.Or(p.workingDir, store.WorkingDir())
 	platform := cmp.Or(p.platform, runtime.GOOS)
 
-	files := map[string][]ContextFile{}
+	contextFiles := map[string][]ContextFile{}
+	globalContextFiles := map[string][]ContextFile{}
 
 	cfg := store.Config()
 	for _, pth := range cfg.Options.ContextPaths {
 		expanded := expandPath(pth, store)
 		pathKey := strings.ToLower(expanded)
-		if _, ok := files[pathKey]; ok {
+		if _, ok := contextFiles[pathKey]; ok {
 			continue
 		}
 		content := processContextPath(expanded, store)
-		files[pathKey] = content
+		contextFiles[pathKey] = content
+	}
+
+	for _, pth := range cfg.Options.GlobalContextPaths {
+		expanded := expandPath(pth, store)
+		pathKey := strings.ToLower(expanded)
+		if _, ok := globalContextFiles[pathKey]; ok {
+			continue
+		}
+		content := processContextPath(expanded, store)
+		globalContextFiles[pathKey] = content
 	}
 
 	// Discover and load skills metadata.
@@ -219,8 +232,13 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		}
 	}
 
-	for _, contextFiles := range files {
-		data.ContextFiles = append(data.ContextFiles, contextFiles...)
+	for _, files := range contextFiles {
+		data.ContextFiles = append(data.ContextFiles, files...)
+	}
+	if !testing.Testing() {
+		for _, files := range globalContextFiles {
+			data.GlobalContextFiles = append(data.GlobalContextFiles, files...)
+		}
 	}
 	return data, nil
 }

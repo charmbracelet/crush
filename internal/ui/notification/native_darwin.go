@@ -3,10 +3,12 @@
 package notification
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/gen2brain/beeep"
 )
@@ -75,8 +77,10 @@ func lookupBundleID(appName string) string {
 	// Try common variations of the app name.
 	variations := []string{appName, strings.TrimSuffix(appName, ".app")}
 	for _, name := range variations {
-		cmd := exec.Command("osascript", "-e", `id of app "`+name+`"`)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		cmd := exec.CommandContext(ctx, "osascript", "-e", `id of app "`+name+`"`)
 		out, err := cmd.Output()
+		cancel()
 		if err == nil {
 			return strings.TrimSpace(string(out))
 		}
@@ -116,7 +120,10 @@ func (b *NativeBackend) sendWithTerminalNotifier(n Notification) error {
 		args = append(args, "-activate", b.terminalBundleID)
 	}
 
-	cmd := exec.Command("terminal-notifier", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "terminal-notifier", args...)
 	if err := cmd.Run(); err != nil {
 		slog.Error("Failed to send notification via terminal-notifier", "error", err)
 		return err

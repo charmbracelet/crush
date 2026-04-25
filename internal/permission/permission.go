@@ -12,6 +12,28 @@ import (
 	"github.com/google/uuid"
 )
 
+// hookApprovalKey is the unexported context key used to mark a tool call as
+// pre-approved by a PreToolUse hook. The value is the tool call ID so an
+// approval can't be reused across calls that happen to share a context.
+type hookApprovalKey struct{}
+
+// WithHookApproval returns a context that marks the given tool call ID as
+// pre-approved by a hook. When the permission service sees a matching
+// request it short-circuits the normal prompt and grants immediately.
+func WithHookApproval(ctx context.Context, toolCallID string) context.Context {
+	return context.WithValue(ctx, hookApprovalKey{}, toolCallID)
+}
+
+// hookApproved reports whether the context carries a hook approval for the
+// given tool call ID.
+func hookApproved(ctx context.Context, toolCallID string) bool {
+	if toolCallID == "" {
+		return false
+	}
+	v, _ := ctx.Value(hookApprovalKey{}).(string)
+	return v == toolCallID
+}
+
 type CreatePermissionRequest struct {
 	SessionID   string `json:"session_id"`
 	ToolCallID  string `json:"tool_call_id"`
@@ -134,6 +156,18 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	// Check if the tool/action combination is in the allowlist
 	commandKey := opts.ToolName + ":" + opts.Action
 	if slices.Contains(s.allowedTools, commandKey) || slices.Contains(s.allowedTools, opts.ToolName) {
+		return true, nil
+	}
+
+	// A PreToolUse hook that returned decision=allow stamps the context
+	// with the tool call ID. Treat that as a pre-approval and skip the
+	// prompt entirely. We still publish a granted notification so the UI
+	// and audit subscribers see the outcome.
+	if hookApproved(ctx, opts.ToolCallID) {
+		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+			ToolCallID: opts.ToolCallID,
+			Granted:    true,
+		})
 		return true, nil
 	}
 

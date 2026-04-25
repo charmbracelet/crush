@@ -9,6 +9,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/hooks"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/tidwall/sjson"
 )
 
@@ -58,6 +59,13 @@ func (h *hookedTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.To
 
 	if result.UpdatedInput != "" {
 		call.Input = result.UpdatedInput
+	}
+
+	// An explicit allow from a hook pre-approves the permission prompt for
+	// this tool call. Deny is already handled above; silence falls through
+	// to the normal permission flow.
+	if result.Decision == hooks.DecisionAllow {
+		ctx = permission.WithHookApproval(ctx, call.ID)
 	}
 
 	resp, err := h.inner.Run(ctx, call)

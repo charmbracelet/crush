@@ -13,8 +13,10 @@ languages at the end, too.
 
 ### Hot Hook Facts
 
-- Hooks run before permission checks. If a hook denies a tool call, you'll never
-  see a permission prompt for it.
+- Hooks run before permission checks. If a hook denies a tool call, you'll
+  never see a permission prompt for it. If a hook explicitly allows a tool
+  call, you'll _also_ never see a prompt — Crush treats `"decision": "allow"`
+  as affirmative pre-approval.
 - Hooks are also compatible with hooks in Claude Code, however this document
   covers the Crush-specific API only. One intentional divergence: Crush treats
   `updated_input` as a shallow-merge patch rather than a full replacement — see
@@ -197,6 +199,13 @@ the input, or still deny/halt with a reason:
 if omitted. Unknown higher versions are still parsed; the field exists so the
 envelope can evolve without a compatibility shim.
 
+`decision: "allow"` is **affirmative**: it pre-approves the tool call and
+bypasses the permission prompt entirely. Silence (no `decision`, or
+`decision: null`) means "no opinion" — the tool still goes through the
+normal permission flow. Use `"allow"` when you want to auto-approve; omit it
+when you only want to inject context or rewrite input without also vouching
+for the call.
+
 `updated_input` is a shallow-merge patch. Keys you include overwrite matching
 keys in `tool_input`; keys you don't include are preserved. If the model called
 `bash` with `{"command": "npm test", "timeout": 60000}` and your hook returns
@@ -243,7 +252,8 @@ When multiple hooks match the same tool call:
 - If **any** hook denies, the tool call is blocked. `reason` values are
   concatenated in config order (newline-separated).
 - If **any** hook halts, the turn ends after the tool call is blocked.
-- If no hook denies or halts but at least one allows, the tool call proceeds.
+- If no hook denies or halts but at least one allows, the tool call proceeds
+  **and the permission prompt is skipped**.
 - `context` values are concatenated in config order. Strings and arrays compose
   uniformly — each string becomes one entry, and array entries are flattened in.
 - `updated_input` patches shallow-merge in config order against the original
@@ -279,14 +289,52 @@ Prevent the agent from running `rm -rf` in bash:
 
 ```bash
 #!/usr/bin/env bash
-# Block rm -rf commands in the bash tool.
+# Block rm -rf commands in the bash tool. Otherwise stay silent so the
+# normal permission flow runs.
 
 if echo "$CRUSH_TOOL_INPUT_COMMAND" | grep -qE 'rm\s+-(rf|fr)\s+/'; then
   echo "Refusing to run rm -rf against root" >&2
   exit 2
 fi
 
-echo '{"decision": "allow"}'
+exit 0
+```
+
+### Auto-approve read-only tools
+
+Skip the permission prompt for tools that can't change anything. The hook
+returns `decision: "allow"`, which tells Crush to pre-approve the call:
+
+```jsonc
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^(view|ls|grep|glob)$",
+        "command": "echo '{\"decision\":\"allow\"}'",
+      },
+    ],
+  },
+}
+```
+
+No script file needed — the command is inline. Every `view`/`ls`/`grep`/`glob`
+call now runs without prompting. Add the `bash` tool to this list at your own
+risk; consider a more targeted allowlist instead:
+
+```bash
+#!/usr/bin/env bash
+# hooks/safe-bash.sh — auto-approve read-only bash commands.
+
+case "$CRUSH_TOOL_INPUT_COMMAND" in
+  ls*|cat*|grep*|rg*|echo*|pwd*)
+    echo '{"decision":"allow"}'
+    ;;
+  *)
+    # Silent — fall through to the normal permission prompt.
+    exit 0
+    ;;
+esac
 ```
 
 ### Inject context into file writes
@@ -311,9 +359,11 @@ Add a reminder to the model whenever it writes a Go file:
 ```bash
 #!/usr/bin/env bash
 # Remind the model about Go formatting when editing .go files.
+# Emit context only; stay silent on `decision` so the normal permission
+# prompt still runs for edits/writes.
 
 if [[ "$CRUSH_TOOL_INPUT_FILE_PATH" == *.go ]]; then
-  echo '{"decision": "allow", "context": "Remember: run gofumpt after editing Go files."}'
+  echo '{"context": "Remember: run gofumpt after editing Go files."}'
 else
   echo '{}'
 fi
@@ -360,8 +410,6 @@ if tool_input:match("rm%s+%-[rf][rf]%s+/") then
   io.stderr:write("Refusing to run rm -rf against root\n")
   os.exit(2)
 end
-
-print('{"decision": "allow"}')
 ```
 
 #### JavaScript
@@ -378,8 +426,6 @@ process.stdin.on("end", () => {
     process.stderr.write("Refusing to run rm -rf against root\n");
     process.exit(2);
   }
-
-  console.log(JSON.stringify({ decision: "allow" }));
 });
 ```
 
@@ -479,8 +525,10 @@ Extends the common envelope:
 {
   // ...common fields...
 
-  // "allow" | "deny" | null. null/omitted = no opinion. "deny" blocks the tool
-  // call; the model sees the error and may try something else.
+  // "allow" | "deny" | null. null/omitted = no opinion, the tool still goes
+  // through the normal permission prompt. "allow" is affirmative: pre-approves
+  // the tool call and bypasses the prompt. "deny" blocks the call; the model
+  // sees the error and may try something else.
   "decision": "allow",
 
   // object. Shallow-merge patch against tool_input. Nested objects are
@@ -518,7 +566,10 @@ Universal rules:
 PreToolUse-specific rules:
 
 4. `decision` precedence: `deny` > `allow` > `null`. First deny determines the
-   outcome; subsequent allows don't override.
+   outcome; subsequent allows don't override. If the final aggregated decision
+   is `allow`, Crush pre-approves the tool call and skips the permission
+   prompt. If it's `null` (no hook allowed), the tool goes through the normal
+   permission flow.
 5. `updated_input` patches shallow-merge sequentially against the original
    `tool_input`. Later patches override earlier ones on colliding keys. Patches
    are **ignored** if the final decision is deny or halt.

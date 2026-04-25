@@ -15,4 +15,5 @@ Search the web via DuckDuckGo; returns titles, URLs, and snippets. Follow up wit
 - Use specific, targeted search queries for better results
 - After getting results, use web_fetch to get the full content of relevant pages
 - Combine multiple searches to gather comprehensive information
+- For GitHub searches when an exact repo name, issue, or link is provided, use `gh search` in bash instead
 </tips>

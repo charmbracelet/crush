@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -38,11 +39,15 @@ var sessionCmd = &cobra.Command{
 }
 
 var (
-	sessionListJSON   bool
-	sessionShowJSON   bool
-	sessionLastJSON   bool
-	sessionDeleteJSON bool
-	sessionRenameJSON bool
+	sessionListJSON    bool
+	sessionShowJSON    bool
+	sessionShowMD      bool
+	sessionShowOutFile string
+	sessionLastJSON    bool
+	sessionLastMD      bool
+	sessionLastOutFile string
+	sessionDeleteJSON  bool
+	sessionRenameJSON  bool
 )
 
 var sessionListCmd = &cobra.Command{
@@ -56,7 +61,7 @@ var sessionListCmd = &cobra.Command{
 var sessionShowCmd = &cobra.Command{
 	Use:   "show <id>",
 	Short: "Show session details",
-	Long:  "Show session details. Use --json for machine-readable output. ID can be a UUID, full hash, or hash prefix.",
+	Long:  "Show session details. Use --json, --markdown, or -o <file> for export. ID can be a UUID, full hash, or hash prefix.",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runSessionShow,
 }
@@ -64,7 +69,7 @@ var sessionShowCmd = &cobra.Command{
 var sessionLastCmd = &cobra.Command{
 	Use:   "last",
 	Short: "Show most recent session",
-	Long:  "Show the last updated session. Use --json for machine-readable output.",
+	Long:  "Show the last updated session. Supports --json, --markdown, and -o <file>.",
 	RunE:  runSessionLast,
 }
 
@@ -88,7 +93,11 @@ var sessionRenameCmd = &cobra.Command{
 func init() {
 	sessionListCmd.Flags().BoolVar(&sessionListJSON, "json", false, "output in JSON format")
 	sessionShowCmd.Flags().BoolVar(&sessionShowJSON, "json", false, "output in JSON format")
+	sessionShowCmd.Flags().BoolVar(&sessionShowMD, "markdown", false, "output as markdown")
+	sessionShowCmd.Flags().StringVarP(&sessionShowOutFile, "output", "o", "", "write output to file (format detected from extension: .md, .json)")
 	sessionLastCmd.Flags().BoolVar(&sessionLastJSON, "json", false, "output in JSON format")
+	sessionLastCmd.Flags().BoolVar(&sessionLastMD, "markdown", false, "output as markdown")
+	sessionLastCmd.Flags().StringVarP(&sessionLastOutFile, "output", "o", "", "write output to file (format detected from extension: .md, .json)")
 	sessionDeleteCmd.Flags().BoolVar(&sessionDeleteJSON, "json", false, "output in JSON format")
 	sessionRenameCmd.Flags().BoolVar(&sessionRenameJSON, "json", false, "output in JSON format")
 	sessionCmd.AddCommand(sessionListCmd)
@@ -277,10 +286,7 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 	}
 
 	msgPtrs := messagePtrs(msgs)
-	if sessionShowJSON {
-		return outputSessionJSON(cmd.OutOrStdout(), sess, msgPtrs)
-	}
-	return outputSessionHuman(ctx, sess, msgPtrs)
+	return renderSession(cmd, ctx, sess, msgPtrs, sessionShowJSON, sessionShowMD, sessionShowOutFile)
 }
 
 func runSessionDelete(cmd *cobra.Command, args []string) error {
@@ -356,6 +362,170 @@ func runSessionRename(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// sessionOutputFormat determines the output format based on flags, file extension, and TTY state.
+// Priority: explicit flags (--json, --markdown) > file extension > non-TTY default (markdown) > human.
+func sessionOutputFormat(jsonFlag, mdFlag bool, outputPath string) string {
+	if jsonFlag {
+		return "json"
+	}
+	if mdFlag {
+		return "markdown"
+	}
+	if outputPath != "" {
+		switch strings.ToLower(filepath.Ext(outputPath)) {
+		case ".md", ".markdown":
+			return "markdown"
+		case ".json":
+			return "json"
+		}
+	}
+	if !term.IsTerminal(os.Stdout.Fd()) {
+		return "markdown"
+	}
+	return "human"
+}
+
+// renderSession dispatches to the correct output format and handles -o file writing.
+func renderSession(cmd *cobra.Command, ctx context.Context, sess session.Session, msgs []*message.Message, jsonFlag, mdFlag bool, outputPath string) error {
+	format := sessionOutputFormat(jsonFlag, mdFlag, outputPath)
+
+	// When writing to a file, always use a structured format — human/pager output
+	// doesn't make sense for file destinations.
+	if outputPath != "" && format == "human" {
+		format = "markdown"
+	}
+
+	// Determine the writer: file or stdout.
+	var w io.Writer
+	if outputPath != "" {
+		f, err := os.Create(outputPath)
+		if err != nil {
+			return fmt.Errorf("failed to create output file: %w", err)
+		}
+		defer f.Close()
+		w = f
+	} else {
+		w = cmd.OutOrStdout()
+	}
+
+	switch format {
+	case "json":
+		return outputSessionJSON(w, sess, msgs)
+	case "markdown":
+		return outputSessionMarkdown(w, sess, msgs)
+	default:
+		return outputSessionHuman(ctx, sess, msgs)
+	}
+}
+
+// outputSessionMarkdown writes a session as a self-contained markdown document.
+func outputSessionMarkdown(w io.Writer, sess session.Session, msgs []*message.Message) error {
+	var buf strings.Builder
+
+	created := time.Unix(sess.CreatedAt, 0).Format("2006-01-02 15:04:05 -0700")
+	hash := session.HashID(sess.ID)[:12]
+
+	// YAML frontmatter.
+	fmt.Fprintln(&buf, "---")
+	fmt.Fprintf(&buf, "title: %q\n", sess.Title)
+	fmt.Fprintf(&buf, "id: %s\n", hash)
+	fmt.Fprintf(&buf, "date: %s\n", created)
+	if sess.Cost > 0 {
+		fmt.Fprintf(&buf, "cost: $%.4f\n", sess.Cost)
+	}
+	if sess.PromptTokens > 0 || sess.CompletionTokens > 0 {
+		fmt.Fprintf(&buf, "tokens: %d\n", sess.PromptTokens+sess.CompletionTokens)
+	}
+	fmt.Fprintln(&buf, "---")
+	fmt.Fprintln(&buf)
+
+	// Title (sanitize newlines so the heading stays on one line).
+	safeTitle := strings.ReplaceAll(sess.Title, "\n", " ")
+	fmt.Fprintf(&buf, "# %s\n\n", safeTitle)
+
+	for _, msg := range msgs {
+		if msg.Role == message.System {
+			continue
+		}
+
+		switch msg.Role {
+		case message.User:
+			fmt.Fprintln(&buf, "## User")
+			fmt.Fprintln(&buf)
+			text := msg.Content().Text
+			if text != "" {
+				fmt.Fprintln(&buf, strings.TrimSpace(text))
+				fmt.Fprintln(&buf)
+			}
+
+		case message.Assistant:
+			fmt.Fprintln(&buf, "## Assistant")
+			if msg.Model != "" {
+				fmt.Fprintf(&buf, "\n*Model: %s", msg.Model)
+				if msg.Provider != "" {
+					fmt.Fprintf(&buf, " (%s)", msg.Provider)
+				}
+				fmt.Fprintln(&buf, "*")
+			}
+			fmt.Fprintln(&buf)
+
+			// Reasoning/thinking.
+			reasoning := msg.ReasoningContent()
+			if reasoning.Thinking != "" {
+				fmt.Fprintln(&buf, "<details>")
+				fmt.Fprintln(&buf, "<summary>Thinking</summary>")
+				fmt.Fprintln(&buf)
+				fmt.Fprintln(&buf, strings.TrimSpace(reasoning.Thinking))
+				fmt.Fprintln(&buf)
+				fmt.Fprintln(&buf, "</details>")
+				fmt.Fprintln(&buf)
+			}
+
+			// Text response.
+			text := msg.Content().Text
+			if text != "" {
+				fmt.Fprintln(&buf, strings.TrimSpace(text))
+				fmt.Fprintln(&buf)
+			}
+
+			// Tool calls.
+			for _, tc := range msg.ToolCalls() {
+				fmt.Fprintf(&buf, "### Tool Call: `%s`\n\n", tc.Name)
+				if tc.Input != "" {
+					fmt.Fprintln(&buf, "```json")
+					fmt.Fprintln(&buf, tc.Input)
+					fmt.Fprintln(&buf, "```")
+					fmt.Fprintln(&buf)
+				}
+			}
+
+		case message.Tool:
+			for _, tr := range msg.ToolResults() {
+				fmt.Fprintf(&buf, "### Tool Result: `%s`\n\n", tr.Name)
+				if tr.IsError {
+					fmt.Fprintln(&buf, "**Error:**")
+					fmt.Fprintln(&buf)
+				}
+				content := strings.TrimSpace(tr.Content)
+				if content != "" {
+					fmt.Fprintln(&buf, "<details>")
+					fmt.Fprintf(&buf, "<summary>Output (%d bytes)</summary>\n", len(content))
+					fmt.Fprintln(&buf)
+					fmt.Fprintln(&buf, "```")
+					fmt.Fprintln(&buf, content)
+					fmt.Fprintln(&buf, "```")
+					fmt.Fprintln(&buf)
+					fmt.Fprintln(&buf, "</details>")
+					fmt.Fprintln(&buf)
+				}
+			}
+		}
+	}
+
+	_, err := io.WriteString(w, buf.String())
+	return err
+}
+
 func runSessionLast(cmd *cobra.Command, _ []string) error {
 	event.SetNonInteractive(true)
 
@@ -384,10 +554,7 @@ func runSessionLast(cmd *cobra.Command, _ []string) error {
 	}
 
 	msgPtrs := messagePtrs(msgs)
-	if sessionLastJSON {
-		return outputSessionJSON(cmd.OutOrStdout(), sess, msgPtrs)
-	}
-	return outputSessionHuman(ctx, sess, msgPtrs)
+	return renderSession(cmd, ctx, sess, msgPtrs, sessionLastJSON, sessionLastMD, sessionLastOutFile)
 }
 
 const (

@@ -594,7 +594,12 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	// OnStepFinish errors, and that callback's Update can fail when genCtx
 	// was cancelled right after stream completion), write one with a
 	// detached ctx so the UI spinner always stops.
-	a.ensureAssistantFinished(call.SessionID, currentAssistant)
+	if currentAssistant != nil && !currentAssistant.IsFinished() {
+		slog.Warn("Run completed without persisted finish part; writing fallback terminal state",
+			"session_id", call.SessionID,
+			"message_id", currentAssistant.ID)
+	}
+	a.persistTerminalFinish(call.SessionID, currentAssistant, message.FinishReasonEndTurn, "")
 
 	// Send notification that agent has finished its turn (skip for
 	// nested/non-interactive sessions).
@@ -637,24 +642,23 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	return a.Run(ctx, firstQueuedMessage)
 }
 
-// ensureAssistantFinished is a defense-in-depth fallback: if the assistant
-// message from a successful stream has no terminal finish part persisted —
-// which can happen when fantasy swallows an OnStepFinish error and the
-// underlying Update failed because genCtx was cancelled right after stream
-// completion — write FinishReasonEndTurn with a detached ctx so the UI
-// spinner cannot hang. No-ops for nil or already-finished messages.
-func (a *sessionAgent) ensureAssistantFinished(sessionID string, assistant *message.Message) {
-	if assistant == nil || assistant.IsFinished() {
+// persistTerminalFinish appends a finish part to an assistant-role message
+// and flushes it to the database using a detached context. It is the single
+// entry point for closing out a message's lifecycle so the UI spinner
+// cannot hang on a cancelled genCtx. No-ops on nil or already-finished
+// messages. Errors from the underlying Update are logged but not returned
+// — callers are at terminal points where a write failure must not block
+// further bookkeeping.
+func (a *sessionAgent) persistTerminalFinish(sessionID string, msg *message.Message, reason message.FinishReason, errTitle string) {
+	if msg == nil || msg.IsFinished() {
 		return
 	}
-	slog.Warn("Run completed without persisted finish part; writing fallback terminal state",
-		"session_id", sessionID,
-		"message_id", assistant.ID)
-	assistant.AddFinish(message.FinishReasonEndTurn, "", "")
-	if err := a.messages.Update(context.Background(), *assistant); err != nil {
-		slog.Error("Run terminal-state fallback write failed; spinner may hang",
+	msg.AddFinish(reason, errTitle, "")
+	if err := a.messages.Update(context.Background(), *msg); err != nil {
+		slog.Error("terminal-state write failed; spinner may hang",
 			"session_id", sessionID,
-			"message_id", assistant.ID,
+			"message_id", msg.ID,
+			"reason", string(reason),
 			"err", err)
 	}
 }
@@ -751,30 +755,14 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 			return nil
 		}
 		// Non-cancel stream error: persist a terminal finish part so the UI
-		// leaves the spinning state. Use a detached ctx because genCtx may be
-		// cancelled and the whole point is for the user to see the failure.
-		summaryMessage.AddFinish(message.FinishReasonError, err.Error(), "")
-		if updErr := a.messages.Update(context.Background(), summaryMessage); updErr != nil {
-			slog.Error("summarize terminal-state write failed; spinner may hang",
-				"session_id", sessionID,
-				"message_id", summaryMessage.ID,
-				"err", updErr)
-		}
+		// leaves the spinning state.
+		a.persistTerminalFinish(sessionID, &summaryMessage, message.FinishReasonError, err.Error())
 		return err
 	}
 
-	summaryMessage.AddFinish(message.FinishReasonEndTurn, "", "")
-	// Use a detached ctx for the final terminal-state Update: if the parent
-	// ctx was cancelled right after the stream finished, genCtx would also be
-	// done and the finish part would never reach the database, leaving the
-	// UI spinner running forever.
-	if err := a.messages.Update(context.Background(), summaryMessage); err != nil {
-		slog.Error("summarize final update failed; spinner may hang",
-			"session_id", sessionID,
-			"message_id", summaryMessage.ID,
-			"err", err)
-		return err
-	}
+	// Final terminal-state write: go through the helper so a cancelled
+	// genCtx cannot swallow the finish part and leave the spinner running.
+	a.persistTerminalFinish(sessionID, &summaryMessage, message.FinishReasonEndTurn, "")
 
 	var openrouterCost *float64
 	for _, step := range resp.Steps {

@@ -100,11 +100,11 @@ func TestCancelAllTranslatesSummarizeKeyToSessionID(t *testing.T) {
 	}
 }
 
-// TestEnsureAssistantFinishedWritesFallback verifies the defense-in-depth
-// fallback: when Run's stream returns nil but the assistant message has no
-// terminal finish part, ensureAssistantFinished must append one so the UI
-// spinner stops.
-func TestEnsureAssistantFinishedWritesFallback(t *testing.T) {
+// TestPersistTerminalFinishWritesFallback verifies the helper: when an
+// assistant message has no terminal finish part, persistTerminalFinish must
+// append one and flush it so the UI spinner stops. Covers Run's success
+// fallback and Summarize's success path.
+func TestPersistTerminalFinishWritesFallback(t *testing.T) {
 	t.Parallel()
 
 	env := testEnv(t)
@@ -120,7 +120,7 @@ func TestEnsureAssistantFinishedWritesFallback(t *testing.T) {
 	require.False(t, msg.IsFinished(), "precondition: message must start unfinished")
 
 	a := &sessionAgent{messages: env.messages}
-	a.ensureAssistantFinished(sess.ID, &msg)
+	a.persistTerminalFinish(sess.ID, &msg, message.FinishReasonEndTurn, "")
 
 	// The in-memory msg now has the finish part, and the DB must reflect it.
 	require.True(t, msg.IsFinished(), "in-memory message should be finished after fallback")
@@ -131,10 +131,39 @@ func TestEnsureAssistantFinishedWritesFallback(t *testing.T) {
 	require.Equal(t, message.FinishReasonEndTurn, persisted.FinishPart().Reason)
 }
 
-// TestEnsureAssistantFinishedNoOpWhenAlreadyFinished verifies the fallback
-// is idempotent: if a finish part is already present it must not be
-// duplicated or overwritten.
-func TestEnsureAssistantFinishedNoOpWhenAlreadyFinished(t *testing.T) {
+// TestPersistTerminalFinishWritesErrorReason verifies that passing an error
+// title surfaces through the finish part. Covers Summarize's non-cancel
+// error path.
+func TestPersistTerminalFinishWritesErrorReason(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	sess, err := env.sessions.Create(t.Context(), "test")
+	require.NoError(t, err)
+
+	msg, err := env.messages.Create(t.Context(), sess.ID, message.CreateMessageParams{
+		Role:     message.Assistant,
+		Model:    "test",
+		Provider: "test",
+	})
+	require.NoError(t, err)
+
+	a := &sessionAgent{messages: env.messages}
+	a.persistTerminalFinish(sess.ID, &msg, message.FinishReasonError, "boom")
+
+	persisted, err := env.messages.Get(t.Context(), msg.ID)
+	require.NoError(t, err)
+	finish := persisted.FinishPart()
+	require.NotNil(t, finish)
+	require.Equal(t, message.FinishReasonError, finish.Reason)
+	require.Equal(t, "boom", finish.Message)
+}
+
+// TestPersistTerminalFinishNoOpWhenAlreadyFinished verifies idempotency:
+// if a finish part is already present it must not be duplicated or
+// overwritten. This is what lets callers invoke the helper on paths where
+// fantasy's OnStepFinish may or may not have already written a finish.
+func TestPersistTerminalFinishNoOpWhenAlreadyFinished(t *testing.T) {
 	t.Parallel()
 
 	env := testEnv(t)
@@ -151,7 +180,9 @@ func TestEnsureAssistantFinishedNoOpWhenAlreadyFinished(t *testing.T) {
 	require.NoError(t, env.messages.Update(t.Context(), msg))
 
 	a := &sessionAgent{messages: env.messages}
-	a.ensureAssistantFinished(sess.ID, &msg)
+	// Even with a conflicting EndTurn request the existing Error finish
+	// must stand.
+	a.persistTerminalFinish(sess.ID, &msg, message.FinishReasonEndTurn, "")
 
 	persisted, err := env.messages.Get(t.Context(), msg.ID)
 	require.NoError(t, err)
@@ -163,11 +194,12 @@ func TestEnsureAssistantFinishedNoOpWhenAlreadyFinished(t *testing.T) {
 		"existing finish message must not be overwritten")
 }
 
-// TestEnsureAssistantFinishedNilIsSafe documents that the helper tolerates
-// a nil assistant pointer — Run may bail out before creating the message.
-func TestEnsureAssistantFinishedNilIsSafe(t *testing.T) {
+// TestPersistTerminalFinishNilIsSafe documents that the helper tolerates a
+// nil message pointer — Run may bail out before creating the assistant
+// message.
+func TestPersistTerminalFinishNilIsSafe(t *testing.T) {
 	t.Parallel()
 
 	a := &sessionAgent{}
-	a.ensureAssistantFinished("sess", nil) // must not panic
+	a.persistTerminalFinish("sess", nil, message.FinishReasonEndTurn, "") // must not panic
 }

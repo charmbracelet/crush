@@ -3,6 +3,7 @@ package model
 import (
 	"testing"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	uistyles "github.com/charmbracelet/crush/internal/ui/styles"
@@ -55,4 +56,26 @@ func TestSkillStatusItemsIncludesBuiltinSkills(t *testing.T) {
 		}
 	}
 	require.True(t, hasBuiltin)
+}
+
+func TestSkillStatusItemsExcludesDisabledSkills(t *testing.T) {
+	t.Parallel()
+
+	st := uistyles.DefaultStyles()
+	ui := &UI{
+		com: &common.Common{
+			Styles:    &st,
+			Workspace: &testWorkspace{cfg: &config.Config{Options: &config.Options{DisabledSkills: []string{"go-doc", "crush-config"}}}},
+		},
+		skillStates: []*skills.SkillState{
+			{Name: "go-doc", Path: "/tmp/go-doc/SKILL.md", State: skills.StateNormal},
+		},
+	}
+
+	items := ui.skillStatusItems()
+
+	for _, item := range items {
+		require.NotEqual(t, "go-doc", item.name)
+		require.NotEqual(t, "crush-config", item.name)
+	}
 }

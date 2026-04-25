@@ -472,8 +472,16 @@ focused _and_ your terminal supports reporting the focus state.
 ```
 
 To disable desktop notifications, set `disable_notifications` to `true` in your
-configuration. On macOS, notifications currently lack icons due to platform
-limitations.
+configuration.
+
+On macOS, install `terminal-notifier` for improved notifications:
+
+```bash
+brew install terminal-notifier
+```
+
+With `terminal-notifier` installed, clicking a notification will focus the
+terminal window where Crush is running.
 
 ### Initialization
 

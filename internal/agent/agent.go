@@ -54,7 +54,18 @@ const (
 	largeContextWindowThreshold = 200_000
 	largeContextWindowBuffer    = 20_000
 	smallContextWindowRatio     = 0.2
+
+	// summarizeRequestKeySuffix namespaces the summarize cancel func in
+	// activeRequests so a concurrent Run and Summarize on the same session
+	// cannot clobber each other's cancel registration.
+	summarizeRequestKeySuffix = "-summarize"
 )
+
+// summarizeRequestKey returns the activeRequests key used to register the
+// summarize cancel func for a given session.
+func summarizeRequestKey(sessionID string) string {
+	return sessionID + summarizeRequestKeySuffix
+}
 
 var userAgent = fmt.Sprintf("Charm-Crush/%s (https://charm.land/crush)", version.Version)
 
@@ -640,8 +651,9 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	aiMsgs, _ := a.preparePrompt(msgs)
 
 	genCtx, cancel := context.WithCancel(ctx)
-	a.activeRequests.Set(sessionID, cancel)
-	defer a.activeRequests.Del(sessionID)
+	summarizeKey := summarizeRequestKey(sessionID)
+	a.activeRequests.Set(summarizeKey, cancel)
+	defer a.activeRequests.Del(summarizeKey)
 	defer cancel()
 
 	agent := fantasy.NewAgent(largeModel.Model,
@@ -694,15 +706,40 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		isCancelErr := errors.Is(err, context.Canceled)
 		if isCancelErr {
 			// User cancelled summarize we need to remove the summary message.
-			deleteErr := a.messages.Delete(ctx, summaryMessage.ID)
-			return deleteErr
+			// Use a detached ctx because the parent ctx that caused the
+			// cancellation may also be done.
+			if deleteErr := a.messages.Delete(context.Background(), summaryMessage.ID); deleteErr != nil {
+				slog.Warn("summarize cancel cleanup failed",
+					"session_id", sessionID,
+					"message_id", summaryMessage.ID,
+					"err", deleteErr)
+				return deleteErr
+			}
+			return nil
+		}
+		// Non-cancel stream error: persist a terminal finish part so the UI
+		// leaves the spinning state. Use a detached ctx because genCtx may be
+		// cancelled and the whole point is for the user to see the failure.
+		summaryMessage.AddFinish(message.FinishReasonError, err.Error(), "")
+		if updErr := a.messages.Update(context.Background(), summaryMessage); updErr != nil {
+			slog.Error("summarize terminal-state write failed; spinner may hang",
+				"session_id", sessionID,
+				"message_id", summaryMessage.ID,
+				"err", updErr)
 		}
 		return err
 	}
 
 	summaryMessage.AddFinish(message.FinishReasonEndTurn, "", "")
-	err = a.messages.Update(genCtx, summaryMessage)
-	if err != nil {
+	// Use a detached ctx for the final terminal-state Update: if the parent
+	// ctx was cancelled right after the stream finished, genCtx would also be
+	// done and the finish part would never reach the database, leaving the
+	// UI spinner running forever.
+	if err := a.messages.Update(context.Background(), summaryMessage); err != nil {
+		slog.Error("summarize final update failed; spinner may hang",
+			"session_id", sessionID,
+			"message_id", summaryMessage.ID,
+			"err", err)
 		return err
 	}
 
@@ -1083,7 +1120,7 @@ func (a *sessionAgent) Cancel(sessionID string) {
 	}
 
 	// Also check for summarize requests.
-	if cancel, ok := a.activeRequests.Get(sessionID + "-summarize"); ok && cancel != nil {
+	if cancel, ok := a.activeRequests.Get(summarizeRequestKey(sessionID)); ok && cancel != nil {
 		slog.Debug("Summarize cancellation initiated", "session_id", sessionID)
 		cancel()
 	}
@@ -1106,7 +1143,10 @@ func (a *sessionAgent) CancelAll() {
 		return
 	}
 	for key := range a.activeRequests.Seq2() {
-		a.Cancel(key) // key is sessionID
+		// Translate summarize keys back to their session ID so Cancel hits
+		// both the run and summarize cancel funcs for that session.
+		sessionID := strings.TrimSuffix(key, summarizeRequestKeySuffix)
+		a.Cancel(sessionID)
 	}
 
 	timeout := time.After(5 * time.Second)
@@ -1132,7 +1172,12 @@ func (a *sessionAgent) IsBusy() bool {
 }
 
 func (a *sessionAgent) IsSessionBusy(sessionID string) bool {
-	_, busy := a.activeRequests.Get(sessionID)
+	if _, busy := a.activeRequests.Get(sessionID); busy {
+		return true
+	}
+	// A running summarize also counts as busy so we never launch a concurrent
+	// generation against the same session.
+	_, busy := a.activeRequests.Get(summarizeRequestKey(sessionID))
 	return busy
 }
 

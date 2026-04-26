@@ -62,6 +62,12 @@ type (
 	ActionSelectReasoningEffort struct {
 		Effort string
 	}
+	ActionSelectSearchEngine struct {
+		Engine config.SearchEngine
+	}
+	ActionSaveKagiAPIKey struct {
+		APIKey string
+	}
 	ActionPermissionResponse struct {
 		Permission permission.PermissionRequest
 		Action     PermissionAction

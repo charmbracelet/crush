@@ -105,8 +105,9 @@ func TestCancelAllTranslatesSummarizeKeyToSessionID(t *testing.T) {
 // append one and flush it so the UI spinner stops. Covers Run's success
 // fallback and Summarize's success path.
 func TestPersistTerminalFinishWritesFallback(t *testing.T) {
-	t.Parallel()
-
+	// Not t.Parallel(): testEnv calls db.Connect, which calls the package-
+	// global goose.SetDialect — see the other testEnv-using tests in this
+	// package which likewise run serially.
 	env := testEnv(t)
 	sess, err := env.sessions.Create(t.Context(), "test")
 	require.NoError(t, err)
@@ -135,8 +136,7 @@ func TestPersistTerminalFinishWritesFallback(t *testing.T) {
 // title surfaces through the finish part. Covers Summarize's non-cancel
 // error path.
 func TestPersistTerminalFinishWritesErrorReason(t *testing.T) {
-	t.Parallel()
-
+	// Not t.Parallel(); see TestPersistTerminalFinishWritesFallback.
 	env := testEnv(t)
 	sess, err := env.sessions.Create(t.Context(), "test")
 	require.NoError(t, err)
@@ -164,8 +164,7 @@ func TestPersistTerminalFinishWritesErrorReason(t *testing.T) {
 // overwritten. This is what lets callers invoke the helper on paths where
 // fantasy's OnStepFinish may or may not have already written a finish.
 func TestPersistTerminalFinishNoOpWhenAlreadyFinished(t *testing.T) {
-	t.Parallel()
-
+	// Not t.Parallel(); see TestPersistTerminalFinishWritesFallback.
 	env := testEnv(t)
 	sess, err := env.sessions.Create(t.Context(), "test")
 	require.NoError(t, err)

@@ -414,6 +414,18 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			case fantasy.FinishReasonToolCalls:
 				finishReason = message.FinishReasonToolUse
 			}
+			// If a tool result halted the turn (e.g. a hook halt or a
+			// permission denial), the step ends on FinishReasonToolCalls but
+			// the model will not be called again. Treat it as the end of the
+			// turn so the UI can render the assistant footer.
+			if finishReason == message.FinishReasonToolUse {
+				for _, tr := range stepResult.Response.Content.ToolResults() {
+					if tr.StopTurn {
+						finishReason = message.FinishReasonEndTurn
+						break
+					}
+				}
+			}
 			currentAssistant.AddFinish(finishReason, "", "")
 			sessionLock.Lock()
 			defer sessionLock.Unlock()

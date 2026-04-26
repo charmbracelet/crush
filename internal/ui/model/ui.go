@@ -1092,9 +1092,10 @@ func (m *UI) handleClickFocus(msg tea.MouseClickMsg) (cmd tea.Cmd) {
 	return cmd
 }
 
-// updateSessionMessage updates an existing message in the current session in the chat
-// when an assistant message is updated it may include updated tool calls as well
-// that is why we need to handle creating/updating each tool call message too
+// updateSessionMessage updates an existing message in the current session in
+// the chat when an assistant message is updated it may include updated tool
+// calls as well that is why we need to handle creating/updating each tool call
+// message too.
 func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 	var cmds []tea.Cmd
 	existingItem := m.chat.MessageItem(msg.ID)
@@ -1106,15 +1107,21 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 	}
 
 	shouldRenderAssistant := chat.ShouldRenderAssistantMessage(&msg)
-	// if the message of the assistant does not have any  response just tool calls we need to remove it
+	isEndTurn := msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn
+	// If the message of the assistant does not have any response just tool
+	// calls we need to remove it, but keep the info item for end-of-turn
+	// renders so the footer (model/provider/duration) remains visible when,
+	// for example, a hook halts the turn.
 	if !shouldRenderAssistant && len(msg.ToolCalls()) > 0 && existingItem != nil {
 		m.chat.RemoveMessage(msg.ID)
-		if infoItem := m.chat.MessageItem(chat.AssistantInfoID(msg.ID)); infoItem != nil {
-			m.chat.RemoveMessage(chat.AssistantInfoID(msg.ID))
+		if !isEndTurn {
+			if infoItem := m.chat.MessageItem(chat.AssistantInfoID(msg.ID)); infoItem != nil {
+				m.chat.RemoveMessage(chat.AssistantInfoID(msg.ID))
+			}
 		}
 	}
 
-	if shouldRenderAssistant && msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
+	if isEndTurn {
 		if infoItem := m.chat.MessageItem(chat.AssistantInfoID(msg.ID)); infoItem == nil {
 			newInfoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
 			m.chat.AppendMessages(newInfoItem)

@@ -294,13 +294,17 @@ var (
 
 // maybeDelaySearch adds a random delay if the last search was recent.
 func maybeDelaySearch() {
-	lastSearchMu.Lock()
-	defer lastSearchMu.Unlock()
-
 	minGap := time.Duration(500+rand.IntN(1500)) * time.Millisecond
-	elapsed := time.Since(lastSearchTime)
-	if elapsed < minGap {
-		time.Sleep(minGap - elapsed)
+
+	lastSearchMu.Lock()
+	delay := minGap - time.Since(lastSearchTime)
+	lastSearchMu.Unlock()
+
+	if delay > 0 {
+		time.Sleep(delay)
 	}
+
+	lastSearchMu.Lock()
 	lastSearchTime = time.Now()
+	lastSearchMu.Unlock()
 }

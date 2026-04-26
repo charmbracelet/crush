@@ -61,13 +61,13 @@ func NewWebSearchTool(client *http.Client, opts WebSearchOptions) fantasy.AgentT
 				return fantasy.NewTextErrorResponse("unsupported search_engine: " + params.SearchEngine), nil
 			}
 
-			maybeDelaySearch()
 			var (
 				results []SearchResult
 				err     error
 			)
 			switch engine {
 			case config.SearchEngineDuckDuckGo:
+				maybeDelaySearch()
 				results, err = searchDuckDuckGo(ctx, client, params.Query, maxResults)
 			case config.SearchEngineKagi:
 				results, err = searchKagi(ctx, client, opts.KagiAPIKey, params.Query, maxResults)

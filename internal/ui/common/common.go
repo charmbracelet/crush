@@ -33,7 +33,7 @@ func (c *Common) Config() *config.Config {
 
 // DefaultCommon returns the default common UI configurations.
 func DefaultCommon(ws workspace.Workspace) *Common {
-	s := styles.DefaultStyles()
+	s := styles.CharmtonePantera()
 	return &Common{
 		Workspace: ws,
 		Styles:    &s,

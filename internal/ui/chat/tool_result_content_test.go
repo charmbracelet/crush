@@ -56,7 +56,7 @@ func TestLooksLikeMarkdown(t *testing.T) {
 func TestRenderToolResultTextContent(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.DefaultStyles()
+	sty := styles.CharmtonePantera()
 	styPtr := &sty
 	widths := toolResultContentWidths{Body: 80, Diff: 82}
 

@@ -18,7 +18,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Could not get terminal size: %s", err)
 	}
 
-	s := styles.DefaultStyles()
+	s := styles.CharmtonePantera()
 	opts := logo.Opts{
 		FieldColor:   s.Logo.FieldColor,
 		TitleColorA:  s.Logo.TitleColorA,

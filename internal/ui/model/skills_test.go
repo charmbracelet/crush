@@ -16,7 +16,7 @@ import (
 func TestSkillStatusItemsIncludesBuiltinSkills(t *testing.T) {
 	t.Parallel()
 
-	st := uistyles.DefaultStyles()
+	st := uistyles.CharmtonePantera()
 	ui := &UI{
 		com: &common.Common{Styles: &st},
 		skillStates: []*skills.SkillState{
@@ -61,7 +61,7 @@ func TestSkillStatusItemsIncludesBuiltinSkills(t *testing.T) {
 func TestSkillStatusItemsExcludesDisabledSkills(t *testing.T) {
 	t.Parallel()
 
-	st := uistyles.DefaultStyles()
+	st := uistyles.CharmtonePantera()
 	ui := &UI{
 		com: &common.Common{
 			Styles:    &st,

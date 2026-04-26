@@ -247,7 +247,7 @@ func (a *AssistantMessageItem) isSpinning() bool {
 	isFinished := a.message.IsFinished()
 	hasContent := strings.TrimSpace(a.message.Content().Text) != ""
 	hasToolCalls := len(a.message.ToolCalls()) > 0
-	if !((isThinking || !isFinished) && !hasContent && !hasToolCalls) {
+	if (!isThinking && isFinished) || hasContent || hasToolCalls {
 		return false
 	}
 	// Stall-guard: only applied to summary messages. The Summarize path has

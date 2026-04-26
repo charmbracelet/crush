@@ -419,7 +419,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			// the model will not be called again. Treat it as the end of the
 			// turn so the UI can render the assistant footer.
 			if finishReason == message.FinishReasonToolUse {
-				for _, tr := range stepResult.Response.Content.ToolResults() {
+				for _, tr := range stepResult.Content.ToolResults() {
 					if tr.StopTurn {
 						finishReason = message.FinishReasonEndTurn
 						break

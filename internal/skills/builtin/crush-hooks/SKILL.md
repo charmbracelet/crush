@@ -1,47 +1,51 @@
 ---
 name: crush-hooks
-description: Create, debug, and configure Crush hooks (user-defined shell commands that fire before tool execution). Use when the user wants to add a hook, write a hook script, troubleshoot hook behavior, or configure hooks in crush.json.
+description: Use when the user wants to add, write, debug, or configure a Crush hook — gating or blocking tool calls, approving or rewriting tool input before execution, injecting context into tool results, or troubleshooting hook behavior in crush.json.
 ---
 
 # Crush Hooks
 
-Hooks are user-defined shell commands in `crush.json` that fire at specific
-points during execution, giving deterministic control over tool behavior. Hooks
-run before permission checks.
+Hooks are user-defined commands in `crush.json` that fire at specific points
+during execution, giving deterministic control over tool behavior. They run
+**before** permission checks and **only on the top-level agent's** tool calls —
+sub-agent calls (task tool, agentic_fetch, etc.) are not intercepted, though
+the sub-agent tool call itself is.
+
+For the full reference, see `docs/hooks/README.md`. This skill covers what you
+need to author correct hooks.
 
 ## Supported Events
 
-Only `PreToolUse` is currently supported. It fires before every tool call.
-
-Event names are case-insensitive and accept snake_case:
-`PreToolUse`, `pretooluse`, `pre_tool_use`, `PRE_TOOL_USE` all work.
+Only `PreToolUse` is currently supported. Event names are case-insensitive and
+accept snake_case (`PreToolUse`, `pretooluse`, `pre_tool_use` all work).
 
 ## Configuration
-
-Add hooks to `crush.json` (project-level or global). Project-level hooks take
-precedence.
 
 ```jsonc
 {
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "^bash$",                // regex against tool name (optional; omit to match all)
-        "command": "./hooks/my-hook.sh",     // required: shell command to run
-        "timeout": 10                        // optional: seconds, default 30
+        "matcher": "^bash$",              // regex against tool name (optional; omit to match all)
+        "command": "./hooks/my-hook.sh",   // required: shell command to run
+        "timeout": 10                     // optional: seconds, default 30
       }
     ]
   }
 }
 ```
 
-Only `command` is required. Omit `matcher` to match all tools.
+Project-level hooks take precedence over global. Matching hooks are deduped by
+`command`, run in parallel, and aggregated in **config order** (not finish order).
 
-## Writing Hook Scripts
+## Language
 
-### Input
+`command` is a shell command, so hooks can be written in any language by
+invoking the interpreter: `node ./hooks/h.js`, `python3 ./hooks/h.py`,
+`./hooks/h.sh`, inline `echo '…'`, etc. The rest of this skill shows bash, but
+the input/output contract is identical regardless of language.
 
-Hooks receive data two ways:
+## Input
 
 **Environment variables:**
 
@@ -67,94 +71,90 @@ Hooks receive data two ways:
 }
 ```
 
-Parse with `jq`:
+## Output
 
-```bash
-read -r input
-tool_name=$(echo "$input" | jq -r '.tool_name')
-command=$(echo "$input" | jq -r '.tool_input.command // empty')
-```
+Communicate back via exit code (+ stderr) or JSON on stdout.
 
-### Output
+| Exit Code | Meaning                                                       |
+| --------- | ------------------------------------------------------------- |
+| 0         | Success. Stdout is parsed as the JSON envelope below.         |
+| 2         | Block this tool call. Stderr becomes the deny reason.         |
+| 49        | Halt the whole turn. Stderr becomes the halt reason.          |
+| Other     | Non-blocking error. Logged and ignored; tool call proceeds.   |
 
-**Exit codes:**
+Exit 2 blocks one tool call (agent sees the reason and can try again); exit 49
+ends the whole turn (user takes over). Default to deny — reach for halt only
+when letting the agent retry is itself the problem (e.g. secrets detected,
+policy violation).
 
-| Exit Code | Meaning                                                    |
-| --------- | ---------------------------------------------------------- |
-| 0         | Success. Stdout is parsed as JSON (see below).             |
-| 2         | Block the tool. Stderr is used as the deny reason.         |
-| Other     | Non-blocking error. Logged and ignored; tool call proceeds. |
-
-**Simplest form** — block with exit code 2 and stderr:
-
-```bash
-if some_bad_condition; then
-  echo "Blocked: reason here" >&2
-  exit 2
-fi
-```
-
-**JSON form** — exit 0 with a JSON object on stdout for more control:
+**JSON envelope (exit 0):**
 
 ```json
 {
+  "version": 1,
   "decision": "allow",
-  "reason": "not allowed",
-  "context": "Extra info appended to tool result",
-  "updated_input": {"command": "rewritten command"}
+  "halt": false,
+  "reason": "...",
+  "context": "Extra info for the model",
+  "updated_input": {"command": "rewritten"}
 }
 ```
 
-- `decision`: `"allow"`, `"deny"`, or omit for no opinion.
-- `reason`: Shown to the model when denying.
-- `context`: Appended to the tool response the model sees.
-- `updated_input`: Replaces tool input before execution.
+- **`decision`**: `"allow"`, `"deny"`, or omit. `"allow"` is **affirmative
+  pre-approval** — it bypasses the permission prompt entirely. Omit it
+  (or `null`) when you only want to inject context or rewrite input without
+  also auto-approving the call.
+- **`halt: true`**: ends the turn (same as exit 49).
+- **`reason`**: shown to the model on deny; to model and user on halt.
+- **`context`**: string **or array of strings**. Appended to what the model
+  sees. Empty entries are dropped.
+- **`updated_input`**: **shallow-merge patch** against `tool_input`, not a
+  replacement. Keys you include overwrite; keys you don't are preserved.
+  Nested objects are replaced wholesale, not deep-merged. Ignored on deny/halt.
 
-### Multiple Hooks
+## Aggregation (Multiple Hooks)
 
-When multiple hooks match the same tool call:
+Composed in **config order**:
 
-- **Deny wins** over allow; allow wins over no opinion.
-- All deny reasons are concatenated (newline-separated).
-- All context strings are concatenated.
-- Last non-empty `updated_input` wins. Ignored if denied.
+- `deny` > `allow` > no opinion. First deny decides; subsequent allows don't override.
+- `halt` is sticky: any hook halting ends the turn.
+- `reason` and `context` concatenate in config order (newline-joined).
+- `updated_input` patches shallow-merge sequentially; later patches win on colliding keys.
 
-### Timeouts
+## Canonical Examples
 
-Default: 30 seconds. If exceeded, the hook is killed and treated as
-a non-blocking error (tool call proceeds).
-
-## Hook Templates
-
-When creating hooks, always include `#!/usr/bin/env bash`, use `set -euo pipefail`,
-and make the file executable (`chmod +x`).
-
-### Block a dangerous command
+### Block destructive commands
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Block rm -rf against root.
 if echo "$CRUSH_TOOL_INPUT_COMMAND" | grep -qE 'rm\s+-(rf|fr)\s+/'; then
   echo "Refusing to run rm -rf against root" >&2
   exit 2
 fi
-
-echo '{"decision": "allow"}'
 ```
 
 Config: `{"matcher": "^bash$", "command": "./hooks/no-rm-rf.sh"}`
 
-### Inject context into file writes
+### Auto-approve read-only tools (inline, no script)
+
+```jsonc
+{"matcher": "^(view|ls|grep|glob)$", "command": "echo '{\"decision\":\"allow\"}'"}
+```
+
+Every `view`/`ls`/`grep`/`glob` call now runs without prompting.
+
+### Inject context without auto-approving
+
+Emit only `context` — omit `decision` so the normal permission flow still runs.
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Remind about formatting when editing Go files.
 if [[ "$CRUSH_TOOL_INPUT_FILE_PATH" == *.go ]]; then
-  echo '{"decision": "allow", "context": "Remember: run gofumpt after editing Go files."}'
+  echo '{"context": "Remember: run gofumpt after editing Go files."}'
 else
   echo '{}'
 fi
@@ -162,93 +162,48 @@ fi
 
 Config: `{"matcher": "^(edit|write|multiedit)$", "command": "./hooks/go-context.sh"}`
 
-### Block all MCP tools (inline)
-
-```jsonc
-{"matcher": "^mcp_", "command": "echo 'MCP tools are disabled' >&2; exit 2"}
-```
-
-### Log every tool call (inline)
-
-```jsonc
-{"command": "echo \"$(date -Iseconds) $CRUSH_TOOL_NAME\" >> ./tools.log"}
-```
-
-### Rewrite tool input
+### Rewrite tool input (shallow merge)
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
 
 read -r input
-original_cmd=$(echo "$input" | jq -r '.tool_input.command')
-rewritten=$(some-rewriter "$original_cmd")
+rewritten=$(echo "$input" | jq -r '.tool_input.command' | some-rewriter)
 
 cat <<EOF
 {
-  "decision": "allow",
-  "context": "Rewrote command for efficiency",
+  "context": "Rewrote command",
   "updated_input": {"command": "$rewritten"}
 }
 EOF
 ```
 
-### Restrict file writes to a directory
+If the original call was `{"command": "npm test", "timeout": 60000}`, the
+tool runs with `{"command": "<rewritten>", "timeout": 60000}` — `timeout` is
+preserved.
 
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
+## Authoring Checklist
 
-FILE_PATH="${CRUSH_TOOL_INPUT_FILE_PATH:-}"
+1. Add `#!/usr/bin/env bash` and `set -euo pipefail` (for shell scripts).
+2. `chmod +x` the script.
+3. Add the entry under `hooks.PreToolUse` in `crush.json` with the right matcher.
+4. Decide intent: inject context (omit `decision`), auto-approve (`"allow"`),
+   block (`exit 2`), or halt (`exit 49`).
+5. If rewriting input, remember `updated_input` is a shallow merge — only
+   include the keys you want to change.
 
-if [ -z "$FILE_PATH" ]; then
-  exit 0
-fi
+## Debugging
 
-ALLOWED_DIR="./src"
-
-case "$FILE_PATH" in
-  "$ALLOWED_DIR"/*)
-    echo '{"decision": "allow"}'
-    ;;
-  *)
-    echo "Writes outside $ALLOWED_DIR are not allowed" >&2
-    exit 2
-    ;;
-esac
-```
-
-Config: `{"matcher": "^(edit|write|multiedit)$", "command": "./hooks/restrict-writes.sh"}`
-
-## Checklist for Creating Hooks
-
-1. Create the hook script (or use an inline command).
-2. Add `#!/usr/bin/env bash` and `set -euo pipefail` for shell scripts.
-3. Make the script executable: `chmod +x ./hooks/my-hook.sh`.
-4. Add the hook entry to `crush.json` under `hooks.PreToolUse`.
-5. Set `matcher` to a regex matching the target tool names, or omit for all tools.
-6. Test the hook by triggering the relevant tool call.
-
-## Debugging Hooks
-
-- Hooks that exceed their timeout are killed silently; increase `timeout` if needed.
-- Non-zero exit codes other than 2 are logged but don't block — check Crush logs.
-- Use `echo "debug info" >&2` for stderr logging that won't interfere with JSON output.
-- Verify `matcher` regex matches the intended tool name (e.g. `^bash$` not `bash`
-  if you only want the bash tool, not `mcp_something_bash`).
+- Timeouts kill the hook silently and the tool call proceeds. Bump `timeout` if needed.
+- Non-zero exit codes other than 2/49 are logged but don't block — check Crush logs.
+- Use `echo "debug info" >&2` for logging without corrupting stdout JSON.
+- `matcher` is a regex against the tool name. Use `^bash$` (not `bash`) if you
+  don't also want to match `mcp_something_bash`.
 
 ## Claude Code Compatibility
 
-Crush also accepts the Claude Code hook output format:
-
-```json
-{
-  "hookSpecificOutput": {
-    "permissionDecision": "allow",
-    "permissionDecisionReason": "Auto-approved",
-    "updatedInput": {"command": "echo rewritten"}
-  }
-}
-```
-
-Existing Claude Code hooks work without modification.
+Crush also accepts Claude Code's `hookSpecificOutput` envelope. One intentional
+divergence: Crush treats `updated_input` as shallow-merge, Claude Code replaces.
+Existing Claude Code hooks work without modification for the matcher/decision
+parts; revisit any that relied on `updatedInput` fully replacing tool input.

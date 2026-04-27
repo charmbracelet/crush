@@ -87,9 +87,18 @@ func newTestUIWithConfig(t *testing.T, cfg *config.Config) *UI {
 // testWorkspace is a minimal [workspace.Workspace] stub for unit tests.
 type testWorkspace struct {
 	workspace.Workspace
-	cfg *config.Config
+	cfg          *config.Config
+	configFields map[string]any
 }
 
 func (w *testWorkspace) Config() *config.Config {
 	return w.cfg
+}
+
+func (w *testWorkspace) SetConfigField(_ config.Scope, key string, value any) error {
+	if w.configFields == nil {
+		w.configFields = map[string]any{}
+	}
+	w.configFields[key] = value
+	return nil
 }

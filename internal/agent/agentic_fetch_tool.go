@@ -161,8 +161,12 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				return fantasy.ToolResponse{}, errors.New("small model provider not configured")
 			}
 
+			webSearchConfig := c.cfg.Config().Tools.WebSearch
 			webFetchTool := tools.NewWebFetchTool(tmpDir, client)
-			webSearchTool := tools.NewWebSearchTool(client)
+			webSearchTool := tools.NewWebSearchTool(client, tools.WebSearchOptions{
+				DefaultEngine: webSearchConfig.Engine(),
+				KagiAPIKey:    webSearchConfig.ResolvedKagiAPIKey(c.cfg.Resolver()),
+			})
 			fetchTools := []fantasy.AgentTool{
 				webFetchTool,
 				webSearchTool,

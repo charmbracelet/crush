@@ -346,9 +346,62 @@ type Agent struct {
 	ContextPaths []string `json:"context_paths,omitempty"`
 }
 
+type SearchEngine string
+
+const (
+	SearchEngineDuckDuckGo SearchEngine = "duckduckgo"
+	SearchEngineKagi       SearchEngine = "kagi"
+)
+
+func (s SearchEngine) String() string {
+	return string(s)
+}
+
+func (s SearchEngine) Valid() bool {
+	switch s {
+	case SearchEngineDuckDuckGo, SearchEngineKagi:
+		return true
+	default:
+		return false
+	}
+}
+
 type Tools struct {
-	Ls   ToolLs   `json:"ls,omitzero"`
-	Grep ToolGrep `json:"grep,omitzero"`
+	Ls        ToolLs        `json:"ls,omitzero"`
+	Grep      ToolGrep      `json:"grep,omitzero"`
+	WebSearch ToolWebSearch `json:"web_search,omitzero" jsonschema:"description=Web search tool configuration"`
+}
+
+func (Tools) JSONSchemaExtend(schema *jsonschema.Schema) {
+	schema.Required = slices.DeleteFunc(schema.Required, func(required string) bool {
+		return required == "web_search"
+	})
+}
+
+type ToolWebSearch struct {
+	SearchEngine SearchEngine `json:"search_engine,omitempty" jsonschema:"description=Default search engine for web_search,enum=duckduckgo,enum=kagi,default=duckduckgo"`
+	KagiAPIKey   string       `json:"kagi_api_key,omitempty" jsonschema:"description=Kagi Search API key or environment variable reference,example=$KAGI_API_KEY"`
+}
+
+func (t ToolWebSearch) Engine() SearchEngine {
+	if t.SearchEngine.Valid() {
+		return t.SearchEngine
+	}
+	return SearchEngineDuckDuckGo
+}
+
+func (t ToolWebSearch) ResolvedKagiAPIKey(resolver VariableResolver) string {
+	if t.KagiAPIKey == "" {
+		return ""
+	}
+	if resolver == nil {
+		return t.KagiAPIKey
+	}
+	resolved, err := resolver.ResolveValue(t.KagiAPIKey)
+	if err != nil {
+		return ""
+	}
+	return resolved
 }
 
 type ToolLs struct {

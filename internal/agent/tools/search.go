@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math/rand/v2"
@@ -15,7 +16,7 @@ import (
 	"golang.org/x/net/html"
 )
 
-// SearchResult represents a single search result from DuckDuckGo.
+// SearchResult represents a single search result.
 type SearchResult struct {
 	Title    string
 	Link     string
@@ -43,6 +44,19 @@ var acceptLanguages = []string{
 	"en-GB,en;q=0.9,en-US;q=0.8",
 	"en-US,en;q=0.5",
 	"en-CA,en;q=0.9,en-US;q=0.8",
+}
+
+type kagiSearchResponse struct {
+	Data []kagiSearchResult `json:"data"`
+}
+
+type kagiSearchResult struct {
+	Type      int      `json:"t"`
+	Title     string   `json:"title"`
+	URL       string   `json:"url"`
+	Snippet   string   `json:"snippet"`
+	Published string   `json:"published"`
+	List      []string `json:"list"`
 }
 
 func searchDuckDuckGo(ctx context.Context, client *http.Client, query string, maxResults int) ([]SearchResult, error) {
@@ -75,6 +89,79 @@ func searchDuckDuckGo(ctx context.Context, client *http.Client, query string, ma
 	}
 
 	return parseLiteSearchResults(string(body), maxResults)
+}
+
+func searchKagi(ctx context.Context, client *http.Client, apiKey, query string, maxResults int) ([]SearchResult, error) {
+	if apiKey == "" {
+		return nil, fmt.Errorf("kagi API key is required")
+	}
+	if maxResults <= 0 {
+		maxResults = 10
+	}
+
+	searchURL := "https://kagi.com/api/v0/search?" + url.Values{
+		"q":     {query},
+		"limit": {fmt.Sprintf("%d", maxResults)},
+	}.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bot "+apiKey)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute search: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		switch resp.StatusCode {
+		case http.StatusUnauthorized, http.StatusForbidden:
+			return nil, fmt.Errorf("kagi authentication failed: %s", resp.Status)
+		case http.StatusPaymentRequired:
+			return nil, fmt.Errorf("kagi API balance is exhausted: %s", resp.Status)
+		default:
+			return nil, fmt.Errorf("kagi search failed: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		}
+	}
+
+	return parseKagiSearchResults(body, maxResults)
+}
+
+func parseKagiSearchResults(body []byte, maxResults int) ([]SearchResult, error) {
+	var response kagiSearchResponse
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, fmt.Errorf("failed to parse Kagi response: %w", err)
+	}
+
+	results := make([]SearchResult, 0, min(len(response.Data), maxResults))
+	for _, item := range response.Data {
+		if item.Type != 0 || item.URL == "" {
+			continue
+		}
+		snippet := strings.TrimSpace(item.Snippet)
+		if item.Published != "" {
+			snippet = strings.TrimSpace(snippet + " (" + item.Published + ")")
+		}
+		results = append(results, SearchResult{
+			Title:    item.Title,
+			Link:     item.URL,
+			Snippet:  snippet,
+			Position: len(results) + 1,
+		})
+		if len(results) >= maxResults {
+			break
+		}
+	}
+	return results, nil
 }
 
 func setRandomizedHeaders(req *http.Request) {
@@ -205,15 +292,23 @@ var (
 	lastSearchTime time.Time
 )
 
-// maybeDelaySearch adds a random delay if the last search was recent.
+// maybeDelaySearch reserves the next allowed DuckDuckGo request time under the
+// mutex, then sleeps outside the lock. This keeps concurrent DuckDuckGo
+// searches spaced apart without blocking Kagi or other engines that do not use
+// this scraper-specific throttle.
 func maybeDelaySearch() {
-	lastSearchMu.Lock()
-	defer lastSearchMu.Unlock()
-
 	minGap := time.Duration(500+rand.IntN(1500)) * time.Millisecond
-	elapsed := time.Since(lastSearchTime)
-	if elapsed < minGap {
-		time.Sleep(minGap - elapsed)
+
+	lastSearchMu.Lock()
+	now := time.Now()
+	if lastSearchTime.Before(now) {
+		lastSearchTime = now
 	}
-	lastSearchTime = time.Now()
+	delay := lastSearchTime.Sub(now)
+	lastSearchTime = lastSearchTime.Add(minGap)
+	lastSearchMu.Unlock()
+
+	if delay > 0 {
+		time.Sleep(delay)
+	}
 }

@@ -62,6 +62,13 @@ type (
 	ActionSelectReasoningEffort struct {
 		Effort string
 	}
+	ActionSelectSearchEngine struct {
+		Engine config.SearchEngine
+		Edit   bool
+	}
+	ActionSaveKagiAPIKey struct {
+		APIKey string
+	}
 	ActionPermissionResponse struct {
 		Permission permission.PermissionRequest
 		Action     PermissionAction
@@ -90,7 +97,8 @@ type (
 // Messages for API key input dialog.
 type (
 	ActionChangeAPIKeyState struct {
-		State APIKeyInputState
+		State  APIKeyInputState
+		APIKey string
 	}
 )
 

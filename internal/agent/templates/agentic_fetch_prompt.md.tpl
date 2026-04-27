@@ -56,6 +56,8 @@ Today's date: {{.Date}}
 <web_search_tool>
 You have access to a web_search tool that allows you to search the web:
 - Provide a search query and optionally max_results (default: 10)
+- The tool uses the configured default search engine unless you pass search_engine
+- Supported search_engine values are "duckduckgo" and "kagi"
 - The tool returns search results with titles, URLs, and snippets
 - After getting search results, use web_fetch to get full content from relevant URLs
 - **Prefer multiple focused searches over single broad searches**

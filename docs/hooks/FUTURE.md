@@ -4,7 +4,8 @@ This document tracks planned features and design notes for hooks that are not
 yet implemented. Nothing here is part of the current contract. Treat it as a
 scratchpad for what's next, not as documentation of current behavior.
 
-> [!NOTE] This document was largely LLM-generated.
+> [!NOTE]
+> This document was largely LLM-generated.
 
 ## `context_files`
 

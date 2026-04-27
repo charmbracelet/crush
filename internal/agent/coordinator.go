@@ -424,6 +424,9 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		if err != nil {
 			return err
 		}
+		if largeProviderCfg.SystemPromptPrefix != "" {
+			systemPrompt = largeProviderCfg.SystemPromptPrefix + systemPrompt
+		}
 		result.SetSystemPrompt(systemPrompt)
 		return nil
 	})

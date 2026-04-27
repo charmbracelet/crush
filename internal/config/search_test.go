@@ -35,6 +35,6 @@ func TestToolWebSearchResolvedKagiAPIKey(t *testing.T) {
 
 	require.Equal(t, "resolved-key", cfg.ResolvedKagiAPIKey(resolver))
 	require.Equal(t, "$KAGI_API_KEY", cfg.ResolvedKagiAPIKey(nil))
-	require.Equal(t, "$KAGI_API_KEY", cfg.ResolvedKagiAPIKey(errorResolver{}))
+	require.Empty(t, cfg.ResolvedKagiAPIKey(errorResolver{}))
 	require.Empty(t, ToolWebSearch{}.ResolvedKagiAPIKey(resolver))
 }

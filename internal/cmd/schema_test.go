@@ -74,5 +74,16 @@ func TestSchemaWebSearchIsOptional(t *testing.T) {
 		Required []string `json:"required"`
 	}
 	require.NoError(t, json.Unmarshal(schema.Defs["Tools"], &tools))
-	require.ElementsMatch(t, []string{"ls", "grep"}, tools.Required)
+
+	// Only assert the invariant this test cares about: web_search must remain
+	// optional. github.com/invopop/jsonschema v0.13.0 does not understand the
+	// json "omitzero" tag option, so it marks the sibling ls and grep fields as
+	// required unless they are also removed explicitly. Newer jsonschema versions
+	// understand omitzero and may produce no required fields here at all. If this
+	// is restored to require.ElementsMatch(t, []string{"ls", "grep"},
+	// tools.Required), first bump github.com/invopop/jsonschema to a version whose
+	// omitzero handling is intentionally relied on, review the generated
+	// schema.json diff, and decide whether Tools.JSONSchemaExtend in
+	// internal/config/config.go is still needed.
+	require.NotContains(t, tools.Required, "web_search")
 }

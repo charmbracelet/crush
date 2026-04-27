@@ -57,3 +57,22 @@ func TestSchemaProvidersHasAdditionalProperties(t *testing.T) {
 	require.True(t, strings.Contains(string(providers.AdditionalProperties), "ProviderConfig"),
 		"providers should use additionalProperties with a ProviderConfig ref, got: %s", string(providers.AdditionalProperties))
 }
+
+func TestSchemaWebSearchIsOptional(t *testing.T) {
+	t.Parallel()
+
+	reflector := new(jsonschema.Reflector)
+	bts, err := json.Marshal(reflector.Reflect(&config.Config{}))
+	require.NoError(t, err)
+
+	var schema struct {
+		Defs map[string]json.RawMessage `json:"$defs"`
+	}
+	require.NoError(t, json.Unmarshal(bts, &schema))
+
+	var tools struct {
+		Required []string `json:"required"`
+	}
+	require.NoError(t, json.Unmarshal(schema.Defs["Tools"], &tools))
+	require.ElementsMatch(t, []string{"ls", "grep"}, tools.Required)
+}

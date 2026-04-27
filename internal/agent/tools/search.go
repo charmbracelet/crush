@@ -297,14 +297,15 @@ func maybeDelaySearch() {
 	minGap := time.Duration(500+rand.IntN(1500)) * time.Millisecond
 
 	lastSearchMu.Lock()
-	delay := minGap - time.Since(lastSearchTime)
+	now := time.Now()
+	if lastSearchTime.Before(now) {
+		lastSearchTime = now
+	}
+	delay := lastSearchTime.Sub(now)
+	lastSearchTime = lastSearchTime.Add(minGap)
 	lastSearchMu.Unlock()
 
 	if delay > 0 {
 		time.Sleep(delay)
 	}
-
-	lastSearchMu.Lock()
-	lastSearchTime = time.Now()
-	lastSearchMu.Unlock()
 }

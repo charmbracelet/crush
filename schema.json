@@ -808,8 +808,7 @@
       "type": "object",
       "required": [
         "ls",
-        "grep",
-        "web_search"
+        "grep"
       ]
     }
   }

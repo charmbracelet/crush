@@ -372,6 +372,12 @@ type Tools struct {
 	WebSearch ToolWebSearch `json:"web_search,omitzero" jsonschema:"description=Web search tool configuration"`
 }
 
+func (Tools) JSONSchemaExtend(schema *jsonschema.Schema) {
+	schema.Required = slices.DeleteFunc(schema.Required, func(required string) bool {
+		return required == "web_search"
+	})
+}
+
 type ToolWebSearch struct {
 	SearchEngine SearchEngine `json:"search_engine,omitempty" jsonschema:"description=Default search engine for web_search,enum=duckduckgo,enum=kagi,default=duckduckgo"`
 	KagiAPIKey   string       `json:"kagi_api_key,omitempty" jsonschema:"description=Kagi Search API key or environment variable reference,example=$KAGI_API_KEY"`
@@ -393,7 +399,8 @@ func (t ToolWebSearch) ResolvedKagiAPIKey(resolver VariableResolver) string {
 	}
 	resolved, err := resolver.ResolveValue(t.KagiAPIKey)
 	if err != nil {
-		return ""
+		slog.Error("Error resolving Kagi API key", "error", err, "value", t.KagiAPIKey)
+		return t.KagiAPIKey
 	}
 	return resolved
 }

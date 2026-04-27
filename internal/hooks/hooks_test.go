@@ -195,6 +195,13 @@ func TestBuildEnv(t *testing.T) {
 	require.Equal(t, "/project", envMap["CRUSH_PROJECT_DIR"])
 	require.Equal(t, "ls", envMap["CRUSH_TOOL_INPUT_COMMAND"])
 	require.Equal(t, "/tmp/f.txt", envMap["CRUSH_TOOL_INPUT_FILE_PATH"])
+
+	// Shared Crush markers must be present so hook-authored scripts can
+	// detect they're running under Crush the same way bash-tool-invoked
+	// scripts can.
+	require.Equal(t, "1", envMap["CRUSH"])
+	require.Equal(t, "crush", envMap["AGENT"])
+	require.Equal(t, "crush", envMap["AI_AGENT"])
 }
 
 func splitFirst(s, sep string) []string {

@@ -40,6 +40,34 @@ func DefaultCommon(ws workspace.Workspace) *Common {
 	}
 }
 
+// NewCommon returns common UI configurations using the given theme.
+func NewCommon(ws workspace.Workspace, themeName string) *Common {
+	s := LoadThemeStyles(themeName)
+	return &Common{
+		Workspace: ws,
+		Styles:    &s,
+	}
+}
+
+// ThemeNameFromConfig extracts the theme name from config, returning ""
+// (which LoadTheme treats as the default) when config is nil or unset.
+func ThemeNameFromConfig(cfg *config.Config) string {
+	if cfg == nil || cfg.Options == nil || cfg.Options.TUI == nil {
+		return ""
+	}
+	return cfg.Options.TUI.Theme
+}
+
+// LoadThemeStyles resolves a theme name to Styles, falling back to
+// CharmtonePantera on error or empty name.
+func LoadThemeStyles(name string) styles.Styles {
+	s, err := styles.LoadTheme(name)
+	if err != nil {
+		return styles.CharmtonePantera()
+	}
+	return s
+}
+
 // CenterRect returns a new [Rectangle] centered within the given area with the
 // specified width and height.
 func CenterRect(area uv.Rectangle, width, height int) uv.Rectangle {

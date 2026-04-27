@@ -115,6 +115,13 @@ func (c *Completions) IsOpen() bool {
 	return c.open
 }
 
+// SetStyles updates the styling for the completions popup.
+func (c *Completions) SetStyles(normalStyle, focusedStyle, matchStyle lipgloss.Style) {
+	c.normalStyle = normalStyle
+	c.focusedStyle = focusedStyle
+	c.matchStyle = matchStyle
+}
+
 // Query returns the current filter query.
 func (c *Completions) Query() string {
 	return c.query

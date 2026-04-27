@@ -164,6 +164,21 @@ func (c *cachedMessageItem) clearCache() {
 	c.height = 0
 }
 
+// cacheClearable is implemented by message items that cache rendered output.
+type cacheClearable interface {
+	clearCache()
+}
+
+// ClearItemCaches clears cached rendered output on a slice of items,
+// forcing them to re-render with current styles on the next draw.
+func ClearItemCaches(items []MessageItem) {
+	for _, item := range items {
+		if cc, ok := item.(cacheClearable); ok {
+			cc.clearCache()
+		}
+	}
+}
+
 // focusableMessageItem is a base struct for message items that can be focused.
 type focusableMessageItem struct {
 	focused bool

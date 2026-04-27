@@ -29,6 +29,45 @@ languages at the end, too.
 - Crush currently supports just one hook, `PreToolUse`, with plans to support
   the full gamut. If there's a hook you'd like to see, let us know.
 
+## Execution model
+
+Hooks run through Crush's embedded POSIX shell (`mvdan.cc/sh`) — the same
+interpreter the `bash` tool uses. Inline commands and shebang-less scripts
+execute in-process; scripts with a `#!` shebang dispatch to the named
+interpreter via `os/exec`. This contract is identical on macOS, Linux, and
+Windows.
+
+What this means in practice:
+
+- **Windows without Unix tooling**: inline shell (`echo`, pipelines, `jq`,
+  `grep`), shebang-less `.sh` scripts, inline PowerShell
+  (`powershell -Command …`), and `.exe` invocations all work out of the box
+  with no WSL, Git Bash, Cygwin, or MSYS required.
+- **PowerShell scripts** (`.ps1`) are not auto-dispatched by extension.
+  Invoke them explicitly: `powershell -File ./audit.ps1` (or
+  `pwsh -File ./audit.ps1`).
+- **Shebang'd scripts** require the named interpreter on `PATH`. Git for
+  Windows ships `bash.exe`, which makes `#!/bin/bash` and
+  `#!/usr/bin/env bash` scripts work on Windows the same way they do on
+  Unix. CRLF line endings in the shebang line are tolerated.
+- **Permissive shebang fallback**: if the absolute path in a shebang
+  doesn't exist (e.g. `#!/bin/bash` on Windows), Crush falls back to a
+  `PATH` lookup of the base name (`bash`) before giving up. A debug-level
+  log records the fallback. If the interpreter isn't on `PATH` either, the
+  hook fails cleanly as a non-blocking warning and the agent proceeds as
+  "no opinion".
+- **Environment**: every hook sees `CRUSH=1`, `AGENT=crush`, and
+  `AI_AGENT=crush` on top of the `CRUSH_*` hook-specific variables. These
+  three markers are guaranteed and match what the `bash` tool sets, so
+  scripts that detect "am I being run by an AI agent?" behave the same in
+  both contexts.
+- **Timeout behavior**: when a hook exceeds its timeout, Crush cancels the
+  context and waits a short grace period (~1s) for the interpreter to
+  yield. If the hook still hasn't returned, Crush abandons it, logs a
+  warning, and treats the result as "no opinion" so the agent can proceed.
+  Long-running work should honor context cancellation or run in a
+  subprocess via a shebang.
+
 ## Configuration
 
 Hooks can be added to your `crush.json` at both the global and project-level,
@@ -89,13 +128,15 @@ When a hook fires, Crush:
 1. Filters hooks whose `matcher` regex matches the tool name (no matcher = match
    all).
 2. Deduplicates by `command` (identical commands run once).
-3. Runs all matching hooks **in parallel** as subprocesses.
+3. Runs all matching hooks **in parallel** through Crush's embedded POSIX
+   shell (see [Execution model](#execution-model)).
 4. Waits for all to finish (or time out), then aggregates results **in config
    order**: deny wins over allow, allow wins over none; `updated_input` patches
    shallow-merge in order.
 
-Note that you can omit `matcher` and match in your shell script instead, however
-you'll incur some additional overhead as Crush will `exec` each script.
+Note that you can omit `matcher` and match in your shell script instead,
+however you'll incur some additional overhead as Crush will still parse and
+run each hook.
 
 ### Input
 
@@ -109,6 +150,9 @@ The available environment variables are:
 
 | Variable                     | Description                                    |
 | ---------------------------- | ---------------------------------------------- |
+| `CRUSH`                      | Always `1` when running under Crush.           |
+| `AGENT`                      | Always `crush`.                                |
+| `AI_AGENT`                   | Always `crush`.                                |
 | `CRUSH_EVENT`                | The hook event name (e.g. `PreToolUse`).       |
 | `CRUSH_TOOL_NAME`            | The tool being called (e.g. `bash`).           |
 | `CRUSH_SESSION_ID`           | Current session ID.                            |
@@ -116,6 +160,10 @@ The available environment variables are:
 | `CRUSH_PROJECT_DIR`          | Project root directory.                        |
 | `CRUSH_TOOL_INPUT_COMMAND`   | For `bash` calls: the shell command being run. |
 | `CRUSH_TOOL_INPUT_FILE_PATH` | For file tools: the target file path.          |
+
+The `CRUSH`, `AGENT`, and `AI_AGENT` markers are also set by the `bash`
+tool, so a script can detect "am I running under Crush?" the same way in
+either context.
 
 #### JSON
 
@@ -267,9 +315,12 @@ When multiple hooks match the same tool call:
 
 ### Timeouts
 
-If a hook exceeds its timeout, the process is killed and treated as a
-non-blocking error and the tool call proceeds. The default timeout is 30
-seconds.
+If a hook exceeds its timeout, Crush cancels its context and treats the
+result as a non-blocking error so the tool call proceeds. The default
+timeout is 30 seconds. Shebang-dispatched subprocesses are killed through
+`exec.CommandContext`; in-process hooks get a short grace period to yield
+and are then abandoned (the agent moves on regardless). Long-running work
+should honor context cancellation or run out-of-process via a shebang.
 
 ## Examples
 

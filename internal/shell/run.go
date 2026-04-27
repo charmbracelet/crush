@@ -99,12 +99,18 @@ func newRunner(cwd string, env []string, stdin io.Reader, stdout, stderr io.Writ
 }
 
 // standardHandlers returns the exec-handler middleware chain used by both
-// [Run] and [Shell]. Order matters: builtins first (so Crush's in-process
-// jq wins over any PATH binary), then the block list, then optional Go
-// coreutils. Future middleware (shebang dispatch, etc.) inserts here.
+// [Run] and [Shell]. Order matters:
+//  1. builtins first (so Crush's in-process jq wins over any PATH binary);
+//  2. script dispatch (shebang / binary / shell-source for path-prefixed
+//     argv[0], no-op for bare commands) — runs before the block list so
+//     that deny rules see the already-resolved argv of anything the
+//     script exec's rather than the outer path-prefixed wrapper;
+//  3. block list;
+//  4. optional Go coreutils (only when useGoCoreUtils is on).
 func standardHandlers(blockFuncs []BlockFunc) []func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
 	handlers := []func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc{
 		builtinHandler(),
+		scriptDispatchHandler(blockFuncs),
 		blockHandler(blockFuncs),
 	}
 	if useGoCoreUtils {

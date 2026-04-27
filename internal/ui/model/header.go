@@ -63,7 +63,7 @@ func (h *header) drawHeader(
 ) {
 	t := h.com.Styles
 	if width != h.width || compact != h.compact {
-		h.logo = renderLogo(h.com.Styles, compact, width)
+		h.logo = renderLogo(h.com.Styles, compact, h.com.IsHyper(), width)
 	}
 
 	h.width = width

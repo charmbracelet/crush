@@ -2,11 +2,14 @@ package hooks
 
 import (
 	"context"
+	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/stretchr/testify/require"
 )
 
@@ -566,6 +569,63 @@ func TestAggregationUpdatedInput(t *testing.T) {
 		agg := aggregate([]HookResult{r}, `{"command":"orig"}`)
 		require.Empty(t, agg.UpdatedInput)
 	})
+}
+
+// TestRunnerAbandonRaceSafety verifies that if a hook's shell execution
+// does not yield to ctx cancellation within abandonGrace, runOne returns
+// promptly and never touches the shared stdout/stderr buffers again —
+// even while the abandoned goroutine continues to write to them.
+//
+// The substitute shell executor ignores ctx entirely, writes to Stdout
+// both before and after the abandon deadline, and only then returns.
+// Under -race this catches any code path in runOne that reads those
+// buffers after returning the DecisionNone abandon result.
+func TestRunnerAbandonRaceSafety(t *testing.T) {
+	origRunShell := runShell
+	t.Cleanup(func() { runShell = origRunShell })
+
+	// Synchronize shutdown with the abandoned goroutine so the test
+	// exits cleanly even under -race.
+	var wg sync.WaitGroup
+	release := make(chan struct{})
+	t.Cleanup(func() {
+		close(release)
+		wg.Wait()
+	})
+
+	runShell = func(_ context.Context, opts shell.RunOptions) error {
+		wg.Add(1)
+		defer wg.Done()
+		// Write before the caller observes ctx.Done(); the caller will
+		// not read the buffer while we still own it.
+		_, _ = io.WriteString(opts.Stdout, "before\n")
+		// Hold past ctx deadline + abandonGrace so the caller takes
+		// the abandon branch, then continue writing. If the caller
+		// reads these buffers after abandoning, -race will flag it.
+		select {
+		case <-time.After(5 * time.Second):
+		case <-release:
+		}
+		_, _ = io.WriteString(opts.Stdout, "after\n")
+		return nil
+	}
+
+	hookCfg := config.HookConfig{
+		Command: "# irrelevant; runShell is stubbed",
+		Timeout: 1,
+	}
+	r := NewRunner([]config.HookConfig{hookCfg}, t.TempDir(), t.TempDir())
+
+	start := time.Now()
+	result, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{}`)
+	elapsed := time.Since(start)
+
+	require.NoError(t, err)
+	require.Equal(t, DecisionNone, result.Decision)
+	// Abandon must happen at ~timeout + abandonGrace. Allow generous
+	// slack so CI noise doesn't flake the test.
+	require.Less(t, elapsed, 3500*time.Millisecond,
+		"runOne should return within timeout+abandonGrace+slack")
 }
 
 func TestRunnerUpdatedInput(t *testing.T) {

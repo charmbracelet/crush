@@ -29,6 +29,7 @@ type SearchEngines struct {
 
 	keyMap struct {
 		Select   key.Binding
+		Edit     key.Binding
 		Next     key.Binding
 		Previous key.Binding
 		UpDown   key.Binding
@@ -71,6 +72,10 @@ func NewSearchEngines(com *common.Common) (*SearchEngines, error) {
 	s.keyMap.Select = key.NewBinding(
 		key.WithKeys("enter", "ctrl+y"),
 		key.WithHelp("enter", "confirm"),
+	)
+	s.keyMap.Edit = key.NewBinding(
+		key.WithKeys("ctrl+e"),
+		key.WithHelp("ctrl+e", "edit"),
 	)
 	s.keyMap.Next = key.NewBinding(
 		key.WithKeys("down", "ctrl+n"),
@@ -119,7 +124,7 @@ func (s *SearchEngines) HandleMsg(msg tea.Msg) Action {
 			}
 			s.list.SelectNext()
 			s.list.ScrollToSelected()
-		case key.Matches(msg, s.keyMap.Select):
+		case key.Matches(msg, s.keyMap.Select, s.keyMap.Edit):
 			selectedItem := s.list.SelectedItem()
 			if selectedItem == nil {
 				break
@@ -128,7 +133,11 @@ func (s *SearchEngines) HandleMsg(msg tea.Msg) Action {
 			if !ok {
 				break
 			}
-			return ActionSelectSearchEngine{Engine: searchEngineItem.engine}
+			isEdit := key.Matches(msg, s.keyMap.Edit)
+			if isEdit && !searchEngineItem.canEdit() {
+				break
+			}
+			return ActionSelectSearchEngine{Engine: searchEngineItem.engine, Edit: isEdit}
 		default:
 			var cmd tea.Cmd
 			s.input, cmd = s.input.Update(msg)
@@ -184,15 +193,28 @@ func (s *SearchEngines) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 }
 
 func (s *SearchEngines) ShortHelp() []key.Binding {
-	return []key.Binding{
+	h := []key.Binding{
 		s.keyMap.UpDown,
 		s.keyMap.Select,
-		s.keyMap.Close,
 	}
+	if s.isSelectedEditable() {
+		h = append(h, s.keyMap.Edit)
+	}
+	h = append(h, s.keyMap.Close)
+	return h
 }
 
 func (s *SearchEngines) FullHelp() [][]key.Binding {
 	return [][]key.Binding{s.ShortHelp()}
+}
+
+func (s *SearchEngines) isSelectedEditable() bool {
+	selectedItem := s.list.SelectedItem()
+	if selectedItem == nil {
+		return false
+	}
+	searchEngineItem, ok := selectedItem.(*SearchEngineItem)
+	return ok && searchEngineItem.canEdit()
 }
 
 func (s *SearchEngines) setSearchEngineItems() {
@@ -238,6 +260,10 @@ func (s *SearchEngineItem) Filter() string {
 
 func (s *SearchEngineItem) ID() string {
 	return s.engine.String()
+}
+
+func (s *SearchEngineItem) canEdit() bool {
+	return s.engine == config.SearchEngineKagi
 }
 
 func (s *SearchEngineItem) SetFocused(focused bool) {

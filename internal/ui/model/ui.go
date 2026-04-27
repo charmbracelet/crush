@@ -1526,7 +1526,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, util.ReportError(errors.New("configuration not found")))
 			break
 		}
-		if msg.Engine == config.SearchEngineKagi && cfg.Tools.WebSearch.ResolvedKagiAPIKey(m.com.Workspace.Resolver()) == "" {
+		if msg.Engine == config.SearchEngineKagi && (msg.Edit || cfg.Tools.WebSearch.ResolvedKagiAPIKey(m.com.Workspace.Resolver()) == "") {
 			m.dialog.CloseDialog(dialog.SearchEnginesID)
 			if cmd := m.openKagiAPIKeyInputDialog(); cmd != nil {
 				cmds = append(cmds, cmd)

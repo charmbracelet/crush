@@ -137,6 +137,13 @@ type (
 	// closeDialogMsg is sent to close the current dialog.
 	closeDialogMsg struct{}
 
+	// hyperRefreshDoneMsg is sent after a silent Hyper OAuth refresh
+	// finishes. It carries the original model-selection action so the
+	// selection can be resumed.
+	hyperRefreshDoneMsg struct {
+		action dialog.ActionSelectModel
+	}
+
 	// copyChatHighlightMsg is sent to copy the current chat highlight to clipboard.
 	copyChatHighlightMsg struct{}
 
@@ -843,6 +850,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.textarea.SetValue(msg.Text)
 		m.textarea.MoveToEnd()
 		cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
+	case hyperRefreshDoneMsg:
+		if cmd := m.handleSelectModel(msg.action); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case util.InfoMsg:
 		if msg.Type == util.InfoTypeError {
 			slog.Error("Error reported", "error", msg.Msg)
@@ -1429,73 +1440,8 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.CommandsID)
 
 	case dialog.ActionSelectModel:
-		if m.isAgentBusy() {
-			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
-			break
-		}
-
-		cfg := m.com.Config()
-		if cfg == nil {
-			cmds = append(cmds, util.ReportError(errors.New("configuration not found")))
-			break
-		}
-
-		var (
-			providerID   = msg.Model.Provider
-			isCopilot    = providerID == string(catwalk.InferenceProviderCopilot)
-			isConfigured = func() bool { _, ok := cfg.Providers.Get(providerID); return ok }
-		)
-
-		// Attempt to import GitHub Copilot tokens from VSCode if available.
-		if isCopilot && !isConfigured() && !msg.ReAuthenticate {
-			m.com.Workspace.ImportCopilot()
-		}
-
-		if !isConfigured() || msg.ReAuthenticate {
-			m.dialog.CloseDialog(dialog.ModelsID)
-			if cmd := m.openAuthenticationDialog(msg.Provider, msg.Model, msg.ModelType); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-			break
-		}
-
-		if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, msg.ModelType, msg.Model); err != nil {
-			cmds = append(cmds, util.ReportError(err))
-		} else {
-			if msg.ModelType == config.SelectedModelTypeLarge {
-				// Swap the theme live based on the newly selected large
-				// model's provider.
-				m.applyTheme(styles.ThemeForProvider(providerID))
-			}
-			if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
-				// Ensure small model is set is unset.
-				smallModel := m.com.Workspace.GetDefaultSmallModel(providerID)
-				if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeSmall, smallModel); err != nil {
-					cmds = append(cmds, util.ReportError(err))
-				}
-			}
-		}
-
-		cmds = append(cmds, func() tea.Msg {
-			if err := m.com.Workspace.UpdateAgentModel(context.TODO()); err != nil {
-				return util.ReportError(err)
-			}
-
-			modelMsg := fmt.Sprintf("%s model changed to %s", msg.ModelType, msg.Model.Model)
-
-			return util.NewInfoMsg(modelMsg)
-		})
-
-		m.dialog.CloseDialog(dialog.APIKeyInputID)
-		m.dialog.CloseDialog(dialog.OAuthID)
-		m.dialog.CloseDialog(dialog.ModelsID)
-
-		if isOnboarding {
-			m.setState(uiLanding, uiFocusEditor)
-			m.com.Config().SetupAgents()
-			if err := m.com.Workspace.InitCoderAgent(context.TODO()); err != nil {
-				cmds = append(cmds, util.ReportError(err))
-			}
+		if cmd := m.handleSelectModel(msg); cmd != nil {
+			cmds = append(cmds, cmd)
 		}
 	case dialog.ActionSelectReasoningEffort:
 		if m.isAgentBusy() {
@@ -1599,6 +1545,108 @@ func substituteArgs(content string, args map[string]string) string {
 		content = strings.ReplaceAll(content, placeholder, value)
 	}
 	return content
+}
+
+// refreshHyperAndRetrySelect returns a command that silently refreshes
+// the Hyper OAuth token and then re-runs the model selection. If the
+// refresh fails, the selection resumes with ReAuthenticate set so the
+// OAuth dialog opens.
+func (m *UI) refreshHyperAndRetrySelect(msg dialog.ActionSelectModel) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := m.com.Workspace.RefreshOAuthToken(ctx, config.ScopeGlobal, "hyper"); err != nil {
+			slog.Warn("Hyper OAuth refresh failed, requesting re-auth", "error", err)
+			msg.ReAuthenticate = true
+		}
+		return hyperRefreshDoneMsg{action: msg}
+	}
+}
+
+// handleSelectModel performs the model selection after any provider
+// pre-checks (such as a silent Hyper OAuth refresh) have completed.
+func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
+	var cmds []tea.Cmd
+
+	if m.isAgentBusy() {
+		return util.ReportWarn("Agent is busy, please wait...")
+	}
+
+	cfg := m.com.Config()
+	if cfg == nil {
+		return util.ReportError(errors.New("configuration not found"))
+	}
+
+	var (
+		providerID   = msg.Model.Provider
+		isCopilot    = providerID == string(catwalk.InferenceProviderCopilot)
+		isConfigured = func() bool { _, ok := cfg.Providers.Get(providerID); return ok }
+		isOnboarding = m.state == uiOnboarding
+	)
+
+	// For Hyper, if the stored OAuth token is expired, try a silent
+	// refresh before deciding whether the provider is configured. Keeps
+	// users from hitting a 401 on their first message after the
+	// short-lived access token ages out.
+	if !msg.ReAuthenticate && providerID == "hyper" {
+		if pc, ok := cfg.Providers.Get(providerID); ok && pc.OAuthToken != nil && pc.OAuthToken.IsExpired() {
+			return m.refreshHyperAndRetrySelect(msg)
+		}
+	}
+
+	// Attempt to import GitHub Copilot tokens from VSCode if available.
+	if isCopilot && !isConfigured() && !msg.ReAuthenticate {
+		m.com.Workspace.ImportCopilot()
+	}
+
+	if !isConfigured() || msg.ReAuthenticate {
+		m.dialog.CloseDialog(dialog.ModelsID)
+		if cmd := m.openAuthenticationDialog(msg.Provider, msg.Model, msg.ModelType); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		return tea.Batch(cmds...)
+	}
+
+	if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, msg.ModelType, msg.Model); err != nil {
+		cmds = append(cmds, util.ReportError(err))
+	} else {
+		if msg.ModelType == config.SelectedModelTypeLarge {
+			// Swap the theme live based on the newly selected large
+			// model's provider.
+			m.applyTheme(styles.ThemeForProvider(providerID))
+		}
+		if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
+			// Ensure small model is set is unset.
+			smallModel := m.com.Workspace.GetDefaultSmallModel(providerID)
+			if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeSmall, smallModel); err != nil {
+				cmds = append(cmds, util.ReportError(err))
+			}
+		}
+	}
+
+	cmds = append(cmds, func() tea.Msg {
+		if err := m.com.Workspace.UpdateAgentModel(context.TODO()); err != nil {
+			return util.ReportError(err)
+		}
+
+		modelMsg := fmt.Sprintf("%s model changed to %s", msg.ModelType, msg.Model.Model)
+
+		return util.NewInfoMsg(modelMsg)
+	})
+
+	m.dialog.CloseDialog(dialog.APIKeyInputID)
+	m.dialog.CloseDialog(dialog.OAuthID)
+	m.dialog.CloseDialog(dialog.ModelsID)
+
+	if isOnboarding {
+		m.setState(uiLanding, uiFocusEditor)
+		m.com.Config().SetupAgents()
+		if err := m.com.Workspace.InitCoderAgent(context.TODO()); err != nil {
+			cmds = append(cmds, util.ReportError(err))
+		}
+	}
+
+	return tea.Batch(cmds...)
 }
 
 func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType) tea.Cmd {

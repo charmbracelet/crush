@@ -45,7 +45,8 @@ func NewKagiAPIKeyInput(com *common.Common) (*KagiAPIKeyInput, tea.Cmd) {
 	k.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1))
 
 	cfg := com.Config()
-	if cfg != nil && cfg.Tools.WebSearch.KagiAPIKey != "" {
+	// Only prefill environment references to avoid displaying saved secrets.
+	if cfg != nil && strings.HasPrefix(cfg.Tools.WebSearch.KagiAPIKey, "$") {
 		k.input.SetValue(cfg.Tools.WebSearch.KagiAPIKey)
 	}
 

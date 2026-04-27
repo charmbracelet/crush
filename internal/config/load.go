@@ -330,6 +330,11 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 		c.Providers.Set(string(p.ID), prepared)
 	}
 
+	// Auto-detect Ollama if it's running locally and the user hasn't
+	// explicitly configured it. The provider will be validated in the
+	// custom provider loop below.
+	maybeAutoDetectOllama(c)
+
 	// validate the custom providers
 	for id, providerConfig := range c.Providers.Seq2() {
 		if knownProviderNames[id] {
@@ -451,6 +456,10 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 
 	if str, ok := os.LookupEnv("CRUSH_DISABLE_DEFAULT_PROVIDERS"); ok {
 		c.Options.DisableDefaultProviders, _ = strconv.ParseBool(str)
+	}
+
+	if str, ok := os.LookupEnv("CRUSH_DISABLE_OLLAMA_AUTO_DETECT"); ok {
+		c.Options.DisableOllamaAutoDetect, _ = strconv.ParseBool(str)
 	}
 
 	if c.Options.Attribution == nil {

@@ -264,6 +264,36 @@ $HOME/.local/share/crush/crush.json
 > - `CRUSH_GLOBAL_CONFIG`
 > - `CRUSH_GLOBAL_DATA`
 
+### Themes
+
+Crush ships with built-in color themes.
+
+#### Switching Themes
+
+Open the command palette with `ctrl+p`, select **Switch Theme**, and browse
+the list. The UI previews each theme as you navigate, and pressing `enter`
+confirms the selection. Press `esc` to cancel and revert.
+
+You can also set a theme directly in your config:
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "tui": {
+      "theme": "gruvbox-dark"
+    }
+  }
+}
+```
+
+#### Built-In Themes
+
+| Theme | Name |
+| --- | --- |
+| Charmtone | `charmtone` (default) |
+| Gruvbox Dark | `gruvbox-dark` |
+
 ### LSPs
 
 Crush can use LSPs for additional context to help inform its decisions, just

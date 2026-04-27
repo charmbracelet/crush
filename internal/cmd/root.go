@@ -119,7 +119,7 @@ crush --continue
 
 		event.AppInitialized()
 
-		com := common.DefaultCommon(ws)
+		com := common.NewCommon(ws, common.ThemeNameFromConfig(ws.Config()))
 		model := ui.New(com, sessionID, continueLast)
 
 		var env uv.Environ = os.Environ()

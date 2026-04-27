@@ -2,6 +2,7 @@
 package styles
 
 import (
+	"encoding/json"
 	"fmt"
 	"image/color"
 	"strings"
@@ -564,6 +565,33 @@ func (s *Styles) ChromaTheme() chroma.StyleEntries {
 // DialogHelpStyles returns the styles for dialog help.
 func (s *Styles) DialogHelpStyles() help.Styles {
 	return help.Styles(s.Dialog.Help)
+}
+
+// Clone returns a deep copy of the Styles struct, ensuring pointer fields
+// (particularly within ansi.StyleConfig) are not aliased. This is used to
+// safely snapshot styles before a theme preview.
+func (s *Styles) Clone() Styles {
+	clone := *s
+	clone.Markdown = cloneStyleConfig(s.Markdown)
+	clone.QuietMarkdown = cloneStyleConfig(s.QuietMarkdown)
+	return clone
+}
+
+// cloneStyleConfig deep-copies an ansi.StyleConfig by JSON round-tripping.
+//
+// NOTE: This assumes ansi.StyleConfig remains fully JSON-round-trippable.
+// If the glamour library adds non-serializable fields, this approach will
+// need to be replaced with a reflect-based deep copy.
+func cloneStyleConfig(src ansi.StyleConfig) ansi.StyleConfig {
+	data, err := json.Marshal(src)
+	if err != nil {
+		panic(fmt.Sprintf("styles: failed to marshal StyleConfig for clone: %v", err))
+	}
+	var dst ansi.StyleConfig
+	if err := json.Unmarshal(data, &dst); err != nil {
+		panic(fmt.Sprintf("styles: failed to unmarshal StyleConfig for clone: %v", err))
+	}
+	return dst
 }
 
 // hex returns a pointer to the "#rrggbb" representation of c. It's used to

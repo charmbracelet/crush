@@ -60,8 +60,8 @@ type (
 		Theme string
 	}
 	ActionRevertThemePreview struct{}
-	ActionInitializeProject struct{}
-	ActionSummarize                   struct {
+	ActionInitializeProject  struct{}
+	ActionSummarize          struct {
 		SessionID string
 	}
 	// ActionSelectReasoningEffort is a message indicating a reasoning effort

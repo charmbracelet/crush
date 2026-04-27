@@ -399,7 +399,6 @@ func (t ToolWebSearch) ResolvedKagiAPIKey(resolver VariableResolver) string {
 	}
 	resolved, err := resolver.ResolveValue(t.KagiAPIKey)
 	if err != nil {
-		slog.Error("Error resolving Kagi API key", "error", err)
 		return ""
 	}
 	return resolved

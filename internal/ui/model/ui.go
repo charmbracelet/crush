@@ -587,13 +587,21 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		if m.session != nil && msg.Payload.ID == m.session.ID {
-			prevHasInProgress := hasInProgressTodo(m.session.Todos)
 			m.session = &msg.Payload
-			if !prevHasInProgress && hasInProgressTodo(m.session.Todos) {
+			// Start the spinner if a todo just entered in_progress while the
+			// agent is busy.
+			if hasInProgressTodo(m.session.Todos) && m.isAgentBusy() && !m.todoIsSpinning {
 				m.todoIsSpinning = true
 				cmds = append(cmds, m.todoSpinner.Tick)
-				m.updateLayoutAndSize()
 			}
+			// Stop the spinner if the agent is no longer busy.
+			if m.todoIsSpinning && !m.isAgentBusy() {
+				m.todoIsSpinning = false
+			}
+			// Any todo change (added, completed, reordered, content edited)
+			// must re-render the pills; otherwise the panel stays stale
+			// until an unrelated event triggers a redraw.
+			m.renderPills()
 		}
 	case pubsub.Event[message.Message]:
 		// Check if this is a child session message for an agent tool.

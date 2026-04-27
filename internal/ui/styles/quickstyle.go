@@ -699,6 +699,18 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Tool.MediaType = base
 	s.Tool.ResourceSize = base.Foreground(fgMuted)
 
+	// Hook styles
+	s.Tool.HookLabel = base.Foreground(successSubtle)
+	s.Tool.HookName = base
+	s.Tool.HookMatcher = base.Foreground(fgMuted)
+	s.Tool.HookArrow = base.Foreground(successSubtle)
+	s.Tool.HookDetail = base.Foreground(fgMuted)
+	s.Tool.HookOK = base.Foreground(successMuted)
+	s.Tool.HookDenied = base.Foreground(error)
+	s.Tool.HookDeniedLabel = base.Foreground(danger)
+	s.Tool.HookDeniedReason = base.Foreground(bgOverlay)
+	s.Tool.HookRewrote = base.Foreground(bgOverlay)
+
 	// Tool-call action verbs and result-list styling.
 	s.Tool.ActionCreate = lipgloss.NewStyle().Foreground(successSubtle)
 	s.Tool.ActionDestroy = lipgloss.NewStyle().Foreground(danger)

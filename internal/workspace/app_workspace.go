@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"time"
@@ -205,6 +206,113 @@ func (w *AppWorkspace) FileTrackerListReadFiles(ctx context.Context, sessionID s
 
 func (w *AppWorkspace) ListSessionHistory(ctx context.Context, sessionID string) ([]history.File, error) {
 	return w.app.History.ListBySession(ctx, sessionID)
+}
+
+// -- Undo / Redo --
+
+// UndoLastMessage rolls the session back by one user message. It:
+//  1. Determines the target message (the previous user message when a revert
+//     is already active, or the last user message otherwise).
+//  2. Restores all session files to their state before that message.
+//  3. Sets the revert marker on the session so the UI can hide the undone
+//     messages and offer a redo.
+func (w *AppWorkspace) UndoLastMessage(ctx context.Context, sessionID string) error {
+	sess, err := w.app.Sessions.Get(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("getting session: %w", err)
+	}
+
+	var targetMsg message.Message
+	if sess.RevertMessageID == "" {
+		// No active revert — undo the very last user message.
+		msgs, err := w.app.Messages.ListUserMessages(ctx, sessionID)
+		if err != nil {
+			return fmt.Errorf("listing user messages: %w", err)
+		}
+		if len(msgs) == 0 {
+			return errors.New("nothing to undo")
+		}
+		targetMsg = msgs[0] // ListUserMessages returns DESC.
+	} else {
+		// Already in revert — step back one more user message.
+		prev, err := w.app.Messages.FindPreviousUserMessage(ctx, sessionID, sess.RevertMessageID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return errors.New("nothing more to undo")
+		}
+		if err != nil {
+			return fmt.Errorf("finding previous user message: %w", err)
+		}
+		targetMsg = prev
+	}
+
+	if err := w.app.History.RestoreToTimestamp(ctx, sessionID, targetMsg.CreatedAt); err != nil {
+		return fmt.Errorf("restoring files: %w", err)
+	}
+	return w.app.Sessions.SetRevert(ctx, sessionID, targetMsg.ID)
+}
+
+// RedoMessage moves the revert marker forward by one user message, or clears
+// it entirely when the marker is already at the last user message.
+func (w *AppWorkspace) RedoMessage(ctx context.Context, sessionID string) error {
+	sess, err := w.app.Sessions.Get(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("getting session: %w", err)
+	}
+	if sess.RevertMessageID == "" {
+		return errors.New("nothing to redo")
+	}
+
+	next, err := w.app.Messages.FindNextUserMessage(ctx, sessionID, sess.RevertMessageID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("finding next user message: %w", err)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		// No later user message — redo to head state (unrevert).
+		if err := w.app.History.RestoreToLatest(ctx, sessionID); err != nil {
+			return fmt.Errorf("restoring files to latest: %w", err)
+		}
+		return w.app.Sessions.ClearRevert(ctx, sessionID)
+	}
+
+	// Redo to next user message boundary.
+	if err := w.app.History.RestoreToTimestamp(ctx, sessionID, next.CreatedAt); err != nil {
+		return fmt.Errorf("restoring files: %w", err)
+	}
+	return w.app.Sessions.SetRevert(ctx, sessionID, next.ID)
+}
+
+// CleanupRevert permanently discards the messages and file-version records
+// that were hidden by the revert marker, then clears the marker. Call this
+// before sending a new prompt so the undone history is gone for good.
+func (w *AppWorkspace) CleanupRevert(ctx context.Context, sessionID string) error {
+	sess, err := w.app.Sessions.Get(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("getting session: %w", err)
+	}
+	if sess.RevertMessageID == "" {
+		return nil // Nothing to clean up.
+	}
+
+	// Use the first undone message (the one after the revert marker) as the
+	// deletion boundary rather than the revert message itself. This avoids
+	// deleting records that merely share the same second-resolution timestamp
+	// as the kept revert message.
+	nextMsg, err := w.app.Messages.FindNextUserMessage(ctx, sessionID, sess.RevertMessageID)
+	if errors.Is(err, sql.ErrNoRows) {
+		// No next message — nothing to delete; just clear the marker.
+		return w.app.Sessions.ClearRevert(ctx, sessionID)
+	}
+	if err != nil {
+		return fmt.Errorf("finding first undone message: %w", err)
+	}
+
+	if err := w.app.Messages.DeleteMessagesAfterTimestamp(ctx, sessionID, nextMsg.CreatedAt); err != nil {
+		return fmt.Errorf("deleting messages: %w", err)
+	}
+	if err := w.app.History.CleanupAfterTimestamp(ctx, sessionID, nextMsg.CreatedAt); err != nil {
+		return fmt.Errorf("cleaning up file versions: %w", err)
+	}
+	return w.app.Sessions.ClearRevert(ctx, sessionID)
 }
 
 // -- LSP --

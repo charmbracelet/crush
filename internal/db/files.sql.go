@@ -63,6 +63,21 @@ func (q *Queries) DeleteFile(ctx context.Context, id string) error {
 	return err
 }
 
+const deleteFileVersionsAfterTimestamp = `-- name: DeleteFileVersionsAfterTimestamp :exec
+DELETE FROM files
+WHERE session_id = ? AND created_at >= ?
+`
+
+type DeleteFileVersionsAfterTimestampParams struct {
+	SessionID string `json:"session_id"`
+	CreatedAt int64  `json:"created_at"`
+}
+
+func (q *Queries) DeleteFileVersionsAfterTimestamp(ctx context.Context, arg DeleteFileVersionsAfterTimestampParams) error {
+	_, err := q.exec(ctx, q.deleteFileVersionsAfterTimestampStmt, deleteFileVersionsAfterTimestamp, arg.SessionID, arg.CreatedAt)
+	return err
+}
+
 const deleteSessionFiles = `-- name: DeleteSessionFiles :exec
 DELETE FROM files
 WHERE session_id = ?
@@ -120,6 +135,92 @@ func (q *Queries) GetFileByPathAndSession(ctx context.Context, arg GetFileByPath
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getFileVersionBefore = `-- name: GetFileVersionBefore :one
+SELECT id, session_id, path, content, version, created_at, updated_at
+FROM files
+WHERE session_id = ? AND path = ? AND created_at < ?
+ORDER BY version DESC
+LIMIT 1
+`
+
+type GetFileVersionBeforeParams struct {
+	SessionID string `json:"session_id"`
+	Path      string `json:"path"`
+	CreatedAt int64  `json:"created_at"`
+}
+
+func (q *Queries) GetFileVersionBefore(ctx context.Context, arg GetFileVersionBeforeParams) (File, error) {
+	row := q.queryRow(ctx, q.getFileVersionBeforeStmt, getFileVersionBefore, arg.SessionID, arg.Path, arg.CreatedAt)
+	var i File
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.Path,
+		&i.Content,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getLatestFileVersion = `-- name: GetLatestFileVersion :one
+SELECT id, session_id, path, content, version, created_at, updated_at
+FROM files
+WHERE session_id = ? AND path = ?
+ORDER BY version DESC
+LIMIT 1
+`
+
+type GetLatestFileVersionParams struct {
+	SessionID string `json:"session_id"`
+	Path      string `json:"path"`
+}
+
+func (q *Queries) GetLatestFileVersion(ctx context.Context, arg GetLatestFileVersionParams) (File, error) {
+	row := q.queryRow(ctx, q.getLatestFileVersionStmt, getLatestFileVersion, arg.SessionID, arg.Path)
+	var i File
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.Path,
+		&i.Content,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const listDistinctFilePathsBySession = `-- name: ListDistinctFilePathsBySession :many
+SELECT DISTINCT path
+FROM files
+WHERE session_id = ?
+`
+
+func (q *Queries) ListDistinctFilePathsBySession(ctx context.Context, sessionID string) ([]string, error) {
+	rows, err := q.query(ctx, q.listDistinctFilePathsBySessionStmt, listDistinctFilePathsBySession, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			return nil, err
+		}
+		items = append(items, path)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listFilesByPath = `-- name: ListFilesByPath :many

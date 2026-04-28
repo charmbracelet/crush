@@ -3,7 +3,10 @@ package history
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/crush/internal/db"
@@ -39,20 +42,58 @@ type Service interface {
 	ListLatestSessionFiles(ctx context.Context, sessionID string) ([]File, error)
 	Delete(ctx context.Context, id string) error
 	DeleteSessionFiles(ctx context.Context, sessionID string) error
+
+	// RestoreToTimestamp restores all files in the session to their state
+	// strictly before the given Unix timestamp. Files that have no version
+	// before that timestamp (i.e. they were created by the agent after that
+	// point) are deleted from disk.
+	RestoreToTimestamp(ctx context.Context, sessionID string, timestamp int64) error
+
+	// RestoreToLatest restores all files in the session to their most recent
+	// recorded version. Used when performing a redo back to the head state.
+	RestoreToLatest(ctx context.Context, sessionID string) error
+
+	// CleanupAfterTimestamp removes file version records whose created_at is
+	// >= the given timestamp. Call this during revert cleanup (when the user
+	// sends a new prompt) to permanently discard the undone history.
+	CleanupAfterTimestamp(ctx context.Context, sessionID string, timestamp int64) error
 }
 
 type service struct {
 	*pubsub.Broker[File]
-	db *sql.DB
-	q  *db.Queries
+	db         *sql.DB
+	q          *db.Queries
+	workingDir string
 }
 
-func NewService(q *db.Queries, db *sql.DB) Service {
+func NewService(q *db.Queries, db *sql.DB, workingDir string) Service {
 	return &service{
-		Broker: pubsub.NewBroker[File](),
-		q:      q,
-		db:     db,
+		Broker:     pubsub.NewBroker[File](),
+		q:          q,
+		db:         db,
+		workingDir: workingDir,
 	}
+}
+
+// isPathSafe returns true when p is within the service's working directory.
+// This prevents undo/redo from writing or deleting files outside the workspace.
+func (s *service) isPathSafe(p string) bool {
+	if s.workingDir == "" {
+		return true // No constraint configured — allow all.
+	}
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return false
+	}
+	root, err := filepath.Abs(s.workingDir)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(root, abs)
+	if err != nil {
+		return false
+	}
+	return !strings.HasPrefix(rel, "..")
 }
 
 func (s *service) Create(ctx context.Context, sessionID, path, content string) (File, error) {
@@ -202,6 +243,95 @@ func (s *service) DeleteSessionFiles(ctx context.Context, sessionID string) erro
 		}
 	}
 	return nil
+}
+
+// RestoreToTimestamp restores all session files to their state at the given
+// timestamp boundary. Files that have no version at or before that boundary
+// are deleted from disk. Uses (created_at, version) ordering as a tie-breaker
+// to handle second-resolution timestamp collisions correctly.
+func (s *service) RestoreToTimestamp(ctx context.Context, sessionID string, timestamp int64) error {
+	allFiles, err := s.q.ListFilesBySession(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("listing file versions: %w", err)
+	}
+
+	// Group versions by path.
+	byPath := make(map[string][]db.File)
+	for _, f := range allFiles {
+		byPath[f.Path] = append(byPath[f.Path], f)
+	}
+
+	for path, versions := range byPath {
+		var (
+			best      db.File
+			hasBest   bool
+			hasFuture bool
+		)
+		for _, v := range versions {
+			if v.CreatedAt < timestamp {
+				// Strictly before the boundary — keep the highest versioned one.
+				if !hasBest || v.CreatedAt > best.CreatedAt || (v.CreatedAt == best.CreatedAt && v.Version > best.Version) {
+					best = v
+					hasBest = true
+				}
+			} else {
+				hasFuture = true
+			}
+		}
+
+		if !s.isPathSafe(path) {
+			continue // Skip paths outside the workspace root.
+		}
+		if !hasBest {
+			if hasFuture {
+				// File was created entirely after the revert point — delete it.
+				if removeErr := os.Remove(path); removeErr != nil && !os.IsNotExist(removeErr) {
+					return fmt.Errorf("removing file %s: %w", path, removeErr)
+				}
+			}
+			continue
+		}
+		if writeErr := os.WriteFile(path, []byte(best.Content), 0o644); writeErr != nil {
+			return fmt.Errorf("restoring file %s: %w", path, writeErr)
+		}
+	}
+	return nil
+}
+
+// RestoreToLatest restores all session files to their most recent version.
+func (s *service) RestoreToLatest(ctx context.Context, sessionID string) error {
+	paths, err := s.q.ListDistinctFilePathsBySession(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("listing file paths: %w", err)
+	}
+	for _, path := range paths {
+		if !s.isPathSafe(path) {
+			continue // Skip paths outside the workspace root.
+		}
+		f, err := s.q.GetLatestFileVersion(ctx, db.GetLatestFileVersionParams{
+			SessionID: sessionID,
+			Path:      path,
+		})
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("getting latest file version for %s: %w", path, err)
+		}
+		if writeErr := os.WriteFile(path, []byte(f.Content), 0o644); writeErr != nil {
+			return fmt.Errorf("restoring file %s: %w", path, writeErr)
+		}
+	}
+	return nil
+}
+
+// CleanupAfterTimestamp removes file version records at or after the given
+// timestamp from the session. Called when a new prompt is sent after an undo.
+func (s *service) CleanupAfterTimestamp(ctx context.Context, sessionID string, timestamp int64) error {
+	return s.q.DeleteFileVersionsAfterTimestamp(ctx, db.DeleteFileVersionsAfterTimestampParams{
+		SessionID: sessionID,
+		CreatedAt: timestamp,
+	})
 }
 
 func (s *service) fromDBItem(item db.File) File {

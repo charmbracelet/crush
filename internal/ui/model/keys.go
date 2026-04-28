@@ -64,6 +64,8 @@ type KeyMap struct {
 	Suspend  key.Binding
 	Sessions key.Binding
 	Tab      key.Binding
+	Undo     key.Binding
+	Redo     key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -95,6 +97,14 @@ func DefaultKeyMap() KeyMap {
 		Tab: key.NewBinding(
 			key.WithKeys("tab"),
 			key.WithHelp("tab", "change focus"),
+		),
+		Undo: key.NewBinding(
+			key.WithKeys("ctrl+u"),
+			key.WithHelp("ctrl+u", "undo last message"),
+		),
+		Redo: key.NewBinding(
+			key.WithKeys("ctrl+y"),
+			key.WithHelp("ctrl+y", "redo"),
 		),
 	}
 

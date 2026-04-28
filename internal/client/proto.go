@@ -377,6 +377,45 @@ func (c *Client) GetAgentSessionInfo(ctx context.Context, id string, sessionID s
 	return &info, nil
 }
 
+// UndoLastMessage requests an undo of the last user message.
+func (c *Client) UndoLastMessage(ctx context.Context, workspaceID, sessionID string) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/sessions/%s/undo", workspaceID, sessionID), nil, nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to undo: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to undo: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
+// RedoMessage requests a redo of the next user message.
+func (c *Client) RedoMessage(ctx context.Context, workspaceID, sessionID string) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/sessions/%s/redo", workspaceID, sessionID), nil, nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to redo: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to redo: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
+// CleanupRevert permanently discards the undone messages and file records.
+func (c *Client) CleanupRevert(ctx context.Context, workspaceID, sessionID string) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/sessions/%s/cleanup-revert", workspaceID, sessionID), nil, nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to cleanup revert: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to cleanup revert: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
 // AgentSummarizeSession requests a session summarization.
 func (c *Client) AgentSummarizeSession(ctx context.Context, id string, sessionID string) error {
 	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent/sessions/%s/summarize", id, sessionID), nil, nil, nil)

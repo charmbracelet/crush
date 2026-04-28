@@ -54,10 +54,16 @@ type Session struct {
 	PromptTokens     int64
 	CompletionTokens int64
 	SummaryMessageID string
-	Cost             float64
-	Todos            []Todo
-	CreatedAt        int64
-	UpdatedAt        int64
+	// RevertMessageID is the ID of the message this session is currently
+	// rewound to. When non-empty the session is in "revert" state: messages
+	// at or after this message are hidden in the UI and files on disk have
+	// been restored to their pre-message state. The hidden messages are only
+	// permanently deleted when the next prompt is sent.
+	RevertMessageID string
+	Cost            float64
+	Todos           []Todo
+	CreatedAt       int64
+	UpdatedAt       int64
 }
 
 type Service interface {
@@ -72,6 +78,15 @@ type Service interface {
 	UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error
 	Rename(ctx context.Context, id string, title string) error
 	Delete(ctx context.Context, id string) error
+
+	// SetRevert marks the session as rewound to the given message. The
+	// message and all later messages are hidden until either the revert is
+	// cleared or the next prompt triggers a cleanup.
+	SetRevert(ctx context.Context, sessionID, messageID string) error
+
+	// ClearRevert removes the revert marker from the session, making all
+	// messages visible again (redo back to normal).
+	ClearRevert(ctx context.Context, sessionID string) error
 
 	// Agent tool session management
 	CreateAgentToolSessionID(messageID, toolCallID string) string
@@ -237,6 +252,35 @@ func (s *service) List(ctx context.Context) ([]Session, error) {
 	return sessions, nil
 }
 
+// SetRevert marks the session as rewound to the given message.
+func (s *service) SetRevert(ctx context.Context, sessionID, messageID string) error {
+	if err := s.q.SetSessionRevert(ctx, db.SetSessionRevertParams{
+		RevertMessageID: sql.NullString{String: messageID, Valid: true},
+		ID:              sessionID,
+	}); err != nil {
+		return fmt.Errorf("setting session revert: %w", err)
+	}
+	sess, err := s.Get(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("reloading session after set revert: %w", err)
+	}
+	s.Publish(pubsub.UpdatedEvent, sess)
+	return nil
+}
+
+// ClearRevert removes the revert marker from a session.
+func (s *service) ClearRevert(ctx context.Context, sessionID string) error {
+	if err := s.q.ClearSessionRevert(ctx, sessionID); err != nil {
+		return fmt.Errorf("clearing session revert: %w", err)
+	}
+	sess, err := s.Get(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("reloading session after clear revert: %w", err)
+	}
+	s.Publish(pubsub.UpdatedEvent, sess)
+	return nil
+}
+
 func (s service) fromDBItem(item db.Session) Session {
 	todos, err := unmarshalTodos(item.Todos.String)
 	if err != nil {
@@ -250,6 +294,7 @@ func (s service) fromDBItem(item db.Session) Session {
 		PromptTokens:     item.PromptTokens,
 		CompletionTokens: item.CompletionTokens,
 		SummaryMessageID: item.SummaryMessageID.String,
+		RevertMessageID:  item.RevertMessageID.String,
 		Cost:             item.Cost,
 		Todos:            todos,
 		CreatedAt:        item.CreatedAt,

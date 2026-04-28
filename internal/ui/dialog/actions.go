@@ -85,6 +85,12 @@ type (
 	ActionEnableDockerMCP struct{}
 	// ActionDisableDockerMCP is a message to disable Docker MCP.
 	ActionDisableDockerMCP struct{}
+	// ActionUndo rolls the active session back by one user message, restoring
+	// files and hiding the undone messages until a new prompt is sent.
+	ActionUndo struct{}
+	// ActionRedo moves the revert marker forward by one user message (or
+	// clears it entirely), restoring files to the corresponding state.
+	ActionRedo struct{}
 )
 
 // Messages for API key input dialog.

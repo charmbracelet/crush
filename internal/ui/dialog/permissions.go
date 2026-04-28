@@ -3,6 +3,7 @@ package dialog
 import (
 	"encoding/json"
 	"fmt"
+	"image"
 	"strings"
 
 	"charm.land/bubbles/v2/help"
@@ -76,6 +77,11 @@ type Permissions struct {
 
 	help   help.Model
 	keyMap permissionsKeyMap
+
+	// Mouse click hitboxes for the three response buttons ("Allow",
+	// "Allow for Session", "Deny"). Computed during Draw().
+	buttonsHitboxesValid bool
+	buttonsHitRects      [3]image.Rectangle
 }
 
 type permissionsKeyMap struct {
@@ -272,6 +278,23 @@ func (p *Permissions) HandleMsg(msg tea.Msg) Action {
 				p.viewport, _ = p.viewport.Update(msg)
 			}
 		}
+	case tea.MouseClickMsg:
+		if msg.Button != tea.MouseLeft || !p.buttonsHitboxesValid {
+			break
+		}
+
+		pt := image.Pt(msg.X, msg.Y)
+		switch {
+		case pt.In(p.buttonsHitRects[0]):
+			p.selectedOption = 0
+			return p.respond(PermissionAllow)
+		case pt.In(p.buttonsHitRects[1]):
+			p.selectedOption = 1
+			return p.respond(PermissionAllowForSession)
+		case pt.In(p.buttonsHitRects[2]):
+			p.selectedOption = 2
+			return p.respond(PermissionDeny)
+		}
 	case tea.MouseWheelMsg:
 		if p.hasDiffView() {
 			switch msg.Button {
@@ -436,7 +459,86 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	parts = append(parts, "", buttons, "", helpView)
 
 	innerContent := lipgloss.JoinVertical(lipgloss.Left, parts...)
-	DrawCenterCursor(scr, area, dialogStyle.Render(innerContent), nil)
+
+	viewStr := dialogStyle.Render(innerContent)
+
+	// Update click hitboxes for the response buttons.
+	p.buttonsHitboxesValid = false
+	// Default to empty rectangles; image.Pt(...).In(...) will return false.
+	p.buttonsHitRects = [3]image.Rectangle{}
+
+	contentIncluded := content != ""
+	contentHeightActual := 0
+	if contentIncluded {
+		contentHeightActual = lipgloss.Height(content)
+	}
+
+	// Measure the rendered dialog so we can convert hitboxes to screen coords.
+	viewW, viewH := lipgloss.Size(viewStr)
+	dialogRect := common.CenterRect(area, viewW, viewH)
+
+	innerMinX := dialogRect.Min.X + dialogStyle.GetHorizontalFrameSize()/2
+	innerMinY := dialogRect.Min.Y + dialogStyle.GetVerticalFrameSize()/2
+
+	// Lines before the buttons block within the inner content.
+	buttonTopInInner := headerHeight + 1
+	if contentIncluded {
+		buttonTopInInner += contentHeightActual + 2
+	}
+
+	// Buttons layout can switch between horizontal and stacked mode.
+	buttonOpts := []common.ButtonOpts{
+		{Text: "Allow", UnderlineIndex: 0, Selected: p.selectedOption == 0},
+		{Text: "Allow for Session", UnderlineIndex: 10, Selected: p.selectedOption == 1},
+		{Text: "Deny", UnderlineIndex: 0, Selected: p.selectedOption == 2},
+	}
+	b0 := common.Button(t, buttonOpts[0])
+	b1 := common.Button(t, buttonOpts[1])
+	b2 := common.Button(t, buttonOpts[2])
+
+	buttonGroupHorizontal := common.ButtonGroup(t, buttonOpts, "  ")
+	buttonsAreStacked := lipgloss.Width(buttonGroupHorizontal) > contentWidth
+
+	const hitboxPad = 1
+	yButtonsTop := innerMinY + buttonTopInInner
+
+	if buttonsAreStacked {
+		y := yButtonsTop
+		buttons := []string{b0, b1, b2}
+		for i, b := range buttons {
+			w := lipgloss.Width(b)
+			h := lipgloss.Height(b)
+			x := innerMinX + (contentWidth-w)/2
+			left := max(0, x-hitboxPad)
+			top := max(0, y-hitboxPad)
+			right := x + w + hitboxPad
+			bottom := y + h + hitboxPad
+			p.buttonsHitRects[i] = image.Rect(left, top, right, bottom)
+			y += h
+		}
+	} else {
+		spacingWidth := lipgloss.Width("  ")
+		buttonGroupWidth := lipgloss.Width(buttonGroupHorizontal)
+		x := innerMinX + (contentWidth - buttonGroupWidth)
+
+		// All three buttons share the same vertical span in horizontal mode.
+		yBottom := yButtonsTop + buttonsHeight
+
+		buttons := []string{b0, b1, b2}
+		for i, b := range buttons {
+			w := lipgloss.Width(b)
+			left := max(0, x-hitboxPad)
+			top := max(0, yButtonsTop-hitboxPad)
+			right := x + w + hitboxPad
+			bottom := yBottom + hitboxPad
+			p.buttonsHitRects[i] = image.Rect(left, top, right, bottom)
+			x += w + spacingWidth
+		}
+	}
+
+	p.buttonsHitboxesValid = true
+
+	DrawCenterCursor(scr, area, viewStr, nil)
 	return nil
 }
 

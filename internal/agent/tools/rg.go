@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/charmbracelet/crush/internal/log"
 )
@@ -34,7 +35,9 @@ func getRgCmd(ctx context.Context, globPattern string) *exec.Cmd {
 		}
 		args = append(args, "--glob", globPattern)
 	}
-	return exec.CommandContext(ctx, name, args...)
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.WaitDelay = 3 * time.Second
+	return cmd
 }
 
 func getRgSearchCmd(ctx context.Context, pattern, path, include string) *exec.Cmd {
@@ -49,5 +52,7 @@ func getRgSearchCmd(ctx context.Context, pattern, path, include string) *exec.Cm
 	}
 	args = append(args, path)
 
-	return exec.CommandContext(ctx, name, args...)
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.WaitDelay = 3 * time.Second
+	return cmd
 }

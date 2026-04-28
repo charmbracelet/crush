@@ -272,6 +272,14 @@ type UI struct {
 	}
 }
 
+// CurrentSessionID returns the active top-level session ID, if any.
+func (m *UI) CurrentSessionID() string {
+	if m.session == nil {
+		return ""
+	}
+	return m.session.ID
+}
+
 // New creates a new instance of the [UI] model.
 func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	// Editor components

@@ -131,10 +131,17 @@ crush --continue
 		)
 		go ws.Subscribe(program)
 
-		if _, err := program.Run(); err != nil {
+		finalModel, err := program.Run()
+		if err != nil {
 			event.Error(err)
 			slog.Error("TUI run error", "error", err)
 			return errors.New("Crush crashed. If metrics are enabled, we were notified about it. If you'd like to report it, please copy the stacktrace above and open an issue at https://github.com/charmbracelet/crush/issues/new?template=bug.yml") //nolint:staticcheck
+		}
+
+		if model, ok := finalModel.(*ui.UI); ok {
+			if hint := renderSessionResumeHint(model.CurrentSessionID()); hint != "" {
+				_, _ = fmt.Fprintln(cmd.ErrOrStderr(), hint)
+			}
 		}
 		return nil
 	},
@@ -202,6 +209,32 @@ func supportsProgressBar() bool {
 	_, isWindowsTerminal := os.LookupEnv("WT_SESSION")
 
 	return isWindowsTerminal || xstrings.ContainsAnyOf(strings.ToLower(termProg), "ghostty", "iterm2", "rio")
+}
+
+func renderSessionResumeHint(sessionID string) string {
+	if sessionID == "" {
+		return ""
+	}
+	shortID := session.HashID(sessionID)[:7]
+
+	headerStyle := lipgloss.NewStyle().
+		Foreground(charmtone.Butter).
+		Background(charmtone.Malibu).
+		Bold(true).
+		Padding(0, 1).
+		Margin(1).
+		MarginLeft(2)
+	textStyle := lipgloss.NewStyle().
+		MarginLeft(2)
+
+	return fmt.Sprintf(
+		"%s\n%s\n\n",
+		headerStyle.Render("CONTINUE"),
+		textStyle.Render(fmt.Sprintf(
+			"Resume this session later with:\ncrush --session %s\n\nOr alternatively for the last session:\ncrush --continue (or -C)",
+			shortID,
+		)),
+	)
 }
 
 // useClientServer returns true when the client/server architecture is

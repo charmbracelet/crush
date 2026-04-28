@@ -50,6 +50,13 @@ func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 		return nil, err
 	}
 
+	// Serialize all access through a single connection. SQLite serializes
+	// writes at the file level anyway, and allowing multiple pool
+	// connections to interleave writes/checkpoints (especially under
+	// concurrent sub-agents) has caused WAL/header desync resulting in
+	// SQLITE_NOTADB (26) on the next open.
+	db.SetMaxOpenConns(1)
+
 	if err = db.PingContext(ctx); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to connect to database: %w", err)

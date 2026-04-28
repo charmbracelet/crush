@@ -17,6 +17,9 @@ func openDB(dbPath string) (*sql.DB, error) {
 	for name, value := range pragmas {
 		params.Add("_pragma", fmt.Sprintf("%s(%s)", name, value))
 	}
+	// Use BEGIN IMMEDIATE so writers acquire the reserved lock up front,
+	// preventing deferred-to-writer upgrade deadlocks.
+	params.Set("_txlock", "immediate")
 
 	dsn := fmt.Sprintf("file:%s?%s", dbPath, params.Encode())
 	db, err := sql.Open("sqlite", dsn)

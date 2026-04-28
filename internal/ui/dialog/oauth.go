@@ -222,7 +222,7 @@ func (m *OAuth) headerContent() string {
 		textStyle    = t.Dialog.PrimaryText
 		dialogStyle  = t.Dialog.View.Width(m.width)
 		headerOffset = titleStyle.GetHorizontalFrameSize() + dialogStyle.GetHorizontalFrameSize()
-		dialogTitle  = fmt.Sprintf("Authenticate with %s", m.oAuthProvider.name())
+		dialogTitle  = fmt.Sprintf("Let’s authenticate with %s", m.oAuthProvider.name())
 	)
 	if m.isOnboarding {
 		return textStyle.Render(dialogTitle)
@@ -232,13 +232,13 @@ func (m *OAuth) headerContent() string {
 
 func (m *OAuth) innerDialogContent() string {
 	var (
-		t            = m.com.Styles
-		whiteStyle   = t.Dialog.OAuth.Instructions
-		primaryStyle = t.Dialog.OAuth.Enter
-		greenStyle   = t.Dialog.OAuth.Success
-		linkStyle    = t.Dialog.OAuth.Link
-		errorStyle   = t.Dialog.OAuth.ErrorText
-		mutedStyle   = t.Dialog.OAuth.StatusText
+		t                = m.com.Styles
+		instructionStyle = t.Dialog.OAuth.Instructions
+		enterKeyStyle    = t.Dialog.OAuth.Enter
+		successStyle     = t.Dialog.OAuth.Success
+		linkStyle        = t.Dialog.OAuth.Link
+		errorStyle       = t.Dialog.OAuth.ErrorText
+		statusTextStyle  = t.Dialog.OAuth.StatusText
 	)
 
 	switch m.State {
@@ -248,8 +248,8 @@ func (m *OAuth) innerDialogContent() string {
 			Width(m.width - 2).
 			Align(lipgloss.Center).
 			Render(
-				greenStyle.Render(m.spinner.View()) +
-					mutedStyle.Render("Initializing..."),
+				successStyle.Render(m.spinner.View()) +
+					statusTextStyle.Render("Initializing..."),
 			)
 
 	case OAuthStateDisplay:
@@ -257,9 +257,9 @@ func (m *OAuth) innerDialogContent() string {
 			Margin(0, 1).
 			Width(m.width - 2).
 			Render(
-				whiteStyle.Render("Press ") +
-					primaryStyle.Render("enter") +
-					whiteStyle.Render(" to copy the code below and open the browser."),
+				instructionStyle.Render("Press ") +
+					enterKeyStyle.Render("enter") +
+					instructionStyle.Render(" to copy the code below and open the browser."),
 			)
 
 		codeBox := lipgloss.NewStyle().
@@ -273,16 +273,16 @@ func (m *OAuth) innerDialogContent() string {
 			)
 
 		link := linkStyle.Hyperlink(m.verificationURL, "id=oauth-verify").Render(m.verificationURL)
-		url := mutedStyle.
+		url := statusTextStyle.
 			Margin(0, 1).
 			Width(m.width - 2).
-			Render("Browser not opening? Refer to\n" + link)
+			Render("Browser not opening? Pay a visit to:\n" + link)
 
 		waiting := lipgloss.NewStyle().
 			Margin(0, 1).
 			Width(m.width - 2).
 			Render(
-				greenStyle.Render(m.spinner.View()) + mutedStyle.Render("Verifying..."),
+				successStyle.Render(m.spinner.View()) + statusTextStyle.Render("Verifying..."),
 			)
 
 		return lipgloss.JoinVertical(
@@ -299,7 +299,7 @@ func (m *OAuth) innerDialogContent() string {
 		)
 
 	case OAuthStateSuccess:
-		return greenStyle.
+		return successStyle.
 			Margin(1).
 			Width(m.width - 2).
 			Render("Authentication successful!")

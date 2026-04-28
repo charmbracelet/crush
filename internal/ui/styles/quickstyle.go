@@ -14,13 +14,14 @@ import (
 	"github.com/charmbracelet/x/exp/charmtone"
 )
 
-// quickStyleOpts is the palette of colors used by quickStyle to build a
-// complete Styles value. Each field maps to a semantic role in the UI.
+// quickStyleOpts is the palette of colors used by quickStyle to simplify the
+// process of building a theme.
 type quickStyleOpts struct {
 	// Brand.
 	primary   color.Color
 	secondary color.Color
 	accent    color.Color
+	keyword   color.Color
 
 	// Default foreground and background colors.
 	fgBase color.Color
@@ -55,12 +56,11 @@ type quickStyleOpts struct {
 	successMostSubtle color.Color
 }
 
-// quickStyle builds a complete Styles value from a palette of semantic
-// colors. Themes should populate quickStyleOpts and call this rather than
-// re-implementing every style rule.
+// quickStyle builds the default Styles (that is, the default theme, Charmtone
+// Pantera) from a palette of semi-semanticly-named colors.
 //
-// The idea here is that you can do most of the work with quickStyle, then
-// add overrides as needed.
+// The idea here is that you can do most of the work on a theme with quickStyle,
+// then add overrides as needed.
 func quickStyle(o quickStyleOpts) Styles {
 	var (
 		base   = lipgloss.NewStyle().Foreground(o.fgBase)
@@ -863,11 +863,11 @@ func quickStyle(o quickStyleOpts) Styles {
 
 	// OAuth dialog
 	s.Dialog.OAuth.Spinner = base.Foreground(o.successMoreSubtle)
-	s.Dialog.OAuth.Instructions = lipgloss.NewStyle().Foreground(o.primary)
-	s.Dialog.OAuth.UserCode = lipgloss.NewStyle().Bold(true).Foreground(o.primary)
+	s.Dialog.OAuth.Instructions = lipgloss.NewStyle().Foreground(o.fgBase)
+	s.Dialog.OAuth.UserCode = lipgloss.NewStyle().Bold(true).Foreground(o.fgBase)
 	s.Dialog.OAuth.Success = lipgloss.NewStyle().Foreground(o.successMoreSubtle)
 	s.Dialog.OAuth.Link = lipgloss.NewStyle().Foreground(o.successMostSubtle).Underline(true)
-	s.Dialog.OAuth.Enter = lipgloss.NewStyle().Foreground(o.primary)
+	s.Dialog.OAuth.Enter = lipgloss.NewStyle().Foreground(o.keyword)
 	s.Dialog.OAuth.ErrorText = lipgloss.NewStyle().Foreground(o.error)
 	s.Dialog.OAuth.StatusText = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
 	s.Dialog.OAuth.UserCodeBg = o.bgLeastVisible

@@ -21,6 +21,7 @@ func CharmtonePantera() Styles {
 		primary:   charmtone.Charple,
 		secondary: charmtone.Dolly,
 		accent:    charmtone.Bok,
+		keyword:   charmtone.Blush,
 
 		fgBase:       charmtone.Ash,
 		fgMoreSubtle: charmtone.Squid,

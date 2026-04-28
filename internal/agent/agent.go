@@ -105,6 +105,18 @@ type Model struct {
 	ModelCfg   config.SelectedModel
 }
 
+// MaxOutputTokens resolves the max output tokens to request from the
+// provider: the user-configured ModelCfg.MaxTokens if set, otherwise the
+// Catwalk default. Returns 0 when neither is configured; callers should
+// treat 0 as "don't send a limit" because some providers (e.g. LM Studio)
+// reject an explicit max_tokens of 0.
+func (m Model) MaxOutputTokens() int64 {
+	if m.ModelCfg.MaxTokens != 0 {
+		return m.ModelCfg.MaxTokens
+	}
+	return m.CatwalkCfg.DefaultMaxTokens
+}
+
 type sessionAgent struct {
 	largeModel         *csync.Value[Model]
 	smallModel         *csync.Value[Model]
@@ -666,10 +678,20 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 
 	summaryPromptText := buildSummaryPrompt(currentSession.Todos)
 
+	// Summarize used to rely on provider defaults, which silently caps
+	// Anthropic at 4096 tokens and truncates long summaries. Resolve the
+	// same max-tokens value Run uses, and only pass a non-zero limit (LM
+	// Studio and some OpenAI-compat endpoints reject an explicit 0).
+	var maxOutputTokens *int64
+	if v := largeModel.MaxOutputTokens(); v > 0 {
+		maxOutputTokens = &v
+	}
+
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:          summaryPromptText,
 		Messages:        aiMsgs,
 		ProviderOptions: opts,
+		MaxOutputTokens: maxOutputTokens,
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = options.Messages
 			if systemPromptPrefix != "" {

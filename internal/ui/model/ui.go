@@ -1761,6 +1761,10 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		return m.handleDialogMsg(msg)
 	}
 
+	if m.shouldPromptQuitOnEOF(msg) {
+		return m.openQuitDialog()
+	}
+
 	// Handle cancel key when agent is busy.
 	if key.Matches(msg, m.keyMap.Chat.Cancel) {
 		if m.isAgentBusy() {
@@ -3123,6 +3127,22 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 		return nil
 	})
 	return tea.Batch(cmds...)
+}
+
+func (m *UI) shouldPromptQuitOnEOF(msg tea.KeyPressMsg) bool {
+	if msg.String() != "ctrl+d" {
+		return false
+	}
+	if m.focus != uiFocusEditor {
+		return false
+	}
+	if m.state != uiChat && m.state != uiLanding {
+		return false
+	}
+	if m.textarea.Value() != "" || m.completionsOpen {
+		return false
+	}
+	return m.attachments == nil || len(m.attachments.List()) == 0
 }
 
 const cancelTimerDuration = 2 * time.Second

@@ -21,6 +21,9 @@ Common shell builtins and core utils available on Windows.
 - Chain with ';' or '&&', avoid newlines except in quoted strings
 - Each command runs in independent shell (no state persistence between calls)
 - Prefer absolute paths over 'cd' (use 'cd' only if user explicitly requests)
+{{- if .RgAvailable }}
+- Ripgrep (`rg`) is available; prefer it over `grep` for faster, more intuitive searching
+{{- end }}
 </usage_notes>
 
 <background_execution>

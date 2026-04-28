@@ -7,6 +7,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/atotto/clipboard"
+	nativeclipboard "github.com/aymanbagabas/go-nativeclipboard"
+	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/util"
@@ -98,9 +100,8 @@ func IsFileTooBig(filePath string, sizeLimit int64) (bool, error) {
 	return false, nil
 }
 
-// CopyToClipboard copies the given text to the clipboard using both OSC 52
-// (terminal escape sequence) and native clipboard for maximum compatibility.
-// Returns a command that reports success to the user with the given message.
+// CopyToClipboard copies the given text to the system clipboard when possible.
+// Returns a command that reports success only if the copy likely succeeded.
 func CopyToClipboard(text, successMessage string) tea.Cmd {
 	return CopyToClipboardWithCallback(text, successMessage, nil)
 }
@@ -109,13 +110,32 @@ func CopyToClipboard(text, successMessage string) tea.Cmd {
 // before showing the success message.
 // This is useful when you need to perform additional actions like clearing UI state.
 func CopyToClipboardWithCallback(text, successMessage string, callback tea.Cmd) tea.Cmd {
+	var copied bool
+
 	return tea.Sequence(
 		tea.SetClipboard(text),
 		func() tea.Msg {
-			_ = clipboard.WriteAll(text)
+			// Prefer nativeclipboard since it's able to report whether the
+			// clipboard write succeeded.
+			if _, err := nativeclipboard.Text.Write([]byte(text)); err == nil {
+				copied = true
+			}
+
+			// Fall back to atotto's clipboard implementation.
+			if !copied {
+				if err := clipboard.WriteAll(text); err == nil {
+					copied = true
+				}
+			}
 			return nil
 		},
 		callback,
-		util.ReportInfo(successMessage),
+		func() tea.Msg {
+			if copied {
+				return util.NewInfoMsg(successMessage)
+			}
+
+			return util.NewWarnMsg("Could not copy to clipboard in this environment.")
+		},
 	)
 }

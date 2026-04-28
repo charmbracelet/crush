@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -242,6 +243,49 @@ func (m *UI) startLSPs(paths []string) tea.Cmd {
 		ctx := context.Background()
 		for _, path := range paths {
 			m.com.Workspace.LSPStart(ctx, path)
+		}
+		return nil
+	}
+}
+
+// externalUpdateInterval is how often the TUI polls for session changes made
+// by other processes (e.g. crush run -C in a separate terminal).
+const externalUpdateInterval = time.Second
+
+// checkExternalUpdateMsg is a repeating tick used to detect cross-process
+// session changes.
+type checkExternalUpdateMsg struct{}
+
+// externalSessionChangedMsg is returned when the active session has been
+// updated by an external process.
+type externalSessionChangedMsg struct {
+	sessionID string
+}
+
+// scheduleExternalUpdateCheck returns a command that fires checkExternalUpdateMsg
+// after externalUpdateInterval.
+func scheduleExternalUpdateCheck() tea.Cmd {
+	return tea.Tick(externalUpdateInterval, func(time.Time) tea.Msg {
+		return checkExternalUpdateMsg{}
+	})
+}
+
+// checkExternalSessionUpdate queries the workspace for the current session's
+// updated_at timestamp. If it has advanced beyond the cached value, it signals
+// that a full reload is needed.
+func (m *UI) checkExternalSessionUpdate() tea.Cmd {
+	sessionID := m.session.ID
+	knownUpdatedAt := m.session.UpdatedAt
+	return func() tea.Msg {
+		sess, err := m.com.Workspace.GetSession(context.Background(), sessionID)
+		if err != nil {
+			slog.Debug("External update check: failed to get session", "session_id", sessionID, "error", err)
+			return nil
+		}
+		if sess.UpdatedAt > knownUpdatedAt {
+			slog.Debug("External session update detected", "session_id", sessionID,
+				"known_updated_at", knownUpdatedAt, "new_updated_at", sess.UpdatedAt)
+			return externalSessionChangedMsg{sessionID: sessionID}
 		}
 		return nil
 	}

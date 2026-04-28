@@ -386,6 +386,8 @@ func (m *UI) Init() tea.Cmd {
 	if cmd := m.loadInitialSession(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
+	// Start polling for session changes made by external processes.
+	cmds = append(cmds, scheduleExternalUpdateCheck())
 	return tea.Batch(cmds...)
 }
 
@@ -576,6 +578,19 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case closeDialogMsg:
 		m.dialog.CloseFrontDialog()
+
+	case checkExternalUpdateMsg:
+		// Only probe the DB when the in-process agent is idle; when it is
+		// running, the pubsub broker already delivers updates inline.
+		if m.hasSession() && !m.isAgentBusy() {
+			cmds = append(cmds, m.checkExternalSessionUpdate())
+		}
+		cmds = append(cmds, scheduleExternalUpdateCheck())
+
+	case externalSessionChangedMsg:
+		if m.hasSession() && m.session.ID == msg.sessionID {
+			cmds = append(cmds, m.loadSession(msg.sessionID))
+		}
 
 	case pubsub.Event[session.Session]:
 		if msg.Type == pubsub.DeletedEvent {

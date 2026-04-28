@@ -373,6 +373,40 @@ func TestRunnerMatcherFiltering(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, DecisionNone, result.Decision)
 	})
+
+	// Runner must compile matchers itself; it cannot rely on
+	// ValidateHooks having run first. This is the guarantee that prevents
+	// the reload-drops-matcher class of bug.
+	t.Run("runner compiles matcher without ValidateHooks", func(t *testing.T) {
+		t.Parallel()
+		raw := []config.HookConfig{
+			{Command: `echo '{"decision":"deny","reason":"blocked"}'`, Matcher: "^bash$"},
+		}
+		r := NewRunner(raw, t.TempDir(), t.TempDir())
+
+		deny, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{}`)
+		require.NoError(t, err)
+		require.Equal(t, DecisionDeny, deny.Decision)
+
+		noop, err := r.Run(context.Background(), EventPreToolUse, "sess", "view", `{}`)
+		require.NoError(t, err)
+		require.Equal(t, DecisionNone, noop.Decision)
+	})
+
+	// A matcher that fails to compile at Runner construction must not
+	// degrade to match-everything; the hook is dropped instead.
+	t.Run("runner skips hooks with invalid matcher", func(t *testing.T) {
+		t.Parallel()
+		raw := []config.HookConfig{
+			{Command: `echo '{"decision":"deny","reason":"should not fire"}'`, Matcher: "[invalid"},
+		}
+		r := NewRunner(raw, t.TempDir(), t.TempDir())
+
+		result, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{}`)
+		require.NoError(t, err)
+		require.Equal(t, DecisionNone, result.Decision)
+		require.Empty(t, r.Hooks())
+	})
 }
 
 func TestValidateHooksInvalidRegex(t *testing.T) {

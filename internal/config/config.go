@@ -573,6 +573,13 @@ func (c *Config) SetupAgents() {
 	c.Agents = agents
 }
 
+// API key validation lives between this block and [ProviderConfig.TestConnection]
+// below. See internal/config/VALIDATION.md for the full contract, the
+// per-provider probe table, the classifier inventory, and the checklist for
+// adding or changing a provider's validation behavior. Any change to
+// [buildValidationProbe], the classify* functions, or
+// [openaiCompatModelsAllowlist] must be reflected in that document.
+
 // ErrValidationUnsupported is returned from [ProviderConfig.TestConnection]
 // when the provider does not expose a deterministic endpoint that proves API
 // key authentication without performing inference. Callers should treat this

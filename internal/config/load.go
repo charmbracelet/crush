@@ -612,10 +612,17 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 			} else {
 				large.MaxTokens = model.DefaultMaxTokens
 			}
-			if largeModelSelected.ReasoningEffort != "" {
-				large.ReasoningEffort = largeModelSelected.ReasoningEffort
+			// Only apply reasoning options if the model supports reasoning.
+			// This prevents options persisted for a reasoning-capable model from
+			// being sent to a model that does not support them (e.g. switching
+			// from an Anthropic/OpenRouter model with thinking enabled back to a
+			// local Ollama model).
+			if model.CanReason {
+				if largeModelSelected.ReasoningEffort != "" {
+					large.ReasoningEffort = largeModelSelected.ReasoningEffort
+				}
+				large.Think = largeModelSelected.Think
 			}
-			large.Think = largeModelSelected.Think
 			if largeModelSelected.Temperature != nil {
 				large.Temperature = largeModelSelected.Temperature
 			}
@@ -656,8 +663,12 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 			} else {
 				small.MaxTokens = model.DefaultMaxTokens
 			}
-			if smallModelSelected.ReasoningEffort != "" {
-				small.ReasoningEffort = smallModelSelected.ReasoningEffort
+			// Only apply reasoning options if the model supports reasoning.
+			if model.CanReason {
+				if smallModelSelected.ReasoningEffort != "" {
+					small.ReasoningEffort = smallModelSelected.ReasoningEffort
+				}
+				small.Think = smallModelSelected.Think
 			}
 			if smallModelSelected.Temperature != nil {
 				small.Temperature = smallModelSelected.Temperature
@@ -674,7 +685,6 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 			if smallModelSelected.PresencePenalty != nil {
 				small.PresencePenalty = smallModelSelected.PresencePenalty
 			}
-			small.Think = smallModelSelected.Think
 		}
 	}
 	c.Models[SelectedModelTypeLarge] = large

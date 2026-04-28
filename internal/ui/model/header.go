@@ -1,12 +1,14 @@
 package model
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crush/internal/gitutil"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -151,7 +153,14 @@ func renderHeaderDetails(
 	metadata = dot + metadata
 
 	const dirTrimLimit = 4
-	cwd := fsext.DirTrim(fsext.PrettyPath(com.Workspace.WorkingDir()), dirTrimLimit)
+	workingDir := com.Workspace.WorkingDir()
+	cwd := fsext.DirTrim(fsext.PrettyPath(workingDir), dirTrimLimit)
+
+	branch := gitutil.GetCurrentBranch(context.Background(), workingDir)
+	if branch != "" {
+		cwd = " " + branch + dot + cwd
+	}
+
 	cwd = t.Header.WorkingDir.Render(cwd)
 
 	result := cwd + metadata

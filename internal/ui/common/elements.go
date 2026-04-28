@@ -2,11 +2,14 @@ package common
 
 import (
 	"cmp"
+	"context"
 	"fmt"
 	"image/color"
 	"strings"
 
 	"charm.land/lipgloss/v2"
+
+	"github.com/charmbracelet/crush/internal/gitutil"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
@@ -15,9 +18,13 @@ import (
 )
 
 // PrettyPath formats a file path with home directory shortening and applies
-// muted styling.
+// muted styling. It also displays the current Git branch if available.
 func PrettyPath(t *styles.Styles, path string, width int) string {
 	formatted := home.Short(path)
+	branch := gitutil.GetCurrentBranch(context.Background(), path)
+	if branch != "" {
+		formatted = " " + branch + " • " + formatted
+	}
 	return t.Sidebar.WorkingDir.Width(width).Render(formatted)
 }
 

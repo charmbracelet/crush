@@ -242,7 +242,7 @@ func quickStyle(o quickStyleOpts) Styles {
 					Color: hex(o.fgSubtle),
 				},
 				Error: ansi.StylePrimitive{
-					Color:           hex(o.primary),
+					Color:           hex(o.onPrimary),
 					BackgroundColor: hex(o.error),
 				},
 				Comment: ansi.StylePrimitive{
@@ -618,12 +618,12 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Tool.StateWaiting = base.Foreground(o.fgMostSubtle)
 	s.Tool.StateCancelled = base.Foreground(o.fgMostSubtle)
 
-	s.Tool.ErrorTag = base.Padding(0, 1).Background(o.destructive).Foreground(o.primary)
+	s.Tool.ErrorTag = base.Padding(0, 1).Background(o.destructive).Foreground(o.onPrimary)
 	s.Tool.ErrorMessage = base.Foreground(o.fgSubtle)
 
 	// Diff and multi-edit styles
 	s.Tool.DiffTruncation = muted.Background(o.bgLeastVisible).PaddingLeft(2)
-	s.Tool.NoteTag = base.Padding(0, 1).Background(o.info).Foreground(o.primary)
+	s.Tool.NoteTag = base.Padding(0, 1).Background(o.info).Foreground(o.onPrimary)
 	s.Tool.NoteMessage = base.Foreground(o.fgSubtle)
 
 	// Job header styles
@@ -636,7 +636,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Tool.JobDescription = subtle
 
 	// Agent task styles
-	s.Tool.AgentTaskTag = base.Bold(true).Padding(0, 1).MarginLeft(2).Background(o.infoMoreSubtle).Foreground(o.primary)
+	s.Tool.AgentTaskTag = base.Bold(true).Padding(0, 1).MarginLeft(2).Background(o.infoMoreSubtle).Foreground(o.onPrimary)
 	s.Tool.AgentPrompt = muted
 
 	// Agentic fetch styles
@@ -684,7 +684,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Tool.ResultItemDesc = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 
 	// Buttons
-	s.Button.Focused = lipgloss.NewStyle().Foreground(o.primary).Background(o.secondary)
+	s.Button.Focused = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.secondary)
 	s.Button.Blurred = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.bgLessVisible)
 
 	// Editor
@@ -783,7 +783,7 @@ func quickStyle(o quickStyleOpts) Styles {
 		BorderForeground(o.successMostSubtle).BorderStyle(messageFocussedBorder)
 	s.Messages.Thinking = lipgloss.NewStyle().MaxHeight(10)
 	s.Messages.ErrorTag = lipgloss.NewStyle().Padding(0, 1).
-		Background(o.destructive).Foreground(o.primary)
+		Background(o.destructive).Foreground(o.onPrimary)
 	s.Messages.ErrorTitle = lipgloss.NewStyle().Foreground(o.fgSubtle)
 	s.Messages.ErrorDetails = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 
@@ -847,7 +847,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Dialog.Help.FullDesc = base.Foreground(o.fgMostSubtle)
 	s.Dialog.Help.FullSeparator = base.Foreground(o.separator)
 	s.Dialog.NormalItem = base.Padding(0, 1).Foreground(o.fgBase)
-	s.Dialog.SelectedItem = base.Padding(0, 1).Background(o.primary).Foreground(o.fgBase)
+	s.Dialog.SelectedItem = base.Padding(0, 1).Background(o.primary).Foreground(o.onPrimary)
 	s.Dialog.InputPrompt = base.Margin(1, 1)
 
 	s.Dialog.List = base.Margin(0, 0, 1, 0)
@@ -908,11 +908,11 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Status.InfoMessage = s.Status.SuccessMessage
 	s.Status.UpdateMessage = s.Status.SuccessMessage
 	s.Status.WarnMessage = s.Status.SuccessMessage.Foreground(o.bgMostVisible).Background(o.warningSubtle)
-	s.Status.ErrorMessage = s.Status.SuccessMessage.Foreground(o.primary).Background(o.error)
+	s.Status.ErrorMessage = s.Status.SuccessMessage.Foreground(o.onPrimary).Background(o.error)
 
 	// Completions styles
 	s.Completions.Normal = base.Background(o.bgLessVisible).Foreground(o.fgBase)
-	s.Completions.Focused = base.Background(o.primary).Foreground(o.primary)
+	s.Completions.Focused = base.Background(o.primary).Foreground(o.onPrimary)
 	s.Completions.Match = base.Underline(true)
 
 	// Attachments styles

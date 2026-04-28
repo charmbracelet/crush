@@ -1,10 +1,12 @@
 package config
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"maps"
 	"net/http"
@@ -571,100 +573,320 @@ func (c *Config) SetupAgents() {
 	c.Agents = agents
 }
 
-func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
-	var (
-		providerID = catwalk.InferenceProvider(c.ID)
-		testURL    = ""
-		headers    = make(map[string]string)
-		apiKey, _  = resolver.ResolveValue(c.APIKey)
-	)
+// ErrValidationUnsupported is returned from [ProviderConfig.TestConnection]
+// when the provider does not expose a deterministic endpoint that proves API
+// key authentication without performing inference. Callers should treat this
+// as "saved but not verified" rather than as a validation failure.
+var ErrValidationUnsupported = errors.New("provider does not expose a deterministic validation probe")
 
-	switch providerID {
-	case catwalk.InferenceProviderMiniMax, catwalk.InferenceProviderMiniMaxChina:
-		// NOTE: MiniMax has no good endpoint we can use to validate the API key.
+// validationProbe describes a single HTTP request used to prove authentication
+// for a given provider configuration.
+type validationProbe struct {
+	method   string
+	url      string
+	headers  map[string]string
+	body     []byte
+	classify func(statusCode int) error
+}
+
+// classifyAuthGated treats the probe endpoint as one that is expected to
+// return 200 with a valid key and 401/403 with an invalid one. Any other
+// status is considered non-deterministic and reported as unsupported so the
+// UI can show "not verified" instead of a misleading "invalid key".
+func classifyAuthGated(c *ProviderConfig) func(int) error {
+	return func(status int) error {
+		switch status {
+		case http.StatusOK:
+			return nil
+		case http.StatusUnauthorized, http.StatusForbidden:
+			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, http.StatusText(status))
+		default:
+			return ErrValidationUnsupported
+		}
+	}
+}
+
+// classifyOpenAIChatMalformed classifies responses from a deliberately
+// malformed POST {baseURL}/chat/completions probe. On most OpenAI-compatible
+// gateways authentication happens before schema validation, so 401/403 means
+// the key is bad while 400/422 means the key was accepted and only the body
+// was rejected. Anything else is treated as unsupported / transient.
+func classifyOpenAIChatMalformed(c *ProviderConfig) func(int) error {
+	return func(status int) error {
+		switch status {
+		case http.StatusUnauthorized, http.StatusForbidden:
+			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, http.StatusText(status))
+		case http.StatusBadRequest, http.StatusUnprocessableEntity:
+			return nil
+		default:
+			return ErrValidationUnsupported
+		}
+	}
+}
+
+// classifyGoogleModels classifies responses from Google's
+// `/v1beta/models?key=…` probe. Google returns 400 INVALID_ARGUMENT for a
+// malformed or unknown API key, so 400/401/403 all indicate an invalid key.
+func classifyGoogleModels(c *ProviderConfig) func(int) error {
+	return func(status int) error {
+		switch status {
+		case http.StatusOK:
+			return nil
+		case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden:
+			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, http.StatusText(status))
+		default:
+			return ErrValidationUnsupported
+		}
+	}
+}
+
+// classifyZAIModels preserves the historical ZAI-specific behaviour: the
+// `/models` endpoint returns a variety of non-200 statuses even with a valid
+// key, but reliably returns 401 when the key is bad. Treat 401 as invalid
+// and anything else as valid (the endpoint is authoritative about bad keys
+// but noisy about everything else).
+func classifyZAIModels(c *ProviderConfig) func(int) error {
+	return func(status int) error {
+		if status == http.StatusUnauthorized {
+			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, http.StatusText(status))
+		}
 		return nil
 	}
+}
 
+// openaiCompatModelsAllowlist lists openai-compat providers whose `/models`
+// endpoint is known to authenticate the caller (i.e. return 401/403 for a
+// bad key rather than 200 with a public listing). New openai-compat
+// providers should NOT be added here unless their `/models` behaviour has
+// been confirmed to gate on auth — otherwise they should use the malformed
+// chat-completions probe or return [ErrValidationUnsupported].
+var openaiCompatModelsAllowlist = map[catwalk.InferenceProvider]struct{}{
+	"deepseek":                           {},
+	catwalk.InferenceProviderGROQ:        {},
+	catwalk.InferenceProviderXAI:         {},
+	catwalk.InferenceProviderZhipu:       {},
+	catwalk.InferenceProviderZhipuCoding: {},
+	catwalk.InferenceProviderCerebras:    {},
+	catwalk.InferenceProviderNebius:      {},
+	catwalk.InferenceProviderCopilot:     {},
+}
+
+// openaiCompatChatProbe builds a malformed-body POST /chat/completions probe
+// for OpenAI-compatible providers whose chat-completions endpoint is known to
+// gate on auth before validating the request body.
+func openaiCompatChatProbe(c *ProviderConfig, baseURL, apiKey string) (*validationProbe, error) {
+	if baseURL == "" {
+		return nil, ErrValidationUnsupported
+	}
+	return &validationProbe{
+		method: http.MethodPost,
+		url:    baseURL + "/chat/completions",
+		headers: map[string]string{
+			"Authorization": "Bearer " + apiKey,
+			"Content-Type":  "application/json",
+		},
+		// Intentionally malformed: required fields missing so the gateway
+		// rejects the payload after authenticating the caller.
+		body:     []byte(`{"__crush_probe__": true}`),
+		classify: classifyOpenAIChatMalformed(c),
+	}, nil
+}
+
+// buildValidationProbe returns the probe to use for this provider, or a
+// sentinel error if verification is impossible without performing inference.
+// A nil probe with a nil error means "the key is valid by virtue of its
+// format and no network probe is necessary" (e.g. Bedrock/Vercel prefix
+// checks).
+func (c *ProviderConfig) buildValidationProbe(resolver VariableResolver) (*validationProbe, error) {
+	providerID := catwalk.InferenceProvider(c.ID)
+	apiKey, _ := resolver.ResolveValue(c.APIKey)
+	baseURL, _ := resolver.ResolveValue(c.BaseURL)
+
+	// Provider-ID-specific probes take precedence over type-based defaults.
+	switch providerID {
+	case catwalk.InferenceProviderMiniMax, catwalk.InferenceProviderMiniMaxChina:
+		base := cmp.Or(baseURL, "https://api.minimax.io/anthropic")
+		return &validationProbe{
+			method: http.MethodGet,
+			url:    base + "/v1/models",
+			headers: map[string]string{
+				"x-api-key":         apiKey,
+				"anthropic-version": "2023-06-01",
+			},
+			classify: classifyAuthGated(c),
+		}, nil
+	case catwalk.InferenceProviderVenice:
+		base := cmp.Or(baseURL, "https://api.venice.ai/api/v1")
+		return &validationProbe{
+			method: http.MethodGet,
+			url:    base + "/api_keys/rate_limits",
+			headers: map[string]string{
+				"Authorization": "Bearer " + apiKey,
+			},
+			classify: classifyAuthGated(c),
+		}, nil
+	case catwalk.InferenceAIHubMix,
+		catwalk.InferenceProviderAvian,
+		catwalk.InferenceProviderCortecs,
+		catwalk.InferenceProviderHuggingFace,
+		catwalk.InferenceProviderIoNet,
+		catwalk.InferenceProviderOpenCodeGo,
+		catwalk.InferenceProviderOpenCodeZen,
+		catwalk.InferenceProviderQiniuCloud,
+		catwalk.InferenceProviderSynthetic:
+		return openaiCompatChatProbe(c, baseURL, apiKey)
+	case catwalk.InferenceProviderChutes, catwalk.InferenceProviderNeuralwatt:
+		// These providers have been observed to return ambiguous responses
+		// for unauthenticated requests, so we cannot safely validate.
+		return nil, ErrValidationUnsupported
+	case catwalk.InferenceProviderZAI:
+		// ZAI's `/models` endpoint is authoritative about bad keys (always
+		// 401) but returns assorted non-200 statuses for valid keys, so it
+		// needs its own classifier.
+		base := baseURL
+		if base == "" {
+			return nil, ErrValidationUnsupported
+		}
+		return &validationProbe{
+			method: http.MethodGet,
+			url:    base + "/models",
+			headers: map[string]string{
+				"Authorization": "Bearer " + apiKey,
+			},
+			classify: classifyZAIModels(c),
+		}, nil
+	}
+
+	// Type-based defaults for providers without an explicit override.
 	switch c.Type {
-	case catwalk.TypeOpenAI, catwalk.TypeOpenAICompat, catwalk.TypeOpenRouter:
-		baseURL, _ := resolver.ResolveValue(c.BaseURL)
-		baseURL = cmp.Or(baseURL, "https://api.openai.com/v1")
-
-		switch providerID {
-		case catwalk.InferenceProviderOpenRouter:
-			testURL = baseURL + "/credits"
-		case catwalk.InferenceProviderOpenCodeGo:
-			testURL = strings.Replace(baseURL, "/go", "", 1) + "/models"
-		default:
-			testURL = baseURL + "/models"
-		}
-
-		headers["Authorization"] = "Bearer " + apiKey
+	case catwalk.TypeOpenAI:
+		base := cmp.Or(baseURL, "https://api.openai.com/v1")
+		return &validationProbe{
+			method: http.MethodGet,
+			url:    base + "/models",
+			headers: map[string]string{
+				"Authorization": "Bearer " + apiKey,
+			},
+			classify: classifyAuthGated(c),
+		}, nil
+	case catwalk.TypeOpenRouter:
+		base := cmp.Or(baseURL, "https://openrouter.ai/api/v1")
+		return &validationProbe{
+			method: http.MethodGet,
+			url:    base + "/credits",
+			headers: map[string]string{
+				"Authorization": "Bearer " + apiKey,
+			},
+			classify: classifyAuthGated(c),
+		}, nil
 	case catwalk.TypeAnthropic:
-		baseURL, _ := resolver.ResolveValue(c.BaseURL)
-		baseURL = cmp.Or(baseURL, "https://api.anthropic.com/v1")
-
-		switch providerID {
-		case catwalk.InferenceKimiCoding:
-			testURL = baseURL + "/v1/models"
-		default:
-			testURL = baseURL + "/models"
+		base := cmp.Or(baseURL, "https://api.anthropic.com/v1")
+		testURL := base + "/models"
+		if providerID == catwalk.InferenceKimiCoding {
+			testURL = base + "/v1/models"
 		}
-
-		headers["x-api-key"] = apiKey
-		headers["anthropic-version"] = "2023-06-01"
+		return &validationProbe{
+			method: http.MethodGet,
+			url:    testURL,
+			headers: map[string]string{
+				"x-api-key":         apiKey,
+				"anthropic-version": "2023-06-01",
+			},
+			classify: classifyAuthGated(c),
+		}, nil
 	case catwalk.TypeGoogle:
-		baseURL, _ := resolver.ResolveValue(c.BaseURL)
-		baseURL = cmp.Or(baseURL, "https://generativelanguage.googleapis.com")
-		testURL = baseURL + "/v1beta/models?key=" + url.QueryEscape(apiKey)
+		base := cmp.Or(baseURL, "https://generativelanguage.googleapis.com")
+		return &validationProbe{
+			method:   http.MethodGet,
+			url:      base + "/v1beta/models?key=" + url.QueryEscape(apiKey),
+			classify: classifyGoogleModels(c),
+		}, nil
 	case catwalk.TypeBedrock:
 		// NOTE: Bedrock has a `/foundation-models` endpoint that we could in
 		// theory use, but apparently the authorization is region-specific,
-		// so it's not so trivial.
-		if strings.HasPrefix(apiKey, "ABSK") { // Bedrock API keys
-			return nil
+		// so it's not so trivial. Fall back to a prefix check.
+		if strings.HasPrefix(apiKey, "ABSK") {
+			return nil, nil
 		}
-		return errors.New("not a valid bedrock api key")
+		return nil, errors.New("not a valid bedrock api key")
 	case catwalk.TypeVercel:
 		// NOTE: Vercel does not validate API keys on the `/models` endpoint.
-		if strings.HasPrefix(apiKey, "vck_") { // Vercel API keys
-			return nil
+		if strings.HasPrefix(apiKey, "vck_") {
+			return nil, nil
 		}
-		return errors.New("not a valid vercel api key")
+		return nil, errors.New("not a valid vercel api key")
+	case catwalk.TypeOpenAICompat:
+		// Generic openai-compat providers often expose a public /models
+		// endpoint, so hitting it proves nothing about the caller's key.
+		// Only providers we've confirmed to gate /models on auth use the
+		// /models probe; everyone else needs an explicit override above or
+		// returns ErrValidationUnsupported.
+		if _, ok := openaiCompatModelsAllowlist[providerID]; !ok {
+			return nil, ErrValidationUnsupported
+		}
+		if baseURL == "" {
+			return nil, ErrValidationUnsupported
+		}
+		return &validationProbe{
+			method: http.MethodGet,
+			url:    baseURL + "/models",
+			headers: map[string]string{
+				"Authorization": "Bearer " + apiKey,
+			},
+			classify: classifyAuthGated(c),
+		}, nil
+	}
+
+	return nil, ErrValidationUnsupported
+}
+
+// TestConnection attempts to prove that the configured API key authenticates
+// with the provider. It returns nil on confirmed success, [ErrValidationUnsupported]
+// when the provider has no deterministic validation probe, or a non-nil error
+// describing the validation failure.
+func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
+	probe, err := c.buildValidationProbe(resolver)
+	if err != nil {
+		return err
+	}
+	if probe == nil {
+		// A nil probe with no error means the configuration was accepted
+		// without needing a network round-trip (e.g. Bedrock/Vercel prefix
+		// checks).
+		return nil
+	}
+	if probe.url == "" {
+		return ErrValidationUnsupported
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	client := &http.Client{}
-	req, err := http.NewRequestWithContext(ctx, "GET", testURL, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create request for provider %s: %w", c.ID, err)
+	var body io.Reader
+	if len(probe.body) > 0 {
+		body = bytes.NewReader(probe.body)
 	}
-	for k, v := range headers {
+	req, err := http.NewRequestWithContext(ctx, probe.method, probe.url, body)
+	if err != nil {
+		// Probe construction failures shouldn't surface as low-signal user
+		// errors; treat them as "cannot verify" instead.
+		return ErrValidationUnsupported
+	}
+	for k, v := range probe.headers {
 		req.Header.Set(k, v)
 	}
 	for k, v := range c.ExtraHeaders {
 		req.Header.Set(k, v)
 	}
 
+	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to create request for provider %s: %w", c.ID, err)
+		return fmt.Errorf("failed to connect to provider %s: %w", c.ID, err)
 	}
 	defer resp.Body.Close()
 
-	switch providerID {
-	case catwalk.InferenceProviderZAI:
-		if resp.StatusCode == http.StatusUnauthorized {
-			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, resp.Status)
-		}
-	default:
-		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, resp.Status)
-		}
-	}
-	return nil
+	return probe.classify(resp.StatusCode)
 }
 
 func resolveEnvs(envs map[string]string) []string {

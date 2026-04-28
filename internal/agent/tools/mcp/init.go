@@ -289,7 +289,7 @@ func DisableSingle(cfg *config.ConfigStore, name string) error {
 	// Update state to disabled.
 	updateState(name, StateDisabled, nil, nil, Counts{})
 
-	slog.Info("Disabled mcp client", "name", name)
+	slog.Info("Disabled MCP client", "name", name)
 	return nil
 }
 

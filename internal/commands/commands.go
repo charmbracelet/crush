@@ -39,12 +39,36 @@ type MCPPrompt struct {
 	Arguments   []Argument
 }
 
+func (m MCPPrompt) GetID() string {
+	return m.ID
+}
+
+func (m MCPPrompt) GetDescription() string {
+	return m.Description
+}
+
+func (m MCPPrompt) GetTitle() string {
+	return m.Title
+}
+
 // CustomCommand represents a user-defined custom command loaded from markdown files.
 type CustomCommand struct {
 	ID        string
 	Name      string
 	Content   string
 	Arguments []Argument
+}
+
+func (c CustomCommand) GetID() string {
+	return c.ID
+}
+
+func (c CustomCommand) GetDescription() string {
+	return ""
+}
+
+func (c CustomCommand) GetTitle() string {
+	return c.Name
 }
 
 type commandSource struct {

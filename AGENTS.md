@@ -81,6 +81,15 @@ internal/
   `hookedTool` decorator in `internal/agent/hooked_tool.go` wraps tools at
   the coordinator level. Hooks run before permission checks. See
   `HOOKS.md` for the user-facing protocol.
+- **API key validation**: `ProviderConfig.TestConnection` in
+  `internal/config/config.go` proves authentication per-provider rather
+  than hitting `/models` everywhere (many gateways expose a public
+  `/models`, which proves nothing). Three outcomes: validated, invalid,
+  or `ErrValidationUnsupported` — the last is rendered by the UI as
+  "saved (not verified)" and is a first-class result, not a failure.
+  Any PR that adds or changes a provider probe, classifier, or the
+  openai-compat allowlist must update `internal/config/VALIDATION.md`
+  and the audit table in `config_validate_test.go` in the same commit.
 - **CGO disabled**: builds with `CGO_ENABLED=0` and
   `GOEXPERIMENT=greenteagc`.
 

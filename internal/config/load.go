@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unicode"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
@@ -215,6 +216,15 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 			}
 		}
 
+		if envBaseURL, envAPIKey := providerEnvOverrides(env, string(p.ID)); envBaseURL != "" || envAPIKey != "" {
+			if envBaseURL != "" {
+				p.APIEndpoint = envBaseURL
+			}
+			if envAPIKey != "" {
+				p.APIKey = envAPIKey
+			}
+		}
+
 		headers := map[string]string{}
 		if len(p.DefaultHeaders) > 0 {
 			maps.Copy(headers, p.DefaultHeaders)
@@ -336,6 +346,15 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 			continue
 		}
 
+		if envBaseURL, envAPIKey := providerEnvOverrides(env, id); envBaseURL != "" || envAPIKey != "" {
+			if envBaseURL != "" {
+				providerConfig.BaseURL = envBaseURL
+			}
+			if envAPIKey != "" {
+				providerConfig.APIKey = envAPIKey
+			}
+		}
+
 		// Make sure the provider ID is set
 		providerConfig.ID = id
 		providerConfig.Name = cmp.Or(providerConfig.Name, id) // Use ID as name if not set
@@ -393,6 +412,61 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 	}
 
 	return nil
+}
+
+func providerEnvOverrides(env env.Env, providerID string) (baseURL string, apiKey string) {
+	id := strings.TrimSpace(strings.ToLower(providerID))
+	if id == "" {
+		return "", ""
+	}
+
+	suffix := providerEnvSuffix(id)
+	baseURL = firstEnvValue(env,
+		"CRUSH_"+suffix+"_BASE_URL",
+		suffix+"_BASE_URL",
+	)
+	apiKey = firstEnvValue(env,
+		"CRUSH_"+suffix+"_API_KEY",
+	)
+
+	target := strings.TrimSpace(strings.ToLower(env.Get("CRUSH_PROVIDER")))
+	if target == "" {
+		target = "openai"
+	}
+	if target == id {
+		baseURL = cmp.Or(baseURL, firstEnvValue(env, "CRUSH_API_URL", "API_URL", "APIURL"))
+		apiKey = cmp.Or(apiKey, firstEnvValue(env, "CRUSH_API_KEY", "API_KEY", "APIKEY"))
+	}
+
+	return strings.TrimSpace(baseURL), strings.TrimSpace(apiKey)
+}
+
+func providerEnvSuffix(providerID string) string {
+	var b strings.Builder
+	b.Grow(len(providerID))
+	lastUnderscore := false
+	for _, r := range providerID {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(unicode.ToUpper(r))
+			lastUnderscore = false
+			continue
+		}
+		if !lastUnderscore {
+			b.WriteByte('_')
+			lastUnderscore = true
+		}
+	}
+	return strings.Trim(b.String(), "_")
+}
+
+func firstEnvValue(env env.Env, keys ...string) string {
+	for _, key := range keys {
+		v := strings.TrimSpace(env.Get(key))
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func (c *Config) setDefaults(workingDir, dataDir string) {

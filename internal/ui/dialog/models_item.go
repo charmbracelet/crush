@@ -104,15 +104,15 @@ func (m *ModelItem) ID() string {
 func (m *ModelItem) Render(width int) string {
 	var providerInfo string
 	if m.showProvider {
-		providerInfo = string(m.prov.Name)
+		providerInfo = m.prov.Name
 	}
-	styles := ListItemStyles{
+	miStyles := ListItemStyles{
 		ItemBlurred:     m.t.Dialog.NormalItem,
 		ItemFocused:     m.t.Dialog.SelectedItem,
 		InfoTextBlurred: m.t.Dialog.ListItem.InfoBlurred,
 		InfoTextFocused: m.t.Dialog.ListItem.InfoFocused,
 	}
-	return renderItem(styles, m.model.Name, providerInfo, m.focused, width, m.cache, &m.m)
+	return renderItem(miStyles, m.model.Name, providerInfo, m.focused, width, m.cache, &m.m)
 }
 
 // SetFocused implements ListItem.

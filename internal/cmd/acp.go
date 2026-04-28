@@ -3,6 +3,7 @@ package cmd
 import (
 	"github.com/charmbracelet/crush/internal/acp"
 	"github.com/charmbracelet/crush/internal/event"
+	"github.com/charmbracelet/crush/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -15,13 +16,15 @@ This allows external ACP clients (web, desktop, mobile) to drive Crush
 over stdio using JSON-RPC. The client sends prompts and receives
 streaming updates about agent activity.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		app, err := setupApp(cmd)
+		ws, cleanup, err := setupLocalWorkspace(cmd)
 		if err != nil {
 			return err
 		}
-		defer app.Shutdown()
+		defer cleanup()
 
-		if shouldEnableMetrics(app.Config()) {
+		appInstance := ws.(*workspace.AppWorkspace).App()
+
+		if shouldEnableMetrics(appInstance.Config()) {
 			event.Init()
 		}
 
@@ -31,7 +34,7 @@ streaming updates about agent activity.`,
 		server := acp.NewServer(cmd.Context())
 		defer server.Shutdown()
 
-		agent := acp.NewAgent(app)
+		agent := acp.NewAgent(appInstance)
 		return server.Run(agent)
 	},
 }

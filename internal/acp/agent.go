@@ -2,9 +2,12 @@ package acp
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -320,13 +323,8 @@ func (a *Agent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.Promp
 		return acp.PromptResponse{}, acp.NewInvalidParams(fmt.Sprintf("unknown session %q", sessionID))
 	}
 
-	// Extract text from content blocks.
-	var prompt string
-	for _, block := range params.Prompt {
-		if block.Text != nil {
-			prompt += block.Text.Text
-		}
-	}
+	// Extract text and attachments from content blocks.
+	prompt, attachments := extractPromptContent(params.Prompt)
 
 	if prompt == "" {
 		return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
@@ -340,7 +338,7 @@ func (a *Agent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.Promp
 	}
 
 	// Run the agent.
-	result, err := a.app.AgentCoordinator.Run(ctx, string(params.SessionId), prompt)
+	result, err := a.app.AgentCoordinator.Run(ctx, string(params.SessionId), prompt, attachments...)
 	if err != nil {
 		// Permission denial is a normal user choice, not an error.
 		if errors.Is(err, permission.ErrorPermissionDenied) {
@@ -360,6 +358,152 @@ func (a *Agent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.Promp
 	}
 
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
+}
+
+// extractPromptContent processes ACP content blocks into a prompt string and
+// attachments. Text blocks are concatenated into the prompt. Resource,
+// ResourceLink, and Image blocks are converted to message.Attachment values
+// that the agent coordinator can forward to the LLM.
+func extractPromptContent(blocks []acp.ContentBlock) (string, []message.Attachment) {
+	var prompt string
+	var attachments []message.Attachment
+
+	for _, block := range blocks {
+		switch {
+		case block.Text != nil:
+			prompt += block.Text.Text
+
+		case block.Resource != nil:
+			if att, ok := embeddedResourceToAttachment(block.Resource.Resource); ok {
+				attachments = append(attachments, att)
+			}
+
+		case block.ResourceLink != nil:
+			if att, ok := resourceLinkToAttachment(block.ResourceLink); ok {
+				attachments = append(attachments, att)
+			}
+
+		case block.Image != nil:
+			if att, ok := imageBlockToAttachment(block.Image); ok {
+				attachments = append(attachments, att)
+			}
+		}
+	}
+
+	return prompt, attachments
+}
+
+// embeddedResourceToAttachment converts an ACP embedded resource to an
+// attachment. Text resources are returned as text/* attachments; blob
+// resources are base64-decoded into binary attachments.
+func embeddedResourceToAttachment(res acp.EmbeddedResourceResource) (message.Attachment, bool) {
+	if res.TextResourceContents != nil {
+		mimeType := "text/plain"
+		if res.TextResourceContents.MimeType != nil {
+			mimeType = *res.TextResourceContents.MimeType
+		}
+		name := filenameFromURI(res.TextResourceContents.Uri)
+		return message.Attachment{
+			FilePath: uriToPath(res.TextResourceContents.Uri),
+			FileName: name,
+			MimeType: mimeType,
+			Content:  []byte(res.TextResourceContents.Text),
+		}, true
+	}
+
+	if res.BlobResourceContents != nil {
+		data, err := base64.StdEncoding.DecodeString(res.BlobResourceContents.Blob)
+		if err != nil {
+			slog.Warn("Failed to decode blob resource", "uri", res.BlobResourceContents.Uri, "error", err)
+			return message.Attachment{}, false
+		}
+		mimeType := "application/octet-stream"
+		if res.BlobResourceContents.MimeType != nil {
+			mimeType = *res.BlobResourceContents.MimeType
+		}
+		name := filenameFromURI(res.BlobResourceContents.Uri)
+		return message.Attachment{
+			FilePath: uriToPath(res.BlobResourceContents.Uri),
+			FileName: name,
+			MimeType: mimeType,
+			Content:  data,
+		}, true
+	}
+
+	return message.Attachment{}, false
+}
+
+// resourceLinkToAttachment resolves a resource link by reading the file from
+// disk when the URI uses the file:// scheme. Non-file URIs are ignored.
+func resourceLinkToAttachment(link *acp.ContentBlockResourceLink) (message.Attachment, bool) {
+	path := uriToPath(link.Uri)
+	if path == "" {
+		slog.Debug("Skipping non-file resource link", "uri", link.Uri)
+		return message.Attachment{}, false
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		slog.Warn("Failed to read resource link file", "path", path, "error", err)
+		return message.Attachment{}, false
+	}
+
+	mimeType := "text/plain"
+	if link.MimeType != nil {
+		mimeType = *link.MimeType
+	}
+
+	return message.Attachment{
+		FilePath: path,
+		FileName: link.Name,
+		MimeType: mimeType,
+		Content:  data,
+	}, true
+}
+
+// imageBlockToAttachment converts an ACP image content block to an attachment.
+func imageBlockToAttachment(img *acp.ContentBlockImage) (message.Attachment, bool) {
+	data, err := base64.StdEncoding.DecodeString(img.Data)
+	if err != nil {
+		slog.Warn("Failed to decode image data", "error", err)
+		return message.Attachment{}, false
+	}
+
+	name := "image"
+	if img.Uri != nil {
+		name = filenameFromURI(*img.Uri)
+	}
+
+	return message.Attachment{
+		FileName: name,
+		MimeType: img.MimeType,
+		Content:  data,
+	}, true
+}
+
+// uriToPath extracts a filesystem path from a URI. It supports file:// URIs
+// and bare absolute paths. Returns empty string for non-file URIs.
+func uriToPath(uri string) string {
+	if strings.HasPrefix(uri, "file://") {
+		parsed, err := url.Parse(uri)
+		if err != nil {
+			return ""
+		}
+		return parsed.Path
+	}
+	if filepath.IsAbs(uri) {
+		return uri
+	}
+	return ""
+}
+
+// filenameFromURI extracts a display filename from a URI.
+func filenameFromURI(uri string) string {
+	parsed, err := url.Parse(uri)
+	if err != nil {
+		return filepath.Base(uri)
+	}
+	return filepath.Base(parsed.Path)
 }
 
 // Cancel handles cancellation of an in-flight prompt.

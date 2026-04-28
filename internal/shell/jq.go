@@ -142,9 +142,7 @@ func handleJQ(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 		return interp.ExitStatus(3)
 	}
 
-	opts := []gojq.CompilerOption{
-		gojq.WithEnvironLoader(os.Environ),
-	}
+	opts := []gojq.CompilerOption{}
 	if len(argNames) > 0 {
 		opts = append(opts, gojq.WithVariables(argNames))
 	}

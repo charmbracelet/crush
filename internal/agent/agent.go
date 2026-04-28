@@ -53,6 +53,15 @@ const (
 	largeContextWindowThreshold = 200_000
 	largeContextWindowBuffer    = 20_000
 	smallContextWindowRatio     = 0.2
+
+	// smallTitleMaxTokens caps the small-model title call. 256 is enough
+	// for a one-line title and leaves headroom for "non-reasoning" models
+	// that still burn output tokens on hidden reasoning (e.g. GPT-5 mini).
+	smallTitleMaxTokens int64 = 256
+
+	// fallbackTitleMaxTokens is used when the large model's catwalk config
+	// doesn't advertise a default token limit.
+	fallbackTitleMaxTokens int64 = 1024
 )
 
 var userAgent = fmt.Sprintf("Charm-Crush/%s (https://charm.land/crush)", version.Version)
@@ -925,7 +934,7 @@ func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.S
 	return msgs, nil
 }
 
-// generateTitle generates a session titled based on the initial prompt.
+// generateTitle generates a session title based on the initial prompt.
 func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, userPrompt string) {
 	if userPrompt == "" {
 		return
@@ -935,7 +944,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	largeModel := a.largeModel.Get()
 	systemPromptPrefix := a.systemPromptPrefix.Get()
 
-	var maxOutputTokens int64 = 40
+	maxOutputTokens := smallTitleMaxTokens
 	if smallModel.CatwalkCfg.CanReason {
 		maxOutputTokens = smallModel.CatwalkCfg.DefaultMaxTokens
 	}
@@ -970,22 +979,39 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		slog.Debug("Generated title with small model")
 	} else {
 		// It didn't work. Let's try with the big model.
-		slog.Error("Error generating title with small model; trying big model", "err", err)
+		slog.Error("Error generating title with small model; trying big model", "error", err)
 		model = largeModel
-		agent = newAgent(model.Model, titlePrompt, maxOutputTokens)
+		agent = newAgent(model.Model, titlePrompt, cmp.Or(largeModel.CatwalkCfg.DefaultMaxTokens, fallbackTitleMaxTokens))
 		resp, err = agent.Stream(ctx, streamCall)
 		if err == nil {
 			slog.Debug("Generated title with large model")
 		} else {
 			// Welp, the large model didn't work either. Use the default
 			// session name and return.
-			slog.Error("Error generating title with large model", "err", err)
+			slog.Error("Error generating title with large model", "error", err)
 			saveErr := a.sessions.Rename(ctx, sessionID, DefaultSessionName)
 			if saveErr != nil {
 				slog.Error("Failed to save session title", "error", saveErr)
 			}
 			return
 		}
+	}
+
+	// Reasoning-heavy models (e.g. GPT-5 mini) may finish cleanly while
+	// burning the entire output budget on hidden reasoning and emit empty
+	// visible text. Retry with the large model before giving up, but only
+	// if it's a different model and actually returns something usable.
+	if model.CatwalkCfg.ID != largeModel.CatwalkCfg.ID && !isUsableTitleResponse(resp) {
+		retryAgent := newAgent(largeModel.Model, titlePrompt, cmp.Or(largeModel.CatwalkCfg.DefaultMaxTokens, fallbackTitleMaxTokens))
+		retryResp, retryErr := retryAgent.Stream(ctx, streamCall)
+		if retryErr != nil {
+			slog.Error("Large model fallback failed after unusable small model response", "error", retryErr)
+		} else if isUsableTitleResponse(retryResp) {
+			model = largeModel
+			resp = retryResp
+		}
+		// Otherwise both models returned empty content; fall through and
+		// let the default-title path below handle it.
 	}
 
 	if resp == nil {
@@ -1044,6 +1070,18 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		slog.Error("Failed to save session title and usage", "error", saveErr)
 		return
 	}
+}
+
+// isUsableTitleResponse reports whether a stream response carries visible
+// text we can turn into a title. Reasoning-heavy models (e.g. GPT-5 mini)
+// may finish cleanly with finish_reason=stop while spending every output
+// token on hidden reasoning, leaving the visible content empty. Treat any
+// empty response as unusable so callers can fall back to a larger model.
+func isUsableTitleResponse(resp *fantasy.AgentResult) bool {
+	if resp == nil {
+		return false
+	}
+	return strings.TrimSpace(resp.Response.Content.Text()) != ""
 }
 
 func (a *sessionAgent) openrouterCost(metadata fantasy.ProviderMetadata) *float64 {

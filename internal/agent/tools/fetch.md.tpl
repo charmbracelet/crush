@@ -2,6 +2,7 @@ Fetch raw content from a URL as text, markdown, or html (max 100KB); no AI proce
 
 <when_to_use>
 Use this tool when you need:
+
 - Raw, unprocessed content from a URL
 - Direct access to API responses or JSON data
 - HTML/text/markdown content without interpretation
@@ -9,9 +10,13 @@ Use this tool when you need:
 - To save tokens by avoiding AI processing
 
 DO NOT use this tool when you need to:
+
 - Extract specific information from a webpage (use agentic_fetch instead)
 - Answer questions about web content (use agentic_fetch instead)
 - Analyze or summarize web pages (use agentic_fetch instead)
+{{- if .GhAvailable }}
+- Interact with GitHub when an exact repo, issue, or PR link is provided (use `gh` CLI in bash instead)
+{{- end }}
 </when_to_use>
 
 <usage>

@@ -14,119 +14,83 @@ import (
 	"github.com/charmbracelet/x/exp/charmtone"
 )
 
-// quickStyleOpts is the palette of colors used by quickStyle to build a
-// complete Styles value. Each field maps to a semantic role in the UI.
+// quickStyleOpts is the palette of colors used by quickStyle to simplify the
+// process of building a theme.
 type quickStyleOpts struct {
 	// Brand.
 	primary   color.Color
 	secondary color.Color
-	tertiary  color.Color
+	accent    color.Color
+	keyword   color.Color
 
-	// Foregrounds.
-	fgBase      color.Color
-	fgMuted     color.Color
-	fgHalfMuted color.Color
-	fgSubtle    color.Color
+	// Default foreground and background colors.
+	fgBase color.Color
+	bgBase color.Color
+
+	// Low-contrast dividers, separators, and rule lines.
+	separator color.Color
+
+	fgSubtle     color.Color
+	fgMoreSubtle color.Color
+	fgMostSubtle color.Color
 
 	// Contrast pairings: foregrounds designed to sit on top of a
 	// matching background role.
 	onPrimary color.Color // foreground on primary backgrounds.
-	onAccent  color.Color // foreground on saturated status/accent backgrounds.
 
-	// Backgrounds.
-	bgBase        color.Color
-	bgBaseLighter color.Color
-	bgSubtle      color.Color
-	bgOverlay     color.Color
+	bgMostVisible  color.Color
+	bgLessVisible  color.Color
+	bgLeastVisible color.Color
 
-	// Borders.
-	border      color.Color
-	borderFocus color.Color
-
-	// Status.
-	danger        color.Color
-	error         color.Color
-	warning       color.Color
-	warningStrong color.Color
-	busy          color.Color
-	info          color.Color
-	infoSubtle    color.Color
-	infoMuted     color.Color
-	success       color.Color
-	successSubtle color.Color
-	successMuted  color.Color
+	// Statuses.
+	destructive       color.Color
+	error             color.Color
+	warning           color.Color
+	warningSubtle     color.Color
+	busy              color.Color
+	info              color.Color
+	infoMoreSubtle    color.Color
+	infoMostSubtle    color.Color
+	success           color.Color
+	successMoreSubtle color.Color
+	successMostSubtle color.Color
 }
 
-// quickStyle builds a complete Styles value from a palette of semantic
-// colors. Themes should populate quickStyleOpts and call this rather than
-// re-implementing every style rule.
+// quickStyle builds the default Styles (that is, the default theme, Charmtone
+// Pantera) from a palette of semi-semanticly-named colors.
 //
-// The idea here is that you can do most of the work with quickStyle, then
-// add overrides as needed.
+// The idea here is that you can do most of the work on a theme with quickStyle,
+// then add overrides as needed.
 func quickStyle(o quickStyleOpts) Styles {
 	var (
-		primary   = o.primary
-		secondary = o.secondary
-		tertiary  = o.tertiary
-
-		fgBase      = o.fgBase
-		fgMuted     = o.fgMuted
-		fgHalfMuted = o.fgHalfMuted
-		fgSubtle    = o.fgSubtle
-
-		onPrimary = o.onPrimary
-		onAccent  = o.onAccent
-
-		bgBase        = o.bgBase
-		bgBaseLighter = o.bgBaseLighter
-		bgSubtle      = o.bgSubtle
-		bgOverlay     = o.bgOverlay
-
-		border      = o.border
-		borderFocus = o.borderFocus
-
-		danger        = o.danger
-		error         = o.error
-		warning       = o.warning
-		warningStrong = o.warningStrong
-		busy          = o.busy
-		info          = o.info
-		infoSubtle    = o.infoSubtle
-		infoMuted     = o.infoMuted
-		success       = o.success
-		successSubtle = o.successSubtle
-		successMuted  = o.successMuted
-	)
-
-	var (
-		base   = lipgloss.NewStyle().Foreground(fgBase)
-		muted  = lipgloss.NewStyle().Foreground(fgMuted)
-		subtle = lipgloss.NewStyle().Foreground(fgSubtle)
+		base   = lipgloss.NewStyle().Foreground(o.fgBase)
+		muted  = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
+		subtle = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 		s      Styles
 	)
 
-	s.Background = bgBase
+	s.Background = o.bgBase
 
 	// Populate color fields
-	s.WorkingGradFromColor = primary
-	s.WorkingGradToColor = secondary
-	s.WorkingLabelColor = fgBase
+	s.WorkingGradFromColor = o.primary
+	s.WorkingGradToColor = o.secondary
+	s.WorkingLabelColor = o.fgBase
 
 	s.TextInput = textinput.Styles{
 		Focused: textinput.StyleState{
 			Text:        base,
-			Placeholder: base.Foreground(fgSubtle),
-			Prompt:      base.Foreground(tertiary),
-			Suggestion:  base.Foreground(fgSubtle),
+			Placeholder: base.Foreground(o.fgMostSubtle),
+			Prompt:      base.Foreground(o.accent),
+			Suggestion:  base.Foreground(o.fgMostSubtle),
 		},
 		Blurred: textinput.StyleState{
-			Text:        base.Foreground(fgMuted),
-			Placeholder: base.Foreground(fgSubtle),
-			Prompt:      base.Foreground(fgMuted),
-			Suggestion:  base.Foreground(fgSubtle),
+			Text:        base.Foreground(o.fgMoreSubtle),
+			Placeholder: base.Foreground(o.fgMostSubtle),
+			Prompt:      base.Foreground(o.fgMoreSubtle),
+			Suggestion:  base.Foreground(o.fgMostSubtle),
 		},
 		Cursor: textinput.CursorStyle{
-			Color: secondary,
+			Color: o.secondary,
 			Shape: tea.CursorBlock,
 			Blink: true,
 		},
@@ -136,23 +100,23 @@ func quickStyle(o quickStyleOpts) Styles {
 		Focused: textarea.StyleState{
 			Base:             base,
 			Text:             base,
-			LineNumber:       base.Foreground(fgSubtle),
+			LineNumber:       base.Foreground(o.fgMostSubtle),
 			CursorLine:       base,
-			CursorLineNumber: base.Foreground(fgSubtle),
-			Placeholder:      base.Foreground(fgSubtle),
-			Prompt:           base.Foreground(tertiary),
+			CursorLineNumber: base.Foreground(o.fgMostSubtle),
+			Placeholder:      base.Foreground(o.fgMostSubtle),
+			Prompt:           base.Foreground(o.accent),
 		},
 		Blurred: textarea.StyleState{
 			Base:             base,
-			Text:             base.Foreground(fgMuted),
-			LineNumber:       base.Foreground(fgMuted),
+			Text:             base.Foreground(o.fgMoreSubtle),
+			LineNumber:       base.Foreground(o.fgMoreSubtle),
 			CursorLine:       base,
-			CursorLineNumber: base.Foreground(fgMuted),
-			Placeholder:      base.Foreground(fgSubtle),
-			Prompt:           base.Foreground(fgMuted),
+			CursorLineNumber: base.Foreground(o.fgMoreSubtle),
+			Placeholder:      base.Foreground(o.fgMostSubtle),
+			Prompt:           base.Foreground(o.fgMoreSubtle),
 		},
 		Cursor: textarea.CursorStyle{
-			Color: secondary,
+			Color: o.secondary,
 			Shape: tea.CursorBlock,
 			Blink: true,
 		},
@@ -163,7 +127,7 @@ func quickStyle(o quickStyleOpts) Styles {
 			StylePrimitive: ansi.StylePrimitive{
 				// BlockPrefix: "\n",
 				// BlockSuffix: "\n",
-				Color: hex(fgHalfMuted),
+				Color: hex(o.fgSubtle),
 			},
 			// Margin: new(uint(defaultMargin)),
 		},
@@ -178,7 +142,7 @@ func quickStyle(o quickStyleOpts) Styles {
 		Heading: ansi.StyleBlock{
 			StylePrimitive: ansi.StylePrimitive{
 				BlockSuffix: "\n",
-				Color:       hex(info),
+				Color:       hex(o.info),
 				Bold:        new(true),
 			},
 		},
@@ -186,8 +150,8 @@ func quickStyle(o quickStyleOpts) Styles {
 			StylePrimitive: ansi.StylePrimitive{
 				Prefix:          " ",
 				Suffix:          " ",
-				Color:           hex(warning),
-				BackgroundColor: hex(primary),
+				Color:           hex(o.warningSubtle),
+				BackgroundColor: hex(o.primary),
 				Bold:            new(true),
 			},
 		},
@@ -214,7 +178,7 @@ func quickStyle(o quickStyleOpts) Styles {
 		H6: ansi.StyleBlock{
 			StylePrimitive: ansi.StylePrimitive{
 				Prefix: "###### ",
-				Color:  hex(successMuted),
+				Color:  hex(o.successMostSubtle),
 				Bold:   new(false),
 			},
 		},
@@ -228,7 +192,7 @@ func quickStyle(o quickStyleOpts) Styles {
 			Bold: new(true),
 		},
 		HorizontalRule: ansi.StylePrimitive{
-			Color:  hex(border),
+			Color:  hex(o.separator),
 			Format: "\n--------\n",
 		},
 		Item: ansi.StylePrimitive{
@@ -247,7 +211,7 @@ func quickStyle(o quickStyleOpts) Styles {
 			Underline: new(true),
 		},
 		LinkText: ansi.StylePrimitive{
-			Color: hex(successMuted),
+			Color: hex(o.successMostSubtle),
 			Bold:  new(true),
 		},
 		Image: ansi.StylePrimitive{
@@ -255,40 +219,40 @@ func quickStyle(o quickStyleOpts) Styles {
 			Underline: new(true),
 		},
 		ImageText: ansi.StylePrimitive{
-			Color:  hex(fgMuted),
+			Color:  hex(o.fgMoreSubtle),
 			Format: "Image: {{.text}} →",
 		},
 		Code: ansi.StyleBlock{
 			StylePrimitive: ansi.StylePrimitive{
 				Prefix:          " ",
 				Suffix:          " ",
-				Color:           hex(danger),
-				BackgroundColor: hex(bgSubtle),
+				Color:           hex(o.destructive),
+				BackgroundColor: hex(o.bgLessVisible),
 			},
 		},
 		CodeBlock: ansi.StyleCodeBlock{
 			StyleBlock: ansi.StyleBlock{
 				StylePrimitive: ansi.StylePrimitive{
-					Color: hex(bgSubtle),
+					Color: hex(o.bgLessVisible),
 				},
 				Margin: new(uint(defaultMargin)),
 			},
 			Chroma: &ansi.Chroma{
 				Text: ansi.StylePrimitive{
-					Color: hex(fgHalfMuted),
+					Color: hex(o.fgSubtle),
 				},
 				Error: ansi.StylePrimitive{
-					Color:           hex(onAccent),
-					BackgroundColor: hex(error),
+					Color:           hex(o.primary),
+					BackgroundColor: hex(o.error),
 				},
 				Comment: ansi.StylePrimitive{
-					Color: hex(fgSubtle),
+					Color: hex(o.fgMostSubtle),
 				},
 				CommentPreproc: ansi.StylePrimitive{
 					Color: hex(charmtone.Bengal),
 				},
 				Keyword: ansi.StylePrimitive{
-					Color: hex(info),
+					Color: hex(o.info),
 				},
 				KeywordReserved: ansi.StylePrimitive{
 					Color: hex(charmtone.Pony),
@@ -303,10 +267,10 @@ func quickStyle(o quickStyleOpts) Styles {
 					Color: hex(charmtone.Salmon),
 				},
 				Punctuation: ansi.StylePrimitive{
-					Color: hex(warning),
+					Color: hex(o.warningSubtle),
 				},
 				Name: ansi.StylePrimitive{
-					Color: hex(fgHalfMuted),
+					Color: hex(o.fgSubtle),
 				},
 				NameBuiltin: ansi.StylePrimitive{
 					Color: hex(charmtone.Cheeky),
@@ -326,34 +290,34 @@ func quickStyle(o quickStyleOpts) Styles {
 					Color: hex(charmtone.Citron),
 				},
 				NameFunction: ansi.StylePrimitive{
-					Color: hex(successMuted),
+					Color: hex(o.successMostSubtle),
 				},
 				LiteralNumber: ansi.StylePrimitive{
-					Color: hex(success),
+					Color: hex(o.success),
 				},
 				LiteralString: ansi.StylePrimitive{
 					Color: hex(charmtone.Cumin),
 				},
 				LiteralStringEscape: ansi.StylePrimitive{
-					Color: hex(successSubtle),
+					Color: hex(o.successMoreSubtle),
 				},
 				GenericDeleted: ansi.StylePrimitive{
-					Color: hex(danger),
+					Color: hex(o.destructive),
 				},
 				GenericEmph: ansi.StylePrimitive{
 					Italic: new(true),
 				},
 				GenericInserted: ansi.StylePrimitive{
-					Color: hex(successMuted),
+					Color: hex(o.successMostSubtle),
 				},
 				GenericStrong: ansi.StylePrimitive{
 					Bold: new(true),
 				},
 				GenericSubheading: ansi.StylePrimitive{
-					Color: hex(fgMuted),
+					Color: hex(o.fgMoreSubtle),
 				},
 				Background: ansi.StylePrimitive{
-					BackgroundColor: hex(bgSubtle),
+					BackgroundColor: hex(o.bgLessVisible),
 				},
 			},
 		},
@@ -368,8 +332,8 @@ func quickStyle(o quickStyleOpts) Styles {
 	}
 
 	// QuietMarkdown style - muted colors on subtle background for thinking content.
-	plainBg := hex(bgBaseLighter)
-	plainFg := hex(fgMuted)
+	plainBg := hex(o.bgLeastVisible)
+	plainFg := hex(o.fgMoreSubtle)
 	s.QuietMarkdown = ansi.StyleConfig{
 		Document: ansi.StyleBlock{
 			StylePrimitive: ansi.StylePrimitive{
@@ -531,37 +495,37 @@ func quickStyle(o quickStyleOpts) Styles {
 	}
 
 	s.Help = help.Styles{
-		ShortKey:       base.Foreground(fgMuted),
-		ShortDesc:      base.Foreground(fgSubtle),
-		ShortSeparator: base.Foreground(border),
-		Ellipsis:       base.Foreground(border),
-		FullKey:        base.Foreground(fgMuted),
-		FullDesc:       base.Foreground(fgSubtle),
-		FullSeparator:  base.Foreground(border),
+		ShortKey:       base.Foreground(o.fgMoreSubtle),
+		ShortDesc:      base.Foreground(o.fgMostSubtle),
+		ShortSeparator: base.Foreground(o.separator),
+		Ellipsis:       base.Foreground(o.separator),
+		FullKey:        base.Foreground(o.fgMoreSubtle),
+		FullDesc:       base.Foreground(o.fgMostSubtle),
+		FullSeparator:  base.Foreground(o.separator),
 	}
 
 	s.Diff = diffview.Style{
 		DividerLine: diffview.LineStyle{
 			LineNumber: lipgloss.NewStyle().
-				Foreground(fgHalfMuted).
-				Background(bgBaseLighter),
+				Foreground(o.fgSubtle).
+				Background(o.bgLeastVisible),
 			Code: lipgloss.NewStyle().
-				Foreground(fgHalfMuted).
-				Background(bgBaseLighter),
+				Foreground(o.fgSubtle).
+				Background(o.bgLeastVisible),
 		},
 		MissingLine: diffview.LineStyle{
 			LineNumber: lipgloss.NewStyle().
-				Background(bgBaseLighter),
+				Background(o.bgLeastVisible),
 			Code: lipgloss.NewStyle().
-				Background(bgBaseLighter),
+				Background(o.bgLeastVisible),
 		},
 		EqualLine: diffview.LineStyle{
 			LineNumber: lipgloss.NewStyle().
-				Foreground(fgMuted).
-				Background(bgBase),
+				Foreground(o.fgMoreSubtle).
+				Background(o.bgBase),
 			Code: lipgloss.NewStyle().
-				Foreground(fgMuted).
-				Background(bgBase),
+				Foreground(o.fgMoreSubtle).
+				Background(o.bgBase),
 		},
 		InsertLine: diffview.LineStyle{
 			LineNumber: lipgloss.NewStyle().
@@ -585,249 +549,249 @@ func quickStyle(o quickStyleOpts) Styles {
 		},
 		Filename: diffview.LineStyle{
 			LineNumber: lipgloss.NewStyle().
-				Foreground(fgHalfMuted).
-				Background(bgBaseLighter),
+				Foreground(o.fgSubtle).
+				Background(o.bgLeastVisible),
 			Code: lipgloss.NewStyle().
-				Foreground(fgHalfMuted).
-				Background(bgBaseLighter),
+				Foreground(o.fgSubtle).
+				Background(o.bgLeastVisible),
 		},
 	}
 
 	s.FilePicker = filepicker.Styles{
-		DisabledCursor:   base.Foreground(fgMuted),
-		Cursor:           base.Foreground(fgBase),
-		Symlink:          base.Foreground(fgSubtle),
-		Directory:        base.Foreground(primary),
-		File:             base.Foreground(fgBase),
-		DisabledFile:     base.Foreground(fgMuted),
-		DisabledSelected: base.Background(bgOverlay).Foreground(fgMuted),
-		Permission:       base.Foreground(fgMuted),
-		Selected:         base.Background(primary).Foreground(fgBase),
-		FileSize:         base.Foreground(fgMuted),
-		EmptyDirectory:   base.Foreground(fgMuted).PaddingLeft(2).SetString("Empty directory"),
+		DisabledCursor:   base.Foreground(o.fgMoreSubtle),
+		Cursor:           base.Foreground(o.fgBase),
+		Symlink:          base.Foreground(o.fgMostSubtle),
+		Directory:        base.Foreground(o.primary),
+		File:             base.Foreground(o.fgBase),
+		DisabledFile:     base.Foreground(o.fgMoreSubtle),
+		DisabledSelected: base.Background(o.bgMostVisible).Foreground(o.fgMoreSubtle),
+		Permission:       base.Foreground(o.fgMoreSubtle),
+		Selected:         base.Background(o.primary).Foreground(o.fgBase),
+		FileSize:         base.Foreground(o.fgMoreSubtle),
+		EmptyDirectory:   base.Foreground(o.fgMoreSubtle).PaddingLeft(2).SetString("Empty directory"),
 	}
 
 	// borders
-	s.ToolCallSuccess = lipgloss.NewStyle().Foreground(success).SetString(ToolSuccess)
+	s.ToolCallSuccess = lipgloss.NewStyle().Foreground(o.success).SetString(ToolSuccess)
 
-	s.Header.Charm = base.Foreground(secondary)
-	s.Header.Diagonals = base.Foreground(primary)
+	s.Header.Charm = base.Foreground(o.secondary)
+	s.Header.Diagonals = base.Foreground(o.primary)
 	s.Header.Percentage = muted
 	s.Header.Keystroke = muted
 	s.Header.KeystrokeTip = subtle
 	s.Header.WorkingDir = muted
 	s.Header.Separator = subtle
-	s.Header.Wrapper = lipgloss.NewStyle().Foreground(fgBase)
+	s.Header.Wrapper = lipgloss.NewStyle().Foreground(o.fgBase)
 	s.Header.LogoGradCanvas = lipgloss.NewStyle()
-	s.Header.LogoGradFromColor = secondary
-	s.Header.LogoGradToColor = primary
+	s.Header.LogoGradFromColor = o.secondary
+	s.Header.LogoGradToColor = o.primary
 
 	s.CompactDetails.Title = base
-	s.CompactDetails.View = base.Padding(0, 1, 1, 1).Border(lipgloss.RoundedBorder()).BorderForeground(borderFocus)
-	s.CompactDetails.Version = lipgloss.NewStyle().Foreground(border)
+	s.CompactDetails.View = base.Padding(0, 1, 1, 1).Border(lipgloss.RoundedBorder()).BorderForeground(o.primary)
+	s.CompactDetails.Version = lipgloss.NewStyle().Foreground(o.separator)
 
 	// Tool rendering styles
-	s.Tool.IconPending = base.Foreground(successMuted).SetString(ToolPending)
-	s.Tool.IconSuccess = base.Foreground(success).SetString(ToolSuccess)
-	s.Tool.IconError = base.Foreground(error).SetString(ToolError)
+	s.Tool.IconPending = base.Foreground(o.successMostSubtle).SetString(ToolPending)
+	s.Tool.IconSuccess = base.Foreground(o.success).SetString(ToolSuccess)
+	s.Tool.IconError = base.Foreground(o.error).SetString(ToolError)
 	s.Tool.IconCancelled = muted.SetString(ToolPending)
 
-	s.Tool.NameNormal = base.Foreground(info)
-	s.Tool.NameNested = base.Foreground(info)
+	s.Tool.NameNormal = base.Foreground(o.info)
+	s.Tool.NameNested = base.Foreground(o.info)
 
 	s.Tool.ParamMain = subtle
 	s.Tool.ParamKey = subtle
 
 	// Content rendering - prepared styles that accept width parameter
-	s.Tool.ContentLine = muted.Background(bgBaseLighter)
-	s.Tool.ContentTruncation = muted.Background(bgBaseLighter)
-	s.Tool.ContentCodeLine = base.Background(bgBase).PaddingLeft(2)
-	s.Tool.ContentCodeTruncation = muted.Background(bgBase).PaddingLeft(2)
-	s.Tool.ContentCodeBg = bgBase
+	s.Tool.ContentLine = muted.Background(o.bgLeastVisible)
+	s.Tool.ContentTruncation = muted.Background(o.bgLeastVisible)
+	s.Tool.ContentCodeLine = base.Background(o.bgBase).PaddingLeft(2)
+	s.Tool.ContentCodeTruncation = muted.Background(o.bgBase).PaddingLeft(2)
+	s.Tool.ContentCodeBg = o.bgBase
 	s.Tool.Body = base.PaddingLeft(2)
 
 	// Deprecated - kept for backward compatibility
-	s.Tool.ContentBg = muted.Background(bgBaseLighter)
+	s.Tool.ContentBg = muted.Background(o.bgLeastVisible)
 	s.Tool.ContentText = muted
-	s.Tool.ContentLineNumber = base.Foreground(fgMuted).Background(bgBase).PaddingRight(1).PaddingLeft(1)
+	s.Tool.ContentLineNumber = base.Foreground(o.fgMoreSubtle).Background(o.bgBase).PaddingRight(1).PaddingLeft(1)
 
-	s.Tool.StateWaiting = base.Foreground(fgSubtle)
-	s.Tool.StateCancelled = base.Foreground(fgSubtle)
+	s.Tool.StateWaiting = base.Foreground(o.fgMostSubtle)
+	s.Tool.StateCancelled = base.Foreground(o.fgMostSubtle)
 
-	s.Tool.ErrorTag = base.Padding(0, 1).Background(danger).Foreground(onAccent)
-	s.Tool.ErrorMessage = base.Foreground(fgHalfMuted)
+	s.Tool.ErrorTag = base.Padding(0, 1).Background(o.destructive).Foreground(o.primary)
+	s.Tool.ErrorMessage = base.Foreground(o.fgSubtle)
 
 	// Diff and multi-edit styles
-	s.Tool.DiffTruncation = muted.Background(bgBaseLighter).PaddingLeft(2)
-	s.Tool.NoteTag = base.Padding(0, 1).Background(info).Foreground(onAccent)
-	s.Tool.NoteMessage = base.Foreground(fgHalfMuted)
+	s.Tool.DiffTruncation = muted.Background(o.bgLeastVisible).PaddingLeft(2)
+	s.Tool.NoteTag = base.Padding(0, 1).Background(o.info).Foreground(o.primary)
+	s.Tool.NoteMessage = base.Foreground(o.fgSubtle)
 
 	// Job header styles
-	s.Tool.JobIconPending = base.Foreground(successMuted)
-	s.Tool.JobIconError = base.Foreground(error)
-	s.Tool.JobIconSuccess = base.Foreground(success)
-	s.Tool.JobToolName = base.Foreground(info)
-	s.Tool.JobAction = base.Foreground(infoMuted)
+	s.Tool.JobIconPending = base.Foreground(o.successMostSubtle)
+	s.Tool.JobIconError = base.Foreground(o.error)
+	s.Tool.JobIconSuccess = base.Foreground(o.success)
+	s.Tool.JobToolName = base.Foreground(o.info)
+	s.Tool.JobAction = base.Foreground(o.infoMostSubtle)
 	s.Tool.JobPID = muted
 	s.Tool.JobDescription = subtle
 
 	// Agent task styles
-	s.Tool.AgentTaskTag = base.Bold(true).Padding(0, 1).MarginLeft(2).Background(infoSubtle).Foreground(onAccent)
+	s.Tool.AgentTaskTag = base.Bold(true).Padding(0, 1).MarginLeft(2).Background(o.infoMoreSubtle).Foreground(o.primary)
 	s.Tool.AgentPrompt = muted
 
 	// Agentic fetch styles
-	s.Tool.AgenticFetchPromptTag = base.Bold(true).Padding(0, 1).MarginLeft(2).Background(success).Foreground(border)
+	s.Tool.AgenticFetchPromptTag = base.Bold(true).Padding(0, 1).MarginLeft(2).Background(o.success).Foreground(o.separator)
 
 	// Todo styles
-	s.Tool.TodoRatio = base.Foreground(infoMuted)
-	s.Tool.TodoCompletedIcon = base.Foreground(success)
-	s.Tool.TodoInProgressIcon = base.Foreground(successMuted)
-	s.Tool.TodoPendingIcon = base.Foreground(fgMuted)
-	s.Tool.TodoStatusNote = lipgloss.NewStyle().Foreground(fgSubtle)
-	s.Tool.TodoItem = lipgloss.NewStyle().Foreground(fgBase)
-	s.Tool.TodoJustStarted = lipgloss.NewStyle().Foreground(fgBase)
+	s.Tool.TodoRatio = base.Foreground(o.infoMostSubtle)
+	s.Tool.TodoCompletedIcon = base.Foreground(o.success)
+	s.Tool.TodoInProgressIcon = base.Foreground(o.successMostSubtle)
+	s.Tool.TodoPendingIcon = base.Foreground(o.fgMoreSubtle)
+	s.Tool.TodoStatusNote = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
+	s.Tool.TodoItem = lipgloss.NewStyle().Foreground(o.fgBase)
+	s.Tool.TodoJustStarted = lipgloss.NewStyle().Foreground(o.fgBase)
 
 	// MCP styles
-	s.Tool.MCPName = base.Foreground(info)
-	s.Tool.MCPToolName = base.Foreground(infoMuted)
-	s.Tool.MCPArrow = base.Foreground(info).SetString(ArrowRightIcon)
+	s.Tool.MCPName = base.Foreground(o.info)
+	s.Tool.MCPToolName = base.Foreground(o.infoMostSubtle)
+	s.Tool.MCPArrow = base.Foreground(o.info).SetString(ArrowRightIcon)
 
 	// Loading indicators for images, skills
-	s.Tool.ResourceLoadedText = base.Foreground(success)
-	s.Tool.ResourceLoadedIndicator = base.Foreground(successMuted)
+	s.Tool.ResourceLoadedText = base.Foreground(o.success)
+	s.Tool.ResourceLoadedIndicator = base.Foreground(o.successMostSubtle)
 	s.Tool.ResourceName = base
 	s.Tool.MediaType = base
-	s.Tool.ResourceSize = base.Foreground(fgMuted)
+	s.Tool.ResourceSize = base.Foreground(o.fgMoreSubtle)
 
 	// Hook styles
-	s.Tool.HookLabel = base.Foreground(successSubtle)
+	s.Tool.HookLabel = base.Foreground(o.successMoreSubtle)
 	s.Tool.HookName = base
-	s.Tool.HookMatcher = base.Foreground(fgMuted)
-	s.Tool.HookArrow = base.Foreground(successSubtle)
-	s.Tool.HookDetail = base.Foreground(fgMuted)
-	s.Tool.HookOK = base.Foreground(successMuted)
-	s.Tool.HookDenied = base.Foreground(error)
-	s.Tool.HookDeniedLabel = base.Foreground(danger)
-	s.Tool.HookDeniedReason = base.Foreground(bgOverlay)
-	s.Tool.HookRewrote = base.Foreground(bgOverlay)
+	s.Tool.HookMatcher = base.Foreground(o.fgMoreSubtle)
+	s.Tool.HookArrow = base.Foreground(o.successMoreSubtle)
+	s.Tool.HookDetail = base.Foreground(o.fgMoreSubtle)
+	s.Tool.HookOK = base.Foreground(o.successMostSubtle)
+	s.Tool.HookDenied = base.Foreground(o.error)
+	s.Tool.HookDeniedLabel = base.Foreground(o.destructive)
+	s.Tool.HookDeniedReason = base.Foreground(o.bgMostVisible)
+	s.Tool.HookRewrote = base.Foreground(o.bgMostVisible)
 
 	// Tool-call action verbs and result-list styling.
-	s.Tool.ActionCreate = lipgloss.NewStyle().Foreground(successSubtle)
-	s.Tool.ActionDestroy = lipgloss.NewStyle().Foreground(danger)
-	s.Tool.ResultEmpty = lipgloss.NewStyle().Foreground(fgSubtle)
-	s.Tool.ResultTruncation = lipgloss.NewStyle().Foreground(fgSubtle)
-	s.Tool.ResultItemName = lipgloss.NewStyle().Foreground(fgBase)
-	s.Tool.ResultItemDesc = lipgloss.NewStyle().Foreground(fgSubtle)
+	s.Tool.ActionCreate = lipgloss.NewStyle().Foreground(o.successMoreSubtle)
+	s.Tool.ActionDestroy = lipgloss.NewStyle().Foreground(o.destructive)
+	s.Tool.ResultEmpty = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
+	s.Tool.ResultTruncation = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
+	s.Tool.ResultItemName = lipgloss.NewStyle().Foreground(o.fgBase)
+	s.Tool.ResultItemDesc = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 
 	// Buttons
-	s.Button.Focused = lipgloss.NewStyle().Foreground(onAccent).Background(secondary)
-	s.Button.Blurred = lipgloss.NewStyle().Foreground(fgBase).Background(bgSubtle)
+	s.Button.Focused = lipgloss.NewStyle().Foreground(o.primary).Background(o.secondary)
+	s.Button.Blurred = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.bgLessVisible)
 
 	// Editor
-	s.Editor.PromptNormalFocused = lipgloss.NewStyle().Foreground(successMuted).SetString("::: ")
-	s.Editor.PromptNormalBlurred = s.Editor.PromptNormalFocused.Foreground(fgMuted)
-	s.Editor.PromptYoloIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(fgSubtle).Background(busy).Bold(true).SetString(" ! ")
-	s.Editor.PromptYoloIconBlurred = s.Editor.PromptYoloIconFocused.Foreground(bgBase).Background(fgMuted)
-	s.Editor.PromptYoloDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(warning).SetString(":::")
-	s.Editor.PromptYoloDotsBlurred = s.Editor.PromptYoloDotsFocused.Foreground(fgMuted)
+	s.Editor.PromptNormalFocused = lipgloss.NewStyle().Foreground(o.successMostSubtle).SetString("::: ")
+	s.Editor.PromptNormalBlurred = s.Editor.PromptNormalFocused.Foreground(o.fgMoreSubtle)
+	s.Editor.PromptYoloIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.fgMostSubtle).Background(o.busy).Bold(true).SetString(" ! ")
+	s.Editor.PromptYoloIconBlurred = s.Editor.PromptYoloIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
+	s.Editor.PromptYoloDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.warningSubtle).SetString(":::")
+	s.Editor.PromptYoloDotsBlurred = s.Editor.PromptYoloDotsFocused.Foreground(o.fgMoreSubtle)
 
-	s.Radio.On = lipgloss.NewStyle().Foreground(fgHalfMuted).SetString(RadioOn)
-	s.Radio.Off = lipgloss.NewStyle().Foreground(fgHalfMuted).SetString(RadioOff)
-	s.Radio.Label = lipgloss.NewStyle().Foreground(fgHalfMuted)
+	s.Radio.On = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOn)
+	s.Radio.Off = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOff)
+	s.Radio.Label = lipgloss.NewStyle().Foreground(o.fgSubtle)
 
 	// Logo
-	s.Logo.FieldColor = primary
-	s.Logo.TitleColorA = secondary
-	s.Logo.TitleColorB = primary
-	s.Logo.CharmColor = secondary
-	s.Logo.VersionColor = primary
-	s.Logo.SmallCharm = lipgloss.NewStyle().Foreground(secondary)
-	s.Logo.SmallDiagonals = lipgloss.NewStyle().Foreground(primary)
+	s.Logo.FieldColor = o.primary
+	s.Logo.TitleColorA = o.secondary
+	s.Logo.TitleColorB = o.primary
+	s.Logo.CharmColor = o.secondary
+	s.Logo.VersionColor = o.primary
+	s.Logo.SmallCharm = lipgloss.NewStyle().Foreground(o.secondary)
+	s.Logo.SmallDiagonals = lipgloss.NewStyle().Foreground(o.primary)
 	s.Logo.GradCanvas = lipgloss.NewStyle()
-	s.Logo.SmallGradFromColor = secondary
-	s.Logo.SmallGradToColor = primary
+	s.Logo.SmallGradFromColor = o.secondary
+	s.Logo.SmallGradToColor = o.primary
 
 	// Section
 	s.Section.Title = subtle
-	s.Section.Line = base.Foreground(border)
+	s.Section.Line = base.Foreground(o.separator)
 
 	// Initialize
 	s.Initialize.Header = base
 	s.Initialize.Content = muted
-	s.Initialize.Accent = base.Foreground(successMuted)
+	s.Initialize.Accent = base.Foreground(o.successMostSubtle)
 
 	// ResourceGroup (LSP/MCP/skills sidebar lists).
-	s.Resource.Heading = lipgloss.NewStyle().Foreground(fgSubtle)
-	s.Resource.Name = lipgloss.NewStyle().Foreground(fgMuted)
-	s.Resource.StatusText = lipgloss.NewStyle().Foreground(fgSubtle)
-	s.Resource.OfflineIcon = lipgloss.NewStyle().Foreground(bgOverlay).SetString("●")
-	s.Resource.BusyIcon = s.Resource.OfflineIcon.Foreground(busy)
-	s.Resource.ErrorIcon = s.Resource.OfflineIcon.Foreground(danger)
-	s.Resource.OnlineIcon = s.Resource.OfflineIcon.Foreground(successMuted)
-	s.Resource.DisabledIcon = lipgloss.NewStyle().Foreground(fgMuted).SetString("●")
-	s.Resource.AdditionalText = lipgloss.NewStyle().Foreground(fgSubtle)
-	s.Resource.CapabilityCount = lipgloss.NewStyle().Foreground(fgSubtle)
-	s.Resource.RowTitleBase = lipgloss.NewStyle().Foreground(fgBase)
-	s.Resource.RowDescBase = lipgloss.NewStyle().Foreground(fgBase)
-	s.Resource.DefaultTitleFg = fgMuted
-	s.Resource.DefaultDescFg = fgSubtle
+	s.Resource.Heading = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
+	s.Resource.Name = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
+	s.Resource.StatusText = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
+	s.Resource.OfflineIcon = lipgloss.NewStyle().Foreground(o.bgMostVisible).SetString("●")
+	s.Resource.BusyIcon = s.Resource.OfflineIcon.Foreground(o.busy)
+	s.Resource.ErrorIcon = s.Resource.OfflineIcon.Foreground(o.destructive)
+	s.Resource.OnlineIcon = s.Resource.OfflineIcon.Foreground(o.successMostSubtle)
+	s.Resource.DisabledIcon = lipgloss.NewStyle().Foreground(o.fgMoreSubtle).SetString("●")
+	s.Resource.AdditionalText = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
+	s.Resource.CapabilityCount = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
+	s.Resource.RowTitleBase = lipgloss.NewStyle().Foreground(o.fgBase)
+	s.Resource.RowDescBase = lipgloss.NewStyle().Foreground(o.fgBase)
+	s.Resource.DefaultTitleFg = o.fgMoreSubtle
+	s.Resource.DefaultDescFg = o.fgMostSubtle
 
 	// LSP
-	s.LSP.ErrorDiagnostic = base.Foreground(error)
-	s.LSP.WarningDiagnostic = base.Foreground(warning)
-	s.LSP.HintDiagnostic = base.Foreground(fgHalfMuted)
-	s.LSP.InfoDiagnostic = base.Foreground(info)
+	s.LSP.ErrorDiagnostic = base.Foreground(o.error)
+	s.LSP.WarningDiagnostic = base.Foreground(o.warningSubtle)
+	s.LSP.HintDiagnostic = base.Foreground(o.fgSubtle)
+	s.LSP.InfoDiagnostic = base.Foreground(o.info)
 
 	// Files
-	s.Files.Path = lipgloss.NewStyle().Foreground(fgMuted)
-	s.Files.Additions = lipgloss.NewStyle().Foreground(successMuted)
-	s.Files.Deletions = lipgloss.NewStyle().Foreground(error)
-	s.Files.SectionTitle = lipgloss.NewStyle().Foreground(fgSubtle)
-	s.Files.EmptyMessage = lipgloss.NewStyle().Foreground(fgSubtle)
-	s.Files.TruncationHint = lipgloss.NewStyle().Foreground(fgSubtle)
+	s.Files.Path = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
+	s.Files.Additions = lipgloss.NewStyle().Foreground(o.successMostSubtle)
+	s.Files.Deletions = lipgloss.NewStyle().Foreground(o.error)
+	s.Files.SectionTitle = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
+	s.Files.EmptyMessage = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
+	s.Files.TruncationHint = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 
 	// Sidebar
-	s.Sidebar.SessionTitle = lipgloss.NewStyle().Foreground(fgMuted)
-	s.Sidebar.WorkingDir = lipgloss.NewStyle().Foreground(fgMuted)
+	s.Sidebar.SessionTitle = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
+	s.Sidebar.WorkingDir = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
 
 	// ModelInfo
-	s.ModelInfo.Icon = lipgloss.NewStyle().Foreground(fgSubtle)
-	s.ModelInfo.Name = lipgloss.NewStyle().Foreground(fgBase)
-	s.ModelInfo.Provider = lipgloss.NewStyle().Foreground(fgMuted)
-	s.ModelInfo.ProviderFallback = lipgloss.NewStyle().Foreground(fgMuted).PaddingLeft(2)
-	s.ModelInfo.Reasoning = lipgloss.NewStyle().Foreground(fgSubtle).PaddingLeft(2)
-	s.ModelInfo.TokenCount = lipgloss.NewStyle().Foreground(fgSubtle)
-	s.ModelInfo.TokenPercentage = lipgloss.NewStyle().Foreground(fgMuted)
-	s.ModelInfo.Cost = lipgloss.NewStyle().Foreground(fgMuted)
+	s.ModelInfo.Icon = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
+	s.ModelInfo.Name = lipgloss.NewStyle().Foreground(o.fgBase)
+	s.ModelInfo.Provider = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
+	s.ModelInfo.ProviderFallback = lipgloss.NewStyle().Foreground(o.fgMoreSubtle).PaddingLeft(2)
+	s.ModelInfo.Reasoning = lipgloss.NewStyle().Foreground(o.fgMostSubtle).PaddingLeft(2)
+	s.ModelInfo.TokenCount = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
+	s.ModelInfo.TokenPercentage = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
+	s.ModelInfo.Cost = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
 
 	// ResourceGroup
-	s.Resource.DefaultTitleFg = fgMuted
-	s.Resource.DefaultDescFg = fgSubtle
+	s.Resource.DefaultTitleFg = o.fgMoreSubtle
+	s.Resource.DefaultDescFg = o.fgMostSubtle
 
 	// Chat
 	messageFocussedBorder := lipgloss.Border{
 		Left: "▌",
 	}
 
-	s.Messages.NoContent = lipgloss.NewStyle().Foreground(fgBase)
+	s.Messages.NoContent = lipgloss.NewStyle().Foreground(o.fgBase)
 	s.Messages.UserBlurred = s.Messages.NoContent.PaddingLeft(1).BorderLeft(true).
-		BorderForeground(primary).BorderStyle(lipgloss.NormalBorder())
+		BorderForeground(o.primary).BorderStyle(lipgloss.NormalBorder())
 	s.Messages.UserFocused = s.Messages.NoContent.PaddingLeft(1).BorderLeft(true).
-		BorderForeground(primary).BorderStyle(messageFocussedBorder)
+		BorderForeground(o.primary).BorderStyle(messageFocussedBorder)
 	s.Messages.AssistantBlurred = s.Messages.NoContent.PaddingLeft(2)
 	s.Messages.AssistantFocused = s.Messages.NoContent.PaddingLeft(1).BorderLeft(true).
-		BorderForeground(successMuted).BorderStyle(messageFocussedBorder)
+		BorderForeground(o.successMostSubtle).BorderStyle(messageFocussedBorder)
 	s.Messages.Thinking = lipgloss.NewStyle().MaxHeight(10)
 	s.Messages.ErrorTag = lipgloss.NewStyle().Padding(0, 1).
-		Background(danger).Foreground(onAccent)
-	s.Messages.ErrorTitle = lipgloss.NewStyle().Foreground(fgHalfMuted)
-	s.Messages.ErrorDetails = lipgloss.NewStyle().Foreground(fgSubtle)
+		Background(o.destructive).Foreground(o.primary)
+	s.Messages.ErrorTitle = lipgloss.NewStyle().Foreground(o.fgSubtle)
+	s.Messages.ErrorDetails = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 
 	// Message item styles
 	s.Messages.ToolCallFocused = muted.PaddingLeft(1).
 		BorderStyle(messageFocussedBorder).
 		BorderLeft(true).
-		BorderForeground(successMuted)
+		BorderForeground(o.successMostSubtle)
 	s.Messages.ToolCallBlurred = muted.PaddingLeft(2)
 	// No padding or border for compact tool calls within messages
 	s.Messages.ToolCallCompact = muted
@@ -836,144 +800,144 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Messages.AssistantInfoModel = muted
 	s.Messages.AssistantInfoProvider = subtle
 	s.Messages.AssistantInfoDuration = subtle
-	s.Messages.AssistantCanceled = lipgloss.NewStyle().Foreground(fgBase).Italic(true)
+	s.Messages.AssistantCanceled = lipgloss.NewStyle().Foreground(o.fgBase).Italic(true)
 
 	// Thinking section styles
-	s.Messages.ThinkingBox = subtle.Background(bgBaseLighter)
+	s.Messages.ThinkingBox = subtle.Background(o.bgLeastVisible)
 	s.Messages.ThinkingTruncationHint = muted
 	s.Messages.ThinkingFooterTitle = muted
 	s.Messages.ThinkingFooterDuration = subtle
 
 	// Text selection.
-	s.TextSelection = lipgloss.NewStyle().Foreground(onPrimary).Background(primary)
+	s.TextSelection = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.primary)
 
 	// Dialog styles
-	s.Dialog.Title = base.Padding(0, 1).Foreground(primary)
-	s.Dialog.TitleText = base.Foreground(primary)
-	s.Dialog.TitleError = base.Foreground(danger)
-	s.Dialog.TitleAccent = base.Foreground(success).Bold(true)
+	s.Dialog.Title = base.Padding(0, 1).Foreground(o.primary)
+	s.Dialog.TitleText = base.Foreground(o.primary)
+	s.Dialog.TitleError = base.Foreground(o.destructive)
+	s.Dialog.TitleAccent = base.Foreground(o.success).Bold(true)
 	s.Dialog.TitleLineBase = lipgloss.NewStyle()
-	s.Dialog.TitleGradFromColor = primary
-	s.Dialog.TitleGradToColor = secondary
+	s.Dialog.TitleGradFromColor = o.primary
+	s.Dialog.TitleGradToColor = o.secondary
 
 	// Dialog.ListItem (commands, reasoning, models)
-	s.Dialog.ListItem.InfoBlurred = lipgloss.NewStyle().Foreground(fgBase)
-	s.Dialog.ListItem.InfoFocused = lipgloss.NewStyle().Foreground(fgBase)
+	s.Dialog.ListItem.InfoBlurred = lipgloss.NewStyle().Foreground(o.fgBase)
+	s.Dialog.ListItem.InfoFocused = lipgloss.NewStyle().Foreground(o.fgBase)
 
 	// Dialog.Models
-	s.Dialog.Models.ConfiguredText = lipgloss.NewStyle().Foreground(fgSubtle)
+	s.Dialog.Models.ConfiguredText = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 
 	// Dialog.Permissions
-	s.Dialog.Permissions.KeyText = lipgloss.NewStyle().Foreground(fgMuted)
-	s.Dialog.Permissions.ValueText = lipgloss.NewStyle().Foreground(fgBase)
-	s.Dialog.Permissions.ParamsBg = bgSubtle
+	s.Dialog.Permissions.KeyText = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
+	s.Dialog.Permissions.ValueText = lipgloss.NewStyle().Foreground(o.fgBase)
+	s.Dialog.Permissions.ParamsBg = o.bgLessVisible
 
 	// Dialog.Quit
-	s.Dialog.Quit.Content = lipgloss.NewStyle().Foreground(fgBase)
-	s.Dialog.Quit.Frame = lipgloss.NewStyle().BorderForeground(borderFocus).Border(lipgloss.RoundedBorder()).Padding(1, 2)
-	s.Dialog.View = base.Border(lipgloss.RoundedBorder()).BorderForeground(borderFocus)
-	s.Dialog.PrimaryText = base.Padding(0, 1).Foreground(primary)
-	s.Dialog.SecondaryText = base.Padding(0, 1).Foreground(fgSubtle)
+	s.Dialog.Quit.Content = lipgloss.NewStyle().Foreground(o.fgBase)
+	s.Dialog.Quit.Frame = lipgloss.NewStyle().BorderForeground(o.primary).Border(lipgloss.RoundedBorder()).Padding(1, 2)
+	s.Dialog.View = base.Border(lipgloss.RoundedBorder()).BorderForeground(o.primary)
+	s.Dialog.PrimaryText = base.Padding(0, 1).Foreground(o.primary)
+	s.Dialog.SecondaryText = base.Padding(0, 1).Foreground(o.fgMostSubtle)
 	s.Dialog.HelpView = base.Padding(0, 1).AlignHorizontal(lipgloss.Left)
-	s.Dialog.Help.ShortKey = base.Foreground(fgMuted)
-	s.Dialog.Help.ShortDesc = base.Foreground(fgSubtle)
-	s.Dialog.Help.ShortSeparator = base.Foreground(border)
-	s.Dialog.Help.Ellipsis = base.Foreground(border)
-	s.Dialog.Help.FullKey = base.Foreground(fgMuted)
-	s.Dialog.Help.FullDesc = base.Foreground(fgSubtle)
-	s.Dialog.Help.FullSeparator = base.Foreground(border)
-	s.Dialog.NormalItem = base.Padding(0, 1).Foreground(fgBase)
-	s.Dialog.SelectedItem = base.Padding(0, 1).Background(primary).Foreground(fgBase)
+	s.Dialog.Help.ShortKey = base.Foreground(o.fgMoreSubtle)
+	s.Dialog.Help.ShortDesc = base.Foreground(o.fgMostSubtle)
+	s.Dialog.Help.ShortSeparator = base.Foreground(o.separator)
+	s.Dialog.Help.Ellipsis = base.Foreground(o.separator)
+	s.Dialog.Help.FullKey = base.Foreground(o.fgMoreSubtle)
+	s.Dialog.Help.FullDesc = base.Foreground(o.fgMostSubtle)
+	s.Dialog.Help.FullSeparator = base.Foreground(o.separator)
+	s.Dialog.NormalItem = base.Padding(0, 1).Foreground(o.fgBase)
+	s.Dialog.SelectedItem = base.Padding(0, 1).Background(o.primary).Foreground(o.fgBase)
 	s.Dialog.InputPrompt = base.Margin(1, 1)
 
 	s.Dialog.List = base.Margin(0, 0, 1, 0)
-	s.Dialog.ContentPanel = base.Background(bgSubtle).Foreground(fgBase).Padding(1, 2)
-	s.Dialog.Spinner = base.Foreground(secondary)
-	s.Dialog.ScrollbarThumb = base.Foreground(secondary)
-	s.Dialog.ScrollbarTrack = base.Foreground(border)
+	s.Dialog.ContentPanel = base.Background(o.bgLessVisible).Foreground(o.fgBase).Padding(1, 2)
+	s.Dialog.Spinner = base.Foreground(o.secondary)
+	s.Dialog.ScrollbarThumb = base.Foreground(o.secondary)
+	s.Dialog.ScrollbarTrack = base.Foreground(o.separator)
 
-	s.Dialog.ImagePreview = lipgloss.NewStyle().Padding(0, 1).Foreground(fgSubtle)
+	s.Dialog.ImagePreview = lipgloss.NewStyle().Padding(0, 1).Foreground(o.fgMostSubtle)
 
 	// API key input dialog
-	s.Dialog.APIKey.Spinner = base.Foreground(success)
+	s.Dialog.APIKey.Spinner = base.Foreground(o.success)
 
 	// OAuth dialog
-	s.Dialog.OAuth.Spinner = base.Foreground(successSubtle)
-	s.Dialog.OAuth.Instructions = lipgloss.NewStyle().Foreground(onAccent)
-	s.Dialog.OAuth.UserCode = lipgloss.NewStyle().Bold(true).Foreground(onAccent)
-	s.Dialog.OAuth.Success = lipgloss.NewStyle().Foreground(successSubtle)
-	s.Dialog.OAuth.Link = lipgloss.NewStyle().Foreground(successMuted).Underline(true)
-	s.Dialog.OAuth.Enter = lipgloss.NewStyle().Foreground(primary)
-	s.Dialog.OAuth.ErrorText = lipgloss.NewStyle().Foreground(error)
-	s.Dialog.OAuth.StatusText = lipgloss.NewStyle().Foreground(fgMuted)
-	s.Dialog.OAuth.UserCodeBg = bgBaseLighter
+	s.Dialog.OAuth.Spinner = base.Foreground(o.successMoreSubtle)
+	s.Dialog.OAuth.Instructions = lipgloss.NewStyle().Foreground(o.fgBase)
+	s.Dialog.OAuth.UserCode = lipgloss.NewStyle().Bold(true).Foreground(o.fgBase)
+	s.Dialog.OAuth.Success = lipgloss.NewStyle().Foreground(o.successMoreSubtle)
+	s.Dialog.OAuth.Link = lipgloss.NewStyle().Foreground(o.successMostSubtle).Underline(true)
+	s.Dialog.OAuth.Enter = lipgloss.NewStyle().Foreground(o.keyword)
+	s.Dialog.OAuth.ErrorText = lipgloss.NewStyle().Foreground(o.error)
+	s.Dialog.OAuth.StatusText = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
+	s.Dialog.OAuth.UserCodeBg = o.bgLeastVisible
 
 	s.Dialog.Arguments.Content = base.Padding(1)
 	s.Dialog.Arguments.Description = base.MarginBottom(1).MaxHeight(3)
-	s.Dialog.Arguments.InputLabelBlurred = base.Foreground(fgMuted)
+	s.Dialog.Arguments.InputLabelBlurred = base.Foreground(o.fgMoreSubtle)
 	s.Dialog.Arguments.InputLabelFocused = base.Bold(true)
-	s.Dialog.Arguments.InputRequiredMarkBlurred = base.Foreground(fgMuted).SetString("*")
-	s.Dialog.Arguments.InputRequiredMarkFocused = base.Foreground(primary).Bold(true).SetString("*")
+	s.Dialog.Arguments.InputRequiredMarkBlurred = base.Foreground(o.fgMoreSubtle).SetString("*")
+	s.Dialog.Arguments.InputRequiredMarkFocused = base.Foreground(o.primary).Bold(true).SetString("*")
 
-	s.Dialog.Sessions.DeletingTitle = s.Dialog.Title.Foreground(danger)
-	s.Dialog.Sessions.DeletingView = s.Dialog.View.BorderForeground(danger)
+	s.Dialog.Sessions.DeletingTitle = s.Dialog.Title.Foreground(o.destructive)
+	s.Dialog.Sessions.DeletingView = s.Dialog.View.BorderForeground(o.destructive)
 	s.Dialog.Sessions.DeletingMessage = base.Padding(1)
-	s.Dialog.Sessions.DeletingTitleGradientFromColor = danger
-	s.Dialog.Sessions.DeletingTitleGradientToColor = primary
-	s.Dialog.Sessions.DeletingItemBlurred = s.Dialog.NormalItem.Foreground(fgSubtle)
-	s.Dialog.Sessions.DeletingItemFocused = s.Dialog.SelectedItem.Background(danger).Foreground(onAccent)
+	s.Dialog.Sessions.DeletingTitleGradientFromColor = o.destructive
+	s.Dialog.Sessions.DeletingTitleGradientToColor = o.primary
+	s.Dialog.Sessions.DeletingItemBlurred = s.Dialog.NormalItem.Foreground(o.fgMostSubtle)
+	s.Dialog.Sessions.DeletingItemFocused = s.Dialog.SelectedItem.Background(o.destructive).Foreground(o.onPrimary)
 
-	s.Dialog.Sessions.RenamingingTitle = s.Dialog.Title.Foreground(warning)
-	s.Dialog.Sessions.RenamingView = s.Dialog.View.BorderForeground(warning)
+	s.Dialog.Sessions.RenamingingTitle = s.Dialog.Title.Foreground(o.warningSubtle)
+	s.Dialog.Sessions.RenamingView = s.Dialog.View.BorderForeground(o.warningSubtle)
 	s.Dialog.Sessions.RenamingingMessage = base.Padding(1)
-	s.Dialog.Sessions.RenamingTitleGradientFromColor = warning
-	s.Dialog.Sessions.RenamingTitleGradientToColor = tertiary
-	s.Dialog.Sessions.RenamingItemBlurred = s.Dialog.NormalItem.Foreground(fgSubtle)
+	s.Dialog.Sessions.RenamingTitleGradientFromColor = o.warningSubtle
+	s.Dialog.Sessions.RenamingTitleGradientToColor = o.accent
+	s.Dialog.Sessions.RenamingItemBlurred = s.Dialog.NormalItem.Foreground(o.fgMostSubtle)
 	s.Dialog.Sessions.RenamingingItemFocused = s.Dialog.SelectedItem.UnsetBackground().UnsetForeground()
-	s.Dialog.Sessions.RenamingPlaceholder = base.Foreground(fgMuted)
-	s.Dialog.Sessions.InfoBlurred = lipgloss.NewStyle().Foreground(fgSubtle)
-	s.Dialog.Sessions.InfoFocused = lipgloss.NewStyle().Foreground(fgBase)
+	s.Dialog.Sessions.RenamingPlaceholder = base.Foreground(o.fgMoreSubtle)
+	s.Dialog.Sessions.InfoBlurred = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
+	s.Dialog.Sessions.InfoFocused = lipgloss.NewStyle().Foreground(o.fgBase)
 
 	s.Status.Help = lipgloss.NewStyle().Padding(0, 1)
-	s.Status.SuccessIndicator = base.Foreground(bgSubtle).Background(success).Padding(0, 1).Bold(true).SetString("OKAY!")
+	s.Status.SuccessIndicator = base.Foreground(o.bgLessVisible).Background(o.success).Padding(0, 1).Bold(true).SetString("OKAY!")
 	s.Status.InfoIndicator = s.Status.SuccessIndicator
 	s.Status.UpdateIndicator = s.Status.SuccessIndicator.SetString("HEY!")
-	s.Status.WarnIndicator = s.Status.SuccessIndicator.Foreground(bgOverlay).Background(warningStrong).SetString("WARNING")
-	s.Status.ErrorIndicator = s.Status.SuccessIndicator.Foreground(bgBase).Background(danger).SetString("ERROR")
-	s.Status.SuccessMessage = base.Foreground(bgSubtle).Background(successMuted).Padding(0, 1)
+	s.Status.WarnIndicator = s.Status.SuccessIndicator.Foreground(o.bgMostVisible).Background(o.warning).SetString("WARNING")
+	s.Status.ErrorIndicator = s.Status.SuccessIndicator.Foreground(o.bgBase).Background(o.destructive).SetString("ERROR")
+	s.Status.SuccessMessage = base.Foreground(o.bgLessVisible).Background(o.successMostSubtle).Padding(0, 1)
 	s.Status.InfoMessage = s.Status.SuccessMessage
 	s.Status.UpdateMessage = s.Status.SuccessMessage
-	s.Status.WarnMessage = s.Status.SuccessMessage.Foreground(bgOverlay).Background(warning)
-	s.Status.ErrorMessage = s.Status.SuccessMessage.Foreground(onAccent).Background(error)
+	s.Status.WarnMessage = s.Status.SuccessMessage.Foreground(o.bgMostVisible).Background(o.warningSubtle)
+	s.Status.ErrorMessage = s.Status.SuccessMessage.Foreground(o.primary).Background(o.error)
 
 	// Completions styles
-	s.Completions.Normal = base.Background(bgSubtle).Foreground(fgBase)
-	s.Completions.Focused = base.Background(primary).Foreground(onAccent)
+	s.Completions.Normal = base.Background(o.bgLessVisible).Foreground(o.fgBase)
+	s.Completions.Focused = base.Background(o.primary).Foreground(o.primary)
 	s.Completions.Match = base.Underline(true)
 
 	// Attachments styles
-	attachmentIconStyle := base.Foreground(bgSubtle).Background(success).Padding(0, 1)
+	attachmentIconStyle := base.Foreground(o.bgLessVisible).Background(o.success).Padding(0, 1)
 	s.Attachments.Image = attachmentIconStyle.SetString(ImageIcon)
 	s.Attachments.Text = attachmentIconStyle.SetString(TextIcon)
-	s.Attachments.Normal = base.Padding(0, 1).MarginRight(1).Background(fgMuted).Foreground(fgBase)
-	s.Attachments.Deleting = base.Padding(0, 1).Bold(true).Background(danger).Foreground(fgBase)
+	s.Attachments.Normal = base.Padding(0, 1).MarginRight(1).Background(o.fgMoreSubtle).Foreground(o.fgBase)
+	s.Attachments.Deleting = base.Padding(0, 1).Bold(true).Background(o.destructive).Foreground(o.fgBase)
 
 	// Pills styles
 	s.Pills.Base = base.Padding(0, 1)
-	s.Pills.Focused = base.Padding(0, 1).BorderStyle(lipgloss.RoundedBorder()).BorderForeground(bgOverlay)
+	s.Pills.Focused = base.Padding(0, 1).BorderStyle(lipgloss.RoundedBorder()).BorderForeground(o.bgMostVisible)
 	s.Pills.Blurred = base.Padding(0, 1).BorderStyle(lipgloss.HiddenBorder())
-	s.Pills.QueueItemPrefix = lipgloss.NewStyle().Foreground(fgMuted).SetString("  •")
-	s.Pills.QueueItemText = lipgloss.NewStyle().Foreground(fgMuted)
-	s.Pills.QueueLabel = lipgloss.NewStyle().Foreground(fgBase)
-	s.Pills.QueueIconBase = lipgloss.NewStyle().Foreground(fgBase)
-	s.Pills.QueueGradFromColor = error
-	s.Pills.QueueGradToColor = secondary
-	s.Pills.TodoLabel = lipgloss.NewStyle().Foreground(fgBase)
-	s.Pills.TodoProgress = lipgloss.NewStyle().Foreground(fgMuted)
-	s.Pills.TodoCurrentTask = lipgloss.NewStyle().Foreground(fgSubtle)
-	s.Pills.TodoSpinner = lipgloss.NewStyle().Foreground(successMuted)
-	s.Pills.HelpKey = lipgloss.NewStyle().Foreground(fgMuted)
-	s.Pills.HelpText = lipgloss.NewStyle().Foreground(fgSubtle)
+	s.Pills.QueueItemPrefix = lipgloss.NewStyle().Foreground(o.fgMoreSubtle).SetString("  •")
+	s.Pills.QueueItemText = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
+	s.Pills.QueueLabel = lipgloss.NewStyle().Foreground(o.fgBase)
+	s.Pills.QueueIconBase = lipgloss.NewStyle().Foreground(o.fgBase)
+	s.Pills.QueueGradFromColor = o.error
+	s.Pills.QueueGradToColor = o.secondary
+	s.Pills.TodoLabel = lipgloss.NewStyle().Foreground(o.fgBase)
+	s.Pills.TodoProgress = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
+	s.Pills.TodoCurrentTask = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
+	s.Pills.TodoSpinner = lipgloss.NewStyle().Foreground(o.successMostSubtle)
+	s.Pills.HelpKey = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
+	s.Pills.HelpText = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 	s.Pills.Area = base
 
 	return s

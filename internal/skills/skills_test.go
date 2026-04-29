@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,6 +63,39 @@ Instructions here.
 			wantName:  "my-skill",
 			wantDesc:  "A simple skill for testing.",
 			wantInstr: "# My Skill\n\nInstructions here.",
+		},
+		{
+			name: "frontmatter with utf8 bom",
+			content: "\uFEFF---\n" +
+				"name: bom-skill\n" +
+				"description: Skill with bom.\n" +
+				"---\n\n" +
+				"# BOM Skill\n",
+			wantName:  "bom-skill",
+			wantDesc:  "Skill with bom.",
+			wantInstr: "# BOM Skill",
+		},
+		{
+			name: "frontmatter with leading blank lines",
+			content: "\n\n---\n" +
+				"name: blank-prefix\n" +
+				"description: Skill with leading blank lines.\n" +
+				"---\n\n" +
+				"# Blank Prefix\n",
+			wantName:  "blank-prefix",
+			wantDesc:  "Skill with leading blank lines.",
+			wantInstr: "# Blank Prefix",
+		},
+		{
+			name: "frontmatter delimiter with trailing spaces",
+			content: "---   \n" +
+				"name: spaced-delimiter\n" +
+				"description: Delimiter has spaces.\n" +
+				"---   \n\n" +
+				"# Spaced Delimiter\n",
+			wantName:  "spaced-delimiter",
+			wantDesc:  "Delimiter has spaces.",
+			wantInstr: "# Spaced Delimiter",
 		},
 		{
 			name:    "no frontmatter",
@@ -182,8 +216,7 @@ func TestSkillValidate(t *testing.T) {
 }
 
 func TestDiscover(t *testing.T) {
-	t.Parallel()
-
+	// Not parallel: shares global broker with other Discover tests.
 	tmpDir := t.TempDir()
 
 	// Create valid skill 1.
@@ -215,8 +248,33 @@ description: Name doesn't match directory.
 ---
 `), 0o644))
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := SubscribeEvents(ctx)
+
 	skills := Discover([]string{tmpDir})
+
+	evt := <-ch
+	states := evt.Payload.States
+	var normalCount int
+	var errorCount int
+	var hasInvalidDir bool
+	for _, state := range states {
+		if state.State == StateNormal {
+			normalCount++
+		}
+		if state.State == StateError {
+			errorCount++
+			if strings.Contains(state.Path, "invalid-dir") {
+				hasInvalidDir = true
+			}
+		}
+	}
+	require.Equal(t, 2, normalCount)
+	require.Equal(t, 1, errorCount)
+	require.True(t, hasInvalidDir)
 	require.Len(t, skills, 2)
+	require.Equal(t, []string{"skill-two", "skill-one"}, []string{skills[0].Name, skills[1].Name})
 
 	names := make(map[string]bool)
 	for _, s := range skills {
@@ -224,6 +282,36 @@ description: Name doesn't match directory.
 	}
 	require.True(t, names["skill-one"])
 	require.True(t, names["skill-two"])
+}
+
+func TestDiscoverEmptyDir(t *testing.T) {
+	// Not parallel: shares global broker with other Discover tests.
+
+	tmpDir := t.TempDir()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := SubscribeEvents(ctx)
+
+	skills := Discover([]string{tmpDir})
+
+	evt := <-ch
+	require.Empty(t, evt.Payload.States)
+	require.Empty(t, skills)
+}
+
+func TestDiscoverMissingPath(t *testing.T) {
+	// Not parallel: shares global broker with other Discover tests.
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := SubscribeEvents(ctx)
+
+	skills := Discover([]string{filepath.Join(t.TempDir(), "missing")})
+
+	evt := <-ch
+	require.Empty(t, evt.Payload.States)
+	require.Empty(t, skills)
 }
 
 func TestToPromptXML(t *testing.T) {
@@ -246,6 +334,34 @@ func TestToPromptXMLEmpty(t *testing.T) {
 	t.Parallel()
 	require.Empty(t, ToPromptXML(nil))
 	require.Empty(t, ToPromptXML([]*Skill{}))
+}
+
+func TestEscape(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "escape xml special chars",
+			in:   `<tag attr="x&y">'z'</tag>`,
+			want: `&lt;tag attr=&quot;x&amp;y&quot;&gt;&apos;z&apos;&lt;/tag&gt;`,
+		},
+		{
+			name: "plain text unchanged",
+			in:   "hello world",
+			want: "hello world",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tt.want, escape(tt.in))
+		})
+	}
 }
 
 func TestToPromptXMLBuiltinType(t *testing.T) {
@@ -308,6 +424,32 @@ func TestDiscoverBuiltin(t *testing.T) {
 		}
 	}
 	require.True(t, found, "crush-config builtin skill not found")
+
+	var foundJQ bool
+	for _, s := range discovered {
+		if s.Name == "jq" {
+			foundJQ = true
+			require.Equal(t, "crush://skills/jq/SKILL.md", s.SkillFilePath)
+			require.Equal(t, "crush://skills/jq", s.Path)
+			require.NotEmpty(t, s.Description)
+			require.NotEmpty(t, s.Instructions)
+			require.True(t, s.Builtin)
+		}
+	}
+	require.True(t, foundJQ, "jq builtin skill not found")
+
+	var foundHooks bool
+	for _, s := range discovered {
+		if s.Name == "crush-hooks" {
+			foundHooks = true
+			require.Equal(t, "crush://skills/crush-hooks/SKILL.md", s.SkillFilePath)
+			require.Equal(t, "crush://skills/crush-hooks", s.Path)
+			require.NotEmpty(t, s.Description)
+			require.NotEmpty(t, s.Instructions)
+			require.True(t, s.Builtin)
+		}
+	}
+	require.True(t, foundHooks, "crush-hooks builtin skill not found")
 }
 
 func TestDeduplicate(t *testing.T) {

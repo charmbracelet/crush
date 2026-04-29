@@ -21,6 +21,7 @@ type Style struct {
 	EqualLine   LineStyle
 	InsertLine  LineStyle
 	DeleteLine  LineStyle
+	Filename    LineStyle
 }
 
 // DefaultLightStyle provides a default light theme style for the diff view.
@@ -69,6 +70,14 @@ func DefaultLightStyle() Style {
 			Code: lipgloss.NewStyle().
 				Foreground(charmtone.Pepper).
 				Background(lipgloss.Color("#ffebee")),
+		},
+		Filename: LineStyle{
+			LineNumber: lipgloss.NewStyle().
+				Foreground(charmtone.Iron).
+				Background(charmtone.Thunder),
+			Code: lipgloss.NewStyle().
+				Foreground(charmtone.Iron).
+				Background(charmtone.Thunder),
 		},
 	}
 }
@@ -119,6 +128,14 @@ func DefaultDarkStyle() Style {
 			Code: lipgloss.NewStyle().
 				Foreground(charmtone.Salt).
 				Background(lipgloss.Color("#3a3030")),
+		},
+		Filename: LineStyle{
+			LineNumber: lipgloss.NewStyle().
+				Foreground(charmtone.Smoke).
+				Background(charmtone.Sapphire),
+			Code: lipgloss.NewStyle().
+				Foreground(charmtone.Smoke).
+				Background(charmtone.Sapphire),
 		},
 	}
 }

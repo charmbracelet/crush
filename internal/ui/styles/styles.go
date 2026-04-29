@@ -1,6 +1,8 @@
+// Package styles define styling and theming for the project.
 package styles
 
 import (
+	"fmt"
 	"image/color"
 	"strings"
 
@@ -8,12 +10,10 @@ import (
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
-	tea "charm.land/bubbletea/v2"
 	"charm.land/glamour/v2/ansi"
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
 	"github.com/charmbracelet/crush/internal/ui/diffview"
-	"github.com/charmbracelet/x/exp/charmtone"
 )
 
 const (
@@ -58,28 +58,19 @@ const (
 )
 
 type Styles struct {
-	WindowTooSmall lipgloss.Style
-
-	// Reusable text styles
-	Base      lipgloss.Style
-	Muted     lipgloss.Style
-	HalfMuted lipgloss.Style
-	Subtle    lipgloss.Style
-
-	// Tags
-	TagBase  lipgloss.Style
-	TagError lipgloss.Style
-	TagInfo  lipgloss.Style
-
 	// Header
 	Header struct {
-		Charm        lipgloss.Style // Style for "Charm™" label
-		Diagonals    lipgloss.Style // Style for diagonal separators (╱)
-		Percentage   lipgloss.Style // Style for context percentage
-		Keystroke    lipgloss.Style // Style for keystroke hints (e.g., "ctrl+d")
-		KeystrokeTip lipgloss.Style // Style for keystroke action text (e.g., "open", "close")
-		WorkingDir   lipgloss.Style // Style for current working directory
-		Separator    lipgloss.Style // Style for separator dots (•)
+		Charm             lipgloss.Style // Style for "Charm™" label
+		Diagonals         lipgloss.Style // Style for diagonal separators (╱)
+		Percentage        lipgloss.Style // Style for context percentage
+		Keystroke         lipgloss.Style // Style for keystroke hints (e.g., "ctrl+d")
+		KeystrokeTip      lipgloss.Style // Style for keystroke action text (e.g., "open", "close")
+		WorkingDir        lipgloss.Style // Style for current working directory
+		Separator         lipgloss.Style // Style for separator dots (•)
+		Wrapper           lipgloss.Style // Outer container for the entire header row
+		LogoGradCanvas    lipgloss.Style // Canvas for the compact "CRUSH" gradient
+		LogoGradFromColor color.Color    // "CRUSH" wordmark gradient start
+		LogoGradToColor   color.Color    // "CRUSH" wordmark gradient end
 	}
 
 	CompactDetails struct {
@@ -88,43 +79,18 @@ type Styles struct {
 		Title   lipgloss.Style
 	}
 
-	// Panels
-	PanelMuted lipgloss.Style
-	PanelBase  lipgloss.Style
-
-	// Line numbers for code blocks
-	LineNumber lipgloss.Style
-
-	// Message borders
-	FocusedMessageBorder lipgloss.Border
-
 	// Tool calls
-	ToolCallPending   lipgloss.Style
-	ToolCallError     lipgloss.Style
-	ToolCallSuccess   lipgloss.Style
-	ToolCallCancelled lipgloss.Style
-	EarlyStateMessage lipgloss.Style
+	ToolCallSuccess lipgloss.Style
 
 	// Text selection
 	TextSelection lipgloss.Style
 
-	// LSP and MCP status indicators
-	ResourceGroupTitle     lipgloss.Style
-	ResourceOfflineIcon    lipgloss.Style
-	ResourceBusyIcon       lipgloss.Style
-	ResourceErrorIcon      lipgloss.Style
-	ResourceOnlineIcon     lipgloss.Style
-	ResourceName           lipgloss.Style
-	ResourceStatus         lipgloss.Style
-	ResourceAdditionalText lipgloss.Style
-
 	// Markdown & Chroma
 	Markdown      ansi.StyleConfig
-	PlainMarkdown ansi.StyleConfig
+	QuietMarkdown ansi.StyleConfig
 
 	// Inputs
 	TextInput textinput.Styles
-	TextArea  textarea.Styles
 
 	// Help
 	Help help.Styles
@@ -136,62 +102,55 @@ type Styles struct {
 	FilePicker filepicker.Styles
 
 	// Buttons
-	ButtonFocus lipgloss.Style
-	ButtonBlur  lipgloss.Style
-
-	// Borders
-	BorderFocus lipgloss.Style
-	BorderBlur  lipgloss.Style
+	Button struct {
+		Focused lipgloss.Style
+		Blurred lipgloss.Style
+	}
 
 	// Editor
-	EditorPromptNormalFocused   lipgloss.Style
-	EditorPromptNormalBlurred   lipgloss.Style
-	EditorPromptYoloIconFocused lipgloss.Style
-	EditorPromptYoloIconBlurred lipgloss.Style
-	EditorPromptYoloDotsFocused lipgloss.Style
-	EditorPromptYoloDotsBlurred lipgloss.Style
+	Editor struct {
+		Textarea textarea.Styles
+
+		// Normal mode prompt (default "::: ").
+		PromptNormalFocused lipgloss.Style
+		PromptNormalBlurred lipgloss.Style
+
+		// YOLO mode prompt (" ! " icon + ":::" dots).
+		PromptYoloIconFocused lipgloss.Style
+		PromptYoloIconBlurred lipgloss.Style
+		PromptYoloDotsFocused lipgloss.Style
+		PromptYoloDotsBlurred lipgloss.Style
+	}
 
 	// Radio
-	RadioOn  lipgloss.Style
-	RadioOff lipgloss.Style
+	Radio struct {
+		On    lipgloss.Style
+		Off   lipgloss.Style
+		Label lipgloss.Style // Text next to a radio button
+	}
 
 	// Background
 	Background color.Color
 
 	// Logo
-	LogoFieldColor   color.Color
-	LogoTitleColorA  color.Color
-	LogoTitleColorB  color.Color
-	LogoCharmColor   color.Color
-	LogoVersionColor color.Color
+	Logo struct {
+		FieldColor         color.Color
+		TitleColorA        color.Color
+		TitleColorB        color.Color
+		CharmColor         color.Color
+		VersionColor       color.Color
+		SmallCharm         lipgloss.Style // "Charm™" label in SmallRender
+		SmallDiagonals     lipgloss.Style // Diagonal line fill in SmallRender
+		GradCanvas         lipgloss.Style // Blank canvas for gradient painting
+		SmallGradFromColor color.Color    // Small "Crush" wordmark gradient start
+		SmallGradToColor   color.Color    // Small "Crush" wordmark gradient end
+	}
 
-	// Colors - semantic colors for tool rendering.
-	Primary       color.Color
-	Secondary     color.Color
-	Tertiary      color.Color
-	BgBase        color.Color
-	BgBaseLighter color.Color
-	BgSubtle      color.Color
-	BgOverlay     color.Color
-	FgBase        color.Color
-	FgMuted       color.Color
-	FgHalfMuted   color.Color
-	FgSubtle      color.Color
-	Border        color.Color
-	BorderColor   color.Color // Border focus color
-	Error         color.Color
-	Warning       color.Color
-	Info          color.Color
-	White         color.Color
-	BlueLight     color.Color
-	Blue          color.Color
-	BlueDark      color.Color
-	GreenLight    color.Color
-	Green         color.Color
-	GreenDark     color.Color
-	Red           color.Color
-	RedDark       color.Color
-	Yellow        color.Color
+	// Working indicator gradient (spinners/shimmers on assistant "thinking",
+	// tool-call pending, CLI generating, startup).
+	WorkingGradFromColor color.Color
+	WorkingGradToColor   color.Color
+	WorkingLabelColor    color.Color // Label text color next to the indicator
 
 	// Section Title
 	Section struct {
@@ -214,41 +173,80 @@ type Styles struct {
 		InfoDiagnostic    lipgloss.Style
 	}
 
+	// Sidebar
+	Sidebar struct {
+		SessionTitle lipgloss.Style // Current session title at top of sidebar
+		WorkingDir   lipgloss.Style // Working directory path (PrettyPath)
+	}
+
+	// ModelInfo (model name, provider, reasoning, token/cost summary)
+	ModelInfo struct {
+		Icon             lipgloss.Style // Model icon (◇)
+		Name             lipgloss.Style // Model name text
+		Provider         lipgloss.Style // "via <provider>" text
+		ProviderFallback lipgloss.Style // Provider on its own second line
+		Reasoning        lipgloss.Style // Reasoning effort text
+		TokenCount       lipgloss.Style // "(42K)" token count
+		TokenPercentage  lipgloss.Style // "42%" percent of context window
+		Cost             lipgloss.Style // "$0.42" cost readout
+	}
+
+	// Resource styles the LSP/MCP/skills sidebar lists: their heading,
+	// each row's status icon, name, status text, and truncation hints.
+	Resource struct {
+		Heading         lipgloss.Style // Section header ("LSPs", "MCPs", "Skills")
+		Name            lipgloss.Style // Resource name (e.g. "gopls")
+		StatusText      lipgloss.Style // Row status description (e.g. "starting...")
+		OfflineIcon     lipgloss.Style // Offline/unstarted/stopped status icon
+		DisabledIcon    lipgloss.Style // Disabled status icon
+		BusyIcon        lipgloss.Style // Busy/starting status icon
+		ErrorIcon       lipgloss.Style // Error status icon
+		OnlineIcon      lipgloss.Style // Online/ready status icon
+		AdditionalText  lipgloss.Style // "None" and "…and N more" text
+		CapabilityCount lipgloss.Style // "N tools" / "N prompts" / "N resources"
+		RowTitleBase    lipgloss.Style // Base style applied over row titles in common.Status
+		RowDescBase     lipgloss.Style // Base style applied over row descriptions in common.Status
+		DefaultTitleFg  color.Color    // Default title color when opt is zero
+		DefaultDescFg   color.Color    // Default description color when opt is zero
+	}
+
 	// Files
 	Files struct {
-		Path      lipgloss.Style
-		Additions lipgloss.Style
-		Deletions lipgloss.Style
+		Path           lipgloss.Style
+		Additions      lipgloss.Style
+		Deletions      lipgloss.Style
+		SectionTitle   lipgloss.Style // "Modified Files" heading
+		EmptyMessage   lipgloss.Style // "None" placeholder when no files
+		TruncationHint lipgloss.Style // "…and N more" message
 	}
 
 	// Chat
-	Chat struct {
-		// Message item styles
-		Message struct {
-			UserBlurred      lipgloss.Style
-			UserFocused      lipgloss.Style
-			AssistantBlurred lipgloss.Style
-			AssistantFocused lipgloss.Style
-			NoContent        lipgloss.Style
-			Thinking         lipgloss.Style
-			ErrorTag         lipgloss.Style
-			ErrorTitle       lipgloss.Style
-			ErrorDetails     lipgloss.Style
-			ToolCallFocused  lipgloss.Style
-			ToolCallCompact  lipgloss.Style
-			ToolCallBlurred  lipgloss.Style
-			SectionHeader    lipgloss.Style
+	// Messages - chat message item styles
+	Messages struct {
+		UserBlurred      lipgloss.Style
+		UserFocused      lipgloss.Style
+		AssistantBlurred lipgloss.Style
+		AssistantFocused lipgloss.Style
+		NoContent        lipgloss.Style
+		Thinking         lipgloss.Style
+		ErrorTag         lipgloss.Style
+		ErrorTitle       lipgloss.Style
+		ErrorDetails     lipgloss.Style
+		ToolCallFocused  lipgloss.Style
+		ToolCallCompact  lipgloss.Style
+		ToolCallBlurred  lipgloss.Style
+		SectionHeader    lipgloss.Style
 
-			// Thinking section styles
-			ThinkingBox            lipgloss.Style // Background for thinking content
-			ThinkingTruncationHint lipgloss.Style // "… (N lines hidden)" hint
-			ThinkingFooterTitle    lipgloss.Style // "Thought for" text
-			ThinkingFooterDuration lipgloss.Style // Duration value
-			AssistantInfoIcon      lipgloss.Style
-			AssistantInfoModel     lipgloss.Style
-			AssistantInfoProvider  lipgloss.Style
-			AssistantInfoDuration  lipgloss.Style
-		}
+		// Thinking section styles
+		ThinkingBox            lipgloss.Style // Background for thinking content
+		ThinkingTruncationHint lipgloss.Style // "… (N lines hidden)" hint
+		ThinkingFooterTitle    lipgloss.Style // "Thought for" text
+		ThinkingFooterDuration lipgloss.Style // Duration value
+		AssistantInfoIcon      lipgloss.Style
+		AssistantInfoModel     lipgloss.Style
+		AssistantInfoProvider  lipgloss.Style
+		AssistantInfoDuration  lipgloss.Style
+		AssistantCanceled      lipgloss.Style // Italic "Canceled" footer
 	}
 
 	// Tool - styles for tool call rendering
@@ -316,6 +314,9 @@ type Styles struct {
 		TodoCompletedIcon  lipgloss.Style // Completed todo icon
 		TodoInProgressIcon lipgloss.Style // In-progress todo icon
 		TodoPendingIcon    lipgloss.Style // Pending todo icon
+		TodoStatusNote     lipgloss.Style // " · completed N" / " · starting task" trailing note
+		TodoItem           lipgloss.Style // Default body text for todo list items
+		TodoJustStarted    lipgloss.Style // Text of the just-started todo in tool-call bodies
 
 		// MCP tools
 		MCPName     lipgloss.Style // The mcp name
@@ -329,17 +330,38 @@ type Styles struct {
 		ResourceSize            lipgloss.Style
 		MediaType               lipgloss.Style
 
-		// Docker MCP tools
-		DockerMCPActionAdd lipgloss.Style // Docker MCP add action (green)
-		DockerMCPActionDel lipgloss.Style // Docker MCP remove action (red)
+		// Hooks
+		HookLabel        lipgloss.Style // "Hook" label
+		HookName         lipgloss.Style // Hook command name
+		HookMatcher      lipgloss.Style // Matcher regex pattern
+		HookArrow        lipgloss.Style // Arrow indicator
+		HookDetail       lipgloss.Style // Decision detail text
+		HookOK           lipgloss.Style // "OK" status
+		HookDenied       lipgloss.Style // "Denied" status
+		HookDeniedLabel  lipgloss.Style // "Hook" label when denied
+		HookDeniedReason lipgloss.Style // Denied reason text
+		HookRewrote      lipgloss.Style // "Rewrote Input" indicator
+
+		// Action verb colors for tool-call headers.
+		ActionCreate  lipgloss.Style // Constructive actions (e.g. "Add", "Create")
+		ActionDestroy lipgloss.Style // Destructive actions (e.g. "Remove", "Delete")
+
+		// Tool result helpers.
+		ResultEmpty      lipgloss.Style // "No results" placeholder
+		ResultTruncation lipgloss.Style // "… and N more" truncation line
+		ResultItemName   lipgloss.Style // Item name (left column in result lists)
+		ResultItemDesc   lipgloss.Style // Item description (right column)
 	}
 
 	// Dialog styles
 	Dialog struct {
-		Title       lipgloss.Style
-		TitleText   lipgloss.Style
-		TitleError  lipgloss.Style
-		TitleAccent lipgloss.Style
+		Title              lipgloss.Style
+		TitleText          lipgloss.Style
+		TitleError         lipgloss.Style
+		TitleAccent        lipgloss.Style
+		TitleLineBase      lipgloss.Style // Base for the gradient ╱╱╱ next to dialog titles
+		TitleGradFromColor color.Color    // Default dialog title ╱╱╱ gradient start
+		TitleGradToColor   color.Color    // Default dialog title ╱╱╱ gradient end
 		// View is the main content area style.
 		View          lipgloss.Style
 		PrimaryText   lipgloss.Style
@@ -381,7 +403,43 @@ type Styles struct {
 			InputRequiredMarkFocused lipgloss.Style
 		}
 
-		Commands struct{}
+		// ListItem styles the info-text rendered alongside list items (commands,
+		// models, reasoning options). Sessions have their own overrides below.
+		ListItem struct {
+			InfoBlurred lipgloss.Style
+			InfoFocused lipgloss.Style
+		}
+
+		Models struct {
+			ConfiguredText lipgloss.Style // "Configured" badge shown on the ModelGroup header
+		}
+
+		Permissions struct {
+			KeyText   lipgloss.Style // Left key cell of a key/value row
+			ValueText lipgloss.Style // Right value cell of a key/value row
+			ParamsBg  color.Color    // Background color behind highlighted JSON parameters
+		}
+
+		Quit struct {
+			Content lipgloss.Style // Wrapper for the quit dialog's inner content
+			Frame   lipgloss.Style // Outer rounded border framing the quit dialog
+		}
+
+		APIKey struct {
+			Spinner lipgloss.Style // Loading spinner while validating the key
+		}
+
+		OAuth struct {
+			Spinner      lipgloss.Style // Loading spinner
+			Instructions lipgloss.Style // Emphasized instruction text
+			UserCode     lipgloss.Style // Prominent user code display
+			Success      lipgloss.Style // Positive status text (e.g. "Authentication successful!")
+			Link         lipgloss.Style // Underlined verification URL
+			Enter        lipgloss.Style // "enter" keyword highlight in instructions
+			ErrorText    lipgloss.Style // Error message when authentication fails
+			StatusText   lipgloss.Style // Narrative status text ("Initializing...", "Verifying...", etc.)
+			UserCodeBg   color.Color    // Background color of the centered user-code box
+		}
 
 		ImagePreview lipgloss.Style
 
@@ -404,6 +462,9 @@ type Styles struct {
 			RenamingTitleGradientFromColor color.Color
 			RenamingTitleGradientToColor   color.Color
 			RenamingPlaceholder            lipgloss.Style
+
+			InfoBlurred lipgloss.Style // Timestamp text on unfocused session items
+			InfoFocused lipgloss.Style // Timestamp text on the focused session item
 		}
 	}
 
@@ -441,14 +502,22 @@ type Styles struct {
 
 	// Pills styles for todo/queue pills
 	Pills struct {
-		Base            lipgloss.Style // Base pill style with padding
-		Focused         lipgloss.Style // Focused pill with visible border
-		Blurred         lipgloss.Style // Blurred pill with hidden border
-		QueueItemPrefix lipgloss.Style // Prefix for queue list items
-		HelpKey         lipgloss.Style // Keystroke hint style
-		HelpText        lipgloss.Style // Help action text style
-		Area            lipgloss.Style // Pills area container
-		TodoSpinner     lipgloss.Style // Todo spinner style
+		Base               lipgloss.Style // Base pill style with padding
+		Focused            lipgloss.Style // Focused pill with visible border
+		Blurred            lipgloss.Style // Blurred pill with hidden border
+		QueueItemPrefix    lipgloss.Style // Prefix for queue list items
+		QueueItemText      lipgloss.Style // Queue list item body text
+		QueueLabel         lipgloss.Style // "N Queued" label text
+		QueueIconBase      lipgloss.Style // Base style for queue gradient triangles
+		QueueGradFromColor color.Color    // Start color for queue indicator gradient
+		QueueGradToColor   color.Color    // End color for queue indicator gradient
+		TodoLabel          lipgloss.Style // "To-Do" label
+		TodoProgress       lipgloss.Style // Todo ratio (e.g. "2/5")
+		TodoCurrentTask    lipgloss.Style // Current in-progress task name
+		TodoSpinner        lipgloss.Style // Todo spinner style
+		HelpKey            lipgloss.Style // Keystroke hint style
+		HelpText           lipgloss.Style // Help action text style
+		Area               lipgloss.Style // Pills area container
 	}
 }
 
@@ -497,883 +566,13 @@ func (s *Styles) DialogHelpStyles() help.Styles {
 	return help.Styles(s.Dialog.Help)
 }
 
-// DefaultStyles returns the default styles for the UI.
-func DefaultStyles() Styles {
-	var (
-		primary   = charmtone.Charple
-		secondary = charmtone.Dolly
-		tertiary  = charmtone.Bok
-		// accent    = charmtone.Zest
-
-		// Backgrounds
-		bgBase        = charmtone.Pepper
-		bgBaseLighter = charmtone.BBQ
-		bgSubtle      = charmtone.Charcoal
-		bgOverlay     = charmtone.Iron
-
-		// Foregrounds
-		fgBase      = charmtone.Ash
-		fgMuted     = charmtone.Squid
-		fgHalfMuted = charmtone.Smoke
-		fgSubtle    = charmtone.Oyster
-		// fgSelected  = charmtone.Salt
-
-		// Borders
-		border      = charmtone.Charcoal
-		borderFocus = charmtone.Charple
-
-		// Status
-		error   = charmtone.Sriracha
-		warning = charmtone.Zest
-		info    = charmtone.Malibu
-
-		// Colors
-		white = charmtone.Butter
-
-		blueLight = charmtone.Sardine
-		blue      = charmtone.Malibu
-		blueDark  = charmtone.Damson
-
-		// yellow = charmtone.Mustard
-		yellow = charmtone.Mustard
-		// citron = charmtone.Citron
-
-		greenLight = charmtone.Bok
-		green      = charmtone.Julep
-		greenDark  = charmtone.Guac
-		// greenLight = charmtone.Bok
-
-		red     = charmtone.Coral
-		redDark = charmtone.Sriracha
-		// redLight = charmtone.Salmon
-		// cherry   = charmtone.Cherry
-	)
-
-	normalBorder := lipgloss.NormalBorder()
-
-	base := lipgloss.NewStyle().Foreground(fgBase)
-
-	s := Styles{}
-
-	s.Background = bgBase
-
-	// Populate color fields
-	s.Primary = primary
-	s.Secondary = secondary
-	s.Tertiary = tertiary
-	s.BgBase = bgBase
-	s.BgBaseLighter = bgBaseLighter
-	s.BgSubtle = bgSubtle
-	s.BgOverlay = bgOverlay
-	s.FgBase = fgBase
-	s.FgMuted = fgMuted
-	s.FgHalfMuted = fgHalfMuted
-	s.FgSubtle = fgSubtle
-	s.Border = border
-	s.BorderColor = borderFocus
-	s.Error = error
-	s.Warning = warning
-	s.Info = info
-	s.White = white
-	s.BlueLight = blueLight
-	s.Blue = blue
-	s.BlueDark = blueDark
-	s.GreenLight = greenLight
-	s.Green = green
-	s.GreenDark = greenDark
-	s.Red = red
-	s.RedDark = redDark
-	s.Yellow = yellow
-
-	s.TextInput = textinput.Styles{
-		Focused: textinput.StyleState{
-			Text:        base,
-			Placeholder: base.Foreground(fgSubtle),
-			Prompt:      base.Foreground(tertiary),
-			Suggestion:  base.Foreground(fgSubtle),
-		},
-		Blurred: textinput.StyleState{
-			Text:        base.Foreground(fgMuted),
-			Placeholder: base.Foreground(fgSubtle),
-			Prompt:      base.Foreground(fgMuted),
-			Suggestion:  base.Foreground(fgSubtle),
-		},
-		Cursor: textinput.CursorStyle{
-			Color: secondary,
-			Shape: tea.CursorBlock,
-			Blink: true,
-		},
-	}
-
-	s.TextArea = textarea.Styles{
-		Focused: textarea.StyleState{
-			Base:             base,
-			Text:             base,
-			LineNumber:       base.Foreground(fgSubtle),
-			CursorLine:       base,
-			CursorLineNumber: base.Foreground(fgSubtle),
-			Placeholder:      base.Foreground(fgSubtle),
-			Prompt:           base.Foreground(tertiary),
-		},
-		Blurred: textarea.StyleState{
-			Base:             base,
-			Text:             base.Foreground(fgMuted),
-			LineNumber:       base.Foreground(fgMuted),
-			CursorLine:       base,
-			CursorLineNumber: base.Foreground(fgMuted),
-			Placeholder:      base.Foreground(fgSubtle),
-			Prompt:           base.Foreground(fgMuted),
-		},
-		Cursor: textarea.CursorStyle{
-			Color: secondary,
-			Shape: tea.CursorBlock,
-			Blink: true,
-		},
-	}
-
-	s.Markdown = ansi.StyleConfig{
-		Document: ansi.StyleBlock{
-			StylePrimitive: ansi.StylePrimitive{
-				// BlockPrefix: "\n",
-				// BlockSuffix: "\n",
-				Color: new(charmtone.Smoke.Hex()),
-			},
-			// Margin: new(uint(defaultMargin)),
-		},
-		BlockQuote: ansi.StyleBlock{
-			StylePrimitive: ansi.StylePrimitive{},
-			Indent:         new(uint(1)),
-			IndentToken:    new("│ "),
-		},
-		List: ansi.StyleList{
-			LevelIndent: defaultListIndent,
-		},
-		Heading: ansi.StyleBlock{
-			StylePrimitive: ansi.StylePrimitive{
-				BlockSuffix: "\n",
-				Color:       new(charmtone.Malibu.Hex()),
-				Bold:        new(true),
-			},
-		},
-		H1: ansi.StyleBlock{
-			StylePrimitive: ansi.StylePrimitive{
-				Prefix:          " ",
-				Suffix:          " ",
-				Color:           new(charmtone.Zest.Hex()),
-				BackgroundColor: new(charmtone.Charple.Hex()),
-				Bold:            new(true),
-			},
-		},
-		H2: ansi.StyleBlock{
-			StylePrimitive: ansi.StylePrimitive{
-				Prefix: "## ",
-			},
-		},
-		H3: ansi.StyleBlock{
-			StylePrimitive: ansi.StylePrimitive{
-				Prefix: "### ",
-			},
-		},
-		H4: ansi.StyleBlock{
-			StylePrimitive: ansi.StylePrimitive{
-				Prefix: "#### ",
-			},
-		},
-		H5: ansi.StyleBlock{
-			StylePrimitive: ansi.StylePrimitive{
-				Prefix: "##### ",
-			},
-		},
-		H6: ansi.StyleBlock{
-			StylePrimitive: ansi.StylePrimitive{
-				Prefix: "###### ",
-				Color:  new(charmtone.Guac.Hex()),
-				Bold:   new(false),
-			},
-		},
-		Strikethrough: ansi.StylePrimitive{
-			CrossedOut: new(true),
-		},
-		Emph: ansi.StylePrimitive{
-			Italic: new(true),
-		},
-		Strong: ansi.StylePrimitive{
-			Bold: new(true),
-		},
-		HorizontalRule: ansi.StylePrimitive{
-			Color:  new(charmtone.Charcoal.Hex()),
-			Format: "\n--------\n",
-		},
-		Item: ansi.StylePrimitive{
-			BlockPrefix: "• ",
-		},
-		Enumeration: ansi.StylePrimitive{
-			BlockPrefix: ". ",
-		},
-		Task: ansi.StyleTask{
-			StylePrimitive: ansi.StylePrimitive{},
-			Ticked:         "[✓] ",
-			Unticked:       "[ ] ",
-		},
-		Link: ansi.StylePrimitive{
-			Color:     new(charmtone.Zinc.Hex()),
-			Underline: new(true),
-		},
-		LinkText: ansi.StylePrimitive{
-			Color: new(charmtone.Guac.Hex()),
-			Bold:  new(true),
-		},
-		Image: ansi.StylePrimitive{
-			Color:     new(charmtone.Cheeky.Hex()),
-			Underline: new(true),
-		},
-		ImageText: ansi.StylePrimitive{
-			Color:  new(charmtone.Squid.Hex()),
-			Format: "Image: {{.text}} →",
-		},
-		Code: ansi.StyleBlock{
-			StylePrimitive: ansi.StylePrimitive{
-				Prefix:          " ",
-				Suffix:          " ",
-				Color:           new(charmtone.Coral.Hex()),
-				BackgroundColor: new(charmtone.Charcoal.Hex()),
-			},
-		},
-		CodeBlock: ansi.StyleCodeBlock{
-			StyleBlock: ansi.StyleBlock{
-				StylePrimitive: ansi.StylePrimitive{
-					Color: new(charmtone.Charcoal.Hex()),
-				},
-				Margin: new(uint(defaultMargin)),
-			},
-			Chroma: &ansi.Chroma{
-				Text: ansi.StylePrimitive{
-					Color: new(charmtone.Smoke.Hex()),
-				},
-				Error: ansi.StylePrimitive{
-					Color:           new(charmtone.Butter.Hex()),
-					BackgroundColor: new(charmtone.Sriracha.Hex()),
-				},
-				Comment: ansi.StylePrimitive{
-					Color: new(charmtone.Oyster.Hex()),
-				},
-				CommentPreproc: ansi.StylePrimitive{
-					Color: new(charmtone.Bengal.Hex()),
-				},
-				Keyword: ansi.StylePrimitive{
-					Color: new(charmtone.Malibu.Hex()),
-				},
-				KeywordReserved: ansi.StylePrimitive{
-					Color: new(charmtone.Pony.Hex()),
-				},
-				KeywordNamespace: ansi.StylePrimitive{
-					Color: new(charmtone.Pony.Hex()),
-				},
-				KeywordType: ansi.StylePrimitive{
-					Color: new(charmtone.Guppy.Hex()),
-				},
-				Operator: ansi.StylePrimitive{
-					Color: new(charmtone.Salmon.Hex()),
-				},
-				Punctuation: ansi.StylePrimitive{
-					Color: new(charmtone.Zest.Hex()),
-				},
-				Name: ansi.StylePrimitive{
-					Color: new(charmtone.Smoke.Hex()),
-				},
-				NameBuiltin: ansi.StylePrimitive{
-					Color: new(charmtone.Cheeky.Hex()),
-				},
-				NameTag: ansi.StylePrimitive{
-					Color: new(charmtone.Mauve.Hex()),
-				},
-				NameAttribute: ansi.StylePrimitive{
-					Color: new(charmtone.Hazy.Hex()),
-				},
-				NameClass: ansi.StylePrimitive{
-					Color:     new(charmtone.Salt.Hex()),
-					Underline: new(true),
-					Bold:      new(true),
-				},
-				NameDecorator: ansi.StylePrimitive{
-					Color: new(charmtone.Citron.Hex()),
-				},
-				NameFunction: ansi.StylePrimitive{
-					Color: new(charmtone.Guac.Hex()),
-				},
-				LiteralNumber: ansi.StylePrimitive{
-					Color: new(charmtone.Julep.Hex()),
-				},
-				LiteralString: ansi.StylePrimitive{
-					Color: new(charmtone.Cumin.Hex()),
-				},
-				LiteralStringEscape: ansi.StylePrimitive{
-					Color: new(charmtone.Bok.Hex()),
-				},
-				GenericDeleted: ansi.StylePrimitive{
-					Color: new(charmtone.Coral.Hex()),
-				},
-				GenericEmph: ansi.StylePrimitive{
-					Italic: new(true),
-				},
-				GenericInserted: ansi.StylePrimitive{
-					Color: new(charmtone.Guac.Hex()),
-				},
-				GenericStrong: ansi.StylePrimitive{
-					Bold: new(true),
-				},
-				GenericSubheading: ansi.StylePrimitive{
-					Color: new(charmtone.Squid.Hex()),
-				},
-				Background: ansi.StylePrimitive{
-					BackgroundColor: new(charmtone.Charcoal.Hex()),
-				},
-			},
-		},
-		Table: ansi.StyleTable{
-			StyleBlock: ansi.StyleBlock{
-				StylePrimitive: ansi.StylePrimitive{},
-			},
-		},
-		DefinitionDescription: ansi.StylePrimitive{
-			BlockPrefix: "\n ",
-		},
-	}
-
-	// PlainMarkdown style - muted colors on subtle background for thinking content.
-	plainBg := new(bgBaseLighter.Hex())
-	plainFg := new(fgMuted.Hex())
-	s.PlainMarkdown = ansi.StyleConfig{
-		Document: ansi.StyleBlock{
-			StylePrimitive: ansi.StylePrimitive{
-				Color:           plainFg,
-				BackgroundColor: plainBg,
-			},
-		},
-		BlockQuote: ansi.StyleBlock{
-			StylePrimitive: ansi.StylePrimitive{
-				Color:           plainFg,
-				BackgroundColor: plainBg,
-			},
-			Indent:      new(uint(1)),
-			IndentToken: new("│ "),
-		},
-		List: ansi.StyleList{
-			LevelIndent: defaultListIndent,
-		},
-		Heading: ansi.StyleBlock{
-			StylePrimitive: ansi.StylePrimitive{
-				BlockSuffix:     "\n",
-				Bold:            new(true),
-				Color:           plainFg,
-				BackgroundColor: plainBg,
-			},
-		},
-		H1: ansi.StyleBlock{
-			StylePrimitive: ansi.StylePrimitive{
-				Prefix:          " ",
-				Suffix:          " ",
-				Bold:            new(true),
-				Color:           plainFg,
-				BackgroundColor: plainBg,
-			},
-		},
-		H2: ansi.StyleBlock{
-			StylePrimitive: ansi.StylePrimitive{
-				Prefix:          "## ",
-				Color:           plainFg,
-				BackgroundColor: plainBg,
-			},
-		},
-		H3: ansi.StyleBlock{
-			StylePrimitive: ansi.StylePrimitive{
-				Prefix:          "### ",
-				Color:           plainFg,
-				BackgroundColor: plainBg,
-			},
-		},
-		H4: ansi.StyleBlock{
-			StylePrimitive: ansi.StylePrimitive{
-				Prefix:          "#### ",
-				Color:           plainFg,
-				BackgroundColor: plainBg,
-			},
-		},
-		H5: ansi.StyleBlock{
-			StylePrimitive: ansi.StylePrimitive{
-				Prefix:          "##### ",
-				Color:           plainFg,
-				BackgroundColor: plainBg,
-			},
-		},
-		H6: ansi.StyleBlock{
-			StylePrimitive: ansi.StylePrimitive{
-				Prefix:          "###### ",
-				Color:           plainFg,
-				BackgroundColor: plainBg,
-			},
-		},
-		Strikethrough: ansi.StylePrimitive{
-			CrossedOut:      new(true),
-			Color:           plainFg,
-			BackgroundColor: plainBg,
-		},
-		Emph: ansi.StylePrimitive{
-			Italic:          new(true),
-			Color:           plainFg,
-			BackgroundColor: plainBg,
-		},
-		Strong: ansi.StylePrimitive{
-			Bold:            new(true),
-			Color:           plainFg,
-			BackgroundColor: plainBg,
-		},
-		HorizontalRule: ansi.StylePrimitive{
-			Format:          "\n--------\n",
-			Color:           plainFg,
-			BackgroundColor: plainBg,
-		},
-		Item: ansi.StylePrimitive{
-			BlockPrefix:     "• ",
-			Color:           plainFg,
-			BackgroundColor: plainBg,
-		},
-		Enumeration: ansi.StylePrimitive{
-			BlockPrefix:     ". ",
-			Color:           plainFg,
-			BackgroundColor: plainBg,
-		},
-		Task: ansi.StyleTask{
-			StylePrimitive: ansi.StylePrimitive{
-				Color:           plainFg,
-				BackgroundColor: plainBg,
-			},
-			Ticked:   "[✓] ",
-			Unticked: "[ ] ",
-		},
-		Link: ansi.StylePrimitive{
-			Underline:       new(true),
-			Color:           plainFg,
-			BackgroundColor: plainBg,
-		},
-		LinkText: ansi.StylePrimitive{
-			Bold:            new(true),
-			Color:           plainFg,
-			BackgroundColor: plainBg,
-		},
-		Image: ansi.StylePrimitive{
-			Underline:       new(true),
-			Color:           plainFg,
-			BackgroundColor: plainBg,
-		},
-		ImageText: ansi.StylePrimitive{
-			Format:          "Image: {{.text}} →",
-			Color:           plainFg,
-			BackgroundColor: plainBg,
-		},
-		Code: ansi.StyleBlock{
-			StylePrimitive: ansi.StylePrimitive{
-				Prefix:          " ",
-				Suffix:          " ",
-				Color:           plainFg,
-				BackgroundColor: plainBg,
-			},
-		},
-		CodeBlock: ansi.StyleCodeBlock{
-			StyleBlock: ansi.StyleBlock{
-				StylePrimitive: ansi.StylePrimitive{
-					Color:           plainFg,
-					BackgroundColor: plainBg,
-				},
-				Margin: new(uint(defaultMargin)),
-			},
-		},
-		Table: ansi.StyleTable{
-			StyleBlock: ansi.StyleBlock{
-				StylePrimitive: ansi.StylePrimitive{
-					Color:           plainFg,
-					BackgroundColor: plainBg,
-				},
-			},
-		},
-		DefinitionDescription: ansi.StylePrimitive{
-			BlockPrefix:     "\n ",
-			Color:           plainFg,
-			BackgroundColor: plainBg,
-		},
-	}
-
-	s.Help = help.Styles{
-		ShortKey:       base.Foreground(fgMuted),
-		ShortDesc:      base.Foreground(fgSubtle),
-		ShortSeparator: base.Foreground(border),
-		Ellipsis:       base.Foreground(border),
-		FullKey:        base.Foreground(fgMuted),
-		FullDesc:       base.Foreground(fgSubtle),
-		FullSeparator:  base.Foreground(border),
-	}
-
-	s.Diff = diffview.Style{
-		DividerLine: diffview.LineStyle{
-			LineNumber: lipgloss.NewStyle().
-				Foreground(fgHalfMuted).
-				Background(bgBaseLighter),
-			Code: lipgloss.NewStyle().
-				Foreground(fgHalfMuted).
-				Background(bgBaseLighter),
-		},
-		MissingLine: diffview.LineStyle{
-			LineNumber: lipgloss.NewStyle().
-				Background(bgBaseLighter),
-			Code: lipgloss.NewStyle().
-				Background(bgBaseLighter),
-		},
-		EqualLine: diffview.LineStyle{
-			LineNumber: lipgloss.NewStyle().
-				Foreground(fgMuted).
-				Background(bgBase),
-			Code: lipgloss.NewStyle().
-				Foreground(fgMuted).
-				Background(bgBase),
-		},
-		InsertLine: diffview.LineStyle{
-			LineNumber: lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#629657")).
-				Background(lipgloss.Color("#2b322a")),
-			Symbol: lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#629657")).
-				Background(lipgloss.Color("#323931")),
-			Code: lipgloss.NewStyle().
-				Background(lipgloss.Color("#323931")),
-		},
-		DeleteLine: diffview.LineStyle{
-			LineNumber: lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#a45c59")).
-				Background(lipgloss.Color("#312929")),
-			Symbol: lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#a45c59")).
-				Background(lipgloss.Color("#383030")),
-			Code: lipgloss.NewStyle().
-				Background(lipgloss.Color("#383030")),
-		},
-	}
-
-	s.FilePicker = filepicker.Styles{
-		DisabledCursor:   base.Foreground(fgMuted),
-		Cursor:           base.Foreground(fgBase),
-		Symlink:          base.Foreground(fgSubtle),
-		Directory:        base.Foreground(primary),
-		File:             base.Foreground(fgBase),
-		DisabledFile:     base.Foreground(fgMuted),
-		DisabledSelected: base.Background(bgOverlay).Foreground(fgMuted),
-		Permission:       base.Foreground(fgMuted),
-		Selected:         base.Background(primary).Foreground(fgBase),
-		FileSize:         base.Foreground(fgMuted),
-		EmptyDirectory:   base.Foreground(fgMuted).PaddingLeft(2).SetString("Empty directory"),
-	}
-
-	// borders
-	s.FocusedMessageBorder = lipgloss.Border{Left: BorderThick}
-
-	// text presets
-	s.Base = lipgloss.NewStyle().Foreground(fgBase)
-	s.Muted = lipgloss.NewStyle().Foreground(fgMuted)
-	s.HalfMuted = lipgloss.NewStyle().Foreground(fgHalfMuted)
-	s.Subtle = lipgloss.NewStyle().Foreground(fgSubtle)
-
-	s.WindowTooSmall = s.Muted
-
-	// tag presets
-	s.TagBase = lipgloss.NewStyle().Padding(0, 1).Foreground(white)
-	s.TagError = s.TagBase.Background(redDark)
-	s.TagInfo = s.TagBase.Background(blueLight)
-
-	// Compact header styles
-	s.Header.Charm = base.Foreground(secondary)
-	s.Header.Diagonals = base.Foreground(primary)
-	s.Header.Percentage = s.Muted
-	s.Header.Keystroke = s.Muted
-	s.Header.KeystrokeTip = s.Subtle
-	s.Header.WorkingDir = s.Muted
-	s.Header.Separator = s.Subtle
-
-	s.CompactDetails.Title = s.Base
-	s.CompactDetails.View = s.Base.Padding(0, 1, 1, 1).Border(lipgloss.RoundedBorder()).BorderForeground(borderFocus)
-	s.CompactDetails.Version = s.Muted
-
-	// panels
-	s.PanelMuted = s.Muted.Background(bgBaseLighter)
-	s.PanelBase = lipgloss.NewStyle().Background(bgBase)
-
-	// code line number
-	s.LineNumber = lipgloss.NewStyle().Foreground(fgMuted).Background(bgBase).PaddingRight(1).PaddingLeft(1)
-
-	// Tool calls
-	s.ToolCallPending = lipgloss.NewStyle().Foreground(greenDark).SetString(ToolPending)
-	s.ToolCallError = lipgloss.NewStyle().Foreground(redDark).SetString(ToolError)
-	s.ToolCallSuccess = lipgloss.NewStyle().Foreground(green).SetString(ToolSuccess)
-	// Cancelled uses muted tone but same glyph as pending
-	s.ToolCallCancelled = s.Muted.SetString(ToolPending)
-	s.EarlyStateMessage = s.Subtle.PaddingLeft(2)
-
-	// Tool rendering styles
-	s.Tool.IconPending = base.Foreground(greenDark).SetString(ToolPending)
-	s.Tool.IconSuccess = base.Foreground(green).SetString(ToolSuccess)
-	s.Tool.IconError = base.Foreground(redDark).SetString(ToolError)
-	s.Tool.IconCancelled = s.Muted.SetString(ToolPending)
-
-	s.Tool.NameNormal = base.Foreground(blue)
-	s.Tool.NameNested = base.Foreground(blue)
-
-	s.Tool.ParamMain = s.Subtle
-	s.Tool.ParamKey = s.Subtle
-
-	// Content rendering - prepared styles that accept width parameter
-	s.Tool.ContentLine = s.Muted.Background(bgBaseLighter)
-	s.Tool.ContentTruncation = s.Muted.Background(bgBaseLighter)
-	s.Tool.ContentCodeLine = s.Base.Background(bgBase).PaddingLeft(2)
-	s.Tool.ContentCodeTruncation = s.Muted.Background(bgBase).PaddingLeft(2)
-	s.Tool.ContentCodeBg = bgBase
-	s.Tool.Body = base.PaddingLeft(2)
-
-	// Deprecated - kept for backward compatibility
-	s.Tool.ContentBg = s.Muted.Background(bgBaseLighter)
-	s.Tool.ContentText = s.Muted
-	s.Tool.ContentLineNumber = base.Foreground(fgMuted).Background(bgBase).PaddingRight(1).PaddingLeft(1)
-
-	s.Tool.StateWaiting = base.Foreground(fgSubtle)
-	s.Tool.StateCancelled = base.Foreground(fgSubtle)
-
-	s.Tool.ErrorTag = base.Padding(0, 1).Background(red).Foreground(white)
-	s.Tool.ErrorMessage = base.Foreground(fgHalfMuted)
-
-	// Diff and multi-edit styles
-	s.Tool.DiffTruncation = s.Muted.Background(bgBaseLighter).PaddingLeft(2)
-	s.Tool.NoteTag = base.Padding(0, 1).Background(info).Foreground(white)
-	s.Tool.NoteMessage = base.Foreground(fgHalfMuted)
-
-	// Job header styles
-	s.Tool.JobIconPending = base.Foreground(greenDark)
-	s.Tool.JobIconError = base.Foreground(redDark)
-	s.Tool.JobIconSuccess = base.Foreground(green)
-	s.Tool.JobToolName = base.Foreground(blue)
-	s.Tool.JobAction = base.Foreground(blueDark)
-	s.Tool.JobPID = s.Muted
-	s.Tool.JobDescription = s.Subtle
-
-	// Agent task styles
-	s.Tool.AgentTaskTag = base.Bold(true).Padding(0, 1).MarginLeft(2).Background(blueLight).Foreground(white)
-	s.Tool.AgentPrompt = s.Muted
-
-	// Agentic fetch styles
-	s.Tool.AgenticFetchPromptTag = base.Bold(true).Padding(0, 1).MarginLeft(2).Background(green).Foreground(border)
-
-	// Todo styles
-	s.Tool.TodoRatio = base.Foreground(blueDark)
-	s.Tool.TodoCompletedIcon = base.Foreground(green)
-	s.Tool.TodoInProgressIcon = base.Foreground(greenDark)
-	s.Tool.TodoPendingIcon = base.Foreground(fgMuted)
-
-	// MCP styles
-	s.Tool.MCPName = base.Foreground(blue)
-	s.Tool.MCPToolName = base.Foreground(blueDark)
-	s.Tool.MCPArrow = base.Foreground(blue).SetString(ArrowRightIcon)
-
-	// Loading indicators for images, skills
-	s.Tool.ResourceLoadedText = base.Foreground(green)
-	s.Tool.ResourceLoadedIndicator = base.Foreground(greenDark)
-	s.Tool.ResourceName = base
-	s.Tool.MediaType = base
-	s.Tool.ResourceSize = base.Foreground(fgMuted)
-
-	// Docker MCP styles
-	s.Tool.DockerMCPActionAdd = base.Foreground(greenLight)
-	s.Tool.DockerMCPActionDel = base.Foreground(red)
-
-	// Buttons
-	s.ButtonFocus = lipgloss.NewStyle().Foreground(white).Background(secondary)
-	s.ButtonBlur = s.Base.Background(bgSubtle)
-
-	// Borders
-	s.BorderFocus = lipgloss.NewStyle().BorderForeground(borderFocus).Border(lipgloss.RoundedBorder()).Padding(1, 2)
-
-	// Editor
-	s.EditorPromptNormalFocused = lipgloss.NewStyle().Foreground(greenDark).SetString("::: ")
-	s.EditorPromptNormalBlurred = s.EditorPromptNormalFocused.Foreground(fgMuted)
-	s.EditorPromptYoloIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(charmtone.Oyster).Background(charmtone.Citron).Bold(true).SetString(" ! ")
-	s.EditorPromptYoloIconBlurred = s.EditorPromptYoloIconFocused.Foreground(charmtone.Pepper).Background(charmtone.Squid)
-	s.EditorPromptYoloDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(charmtone.Zest).SetString(":::")
-	s.EditorPromptYoloDotsBlurred = s.EditorPromptYoloDotsFocused.Foreground(charmtone.Squid)
-
-	s.RadioOn = s.HalfMuted.SetString(RadioOn)
-	s.RadioOff = s.HalfMuted.SetString(RadioOff)
-
-	// Logo colors
-	s.LogoFieldColor = primary
-	s.LogoTitleColorA = secondary
-	s.LogoTitleColorB = primary
-	s.LogoCharmColor = secondary
-	s.LogoVersionColor = primary
-
-	// Section
-	s.Section.Title = s.Subtle
-	s.Section.Line = s.Base.Foreground(charmtone.Charcoal)
-
-	// Initialize
-	s.Initialize.Header = s.Base
-	s.Initialize.Content = s.Muted
-	s.Initialize.Accent = s.Base.Foreground(greenDark)
-
-	// LSP and MCP status.
-	s.ResourceGroupTitle = lipgloss.NewStyle().Foreground(charmtone.Oyster)
-	s.ResourceOfflineIcon = lipgloss.NewStyle().Foreground(charmtone.Iron).SetString("●")
-	s.ResourceBusyIcon = s.ResourceOfflineIcon.Foreground(charmtone.Citron)
-	s.ResourceErrorIcon = s.ResourceOfflineIcon.Foreground(charmtone.Coral)
-	s.ResourceOnlineIcon = s.ResourceOfflineIcon.Foreground(charmtone.Guac)
-	s.ResourceName = lipgloss.NewStyle().Foreground(charmtone.Squid)
-	s.ResourceStatus = lipgloss.NewStyle().Foreground(charmtone.Oyster)
-	s.ResourceAdditionalText = lipgloss.NewStyle().Foreground(charmtone.Oyster)
-
-	// LSP
-	s.LSP.ErrorDiagnostic = s.Base.Foreground(redDark)
-	s.LSP.WarningDiagnostic = s.Base.Foreground(warning)
-	s.LSP.HintDiagnostic = s.Base.Foreground(fgHalfMuted)
-	s.LSP.InfoDiagnostic = s.Base.Foreground(info)
-
-	// Files
-	s.Files.Path = s.Muted
-	s.Files.Additions = s.Base.Foreground(greenDark)
-	s.Files.Deletions = s.Base.Foreground(redDark)
-
-	// Chat
-	messageFocussedBorder := lipgloss.Border{
-		Left: "▌",
-	}
-
-	s.Chat.Message.NoContent = lipgloss.NewStyle().Foreground(fgBase)
-	s.Chat.Message.UserBlurred = s.Chat.Message.NoContent.PaddingLeft(1).BorderLeft(true).
-		BorderForeground(primary).BorderStyle(normalBorder)
-	s.Chat.Message.UserFocused = s.Chat.Message.NoContent.PaddingLeft(1).BorderLeft(true).
-		BorderForeground(primary).BorderStyle(messageFocussedBorder)
-	s.Chat.Message.AssistantBlurred = s.Chat.Message.NoContent.PaddingLeft(2)
-	s.Chat.Message.AssistantFocused = s.Chat.Message.NoContent.PaddingLeft(1).BorderLeft(true).
-		BorderForeground(greenDark).BorderStyle(messageFocussedBorder)
-	s.Chat.Message.Thinking = lipgloss.NewStyle().MaxHeight(10)
-	s.Chat.Message.ErrorTag = lipgloss.NewStyle().Padding(0, 1).
-		Background(red).Foreground(white)
-	s.Chat.Message.ErrorTitle = lipgloss.NewStyle().Foreground(fgHalfMuted)
-	s.Chat.Message.ErrorDetails = lipgloss.NewStyle().Foreground(fgSubtle)
-
-	// Message item styles
-	s.Chat.Message.ToolCallFocused = s.Muted.PaddingLeft(1).
-		BorderStyle(messageFocussedBorder).
-		BorderLeft(true).
-		BorderForeground(greenDark)
-	s.Chat.Message.ToolCallBlurred = s.Muted.PaddingLeft(2)
-	// No padding or border for compact tool calls within messages
-	s.Chat.Message.ToolCallCompact = s.Muted
-	s.Chat.Message.SectionHeader = s.Base.PaddingLeft(2)
-	s.Chat.Message.AssistantInfoIcon = s.Subtle
-	s.Chat.Message.AssistantInfoModel = s.Muted
-	s.Chat.Message.AssistantInfoProvider = s.Subtle
-	s.Chat.Message.AssistantInfoDuration = s.Subtle
-
-	// Thinking section styles
-	s.Chat.Message.ThinkingBox = s.Subtle.Background(bgBaseLighter)
-	s.Chat.Message.ThinkingTruncationHint = s.Muted
-	s.Chat.Message.ThinkingFooterTitle = s.Muted
-	s.Chat.Message.ThinkingFooterDuration = s.Subtle
-
-	// Text selection.
-	s.TextSelection = lipgloss.NewStyle().Foreground(charmtone.Salt).Background(charmtone.Charple)
-
-	// Dialog styles
-	s.Dialog.Title = base.Padding(0, 1).Foreground(primary)
-	s.Dialog.TitleText = base.Foreground(primary)
-	s.Dialog.TitleError = base.Foreground(red)
-	s.Dialog.TitleAccent = base.Foreground(green).Bold(true)
-	s.Dialog.View = base.Border(lipgloss.RoundedBorder()).BorderForeground(borderFocus)
-	s.Dialog.PrimaryText = base.Padding(0, 1).Foreground(primary)
-	s.Dialog.SecondaryText = base.Padding(0, 1).Foreground(fgSubtle)
-	s.Dialog.HelpView = base.Padding(0, 1).AlignHorizontal(lipgloss.Left)
-	s.Dialog.Help.ShortKey = base.Foreground(fgMuted)
-	s.Dialog.Help.ShortDesc = base.Foreground(fgSubtle)
-	s.Dialog.Help.ShortSeparator = base.Foreground(border)
-	s.Dialog.Help.Ellipsis = base.Foreground(border)
-	s.Dialog.Help.FullKey = base.Foreground(fgMuted)
-	s.Dialog.Help.FullDesc = base.Foreground(fgSubtle)
-	s.Dialog.Help.FullSeparator = base.Foreground(border)
-	s.Dialog.NormalItem = base.Padding(0, 1).Foreground(fgBase)
-	s.Dialog.SelectedItem = base.Padding(0, 1).Background(primary).Foreground(fgBase)
-	s.Dialog.InputPrompt = base.Margin(1, 1)
-
-	s.Dialog.List = base.Margin(0, 0, 1, 0)
-	s.Dialog.ContentPanel = base.Background(bgSubtle).Foreground(fgBase).Padding(1, 2)
-	s.Dialog.Spinner = base.Foreground(secondary)
-	s.Dialog.ScrollbarThumb = base.Foreground(secondary)
-	s.Dialog.ScrollbarTrack = base.Foreground(border)
-
-	s.Dialog.ImagePreview = lipgloss.NewStyle().Padding(0, 1).Foreground(fgSubtle)
-
-	s.Dialog.Arguments.Content = base.Padding(1)
-	s.Dialog.Arguments.Description = base.MarginBottom(1).MaxHeight(3)
-	s.Dialog.Arguments.InputLabelBlurred = base.Foreground(fgMuted)
-	s.Dialog.Arguments.InputLabelFocused = base.Bold(true)
-	s.Dialog.Arguments.InputRequiredMarkBlurred = base.Foreground(fgMuted).SetString("*")
-	s.Dialog.Arguments.InputRequiredMarkFocused = base.Foreground(primary).Bold(true).SetString("*")
-
-	s.Dialog.Sessions.DeletingTitle = s.Dialog.Title.Foreground(red)
-	s.Dialog.Sessions.DeletingView = s.Dialog.View.BorderForeground(red)
-	s.Dialog.Sessions.DeletingMessage = s.Base.Padding(1)
-	s.Dialog.Sessions.DeletingTitleGradientFromColor = red
-	s.Dialog.Sessions.DeletingTitleGradientToColor = s.Primary
-	s.Dialog.Sessions.DeletingItemBlurred = s.Dialog.NormalItem.Foreground(fgSubtle)
-	s.Dialog.Sessions.DeletingItemFocused = s.Dialog.SelectedItem.Background(red).Foreground(charmtone.Butter)
-
-	s.Dialog.Sessions.RenamingingTitle = s.Dialog.Title.Foreground(charmtone.Zest)
-	s.Dialog.Sessions.RenamingView = s.Dialog.View.BorderForeground(charmtone.Zest)
-	s.Dialog.Sessions.RenamingingMessage = s.Base.Padding(1)
-	s.Dialog.Sessions.RenamingTitleGradientFromColor = charmtone.Zest
-	s.Dialog.Sessions.RenamingTitleGradientToColor = charmtone.Bok
-	s.Dialog.Sessions.RenamingItemBlurred = s.Dialog.NormalItem.Foreground(fgSubtle)
-	s.Dialog.Sessions.RenamingingItemFocused = s.Dialog.SelectedItem.UnsetBackground().UnsetForeground()
-	s.Dialog.Sessions.RenamingPlaceholder = base.Foreground(charmtone.Squid)
-
-	s.Status.Help = lipgloss.NewStyle().Padding(0, 1)
-	s.Status.SuccessIndicator = base.Foreground(bgSubtle).Background(green).Padding(0, 1).Bold(true).SetString("OKAY!")
-	s.Status.InfoIndicator = s.Status.SuccessIndicator
-	s.Status.UpdateIndicator = s.Status.SuccessIndicator.SetString("HEY!")
-	s.Status.WarnIndicator = s.Status.SuccessIndicator.Foreground(bgOverlay).Background(yellow).SetString("WARNING")
-	s.Status.ErrorIndicator = s.Status.SuccessIndicator.Foreground(bgBase).Background(red).SetString("ERROR")
-	s.Status.SuccessMessage = base.Foreground(bgSubtle).Background(greenDark).Padding(0, 1)
-	s.Status.InfoMessage = s.Status.SuccessMessage
-	s.Status.UpdateMessage = s.Status.SuccessMessage
-	s.Status.WarnMessage = s.Status.SuccessMessage.Foreground(bgOverlay).Background(warning)
-	s.Status.ErrorMessage = s.Status.SuccessMessage.Foreground(white).Background(redDark)
-
-	// Completions styles
-	s.Completions.Normal = base.Background(bgSubtle).Foreground(fgBase)
-	s.Completions.Focused = base.Background(primary).Foreground(white)
-	s.Completions.Match = base.Underline(true)
-
-	// Attachments styles
-	attachmentIconStyle := base.Foreground(bgSubtle).Background(green).Padding(0, 1)
-	s.Attachments.Image = attachmentIconStyle.SetString(ImageIcon)
-	s.Attachments.Text = attachmentIconStyle.SetString(TextIcon)
-	s.Attachments.Normal = base.Padding(0, 1).MarginRight(1).Background(fgMuted).Foreground(fgBase)
-	s.Attachments.Deleting = base.Padding(0, 1).Bold(true).Background(red).Foreground(fgBase)
-
-	// Pills styles
-	s.Pills.Base = base.Padding(0, 1)
-	s.Pills.Focused = base.Padding(0, 1).BorderStyle(lipgloss.RoundedBorder()).BorderForeground(bgOverlay)
-	s.Pills.Blurred = base.Padding(0, 1).BorderStyle(lipgloss.HiddenBorder())
-	s.Pills.QueueItemPrefix = s.Muted.SetString("  •")
-	s.Pills.HelpKey = s.Muted
-	s.Pills.HelpText = s.Subtle
-	s.Pills.Area = base
-	s.Pills.TodoSpinner = base.Foreground(greenDark)
-
-	return s
+// hex returns a pointer to the "#rrggbb" representation of c. It's used to
+// satisfy glamour's string-pointer API when configuring markdown colors
+// from the theme palette.
+func hex(c color.Color) *string {
+	r, g, b, _ := c.RGBA()
+	s := fmt.Sprintf("#%02x%02x%02x", r>>8, g>>8, b>>8)
+	return &s
 }
 
 func chromaStyle(style ansi.StylePrimitive) string {

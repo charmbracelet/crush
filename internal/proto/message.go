@@ -55,13 +55,12 @@ func (r *MessageRole) UnmarshalText(data []byte) error {
 type FinishReason string
 
 const (
-	FinishReasonEndTurn          FinishReason = "end_turn"
-	FinishReasonMaxTokens        FinishReason = "max_tokens"
-	FinishReasonToolUse          FinishReason = "tool_use"
-	FinishReasonCanceled         FinishReason = "canceled"
-	FinishReasonError            FinishReason = "error"
-	FinishReasonPermissionDenied FinishReason = "permission_denied"
-	FinishReasonUnknown          FinishReason = "unknown"
+	FinishReasonEndTurn   FinishReason = "end_turn"
+	FinishReasonMaxTokens FinishReason = "max_tokens"
+	FinishReasonToolUse   FinishReason = "tool_use"
+	FinishReasonCanceled  FinishReason = "canceled"
+	FinishReasonError     FinishReason = "error"
+	FinishReasonUnknown   FinishReason = "unknown"
 )
 
 // MarshalText implements the [encoding.TextMarshaler] interface.

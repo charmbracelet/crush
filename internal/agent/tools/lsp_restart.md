@@ -1,4 +1,4 @@
-Restart LSP (Language Server Protocol) clients.
+Restart one or all LSP clients by name; use when diagnostics are stale or the LSP is unresponsive.
 
 <usage>
 - Restart all running LSP clients or a specific LSP client by name

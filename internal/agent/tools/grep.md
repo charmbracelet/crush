@@ -1,4 +1,4 @@
-Fast content search tool that finds files containing specific text/patterns, returning matching paths sorted by modification time (newest first).
+Search file contents by regex or literal text; returns matching file paths sorted by modification time (max 100); respects .gitignore. Use glob to filter by filename, not contents.
 
 <usage>
 - Provide regex pattern to search within file contents

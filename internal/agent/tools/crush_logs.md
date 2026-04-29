@@ -1,4 +1,4 @@
-Read Crush's own application logs.
+Read Crush's internal application logs (default 50 entries, max 100); useful for diagnosing provider errors, tool failures, LSP/MCP issues.
 
 <usage>
 - Returns recent log entries from Crush's internal log file

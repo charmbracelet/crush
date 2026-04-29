@@ -1,4 +1,4 @@
-Fast file pattern matching tool that finds files by name/pattern, returning paths sorted by modification time (newest first).
+Find files by name/pattern (glob syntax), sorted by modification time; max 100 results; skips hidden files. Use grep to search file contents.
 
 <usage>
 - Provide glob pattern to match against file paths

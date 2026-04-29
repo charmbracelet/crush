@@ -31,13 +31,34 @@ func (c *Common) Config() *config.Config {
 	return c.Workspace.Config()
 }
 
-// DefaultCommon returns the default common UI configurations.
+// DefaultCommon returns the default common UI configurations. When the
+// workspace has a large model selected, the theme is chosen based on its
+// provider; otherwise the default theme is used.
 func DefaultCommon(ws workspace.Workspace) *Common {
-	s := styles.DefaultStyles()
+	s := styles.ThemeForProvider(largeModelProviderID(ws))
 	return &Common{
 		Workspace: ws,
 		Styles:    &s,
 	}
+}
+
+// largeModelProviderID returns the provider ID of the currently selected
+// large model, or the empty string if none is set or the workspace is nil.
+func largeModelProviderID(ws workspace.Workspace) string {
+	if ws == nil {
+		return ""
+	}
+	cfg := ws.Config()
+	if cfg == nil {
+		return ""
+	}
+	return cfg.Models[config.SelectedModelTypeLarge].Provider
+}
+
+// IsHyper reports whether the currently selected large model is provided
+// by Hyper.
+func (c *Common) IsHyper() bool {
+	return largeModelProviderID(c.Workspace) == "hyper"
 }
 
 // CenterRect returns a new [Rectangle] centered within the given area with the

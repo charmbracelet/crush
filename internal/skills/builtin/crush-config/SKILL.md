@@ -1,6 +1,6 @@
 ---
 name: crush-config
-description: Configure Crush settings including providers, LSPs, MCPs, skills, permissions, and behavior options. Use when the user needs help with crush.json configuration, setting up providers, configuring LSPs, adding MCP servers, or changing Crush behavior.
+description: Use when the user needs help configuring Crush — working with crush.json, setting up providers, configuring LSPs, adding MCP servers, managing skills or permissions, or changing Crush behavior.
 ---
 
 # Crush Configuration
@@ -20,6 +20,7 @@ Crush uses JSON configuration files with the following priority (highest to lowe
   "providers": {},
   "mcp": {},
   "lsp": {},
+  "hooks": {},
   "options": {},
   "permissions": {},
   "tools": {}
@@ -154,6 +155,117 @@ The `$schema` property enables IDE autocomplete but is optional.
 > `.agents/skills`, `.crush/skills`, `.claude/skills`, `.cursor/skills`
 
 Other options: `context_paths`, `progress`, `disable_notifications`, `disable_auto_summarize`, `disable_metrics`, `disable_provider_auto_update`, `disable_default_providers`, `data_directory`, `initialize_as`.
+
+## Hooks
+
+Hooks are user-defined shell commands that fire on agent events. Currently only `PreToolUse` is supported, which runs before a tool is executed.
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^(edit|write|multiedit)$",
+        "command": ".crush/hooks/protect-files.sh"
+      },
+      {
+        "matcher": "^bash$",
+        "command": ".crush/hooks/no-haskell.sh"
+      }
+    ]
+  }
+}
+```
+
+### Hook Properties
+
+- `command` (required): Shell command to execute. Runs via `sh -c`.
+- `matcher` (optional): Regex pattern tested against the tool name. Empty or absent means match all tools.
+- `timeout` (optional): Timeout in seconds. Defaults to 30.
+
+### Event Name Normalization
+
+Event names are case-insensitive and accept snake_case variants: `PreToolUse`, `pretooluse`, `pre_tool_use`, and `PRE_TOOL_USE` all work.
+
+### How Hooks Work
+
+1. When a tool is about to be called, all `PreToolUse` hooks with a matching `matcher` (or no matcher) run in parallel.
+2. Duplicate commands are deduplicated — each unique command runs at most once.
+3. The hook receives JSON on **stdin** and hook-specific **environment variables**.
+
+### Hook Input (stdin)
+
+A JSON payload is piped to the hook command:
+
+```json
+{
+  "event": "PreToolUse",
+  "session_id": "abc-123",
+  "cwd": "/path/to/project",
+  "tool_name": "bash",
+  "tool_input": {"command": "ls -la"}
+}
+```
+
+### Hook Environment Variables
+
+| Variable | Description |
+|---|---|
+| `CRUSH_EVENT` | Event name (e.g. `PreToolUse`) |
+| `CRUSH_TOOL_NAME` | Name of the tool being called |
+| `CRUSH_SESSION_ID` | Current session ID |
+| `CRUSH_CWD` | Current working directory |
+| `CRUSH_PROJECT_DIR` | Project root directory |
+| `CRUSH_TOOL_INPUT_COMMAND` | Value of `command` from tool input (if present) |
+| `CRUSH_TOOL_INPUT_FILE_PATH` | Value of `file_path` from tool input (if present) |
+
+### Hook Output
+
+**Exit code 0** — the hook succeeded. Stdout is parsed as JSON:
+
+```json
+{"decision": "allow", "context": "optional context appended to tool result"}
+```
+
+- `decision`: `allow` to explicitly allow, `deny` to block, `none` (or omit) for no opinion.
+- `reason`: Explanation text (used when denying).
+- `context`: Extra context appended to the tool result.
+- `updated_input`: Replacement JSON for the tool input. Last non-empty value wins.
+
+**Exit code 2** — the tool call is blocked. Stderr is used as the deny reason.
+
+```bash
+echo "No Haskell allowed" >&2
+exit 2
+```
+
+**Any other exit code** — non-blocking error. The tool call proceeds as normal.
+
+### Claude Code Compatibility
+
+Crush also supports the Claude Code hook output format:
+
+```json
+{
+  "hookSpecificOutput": {
+    "permissionDecision": "allow",
+    "permissionDecisionReason": "Auto-approved",
+    "updatedInput": {"command": "echo rewritten"}
+  }
+}
+```
+
+Existing Claude Code hooks should work without modification.
+
+### Decision Aggregation
+
+When multiple hooks match, their decisions are aggregated:
+
+- **Deny wins over allow** — if any hook denies, the tool call is blocked.
+- **Allow wins over none** — if no hook denies but at least one allows, the call proceeds.
+- All deny reasons are concatenated (newline-separated).
+- All context strings are concatenated (newline-separated).
+- For `updated_input`, the last non-empty value wins.
 
 ## Tool Permissions
 

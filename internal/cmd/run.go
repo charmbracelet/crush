@@ -86,7 +86,6 @@ crush run --continue "Follow up on your last response"
 		}
 
 		event.SetNonInteractive(true)
-		event.AppInitialized()
 
 		switch {
 		case sessionID != "":
@@ -101,6 +100,8 @@ crush run --continue "Follow up on your last response"
 				return err
 			}
 			defer cleanup()
+
+			event.AppInitialized()
 
 			if sessionID != "" {
 				sess, err := resolveSessionByID(ctx, c, ws.ID, sessionID)
@@ -126,6 +127,8 @@ crush run --continue "Follow up on your last response"
 			return err
 		}
 		defer cleanup()
+
+		event.AppInitialized()
 
 		if !ws.Config().IsConfigured() {
 			return fmt.Errorf("no providers configured - please run 'crush' to set up a provider interactively")
@@ -186,20 +189,20 @@ func runNonInteractive(
 	progress = ws.Config.Options.Progress == nil || *ws.Config.Options.Progress
 
 	if !hideSpinner && stderrTTY {
-		t := styles.DefaultStyles()
+		t := styles.ThemeForProvider(ws.Config.Models[config.SelectedModelTypeLarge].Provider)
 
 		hasDarkBG := true
 		if stdinTTY && stdoutTTY {
 			hasDarkBG = lipgloss.HasDarkBackground(os.Stdin, os.Stdout)
 		}
-		defaultFG := lipgloss.LightDark(hasDarkBG)(charmtone.Pepper, t.FgBase)
+		defaultFG := lipgloss.LightDark(hasDarkBG)(charmtone.Pepper, t.WorkingLabelColor)
 
 		spinner = format.NewSpinner(ctx, cancel, anim.Settings{
 			Size:        10,
 			Label:       "Generating",
 			LabelColor:  defaultFG,
-			GradColorA:  t.Primary,
-			GradColorB:  t.Secondary,
+			GradColorA:  t.WorkingGradFromColor,
+			GradColorB:  t.WorkingGradToColor,
 			CycleColors: true,
 		})
 		spinner.Start()

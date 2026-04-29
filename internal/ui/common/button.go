@@ -22,9 +22,9 @@ type ButtonOpts struct {
 // Button creates a button with an underlined character and selection state
 func Button(t *styles.Styles, opts ButtonOpts) string {
 	// Select style based on selection state
-	style := t.ButtonBlur
+	style := t.Button.Blurred
 	if opts.Selected {
-		style = t.ButtonFocus
+		style = t.Button.Focused
 	}
 
 	text := opts.Text

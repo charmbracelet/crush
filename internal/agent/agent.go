@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"regexp"
 	"strconv"
@@ -38,7 +39,6 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/stringext"
@@ -64,7 +64,10 @@ var titlePrompt []byte
 var summaryPrompt []byte
 
 // Used to remove <think> tags from generated titles.
-var thinkTagRegex = regexp.MustCompile(`<think>.*?</think>`)
+var (
+	thinkTagRegex       = regexp.MustCompile(`(?s)<think>.*?</think>`)
+	orphanThinkTagRegex = regexp.MustCompile(`</?think>`)
+)
 
 type SessionAgentCall struct {
 	SessionID        string
@@ -374,7 +377,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return a.messages.Update(ctx, *currentAssistant)
 		},
 		OnRetry: func(err *fantasy.ProviderError, delay time.Duration) {
-			// TODO: implement
+			slog.Warn("Provider request failed, retrying", providerRetryLogFields(err, delay)...)
 		},
 		OnToolCall: func(tc fantasy.ToolCallContent) error {
 			toolCall := message.ToolCall{
@@ -410,6 +413,18 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				finishReason = message.FinishReasonEndTurn
 			case fantasy.FinishReasonToolCalls:
 				finishReason = message.FinishReasonToolUse
+			}
+			// If a tool result halted the turn (e.g. a hook halt or a
+			// permission denial), the step ends on FinishReasonToolCalls but
+			// the model will not be called again. Treat it as the end of the
+			// turn so the UI can render the assistant footer.
+			if finishReason == message.FinishReasonToolUse {
+				for _, tr := range stepResult.Content.ToolResults() {
+					if tr.StopTurn {
+						finishReason = message.FinishReasonEndTurn
+						break
+					}
+				}
 			}
 			currentAssistant.AddFinish(finishReason, "", "")
 			sessionLock.Lock()
@@ -458,8 +473,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	a.eventPromptResponded(call.SessionID, time.Since(startTime).Truncate(time.Second))
 
 	if err != nil {
+		isHyper := largeModel.ModelCfg.Provider == hyper.Name
 		isCancelErr := errors.Is(err, context.Canceled)
-		isPermissionErr := errors.Is(err, permission.ErrorPermissionDenied)
 		if currentAssistant == nil {
 			return result, err
 		}
@@ -502,8 +517,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			content := "There was an error while executing the tool"
 			if isCancelErr {
 				content = "Error: user cancelled assistant tool calling"
-			} else if isPermissionErr {
-				content = "User denied permission"
 			}
 			toolResult := message.ToolResult{
 				ToolCallID: tc.ID,
@@ -527,9 +540,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		linkStyle := lipgloss.NewStyle().Foreground(charmtone.Guac).Underline(true)
 		if isCancelErr {
 			currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
-		} else if isPermissionErr {
-			currentAssistant.AddFinish(message.FinishReasonPermissionDenied, "User denied permission", "")
-		} else if errors.Is(err, hyper.ErrUnauthorized) {
+		} else if isHyper && errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized {
 			currentAssistant.AddFinish(message.FinishReasonError, "Unauthorized", `Please re-authenticate with Hyper. You can also run "crush auth" to re-authenticate.`)
 			if a.notify != nil {
 				a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
@@ -539,7 +550,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 					ProviderID:   largeModel.ModelCfg.Provider,
 				})
 			}
-		} else if errors.Is(err, hyper.ErrNoCredits) {
+		} else if isHyper && errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusPaymentRequired {
 			url := hyper.BaseURL()
 			link := linkStyle.Hyperlink(url, "id=hyper").Render(url)
 			currentAssistant.AddFinish(message.FinishReasonError, "No credits", "You're out of credits. Add more at "+link)
@@ -769,16 +780,46 @@ If not, please feel free to ignore. Again do not mention this message to the use
 			),
 		))
 	}
+	// Collect all tool call IDs present in assistant messages and all tool
+	// result IDs present in tool messages. This lets us detect both orphaned
+	// tool results (result without a call) and orphaned tool calls (call
+	// without a result).
+	knownToolCallIDs := make(map[string]struct{})
+	knownToolResultIDs := make(map[string]struct{})
+	for _, m := range msgs {
+		switch m.Role {
+		case message.Assistant:
+			for _, tc := range m.ToolCalls() {
+				knownToolCallIDs[tc.ID] = struct{}{}
+			}
+		case message.Tool:
+			for _, tr := range m.ToolResults() {
+				knownToolResultIDs[tr.ToolCallID] = struct{}{}
+			}
+		}
+	}
+
 	for _, m := range msgs {
 		if len(m.Parts) == 0 {
 			continue
 		}
-		// Assistant message without content or tool calls (cancelled before it
-		// returned anything).
+		// Assistant message without content or tool calls (cancelled before it returned anything).
 		if m.Role == message.Assistant && len(m.ToolCalls()) == 0 && m.Content().Text == "" && m.ReasoningContent().String() == "" {
 			continue
 		}
+		if m.Role == message.Tool {
+			if msg, ok := filterOrphanedToolResults(m, knownToolCallIDs); ok {
+				history = append(history, msg)
+			}
+			continue
+		}
 		history = append(history, m.ToAIMessage()...)
+
+		if m.Role == message.Assistant {
+			if msg, ok := syntheticToolResultsForOrphanedCalls(m, knownToolResultIDs); ok {
+				history = append(history, msg)
+			}
+		}
 	}
 
 	var files []fantasy.FilePart
@@ -794,6 +835,72 @@ If not, please feel free to ignore. Again do not mention this message to the use
 	}
 
 	return history, files
+}
+
+// filterOrphanedToolResults converts a tool message to a fantasy.Message,
+// dropping any tool result parts whose tool_call_id has no matching tool call
+// in the known set. An orphaned result causes API validation to fail on every
+// subsequent turn, permanently locking the session. Returns the filtered
+// message and true if at least one valid part remains.
+func filterOrphanedToolResults(m message.Message, knownToolCallIDs map[string]struct{}) (fantasy.Message, bool) {
+	aiMsgs := m.ToAIMessage()
+	if len(aiMsgs) == 0 {
+		return fantasy.Message{}, false
+	}
+	var validParts []fantasy.MessagePart
+	for _, part := range aiMsgs[0].Content {
+		tr, ok := fantasy.AsMessagePart[fantasy.ToolResultPart](part)
+		if !ok {
+			validParts = append(validParts, part)
+			continue
+		}
+		if _, known := knownToolCallIDs[tr.ToolCallID]; known {
+			validParts = append(validParts, part)
+		} else {
+			slog.Warn("Dropping orphaned tool result with no matching tool call",
+				"tool_call_id", tr.ToolCallID,
+			)
+		}
+	}
+	if len(validParts) == 0 {
+		return fantasy.Message{}, false
+	}
+	msg := aiMsgs[0]
+	msg.Content = validParts
+	return msg, true
+}
+
+// syntheticToolResultsForOrphanedCalls returns a tool message containing
+// synthetic tool results for any tool calls in the assistant message that
+// have no matching result in knownToolResultIDs. LLM APIs require every
+// tool_use to be immediately followed by a tool_result; an interrupted
+// session can leave orphaned tool_use blocks that permanently lock the
+// conversation. Returns the message and true if any synthetic results were
+// produced.
+func syntheticToolResultsForOrphanedCalls(m message.Message, knownToolResultIDs map[string]struct{}) (fantasy.Message, bool) {
+	var syntheticParts []fantasy.MessagePart
+	for _, tc := range m.ToolCalls() {
+		if _, hasResult := knownToolResultIDs[tc.ID]; hasResult {
+			continue
+		}
+		slog.Warn("Injecting synthetic tool result for orphaned tool call",
+			"tool_call_id", tc.ID,
+			"tool_name", tc.Name,
+		)
+		syntheticParts = append(syntheticParts, fantasy.ToolResultPart{
+			ToolCallID: tc.ID,
+			Output: fantasy.ToolResultOutputContentError{
+				Error: errors.New("tool call was interrupted and did not produce a result, you may retry this call if the result is still needed"),
+			},
+		})
+	}
+	if len(syntheticParts) == 0 {
+		return fantasy.Message{}, false
+	}
+	return fantasy.Message{
+		Role:    fantasy.MessageRoleTool,
+		Content: syntheticParts,
+	}, true
 }
 
 func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.Session) ([]message.Message, error) {
@@ -898,6 +1005,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 
 	// Remove thinking tags if present.
 	title = thinkTagRegex.ReplaceAllString(title, "")
+	title = orphanThinkTagRegex.ReplaceAllString(title, "")
 
 	title = strings.TrimSpace(title)
 	title = cmp.Or(title, DefaultSessionName)
@@ -1091,13 +1199,22 @@ func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) mes
 		}
 	case fantasy.ToolResultContentTypeMedia:
 		if r, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentMedia](result.Result); ok {
-			content := r.Text
-			if content == "" {
-				content = fmt.Sprintf("Loaded %s content", r.MediaType)
+			if !stringext.IsValidBase64(r.Data) {
+				slog.Warn("Tool returned media with invalid base64 data, discarding image",
+					"tool", result.ToolName,
+					"tool_call_id", result.ToolCallID,
+				)
+				baseResult.Content = "Tool returned image data with invalid encoding"
+				baseResult.IsError = true
+			} else {
+				content := r.Text
+				if content == "" {
+					content = fmt.Sprintf("Loaded %s content", r.MediaType)
+				}
+				baseResult.Content = content
+				baseResult.Data = r.Data
+				baseResult.MIMEType = r.MediaType
 			}
-			baseResult.Content = content
-			baseResult.Data = r.Data
-			baseResult.MIMEType = r.MediaType
 		}
 	}
 
@@ -1206,4 +1323,21 @@ func buildSummaryPrompt(todos []session.Todo) string {
 		sb.WriteString("Instruct the resuming assistant to use the `todos` tool to continue tracking progress on these tasks.")
 	}
 	return sb.String()
+}
+
+func providerRetryLogFields(err *fantasy.ProviderError, delay time.Duration) []any {
+	fields := []any{
+		"retry_delay", delay.String(),
+	}
+	if err == nil {
+		return fields
+	}
+	fields = append(fields, "status_code", err.StatusCode)
+	if err.Title != "" {
+		fields = append(fields, "title", err.Title)
+	}
+	if err.Message != "" {
+		fields = append(fields, "message", err.Message)
+	}
+	return fields
 }

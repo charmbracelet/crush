@@ -30,7 +30,7 @@ func newTestUI() *UI {
 	com := common.DefaultCommon(nil)
 
 	ta := textarea.New()
-	ta.SetStyles(com.Styles.TextArea)
+	ta.SetStyles(com.Styles.Editor.Textarea)
 	ta.ShowLineNumbers = false
 	ta.CharLimit = -1
 	ta.SetVirtualCursor(false)

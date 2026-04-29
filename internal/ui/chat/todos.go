@@ -91,16 +91,16 @@ func (t *TodosToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 
 					ratio := sty.Tool.TodoRatio.Render(fmt.Sprintf("%d/%d", meta.Completed, meta.Total))
 					if hasCompleted && hasStarted {
-						text := sty.Subtle.Render(fmt.Sprintf(" · completed %d, starting next", len(meta.JustCompleted)))
+						text := sty.Tool.TodoStatusNote.Render(fmt.Sprintf(" · completed %d, starting next", len(meta.JustCompleted)))
 						headerText = fmt.Sprintf("%s%s", ratio, text)
 					} else if hasCompleted {
-						text := sty.Subtle.Render(fmt.Sprintf(" · completed %d", len(meta.JustCompleted)))
+						text := sty.Tool.TodoStatusNote.Render(fmt.Sprintf(" · completed %d", len(meta.JustCompleted)))
 						if allCompleted {
-							text = sty.Subtle.Render(" · completed all")
+							text = sty.Tool.TodoStatusNote.Render(" · completed all")
 						}
 						headerText = fmt.Sprintf("%s%s", ratio, text)
 					} else if hasStarted {
-						headerText = fmt.Sprintf("%s%s", ratio, sty.Subtle.Render(" · starting task"))
+						headerText = fmt.Sprintf("%s%s", ratio, sty.Tool.TodoStatusNote.Render(" · starting task"))
 					} else {
 						headerText = ratio
 					}
@@ -111,7 +111,7 @@ func (t *TodosToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 						body = FormatTodosList(sty, meta.Todos, styles.ArrowRightIcon, cappedWidth)
 					} else if meta.JustStarted != "" {
 						body = sty.Tool.TodoInProgressIcon.Render(styles.ArrowRightIcon+" ") +
-							sty.Base.Render(meta.JustStarted)
+							sty.Tool.TodoJustStarted.Render(meta.JustStarted)
 					}
 				}
 			}
@@ -148,7 +148,7 @@ func FormatTodosList(sty *styles.Styles, todos []session.Todo, inProgressIcon st
 	var lines []string
 	for _, todo := range sorted {
 		var prefix string
-		textStyle := sty.Base
+		textStyle := sty.Tool.TodoItem
 
 		switch todo.Status {
 		case session.TodoStatusCompleted:

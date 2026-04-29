@@ -41,11 +41,11 @@ func (m *UI) lspInfo(width, maxItems int, isSection bool) string {
 		lsps = append(lsps, LSPInfo{LSPClientInfo: state, Diagnostics: lspErrs})
 	}
 
-	title := t.ResourceGroupTitle.Render("LSPs")
+	title := t.Resource.Heading.Render("LSPs")
 	if isSection {
 		title = common.Section(t, title, width)
 	}
-	list := t.ResourceAdditionalText.Render("None")
+	list := t.Resource.AdditionalText.Render("None")
 	if len(lsps) > 0 {
 		list = lspList(t, lsps, width, maxItems)
 	}
@@ -80,31 +80,31 @@ func lspList(t *styles.Styles, lsps []LSPInfo, width, maxItems int) string {
 	var renderedLsps []string
 	for _, l := range lsps {
 		var icon string
-		title := t.ResourceName.Render(l.Name)
+		title := t.Resource.Name.Render(l.Name)
 		var description string
 		var diagnostics string
 		switch l.State {
 		case lsp.StateUnstarted:
-			icon = t.ResourceOfflineIcon.String()
-			description = t.ResourceStatus.Render("unstarted")
+			icon = t.Resource.OfflineIcon.String()
+			description = t.Resource.StatusText.Render("unstarted")
 		case lsp.StateStopped:
-			icon = t.ResourceOfflineIcon.String()
-			description = t.ResourceStatus.Render("stopped")
+			icon = t.Resource.OfflineIcon.String()
+			description = t.Resource.StatusText.Render("stopped")
 		case lsp.StateStarting:
-			icon = t.ResourceBusyIcon.String()
-			description = t.ResourceStatus.Render("starting...")
+			icon = t.Resource.BusyIcon.String()
+			description = t.Resource.StatusText.Render("starting...")
 		case lsp.StateReady:
-			icon = t.ResourceOnlineIcon.String()
+			icon = t.Resource.OnlineIcon.String()
 			diagnostics = lspDiagnostics(t, l.Diagnostics)
 		case lsp.StateError:
-			icon = t.ResourceErrorIcon.String()
-			description = t.ResourceStatus.Render("error")
+			icon = t.Resource.ErrorIcon.String()
+			description = t.Resource.StatusText.Render("error")
 			if l.Error != nil {
-				description = t.ResourceStatus.Render(fmt.Sprintf("error: %s", l.Error.Error()))
+				description = t.Resource.StatusText.Render(fmt.Sprintf("error: %s", l.Error.Error()))
 			}
 		case lsp.StateDisabled:
-			icon = t.ResourceOfflineIcon.Foreground(t.Muted.GetBackground()).String()
-			description = t.ResourceStatus.Render("disabled")
+			icon = t.Resource.DisabledIcon.String()
+			description = t.Resource.StatusText.Render("disabled")
 		default:
 			continue
 		}
@@ -119,7 +119,7 @@ func lspList(t *styles.Styles, lsps []LSPInfo, width, maxItems int) string {
 	if len(renderedLsps) > maxItems {
 		visibleItems := renderedLsps[:maxItems-1]
 		remaining := len(renderedLsps) - maxItems
-		visibleItems = append(visibleItems, t.ResourceAdditionalText.Render(fmt.Sprintf("…and %d more", remaining)))
+		visibleItems = append(visibleItems, t.Resource.AdditionalText.Render(fmt.Sprintf("…and %d more", remaining)))
 		return lipgloss.JoinVertical(lipgloss.Left, visibleItems...)
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, renderedLsps...)

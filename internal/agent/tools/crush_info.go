@@ -46,9 +46,11 @@ func buildCrushInfo(cfg *config.ConfigStore, lspManager *lsp.Manager, allSkills 
 	writeLSP(&b, lspManager, cfg)
 	writeMCP(&b, mcp.GetStates(), cfg)
 	writeSkills(&b, allSkills, activeSkills, skillTracker, cfg)
+	writeHooks(&b, cfg)
 	writePermissions(&b, cfg)
 	writeDisabledTools(&b, cfg)
 	writeOptions(&b, cfg)
+	writeAttribution(&b, cfg)
 
 	return b.String()
 }
@@ -336,6 +338,7 @@ func writeSkills(b *strings.Builder, allSkills []*skills.Skill, activeSkills []*
 
 	slices.SortFunc(entries, func(a, b entry) int { return strings.Compare(a.name, b.name) })
 	b.WriteString("[skills]\n")
+	fmt.Fprintf(b, "loaded_this_session = %d/%d\n", tracker.LoadedCount(), len(activeSkills))
 	for _, e := range entries {
 		fmt.Fprintf(b, "%s = %s, %s\n", e.name, e.origin, e.state)
 	}
@@ -400,6 +403,66 @@ func writeOptions(b *strings.Builder, cfg *config.ConfigStore) {
 	for _, o := range opts {
 		fmt.Fprintf(b, "%s = %s\n", o.key, o.value)
 	}
+	b.WriteString("\n")
+}
+
+func writeAttribution(b *strings.Builder, cfg *config.ConfigStore) {
+	c := cfg.Config()
+	if c.Options == nil || c.Options.Attribution == nil {
+		return
+	}
+	b.WriteString("[attribution]\n")
+	trailerStyle := c.Options.Attribution.TrailerStyle
+	if trailerStyle == "" {
+		trailerStyle = config.TrailerStyleCoAuthoredBy
+	}
+	fmt.Fprintf(b, "trailer_style = %s\n", trailerStyle)
+	fmt.Fprintf(b, "generated_with = %v\n", c.Options.Attribution.GeneratedWith)
+	b.WriteString("\n")
+}
+
+func writeHooks(b *strings.Builder, cfg *config.ConfigStore) {
+	c := cfg.Config()
+	if len(c.Hooks) == 0 {
+		return
+	}
+
+	type entry struct {
+		event   string
+		matcher string
+		command string
+		timeout int
+	}
+	var entries []entry
+	for event, hookList := range c.Hooks {
+		for _, h := range hookList {
+			entries = append(entries, entry{
+				event:   event,
+				matcher: h.Matcher,
+				command: h.Command,
+				timeout: h.Timeout,
+			})
+		}
+	}
+	slices.SortFunc(entries, func(a, b entry) int {
+		if a.event != b.event {
+			return strings.Compare(a.event, b.event)
+		}
+		return strings.Compare(a.command, b.command)
+	})
+
+	b.WriteString("[hooks]\n")
+	for _, e := range entries {
+		line := fmt.Sprintf("%s = %s", e.event, e.command)
+		if e.matcher != "" {
+			line = fmt.Sprintf("%s (matcher: %s) = %s", e.event, e.matcher, e.command)
+		}
+		if e.timeout > 0 && e.timeout != 30 {
+			line += fmt.Sprintf(" (timeout: %ds)", e.timeout)
+		}
+		b.WriteString(line + "\n")
+	}
+
 	b.WriteString("\n")
 }
 

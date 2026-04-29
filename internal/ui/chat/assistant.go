@@ -48,9 +48,9 @@ func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) Messa
 	a.anim = anim.New(anim.Settings{
 		ID:          a.ID(),
 		Size:        15,
-		GradColorA:  sty.Primary,
-		GradColorB:  sty.Secondary,
-		LabelColor:  sty.FgBase,
+		GradColorA:  sty.WorkingGradFromColor,
+		GradColorB:  sty.WorkingGradToColor,
+		LabelColor:  sty.WorkingLabelColor,
 		CycleColors: true,
 	})
 	return a
@@ -112,8 +112,8 @@ func (a *AssistantMessageItem) Render(width int) string {
 	// it's wrapping logic.
 	// We already know that the content is wrapped to the correct width in
 	// RawRender, so we can just apply the styles directly to each line.
-	focused := a.sty.Chat.Message.AssistantFocused.Render()
-	blurred := a.sty.Chat.Message.AssistantBlurred.Render()
+	focused := a.sty.Messages.AssistantFocused.Render()
+	blurred := a.sty.Messages.AssistantBlurred.Render()
 	rendered := a.RawRender(width)
 	lines := strings.Split(rendered, "\n")
 	for i, line := range lines {
@@ -149,7 +149,7 @@ func (a *AssistantMessageItem) renderMessageContent(width int) string {
 	if a.message.IsFinished() {
 		switch a.message.FinishReason() {
 		case message.FinishReasonCanceled:
-			messageParts = append(messageParts, a.sty.Base.Italic(true).Render("Canceled"))
+			messageParts = append(messageParts, a.sty.Messages.AssistantCanceled.Render("Canceled"))
 		case message.FinishReasonError:
 			messageParts = append(messageParts, a.renderError(width))
 		}
@@ -160,7 +160,7 @@ func (a *AssistantMessageItem) renderMessageContent(width int) string {
 
 // renderThinking renders the thinking/reasoning content with footer.
 func (a *AssistantMessageItem) renderThinking(thinking string, width int) string {
-	renderer := common.PlainMarkdownRenderer(a.sty, width)
+	renderer := common.QuietMarkdownRenderer(a.sty, width)
 	rendered, err := renderer.Render(thinking)
 	if err != nil {
 		rendered = thinking
@@ -173,13 +173,13 @@ func (a *AssistantMessageItem) renderThinking(thinking string, width int) string
 	isTruncated := totalLines > maxCollapsedThinkingHeight
 	if !a.thinkingExpanded && isTruncated {
 		lines = lines[totalLines-maxCollapsedThinkingHeight:]
-		hint := a.sty.Chat.Message.ThinkingTruncationHint.Render(
+		hint := a.sty.Messages.ThinkingTruncationHint.Render(
 			fmt.Sprintf(assistantMessageTruncateFormat, totalLines-maxCollapsedThinkingHeight),
 		)
 		lines = append([]string{hint, ""}, lines...)
 	}
 
-	thinkingStyle := a.sty.Chat.Message.ThinkingBox.Width(width)
+	thinkingStyle := a.sty.Messages.ThinkingBox.Width(width)
 	result := thinkingStyle.Render(strings.Join(lines, "\n"))
 	a.thinkingBoxHeight = lipgloss.Height(result)
 
@@ -188,8 +188,8 @@ func (a *AssistantMessageItem) renderThinking(thinking string, width int) string
 	if !a.message.IsThinking() || len(a.message.ToolCalls()) > 0 {
 		duration := a.message.ThinkingDuration()
 		if duration.String() != "0s" {
-			footer = a.sty.Chat.Message.ThinkingFooterTitle.Render("Thought for ") +
-				a.sty.Chat.Message.ThinkingFooterDuration.Render(duration.String())
+			footer = a.sty.Messages.ThinkingFooterTitle.Render("Thought for ") +
+				a.sty.Messages.ThinkingFooterDuration.Render(duration.String())
 		}
 	}
 
@@ -222,10 +222,10 @@ func (a *AssistantMessageItem) renderSpinning() string {
 // renderError renders an error message.
 func (a *AssistantMessageItem) renderError(width int) string {
 	finishPart := a.message.FinishPart()
-	errTag := a.sty.Chat.Message.ErrorTag.Render("ERROR")
+	errTag := a.sty.Messages.ErrorTag.Render("ERROR")
 	truncated := ansi.Truncate(finishPart.Message, width-2-lipgloss.Width(errTag), "...")
-	title := fmt.Sprintf("%s %s", errTag, a.sty.Chat.Message.ErrorTitle.Render(truncated))
-	details := a.sty.Chat.Message.ErrorDetails.Width(width - 2).Render(finishPart.Details)
+	title := fmt.Sprintf("%s %s", errTag, a.sty.Messages.ErrorTitle.Render(truncated))
+	details := a.sty.Messages.ErrorDetails.Width(width - 2).Render(finishPart.Details)
 	return fmt.Sprintf("%s\n\n%s", title, details)
 }
 

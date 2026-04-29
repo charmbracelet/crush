@@ -37,10 +37,19 @@ func newHeader(com *common.Common) *header {
 	h := &header{
 		com: com,
 	}
-	t := com.Styles
-	h.compactLogo = t.Header.Charm.Render("Charm™") + " " +
-		styles.ApplyBoldForegroundGrad(t, "CRUSH", t.Secondary, t.Primary) + " "
+	h.refresh()
 	return h
+}
+
+// refresh rebuilds cached logo strings using the current styles. Call
+// after the theme changes.
+func (h *header) refresh() {
+	t := h.com.Styles
+	h.compactLogo = t.Header.Charm.Render("Charm™") + " " +
+		styles.ApplyBoldForegroundGrad(t.Header.LogoGradCanvas, "CRUSH", t.Header.LogoGradFromColor, t.Header.LogoGradToColor) + " "
+	// Force drawHeader to re-render the wide logo on the next frame.
+	h.width = 0
+	h.logo = ""
 }
 
 // drawHeader draws the header for the given session.
@@ -54,7 +63,7 @@ func (h *header) drawHeader(
 ) {
 	t := h.com.Styles
 	if width != h.width || compact != h.compact {
-		h.logo = renderLogo(h.com.Styles, compact, width)
+		h.logo = renderLogo(h.com.Styles, compact, h.com.IsHyper(), width)
 	}
 
 	h.width = width
@@ -102,7 +111,7 @@ func (h *header) drawHeader(
 	b.WriteString(details)
 
 	view := uv.NewStyledString(
-		t.Base.Padding(0, rightPadding, 0, leftPadding).Render(b.String()))
+		t.Header.Wrapper.Padding(0, rightPadding, 0, leftPadding).Render(b.String()))
 	view.Draw(scr, area)
 }
 

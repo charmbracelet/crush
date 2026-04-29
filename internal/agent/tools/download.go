@@ -48,7 +48,7 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 	}
 	return fantasy.NewParallelAgentTool(
 		DownloadToolName,
-		string(downloadDescription),
+		FirstLineDescription(downloadDescription),
 		func(ctx context.Context, params DownloadParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.URL == "" {
 				return fantasy.NewTextErrorResponse("URL parameter is required"), nil
@@ -85,7 +85,7 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 				return fantasy.ToolResponse{}, err
 			}
 			if !p {
-				return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
+				return NewPermissionDeniedResponse(), nil
 			}
 
 			// Handle timeout with context

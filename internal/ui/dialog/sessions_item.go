@@ -79,8 +79,8 @@ func (s *SessionItem) Render(width int) string {
 	styles := ListItemStyles{
 		ItemBlurred:     s.t.Dialog.NormalItem,
 		ItemFocused:     s.t.Dialog.SelectedItem,
-		InfoTextBlurred: s.t.Subtle,
-		InfoTextFocused: s.t.Base,
+		InfoTextBlurred: s.t.Dialog.Sessions.InfoBlurred,
+		InfoTextFocused: s.t.Dialog.Sessions.InfoFocused,
 	}
 
 	switch s.sessionsMode {
@@ -91,7 +91,8 @@ func (s *SessionItem) Render(width int) string {
 		styles.ItemBlurred = s.t.Dialog.Sessions.RenamingItemBlurred
 		styles.ItemFocused = s.t.Dialog.Sessions.RenamingingItemFocused
 		if s.focused {
-			inputWidth := width - styles.InfoTextFocused.GetHorizontalFrameSize()
+			const cursorPadding = 1
+			inputWidth := max(0, width-styles.ItemFocused.GetHorizontalFrameSize()-cursorPadding)
 			s.updateTitleInput.SetWidth(inputWidth)
 			s.updateTitleInput.Placeholder = ansi.Truncate(s.Title, width, "…")
 			return styles.ItemFocused.Render(s.updateTitleInput.View())

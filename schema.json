@@ -89,12 +89,41 @@
         "tools": {
           "$ref": "#/$defs/Tools",
           "description": "Tool configurations"
+        },
+        "hooks": {
+          "additionalProperties": {
+            "items": {
+              "$ref": "#/$defs/HookConfig"
+            },
+            "type": "array"
+          },
+          "type": "object",
+          "description": "User-defined shell commands that fire on hook events (e.g. PreToolUse)"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "HookConfig": {
+      "properties": {
+        "matcher": {
+          "type": "string",
+          "description": "Regex pattern tested against the tool name. Empty means match all tools."
+        },
+        "command": {
+          "type": "string",
+          "description": "Shell command to execute when the hook fires"
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Timeout in seconds for the hook command",
+          "default": 30
         }
       },
       "additionalProperties": false,
       "type": "object",
       "required": [
-        "tools"
+        "command"
       ]
     },
     "LSPConfig": {
@@ -322,8 +351,7 @@
         "context_window",
         "default_max_tokens",
         "can_reason",
-        "supports_attachments",
-        "options"
+        "supports_attachments"
       ]
     },
     "ModelOptions": {
@@ -676,10 +704,7 @@
         }
       },
       "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "completions"
-      ]
+      "type": "object"
     },
     "Token": {
       "properties": {
@@ -747,11 +772,7 @@
         }
       },
       "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "ls",
-        "grep"
-      ]
+      "type": "object"
     }
   }
 }

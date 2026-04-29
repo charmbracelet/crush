@@ -120,7 +120,7 @@ func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolRe
 			return fantasy.ToolResponse{}, err
 		}
 		if !p {
-			return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
+			return NewPermissionDeniedResponse(), nil
 		}
 	}
 

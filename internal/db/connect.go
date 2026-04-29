@@ -3,21 +3,39 @@ package db
 import (
 	"context"
 	"database/sql"
+	"embed"
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"sync"
+	"testing"
 
 	"github.com/pressly/goose/v3"
 )
 
-var pragmas = map[string]string{
-	"foreign_keys":  "ON",
-	"journal_mode":  "WAL",
-	"page_size":     "4096",
-	"cache_size":    "-8000",
-	"synchronous":   "NORMAL",
-	"secure_delete": "ON",
-	"busy_timeout":  "30000",
+var (
+	pragmas = map[string]string{
+		"foreign_keys":  "ON",
+		"journal_mode":  "WAL",
+		"page_size":     "4096",
+		"cache_size":    "-8000",
+		"synchronous":   "NORMAL",
+		"secure_delete": "ON",
+		"busy_timeout":  "30000",
+	}
+	gooseInitOnce sync.Once
+	gooseInitErr  error
+)
+
+//go:embed migrations/*.sql
+var FS embed.FS
+
+func init() {
+	goose.SetBaseFS(FS)
+
+	if testing.Testing() {
+		goose.SetLogger(goose.NopLogger())
+	}
 }
 
 // Connect opens a SQLite database connection and runs migrations.
@@ -37,11 +55,9 @@ func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	goose.SetBaseFS(FS)
-
-	if err := goose.SetDialect("sqlite3"); err != nil {
-		slog.Error("Failed to set dialect", "error", err)
-		return nil, fmt.Errorf("failed to set dialect: %w", err)
+	if err := initGoose(); err != nil {
+		slog.Error("Failed to initialize goose", "error", err)
+		return nil, fmt.Errorf("failed to initialize goose: %w", err)
 	}
 
 	if err := goose.Up(db, "migrations"); err != nil {
@@ -50,4 +66,13 @@ func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 	}
 
 	return db, nil
+}
+
+func initGoose() error {
+	gooseInitOnce.Do(func() {
+		goose.SetBaseFS(FS)
+		gooseInitErr = goose.SetDialect("sqlite3")
+	})
+
+	return gooseInitErr
 }

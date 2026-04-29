@@ -59,7 +59,7 @@ func NewWriteTool(
 			}
 
 			if params.Content == "" {
-				return fantasy.NewTextErrorResponse("content is required"), nil
+				return fantasy.NewTextErrorResponse(`content is required. use the "touch" tool to create an empty file`), nil
 			}
 
 			sessionID := GetSessionFromContext(ctx)

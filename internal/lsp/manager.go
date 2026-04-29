@@ -75,6 +75,39 @@ func (s *Manager) Clients() *csync.Map[string, *Client] {
 	return s.clients
 }
 
+// BestClientFor returns the LSP client best suited to handle the given
+// path, preferring clients whose FileTypes explicitly match over
+// clients that act as catch-alls (no FileTypes set). Returns nil when
+// no client is willing to handle the path.
+//
+// Use this from tools that must pick a single client (lsp_references).
+// Tools that broadcast to every willing client (lsp_diagnostics,
+// notifyLSPs) should iterate Clients() directly with HandlesFile.
+//
+// Ties are broken by client name so the choice is deterministic across
+// runs — Go's map iteration order is randomized, and without a tiebreak
+// the same workspace would route to different clients on different
+// invocations.
+func (s *Manager) BestClientFor(path string) *Client {
+	var (
+		best     *Client
+		bestName string
+	)
+	bestScore := 0
+	for name, c := range s.clients.Seq2() {
+		score := c.MatchScore(path)
+		if score == 0 {
+			continue
+		}
+		if score > bestScore || (score == bestScore && (best == nil || name < bestName)) {
+			best = c
+			bestScore = score
+			bestName = name
+		}
+	}
+	return best
+}
+
 // SetCallback sets a callback that is invoked when a new LSP
 // client is successfully started. This allows the coordinator to add LSP tools.
 func (s *Manager) SetCallback(cb func(name string, client *Client)) {

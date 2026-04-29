@@ -221,6 +221,8 @@ func NewToolMessageItem(
 		item = NewJobKillToolMessageItem(sty, toolCall, result, canceled)
 	case tools.ViewToolName:
 		item = NewViewToolMessageItem(sty, toolCall, result, canceled)
+	case tools.TouchToolName:
+		item = NewTouchToolMessageItem(sty, toolCall, result, canceled)
 	case tools.WriteToolName:
 		item = NewWriteToolMessageItem(sty, toolCall, result, canceled)
 	case tools.EditToolName:
@@ -1076,6 +1078,11 @@ func (t *baseToolMessageItem) formatParametersForCopy() string {
 			parts = append(parts, fmt.Sprintf("**Edits:** %d", len(params.Edits)))
 			return strings.Join(parts, "\n")
 		}
+	case tools.TouchToolName:
+		var params tools.TouchParams
+		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
+			return fmt.Sprintf("**File:** %s", fsext.PrettyPath(params.FilePath))
+		}
 	case tools.WriteToolName:
 		var params tools.WriteParams
 		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
@@ -1217,6 +1224,8 @@ func (t *baseToolMessageItem) formatResultForCopy() string {
 		return t.formatEditResultForCopy()
 	case tools.MultiEditToolName:
 		return t.formatMultiEditResultForCopy()
+	case tools.TouchToolName:
+		return t.formatTouchResultForCopy()
 	case tools.WriteToolName:
 		return t.formatWriteResultForCopy()
 	case tools.FetchToolName:
@@ -1388,6 +1397,20 @@ func (t *baseToolMessageItem) formatMultiEditResultForCopy() string {
 	}
 
 	return result.String()
+}
+
+// formatTouchResultForCopy formats touch tool results for clipboard.
+func (t *baseToolMessageItem) formatTouchResultForCopy() string {
+	if t.result == nil {
+		return ""
+	}
+
+	var params tools.TouchParams
+	if json.Unmarshal([]byte(t.toolCall.Input), &params) != nil {
+		return t.result.Content
+	}
+
+	return fmt.Sprintf("File: %s\n```\n```", fsext.PrettyPath(params.FilePath))
 }
 
 // formatWriteResultForCopy formats write tool results for clipboard.
@@ -1575,6 +1598,8 @@ func prettifyToolName(name string) string {
 		return "Sourcegraph"
 	case tools.TodosToolName:
 		return "To-Do"
+	case tools.TouchToolName:
+		return "Touch"
 	case tools.ViewToolName:
 		return "View"
 	case tools.WriteToolName:

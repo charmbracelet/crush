@@ -98,6 +98,55 @@ func (v *ViewToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 }
 
 // -----------------------------------------------------------------------------
+// Touch Tool
+// -----------------------------------------------------------------------------
+
+// TouchToolMessageItem is a message item that represents a touch tool call.
+type TouchToolMessageItem struct {
+	*baseToolMessageItem
+}
+
+var _ ToolMessageItem = (*TouchToolMessageItem)(nil)
+
+// NewTouchToolMessageItem creates a new [TouchToolMessageItem].
+func NewTouchToolMessageItem(
+	sty *styles.Styles,
+	toolCall message.ToolCall,
+	result *message.ToolResult,
+	canceled bool,
+) ToolMessageItem {
+	return newBaseToolMessageItem(sty, toolCall, result, &TouchToolRenderContext{}, canceled)
+}
+
+// TouchToolRenderContext renders touch tool messages.
+type TouchToolRenderContext struct{}
+
+// RenderTool implements the [ToolRenderer] interface.
+func (t *TouchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
+	cappedWidth := cappedMessageWidth(width)
+	if opts.IsPending() {
+		return pendingTool(sty, "Touch", opts.Anim, opts.Compact)
+	}
+
+	var params tools.TouchParams
+	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
+		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
+	}
+
+	file := fsext.PrettyPath(params.FilePath)
+	header := toolHeader(sty, opts.Status, "Touch", cappedWidth, opts.Compact, file)
+	if opts.Compact {
+		return header
+	}
+
+	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
+		return joinToolParts(header, earlyState)
+	}
+
+	return header
+}
+
+// -----------------------------------------------------------------------------
 // Write Tool
 // -----------------------------------------------------------------------------
 

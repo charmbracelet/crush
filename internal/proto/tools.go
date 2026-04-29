@@ -227,6 +227,25 @@ type ViewResponseMetadata struct {
 	Content  string `json:"content"`
 }
 
+const TouchToolName = "touch"
+
+// TouchParams represents the parameters for the touch tool.
+type TouchParams struct {
+	FilePath string `json:"file_path"`
+}
+
+// TouchPermissionsParams represents the permission parameters for the touch tool.
+type TouchPermissionsParams struct {
+	FilePath   string `json:"file_path"`
+	OldContent string `json:"old_content,omitempty"`
+	NewContent string `json:"new_content,omitempty"`
+}
+
+// TouchResponseMetadata represents the metadata for the touch tool response.
+type TouchResponseMetadata struct {
+	FilePath string `json:"file_path"`
+}
+
 const WriteToolName = "write"
 
 // WriteParams represents the parameters for the write tool.

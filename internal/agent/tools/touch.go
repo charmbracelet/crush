@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/filepathext"
@@ -57,17 +58,50 @@ func NewTouchTool(
 
 			filePath := filepathext.SmartJoin(workingDir, params.FilePath)
 
-			fileInfo, err := os.Stat(filePath)
+			absWorkingDir, err := filepath.Abs(workingDir)
+			if err != nil {
+				return fantasy.ToolResponse{}, fmt.Errorf("error resolving working directory: %w", err)
+			}
+			absFilePath, err := filepath.Abs(filePath)
+			if err != nil {
+				return fantasy.ToolResponse{}, fmt.Errorf("error resolving file path: %w", err)
+			}
+			relPath, relErr := filepath.Rel(absWorkingDir, absFilePath)
+			isOutsideWorkDir := relErr != nil || strings.HasPrefix(relPath, "..")
+
+			if isOutsideWorkDir {
+				granted, permReqErr := permissions.Request(ctx,
+					permission.CreatePermissionRequest{
+						SessionID:   sessionID,
+						Path:        absFilePath,
+						ToolCallID:  call.ID,
+						ToolName:    TouchToolName,
+						Action:      "write",
+						Description: fmt.Sprintf("Create empty file outside working directory: %s", absFilePath),
+						Params: TouchPermissionsParams{
+							FilePath: absFilePath,
+						},
+					},
+				)
+				if permReqErr != nil {
+					return fantasy.ToolResponse{}, permReqErr
+				}
+				if !granted {
+					return NewPermissionDeniedResponse(), nil
+				}
+			}
+
+			fileInfo, err := os.Stat(absFilePath)
 			if err == nil {
 				if fileInfo.IsDir() {
-					return fantasy.NewTextErrorResponse(fmt.Sprintf("Path is a directory, not a file: %s", filePath)), nil
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("Path is a directory, not a file: %s", absFilePath)), nil
 				}
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("File already exists: %s", filePath)), nil
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("File already exists: %s", absFilePath)), nil
 			} else if !os.IsNotExist(err) {
 				return fantasy.ToolResponse{}, fmt.Errorf("error checking file: %w", err)
 			}
 
-			dir := filepath.Dir(filePath)
+			dir := filepath.Dir(absFilePath)
 			if err = os.MkdirAll(dir, 0o755); err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error creating directory: %w", err)
 			}
@@ -75,13 +109,13 @@ func NewTouchTool(
 			p, err := permissions.Request(ctx,
 				permission.CreatePermissionRequest{
 					SessionID:   sessionID,
-					Path:        fsext.PathOrPrefix(filePath, workingDir),
+					Path:        fsext.PathOrPrefix(absFilePath, absWorkingDir),
 					ToolCallID:  call.ID,
 					ToolName:    TouchToolName,
 					Action:      "write",
-					Description: fmt.Sprintf("Create empty file %s", filePath),
+					Description: fmt.Sprintf("Create empty file %s", absFilePath),
 					Params: TouchPermissionsParams{
-						FilePath:   filePath,
+						FilePath:   absFilePath,
 						OldContent: "",
 						NewContent: "",
 					},
@@ -94,10 +128,10 @@ func NewTouchTool(
 				return NewPermissionDeniedResponse(), nil
 			}
 
-			file, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o644)
+			file, err := os.OpenFile(absFilePath, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o644)
 			if err != nil {
 				if os.IsExist(err) {
-					return fantasy.NewTextErrorResponse(fmt.Sprintf("File already exists: %s", filePath)), nil
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("File already exists: %s", absFilePath)), nil
 				}
 				return fantasy.ToolResponse{}, fmt.Errorf("error creating file: %w", err)
 			}
@@ -105,21 +139,21 @@ func NewTouchTool(
 				return fantasy.ToolResponse{}, fmt.Errorf("error closing file: %w", err)
 			}
 
-			_, err = files.Create(ctx, sessionID, filePath, "")
+			_, err = files.Create(ctx, sessionID, absFilePath, "")
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
 			}
 
-			filetracker.RecordRead(ctx, sessionID, filePath)
+			filetracker.RecordRead(ctx, sessionID, absFilePath)
 
-			notifyLSPs(ctx, lspManager, filePath)
+			notifyLSPs(ctx, lspManager, absFilePath)
 
-			result := fmt.Sprintf("Empty file successfully created: %s", filePath)
+			result := fmt.Sprintf("Empty file successfully created: %s", absFilePath)
 			result = fmt.Sprintf("<result>\n%s\n</result>", result)
-			result += getDiagnostics(filePath, lspManager)
+			result += getDiagnostics(absFilePath, lspManager)
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(result),
 				TouchResponseMetadata{
-					FilePath: filePath,
+					FilePath: absFilePath,
 				},
 			), nil
 		})

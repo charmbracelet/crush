@@ -5,12 +5,38 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/stretchr/testify/require"
 )
+
+// recordingPermissionService captures permission requests and answers them
+// according to a configurable response.
+type recordingPermissionService struct {
+	*pubsub.Broker[permission.PermissionRequest]
+	requests []permission.CreatePermissionRequest
+	grant    bool
+}
+
+func (m *recordingPermissionService) Request(ctx context.Context, req permission.CreatePermissionRequest) (bool, error) {
+	m.requests = append(m.requests, req)
+	return m.grant, nil
+}
+
+func (m *recordingPermissionService) Grant(req permission.PermissionRequest)           {}
+func (m *recordingPermissionService) Deny(req permission.PermissionRequest)            {}
+func (m *recordingPermissionService) GrantPersistent(req permission.PermissionRequest) {}
+func (m *recordingPermissionService) AutoApproveSession(sessionID string)              {}
+func (m *recordingPermissionService) SetSkipRequests(skip bool)                        {}
+func (m *recordingPermissionService) SkipRequests() bool                               { return false }
+func (m *recordingPermissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[permission.PermissionNotification] {
+	return make(<-chan pubsub.Event[permission.PermissionNotification])
+}
 
 type mockFileTrackerService struct{}
 
@@ -58,6 +84,60 @@ func TestTouchToolRefusesExistingFile(t *testing.T) {
 	content, err := os.ReadFile(filePath)
 	require.NoError(t, err)
 	require.Equal(t, "content", string(content))
+}
+
+func TestTouchToolStaysInsideWorkingDir(t *testing.T) {
+	t.Parallel()
+
+	workingDir := t.TempDir()
+	perms := &recordingPermissionService{grant: true}
+	tool := NewTouchTool(nil, perms, &mockHistoryService{}, mockFileTrackerService{}, workingDir)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	resp := runTouchTool(t, tool, ctx, TouchParams{FilePath: "inside.txt"})
+	require.False(t, resp.IsError)
+
+	for _, req := range perms.requests {
+		require.NotContains(t, req.Description, "outside working directory",
+			"inside-workingDir touch should not trigger an outside-workingDir permission prompt")
+	}
+
+	_, err := os.Stat(filepath.Join(workingDir, "inside.txt"))
+	require.NoError(t, err)
+}
+
+func TestTouchToolOutsideWorkingDirRequiresPermission(t *testing.T) {
+	t.Parallel()
+
+	parent := t.TempDir()
+	workingDir := filepath.Join(parent, "wd")
+	require.NoError(t, os.MkdirAll(workingDir, 0o755))
+
+	// Denied: file outside workingDir must not be created.
+	deny := &recordingPermissionService{grant: false}
+	tool := NewTouchTool(nil, deny, &mockHistoryService{}, mockFileTrackerService{}, workingDir)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	resp := runTouchTool(t, tool, ctx, TouchParams{FilePath: "../escape.txt"})
+	require.True(t, resp.IsError)
+
+	require.Len(t, deny.requests, 1)
+	require.True(t, strings.Contains(deny.requests[0].Description, "outside working directory"),
+		"expected outside-working-directory permission prompt, got %q", deny.requests[0].Description)
+
+	_, err := os.Stat(filepath.Join(parent, "escape.txt"))
+	require.True(t, os.IsNotExist(err), "denied permission should not create the file")
+
+	// Granted: same path now succeeds.
+	grant := &recordingPermissionService{grant: true}
+	tool = NewTouchTool(nil, grant, &mockHistoryService{}, mockFileTrackerService{}, workingDir)
+	resp = runTouchTool(t, tool, ctx, TouchParams{FilePath: "../escape.txt"})
+	require.False(t, resp.IsError)
+	require.GreaterOrEqual(t, len(grant.requests), 1)
+	require.Contains(t, grant.requests[0].Description, "outside working directory")
+
+	_, err = os.Stat(filepath.Join(parent, "escape.txt"))
+	require.NoError(t, err)
 }
 
 func TestWriteToolEmptyContentPointsToTouch(t *testing.T) {

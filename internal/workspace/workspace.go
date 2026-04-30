@@ -103,6 +103,21 @@ type Workspace interface {
 	// History
 	ListSessionHistory(ctx context.Context, sessionID string) ([]history.File, error)
 
+	// Undo rolls the session back by one user message. It restores file
+	// contents to their pre-message state and records a revert marker on the
+	// session so the hidden messages can be redone or cleaned up later.
+	UndoLastMessage(ctx context.Context, sessionID string) error
+
+	// RedoMessage moves the revert marker forward by one user message (or
+	// clears it entirely when already at the last message), restoring the
+	// corresponding file contents.
+	RedoMessage(ctx context.Context, sessionID string) error
+
+	// CleanupRevert permanently deletes the messages and file-version records
+	// that were hidden by the revert marker, then clears the marker. Call
+	// this before sending a new prompt so the undone history is discarded.
+	CleanupRevert(ctx context.Context, sessionID string) error
+
 	// LSP
 	LSPStart(ctx context.Context, path string)
 	LSPStopAll(ctx context.Context)

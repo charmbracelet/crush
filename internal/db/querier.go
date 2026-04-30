@@ -9,11 +9,14 @@ import (
 )
 
 type Querier interface {
+	ClearSessionRevert(ctx context.Context, id string) error
 	CreateFile(ctx context.Context, arg CreateFileParams) (File, error)
 	CreateMessage(ctx context.Context, arg CreateMessageParams) (Message, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	DeleteFile(ctx context.Context, id string) error
+	DeleteFileVersionsAfterTimestamp(ctx context.Context, arg DeleteFileVersionsAfterTimestampParams) error
 	DeleteMessage(ctx context.Context, id string) error
+	DeleteMessagesAfterTimestamp(ctx context.Context, arg DeleteMessagesAfterTimestampParams) error
 	DeleteSession(ctx context.Context, id string) error
 	DeleteSessionFiles(ctx context.Context, sessionID string) error
 	DeleteSessionMessages(ctx context.Context, sessionID string) error
@@ -21,8 +24,10 @@ type Querier interface {
 	GetFile(ctx context.Context, id string) (File, error)
 	GetFileByPathAndSession(ctx context.Context, arg GetFileByPathAndSessionParams) (File, error)
 	GetFileRead(ctx context.Context, arg GetFileReadParams) (ReadFile, error)
+	GetFileVersionBefore(ctx context.Context, arg GetFileVersionBeforeParams) (File, error)
 	GetHourDayHeatmap(ctx context.Context) ([]GetHourDayHeatmapRow, error)
 	GetLastSession(ctx context.Context) (Session, error)
+	GetLatestFileVersion(ctx context.Context, arg GetLatestFileVersionParams) (File, error)
 	GetMessage(ctx context.Context, id string) (Message, error)
 	GetRecentActivity(ctx context.Context) ([]GetRecentActivityRow, error)
 	GetSessionByID(ctx context.Context, id string) (Session, error)
@@ -33,6 +38,7 @@ type Querier interface {
 	GetUsageByHour(ctx context.Context) ([]GetUsageByHourRow, error)
 	GetUsageByModel(ctx context.Context) ([]GetUsageByModelRow, error)
 	ListAllUserMessages(ctx context.Context) ([]Message, error)
+	ListDistinctFilePathsBySession(ctx context.Context, sessionID string) ([]string, error)
 	ListFilesByPath(ctx context.Context, path string) ([]File, error)
 	ListFilesBySession(ctx context.Context, sessionID string) ([]File, error)
 	ListLatestSessionFiles(ctx context.Context, sessionID string) ([]File, error)
@@ -43,6 +49,7 @@ type Querier interface {
 	ListUserMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
 	RecordFileRead(ctx context.Context, arg RecordFileReadParams) error
 	RenameSession(ctx context.Context, arg RenameSessionParams) error
+	SetSessionRevert(ctx context.Context, arg SetSessionRevertParams) error
 	UpdateMessage(ctx context.Context, arg UpdateMessageParams) error
 	UpdateSession(ctx context.Context, arg UpdateSessionParams) (Session, error)
 	UpdateSessionTitleAndUsage(ctx context.Context, arg UpdateSessionTitleAndUsageParams) error

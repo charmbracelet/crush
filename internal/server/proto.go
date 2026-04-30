@@ -814,6 +814,66 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionSummarize(w http.ResponseW
 	w.WriteHeader(http.StatusOK)
 }
 
+// handlePostWorkspaceSessionUndo rolls a session back by one user message.
+//
+//	@Summary		Undo last message
+//	@Tags			sessions
+//	@Param			id	path	string	true	"Workspace ID"
+//	@Param			sid	path	string	true	"Session ID"
+//	@Success		200
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/sessions/{sid}/undo [post]
+func (c *controllerV1) handlePostWorkspaceSessionUndo(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	sid := r.PathValue("sid")
+	if err := c.backend.UndoLastMessage(r.Context(), id, sid); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// handlePostWorkspaceSessionRedo moves the revert marker forward by one message.
+//
+//	@Summary		Redo message
+//	@Tags			sessions
+//	@Param			id	path	string	true	"Workspace ID"
+//	@Param			sid	path	string	true	"Session ID"
+//	@Success		200
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/sessions/{sid}/redo [post]
+func (c *controllerV1) handlePostWorkspaceSessionRedo(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	sid := r.PathValue("sid")
+	if err := c.backend.RedoMessage(r.Context(), id, sid); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// handlePostWorkspaceSessionCleanupRevert permanently discards the undone range.
+//
+//	@Summary		Cleanup revert
+//	@Tags			sessions
+//	@Param			id	path	string	true	"Workspace ID"
+//	@Param			sid	path	string	true	"Session ID"
+//	@Success		200
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/sessions/{sid}/cleanup-revert [post]
+func (c *controllerV1) handlePostWorkspaceSessionCleanupRevert(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	sid := r.PathValue("sid")
+	if err := c.backend.CleanupRevert(r.Context(), id, sid); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 // handleGetWorkspaceAgentSessionPromptList returns the list of queued prompts.
 //
 //	@Summary		List queued prompts

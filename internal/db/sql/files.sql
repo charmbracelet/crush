@@ -60,3 +60,26 @@ SELECT *
 FROM files
 WHERE is_new = 1
 ORDER BY version DESC, created_at DESC;
+
+-- name: ListDistinctFilePathsBySession :many
+SELECT DISTINCT path
+FROM files
+WHERE session_id = ?;
+
+-- name: GetFileVersionBefore :one
+SELECT *
+FROM files
+WHERE session_id = ? AND path = ? AND created_at < ?
+ORDER BY version DESC
+LIMIT 1;
+
+-- name: GetLatestFileVersion :one
+SELECT *
+FROM files
+WHERE session_id = ? AND path = ?
+ORDER BY version DESC
+LIMIT 1;
+
+-- name: DeleteFileVersionsAfterTimestamp :exec
+DELETE FROM files
+WHERE session_id = ? AND created_at >= ?;

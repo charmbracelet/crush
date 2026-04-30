@@ -53,3 +53,7 @@ SELECT *
 FROM messages
 WHERE role = 'user'
 ORDER BY created_at DESC;
+
+-- name: DeleteMessagesAfterTimestamp :exec
+DELETE FROM messages
+WHERE session_id = ? AND created_at >= ?;

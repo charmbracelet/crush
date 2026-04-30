@@ -298,7 +298,15 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 				prepared.ExtraParams["region"] = env.Get("AWS_DEFAULT_REGION")
 			}
 			for _, model := range p.Models {
-				if !strings.HasPrefix(model.ID, "anthropic.") {
+				// Strip optional cross-region inference profile prefix (e.g.
+				// "us.", "eu.", "apac.", "us-gov.") before checking the model
+				// family. Claude 4.x on Bedrock is only available through these
+				// inference profiles.
+				id := model.ID
+				for _, prefix := range []string{"us.", "eu.", "apac.", "us-gov."} {
+					id = strings.TrimPrefix(id, prefix)
+				}
+				if !strings.HasPrefix(id, "anthropic.") {
 					return fmt.Errorf("bedrock provider only supports anthropic models for now, found: %s", model.ID)
 				}
 			}

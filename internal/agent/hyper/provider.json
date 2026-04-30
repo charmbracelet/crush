@@ -7,6 +7,30 @@
   "default_small_model_id": "gpt-oss-120b",
   "models": [
     {
+      "id": "deepseek-v4-pro",
+      "name": "DeepSeek V4 Pro",
+      "cost_per_1m_in": 4.45,
+      "cost_per_1m_out": 5.5,
+      "cost_per_1m_in_cached": 0.35,
+      "cost_per_1m_out_cached": 0,
+      "context_window": 600000,
+      "default_max_tokens": 60000,
+      "can_reason": true,
+      "supports_attachments": false
+    },
+    {
+      "id": "gemma-4-26b-a4b-it",
+      "name": "Gemma 4 26B A4B",
+      "cost_per_1m_in": 0.145,
+      "cost_per_1m_out": 0.5,
+      "cost_per_1m_in_cached": 0.08,
+      "cost_per_1m_out_cached": 0,
+      "context_window": 262144,
+      "default_max_tokens": 26214,
+      "can_reason": true,
+      "supports_attachments": false
+    },
+    {
       "id": "glm-5",
       "name": "GLM-5",
       "cost_per_1m_in": 1,
@@ -71,6 +95,66 @@
       "default_max_tokens": 26214,
       "can_reason": true,
       "supports_attachments": true
+    },
+    {
+      "id": "llama-3.3-70b-instruct",
+      "name": "Llama 3.3 70B Instruct",
+      "cost_per_1m_in": 0.1,
+      "cost_per_1m_out": 0.32,
+      "cost_per_1m_in_cached": 0.05,
+      "cost_per_1m_out_cached": 0.2,
+      "context_window": 128000,
+      "default_max_tokens": 12800,
+      "can_reason": true,
+      "supports_attachments": false
+    },
+    {
+      "id": "llama-4-maverick-17b-128e-instruct-fp8",
+      "name": "Llama 4 Maverick 17B 128E Instruct FP8",
+      "cost_per_1m_in": 0.15,
+      "cost_per_1m_out": 0.6,
+      "cost_per_1m_in_cached": 0.075,
+      "cost_per_1m_out_cached": 0.3,
+      "context_window": 430000,
+      "default_max_tokens": 43000,
+      "can_reason": true,
+      "supports_attachments": true
+    },
+    {
+      "id": "mistral-large-instruct-2411",
+      "name": "Mistral Large Instruct 2411",
+      "cost_per_1m_in": 2,
+      "cost_per_1m_out": 6,
+      "cost_per_1m_in_cached": 1,
+      "cost_per_1m_out_cached": 4,
+      "context_window": 128000,
+      "default_max_tokens": 12800,
+      "can_reason": false,
+      "supports_attachments": true
+    },
+    {
+      "id": "qwen3-coder-480b-a35b-instruct-int4-mixed-ar",
+      "name": "Qwen3 Coder 480B A35B Instruct INT4 Mixed AR",
+      "cost_per_1m_in": 0.22,
+      "cost_per_1m_out": 0.95,
+      "cost_per_1m_in_cached": 0.11,
+      "cost_per_1m_out_cached": 0.44,
+      "context_window": 106000,
+      "default_max_tokens": 10600,
+      "can_reason": false,
+      "supports_attachments": false
+    },
+    {
+      "id": "qwen3-next-80b-a3b-instruct",
+      "name": "Qwen3 Next 80B A3B Instruct",
+      "cost_per_1m_in": 0.06,
+      "cost_per_1m_out": 0.6,
+      "cost_per_1m_in_cached": 0.03,
+      "cost_per_1m_out_cached": 0.12,
+      "context_window": 262144,
+      "default_max_tokens": 26214,
+      "can_reason": false,
+      "supports_attachments": false
     }
   ]
 }

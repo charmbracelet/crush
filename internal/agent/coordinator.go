@@ -281,20 +281,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		return options
 	}
 
-	providerType := providerCfg.Type
-	if providerType == "hyper" {
-		if strings.Contains(model.CatwalkCfg.ID, "claude") {
-			providerType = anthropic.Name
-		} else if strings.Contains(model.CatwalkCfg.ID, "gpt") {
-			providerType = openai.Name
-		} else if strings.Contains(model.CatwalkCfg.ID, "gemini") {
-			providerType = google.Name
-		} else {
-			providerType = openaicompat.Name
-		}
-	}
-
-	switch providerType {
+	switch providerCfg.Type {
 	case openai.Name, azure.Name:
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
 		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {

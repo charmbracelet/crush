@@ -257,6 +257,7 @@ type Options struct {
 	Progress                  *bool        `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
 	DisableNotifications      bool         `json:"disable_notifications,omitempty" jsonschema:"description=Disable desktop notifications,default=false"`
 	DisabledSkills            []string     `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
+	AWSAuthRefresh            string       `json:"aws_auth_refresh,omitempty" jsonschema:"description=Shell command executed before Bedrock calls to refresh AWS credentials. Stdin/stdout/stderr are attached to the terminal so interactive prompts (e.g. SSO or MFA) work. Runs on startup and again after a 401 or 403 from Bedrock before retrying the request.,example=exec duo-sso -profile myprofile -valid-session-threshold 7200"`
 }
 
 type MCPs map[string]MCPConfig

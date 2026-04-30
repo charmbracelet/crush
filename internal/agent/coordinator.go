@@ -230,6 +230,17 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 		}
 	}
 
+	if providerCfg.Type == bedrock.Name &&
+		c.cfg.Config().Options.AWSAuthRefresh != "" &&
+		c.isBedrockAuthError(originalErr) {
+		slog.Warn("Received auth error from Bedrock. Running aws_auth_refresh and retrying", "provider", providerCfg.ID)
+		if err := config.RunAWSAuthRefresh(c.cfg.Config().Options.AWSAuthRefresh); err != nil {
+			slog.Warn("aws_auth_refresh failed", "error", err)
+			return nil, originalErr
+		}
+		return run()
+	}
+
 	return result, originalErr
 }
 
@@ -952,6 +963,18 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 func (c *coordinator) isUnauthorized(err error) bool {
 	var providerErr *fantasy.ProviderError
 	return errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized
+}
+
+// isBedrockAuthError matches the HTTP statuses Bedrock returns when AWS
+// credentials are missing or expired. SigV4 expired-session tokens surface as
+// 403 (ExpiredTokenException), while a missing signer or disabled key is 401.
+func (c *coordinator) isBedrockAuthError(err error) bool {
+	var providerErr *fantasy.ProviderError
+	if !errors.As(err, &providerErr) {
+		return false
+	}
+	return providerErr.StatusCode == http.StatusUnauthorized ||
+		providerErr.StatusCode == http.StatusForbidden
 }
 
 func (c *coordinator) refreshOAuth2Token(ctx context.Context, providerCfg config.ProviderConfig) error {

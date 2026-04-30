@@ -797,22 +797,27 @@ func renderHookLine(sty *styles.Styles, hi hooks.HookInfo, rawName, detail strin
 
 // hookDetail returns the styled detail text for a single hook result.
 func hookDetail(sty *styles.Styles, hi hooks.HookInfo) string {
+	const (
+		okMessage      = "OK"
+		denialMessage  = "Denied"
+		rewroteMessage = "Rewrote Output"
+	)
 	switch hi.Decision {
 	case "deny":
 		if hi.Reason != "" {
-			return sty.Tool.HookDenied.Render("Denied") + " " + sty.Tool.HookDeniedReason.Render(hi.Reason)
+			return sty.Tool.HookDenied.Render(denialMessage) + " " + sty.Tool.HookDeniedReason.Render(hi.Reason)
 		}
-		return sty.Tool.HookDenied.Render("Denied")
+		return sty.Tool.HookDenied.Render(denialMessage)
 	case "allow":
-		result := sty.Tool.HookOK.Render("OK")
+		result := sty.Tool.HookOK.Render(okMessage)
 		if hi.InputRewrite {
-			result += " " + sty.Tool.HookRewrote.Render("Rewrote Input")
+			result += " " + sty.Tool.HookRewrote.Render(rewroteMessage)
 		}
 		return result
 	default:
-		result := sty.Tool.HookOK.Render("OK")
+		result := sty.Tool.HookOK.Render(okMessage)
 		if hi.InputRewrite {
-			result += " " + sty.Tool.HookRewrote.Render("Rewrote Input")
+			result += " " + sty.Tool.HookRewrote.Render(rewroteMessage)
 		}
 		return result
 	}

@@ -40,7 +40,7 @@ type ModelContextInfo struct {
 
 // ModelInfo renders model information including name, provider, reasoning
 // settings, and optional context usage/cost.
-func ModelInfo(t *styles.Styles, modelName, providerName, reasoningInfo string, context *ModelContextInfo, width int, hyperCredits int) string {
+func ModelInfo(t *styles.Styles, modelName, providerName, reasoningInfo string, context *ModelContextInfo, width int, hyperCredits *int) string {
 	modelIcon := t.ModelInfo.Icon.Render(styles.ModelIcon)
 	modelName = t.ModelInfo.Name.Render(modelName)
 
@@ -78,10 +78,10 @@ func ModelInfo(t *styles.Styles, modelName, providerName, reasoningInfo string, 
 		parts = append(parts, lipgloss.NewStyle().PaddingLeft(2).Render(formattedInfo))
 	}
 
-	if providerName == hyper.DisplayName && hyperCredits > 0 {
+	if providerName == hyper.DisplayName && hyperCredits != nil {
 		hcInfo := t.ModelInfo.HypercreditIcon.Render(styles.HypercreditIcon)
 		hcInfo += " "
-		hcInfo += t.ModelInfo.HypercreditText.Render(fmt.Sprintf("%s Hypercredits", formatCredits(hyperCredits)))
+		hcInfo += t.ModelInfo.HypercreditText.Render(fmt.Sprintf("%s Hypercredits", formatCredits(*hyperCredits)))
 		parts = append(parts, "", hcInfo)
 	}
 

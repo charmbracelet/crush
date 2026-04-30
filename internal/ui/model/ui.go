@@ -271,7 +271,7 @@ type UI struct {
 	lastClickTime time.Time
 
 	// hyperCredits is the remaining Hyper credits, updated after each prompt.
-	hyperCredits int
+	hyperCredits *int
 
 	// Prompt history for up/down navigation through previous messages.
 	promptHistory struct {
@@ -867,7 +867,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case creditsUpdatedMsg:
-		m.hyperCredits = msg.credits
+		m.hyperCredits = &msg.credits
 	case util.InfoMsg:
 		if msg.Type == util.InfoTypeError {
 			slog.Error("Error reported", "error", msg.Msg)

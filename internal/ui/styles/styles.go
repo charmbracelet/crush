@@ -17,10 +17,11 @@ import (
 )
 
 const (
-	CheckIcon   string = "✓"
-	SpinnerIcon string = "⋯"
-	LoadingIcon string = "⟳"
-	ModelIcon   string = "◇"
+	CheckIcon       string = "✓"
+	SpinnerIcon     string = "⋯"
+	LoadingIcon     string = "⟳"
+	ModelIcon       string = "◇"
+	HypercreditIcon string = "◆"
 
 	ArrowRightIcon string = "→"
 
@@ -189,6 +190,8 @@ type Styles struct {
 		TokenCount       lipgloss.Style // "(42K)" token count
 		TokenPercentage  lipgloss.Style // "42%" percent of context window
 		Cost             lipgloss.Style // "$0.42" cost readout
+		HypercreditIcon  lipgloss.Style // Hypercredit icon (◆)
+		HypercreditText  lipgloss.Style // Remaining Hypercredits text
 	}
 
 	// Resource styles the LSP/MCP/skills sidebar lists: their heading,

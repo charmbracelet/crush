@@ -361,11 +361,39 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		if err == nil {
 			options[google.Name] = parsed
 		}
-	case openaicompat.Name:
+	case openaicompat.Name, hyper.Name:
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
 		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
 			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
 		}
+
+		extraBody := make(map[string]any)
+
+		// "reasoning effort" is a standard OpenAI field, but "thinking" is not.
+		// Setting it in the right way for each provider.
+		// TODO: Abstract this in Fantasy somehow?
+		// TODO: Allow custom providers to specify how to set this?
+		switch providerCfg.ID {
+		case hyper.Name:
+			extraBody["thinking"] = model.ModelCfg.Think
+		case string(catwalk.InferenceProviderIoNet):
+			extraBody["chat_template_kwargs"] = map[string]any{
+				"thinking": model.ModelCfg.Think,
+			}
+		case string(catwalk.InferenceProviderZAI):
+			if model.ModelCfg.Think {
+				extraBody["thinking"] = map[string]any{
+					"type": "enabled",
+				}
+			} else {
+				extraBody["thinking"] = map[string]any{
+					"type": "disabled",
+				}
+			}
+		}
+
+		mergedOptions["extra_body"] = extraBody
+
 		parsed, err := openaicompat.ParseOptions(mergedOptions)
 		if err == nil {
 			options[openaicompat.Name] = parsed

@@ -9,7 +9,6 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/atotto/clipboard"
-	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/client"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/oauth"
@@ -70,9 +69,6 @@ crush login copilot
 }
 
 func loginHyper(c *client.Client, wsID string) error {
-	if !hyperp.Enabled() {
-		return fmt.Errorf("hyper not enabled")
-	}
 	ctx := getLoginContext()
 
 	resp, err := hyper.InitiateDeviceAuth(ctx)

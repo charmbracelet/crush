@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"strconv"
 	"sync"
 	"time"
 
@@ -21,19 +20,6 @@ import (
 
 //go:embed provider.json
 var embedded []byte
-
-// Enabled returns true if hyper is enabled.
-var Enabled = sync.OnceValue(func() bool {
-	b, _ := strconv.ParseBool(
-		cmp.Or(
-			os.Getenv("HYPER"),
-			os.Getenv("HYPERCRUSH"),
-			os.Getenv("HYPER_ENABLE"),
-			os.Getenv("HYPER_ENABLED"),
-		),
-	)
-	return b
-})
 
 // Embedded returns the embedded Hyper provider.
 var Embedded = sync.OnceValue(func() catwalk.Provider {

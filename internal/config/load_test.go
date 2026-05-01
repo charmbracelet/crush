@@ -1504,6 +1504,52 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		require.Equal(t, "openai", large.Provider)
 		require.Equal(t, int64(100), large.MaxTokens)
 	})
+
+	t.Run("should not apply reasoning options to models that do not support reasoning", func(t *testing.T) {
+		// Regression test for: switching from a reasoning-capable model to a
+		// non-reasoning model (e.g. Ollama) should not carry over Think or
+		// ReasoningEffort options from the previous model's config.
+		knownProviders := []catwalk.Provider{
+			{
+				ID:                  "ollama",
+				APIKey:              "abc",
+				DefaultLargeModelID: "llama3",
+				DefaultSmallModelID: "llama3",
+				Models: []catwalk.Model{
+					{
+						ID:               "llama3",
+						DefaultMaxTokens: 4096,
+						CanReason:        false,
+					},
+				},
+			},
+		}
+
+		cfg := &Config{
+			Models: map[SelectedModelType]SelectedModel{
+				"large": {
+					Model:           "llama3",
+					Provider:        "ollama",
+					Think:           true,  // persisted from a previous reasoning-capable model
+					ReasoningEffort: "high", // persisted from a previous reasoning-capable model
+				},
+			},
+		}
+		cfg.setDefaults("/tmp", "")
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewEnvironmentVariableResolver(env)
+		err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
+		require.NoError(t, err)
+
+		err = configureSelectedModels(testStore(cfg), knownProviders, true)
+		require.NoError(t, err)
+		large := cfg.Models[SelectedModelTypeLarge]
+		require.Equal(t, "llama3", large.Model)
+		require.Equal(t, "ollama", large.Provider)
+		// Think and ReasoningEffort must be cleared for a non-reasoning model.
+		require.False(t, large.Think, "Think must not be applied to a model that does not support reasoning")
+		require.Empty(t, large.ReasoningEffort, "ReasoningEffort must not be applied to a model that does not support reasoning")
+	})
 }
 
 func TestConfig_configureProviders_HyperAPIKeyFromEnv(t *testing.T) {

@@ -179,6 +179,7 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 			m.list.Focus()
 			if m.list.IsSelectedLast() {
 				m.list.SelectFirst()
+				m.list.ScrollToTop()
 			} else {
 				m.list.SelectNext()
 			}

@@ -81,7 +81,7 @@ func ModelInfo(t *styles.Styles, modelName, providerName, reasoningInfo string, 
 	if providerName == hyper.DisplayName && hyperCredits != nil {
 		hcInfo := t.ModelInfo.HypercreditIcon.Render(styles.HypercreditIcon)
 		hcInfo += " "
-		hcInfo += t.ModelInfo.HypercreditText.Render(fmt.Sprintf("%s Hypercredits", formatCredits(*hyperCredits)))
+		hcInfo += t.ModelInfo.HypercreditText.Render(fmt.Sprintf("%s Hypercredits", FormatCredits(*hyperCredits)))
 		parts = append(parts, "", hcInfo)
 	}
 
@@ -124,8 +124,8 @@ func formatTokensAndCost(t *styles.Styles, tokens, contextWindow int64, cost flo
 	return fmt.Sprintf("%s %s", formattedTokens, formattedCost)
 }
 
-// formatCredits formats an integer with comma separators for thousands.
-func formatCredits(n int) string {
+// FormatCredits formats an integer with comma separators for thousands.
+func FormatCredits(n int) string {
 	s := strconv.FormatInt(int64(n), 10)
 	if n < 1000 {
 		return s

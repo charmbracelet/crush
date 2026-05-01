@@ -64,6 +64,7 @@ type Styles struct {
 		Charm             lipgloss.Style // Style for "Charm™" label
 		Diagonals         lipgloss.Style // Style for diagonal separators (╱)
 		Percentage        lipgloss.Style // Style for context percentage
+		Hypercredit       lipgloss.Style // Style for Hypercredit count (◆ N)
 		Keystroke         lipgloss.Style // Style for keystroke hints (e.g., "ctrl+d")
 		KeystrokeTip      lipgloss.Style // Style for keystroke action text (e.g., "open", "close")
 		WorkingDir        lipgloss.Style // Style for current working directory

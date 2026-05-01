@@ -577,6 +577,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Header.Charm = base.Foreground(o.secondary)
 	s.Header.Diagonals = base.Foreground(o.primary)
 	s.Header.Percentage = muted
+	s.Header.Hypercredit = base.Foreground(charmtone.Dolly)
 	s.Header.Keystroke = muted
 	s.Header.KeystrokeTip = subtle
 	s.Header.WorkingDir = muted

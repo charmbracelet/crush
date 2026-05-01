@@ -142,7 +142,9 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	cwd := common.PrettyPath(t, m.com.Workspace.WorkingDir(), width)
 	sidebarLogo := m.sidebarLogo
 	if height < logoHeightBreakpoint {
-		sidebarLogo = logo.SmallRender(m.com.Styles, width)
+		sidebarLogo = logo.SmallRender(m.com.Styles, width, logo.Opts{
+			Hyper: m.com.IsHyper(),
+		})
 	}
 	blocks := []string{
 		sidebarLogo,

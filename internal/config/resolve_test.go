@@ -3,260 +3,221 @@ package config
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/stretchr/testify/require"
 )
 
-// mockShell implements the Shell interface for testing
-type mockShell struct {
-	execFunc func(ctx context.Context, command string) (stdout, stderr string, err error)
+// fakeExpander returns a canned value/error for the last passed value and
+// records the context, raw value, and env slice it was called with. It
+// lets the config-layer tests assert on delegation behaviour without
+// spinning up a real interpreter — real-shell coverage lives in
+// internal/shell/expand_test.go and resolve_real_test.go.
+type fakeExpander struct {
+	expand    func(ctx context.Context, value string, env []string) (string, error)
+	lastValue string
+	lastEnv   []string
+	calls     int
 }
 
-func (m *mockShell) Exec(ctx context.Context, command string) (stdout, stderr string, err error) {
-	if m.execFunc != nil {
-		return m.execFunc(ctx, command)
+func (f *fakeExpander) Expand(ctx context.Context, value string, env []string) (string, error) {
+	f.calls++
+	f.lastValue = value
+	f.lastEnv = env
+	if f.expand == nil {
+		return value, nil
 	}
-	return "", "", nil
+	return f.expand(ctx, value, env)
 }
 
-func TestShellVariableResolver_ResolveValue(t *testing.T) {
-	tests := []struct {
-		name        string
-		value       string
-		envVars     map[string]string
-		shellFunc   func(ctx context.Context, command string) (stdout, stderr string, err error)
-		expected    string
-		expectError bool
-	}{
-		{
-			name:     "non-variable string returns as-is",
-			value:    "plain-string",
-			expected: "plain-string",
-		},
-		{
-			name:     "environment variable resolution",
-			value:    "$HOME",
-			envVars:  map[string]string{"HOME": "/home/user"},
-			expected: "/home/user",
-		},
-		{
-			name:        "missing environment variable returns error",
-			value:       "$MISSING_VAR",
-			envVars:     map[string]string{},
-			expectError: true,
-		},
+func TestShellVariableResolver_DelegatesToExpander(t *testing.T) {
+	t.Parallel()
 
-		{
-			name:  "shell command with whitespace trimming",
-			value: "$(echo '  spaced  ')",
-			shellFunc: func(ctx context.Context, command string) (stdout, stderr string, err error) {
-				if command == "echo '  spaced  '" {
-					return "  spaced  \n", "", nil
-				}
-				return "", "", errors.New("unexpected command")
-			},
-			expected: "spaced",
-		},
-		{
-			name:  "shell command execution error",
-			value: "$(false)",
-			shellFunc: func(ctx context.Context, command string) (stdout, stderr string, err error) {
-				return "", "", errors.New("command failed")
-			},
-			expectError: true,
-		},
-		{
-			name:        "invalid format returns error",
-			value:       "$",
-			expectError: true,
+	fe := &fakeExpander{
+		expand: func(_ context.Context, value string, _ []string) (string, error) {
+			if value == "hello $FOO" {
+				return "hello bar", nil
+			}
+			return value, nil
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			testEnv := env.NewFromMap(tt.envVars)
-			resolver := &shellVariableResolver{
-				shell: &mockShell{execFunc: tt.shellFunc},
-				env:   testEnv,
-			}
+	e := env.NewFromMap(map[string]string{"FOO": "bar"})
+	r := NewShellVariableResolver(e, WithExpander(fe.Expand))
 
-			result, err := resolver.ResolveValue(tt.value)
-
-			if tt.expectError {
-				require.Error(t, err)
-			} else {
-				require.NoError(t, err)
-				require.Equal(t, tt.expected, result)
-			}
-		})
-	}
+	got, err := r.ResolveValue("hello $FOO")
+	require.NoError(t, err)
+	require.Equal(t, "hello bar", got)
+	require.Equal(t, 1, fe.calls)
+	require.Equal(t, "hello $FOO", fe.lastValue)
+	require.Contains(t, fe.lastEnv, "FOO=bar")
 }
 
-func TestShellVariableResolver_EnhancedResolveValue(t *testing.T) {
-	tests := []struct {
-		name        string
-		value       string
-		envVars     map[string]string
-		shellFunc   func(ctx context.Context, command string) (stdout, stderr string, err error)
-		expected    string
-		expectError bool
-	}{
-		{
-			name:  "command substitution within string",
-			value: "Bearer $(echo token123)",
-			shellFunc: func(ctx context.Context, command string) (stdout, stderr string, err error) {
-				if command == "echo token123" {
-					return "token123\n", "", nil
-				}
-				return "", "", errors.New("unexpected command")
-			},
-			expected: "Bearer token123",
-		},
-		{
-			name:     "environment variable within string",
-			value:    "Bearer $TOKEN",
-			envVars:  map[string]string{"TOKEN": "sk-ant-123"},
-			expected: "Bearer sk-ant-123",
-		},
-		{
-			name:     "environment variable with braces within string",
-			value:    "Bearer ${TOKEN}",
-			envVars:  map[string]string{"TOKEN": "sk-ant-456"},
-			expected: "Bearer sk-ant-456",
-		},
-		{
-			name:  "mixed command and environment substitution",
-			value: "$USER-$(date +%Y)-$HOST",
-			envVars: map[string]string{
-				"USER": "testuser",
-				"HOST": "localhost",
-			},
-			shellFunc: func(ctx context.Context, command string) (stdout, stderr string, err error) {
-				if command == "date +%Y" {
-					return "2024\n", "", nil
-				}
-				return "", "", errors.New("unexpected command")
-			},
-			expected: "testuser-2024-localhost",
-		},
-		{
-			name:  "multiple command substitutions",
-			value: "$(echo hello) $(echo world)",
-			shellFunc: func(ctx context.Context, command string) (stdout, stderr string, err error) {
-				switch command {
-				case "echo hello":
-					return "hello\n", "", nil
-				case "echo world":
-					return "world\n", "", nil
-				}
-				return "", "", errors.New("unexpected command")
-			},
-			expected: "hello world",
-		},
-		{
-			name:  "nested parentheses in command",
-			value: "$(echo $(echo inner))",
-			shellFunc: func(ctx context.Context, command string) (stdout, stderr string, err error) {
-				if command == "echo $(echo inner)" {
-					return "nested\n", "", nil
-				}
-				return "", "", errors.New("unexpected command")
-			},
-			expected: "nested",
-		},
-		{
-			name:        "lone dollar with non-variable chars",
-			value:       "prefix$123suffix", // Numbers can't start variable names
-			expectError: true,
-		},
-		{
-			name:        "dollar with special chars",
-			value:       "a$@b$#c", // Special chars aren't valid in variable names
-			expectError: true,
-		},
-		{
-			name:        "empty environment variable substitution",
-			value:       "Bearer $EMPTY_VAR",
-			envVars:     map[string]string{},
-			expectError: true,
-		},
-		{
-			name:        "unmatched command substitution opening",
-			value:       "Bearer $(echo test",
-			expectError: true,
-		},
-		{
-			name:        "unmatched environment variable braces",
-			value:       "Bearer ${TOKEN",
-			expectError: true,
-		},
-		{
-			name:  "command substitution with error",
-			value: "Bearer $(false)",
-			shellFunc: func(ctx context.Context, command string) (stdout, stderr string, err error) {
-				return "", "", errors.New("command failed")
-			},
-			expectError: true,
-		},
-		{
-			name:  "complex real-world example",
-			value: "Bearer $(cat /tmp/token.txt | base64 -w 0)",
-			shellFunc: func(ctx context.Context, command string) (stdout, stderr string, err error) {
-				if command == "cat /tmp/token.txt | base64 -w 0" {
-					return "c2stYW50LXRlc3Q=\n", "", nil
-				}
-				return "", "", errors.New("unexpected command")
-			},
-			expected: "Bearer c2stYW50LXRlc3Q=",
-		},
-		{
-			name:     "environment variable with underscores and numbers",
-			value:    "Bearer $API_KEY_V2",
-			envVars:  map[string]string{"API_KEY_V2": "sk-test-123"},
-			expected: "Bearer sk-test-123",
-		},
-		{
-			name:     "no substitution needed",
-			value:    "Bearer sk-ant-static-token",
-			expected: "Bearer sk-ant-static-token",
-		},
-		{
-			name:        "incomplete variable at end",
-			value:       "Bearer $",
-			expectError: true,
-		},
-		{
-			name:        "variable with invalid character",
-			value:       "Bearer $VAR-NAME", // Hyphen not allowed in variable names
-			expectError: true,
-		},
-		{
-			name:        "multiple invalid variables",
-			value:       "$1$2$3",
-			expectError: true,
+func TestShellVariableResolver_LoneDollarIsError(t *testing.T) {
+	t.Parallel()
+
+	// Lone "$" must short-circuit before reaching the expander: the
+	// underlying shell parser would accept it as a literal, but this
+	// resolver has historically rejected it and callers depend on
+	// that early-fail behaviour.
+	fe := &fakeExpander{}
+	r := NewShellVariableResolver(env.NewFromMap(nil), WithExpander(fe.Expand))
+
+	_, err := r.ResolveValue("$")
+	require.Error(t, err)
+	require.Equal(t, 0, fe.calls, "expander must not be called for lone $")
+}
+
+func TestShellVariableResolver_PassesThroughLiterals(t *testing.T) {
+	t.Parallel()
+
+	fe := &fakeExpander{
+		expand: func(_ context.Context, value string, _ []string) (string, error) {
+			return value, nil
 		},
 	}
+	r := NewShellVariableResolver(env.NewFromMap(nil), WithExpander(fe.Expand))
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			testEnv := env.NewFromMap(tt.envVars)
-			resolver := &shellVariableResolver{
-				shell: &mockShell{execFunc: tt.shellFunc},
-				env:   testEnv,
-			}
+	got, err := r.ResolveValue("plain-string")
+	require.NoError(t, err)
+	require.Equal(t, "plain-string", got)
+}
 
-			result, err := resolver.ResolveValue(tt.value)
+func TestShellVariableResolver_WrapsErrorsWithTemplate(t *testing.T) {
+	t.Parallel()
 
-			if tt.expectError {
-				require.Error(t, err)
-			} else {
-				require.NoError(t, err)
-				require.Equal(t, tt.expected, result)
-			}
-		})
+	inner := errors.New("cat: /run/secrets/x: permission denied")
+	fe := &fakeExpander{
+		expand: func(_ context.Context, _ string, _ []string) (string, error) {
+			return "", inner
+		},
 	}
+	r := NewShellVariableResolver(env.NewFromMap(nil), WithExpander(fe.Expand))
+
+	_, err := r.ResolveValue("$(cat /run/secrets/x)")
+	require.Error(t, err)
+	require.ErrorIs(t, err, inner)
+	require.Contains(t, err.Error(), "$(cat /run/secrets/x)")
+	require.Contains(t, err.Error(), "permission denied")
+}
+
+func TestSanitizeResolveError(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil passes through", func(t *testing.T) {
+		t.Parallel()
+		require.NoError(t, sanitizeResolveError("anything", nil))
+	})
+
+	t.Run("includes template and wraps inner", func(t *testing.T) {
+		t.Parallel()
+		inner := errors.New("cat: /run/secrets/x: permission denied")
+		got := sanitizeResolveError("$(cat /run/secrets/x)", inner)
+		require.Error(t, got)
+		require.ErrorIs(t, got, inner)
+		require.Contains(t, got.Error(), "$(cat /run/secrets/x)")
+		require.Contains(t, got.Error(), "permission denied")
+	})
+
+	t.Run("unwrap preserves original for errors.Is", func(t *testing.T) {
+		t.Parallel()
+		inner := errors.New("sentinel")
+		got := sanitizeResolveError("$FOO", inner)
+		require.ErrorIs(t, got, inner)
+	})
+
+	t.Run("truncates over-budget inner message", func(t *testing.T) {
+		t.Parallel()
+		// Inner message holds far more than the budget. After
+		// sanitization the rendered inner portion must not exceed
+		// maxResolveErrBytes, and the characters beyond the budget
+		// (marked by a distinct tail sentinel) must be gone.
+		const tailSentinel = "TAIL_SENTINEL_BEYOND_BUDGET"
+		body := strings.Repeat("x", maxResolveErrBytes)
+		inner := errors.New(body + tailSentinel)
+
+		got := sanitizeResolveError("$TEMPLATE", inner)
+		require.Error(t, got)
+
+		prefix := `resolving "$TEMPLATE": `
+		rendered := got.Error()
+		require.True(
+			t,
+			strings.HasPrefix(rendered, prefix),
+			"rendered error must start with template prefix",
+		)
+		innerRendered := strings.TrimPrefix(rendered, prefix)
+		require.LessOrEqual(
+			t,
+			len(innerRendered),
+			maxResolveErrBytes,
+			"inner message must be bounded to maxResolveErrBytes",
+		)
+		require.NotContains(
+			t,
+			rendered,
+			tailSentinel,
+			"content past the budget must not leak",
+		)
+	})
+
+	t.Run("replaces non-printable bytes", func(t *testing.T) {
+		t.Parallel()
+		// NUL, BEL, ESC, DEL, and a UTF-8 high byte should all be
+		// scrubbed to '?'. Tab and newline are preserved because
+		// they show up legitimately in command stderr.
+		inner := errors.New("ok\x00bad\x07\x1b\x7f\xffend\ttab\nline")
+		got := sanitizeResolveError("$T", inner)
+		rendered := got.Error()
+
+		require.NotContains(t, rendered, "\x00")
+		require.NotContains(t, rendered, "\x07")
+		require.NotContains(t, rendered, "\x1b")
+		require.NotContains(t, rendered, "\x7f")
+		require.NotContains(t, rendered, "\xff")
+		require.Contains(t, rendered, "ok?bad????end\ttab\nline")
+	})
+
+	t.Run("scrubbing does not depend on shell.ExpandValue upstream", func(t *testing.T) {
+		t.Parallel()
+		// A custom Expander can inject arbitrary error text. The
+		// config-layer helper is the single chokepoint; it must
+		// bound + scrub regardless of the error source.
+		nasty := strings.Repeat("A", maxResolveErrBytes+64) + "\x00BEYOND"
+		fe := &fakeExpander{
+			expand: func(_ context.Context, _ string, _ []string) (string, error) {
+				return "", errors.New(nasty)
+			},
+		}
+		r := NewShellVariableResolver(env.NewFromMap(nil), WithExpander(fe.Expand))
+
+		_, err := r.ResolveValue("$T")
+		require.Error(t, err)
+		require.NotContains(t, err.Error(), "BEYOND", "over-budget tail must not leak")
+		require.NotContains(t, err.Error(), "\x00", "non-printables must be scrubbed")
+	})
+}
+
+func TestScrubErrorMessage(t *testing.T) {
+	t.Parallel()
+
+	t.Run("bounds output to maxResolveErrBytes", func(t *testing.T) {
+		t.Parallel()
+		got := scrubErrorMessage(strings.Repeat("a", maxResolveErrBytes*3))
+		require.Len(t, got, maxResolveErrBytes)
+	})
+
+	t.Run("preserves printable ASCII tab and newline", func(t *testing.T) {
+		t.Parallel()
+		require.Equal(t, "a\tb\nc d!", scrubErrorMessage("a\tb\nc d!"))
+	})
+
+	t.Run("replaces control and non-ASCII bytes", func(t *testing.T) {
+		t.Parallel()
+		require.Equal(t, "a?b??c", scrubErrorMessage("a\x01b\x1b\xe2c"))
+	})
 }
 
 func TestEnvironmentVariableResolver_ResolveValue(t *testing.T) {

@@ -461,7 +461,11 @@ func createTransport(ctx context.Context, m config.MCPConfig, resolver config.Va
 			Command: cmd,
 		}, nil
 	case config.MCPHttp:
-		if strings.TrimSpace(m.URL) == "" {
+		url, err := m.ResolvedURL(resolver)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(url) == "" {
 			return nil, fmt.Errorf("mcp http config requires a non-empty 'url' field")
 		}
 		headers, err := m.ResolvedHeaders(resolver)
@@ -474,11 +478,15 @@ func createTransport(ctx context.Context, m config.MCPConfig, resolver config.Va
 			},
 		}
 		return &mcp.StreamableClientTransport{
-			Endpoint:   m.URL,
+			Endpoint:   url,
 			HTTPClient: client,
 		}, nil
 	case config.MCPSSE:
-		if strings.TrimSpace(m.URL) == "" {
+		url, err := m.ResolvedURL(resolver)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(url) == "" {
 			return nil, fmt.Errorf("mcp sse config requires a non-empty 'url' field")
 		}
 		headers, err := m.ResolvedHeaders(resolver)
@@ -491,7 +499,7 @@ func createTransport(ctx context.Context, m config.MCPConfig, resolver config.Va
 			},
 		}
 		return &mcp.SSEClientTransport{
-			Endpoint:   m.URL,
+			Endpoint:   url,
 			HTTPClient: client,
 		}, nil
 	default:

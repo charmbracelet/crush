@@ -466,6 +466,37 @@ func TestValidateHooksNormalizesEventNames(t *testing.T) {
 	}
 }
 
+func TestRunnerHookNameUsesDisplayName(t *testing.T) {
+	t.Parallel()
+
+	t.Run("name field is used when set", func(t *testing.T) {
+		t.Parallel()
+		hookCfg := config.HookConfig{
+			Name:    "my-hook",
+			Command: `echo '{"decision":"allow"}'`,
+		}
+		r := NewRunner([]config.HookConfig{hookCfg}, t.TempDir(), t.TempDir())
+		result, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{}`)
+		require.NoError(t, err)
+		require.Equal(t, DecisionAllow, result.Decision)
+		require.Len(t, result.Hooks, 1)
+		require.Equal(t, "my-hook", result.Hooks[0].Name)
+	})
+
+	t.Run("command is used when name is empty", func(t *testing.T) {
+		t.Parallel()
+		hookCfg := config.HookConfig{
+			Command: `echo '{"decision":"allow"}'`,
+		}
+		r := NewRunner([]config.HookConfig{hookCfg}, t.TempDir(), t.TempDir())
+		result, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{}`)
+		require.NoError(t, err)
+		require.Equal(t, DecisionAllow, result.Decision)
+		require.Len(t, result.Hooks, 1)
+		require.Equal(t, `echo '{"decision":"allow"}'`, result.Hooks[0].Name)
+	})
+}
+
 func TestRunnerParallelExecution(t *testing.T) {
 	t.Parallel()
 	// Two hooks: one allows, one denies. Deny should win.

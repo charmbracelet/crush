@@ -110,7 +110,7 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 	agg.Hooks = make([]HookInfo, len(deduped))
 	for i, h := range deduped {
 		agg.Hooks[i] = HookInfo{
-			Name:         h.Command,
+			Name:         h.DisplayName(),
 			Matcher:      h.Matcher,
 			Decision:     results[i].Decision.String(),
 			Halt:         results[i].Halt,

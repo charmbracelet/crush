@@ -447,11 +447,15 @@ func createTransport(ctx context.Context, m config.MCPConfig, resolver config.Va
 		if strings.TrimSpace(command) == "" {
 			return nil, fmt.Errorf("mcp stdio config requires a non-empty 'command' field")
 		}
-		envs, err := m.ResolvedEnv()
+		args, err := m.ResolvedArgs(resolver)
 		if err != nil {
 			return nil, err
 		}
-		cmd := exec.CommandContext(ctx, home.Long(command), m.Args...)
+		envs, err := m.ResolvedEnv(resolver)
+		if err != nil {
+			return nil, err
+		}
+		cmd := exec.CommandContext(ctx, home.Long(command), args...)
 		cmd.Env = append(os.Environ(), envs...)
 		return &mcp.CommandTransport{
 			Command: cmd,
@@ -460,7 +464,7 @@ func createTransport(ctx context.Context, m config.MCPConfig, resolver config.Va
 		if strings.TrimSpace(m.URL) == "" {
 			return nil, fmt.Errorf("mcp http config requires a non-empty 'url' field")
 		}
-		headers, err := m.ResolvedHeaders()
+		headers, err := m.ResolvedHeaders(resolver)
 		if err != nil {
 			return nil, err
 		}
@@ -477,7 +481,7 @@ func createTransport(ctx context.Context, m config.MCPConfig, resolver config.Va
 		if strings.TrimSpace(m.URL) == "" {
 			return nil, fmt.Errorf("mcp sse config requires a non-empty 'url' field")
 		}
-		headers, err := m.ResolvedHeaders()
+		headers, err := m.ResolvedHeaders(resolver)
 		if err != nil {
 			return nil, err
 		}

@@ -222,6 +222,12 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 		if len(config.ExtraHeaders) > 0 {
 			maps.Copy(headers, config.ExtraHeaders)
 		}
+		// Intentional divergence from MCP env/headers/args/url resolution:
+		// provider headers that fail to resolve log and keep their literal
+		// template so providers with optional, env-gated headers still
+		// load on hosts where those vars are unset. Changing this to a
+		// hard error would break those configs. See PLAN.md "Design
+		// decisions" item 4 for the full rationale.
 		for k, v := range headers {
 			resolved, err := resolver.ResolveValue(v)
 			if err != nil {

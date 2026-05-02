@@ -70,7 +70,7 @@ func TestReadTextFileBoundaryCases(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			gotContent, gotHasMore, err := readTextFile(filePath, tt.offset, tt.limit)
+			gotContent, gotHasMore, err := readTextFile(filePath, tt.offset, tt.limit, 0)
 			require.NoError(t, err)
 			require.Equal(t, tt.wantContent, gotContent)
 			require.Equal(t, tt.wantHasMore, gotHasMore)
@@ -87,7 +87,7 @@ func TestReadTextFileTruncatesLongLines(t *testing.T) {
 	longLine := strings.Repeat("a", MaxLineLength+10)
 	require.NoError(t, os.WriteFile(filePath, []byte(longLine), 0o644))
 
-	content, hasMore, err := readTextFile(filePath, 0, 1)
+	content, hasMore, err := readTextFile(filePath, 0, 1, 0)
 	require.NoError(t, err)
 	require.False(t, hasMore)
 	require.Equal(t, strings.Repeat("a", MaxLineLength)+"...", content)
@@ -137,6 +137,42 @@ func TestViewToolBlocksOversizedReturnedSections(t *testing.T) {
 
 	require.True(t, resp.IsError)
 	require.Contains(t, resp.Content, "Content section is too large")
+}
+
+func TestReadTextFileEnforcesMaxContentSize(t *testing.T) {
+	t.Parallel()
+
+	workingDir := t.TempDir()
+	filePath := filepath.Join(workingDir, "oversized.txt")
+	lines := []string{
+		strings.Repeat("a", MaxLineLength),
+		strings.Repeat("b", MaxLineLength),
+		"target line",
+	}
+	require.NoError(t, os.WriteFile(filePath, []byte(strings.Join(lines, "\n")), 0o644))
+
+	content, hasMore, err := readTextFile(filePath, 0, len(lines), MaxLineLength)
+	require.ErrorAs(t, err, &contentTooLargeError{})
+	require.Empty(t, content)
+	require.False(t, hasMore)
+
+	content, hasMore, err = readTextFile(filePath, 2, 1, MaxLineLength)
+	require.NoError(t, err)
+	require.Equal(t, "target line", content)
+	require.False(t, hasMore)
+}
+
+func TestReadTextFileAllowsExactMaxContentSize(t *testing.T) {
+	t.Parallel()
+
+	workingDir := t.TempDir()
+	filePath := filepath.Join(workingDir, "exact-size.txt")
+	require.NoError(t, os.WriteFile(filePath, []byte("abcd\nefgh"), 0o644))
+
+	content, hasMore, err := readTextFile(filePath, 0, 2, len("abcd\nefgh"))
+	require.NoError(t, err)
+	require.Equal(t, "abcd\nefgh", content)
+	require.False(t, hasMore)
 }
 
 type mockViewPermissionService struct {

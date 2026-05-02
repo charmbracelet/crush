@@ -1,4 +1,4 @@
-Read a file by path with line numbers; supports offset and line limit (default 2000, max 200KB returned text); renders images (PNG, JPEG, GIF, BMP, SVG, WebP); use ls for directories.
+Read a file by path with line numbers; supports offset and line limit (default 2000, max 200KB returned file content section); renders images (PNG, JPEG, GIF, BMP, SVG, WebP); use ls for directories.
 
 <usage>
 - Provide file path to read
@@ -18,7 +18,7 @@ Read a file by path with line numbers; supports offset and line limit (default 2
 </features>
 
 <limitations>
-- Max returned text content: 200KB after offset/limit are applied
+- Max returned file content section: 200KB after offset/limit are applied
 - Default limit: 2000 lines
 - Lines >2000 chars truncated
 - Binary files (except images) cannot be displayed

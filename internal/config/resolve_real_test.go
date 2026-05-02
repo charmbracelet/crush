@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/env"
@@ -43,8 +44,11 @@ func writeTempFile(t *testing.T, content string) string {
 func TestResolvedEnv_RealShell_Success(t *testing.T) {
 	t.Parallel()
 
-	withNL := writeTempFile(t, "token-with-nl\n")
-	noNL := writeTempFile(t, "token-no-nl")
+	// filepath.ToSlash so Windows temp paths (C:\Users\...) survive
+	// being injected into a shell command string — the embedded shell
+	// treats backslashes as escapes, forward slashes work on every OS.
+	withNL := filepath.ToSlash(writeTempFile(t, "token-with-nl\n"))
+	noNL := filepath.ToSlash(writeTempFile(t, "token-no-nl"))
 
 	m := MCPConfig{
 		Env: map[string]string{
@@ -175,14 +179,17 @@ func TestResolvedEnv_RealShell_NounsetRegression(t *testing.T) {
 }
 
 // TestResolvedEnv_RealShell_FailureDetail pins that a failing inner
-// command surfaces enough detail (exit code + stderr) to diagnose
-// without forcing the user to re-run the command by hand. Also
-// verifies the template is included so they know which Env entry
-// blew up.
+// command surfaces enough detail (exit code + stderr on POSIX, the
+// underlying OS error on Windows where coreutils runs in-process) to
+// diagnose without forcing the user to re-run the command by hand.
+// Also verifies the template is included so they know which Env
+// entry blew up.
 func TestResolvedEnv_RealShell_FailureDetail(t *testing.T) {
 	t.Parallel()
 
-	missing := filepath.Join(t.TempDir(), "definitely-not-here")
+	// Forward slashes so the path survives shell-string injection on
+	// Windows; see TestResolvedEnv_RealShell_Success for the same note.
+	missing := filepath.ToSlash(filepath.Join(t.TempDir(), "definitely-not-here"))
 	m := MCPConfig{Env: map[string]string{
 		"FORGEJO_ACCESS_TOKEN": fmt.Sprintf("$(cat %s)", missing),
 	}}
@@ -192,7 +199,16 @@ func TestResolvedEnv_RealShell_FailureDetail(t *testing.T) {
 	msg := err.Error()
 	require.Contains(t, msg, "FORGEJO_ACCESS_TOKEN", "must identify the failing env var")
 	require.Contains(t, msg, missing, "must include the template so users see what failed")
-	require.Contains(t, msg, "exit status", "must surface the inner exit code")
+
+	// Inner diagnostic detail must survive. POSIX surfaces "exit
+	// status N" + stderr; Windows' in-process coreutils surfaces the
+	// Go OS error instead. Accept either shape so the test is
+	// portable without weakening the intent.
+	lower := strings.ToLower(msg)
+	hasDetail := strings.Contains(lower, "exit status") ||
+		strings.Contains(lower, "no such file") ||
+		strings.Contains(lower, "cannot find")
+	require.True(t, hasDetail, "must surface inner error detail: %s", msg)
 }
 
 // TestResolvedHeaders_RealShell_FailurePreservesOriginal pins two

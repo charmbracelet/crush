@@ -162,7 +162,8 @@ func NewViewTool(
 			}
 
 			// Based on the specifications we should not limit the skills read.
-			if !isSkillFile && fileInfo.Size() > MaxViewSize {
+			// Only block if no limit is set.
+			if !isSkillFile && params.Limit <= 0 && fileInfo.Size() > MaxViewSize {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("File is too large (%d bytes). Maximum size is %d bytes",
 					fileInfo.Size(), MaxViewSize)), nil
 			}

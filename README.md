@@ -292,10 +292,17 @@ like you would. LSPs can be added manually like so:
 
 ### MCPs
 
-Crush also supports Model Context Protocol (MCP) servers through three
-transport types: `stdio` for command-line servers, `http` for HTTP endpoints,
-and `sse` for Server-Sent Events. Environment variable expansion is supported
-using `$(echo $VAR)` syntax.
+Crush also supports Model Context Protocol (MCP) servers through three transport
+types: `stdio` for command-line servers, `http` for HTTP endpoints, and `sse`
+for Server-Sent Events.
+
+Shell-style value expansion (`$VAR`, `${VAR:-default}`, `$(command)`, quoting,
+and nesting (works in `command`, `args`, `env`, `headers`, and `url`, so
+file-based secrets like work out of the box, so you can use values like
+"$TOKEN"` and `"$(cat /path/to/secret/token)"``. Expansion runs through Crush's
+embedded shell, so the same syntax works on all supported systems, including
+Windows. Unset variables are an error; use `${VAR:-fallback}` to opt in to
+a default.
 
 ```json
 {

@@ -3,12 +3,16 @@ package config
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/shell"
 )
+
+// resolveTimeout bounds how long a single ResolveValue call may spend
+// inside shell expansion (including any command substitution). Matches
+// the timeout used by the previous hand-rolled parser.
+const resolveTimeout = 5 * time.Minute
 
 type VariableResolver interface {
 	ResolveValue(value string) (string, error)
@@ -28,141 +32,140 @@ func IdentityResolver() VariableResolver {
 	return identityResolver{}
 }
 
-type Shell interface {
-	Exec(ctx context.Context, command string) (stdout, stderr string, err error)
-}
+// Expander is the single-value shell expansion seam used by
+// shellVariableResolver. Production wires it to shell.ExpandValue; tests
+// can inject a fake via WithExpander.
+type Expander func(ctx context.Context, value string, env []string) (string, error)
 
-type shellVariableResolver struct {
-	shell Shell
-	env   env.Env
-}
+// ShellResolverOption customizes shell variable resolver construction.
+type ShellResolverOption func(*shellVariableResolver)
 
-func NewShellVariableResolver(env env.Env) VariableResolver {
-	return &shellVariableResolver{
-		env: env,
-		shell: shell.NewShell(
-			&shell.Options{
-				Env: env.Env(),
-			},
-		),
+// WithExpander overrides the expansion function used by the resolver.
+// Primarily intended for tests; production callers should not need this.
+func WithExpander(e Expander) ShellResolverOption {
+	return func(r *shellVariableResolver) {
+		if e != nil {
+			r.expand = e
+		}
 	}
 }
 
-// ResolveValue is a method for resolving values, such as environment variables.
-// it will resolve shell-like variable substitution anywhere in the string, including:
-// - $(command) for command substitution
-// - $VAR or ${VAR} for environment variables
+type shellVariableResolver struct {
+	env    env.Env
+	expand Expander
+}
+
+// NewShellVariableResolver returns a VariableResolver that delegates to
+// the embedded shell (the same interpreter used by the bash tool and
+// hooks). Supported constructs match shell.ExpandValue: $VAR, ${VAR},
+// ${VAR:-default}, $(command), quoting, and escapes. Unset variables are
+// an error; use ${VAR:-} to opt in to an empty fallback.
+func NewShellVariableResolver(e env.Env, opts ...ShellResolverOption) VariableResolver {
+	r := &shellVariableResolver{
+		env:    e,
+		expand: shell.ExpandValue,
+	}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
+}
+
+// ResolveValue resolves shell-style substitution anywhere in the string:
+//
+//   - $(command) for command substitution, with full quoting and nesting.
+//   - $VAR and ${VAR} for environment variables.
+//   - ${VAR:-default} / ${VAR:+alt} / ${VAR:?msg} for defaulting.
+//
+// Unset variables are a hard error (nounset), mirroring the historical
+// behaviour of this resolver: silently expanding an unset variable to the
+// empty string is exactly how broken credentials reach MCP servers.
 func (r *shellVariableResolver) ResolveValue(value string) (string, error) {
-	// Special case: lone $ is an error (backward compatibility)
+	// Preserve the historical backward-compat contract: a lone "$" is a
+	// malformed config value, not a legal literal. The underlying shell
+	// parser would accept it as a literal; we reject it here so existing
+	// configs that relied on this validation still fail early.
 	if value == "$" {
 		return "", fmt.Errorf("invalid value format: %s", value)
 	}
 
-	// If no $ found, return as-is
-	if !strings.Contains(value, "$") {
-		return value, nil
+	ctx, cancel := context.WithTimeout(context.Background(), resolveTimeout)
+	defer cancel()
+
+	out, err := r.expand(ctx, value, r.env.Env())
+	if err != nil {
+		return "", sanitizeResolveError(value, err)
 	}
+	return out, nil
+}
 
-	result := value
+// maxResolveErrBytes bounds the size of the inner error message surfaced
+// from a resolution failure. Defense-in-depth on top of shell.ExpandValue's
+// own stderr budget: a custom Expander injected via WithExpander, or any
+// future non-shell error path, must still produce a user-safe message.
+const maxResolveErrBytes = 512
 
-	// Handle command substitution: $(command)
-	for {
-		start := strings.Index(result, "$(")
-		if start == -1 {
-			break
-		}
-
-		// Find matching closing parenthesis
-		depth := 0
-		end := -1
-		for i := start + 2; i < len(result); i++ {
-			if result[i] == '(' {
-				depth++
-			} else if result[i] == ')' {
-				if depth == 0 {
-					end = i
-					break
-				}
-				depth--
-			}
-		}
-
-		if end == -1 {
-			return "", fmt.Errorf("unmatched $( in value: %s", value)
-		}
-
-		command := result[start+2 : end]
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-
-		stdout, _, err := r.shell.Exec(ctx, command)
-		cancel()
-		if err != nil {
-			return "", fmt.Errorf("command execution failed for '%s': %w", command, err)
-		}
-
-		// Replace the $(command) with the output
-		replacement := strings.TrimSpace(stdout)
-		result = result[:start] + replacement + result[end+1:]
+// sanitizeResolveError wraps an expansion error with the user-written
+// template (the pre-expansion string — it is what they typed, safe to
+// surface) and a bounded, scrubbed rendering of the inner error message.
+// Contract:
+//
+//   - Never includes the resolved (post-expansion) value. This helper
+//     only receives the template and err, so a successful expansion
+//     result cannot reach it.
+//   - May include the template verbatim.
+//   - Truncates the inner error's message to maxResolveErrBytes and
+//     replaces embedded NULs and other non-printables (except tab and
+//     newline) with '?'.
+//
+// The returned error still unwraps to the original for errors.Is/As so
+// callers can inspect typed sentinels; only the rendered message is
+// scrubbed.
+func sanitizeResolveError(template string, err error) error {
+	if err == nil {
+		return nil
 	}
+	return &resolveError{
+		template: template,
+		msg:      scrubErrorMessage(err.Error()),
+		inner:    err,
+	}
+}
 
-	// Handle environment variables: $VAR and ${VAR}
-	searchStart := 0
-	for {
-		start := strings.Index(result[searchStart:], "$")
-		if start == -1 {
-			break
-		}
-		start += searchStart // Adjust for the offset
+// resolveError is the concrete type returned by sanitizeResolveError.
+// Its Error() method returns the template + scrubbed inner message;
+// Unwrap exposes the original error so errors.Is/As continue to work.
+type resolveError struct {
+	template string
+	msg      string
+	inner    error
+}
 
-		// Skip if this is part of $( which we already handled
-		if start+1 < len(result) && result[start+1] == '(' {
-			// Skip past this $(...)
-			searchStart = start + 1
+func (e *resolveError) Error() string {
+	return fmt.Sprintf("resolving %q: %s", e.template, e.msg)
+}
+
+func (e *resolveError) Unwrap() error { return e.inner }
+
+// scrubErrorMessage bounds the message to maxResolveErrBytes bytes and
+// replaces non-printable bytes (anything outside ASCII printable, tab, or
+// newline) with '?'. Mirrors shell.sanitizeStderr but operates on a
+// string rather than raw command stderr and runs at the config layer,
+// so arbitrary Expander error text is also sanitized.
+func scrubErrorMessage(s string) string {
+	if len(s) > maxResolveErrBytes {
+		s = s[:maxResolveErrBytes]
+	}
+	out := make([]byte, len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '\t' || c == '\n' || (c >= 0x20 && c < 0x7f) {
+			out[i] = c
 			continue
 		}
-		var varName string
-		var end int
-
-		if start+1 < len(result) && result[start+1] == '{' {
-			// Handle ${VAR} format
-			closeIdx := strings.Index(result[start+2:], "}")
-			if closeIdx == -1 {
-				return "", fmt.Errorf("unmatched ${ in value: %s", value)
-			}
-			varName = result[start+2 : start+2+closeIdx]
-			end = start + 2 + closeIdx + 1
-		} else {
-			// Handle $VAR format - variable names must start with letter or underscore
-			if start+1 >= len(result) {
-				return "", fmt.Errorf("incomplete variable reference at end of string: %s", value)
-			}
-
-			if result[start+1] != '_' &&
-				(result[start+1] < 'a' || result[start+1] > 'z') &&
-				(result[start+1] < 'A' || result[start+1] > 'Z') {
-				return "", fmt.Errorf("invalid variable name starting with '%c' in: %s", result[start+1], value)
-			}
-
-			end = start + 1
-			for end < len(result) && (result[end] == '_' ||
-				(result[end] >= 'a' && result[end] <= 'z') ||
-				(result[end] >= 'A' && result[end] <= 'Z') ||
-				(result[end] >= '0' && result[end] <= '9')) {
-				end++
-			}
-			varName = result[start+1 : end]
-		}
-
-		envValue := r.env.Get(varName)
-		if envValue == "" {
-			return "", fmt.Errorf("environment variable %q not set", varName)
-		}
-
-		result = result[:start] + envValue + result[end:]
-		searchStart = start + len(envValue) // Continue searching after the replacement
+		out[i] = '?'
 	}
-
-	return result, nil
+	return string(out)
 }
 
 type environmentVariableResolver struct {
@@ -177,11 +180,11 @@ func NewEnvironmentVariableResolver(env env.Env) VariableResolver {
 
 // ResolveValue resolves environment variables from the provided env.Env.
 func (r *environmentVariableResolver) ResolveValue(value string) (string, error) {
-	if !strings.HasPrefix(value, "$") {
+	if len(value) == 0 || value[0] != '$' {
 		return value, nil
 	}
 
-	varName := strings.TrimPrefix(value, "$")
+	varName := value[1:]
 	resolvedValue := r.env.Get(varName)
 	if resolvedValue == "" {
 		return "", fmt.Errorf("environment variable %q not set", varName)

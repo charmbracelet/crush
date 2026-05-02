@@ -447,8 +447,12 @@ func createTransport(ctx context.Context, m config.MCPConfig, resolver config.Va
 		if strings.TrimSpace(command) == "" {
 			return nil, fmt.Errorf("mcp stdio config requires a non-empty 'command' field")
 		}
+		envs, err := m.ResolvedEnv()
+		if err != nil {
+			return nil, err
+		}
 		cmd := exec.CommandContext(ctx, home.Long(command), m.Args...)
-		cmd.Env = append(os.Environ(), m.ResolvedEnv()...)
+		cmd.Env = append(os.Environ(), envs...)
 		return &mcp.CommandTransport{
 			Command: cmd,
 		}, nil
@@ -456,9 +460,13 @@ func createTransport(ctx context.Context, m config.MCPConfig, resolver config.Va
 		if strings.TrimSpace(m.URL) == "" {
 			return nil, fmt.Errorf("mcp http config requires a non-empty 'url' field")
 		}
+		headers, err := m.ResolvedHeaders()
+		if err != nil {
+			return nil, err
+		}
 		client := &http.Client{
 			Transport: &headerRoundTripper{
-				headers: m.ResolvedHeaders(),
+				headers: headers,
 			},
 		}
 		return &mcp.StreamableClientTransport{
@@ -469,9 +477,13 @@ func createTransport(ctx context.Context, m config.MCPConfig, resolver config.Va
 		if strings.TrimSpace(m.URL) == "" {
 			return nil, fmt.Errorf("mcp sse config requires a non-empty 'url' field")
 		}
+		headers, err := m.ResolvedHeaders()
+		if err != nil {
+			return nil, err
+		}
 		client := &http.Client{
 			Transport: &headerRoundTripper{
-				headers: m.ResolvedHeaders(),
+				headers: headers,
 			},
 		}
 		return &mcp.SSEClientTransport{

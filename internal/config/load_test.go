@@ -1589,3 +1589,61 @@ func TestConfig_configureProviders_HyperAPIKeyFromConfigOverrides(t *testing.T) 
 	require.True(t, ok, "Hyper provider should be configured")
 	require.Equal(t, "env-api-key", pc.APIKey)
 }
+
+// TestConfig_configureProviders_ProviderHeaderResolveFailure pins the
+// intentional divergence at load.go:225: a provider header whose
+// expansion fails must NOT fail the whole config load. It logs an
+// error, keeps the literal template in the resolved header map, and
+// moves on. The MCP contract (hard error on failed expansion) does not
+// apply here because many providers ship DefaultHeaders that reference
+// env vars which are legitimately unset on most hosts.
+//
+// If this test ever flips to requiring an error, read PLAN.md "Design
+// decisions" item 4 before changing the production code — the
+// divergence is deliberate.
+func TestConfig_configureProviders_ProviderHeaderResolveFailure(t *testing.T) {
+	knownProviders := []catwalk.Provider{
+		{
+			ID:          "openai",
+			APIKey:      "$OPENAI_API_KEY",
+			APIEndpoint: "https://api.openai.com/v1",
+			Models:      []catwalk.Model{{ID: "test-model"}},
+		},
+	}
+
+	cfg := &Config{
+		Providers: csync.NewMapFrom(map[string]ProviderConfig{
+			"openai": {
+				ExtraHeaders: map[string]string{
+					// Failing $(...) — inner command exits 1, no stdout.
+					"X-Broken": "$(false)",
+					// Unset var — nounset makes this an error too.
+					"X-Missing": "$PROVIDER_HEADER_NEVER_SET",
+					// Happy path: must still be resolved, proving the
+					// failure in the other two did not abort the loop.
+					"X-Static": "kept-literal",
+				},
+			},
+		}),
+	}
+	cfg.setDefaults("/tmp", "")
+
+	testEnv := env.NewFromMap(map[string]string{
+		"OPENAI_API_KEY": "test-key",
+		"PATH":           os.Getenv("PATH"),
+	})
+	resolver := NewShellVariableResolver(testEnv)
+
+	err := cfg.configureProviders(testStore(cfg), testEnv, resolver, knownProviders)
+	require.NoError(t, err, "provider load must tolerate failing header expansion")
+
+	pc, ok := cfg.Providers.Get("openai")
+	require.True(t, ok, "openai provider must still be configured")
+
+	// Literal template preserved for the two failing headers; the
+	// happy-path header is resolved through the shell (pass-through
+	// for a literal value).
+	require.Equal(t, "$(false)", pc.ExtraHeaders["X-Broken"])
+	require.Equal(t, "$PROVIDER_HEADER_NEVER_SET", pc.ExtraHeaders["X-Missing"])
+	require.Equal(t, "kept-literal", pc.ExtraHeaders["X-Static"])
+}

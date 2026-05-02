@@ -339,6 +339,28 @@ func (m MCPConfig) ResolvedArgs(r VariableResolver) ([]string, error) {
 	return out, nil
 }
 
+// ResolvedURL returns m.URL expanded through the given resolver. The
+// receiver is not mutated. Errors from the resolver are already
+// sanitized by ResolveValue and are wrapped with %w for errors.Is/As.
+//
+// URLs run through the same shell-expansion pipeline as the other
+// fields, so a literal '$' (e.g. OData query strings containing
+// $filter/$select) must be escaped as '\$' or '${DOLLAR:-$}' to avoid
+// being interpreted as a variable reference. Same constraint already
+// applies to command, args, env, and headers.
+//
+// See ResolvedEnv for guidance on picking a resolver.
+func (m MCPConfig) ResolvedURL(r VariableResolver) (string, error) {
+	if m.URL == "" {
+		return "", nil
+	}
+	v, err := r.ResolveValue(m.URL)
+	if err != nil {
+		return "", fmt.Errorf("url: %w", err)
+	}
+	return v, nil
+}
+
 // ResolvedHeaders returns m.Headers with every value expanded through
 // the given resolver. A fresh map is allocated; m.Headers is never
 // mutated. On the first resolution failure it returns nil and an error

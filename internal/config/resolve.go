@@ -10,8 +10,7 @@ import (
 )
 
 // resolveTimeout bounds how long a single ResolveValue call may spend
-// inside shell expansion (including any command substitution). Matches
-// the timeout used by the previous hand-rolled parser.
+// inside shell expansion (including any command substitution).
 const resolveTimeout = 5 * time.Minute
 
 type VariableResolver interface {
@@ -172,28 +171,4 @@ func scrubErrorMessage(s string) string {
 		out[i] = '?'
 	}
 	return string(out)
-}
-
-type environmentVariableResolver struct {
-	env env.Env
-}
-
-func NewEnvironmentVariableResolver(env env.Env) VariableResolver {
-	return &environmentVariableResolver{
-		env: env,
-	}
-}
-
-// ResolveValue resolves environment variables from the provided env.Env.
-func (r *environmentVariableResolver) ResolveValue(value string) (string, error) {
-	if len(value) == 0 || value[0] != '$' {
-		return value, nil
-	}
-
-	varName := value[1:]
-	resolvedValue := r.env.Get(varName)
-	if resolvedValue == "" {
-		return "", fmt.Errorf("environment variable %q not set", varName)
-	}
-	return resolvedValue, nil
 }

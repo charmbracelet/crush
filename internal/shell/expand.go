@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync/atomic"
 
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/interp"
@@ -18,11 +19,28 @@ import (
 // to be embedded in a failing inner command.
 const maxInnerStderrBytes = 512
 
+// NoUnset controls whether ExpandValue treats unset variables as an
+// error. Default false matches bash: $UNSET expands to "". Store true
+// to re-enable strict mode globally. Not exposed in crush.json; this is
+// an internal escape hatch in case the lenient default turns out to be
+// the wrong call.
+//
+// Declared atomic because ExpandValue is invoked concurrently (multiple
+// MCP / LSP / provider loads in flight at startup, hook execution, etc.)
+// and an unsynchronised read/write pair is a data race under the Go
+// memory model regardless of test-level happens-before reasoning. The
+// atomic load on the hot path is negligible against the cost of parsing
+// and running through mvdan.
+//
+// See PLAN.md Phase 2 design decisions #11 and #12 for the full
+// rationale.
+var NoUnset atomic.Bool
+
 // ExpandValue expands shell-style substitutions in a single config value.
 //
 // Supported constructs match the bash tool:
 //
-//   - $VAR and ${VAR} (unset is an error; see nounset below).
+//   - $VAR and ${VAR}.
 //   - ${VAR:-default} / ${VAR:+alt} / ${VAR:?msg}.
 //   - $(command) with full quoting and nesting.
 //   - escaped and quoted strings ("...", '...').
@@ -32,9 +50,11 @@ const maxInnerStderrBytes = 512
 //   - Returns exactly one string. No field splitting, no globbing, no
 //     pathname generation. Multi-word command output is preserved
 //     verbatim; it is never split into multiple values.
-//   - Nounset is on: unset variables produce an error instead of
-//     expanding to the empty string. Use ${VAR:-default} to opt in to
-//     an empty fallback.
+//   - Nounset is off by default, matching bash: unset variables expand
+//     to "". Opt in to strict behaviour per-reference with
+//     ${VAR:?msg}, which errors loudly when VAR is unset regardless of
+//     the global toggle. Flip the global default via
+//     shell.NoUnset.Store(true) as an internal escape hatch.
 //   - Embedded whitespace and newlines in the input are preserved
 //     verbatim. Command substitution strips trailing newlines only
 //     (POSIX), never leading or internal whitespace.
@@ -63,22 +83,27 @@ func ExpandValue(ctx context.Context, value string, env []string) (string, error
 		logger: noopLogger{},
 	}
 
+	strict := NoUnset.Load()
+
 	var stderrBuf bytes.Buffer
 	cfg := &expand.Config{
 		Env:     expand.ListEnviron(env...),
-		NoUnset: true,
+		NoUnset: strict,
 		CmdSubst: func(w io.Writer, cs *syntax.CmdSubst) error {
 			stderrBuf.Reset()
-			runner, rerr := interp.New(
+			runnerOpts := []interp.RunnerOption{
 				interp.StdIO(nil, w, &stderrBuf),
 				interp.Interactive(false),
 				interp.Env(expand.ListEnviron(env...)),
 				interp.Dir(s.cwd),
 				interp.ExecHandlers(s.execHandlers()...),
+			}
+			if strict {
 				// Match the outer NoUnset: an unset $VAR inside
 				// $(...) is also an error, not a silent empty.
-				interp.Params("-u"),
-			)
+				runnerOpts = append(runnerOpts, interp.Params("-u"))
+			}
+			runner, rerr := interp.New(runnerOpts...)
 			if rerr != nil {
 				return rerr
 			}

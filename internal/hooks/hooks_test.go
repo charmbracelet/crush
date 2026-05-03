@@ -2,6 +2,7 @@ package hooks
 
 import (
 	"context"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +10,12 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/stretchr/testify/require"
 )
+
+func skipIfNoSh(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("Test uses Unix-specific shell commands/syntax and sh is not available")
+	}
+}
 
 func TestAggregation(t *testing.T) {
 	t.Parallel()
@@ -214,6 +221,7 @@ func TestBuildPayload(t *testing.T) {
 
 func TestRunnerExitCode0Allow(t *testing.T) {
 	t.Parallel()
+	skipIfNoSh(t)
 	hookCfg := config.HookConfig{
 		Command: `echo '{"decision":"allow","context":"ok"}'`,
 	}
@@ -226,6 +234,7 @@ func TestRunnerExitCode0Allow(t *testing.T) {
 
 func TestRunnerExitCode2Deny(t *testing.T) {
 	t.Parallel()
+	skipIfNoSh(t)
 	hookCfg := config.HookConfig{
 		Command: `echo "forbidden" >&2; exit 2`,
 	}
@@ -239,6 +248,7 @@ func TestRunnerExitCode2Deny(t *testing.T) {
 
 func TestRunnerExitCode49Halt(t *testing.T) {
 	t.Parallel()
+	skipIfNoSh(t)
 	hookCfg := config.HookConfig{
 		Command: `echo "stop the turn" >&2; exit 49`,
 	}
@@ -252,6 +262,7 @@ func TestRunnerExitCode49Halt(t *testing.T) {
 
 func TestRunnerHaltViaJSON(t *testing.T) {
 	t.Parallel()
+	skipIfNoSh(t)
 	hookCfg := config.HookConfig{
 		Command: `echo '{"halt":true,"reason":"via json"}'`,
 	}
@@ -264,6 +275,7 @@ func TestRunnerHaltViaJSON(t *testing.T) {
 
 func TestRunnerExitCodeOtherNonBlocking(t *testing.T) {
 	t.Parallel()
+	skipIfNoSh(t)
 	hookCfg := config.HookConfig{
 		Command: `exit 1`,
 	}
@@ -275,6 +287,7 @@ func TestRunnerExitCodeOtherNonBlocking(t *testing.T) {
 
 func TestRunnerTimeout(t *testing.T) {
 	t.Parallel()
+	skipIfNoSh(t)
 	hookCfg := config.HookConfig{
 		Command: `sleep 10`,
 		Timeout: 1,
@@ -290,6 +303,7 @@ func TestRunnerTimeout(t *testing.T) {
 
 func TestRunnerDeduplication(t *testing.T) {
 	t.Parallel()
+	skipIfNoSh(t)
 	// Two hooks with the same command should only run once.
 	hookCfg := config.HookConfig{
 		Command: `echo '{"decision":"allow"}'`,
@@ -302,6 +316,7 @@ func TestRunnerDeduplication(t *testing.T) {
 
 func TestRunnerNoMatchingHooks(t *testing.T) {
 	t.Parallel()
+	skipIfNoSh(t)
 	// Hooks are empty.
 	r := NewRunner(nil, t.TempDir(), t.TempDir())
 	result, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{}`)
@@ -324,6 +339,7 @@ func validatedHooks(t *testing.T, hooks []config.HookConfig) []config.HookConfig
 
 func TestRunnerMatcherFiltering(t *testing.T) {
 	t.Parallel()
+	skipIfNoSh(t)
 
 	t.Run("compiled regex matches", func(t *testing.T) {
 		t.Parallel()
@@ -468,6 +484,7 @@ func TestValidateHooksNormalizesEventNames(t *testing.T) {
 
 func TestRunnerParallelExecution(t *testing.T) {
 	t.Parallel()
+	skipIfNoSh(t)
 	// Two hooks: one allows, one denies. Deny should win.
 	hooks := []config.HookConfig{
 		{Command: `echo '{"decision":"allow","context":"hook1"}'`},
@@ -482,6 +499,7 @@ func TestRunnerParallelExecution(t *testing.T) {
 
 func TestRunnerEnvVarsPropagated(t *testing.T) {
 	t.Parallel()
+	skipIfNoSh(t)
 	hookCfg := config.HookConfig{
 		Command: `printf '{"decision":"allow","context":"%s"}' "$CRUSH_TOOL_NAME"`,
 	}
@@ -604,6 +622,7 @@ func TestAggregationUpdatedInput(t *testing.T) {
 
 func TestRunnerUpdatedInput(t *testing.T) {
 	t.Parallel()
+	skipIfNoSh(t)
 	hookCfg := config.HookConfig{
 		Command: `echo '{"decision":"allow","updated_input":{"command":"echo rewritten"}}'`,
 	}

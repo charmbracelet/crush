@@ -5,7 +5,9 @@ import (
 	"context"
 	"log/slog"
 	"os/exec"
+	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -145,7 +147,8 @@ func (r *Runner) runOne(parentCtx context.Context, hook config.HookConfig, envVa
 	ctx, cancel := context.WithTimeout(parentCtx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "sh", "-c", hook.Command)
+	shell, shellArg := pickShell(hook.Command)
+	cmd := exec.CommandContext(ctx, shell, shellArg, hook.Command)
 	cmd.WaitDelay = time.Second
 	cmd.Env = envVars
 	cmd.Dir = r.cwd
@@ -212,4 +215,33 @@ func (r *Runner) runOne(parentCtx context.Context, hook config.HookConfig, envVa
 		"decision", result.Decision.String(),
 	)
 	return result
+}
+
+// pickShell returns the shell and flag to use for the given hook command.
+// On Windows, .bat/.cmd files run under cmd /c; .sh files run under sh -c;
+// everything else prefers sh if available and falls back to cmd /c.
+func pickShell(command string) (string, string) {
+	if runtime.GOOS != "windows" {
+		return "sh", "-c"
+	}
+	command = strings.TrimSpace(command)
+	first := command
+	if strings.HasPrefix(command, `"`) {
+		if end := strings.Index(command[1:], `"`); end >= 0 {
+			first = command[1 : end+1]
+		}
+	} else if i := strings.IndexAny(command, " \t"); i > 0 {
+		first = command[:i]
+	}
+	switch strings.ToLower(filepath.Ext(first)) {
+	case ".bat", ".cmd":
+		return "cmd", "/c"
+	case ".sh":
+		return "sh", "-c"
+	default:
+		if _, err := exec.LookPath("sh"); err != nil {
+			return "cmd", "/c"
+		}
+		return "sh", "-c"
+	}
 }

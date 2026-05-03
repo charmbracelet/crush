@@ -105,22 +105,25 @@ func TestExpandValue_Success(t *testing.T) {
 func TestExpandValue_Errors(t *testing.T) {
 	t.Parallel()
 
-	t.Run("unset var is an error, not empty", func(t *testing.T) {
+	t.Run("unset var expands to empty under lenient default", func(t *testing.T) {
 		t.Parallel()
-		_, err := ExpandValue(t.Context(), "$MISSING", nil)
-		require.Error(t, err)
+		got, err := ExpandValue(t.Context(), "$MISSING", nil)
+		require.NoError(t, err)
+		require.Equal(t, "", got)
 	})
 
-	t.Run("unset var inside braces is an error", func(t *testing.T) {
+	t.Run("unset var inside braces expands to empty", func(t *testing.T) {
 		t.Parallel()
-		_, err := ExpandValue(t.Context(), "${MISSING}", nil)
-		require.Error(t, err)
+		got, err := ExpandValue(t.Context(), "${MISSING}", nil)
+		require.NoError(t, err)
+		require.Equal(t, "", got)
 	})
 
-	t.Run("unset var inside cmdsubst is an error", func(t *testing.T) {
+	t.Run("unset var inside cmdsubst expands to empty", func(t *testing.T) {
 		t.Parallel()
-		_, err := ExpandValue(t.Context(), `$(printf '%s' "$MISSING")`, nil)
-		require.Error(t, err)
+		got, err := ExpandValue(t.Context(), `$(printf '%s' "$MISSING")`, nil)
+		require.NoError(t, err)
+		require.Equal(t, "", got)
 	})
 
 	t.Run("bad syntax returns error", func(t *testing.T) {
@@ -171,6 +174,45 @@ func TestExpandValue_Errors(t *testing.T) {
 			"stderr should be bounded",
 		)
 	})
+}
+
+// TestExpandValue_StrictToggle pins the NoUnset escape hatch: when a
+// caller flips strict mode on, bare $UNSET must error instead of
+// expanding to the empty string. Must not run in parallel: it mutates
+// the package-level NoUnset atomic, so a parallel peer observing the
+// flipped value would break the lenient default other tests assume.
+func TestExpandValue_StrictToggle(t *testing.T) {
+	NoUnset.Store(true)
+	t.Cleanup(func() { NoUnset.Store(false) })
+
+	_, err := ExpandValue(t.Context(), "$UNSET", nil)
+	require.Error(t, err)
+
+	_, err = ExpandValue(t.Context(), "${UNSET}", nil)
+	require.Error(t, err)
+
+	_, err = ExpandValue(t.Context(), `$(printf '%s' "$UNSET")`, nil)
+	require.Error(t, err)
+}
+
+// TestExpandValue_RequiredOptIn pins the per-reference opt-in strict
+// idiom ${VAR:?msg}: it must error whether or not the global NoUnset
+// toggle is on, so config authors can mark individual credentials as
+// required without flipping the global default.
+func TestExpandValue_RequiredOptIn(t *testing.T) {
+	t.Parallel()
+
+	_, err := ExpandValue(t.Context(), "${REQUIRED:?must be set}", nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "must be set")
+
+	got, err := ExpandValue(
+		t.Context(),
+		"${REQUIRED:?must be set}",
+		[]string{"REQUIRED=ok"},
+	)
+	require.NoError(t, err)
+	require.Equal(t, "ok", got)
 }
 
 func TestSanitizeStderr(t *testing.T) {

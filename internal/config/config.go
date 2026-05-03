@@ -368,6 +368,13 @@ func (m MCPConfig) ResolvedURL(r VariableResolver) (string, error) {
 // already sanitized by ResolveValue and is wrapped with %w so
 // errors.Is/As continues to work.
 //
+// A header whose value resolves to the empty string (unset bare $VAR
+// under lenient nounset, $(echo), or literal "") is omitted from the
+// returned map — sending "X-Auth:" with an empty value is rejected by
+// some providers and the user's intent in "optional, env-gated
+// header" is clearly "absent when the var isn't set." See PLAN.md
+// Phase 2 design decision #18.
+//
 // See ResolvedEnv for guidance on picking a resolver.
 func (m MCPConfig) ResolvedHeaders(r VariableResolver) (map[string]string, error) {
 	if len(m.Headers) == 0 {
@@ -385,6 +392,9 @@ func (m MCPConfig) ResolvedHeaders(r VariableResolver) (map[string]string, error
 		v, err := r.ResolveValue(m.Headers[k])
 		if err != nil {
 			return nil, fmt.Errorf("header %s: %w", k, err)
+		}
+		if v == "" {
+			continue
 		}
 		out[k] = v
 	}

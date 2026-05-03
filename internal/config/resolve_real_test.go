@@ -259,6 +259,71 @@ func TestResolvedHeaders_RealShell_FailurePreservesOriginal(t *testing.T) {
 	require.Equal(t, orig, m.Headers, "receiver Headers must be preserved")
 }
 
+// TestResolvedHeaders_RealShell_DropEmpty pins Phase 2 design
+// decision #18 on the MCP side: a header whose value resolves to the
+// empty string is omitted from the returned map. Covers the three
+// ways a value can legitimately land on empty — unset bare $VAR
+// under lenient nounset, a literal "", and a non-failing command
+// whose stdout is empty — and also pins that a failing $(cmd) still
+// errors rather than silently dropping.
+func TestResolvedHeaders_RealShell_DropEmpty(t *testing.T) {
+	t.Parallel()
+
+	t.Run("unset $VAR is absent", func(t *testing.T) {
+		t.Parallel()
+		m := MCPConfig{Headers: map[string]string{
+			"X-Missing": "$MCP_HEADER_NEVER_SET",
+			"X-Kept":    "present",
+		}}
+		got, err := m.ResolvedHeaders(realShellResolver(nil))
+		require.NoError(t, err)
+		_, present := got["X-Missing"]
+		require.False(t, present, "unset bare $VAR → empty → header dropped")
+		require.Equal(t, "present", got["X-Kept"])
+	})
+
+	t.Run("literal empty string is absent", func(t *testing.T) {
+		t.Parallel()
+		m := MCPConfig{Headers: map[string]string{
+			"X-Custom": "",
+			"X-Kept":   "present",
+		}}
+		got, err := m.ResolvedHeaders(realShellResolver(nil))
+		require.NoError(t, err)
+		_, present := got["X-Custom"]
+		require.False(t, present, "literal empty-string header must be dropped")
+		require.Equal(t, "present", got["X-Kept"])
+	})
+
+	t.Run("$(echo) is absent", func(t *testing.T) {
+		t.Parallel()
+		m := MCPConfig{Headers: map[string]string{
+			"X-Empty": "$(echo)",
+			"X-Kept":  "present",
+		}}
+		got, err := m.ResolvedHeaders(realShellResolver(nil))
+		require.NoError(t, err)
+		_, present := got["X-Empty"]
+		require.False(t, present, "$(echo) → empty → header dropped")
+		require.Equal(t, "present", got["X-Kept"])
+	})
+
+	t.Run("$(false) errors and does not mutate", func(t *testing.T) {
+		t.Parallel()
+		m := MCPConfig{Headers: map[string]string{
+			"X-Broken": "$(false)",
+			"X-Kept":   "present",
+		}}
+		orig := maps.Clone(m.Headers)
+
+		got, err := m.ResolvedHeaders(realShellResolver(nil))
+		require.Error(t, err)
+		require.Empty(t, got, "map must be nil/empty on failure, not a partial")
+		require.Contains(t, err.Error(), "header X-Broken")
+		require.Equal(t, orig, m.Headers, "receiver Headers must be preserved")
+	})
+}
+
 // TestResolvedArgs_RealShell exercises both success and failure for
 // m.Args symmetrically with Env. Args are ordered so error messages
 // must identify a positional index, not a key.

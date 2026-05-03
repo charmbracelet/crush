@@ -1590,18 +1590,13 @@ func TestConfig_configureProviders_HyperAPIKeyFromConfigOverrides(t *testing.T) 
 	require.Equal(t, "env-api-key", pc.APIKey)
 }
 
-// TestConfig_configureProviders_ProviderHeaderResolveFailure pins the
-// intentional divergence at load.go:225: a provider header whose
-// expansion fails must NOT fail the whole config load. It logs an
-// error, keeps the literal template in the resolved header map, and
-// moves on. The MCP contract (hard error on failed expansion) does not
-// apply here because many providers ship DefaultHeaders that reference
-// env vars which are legitimately unset on most hosts.
-//
-// If this test ever flips to requiring an error, read PLAN.md "Design
-// decisions" item 4 before changing the production code — the
-// divergence is deliberate.
-func TestConfig_configureProviders_ProviderHeaderResolveFailure(t *testing.T) {
+// TestConfig_configureProviders_ProviderHeaderResolveError pins
+// Phase 2 design decision #14: a failing $(cmd) in a provider header
+// must fail the provider load with a clear message that names the
+// offending header. The Phase 1 log-and-continue divergence at
+// load.go:225 is gone; provider headers now share the MCP error
+// contract.
+func TestConfig_configureProviders_ProviderHeaderResolveError(t *testing.T) {
 	knownProviders := []catwalk.Provider{
 		{
 			ID:          "openai",
@@ -1615,17 +1610,9 @@ func TestConfig_configureProviders_ProviderHeaderResolveFailure(t *testing.T) {
 		Providers: csync.NewMapFrom(map[string]ProviderConfig{
 			"openai": {
 				ExtraHeaders: map[string]string{
-					// Failing $(...) — inner command exits 1, no stdout.
+					// Failing $(...) — inner command exits 1. Must
+					// propagate as an error, not a silent truncation.
 					"X-Broken": "$(false)",
-					// Unset var — under Phase 2 lenient nounset this
-					// resolves cleanly to "" rather than erroring;
-					// Step 10 will rewrite this whole test once the
-					// empty-drop rule replaces the log-and-continue
-					// loop at load.go:225.
-					"X-Missing": "$PROVIDER_HEADER_NEVER_SET",
-					// Happy path: must still be resolved, proving the
-					// failure in X-Broken did not abort the loop.
-					"X-Static": "kept-literal",
 				},
 			},
 		}),
@@ -1639,20 +1626,117 @@ func TestConfig_configureProviders_ProviderHeaderResolveFailure(t *testing.T) {
 	resolver := NewShellVariableResolver(testEnv)
 
 	err := cfg.configureProviders(testStore(cfg), testEnv, resolver, knownProviders)
-	require.NoError(t, err, "provider load must tolerate failing header expansion")
+	require.Error(t, err, "failing $(cmd) in a header must fail the provider load")
+	require.Contains(t, err.Error(), "X-Broken", "error must name the offending header")
+}
+
+// TestConfig_configureProviders_CatwalkDefaultWithUnsetVarLoads pins
+// Phase 2 design decisions #11 and #18 from the provider angle: a
+// Catwalk-style default header like
+// "OpenAI-Organization": "$OPENAI_ORG_ID" must load cleanly under
+// lenient nounset (unset → "" → header dropped), not fail the load
+// and not leave the literal template on the wire.
+func TestConfig_configureProviders_CatwalkDefaultWithUnsetVarLoads(t *testing.T) {
+	knownProviders := []catwalk.Provider{
+		{
+			ID:          "openai",
+			APIKey:      "$OPENAI_API_KEY",
+			APIEndpoint: "https://api.openai.com/v1",
+			Models:      []catwalk.Model{{ID: "test-model"}},
+			DefaultHeaders: map[string]string{
+				"OpenAI-Organization": "$OPENAI_ORG_ID",
+			},
+		},
+	}
+
+	cfg := &Config{}
+	cfg.setDefaults("/tmp", "")
+
+	testEnv := env.NewFromMap(map[string]string{
+		"OPENAI_API_KEY": "test-key",
+		"PATH":           os.Getenv("PATH"),
+	})
+	resolver := NewShellVariableResolver(testEnv)
+
+	err := cfg.configureProviders(testStore(cfg), testEnv, resolver, knownProviders)
+	require.NoError(t, err, "optional env-gated header must not fail the load")
 
 	pc, ok := cfg.Providers.Get("openai")
 	require.True(t, ok, "openai provider must still be configured")
+	_, present := pc.ExtraHeaders["OpenAI-Organization"]
+	require.False(t, present, "header whose value resolves to empty must be absent")
+}
 
-	// X-Broken still errors on $(false) so its literal template is
-	// preserved by the log-and-continue loop. X-Missing resolves
-	// cleanly to "" under lenient nounset: the current divergence
-	// only kicks in on resolver errors, so a non-erroring empty
-	// expansion writes through. The happy-path header is resolved
-	// through the shell (pass-through for a literal value). Step 10
-	// will flip this whole surface to the MCP contract plus the
-	// empty-drop rule from design decision #18.
-	require.Equal(t, "$(false)", pc.ExtraHeaders["X-Broken"])
-	require.Equal(t, "", pc.ExtraHeaders["X-Missing"])
-	require.Equal(t, "kept-literal", pc.ExtraHeaders["X-Static"])
+// TestConfig_configureProviders_LiteralEmptyHeaderDropped pins design
+// decision #18 for the literal case: a user-authored
+// "X-Custom": "" in extra_headers is absent from the resolved map.
+// Applies to both known- and custom-provider paths; this test
+// exercises the custom-provider loop.
+func TestConfig_configureProviders_LiteralEmptyHeaderDropped(t *testing.T) {
+	cfg := &Config{
+		Providers: csync.NewMapFrom(map[string]ProviderConfig{
+			"my-llm": {
+				APIKey:  "test-key",
+				BaseURL: "https://my-llm.example.com/v1",
+				Type:    catwalk.TypeOpenAI,
+				Models:  []catwalk.Model{{ID: "m"}},
+				ExtraHeaders: map[string]string{
+					"X-Custom": "",
+					"X-Kept":   "present",
+				},
+			},
+		}),
+	}
+	cfg.setDefaults("/tmp", "")
+
+	testEnv := env.NewFromMap(map[string]string{
+		"PATH": os.Getenv("PATH"),
+	})
+	resolver := NewShellVariableResolver(testEnv)
+
+	err := cfg.configureProviders(testStore(cfg), testEnv, resolver, []catwalk.Provider{})
+	require.NoError(t, err)
+
+	pc, ok := cfg.Providers.Get("my-llm")
+	require.True(t, ok)
+	_, present := pc.ExtraHeaders["X-Custom"]
+	require.False(t, present, "literal empty-string header must be dropped")
+	require.Equal(t, "present", pc.ExtraHeaders["X-Kept"])
+}
+
+// TestConfig_configureProviders_EchoEmptyHeaderDropped pins design
+// decision #18 for the non-failing empty case: $(echo) exits 0 with
+// empty output, resolves cleanly to "", and must be dropped the same
+// way an unset bare $VAR is. Exercises the known-provider loop.
+func TestConfig_configureProviders_EchoEmptyHeaderDropped(t *testing.T) {
+	knownProviders := []catwalk.Provider{
+		{
+			ID:          "openai",
+			APIKey:      "$OPENAI_API_KEY",
+			APIEndpoint: "https://api.openai.com/v1",
+			Models:      []catwalk.Model{{ID: "test-model"}},
+			DefaultHeaders: map[string]string{
+				"X-Empty": "$(echo)",
+				"X-Kept":  "present",
+			},
+		},
+	}
+
+	cfg := &Config{}
+	cfg.setDefaults("/tmp", "")
+
+	testEnv := env.NewFromMap(map[string]string{
+		"OPENAI_API_KEY": "test-key",
+		"PATH":           os.Getenv("PATH"),
+	})
+	resolver := NewShellVariableResolver(testEnv)
+
+	err := cfg.configureProviders(testStore(cfg), testEnv, resolver, knownProviders)
+	require.NoError(t, err)
+
+	pc, ok := cfg.Providers.Get("openai")
+	require.True(t, ok)
+	_, present := pc.ExtraHeaders["X-Empty"]
+	require.False(t, present, "$(echo) → empty → header must be dropped")
+	require.Equal(t, "present", pc.ExtraHeaders["X-Kept"])
 }

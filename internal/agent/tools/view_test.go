@@ -139,6 +139,24 @@ func TestViewToolBlocksOversizedReturnedSections(t *testing.T) {
 	require.Contains(t, resp.Content, "Content section is too large")
 }
 
+func TestViewToolBlocksOversizedImages(t *testing.T) {
+	t.Parallel()
+
+	workingDir := t.TempDir()
+	filePath := filepath.Join(workingDir, "large.png")
+	require.NoError(t, os.WriteFile(filePath, []byte(strings.Repeat("a", MaxViewSize+1)), 0o644))
+
+	tool := newViewToolForTest(workingDir)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+	ctx = context.WithValue(ctx, SupportsImagesContextKey, true)
+	resp := runViewTool(t, tool, ctx, ViewParams{
+		FilePath: filePath,
+	})
+
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "Image file is too large")
+}
+
 func TestReadTextFileEnforcesMaxContentSize(t *testing.T) {
 	t.Parallel()
 

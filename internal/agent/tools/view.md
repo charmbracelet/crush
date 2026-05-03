@@ -1,11 +1,11 @@
-Read a file by path with line numbers; supports offset and line limit (default 2000, max 200KB returned file content section); renders images (PNG, JPEG, GIF, BMP, SVG, WebP); use ls for directories.
+Read a file by path with line numbers; supports offset and line limit (default 2000, max 200KB returned file content section); renders images (PNG, JPEG, GIF, WebP); use ls for directories.
 
 <usage>
 - Provide file path to read
 - Optional offset: start reading from specific line (0-based)
 - Optional limit: control lines read (default 2000)
 - Don't use for directories (use LS tool instead)
-- Supports image files (PNG, JPEG, GIF, BMP, SVG, WebP)
+- Supports image files (PNG, JPEG, GIF, WebP)
 </usage>
 
 <features>

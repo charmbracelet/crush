@@ -297,12 +297,31 @@ types: `stdio` for command-line servers, `http` for HTTP endpoints, and `sse`
 for Server-Sent Events.
 
 Shell-style value expansion (`$VAR`, `${VAR:-default}`, `$(command)`, quoting,
-and nesting (works in `command`, `args`, `env`, `headers`, and `url`, so
-file-based secrets like work out of the box, so you can use values like
-"$TOKEN"` and `"$(cat /path/to/secret/token)"``. Expansion runs through Crush's
-embedded shell, so the same syntax works on all supported systems, including
-Windows. Unset variables are an error; use `${VAR:-fallback}` to opt in to
-a default.
+nesting) works in `command`, `args`, `env`, `headers`, and `url`, so
+file-based secrets work out of the box. You can use values like `"$TOKEN"`
+or `"$(cat /path/to/secret/token)"`. Expansion runs through Crush's embedded
+shell, so the same syntax works on every supported system, Windows included.
+
+Unset variables expand to the empty string by default, matching bash. For
+required credentials, use `${VAR:?message}` so an unset variable fails loudly
+at load time with `message` instead of silently resolving to empty:
+
+```json
+{ "api_key": "${CODEBERG_TOKEN:?set CODEBERG_TOKEN}" }
+```
+
+Headers (both MCP `headers` and provider `extra_headers`) whose value
+resolves to the empty string are dropped from the outgoing request rather
+than sent as `Header:`. That keeps optional env-gated headers like
+`"OpenAI-Organization": "$OPENAI_ORG_ID"` clean when the variable is unset.
+
+Provider `extra_body` is a non-expanding JSON passthrough; put env-driven
+values in `extra_headers` or the provider's `api_key` / `base_url`, all of
+which do expand.
+
+> **Security note:** `crush.json` is trusted code. Any `$(...)` in it runs at
+> load time with your shell's privileges, before the UI appears. Don't launch
+> Crush in a directory whose `crush.json` you haven't reviewed.
 
 ```json
 {

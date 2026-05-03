@@ -108,9 +108,22 @@ type ProviderConfig struct {
 	// Custom system prompt prefix.
 	SystemPromptPrefix string `json:"system_prompt_prefix,omitempty" jsonschema:"description=Custom prefix to add to system prompts for this provider"`
 
-	// Extra headers to send with each request to the provider.
+	// Extra headers to send with each request to the provider. Values
+	// run through shell expansion at config-load time, so $VAR and
+	// $(cmd) work the same way they do in MCP headers. A header whose
+	// value resolves to the empty string (unset bare $VAR under
+	// lenient nounset, $(echo), or literal "") is omitted from the
+	// outgoing request rather than sent as "Header:". See PLAN.md
+	// Phase 2 design decision #18.
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty" jsonschema:"description=Additional HTTP headers to send with requests"`
-	// Extra body
+	// ExtraBody is merged verbatim into OpenAI-compatible request
+	// bodies. String values are NOT shell-expanded: this is a plain
+	// JSON passthrough so that arbitrary provider-extension fields
+	// (numbers, nested objects, booleans) round-trip without a
+	// recursive walker guessing at intent. If you need an env-var-
+	// driven value at request time, put it in extra_headers, or in
+	// the provider's top-level api_key / base_url, all of which do
+	// expand. See PLAN.md Phase 2 design decision #16.
 	ExtraBody map[string]any `json:"extra_body,omitempty" jsonschema:"description=Additional fields to include in request bodies, only works with openai-compatible providers"`
 
 	ProviderOptions map[string]any `json:"provider_options,omitempty" jsonschema:"description=Additional provider-specific options for this provider"`
@@ -174,7 +187,12 @@ type MCPConfig struct {
 	DisabledTools []string          `json:"disabled_tools,omitempty" jsonschema:"description=List of tools from this MCP server to disable,example=get-library-doc"`
 	Timeout       int               `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for MCP server connections,default=15,example=30,example=60,example=120"`
 
-	// TODO: maybe make it possible to get the value from the env
+	// Headers are HTTP headers for HTTP/SSE MCP servers. Values run
+	// through shell expansion at MCP startup, so $VAR and $(cmd)
+	// work. A header whose value resolves to the empty string (unset
+	// bare $VAR under lenient nounset, $(echo), or literal "") is
+	// omitted from the outgoing request rather than sent as
+	// "Header:". See PLAN.md Phase 2 design decision #18.
 	Headers map[string]string `json:"headers,omitempty" jsonschema:"description=HTTP headers for HTTP/SSE MCP servers"`
 }
 

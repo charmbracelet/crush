@@ -220,73 +220,9 @@ func TestScrubErrorMessage(t *testing.T) {
 	})
 }
 
-func TestEnvironmentVariableResolver_ResolveValue(t *testing.T) {
-	tests := []struct {
-		name        string
-		value       string
-		envVars     map[string]string
-		expected    string
-		expectError bool
-	}{
-		{
-			name:     "non-variable string returns as-is",
-			value:    "plain-string",
-			expected: "plain-string",
-		},
-		{
-			name:     "environment variable resolution",
-			value:    "$HOME",
-			envVars:  map[string]string{"HOME": "/home/user"},
-			expected: "/home/user",
-		},
-		{
-			name:     "environment variable with complex value",
-			value:    "$PATH",
-			envVars:  map[string]string{"PATH": "/usr/bin:/bin:/usr/local/bin"},
-			expected: "/usr/bin:/bin:/usr/local/bin",
-		},
-		{
-			name:        "missing environment variable returns error",
-			value:       "$MISSING_VAR",
-			envVars:     map[string]string{},
-			expectError: true,
-		},
-		{
-			name:        "empty environment variable returns error",
-			value:       "$EMPTY_VAR",
-			envVars:     map[string]string{"EMPTY_VAR": ""},
-			expectError: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			testEnv := env.NewFromMap(tt.envVars)
-			resolver := NewEnvironmentVariableResolver(testEnv)
-
-			result, err := resolver.ResolveValue(tt.value)
-
-			if tt.expectError {
-				require.Error(t, err)
-			} else {
-				require.NoError(t, err)
-				require.Equal(t, tt.expected, result)
-			}
-		})
-	}
-}
-
 func TestNewShellVariableResolver(t *testing.T) {
 	testEnv := env.NewFromMap(map[string]string{"TEST": "value"})
 	resolver := NewShellVariableResolver(testEnv)
-
-	require.NotNil(t, resolver)
-	require.Implements(t, (*VariableResolver)(nil), resolver)
-}
-
-func TestNewEnvironmentVariableResolver(t *testing.T) {
-	testEnv := env.NewFromMap(map[string]string{"TEST": "value"})
-	resolver := NewEnvironmentVariableResolver(testEnv)
 
 	require.NotNil(t, resolver)
 	require.Implements(t, (*VariableResolver)(nil), resolver)

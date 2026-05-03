@@ -359,6 +359,118 @@ func TestResolvedArgs_RealShell(t *testing.T) {
 	})
 }
 
+// TestLSPConfig_ResolvedArgs_RealShell exercises both success and
+// failure for l.Args symmetrically with MCP args. Args are ordered so
+// error messages must identify a positional index, not a key.
+func TestLSPConfig_ResolvedArgs_RealShell(t *testing.T) {
+	t.Parallel()
+
+	t.Run("success expands $VAR in each element", func(t *testing.T) {
+		t.Parallel()
+		l := LSPConfig{Args: []string{"--root", "$HOME", "--flag", "literal"}}
+		r := realShellResolver(map[string]string{"HOME": "/home/tester"})
+		got, err := l.ResolvedArgs(r)
+		require.NoError(t, err)
+		require.Equal(t, []string{"--root", "/home/tester", "--flag", "literal"}, got)
+	})
+
+	t.Run("failure identifies offending index", func(t *testing.T) {
+		t.Parallel()
+		l := LSPConfig{Args: []string{"--root", "$(false)"}}
+		orig := slices.Clone(l.Args)
+
+		got, err := l.ResolvedArgs(realShellResolver(nil))
+		require.Error(t, err)
+		require.Nil(t, got)
+		require.Contains(t, err.Error(), "arg 1")
+		require.Equal(t, orig, l.Args, "receiver Args must be preserved")
+	})
+
+	t.Run("nil args returns nil, no error", func(t *testing.T) {
+		t.Parallel()
+		l := LSPConfig{}
+		got, err := l.ResolvedArgs(realShellResolver(nil))
+		require.NoError(t, err)
+		require.Nil(t, got)
+	})
+}
+
+// TestLSPConfig_ResolvedEnv_RealShell pins the LSP env contract:
+// success expands $VAR, failure wraps with the key name, and the
+// receiver map is never mutated. The shape is map[string]string
+// (not the MCP []string form) because powernap.ClientConfig.Environment
+// takes a map directly.
+func TestLSPConfig_ResolvedEnv_RealShell(t *testing.T) {
+	t.Parallel()
+
+	t.Run("success expands $VAR", func(t *testing.T) {
+		t.Parallel()
+		l := LSPConfig{Env: map[string]string{"GOPATH": "$HOME/go"}}
+		r := realShellResolver(map[string]string{"HOME": "/home/tester"})
+		got, err := l.ResolvedEnv(r)
+		require.NoError(t, err)
+		require.Equal(t, map[string]string{"GOPATH": "/home/tester/go"}, got)
+	})
+
+	t.Run("failure identifies offending key", func(t *testing.T) {
+		t.Parallel()
+		l := LSPConfig{Env: map[string]string{
+			"GOPATH": "$(false)",
+			"OTHER":  "literal",
+		}}
+		orig := maps.Clone(l.Env)
+
+		got, err := l.ResolvedEnv(realShellResolver(nil))
+		require.Error(t, err)
+		require.Nil(t, got)
+		require.Contains(t, err.Error(), `env "GOPATH"`)
+		require.Equal(t, orig, l.Env, "receiver Env must be preserved")
+	})
+
+	t.Run("idempotent and non-mutating", func(t *testing.T) {
+		t.Parallel()
+		l := LSPConfig{Env: map[string]string{
+			"A": "$(echo one)",
+			"B": "literal",
+		}}
+		orig := maps.Clone(l.Env)
+		r := realShellResolver(nil)
+
+		first, err := l.ResolvedEnv(r)
+		require.NoError(t, err)
+		second, err := l.ResolvedEnv(r)
+		require.NoError(t, err)
+		require.Equal(t, first, second)
+		require.Equal(t, orig, l.Env, "receiver Env must be preserved")
+	})
+}
+
+// TestLSPConfig_IdentityResolver pins the client-mode contract: both
+// ResolvedArgs and ResolvedEnv round-trip the template verbatim under
+// IdentityResolver and never error on unset variables. Local
+// expansion would double-expand when the server does its own — this
+// has to stay a pure pass-through.
+func TestLSPConfig_IdentityResolver(t *testing.T) {
+	t.Parallel()
+
+	l := LSPConfig{
+		Args: []string{"--root", "$LSP_ROOT", "$(vault read -f lsp)"},
+		Env: map[string]string{
+			"GOPATH": "$HOME/go",
+			"TOKEN":  "$(cat /run/secrets/x)",
+		},
+	}
+	r := IdentityResolver()
+
+	args, err := l.ResolvedArgs(r)
+	require.NoError(t, err)
+	require.Equal(t, l.Args, args)
+
+	envs, err := l.ResolvedEnv(r)
+	require.NoError(t, err)
+	require.Equal(t, l.Env, envs)
+}
+
 // TestMCPConfig_IdentityResolver pins the client-mode contract: every
 // Resolved* method round-trips the template verbatim and never errors
 // on unset variables. Local expansion would double-expand when the

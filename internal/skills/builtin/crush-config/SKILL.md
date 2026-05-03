@@ -29,6 +29,58 @@ Crush uses JSON configuration files with the following priority (highest to lowe
 
 The `$schema` property enables IDE autocomplete but is optional.
 
+## Shell Expansion
+
+Crush runs selected string fields through an embedded bash-compatible
+shell at load time, so values can pull from env vars, files, or helper
+commands.
+
+Supported constructs (match the `bash` tool):
+
+- `$VAR` and `${VAR}`
+- `${VAR:-default}`, `${VAR:+alt}`, `${VAR:?message}`
+- `$(command)` with full quoting and nesting
+- Single- and double-quoted strings, escapes
+
+Default semantics match bash: an unset variable expands to an empty
+string, no error. A failing `$(command)` is always a hard error. For
+required credentials, use `${VAR:?message}` so a missing variable
+fails loudly at load time with your message.
+
+```json
+{ "api_key": "${CODEBERG_TOKEN:?set CODEBERG_TOKEN}" }
+```
+
+### Which fields expand
+
+| Surface                                             | Expansion |
+| --------------------------------------------------- | --------- |
+| Provider `api_key`, `base_url`, `api_endpoint`      | yes       |
+| Provider `extra_headers`                            | yes       |
+| Provider `extra_body`                               | **no**    |
+| MCP `command`, `args`, `env`, `headers`, `url`      | yes       |
+| LSP `command`, `args`, `env`                        | yes       |
+| Hook `command`                                      | runs via `sh -c`, not the resolver |
+
+`extra_body` is a JSON passthrough. If you need env-driven values in
+a request body, put them in `extra_headers`, `api_key`, or
+`base_url` instead.
+
+### Empty-resolved headers are dropped
+
+When a header value resolves to the empty string (unset variable,
+`$(echo)`, or literal `""`), the header is omitted from the
+outgoing request. This keeps optional env-gated headers like
+`"OpenAI-Organization": "$OPENAI_ORG_ID"` working cleanly when the
+var isn't set. Applies to MCP `headers` and provider `extra_headers`.
+
+### Security note
+
+`crush.json` is trusted code. Any `$(...)` in it runs at load time
+with the invoking user's shell privileges, before the UI appears.
+Don't launch Crush in a directory whose `crush.json` you haven't
+reviewed.
+
 ## Common Tasks
 
 - Add a custom provider: add an entry under `providers` with `type`, `base_url`, `api_key`, and `models`.
@@ -79,7 +131,8 @@ The `$schema` property enables IDE autocomplete but is optional.
 ```
 
 - `type` (required): `openai`, `openai-compat`, or `anthropic`
-- `api_key` supports `$ENV_VAR` syntax.
+- `api_key`, `base_url`, `api_endpoint`, and `extra_headers` are shell-expanded (see [Shell Expansion](#shell-expansion)).
+- `extra_body` is a JSON passthrough and is **not** expanded.
 - Additional fields: `disable`, `system_prompt_prefix`, `extra_headers`, `extra_body`, `provider_options`.
 
 ## LSP Configuration
@@ -89,7 +142,7 @@ The `$schema` property enables IDE autocomplete but is optional.
   "lsp": {
     "go": {
       "command": "gopls",
-      "env": { "GOTOOLCHAIN": "go1.24.5" }
+      "env": { "GOPATH": "$HOME/go" }
     },
     "typescript": {
       "command": "typescript-language-server",
@@ -100,6 +153,7 @@ The `$schema` property enables IDE autocomplete but is optional.
 ```
 
 - `command` (required), `args`, `env` cover most setups.
+- `command`, `args`, and `env` values are shell-expanded (see [Shell Expansion](#shell-expansion)).
 - Additional fields: `disabled`, `filetypes`, `root_markers`, `init_options`, `options`, `timeout`.
 
 ## MCP Servers
@@ -124,6 +178,7 @@ The `$schema` property enables IDE autocomplete but is optional.
 ```
 
 - `type` (required): `stdio`, `sse`, or `http`
+- `command`, `args`, `env`, `headers`, and `url` are shell-expanded (see [Shell Expansion](#shell-expansion)).
 - Additional fields: `env`, `disabled`, `disabled_tools`, `timeout`.
 
 ## Options

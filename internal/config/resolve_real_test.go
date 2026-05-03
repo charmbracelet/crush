@@ -159,23 +159,50 @@ func TestResolvedEnv_RealShell_Deterministic(t *testing.T) {
 	require.True(t, slices.IsSorted(got), "env slice must be sorted; got %v", got)
 }
 
-// TestResolvedEnv_RealShell_NounsetRegression is the single most
-// important assertion in this file: an unset variable is an error, not
-// an empty expansion. Swapping the hand-rolled parser for mvdan's
-// default-expansion behaviour without nounset would re-introduce
-// Defect 1 via a typo'd variable name.
-func TestResolvedEnv_RealShell_NounsetRegression(t *testing.T) {
+// TestResolvedEnv_RealShell_UnsetExpandsEmpty pins Phase 2's lenient
+// default: an unset bare $VAR expands to the empty string, matching
+// bash. The silent-empty-credential class of bug that motivated Phase
+// 1's nounset-on default is already prevented by the pure-function
+// error-returning contract of ResolvedEnv, so we no longer rely on
+// nounset to catch typo'd variable names. Users who want strict
+// behaviour for a required credential opt in per-reference with
+// ${VAR:?msg}; see TestResolvedEnv_RealShell_ColonQuestionIsStrict.
+func TestResolvedEnv_RealShell_UnsetExpandsEmpty(t *testing.T) {
 	t.Parallel()
 
 	m := MCPConfig{Env: map[string]string{
-		// Intentional typo: user meant $FORGEJO_TOKEN.
+		// Intentional typo: user meant $FORGEJO_TOKEN. Under Phase 2
+		// defaults this expands to "" rather than erroring, matching
+		// bash's behaviour on bare $VAR.
 		"FORGEJO_ACCESS_TOKEN": "$FORGJO_TOKEN",
 	}}
 	got, err := m.ResolvedEnv(realShellResolver(nil))
-	require.Error(t, err, "unset var must not silently expand to empty")
+	require.NoError(t, err, "unset var must expand to empty, not error")
+	require.Equal(t, []string{"FORGEJO_ACCESS_TOKEN="}, got)
+}
+
+// TestResolvedEnv_RealShell_ColonQuestionIsStrict pins the opt-in
+// strictness contract: ${VAR:?msg} must hard-error when VAR is unset,
+// regardless of the global NoUnset toggle. This is the recommended
+// mechanism for required credentials under the lenient default, so a
+// future refactor that accidentally swallows ${VAR:?...} errors would
+// silently ship empty tokens to MCP servers again.
+func TestResolvedEnv_RealShell_ColonQuestionIsStrict(t *testing.T) {
+	t.Parallel()
+
+	m := MCPConfig{Env: map[string]string{
+		"FORGEJO_ACCESS_TOKEN": "${FORGJO_TOKEN:?set FORGJO_TOKEN}",
+	}}
+	got, err := m.ResolvedEnv(realShellResolver(nil))
+	require.Error(t, err, "${VAR:?msg} must error when VAR is unset")
 	require.Nil(t, got)
-	require.Contains(t, err.Error(), "FORGEJO_ACCESS_TOKEN")
-	require.Contains(t, err.Error(), "$FORGJO_TOKEN")
+	// The resolver wraps with the env key and the user-written
+	// template; the inner shell error carries the :? message so
+	// users learn which credential is missing and why.
+	msg := err.Error()
+	require.Contains(t, msg, "FORGEJO_ACCESS_TOKEN")
+	require.Contains(t, msg, "${FORGJO_TOKEN:?set FORGJO_TOKEN}")
+	require.Contains(t, msg, "set FORGJO_TOKEN")
 }
 
 // TestResolvedEnv_RealShell_FailureDetail pins that a failing inner
@@ -232,6 +259,71 @@ func TestResolvedHeaders_RealShell_FailurePreservesOriginal(t *testing.T) {
 	require.Equal(t, orig, m.Headers, "receiver Headers must be preserved")
 }
 
+// TestResolvedHeaders_RealShell_DropEmpty pins Phase 2 design
+// decision #18 on the MCP side: a header whose value resolves to the
+// empty string is omitted from the returned map. Covers the three
+// ways a value can legitimately land on empty — unset bare $VAR
+// under lenient nounset, a literal "", and a non-failing command
+// whose stdout is empty — and also pins that a failing $(cmd) still
+// errors rather than silently dropping.
+func TestResolvedHeaders_RealShell_DropEmpty(t *testing.T) {
+	t.Parallel()
+
+	t.Run("unset $VAR is absent", func(t *testing.T) {
+		t.Parallel()
+		m := MCPConfig{Headers: map[string]string{
+			"X-Missing": "$MCP_HEADER_NEVER_SET",
+			"X-Kept":    "present",
+		}}
+		got, err := m.ResolvedHeaders(realShellResolver(nil))
+		require.NoError(t, err)
+		_, present := got["X-Missing"]
+		require.False(t, present, "unset bare $VAR → empty → header dropped")
+		require.Equal(t, "present", got["X-Kept"])
+	})
+
+	t.Run("literal empty string is absent", func(t *testing.T) {
+		t.Parallel()
+		m := MCPConfig{Headers: map[string]string{
+			"X-Custom": "",
+			"X-Kept":   "present",
+		}}
+		got, err := m.ResolvedHeaders(realShellResolver(nil))
+		require.NoError(t, err)
+		_, present := got["X-Custom"]
+		require.False(t, present, "literal empty-string header must be dropped")
+		require.Equal(t, "present", got["X-Kept"])
+	})
+
+	t.Run("$(echo) is absent", func(t *testing.T) {
+		t.Parallel()
+		m := MCPConfig{Headers: map[string]string{
+			"X-Empty": "$(echo)",
+			"X-Kept":  "present",
+		}}
+		got, err := m.ResolvedHeaders(realShellResolver(nil))
+		require.NoError(t, err)
+		_, present := got["X-Empty"]
+		require.False(t, present, "$(echo) → empty → header dropped")
+		require.Equal(t, "present", got["X-Kept"])
+	})
+
+	t.Run("$(false) errors and does not mutate", func(t *testing.T) {
+		t.Parallel()
+		m := MCPConfig{Headers: map[string]string{
+			"X-Broken": "$(false)",
+			"X-Kept":   "present",
+		}}
+		orig := maps.Clone(m.Headers)
+
+		got, err := m.ResolvedHeaders(realShellResolver(nil))
+		require.Error(t, err)
+		require.Empty(t, got, "map must be nil/empty on failure, not a partial")
+		require.Contains(t, err.Error(), "header X-Broken")
+		require.Equal(t, orig, m.Headers, "receiver Headers must be preserved")
+	})
+}
+
 // TestResolvedArgs_RealShell exercises both success and failure for
 // m.Args symmetrically with Env. Args are ordered so error messages
 // must identify a positional index, not a key.
@@ -265,6 +357,118 @@ func TestResolvedArgs_RealShell(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, got)
 	})
+}
+
+// TestLSPConfig_ResolvedArgs_RealShell exercises both success and
+// failure for l.Args symmetrically with MCP args. Args are ordered so
+// error messages must identify a positional index, not a key.
+func TestLSPConfig_ResolvedArgs_RealShell(t *testing.T) {
+	t.Parallel()
+
+	t.Run("success expands $VAR in each element", func(t *testing.T) {
+		t.Parallel()
+		l := LSPConfig{Args: []string{"--root", "$HOME", "--flag", "literal"}}
+		r := realShellResolver(map[string]string{"HOME": "/home/tester"})
+		got, err := l.ResolvedArgs(r)
+		require.NoError(t, err)
+		require.Equal(t, []string{"--root", "/home/tester", "--flag", "literal"}, got)
+	})
+
+	t.Run("failure identifies offending index", func(t *testing.T) {
+		t.Parallel()
+		l := LSPConfig{Args: []string{"--root", "$(false)"}}
+		orig := slices.Clone(l.Args)
+
+		got, err := l.ResolvedArgs(realShellResolver(nil))
+		require.Error(t, err)
+		require.Nil(t, got)
+		require.Contains(t, err.Error(), "arg 1")
+		require.Equal(t, orig, l.Args, "receiver Args must be preserved")
+	})
+
+	t.Run("nil args returns nil, no error", func(t *testing.T) {
+		t.Parallel()
+		l := LSPConfig{}
+		got, err := l.ResolvedArgs(realShellResolver(nil))
+		require.NoError(t, err)
+		require.Nil(t, got)
+	})
+}
+
+// TestLSPConfig_ResolvedEnv_RealShell pins the LSP env contract:
+// success expands $VAR, failure wraps with the key name, and the
+// receiver map is never mutated. The shape is map[string]string
+// (not the MCP []string form) because powernap.ClientConfig.Environment
+// takes a map directly.
+func TestLSPConfig_ResolvedEnv_RealShell(t *testing.T) {
+	t.Parallel()
+
+	t.Run("success expands $VAR", func(t *testing.T) {
+		t.Parallel()
+		l := LSPConfig{Env: map[string]string{"GOPATH": "$HOME/go"}}
+		r := realShellResolver(map[string]string{"HOME": "/home/tester"})
+		got, err := l.ResolvedEnv(r)
+		require.NoError(t, err)
+		require.Equal(t, map[string]string{"GOPATH": "/home/tester/go"}, got)
+	})
+
+	t.Run("failure identifies offending key", func(t *testing.T) {
+		t.Parallel()
+		l := LSPConfig{Env: map[string]string{
+			"GOPATH": "$(false)",
+			"OTHER":  "literal",
+		}}
+		orig := maps.Clone(l.Env)
+
+		got, err := l.ResolvedEnv(realShellResolver(nil))
+		require.Error(t, err)
+		require.Nil(t, got)
+		require.Contains(t, err.Error(), `env "GOPATH"`)
+		require.Equal(t, orig, l.Env, "receiver Env must be preserved")
+	})
+
+	t.Run("idempotent and non-mutating", func(t *testing.T) {
+		t.Parallel()
+		l := LSPConfig{Env: map[string]string{
+			"A": "$(echo one)",
+			"B": "literal",
+		}}
+		orig := maps.Clone(l.Env)
+		r := realShellResolver(nil)
+
+		first, err := l.ResolvedEnv(r)
+		require.NoError(t, err)
+		second, err := l.ResolvedEnv(r)
+		require.NoError(t, err)
+		require.Equal(t, first, second)
+		require.Equal(t, orig, l.Env, "receiver Env must be preserved")
+	})
+}
+
+// TestLSPConfig_IdentityResolver pins the client-mode contract: both
+// ResolvedArgs and ResolvedEnv round-trip the template verbatim under
+// IdentityResolver and never error on unset variables. Local
+// expansion would double-expand when the server does its own — this
+// has to stay a pure pass-through.
+func TestLSPConfig_IdentityResolver(t *testing.T) {
+	t.Parallel()
+
+	l := LSPConfig{
+		Args: []string{"--root", "$LSP_ROOT", "$(vault read -f lsp)"},
+		Env: map[string]string{
+			"GOPATH": "$HOME/go",
+			"TOKEN":  "$(cat /run/secrets/x)",
+		},
+	}
+	r := IdentityResolver()
+
+	args, err := l.ResolvedArgs(r)
+	require.NoError(t, err)
+	require.Equal(t, l.Args, args)
+
+	envs, err := l.ResolvedEnv(r)
+	require.NoError(t, err)
+	require.Equal(t, l.Env, envs)
 }
 
 // TestMCPConfig_IdentityResolver pins the client-mode contract: every

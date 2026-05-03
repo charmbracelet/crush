@@ -108,9 +108,22 @@ type ProviderConfig struct {
 	// Custom system prompt prefix.
 	SystemPromptPrefix string `json:"system_prompt_prefix,omitempty" jsonschema:"description=Custom prefix to add to system prompts for this provider"`
 
-	// Extra headers to send with each request to the provider.
+	// Extra headers to send with each request to the provider. Values
+	// run through shell expansion at config-load time, so $VAR and
+	// $(cmd) work the same way they do in MCP headers. A header whose
+	// value resolves to the empty string (unset bare $VAR under
+	// lenient nounset, $(echo), or literal "") is omitted from the
+	// outgoing request rather than sent as "Header:". See PLAN.md
+	// Phase 2 design decision #18.
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty" jsonschema:"description=Additional HTTP headers to send with requests"`
-	// Extra body
+	// ExtraBody is merged verbatim into OpenAI-compatible request
+	// bodies. String values are NOT shell-expanded: this is a plain
+	// JSON passthrough so that arbitrary provider-extension fields
+	// (numbers, nested objects, booleans) round-trip without a
+	// recursive walker guessing at intent. If you need an env-var-
+	// driven value at request time, put it in extra_headers, or in
+	// the provider's top-level api_key / base_url, all of which do
+	// expand. See PLAN.md Phase 2 design decision #16.
 	ExtraBody map[string]any `json:"extra_body,omitempty" jsonschema:"description=Additional fields to include in request bodies, only works with openai-compatible providers"`
 
 	ProviderOptions map[string]any `json:"provider_options,omitempty" jsonschema:"description=Additional provider-specific options for this provider"`
@@ -174,7 +187,12 @@ type MCPConfig struct {
 	DisabledTools []string          `json:"disabled_tools,omitempty" jsonschema:"description=List of tools from this MCP server to disable,example=get-library-doc"`
 	Timeout       int               `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for MCP server connections,default=15,example=30,example=60,example=120"`
 
-	// TODO: maybe make it possible to get the value from the env
+	// Headers are HTTP headers for HTTP/SSE MCP servers. Values run
+	// through shell expansion at MCP startup, so $VAR and $(cmd)
+	// work. A header whose value resolves to the empty string (unset
+	// bare $VAR under lenient nounset, $(echo), or literal "") is
+	// omitted from the outgoing request rather than sent as
+	// "Header:". See PLAN.md Phase 2 design decision #18.
 	Headers map[string]string `json:"headers,omitempty" jsonschema:"description=HTTP headers for HTTP/SSE MCP servers"`
 }
 
@@ -368,6 +386,13 @@ func (m MCPConfig) ResolvedURL(r VariableResolver) (string, error) {
 // already sanitized by ResolveValue and is wrapped with %w so
 // errors.Is/As continues to work.
 //
+// A header whose value resolves to the empty string (unset bare $VAR
+// under lenient nounset, $(echo), or literal "") is omitted from the
+// returned map — sending "X-Auth:" with an empty value is rejected by
+// some providers and the user's intent in "optional, env-gated
+// header" is clearly "absent when the var isn't set." See PLAN.md
+// Phase 2 design decision #18.
+//
 // See ResolvedEnv for guidance on picking a resolver.
 func (m MCPConfig) ResolvedHeaders(r VariableResolver) (map[string]string, error) {
 	if len(m.Headers) == 0 {
@@ -385,6 +410,80 @@ func (m MCPConfig) ResolvedHeaders(r VariableResolver) (map[string]string, error
 		v, err := r.ResolveValue(m.Headers[k])
 		if err != nil {
 			return nil, fmt.Errorf("header %s: %w", k, err)
+		}
+		if v == "" {
+			continue
+		}
+		out[k] = v
+	}
+	return out, nil
+}
+
+// ResolvedArgs returns l.Args with every element expanded through the
+// given resolver. A fresh slice is allocated; l.Args is never mutated.
+// On the first resolution failure it returns nil and an error
+// identifying the offending positional index; the inner resolver error
+// is already sanitized by ResolveValue and is wrapped with %w so
+// errors.Is/As continues to work.
+//
+// Empty resolved values are kept (a deliberate "empty positional arg"
+// like --flag "" is sometimes valid), matching MCPConfig.ResolvedArgs;
+// see PLAN.md Phase 2 design decision #18.
+//
+// The resolver choice matters: in server mode pass the shell resolver
+// so $VAR / $(cmd) expand; in client mode pass IdentityResolver so the
+// template is forwarded verbatim. See PLAN.md Phase 2 design decision
+// #13.
+func (l LSPConfig) ResolvedArgs(r VariableResolver) ([]string, error) {
+	if len(l.Args) == 0 {
+		return nil, nil
+	}
+	out := make([]string, len(l.Args))
+	for i, a := range l.Args {
+		v, err := r.ResolveValue(a)
+		if err != nil {
+			return nil, fmt.Errorf("arg %d: %w", i, err)
+		}
+		out[i] = v
+	}
+	return out, nil
+}
+
+// ResolvedEnv returns l.Env with every value expanded through the
+// given resolver. A fresh map is allocated; l.Env is never mutated.
+// On the first resolution failure it returns nil and an error that
+// identifies the offending key; the inner resolver error is already
+// sanitized by ResolveValue and is wrapped with %w so errors.Is/As
+// continues to work.
+//
+// Empty resolved values are kept ("FOO=" is a legitimate request;
+// opt out via ${VAR:+...}), matching MCPConfig.ResolvedEnv; see
+// PLAN.md Phase 2 design decision #18.
+//
+// Shape note: this returns map[string]string rather than the []string
+// shape MCPConfig.ResolvedEnv uses because the consumer
+// (powernap.ClientConfig.Environment in internal/lsp/client.go) takes
+// a map directly — returning a []string here would only force a
+// round-trip back to a map at the call site. See PLAN.md Phase 2
+// design decision #13.
+//
+// See ResolvedArgs for guidance on picking a resolver.
+func (l LSPConfig) ResolvedEnv(r VariableResolver) (map[string]string, error) {
+	if len(l.Env) == 0 {
+		return map[string]string{}, nil
+	}
+	out := make(map[string]string, len(l.Env))
+	// Sort keys so failures are reported deterministically when more
+	// than one value would fail.
+	keys := make([]string, 0, len(l.Env))
+	for k := range l.Env {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		v, err := r.ResolveValue(l.Env[k])
+		if err != nil {
+			return nil, fmt.Errorf("env %q: %w", k, err)
 		}
 		out[k] = v
 	}

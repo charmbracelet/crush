@@ -222,16 +222,19 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 		if len(config.ExtraHeaders) > 0 {
 			maps.Copy(headers, config.ExtraHeaders)
 		}
-		// Intentional divergence from MCP env/headers/args/url resolution:
-		// provider headers that fail to resolve log and keep their literal
-		// template so providers with optional, env-gated headers still
-		// load on hosts where those vars are unset. Changing this to a
-		// hard error would break those configs. See PLAN.md "Design
-		// decisions" item 4 for the full rationale.
+		// Provider headers use the same error contract as MCP headers:
+		// a failing $(...) aborts the provider load with a clear
+		// message, and a header that resolves to the empty string
+		// (unset bare $VAR under lenient nounset, $(echo), or literal
+		// "") is dropped from the outgoing request. See PLAN.md
+		// Phase 2 design decisions #14 and #18.
 		for k, v := range headers {
 			resolved, err := resolver.ResolveValue(v)
 			if err != nil {
-				slog.Error("Could not resolve provider header", "err", err.Error())
+				return fmt.Errorf("resolving provider %s header %q: %w", p.ID, k, err)
+			}
+			if resolved == "" {
+				delete(headers, k)
 				continue
 			}
 			headers[k] = resolved
@@ -382,10 +385,16 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 			continue
 		}
 
+		// Custom-provider headers share the MCP error contract; see
+		// the known-provider loop above and PLAN.md Phase 2 design
+		// decisions #14 and #18.
 		for k, v := range providerConfig.ExtraHeaders {
 			resolved, err := resolver.ResolveValue(v)
 			if err != nil {
-				slog.Error("Could not resolve provider header", "err", err.Error())
+				return fmt.Errorf("resolving provider %s header %q: %w", id, k, err)
+			}
+			if resolved == "" {
+				delete(providerConfig.ExtraHeaders, k)
 				continue
 			}
 			providerConfig.ExtraHeaders[k] = resolved

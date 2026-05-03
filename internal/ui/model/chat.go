@@ -603,10 +603,15 @@ func (m *Chat) HandleDelayedClick(msg DelayedClickMsg) bool {
 	selectedItem := m.list.SelectedItem()
 	if clickable, ok := selectedItem.(list.MouseClickable); ok {
 		handled := clickable.HandleMouseClick(ansi.MouseButton1, msg.X, msg.Y)
-		// Toggle expansion if applicable.
-		if expandable, ok := selectedItem.(chat.Expandable); ok {
-			if !expandable.ToggleExpanded() {
-				m.ScrollToIndex(m.list.Selected())
+		// Toggle expansion only when the item signalled it handled the
+		// click. Items like AssistantMessageItem only report handled when
+		// the click is on their expandable region, so this avoids
+		// toggling expansion for clicks outside the clickable area.
+		if handled {
+			if expandable, ok := selectedItem.(chat.Expandable); ok {
+				if !expandable.ToggleExpanded() {
+					m.ScrollToIndex(m.list.Selected())
+				}
 			}
 		}
 		if m.AtBottom() {

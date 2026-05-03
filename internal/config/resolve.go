@@ -58,8 +58,11 @@ type shellVariableResolver struct {
 // NewShellVariableResolver returns a VariableResolver that delegates to
 // the embedded shell (the same interpreter used by the bash tool and
 // hooks). Supported constructs match shell.ExpandValue: $VAR, ${VAR},
-// ${VAR:-default}, $(command), quoting, and escapes. Unset variables are
-// an error; use ${VAR:-} to opt in to an empty fallback.
+// ${VAR:-default}, $(command), quoting, and escapes. Unset variables
+// expand to the empty string by default, matching bash; use
+// ${VAR:?message} to require a value and fail loudly when it is missing.
+// The stricter "unset is always an error" mode is gated globally by
+// shell.NoUnset.
 func NewShellVariableResolver(e env.Env, opts ...ShellResolverOption) VariableResolver {
 	r := &shellVariableResolver{
 		env:    e,
@@ -77,9 +80,12 @@ func NewShellVariableResolver(e env.Env, opts ...ShellResolverOption) VariableRe
 //   - $VAR and ${VAR} for environment variables.
 //   - ${VAR:-default} / ${VAR:+alt} / ${VAR:?msg} for defaulting.
 //
-// Unset variables are a hard error (nounset), mirroring the historical
-// behaviour of this resolver: silently expanding an unset variable to the
-// empty string is exactly how broken credentials reach MCP servers.
+// Unset variables expand to the empty string by default, matching bash.
+// Command-substitution failures are always a hard error. Required
+// credentials should use ${VAR:?message} so a missing variable fails
+// loudly at load time instead of quietly resolving to empty. Global
+// strict mode is available via shell.NoUnset for callers that want the
+// old nounset-on behaviour back.
 func (r *shellVariableResolver) ResolveValue(value string) (string, error) {
 	// Preserve the historical backward-compat contract: a lone "$" is a
 	// malformed config value, not a legal literal. The underlying shell

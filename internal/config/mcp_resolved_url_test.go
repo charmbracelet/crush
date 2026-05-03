@@ -44,14 +44,31 @@ func TestMCPConfig_ResolvedURL(t *testing.T) {
 		require.Equal(t, "https://mcp.example.com/events", got)
 	})
 
-	t.Run("unset var is an error wrapping the template", func(t *testing.T) {
+	t.Run("unset var expands to empty under lenient default", func(t *testing.T) {
 		t.Parallel()
+		// Phase 2 defaults to nounset-off: bare $VAR on an unset
+		// variable expands to "" rather than erroring. Here the
+		// host collapses to empty, so the caller sees a malformed
+		// URL rather than a resolver error; that's the expected
+		// trade-off for making $OPTIONAL-style patterns work, and
+		// required-credential callers should use ${VAR:?msg}.
 		m := MCPConfig{Type: MCPHttp, URL: "https://$MCP_MISSING_HOST/api"}
+		got, err := m.ResolvedURL(NewShellVariableResolver(env.NewFromMap(nil)))
+		require.NoError(t, err, "unset var must not error under lenient default")
+		require.Equal(t, "https:///api", got)
+	})
+
+	t.Run("colon-question on unset var errors regardless of toggle", func(t *testing.T) {
+		t.Parallel()
+		// ${VAR:?msg} is the opt-in strictness mechanism; it must
+		// hard-error even with NoUnset off so required credentials
+		// surface at load time instead of shipping empty-host URLs
+		// to the transport layer.
+		m := MCPConfig{Type: MCPHttp, URL: "https://${MCP_MISSING_HOST:?set MCP_MISSING_HOST}/api"}
 		_, err := m.ResolvedURL(NewShellVariableResolver(env.NewFromMap(nil)))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "url:")
-		require.Contains(t, err.Error(), "$MCP_MISSING_HOST")
-		require.Contains(t, err.Error(), "unbound")
+		require.Contains(t, err.Error(), "set MCP_MISSING_HOST")
 	})
 
 	t.Run("failing command substitution is an error", func(t *testing.T) {

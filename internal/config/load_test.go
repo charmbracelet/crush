@@ -1617,10 +1617,14 @@ func TestConfig_configureProviders_ProviderHeaderResolveFailure(t *testing.T) {
 				ExtraHeaders: map[string]string{
 					// Failing $(...) — inner command exits 1, no stdout.
 					"X-Broken": "$(false)",
-					// Unset var — nounset makes this an error too.
+					// Unset var — under Phase 2 lenient nounset this
+					// resolves cleanly to "" rather than erroring;
+					// Step 10 will rewrite this whole test once the
+					// empty-drop rule replaces the log-and-continue
+					// loop at load.go:225.
 					"X-Missing": "$PROVIDER_HEADER_NEVER_SET",
 					// Happy path: must still be resolved, proving the
-					// failure in the other two did not abort the loop.
+					// failure in X-Broken did not abort the loop.
 					"X-Static": "kept-literal",
 				},
 			},
@@ -1640,10 +1644,15 @@ func TestConfig_configureProviders_ProviderHeaderResolveFailure(t *testing.T) {
 	pc, ok := cfg.Providers.Get("openai")
 	require.True(t, ok, "openai provider must still be configured")
 
-	// Literal template preserved for the two failing headers; the
-	// happy-path header is resolved through the shell (pass-through
-	// for a literal value).
+	// X-Broken still errors on $(false) so its literal template is
+	// preserved by the log-and-continue loop. X-Missing resolves
+	// cleanly to "" under lenient nounset: the current divergence
+	// only kicks in on resolver errors, so a non-erroring empty
+	// expansion writes through. The happy-path header is resolved
+	// through the shell (pass-through for a literal value). Step 10
+	// will flip this whole surface to the MCP contract plus the
+	// empty-drop rule from design decision #18.
 	require.Equal(t, "$(false)", pc.ExtraHeaders["X-Broken"])
-	require.Equal(t, "$PROVIDER_HEADER_NEVER_SET", pc.ExtraHeaders["X-Missing"])
+	require.Equal(t, "", pc.ExtraHeaders["X-Missing"])
 	require.Equal(t, "kept-literal", pc.ExtraHeaders["X-Static"])
 }

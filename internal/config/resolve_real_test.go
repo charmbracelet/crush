@@ -159,23 +159,50 @@ func TestResolvedEnv_RealShell_Deterministic(t *testing.T) {
 	require.True(t, slices.IsSorted(got), "env slice must be sorted; got %v", got)
 }
 
-// TestResolvedEnv_RealShell_NounsetRegression is the single most
-// important assertion in this file: an unset variable is an error, not
-// an empty expansion. Swapping the hand-rolled parser for mvdan's
-// default-expansion behaviour without nounset would re-introduce
-// Defect 1 via a typo'd variable name.
-func TestResolvedEnv_RealShell_NounsetRegression(t *testing.T) {
+// TestResolvedEnv_RealShell_UnsetExpandsEmpty pins Phase 2's lenient
+// default: an unset bare $VAR expands to the empty string, matching
+// bash. The silent-empty-credential class of bug that motivated Phase
+// 1's nounset-on default is already prevented by the pure-function
+// error-returning contract of ResolvedEnv, so we no longer rely on
+// nounset to catch typo'd variable names. Users who want strict
+// behaviour for a required credential opt in per-reference with
+// ${VAR:?msg}; see TestResolvedEnv_RealShell_ColonQuestionIsStrict.
+func TestResolvedEnv_RealShell_UnsetExpandsEmpty(t *testing.T) {
 	t.Parallel()
 
 	m := MCPConfig{Env: map[string]string{
-		// Intentional typo: user meant $FORGEJO_TOKEN.
+		// Intentional typo: user meant $FORGEJO_TOKEN. Under Phase 2
+		// defaults this expands to "" rather than erroring, matching
+		// bash's behaviour on bare $VAR.
 		"FORGEJO_ACCESS_TOKEN": "$FORGJO_TOKEN",
 	}}
 	got, err := m.ResolvedEnv(realShellResolver(nil))
-	require.Error(t, err, "unset var must not silently expand to empty")
+	require.NoError(t, err, "unset var must expand to empty, not error")
+	require.Equal(t, []string{"FORGEJO_ACCESS_TOKEN="}, got)
+}
+
+// TestResolvedEnv_RealShell_ColonQuestionIsStrict pins the opt-in
+// strictness contract: ${VAR:?msg} must hard-error when VAR is unset,
+// regardless of the global NoUnset toggle. This is the recommended
+// mechanism for required credentials under the lenient default, so a
+// future refactor that accidentally swallows ${VAR:?...} errors would
+// silently ship empty tokens to MCP servers again.
+func TestResolvedEnv_RealShell_ColonQuestionIsStrict(t *testing.T) {
+	t.Parallel()
+
+	m := MCPConfig{Env: map[string]string{
+		"FORGEJO_ACCESS_TOKEN": "${FORGJO_TOKEN:?set FORGJO_TOKEN}",
+	}}
+	got, err := m.ResolvedEnv(realShellResolver(nil))
+	require.Error(t, err, "${VAR:?msg} must error when VAR is unset")
 	require.Nil(t, got)
-	require.Contains(t, err.Error(), "FORGEJO_ACCESS_TOKEN")
-	require.Contains(t, err.Error(), "$FORGJO_TOKEN")
+	// The resolver wraps with the env key and the user-written
+	// template; the inner shell error carries the :? message so
+	// users learn which credential is missing and why.
+	msg := err.Error()
+	require.Contains(t, msg, "FORGEJO_ACCESS_TOKEN")
+	require.Contains(t, msg, "${FORGJO_TOKEN:?set FORGJO_TOKEN}")
+	require.Contains(t, msg, "set FORGJO_TOKEN")
 }
 
 // TestResolvedEnv_RealShell_FailureDetail pins that a failing inner

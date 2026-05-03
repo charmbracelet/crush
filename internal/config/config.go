@@ -401,6 +401,77 @@ func (m MCPConfig) ResolvedHeaders(r VariableResolver) (map[string]string, error
 	return out, nil
 }
 
+// ResolvedArgs returns l.Args with every element expanded through the
+// given resolver. A fresh slice is allocated; l.Args is never mutated.
+// On the first resolution failure it returns nil and an error
+// identifying the offending positional index; the inner resolver error
+// is already sanitized by ResolveValue and is wrapped with %w so
+// errors.Is/As continues to work.
+//
+// Empty resolved values are kept (a deliberate "empty positional arg"
+// like --flag "" is sometimes valid), matching MCPConfig.ResolvedArgs;
+// see PLAN.md Phase 2 design decision #18.
+//
+// The resolver choice matters: in server mode pass the shell resolver
+// so $VAR / $(cmd) expand; in client mode pass IdentityResolver so the
+// template is forwarded verbatim. See PLAN.md Phase 2 design decision
+// #13.
+func (l LSPConfig) ResolvedArgs(r VariableResolver) ([]string, error) {
+	if len(l.Args) == 0 {
+		return nil, nil
+	}
+	out := make([]string, len(l.Args))
+	for i, a := range l.Args {
+		v, err := r.ResolveValue(a)
+		if err != nil {
+			return nil, fmt.Errorf("arg %d: %w", i, err)
+		}
+		out[i] = v
+	}
+	return out, nil
+}
+
+// ResolvedEnv returns l.Env with every value expanded through the
+// given resolver. A fresh map is allocated; l.Env is never mutated.
+// On the first resolution failure it returns nil and an error that
+// identifies the offending key; the inner resolver error is already
+// sanitized by ResolveValue and is wrapped with %w so errors.Is/As
+// continues to work.
+//
+// Empty resolved values are kept ("FOO=" is a legitimate request;
+// opt out via ${VAR:+...}), matching MCPConfig.ResolvedEnv; see
+// PLAN.md Phase 2 design decision #18.
+//
+// Shape note: this returns map[string]string rather than the []string
+// shape MCPConfig.ResolvedEnv uses because the consumer
+// (powernap.ClientConfig.Environment in internal/lsp/client.go) takes
+// a map directly — returning a []string here would only force a
+// round-trip back to a map at the call site. See PLAN.md Phase 2
+// design decision #13.
+//
+// See ResolvedArgs for guidance on picking a resolver.
+func (l LSPConfig) ResolvedEnv(r VariableResolver) (map[string]string, error) {
+	if len(l.Env) == 0 {
+		return map[string]string{}, nil
+	}
+	out := make(map[string]string, len(l.Env))
+	// Sort keys so failures are reported deterministically when more
+	// than one value would fail.
+	keys := make([]string, 0, len(l.Env))
+	for k := range l.Env {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		v, err := r.ResolveValue(l.Env[k])
+		if err != nil {
+			return nil, fmt.Errorf("env %q: %w", k, err)
+		}
+		out[k] = v
+	}
+	return out, nil
+}
+
 type Agent struct {
 	ID          string `json:"id,omitempty"`
 	Name        string `json:"name,omitempty"`

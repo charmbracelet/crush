@@ -106,6 +106,10 @@
     },
     "HookConfig": {
       "properties": {
+        "name": {
+          "type": "string",
+          "description": "Friendly display name shown in the TUI for this hook"
+        },
         "matcher": {
           "type": "string",
           "description": "Regex pattern tested against the tool name. Empty means match all tools."

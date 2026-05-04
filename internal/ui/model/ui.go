@@ -3091,10 +3091,12 @@ func (m *UI) cacheSidebarLogo(width int) {
 	m.sidebarLogo = renderLogo(m.com.Styles, true, m.com.IsHyper(), width)
 }
 
-// applyTheme replaces the active styles with the given theme and
-// refreshes every component that caches style data.
+// applyTheme replaces the active styles with the given theme, drops the
+// shared markdown renderer cache, and refreshes every component that
+// caches style data.
 func (m *UI) applyTheme(s styles.Styles) {
 	*m.com.Styles = s
+	common.InvalidateMarkdownRendererCache()
 	m.refreshStyles()
 }
 
@@ -3116,7 +3118,6 @@ func (m *UI) refreshStyles() {
 	)
 	m.todoSpinner.Style = t.Pills.TodoSpinner
 	m.status.help.Styles = t.Help
-	common.InvalidateMarkdownRendererCache()
 	m.chat.InvalidateRenderCaches()
 }
 

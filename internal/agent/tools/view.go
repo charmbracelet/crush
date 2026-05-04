@@ -161,12 +161,6 @@ func NewViewTool(
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("Path is a directory, not a file: %s", filePath)), nil
 			}
 
-			// Based on the specifications we should not limit the skills read.
-			if !isSkillFile && fileInfo.Size() > MaxViewSize {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("File is too large (%d bytes). Maximum size is %d bytes",
-					fileInfo.Size(), MaxViewSize)), nil
-			}
-
 			// Set default limit if not provided (no limit for SKILL.md files)
 			if params.Limit <= 0 {
 				if isSkillFile {
@@ -198,6 +192,12 @@ func NewViewTool(
 			}
 			if !utf8.ValidString(content) {
 				return fantasy.NewTextErrorResponse("File content is not valid UTF-8"), nil
+			}
+
+			// Based on the specifications we should not limit the skills read.
+			if !isSkillFile && len(content) > MaxViewSize {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("Content section is too large (%d bytes). Maximum size is %d bytes",
+					len(content), MaxViewSize)), nil
 			}
 
 			openInLSPs(ctx, lspManager, filePath)

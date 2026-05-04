@@ -3116,6 +3116,7 @@ func (m *UI) refreshStyles() {
 	)
 	m.todoSpinner.Style = t.Pills.TodoSpinner
 	m.status.help.Styles = t.Help
+	common.InvalidateMarkdownRendererCache()
 	m.chat.InvalidateRenderCaches()
 }
 

@@ -7,6 +7,18 @@
   "default_small_model_id": "gpt-oss-120b",
   "models": [
     {
+      "id": "deepseek-v4-flash",
+      "name": "DeepSeek V4 Flash",
+      "cost_per_1m_in": 1.55,
+      "cost_per_1m_out": 2.28,
+      "cost_per_1m_in_cached": 0.38,
+      "cost_per_1m_out_cached": 0,
+      "context_window": 65000,
+      "default_max_tokens": 6500,
+      "can_reason": true,
+      "supports_attachments": false
+    },
+    {
       "id": "deepseek-v4-pro",
       "name": "DeepSeek V4 Pro",
       "cost_per_1m_in": 4.45,
@@ -87,9 +99,9 @@
     {
       "id": "kimi-k2.6",
       "name": "Kimi K2.6",
-      "cost_per_1m_in": 0.8,
-      "cost_per_1m_out": 4,
-      "cost_per_1m_in_cached": 0.25,
+      "cost_per_1m_in": 0.74,
+      "cost_per_1m_out": 3.49,
+      "cost_per_1m_in_cached": 0.14,
       "cost_per_1m_out_cached": 0,
       "context_window": 262142,
       "default_max_tokens": 26214,

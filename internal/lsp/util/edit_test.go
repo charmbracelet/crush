@@ -1,12 +1,43 @@
 package util
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/stretchr/testify/require"
 )
+
+func TestNormalizeURIPath(t *testing.T) {
+	t.Parallel()
+
+	t.Run("normalizes slash-separated paths", func(t *testing.T) {
+		t.Parallel()
+		got := normalizeURIPath("foo/bar/baz.txt")
+		require.Equal(t, filepath.Clean(filepath.FromSlash("foo/bar/baz.txt")), got)
+	})
+
+	t.Run("windows drive URI path forward slash", func(t *testing.T) {
+		t.Parallel()
+		if runtime.GOOS != "windows" {
+			t.Skip("windows-only normalization behavior")
+		}
+		got := normalizeURIPath("/C:/Users/test/file.txt")
+		require.Equal(t, filepath.Clean(`C:\Users\test\file.txt`), got)
+	})
+
+	t.Run("windows drive URI path backslash", func(t *testing.T) {
+		t.Parallel()
+		if runtime.GOOS != "windows" {
+			t.Skip("windows-only normalization behavior")
+		}
+		got := normalizeURIPath(`\C:\Users\test\file.txt`)
+		require.Equal(t, filepath.Clean(`C:\Users\test\file.txt`), got)
+	})
+}
 
 func TestPositionToByteOffset(t *testing.T) {
 	tests := []struct {
@@ -373,4 +404,112 @@ func TestRangesOverlap(t *testing.T) {
 			require.Equal(t, tt.want, got2, "rangesOverlap(r2, r1) symmetry")
 		})
 	}
+}
+
+func TestApplyWorkspaceEdit_BoundaryEnforcement(t *testing.T) {
+	t.Parallel()
+
+	t.Run("allows edits inside workspace", func(t *testing.T) {
+		t.Parallel()
+		workspace := t.TempDir()
+		insideFile := filepath.Join(workspace, "inside.txt")
+		require.NoError(t, os.WriteFile(insideFile, []byte("hello"), 0o644))
+
+		edit := protocol.WorkspaceEdit{
+			Changes: map[protocol.DocumentURI][]protocol.TextEdit{
+				protocol.URIFromPath(insideFile): {
+					{
+						Range: protocol.Range{
+							Start: protocol.Position{Line: 0, Character: 0},
+							End:   protocol.Position{Line: 0, Character: 5},
+						},
+						NewText: "world",
+					},
+				},
+			},
+		}
+
+		err := ApplyWorkspaceEdit(edit, powernap.UTF8, workspace)
+		require.NoError(t, err)
+
+		content, err := os.ReadFile(insideFile)
+		require.NoError(t, err)
+		require.Equal(t, "world", string(content))
+	})
+
+	t.Run("rejects text edits outside workspace", func(t *testing.T) {
+		t.Parallel()
+		workspace := t.TempDir()
+		outsideDir := t.TempDir()
+		outsideFile := filepath.Join(outsideDir, "outside.txt")
+		require.NoError(t, os.WriteFile(outsideFile, []byte("outside"), 0o644))
+
+		edit := protocol.WorkspaceEdit{
+			Changes: map[protocol.DocumentURI][]protocol.TextEdit{
+				protocol.URIFromPath(outsideFile): {
+					{
+						Range: protocol.Range{
+							Start: protocol.Position{Line: 0, Character: 0},
+							End:   protocol.Position{Line: 0, Character: 7},
+						},
+						NewText: "blocked",
+					},
+				},
+			},
+		}
+
+		err := ApplyWorkspaceEdit(edit, powernap.UTF8, workspace)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "outside workspace root")
+	})
+
+	t.Run("rejects recursive delete outside workspace", func(t *testing.T) {
+		t.Parallel()
+		workspace := t.TempDir()
+		outsideDir := t.TempDir()
+
+		edit := protocol.WorkspaceEdit{
+			DocumentChanges: []protocol.DocumentChange{
+				{
+					DeleteFile: &protocol.DeleteFile{
+						URI: protocol.URIFromPath(outsideDir),
+						Options: &protocol.DeleteFileOptions{
+							Recursive: true,
+						},
+					},
+				},
+			},
+		}
+
+		err := ApplyWorkspaceEdit(edit, powernap.UTF8, workspace)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "outside workspace root")
+		_, statErr := os.Stat(outsideDir)
+		require.NoError(t, statErr)
+	})
+
+	t.Run("rejects rename when target outside workspace", func(t *testing.T) {
+		t.Parallel()
+		workspace := t.TempDir()
+		outsideDir := t.TempDir()
+		renameSource := filepath.Join(workspace, "rename.txt")
+		require.NoError(t, os.WriteFile(renameSource, []byte("rename"), 0o644))
+
+		edit := protocol.WorkspaceEdit{
+			DocumentChanges: []protocol.DocumentChange{
+				{
+					RenameFile: &protocol.RenameFile{
+						OldURI: protocol.URIFromPath(renameSource),
+						NewURI: protocol.URIFromPath(filepath.Join(outsideDir, "renamed.txt")),
+					},
+				},
+			},
+		}
+
+		err := ApplyWorkspaceEdit(edit, powernap.UTF8, workspace)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "outside workspace root")
+		_, statErr := os.Stat(renameSource)
+		require.NoError(t, statErr)
+	})
 }

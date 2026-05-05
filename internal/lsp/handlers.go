@@ -45,14 +45,14 @@ func HandleRegisterCapability(_ context.Context, _ string, params json.RawMessag
 }
 
 // HandleApplyEdit handles workspace edit requests
-func HandleApplyEdit(encoding powernap.OffsetEncoding) func(_ context.Context, _ string, params json.RawMessage) (any, error) {
+func HandleApplyEdit(encoding powernap.OffsetEncoding, workspaceRoot string) func(_ context.Context, _ string, params json.RawMessage) (any, error) {
 	return func(_ context.Context, _ string, params json.RawMessage) (any, error) {
 		var edit protocol.ApplyWorkspaceEditParams
 		if err := json.Unmarshal(params, &edit); err != nil {
 			return nil, err
 		}
 
-		err := util.ApplyWorkspaceEdit(edit.Edit, encoding)
+		err := util.ApplyWorkspaceEdit(edit.Edit, encoding, workspaceRoot)
 		if err != nil {
 			slog.Error("Error applying workspace edit", "error", err)
 			return protocol.ApplyWorkspaceEditResult{Applied: false, FailureReason: err.Error()}, nil

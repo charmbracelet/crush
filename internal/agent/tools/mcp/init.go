@@ -447,35 +447,59 @@ func createTransport(ctx context.Context, m config.MCPConfig, resolver config.Va
 		if strings.TrimSpace(command) == "" {
 			return nil, fmt.Errorf("mcp stdio config requires a non-empty 'command' field")
 		}
-		cmd := exec.CommandContext(ctx, home.Long(command), m.Args...)
-		cmd.Env = append(os.Environ(), m.ResolvedEnv()...)
+		args, err := m.ResolvedArgs(resolver)
+		if err != nil {
+			return nil, err
+		}
+		envs, err := m.ResolvedEnv(resolver)
+		if err != nil {
+			return nil, err
+		}
+		cmd := exec.CommandContext(ctx, home.Long(command), args...)
+		cmd.Env = append(os.Environ(), envs...)
 		return &mcp.CommandTransport{
 			Command: cmd,
 		}, nil
 	case config.MCPHttp:
-		if strings.TrimSpace(m.URL) == "" {
+		url, err := m.ResolvedURL(resolver)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(url) == "" {
 			return nil, fmt.Errorf("mcp http config requires a non-empty 'url' field")
+		}
+		headers, err := m.ResolvedHeaders(resolver)
+		if err != nil {
+			return nil, err
 		}
 		client := &http.Client{
 			Transport: &headerRoundTripper{
-				headers: m.ResolvedHeaders(),
+				headers: headers,
 			},
 		}
 		return &mcp.StreamableClientTransport{
-			Endpoint:   m.URL,
+			Endpoint:   url,
 			HTTPClient: client,
 		}, nil
 	case config.MCPSSE:
-		if strings.TrimSpace(m.URL) == "" {
+		url, err := m.ResolvedURL(resolver)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(url) == "" {
 			return nil, fmt.Errorf("mcp sse config requires a non-empty 'url' field")
+		}
+		headers, err := m.ResolvedHeaders(resolver)
+		if err != nil {
+			return nil, err
 		}
 		client := &http.Client{
 			Transport: &headerRoundTripper{
-				headers: m.ResolvedHeaders(),
+				headers: headers,
 			},
 		}
 		return &mcp.SSEClientTransport{
-			Endpoint:   m.URL,
+			Endpoint:   url,
 			HTTPClient: client,
 		}, nil
 	default:

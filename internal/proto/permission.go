@@ -100,6 +100,12 @@ func unmarshalToolParams(toolName string, raw json.RawMessage) (any, error) {
 			return nil, err
 		}
 		return params, nil
+	case TouchToolName:
+		var params TouchPermissionsParams
+		if err := json.Unmarshal(raw, &params); err != nil {
+			return nil, err
+		}
+		return params, nil
 	case WriteToolName:
 		var params WritePermissionsParams
 		if err := json.Unmarshal(raw, &params); err != nil {

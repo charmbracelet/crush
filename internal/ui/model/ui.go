@@ -157,6 +157,10 @@ type (
 	creditsUpdatedMsg struct {
 		credits int
 	}
+
+	// agentRunCompleteMsg is sent when an agent run finishes (normally or via
+	// cancellation) so that prompt history can be refreshed.
+	agentRunCompleteMsg struct{}
 )
 
 // UI represents the main user interface model.
@@ -585,6 +589,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.promptHistory.messages = msg.messages
 		m.promptHistory.index = -1
 		m.promptHistory.draft = ""
+
+	case agentRunCompleteMsg:
+		cmds = append(cmds, m.loadPromptHistory())
 
 	case closeDialogMsg:
 		m.dialog.CloseFrontDialog()
@@ -3159,14 +3166,14 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 		if err != nil {
 			isCancelErr := errors.Is(err, context.Canceled)
 			if isCancelErr {
-				return nil
+				return agentRunCompleteMsg{}
 			}
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
 				Msg:  fmt.Sprintf("%v", err),
 			}
 		}
-		return nil
+		return agentRunCompleteMsg{}
 	})
 	return tea.Batch(cmds...)
 }

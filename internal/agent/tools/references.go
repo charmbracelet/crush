@@ -100,14 +100,7 @@ func find(ctx context.Context, lspManager *lsp.Manager, symbol string, match gre
 		return nil, fmt.Errorf("failed to get absolute path: %s", err)
 	}
 
-	var client *lsp.Client
-	for c := range lspManager.Clients().Seq() {
-		if c.HandlesFile(absPath) {
-			client = c
-			break
-		}
-	}
-
+	client := lspManager.BestClientFor(absPath)
 	if client == nil {
 		slog.Warn("No LSP clients to handle", "path", match.path)
 		return nil, nil

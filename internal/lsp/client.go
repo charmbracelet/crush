@@ -345,14 +345,35 @@ type OpenFileInfo struct {
 // HandlesFile checks if this LSP client handles the given file based on its
 // extension and whether it's within the working directory.
 func (c *Client) HandlesFile(path string) bool {
+	return c.MatchScore(path) > 0
+}
+
+// MatchScore returns how strongly this client claims to handle the given
+// path. Higher scores beat lower scores for tools that must pick a single
+// client (e.g. lsp_references):
+//
+//	0 — outside the client's workspace, or FileTypes is set but doesn't match
+//	1 — inside the workspace and the client has no FileTypes (catch-all)
+//	2 — inside the workspace and FileTypes explicitly names the extension or
+//	    detected language
+//
+// Tools that broadcast to every matching client (e.g. lsp_diagnostics)
+// should keep using HandlesFile, since any non-zero score is "willing".
+func (c *Client) MatchScore(path string) int {
 	if c == nil {
-		return false
+		return 0
 	}
 	if !fsext.HasPrefix(path, c.cwd) {
 		slog.Debug("File outside workspace", "name", c.name, "file", path, "workDir", c.cwd)
-		return false
+		return 0
 	}
-	return handlesFiletype(c.name, c.fileTypes, path)
+	if len(c.fileTypes) == 0 {
+		return 1
+	}
+	if handlesFiletype(c.name, c.fileTypes, path) {
+		return 2
+	}
+	return 0
 }
 
 // OpenFile opens a file in the LSP server.

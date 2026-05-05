@@ -12,7 +12,7 @@ forward.
 
 ### Hot Hook Facts
 
-- Hooks just shell commands
+- Hooks are just shell commands
 - Hooks can be written in any language because they’re just executables: Bash, Python, Node, Rust, Haskell, whatever
 - Hooks are Claude Code-compatible
 - Crush ships with a builtin `crush-hook` skill write, edit, and configure

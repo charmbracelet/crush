@@ -23,7 +23,7 @@ func writeScript(t *testing.T, dir, name, contents string) string {
 	if err := os.WriteFile(path, []byte(contents), 0o755); err != nil {
 		t.Fatalf("write %s: %v", name, err)
 	}
-	return path
+	return filepath.ToSlash(path)
 }
 
 // randSuffix returns a short random hex string, used to build

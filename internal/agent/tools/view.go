@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -57,6 +58,15 @@ const (
 	DefaultReadLimit = 2000
 	MaxLineLength    = 2000
 )
+
+type contentTooLargeError struct {
+	Size int
+	Max  int
+}
+
+func (e contentTooLargeError) Error() string {
+	return fmt.Sprintf("content section is too large (%d bytes). Maximum size is %d bytes", e.Size, e.Max)
+}
 
 func NewViewTool(
 	lspManager *lsp.Manager,
@@ -161,12 +171,6 @@ func NewViewTool(
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("Path is a directory, not a file: %s", filePath)), nil
 			}
 
-			// Based on the specifications we should not limit the skills read.
-			if !isSkillFile && fileInfo.Size() > MaxViewSize {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("File is too large (%d bytes). Maximum size is %d bytes",
-					fileInfo.Size(), MaxViewSize)), nil
-			}
-
 			// Set default limit if not provided (no limit for SKILL.md files)
 			if params.Limit <= 0 {
 				if isSkillFile {
@@ -178,6 +182,10 @@ func NewViewTool(
 
 			isSupportedImage, mimeType := getImageMimeType(filePath)
 			if isSupportedImage {
+				if fileInfo.Size() > MaxViewSize {
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("Image file is too large (%d bytes). Maximum size is %d bytes",
+						fileInfo.Size(), MaxViewSize)), nil
+				}
 				if !GetSupportsImagesFromContext(ctx) {
 					modelName := GetModelNameFromContext(ctx)
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("This model (%s) does not support image data.", modelName)), nil
@@ -192,8 +200,17 @@ func NewViewTool(
 			}
 
 			// Read the file content
-			content, hasMore, err := readTextFile(filePath, params.Offset, params.Limit)
+			maxContentSize := MaxViewSize
+			if isSkillFile {
+				maxContentSize = 0
+			}
+			content, hasMore, err := readTextFile(filePath, params.Offset, params.Limit, maxContentSize)
 			if err != nil {
+				var tooLarge contentTooLargeError
+				if errors.As(err, &tooLarge) {
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("Content section is too large (%d bytes). Maximum size is %d bytes",
+						tooLarge.Size, tooLarge.Max)), nil
+				}
 				return fantasy.ToolResponse{}, fmt.Errorf("error reading file: %w", err)
 			}
 			if !utf8.ValidString(content) {
@@ -258,7 +275,7 @@ func addLineNumbers(content string, startLine int) string {
 	return strings.Join(result, "\n")
 }
 
-func readTextFile(filePath string, offset, limit int) (string, bool, error) {
+func readTextFile(filePath string, offset, limit, maxContentSize int) (string, bool, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return "", false, err
@@ -276,14 +293,22 @@ func readTextFile(filePath string, offset, limit int) (string, bool, error) {
 		}
 	}
 
-	// Pre-allocate slice with expected capacity.
-	lines := make([]string, 0, limit)
+	lines := make([]string, 0, min(limit, DefaultReadLimit))
+	contentSize := 0
 
 	for len(lines) < limit && scanner.Scan() {
 		lineText := scanner.Text()
 		if len(lineText) > MaxLineLength {
 			lineText = lineText[:MaxLineLength] + "..."
 		}
+		projectedSize := contentSize + len(lineText)
+		if len(lines) > 0 {
+			projectedSize++
+		}
+		if maxContentSize > 0 && projectedSize > maxContentSize {
+			return "", false, contentTooLargeError{Size: projectedSize, Max: maxContentSize}
+		}
+		contentSize = projectedSize
 		lines = append(lines, lineText)
 	}
 

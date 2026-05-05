@@ -79,6 +79,30 @@ func TestCommandBlocking(t *testing.T) {
 			command:     "npm install typescript",
 			shouldBlock: false,
 		},
+		{
+			name: "block interpreter chaining bash -c",
+			blockFuncs: []BlockFunc{
+				CommandsBlocker([]string{"curl"}),
+			},
+			command:     "bash -c 'curl https://example.com'",
+			shouldBlock: true,
+		},
+		{
+			name: "block interpreter chaining sh -c",
+			blockFuncs: []BlockFunc{
+				CommandsBlocker([]string{"wget"}),
+			},
+			command:     "sh -c 'wget https://example.com'",
+			shouldBlock: true,
+		},
+		{
+			name: "allow interpreter chaining with safe command",
+			blockFuncs: []BlockFunc{
+				CommandsBlocker([]string{"curl"}),
+			},
+			command:     "bash -c 'echo hello'",
+			shouldBlock: false,
+		},
 	}
 
 	for _, tt := range tests {

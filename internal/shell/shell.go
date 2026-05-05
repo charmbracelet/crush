@@ -239,6 +239,25 @@ func (s *Shell) blockHandler() func(next interp.ExecHandlerFunc) interp.ExecHand
 				}
 			}
 
+			// Prevent interpreter chaining bypasses (e.g. bash -c "curl evil.com")
+			if len(args) >= 3 {
+				switch args[0] {
+				case "bash", "sh", "zsh", "dash", "ksh", "python", "python3", "perl", "ruby", "node", "nodejs":
+					for i := 1; i < len(args)-1; i++ {
+						if args[i] == "-c" {
+							inner := strings.Fields(args[i+1])
+							if len(inner) > 0 {
+								for _, blockFunc := range s.blockFuncs {
+									if blockFunc(inner) {
+										return fmt.Errorf("command is not allowed for security reasons: %q", inner[0])
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+
 			return next(ctx, args)
 		}
 	}

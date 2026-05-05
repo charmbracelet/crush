@@ -762,6 +762,28 @@
       "additionalProperties": false,
       "type": "object"
     },
+    "ToolWebSearch": {
+      "properties": {
+        "search_engine": {
+          "type": "string",
+          "enum": [
+            "duckduckgo",
+            "kagi"
+          ],
+          "description": "Default search engine for web_search",
+          "default": "duckduckgo"
+        },
+        "kagi_api_key": {
+          "type": "string",
+          "description": "Kagi Search API key or environment variable reference",
+          "examples": [
+            "$KAGI_API_KEY"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "Tools": {
       "properties": {
         "ls": {
@@ -769,6 +791,10 @@
         },
         "grep": {
           "$ref": "#/$defs/ToolGrep"
+        },
+        "web_search": {
+          "$ref": "#/$defs/ToolWebSearch",
+          "description": "Web search tool configuration"
         }
       },
       "additionalProperties": false,

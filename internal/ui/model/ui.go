@@ -1499,6 +1499,37 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			return util.NewInfoMsg("Reasoning effort set to " + msg.Effort)
 		})
 		m.dialog.CloseDialog(dialog.ReasoningID)
+	case dialog.ActionSelectSearchEngine:
+		cfg := m.com.Config()
+		if cfg == nil {
+			cmds = append(cmds, util.ReportError(errors.New("configuration not found")))
+			break
+		}
+		if msg.Engine == config.SearchEngineKagi && (msg.Edit || cfg.Tools.WebSearch.ResolvedKagiAPIKey(m.com.Workspace.Resolver()) == "") {
+			m.dialog.CloseDialog(dialog.SearchEnginesID)
+			if cmd := m.openKagiAPIKeyInputDialog(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			break
+		}
+		if err := m.saveSearchEngine(msg.Engine); err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
+		m.dialog.CloseDialog(dialog.SearchEnginesID)
+		cmds = append(cmds, util.CmdHandler(util.NewInfoMsg("Search engine set to "+searchEngineDisplayName(msg.Engine))))
+	case dialog.ActionSaveKagiAPIKey:
+		if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "tools.web_search.kagi_api_key", msg.APIKey); err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
+		if err := m.saveSearchEngine(config.SearchEngineKagi); err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
+		m.dialog.CloseDialog(dialog.KagiAPIKeyInputID)
+		m.dialog.CloseDialog(dialog.SearchEnginesID)
+		cmds = append(cmds, util.CmdHandler(util.NewInfoMsg("Search engine set to Kagi")))
 	case dialog.ActionPermissionResponse:
 		m.dialog.CloseDialog(dialog.PermissionsID)
 		switch msg.Action {
@@ -3233,6 +3264,14 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openReasoningDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.SearchEnginesID:
+		if cmd := m.openSearchEnginesDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.KagiAPIKeyInputID:
+		if cmd := m.openKagiAPIKeyInputDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.FilePickerID:
 		if cmd := m.openFilesDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -3320,6 +3359,50 @@ func (m *UI) openReasoningDialog() tea.Cmd {
 
 	m.dialog.OpenDialog(reasoningDialog)
 	return nil
+}
+
+func (m *UI) openSearchEnginesDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.SearchEnginesID) {
+		m.dialog.BringToFront(dialog.SearchEnginesID)
+		return nil
+	}
+
+	searchEnginesDialog, err := dialog.NewSearchEngines(m.com)
+	if err != nil {
+		return util.ReportError(err)
+	}
+
+	m.dialog.OpenDialog(searchEnginesDialog)
+	return nil
+}
+
+func (m *UI) openKagiAPIKeyInputDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.KagiAPIKeyInputID) {
+		m.dialog.BringToFront(dialog.KagiAPIKeyInputID)
+		return nil
+	}
+
+	kagiAPIKeyInputDialog, cmd := dialog.NewKagiAPIKeyInput(m.com)
+	m.dialog.OpenDialog(kagiAPIKeyInputDialog)
+	return cmd
+}
+
+func (m *UI) saveSearchEngine(engine config.SearchEngine) error {
+	if !engine.Valid() {
+		return fmt.Errorf("invalid search engine: %s", engine)
+	}
+	return m.com.Workspace.SetConfigField(config.ScopeGlobal, "tools.web_search.search_engine", engine.String())
+}
+
+func searchEngineDisplayName(engine config.SearchEngine) string {
+	switch engine {
+	case config.SearchEngineKagi:
+		return "Kagi"
+	case config.SearchEngineDuckDuckGo:
+		return "DuckDuckGo"
+	default:
+		return engine.String()
+	}
 }
 
 // openSessionsDialog opens the sessions dialog. If the dialog is already open,

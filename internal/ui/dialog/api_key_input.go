@@ -301,9 +301,9 @@ func (m *APIKeyInput) verifyAPIKey() tea.Msg {
 	}
 
 	if err == nil {
-		return ActionChangeAPIKeyState{APIKeyInputStateVerified}
+		return ActionChangeAPIKeyState{State: APIKeyInputStateVerified}
 	}
-	return ActionChangeAPIKeyState{APIKeyInputStateError}
+	return ActionChangeAPIKeyState{State: APIKeyInputStateError}
 }
 
 func (m *APIKeyInput) saveKeyAndContinue() Action {

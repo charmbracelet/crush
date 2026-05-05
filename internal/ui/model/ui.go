@@ -1621,7 +1621,8 @@ func (m *UI) fetchHyperCredits() tea.Cmd {
 func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 	var cmds []tea.Cmd
 
-	if m.isAgentBusy() {
+	// we ignore dialogs with the oauth id as they need to be able to be dismissed
+	if m.isAgentBusy() && !m.dialog.ContainsDialog(dialog.OAuthID) {
 		return util.ReportWarn("Agent is busy, please wait...")
 	}
 

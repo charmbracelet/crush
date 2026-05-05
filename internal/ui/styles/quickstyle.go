@@ -695,6 +695,10 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Editor.PromptYoloIconBlurred = s.Editor.PromptYoloIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
 	s.Editor.PromptYoloDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.warningSubtle).SetString(":::")
 	s.Editor.PromptYoloDotsBlurred = s.Editor.PromptYoloDotsFocused.Foreground(o.fgMoreSubtle)
+	s.Editor.PromptShellIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.bgBase).Background(o.info).Bold(true).SetString(" $ ")
+	s.Editor.PromptShellIconBlurred = s.Editor.PromptShellIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
+	s.Editor.PromptShellDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.info).SetString(":::")
+	s.Editor.PromptShellDotsBlurred = s.Editor.PromptShellDotsFocused.Foreground(o.fgMoreSubtle)
 
 	s.Radio.On = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOn)
 	s.Radio.Off = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOff)

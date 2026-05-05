@@ -39,6 +39,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
@@ -157,6 +158,16 @@ type (
 	creditsUpdatedMsg struct {
 		credits int
 	}
+
+	// terminalOutputMsg is sent when a local terminal command finishes executing.
+	terminalOutputMsg struct {
+		command  string
+		stdout   string
+		stderr   string
+		exitCode int
+		duration time.Duration
+		err      error
+	}
 )
 
 // UI represents the main user interface model.
@@ -212,6 +223,9 @@ type UI struct {
 
 	readyPlaceholder   string
 	workingPlaceholder string
+
+	// Shell mode tracks if the current input starts with !
+	isShellMode bool
 
 	// Completions state
 	completions              *completions.Completions
@@ -543,6 +557,23 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.historyReset()
 		cmds = append(cmds, m.loadPromptHistory())
 		m.updateLayoutAndSize()
+
+	case terminalOutputMsg:
+		id := fmt.Sprintf("term-cmd-%d", time.Now().UnixNano())
+		item := chat.NewTerminalOutputItem(
+			id,
+			m.com.Styles,
+			msg.command,
+			msg.stdout,
+			msg.stderr,
+			msg.exitCode,
+			msg.duration,
+			msg.err != nil || msg.exitCode != 0,
+		)
+		m.chat.AppendMessages(item)
+		if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 
 	case sessionFilesUpdatesMsg:
 		m.sessionFiles = msg.sessionFiles
@@ -915,14 +946,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case uiFocusMain:
 	case uiFocusEditor:
 		// Textarea placeholder logic
-		if m.isAgentBusy() {
-			m.textarea.Placeholder = m.workingPlaceholder
-		} else {
-			m.textarea.Placeholder = m.readyPlaceholder
-		}
-		if m.com.Workspace.PermissionSkipRequests() {
-			m.textarea.Placeholder = "Yolo mode!"
-		}
+		m.updatePlaceholder()
 	}
 
 	// at this point this can only handle [message.Attachment] message, and we
@@ -1895,6 +1919,15 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				m.randomizePlaceholders()
 				m.historyReset()
 
+				// If in shell mode, execute as terminal command
+				if m.isShellMode {
+					cmdStr := strings.TrimSpace(value)
+					if cmdStr != "" {
+						// Stay in shell mode until user explicitly exits with !
+						return tea.Batch(m.executeTerminalCommand(cmdStr), m.loadPromptHistory())
+					}
+				}
+
 				return tea.Batch(m.sendMessage(value, attachments...), m.loadPromptHistory())
 			case key.Matches(msg, m.keyMap.Chat.NewSession):
 				if !m.hasSession() {
@@ -1954,6 +1987,14 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				curValue := m.textarea.Value()
 				curIdx := len(curValue)
 
+				// Toggle shell mode on ! (only when input is empty).
+				if msg.String() == "!" && curIdx == 0 {
+					m.isShellMode = !m.isShellMode
+					m.setEditorPrompt(m.com.Workspace.PermissionSkipRequests())
+					m.updatePlaceholder()
+					break
+				}
+
 				// Trigger completions on @.
 				if msg.String() == "@" && !m.completionsOpen {
 					// Only show if beginning of prompt or after whitespace.
@@ -1975,6 +2016,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 				prevHeight := m.textarea.Height()
 				cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
+
+				// Shell mode is now controlled by explicit toggle, not content
+				// (we don't need updateShellMode here anymore)
 
 				// Any text modification becomes the current draft.
 				m.updateHistoryDraft(curValue)
@@ -2227,8 +2271,14 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 		if m.textarea.Focused() {
 			cur := m.textarea.Cursor()
-			cur.X++                            // Adjust for app margins
-			cur.Y += m.layout.editor.Min.Y + 1 // Offset for attachments row
+			cur.X++ // Adjust for app margins
+
+			// Calculate Y offset
+			yOffset := m.layout.editor.Min.Y
+			if len(m.attachments.List()) > 0 {
+				yOffset++ // Offset for attachments row
+			}
+			cur.Y += yOffset
 			return cur
 		}
 	}
@@ -2843,10 +2893,14 @@ func (m *UI) openEditor(value string) tea.Cmd {
 }
 
 // setEditorPrompt configures the textarea prompt function based on whether
-// yolo mode is enabled.
+// yolo mode or shell mode is enabled.
 func (m *UI) setEditorPrompt(yolo bool) {
 	if yolo {
 		m.textarea.SetPromptFunc(4, m.yoloPromptFunc)
+		return
+	}
+	if m.isShellMode {
+		m.textarea.SetPromptFunc(4, m.shellPromptFunc)
 		return
 	}
 	m.textarea.SetPromptFunc(4, m.normalPromptFunc)
@@ -2883,6 +2937,42 @@ func (m *UI) yoloPromptFunc(info textarea.PromptInfo) string {
 		return t.Editor.PromptYoloDotsFocused.Render()
 	}
 	return t.Editor.PromptYoloDotsBlurred.Render()
+}
+
+// shellPromptFunc returns the shell mode editor prompt style with $ icon
+// and colored dots.
+func (m *UI) shellPromptFunc(info textarea.PromptInfo) string {
+	t := m.com.Styles
+	if info.LineNumber == 0 {
+		if info.Focused {
+			return t.Editor.PromptShellIconFocused.Render()
+		} else {
+			return t.Editor.PromptShellIconBlurred.Render()
+		}
+	}
+	if info.Focused {
+		return t.Editor.PromptShellDotsFocused.Render()
+	}
+	return t.Editor.PromptShellDotsBlurred.Render()
+}
+
+// updatePlaceholder updates the textarea placeholder based on current mode.
+func (m *UI) updatePlaceholder() {
+	if m.isShellMode {
+		m.textarea.Placeholder = "Shell mode - Direct command execution"
+		return
+	}
+
+	if m.com.Workspace.PermissionSkipRequests() {
+		m.textarea.Placeholder = "Yolo mode!"
+		return
+	}
+
+	if m.isAgentBusy() {
+		m.textarea.Placeholder = m.workingPlaceholder
+	} else {
+		m.textarea.Placeholder = m.readyPlaceholder
+	}
 }
 
 // closeCompletions closes the completions popup and resets state.
@@ -3075,15 +3165,20 @@ func (m *UI) randomizePlaceholders() {
 
 // renderEditorView renders the editor view with attachments if any.
 func (m *UI) renderEditorView(width int) string {
-	var attachmentsView string
+	var parts []string
+
+	// Attachments
 	if len(m.attachments.List()) > 0 {
-		attachmentsView = m.attachments.Render(width)
+		parts = append(parts, m.attachments.Render(width))
 	}
-	return strings.Join([]string{
-		attachmentsView,
-		m.textarea.View(),
-		"", // margin at bottom of editor
-	}, "\n")
+
+	// Textarea
+	parts = append(parts, m.textarea.View())
+
+	// Bottom margin
+	parts = append(parts, "")
+
+	return strings.Join(parts, "\n")
 }
 
 // cacheSidebarLogo renders and caches the sidebar logo at the specified width.
@@ -3812,4 +3907,97 @@ func renderLogo(t *styles.Styles, compact, hyper bool, width int) string {
 		Width:        width,
 		Hyper:        hyper,
 	})
+}
+
+// interactiveCommands is a list of commands that require terminal interaction
+// and should not be executed in terminal mode to avoid hanging.
+var interactiveCommands = []string{
+	// TUI/interactive programs
+	"vim", "nvim", "vi", "nano", "emacs", "less", "more", "top", "htop",
+	"tmux", "screen", "ssh", "ftp", "sftp", "telnet",
+	// Programs that may start interactive TUIs
+	"python", "python3", "node", "irb", "ghci", "lua",
+	// This application itself
+	"crush",
+}
+
+// isInteractiveCommand checks if the command might start an interactive program.
+func isInteractiveCommand(command string) bool {
+	// Extract the first word (command name)
+	parts := strings.Fields(command)
+	if len(parts) == 0 {
+		return false
+	}
+	cmd := strings.ToLower(parts[0])
+
+	// Check against known interactive commands
+	for _, ic := range interactiveCommands {
+		if cmd == ic {
+			return true
+		}
+	}
+
+	// Special case: "go run" without specific flags that make it non-interactive
+	if cmd == "go" && len(parts) > 1 && parts[1] == "run" {
+		return true
+	}
+
+	return false
+}
+
+// executeTerminalCommand executes a shell command directly without AI involvement.
+func (m *UI) executeTerminalCommand(command string) tea.Cmd {
+	// Check for interactive commands that would hang
+	if isInteractiveCommand(command) {
+		return util.ReportWarn("This command may require terminal interaction and cannot be run in terminal mode: " + strings.Fields(command)[0])
+	}
+
+	var cmds []tea.Cmd
+	// Create a new session if one doesn't exist
+	if !m.hasSession() {
+		newSession, err := m.com.Workspace.CreateSession(context.Background(), "New Session")
+		if err != nil {
+			return util.ReportError(err)
+		}
+		if m.forceCompactMode {
+			m.isCompact = true
+		}
+		if newSession.ID != "" {
+			m.session = &newSession
+			cmds = append(cmds, m.loadSession(newSession.ID))
+		}
+		m.setState(uiChat, m.focus)
+	}
+
+	execCmd := func() tea.Msg {
+		startTime := time.Now()
+
+		workingDir := m.com.Workspace.WorkingDir()
+		if workingDir == "" {
+			workingDir = "."
+		}
+
+		sh := shell.NewShell(&shell.Options{
+			WorkingDir: workingDir,
+		})
+
+		stdout, stderr, execErr := sh.Exec(context.Background(), command)
+
+		exitCode := 0
+		if execErr != nil {
+			exitCode = shell.ExitCode(execErr)
+		}
+
+		return terminalOutputMsg{
+			command:  command,
+			stdout:   stdout,
+			stderr:   stderr,
+			exitCode: exitCode,
+			duration: time.Since(startTime),
+			err:      execErr,
+		}
+	}
+
+	cmds = append(cmds, execCmd)
+	return tea.Sequence(cmds...)
 }

@@ -49,7 +49,7 @@ func NewManager(cfg *config.ConfigStore) *Manager {
 		// HACK: the user might have the command name in their config instead
 		// of the actual name. Find and use the correct name.
 		actualName := resolveServerName(manager, name)
-		manager.AddServer(actualName, &powernapconfig.ServerConfig{
+		serverCfg := &powernapconfig.ServerConfig{
 			Command:     clientConfig.Command,
 			Args:        clientConfig.Args,
 			Environment: clientConfig.Env,
@@ -57,7 +57,16 @@ func NewManager(cfg *config.ConfigStore) *Manager {
 			RootMarkers: clientConfig.RootMarkers,
 			InitOptions: clientConfig.InitOptions,
 			Settings:    clientConfig.Options,
-		})
+		}
+		// Preserve capability flags from defaults when the user overrides
+		// a known server: those are populated by powernap's curated
+		// allowlists, not user config, so a bare `command:` override would
+		// otherwise zero them out.
+		if defaultCfg, ok := manager.GetServer(actualName); ok {
+			serverCfg.SingleFileSupport = defaultCfg.SingleFileSupport
+			serverCfg.EnableSnippets = defaultCfg.EnableSnippets
+		}
+		manager.AddServer(actualName, serverCfg)
 	}
 
 	return &Manager{
@@ -347,7 +356,7 @@ func hasRootMarkers(dir string, markers []string) bool {
 
 func handles(server *powernapconfig.ServerConfig, filePath, workDir string) bool {
 	return handlesFiletype(server.Command, server.FileTypes, filePath) &&
-		hasRootMarkers(workDir, server.RootMarkers)
+		(server.SingleFileSupport || hasRootMarkers(workDir, server.RootMarkers))
 }
 
 // KillAll force-kills all the LSP clients.

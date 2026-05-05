@@ -286,6 +286,9 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 			prepared.BaseURL = endpoint
 			prepared.ExtraParams["apiVersion"] = env.Get("AZURE_OPENAI_API_VERSION")
 		case catwalk.InferenceProviderBedrock:
+			if err := RunAWSAuthRefresh(c.Options.AWSAuthRefresh); err != nil {
+				return fmt.Errorf("aws_auth_refresh failed: %w", err)
+			}
 			if !hasAWSCredentials(env) {
 				if configExists {
 					slog.Warn("Skipping Bedrock provider due to missing AWS credentials")
@@ -744,6 +747,24 @@ func loadFromBytes(configs [][]byte) (*Config, error) {
 		return nil, err
 	}
 	return &config, nil
+}
+
+// RunAWSAuthRefresh executes the configured aws_auth_refresh shell command.
+// Stdin/stdout/stderr are attached to the current terminal so interactive
+// credential prompts (e.g. SSO or MFA) can complete. An empty command is a
+// no-op. Typical commands are idempotent and self-throttling (e.g. check
+// remaining session lifetime and exit 0 if still valid).
+func RunAWSAuthRefresh(cmd string) error {
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" {
+		return nil
+	}
+	slog.Debug("Running aws_auth_refresh", "cmd", cmd)
+	c := exec.Command("sh", "-c", cmd)
+	c.Stdin = os.Stdin
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	return c.Run()
 }
 
 func hasAWSCredentials(env env.Env) bool {

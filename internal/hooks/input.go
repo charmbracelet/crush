@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/tidwall/gjson"
 )
 
@@ -51,6 +52,7 @@ func BuildPayload(eventName, sessionID, cwd, toolName, toolInputJSON string) []b
 // It includes all current process env vars plus hook-specific ones.
 func BuildEnv(eventName, toolName, sessionID, cwd, projectDir, toolInputJSON string) []string {
 	env := os.Environ()
+	env = append(env, shell.CrushEnvMarkers()...)
 	env = append(env,
 		fmt.Sprintf("CRUSH_EVENT=%s", eventName),
 		fmt.Sprintf("CRUSH_TOOL_NAME=%s", toolName),

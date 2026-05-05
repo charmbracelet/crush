@@ -21,8 +21,6 @@ import (
 	"sync"
 
 	"github.com/charmbracelet/x/exp/slice"
-	"mvdan.cc/sh/moreinterp/coreutils"
-	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/interp"
 	"mvdan.cc/sh/v3/syntax"
 )
@@ -35,6 +33,20 @@ const (
 	ShellTypeCmd
 	ShellTypePowerShell
 )
+
+// CrushEnvMarkers returns a fresh slice of the environment variables that
+// Crush unconditionally sets on every shell it spawns — both the interactive
+// bash tool's [Shell] and the hook runner's [Run] calls. Tools that want to
+// detect "am I being invoked by an AI agent?" can check any of these.
+// Keeping them in one place guarantees the two shell surfaces cannot drift.
+// A fresh slice is returned on every call so callers may append freely.
+func CrushEnvMarkers() []string {
+	return []string{
+		"CRUSH=1",
+		"AGENT=crush",
+		"AI_AGENT=crush",
+	}
+}
 
 // Logger interface for optional logging
 type Logger interface {
@@ -83,12 +95,7 @@ func NewShell(opts *Options) *Shell {
 	}
 
 	// Allow tools to detect execution by Crush.
-	env = append(
-		env,
-		"CRUSH=1",
-		"AGENT=crush",
-		"AI_AGENT=crush",
-	)
+	env = append(env, CrushEnvMarkers()...)
 
 	logger := opts.Logger
 	if logger == nil {
@@ -226,52 +233,10 @@ func splitArgsFlags(parts []string) (args []string, flags []string) {
 	return args, flags
 }
 
-func (s *Shell) blockHandler() func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
-	return func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
-		return func(ctx context.Context, args []string) error {
-			if len(args) == 0 {
-				return next(ctx, args)
-			}
-
-			for _, blockFunc := range s.blockFuncs {
-				if blockFunc(args) {
-					return fmt.Errorf("command is not allowed for security reasons: %q", args[0])
-				}
-			}
-
-			return next(ctx, args)
-		}
-	}
-}
-
-func (s *Shell) builtinHandler() func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
-	return func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
-		return func(ctx context.Context, args []string) error {
-			if len(args) == 0 {
-				return next(ctx, args)
-			}
-
-			// Builtins.
-			switch args[0] {
-			case "jq":
-				hc := interp.HandlerCtx(ctx)
-				return handleJQ(args, hc.Stdin, hc.Stdout, hc.Stderr)
-			default:
-				return next(ctx, args)
-			}
-		}
-	}
-}
-
-// newInterp creates a new interpreter with the current shell state
-func (s *Shell) newInterp(stdout, stderr io.Writer) (*interp.Runner, error) {
-	return interp.New(
-		interp.StdIO(nil, stdout, stderr),
-		interp.Interactive(false),
-		interp.Env(expand.ListEnviron(s.env...)),
-		interp.Dir(s.cwd),
-		interp.ExecHandlers(s.execHandlers()...),
-	)
+// newInterp creates a new interpreter with the current shell state. A nil
+// stdin is equivalent to an empty input stream.
+func (s *Shell) newInterp(stdin io.Reader, stdout, stderr io.Writer) (*interp.Runner, error) {
+	return newRunner(s.cwd, s.env, stdin, stdout, stderr, s.blockFuncs)
 }
 
 // updateShellFromRunner updates the shell from the interpreter after execution.
@@ -303,7 +268,7 @@ func (s *Shell) execCommon(ctx context.Context, command string, stdout, stderr i
 		return fmt.Errorf("could not parse command: %w", err)
 	}
 
-	runner, err = s.newInterp(stdout, stderr)
+	runner, err = s.newInterp(nil, stdout, stderr)
 	if err != nil {
 		return fmt.Errorf("could not run command: %w", err)
 	}
@@ -322,17 +287,6 @@ func (s *Shell) exec(ctx context.Context, command string) (string, string, error
 // execStream executes commands using POSIX shell emulation with streaming output
 func (s *Shell) execStream(ctx context.Context, command string, stdout, stderr io.Writer) error {
 	return s.execCommon(ctx, command, stdout, stderr)
-}
-
-func (s *Shell) execHandlers() []func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
-	handlers := []func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc{
-		s.builtinHandler(),
-		s.blockHandler(),
-	}
-	if useGoCoreUtils {
-		handlers = append(handlers, coreutils.ExecHandler)
-	}
-	return handlers
 }
 
 // IsInterrupt checks if an error is due to interruption

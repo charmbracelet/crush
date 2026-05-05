@@ -4,14 +4,26 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
-	"os/exec"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/shell"
 )
+
+// abandonGrace is how long runOne waits after ctx cancellation for the
+// shell goroutine to yield before returning control to the caller and
+// letting the goroutine finish on its own. Mirrors the historical
+// cmd.WaitDelay = time.Second behavior of the previous os/exec path.
+const abandonGrace = time.Second
+
+// runShell is the shell executor used by runOne. It is a package-level
+// variable so tests can substitute a blocking or non-yielding
+// implementation to exercise the abandon-on-timeout path without
+// depending on the scheduling behavior of the real interpreter.
+var runShell = shell.Run
 
 // compiledHook pairs a HookConfig with its compiled matcher regex. A nil
 // matcher means "match every tool".
@@ -140,24 +152,59 @@ func (r *Runner) matchingHooks(toolName string) []config.HookConfig {
 }
 
 // runOne executes a single hook command and returns its result.
+//
+// Execution goes through Crush's embedded POSIX shell (shell.Run) so the
+// same interpreter, builtins, and coreutils are visible to hooks as to
+// the bash tool. BlockFuncs are intentionally omitted: hooks are
+// user-authored config that carry the same trust as a shell alias.
+//
+// A hook that fails to yield after its deadline has passed is abandoned
+// after abandonGrace so the caller never blocks longer than
+// timeout + abandonGrace. Ownership of the stdout and stderr buffers is
+// strictly single-goroutine:
+//   - before receiving from `done`, only the goroutine writes to them;
+//   - after `done` delivers a value, the goroutine is finished and the
+//     outer frame reads them;
+//   - on the abandon path, the goroutine may still be writing and the
+//     outer frame must not touch them again.
 func (r *Runner) runOne(parentCtx context.Context, hook config.HookConfig, envVars []string, payload []byte) HookResult {
 	timeout := hook.TimeoutDuration()
 	ctx, cancel := context.WithTimeout(parentCtx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "sh", "-c", hook.Command)
-	cmd.WaitDelay = time.Second
-	cmd.Env = envVars
-	cmd.Dir = r.cwd
-	cmd.Stdin = bytes.NewReader(payload)
-
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	done := make(chan error, 1)
+	go func() {
+		done <- runShell(ctx, shell.RunOptions{
+			Command: hook.Command,
+			Cwd:     r.cwd,
+			Env:     envVars,
+			Stdin:   bytes.NewReader(payload),
+			Stdout:  &stdout,
+			Stderr:  &stderr,
+		})
+	}()
 
-	err := cmd.Run()
+	var err error
+	select {
+	case err = <-done:
+		// Normal path: goroutine has finished, buffers are safe to read.
+	case <-ctx.Done():
+		select {
+		case err = <-done:
+			// Interpreter yielded within the grace period; safe to read.
+		case <-time.After(abandonGrace):
+			slog.Warn("Hook did not yield after cancel; abandoning goroutine",
+				"command", hook.Command,
+				"timeout", timeout,
+			)
+			// The goroutine may still be writing to stdout/stderr; do
+			// not read either buffer below this point.
+			return HookResult{Decision: DecisionNone}
+		}
+	}
 
-	if ctx.Err() != nil {
+	if shell.IsInterrupt(err) {
 		// Distinguish timeout from parent cancellation.
 		if parentCtx.Err() != nil {
 			slog.Debug("Hook cancelled by parent context", "command", hook.Command)
@@ -168,10 +215,7 @@ func (r *Runner) runOne(parentCtx context.Context, hook config.HookConfig, envVa
 	}
 
 	if err != nil {
-		exitCode := -1
-		if cmd.ProcessState != nil {
-			exitCode = cmd.ProcessState.ExitCode()
-		}
+		exitCode := shell.ExitCode(err)
 		switch exitCode {
 		case 2:
 			// Exit code 2 = block this tool call. Stderr is the reason.
@@ -200,6 +244,7 @@ func (r *Runner) runOne(parentCtx context.Context, hook config.HookConfig, envVa
 				"command", hook.Command,
 				"exit_code", exitCode,
 				"stderr", strings.TrimSpace(stderr.String()),
+				"error", err,
 			)
 			return HookResult{Decision: DecisionNone}
 		}

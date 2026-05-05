@@ -732,7 +732,24 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	currentSession.CompletionTokens = usage.OutputTokens
 	currentSession.PromptTokens = 0
 	_, err = a.sessions.Save(genCtx, currentSession)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Release the active request before processing queued messages so that
+	// Run() does not see the session as busy.
+	a.activeRequests.Del(sessionID)
+	cancel()
+
+	// Process any messages that were queued while summarizing.
+	queuedMessages, ok := a.messageQueue.Get(sessionID)
+	if !ok || len(queuedMessages) == 0 {
+		return nil
+	}
+	firstQueuedMessage := queuedMessages[0]
+	a.messageQueue.Set(sessionID, queuedMessages[1:])
+	_, qErr := a.Run(ctx, firstQueuedMessage)
+	return qErr
 }
 
 func (a *sessionAgent) getCacheControlOptions() fantasy.ProviderOptions {

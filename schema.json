@@ -102,10 +102,7 @@
         }
       },
       "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "tools"
-      ]
+      "type": "object"
     },
     "HookConfig": {
       "properties": {
@@ -354,8 +351,7 @@
         "context_window",
         "default_max_tokens",
         "can_reason",
-        "supports_attachments",
-        "options"
+        "supports_attachments"
       ]
     },
     "ModelOptions": {
@@ -708,10 +704,7 @@
         }
       },
       "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "completions"
-      ]
+      "type": "object"
     },
     "Token": {
       "properties": {
@@ -779,11 +772,7 @@
         }
       },
       "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "ls",
-        "grep"
-      ]
+      "type": "object"
     }
   }
 }

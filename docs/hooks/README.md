@@ -1,33 +1,92 @@
 # Hooks
 
-> [!NOTE] This document was designed for both humans and agents.
+> [!NOTE]
+> This document was designed for both humans and agents.
 
-Hooks are user-defined shell commands that fire at specific points during
-Crush's execution, giving you deterministic control over an agent's wily
-behavior.
+Hooks are user-defined shell scripts that run when various events happen during
+the agent lifecycle, allowing you to both build on top of Crush, customize
+its behavior, and exert deterministic control over an agent's wily behavior.
 
-Hooks in Crush are shell-based, with a focus on simplicity. This allows hooks to
-effectively be written in any language. In this document we'll primarily focus
-on Bash for simplicity's sake, though we'll include some examples in other
-languages at the end, too.
+Hooks are just shell commands, and were designed to be both simple and future
+forward.
 
 ### Hot Hook Facts
 
-- Hooks run before permission checks. If a hook denies a tool call, you'll
-  never see a permission prompt for it. If a hook explicitly allows a tool
-  call, you'll _also_ never see a prompt — Crush treats `"decision": "allow"`
-  as affirmative pre-approval.
-- Hooks only fire on the **top-level agent's** tool calls. Sub-agents (the
-  `agent` task tool, `agentic_fetch`, etc.) run without hook interception so
-  a single delegated turn doesn't trigger your hook N times. The outer
-  sub-agent tool call itself _is_ hooked, so policy like "never let the
-  agent spawn sub-agents" still works.
-- Hooks are also compatible with hooks in Claude Code, however this document
-  covers the Crush-specific API only. One intentional divergence: Crush treats
-  `updated_input` as a shallow-merge patch rather than a full replacement — see
-  [Output](#output) below.
+- Hooks just shell commands
+- Hooks can be written in any language because they’re just executables: Bash, Python, Node, Rust, Haskell, whatever
+- Hooks are Claude Code-compatible
+- Crush ships with a builtin `crush-hook` skill write, edit, and configure
+  hooks; just tell Crush how to configure Crush
 - Crush currently supports just one hook, `PreToolUse`, with plans to support
-  the full gamut. If there's a hook you'd like to see, let us know.
+  the full gamut; please let us know which hooks you'd like to see next
+- Hooks run in parallel for speed, but their results compose in config order
+  for determinism
+
+### Some things you can do with hooks:
+
+- Block "dangerous" commands: no more `git push -f` or `cabal init`
+- Rewrite tool input: turn `node` calls info `deno`, scrub secrets from
+  commands, rewrite all mentions of "Haskell" into "Haskell, The Best
+  Language", and so on
+- Inject context: add notes to the model's context whenever certain tools are
+  called. For example: "remember to run gofumpt after editing Go files"
+- Auto-approve tools: skip the permission prompt for bash commands that
+  you know are safe
+- Log certain tool calls
+
+…And lots more. Show us what you're building!
+
+## Baby's First Hook
+
+Let's just dive into it and make a simple hook. This particular hook will
+disallow the use of Haskell (but we love you, Simon Peyton Jones).
+
+### Config
+
+The first thing we need to do is hook up our hook. Let's add the following to
+our local `crush.json`. You can, of course, do this globally, too.
+
+```jsonc
+{
+  // As expected, hooks go in a "hooks" object.
+  "hooks": {
+    // PreToolUse is an event that fires before a tool is used.
+    "PreToolUse": [
+      {
+        // What tool do we want to hook into? In this case, Bash, because it
+        // runs the stuff we wanna block.
+        "matcher": "^bash$",
+
+        // The path to our actual hook script.
+        "command": "./no-haskell.sh",
+      },
+    ],
+  },
+}
+```
+
+Now, let's make our `no-haskell.sh` hook script.
+
+```bash
+#!/usr/bin/env bash
+
+# Disallow ghc, cabal, and stack. Pipe the bash command output
+# ($CRUSH_TOOL_INPUT_COMMAND) to grep and match on a regexp.
+if echo "$CRUSH_TOOL_INPUT_COMMAND" | grep -qE '(^| )((ghc|cabal|stack)(\.exe)?)( |$)'; then
+
+  # Someone is trying to use Haskell. Let's send a message back to the model
+  # and user explaining why we're blocking this. Note that we send all feedback
+  # like this to stderr.
+  echo "No Haskell allowed, kiddo." >&2
+
+  # Now, block the tool call by exiting with code 2.
+  exit 2
+fi
+```
+
+That's basically it. For the full guide on how hooks work, however, read on.
+
+---
 
 ## Execution model
 
@@ -70,8 +129,8 @@ What this means in practice:
 
 ## Configuration
 
-Hooks can be added to your `crush.json` at both the global and project-level,
-with project level hooks taking precedence.
+Hooks can be added to your `crush.json` (or `.crush.json`) at both the global
+and project-level, with project level hooks taking precedence.
 
 ```jsonc
 {
@@ -87,8 +146,8 @@ with project level hooks taking precedence.
 }
 ```
 
-Hooks are keyed by event name. Only `command` is required; omit `matcher` to
-match all tools.
+Remember, hooks will run in parallel but resolve in config order. Last hook
+wins when rewriting input, but first deny wins when blocking.
 
 ## Events
 
@@ -97,29 +156,24 @@ Here are the events you can hook into (spoiler: there's currently just one):
 ### PreToolUse
 
 This hook fires before every tool call. Use it to block dangerous commands,
-enforce policies, rewrite tool input, or inject context the model should see.
+enforce policies, rewrite tool input, inject context the model should see, log
+stuff, and so on.
 
 **Matched against**: the tool name (e.g. `bash`, `edit`, `write`,
 `mcp_github_create_pull_request`).
 
-> [!NOTE] Event names are case insensitive and snake-caseable, so `PreToolUse`,
+> [!NOTE]
+> Event names are case insensitive and snake-caseable, so `PreToolUse`,
 > `pretooluse`, `PRETOOLUSE`, `pre_tool_use`, and `PRE_TOOL_USE` all work.
 
-## Baby's First Hook
+**Scope**: `PreToolUse` only fires on the **top-level agent's** tool calls.
+Sub-agents (the `agent` task tool, `agentic_fetch`, etc.) run without hook
+interception so a single delegated turn doesn't trigger your hook N times. The
+outer sub-agent tool call itself _is_ hooked, so policy like "never let the
+agent spawn sub-agents" still works.
 
-Hooks are just shell scripts. Go crazy.
-
-```bash
-#!/usr/bin/env bash
-
-# Log all bash tool calls to a file.
-printf "%s: %s / %s" \
-    "$(date -Iseconds)" \
-    "$CRUSH_SESSION_ID" \
-    "$CRUSH_TOOL_INPUT_COMMAND" >> ./bash.log
-```
-
-That's basically it. For the full guide on how hooks work, however, read on.
+Hooks are keyed by event name. Only `command` is required, and you can omit
+`matcher` to match all tools.
 
 ## Building Hooks
 
@@ -133,6 +187,11 @@ When a hook fires, Crush:
 4. Waits for all to finish (or time out), then aggregates results **in config
    order**: deny wins over allow, allow wins over none; `updated_input` patches
    shallow-merge in order.
+5. Applies the result **before** permission checks. If the aggregated decision
+   is `deny`, the tool call is blocked and you never see a permission prompt
+   for it. If it's `allow`, Crush treats that as affirmative pre-approval and
+   also skips the prompt. Silence (no decision) falls through to the normal
+   permission flow.
 
 Note that you can omit `matcher` and match in your shell script instead,
 however you'll incur some additional overhead as Crush will still parse and
@@ -484,6 +543,20 @@ process.stdin.on("end", () => {
   }
 });
 ```
+
+---
+
+## Claude Code compatibility
+
+Crush hooks are broadly compatible with [Claude Code
+hooks](https://docs.claude.com/en/docs/claude-code/hooks): the config shape,
+stdin payload, output envelope, and exit codes line up so most Claude Code
+hooks run under Crush unchanged. This document covers the Crush-specific API
+only — anything not documented here isn't guaranteed to work.
+
+One intentional divergence: Crush treats `updated_input` as a shallow-merge
+patch against the original `tool_input` rather than a full replacement. Keys
+you omit are preserved. See [Output](#output) for details.
 
 ---
 

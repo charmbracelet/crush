@@ -1,4 +1,4 @@
-Terminate a background shell process by ID; shell ID becomes invalid after killing.
+Terminate a background shell process.
 
 <usage>
 - Provide the shell ID returned from a background bash execution

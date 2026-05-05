@@ -189,7 +189,7 @@ func runNonInteractive(
 	progress = ws.Config.Options.Progress == nil || *ws.Config.Options.Progress
 
 	if !hideSpinner && stderrTTY {
-		t := styles.CharmtonePantera()
+		t := styles.ThemeForProvider(ws.Config.Models[config.SelectedModelTypeLarge].Provider)
 
 		hasDarkBG := true
 		if stdinTTY && stdoutTTY {

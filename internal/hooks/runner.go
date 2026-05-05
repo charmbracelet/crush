@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -24,25 +25,63 @@ const abandonGrace = time.Second
 // depending on the scheduling behavior of the real interpreter.
 var runShell = shell.Run
 
+// compiledHook pairs a HookConfig with its compiled matcher regex. A nil
+// matcher means "match every tool".
+type compiledHook struct {
+	cfg     config.HookConfig
+	matcher *regexp.Regexp
+}
+
 // Runner executes hook commands and aggregates their results.
 type Runner struct {
-	hooks      []config.HookConfig
+	hooks      []compiledHook
 	cwd        string
 	projectDir string
 }
 
-// NewRunner creates a Runner from the given hook configs.
+// NewRunner creates a Runner from the given hook configs. Each hook's
+// Matcher is compiled here so the Runner is self-sufficient; callers do
+// not have to pre-compile matchers on the config, and reloads or merges
+// that rebuild HookConfig values can't silently strip compiled state.
+//
+// Hooks whose matcher fails to compile are skipped with a warning rather
+// than treated as match-everything. ValidateHooks is expected to have
+// caught syntax errors earlier, so this is defense in depth.
 func NewRunner(hooks []config.HookConfig, cwd, projectDir string) *Runner {
+	compiled := make([]compiledHook, 0, len(hooks))
+	for _, h := range hooks {
+		ch := compiledHook{cfg: h}
+		if h.Matcher != "" {
+			re, err := regexp.Compile(h.Matcher)
+			if err != nil {
+				slog.Warn("Hook matcher failed to compile; skipping hook",
+					"matcher", h.Matcher,
+					"command", h.Command,
+					"error", err,
+				)
+				continue
+			}
+			ch.matcher = re
+		}
+		compiled = append(compiled, ch)
+	}
 	return &Runner{
-		hooks:      hooks,
+		hooks:      compiled,
 		cwd:        cwd,
 		projectDir: projectDir,
 	}
 }
 
-// Hooks returns the hook configs the runner was created with.
+// Hooks returns the hook configs the runner was created with, in config
+// order. Hooks whose matcher failed to compile at construction are
+// omitted. Intended for diagnostics; callers should not rely on ordering
+// or identity beyond that.
 func (r *Runner) Hooks() []config.HookConfig {
-	return r.hooks
+	out := make([]config.HookConfig, len(r.hooks))
+	for i, h := range r.hooks {
+		out[i] = h.cfg
+	}
+	return out
 }
 
 // Run executes all matching hooks for the given event and tool, returning
@@ -105,9 +144,8 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 func (r *Runner) matchingHooks(toolName string) []config.HookConfig {
 	var matched []config.HookConfig
 	for _, h := range r.hooks {
-		re := h.MatcherRegex()
-		if re == nil || re.MatchString(toolName) {
-			matched = append(matched, h)
+		if h.matcher == nil || h.matcher.MatchString(toolName) {
+			matched = append(matched, h.cfg)
 		}
 	}
 	return matched

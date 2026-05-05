@@ -905,8 +905,11 @@ func normalizeHookEvent(name string) string {
 	}
 }
 
-// ValidateHooks normalizes event names and compiles matcher regexes for all
-// configured hooks. Returns an error if any regex is invalid.
+// ValidateHooks normalizes event names and checks that every configured
+// hook has a command and a syntactically valid matcher regex. Matcher
+// compilation used for matching is owned by hooks.Runner; this function
+// only validates up front so the user sees config errors at load time
+// rather than on the first tool call.
 func (c *Config) ValidateHooks() error {
 	// Normalize event name keys.
 	for event, eventHooks := range c.Hooks {
@@ -918,17 +921,15 @@ func (c *Config) ValidateHooks() error {
 	}
 
 	for event, eventHooks := range c.Hooks {
-		for i := range eventHooks {
-			h := &c.Hooks[event][i]
+		for i, h := range eventHooks {
 			if h.Command == "" {
 				return fmt.Errorf("hook %s[%d]: command is required", event, i)
 			}
-			if h.Matcher != "" {
-				re, err := regexp.Compile(h.Matcher)
-				if err != nil {
-					return fmt.Errorf("hook %s[%d]: invalid matcher regex %q: %w", event, i, h.Matcher, err)
-				}
-				h.matcherRegex = re
+			if h.Matcher == "" {
+				continue
+			}
+			if _, err := regexp.Compile(h.Matcher); err != nil {
+				return fmt.Errorf("hook %s[%d]: invalid matcher regex %q: %w", event, i, h.Matcher, err)
 			}
 		}
 	}

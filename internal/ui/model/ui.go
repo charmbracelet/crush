@@ -25,6 +25,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	agenttools "github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
@@ -137,12 +138,24 @@ type (
 	// closeDialogMsg is sent to close the current dialog.
 	closeDialogMsg struct{}
 
+	// hyperRefreshDoneMsg is sent after a silent Hyper OAuth refresh
+	// finishes. It carries the original model-selection action so the
+	// selection can be resumed.
+	hyperRefreshDoneMsg struct {
+		action dialog.ActionSelectModel
+	}
+
 	// copyChatHighlightMsg is sent to copy the current chat highlight to clipboard.
 	copyChatHighlightMsg struct{}
 
 	// sessionFilesUpdatesMsg is sent when the files for this session have been updated
 	sessionFilesUpdatesMsg struct {
 		sessionFiles []SessionFile
+	}
+	// creditsUpdatedMsg is sent when the remaining Hyper credits have been
+	// fetched from the API.
+	creditsUpdatedMsg struct {
+		credits int
 	}
 )
 
@@ -257,6 +270,9 @@ type UI struct {
 	// mouse highlighting related state
 	lastClickTime time.Time
 
+	// hyperCredits is the remaining Hyper credits, updated after each prompt.
+	hyperCredits *int
+
 	// Prompt history for up/down navigation through previous messages.
 	promptHistory struct {
 		messages []string
@@ -331,7 +347,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 
 	status := NewStatus(com, ui)
 
-	ui.setEditorPrompt(false)
+	ui.setEditorPrompt(com.Workspace.PermissionSkipRequests())
 	ui.randomizePlaceholders()
 	ui.textarea.Placeholder = ui.readyPlaceholder
 	ui.status = status
@@ -378,6 +394,9 @@ func (m *UI) Init() tea.Cmd {
 	// load initial session if specified
 	if cmd := m.loadInitialSession(); cmd != nil {
 		cmds = append(cmds, cmd)
+	}
+	if m.com.IsHyper() {
+		cmds = append(cmds, m.fetchHyperCredits())
 	}
 	return tea.Batch(cmds...)
 }
@@ -843,6 +862,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.textarea.SetValue(msg.Text)
 		m.textarea.MoveToEnd()
 		cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
+	case hyperRefreshDoneMsg:
+		if cmd := m.handleSelectModel(msg.action); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case creditsUpdatedMsg:
+		m.hyperCredits = &msg.credits
 	case util.InfoMsg:
 		if msg.Type == util.InfoTypeError {
 			slog.Error("Error reported", "error", msg.Msg)
@@ -852,6 +877,18 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if ttl <= 0 {
 			ttl = DefaultStatusTTL
 		}
+		cmds = append(cmds, clearInfoMsgCmd(ttl))
+	case app.UpdateAvailableMsg:
+		text := fmt.Sprintf("Crush update available: v%s → v%s.", msg.CurrentVersion, msg.LatestVersion)
+		if msg.IsDevelopment {
+			text = fmt.Sprintf("This is a development version of Crush. The latest version is v%s.", msg.LatestVersion)
+		}
+		ttl := 10 * time.Second
+		m.status.SetInfoMsg(util.InfoMsg{
+			Type: util.InfoTypeUpdate,
+			Msg:  text,
+			TTL:  ttl,
+		})
 		cmds = append(cmds, clearInfoMsgCmd(ttl))
 	case util.ClearStatusMsg:
 		m.status.ClearInfoMsg()
@@ -1429,66 +1466,8 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.CommandsID)
 
 	case dialog.ActionSelectModel:
-		if m.isAgentBusy() {
-			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
-			break
-		}
-
-		cfg := m.com.Config()
-		if cfg == nil {
-			cmds = append(cmds, util.ReportError(errors.New("configuration not found")))
-			break
-		}
-
-		var (
-			providerID   = msg.Model.Provider
-			isCopilot    = providerID == string(catwalk.InferenceProviderCopilot)
-			isConfigured = func() bool { _, ok := cfg.Providers.Get(providerID); return ok }
-		)
-
-		// Attempt to import GitHub Copilot tokens from VSCode if available.
-		if isCopilot && !isConfigured() && !msg.ReAuthenticate {
-			m.com.Workspace.ImportCopilot()
-		}
-
-		if !isConfigured() || msg.ReAuthenticate {
-			m.dialog.CloseDialog(dialog.ModelsID)
-			if cmd := m.openAuthenticationDialog(msg.Provider, msg.Model, msg.ModelType); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-			break
-		}
-
-		if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, msg.ModelType, msg.Model); err != nil {
-			cmds = append(cmds, util.ReportError(err))
-		} else if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
-			// Ensure small model is set is unset.
-			smallModel := m.com.Workspace.GetDefaultSmallModel(providerID)
-			if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeSmall, smallModel); err != nil {
-				cmds = append(cmds, util.ReportError(err))
-			}
-		}
-
-		cmds = append(cmds, func() tea.Msg {
-			if err := m.com.Workspace.UpdateAgentModel(context.TODO()); err != nil {
-				return util.ReportError(err)
-			}
-
-			modelMsg := fmt.Sprintf("%s model changed to %s", msg.ModelType, msg.Model.Model)
-
-			return util.NewInfoMsg(modelMsg)
-		})
-
-		m.dialog.CloseDialog(dialog.APIKeyInputID)
-		m.dialog.CloseDialog(dialog.OAuthID)
-		m.dialog.CloseDialog(dialog.ModelsID)
-
-		if isOnboarding {
-			m.setState(uiLanding, uiFocusEditor)
-			m.com.Config().SetupAgents()
-			if err := m.com.Workspace.InitCoderAgent(context.TODO()); err != nil {
-				cmds = append(cmds, util.ReportError(err))
-			}
+		if cmd := m.handleSelectModel(msg); cmd != nil {
+			cmds = append(cmds, cmd)
 		}
 	case dialog.ActionSelectReasoningEffort:
 		if m.isAgentBusy() {
@@ -1592,6 +1571,137 @@ func substituteArgs(content string, args map[string]string) string {
 		content = strings.ReplaceAll(content, placeholder, value)
 	}
 	return content
+}
+
+// refreshHyperAndRetrySelect returns a command that silently refreshes
+// the Hyper OAuth token and then re-runs the model selection. If the
+// refresh fails, the selection resumes with ReAuthenticate set so the
+// OAuth dialog opens.
+func (m *UI) refreshHyperAndRetrySelect(msg dialog.ActionSelectModel) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := m.com.Workspace.RefreshOAuthToken(ctx, config.ScopeGlobal, "hyper"); err != nil {
+			slog.Warn("Hyper OAuth refresh failed, requesting re-auth", "error", err)
+			msg.ReAuthenticate = true
+		}
+		return hyperRefreshDoneMsg{action: msg}
+	}
+}
+
+// fetchHyperCredits returns a command that asynchronously fetches the
+// remaining Hyper credits from the API.
+func (m *UI) fetchHyperCredits() tea.Cmd {
+	return func() tea.Msg {
+		cfg := m.com.Config()
+		if cfg == nil {
+			return nil
+		}
+		providerCfg, ok := cfg.Providers.Get(hyper.Name)
+		if !ok {
+			return nil
+		}
+		apiKey, err := m.com.Workspace.Resolver().ResolveValue(providerCfg.APIKey)
+		if err != nil || apiKey == "" {
+			return nil
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		credits, err := hyper.FetchCredits(ctx, apiKey)
+		if err != nil {
+			slog.Error("Failed to fetch Hyper credits", "error", err)
+			return nil
+		}
+		return creditsUpdatedMsg{credits: credits}
+	}
+}
+
+// handleSelectModel performs the model selection after any provider
+// pre-checks (such as a silent Hyper OAuth refresh) have completed.
+func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
+	var cmds []tea.Cmd
+
+	if m.isAgentBusy() {
+		return util.ReportWarn("Agent is busy, please wait...")
+	}
+
+	cfg := m.com.Config()
+	if cfg == nil {
+		return util.ReportError(errors.New("configuration not found"))
+	}
+
+	var (
+		providerID   = msg.Model.Provider
+		isCopilot    = providerID == string(catwalk.InferenceProviderCopilot)
+		isConfigured = func() bool { _, ok := cfg.Providers.Get(providerID); return ok }
+		isOnboarding = m.state == uiOnboarding
+	)
+
+	// For Hyper, if the stored OAuth token is expired, try a silent
+	// refresh before deciding whether the provider is configured. Keeps
+	// users from hitting a 401 on their first message after the
+	// short-lived access token ages out.
+	if !msg.ReAuthenticate && providerID == "hyper" {
+		if pc, ok := cfg.Providers.Get(providerID); ok && pc.OAuthToken != nil && pc.OAuthToken.IsExpired() {
+			return m.refreshHyperAndRetrySelect(msg)
+		}
+	}
+
+	// Attempt to import GitHub Copilot tokens from VSCode if available.
+	if isCopilot && !isConfigured() && !msg.ReAuthenticate {
+		m.com.Workspace.ImportCopilot()
+	}
+
+	if !isConfigured() || msg.ReAuthenticate {
+		m.dialog.CloseDialog(dialog.ModelsID)
+		if cmd := m.openAuthenticationDialog(msg.Provider, msg.Model, msg.ModelType); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		return tea.Batch(cmds...)
+	}
+
+	if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, msg.ModelType, msg.Model); err != nil {
+		cmds = append(cmds, util.ReportError(err))
+	} else {
+		if msg.ModelType == config.SelectedModelTypeLarge {
+			// Swap the theme live based on the newly selected large
+			// model's provider.
+			m.applyTheme(styles.ThemeForProvider(providerID))
+		}
+		if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
+			// Ensure small model is set is unset.
+			smallModel := m.com.Workspace.GetDefaultSmallModel(providerID)
+			if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeSmall, smallModel); err != nil {
+				cmds = append(cmds, util.ReportError(err))
+			}
+		}
+	}
+
+	cmds = append(cmds, func() tea.Msg {
+		if err := m.com.Workspace.UpdateAgentModel(context.TODO()); err != nil {
+			return util.ReportError(err)
+		}
+
+		modelMsg := fmt.Sprintf("%s model changed to %s", msg.ModelType, msg.Model.Model)
+
+		return util.NewInfoMsg(modelMsg)
+	})
+
+	m.dialog.CloseDialog(dialog.APIKeyInputID)
+	m.dialog.CloseDialog(dialog.OAuthID)
+	m.dialog.CloseDialog(dialog.ModelsID)
+
+	if isOnboarding {
+		m.setState(uiLanding, uiFocusEditor)
+		m.com.Config().SetupAgents()
+		if err := m.com.Workspace.InitCoderAgent(context.TODO()); err != nil {
+			cmds = append(cmds, util.ReportError(err))
+		}
+	} else if m.com.IsHyper() {
+		cmds = append(cmds, m.fetchHyperCredits())
+	}
+
+	return tea.Batch(cmds...)
 }
 
 func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType) tea.Cmd {
@@ -1999,6 +2109,7 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 		m.isCompact,
 		m.detailsOpen,
 		area.Dx(),
+		m.hyperCredits,
 	)
 }
 
@@ -2977,7 +3088,37 @@ func (m *UI) renderEditorView(width int) string {
 
 // cacheSidebarLogo renders and caches the sidebar logo at the specified width.
 func (m *UI) cacheSidebarLogo(width int) {
-	m.sidebarLogo = renderLogo(m.com.Styles, true, width)
+	m.sidebarLogo = renderLogo(m.com.Styles, true, m.com.IsHyper(), width)
+}
+
+// applyTheme replaces the active styles with the given theme, drops the
+// shared markdown renderer cache, and refreshes every component that
+// caches style data.
+func (m *UI) applyTheme(s styles.Styles) {
+	*m.com.Styles = s
+	common.InvalidateMarkdownRendererCache()
+	m.refreshStyles()
+}
+
+// refreshStyles pushes the current *m.com.Styles into every subcomponent
+// that copies or pre-renders style-dependent values at construction time.
+func (m *UI) refreshStyles() {
+	t := m.com.Styles
+	m.header.refresh()
+	if m.layout.sidebar.Dx() > 0 {
+		m.cacheSidebarLogo(m.layout.sidebar.Dx())
+	}
+	m.textarea.SetStyles(t.Editor.Textarea)
+	m.completions.SetStyles(t.Completions.Normal, t.Completions.Focused, t.Completions.Match)
+	m.attachments.Renderer().SetStyles(
+		t.Attachments.Normal,
+		t.Attachments.Deleting,
+		t.Attachments.Image,
+		t.Attachments.Text,
+	)
+	m.todoSpinner.Style = t.Pills.TodoSpinner
+	m.status.help.Styles = t.Help
+	m.chat.InvalidateRenderCaches()
 }
 
 // sendMessage sends a message with the given content and attachments.
@@ -3257,10 +3398,15 @@ func (m *UI) handlePermissionNotification(notification permission.PermissionNoti
 func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 	switch n.Type {
 	case notify.TypeAgentFinished:
-		return m.sendNotification(notification.Notification{
+		var cmds []tea.Cmd
+		cmds = append(cmds, m.sendNotification(notification.Notification{
 			Title:   "Crush is waiting...",
 			Message: fmt.Sprintf("Agent's turn completed in \"%s\"", n.SessionTitle),
-		})
+		}))
+		if m.com.IsHyper() {
+			cmds = append(cmds, m.fetchHyperCredits())
+		}
+		return tea.Batch(cmds...)
 	case notify.TypeReAuthenticate:
 		return m.handleReAuthenticate(n.ProviderID)
 	default:
@@ -3656,7 +3802,7 @@ func (m *UI) disableDockerMCP() tea.Msg {
 }
 
 // renderLogo renders the Crush logo with the given styles and dimensions.
-func renderLogo(t *styles.Styles, compact bool, width int) string {
+func renderLogo(t *styles.Styles, compact, hyper bool, width int) string {
 	return logo.Render(t.Logo.GradCanvas, version.Version, compact, logo.Opts{
 		FieldColor:   t.Logo.FieldColor,
 		TitleColorA:  t.Logo.TitleColorA,
@@ -3664,5 +3810,6 @@ func renderLogo(t *styles.Styles, compact bool, width int) string {
 		CharmColor:   t.Logo.CharmColor,
 		VersionColor: t.Logo.VersionColor,
 		Width:        width,
+		Hyper:        hyper,
 	})
 }

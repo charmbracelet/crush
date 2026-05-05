@@ -148,10 +148,18 @@ func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
 
 // SmallRender renders a smaller version of the Crush logo, suitable for
 // smaller windows or sidebar usage.
-func SmallRender(t *styles.Styles, width int) string {
-	title := t.Logo.SmallCharm.Render("Charm™")
-	title = fmt.Sprintf("%s %s", title, styles.ApplyBoldForegroundGrad(t.Logo.GradCanvas, "Crush", t.Logo.SmallGradFromColor, t.Logo.SmallGradToColor))
-	remainingWidth := width - lipgloss.Width(title) - 1 // 1 for the space after "Crush"
+func SmallRender(t *styles.Styles, width int, o Opts) string {
+	name := "Crush"
+	if o.Hyper {
+		name = "HYPERCRUSH"
+	}
+	charm := "Charm™"
+	if !o.Hyper {
+		charm = " " + charm
+	}
+	title := t.Logo.SmallCharm.Render(charm)
+	title = fmt.Sprintf("%s %s", title, styles.ApplyBoldForegroundGrad(t.Logo.GradCanvas, name, t.Logo.SmallGradFromColor, t.Logo.SmallGradToColor))
+	remainingWidth := width - lipgloss.Width(title) - 1 // 1 for the space after the name
 	if remainingWidth > 0 {
 		lines := strings.Repeat("╱", remainingWidth)
 		title = fmt.Sprintf("%s %s", title, t.Logo.SmallDiagonals.Render(lines))

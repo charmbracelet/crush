@@ -110,6 +110,15 @@ func New(normalStyle, focusedStyle, matchStyle lipgloss.Style) *Completions {
 	}
 }
 
+// SetStyles updates the styles used when rendering completion items.
+// Existing items are not restyled; subsequent SetItems calls pick up the
+// new styles.
+func (c *Completions) SetStyles(normalStyle, focusedStyle, matchStyle lipgloss.Style) {
+	c.normalStyle = normalStyle
+	c.focusedStyle = focusedStyle
+	c.matchStyle = matchStyle
+}
+
 // IsOpen returns whether the completions popup is open.
 func (c *Completions) IsOpen() bool {
 	return c.open

@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	_ "embed"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -722,6 +723,7 @@ func generateHTML(stats *Stats, projectStats []ProjectStats, projName, username,
 		Header           template.HTML
 		Heartbit         template.HTML
 		Footer           template.HTML
+		Favicon          template.URL
 		GeneratedAt      string
 		ProjectName      string
 		Username         string
@@ -733,6 +735,7 @@ func generateHTML(stats *Stats, projectStats []ProjectStats, projName, username,
 		Header:           template.HTML(headerSVG),
 		Heartbit:         template.HTML(heartbitSVG),
 		Footer:           template.HTML(footerSVG),
+		Favicon:          template.URL("data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(heartbitSVG))),
 		GeneratedAt:      stats.GeneratedAt.Format("2006-01-02"),
 		ProjectName:      projName,
 		Username:         username,

@@ -703,6 +703,12 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 			deleteErr := a.messages.Delete(ctx, summaryMessage.ID)
 			return deleteErr
 		}
+		// Mark the summary message as finished with an error so the UI
+		// stops spinning.
+		summaryMessage.AddFinish(message.FinishReasonError, "Summarization Error", err.Error())
+		if updateErr := a.messages.Update(ctx, summaryMessage); updateErr != nil {
+			return updateErr
+		}
 		return err
 	}
 

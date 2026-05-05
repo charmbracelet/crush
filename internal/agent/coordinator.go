@@ -961,7 +961,38 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 	if !ok {
 		return errModelProviderNotConfigured
 	}
-	return c.currentAgent.Summarize(ctx, sessionID, getProviderOptions(c.currentAgent.Model(), providerCfg))
+
+	// Proactively refresh OAuth token if expired, same as Run().
+	if providerCfg.OAuthToken != nil && providerCfg.OAuthToken.IsExpired() {
+		slog.Debug("Token needs to be refreshed before summarize", "provider", providerCfg.ID)
+		if err := c.refreshOAuth2Token(ctx, providerCfg); err != nil {
+			slog.Error("Failed to refresh OAuth2 token before summarize. Proceeding with existing token.", "error", err)
+		}
+	}
+
+	summarize := func() error {
+		return c.currentAgent.Summarize(ctx, sessionID, getProviderOptions(c.currentAgent.Model(), providerCfg))
+	}
+
+	err := summarize()
+	if err != nil && c.isUnauthorized(err) {
+		switch {
+		case providerCfg.OAuthToken != nil:
+			slog.Debug("Received 401 during summarize. Refreshing token and retrying", "provider", providerCfg.ID)
+			if refreshErr := c.refreshOAuth2Token(ctx, providerCfg); refreshErr != nil {
+				return err
+			}
+			return summarize()
+		case strings.Contains(providerCfg.APIKeyTemplate, "$"):
+			slog.Debug("Received 401 during summarize. Refreshing API Key template and retrying", "provider", providerCfg.ID)
+			if refreshErr := c.refreshApiKeyTemplate(ctx, providerCfg); refreshErr != nil {
+				return err
+			}
+			return summarize()
+		}
+	}
+
+	return err
 }
 
 func (c *coordinator) isUnauthorized(err error) bool {

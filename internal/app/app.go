@@ -352,7 +352,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 
 				part := content[readBytes:]
 				// Trim leading whitespace. Sometimes the LLM includes leading
-				// formatting and intentation, which we don't want here.
+				// formatting and indentation, which we don't want here.
 				if readBytes == 0 {
 					part = strings.TrimLeft(part, " \t")
 				}

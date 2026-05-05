@@ -242,6 +242,7 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 			SystemPromptPrefix: config.SystemPromptPrefix,
 			ExtraHeaders:       headers,
 			ExtraBody:          config.ExtraBody,
+			ProviderOptions:    config.ProviderOptions,
 			ExtraParams:        make(map[string]string),
 			Models:             p.Models,
 		}

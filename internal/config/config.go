@@ -374,12 +374,23 @@ func (t ToolGrep) GetTimeout() time.Duration {
 // is owned by hooks.Runner so a JSON round-trip, merge, or reload can't
 // silently drop compiled state.
 type HookConfig struct {
+	// Friendly display name shown in the TUI. Falls back to Command when empty.
+	Name string `json:"name,omitempty" jsonschema:"description=Friendly display name shown in the TUI for this hook"`
 	// Regex pattern tested against the tool name. Empty means match all.
 	Matcher string `json:"matcher,omitempty" jsonschema:"description=Regex pattern tested against the tool name. Empty means match all tools."`
 	// Shell command to execute.
 	Command string `json:"command" jsonschema:"required,description=Shell command to execute when the hook fires"`
 	// Timeout in seconds. Default 30.
 	Timeout int `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for the hook command,default=30"`
+}
+
+// DisplayName returns the hook name for display purposes. It returns Name
+// when set, otherwise falls back to Command.
+func (h *HookConfig) DisplayName() string {
+	if h.Name != "" {
+		return h.Name
+	}
+	return h.Command
 }
 
 // TimeoutDuration returns the hook timeout as a time.Duration, defaulting

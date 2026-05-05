@@ -166,7 +166,11 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 		layout.Len(lipgloss.Height(sidebarHeader)),
 		layout.Fill(1),
 	).Split(m.layout.sidebar).Assign(new(image.Rectangle), &remainingHeightArea)
-	remainingHeight := remainingHeightArea.Dy() - 6
+	// Account for 4 section titles (1 each), 4 blank lines within sections
+	// (1 each from "\n\n"), and 3 separator lines between sections — total 11
+	// lines of overhead that getDynamicHeightLimits doesn't track.
+	const sectionOverhead = 11
+	remainingHeight := max(0, remainingHeightArea.Dy()-sectionOverhead)
 	filesCount := 0
 	for _, f := range m.sessionFiles {
 		if f.Additions == 0 && f.Deletions == 0 {

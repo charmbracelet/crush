@@ -786,6 +786,7 @@ If not, please feel free to ignore. Again do not mention this message to the use
 	// without a result).
 	knownToolCallIDs := make(map[string]struct{})
 	knownToolResultIDs := make(map[string]struct{})
+	tcToResultMsgs := make(map[string][]message.Message)
 	for _, m := range msgs {
 		switch m.Role {
 		case message.Assistant:
@@ -795,11 +796,19 @@ If not, please feel free to ignore. Again do not mention this message to the use
 		case message.Tool:
 			for _, tr := range m.ToolResults() {
 				knownToolResultIDs[tr.ToolCallID] = struct{}{}
+				tcToResultMsgs[tr.ToolCallID] = append(tcToResultMsgs[tr.ToolCallID], m)
 			}
 		}
 	}
 
+	// Track which result messages have been proactively placed after their
+	// assistant, so we skip them when they appear later in the stream.
+	placedResults := make(map[string]bool)
+
 	for _, m := range msgs {
+		if placedResults[m.ID] {
+			continue
+		}
 		if len(m.Parts) == 0 {
 			continue
 		}
@@ -810,14 +819,15 @@ If not, please feel free to ignore. Again do not mention this message to the use
 		if m.Role == message.Tool {
 			if msg, ok := filterOrphanedToolResults(m, knownToolCallIDs); ok {
 				history = append(history, msg)
+				placedResults[m.ID] = true
 			}
 			continue
 		}
 		history = append(history, m.ToAIMessage()...)
 
 		if m.Role == message.Assistant {
-			if msg, ok := syntheticToolResultsForOrphanedCalls(m, knownToolResultIDs); ok {
-				history = append(history, msg)
+			if results, ok := buildToolResultsForCalls(m, tcToResultMsgs, placedResults); ok {
+				history = append(history, results...)
 			}
 		}
 	}
@@ -835,6 +845,48 @@ If not, please feel free to ignore. Again do not mention this message to the use
 	}
 
 	return history, files
+}
+
+// buildToolResultsForCalls returns tool result messages for the tool calls
+// in the given assistant message. Real results are taken from tcToResultMsgs
+// and marked as placed. Tool calls with no result at all receive a synthetic
+// error result so strict-adjacency providers (e.g. DeepSeek) don't reject the
+// turn. Returns the messages to append and true if any were produced.
+func buildToolResultsForCalls(m message.Message, tcToResultMsgs map[string][]message.Message, placedResults map[string]bool) ([]fantasy.Message, bool) {
+	toolCalls := m.ToolCalls()
+	if len(toolCalls) == 0 {
+		return nil, false
+	}
+	var results []fantasy.Message
+	var syntheticParts []fantasy.MessagePart
+	for _, tc := range toolCalls {
+		if resultMsgs, hasResults := tcToResultMsgs[tc.ID]; hasResults {
+			for _, rm := range resultMsgs {
+				if !placedResults[rm.ID] {
+					results = append(results, rm.ToAIMessage()...)
+					placedResults[rm.ID] = true
+				}
+			}
+		} else {
+			slog.Warn("Injecting synthetic tool result for orphaned tool call",
+				"tool_call_id", tc.ID,
+				"tool_name", tc.Name,
+			)
+			syntheticParts = append(syntheticParts, fantasy.ToolResultPart{
+				ToolCallID: tc.ID,
+				Output: fantasy.ToolResultOutputContentError{
+					Error: errors.New("tool call was interrupted and did not produce a result, you may retry this call if the result is still needed"),
+				},
+			})
+		}
+	}
+	if len(syntheticParts) > 0 {
+		results = append(results, fantasy.Message{
+			Role:    fantasy.MessageRoleTool,
+			Content: syntheticParts,
+		})
+	}
+	return results, len(results) > 0
 }
 
 // filterOrphanedToolResults converts a tool message to a fantasy.Message,
@@ -868,39 +920,6 @@ func filterOrphanedToolResults(m message.Message, knownToolCallIDs map[string]st
 	msg := aiMsgs[0]
 	msg.Content = validParts
 	return msg, true
-}
-
-// syntheticToolResultsForOrphanedCalls returns a tool message containing
-// synthetic tool results for any tool calls in the assistant message that
-// have no matching result in knownToolResultIDs. LLM APIs require every
-// tool_use to be immediately followed by a tool_result; an interrupted
-// session can leave orphaned tool_use blocks that permanently lock the
-// conversation. Returns the message and true if any synthetic results were
-// produced.
-func syntheticToolResultsForOrphanedCalls(m message.Message, knownToolResultIDs map[string]struct{}) (fantasy.Message, bool) {
-	var syntheticParts []fantasy.MessagePart
-	for _, tc := range m.ToolCalls() {
-		if _, hasResult := knownToolResultIDs[tc.ID]; hasResult {
-			continue
-		}
-		slog.Warn("Injecting synthetic tool result for orphaned tool call",
-			"tool_call_id", tc.ID,
-			"tool_name", tc.Name,
-		)
-		syntheticParts = append(syntheticParts, fantasy.ToolResultPart{
-			ToolCallID: tc.ID,
-			Output: fantasy.ToolResultOutputContentError{
-				Error: errors.New("tool call was interrupted and did not produce a result, you may retry this call if the result is still needed"),
-			},
-		})
-	}
-	if len(syntheticParts) == 0 {
-		return fantasy.Message{}, false
-	}
-	return fantasy.Message{
-		Role:    fantasy.MessageRoleTool,
-		Content: syntheticParts,
-	}, true
 }
 
 func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.Session) ([]message.Message, error) {

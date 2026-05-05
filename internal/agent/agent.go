@@ -288,6 +288,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			}
 
 			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel)
+			prepared.Messages = pruneExcessImages(prepared.Messages, largeModel)
 
 			lastSystemRoleInx := 0
 			systemMessageUpdated := false
@@ -1308,6 +1309,114 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 	}
 
 	return convertedMessages
+}
+
+// maxImagesForModel returns the per-request image limit for the given model.
+// Only providers known to enforce a hard limit are listed; others return 0
+// (unlimited), relying on context window limits instead.
+//
+// TODO: Replace this with catwalk.Model.MaxAttachments once Catwalk exposes
+// per-model attachment limits. See https://github.com/charmbracelet/catwalk.
+func maxImagesForModel(model Model) int {
+	switch catwalk.InferenceProvider(model.ModelCfg.Provider) {
+	case catwalk.InferenceProviderGemini, catwalk.InferenceProviderVertexAI:
+		return 10
+	default:
+		return 0
+	}
+}
+
+// isImageFilePart reports whether the message part is a FilePart whose media
+// type starts with "image/".
+func isImageFilePart(part fantasy.MessagePart) (fantasy.FilePart, bool) {
+	fp, ok := fantasy.AsMessagePart[fantasy.FilePart](part)
+	if !ok {
+		return fp, false
+	}
+	return fp, strings.HasPrefix(fp.MediaType, "image/")
+}
+
+// countImagesInMessages returns the total number of image file parts across
+// all messages.
+func countImagesInMessages(messages []fantasy.Message) int {
+	count := 0
+	for _, msg := range messages {
+		for _, part := range msg.Content {
+			if _, ok := isImageFilePart(part); ok {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+// pruneExcessImages removes the oldest images from the conversation history
+// when the total count exceeds the provider's per-request image limit.
+//
+// Problem: Some providers (e.g. Google Gemini) enforce a hard limit on the
+// number of images per request. Because the full conversation history —
+// including all historical images — is sent with every request, the session
+// becomes permanently unusable once the cumulative image count exceeds the
+// limit: every subsequent request (even text-only prompts that happen to have
+// images in the history) fails with the same "too many images" error.
+//
+// Solution: Before sending, count images in the history. If the count exceeds
+// the provider's limit, strip the oldest images (replacing them with a short
+// text placeholder) so the request stays within bounds. Only the sent history
+// is modified; the persisted messages in the database are untouched.
+func pruneExcessImages(messages []fantasy.Message, model Model) []fantasy.Message {
+	maxImages := maxImagesForModel(model)
+	if maxImages <= 0 {
+		return messages
+	}
+
+	total := countImagesInMessages(messages)
+	if total <= maxImages {
+		return messages
+	}
+
+	toRemove := total - maxImages
+	removed := 0
+
+	result := make([]fantasy.Message, 0, len(messages))
+	for _, msg := range messages {
+		if removed >= toRemove {
+			result = append(result, msg)
+			continue
+		}
+
+		newParts := make([]fantasy.MessagePart, 0, len(msg.Content))
+		for _, part := range msg.Content {
+			if fp, ok := isImageFilePart(part); ok && removed < toRemove {
+				name := fp.Filename
+				if name == "" {
+					name = "image"
+				}
+				newParts = append(newParts, fantasy.TextPart{
+					Text: fmt.Sprintf("[Earlier image %q removed to stay within model limits]", name),
+				})
+				removed++
+				continue
+			}
+			newParts = append(newParts, part)
+		}
+
+		result = append(result, fantasy.Message{
+			Role:            msg.Role,
+			Content:         newParts,
+			ProviderOptions: msg.ProviderOptions,
+		})
+	}
+
+	if removed > 0 {
+		slog.Info("Pruned excess images from conversation history",
+			"removed", removed,
+			"max_allowed", maxImages,
+			"original_count", total,
+		)
+	}
+
+	return result
 }
 
 // buildSummaryPrompt constructs the prompt text for session summarization.

@@ -264,6 +264,16 @@
           "type": "array",
           "description": "List of tools from this MCP server to disable"
         },
+        "enabled_tools": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "get-library-doc"
+            ]
+          },
+          "type": "array",
+          "description": "Allow list of tools from this MCP server. When set"
+        },
         "timeout": {
           "type": "integer",
           "description": "Timeout in seconds for MCP server connections",

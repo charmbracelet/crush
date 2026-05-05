@@ -1,7 +1,9 @@
 package dialog
 
 import (
+	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -25,6 +27,10 @@ const (
 	APIKeyInputStateInitial APIKeyInputState = iota
 	APIKeyInputStateVerifying
 	APIKeyInputStateVerified
+	// APIKeyInputStateUnverified indicates the key was saved but the
+	// provider does not expose a deterministic validation probe, so
+	// authentication could not be proven.
+	APIKeyInputStateUnverified
 	APIKeyInputStateError
 )
 
@@ -128,7 +134,7 @@ func (m *APIKeyInput) HandleMsg(msg tea.Msg) Action {
 			// do nothing
 		case key.Matches(msg, m.keyMap.Close):
 			switch m.state {
-			case APIKeyInputStateVerified:
+			case APIKeyInputStateVerified, APIKeyInputStateUnverified:
 				return m.saveKeyAndContinue()
 			default:
 				return ActionClose{}
@@ -137,7 +143,7 @@ func (m *APIKeyInput) HandleMsg(msg tea.Msg) Action {
 			switch m.state {
 			case APIKeyInputStateInitial, APIKeyInputStateError:
 				return ActionChangeAPIKeyState{State: APIKeyInputStateVerifying}
-			case APIKeyInputStateVerified:
+			case APIKeyInputStateVerified, APIKeyInputStateUnverified:
 				return m.saveKeyAndContinue()
 			}
 		default:
@@ -219,6 +225,8 @@ func (m *APIKeyInput) dialogTitle() string {
 		return textStyle.Render("Verifying your ") + accentStyle.Render(fmt.Sprintf("%s Key", m.provider.Name)) + textStyle.Render("...")
 	case APIKeyInputStateVerified:
 		return accentStyle.Render(fmt.Sprintf("%s Key", m.provider.Name)) + textStyle.Render(" validated.")
+	case APIKeyInputStateUnverified:
+		return accentStyle.Render(fmt.Sprintf("%s Key", m.provider.Name)) + textStyle.Render(" saved (not verified).")
 	case APIKeyInputStateError:
 		return errorStyle.Render("Invalid ") + accentStyle.Render(fmt.Sprintf("%s Key", m.provider.Name)) + errorStyle.Render(". Try again?")
 	}
@@ -240,7 +248,7 @@ func (m *APIKeyInput) inputView() string {
 		m.input.Prompt = m.spinner.View()
 		m.input.SetStyles(ts)
 		m.input.Blur()
-	case APIKeyInputStateVerified:
+	case APIKeyInputStateVerified, APIKeyInputStateUnverified:
 		ts := t.TextInput
 		ts.Blurred.Prompt = ts.Focused.Prompt
 
@@ -284,13 +292,7 @@ func (m *APIKeyInput) ShortHelp() []key.Binding {
 func (m *APIKeyInput) verifyAPIKey() tea.Msg {
 	start := time.Now()
 
-	providerConfig := config.ProviderConfig{
-		ID:      string(m.provider.ID),
-		Name:    m.provider.Name,
-		APIKey:  m.input.Value(),
-		Type:    m.provider.Type,
-		BaseURL: m.provider.APIEndpoint,
-	}
+	providerConfig := providerConfigForVerify(m.provider, m.input.Value())
 	err := providerConfig.TestConnection(m.com.Workspace.Resolver())
 
 	// intentionally wait for at least 750ms to make sure the user sees the spinner
@@ -300,10 +302,41 @@ func (m *APIKeyInput) verifyAPIKey() tea.Msg {
 		time.Sleep(minimum - elapsed)
 	}
 
-	if err == nil {
-		return ActionChangeAPIKeyState{APIKeyInputStateVerified}
+	return ActionChangeAPIKeyState{State: apiKeyStateForVerifyErr(err)}
+}
+
+// providerConfigForVerify builds the [config.ProviderConfig] used to probe a
+// provider's API key from the dialog. In particular it propagates the
+// provider's [catwalk.Provider.DefaultHeaders] into [config.ProviderConfig.ExtraHeaders]
+// so validation probes carry any headers the provider expects (e.g. routing
+// or tenant hints) — matching the behaviour used for real inference traffic.
+func providerConfigForVerify(provider catwalk.Provider, apiKey string) config.ProviderConfig {
+	cfg := config.ProviderConfig{
+		ID:      string(provider.ID),
+		Name:    provider.Name,
+		APIKey:  apiKey,
+		Type:    provider.Type,
+		BaseURL: provider.APIEndpoint,
 	}
-	return ActionChangeAPIKeyState{APIKeyInputStateError}
+	if len(provider.DefaultHeaders) > 0 {
+		cfg.ExtraHeaders = make(map[string]string, len(provider.DefaultHeaders))
+		maps.Copy(cfg.ExtraHeaders, provider.DefaultHeaders)
+	}
+	return cfg
+}
+
+// apiKeyStateForVerifyErr maps a [config.ProviderConfig.TestConnection] error
+// to the dialog state the UI should transition into. Extracted so the
+// mapping can be unit-tested without spinning up a full [common.Common].
+func apiKeyStateForVerifyErr(err error) APIKeyInputState {
+	switch {
+	case err == nil:
+		return APIKeyInputStateVerified
+	case errors.Is(err, config.ErrValidationUnsupported):
+		return APIKeyInputStateUnverified
+	default:
+		return APIKeyInputStateError
+	}
 }
 
 func (m *APIKeyInput) saveKeyAndContinue() Action {

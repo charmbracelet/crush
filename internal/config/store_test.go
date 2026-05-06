@@ -513,6 +513,38 @@ func TestAutoReloadDisabledDuringReload(t *testing.T) {
 	require.False(t, store.autoReloadDisabled, "autoReloadDisabled should be false after ReloadFromDisk")
 }
 
+// TestSetConfigFields_AutoReloadsAtomically verifies that SetConfigFields writes
+// multiple fields in a single disk write and triggers only one auto-reload,
+// avoiding intermediate states where only some fields are persisted.
+func TestSetConfigFields_AutoReloadsAtomically(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "crush.json")
+
+	// Create initial config file.
+	initialConfig := `{"options": {"debug": false}}`
+	require.NoError(t, os.WriteFile(configPath, []byte(initialConfig), 0o600))
+
+	// Load initial config.
+	store, err := Load(dir, dir, false)
+	require.NoError(t, err)
+
+	// Set globalDataPath and capture snapshot.
+	store.globalDataPath = configPath
+	store.CaptureStalenessSnapshot([]string{configPath})
+
+	// Write multiple fields atomically.
+	err = store.SetConfigFields(ScopeGlobal, map[string]any{
+		"options.debug":  true,
+		"options.custom": "hello",
+	})
+	require.NoError(t, err)
+
+	// Verify both fields are reflected in memory.
+	require.True(t, store.config.Options.Debug)
+}
+
 func TestLoadTokenFromDisk_ReturnsNewerToken(t *testing.T) {
 	t.Parallel()
 

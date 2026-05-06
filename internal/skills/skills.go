@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 
@@ -30,6 +29,9 @@ const (
 var (
 	namePattern    = regexp.MustCompile(`^[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*$`)
 	promptReplacer = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\"", "&quot;", "'", "&apos;")
+
+	latestStates   []*SkillState
+	latestStatesMu sync.RWMutex
 )
 
 // Skill represents a parsed SKILL.md file.
@@ -73,6 +75,41 @@ var broker = pubsub.NewBroker[Event]()
 // SubscribeEvents returns a channel that receives events when skill discovery state changes.
 func SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {
 	return broker.Subscribe(ctx)
+}
+
+// PublishStates publishes a skill discovery event with the given states.
+func PublishStates(states []*SkillState) {
+	broker.Publish(pubsub.UpdatedEvent, Event{States: cloneStates(states)})
+}
+
+// cloneStates returns a deep copy of the given state slice so callers cannot
+// accidentally mutate the source.
+func cloneStates(states []*SkillState) []*SkillState {
+	if states == nil {
+		return nil
+	}
+	result := make([]*SkillState, len(states))
+	for i, s := range states {
+		clone := *s
+		result[i] = &clone
+	}
+	return result
+}
+
+// GetLatestStates returns the latest discovery states.
+func GetLatestStates() []*SkillState {
+	latestStatesMu.RLock()
+	defer latestStatesMu.RUnlock()
+	return cloneStates(latestStates)
+}
+
+// SetLatestStates stores the given states in the package-level cache so that
+// GetLatestStates can return them synchronously before the first pubsub event
+// arrives.
+func SetLatestStates(states []*SkillState) {
+	latestStatesMu.Lock()
+	latestStates = cloneStates(states)
+	latestStatesMu.Unlock()
 }
 
 // Validate checks if the skill meets spec requirements.
@@ -244,15 +281,15 @@ func DiscoverWithStates(paths []string) ([]*Skill, []*SkillState) {
 	}
 
 	// fastwalk traversal order is non-deterministic, so sort for stable output.
-	sort.SliceStable(skills, func(i, j int) bool {
-		left := strings.ToLower(skills[i].SkillFilePath)
-		right := strings.ToLower(skills[j].SkillFilePath)
-		if left == right {
-			return skills[i].SkillFilePath < skills[j].SkillFilePath
+	// Sort by path first, then alphabetically by name within each path.
+	slices.SortStableFunc(skills, func(a, b *Skill) int {
+		if c := strings.Compare(strings.ToLower(a.Path), strings.ToLower(b.Path)); c != 0 {
+			return c
 		}
-		return left < right
+		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
 	})
 
+	// Publish states as-is; the coordinator will merge and re-sort them later.
 	broker.Publish(pubsub.UpdatedEvent, Event{States: states})
 	return skills, states
 }
@@ -281,6 +318,26 @@ func ToPromptXML(skills []*Skill) string {
 
 func escape(s string) string {
 	return promptReplacer.Replace(s)
+}
+
+// DeduplicateStates removes duplicate skill states by name. When duplicates exist,
+// the last occurrence wins (consistent with Deduplicate for skills).
+func DeduplicateStates(all []*SkillState) []*SkillState {
+	seen := make(map[string]int, len(all))
+	for i, s := range all {
+		if s.Name != "" {
+			seen[s.Name] = i
+		}
+	}
+
+	result := make([]*SkillState, 0, len(seen))
+	for i, s := range all {
+		// If it's the last occurrence of this name, or it has no name (error state), keep it
+		if s.Name == "" || seen[s.Name] == i {
+			result = append(result, s)
+		}
+	}
+	return result
 }
 
 // Deduplicate removes duplicate skills by name. When duplicates exist, the

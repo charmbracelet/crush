@@ -172,9 +172,17 @@ func NewGrepTool(workingDir string, config config.ToolGrep) fantasy.AgentTool {
 }
 
 func searchFiles(ctx context.Context, pattern, rootPath, include string, limit int) ([]grepMatch, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
+
 	matches, err := searchWithRipgrep(ctx, pattern, rootPath, include)
 	if err != nil {
-		matches, err = searchFilesWithRegex(pattern, rootPath, include)
+		if err := ctx.Err(); err != nil {
+			return nil, false, err
+		}
+
+		matches, err = searchFilesWithRegex(ctx, pattern, rootPath, include)
 		if err != nil {
 			return nil, false, err
 		}
@@ -261,7 +269,11 @@ type ripgrepMatch struct {
 	} `json:"data"`
 }
 
-func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error) {
+func searchFilesWithRegex(ctx context.Context, pattern, rootPath, include string) ([]grepMatch, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	matches := []grepMatch{}
 
 	// Use cached regex compilation
@@ -285,6 +297,9 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 	err = filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // Skip errors
+		}
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 
 		if info.IsDir() {
@@ -310,8 +325,11 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 			return nil
 		}
 
-		match, lineNum, charNum, lineText, err := fileContainsPattern(path, regex)
+		match, lineNum, charNum, lineText, err := fileContainsPattern(ctx, path, regex)
 		if err != nil {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			return nil // Skip files we can't read
 		}
 
@@ -334,11 +352,18 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 	if err != nil {
 		return nil, err
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	return matches, nil
 }
 
-func fileContainsPattern(filePath string, pattern *regexp.Regexp) (bool, int, int, string, error) {
+func fileContainsPattern(ctx context.Context, filePath string, pattern *regexp.Regexp) (bool, int, int, string, error) {
+	if err := ctx.Err(); err != nil {
+		return false, 0, 0, "", err
+	}
+
 	// Only search text files.
 	if !isTextFile(filePath) {
 		return false, 0, 0, "", nil
@@ -353,12 +378,20 @@ func fileContainsPattern(filePath string, pattern *regexp.Regexp) (bool, int, in
 	scanner := bufio.NewScanner(file)
 	lineNum := 0
 	for scanner.Scan() {
+		if err := ctx.Err(); err != nil {
+			return false, 0, 0, "", err
+		}
+
 		lineNum++
 		line := scanner.Text()
 		if loc := pattern.FindStringIndex(line); loc != nil {
 			charNum := loc[0] + 1
 			return true, lineNum, charNum, line, nil
 		}
+	}
+
+	if err := ctx.Err(); err != nil {
+		return false, 0, 0, "", err
 	}
 
 	return false, 0, 0, "", scanner.Err()

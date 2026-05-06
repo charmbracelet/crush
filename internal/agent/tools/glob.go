@@ -44,7 +44,7 @@ func NewGlobTool(workingDir string) fantasy.AgentTool {
 
 			files, truncated, err := globFiles(ctx, params.Pattern, searchPath, 100)
 			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error finding files: %w", err)
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("error finding files: %v", err)), nil
 			}
 
 			var output string

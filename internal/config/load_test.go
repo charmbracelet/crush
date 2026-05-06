@@ -693,6 +693,10 @@ func TestConfig_setupAgentsWithNoDisabledTools(t *testing.T) {
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
 	assert.Equal(t, []string{"glob", "grep", "ls", "sourcegraph", "view"}, taskAgent.AllowedTools)
+
+	planAgent, ok := cfg.Agents[AgentPlan]
+	require.True(t, ok)
+	assert.Equal(t, []string{"agent", "glob", "grep", "ls", "sourcegraph", "view"}, planAgent.AllowedTools)
 }
 
 func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
@@ -715,12 +719,17 @@ func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
 	assert.Equal(t, []string{"glob", "ls", "sourcegraph", "view"}, taskAgent.AllowedTools)
+
+	planAgent, ok := cfg.Agents[AgentPlan]
+	require.True(t, ok)
+	assert.Equal(t, []string{"agent", "glob", "ls", "sourcegraph", "view"}, planAgent.AllowedTools)
 }
 
 func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 	cfg := &Config{
 		Options: &Options{
 			DisabledTools: []string{
+				"agent",
 				"glob",
 				"grep",
 				"ls",
@@ -738,6 +747,10 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
 	assert.Len(t, taskAgent.AllowedTools, 0)
+
+	planAgent, ok := cfg.Agents[AgentPlan]
+	require.True(t, ok)
+	assert.Len(t, planAgent.AllowedTools, 0)
 }
 
 func TestConfig_configureProvidersWithDisabledProvider(t *testing.T) {

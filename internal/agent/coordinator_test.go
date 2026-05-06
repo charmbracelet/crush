@@ -552,3 +552,35 @@ func TestGetProviderOptionsReasoningEffortFallback(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "enabled", thinking["type"])
 }
+
+func TestCoordinatorSetMainAgent(t *testing.T) {
+	t.Run("switches current agent", func(t *testing.T) {
+		coder := &mockSessionAgent{}
+		plan := &mockSessionAgent{}
+		coord := &coordinator{
+			currentAgent:     coder,
+			currentAgentName: config.AgentCoder,
+			agents: map[string]SessionAgent{
+				config.AgentCoder: coder,
+				config.AgentPlan:  plan,
+			},
+		}
+
+		err := coord.SetMainAgent(config.AgentPlan)
+		require.NoError(t, err)
+		assert.Equal(t, config.AgentPlan, coord.currentAgentName)
+		assert.Same(t, plan, coord.currentAgent)
+	})
+
+	t.Run("returns error for unknown agent", func(t *testing.T) {
+		coord := &coordinator{
+			agents: map[string]SessionAgent{
+				config.AgentCoder: &mockSessionAgent{},
+			},
+		}
+
+		err := coord.SetMainAgent("unknown")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errMainAgentNotFound)
+	})
+}

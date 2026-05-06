@@ -258,6 +258,10 @@ func (w *ClientWorkspace) AgentClearQueue(sessionID string) {
 	_ = w.client.ClearAgentSessionQueuedPrompts(context.Background(), w.workspaceID(), sessionID)
 }
 
+func (w *ClientWorkspace) AgentSetMain(agentID string) error {
+	return fmt.Errorf("set main agent is not supported in client workspace: %s", agentID)
+}
+
 func (w *ClientWorkspace) AgentSummarize(ctx context.Context, sessionID string) error {
 	return w.client.AgentSummarizeSession(ctx, w.workspaceID(), sessionID)
 }

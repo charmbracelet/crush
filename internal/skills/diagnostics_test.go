@@ -1,6 +1,8 @@
 package skills
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -59,4 +61,44 @@ func TestDiscoverWithStates_MissingPath(t *testing.T) {
 	// A clearly nonexistent path should not panic; it may log an error.
 	skills, _ := DiscoverWithStates([]string{"/nonexistent/crush/skills/path"})
 	require.Empty(t, skills)
+}
+
+func TestGetLatestStates(t *testing.T) {
+	// Not parallel - manipulates package-level cache.
+	prev := GetLatestStates()
+	t.Cleanup(func() { SetLatestStates(prev) })
+
+	SetLatestStates(nil)
+	require.Nil(t, GetLatestStates())
+
+	dir := t.TempDir()
+	skillDir := filepath.Join(dir, "my-skill")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(skillDir, SkillFileName),
+		[]byte("---\nname: my-skill\ndescription: A test skill.\n---\nInstructions.\n"),
+		0o644,
+	))
+
+	_, states := DiscoverWithStates([]string{dir})
+	SetLatestStates(states)
+
+	got := GetLatestStates()
+	require.Len(t, got, 1)
+	require.Equal(t, "my-skill", got[0].Name)
+}
+
+func TestGetLatestStates_Isolation(t *testing.T) {
+	// Not parallel - manipulates package-level cache.
+	prev := GetLatestStates()
+	t.Cleanup(func() { SetLatestStates(prev) })
+
+	initial := []*SkillState{{Name: "test"}}
+	SetLatestStates(initial)
+
+	got := GetLatestStates()
+	got[0].Name = "corrupted"
+
+	check := GetLatestStates()
+	require.Equal(t, "test", check[0].Name, "Cache should be isolated from caller mutations")
 }

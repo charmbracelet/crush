@@ -950,6 +950,9 @@ func GlobalSkillsDirs() []string {
 	paths := []string{
 		filepath.Join(home.Config(), appName, "skills"),
 		filepath.Join(home.Config(), "agents", "skills"),
+		// Per the Agent Skills spec, scan ~/.agents/skills
+		filepath.Join(home.Dir(), ".agents", "skills"),
+		filepath.Join(home.Dir(), ".claude", "skills"),
 	}
 
 	// On Windows, also load from app data on top of `$HOME/.config/crush`.

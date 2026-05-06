@@ -1144,6 +1144,17 @@ func discoverSkills(cfg *config.ConfigStore) (allSkills, activeSkills []*skills.
 	}
 	activeSkills = skills.Filter(allSkills, disabledSkills)
 
+	allStates := append([]*skills.SkillState(nil), builtinStates...)
+	allStates = append(allStates, userStates...)
+
+	allStates = skills.DeduplicateStates(allStates)
+
+	slices.SortStableFunc(allStates, func(a, b *skills.SkillState) int {
+		return strings.Compare(strings.ToLower(a.Path), strings.ToLower(b.Path))
+	})
+	skills.SetLatestStates(allStates)
+	skills.PublishStates(allStates)
+
 	logDiscoveryStats(builtin, builtinStates, userStates, userPaths, allSkills, activeSkills, disabledSkills)
 	return allSkills, activeSkills
 }

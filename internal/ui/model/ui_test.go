@@ -1,8 +1,10 @@
 package model
 
 import (
+	"context"
 	"testing"
 
+	"charm.land/bubbles/v2/textarea"
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
@@ -87,9 +89,60 @@ func newTestUIWithConfig(t *testing.T, cfg *config.Config) *UI {
 // testWorkspace is a minimal [workspace.Workspace] stub for unit tests.
 type testWorkspace struct {
 	workspace.Workspace
-	cfg *config.Config
+	cfg               *config.Config
+	setMainCalledWith string
+	updateCalls       int
 }
 
 func (w *testWorkspace) Config() *config.Config {
 	return w.cfg
+}
+
+func (w *testWorkspace) AgentSetMain(agentID string) error {
+	w.setMainCalledWith = agentID
+	return nil
+}
+
+func (w *testWorkspace) UpdateAgentModel(context.Context) error {
+	w.updateCalls++
+	return nil
+}
+
+func (w *testWorkspace) PermissionSkipRequests() bool {
+	return false
+}
+
+func TestDefaultKeyMapHasShiftTab(t *testing.T) {
+	t.Parallel()
+
+	km := DefaultKeyMap()
+	require.Equal(t, []string{"shift+tab"}, km.ShiftTab.Keys())
+}
+
+func TestToggleInputMode(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+	}
+	ws := &testWorkspace{cfg: cfg}
+	ui := &UI{
+		com: &common.Common{
+			Workspace: ws,
+		},
+		mode:     uiInputModeCode,
+		textarea: textarea.New(),
+	}
+
+	msg := ui.toggleInputMode()()
+	require.NotNil(t, msg)
+	require.Equal(t, uiInputModePlan, ui.mode)
+	require.Equal(t, config.AgentPlan, ws.setMainCalledWith)
+	require.Equal(t, 1, ws.updateCalls)
+
+	msg = ui.toggleInputMode()()
+	require.NotNil(t, msg)
+	require.Equal(t, uiInputModeCode, ui.mode)
+	require.Equal(t, config.AgentCoder, ws.setMainCalledWith)
+	require.Equal(t, 2, ws.updateCalls)
 }

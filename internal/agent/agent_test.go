@@ -795,6 +795,186 @@ func TestPreparePrompt_OrphanedToolUseMixed(t *testing.T) {
 	require.Equal(t, 1, syntheticCount, "expected exactly one synthetic result for the orphaned call")
 }
 
+func TestPreparePrompt_NonAdjacentToolResults(t *testing.T) {
+	// Tests that preparePrompt reorders tool results to be immediately
+	// after their assistant message, even when DB ordering has interleaved
+	// messages between the call and its result.
+	env := testEnv(t)
+	sa := testSessionAgent(env, nil, nil, "test prompt")
+	agent := sa.(*sessionAgent)
+
+	ctx := t.Context()
+	sess, err := env.sessions.Create(ctx, "test")
+	require.NoError(t, err)
+
+	// User message
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.User,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "run commands"},
+		},
+	})
+	require.NoError(t, err)
+
+	// Assistant with 2 tool calls: call_A and call_B
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.ToolCall{
+				ID:       "call_A",
+				Name:     "bash",
+				Input:    `{"command":"date"}`,
+				Finished: true,
+			},
+			message.ToolCall{
+				ID:       "call_B",
+				Name:     "bash",
+				Input:    `{"command":"uptime"}`,
+				Finished: true,
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	// Simulate interleaving: a user message appears BEFORE tool results.
+	// This can happen when sub-agents or error recovery paths write
+	// messages concurrently with PrepareStep.
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.User,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "are we done?"},
+		},
+	})
+	require.NoError(t, err)
+
+	// Results for call_A and call_B arrive LATE — after the interleaved user.
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.Tool,
+		Parts: []message.ContentPart{
+			message.ToolResult{
+				ToolCallID: "call_A",
+				Name:       "bash",
+				Content:    "Fri May 2 21:00:00 UTC 2026",
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.Tool,
+		Parts: []message.ContentPart{
+			message.ToolResult{
+				ToolCallID: "call_B",
+				Name:       "bash",
+				Content:    "21:00  up 3 days",
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	msgs, err := env.messages.List(ctx, sess.ID)
+	require.NoError(t, err)
+
+	// Verify DB ordering has the interleaving: user at pos 2, results at 3 and 4
+	require.Equal(t, message.User, msgs[2].Role, "interleaved user should be between assistant and results")
+
+	history, _ := agent.preparePrompt(msgs)
+
+	// After preparePrompt, tool results MUST be immediately after their assistant.
+	// Find the assistant with call_A and verify the next message is a tool result.
+	var assistantIdx int
+	for i, msg := range history {
+		if msg.Role != fantasy.MessageRoleAssistant {
+			continue
+		}
+		for _, part := range msg.Content {
+			if tc, ok := fantasy.AsMessagePart[fantasy.ToolCallPart](part); ok && tc.ToolCallID == "call_A" {
+				assistantIdx = i
+				break
+			}
+		}
+		if assistantIdx > 0 {
+			break
+		}
+	}
+	require.Greater(t, assistantIdx, 0, "should find assistant with call_A")
+
+	// The message immediately after the assistant must be a tool result,
+	// NOT the interleaved user message.
+	require.Equal(t, fantasy.MessageRoleTool, history[assistantIdx+1].Role,
+		"after assistant with tool_calls, next message must be tool (not user)")
+
+	// Both call_A and call_B results must be found in tool messages
+	// immediately following the assistant.
+	foundCallA, foundCallB := false, false
+	for i := assistantIdx + 1; i < len(history) && i <= assistantIdx+3; i++ {
+		if history[i].Role != fantasy.MessageRoleTool {
+			break
+		}
+		for _, part := range history[i].Content {
+			if tr, ok := fantasy.AsMessagePart[fantasy.ToolResultPart](part); ok {
+				switch tr.ToolCallID {
+				case "call_A":
+					foundCallA = true
+				case "call_B":
+					foundCallB = true
+				}
+			}
+		}
+	}
+	require.True(t, foundCallA, "result for call_A must be adjacent to its assistant")
+	require.True(t, foundCallB, "result for call_B must be adjacent to its assistant")
+}
+
+func TestPreparePrompt_ResultBeforeAssistant(t *testing.T) {
+	// Tests that when DB ordering has a tool result BEFORE its assistant
+	// (e.g. from concurrent writes), the result is not duplicated.
+	t.Parallel()
+	env := testEnv(t)
+	sa := testSessionAgent(env, nil, nil, "test prompt")
+	agent := sa.(*sessionAgent)
+
+	ctx := t.Context()
+	sess, err := env.sessions.Create(ctx, "test")
+	require.NoError(t, err)
+
+	// Result arrives BEFORE assistant in DB order.
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.Tool,
+		Parts: []message.ContentPart{
+			message.ToolResult{ToolCallID: "call_X", Name: "bash", Content: "result"},
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.ToolCall{ID: "call_X", Name: "bash", Input: `{}`, Finished: true},
+		},
+	})
+	require.NoError(t, err)
+
+	msgs, err := env.messages.List(ctx, sess.ID)
+	require.NoError(t, err)
+
+	history, _ := agent.preparePrompt(msgs)
+
+	// Count occurrences of call_X result in history.
+	resultCount := 0
+	for _, msg := range history {
+		if msg.Role != fantasy.MessageRoleTool {
+			continue
+		}
+		for _, part := range msg.Content {
+			if tr, ok := fantasy.AsMessagePart[fantasy.ToolResultPart](part); ok && tr.ToolCallID == "call_X" {
+				resultCount++
+			}
+		}
+	}
+	require.Equal(t, 1, resultCount, "result must not be duplicated")
+}
+
 func TestProviderRetryLogFields(t *testing.T) {
 	t.Run("nil provider error", func(t *testing.T) {
 		fields := providerRetryLogFields(nil, 2*time.Second)

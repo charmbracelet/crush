@@ -64,6 +64,7 @@ type KeyMap struct {
 	Suspend  key.Binding
 	Sessions key.Binding
 	Tab      key.Binding
+	ShiftTab key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -95,6 +96,10 @@ func DefaultKeyMap() KeyMap {
 		Tab: key.NewBinding(
 			key.WithKeys("tab"),
 			key.WithHelp("tab", "change focus"),
+		),
+		ShiftTab: key.NewBinding(
+			key.WithKeys("shift+tab"),
+			key.WithHelp("shift+tab", "toggle plan mode"),
 		),
 	}
 

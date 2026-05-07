@@ -333,6 +333,7 @@ func TestReloadFromDisk_WorkspaceRecentModelsOverrideGlobalRecentModels(t *testi
 
 	dir := t.TempDir()
 	globalDataDir := filepath.Join(dir, "global-data")
+	t.Setenv("CRUSH_GLOBAL_CONFIG", filepath.Join(dir, "no-such-global-config"))
 	t.Setenv("CRUSH_GLOBAL_DATA", globalDataDir)
 
 	globalPath := filepath.Join(globalDataDir, "crush.json")
@@ -526,9 +527,8 @@ func TestConfigStaleness_RefreshClearsDirtyState(t *testing.T) {
 // ReloadFromDisk updates store state BEFORE running model/agent setup,
 // so the new config values are used rather than stale pre-reload values.
 func TestReloadFromDisk_UsesNewConfigValues(t *testing.T) {
-	t.Parallel()
-
 	dir := t.TempDir()
+	t.Setenv("CRUSH_GLOBAL_CONFIG", filepath.Join(dir, "no-such-global-config"))
 	configPath := filepath.Join(dir, "crush.json")
 
 	// Create initial config with one model preference

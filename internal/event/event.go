@@ -104,6 +104,9 @@ func Error(errToLog any, props ...any) {
 		reflect.TypeOf(errToLog).String(),
 		fmt.Sprintf("%v", errToLog),
 	)
+	if exception.Properties == nil {
+		exception.Properties = posthog.NewProperties()
+	}
 	exception.Properties = exception.Properties.Merge(pairsToProps(props...))
 
 	if posthogErr := client.Enqueue(exception); posthogErr != nil {

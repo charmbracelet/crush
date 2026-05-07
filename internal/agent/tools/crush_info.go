@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/lsp"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/skills"
 )
 
@@ -349,16 +350,18 @@ func writePermissions(b *strings.Builder, cfg *config.ConfigStore) {
 	c := cfg.Config()
 	overrides := cfg.Overrides()
 
-	if c.Permissions == nil {
-		if !overrides.SkipPermissionRequests {
-			return
-		}
-	} else if !overrides.SkipPermissionRequests && len(c.Permissions.AllowedTools) == 0 {
-		return
-	}
 	b.WriteString("[permissions]\n")
 	if overrides.SkipPermissionRequests {
-		b.WriteString("mode = yolo\n")
+		switch overrides.PermissionMode {
+		case permission.PermissionModeSuperYolo:
+			b.WriteString("mode = super_yolo\n")
+		case permission.PermissionModeYolo:
+			b.WriteString("mode = yolo\n")
+		default:
+			b.WriteString("mode = yolo\n")
+		}
+	} else {
+		b.WriteString("mode = normal\n")
 	}
 	if c.Permissions != nil && len(c.Permissions.AllowedTools) > 0 {
 		sorted := slices.Clone(c.Permissions.AllowedTools)

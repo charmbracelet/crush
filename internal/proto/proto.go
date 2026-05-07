@@ -13,14 +13,15 @@ import (
 // Workspace represents a running app.App workspace with its associated
 // resources and state.
 type Workspace struct {
-	ID      string         `json:"id"`
-	Path    string         `json:"path"`
-	YOLO    bool           `json:"yolo,omitempty"`
-	Debug   bool           `json:"debug,omitempty"`
-	DataDir string         `json:"data_dir,omitempty"`
-	Version string         `json:"version,omitempty"`
-	Config  *config.Config `json:"config,omitempty"`
-	Env     []string       `json:"env,omitempty"`
+	ID        string         `json:"id"`
+	Path      string         `json:"path"`
+	YOLO      bool           `json:"yolo,omitempty"`
+	SuperYOLO bool           `json:"super_yolo,omitempty"`
+	Debug     bool           `json:"debug,omitempty"`
+	DataDir   string         `json:"data_dir,omitempty"`
+	Version   string         `json:"version,omitempty"`
+	Config    *config.Config `json:"config,omitempty"`
+	Env       []string       `json:"env,omitempty"`
 }
 
 // Error represents an error response.

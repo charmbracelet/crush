@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/lsp"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/stretchr/testify/require"
 )
@@ -27,7 +28,8 @@ func TestCrushInfo_MinimalConfig(t *testing.T) {
 	require.NotContains(t, output, "[providers]")
 	require.NotContains(t, output, "[lsp]")
 	require.NotContains(t, output, "[mcp]")
-	require.NotContains(t, output, "[permissions]")
+	require.Contains(t, output, "[permissions]")
+	require.Contains(t, output, "mode = normal")
 	require.NotContains(t, output, "[tools]")
 }
 
@@ -158,10 +160,26 @@ func TestCrushInfo_YoloMode(t *testing.T) {
 		Permissions: &config.Permissions{},
 	})
 	cfg.Overrides().SkipPermissionRequests = true
+	cfg.Overrides().PermissionMode = permission.PermissionModeYolo
 
 	output := buildCrushInfo(cfg, nil, nil, nil, nil)
 	require.Contains(t, output, "[permissions]")
 	require.Contains(t, output, "mode = yolo")
+}
+
+func TestCrushInfo_SuperYoloMode(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.NewTestStore(&config.Config{
+		Providers:   csync.NewMap[string, config.ProviderConfig](),
+		Permissions: &config.Permissions{},
+	})
+	cfg.Overrides().SkipPermissionRequests = true
+	cfg.Overrides().PermissionMode = permission.PermissionModeSuperYolo
+
+	output := buildCrushInfo(cfg, nil, nil, nil, nil)
+	require.Contains(t, output, "[permissions]")
+	require.Contains(t, output, "mode = super_yolo")
 }
 
 func TestCrushInfo_AllowedTools(t *testing.T) {
@@ -297,7 +315,6 @@ func TestCrushInfo_EmptySectionsOmitted(t *testing.T) {
 
 	output := buildCrushInfo(cfg, nil, nil, nil, nil)
 	require.NotContains(t, output, "[tools]")
-	require.NotContains(t, output, "[permissions]")
 	require.NotContains(t, output, "[lsp]")
 	require.NotContains(t, output, "[mcp]")
 	require.NotContains(t, output, "[skills]")

@@ -15,6 +15,11 @@ type ConfigRemoveRequest struct {
 	Key   string       `json:"key"`
 }
 
+// ConfigHasFieldResponse represents whether a config field exists.
+type ConfigHasFieldResponse struct {
+	Exists bool `json:"exists"`
+}
+
 // ConfigModelRequest represents a request to update the preferred model.
 type ConfigModelRequest struct {
 	Scope     config.Scope             `json:"scope"`

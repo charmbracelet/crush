@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/proto"
 )
 
@@ -63,6 +64,28 @@ func (c *controllerV1) handlePostWorkspaceConfigRemove(w http.ResponseWriter, r 
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+// handleGetWorkspaceConfigHas checks whether a configuration field exists.
+//
+//	@Summary		Check config field
+//	@Tags			config
+//	@Produce		json
+//	@Param			id		path	string	true	"Workspace ID"
+//	@Param			scope	query	string	true	"Config scope"
+//	@Param			key		query	string	true	"Config key"
+//	@Success		200	{object}	proto.ConfigHasFieldResponse
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/config/has [get]
+func (c *controllerV1) handleGetWorkspaceConfigHas(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	scope := config.ScopeGlobal
+	if r.URL.Query().Get("scope") == config.ScopeWorkspace.String() {
+		scope = config.ScopeWorkspace
+	}
+	key := r.URL.Query().Get("key")
+	jsonEncode(w, proto.ConfigHasFieldResponse{Exists: c.backend.HasConfigField(id, scope, key)})
 }
 
 // handlePostWorkspaceConfigModel updates the preferred model.

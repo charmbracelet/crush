@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/charmbracelet/crush/internal/backend"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/session"
 )
@@ -951,6 +952,8 @@ func (c *controllerV1) handleError(w http.ResponseWriter, r *http.Request, err e
 	case errors.Is(err, backend.ErrInvalidPermissionAction):
 		status = http.StatusBadRequest
 	case errors.Is(err, backend.ErrUnknownCommand):
+		status = http.StatusBadRequest
+	case errors.Is(err, config.ErrNoModelChoicesToSave):
 		status = http.StatusBadRequest
 	}
 	c.server.logError(r, err.Error())

@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -218,21 +219,22 @@ func (s *ConfigStore) UpdatePreferredModel(scope Scope, modelType SelectedModelT
 	return nil
 }
 
+var ErrNoModelChoicesToSave = errors.New("no model choices to save")
+
 // SaveModelChoicesAsDefault persists the current effective model choices to the
 // global data config.
 func (s *ConfigStore) SaveModelChoicesAsDefault() error {
-	models := s.config.Models
-	if models == nil {
-		models = map[SelectedModelType]SelectedModel{}
+	fields := make(map[string]any)
+	if len(s.config.Models) > 0 {
+		fields["models"] = s.config.Models
 	}
-	recentModels := s.config.RecentModels
-	if recentModels == nil {
-		recentModels = map[SelectedModelType][]SelectedModel{}
+	if len(s.config.RecentModels) > 0 {
+		fields["recent_models"] = s.config.RecentModels
 	}
-	if err := s.SetConfigFields(ScopeGlobal, map[string]any{
-		"models":        models,
-		"recent_models": recentModels,
-	}); err != nil {
+	if len(fields) == 0 {
+		return ErrNoModelChoicesToSave
+	}
+	if err := s.SetConfigFields(ScopeGlobal, fields); err != nil {
 		return fmt.Errorf("failed to save model choices as defaults: %w", err)
 	}
 	return nil
@@ -419,6 +421,26 @@ func (s *ConfigStore) loadTokenFromDisk(scope Scope, providerID string) (*oauth.
 	return &token, nil
 }
 
+func sameSelectedModel(a, b SelectedModel) bool {
+	return a.Provider == b.Provider && a.Model == b.Model
+}
+
+func normalizeRecentModels(models []SelectedModel) []SelectedModel {
+	var normalized []SelectedModel
+	for _, model := range models {
+		if model.Provider == "" || model.Model == "" || slices.ContainsFunc(normalized, func(existing SelectedModel) bool {
+			return sameSelectedModel(existing, model)
+		}) {
+			continue
+		}
+		normalized = append(normalized, SelectedModel{Provider: model.Provider, Model: model.Model})
+		if len(normalized) == maxRecentModelsPerType {
+			break
+		}
+	}
+	return normalized
+}
+
 // recordRecentModel records a model in the recent models list.
 func (s *ConfigStore) recordRecentModel(scope Scope, modelType SelectedModelType, model SelectedModel) error {
 	if model.Provider == "" || model.Model == "" {
@@ -429,26 +451,15 @@ func (s *ConfigStore) recordRecentModel(scope Scope, modelType SelectedModelType
 		s.config.RecentModels = make(map[SelectedModelType][]SelectedModel)
 	}
 
-	eq := func(a, b SelectedModel) bool {
-		return a.Provider == b.Provider && a.Model == b.Model
-	}
-
 	entry := SelectedModel{
 		Provider: model.Provider,
 		Model:    model.Model,
 	}
 
 	current := s.config.RecentModels[modelType]
-	withoutCurrent := slices.DeleteFunc(slices.Clone(current), func(existing SelectedModel) bool {
-		return eq(existing, entry)
-	})
+	updated := normalizeRecentModels(append([]SelectedModel{entry}, current...))
 
-	updated := append([]SelectedModel{entry}, withoutCurrent...)
-	if len(updated) > maxRecentModelsPerType {
-		updated = updated[:maxRecentModelsPerType]
-	}
-
-	if slices.EqualFunc(current, updated, eq) {
+	if slices.EqualFunc(current, updated, sameSelectedModel) {
 		return nil
 	}
 

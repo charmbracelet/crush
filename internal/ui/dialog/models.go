@@ -485,7 +485,11 @@ func (m *Models) setProviderItems() error {
 
 		if len(validRecentItems) != len(recentItems) {
 			// FIXME: Does this need to be here? Is it mutating the config during a read?
-			if err := m.com.Workspace.SetConfigField(config.ScopeWorkspace, fmt.Sprintf("recent_models.%s", selectedType), validRecentItems); err != nil {
+			scope := config.ScopeGlobal
+			if m.com.Workspace.HasConfigField(config.ScopeWorkspace, fmt.Sprintf("recent_models.%s", selectedType)) {
+				scope = config.ScopeWorkspace
+			}
+			if err := m.com.Workspace.SetConfigField(scope, fmt.Sprintf("recent_models.%s", selectedType), validRecentItems); err != nil {
 				return fmt.Errorf("failed to update recent models: %w", err)
 			}
 		}

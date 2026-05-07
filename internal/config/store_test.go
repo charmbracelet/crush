@@ -18,6 +18,7 @@ import (
 func isolateProviderStateForTest(t *testing.T) {
 	t.Helper()
 
+	// Mutates package-level provider singletons; callers must not use t.Parallel().
 	originalList := providerList
 	originalErr := providerErr
 	originalCatwalkSyncer := catwalkSyncer
@@ -293,7 +294,7 @@ func TestLoad_PartialWorkspaceModelOverrideFallsBackToGlobal(t *testing.T) {
 	require.Equal(t, "global-small", store.config.Models[SelectedModelTypeSmall].Model)
 }
 
-func TestLoad_WorkspaceRecentModelsAppendGlobalRecentModels(t *testing.T) {
+func TestLoad_WorkspaceRecentModelsOverrideGlobalRecentModels(t *testing.T) {
 	isolateProviderStateForTest(t)
 
 	dir := t.TempDir()
@@ -318,8 +319,8 @@ func TestLoad_WorkspaceRecentModelsAppendGlobalRecentModels(t *testing.T) {
 
 	store, err := Load(dir, workspaceDir, false)
 	require.NoError(t, err)
-	require.Equal(t, "global-large", store.config.RecentModels[SelectedModelTypeLarge][0].Model)
-	require.Equal(t, "workspace-large", store.config.RecentModels[SelectedModelTypeLarge][1].Model)
+	require.Len(t, store.config.RecentModels[SelectedModelTypeLarge], 1)
+	require.Equal(t, "workspace-large", store.config.RecentModels[SelectedModelTypeLarge][0].Model)
 	require.Equal(t, "global-small", store.config.RecentModels[SelectedModelTypeSmall][0].Model)
 }
 
@@ -752,6 +753,28 @@ func TestConfigStore_UpdatePreferredModel_WorkspaceScopeKeepsGlobalUnchanged(t *
 	recentLarge, ok := recentModels[string(SelectedModelTypeLarge)].([]any)
 	require.True(t, ok)
 	require.Len(t, recentLarge, 1)
+}
+
+func TestConfigStore_SaveModelChoicesAsDefault_EmptyStateDoesNotClobberGlobal(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	globalPath := filepath.Join(dir, "global", "crush.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(globalPath), 0o755))
+	require.NoError(t, os.WriteFile(globalPath, []byte(`{"models":{"large":{"provider":"openai","model":"old-global"}},"recent_models":{"large":[{"provider":"openai","model":"old-global"}]}}`), 0o600))
+	beforeGlobal, err := os.ReadFile(globalPath)
+	require.NoError(t, err)
+
+	store := &ConfigStore{
+		config:         &Config{},
+		globalDataPath: globalPath,
+	}
+
+	err = store.SaveModelChoicesAsDefault()
+	require.ErrorIs(t, err, ErrNoModelChoicesToSave)
+	afterGlobal, err := os.ReadFile(globalPath)
+	require.NoError(t, err)
+	require.Equal(t, string(beforeGlobal), string(afterGlobal))
 }
 
 func TestConfigStore_SaveModelChoicesAsDefault(t *testing.T) {

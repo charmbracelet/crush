@@ -1452,6 +1452,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionSaveModelChoicesAsDefault:
 		cmds = append(cmds, func() tea.Msg {
 			if err := m.com.Workspace.SaveModelChoicesAsDefault(); err != nil {
+				if errors.Is(err, config.ErrNoModelChoicesToSave) {
+					return util.NewWarnMsg("No model choices to save")
+				}
 				return util.ReportError(err)()
 			}
 			return util.NewInfoMsg("Model choices saved as defaults")

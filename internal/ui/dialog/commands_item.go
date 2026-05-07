@@ -1,6 +1,8 @@
 package dialog
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/sahilm/fuzzy"
 )
@@ -11,6 +13,7 @@ type CommandItem struct {
 	title    string
 	shortcut string
 	action   Action
+	aliases  []string
 	t        *styles.Styles
 	m        fuzzy.Match
 	cache    map[int]string
@@ -30,9 +33,18 @@ func NewCommandItem(t *styles.Styles, id, title, shortcut string, action Action)
 	}
 }
 
+// WithAliases returns the CommandItem with the given aliases for filtering.
+func (c *CommandItem) WithAliases(aliases ...string) *CommandItem {
+	c.aliases = aliases
+	return c
+}
+
 // Filter implements ListItem.
 func (c *CommandItem) Filter() string {
-	return c.title
+	if len(c.aliases) == 0 {
+		return c.title
+	}
+	return c.title + " " + strings.Join(c.aliases, " ")
 }
 
 // ID implements ListItem.

@@ -60,6 +60,19 @@ func (c *Client) UpdatePreferredModel(ctx context.Context, id string, scope conf
 	return nil
 }
 
+// SaveModelChoicesAsDefault saves the current model choices as defaults on the server.
+func (c *Client) SaveModelChoicesAsDefault(ctx context.Context, id string) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/config/model/default", id), nil, nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to save model choices as defaults: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to save model choices as defaults: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
 // SetCompactMode sets compact mode on the server.
 func (c *Client) SetCompactMode(ctx context.Context, id string, scope config.Scope, enabled bool) error {
 	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/config/compact", id), nil, jsonBody(struct {

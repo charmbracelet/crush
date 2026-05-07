@@ -218,6 +218,26 @@ func (s *ConfigStore) UpdatePreferredModel(scope Scope, modelType SelectedModelT
 	return nil
 }
 
+// SaveModelChoicesAsDefault persists the current effective model choices to the
+// global data config.
+func (s *ConfigStore) SaveModelChoicesAsDefault() error {
+	models := s.config.Models
+	if models == nil {
+		models = map[SelectedModelType]SelectedModel{}
+	}
+	recentModels := s.config.RecentModels
+	if recentModels == nil {
+		recentModels = map[SelectedModelType][]SelectedModel{}
+	}
+	if err := s.SetConfigFields(ScopeGlobal, map[string]any{
+		"models":        models,
+		"recent_models": recentModels,
+	}); err != nil {
+		return fmt.Errorf("failed to save model choices as defaults: %w", err)
+	}
+	return nil
+}
+
 // SetCompactMode sets the compact mode setting and persists it.
 func (s *ConfigStore) SetCompactMode(scope Scope, enabled bool) error {
 	if s.config.Options == nil {

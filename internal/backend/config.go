@@ -51,6 +51,15 @@ func (b *Backend) UpdatePreferredModel(workspaceID string, scope config.Scope, m
 	return ws.Cfg.UpdatePreferredModel(scope, modelType, model)
 }
 
+// SaveModelChoicesAsDefault saves the current model choices as defaults.
+func (b *Backend) SaveModelChoicesAsDefault(workspaceID string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+	return ws.Cfg.SaveModelChoicesAsDefault()
+}
+
 // SetCompactMode sets the compact mode setting and persists it.
 func (b *Backend) SetCompactMode(workspaceID string, scope config.Scope, enabled bool) error {
 	ws, err := b.GetWorkspace(workspaceID)

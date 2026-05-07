@@ -1504,6 +1504,61 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		require.Equal(t, "openai", large.Provider)
 		require.Equal(t, int64(100), large.MaxTokens)
 	})
+
+	t.Run("invalid model from non-writable scope is not persisted", func(t *testing.T) {
+		// Regression test: when the configured model is invalid but does not
+		// originate from a writable scope (workspace data file or global data
+		// file), repair should be skipped rather than written to global.
+		knownProviders := []catwalk.Provider{
+			{
+				ID:                  "openai",
+				APIKey:              "abc",
+				DefaultLargeModelID: "large-model",
+				DefaultSmallModelID: "small-model",
+				Models: []catwalk.Model{
+					{ID: "large-model", DefaultMaxTokens: 1000},
+					{ID: "small-model", DefaultMaxTokens: 500},
+				},
+			},
+		}
+
+		dir := t.TempDir()
+		globalPath := filepath.Join(dir, "global", "crush.json")
+		require.NoError(t, os.MkdirAll(filepath.Dir(globalPath), 0o755))
+		// Global file does NOT contain models.large.
+		require.NoError(t, os.WriteFile(globalPath, []byte(`{}`), 0o600))
+		beforeGlobal, err := os.ReadFile(globalPath)
+		require.NoError(t, err)
+
+		cfg := &Config{
+			Models: map[SelectedModelType]SelectedModel{
+				SelectedModelTypeLarge: {
+					Provider: "openai",
+					Model:    "does-not-exist",
+				},
+			},
+		}
+		cfg.setDefaults("/tmp", "")
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewEnvironmentVariableResolver(env)
+		store := &ConfigStore{
+			config:         cfg,
+			globalDataPath: globalPath,
+		}
+		require.NoError(t, cfg.configureProviders(store, env, resolver, knownProviders))
+
+		require.NoError(t, configureSelectedModels(store, knownProviders, true))
+
+		// Global file should not have been mutated to "repair" a model that
+		// originated from a non-writable scope.
+		afterGlobal, err := os.ReadFile(globalPath)
+		require.NoError(t, err)
+		require.Equal(t, string(beforeGlobal), string(afterGlobal),
+			"configureSelectedModels must not persist repairs to a non-writable origin scope")
+
+		// In-memory model is still updated to the default for runtime use.
+		require.Equal(t, "large-model", cfg.Models[SelectedModelTypeLarge].Model)
+	})
 }
 
 func TestConfig_configureProviders_HyperAPIKeyFromEnv(t *testing.T) {

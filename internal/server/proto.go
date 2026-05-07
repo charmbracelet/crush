@@ -940,6 +940,7 @@ func (c *controllerV1) handleGetWorkspacePermissionsSkip(w http.ResponseWriter, 
 // JSON error response.
 func (c *controllerV1) handleError(w http.ResponseWriter, r *http.Request, err error) {
 	status := http.StatusInternalServerError
+	code := ""
 	switch {
 	case errors.Is(err, backend.ErrWorkspaceNotFound):
 		status = http.StatusNotFound
@@ -955,9 +956,10 @@ func (c *controllerV1) handleError(w http.ResponseWriter, r *http.Request, err e
 		status = http.StatusBadRequest
 	case errors.Is(err, config.ErrNoModelChoicesToSave):
 		status = http.StatusBadRequest
+		code = proto.ErrCodeNoModelChoicesToSave
 	}
 	c.server.logError(r, err.Error())
-	jsonError(w, status, err.Error())
+	jsonErrorWithCode(w, status, err.Error(), code)
 }
 
 func jsonEncode(w http.ResponseWriter, v any) {
@@ -966,7 +968,13 @@ func jsonEncode(w http.ResponseWriter, v any) {
 }
 
 func jsonError(w http.ResponseWriter, status int, message string) {
+	jsonErrorWithCode(w, status, message, "")
+}
+
+// jsonErrorWithCode writes a proto.Error response including a stable code
+// that clients can match against without relying on Message text.
+func jsonErrorWithCode(w http.ResponseWriter, status int, message, code string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(proto.Error{Message: message})
+	_ = json.NewEncoder(w).Encode(proto.Error{Message: message, Code: code})
 }

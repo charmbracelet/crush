@@ -464,11 +464,13 @@ func (m *Models) setProviderItems() error {
 	if len(recentItems) > 0 {
 		recentGroup := NewModelGroup(t, "Recently used", false)
 
-		var validRecentItems []config.SelectedModel
 		for _, recent := range recentItems {
 			key := modelKey(recent.Provider, recent.Model)
 			item, ok := itemsMap[key]
 			if !ok {
+				// Stale recent entries (provider/model no longer resolvable)
+				// are pruned at config load/reload time by the config layer;
+				// we just skip rendering them here.
 				continue
 			}
 
@@ -476,21 +478,9 @@ func (m *Models) setProviderItems() error {
 			item = NewModelItem(t, item.prov, item.model, m.modelType, true)
 			item.showProvider = true
 
-			validRecentItems = append(validRecentItems, recent)
 			recentGroup.AppendItems(item)
 			if recent.Model == currentModel.Model && recent.Provider == currentModel.Provider {
 				selectedItemID = item.ID()
-			}
-		}
-
-		if len(validRecentItems) != len(recentItems) {
-			// FIXME: Does this need to be here? Is it mutating the config during a read?
-			scope := config.ScopeGlobal
-			if m.com.Workspace.HasConfigField(config.ScopeWorkspace, fmt.Sprintf("recent_models.%s", selectedType)) {
-				scope = config.ScopeWorkspace
-			}
-			if err := m.com.Workspace.SetConfigField(scope, fmt.Sprintf("recent_models.%s", selectedType), validRecentItems); err != nil {
-				return fmt.Errorf("failed to update recent models: %w", err)
 			}
 		}
 

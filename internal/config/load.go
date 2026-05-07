@@ -623,11 +623,11 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 		if model == nil {
 			large = defaultLarge
 			if persist {
-				scope := ScopeGlobal
-				if store.HasConfigField(ScopeWorkspace, fmt.Sprintf("models.%s", SelectedModelTypeLarge)) {
-					scope = ScopeWorkspace
-				}
-				if err := store.UpdatePreferredModel(scope, SelectedModelTypeLarge, large); err != nil {
+				scope, ok := store.writableScopeForModel(SelectedModelTypeLarge)
+				if !ok {
+					slog.Warn("Skipping repair of invalid selected large model: not present in writable scope (workspace/global data)",
+						"provider", largeModelSelected.Provider, "model", largeModelSelected.Model)
+				} else if err := store.UpdatePreferredModel(scope, SelectedModelTypeLarge, large); err != nil {
 					return fmt.Errorf("failed to update preferred large model: %w", err)
 				}
 			}
@@ -671,11 +671,11 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 		if model == nil {
 			small = defaultSmall
 			if persist {
-				scope := ScopeGlobal
-				if store.HasConfigField(ScopeWorkspace, fmt.Sprintf("models.%s", SelectedModelTypeSmall)) {
-					scope = ScopeWorkspace
-				}
-				if err := store.UpdatePreferredModel(scope, SelectedModelTypeSmall, small); err != nil {
+				scope, ok := store.writableScopeForModel(SelectedModelTypeSmall)
+				if !ok {
+					slog.Warn("Skipping repair of invalid selected small model: not present in writable scope (workspace/global data)",
+						"provider", smallModelSelected.Provider, "model", smallModelSelected.Model)
+				} else if err := store.UpdatePreferredModel(scope, SelectedModelTypeSmall, small); err != nil {
 					return fmt.Errorf("failed to update preferred small model: %w", err)
 				}
 			}
@@ -708,6 +708,17 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 	}
 	c.Models[SelectedModelTypeLarge] = large
 	c.Models[SelectedModelTypeSmall] = small
+	if persist {
+		// Drop recent_models entries whose provider/model is no longer
+		// resolvable. We do this here (after Load/ReloadFromDisk has
+		// finished merging config) rather than in the model dialog's
+		// render path, and we write to whichever scope (workspace or
+		// global) owns the recent_models entries — never widening to a
+		// non-writable scope.
+		if err := store.pruneInvalidRecentModels(); err != nil {
+			return fmt.Errorf("failed to prune invalid recent models: %w", err)
+		}
+	}
 	return nil
 }
 

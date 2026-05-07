@@ -276,8 +276,8 @@ func (w *AppWorkspace) SetConfigField(scope config.Scope, key string, value any)
 	return w.store.SetConfigField(scope, key, value)
 }
 
-func (w *AppWorkspace) HasConfigField(scope config.Scope, key string) bool {
-	return w.store.HasConfigField(scope, key)
+func (w *AppWorkspace) HasConfigField(scope config.Scope, key string) (bool, error) {
+	return w.store.HasConfigField(scope, key), nil
 }
 
 func (w *AppWorkspace) RemoveConfigField(scope config.Scope, key string) error {

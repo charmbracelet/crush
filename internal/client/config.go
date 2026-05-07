@@ -91,8 +91,16 @@ func (c *Client) SaveModelChoicesAsDefault(ctx context.Context, id string) error
 	defer rsp.Body.Close()
 	if rsp.StatusCode != http.StatusOK {
 		var result proto.Error
-		if err := json.NewDecoder(rsp.Body).Decode(&result); err == nil && result.Message == config.ErrNoModelChoicesToSave.Error() {
-			return config.ErrNoModelChoicesToSave
+		if err := json.NewDecoder(rsp.Body).Decode(&result); err == nil {
+			// Match on stable error code rather than Message text so that
+			// future message changes don't silently break the sentinel
+			// detection.
+			if result.Code == proto.ErrCodeNoModelChoicesToSave {
+				return config.ErrNoModelChoicesToSave
+			}
+			if result.Message != "" {
+				return fmt.Errorf("failed to save model choices as defaults: status code %d: %s", rsp.StatusCode, result.Message)
+			}
 		}
 		return fmt.Errorf("failed to save model choices as defaults: status code %d", rsp.StatusCode)
 	}

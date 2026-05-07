@@ -439,9 +439,8 @@ func (w *ClientWorkspace) SetConfigField(scope config.Scope, key string, value a
 	return err
 }
 
-func (w *ClientWorkspace) HasConfigField(scope config.Scope, key string) bool {
-	hasField, err := w.client.HasConfigField(context.Background(), w.workspaceID(), scope, key)
-	return err == nil && hasField
+func (w *ClientWorkspace) HasConfigField(scope config.Scope, key string) (bool, error) {
+	return w.client.HasConfigField(context.Background(), w.workspaceID(), scope, key)
 }
 
 func (w *ClientWorkspace) RemoveConfigField(scope config.Scope, key string) error {

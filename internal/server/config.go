@@ -85,7 +85,12 @@ func (c *controllerV1) handleGetWorkspaceConfigHas(w http.ResponseWriter, r *htt
 		scope = config.ScopeWorkspace
 	}
 	key := r.URL.Query().Get("key")
-	jsonEncode(w, proto.ConfigHasFieldResponse{Exists: c.backend.HasConfigField(id, scope, key)})
+	exists, err := c.backend.HasConfigField(id, scope, key)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, proto.ConfigHasFieldResponse{Exists: exists})
 }
 
 // handlePostWorkspaceConfigModel updates the preferred model.

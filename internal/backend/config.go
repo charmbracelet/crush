@@ -43,12 +43,12 @@ func (b *Backend) RemoveConfigField(workspaceID string, scope config.Scope, key 
 
 // HasConfigField checks whether a key exists in the config file for the given
 // scope.
-func (b *Backend) HasConfigField(workspaceID string, scope config.Scope, key string) bool {
+func (b *Backend) HasConfigField(workspaceID string, scope config.Scope, key string) (bool, error) {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
-		return false
+		return false, err
 	}
-	return ws.Cfg.HasConfigField(scope, key)
+	return ws.Cfg.HasConfigField(scope, key), nil
 }
 
 // UpdatePreferredModel updates the preferred model for the given type

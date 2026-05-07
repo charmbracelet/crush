@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync"
 
 	"charm.land/catwalk/pkg/catwalk"
 	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
@@ -64,7 +65,8 @@ type ConfigStore struct {
 	// Entries are validated against (size, mtime) on read; mismatches force
 	// a fresh ReadFile. SetConfigField*/RemoveConfigField invalidate the
 	// affected scope's entry.
-	configFileCache map[string]configFileCacheEntry
+	configFileCacheMu sync.RWMutex
+	configFileCache   map[string]configFileCacheEntry
 }
 
 // Config returns the pure-data config struct (read-only after load).
@@ -133,20 +135,24 @@ func (s *ConfigStore) readCachedConfigFile(path string) ([]byte, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			s.configFileCacheMu.Lock()
 			delete(s.configFileCache, path)
+			s.configFileCacheMu.Unlock()
 			return nil, nil
 		}
 		return nil, err
 	}
-	if entry, ok := s.configFileCache[path]; ok {
-		if entry.size == info.Size() && entry.modTime == info.ModTime().UnixNano() {
-			return entry.data, nil
-		}
+	s.configFileCacheMu.RLock()
+	entry, ok := s.configFileCache[path]
+	s.configFileCacheMu.RUnlock()
+	if ok && entry.size == info.Size() && entry.modTime == info.ModTime().UnixNano() {
+		return entry.data, nil
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
+	s.configFileCacheMu.Lock()
 	if s.configFileCache == nil {
 		s.configFileCache = make(map[string]configFileCacheEntry)
 	}
@@ -155,6 +161,7 @@ func (s *ConfigStore) readCachedConfigFile(path string) ([]byte, error) {
 		size:    info.Size(),
 		data:    data,
 	}
+	s.configFileCacheMu.Unlock()
 	return data, nil
 }
 
@@ -165,7 +172,9 @@ func (s *ConfigStore) invalidateConfigFileCache(scope Scope) {
 	if err != nil || path == "" {
 		return
 	}
+	s.configFileCacheMu.Lock()
 	delete(s.configFileCache, path)
+	s.configFileCacheMu.Unlock()
 }
 
 // writableScopeForModel returns the scope (workspace or global) whose data

@@ -38,14 +38,16 @@ func newRegexCache() *regexCache {
 
 // get retrieves a compiled regex from cache or compiles and caches it
 func (rc *regexCache) get(pattern string) (*regexp.Regexp, error) {
-	var rerr error
-	return rc.GetOrSet(pattern, func() *regexp.Regexp {
-		regex, err := regexp.Compile(pattern)
-		if err != nil {
-			rerr = err
-		}
-		return regex
-	}), rerr
+	re, ok := rc.Get(pattern)
+	if ok && re != nil {
+		return re, nil
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, err
+	}
+	rc.Set(pattern, re)
+	return re, nil
 }
 
 // ResetCache clears compiled regex caches to prevent unbounded growth across sessions.
@@ -339,6 +341,9 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 }
 
 func fileContainsPattern(filePath string, pattern *regexp.Regexp) (bool, int, int, string, error) {
+	if pattern == nil {
+		return false, 0, 0, "", nil
+	}
 	// Only search text files.
 	if !isTextFile(filePath) {
 		return false, 0, 0, "", nil

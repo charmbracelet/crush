@@ -607,10 +607,42 @@ func (s *ConfigStore) recordRecentModel(scope Scope, modelType SelectedModelType
 
 	s.config.RecentModels[modelType] = merged
 
-	if err := s.SetConfigField(scope, fmt.Sprintf("recent_models.%s", modelType), updated); err != nil {
-		return fmt.Errorf("failed to persist recent models: %w", err)
+	if err := s.persistRecentModel(scope, modelType, updated); err != nil {
+		return err
 	}
 
+	// When persisting to workspace we also write to global so that
+	// recently-used models carry across to new projects (where no
+	// .crush/crush.json exists yet). Each scope reads its own on-disk
+	// state independently to prevent cross-contamination.
+	if scope == ScopeWorkspace {
+		globalStored, gerr := s.readRecentModelsFromScope(ScopeGlobal, modelType)
+		if gerr != nil {
+			return fmt.Errorf("failed to read recent models from global scope: %w", gerr)
+		}
+		globalUpdated := normalizeRecentModels(append([]SelectedModel{entry}, globalStored...))
+		if err := s.persistRecentModel(ScopeGlobal, modelType, globalUpdated); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// persistRecentModel writes recent_models.<modelType> to the given scope's
+// config file. It is a no-op when the stored list is unchanged.
+func (s *ConfigStore) persistRecentModel(scope Scope, modelType SelectedModelType, recents []SelectedModel) error {
+	key := fmt.Sprintf("recent_models.%s", modelType)
+	stored, err := s.readRecentModelsFromScope(scope, modelType)
+	if err != nil {
+		return fmt.Errorf("failed to read recent models from %s scope: %w", scope, err)
+	}
+	if slices.EqualFunc(stored, recents, sameSelectedModel) {
+		return nil
+	}
+	if err := s.SetConfigField(scope, key, recents); err != nil {
+		return fmt.Errorf("failed to persist recent models to %s scope: %w", scope, err)
+	}
 	return nil
 }
 

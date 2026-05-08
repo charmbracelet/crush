@@ -491,6 +491,37 @@ git clone https://github.com/anthropics/skills.git _temp
 mv _temp/skills/* . ; rm -r -force _temp
 ```
 
+#### User-Invocable Skills
+
+Skills can be made invocable as commands from the commands palette (Ctrl+P). Add `user-invocable: true` to the skill's YAML frontmatter:
+
+```yaml
+---
+name: my-skill
+description: A skill that can be invoked as a command.
+user-invocable: true
+---
+```
+
+User-invocable skills appear in the commands palette with a `user:` or `project:` prefix:
+- Skills from global directories show as `user:skill-name`
+- Skills from project directories show as `project:skill-name`
+
+When invoked, the skill's instructions are loaded into the conversation context.
+
+To prevent the model from auto-triggering a skill (while still allowing user invocation), add `disable-model-invocation: true`:
+
+```yaml
+---
+name: my-skill
+description: Only invocable by users, not the model.
+user-invocable: true
+disable-model-invocation: true
+---
+```
+
+Skills with `disable-model-invocation` won't appear in the model's available skills list but can still be invoked manually by users.
+
 ### Desktop notifications
 
 Crush sends desktop notifications when a tool call requires permission and when

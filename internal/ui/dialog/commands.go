@@ -393,6 +393,7 @@ func (c *Commands) setCommandItems(commandType CommandType) {
 			action := ActionRunCustomCommand{
 				Content:   cmd.Content,
 				Arguments: cmd.Arguments,
+				Skill:     cmd.Skill,
 			}
 			commandItems = append(commandItems, NewCommandItem(c.com.Styles, "custom_"+cmd.ID, cmd.Name, "", action))
 		}

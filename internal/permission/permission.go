@@ -73,13 +73,20 @@ type Service interface {
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
 }
 
+// PermissionKey is a composite key for session permission lookups.
+type PermissionKey struct {
+	SessionID string
+	ToolName  string
+	Action    string
+	Path      string
+}
+
 type permissionService struct {
 	*pubsub.Broker[PermissionRequest]
 
 	notificationBroker    *pubsub.Broker[PermissionNotification]
 	workingDir            string
-	sessionPermissions    []PermissionRequest
-	sessionPermissionsMu  sync.RWMutex
+	sessionPermissions    *csync.Map[PermissionKey, bool]
 	pendingRequests       *csync.Map[string, chan bool]
 	autoApproveSessions   map[string]bool
 	autoApproveSessionsMu sync.RWMutex
@@ -102,9 +109,12 @@ func (s *permissionService) GrantPersistent(permission PermissionRequest) {
 		respCh <- true
 	}
 
-	s.sessionPermissionsMu.Lock()
-	s.sessionPermissions = append(s.sessionPermissions, permission)
-	s.sessionPermissionsMu.Unlock()
+	s.sessionPermissions.Set(PermissionKey{
+		SessionID: permission.SessionID,
+		ToolName:  permission.ToolName,
+		Action:    permission.Action,
+		Path:      permission.Path,
+	}, true)
 
 	s.activeRequestMu.Lock()
 	if s.activeRequest != nil && s.activeRequest.ID == permission.ID {
@@ -171,12 +181,13 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		return true, nil
 	}
 
+	s.requestMu.Lock()
+	defer s.requestMu.Unlock()
+
 	// tell the UI that a permission was requested
 	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
 		ToolCallID: opts.ToolCallID,
 	})
-	s.requestMu.Lock()
-	defer s.requestMu.Unlock()
 
 	s.autoApproveSessionsMu.RLock()
 	autoApprove := s.autoApproveSessions[opts.SessionID]
@@ -214,18 +225,18 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		Params:      opts.Params,
 	}
 
-	s.sessionPermissionsMu.RLock()
-	for _, p := range s.sessionPermissions {
-		if p.ToolName == permission.ToolName && p.Action == permission.Action && p.SessionID == permission.SessionID && p.Path == permission.Path {
-			s.sessionPermissionsMu.RUnlock()
-			s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
-				ToolCallID: opts.ToolCallID,
-				Granted:    true,
-			})
-			return true, nil
-		}
+	if _, ok := s.sessionPermissions.Get(PermissionKey{
+		SessionID: permission.SessionID,
+		ToolName:  permission.ToolName,
+		Action:    permission.Action,
+		Path:      permission.Path,
+	}); ok {
+		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+			ToolCallID: opts.ToolCallID,
+			Granted:    true,
+		})
+		return true, nil
 	}
-	s.sessionPermissionsMu.RUnlock()
 
 	s.activeRequestMu.Lock()
 	s.activeRequest = &permission
@@ -269,7 +280,7 @@ func NewPermissionService(workingDir string, skip bool, allowedTools []string) S
 		Broker:              pubsub.NewBroker[PermissionRequest](),
 		notificationBroker:  pubsub.NewBroker[PermissionNotification](),
 		workingDir:          workingDir,
-		sessionPermissions:  make([]PermissionRequest, 0),
+		sessionPermissions:  csync.NewMap[PermissionKey, bool](),
 		autoApproveSessions: make(map[string]bool),
 		skip:                skip,
 		allowedTools:        allowedTools,

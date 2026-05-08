@@ -414,7 +414,7 @@ func formatOutput(stdout, stderr string, execErr error) string {
 	return stdout
 }
 
-func truncateOutput(content string) string {
+func TruncateOutput(content string) string {
 	if len(content) <= MaxOutputLength {
 		return content
 	}
@@ -425,6 +425,10 @@ func truncateOutput(content string) string {
 
 	truncatedLinesCount := countLines(content[halfLength : len(content)-halfLength])
 	return fmt.Sprintf("%s\n\n... [%d lines truncated] ...\n\n%s", start, truncatedLinesCount, end)
+}
+
+func truncateOutput(content string) string {
+	return TruncateOutput(content)
 }
 
 func countLines(s string) int {

@@ -468,6 +468,10 @@ func (m *UI) loadCustomCommands() tea.Cmd {
 		if err != nil {
 			slog.Error("Failed to load custom commands", "error", err)
 		}
+		// Append user-invocable skills as commands
+		skillCommands := commands.LoadSkillCommands()
+		skillCommands = append(skillCommands, commands.LoadProjectSkillCommands(m.com.Workspace.WorkingDir())...)
+		customCommands = append(customCommands, skillCommands...)
 		return userCommandsLoadedMsg{Commands: customCommands}
 	}
 }
@@ -1540,6 +1544,10 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		content := msg.Content
 		if msg.Args != nil {
 			content = substituteArgs(content, msg.Args)
+		}
+		// If this is a skill command, format it using the skill's FormatInvocation method
+		if msg.Skill != nil {
+			content = msg.Skill.FormatInvocation()
 		}
 		cmds = append(cmds, m.sendMessage(content))
 		m.dialog.CloseFrontDialog()

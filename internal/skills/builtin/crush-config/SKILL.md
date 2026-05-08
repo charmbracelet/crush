@@ -211,6 +211,37 @@ reviewed.
 
 Other options: `context_paths`, `progress`, `disable_notifications`, `disable_auto_summarize`, `disable_metrics`, `disable_provider_auto_update`, `disable_default_providers`, `data_directory`, `initialize_as`.
 
+## User-Invocable Skills
+
+Skills can be made invocable as commands from the commands palette. Add `user-invocable: true` to the skill's YAML frontmatter:
+
+```yaml
+---
+name: my-skill
+description: A skill that can be invoked as a command.
+user-invocable: true
+---
+```
+
+User-invocable skills appear in the commands palette with a prefix:
+- Skills from global directories: `user:skill-name`
+- Skills from project directories: `project:skill-name`
+
+When invoked, the skill's instructions are loaded into the conversation context.
+
+To prevent the model from auto-triggering a skill (while still allowing user invocation), add `disable-model-invocation: true`:
+
+```yaml
+---
+name: my-skill
+description: Only invocable by users, not the model.
+user-invocable: true
+disable-model-invocation: true
+---
+```
+
+Skills with `disable-model-invocation` won't appear in the model's available skills list but can still be invoked manually by users.
+
 ## Hooks
 
 Hooks are user-defined shell commands that fire on agent events. Currently only `PreToolUse` is supported, which runs before a tool is executed.

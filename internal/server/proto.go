@@ -613,6 +613,38 @@ func (c *controllerV1) handleDeleteWorkspaceSessionMessagesAfter(w http.Response
 	w.WriteHeader(http.StatusOK)
 }
 
+// handleRestoreWorkspaceSessionMessages restores previously deleted messages
+// into a session.
+//
+//	@Summary		Restore messages into a session
+//	@Tags			sessions
+//	@Accept			json
+//	@Param			id		path	string							true	"Workspace ID"
+//	@Param			sid		path	string							true	"Session ID"
+//	@Param			request	body	proto.RestoreMessagesRequest	true	"Messages to restore"
+//	@Success		200
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/sessions/{sid}/messages/restore [post]
+func (c *controllerV1) handleRestoreWorkspaceSessionMessages(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var req proto.RestoreMessagesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+
+	messages := protoToMessages(req.Messages)
+	if err := c.backend.RestoreMessages(r.Context(), id, messages); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 // handleGetWorkspaceSessionFileTrackerFiles lists files read in a session.
 //
 //	@Summary		List tracked files for session

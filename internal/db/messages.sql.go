@@ -247,6 +247,51 @@ func (q *Queries) ListUserMessagesBySession(ctx context.Context, sessionID strin
 	return items, nil
 }
 
+const restoreMessage = `-- name: RestoreMessage :exec
+INSERT OR IGNORE INTO messages (
+    id,
+    session_id,
+    role,
+    parts,
+    model,
+    provider,
+    is_summary_message,
+    created_at,
+    updated_at,
+    finished_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+// RestoreMessageParams holds the parameters for restoring a previously deleted message.
+type RestoreMessageParams struct {
+	ID               string         `json:"id"`
+	SessionID        string         `json:"session_id"`
+	Role             string         `json:"role"`
+	Parts            string         `json:"parts"`
+	Model            sql.NullString `json:"model"`
+	Provider         sql.NullString `json:"provider"`
+	IsSummaryMessage int64          `json:"is_summary_message"`
+	CreatedAt        int64          `json:"created_at"`
+	UpdatedAt        int64          `json:"updated_at"`
+	FinishedAt       sql.NullInt64  `json:"finished_at"`
+}
+
+func (q *Queries) RestoreMessage(ctx context.Context, arg RestoreMessageParams) error {
+	_, err := q.exec(ctx, q.restoreMessageStmt, restoreMessage,
+		arg.ID,
+		arg.SessionID,
+		arg.Role,
+		arg.Parts,
+		arg.Model,
+		arg.Provider,
+		arg.IsSummaryMessage,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+		arg.FinishedAt,
+	)
+	return err
+}
+
 const updateMessage = `-- name: UpdateMessage :exec
 UPDATE messages
 SET

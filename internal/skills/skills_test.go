@@ -312,6 +312,20 @@ func TestToPromptXML(t *testing.T) {
 	require.Contains(t, xml, "&amp;") // XML escaping
 }
 
+func TestToPromptXMLDisableModelInvocation(t *testing.T) {
+	t.Parallel()
+
+	skills := []*Skill{
+		{Name: "visible-skill", Description: "This one appears.", SkillFilePath: "/skills/visible/SKILL.md"},
+		{Name: "hidden-skill", Description: "This one is hidden.", SkillFilePath: "/skills/hidden/SKILL.md", DisableModelInvocation: true},
+	}
+
+	xml := ToPromptXML(skills)
+
+	require.Contains(t, xml, "<name>visible-skill</name>")
+	require.NotContains(t, xml, "<name>hidden-skill</name>")
+}
+
 func TestToPromptXMLEmpty(t *testing.T) {
 	t.Parallel()
 	require.Empty(t, ToPromptXML(nil))

@@ -99,6 +99,8 @@ type (
 	ActionDisableDockerMCP struct{}
 	// ActionUndo is a message to undo the last user message and all subsequent messages.
 	ActionUndo struct{}
+	// ActionRedo is a message to redo the last undone message batch.
+	ActionRedo struct{}
 )
 
 // Messages for MCP OAuth authentication dialog.

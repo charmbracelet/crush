@@ -59,3 +59,17 @@ DELETE FROM messages AS target
 WHERE target.session_id = ? AND target.created_at >= (
     SELECT m.created_at FROM messages AS m WHERE m.id = ?
 );
+
+-- name: RestoreMessage :exec
+INSERT OR IGNORE INTO messages (
+    id,
+    session_id,
+    role,
+    parts,
+    model,
+    provider,
+    is_summary_message,
+    created_at,
+    updated_at,
+    finished_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);

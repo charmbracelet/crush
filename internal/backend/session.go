@@ -134,3 +134,13 @@ func (b *Backend) DeleteMessagesAfter(ctx context.Context, workspaceID, sessionI
 
 	return ws.Messages.DeleteMessagesAfter(ctx, sessionID, messageID)
 }
+
+// RestoreMessages re-inserts previously deleted messages into a session.
+func (b *Backend) RestoreMessages(ctx context.Context, workspaceID string, messages []message.Message) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+
+	return ws.Messages.RestoreMessages(ctx, messages)
+}

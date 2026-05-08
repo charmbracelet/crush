@@ -161,6 +161,10 @@ func (w *ClientWorkspace) DeleteMessagesAfter(ctx context.Context, sessionID, me
 	return w.client.DeleteMessagesAfter(ctx, w.workspaceID(), sessionID, messageID)
 }
 
+func (w *ClientWorkspace) RestoreMessages(ctx context.Context, messages []message.Message) error {
+	return w.client.RestoreMessages(ctx, w.workspaceID(), messages)
+}
+
 // -- Agent --
 
 func (w *ClientWorkspace) AgentRun(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) error {

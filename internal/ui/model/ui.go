@@ -1056,7 +1056,7 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	}
 
 	// Load nested tool calls for agent/agentic_fetch tools.
-	m.loadNestedToolCalls(items)
+	m.loadNestedToolCalls(items, reduceAnimations)
 
 	// If the user switches between sessions while the agent is working we want
 	// to make sure the animations are shown.
@@ -1077,8 +1077,7 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 }
 
 // loadNestedToolCalls recursively loads nested tool calls for agent/agentic_fetch tools.
-func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
-	reduceAnimations := m.shouldReduceAnimations()
+func (m *UI) loadNestedToolCalls(items []chat.MessageItem, reduceAnimations bool) {
 	for _, item := range items {
 		nestedContainer, ok := item.(chat.NestedToolContainer)
 		if !ok {
@@ -1128,7 +1127,7 @@ func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
 		for i, nt := range nestedTools {
 			nestedMessageItems[i] = nt
 		}
-		m.loadNestedToolCalls(nestedMessageItems)
+		m.loadNestedToolCalls(nestedMessageItems, reduceAnimations)
 
 		// Set nested tools on the parent.
 		nestedContainer.SetNestedTools(nestedTools)

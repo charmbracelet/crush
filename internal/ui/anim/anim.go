@@ -46,6 +46,9 @@ const (
 
 	// Default number of cycling chars.
 	defaultNumCyclingChars = 10
+
+	// Number of steps per color cycle for the static dot animation (500ms at 20fps).
+	dotColorCycleSteps = 10
 )
 
 // Default colors for gradient.
@@ -124,6 +127,8 @@ type Anim struct {
 	id               string
 	static           bool // when true, don't animate
 	staticRendered   string
+	gradColorA       color.Color
+	gradColorB       color.Color
 }
 
 // New creates a new Anim instance with the specified width and label.
@@ -151,6 +156,9 @@ func New(opts Settings) *Anim {
 	a.cyclingCharWidth = opts.Size
 	a.labelColor = opts.LabelColor
 	a.static = opts.Static
+
+	a.gradColorA = opts.GradColorA
+	a.gradColorB = opts.GradColorB
 
 	// For static mode, render a static "Working..." label and return early.
 	if opts.Static {
@@ -358,8 +366,16 @@ func (a *Anim) Start() tea.Cmd {
 
 // Animate advances the animation to the next step.
 func (a *Anim) Animate(msg StepMsg) tea.Cmd {
-	if a.static || msg.ID != a.id {
+	if msg.ID != a.id {
 		return nil
+	}
+
+	if a.static {
+		step := a.step.Add(1)
+		if int(step) >= dotColorCycleSteps {
+			a.step.Store(0)
+		}
+		return a.Step()
 	}
 
 	step := a.step.Add(1)
@@ -380,17 +396,19 @@ func (a *Anim) Animate(msg StepMsg) tea.Cmd {
 	return a.Step()
 }
 
-// renderStatic renders the static version of the spinner (label with "..." ellipsis).
+// renderStatic renders the static "Working" label (without dots, which are colored dynamically).
 func (a *Anim) renderStatic() {
 	a.staticRendered = lipgloss.NewStyle().
 		Foreground(a.labelColor).
-		Render("Working...")
+		Render("Working")
 }
 
 // Render renders the current state of the animation.
 func (a *Anim) Render() string {
 	if a.static {
-		return a.staticRendered
+		step := int(a.step.Load())
+		dots := lipgloss.NewStyle().Foreground(a.dotColor(step)).Render("...")
+		return a.staticRendered + dots
 	}
 
 	var b strings.Builder
@@ -424,6 +442,24 @@ func (a *Anim) Render() string {
 	}
 
 	return b.String()
+}
+
+// dotColor returns a color blended between GradColorA and GradColorB based on
+// the current step, cycling every 500ms (dotColorCycleSteps frames at fps).
+func (a *Anim) dotColor(step int) color.Color {
+	pos := float64(step%dotColorCycleSteps) / float64(dotColorCycleSteps)
+
+	c1, ok1 := colorful.MakeColor(a.gradColorA)
+	c2, ok2 := colorful.MakeColor(a.gradColorB)
+	if !ok1 || !ok2 {
+		return a.labelColor
+	}
+
+	// Oscillate between A and B.
+	if pos < 0.5 {
+		return c1.BlendHcl(c2, pos*2)
+	}
+	return c2.BlendHcl(c1, (pos-0.5)*2)
 }
 
 // Step is a command that triggers the next step in the animation.

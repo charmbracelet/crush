@@ -439,6 +439,10 @@ func (w *ClientWorkspace) RemoveConfigField(scope config.Scope, key string) erro
 	return err
 }
 
+func (w *ClientWorkspace) SetSSHAnimationMode(scope config.Scope, mode string) error {
+	return w.SetConfigField(scope, "options.tui.ssh_animation_mode", mode)
+}
+
 func (w *ClientWorkspace) ImportCopilot() (*oauth.Token, bool) {
 	token, ok, err := w.client.ImportCopilot(context.Background(), w.workspaceID())
 	if err != nil {

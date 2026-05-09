@@ -47,8 +47,16 @@ const (
 	// Default number of cycling chars.
 	defaultNumCyclingChars = 10
 
-	// Number of steps per color cycle for the static dot animation (500ms at 20fps).
+	// Number of steps per color cycle for the static dot animation.
 	dotColorCycleSteps = 10
+
+	// Tick interval for static (reduced) animation mode. Slower tick means
+	// fewer re-renders and less bandwidth over SSH.
+	staticTickInterval = 2 * time.Second
+
+	// Phase offset between consecutive dots in the static animation. Each dot
+	// is offset by this many steps, creating a left-to-right color wave.
+	staticDotPhase = 3
 )
 
 // Default colors for gradient.
@@ -131,8 +139,9 @@ type Anim struct {
 	ellipsisStep     atomic.Int64         // current ellipsis frame step
 	ellipsisFrames   *csync.Slice[string] // ellipsis animation frames
 	id               string
-	static           bool // when true, don't animate
+	static           bool     // when true, don't animate
 	staticRendered   string
+	dotColors        []string // pre-rendered dot characters for static mode
 	gradColorA       color.Color
 	gradColorB       color.Color
 }
@@ -381,8 +390,9 @@ func (a *Anim) Width() (w int) {
 
 // Start starts the animation.
 func (a *Anim) Start() tea.Cmd {
-	// Always start the tick so Animate can advance the step, even in static
-	// mode (for color cycling dots).
+	if a.static {
+		return a.staticTick()
+	}
 	return a.Step()
 }
 
@@ -397,7 +407,7 @@ func (a *Anim) Animate(msg StepMsg) tea.Cmd {
 		if int(step) >= dotColorCycleSteps {
 			a.step.Store(0)
 		}
-		return a.Step()
+		return a.staticTick()
 	}
 
 	step := a.step.Add(1)
@@ -418,19 +428,48 @@ func (a *Anim) Animate(msg StepMsg) tea.Cmd {
 	return a.Step()
 }
 
-// renderStatic renders the static "Working" label (without dots, which are colored dynamically).
+// renderStatic renders the static "Working" label and pre-renders dot colors.
 func (a *Anim) renderStatic() {
 	a.staticRendered = lipgloss.NewStyle().
 		Foreground(a.labelColor).
 		Render("Working")
+
+	// Pre-render all dot colors to avoid MakeColor + lipgloss on every Render().
+	c1, ok1 := colorful.MakeColor(a.gradColorA)
+	c2, ok2 := colorful.MakeColor(a.gradColorB)
+	if ok1 && ok2 {
+		a.dotColors = make([]string, dotColorCycleSteps)
+		for step := range dotColorCycleSteps {
+			pos := float64(step) / float64(dotColorCycleSteps)
+			var c color.Color
+			if pos < 0.5 {
+				c = c1.BlendHcl(c2, pos*2)
+			} else {
+				c = c2.BlendHcl(c1, (pos-0.5)*2)
+			}
+			a.dotColors[step] = lipgloss.NewStyle().Foreground(c).Render(".")
+		}
+	}
 }
 
 // Render renders the current state of the animation.
 func (a *Anim) Render() string {
 	if a.static {
 		step := int(a.step.Load())
-		dots := lipgloss.NewStyle().Foreground(a.dotColor(step)).Render("...")
-		return a.staticRendered + dots
+		var b strings.Builder
+		b.WriteString(a.staticRendered)
+		if a.dotColors != nil {
+			for i := range 3 {
+				dotStep := (step + i*staticDotPhase) % dotColorCycleSteps
+				b.WriteString(a.dotColors[dotStep])
+			}
+		} else {
+			// Fallback: plain dots if MakeColor failed during init.
+			for range 3 {
+				b.WriteByte('.')
+			}
+		}
+		return b.String()
 	}
 
 	var b strings.Builder
@@ -470,27 +509,19 @@ func (a *Anim) Render() string {
 	return b.String()
 }
 
-// dotColor returns a color blended between GradColorA and GradColorB based on
-// the current step, cycling every 500ms (dotColorCycleSteps frames at fps).
-func (a *Anim) dotColor(step int) color.Color {
-	pos := float64(step%dotColorCycleSteps) / float64(dotColorCycleSteps)
 
-	c1, ok1 := colorful.MakeColor(a.gradColorA)
-	c2, ok2 := colorful.MakeColor(a.gradColorB)
-	if !ok1 || !ok2 {
-		return a.labelColor
-	}
-
-	// Oscillate between A and B.
-	if pos < 0.5 {
-		return c1.BlendHcl(c2, pos*2)
-	}
-	return c2.BlendHcl(c1, (pos-0.5)*2)
-}
 
 // Step is a command that triggers the next step in the animation.
 func (a *Anim) Step() tea.Cmd {
 	return tea.Tick(time.Second/time.Duration(fps), func(t time.Time) tea.Msg {
+		return StepMsg{ID: a.id}
+	})
+}
+
+// staticTick returns a slower tick for static/reduced animation mode to
+// minimize bandwidth and re-renders.
+func (a *Anim) staticTick() tea.Cmd {
+	return tea.Tick(staticTickInterval, func(t time.Time) tea.Msg {
 		return StepMsg{ID: a.id}
 	})
 }

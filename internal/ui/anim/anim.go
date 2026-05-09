@@ -358,9 +358,8 @@ func (a *Anim) Width() (w int) {
 
 // Start starts the animation.
 func (a *Anim) Start() tea.Cmd {
-	if a.static {
-		return nil
-	}
+	// Always start the tick so Animate can advance the step, even in static
+	// mode (for color cycling dots).
 	return a.Step()
 }
 

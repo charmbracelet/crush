@@ -133,7 +133,7 @@ type Anim struct {
 	ellipsisStep     atomic.Int64         // current ellipsis frame step
 	ellipsisFrames   *csync.Slice[string] // ellipsis animation frames
 	id               string
-	static           bool     // when true, don't animate
+	static           bool // when true, don't animate
 	staticRendered   string
 	dotColors        []string // pre-rendered dot characters for static mode
 	gradColorA       color.Color
@@ -481,8 +481,6 @@ func (a *Anim) Render() string {
 
 	return b.String()
 }
-
-
 
 // Step is a command that triggers the next step in the animation.
 func (a *Anim) Step() tea.Cmd {

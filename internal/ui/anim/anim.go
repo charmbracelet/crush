@@ -94,6 +94,7 @@ type StepMsg struct{ ID string }
 // Settings defines settings for the animation.
 type Settings struct {
 	ID          string
+	Static      bool
 	Size        int
 	Label       string
 	LabelColor  color.Color
@@ -127,6 +128,8 @@ type Anim struct {
 	ellipsisStep     atomic.Int64         // current ellipsis frame step
 	ellipsisFrames   *csync.Slice[string] // ellipsis animation frames
 	id               string
+	static           bool // when true, don't animate
+	staticRendered   string
 }
 
 // New creates a new Anim instance with the specified width and label.
@@ -157,6 +160,14 @@ func New(opts Settings) *Anim {
 		a.cyclingCharWidth = opts.Size
 	}
 	a.labelColor = opts.LabelColor
+	a.static = opts.Static
+
+	// For static mode, render a static "Working..." label and return early.
+	if opts.Static {
+		a.initialized.Store(true)
+		a.renderStatic()
+		return a
+	}
 
 	// NoScramble means no cycling chars and no birth animation. Mark as
 	// initialized immediately so the label renders without a fade-in.
@@ -362,12 +373,15 @@ func (a *Anim) Width() (w int) {
 
 // Start starts the animation.
 func (a *Anim) Start() tea.Cmd {
+	if a.static {
+		return nil
+	}
 	return a.Step()
 }
 
 // Animate advances the animation to the next step.
 func (a *Anim) Animate(msg StepMsg) tea.Cmd {
-	if msg.ID != a.id {
+	if a.static || msg.ID != a.id {
 		return nil
 	}
 
@@ -389,8 +403,19 @@ func (a *Anim) Animate(msg StepMsg) tea.Cmd {
 	return a.Step()
 }
 
+// renderStatic renders the static version of the spinner (label with "..." ellipsis).
+func (a *Anim) renderStatic() {
+	a.staticRendered = lipgloss.NewStyle().
+		Foreground(a.labelColor).
+		Render("Working...")
+}
+
 // Render renders the current state of the animation.
 func (a *Anim) Render() string {
+	if a.static {
+		return a.staticRendered
+	}
+
 	var b strings.Builder
 	step := int(a.step.Load())
 	frames := int(a.framesSinceStart.Load())

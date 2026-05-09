@@ -96,6 +96,17 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		assignIfNil(&cfg.Options.TUI.Transparent, true)
 	}
 
+	if isSSH() {
+		slog.Warn("Running over SSH, will enable reduce animations")
+		assignIfNil(&cfg.Options.TUI.ReduceAnimations, true)
+	}
+
+	if str, ok := os.LookupEnv("CRUSH_REDUCE_ANIMATIONS"); ok {
+		if val, err := strconv.ParseBool(str); err == nil {
+			assignIfNil(&cfg.Options.TUI.ReduceAnimations, val)
+		}
+	}
+
 	// Load known providers, this loads the config from catwalk
 	providers, err := Providers(cfg)
 	if err != nil {
@@ -1090,3 +1101,14 @@ func (c *Config) ValidateHooks() error {
 	}
 	return nil
 }
+
+func isSSH() bool {
+	return os.Getenv("SSH_TTY") != ""
+}
+
+// ShouldReduceAnimations returns whether animations should be reduced based on config.
+func (c *Config) ShouldReduceAnimations() bool {
+	return c.Options != nil && c.Options.TUI != nil && c.Options.TUI.ReduceAnimations != nil && *c.Options.TUI.ReduceAnimations
+}
+
+

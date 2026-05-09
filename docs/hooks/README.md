@@ -44,7 +44,9 @@ disallow the use of Haskell (but we love you, Simon Peyton Jones).
 ### Config
 
 The first thing we need to do is hook up our hook. Let's add the following to
-our local `crush.json`. You can, of course, do this globally, too.
+our **project-level** `crush.json`. Relative paths like `./no-haskell.sh` work
+here because the project root is your working directory. If you're configuring
+a global hook (`~/.config/crush/crush.json`), use an absolute path instead.
 
 ```jsonc
 {
@@ -145,6 +147,28 @@ and project-level, with project level hooks taking precedence.
   },
 }
 ```
+
+> [!IMPORTANT]
+> The `command` is resolved relative to your **current working directory** —
+> not relative to the config file. Relative paths like `./hooks/whatever.sh`
+> work fine in project-level `crush.json` because the project root is also
+> your working directory. For **global** config (`~/.config/crush/`),
+> however, you must use either an absolute path or an inline command:
+>
+> ```jsonc
+> // Global ~/.config/crush/crush.json
+> {
+>   "hooks": {
+>     "PreToolUse": [
+>       {
+>         "command": "/home/you/.config/crush/hooks/no-haskell.sh"
+>         // or use an inline command:
+>         // "command": "echo '{\"decision\":\"allow\"}'"
+>       }
+>     ]
+>   }
+> }
+> ```
 
 Remember, hooks will run in parallel but resolve in config order. Last hook
 wins when rewriting input, but first deny wins when blocking.

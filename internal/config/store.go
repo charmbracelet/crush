@@ -311,6 +311,18 @@ func (s *ConfigStore) SetTransparentBackground(scope Scope, enabled bool) error 
 	return s.SetConfigField(scope, "options.tui.transparent", enabled)
 }
 
+// SetSSHAnimationMode sets the SSH animation mode and persists it.
+func (s *ConfigStore) SetSSHAnimationMode(scope Scope, mode string) error {
+	if s.config.Options == nil {
+		s.config.Options = &Options{}
+	}
+	if s.config.Options.TUI == nil {
+		s.config.Options.TUI = &TUIOptions{}
+	}
+	s.config.Options.TUI.SSHAnimationMode = mode
+	return s.SetConfigField(scope, "options.tui.ssh_animation_mode", mode)
+}
+
 // SetProviderAPIKey sets the API key for a provider and persists it.
 func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey any) error {
 	var providerConfig ProviderConfig

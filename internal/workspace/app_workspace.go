@@ -347,6 +347,10 @@ func (w *AppWorkspace) RemoveConfigField(scope config.Scope, key string) error {
 	return w.store.RemoveConfigField(scope, key)
 }
 
+func (w *AppWorkspace) SetSSHAnimationMode(scope config.Scope, mode string) error {
+	return w.store.SetSSHAnimationMode(scope, mode)
+}
+
 func (w *AppWorkspace) ImportCopilot() (*oauth.Token, bool) {
 	return w.store.ImportCopilot()
 }

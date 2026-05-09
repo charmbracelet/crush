@@ -280,9 +280,17 @@ type UI struct {
 	// forceCompactMode tracks whether compact mode is forced by user toggle
 	forceCompactMode bool
 
+	// forceReduceAnimations tracks whether animations are reduced (either by
+	// user toggle or from SSH dialog preference)
+	forceReduceAnimations bool
+
 	// isCompact tracks whether we're currently in compact layout mode (either
 	// by user toggle or auto-switch based on window size)
 	isCompact bool
+
+	// sshAnimationsDialogShown tracks whether we've shown the SSH animations
+	// dialog in this session to avoid showing it multiple times
+	sshAnimationsDialogShown bool
 
 	// detailsOpen tracks whether the details panel is open (in compact mode)
 	detailsOpen bool
@@ -420,6 +428,14 @@ func (m *UI) Init() tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	}
+
+	// Check if we should show SSH animations dialog
+	if m.com.Config().ShouldPromptForSSHAnimations() && !m.sshAnimationsDialogShown {
+		if cmd := m.openSSHAnimationsDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+
 	// load the user commands async
 	cmds = append(cmds, m.loadCustomCommands())
 	// load prompt history async
@@ -432,6 +448,14 @@ func (m *UI) Init() tea.Cmd {
 		cmds = append(cmds, m.fetchHyperCredits())
 	}
 	return tea.Batch(cmds...)
+}
+
+// openSSHAnimationsDialog opens the SSH animations preference dialog.
+func (m *UI) openSSHAnimationsDialog() tea.Cmd {
+	m.sshAnimationsDialogShown = true
+	dialog := dialog.NewSSHAnimations(m.com)
+	m.dialog.OpenDialog(dialog)
+	return nil
 }
 
 // loadInitialSession loads the initial session if one was specified on startup.
@@ -1101,7 +1125,7 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	}
 
 	// Add messages to chat with linked tool results
-	reduceAnimations := m.com.Config().ShouldReduceAnimations()
+	reduceAnimations := m.shouldReduceAnimations()
 	items := make([]chat.MessageItem, 0, len(msgs)*2)
 	for _, msg := range msgPtrs {
 		switch msg.Role {
@@ -1142,7 +1166,7 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 
 // loadNestedToolCalls recursively loads nested tool calls for agent/agentic_fetch tools.
 func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
-	reduceAnimations := m.com.Config().ShouldReduceAnimations()
+	reduceAnimations := m.shouldReduceAnimations()
 	for _, item := range items {
 		nestedContainer, ok := item.(chat.NestedToolContainer)
 		if !ok {
@@ -1203,7 +1227,7 @@ func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
 // if the message is a tool result it will update the corresponding tool call message
 func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 	var cmds []tea.Cmd
-	reduceAnimations := m.com.Config().ShouldReduceAnimations()
+	reduceAnimations := m.shouldReduceAnimations()
 
 	existing := m.chat.MessageItem(msg.ID)
 	if existing != nil {
@@ -1621,6 +1645,24 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			return util.NewInfoMsg("Transparent background " + status)
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionReduceSSHAAnimations:
+		m.forceReduceAnimations = true
+		m.dialog.CloseDialog(dialog.SSHAnimationsID)
+	case dialog.ActionKeepSSHAAnimations:
+		m.forceReduceAnimations = false
+		m.dialog.CloseDialog(dialog.SSHAnimationsID)
+	case dialog.ActionPersistSSHAutoReduce:
+		m.forceReduceAnimations = true
+		if err := m.com.Workspace.SetSSHAnimationMode(config.ScopeGlobal, "reduce"); err != nil {
+			return util.ReportError(err)
+		}
+		m.dialog.CloseDialog(dialog.SSHAnimationsID)
+	case dialog.ActionPersistSSHNever:
+		m.forceReduceAnimations = false
+		if err := m.com.Workspace.SetSSHAnimationMode(config.ScopeGlobal, "never"); err != nil {
+			return util.ReportError(err)
+		}
+		m.dialog.CloseDialog(dialog.SSHAnimationsID)
 	case dialog.ActionQuit:
 		cmds = append(cmds, tea.Quit)
 	case dialog.ActionEnableDockerMCP:
@@ -2761,6 +2803,15 @@ func (m *UI) toggleCompactMode() tea.Cmd {
 	m.updateLayoutAndSize()
 
 	return nil
+}
+
+// shouldReduceAnimations returns whether animations should be reduced.
+// It considers both the config setting and runtime override from SSH dialog.
+func (m *UI) shouldReduceAnimations() bool {
+	if m.forceReduceAnimations {
+		return true
+	}
+	return m.com.Config().ShouldReduceAnimations()
 }
 
 // updateLayoutAndSize updates the layout and sizes of UI components.

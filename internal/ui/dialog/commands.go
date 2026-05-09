@@ -1,7 +1,6 @@
 package dialog
 
 import (
-	"os"
 	"strings"
 
 	"charm.land/bubbles/v2/help"
@@ -73,12 +72,13 @@ type Commands struct {
 
 	dockerMCPAvailable     *bool
 	dockerMCPCheckInFlight bool
+	editorAvailable        bool
 }
 
 var _ Dialog = (*Commands)(nil)
 
 // NewCommands creates a new commands dialog.
-func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, hasQueue bool, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) (*Commands, error) {
+func NewCommands(com *common.Common, env uv.Environ, sessionID string, hasSession, hasTodos, hasQueue bool, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) (*Commands, error) {
 	c := &Commands{
 		com:            com,
 		selected:       SystemCommands,
@@ -136,6 +136,8 @@ func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, has
 	if available, known := config.DockerMCPAvailabilityCached(); known {
 		c.dockerMCPAvailable = &available
 	}
+	_, editorAvailable := env.LookupEnv("EDITOR")
+	c.editorAvailable = editorAvailable
 
 	// Set initial commands
 	c.setCommandItems(c.selected)
@@ -470,11 +472,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	}
 
 	// Add external editor command if $EDITOR is available.
-	//
-	// TODO: Use [tea.EnvMsg] to get environment variable instead of os.Getenv;
-	// because os.Getenv does IO is breaks the TEA paradigm and is generally an
-	// antipattern.
-	if os.Getenv("EDITOR") != "" {
+	if c.editorAvailable {
 		commands = append(commands, NewCommandItem(c.com.Styles, "open_external_editor", "Open External Editor", "ctrl+o", ActionExternalEditor{}))
 	}
 

@@ -401,6 +401,7 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 				tc,
 				result,
 				msg.FinishReason() == message.FinishReasonCanceled,
+				reduceAnimations,
 			))
 		}
 		return items

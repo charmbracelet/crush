@@ -149,7 +149,7 @@ type AssistantMessageItem struct {
 var _ Expandable = (*AssistantMessageItem)(nil)
 
 // NewAssistantMessageItem creates a new AssistantMessageItem.
-func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) MessageItem {
+func NewAssistantMessageItem(sty *styles.Styles, message *message.Message, reduceAnimations bool) MessageItem {
 	v := list.NewVersioned()
 	a := &AssistantMessageItem{
 		Versioned:                v,
@@ -162,6 +162,7 @@ func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) Messa
 
 	a.anim = anim.New(anim.Settings{
 		ID:          a.ID(),
+		Static:      reduceAnimations,
 		Size:        15,
 		GradColorA:  sty.WorkingGradFromColor,
 		GradColorB:  sty.WorkingGradToColor,

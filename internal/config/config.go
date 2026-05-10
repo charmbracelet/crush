@@ -503,7 +503,6 @@ func allToolNames() []string {
 		"ls",
 		"sourcegraph",
 		"todos",
-		"touch",
 		"view",
 		"write",
 		"list_mcp_resources",

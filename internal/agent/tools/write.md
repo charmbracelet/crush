@@ -2,7 +2,7 @@ Create or overwrite a file with given content; auto-creates parent dirs. Cannot 
 
 <usage>
 - Provide file path to write
-- Include content to write to file
+- Include content to write to file (may be empty for a new empty file)
 - Tool creates necessary parent directories automatically
 </usage>
 

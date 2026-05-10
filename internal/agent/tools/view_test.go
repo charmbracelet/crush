@@ -137,3 +137,35 @@ func TestReadBuiltinFile(t *testing.T) {
 		require.NotContains(t, resp.Content, "     1|")
 	})
 }
+
+func TestSniffImageMimeType(t *testing.T) {
+	t.Parallel()
+
+	jpegMagic := []byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 'J', 'F', 'I', 'F'}
+	pngMagic := []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a}
+	gifMagic := []byte("GIF89a")
+	// Minimal RIFF/WEBP header.
+	webpMagic := append([]byte("RIFF\x00\x00\x00\x00WEBPVP8 "), make([]byte, 16)...)
+	random := []byte("not an image at all, just text")
+
+	cases := []struct {
+		name     string
+		data     []byte
+		fallback string
+		want     string
+	}{
+		{"jpeg bytes in .png file uses sniffed", jpegMagic, "image/png", "image/jpeg"},
+		{"png bytes in .jpg file uses sniffed", pngMagic, "image/jpeg", "image/png"},
+		{"gif bytes uses sniffed", gifMagic, "image/png", "image/gif"},
+		{"webp bytes uses sniffed", webpMagic, "image/png", "image/webp"},
+		{"matching extension and content keeps sniffed", pngMagic, "image/png", "image/png"},
+		{"unsniffable content falls back", random, "image/png", "image/png"},
+		{"empty content falls back", nil, "image/jpeg", "image/jpeg"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.want, sniffImageMimeType(tc.data, tc.fallback))
+		})
+	}
+}

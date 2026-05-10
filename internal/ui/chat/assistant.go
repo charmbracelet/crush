@@ -35,6 +35,8 @@ type AssistantMessageItem struct {
 	thinkingBoxHeight int // Tracks the rendered thinking box height for click detection.
 }
 
+var _ Expandable = (*AssistantMessageItem)(nil)
+
 // NewAssistantMessageItem creates a new AssistantMessageItem.
 func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) MessageItem {
 	a := &AssistantMessageItem{
@@ -249,23 +251,26 @@ func (a *AssistantMessageItem) SetMessage(message *message.Message) tea.Cmd {
 	return nil
 }
 
-// ToggleExpanded toggles the expanded state of the thinking box.
-func (a *AssistantMessageItem) ToggleExpanded() {
+// ToggleExpanded toggles the expanded state of the thinking box and returns
+// whether the item is now expanded.
+func (a *AssistantMessageItem) ToggleExpanded() bool {
 	a.thinkingExpanded = !a.thinkingExpanded
 	a.clearCache()
+	return a.thinkingExpanded
 }
 
-// HandleMouseClick implements MouseClickable.
+// HandleMouseClick implements MouseClickable. It signals (via a true return)
+// that the click lies on the thinking box so the caller can invoke
+// [AssistantMessageItem.ToggleExpanded] through the generic [Expandable]
+// path. Toggling here directly would double-toggle because the caller always
+// runs the generic path after a handled click.
 func (a *AssistantMessageItem) HandleMouseClick(btn ansi.MouseButton, x, y int) bool {
 	if btn != ansi.MouseLeft {
 		return false
 	}
-	// check if the click is within the thinking box
-	if a.thinkingBoxHeight > 0 && y < a.thinkingBoxHeight {
-		a.ToggleExpanded()
-		return true
-	}
-	return false
+	// Only the thinking box is clickable; other regions of the assistant
+	// message should not trigger expansion.
+	return a.thinkingBoxHeight > 0 && y < a.thinkingBoxHeight
 }
 
 // HandleKeyEvent implements KeyEventHandler.

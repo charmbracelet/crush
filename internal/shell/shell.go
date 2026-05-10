@@ -300,8 +300,7 @@ func ExitCode(err error) int {
 	if err == nil {
 		return 0
 	}
-	var exitErr interp.ExitStatus
-	if errors.As(err, &exitErr) {
+	if exitErr, ok := errors.AsType[interp.ExitStatus](err); ok {
 		return int(exitErr)
 	}
 	return 1

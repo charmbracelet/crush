@@ -144,6 +144,10 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 				var e pubsub.Event[proto.MCPEvent]
 				_ = json.Unmarshal(p.Payload, &e)
 				sendEvent(ctx, events, e)
+			case pubsub.PayloadTypeSkillEvent:
+				var e pubsub.Event[proto.SkillEvent]
+				_ = json.Unmarshal(p.Payload, &e)
+				sendEvent(ctx, events, e)
 			case pubsub.PayloadTypePermissionRequest:
 				var e pubsub.Event[proto.PermissionRequest]
 				_ = json.Unmarshal(p.Payload, &e)

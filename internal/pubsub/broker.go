@@ -5,26 +5,28 @@ import (
 	"sync"
 )
 
-const bufferSize = 64
+// bufferSize is the per-subscriber channel capacity for any broker
+// created via NewBroker.  Publish is non-blocking, so a full buffer
+// silently drops events; sized to cover a long streaming assistant
+// turn (~one UpdatedEvent per token) even under TUI render stalls.
+const bufferSize = 4096
 
 type Broker[T any] struct {
 	subs              map[chan Event[T]]struct{}
 	mu                sync.RWMutex
 	done              chan struct{}
 	subCount          int
-	maxEvents         int
 	channelBufferSize int
 }
 
 func NewBroker[T any]() *Broker[T] {
-	return NewBrokerWithOptions[T](bufferSize, 1000)
+	return NewBrokerWithOptions[T](bufferSize)
 }
 
-func NewBrokerWithOptions[T any](channelBufferSize, maxEvents int) *Broker[T] {
+func NewBrokerWithOptions[T any](channelBufferSize int) *Broker[T] {
 	return &Broker[T]{
 		subs:              make(map[chan Event[T]]struct{}),
 		done:              make(chan struct{}),
-		maxEvents:         maxEvents,
 		channelBufferSize: channelBufferSize,
 	}
 }

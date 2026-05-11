@@ -13,8 +13,8 @@
       "cost_per_1m_out": 2.28,
       "cost_per_1m_in_cached": 0.38,
       "cost_per_1m_out_cached": 0,
-      "context_window": 65000,
-      "default_max_tokens": 6500,
+      "context_window": 1048576,
+      "default_max_tokens": 104857,
       "can_reason": true,
       "supports_attachments": false
     },
@@ -25,8 +25,8 @@
       "cost_per_1m_out": 5.5,
       "cost_per_1m_in_cached": 0.35,
       "cost_per_1m_out_cached": 0,
-      "context_window": 600000,
-      "default_max_tokens": 60000,
+      "context_window": 1048576,
+      "default_max_tokens": 104857,
       "can_reason": true,
       "supports_attachments": false
     },

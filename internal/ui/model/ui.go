@@ -32,6 +32,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/fork"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/home"
@@ -53,6 +54,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/crush/internal/workspace"
+	"github.com/charmbracelet/crush/internal/worktree"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/layout"
 	"github.com/charmbracelet/ultraviolet/screen"
@@ -160,6 +162,11 @@ type (
 	// fetched from the API.
 	creditsUpdatedMsg struct {
 		credits int
+	}
+	// forkCompletedMsg is sent when a conversation fork completes.
+	forkCompletedMsg struct {
+		newSession session.Session
+		worktree   *worktree.Worktree
 	}
 )
 
@@ -878,6 +885,18 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case creditsUpdatedMsg:
 		m.hyperCredits = &msg.credits
+	case forkCompletedMsg:
+		// Switch to the newly forked session.
+		infoText := fmt.Sprintf("Forked to session: %s", msg.newSession.Title)
+		if msg.worktree != nil {
+			infoText = fmt.Sprintf("Forked to session: %s (worktree: %s)", msg.newSession.Title, msg.worktree.Name)
+		}
+		cmds = append(cmds, m.loadSession(msg.newSession.ID), util.ReportInfo(infoText))
+	case dialog.ActionOpenForkDialog:
+		// Handle fork dialog action from user message key handler.
+		if cmd := m.openForkDialog(msg.SessionID, msg.MessageID); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case util.InfoMsg:
 		if msg.Type == util.InfoTypeError {
 			slog.Error("Error reported", "error", msg.Msg)
@@ -1491,6 +1510,13 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionRunSnapshotGC:
 		m.dialog.CloseDialog(dialog.CommandsID)
 		cmds = append(cmds, m.runSnapshotGC())
+	case dialog.ActionOpenForkDialog:
+		if cmd := m.openForkDialog(msg.SessionID, msg.MessageID); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.ActionForkConversation:
+		m.dialog.CloseDialog(dialog.ForkID)
+		cmds = append(cmds, m.forkConversation(msg.SessionID, msg.MessageID, msg.NewSessionTitle, msg.CreateWorktree))
 
 	case dialog.ActionInitializeProject:
 		if m.isAgentBusy() {
@@ -3477,6 +3503,47 @@ func (m *UI) runSnapshotGC() tea.Cmd {
 			return util.ReportError(err)()
 		}
 		return util.NewInfoMsg(fmt.Sprintf("Garbage collection freed %s", formatBytes(freed)))
+	}
+}
+
+// openForkDialog opens the fork dialog for a specific message.
+func (m *UI) openForkDialog(sessionID, messageID string) tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.ForkID) {
+		m.dialog.BringToFront(dialog.ForkID)
+		return nil
+	}
+
+	// Generate default title from current session.
+	defaultTitle := "Fork"
+	if m.session != nil && m.session.Title != "" {
+		defaultTitle = m.session.Title + " (fork)"
+	}
+
+	forkDialog := dialog.NewFork(m.com, sessionID, messageID, defaultTitle)
+	m.dialog.OpenDialog(forkDialog)
+	return nil
+}
+
+// forkConversation forks the conversation from a specific message.
+func (m *UI) forkConversation(sessionID, messageID, newTitle string, createWorktree bool) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+
+		result, err := m.com.Workspace.ForkConversation(ctx, fork.ForkParams{
+			SessionID:      sessionID,
+			MessageID:      messageID,
+			CreateWorktree: createWorktree,
+			Title:          newTitle,
+		})
+		if err != nil {
+			return util.ReportError(fmt.Errorf("fork failed: %w", err))()
+		}
+
+		// Return a message to switch to the new session.
+		return forkCompletedMsg{
+			newSession: result.NewSession,
+			worktree:   result.Worktree,
+		}
 	}
 }
 

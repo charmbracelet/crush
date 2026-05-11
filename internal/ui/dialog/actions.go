@@ -108,11 +108,23 @@ type (
 	}
 	// ActionSwitchWorktree switches to a different worktree.
 	ActionSwitchWorktree struct {
-		SessionID   string
-		WorktreeID  string
+		SessionID  string
+		WorktreeID string
 	}
 	// ActionRunSnapshotGC runs garbage collection on snapshots.
 	ActionRunSnapshotGC struct{}
+	// ActionOpenForkDialog opens the fork dialog for a specific message.
+	ActionOpenForkDialog struct {
+		SessionID string
+		MessageID string
+	}
+	// ActionForkConversation forks the conversation from a specific message.
+	ActionForkConversation struct {
+		SessionID       string
+		MessageID       string
+		NewSessionTitle string
+		CreateWorktree  bool
+	}
 )
 
 // Messages for API key input dialog.

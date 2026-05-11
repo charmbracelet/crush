@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/dialog"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 )
 
@@ -102,9 +103,17 @@ func (m *UserMessageItem) renderAttachments(width int) string {
 
 // HandleKeyEvent implements KeyEventHandler.
 func (m *UserMessageItem) HandleKeyEvent(key tea.KeyMsg) (bool, tea.Cmd) {
-	if k := key.String(); k == "c" || k == "y" {
+	switch key.String() {
+	case "c", "y":
 		text := m.message.Content().Text
 		return true, common.CopyToClipboard(text, "Message copied to clipboard")
+	case "F": // shift+F to fork from this message
+		return true, func() tea.Msg {
+			return dialog.ActionOpenForkDialog{
+				SessionID: m.message.SessionID,
+				MessageID: m.message.ID,
+			}
+		}
 	}
 	return false, nil
 }

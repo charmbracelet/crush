@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/checkpoint"
@@ -104,17 +105,39 @@ func NewService(
 }
 
 func (s *service) Fork(ctx context.Context, params ForkParams) (*ForkResult, error) {
-	// Get the snapshot for the message.
-	var snapshot *checkpoint.Snapshot
+	// Step 1: Get the snapshot for the target message (if snapshots enabled).
+	var targetSnapshot *checkpoint.Snapshot
 	if s.checkpoints != nil && s.checkpoints.IsEnabled() {
 		var err error
-		snapshot, err = s.checkpoints.GetSnapshotByMessage(ctx, params.MessageID)
+		targetSnapshot, err = s.checkpoints.GetSnapshotByMessage(ctx, params.MessageID)
 		if err != nil && !errors.Is(err, checkpoint.ErrSnapshotNotFound) {
 			return nil, fmt.Errorf("get snapshot: %w", err)
 		}
+		// If no snapshot exists for this message, that's okay - we just won't restore.
+		// This can happen with archived/gc'd conversations.
+		if errors.Is(err, checkpoint.ErrSnapshotNotFound) {
+			slog.Warn("No snapshot found for fork message, filesystem will not be restored",
+				"message_id", params.MessageID)
+		}
 	}
 
-	// Get source session to copy title if needed.
+	// Step 2: Snapshot current state as a "stash" before making changes.
+	// This allows us to restore if something goes wrong or if the user wants to undo.
+	var stashSnapshot *checkpoint.Snapshot
+	if s.checkpoints != nil && s.checkpoints.IsEnabled() {
+		// Create a temporary snapshot of current state. We use a synthetic message ID
+		// since this is a pre-fork stash, not tied to a specific message.
+		stash, err := s.checkpoints.CreateSnapshot(ctx, params.SessionID, "pre-fork-stash", "Pre-fork filesystem state")
+		if err != nil {
+			slog.Warn("Failed to create pre-fork stash snapshot", "error", err)
+			// Non-fatal - continue with fork even if stash fails.
+		} else {
+			stashSnapshot = stash
+			_ = stashSnapshot // Stash is created for potential future undo functionality.
+		}
+	}
+
+	// Step 3: Get source session to copy title if needed.
 	sourceSession, err := s.sessions.Get(ctx, params.SessionID)
 	if err != nil {
 		return nil, fmt.Errorf("get source session: %w", err)
@@ -126,48 +149,69 @@ func (s *service) Fork(ctx context.Context, params ForkParams) (*ForkResult, err
 		title = fmt.Sprintf("Fork of %s", sourceSession.Title)
 	}
 
-	// Create new session.
+	// Step 4: Create new session.
 	newSession, err := s.sessions.Create(ctx, title)
 	if err != nil {
 		return nil, fmt.Errorf("create session: %w", err)
 	}
 
-	// Copy messages up to and including the specified message.
-	if err := s.copyMessagesUpTo(ctx, params.SessionID, newSession.ID, params.MessageID); err != nil {
+	// Step 5: Copy messages up to and including the specified message.
+	idMapping, err := s.copyMessagesUpTo(ctx, params.SessionID, newSession.ID, params.MessageID)
+	if err != nil {
 		// Clean up on failure.
 		_ = s.sessions.Delete(ctx, newSession.ID)
 		return nil, fmt.Errorf("copy messages: %w", err)
 	}
 
-	// Update session with fork reference.
-	if snapshot != nil {
+	// Step 6: Update session with SummaryMessageID if the source had one and it was copied.
+	if sourceSession.SummaryMessageID != "" {
+		if newSummaryID, ok := idMapping[sourceSession.SummaryMessageID]; ok {
+			newSession.SummaryMessageID = newSummaryID
+			newSession, err = s.sessions.Save(ctx, newSession)
+			if err != nil {
+				slog.Warn("Failed to update SummaryMessageID on forked session", "error", err)
+			}
+		}
+	}
+
+	// Step 7: Update session with fork reference.
+	if targetSnapshot != nil {
 		if err := s.queries.UpdateSessionForkedFrom(ctx, db.UpdateSessionForkedFromParams{
-			ForkedFromSnapshotID: sql.NullString{String: snapshot.ID, Valid: true},
+			ForkedFromSnapshotID: sql.NullString{String: targetSnapshot.ID, Valid: true},
 			ID:                   newSession.ID,
 		}); err != nil {
-			// Non-fatal, just log.
+			slog.Warn("Failed to update session fork reference", "error", err)
 		}
 	}
 
 	result := &ForkResult{
 		NewSession:     newSession,
-		SourceSnapshot: snapshot,
+		SourceSnapshot: targetSnapshot,
 		CreatedAt:      time.Now(),
 	}
 
-	// Create worktree if requested.
+	// Step 8: Handle worktree creation or filesystem restore.
 	if params.CreateWorktree && s.worktrees != nil && s.worktrees.IsEnabled() {
+		// Create a worktree with the target snapshot state.
 		snapshotID := ""
-		if snapshot != nil {
-			snapshotID = snapshot.ID
+		if targetSnapshot != nil {
+			snapshotID = targetSnapshot.ID
 		}
 
 		wt, err := s.worktrees.Create(ctx, newSession.ID, params.WorktreeName, snapshotID)
 		if err != nil {
-			// Non-fatal, session was still created.
-			// TODO: Log warning.
+			slog.Warn("Failed to create worktree for fork", "error", err)
+			// Non-fatal - session was still created.
 		} else {
 			result.Worktree = wt
+		}
+	} else if targetSnapshot != nil {
+		// No worktree requested - restore the target snapshot to current directory.
+		if err := s.checkpoints.RestoreSnapshot(ctx, targetSnapshot.ID, ""); err != nil {
+			slog.Warn("Failed to restore snapshot for fork",
+				"snapshot_id", targetSnapshot.ID,
+				"error", err)
+			// Non-fatal - session was still created, just filesystem wasn't restored.
 		}
 	}
 
@@ -183,22 +227,31 @@ func (s *service) GetForkHistory(ctx context.Context, snapshotID string) ([]sess
 }
 
 // copyMessagesUpTo copies all messages from source session to target session,
-// up to and including the specified message.
-func (s *service) copyMessagesUpTo(ctx context.Context, sourceSessionID, targetSessionID, upToMessageID string) error {
+// up to and including the specified message. Returns a map of old message IDs
+// to new message IDs for updating references like SummaryMessageID.
+func (s *service) copyMessagesUpTo(ctx context.Context, sourceSessionID, targetSessionID, upToMessageID string) (map[string]string, error) {
 	msgs, err := s.messages.List(ctx, sourceSessionID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
+	// Map old message IDs to new message IDs.
+	idMapping := make(map[string]string)
+
 	for _, msg := range msgs {
-		// Create a copy of the message in the new session.
-		_, err := s.messages.Create(ctx, targetSessionID, message.CreateMessageParams{
-			Role:  msg.Role,
-			Parts: msg.Parts,
+		// Create a copy of the message in the new session, preserving all fields.
+		newMsg, err := s.messages.Create(ctx, targetSessionID, message.CreateMessageParams{
+			Role:             msg.Role,
+			Parts:            msg.Parts,
+			Model:            msg.Model,
+			Provider:         msg.Provider,
+			IsSummaryMessage: msg.IsSummaryMessage,
 		})
 		if err != nil {
-			return fmt.Errorf("copy message %s: %w", msg.ID, err)
+			return nil, fmt.Errorf("copy message %s: %w", msg.ID, err)
 		}
+
+		idMapping[msg.ID] = newMsg.ID
 
 		// Stop after copying the target message.
 		if msg.ID == upToMessageID {
@@ -206,5 +259,5 @@ func (s *service) copyMessagesUpTo(ctx context.Context, sourceSessionID, targetS
 		}
 	}
 
-	return nil
+	return idMapping, nil
 }

@@ -24,6 +24,7 @@ import (
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/worktree"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
@@ -701,6 +702,11 @@ func translateEvent(ev any) tea.Msg {
 				},
 			},
 		}
+	case pubsub.Event[proto.SkillEvent]:
+		return pubsub.Event[skills.Event]{
+			Type:    e.Type,
+			Payload: protoToSkillEvent(e.Payload),
+		}
 	case pubsub.Event[proto.PermissionRequest]:
 		return pubsub.Event[permission.PermissionRequest]{
 			Type: e.Type,
@@ -878,4 +884,17 @@ func sessionToProto(s session.Session) proto.Session {
 		CreatedAt:        s.CreatedAt,
 		UpdatedAt:        s.UpdatedAt,
 	}
+}
+
+func protoToSkillEvent(e proto.SkillEvent) skills.Event {
+	states := make([]*skills.SkillState, len(e.States))
+	for i, s := range e.States {
+		states[i] = &skills.SkillState{
+			Name:  s.Name,
+			Path:  s.Path,
+			State: skills.DiscoveryState(s.State),
+			Err:   s.Error,
+		}
+	}
+	return skills.Event{States: states}
 }

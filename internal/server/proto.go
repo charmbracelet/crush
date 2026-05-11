@@ -952,6 +952,12 @@ func (c *controllerV1) handleError(w http.ResponseWriter, r *http.Request, err e
 		status = http.StatusBadRequest
 	case errors.Is(err, backend.ErrUnknownCommand):
 		status = http.StatusBadRequest
+	case errors.Is(err, backend.ErrSnapshotsDisabled):
+		status = http.StatusBadRequest
+	case errors.Is(err, backend.ErrWorktreesDisabled):
+		status = http.StatusBadRequest
+	case errors.Is(err, backend.ErrForksDisabled):
+		status = http.StatusBadRequest
 	}
 	c.server.logError(r, err.Error())
 	jsonError(w, status, err.Error())

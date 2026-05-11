@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -61,7 +62,7 @@ func NewWebFetchTool(workingDir string, client *http.Client) fantasy.AgentTool {
 				}
 
 				fmt.Fprintf(&result, "Fetched content from %s (large page)\n\n", params.URL)
-				fmt.Fprintf(&result, "Content saved to: %s\n\n", tempFilePath)
+				fmt.Fprintf(&result, "Content saved to: %s\n\n", filepath.Base(tempFilePath))
 				result.WriteString("Use the view and grep tools to analyze this file.")
 			} else {
 				fmt.Fprintf(&result, "Fetched content from %s:\n\n", params.URL)

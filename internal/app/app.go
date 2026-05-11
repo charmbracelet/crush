@@ -40,6 +40,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/update"
 	"github.com/charmbracelet/crush/internal/version"
+	"github.com/charmbracelet/crush/internal/worktree"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/charmbracelet/x/term"
@@ -59,6 +60,7 @@ type App struct {
 	Permissions permission.Service
 	FileTracker filetracker.Service
 	Checkpoints checkpoint.Service
+	Worktrees   worktree.Service
 
 	AgentCoordinator agent.Coordinator
 
@@ -115,6 +117,20 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 		checkpoints, _ = checkpoint.NewService(checkpoint.ServiceConfig{Enabled: false}, q, conn)
 	}
 
+	// Initialize worktree service.
+	worktreeCfg := worktree.ServiceConfig{
+		ProjectDir: store.WorkingDir(),
+		Enabled:    cfg.Worktree != nil && len(cfg.Worktree.PostCreate) > 0,
+	}
+	if cfg.Worktree != nil {
+		worktreeCfg.PostCreateHooks = cfg.Worktree.PostCreate
+	}
+	worktrees, err := worktree.NewService(worktreeCfg, q, conn, checkpoints)
+	if err != nil {
+		slog.Warn("Failed to initialize worktree service", "error", err)
+		worktrees, _ = worktree.NewService(worktree.ServiceConfig{Enabled: false}, q, conn, checkpoints)
+	}
+
 	app := &App{
 		Sessions:    sessions,
 		Messages:    messages,
@@ -122,6 +138,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 		Permissions: permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools),
 		FileTracker: filetracker.NewService(q),
 		Checkpoints: checkpoints,
+		Worktrees:   worktrees,
 		LSPManager:  lsp.NewManager(store),
 
 		globalCtx: ctx,

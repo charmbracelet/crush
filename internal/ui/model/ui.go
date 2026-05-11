@@ -522,6 +522,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setState(uiChat, m.focus)
 		m.session = msg.session
 		m.sessionFiles = msg.files
+		// Set active session for worktree-aware working directory.
+		m.com.Workspace.SetActiveSessionID(m.session.ID)
 		cmds = append(cmds, m.startLSPs(msg.lspFilePaths()))
 		msgs, err := m.com.Workspace.ListMessages(context.Background(), m.session.ID)
 		if err != nil {
@@ -3553,6 +3555,8 @@ func (m *UI) newSession() tea.Cmd {
 	m.session = nil
 	m.sessionFiles = nil
 	m.sessionFileReads = nil
+	// Clear active session for worktree-aware working directory.
+	m.com.Workspace.SetActiveSessionID("")
 	m.setState(uiLanding, uiFocusEditor)
 	m.textarea.Focus()
 	m.chat.Blur()

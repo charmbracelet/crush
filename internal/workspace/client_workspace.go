@@ -35,8 +35,9 @@ import (
 type ClientWorkspace struct {
 	client *client.Client
 
-	mu sync.RWMutex
-	ws proto.Workspace
+	mu              sync.RWMutex
+	ws              proto.Workspace
+	activeSessionID string
 }
 
 // NewClientWorkspace creates a new ClientWorkspace that proxies all
@@ -393,11 +394,35 @@ func (w *ClientWorkspace) Config() *config.Config {
 }
 
 func (w *ClientWorkspace) WorkingDir() string {
+	// If there's an active session with an active worktree, use the worktree path.
+	w.mu.RLock()
+	sessionID := w.activeSessionID
+	w.mu.RUnlock()
+
+	if sessionID != "" {
+		if wt, err := w.GetActiveWorktree(context.Background(), sessionID); err == nil && wt != nil {
+			return wt.Path
+		}
+	}
 	return w.cached().Path
 }
 
 func (w *ClientWorkspace) Resolver() config.VariableResolver {
 	return config.IdentityResolver()
+}
+
+// SetActiveSessionID sets the current session ID for worktree-aware working directory.
+func (w *ClientWorkspace) SetActiveSessionID(sessionID string) {
+	w.mu.Lock()
+	w.activeSessionID = sessionID
+	w.mu.Unlock()
+}
+
+// ActiveSessionID returns the current session ID.
+func (w *ClientWorkspace) ActiveSessionID() string {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.activeSessionID
 }
 
 // -- Config mutations --

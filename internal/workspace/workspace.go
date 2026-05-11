@@ -117,6 +117,10 @@ type Workspace interface {
 	WorkingDir() string
 	Resolver() config.VariableResolver
 
+	// Session context for worktree-aware working directory
+	SetActiveSessionID(sessionID string)
+	ActiveSessionID() string
+
 	// Config mutations (proxied to server in client mode)
 	UpdatePreferredModel(scope config.Scope, modelType config.SelectedModelType, model config.SelectedModel) error
 	SetCompactMode(scope config.Scope, enabled bool) error

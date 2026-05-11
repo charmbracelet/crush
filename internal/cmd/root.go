@@ -426,7 +426,7 @@ func ensureServer(cmd *cobra.Command, hostURL *url.URL) error {
 // duration of "spawn + readiness probe" and released before the caller
 // resumes its normal lifetime.
 func spawnAndWaitReady(cmd *cobra.Command, hostURL *url.URL) error {
-	chDir, err := perHostServerDir()
+	chDir, err := perHostServerDir(hostURL)
 	if err != nil {
 		return err
 	}
@@ -435,7 +435,7 @@ func spawnAndWaitReady(cmd *cobra.Command, hostURL *url.URL) error {
 		// If the lock itself is unavailable, fall back to the
 		// unsynchronized path rather than blocking the user.
 		slog.Warn("Failed to acquire spawn lock, proceeding without single-flight", "error", err)
-		if err := startDetachedServer(cmd); err != nil {
+		if err := startDetachedServer(cmd, hostURL); err != nil {
 			return err
 		}
 		return waitForServerReady(cmd.Context(), hostURL)
@@ -452,7 +452,7 @@ func spawnAndWaitReady(cmd *cobra.Command, hostURL *url.URL) error {
 		return nil
 	}
 
-	if err := startDetachedServer(cmd); err != nil {
+	if err := startDetachedServer(cmd, hostURL); err != nil {
 		return err
 	}
 	return waitForServerReady(cmd.Context(), hostURL)
@@ -469,15 +469,23 @@ func quickHealthProbe(ctx context.Context, hostURL *url.URL) error {
 }
 
 // perHostServerDir returns (and creates) the cache directory used for
-// per-host server state (logs, start.lock, etc.). It mirrors the path
-// computed in startDetachedServer so both code paths stay in sync.
-func perHostServerDir() (string, error) {
-	safeClientHost := safeNameRegexp.ReplaceAllString(clientHost, "_")
-	chDir := filepath.Join(config.GlobalCacheDir(), "server-"+safeClientHost)
+// per-host server state (logs, start.lock, etc.). The path is derived
+// from the parsed host URL rather than the global flag so the same key
+// is computed regardless of where the host came from.
+func perHostServerDir(hostURL *url.URL) (string, error) {
+	chDir := filepath.Join(config.GlobalCacheDir(), "server-"+safeHostName(hostURL))
 	if err := os.MkdirAll(chDir, 0o700); err != nil {
 		return "", fmt.Errorf("failed to create server working directory: %v", err)
 	}
 	return chDir, nil
+}
+
+// safeHostName returns a filesystem-safe identifier for hostURL,
+// suitable for use as a directory name. It mirrors the input shape of
+// the --host flag so client and server compute the same key.
+func safeHostName(hostURL *url.URL) string {
+	return safeNameRegexp.ReplaceAllString(
+		hostURL.Scheme+"://"+hostURL.Host+hostURL.Path, "_")
 }
 
 // serverReadyTimeout returns the total budget for the readiness probe.
@@ -631,13 +639,13 @@ func restartIfStale(cmd *cobra.Command, hostURL *url.URL) (restarted bool, err e
 
 var safeNameRegexp = regexp.MustCompile(`[^a-zA-Z0-9._-]`)
 
-func startDetachedServer(cmd *cobra.Command) error {
+func startDetachedServer(cmd *cobra.Command, hostURL *url.URL) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("failed to get executable path: %v", err)
 	}
 
-	chDir, err := perHostServerDir()
+	chDir, err := perHostServerDir(hostURL)
 	if err != nil {
 		return err
 	}

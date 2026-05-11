@@ -68,11 +68,22 @@ type Event struct {
 	States []*SkillState
 }
 
-var broker = pubsub.NewBroker[Event]()
+var (
+	broker       = pubsub.NewBroker[Event]()
+	cachedStates []*SkillState
+	statesMu     sync.RWMutex
+)
 
 // SubscribeEvents returns a channel that receives events when skill discovery state changes.
 func SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {
 	return broker.Subscribe(ctx)
+}
+
+// GetStates returns the current cached skill discovery states.
+func GetStates() []*SkillState {
+	statesMu.RLock()
+	defer statesMu.RUnlock()
+	return cachedStates
 }
 
 // Validate checks if the skill meets spec requirements.
@@ -252,6 +263,11 @@ func DiscoverWithStates(paths []string) ([]*Skill, []*SkillState) {
 		}
 		return left < right
 	})
+
+	// Cache the states before publishing.
+	statesMu.Lock()
+	cachedStates = states
+	statesMu.Unlock()
 
 	broker.Publish(pubsub.UpdatedEvent, Event{States: states})
 	return skills, states

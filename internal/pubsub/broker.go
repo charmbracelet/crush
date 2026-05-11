@@ -2,13 +2,15 @@ package pubsub
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 )
 
 // bufferSize is the per-subscriber channel capacity for any broker
 // created via NewBroker.  Publish is non-blocking, so a full buffer
-// silently drops events; sized to cover a long streaming assistant
-// turn (~one UpdatedEvent per token) even under TUI render stalls.
+// drops events (with a warning log); sized to cover a long streaming
+// assistant turn (~one UpdatedEvent per token) even under TUI render
+// stalls.
 const bufferSize = 4096
 
 type Broker[T any] struct {
@@ -108,8 +110,9 @@ func (b *Broker[T]) Publish(t EventType, payload T) {
 		select {
 		case sub <- event:
 		default:
-			// Channel is full, subscriber is slow - skip this event
-			// This prevents blocking the publisher
+			// Channel is full, subscriber is slow — skip this event.
+			// This prevents blocking the publisher.
+			slog.Warn("Pubsub buffer full; dropping event", "type", t)
 		}
 	}
 }

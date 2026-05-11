@@ -199,7 +199,7 @@ func dispatchShebang(ctx context.Context, scriptPath string, probe []byte, args 
 
 	// Don't use exec.CommandContext - we handle cancellation ourselves
 	// to properly kill the process group.
-	cmd := exec.Command(interpreter, cmdArgs...)
+	cmd := exec.Command(interpreter, cmdArgs...) //nolint:noctx // intentional - we handle ctx cancellation manually for process group kill
 	hc := interp.HandlerCtx(ctx)
 	cmd.Dir = hc.Dir
 	cmd.Env = execEnvList(hc.Env)

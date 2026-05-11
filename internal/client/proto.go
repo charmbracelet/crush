@@ -243,6 +243,23 @@ func (c *Client) MCPGetStates(ctx context.Context, id string) (map[string]proto.
 	return states, nil
 }
 
+// SkillsGetStates retrieves the skill discovery states for a workspace.
+func (c *Client) SkillsGetStates(ctx context.Context, id string) ([]proto.SkillState, error) {
+	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/skills/states", id), nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get skill states: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to get skill states: status code %d", rsp.StatusCode)
+	}
+	var states []proto.SkillState
+	if err := json.NewDecoder(rsp.Body).Decode(&states); err != nil {
+		return nil, fmt.Errorf("failed to decode skill states: %w", err)
+	}
+	return states, nil
+}
+
 // MCPRefreshPrompts refreshes prompts for a named MCP client.
 func (c *Client) MCPRefreshPrompts(ctx context.Context, id, name string) error {
 	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/mcp/refresh-prompts", id), nil,

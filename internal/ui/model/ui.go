@@ -124,6 +124,10 @@ type (
 	mcpPromptsLoadedMsg struct {
 		Prompts []commands.MCPPrompt
 	}
+	// lspStateChangedMsg is sent when there is a change in LSP client states.
+	lspStateChangedMsg struct {
+		states map[string]workspace.LSPClientInfo
+	}
 	// mcpStateChangedMsg is sent when there is a change in MCP client states.
 	mcpStateChangedMsg struct {
 		states map[string]mcp.ClientInfo
@@ -229,7 +233,7 @@ type UI struct {
 	}
 
 	// lsp
-	lspStates map[string]app.LSPClientInfo
+	lspStates map[string]workspace.LSPClientInfo
 
 	// mcp
 	mcpStates map[string]mcp.ClientInfo
@@ -337,7 +341,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		completions:         comp,
 		attachments:         attachments,
 		todoSpinner:         todoSpinner,
-		lspStates:           make(map[string]app.LSPClientInfo),
+		lspStates:           make(map[string]workspace.LSPClientInfo),
 		mcpStates:           make(map[string]mcp.ClientInfo),
 		notifyBackend:       notification.NoopBackend{},
 		notifyWindowFocused: true,
@@ -391,6 +395,8 @@ func (m *UI) Init() tea.Cmd {
 	cmds = append(cmds, m.loadCustomCommands())
 	// load prompt history async
 	cmds = append(cmds, m.loadPromptHistory())
+	// load initial LSP and MCP states
+	cmds = append(cmds, m.loadInitialLSPStates(), m.loadInitialMCPStates())
 	// load initial session if specified
 	if cmd := m.loadInitialSession(); cmd != nil {
 		cmds = append(cmds, cmd)
@@ -569,6 +575,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			commands.SetCustomCommands(m.customCommands)
 		}
 
+	case lspStateChangedMsg:
+		m.lspStates = msg.states
 	case mcpStateChangedMsg:
 		m.mcpStates = msg.states
 	case mcpPromptsLoadedMsg:
@@ -642,8 +650,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.renderPills()
 	case pubsub.Event[history.File]:
 		cmds = append(cmds, m.handleFileEvent(msg.Payload))
-	case pubsub.Event[app.LSPEvent]:
-		m.lspStates = app.GetLSPStates()
+	case pubsub.Event[workspace.LSPEvent]:
+		m.lspStates = m.com.Workspace.LSPGetStates()
 	case pubsub.Event[skills.Event]:
 		m.skillStates = msg.Payload.States
 	case pubsub.Event[mcp.Event]:
@@ -2327,7 +2335,8 @@ func (m *UI) ShortHelp() []key.Binding {
 			tab.SetHelp("tab", "focus editor")
 		}
 
-		binds = append(binds,
+		binds = append(
+			binds,
 			tab,
 			commands,
 			k.Models,
@@ -2335,11 +2344,13 @@ func (m *UI) ShortHelp() []key.Binding {
 
 		switch m.focus {
 		case uiFocusEditor:
-			binds = append(binds,
+			binds = append(
+				binds,
 				k.Editor.Newline,
 			)
 		case uiFocusMain:
-			binds = append(binds,
+			binds = append(
+				binds,
 				k.Chat.UpDown,
 				k.Chat.UpDownOneItem,
 				k.Chat.PageUp,
@@ -2354,14 +2365,16 @@ func (m *UI) ShortHelp() []key.Binding {
 		// TODO: other states
 		// if m.session == nil {
 		// no session selected
-		binds = append(binds,
+		binds = append(
+			binds,
 			commands,
 			k.Models,
 			k.Editor.Newline,
 		)
 	}
 
-	binds = append(binds,
+	binds = append(
+		binds,
 		k.Quit,
 		k.Help,
 	)
@@ -2408,7 +2421,8 @@ func (m *UI) FullHelp() [][]key.Binding {
 			tab.SetHelp("tab", "focus editor")
 		}
 
-		mainBinds = append(mainBinds,
+		mainBinds = append(
+			mainBinds,
 			tab,
 			commands,
 			k.Models,
@@ -2432,7 +2446,8 @@ func (m *UI) FullHelp() [][]key.Binding {
 			}
 			binds = append(binds, editorBinds)
 			if hasAttachments {
-				binds = append(binds,
+				binds = append(
+					binds,
 					[]key.Binding{
 						k.Editor.AttachmentDeleteMode,
 						k.Editor.DeleteAllAttachments,
@@ -2441,7 +2456,8 @@ func (m *UI) FullHelp() [][]key.Binding {
 				)
 			}
 		case uiFocusMain:
-			binds = append(binds,
+			binds = append(
+				binds,
 				[]key.Binding{
 					k.Chat.UpDown,
 					k.Chat.UpDownOneItem,
@@ -2466,7 +2482,8 @@ func (m *UI) FullHelp() [][]key.Binding {
 	default:
 		if m.session == nil {
 			// no session selected
-			binds = append(binds,
+			binds = append(
+				binds,
 				[]key.Binding{
 					commands,
 					k.Models,
@@ -2483,7 +2500,8 @@ func (m *UI) FullHelp() [][]key.Binding {
 			}
 			binds = append(binds, editorBinds)
 			if hasAttachments {
-				binds = append(binds,
+				binds = append(
+					binds,
 					[]key.Binding{
 						k.Editor.AttachmentDeleteMode,
 						k.Editor.DeleteAllAttachments,
@@ -2494,7 +2512,8 @@ func (m *UI) FullHelp() [][]key.Binding {
 		}
 	}
 
-	binds = append(binds,
+	binds = append(
+		binds,
 		[]key.Binding{
 			help,
 			k.Quit,
@@ -3861,6 +3880,22 @@ func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string
 func (m *UI) handleStateChanged() tea.Cmd {
 	return func() tea.Msg {
 		m.com.Workspace.UpdateAgentModel(context.Background())
+		return mcpStateChangedMsg{
+			states: m.com.Workspace.MCPGetStates(),
+		}
+	}
+}
+
+func (m *UI) loadInitialLSPStates() tea.Cmd {
+	return func() tea.Msg {
+		return lspStateChangedMsg{
+			states: m.com.Workspace.LSPGetStates(),
+		}
+	}
+}
+
+func (m *UI) loadInitialMCPStates() tea.Cmd {
+	return func() tea.Msg {
 		return mcpStateChangedMsg{
 			states: m.com.Workspace.MCPGetStates(),
 		}

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -141,6 +142,13 @@ func renderHeaderDetails(
 
 	if lspErrorCount > 0 {
 		parts = append(parts, t.LSP.ErrorDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPErrorIcon, lspErrorCount)))
+	}
+
+	// Show active worktree indicator if enabled.
+	if com.Workspace.WorktreesEnabled() {
+		if wt, err := com.Workspace.GetActiveWorktree(context.Background(), session.ID); err == nil && wt != nil {
+			parts = append(parts, t.Header.WorkingDir.Render("⑂ "+wt.Name))
+		}
 	}
 
 	agentCfg := com.Config().Agents[config.AgentCoder]

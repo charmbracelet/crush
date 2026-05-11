@@ -251,3 +251,11 @@ type WriteResponseMetadata struct {
 	Additions int    `json:"additions"`
 	Removals  int    `json:"removals"`
 }
+
+const AgenticFetchToolName = "agentic_fetch"
+
+// AgenticFetchPermissionsParams represents the permission parameters for the agentic fetch tool.
+type AgenticFetchPermissionsParams struct {
+	URL    string `json:"url,omitempty"`
+	Prompt string `json:"prompt"`
+}

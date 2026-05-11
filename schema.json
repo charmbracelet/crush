@@ -272,7 +272,7 @@
             ]
           },
           "type": "array",
-          "description": "Allow list of tools from this MCP server. When set"
+          "description": "Allow list of tools from this MCP server"
         },
         "timeout": {
           "type": "integer",

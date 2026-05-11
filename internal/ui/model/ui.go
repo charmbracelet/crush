@@ -3462,6 +3462,9 @@ func (m *UI) newSession() tea.Cmd {
 
 // handlePasteMsg handles a paste message.
 func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
+	// Normalize \r\n before the textarea sanitizer sees it.
+	msg.Content = strings.ReplaceAll(msg.Content, "\r\n", "\n")
+
 	if m.dialog.HasDialogs() {
 		return m.handleDialogMsg(msg)
 	}

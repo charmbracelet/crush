@@ -458,10 +458,10 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	}
 
 	// Get the model name for the agent
-	modelName := ""
+	modelID := ""
 	if modelCfg, ok := c.cfg.Config().Models[agent.Model]; ok {
 		if model := c.cfg.Config().GetModel(modelCfg.Provider, modelCfg.Model); model != nil {
-			modelName = model.Name
+			modelID = model.ID
 		}
 	}
 
@@ -474,7 +474,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	}
 
 	allTools = append(allTools,
-		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelName),
+		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelID),
 		tools.NewCrushInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
 		tools.NewCrushLogsTool(logFile),
 		tools.NewJobOutputTool(),

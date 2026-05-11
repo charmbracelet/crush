@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/stringext"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -455,11 +456,18 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 	// Add tool-specific header info.
 	switch p.permission.ToolName {
 	case tools.BashToolName:
-		if params, ok := p.permission.Params.(tools.BashPermissionsParams); ok {
+		switch params := p.permission.Params.(type) {
+		case tools.BashPermissionsParams:
+			lines = append(lines, p.renderKeyValue("Desc", params.Description, contentWidth))
+		case proto.BashPermissionsParams:
 			lines = append(lines, p.renderKeyValue("Desc", params.Description, contentWidth))
 		}
 	case tools.DownloadToolName:
-		if params, ok := p.permission.Params.(tools.DownloadPermissionsParams); ok {
+		switch params := p.permission.Params.(type) {
+		case tools.DownloadPermissionsParams:
+			lines = append(lines, p.renderKeyValue("URL", params.URL, contentWidth))
+			lines = append(lines, p.renderKeyValue("File", fsext.PrettyPath(params.FilePath), contentWidth))
+		case proto.DownloadPermissionsParams:
 			lines = append(lines, p.renderKeyValue("URL", params.URL, contentWidth))
 			lines = append(lines, p.renderKeyValue("File", fsext.PrettyPath(params.FilePath), contentWidth))
 		}
@@ -474,12 +482,23 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 			filePath = params.FilePath
 		case tools.ViewPermissionsParams:
 			filePath = params.FilePath
+		case proto.EditPermissionsParams:
+			filePath = params.FilePath
+		case proto.WritePermissionsParams:
+			filePath = params.FilePath
+		case proto.MultiEditPermissionsParams:
+			filePath = params.FilePath
+		case proto.ViewPermissionsParams:
+			filePath = params.FilePath
 		}
 		if filePath != "" {
 			lines = append(lines, p.renderKeyValue("File", fsext.PrettyPath(filePath), contentWidth))
 		}
 	case tools.LSToolName:
-		if params, ok := p.permission.Params.(tools.LSPermissionsParams); ok {
+		switch params := p.permission.Params.(type) {
+		case tools.LSPermissionsParams:
+			lines = append(lines, p.renderKeyValue("Directory", fsext.PrettyPath(params.Path), contentWidth))
+		case proto.LSPermissionsParams:
 			lines = append(lines, p.renderKeyValue("Directory", fsext.PrettyPath(params.Path), contentWidth))
 		}
 	}
@@ -547,36 +566,55 @@ func (p *Permissions) renderContent(width int) string {
 }
 
 func (p *Permissions) renderBashContent(width int) string {
-	params, ok := p.permission.Params.(tools.BashPermissionsParams)
-	if !ok {
+	var command string
+	switch params := p.permission.Params.(type) {
+	case tools.BashPermissionsParams:
+		command = params.Command
+	case proto.BashPermissionsParams:
+		command = params.Command
+	default:
 		return ""
 	}
-
-	return p.renderContentPanel(params.Command, width)
+	return p.renderContentPanel(command, width)
 }
 
 func (p *Permissions) renderEditContent(contentWidth int) string {
-	params, ok := p.permission.Params.(tools.EditPermissionsParams)
-	if !ok {
+	var filePath, oldContent, newContent string
+	switch params := p.permission.Params.(type) {
+	case tools.EditPermissionsParams:
+		filePath, oldContent, newContent = params.FilePath, params.OldContent, params.NewContent
+	case proto.EditPermissionsParams:
+		filePath, oldContent, newContent = params.FilePath, params.OldContent, params.NewContent
+	default:
 		return ""
 	}
-	return p.renderDiff(params.FilePath, params.OldContent, params.NewContent, contentWidth)
+	return p.renderDiff(filePath, oldContent, newContent, contentWidth)
 }
 
 func (p *Permissions) renderWriteContent(contentWidth int) string {
-	params, ok := p.permission.Params.(tools.WritePermissionsParams)
-	if !ok {
+	var filePath, oldContent, newContent string
+	switch params := p.permission.Params.(type) {
+	case tools.WritePermissionsParams:
+		filePath, oldContent, newContent = params.FilePath, params.OldContent, params.NewContent
+	case proto.WritePermissionsParams:
+		filePath, oldContent, newContent = params.FilePath, params.OldContent, params.NewContent
+	default:
 		return ""
 	}
-	return p.renderDiff(params.FilePath, params.OldContent, params.NewContent, contentWidth)
+	return p.renderDiff(filePath, oldContent, newContent, contentWidth)
 }
 
 func (p *Permissions) renderMultiEditContent(contentWidth int) string {
-	params, ok := p.permission.Params.(tools.MultiEditPermissionsParams)
-	if !ok {
+	var filePath, oldContent, newContent string
+	switch params := p.permission.Params.(type) {
+	case tools.MultiEditPermissionsParams:
+		filePath, oldContent, newContent = params.FilePath, params.OldContent, params.NewContent
+	case proto.MultiEditPermissionsParams:
+		filePath, oldContent, newContent = params.FilePath, params.OldContent, params.NewContent
+	default:
 		return ""
 	}
-	return p.renderDiff(params.FilePath, params.OldContent, params.NewContent, contentWidth)
+	return p.renderDiff(filePath, oldContent, newContent, contentWidth)
 }
 
 func (p *Permissions) renderDiff(filePath, oldContent, newContent string, contentWidth int) string {
@@ -609,70 +647,97 @@ func (p *Permissions) renderDiff(filePath, oldContent, newContent string, conten
 }
 
 func (p *Permissions) renderDownloadContent(width int) string {
-	params, ok := p.permission.Params.(tools.DownloadPermissionsParams)
-	if !ok {
+	var url, filePath string
+	var timeout int
+	switch params := p.permission.Params.(type) {
+	case tools.DownloadPermissionsParams:
+		url, filePath, timeout = params.URL, params.FilePath, params.Timeout
+	case proto.DownloadPermissionsParams:
+		url, filePath, timeout = params.URL, params.FilePath, params.Timeout
+	default:
 		return ""
 	}
 
-	content := fmt.Sprintf("URL: %s\nFile: %s", params.URL, fsext.PrettyPath(params.FilePath))
-	if params.Timeout > 0 {
-		content += fmt.Sprintf("\nTimeout: %ds", params.Timeout)
+	content := fmt.Sprintf("URL: %s\nFile: %s", url, fsext.PrettyPath(filePath))
+	if timeout > 0 {
+		content += fmt.Sprintf("\nTimeout: %ds", timeout)
 	}
 
 	return p.renderContentPanel(content, width)
 }
 
 func (p *Permissions) renderFetchContent(width int) string {
-	params, ok := p.permission.Params.(tools.FetchPermissionsParams)
-	if !ok {
+	var url string
+	switch params := p.permission.Params.(type) {
+	case tools.FetchPermissionsParams:
+		url = params.URL
+	case proto.FetchPermissionsParams:
+		url = params.URL
+	default:
 		return ""
 	}
-
-	return p.renderContentPanel(params.URL, width)
+	return p.renderContentPanel(url, width)
 }
 
 func (p *Permissions) renderAgenticFetchContent(width int) string {
-	params, ok := p.permission.Params.(tools.AgenticFetchPermissionsParams)
-	if !ok {
+	var url, prompt string
+	switch params := p.permission.Params.(type) {
+	case tools.AgenticFetchPermissionsParams:
+		url, prompt = params.URL, params.Prompt
+	case proto.AgenticFetchPermissionsParams:
+		url, prompt = params.URL, params.Prompt
+	default:
 		return ""
 	}
 
 	var content string
-	if params.URL != "" {
-		content = fmt.Sprintf("URL: %s\n\nPrompt: %s", params.URL, params.Prompt)
+	if url != "" {
+		content = fmt.Sprintf("URL: %s\n\nPrompt: %s", url, prompt)
 	} else {
-		content = fmt.Sprintf("Prompt: %s", params.Prompt)
+		content = fmt.Sprintf("Prompt: %s", prompt)
 	}
 
 	return p.renderContentPanel(content, width)
 }
 
 func (p *Permissions) renderViewContent(width int) string {
-	params, ok := p.permission.Params.(tools.ViewPermissionsParams)
-	if !ok {
+	var filePath string
+	var offset, limit int
+	switch params := p.permission.Params.(type) {
+	case tools.ViewPermissionsParams:
+		filePath, offset, limit = params.FilePath, params.Offset, params.Limit
+	case proto.ViewPermissionsParams:
+		filePath, offset, limit = params.FilePath, params.Offset, params.Limit
+	default:
 		return ""
 	}
 
-	content := fmt.Sprintf("File: %s", fsext.PrettyPath(params.FilePath))
-	if params.Offset > 0 {
-		content += fmt.Sprintf("\nStarting from line: %d", params.Offset+1)
+	content := fmt.Sprintf("File: %s", fsext.PrettyPath(filePath))
+	if offset > 0 {
+		content += fmt.Sprintf("\nStarting from line: %d", offset+1)
 	}
-	if params.Limit > 0 && params.Limit != 2000 {
-		content += fmt.Sprintf("\nLines to read: %d", params.Limit)
+	if limit > 0 && limit != 2000 {
+		content += fmt.Sprintf("\nLines to read: %d", limit)
 	}
 
 	return p.renderContentPanel(content, width)
 }
 
 func (p *Permissions) renderLSContent(width int) string {
-	params, ok := p.permission.Params.(tools.LSPermissionsParams)
-	if !ok {
+	var path string
+	var ignore []string
+	switch params := p.permission.Params.(type) {
+	case tools.LSPermissionsParams:
+		path, ignore = params.Path, params.Ignore
+	case proto.LSPermissionsParams:
+		path, ignore = params.Path, params.Ignore
+	default:
 		return ""
 	}
 
-	content := fmt.Sprintf("Directory: %s", fsext.PrettyPath(params.Path))
-	if len(params.Ignore) > 0 {
-		content += fmt.Sprintf("\nIgnore patterns: %s", strings.Join(params.Ignore, ", "))
+	content := fmt.Sprintf("Directory: %s", fsext.PrettyPath(path))
+	if len(ignore) > 0 {
+		content += fmt.Sprintf("\nIgnore patterns: %s", strings.Join(ignore, ", "))
 	}
 
 	return p.renderContentPanel(content, width)

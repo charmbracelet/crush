@@ -289,8 +289,6 @@ func DiscoverWithStates(paths []string) ([]*Skill, []*SkillState) {
 		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
 	})
 
-	// Publish states as-is; the coordinator will merge and re-sort them later.
-	broker.Publish(pubsub.UpdatedEvent, Event{States: states})
 	return skills, states
 }
 

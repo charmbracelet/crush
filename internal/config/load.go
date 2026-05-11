@@ -55,6 +55,9 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 
 	// Load workspace config last so it has highest priority.
 	if wsData, err := os.ReadFile(store.workspacePath); err == nil && len(wsData) > 0 {
+		if !json.Valid(wsData) {
+			return nil, fmt.Errorf("invalid JSON in config file %s", store.workspacePath)
+		}
 		merged, mergeErr := loadFromBytes(append([][]byte{mustMarshalConfig(cfg)}, wsData))
 		if mergeErr == nil {
 			// Preserve defaults that setDefaults already applied.
@@ -733,6 +736,9 @@ func loadFromConfigPaths(configPaths []string) (*Config, []string, error) {
 		}
 		if len(data) == 0 {
 			continue
+		}
+		if !json.Valid(data) {
+			return nil, nil, fmt.Errorf("invalid JSON in config file %s", path)
 		}
 		configs = append(configs, data)
 		loaded = append(loaded, path)

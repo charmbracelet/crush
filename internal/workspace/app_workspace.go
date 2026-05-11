@@ -466,6 +466,22 @@ func (w *AppWorkspace) ForkConversation(ctx context.Context, params fork.ForkPar
 	return w.app.Forks.Fork(ctx, params)
 }
 
+// -- Garbage Collection --
+
+func (w *AppWorkspace) SnapshotGC(ctx context.Context) (int64, error) {
+	if w.app.Checkpoints == nil {
+		return 0, errors.New("snapshots not enabled")
+	}
+	return w.app.Checkpoints.GC(ctx)
+}
+
+func (w *AppWorkspace) SnapshotStats(ctx context.Context) (*checkpoint.Stats, error) {
+	if w.app.Checkpoints == nil {
+		return nil, errors.New("snapshots not enabled")
+	}
+	return w.app.Checkpoints.GetStats(ctx)
+}
+
 // -- Lifecycle --
 
 func (w *AppWorkspace) Subscribe(program *tea.Program) {

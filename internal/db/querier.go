@@ -44,6 +44,7 @@ type Querier interface {
 	GetUsageByModel(ctx context.Context) ([]GetUsageByModelRow, error)
 	GetWorktree(ctx context.Context, id string) (Worktree, error)
 	GetWorktreeByName(ctx context.Context, arg GetWorktreeByNameParams) (Worktree, error)
+	ListAllSnapshots(ctx context.Context) ([]Snapshot, error)
 	ListAllUserMessages(ctx context.Context) ([]Message, error)
 	ListAllWorktrees(ctx context.Context) ([]Worktree, error)
 	ListFilesByPath(ctx context.Context, path string) ([]File, error)

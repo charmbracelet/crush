@@ -527,6 +527,11 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		commands = append(commands, NewCommandItem(c.com.Styles, "new_worktree", "Create Worktree", "", ActionCreateWorktree{SessionID: c.sessionID}))
 	}
 
+	// Add garbage collection command if snapshots enabled.
+	if c.com.Workspace.SnapshotsEnabled() {
+		commands = append(commands, NewCommandItem(c.com.Styles, "gc", "Run Garbage Collection", "", ActionRunSnapshotGC{}))
+	}
+
 	// Add transparent background toggle.
 	transparentLabel := "Disable Background Color"
 	if cfg != nil && cfg.Options != nil && cfg.Options.TUI.Transparent != nil && *cfg.Options.TUI.Transparent {

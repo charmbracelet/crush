@@ -50,6 +50,13 @@ type Service interface {
 	// RunPostRestoreHooks runs configured post-restore commands.
 	RunPostRestoreHooks(ctx context.Context, targetDir string) error
 
+	// GC performs garbage collection, removing unreferenced objects.
+	// Returns the number of bytes freed.
+	GC(ctx context.Context) (int64, error)
+
+	// GetStats returns statistics about the snapshot storage.
+	GetStats(ctx context.Context) (*Stats, error)
+
 	// IsEnabled returns whether snapshots are enabled.
 	IsEnabled() bool
 }
@@ -82,6 +89,12 @@ type SnapshotNode struct {
 type PostRestoreHook struct {
 	IfExists string `json:"if_exists"` // File to check for
 	Run      string `json:"run"`       // Command to run
+}
+
+// Stats holds statistics about snapshot storage.
+type Stats struct {
+	SnapshotCount int   `json:"snapshot_count"`
+	DiskUsage     int64 `json:"disk_usage"` // Bytes used by .crush/git
 }
 
 // service implements the Service interface.
@@ -462,4 +475,50 @@ func truncateDescription(s string) string {
 		return s
 	}
 	return s[:maxLen-3] + "..."
+}
+
+func (s *service) GC(ctx context.Context) (int64, error) {
+	if !s.enabled || s.repo == nil {
+		return 0, nil
+	}
+
+	// Get size before GC.
+	statsBefore, err := s.GetStats(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("get stats before GC: %w", err)
+	}
+
+	// Run git gc.
+	if err := s.repo.GC(); err != nil {
+		return 0, fmt.Errorf("run GC: %w", err)
+	}
+
+	// Get size after GC.
+	statsAfter, err := s.GetStats(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("get stats after GC: %w", err)
+	}
+
+	freed := statsBefore.DiskUsage - statsAfter.DiskUsage
+	if freed < 0 {
+		freed = 0
+	}
+	return freed, nil
+}
+
+func (s *service) GetStats(ctx context.Context) (*Stats, error) {
+	stats := &Stats{}
+
+	// Count snapshots.
+	snapshots, err := s.queries.ListAllSnapshots(ctx)
+	if err == nil {
+		stats.SnapshotCount = len(snapshots)
+	}
+
+	// Calculate disk usage.
+	if s.repo != nil {
+		stats.DiskUsage = s.repo.DiskUsage()
+	}
+
+	return stats, nil
 }

@@ -605,6 +605,16 @@ func (w *ClientWorkspace) ForkConversation(ctx context.Context, params fork.Fork
 	return nil, errRemoteNotSupported
 }
 
+// -- Garbage Collection (not supported in client mode) --
+
+func (w *ClientWorkspace) SnapshotGC(ctx context.Context) (int64, error) {
+	return 0, errRemoteNotSupported
+}
+
+func (w *ClientWorkspace) SnapshotStats(ctx context.Context) (*checkpoint.Stats, error) {
+	return nil, errRemoteNotSupported
+}
+
 // -- Lifecycle --
 
 func (w *ClientWorkspace) Subscribe(program *tea.Program) {

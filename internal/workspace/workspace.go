@@ -161,6 +161,10 @@ type Workspace interface {
 	// Forks
 	ForkConversation(ctx context.Context, params fork.ForkParams) (*fork.ForkResult, error)
 
+	// Garbage Collection
+	SnapshotGC(ctx context.Context) (int64, error)
+	SnapshotStats(ctx context.Context) (*checkpoint.Stats, error)
+
 	// Events
 	Subscribe(program *tea.Program)
 	Shutdown()

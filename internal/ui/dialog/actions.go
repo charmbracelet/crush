@@ -111,6 +111,8 @@ type (
 		SessionID   string
 		WorktreeID  string
 	}
+	// ActionRunSnapshotGC runs garbage collection on snapshots.
+	ActionRunSnapshotGC struct{}
 )
 
 // Messages for API key input dialog.

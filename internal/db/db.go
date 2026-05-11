@@ -129,6 +129,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getWorktreeByNameStmt, err = db.PrepareContext(ctx, getWorktreeByName); err != nil {
 		return nil, fmt.Errorf("error preparing query GetWorktreeByName: %w", err)
 	}
+	if q.listAllSnapshotsStmt, err = db.PrepareContext(ctx, listAllSnapshots); err != nil {
+		return nil, fmt.Errorf("error preparing query ListAllSnapshots: %w", err)
+	}
 	if q.listAllUserMessagesStmt, err = db.PrepareContext(ctx, listAllUserMessages); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAllUserMessages: %w", err)
 	}
@@ -369,6 +372,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing getWorktreeByNameStmt: %w", cerr)
 		}
 	}
+	if q.listAllSnapshotsStmt != nil {
+		if cerr := q.listAllSnapshotsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listAllSnapshotsStmt: %w", cerr)
+		}
+	}
 	if q.listAllUserMessagesStmt != nil {
 		if cerr := q.listAllUserMessagesStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listAllUserMessagesStmt: %w", cerr)
@@ -543,6 +551,7 @@ type Queries struct {
 	getUsageByModelStmt            *sql.Stmt
 	getWorktreeStmt                *sql.Stmt
 	getWorktreeByNameStmt          *sql.Stmt
+	listAllSnapshotsStmt           *sql.Stmt
 	listAllUserMessagesStmt        *sql.Stmt
 	listAllWorktreesStmt           *sql.Stmt
 	listFilesByPathStmt            *sql.Stmt
@@ -604,6 +613,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getUsageByModelStmt:            q.getUsageByModelStmt,
 		getWorktreeStmt:                q.getWorktreeStmt,
 		getWorktreeByNameStmt:          q.getWorktreeByNameStmt,
+		listAllSnapshotsStmt:           q.listAllSnapshotsStmt,
 		listAllUserMessagesStmt:        q.listAllUserMessagesStmt,
 		listAllWorktreesStmt:           q.listAllWorktreesStmt,
 		listFilesByPathStmt:            q.listFilesByPathStmt,

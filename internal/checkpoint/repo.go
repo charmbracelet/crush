@@ -592,3 +592,18 @@ func (r *Repo) ProjectDir() string {
 func (r *Repo) GitDir() string {
 	return r.gitDir
 }
+
+// DiskUsage returns the size of the git directory in bytes.
+func (r *Repo) DiskUsage() int64 {
+	var size int64
+	_ = filepath.Walk(r.gitDir, func(_ string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !info.IsDir() {
+			size += info.Size()
+		}
+		return nil
+	})
+	return size
+}

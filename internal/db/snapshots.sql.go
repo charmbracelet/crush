@@ -115,6 +115,43 @@ func (q *Queries) GetSnapshotByMessage(ctx context.Context, messageID string) (S
 	return i, err
 }
 
+const listAllSnapshots = `-- name: ListAllSnapshots :many
+SELECT id, session_id, message_id, parent_snapshot_id, git_commit_hash, description, created_at
+FROM snapshots
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListAllSnapshots(ctx context.Context) ([]Snapshot, error) {
+	rows, err := q.query(ctx, q.listAllSnapshotsStmt, listAllSnapshots)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Snapshot{}
+	for rows.Next() {
+		var i Snapshot
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.MessageID,
+			&i.ParentSnapshotID,
+			&i.GitCommitHash,
+			&i.Description,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSnapshots = `-- name: ListSnapshots :many
 SELECT id, session_id, message_id, parent_snapshot_id, git_commit_hash, description, created_at
 FROM snapshots

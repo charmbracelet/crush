@@ -1478,6 +1478,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionSwitchWorktree:
 		m.dialog.CloseDialog(dialog.WorktreesID)
 		cmds = append(cmds, m.switchWorktree(msg.SessionID, msg.WorktreeID))
+	case dialog.ActionRunSnapshotGC:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		cmds = append(cmds, m.runSnapshotGC())
 
 	case dialog.ActionInitializeProject:
 		if m.isAgentBusy() {
@@ -3443,6 +3446,31 @@ func (m *UI) switchWorktree(sessionID, worktreeID string) tea.Cmd {
 		}
 		return util.NewInfoMsg("Switched worktree")
 	}
+}
+
+// runSnapshotGC runs garbage collection on snapshots.
+func (m *UI) runSnapshotGC() tea.Cmd {
+	return func() tea.Msg {
+		freed, err := m.com.Workspace.SnapshotGC(context.Background())
+		if err != nil {
+			return util.ReportError(err)()
+		}
+		return util.NewInfoMsg(fmt.Sprintf("Garbage collection freed %s", formatBytes(freed)))
+	}
+}
+
+// formatBytes formats bytes into a human-readable string.
+func formatBytes(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
 // openPermissionsDialog opens the permissions dialog for a permission request.

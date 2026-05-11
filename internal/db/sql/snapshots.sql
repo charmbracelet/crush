@@ -33,6 +33,11 @@ FROM snapshots
 WHERE session_id = ?
 ORDER BY created_at ASC;
 
+-- name: ListAllSnapshots :many
+SELECT *
+FROM snapshots
+ORDER BY created_at DESC;
+
 -- name: DeleteSnapshot :exec
 DELETE FROM snapshots
 WHERE id = ?;

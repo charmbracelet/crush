@@ -27,6 +27,17 @@ var (
 	gooseInitErr  error
 )
 
+// connEntry holds a pooled database connection with reference counting.
+type connEntry struct {
+	db       *sql.DB
+	refCount int
+}
+
+var (
+	poolMu sync.Mutex
+	pool   = make(map[string]*connEntry)
+)
+
 //go:embed migrations/*.sql
 var FS embed.FS
 
@@ -39,11 +50,31 @@ func init() {
 }
 
 // Connect opens a SQLite database connection and runs migrations.
+// Multiple calls with the same dataDir return the same *sql.DB and increment
+// a reference count. Call Release when done to decrement the count; the
+// connection is closed when the last reference is released.
 func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 	if dataDir == "" {
 		return nil, fmt.Errorf("data.dir is not set")
 	}
-	dbPath := filepath.Join(dataDir, "crush.db")
+
+	// Resolve to absolute path so different relative paths to the same file
+	// share a single connection.
+	absDir, err := filepath.Abs(dataDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve data dir: %w", err)
+	}
+
+	poolMu.Lock()
+	defer poolMu.Unlock()
+
+	// Return existing connection if already open.
+	if entry, ok := pool[absDir]; ok {
+		entry.refCount++
+		return entry.db, nil
+	}
+
+	dbPath := filepath.Join(absDir, "crush.db")
 
 	db, err := openDB(dbPath)
 	if err != nil {
@@ -72,7 +103,43 @@ func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to apply migrations: %w", err)
 	}
 
+	pool[absDir] = &connEntry{db: db, refCount: 1}
 	return db, nil
+}
+
+// Release decrements the reference count for the connection associated with
+// dataDir. When the count reaches zero, the connection is closed and removed
+// from the pool.
+func Release(dataDir string) {
+	absDir, err := filepath.Abs(dataDir)
+	if err != nil {
+		return
+	}
+
+	poolMu.Lock()
+	defer poolMu.Unlock()
+
+	entry, ok := pool[absDir]
+	if !ok {
+		return
+	}
+
+	entry.refCount--
+	if entry.refCount <= 0 {
+		entry.db.Close()
+		delete(pool, absDir)
+	}
+}
+
+// ResetPool closes all connections and clears the pool. For testing only.
+func ResetPool() {
+	poolMu.Lock()
+	defer poolMu.Unlock()
+
+	for path, entry := range pool {
+		entry.db.Close()
+		delete(pool, path)
+	}
 }
 
 func initGoose() error {

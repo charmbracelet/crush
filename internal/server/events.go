@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/skills"
 )
 
 // wrapEvent converts a raw tea.Msg (a pubsub.Event[T] from the app
@@ -43,6 +44,11 @@ func wrapEvent(ev any) *pubsub.Payload {
 				Error:     e.Payload.Error,
 				ToolCount: e.Payload.Counts.Tools,
 			},
+		})
+	case pubsub.Event[skills.Event]:
+		return envelope(pubsub.PayloadTypeSkillEvent, pubsub.Event[proto.SkillEvent]{
+			Type:    e.Type,
+			Payload: skillEventToProto(e.Payload),
 		})
 	case pubsub.Event[permission.PermissionRequest]:
 		return envelope(pubsub.PayloadTypePermissionRequest, pubsub.Event[proto.PermissionRequest]{
@@ -211,4 +217,17 @@ func messagesToProto(msgs []message.Message) []proto.Message {
 		out[i] = messageToProto(m)
 	}
 	return out
+}
+
+func skillEventToProto(e skills.Event) proto.SkillEvent {
+	states := make([]proto.SkillState, len(e.States))
+	for i, s := range e.States {
+		states[i] = proto.SkillState{
+			Name:  s.Name,
+			Path:  s.Path,
+			State: proto.SkillDiscoveryState(s.State),
+			Error: s.Err,
+		}
+	}
+	return proto.SkillEvent{States: states}
 }

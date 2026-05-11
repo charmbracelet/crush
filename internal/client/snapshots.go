@@ -66,7 +66,7 @@ func (c *Client) GetSnapshot(ctx context.Context, workspaceID, snapshotID string
 
 // GetSnapshotByMessage retrieves a snapshot by message ID.
 func (c *Client) GetSnapshotByMessage(ctx context.Context, workspaceID, messageID string) (*checkpoint.Snapshot, error) {
-	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/snapshots/by-message/%s", workspaceID, messageID), nil, nil)
+	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/messages/%s/snapshot", workspaceID, messageID), nil, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get snapshot by message: %w", err)
 	}

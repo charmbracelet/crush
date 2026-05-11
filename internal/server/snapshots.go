@@ -81,7 +81,7 @@ func (c *controllerV1) handleGetWorkspaceSnapshot(w http.ResponseWriter, r *http
 //	@Success		200		{object}	object
 //	@Failure		404		{object}	proto.Error
 //	@Failure		500		{object}	proto.Error
-//	@Router			/workspaces/{id}/snapshots/by-message/{msgid} [get]
+//	@Router			/workspaces/{id}/messages/{msgid}/snapshot [get]
 func (c *controllerV1) handleGetWorkspaceSnapshotByMessage(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	msgid := r.PathValue("msgid")

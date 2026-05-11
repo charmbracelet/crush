@@ -11,13 +11,16 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/checkpoint"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/fork"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/worktree"
 )
 
 // LSPClientInfo holds information about an LSP client's state. This is
@@ -137,6 +140,26 @@ type Workspace interface {
 	GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error)
 	EnableDockerMCP(ctx context.Context) error
 	DisableDockerMCP() error
+
+	// Snapshots
+	SnapshotsEnabled() bool
+	ListSnapshots(ctx context.Context, sessionID string) ([]*checkpoint.Snapshot, error)
+	GetSnapshot(ctx context.Context, snapshotID string) (*checkpoint.Snapshot, error)
+	GetSnapshotByMessage(ctx context.Context, messageID string) (*checkpoint.Snapshot, error)
+	RestoreSnapshot(ctx context.Context, snapshotID string) error
+	DiffFromCurrentSnapshot(ctx context.Context, snapshotID string) (string, error)
+
+	// Worktrees
+	WorktreesEnabled() bool
+	ListWorktrees(ctx context.Context, sessionID string) ([]*worktree.Worktree, error)
+	GetWorktree(ctx context.Context, worktreeID string) (*worktree.Worktree, error)
+	GetActiveWorktree(ctx context.Context, sessionID string) (*worktree.Worktree, error)
+	CreateWorktree(ctx context.Context, sessionID, name, fromSnapshotID string) (*worktree.Worktree, error)
+	SwitchWorktree(ctx context.Context, sessionID, worktreeID string) error
+	DeleteWorktree(ctx context.Context, worktreeID string) error
+
+	// Forks
+	ForkConversation(ctx context.Context, params fork.ForkParams) (*fork.ForkResult, error)
 
 	// Events
 	Subscribe(program *tea.Program)

@@ -10,14 +10,17 @@ import (
 	"github.com/charmbracelet/crush/internal/agent"
 	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/checkpoint"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/fork"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/worktree"
 )
 
 // AppWorkspace implements the Workspace interface by delegating
@@ -363,6 +366,104 @@ func (w *AppWorkspace) DisableDockerMCP() error {
 		return fmt.Errorf("failed to disable docker MCP: %w", err)
 	}
 	return w.store.DisableDockerMCP()
+}
+
+// -- Snapshots --
+
+func (w *AppWorkspace) SnapshotsEnabled() bool {
+	return w.app.Checkpoints != nil && w.app.Checkpoints.IsEnabled()
+}
+
+func (w *AppWorkspace) ListSnapshots(ctx context.Context, sessionID string) ([]*checkpoint.Snapshot, error) {
+	if w.app.Checkpoints == nil {
+		return nil, nil
+	}
+	return w.app.Checkpoints.ListSnapshots(ctx, sessionID)
+}
+
+func (w *AppWorkspace) GetSnapshot(ctx context.Context, snapshotID string) (*checkpoint.Snapshot, error) {
+	if w.app.Checkpoints == nil {
+		return nil, errors.New("snapshots not enabled")
+	}
+	return w.app.Checkpoints.GetSnapshot(ctx, snapshotID)
+}
+
+func (w *AppWorkspace) GetSnapshotByMessage(ctx context.Context, messageID string) (*checkpoint.Snapshot, error) {
+	if w.app.Checkpoints == nil {
+		return nil, errors.New("snapshots not enabled")
+	}
+	return w.app.Checkpoints.GetSnapshotByMessage(ctx, messageID)
+}
+
+func (w *AppWorkspace) RestoreSnapshot(ctx context.Context, snapshotID string) error {
+	if w.app.Checkpoints == nil {
+		return errors.New("snapshots not enabled")
+	}
+	return w.app.Checkpoints.RestoreSnapshot(ctx, snapshotID, w.store.WorkingDir())
+}
+
+func (w *AppWorkspace) DiffFromCurrentSnapshot(ctx context.Context, snapshotID string) (string, error) {
+	if w.app.Checkpoints == nil {
+		return "", errors.New("snapshots not enabled")
+	}
+	return w.app.Checkpoints.DiffFromCurrent(ctx, snapshotID)
+}
+
+// -- Worktrees --
+
+func (w *AppWorkspace) WorktreesEnabled() bool {
+	return w.app.Worktrees != nil && w.app.Worktrees.IsEnabled()
+}
+
+func (w *AppWorkspace) ListWorktrees(ctx context.Context, sessionID string) ([]*worktree.Worktree, error) {
+	if w.app.Worktrees == nil {
+		return nil, nil
+	}
+	return w.app.Worktrees.List(ctx, sessionID)
+}
+
+func (w *AppWorkspace) GetWorktree(ctx context.Context, worktreeID string) (*worktree.Worktree, error) {
+	if w.app.Worktrees == nil {
+		return nil, errors.New("worktrees not enabled")
+	}
+	return w.app.Worktrees.Get(ctx, worktreeID)
+}
+
+func (w *AppWorkspace) GetActiveWorktree(ctx context.Context, sessionID string) (*worktree.Worktree, error) {
+	if w.app.Worktrees == nil {
+		return nil, nil
+	}
+	return w.app.Worktrees.GetActive(ctx, sessionID)
+}
+
+func (w *AppWorkspace) CreateWorktree(ctx context.Context, sessionID, name, fromSnapshotID string) (*worktree.Worktree, error) {
+	if w.app.Worktrees == nil {
+		return nil, errors.New("worktrees not enabled")
+	}
+	return w.app.Worktrees.Create(ctx, sessionID, name, fromSnapshotID)
+}
+
+func (w *AppWorkspace) SwitchWorktree(ctx context.Context, sessionID, worktreeID string) error {
+	if w.app.Worktrees == nil {
+		return errors.New("worktrees not enabled")
+	}
+	return w.app.Worktrees.Switch(ctx, sessionID, worktreeID)
+}
+
+func (w *AppWorkspace) DeleteWorktree(ctx context.Context, worktreeID string) error {
+	if w.app.Worktrees == nil {
+		return errors.New("worktrees not enabled")
+	}
+	return w.app.Worktrees.Delete(ctx, worktreeID)
+}
+
+// -- Forks --
+
+func (w *AppWorkspace) ForkConversation(ctx context.Context, params fork.ForkParams) (*fork.ForkResult, error) {
+	if w.app.Forks == nil {
+		return nil, errors.New("fork service not available")
+	}
+	return w.app.Forks.Fork(ctx, params)
 }
 
 // -- Lifecycle --

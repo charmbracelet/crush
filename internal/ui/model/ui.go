@@ -395,8 +395,8 @@ func (m *UI) Init() tea.Cmd {
 	cmds = append(cmds, m.loadCustomCommands())
 	// load prompt history async
 	cmds = append(cmds, m.loadPromptHistory())
-	// load initial LSP and MCP states
-	cmds = append(cmds, m.loadInitialLSPStates(), m.loadInitialMCPStates())
+	// load initial LSP, MCP, and skill states
+	cmds = append(cmds, m.loadInitialLSPStates(), m.loadInitialMCPStates(), m.loadInitialSkillStates())
 	// load initial session if specified
 	if cmd := m.loadInitialSession(); cmd != nil {
 		cmds = append(cmds, cmd)
@@ -3898,6 +3898,15 @@ func (m *UI) loadInitialMCPStates() tea.Cmd {
 	return func() tea.Msg {
 		return mcpStateChangedMsg{
 			states: m.com.Workspace.MCPGetStates(),
+		}
+	}
+}
+
+func (m *UI) loadInitialSkillStates() tea.Cmd {
+	return func() tea.Msg {
+		return pubsub.Event[skills.Event]{
+			Type:    pubsub.UpdatedEvent,
+			Payload: skills.Event{States: m.com.Workspace.SkillsGetStates()},
 		}
 	}
 }

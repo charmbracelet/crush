@@ -46,7 +46,8 @@ func NewWorktrees(com *common.Common, sessionID string) (*Worktrees, error) {
 		sessionID: sessionID,
 	}
 
-	worktrees, err := com.Workspace.ListWorktrees(context.TODO(), sessionID)
+	// List all worktrees (pass empty string to get all, not just for this session).
+	worktrees, err := com.Workspace.ListWorktrees(context.TODO(), "")
 	if err != nil {
 		return nil, err
 	}

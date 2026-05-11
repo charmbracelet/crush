@@ -2,12 +2,14 @@ package model
 
 import (
 	"cmp"
+	"context"
 	"fmt"
 	"image"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/logo"
+	"github.com/charmbracelet/crush/internal/worktree"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/layout"
 )
@@ -139,22 +141,42 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	height := area.Dy()
 
 	title := t.Sidebar.SessionTitle.Width(width).MaxHeight(2).Render(m.session.Title)
-	cwd := common.PrettyPath(t, m.com.Workspace.WorkingDir(), width)
+	// Use BaseDir to show project root, not worktree path.
+	cwd := common.PrettyPath(t, m.com.Workspace.BaseDir(), width)
 	sidebarLogo := m.sidebarLogo
 	if height < logoHeightBreakpoint {
 		sidebarLogo = logo.SmallRender(m.com.Styles, width, logo.Opts{
 			Hyper: m.com.IsHyper(),
 		})
 	}
+
+	// Build git/worktree info line.
+	// If in a worktree, show worktree name; otherwise show git branch.
+	var gitInfo string
+	var activeWorktree *worktree.Worktree
+	if m.com.Workspace.WorktreesEnabled() {
+		activeWorktree, _ = m.com.Workspace.GetActiveWorktree(context.Background(), m.session.ID)
+	}
+	if activeWorktree != nil {
+		gitInfo = t.Sidebar.WorkingDir.Render("⑂ " + activeWorktree.Name)
+	} else if branch := m.com.Workspace.GitBranch(); branch != "" {
+		gitInfo = t.Sidebar.WorkingDir.Render(" " + branch)
+	}
+
 	blocks := []string{
 		sidebarLogo,
 		title,
 		"",
 		cwd,
+	}
+	if gitInfo != "" {
+		blocks = append(blocks, gitInfo)
+	}
+	blocks = append(blocks,
 		"",
 		m.modelInfo(width),
 		"",
-	}
+	)
 
 	sidebarHeader := lipgloss.JoinVertical(
 		lipgloss.Left,

@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os/exec"
 	"runtime"
+	"strings"
 
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
@@ -209,13 +211,14 @@ func (b *Backend) maybeShutdown() {
 func (b *Backend) makeProtoWorkspace(clientID, path, dataDir string, env []string, cfg *config.ConfigStore) proto.Workspace {
 	c := cfg.Config()
 	return proto.Workspace{
-		ID:      clientID,
-		Path:    path,
-		DataDir: dataDir,
-		Debug:   c.Options.Debug,
-		YOLO:    cfg.Overrides().SkipPermissionRequests,
-		Config:  c,
-		Env:     env,
+		ID:        clientID,
+		Path:      path,
+		GitBranch: getGitBranch(path),
+		DataDir:   dataDir,
+		Debug:     c.Options.Debug,
+		YOLO:      cfg.Overrides().SkipPermissionRequests,
+		Config:    c,
+		Env:       env,
 	}
 }
 
@@ -253,11 +256,24 @@ func (b *Backend) Shutdown() {
 func workspaceToProto(ws *Workspace) proto.Workspace {
 	cfg := ws.Cfg.Config()
 	return proto.Workspace{
-		ID:      ws.ID,
-		Path:    ws.Path,
-		YOLO:    ws.Cfg.Overrides().SkipPermissionRequests,
-		DataDir: cfg.Options.DataDirectory,
-		Debug:   cfg.Options.Debug,
-		Config:  cfg,
+		ID:        ws.ID,
+		Path:      ws.Path,
+		GitBranch: getGitBranch(ws.Path),
+		YOLO:      ws.Cfg.Overrides().SkipPermissionRequests,
+		DataDir:   cfg.Options.DataDirectory,
+		Debug:     cfg.Options.Debug,
+		Config:    cfg,
 	}
+}
+
+// getGitBranch returns the current git branch for the given directory.
+// Returns empty string if not in a git repo or on error.
+func getGitBranch(dir string) string {
+	cmd := exec.Command("git", "branch", "--show-current")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }

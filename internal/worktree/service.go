@@ -340,6 +340,11 @@ func (s *service) List(ctx context.Context, sessionID string) ([]*Worktree, erro
 		return nil, nil
 	}
 
+	// If no sessionID provided, list all worktrees.
+	if sessionID == "" {
+		return s.ListAll(ctx)
+	}
+
 	rows, err := s.queries.ListWorktrees(ctx, sessionID)
 	if err != nil {
 		return nil, err

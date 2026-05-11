@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/crush/internal/worktree"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -144,11 +145,15 @@ func renderHeaderDetails(
 		parts = append(parts, t.LSP.ErrorDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPErrorIcon, lspErrorCount)))
 	}
 
-	// Show active worktree indicator if enabled.
+	// Show worktree name if active, otherwise git branch.
+	var activeWorktree *worktree.Worktree
 	if com.Workspace.WorktreesEnabled() {
-		if wt, err := com.Workspace.GetActiveWorktree(context.Background(), session.ID); err == nil && wt != nil {
-			parts = append(parts, t.Header.WorkingDir.Render("⑂ "+wt.Name))
-		}
+		activeWorktree, _ = com.Workspace.GetActiveWorktree(context.Background(), session.ID)
+	}
+	if activeWorktree != nil {
+		parts = append(parts, t.Header.WorkingDir.Render("⑂ "+activeWorktree.Name))
+	} else if branch := com.Workspace.GitBranch(); branch != "" {
+		parts = append(parts, t.Header.WorkingDir.Render(" "+branch))
 	}
 
 	agentCfg := com.Config().Agents[config.AgentCoder]
@@ -175,8 +180,9 @@ func renderHeaderDetails(
 	metadata := strings.Join(parts, dot)
 	metadata = dot + metadata
 
+	// Use BaseDir to show project root, not worktree path.
 	const dirTrimLimit = 4
-	cwd := fsext.DirTrim(fsext.PrettyPath(com.Workspace.WorkingDir()), dirTrimLimit)
+	cwd := fsext.DirTrim(fsext.PrettyPath(com.Workspace.BaseDir()), dirTrimLimit)
 	cwd = t.Header.WorkingDir.Render(cwd)
 
 	result := cwd + metadata

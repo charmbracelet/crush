@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -423,6 +424,24 @@ func (w *ClientWorkspace) WorkingDir() string {
 		}
 	}
 	return w.cached().Path
+}
+
+// BaseDir returns the project base directory (not worktree-aware).
+func (w *ClientWorkspace) BaseDir() string {
+	return w.cached().Path
+}
+
+// GitBranch returns the current git branch name, or empty if not in a git repo.
+// Fetches live from git using WorkingDir (which is worktree-aware).
+func (w *ClientWorkspace) GitBranch() string {
+	dir := w.WorkingDir()
+	cmd := exec.Command("git", "branch", "--show-current")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func (w *ClientWorkspace) Resolver() config.VariableResolver {

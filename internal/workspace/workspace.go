@@ -119,6 +119,8 @@ type Workspace interface {
 	// Config (read-only data)
 	Config() *config.Config
 	WorkingDir() string
+	BaseDir() string // Project base directory (not worktree-aware)
+	GitBranch() string
 	Resolver() config.VariableResolver
 
 	// Session context for worktree-aware working directory

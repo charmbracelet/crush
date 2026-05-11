@@ -559,8 +559,19 @@ func (s *SnapshotsConfig) IsEnabled() bool {
 
 // WorktreeConfig holds configuration for Crush-managed git worktrees.
 type WorktreeConfig struct {
+	// Enabled controls whether worktrees are used (default true).
+	Enabled *bool `json:"enabled,omitempty" jsonschema:"description=Enable Crush-managed git worktrees,default=true"`
+
 	// PostCreate defines commands to run after creating/restoring a worktree.
 	PostCreate []PostCreateHook `json:"post_create,omitempty" jsonschema:"description=Commands to run after creating a worktree"`
+}
+
+// IsEnabled returns whether worktrees are enabled (default true).
+func (w *WorktreeConfig) IsEnabled() bool {
+	if w == nil || w.Enabled == nil {
+		return true
+	}
+	return *w.Enabled
 }
 
 // PostCreateHook defines a command to run after worktree creation.

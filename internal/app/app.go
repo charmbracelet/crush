@@ -122,7 +122,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 	// Initialize worktree service.
 	worktreeCfg := worktree.ServiceConfig{
 		ProjectDir: store.WorkingDir(),
-		Enabled:    cfg.Worktree != nil && len(cfg.Worktree.PostCreate) > 0,
+		Enabled:    cfg.Worktree.IsEnabled(),
 	}
 	if cfg.Worktree != nil {
 		worktreeCfg.PostCreateHooks = cfg.Worktree.PostCreate

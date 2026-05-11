@@ -42,6 +42,17 @@ Common shell builtins and core utils available on Windows.
   * Short-lived scripts
 </background_execution>
 
+<github_integration>
+**Note**: The gh CLI is available for all GitHub-related operations. When fetching GitHub content (PRs, issues, repos, commits), prefer gh CLI over web scraping:
+
+- `gh pr view <number> --repo <owner>/<repo> --json <fields>` - Fetch PR details
+- `gh issue view <number> --repo <owner>/<repo> --json <fields>` - Fetch issue details
+- `gh repo view <owner>/<repo> --json <fields>` - Fetch repository details
+- `gh api repos/<owner>/<repo>/commits/<sha>` - Fetch commit details
+
+This provides structured JSON data with better quality than HTML parsing. See the agentic_fetch sub-agent prompt for detailed field lists and usage examples.
+</github_integration>
+
 <git_commits>
 When user asks to create git commit:
 

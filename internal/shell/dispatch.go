@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/interp"
@@ -173,6 +174,10 @@ func isBinary(probe []byte) bool {
 // interpreter via os/exec, inheriting the parent runner's cwd, env, and
 // stdio. Returns interp.ExitStatus on non-zero interpreter exit so the
 // parent interpreter sees it as a normal non-zero status.
+//
+// On Unix, the command runs in its own process group so that on context
+// cancellation we can kill the entire tree (the interpreter and any
+// children it spawns, e.g. an editor).
 func dispatchShebang(ctx context.Context, scriptPath string, probe []byte, args []string) error {
 	sb, err := parseShebang(probe)
 	if err != nil {
@@ -192,7 +197,9 @@ func dispatchShebang(ctx context.Context, scriptPath string, probe []byte, args 
 	cmdArgs = append(cmdArgs, scriptPath)
 	cmdArgs = append(cmdArgs, args[1:]...)
 
-	cmd := exec.CommandContext(ctx, interpreter, cmdArgs...)
+	// Don't use exec.CommandContext - we handle cancellation ourselves
+	// to properly kill the process group.
+	cmd := exec.Command(interpreter, cmdArgs...)
 	hc := interp.HandlerCtx(ctx)
 	cmd.Dir = hc.Dir
 	cmd.Env = execEnvList(hc.Env)
@@ -200,7 +207,26 @@ func dispatchShebang(ctx context.Context, scriptPath string, probe []byte, args 
 	cmd.Stdout = hc.Stdout
 	cmd.Stderr = hc.Stderr
 
-	if err := cmd.Run(); err != nil {
+	// Set up process group isolation so we can kill child processes.
+	prepareCmd(cmd)
+
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	// Set up cancellation handler to kill the process group.
+	stopCancel := context.AfterFunc(ctx, func() {
+		if killTimeout <= 0 {
+			_ = killCmd(cmd)
+			return
+		}
+		_ = interruptCmd(cmd)
+		time.Sleep(killTimeout)
+		_ = killCmd(cmd)
+	})
+	defer stopCancel()
+
+	if err := cmd.Wait(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			code := exitErr.ExitCode()

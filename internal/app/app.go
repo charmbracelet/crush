@@ -192,6 +192,13 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 	})
 	go app.LSPManager.TrackConfigured()
 
+	// Validate worktree state on startup.
+	if worktrees != nil && worktrees.IsEnabled() {
+		if err := worktrees.ValidateState(ctx); err != nil {
+			slog.Warn("Worktree validation failed", "error", err)
+		}
+	}
+
 	return app, nil
 }
 

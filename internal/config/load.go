@@ -442,6 +442,22 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 		c.LSP = make(map[string]LSPConfig)
 	}
 
+	// Set default snapshot exclusions if not configured.
+	if c.Snapshots == nil {
+		c.Snapshots = &SnapshotsConfig{}
+	}
+	if len(c.Snapshots.Exclude) == 0 {
+		c.Snapshots.Exclude = defaultSnapshotExclusions()
+	}
+
+	// Set default worktree hooks if not configured.
+	if c.Worktree == nil {
+		c.Worktree = &WorktreeConfig{}
+	}
+	if len(c.Worktree.PostCreate) == 0 {
+		c.Worktree.PostCreate = defaultPostCreateHooks()
+	}
+
 	// Apply defaults to LSP configurations
 	c.applyLSPDefaults()
 
@@ -907,6 +923,42 @@ func ProjectSkillsDir(workingDir string) []string {
 }
 
 func isAppleTerminal() bool { return os.Getenv("TERM_PROGRAM") == "Apple_Terminal" }
+
+// defaultSnapshotExclusions returns the default patterns to exclude from snapshots.
+func defaultSnapshotExclusions() []string {
+	return []string{
+		"node_modules",
+		"**/node_modules",
+		"vendor",
+		".venv",
+		"venv",
+		"__pycache__",
+		"**/__pycache__",
+		"*.pyc",
+		"target",
+		"dist",
+		"build",
+		".next",
+		".nuxt",
+		".output",
+		".cache",
+		"*.log",
+		".DS_Store",
+	}
+}
+
+// defaultPostCreateHooks returns the default commands to run after creating a worktree.
+func defaultPostCreateHooks() []PostCreateHook {
+	return []PostCreateHook{
+		{IfExists: "bun.lockb", Run: "bun i"},
+		{IfExists: "pnpm-lock.yaml", Run: "pnpm i"},
+		{IfExists: "yarn.lock", Run: "yarn"},
+		{IfExists: "package-lock.json", Run: "npm ci"},
+		{IfExists: "go.sum", Run: "go mod download"},
+		{IfExists: "Cargo.lock", Run: "cargo fetch"},
+		{IfExists: "requirements.txt", Run: "pip install -r requirements.txt"},
+	}
+}
 
 // normalizeHookEvent maps user-provided event names to their canonical
 // form. Matching is case-insensitive and accepts snake_case variants

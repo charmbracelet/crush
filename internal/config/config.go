@@ -540,6 +540,38 @@ func (t ToolGrep) GetTimeout() time.Duration {
 	return ptrValOr(t.Timeout, 5*time.Second)
 }
 
+// SnapshotsConfig holds configuration for filesystem snapshots.
+type SnapshotsConfig struct {
+	// Enabled enables automatic snapshots on user messages.
+	Enabled *bool `json:"enabled,omitempty" jsonschema:"description=Enable automatic filesystem snapshots,default=true"`
+
+	// Exclude is a list of glob patterns to exclude from snapshots.
+	Exclude []string `json:"exclude,omitempty" jsonschema:"description=Glob patterns to exclude from snapshots (e.g. node_modules)"`
+}
+
+// IsEnabled returns whether snapshots are enabled (default true).
+func (s *SnapshotsConfig) IsEnabled() bool {
+	if s == nil || s.Enabled == nil {
+		return true
+	}
+	return *s.Enabled
+}
+
+// WorktreeConfig holds configuration for Crush-managed git worktrees.
+type WorktreeConfig struct {
+	// PostCreate defines commands to run after creating/restoring a worktree.
+	PostCreate []PostCreateHook `json:"post_create,omitempty" jsonschema:"description=Commands to run after creating a worktree"`
+}
+
+// PostCreateHook defines a command to run after worktree creation.
+type PostCreateHook struct {
+	// IfExists is a file to check for before running the command.
+	IfExists string `json:"if_exists" jsonschema:"required,description=File to check for (e.g. bun.lockb)"`
+
+	// Run is the command to execute.
+	Run string `json:"run" jsonschema:"required,description=Command to run (e.g. bun i)"`
+}
+
 // HookConfig defines a user-configured shell command that fires on a hook
 // event (e.g. PreToolUse). This is a pure-data struct: matcher compilation
 // is owned by hooks.Runner so a JSON round-trip, merge, or reload can't
@@ -586,6 +618,10 @@ type Config struct {
 	Tools Tools `json:"tools,omitzero" jsonschema:"description=Tool configurations"`
 
 	Hooks map[string][]HookConfig `json:"hooks,omitempty" jsonschema:"description=User-defined shell commands that fire on hook events (e.g. PreToolUse)"`
+
+	Snapshots *SnapshotsConfig `json:"snapshots,omitempty" jsonschema:"description=Filesystem snapshot configuration"`
+
+	Worktree *WorktreeConfig `json:"worktree,omitempty" jsonschema:"description=Git worktree configuration"`
 
 	Agents map[string]Agent `json:"-"`
 }

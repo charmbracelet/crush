@@ -204,11 +204,12 @@ func supportsProgressBar() bool {
 	return isWindowsTerminal || xstrings.ContainsAnyOf(strings.ToLower(termProg), "ghostty", "iterm2", "rio")
 }
 
-// useClientServer returns true when the client/server architecture is
-// enabled via the CRUSH_CLIENT_SERVER environment variable.
+// useClientServer returns true unless the CRUSH_LOCAL_MODE environment
+// variable is set to disable client/server mode. Client/server is now
+// the default architecture.
 func useClientServer() bool {
-	v, _ := strconv.ParseBool(os.Getenv("CRUSH_CLIENT_SERVER"))
-	return v
+	v, _ := strconv.ParseBool(os.Getenv("CRUSH_LOCAL_MODE"))
+	return !v
 }
 
 // setupWorkspaceWithProgressBar wraps setupWorkspace with an optional
@@ -228,10 +229,10 @@ func setupWorkspaceWithProgressBar(cmd *cobra.Command) (workspace.Workspace, fun
 	return ws, cleanup, err
 }
 
-// setupWorkspace returns a Workspace and cleanup function. When
-// CRUSH_CLIENT_SERVER=1, it connects to a server process and returns a
-// ClientWorkspace. Otherwise it creates an in-process app.App and
-// returns an AppWorkspace.
+// setupWorkspace returns a Workspace and cleanup function. By default,
+// it connects to a server process and returns a ClientWorkspace. When
+// CRUSH_LOCAL_MODE=1, it creates an in-process app.App and returns an
+// AppWorkspace.
 func setupWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error) {
 	if useClientServer() {
 		return setupClientServerWorkspace(cmd)

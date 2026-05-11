@@ -388,6 +388,23 @@ func (w *ClientWorkspace) LSPGetDiagnosticCounts(name string) lsp.DiagnosticCoun
 	return counts
 }
 
+func (w *ClientWorkspace) SkillsGetStates() []*skills.SkillState {
+	states, err := w.client.SkillsGetStates(context.Background(), w.workspaceID())
+	if err != nil {
+		return nil
+	}
+	result := make([]*skills.SkillState, len(states))
+	for i, s := range states {
+		result[i] = &skills.SkillState{
+			Name:  s.Name,
+			Path:  s.Path,
+			State: skills.DiscoveryState(s.State),
+			Err:   s.Error,
+		}
+	}
+	return result
+}
+
 // -- Config (read-only) --
 
 func (w *ClientWorkspace) Config() *config.Config {

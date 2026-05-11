@@ -31,8 +31,9 @@ type WebFetchParams struct {
 
 // WebSearchParams defines the parameters for the web_search tool.
 type WebSearchParams struct {
-	Query      string `json:"query" description:"The search query to find information on the web"`
-	MaxResults int    `json:"max_results,omitempty" description:"Maximum number of results to return (default: 10, max: 20)"`
+	Query        string `json:"query" description:"The search query to find information on the web"`
+	MaxResults   int    `json:"max_results,omitempty" description:"Maximum number of results to return (default: 10, max: 20)"`
+	SearchEngine string `json:"search_engine,omitempty" description:"Optional search engine override for this search (duckduckgo or kagi)"`
 }
 
 // FetchParams defines the parameters for the simple fetch tool.

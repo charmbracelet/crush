@@ -2,7 +2,6 @@ package backend
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/config"
@@ -11,8 +10,6 @@ import (
 )
 
 func TestCreateWorkspace_DeduplicatesByDataDir(t *testing.T) {
-	t.Parallel()
-
 	tempDir := t.TempDir()
 
 	cfg, err := config.Init(tempDir, "", false)
@@ -47,17 +44,13 @@ func TestCreateWorkspace_DeduplicatesByDataDir(t *testing.T) {
 	require.NoError(t, err)
 	require.Same(t, got1, got2, "both client IDs should resolve to same workspace")
 
-	// Verify client tracking.
-	b.mu.Lock()
-	workspaceID := b.clientToWorkspace[result1.ID]
-	clients := b.workspaceClients[workspaceID]
-	b.mu.Unlock()
-	require.Len(t, clients, 2, "should have 2 clients tracked")
+	// Verify client tracking via the tracker's client count.
+	wsID, ok := b.clients.workspaceForClient(result1.ID)
+	require.True(t, ok)
+	require.Equal(t, 2, b.clients.clientCount(wsID), "should have 2 clients tracked")
 }
 
 func TestDeleteWorkspace_OnlyDeletesWhenLastClientDisconnects(t *testing.T) {
-	t.Parallel()
-
 	tempDir := t.TempDir()
 
 	cfg, err := config.Init(tempDir, "", false)
@@ -93,8 +86,6 @@ func TestDeleteWorkspace_OnlyDeletesWhenLastClientDisconnects(t *testing.T) {
 }
 
 func TestDeleteWorkspace_CleansUpDataDirMapping(t *testing.T) {
-	t.Parallel()
-
 	tempDir := t.TempDir()
 
 	cfg, err := config.Init(tempDir, "", false)
@@ -106,21 +97,17 @@ func TestDeleteWorkspace_CleansUpDataDirMapping(t *testing.T) {
 	_, result1, err := b.CreateWorkspace(proto.Workspace{Path: tempDir})
 	require.NoError(t, err)
 
-	dataDir := filepath.Join(tempDir, ".crush")
+	dataDir := result1.DataDir
 
 	// Verify mapping exists.
-	b.mu.Lock()
-	_, exists := b.dataDirToID[dataDir]
-	b.mu.Unlock()
+	_, exists := b.clients.workspaceForDataDir(dataDir)
 	require.True(t, exists, "data dir mapping should exist")
 
 	// Delete workspace.
 	b.DeleteWorkspace(result1.ID)
 
 	// Verify mapping is cleaned up.
-	b.mu.Lock()
-	_, exists = b.dataDirToID[dataDir]
-	b.mu.Unlock()
+	_, exists = b.clients.workspaceForDataDir(dataDir)
 	require.False(t, exists, "data dir mapping should be cleaned up")
 
 	// Creating a new workspace should work.

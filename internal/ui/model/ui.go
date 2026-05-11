@@ -1457,6 +1457,28 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionDisableDockerMCP:
 		m.dialog.CloseDialog(dialog.CommandsID)
 		cmds = append(cmds, m.disableDockerMCP)
+
+	// Snapshot/Worktree actions.
+	case dialog.ActionOpenSnapshotsDialog:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		if cmd := m.openSnapshotsDialog(msg.SessionID); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.ActionRestoreSnapshot:
+		m.dialog.CloseDialog(dialog.SnapshotsID)
+		cmds = append(cmds, m.restoreSnapshot(msg.SnapshotID))
+	case dialog.ActionOpenWorktreesDialog:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		if cmd := m.openWorktreesDialog(msg.SessionID); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.ActionCreateWorktree:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		cmds = append(cmds, m.createWorktree(msg.SessionID, msg.Name, msg.FromSnapshotID))
+	case dialog.ActionSwitchWorktree:
+		m.dialog.CloseDialog(dialog.WorktreesID)
+		cmds = append(cmds, m.switchWorktree(msg.SessionID, msg.WorktreeID))
+
 	case dialog.ActionInitializeProject:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
@@ -3360,6 +3382,67 @@ func (m *UI) openFilesDialog() tea.Cmd {
 	m.dialog.OpenDialog(filePicker)
 
 	return cmd
+}
+
+// openSnapshotsDialog opens the snapshots dialog.
+func (m *UI) openSnapshotsDialog(sessionID string) tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.SnapshotsID) {
+		m.dialog.BringToFront(dialog.SnapshotsID)
+		return nil
+	}
+
+	snapshotsDialog, err := dialog.NewSnapshots(m.com, sessionID)
+	if err != nil {
+		return util.ReportError(err)
+	}
+	m.dialog.OpenDialog(snapshotsDialog)
+	return nil
+}
+
+// restoreSnapshot restores the filesystem to a specific snapshot.
+func (m *UI) restoreSnapshot(snapshotID string) tea.Cmd {
+	return func() tea.Msg {
+		if err := m.com.Workspace.RestoreSnapshot(context.Background(), snapshotID); err != nil {
+			return util.ReportError(err)()
+		}
+		return util.NewInfoMsg("Snapshot restored")
+	}
+}
+
+// openWorktreesDialog opens the worktrees dialog.
+func (m *UI) openWorktreesDialog(sessionID string) tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.WorktreesID) {
+		m.dialog.BringToFront(dialog.WorktreesID)
+		return nil
+	}
+
+	worktreesDialog, err := dialog.NewWorktrees(m.com, sessionID)
+	if err != nil {
+		return util.ReportError(err)
+	}
+	m.dialog.OpenDialog(worktreesDialog)
+	return nil
+}
+
+// createWorktree creates a new worktree.
+func (m *UI) createWorktree(sessionID, name, fromSnapshotID string) tea.Cmd {
+	return func() tea.Msg {
+		wt, err := m.com.Workspace.CreateWorktree(context.Background(), sessionID, name, fromSnapshotID)
+		if err != nil {
+			return util.ReportError(err)()
+		}
+		return util.NewInfoMsg("Worktree created: " + wt.Name)
+	}
+}
+
+// switchWorktree switches to a different worktree.
+func (m *UI) switchWorktree(sessionID, worktreeID string) tea.Cmd {
+	return func() tea.Msg {
+		if err := m.com.Workspace.SwitchWorktree(context.Background(), sessionID, worktreeID); err != nil {
+			return util.ReportError(err)()
+		}
+		return util.NewInfoMsg("Switched worktree")
+	}
 }
 
 // openPermissionsDialog opens the permissions dialog for a permission request.

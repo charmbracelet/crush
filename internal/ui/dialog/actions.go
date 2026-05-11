@@ -85,6 +85,32 @@ type (
 	ActionEnableDockerMCP struct{}
 	// ActionDisableDockerMCP is a message to disable Docker MCP.
 	ActionDisableDockerMCP struct{}
+
+	// Snapshot/Worktree actions.
+
+	// ActionOpenSnapshotsDialog opens the snapshots dialog.
+	ActionOpenSnapshotsDialog struct {
+		SessionID string
+	}
+	// ActionRestoreSnapshot restores the filesystem to a snapshot.
+	ActionRestoreSnapshot struct {
+		SnapshotID string
+	}
+	// ActionOpenWorktreesDialog opens the worktrees dialog.
+	ActionOpenWorktreesDialog struct {
+		SessionID string
+	}
+	// ActionCreateWorktree creates a new worktree.
+	ActionCreateWorktree struct {
+		SessionID      string
+		Name           string
+		FromSnapshotID string
+	}
+	// ActionSwitchWorktree switches to a different worktree.
+	ActionSwitchWorktree struct {
+		SessionID   string
+		WorktreeID  string
+	}
 )
 
 // Messages for API key input dialog.

@@ -516,6 +516,17 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		NewCommandItem(c.com.Styles, "init", "Initialize Project", "", ActionInitializeProject{}),
 	)
 
+	// Add snapshot commands if enabled and has session.
+	if c.hasSession && c.com.Workspace.SnapshotsEnabled() {
+		commands = append(commands, NewCommandItem(c.com.Styles, "snapshots", "View Snapshots", "", ActionOpenSnapshotsDialog{SessionID: c.sessionID}))
+	}
+
+	// Add worktree commands if enabled and has session.
+	if c.hasSession && c.com.Workspace.WorktreesEnabled() {
+		commands = append(commands, NewCommandItem(c.com.Styles, "worktrees", "Manage Worktrees", "", ActionOpenWorktreesDialog{SessionID: c.sessionID}))
+		commands = append(commands, NewCommandItem(c.com.Styles, "new_worktree", "Create Worktree", "", ActionCreateWorktree{SessionID: c.sessionID}))
+	}
+
 	// Add transparent background toggle.
 	transparentLabel := "Disable Background Color"
 	if cfg != nil && cfg.Options != nil && cfg.Options.TUI.Transparent != nil && *cfg.Options.TUI.Transparent {

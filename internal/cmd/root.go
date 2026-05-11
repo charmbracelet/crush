@@ -3,7 +3,6 @@ package cmd
 import (
 	"bytes"
 	"context"
-	_ "embed"
 	"errors"
 	"fmt"
 	"io"
@@ -22,13 +21,10 @@ import (
 	fang "charm.land/fang/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
-	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/client"
 	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
 	crushlog "github.com/charmbracelet/crush/internal/log"
-	"github.com/charmbracelet/crush/internal/projects"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/server"
 	"github.com/charmbracelet/crush/internal/session"
@@ -204,14 +200,6 @@ func supportsProgressBar() bool {
 	return isWindowsTerminal || xstrings.ContainsAnyOf(strings.ToLower(termProg), "ghostty", "iterm2", "rio")
 }
 
-// useClientServer returns true unless the CRUSH_LOCAL_MODE environment
-// variable is set to disable client/server mode. Client/server is now
-// the default architecture.
-func useClientServer() bool {
-	v, _ := strconv.ParseBool(os.Getenv("CRUSH_LOCAL_MODE"))
-	return !v
-}
-
 // setupWorkspaceWithProgressBar wraps setupWorkspace with an optional
 // terminal progress bar shown during initialization.
 func setupWorkspaceWithProgressBar(cmd *cobra.Command) (workspace.Workspace, func(), error) {
@@ -229,75 +217,10 @@ func setupWorkspaceWithProgressBar(cmd *cobra.Command) (workspace.Workspace, fun
 	return ws, cleanup, err
 }
 
-// setupWorkspace returns a Workspace and cleanup function. By default,
-// it connects to a server process and returns a ClientWorkspace. When
-// CRUSH_LOCAL_MODE=1, it creates an in-process app.App and returns an
-// AppWorkspace.
+// setupWorkspace returns a Workspace and cleanup function. It connects
+// to a server process and returns a ClientWorkspace.
 func setupWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error) {
-	if useClientServer() {
-		return setupClientServerWorkspace(cmd)
-	}
-	return setupLocalWorkspace(cmd)
-}
-
-// setupLocalWorkspace creates an in-process app.App and wraps it in an
-// AppWorkspace.
-func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error) {
-	debug, _ := cmd.Flags().GetBool("debug")
-	yolo, _ := cmd.Flags().GetBool("yolo")
-	dataDir, _ := cmd.Flags().GetString("data-dir")
-	ctx := cmd.Context()
-
-	cwd, err := ResolveCwd(cmd)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	store, err := config.Init(cwd, dataDir, debug)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	cfg := store.Config()
-	store.Overrides().SkipPermissionRequests = yolo
-
-	if err := os.MkdirAll(cfg.Options.DataDirectory, 0o700); err != nil {
-		return nil, nil, fmt.Errorf("failed to create data directory: %q %w", cfg.Options.DataDirectory, err)
-	}
-
-	gitIgnorePath := filepath.Join(cfg.Options.DataDirectory, ".gitignore")
-	if _, err := os.Stat(gitIgnorePath); os.IsNotExist(err) {
-		if err := os.WriteFile(gitIgnorePath, []byte("*\n"), 0o644); err != nil {
-			return nil, nil, fmt.Errorf("failed to create .gitignore file: %q %w", gitIgnorePath, err)
-		}
-	}
-
-	if err := projects.Register(cwd, cfg.Options.DataDirectory); err != nil {
-		slog.Warn("Failed to register project", "error", err)
-	}
-
-	conn, err := db.Connect(ctx, cfg.Options.DataDirectory)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	logFile := filepath.Join(cfg.Options.DataDirectory, "logs", "crush.log")
-	crushlog.Setup(logFile, debug)
-
-	appInstance, err := app.New(ctx, conn, store)
-	if err != nil {
-		_ = conn.Close()
-		slog.Error("Failed to create app instance", "error", err)
-		return nil, nil, err
-	}
-
-	if shouldEnableMetrics(cfg) {
-		event.Init()
-	}
-
-	ws := workspace.NewAppWorkspace(appInstance, store)
-	cleanup := func() { appInstance.Shutdown() }
-	return ws, cleanup, nil
+	return setupClientServerWorkspace(cmd)
 }
 
 // setupClientServerWorkspace connects to a server process and wraps the
@@ -595,27 +518,3 @@ func ResolveCwd(cmd *cobra.Command) (string, error) {
 	}
 	return cwd, nil
 }
-
-func createDotCrushDir(dir string) error {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("failed to create data directory: %q %w", dir, err)
-	}
-
-	gitIgnorePath := filepath.Join(dir, ".gitignore")
-	content, err := os.ReadFile(gitIgnorePath)
-
-	// create or update if old version
-	if os.IsNotExist(err) || string(content) == oldGitIgnore {
-		if err := os.WriteFile(gitIgnorePath, []byte(defaultGitIgnore), 0o644); err != nil {
-			return fmt.Errorf("failed to create .gitignore file: %q %w", gitIgnorePath, err)
-		}
-	}
-
-	return nil
-}
-
-//go:embed gitignore/old
-var oldGitIgnore string
-
-//go:embed gitignore/default
-var defaultGitIgnore string

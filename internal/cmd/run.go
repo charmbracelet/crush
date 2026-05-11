@@ -20,7 +20,6 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/styles"
-	"github.com/charmbracelet/crush/internal/workspace"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/charmbracelet/x/term"
@@ -94,35 +93,7 @@ crush run --continue "Follow up on your last response"
 			event.SetContinueLastSession(true)
 		}
 
-		if useClientServer() {
-			c, ws, cleanup, err := connectToServer(cmd)
-			if err != nil {
-				return err
-			}
-			defer cleanup()
-
-			event.AppInitialized()
-
-			if sessionID != "" {
-				sess, err := resolveSessionByID(ctx, c, ws.ID, sessionID)
-				if err != nil {
-					return err
-				}
-				sessionID = sess.ID
-			}
-
-			if !ws.Config.IsConfigured() {
-				return fmt.Errorf("no providers configured - please run 'crush' to set up a provider interactively")
-			}
-
-			if verbose {
-				slog.SetDefault(slog.New(log.New(os.Stderr)))
-			}
-
-			return runNonInteractive(ctx, c, ws, prompt, largeModel, smallModel, quiet || verbose, sessionID, useLast)
-		}
-
-		ws, cleanup, err := setupLocalWorkspace(cmd)
+		c, ws, cleanup, err := connectToServer(cmd)
 		if err != nil {
 			return err
 		}
@@ -130,7 +101,15 @@ crush run --continue "Follow up on your last response"
 
 		event.AppInitialized()
 
-		if !ws.Config().IsConfigured() {
+		if sessionID != "" {
+			sess, err := resolveSessionByID(ctx, c, ws.ID, sessionID)
+			if err != nil {
+				return err
+			}
+			sessionID = sess.ID
+		}
+
+		if !ws.Config.IsConfigured() {
 			return fmt.Errorf("no providers configured - please run 'crush' to set up a provider interactively")
 		}
 
@@ -138,8 +117,7 @@ crush run --continue "Follow up on your last response"
 			slog.SetDefault(slog.New(log.New(os.Stderr)))
 		}
 
-		appWs := ws.(*workspace.AppWorkspace)
-		return appWs.App().RunNonInteractive(ctx, os.Stdout, prompt, largeModel, smallModel, quiet || verbose, sessionID, useLast)
+		return runNonInteractive(ctx, c, ws, prompt, largeModel, smallModel, quiet || verbose, sessionID, useLast)
 	},
 }
 

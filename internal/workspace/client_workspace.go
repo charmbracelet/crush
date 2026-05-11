@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -541,78 +540,84 @@ func (w *ClientWorkspace) DisableDockerMCP() error {
 	return w.client.DisableDockerMCP(context.Background(), w.workspaceID())
 }
 
-// -- Snapshots (not supported in client mode) --
-
-var errRemoteNotSupported = errors.New("snapshots/worktrees/forks not supported in remote mode")
+// -- Snapshots --
 
 func (w *ClientWorkspace) SnapshotsEnabled() bool {
-	return false
+	enabled, err := w.client.SnapshotsEnabled(context.Background(), w.workspaceID())
+	if err != nil {
+		return false
+	}
+	return enabled
 }
 
 func (w *ClientWorkspace) ListSnapshots(ctx context.Context, sessionID string) ([]*checkpoint.Snapshot, error) {
-	return nil, errRemoteNotSupported
+	return w.client.ListSnapshots(ctx, w.workspaceID(), sessionID)
 }
 
 func (w *ClientWorkspace) GetSnapshot(ctx context.Context, snapshotID string) (*checkpoint.Snapshot, error) {
-	return nil, errRemoteNotSupported
+	return w.client.GetSnapshot(ctx, w.workspaceID(), snapshotID)
 }
 
 func (w *ClientWorkspace) GetSnapshotByMessage(ctx context.Context, messageID string) (*checkpoint.Snapshot, error) {
-	return nil, errRemoteNotSupported
+	return w.client.GetSnapshotByMessage(ctx, w.workspaceID(), messageID)
 }
 
 func (w *ClientWorkspace) RestoreSnapshot(ctx context.Context, snapshotID string) error {
-	return errRemoteNotSupported
+	return w.client.RestoreSnapshot(ctx, w.workspaceID(), snapshotID)
 }
 
 func (w *ClientWorkspace) DiffFromCurrentSnapshot(ctx context.Context, snapshotID string) (string, error) {
-	return "", errRemoteNotSupported
+	return w.client.DiffFromCurrentSnapshot(ctx, w.workspaceID(), snapshotID)
 }
 
-// -- Worktrees (not supported in client mode) --
+// -- Worktrees --
 
 func (w *ClientWorkspace) WorktreesEnabled() bool {
-	return false
+	enabled, err := w.client.WorktreesEnabled(context.Background(), w.workspaceID())
+	if err != nil {
+		return false
+	}
+	return enabled
 }
 
 func (w *ClientWorkspace) ListWorktrees(ctx context.Context, sessionID string) ([]*worktree.Worktree, error) {
-	return nil, errRemoteNotSupported
+	return w.client.ListWorktrees(ctx, w.workspaceID(), sessionID)
 }
 
 func (w *ClientWorkspace) GetWorktree(ctx context.Context, worktreeID string) (*worktree.Worktree, error) {
-	return nil, errRemoteNotSupported
+	return w.client.GetWorktree(ctx, w.workspaceID(), worktreeID)
 }
 
 func (w *ClientWorkspace) GetActiveWorktree(ctx context.Context, sessionID string) (*worktree.Worktree, error) {
-	return nil, errRemoteNotSupported
+	return w.client.GetActiveWorktree(ctx, w.workspaceID(), sessionID)
 }
 
 func (w *ClientWorkspace) CreateWorktree(ctx context.Context, sessionID, name, fromSnapshotID string) (*worktree.Worktree, error) {
-	return nil, errRemoteNotSupported
+	return w.client.CreateWorktree(ctx, w.workspaceID(), sessionID, name, fromSnapshotID)
 }
 
 func (w *ClientWorkspace) SwitchWorktree(ctx context.Context, sessionID, worktreeID string) error {
-	return errRemoteNotSupported
+	return w.client.SwitchWorktree(ctx, w.workspaceID(), sessionID, worktreeID)
 }
 
 func (w *ClientWorkspace) DeleteWorktree(ctx context.Context, worktreeID string) error {
-	return errRemoteNotSupported
+	return w.client.DeleteWorktree(ctx, w.workspaceID(), worktreeID)
 }
 
-// -- Forks (not supported in client mode) --
+// -- Forks --
 
 func (w *ClientWorkspace) ForkConversation(ctx context.Context, params fork.ForkParams) (*fork.ForkResult, error) {
-	return nil, errRemoteNotSupported
+	return w.client.ForkConversation(ctx, w.workspaceID(), params)
 }
 
-// -- Garbage Collection (not supported in client mode) --
+// -- Garbage Collection --
 
 func (w *ClientWorkspace) SnapshotGC(ctx context.Context) (int64, error) {
-	return 0, errRemoteNotSupported
+	return w.client.SnapshotGC(ctx, w.workspaceID())
 }
 
 func (w *ClientWorkspace) SnapshotStats(ctx context.Context) (*checkpoint.Stats, error) {
-	return nil, errRemoteNotSupported
+	return w.client.SnapshotStats(ctx, w.workspaceID())
 }
 
 // -- Lifecycle --

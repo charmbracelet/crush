@@ -40,6 +40,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/update"
 	"github.com/charmbracelet/crush/internal/version"
+	"github.com/charmbracelet/crush/internal/fork"
 	"github.com/charmbracelet/crush/internal/worktree"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
@@ -61,6 +62,7 @@ type App struct {
 	FileTracker filetracker.Service
 	Checkpoints checkpoint.Service
 	Worktrees   worktree.Service
+	Forks       fork.Service
 
 	AgentCoordinator agent.Coordinator
 
@@ -131,6 +133,9 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 		worktrees, _ = worktree.NewService(worktree.ServiceConfig{Enabled: false}, q, conn, checkpoints)
 	}
 
+	// Initialize fork service.
+	forks := fork.NewService(q, conn, sessions, messages, checkpoints, worktrees)
+
 	app := &App{
 		Sessions:    sessions,
 		Messages:    messages,
@@ -139,6 +144,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 		FileTracker: filetracker.NewService(q),
 		Checkpoints: checkpoints,
 		Worktrees:   worktrees,
+		Forks:       forks,
 		LSPManager:  lsp.NewManager(store),
 
 		globalCtx: ctx,

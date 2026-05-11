@@ -36,6 +36,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/checkpoint"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
@@ -116,6 +117,7 @@ type sessionAgent struct {
 	isSubAgent           bool
 	sessions             session.Service
 	messages             message.Service
+	checkpoints          checkpoint.Service
 	disableAutoSummarize bool
 	isYolo               bool
 	notify               pubsub.Publisher[notify.Notification]
@@ -134,6 +136,7 @@ type SessionAgentOptions struct {
 	IsYolo               bool
 	Sessions             session.Service
 	Messages             message.Service
+	Checkpoints          checkpoint.Service
 	Tools                []fantasy.AgentTool
 	Notify               pubsub.Publisher[notify.Notification]
 }
@@ -149,6 +152,7 @@ func NewSessionAgent(
 		isSubAgent:           opts.IsSubAgent,
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
+		checkpoints:          opts.Checkpoints,
 		disableAutoSummarize: opts.DisableAutoSummarize,
 		tools:                csync.NewSliceFrom(opts.Tools),
 		isYolo:               opts.IsYolo,
@@ -232,9 +236,21 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	defer wg.Wait()
 
 	// Add the user message to the session.
-	_, err = a.createUserMessage(ctx, call)
+	userMsg, err := a.createUserMessage(ctx, call)
 	if err != nil {
 		return nil, err
+	}
+
+	// Create snapshot of filesystem state (best-effort, don't block on failure).
+	if a.checkpoints != nil && a.checkpoints.IsEnabled() && !a.isSubAgent {
+		go func() {
+			// Use background context since this shouldn't be cancelled with the request.
+			snapshotCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if _, err := a.checkpoints.CreateSnapshot(snapshotCtx, call.SessionID, userMsg.ID, call.Prompt); err != nil {
+				slog.Debug("Failed to create snapshot", "error", err, "session_id", call.SessionID)
+			}
+		}()
 	}
 
 	// Add the session to the context.
@@ -654,7 +670,8 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	defer a.activeRequests.Del(sessionID)
 	defer cancel()
 
-	agent := fantasy.NewAgent(largeModel.Model,
+	agent := fantasy.NewAgent(
+		largeModel.Model,
 		fantasy.WithSystemPrompt(string(summaryPrompt)),
 		fantasy.WithUserAgent(userAgent),
 	)
@@ -800,7 +817,8 @@ func (a *sessionAgent) preparePrompt(msgs []message.Message, supportsImages bool
 	var history []fantasy.Message
 	if !a.isSubAgent {
 		history = append(history, fantasy.NewUserMessage(
-			fmt.Sprintf("<system_reminder>%s</system_reminder>",
+			fmt.Sprintf(
+				"<system_reminder>%s</system_reminder>",
 				`This is a reminder that your todo list is currently empty. DO NOT mention this to the user explicitly because they are already aware.
 If you are working on tasks that would benefit from a todo list please use the "todos" tool to create one.
 If not, please feel free to ignore. Again do not mention this message to the user.`,
@@ -906,7 +924,8 @@ func filterOrphanedToolResults(m message.Message, knownToolCallIDs map[string]st
 		if _, known := knownToolCallIDs[tr.ToolCallID]; known {
 			validParts = append(validParts, part)
 		} else {
-			slog.Warn("Dropping orphaned tool result with no matching tool call",
+			slog.Warn(
+				"Dropping orphaned tool result with no matching tool call",
 				"tool_call_id", tr.ToolCallID,
 			)
 		}
@@ -932,7 +951,8 @@ func syntheticToolResultsForOrphanedCalls(m message.Message, knownToolResultIDs 
 		if _, hasResult := knownToolResultIDs[tc.ID]; hasResult {
 			continue
 		}
-		slog.Warn("Injecting synthetic tool result for orphaned tool call",
+		slog.Warn(
+			"Injecting synthetic tool result for orphaned tool call",
 			"tool_call_id", tc.ID,
 			"tool_name", tc.Name,
 		)
@@ -990,7 +1010,8 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	}
 
 	newAgent := func(m fantasy.LanguageModel, p []byte, tok int64) fantasy.Agent {
-		return fantasy.NewAgent(m,
+		return fantasy.NewAgent(
+			m,
 			fantasy.WithSystemPrompt(string(p)+"\n /no_think"),
 			fantasy.WithMaxOutputTokens(tok),
 			fantasy.WithUserAgent(userAgent),
@@ -1259,7 +1280,8 @@ func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) mes
 	case fantasy.ToolResultContentTypeMedia:
 		if r, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentMedia](result.Result); ok {
 			if !stringext.IsValidBase64(r.Data) {
-				slog.Warn("Tool returned media with invalid base64 data, discarding image",
+				slog.Warn(
+					"Tool returned media with invalid base64 data, discarding image",
 					"tool", result.ToolName,
 					"tool_call_id", result.ToolCallID,
 				)

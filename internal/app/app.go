@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/charmbracelet/crush/internal/checkpoint"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
@@ -57,12 +58,15 @@ type App struct {
 	History     history.Service
 	Permissions permission.Service
 	FileTracker filetracker.Service
+	Checkpoints checkpoint.Service
 
 	AgentCoordinator agent.Coordinator
 
 	LSPManager *lsp.Manager
 
 	config *config.ConfigStore
+
+	dbConn *sql.DB
 
 	serviceEventsWG *sync.WaitGroup
 	eventsCtx       context.Context
@@ -88,17 +92,42 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 		allowedTools = cfg.Permissions.AllowedTools
 	}
 
+	// Initialize checkpoint service for filesystem snapshots.
+	checkpointCfg := checkpoint.ServiceConfig{
+		ProjectDir: store.WorkingDir(),
+		Enabled:    cfg.Snapshots.IsEnabled(),
+	}
+	if cfg.Snapshots != nil {
+		checkpointCfg.Exclude = cfg.Snapshots.Exclude
+	}
+	if cfg.Worktree != nil {
+		for _, hook := range cfg.Worktree.PostCreate {
+			checkpointCfg.PostRestoreHooks = append(checkpointCfg.PostRestoreHooks, checkpoint.PostRestoreHook{
+				IfExists: hook.IfExists,
+				Run:      hook.Run,
+			})
+		}
+	}
+	checkpoints, err := checkpoint.NewService(checkpointCfg, q, conn)
+	if err != nil {
+		slog.Warn("Failed to initialize checkpoint service", "error", err)
+		// Continue without snapshots - it's not critical.
+		checkpoints, _ = checkpoint.NewService(checkpoint.ServiceConfig{Enabled: false}, q, conn)
+	}
+
 	app := &App{
 		Sessions:    sessions,
 		Messages:    messages,
 		History:     files,
 		Permissions: permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools),
 		FileTracker: filetracker.NewService(q),
+		Checkpoints: checkpoints,
 		LSPManager:  lsp.NewManager(store),
 
 		globalCtx: ctx,
 
 		config: store,
+		dbConn: conn,
 
 		events:             pubsub.NewBroker[tea.Msg](),
 		serviceEventsWG:    &sync.WaitGroup{},
@@ -525,6 +554,7 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.config,
 		app.Sessions,
 		app.Messages,
+		app.Checkpoints,
 		app.Permissions,
 		app.History,
 		app.FileTracker,

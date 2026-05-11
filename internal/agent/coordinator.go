@@ -22,6 +22,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/checkpoint"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/filetracker"
@@ -82,6 +83,7 @@ type coordinator struct {
 	cfg         *config.ConfigStore
 	sessions    session.Service
 	messages    message.Service
+	checkpoints checkpoint.Service
 	permissions permission.Service
 	history     history.Service
 	filetracker filetracker.Service
@@ -104,6 +106,7 @@ func NewCoordinator(
 	cfg *config.ConfigStore,
 	sessions session.Service,
 	messages message.Service,
+	checkpoints checkpoint.Service,
 	permissions permission.Service,
 	history history.Service,
 	filetracker filetracker.Service,
@@ -118,6 +121,7 @@ func NewCoordinator(
 		cfg:          cfg,
 		sessions:     sessions,
 		messages:     messages,
+		checkpoints:  checkpoints,
 		permissions:  permissions,
 		history:      history,
 		filetracker:  filetracker,
@@ -414,6 +418,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		IsYolo:               c.permissions.SkipRequests(),
 		Sessions:             c.sessions,
 		Messages:             c.messages,
+		Checkpoints:          c.checkpoints,
 		Tools:                nil,
 		Notify:               c.notify,
 	})
@@ -473,7 +478,8 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		hookRunner = hooks.NewRunner(preToolHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
 	}
 
-	allTools = append(allTools,
+	allTools = append(
+		allTools,
 		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelName),
 		tools.NewCrushInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
 		tools.NewCrushLogsTool(logFile),
@@ -1179,7 +1185,8 @@ func logTurnSkillUsage(
 		}
 	}
 
-	slog.Info("Skill turn summary",
+	slog.Info(
+		"Skill turn summary",
 		"component", "skills",
 		"session_id", sessionID,
 		"prompt_len", len(prompt),
@@ -1223,7 +1230,8 @@ func logDiscoveryStats(
 
 	xml := skills.ToPromptXML(activeSkills)
 
-	slog.Info("Skill discovery complete",
+	slog.Info(
+		"Skill discovery complete",
 		"component", "skills",
 		"builtin_ok", len(builtin),
 		"builtin_errors", countErrors(builtinStates),

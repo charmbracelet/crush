@@ -50,3 +50,13 @@ type Session struct {
 	SummaryMessageID sql.NullString `json:"summary_message_id"`
 	Todos            sql.NullString `json:"todos"`
 }
+
+type Snapshot struct {
+	ID               string         `json:"id"`
+	SessionID        string         `json:"session_id"`
+	MessageID        string         `json:"message_id"`
+	ParentSnapshotID sql.NullString `json:"parent_snapshot_id"`
+	GitCommitHash    string         `json:"git_commit_hash"`
+	Description      sql.NullString `json:"description"`
+	CreatedAt        int64          `json:"created_at"`
+}

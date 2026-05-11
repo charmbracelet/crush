@@ -36,6 +36,38 @@ func TestConfig_LoadFromBytes(t *testing.T) {
 	require.Equal(t, "https://api.openai.com/v2", pc.BaseURL)
 }
 
+func TestLoadFromConfigPaths_InvalidJSON(t *testing.T) {
+	t.Parallel()
+
+	t.Run("identifies the offending file", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		good := filepath.Join(tmpDir, "good.json")
+		bad := filepath.Join(tmpDir, "bad.json")
+		require.NoError(t, os.WriteFile(good, []byte(`{"providers":{}}`), 0o644))
+		require.NoError(t, os.WriteFile(bad, []byte(`{not valid json}`), 0o644))
+
+		_, _, err := loadFromConfigPaths([]string{good, bad})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid JSON in config file")
+		require.Contains(t, err.Error(), "bad.json")
+	})
+
+	t.Run("skips missing and empty files", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		empty := filepath.Join(tmpDir, "empty.json")
+		require.NoError(t, os.WriteFile(empty, []byte(""), 0o644))
+
+		cfg, _, err := loadFromConfigPaths([]string{
+			filepath.Join(tmpDir, "nonexistent.json"),
+			empty,
+		})
+		require.NoError(t, err)
+		require.NotNil(t, cfg)
+	})
+}
+
 // testStore wraps a Config in a minimal ConfigStore for testing.
 func testStore(cfg *Config) *ConfigStore {
 	return &ConfigStore{config: cfg}

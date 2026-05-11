@@ -26,8 +26,11 @@ type BashParams struct {
 
 // BashPermissionsParams represents the permission parameters for the bash tool.
 type BashPermissionsParams struct {
-	Command string `json:"command"`
-	Timeout int    `json:"timeout"`
+	Description         string `json:"description"`
+	Command             string `json:"command"`
+	WorkingDir          string `json:"working_dir"`
+	RunInBackground     bool   `json:"run_in_background"`
+	AutoBackgroundAfter int    `json:"auto_background_after"`
 }
 
 // BashResponseMetadata represents the metadata for a bash tool response.

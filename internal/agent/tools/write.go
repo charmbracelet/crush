@@ -48,7 +48,7 @@ func NewWriteTool(
 	permissions permission.Service,
 	files history.Service,
 	filetracker filetracker.Service,
-	workingDir string,
+	workingDir WorkingDirFunc,
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		WriteToolName,
@@ -63,7 +63,8 @@ func NewWriteTool(
 				return fantasy.ToolResponse{}, fmt.Errorf("session_id is required")
 			}
 
-			filePath := filepathext.SmartJoin(workingDir, params.FilePath)
+			wd := workingDir()
+			filePath := filepathext.SmartJoin(wd, params.FilePath)
 
 			fileInfo, err := os.Stat(filePath)
 			if err == nil {
@@ -102,13 +103,13 @@ func NewWriteTool(
 			diff, additions, removals := diff.GenerateDiff(
 				oldContent,
 				params.Content,
-				strings.TrimPrefix(filePath, workingDir),
+				strings.TrimPrefix(filePath, wd),
 			)
 
 			p, err := permissions.Request(ctx,
 				permission.CreatePermissionRequest{
 					SessionID:   sessionID,
-					Path:        fsext.PathOrPrefix(filePath, workingDir),
+					Path:        fsext.PathOrPrefix(filePath, wd),
 					ToolCallID:  call.ID,
 					ToolName:    WriteToolName,
 					Action:      "write",

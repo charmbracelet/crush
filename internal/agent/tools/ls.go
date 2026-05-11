@@ -55,20 +55,21 @@ const (
 //go:embed ls.md
 var lsDescription []byte
 
-func NewLsTool(permissions permission.Service, workingDir string, lsConfig config.ToolLs) fantasy.AgentTool {
+func NewLsTool(permissions permission.Service, workingDir WorkingDirFunc, lsConfig config.ToolLs) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		LSToolName,
 		FirstLineDescription(lsDescription),
 		func(ctx context.Context, params LSParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			searchPath, err := fsext.Expand(cmp.Or(params.Path, workingDir))
+			wd := workingDir()
+			searchPath, err := fsext.Expand(cmp.Or(params.Path, wd))
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("error expanding path: %v", err)), nil
 			}
 
-			searchPath = filepathext.SmartJoin(workingDir, searchPath)
+			searchPath = filepathext.SmartJoin(wd, searchPath)
 
 			// Check if directory is outside working directory and request permission if needed
-			absWorkingDir, err := filepath.Abs(workingDir)
+			absWorkingDir, err := filepath.Abs(wd)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("error resolving working directory: %v", err)), nil
 			}

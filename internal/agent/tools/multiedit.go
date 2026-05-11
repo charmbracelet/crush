@@ -62,7 +62,7 @@ func NewMultiEditTool(
 	permissions permission.Service,
 	files history.Service,
 	filetracker filetracker.Service,
-	workingDir string,
+	workingDir WorkingDirFunc,
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		MultiEditToolName,
@@ -76,7 +76,8 @@ func NewMultiEditTool(
 				return fantasy.NewTextErrorResponse("at least one edit operation is required"), nil
 			}
 
-			params.FilePath = filepathext.SmartJoin(workingDir, params.FilePath)
+			wd := workingDir()
+			params.FilePath = filepathext.SmartJoin(wd, params.FilePath)
 
 			// Validate all edits before applying any
 			if err := validateEdits(params.Edits); err != nil {
@@ -86,7 +87,7 @@ func NewMultiEditTool(
 			var response fantasy.ToolResponse
 			var err error
 
-			editCtx := editContext{ctx, permissions, files, filetracker, workingDir}
+			editCtx := editContext{ctx, permissions, files, filetracker, wd}
 			// Handle file creation case (first edit has empty old_string)
 			if len(params.Edits) > 0 && params.Edits[0].OldString == "" {
 				response, err = processMultiEditWithCreation(editCtx, params, call)

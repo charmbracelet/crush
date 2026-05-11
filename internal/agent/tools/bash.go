@@ -190,7 +190,7 @@ func blockFuncs() []shell.BlockFunc {
 	}
 }
 
-func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelName string) fantasy.AgentTool {
+func NewBashTool(permissions permission.Service, workingDir WorkingDirFunc, attribution *config.Attribution, modelName string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		BashToolName,
 		string(bashDescription(attribution, modelName)),
@@ -200,7 +200,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			}
 
 			// Determine working directory
-			execWorkingDir := cmp.Or(params.WorkingDir, workingDir)
+			execWorkingDir := cmp.Or(params.WorkingDir, workingDir())
 
 			isSafeReadOnly := false
 			cmdLower := strings.ToLower(params.Command)

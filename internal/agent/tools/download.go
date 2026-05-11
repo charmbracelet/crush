@@ -34,7 +34,7 @@ const DownloadToolName = "download"
 //go:embed download.md
 var downloadDescription []byte
 
-func NewDownloadTool(permissions permission.Service, workingDir string, client *http.Client) fantasy.AgentTool {
+func NewDownloadTool(permissions permission.Service, workingDir WorkingDirFunc, client *http.Client) fantasy.AgentTool {
 	if client == nil {
 		transport := http.DefaultTransport.(*http.Transport).Clone()
 		transport.MaxIdleConns = 100
@@ -62,8 +62,9 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 				return fantasy.NewTextErrorResponse("URL must start with http:// or https://"), nil
 			}
 
-			filePath := filepathext.SmartJoin(workingDir, params.FilePath)
-			relPath, _ := filepath.Rel(workingDir, filePath)
+			wd := workingDir()
+			filePath := filepathext.SmartJoin(wd, params.FilePath)
+			relPath, _ := filepath.Rel(wd, filePath)
 			relPath = filepath.ToSlash(cmp.Or(relPath, filePath))
 
 			sessionID := GetSessionFromContext(ctx)

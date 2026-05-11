@@ -161,15 +161,16 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				return fantasy.ToolResponse{}, errors.New("small model provider not configured")
 			}
 
-			webFetchTool := tools.NewWebFetchTool(tmpDir, client)
+			tmpDirFunc := func() string { return tmpDir }
+			webFetchTool := tools.NewWebFetchTool(tmpDirFunc, client)
 			webSearchTool := tools.NewWebSearchTool(client)
 			fetchTools := []fantasy.AgentTool{
 				webFetchTool,
 				webSearchTool,
-				tools.NewGlobTool(tmpDir),
-				tools.NewGrepTool(tmpDir, c.cfg.Config().Tools.Grep),
+				tools.NewGlobTool(tmpDirFunc),
+				tools.NewGrepTool(tmpDirFunc, c.cfg.Config().Tools.Grep),
 				tools.NewSourcegraphTool(client),
-				tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, nil, tmpDir),
+				tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, nil, tmpDirFunc),
 			}
 
 			// Sub-agent tools run without hook interception. The top-level

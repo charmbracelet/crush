@@ -64,7 +64,7 @@ func NewEditTool(
 	permissions permission.Service,
 	files history.Service,
 	filetracker filetracker.Service,
-	workingDir string,
+	workingDir WorkingDirFunc,
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		EditToolName,
@@ -74,12 +74,13 @@ func NewEditTool(
 				return fantasy.NewTextErrorResponse("file_path is required"), nil
 			}
 
-			params.FilePath = filepathext.SmartJoin(workingDir, params.FilePath)
+			wd := workingDir()
+			params.FilePath = filepathext.SmartJoin(wd, params.FilePath)
 
 			var response fantasy.ToolResponse
 			var err error
 
-			editCtx := editContext{ctx, permissions, files, filetracker, workingDir}
+			editCtx := editContext{ctx, permissions, files, filetracker, wd}
 
 			if params.OldString == "" {
 				response, err = createNewFile(editCtx, params.FilePath, params.NewString, call)

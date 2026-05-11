@@ -31,7 +31,7 @@ type GlobResponseMetadata struct {
 	Truncated     bool `json:"truncated"`
 }
 
-func NewGlobTool(workingDir string) fantasy.AgentTool {
+func NewGlobTool(workingDir WorkingDirFunc) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		GlobToolName,
 		FirstLineDescription(globDescription),
@@ -40,7 +40,7 @@ func NewGlobTool(workingDir string) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse("pattern is required"), nil
 			}
 
-			searchPath := cmp.Or(params.Path, workingDir)
+			searchPath := cmp.Or(params.Path, workingDir())
 
 			files, truncated, err := globFiles(ctx, params.Pattern, searchPath, 100)
 			if err != nil {

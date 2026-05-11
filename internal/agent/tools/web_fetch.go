@@ -22,7 +22,7 @@ var webFetchDescriptionTpl = template.Must(
 )
 
 // NewWebFetchTool creates a simple web fetch tool for sub-agents (no permissions needed).
-func NewWebFetchTool(workingDir string, client *http.Client) fantasy.AgentTool {
+func NewWebFetchTool(workingDir WorkingDirFunc, client *http.Client) fantasy.AgentTool {
 	if client == nil {
 		transport := http.DefaultTransport.(*http.Transport).Clone()
 		transport.MaxIdleConns = 100
@@ -52,7 +52,7 @@ func NewWebFetchTool(workingDir string, client *http.Client) fantasy.AgentTool {
 			var result strings.Builder
 
 			if hasLargeContent {
-				tempFile, err := os.CreateTemp(workingDir, "page-*.md")
+				tempFile, err := os.CreateTemp(workingDir(), "page-*.md")
 				if err != nil {
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to create temporary file: %s", err)), nil
 				}

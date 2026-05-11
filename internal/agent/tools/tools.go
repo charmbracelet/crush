@@ -20,6 +20,10 @@ type (
 	modelNameKey        string
 )
 
+// WorkingDirFunc returns the current working directory. Tools use this to
+// support dynamic working directories (e.g., when worktrees are active).
+type WorkingDirFunc func() string
+
 const (
 	// SessionIDContextKey is the key for the session ID in the context.
 	SessionIDContextKey sessionIDContextKey = "session_id"

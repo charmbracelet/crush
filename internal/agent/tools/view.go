@@ -64,7 +64,7 @@ func NewViewTool(
 	permissions permission.Service,
 	filetracker filetracker.Service,
 	skillTracker *skills.Tracker,
-	workingDir string,
+	workingDir WorkingDirFunc,
 	skillsPaths ...string,
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
@@ -81,11 +81,12 @@ func NewViewTool(
 				return resp, err
 			}
 
+			wd := workingDir()
 			// Handle relative paths
-			filePath := filepathext.SmartJoin(workingDir, params.FilePath)
+			filePath := filepathext.SmartJoin(wd, params.FilePath)
 
 			// Check if file is outside working directory and request permission if needed
-			absWorkingDir, err := filepath.Abs(workingDir)
+			absWorkingDir, err := filepath.Abs(wd)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error resolving working directory: %w", err)
 			}

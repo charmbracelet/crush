@@ -30,7 +30,7 @@ var fetchDescriptionTpl = template.Must(
 		Parse(string(fetchDescriptionTmpl)),
 )
 
-func NewFetchTool(permissions permission.Service, workingDir string, client *http.Client) fantasy.AgentTool {
+func NewFetchTool(permissions permission.Service, workingDir WorkingDirFunc, client *http.Client) fantasy.AgentTool {
 	if client == nil {
 		transport := http.DefaultTransport.(*http.Transport).Clone()
 		transport.MaxIdleConns = 100
@@ -68,7 +68,7 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 			p, err := permissions.Request(ctx,
 				permission.CreatePermissionRequest{
 					SessionID:   sessionID,
-					Path:        workingDir,
+					Path:        workingDir(),
 					ToolCallID:  call.ID,
 					ToolName:    FetchToolName,
 					Action:      "fetch",

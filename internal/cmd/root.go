@@ -402,9 +402,10 @@ func ensureServer(cmd *cobra.Command, hostURL *url.URL) error {
 		}
 
 		if needsStart {
-			if err := startDetachedServer(cmd); err != nil {
-				return err
+			if err := spawnAndWaitReady(cmd, hostURL); err != nil {
+				return fmt.Errorf("failed to initialize crush server: %v", err)
 			}
+			return nil
 		}
 
 		if err := waitForServerReady(cmd.Context(), hostURL); err != nil {
@@ -413,6 +414,70 @@ func ensureServer(cmd *cobra.Command, hostURL *url.URL) error {
 	}
 
 	return nil
+}
+
+// spawnAndWaitReady serializes the spawn-and-wait-for-readiness sequence
+// across concurrent clients via an exclusive flock on
+// $XDG_CACHE_HOME/crush/server-<safeHost>/start.lock.
+//
+// After acquiring the lock it re-probes readiness so that a client that
+// blocked while another client was spawning can skip its own spawn and
+// just use the now-running server. The lock is held only for the
+// duration of "spawn + readiness probe" and released before the caller
+// resumes its normal lifetime.
+func spawnAndWaitReady(cmd *cobra.Command, hostURL *url.URL) error {
+	chDir, err := perHostServerDir()
+	if err != nil {
+		return err
+	}
+	release, err := acquireSpawnLock(filepath.Join(chDir, "start.lock"))
+	if err != nil {
+		// If the lock itself is unavailable, fall back to the
+		// unsynchronized path rather than blocking the user.
+		slog.Warn("Failed to acquire spawn lock, proceeding without single-flight", "error", err)
+		if err := startDetachedServer(cmd); err != nil {
+			return err
+		}
+		return waitForServerReady(cmd.Context(), hostURL)
+	}
+	defer release()
+
+	// Another client may have just finished spawning while we were
+	// waiting on the lock; if the server is already responsive, skip
+	// the spawn entirely.
+	probeCtx, cancel := context.WithTimeout(cmd.Context(), 200*time.Millisecond)
+	probeErr := quickHealthProbe(probeCtx, hostURL)
+	cancel()
+	if probeErr == nil {
+		return nil
+	}
+
+	if err := startDetachedServer(cmd); err != nil {
+		return err
+	}
+	return waitForServerReady(cmd.Context(), hostURL)
+}
+
+// quickHealthProbe issues a single readiness request with the caller's
+// context and returns nil iff the server is responsive right now.
+func quickHealthProbe(ctx context.Context, hostURL *url.URL) error {
+	httpClient, reqURL, err := readinessHTTPClient(hostURL)
+	if err != nil {
+		return err
+	}
+	return probeHealth(ctx, httpClient, reqURL, hostURL)
+}
+
+// perHostServerDir returns (and creates) the cache directory used for
+// per-host server state (logs, start.lock, etc.). It mirrors the path
+// computed in startDetachedServer so both code paths stay in sync.
+func perHostServerDir() (string, error) {
+	safeClientHost := safeNameRegexp.ReplaceAllString(clientHost, "_")
+	chDir := filepath.Join(config.GlobalCacheDir(), "server-"+safeClientHost)
+	if err := os.MkdirAll(chDir, 0o700); err != nil {
+		return "", fmt.Errorf("failed to create server working directory: %v", err)
+	}
+	return chDir, nil
 }
 
 // serverReadyTimeout returns the total budget for the readiness probe.
@@ -572,10 +637,9 @@ func startDetachedServer(cmd *cobra.Command) error {
 		return fmt.Errorf("failed to get executable path: %v", err)
 	}
 
-	safeClientHost := safeNameRegexp.ReplaceAllString(clientHost, "_")
-	chDir := filepath.Join(config.GlobalCacheDir(), "server-"+safeClientHost)
-	if err := os.MkdirAll(chDir, 0o700); err != nil {
-		return fmt.Errorf("failed to create server working directory: %v", err)
+	chDir, err := perHostServerDir()
+	if err != nil {
+		return err
 	}
 
 	cmdArgs := []string{"server"}

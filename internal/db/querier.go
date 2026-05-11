@@ -13,13 +13,18 @@ type Querier interface {
 	CreateMessage(ctx context.Context, arg CreateMessageParams) (Message, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	CreateSnapshot(ctx context.Context, arg CreateSnapshotParams) error
+	CreateWorktree(ctx context.Context, arg CreateWorktreeParams) error
+	DeactivateSessionWorktrees(ctx context.Context, sessionID string) error
 	DeleteFile(ctx context.Context, id string) error
 	DeleteMessage(ctx context.Context, id string) error
 	DeleteSession(ctx context.Context, id string) error
 	DeleteSessionFiles(ctx context.Context, sessionID string) error
 	DeleteSessionMessages(ctx context.Context, sessionID string) error
 	DeleteSessionSnapshots(ctx context.Context, sessionID string) error
+	DeleteSessionWorktrees(ctx context.Context, sessionID string) error
 	DeleteSnapshot(ctx context.Context, id string) error
+	DeleteWorktree(ctx context.Context, id string) error
+	GetActiveWorktree(ctx context.Context, sessionID string) (Worktree, error)
 	GetAverageResponseTime(ctx context.Context) (int64, error)
 	GetFile(ctx context.Context, id string) (File, error)
 	GetFileByPathAndSession(ctx context.Context, arg GetFileByPathAndSessionParams) (File, error)
@@ -37,7 +42,10 @@ type Querier interface {
 	GetUsageByDayOfWeek(ctx context.Context) ([]GetUsageByDayOfWeekRow, error)
 	GetUsageByHour(ctx context.Context) ([]GetUsageByHourRow, error)
 	GetUsageByModel(ctx context.Context) ([]GetUsageByModelRow, error)
+	GetWorktree(ctx context.Context, id string) (Worktree, error)
+	GetWorktreeByName(ctx context.Context, arg GetWorktreeByNameParams) (Worktree, error)
 	ListAllUserMessages(ctx context.Context) ([]Message, error)
+	ListAllWorktrees(ctx context.Context) ([]Worktree, error)
 	ListFilesByPath(ctx context.Context, path string) ([]File, error)
 	ListFilesBySession(ctx context.Context, sessionID string) ([]File, error)
 	ListLatestSessionFiles(ctx context.Context, sessionID string) ([]File, error)
@@ -47,11 +55,15 @@ type Querier interface {
 	ListSessions(ctx context.Context) ([]Session, error)
 	ListSnapshots(ctx context.Context, sessionID string) ([]Snapshot, error)
 	ListUserMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
+	ListWorktrees(ctx context.Context, sessionID string) ([]Worktree, error)
 	RecordFileRead(ctx context.Context, arg RecordFileReadParams) error
 	RenameSession(ctx context.Context, arg RenameSessionParams) error
+	SetWorktreeActive(ctx context.Context, arg SetWorktreeActiveParams) error
 	UpdateMessage(ctx context.Context, arg UpdateMessageParams) error
 	UpdateSession(ctx context.Context, arg UpdateSessionParams) (Session, error)
+	UpdateSessionForkedFrom(ctx context.Context, arg UpdateSessionForkedFromParams) error
 	UpdateSessionTitleAndUsage(ctx context.Context, arg UpdateSessionTitleAndUsageParams) error
+	UpdateSessionWorktree(ctx context.Context, arg UpdateSessionWorktreeParams) error
 }
 
 var _ Querier = (*Queries)(nil)

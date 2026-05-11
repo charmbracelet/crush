@@ -36,6 +36,12 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.createSnapshotStmt, err = db.PrepareContext(ctx, createSnapshot); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateSnapshot: %w", err)
 	}
+	if q.createWorktreeStmt, err = db.PrepareContext(ctx, createWorktree); err != nil {
+		return nil, fmt.Errorf("error preparing query CreateWorktree: %w", err)
+	}
+	if q.deactivateSessionWorktreesStmt, err = db.PrepareContext(ctx, deactivateSessionWorktrees); err != nil {
+		return nil, fmt.Errorf("error preparing query DeactivateSessionWorktrees: %w", err)
+	}
 	if q.deleteFileStmt, err = db.PrepareContext(ctx, deleteFile); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteFile: %w", err)
 	}
@@ -54,8 +60,17 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.deleteSessionSnapshotsStmt, err = db.PrepareContext(ctx, deleteSessionSnapshots); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteSessionSnapshots: %w", err)
 	}
+	if q.deleteSessionWorktreesStmt, err = db.PrepareContext(ctx, deleteSessionWorktrees); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteSessionWorktrees: %w", err)
+	}
 	if q.deleteSnapshotStmt, err = db.PrepareContext(ctx, deleteSnapshot); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteSnapshot: %w", err)
+	}
+	if q.deleteWorktreeStmt, err = db.PrepareContext(ctx, deleteWorktree); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteWorktree: %w", err)
+	}
+	if q.getActiveWorktreeStmt, err = db.PrepareContext(ctx, getActiveWorktree); err != nil {
+		return nil, fmt.Errorf("error preparing query GetActiveWorktree: %w", err)
 	}
 	if q.getAverageResponseTimeStmt, err = db.PrepareContext(ctx, getAverageResponseTime); err != nil {
 		return nil, fmt.Errorf("error preparing query GetAverageResponseTime: %w", err)
@@ -108,8 +123,17 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getUsageByModelStmt, err = db.PrepareContext(ctx, getUsageByModel); err != nil {
 		return nil, fmt.Errorf("error preparing query GetUsageByModel: %w", err)
 	}
+	if q.getWorktreeStmt, err = db.PrepareContext(ctx, getWorktree); err != nil {
+		return nil, fmt.Errorf("error preparing query GetWorktree: %w", err)
+	}
+	if q.getWorktreeByNameStmt, err = db.PrepareContext(ctx, getWorktreeByName); err != nil {
+		return nil, fmt.Errorf("error preparing query GetWorktreeByName: %w", err)
+	}
 	if q.listAllUserMessagesStmt, err = db.PrepareContext(ctx, listAllUserMessages); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAllUserMessages: %w", err)
+	}
+	if q.listAllWorktreesStmt, err = db.PrepareContext(ctx, listAllWorktrees); err != nil {
+		return nil, fmt.Errorf("error preparing query ListAllWorktrees: %w", err)
 	}
 	if q.listFilesByPathStmt, err = db.PrepareContext(ctx, listFilesByPath); err != nil {
 		return nil, fmt.Errorf("error preparing query ListFilesByPath: %w", err)
@@ -138,11 +162,17 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listUserMessagesBySessionStmt, err = db.PrepareContext(ctx, listUserMessagesBySession); err != nil {
 		return nil, fmt.Errorf("error preparing query ListUserMessagesBySession: %w", err)
 	}
+	if q.listWorktreesStmt, err = db.PrepareContext(ctx, listWorktrees); err != nil {
+		return nil, fmt.Errorf("error preparing query ListWorktrees: %w", err)
+	}
 	if q.recordFileReadStmt, err = db.PrepareContext(ctx, recordFileRead); err != nil {
 		return nil, fmt.Errorf("error preparing query RecordFileRead: %w", err)
 	}
 	if q.renameSessionStmt, err = db.PrepareContext(ctx, renameSession); err != nil {
 		return nil, fmt.Errorf("error preparing query RenameSession: %w", err)
+	}
+	if q.setWorktreeActiveStmt, err = db.PrepareContext(ctx, setWorktreeActive); err != nil {
+		return nil, fmt.Errorf("error preparing query SetWorktreeActive: %w", err)
 	}
 	if q.updateMessageStmt, err = db.PrepareContext(ctx, updateMessage); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateMessage: %w", err)
@@ -150,8 +180,14 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.updateSessionStmt, err = db.PrepareContext(ctx, updateSession); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateSession: %w", err)
 	}
+	if q.updateSessionForkedFromStmt, err = db.PrepareContext(ctx, updateSessionForkedFrom); err != nil {
+		return nil, fmt.Errorf("error preparing query UpdateSessionForkedFrom: %w", err)
+	}
 	if q.updateSessionTitleAndUsageStmt, err = db.PrepareContext(ctx, updateSessionTitleAndUsage); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateSessionTitleAndUsage: %w", err)
+	}
+	if q.updateSessionWorktreeStmt, err = db.PrepareContext(ctx, updateSessionWorktree); err != nil {
+		return nil, fmt.Errorf("error preparing query UpdateSessionWorktree: %w", err)
 	}
 	return &q, nil
 }
@@ -176,6 +212,16 @@ func (q *Queries) Close() error {
 	if q.createSnapshotStmt != nil {
 		if cerr := q.createSnapshotStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing createSnapshotStmt: %w", cerr)
+		}
+	}
+	if q.createWorktreeStmt != nil {
+		if cerr := q.createWorktreeStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing createWorktreeStmt: %w", cerr)
+		}
+	}
+	if q.deactivateSessionWorktreesStmt != nil {
+		if cerr := q.deactivateSessionWorktreesStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deactivateSessionWorktreesStmt: %w", cerr)
 		}
 	}
 	if q.deleteFileStmt != nil {
@@ -208,9 +254,24 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing deleteSessionSnapshotsStmt: %w", cerr)
 		}
 	}
+	if q.deleteSessionWorktreesStmt != nil {
+		if cerr := q.deleteSessionWorktreesStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteSessionWorktreesStmt: %w", cerr)
+		}
+	}
 	if q.deleteSnapshotStmt != nil {
 		if cerr := q.deleteSnapshotStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing deleteSnapshotStmt: %w", cerr)
+		}
+	}
+	if q.deleteWorktreeStmt != nil {
+		if cerr := q.deleteWorktreeStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteWorktreeStmt: %w", cerr)
+		}
+	}
+	if q.getActiveWorktreeStmt != nil {
+		if cerr := q.getActiveWorktreeStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getActiveWorktreeStmt: %w", cerr)
 		}
 	}
 	if q.getAverageResponseTimeStmt != nil {
@@ -298,9 +359,24 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing getUsageByModelStmt: %w", cerr)
 		}
 	}
+	if q.getWorktreeStmt != nil {
+		if cerr := q.getWorktreeStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getWorktreeStmt: %w", cerr)
+		}
+	}
+	if q.getWorktreeByNameStmt != nil {
+		if cerr := q.getWorktreeByNameStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getWorktreeByNameStmt: %w", cerr)
+		}
+	}
 	if q.listAllUserMessagesStmt != nil {
 		if cerr := q.listAllUserMessagesStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listAllUserMessagesStmt: %w", cerr)
+		}
+	}
+	if q.listAllWorktreesStmt != nil {
+		if cerr := q.listAllWorktreesStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listAllWorktreesStmt: %w", cerr)
 		}
 	}
 	if q.listFilesByPathStmt != nil {
@@ -348,6 +424,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listUserMessagesBySessionStmt: %w", cerr)
 		}
 	}
+	if q.listWorktreesStmt != nil {
+		if cerr := q.listWorktreesStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listWorktreesStmt: %w", cerr)
+		}
+	}
 	if q.recordFileReadStmt != nil {
 		if cerr := q.recordFileReadStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing recordFileReadStmt: %w", cerr)
@@ -356,6 +437,11 @@ func (q *Queries) Close() error {
 	if q.renameSessionStmt != nil {
 		if cerr := q.renameSessionStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing renameSessionStmt: %w", cerr)
+		}
+	}
+	if q.setWorktreeActiveStmt != nil {
+		if cerr := q.setWorktreeActiveStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing setWorktreeActiveStmt: %w", cerr)
 		}
 	}
 	if q.updateMessageStmt != nil {
@@ -368,9 +454,19 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing updateSessionStmt: %w", cerr)
 		}
 	}
+	if q.updateSessionForkedFromStmt != nil {
+		if cerr := q.updateSessionForkedFromStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing updateSessionForkedFromStmt: %w", cerr)
+		}
+	}
 	if q.updateSessionTitleAndUsageStmt != nil {
 		if cerr := q.updateSessionTitleAndUsageStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing updateSessionTitleAndUsageStmt: %w", cerr)
+		}
+	}
+	if q.updateSessionWorktreeStmt != nil {
+		if cerr := q.updateSessionWorktreeStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing updateSessionWorktreeStmt: %w", cerr)
 		}
 	}
 	return err
@@ -416,13 +512,18 @@ type Queries struct {
 	createMessageStmt              *sql.Stmt
 	createSessionStmt              *sql.Stmt
 	createSnapshotStmt             *sql.Stmt
+	createWorktreeStmt             *sql.Stmt
+	deactivateSessionWorktreesStmt *sql.Stmt
 	deleteFileStmt                 *sql.Stmt
 	deleteMessageStmt              *sql.Stmt
 	deleteSessionStmt              *sql.Stmt
 	deleteSessionFilesStmt         *sql.Stmt
 	deleteSessionMessagesStmt      *sql.Stmt
 	deleteSessionSnapshotsStmt     *sql.Stmt
+	deleteSessionWorktreesStmt     *sql.Stmt
 	deleteSnapshotStmt             *sql.Stmt
+	deleteWorktreeStmt             *sql.Stmt
+	getActiveWorktreeStmt          *sql.Stmt
 	getAverageResponseTimeStmt     *sql.Stmt
 	getFileStmt                    *sql.Stmt
 	getFileByPathAndSessionStmt    *sql.Stmt
@@ -440,7 +541,10 @@ type Queries struct {
 	getUsageByDayOfWeekStmt        *sql.Stmt
 	getUsageByHourStmt             *sql.Stmt
 	getUsageByModelStmt            *sql.Stmt
+	getWorktreeStmt                *sql.Stmt
+	getWorktreeByNameStmt          *sql.Stmt
 	listAllUserMessagesStmt        *sql.Stmt
+	listAllWorktreesStmt           *sql.Stmt
 	listFilesByPathStmt            *sql.Stmt
 	listFilesBySessionStmt         *sql.Stmt
 	listLatestSessionFilesStmt     *sql.Stmt
@@ -450,11 +554,15 @@ type Queries struct {
 	listSessionsStmt               *sql.Stmt
 	listSnapshotsStmt              *sql.Stmt
 	listUserMessagesBySessionStmt  *sql.Stmt
+	listWorktreesStmt              *sql.Stmt
 	recordFileReadStmt             *sql.Stmt
 	renameSessionStmt              *sql.Stmt
+	setWorktreeActiveStmt          *sql.Stmt
 	updateMessageStmt              *sql.Stmt
 	updateSessionStmt              *sql.Stmt
+	updateSessionForkedFromStmt    *sql.Stmt
 	updateSessionTitleAndUsageStmt *sql.Stmt
+	updateSessionWorktreeStmt      *sql.Stmt
 }
 
 func (q *Queries) WithTx(tx *sql.Tx) *Queries {
@@ -465,13 +573,18 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		createMessageStmt:              q.createMessageStmt,
 		createSessionStmt:              q.createSessionStmt,
 		createSnapshotStmt:             q.createSnapshotStmt,
+		createWorktreeStmt:             q.createWorktreeStmt,
+		deactivateSessionWorktreesStmt: q.deactivateSessionWorktreesStmt,
 		deleteFileStmt:                 q.deleteFileStmt,
 		deleteMessageStmt:              q.deleteMessageStmt,
 		deleteSessionStmt:              q.deleteSessionStmt,
 		deleteSessionFilesStmt:         q.deleteSessionFilesStmt,
 		deleteSessionMessagesStmt:      q.deleteSessionMessagesStmt,
 		deleteSessionSnapshotsStmt:     q.deleteSessionSnapshotsStmt,
+		deleteSessionWorktreesStmt:     q.deleteSessionWorktreesStmt,
 		deleteSnapshotStmt:             q.deleteSnapshotStmt,
+		deleteWorktreeStmt:             q.deleteWorktreeStmt,
+		getActiveWorktreeStmt:          q.getActiveWorktreeStmt,
 		getAverageResponseTimeStmt:     q.getAverageResponseTimeStmt,
 		getFileStmt:                    q.getFileStmt,
 		getFileByPathAndSessionStmt:    q.getFileByPathAndSessionStmt,
@@ -489,7 +602,10 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getUsageByDayOfWeekStmt:        q.getUsageByDayOfWeekStmt,
 		getUsageByHourStmt:             q.getUsageByHourStmt,
 		getUsageByModelStmt:            q.getUsageByModelStmt,
+		getWorktreeStmt:                q.getWorktreeStmt,
+		getWorktreeByNameStmt:          q.getWorktreeByNameStmt,
 		listAllUserMessagesStmt:        q.listAllUserMessagesStmt,
+		listAllWorktreesStmt:           q.listAllWorktreesStmt,
 		listFilesByPathStmt:            q.listFilesByPathStmt,
 		listFilesBySessionStmt:         q.listFilesBySessionStmt,
 		listLatestSessionFilesStmt:     q.listLatestSessionFilesStmt,
@@ -499,10 +615,14 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listSessionsStmt:               q.listSessionsStmt,
 		listSnapshotsStmt:              q.listSnapshotsStmt,
 		listUserMessagesBySessionStmt:  q.listUserMessagesBySessionStmt,
+		listWorktreesStmt:              q.listWorktreesStmt,
 		recordFileReadStmt:             q.recordFileReadStmt,
 		renameSessionStmt:              q.renameSessionStmt,
+		setWorktreeActiveStmt:          q.setWorktreeActiveStmt,
 		updateMessageStmt:              q.updateMessageStmt,
 		updateSessionStmt:              q.updateSessionStmt,
+		updateSessionForkedFromStmt:    q.updateSessionForkedFromStmt,
 		updateSessionTitleAndUsageStmt: q.updateSessionTitleAndUsageStmt,
+		updateSessionWorktreeStmt:      q.updateSessionWorktreeStmt,
 	}
 }

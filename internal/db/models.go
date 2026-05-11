@@ -38,17 +38,19 @@ type ReadFile struct {
 }
 
 type Session struct {
-	ID               string         `json:"id"`
-	ParentSessionID  sql.NullString `json:"parent_session_id"`
-	Title            string         `json:"title"`
-	MessageCount     int64          `json:"message_count"`
-	PromptTokens     int64          `json:"prompt_tokens"`
-	CompletionTokens int64          `json:"completion_tokens"`
-	Cost             float64        `json:"cost"`
-	UpdatedAt        int64          `json:"updated_at"`
-	CreatedAt        int64          `json:"created_at"`
-	SummaryMessageID sql.NullString `json:"summary_message_id"`
-	Todos            sql.NullString `json:"todos"`
+	ID                   string         `json:"id"`
+	ParentSessionID      sql.NullString `json:"parent_session_id"`
+	Title                string         `json:"title"`
+	MessageCount         int64          `json:"message_count"`
+	PromptTokens         int64          `json:"prompt_tokens"`
+	CompletionTokens     int64          `json:"completion_tokens"`
+	Cost                 float64        `json:"cost"`
+	UpdatedAt            int64          `json:"updated_at"`
+	CreatedAt            int64          `json:"created_at"`
+	SummaryMessageID     sql.NullString `json:"summary_message_id"`
+	Todos                sql.NullString `json:"todos"`
+	WorktreeID           sql.NullString `json:"worktree_id"`
+	ForkedFromSnapshotID sql.NullString `json:"forked_from_snapshot_id"`
 }
 
 type Snapshot struct {
@@ -59,4 +61,14 @@ type Snapshot struct {
 	GitCommitHash    string         `json:"git_commit_hash"`
 	Description      sql.NullString `json:"description"`
 	CreatedAt        int64          `json:"created_at"`
+}
+
+type Worktree struct {
+	ID             string         `json:"id"`
+	SessionID      string         `json:"session_id"`
+	Name           string         `json:"name"`
+	Path           string         `json:"path"`
+	BaseSnapshotID sql.NullString `json:"base_snapshot_id"`
+	IsActive       int64          `json:"is_active"`
+	CreatedAt      int64          `json:"created_at"`
 }

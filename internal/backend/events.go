@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/skills"
 )
 
 // SubscribeEvents returns a per-caller event channel for a workspace.
@@ -106,4 +107,9 @@ func (b *Backend) MCPRefreshPrompts(ctx context.Context, _ string, name string) 
 // MCPRefreshResources refreshes resources for a named MCP client.
 func (b *Backend) MCPRefreshResources(ctx context.Context, _ string, name string) {
 	mcptools.RefreshResources(ctx, name)
+}
+
+// SkillsGetStates returns the current state of all discovered skills.
+func (b *Backend) SkillsGetStates(_ string) []*skills.SkillState {
+	return skills.GetStates()
 }

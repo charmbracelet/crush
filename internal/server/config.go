@@ -465,3 +465,28 @@ func (c *controllerV1) handlePostWorkspaceMCPRefreshResources(w http.ResponseWri
 	c.backend.MCPRefreshResources(r.Context(), id, req.Name)
 	w.WriteHeader(http.StatusOK)
 }
+
+// handleGetWorkspaceSkillsStates retrieves the skill discovery states.
+//
+//	@Summary		Get skill discovery states
+//	@Tags			skills
+//	@Produce		json
+//	@Param			id	path		string	true	"Workspace ID"
+//	@Success		200	{array}		proto.SkillState
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/skills/states [get]
+func (c *controllerV1) handleGetWorkspaceSkillsStates(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	states := c.backend.SkillsGetStates(id)
+	result := make([]proto.SkillState, len(states))
+	for i, s := range states {
+		result[i] = proto.SkillState{
+			Name:  s.Name,
+			Path:  s.Path,
+			State: proto.SkillDiscoveryState(s.State),
+			Error: s.Err,
+		}
+	}
+	jsonEncode(w, result)
+}

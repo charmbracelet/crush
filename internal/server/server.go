@@ -165,6 +165,7 @@ func NewServer(cfg *config.ConfigStore, network, address string) *Server {
 	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/refresh-resources", c.handlePostWorkspaceMCPRefreshResources)
 	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/docker/enable", c.handlePostWorkspaceMCPEnableDocker)
 	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/docker/disable", c.handlePostWorkspaceMCPDisableDocker)
+	mux.HandleFunc("GET /v1/workspaces/{id}/skills/states", c.handleGetWorkspaceSkillsStates)
 	mux.HandleFunc("GET /v1/workspaces/{id}/snapshots/enabled", c.handleGetWorkspaceSnapshotsEnabled)
 	mux.HandleFunc("GET /v1/workspaces/{id}/messages/{msgid}/snapshot", c.handleGetWorkspaceSnapshotByMessage)
 	mux.HandleFunc("POST /v1/workspaces/{id}/snapshots/gc", c.handlePostWorkspaceSnapshotGC)

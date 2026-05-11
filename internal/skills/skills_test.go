@@ -1,7 +1,6 @@
 package skills
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -216,7 +215,8 @@ func TestSkillValidate(t *testing.T) {
 }
 
 func TestDiscover(t *testing.T) {
-	// Not parallel: shares global broker with other Discover tests.
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 
 	// Create valid skill 1.
@@ -248,14 +248,8 @@ description: Name doesn't match directory.
 ---
 `), 0o644))
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	ch := SubscribeEvents(ctx)
+	skills, states := DiscoverWithStates([]string{tmpDir})
 
-	skills := Discover([]string{tmpDir})
-
-	evt := <-ch
-	states := evt.Payload.States
 	var normalCount int
 	var errorCount int
 	var hasInvalidDir bool
@@ -285,32 +279,20 @@ description: Name doesn't match directory.
 }
 
 func TestDiscoverEmptyDir(t *testing.T) {
-	// Not parallel: shares global broker with other Discover tests.
+	t.Parallel()
 
 	tmpDir := t.TempDir()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	ch := SubscribeEvents(ctx)
-
-	skills := Discover([]string{tmpDir})
-
-	evt := <-ch
-	require.Empty(t, evt.Payload.States)
+	skills, states := DiscoverWithStates([]string{tmpDir})
+	require.Empty(t, states)
 	require.Empty(t, skills)
 }
 
 func TestDiscoverMissingPath(t *testing.T) {
-	// Not parallel: shares global broker with other Discover tests.
+	t.Parallel()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	ch := SubscribeEvents(ctx)
-
-	skills := Discover([]string{filepath.Join(t.TempDir(), "missing")})
-
-	evt := <-ch
-	require.Empty(t, evt.Payload.States)
+	skills, states := DiscoverWithStates([]string{filepath.Join(t.TempDir(), "missing")})
+	require.Empty(t, states)
 	require.Empty(t, skills)
 }
 

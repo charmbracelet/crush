@@ -205,6 +205,36 @@ func TestConfig_setDefaults(t *testing.T) {
 		require.Equal(t, filepath.Join(workingDir, "state"), cfg.Options.DataDirectory)
 	})
 
+	t.Run("preserves absolute configured data directory", func(t *testing.T) {
+		// Use a platform-appropriate absolute path so the test runs
+		// the same way on POSIX and Windows.
+		absDir := filepath.Join(t.TempDir(), "data")
+		cfg := &Config{Options: &Options{DataDirectory: absDir}}
+
+		cfg.setDefaults(filepath.Join(t.TempDir(), "worktree"), "")
+
+		require.Equal(t, absDir, cfg.Options.DataDirectory)
+	})
+
+	t.Run("workspace merge re-entry keeps an absolute data directory", func(t *testing.T) {
+		// Simulate the load and reload paths: defaults are applied
+		// twice with the data directory potentially carried through
+		// from an earlier merge as a relative string.
+		workingDir := filepath.Join(t.TempDir(), "worktree")
+		cfg := &Config{}
+		cfg.setDefaults(workingDir, "")
+
+		// Workspace JSON sets data_directory to a relative value; the
+		// merge replaces the struct, then setDefaults runs again.
+		cfg.Options.DataDirectory = "./state"
+		cfg.setDefaults(workingDir, "")
+
+		require.True(t, filepath.IsAbs(cfg.Options.DataDirectory),
+			"data directory must remain absolute after re-merge, got %q",
+			cfg.Options.DataDirectory)
+		require.Equal(t, filepath.Join(workingDir, "state"), cfg.Options.DataDirectory)
+	})
+
 	t.Run("does not adopt .crush from a parent project", func(t *testing.T) {
 		parent := t.TempDir()
 

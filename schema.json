@@ -423,7 +423,7 @@
         },
         "data_directory": {
           "type": "string",
-          "description": "Directory for storing application data (relative to working directory)",
+          "description": "Directory for storing application data. Relative paths are resolved against the working directory; absolute paths are used as-is.",
           "default": ".crush",
           "examples": [
             ".crush"

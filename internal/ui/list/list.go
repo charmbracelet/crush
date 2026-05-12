@@ -457,18 +457,30 @@ func (l *List) VisibleItemIndices() (startIdx, endIdx int) {
 }
 
 // Render renders the list and returns the visible lines.
+//
+// F7: per-item slicing is bounded by the remaining viewport budget so
+// per-frame work is O(viewport) rather than O(total item heights).
+// We never append beyond l.height lines to the output buffer; the
+// final trim is therefore unnecessary. Reverse mode applies the same
+// final reversal as before, which is byte-identical because the
+// pre-F7 trim happened at the tail of the joined buffer (the same
+// lines we now drop implicitly per item).
 func (l *List) Render() string {
 	if len(l.items) == 0 {
 		return ""
 	}
 
-	var lines []string
+	budget := max(l.height, 0)
+	lines := make([]string, 0, budget)
 	currentIdx := l.offsetIdx
 	currentOffset := l.offsetLine
 
-	linesNeeded := l.height
+	for currentIdx < len(l.items) {
+		remaining := budget - len(lines)
+		if remaining <= 0 {
+			break
+		}
 
-	for linesNeeded > 0 && currentIdx < len(l.items) {
 		entry := l.renderItemEntry(currentIdx)
 		if entry == nil {
 			break
@@ -477,37 +489,43 @@ func (l *List) Render() string {
 		itemHeight := len(itemLines)
 
 		if currentOffset >= 0 && currentOffset < itemHeight {
-			// Add visible content lines
-			lines = append(lines, itemLines[currentOffset:]...)
+			// Append only the visible slice that fits in the
+			// remaining viewport budget. Anything past the
+			// budget would be discarded by the pre-F7 tail
+			// trim, so skipping the append here is
+			// byte-identical and bounded.
+			visible := itemLines[currentOffset:]
+			if len(visible) > remaining {
+				visible = visible[:remaining]
+			}
+			lines = append(lines, visible...)
 
-			// Add gap if this is not the absolute last visual element (conceptually gaps are between items)
-			// But in the loop we can just add it and trim later
+			// Gap rows after the item, capped to the
+			// remaining budget so a 30k-line item with a
+			// trailing gap can't push past the viewport.
 			if l.gap > 0 {
-				for i := 0; i < l.gap; i++ {
+				gapBudget := min(budget-len(lines), l.gap)
+				for range gapBudget {
 					lines = append(lines, "")
 				}
 			}
 		} else {
-			// offsetLine starts in the gap
+			// offsetLine starts inside the gap.
 			gapOffset := currentOffset - itemHeight
 			gapRemaining := l.gap - gapOffset
 			if gapRemaining > 0 {
-				for range gapRemaining {
+				gapBudget := min(budget-len(lines), gapRemaining)
+				for range gapBudget {
 					lines = append(lines, "")
 				}
 			}
 		}
 
-		linesNeeded = l.height - len(lines)
 		currentIdx++
-		currentOffset = 0 // Reset offset for subsequent items
+		currentOffset = 0 // Reset offset for subsequent items.
 	}
 
-	l.height = max(l.height, 0)
-
-	if len(lines) > l.height {
-		lines = lines[:l.height]
-	}
+	l.height = budget
 
 	if l.reverse {
 		// Reverse the lines so the list renders bottom-to-top.

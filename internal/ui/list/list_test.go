@@ -399,3 +399,372 @@ func TestVersioned_BumpMonotonic(t *testing.T) {
 	v.Bump()
 	require.Equal(t, uint64(3), v.Version())
 }
+
+// multiLineItem is a test helper whose Render returns a fixed
+// multi-line body. Each line is uniquely identifiable (id:N) so a
+// test can reconstruct the expected visible window by index. F7's
+// byte-identity matrix is built around these.
+type multiLineItem struct {
+	*Versioned
+	id     string
+	height int
+}
+
+func newMultiLineItem(id string, height int) *multiLineItem {
+	return &multiLineItem{
+		Versioned: NewVersioned(),
+		id:        id,
+		height:    height,
+	}
+}
+
+func (m *multiLineItem) Render(_ int) string {
+	if m.height <= 0 {
+		return ""
+	}
+	parts := make([]string, m.height)
+	for i := range m.height {
+		parts[i] = m.id + ":" + strconv.Itoa(i)
+	}
+	return strings.Join(parts, "\n")
+}
+
+func (m *multiLineItem) Finished() bool { return true }
+
+// expectedRender computes what list.Render *should* produce from
+// first principles given the item heights, viewport, offsetIdx,
+// offsetLine, gap, and reverse settings. It mirrors the pre-F7
+// "build everything, trim to height, reverse" semantics so we can
+// assert byte-identity against the new bounded path.
+func expectedRender(items []*multiLineItem, height, offsetIdx, offsetLine, gap int, reverse bool) string {
+	if len(items) == 0 {
+		return ""
+	}
+	budget := max(height, 0)
+	var lines []string
+	currentOffset := offsetLine
+	for idx := offsetIdx; idx < len(items) && len(lines) < budget; idx++ {
+		body := items[idx].Render(0)
+		body = strings.TrimRight(body, "\n")
+		itemLines := strings.Split(body, "\n")
+		itemHeight := len(itemLines)
+
+		if currentOffset >= 0 && currentOffset < itemHeight {
+			lines = append(lines, itemLines[currentOffset:]...)
+			for range gap {
+				lines = append(lines, "")
+			}
+		} else {
+			gapOffset := currentOffset - itemHeight
+			gapRemaining := gap - gapOffset
+			for range max(gapRemaining, 0) {
+				lines = append(lines, "")
+			}
+		}
+		currentOffset = 0
+	}
+	if len(lines) > budget {
+		lines = lines[:budget]
+	}
+	if reverse {
+		for i, j := 0, len(lines)-1; i < j; i, j = i+1, j-1 {
+			lines[i], lines[j] = lines[j], lines[i]
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// TestList_F7_ByteIdentityMatrix is T1 from the F7 plan: a sweep
+// over (item heights × viewport heights × offsets × gaps × reverse)
+// that asserts list.Render produces output byte-identical to a
+// pre-F7-equivalent reference (build full buffer, trim at end).
+func TestList_F7_ByteIdentityMatrix(t *testing.T) {
+	t.Parallel()
+
+	itemHeights := [][]int{
+		{1},
+		{5},
+		{1, 1, 1},
+		{3, 7, 2},
+		{20, 5, 30},
+		{50, 1, 50, 1},
+	}
+	viewportHeights := []int{1, 3, 5, 10, 25, 100}
+	offsetIdxs := []int{0, 1, 2}
+	offsetLines := []int{0, 1, 4}
+	gaps := []int{0, 1, 3}
+	reverses := []bool{false, true}
+
+	for _, heights := range itemHeights {
+		for _, vh := range viewportHeights {
+			for _, oIdx := range offsetIdxs {
+				if oIdx >= len(heights) {
+					continue
+				}
+				for _, oLine := range offsetLines {
+					maxOffset := heights[oIdx]
+					if oLine >= maxOffset {
+						continue
+					}
+					for _, gap := range gaps {
+						for _, reverse := range reverses {
+							items := make([]*multiLineItem, len(heights))
+							asItems := make([]Item, len(heights))
+							for i, h := range heights {
+								items[i] = newMultiLineItem("i"+strconv.Itoa(i), h)
+								asItems[i] = items[i]
+							}
+							l := NewList(asItems...)
+							l.SetSize(40, vh)
+							l.SetGap(gap)
+							l.SetReverse(reverse)
+							l.offsetIdx = oIdx
+							l.offsetLine = oLine
+
+							got := l.Render()
+							want := expectedRender(items, vh, oIdx, oLine, gap, reverse)
+							require.Equalf(t, want, got,
+								"mismatch heights=%v vh=%d oIdx=%d oLine=%d gap=%d reverse=%v",
+								heights, vh, oIdx, oLine, gap, reverse)
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// TestList_F7_GiantItemBoundedRender is T2: a single 10,000-line
+// item with a 50-line viewport. Render must return exactly 50
+// lines — no off-by-one, no trim issue. This is the F7 win in
+// test form: per-frame work is bounded by viewport, not item
+// height.
+func TestList_F7_GiantItemBoundedRender(t *testing.T) {
+	t.Parallel()
+
+	const itemHeight = 10000
+	const viewport = 50
+
+	giant := newMultiLineItem("giant", itemHeight)
+	l := NewList(giant)
+	l.SetSize(40, viewport)
+
+	out := l.Render()
+	got := strings.Count(out, "\n") + 1
+	require.Equal(t, viewport, got, "render output must be exactly viewport lines for an oversized item")
+
+	// And the lines are the prefix of the item starting at
+	// offset 0.
+	lines := strings.Split(out, "\n")
+	for i, line := range lines {
+		require.Equal(t, "giant:"+strconv.Itoa(i), line, "line %d does not match expected slice", i)
+	}
+}
+
+// TestList_F7_GiantItemWithOffsetBoundedRender complements T2 with
+// a non-zero offsetLine so we exercise both the "skip prefix" and
+// "bound suffix" sides of the slice.
+func TestList_F7_GiantItemWithOffsetBoundedRender(t *testing.T) {
+	t.Parallel()
+
+	const itemHeight = 10000
+	const viewport = 50
+	const offset = 1234
+
+	giant := newMultiLineItem("giant", itemHeight)
+	l := NewList(giant)
+	l.SetSize(40, viewport)
+	l.offsetLine = offset
+
+	out := l.Render()
+	lines := strings.Split(out, "\n")
+	require.Len(t, lines, viewport, "render output must be exactly viewport lines for an oversized item")
+	for i, line := range lines {
+		require.Equal(t, "giant:"+strconv.Itoa(offset+i), line, "line %d does not match expected slice", i)
+	}
+}
+
+// TestList_F7_GapOverflow is T3: viewport height 5, two items each
+// 10 lines, gap of 3. Render returns exactly 5 lines and never
+// includes gap rows beyond the viewport.
+func TestList_F7_GapOverflow(t *testing.T) {
+	t.Parallel()
+
+	a := newMultiLineItem("a", 10)
+	b := newMultiLineItem("b", 10)
+	l := NewList(a, b)
+	l.SetSize(40, 5)
+	l.SetGap(3)
+
+	out := l.Render()
+	lines := strings.Split(out, "\n")
+	require.Len(t, lines, 5, "viewport must clamp output to height even with gap rows pending")
+
+	// Gap rows after item a would only appear if the viewport
+	// extended past the first 10 lines, which it doesn't here.
+	for i, line := range lines {
+		require.Equal(t, "a:"+strconv.Itoa(i), line, "line %d", i)
+	}
+}
+
+// TestList_F7_GapOverflow_BoundaryStraddle exercises a viewport
+// that lands inside the gap region between two items: 12 lines
+// viewport, item a height 10, item b height 10, gap 3 — first 10
+// lines from a, then 2 of the 3 gap rows, no b lines yet.
+func TestList_F7_GapOverflow_BoundaryStraddle(t *testing.T) {
+	t.Parallel()
+
+	a := newMultiLineItem("a", 10)
+	b := newMultiLineItem("b", 10)
+	l := NewList(a, b)
+	l.SetSize(40, 12)
+	l.SetGap(3)
+
+	out := l.Render()
+	lines := strings.Split(out, "\n")
+	require.Len(t, lines, 12)
+
+	for i := range 10 {
+		require.Equal(t, "a:"+strconv.Itoa(i), lines[i])
+	}
+	require.Equal(t, "", lines[10])
+	require.Equal(t, "", lines[11])
+}
+
+// TestList_F7_ReverseGiantItem is T4: same bounded-slicing
+// invariant in reverse mode. Reverse mode keeps the same final
+// trim semantics; bounded slicing must produce the same window
+// (just reversed).
+func TestList_F7_ReverseGiantItem(t *testing.T) {
+	t.Parallel()
+
+	const itemHeight = 10000
+	const viewport = 50
+
+	giant := newMultiLineItem("giant", itemHeight)
+	l := NewList(giant)
+	l.SetSize(40, viewport)
+	l.SetReverse(true)
+
+	out := l.Render()
+	lines := strings.Split(out, "\n")
+	require.Len(t, lines, viewport)
+
+	// Expected: the same first-50 slice as the non-reverse path
+	// but reversed.
+	for i, line := range lines {
+		expectedIdx := viewport - 1 - i
+		require.Equal(t, "giant:"+strconv.Itoa(expectedIdx), line, "reverse line %d", i)
+	}
+}
+
+// TestList_F7_OffsetLineAtItemBoundary is T5: offsetLine ==
+// itemHeight lands exactly past the last visible line of the item
+// at offsetIdx. The renderer must not address line N (which does
+// not exist); the visible window starts at the gap rows (when gap
+// > 0) or at the next item (when gap == 0).
+func TestList_F7_OffsetLineAtItemBoundary(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		gap      int
+		viewport int
+		want     []string
+	}{
+		{
+			name:     "gap zero jumps straight to next item",
+			gap:      0,
+			viewport: 5,
+			want: []string{
+				"b:0", "b:1", "b:2", "b:3", "b:4",
+			},
+		},
+		{
+			name:     "gap two emits gap rows then next item",
+			gap:      2,
+			viewport: 5,
+			want: []string{
+				"", "", "b:0", "b:1", "b:2",
+			},
+		},
+	}
+
+	const itemHeight = 4
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			a := newMultiLineItem("a", itemHeight)
+			b := newMultiLineItem("b", 10)
+			l := NewList(a, b)
+			l.SetSize(40, tc.viewport)
+			l.SetGap(tc.gap)
+			l.offsetIdx = 0
+			l.offsetLine = itemHeight // exactly at the boundary
+
+			out := l.Render()
+			require.Equal(t, strings.Join(tc.want, "\n"), out)
+		})
+	}
+}
+
+// TestList_F7_OffsetLineInsideGap is T6: offsetLine is one row
+// past the end of the item at offsetIdx, landing inside the gap
+// region. The visible window starts at the second gap row and
+// then continues into the next item.
+func TestList_F7_OffsetLineInsideGap(t *testing.T) {
+	t.Parallel()
+
+	const itemHeight = 4
+	const gap = 3
+	const viewport = 5
+
+	a := newMultiLineItem("a", itemHeight)
+	b := newMultiLineItem("b", 10)
+	l := NewList(a, b)
+	l.SetSize(40, viewport)
+	l.SetGap(gap)
+	l.offsetIdx = 0
+	l.offsetLine = itemHeight + 1 // one row into the gap
+
+	out := l.Render()
+	want := strings.Join([]string{
+		"",    // second gap row
+		"",    // third gap row
+		"b:0", // next item starts
+		"b:1",
+		"b:2",
+	}, "\n")
+	require.Equal(t, want, out)
+}
+
+// TestList_F7_ViewportZeroOrNegative is T7: a non-positive
+// viewport height must produce an empty string with no panic and
+// must normalize l.height to zero (the budget := max(l.height, 0)
+// side effect).
+func TestList_F7_ViewportZeroOrNegative(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		height int
+	}{
+		{name: "height zero", height: 0},
+		{name: "height negative", height: -1},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			a := newMultiLineItem("a", 5)
+			l := NewList(a)
+			l.SetSize(40, tc.height)
+
+			out := l.Render()
+			require.Equal(t, "", out, "render must be empty for non-positive viewport")
+			require.Equal(t, 0, l.height, "render must normalize height to zero")
+		})
+	}
+}

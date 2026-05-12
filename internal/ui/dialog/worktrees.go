@@ -120,8 +120,11 @@ func (w *Worktrees) HandleMsg(msg tea.Msg) Action {
 		case key.Matches(msg, w.keyMap.Select):
 			if item := w.list.SelectedItem(); item != nil {
 				if wtItem, ok := item.(*worktreeItem); ok {
+					// Use the worktree's own session ID, not the passed-in one.
+					// This allows switching to worktrees from any context, including
+					// when no session is active.
 					return ActionSwitchWorktree{
-						SessionID:  w.sessionID,
+						SessionID:  wtItem.worktree.SessionID,
 						WorktreeID: wtItem.worktree.ID,
 					}
 				}

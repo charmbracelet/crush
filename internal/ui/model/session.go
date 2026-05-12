@@ -28,6 +28,13 @@ type loadSessionMsg struct {
 	readFiles []string
 }
 
+// loadSessionAndSwitchWorktreeMsg is a message indicating that a session has been
+// loaded and a worktree should be switched to.
+type loadSessionAndSwitchWorktreeMsg struct {
+	loadSessionMsg
+	worktreeID string
+}
+
 // lspFilePaths returns deduplicated file paths from both modified and read
 // files for starting LSP servers.
 func (msg loadSessionMsg) lspFilePaths() []string {
@@ -85,6 +92,36 @@ func (m *UI) loadSession(sessionID string) tea.Cmd {
 			session:   &session,
 			files:     sessionFiles,
 			readFiles: readFiles,
+		}
+	}
+}
+
+// loadSessionAndSwitchWorktree loads a session and then switches to a worktree.
+// This is used when switching to a worktree from a different session.
+func (m *UI) loadSessionAndSwitchWorktree(sessionID, worktreeID string) tea.Cmd {
+	return func() tea.Msg {
+		session, err := m.com.Workspace.GetSession(context.Background(), sessionID)
+		if err != nil {
+			return util.ReportError(err)
+		}
+
+		sessionFiles, err := m.loadSessionFiles(sessionID)
+		if err != nil {
+			return util.ReportError(err)
+		}
+
+		readFiles, err := m.com.Workspace.FileTrackerListReadFiles(context.Background(), sessionID)
+		if err != nil {
+			slog.Error("Failed to load read files for session", "error", err)
+		}
+
+		return loadSessionAndSwitchWorktreeMsg{
+			loadSessionMsg: loadSessionMsg{
+				session:   &session,
+				files:     sessionFiles,
+				readFiles: readFiles,
+			},
+			worktreeID: worktreeID,
 		}
 	}
 }

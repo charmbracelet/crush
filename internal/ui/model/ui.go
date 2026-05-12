@@ -559,6 +559,37 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.loadPromptHistory())
 		m.updateLayoutAndSize()
 
+	case loadSessionAndSwitchWorktreeMsg:
+		// First do all the session loading (same as loadSessionMsg).
+		if m.forceCompactMode {
+			m.isCompact = true
+		}
+		m.setState(uiChat, m.focus)
+		m.session = msg.session
+		m.sessionFiles = msg.files
+		m.com.Workspace.SetActiveSessionID(m.session.ID)
+		cmds = append(cmds, m.startLSPs(msg.lspFilePaths()))
+		msgs, err := m.com.Workspace.ListMessages(context.Background(), m.session.ID)
+		if err != nil {
+			cmds = append(cmds, util.ReportError(err))
+			break
+		}
+		if cmd := m.setSessionMessages(msgs); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		if hasInProgressTodo(m.session.Todos) {
+			if m.isAgentBusy() {
+				m.todoIsSpinning = true
+				cmds = append(cmds, m.todoSpinner.Tick)
+			}
+			m.updateLayoutAndSize()
+		}
+		m.historyReset()
+		cmds = append(cmds, m.loadPromptHistory())
+		m.updateLayoutAndSize()
+		// Now switch the worktree.
+		cmds = append(cmds, m.switchWorktree(msg.session.ID, msg.worktreeID))
+
 	case sessionFilesUpdatesMsg:
 		m.sessionFiles = msg.sessionFiles
 		var paths []string
@@ -1506,7 +1537,12 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		cmds = append(cmds, m.createWorktree(msg.SessionID, msg.Name, msg.FromSnapshotID))
 	case dialog.ActionSwitchWorktree:
 		m.dialog.CloseDialog(dialog.WorktreesID)
-		cmds = append(cmds, m.switchWorktree(msg.SessionID, msg.WorktreeID))
+		// First switch to the worktree's session if it's different from the current session.
+		if m.session == nil || m.session.ID != msg.SessionID {
+			cmds = append(cmds, m.loadSessionAndSwitchWorktree(msg.SessionID, msg.WorktreeID))
+		} else {
+			cmds = append(cmds, m.switchWorktree(msg.SessionID, msg.WorktreeID))
+		}
 	case dialog.ActionRunSnapshotGC:
 		m.dialog.CloseDialog(dialog.CommandsID)
 		cmds = append(cmds, m.runSnapshotGC())

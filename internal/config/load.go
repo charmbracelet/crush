@@ -702,7 +702,12 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 	return nil
 }
 
-// lookupConfigs searches config files recursively from CWD up to FS root
+// lookupConfigs searches config files starting at cwd and walking up
+// through the current project. The upward walk stops at the git
+// working tree root when one can be detected, otherwise at cwd itself,
+// so an unrelated crush.json placed above the project is never picked
+// up. Global user-level config locations are always included
+// regardless of the boundary.
 func lookupConfigs(cwd string) []string {
 	// prepend default config paths
 	configPaths := []string{
@@ -712,7 +717,7 @@ func lookupConfigs(cwd string) []string {
 
 	configNames := []string{appName + ".json", "." + appName + ".json"}
 
-	foundConfigs, err := fsext.Lookup(cwd, configNames...)
+	foundConfigs, err := fsext.LookupBounded(cwd, projectBoundary(cwd), configNames...)
 	if err != nil {
 		// returns at least default configs
 		return configPaths

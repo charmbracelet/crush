@@ -3,6 +3,7 @@ package dialog
 import (
 	"context"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
@@ -471,6 +472,8 @@ func (s *Session) confirmArchiveSession() Action {
 	}
 
 	s.removeSession(sessionItem.ID())
+	// Move to archived sessions
+	s.archivedSessions = append([]session.Session{sessionItem.Session}, s.archivedSessions...)
 	return ActionCmd{s.archiveSessionCmd(sessionItem.ID())}
 }
 
@@ -492,8 +495,11 @@ func (s *Session) confirmUnarchiveSession() Action {
 	}
 
 	s.removeArchivedSession(sessionItem.ID())
-	// Move to active sessions
-	s.sessions = append([]session.Session{sessionItem.Session}, s.sessions...)
+	// Move to active sessions with updated timestamp
+	sess := sessionItem.Session
+	sess.UpdatedAt = time.Now().Unix()
+	sess.ArchivedAt = 0
+	s.sessions = append([]session.Session{sess}, s.sessions...)
 	return ActionCmd{s.unarchiveSessionCmd(sessionItem.ID())}
 }
 

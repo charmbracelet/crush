@@ -83,10 +83,11 @@ WHERE id = ?;
 
 -- name: ArchiveSession :exec
 UPDATE sessions
-SET archived_at = strftime('%s', 'now') * 1000
+SET archived_at = strftime('%s', 'now')
 WHERE id = ?;
 
 -- name: UnarchiveSession :exec
 UPDATE sessions
-SET archived_at = NULL
+SET archived_at = NULL,
+    updated_at = strftime('%s', 'now')
 WHERE id = ?;

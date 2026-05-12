@@ -1,7 +1,10 @@
 package tools
 
 import (
+	"bytes"
 	"context"
+	"html/template"
+	"os/exec"
 
 	"charm.land/fantasy"
 )
@@ -63,4 +66,27 @@ func NewPermissionDeniedResponse() fantasy.ToolResponse {
 	resp := fantasy.NewTextErrorResponse("User denied permission")
 	resp.StopTurn = true
 	return resp
+}
+
+// ghAvailable indicates whether the `gh` CLI is available on PATH.
+var ghAvailable = func() bool {
+	_, err := exec.LookPath("gh")
+	return err == nil
+}()
+
+// toolDescriptionData is the common data structure for tool description templates.
+type toolDescriptionData struct {
+	GhAvailable bool
+}
+
+// renderToolDescription renders a tool description template with the given data.
+func renderToolDescription(tmpl *template.Template) string {
+	data := toolDescriptionData{
+		GhAvailable: ghAvailable,
+	}
+	var out bytes.Buffer
+	if err := tmpl.Execute(&out, data); err != nil {
+		panic("failed to execute tool description template: " + err.Error())
+	}
+	return out.String()
 }

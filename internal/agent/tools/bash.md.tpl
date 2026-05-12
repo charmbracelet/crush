@@ -21,6 +21,9 @@ Common shell builtins and core utils available on Windows.
 - Chain with ';' or '&&', avoid newlines except in quoted strings
 - Each command runs in independent shell (no state persistence between calls)
 - Prefer absolute paths over 'cd' (use 'cd' only if user explicitly requests)
+{{- if .RgAvailable }}
+- Ripgrep (`rg`) is available; prefer it over `grep` for faster, more intuitive searching
+{{- end }}
 </usage_notes>
 
 <background_execution>
@@ -82,7 +85,7 @@ When user asks to create git commit:
 
 6. Run git status to verify.
 
-Notes: Use "git commit -am" when possible, don't stage unrelated files, NEVER update config, don't push, no -i flags, no empty commits, return empty response.
+Notes: Use "git commit -am" when possible, don't stage unrelated files, NEVER update config, don't push, no -i flags, no empty commits, return empty response, when rebasing always use -m or GIT_EDITOR=true.
 </git_commits>
 
 <pull_requests>

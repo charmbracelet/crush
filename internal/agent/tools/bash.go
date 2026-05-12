@@ -53,7 +53,7 @@ const (
 	BashNoOutput               = "no output"
 )
 
-//go:embed bash.tpl
+//go:embed bash.md.tpl
 var bashDescriptionTmpl []byte
 
 var bashDescriptionTpl = template.Must(
@@ -66,6 +66,7 @@ type bashDescriptionData struct {
 	MaxOutputLength int
 	Attribution     config.Attribution
 	ModelID         string
+	RgAvailable     bool
 }
 
 var bannedCommands = []string{
@@ -149,6 +150,7 @@ func bashDescription(attribution *config.Attribution, modelID string) string {
 		MaxOutputLength: MaxOutputLength,
 		Attribution:     *attribution,
 		ModelID:         modelID,
+		RgAvailable:     getRg() != "",
 	}); err != nil {
 		// this should never happen.
 		panic("failed to execute bash description template: " + err.Error())

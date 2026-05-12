@@ -339,6 +339,11 @@ func (a *Anim) SetLabel(newLabel string) {
 		a.width += a.labelWidth
 	}
 
+	if a.static {
+		a.staticRendered = lipgloss.NewStyle().Foreground(a.labelColor).Render(newLabel)
+		return
+	}
+
 	// Re-render the label
 	a.renderLabel(newLabel)
 }

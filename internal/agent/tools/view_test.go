@@ -93,6 +93,21 @@ func TestReadTextFileTruncatesLongLines(t *testing.T) {
 	require.Equal(t, strings.Repeat("a", MaxLineLength)+"...", content)
 }
 
+func TestReadTextFileLineExceeding1MB(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "huge_line.txt")
+
+	hugeLine := strings.Repeat("A", 2*1024*1024) // 2MB — exceeds bufio.Scanner max
+	require.NoError(t, os.WriteFile(filePath, []byte(hugeLine), 0o644))
+
+	content, hasMore, err := readTextFile(filePath, 0, 1, 0)
+	require.NoError(t, err)
+	require.False(t, hasMore)
+	require.Equal(t, strings.Repeat("A", MaxLineLength)+"...", content)
+}
+
 func TestViewToolAllowsSmallSectionsOfLargeFiles(t *testing.T) {
 	t.Parallel()
 

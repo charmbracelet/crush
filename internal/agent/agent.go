@@ -745,7 +745,9 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	// Just in case, get just the last usage info.
 	usage := resp.Response.Usage
 	currentSession.SummaryMessageID = summaryMessage.ID
-	currentSession.CompletionTokens = usage.OutputTokens
+	if completionTokens := summaryCompletionTokens(usage, summaryMessage); completionTokens != 0 {
+		currentSession.CompletionTokens = completionTokens
+	}
 	currentSession.PromptTokens = 0
 	_, err = a.sessions.Save(genCtx, currentSession)
 	if err != nil {
@@ -1126,11 +1128,9 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 		modelConfig.CostPer1MIn/1e6*float64(usage.InputTokens) +
 		modelConfig.CostPer1MOut/1e6*float64(usage.OutputTokens)
 
-	eventCost := cost
-	if estimated {
-		eventCost = 0
+	if !estimated {
+		a.eventTokensUsed(session.ID, model, usage, cost)
 	}
-	a.eventTokensUsed(session.ID, model, usage, eventCost)
 
 	if estimated {
 		cost = 0
@@ -1147,10 +1147,23 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 	}
 
 	session.Cost += cost
-	if !usageIsZero(usage) {
+	updateSessionTokenCounters(session, usage)
+}
+
+func updateSessionTokenCounters(session *session.Session, usage fantasy.Usage) {
+	if usage.OutputTokens != 0 {
 		session.CompletionTokens = usage.OutputTokens
-		session.PromptTokens = usage.InputTokens + usage.CacheReadTokens
 	}
+	if promptTokens := usage.InputTokens + usage.CacheReadTokens; promptTokens != 0 {
+		session.PromptTokens = promptTokens
+	}
+}
+
+func summaryCompletionTokens(usage fantasy.Usage, summaryMessage message.Message) int64 {
+	if usage.OutputTokens != 0 {
+		return usage.OutputTokens
+	}
+	return approxTokenCount(summaryMessage.Content().Text) + approxTokenCount(summaryMessage.ReasoningContent().String())
 }
 
 func (a *sessionAgent) Cancel(sessionID string) {

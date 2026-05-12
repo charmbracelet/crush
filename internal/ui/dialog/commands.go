@@ -521,10 +521,14 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		commands = append(commands, NewCommandItem(c.com.Styles, "snapshots", "View Snapshots", "", ActionOpenSnapshotsDialog{SessionID: c.sessionID}))
 	}
 
-	// Add worktree commands if enabled and has session.
-	if c.hasSession && c.com.Workspace.WorktreesEnabled() {
+	// Add worktree commands if enabled.
+	// "Manage Worktrees" is always available to view/delete existing worktrees.
+	// "Create Worktree" requires a session since worktrees are tied to sessions.
+	if c.com.Workspace.WorktreesEnabled() {
 		commands = append(commands, NewCommandItem(c.com.Styles, "worktrees", "Manage Worktrees", "", ActionOpenWorktreesDialog{SessionID: c.sessionID}))
-		commands = append(commands, NewCommandItem(c.com.Styles, "new_worktree", "Create Worktree", "", ActionCreateWorktree{SessionID: c.sessionID}))
+		if c.hasSession {
+			commands = append(commands, NewCommandItem(c.com.Styles, "new_worktree", "Create Worktree", "", ActionCreateWorktree{SessionID: c.sessionID}))
+		}
 	}
 
 	// Add garbage collection command if snapshots enabled.

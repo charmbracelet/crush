@@ -70,6 +70,20 @@ func (m *UserMessageItem) RawRender(width int) string {
 
 // Render implements MessageItem.
 func (m *UserMessageItem) Render(width int) string {
+	// Bypass the prefix cache while a highlight range is active so
+	// selection drags reflect immediately without invalidating the
+	// cache. Highlight changes are intentionally applied "above" the
+	// prefix cache.
+	useCache := !m.isHighlighted()
+	var key uint64
+	if m.focused {
+		key = 1
+	}
+	if useCache {
+		if cached, ok := m.getCachedPrefixedRender(width, key); ok {
+			return cached
+		}
+	}
 	var prefix string
 	if m.focused {
 		prefix = m.sty.Messages.UserFocused.Render()
@@ -80,7 +94,11 @@ func (m *UserMessageItem) Render(width int) string {
 	for i, line := range lines {
 		lines[i] = prefix + line
 	}
-	return strings.Join(lines, "\n")
+	out := strings.Join(lines, "\n")
+	if useCache {
+		m.setCachedPrefixedRender(out, width, key)
+	}
+	return out
 }
 
 // ID implements MessageItem.

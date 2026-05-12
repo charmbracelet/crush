@@ -108,7 +108,7 @@ func (s *SSHAnimations) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	// Render components to compute needed height.
 	header := s.renderHeader(contentWidth)
 	buttons := s.renderButtons(contentWidth)
-	helpView := s.renderHelp(contentWidth)
+	helpView := s.renderHelp()
 	body := s.renderBody(contentWidth)
 
 	parts := []string{header, "", body, "", buttons, "", helpView}
@@ -139,8 +139,8 @@ func (s *SSHAnimations) renderButtons(contentWidth int) string {
 	buttons := []common.ButtonOpts{
 		{Text: "Yes", UnderlineIndex: 0, Selected: s.selectedOption == 0},
 		{Text: "No", UnderlineIndex: 0, Selected: s.selectedOption == 1},
-		{Text: "For all SSH connections", UnderlineIndex: 2, Selected: s.selectedOption == 2},
-		{Text: "Never", UnderlineIndex: 0, Selected: s.selectedOption == 3},
+		{Text: "For all SSH connections", UnderlineIndex: 4, Selected: s.selectedOption == 2},
+		{Text: "Never", UnderlineIndex: 2, Selected: s.selectedOption == 3},
 	}
 
 	content := common.ButtonGroup(s.com.Styles, buttons, "  ")
@@ -157,7 +157,7 @@ func (s *SSHAnimations) renderButtons(contentWidth int) string {
 		Render(content)
 }
 
-func (s *SSHAnimations) renderHelp(contentWidth int) string {
+func (s *SSHAnimations) renderHelp() string {
 	return "←/→ or tab to navigate · enter to confirm · esc to dismiss"
 }
 

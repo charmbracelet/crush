@@ -132,7 +132,7 @@ func (e LSPEvent) MarshalJSON() ([]byte, error) {
 			}
 			return ""
 		}(),
-		Alias: (Alias)(e),
+		Alias: Alias(e),
 	})
 }
 
@@ -143,7 +143,7 @@ func (e *LSPEvent) UnmarshalJSON(data []byte) error {
 		Error string `json:"error,omitempty"`
 		Alias
 	}{
-		Alias: (Alias)(*e),
+		Alias: Alias(*e),
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
@@ -177,7 +177,7 @@ func (i LSPClientInfo) MarshalJSON() ([]byte, error) {
 			}
 			return ""
 		}(),
-		Alias: (Alias)(i),
+		Alias: Alias(i),
 	})
 }
 
@@ -188,7 +188,7 @@ func (i *LSPClientInfo) UnmarshalJSON(data []byte) error {
 		Error string `json:"error,omitempty"`
 		Alias
 	}{
-		Alias: (Alias)(*i),
+		Alias: Alias(*i),
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err

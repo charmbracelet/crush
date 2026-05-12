@@ -51,7 +51,7 @@ func (e AgentEvent) MarshalJSON() ([]byte, error) {
 			}
 			return ""
 		}(),
-		Alias: (Alias)(e),
+		Alias: Alias(e),
 	})
 }
 
@@ -62,7 +62,7 @@ func (e *AgentEvent) UnmarshalJSON(data []byte) error {
 		Error string `json:"error,omitempty"`
 		Alias
 	}{
-		Alias: (Alias)(*e),
+		Alias: Alias(*e),
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err

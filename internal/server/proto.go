@@ -460,6 +460,26 @@ func (c *controllerV1) handleDeleteWorkspaceSession(w http.ResponseWriter, r *ht
 	w.WriteHeader(http.StatusOK)
 }
 
+// handleArchiveWorkspaceSession archives a session and releases its snapshot refs.
+//
+//	@Summary		Archive a session
+//	@Tags			sessions
+//	@Param			id	path	string	true	"Workspace ID"
+//	@Param			sid	path	string	true	"Session ID"
+//	@Success		200
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/sessions/{sid}/archive [post]
+func (c *controllerV1) handleArchiveWorkspaceSession(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	sid := r.PathValue("sid")
+	if err := c.backend.ArchiveSession(r.Context(), id, sid); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 // handleGetWorkspaceSessionUserMessages returns user messages for a session.
 //
 //	@Summary		Get user messages for session

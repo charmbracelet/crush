@@ -105,6 +105,16 @@ func (b *Backend) DeleteSession(ctx context.Context, workspaceID, sessionID stri
 	return ws.Sessions.Delete(ctx, sessionID)
 }
 
+// ArchiveSession archives a session and releases its snapshot refs.
+func (b *Backend) ArchiveSession(ctx context.Context, workspaceID, sessionID string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+
+	return ws.ArchiveSession(ctx, sessionID)
+}
+
 // ListUserMessages returns user-role messages for a session.
 func (b *Backend) ListUserMessages(ctx context.Context, workspaceID, sessionID string) ([]message.Message, error) {
 	ws, err := b.GetWorkspace(workspaceID)

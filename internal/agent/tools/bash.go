@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"html/template"
 	"path/filepath"
@@ -336,7 +337,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 					// Incoming context was cancelled before we moved to background
 					// Kill the shell and return error
 					bgManager.Kill(bgShell.ID)
-					return fantasy.ToolResponse{}, ctx.Err()
+					return fantasy.ToolResponse{}, fmt.Errorf("command was interrupted")
 				}
 			}
 
@@ -393,7 +394,7 @@ func formatOutput(stdout, stderr string, execErr error) string {
 	stderr = truncateOutput(stderr)
 
 	errorMessage := stderr
-	if errorMessage == "" && execErr != nil {
+	if errorMessage == "" && execErr != nil && !interrupted {
 		errorMessage = execErr.Error()
 	}
 
@@ -401,7 +402,11 @@ func formatOutput(stdout, stderr string, execErr error) string {
 		if errorMessage != "" {
 			errorMessage += "\n"
 		}
-		errorMessage += "Command was aborted before completion"
+		if errors.Is(execErr, context.DeadlineExceeded) {
+			errorMessage += "Command timed out"
+		} else {
+			errorMessage += "Command was aborted before completion"
+		}
 	} else if exitCode != 0 {
 		if errorMessage != "" {
 			errorMessage += "\n"

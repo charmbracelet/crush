@@ -15,7 +15,7 @@ const (
 )
 
 //go:embed job_output.md
-var jobOutputDescription []byte
+var jobOutputDescription string
 
 type JobOutputParams struct {
 	ShellID string `json:"shell_id" description:"The ID of the background shell to retrieve output from"`
@@ -33,7 +33,7 @@ type JobOutputResponseMetadata struct {
 func NewJobOutputTool() fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		JobOutputToolName,
-		FirstLineDescription(jobOutputDescription),
+		jobOutputDescription,
 		func(ctx context.Context, params JobOutputParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.ShellID == "" {
 				return fantasy.NewTextErrorResponse("missing shell_id"), nil

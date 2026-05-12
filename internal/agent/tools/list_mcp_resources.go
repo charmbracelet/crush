@@ -26,12 +26,12 @@ type ListMCPResourcesPermissionsParams struct {
 const ListMCPResourcesToolName = "list_mcp_resources"
 
 //go:embed list_mcp_resources.md
-var listMCPResourcesDescription []byte
+var listMCPResourcesDescription string
 
 func NewListMCPResourcesTool(cfg *config.ConfigStore, permissions permission.Service) fantasy.AgentTool {
 	return fantasy.NewParallelAgentTool(
 		ListMCPResourcesToolName,
-		FirstLineDescription(listMCPResourcesDescription),
+		listMCPResourcesDescription,
 		func(ctx context.Context, params ListMCPResourcesParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			params.MCPName = strings.TrimSpace(params.MCPName)
 			if params.MCPName == "" {

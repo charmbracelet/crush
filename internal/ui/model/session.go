@@ -213,7 +213,12 @@ func fileList(t *styles.Styles, cwd string, filesWithChanges []SessionFile, widt
 			filePath = rel
 		}
 		filePath = fsext.DirTrim(filePath, 2)
-		filePath = ansi.Truncate(filePath, width-(lipgloss.Width(extraContent)-2), "…")
+		suffix := ""
+		if extraContent != "" {
+			suffix = " " + extraContent
+		}
+		maxPathWidth := max(width-lipgloss.Width(suffix), 0)
+		filePath = ansi.Truncate(filePath, maxPathWidth, "…")
 
 		line := t.Files.Path.Render(filePath)
 		if extraContent != "" {

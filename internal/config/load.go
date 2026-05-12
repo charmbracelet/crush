@@ -429,6 +429,10 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 			c.Options.DataDirectory = filepath.Join(workingDir, defaultDataDirectory)
 		}
 	}
+	if !filepath.IsAbs(c.Options.DataDirectory) {
+		c.Options.DataDirectory = filepath.Join(workingDir, c.Options.DataDirectory)
+	}
+	c.Options.DataDirectory = filepath.Clean(c.Options.DataDirectory)
 	if c.Providers == nil {
 		c.Providers = csync.NewMap[string, ProviderConfig]()
 	}

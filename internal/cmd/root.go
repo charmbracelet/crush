@@ -656,11 +656,11 @@ func startDetachedServer(cmd *cobra.Command, hostURL *url.URL) error {
 		cmdArgs = append(cmdArgs, "--host", clientHost)
 	}
 
-	// Use exec.Command (not exec.CommandContext) so the parent's context
-	// cancellation does not kill the spawned server. detachProcess
-	// (Setsid on !windows, DETACHED_PROCESS on windows) is what truly
-	// detaches the child from this process's lifetime.
-	c := exec.Command(exe, cmdArgs...)
+	// Use context.Background() so the parent's context cancellation does not
+	// kill the spawned server. detachProcess (Setsid on !windows,
+	// DETACHED_PROCESS on windows) is what truly detaches the child from
+	// this process's lifetime.
+	c := exec.CommandContext(context.Background(), exe, cmdArgs...)
 	stdoutPath := filepath.Join(chDir, "stdout.log")
 	stderrPath := filepath.Join(chDir, "stderr.log")
 	detachProcess(c)

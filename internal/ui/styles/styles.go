@@ -154,6 +154,7 @@ type Styles struct {
 	WorkingGradFromColor color.Color
 	WorkingGradToColor   color.Color
 	WorkingLabelColor    color.Color // Label text color next to the indicator
+	WorkingEllipsisColor color.Color // Muted color for static ellipsis dots
 
 	// Section Title
 	Section struct {

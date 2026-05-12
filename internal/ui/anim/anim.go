@@ -47,17 +47,12 @@ const (
 	// Default number of cycling chars.
 	defaultNumCyclingChars = 10
 
-	// Number of steps per color cycle for the static dot animation.
-	dotColorCycleSteps = 10
-
-	// Tick interval for static (reduced) animation mode. Slower tick means
-	// fewer re-renders and less bandwidth over SSH.
-	staticTickInterval = 2 * time.Second
-
-	// Phase offset between consecutive dots in the static animation. Each dot
-	// is offset by this many steps, creating a left-to-right color wave.
-	staticDotPhase = 3
+	// Tick interval for static (reduced) animation mode.
+	staticTickInterval = 500 * time.Millisecond
 )
+
+// Ellipsis frames for the static animation.
+var staticEllipsisFrames = []string{"", ".", "..", "..."}
 
 // Default colors for gradient.
 var (
@@ -94,8 +89,8 @@ var animCacheMap = csync.NewMap[string, *animCache]()
 // settingsHash creates a hash key for the settings to use for caching
 func settingsHash(opts Settings) string {
 	h := xxh3.New()
-	fmt.Fprintf(h, "%d-%s-%v-%v-%v-%t",
-		opts.Size, opts.Label, opts.LabelColor, opts.GradColorA, opts.GradColorB, opts.CycleColors)
+	fmt.Fprintf(h, "%d-%s-%v-%v-%v-%v-%t",
+		opts.Size, opts.Label, opts.LabelColor, opts.EllipsisColor, opts.GradColorA, opts.GradColorB, opts.CycleColors)
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
@@ -104,14 +99,15 @@ type StepMsg struct{ ID string }
 
 // Settings defines settings for the animation.
 type Settings struct {
-	ID          string
-	Static      bool
-	Size        int
-	Label       string
-	LabelColor  color.Color
-	GradColorA  color.Color
-	GradColorB  color.Color
-	CycleColors bool
+	ID            string
+	Static        bool
+	Size          int
+	Label         string
+	LabelColor    color.Color
+	EllipsisColor color.Color // Color for ellipsis dots; defaults to LabelColor if unset
+	GradColorA    color.Color
+	GradColorB    color.Color
+	CycleColors   bool
 }
 
 // Default settings.
@@ -119,25 +115,24 @@ const ()
 
 // Anim is a Bubble for an animated spinner.
 type Anim struct {
-	width            int
-	cyclingCharWidth int
-	label            *csync.Slice[string]
-	labelWidth       int
-	labelColor       color.Color
-	birthSteps       []int
-	initialFrames    [][]string // frames for the initial characters
-	initialized      atomic.Bool
-	cyclingFrames    [][]string           // frames for the cycling characters
-	step             atomic.Int64         // current main frame step (wraps)
-	framesSinceStart atomic.Int64         // total Animate ticks (does not wrap)
-	ellipsisStep     atomic.Int64         // current ellipsis frame step
-	ellipsisFrames   *csync.Slice[string] // ellipsis animation frames
-	id               string
-	static           bool // when true, don't animate
-	staticRendered   string
-	dotColors        []string // pre-rendered dot characters for static mode
-	gradColorA       color.Color
-	gradColorB       color.Color
+	width                int
+	cyclingCharWidth     int
+	label                *csync.Slice[string]
+	labelWidth           int
+	labelColor           color.Color
+	ellipsisColor        color.Color
+	birthSteps           []int
+	initialFrames        [][]string // frames for the initial characters
+	initialized          atomic.Bool
+	cyclingFrames        [][]string           // frames for the cycling characters
+	step                 atomic.Int64         // current main frame step (wraps)
+	framesSinceStart     atomic.Int64         // total Animate ticks (does not wrap)
+	ellipsisStep         atomic.Int64         // current ellipsis frame step
+	ellipsisFrames       *csync.Slice[string] // ellipsis animation frames
+	id                   string
+	static               bool // when true, don't animate
+	staticRendered       string
+	staticEllipsisFrames []string // pre-rendered ellipsis frames for static mode
 }
 
 // New creates a new Anim instance with the specified width and label.
@@ -164,10 +159,12 @@ func New(opts Settings) *Anim {
 	}
 	a.cyclingCharWidth = opts.Size
 	a.labelColor = opts.LabelColor
+	if colorIsUnset(opts.EllipsisColor) {
+		a.ellipsisColor = opts.LabelColor
+	} else {
+		a.ellipsisColor = opts.EllipsisColor
+	}
 	a.static = opts.Static
-
-	a.gradColorA = opts.GradColorA
-	a.gradColorB = opts.GradColorB
 
 	// For static mode, render a static "Working..." label and return early.
 	if opts.Static {
@@ -317,7 +314,7 @@ func (a *Anim) SetLabel(newLabel string) {
 	}
 
 	if a.static {
-		a.staticRendered = lipgloss.NewStyle().Foreground(a.labelColor).Render(newLabel)
+		a.renderStatic()
 		return
 	}
 
@@ -386,7 +383,7 @@ func (a *Anim) Animate(msg StepMsg) tea.Cmd {
 
 	if a.static {
 		step := a.step.Add(1)
-		if int(step) >= dotColorCycleSteps {
+		if int(step) >= len(staticEllipsisFrames) {
 			a.step.Store(0)
 		}
 		return a.staticTick()
@@ -410,27 +407,14 @@ func (a *Anim) Animate(msg StepMsg) tea.Cmd {
 	return a.Step()
 }
 
-// renderStatic renders the static "Working" label and pre-renders dot colors.
+// renderStatic renders the static label and pre-renders ellipsis frames.
 func (a *Anim) renderStatic() {
-	a.staticRendered = lipgloss.NewStyle().
-		Foreground(a.labelColor).
-		Render("Working")
-
-	// Pre-render all dot colors to avoid MakeColor + lipgloss on every Render().
-	c1, ok1 := colorful.MakeColor(a.gradColorA)
-	c2, ok2 := colorful.MakeColor(a.gradColorB)
-	if ok1 && ok2 {
-		a.dotColors = make([]string, dotColorCycleSteps)
-		for step := range dotColorCycleSteps {
-			pos := float64(step) / float64(dotColorCycleSteps)
-			var c color.Color
-			if pos < 0.5 {
-				c = c1.BlendHcl(c2, pos*2)
-			} else {
-				c = c2.BlendHcl(c1, (pos-0.5)*2)
-			}
-			a.dotColors[step] = lipgloss.NewStyle().Foreground(c).Render(".")
-		}
+	labelStyle := lipgloss.NewStyle().Foreground(a.labelColor)
+	dotStyle := lipgloss.NewStyle().Foreground(a.ellipsisColor)
+	a.staticRendered = labelStyle.Render("Working")
+	a.staticEllipsisFrames = make([]string, len(staticEllipsisFrames))
+	for i, frame := range staticEllipsisFrames {
+		a.staticEllipsisFrames[i] = dotStyle.Render(frame)
 	}
 }
 
@@ -440,16 +424,8 @@ func (a *Anim) Render() string {
 		step := int(a.step.Load())
 		var b strings.Builder
 		b.WriteString(a.staticRendered)
-		if a.dotColors != nil {
-			for i := range 3 {
-				dotStep := (step + i*staticDotPhase) % dotColorCycleSteps
-				b.WriteString(a.dotColors[dotStep])
-			}
-		} else {
-			// Fallback: plain dots if MakeColor failed during init.
-			for range 3 {
-				b.WriteByte('.')
-			}
+		if step < len(a.staticEllipsisFrames) {
+			b.WriteString(a.staticEllipsisFrames[step])
 		}
 		return b.String()
 	}

@@ -11,9 +11,9 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/dustin/go-humanize"
 	"github.com/sahilm/fuzzy"
-	uv "github.com/charmbracelet/ultraviolet"
 )
 
 // SnapshotsID is the identifier for the snapshots dialog.

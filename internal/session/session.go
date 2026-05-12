@@ -58,6 +58,7 @@ type Session struct {
 	Todos            []Todo
 	CreatedAt        int64
 	UpdatedAt        int64
+	ArchivedAt       int64
 }
 
 type Service interface {
@@ -68,9 +69,12 @@ type Service interface {
 	Get(ctx context.Context, id string) (Session, error)
 	GetLast(ctx context.Context) (Session, error)
 	List(ctx context.Context) ([]Session, error)
+	ListArchived(ctx context.Context) ([]Session, error)
 	Save(ctx context.Context, session Session) (Session, error)
 	UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error
 	Rename(ctx context.Context, id string, title string) error
+	Archive(ctx context.Context, id string) error
+	Unarchive(ctx context.Context, id string) error
 	Delete(ctx context.Context, id string) error
 
 	// Agent tool session management
@@ -237,6 +241,42 @@ func (s *service) List(ctx context.Context) ([]Session, error) {
 	return sessions, nil
 }
 
+func (s *service) ListArchived(ctx context.Context) ([]Session, error) {
+	dbSessions, err := s.q.ListArchivedSessions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sessions := make([]Session, len(dbSessions))
+	for i, dbSession := range dbSessions {
+		sessions[i] = s.fromDBItem(dbSession)
+	}
+	return sessions, nil
+}
+
+func (s *service) Archive(ctx context.Context, id string) error {
+	if err := s.q.ArchiveSession(ctx, id); err != nil {
+		return fmt.Errorf("archiving session: %w", err)
+	}
+	dbSession, err := s.q.GetSessionByID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("getting archived session: %w", err)
+	}
+	s.Publish(pubsub.UpdatedEvent, s.fromDBItem(dbSession))
+	return nil
+}
+
+func (s *service) Unarchive(ctx context.Context, id string) error {
+	if err := s.q.UnarchiveSession(ctx, id); err != nil {
+		return fmt.Errorf("unarchiving session: %w", err)
+	}
+	dbSession, err := s.q.GetSessionByID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("getting unarchived session: %w", err)
+	}
+	s.Publish(pubsub.UpdatedEvent, s.fromDBItem(dbSession))
+	return nil
+}
+
 func (s service) fromDBItem(item db.Session) Session {
 	todos, err := unmarshalTodos(item.Todos.String)
 	if err != nil {
@@ -254,6 +294,7 @@ func (s service) fromDBItem(item db.Session) Session {
 		Todos:            todos,
 		CreatedAt:        item.CreatedAt,
 		UpdatedAt:        item.UpdatedAt,
+		ArchivedAt:       item.ArchivedAt.Int64,
 	}
 }
 

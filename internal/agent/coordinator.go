@@ -210,11 +210,8 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	logTurnSkillUsage(sessionID, prompt, c.activeSkills, c.skillTracker, beforeLoaded)
 
 	if c.isUnauthorized(originalErr) {
-		slog.Debug("Error is unauthorized, attempting retry", "provider", providerCfg.ID, "aws_auth_refresh", providerCfg.AWSAuthRefresh)
 		if err := c.retryAfterUnauthorized(ctx, providerCfg); err == nil {
 			return run()
-		} else {
-			slog.Debug("retryAfterUnauthorized failed", "error", err)
 		}
 	}
 
@@ -1009,7 +1006,6 @@ func (c *coordinator) isUnauthorized(err error) bool {
 	// chain before any Bedrock request is made, so they never become a
 	// ProviderError. Match on the error message instead.
 	msg := err.Error()
-	slog.Debug("Checking if error is unauthorized", "error", msg)
 	return strings.Contains(msg, "GetRoleCredentials") ||
 		strings.Contains(msg, "cached credentials") ||
 		strings.Contains(msg, "ForbiddenException") ||

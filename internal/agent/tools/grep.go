@@ -371,18 +371,26 @@ func fileContainsPattern(filePath string, pattern *regexp.Regexp) (bool, int, in
 	}
 	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
+	reader := bufio.NewReader(file)
 	lineNum := 0
-	for scanner.Scan() {
+	for {
+		line, err := reader.ReadString('\n')
 		lineNum++
-		line := scanner.Text()
+		line = strings.TrimSuffix(line, "\n")
+		line = strings.TrimSuffix(line, "\r")
 		if loc := pattern.FindStringIndex(line); loc != nil {
 			charNum := loc[0] + 1
 			return true, lineNum, charNum, line, nil
 		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return false, 0, 0, "", err
+		}
 	}
 
-	return false, 0, 0, "", scanner.Err()
+	return false, 0, 0, "", nil
 }
 
 // isTextFile checks if a file is a text file by examining its MIME type.

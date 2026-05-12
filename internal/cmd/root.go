@@ -329,6 +329,9 @@ func ensureServer(cmd *cobra.Command, hostURL *url.URL) error {
 		}
 
 		if needsStart {
+			// Remove any stale socket before starting a new server.
+			// The socket might exist without a running server (e.g., after a crash).
+			_ = os.Remove(hostURL.Host)
 			if err := startDetachedServer(cmd); err != nil {
 				return err
 			}

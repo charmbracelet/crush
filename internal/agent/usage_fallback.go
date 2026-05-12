@@ -78,9 +78,13 @@ func estimateStepCompletionTokens(step fantasy.StepResult) int64 {
 		case *fantasy.ToolCallContent:
 			tokens += estimateToolCallTokens(c.ToolName, c.Input)
 		case fantasy.ToolResultContent:
-			tokens += estimateToolResultContentTokens(c.ToolCallID, c.ToolName, c.ClientMetadata, c.Result)
+			if c.ProviderExecuted {
+				tokens += estimateToolResultContentTokens(c.ToolCallID, c.ToolName, c.ClientMetadata, c.Result)
+			}
 		case *fantasy.ToolResultContent:
-			tokens += estimateToolResultContentTokens(c.ToolCallID, c.ToolName, c.ClientMetadata, c.Result)
+			if c.ProviderExecuted {
+				tokens += estimateToolResultContentTokens(c.ToolCallID, c.ToolName, c.ClientMetadata, c.Result)
+			}
 		}
 	}
 	return tokens

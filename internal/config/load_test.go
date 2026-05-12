@@ -4,6 +4,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -110,6 +111,68 @@ func TestConfig_setDefaults(t *testing.T) {
 		cfg.setDefaults(workingDir, "./state")
 
 		require.Equal(t, filepath.Join(workingDir, "state"), cfg.Options.DataDirectory)
+	})
+
+	t.Run("does not adopt .crush from a parent project", func(t *testing.T) {
+		parent := t.TempDir()
+
+		// .crush in the parent: it should not be reused by the child
+		// because there is no git context joining them.
+		require.NoError(t, os.Mkdir(filepath.Join(parent, defaultDataDirectory), 0o755))
+
+		child := filepath.Join(parent, "child")
+		require.NoError(t, os.Mkdir(child, 0o755))
+
+		cfg := &Config{}
+		cfg.setDefaults(child, "")
+
+		require.Equal(t,
+			filepath.Clean(filepath.Join(child, defaultDataDirectory)),
+			filepath.Clean(cfg.Options.DataDirectory),
+		)
+	})
+
+	t.Run("does not climb out of git worktree to find .crush", func(t *testing.T) {
+		if _, err := exec.LookPath("git"); err != nil {
+			t.Skip("git not available")
+		}
+
+		parent := t.TempDir()
+
+		// Stray .crush above the worktree root.
+		require.NoError(t, os.Mkdir(filepath.Join(parent, defaultDataDirectory), 0o755))
+
+		worktree := filepath.Join(parent, "worktree")
+		require.NoError(t, os.Mkdir(worktree, 0o755))
+
+		sub := filepath.Join(worktree, "pkg")
+		require.NoError(t, os.Mkdir(sub, 0o755))
+
+		// Make worktree a real git repo so the boundary detection
+		// resolves to it, mirroring what happens with linked worktrees
+		// in real usage.
+		gitInit := exec.CommandContext(t.Context(), "git", "init", "-q")
+		gitInit.Dir = worktree
+		require.NoError(t, gitInit.Run())
+
+		cfg := &Config{}
+		cfg.setDefaults(sub, "")
+
+		// Resolve symlinks because TempDir on macOS sits under /var
+		// which is a symlink to /private/var. The data directory has
+		// not been created yet, so resolve its parent and join.
+		gotDir, gotName := filepath.Split(cfg.Options.DataDirectory)
+		gotEvalDir, err := filepath.EvalSymlinks(filepath.Clean(gotDir))
+		require.NoError(t, err)
+		gotEval := filepath.Join(gotEvalDir, gotName)
+
+		strayEval, err := filepath.EvalSymlinks(filepath.Join(parent, defaultDataDirectory))
+		require.NoError(t, err)
+		require.NotEqual(t, strayEval, gotEval, "must not adopt parent .crush")
+
+		subEval, err := filepath.EvalSymlinks(sub)
+		require.NoError(t, err)
+		require.Equal(t, filepath.Join(subEval, defaultDataDirectory), gotEval)
 	})
 }
 

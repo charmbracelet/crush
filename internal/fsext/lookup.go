@@ -197,6 +197,11 @@ func traverseUp(dir string, walkFn func(dir string, owner int) error) error {
 // traverseUp instead. If stopDir is set but is not an ancestor of dir
 // the walk still stops at the filesystem root, so callers cannot
 // accidentally produce an infinite walk by passing a sibling path.
+//
+// Boundary comparison is performed against symlink-resolved paths so
+// that callers passing logically equivalent paths (a symlinked /var vs
+// the underlying /private/var, for example) still terminate at the
+// expected directory.
 func traverseUpBounded(dir, stopDir string, walkFn func(dir string, owner int) error) error {
 	cwd, err := filepath.Abs(dir)
 	if err != nil {
@@ -210,6 +215,7 @@ func traverseUpBounded(dir, stopDir string, walkFn func(dir string, owner int) e
 			return fmt.Errorf("cannot convert stop dir to absolute path: %w", err)
 		}
 	}
+	canonStop := canonicalize(stop)
 
 	owner, err := Owner(dir)
 	if err != nil {
@@ -219,7 +225,7 @@ func traverseUpBounded(dir, stopDir string, walkFn func(dir string, owner int) e
 	for {
 		err := walkFn(cwd, owner)
 		if err == nil || errors.Is(err, filepath.SkipDir) {
-			if cwd == stop {
+			if canonicalize(cwd) == canonStop {
 				return nil
 			}
 
@@ -238,6 +244,16 @@ func traverseUpBounded(dir, stopDir string, walkFn func(dir string, owner int) e
 
 		return err
 	}
+}
+
+// canonicalize resolves any symbolic links in path. If resolution fails
+// (typically because path does not exist yet) the original path is
+// returned cleaned, so callers can still perform stable equality checks.
+func canonicalize(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	return filepath.Clean(path)
 }
 
 // probeEnt checks if entity at given path exists and belongs to given owner

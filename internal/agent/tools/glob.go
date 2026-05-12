@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/fsext"
 )
 
@@ -96,10 +97,7 @@ func runRipgrep(cmd *exec.Cmd, searchRoot string, limit int) ([]string, error) {
 		if len(p) == 0 {
 			continue
 		}
-		absPath := string(p)
-		if !filepath.IsAbs(absPath) {
-			absPath = filepath.Join(searchRoot, absPath)
-		}
+		absPath := filepathext.SmartJoin(searchRoot, string(p))
 		if fsext.SkipHidden(absPath) {
 			continue
 		}

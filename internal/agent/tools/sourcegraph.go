@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"io"
 	"net/http"
 	"strings"
@@ -28,8 +29,23 @@ type SourcegraphResponseMetadata struct {
 
 const SourcegraphToolName = "sourcegraph"
 
-//go:embed sourcegraph.md
-var sourcegraphDescription string
+//go:embed sourcegraph.md.tpl
+var sourcegraphDescriptionTmpl []byte
+
+var sourcegraphDescriptionTpl = template.Must(
+	template.New("sourcegraphDescription").
+		Parse(string(sourcegraphDescriptionTmpl)),
+)
+
+type sourcegraphDescriptionData struct {
+	MaxResults int
+}
+
+func sourcegraphDescription() string {
+	return renderTemplate(sourcegraphDescriptionTpl, sourcegraphDescriptionData{
+		MaxResults: 20,
+	})
+}
 
 func NewSourcegraphTool(client *http.Client) fantasy.AgentTool {
 	if client == nil {
@@ -45,7 +61,7 @@ func NewSourcegraphTool(client *http.Client) fantasy.AgentTool {
 	}
 	return fantasy.NewParallelAgentTool(
 		SourcegraphToolName,
-		sourcegraphDescription,
+		sourcegraphDescription(),
 		func(ctx context.Context, params SourcegraphParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Query == "" {
 				return fantasy.NewTextErrorResponse("Query parameter is required"), nil

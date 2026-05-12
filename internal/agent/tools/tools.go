@@ -90,3 +90,12 @@ func renderToolDescription(tmpl *template.Template) string {
 	}
 	return out.String()
 }
+
+// renderTemplate renders a Go template with the given data.
+func renderTemplate(tmpl *template.Template, data any) string {
+	var out bytes.Buffer
+	if err := tmpl.Execute(&out, data); err != nil {
+		panic("failed to execute tool description template: " + err.Error())
+	}
+	return out.String()
+}

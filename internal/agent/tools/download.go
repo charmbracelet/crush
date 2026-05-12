@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"html/template"
 	"io"
 	"net/http"
 	"os"
@@ -31,8 +32,23 @@ type DownloadPermissionsParams struct {
 
 const DownloadToolName = "download"
 
-//go:embed download.md
-var downloadDescription string
+//go:embed download.md.tpl
+var downloadDescriptionTmpl []byte
+
+var downloadDescriptionTpl = template.Must(
+	template.New("downloadDescription").
+		Parse(string(downloadDescriptionTmpl)),
+)
+
+type downloadDescriptionData struct {
+	MaxDownloadTimeout int
+}
+
+func downloadDescription() string {
+	return renderTemplate(downloadDescriptionTpl, downloadDescriptionData{
+		MaxDownloadTimeout: 600,
+	})
+}
 
 func NewDownloadTool(permissions permission.Service, workingDir string, client *http.Client) fantasy.AgentTool {
 	if client == nil {
@@ -48,7 +64,7 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 	}
 	return fantasy.NewParallelAgentTool(
 		DownloadToolName,
-		downloadDescription,
+		downloadDescription(),
 		func(ctx context.Context, params DownloadParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.URL == "" {
 				return fantasy.NewTextErrorResponse("URL parameter is required"), nil

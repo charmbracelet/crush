@@ -22,7 +22,7 @@ const (
 )
 
 //go:embed fetch.md
-var fetchDescription []byte
+var fetchDescription string
 
 func NewFetchTool(permissions permission.Service, workingDir string, client *http.Client) fantasy.AgentTool {
 	if client == nil {
@@ -39,7 +39,7 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 
 	return fantasy.NewParallelAgentTool(
 		FetchToolName,
-		FirstLineDescription(fetchDescription),
+		fetchDescription,
 		func(ctx context.Context, params FetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.URL == "" {
 				return fantasy.NewTextErrorResponse("URL parameter is required"), nil

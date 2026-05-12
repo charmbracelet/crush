@@ -20,7 +20,7 @@ import (
 const GlobToolName = "glob"
 
 //go:embed glob.md
-var globDescription []byte
+var globDescription string
 
 type GlobParams struct {
 	Pattern string `json:"pattern" description:"The glob pattern to match files against"`
@@ -35,7 +35,7 @@ type GlobResponseMetadata struct {
 func NewGlobTool(workingDir string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		GlobToolName,
-		FirstLineDescription(globDescription),
+		globDescription,
 		func(ctx context.Context, params GlobParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Pattern == "" {
 				return fantasy.NewTextErrorResponse("pattern is required"), nil

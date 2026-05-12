@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -417,4 +419,49 @@ func TestGetProviderOptionsReasoningEffort(t *testing.T) {
 			assert.Equal(t, anthropic.Effort("max"), *parsed.Effort)
 		})
 	}
+}
+
+func TestIsUnauthorized(t *testing.T) {
+	env := testEnv(t)
+	coord := newTestCoordinator(t, env, "bedrock", config.ProviderConfig{ID: "bedrock"})
+
+	t.Run("nil error", func(t *testing.T) {
+		assert.False(t, coord.isUnauthorized(nil, config.ProviderConfig{}))
+	})
+
+	t.Run("non-provider error", func(t *testing.T) {
+		assert.False(t, coord.isUnauthorized(errors.New("something broke"), config.ProviderConfig{}))
+	})
+
+	t.Run("provider error with 401", func(t *testing.T) {
+		err := &fantasy.ProviderError{StatusCode: http.StatusUnauthorized, Message: "unauthorized"}
+		assert.True(t, coord.isUnauthorized(err, config.ProviderConfig{}))
+	})
+
+	t.Run("provider error with non-401", func(t *testing.T) {
+		err := &fantasy.ProviderError{StatusCode: http.StatusForbidden, Message: "forbidden"}
+		assert.False(t, coord.isUnauthorized(err, config.ProviderConfig{}))
+	})
+
+	t.Run("wrapped provider error with 401", func(t *testing.T) {
+		inner := &fantasy.ProviderError{StatusCode: http.StatusUnauthorized, Message: "expired"}
+		err := fmt.Errorf("request failed: %w", inner)
+		assert.True(t, coord.isUnauthorized(err, config.ProviderConfig{}))
+	})
+
+	t.Run("AWS credential error with aws_auth_refresh", func(t *testing.T) {
+		cfg := config.ProviderConfig{AWSAuthRefresh: "aws sso login"}
+		err := errors.New("operation error: failed to refresh cached credentials")
+		assert.True(t, coord.isUnauthorized(err, cfg))
+	})
+
+	t.Run("AWS credential error without aws_auth_refresh", func(t *testing.T) {
+		err := errors.New("operation error: failed to refresh cached credentials")
+		assert.False(t, coord.isUnauthorized(err, config.ProviderConfig{}))
+	})
+
+	t.Run("unrelated error with aws_auth_refresh", func(t *testing.T) {
+		cfg := config.ProviderConfig{AWSAuthRefresh: "aws sso login"}
+		assert.False(t, coord.isUnauthorized(errors.New("network timeout"), cfg))
+	})
 }

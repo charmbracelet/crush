@@ -353,6 +353,131 @@ func TestLookup(t *testing.T) {
 	})
 }
 
+func TestLookupClosestBounded(t *testing.T) {
+	t.Run("found in starting directory", func(t *testing.T) {
+		testDir := t.TempDir()
+
+		targetFile := filepath.Join(testDir, "target.txt")
+		require.NoError(t, os.WriteFile(targetFile, []byte("test"), 0o644))
+
+		foundPath, found := LookupClosestBounded(testDir, testDir, "target.txt")
+		require.True(t, found)
+		require.Equal(t, targetFile, foundPath)
+	})
+
+	t.Run("found at boundary directory", func(t *testing.T) {
+		boundary := t.TempDir()
+
+		subDir := filepath.Join(boundary, "subdir")
+		require.NoError(t, os.Mkdir(subDir, 0o755))
+
+		targetFile := filepath.Join(boundary, "target.txt")
+		require.NoError(t, os.WriteFile(targetFile, []byte("test"), 0o644))
+
+		foundPath, found := LookupClosestBounded(subDir, boundary, "target.txt")
+		require.True(t, found)
+		require.Equal(t, targetFile, foundPath)
+	})
+
+	t.Run("does not climb past boundary", func(t *testing.T) {
+		parent := t.TempDir()
+
+		// Target lives above the boundary.
+		require.NoError(t, os.WriteFile(filepath.Join(parent, "target.txt"), []byte("test"), 0o644))
+
+		boundary := filepath.Join(parent, "project")
+		require.NoError(t, os.Mkdir(boundary, 0o755))
+
+		subDir := filepath.Join(boundary, "subdir")
+		require.NoError(t, os.Mkdir(subDir, 0o755))
+
+		foundPath, found := LookupClosestBounded(subDir, boundary, "target.txt")
+		require.False(t, found)
+		require.Empty(t, foundPath)
+	})
+
+	t.Run("empty boundary searches only starting directory", func(t *testing.T) {
+		parent := t.TempDir()
+
+		require.NoError(t, os.WriteFile(filepath.Join(parent, "target.txt"), []byte("test"), 0o644))
+
+		subDir := filepath.Join(parent, "subdir")
+		require.NoError(t, os.Mkdir(subDir, 0o755))
+
+		foundPath, found := LookupClosestBounded(subDir, "", "target.txt")
+		require.False(t, found)
+		require.Empty(t, foundPath)
+	})
+
+	t.Run("empty boundary still finds in starting directory", func(t *testing.T) {
+		testDir := t.TempDir()
+
+		targetFile := filepath.Join(testDir, "target.txt")
+		require.NoError(t, os.WriteFile(targetFile, []byte("test"), 0o644))
+
+		foundPath, found := LookupClosestBounded(testDir, "", "target.txt")
+		require.True(t, found)
+		require.Equal(t, targetFile, foundPath)
+	})
+}
+
+func TestLookupBounded(t *testing.T) {
+	t.Run("returns matches at and below boundary", func(t *testing.T) {
+		boundary := t.TempDir()
+
+		subDir := filepath.Join(boundary, "subdir")
+		require.NoError(t, os.Mkdir(subDir, 0o755))
+
+		atBoundary := filepath.Join(boundary, "target.txt")
+		atSub := filepath.Join(subDir, "target.txt")
+		require.NoError(t, os.WriteFile(atBoundary, []byte("a"), 0o644))
+		require.NoError(t, os.WriteFile(atSub, []byte("b"), 0o644))
+
+		found, err := LookupBounded(subDir, boundary, "target.txt")
+		require.NoError(t, err)
+		require.Len(t, found, 2)
+		require.Contains(t, found, atBoundary)
+		require.Contains(t, found, atSub)
+	})
+
+	t.Run("ignores matches above boundary", func(t *testing.T) {
+		parent := t.TempDir()
+
+		require.NoError(t, os.WriteFile(filepath.Join(parent, "target.txt"), []byte("nope"), 0o644))
+
+		boundary := filepath.Join(parent, "project")
+		require.NoError(t, os.Mkdir(boundary, 0o755))
+
+		subDir := filepath.Join(boundary, "subdir")
+		require.NoError(t, os.Mkdir(subDir, 0o755))
+
+		// Target lives only above the boundary.
+		found, err := LookupBounded(subDir, boundary, "target.txt")
+		require.NoError(t, err)
+		require.Empty(t, found)
+	})
+
+	t.Run("empty boundary searches only starting directory", func(t *testing.T) {
+		parent := t.TempDir()
+
+		require.NoError(t, os.WriteFile(filepath.Join(parent, "target.txt"), []byte("nope"), 0o644))
+
+		subDir := filepath.Join(parent, "subdir")
+		require.NoError(t, os.Mkdir(subDir, 0o755))
+
+		found, err := LookupBounded(subDir, "", "target.txt")
+		require.NoError(t, err)
+		require.Empty(t, found)
+	})
+
+	t.Run("no targets returns nil", func(t *testing.T) {
+		dir := t.TempDir()
+		found, err := LookupBounded(dir, dir)
+		require.NoError(t, err)
+		require.Empty(t, found)
+	})
+}
+
 func TestProbeEnt(t *testing.T) {
 	t.Run("existing file with correct owner", func(t *testing.T) {
 		tempDir := t.TempDir()

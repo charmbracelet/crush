@@ -446,6 +446,38 @@ func (m *Chat) SelectLastInView() {
 	}
 }
 
+// isUserMessage returns true if the item at the given index is a user message.
+func (m *Chat) isUserMessage(index int) bool {
+	item := m.list.ItemAt(index)
+	if item == nil {
+		return false
+	}
+	_, ok := item.(*chat.UserMessageItem)
+	return ok
+}
+
+// SelectPrevUserMessage selects the previous user message in the chat list.
+func (m *Chat) SelectPrevUserMessage() {
+	current := m.list.Selected()
+	for i := current - 1; i >= 0; i-- {
+		if m.isUserMessage(i) {
+			m.list.SetSelected(i)
+			return
+		}
+	}
+}
+
+// SelectNextUserMessage selects the next user message in the chat list.
+func (m *Chat) SelectNextUserMessage() {
+	current := m.list.Selected()
+	for i := current + 1; i < m.list.Len(); i++ {
+		if m.isUserMessage(i) {
+			m.list.SetSelected(i)
+			return
+		}
+	}
+}
+
 // ClearMessages removes all messages from the chat list.
 func (m *Chat) ClearMessages() {
 	m.idInxMap = make(map[string]int)

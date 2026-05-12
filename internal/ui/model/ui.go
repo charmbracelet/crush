@@ -2169,6 +2169,16 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if cmd := m.chat.ScrollToSelectedAndAnimate(); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
+			case key.Matches(msg, m.keyMap.Chat.PrevUserMessage):
+				m.chat.SelectPrevUserMessage()
+				if cmd := m.chat.ScrollToSelectedAndAnimate(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			case key.Matches(msg, m.keyMap.Chat.NextUserMessage):
+				m.chat.SelectNextUserMessage()
+				if cmd := m.chat.ScrollToSelectedAndAnimate(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			case key.Matches(msg, m.keyMap.Chat.HalfPageUp):
 				if cmd := m.chat.ScrollByAndAnimate(-m.chat.Height() / 2); cmd != nil {
 					cmds = append(cmds, cmd)
@@ -2433,6 +2443,7 @@ func (m *UI) ShortHelp() []key.Binding {
 				binds,
 				k.Chat.UpDown,
 				k.Chat.UpDownOneItem,
+				k.Chat.PrevNextUserMessage,
 				k.Chat.PageUp,
 				k.Chat.PageDown,
 				k.Chat.Copy,
@@ -2541,6 +2552,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 				[]key.Binding{
 					k.Chat.UpDown,
 					k.Chat.UpDownOneItem,
+					k.Chat.PrevNextUserMessage,
 					k.Chat.PageUp,
 					k.Chat.PageDown,
 				},

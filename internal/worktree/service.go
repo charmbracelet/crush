@@ -61,6 +61,9 @@ type Service interface {
 	// ListAll lists all worktrees across all sessions.
 	ListAll(ctx context.Context) ([]*Worktree, error)
 
+	// Merge merges or rebases a worktree onto a target branch.
+	Merge(ctx context.Context, worktreeID, targetBranch string, rebase bool) error
+
 	// GenerateName generates a worktree name from a description.
 	GenerateName(description string) string
 
@@ -374,6 +377,64 @@ func (s *service) ListAll(ctx context.Context) ([]*Worktree, error) {
 	}
 
 	return worktrees, nil
+}
+
+func (s *service) Merge(ctx context.Context, worktreeID, targetBranch string, rebase bool) error {
+	if !s.enabled {
+		return ErrWorktreesDisabled
+	}
+
+	wt, err := s.Get(ctx, worktreeID)
+	if err != nil {
+		return err
+	}
+
+	// First, checkout the target branch.
+	checkoutCmd := exec.CommandContext(ctx, "git", "checkout", targetBranch)
+	checkoutCmd.Dir = s.projectDir
+	if out, err := checkoutCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("checkout target branch: %s: %w", string(out), err)
+	}
+
+	// Get the worktree branch name.
+	wtBranch := wt.Name
+
+	// Merge or rebase.
+	var mergeCmd *exec.Cmd
+	if rebase {
+		// For rebase, we rebase the worktree branch onto target.
+		// First switch to worktree branch, rebase onto target, then merge into target.
+		switchCmd := exec.CommandContext(ctx, "git", "checkout", wtBranch)
+		switchCmd.Dir = s.projectDir
+		if out, err := switchCmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("checkout worktree branch: %s: %w", string(out), err)
+		}
+
+		rebaseCmd := exec.CommandContext(ctx, "git", "rebase", targetBranch)
+		rebaseCmd.Dir = s.projectDir
+		if out, err := rebaseCmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("rebase onto target: %s: %w", string(out), err)
+		}
+
+		// Switch back to target and merge (fast-forward).
+		switchBackCmd := exec.CommandContext(ctx, "git", "checkout", targetBranch)
+		switchBackCmd.Dir = s.projectDir
+		if out, err := switchBackCmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("checkout target after rebase: %s: %w", string(out), err)
+		}
+
+		mergeCmd = exec.CommandContext(ctx, "git", "merge", "--ff-only", wtBranch)
+	} else {
+		// Regular merge.
+		mergeCmd = exec.CommandContext(ctx, "git", "merge", wtBranch, "--no-edit")
+	}
+
+	mergeCmd.Dir = s.projectDir
+	if out, err := mergeCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("merge worktree: %s: %w", string(out), err)
+	}
+
+	return nil
 }
 
 // GenerateName generates a worktree name from a description.

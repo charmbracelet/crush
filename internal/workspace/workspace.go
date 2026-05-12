@@ -168,6 +168,8 @@ type Workspace interface {
 	CreateWorktree(ctx context.Context, sessionID, name, fromSnapshotID string) (*worktree.Worktree, error)
 	SwitchWorktree(ctx context.Context, sessionID, worktreeID string) error
 	DeleteWorktree(ctx context.Context, worktreeID string) error
+	MergeWorktree(ctx context.Context, worktreeID, targetBranch string, rebase bool) error
+	ListGitBranches(ctx context.Context) ([]string, error)
 
 	// Forks
 	ForkConversation(ctx context.Context, params fork.ForkParams) (*fork.ForkResult, error)

@@ -113,6 +113,17 @@ type (
 	}
 	// ActionRunSnapshotGC runs garbage collection on snapshots.
 	ActionRunSnapshotGC struct{}
+	// ActionOpenMergeWorktreeDialog opens the merge worktree dialog.
+	ActionOpenMergeWorktreeDialog struct {
+		WorktreeID   string
+		WorktreeName string
+	}
+	// ActionMergeWorktree merges or rebases a worktree onto a target branch.
+	ActionMergeWorktree struct {
+		WorktreeID   string
+		TargetBranch string
+		Rebase       bool
+	}
 	// ActionOpenForkDialog opens the fork dialog for a specific message.
 	ActionOpenForkDialog struct {
 		SessionID string

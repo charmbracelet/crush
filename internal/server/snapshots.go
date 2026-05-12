@@ -362,6 +362,63 @@ func (c *controllerV1) handleDeleteWorkspaceWorktree(w http.ResponseWriter, r *h
 	w.WriteHeader(http.StatusOK)
 }
 
+// MergeWorktreeRequest is the request body for merging a worktree.
+type MergeWorktreeRequest struct {
+	TargetBranch string `json:"target_branch"`
+	Rebase       bool   `json:"rebase"`
+}
+
+// handlePostWorkspaceWorktreeMerge merges or rebases a worktree onto a target branch.
+//
+//	@Summary		Merge worktree
+//	@Tags			worktrees
+//	@Accept			json
+//	@Param			id		path	string	true	"Workspace ID"
+//	@Param			wtid	path	string	true	"Worktree ID"
+//	@Param			request	body	MergeWorktreeRequest	true	"Merge params"
+//	@Success		200
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/worktrees/{wtid}/merge [post]
+func (c *controllerV1) handlePostWorkspaceWorktreeMerge(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	wtid := r.PathValue("wtid")
+
+	var req MergeWorktreeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+
+	if err := c.backend.MergeWorktree(r.Context(), id, wtid, req.TargetBranch, req.Rebase); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// handleGetWorkspaceGitBranches lists git branches in a workspace.
+//
+//	@Summary		List git branches
+//	@Tags			git
+//	@Produce		json
+//	@Param			id	path		string	true	"Workspace ID"
+//	@Success		200	{array}		string
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/git/branches [get]
+func (c *controllerV1) handleGetWorkspaceGitBranches(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	branches, err := c.backend.ListGitBranches(r.Context(), id)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, branches)
+}
+
 // handlePostWorkspaceFork creates a fork of a conversation.
 //
 //	@Summary		Fork conversation

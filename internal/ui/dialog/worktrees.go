@@ -33,6 +33,7 @@ type Worktrees struct {
 		Previous key.Binding
 		UpDown   key.Binding
 		Delete   key.Binding
+		Merge    key.Binding
 		Close    key.Binding
 	}
 }
@@ -81,6 +82,10 @@ func NewWorktrees(com *common.Common, sessionID string) (*Worktrees, error) {
 		key.WithKeys("d", "backspace"),
 		key.WithHelp("d", "delete"),
 	)
+	w.keyMap.Merge = key.NewBinding(
+		key.WithKeys("m"),
+		key.WithHelp("m", "merge"),
+	)
 
 	closeKey := CloseKey
 	closeKey.SetHelp("esc", "close")
@@ -126,6 +131,15 @@ func (w *Worktrees) HandleMsg(msg tea.Msg) Action {
 					return ActionSwitchWorktree{
 						SessionID:  wtItem.worktree.SessionID,
 						WorktreeID: wtItem.worktree.ID,
+					}
+				}
+			}
+		case key.Matches(msg, w.keyMap.Merge):
+			if item := w.list.SelectedItem(); item != nil {
+				if wtItem, ok := item.(*worktreeItem); ok {
+					return ActionOpenMergeWorktreeDialog{
+						WorktreeID:   wtItem.worktree.ID,
+						WorktreeName: wtItem.worktree.Name,
 					}
 				}
 			}
@@ -179,6 +193,7 @@ func (w *Worktrees) ShortHelp() []key.Binding {
 	return []key.Binding{
 		w.keyMap.UpDown,
 		w.keyMap.Select,
+		w.keyMap.Merge,
 		w.keyMap.Close,
 	}
 }
@@ -186,7 +201,7 @@ func (w *Worktrees) ShortHelp() []key.Binding {
 // FullHelp implements help.KeyMap.
 func (w *Worktrees) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{w.keyMap.Select, w.keyMap.Next, w.keyMap.Previous},
+		{w.keyMap.Select, w.keyMap.Merge, w.keyMap.Next, w.keyMap.Previous},
 		{w.keyMap.Close},
 	}
 }

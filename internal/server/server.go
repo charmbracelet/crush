@@ -181,7 +181,9 @@ func NewServer(cfg *config.ConfigStore, network, address string) *Server {
 	mux.HandleFunc("GET /v1/workspaces/{id}/sessions/{sid}/worktrees/active", c.handleGetWorkspaceActiveWorktree)
 	mux.HandleFunc("POST /v1/workspaces/{id}/sessions/{sid}/worktrees", c.handlePostWorkspaceWorktree)
 	mux.HandleFunc("POST /v1/workspaces/{id}/sessions/{sid}/worktrees/{wtid}/switch", c.handlePostWorkspaceWorktreeSwitch)
+	mux.HandleFunc("POST /v1/workspaces/{id}/worktrees/{wtid}/merge", c.handlePostWorkspaceWorktreeMerge)
 	mux.HandleFunc("DELETE /v1/workspaces/{id}/worktrees/{wtid}", c.handleDeleteWorkspaceWorktree)
+	mux.HandleFunc("GET /v1/workspaces/{id}/git/branches", c.handleGetWorkspaceGitBranches)
 	mux.HandleFunc("POST /v1/workspaces/{id}/fork", c.handlePostWorkspaceFork)
 	mux.Handle("/v1/docs/", httpswagger.WrapHandler)
 	s.h = &http.Server{

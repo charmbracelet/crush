@@ -286,6 +286,43 @@ func (c *Client) DeleteWorktree(ctx context.Context, workspaceID, worktreeID str
 	return nil
 }
 
+// MergeWorktree merges or rebases a worktree onto a target branch.
+func (c *Client) MergeWorktree(ctx context.Context, workspaceID, worktreeID, targetBranch string, rebase bool) error {
+	body := struct {
+		TargetBranch string `json:"target_branch"`
+		Rebase       bool   `json:"rebase"`
+	}{
+		TargetBranch: targetBranch,
+		Rebase:       rebase,
+	}
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/worktrees/%s/merge", workspaceID, worktreeID), nil, jsonBody(body), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to merge worktree: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to merge worktree: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
+// ListGitBranches returns all git branches in the workspace.
+func (c *Client) ListGitBranches(ctx context.Context, workspaceID string) ([]string, error) {
+	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/git/branches", workspaceID), nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list git branches: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to list git branches: status code %d", rsp.StatusCode)
+	}
+	var branches []string
+	if err := json.NewDecoder(rsp.Body).Decode(&branches); err != nil {
+		return nil, fmt.Errorf("failed to decode git branches: %w", err)
+	}
+	return branches, nil
+}
+
 // ForkConversation creates a fork of a conversation.
 func (c *Client) ForkConversation(ctx context.Context, workspaceID string, params fork.ForkParams) (*fork.ForkResult, error) {
 	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/fork", workspaceID), nil, jsonBody(params), http.Header{"Content-Type": []string{"application/json"}})

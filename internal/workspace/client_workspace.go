@@ -670,6 +670,14 @@ func (w *ClientWorkspace) DeleteWorktree(ctx context.Context, worktreeID string)
 	return w.client.DeleteWorktree(ctx, w.workspaceID(), worktreeID)
 }
 
+func (w *ClientWorkspace) MergeWorktree(ctx context.Context, worktreeID, targetBranch string, rebase bool) error {
+	return w.client.MergeWorktree(ctx, w.workspaceID(), worktreeID, targetBranch, rebase)
+}
+
+func (w *ClientWorkspace) ListGitBranches(ctx context.Context) ([]string, error) {
+	return w.client.ListGitBranches(ctx, w.workspaceID())
+}
+
 // -- Forks --
 
 func (w *ClientWorkspace) ForkConversation(ctx context.Context, params fork.ForkParams) (*fork.ForkResult, error) {

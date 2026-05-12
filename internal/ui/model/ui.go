@@ -1553,6 +1553,14 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionForkConversation:
 		m.dialog.CloseDialog(dialog.ForkID)
 		cmds = append(cmds, m.forkConversation(msg.SessionID, msg.MessageID, msg.NewSessionTitle, msg.CreateWorktree))
+	case dialog.ActionOpenMergeWorktreeDialog:
+		m.dialog.CloseDialog(dialog.WorktreesID)
+		if cmd := m.openMergeWorktreeDialog(msg.WorktreeID, msg.WorktreeName); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.ActionMergeWorktree:
+		m.dialog.CloseDialog(dialog.MergeWorktreeID)
+		cmds = append(cmds, m.mergeWorktree(msg.WorktreeID, msg.TargetBranch, msg.Rebase))
 
 	case dialog.ActionInitializeProject:
 		if m.isAgentBusy() {
@@ -3549,6 +3557,35 @@ func (m *UI) runSnapshotGC() tea.Cmd {
 			return util.ReportError(err)()
 		}
 		return util.NewInfoMsg(fmt.Sprintf("Garbage collection freed %s", formatBytes(freed)))
+	}
+}
+
+// openMergeWorktreeDialog opens the merge worktree dialog.
+func (m *UI) openMergeWorktreeDialog(worktreeID, worktreeName string) tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.MergeWorktreeID) {
+		m.dialog.BringToFront(dialog.MergeWorktreeID)
+		return nil
+	}
+
+	mergeDialog, err := dialog.NewMergeWorktree(m.com, worktreeID, worktreeName)
+	if err != nil {
+		return util.ReportError(err)
+	}
+	m.dialog.OpenDialog(mergeDialog)
+	return nil
+}
+
+// mergeWorktree merges a worktree onto a target branch.
+func (m *UI) mergeWorktree(worktreeID, targetBranch string, rebase bool) tea.Cmd {
+	return func() tea.Msg {
+		if err := m.com.Workspace.MergeWorktree(context.Background(), worktreeID, targetBranch, rebase); err != nil {
+			return util.ReportError(err)()
+		}
+		action := "Merged"
+		if rebase {
+			action = "Rebased"
+		}
+		return util.NewInfoMsg(fmt.Sprintf("%s worktree onto %s", action, targetBranch))
 	}
 }
 

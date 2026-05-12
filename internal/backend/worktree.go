@@ -3,6 +3,8 @@ package backend
 import (
 	"context"
 	"errors"
+	"os/exec"
+	"strings"
 
 	"github.com/charmbracelet/crush/internal/worktree"
 )
@@ -101,4 +103,40 @@ func (b *Backend) DeleteWorktree(ctx context.Context, workspaceID, worktreeID st
 		return ErrWorktreesDisabled
 	}
 	return ws.Worktrees.Delete(ctx, worktreeID)
+}
+
+// MergeWorktree merges or rebases a worktree onto a target branch.
+func (b *Backend) MergeWorktree(ctx context.Context, workspaceID, worktreeID, targetBranch string, rebase bool) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+	if ws.Worktrees == nil || !ws.Worktrees.IsEnabled() {
+		return ErrWorktreesDisabled
+	}
+	return ws.Worktrees.Merge(ctx, worktreeID, targetBranch, rebase)
+}
+
+// ListGitBranches returns all git branches in the workspace.
+func (b *Backend) ListGitBranches(_ context.Context, workspaceID string) ([]string, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	// Run git branch to list all branches.
+	cmd := exec.Command("git", "branch", "--format=%(refname:short)")
+	cmd.Dir = ws.Cfg.WorkingDir()
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	var branches []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			branches = append(branches, line)
+		}
+	}
+	return branches, nil
 }

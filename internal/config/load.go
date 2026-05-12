@@ -491,8 +491,7 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 
 	if c.Options.Attribution == nil {
 		c.Options.Attribution = &Attribution{
-			TrailerStyle:  TrailerStyleAssistedBy,
-			GeneratedWith: true,
+			TrailerStyle: TrailerStyleAssistedBy,
 		}
 	} else if c.Options.Attribution.TrailerStyle == "" {
 		// Migrate deprecated co_authored_by or apply default

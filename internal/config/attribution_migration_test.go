@@ -10,36 +10,31 @@ func TestAttributionMigration(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name             string
-		configJSON       string
-		expectedTrailer  TrailerStyle
-		expectedGenerate bool
+		name            string
+		configJSON      string
+		expectedTrailer TrailerStyle
 	}{
 		{
 			name: "old setting co_authored_by=true migrates to co-authored-by",
 			configJSON: `{
 				"options": {
 					"attribution": {
-						"co_authored_by": true,
-						"generated_with": false
+						"co_authored_by": true
 					}
 				}
 			}`,
-			expectedTrailer:  TrailerStyleCoAuthoredBy,
-			expectedGenerate: false,
+			expectedTrailer: TrailerStyleCoAuthoredBy,
 		},
 		{
 			name: "old setting co_authored_by=false migrates to none",
 			configJSON: `{
 				"options": {
 					"attribution": {
-						"co_authored_by": false,
-						"generated_with": true
+						"co_authored_by": false
 					}
 				}
 			}`,
-			expectedTrailer:  TrailerStyleNone,
-			expectedGenerate: true,
+			expectedTrailer: TrailerStyleNone,
 		},
 		{
 			name: "new setting takes precedence over old setting",
@@ -47,33 +42,27 @@ func TestAttributionMigration(t *testing.T) {
 				"options": {
 					"attribution": {
 						"trailer_style": "assisted-by",
-						"co_authored_by": true,
-						"generated_with": false
+						"co_authored_by": true
 					}
 				}
 			}`,
-			expectedTrailer:  TrailerStyleAssistedBy,
-			expectedGenerate: false,
+			expectedTrailer: TrailerStyleAssistedBy,
 		},
 		{
 			name: "default when neither setting present",
 			configJSON: `{
 				"options": {
-					"attribution": {
-						"generated_with": true
-					}
+					"attribution": {}
 				}
 			}`,
-			expectedTrailer:  TrailerStyleAssistedBy,
-			expectedGenerate: true,
+			expectedTrailer: TrailerStyleAssistedBy,
 		},
 		{
 			name: "default when attribution is null",
 			configJSON: `{
 				"options": {}
 			}`,
-			expectedTrailer:  TrailerStyleAssistedBy,
-			expectedGenerate: true,
+			expectedTrailer: TrailerStyleAssistedBy,
 		},
 	}
 
@@ -87,7 +76,6 @@ func TestAttributionMigration(t *testing.T) {
 			cfg.setDefaults(t.TempDir(), "")
 
 			require.Equal(t, tt.expectedTrailer, cfg.Options.Attribution.TrailerStyle)
-			require.Equal(t, tt.expectedGenerate, cfg.Options.Attribution.GeneratedWith)
 		})
 	}
 }

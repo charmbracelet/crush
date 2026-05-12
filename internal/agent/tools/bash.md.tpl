@@ -67,9 +67,6 @@ When user asks to create git commit:
    git commit -m "$(cat <<'EOF'
    Commit message here.
 
-{{ if .Attribution.GeneratedWith }}
-   💘 Generated with Crush
-{{ end}}
 {{if eq .Attribution.TrailerStyle "assisted-by" }}
 
    Assisted-by: Crush:{{ .ModelName }}
@@ -126,9 +123,6 @@ Use gh command for ALL GitHub tasks. When user asks to create PR:
 
    [Checklist of TODOs...]
 
-{{ if .Attribution.GeneratedWith}}
-   💘 Generated with Crush
-{{ end }}
 
    EOF
    )"

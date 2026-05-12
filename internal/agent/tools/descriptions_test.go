@@ -22,8 +22,7 @@ func TestToolDescriptions_NoPanic(t *testing.T) {
 		}
 		for _, style := range styles {
 			attribution := &config.Attribution{
-				TrailerStyle:  style,
-				GeneratedWith: true,
+				TrailerStyle: style,
 			}
 			desc := bashDescription(attribution, "test-model")
 			require.NotEmpty(t, desc)

@@ -144,8 +144,7 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 	// NOTE(@andreynering): Set a fixed config to ensure cassettes match
 	// independently of user config on `$HOME/.config/crush/crush.json`.
 	cfg.Config().Options.Attribution = &config.Attribution{
-		TrailerStyle:  "co-authored-by",
-		GeneratedWith: true,
+		TrailerStyle: "co-authored-by",
 	}
 
 	// Clear some fields to avoid issues with VCR cassette matching.

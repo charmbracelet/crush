@@ -18,6 +18,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -81,7 +82,8 @@ func TestClientServerSpawnRace(t *testing.T) {
 		}
 	}
 
-	env := append(os.Environ(),
+	env := append(
+		os.Environ(),
 		"CRUSH_CLIENT_SERVER=1",
 		"XDG_CACHE_HOME="+cacheHome,
 		"XDG_DATA_HOME="+dataHome,
@@ -108,8 +110,43 @@ func TestClientServerSpawnRace(t *testing.T) {
 	}
 	results := make(chan result, numClients)
 
+	// Probe /v1/health concurrently while the clients are still
+	// running. The server self-shuts-down when the last workspace is
+	// released (internal/backend/backend.go:DeleteWorkspace), so once
+	// all clients exit cleanly the socket may legitimately be gone —
+	// asserting the socket post-hoc would race with that documented
+	// self-shutdown. Instead we require that during the parallel run
+	// at least one /v1/health probe got a 2xx, which proves the
+	// spawn-and-readiness path actually produced a live server.
+	var sawHealthy atomic.Bool
+	probeDone := make(chan struct{})
+	stopProbe := make(chan struct{})
+
 	var wg sync.WaitGroup
 	start := make(chan struct{})
+
+	go func() {
+		defer close(probeDone)
+		<-start
+		deadline := time.Now().Add(clientTimeout)
+		for time.Now().Before(deadline) {
+			select {
+			case <-stopProbe:
+				return
+			default:
+			}
+			if err := pingHealth(socketPath); err == nil {
+				sawHealthy.Store(true)
+				return
+			}
+			select {
+			case <-stopProbe:
+				return
+			case <-time.After(50 * time.Millisecond):
+			}
+		}
+	}()
+
 	for i := range numClients {
 		wg.Add(1)
 		go func(i int) {
@@ -133,7 +170,8 @@ func TestClientServerSpawnRace(t *testing.T) {
 			// (e.g. waiting on event subscriptions); the context
 			// timeout above bounds that. We assert race outcomes
 			// purely from output, not exit code.
-			c := exec.CommandContext(ctx, bin,
+			c := exec.CommandContext(
+				ctx, bin,
 				"--host", host,
 				"--cwd", cwd,
 				"run", "hi",
@@ -156,6 +194,8 @@ func TestClientServerSpawnRace(t *testing.T) {
 	close(start) // release all clients as simultaneously as possible
 	wg.Wait()
 	close(results)
+	close(stopProbe)
+	<-probeDone
 
 	var raceFailures []string
 	for r := range results {
@@ -169,21 +209,23 @@ func TestClientServerSpawnRace(t *testing.T) {
 	}
 
 	if len(raceFailures) > 0 {
-		t.Fatalf("client/server spawn race regressed: %d/%d clients failed\n\n%s",
+		t.Fatalf(
+			"client/server spawn race regressed: %d/%d clients failed\n\n%s",
 			len(raceFailures), numClients,
 			strings.Join(raceFailures, "\n---\n"),
 		)
 	}
 
-	// Positive sanity check: a single live server should be
-	// reachable on the socket. If the race had fired, we'd either
-	// have no socket or a stale one with no listener.
-	if _, err := os.Stat(socketPath); err != nil {
-		t.Fatalf("expected socket %s to exist after parallel clients ran, got: %v",
-			socketPath, err)
-	}
-	if err := pingHealth(socketPath); err != nil {
-		t.Fatalf("server is not responding on %s: %v", socketPath, err)
+	// Positive sanity check: at some point during the parallel run a
+	// /v1/health probe must have succeeded. We deliberately do *not*
+	// stat the socket post-hoc: when every client returns cleanly
+	// (e.g. exits early because no providers are configured), the
+	// last DeleteWorkspace triggers the server's self-shutdown and
+	// the socket disappears. That is correct behaviour, not a race
+	// regression.
+	if !sawHealthy.Load() {
+		t.Fatalf("no /v1/health probe succeeded on %s while %d clients were running",
+			socketPath, numClients)
 	}
 }
 

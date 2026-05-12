@@ -72,6 +72,18 @@ func (m *mockSessionService) Delete(context.Context, string) error {
 	return nil
 }
 
+func (m *mockSessionService) Archive(context.Context, string) error {
+	return nil
+}
+
+func (m *mockSessionService) Unarchive(context.Context, string) error {
+	return nil
+}
+
+func (m *mockSessionService) ListArchived(context.Context) ([]session.Session, error) {
+	return nil, nil
+}
+
 func (m *mockSessionService) CreateAgentToolSessionID(messageID, toolCallID string) string {
 	return fmt.Sprintf("%s$$%s", messageID, toolCallID)
 }

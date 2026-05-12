@@ -261,6 +261,22 @@ func (app *App) resolveSession(ctx context.Context, continueSessionID string, us
 	}
 }
 
+// ArchiveSession archives a session and deletes its snapshot refs to allow GC.
+func (app *App) ArchiveSession(ctx context.Context, sessionID string) error {
+	// Delete snapshot refs first so git objects become unreachable.
+	if err := app.Checkpoints.DeleteSessionSnapshots(ctx, sessionID); err != nil {
+		slog.Warn("Failed to delete session snapshots during archive", "session_id", sessionID, "error", err)
+		// Continue with archiving even if snapshot deletion fails.
+	}
+
+	// Mark the session as archived.
+	if err := app.Sessions.Archive(ctx, sessionID); err != nil {
+		return fmt.Errorf("archiving session: %w", err)
+	}
+
+	return nil
+}
+
 // RunNonInteractive runs the application in non-interactive mode with the
 // given prompt, printing to stdout.
 func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt, largeModel, smallModel string, hideSpinner bool, continueSessionID string, useLast bool) error {

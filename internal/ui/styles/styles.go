@@ -476,6 +476,8 @@ type Styles struct {
 			ArchivingTitleGradientFromColor color.Color
 			ArchivingTitleGradientToColor   color.Color
 
+			SeparatorStyle lipgloss.Style // Style for section separators
+
 			InfoBlurred lipgloss.Style // Timestamp text on unfocused session items
 			InfoFocused lipgloss.Style // Timestamp text on the focused session item
 		}

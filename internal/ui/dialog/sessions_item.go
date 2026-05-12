@@ -187,6 +187,41 @@ func (s *SessionItem) SetFocused(focused bool) {
 	s.focused = focused
 }
 
+// SeparatorItem is a non-selectable separator in the sessions list.
+type SeparatorItem struct {
+	t     *styles.Styles
+	label string
+}
+
+var _ list.FilterableItem = &SeparatorItem{}
+
+// NewSeparatorItem creates a new separator item with the given label.
+func NewSeparatorItem(t *styles.Styles, label string) *SeparatorItem {
+	return &SeparatorItem{t: t, label: label}
+}
+
+// Filter returns empty string so separator is always visible.
+func (s *SeparatorItem) Filter() string {
+	return ""
+}
+
+// Render renders the separator.
+func (s *SeparatorItem) Render(width int) string {
+	label := s.label
+	if label == "" {
+		label = "Archived"
+	}
+	// Create a centered label with dashes on both sides
+	labelLen := len(label) + 2 // space on each side
+	if width <= labelLen {
+		return s.t.Dialog.Sessions.SeparatorStyle.Render(label)
+	}
+	dashCount := (width - labelLen) / 2
+	left := strings.Repeat("─", dashCount)
+	right := strings.Repeat("─", width-dashCount-labelLen)
+	return s.t.Dialog.Sessions.SeparatorStyle.Render(left + " " + label + " " + right)
+}
+
 // sessionItems takes a slice of [session.Session]s and convert them to a slice
 // of [ListItem]s.
 func sessionItems(t *styles.Styles, mode sessionsMode, sessions ...session.Session) []list.FilterableItem {

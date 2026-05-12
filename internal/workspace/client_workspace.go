@@ -129,6 +129,22 @@ func (w *ClientWorkspace) ArchiveSession(ctx context.Context, sessionID string) 
 	return w.client.ArchiveSession(ctx, w.workspaceID(), sessionID)
 }
 
+func (w *ClientWorkspace) UnarchiveSession(ctx context.Context, sessionID string) error {
+	return w.client.UnarchiveSession(ctx, w.workspaceID(), sessionID)
+}
+
+func (w *ClientWorkspace) ListArchivedSessions(ctx context.Context) ([]session.Session, error) {
+	protoSessions, err := w.client.ListArchivedSessions(ctx, w.workspaceID())
+	if err != nil {
+		return nil, err
+	}
+	sessions := make([]session.Session, len(protoSessions))
+	for i, s := range protoSessions {
+		sessions[i] = protoToSession(s)
+	}
+	return sessions, nil
+}
+
 func (w *ClientWorkspace) CreateAgentToolSessionID(messageID, toolCallID string) string {
 	return fmt.Sprintf("%s$$%s", messageID, toolCallID)
 }

@@ -907,6 +907,8 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Dialog.Sessions.ArchivingItemBlurred = s.Dialog.NormalItem.Foreground(o.fgMostSubtle)
 	s.Dialog.Sessions.ArchivingItemFocused = s.Dialog.SelectedItem.Background(o.fgMoreSubtle).Foreground(o.onPrimary)
 
+	s.Dialog.Sessions.SeparatorStyle = base.Foreground(o.fgMostSubtle)
+
 	s.Dialog.Sessions.InfoBlurred = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 	s.Dialog.Sessions.InfoFocused = lipgloss.NewStyle().Foreground(o.fgBase)
 

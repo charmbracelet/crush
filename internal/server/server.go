@@ -123,6 +123,8 @@ func NewServer(cfg *config.ConfigStore, network, address string) *Server {
 	mux.HandleFunc("PUT /v1/workspaces/{id}/sessions/{sid}", c.handlePutWorkspaceSession)
 	mux.HandleFunc("DELETE /v1/workspaces/{id}/sessions/{sid}", c.handleDeleteWorkspaceSession)
 	mux.HandleFunc("POST /v1/workspaces/{id}/sessions/{sid}/archive", c.handleArchiveWorkspaceSession)
+	mux.HandleFunc("POST /v1/workspaces/{id}/sessions/{sid}/unarchive", c.handleUnarchiveWorkspaceSession)
+	mux.HandleFunc("GET /v1/workspaces/{id}/sessions/archived", c.handleGetWorkspaceArchivedSessions)
 	mux.HandleFunc("GET /v1/workspaces/{id}/sessions/{sid}/history", c.handleGetWorkspaceSessionHistory)
 	mux.HandleFunc("GET /v1/workspaces/{id}/sessions/{sid}/messages", c.handleGetWorkspaceSessionMessages)
 	mux.HandleFunc("GET /v1/workspaces/{id}/sessions/{sid}/messages/user", c.handleGetWorkspaceSessionUserMessages)

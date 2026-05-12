@@ -619,6 +619,36 @@ func (c *Client) ArchiveSession(ctx context.Context, id string, sessionID string
 	return nil
 }
 
+// UnarchiveSession unarchives a session in a workspace.
+func (c *Client) UnarchiveSession(ctx context.Context, id string, sessionID string) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/sessions/%s/unarchive", id, sessionID), nil, nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to unarchive session: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to unarchive session: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
+// ListArchivedSessions retrieves archived sessions for a workspace.
+func (c *Client) ListArchivedSessions(ctx context.Context, id string) ([]proto.Session, error) {
+	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/sessions/archived", id), nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list archived sessions: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to list archived sessions: status code %d", rsp.StatusCode)
+	}
+	var sessions []proto.Session
+	if err := json.NewDecoder(rsp.Body).Decode(&sessions); err != nil && !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("failed to decode archived sessions: %w", err)
+	}
+	return sessions, nil
+}
+
 // ListUserMessages retrieves user-role messages for a session as proto types.
 func (c *Client) ListUserMessages(ctx context.Context, id string, sessionID string) ([]proto.Message, error) {
 	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/sessions/%s/messages/user", id, sessionID), nil, nil)

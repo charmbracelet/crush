@@ -115,6 +115,26 @@ func (b *Backend) ArchiveSession(ctx context.Context, workspaceID, sessionID str
 	return ws.ArchiveSession(ctx, sessionID)
 }
 
+// UnarchiveSession unarchives a session.
+func (b *Backend) UnarchiveSession(ctx context.Context, workspaceID, sessionID string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+
+	return ws.Sessions.Unarchive(ctx, sessionID)
+}
+
+// ListArchivedSessions returns archived sessions for a workspace.
+func (b *Backend) ListArchivedSessions(ctx context.Context, workspaceID string) ([]session.Session, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	return ws.Sessions.ListArchived(ctx)
+}
+
 // ListUserMessages returns user-role messages for a session.
 func (b *Backend) ListUserMessages(ctx context.Context, workspaceID, sessionID string) ([]message.Message, error) {
 	ws, err := b.GetWorkspace(workspaceID)

@@ -27,34 +27,40 @@ const (
 	sessionsModeDeleting
 	sessionsModeUpdating
 	sessionsModeArchiving
+	sessionsModeUnarchiving
 )
 
 // Session is a session selector dialog.
 type Session struct {
-	com                *common.Common
-	help               help.Model
-	list               *list.FilterableList
-	input              textinput.Model
-	selectedSessionInx int
-	sessions           []session.Session
+	com                 *common.Common
+	help                help.Model
+	list                *list.FilterableList
+	input               textinput.Model
+	selectedSessionInx  int
+	sessions            []session.Session
+	archivedSessions    []session.Session
+	archivedStartIndex  int // index where archived section starts (-1 if no archived)
 
 	sessionsMode sessionsMode
 
 	keyMap struct {
-		Select         key.Binding
-		Next           key.Binding
-		Previous       key.Binding
-		UpDown         key.Binding
-		Delete         key.Binding
-		Rename         key.Binding
-		Archive        key.Binding
-		ConfirmRename  key.Binding
-		CancelRename   key.Binding
-		ConfirmDelete  key.Binding
-		CancelDelete   key.Binding
-		ConfirmArchive key.Binding
-		CancelArchive  key.Binding
-		Close          key.Binding
+		Select          key.Binding
+		Next            key.Binding
+		Previous        key.Binding
+		UpDown          key.Binding
+		Delete          key.Binding
+		Rename          key.Binding
+		Archive         key.Binding
+		Unarchive       key.Binding
+		ConfirmRename   key.Binding
+		CancelRename    key.Binding
+		ConfirmDelete   key.Binding
+		CancelDelete    key.Binding
+		ConfirmArchive  key.Binding
+		CancelArchive   key.Binding
+		ConfirmUnarchive key.Binding
+		CancelUnarchive  key.Binding
+		Close           key.Binding
 	}
 }
 
@@ -65,12 +71,21 @@ func NewSessions(com *common.Common, selectedSessionID string) (*Session, error)
 	s := new(Session)
 	s.sessionsMode = sessionsModeNormal
 	s.com = com
+	s.archivedStartIndex = -1
+
 	sessions, err := com.Workspace.ListSessions(context.TODO())
 	if err != nil {
 		return nil, err
 	}
-
 	s.sessions = sessions
+
+	archivedSessions, err := com.Workspace.ListArchivedSessions(context.TODO())
+	if err != nil {
+		// Non-fatal: just show active sessions
+		archivedSessions = nil
+	}
+	s.archivedSessions = archivedSessions
+
 	for i, sess := range sessions {
 		if sess.ID == selectedSessionID {
 			s.selectedSessionInx = i
@@ -82,7 +97,7 @@ func NewSessions(com *common.Common, selectedSessionID string) (*Session, error)
 	help.Styles = com.Styles.DialogHelpStyles()
 
 	s.help = help
-	s.list = list.NewFilterableList(sessionItems(com.Styles, sessionsModeNormal, sessions...)...)
+	s.list = list.NewFilterableList(s.buildListItems(sessionsModeNormal)...)
 	s.list.Focus()
 	s.list.SetSelected(s.selectedSessionInx)
 
@@ -120,6 +135,10 @@ func NewSessions(com *common.Common, selectedSessionID string) (*Session, error)
 		key.WithKeys("ctrl+a"),
 		key.WithHelp("ctrl+a", "archive"),
 	)
+	s.keyMap.Unarchive = key.NewBinding(
+		key.WithKeys("ctrl+u"),
+		key.WithHelp("ctrl+u", "unarchive"),
+	)
 	s.keyMap.ConfirmRename = key.NewBinding(
 		key.WithKeys("enter"),
 		key.WithHelp("enter", "confirm"),
@@ -144,6 +163,14 @@ func NewSessions(com *common.Common, selectedSessionID string) (*Session, error)
 		key.WithKeys("n", "esc"),
 		key.WithHelp("n", "cancel"),
 	)
+	s.keyMap.ConfirmUnarchive = key.NewBinding(
+		key.WithKeys("y"),
+		key.WithHelp("y", "unarchive"),
+	)
+	s.keyMap.CancelUnarchive = key.NewBinding(
+		key.WithKeys("n", "esc"),
+		key.WithHelp("n", "cancel"),
+	)
 	s.keyMap.Close = CloseKey
 
 	return s, nil
@@ -163,23 +190,23 @@ func (s *Session) HandleMsg(msg tea.Msg) Action {
 			switch {
 			case key.Matches(msg, s.keyMap.ConfirmDelete):
 				action := s.confirmDeleteSession()
-				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeNormal, s.sessions...)...)
+				s.list.SetItems(s.buildListItems(sessionsModeNormal)...)
 				s.list.SelectFirst()
 				s.list.ScrollToSelected()
 				return action
 			case key.Matches(msg, s.keyMap.CancelDelete):
 				s.sessionsMode = sessionsModeNormal
-				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeNormal, s.sessions...)...)
+				s.list.SetItems(s.buildListItems(sessionsModeNormal)...)
 			}
 		case sessionsModeUpdating:
 			switch {
 			case key.Matches(msg, s.keyMap.ConfirmRename):
 				action := s.confirmRenameSession()
-				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeNormal, s.sessions...)...)
+				s.list.SetItems(s.buildListItems(sessionsModeNormal)...)
 				return action
 			case key.Matches(msg, s.keyMap.CancelRename):
 				s.sessionsMode = sessionsModeNormal
-				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeNormal, s.sessions...)...)
+				s.list.SetItems(s.buildListItems(sessionsModeNormal)...)
 			default:
 				item := s.list.SelectedItem()
 				if item == nil {
@@ -193,38 +220,69 @@ func (s *Session) HandleMsg(msg tea.Msg) Action {
 			switch {
 			case key.Matches(msg, s.keyMap.ConfirmArchive):
 				action := s.confirmArchiveSession()
-				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeNormal, s.sessions...)...)
+				s.list.SetItems(s.buildListItems(sessionsModeNormal)...)
 				s.list.SelectFirst()
 				s.list.ScrollToSelected()
 				return action
 			case key.Matches(msg, s.keyMap.CancelArchive):
 				s.sessionsMode = sessionsModeNormal
-				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeNormal, s.sessions...)...)
+				s.list.SetItems(s.buildListItems(sessionsModeNormal)...)
+			}
+		case sessionsModeUnarchiving:
+			switch {
+			case key.Matches(msg, s.keyMap.ConfirmUnarchive):
+				action := s.confirmUnarchiveSession()
+				s.list.SetItems(s.buildListItems(sessionsModeNormal)...)
+				s.list.SelectFirst()
+				s.list.ScrollToSelected()
+				return action
+			case key.Matches(msg, s.keyMap.CancelUnarchive):
+				s.sessionsMode = sessionsModeNormal
+				s.list.SetItems(s.buildListItems(sessionsModeNormal)...)
 			}
 		default:
 			switch {
 			case key.Matches(msg, s.keyMap.Close):
 				return ActionClose{}
 			case key.Matches(msg, s.keyMap.Rename):
+				if s.isSelectedSeparator() || s.isSelectedArchived() {
+					return nil
+				}
 				s.sessionsMode = sessionsModeUpdating
-				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeUpdating, s.sessions...)...)
+				s.list.SetItems(s.buildListItems(sessionsModeUpdating)...)
 			case key.Matches(msg, s.keyMap.Delete):
+				if s.isSelectedSeparator() {
+					return nil
+				}
 				if s.isCurrentSessionBusy() {
 					return ActionCmd{util.ReportWarn("Agent is busy, please wait...")}
 				}
 				s.sessionsMode = sessionsModeDeleting
-				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeDeleting, s.sessions...)...)
+				s.list.SetItems(s.buildListItems(sessionsModeDeleting)...)
 			case key.Matches(msg, s.keyMap.Archive):
+				if s.isSelectedSeparator() || s.isSelectedArchived() {
+					return nil
+				}
 				if s.isCurrentSessionBusy() {
 					return ActionCmd{util.ReportWarn("Agent is busy, please wait...")}
 				}
 				s.sessionsMode = sessionsModeArchiving
-				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeArchiving, s.sessions...)...)
+				s.list.SetItems(s.buildListItems(sessionsModeArchiving)...)
+			case key.Matches(msg, s.keyMap.Unarchive):
+				if !s.isSelectedArchived() {
+					return nil
+				}
+				s.sessionsMode = sessionsModeUnarchiving
+				s.list.SetItems(s.buildListItems(sessionsModeUnarchiving)...)
 			case key.Matches(msg, s.keyMap.Previous):
 				s.list.Focus()
 				if s.list.IsSelectedFirst() {
 					s.list.SelectLast()
 				} else {
+					s.list.SelectPrev()
+				}
+				// Skip separator
+				if s.isSelectedSeparator() {
 					s.list.SelectPrev()
 				}
 				s.list.ScrollToSelected()
@@ -235,11 +293,19 @@ func (s *Session) HandleMsg(msg tea.Msg) Action {
 				} else {
 					s.list.SelectNext()
 				}
+				// Skip separator
+				if s.isSelectedSeparator() {
+					s.list.SelectNext()
+				}
 				s.list.ScrollToSelected()
 			case key.Matches(msg, s.keyMap.Select):
+				if s.isSelectedSeparator() {
+					return nil
+				}
 				if item := s.list.SelectedItem(); item != nil {
-					sessionItem := item.(*SessionItem)
-					return ActionSelectSession{sessionItem.Session}
+					if sessionItem, ok := item.(*SessionItem); ok {
+						return ActionSelectSession{sessionItem.Session}
+					}
 				}
 			default:
 				var cmd tea.Cmd
@@ -418,6 +484,40 @@ func (s *Session) archiveSessionCmd(id string) tea.Cmd {
 	}
 }
 
+func (s *Session) confirmUnarchiveSession() Action {
+	sessionItem := s.selectedSessionItem()
+	s.sessionsMode = sessionsModeNormal
+	if sessionItem == nil {
+		return nil
+	}
+
+	s.removeArchivedSession(sessionItem.ID())
+	// Move to active sessions
+	s.sessions = append([]session.Session{sessionItem.Session}, s.sessions...)
+	return ActionCmd{s.unarchiveSessionCmd(sessionItem.ID())}
+}
+
+func (s *Session) removeArchivedSession(id string) {
+	var newSessions []session.Session
+	for _, sess := range s.archivedSessions {
+		if sess.ID == id {
+			continue
+		}
+		newSessions = append(newSessions, sess)
+	}
+	s.archivedSessions = newSessions
+}
+
+func (s *Session) unarchiveSessionCmd(id string) tea.Cmd {
+	return func() tea.Msg {
+		err := s.com.Workspace.UnarchiveSession(context.TODO(), id)
+		if err != nil {
+			return util.NewErrorMsg(err)
+		}
+		return nil
+	}
+}
+
 func (s *Session) confirmRenameSession() Action {
 	sessionItem := s.selectedSessionItem()
 	s.sessionsMode = sessionsModeNormal
@@ -485,7 +585,21 @@ func (s *Session) ShortHelp() []key.Binding {
 			s.keyMap.ConfirmArchive,
 			s.keyMap.CancelArchive,
 		}
+	case sessionsModeUnarchiving:
+		return []key.Binding{
+			s.keyMap.ConfirmUnarchive,
+			s.keyMap.CancelUnarchive,
+		}
 	default:
+		if s.isSelectedArchived() {
+			return []key.Binding{
+				s.keyMap.UpDown,
+				s.keyMap.Unarchive,
+				s.keyMap.Delete,
+				s.keyMap.Select,
+				s.keyMap.Close,
+			}
+		}
 		return []key.Binding{
 			s.keyMap.UpDown,
 			s.keyMap.Rename,
@@ -525,10 +639,52 @@ func (s *Session) FullHelp() [][]key.Binding {
 			s.keyMap.ConfirmArchive,
 			s.keyMap.CancelArchive,
 		}
+	case sessionsModeUnarchiving:
+		slice = []key.Binding{
+			s.keyMap.ConfirmUnarchive,
+			s.keyMap.CancelUnarchive,
+		}
 	}
 	for i := 0; i < len(slice); i += 4 {
 		end := min(i+4, len(slice))
 		m = append(m, slice[i:end])
 	}
 	return m
+}
+
+// buildListItems builds the list items including active sessions, separator, and archived sessions.
+func (s *Session) buildListItems(mode sessionsMode) []list.FilterableItem {
+	items := sessionItems(s.com.Styles, mode, s.sessions...)
+
+	if len(s.archivedSessions) > 0 {
+		// Add separator before archived sessions
+		s.archivedStartIndex = len(items)
+		items = append(items, NewSeparatorItem(s.com.Styles, "Archived"))
+
+		// Add archived sessions
+		archivedItems := sessionItems(s.com.Styles, mode, s.archivedSessions...)
+		items = append(items, archivedItems...)
+	} else {
+		s.archivedStartIndex = -1
+	}
+
+	return items
+}
+
+// isSelectedArchived returns true if the currently selected item is an archived session.
+func (s *Session) isSelectedArchived() bool {
+	if s.archivedStartIndex < 0 {
+		return false
+	}
+	selected := s.list.Selected()
+	// Account for separator: archived items start at archivedStartIndex + 1
+	return selected > s.archivedStartIndex
+}
+
+// isSelectedSeparator returns true if the currently selected item is the separator.
+func (s *Session) isSelectedSeparator() bool {
+	if s.archivedStartIndex < 0 {
+		return false
+	}
+	return s.list.Selected() == s.archivedStartIndex
 }

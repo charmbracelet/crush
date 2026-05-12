@@ -116,7 +116,8 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	if existingID, ok := b.clients.workspaceForDataDir(dataDir); ok {
 		if ws, ok := b.workspaces.Get(existingID); ok {
 			count, _ := b.clients.addClient(clientID, existingID, dataDir)
-			slog.Info("Reusing existing workspace for data directory",
+			slog.Info(
+				"Reusing existing workspace for data directory",
 				"client_id", clientID,
 				"workspace_id", existingID,
 				"data_dir", dataDir,
@@ -157,7 +158,8 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	b.clients.addClient(clientID, clientID, dataDir)
 
 	if args.Version != "" && args.Version != version.Version {
-		slog.Warn("Client/server version mismatch",
+		slog.Warn(
+			"Client/server version mismatch",
 			"client", args.Version,
 			"server", version.Version,
 		)
@@ -184,7 +186,8 @@ func (b *Backend) DeleteWorkspace(clientID string) {
 		return
 	}
 
-	slog.Info("Client disconnected from workspace",
+	slog.Info(
+		"Client disconnected from workspace",
 		"client_id", clientID,
 		"workspace_id", workspaceID,
 		"last_client", lastClient,

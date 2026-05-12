@@ -538,7 +538,8 @@ func TestAggregationUpdatedInput(t *testing.T) {
 		require.Equal(t, DecisionAllow, agg.Decision)
 		// command overridden by second patch; keep preserved from first
 		// patch; timeout preserved from original input.
-		require.JSONEq(t,
+		require.JSONEq(
+			t,
 			`{"command":"second","keep":"me","timeout":60}`,
 			agg.UpdatedInput,
 		)
@@ -550,7 +551,8 @@ func TestAggregationUpdatedInput(t *testing.T) {
 			{Decision: DecisionAllow, UpdatedInput: `{"env":{"FOO":"bar"}}`},
 		}, `{"env":{"BAZ":"qux"},"command":"ls"}`)
 		// "env" is replaced entirely; "command" preserved.
-		require.JSONEq(t,
+		require.JSONEq(
+			t,
 			`{"env":{"FOO":"bar"},"command":"ls"}`,
 			agg.UpdatedInput,
 		)
@@ -678,7 +680,8 @@ func TestRunnerUpdatedInput(t *testing.T) {
 	result, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{"command":"echo original","timeout":60}`)
 	require.NoError(t, err)
 	require.Equal(t, DecisionAllow, result.Decision)
-	require.JSONEq(t,
+	require.JSONEq(
+		t,
 		`{"command":"echo rewritten","timeout":60}`,
 		result.UpdatedInput,
 	)

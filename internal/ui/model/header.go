@@ -124,7 +124,8 @@ func (h *header) drawHeader(
 	b.WriteString(details)
 
 	view := uv.NewStyledString(
-		t.Header.Wrapper.Padding(0, rightPadding, 0, leftPadding).Render(b.String()))
+		t.Header.Wrapper.Padding(0, rightPadding, 0, leftPadding).Render(b.String()),
+	)
 	view.Draw(scr, area)
 }
 

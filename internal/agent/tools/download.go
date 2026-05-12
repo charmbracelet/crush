@@ -72,7 +72,8 @@ func NewDownloadTool(permissions permission.Service, workingDir WorkingDirFunc, 
 				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for downloading files")
 			}
 
-			p, err := permissions.Request(ctx,
+			p, err := permissions.Request(
+				ctx,
 				permission.CreatePermissionRequest{
 					SessionID:   sessionID,
 					Path:        filePath,
@@ -145,5 +146,6 @@ func NewDownloadTool(permissions permission.Service, workingDir WorkingDirFunc, 
 			}
 
 			return fantasy.NewTextResponse(responseMsg), nil
-		})
+		},
+	)
 }

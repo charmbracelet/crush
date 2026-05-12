@@ -172,7 +172,8 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	if gitInfo != "" {
 		blocks = append(blocks, gitInfo)
 	}
-	blocks = append(blocks,
+	blocks = append(
+		blocks,
 		"",
 		m.modelInfo(width),
 		"",

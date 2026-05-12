@@ -111,7 +111,8 @@ func NewMultiEditTool(
 			text += getDiagnostics(params.FilePath, lspManager)
 			response.Content = text
 			return response, nil
-		})
+		},
+	)
 }
 
 func validateEdits(edits []MultiEditOperation) error {
@@ -267,9 +268,11 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 	modTime := fileInfo.ModTime().Truncate(time.Second)
 	if modTime.After(lastRead) {
 		return fantasy.NewTextErrorResponse(
-			fmt.Sprintf("file %s has been modified since it was last read (mod time: %s, last read: %s)",
+			fmt.Sprintf(
+				"file %s has been modified since it was last read (mod time: %s, last read: %s)",
 				params.FilePath, modTime.Format(time.RFC3339), lastRead.Format(time.RFC3339),
-			)), nil
+			),
+		), nil
 	}
 
 	// Read current file content

@@ -369,7 +369,8 @@ func restartIfStale(cmd *cobra.Command, hostURL *url.URL) error {
 	if vi.Version == version.Version {
 		return nil
 	}
-	slog.Info("Server version mismatch, restarting",
+	slog.Info(
+		"Server version mismatch, restarting",
 		"server", vi.Version,
 		"client", version.Version,
 	)

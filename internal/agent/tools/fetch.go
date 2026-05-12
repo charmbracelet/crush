@@ -65,7 +65,8 @@ func NewFetchTool(permissions permission.Service, workingDir WorkingDirFunc, cli
 				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for creating a new file")
 			}
 
-			p, err := permissions.Request(ctx,
+			p, err := permissions.Request(
+				ctx,
 				permission.CreatePermissionRequest{
 					SessionID:   sessionID,
 					Path:        workingDir(),
@@ -172,7 +173,8 @@ func NewFetchTool(permissions permission.Service, workingDir WorkingDirFunc, cli
 			}
 
 			return fantasy.NewTextResponse(content), nil
-		})
+		},
+	)
 }
 
 func extractTextFromHTML(html string) (string, error) {

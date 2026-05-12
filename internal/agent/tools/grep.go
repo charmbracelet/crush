@@ -170,7 +170,8 @@ func NewGrepTool(workingDir WorkingDirFunc, config config.ToolGrep) fantasy.Agen
 					Truncated:       truncated,
 				},
 			), nil
-		})
+		},
+	)
 }
 
 func searchFiles(ctx context.Context, pattern, rootPath, include string, limit int) ([]grepMatch, bool, error) {

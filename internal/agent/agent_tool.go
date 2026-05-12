@@ -63,5 +63,6 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 				Prompt:         params.Prompt,
 				SessionTitle:   "New Agent Session",
 			})
-		}), nil
+		},
+	), nil
 }

@@ -75,5 +75,6 @@ func NewWebFetchTool(workingDir WorkingDirFunc, client *http.Client) fantasy.Age
 			}
 
 			return fantasy.NewTextResponse(result.String()), nil
-		})
+		},
+	)
 }

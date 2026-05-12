@@ -168,7 +168,8 @@ func (m *BackgroundShellManager) Kill(id string) error {
 		// Clean exit.
 		return nil
 	case <-time.After(KillGracePeriod):
-		slog.Warn("Background shell did not exit within grace period; abandoning",
+		slog.Warn(
+			"Background shell did not exit within grace period; abandoning",
 			"id", id,
 			"command", shell.Command,
 			"grace_period", KillGracePeriod,

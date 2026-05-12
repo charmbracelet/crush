@@ -54,7 +54,8 @@ func NewRunner(hooks []config.HookConfig, cwd, projectDir string) *Runner {
 		if h.Matcher != "" {
 			re, err := regexp.Compile(h.Matcher)
 			if err != nil {
-				slog.Warn("Hook matcher failed to compile; skipping hook",
+				slog.Warn(
+					"Hook matcher failed to compile; skipping hook",
 					"matcher", h.Matcher,
 					"command", h.Command,
 					"error", err,
@@ -130,7 +131,8 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 			InputRewrite: results[i].UpdatedInput != "",
 		}
 	}
-	slog.Info("Hook completed",
+	slog.Info(
+		"Hook completed",
 		"event", eventName,
 		"tool", toolName,
 		"hooks", len(deduped),
@@ -194,7 +196,8 @@ func (r *Runner) runOne(parentCtx context.Context, hook config.HookConfig, envVa
 		case err = <-done:
 			// Interpreter yielded within the grace period; safe to read.
 		case <-time.After(abandonGrace):
-			slog.Warn("Hook did not yield after cancel; abandoning goroutine",
+			slog.Warn(
+				"Hook did not yield after cancel; abandoning goroutine",
 				"command", hook.Command,
 				"timeout", timeout,
 			)
@@ -240,7 +243,8 @@ func (r *Runner) runOne(parentCtx context.Context, hook config.HookConfig, envVa
 			}
 		default:
 			// Other non-zero exits are non-blocking errors.
-			slog.Warn("Hook failed with non-blocking error",
+			slog.Warn(
+				"Hook failed with non-blocking error",
 				"command", hook.Command,
 				"exit_code", exitCode,
 				"stderr", strings.TrimSpace(stderr.String()),
@@ -252,7 +256,8 @@ func (r *Runner) runOne(parentCtx context.Context, hook config.HookConfig, envVa
 
 	// Exit code 0 — parse stdout JSON.
 	result := parseStdout(stdout.String())
-	slog.Debug("Hook executed",
+	slog.Debug(
+		"Hook executed",
 		"command", hook.Command,
 		"decision", result.Decision.String(),
 	)

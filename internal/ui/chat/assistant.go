@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -119,6 +120,7 @@ func fnvFields(fields ...[]byte) uint64 {
 //
 // This item includes thinking, and the content but does not include the tool calls.
 type AssistantMessageItem struct {
+	*list.Versioned
 	*highlightableMessageItem
 	*cachedMessageItem
 	*focusableMessageItem
@@ -141,10 +143,12 @@ var _ Expandable = (*AssistantMessageItem)(nil)
 
 // NewAssistantMessageItem creates a new AssistantMessageItem.
 func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) MessageItem {
+	v := list.NewVersioned()
 	a := &AssistantMessageItem{
-		highlightableMessageItem: defaultHighlighter(sty),
+		Versioned:                v,
+		highlightableMessageItem: defaultHighlighter(sty, v),
 		cachedMessageItem:        &cachedMessageItem{},
-		focusableMessageItem:     &focusableMessageItem{},
+		focusableMessageItem:     newFocusableMessageItem(v),
 		message:                  message,
 		sty:                      sty,
 	}
@@ -173,6 +177,13 @@ func (a *AssistantMessageItem) Animate(msg anim.StepMsg) tea.Cmd {
 	if !a.isSpinning() {
 		return nil
 	}
+	// Bump the F6 list-cache version so the next draw re-renders
+	// this item: a spinner tick mutates anim's internal frame
+	// counter, which changes the rendered output but is invisible
+	// to the per-section content hashes. Without the bump the
+	// list cache would serve the previously rendered frame
+	// indefinitely and the spinner would appear frozen.
+	a.Bump()
 	return a.anim.Animate(msg)
 }
 
@@ -523,6 +534,12 @@ func (a *AssistantMessageItem) isSpinning() bool {
 func (a *AssistantMessageItem) SetMessage(msg *message.Message) tea.Cmd {
 	wasSpinning := a.isSpinning()
 	a.message = msg
+	// Bump the F6 version even if the underlying *message.Message
+	// pointer is identical: callers may have mutated the message in
+	// place (delta append) and we cannot tell from here. The
+	// per-section caches dedupe identical content via FNV-64 hashes,
+	// so a redundant bump only costs one list-cache repopulation.
+	a.Bump()
 	// The prefix cache is keyed by a fingerprint that includes every
 	// section's source hash, so an unchanged section keeps its prefix
 	// cache valid while a changed section forces a miss naturally.
@@ -532,6 +549,16 @@ func (a *AssistantMessageItem) SetMessage(msg *message.Message) tea.Cmd {
 		return a.StartAnimation()
 	}
 	return nil
+}
+
+// Finished implements list.Item. The assistant message is freezable
+// once the message reports IsFinished() and is no longer spinning
+// (no animation tick remains pending). Streaming tail animation is
+// caught by isSpinning, so freezing only kicks in once the turn is
+// fully terminal. The list cache invalidates the entry on the next
+// version bump if anything (focus, highlight, expansion) changes.
+func (a *AssistantMessageItem) Finished() bool {
+	return a.message.IsFinished() && !a.isSpinning()
 }
 
 // clearCache drops every cached render for this item, including the
@@ -572,6 +599,7 @@ func (a *AssistantMessageItem) ToggleExpanded() bool {
 	case thinkingFullExpanded:
 		a.thinkingViewMode = thinkingCollapsed
 	}
+	a.Bump()
 	return a.thinkingViewMode != thinkingCollapsed
 }
 

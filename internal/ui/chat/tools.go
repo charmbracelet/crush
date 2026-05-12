@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/crush/internal/stringext"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -135,6 +136,7 @@ func (f ToolRendererFunc) RenderTool(sty *styles.Styles, width int, opts *ToolRe
 
 // baseToolMessageItem represents a tool call message that can be displayed in the UI.
 type baseToolMessageItem struct {
+	*list.Versioned
 	*highlightableMessageItem
 	*cachedMessageItem
 	*focusableMessageItem
@@ -176,10 +178,12 @@ func newBaseToolMessageItem(
 		status = ToolStatusCanceled
 	}
 
+	v := list.NewVersioned()
 	t := &baseToolMessageItem{
-		highlightableMessageItem: defaultHighlighter(sty),
+		Versioned:                v,
+		highlightableMessageItem: defaultHighlighter(sty, v),
 		cachedMessageItem:        &cachedMessageItem{},
-		focusableMessageItem:     &focusableMessageItem{},
+		focusableMessageItem:     newFocusableMessageItem(v),
 		sty:                      sty,
 		toolRenderer:             toolRenderer,
 		toolCall:                 toolCall,
@@ -270,8 +274,12 @@ func NewToolMessageItem(
 
 // SetCompact implements the Compactable interface.
 func (t *baseToolMessageItem) SetCompact(compact bool) {
+	if t.isCompact == compact {
+		return
+	}
 	t.isCompact = compact
 	t.clearCache()
+	t.Bump()
 }
 
 // ID returns the unique identifier for this tool message item.
@@ -378,12 +386,14 @@ func (t *baseToolMessageItem) ToolCall() message.ToolCall {
 func (t *baseToolMessageItem) SetToolCall(tc message.ToolCall) {
 	t.toolCall = tc
 	t.clearCache()
+	t.Bump()
 }
 
 // SetResult sets the tool result associated with this message item.
 func (t *baseToolMessageItem) SetResult(res *message.ToolResult) {
 	t.result = res
 	t.clearCache()
+	t.Bump()
 }
 
 // MessageID returns the ID of the message containing this tool call.
@@ -392,14 +402,20 @@ func (t *baseToolMessageItem) MessageID() string {
 }
 
 // SetMessageID sets the ID of the message containing this tool call.
+// MessageID is metadata only and does not affect the rendered output,
+// so we deliberately do not bump the version here.
 func (t *baseToolMessageItem) SetMessageID(id string) {
 	t.messageID = id
 }
 
 // SetStatus sets the tool status.
 func (t *baseToolMessageItem) SetStatus(status ToolStatus) {
+	if t.status == status {
+		return
+	}
 	t.status = status
 	t.clearCache()
+	t.Bump()
 }
 
 // Status returns the current tool status.
@@ -439,7 +455,23 @@ func (t *baseToolMessageItem) SetSpinningFunc(fn SpinningFunc) {
 func (t *baseToolMessageItem) ToggleExpanded() bool {
 	t.expandedContent = !t.expandedContent
 	t.clearCache()
+	t.Bump()
 	return t.expandedContent
+}
+
+// Finished implements list.Item. A tool call is freezable once the
+// tool call itself is marked finished AND a result has been recorded
+// (or it has been canceled). Tools that override the spinning logic
+// via spinningFunc would short-circuit live ticks; we still gate
+// freezing on isSpinning to keep the contract conservative.
+func (t *baseToolMessageItem) Finished() bool {
+	if t.isSpinning() {
+		return false
+	}
+	if t.status == ToolStatusCanceled {
+		return true
+	}
+	return t.toolCall.Finished && t.result != nil
 }
 
 // HandleMouseClick implements MouseClickable.

@@ -7,11 +7,15 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"testing"
 
 	"github.com/charmbracelet/crush/internal/log"
 )
 
 var getRg = sync.OnceValue(func() string {
+	if testing.Testing() {
+		return ""
+	}
 	path, err := exec.LookPath("rg")
 	if err != nil {
 		if log.Initialized() {

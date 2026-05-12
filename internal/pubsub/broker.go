@@ -2,29 +2,33 @@ package pubsub
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 )
 
-const bufferSize = 64
+// bufferSize is the per-subscriber channel capacity for any broker
+// created via NewBroker.  Publish is non-blocking, so a full buffer
+// drops events (with a warning log); sized to cover a long streaming
+// assistant turn (~one UpdatedEvent per token) even under TUI render
+// stalls.
+const bufferSize = 4096
 
 type Broker[T any] struct {
 	subs              map[chan Event[T]]struct{}
 	mu                sync.RWMutex
 	done              chan struct{}
 	subCount          int
-	maxEvents         int
 	channelBufferSize int
 }
 
 func NewBroker[T any]() *Broker[T] {
-	return NewBrokerWithOptions[T](bufferSize, 1000)
+	return NewBrokerWithOptions[T](bufferSize)
 }
 
-func NewBrokerWithOptions[T any](channelBufferSize, maxEvents int) *Broker[T] {
+func NewBrokerWithOptions[T any](channelBufferSize int) *Broker[T] {
 	return &Broker[T]{
 		subs:              make(map[chan Event[T]]struct{}),
 		done:              make(chan struct{}),
-		maxEvents:         maxEvents,
 		channelBufferSize: channelBufferSize,
 	}
 }
@@ -106,8 +110,9 @@ func (b *Broker[T]) Publish(t EventType, payload T) {
 		select {
 		case sub <- event:
 		default:
-			// Channel is full, subscriber is slow - skip this event
-			// This prevents blocking the publisher
+			// Channel is full, subscriber is slow — skip this event.
+			// This prevents blocking the publisher.
+			slog.Warn("Pubsub buffer full; dropping event", "type", t)
 		}
 	}
 }

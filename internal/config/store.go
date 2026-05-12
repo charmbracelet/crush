@@ -647,6 +647,9 @@ func (s *ConfigStore) ReloadFromDisk(ctx context.Context) error {
 	// Merge workspace config if present
 	workspacePath := filepath.Join(cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName))
 	if wsData, err := os.ReadFile(workspacePath); err == nil && len(wsData) > 0 {
+		if !json.Valid(wsData) {
+			return fmt.Errorf("invalid JSON in config file %s", workspacePath)
+		}
 		merged, mergeErr := loadFromBytes(append([][]byte{mustMarshalConfig(cfg)}, wsData))
 		if mergeErr == nil {
 			dataDir := cfg.Options.DataDirectory

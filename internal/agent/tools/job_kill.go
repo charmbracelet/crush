@@ -14,7 +14,7 @@ const (
 )
 
 //go:embed job_kill.md
-var jobKillDescription []byte
+var jobKillDescription string
 
 type JobKillParams struct {
 	ShellID string `json:"shell_id" description:"The ID of the background shell to terminate"`
@@ -29,7 +29,7 @@ type JobKillResponseMetadata struct {
 func NewJobKillTool() fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		JobKillToolName,
-		string(jobKillDescription),
+		jobKillDescription,
 		func(ctx context.Context, params JobKillParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.ShellID == "" {
 				return fantasy.NewTextErrorResponse("missing shell_id"), nil

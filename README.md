@@ -548,8 +548,7 @@ it creates. You can customize this behavior with the `attribution` option:
 
 - `trailer_style`: Controls the attribution trailer added to commit messages
   (default: `assisted-by`)
-  - `assisted-by`: Adds `Assisted-by: [Model Name] via Crush <crush@charm.land>`
-    (includes the model name)
+  - `assisted-by`: Adds `Assisted-by: Crush:[ModelID]` as specified in [the convention](https://docs.kernel.org/process/coding-assistants.html#attribution)
   - `co-authored-by`: Adds `Co-Authored-By: Crush <crush@charm.land>`
   - `none`: No attribution trailer
 - `generated_with`: When true (default), adds `💘 Generated with Crush` line to

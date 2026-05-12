@@ -165,12 +165,12 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 
 	go mcp.Initialize(ctx, app.Permissions, store)
 
-	// Cleanup database upon app shutdown. Release the shared database connection;
-	// this closes the underlying *sql.DB when the last reference is released.
+	// Release the shared database connection on shutdown. The pool
+	// closes the underlying *sql.DB when the last reference is released.
 	dataDir := cfg.Options.DataDirectory
 	app.cleanupFuncs = append(
 		app.cleanupFuncs,
-		func(context.Context) error { db.Release(dataDir); return nil },
+		func(context.Context) error { return db.Release(dataDir) },
 		func(ctx context.Context) error { return mcp.Close(ctx) },
 	)
 

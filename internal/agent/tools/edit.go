@@ -49,7 +49,7 @@ var (
 )
 
 //go:embed edit.md
-var editDescription []byte
+var editDescription string
 
 type editContext struct {
 	ctx         context.Context
@@ -68,7 +68,7 @@ func NewEditTool(
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		EditToolName,
-		FirstLineDescription(editDescription),
+		editDescription,
 		func(ctx context.Context, params EditParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.FilePath == "" {
 				return fantasy.NewTextErrorResponse("file_path is required"), nil

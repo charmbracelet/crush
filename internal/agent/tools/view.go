@@ -309,22 +309,29 @@ func readTextFile(filePath string, offset, limit, maxContentSize int) (string, b
 	}
 	defer file.Close()
 
-	scanner := NewLineScanner(file)
-	if offset > 0 {
-		skipped := 0
-		for skipped < offset && scanner.Scan() {
-			skipped++
-		}
-		if err = scanner.Err(); err != nil {
+	reader := bufio.NewReader(file)
+	skipped := 0
+	for skipped < offset {
+		_, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				return "", false, nil
+			}
 			return "", false, err
 		}
+		skipped++
 	}
 
 	lines := make([]string, 0, min(limit, DefaultReadLimit))
 	contentSize := 0
 
-	for len(lines) < limit && scanner.Scan() {
-		lineText := scanner.Text()
+	for len(lines) < limit {
+		lineText, err := reader.ReadString('\n')
+		if err != nil && err != io.EOF {
+			return "", false, err
+		}
+		lineText = strings.TrimSuffix(lineText, "\n")
+		lineText = strings.TrimSuffix(lineText, "\r")
 		if len(lineText) > MaxLineLength {
 			lineText = lineText[:MaxLineLength] + "..."
 		}
@@ -337,13 +344,16 @@ func readTextFile(filePath string, offset, limit, maxContentSize int) (string, b
 		}
 		contentSize = projectedSize
 		lines = append(lines, lineText)
+		if err == io.EOF {
+			break
+		}
 	}
 
 	// Peek one more line only when we filled the limit.
-	hasMore := len(lines) == limit && scanner.Scan()
-
-	if err := scanner.Err(); err != nil {
-		return "", false, err
+	hasMore := false
+	if len(lines) == limit {
+		lineText, peekErr := reader.ReadString('\n')
+		hasMore = len(lineText) > 0 || peekErr == nil
 	}
 
 	return strings.Join(lines, "\n"), hasMore, nil
@@ -383,33 +393,6 @@ func sniffImageMimeType(data []byte, fallback string) string {
 		return sniffed
 	}
 	return fallback
-}
-
-type LineScanner struct {
-	scanner *bufio.Scanner
-}
-
-func NewLineScanner(r io.Reader) *LineScanner {
-	scanner := bufio.NewScanner(r)
-	// Increase buffer size to handle large lines (e.g., minified JSON, HTML)
-	// Default is 64KB, set to 1MB
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
-	return &LineScanner{
-		scanner: scanner,
-	}
-}
-
-func (s *LineScanner) Scan() bool {
-	return s.scanner.Scan()
-}
-
-func (s *LineScanner) Text() string {
-	return s.scanner.Text()
-}
-
-func (s *LineScanner) Err() error {
-	return s.scanner.Err()
 }
 
 // isInSkillsPath checks if filePath is within any of the configured skills

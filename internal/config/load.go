@@ -113,6 +113,13 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	store.reloadMu.Lock()
 	defer store.reloadMu.Unlock()
 
+	// Apply top-level env vars to the process before configuring providers so
+	// that variables like AWS_PROFILE are visible to the AWS SDK credential chain.
+	for k, v := range cfg.Env {
+		resolved, _ := valueResolver.ResolveValue(v)
+		os.Setenv(k, resolved)
+	}
+
 	if err := cfg.configureProviders(store, env, valueResolver, store.knownProviders); err != nil {
 		return nil, fmt.Errorf("failed to configure providers: %w", err)
 	}
@@ -261,6 +268,7 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 			ExtraBody:          config.ExtraBody,
 			ExtraParams:        make(map[string]string),
 			Models:             p.Models,
+			AWSAuthRefresh:     config.AWSAuthRefresh,
 		}
 
 		switch {

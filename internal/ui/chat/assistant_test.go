@@ -27,7 +27,7 @@ func TestAssistantMessageItemExpandable(t *testing.T) {
 	// Short thinking: under the tail-window cap, so the cycle is
 	// collapsed -> full -> collapsed (tail-window is skipped).
 	msg := thinkingMessage("m1", "step one\nstep two\nstep three", "")
-	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+	item := NewAssistantMessageItem(&sty, msg, false).(*AssistantMessageItem)
 
 	exp, ok := any(item).(Expandable)
 	require.True(t, ok, "AssistantMessageItem must satisfy Expandable")
@@ -54,7 +54,7 @@ func TestAssistantMessageItemExpandableEmptyThinkingNoOp(t *testing.T) {
 
 	sty := styles.CharmtonePantera()
 	msg := &message.Message{ID: "m1-empty", Role: message.Assistant}
-	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+	item := NewAssistantMessageItem(&sty, msg, false).(*AssistantMessageItem)
 
 	exp, ok := any(item).(Expandable)
 	require.True(t, ok, "AssistantMessageItem must satisfy Expandable")
@@ -87,11 +87,11 @@ func TestAssistantMessageItemTailWindowBoundary(t *testing.T) {
 	atCap := buildLines(maxExpandedThinkingTailLines)
 	overCap := buildLines(maxExpandedThinkingTailLines + 1)
 
-	atItem := NewAssistantMessageItem(&sty, thinkingMessage("at-cap", atCap, "")).(*AssistantMessageItem)
+	atItem := NewAssistantMessageItem(&sty, thinkingMessage("at-cap", atCap, ""), false).(*AssistantMessageItem)
 	require.False(t, atItem.tailWindowWouldTruncate(),
 		"a source with exactly N logical lines must not trip the tail-window step")
 
-	overItem := NewAssistantMessageItem(&sty, thinkingMessage("over-cap", overCap, "")).(*AssistantMessageItem)
+	overItem := NewAssistantMessageItem(&sty, thinkingMessage("over-cap", overCap, ""), false).(*AssistantMessageItem)
 	require.True(t, overItem.tailWindowWouldTruncate(),
 		"a source with N+1 logical lines must trip the tail-window step")
 }
@@ -123,7 +123,7 @@ func TestAssistantMessageItemHandleMouseClick(t *testing.T) {
 
 	sty := styles.CharmtonePantera()
 	msg := &message.Message{ID: "m2", Role: message.Assistant}
-	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+	item := NewAssistantMessageItem(&sty, msg, false).(*AssistantMessageItem)
 	item.thinkingBoxHeight = 5
 
 	// Click inside the thinking box signals handled but must not mutate

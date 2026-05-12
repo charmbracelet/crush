@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"html/template"
 	"io"
 	"net/http"
 	"strings"
@@ -21,8 +22,13 @@ const (
 	MaxFetchSize  = 100 * 1024 // 100KB
 )
 
-//go:embed fetch.md
-var fetchDescription string
+//go:embed fetch.md.tpl
+var fetchDescriptionTmpl []byte
+
+var fetchDescriptionTpl = template.Must(
+	template.New("fetchDescription").
+		Parse(string(fetchDescriptionTmpl)),
+)
 
 func NewFetchTool(permissions permission.Service, workingDir string, client *http.Client) fantasy.AgentTool {
 	if client == nil {
@@ -39,7 +45,7 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 
 	return fantasy.NewParallelAgentTool(
 		FetchToolName,
-		fetchDescription,
+		renderToolDescription(fetchDescriptionTpl),
 		func(ctx context.Context, params FetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.URL == "" {
 				return fantasy.NewTextErrorResponse("URL parameter is required"), nil

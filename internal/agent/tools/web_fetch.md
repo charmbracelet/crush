@@ -1,1 +1,0 @@
-Fetch a web URL and return content as markdown; for use inside sub-agents. Large pages (>50KB) are saved to a temp file for grep/view.

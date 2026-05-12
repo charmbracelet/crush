@@ -77,9 +77,23 @@ func (a *AgentToolMessageItem) NestedTools() []ToolMessageItem {
 }
 
 // SetNestedTools sets the nested tools.
+//
+// SetNestedTools always bumps the version. The previous design
+// deduped when the slice's length and element pointers were
+// unchanged, but the live update path in internal/ui/model/ui.go
+// mutates existing children in place (SetToolCall / SetResult on the
+// same pointers) and then calls SetNestedTools with the same slice.
+// Pointer-equality dedupe in that case skips the parent Bump even
+// though the parent's rendered output (which embeds the children
+// inline) has changed, leaving a stale parent entry in the list
+// cache. Always bumping is cheap (one uint64 increment) and called
+// at most once per agent event; in the rare case the slice is
+// truly unchanged the worst case is one extra parent re-render
+// while every child cache hit stays warm.
 func (a *AgentToolMessageItem) SetNestedTools(tools []ToolMessageItem) {
 	a.nestedTools = tools
 	a.clearCache()
+	a.Bump()
 }
 
 // AddNestedTool adds a nested tool.
@@ -90,6 +104,7 @@ func (a *AgentToolMessageItem) AddNestedTool(tool ToolMessageItem) {
 	}
 	a.nestedTools = append(a.nestedTools, tool)
 	a.clearCache()
+	a.Bump()
 }
 
 // AgentToolRenderContext renders agent tool messages.
@@ -201,10 +216,12 @@ func (a *AgenticFetchToolMessageItem) NestedTools() []ToolMessageItem {
 	return a.nestedTools
 }
 
-// SetNestedTools sets the nested tools.
+// SetNestedTools sets the nested tools. Always bumps the version;
+// see [AgentToolMessageItem.SetNestedTools] for the rationale.
 func (a *AgenticFetchToolMessageItem) SetNestedTools(tools []ToolMessageItem) {
 	a.nestedTools = tools
 	a.clearCache()
+	a.Bump()
 }
 
 // AddNestedTool adds a nested tool.
@@ -215,6 +232,7 @@ func (a *AgenticFetchToolMessageItem) AddNestedTool(tool ToolMessageItem) {
 	}
 	a.nestedTools = append(a.nestedTools, tool)
 	a.clearCache()
+	a.Bump()
 }
 
 // AgenticFetchToolRenderContext renders agentic fetch tool messages.

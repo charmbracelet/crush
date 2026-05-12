@@ -1,8 +1,6 @@
 package dialog
 
 import (
-	"image"
-
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -27,10 +25,9 @@ type Quit struct {
 		Quit key.Binding
 	}
 
-	// Mouse click hitboxes for the two response buttons ("Yep!",
-	// "Nope"). Computed during Draw().
-	buttonsHitboxesValid bool
-	buttonsHitRects      [2]image.Rectangle
+	// Compositor for button hit detection. Built during Draw() from
+	// button layers positioned at their screen coordinates.
+	compositor *lipgloss.Compositor
 }
 
 var _ Dialog = (*Quit)(nil)
@@ -96,15 +93,16 @@ func (q *Quit) HandleMsg(msg tea.Msg) Action {
 			return ActionClose{}
 		}
 	case tea.MouseClickMsg:
-		if msg.Button != tea.MouseLeft || !q.buttonsHitboxesValid {
+		if msg.Button != tea.MouseLeft {
 			break
 		}
-		pt := image.Pt(msg.X, msg.Y)
-		switch {
-		case pt.In(q.buttonsHitRects[0]):
-			return ActionQuit{}
-		case pt.In(q.buttonsHitRects[1]):
-			return ActionClose{}
+		if q.compositor != nil {
+			switch q.compositor.Hit(msg.X, msg.Y).ID() {
+			case "yep":
+				return ActionQuit{}
+			case "nope":
+				return ActionClose{}
+			}
 		}
 	}
 
@@ -131,12 +129,9 @@ func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	view := q.com.Styles.Dialog.Quit.Frame.Render(content)
 
-	// Compute click hitboxes for the response buttons.
-	q.buttonsHitboxesValid = false
-	q.buttonsHitRects = [2]image.Rectangle{}
-
-	viewW, _ := lipgloss.Size(view)
-	dialogRect := common.CenterRect(area, viewW, lipgloss.Height(view))
+	// Build compositor for button hit detection using lipgloss layers.
+	viewW, viewH := lipgloss.Size(view)
+	dialogRect := common.CenterRect(area, viewW, viewH)
 
 	frameStyle := q.com.Styles.Dialog.Quit.Frame
 	innerMinX := dialogRect.Min.X + frameStyle.GetHorizontalFrameSize()/2
@@ -144,8 +139,7 @@ func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	// Buttons are at line 2 within inner content (question=0,
 	// blank=1, buttons=2).
-	buttonTopInInner := 2
-	yButtonsTop := innerMinY + buttonTopInInner
+	yButtonsTop := innerMinY + 2
 
 	b0 := common.Button(q.com.Styles, buttonOpts[0])
 	b1 := common.Button(q.com.Styles, buttonOpts[1])
@@ -157,22 +151,10 @@ func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	contentW := lipgloss.Width(content)
 	buttonStartX := innerMinX + (contentW-buttonGroupW)/2
 
-	const hitboxPad = 1
-	x := buttonStartX
-	q.buttonsHitRects[0] = image.Rect(
-		max(0, x-hitboxPad),
-		max(0, yButtonsTop-hitboxPad),
-		x+w0+hitboxPad,
-		yButtonsTop+lipgloss.Height(b0)+hitboxPad,
+	q.compositor = lipgloss.NewCompositor(
+		lipgloss.NewLayer(b0).X(buttonStartX).Y(yButtonsTop).ID("yep"),
+		lipgloss.NewLayer(b1).X(buttonStartX+w0+spacingW).Y(yButtonsTop).ID("nope"),
 	)
-	x += w0 + spacingW
-	q.buttonsHitRects[1] = image.Rect(
-		max(0, x-hitboxPad),
-		max(0, yButtonsTop-hitboxPad),
-		x+w1+hitboxPad,
-		yButtonsTop+lipgloss.Height(b1)+hitboxPad,
-	)
-	q.buttonsHitboxesValid = true
 
 	DrawCenter(scr, area, view)
 	return nil

@@ -35,6 +35,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
 	"golang.org/x/sync/errgroup"
 
@@ -209,8 +210,11 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	logTurnSkillUsage(sessionID, prompt, c.activeSkills, c.skillTracker, beforeLoaded)
 
 	if c.isUnauthorized(originalErr) {
+		slog.Debug("Error is unauthorized, attempting retry", "provider", providerCfg.ID, "aws_auth_refresh", providerCfg.AWSAuthRefresh)
 		if err := c.retryAfterUnauthorized(ctx, providerCfg); err == nil {
 			return run()
+		} else {
+			slog.Debug("retryAfterUnauthorized failed", "error", err)
 		}
 	}
 
@@ -985,14 +989,31 @@ func (c *coordinator) retryAfterUnauthorized(ctx context.Context, providerCfg co
 	case strings.Contains(providerCfg.APIKeyTemplate, "$"):
 		slog.Debug("Received 401. Refreshing API Key template and retrying", "provider", providerCfg.ID)
 		return c.refreshApiKeyTemplate(ctx, providerCfg)
+	case providerCfg.AWSAuthRefresh != "":
+		slog.Debug("Received 401. Running AWS auth refresh and retrying", "provider", providerCfg.ID)
+		return c.runAWSAuthRefresh(ctx, providerCfg)
 	default:
 		return nil
 	}
 }
 
 func (c *coordinator) isUnauthorized(err error) bool {
+	if err == nil {
+		return false
+	}
 	var providerErr *fantasy.ProviderError
-	return errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized
+	if errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized {
+		return true
+	}
+	// AWS SSO credential errors surface as plain errors from the SDK credential
+	// chain before any Bedrock request is made, so they never become a
+	// ProviderError. Match on the error message instead.
+	msg := err.Error()
+	slog.Debug("Checking if error is unauthorized", "error", msg)
+	return strings.Contains(msg, "GetRoleCredentials") ||
+		strings.Contains(msg, "cached credentials") ||
+		strings.Contains(msg, "ForbiddenException") ||
+		(strings.Contains(msg, ".aws/sso/cache") && strings.Contains(msg, "no such file or directory"))
 }
 
 func (c *coordinator) refreshOAuth2Token(ctx context.Context, providerCfg config.ProviderConfig) error {
@@ -1020,6 +1041,25 @@ func (c *coordinator) refreshApiKeyTemplate(ctx context.Context, providerCfg con
 		return err
 	}
 	return nil
+}
+
+// runAWSAuthRefresh runs the configured aws_auth_refresh command to obtain
+// fresh AWS credentials. Output is written directly to os.Stdout so the user
+// can interact with browser-based SSO flows (e.g. copying a device code).
+func (c *coordinator) runAWSAuthRefresh(ctx context.Context, providerCfg config.ProviderConfig) error {
+	err := shell.Run(ctx, shell.RunOptions{
+		Command: providerCfg.AWSAuthRefresh,
+		Cwd:     c.cfg.WorkingDir(),
+		Env:     os.Environ(),
+		Stdout:  os.Stdout,
+		Stderr:  os.Stderr,
+		Stdin:   os.Stdin,
+	})
+	if err != nil {
+		slog.Error("AWS auth refresh command failed.", "provider", providerCfg.ID, "error", err)
+		return err
+	}
+	return c.UpdateModels(ctx)
 }
 
 // subAgentParams holds the parameters for running a sub-agent.

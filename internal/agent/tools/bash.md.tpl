@@ -72,7 +72,7 @@ When user asks to create git commit:
 {{ end}}
 {{if eq .Attribution.TrailerStyle "assisted-by" }}
 
-   Assisted-by: Crush:{{ .ModelID }}
+   Assisted-by: Crush:{{ .ModelName }}
 {{ else if eq .Attribution.TrailerStyle "co-authored-by" }}
 
    Co-Authored-By: Crush <crush@charm.land>

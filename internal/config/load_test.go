@@ -2098,6 +2098,8 @@ func TestConfig_configureProviders_UnsetAzureEndpointSkipsProvider(t *testing.T)
 	require.Equal(t, 0, cfg.Providers.Len(), "azure provider with unset endpoint must be skipped")
 	_, exists := cfg.Providers.Get("azure")
 	require.False(t, exists)
+}
+
 // TestShouldReduceAnimations tests the ShouldReduceAnimations logic.
 func TestShouldReduceAnimations(t *testing.T) {
 	// Test explicit reduce_animations: true

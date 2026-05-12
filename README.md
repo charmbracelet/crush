@@ -266,6 +266,22 @@ $HOME/.local/share/crush/crush.json
 > - `CRUSH_GLOBAL_CONFIG`
 > - `CRUSH_GLOBAL_DATA`
 
+### Environment Variables
+
+The top-level `env` field sets environment variables at startup, before
+providers are configured. This is useful for variables that affect provider
+authentication (e.g. AWS SDK credential chain) without needing shell wrappers:
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "env": {
+    "AWS_PROFILE": "my-sso-profile",
+    "AWS_REGION": "us-west-2"
+  }
+}
+```
+
 ### LSPs
 
 Crush can use LSPs for additional context to help inform its decisions, just
@@ -730,9 +746,26 @@ Custom Anthropic-compatible providers follow this format:
 Crush currently supports running Anthropic models through Bedrock, with caching disabled.
 
 - A Bedrock provider will appear once you have AWS configured, i.e. `aws configure`
-- Crush also expects the `AWS_REGION` or `AWS_DEFAULT_REGION` to be set
-- To use a specific AWS profile set `AWS_PROFILE` in your environment, i.e. `AWS_PROFILE=myprofile crush`
+- Crush also expects the `AWS_REGION` or `AWS_DEFAULT_REGION` to be set (or configured via [`env`](#environment-variables))
+- To use a specific AWS profile set `AWS_PROFILE` in your environment, i.e. `AWS_PROFILE=myprofile crush`, or use the top-level [`env`](#environment-variables) config
 - Alternatively to `aws configure`, you can also just set `AWS_BEARER_TOKEN_BEDROCK`
+
+If you authenticate via AWS SSO, set `aws_auth_refresh` to a command that
+refreshes credentials. Crush runs it automatically when Bedrock returns a
+credential error and retries the request:
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "providers": {
+    "bedrock": {
+      "aws_auth_refresh": "aws sso login --profile my-sso-profile"
+    }
+  }
+}
+```
+
+- `aws_auth_refresh` — shell command run when credentials expire (e.g. `aws sso login`)
 
 ### Vertex AI Platform
 

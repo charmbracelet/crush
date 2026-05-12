@@ -441,7 +441,7 @@ func TestAssistantSectionCache_ThinkingBoxHeightSurvivesCacheHit(t *testing.T) {
 	}, "\n")
 	msg := thinkingMessage("hbox", thinking, "initial answer")
 	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
-	item.thinkingExpanded = true
+	item.thinkingViewMode = thinkingFullExpanded
 
 	_ = item.RawRender(width)
 	originalHeight := item.thinkingBoxHeight

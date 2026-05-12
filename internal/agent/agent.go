@@ -41,6 +41,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/stringext"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/x/exp/charmtone"
@@ -435,7 +436,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			if getSessionErr != nil {
 				return getSessionErr
 			}
-			a.updateSessionUsage(largeModel, &updatedSession, stepResult.Usage, a.openrouterCost(stepResult.ProviderMetadata))
+			a.updateSessionUsage(largeModel, &updatedSession, stepResult.Usage, a.openrouterCost(stepResult.ProviderMetadata), stepResult.Content.Text())
 			_, sessionErr := a.sessions.Save(ctx, updatedSession)
 			if sessionErr != nil {
 				return sessionErr
@@ -734,12 +735,17 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		}
 	}
 
-	a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, openrouterCost)
+	a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, openrouterCost, resp.Response.Content.Text())
 
 	// Just in case, get just the last usage info.
 	usage := resp.Response.Usage
 	currentSession.SummaryMessageID = summaryMessage.ID
-	currentSession.CompletionTokens = usage.OutputTokens
+	if usage.OutputTokens == 0 && usage.InputTokens == 0 {
+		// Provider did not report usage; estimate from summary response.
+		currentSession.CompletionTokens += int64(skills.ApproxTokenCount(resp.Response.Content.Text()))
+	} else {
+		currentSession.CompletionTokens = usage.OutputTokens
+	}
 	currentSession.PromptTokens = 0
 	_, err = a.sessions.Save(genCtx, currentSession)
 	if err != nil {
@@ -1090,6 +1096,10 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 
 	promptTokens := resp.TotalUsage.InputTokens + resp.TotalUsage.CacheCreationTokens
 	completionTokens := resp.TotalUsage.OutputTokens
+	if completionTokens == 0 && promptTokens == 0 {
+		// Provider did not report usage; estimate from title response.
+		completionTokens = int64(skills.ApproxTokenCount(resp.Response.Content.Text()))
+	}
 
 	// Atomically update only title and usage fields to avoid overriding other
 	// concurrent session updates.
@@ -1113,7 +1123,7 @@ func (a *sessionAgent) openrouterCost(metadata fantasy.ProviderMetadata) *float6
 	return &opts.Usage.Cost
 }
 
-func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session, usage fantasy.Usage, overrideCost *float64) {
+func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session, usage fantasy.Usage, overrideCost *float64, responseText string) {
 	modelConfig := model.CatwalkCfg
 	cost := modelConfig.CostPer1MInCached/1e6*float64(usage.CacheCreationTokens) +
 		modelConfig.CostPer1MOutCached/1e6*float64(usage.CacheReadTokens) +
@@ -1133,8 +1143,15 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 	}
 
 	session.Cost += cost
-	session.CompletionTokens = usage.OutputTokens
-	session.PromptTokens = usage.InputTokens + usage.CacheReadTokens
+	if usage.OutputTokens == 0 && usage.InputTokens == 0 && usage.CacheReadTokens == 0 && responseText != "" {
+		// Provider did not report token usage; estimate from response text
+		// using the ~4-chars-per-token heuristic.
+		estimated := int64(skills.ApproxTokenCount(responseText))
+		session.CompletionTokens += estimated
+	} else {
+		session.CompletionTokens = usage.OutputTokens
+		session.PromptTokens = usage.InputTokens + usage.CacheReadTokens
+	}
 }
 
 func (a *sessionAgent) Cancel(sessionID string) {

@@ -424,7 +424,7 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	if dataDir != "" {
 		c.Options.DataDirectory = dataDir
 	} else if c.Options.DataDirectory == "" {
-		if path, ok := fsext.LookupClosest(workingDir, defaultDataDirectory); ok {
+		if path, ok := fsext.LookupClosestBounded(workingDir, projectBoundary(workingDir), defaultDataDirectory); ok {
 			c.Options.DataDirectory = path
 		} else {
 			c.Options.DataDirectory = filepath.Join(workingDir, defaultDataDirectory)
@@ -871,6 +871,48 @@ func isInsideWorktree() bool {
 		"--is-inside-work-tree",
 	).CombinedOutput()
 	return err == nil && strings.TrimSpace(string(bts)) == "true"
+}
+
+// worktreeRoot returns the absolute path of the git working tree root for
+// dir, or the empty string if dir is not inside a working tree (bare
+// repositories, missing git binary, plain directories, or any other
+// failure mode). Linked worktrees and submodules each report their own
+// top-level, which is what callers want when bounding lookups.
+func worktreeRoot(dir string) string {
+	cmd := exec.CommandContext(
+		context.Background(),
+		"git", "rev-parse", "--show-toplevel",
+	)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	root := strings.TrimSpace(string(out))
+	if root == "" {
+		return ""
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return ""
+	}
+	return abs
+}
+
+// projectBoundary returns the directory at which an upward configuration
+// search rooted at dir should stop. It is the git working tree root when
+// one can be detected, otherwise dir itself. Returning dir as a
+// fallback keeps Crush from silently adopting state files placed above
+// the current project.
+func projectBoundary(dir string) string {
+	if root := worktreeRoot(dir); root != "" {
+		return root
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return dir
+	}
+	return abs
 }
 
 // GlobalSkillsDirs returns the default directories for Agent Skills.

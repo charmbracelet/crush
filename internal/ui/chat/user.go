@@ -57,7 +57,10 @@ func (m *UserMessageItem) RawRender(width int) string {
 	renderer := common.MarkdownRenderer(m.sty, cappedWidth)
 
 	msgContent := strings.TrimSpace(m.message.Content().Text)
+	mu := common.LockMarkdownRenderer(renderer)
+	mu.Lock()
 	result, err := renderer.Render(msgContent)
+	mu.Unlock()
 	if err != nil {
 		content = msgContent
 	} else {

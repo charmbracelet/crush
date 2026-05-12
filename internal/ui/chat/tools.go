@@ -193,13 +193,14 @@ func newBaseToolMessageItem(
 		hasCappedWidth:           hasCappedWidth,
 	}
 	t.anim = anim.New(anim.Settings{
-		ID:          toolCall.ID,
-		Size:        15,
-		GradColorA:  sty.WorkingGradFromColor,
-		GradColorB:  sty.WorkingGradToColor,
-		LabelColor:  sty.WorkingLabelColor,
-		CycleColors: true,
-		Static:      reduceAnimations,
+		ID:            toolCall.ID,
+		Size:          15,
+		GradColorA:    sty.WorkingGradFromColor,
+		GradColorB:    sty.WorkingGradToColor,
+		LabelColor:    sty.WorkingLabelColor,
+		EllipsisColor: sty.WorkingEllipsisColor,
+		CycleColors:   true,
+		Static:        reduceAnimations,
 	})
 
 	return t

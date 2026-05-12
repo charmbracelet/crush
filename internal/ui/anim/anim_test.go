@@ -2,10 +2,11 @@ package anim
 
 import (
 	"image/color"
+	"strings"
 	"testing"
 )
 
-func TestStaticColorCycling(t *testing.T) {
+func TestStaticEllipsisCycling(t *testing.T) {
 	a := New(Settings{
 		Static:      true,
 		Size:        15,
@@ -15,49 +16,78 @@ func TestStaticColorCycling(t *testing.T) {
 		CycleColors: true,
 	})
 
-	// Capture initial render
-	previous := a.Render()
+	// Capture renders for each step
+	renders := make([]string, len(staticEllipsisFrames))
+	for i := range staticEllipsisFrames {
+		a.step.Store(int64(i))
+		renders[i] = a.Render()
+	}
 
-	distinctRenders := 0
-
-	// Simulate 3 full cycles (30 steps) and track distinct renders
-	for i := 0; i < 30; i++ {
-		a.step.Add(1)
-		current := a.Render()
-		if current != previous {
-			distinctRenders++
-			previous = current
+	// Each render should contain "Working" and the appropriate dots
+	for i, r := range renders {
+		if !strings.Contains(r, "Working") {
+			t.Errorf("expected render to contain 'Working', got %q", r)
+		}
+		expectedDots := staticEllipsisFrames[i]
+		if expectedDots != "" && !strings.Contains(r, expectedDots) {
+			t.Errorf("step %d: expected render to contain %q, got %q", i, expectedDots, r)
 		}
 	}
 
-	// With 10 distinct colors in a cycle, we should see at least 5 changes
-	// across 30 steps (3 cycles × 10 colors = 30, but step 0 repeats at wrap)
-	if distinctRenders < 5 {
-		t.Errorf("expected at least 5 distinct renders across 3 cycles, got %d", distinctRenders)
+	// Verify cycle wraps correctly
+	a.step.Store(int64(len(staticEllipsisFrames)))
+	a.Animate(StepMsg{ID: a.id})
+	if int(a.step.Load()) != 0 {
+		t.Errorf("expected step to wrap to 0, got %d", a.step.Load())
 	}
 }
 
-func TestStaticStartsWithGradColorA(t *testing.T) {
-	red := color.RGBA{R: 0xff, G: 0, B: 0, A: 0xff}
-	blue := color.RGBA{R: 0, G: 0, B: 0xff, A: 0xff}
+func TestStaticStartsWithWorking(t *testing.T) {
 	label := color.RGBA{R: 0xcc, G: 0xcc, B: 0xcc, A: 0xff}
 
 	a := New(Settings{
 		Static:      true,
 		Size:        15,
-		GradColorA:  red,
-		GradColorB:  blue,
+		GradColorA:  color.RGBA{R: 0xff, G: 0, B: 0, A: 0xff},
+		GradColorB:  color.RGBA{R: 0, G: 0, B: 0xff, A: 0xff},
 		LabelColor:  label,
 		CycleColors: true,
 	})
 
-	// At step 0, dotColor should be GradColorA (red)
+	// At step 0, should show "Working" (no dots yet).
 	r := a.Render()
-	if len(r) == 0 {
-		t.Fatal("expected non-empty render")
+	if !strings.Contains(r, "Working") {
+		t.Fatalf("expected render to contain 'Working', got %q", r)
 	}
-	// Verify it contains "Working" in the label color
 	if a.staticRendered == "" {
 		t.Fatal("expected staticRendered to be set")
+	}
+}
+
+func TestStaticEllipsisColor(t *testing.T) {
+	label := color.RGBA{R: 0xcc, G: 0xcc, B: 0xcc, A: 0xff}
+	ellipsis := color.RGBA{R: 0x66, G: 0x66, B: 0x66, A: 0xff}
+
+	a := New(Settings{
+		Static:        true,
+		Size:          15,
+		LabelColor:    label,
+		EllipsisColor: ellipsis,
+		CycleColors:   true,
+	})
+
+	if a.ellipsisColor != ellipsis {
+		t.Errorf("expected ellipsisColor to be set, got %v", a.ellipsisColor)
+	}
+
+	// When EllipsisColor is unset, it should default to LabelColor
+	b := New(Settings{
+		Static:      true,
+		Size:        15,
+		LabelColor:  label,
+		CycleColors: true,
+	})
+	if b.ellipsisColor != label {
+		t.Errorf("expected ellipsisColor to default to LabelColor, got %v", b.ellipsisColor)
 	}
 }

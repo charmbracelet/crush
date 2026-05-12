@@ -387,6 +387,18 @@ func (r *Repo) buildTree(dir string, relPath string) (plumbing.Hash, error) {
 		return plumbing.ZeroHash, nil
 	}
 
+	// Sort tree entries using git's sort order (directories treated as name + "/").
+	sort.Slice(treeEntries, func(i, j int) bool {
+		nameI, nameJ := treeEntries[i].Name, treeEntries[j].Name
+		if treeEntries[i].Mode == filemode.Dir {
+			nameI += "/"
+		}
+		if treeEntries[j].Mode == filemode.Dir {
+			nameJ += "/"
+		}
+		return nameI < nameJ
+	})
+
 	// Create tree object.
 	tree := &object.Tree{Entries: treeEntries}
 

@@ -145,6 +145,51 @@ func TestFallbackStepUsageEstimatesToolResults(t *testing.T) {
 	require.Equal(t, usage.InputTokens, usage.TotalTokens)
 }
 
+func TestFallbackStepUsageSkipsClientToolResultsAsOutput(t *testing.T) {
+	t.Parallel()
+
+	step := fantasy.StepResult{
+		Response: fantasy.Response{
+			Content: fantasy.ResponseContent{
+				fantasy.ToolResultContent{
+					ToolCallID: "tool-call-1",
+					ToolName:   "bash",
+					Result: fantasy.ToolResultOutputContentText{
+						Text: "large client-executed payload that should not count as model output tokens",
+					},
+				},
+			},
+		},
+	}
+
+	usage, estimated := fallbackStepUsage(nil, step)
+	require.False(t, estimated)
+	require.Zero(t, usage.OutputTokens)
+}
+
+func TestFallbackStepUsageCountsProviderToolResultsAsOutput(t *testing.T) {
+	t.Parallel()
+
+	step := fantasy.StepResult{
+		Response: fantasy.Response{
+			Content: fantasy.ResponseContent{
+				fantasy.ToolResultContent{
+					ToolCallID:       "tool-call-1",
+					ToolName:         "web_search",
+					ProviderExecuted: true,
+					ClientMetadata:   "provider metadata",
+					Result:           fantasy.ToolResultOutputContentText{Text: "provider-executed result"},
+				},
+			},
+		},
+	}
+
+	usage, estimated := fallbackStepUsage(nil, step)
+	require.True(t, estimated)
+	require.Positive(t, usage.OutputTokens)
+	require.Equal(t, usage.OutputTokens, usage.TotalTokens)
+}
+
 func TestFallbackStepUsageReturnsZeroWithoutContent(t *testing.T) {
 	t.Parallel()
 
@@ -185,6 +230,24 @@ func TestUpdateSessionUsageKeepsCountersForZeroUsage(t *testing.T) {
 	require.Equal(t, 1.25, currentSession.Cost)
 	require.Equal(t, int64(123), currentSession.PromptTokens)
 	require.Equal(t, int64(456), currentSession.CompletionTokens)
+}
+
+func TestUpdateSessionUsageReplacesCountersForPartialUsage(t *testing.T) {
+	t.Parallel()
+
+	agent := &sessionAgent{}
+	currentSession := &session.Session{
+		ID:               "session-id",
+		PromptTokens:     123,
+		CompletionTokens: 456,
+	}
+	model := Model{CatwalkCfg: catwalk.Model{CostPer1MIn: 10, CostPer1MOut: 20}}
+	usage := fantasy.Usage{InputTokens: 789}
+
+	agent.updateSessionUsage(model, currentSession, usage, nil, false)
+
+	require.Equal(t, int64(789), currentSession.PromptTokens)
+	require.Zero(t, currentSession.CompletionTokens)
 }
 
 func TestUpdateSessionUsageAddsProviderCost(t *testing.T) {

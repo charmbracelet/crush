@@ -137,6 +137,13 @@ type AssistantMessageItem struct {
 	thinkingSec assistantSection
 	contentSec  assistantSection
 	errorSec    assistantSection
+
+	// streamingContent caches a "stable prefix" glamour render of
+	// the assistant content body so each streaming flush only
+	// re-renders the trailing partial. F8 of
+	// docs/notes/2026-05-12-chat-rendering-perf.md. See
+	// streaming_markdown.go for the full algorithm.
+	streamingContent streamingMarkdown
 }
 
 var _ Expandable = (*AssistantMessageItem)(nil)
@@ -440,7 +447,10 @@ func (a *AssistantMessageItem) cachedError(width int) string {
 // lines so the visual box matches what the user sees today.
 func (a *AssistantMessageItem) renderThinking(thinking string, width int) string {
 	renderer := common.QuietMarkdownRenderer(a.sty, width)
+	mu := common.LockMarkdownRenderer(renderer)
+	mu.Lock()
 	rendered, err := renderer.Render(thinking)
+	mu.Unlock()
 	if err != nil {
 		rendered = thinking
 	}
@@ -489,14 +499,18 @@ func (a *AssistantMessageItem) renderThinking(thinking string, width int) string
 	return result
 }
 
-// renderMarkdown renders content as markdown.
+// renderMarkdown renders content as markdown. F8 routes the call
+// through streamingContent, which caches the glamour render of a
+// "stable prefix" so each streaming flush only re-renders the
+// trailing partial. The streaming cache invalidates itself on
+// width change and on any content that is not a prefix-extension
+// of the previously rendered content (e.g. user retried the
+// turn), and falls back to a full render whenever boundary
+// detection has the slightest doubt — see
+// findSafeMarkdownBoundary.
 func (a *AssistantMessageItem) renderMarkdown(content string, width int) string {
 	renderer := common.MarkdownRenderer(a.sty, width)
-	result, err := renderer.Render(content)
-	if err != nil {
-		return content
-	}
-	return strings.TrimSuffix(result, "\n")
+	return a.streamingContent.Render(content, width, renderer)
 }
 
 func (a *AssistantMessageItem) renderSpinning() string {
@@ -564,11 +578,15 @@ func (a *AssistantMessageItem) Finished() bool {
 // clearCache drops every cached render for this item, including the
 // per-section caches. Shadows the embedded cachedMessageItem.clearCache
 // so ClearItemCaches (style change) wipes the section caches too.
+// F8: also drop the streaming-markdown stable-prefix cache because
+// the cached glamour render embeds the OLD style's ANSI sequences
+// and is no longer visually consistent with the new style.
 func (a *AssistantMessageItem) clearCache() {
 	a.cachedMessageItem.clearCache()
 	a.thinkingSec.reset()
 	a.contentSec.reset()
 	a.errorSec.reset()
+	a.streamingContent.Reset()
 }
 
 // ToggleExpanded advances the F5 thinking view-mode cycle and returns

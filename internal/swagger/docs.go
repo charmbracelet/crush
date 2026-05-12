@@ -2939,7 +2939,7 @@ const docTemplate = `{
                     }
                 },
                 "data_directory": {
-                    "description": "Relative to the cwd",
+                    "description": "DataDirectory is where Crush keeps per-project state such as the SQLite database and workspace overrides. Relative paths are resolved against the working directory; absolute paths are used verbatim. After defaulting the stored value is always absolute.",
                     "type": "string"
                 },
                 "debug": {

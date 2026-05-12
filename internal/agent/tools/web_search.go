@@ -11,7 +11,7 @@ import (
 )
 
 //go:embed web_search.md
-var webSearchToolDescription []byte
+var webSearchToolDescription string
 
 // NewWebSearchTool creates a web search tool for sub-agents (no permissions needed).
 func NewWebSearchTool(client *http.Client) fantasy.AgentTool {
@@ -29,7 +29,7 @@ func NewWebSearchTool(client *http.Client) fantasy.AgentTool {
 
 	return fantasy.NewParallelAgentTool(
 		WebSearchToolName,
-		FirstLineDescription(webSearchToolDescription),
+		webSearchToolDescription,
 		func(ctx context.Context, params WebSearchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Query == "" {
 				return fantasy.NewTextErrorResponse("query is required"), nil

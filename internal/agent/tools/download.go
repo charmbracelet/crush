@@ -32,7 +32,7 @@ type DownloadPermissionsParams struct {
 const DownloadToolName = "download"
 
 //go:embed download.md
-var downloadDescription []byte
+var downloadDescription string
 
 func NewDownloadTool(permissions permission.Service, workingDir string, client *http.Client) fantasy.AgentTool {
 	if client == nil {
@@ -48,7 +48,7 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 	}
 	return fantasy.NewParallelAgentTool(
 		DownloadToolName,
-		FirstLineDescription(downloadDescription),
+		downloadDescription,
 		func(ctx context.Context, params DownloadParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.URL == "" {
 				return fantasy.NewTextErrorResponse("URL parameter is required"), nil

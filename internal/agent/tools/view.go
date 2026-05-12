@@ -24,7 +24,7 @@ import (
 )
 
 //go:embed view.md
-var viewDescription []byte
+var viewDescription string
 
 type ViewParams struct {
 	FilePath string `json:"file_path" description:"The path to the file to read"`
@@ -79,7 +79,7 @@ func NewViewTool(
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		ViewToolName,
-		FirstLineDescription(viewDescription),
+		viewDescription,
 		func(ctx context.Context, params ViewParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.FilePath == "" {
 				return fantasy.NewTextErrorResponse("file_path is required"), nil

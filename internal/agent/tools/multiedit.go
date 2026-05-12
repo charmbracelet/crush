@@ -55,7 +55,7 @@ type MultiEditResponseMetadata struct {
 const MultiEditToolName = "multiedit"
 
 //go:embed multiedit.md
-var multieditDescription []byte
+var multieditDescription string
 
 func NewMultiEditTool(
 	lspManager *lsp.Manager,
@@ -66,7 +66,7 @@ func NewMultiEditTool(
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		MultiEditToolName,
-		FirstLineDescription(multieditDescription),
+		multieditDescription,
 		func(ctx context.Context, params MultiEditParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.FilePath == "" {
 				return fantasy.NewTextErrorResponse("file_path is required"), nil

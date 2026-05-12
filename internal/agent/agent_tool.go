@@ -13,7 +13,7 @@ import (
 )
 
 //go:embed templates/agent_tool.md
-var agentToolDescription []byte
+var agentToolDescription string
 
 type AgentParams struct {
 	Prompt string `json:"prompt" description:"The task for the agent to perform"`
@@ -39,7 +39,7 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 	}
 	return fantasy.NewParallelAgentTool(
 		AgentToolName,
-		tools.FirstLineDescription(agentToolDescription),
+		agentToolDescription,
 		func(ctx context.Context, params AgentParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Prompt == "" {
 				return fantasy.NewTextErrorResponse("prompt is required"), nil

@@ -28,12 +28,12 @@ type ReadMCPResourcePermissionsParams struct {
 const ReadMCPResourceToolName = "read_mcp_resource"
 
 //go:embed read_mcp_resource.md
-var readMCPResourceDescription []byte
+var readMCPResourceDescription string
 
 func NewReadMCPResourceTool(cfg *config.ConfigStore, permissions permission.Service) fantasy.AgentTool {
 	return fantasy.NewParallelAgentTool(
 		ReadMCPResourceToolName,
-		FirstLineDescription(readMCPResourceDescription),
+		readMCPResourceDescription,
 		func(ctx context.Context, params ReadMCPResourceParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			params.MCPName = strings.TrimSpace(params.MCPName)
 			params.URI = strings.TrimSpace(params.URI)

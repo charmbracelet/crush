@@ -53,12 +53,12 @@ const (
 )
 
 //go:embed ls.md
-var lsDescription []byte
+var lsDescription string
 
 func NewLsTool(permissions permission.Service, workingDir string, lsConfig config.ToolLs) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		LSToolName,
-		FirstLineDescription(lsDescription),
+		lsDescription,
 		func(ctx context.Context, params LSParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			searchPath, err := fsext.Expand(cmp.Or(params.Path, workingDir))
 			if err != nil {

@@ -13,7 +13,7 @@ import (
 )
 
 //go:embed web_fetch.md
-var webFetchToolDescription []byte
+var webFetchToolDescription string
 
 // NewWebFetchTool creates a simple web fetch tool for sub-agents (no permissions needed).
 func NewWebFetchTool(workingDir string, client *http.Client) fantasy.AgentTool {
@@ -31,7 +31,7 @@ func NewWebFetchTool(workingDir string, client *http.Client) fantasy.AgentTool {
 
 	return fantasy.NewParallelAgentTool(
 		WebFetchToolName,
-		FirstLineDescription(webFetchToolDescription),
+		webFetchToolDescription,
 		func(ctx context.Context, params WebFetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.URL == "" {
 				return fantasy.NewTextErrorResponse("url is required"), nil

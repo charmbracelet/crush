@@ -29,7 +29,7 @@ type SourcegraphResponseMetadata struct {
 const SourcegraphToolName = "sourcegraph"
 
 //go:embed sourcegraph.md
-var sourcegraphDescription []byte
+var sourcegraphDescription string
 
 func NewSourcegraphTool(client *http.Client) fantasy.AgentTool {
 	if client == nil {
@@ -45,7 +45,7 @@ func NewSourcegraphTool(client *http.Client) fantasy.AgentTool {
 	}
 	return fantasy.NewParallelAgentTool(
 		SourcegraphToolName,
-		FirstLineDescription(sourcegraphDescription),
+		sourcegraphDescription,
 		func(ctx context.Context, params SourcegraphParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Query == "" {
 				return fantasy.NewTextErrorResponse("Query parameter is required"), nil

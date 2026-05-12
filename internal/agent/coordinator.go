@@ -1005,11 +1005,7 @@ func (c *coordinator) isUnauthorized(err error) bool {
 	// AWS SSO credential errors surface as plain errors from the SDK credential
 	// chain before any Bedrock request is made, so they never become a
 	// ProviderError. Match on the error message instead.
-	msg := err.Error()
-	return strings.Contains(msg, "GetRoleCredentials") ||
-		strings.Contains(msg, "cached credentials") ||
-		strings.Contains(msg, "ForbiddenException") ||
-		(strings.Contains(msg, ".aws/sso/cache") && strings.Contains(msg, "no such file or directory"))
+	return strings.Contains(err.Error(), "failed to refresh cached credentials")
 }
 
 func (c *coordinator) refreshOAuth2Token(ctx context.Context, providerCfg config.ProviderConfig) error {

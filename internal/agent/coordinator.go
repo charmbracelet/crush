@@ -296,7 +296,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 
 	// Notify only if still unauthorized after retry — a successful
 	// retry means the user doesn't need to re-authenticate.
-	if originalErr != nil && c.isUnauthorized(originalErr) && c.notify != nil && model.ModelCfg.Provider == hyper.Name {
+	if originalErr != nil && c.isUnauthorized(originalErr, providerCfg) && c.notify != nil && model.ModelCfg.Provider == hyper.Name {
 		c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
 			Type:       notify.TypeReAuthenticate,
 			ProviderID: model.ModelCfg.Provider,
@@ -1196,7 +1196,7 @@ func (c *coordinator) refreshTokenIfExpired(ctx context.Context, providerCfg con
 // failure should check isUnauthorized on the returned error.
 func (c *coordinator) runWithUnauthorizedRetry(ctx context.Context, providerCfg config.ProviderConfig, fn func() error) error {
 	err := fn()
-	if err != nil && c.isUnauthorized(err) {
+	if err != nil && c.isUnauthorized(err, providerCfg) {
 		if retryErr := c.retryAfterUnauthorized(ctx, providerCfg); retryErr == nil {
 			return fn()
 		}
@@ -1222,7 +1222,7 @@ func (c *coordinator) retryAfterUnauthorized(ctx context.Context, providerCfg co
 	}
 }
 
-func (c *coordinator) isUnauthorized(err error) bool {
+func (c *coordinator) isUnauthorized(err error, providerCfg config.ProviderConfig) bool {
 	if err == nil {
 		return false
 	}
@@ -1230,10 +1230,12 @@ func (c *coordinator) isUnauthorized(err error) bool {
 	if errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized {
 		return true
 	}
-	// AWS SSO credential errors surface as plain errors from the SDK credential
-	// chain before any Bedrock request is made, so they never become a
-	// ProviderError. Match on the error message instead.
-	return strings.Contains(err.Error(), "failed to refresh cached credentials")
+	// AWS SSO credential errors surface before any Bedrock request is made,
+	// so they never become a ProviderError.
+	if providerCfg.AWSAuthRefresh != "" {
+		return strings.Contains(err.Error(), "failed to refresh cached credentials")
+	}
+	return false
 }
 
 func (c *coordinator) refreshOAuth2Token(ctx context.Context, providerCfg config.ProviderConfig) error {
@@ -1263,17 +1265,12 @@ func (c *coordinator) refreshApiKeyTemplate(ctx context.Context, providerCfg con
 	return nil
 }
 
-// runAWSAuthRefresh runs the configured aws_auth_refresh command to obtain
-// fresh AWS credentials. Output is written directly to os.Stdout so the user
-// can interact with browser-based SSO flows (e.g. copying a device code).
+// runAWSAuthRefresh runs aws_auth_refresh to obtain fresh AWS credentials.
 func (c *coordinator) runAWSAuthRefresh(ctx context.Context, providerCfg config.ProviderConfig) error {
 	err := shell.Run(ctx, shell.RunOptions{
 		Command: providerCfg.AWSAuthRefresh,
 		Cwd:     c.cfg.WorkingDir(),
 		Env:     os.Environ(),
-		Stdout:  os.Stdout,
-		Stderr:  os.Stderr,
-		Stdin:   os.Stdin,
 	})
 	if err != nil {
 		slog.Error("AWS auth refresh command failed.", "provider", providerCfg.ID, "error", err)
@@ -1345,7 +1342,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		return runErr
 	})
 	// Notify only if still unauthorized after retry.
-	if err != nil && c.isUnauthorized(err) && c.notify != nil && model.ModelCfg.Provider == hyper.Name {
+	if err != nil && c.isUnauthorized(err, providerCfg) && c.notify != nil && model.ModelCfg.Provider == hyper.Name {
 		c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
 			Type:       notify.TypeReAuthenticate,
 			ProviderID: model.ModelCfg.Provider,

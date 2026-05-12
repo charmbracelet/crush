@@ -286,7 +286,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 				options[openai.Name] = parsed
 			}
 		}
-	case anthropic.Name:
+	case anthropic.Name, bedrock.Name:
 		var (
 			_, hasEffort = mergedOptions["effort"]
 			_, hasThink  = mergedOptions["thinking"]

@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"html/template"
 	"net/http"
 	"os"
 	"strings"
@@ -12,8 +13,13 @@ import (
 	"charm.land/fantasy"
 )
 
-//go:embed web_fetch.md
-var webFetchToolDescription string
+//go:embed web_fetch.md.tpl
+var webFetchDescriptionTmpl []byte
+
+var webFetchDescriptionTpl = template.Must(
+	template.New("webFetchDescription").
+		Parse(string(webFetchDescriptionTmpl)),
+)
 
 // NewWebFetchTool creates a simple web fetch tool for sub-agents (no permissions needed).
 func NewWebFetchTool(workingDir string, client *http.Client) fantasy.AgentTool {
@@ -31,7 +37,7 @@ func NewWebFetchTool(workingDir string, client *http.Client) fantasy.AgentTool {
 
 	return fantasy.NewParallelAgentTool(
 		WebFetchToolName,
-		webFetchToolDescription,
+		renderToolDescription(webFetchDescriptionTpl),
 		func(ctx context.Context, params WebFetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.URL == "" {
 				return fantasy.NewTextErrorResponse("url is required"), nil

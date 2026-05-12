@@ -1,1 +1,0 @@
-Fetch raw content from a URL as text, markdown, or html (max 100KB); no AI processing. For analysis or extraction use agentic_fetch.

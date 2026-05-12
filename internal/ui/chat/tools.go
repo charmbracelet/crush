@@ -332,6 +332,24 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 
 // Render renders the tool message item at the given width.
 func (t *baseToolMessageItem) Render(width int) string {
+	// Cache the prefixed output keyed by (width, prefix variant).
+	// Bypass the cache while spinning (RawRender output is
+	// frame-dependent) or while a highlight range is active.
+	useCache := !t.isSpinning() && !t.isHighlighted()
+	var key uint64
+	switch {
+	case t.isCompact:
+		key = 2
+	case t.focused:
+		key = 1
+	default:
+		key = 0
+	}
+	if useCache {
+		if cached, ok := t.getCachedPrefixedRender(width, key); ok {
+			return cached
+		}
+	}
 	var prefix string
 	if t.isCompact {
 		prefix = t.sty.Messages.ToolCallCompact.Render()
@@ -344,7 +362,11 @@ func (t *baseToolMessageItem) Render(width int) string {
 	for i, ln := range lines {
 		lines[i] = prefix + ln
 	}
-	return strings.Join(lines, "\n")
+	out := strings.Join(lines, "\n")
+	if useCache {
+		t.setCachedPrefixedRender(out, width, key)
+	}
+	return out
 }
 
 // ToolCall returns the tool call associated with this message item.

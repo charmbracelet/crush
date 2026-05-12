@@ -156,6 +156,20 @@ type cachedMessageItem struct {
 	// width and height are the dimensions of the cached render
 	width  int
 	height int
+
+	// prefixedRendered caches the per-line-prefixed Render output (the
+	// result of splitting RawRender by newlines and prepending a focus
+	// or selection prefix to every line). Items rebuild this every
+	// frame today; caching it keyed by (prefixedWidth, prefixedKey)
+	// turns Render into a pointer return when item state is stable.
+	//
+	// Invalidation lives in clearCache; callers must additionally
+	// bypass this cache whenever the prefixed output would not be
+	// stable (spinner ticks, active highlight ranges) by not calling
+	// setCachedPrefixedRender for those frames.
+	prefixedRendered string
+	prefixedWidth    int
+	prefixedKey      uint64
 }
 
 // getCachedRender returns the cached render if it exists for the given width.
@@ -173,11 +187,31 @@ func (c *cachedMessageItem) setCachedRender(rendered string, width, height int) 
 	c.height = height
 }
 
+// getCachedPrefixedRender returns the cached prefixed render if it exists
+// for the given (width, key). The key encodes any state that changes the
+// per-line prefix (focused/blurred, compact, ...).
+func (c *cachedMessageItem) getCachedPrefixedRender(width int, key uint64) (string, bool) {
+	if c.prefixedRendered != "" && c.prefixedWidth == width && c.prefixedKey == key {
+		return c.prefixedRendered, true
+	}
+	return "", false
+}
+
+// setCachedPrefixedRender stores the cached prefixed render.
+func (c *cachedMessageItem) setCachedPrefixedRender(rendered string, width int, key uint64) {
+	c.prefixedRendered = rendered
+	c.prefixedWidth = width
+	c.prefixedKey = key
+}
+
 // clearCache clears the cached render.
 func (c *cachedMessageItem) clearCache() {
 	c.rendered = ""
 	c.width = 0
 	c.height = 0
+	c.prefixedRendered = ""
+	c.prefixedWidth = 0
+	c.prefixedKey = 0
 }
 
 // focusableMessageItem is a base struct for message items that can be focused.
@@ -237,12 +271,20 @@ func (a *AssistantInfoItem) RawRender(width int) string {
 
 // Render implements MessageItem.
 func (a *AssistantInfoItem) Render(width int) string {
+	// AssistantInfoItem uses a single, state-independent prefix; key 0
+	// is sufficient. The cache is invalidated whenever the underlying
+	// cachedMessageItem render is cleared.
+	if cached, ok := a.getCachedPrefixedRender(width, 0); ok {
+		return cached
+	}
 	prefix := a.sty.Messages.SectionHeader.Render()
 	lines := strings.Split(a.RawRender(width), "\n")
 	for i, line := range lines {
 		lines[i] = prefix + line
 	}
-	return strings.Join(lines, "\n")
+	out := strings.Join(lines, "\n")
+	a.setCachedPrefixedRender(out, width, 0)
+	return out
 }
 
 func (a *AssistantInfoItem) renderContent(width int) string {

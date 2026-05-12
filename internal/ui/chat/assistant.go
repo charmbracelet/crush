@@ -114,6 +114,22 @@ func (a *AssistantMessageItem) Render(width int) string {
 	// it's wrapping logic.
 	// We already know that the content is wrapped to the correct width in
 	// RawRender, so we can just apply the styles directly to each line.
+	//
+	// The split + per-line prefix loop is O(L); cache the result keyed
+	// by (width, focused) so steady-state Render becomes a pointer
+	// return. Bypass the cache while spinning (RawRender's spinner
+	// suffix changes every animation frame) or while a highlight range
+	// is active (selection drag).
+	useCache := !a.isSpinning() && !a.isHighlighted()
+	var key uint64
+	if a.focused {
+		key = 1
+	}
+	if useCache {
+		if cached, ok := a.getCachedPrefixedRender(width, key); ok {
+			return cached
+		}
+	}
 	focused := a.sty.Messages.AssistantFocused.Render()
 	blurred := a.sty.Messages.AssistantBlurred.Render()
 	rendered := a.RawRender(width)
@@ -125,7 +141,11 @@ func (a *AssistantMessageItem) Render(width int) string {
 			lines[i] = blurred + line
 		}
 	}
-	return strings.Join(lines, "\n")
+	out := strings.Join(lines, "\n")
+	if useCache {
+		a.setCachedPrefixedRender(out, width, key)
+	}
+	return out
 }
 
 // renderMessageContent renders the message content including thinking, main content, and finish reason.

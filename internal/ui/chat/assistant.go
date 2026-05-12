@@ -16,11 +16,40 @@ import (
 )
 
 // assistantMessageTruncateFormat is the text shown when an assistant message is
-// truncated.
+// truncated in the collapsed state.
 const assistantMessageTruncateFormat = "… (%d lines hidden) [click or space to expand]"
+
+// assistantMessageTailWindowFormat is shown above a tail-windowed thinking
+// block to advertise that earlier lines exist and that the user can
+// promote the view to a full expansion. The promotion is wired through
+// the existing ToggleExpanded path (click / space) — F5 deliberately
+// does not add a new keybinding.
+const assistantMessageTailWindowFormat = "… %d earlier lines hidden [click or space for full view]"
 
 // maxCollapsedThinkingHeight defines the maximum height of the thinking
 const maxCollapsedThinkingHeight = 10
+
+// maxExpandedThinkingTailLines is the F5 tail-window cap. When the user
+// expands a thinking block whose post-glamour line count exceeds this
+// threshold, only the last N lines are shown with an affordance line
+// indicating how many earlier lines are hidden. Clicking / pressing
+// space again promotes the view to a full expansion. The slice is
+// taken AFTER glamour render (not before) so fenced code blocks,
+// lists, and tables are not torn at arbitrary boundaries.
+const maxExpandedThinkingTailLines = 200
+
+// thinkingViewMode is the F5 three-state view machine for the thinking
+// block. ToggleExpanded cycles
+// collapsed → tail-window → full-expanded → collapsed, skipping the
+// tail-window step when the rendered thinking fits within the cap so
+// short blocks still toggle in two clicks.
+type thinkingViewMode uint8
+
+const (
+	thinkingCollapsed thinkingViewMode = iota
+	thinkingTailWindow
+	thinkingFullExpanded
+)
 
 // assistantSection is a per-section render cache for AssistantMessageItem.
 // Each section (thinking, content, error) carries its own keys so that
@@ -97,7 +126,7 @@ type AssistantMessageItem struct {
 	message           *message.Message
 	sty               *styles.Styles
 	anim              *anim.Anim
-	thinkingExpanded  bool
+	thinkingViewMode  thinkingViewMode
 	thinkingBoxHeight int // Tracks the rendered thinking box height for click detection.
 
 	// Per-section render caches. Splitting these out means content
@@ -304,9 +333,9 @@ func (a *AssistantMessageItem) renderMessageContent(width int) (string, int) {
 
 // thinkingKey returns the (srcHash, extra) cache key components for the
 // thinking section. extra folds in everything other than the raw
-// thinking text that affects the rendered output: the expanded flag
-// and the footer state (which depends on IsThinking, ToolCalls, and
-// ThinkingDuration).
+// thinking text that affects the rendered output: the view mode
+// (collapsed / tail-window / full) and the footer state (which
+// depends on IsThinking, ToolCalls, and ThinkingDuration).
 func (a *AssistantMessageItem) thinkingKey() (uint64, uint64) {
 	thinking := a.message.ReasoningContent().Thinking
 	srcHash := fnv64(thinking)
@@ -319,17 +348,15 @@ func (a *AssistantMessageItem) thinkingKey() (uint64, uint64) {
 			durationStr = duration.String()
 		}
 	}
-	var expanded byte
-	if a.thinkingExpanded {
-		expanded = 1
-	}
 	var footer byte
 	if showFooter {
 		footer = 1
 	}
 	// Length-prefixed framing avoids any delimiter collision between
-	// the flag bytes and the duration string.
-	extra := fnvFields([]byte{expanded, footer}, []byte(durationStr))
+	// the flag bytes and the duration string. The view mode is folded
+	// in so that toggling collapsed ↔ tail-window ↔ full invalidates
+	// only the thinking section, not content/error.
+	extra := fnvFields([]byte{byte(a.thinkingViewMode), footer}, []byte(durationStr))
 	return srcHash, extra
 }
 
@@ -394,6 +421,12 @@ func (a *AssistantMessageItem) cachedError(width int) string {
 }
 
 // renderThinking renders the thinking/reasoning content with footer.
+//
+// Slicing happens AFTER glamour rendering so fenced code blocks, list
+// continuations, and tables are not split mid-block — the same
+// boundary problem §4.4 of the design note flags. The bordered
+// ThinkingBox style is applied on top of the (already-windowed)
+// lines so the visual box matches what the user sees today.
 func (a *AssistantMessageItem) renderThinking(thinking string, width int) string {
 	renderer := common.QuietMarkdownRenderer(a.sty, width)
 	rendered, err := renderer.Render(thinking)
@@ -405,13 +438,23 @@ func (a *AssistantMessageItem) renderThinking(thinking string, width int) string
 	lines := strings.Split(rendered, "\n")
 	totalLines := len(lines)
 
-	isTruncated := totalLines > maxCollapsedThinkingHeight
-	if !a.thinkingExpanded && isTruncated {
-		lines = lines[totalLines-maxCollapsedThinkingHeight:]
-		hint := a.sty.Messages.ThinkingTruncationHint.Render(
-			fmt.Sprintf(assistantMessageTruncateFormat, totalLines-maxCollapsedThinkingHeight),
-		)
-		lines = append([]string{hint, ""}, lines...)
+	switch a.thinkingViewMode {
+	case thinkingCollapsed:
+		if totalLines > maxCollapsedThinkingHeight {
+			lines = lines[totalLines-maxCollapsedThinkingHeight:]
+			hint := a.sty.Messages.ThinkingTruncationHint.Render(
+				fmt.Sprintf(assistantMessageTruncateFormat, totalLines-maxCollapsedThinkingHeight),
+			)
+			lines = append([]string{hint, ""}, lines...)
+		}
+	case thinkingTailWindow:
+		if totalLines > maxExpandedThinkingTailLines {
+			lines = lines[totalLines-maxExpandedThinkingTailLines:]
+			hint := a.sty.Messages.ThinkingTruncationHint.Render(
+				fmt.Sprintf(assistantMessageTailWindowFormat, totalLines-maxExpandedThinkingTailLines),
+			)
+			lines = append([]string{hint, ""}, lines...)
+		}
 	}
 
 	thinkingStyle := a.sty.Messages.ThinkingBox.Width(width)
@@ -501,14 +544,58 @@ func (a *AssistantMessageItem) clearCache() {
 	a.errorSec.reset()
 }
 
-// ToggleExpanded toggles the expanded state of the thinking box and returns
-// whether the item is now expanded. Both the thinking section cache and
-// the F3 prefix cache key fold in thinkingExpanded (via the section's
-// extra hash and the prefix cache fingerprint respectively), so no
-// explicit invalidation is required.
+// ToggleExpanded advances the F5 thinking view-mode cycle and returns
+// whether the item is now in any expanded state (tail-window or full).
+// The cycle is collapsed → tail-window → full → collapsed, with the
+// tail-window step skipped when the rendered thinking fits within
+// maxExpandedThinkingTailLines so short blocks remain a two-click
+// toggle. Both the thinking section cache and the F3 prefix cache
+// fold thinkingViewMode into their keys, so no explicit invalidation
+// is required here.
+//
+// When the message carries no thinking text the toggle is a no-op:
+// there is nothing to expand, and mutating the view mode would
+// thrash the thinking-section cache key for no visible benefit.
 func (a *AssistantMessageItem) ToggleExpanded() bool {
-	a.thinkingExpanded = !a.thinkingExpanded
-	return a.thinkingExpanded
+	if strings.TrimSpace(a.message.ReasoningContent().Thinking) == "" {
+		return a.thinkingViewMode != thinkingCollapsed
+	}
+	switch a.thinkingViewMode {
+	case thinkingCollapsed:
+		if a.tailWindowWouldTruncate() {
+			a.thinkingViewMode = thinkingTailWindow
+		} else {
+			a.thinkingViewMode = thinkingFullExpanded
+		}
+	case thinkingTailWindow:
+		a.thinkingViewMode = thinkingFullExpanded
+	case thinkingFullExpanded:
+		a.thinkingViewMode = thinkingCollapsed
+	}
+	return a.thinkingViewMode != thinkingCollapsed
+}
+
+// tailWindowWouldTruncate reports whether the current thinking text
+// is long enough that the tail-window step is worth inserting into
+// the toggle cycle. We use a cheap source-text logical-line count
+// as the heuristic rather than peeking into the cache: the cache
+// may be populated in collapsed state (where its height is bounded
+// by maxCollapsedThinkingHeight and tells us nothing about the
+// underlying length), and re-running glamour just to count lines
+// would defeat the cache. The heuristic can over-trigger (a source
+// with many short lines may wrap to fewer than N lines), in which
+// case the tail-window render is visually identical to full and
+// the cycle costs the user one extra toggle — preferred over the
+// alternative of failing to show the affordance on a genuinely
+// long block.
+//
+// Logical line count is `1 + newlineCount` (a string with no
+// newlines is one line). Comparing newline count alone introduced
+// an off-by-one that let a source whose post-newline-split length
+// equalled the cap skip the tail-window step.
+func (a *AssistantMessageItem) tailWindowWouldTruncate() bool {
+	lineCount := 1 + strings.Count(a.message.ReasoningContent().Thinking, "\n")
+	return lineCount > maxExpandedThinkingTailLines
 }
 
 // HandleMouseClick implements MouseClickable. It signals (via a true return)

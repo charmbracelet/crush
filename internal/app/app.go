@@ -582,12 +582,22 @@ func (app *App) Shutdown() {
 		app.AgentCoordinator.CancelAll()
 	}
 
-	// Now run remaining cleanup tasks in parallel.
-	var wg sync.WaitGroup
-
 	// Shared shutdown context for all timeout-bounded cleanup.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
+	// Drain any debounced message updates before the DB-close cleanup
+	// runs in the parallel block below. message.Service buffers
+	// streaming deltas (see internal/message/message.go) and we must
+	// land them while the connection is still open.
+	if app.Messages != nil {
+		if err := app.Messages.FlushAll(shutdownCtx); err != nil {
+			slog.Error("Failed to flush pending message updates on shutdown", "error", err)
+		}
+	}
+
+	// Now run remaining cleanup tasks in parallel.
+	var wg sync.WaitGroup
 
 	// Send exit event
 	wg.Go(func() {

@@ -211,6 +211,46 @@ reviewed.
 
 Other options: `context_paths`, `progress`, `disable_notifications`, `disable_auto_summarize`, `disable_metrics`, `disable_provider_auto_update`, `disable_default_providers`, `data_directory`, `initialize_as`.
 
+## Snapshots
+
+Crush automatically snapshots the filesystem before each user message, enabling restore points.
+
+```json
+{
+  "snapshots": {
+    "enabled": true,
+    "exclude": ["node_modules", "**/node_modules", "vendor", ".venv", "dist", "build"]
+  }
+}
+```
+
+- `enabled` (default `true`): Toggle automatic snapshots.
+- `exclude`: Glob patterns to exclude from snapshots. Defaults include `node_modules`, `vendor`, `.venv`, `__pycache__`, `target`, `dist`, `build`, `.next`, `.cache`, etc.
+
+## Worktrees
+
+Crush can manage git worktrees for isolated work environments.
+
+```json
+{
+  "worktree": {
+    "enabled": true,
+    "post_create": [
+      {"if_exists": "bun.lockb", "run": "bun i"},
+      {"if_exists": "package-lock.json", "run": "npm ci"},
+      {"if_exists": "go.sum", "run": "go mod download"}
+    ]
+  }
+}
+```
+
+- `enabled` (default `true`): Toggle worktree management.
+- `post_create`: Commands to run after creating/restoring a worktree. Each entry has:
+  - `if_exists`: File to check for before running the command.
+  - `run`: Command to execute.
+
+Default `post_create` hooks handle common package managers: `bun i`, `pnpm i`, `yarn`, `npm ci`, `go mod download`, `cargo fetch`, `pip install -r requirements.txt`.
+
 ## Hooks
 
 Hooks are user-defined shell commands that fire on agent events. Currently only `PreToolUse` is supported, which runs before a tool is executed.
@@ -337,3 +377,5 @@ When multiple hooks match, their decisions are aggregated:
 - `CRUSH_GLOBAL_CONFIG` - Override global config location
 - `CRUSH_GLOBAL_DATA` - Override data directory location
 - `CRUSH_SKILLS_DIR` - Override default skills directory
+- `CRUSH_DISABLE_PROVIDER_AUTO_UPDATE` - Disable automatic provider updates
+- `CRUSH_DISABLE_DEFAULT_PROVIDERS` - Disable default provider configurations

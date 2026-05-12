@@ -83,6 +83,9 @@ internal/
   `HOOKS.md` for the user-facing protocol.
 - **CGO disabled**: builds with `CGO_ENABLED=0` and
   `GOEXPERIMENT=greenteagc`.
+- **Builtin skills**: `internal/skills/builtin/` contains skills like
+  `crush-config`, `crush-hooks`, and `jq`. When adding or changing config
+  options in `internal/config/`, update the `crush-config` skill to match.
 
 ## Build/Test/Lint Commands
 

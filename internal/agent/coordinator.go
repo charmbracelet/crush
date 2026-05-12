@@ -18,6 +18,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/agent/deepseek"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/prompt"
@@ -345,7 +346,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		if err == nil {
 			options[google.Name] = parsed
 		}
-	case openaicompat.Name, hyper.Name:
+	case openaicompat.Name, hyper.Name, deepseek.Name:
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
 		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
 			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
@@ -360,6 +361,12 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		switch providerCfg.ID {
 		case hyper.Name:
 			extraBody["thinking"] = model.ModelCfg.Think
+		case deepseek.Name:
+			if model.ModelCfg.ReasoningEffort != "" {
+				extraBody["thinking"] = map[string]any{
+					"type": "enabled",
+				}
+			}
 		case string(catwalk.InferenceProviderIoNet):
 			extraBody["chat_template_kwargs"] = map[string]any{
 				"thinking": model.ModelCfg.Think,
@@ -861,11 +868,17 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		return c.buildGoogleProvider(baseURL, apiKey, headers)
 	case "google-vertex":
 		return c.buildGoogleVertexProvider(headers, providerCfg.ExtraParams)
-	case openaicompat.Name, hyper.Name:
+	case openaicompat.Name, hyper.Name, deepseek.Name:
 		switch providerCfg.ID {
 		case hyper.Name:
 			baseURL = hyper.BaseURL() + "/v1"
 			headers["x-crush-id"] = event.GetID()
+		case deepseek.Name:
+			baseURL = deepseek.BaseURL() + "/v1"
+			if providerCfg.ExtraBody == nil {
+				providerCfg.ExtraBody = map[string]any{}
+			}
+			providerCfg.ExtraBody["tool_stream"] = true
 		case string(catwalk.InferenceProviderZAI):
 			if providerCfg.ExtraBody == nil {
 				providerCfg.ExtraBody = map[string]any{}
@@ -882,6 +895,8 @@ func isExactoSupported(modelID string) bool {
 	supportedModels := []string{
 		"moonshotai/kimi-k2-0905",
 		"deepseek/deepseek-v3.1-terminus",
+		"deepseek/deepseek-v4-flash",
+		"deepseek/deepseek-v4-pro",
 		"z-ai/glm-4.6",
 		"openai/gpt-oss-120b",
 		"qwen/qwen3-coder",

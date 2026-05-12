@@ -34,6 +34,12 @@ crush update-providers --source=hyper
 
 # Update Hyper from a custom URL
 crush update-providers --source=hyper https://hyper.example.com
+
+# Update DeepSeek provider information
+crush update-providers --source=deepseek
+
+# Update DeepSeek from a local file
+crush update-providers --source=deepseek /path/to/deepseek.json
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// NOTE(@andreynering): We want to skip logging output do stdout here.
@@ -50,8 +56,10 @@ crush update-providers --source=hyper https://hyper.example.com
 			err = config.UpdateProviders(pathOrURL)
 		case "hyper":
 			err = config.UpdateHyper(pathOrURL)
+		case "deepseek":
+			err = config.UpdateDeepSeek(pathOrURL)
 		default:
-			return fmt.Errorf("invalid source %q, must be 'catwalk' or 'hyper'", updateProvidersSource)
+			return fmt.Errorf("invalid source %q, must be 'catwalk', 'hyper', or 'deepseek'", updateProvidersSource)
 		}
 
 		if err != nil {
@@ -78,5 +86,5 @@ crush update-providers --source=hyper https://hyper.example.com
 }
 
 func init() {
-	updateProvidersCmd.Flags().StringVar(&updateProvidersSource, "source", "catwalk", "Provider source to update (catwalk or hyper)")
+	updateProvidersCmd.Flags().StringVar(&updateProvidersSource, "source", "catwalk", "Provider source to update (catwalk, hyper, or deepseek)")
 }

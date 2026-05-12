@@ -768,6 +768,11 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 		}
 
 		headers["Authorization"] = "Bearer " + apiKey
+	case "deepseek":
+		baseURL, _ := resolver.ResolveValue(c.BaseURL)
+		baseURL = cmp.Or(baseURL, "https://api.deepseek.com")
+		testURL = baseURL + "/models"
+		headers["Authorization"] = "Bearer " + apiKey
 	case catwalk.TypeAnthropic:
 		baseURL, _ := resolver.ResolveValue(c.BaseURL)
 		baseURL = cmp.Or(baseURL, "https://api.anthropic.com/v1")

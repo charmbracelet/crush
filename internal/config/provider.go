@@ -17,6 +17,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/catwalk/pkg/embedded"
+	"github.com/charmbracelet/crush/internal/agent/deepseek"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/home"
@@ -122,6 +123,32 @@ func UpdateHyper(pathOrURL string) error {
 	return nil
 }
 
+// UpdateDeepSeek updates the DeepSeek provider information from a specified file.
+func UpdateDeepSeek(pathOrURL string) error {
+	var provider catwalk.Provider
+	pathOrURL = cmp.Or(pathOrURL, "embedded")
+
+	switch {
+	case pathOrURL == "embedded":
+		provider = deepseek.Embedded()
+	default:
+		content, err := os.ReadFile(pathOrURL)
+		if err != nil {
+			return fmt.Errorf("failed to read file: %w", err)
+		}
+		if err := json.Unmarshal(content, &provider); err != nil {
+			return fmt.Errorf("failed to unmarshal provider data: %w", err)
+		}
+	}
+
+	if err := newCache[catwalk.Provider](cachePathFor("deepseek")).Store(provider); err != nil {
+		return fmt.Errorf("failed to save DeepSeek provider to cache: %w", err)
+	}
+
+	slog.Info("DeepSeek provider updated successfully", "from", pathOrURL, "to", cachePathFor("deepseek"))
+	return nil
+}
+
 var (
 	catwalkSyncer = &catwalkSync{}
 	hyperSyncer   = &hyperSync{}
@@ -178,6 +205,13 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 				return
 			}
 			providers.Append(item)
+		})
+
+		wg.Go(func() {
+			if customProvidersOnly {
+				return
+			}
+			providers.Append(deepseek.Embedded())
 		})
 
 		wg.Wait()

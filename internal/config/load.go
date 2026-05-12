@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
+	"github.com/charmbracelet/crush/internal/agent/deepseek"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
@@ -329,6 +330,21 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 					continue
 				}
 			}
+		case catwalk.InferenceProvider("deepseek"):
+			if apiKey := env.Get("DEEPSEEK_API_KEY"); apiKey != "" {
+				prepared.APIKey = apiKey
+				prepared.APIKeyTemplate = apiKey
+			} else {
+				v, err := resolver.ResolveValue(p.APIKey)
+				if v == "" || err != nil {
+					slog.Debug("DeepSeek provider requires DEEPSEEK_API_KEY", "provider", p.ID)
+					if configExists {
+						slog.Warn("Skipping DeepSeek provider due to missing API key", "provider", p.ID)
+						c.Providers.Del(string(p.ID))
+					}
+					continue
+				}
+			}
 		default:
 			// if the provider api or endpoint are missing we skip them
 			v, err := resolver.ResolveValue(p.APIKey)
@@ -354,7 +370,7 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 		providerConfig.Name = cmp.Or(providerConfig.Name, id) // Use ID as name if not set
 		// default to OpenAI if not set
 		providerConfig.Type = cmp.Or(providerConfig.Type, catwalk.TypeOpenAICompat)
-		if !slices.Contains(catwalk.KnownProviderTypes(), providerConfig.Type) && providerConfig.Type != hyper.Name {
+		if !slices.Contains(catwalk.KnownProviderTypes(), providerConfig.Type) && providerConfig.Type != hyper.Name && providerConfig.Type != deepseek.Name {
 			slog.Warn("Skipping custom provider due to unsupported provider type", "provider", id)
 			c.Providers.Del(id)
 			continue

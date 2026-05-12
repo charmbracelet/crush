@@ -23,6 +23,9 @@ type CreateMessageParams struct {
 type Service interface {
 	pubsub.Subscriber[Message]
 	Create(ctx context.Context, sessionID string, params CreateMessageParams) (Message, error)
+	// CreateSilent creates a message without publishing a pubsub event.
+	// Use for bulk operations like fork where UI will reload messages from DB.
+	CreateSilent(ctx context.Context, sessionID string, params CreateMessageParams) (Message, error)
 	Update(ctx context.Context, message Message) error
 	Get(ctx context.Context, id string) (Message, error)
 	List(ctx context.Context, sessionID string) ([]Message, error)
@@ -60,6 +63,21 @@ func (s *service) Delete(ctx context.Context, id string) error {
 }
 
 func (s *service) Create(ctx context.Context, sessionID string, params CreateMessageParams) (Message, error) {
+	message, err := s.createMessage(ctx, sessionID, params)
+	if err != nil {
+		return Message{}, err
+	}
+	// Clone the message before publishing to avoid race conditions with
+	// concurrent modifications to the Parts slice.
+	s.Publish(pubsub.CreatedEvent, message.Clone())
+	return message, nil
+}
+
+func (s *service) CreateSilent(ctx context.Context, sessionID string, params CreateMessageParams) (Message, error) {
+	return s.createMessage(ctx, sessionID, params)
+}
+
+func (s *service) createMessage(ctx context.Context, sessionID string, params CreateMessageParams) (Message, error) {
 	if params.Role != Assistant {
 		params.Parts = append(params.Parts, Finish{
 			Reason: "stop",
@@ -85,14 +103,7 @@ func (s *service) Create(ctx context.Context, sessionID string, params CreateMes
 	if err != nil {
 		return Message{}, err
 	}
-	message, err := s.fromDBItem(dbMessage)
-	if err != nil {
-		return Message{}, err
-	}
-	// Clone the message before publishing to avoid race conditions with
-	// concurrent modifications to the Parts slice.
-	s.Publish(pubsub.CreatedEvent, message.Clone())
-	return message, nil
+	return s.fromDBItem(dbMessage)
 }
 
 func (s *service) DeleteSessionMessages(ctx context.Context, sessionID string) error {

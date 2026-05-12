@@ -240,7 +240,9 @@ func (s *service) copyMessagesUpTo(ctx context.Context, sourceSessionID, targetS
 
 	for _, msg := range msgs {
 		// Create a copy of the message in the new session, preserving all fields.
-		newMsg, err := s.messages.Create(ctx, targetSessionID, message.CreateMessageParams{
+		// Use CreateSilent to avoid publishing events - the UI will reload
+		// messages from DB when loading the forked session.
+		newMsg, err := s.messages.CreateSilent(ctx, targetSessionID, message.CreateMessageParams{
 			Role:             msg.Role,
 			Parts:            msg.Parts,
 			Model:            msg.Model,

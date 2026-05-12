@@ -37,6 +37,98 @@ func TestConfig_LoadFromBytes(t *testing.T) {
 	require.Equal(t, "https://api.openai.com/v2", pc.BaseURL)
 }
 
+func TestLookupConfigs_BoundedByProject(t *testing.T) {
+	// Force GlobalConfig and GlobalConfigData to point at locations we
+	// control so they can be present in the result without polluting
+	// the developer's real config.
+	globalDir := t.TempDir()
+	t.Setenv("CRUSH_GLOBAL_CONFIG", globalDir)
+	t.Setenv("CRUSH_GLOBAL_DATA", globalDir)
+
+	t.Run("does not pick up crush.json above non-git project", func(t *testing.T) {
+		parent := t.TempDir()
+
+		// crush.json above the project must not be adopted.
+		require.NoError(t, os.WriteFile(
+			filepath.Join(parent, "crush.json"),
+			[]byte(`{}`),
+			0o644,
+		))
+
+		project := filepath.Join(parent, "project")
+		require.NoError(t, os.Mkdir(project, 0o755))
+
+		got := lookupConfigs(project)
+		for _, p := range got {
+			require.NotEqual(t, filepath.Join(parent, "crush.json"), p)
+		}
+	})
+
+	t.Run("does not climb out of git worktree to find crush.json", func(t *testing.T) {
+		if _, err := exec.LookPath("git"); err != nil {
+			t.Skip("git not available")
+		}
+
+		parent := t.TempDir()
+
+		require.NoError(t, os.WriteFile(
+			filepath.Join(parent, "crush.json"),
+			[]byte(`{}`),
+			0o644,
+		))
+
+		worktree := filepath.Join(parent, "worktree")
+		require.NoError(t, os.Mkdir(worktree, 0o755))
+		gitInit := exec.CommandContext(t.Context(), "git", "init", "-q")
+		gitInit.Dir = worktree
+		require.NoError(t, gitInit.Run())
+
+		got := lookupConfigs(worktree)
+		strayEval, err := filepath.EvalSymlinks(filepath.Join(parent, "crush.json"))
+		require.NoError(t, err)
+		for _, p := range got {
+			pEval, err := filepath.EvalSymlinks(p)
+			if err != nil {
+				continue
+			}
+			require.NotEqual(t, strayEval, pEval, "must not adopt parent crush.json")
+		}
+	})
+
+	t.Run("picks up crush.json inside the project", func(t *testing.T) {
+		project := t.TempDir()
+		local := filepath.Join(project, "crush.json")
+		require.NoError(t, os.WriteFile(local, []byte(`{}`), 0o644))
+
+		got := lookupConfigs(project)
+
+		localEval, err := filepath.EvalSymlinks(local)
+		require.NoError(t, err)
+		var foundLocal bool
+		for _, p := range got {
+			pEval, err := filepath.EvalSymlinks(p)
+			if err != nil {
+				continue
+			}
+			if pEval == localEval {
+				foundLocal = true
+				break
+			}
+		}
+		require.True(t, foundLocal, "expected project crush.json to be in lookup result: %v", got)
+	})
+
+	t.Run("global config is always included regardless of boundary", func(t *testing.T) {
+		project := t.TempDir()
+
+		got := lookupConfigs(project)
+		// Global config and global data path are always prepended,
+		// even when no project file exists.
+		require.Contains(t, got, GlobalConfig())
+		require.Contains(t, got, GlobalConfigData())
+	})
+}
+
 func TestLoadFromConfigPaths_InvalidJSON(t *testing.T) {
 	t.Parallel()
 

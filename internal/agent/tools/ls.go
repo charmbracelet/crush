@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"html/template"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,13 +53,28 @@ const (
 	maxLSFiles = 1000
 )
 
-//go:embed ls.md
-var lsDescription string
+//go:embed ls.md.tpl
+var lsDescriptionTmpl []byte
+
+var lsDescriptionTpl = template.Must(
+	template.New("lsDescription").
+		Parse(string(lsDescriptionTmpl)),
+)
+
+type lsDescriptionData struct {
+	MaxFiles int
+}
+
+func lsDescription() string {
+	return renderTemplate(lsDescriptionTpl, lsDescriptionData{
+		MaxFiles: maxLSFiles,
+	})
+}
 
 func NewLsTool(permissions permission.Service, workingDir string, lsConfig config.ToolLs) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		LSToolName,
-		lsDescription,
+		lsDescription(),
 		func(ctx context.Context, params LSParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			searchPath, err := fsext.Expand(cmp.Or(params.Path, workingDir))
 			if err != nil {

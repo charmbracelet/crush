@@ -8,6 +8,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"io"
 	"net/http"
 	"os"
@@ -89,8 +90,23 @@ const (
 	maxGrepContentWidth = 500
 )
 
-//go:embed grep.md
-var grepDescription string
+//go:embed grep.md.tpl
+var grepDescriptionTmpl []byte
+
+var grepDescriptionTpl = template.Must(
+	template.New("grepDescription").
+		Parse(string(grepDescriptionTmpl)),
+)
+
+type grepDescriptionData struct {
+	MaxResults int
+}
+
+func grepDescription() string {
+	return renderTemplate(grepDescriptionTpl, grepDescriptionData{
+		MaxResults: 100,
+	})
+}
 
 // escapeRegexPattern escapes special regex characters so they're treated as literal characters
 func escapeRegexPattern(pattern string) string {
@@ -107,7 +123,7 @@ func escapeRegexPattern(pattern string) string {
 func NewGrepTool(workingDir string, config config.ToolGrep) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		GrepToolName,
-		grepDescription,
+		grepDescription(),
 		func(ctx context.Context, params GrepParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Pattern == "" {
 				return fantasy.NewTextErrorResponse("pattern is required"), nil

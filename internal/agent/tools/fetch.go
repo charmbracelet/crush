@@ -30,6 +30,18 @@ var fetchDescriptionTpl = template.Must(
 		Parse(string(fetchDescriptionTmpl)),
 )
 
+type fetchDescriptionData struct {
+	GhAvailable    bool
+	MaxFetchSizeKB int
+}
+
+func fetchDescription() string {
+	return renderTemplate(fetchDescriptionTpl, fetchDescriptionData{
+		GhAvailable:    ghAvailable,
+		MaxFetchSizeKB: MaxFetchSize / 1024,
+	})
+}
+
 func NewFetchTool(permissions permission.Service, workingDir string, client *http.Client) fantasy.AgentTool {
 	if client == nil {
 		transport := http.DefaultTransport.(*http.Transport).Clone()
@@ -45,7 +57,7 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 
 	return fantasy.NewParallelAgentTool(
 		FetchToolName,
-		renderToolDescription(fetchDescriptionTpl),
+		fetchDescription(),
 		func(ctx context.Context, params FetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.URL == "" {
 				return fantasy.NewTextErrorResponse("URL parameter is required"), nil

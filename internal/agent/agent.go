@@ -245,6 +245,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	defer cancel()
 	defer a.activeRequests.Del(call.SessionID)
+	// Drain any debounced message updates before returning. message.Service
+	// already flushes synchronously on terminal updates, but a defer here
+	// guarantees the contract at every Run exit (success, error, panic
+	// recovery upstream) without callers needing to know.
+	defer func() {
+		if flushErr := a.messages.FlushAll(ctx); flushErr != nil {
+			slog.Error("Failed to flush pending message updates after run", "error", flushErr)
+		}
+	}()
 
 	history, files := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages, call.Attachments...)
 
@@ -653,6 +662,11 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	a.activeRequests.Set(sessionID, cancel)
 	defer a.activeRequests.Del(sessionID)
 	defer cancel()
+	defer func() {
+		if flushErr := a.messages.FlushAll(ctx); flushErr != nil {
+			slog.Error("Failed to flush pending message updates after summarize", "error", flushErr)
+		}
+	}()
 
 	agent := fantasy.NewAgent(largeModel.Model,
 		fantasy.WithSystemPrompt(string(summaryPrompt)),

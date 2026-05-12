@@ -499,10 +499,7 @@ func (s *service) GC(ctx context.Context) (int64, error) {
 		return 0, fmt.Errorf("get stats after GC: %w", err)
 	}
 
-	freed := statsBefore.DiskUsage - statsAfter.DiskUsage
-	if freed < 0 {
-		freed = 0
-	}
+	freed := max(0, statsBefore.DiskUsage-statsAfter.DiskUsage)
 	return freed, nil
 }
 

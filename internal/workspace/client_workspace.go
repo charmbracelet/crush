@@ -708,6 +708,19 @@ func (w *ClientWorkspace) Subscribe(program *tea.Program) {
 		return
 	}
 
+	// Send synthetic state-changed events to trigger UI refresh now that
+	// subscription is established. This ensures the UI gets fresh MCP/LSP
+	// states even if the actual state-change events were published before
+	// this subscription connected.
+	program.Send(pubsub.Event[mcp.Event]{
+		Type:    pubsub.UpdatedEvent,
+		Payload: mcp.Event{Type: mcp.EventStateChanged},
+	})
+	program.Send(pubsub.Event[LSPEvent]{
+		Type:    pubsub.UpdatedEvent,
+		Payload: LSPEvent{Type: LSPEventStateChanged},
+	})
+
 	for ev := range evc {
 		translated := translateEvent(ev)
 		if translated != nil {

@@ -7,6 +7,8 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
+	"charm.land/fantasy/providers/anthropic"
+	"charm.land/fantasy/providers/bedrock"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -382,4 +384,37 @@ func TestUpdateParentSessionCost(t *testing.T) {
 		require.NoError(t, err)
 		assert.InDelta(t, 0.0, updated.Cost, 1e-9)
 	})
+}
+
+func TestGetProviderOptionsReasoningEffort(t *testing.T) {
+	// Bedrock is Fantasy's Anthropic under a different provider name; options
+	// must land under anthropic.Name so the Anthropic language model picks them up.
+	tests := []struct {
+		name         string
+		providerType catwalk.Type
+	}{
+		{"anthropic honors reasoning_effort", catwalk.Type(anthropic.Name)},
+		{"bedrock honors reasoning_effort", catwalk.Type(bedrock.Name)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			model := Model{
+				CatwalkCfg: catwalk.Model{ID: "claude-opus-4-7"},
+				ModelCfg: config.SelectedModel{
+					Provider:        "test",
+					ReasoningEffort: "max",
+				},
+			}
+			providerCfg := config.ProviderConfig{ID: "test", Type: tc.providerType}
+
+			opts := getProviderOptions(model, providerCfg)
+
+			raw, ok := opts[anthropic.Name]
+			require.True(t, ok, "options should be keyed under anthropic.Name for type %q", tc.providerType)
+			parsed, ok := raw.(*anthropic.ProviderOptions)
+			require.True(t, ok)
+			require.NotNil(t, parsed.Effort)
+			assert.Equal(t, anthropic.Effort("max"), *parsed.Effort)
+		})
+	}
 }

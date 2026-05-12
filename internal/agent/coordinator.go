@@ -1234,7 +1234,6 @@ func (c *coordinator) isUnauthorized(err error) bool {
 	// chain before any Bedrock request is made, so they never become a
 	// ProviderError. Match on the error message instead.
 	msg := err.Error()
-	slog.Debug("Checking if error is unauthorized", "error", msg)
 	return strings.Contains(msg, "GetRoleCredentials") ||
 		strings.Contains(msg, "cached credentials") ||
 		strings.Contains(msg, "ForbiddenException") ||

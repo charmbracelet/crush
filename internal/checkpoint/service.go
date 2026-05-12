@@ -166,7 +166,7 @@ func (s *service) CreateSnapshot(ctx context.Context, sessionID, messageID, desc
 	var parentSnapshotID string
 	snapshots, err := s.ListSnapshots(ctx, sessionID)
 	if err == nil && len(snapshots) > 0 {
-		parentSnapshotID = snapshots[len(snapshots)-1].ID
+		parentSnapshotID = snapshots[0].ID
 	}
 
 	// Create git snapshot.
@@ -320,7 +320,7 @@ func (s *service) GetSnapshotTree(ctx context.Context, sessionID string) (*Snaps
 
 	// Current is the most recent snapshot.
 	if len(snapshots) > 0 {
-		tree.Current = snapshots[len(snapshots)-1].ID
+		tree.Current = snapshots[0].ID
 	}
 
 	return tree, nil

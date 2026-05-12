@@ -156,7 +156,7 @@ const listSnapshots = `-- name: ListSnapshots :many
 SELECT id, session_id, message_id, parent_snapshot_id, git_commit_hash, description, created_at
 FROM snapshots
 WHERE session_id = ?
-ORDER BY created_at ASC
+ORDER BY created_at DESC
 `
 
 func (q *Queries) ListSnapshots(ctx context.Context, sessionID string) ([]Snapshot, error) {

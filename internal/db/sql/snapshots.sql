@@ -31,7 +31,7 @@ WHERE message_id = ? LIMIT 1;
 SELECT *
 FROM snapshots
 WHERE session_id = ?
-ORDER BY created_at ASC;
+ORDER BY created_at DESC;
 
 -- name: ListAllSnapshots :many
 SELECT *

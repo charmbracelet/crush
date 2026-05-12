@@ -185,6 +185,23 @@ func (c *Client) ListWorktrees(ctx context.Context, workspaceID, sessionID strin
 	return worktrees, nil
 }
 
+// ListAllWorktrees returns all worktrees for a workspace.
+func (c *Client) ListAllWorktrees(ctx context.Context, workspaceID string) ([]*worktree.Worktree, error) {
+	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/worktrees", workspaceID), nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list all worktrees: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to list all worktrees: status code %d", rsp.StatusCode)
+	}
+	var worktrees []*worktree.Worktree
+	if err := json.NewDecoder(rsp.Body).Decode(&worktrees); err != nil {
+		return nil, fmt.Errorf("failed to decode worktrees: %w", err)
+	}
+	return worktrees, nil
+}
+
 // GetWorktree retrieves a worktree by ID.
 func (c *Client) GetWorktree(ctx context.Context, workspaceID, worktreeID string) (*worktree.Worktree, error) {
 	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/worktrees/%s", workspaceID, worktreeID), nil, nil)

@@ -646,6 +646,10 @@ func (w *ClientWorkspace) ListWorktrees(ctx context.Context, sessionID string) (
 	return w.client.ListWorktrees(ctx, w.workspaceID(), sessionID)
 }
 
+func (w *ClientWorkspace) ListAllWorktrees(ctx context.Context) ([]*worktree.Worktree, error) {
+	return w.client.ListAllWorktrees(ctx, w.workspaceID())
+}
+
 func (w *ClientWorkspace) GetWorktree(ctx context.Context, worktreeID string) (*worktree.Worktree, error) {
 	return w.client.GetWorktree(ctx, w.workspaceID(), worktreeID)
 }

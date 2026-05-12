@@ -217,6 +217,26 @@ func (c *controllerV1) handleGetWorkspaceWorktrees(w http.ResponseWriter, r *htt
 	jsonEncode(w, worktrees)
 }
 
+// handleGetAllWorkspaceWorktrees lists all worktrees for a workspace.
+//
+//	@Summary		List all worktrees
+//	@Tags			worktrees
+//	@Produce		json
+//	@Param			id	path		string	true	"Workspace ID"
+//	@Success		200	{array}		object
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/worktrees [get]
+func (c *controllerV1) handleGetAllWorkspaceWorktrees(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	worktrees, err := c.backend.ListAllWorktrees(r.Context(), id)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, worktrees)
+}
+
 // handleGetWorkspaceWorktree retrieves a specific worktree.
 //
 //	@Summary		Get worktree

@@ -31,6 +31,18 @@ func (b *Backend) ListWorktrees(ctx context.Context, workspaceID, sessionID stri
 	return ws.Worktrees.List(ctx, sessionID)
 }
 
+// ListAllWorktrees returns all worktrees for a workspace.
+func (b *Backend) ListAllWorktrees(ctx context.Context, workspaceID string) ([]*worktree.Worktree, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if ws.Worktrees == nil || !ws.Worktrees.IsEnabled() {
+		return nil, ErrWorktreesDisabled
+	}
+	return ws.Worktrees.ListAll(ctx)
+}
+
 // GetWorktree retrieves a worktree by ID.
 func (b *Backend) GetWorktree(ctx context.Context, workspaceID, worktreeID string) (*worktree.Worktree, error) {
 	ws, err := b.GetWorkspace(workspaceID)

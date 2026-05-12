@@ -175,6 +175,7 @@ func NewServer(cfg *config.ConfigStore, network, address string) *Server {
 	mux.HandleFunc("POST /v1/workspaces/{id}/snapshots/{snapid}/restore", c.handlePostWorkspaceSnapshotRestore)
 	mux.HandleFunc("GET /v1/workspaces/{id}/snapshots/{snapid}/diff", c.handleGetWorkspaceSnapshotDiff)
 	mux.HandleFunc("GET /v1/workspaces/{id}/worktrees/enabled", c.handleGetWorkspaceWorktreesEnabled)
+	mux.HandleFunc("GET /v1/workspaces/{id}/worktrees", c.handleGetAllWorkspaceWorktrees)
 	mux.HandleFunc("GET /v1/workspaces/{id}/sessions/{sid}/worktrees", c.handleGetWorkspaceWorktrees)
 	mux.HandleFunc("GET /v1/workspaces/{id}/worktrees/{wtid}", c.handleGetWorkspaceWorktree)
 	mux.HandleFunc("GET /v1/workspaces/{id}/sessions/{sid}/worktrees/active", c.handleGetWorkspaceActiveWorktree)

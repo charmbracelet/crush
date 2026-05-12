@@ -162,6 +162,7 @@ type Workspace interface {
 	// Worktrees
 	WorktreesEnabled() bool
 	ListWorktrees(ctx context.Context, sessionID string) ([]*worktree.Worktree, error)
+	ListAllWorktrees(ctx context.Context) ([]*worktree.Worktree, error)
 	GetWorktree(ctx context.Context, worktreeID string) (*worktree.Worktree, error)
 	GetActiveWorktree(ctx context.Context, sessionID string) (*worktree.Worktree, error)
 	CreateWorktree(ctx context.Context, sessionID, name, fromSnapshotID string) (*worktree.Worktree, error)

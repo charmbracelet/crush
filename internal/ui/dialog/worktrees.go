@@ -11,9 +11,9 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/worktree"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/dustin/go-humanize"
 	"github.com/sahilm/fuzzy"
-	uv "github.com/charmbracelet/ultraviolet"
 )
 
 // WorktreesID is the identifier for the worktrees dialog.
@@ -46,8 +46,8 @@ func NewWorktrees(com *common.Common, sessionID string) (*Worktrees, error) {
 		sessionID: sessionID,
 	}
 
-	// List all worktrees (pass empty string to get all, not just for this session).
-	worktrees, err := com.Workspace.ListWorktrees(context.TODO(), "")
+	// List all worktrees for this workspace.
+	worktrees, err := com.Workspace.ListAllWorktrees(context.TODO())
 	if err != nil {
 		return nil, err
 	}

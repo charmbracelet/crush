@@ -9,6 +9,7 @@ import (
 )
 
 type Querier interface {
+	ArchiveSession(ctx context.Context, id string) error
 	CreateFile(ctx context.Context, arg CreateFileParams) (File, error)
 	CreateMessage(ctx context.Context, arg CreateMessageParams) (Message, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
@@ -47,6 +48,7 @@ type Querier interface {
 	ListAllSnapshots(ctx context.Context) ([]Snapshot, error)
 	ListAllUserMessages(ctx context.Context) ([]Message, error)
 	ListAllWorktrees(ctx context.Context) ([]Worktree, error)
+	ListArchivedSessions(ctx context.Context) ([]Session, error)
 	ListFilesByPath(ctx context.Context, path string) ([]File, error)
 	ListFilesBySession(ctx context.Context, sessionID string) ([]File, error)
 	ListLatestSessionFiles(ctx context.Context, sessionID string) ([]File, error)
@@ -60,6 +62,7 @@ type Querier interface {
 	RecordFileRead(ctx context.Context, arg RecordFileReadParams) error
 	RenameSession(ctx context.Context, arg RenameSessionParams) error
 	SetWorktreeActive(ctx context.Context, arg SetWorktreeActiveParams) error
+	UnarchiveSession(ctx context.Context, id string) error
 	UpdateMessage(ctx context.Context, arg UpdateMessageParams) error
 	UpdateSession(ctx context.Context, arg UpdateSessionParams) (Session, error)
 	UpdateSessionForkedFrom(ctx context.Context, arg UpdateSessionForkedFromParams) error

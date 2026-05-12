@@ -24,6 +24,9 @@ func New(db DBTX) *Queries {
 func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	q := Queries{db: db}
 	var err error
+	if q.archiveSessionStmt, err = db.PrepareContext(ctx, archiveSession); err != nil {
+		return nil, fmt.Errorf("error preparing query ArchiveSession: %w", err)
+	}
 	if q.createFileStmt, err = db.PrepareContext(ctx, createFile); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateFile: %w", err)
 	}
@@ -138,6 +141,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listAllWorktreesStmt, err = db.PrepareContext(ctx, listAllWorktrees); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAllWorktrees: %w", err)
 	}
+	if q.listArchivedSessionsStmt, err = db.PrepareContext(ctx, listArchivedSessions); err != nil {
+		return nil, fmt.Errorf("error preparing query ListArchivedSessions: %w", err)
+	}
 	if q.listFilesByPathStmt, err = db.PrepareContext(ctx, listFilesByPath); err != nil {
 		return nil, fmt.Errorf("error preparing query ListFilesByPath: %w", err)
 	}
@@ -177,6 +183,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.setWorktreeActiveStmt, err = db.PrepareContext(ctx, setWorktreeActive); err != nil {
 		return nil, fmt.Errorf("error preparing query SetWorktreeActive: %w", err)
 	}
+	if q.unarchiveSessionStmt, err = db.PrepareContext(ctx, unarchiveSession); err != nil {
+		return nil, fmt.Errorf("error preparing query UnarchiveSession: %w", err)
+	}
 	if q.updateMessageStmt, err = db.PrepareContext(ctx, updateMessage); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateMessage: %w", err)
 	}
@@ -197,6 +206,11 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 
 func (q *Queries) Close() error {
 	var err error
+	if q.archiveSessionStmt != nil {
+		if cerr := q.archiveSessionStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing archiveSessionStmt: %w", cerr)
+		}
+	}
 	if q.createFileStmt != nil {
 		if cerr := q.createFileStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing createFileStmt: %w", cerr)
@@ -387,6 +401,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listAllWorktreesStmt: %w", cerr)
 		}
 	}
+	if q.listArchivedSessionsStmt != nil {
+		if cerr := q.listArchivedSessionsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listArchivedSessionsStmt: %w", cerr)
+		}
+	}
 	if q.listFilesByPathStmt != nil {
 		if cerr := q.listFilesByPathStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listFilesByPathStmt: %w", cerr)
@@ -450,6 +469,11 @@ func (q *Queries) Close() error {
 	if q.setWorktreeActiveStmt != nil {
 		if cerr := q.setWorktreeActiveStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing setWorktreeActiveStmt: %w", cerr)
+		}
+	}
+	if q.unarchiveSessionStmt != nil {
+		if cerr := q.unarchiveSessionStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing unarchiveSessionStmt: %w", cerr)
 		}
 	}
 	if q.updateMessageStmt != nil {
@@ -516,6 +540,7 @@ func (q *Queries) queryRow(ctx context.Context, stmt *sql.Stmt, query string, ar
 type Queries struct {
 	db                             DBTX
 	tx                             *sql.Tx
+	archiveSessionStmt             *sql.Stmt
 	createFileStmt                 *sql.Stmt
 	createMessageStmt              *sql.Stmt
 	createSessionStmt              *sql.Stmt
@@ -554,6 +579,7 @@ type Queries struct {
 	listAllSnapshotsStmt           *sql.Stmt
 	listAllUserMessagesStmt        *sql.Stmt
 	listAllWorktreesStmt           *sql.Stmt
+	listArchivedSessionsStmt       *sql.Stmt
 	listFilesByPathStmt            *sql.Stmt
 	listFilesBySessionStmt         *sql.Stmt
 	listLatestSessionFilesStmt     *sql.Stmt
@@ -567,6 +593,7 @@ type Queries struct {
 	recordFileReadStmt             *sql.Stmt
 	renameSessionStmt              *sql.Stmt
 	setWorktreeActiveStmt          *sql.Stmt
+	unarchiveSessionStmt           *sql.Stmt
 	updateMessageStmt              *sql.Stmt
 	updateSessionStmt              *sql.Stmt
 	updateSessionForkedFromStmt    *sql.Stmt
@@ -578,6 +605,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 	return &Queries{
 		db:                             tx,
 		tx:                             tx,
+		archiveSessionStmt:             q.archiveSessionStmt,
 		createFileStmt:                 q.createFileStmt,
 		createMessageStmt:              q.createMessageStmt,
 		createSessionStmt:              q.createSessionStmt,
@@ -616,6 +644,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listAllSnapshotsStmt:           q.listAllSnapshotsStmt,
 		listAllUserMessagesStmt:        q.listAllUserMessagesStmt,
 		listAllWorktreesStmt:           q.listAllWorktreesStmt,
+		listArchivedSessionsStmt:       q.listArchivedSessionsStmt,
 		listFilesByPathStmt:            q.listFilesByPathStmt,
 		listFilesBySessionStmt:         q.listFilesBySessionStmt,
 		listLatestSessionFilesStmt:     q.listLatestSessionFilesStmt,
@@ -629,6 +658,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		recordFileReadStmt:             q.recordFileReadStmt,
 		renameSessionStmt:              q.renameSessionStmt,
 		setWorktreeActiveStmt:          q.setWorktreeActiveStmt,
+		unarchiveSessionStmt:           q.unarchiveSessionStmt,
 		updateMessageStmt:              q.updateMessageStmt,
 		updateSessionStmt:              q.updateSessionStmt,
 		updateSessionForkedFromStmt:    q.updateSessionForkedFromStmt,

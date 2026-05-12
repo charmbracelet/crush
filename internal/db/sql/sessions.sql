@@ -38,7 +38,15 @@ LIMIT 1;
 SELECT *
 FROM sessions
 WHERE parent_session_id is NULL
+  AND archived_at IS NULL
 ORDER BY updated_at DESC;
+
+-- name: ListArchivedSessions :many
+SELECT *
+FROM sessions
+WHERE parent_session_id is NULL
+  AND archived_at IS NOT NULL
+ORDER BY archived_at DESC;
 
 -- name: UpdateSession :one
 UPDATE sessions
@@ -71,4 +79,14 @@ WHERE id = ?;
 
 -- name: DeleteSession :exec
 DELETE FROM sessions
+WHERE id = ?;
+
+-- name: ArchiveSession :exec
+UPDATE sessions
+SET archived_at = strftime('%s', 'now') * 1000
+WHERE id = ?;
+
+-- name: UnarchiveSession :exec
+UPDATE sessions
+SET archived_at = NULL
 WHERE id = ?;

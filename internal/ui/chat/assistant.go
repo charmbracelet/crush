@@ -168,13 +168,14 @@ func NewAssistantMessageItem(sty *styles.Styles, message *message.Message, reduc
 	}
 
 	a.anim = anim.New(anim.Settings{
-		ID:          a.ID(),
-		Static:      reduceAnimations,
-		Size:        15,
-		GradColorA:  sty.WorkingGradFromColor,
-		GradColorB:  sty.WorkingGradToColor,
-		LabelColor:  sty.WorkingLabelColor,
-		CycleColors: true,
+		ID:            a.ID(),
+		Static:        reduceAnimations,
+		Size:          15,
+		GradColorA:    sty.WorkingGradFromColor,
+		GradColorB:    sty.WorkingGradToColor,
+		LabelColor:    sty.WorkingLabelColor,
+		EllipsisColor: sty.WorkingEllipsisColor,
+		CycleColors:   true,
 	})
 	return a
 }

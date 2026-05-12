@@ -6,6 +6,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"html/template"
 	"log/slog"
 	"os/exec"
 	"path/filepath"
@@ -19,8 +20,23 @@ import (
 
 const GlobToolName = "glob"
 
-//go:embed glob.md
-var globDescription string
+//go:embed glob.md.tpl
+var globDescriptionTmpl []byte
+
+var globDescriptionTpl = template.Must(
+	template.New("globDescription").
+		Parse(string(globDescriptionTmpl)),
+)
+
+type globDescriptionData struct {
+	MaxResults int
+}
+
+func globDescription() string {
+	return renderTemplate(globDescriptionTpl, globDescriptionData{
+		MaxResults: 100,
+	})
+}
 
 type GlobParams struct {
 	Pattern string `json:"pattern" description:"The glob pattern to match files against"`
@@ -35,7 +51,7 @@ type GlobResponseMetadata struct {
 func NewGlobTool(workingDir string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		GlobToolName,
-		globDescription,
+		globDescription(),
 		func(ctx context.Context, params GlobParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Pattern == "" {
 				return fantasy.NewTextErrorResponse("pattern is required"), nil

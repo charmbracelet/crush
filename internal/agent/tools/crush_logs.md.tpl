@@ -1,4 +1,4 @@
-Read Crush's internal application logs (default 50 entries, max 100); useful for diagnosing provider errors, tool failures, LSP/MCP issues.
+Read Crush's internal application logs (default {{ .DefaultLines }} entries, max {{ .MaxLines }}); useful for diagnosing provider errors, tool failures, LSP/MCP issues.
 
 <usage>
 - Returns recent log entries from Crush's internal log file
@@ -8,6 +8,6 @@ Read Crush's internal application logs (default 50 entries, max 100); useful for
 </usage>
 
 <tips>
-- Default returns last 50 entries; use lines parameter for more (max 100)
+- Default returns last {{ .DefaultLines }} entries; use lines parameter for more (max {{ .MaxLines }})
 - Look for ERROR and WARN entries first when diagnosing problems
 </tips>

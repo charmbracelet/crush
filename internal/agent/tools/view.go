@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"html/template"
 	"io"
 	"io/fs"
 	"net/http"
@@ -23,8 +24,25 @@ import (
 	"github.com/charmbracelet/crush/internal/skills"
 )
 
-//go:embed view.md
-var viewDescription string
+//go:embed view.md.tpl
+var viewDescriptionTmpl []byte
+
+var viewDescriptionTpl = template.Must(
+	template.New("viewDescription").
+		Parse(string(viewDescriptionTmpl)),
+)
+
+type viewDescriptionData struct {
+	DefaultReadLimit int
+	MaxViewSizeKB    int
+}
+
+func viewDescription() string {
+	return renderTemplate(viewDescriptionTpl, viewDescriptionData{
+		DefaultReadLimit: DefaultReadLimit,
+		MaxViewSizeKB:    MaxViewSize / 1024,
+	})
+}
 
 type ViewParams struct {
 	FilePath string `json:"file_path" description:"The path to the file to read"`
@@ -79,7 +97,7 @@ func NewViewTool(
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		ViewToolName,
-		viewDescription,
+		viewDescription(),
 		func(ctx context.Context, params ViewParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.FilePath == "" {
 				return fantasy.NewTextErrorResponse("file_path is required"), nil

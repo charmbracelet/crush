@@ -5,6 +5,7 @@ import (
 	"context"
 	"html/template"
 	"os/exec"
+	"testing"
 
 	"charm.land/fantasy"
 )
@@ -70,6 +71,9 @@ func NewPermissionDeniedResponse() fantasy.ToolResponse {
 
 // ghAvailable indicates whether the `gh` CLI is available on PATH.
 var ghAvailable = func() bool {
+	if testing.Testing() {
+		return false
+	}
 	_, err := exec.LookPath("gh")
 	return err == nil
 }()

@@ -14,8 +14,7 @@ import (
 const ForkID = "fork"
 
 const (
-	forkDialogMaxWidth  = 60
-	forkDialogMaxHeight = 12
+	forkDialogMaxWidth = 60
 )
 
 // Fork is a dialog for forking a conversation from a specific message.

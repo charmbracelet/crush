@@ -87,6 +87,9 @@ func (s *SessionItem) Render(width int) string {
 	case sessionsModeDeleting:
 		styles.ItemBlurred = s.t.Dialog.Sessions.DeletingItemBlurred
 		styles.ItemFocused = s.t.Dialog.Sessions.DeletingItemFocused
+	case sessionsModeArchiving:
+		styles.ItemBlurred = s.t.Dialog.Sessions.ArchivingItemBlurred
+		styles.ItemFocused = s.t.Dialog.Sessions.ArchivingItemFocused
 	case sessionsModeUpdating:
 		styles.ItemBlurred = s.t.Dialog.Sessions.RenamingItemBlurred
 		styles.ItemFocused = s.t.Dialog.Sessions.RenamingingItemFocused

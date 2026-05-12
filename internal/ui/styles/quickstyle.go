@@ -898,6 +898,15 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Dialog.Sessions.RenamingItemBlurred = s.Dialog.NormalItem.Foreground(o.fgMostSubtle)
 	s.Dialog.Sessions.RenamingingItemFocused = s.Dialog.SelectedItem.UnsetBackground().UnsetForeground()
 	s.Dialog.Sessions.RenamingPlaceholder = base.Foreground(o.fgMoreSubtle)
+
+	s.Dialog.Sessions.ArchivingTitle = s.Dialog.Title.Foreground(o.fgMoreSubtle)
+	s.Dialog.Sessions.ArchivingView = s.Dialog.View.BorderForeground(o.fgMoreSubtle)
+	s.Dialog.Sessions.ArchivingMessage = base.Padding(1)
+	s.Dialog.Sessions.ArchivingTitleGradientFromColor = o.fgMoreSubtle
+	s.Dialog.Sessions.ArchivingTitleGradientToColor = o.primary
+	s.Dialog.Sessions.ArchivingItemBlurred = s.Dialog.NormalItem.Foreground(o.fgMostSubtle)
+	s.Dialog.Sessions.ArchivingItemFocused = s.Dialog.SelectedItem.Background(o.fgMoreSubtle).Foreground(o.onPrimary)
+
 	s.Dialog.Sessions.InfoBlurred = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 	s.Dialog.Sessions.InfoFocused = lipgloss.NewStyle().Foreground(o.fgBase)
 

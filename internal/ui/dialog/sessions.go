@@ -26,6 +26,7 @@ const (
 	sessionsModeNormal sessionsMode = iota
 	sessionsModeDeleting
 	sessionsModeUpdating
+	sessionsModeArchiving
 )
 
 // Session is a session selector dialog.
@@ -40,17 +41,20 @@ type Session struct {
 	sessionsMode sessionsMode
 
 	keyMap struct {
-		Select        key.Binding
-		Next          key.Binding
-		Previous      key.Binding
-		UpDown        key.Binding
-		Delete        key.Binding
-		Rename        key.Binding
-		ConfirmRename key.Binding
-		CancelRename  key.Binding
-		ConfirmDelete key.Binding
-		CancelDelete  key.Binding
-		Close         key.Binding
+		Select         key.Binding
+		Next           key.Binding
+		Previous       key.Binding
+		UpDown         key.Binding
+		Delete         key.Binding
+		Rename         key.Binding
+		Archive        key.Binding
+		ConfirmRename  key.Binding
+		CancelRename   key.Binding
+		ConfirmDelete  key.Binding
+		CancelDelete   key.Binding
+		ConfirmArchive key.Binding
+		CancelArchive  key.Binding
+		Close          key.Binding
 	}
 }
 
@@ -112,6 +116,10 @@ func NewSessions(com *common.Common, selectedSessionID string) (*Session, error)
 		key.WithKeys("ctrl+r"),
 		key.WithHelp("ctrl+r", "rename"),
 	)
+	s.keyMap.Archive = key.NewBinding(
+		key.WithKeys("ctrl+a"),
+		key.WithHelp("ctrl+a", "archive"),
+	)
 	s.keyMap.ConfirmRename = key.NewBinding(
 		key.WithKeys("enter"),
 		key.WithHelp("enter", "confirm"),
@@ -125,6 +133,14 @@ func NewSessions(com *common.Common, selectedSessionID string) (*Session, error)
 		key.WithHelp("y", "delete"),
 	)
 	s.keyMap.CancelDelete = key.NewBinding(
+		key.WithKeys("n", "esc"),
+		key.WithHelp("n", "cancel"),
+	)
+	s.keyMap.ConfirmArchive = key.NewBinding(
+		key.WithKeys("y"),
+		key.WithHelp("y", "archive"),
+	)
+	s.keyMap.CancelArchive = key.NewBinding(
 		key.WithKeys("n", "esc"),
 		key.WithHelp("n", "cancel"),
 	)
@@ -173,6 +189,18 @@ func (s *Session) HandleMsg(msg tea.Msg) Action {
 					return sessionItem.HandleInput(msg)
 				}
 			}
+		case sessionsModeArchiving:
+			switch {
+			case key.Matches(msg, s.keyMap.ConfirmArchive):
+				action := s.confirmArchiveSession()
+				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeNormal, s.sessions...)...)
+				s.list.SelectFirst()
+				s.list.ScrollToSelected()
+				return action
+			case key.Matches(msg, s.keyMap.CancelArchive):
+				s.sessionsMode = sessionsModeNormal
+				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeNormal, s.sessions...)...)
+			}
 		default:
 			switch {
 			case key.Matches(msg, s.keyMap.Close):
@@ -186,6 +214,12 @@ func (s *Session) HandleMsg(msg tea.Msg) Action {
 				}
 				s.sessionsMode = sessionsModeDeleting
 				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeDeleting, s.sessions...)...)
+			case key.Matches(msg, s.keyMap.Archive):
+				if s.isCurrentSessionBusy() {
+					return ActionCmd{util.ReportWarn("Agent is busy, please wait...")}
+				}
+				s.sessionsMode = sessionsModeArchiving
+				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeArchiving, s.sessions...)...)
 			case key.Matches(msg, s.keyMap.Previous):
 				s.list.Focus()
 				if s.list.IsSelectedFirst() {
@@ -258,6 +292,12 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		rc.TitleGradientToColor = t.Dialog.Sessions.DeletingTitleGradientToColor
 		rc.ViewStyle = t.Dialog.Sessions.DeletingView
 		rc.AddPart(t.Dialog.Sessions.DeletingMessage.Render("Delete this session?"))
+	case sessionsModeArchiving:
+		rc.TitleStyle = t.Dialog.Sessions.ArchivingTitle
+		rc.TitleGradientFromColor = t.Dialog.Sessions.ArchivingTitleGradientFromColor
+		rc.TitleGradientToColor = t.Dialog.Sessions.ArchivingTitleGradientToColor
+		rc.ViewStyle = t.Dialog.Sessions.ArchivingView
+		rc.AddPart(t.Dialog.Sessions.ArchivingMessage.Render("Archive this session?"))
 	case sessionsModeUpdating:
 		rc.TitleStyle = t.Dialog.Sessions.RenamingingTitle
 		rc.TitleGradientFromColor = t.Dialog.Sessions.RenamingTitleGradientFromColor
@@ -357,6 +397,27 @@ func (s *Session) deleteSessionCmd(id string) tea.Cmd {
 	}
 }
 
+func (s *Session) confirmArchiveSession() Action {
+	sessionItem := s.selectedSessionItem()
+	s.sessionsMode = sessionsModeNormal
+	if sessionItem == nil {
+		return nil
+	}
+
+	s.removeSession(sessionItem.ID())
+	return ActionCmd{s.archiveSessionCmd(sessionItem.ID())}
+}
+
+func (s *Session) archiveSessionCmd(id string) tea.Cmd {
+	return func() tea.Msg {
+		err := s.com.Workspace.ArchiveSession(context.TODO(), id)
+		if err != nil {
+			return util.NewErrorMsg(err)
+		}
+		return nil
+	}
+}
+
 func (s *Session) confirmRenameSession() Action {
 	sessionItem := s.selectedSessionItem()
 	s.sessionsMode = sessionsModeNormal
@@ -419,10 +480,16 @@ func (s *Session) ShortHelp() []key.Binding {
 			s.keyMap.ConfirmRename,
 			s.keyMap.CancelRename,
 		}
+	case sessionsModeArchiving:
+		return []key.Binding{
+			s.keyMap.ConfirmArchive,
+			s.keyMap.CancelArchive,
+		}
 	default:
 		return []key.Binding{
 			s.keyMap.UpDown,
 			s.keyMap.Rename,
+			s.keyMap.Archive,
 			s.keyMap.Delete,
 			s.keyMap.Select,
 			s.keyMap.Close,
@@ -436,6 +503,7 @@ func (s *Session) FullHelp() [][]key.Binding {
 	slice := []key.Binding{
 		s.keyMap.UpDown,
 		s.keyMap.Rename,
+		s.keyMap.Archive,
 		s.keyMap.Delete,
 		s.keyMap.Select,
 		s.keyMap.Close,
@@ -451,6 +519,11 @@ func (s *Session) FullHelp() [][]key.Binding {
 		slice = []key.Binding{
 			s.keyMap.ConfirmRename,
 			s.keyMap.CancelRename,
+		}
+	case sessionsModeArchiving:
+		slice = []key.Binding{
+			s.keyMap.ConfirmArchive,
+			s.keyMap.CancelArchive,
 		}
 	}
 	for i := 0; i < len(slice); i += 4 {

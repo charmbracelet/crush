@@ -467,6 +467,15 @@ type Styles struct {
 			RenamingTitleGradientToColor   color.Color
 			RenamingPlaceholder            lipgloss.Style
 
+			// styles for when we are in archive mode
+			ArchivingView                   lipgloss.Style
+			ArchivingItemFocused            lipgloss.Style
+			ArchivingItemBlurred            lipgloss.Style
+			ArchivingTitle                  lipgloss.Style
+			ArchivingMessage                lipgloss.Style
+			ArchivingTitleGradientFromColor color.Color
+			ArchivingTitleGradientToColor   color.Color
+
 			InfoBlurred lipgloss.Style // Timestamp text on unfocused session items
 			InfoFocused lipgloss.Style // Timestamp text on the focused session item
 		}

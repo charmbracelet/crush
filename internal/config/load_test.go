@@ -76,8 +76,9 @@ func testStore(cfg *Config) *ConfigStore {
 func TestConfig_setDefaults(t *testing.T) {
 	t.Run("sets default data directory", func(t *testing.T) {
 		cfg := &Config{}
+		workingDir := t.TempDir()
 
-		cfg.setDefaults("/tmp", "")
+		cfg.setDefaults(workingDir, "")
 
 		require.NotNil(t, cfg.Options)
 		require.NotNil(t, cfg.Options.TUI)
@@ -86,7 +87,7 @@ func TestConfig_setDefaults(t *testing.T) {
 		require.NotNil(t, cfg.Models)
 		require.NotNil(t, cfg.LSP)
 		require.NotNil(t, cfg.MCP)
-		require.Equal(t, filepath.Join("/tmp", ".crush"), cfg.Options.DataDirectory)
+		require.Equal(t, filepath.Join(workingDir, ".crush"), cfg.Options.DataDirectory)
 		require.Equal(t, "AGENTS.md", cfg.Options.InitializeAs)
 		for _, path := range defaultContextPaths {
 			require.Contains(t, cfg.Options.ContextPaths, path)
@@ -95,18 +96,20 @@ func TestConfig_setDefaults(t *testing.T) {
 
 	t.Run("resolves relative configured data directory from working directory", func(t *testing.T) {
 		cfg := &Config{Options: &Options{DataDirectory: "."}}
+		workingDir := filepath.Join(t.TempDir(), "worktree")
 
-		cfg.setDefaults("/tmp/worktree", "")
+		cfg.setDefaults(workingDir, "")
 
-		require.Equal(t, "/tmp/worktree", cfg.Options.DataDirectory)
+		require.Equal(t, workingDir, cfg.Options.DataDirectory)
 	})
 
 	t.Run("resolves relative flag data directory from working directory", func(t *testing.T) {
 		cfg := &Config{}
+		workingDir := filepath.Join(t.TempDir(), "worktree")
 
-		cfg.setDefaults("/tmp/worktree", "./state")
+		cfg.setDefaults(workingDir, "./state")
 
-		require.Equal(t, "/tmp/worktree/state", cfg.Options.DataDirectory)
+		require.Equal(t, filepath.Join(workingDir, "state"), cfg.Options.DataDirectory)
 	})
 }
 

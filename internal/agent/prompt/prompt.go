@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
@@ -107,10 +108,7 @@ func processFile(filePath string) *ContextFile {
 
 func processContextPath(p string, store *config.ConfigStore) []ContextFile {
 	var contexts []ContextFile
-	fullPath := p
-	if !filepath.IsAbs(p) {
-		fullPath = filepath.Join(store.WorkingDir(), p)
-	}
+	fullPath := filepathext.SmartJoin(store.WorkingDir(), p)
 	info, err := os.Stat(fullPath)
 	if err != nil {
 		return contexts

@@ -1147,11 +1147,9 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 	}
 
 	session.Cost += cost
-	if usage.OutputTokens != 0 {
+	if !usageIsZero(usage) {
 		session.CompletionTokens = usage.OutputTokens
-	}
-	if promptTokens := usage.InputTokens + usage.CacheReadTokens; promptTokens != 0 {
-		session.PromptTokens = promptTokens
+		session.PromptTokens = usage.InputTokens + usage.CacheReadTokens
 	}
 }
 

@@ -209,7 +209,7 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	result, originalErr := run()
 	logTurnSkillUsage(sessionID, prompt, c.activeSkills, c.skillTracker, beforeLoaded)
 
-	if c.isUnauthorized(originalErr) {
+	if c.isUnauthorized(originalErr, providerCfg) {
 		if err := c.retryAfterUnauthorized(ctx, providerCfg); err == nil {
 			return run()
 		}
@@ -958,7 +958,7 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 	}
 
 	err := summarize()
-	if err != nil && c.isUnauthorized(err) {
+	if err != nil && c.isUnauthorized(err, providerCfg) {
 		if retryErr := c.retryAfterUnauthorized(ctx, providerCfg); retryErr == nil {
 			return summarize()
 		}
@@ -994,7 +994,7 @@ func (c *coordinator) retryAfterUnauthorized(ctx context.Context, providerCfg co
 	}
 }
 
-func (c *coordinator) isUnauthorized(err error) bool {
+func (c *coordinator) isUnauthorized(err error, providerCfg config.ProviderConfig) bool {
 	if err == nil {
 		return false
 	}
@@ -1002,10 +1002,12 @@ func (c *coordinator) isUnauthorized(err error) bool {
 	if errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized {
 		return true
 	}
-	// AWS SSO credential errors surface as plain errors from the SDK credential
-	// chain before any Bedrock request is made, so they never become a
-	// ProviderError. Match on the error message instead.
-	return strings.Contains(err.Error(), "failed to refresh cached credentials")
+	// AWS SSO credential errors surface before any Bedrock request is made,
+	// so they never become a ProviderError.
+	if providerCfg.AWSAuthRefresh != "" {
+		return strings.Contains(err.Error(), "failed to refresh cached credentials")
+	}
+	return false
 }
 
 func (c *coordinator) refreshOAuth2Token(ctx context.Context, providerCfg config.ProviderConfig) error {
@@ -1035,17 +1037,12 @@ func (c *coordinator) refreshApiKeyTemplate(ctx context.Context, providerCfg con
 	return nil
 }
 
-// runAWSAuthRefresh runs the configured aws_auth_refresh command to obtain
-// fresh AWS credentials. Output is written directly to os.Stdout so the user
-// can interact with browser-based SSO flows (e.g. copying a device code).
+// runAWSAuthRefresh runs aws_auth_refresh to obtain fresh AWS credentials.
 func (c *coordinator) runAWSAuthRefresh(ctx context.Context, providerCfg config.ProviderConfig) error {
 	err := shell.Run(ctx, shell.RunOptions{
 		Command: providerCfg.AWSAuthRefresh,
 		Cwd:     c.cfg.WorkingDir(),
 		Env:     os.Environ(),
-		Stdout:  os.Stdout,
-		Stderr:  os.Stderr,
-		Stdin:   os.Stdin,
 	})
 	if err != nil {
 		slog.Error("AWS auth refresh command failed.", "provider", providerCfg.ID, "error", err)

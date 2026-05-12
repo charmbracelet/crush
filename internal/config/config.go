@@ -131,10 +131,8 @@ type ProviderConfig struct {
 	// Used to pass extra parameters to the provider.
 	ExtraParams map[string]string `json:"-"`
 
-	// AWSAuthRefresh is a shell command to run when AWS credentials are expired.
-	// It is executed before retrying a Bedrock request that failed with a 401.
-	// The command's output is displayed to the user. Useful for browser-based
-	// SSO flows (e.g. "aws sso login --profile myprofile").
+	// AWSAuthRefresh is a shell command run when Bedrock returns a
+	// credential error. Output is discarded to avoid corrupting the TUI.
 	AWSAuthRefresh string `json:"aws_auth_refresh,omitempty" jsonschema:"description=Shell command to run when AWS credentials expire (Bedrock only). Output is shown to the user."`
 
 	// Skip cost accumulation for this provider when using subscription or flat rate billing.
@@ -598,8 +596,7 @@ type Config struct {
 
 	Hooks map[string][]HookConfig `json:"hooks,omitempty" jsonschema:"description=User-defined shell commands that fire on hook events (e.g. PreToolUse)"`
 
-	// Env is a map of environment variables that are applied to the current
-	// process on startup. Values support $VAR shell expansion.
+	// Env is a map of environment variables set on startup.
 	Env map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set on startup"`
 
 	Agents map[string]Agent `json:"-"`

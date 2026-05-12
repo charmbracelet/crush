@@ -108,10 +108,13 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	store.autoReloadDisabled = true
 	defer func() { store.autoReloadDisabled = false }()
 
-	// Apply top-level env vars to the process before configuring providers so
-	// that variables like AWS_PROFILE are visible to the AWS SDK credential chain.
+	// Apply top-level env vars before configuring providers so variables
+	// like AWS_PROFILE are visible to the AWS SDK credential chain.
 	for k, v := range cfg.Env {
-		resolved, _ := valueResolver.ResolveValue(v)
+		resolved, err := valueResolver.ResolveValue(v)
+		if err != nil {
+			slog.Warn("Failed to resolve env var value. Variable will be set to empty string.", "key", k, "value", v, "error", err)
+		}
 		os.Setenv(k, resolved)
 	}
 

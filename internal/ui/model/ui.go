@@ -1816,6 +1816,16 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				cmds = append(cmds, cmd)
 			}
 			return true
+		case key.Matches(msg, m.keyMap.YoloMode):
+			yolo := !m.com.Workspace.PermissionSkipRequests()
+			m.com.Workspace.PermissionSetSkipRequests(yolo)
+			m.setEditorPrompt(yolo)
+			status := "disabled"
+			if yolo {
+				status = "enabled"
+			}
+			cmds = append(cmds, util.ReportInfo("Yolo mode "+status))
+			return true
 		case key.Matches(msg, m.keyMap.Chat.Details) && m.isCompact:
 			m.detailsOpen = !m.detailsOpen
 			m.updateLayoutAndSize()

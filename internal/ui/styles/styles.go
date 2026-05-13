@@ -290,6 +290,10 @@ type Styles struct {
 		ErrorTag     lipgloss.Style // ERROR tag
 		ErrorMessage lipgloss.Style // Error message text
 
+		// Denied styles
+		DeniedTag     lipgloss.Style // DENIED tag
+		DeniedMessage lipgloss.Style // Denied message text
+
 		// Diff styles
 		DiffTruncation lipgloss.Style // Diff truncation message with padding
 

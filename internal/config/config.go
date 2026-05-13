@@ -56,6 +56,20 @@ const (
 	SelectedModelTypeSmall SelectedModelType = "small"
 )
 
+// ContextMode controls how the model handles context window limits.
+type ContextMode string
+
+const (
+	// ContextModeStandard uses the default context window (e.g., 200K).
+	ContextModeStandard ContextMode = "standard"
+	// ContextModeExtended enables the extended context window (e.g., 1M) for models that support it.
+	// Note: Extended context mode may reduce model capability in exchange for more context.
+	ContextModeExtended ContextMode = "extended"
+	// ContextModeDynamic starts in standard mode and switches to extended mode when approaching
+	// the context limit, then summarizes and returns to standard mode when approaching the extended limit.
+	ContextModeDynamic ContextMode = "dynamic"
+)
+
 const (
 	AgentCoder string = "coder"
 	AgentTask  string = "task"
@@ -74,6 +88,9 @@ type SelectedModel struct {
 
 	// Used by anthropic models that can reason to indicate if the model should think.
 	Think bool `json:"think,omitempty" jsonschema:"description=Enable thinking mode for Anthropic models that support reasoning"`
+
+	// ContextMode controls how the model handles context window limits for models that support extended context.
+	ContextMode ContextMode `json:"context_mode,omitempty" jsonschema:"description=Context window mode: standard (default 200K)\\, extended (1M)\\, or dynamic (auto-switch),enum=standard,enum=extended,enum=dynamic,default=standard"`
 
 	// Overrides the default model configuration.
 	MaxTokens        int64    `json:"max_tokens,omitempty" jsonschema:"description=Maximum number of tokens for model responses,maximum=200000,example=4096"`

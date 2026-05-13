@@ -666,6 +666,12 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 			if largeModelSelected.PresencePenalty != nil {
 				large.PresencePenalty = largeModelSelected.PresencePenalty
 			}
+			if largeModelSelected.ContextMode != "" {
+				large.ContextMode = largeModelSelected.ContextMode
+			}
+			if largeModelSelected.ProviderOptions != nil {
+				large.ProviderOptions = largeModelSelected.ProviderOptions
+			}
 		}
 	}
 	smallModelSelected, smallModelConfigured := c.Models[SelectedModelTypeSmall]
@@ -708,6 +714,12 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 			}
 			if smallModelSelected.PresencePenalty != nil {
 				small.PresencePenalty = smallModelSelected.PresencePenalty
+			}
+			if smallModelSelected.ContextMode != "" {
+				small.ContextMode = smallModelSelected.ContextMode
+			}
+			if smallModelSelected.ProviderOptions != nil {
+				small.ProviderOptions = smallModelSelected.ProviderOptions
 			}
 			small.Think = smallModelSelected.Think
 		}

@@ -463,6 +463,9 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 			lines = append(lines, p.renderKeyValue("URL", params.URL, contentWidth))
 			lines = append(lines, p.renderKeyValue("File", fsext.PrettyPath(params.FilePath), contentWidth))
 		}
+		if p.permission.Description != "" {
+			lines = append(lines, p.renderKeyValue("Desc", p.permission.Description, contentWidth))
+		}
 	case tools.EditToolName, tools.WriteToolName, tools.MultiEditToolName, tools.ViewToolName:
 		var filePath string
 		switch params := p.permission.Params.(type) {
@@ -478,9 +481,15 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 		if filePath != "" {
 			lines = append(lines, p.renderKeyValue("File", fsext.PrettyPath(filePath), contentWidth))
 		}
+		if p.permission.Description != "" {
+			lines = append(lines, p.renderKeyValue("Desc", p.permission.Description, contentWidth))
+		}
 	case tools.LSToolName:
 		if params, ok := p.permission.Params.(tools.LSPermissionsParams); ok {
 			lines = append(lines, p.renderKeyValue("Directory", fsext.PrettyPath(params.Path), contentWidth))
+		}
+		if p.permission.Description != "" {
+			lines = append(lines, p.renderKeyValue("Desc", p.permission.Description, contentWidth))
 		}
 	}
 

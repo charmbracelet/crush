@@ -128,8 +128,8 @@ func UpdateDeepSeek(pathOrURL string) error {
 	var provider catwalk.Provider
 	pathOrURL = cmp.Or(pathOrURL, "embedded")
 
-	switch {
-	case pathOrURL == "embedded":
+	switch pathOrURL {
+	case "embedded":
 		provider = deepseek.Embedded()
 	default:
 		content, err := os.ReadFile(pathOrURL)

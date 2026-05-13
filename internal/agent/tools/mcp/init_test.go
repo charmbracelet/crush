@@ -6,8 +6,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/env"
+	"github.com/taigrr/crush/internal/config"
+	"github.com/taigrr/crush/internal/env"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"

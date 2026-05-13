@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/taigrr/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/env"
+	"github.com/taigrr/crush/internal/csync"
+	"github.com/taigrr/crush/internal/env"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

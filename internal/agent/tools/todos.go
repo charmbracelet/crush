@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/taigrr/fantasy"
-	"github.com/charmbracelet/crush/internal/session"
+	"github.com/taigrr/crush/internal/session"
 )
 
 //go:embed todos.md

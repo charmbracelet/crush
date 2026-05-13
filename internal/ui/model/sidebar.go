@@ -7,9 +7,9 @@ import (
 	"image"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/ui/logo"
-	"github.com/charmbracelet/crush/internal/worktree"
+	"github.com/taigrr/crush/internal/ui/common"
+	"github.com/taigrr/crush/internal/ui/logo"
+	"github.com/taigrr/crush/internal/worktree"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/layout"
 )

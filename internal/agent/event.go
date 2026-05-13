@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/taigrr/fantasy"
-	"github.com/charmbracelet/crush/internal/event"
+	"github.com/taigrr/crush/internal/event"
 )
 
 func (a *sessionAgent) eventPromptSent(sessionID string) {

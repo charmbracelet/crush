@@ -15,7 +15,7 @@ import (
 	"strings"
 
 	"github.com/taigrr/fantasy"
-	"github.com/charmbracelet/crush/internal/lsp"
+	"github.com/taigrr/crush/internal/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 

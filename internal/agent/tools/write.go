@@ -11,14 +11,14 @@ import (
 	"time"
 
 	"github.com/taigrr/fantasy"
-	"github.com/charmbracelet/crush/internal/diff"
-	"github.com/charmbracelet/crush/internal/filepathext"
-	"github.com/charmbracelet/crush/internal/filetracker"
-	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/crush/internal/history"
+	"github.com/taigrr/crush/internal/diff"
+	"github.com/taigrr/crush/internal/filepathext"
+	"github.com/taigrr/crush/internal/filetracker"
+	"github.com/taigrr/crush/internal/fsext"
+	"github.com/taigrr/crush/internal/history"
 
-	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/taigrr/crush/internal/lsp"
+	"github.com/taigrr/crush/internal/permission"
 )
 
 //go:embed write.md

@@ -14,8 +14,8 @@ import (
 	"strings"
 
 	"github.com/taigrr/fantasy"
-	"github.com/charmbracelet/crush/internal/filepathext"
-	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/taigrr/crush/internal/filepathext"
+	"github.com/taigrr/crush/internal/fsext"
 )
 
 const GlobToolName = "glob"

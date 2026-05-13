@@ -5,16 +5,16 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/charmbracelet/crush/internal/agent/notify"
-	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
-	"github.com/charmbracelet/crush/internal/app"
-	"github.com/charmbracelet/crush/internal/history"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/taigrr/crush/internal/agent/notify"
+	"github.com/taigrr/crush/internal/agent/tools/mcp"
+	"github.com/taigrr/crush/internal/app"
+	"github.com/taigrr/crush/internal/history"
+	"github.com/taigrr/crush/internal/message"
+	"github.com/taigrr/crush/internal/permission"
+	"github.com/taigrr/crush/internal/proto"
+	"github.com/taigrr/crush/internal/pubsub"
+	"github.com/taigrr/crush/internal/session"
+	"github.com/taigrr/crush/internal/skills"
 )
 
 // wrapEvent converts a raw tea.Msg (a pubsub.Event[T] from the app

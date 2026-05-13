@@ -20,9 +20,9 @@ import (
 	"time"
 
 	"github.com/taigrr/fantasy"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/taigrr/crush/internal/config"
+	"github.com/taigrr/crush/internal/csync"
+	"github.com/taigrr/crush/internal/fsext"
 )
 
 // regexCache provides thread-safe caching of compiled regex patterns

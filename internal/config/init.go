@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/taigrr/crush/internal/fsext"
 )
 
 const (

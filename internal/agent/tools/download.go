@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/taigrr/fantasy"
-	"github.com/charmbracelet/crush/internal/filepathext"
-	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/taigrr/crush/internal/filepathext"
+	"github.com/taigrr/crush/internal/permission"
 )
 
 type DownloadParams struct {

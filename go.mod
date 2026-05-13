@@ -1,4 +1,4 @@
-module github.com/charmbracelet/crush
+module github.com/taigrr/crush
 
 go 1.26.2
 

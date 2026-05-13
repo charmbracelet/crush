@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/hooks"
+	"github.com/taigrr/crush/internal/config"
+	"github.com/taigrr/crush/internal/hooks"
 	"github.com/stretchr/testify/require"
 )
 

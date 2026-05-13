@@ -10,7 +10,7 @@ import (
 	"sync"
 
 	"github.com/taigrr/fantasy"
-	"github.com/charmbracelet/crush/internal/lsp"
+	"github.com/taigrr/crush/internal/lsp"
 )
 
 const LSPRestartToolName = "lsp_restart"

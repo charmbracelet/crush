@@ -9,7 +9,7 @@ import (
 	"github.com/taigrr/fantasy"
 	"github.com/taigrr/fantasy/providers/anthropic"
 	"github.com/taigrr/fantasy/providers/bedrock"
-	"github.com/charmbracelet/crush/internal/config"
+	"github.com/taigrr/crush/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

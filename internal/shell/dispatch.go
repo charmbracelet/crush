@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/filepathext"
+	"github.com/taigrr/crush/internal/filepathext"
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/interp"
 	"mvdan.cc/sh/v3/syntax"

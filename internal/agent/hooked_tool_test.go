@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"github.com/taigrr/fantasy"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/hooks"
-	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/taigrr/crush/internal/config"
+	"github.com/taigrr/crush/internal/hooks"
+	"github.com/taigrr/crush/internal/permission"
 	"github.com/stretchr/testify/require"
 )
 

@@ -4,10 +4,10 @@ import (
 	"testing"
 
 	"github.com/taigrr/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/workspace"
+	"github.com/taigrr/crush/internal/config"
+	"github.com/taigrr/crush/internal/csync"
+	"github.com/taigrr/crush/internal/ui/common"
+	"github.com/taigrr/crush/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 

@@ -7,9 +7,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/taigrr/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/oauth/copilot"
-	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/taigrr/crush/internal/config"
+	"github.com/taigrr/crush/internal/oauth/copilot"
+	"github.com/taigrr/crush/internal/ui/common"
 )
 
 func NewOAuthCopilot(

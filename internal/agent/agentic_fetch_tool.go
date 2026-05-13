@@ -11,9 +11,9 @@ import (
 
 	"github.com/taigrr/fantasy"
 
-	"github.com/charmbracelet/crush/internal/agent/prompt"
-	"github.com/charmbracelet/crush/internal/agent/tools"
-	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/taigrr/crush/internal/agent/prompt"
+	"github.com/taigrr/crush/internal/agent/tools"
+	"github.com/taigrr/crush/internal/permission"
 )
 
 //go:embed templates/agentic_fetch.md

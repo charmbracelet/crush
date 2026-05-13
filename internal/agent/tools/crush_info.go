@@ -8,10 +8,10 @@ import (
 	"strings"
 
 	"github.com/taigrr/fantasy"
-	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/taigrr/crush/internal/agent/tools/mcp"
+	"github.com/taigrr/crush/internal/config"
+	"github.com/taigrr/crush/internal/lsp"
+	"github.com/taigrr/crush/internal/skills"
 )
 
 const CrushInfoToolName = "crush_info"

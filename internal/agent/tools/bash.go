@@ -13,10 +13,10 @@ import (
 	"time"
 
 	"github.com/taigrr/fantasy"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/shell"
+	"github.com/taigrr/crush/internal/config"
+	"github.com/taigrr/crush/internal/fsext"
+	"github.com/taigrr/crush/internal/permission"
+	"github.com/taigrr/crush/internal/shell"
 )
 
 type BashParams struct {

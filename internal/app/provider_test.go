@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/taigrr/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/config"
+	"github.com/taigrr/crush/internal/config"
 	"github.com/stretchr/testify/require"
 )
 

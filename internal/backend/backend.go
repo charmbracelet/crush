@@ -12,13 +12,13 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/charmbracelet/crush/internal/app"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/db"
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/ui/util"
-	"github.com/charmbracelet/crush/internal/version"
+	"github.com/taigrr/crush/internal/app"
+	"github.com/taigrr/crush/internal/config"
+	"github.com/taigrr/crush/internal/csync"
+	"github.com/taigrr/crush/internal/db"
+	"github.com/taigrr/crush/internal/proto"
+	"github.com/taigrr/crush/internal/ui/util"
+	"github.com/taigrr/crush/internal/version"
 	"github.com/google/uuid"
 )
 

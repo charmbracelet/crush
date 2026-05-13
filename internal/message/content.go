@@ -13,7 +13,7 @@ import (
 	"github.com/taigrr/fantasy/providers/anthropic"
 	"github.com/taigrr/fantasy/providers/google"
 	"github.com/taigrr/fantasy/providers/openai"
-	"github.com/charmbracelet/crush/internal/stringext"
+	"github.com/taigrr/crush/internal/stringext"
 )
 
 type MessageRole string

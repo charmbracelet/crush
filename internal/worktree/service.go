@@ -16,10 +16,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/checkpoint"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/db"
-	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/taigrr/crush/internal/checkpoint"
+	"github.com/taigrr/crush/internal/config"
+	"github.com/taigrr/crush/internal/db"
+	"github.com/taigrr/crush/internal/pubsub"
 	"github.com/google/uuid"
 )
 

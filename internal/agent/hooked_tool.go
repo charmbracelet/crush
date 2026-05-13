@@ -7,9 +7,9 @@ import (
 	"log/slog"
 
 	"github.com/taigrr/fantasy"
-	"github.com/charmbracelet/crush/internal/agent/tools"
-	"github.com/charmbracelet/crush/internal/hooks"
-	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/taigrr/crush/internal/agent/tools"
+	"github.com/taigrr/crush/internal/hooks"
+	"github.com/taigrr/crush/internal/permission"
 	"github.com/tidwall/sjson"
 )
 

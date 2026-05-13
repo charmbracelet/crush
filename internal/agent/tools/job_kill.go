@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/taigrr/fantasy"
-	"github.com/charmbracelet/crush/internal/shell"
+	"github.com/taigrr/crush/internal/shell"
 )
 
 const (

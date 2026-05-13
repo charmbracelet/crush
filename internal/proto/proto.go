@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/taigrr/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/lsp"
+	"github.com/taigrr/crush/internal/config"
+	"github.com/taigrr/crush/internal/lsp"
 )
 
 // Workspace represents a running app.App workspace with its associated

@@ -11,12 +11,12 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/checkpoint"
-	"github.com/charmbracelet/crush/internal/db"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/crush/internal/worktree"
+	"github.com/taigrr/crush/internal/checkpoint"
+	"github.com/taigrr/crush/internal/db"
+	"github.com/taigrr/crush/internal/message"
+	"github.com/taigrr/crush/internal/pubsub"
+	"github.com/taigrr/crush/internal/session"
+	"github.com/taigrr/crush/internal/worktree"
 )
 
 // Common errors.

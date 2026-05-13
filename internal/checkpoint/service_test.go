@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/db"
+	"github.com/taigrr/crush/internal/db"
 	"github.com/stretchr/testify/require"
 )
 

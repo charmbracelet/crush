@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/taigrr/fantasy"
-	"github.com/charmbracelet/crush/internal/filetracker"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/taigrr/crush/internal/filetracker"
+	"github.com/taigrr/crush/internal/permission"
+	"github.com/taigrr/crush/internal/pubsub"
 	"github.com/stretchr/testify/require"
 )
 

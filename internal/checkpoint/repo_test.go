@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/checkpoint"
+	"github.com/taigrr/crush/internal/checkpoint"
 	"github.com/stretchr/testify/require"
 )
 

@@ -18,12 +18,12 @@ import (
 	"testing"
 
 	"github.com/taigrr/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/agent/hyper"
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/env"
-	"github.com/charmbracelet/crush/internal/filepathext"
-	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/crush/internal/home"
+	"github.com/taigrr/crush/internal/agent/hyper"
+	"github.com/taigrr/crush/internal/csync"
+	"github.com/taigrr/crush/internal/env"
+	"github.com/taigrr/crush/internal/filepathext"
+	"github.com/taigrr/crush/internal/fsext"
+	"github.com/taigrr/crush/internal/home"
 	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
 	"github.com/qjebbs/go-jsons"
 )

@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/taigrr/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/oauth"
-	"github.com/charmbracelet/crush/internal/oauth/copilot"
+	"github.com/taigrr/crush/internal/csync"
+	"github.com/taigrr/crush/internal/oauth"
+	"github.com/taigrr/crush/internal/oauth/copilot"
 	"github.com/invopop/jsonschema"
 )
 

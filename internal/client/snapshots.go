@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/charmbracelet/crush/internal/checkpoint"
-	"github.com/charmbracelet/crush/internal/fork"
-	"github.com/charmbracelet/crush/internal/worktree"
+	"github.com/taigrr/crush/internal/checkpoint"
+	"github.com/taigrr/crush/internal/fork"
+	"github.com/taigrr/crush/internal/worktree"
 )
 
 // SnapshotsEnabled returns whether snapshots are enabled for a workspace.

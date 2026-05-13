@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/charmbracelet/crush/internal/fork"
+	"github.com/taigrr/crush/internal/fork"
 )
 
 // ErrForksDisabled is returned when fork service is not available.

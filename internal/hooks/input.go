@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/charmbracelet/crush/internal/shell"
+	"github.com/taigrr/crush/internal/shell"
 	"github.com/tidwall/gjson"
 )
 

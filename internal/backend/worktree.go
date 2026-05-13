@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/charmbracelet/crush/internal/worktree"
+	"github.com/taigrr/crush/internal/worktree"
 )
 
 // ErrWorktreesDisabled is returned when worktrees are not enabled.

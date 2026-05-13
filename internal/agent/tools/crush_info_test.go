@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/taigrr/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/taigrr/crush/internal/agent/tools/mcp"
+	"github.com/taigrr/crush/internal/config"
+	"github.com/taigrr/crush/internal/csync"
+	"github.com/taigrr/crush/internal/lsp"
+	"github.com/taigrr/crush/internal/skills"
 	"github.com/stretchr/testify/require"
 )
 

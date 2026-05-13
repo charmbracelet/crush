@@ -21,17 +21,17 @@ import (
 	fang "charm.land/fang/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
-	"github.com/charmbracelet/crush/internal/client"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/event"
-	crushlog "github.com/charmbracelet/crush/internal/log"
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/server"
-	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/crush/internal/ui/common"
-	ui "github.com/charmbracelet/crush/internal/ui/model"
-	"github.com/charmbracelet/crush/internal/version"
-	"github.com/charmbracelet/crush/internal/workspace"
+	"github.com/taigrr/crush/internal/client"
+	"github.com/taigrr/crush/internal/config"
+	"github.com/taigrr/crush/internal/event"
+	crushlog "github.com/taigrr/crush/internal/log"
+	"github.com/taigrr/crush/internal/proto"
+	"github.com/taigrr/crush/internal/server"
+	"github.com/taigrr/crush/internal/session"
+	"github.com/taigrr/crush/internal/ui/common"
+	ui "github.com/taigrr/crush/internal/ui/model"
+	"github.com/taigrr/crush/internal/version"
+	"github.com/taigrr/crush/internal/workspace"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
@@ -131,7 +131,7 @@ crush --continue
 		if _, err := program.Run(); err != nil {
 			event.Error(err)
 			slog.Error("TUI run error", "error", err)
-			return errors.New("Crush crashed. If metrics are enabled, we were notified about it. If you'd like to report it, please copy the stacktrace above and open an issue at https://github.com/charmbracelet/crush/issues/new?template=bug.yml") //nolint:staticcheck
+			return errors.New("Crush crashed. If metrics are enabled, we were notified about it. If you'd like to report it, please copy the stacktrace above and open an issue at https://github.com/taigrr/crush/issues/new?template=bug.yml") //nolint:staticcheck
 		}
 		return nil
 	},

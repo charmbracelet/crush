@@ -3,7 +3,7 @@ package tools
 import (
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/config"
+	"github.com/taigrr/crush/internal/config"
 	"github.com/stretchr/testify/require"
 )
 

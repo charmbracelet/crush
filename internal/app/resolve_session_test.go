@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/crush/internal/session"
+	"github.com/taigrr/crush/internal/pubsub"
+	"github.com/taigrr/crush/internal/session"
 	"github.com/stretchr/testify/require"
 )
 

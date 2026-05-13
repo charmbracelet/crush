@@ -7,8 +7,8 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/taigrr/crush/internal/csync"
+	"github.com/taigrr/crush/internal/pubsub"
 	"github.com/google/uuid"
 )
 

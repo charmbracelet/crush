@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/charmbracelet/crush/internal/checkpoint"
+	"github.com/taigrr/crush/internal/checkpoint"
 )
 
 // ErrSnapshotsDisabled is returned when snapshots are not enabled.

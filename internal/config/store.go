@@ -10,11 +10,11 @@ import (
 	"slices"
 
 	"github.com/taigrr/catwalk/pkg/catwalk"
-	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
-	"github.com/charmbracelet/crush/internal/env"
-	"github.com/charmbracelet/crush/internal/oauth"
-	"github.com/charmbracelet/crush/internal/oauth/copilot"
-	"github.com/charmbracelet/crush/internal/oauth/hyper"
+	hyperp "github.com/taigrr/crush/internal/agent/hyper"
+	"github.com/taigrr/crush/internal/env"
+	"github.com/taigrr/crush/internal/oauth"
+	"github.com/taigrr/crush/internal/oauth/copilot"
+	"github.com/taigrr/crush/internal/oauth/hyper"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )

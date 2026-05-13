@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/proto"
+	"github.com/taigrr/crush/internal/config"
+	"github.com/taigrr/crush/internal/proto"
 	"github.com/stretchr/testify/require"
 )
 

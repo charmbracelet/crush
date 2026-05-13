@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/charmbracelet/crush/internal/fork"
+	"github.com/taigrr/crush/internal/fork"
 )
 
 // handleGetWorkspaceSnapshotsEnabled returns whether snapshots are enabled.

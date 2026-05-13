@@ -6,7 +6,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/taigrr/crush/internal/ui/common"
 	uv "github.com/charmbracelet/ultraviolet"
 )
 

@@ -17,11 +17,11 @@ import (
 	"unicode/utf8"
 
 	"github.com/taigrr/fantasy"
-	"github.com/charmbracelet/crush/internal/filepathext"
-	"github.com/charmbracelet/crush/internal/filetracker"
-	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/taigrr/crush/internal/filepathext"
+	"github.com/taigrr/crush/internal/filetracker"
+	"github.com/taigrr/crush/internal/lsp"
+	"github.com/taigrr/crush/internal/permission"
+	"github.com/taigrr/crush/internal/skills"
 )
 
 //go:embed view.md.tpl

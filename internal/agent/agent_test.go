@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/taigrr/fantasy"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/session"
+	"github.com/taigrr/crush/internal/message"
+	"github.com/taigrr/crush/internal/session"
 	"github.com/stretchr/testify/require"
 
 	_ "github.com/joho/godotenv/autoload"

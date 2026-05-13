@@ -7,9 +7,9 @@ import (
 
 	"github.com/taigrr/fantasy"
 
-	"github.com/charmbracelet/crush/internal/agent/prompt"
-	"github.com/charmbracelet/crush/internal/agent/tools"
-	"github.com/charmbracelet/crush/internal/config"
+	"github.com/taigrr/crush/internal/agent/prompt"
+	"github.com/taigrr/crush/internal/agent/tools"
+	"github.com/taigrr/crush/internal/config"
 )
 
 //go:embed templates/agent_tool.md

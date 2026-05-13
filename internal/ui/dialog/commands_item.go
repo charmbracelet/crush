@@ -3,7 +3,7 @@ package dialog
 import (
 	"strings"
 
-	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/taigrr/crush/internal/ui/styles"
 	"github.com/sahilm/fuzzy"
 )
 

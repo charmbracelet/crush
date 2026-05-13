@@ -292,6 +292,10 @@ type Styles struct {
 		ErrorTag     lipgloss.Style // ERROR tag
 		ErrorMessage lipgloss.Style // Error message text
 
+		// Warning styles (used for permission denied)
+		WarnTag     lipgloss.Style // WARN tag
+		WarnMessage lipgloss.Style // Warning message text
+
 		// Diff styles
 		DiffTruncation lipgloss.Style // Diff truncation message with padding
 

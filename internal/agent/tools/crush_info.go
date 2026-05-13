@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"charm.land/fantasy"
+	"github.com/taigrr/fantasy"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/lsp"

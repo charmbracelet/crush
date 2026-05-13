@@ -3,7 +3,7 @@ package model
 import (
 	"testing"
 
-	"charm.land/catwalk/pkg/catwalk"
+	"github.com/taigrr/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/ui/common"

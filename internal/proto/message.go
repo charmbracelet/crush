@@ -7,7 +7,7 @@ import (
 	"slices"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
+	"github.com/taigrr/catwalk/pkg/catwalk"
 )
 
 // CreateMessageParams represents parameters for creating a message.

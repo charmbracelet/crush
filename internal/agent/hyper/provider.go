@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
+	"github.com/taigrr/catwalk/pkg/catwalk"
 )
 
 //go:generate wget -O provider.json https://hyper.charm.land/v1/provider

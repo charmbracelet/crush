@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"charm.land/fantasy"
+	"github.com/taigrr/fantasy"
 )
 
 // makeStep creates a StepResult with the given tool calls and results in its Content.

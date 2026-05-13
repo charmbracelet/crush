@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
-	"charm.land/fantasy"
-	"charm.land/fantasy/providers/anthropic"
-	"charm.land/fantasy/providers/google"
-	"charm.land/fantasy/providers/openai"
+	"github.com/taigrr/catwalk/pkg/catwalk"
+	"github.com/taigrr/fantasy"
+	"github.com/taigrr/fantasy/providers/anthropic"
+	"github.com/taigrr/fantasy/providers/google"
+	"github.com/taigrr/fantasy/providers/openai"
 	"github.com/charmbracelet/crush/internal/stringext"
 )
 

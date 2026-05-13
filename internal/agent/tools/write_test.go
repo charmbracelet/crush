@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"charm.land/fantasy"
+	"github.com/taigrr/fantasy"
 	"github.com/stretchr/testify/require"
 )
 

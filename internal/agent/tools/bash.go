@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/fantasy"
+	"github.com/taigrr/fantasy"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/permission"

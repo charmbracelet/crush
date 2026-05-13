@@ -9,7 +9,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/catwalk/pkg/catwalk"
+	"github.com/taigrr/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/oauth"

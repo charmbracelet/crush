@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"charm.land/catwalk/pkg/catwalk"
+	"github.com/taigrr/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2/tree"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/mattn/go-isatty"

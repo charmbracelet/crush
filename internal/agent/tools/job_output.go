@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"charm.land/fantasy"
+	"github.com/taigrr/fantasy"
 	"github.com/charmbracelet/crush/internal/shell"
 )
 

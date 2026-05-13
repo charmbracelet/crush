@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"charm.land/fantasy"
+	"github.com/taigrr/fantasy"
 	"github.com/charmbracelet/crush/internal/lsp"
 )
 

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"charm.land/catwalk/pkg/catwalk"
-	"charm.land/fantasy"
+	"github.com/taigrr/catwalk/pkg/catwalk"
+	"github.com/taigrr/fantasy"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

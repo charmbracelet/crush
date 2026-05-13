@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
-	"charm.land/fantasy"
-	"charm.land/fantasy/providers/openaicompat"
+	"github.com/taigrr/catwalk/pkg/catwalk"
+	"github.com/taigrr/fantasy"
+	"github.com/taigrr/fantasy/providers/openaicompat"
 	"charm.land/x/vcr"
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"

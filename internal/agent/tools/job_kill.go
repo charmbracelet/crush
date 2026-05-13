@@ -5,7 +5,7 @@ import (
 	_ "embed"
 	"fmt"
 
-	"charm.land/fantasy"
+	"github.com/taigrr/fantasy"
 	"github.com/charmbracelet/crush/internal/shell"
 )
 

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"charm.land/fantasy"
+	"github.com/taigrr/fantasy"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/stretchr/testify/require"

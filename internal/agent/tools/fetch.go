@@ -11,7 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"charm.land/fantasy"
+	"github.com/taigrr/fantasy"
 	md "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/charmbracelet/crush/internal/permission"

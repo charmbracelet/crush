@@ -16,7 +16,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"charm.land/fantasy"
+	"github.com/taigrr/fantasy"
 	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/lsp"

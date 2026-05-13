@@ -15,8 +15,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/catwalk/pkg/catwalk"
-	"charm.land/fantasy"
+	"github.com/taigrr/catwalk/pkg/catwalk"
+	"github.com/taigrr/fantasy"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/notify"

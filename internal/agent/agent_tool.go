@@ -5,7 +5,7 @@ import (
 	_ "embed"
 	"errors"
 
-	"charm.land/fantasy"
+	"github.com/taigrr/fantasy"
 
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"

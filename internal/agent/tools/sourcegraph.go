@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/fantasy"
+	"github.com/taigrr/fantasy"
 )
 
 type SourcegraphParams struct {

@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/fantasy"
+	"github.com/taigrr/fantasy"
 )
 
 const CrushLogsToolName = "crush_logs"

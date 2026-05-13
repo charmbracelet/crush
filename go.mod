@@ -5,9 +5,7 @@ go 1.26.2
 require (
 	charm.land/bubbles/v2 v2.1.0
 	charm.land/bubbletea/v2 v2.0.6
-	charm.land/catwalk v0.39.5
 	charm.land/fang/v2 v2.0.1
-	charm.land/fantasy v0.23.0
 	charm.land/glamour/v2 v2.0.0
 	charm.land/lipgloss/v2 v2.0.3
 	charm.land/log/v2 v2.0.0
@@ -27,7 +25,6 @@ require (
 	github.com/charmbracelet/ultraviolet v0.0.0-20260416155717-489999b90468
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/charmbracelet/x/editor v0.2.0
-	github.com/charmbracelet/x/etag v0.2.0
 	github.com/charmbracelet/x/exp/charmtone v0.0.0-20260109001716-2fbdffcb221f
 	github.com/charmbracelet/x/exp/golden v0.0.0-20250806222409-83e3a29d542f
 	github.com/charmbracelet/x/exp/ordered v0.1.0
@@ -64,6 +61,8 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/swaggo/http-swagger/v2 v2.0.2
 	github.com/swaggo/swag v1.16.6
+	github.com/taigrr/catwalk v0.40.0
+	github.com/taigrr/fantasy v0.22.0
 	github.com/tidwall/gjson v1.18.0
 	github.com/tidwall/sjson v1.2.5
 	github.com/zeebo/xxh3 v1.1.0
@@ -111,6 +110,7 @@ require (
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/charmbracelet/anthropic-sdk-go v0.0.0-20260223140439-63879b0b8dab // indirect
+	github.com/charmbracelet/x/etag v0.2.0 // indirect
 	github.com/charmbracelet/x/json v0.2.0 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect

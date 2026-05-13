@@ -14,7 +14,7 @@ import (
 	"sort"
 	"strings"
 
-	"charm.land/fantasy"
+	"github.com/taigrr/fantasy"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )

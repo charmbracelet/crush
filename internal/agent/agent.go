@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -54,6 +55,12 @@ const (
 	largeContextWindowThreshold = 200_000
 	largeContextWindowBuffer    = 20_000
 	smallContextWindowRatio     = 0.2
+
+	// Extended context (1M) constants for dynamic mode.
+	extendedContextWindow         = 1_000_000
+	extendedContextSwitchRatio    = 0.8 // switch to extended at 80% of standard window
+	extendedContextSummarizeRatio = 0.9 // summarize at 90% of 1M
+	extendedContextBetaFlag       = "context-1m-2025-08-07"
 )
 
 var userAgent = fmt.Sprintf("Charm-Crush/%s (https://charm.land/crush)", version.Version)
@@ -92,6 +99,7 @@ type SessionAgent interface {
 	Cancel(sessionID string)
 	CancelAll()
 	IsSessionBusy(sessionID string) bool
+	IsExtendedContext(sessionID string) bool
 	IsBusy() bool
 	QueuedPrompts(sessionID string) int
 	QueuedPromptsList(sessionID string) []string
@@ -122,8 +130,9 @@ type sessionAgent struct {
 	isYolo               bool
 	notify               pubsub.Publisher[notify.Notification]
 
-	messageQueue   *csync.Map[string, []SessionAgentCall]
-	activeRequests *csync.Map[string, context.CancelFunc]
+	messageQueue        *csync.Map[string, []SessionAgentCall]
+	activeRequests      *csync.Map[string, context.CancelFunc]
+	extendedContextMode *csync.Map[string, bool] // tracks which sessions are in extended (1M) context mode
 }
 
 type SessionAgentOptions struct {
@@ -159,6 +168,7 @@ func NewSessionAgent(
 		notify:               opts.Notify,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, context.CancelFunc](),
+		extendedContextMode:  csync.NewMap[string, bool](),
 	}
 }
 
@@ -274,11 +284,18 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	if call.MaxOutputTokens > 0 {
 		maxOutputTokens = &call.MaxOutputTokens
 	}
+
+	// Inject 1M context beta flag if needed (extended or dynamic mode).
+	providerOpts := call.ProviderOptions
+	if a.useExtendedContext(call.SessionID, largeModel) {
+		providerOpts = addExtendedContextBeta(providerOpts)
+	}
+
 	result, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
 		Files:            files,
 		Messages:         history,
-		ProviderOptions:  call.ProviderOptions,
+		ProviderOptions:  providerOpts,
 		MaxOutputTokens:  maxOutputTokens,
 		TopP:             call.TopP,
 		Temperature:      call.Temperature,
@@ -460,14 +477,54 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return a.messages.Update(genCtx, *currentAssistant)
 		},
 		StopWhen: []fantasy.StopCondition{
-			func(_ []fantasy.StepResult) bool {
+			func(steps []fantasy.StepResult) bool {
 				cw := int64(largeModel.CatwalkCfg.ContextWindow)
 				// If context window is unknown (0), skip auto-summarize
 				// to avoid immediately truncating custom/local models.
 				if cw == 0 {
 					return false
 				}
-				tokens := currentSession.CompletionTokens + currentSession.PromptTokens
+				// Use the most recent step's input usage as a proxy for the
+				// current context size. Cumulative session tokens grow
+				// monotonically and would falsely trigger summarization even
+				// when the active context is small.
+				var tokens int64
+				if len(steps) > 0 {
+					last := steps[len(steps)-1]
+					tokens = last.Usage.InputTokens + last.Usage.CacheReadTokens + last.Usage.CacheCreationTokens + last.Usage.OutputTokens
+				}
+				// Fall back to cumulative session totals only when no step
+				// usage is available (e.g., first call in some providers).
+				if tokens == 0 {
+					tokens = currentSession.CompletionTokens + currentSession.PromptTokens
+				}
+
+				// Handle dynamic context mode for models that support 1M context.
+				if largeModel.ModelCfg.ContextMode == config.ContextModeDynamic && largeModel.CatwalkCfg.Supports1MContext {
+					inExtended, _ := a.extendedContextMode.Get(call.SessionID)
+					if inExtended {
+						// In extended mode: summarize at 90% of 1M.
+						threshold := int64(float64(extendedContextWindow) * extendedContextSummarizeRatio)
+						if tokens >= threshold && !a.disableAutoSummarize {
+							// Reset to standard mode after summarization.
+							a.extendedContextMode.Set(call.SessionID, false)
+							shouldSummarize = true
+							return true
+						}
+					} else {
+						// In standard mode: switch to extended at 80% of standard window.
+						threshold := int64(float64(cw) * extendedContextSwitchRatio)
+						if tokens >= threshold {
+							// Switch to extended mode for the NEXT call (don't stop current).
+							a.extendedContextMode.Set(call.SessionID, true)
+							slog.Info("Switching to extended context mode", "session_id", call.SessionID, "tokens", tokens)
+						}
+					}
+					// Don't stop for standard auto-summarize in dynamic mode.
+					return false
+				}
+
+				// Standard auto-summarize logic for non-dynamic modes.
 				remaining := cw - tokens
 				var threshold int64
 				if cw > largeContextWindowThreshold {
@@ -796,6 +853,66 @@ func (a *sessionAgent) getCacheControlOptions() fantasy.ProviderOptions {
 	}
 }
 
+// useExtendedContext returns true if the current request should use extended (1M) context mode.
+// This is based on the model's context_mode setting and the current session state.
+func (a *sessionAgent) useExtendedContext(sessionID string, model Model) bool {
+	if !model.CatwalkCfg.Supports1MContext {
+		return false
+	}
+	switch model.ModelCfg.ContextMode {
+	case config.ContextModeExtended:
+		return true
+	case config.ContextModeDynamic:
+		inExtended, _ := a.extendedContextMode.Get(sessionID)
+		return inExtended
+	default:
+		return false
+	}
+}
+
+// IsExtendedContext returns whether the given session is currently using
+// extended (1M) context mode.
+func (a *sessionAgent) IsExtendedContext(sessionID string) bool {
+	model := a.largeModel.Get()
+	return a.useExtendedContext(sessionID, model)
+}
+
+// addExtendedContextBeta injects the 1M context beta flag into the provider options.
+// It returns a new ProviderOptions map with the beta flag added for anthropic/bedrock providers.
+func addExtendedContextBeta(opts fantasy.ProviderOptions) fantasy.ProviderOptions {
+	if opts == nil {
+		opts = fantasy.ProviderOptions{}
+	}
+
+	// Helper to add beta flag to anthropic options.
+	addBeta := func(existing *anthropic.ProviderOptions) *anthropic.ProviderOptions {
+		if existing == nil {
+			return &anthropic.ProviderOptions{Betas: []string{extendedContextBetaFlag}}
+		}
+		// Avoid duplicate beta flags.
+		if slices.Contains(existing.Betas, extendedContextBetaFlag) {
+			return existing
+		}
+		existing.Betas = append(existing.Betas, extendedContextBetaFlag)
+		return existing
+	}
+
+	// Add beta flag for both anthropic and bedrock providers.
+	if existing, ok := opts[anthropic.Name].(*anthropic.ProviderOptions); ok {
+		opts[anthropic.Name] = addBeta(existing)
+	} else {
+		opts[anthropic.Name] = addBeta(nil)
+	}
+
+	if existing, ok := opts[bedrock.Name].(*anthropic.ProviderOptions); ok {
+		opts[bedrock.Name] = addBeta(existing)
+	} else {
+		opts[bedrock.Name] = addBeta(nil)
+	}
+
+	return opts
+}
+
 func (a *sessionAgent) createUserMessage(ctx context.Context, call SessionAgentCall) (message.Message, error) {
 	parts := []message.ContentPart{message.TextContent{Text: call.Prompt}}
 	var attachmentParts []message.ContentPart
@@ -1094,10 +1211,24 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	}
 
 	modelConfig := model.CatwalkCfg
-	cost := modelConfig.CostPer1MInCached/1e6*float64(resp.TotalUsage.CacheCreationTokens) +
+
+	// Use long context pricing if extended mode is active and prompt exceeds 200K.
+	costIn := modelConfig.CostPer1MIn
+	costOut := modelConfig.CostPer1MOut
+	costInCached := modelConfig.CostPer1MInCached
+	if a.useExtendedContext(sessionID, model) {
+		promptTokens := resp.TotalUsage.InputTokens + resp.TotalUsage.CacheReadTokens + resp.TotalUsage.CacheCreationTokens
+		if promptTokens > largeContextWindowThreshold && modelConfig.LongContextCostPer1MIn > 0 {
+			costIn = modelConfig.LongContextCostPer1MIn
+			costOut = modelConfig.LongContextCostPer1MOut
+			costInCached = modelConfig.LongContextCostPer1MInCached
+		}
+	}
+
+	cost := costInCached/1e6*float64(resp.TotalUsage.CacheCreationTokens) +
 		modelConfig.CostPer1MOutCached/1e6*float64(resp.TotalUsage.CacheReadTokens) +
-		modelConfig.CostPer1MIn/1e6*float64(resp.TotalUsage.InputTokens) +
-		modelConfig.CostPer1MOut/1e6*float64(resp.TotalUsage.OutputTokens)
+		costIn/1e6*float64(resp.TotalUsage.InputTokens) +
+		costOut/1e6*float64(resp.TotalUsage.OutputTokens)
 
 	// Use override cost if available (e.g., from OpenRouter).
 	if openrouterCost != nil {
@@ -1136,10 +1267,26 @@ func (a *sessionAgent) openrouterCost(metadata fantasy.ProviderMetadata) *float6
 
 func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session, usage fantasy.Usage, overrideCost *float64) {
 	modelConfig := model.CatwalkCfg
-	cost := modelConfig.CostPer1MInCached/1e6*float64(usage.CacheCreationTokens) +
+
+	// Determine pricing tier: when extended (1M) context is active AND the
+	// prompt exceeds the standard 200K threshold, Anthropic charges premium
+	// long-context rates.
+	costIn := modelConfig.CostPer1MIn
+	costOut := modelConfig.CostPer1MOut
+	costInCached := modelConfig.CostPer1MInCached
+	if a.useExtendedContext(session.ID, model) {
+		promptTokens := usage.InputTokens + usage.CacheReadTokens + usage.CacheCreationTokens
+		if promptTokens > largeContextWindowThreshold && modelConfig.LongContextCostPer1MIn > 0 {
+			costIn = modelConfig.LongContextCostPer1MIn
+			costOut = modelConfig.LongContextCostPer1MOut
+			costInCached = modelConfig.LongContextCostPer1MInCached
+		}
+	}
+
+	cost := costInCached/1e6*float64(usage.CacheCreationTokens) +
 		modelConfig.CostPer1MOutCached/1e6*float64(usage.CacheReadTokens) +
-		modelConfig.CostPer1MIn/1e6*float64(usage.InputTokens) +
-		modelConfig.CostPer1MOut/1e6*float64(usage.OutputTokens)
+		costIn/1e6*float64(usage.InputTokens) +
+		costOut/1e6*float64(usage.OutputTokens)
 
 	a.eventTokensUsed(session.ID, model, usage, cost)
 

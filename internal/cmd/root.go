@@ -614,12 +614,15 @@ func restartIfStale(cmd *cobra.Command, hostURL *url.URL) (restarted bool, err e
 	if err != nil {
 		return false, err
 	}
-	if vi.Version == version.Version {
+	if vi.Version == version.Version && vi.BuildID == version.BuildID {
 		return false, nil
 	}
-	slog.Info("Server version mismatch, restarting",
-		"server", vi.Version,
-		"client", version.Version,
+	slog.Info(
+		"Server version mismatch, restarting",
+		"server_version", vi.Version,
+		"client_version", version.Version,
+		"server_build_id", vi.BuildID,
+		"client_build_id", version.BuildID,
 	)
 	_ = c.ShutdownServer(cmd.Context())
 	// Give the old process a moment to release the socket.

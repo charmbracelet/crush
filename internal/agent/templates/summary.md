@@ -1,4 +1,4 @@
-You are summarizing a conversation to preserve context for continuing work later.
+The conversation context above needs to be compacted. Summarize the key information into a detailed context summary so work can continue without losing important details.
 
 **Critical**: This summary will be the ONLY context available when the conversation resumes. Assume all previous messages will be lost. Be thorough.
 

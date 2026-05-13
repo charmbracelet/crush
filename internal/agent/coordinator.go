@@ -364,12 +364,15 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		case deepseek.Name:
 			// The openai SDK doesn't have a "max" ReasoningEffort value,
 			// so we send "xhigh" instead — DeepSeek treats "xhigh" as "max".
-			if model.ModelCfg.ReasoningEffort == "max" {
-				mergedOptions["reasoning_effort"] = "xhigh"
-			}
-
-			// Thinking mode (passes reasoning_content in responses).
+			// "low"/"medium" are silently mapped to "high" by the API.
 			if model.ModelCfg.ReasoningEffort != "" {
+				effort := model.ModelCfg.ReasoningEffort
+				if effort == "max" {
+					effort = "xhigh"
+				}
+				mergedOptions["reasoning_effort"] = effort
+
+				// Thinking mode (passes reasoning_content in responses).
 				extraBody["thinking"] = map[string]any{
 					"type": "enabled",
 				}

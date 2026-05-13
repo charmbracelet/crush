@@ -346,7 +346,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		if err == nil {
 			options[google.Name] = parsed
 		}
-	case openaicompat.Name, hyper.Name, deepseek.Name:
+	case openaicompat.Name, hyper.Name:
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
 		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
 			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
@@ -361,22 +361,6 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		switch providerCfg.ID {
 		case hyper.Name:
 			extraBody["thinking"] = model.ModelCfg.Think
-		case deepseek.Name:
-			// The openai SDK doesn't have a "max" ReasoningEffort value,
-			// so we send "xhigh" instead — DeepSeek treats "xhigh" as "max".
-			// "low"/"medium" are silently mapped to "high" by the API.
-			if model.ModelCfg.ReasoningEffort != "" {
-				effort := model.ModelCfg.ReasoningEffort
-				if effort == "max" {
-					effort = "xhigh"
-				}
-				mergedOptions["reasoning_effort"] = effort
-
-				// Thinking mode (passes reasoning_content in responses).
-				extraBody["thinking"] = map[string]any{
-					"type": "enabled",
-				}
-			}
 		case string(catwalk.InferenceProviderIoNet):
 			extraBody["chat_template_kwargs"] = map[string]any{
 				"thinking": model.ModelCfg.Think,
@@ -394,6 +378,30 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		}
 
 		mergedOptions["extra_body"] = extraBody
+
+		parsed, err := openaicompat.ParseOptions(mergedOptions)
+		if err == nil {
+			options[openaicompat.Name] = parsed
+		}
+	case deepseek.Name:
+		// The openai SDK doesn't have a "max" ReasoningEffort value,
+		// so we send "xhigh" instead — DeepSeek treats "xhigh" as "max".
+		// "low"/"medium" are silently mapped to "high" by the API.
+		if model.ModelCfg.ReasoningEffort != "" {
+			effort := model.ModelCfg.ReasoningEffort
+			if effort == "max" {
+				effort = "xhigh"
+			}
+			mergedOptions["reasoning_effort"] = effort
+
+			// Thinking mode (passes reasoning_content in responses).
+			extraBody := map[string]any{
+				"thinking": map[string]any{
+					"type": "enabled",
+				},
+			}
+			mergedOptions["extra_body"] = extraBody
+		}
 
 		parsed, err := openaicompat.ParseOptions(mergedOptions)
 		if err == nil {
@@ -759,6 +767,27 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 	return openaicompat.New(opts...)
 }
 
+func (c *coordinator) buildDeepSeekProvider(apiKey string, headers map[string]string, extraBody map[string]any) (fantasy.Provider, error) {
+	opts := []openaicompat.Option{
+		openaicompat.WithBaseURL(deepseek.BaseURL() + "/v1"),
+		openaicompat.WithAPIKey(apiKey),
+	}
+
+	if c.cfg.Config().Options.Debug {
+		opts = append(opts, openaicompat.WithHTTPClient(log.NewHTTPClient()))
+	}
+
+	if len(headers) > 0 {
+		opts = append(opts, openaicompat.WithHeaders(headers))
+	}
+
+	for extraKey, extraValue := range extraBody {
+		opts = append(opts, openaicompat.WithSDKOptions(openaisdk.WithJSONSet(extraKey, extraValue)))
+	}
+
+	return openaicompat.New(opts...)
+}
+
 func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[string]string, options map[string]string) (fantasy.Provider, error) {
 	opts := []azure.Option{
 		azure.WithBaseURL(baseURL),
@@ -878,20 +907,15 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		return c.buildGoogleProvider(baseURL, apiKey, headers)
 	case "google-vertex":
 		return c.buildGoogleVertexProvider(headers, providerCfg.ExtraParams)
-	case openaicompat.Name, hyper.Name, deepseek.Name:
+	case openaicompat.Name, hyper.Name:
 		switch providerCfg.ID {
 		case hyper.Name:
 			baseURL = hyper.BaseURL() + "/v1"
 			headers["x-crush-id"] = event.GetID()
-		case deepseek.Name:
-			baseURL = deepseek.BaseURL() + "/v1"
-		case string(catwalk.InferenceProviderZAI):
-			if providerCfg.ExtraBody == nil {
-				providerCfg.ExtraBody = map[string]any{}
-			}
-			providerCfg.ExtraBody["tool_stream"] = true
 		}
 		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent)
+	case deepseek.Name:
+		return c.buildDeepSeekProvider(apiKey, headers, providerCfg.ExtraBody)
 	default:
 		return nil, fmt.Errorf("provider type not supported: %q", providerCfg.Type)
 	}

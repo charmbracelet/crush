@@ -165,13 +165,13 @@ func extractArgNames(content string) []Argument {
 		return nil
 	}
 
-	seen := make(map[string]bool)
+	seen := make(map[string]struct{})
 	var args []Argument
 
 	for _, match := range matches {
 		arg := match[1]
-		if !seen[arg] {
-			seen[arg] = true
+		if _, ok := seen[arg]; !ok {
+			seen[arg] = struct{}{}
 			// for normal custom commands, all args are required
 			args = append(args, Argument{ID: arg, Title: arg, Required: true})
 		}

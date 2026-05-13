@@ -351,7 +351,7 @@ func (m *Models) setProviderItems() error {
 	recentItems := cfg.RecentModels[selectedType]
 
 	// Track providers already added to avoid duplicates
-	addedProviders := make(map[string]bool)
+	addedProviders := make(map[string]struct{})
 
 	// Get a list of known providers to compare against
 	knownProviders, err := config.Providers(cfg)
@@ -381,7 +381,7 @@ func (m *Models) setProviderItems() error {
 			// Add this unknown provider to the list
 			name := cmp.Or(p.Name, id)
 
-			addedProviders[id] = true
+			addedProviders[id] = struct{}{}
 
 			group := NewModelGroup(t, name, true)
 			for _, model := range p.Models {
@@ -414,7 +414,7 @@ func (m *Models) setProviderItems() error {
 	// Now add known providers from the predefined list
 	for _, provider := range m.providers {
 		providerID := string(provider.ID)
-		if addedProviders[providerID] {
+		if _, ok := addedProviders[providerID]; ok {
 			continue
 		}
 

@@ -615,7 +615,7 @@ type sessionShowPart struct {
 
 func extractSkillsFromMessages(msgs []*message.Message) []sessionShowSkill {
 	var skills []sessionShowSkill
-	seen := make(map[string]bool)
+	seen := make(map[string]struct{})
 
 	for _, msg := range msgs {
 		for _, part := range msg.Parts {
@@ -623,8 +623,8 @@ func extractSkillsFromMessages(msgs []*message.Message) []sessionShowSkill {
 				var meta tools.ViewResponseMetadata
 				if err := json.Unmarshal([]byte(tr.Metadata), &meta); err == nil {
 					if meta.ResourceType == tools.ViewResourceSkill && meta.ResourceName != "" {
-						if !seen[meta.ResourceName] {
-							seen[meta.ResourceName] = true
+						if _, ok := seen[meta.ResourceName]; !ok {
+							seen[meta.ResourceName] = struct{}{}
 							skills = append(skills, sessionShowSkill{
 								Name:        meta.ResourceName,
 								Description: meta.ResourceDescription,

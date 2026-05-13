@@ -165,7 +165,7 @@ func PushPopCrushEnv() func() {
 }
 
 func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver VariableResolver, knownProviders []catwalk.Provider) error {
-	knownProviderNames := make(map[string]bool)
+	knownProviderNames := make(map[string]struct{})
 	restore := PushPopCrushEnv()
 	defer restore()
 
@@ -178,7 +178,7 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 	}
 
 	for _, p := range knownProviders {
-		knownProviderNames[string(p.ID)] = true
+		knownProviderNames[string(p.ID)] = struct{}{}
 		config, configExists := c.Providers.Get(string(p.ID))
 		// if the user configured a known provider we need to allow it to override a couple of parameters
 		if configExists {
@@ -190,23 +190,23 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 			}
 			if len(config.Models) > 0 {
 				models := []catwalk.Model{}
-				seen := make(map[string]bool)
+				seen := make(map[string]struct{})
 
 				for _, model := range config.Models {
-					if seen[model.ID] {
+					if _, ok := seen[model.ID]; ok {
 						continue
 					}
-					seen[model.ID] = true
+					seen[model.ID] = struct{}{}
 					if model.Name == "" {
 						model.Name = model.ID
 					}
 					models = append(models, model)
 				}
 				for _, model := range p.Models {
-					if seen[model.ID] {
+					if _, ok := seen[model.ID]; ok {
 						continue
 					}
-					seen[model.ID] = true
+					seen[model.ID] = struct{}{}
 					if model.Name == "" {
 						model.Name = model.ID
 					}
@@ -343,7 +343,7 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 
 	// validate the custom providers
 	for id, providerConfig := range c.Providers.Seq2() {
-		if knownProviderNames[id] {
+		if _, ok := knownProviderNames[id]; ok {
 			continue
 		}
 

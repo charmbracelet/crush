@@ -58,11 +58,11 @@ func (m *UI) skillStatusItems() []skillStatusItem {
 	var items []skillStatusItem
 	stateNames := make(map[string]struct{}, len(m.skillStates))
 
-	disabledSet := make(map[string]bool)
+	disabledSet := make(map[string]struct{})
 	if m.com != nil && m.com.Workspace != nil {
 		if cfg := m.com.Config(); cfg != nil {
 			for _, name := range cfg.Options.DisabledSkills {
-				disabledSet[name] = true
+				disabledSet[name] = struct{}{}
 			}
 		}
 	}
@@ -76,7 +76,7 @@ func (m *UI) skillStatusItems() []skillStatusItem {
 		if name == "" {
 			name = filepath.Base(filepath.Dir(state.Path))
 		}
-		if disabledSet[name] {
+		if _, ok := disabledSet[name]; ok {
 			continue
 		}
 		if _, exists := stateNames[name]; exists {
@@ -102,7 +102,7 @@ func (m *UI) skillStatusItems() []skillStatusItem {
 		if _, ok := stateNames[skill.Name]; ok {
 			continue
 		}
-		if disabledSet[skill.Name] {
+		if _, ok := disabledSet[skill.Name]; ok {
 			continue
 		}
 		items = append(items, skillStatusItem{

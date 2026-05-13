@@ -94,13 +94,13 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 	}
 
 	// Deduplicate by command string.
-	seen := make(map[string]bool, len(matching))
+	seen := make(map[string]struct{}, len(matching))
 	var deduped []config.HookConfig
 	for _, h := range matching {
-		if seen[h.Command] {
+		if _, ok := seen[h.Command]; ok {
 			continue
 		}
-		seen[h.Command] = true
+		seen[h.Command] = struct{}{}
 		deduped = append(deduped, h)
 	}
 

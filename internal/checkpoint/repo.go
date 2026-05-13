@@ -492,12 +492,12 @@ func (r *Repo) restoreTree(tree *object.Tree, targetDir string, relPath string) 
 	}
 
 	// Track files we restore so we can clean up extras.
-	restored := make(map[string]bool)
+	restored := make(map[string]struct{})
 
 	for _, entry := range tree.Entries {
 		targetPath := filepath.Join(targetDir, entry.Name)
 		entryRelPath := filepath.Join(relPath, entry.Name)
-		restored[entry.Name] = true
+		restored[entry.Name] = struct{}{}
 
 		switch entry.Mode {
 		case filemode.Dir:
@@ -576,7 +576,7 @@ func (r *Repo) restoreTree(tree *object.Tree, targetDir string, relPath string) 
 		if name == ".git" || name == ".crush" {
 			continue
 		}
-		if restored[name] {
+		if _, ok := restored[name]; ok {
 			continue
 		}
 

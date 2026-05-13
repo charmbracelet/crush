@@ -193,7 +193,7 @@ func DiscoverWithStates(paths []string) ([]*Skill, []*SkillState) {
 	var skills []*Skill
 	var states []*SkillState
 	var mu sync.Mutex
-	seen := make(map[string]bool)
+	seen := make(map[string]struct{})
 	addState := func(name, path string, state DiscoveryState, err error) {
 		mu.Lock()
 		states = append(states, &SkillState{
@@ -224,11 +224,11 @@ func DiscoverWithStates(paths []string) ([]*Skill, []*SkillState) {
 				return nil
 			}
 			mu.Lock()
-			if seen[path] {
+			if _, ok := seen[path]; ok {
 				mu.Unlock()
 				return nil
 			}
-			seen[path] = true
+			seen[path] = struct{}{}
 			mu.Unlock()
 			skill, err := Parse(path)
 			if err != nil {
@@ -332,14 +332,14 @@ func Filter(all []*Skill, disabled []string) []*Skill {
 		return all
 	}
 
-	disabledSet := make(map[string]bool, len(disabled))
+	disabledSet := make(map[string]struct{}, len(disabled))
 	for _, name := range disabled {
-		disabledSet[name] = true
+		disabledSet[name] = struct{}{}
 	}
 
 	result := make([]*Skill, 0, len(all))
 	for _, s := range all {
-		if !disabledSet[s.Name] {
+		if _, disabled := disabledSet[s.Name]; !disabled {
 			result = append(result, s)
 		}
 	}

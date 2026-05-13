@@ -875,7 +875,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 			if providerCfg.ExtraBody == nil {
 				providerCfg.ExtraBody = map[string]any{}
 			}
-			providerCfg.ExtraBody["tool_stream"] = true
+			providerCfg.ExtraBody["tool_stream"] = struct{}{}
 		}
 		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent)
 	default:
@@ -1177,13 +1177,13 @@ func logTurnSkillUsage(
 
 	after := tracker.LoadedNames()
 
-	beforeSet := make(map[string]bool, len(before))
+	beforeSet := make(map[string]struct{}, len(before))
 	for _, n := range before {
-		beforeSet[n] = true
+		beforeSet[n] = struct{}{}
 	}
 	var loadedThisTurn []string
 	for _, n := range after {
-		if !beforeSet[n] {
+		if _, ok := beforeSet[n]; !ok {
 			loadedThisTurn = append(loadedThisTurn, n)
 		}
 	}

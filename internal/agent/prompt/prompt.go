@@ -169,9 +169,9 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 
 	// Start with builtin skills.
 	allSkills := skills.DiscoverBuiltin()
-	builtinNames := make(map[string]bool, len(allSkills))
+	builtinNames := make(map[string]struct{}, len(allSkills))
 	for _, s := range allSkills {
-		builtinNames[s.Name] = true
+		builtinNames[s.Name] = struct{}{}
 	}
 
 	// Discover user skills from configured paths.
@@ -181,7 +181,7 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 			expandedPaths = append(expandedPaths, expandPath(pth, store))
 		}
 		for _, userSkill := range skills.Discover(expandedPaths) {
-			if builtinNames[userSkill.Name] {
+			if _, ok := builtinNames[userSkill.Name]; ok {
 				slog.Warn("User skill overrides builtin skill", "name", userSkill.Name)
 			}
 			allSkills = append(allSkills, userSkill)

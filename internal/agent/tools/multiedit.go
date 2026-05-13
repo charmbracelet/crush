@@ -29,6 +29,7 @@ type MultiEditOperation struct {
 type MultiEditParams struct {
 	FilePath string               `json:"file_path" description:"The absolute path to the file to modify"`
 	Edits    []MultiEditOperation `json:"edits" description:"Array of edit operations to perform sequentially on the file"`
+	Reason   string               `json:"reason,omitempty" description:"Brief explanation of why these edits are being made"`
 }
 
 type MultiEditPermissionsParams struct {
@@ -185,6 +186,7 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 		ToolName:    MultiEditToolName,
 		Action:      "write",
 		Description: description,
+		Reason:      params.Reason,
 		Params: MultiEditPermissionsParams{
 			FilePath:   params.FilePath,
 			OldContent: "",
@@ -327,6 +329,7 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 		ToolName:    MultiEditToolName,
 		Action:      "write",
 		Description: description,
+		Reason:      params.Reason,
 		Params: MultiEditPermissionsParams{
 			FilePath:   params.FilePath,
 			OldContent: oldContent,

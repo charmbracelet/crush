@@ -27,6 +27,7 @@ var writeDescription string
 type WriteParams struct {
 	FilePath string `json:"file_path" description:"The path to the file to write"`
 	Content  string `json:"content" description:"The content to write to the file"`
+	Reason   string `json:"reason,omitempty" description:"Brief explanation of why this file is being written"`
 }
 
 type WritePermissionsParams struct {
@@ -113,6 +114,7 @@ func NewWriteTool(
 					ToolName:    WriteToolName,
 					Action:      "write",
 					Description: fmt.Sprintf("Create file %s", filePath),
+					Reason: params.Reason,
 					Params: WritePermissionsParams{
 						FilePath:   filePath,
 						OldContent: oldContent,

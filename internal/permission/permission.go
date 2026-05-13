@@ -39,6 +39,7 @@ type CreatePermissionRequest struct {
 	ToolCallID  string `json:"tool_call_id"`
 	ToolName    string `json:"tool_name"`
 	Description string `json:"description"`
+	Reason      string `json:"reason"`
 	Action      string `json:"action"`
 	Params      any    `json:"params"`
 	Path        string `json:"path"`
@@ -56,6 +57,7 @@ type PermissionRequest struct {
 	ToolCallID  string `json:"tool_call_id"`
 	ToolName    string `json:"tool_name"`
 	Description string `json:"description"`
+	Reason      string `json:"reason"`
 	Action      string `json:"action"`
 	Params      any    `json:"params"`
 	Path        string `json:"path"`
@@ -221,6 +223,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		ToolCallID:  opts.ToolCallID,
 		ToolName:    opts.ToolName,
 		Description: opts.Description,
+		Reason:      opts.Reason,
 		Action:      opts.Action,
 		Params:      opts.Params,
 	}

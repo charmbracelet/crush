@@ -26,6 +26,7 @@ type EditParams struct {
 	OldString  string `json:"old_string" description:"The text to replace"`
 	NewString  string `json:"new_string" description:"The text to replace it with"`
 	ReplaceAll bool   `json:"replace_all,omitempty" description:"Replace all occurrences of old_string (default false)"`
+	Reason     string `json:"reason,omitempty" description:"Brief explanation of why this edit is being made"`
 }
 
 type EditPermissionsParams struct {
@@ -82,11 +83,11 @@ func NewEditTool(
 			editCtx := editContext{ctx, permissions, files, filetracker, workingDir}
 
 			if params.OldString == "" {
-				response, err = createNewFile(editCtx, params.FilePath, params.NewString, call)
+				response, err = createNewFile(editCtx, params.FilePath, params.NewString, params.Reason, call)
 			} else if params.NewString == "" {
-				response, err = deleteContent(editCtx, params.FilePath, params.OldString, params.ReplaceAll, call)
+				response, err = deleteContent(editCtx, params.FilePath, params.OldString, params.ReplaceAll, params.Reason, call)
 			} else {
-				response, err = replaceContent(editCtx, params.FilePath, params.OldString, params.NewString, params.ReplaceAll, call)
+				response, err = replaceContent(editCtx, params.FilePath, params.OldString, params.NewString, params.ReplaceAll, params.Reason, call)
 			}
 
 			if err != nil {
@@ -107,7 +108,7 @@ func NewEditTool(
 		})
 }
 
-func createNewFile(edit editContext, filePath, content string, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+func createNewFile(edit editContext, filePath, content, reason string, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 	fileInfo, err := os.Stat(filePath)
 	if err == nil {
 		if fileInfo.IsDir() {
@@ -141,6 +142,7 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 			ToolName:    EditToolName,
 			Action:      "write",
 			Description: fmt.Sprintf("Create file %s", filePath),
+			Reason: reason,
 			Params: EditPermissionsParams{
 				FilePath:   filePath,
 				OldContent: "",
@@ -187,7 +189,7 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 	), nil
 }
 
-func deleteContent(edit editContext, filePath, oldString string, replaceAll bool, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+func deleteContent(edit editContext, filePath, oldString string, replaceAll bool, reason string, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -260,6 +262,7 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 			ToolName:    EditToolName,
 			Action:      "write",
 			Description: fmt.Sprintf("Delete content from file %s", filePath),
+			Reason: reason,
 			Params: EditPermissionsParams{
 				FilePath:   filePath,
 				OldContent: oldContent,
@@ -318,7 +321,7 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 	), nil
 }
 
-func replaceContent(edit editContext, filePath, oldString, newString string, replaceAll bool, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+func replaceContent(edit editContext, filePath, oldString, newString string, replaceAll bool, reason string, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -391,6 +394,7 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 			ToolName:    EditToolName,
 			Action:      "write",
 			Description: fmt.Sprintf("Replace content in file %s", filePath),
+			Reason: reason,
 			Params: EditPermissionsParams{
 				FilePath:   filePath,
 				OldContent: oldContent,

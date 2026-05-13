@@ -13,7 +13,6 @@ import (
 	"charm.land/log/v2"
 	"github.com/taigrr/crush/internal/client"
 	"github.com/taigrr/crush/internal/config"
-	"github.com/taigrr/crush/internal/event"
 	"github.com/taigrr/crush/internal/format"
 	"github.com/taigrr/crush/internal/proto"
 	"github.com/taigrr/crush/internal/pubsub"
@@ -84,13 +83,10 @@ crush run --continue "Follow up on your last response"
 			return fmt.Errorf("no prompt provided")
 		}
 
-		event.SetNonInteractive(true)
 
 		switch {
 		case sessionID != "":
-			event.SetContinueBySessionID(true)
 		case useLast:
-			event.SetContinueLastSession(true)
 		}
 
 		c, ws, cleanup, err := connectToServer(cmd)
@@ -99,7 +95,6 @@ crush run --continue "Follow up on your last response"
 		}
 		defer cleanup()
 
-		event.AppInitialized()
 
 		if sessionID != "" {
 			sess, err := resolveSessionByID(ctx, c, ws.ID, sessionID)

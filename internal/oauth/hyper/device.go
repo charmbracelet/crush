@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/taigrr/crush/internal/agent/hyper"
-	"github.com/taigrr/crush/internal/event"
 	"github.com/taigrr/crush/internal/oauth"
 )
 
@@ -102,7 +101,6 @@ func PollForToken(ctx context.Context, deviceCode string, expiresIn int) (string
 				return "", err
 			}
 			if result.RefreshToken != "" {
-				event.Alias(result.UserID)
 				return result.RefreshToken, nil
 			}
 			switch result.Error {

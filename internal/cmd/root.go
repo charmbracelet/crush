@@ -23,7 +23,6 @@ import (
 	"github.com/charmbracelet/colorprofile"
 	"github.com/taigrr/crush/internal/client"
 	"github.com/taigrr/crush/internal/config"
-	"github.com/taigrr/crush/internal/event"
 	crushlog "github.com/taigrr/crush/internal/log"
 	"github.com/taigrr/crush/internal/proto"
 	"github.com/taigrr/crush/internal/server"
@@ -114,7 +113,6 @@ crush --continue
 			sessionID = sess.ID
 		}
 
-		event.AppInitialized()
 
 		com := common.DefaultCommon(ws)
 		model := ui.New(com, sessionID, continueLast)
@@ -129,7 +127,6 @@ crush --continue
 		go ws.Subscribe(program)
 
 		if _, err := program.Run(); err != nil {
-			event.Error(err)
 			slog.Error("TUI run error", "error", err)
 			return errors.New("Crush crashed. If metrics are enabled, we were notified about it. If you'd like to report it, please copy the stacktrace above and open an issue at https://github.com/taigrr/crush/issues/new?template=bug.yml") //nolint:staticcheck
 		}
@@ -300,7 +297,6 @@ func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func
 	}
 
 	if shouldEnableMetrics(ws.Config) {
-		event.Init()
 	}
 
 	if ws.Config != nil {

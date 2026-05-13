@@ -274,8 +274,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	history, files := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages, call.Attachments...)
 
-	startTime := time.Now()
-	a.eventPromptSent(call.SessionID)
 
 	var currentAssistant *message.Message
 	var shouldSummarize bool
@@ -544,7 +542,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		},
 	})
 
-	a.eventPromptResponded(call.SessionID, time.Since(startTime).Truncate(time.Second))
 
 	if err != nil {
 		isHyper := largeModel.ModelCfg.Provider == hyper.Name
@@ -1288,7 +1285,6 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 		costIn/1e6*float64(usage.InputTokens) +
 		costOut/1e6*float64(usage.OutputTokens)
 
-	a.eventTokensUsed(session.ID, model, usage, cost)
 
 	// Use override cost if available (e.g., from OpenRouter).
 	if overrideCost != nil {

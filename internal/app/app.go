@@ -24,7 +24,6 @@ import (
 	"github.com/taigrr/crush/internal/checkpoint"
 	"github.com/taigrr/crush/internal/config"
 	"github.com/taigrr/crush/internal/db"
-	"github.com/taigrr/crush/internal/event"
 	"github.com/taigrr/crush/internal/filetracker"
 	"github.com/taigrr/crush/internal/fork"
 	"github.com/taigrr/crush/internal/format"
@@ -669,7 +668,6 @@ func (app *App) Shutdown() {
 
 	// Send exit event
 	wg.Go(func() {
-		event.AppExited()
 	})
 
 	// Kill all background shells.

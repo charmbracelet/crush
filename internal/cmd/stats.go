@@ -16,7 +16,6 @@ import (
 
 	"github.com/taigrr/crush/internal/config"
 	"github.com/taigrr/crush/internal/db"
-	"github.com/taigrr/crush/internal/event"
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
 )
@@ -132,10 +131,8 @@ func runStats(cmd *cobra.Command, _ []string) error {
 		dataDir = cfg.Config().Options.DataDirectory
 	}
 	if shouldEnableMetrics(cfg.Config()) {
-		event.Init()
 	}
 
-	event.StatsViewed()
 
 	conn, err := db.Connect(ctx, dataDir)
 	if err != nil {

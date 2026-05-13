@@ -70,6 +70,7 @@ type Coordinator interface {
 	Cancel(sessionID string)
 	CancelAll()
 	IsSessionBusy(sessionID string) bool
+	IsExtendedContext(sessionID string) bool
 	IsBusy() bool
 	QueuedPrompts(sessionID string) int
 	QueuedPromptsList(sessionID string) []string
@@ -913,6 +914,10 @@ func (c *coordinator) IsBusy() bool {
 
 func (c *coordinator) IsSessionBusy(sessionID string) bool {
 	return c.currentAgent.IsSessionBusy(sessionID)
+}
+
+func (c *coordinator) IsExtendedContext(sessionID string) bool {
+	return c.currentAgent.IsExtendedContext(sessionID)
 }
 
 func (c *coordinator) Model() Model {

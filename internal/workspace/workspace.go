@@ -85,6 +85,7 @@ type Workspace interface {
 	AgentCancel(sessionID string)
 	AgentIsBusy() bool
 	AgentIsSessionBusy(sessionID string) bool
+	AgentIsExtendedContext(sessionID string) bool
 	AgentModel() AgentModel
 	AgentIsReady() bool
 	AgentQueuedPrompts(sessionID string) int

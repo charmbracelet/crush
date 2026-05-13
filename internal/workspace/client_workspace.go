@@ -209,6 +209,14 @@ func (w *ClientWorkspace) AgentIsSessionBusy(sessionID string) bool {
 	return info.IsBusy
 }
 
+func (w *ClientWorkspace) AgentIsExtendedContext(sessionID string) bool {
+	info, err := w.client.GetAgentSessionInfo(context.Background(), w.workspaceID(), sessionID)
+	if err != nil {
+		return false
+	}
+	return info.IsExtendedContext
+}
+
 func (w *ClientWorkspace) AgentModel() AgentModel {
 	info, err := w.client.GetAgentInfo(context.Background(), w.workspaceID())
 	if err != nil {

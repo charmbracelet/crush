@@ -52,8 +52,10 @@ func (b *Backend) GetAgentSession(ctx context.Context, workspaceID, sessionID st
 	}
 
 	var isSessionBusy bool
+	var isExtendedContext bool
 	if ws.AgentCoordinator != nil {
 		isSessionBusy = ws.AgentCoordinator.IsSessionBusy(sessionID)
+		isExtendedContext = ws.AgentCoordinator.IsExtendedContext(sessionID)
 	}
 
 	return proto.AgentSession{
@@ -61,7 +63,8 @@ func (b *Backend) GetAgentSession(ctx context.Context, workspaceID, sessionID st
 			ID:    se.ID,
 			Title: se.Title,
 		},
-		IsBusy: isSessionBusy,
+		IsBusy:            isSessionBusy,
+		IsExtendedContext: isExtendedContext,
 	}, nil
 }
 

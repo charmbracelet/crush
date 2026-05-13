@@ -52,7 +52,8 @@ type AgentMessage struct {
 // AgentSession represents a session with its busy status.
 type AgentSession struct {
 	Session
-	IsBusy bool `json:"is_busy"`
+	IsBusy            bool `json:"is_busy"`
+	IsExtendedContext bool `json:"is_extended_context"`
 }
 
 // IsZero checks if the AgentSession is zero-valued.

@@ -1,6 +1,9 @@
 package styles
 
-import "github.com/charmbracelet/x/exp/charmtone"
+import (
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/exp/charmtone"
+)
 
 // ThemeForProvider returns the Styles associated with the given provider
 // ID. Unknown or empty provider IDs yield the default Charmtone Pantera
@@ -16,10 +19,10 @@ func ThemeForProvider(providerID string) Styles {
 
 // ThemeForBackground returns the theme tuned for the terminal background
 // brightness. When hasDarkBackground is false, the light theme is returned;
-// otherwise, the dark theme is returned.
-func ThemeForBackground(hasDarkBackground bool) Styles {
+// otherwise, the dark theme matching the given provider is returned.
+func ThemeForBackground(hasDarkBackground bool, providerID string) Styles {
 	if hasDarkBackground {
-		return CharmtonePantera()
+		return ThemeForProvider(providerID)
 	}
 	return CharmtoneDaylight()
 }
@@ -30,34 +33,41 @@ func CharmtoneDaylight() Styles {
 	return quickStyle(quickStyleOpts{
 		primary:   charmtone.Charple,
 		secondary: charmtone.Dolly,
-		accent:    charmtone.Bok,
+		accent:    charmtone.Pickle,
 		keyword:   charmtone.Blush,
 
 		fgBase:       charmtone.Pepper,
-		fgMoreSubtle: charmtone.Charcoal,
-		fgSubtle:     charmtone.Oyster,
+		fgSubtle:     charmtone.Charcoal,
+		fgMoreSubtle: charmtone.Oyster,
 		fgMostSubtle: charmtone.Iron,
 
 		onPrimary: charmtone.Salt,
 
 		bgBase:         charmtone.Salt,
 		bgLeastVisible: charmtone.Ash,
-		bgLessVisible:  charmtone.Anchovy,
-		bgMostVisible:  charmtone.Charcoal,
+		bgLessVisible:  charmtone.Smoke,
+		bgMostVisible:  charmtone.Squid,
 
 		separator: charmtone.Anchovy,
 
 		destructive:       charmtone.Coral,
 		error:             charmtone.Sriracha,
-		warningSubtle:     charmtone.Zest,
+		warningSubtle:     charmtone.Tang,
 		warning:           charmtone.Mustard,
-		busy:              charmtone.Citron,
+		busy:              charmtone.Yam,
 		info:              charmtone.Malibu,
 		infoMoreSubtle:    charmtone.Sardine,
 		infoMostSubtle:    charmtone.Damson,
-		success:           charmtone.Julep,
-		successMoreSubtle: charmtone.Bok,
+		success:           charmtone.Pickle,
+		successMoreSubtle: charmtone.Pickle,
 		successMostSubtle: charmtone.Guac,
+
+		diffInsertFG:     lipgloss.Color("#5a7555"),
+		diffInsertBGCode: lipgloss.Color("#bfdbbc"),
+		diffInsertBGNum:  lipgloss.Color("#b7ceb3"),
+		diffDeleteFG:     lipgloss.Color("#ad6866"),
+		diffDeleteBGCode: lipgloss.Color("#e0bebe"),
+		diffDeleteBGNum:  lipgloss.Color("#d3baba"),
 	})
 }
 
@@ -95,6 +105,13 @@ func CharmtonePantera() Styles {
 		success:           charmtone.Julep,
 		successMoreSubtle: charmtone.Bok,
 		successMostSubtle: charmtone.Guac,
+
+		diffInsertFG:     lipgloss.Color("#629657"),
+		diffInsertBGCode: lipgloss.Color("#323931"),
+		diffInsertBGNum:  lipgloss.Color("#2b322a"),
+		diffDeleteFG:     lipgloss.Color("#a45c59"),
+		diffDeleteBGCode: lipgloss.Color("#383030"),
+		diffDeleteBGNum:  lipgloss.Color("#312929"),
 	})
 }
 
@@ -130,5 +147,12 @@ func HypercrushObsidiana() Styles {
 		success:           charmtone.Julep,
 		successMoreSubtle: charmtone.Bok,
 		successMostSubtle: charmtone.Guac,
+
+		diffInsertFG:     lipgloss.Color("#629657"),
+		diffInsertBGCode: lipgloss.Color("#323931"),
+		diffInsertBGNum:  lipgloss.Color("#2b322a"),
+		diffDeleteFG:     lipgloss.Color("#a45c59"),
+		diffDeleteBGCode: lipgloss.Color("#383030"),
+		diffDeleteBGNum:  lipgloss.Color("#312929"),
 	})
 }

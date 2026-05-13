@@ -1003,7 +1003,12 @@ func (c *coordinator) isUnauthorized(err error, providerCfg config.ProviderConfi
 		return true
 	}
 	// AWS SSO credential errors surface before any Bedrock request is made,
-	// so they never become a ProviderError.
+	// so they never become a ProviderError. All known expiry cases wrap their
+	// cause in "failed to refresh cached credentials" via the AWS SDK credential
+	// cache (aws/aws-sdk-go-v2/aws/credential_cache.go), including:
+	//   - missing SSO token cache file (e.g. after aws sso logout)
+	//   - expired SSO access token: ForbiddenException from GetRoleCredentials
+	//   - expired SSO refresh token: InvalidGrantException from CreateToken
 	if providerCfg.AWSAuthRefresh != "" {
 		return strings.Contains(err.Error(), "failed to refresh cached credentials")
 	}

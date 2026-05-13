@@ -6,6 +6,7 @@ on:
     paths:
       - "internal/config/**"
       - "internal/agent/hyper/**"
+    workflow_dispatch:
 
 jobs:
   update-schema:

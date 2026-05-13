@@ -23,10 +23,6 @@ type ReferencesParams struct {
 	Path   string `json:"path,omitempty" description:"The directory to search in. Use a directory/file to narrow down the symbol search. Defaults to the current working directory."`
 }
 
-type referencesTool struct {
-	lspManager *lsp.Manager
-}
-
 const ReferencesToolName = "lsp_references"
 
 //go:embed references.md
@@ -88,10 +84,6 @@ func NewReferencesTool(lspManager *lsp.Manager) fantasy.AgentTool {
 			return fantasy.NewTextResponse(fmt.Sprintf("No references found for symbol '%s'", params.Symbol)), nil
 		},
 	)
-}
-
-func (r *referencesTool) Name() string {
-	return ReferencesToolName
 }
 
 func find(ctx context.Context, lspManager *lsp.Manager, symbol string, match grepMatch) ([]protocol.Location, error) {

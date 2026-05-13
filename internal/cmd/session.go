@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,13 +10,17 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"sort"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/exp/charmtone"
+	"github.com/charmbracelet/x/term"
+	"github.com/spf13/cobra"
 	"github.com/taigrr/crush/internal/agent/tools"
 	"github.com/taigrr/crush/internal/config"
 	"github.com/taigrr/crush/internal/db"
@@ -23,10 +28,6 @@ import (
 	"github.com/taigrr/crush/internal/session"
 	"github.com/taigrr/crush/internal/ui/chat"
 	"github.com/taigrr/crush/internal/ui/styles"
-	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/exp/charmtone"
-	"github.com/charmbracelet/x/term"
-	"github.com/spf13/cobra"
 )
 
 var sessionCmd = &cobra.Command{
@@ -138,7 +139,6 @@ func runSessionList(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	defer cleanup()
-
 
 	list, err := svc.sessions.List(ctx)
 	if err != nil {
@@ -261,7 +261,6 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 	}
 	defer cleanup()
 
-
 	sess, err := resolveSessionID(ctx, svc.sessions, args[0])
 	if err != nil {
 		return err
@@ -286,7 +285,6 @@ func runSessionDelete(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer cleanup()
-
 
 	sess, err := resolveSessionID(ctx, svc.sessions, args[0])
 	if err != nil {
@@ -321,7 +319,6 @@ func runSessionRename(cmd *cobra.Command, args []string) error {
 	}
 	defer cleanup()
 
-
 	sess, err := resolveSessionID(ctx, svc.sessions, args[0])
 	if err != nil {
 		return err
@@ -355,7 +352,6 @@ func runSessionLast(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	defer cleanup()
-
 
 	list, err := svc.sessions.List(ctx)
 	if err != nil {
@@ -641,11 +637,11 @@ func extractSkillsFromMessages(msgs []*message.Message) []sessionShowSkill {
 		}
 	}
 
-	sort.Slice(skills, func(i, j int) bool {
-		if skills[i].LoadedAt == skills[j].LoadedAt {
-			return skills[i].Name < skills[j].Name
+	slices.SortFunc(skills, func(a, b sessionShowSkill) int {
+		if n := cmp.Compare(a.LoadedAt, b.LoadedAt); n != 0 {
+			return n
 		}
-		return skills[i].LoadedAt < skills[j].LoadedAt
+		return cmp.Compare(a.Name, b.Name)
 	})
 
 	return skills

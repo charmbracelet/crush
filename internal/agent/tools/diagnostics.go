@@ -1,18 +1,19 @@
 package tools
 
 import (
+	"cmp"
 	"context"
 	_ "embed"
 	"fmt"
 	"log/slog"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/taigrr/fantasy"
-	"github.com/taigrr/crush/internal/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+	"github.com/taigrr/crush/internal/lsp"
+	"github.com/taigrr/fantasy"
 )
 
 type DiagnosticsParams struct {
@@ -195,13 +196,16 @@ func writeDiagnostics(output *strings.Builder, tag string, in []string) {
 }
 
 func sortDiagnostics(in []string) []string {
-	sort.Slice(in, func(i, j int) bool {
-		iIsError := strings.HasPrefix(in[i], "Error")
-		jIsError := strings.HasPrefix(in[j], "Error")
-		if iIsError != jIsError {
-			return iIsError // Errors come first
+	slices.SortFunc(in, func(a, b string) int {
+		aIsError := strings.HasPrefix(a, "Error")
+		bIsError := strings.HasPrefix(b, "Error")
+		if aIsError != bIsError {
+			if aIsError {
+				return -1
+			}
+			return 1
 		}
-		return in[i] < in[j] // Then alphabetically
+		return cmp.Compare(a, b)
 	})
 	return in
 }

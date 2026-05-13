@@ -15,14 +15,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
-	"github.com/taigrr/fantasy"
 	"github.com/taigrr/crush/internal/config"
 	"github.com/taigrr/crush/internal/csync"
 	"github.com/taigrr/crush/internal/fsext"
+	"github.com/taigrr/fantasy"
 )
 
 // regexCache provides thread-safe caching of compiled regex patterns
@@ -199,8 +199,8 @@ func searchFiles(ctx context.Context, pattern, rootPath, include string, limit i
 		}
 	}
 
-	sort.Slice(matches, func(i, j int) bool {
-		return matches[i].modTime.After(matches[j].modTime)
+	slices.SortFunc(matches, func(a, b grepMatch) int {
+		return b.modTime.Compare(a.modTime)
 	})
 
 	truncated := len(matches) > limit

@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 
@@ -255,13 +254,13 @@ func DiscoverWithStates(paths []string) ([]*Skill, []*SkillState) {
 	}
 
 	// fastwalk traversal order is non-deterministic, so sort for stable output.
-	sort.SliceStable(skills, func(i, j int) bool {
-		left := strings.ToLower(skills[i].SkillFilePath)
-		right := strings.ToLower(skills[j].SkillFilePath)
+	slices.SortStableFunc(skills, func(a, b *Skill) int {
+		left := strings.ToLower(a.SkillFilePath)
+		right := strings.ToLower(b.SkillFilePath)
 		if left == right {
-			return skills[i].SkillFilePath < skills[j].SkillFilePath
+			return strings.Compare(a.SkillFilePath, b.SkillFilePath)
 		}
-		return left < right
+		return strings.Compare(left, right)
 	})
 
 	// Cache the states before publishing.

@@ -1,7 +1,7 @@
 package skills
 
 import (
-	"sort"
+	"slices"
 	"sync"
 )
 
@@ -70,7 +70,7 @@ func (t *Tracker) LoadedNames() []string {
 	for name := range t.loaded {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	return names
 }
 

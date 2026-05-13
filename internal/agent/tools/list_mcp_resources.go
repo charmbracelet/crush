@@ -5,14 +5,14 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 
-	"github.com/taigrr/fantasy"
 	"github.com/taigrr/crush/internal/agent/tools/mcp"
 	"github.com/taigrr/crush/internal/config"
 	"github.com/taigrr/crush/internal/filepathext"
 	"github.com/taigrr/crush/internal/permission"
+	"github.com/taigrr/fantasy"
 )
 
 type ListMCPResourcesParams struct {
@@ -93,7 +93,7 @@ func NewListMCPResourcesTool(cfg *config.ConfigStore, permissions permission.Ser
 				lines = append(lines, line)
 			}
 
-			sort.Strings(lines)
+			slices.Sort(lines)
 			return fantasy.NewTextResponse(strings.Join(lines, "\n")), nil
 		},
 	)

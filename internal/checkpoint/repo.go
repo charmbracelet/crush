@@ -4,13 +4,14 @@
 package checkpoint
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -315,8 +316,8 @@ func (r *Repo) buildTree(dir string, relPath string) (plumbing.Hash, error) {
 	}
 
 	// Sort entries for deterministic tree hashes.
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].Name() < entries[j].Name()
+	slices.SortFunc(entries, func(a, b os.DirEntry) int {
+		return cmp.Compare(a.Name(), b.Name())
 	})
 
 	var treeEntries []object.TreeEntry
@@ -388,15 +389,15 @@ func (r *Repo) buildTree(dir string, relPath string) (plumbing.Hash, error) {
 	}
 
 	// Sort tree entries using git's sort order (directories treated as name + "/").
-	sort.Slice(treeEntries, func(i, j int) bool {
-		nameI, nameJ := treeEntries[i].Name, treeEntries[j].Name
-		if treeEntries[i].Mode == filemode.Dir {
-			nameI += "/"
+	slices.SortFunc(treeEntries, func(a, b object.TreeEntry) int {
+		nameA, nameB := a.Name, b.Name
+		if a.Mode == filemode.Dir {
+			nameA += "/"
 		}
-		if treeEntries[j].Mode == filemode.Dir {
-			nameJ += "/"
+		if b.Mode == filemode.Dir {
+			nameB += "/"
 		}
-		return nameI < nameJ
+		return cmp.Compare(nameA, nameB)
 	})
 
 	// Create tree object.

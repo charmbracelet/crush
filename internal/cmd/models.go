@@ -4,14 +4,13 @@ import (
 	"fmt"
 	"os"
 	"slices"
-	"sort"
 	"strings"
 
-	"github.com/taigrr/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2/tree"
-	"github.com/taigrr/crush/internal/config"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
+	"github.com/taigrr/catwalk/pkg/catwalk"
+	"github.com/taigrr/crush/internal/config"
 )
 
 var modelsCmd = &cobra.Command{
@@ -73,7 +72,7 @@ crush models gpt5`,
 			slices.Sort(providerModels[providerID])
 			providerIDs = append(providerIDs, providerID)
 		}
-		sort.Strings(providerIDs)
+		slices.Sort(providerIDs)
 
 		if len(providerIDs) == 0 && len(args) == 0 {
 			return fmt.Errorf("no enabled providers found")

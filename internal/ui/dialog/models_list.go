@@ -1,14 +1,14 @@
 package dialog
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 
+	"github.com/sahilm/fuzzy"
 	"github.com/taigrr/crush/internal/ui/list"
 	"github.com/taigrr/crush/internal/ui/styles"
-	"github.com/sahilm/fuzzy"
 )
 
 // ModelsList is a list specifically for model items and groups.
@@ -218,8 +218,8 @@ func (f *ModelsList) VisibleItems() []list.Item {
 		matches := fuzzy.Find(query, names)
 
 		// Sort by original index to preserve order within the group
-		sort.SliceStable(matches, func(i, j int) bool {
-			return matches[i].Index < matches[j].Index
+		slices.SortStableFunc(matches, func(a, b fuzzy.Match) int {
+			return cmp.Compare(a.Index, b.Index)
 		})
 
 		for _, match := range matches {

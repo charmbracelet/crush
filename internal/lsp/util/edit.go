@@ -2,9 +2,10 @@ package util
 
 import (
 	"bytes"
+	"cmp"
 	"fmt"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 
 	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
@@ -49,11 +50,11 @@ func applyTextEdits(uri protocol.DocumentURI, edits []protocol.TextEdit, encodin
 	// Sort edits in reverse order
 	sortedEdits := make([]protocol.TextEdit, len(edits))
 	copy(sortedEdits, edits)
-	sort.Slice(sortedEdits, func(i, j int) bool {
-		if sortedEdits[i].Range.Start.Line != sortedEdits[j].Range.Start.Line {
-			return sortedEdits[i].Range.Start.Line > sortedEdits[j].Range.Start.Line
+	slices.SortFunc(sortedEdits, func(a, b protocol.TextEdit) int {
+		if n := cmp.Compare(b.Range.Start.Line, a.Range.Start.Line); n != 0 {
+			return n
 		}
-		return sortedEdits[i].Range.Start.Character > sortedEdits[j].Range.Start.Character
+		return cmp.Compare(b.Range.Start.Character, a.Range.Start.Character)
 	})
 
 	// Apply each edit

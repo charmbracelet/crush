@@ -10,12 +10,12 @@ import (
 	"log/slog"
 	"os/exec"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
-	"github.com/taigrr/fantasy"
 	"github.com/taigrr/crush/internal/filepathext"
 	"github.com/taigrr/crush/internal/fsext"
+	"github.com/taigrr/fantasy"
 )
 
 const GlobToolName = "glob"
@@ -121,8 +121,8 @@ func runRipgrep(cmd *exec.Cmd, searchRoot string, limit int) ([]string, error) {
 		matches = append(matches, absPath)
 	}
 
-	sort.SliceStable(matches, func(i, j int) bool {
-		return len(matches[i]) < len(matches[j])
+	slices.SortStableFunc(matches, func(a, b string) int {
+		return cmp.Compare(len(a), len(b))
 	})
 
 	if limit > 0 && len(matches) > limit {

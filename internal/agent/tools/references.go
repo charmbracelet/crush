@@ -11,12 +11,11 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"sort"
 	"strings"
 
-	"github.com/taigrr/fantasy"
-	"github.com/taigrr/crush/internal/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+	"github.com/taigrr/crush/internal/lsp"
+	"github.com/taigrr/fantasy"
 )
 
 type ReferencesParams struct {
@@ -174,7 +173,7 @@ func groupByFilename(locations []protocol.Location) map[string][]protocol.Locati
 func formatReferences(locations []protocol.Location) string {
 	fileRefs := groupByFilename(locations)
 	files := slices.Collect(maps.Keys(fileRefs))
-	sort.Strings(files)
+	slices.Sort(files)
 
 	var output strings.Builder
 	fmt.Fprintf(&output, "Found %d reference(s) in %d file(s):\n\n", len(locations), len(files))

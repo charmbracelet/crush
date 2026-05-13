@@ -40,22 +40,48 @@ func (m *UI) modelInfo(width int) string {
 					reasoningInfo = fmt.Sprintf("Reasoning %s", common.FormatReasoningEffort(reasoningEffort))
 				}
 			}
+
+			// Show context mode if the model supports 1M context and mode is non-standard.
+			if model.CatwalkCfg.Supports1MContext && model.ModelCfg.ContextMode != "" && model.ModelCfg.ContextMode != "standard" {
+				var modeStr string
+				if model.ModelCfg.ContextMode == "dynamic" && m.session != nil &&
+					m.com.Workspace.AgentIsExtendedContext(m.session.ID) {
+					modeStr = "1M Active"
+				} else {
+					modeStr = common.FormatContextMode(string(model.ModelCfg.ContextMode))
+				}
+				if reasoningInfo != "" {
+					reasoningInfo += " · " + modeStr
+				} else {
+					reasoningInfo = modeStr
+				}
+			}
 		}
 	}
 
 	var modelContext *common.ModelContextInfo
 	if model != nil && m.session != nil {
+		// Use extended (1M) window when extended/dynamic mode is enabled.
+		ctxWindow := model.CatwalkCfg.ContextWindow
+		if model.CatwalkCfg.Supports1MContext {
+			switch model.ModelCfg.ContextMode {
+			case "extended", "dynamic":
+				ctxWindow = 1_000_000
+			}
+		}
 		modelContext = &common.ModelContextInfo{
 			ContextUsed:  m.session.CompletionTokens + m.session.PromptTokens,
 			Cost:         m.session.Cost,
-			ModelContext: model.CatwalkCfg.ContextWindow,
+			ModelContext: ctxWindow,
 		}
 	}
 	var modelName string
+	var rainbow bool
 	if model != nil {
 		modelName = model.CatwalkCfg.Name
+		rainbow = model.CatwalkCfg.Supports1MContext && model.ModelCfg.ContextMode == "dynamic"
 	}
-	return common.ModelInfo(m.com.Styles, modelName, providerName, reasoningInfo, modelContext, width, m.hyperCredits)
+	return common.ModelInfo(m.com.Styles, modelName, providerName, reasoningInfo, modelContext, width, m.hyperCredits, rainbow)
 }
 
 // getDynamicHeightLimits will give us the num of items to show in each section based on the height

@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	githubApiUrl = "https://api.github.com/repos/charmbracelet/crush/releases/latest"
+	githubApiUrl = "https://api.github.com/repos/taigrr/crush/releases/latest"
 	userAgent    = "crush/1.0"
 )
 

@@ -32,6 +32,9 @@ crush login
 
 # Authenticate with GitHub Copilot
 crush login copilot
+
+# Force re-authentication even if already logged in
+crush login -f copilot
   `,
 	ValidArgs: []cobra.Completion{
 		"hyper",
@@ -57,19 +60,35 @@ crush login copilot
 		if len(args) > 0 {
 			provider = args[0]
 		}
+		force, _ := cmd.Flags().GetBool("force")
 		switch provider {
 		case "hyper":
-			return loginHyper(c, ws.ID)
+			return loginHyper(c, ws.ID, force)
 		case "copilot", "github", "github-copilot":
-			return loginCopilot(cmd.Context(), c, ws.ID)
+			return loginCopilot(c, ws.ID, force)
 		default:
 			return fmt.Errorf("unknown platform: %s", args[0])
 		}
 	},
 }
 
-func loginHyper(c *client.Client, wsID string) error {
+func init() {
+	loginCmd.Flags().BoolP("force", "f", false, "Force re-authentication even if already logged in")
+}
+
+func loginHyper(c *client.Client, wsID string, force bool) error {
 	ctx := getLoginContext()
+
+	if !force {
+		cfg, err := c.GetConfig(ctx, wsID)
+		if err == nil && cfg != nil {
+			if pc, ok := cfg.Providers.Get("hyper"); ok && pc.OAuthToken != nil {
+				fmt.Println("You are already logged in to Hyper.")
+				fmt.Println("Use --force to re-authenticate.")
+				return nil
+			}
+		}
+	}
 
 	resp, err := hyper.InitiateDeviceAuth(ctx)
 	if err != nil {
@@ -127,14 +146,17 @@ func loginHyper(c *client.Client, wsID string) error {
 	return nil
 }
 
-func loginCopilot(ctx context.Context, c *client.Client, wsID string) error {
+func loginCopilot(c *client.Client, wsID string, force bool) error {
 	loginCtx := getLoginContext()
 
-	cfg, err := c.GetConfig(ctx, wsID)
-	if err == nil && cfg != nil {
-		if pc, ok := cfg.Providers.Get("copilot"); ok && pc.OAuthToken != nil {
-			fmt.Println("You are already logged in to GitHub Copilot.")
-			return nil
+	if !force {
+		cfg, err := c.GetConfig(loginCtx, wsID)
+		if err == nil && cfg != nil {
+			if pc, ok := cfg.Providers.Get("copilot"); ok && pc.OAuthToken != nil {
+				fmt.Println("You are already logged in to GitHub Copilot.")
+				fmt.Println("Use --force to re-authenticate.")
+				return nil
+			}
 		}
 	}
 

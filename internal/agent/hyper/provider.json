@@ -103,8 +103,8 @@
       "cost_per_1m_out": 3.5,
       "cost_per_1m_in_cached": 0.25,
       "cost_per_1m_out_cached": 0,
-      "context_window": 32768,
-      "default_max_tokens": 3276,
+      "context_window": 262142,
+      "default_max_tokens": 26214,
       "can_reason": true,
       "supports_attachments": true
     },

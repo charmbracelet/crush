@@ -28,8 +28,6 @@ import (
 	"github.com/qjebbs/go-jsons"
 )
 
-const defaultCatwalkURL = "https://catwalk.charm.land"
-
 // Load loads the configuration from the default paths and returns a
 // ConfigStore that owns both the pure-data Config and all runtime state.
 func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
@@ -724,6 +722,25 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 			small.Think = smallModelSelected.Think
 		}
 	}
+
+	// When small isn't explicitly configured and the provider isn't a
+	// known built-in, use the large model as the small model. This
+	// prevents two different models from being requested concurrently
+	// for local/openai-compat providers.
+	if !smallModelConfigured {
+		isKnownProvider := false
+		for _, kp := range knownProviders {
+			if string(kp.ID) == small.Provider {
+				isKnownProvider = true
+				break
+			}
+		}
+		if !isKnownProvider {
+			slog.Warn("Using large model as small model for unknown provider", "provider", large.Provider, "model", large.Model)
+			small = large
+		}
+	}
+
 	c.Models[SelectedModelTypeLarge] = large
 	c.Models[SelectedModelTypeSmall] = small
 	return nil

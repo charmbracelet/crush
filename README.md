@@ -555,56 +555,7 @@ it creates. You can customize this behavior with the `attribution` option:
 - `generated_with`: When true (default), adds `💘 Generated with Crush` line to
   commit messages and PR descriptions
 
-### Custom Providers
-
-Crush supports custom provider configurations for both OpenAI-compatible and
-Anthropic-compatible APIs.
-
-> [!NOTE]
-> Note that we support two "types" for OpenAI. Make sure to choose the right one
-> to ensure the best experience!
->
-> - `openai` should be used when proxying or routing requests through OpenAI.
-> - `openai-compat` should be used when using non-OpenAI providers that have OpenAI-compatible APIs.
-
-#### OpenAI-Compatible APIs
-
-DeepSeek is now a **built-in provider** — it's automatically available when you
-set `DEEPSEEK_API_KEY` in your environment. You don't need to configure it manually.
-
-DeepSeek's V4 models support **thinking mode** with configurable reasoning effort
-levels (`high` and `max`). You can toggle thinking on/off and select the effort
-level from Crush's command palette.
-
-Here's also an example custom configuration for DeepSeek, which uses an
-OpenAI-compatible API:
-
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "providers": {
-    "deepseek": {
-      "type": "openai-compat",
-      "base_url": "https://api.deepseek.com/v1",
-      "api_key": "$DEEPSEEK_API_KEY",
-      "models": [
-        {
-          "id": "deepseek-chat",
-          "name": "Deepseek V3",
-          "cost_per_1m_in": 0.27,
-          "cost_per_1m_out": 1.1,
-          "cost_per_1m_in_cached": 0.07,
-          "cost_per_1m_out_cached": 1.1,
-          "context_window": 64000,
-          "default_max_tokens": 5000
-        }
-      ]
-    }
-  }
-}
-```
-
-#### Anthropic-Compatible APIs
+### Anthropic-Compatible APIs
 
 Custom Anthropic-compatible providers follow this format:
 

@@ -912,6 +912,11 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		case hyper.Name:
 			baseURL = hyper.BaseURL() + "/v1"
 			headers["x-crush-id"] = event.GetID()
+		case string(catwalk.InferenceProviderZAI):
+			if providerCfg.ExtraBody == nil {
+				providerCfg.ExtraBody = map[string]any{}
+			}
+			providerCfg.ExtraBody["tool_stream"] = true
 		}
 		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent)
 	case deepseek.Name:

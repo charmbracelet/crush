@@ -745,9 +745,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	// Just in case, get just the last usage info.
 	usage := resp.Response.Usage
 	currentSession.SummaryMessageID = summaryMessage.ID
-	if completionTokens := summaryCompletionTokens(usage, summaryMessage); completionTokens != 0 {
-		currentSession.CompletionTokens = completionTokens
-	}
+	currentSession.CompletionTokens = summaryCompletionTokens(usage, summaryMessage)
 	currentSession.PromptTokens = 0
 	_, err = a.sessions.Save(genCtx, currentSession)
 	if err != nil {

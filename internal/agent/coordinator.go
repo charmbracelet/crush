@@ -362,6 +362,13 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		case hyper.Name:
 			extraBody["thinking"] = model.ModelCfg.Think
 		case deepseek.Name:
+			// The openai SDK doesn't have a "max" ReasoningEffort value,
+			// so we send "xhigh" instead — DeepSeek treats "xhigh" as "max".
+			if model.ModelCfg.ReasoningEffort == "max" {
+				mergedOptions["reasoning_effort"] = "xhigh"
+			}
+
+			// Thinking mode (passes reasoning_content in responses).
 			if model.ModelCfg.ReasoningEffort != "" {
 				extraBody["thinking"] = map[string]any{
 					"type": "enabled",
@@ -875,10 +882,6 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 			headers["x-crush-id"] = event.GetID()
 		case deepseek.Name:
 			baseURL = deepseek.BaseURL() + "/v1"
-			if providerCfg.ExtraBody == nil {
-				providerCfg.ExtraBody = map[string]any{}
-			}
-			providerCfg.ExtraBody["tool_stream"] = true
 		case string(catwalk.InferenceProviderZAI):
 			if providerCfg.ExtraBody == nil {
 				providerCfg.ExtraBody = map[string]any{}

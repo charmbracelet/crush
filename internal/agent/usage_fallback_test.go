@@ -212,6 +212,7 @@ func TestUpdateSessionUsageSkipsEstimatedCost(t *testing.T) {
 	require.Equal(t, 1.25, currentSession.Cost)
 	require.Equal(t, int64(1000), currentSession.PromptTokens)
 	require.Equal(t, int64(2000), currentSession.CompletionTokens)
+	require.True(t, currentSession.EstimatedUsage)
 }
 
 func TestUpdateSessionUsageKeepsCountersForZeroUsage(t *testing.T) {
@@ -334,4 +335,5 @@ func TestUpdateSessionUsageAddsProviderCost(t *testing.T) {
 	require.Equal(t, 1.3, currentSession.Cost)
 	require.Equal(t, int64(1000), currentSession.PromptTokens)
 	require.Equal(t, int64(2000), currentSession.CompletionTokens)
+	require.False(t, currentSession.EstimatedUsage)
 }

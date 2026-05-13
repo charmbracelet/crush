@@ -747,6 +747,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	currentSession.SummaryMessageID = summaryMessage.ID
 	currentSession.CompletionTokens = summaryCompletionTokens(usage, summaryMessage)
 	currentSession.PromptTokens = 0
+	currentSession.EstimatedUsage = usageIsZero(usage)
 	_, err = a.sessions.Save(genCtx, currentSession)
 	if err != nil {
 		return err
@@ -1120,6 +1121,10 @@ func (a *sessionAgent) openrouterCost(metadata fantasy.ProviderMetadata) *float6
 }
 
 func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session, usage fantasy.Usage, overrideCost *float64, estimated bool) {
+	if !usageIsZero(usage) {
+		session.EstimatedUsage = estimated
+	}
+
 	modelConfig := model.CatwalkCfg
 	cost := modelConfig.CostPer1MInCached/1e6*float64(usage.CacheCreationTokens) +
 		modelConfig.CostPer1MOutCached/1e6*float64(usage.CacheReadTokens) +

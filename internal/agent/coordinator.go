@@ -364,7 +364,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			extraBody["chat_template_kwargs"] = map[string]any{
 				"thinking": model.ModelCfg.Think,
 			}
-		case string(catwalk.InferenceProviderZAI):
+		case string(catwalk.InferenceProviderZAI), string(catwalk.InferenceProviderDeepSeek):
 			if model.ModelCfg.Think {
 				extraBody["thinking"] = map[string]any{
 					"type": "enabled",

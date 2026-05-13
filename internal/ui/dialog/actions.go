@@ -62,6 +62,11 @@ type (
 	ActionSelectReasoningEffort struct {
 		Effort string
 	}
+	// ActionSelectContextMode is a message indicating a context mode has been
+	// selected.
+	ActionSelectContextMode struct {
+		Mode config.ContextMode
+	}
 	ActionPermissionResponse struct {
 		Permission permission.PermissionRequest
 		Action     PermissionAction

@@ -31,6 +31,11 @@ func FormatReasoningEffort(effort string) string {
 	return cases.Title(language.English).String(effort)
 }
 
+// FormatContextMode formats a context mode for display.
+func FormatContextMode(mode string) string {
+	return cases.Title(language.English).String(mode)
+}
+
 // ModelContextInfo contains token usage and cost information for a model.
 type ModelContextInfo struct {
 	ContextUsed  int64
@@ -39,26 +44,32 @@ type ModelContextInfo struct {
 }
 
 // ModelInfo renders model information including name, provider, reasoning
-// settings, and optional context usage/cost.
-func ModelInfo(t *styles.Styles, modelName, providerName, reasoningInfo string, context *ModelContextInfo, width int, hyperCredits *int) string {
+// settings, and optional context usage/cost. When rainbow is true, the model
+// name is rendered with a rainbow gradient.
+func ModelInfo(t *styles.Styles, modelName, providerName, reasoningInfo string, context *ModelContextInfo, width int, hyperCredits *int, rainbow bool) string {
 	modelIcon := t.ModelInfo.Icon.Render(styles.ModelIcon)
-	modelName = t.ModelInfo.Name.Render(modelName)
+	var renderedModelName string
+	if rainbow {
+		renderedModelName = styles.ApplyRainbowGrad(t.ModelInfo.Name, modelName, styles.RainbowColors)
+	} else {
+		renderedModelName = t.ModelInfo.Name.Render(modelName)
+	}
 
 	// Build first line with model name and optionally provider on the same line
 	var firstLine string
 	if providerName != "" {
 		providerInfo := t.ModelInfo.Provider.Render(fmt.Sprintf("via %s", providerName))
-		modelWithProvider := fmt.Sprintf("%s %s %s", modelIcon, modelName, providerInfo)
+		modelWithProvider := fmt.Sprintf("%s %s %s", modelIcon, renderedModelName, providerInfo)
 
 		// Check if it fits on one line
 		if lipgloss.Width(modelWithProvider) <= width {
 			firstLine = modelWithProvider
 		} else {
 			// If it doesn't fit, put provider on next line
-			firstLine = fmt.Sprintf("%s %s", modelIcon, modelName)
+			firstLine = fmt.Sprintf("%s %s", modelIcon, renderedModelName)
 		}
 	} else {
-		firstLine = fmt.Sprintf("%s %s", modelIcon, modelName)
+		firstLine = fmt.Sprintf("%s %s", modelIcon, renderedModelName)
 	}
 
 	parts := []string{firstLine}

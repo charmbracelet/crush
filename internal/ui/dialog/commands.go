@@ -452,6 +452,13 @@ func (c *Commands) defaultCommands() []*CommandItem {
 					DialogID: ReasoningID,
 				}))
 			}
+
+			// Models with 1M context support: context mode dialog
+			if model.Supports1MContext {
+				commands = append(commands, NewCommandItem(c.com.Styles, "select_context_mode", "Select Context Mode", "", ActionOpenDialog{
+					DialogID: ContextModeID,
+				}))
+			}
 		}
 	}
 	// Only show toggle compact mode command if window width is larger than compact breakpoint (120)

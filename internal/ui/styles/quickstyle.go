@@ -47,6 +47,7 @@ type quickStyleOpts struct {
 	error             color.Color
 	warning           color.Color
 	warningSubtle     color.Color
+	denied            color.Color
 	busy              color.Color
 	info              color.Color
 	infoMoreSubtle    color.Color
@@ -621,6 +622,9 @@ func quickStyle(o quickStyleOpts) Styles {
 
 	s.Tool.ErrorTag = base.Padding(0, 1).Background(o.destructive).Foreground(o.onPrimary)
 	s.Tool.ErrorMessage = base.Foreground(o.fgSubtle)
+
+	s.Tool.WarnTag = base.Padding(0, 1).Background(o.denied).Foreground(o.bgBase).Bold(true)
+	s.Tool.WarnMessage = base.Foreground(o.fgSubtle)
 
 	// Diff and multi-edit styles
 	s.Tool.DiffTruncation = muted.Background(o.bgLeastVisible).PaddingLeft(2)

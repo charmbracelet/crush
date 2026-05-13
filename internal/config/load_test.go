@@ -2418,5 +2418,4 @@ func TestConfig_load(t *testing.T) {
 	assert.NotNil(t, cfg2.config.Options)
 	assert.NotNil(t, cfg2.config.Options.TUI)
 	assert.Nil(t, cfg2.config.Options.TUI.ReduceAnimations) // Should be nil, not auto-set to true
-
 }

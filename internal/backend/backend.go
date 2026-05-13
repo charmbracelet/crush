@@ -174,6 +174,7 @@ func (b *Backend) VersionInfo() proto.VersionInfo {
 	return proto.VersionInfo{
 		Version:   version.Version,
 		Commit:    version.Commit,
+		BuildID:   version.BuildID,
 		GoVersion: runtime.Version(),
 		Platform:  fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
 	}

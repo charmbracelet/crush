@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/exp/charmtone"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
@@ -117,10 +118,12 @@ func formatTokensAndCost(t *styles.Styles, tokens, contextWindow int64, cost flo
 
 	formattedTokens = t.ModelInfo.TokenCount.Render(fmt.Sprintf("(%s)", formattedTokens))
 	percentageText := fmt.Sprintf("%d%%", int(percentage))
+	percentageStyle := t.ModelInfo.TokenPercentage
 	if estimated {
 		percentageText = "~" + percentageText
+		percentageStyle = percentageStyle.Foreground(charmtone.Tang)
 	}
-	formattedPercentage := t.ModelInfo.TokenPercentage.Render(percentageText)
+	formattedPercentage := percentageStyle.Render(percentageText)
 	formattedTokens = fmt.Sprintf("%s %s", formattedPercentage, formattedTokens)
 	if percentage > 80 {
 		formattedTokens = fmt.Sprintf("%s %s", styles.LSPWarningIcon, formattedTokens)

@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/stretchr/testify/require"
 )
 
@@ -20,7 +21,7 @@ func TestFormatTokensAndCostPrefixesEstimatedUsage(t *testing.T) {
 	require.Contains(t, actual, "~12%")
 	require.Contains(t, actual, "(120)")
 	require.Contains(t, actual, "$0.00")
-	require.True(t, strings.Contains(rendered, sty.ModelInfo.TokenPercentage.Render("~12%")))
+	require.True(t, strings.Contains(rendered, sty.ModelInfo.TokenPercentage.Foreground(charmtone.Tang).Render("~12%")))
 }
 
 func TestFormatTokensAndCostOmitsEstimatedPrefix(t *testing.T) {

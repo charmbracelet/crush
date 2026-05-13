@@ -195,6 +195,7 @@ That said, you can also set environment variables for preferred providers.
 | `IONET_API_KEY`             | io.net                                             |
 | `GROQ_API_KEY`              | Groq                                               |
 | `AVIAN_API_KEY`             | Avian                                              |
+| `DEEPSEEK_API_KEY`          | DeepSeek                                           |
 | `OPENCODE_API_KEY`          | OpenCode Zen & Go                                  |
 | `VERTEXAI_PROJECT`          | Google Cloud VertexAI (Gemini)                     |
 | `VERTEXAI_LOCATION`         | Google Cloud VertexAI (Gemini)                     |
@@ -568,8 +569,15 @@ Anthropic-compatible APIs.
 
 #### OpenAI-Compatible APIs
 
-Here’s an example configuration for Deepseek, which uses an OpenAI-compatible
-API. Don't forget to set `DEEPSEEK_API_KEY` in your environment.
+DeepSeek is now a **built-in provider** — it's automatically available when you
+set `DEEPSEEK_API_KEY` in your environment. You don't need to configure it manually.
+
+DeepSeek's V4 models support **thinking mode** with configurable reasoning effort
+levels (`high` and `max`). You can toggle thinking on/off and select the effort
+level from Crush's command palette.
+
+Here's also an example custom configuration for DeepSeek, which uses an
+OpenAI-compatible API:
 
 ```json
 {
@@ -790,17 +798,23 @@ Manually updating providers is possible with the `crush update-providers`
 command:
 
 ```bash
-# Update providers remotely from Catwalk.
+# Update Catwalk providers remotely (default).
 crush update-providers
 
-# Update providers from a custom Catwalk base URL.
+# Update Catwalk providers from a custom URL.
 crush update-providers https://example.com/
 
-# Update providers from a local file.
+# Update Catwalk providers from a local file.
 crush update-providers /path/to/local-providers.json
 
-# Reset providers to the embedded version, embedded at crush at build time.
+# Reset Catwalk providers to the embedded version.
 crush update-providers embedded
+
+# Update Hyper provider information (embedded or custom URL).
+crush update-providers --source=hyper
+
+# Update DeepSeek provider information (embedded or custom file).
+crush update-providers --source=deepseek
 
 # For more info:
 crush update-providers --help

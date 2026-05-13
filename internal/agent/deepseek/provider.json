@@ -33,32 +33,6 @@
       "reasoning_levels": ["high", "max"],
       "default_reasoning_effort": "high",
       "supports_attachments": false
-    },
-    {
-      "id": "deepseek-chat",
-      "name": "DeepSeek Chat (deprecated - use v4-flash)",
-      "cost_per_1m_in": 0.14,
-      "cost_per_1m_out": 0.28,
-      "cost_per_1m_in_cached": 0.0028,
-      "cost_per_1m_out_cached": 0,
-      "context_window": 1048576,
-      "default_max_tokens": 384000,
-      "can_reason": false,
-      "supports_attachments": false
-    },
-    {
-      "id": "deepseek-reasoner",
-      "name": "DeepSeek Reasoner (deprecated - use v4-flash thinking)",
-      "cost_per_1m_in": 0.14,
-      "cost_per_1m_out": 0.28,
-      "cost_per_1m_in_cached": 0.0028,
-      "cost_per_1m_out_cached": 0,
-      "context_window": 1048576,
-      "default_max_tokens": 384000,
-      "can_reason": true,
-      "reasoning_levels": ["high", "max"],
-      "default_reasoning_effort": "high",
-      "supports_attachments": false
     }
   ]
 }

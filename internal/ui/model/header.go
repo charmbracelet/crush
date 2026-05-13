@@ -149,7 +149,7 @@ func renderHeaderDetails(
 		percentage := (float64(session.CompletionTokens+session.PromptTokens) / float64(model.ContextWindow)) * 100
 		percentageText := fmt.Sprintf("%d%%", int(percentage))
 		if session.EstimatedUsage {
-			percentageText = t.ModelInfo.EstimatedUsagePrefix.Render("~") + percentageText
+			percentageText = "~" + percentageText
 		}
 		formattedPercentage := t.Header.Percentage.Render(percentageText)
 		parts = append(parts, formattedPercentage)

@@ -135,7 +135,8 @@ func NewViewTool(
 
 			// Request permission for files outside working directory, unless it's a skill file.
 			if isOutsideWorkDir && !isSkillFile {
-				granted, permReqErr := permissions.Request(ctx,
+				granted, permReqErr := permissions.Request(
+					ctx,
 					permission.CreatePermissionRequest{
 						SessionID:   sessionID,
 						Path:        absFilePath,
@@ -143,7 +144,7 @@ func NewViewTool(
 						ToolName:    ViewToolName,
 						Action:      "read",
 						Description: fmt.Sprintf("Read file outside working directory: %s", absFilePath),
-						Reason: params.Reason,
+						Reason:      params.Reason,
 						Params: ViewPermissionsParams{
 							FilePath: params.FilePath,
 							Offset:   params.Offset,
@@ -280,7 +281,8 @@ func NewViewTool(
 				fantasy.NewTextResponse(output),
 				meta,
 			), nil
-		})
+		},
+	)
 }
 
 func addLineNumbers(content string, startLine int) string {

@@ -6,6 +6,7 @@ import (
 	"embed"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -68,6 +69,7 @@ func init() {
 type connEntry struct {
 	db       *sql.DB
 	refCount int
+	lockFile *os.File // exclusive-mode lockfile; nil when not in exclusive mode.
 }
 
 var (
@@ -118,18 +120,35 @@ func Connect(ctx context.Context, dataDir string, opts ...ConnectOptions) (*sql.
 	}
 
 	pragmaList := basePragmas
+	exclusiveMode := o.ExclusiveLock
 	if o.ExclusiveLock {
 		pragmaList = append(slices.Clone(basePragmas), pragma{"locking_mode", "EXCLUSIVE"})
 	} else if !mmapAvailable(probeMmapDir(dbPath)) {
 		pragmaList = append(slices.Clone(basePragmas), pragma{"locking_mode", "EXCLUSIVE"})
+		exclusiveMode = true
 		slog.Warn("Mmap appears blocked in this environment; enabled exclusive SQLite locking mode automatically.")
 		mmapFlagMu.Lock()
 		mmapAutoEnabled = true
 		mmapFlagMu.Unlock()
 	}
 
+	// In exclusive mode, acquire a cross-process advisory lock so a
+	// second Crush instance gets a clear error instead of a cryptic
+	// SQLite failure.
+	var lockFile *os.File
+	if exclusiveMode {
+		lockPath := filepath.Join(dataDir, "crush.lock")
+		lockFile, err = tryExclusiveLock(lockPath)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	conn, err := openDB(dbPath, pragmaList)
 	if err != nil {
+		if lockFile != nil {
+			lockFile.Close()
+		}
 		return nil, err
 	}
 
@@ -142,22 +161,31 @@ func Connect(ctx context.Context, dataDir string, opts ...ConnectOptions) (*sql.
 
 	if err = conn.PingContext(ctx); err != nil {
 		conn.Close()
+		if lockFile != nil {
+			lockFile.Close()
+		}
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
 	if err := initGoose(); err != nil {
 		conn.Close()
+		if lockFile != nil {
+			lockFile.Close()
+		}
 		slog.Error("Failed to initialize goose", "error", err)
 		return nil, fmt.Errorf("failed to initialize goose: %w", err)
 	}
 
 	if err := goose.Up(conn, "migrations"); err != nil {
 		conn.Close()
+		if lockFile != nil {
+			lockFile.Close()
+		}
 		slog.Error("Failed to apply migrations", "error", err)
 		return nil, fmt.Errorf("failed to apply migrations: %w", err)
 	}
 
-	pool[absPath] = &connEntry{db: conn, refCount: 1}
+	pool[absPath] = &connEntry{db: conn, refCount: 1, lockFile: lockFile}
 	return conn, nil
 }
 
@@ -194,7 +222,11 @@ func Release(dataDir string) error {
 		slog.Warn("WAL checkpoint failed during release", "error", err)
 	}
 
-	return entry.db.Close()
+	dbErr := entry.db.Close()
+	if entry.lockFile != nil {
+		entry.lockFile.Close()
+	}
+	return dbErr
 }
 
 // ResetPool closes all pooled connections and clears the pool. This is
@@ -205,6 +237,9 @@ func ResetPool() {
 	for path, entry := range pool {
 		entry.db.ExecContext(context.Background(), "PRAGMA wal_checkpoint(TRUNCATE)") //nolint:errcheck
 		entry.db.Close()
+		if entry.lockFile != nil {
+			entry.lockFile.Close()
+		}
 		delete(pool, path)
 	}
 }

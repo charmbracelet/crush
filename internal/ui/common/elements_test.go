@@ -1,6 +1,7 @@
 package common
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -13,11 +14,13 @@ func TestFormatTokensAndCostPrefixesEstimatedUsage(t *testing.T) {
 
 	sty := styles.CharmtonePantera()
 
-	actual := ansi.Strip(formatTokensAndCost(&sty, 120, 1000, 0, true))
+	rendered := formatTokensAndCost(&sty, 120, 1000, 0, true)
+	actual := ansi.Strip(rendered)
 
 	require.Contains(t, actual, "~12%")
 	require.Contains(t, actual, "(120)")
 	require.Contains(t, actual, "$0.00")
+	require.True(t, strings.Contains(rendered, sty.ModelInfo.TokenPercentage.Render("~12%")))
 }
 
 func TestFormatTokensAndCostOmitsEstimatedPrefix(t *testing.T) {

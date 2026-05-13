@@ -53,6 +53,7 @@ type Session struct {
 	MessageCount     int64
 	PromptTokens     int64
 	CompletionTokens int64
+	EstimatedUsage   bool
 	SummaryMessageID string
 	Cost             float64
 	Todos            []Todo
@@ -199,7 +200,9 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 	if err != nil {
 		return Session{}, err
 	}
+	estimatedUsage := session.EstimatedUsage
 	session = s.fromDBItem(dbSession)
+	session.EstimatedUsage = estimatedUsage
 	s.Publish(pubsub.UpdatedEvent, session)
 	return session, nil
 }

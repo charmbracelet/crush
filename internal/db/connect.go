@@ -7,25 +7,51 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 
 	"github.com/pressly/goose/v3"
 )
 
+// pragma is a single SQLite pragma with a guaranteed execution order.
+type pragma struct {
+	name  string
+	value string
+}
+
+// basePragmas are applied in order on every connection. page_size must
+// come before journal_mode because setting WAL writes to the database
+// and locks in the current page size on new databases.
+var basePragmas = []pragma{
+	{"page_size", "4096"},
+	{"journal_mode", "WAL"},
+	{"foreign_keys", "ON"},
+	{"cache_size", "-8000"},
+	{"synchronous", "NORMAL"},
+	{"secure_delete", "ON"},
+	{"busy_timeout", "30000"},
+}
+
 var (
-	pragmas = map[string]string{
-		"foreign_keys":  "ON",
-		"journal_mode":  "WAL",
-		"page_size":     "4096",
-		"cache_size":    "-8000",
-		"synchronous":   "NORMAL",
-		"secure_delete": "ON",
-		"busy_timeout":  "30000",
-	}
 	gooseInitOnce sync.Once
 	gooseInitErr  error
+
+	// mmapAutoEnabled is set to true when Connect auto-detects a
+	// blocked mmap and enables exclusive locking mode automatically.
+	// Callers (e.g. the TUI) can check this via [MmapAutoEnabled]
+	// to show a warning banner.
+	mmapAutoEnabled bool
+	mmapFlagMu      sync.RWMutex
 )
+
+// MmapAutoEnabled returns true if mmap was auto-detected as blocked
+// and exclusive locking was enabled automatically.
+func MmapAutoEnabled() bool {
+	mmapFlagMu.RLock()
+	defer mmapFlagMu.RUnlock()
+	return mmapAutoEnabled
+}
 
 //go:embed migrations/*.sql
 var FS embed.FS
@@ -49,12 +75,22 @@ var (
 	poolMu sync.Mutex
 )
 
+// ConnectOptions configures optional behavior for [Connect].
+type ConnectOptions struct {
+	// ExclusiveLock uses PRAGMA locking_mode=EXCLUSIVE, which
+	// eliminates the shared-memory (-shm) file and avoids mmap.
+	// This fixes "unable to open database" errors in sandboxed
+	// environments that restrict mmap, but only one process can
+	// access the database at a time.
+	ExclusiveLock bool
+}
+
 // Connect opens a SQLite database connection for the given data
 // directory and runs migrations. If a connection to the same database
 // file already exists, the existing connection is returned with its
 // reference count incremented. Callers must pair each Connect with a
 // [Release] when they no longer need the connection.
-func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
+func Connect(ctx context.Context, dataDir string, opts ...ConnectOptions) (*sql.DB, error) {
 	if dataDir == "" {
 		return nil, fmt.Errorf("data.dir is not set")
 	}
@@ -76,7 +112,23 @@ func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 		return entry.db, nil
 	}
 
-	conn, err := openDB(dbPath)
+	var o ConnectOptions
+	if len(opts) > 0 {
+		o = opts[0]
+	}
+
+	pragmaList := basePragmas
+	if o.ExclusiveLock {
+		pragmaList = append(slices.Clone(basePragmas), pragma{"locking_mode", "EXCLUSIVE"})
+	} else if !mmapAvailable(probeMmapDir(dbPath)) {
+		pragmaList = append(slices.Clone(basePragmas), pragma{"locking_mode", "EXCLUSIVE"})
+		slog.Warn("Mmap appears blocked in this environment; enabled exclusive SQLite locking mode automatically.")
+		mmapFlagMu.Lock()
+		mmapAutoEnabled = true
+		mmapFlagMu.Unlock()
+	}
+
+	conn, err := openDB(dbPath, pragmaList)
 	if err != nil {
 		return nil, err
 	}
@@ -133,6 +185,15 @@ func Release(dataDir string) error {
 	}
 
 	delete(pool, absPath)
+
+	// Checkpoint and truncate the WAL before closing so the -wal and
+	// -shm sidecar files are cleaned up. This reduces the chance of
+	// stale sidecar files causing issues on the next open. Errors
+	// are best-effort — we still close the connection regardless.
+	if _, err := entry.db.ExecContext(context.Background(), "PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+		slog.Warn("WAL checkpoint failed during release", "error", err)
+	}
+
 	return entry.db.Close()
 }
 
@@ -142,6 +203,7 @@ func ResetPool() {
 	poolMu.Lock()
 	defer poolMu.Unlock()
 	for path, entry := range pool {
+		entry.db.ExecContext(context.Background(), "PRAGMA wal_checkpoint(TRUNCATE)") //nolint:errcheck
 		entry.db.Close()
 		delete(pool, path)
 	}

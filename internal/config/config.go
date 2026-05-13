@@ -281,6 +281,7 @@ type Options struct {
 	Progress                  *bool        `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
 	DisableNotifications      bool         `json:"disable_notifications,omitempty" jsonschema:"description=Disable desktop notifications,default=false"`
 	DisabledSkills            []string     `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
+	SQLiteExclusiveLock       bool         `json:"sqlite_exclusive_lock,omitempty" jsonschema:"description=Use exclusive locking mode for SQLite. Eliminates the shared-memory file and avoids mmap\\, which fixes 'unable to open database' errors in sandboxed environments. Only one Crush instance can access the database at a time when enabled.,default=false"`
 }
 
 type MCPs map[string]MCPConfig

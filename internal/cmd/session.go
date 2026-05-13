@@ -119,7 +119,9 @@ func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func()
 		event.Init()
 	}
 
-	conn, err := db.Connect(ctx, dataDir)
+	conn, err := db.Connect(ctx, dataDir, db.ConnectOptions{
+		ExclusiveLock: cfg.Config().Options.SQLiteExclusiveLock,
+	})
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to connect to database: %w", err)
 	}

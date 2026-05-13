@@ -52,3 +52,35 @@ func TestRelease_NoopForUnknownDataDir(t *testing.T) {
 
 	require.NoError(t, Release("/nonexistent/path"), "releasing unknown data dir should not error")
 }
+
+func TestConnect_ExclusiveLock(t *testing.T) {
+	t.Cleanup(ResetPool)
+
+	dataDir := t.TempDir()
+
+	conn, err := Connect(context.Background(), dataDir, ConnectOptions{
+		ExclusiveLock: true,
+	})
+	require.NoError(t, err)
+
+	var mode string
+	require.NoError(t, conn.QueryRowContext(t.Context(), "PRAGMA locking_mode").Scan(&mode))
+	require.Equal(t, "exclusive", mode)
+
+	require.NoError(t, Release(dataDir))
+}
+
+func TestConnect_DefaultLockingMode(t *testing.T) {
+	t.Cleanup(ResetPool)
+
+	dataDir := t.TempDir()
+
+	conn, err := Connect(context.Background(), dataDir)
+	require.NoError(t, err)
+
+	var mode string
+	require.NoError(t, conn.QueryRowContext(t.Context(), "PRAGMA locking_mode").Scan(&mode))
+	require.Equal(t, "normal", mode)
+
+	require.NoError(t, Release(dataDir))
+}

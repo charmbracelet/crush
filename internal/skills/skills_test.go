@@ -284,6 +284,46 @@ description: Name doesn't match directory.
 	require.True(t, names["skill-two"])
 }
 
+func TestDiscoverDeduplicatesSymlinks(t *testing.T) {
+	// Not parallel: shares global broker with other Discover tests.
+
+	// Build a real skills dir and a symlink to it, simulating the case where
+	// ~/.config/crush/skills is a symlink to a project's .claude/skills.
+	realDir := t.TempDir()
+	skillDir := filepath.Join(realDir, "my-skill")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(`---
+name: my-skill
+description: A test skill.
+---
+# My Skill
+`), 0o644))
+
+	// Create a symlink directory that points to the same real directory.
+	symlinkDir := filepath.Join(t.TempDir(), "skills-link")
+	require.NoError(t, os.Symlink(realDir, symlinkDir))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := SubscribeEvents(ctx)
+
+	// Discover from both the real dir and the symlinked dir.
+	skills := Discover([]string{realDir, symlinkDir})
+
+	evt := <-ch
+	var normalStates int
+	for _, s := range evt.Payload.States {
+		if s.State == StateNormal {
+			normalStates++
+		}
+	}
+
+	// The skill should appear exactly once despite two discovery paths resolving
+	// to the same underlying file.
+	require.Len(t, skills, 1, "expected exactly one skill, got duplicates")
+	require.Equal(t, 1, normalStates, "expected one normal state, got duplicates")
+}
+
 func TestDiscoverEmptyDir(t *testing.T) {
 	// Not parallel: shares global broker with other Discover tests.
 

@@ -400,6 +400,146 @@ func TestAgenticFetchToolMessageItem_NestedChildInPlaceMutationBumpsParent(t *te
 		"parent SetNestedTools must bump even when child pointers are unchanged")
 }
 
+// requireNoBump asserts the supplied mutator leaves the item's
+// Version() unchanged. The mutator runs once; an unexpected bump
+// would force the F6 list memo to re-render an item whose output
+// did not change, churning the cache.
+func requireNoBump(t *testing.T, name string, item versionedItem, mutate func()) {
+	t.Helper()
+	before := item.Version()
+	mutate()
+	after := item.Version()
+	require.Equalf(t, before, after,
+		"%s must not bump Version() (before=%d, after=%d)", name, before, after)
+}
+
+// TestBaseToolMessageItem_AnimateBumpsVersion is the spinner
+// regression test for non-agent tools: while the tool is spinning,
+// every anim.StepMsg whose ID matches the tool must bump Version()
+// so the list-level cache invalidates and the next draw re-renders
+// the advanced spinner frame. Foreign IDs must not bump (they would
+// churn the cache on every frame), and a finished tool must not
+// bump on any ID (the entry is frozen and stays frozen).
+func TestBaseToolMessageItem_AnimateBumpsVersion(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	tc := message.ToolCall{ID: "tc-spin", Name: "bash", Input: "{}", Finished: false}
+	item := NewToolMessageItem(&sty, "msg", tc, nil, false)
+	v := item.(versionedItem)
+	a, ok := item.(Animatable)
+	require.True(t, ok, "base tool message item must implement Animatable")
+
+	// Spinning + matching ID → bump.
+	requireBump(t, "Animate[spinning,own ID]", v, func() {
+		a.Animate(anim.StepMsg{ID: tc.ID})
+	})
+
+	// Spinning + foreign ID → no bump. Routing this StepMsg here at
+	// all would mean a future chat.Animate refactor; the item must
+	// be defensive against it so we don't churn the list cache.
+	requireNoBump(t, "Animate[spinning,foreign ID]", v, func() {
+		a.Animate(anim.StepMsg{ID: "some-other-tool"})
+	})
+
+	// Finished → no bump on any ID. The entry is frozen; a stray
+	// bump would needlessly invalidate frozen entries.
+	tcFinished := tc
+	tcFinished.Finished = true
+	item.SetToolCall(tcFinished)
+	item.SetResult(&message.ToolResult{ToolCallID: tc.ID, Content: "ok"})
+	require.True(t, item.Finished(), "tool must report Finished() once the result lands")
+
+	requireNoBump(t, "Animate[finished,own ID]", v, func() {
+		a.Animate(anim.StepMsg{ID: tc.ID})
+	})
+	requireNoBump(t, "Animate[finished,foreign ID]", v, func() {
+		a.Animate(anim.StepMsg{ID: "some-other-tool"})
+	})
+}
+
+// TestAgentToolMessageItem_AnimateBumpsVersion is the spinner
+// regression test for agent tools. The parent must bump on both
+// the parent-tick branch (msg.ID == parent.ID()) and the
+// nested-tick branch (msg.ID == nested.ID()) because the list
+// only checks the parent's version — nested tools are not list
+// entries of their own. Unrelated IDs must not bump, and a parent
+// with a result must not bump on any ID.
+func TestAgentToolMessageItem_AnimateBumpsVersion(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	parentTC := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{}`, Finished: false}
+	parent := NewAgentToolMessageItem(&sty, parentTC, nil, false)
+
+	childTC := message.ToolCall{ID: "agent-child", Name: "bash", Input: `{}`, Finished: false}
+	child := NewToolMessageItem(&sty, "msg", childTC, nil, false)
+	parent.AddNestedTool(child)
+
+	// Spinning + parent's own ID → parent bumps.
+	requireBump(t, "Animate[spinning,parent ID]", parent, func() {
+		parent.Animate(anim.StepMsg{ID: parentTC.ID})
+	})
+
+	// Spinning + nested child ID → parent bumps. The list only
+	// invalidates on the parent; without this the nested
+	// spinner's frame would never reach the screen even though
+	// the nested anim's step has advanced.
+	requireBump(t, "Animate[spinning,nested ID]", parent, func() {
+		parent.Animate(anim.StepMsg{ID: childTC.ID})
+	})
+
+	// Spinning + unrelated ID → no bump.
+	requireNoBump(t, "Animate[spinning,foreign ID]", parent, func() {
+		parent.Animate(anim.StepMsg{ID: "unrelated"})
+	})
+
+	// Once the parent has a result, neither branch bumps.
+	parent.SetResult(&message.ToolResult{ToolCallID: parentTC.ID, Content: "done"})
+	requireNoBump(t, "Animate[finished,parent ID]", parent, func() {
+		parent.Animate(anim.StepMsg{ID: parentTC.ID})
+	})
+	requireNoBump(t, "Animate[finished,nested ID]", parent, func() {
+		parent.Animate(anim.StepMsg{ID: childTC.ID})
+	})
+}
+
+// TestAgenticFetchToolMessageItem_AnimateBumpsVersion is the
+// agentic-fetch counterpart of the agent-tool Animate bump test.
+// Without an explicit override the embedded base Animate would
+// drop nested-child StepMsgs at anim.Animate's ID check and never
+// bump the parent on its own ticks; this test locks in the
+// override.
+func TestAgenticFetchToolMessageItem_AnimateBumpsVersion(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	parentTC := message.ToolCall{ID: "fetch-parent", Name: "agentic_fetch", Input: `{}`, Finished: false}
+	parent := NewAgenticFetchToolMessageItem(&sty, parentTC, nil, false)
+
+	childTC := message.ToolCall{ID: "fetch-child", Name: "fetch", Input: `{}`, Finished: false}
+	child := NewToolMessageItem(&sty, "msg", childTC, nil, false)
+	parent.AddNestedTool(child)
+
+	requireBump(t, "Animate[spinning,parent ID]", parent, func() {
+		parent.Animate(anim.StepMsg{ID: parentTC.ID})
+	})
+	requireBump(t, "Animate[spinning,nested ID]", parent, func() {
+		parent.Animate(anim.StepMsg{ID: childTC.ID})
+	})
+	requireNoBump(t, "Animate[spinning,foreign ID]", parent, func() {
+		parent.Animate(anim.StepMsg{ID: "unrelated"})
+	})
+
+	parent.SetResult(&message.ToolResult{ToolCallID: parentTC.ID, Content: "done"})
+	requireNoBump(t, "Animate[finished,parent ID]", parent, func() {
+		parent.Animate(anim.StepMsg{ID: parentTC.ID})
+	})
+	requireNoBump(t, "Animate[finished,nested ID]", parent, func() {
+		parent.Animate(anim.StepMsg{ID: childTC.ID})
+	})
+}
+
 // TestBaseToolMessageItem_FinishedTransition covers §4.5.1 for
 // tools: a still-running tool reports Finished() == false; once the
 // tool call is marked finished and a result lands, Finished()

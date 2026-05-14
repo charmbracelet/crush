@@ -424,7 +424,15 @@ func (w *ClientWorkspace) SetProviderAPIKey(scope config.Scope, providerID strin
 }
 
 func (w *ClientWorkspace) SetConfigField(scope config.Scope, key string, value any) error {
-	err := w.client.SetConfigField(context.Background(), w.workspaceID(), scope, key, value)
+	err := w.client.SetConfigField(context.Background(), w.ws.ID, scope, key, value)
+	if err == nil {
+		w.refreshWorkspace()
+	}
+	return err
+}
+
+func (w *ClientWorkspace) SetConfigFields(scope config.Scope, kv map[string]any) error {
+	err := w.client.SetConfigFields(context.Background(), w.ws.ID, scope, kv)
 	if err == nil {
 		w.refreshWorkspace()
 	}
@@ -432,7 +440,7 @@ func (w *ClientWorkspace) SetConfigField(scope config.Scope, key string, value a
 }
 
 func (w *ClientWorkspace) RemoveConfigField(scope config.Scope, key string) error {
-	err := w.client.RemoveConfigField(context.Background(), w.workspaceID(), scope, key)
+	err := w.client.RemoveConfigField(context.Background(), w.ws.ID, scope, key)
 	if err == nil {
 		w.refreshWorkspace()
 	}
@@ -535,6 +543,15 @@ func (w *ClientWorkspace) EnableDockerMCP(ctx context.Context) error {
 
 func (w *ClientWorkspace) DisableDockerMCP() error {
 	return w.client.DisableDockerMCP(context.Background(), w.workspaceID())
+}
+
+func (w *ClientWorkspace) MCPInitializeSingle(ctx context.Context, name string) error {
+	return w.client.MCPInitializeSingle(ctx, w.workspaceID(), name)
+}
+
+func (w *ClientWorkspace) MCPDisableSingle(name string) error {
+	// Use background context for disable to ensure it completes during shutdown/toggles
+	return w.client.MCPDisableSingle(context.Background(), w.workspaceID(), name)
 }
 
 // -- Lifecycle --

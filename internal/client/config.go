@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/charmbracelet/crush/internal/proto"
 )
 
 // SetConfigField sets a config key/value pair on the server.
@@ -23,6 +24,21 @@ func (c *Client) SetConfigField(ctx context.Context, id string, scope config.Sco
 	defer rsp.Body.Close()
 	if rsp.StatusCode != http.StatusOK {
 		return fmt.Errorf("failed to set config field: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
+func (c *Client) SetConfigFields(ctx context.Context, id string, scope config.Scope, kv map[string]any) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/config/set-bulk", id), nil, jsonBody(struct {
+		Scope config.Scope   `json:"scope"`
+		KV    map[string]any `json:"kv"`
+	}{Scope: scope, KV: kv}), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return err
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to set config fields: status %d", rsp.StatusCode)
 	}
 	return nil
 }
@@ -275,4 +291,32 @@ func (c *Client) GetMCPPrompt(ctx context.Context, id, clientID, promptID string
 		return "", fmt.Errorf("failed to decode MCP prompt response: %w", err)
 	}
 	return result.Prompt, nil
+}
+
+func (c *Client) MCPInitializeSingle(ctx context.Context, id string, name string) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/mcp/initialize-single", id), nil,
+		jsonBody(proto.MCPNameRequest{Name: name}),
+		http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return err
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to initialize MCP: status %d", rsp.StatusCode)
+	}
+	return nil
+}
+
+func (c *Client) MCPDisableSingle(ctx context.Context, id string, name string) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/mcp/disable-single", id), nil,
+		jsonBody(proto.MCPNameRequest{Name: name}),
+		http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return err
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to disable MCP: status %d", rsp.StatusCode)
+	}
+	return nil
 }

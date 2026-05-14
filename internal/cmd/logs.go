@@ -186,7 +186,11 @@ func printLogLine(lineText string) {
 			if !ok {
 				continue
 			}
-			sourceFile := fmt.Sprintf("%s:%d", source["file"], int(source["line"].(float64)))
+			line, ok := source["line"].(float64)
+			if !ok {
+				continue
+			}
+			sourceFile := fmt.Sprintf("%s:%d", source["file"], int(line))
 			otherData = append(otherData, "source", sourceFile)
 
 		default:
@@ -195,7 +199,11 @@ func printLogLine(lineText string) {
 	}
 	log.SetTimeFunction(func(_ time.Time) time.Time {
 		// parse the timestamp from the log line if available
-		t, err := time.Parse(time.RFC3339, data["time"].(string))
+		timeStr, ok := data["time"].(string)
+		if !ok {
+			return time.Now()
+		}
+		t, err := time.Parse(time.RFC3339, timeStr)
 		if err != nil {
 			return time.Now() // fallback to current time if parsing fails
 		}

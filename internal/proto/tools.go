@@ -1,5 +1,12 @@
 package proto
 
+// The wire schema for per-tool permission parameters is owned by the
+// tool itself, not duplicated here. We alias the canonical types so
+// there is exactly one source of truth and so values survive a
+// round-trip across the client/server boundary as the same Go type
+// the UI asserts on.
+import "github.com/charmbracelet/crush/internal/agent/tools"
+
 // ToolResponseType represents the type of tool response.
 type ToolResponseType string
 
@@ -25,10 +32,7 @@ type BashParams struct {
 }
 
 // BashPermissionsParams represents the permission parameters for the bash tool.
-type BashPermissionsParams struct {
-	Command string `json:"command"`
-	Timeout int    `json:"timeout"`
-}
+type BashPermissionsParams = tools.BashPermissionsParams
 
 // BashResponseMetadata represents the metadata for a bash tool response.
 type BashResponseMetadata struct {
@@ -53,11 +57,7 @@ type DownloadParams struct {
 }
 
 // DownloadPermissionsParams represents the permission parameters for the download tool.
-type DownloadPermissionsParams struct {
-	URL      string `json:"url"`
-	FilePath string `json:"file_path"`
-	Timeout  int    `json:"timeout,omitempty"`
-}
+type DownloadPermissionsParams = tools.DownloadPermissionsParams
 
 const EditToolName = "edit"
 
@@ -70,11 +70,7 @@ type EditParams struct {
 }
 
 // EditPermissionsParams represents the permission parameters for the edit tool.
-type EditPermissionsParams struct {
-	FilePath   string `json:"file_path"`
-	OldContent string `json:"old_content,omitempty"`
-	NewContent string `json:"new_content,omitempty"`
-}
+type EditPermissionsParams = tools.EditPermissionsParams
 
 // EditResponseMetadata represents the metadata for an edit tool response.
 type EditResponseMetadata struct {
@@ -94,11 +90,14 @@ type FetchParams struct {
 }
 
 // FetchPermissionsParams represents the permission parameters for the fetch tool.
-type FetchPermissionsParams struct {
-	URL     string `json:"url"`
-	Format  string `json:"format"`
-	Timeout int    `json:"timeout,omitempty"`
-}
+type FetchPermissionsParams = tools.FetchPermissionsParams
+
+// AgenticFetchToolName is the name of the agentic_fetch tool.
+const AgenticFetchToolName = tools.AgenticFetchToolName
+
+// AgenticFetchPermissionsParams represents the permission parameters for the
+// agentic_fetch tool.
+type AgenticFetchPermissionsParams = tools.AgenticFetchPermissionsParams
 
 const GlobToolName = "glob"
 
@@ -139,10 +138,7 @@ type LSParams struct {
 }
 
 // LSPermissionsParams represents the permission parameters for the ls tool.
-type LSPermissionsParams struct {
-	Path   string   `json:"path"`
-	Ignore []string `json:"ignore"`
-}
+type LSPermissionsParams = tools.LSPermissionsParams
 
 // TreeNode represents a node in a directory tree.
 type TreeNode struct {
@@ -174,11 +170,7 @@ type MultiEditParams struct {
 }
 
 // MultiEditPermissionsParams represents the permission parameters for the multi-edit tool.
-type MultiEditPermissionsParams struct {
-	FilePath   string `json:"file_path"`
-	OldContent string `json:"old_content,omitempty"`
-	NewContent string `json:"new_content,omitempty"`
-}
+type MultiEditPermissionsParams = tools.MultiEditPermissionsParams
 
 // MultiEditResponseMetadata represents the metadata for a multi-edit tool response.
 type MultiEditResponseMetadata struct {
@@ -215,11 +207,7 @@ type ViewParams struct {
 }
 
 // ViewPermissionsParams represents the permission parameters for the view tool.
-type ViewPermissionsParams struct {
-	FilePath string `json:"file_path"`
-	Offset   int    `json:"offset"`
-	Limit    int    `json:"limit"`
-}
+type ViewPermissionsParams = tools.ViewPermissionsParams
 
 // ViewResponseMetadata represents the metadata for a view tool response.
 type ViewResponseMetadata struct {
@@ -236,11 +224,7 @@ type WriteParams struct {
 }
 
 // WritePermissionsParams represents the permission parameters for the write tool.
-type WritePermissionsParams struct {
-	FilePath   string `json:"file_path"`
-	OldContent string `json:"old_content,omitempty"`
-	NewContent string `json:"new_content,omitempty"`
-}
+type WritePermissionsParams = tools.WritePermissionsParams
 
 // WriteResponseMetadata represents the metadata for a write tool response.
 type WriteResponseMetadata struct {

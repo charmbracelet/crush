@@ -23,9 +23,13 @@ type pragma struct {
 
 // basePragmas are applied in order on every connection. page_size must
 // come before journal_mode because setting WAL writes to the database
-// and locks in the current page size on new databases.
+// and locks in the current page size on new databases. temp_store=MEMORY
+// keeps SQLite temp files in RAM instead of the OS temp directory,
+// which avoids SQLITE_CANTOPEN errors in sandboxed environments
+// (e.g. Landlock) that restrict access to /tmp.
 var basePragmas = []pragma{
 	{"page_size", "4096"},
+	{"temp_store", "MEMORY"},
 	{"journal_mode", "WAL"},
 	{"foreign_keys", "ON"},
 	{"cache_size", "-8000"},

@@ -296,10 +296,22 @@ func (t *baseToolMessageItem) StartAnimation() tea.Cmd {
 }
 
 // Animate progresses the assistant message animation if it should be spinning.
+//
+// Bumps the F6 list-cache version so the next draw re-renders this
+// item: a spinner tick mutates anim's internal frame counter, which
+// changes the rendered output but is invisible to the per-item
+// caches. Without the bump the list cache would serve the previously
+// rendered frame indefinitely and the spinner would appear frozen.
+// The ID gate keeps unrelated ticks (routed here by a future change
+// to chat.Animate's dispatch) from churning the cache.
 func (t *baseToolMessageItem) Animate(msg anim.StepMsg) tea.Cmd {
 	if !t.isSpinning() {
 		return nil
 	}
+	if msg.ID != t.toolCall.ID {
+		return nil
+	}
+	t.Bump()
 	return t.anim.Animate(msg)
 }
 

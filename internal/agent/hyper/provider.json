@@ -3,8 +3,8 @@
   "id": "hyper",
   "api_endpoint": "https://hyper.charm.land/api/v1/fantasy",
   "type": "hyper",
-  "default_large_model_id": "kimi-k2.5",
-  "default_small_model_id": "gpt-oss-120b",
+  "default_large_model_id": "kimi-k2.6",
+  "default_small_model_id": "deepseek-v4-flash",
   "models": [
     {
       "id": "deepseek-v4-flash",
@@ -131,6 +131,18 @@
       "default_max_tokens": 43000,
       "can_reason": true,
       "supports_attachments": true
+    },
+    {
+      "id": "minimax-m2.7",
+      "name": "MiniMax M2.7",
+      "cost_per_1m_in": 0.3,
+      "cost_per_1m_out": 1.2,
+      "cost_per_1m_in_cached": 0.06,
+      "cost_per_1m_out_cached": 0,
+      "context_window": 204800,
+      "default_max_tokens": 20480,
+      "can_reason": false,
+      "supports_attachments": false
     },
     {
       "id": "mistral-large-instruct-2411",

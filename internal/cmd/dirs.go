@@ -1,110 +1,91 @@
 package cmd
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"charm.land/lipgloss/v2/table"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 )
 
 var dirsCmd = &cobra.Command{
 	Use:   "dirs",
-	Short: "Print directories used by Crush",
-	Long: `Print the directories where Crush stores its configuration and data files.
-This includes the global configuration directory and data directory.`,
+	Short: "Show config and data directories",
+	Long: `Show where Crush stores its configuration and data,
+including any project-level config files discovered
+from the current directory up to the project root.`,
 	Example: `
-# Print all global directories
+# Show all directories
 crush dirs
-
-# Print data directory and all project specific config directories
-crush dirs -p
-
-# Print only global config directory
-crush dirs config
-
-# Print only project specific config directories
-crush dirs -p config
-
-# Print only the data directory
-crush dirs data
   `,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		dirs, err := configDirs(cmd)
-		if err != nil {
-			return fmt.Errorf("cannot collect config directories: %w", err)
-		}
-
-		if term.IsTerminal(os.Stdout.Fd()) {
-			// We're in a TTY: make it fancy.
-			t := table.New().
-				Border(lipgloss.RoundedBorder()).
-				StyleFunc(func(row, col int) lipgloss.Style {
-					return lipgloss.NewStyle().Padding(0, 2)
-				}).
-				Row("Config", dirs).
-				Row("Data", filepath.Dir(config.GlobalConfigData()))
-			lipgloss.Println(t)
-			return nil
-		}
-		// Not a TTY.
-		cmd.Println(dirs)
-		cmd.Println(filepath.Dir(config.GlobalConfigData()))
-
-		return nil
-	},
-}
-
-var configDirCmd = &cobra.Command{
-	Use:   "config",
-	Short: "Print the configuration directory used by Crush",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		dirs, err := configDirs(cmd)
-		if err != nil {
-			return fmt.Errorf("cannot collect config directories: %w", err)
-		}
-		cmd.Println(dirs)
-		return nil
-	},
-}
-
-var dataDirCmd = &cobra.Command{
-	Use:   "data",
-	Short: "Print the datauration directory used by Crush",
 	Run: func(cmd *cobra.Command, args []string) {
-		cmd.Println(filepath.Dir(config.GlobalConfigData()))
+		entries := collectDirs(cmd)
+		if term.IsTerminal(os.Stdout.Fd()) {
+			printDirs(cmd, entries)
+			return
+		}
+		for _, e := range entries {
+			cmd.Println(e)
+		}
 	},
 }
 
-// configDirs returns formatted string with one or more project config paths
-func configDirs(cmd *cobra.Command) (string, error) {
-	configDir := filepath.Dir(config.GlobalConfig())
-	if ok, _ := cmd.Flags().GetBool("project"); !ok {
-		return configDir, nil
-	}
+func collectDirs(cmd *cobra.Command) []string {
+	var dirs []string
+
+	dirs = append(dirs, filepath.Dir(config.GlobalConfig()))
+	dirs = append(dirs, filepath.Dir(config.GlobalConfigData()))
 
 	cwd, err := ResolveCwd(cmd)
 	if err != nil {
-		return "", fmt.Errorf("cannot resolve current working directory: %w", err)
+		return dirs
 	}
 
-	var sb strings.Builder
-	for i, path := range config.ProjectConfigs(cwd) {
-		if i > 0 {
-			sb.WriteByte('\n')
+	for _, p := range config.ProjectConfigs(cwd) {
+		d := filepath.Dir(p)
+		// Skip global paths, already shown.
+		if d == filepath.Dir(config.GlobalConfig()) || d == filepath.Dir(config.GlobalConfigData()) {
+			continue
 		}
-		sb.WriteString(filepath.Dir(path))
+		dirs = append(dirs, d)
 	}
-	return sb.String(), nil
+
+	return dirs
 }
 
-func init() {
-	dirsCmd.PersistentFlags().BoolP("project", "p", false, "Print project specific configs")
+func printDirs(cmd *cobra.Command, dirs []string) {
+	labelStyle := lipgloss.NewStyle().Bold(true).Foreground(charmtone.Charple)
 
-	dirsCmd.AddCommand(configDirCmd, dataDirCmd)
+	labels := make([]string, len(dirs))
+	longest := 0
+	for i := range dirs {
+		l := dirLabel(i)
+		labels[i] = l + ":"
+		if len(labels[i]) > longest {
+			longest = len(labels[i])
+		}
+	}
+
+	for i, d := range dirs {
+		lipgloss.Println(labelStyle.Render(labels[i]) +
+			strings.Repeat(" ", longest-len(labels[i])) +
+			" " + d)
+	}
+
+	lipgloss.Println(lipgloss.NewStyle().Foreground(charmtone.Squid).Render("Configs merge from top to bottom"))
+}
+
+func dirLabel(i int) string {
+	switch i {
+	case 0:
+		return "Config"
+	case 1:
+		return "Data"
+	default:
+		return "Project"
+	}
 }

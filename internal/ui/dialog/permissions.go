@@ -13,7 +13,6 @@ import (
 	"github.com/taigrr/crush/internal/agent/tools"
 	"github.com/taigrr/crush/internal/fsext"
 	"github.com/taigrr/crush/internal/permission"
-	"github.com/taigrr/crush/internal/proto"
 	"github.com/taigrr/crush/internal/stringext"
 	"github.com/taigrr/crush/internal/ui/common"
 	"github.com/taigrr/crush/internal/ui/styles"
@@ -459,15 +458,10 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 		switch params := p.permission.Params.(type) {
 		case tools.BashPermissionsParams:
 			lines = append(lines, p.renderKeyValue("Desc", params.Description, contentWidth))
-		case proto.BashPermissionsParams:
-			lines = append(lines, p.renderKeyValue("Desc", params.Description, contentWidth))
 		}
 	case tools.DownloadToolName:
 		switch params := p.permission.Params.(type) {
 		case tools.DownloadPermissionsParams:
-			lines = append(lines, p.renderKeyValue("URL", params.URL, contentWidth))
-			lines = append(lines, p.renderKeyValue("File", fsext.PrettyPath(params.FilePath), contentWidth))
-		case proto.DownloadPermissionsParams:
 			lines = append(lines, p.renderKeyValue("URL", params.URL, contentWidth))
 			lines = append(lines, p.renderKeyValue("File", fsext.PrettyPath(params.FilePath), contentWidth))
 		}
@@ -482,14 +476,6 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 			filePath = params.FilePath
 		case tools.ViewPermissionsParams:
 			filePath = params.FilePath
-		case proto.EditPermissionsParams:
-			filePath = params.FilePath
-		case proto.WritePermissionsParams:
-			filePath = params.FilePath
-		case proto.MultiEditPermissionsParams:
-			filePath = params.FilePath
-		case proto.ViewPermissionsParams:
-			filePath = params.FilePath
 		}
 		if filePath != "" {
 			lines = append(lines, p.renderKeyValue("File", fsext.PrettyPath(filePath), contentWidth))
@@ -497,8 +483,6 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 	case tools.LSToolName:
 		switch params := p.permission.Params.(type) {
 		case tools.LSPermissionsParams:
-			lines = append(lines, p.renderKeyValue("Directory", fsext.PrettyPath(params.Path), contentWidth))
-		case proto.LSPermissionsParams:
 			lines = append(lines, p.renderKeyValue("Directory", fsext.PrettyPath(params.Path), contentWidth))
 		}
 	}
@@ -570,8 +554,6 @@ func (p *Permissions) renderBashContent(width int) string {
 	switch params := p.permission.Params.(type) {
 	case tools.BashPermissionsParams:
 		command = params.Command
-	case proto.BashPermissionsParams:
-		command = params.Command
 	default:
 		return ""
 	}
@@ -582,8 +564,6 @@ func (p *Permissions) renderEditContent(contentWidth int) string {
 	var filePath, oldContent, newContent string
 	switch params := p.permission.Params.(type) {
 	case tools.EditPermissionsParams:
-		filePath, oldContent, newContent = params.FilePath, params.OldContent, params.NewContent
-	case proto.EditPermissionsParams:
 		filePath, oldContent, newContent = params.FilePath, params.OldContent, params.NewContent
 	default:
 		return ""
@@ -596,8 +576,6 @@ func (p *Permissions) renderWriteContent(contentWidth int) string {
 	switch params := p.permission.Params.(type) {
 	case tools.WritePermissionsParams:
 		filePath, oldContent, newContent = params.FilePath, params.OldContent, params.NewContent
-	case proto.WritePermissionsParams:
-		filePath, oldContent, newContent = params.FilePath, params.OldContent, params.NewContent
 	default:
 		return ""
 	}
@@ -608,8 +586,6 @@ func (p *Permissions) renderMultiEditContent(contentWidth int) string {
 	var filePath, oldContent, newContent string
 	switch params := p.permission.Params.(type) {
 	case tools.MultiEditPermissionsParams:
-		filePath, oldContent, newContent = params.FilePath, params.OldContent, params.NewContent
-	case proto.MultiEditPermissionsParams:
 		filePath, oldContent, newContent = params.FilePath, params.OldContent, params.NewContent
 	default:
 		return ""
@@ -652,8 +628,6 @@ func (p *Permissions) renderDownloadContent(width int) string {
 	switch params := p.permission.Params.(type) {
 	case tools.DownloadPermissionsParams:
 		url, filePath, timeout = params.URL, params.FilePath, params.Timeout
-	case proto.DownloadPermissionsParams:
-		url, filePath, timeout = params.URL, params.FilePath, params.Timeout
 	default:
 		return ""
 	}
@@ -671,8 +645,6 @@ func (p *Permissions) renderFetchContent(width int) string {
 	switch params := p.permission.Params.(type) {
 	case tools.FetchPermissionsParams:
 		url = params.URL
-	case proto.FetchPermissionsParams:
-		url = params.URL
 	default:
 		return ""
 	}
@@ -683,8 +655,6 @@ func (p *Permissions) renderAgenticFetchContent(width int) string {
 	var url, prompt string
 	switch params := p.permission.Params.(type) {
 	case tools.AgenticFetchPermissionsParams:
-		url, prompt = params.URL, params.Prompt
-	case proto.AgenticFetchPermissionsParams:
 		url, prompt = params.URL, params.Prompt
 	default:
 		return ""
@@ -706,8 +676,6 @@ func (p *Permissions) renderViewContent(width int) string {
 	switch params := p.permission.Params.(type) {
 	case tools.ViewPermissionsParams:
 		filePath, offset, limit = params.FilePath, params.Offset, params.Limit
-	case proto.ViewPermissionsParams:
-		filePath, offset, limit = params.FilePath, params.Offset, params.Limit
 	default:
 		return ""
 	}
@@ -728,8 +696,6 @@ func (p *Permissions) renderLSContent(width int) string {
 	var ignore []string
 	switch params := p.permission.Params.(type) {
 	case tools.LSPermissionsParams:
-		path, ignore = params.Path, params.Ignore
-	case proto.LSPermissionsParams:
 		path, ignore = params.Path, params.Ignore
 	default:
 		return ""

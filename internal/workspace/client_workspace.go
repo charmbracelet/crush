@@ -925,6 +925,9 @@ func protoToMessage(m proto.Message) message.Message {
 				ToolCallID: v.ToolCallID,
 				Name:       v.Name,
 				Content:    v.Content,
+				Data:       v.Data,
+				MIMEType:   v.MIMEType,
+				Metadata:   v.Metadata,
 				IsError:    v.IsError,
 			})
 		case proto.Finish:

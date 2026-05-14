@@ -87,6 +87,26 @@ type (
 	ActionDisableDockerMCP struct{}
 )
 
+// Messages for MCP OAuth authentication dialog.
+type (
+	// ActionMCPAuthStarted is sent when the user approves authentication
+	// for an MCP server. The UI should initiate the actual auth flow.
+	ActionMCPAuthStarted struct {
+		Name string
+	}
+
+	// ActionMCPAuthComplete is sent when MCP authentication succeeds.
+	ActionMCPAuthComplete struct {
+		Name string
+	}
+
+	// ActionMCPAuthErrored is sent when MCP authentication fails.
+	ActionMCPAuthErrored struct {
+		Name  string
+		Error error
+	}
+)
+
 // Messages for API key input dialog.
 type (
 	ActionChangeAPIKeyState struct {

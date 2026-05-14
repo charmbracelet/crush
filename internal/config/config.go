@@ -198,6 +198,16 @@ type MCPConfig struct {
 	// omitted from the outgoing request rather than sent as
 	// "Header:". See PLAN.md Phase 2 design decision #18.
 	Headers map[string]string `json:"headers,omitempty" jsonschema:"description=HTTP headers for HTTP/SSE MCP servers"`
+
+	// OAuth enables the MCP OAuth 2.1 authorization flow for HTTP
+	// transport servers. When true, the client uses dynamic client
+	// registration and opens a browser for the user to authorize.
+	// Tokens are persisted automatically. Only supported for type=http.
+	OAuth bool `json:"oauth,omitempty" jsonschema:"description=Enable OAuth 2.1 authorization flow for this MCP server (HTTP transport only),default=false"`
+
+	// OAuthToken is the persisted OAuth token for this server. It is
+	// managed internally and stored in the global data config.
+	OAuthToken *oauth.Token `json:"oauth_token,omitempty" jsonschema:"-"`
 }
 
 type LSPConfig struct {

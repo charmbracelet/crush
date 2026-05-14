@@ -15,6 +15,7 @@ const (
 	MCPStateStarting
 	MCPStateConnected
 	MCPStateError
+	MCPStateNeedsAuth
 )
 
 // MarshalText implements the [encoding.TextMarshaler] interface.
@@ -33,6 +34,8 @@ func (s *MCPState) UnmarshalText(data []byte) error {
 		*s = MCPStateConnected
 	case "error":
 		*s = MCPStateError
+	case "needs auth":
+		*s = MCPStateNeedsAuth
 	default:
 		return fmt.Errorf("unknown mcp state: %s", data)
 	}
@@ -50,6 +53,8 @@ func (s MCPState) String() string {
 		return "connected"
 	case MCPStateError:
 		return "error"
+	case MCPStateNeedsAuth:
+		return "needs auth"
 	default:
 		return "unknown"
 	}

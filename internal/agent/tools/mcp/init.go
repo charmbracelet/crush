@@ -347,6 +347,7 @@ func initClient(ctx context.Context, cfg *config.ConfigStore, name string, m con
 	// approve. If a cached token exists, try connecting with it directly.
 	if m.OAuth && m.Type == config.MCPHttp && (m.OAuthToken == nil || m.OAuthToken.IsExpired()) {
 		updateState(name, StateNeedsAuth, nil, nil, Counts{})
+		clearMCPData(name)
 		slog.Info("MCP server requires OAuth authentication", "name", name)
 		return nil
 	}
@@ -401,9 +402,10 @@ func DisableSingle(cfg *config.ConfigStore, name string) error {
 		sessions.Del(name)
 	}
 
-	// Clear tools and prompts for this MCP.
+	// Clear tools, prompts, and resources for this MCP.
 	updateTools(cfg, name, nil)
 	updatePrompts(name, nil)
+	allResources.Del(name)
 
 	// Update state to disabled.
 	updateState(name, StateDisabled, nil, nil, Counts{})
@@ -436,7 +438,10 @@ func getOrRenewClient(ctx context.Context, cfg *config.ConfigStore, name string)
 		// re-authenticate instead of leaving it in an error state.
 		if m.OAuth && m.Type == config.MCPHttp {
 			updateState(name, StateNeedsAuth, nil, nil, Counts{})
+			clearMCPData(name)
 			slog.Info("MCP OAuth session expired, re-authentication required", "name", name)
+		} else {
+			clearMCPData(name)
 		}
 		return nil, err
 	}
@@ -671,6 +676,14 @@ func mcpTimeout(m config.MCPConfig) time.Duration {
 		return 5 * time.Minute
 	}
 	return 15 * time.Second
+}
+
+// clearMCPData removes a stale MCP server's tools, prompts, and
+// resources from global state so they are not served to the agent.
+func clearMCPData(name string) {
+	allTools.Del(name)
+	allPrompts.Del(name)
+	allResources.Del(name)
 }
 
 func stdioCheck(old *exec.Cmd) error {

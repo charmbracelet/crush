@@ -346,12 +346,17 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			options[google.Name] = parsed
 		}
 	case openaicompat.Name, hyper.Name:
+		extraBody := make(map[string]any)
+
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
 		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
-			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
+			switch providerCfg.ID {
+			case string(catwalk.InferenceProviderIoNet):
+				extraBody["reasoning"] = map[string]string{"effort": model.ModelCfg.ReasoningEffort}
+			default:
+				mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
+			}
 		}
-
-		extraBody := make(map[string]any)
 
 		// "reasoning effort" is a standard OpenAI field, but "thinking" is not.
 		// Setting it in the right way for each provider.
@@ -361,8 +366,12 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		case hyper.Name:
 			extraBody["thinking"] = model.ModelCfg.Think
 		case string(catwalk.InferenceProviderIoNet):
-			extraBody["chat_template_kwargs"] = map[string]any{
-				"thinking": model.ModelCfg.Think,
+			if _, ok := extraBody["reasoning"]; !ok && model.CatwalkCfg.CanReason {
+				if model.ModelCfg.Think {
+					extraBody["reasoning"] = map[string]string{"effort": "medium"}
+				} else {
+					extraBody["reasoning"] = map[string]string{"effort": "none"}
+				}
 			}
 		case string(catwalk.InferenceProviderZAI), string(catwalk.InferenceProviderDeepSeek):
 			if model.ModelCfg.Think {

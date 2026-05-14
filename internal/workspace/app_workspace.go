@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/skills"
 )
 
 // AppWorkspace implements the Workspace interface by delegating
@@ -296,6 +297,18 @@ func (w *AppWorkspace) MarkProjectInitialized() error {
 
 func (w *AppWorkspace) InitializePrompt() (string, error) {
 	return agent.InitializePrompt(w.store)
+}
+
+func (w *AppWorkspace) ListSkills(_ context.Context) ([]skills.CatalogEntry, error) {
+	return skills.Catalog(w.store), nil
+}
+
+func (w *AppWorkspace) ReadSkill(ctx context.Context, skillID string) ([]byte, skills.SkillReadResult, error) {
+	if w.app.AgentCoordinator != nil {
+		return w.app.AgentCoordinator.ReadSkill(ctx, skillID)
+	}
+	// Pre-init fallback: read directly without tracker mark.
+	return skills.ReadContent(w.store, skillID)
 }
 
 // -- MCP operations --

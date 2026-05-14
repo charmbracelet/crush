@@ -149,14 +149,6 @@ definitions:
           type: string
         type: array
     type: object
-  config.Scope:
-    enum:
-    - 0
-    - 1
-    type: integer
-    x-enum-varnames:
-    - ScopeGlobal
-    - ScopeWorkspace
   config.SelectedModel:
     properties:
       frequency_penalty:
@@ -307,6 +299,10 @@ definitions:
         type: boolean
       disable_provider_auto_update:
         type: boolean
+      disabled_skills:
+        items:
+          type: string
+        type: array
       disabled_tools:
         items:
           type: string
@@ -322,6 +318,14 @@ definitions:
       tui:
         $ref: '#/definitions/config.TUIOptions'
     type: object
+  github_com_charmbracelet_crush_internal_config.Scope:
+    enum:
+    - 0
+    - 1
+    type: integer
+    x-enum-varnames:
+    - ScopeGlobal
+    - ScopeWorkspace
   github_com_charmbracelet_crush_internal_proto.Message:
     properties:
       created_at:
@@ -423,7 +427,7 @@ definitions:
       enabled:
         type: boolean
       scope:
-        $ref: '#/definitions/config.Scope'
+        $ref: '#/definitions/github_com_charmbracelet_crush_internal_config.Scope'
     type: object
   proto.ConfigModelRequest:
     properties:
@@ -432,7 +436,7 @@ definitions:
       model_type:
         $ref: '#/definitions/config.SelectedModelType'
       scope:
-        $ref: '#/definitions/config.Scope'
+        $ref: '#/definitions/github_com_charmbracelet_crush_internal_config.Scope'
     type: object
   proto.ConfigProviderKeyRequest:
     properties:
@@ -440,28 +444,28 @@ definitions:
       provider_id:
         type: string
       scope:
-        $ref: '#/definitions/config.Scope'
+        $ref: '#/definitions/github_com_charmbracelet_crush_internal_config.Scope'
     type: object
   proto.ConfigRefreshOAuthRequest:
     properties:
       provider_id:
         type: string
       scope:
-        $ref: '#/definitions/config.Scope'
+        $ref: '#/definitions/github_com_charmbracelet_crush_internal_config.Scope'
     type: object
   proto.ConfigRemoveRequest:
     properties:
       key:
         type: string
       scope:
-        $ref: '#/definitions/config.Scope'
+        $ref: '#/definitions/github_com_charmbracelet_crush_internal_config.Scope'
     type: object
   proto.ConfigSetRequest:
     properties:
       key:
         type: string
       scope:
-        $ref: '#/definitions/config.Scope'
+        $ref: '#/definitions/github_com_charmbracelet_crush_internal_config.Scope'
       value: {}
     type: object
   proto.Error:
@@ -634,6 +638,20 @@ definitions:
       needs_init:
         type: boolean
     type: object
+  proto.ReadSkillRequest:
+    properties:
+      skill_id:
+        type: string
+    type: object
+  proto.ReadSkillResponse:
+    properties:
+      content:
+        items:
+          type: integer
+        type: array
+      result:
+        $ref: '#/definitions/proto.SkillReadResult'
+    type: object
   proto.ServerControl:
     properties:
       command:
@@ -661,6 +679,30 @@ definitions:
         type: string
       updated_at:
         type: integer
+    type: object
+  proto.SkillInfo:
+    properties:
+      description:
+        type: string
+      id:
+        type: string
+      label:
+        type: string
+      name:
+        type: string
+      source:
+        type: string
+    type: object
+  proto.SkillReadResult:
+    properties:
+      builtin:
+        type: boolean
+      description:
+        type: string
+      name:
+        type: string
+      source:
+        type: string
     type: object
   proto.VersionInfo:
     properties:
@@ -1639,6 +1681,50 @@ paths:
       summary: Stop all LSP servers
       tags:
       - lsp
+  /workspaces/{id}/mcp/docker/disable:
+    post:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Disable Docker MCP
+      tags:
+      - mcp
+  /workspaces/{id}/mcp/docker/enable:
+    post:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Enable Docker MCP
+      tags:
+      - mcp
   /workspaces/{id}/mcp/get-prompt:
     post:
       consumes:
@@ -2362,4 +2448,70 @@ paths:
       summary: Get user messages for session
       tags:
       - sessions
+  /workspaces/{id}/skills:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/proto.SkillInfo'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: List visible skills
+      tags:
+      - skills
+  /workspaces/{id}/skills/read:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Read skill request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.ReadSkillRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/proto.ReadSkillResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Read skill content
+      tags:
+      - skills
 swagger: "2.0"

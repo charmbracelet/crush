@@ -337,3 +337,15 @@ When multiple hooks match, their decisions are aggregated:
 - `CRUSH_GLOBAL_CONFIG` - Override global config location
 - `CRUSH_GLOBAL_DATA` - Override data directory location
 - `CRUSH_SKILLS_DIR` - Override default skills directory
+
+## Viewing docs for the running version
+
+```bash
+crush -v | head -1
+```
+
+This prints something like `crush version VERSION`. Use the version and agentic fetch to get info for the current version when needed.
+
+```
+https://raw.githubusercontent.com/charmbracelet/crush/refs/tags/VERSION/README.md
+```

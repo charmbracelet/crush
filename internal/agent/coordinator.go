@@ -383,7 +383,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 				}
 			}
 		case string(catwalk.InferenceProviderZAI), string(catwalk.InferenceProviderDeepSeek):
-			if model.ModelCfg.Think {
+			if model.ModelCfg.Think || model.ModelCfg.ReasoningEffort != "" {
 				extraBody["thinking"] = map[string]any{
 					"type": "enabled",
 				}

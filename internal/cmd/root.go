@@ -329,6 +329,9 @@ func ensureServer(cmd *cobra.Command, hostURL *url.URL) error {
 			if err := startDetachedServer(cmd, hostURL); err != nil {
 				return err
 			}
+			if err := waitForServerReady(cmd.Context(), hostURL); err != nil {
+				return fmt.Errorf("failed to initialize crush server: %v", err)
+			}
 			return nil
 		}
 

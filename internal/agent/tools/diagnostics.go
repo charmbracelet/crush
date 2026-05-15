@@ -54,12 +54,16 @@ func openInLSPs(
 
 	manager.Start(ctx, filepath)
 
+	var wg sync.WaitGroup
 	for client := range manager.Clients().Seq() {
 		if !client.HandlesFile(filepath) {
 			continue
 		}
-		_ = client.OpenFileOnDemand(ctx, filepath)
+		wg.Go(func() {
+			_ = client.OpenFileOnDemand(ctx, filepath)
+		})
 	}
+	wg.Wait()
 }
 
 // waitForLSPDiagnostics waits briefly for diagnostics publication after a file

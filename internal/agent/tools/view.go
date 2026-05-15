@@ -48,6 +48,7 @@ type ViewParams struct {
 	FilePath string `json:"file_path" description:"The path to the file to read"`
 	Offset   int    `json:"offset,omitempty" description:"The line number to start reading from (0-based)"`
 	Limit    int    `json:"limit,omitempty" description:"The number of lines to read (defaults to 2000)"`
+	Reason   string `json:"reason,omitempty" description:"Brief explanation of why this file is being read"`
 }
 
 type ViewPermissionsParams struct {
@@ -134,7 +135,8 @@ func NewViewTool(
 
 			// Request permission for files outside working directory, unless it's a skill file.
 			if isOutsideWorkDir && !isSkillFile {
-				granted, permReqErr := permissions.Request(ctx,
+				granted, permReqErr := permissions.Request(
+					ctx,
 					permission.CreatePermissionRequest{
 						SessionID:   sessionID,
 						Path:        absFilePath,
@@ -142,7 +144,12 @@ func NewViewTool(
 						ToolName:    ViewToolName,
 						Action:      "read",
 						Description: fmt.Sprintf("Read file outside working directory: %s", absFilePath),
-						Params:      ViewPermissionsParams(params),
+						Reason:      params.Reason,
+						Params: ViewPermissionsParams{
+							FilePath: params.FilePath,
+							Offset:   params.Offset,
+							Limit:    params.Limit,
+						},
 					},
 				)
 				if permReqErr != nil {
@@ -274,7 +281,8 @@ func NewViewTool(
 				fantasy.NewTextResponse(output),
 				meta,
 			), nil
-		})
+		},
+	)
 }
 
 func addLineNumbers(content string, startLine int) string {

@@ -478,6 +478,9 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 		if filePath != "" {
 			lines = append(lines, p.renderKeyValue("File", fsext.PrettyPath(filePath), contentWidth))
 		}
+		if p.permission.Reason != "" {
+			lines = append(lines, p.renderKeyValue("Reason", p.permission.Reason, contentWidth))
+		}
 	case tools.LSToolName:
 		if params, ok := p.permission.Params.(tools.LSPermissionsParams); ok {
 			lines = append(lines, p.renderKeyValue("Directory", fsext.PrettyPath(params.Path), contentWidth))

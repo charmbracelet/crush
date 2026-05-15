@@ -29,6 +29,7 @@ type MultiEditOperation struct {
 type MultiEditParams struct {
 	FilePath string               `json:"file_path" description:"The absolute path to the file to modify"`
 	Edits    []MultiEditOperation `json:"edits" description:"Array of edit operations to perform sequentially on the file"`
+	Reason   string               `json:"reason,omitempty" description:"Brief explanation of why these edits are being made"`
 }
 
 type MultiEditPermissionsParams struct {
@@ -110,7 +111,8 @@ func NewMultiEditTool(
 			text += getDiagnostics(params.FilePath, lspManager)
 			response.Content = text
 			return response, nil
-		})
+		},
+	)
 }
 
 func validateEdits(edits []MultiEditOperation) error {
@@ -185,6 +187,7 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 		ToolName:    MultiEditToolName,
 		Action:      "write",
 		Description: description,
+		Reason:      params.Reason,
 		Params: MultiEditPermissionsParams{
 			FilePath:   params.FilePath,
 			OldContent: "",
@@ -266,9 +269,11 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 	modTime := fileInfo.ModTime().Truncate(time.Second)
 	if modTime.After(lastRead) {
 		return fantasy.NewTextErrorResponse(
-			fmt.Sprintf("file %s has been modified since it was last read (mod time: %s, last read: %s)",
+			fmt.Sprintf(
+				"file %s has been modified since it was last read (mod time: %s, last read: %s)",
 				params.FilePath, modTime.Format(time.RFC3339), lastRead.Format(time.RFC3339),
-			)), nil
+			),
+		), nil
 	}
 
 	// Read current file content
@@ -327,6 +332,7 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 		ToolName:    MultiEditToolName,
 		Action:      "write",
 		Description: description,
+		Reason:      params.Reason,
 		Params: MultiEditPermissionsParams{
 			FilePath:   params.FilePath,
 			OldContent: oldContent,

@@ -27,6 +27,7 @@ var writeDescription string
 type WriteParams struct {
 	FilePath string `json:"file_path" description:"The path to the file to write"`
 	Content  string `json:"content" description:"The content to write to the file"`
+	Reason   string `json:"reason,omitempty" description:"Brief explanation of why this file is being written"`
 }
 
 type WritePermissionsParams struct {
@@ -105,7 +106,8 @@ func NewWriteTool(
 				strings.TrimPrefix(filePath, workingDir),
 			)
 
-			p, err := permissions.Request(ctx,
+			p, err := permissions.Request(
+				ctx,
 				permission.CreatePermissionRequest{
 					SessionID:   sessionID,
 					Path:        fsext.PathOrPrefix(filePath, workingDir),
@@ -113,6 +115,7 @@ func NewWriteTool(
 					ToolName:    WriteToolName,
 					Action:      "write",
 					Description: fmt.Sprintf("Create file %s", filePath),
+					Reason:      params.Reason,
 					Params: WritePermissionsParams{
 						FilePath:   filePath,
 						OldContent: oldContent,
@@ -161,12 +164,14 @@ func NewWriteTool(
 			result := fmt.Sprintf("File successfully written: %s", filePath)
 			result = fmt.Sprintf("<result>\n%s\n</result>", result)
 			result += getDiagnostics(filePath, lspManager)
-			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(result),
+			return fantasy.WithResponseMetadata(
+				fantasy.NewTextResponse(result),
 				WriteResponseMetadata{
 					Diff:      diff,
 					Additions: additions,
 					Removals:  removals,
 				},
 			), nil
-		})
+		},
+	)
 }

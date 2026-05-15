@@ -179,7 +179,6 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 }
 
 func sendEvent(ctx context.Context, evc chan any, ev any) {
-	slog.Info("Event received", "event", fmt.Sprintf("%T %+v", ev, ev))
 	select {
 	case evc <- ev:
 	case <-ctx.Done():

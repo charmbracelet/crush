@@ -218,7 +218,6 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 			if !ok {
 				return
 			}
-			c.server.logDebug(r, "Sending event", "event", fmt.Sprintf("%T %+v", ev.Payload, ev.Payload))
 			wrapped := wrapEvent(ev.Payload)
 			if wrapped == nil {
 				continue

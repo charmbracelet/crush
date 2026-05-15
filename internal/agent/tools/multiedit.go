@@ -404,27 +404,26 @@ func applyEditToContent(content string, edit MultiEditOperation) (string, error)
 	}
 
 	var newContent string
-	var replacementCount int
 
 	if edit.ReplaceAll {
-		newContent = strings.ReplaceAll(content, edit.OldString, edit.NewString)
-		replacementCount = strings.Count(content, edit.OldString)
-		if replacementCount == 0 {
+		// For replaceAll, try fuzzy match if exact match fails.
+		replaced, found := replaceAllWithBestMatch(content, edit.OldString, edit.NewString)
+		if !found {
 			return "", fmt.Errorf("old_string not found in content. Make sure it matches exactly, including whitespace and line breaks")
 		}
+		newContent = replaced
 	} else {
-		index := strings.Index(content, edit.OldString)
-		if index == -1 {
+		// Try exact match first, then fuzzy match.
+		matchedString, found, isMultiple := findBestMatch(content, edit.OldString)
+		if !found {
 			return "", fmt.Errorf("old_string not found in content. Make sure it matches exactly, including whitespace and line breaks")
 		}
-
-		lastIndex := strings.LastIndex(content, edit.OldString)
-		if index != lastIndex {
+		if isMultiple {
 			return "", fmt.Errorf("old_string appears multiple times in the content. Please provide more context to ensure a unique match, or set replace_all to true")
 		}
 
-		newContent = content[:index] + edit.NewString + content[index+len(edit.OldString):]
-		replacementCount = 1
+		index := strings.Index(content, matchedString)
+		newContent = content[:index] + edit.NewString + content[index+len(matchedString):]
 	}
 
 	return newContent, nil

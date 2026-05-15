@@ -158,7 +158,7 @@ func (s *ConfigStore) SetConfigFields(scope Scope, kv map[string]any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("failed to create config directory %q: %w", path, err)
 	}
-	if err := os.WriteFile(path, []byte(newValue), 0o600); err != nil {
+	if err := atomicWriteFile(path, []byte(newValue), 0o600); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 
@@ -193,7 +193,7 @@ func (s *ConfigStore) RemoveConfigField(scope Scope, key string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("failed to create config directory %q: %w", path, err)
 	}
-	if err := os.WriteFile(path, []byte(newValue), 0o600); err != nil {
+	if err := atomicWriteFile(path, []byte(newValue), 0o600); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 
@@ -302,7 +302,10 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 // RefreshOAuthToken refreshes the OAuth token for the given provider.
 // Before making an external refresh request, it checks the config file on
 // disk to see if another Crush session has already refreshed the token. If
-// a newer token is found, it is used instead of refreshing.
+// a newer, unexpired token is found, it is used instead of refreshing. If
+// the exchange fails (e.g. because another session already rotated the
+// refresh token), the disk is re-checked to recover the other session's
+// token.
 func (s *ConfigStore) RefreshOAuthToken(ctx context.Context, scope Scope, providerID string) error {
 	providerConfig, exists := s.config.Providers.Get(providerID)
 	if !exists {
@@ -318,15 +321,9 @@ func (s *ConfigStore) RefreshOAuthToken(ctx context.Context, scope Scope, provid
 	newToken, err := s.loadTokenFromDisk(scope, providerID)
 	if err != nil {
 		slog.Warn("Failed to read token from config file, proceeding with refresh", "provider", providerID, "error", err)
-	} else if newToken != nil && newToken.AccessToken != providerConfig.OAuthToken.AccessToken {
+	} else if newToken != nil && !newToken.IsExpired() && newToken.AccessToken != providerConfig.OAuthToken.AccessToken {
 		slog.Info("Using token refreshed by another session", "provider", providerID)
-		providerConfig.OAuthToken = newToken
-		providerConfig.APIKey = newToken.AccessToken
-		if providerID == string(catwalk.InferenceProviderCopilot) {
-			providerConfig.SetupGitHubCopilot()
-		}
-		s.config.Providers.Set(providerID, providerConfig)
-		return nil
+		return s.applyToken(providerConfig, newToken, providerID)
 	}
 
 	var refreshedToken *oauth.Token
@@ -340,6 +337,16 @@ func (s *ConfigStore) RefreshOAuthToken(ctx context.Context, scope Scope, provid
 		return fmt.Errorf("OAuth refresh not supported for provider %s", providerID)
 	}
 	if refreshErr != nil {
+		// The exchange may have failed because another session already
+		// rotated the refresh token. Re-read the config file and use the
+		// other session's token if available.
+		if diskToken, diskErr := s.loadTokenFromDisk(scope, providerID); diskErr == nil &&
+			diskToken != nil &&
+			!diskToken.IsExpired() &&
+			diskToken.AccessToken != providerConfig.OAuthToken.AccessToken {
+			slog.Info("Using token refreshed by another session after exchange failure", "provider", providerID)
+			return s.applyToken(providerConfig, diskToken, providerID)
+		}
 		return fmt.Errorf("failed to refresh OAuth token for provider %s: %w", providerID, refreshErr)
 	}
 
@@ -361,6 +368,17 @@ func (s *ConfigStore) RefreshOAuthToken(ctx context.Context, scope Scope, provid
 		return fmt.Errorf("failed to persist refreshed token: %w", err)
 	}
 
+	return nil
+}
+
+// applyToken updates the in-memory provider config with the given token.
+func (s *ConfigStore) applyToken(providerConfig ProviderConfig, token *oauth.Token, providerID string) error {
+	providerConfig.OAuthToken = token
+	providerConfig.APIKey = token.AccessToken
+	if providerID == string(catwalk.InferenceProviderCopilot) {
+		providerConfig.SetupGitHubCopilot()
+	}
+	s.config.Providers.Set(providerID, providerConfig)
 	return nil
 }
 

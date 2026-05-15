@@ -245,6 +245,7 @@ func (m *MergeWorktree) FullHelp() [][]key.Binding {
 
 // branchItem represents a branch in the list.
 type branchItem struct {
+	*list.Versioned
 	t       *styles.Styles
 	branch  string
 	m       fuzzy.Match
@@ -252,7 +253,7 @@ type branchItem struct {
 	focused bool
 }
 
-var _ ListItem = &branchItem{}
+var _ ListItem = &branchItem{Versioned: list.NewVersioned()}
 
 // Filter returns the filterable value of the branch.
 func (i *branchItem) Filter() string {
@@ -294,9 +295,13 @@ func branchItems(styles *styles.Styles, branches []string) []list.FilterableItem
 	items := make([]list.FilterableItem, len(branches))
 	for i, branch := range branches {
 		items[i] = &branchItem{
-			t:      styles,
-			branch: branch,
+			Versioned: list.NewVersioned(),
+			t:         styles,
+			branch:    branch,
 		}
 	}
 	return items
 }
+
+// Finished implements list.Item.
+func (b *branchItem) Finished() bool { return true }

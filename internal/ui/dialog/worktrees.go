@@ -208,6 +208,7 @@ func (w *Worktrees) FullHelp() [][]key.Binding {
 
 // worktreeItem represents a worktree in the list.
 type worktreeItem struct {
+	*list.Versioned
 	t        *styles.Styles
 	worktree *worktree.Worktree
 	m        fuzzy.Match
@@ -215,7 +216,7 @@ type worktreeItem struct {
 	focused  bool
 }
 
-var _ ListItem = &worktreeItem{}
+var _ ListItem = &worktreeItem{Versioned: list.NewVersioned()}
 
 // Filter returns the filterable value of the worktree.
 func (i *worktreeItem) Filter() string {
@@ -263,9 +264,13 @@ func worktreeItems(styles *styles.Styles, worktrees []*worktree.Worktree) []list
 	items := make([]list.FilterableItem, len(worktrees))
 	for i, wt := range worktrees {
 		items[i] = &worktreeItem{
-			t:        styles,
-			worktree: wt,
+			Versioned: list.NewVersioned(),
+			t:         styles,
+			worktree:  wt,
 		}
 	}
 	return items
 }
+
+// Finished implements list.Item.
+func (w *worktreeItem) Finished() bool { return true }

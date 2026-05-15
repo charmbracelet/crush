@@ -20,7 +20,13 @@ func TestChatToggleExpandedSelectedItem_AssistantMessage(t *testing.T) {
 
 	u := newTestUI()
 
-	msg := &message.Message{ID: "m-assist", Role: message.Assistant}
+	msg := &message.Message{
+		ID:   "m-assist",
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.ReasoningContent{Thinking: "thinking about it"},
+		},
+	}
 	item := chat.NewAssistantMessageItem(u.com.Styles, msg)
 
 	// The keyboard expand path uses the generic Expandable interface;

@@ -445,6 +445,8 @@ The global paths we looks for skills are:
 * `$CRUSH_SKILLS_DIR`
 * `$XDG_CONFIG_HOME/agents/skills` or `~/.config/agents/skills/`
 * `$XDG_CONFIG_HOME/crush/skills` or `~/.config/crush/skills/`
+* `~/.agents/skills/`
+* `~/.claude/skills/`
 * On Windows, we _also_ look at
   * `%LOCALAPPDATA%\agents\skills\` or `%USERPROFILE%\AppData\Local\agents\skills\`
   * `%LOCALAPPDATA%\crush\skills\` or `%USERPROFILE%\AppData\Local\crush\skills\`

@@ -181,6 +181,7 @@ func (s *Snapshots) FullHelp() [][]key.Binding {
 
 // snapshotItem represents a snapshot in the list.
 type snapshotItem struct {
+	*list.Versioned
 	t        *styles.Styles
 	snapshot *checkpoint.Snapshot
 	m        fuzzy.Match
@@ -188,7 +189,7 @@ type snapshotItem struct {
 	focused  bool
 }
 
-var _ ListItem = &snapshotItem{}
+var _ ListItem = &snapshotItem{Versioned: list.NewVersioned()}
 
 // Filter returns the filterable value of the snapshot.
 func (i *snapshotItem) Filter() string {
@@ -239,9 +240,13 @@ func snapshotItems(styles *styles.Styles, snapshots []*checkpoint.Snapshot) []li
 	items := make([]list.FilterableItem, len(snapshots))
 	for i, snap := range snapshots {
 		items[i] = &snapshotItem{
-			t:        styles,
-			snapshot: snap,
+			Versioned: list.NewVersioned(),
+			t:         styles,
+			snapshot:  snap,
 		}
 	}
 	return items
 }
+
+// Finished implements list.Item.
+func (s *snapshotItem) Finished() bool { return true }

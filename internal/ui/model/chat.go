@@ -63,6 +63,32 @@ type Chat struct {
 	// follow is a flag to indicate whether the view should auto-scroll to
 	// bottom on new messages.
 	follow bool
+
+	// drawCache memoizes the decoded form of the last list.Render output so
+	// repeat frames with byte-identical content skip the per-cell ANSI
+	// reparse that uv.StyledString.Draw performs every call. See F9
+	// (docs/notes/2026-05-12-chat-rendering-perf.md §4.8). Bounded to one
+	// entry; invalidated implicitly by string inequality on the next Draw.
+	drawCache *chatDrawCache
+}
+
+// chatDrawCache holds the pre-decoded form of the last list.Render output.
+// The cache is keyed by the rendered string and the screen's width method
+// (graphemes vs wcwidth pick different decoders inside ultraviolet's
+// printString, so a cached buffer is only valid for the method it was
+// decoded with). The cached buffer is independent of the draw area, so
+// resize / scroll changes that produce the same string still hit. We cannot
+// use uv.StyledString.Lines because it bottoms out at the first iteration
+// against a zero-bounds rectangle (see ultraviolet styled.go line 45 — the
+// shared printString loop's `y >= bounds.Max.Y` exit applies to the
+// line-building branch too). A Buffer of the rendered text's natural
+// dimensions is the cheapest correct shape: StyledString.Draw runs once on
+// miss to populate it, and Buffer.Draw is an O(cells) cell copy with no
+// ANSI re-parse on hit.
+type chatDrawCache struct {
+	rendered string
+	method   ansi.Method
+	buf      uv.ScreenBuffer
 }
 
 // NewChat creates a new instance of [Chat] that handles chat interactions and
@@ -89,8 +115,93 @@ func (m *Chat) Height() int {
 }
 
 // Draw renders the chat UI component to the screen and the given area.
+//
+// The list's rendered output is cached in decoded form (see chatDrawCache) so
+// that frames with byte-identical content skip the ANSI reparse that
+// uv.StyledString.Draw performs on every call. The cache is keyed by the
+// rendered string and the screen's width method; area / scroll changes do not
+// invalidate it.
 func (m *Chat) Draw(scr uv.Screen, area uv.Rectangle) {
-	uv.NewStyledString(m.list.Render()).Draw(scr, area)
+	rendered := m.list.Render()
+	method, ok := scr.WidthMethod().(ansi.Method)
+	if !ok {
+		// Width method isn't an ansi.Method (unlikely in practice — both
+		// TerminalScreen and ScreenBuffer store ansi.Method). Fall back
+		// to the uncached path so behavior matches upstream exactly.
+		uv.NewStyledString(rendered).Draw(scr, area)
+		return
+	}
+	if m.drawCache == nil ||
+		m.drawCache.rendered != rendered ||
+		m.drawCache.method != method {
+		m.drawCache = newChatDrawCache(rendered, method)
+	}
+	drawCachedBuffer(scr, area, m.drawCache.buf)
+}
+
+// newChatDrawCache builds a chatDrawCache for the given rendered string by
+// running uv.StyledString.Draw into a fresh buffer sized to the text's
+// natural bounds under the active width method. This is the only place
+// ANSI decoding happens for cached frames — subsequent draws reuse buf
+// via drawCachedBuffer.
+//
+// We can't use uv.StyledString.Bounds() here: it is hard-coded to
+// ansi.GraphemeWidth, while StyledString.Draw lays cells using the
+// destination buffer's WidthMethod (which we capture in `method`). For
+// strings where graphemes and wcwidth disagree (emoji ZWJ sequences,
+// some CJK, certain combining marks) the two answers diverge, leaving
+// the cached buffer either too small (trailing cells dropped on hit) or
+// too large (dead cells past the live content). Computing dimensions
+// with `method.StringWidth` per line matches what printString tallies
+// cell-by-cell, since both decode ANSI sequences and use the same width
+// method.
+func newChatDrawCache(rendered string, method ansi.Method) *chatDrawCache {
+	w, h := renderedBounds(rendered, method)
+	if w <= 0 {
+		w = 1
+	}
+	if h <= 0 {
+		h = 1
+	}
+	buf := uv.NewScreenBuffer(w, h)
+	buf.Method = method
+	uv.NewStyledString(rendered).Draw(buf, buf.Bounds())
+	return &chatDrawCache{
+		rendered: rendered,
+		method:   method,
+		buf:      buf,
+	}
+}
+
+// renderedBounds returns the (width, height) cell extent of rendered
+// when laid out by method. Width is the widest line's StringWidth (which
+// strips ANSI sequences and tallies cells via method, exactly like
+// printString); height is the line count. Both match what
+// uv.StyledString.Draw will write into a buffer whose WidthMethod is
+// method, so the cache buffer is always sized to fit the live content.
+func renderedBounds(rendered string, method ansi.Method) (w, h int) {
+	for line := range strings.SplitSeq(rendered, "\n") {
+		w = max(w, method.StringWidth(line))
+		h++
+	}
+	return w, h
+}
+
+// drawCachedBuffer blits a previously-decoded buffer into scr at area,
+// mirroring uv.StyledString.Draw's screen-mode behavior for the default
+// Wrap=false, Tail="" case. The clear loop matches StyledString.Draw line
+// 51-56; the buf.Draw call replaces the per-cell ANSI decode that
+// printString does on every uncached frame with a pure cell copy.
+func drawCachedBuffer(scr uv.Screen, area uv.Rectangle, buf uv.ScreenBuffer) {
+	// Clear the area first to match StyledString.Draw — leftover cells
+	// from a previous frame outside the new content must be zeroed,
+	// because Buffer.Draw skips empty cells (it doesn't clear).
+	for y := area.Min.Y; y < area.Max.Y; y++ {
+		for x := area.Min.X; x < area.Max.X; x++ {
+			scr.SetCell(x, y, nil)
+		}
+	}
+	buf.Draw(scr, area)
 }
 
 // SetSize sets the size of the chat view port.

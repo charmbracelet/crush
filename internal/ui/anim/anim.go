@@ -30,9 +30,14 @@ const (
 	// change every 8 frames (400 milliseconds).
 	ellipsisAnimSpeed = 8
 
-	// The maximum amount of time that can pass before a character appears.
-	// This is used to create a staggered entrance effect.
-	maxBirthOffset = time.Second
+	// The maximum number of animation steps that can pass before a
+	// character appears. With fps == 20 this is ~1s of staggered
+	// entrance, identical to the previous wall-clock-driven value.
+	// Switching from wall-clock + rand to a step-driven birth schedule
+	// keeps Render() deterministic: two Anim instances built from the
+	// same Settings produce byte-identical output when no Animate ticks
+	// have advanced their step counter.
+	maxBirthSteps = 20
 
 	// Number of frames to prerender for the animation. After this number
 	// of frames, the animation will loop. This only applies when color
@@ -107,12 +112,12 @@ type Anim struct {
 	label            *csync.Slice[string]
 	labelWidth       int
 	labelColor       color.Color
-	startTime        time.Time
-	birthOffsets     []time.Duration
+	birthSteps       []int
 	initialFrames    [][]string // frames for the initial characters
 	initialized      atomic.Bool
 	cyclingFrames    [][]string           // frames for the cycling characters
-	step             atomic.Int64         // current main frame step
+	step             atomic.Int64         // current main frame step (wraps)
+	framesSinceStart atomic.Int64         // total Animate ticks (does not wrap)
 	ellipsisStep     atomic.Int64         // current ellipsis frame step
 	ellipsisFrames   *csync.Slice[string] // ellipsis animation frames
 	id               string
@@ -140,7 +145,6 @@ func New(opts Settings) *Anim {
 	} else {
 		a.id = fmt.Sprintf("%d", nextID())
 	}
-	a.startTime = time.Now()
 	a.cyclingCharWidth = opts.Size
 	a.labelColor = opts.LabelColor
 
@@ -207,7 +211,13 @@ func New(opts Settings) *Anim {
 			}
 		}
 
-		// Prerender scrambled rune frames for the animation.
+		// Prerender scrambled rune frames for the animation. Seed
+		// the rune picker off the settings hash so cyclingFrames is
+		// a pure function of Settings: two processes with identical
+		// Settings populate the cache with the same glyphs, which
+		// keeps any cross-process golden-file comparison stable.
+		seed := xxh3.HashString(cacheKey)
+		rng := rand.New(rand.NewPCG(seed, ^seed))
 		a.cyclingFrames = make([][]string, numFrames)
 		offset = 0
 		for i := range a.cyclingFrames {
@@ -219,7 +229,7 @@ func New(opts Settings) *Anim {
 
 				// Also prerender the color with Lip Gloss here to avoid processing
 				// in the render loop.
-				r := availableRunes[rand.IntN(len(availableRunes))]
+				r := availableRunes[rng.IntN(len(availableRunes))]
 				a.cyclingFrames[i][j] = lipgloss.NewStyle().
 					Foreground(ramp[j+offset]).
 					Render(string(r))
@@ -249,10 +259,20 @@ func New(opts Settings) *Anim {
 		animCacheMap.Set(cacheKey, cached)
 	}
 
-	// Random assign a birth to each character for a stagged entrance effect.
-	a.birthOffsets = make([]time.Duration, a.width)
-	for i := range a.birthOffsets {
-		a.birthOffsets[i] = time.Duration(rand.N(int64(maxBirthOffset))) * time.Nanosecond
+	// Assign a deterministic birth step to each column for a
+	// staggered entrance effect. The schedule is seeded off the
+	// spinner id and the settings hash, so two spinners with the
+	// same role and identity stagger identically (this is what
+	// keeps Render() byte-equal across cache hits and across
+	// processes for the same Settings+ID) while spinners with
+	// different ids — distinct assistant messages, different tool
+	// calls, "Thinking" vs "Generating" labels — fade in with
+	// different patterns instead of marching in lock-step.
+	birthSeed := xxh3.HashString(a.id + "|" + cacheKey)
+	birthRng := rand.New(rand.NewPCG(birthSeed, ^birthSeed))
+	a.birthSteps = make([]int, a.width)
+	for i := range a.birthSteps {
+		a.birthSteps[i] = birthRng.IntN(maxBirthSteps)
 	}
 
 	return a
@@ -333,13 +353,14 @@ func (a *Anim) Animate(msg StepMsg) tea.Cmd {
 		a.step.Store(0)
 	}
 
+	frames := a.framesSinceStart.Add(1)
 	if a.initialized.Load() && a.labelWidth > 0 {
 		// Manage the ellipsis animation.
 		ellipsisStep := a.ellipsisStep.Add(1)
 		if int(ellipsisStep) >= ellipsisAnimSpeed*len(ellipsisFrames) {
 			a.ellipsisStep.Store(0)
 		}
-	} else if !a.initialized.Load() && time.Since(a.startTime) >= maxBirthOffset {
+	} else if !a.initialized.Load() && int(frames) >= maxBirthSteps {
 		a.initialized.Store(true)
 	}
 	return a.Step()
@@ -349,10 +370,11 @@ func (a *Anim) Animate(msg StepMsg) tea.Cmd {
 func (a *Anim) Render() string {
 	var b strings.Builder
 	step := int(a.step.Load())
+	frames := int(a.framesSinceStart.Load())
 	for i := range a.width {
 		switch {
-		case !a.initialized.Load() && i < len(a.birthOffsets) && time.Since(a.startTime) < a.birthOffsets[i]:
-			// Birth offset not reached: render initial character.
+		case !a.initialized.Load() && i < len(a.birthSteps) && frames < a.birthSteps[i]:
+			// Birth step not reached: render initial character.
 			b.WriteString(a.initialFrames[step][i])
 		case i < a.cyclingCharWidth:
 			// Render a cycling character.

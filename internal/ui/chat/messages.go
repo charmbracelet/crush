@@ -75,6 +75,12 @@ type SendMsg struct {
 }
 
 type highlightableMessageItem struct {
+	// version is the parent item's version counter. SetHighlight
+	// bumps it on every observable change so the F6 list memo and
+	// any frozen entry get invalidated when a selection drag enters
+	// or leaves the item.
+	version *list.Versioned
+
 	startLine   int
 	startCol    int
 	endLine     int
@@ -103,13 +109,20 @@ func (h *highlightableMessageItem) SetHighlight(startLine int, startCol int, end
 	// Adjust columns for the style's left inset (border + padding) since we
 	// highlight the content only.
 	offset := MessageLeftPaddingTotal
-	h.startLine = startLine
-	h.startCol = max(0, startCol-offset)
-	h.endLine = endLine
+	newStartCol := max(0, startCol-offset)
+	newEndCol := endCol
 	if endCol >= 0 {
-		h.endCol = max(0, endCol-offset)
-	} else {
-		h.endCol = endCol
+		newEndCol = max(0, endCol-offset)
+	}
+	if h.startLine == startLine && h.startCol == newStartCol && h.endLine == endLine && h.endCol == newEndCol {
+		return
+	}
+	h.startLine = startLine
+	h.startCol = newStartCol
+	h.endLine = endLine
+	h.endCol = newEndCol
+	if h.version != nil {
+		h.version.Bump()
 	}
 }
 
@@ -118,8 +131,9 @@ func (h *highlightableMessageItem) Highlight() (startLine int, startCol int, end
 	return h.startLine, h.startCol, h.endLine, h.endCol
 }
 
-func defaultHighlighter(sty *styles.Styles) *highlightableMessageItem {
+func defaultHighlighter(sty *styles.Styles, v *list.Versioned) *highlightableMessageItem {
 	return &highlightableMessageItem{
+		version:     v,
 		startLine:   -1,
 		startCol:    -1,
 		endLine:     -1,
@@ -135,11 +149,16 @@ type cacheClearable interface {
 }
 
 // ClearItemCaches drops any cached rendered output on each item so the
-// next render uses the current styles.
+// next render uses the current styles. It also bumps each item's
+// version so the F6 list-level memo invalidates frozen entries on
+// the next render.
 func ClearItemCaches(items []MessageItem) {
 	for _, item := range items {
 		if cc, ok := item.(cacheClearable); ok {
 			cc.clearCache()
+		}
+		if v, ok := item.(interface{ Bump() }); ok {
+			v.Bump()
 		}
 	}
 }
@@ -156,6 +175,20 @@ type cachedMessageItem struct {
 	// width and height are the dimensions of the cached render
 	width  int
 	height int
+
+	// prefixedRendered caches the per-line-prefixed Render output (the
+	// result of splitting RawRender by newlines and prepending a focus
+	// or selection prefix to every line). Items rebuild this every
+	// frame today; caching it keyed by (prefixedWidth, prefixedKey)
+	// turns Render into a pointer return when item state is stable.
+	//
+	// Invalidation lives in clearCache; callers must additionally
+	// bypass this cache whenever the prefixed output would not be
+	// stable (spinner ticks, active highlight ranges) by not calling
+	// setCachedPrefixedRender for those frames.
+	prefixedRendered string
+	prefixedWidth    int
+	prefixedKey      uint64
 }
 
 // getCachedRender returns the cached render if it exists for the given width.
@@ -173,21 +206,57 @@ func (c *cachedMessageItem) setCachedRender(rendered string, width, height int) 
 	c.height = height
 }
 
+// getCachedPrefixedRender returns the cached prefixed render if it exists
+// for the given (width, key). The key encodes any state that changes the
+// per-line prefix (focused/blurred, compact, ...).
+func (c *cachedMessageItem) getCachedPrefixedRender(width int, key uint64) (string, bool) {
+	if c.prefixedRendered != "" && c.prefixedWidth == width && c.prefixedKey == key {
+		return c.prefixedRendered, true
+	}
+	return "", false
+}
+
+// setCachedPrefixedRender stores the cached prefixed render.
+func (c *cachedMessageItem) setCachedPrefixedRender(rendered string, width int, key uint64) {
+	c.prefixedRendered = rendered
+	c.prefixedWidth = width
+	c.prefixedKey = key
+}
+
 // clearCache clears the cached render.
 func (c *cachedMessageItem) clearCache() {
 	c.rendered = ""
 	c.width = 0
 	c.height = 0
+	c.prefixedRendered = ""
+	c.prefixedWidth = 0
+	c.prefixedKey = 0
 }
 
 // focusableMessageItem is a base struct for message items that can be focused.
 type focusableMessageItem struct {
+	// version is the parent item's version counter. SetFocused
+	// bumps it whenever focus actually flips so the F6 list memo
+	// invalidates the per-line focus prefix.
+	version *list.Versioned
 	focused bool
+}
+
+// newFocusableMessageItem returns a focusableMessageItem wired to the
+// shared version counter.
+func newFocusableMessageItem(v *list.Versioned) *focusableMessageItem {
+	return &focusableMessageItem{version: v}
 }
 
 // SetFocused implements MessageItem.
 func (f *focusableMessageItem) SetFocused(focused bool) {
+	if f.focused == focused {
+		return
+	}
 	f.focused = focused
+	if f.version != nil {
+		f.version.Bump()
+	}
 }
 
 // AssistantInfoID returns a stable ID for assistant info items.
@@ -197,6 +266,7 @@ func AssistantInfoID(messageID string) string {
 
 // AssistantInfoItem renders model info and response time after assistant completes.
 type AssistantInfoItem struct {
+	*list.Versioned
 	*cachedMessageItem
 
 	id                  string
@@ -209,6 +279,7 @@ type AssistantInfoItem struct {
 // NewAssistantInfoItem creates a new AssistantInfoItem.
 func NewAssistantInfoItem(sty *styles.Styles, message *message.Message, cfg *config.Config, lastUserMessageTime time.Time) MessageItem {
 	return &AssistantInfoItem{
+		Versioned:           list.NewVersioned(),
 		cachedMessageItem:   &cachedMessageItem{},
 		id:                  AssistantInfoID(message.ID),
 		message:             message,
@@ -216,6 +287,13 @@ func NewAssistantInfoItem(sty *styles.Styles, message *message.Message, cfg *con
 		cfg:                 cfg,
 		lastUserMessageTime: lastUserMessageTime,
 	}
+}
+
+// Finished implements list.Item. Assistant info blocks render a fixed
+// model/duration footer once the assistant turn finishes; the data
+// is immutable after construction so the entry is safe to freeze.
+func (a *AssistantInfoItem) Finished() bool {
+	return true
 }
 
 // ID implements MessageItem.
@@ -237,12 +315,20 @@ func (a *AssistantInfoItem) RawRender(width int) string {
 
 // Render implements MessageItem.
 func (a *AssistantInfoItem) Render(width int) string {
+	// AssistantInfoItem uses a single, state-independent prefix; key 0
+	// is sufficient. The cache is invalidated whenever the underlying
+	// cachedMessageItem render is cleared.
+	if cached, ok := a.getCachedPrefixedRender(width, 0); ok {
+		return cached
+	}
 	prefix := a.sty.Messages.SectionHeader.Render()
 	lines := strings.Split(a.RawRender(width), "\n")
 	for i, line := range lines {
 		lines[i] = prefix + line
 	}
-	return strings.Join(lines, "\n")
+	out := strings.Join(lines, "\n")
+	a.setCachedPrefixedRender(out, width, 0)
+	return out
 }
 
 func (a *AssistantInfoItem) renderContent(width int) string {

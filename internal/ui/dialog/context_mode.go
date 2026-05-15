@@ -40,6 +40,7 @@ type ContextMode struct {
 
 // ContextModeItem represents a context mode list item.
 type ContextModeItem struct {
+	*list.Versioned
 	mode      config.ContextMode
 	title     string
 	desc      string
@@ -253,6 +254,7 @@ func (c *ContextMode) setContextModeItems() error {
 	selectedIndex := 0
 	for i, m := range modes {
 		item := &ContextModeItem{
+			Versioned: list.NewVersioned(),
 			mode:      m.mode,
 			title:     m.title,
 			isCurrent: m.mode == currentMode,
@@ -308,3 +310,6 @@ func (c *ContextModeItem) Render(width int) string {
 	}
 	return renderItem(styles, c.title, info, c.focused, width, c.cache, &c.m)
 }
+
+// Finished implements list.Item.
+func (c *ContextModeItem) Finished() bool { return true }

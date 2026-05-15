@@ -73,6 +73,23 @@ func (q *Queries) DeleteMessage(ctx context.Context, id string) error {
 	return err
 }
 
+const deleteMessagesAfter = `-- name: DeleteMessagesAfter :exec
+DELETE FROM messages AS target
+WHERE target.session_id = ? AND target.created_at >= (
+    SELECT m.created_at FROM messages AS m WHERE m.id = ?
+)
+`
+
+type DeleteMessagesAfterParams struct {
+	SessionID string `json:"session_id"`
+	ID        string `json:"id"`
+}
+
+func (q *Queries) DeleteMessagesAfter(ctx context.Context, arg DeleteMessagesAfterParams) error {
+	_, err := q.exec(ctx, q.deleteMessagesAfterStmt, deleteMessagesAfter, arg.SessionID, arg.ID)
+	return err
+}
+
 const deleteSessionMessages = `-- name: DeleteSessionMessages :exec
 DELETE FROM messages
 WHERE session_id = ?
@@ -228,6 +245,51 @@ func (q *Queries) ListUserMessagesBySession(ctx context.Context, sessionID strin
 		return nil, err
 	}
 	return items, nil
+}
+
+const restoreMessage = `-- name: RestoreMessage :exec
+INSERT OR IGNORE INTO messages (
+    id,
+    session_id,
+    role,
+    parts,
+    model,
+    provider,
+    is_summary_message,
+    created_at,
+    updated_at,
+    finished_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+// RestoreMessageParams holds the parameters for restoring a previously deleted message.
+type RestoreMessageParams struct {
+	ID               string         `json:"id"`
+	SessionID        string         `json:"session_id"`
+	Role             string         `json:"role"`
+	Parts            string         `json:"parts"`
+	Model            sql.NullString `json:"model"`
+	Provider         sql.NullString `json:"provider"`
+	IsSummaryMessage int64          `json:"is_summary_message"`
+	CreatedAt        int64          `json:"created_at"`
+	UpdatedAt        int64          `json:"updated_at"`
+	FinishedAt       sql.NullInt64  `json:"finished_at"`
+}
+
+func (q *Queries) RestoreMessage(ctx context.Context, arg RestoreMessageParams) error {
+	_, err := q.exec(ctx, q.restoreMessageStmt, restoreMessage,
+		arg.ID,
+		arg.SessionID,
+		arg.Role,
+		arg.Parts,
+		arg.Model,
+		arg.Provider,
+		arg.IsSummaryMessage,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+		arg.FinishedAt,
+	)
+	return err
 }
 
 const updateMessage = `-- name: UpdateMessage :exec

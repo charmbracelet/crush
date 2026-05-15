@@ -81,6 +81,14 @@ func (w *AppWorkspace) ListAllUserMessages(ctx context.Context) ([]message.Messa
 	return w.app.Messages.ListAllUserMessages(ctx)
 }
 
+func (w *AppWorkspace) DeleteMessagesAfter(ctx context.Context, sessionID, messageID string) error {
+	return w.app.Messages.DeleteMessagesAfter(ctx, sessionID, messageID)
+}
+
+func (w *AppWorkspace) RestoreMessages(ctx context.Context, messages []message.Message) error {
+	return w.app.Messages.RestoreMessages(ctx, messages)
+}
+
 // -- Agent --
 
 func (w *AppWorkspace) AgentRun(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) error {

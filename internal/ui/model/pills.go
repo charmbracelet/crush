@@ -134,6 +134,39 @@ func queueList(queueItems []string, t *styles.Styles) string {
 	return strings.Join(lines, "\n")
 }
 
+// pillsHeightReasonableTerminalHeight is the minimum terminal height at which
+// we auto-expand pills when there are incomplete todos.
+const pillsHeightReasonableTerminalHeight = 40
+
+// autoExpandPillsIfReasonable expands the pills panel if the terminal has
+// enough vertical space to show the expanded list comfortably.
+func (m *UI) autoExpandPillsIfReasonable() tea.Cmd {
+	if !m.hasSession() {
+		return nil
+	}
+	if m.height < pillsHeightReasonableTerminalHeight {
+		return nil
+	}
+	hasPills := hasIncompleteTodos(m.session.Todos) || m.promptQueue > 0
+	if !hasPills {
+		return nil
+	}
+	if m.pillsExpanded {
+		return nil
+	}
+	m.pillsExpanded = true
+	if hasIncompleteTodos(m.session.Todos) {
+		m.focusedPillSection = pillSectionTodos
+	} else {
+		m.focusedPillSection = pillSectionQueue
+	}
+	m.updateLayoutAndSize()
+	if m.chat.Follow() {
+		m.chat.ScrollToBottom()
+	}
+	return nil
+}
+
 // togglePillsExpanded toggles the pills panel expansion state.
 func (m *UI) togglePillsExpanded() tea.Cmd {
 	if !m.hasSession() {
@@ -249,7 +282,7 @@ func (m *UI) renderPills() {
 		if todosFocused && hasIncomplete {
 			expandedList = todoList(m.session.Todos, inProgressIcon, t, contentWidth)
 		} else if queueFocused && hasQueue {
-			if m.com.Workspace.AgentIsReady() {
+			if m.com != nil && m.com.Workspace != nil && m.com.Workspace.AgentIsReady() {
 				queueItems := m.com.Workspace.AgentQueuedPromptsList(m.session.ID)
 				expandedList = queueList(queueItems, t)
 			}

@@ -267,7 +267,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	if call.MaxOutputTokens > 0 {
 		maxOutputTokens = &call.MaxOutputTokens
 	}
-	result, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
+	streamCall := fantasy.AgentStreamCall{
 		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
 		Files:            files,
 		Messages:         history,
@@ -478,7 +478,35 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				return hasRepeatedToolCalls(steps, loopDetectionWindowSize, loopDetectionMaxRepeats)
 			},
 		},
-	})
+	}
+
+	// Re-issue the stream call on raw transient network errors (e.g.
+	// "connection reset by peer") that fantasy's provider-level retry does
+	// not catch because they surface unwrapped. We only retry while
+	// currentAssistant is still nil — once PrepareStep runs we have
+	// committed state that re-streaming could duplicate. The loop is hard
+	// capped at transientMaxAttempts and respects ctx cancellation, so it
+	// cannot spin.
+	var result *fantasy.AgentResult
+retryLoop:
+	for attempt := 1; ; attempt++ {
+		result, err = agent.Stream(genCtx, streamCall)
+		if err == nil || attempt >= transientMaxAttempts || currentAssistant != nil || !isTransientNetErr(err) {
+			break
+		}
+		delay := time.Duration(attempt) * time.Second
+		slog.Warn("Transient network error before stream started; retrying",
+			"attempt", attempt,
+			"delay", delay,
+			"error", err,
+		)
+		select {
+		case <-time.After(delay):
+		case <-genCtx.Done():
+			err = genCtx.Err()
+			break retryLoop
+		}
+	}
 
 	a.eventPromptResponded(call.SessionID, time.Since(startTime).Truncate(time.Second))
 

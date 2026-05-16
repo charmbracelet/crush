@@ -82,6 +82,7 @@ func runExternal(ctx context.Context, path string, args []string) error {
 		fmt.Fprintln(hc.Stderr, err)
 		return interp.ExitStatus(127)
 	}
+	startedCmd(&cmd)
 
 	stopCancel := context.AfterFunc(ctx, func() {
 		if killTimeout <= 0 {
@@ -93,6 +94,7 @@ func runExternal(ctx context.Context, path string, args []string) error {
 		_ = killCmd(&cmd)
 	})
 	defer stopCancel()
+	defer cleanupCmd(&cmd)
 
 	waitErr := cmd.Wait()
 	return translateExitError(ctx, waitErr)

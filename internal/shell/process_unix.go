@@ -28,6 +28,14 @@ func prepareCmd(cmd *exec.Cmd) {
 	cmd.SysProcAttr.Setpgid = true
 }
 
+// startedCmd is a no-op on Unix — prepareCmd already configured the
+// process group via Setpgid and no post-Start setup is needed.
+func startedCmd(cmd *exec.Cmd) {}
+
+// cleanupCmd is a no-op on Unix — there are no per-process resources
+// to release after Wait returns.
+func cleanupCmd(cmd *exec.Cmd) {}
+
 // interruptCmd sends SIGINT to the entire process group. The negative
 // PID is the kernel's way of saying "this PGID, not this PID". Safe to
 // call after Start; a no-op if the process is already reaped.

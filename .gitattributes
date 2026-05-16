@@ -2,3 +2,10 @@
 .github/crush-schema.json linguist-generated=true
 internal/agent/hyper/provider.json linguist-generated=true
 internal/agent/testdata/**/*.yaml -diff linguist-generated=true
+
+# Embedded test fixtures consumed by chroma syntax highlighting. Without
+# this, Windows checkouts with core.autocrlf=true convert these files to
+# CRLF, which makes the Go lexer mis-tokenize trailing braces and breaks
+# diffview golden tests at specific widths.
+internal/ui/diffview/testdata/*.before text eol=lf
+internal/ui/diffview/testdata/*.after  text eol=lf

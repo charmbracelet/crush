@@ -34,6 +34,7 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/questions"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 	"golang.org/x/sync/errgroup"
@@ -93,6 +94,7 @@ type coordinator struct {
 	messages    message.Service
 	permissions permission.Service
 	history     history.Service
+	questions   questions.Service
 	filetracker filetracker.Service
 	lspManager  *lsp.Manager
 	notify      pubsub.Publisher[notify.Notification]
@@ -115,6 +117,7 @@ func NewCoordinator(
 	messages message.Service,
 	permissions permission.Service,
 	history history.Service,
+	questions questions.Service,
 	filetracker filetracker.Service,
 	lspManager *lsp.Manager,
 	notify pubsub.Publisher[notify.Notification],
@@ -129,6 +132,7 @@ func NewCoordinator(
 		messages:     messages,
 		permissions:  permissions,
 		history:      history,
+		questions:    questions,
 		filetracker:  filetracker,
 		lspManager:   lspManager,
 		notify:       notify,
@@ -499,6 +503,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewJobKillTool(),
 		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),
 		tools.NewEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
+		tools.NewAskUserQuestionsTool(c.questions),
 		tools.NewMultiEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 		tools.NewFetchTool(c.permissions, c.cfg.WorkingDir(), nil),
 		tools.NewGlobTool(c.cfg.WorkingDir()),

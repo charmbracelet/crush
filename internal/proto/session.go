@@ -10,6 +10,14 @@ type Session struct {
 	CompletionTokens int64   `json:"completion_tokens"`
 	SummaryMessageID string  `json:"summary_message_id"`
 	Cost             float64 `json:"cost"`
+	Todos            []Todo  `json:"todos,omitempty"`
 	CreatedAt        int64   `json:"created_at"`
 	UpdatedAt        int64   `json:"updated_at"`
+}
+
+// Todo represents a single todo entry on a session in the proto layer.
+type Todo struct {
+	Content    string `json:"content"`
+	Status     string `json:"status"`
+	ActiveForm string `json:"active_form"`
 }

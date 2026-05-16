@@ -56,7 +56,7 @@ type AgentSession struct {
 
 // IsZero checks if the AgentSession is zero-valued.
 func (a AgentSession) IsZero() bool {
-	return a == AgentSession{}
+	return a.ID == "" && !a.IsBusy
 }
 
 // PermissionAction represents an action taken on a permission request.

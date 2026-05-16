@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/taigrr/crush/internal/config"
+	"github.com/taigrr/crush/internal/message"
 	"github.com/taigrr/crush/internal/proto"
 )
 
@@ -19,7 +20,17 @@ func (b *Backend) SendMessage(ctx context.Context, workspaceID string, msg proto
 		return ErrAgentNotInitialized
 	}
 
-	_, err = ws.AgentCoordinator.Run(ctx, msg.SessionID, msg.Prompt)
+	attachments := make([]message.Attachment, len(msg.Attachments))
+	for i, a := range msg.Attachments {
+		attachments[i] = message.Attachment{
+			FilePath: a.FilePath,
+			FileName: a.FileName,
+			MimeType: a.MimeType,
+			Content:  a.Content,
+		}
+	}
+
+	_, err = ws.AgentCoordinator.Run(ctx, msg.SessionID, msg.Prompt, attachments...)
 	return err
 }
 

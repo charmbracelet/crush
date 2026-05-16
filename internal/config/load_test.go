@@ -248,7 +248,8 @@ func TestConfig_setDefaults(t *testing.T) {
 		cfg := &Config{}
 		cfg.setDefaults(child, "")
 
-		require.Equal(t,
+		require.Equal(
+			t,
 			filepath.Clean(filepath.Join(child, defaultDataDirectory)),
 			filepath.Clean(cfg.Options.DataDirectory),
 		)

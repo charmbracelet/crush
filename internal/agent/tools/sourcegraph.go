@@ -150,7 +150,8 @@ func NewSourcegraphTool(client *http.Client) fantasy.AgentTool {
 			}
 
 			return fantasy.NewTextResponse(formattedResults), nil
-		})
+		},
+	)
 }
 
 func formatSourcegraphResults(result map[string]any, contextWindow int) (string, error) {

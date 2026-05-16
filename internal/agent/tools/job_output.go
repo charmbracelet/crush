@@ -87,5 +87,6 @@ func NewJobOutputTool() fantasy.AgentTool {
 
 			result := fmt.Sprintf("Status: %s\n\n%s", status, output)
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(result), metadata), nil
-		})
+		},
+	)
 }

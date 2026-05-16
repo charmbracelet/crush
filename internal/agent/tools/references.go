@@ -87,7 +87,8 @@ func NewReferencesTool(lspManager *lsp.Manager) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse(allErrs.Error()), nil
 			}
 			return fantasy.NewTextResponse(fmt.Sprintf("No references found for symbol '%s'", params.Symbol)), nil
-		})
+		},
+	)
 }
 
 func (r *referencesTool) Name() string {

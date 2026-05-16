@@ -57,5 +57,6 @@ func NewWebSearchTool(client *http.Client) fantasy.AgentTool {
 			}
 
 			return fantasy.NewTextResponse(formatSearchResults(results)), nil
-		})
+		},
+	)
 }

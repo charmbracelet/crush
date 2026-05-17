@@ -182,6 +182,9 @@ type UI struct {
 
 	isTransparent bool
 
+	// theme is the current theme mode: "auto", "dark", or "light".
+	theme string
+
 	focus uiFocusState
 	state uiState
 
@@ -377,6 +380,12 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	// enable transparent mode
 	ui.isTransparent = opts.TUI.Transparent != nil && *opts.TUI.Transparent
 
+	// set initial theme from config
+	ui.theme = opts.TUI.Theme
+	if ui.theme == "" {
+		ui.theme = "auto"
+	}
+
 	return ui
 }
 
@@ -399,7 +408,51 @@ func (m *UI) Init() tea.Cmd {
 	if m.com.IsHyper() {
 		cmds = append(cmds, m.fetchHyperCredits())
 	}
+	if m.theme == "auto" {
+		cmds = append(cmds, tea.RequestBackgroundColor)
+	} else {
+		cmds = append(cmds, m.applyThemeFromConfig())
+	}
 	return tea.Batch(cmds...)
+}
+
+func (m *UI) applyBackgroundTheme(hasDarkBackground bool) {
+	if m.theme != "auto" {
+		return
+	}
+	s := styles.ThemeForBackground(hasDarkBackground, m.providerID())
+	*m.com.Styles = s
+	common.InvalidateMarkdownRendererCache()
+	m.refreshStyles()
+}
+
+// providerID returns the provider ID of the currently selected large model.
+func (m *UI) providerID() string {
+	cfg := m.com.Config()
+	if cfg == nil {
+		return ""
+	}
+	return cfg.Models[config.SelectedModelTypeLarge].Provider
+}
+
+// applyThemeFromConfig returns a command that applies the theme based on the
+// configured theme value.
+func (m *UI) applyThemeFromConfig() tea.Cmd {
+	return func() tea.Msg {
+		m.applyForcedTheme()
+		return nil
+	}
+}
+
+// applyForcedTheme applies the theme based on the configured non-auto theme.
+func (m *UI) applyForcedTheme() {
+	if m.theme == "auto" {
+		return
+	}
+	s := styles.ThemeForBackground(m.theme == "dark", m.providerID())
+	*m.com.Styles = s
+	common.InvalidateMarkdownRendererCache()
+	m.refreshStyles()
 }
 
 // loadInitialSession loads the initial session if one was specified on startup.
@@ -504,6 +557,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sendProgressBar = slices.Contains(msg, "WT_SESSION")
 		}
 		cmds = append(cmds, common.QueryCmd(uv.Environ(msg)))
+	case tea.BackgroundColorMsg:
+		m.applyBackgroundTheme(msg.IsDark())
+		m.updateLayoutAndSize()
 	case tea.ModeReportMsg:
 		if m.caps.ReportFocusEvents {
 			m.notifyBackend = notification.NewNativeBackend(notification.Icon)
@@ -1448,6 +1504,34 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 				status = "enabled"
 			}
 			return util.NewInfoMsg("Transparent background " + status)
+		})
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionToggleTheme:
+		cmds = append(cmds, func() tea.Msg {
+			cfg := m.com.Config()
+			if cfg == nil {
+				return util.ReportError(errors.New("configuration not found"))()
+			}
+
+			theme := cfg.Options.TUI.Theme
+			if theme == "" {
+				theme = "auto"
+			}
+			var newTheme string
+			switch theme {
+			case "auto", "dark":
+				newTheme = "light"
+			default:
+				newTheme = "dark"
+			}
+			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.theme", newTheme); err != nil {
+				return util.ReportError(err)()
+			}
+
+			m.theme = newTheme
+			m.applyForcedTheme()
+			m.updateLayoutAndSize()
+			return util.NewInfoMsg("Theme set to " + newTheme)
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionQuit:

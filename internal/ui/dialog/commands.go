@@ -523,6 +523,13 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	}
 	commands = append(commands, NewCommandItem(c.com.Styles, "toggle_transparent", transparentLabel, "", ActionToggleTransparentBackground{}))
 
+	// Add theme toggle.
+	themeLabel := "Switch to Light Theme"
+	if cfg != nil && cfg.Options != nil && cfg.Options.TUI.Theme == "light" {
+		themeLabel = "Switch to Dark Theme"
+	}
+	commands = append(commands, NewCommandItem(c.com.Styles, "toggle_theme", themeLabel, "", ActionToggleTheme{}))
+
 	commands = append(commands,
 		NewCommandItem(c.com.Styles, "quit", "Quit", "ctrl+c", tea.QuitMsg{}).WithAliases("exit"),
 	)

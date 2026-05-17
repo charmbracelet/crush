@@ -113,8 +113,7 @@ type ProviderConfig struct {
 	// $(cmd) work the same way they do in MCP headers. A header whose
 	// value resolves to the empty string (unset bare $VAR under
 	// lenient nounset, $(echo), or literal "") is omitted from the
-	// outgoing request rather than sent as "Header:". See PLAN.md
-	// Phase 2 design decision #18.
+	// outgoing request rather than sent as "Header:".
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty" jsonschema:"description=Additional HTTP headers to send with requests"`
 	// ExtraBody is merged verbatim into OpenAI-compatible request
 	// bodies. String values are NOT shell-expanded: this is a plain
@@ -123,7 +122,7 @@ type ProviderConfig struct {
 	// recursive walker guessing at intent. If you need an env-var-
 	// driven value at request time, put it in extra_headers, or in
 	// the provider's top-level api_key / base_url, all of which do
-	// expand. See PLAN.md Phase 2 design decision #16.
+	// expand.
 	ExtraBody map[string]any `json:"extra_body,omitempty" jsonschema:"description=Additional fields to include in request bodies\\, only works with openai-compatible providers"`
 
 	ProviderOptions map[string]any `json:"provider_options,omitempty" jsonschema:"description=Additional provider-specific options for this provider"`
@@ -196,7 +195,7 @@ type MCPConfig struct {
 	// work. A header whose value resolves to the empty string (unset
 	// bare $VAR under lenient nounset, $(echo), or literal "") is
 	// omitted from the outgoing request rather than sent as
-	// "Header:". See PLAN.md Phase 2 design decision #18.
+	// "Header:".
 	Headers map[string]string `json:"headers,omitempty" jsonschema:"description=HTTP headers for HTTP/SSE MCP servers"`
 }
 
@@ -398,8 +397,7 @@ func (m MCPConfig) ResolvedURL(r VariableResolver) (string, error) {
 // under lenient nounset, $(echo), or literal "") is omitted from the
 // returned map — sending "X-Auth:" with an empty value is rejected by
 // some providers and the user's intent in "optional, env-gated
-// header" is clearly "absent when the var isn't set." See PLAN.md
-// Phase 2 design decision #18.
+// header" is clearly "absent when the var isn't set."
 //
 // See ResolvedEnv for guidance on picking a resolver.
 func (m MCPConfig) ResolvedHeaders(r VariableResolver) (map[string]string, error) {
@@ -435,13 +433,11 @@ func (m MCPConfig) ResolvedHeaders(r VariableResolver) (map[string]string, error
 // errors.Is/As continues to work.
 //
 // Empty resolved values are kept (a deliberate "empty positional arg"
-// like --flag "" is sometimes valid), matching MCPConfig.ResolvedArgs;
-// see PLAN.md Phase 2 design decision #18.
+// like --flag "" is sometimes valid), matching MCPConfig.ResolvedArgs.
 //
 // The resolver choice matters: in server mode pass the shell resolver
 // so $VAR / $(cmd) expand; in client mode pass IdentityResolver so the
-// template is forwarded verbatim. See PLAN.md Phase 2 design decision
-// #13.
+// template is forwarded verbatim.
 func (l LSPConfig) ResolvedArgs(r VariableResolver) ([]string, error) {
 	if len(l.Args) == 0 {
 		return nil, nil
@@ -465,15 +461,13 @@ func (l LSPConfig) ResolvedArgs(r VariableResolver) ([]string, error) {
 // continues to work.
 //
 // Empty resolved values are kept ("FOO=" is a legitimate request;
-// opt out via ${VAR:+...}), matching MCPConfig.ResolvedEnv; see
-// PLAN.md Phase 2 design decision #18.
+// opt out via ${VAR:+...}), matching MCPConfig.ResolvedEnv.
 //
 // Shape note: this returns map[string]string rather than the []string
 // shape MCPConfig.ResolvedEnv uses because the consumer
 // (powernap.ClientConfig.Environment in internal/lsp/client.go) takes
 // a map directly — returning a []string here would only force a
-// round-trip back to a map at the call site. See PLAN.md Phase 2
-// design decision #13.
+// round-trip back to a map at the call site.
 //
 // See ResolvedArgs for guidance on picking a resolver.
 func (l LSPConfig) ResolvedEnv(r VariableResolver) (map[string]string, error) {

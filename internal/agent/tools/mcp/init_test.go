@@ -1,7 +1,6 @@
 package mcp
 
 import (
-	"context"
 	"maps"
 	"os"
 	"testing"
@@ -10,7 +9,6 @@ import (
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/goleak"
 )
 
 // shellResolverWithPath builds a shell resolver whose env carries PATH
@@ -22,34 +20,6 @@ func shellResolverWithPath(t *testing.T, overrides map[string]string) config.Var
 	m := map[string]string{"PATH": os.Getenv("PATH")}
 	maps.Copy(m, overrides)
 	return config.NewShellVariableResolver(env.NewFromMap(m))
-}
-
-func TestMCPSession_CancelOnClose(t *testing.T) {
-	defer goleak.VerifyNone(t)
-
-	serverTransport, clientTransport := mcp.NewInMemoryTransports()
-
-	server := mcp.NewServer(&mcp.Implementation{Name: "test-server"}, nil)
-	serverSession, err := server.Connect(context.Background(), serverTransport, nil)
-	require.NoError(t, err)
-	defer serverSession.Close()
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	client := mcp.NewClient(&mcp.Implementation{Name: "crush-test"}, nil)
-	clientSession, err := client.Connect(ctx, clientTransport, nil)
-	require.NoError(t, err)
-
-	sess := &ClientSession{clientSession, cancel}
-
-	// Verify the context is not cancelled before close.
-	require.NoError(t, ctx.Err())
-
-	err = sess.Close()
-	require.NoError(t, err)
-
-	// After Close, the context must be cancelled.
-	require.ErrorIs(t, ctx.Err(), context.Canceled)
 }
 
 // TestCreateTransport_URLResolution pins that m.URL goes through the

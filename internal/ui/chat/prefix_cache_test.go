@@ -33,7 +33,7 @@ func TestAssistantMessageItemRender_PrefixCacheFocusBlur(t *testing.T) {
 
 	sty := styles.CharmtonePantera()
 	msg := finishedAssistantMessage("m1", "Hello world from the cache test.")
-	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+	item := NewAssistantMessageItem(&sty, msg, false).(*AssistantMessageItem)
 
 	const width = 60
 
@@ -58,7 +58,7 @@ func TestAssistantMessageItemRender_PrefixCacheWidthInvalidates(t *testing.T) {
 
 	sty := styles.CharmtonePantera()
 	msg := finishedAssistantMessage("m2", "Some content that wraps differently at different widths so the rendered output diverges.")
-	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+	item := NewAssistantMessageItem(&sty, msg, false).(*AssistantMessageItem)
 	item.SetFocused(true)
 
 	narrow := item.Render(40)
@@ -78,7 +78,7 @@ func TestAssistantMessageItemRender_PrefixCacheHighlightOnTop(t *testing.T) {
 
 	sty := styles.CharmtonePantera()
 	msg := finishedAssistantMessage("m3", "Hello world from the highlight test.")
-	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+	item := NewAssistantMessageItem(&sty, msg, false).(*AssistantMessageItem)
 	item.SetFocused(true)
 
 	const width = 60
@@ -183,7 +183,7 @@ func TestAssistantMessageItemRender_PrefixCacheNoCacheLeak(t *testing.T) {
 
 	sty := styles.CharmtonePantera()
 	msg := finishedAssistantMessage("m4", strings.Repeat("word ", 40))
-	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+	item := NewAssistantMessageItem(&sty, msg, false).(*AssistantMessageItem)
 	item.SetFocused(true)
 
 	out80 := item.Render(80)

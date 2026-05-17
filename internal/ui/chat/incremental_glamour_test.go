@@ -833,7 +833,7 @@ func TestAssistantStreamingContent_ResetOnClearCache(t *testing.T) {
 	sty := styles.CharmtonePantera()
 	doc := "Para one.\n\nPara two.\n\nPara three."
 	msg := finishedAssistantMessage("stream-clear", doc)
-	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+	item := NewAssistantMessageItem(&sty, msg, false).(*AssistantMessageItem)
 
 	const width = 80
 	_ = item.RawRender(width)

@@ -63,6 +63,19 @@ definitions:
       max_items:
         type: integer
     type: object
+  config.HookConfig:
+    properties:
+      command:
+        description: Shell command to execute.
+        type: string
+      matcher:
+        description: Regex pattern tested against the tool name. Empty means match
+          all.
+        type: string
+      timeout:
+        description: Timeout in seconds. Default 30.
+        type: integer
+    type: object
   config.LSPConfig:
     properties:
       args:
@@ -112,6 +125,10 @@ definitions:
         items:
           type: string
         type: array
+      enabled_tools:
+        items:
+          type: string
+        type: array
       env:
         additionalProperties:
           type: string
@@ -119,7 +136,13 @@ definitions:
       headers:
         additionalProperties:
           type: string
-        description: 'TODO: maybe make it possible to get the value from the env'
+        description: |-
+          Headers are HTTP headers for HTTP/SSE MCP servers. Values run
+          through shell expansion at MCP startup, so $VAR and $(cmd)
+          work. A header whose value resolves to the empty string (unset
+          bare $VAR under lenient nounset, $(echo), or literal "") is
+          omitted from the outgoing request rather than sent as
+          "Header:".
         type: object
       timeout:
         type: integer
@@ -249,6 +272,12 @@ definitions:
     properties:
       $schema:
         type: string
+      hooks:
+        additionalProperties:
+          items:
+            $ref: '#/definitions/config.HookConfig'
+          type: array
+        type: object
       lsp:
         $ref: '#/definitions/config.LSPs'
       mcp:
@@ -288,10 +317,10 @@ definitions:
         type: array
       data_directory:
         description: |-
-          DataDirectory is where Crush keeps per-project state such as the SQLite
-          database and workspace overrides. Relative paths are resolved against
-          the working directory; absolute paths are used verbatim. After
-          defaulting the stored value is always absolute.
+          DataDirectory is where Crush keeps per-project state such as
+          the SQLite database and workspace overrides. Relative paths are
+          resolved against the working directory; absolute paths are used
+          verbatim. After defaulting the stored value is always absolute.
         type: string
       debug:
         type: boolean
@@ -307,6 +336,10 @@ definitions:
         type: boolean
       disable_provider_auto_update:
         type: boolean
+      disabled_skills:
+        items:
+          type: string
+        type: array
       disabled_tools:
         items:
           type: string
@@ -358,6 +391,14 @@ definitions:
     - StateError
     - StateStopped
     - StateDisabled
+  proto.APIKeyKind:
+    enum:
+    - string
+    - oauth
+    type: string
+    x-enum-varnames:
+    - APIKeyKindString
+    - APIKeyKindOAuth
   proto.AgentInfo:
     properties:
       is_busy:
@@ -436,7 +477,12 @@ definitions:
     type: object
   proto.ConfigProviderKeyRequest:
     properties:
-      api_key: {}
+      api_key:
+        items:
+          type: integer
+        type: array
+      kind:
+        $ref: '#/definitions/proto.APIKeyKind'
       provider_id:
         type: string
       scope:
@@ -664,6 +710,8 @@ definitions:
     type: object
   proto.VersionInfo:
     properties:
+      build_id:
+        type: string
       commit:
         type: string
       go_version:
@@ -1639,6 +1687,50 @@ paths:
       summary: Stop all LSP servers
       tags:
       - lsp
+  /workspaces/{id}/mcp/docker/disable:
+    post:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Disable Docker MCP
+      tags:
+      - mcp
+  /workspaces/{id}/mcp/docker/enable:
+    post:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Enable Docker MCP
+      tags:
+      - mcp
   /workspaces/{id}/mcp/get-prompt:
     post:
       consumes:

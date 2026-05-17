@@ -145,7 +145,14 @@ func (c *controllerV1) handlePostWorkspaceConfigProviderKey(w http.ResponseWrite
 		return
 	}
 
-	if err := c.backend.SetProviderAPIKey(id, req.Scope, req.ProviderID, req.APIKey); err != nil {
+	apiKey, err := req.DecodeAPIKey()
+	if err != nil {
+		c.server.logError(r, "Failed to decode api key", "error", err, "kind", req.Kind)
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := c.backend.SetProviderAPIKey(id, req.Scope, req.ProviderID, apiKey); err != nil {
 		c.handleError(w, r, err)
 		return
 	}

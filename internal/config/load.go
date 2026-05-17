@@ -230,8 +230,7 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 		// a failing $(...) aborts the provider load with a clear
 		// message, and a header that resolves to the empty string
 		// (unset bare $VAR under lenient nounset, $(echo), or literal
-		// "") is dropped from the outgoing request. See PLAN.md
-		// Phase 2 design decisions #14 and #18.
+		// "") is dropped from the outgoing request.
 		for k, v := range headers {
 			resolved, err := resolver.ResolveValue(v)
 			if err != nil {
@@ -390,8 +389,7 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 		}
 
 		// Custom-provider headers share the MCP error contract; see
-		// the known-provider loop above and PLAN.md Phase 2 design
-		// decisions #14 and #18.
+		// the known-provider loop above.
 		for k, v := range providerConfig.ExtraHeaders {
 			resolved, err := resolver.ResolveValue(v)
 			if err != nil {

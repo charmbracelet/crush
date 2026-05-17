@@ -376,7 +376,7 @@ func TestCreateTransport_HeadersResolution(t *testing.T) {
 
 	t.Run("sse unset var header drops silently", func(t *testing.T) {
 		t.Parallel()
-		// Pinning test for design decision #18 + lenient nounset:
+		// Pinning test for empty-header drop + lenient nounset:
 		// a header whose value resolves to "" (here because the
 		// bare $VAR is unset) is omitted from the round tripper
 		// rather than sent as "X-Header:". Guards against a
@@ -488,10 +488,9 @@ func TestCreateSession_ResolutionFailureUpdatesState(t *testing.T) {
 		},
 		{
 			// Bare $MISSING in a header resolves to "" silently
-			// and is then dropped (design decision #18). The
-			// "header Authorization" wrap only surfaces on a
-			// $(cmd) failure; that is what this subtest now
-			// pins for the SSE path.
+			// and is then dropped. The "header Authorization"
+			// wrap only surfaces on a $(cmd) failure; that is
+			// what this subtest now pins for the SSE path.
 			name:    "sse header failure",
 			mcpName: "test-sse-header-fail",
 			cfg: config.MCPConfig{

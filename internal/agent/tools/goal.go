@@ -10,7 +10,7 @@ import (
 )
 
 //go:embed update_goal.md
-var updateGoalDescription []byte
+var updateGoalDescription string
 
 const UpdateGoalToolName = "update_goal"
 
@@ -19,7 +19,7 @@ type UpdateGoalInput struct {
 }
 
 func NewUpdateGoalTool(goalService goal.Service) fantasy.AgentTool {
-	return fantasy.NewAgentTool(UpdateGoalToolName, FirstLineDescription(updateGoalDescription), func(ctx context.Context, input UpdateGoalInput, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+	return fantasy.NewAgentTool(UpdateGoalToolName, updateGoalDescription, func(ctx context.Context, input UpdateGoalInput, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 		sessionID, ok := ctx.Value(SessionIDContextKey).(string)
 		if !ok {
 			return fantasy.ToolResponse{}, fmt.Errorf("session id not found in context")

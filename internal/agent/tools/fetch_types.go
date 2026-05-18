@@ -1,7 +1,23 @@
 package tools
 
+import (
+	_ "embed"
+	"html/template"
+)
+
 // AgenticFetchToolName is the name of the agentic fetch tool.
 const AgenticFetchToolName = "agentic_fetch"
+
+//go:embed agentic_fetch.md.tpl
+var agenticFetchDescTmpl []byte
+
+var agenticFetchDescTpl = template.Must(
+	template.New("agenticFetchDescription").
+		Parse(string(agenticFetchDescTmpl)),
+)
+
+// AgenticFetchToolDescription is the rendered description for the agentic fetch tool.
+var AgenticFetchToolDescription = RenderToolDescription(agenticFetchDescTpl)
 
 // WebFetchToolName is the name of the web_fetch tool.
 const WebFetchToolName = "web_fetch"

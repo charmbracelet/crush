@@ -100,14 +100,14 @@ var ghAvailable = func() bool {
 	return err == nil
 }()
 
-// toolDescriptionData is the common data structure for tool description templates.
-type toolDescriptionData struct {
+// ToolDescriptionData is the common data structure for tool description templates.
+type ToolDescriptionData struct {
 	GhAvailable bool
 }
 
-// renderToolDescription renders a tool description template with the given data.
-func renderToolDescription(tmpl *template.Template) string {
-	data := toolDescriptionData{
+// RenderToolDescription renders a tool description template with the common data.
+func RenderToolDescription(tmpl *template.Template) string {
+	data := ToolDescriptionData{
 		GhAvailable: ghAvailable,
 	}
 	var out bytes.Buffer

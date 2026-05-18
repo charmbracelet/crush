@@ -45,7 +45,7 @@ func NewFetchTool(permissions permission.Service, workingDir WorkingDirFunc, cli
 
 	return fantasy.NewParallelAgentTool(
 		FetchToolName,
-		FirstLineDescription([]byte(renderToolDescription(fetchDescriptionTpl))),
+		FirstLineDescription([]byte(RenderToolDescription(fetchDescriptionTpl))),
 		func(ctx context.Context, params FetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.URL == "" {
 				return fantasy.NewTextErrorResponse("URL parameter is required"), nil

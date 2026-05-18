@@ -79,19 +79,19 @@ func TestToolDescriptions_NoPanic(t *testing.T) {
 
 	t.Run("fetch", func(t *testing.T) {
 		t.Parallel()
-		desc := renderToolDescription(fetchDescriptionTpl)
+		desc := RenderToolDescription(fetchDescriptionTpl)
 		require.NotEmpty(t, desc)
 	})
 
 	t.Run("web_fetch", func(t *testing.T) {
 		t.Parallel()
-		desc := renderToolDescription(webFetchDescriptionTpl)
+		desc := RenderToolDescription(webFetchDescriptionTpl)
 		require.NotEmpty(t, desc)
 	})
 
 	t.Run("web_search", func(t *testing.T) {
 		t.Parallel()
-		desc := renderToolDescription(webSearchDescriptionTpl)
+		desc := RenderToolDescription(webSearchDescriptionTpl)
 		require.NotEmpty(t, desc)
 	})
 }

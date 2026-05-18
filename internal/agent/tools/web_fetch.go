@@ -37,7 +37,7 @@ func NewWebFetchTool(workingDir WorkingDirFunc, client *http.Client) fantasy.Age
 
 	return fantasy.NewParallelAgentTool(
 		WebFetchToolName,
-		FirstLineDescription([]byte(renderToolDescription(webFetchDescriptionTpl))),
+		FirstLineDescription([]byte(RenderToolDescription(webFetchDescriptionTpl))),
 		func(ctx context.Context, params WebFetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.URL == "" {
 				return fantasy.NewTextErrorResponse("url is required"), nil

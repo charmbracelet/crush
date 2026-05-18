@@ -35,7 +35,7 @@ func NewWebSearchTool(client *http.Client) fantasy.AgentTool {
 
 	return fantasy.NewParallelAgentTool(
 		WebSearchToolName,
-		FirstLineDescription([]byte(renderToolDescription(webSearchDescriptionTpl))),
+		FirstLineDescription([]byte(RenderToolDescription(webSearchDescriptionTpl))),
 		func(ctx context.Context, params WebSearchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Query == "" {
 				return fantasy.NewTextErrorResponse("query is required"), nil

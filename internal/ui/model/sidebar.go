@@ -134,7 +134,7 @@ func (m *UI) goalInfo(width int) string {
 	t := m.com.Styles
 	status := string(m.currentGoal.Status)
 	header := t.Sidebar.SectionHeader.Render("GOAL (" + status + ")")
-	objective := t.Sidebar.SessionTitle.Copy().
+	objective := t.Sidebar.SessionTitle.
 		Foreground(t.Sidebar.WorkingDir.GetForeground()).
 		Width(width).
 		Render(m.currentGoal.Objective)

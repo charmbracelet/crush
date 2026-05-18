@@ -634,10 +634,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	return a.Run(ctx, firstQueuedMessage)
 }
 
+func summarizeSessionKey(sessionID string) string {
+	return sessionID + "-summarize"
+}
+
 func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions) error {
 	if a.IsSessionBusy(sessionID) {
 		return ErrSessionBusy
 	}
+
+	summarySessionID := summarizeSessionKey(sessionID)
 
 	// Copy mutable fields under lock to avoid races with SetModels.
 	largeModel := a.largeModel.Get()
@@ -659,8 +665,8 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	aiMsgs, _ := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages)
 
 	genCtx, cancel := context.WithCancel(ctx)
-	a.activeRequests.Set(sessionID, cancel)
-	defer a.activeRequests.Del(sessionID)
+	a.activeRequests.Set(summarySessionID, cancel)
+	defer a.activeRequests.Del(summarySessionID)
 	defer cancel()
 	defer func() {
 		if flushErr := a.messages.FlushAll(ctx); flushErr != nil {
@@ -762,7 +768,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 
 	// Release the active request before processing queued messages so that
 	// Run() does not see the session as busy.
-	a.activeRequests.Del(sessionID)
+	a.activeRequests.Del(summarySessionID)
 	cancel()
 
 	// Process any messages that were queued while summarizing.
@@ -1162,7 +1168,7 @@ func (a *sessionAgent) Cancel(sessionID string) {
 	}
 
 	// Also check for summarize requests.
-	if cancel, ok := a.activeRequests.Get(sessionID + "-summarize"); ok && cancel != nil {
+	if cancel, ok := a.activeRequests.Get(summarizeSessionKey(sessionID)); ok && cancel != nil {
 		slog.Debug("Summarize cancellation initiated", "session_id", sessionID)
 		cancel()
 	}
@@ -1211,7 +1217,10 @@ func (a *sessionAgent) IsBusy() bool {
 }
 
 func (a *sessionAgent) IsSessionBusy(sessionID string) bool {
-	_, busy := a.activeRequests.Get(sessionID)
+	if _, busy := a.activeRequests.Get(sessionID); busy {
+		return true
+	}
+	_, busy := a.activeRequests.Get(summarizeSessionKey(sessionID))
 	return busy
 }
 

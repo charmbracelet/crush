@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/client"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/goal"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
@@ -232,6 +234,35 @@ func (w *ClientWorkspace) UpdateAgentModel(ctx context.Context) error {
 
 func (w *ClientWorkspace) InitCoderAgent(ctx context.Context) error {
 	return w.client.InitiateAgentProcessing(ctx, w.workspaceID())
+}
+
+func (w *ClientWorkspace) GoalGet(ctx context.Context, sessionID string) (*goal.Goal, error) {
+	// TODO: Implement API call in client
+	return nil, errors.New("GoalGet not implemented for client workspace")
+}
+
+func (w *ClientWorkspace) GoalSet(ctx context.Context, sessionID, objective string) (*goal.Goal, error) {
+	// TODO: Implement API call in client
+	return nil, errors.New("GoalSet not implemented for client workspace")
+}
+
+func (w *ClientWorkspace) GoalPause(ctx context.Context, sessionID string) (*goal.Goal, error) {
+	// TODO: Implement API call in client
+	return nil, errors.New("GoalPause not implemented for client workspace")
+}
+
+func (w *ClientWorkspace) GoalResume(ctx context.Context, sessionID string) (*goal.Goal, error) {
+	// TODO: Implement API call in client
+	return nil, errors.New("GoalResume not implemented for client workspace")
+}
+
+func (w *ClientWorkspace) GoalStart(ctx context.Context, sessionID string) error {
+	return errors.New("GoalStart not implemented for client workspace")
+}
+
+func (w *ClientWorkspace) GoalClear(ctx context.Context, sessionID string) (*goal.Goal, error) {
+	// TODO: Implement API call in client
+	return nil, errors.New("GoalClear not implemented for client workspace")
 }
 
 func (w *ClientWorkspace) GetDefaultSmallModel(providerID string) config.SelectedModel {

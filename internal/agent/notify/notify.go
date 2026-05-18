@@ -12,6 +12,9 @@ const (
 	// TypeReAuthenticate indicates the agent encountered an
 	// authentication error and the user needs to re-authenticate.
 	TypeReAuthenticate Type = "re_authenticate"
+	// TypeGoalContinue indicates that a synthetic continuation turn
+	// is about to start.
+	TypeGoalContinue Type = "goal_continue"
 )
 
 // Notification represents a domain event published by the agent.

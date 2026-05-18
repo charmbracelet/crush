@@ -392,6 +392,10 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 					"type": "disabled",
 				}
 			}
+		case string(catwalk.InferenceProviderAlibabaSingapore):
+			if model.CatwalkCfg.CanReason {
+				extraBody["enable_thinking"] = model.ModelCfg.Think
+			}
 		}
 
 		mergedOptions["extra_body"] = extraBody

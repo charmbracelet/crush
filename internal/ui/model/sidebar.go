@@ -127,6 +127,20 @@ func getDynamicHeightLimits(availableHeight, fileCount, lspCount, mcpCount, skil
 
 // sidebar renders the chat sidebar containing session title, working
 // directory, model info, file list, LSP status, and MCP status.
+func (m *UI) goalInfo(width int) string {
+	if m.currentGoal == nil {
+		return ""
+	}
+	t := m.com.Styles
+	status := string(m.currentGoal.Status)
+	header := t.Sidebar.SectionHeader.Render("GOAL (" + status + ")")
+	objective := t.Sidebar.SessionTitle.Copy().
+		Foreground(t.Sidebar.WorkingDir.GetForeground()).
+		Width(width).
+		Render(m.currentGoal.Objective)
+	return lipgloss.JoinVertical(lipgloss.Left, header, objective)
+}
+
 func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	if m.session == nil {
 		return
@@ -153,6 +167,8 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 		cwd,
 		"",
 		m.modelInfo(width),
+		"",
+		m.goalInfo(width),
 		"",
 	}
 

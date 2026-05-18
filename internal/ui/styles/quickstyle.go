@@ -754,6 +754,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	// Sidebar
 	s.Sidebar.SessionTitle = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
 	s.Sidebar.WorkingDir = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
+	s.Sidebar.SectionHeader = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 
 	// ModelInfo
 	s.ModelInfo.Icon = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
@@ -938,6 +939,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Pills.TodoLabel = lipgloss.NewStyle().Foreground(o.fgBase)
 	s.Pills.TodoProgress = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
 	s.Pills.TodoCurrentTask = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
+	s.Pills.GoalElapsedTime = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
 	s.Pills.TodoSpinner = lipgloss.NewStyle().Foreground(o.successMostSubtle)
 	s.Pills.HelpKey = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
 	s.Pills.HelpText = lipgloss.NewStyle().Foreground(o.fgMostSubtle)

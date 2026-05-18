@@ -133,7 +133,7 @@ type ProviderConfig struct {
 
 	// AWSAuthRefresh is a shell command run when Bedrock returns a
 	// credential error. Output is discarded to avoid corrupting the TUI.
-	AWSAuthRefresh string `json:"aws_auth_refresh,omitempty" jsonschema:"description=Shell command to run when AWS credentials expire (Bedrock only). Output is shown to the user."`
+	AWSAuthRefresh string `json:"aws_auth_refresh,omitempty" jsonschema:"description=Shell command to run when AWS credentials expire (Bedrock only)."`
 
 	// Skip cost accumulation for this provider when using subscription or flat rate billing.
 	FlatRate bool `json:"flat_rate,omitempty" jsonschema:"description=Flat-rate mode for this provider"`

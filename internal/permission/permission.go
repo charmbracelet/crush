@@ -34,6 +34,20 @@ func hookApproved(ctx context.Context, toolCallID string) bool {
 	return v == toolCallID
 }
 
+// PermissionMode represents the current permission mode.
+type PermissionMode int
+
+const (
+	// PermissionModeNormal prompts for all non-safe commands.
+	PermissionModeNormal PermissionMode = iota
+	// PermissionModeYolo auto-approves non-dangerous commands, prompts for
+	// dangerous ones.
+	PermissionModeYolo
+	// PermissionModeSuperYolo auto-approves everything including dangerous
+	// commands.
+	PermissionModeSuperYolo
+)
+
 type CreatePermissionRequest struct {
 	SessionID   string `json:"session_id"`
 	ToolCallID  string `json:"tool_call_id"`
@@ -42,6 +56,7 @@ type CreatePermissionRequest struct {
 	Action      string `json:"action"`
 	Params      any    `json:"params"`
 	Path        string `json:"path"`
+	Dangerous   bool   `json:"dangerous"`
 }
 
 type PermissionNotification struct {
@@ -59,6 +74,7 @@ type PermissionRequest struct {
 	Action      string `json:"action"`
 	Params      any    `json:"params"`
 	Path        string `json:"path"`
+	Dangerous   bool   `json:"dangerous"`
 }
 
 type Service interface {
@@ -70,6 +86,8 @@ type Service interface {
 	AutoApproveSession(sessionID string)
 	SetSkipRequests(skip bool)
 	SkipRequests() bool
+	SetPermissionMode(mode PermissionMode)
+	PermissionMode() PermissionMode
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
 }
 
@@ -90,8 +108,8 @@ type permissionService struct {
 	pendingRequests       *csync.Map[string, chan bool]
 	autoApproveSessions   map[string]bool
 	autoApproveSessionsMu sync.RWMutex
-	skip                  bool
 	allowedTools          []string
+	mode                  PermissionMode
 
 	// used to make sure we only process one request at a time
 	requestMu       sync.Mutex
@@ -159,7 +177,13 @@ func (s *permissionService) Deny(permission PermissionRequest) {
 }
 
 func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRequest) (bool, error) {
-	if s.skip {
+	// Super yolo mode: auto-approve everything including dangerous commands.
+	if s.mode == PermissionModeSuperYolo {
+		return true, nil
+	}
+	// In yolo mode, auto-approve non-dangerous commands but still prompt for
+	// dangerous ones.
+	if s.mode == PermissionModeYolo && !opts.Dangerous {
 		return true, nil
 	}
 
@@ -223,6 +247,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		Description: opts.Description,
 		Action:      opts.Action,
 		Params:      opts.Params,
+		Dangerous:   opts.Dangerous,
 	}
 
 	if _, ok := s.sessionPermissions.Get(PermissionKey{
@@ -268,21 +293,37 @@ func (s *permissionService) SubscribeNotifications(ctx context.Context) <-chan p
 }
 
 func (s *permissionService) SetSkipRequests(skip bool) {
-	s.skip = skip
+	if skip {
+		s.mode = PermissionModeYolo
+	} else {
+		s.mode = PermissionModeNormal
+	}
 }
 
 func (s *permissionService) SkipRequests() bool {
-	return s.skip
+	return s.mode != PermissionModeNormal
+}
+
+func (s *permissionService) SetPermissionMode(mode PermissionMode) {
+	s.mode = mode
+}
+
+func (s *permissionService) PermissionMode() PermissionMode {
+	return s.mode
 }
 
 func NewPermissionService(workingDir string, skip bool, allowedTools []string) Service {
+	mode := PermissionModeNormal
+	if skip {
+		mode = PermissionModeYolo
+	}
 	return &permissionService{
 		Broker:              pubsub.NewBroker[PermissionRequest](),
 		notificationBroker:  pubsub.NewBroker[PermissionNotification](),
 		workingDir:          workingDir,
 		sessionPermissions:  csync.NewMap[PermissionKey, bool](),
 		autoApproveSessions: make(map[string]bool),
-		skip:                skip,
+		mode:                mode,
 		allowedTools:        allowedTools,
 		pendingRequests:     csync.NewMap[string, chan bool](),
 	}

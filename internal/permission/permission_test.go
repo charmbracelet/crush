@@ -80,21 +80,83 @@ func TestPermissionService_AllowedCommands(t *testing.T) {
 }
 
 func TestPermissionService_SkipMode(t *testing.T) {
-	service := NewPermissionService("/tmp", true, []string{})
+	t.Run("skip mode auto-approves non-dangerous commands", func(t *testing.T) {
+		service := NewPermissionService("/tmp", true, []string{})
 
-	result, err := service.Request(t.Context(), CreatePermissionRequest{
-		SessionID:   "test-session",
-		ToolName:    "bash",
-		Action:      "execute",
-		Description: "test command",
-		Path:        "/tmp",
+		result, err := service.Request(t.Context(), CreatePermissionRequest{
+			SessionID:   "test-session",
+			ToolName:    "bash",
+			Action:      "execute",
+			Description: "test command",
+			Path:        "/tmp",
+			Dangerous:   false,
+		})
+		require.NoError(t, err)
+		assert.True(t, result, "expected permission to be granted in skip mode")
 	})
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-	if !result {
-		t.Error("expected permission to be granted in skip mode")
-	}
+
+	t.Run("skip mode prompts for dangerous commands", func(t *testing.T) {
+		service := NewPermissionService("/tmp", true, []string{})
+
+		done := make(chan struct{})
+		go func() {
+			result, err := service.Request(t.Context(), CreatePermissionRequest{
+				SessionID:   "test-session",
+				ToolCallID:  "test-call",
+				ToolName:    "bash",
+				Action:      "execute",
+				Description: "dangerous command",
+				Path:        "/tmp",
+				Dangerous:   true,
+			})
+			require.NoError(t, err)
+			assert.True(t, result)
+			close(done)
+		}()
+
+		// Wait for permission request to be published.
+		events := service.Subscribe(t.Context())
+		event := <-events
+		assert.Equal(t, "bash", event.Payload.ToolName)
+		assert.True(t, event.Payload.Dangerous)
+
+		// Grant the permission.
+		service.Grant(event.Payload)
+		<-done
+	})
+
+	t.Run("super yolo mode auto-approves dangerous commands", func(t *testing.T) {
+		service := NewPermissionService("/tmp", true, []string{})
+		service.SetPermissionMode(PermissionModeSuperYolo)
+
+		result, err := service.Request(t.Context(), CreatePermissionRequest{
+			SessionID:   "test-session",
+			ToolName:    "bash",
+			Action:      "execute",
+			Description: "dangerous command",
+			Path:        "/tmp",
+			Dangerous:   true,
+		})
+		require.NoError(t, err)
+		assert.True(t, result, "expected dangerous permission to be granted in super yolo mode")
+	})
+
+	t.Run("permission mode cycling", func(t *testing.T) {
+		service := NewPermissionService("/tmp", false, []string{})
+		assert.Equal(t, PermissionModeNormal, service.PermissionMode())
+
+		service.SetPermissionMode(PermissionModeYolo)
+		assert.Equal(t, PermissionModeYolo, service.PermissionMode())
+		assert.True(t, service.SkipRequests())
+
+		service.SetPermissionMode(PermissionModeSuperYolo)
+		assert.Equal(t, PermissionModeSuperYolo, service.PermissionMode())
+		assert.True(t, service.SkipRequests())
+
+		service.SetPermissionMode(PermissionModeNormal)
+		assert.Equal(t, PermissionModeNormal, service.PermissionMode())
+		assert.False(t, service.SkipRequests())
+	})
 }
 
 func TestPermissionService_HookApproval(t *testing.T) {

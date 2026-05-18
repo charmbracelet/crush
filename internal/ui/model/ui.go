@@ -348,7 +348,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 
 	status := NewStatus(com, ui)
 
-	ui.setEditorPrompt(com.Workspace.PermissionSkipRequests())
+	ui.setEditorPrompt(com.Workspace.PermissionMode())
 	ui.randomizePlaceholders()
 	ui.textarea.Placeholder = ui.readyPlaceholder
 	ui.status = status
@@ -924,6 +924,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.com.Workspace.PermissionSkipRequests() {
 			m.textarea.Placeholder = "Yolo mode!"
 		}
+		if m.com.Workspace.PermissionMode() == permission.PermissionModeSuperYolo {
+			m.textarea.Placeholder = "Super yolo mode!"
+		}
 	}
 
 	// at this point this can only handle [message.Attachment] message, and we
@@ -1344,9 +1347,20 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 
 	// Command dialog messages.
 	case dialog.ActionToggleYoloMode:
-		yolo := !m.com.Workspace.PermissionSkipRequests()
-		m.com.Workspace.PermissionSetSkipRequests(yolo)
-		m.setEditorPrompt(yolo)
+		if m.com.Workspace.PermissionMode() == permission.PermissionModeYolo {
+			m.com.Workspace.PermissionSetMode(permission.PermissionModeNormal)
+		} else {
+			m.com.Workspace.PermissionSetMode(permission.PermissionModeYolo)
+		}
+		m.setEditorPrompt(m.com.Workspace.PermissionMode())
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionToggleSuperYoloMode:
+		if m.com.Workspace.PermissionMode() == permission.PermissionModeSuperYolo {
+			m.com.Workspace.PermissionSetMode(permission.PermissionModeNormal)
+		} else {
+			m.com.Workspace.PermissionSetMode(permission.PermissionModeSuperYolo)
+		}
+		m.setEditorPrompt(m.com.Workspace.PermissionMode())
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleNotifications:
 		cfg := m.com.Config()
@@ -2844,14 +2858,17 @@ func (m *UI) openEditor(value string) tea.Cmd {
 	})
 }
 
-// setEditorPrompt configures the textarea prompt function based on whether
-// yolo mode is enabled.
-func (m *UI) setEditorPrompt(yolo bool) {
-	if yolo {
+// setEditorPrompt configures the textarea prompt function based on the current
+// permission mode.
+func (m *UI) setEditorPrompt(mode permission.PermissionMode) {
+	switch mode {
+	case permission.PermissionModeSuperYolo:
+		m.textarea.SetPromptFunc(4, m.superYoloPromptFunc)
+	case permission.PermissionModeYolo:
 		m.textarea.SetPromptFunc(4, m.yoloPromptFunc)
-		return
+	default:
+		m.textarea.SetPromptFunc(4, m.normalPromptFunc)
 	}
-	m.textarea.SetPromptFunc(4, m.normalPromptFunc)
 }
 
 // normalPromptFunc returns the normal editor prompt style ("  > " on first
@@ -2885,6 +2902,23 @@ func (m *UI) yoloPromptFunc(info textarea.PromptInfo) string {
 		return t.Editor.PromptYoloDotsFocused.Render()
 	}
 	return t.Editor.PromptYoloDotsBlurred.Render()
+}
+
+// superYoloPromptFunc returns the super yolo mode editor prompt style with red
+// warning icon and red dots.
+func (m *UI) superYoloPromptFunc(info textarea.PromptInfo) string {
+	t := m.com.Styles
+	if info.LineNumber == 0 {
+		if info.Focused {
+			return t.Editor.PromptSuperYoloIconFocused.Render()
+		} else {
+			return t.Editor.PromptSuperYoloIconBlurred.Render()
+		}
+	}
+	if info.Focused {
+		return t.Editor.PromptSuperYoloDotsFocused.Render()
+	}
+	return t.Editor.PromptSuperYoloDotsBlurred.Render()
 }
 
 // closeCompletions closes the completions popup and resets state.

@@ -4,10 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
-	"strings"
 
 	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/charmbracelet/crush/internal/home"
 )
 
 const (
@@ -43,7 +42,7 @@ func ProjectNeedsInitialization(store *ConfigStore) (bool, error) {
 		return false, fmt.Errorf("failed to check init flag file: %w", err)
 	}
 
-	someContextFileExists, err := contextPathsExist(store.WorkingDir())
+	someContextFileExists, err := contextPathsExist(store)
 	if err != nil {
 		return false, fmt.Errorf("failed to check for context files: %w", err)
 	}
@@ -63,32 +62,39 @@ func ProjectNeedsInitialization(store *ConfigStore) (bool, error) {
 	return true, nil
 }
 
-func contextPathsExist(dir string) (bool, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return false, err
+func contextPathsExist(store *ConfigStore) (bool, error) {
+	if store == nil {
+		return false, fmt.Errorf("config not loaded")
 	}
 
-	// Create a slice of lowercase filenames for lookup with slices.Contains
-	var files []string
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			files = append(files, strings.ToLower(entry.Name()))
+	for _, path := range store.Config().Options.ContextPaths {
+		resolvedPath, err := resolveContextPath(store, path)
+		if err != nil {
+			return false, err
 		}
-	}
-
-	// Check if any of the default context paths exist in the directory
-	for _, path := range defaultContextPaths {
-		// Extract just the filename from the path
-		_, filename := filepath.Split(path)
-		filename = strings.ToLower(filename)
-
-		if slices.Contains(files, filename) {
+		if _, err := os.Stat(resolvedPath); err == nil {
 			return true, nil
+		} else if !os.IsNotExist(err) {
+			return false, err
 		}
 	}
 
 	return false, nil
+}
+
+func resolveContextPath(store *ConfigStore, path string) (string, error) {
+	path = home.Long(path)
+	if len(path) > 0 && path[0] == '$' {
+		resolved, err := store.Resolve(path)
+		if err != nil {
+			return "", err
+		}
+		path = resolved
+	}
+	if filepath.IsAbs(path) {
+		return path, nil
+	}
+	return filepath.Join(store.WorkingDir(), path), nil
 }
 
 // dirHasNoVisibleFiles returns true if the directory has no files/dirs after applying ignore rules.

@@ -277,7 +277,7 @@ func (s *permissionService) SkipRequests() bool {
 }
 
 func NewPermissionService(workingDir string, skip bool, allowedTools []string) Service {
-	svc := &permissionService{
+	s := &permissionService{
 		Broker:              pubsub.NewBroker[PermissionRequest](),
 		notificationBroker:  pubsub.NewBroker[PermissionNotification](),
 		workingDir:          workingDir,
@@ -286,6 +286,6 @@ func NewPermissionService(workingDir string, skip bool, allowedTools []string) S
 		allowedTools:        allowedTools,
 		pendingRequests:     csync.NewMap[string, chan bool](),
 	}
-	svc.skip.Store(skip)
-	return svc
+	s.skip.Store(skip)
+	return s
 }

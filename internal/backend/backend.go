@@ -38,6 +38,7 @@ type ShutdownFunc func()
 // server. It manages workspaces and delegates to [app.App] services.
 type Backend struct {
 	workspaces *csync.Map[string, *Workspace]
+	clients    *clientTracker
 	cfg        *config.ConfigStore
 	ctx        context.Context
 	shutdownFn ShutdownFunc
@@ -57,19 +58,29 @@ type Workspace struct {
 func New(ctx context.Context, cfg *config.ConfigStore, shutdownFn ShutdownFunc) *Backend {
 	return &Backend{
 		workspaces: csync.NewMap[string, *Workspace](),
+		clients:    newClientTracker(),
 		cfg:        cfg,
 		ctx:        ctx,
 		shutdownFn: shutdownFn,
 	}
 }
 
-// GetWorkspace retrieves a workspace by ID.
+// GetWorkspace retrieves a workspace by ID. The ID can be either a workspace ID
+// or a client ID that maps to a shared workspace.
 func (b *Backend) GetWorkspace(id string) (*Workspace, error) {
-	ws, ok := b.workspaces.Get(id)
-	if !ok {
-		return nil, ErrWorkspaceNotFound
+	// Try direct workspace lookup first.
+	if ws, ok := b.workspaces.Get(id); ok {
+		return ws, nil
 	}
-	return ws, nil
+
+	// Try as a client ID.
+	if workspaceID, ok := b.clients.workspaceForClient(id); ok {
+		if ws, ok := b.workspaces.Get(workspaceID); ok {
+			return ws, nil
+		}
+	}
+
+	return nil, ErrWorkspaceNotFound
 }
 
 // ListWorkspaces returns all running workspaces.
@@ -81,27 +92,48 @@ func (b *Backend) ListWorkspaces() []proto.Workspace {
 	return workspaces
 }
 
-// CreateWorkspace initializes a new workspace from the given
-// parameters. It creates the config, database connection, and
-// [app.App] instance.
+// CreateWorkspace initializes a new workspace from the given parameters.
+// If a workspace already exists for the same data directory, the existing
+// workspace is returned with a new client ID to avoid opening multiple
+// DB connections to the same file.
 func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Workspace, error) {
 	if args.Path == "" {
 		return nil, proto.Workspace{}, ErrPathRequired
 	}
 
-	id := uuid.New().String()
+	clientID := uuid.New().String()
+
 	cfg, err := config.Init(args.Path, args.DataDir, args.Debug)
 	if err != nil {
 		return nil, proto.Workspace{}, fmt.Errorf("failed to initialize config: %w", err)
 	}
 
+	dataDir := cfg.Config().Options.DataDirectory
+
+	// Check for existing workspace.
+	if existingID, ok := b.clients.workspaceForDataDir(dataDir); ok {
+		if ws, ok := b.workspaces.Get(existingID); ok {
+			count, _ := b.clients.addClient(clientID, existingID, dataDir)
+			slog.Info("Reusing existing workspace for data directory",
+				"client_id", clientID,
+				"workspace_id", existingID,
+				"data_dir", dataDir,
+				"client_count", count,
+			)
+			return ws, b.makeProtoWorkspace(clientID, args.Path, dataDir, args.Env, ws.Cfg), nil
+		}
+		// Stale entry - clean up.
+		b.clients.cleanupStaleWorkspace(existingID, dataDir)
+	}
+
+	// Create new workspace.
 	cfg.Overrides().SkipPermissionRequests = args.YOLO
 
-	if err := createDotCrushDir(cfg.Config().Options.DataDirectory); err != nil {
+	if err := createDotCrushDir(dataDir); err != nil {
 		return nil, proto.Workspace{}, fmt.Errorf("failed to create data directory: %w", err)
 	}
 
-	conn, err := db.Connect(b.ctx, cfg.Config().Options.DataDirectory)
+	conn, err := db.Connect(b.ctx, dataDir)
 	if err != nil {
 		return nil, proto.Workspace{}, fmt.Errorf("failed to connect to database: %w", err)
 	}
@@ -113,13 +145,14 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 
 	ws := &Workspace{
 		App:  appWorkspace,
-		ID:   id,
+		ID:   clientID,
 		Path: args.Path,
 		Cfg:  cfg,
 		Env:  args.Env,
 	}
 
-	b.workspaces.Set(id, ws)
+	b.workspaces.Set(clientID, ws)
+	b.clients.addClient(clientID, clientID, dataDir)
 
 	if args.Version != "" && args.Version != version.Version {
 		slog.Warn(
@@ -133,31 +166,57 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 		)))
 	}
 
-	result := proto.Workspace{
-		ID:      id,
-		Path:    args.Path,
-		DataDir: cfg.Config().Options.DataDirectory,
-		Debug:   cfg.Config().Options.Debug,
-		YOLO:    cfg.Overrides().SkipPermissionRequests,
-		Config:  cfg.Config(),
-		Env:     args.Env,
-	}
-
-	return ws, result, nil
+	return ws, b.makeProtoWorkspace(clientID, args.Path, dataDir, args.Env, cfg), nil
 }
 
-// DeleteWorkspace shuts down and removes a workspace. If it was the
-// last workspace, the shutdown callback is invoked.
-func (b *Backend) DeleteWorkspace(id string) {
-	ws, ok := b.workspaces.Get(id)
-	if ok {
+// DeleteWorkspace removes a client from its workspace. The workspace is only
+// shut down when the last client disconnects.
+func (b *Backend) DeleteWorkspace(clientID string) {
+	workspaceID, _, lastClient, ok := b.clients.removeClient(clientID)
+	if !ok {
+		// Unknown client - try legacy direct lookup.
+		if ws, ok := b.workspaces.Get(clientID); ok {
+			ws.Shutdown()
+			b.workspaces.Del(clientID)
+		}
+		b.maybeShutdown()
+		return
+	}
+
+	slog.Info("Client disconnected from workspace",
+		"client_id", clientID,
+		"workspace_id", workspaceID,
+		"last_client", lastClient,
+	)
+
+	if !lastClient {
+		return
+	}
+
+	if ws, ok := b.workspaces.Get(workspaceID); ok {
 		ws.Shutdown()
 	}
-	b.workspaces.Del(id)
+	b.workspaces.Del(workspaceID)
+	b.maybeShutdown()
+}
 
+func (b *Backend) maybeShutdown() {
 	if b.workspaces.Len() == 0 && b.shutdownFn != nil {
 		slog.Info("Last workspace removed, shutting down server...")
 		b.shutdownFn()
+	}
+}
+
+func (b *Backend) makeProtoWorkspace(clientID, path, dataDir string, env []string, cfg *config.ConfigStore) proto.Workspace {
+	c := cfg.Config()
+	return proto.Workspace{
+		ID:      clientID,
+		Path:    path,
+		DataDir: dataDir,
+		Debug:   c.Options.Debug,
+		YOLO:    cfg.Overrides().SkipPermissionRequests,
+		Config:  c,
+		Env:     env,
 	}
 }
 

@@ -35,6 +35,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
 	"golang.org/x/sync/errgroup"
 
@@ -217,7 +218,7 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 	result, originalErr := run()
 	logTurnSkillUsage(sessionID, prompt, c.activeSkills, c.skillTracker, beforeLoaded)
 
-	if c.isUnauthorized(originalErr) {
+	if c.isUnauthorized(originalErr, providerCfg) {
 		if err := c.retryAfterUnauthorized(ctx, providerCfg); err == nil {
 			return run()
 		}
@@ -986,7 +987,7 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 	}
 
 	err := summarize()
-	if err != nil && c.isUnauthorized(err) {
+	if err != nil && c.isUnauthorized(err, providerCfg) {
 		if retryErr := c.retryAfterUnauthorized(ctx, providerCfg); retryErr == nil {
 			return summarize()
 		}
@@ -1014,14 +1015,33 @@ func (c *coordinator) retryAfterUnauthorized(ctx context.Context, providerCfg co
 	case strings.Contains(providerCfg.APIKeyTemplate, "$"):
 		slog.Debug("Received 401. Refreshing API Key template and retrying", "provider", providerCfg.ID)
 		return c.refreshApiKeyTemplate(ctx, providerCfg)
+	case providerCfg.AWSAuthRefresh != "":
+		slog.Debug("Received 401. Running AWS auth refresh and retrying", "provider", providerCfg.ID)
+		return c.runAWSAuthRefresh(ctx, providerCfg)
 	default:
 		return nil
 	}
 }
 
-func (c *coordinator) isUnauthorized(err error) bool {
+func (c *coordinator) isUnauthorized(err error, providerCfg config.ProviderConfig) bool {
+	if err == nil {
+		return false
+	}
 	var providerErr *fantasy.ProviderError
-	return errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized
+	if errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized {
+		return true
+	}
+	// AWS SSO credential errors surface before any Bedrock request is made,
+	// so they never become a ProviderError. All known expiry cases wrap their
+	// cause in "failed to refresh cached credentials" via the AWS SDK credential
+	// cache (aws/aws-sdk-go-v2/aws/credential_cache.go), including:
+	//   - missing SSO token cache file (e.g. after aws sso logout)
+	//   - expired SSO access token: ForbiddenException from GetRoleCredentials
+	//   - expired SSO refresh token: InvalidGrantException from CreateToken
+	if providerCfg.AWSAuthRefresh != "" {
+		return strings.Contains(err.Error(), "failed to refresh cached credentials")
+	}
+	return false
 }
 
 func (c *coordinator) refreshOAuth2Token(ctx context.Context, providerCfg config.ProviderConfig) error {
@@ -1049,6 +1069,20 @@ func (c *coordinator) refreshApiKeyTemplate(ctx context.Context, providerCfg con
 		return err
 	}
 	return nil
+}
+
+// runAWSAuthRefresh runs aws_auth_refresh to obtain fresh AWS credentials.
+func (c *coordinator) runAWSAuthRefresh(ctx context.Context, providerCfg config.ProviderConfig) error {
+	err := shell.Run(ctx, shell.RunOptions{
+		Command: providerCfg.AWSAuthRefresh,
+		Cwd:     c.cfg.WorkingDir(),
+		Env:     os.Environ(),
+	})
+	if err != nil {
+		slog.Error("AWS auth refresh command failed.", "provider", providerCfg.ID, "error", err)
+		return err
+	}
+	return c.UpdateModels(ctx)
 }
 
 // subAgentParams holds the parameters for running a sub-agent.

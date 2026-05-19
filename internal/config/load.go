@@ -108,6 +108,16 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	store.autoReloadDisabled = true
 	defer func() { store.autoReloadDisabled = false }()
 
+	// Apply top-level env vars before configuring providers so variables
+	// like AWS_PROFILE are visible to the AWS SDK credential chain.
+	for k, v := range cfg.Env {
+		resolved, err := valueResolver.ResolveValue(v)
+		if err != nil {
+			slog.Warn("Failed to resolve env var value. Variable will be set to empty string.", "key", k, "value", v, "error", err)
+		}
+		os.Setenv(k, resolved)
+	}
+
 	if err := cfg.configureProviders(store, env, valueResolver, store.knownProviders); err != nil {
 		return nil, fmt.Errorf("failed to configure providers: %w", err)
 	}
@@ -256,6 +266,7 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 			ExtraBody:          config.ExtraBody,
 			ExtraParams:        make(map[string]string),
 			Models:             p.Models,
+			AWSAuthRefresh:     config.AWSAuthRefresh,
 		}
 
 		switch {

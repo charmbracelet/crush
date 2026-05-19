@@ -8,16 +8,18 @@ import (
 	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/pubsub"
 )
 
-// SubscribeEvents returns the event channel for a workspace's app.
-func (b *Backend) SubscribeEvents(workspaceID string) (<-chan tea.Msg, error) {
+// SubscribeEvents returns a per-caller event channel for a workspace.
+// Each caller receives all events; multiple callers do not compete.
+func (b *Backend) SubscribeEvents(ctx context.Context, workspaceID string) (<-chan pubsub.Event[tea.Msg], error) {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
 		return nil, err
 	}
 
-	return ws.Events(), nil
+	return ws.Events(ctx), nil
 }
 
 // GetLSPStates returns the state of all LSP clients.

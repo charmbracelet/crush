@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/stringext"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 )
 
@@ -37,8 +36,8 @@ func (b *MCPToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *T
 	if len(toolNameParts) != 3 {
 		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid tool name"}, cappedWidth)
 	}
-	mcpName := prettyName(toolNameParts[1])
-	toolName := prettyName(toolNameParts[2])
+	mcpName := humanizedToolName(toolNameParts[1])
+	toolName := humanizedToolName(toolNameParts[2])
 
 	mcpName = sty.Tool.MCPName.Render(mcpName)
 	toolName = sty.Tool.MCPToolName.Render(toolName)
@@ -74,48 +73,6 @@ func (b *MCPToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *T
 	}
 
 	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
-	// see if the result is json
-	var result json.RawMessage
-	var body string
-	if err := json.Unmarshal([]byte(opts.Result.Content), &result); err == nil {
-		prettyResult, err := json.MarshalIndent(result, "", "  ")
-		if err == nil {
-			body = sty.Tool.Body.Render(toolOutputCodeContent(sty, "result.json", string(prettyResult), 0, bodyWidth, opts.ExpandedContent))
-		} else {
-			body = sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
-		}
-	} else if looksLikeMarkdown(opts.Result.Content) {
-		body = sty.Tool.Body.Render(toolOutputCodeContent(sty, "result.md", opts.Result.Content, 0, bodyWidth, opts.ExpandedContent))
-	} else {
-		body = sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
-	}
+	body := renderToolResultTextContent(sty, opts.Result.Content, toolResultContentWidths{Body: bodyWidth, Diff: cappedWidth}, opts.ExpandedContent)
 	return joinToolParts(header, body)
-}
-
-func prettyName(name string) string {
-	name = strings.ReplaceAll(name, "_", " ")
-	name = strings.ReplaceAll(name, "-", " ")
-	return stringext.Capitalize(name)
-}
-
-// looksLikeMarkdown checks if content appears to be markdown by looking for
-// common markdown patterns.
-func looksLikeMarkdown(content string) bool {
-	patterns := []string{
-		"# ",  // headers
-		"## ", // headers
-		"**",  // bold
-		"```", // code fence
-		"- ",  // unordered list
-		"1. ", // ordered list
-		"> ",  // blockquote
-		"---", // horizontal rule
-		"***", // horizontal rule
-	}
-	for _, p := range patterns {
-		if strings.Contains(content, p) {
-			return true
-		}
-	}
-	return false
 }

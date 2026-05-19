@@ -94,7 +94,7 @@ func newOAuth(
 
 	m.spinner = spinner.New(
 		spinner.WithSpinner(spinner.Dot),
-		spinner.WithStyle(t.Base.Foreground(t.GreenLight)),
+		spinner.WithStyle(t.Dialog.OAuth.Spinner),
 	)
 
 	m.help = help.New()
@@ -222,23 +222,23 @@ func (m *OAuth) headerContent() string {
 		textStyle    = t.Dialog.PrimaryText
 		dialogStyle  = t.Dialog.View.Width(m.width)
 		headerOffset = titleStyle.GetHorizontalFrameSize() + dialogStyle.GetHorizontalFrameSize()
-		dialogTitle  = fmt.Sprintf("Authenticate with %s", m.oAuthProvider.name())
+		dialogTitle  = fmt.Sprintf("Let’s authenticate with %s", m.oAuthProvider.name())
 	)
 	if m.isOnboarding {
 		return textStyle.Render(dialogTitle)
 	}
-	return common.DialogTitle(t, titleStyle.Render(dialogTitle), m.width-headerOffset, t.Primary, t.Secondary)
+	return common.DialogTitle(t, titleStyle.Render(dialogTitle), m.width-headerOffset, t.Dialog.TitleGradFromColor, t.Dialog.TitleGradToColor)
 }
 
 func (m *OAuth) innerDialogContent() string {
 	var (
-		t            = m.com.Styles
-		whiteStyle   = lipgloss.NewStyle().Foreground(t.White)
-		primaryStyle = lipgloss.NewStyle().Foreground(t.Primary)
-		greenStyle   = lipgloss.NewStyle().Foreground(t.GreenLight)
-		linkStyle    = lipgloss.NewStyle().Foreground(t.GreenDark).Underline(true)
-		errorStyle   = lipgloss.NewStyle().Foreground(t.Error)
-		mutedStyle   = lipgloss.NewStyle().Foreground(t.FgMuted)
+		t                = m.com.Styles
+		instructionStyle = t.Dialog.OAuth.Instructions
+		enterKeyStyle    = t.Dialog.OAuth.Enter
+		successStyle     = t.Dialog.OAuth.Success
+		linkStyle        = t.Dialog.OAuth.Link
+		errorStyle       = t.Dialog.OAuth.ErrorText
+		statusTextStyle  = t.Dialog.OAuth.StatusText
 	)
 
 	switch m.State {
@@ -248,8 +248,8 @@ func (m *OAuth) innerDialogContent() string {
 			Width(m.width - 2).
 			Align(lipgloss.Center).
 			Render(
-				greenStyle.Render(m.spinner.View()) +
-					mutedStyle.Render("Initializing..."),
+				successStyle.Render(m.spinner.View()) +
+					statusTextStyle.Render("Initializing..."),
 			)
 
 	case OAuthStateDisplay:
@@ -257,35 +257,32 @@ func (m *OAuth) innerDialogContent() string {
 			Margin(0, 1).
 			Width(m.width - 2).
 			Render(
-				whiteStyle.Render("Press ") +
-					primaryStyle.Render("enter") +
-					whiteStyle.Render(" to copy the code below and open the browser."),
+				instructionStyle.Render("Press ") +
+					enterKeyStyle.Render("enter") +
+					instructionStyle.Render(" to copy the code below and open the browser."),
 			)
 
 		codeBox := lipgloss.NewStyle().
 			Width(m.width-2).
 			Height(7).
 			Align(lipgloss.Center, lipgloss.Center).
-			Background(t.BgBaseLighter).
+			Background(t.Dialog.OAuth.UserCodeBg).
 			Margin(0, 1).
 			Render(
-				lipgloss.NewStyle().
-					Bold(true).
-					Foreground(t.White).
-					Render(m.userCode),
+				t.Dialog.OAuth.UserCode.Render(m.userCode),
 			)
 
 		link := linkStyle.Hyperlink(m.verificationURL, "id=oauth-verify").Render(m.verificationURL)
-		url := mutedStyle.
+		url := statusTextStyle.
 			Margin(0, 1).
 			Width(m.width - 2).
-			Render("Browser not opening? Refer to\n" + link)
+			Render("Browser not opening? Pay a visit to:\n" + link)
 
 		waiting := lipgloss.NewStyle().
 			Margin(0, 1).
 			Width(m.width - 2).
 			Render(
-				greenStyle.Render(m.spinner.View()) + mutedStyle.Render("Verifying..."),
+				successStyle.Render(m.spinner.View()) + statusTextStyle.Render("Verifying..."),
 			)
 
 		return lipgloss.JoinVertical(
@@ -302,7 +299,7 @@ func (m *OAuth) innerDialogContent() string {
 		)
 
 	case OAuthStateSuccess:
-		return greenStyle.
+		return successStyle.
 			Margin(1).
 			Width(m.width - 2).
 			Render("Authentication successful!")
@@ -350,25 +347,22 @@ func (d *OAuth) copyCode() tea.Cmd {
 	if d.State != OAuthStateDisplay {
 		return nil
 	}
-	return tea.Sequence(
-		tea.SetClipboard(d.userCode),
-		util.ReportInfo("Code copied to clipboard"),
-	)
+	return common.CopyToClipboard(d.userCode, "Code copied to clipboard")
 }
 
 func (d *OAuth) copyCodeAndOpenURL() tea.Cmd {
 	if d.State != OAuthStateDisplay {
 		return nil
 	}
-	return tea.Sequence(
-		tea.SetClipboard(d.userCode),
+	return common.CopyToClipboardWithCallback(
+		d.userCode,
+		"Code copied and URL opened",
 		func() tea.Msg {
 			if err := browser.OpenURL(d.verificationURL); err != nil {
 				return ActionOAuthErrored{fmt.Errorf("failed to open browser: %w", err)}
 			}
 			return nil
 		},
-		util.ReportInfo("Code copied and URL opened"),
 	)
 }
 

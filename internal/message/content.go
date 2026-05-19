@@ -13,6 +13,7 @@ import (
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/google"
 	"charm.land/fantasy/providers/openai"
+	"github.com/charmbracelet/crush/internal/stringext"
 )
 
 type MessageRole string
@@ -24,15 +25,18 @@ const (
 	Tool      MessageRole = "tool"
 )
 
+// mediaLoadFailedPlaceholder is the text substituted for image data that
+// cannot be decoded during session replay.
+const mediaLoadFailedPlaceholder = "[Image data could not be loaded]"
+
 type FinishReason string
 
 const (
-	FinishReasonEndTurn          FinishReason = "end_turn"
-	FinishReasonMaxTokens        FinishReason = "max_tokens"
-	FinishReasonToolUse          FinishReason = "tool_use"
-	FinishReasonCanceled         FinishReason = "canceled"
-	FinishReasonError            FinishReason = "error"
-	FinishReasonPermissionDenied FinishReason = "permission_denied"
+	FinishReasonEndTurn   FinishReason = "end_turn"
+	FinishReasonMaxTokens FinishReason = "max_tokens"
+	FinishReasonToolUse   FinishReason = "tool_use"
+	FinishReasonCanceled  FinishReason = "canceled"
+	FinishReasonError     FinishReason = "error"
 
 	// Should never happen
 	FinishReasonUnknown FinishReason = "unknown"
@@ -542,9 +546,15 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 					Error: errors.New(result.Content),
 				}
 			} else if result.Data != "" {
-				content = fantasy.ToolResultOutputContentMedia{
-					Data:      result.Data,
-					MediaType: result.MIMEType,
+				if stringext.IsValidBase64(result.Data) {
+					content = fantasy.ToolResultOutputContentMedia{
+						Data:      result.Data,
+						MediaType: result.MIMEType,
+					}
+				} else {
+					content = fantasy.ToolResultOutputContentText{
+						Text: mediaLoadFailedPlaceholder,
+					}
 				}
 			} else {
 				content = fantasy.ToolResultOutputContentText{

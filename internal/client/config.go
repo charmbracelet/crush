@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/charmbracelet/crush/internal/proto"
 )
 
 // SetConfigField sets a config key/value pair on the server.
@@ -76,13 +77,43 @@ func (c *Client) SetCompactMode(ctx context.Context, id string, scope config.Sco
 	return nil
 }
 
-// SetProviderAPIKey sets a provider API key on the server.
+// SetProviderAPIKey sets a provider API key on the server. The wire
+// format tags the credential with an explicit Kind so the server can
+// decode it back into the right Go type — JSON's `any` loses that
+// information across the socket.
 func (c *Client) SetProviderAPIKey(ctx context.Context, id string, scope config.Scope, providerID string, apiKey any) error {
-	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/config/provider-key", id), nil, jsonBody(struct {
-		Scope      config.Scope `json:"scope"`
-		ProviderID string       `json:"provider_id"`
-		APIKey     any          `json:"api_key"`
-	}{Scope: scope, ProviderID: providerID, APIKey: apiKey}), http.Header{"Content-Type": []string{"application/json"}})
+	var (
+		kind proto.APIKeyKind
+		raw  json.RawMessage
+	)
+	switch v := apiKey.(type) {
+	case string:
+		kind = proto.APIKeyKindString
+		b, err := json.Marshal(v)
+		if err != nil {
+			return fmt.Errorf("failed to marshal api key string: %w", err)
+		}
+		raw = b
+	case *oauth.Token:
+		if v == nil {
+			return fmt.Errorf("oauth token is nil")
+		}
+		kind = proto.APIKeyKindOAuth
+		b, err := json.Marshal(v)
+		if err != nil {
+			return fmt.Errorf("failed to marshal oauth token: %w", err)
+		}
+		raw = b
+	default:
+		return fmt.Errorf("unsupported api key type %T", apiKey)
+	}
+
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/config/provider-key", id), nil, jsonBody(proto.ConfigProviderKeyRequest{
+		Scope:      scope,
+		ProviderID: providerID,
+		Kind:       kind,
+		APIKey:     raw,
+	}), http.Header{"Content-Type": []string{"application/json"}})
 	if err != nil {
 		return fmt.Errorf("failed to set provider API key: %w", err)
 	}

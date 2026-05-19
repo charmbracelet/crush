@@ -97,13 +97,19 @@ func Error(errToLog any, props ...any) {
 	if client == nil || distinctId == "" || errToLog == nil {
 		return
 	}
-	posthogErr := client.Enqueue(posthog.NewDefaultException(
+
+	exception := posthog.NewDefaultException(
 		time.Now(),
 		distinctId,
 		reflect.TypeOf(errToLog).String(),
 		fmt.Sprintf("%v", errToLog),
-	))
-	if posthogErr != nil {
+	)
+	if exception.Properties == nil {
+		exception.Properties = posthog.NewProperties()
+	}
+	exception.Properties = exception.Properties.Merge(pairsToProps(props...))
+
+	if posthogErr := client.Enqueue(exception); posthogErr != nil {
 		slog.Error("Failed to enqueue PostHog error", "err", errToLog, "props", props, "posthogErr", posthogErr)
 		return
 	}

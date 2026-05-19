@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"html/template"
 	"io"
 	"net/http"
 	"strings"
@@ -18,11 +19,28 @@ import (
 
 const (
 	FetchToolName = "fetch"
-	MaxFetchSize  = 1 * 1024 * 1024 // 1MB
+	MaxFetchSize  = 100 * 1024 // 100KB
 )
 
-//go:embed fetch.md
-var fetchDescription []byte
+//go:embed fetch.md.tpl
+var fetchDescriptionTmpl []byte
+
+var fetchDescriptionTpl = template.Must(
+	template.New("fetchDescription").
+		Parse(string(fetchDescriptionTmpl)),
+)
+
+type fetchDescriptionData struct {
+	GhAvailable    bool
+	MaxFetchSizeKB int
+}
+
+func fetchDescription() string {
+	return renderTemplate(fetchDescriptionTpl, fetchDescriptionData{
+		GhAvailable:    ghAvailable,
+		MaxFetchSizeKB: MaxFetchSize / 1024,
+	})
+}
 
 func NewFetchTool(permissions permission.Service, workingDir string, client *http.Client) fantasy.AgentTool {
 	if client == nil {
@@ -39,7 +57,7 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 
 	return fantasy.NewParallelAgentTool(
 		FetchToolName,
-		string(fetchDescription),
+		fetchDescription(),
 		func(ctx context.Context, params FetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.URL == "" {
 				return fantasy.NewTextErrorResponse("URL parameter is required"), nil
@@ -59,7 +77,8 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for creating a new file")
 			}
 
-			p, err := permissions.Request(ctx,
+			p, err := permissions.Request(
+				ctx,
 				permission.CreatePermissionRequest{
 					SessionID:   sessionID,
 					Path:        workingDir,
@@ -74,7 +93,7 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 				return fantasy.ToolResponse{}, err
 			}
 			if !p {
-				return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
+				return NewPermissionDeniedResponse(), nil
 			}
 
 			// maxFetchTimeoutSeconds is the maximum allowed timeout for fetch requests (2 minutes)
@@ -160,13 +179,14 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 				}
 			}
 			// truncate content if it exceeds max read size
-			if int64(len(content)) > MaxFetchSize {
+			if int64(len(content)) >= MaxFetchSize {
 				content = content[:MaxFetchSize]
 				content += fmt.Sprintf("\n\n[Content truncated to %d bytes]", MaxFetchSize)
 			}
 
 			return fantasy.NewTextResponse(content), nil
-		})
+		},
+	)
 }
 
 func extractTextFromHTML(html string) (string, error) {

@@ -3,16 +3,19 @@
 package skills
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 
 	"github.com/charlievieth/fastwalk"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"gopkg.in/yaml.v3"
 )
 
@@ -23,7 +26,13 @@ const (
 	MaxCompatibilityLength = 500
 )
 
-var namePattern = regexp.MustCompile(`^[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*$`)
+var (
+	namePattern    = regexp.MustCompile(`^[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*$`)
+	promptReplacer = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\"", "&quot;", "'", "&apos;")
+
+	latestStates   []*SkillState
+	latestStatesMu sync.RWMutex
+)
 
 // Skill represents a parsed SKILL.md file.
 type Skill struct {
@@ -36,6 +45,71 @@ type Skill struct {
 	Path          string            `yaml:"-" json:"path"`
 	SkillFilePath string            `yaml:"-" json:"skill_file_path"`
 	Builtin       bool              `yaml:"-" json:"builtin"`
+}
+
+// DiscoveryState represents the outcome of discovering a single skill file.
+type DiscoveryState int
+
+const (
+	// StateNormal indicates the skill was parsed and validated successfully.
+	StateNormal DiscoveryState = iota
+	// StateError indicates discovery encountered a scan/parse/validate error.
+	StateError
+)
+
+// SkillState represents the latest discovery status of a skill file.
+type SkillState struct {
+	Name  string
+	Path  string
+	State DiscoveryState
+	Err   error
+}
+
+// Event is published when skill discovery completes.
+type Event struct {
+	States []*SkillState
+}
+
+var broker = pubsub.NewBroker[Event]()
+
+// SubscribeEvents returns a channel that receives events when skill discovery state changes.
+func SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {
+	return broker.Subscribe(ctx)
+}
+
+// PublishStates publishes a skill discovery event with the given states.
+func PublishStates(states []*SkillState) {
+	broker.Publish(pubsub.UpdatedEvent, Event{States: cloneStates(states)})
+}
+
+// cloneStates returns a deep copy of the given state slice so callers cannot
+// accidentally mutate the source.
+func cloneStates(states []*SkillState) []*SkillState {
+	if states == nil {
+		return nil
+	}
+	result := make([]*SkillState, len(states))
+	for i, s := range states {
+		clone := *s
+		result[i] = &clone
+	}
+	return result
+}
+
+// GetLatestStates returns the latest discovery states.
+func GetLatestStates() []*SkillState {
+	latestStatesMu.RLock()
+	defer latestStatesMu.RUnlock()
+	return cloneStates(latestStates)
+}
+
+// SetLatestStates stores the given states in the package-level cache so that
+// GetLatestStates can return them synchronously before the first pubsub event
+// arrives.
+func SetLatestStates(states []*SkillState) {
+	latestStatesMu.Lock()
+	latestStates = cloneStates(states)
+	latestStatesMu.Unlock()
 }
 
 // Validate checks if the skill meets spec requirements.
@@ -106,26 +180,57 @@ func ParseContent(content []byte) (*Skill, error) {
 
 // splitFrontmatter extracts YAML frontmatter and body from markdown content.
 func splitFrontmatter(content string) (frontmatter, body string, err error) {
+	// Strip UTF-8 BOM for compatibility with editors that include it.
+	content = strings.TrimPrefix(content, "\uFEFF")
 	// Normalize line endings to \n for consistent parsing.
 	content = strings.ReplaceAll(content, "\r\n", "\n")
-	if !strings.HasPrefix(content, "---\n") {
+	content = strings.ReplaceAll(content, "\r", "\n")
+
+	lines := strings.Split(content, "\n")
+	start := slices.IndexFunc(lines, func(line string) bool {
+		return strings.TrimSpace(line) != ""
+	})
+	if start == -1 || strings.TrimSpace(lines[start]) != "---" {
 		return "", "", errors.New("no YAML frontmatter found")
 	}
 
-	rest := strings.TrimPrefix(content, "---\n")
-	before, after, ok := strings.Cut(rest, "\n---")
-	if !ok {
+	endOffset := slices.IndexFunc(lines[start+1:], func(line string) bool {
+		return strings.TrimSpace(line) == "---"
+	})
+	if endOffset == -1 {
 		return "", "", errors.New("unclosed frontmatter")
 	}
+	end := start + 1 + endOffset
 
-	return before, after, nil
+	frontmatter = strings.Join(lines[start+1:end], "\n")
+	body = strings.Join(lines[end+1:], "\n")
+	return frontmatter, body, nil
 }
 
 // Discover finds all valid skills in the given paths.
 func Discover(paths []string) []*Skill {
+	skills, _ := DiscoverWithStates(paths)
+	return skills
+}
+
+// DiscoverWithStates finds all valid skills in the given paths and also
+// returns a per-file state slice describing parse/validation outcomes. Useful
+// for diagnostics and UI reporting.
+func DiscoverWithStates(paths []string) ([]*Skill, []*SkillState) {
 	var skills []*Skill
+	var states []*SkillState
 	var mu sync.Mutex
 	seen := make(map[string]bool)
+	addState := func(name, path string, state DiscoveryState, err error) {
+		mu.Lock()
+		states = append(states, &SkillState{
+			Name:  name,
+			Path:  path,
+			State: state,
+			Err:   err,
+		})
+		mu.Unlock()
+	}
 
 	for _, base := range paths {
 		// We use fastwalk with Follow: true instead of filepath.WalkDir because
@@ -136,8 +241,10 @@ func Discover(paths []string) []*Skill {
 			Follow:  true,
 			ToSlash: fastwalk.DefaultToSlash(),
 		}
-		fastwalk.Walk(&conf, base, func(path string, d os.DirEntry, err error) error {
+		err := fastwalk.Walk(&conf, base, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
+				slog.Warn("Failed to walk skills path entry", "base", base, "path", path, "error", err)
+				addState("", path, StateError, err)
 				return nil
 			}
 			if d.IsDir() || d.Name() != SkillFileName {
@@ -153,21 +260,36 @@ func Discover(paths []string) []*Skill {
 			skill, err := Parse(path)
 			if err != nil {
 				slog.Warn("Failed to parse skill file", "path", path, "error", err)
+				addState("", path, StateError, err)
 				return nil
 			}
 			if err := skill.Validate(); err != nil {
 				slog.Warn("Skill validation failed", "path", path, "error", err)
+				addState(skill.Name, path, StateError, err)
 				return nil
 			}
 			slog.Debug("Successfully loaded skill", "name", skill.Name, "path", path)
 			mu.Lock()
 			skills = append(skills, skill)
 			mu.Unlock()
+			addState(skill.Name, path, StateNormal, nil)
 			return nil
 		})
+		if err != nil && !os.IsNotExist(err) {
+			slog.Warn("Failed to walk skills path", "path", base, "error", err)
+		}
 	}
 
-	return skills
+	// fastwalk traversal order is non-deterministic, so sort for stable output.
+	// Sort by path first, then alphabetically by name within each path.
+	slices.SortStableFunc(skills, func(a, b *Skill) int {
+		if c := strings.Compare(strings.ToLower(a.Path), strings.ToLower(b.Path)); c != 0 {
+			return c
+		}
+		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+	})
+
+	return skills, states
 }
 
 // ToPromptXML generates XML for injection into the system prompt.
@@ -193,8 +315,27 @@ func ToPromptXML(skills []*Skill) string {
 }
 
 func escape(s string) string {
-	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\"", "&quot;", "'", "&apos;")
-	return r.Replace(s)
+	return promptReplacer.Replace(s)
+}
+
+// DeduplicateStates removes duplicate skill states by name. When duplicates exist,
+// the last occurrence wins (consistent with Deduplicate for skills).
+func DeduplicateStates(all []*SkillState) []*SkillState {
+	seen := make(map[string]int, len(all))
+	for i, s := range all {
+		if s.Name != "" {
+			seen[s.Name] = i
+		}
+	}
+
+	result := make([]*SkillState, 0, len(seen))
+	for i, s := range all {
+		// If it's the last occurrence of this name, or it has no name (error state), keep it
+		if s.Name == "" || seen[s.Name] == i {
+			result = append(result, s)
+		}
+	}
+	return result
 }
 
 // Deduplicate removes duplicate skills by name. When duplicates exist, the
@@ -213,6 +354,16 @@ func Deduplicate(all []*Skill) []*Skill {
 		}
 	}
 	return result
+}
+
+// ApproxTokenCount returns a rough estimate of how many tokens a string
+// occupies when sent to an LLM. Uses the common ~4-chars-per-token heuristic
+// that approximates GPT/Claude tokenizers well enough for diagnostic logging.
+func ApproxTokenCount(s string) int {
+	if s == "" {
+		return 0
+	}
+	return (len(s) + 3) / 4
 }
 
 // Filter removes skills whose names appear in the disabled list.

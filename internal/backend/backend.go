@@ -122,7 +122,8 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	b.workspaces.Set(id, ws)
 
 	if args.Version != "" && args.Version != version.Version {
-		slog.Warn("Client/server version mismatch",
+		slog.Warn(
+			"Client/server version mismatch",
 			"client", args.Version,
 			"server", version.Version,
 		)
@@ -174,6 +175,7 @@ func (b *Backend) VersionInfo() proto.VersionInfo {
 	return proto.VersionInfo{
 		Version:   version.Version,
 		Commit:    version.Commit,
+		BuildID:   version.BuildID,
 		GoVersion: runtime.Version(),
 		Platform:  fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
 	}

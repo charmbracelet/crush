@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strconv"
@@ -20,13 +21,14 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/env"
+	"github.com/charmbracelet/crush/internal/filepathext"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/home"
 	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
 	"github.com/qjebbs/go-jsons"
 )
 
-const defaultCatwalkURL = "https://catwalk.charm.sh"
+const defaultCatwalkURL = "https://catwalk.charm.land"
 
 // Load loads the configuration from the default paths and returns a
 // ConfigStore that owns both the pure-data Config and all runtime state.
@@ -54,6 +56,9 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 
 	// Load workspace config last so it has highest priority.
 	if wsData, err := os.ReadFile(store.workspacePath); err == nil && len(wsData) > 0 {
+		if !json.Valid(wsData) {
+			return nil, fmt.Errorf("invalid JSON in config file %s", store.workspacePath)
+		}
 		merged, mergeErr := loadFromBytes(append([][]byte{mustMarshalConfig(cfg)}, wsData))
 		if mergeErr == nil {
 			// Preserve defaults that setDefaults already applied.
@@ -63,6 +68,12 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 			store.config = cfg
 			store.loadedPaths = append(store.loadedPaths, store.workspacePath)
 		}
+	}
+
+	// Validate hooks after all config merging is complete so workspace
+	// hooks also get their matcher regexes compiled.
+	if err := cfg.ValidateHooks(); err != nil {
+		return nil, fmt.Errorf("invalid hook configuration: %w", err)
 	}
 
 	if !isInsideWorktree() {
@@ -215,10 +226,18 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 		if len(config.ExtraHeaders) > 0 {
 			maps.Copy(headers, config.ExtraHeaders)
 		}
+		// Provider headers use the same error contract as MCP headers:
+		// a failing $(...) aborts the provider load with a clear
+		// message, and a header that resolves to the empty string
+		// (unset bare $VAR under lenient nounset, $(echo), or literal
+		// "") is dropped from the outgoing request.
 		for k, v := range headers {
 			resolved, err := resolver.ResolveValue(v)
 			if err != nil {
-				slog.Error("Could not resolve provider header", "err", err.Error())
+				return fmt.Errorf("resolving provider %s header %q: %w", p.ID, k, err)
+			}
+			if resolved == "" {
+				delete(headers, k)
 				continue
 			}
 			headers[k] = resolved
@@ -369,10 +388,15 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 			continue
 		}
 
+		// Custom-provider headers share the MCP error contract; see
+		// the known-provider loop above.
 		for k, v := range providerConfig.ExtraHeaders {
 			resolved, err := resolver.ResolveValue(v)
 			if err != nil {
-				slog.Error("Could not resolve provider header", "err", err.Error())
+				return fmt.Errorf("resolving provider %s header %q: %w", id, k, err)
+			}
+			if resolved == "" {
+				delete(providerConfig.ExtraHeaders, k)
 				continue
 			}
 			providerConfig.ExtraHeaders[k] = resolved
@@ -398,12 +422,13 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	if dataDir != "" {
 		c.Options.DataDirectory = dataDir
 	} else if c.Options.DataDirectory == "" {
-		if path, ok := fsext.LookupClosest(workingDir, defaultDataDirectory); ok {
+		if path, ok := fsext.LookupClosestBounded(workingDir, projectBoundary(workingDir), defaultDataDirectory); ok {
 			c.Options.DataDirectory = path
 		} else {
 			c.Options.DataDirectory = filepath.Join(workingDir, defaultDataDirectory)
 		}
 	}
+	c.Options.DataDirectory = filepath.Clean(filepathext.SmartJoin(workingDir, c.Options.DataDirectory))
 	if c.Providers == nil {
 		c.Providers = csync.NewMap[string, ProviderConfig]()
 	}
@@ -670,12 +695,36 @@ func configureSelectedModels(store *ConfigStore, knownProviders []catwalk.Provid
 			small.Think = smallModelSelected.Think
 		}
 	}
+
+	// When small isn't explicitly configured and the provider isn't a
+	// known built-in, use the large model as the small model. This
+	// prevents two different models from being requested concurrently
+	// for local/openai-compat providers.
+	if !smallModelConfigured {
+		isKnownProvider := false
+		for _, kp := range knownProviders {
+			if string(kp.ID) == small.Provider {
+				isKnownProvider = true
+				break
+			}
+		}
+		if !isKnownProvider {
+			slog.Warn("Using large model as small model for unknown provider", "provider", large.Provider, "model", large.Model)
+			small = large
+		}
+	}
+
 	c.Models[SelectedModelTypeLarge] = large
 	c.Models[SelectedModelTypeSmall] = small
 	return nil
 }
 
-// lookupConfigs searches config files recursively from CWD up to FS root
+// lookupConfigs searches config files starting at cwd and walking up
+// through the current project. The upward walk stops at the git
+// working tree root when one can be detected, otherwise at cwd itself,
+// so an unrelated crush.json placed above the project is never picked
+// up. Global user-level config locations are always included
+// regardless of the boundary.
 func lookupConfigs(cwd string) []string {
 	// prepend default config paths
 	configPaths := []string{
@@ -685,7 +734,7 @@ func lookupConfigs(cwd string) []string {
 
 	configNames := []string{appName + ".json", "." + appName + ".json"}
 
-	foundConfigs, err := fsext.Lookup(cwd, configNames...)
+	foundConfigs, err := fsext.LookupBounded(cwd, projectBoundary(cwd), configNames...)
 	if err != nil {
 		// returns at least default configs
 		return configPaths
@@ -711,6 +760,9 @@ func loadFromConfigPaths(configPaths []string) (*Config, []string, error) {
 		}
 		if len(data) == 0 {
 			continue
+		}
+		if !json.Valid(data) {
+			return nil, nil, fmt.Errorf("invalid JSON in config file %s", path)
 		}
 		configs = append(configs, data)
 		loaded = append(loaded, path)
@@ -795,6 +847,11 @@ func GlobalCacheDir() string {
 	return filepath.Join(home.Dir(), ".cache", appName)
 }
 
+// ProjectConfigs returns list of current project configs paths.
+func ProjectConfigs(cwd string) []string {
+	return lookupConfigs(cwd)
+}
+
 // GlobalConfigData returns the path to the main data directory for the application.
 // this config is used when the app overrides configurations instead of updating the global config.
 func GlobalConfigData() string {
@@ -843,6 +900,48 @@ func isInsideWorktree() bool {
 	return err == nil && strings.TrimSpace(string(bts)) == "true"
 }
 
+// worktreeRoot returns the absolute path of the git working tree root for
+// dir, or the empty string if dir is not inside a working tree (bare
+// repositories, missing git binary, plain directories, or any other
+// failure mode). Linked worktrees and submodules each report their own
+// top-level, which is what callers want when bounding lookups.
+func worktreeRoot(dir string) string {
+	cmd := exec.CommandContext(
+		context.Background(),
+		"git", "rev-parse", "--show-toplevel",
+	)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	root := strings.TrimSpace(string(out))
+	if root == "" {
+		return ""
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return ""
+	}
+	return abs
+}
+
+// projectBoundary returns the directory at which an upward configuration
+// search rooted at dir should stop. It is the git working tree root when
+// one can be detected, otherwise dir itself. Returning dir as a
+// fallback keeps Crush from silently adopting state files placed above
+// the current project.
+func projectBoundary(dir string) string {
+	if root := worktreeRoot(dir); root != "" {
+		return root
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return dir
+	}
+	return abs
+}
+
 // GlobalSkillsDirs returns the default directories for Agent Skills.
 // Skills in these directories are auto-discovered and their files can be read
 // without permission prompts.
@@ -854,6 +953,9 @@ func GlobalSkillsDirs() []string {
 	paths := []string{
 		filepath.Join(home.Config(), appName, "skills"),
 		filepath.Join(home.Config(), "agents", "skills"),
+		// Per the Agent Skills spec, scan ~/.agents/skills
+		filepath.Join(home.Dir(), ".agents", "skills"),
+		filepath.Join(home.Dir(), ".claude", "skills"),
 	}
 
 	// On Windows, also load from app data on top of `$HOME/.config/crush`.
@@ -885,3 +987,46 @@ func ProjectSkillsDir(workingDir string) []string {
 }
 
 func isAppleTerminal() bool { return os.Getenv("TERM_PROGRAM") == "Apple_Terminal" }
+
+// normalizeHookEvent maps user-provided event names to their canonical
+// form. Matching is case-insensitive and accepts snake_case variants
+// (e.g. "pre_tool_use" → "PreToolUse").
+func normalizeHookEvent(name string) string {
+	switch strings.ToLower(strings.ReplaceAll(name, "_", "")) {
+	case "pretooluse":
+		return "PreToolUse"
+	default:
+		return name
+	}
+}
+
+// ValidateHooks normalizes event names and checks that every configured
+// hook has a command and a syntactically valid matcher regex. Matcher
+// compilation used for matching is owned by hooks.Runner; this function
+// only validates up front so the user sees config errors at load time
+// rather than on the first tool call.
+func (c *Config) ValidateHooks() error {
+	// Normalize event name keys.
+	for event, eventHooks := range c.Hooks {
+		canonical := normalizeHookEvent(event)
+		if canonical != event {
+			c.Hooks[canonical] = append(c.Hooks[canonical], eventHooks...)
+			delete(c.Hooks, event)
+		}
+	}
+
+	for event, eventHooks := range c.Hooks {
+		for i, h := range eventHooks {
+			if h.Command == "" {
+				return fmt.Errorf("hook %s[%d]: command is required", event, i)
+			}
+			if h.Matcher == "" {
+				continue
+			}
+			if _, err := regexp.Compile(h.Matcher); err != nil {
+				return fmt.Errorf("hook %s[%d]: invalid matcher regex %q: %w", event, i, h.Matcher, err)
+			}
+		}
+	}
+	return nil
+}

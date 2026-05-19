@@ -121,6 +121,14 @@ func (c *Client) ShutdownServer(ctx context.Context) error {
 	return nil
 }
 
+// Dial opens a connection to the server using the same scheme-aware
+// logic the client uses for its HTTP transport. Exposed so callers can
+// reuse the dialer when they need to construct sibling HTTP transports
+// (e.g. a readiness probe in the CLI).
+func (c *Client) Dial(ctx context.Context, network, address string) (net.Conn, error) {
+	return c.dialer(ctx, network, address)
+}
+
 func (c *Client) dialer(ctx context.Context, network, address string) (net.Conn, error) {
 	d := net.Dialer{
 		Timeout:   30 * time.Second,

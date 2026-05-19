@@ -65,9 +65,11 @@ type RenderContext struct {
 	TitleStyle lipgloss.Style
 	// ViewStyle is the style of the dialog title by default it uses Styles.Dialog.View
 	ViewStyle lipgloss.Style
-	// TitleGradientFromColor is the color the title gradient starts by defaults its Style.Primary
+	// TitleGradientFromColor is the color the title gradient starts by default
+	// its Styles.Dialog.TitleGradFromColor
 	TitleGradientFromColor color.Color
-	// TitleGradientToColor is the color the title gradient starts by defaults its Style.Secondary
+	// TitleGradientToColor is the color the title gradient ends by default its
+	// Styles.Dialog.TitleGradToColor
 	TitleGradientToColor color.Color
 	// Width is the total width of the dialog including any margins, borders,
 	// and paddings.
@@ -98,8 +100,8 @@ func NewRenderContext(t *styles.Styles, width int) *RenderContext {
 		Styles:                 t,
 		TitleStyle:             t.Dialog.Title,
 		ViewStyle:              t.Dialog.View,
-		TitleGradientFromColor: t.Primary,
-		TitleGradientToColor:   t.Secondary,
+		TitleGradientFromColor: t.Dialog.TitleGradFromColor,
+		TitleGradientToColor:   t.Dialog.TitleGradToColor,
 		Width:                  width,
 		Parts:                  []string{},
 	}

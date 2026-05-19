@@ -101,18 +101,22 @@ func init() {
 type sessionServices struct {
 	sessions session.Service
 	messages message.Service
+	cfg      *config.ConfigStore
 }
 
 func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func(), error) {
 	dataDir, _ := cmd.Flags().GetString("data-dir")
 	ctx := cmd.Context()
 
+	cfg, err := config.Init("", dataDir, false)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to initialize config: %w", err)
+	}
 	if dataDir == "" {
-		cfg, err := config.Init("", "", false)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to initialize config: %w", err)
-		}
 		dataDir = cfg.Config().Options.DataDirectory
+	}
+	if shouldEnableMetrics(cfg.Config()) {
+		event.Init()
 	}
 
 	conn, err := db.Connect(ctx, dataDir)
@@ -124,19 +128,21 @@ func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func()
 	svc := &sessionServices{
 		sessions: session.NewService(queries, conn),
 		messages: message.NewService(queries),
+		cfg:      cfg,
 	}
 	return ctx, svc, func() { conn.Close() }, nil
 }
 
 func runSessionList(cmd *cobra.Command, _ []string) error {
 	event.SetNonInteractive(true)
-	event.SessionListed(sessionListJSON)
 
 	ctx, svc, cleanup, err := sessionSetup(cmd)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
+
+	event.SessionListed(sessionListJSON)
 
 	list, err := svc.sessions.List(ctx)
 	if err != nil {
@@ -253,13 +259,14 @@ func resolveSessionID(ctx context.Context, svc session.Service, id string) (sess
 
 func runSessionShow(cmd *cobra.Command, args []string) error {
 	event.SetNonInteractive(true)
-	event.SessionShown(sessionShowJSON)
 
 	ctx, svc, cleanup, err := sessionSetup(cmd)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
+
+	event.SessionShown(sessionShowJSON)
 
 	sess, err := resolveSessionID(ctx, svc.sessions, args[0])
 	if err != nil {
@@ -275,18 +282,19 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 	if sessionShowJSON {
 		return outputSessionJSON(cmd.OutOrStdout(), sess, msgPtrs)
 	}
-	return outputSessionHuman(ctx, sess, msgPtrs)
+	return outputSessionHuman(ctx, svc.cfg, sess, msgPtrs)
 }
 
 func runSessionDelete(cmd *cobra.Command, args []string) error {
 	event.SetNonInteractive(true)
-	event.SessionDeletedCommand(sessionDeleteJSON)
 
 	ctx, svc, cleanup, err := sessionSetup(cmd)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
+
+	event.SessionDeletedCommand(sessionDeleteJSON)
 
 	sess, err := resolveSessionID(ctx, svc.sessions, args[0])
 	if err != nil {
@@ -315,13 +323,14 @@ func runSessionDelete(cmd *cobra.Command, args []string) error {
 
 func runSessionRename(cmd *cobra.Command, args []string) error {
 	event.SetNonInteractive(true)
-	event.SessionRenamed(sessionRenameJSON)
 
 	ctx, svc, cleanup, err := sessionSetup(cmd)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
+
+	event.SessionRenamed(sessionRenameJSON)
 
 	sess, err := resolveSessionID(ctx, svc.sessions, args[0])
 	if err != nil {
@@ -351,13 +360,14 @@ func runSessionRename(cmd *cobra.Command, args []string) error {
 
 func runSessionLast(cmd *cobra.Command, _ []string) error {
 	event.SetNonInteractive(true)
-	event.SessionLastShown(sessionLastJSON)
 
 	ctx, svc, cleanup, err := sessionSetup(cmd)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
+
+	event.SessionLastShown(sessionLastJSON)
 
 	list, err := svc.sessions.List(ctx)
 	if err != nil {
@@ -379,7 +389,7 @@ func runSessionLast(cmd *cobra.Command, _ []string) error {
 	if sessionLastJSON {
 		return outputSessionJSON(cmd.OutOrStdout(), sess, msgPtrs)
 	}
-	return outputSessionHuman(ctx, sess, msgPtrs)
+	return outputSessionHuman(ctx, svc.cfg, sess, msgPtrs)
 }
 
 const (
@@ -429,8 +439,12 @@ func outputSessionJSON(w io.Writer, sess session.Session, msgs []*message.Messag
 	return enc.Encode(output)
 }
 
-func outputSessionHuman(ctx context.Context, sess session.Session, msgs []*message.Message) error {
-	sty := styles.DefaultStyles()
+func outputSessionHuman(ctx context.Context, cfg *config.ConfigStore, sess session.Session, msgs []*message.Message) error {
+	var providerID string
+	if cfg != nil {
+		providerID = cfg.Config().Models[config.SelectedModelTypeLarge].Provider
+	}
+	styles := styles.ThemeForProvider(providerID)
 	toolResults := chat.BuildToolResultMap(msgs)
 
 	width := sessionOutputWidth
@@ -471,7 +485,7 @@ func outputSessionHuman(ctx context.Context, sess session.Session, msgs []*messa
 
 	first := true
 	for _, msg := range msgs {
-		items := chat.ExtractMessageItems(&sty, msg, toolResults)
+		items := chat.ExtractMessageItems(&styles, msg, toolResults)
 		for _, item := range items {
 			if !first {
 				fmt.Fprintln(&buf)

@@ -23,9 +23,11 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/home"
+	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
@@ -59,6 +61,15 @@ var (
 	errLargeModelNotFound              = errors.New("large model not found in provider config")
 	errSmallModelNotFound              = errors.New("small model not found in provider config")
 )
+
+// Copilot models that use the Responses API instead of Chat Completions.
+var copilotResponsesModels = map[string]bool{
+	"gpt-5.2":       true,
+	"gpt-5.2-codex": true,
+	"gpt-5.3-codex": true,
+	"gpt-5.4-mini":  true,
+	"gpt-5-mini":    true,
+}
 
 type Coordinator interface {
 	// INFO: (kujtim) this is not used yet we will use this when we have multiple agents
@@ -182,11 +193,10 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 
 	mergedOptions, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(model, providerCfg)
 
-	if providerCfg.OAuthToken != nil && providerCfg.OAuthToken.IsExpired() {
-		slog.Debug("Token needs to be refreshed", "provider", providerCfg.ID)
-		if err := c.refreshOAuth2Token(ctx, providerCfg); err != nil {
-			return nil, err
-		}
+	if err := c.refreshTokenIfExpired(ctx, providerCfg); err != nil {
+		// NOTE(@andreynering): We don't return here because the event handling to ask the user to reauthenticate
+		// depends on the flow below. If refresh fails, proceed with the token we have.
+		slog.Error("Failed to refresh OAuth2 token. Proceeding with existing token.", "error", err)
 	}
 
 	run := func() (*fantasy.AgentResult, error) {
@@ -203,23 +213,12 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 			PresencePenalty:  presPenalty,
 		})
 	}
+	beforeLoaded := c.skillTracker.LoadedNames()
 	result, originalErr := run()
+	logTurnSkillUsage(sessionID, prompt, c.activeSkills, c.skillTracker, beforeLoaded)
 
 	if c.isUnauthorized(originalErr) {
-		switch {
-		case providerCfg.OAuthToken != nil:
-			slog.Debug("Received 401. Refreshing token and retrying", "provider", providerCfg.ID)
-			if err := c.refreshOAuth2Token(ctx, providerCfg); err != nil {
-				return nil, originalErr
-			}
-			slog.Debug("Retrying request with refreshed OAuth token", "provider", providerCfg.ID)
-			return run()
-		case strings.Contains(providerCfg.APIKeyTemplate, "$"):
-			slog.Debug("Received 401. Refreshing API Key template and retrying", "provider", providerCfg.ID)
-			if err := c.refreshApiKeyTemplate(ctx, providerCfg); err != nil {
-				return nil, originalErr
-			}
-			slog.Debug("Retrying request with refreshed API key", "provider", providerCfg.ID)
+		if err := c.retryAfterUnauthorized(ctx, providerCfg); err == nil {
 			return run()
 		}
 	}
@@ -275,23 +274,10 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		return options
 	}
 
-	providerType := providerCfg.Type
-	if providerType == "hyper" {
-		if strings.Contains(model.CatwalkCfg.ID, "claude") {
-			providerType = anthropic.Name
-		} else if strings.Contains(model.CatwalkCfg.ID, "gpt") {
-			providerType = openai.Name
-		} else if strings.Contains(model.CatwalkCfg.ID, "gemini") {
-			providerType = google.Name
-		} else {
-			providerType = openaicompat.Name
-		}
-	}
-
-	switch providerType {
+	switch providerCfg.Type {
 	case openai.Name, azure.Name:
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
-		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
+		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" && model.CatwalkCfg.CanReason {
 			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
 		}
 		if openai.IsResponsesModel(model.CatwalkCfg.ID) {
@@ -309,13 +295,13 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 				options[openai.Name] = parsed
 			}
 		}
-	case anthropic.Name:
+	case anthropic.Name, bedrock.Name:
 		var (
 			_, hasEffort = mergedOptions["effort"]
 			_, hasThink  = mergedOptions["thinking"]
 		)
 		switch {
-		case !hasEffort && model.ModelCfg.ReasoningEffort != "":
+		case !hasEffort && model.ModelCfg.ReasoningEffort != "" && model.CatwalkCfg.CanReason:
 			mergedOptions["effort"] = model.ModelCfg.ReasoningEffort
 		case !hasThink && model.ModelCfg.Think:
 			mergedOptions["thinking"] = map[string]any{"budget_tokens": 2000}
@@ -368,11 +354,52 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		if err == nil {
 			options[google.Name] = parsed
 		}
-	case openaicompat.Name:
+	case openaicompat.Name, hyper.Name:
+		extraBody := make(map[string]any)
+
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
-		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
-			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
+		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" && model.CatwalkCfg.CanReason {
+			switch providerCfg.ID {
+			case string(catwalk.InferenceProviderIoNet):
+				extraBody["reasoning"] = map[string]string{"effort": model.ModelCfg.ReasoningEffort}
+			default:
+				mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
+			}
 		}
+
+		// "reasoning effort" is a standard OpenAI field, but "thinking" is not.
+		// Setting it in the right way for each provider.
+		// TODO: Abstract this in Fantasy somehow?
+		// TODO: Allow custom providers to specify how to set this?
+		switch providerCfg.ID {
+		case hyper.Name:
+			extraBody["thinking"] = model.ModelCfg.Think
+		case string(catwalk.InferenceProviderIoNet):
+			if _, ok := extraBody["reasoning"]; !ok && model.CatwalkCfg.CanReason {
+				if model.ModelCfg.Think {
+					extraBody["reasoning"] = map[string]string{"effort": "medium"}
+				} else {
+					extraBody["reasoning"] = map[string]string{"effort": "none"}
+				}
+			}
+		case string(catwalk.InferenceProviderZAI), string(catwalk.InferenceProviderDeepSeek):
+			if model.ModelCfg.Think || model.ModelCfg.ReasoningEffort != "" {
+				extraBody["thinking"] = map[string]any{
+					"type": "enabled",
+				}
+			} else {
+				extraBody["thinking"] = map[string]any{
+					"type": "disabled",
+				}
+			}
+		case string(catwalk.InferenceProviderAlibabaSingapore):
+			if model.CatwalkCfg.CanReason {
+				extraBody["enable_thinking"] = model.ModelCfg.Think
+			}
+		}
+
+		mergedOptions["extra_body"] = extraBody
+
 		parsed, err := openaicompat.ParseOptions(mergedOptions)
 		if err == nil {
 			options[openaicompat.Name] = parsed
@@ -423,7 +450,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	})
 
 	c.readyWg.Go(func() error {
-		tools, err := c.buildTools(ctx, agent)
+		tools, err := c.buildTools(ctx, agent, isSubAgent)
 		if err != nil {
 			return err
 		}
@@ -434,7 +461,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	return result, nil
 }
 
-func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fantasy.AgentTool, error) {
+func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool) ([]fantasy.AgentTool, error) {
 	var allTools []fantasy.AgentTool
 	if slices.Contains(agent.AllowedTools, AgentToolName) {
 		agentTool, err := c.agentTool(ctx)
@@ -453,17 +480,24 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 	}
 
 	// Get the model name for the agent
-	modelName := ""
+	modelID := ""
 	if modelCfg, ok := c.cfg.Config().Models[agent.Model]; ok {
 		if model := c.cfg.Config().GetModel(modelCfg.Provider, modelCfg.Model); model != nil {
-			modelName = model.Name
+			modelID = model.ID
 		}
 	}
 
 	logFile := filepath.Join(c.cfg.Config().Options.DataDirectory, "logs", "crush.log")
 
-	allTools = append(allTools,
-		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelName),
+	// Build hook runner if PreToolUse hooks are configured.
+	var hookRunner *hooks.Runner
+	if preToolHooks := c.cfg.Config().Hooks[hooks.EventPreToolUse]; len(preToolHooks) > 0 {
+		hookRunner = hooks.NewRunner(preToolHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
+	}
+
+	allTools = append(
+		allTools,
+		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelID),
 		tools.NewCrushInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
 		tools.NewCrushLogsTool(logFile),
 		tools.NewJobOutputTool(),
@@ -527,6 +561,14 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 	slices.SortFunc(filteredTools, func(a, b fantasy.AgentTool) int {
 		return strings.Compare(a.Info().Name, b.Info().Name)
 	})
+
+	// Wrap tools with hook interception for the top-level agent only.
+	// Sub-agents (the `agent` task tool, `agentic_fetch`, etc.) run
+	// without hook interception to avoid firing the user's hook N times
+	// per delegated turn. The top-level invocation of the sub-agent tool
+	// itself is still wrapped from the coder's side.
+	filteredTools = wrapToolsWithHooks(filteredTools, hookRunner, isSubAgent)
+
 	return filteredTools, nil
 }
 
@@ -607,10 +649,12 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 			Model:      largeModel,
 			CatwalkCfg: *largeCatwalkModel,
 			ModelCfg:   largeModelCfg,
+			FlatRate:   largeProviderCfg.FlatRate,
 		}, Model{
 			Model:      smallModel,
 			CatwalkCfg: *smallCatwalkModel,
 			ModelCfg:   smallModelCfg,
+			FlatRate:   smallProviderCfg.FlatRate,
 		}, nil
 }
 
@@ -701,7 +745,13 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 	// Set HTTP client based on provider and debug mode.
 	var httpClient *http.Client
 	if providerID == string(catwalk.InferenceProviderCopilot) {
-		opts = append(opts, openaicompat.WithUseResponsesAPI())
+		opts = append(
+			opts,
+			openaicompat.WithUseResponsesAPI(),
+			openaicompat.WithResponsesAPIFunc(func(modelID string) bool {
+				return copilotResponsesModels[modelID]
+			}),
+		)
 		httpClient = copilot.NewClient(isSubAgent, c.cfg.Config().Options.Debug)
 	} else if c.cfg.Config().Options.Debug {
 		httpClient = log.NewHTTPClient()
@@ -797,17 +847,6 @@ func (c *coordinator) buildGoogleVertexProvider(headers map[string]string, optio
 	return google.New(opts...)
 }
 
-func (c *coordinator) buildHyperProvider(apiKey string) (fantasy.Provider, error) {
-	opts := []hyper.Option{
-		hyper.WithAPIKey(apiKey),
-	}
-	if c.cfg.Config().Options.Debug {
-		httpClient := log.NewHTTPClient()
-		opts = append(opts, hyper.WithHTTPClient(httpClient))
-	}
-	return hyper.New(opts...)
-}
-
 func (c *coordinator) isAnthropicThinking(model config.SelectedModel) bool {
 	if model.Think {
 		return true
@@ -851,16 +890,18 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		return c.buildGoogleProvider(baseURL, apiKey, headers)
 	case "google-vertex":
 		return c.buildGoogleVertexProvider(headers, providerCfg.ExtraParams)
-	case openaicompat.Name:
-		if providerCfg.ID == string(catwalk.InferenceProviderZAI) {
+	case openaicompat.Name, hyper.Name:
+		switch providerCfg.ID {
+		case hyper.Name:
+			baseURL = hyper.BaseURL() + "/v1"
+			headers["x-crush-id"] = event.GetID()
+		case string(catwalk.InferenceProviderZAI):
 			if providerCfg.ExtraBody == nil {
 				providerCfg.ExtraBody = map[string]any{}
 			}
 			providerCfg.ExtraBody["tool_stream"] = true
 		}
 		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent)
-	case hyper.Name:
-		return c.buildHyperProvider(apiKey)
 	default:
 		return nil, fmt.Errorf("provider type not supported: %q", providerCfg.Type)
 	}
@@ -914,7 +955,7 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 		return errCoderAgentNotConfigured
 	}
 
-	tools, err := c.buildTools(ctx, agentCfg)
+	tools, err := c.buildTools(ctx, agentCfg, false)
 	if err != nil {
 		return err
 	}
@@ -935,13 +976,52 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 	if !ok {
 		return errModelProviderNotConfigured
 	}
-	return c.currentAgent.Summarize(ctx, sessionID, getProviderOptions(c.currentAgent.Model(), providerCfg))
+
+	if err := c.refreshTokenIfExpired(ctx, providerCfg); err != nil {
+		slog.Error("Failed to refresh OAuth2 token before summarize. Proceeding with existing token.", "error", err)
+	}
+
+	summarize := func() error {
+		return c.currentAgent.Summarize(ctx, sessionID, getProviderOptions(c.currentAgent.Model(), providerCfg))
+	}
+
+	err := summarize()
+	if err != nil && c.isUnauthorized(err) {
+		if retryErr := c.retryAfterUnauthorized(ctx, providerCfg); retryErr == nil {
+			return summarize()
+		}
+	}
+
+	return err
+}
+
+// refreshTokenIfExpired proactively refreshes the OAuth token if it has expired.
+func (c *coordinator) refreshTokenIfExpired(ctx context.Context, providerCfg config.ProviderConfig) error {
+	if providerCfg.OAuthToken == nil || !providerCfg.OAuthToken.IsExpired() {
+		return nil
+	}
+	slog.Debug("Token needs to be refreshed", "provider", providerCfg.ID)
+	return c.refreshOAuth2Token(ctx, providerCfg)
+}
+
+// retryAfterUnauthorized attempts to refresh credentials after receiving a 401
+// and returns nil if retry should be attempted.
+func (c *coordinator) retryAfterUnauthorized(ctx context.Context, providerCfg config.ProviderConfig) error {
+	switch {
+	case providerCfg.OAuthToken != nil:
+		slog.Debug("Received 401. Refreshing token and retrying", "provider", providerCfg.ID)
+		return c.refreshOAuth2Token(ctx, providerCfg)
+	case strings.Contains(providerCfg.APIKeyTemplate, "$"):
+		slog.Debug("Received 401. Refreshing API Key template and retrying", "provider", providerCfg.ID)
+		return c.refreshApiKeyTemplate(ctx, providerCfg)
+	default:
+		return nil
+	}
 }
 
 func (c *coordinator) isUnauthorized(err error) bool {
 	var providerErr *fantasy.ProviderError
-	return (errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized) ||
-		errors.Is(err, hyper.ErrUnauthorized)
+	return errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized
 }
 
 func (c *coordinator) refreshOAuth2Token(ctx context.Context, providerCfg config.ProviderConfig) error {
@@ -1026,7 +1106,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		NonInteractive:   true,
 	})
 	if err != nil {
-		return fantasy.NewTextErrorResponse("error generating response"), nil
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to generate response: %s", err)), nil
 	}
 
 	// Update parent session cost
@@ -1060,12 +1140,18 @@ func (c *coordinator) updateParentSessionCost(ctx context.Context, childSessionI
 
 // discoverSkills runs the skill discovery pipeline and returns both the
 // pre-filter (all discovered, after dedup) and post-filter (active) lists.
+// It also emits a single diagnostic log line summarising the outcome to
+// help track skill-loading health over time.
 func discoverSkills(cfg *config.ConfigStore) (allSkills, activeSkills []*skills.Skill) {
-	discovered := skills.DiscoverBuiltin()
+	builtin, builtinStates := skills.DiscoverBuiltinWithStates()
+	discovered := append([]*skills.Skill(nil), builtin...)
+
+	var userStates []*skills.SkillState
+	var userPaths []string
 
 	opts := cfg.Config().Options
 	if opts != nil && len(opts.SkillsPaths) > 0 {
-		expandedPaths := make([]string, 0, len(opts.SkillsPaths))
+		userPaths = make([]string, 0, len(opts.SkillsPaths))
 		for _, pth := range opts.SkillsPaths {
 			expanded := home.Long(pth)
 			if strings.HasPrefix(expanded, "$") {
@@ -1073,9 +1159,11 @@ func discoverSkills(cfg *config.ConfigStore) (allSkills, activeSkills []*skills.
 					expanded = resolved
 				}
 			}
-			expandedPaths = append(expandedPaths, expanded)
+			userPaths = append(userPaths, expanded)
 		}
-		discovered = append(discovered, skills.Discover(expandedPaths)...)
+		var userSkills []*skills.Skill
+		userSkills, userStates = skills.DiscoverWithStates(userPaths)
+		discovered = append(discovered, userSkills...)
 	}
 
 	allSkills = skills.Deduplicate(discovered)
@@ -1084,5 +1172,111 @@ func discoverSkills(cfg *config.ConfigStore) (allSkills, activeSkills []*skills.
 		disabledSkills = opts.DisabledSkills
 	}
 	activeSkills = skills.Filter(allSkills, disabledSkills)
+
+	allStates := append([]*skills.SkillState(nil), builtinStates...)
+	allStates = append(allStates, userStates...)
+
+	allStates = skills.DeduplicateStates(allStates)
+
+	slices.SortStableFunc(allStates, func(a, b *skills.SkillState) int {
+		return strings.Compare(strings.ToLower(a.Path), strings.ToLower(b.Path))
+	})
+	skills.SetLatestStates(allStates)
+	skills.PublishStates(allStates)
+
+	logDiscoveryStats(builtin, builtinStates, userStates, userPaths, allSkills, activeSkills, disabledSkills)
 	return allSkills, activeSkills
+}
+
+// logTurnSkillUsage emits a per-turn diagnostic line showing which skills
+// (if any) were loaded during this turn and which looked relevant based on
+// a cheap keyword match against the user prompt. The goal is to surface
+// "should-have-loaded but didn't" situations for later analysis.
+//
+// Logged at Info level under component=skills; heavy fields are elided when
+// there is nothing interesting to report.
+func logTurnSkillUsage(
+	sessionID string,
+	prompt string,
+	activeSkills []*skills.Skill,
+	tracker *skills.Tracker,
+	before []string,
+) {
+	if tracker == nil || len(activeSkills) == 0 {
+		return
+	}
+
+	after := tracker.LoadedNames()
+
+	beforeSet := make(map[string]bool, len(before))
+	for _, n := range before {
+		beforeSet[n] = true
+	}
+	var loadedThisTurn []string
+	for _, n := range after {
+		if !beforeSet[n] {
+			loadedThisTurn = append(loadedThisTurn, n)
+		}
+	}
+
+	slog.Info(
+		"Skill turn summary",
+		"component", "skills",
+		"session_id", sessionID,
+		"prompt_len", len(prompt),
+		"active_total", len(activeSkills),
+		"loaded_total", len(after),
+		"loaded_this_turn", loadedThisTurn,
+	)
+}
+
+// logDiscoveryStats emits a single structured log line summarising skill
+// discovery for the current session. It is intentionally low-volume: one
+// line per session start.
+func logDiscoveryStats(
+	builtin []*skills.Skill,
+	builtinStates, userStates []*skills.SkillState,
+	userPaths []string,
+	allSkills, activeSkills []*skills.Skill,
+	disabled []string,
+) {
+	countErrors := func(states []*skills.SkillState) int {
+		n := 0
+		for _, s := range states {
+			if s.State == skills.StateError {
+				n++
+			}
+		}
+		return n
+	}
+
+	userOK := 0
+	for _, s := range userStates {
+		if s.State == skills.StateNormal {
+			userOK++
+		}
+	}
+
+	activeNames := make([]string, 0, len(activeSkills))
+	for _, s := range activeSkills {
+		activeNames = append(activeNames, s.Name)
+	}
+
+	xml := skills.ToPromptXML(activeSkills)
+
+	slog.Info(
+		"Skill discovery complete",
+		"component", "skills",
+		"builtin_ok", len(builtin),
+		"builtin_errors", countErrors(builtinStates),
+		"user_ok", userOK,
+		"user_errors", countErrors(userStates),
+		"user_paths", len(userPaths),
+		"deduped_total", len(allSkills),
+		"active", len(activeSkills),
+		"disabled", len(disabled),
+		"prompt_bytes", len(xml),
+		"prompt_tok_est", skills.ApproxTokenCount(xml),
+		"active_names", activeNames,
+	)
 }

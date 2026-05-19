@@ -536,12 +536,18 @@ func toolEarlyStateContent(sty *styles.Styles, opts *ToolRenderOpts, width int) 
 	return msg, true
 }
 
-// toolErrorContent formats an error message with ERROR tag.
+// toolErrorContent formats an error message with an ERROR or DENIED tag.
 func toolErrorContent(sty *styles.Styles, result *message.ToolResult, width int) string {
 	if result == nil {
 		return ""
 	}
 	errContent := strings.ReplaceAll(result.Content, "\n", " ")
+	if strings.Contains(errContent, "User denied permission") {
+		deniedTag := sty.Tool.DeniedTag.Render("DENIED")
+		deniedTagWidth := lipgloss.Width(deniedTag)
+		errContent = ansi.Truncate(errContent, width-deniedTagWidth-3, "…")
+		return fmt.Sprintf("%s %s", deniedTag, sty.Tool.DeniedMessage.Render(errContent))
+	}
 	errTag := sty.Tool.ErrorTag.Render("ERROR")
 	tagWidth := lipgloss.Width(errTag)
 	errContent = ansi.Truncate(errContent, width-tagWidth-3, "…")

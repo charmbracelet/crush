@@ -167,6 +167,7 @@ func TestSessionModels_SaveValidation(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			err := svc.SaveModel(ctx, tc.sessionID, tc.modelType, tc.model)
 			require.Error(t, err)
 		})

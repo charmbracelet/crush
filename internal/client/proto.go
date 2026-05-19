@@ -335,19 +335,10 @@ func (c *Client) UpdateAgent(ctx context.Context, id string) error {
 
 // SendMessage sends a message to the agent for a workspace.
 func (c *Client) SendMessage(ctx context.Context, id string, sessionID, prompt string, attachments ...message.Attachment) error {
-	protoAttachments := make([]proto.Attachment, len(attachments))
-	for i, a := range attachments {
-		protoAttachments[i] = proto.Attachment{
-			FilePath: a.FilePath,
-			FileName: a.FileName,
-			MimeType: a.MimeType,
-			Content:  a.Content,
-		}
-	}
 	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent", id), nil, jsonBody(proto.AgentMessage{
 		SessionID:   sessionID,
 		Prompt:      prompt,
-		Attachments: protoAttachments,
+		Attachments: proto.AttachmentsFromMessage(attachments),
 	}), http.Header{"Content-Type": []string{"application/json"}})
 	if err != nil {
 		return fmt.Errorf("failed to send message to agent: %w", err)

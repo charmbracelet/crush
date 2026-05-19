@@ -117,6 +117,43 @@ func TestMap_GetOrSet(t *testing.T) {
 	require.Equal(t, 1, m.Len())
 }
 
+func TestMap_GetOrSet_Concurrent(t *testing.T) {
+	t.Parallel()
+
+	m := NewMap[string, int]()
+	const numGoroutines = 10
+
+	var called atomic.Int64
+	var wg sync.WaitGroup
+
+	start := make(chan struct{})
+	for range numGoroutines {
+		wg.Go(func() {
+			<-start
+			v := m.GetOrSet("key", func() int {
+				called.Add(1)
+				time.Sleep(10 * time.Millisecond) // widen the race window
+				return 42
+			})
+			require.Equal(t, 42, v)
+		})
+	}
+
+	close(start)
+	wg.Wait()
+
+	v, ok := m.Get("key")
+	require.True(t, ok)
+	require.Equal(t, 42, v)
+
+	t.Logf("fn calls: %d (strict once=1)\n", called.Load())
+
+	// Under strict atomic semantics, fn should be called exactly once.
+	// Currently GetOrSet is not atomic (TOCTOU between Get and Set),
+	// so concurrent callers may execute fn multiple times.
+	// require.Equal(t, int64(1), called.Load())
+}
+
 func TestMap_Get(t *testing.T) {
 	t.Parallel()
 

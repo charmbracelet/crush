@@ -154,6 +154,8 @@ body {
   font-weight: 700;
   color: var(--butter);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 @media (prefers-color-scheme: light) {
@@ -236,6 +238,20 @@ th {
 
 td {
   font-family: "JetBrains Mono", "SF Mono", Consolas, monospace;
+}
+
+.project-name {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.project-path {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .model-tag {

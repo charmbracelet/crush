@@ -140,3 +140,60 @@ func BenchmarkPromptWithTextAttachments(b *testing.B) {
 		})
 	}
 }
+
+// TestAppendContent_OnlyAppendsToFirstMatch pins the defensive
+// single-match behavior of AppendContent: a delta must extend exactly
+// one TextContent part, even when Parts contains more than one. Without
+// the `return` after a match, the loop continues and appends `delta`
+// to every TextContent in Parts — quietly multiplying the visible
+// response. The sibling helpers in this file (AppendThoughtSignature,
+// SetReasoningResponsesData, FinishThinking) all single-match; this
+// test guards that AppendContent and AppendReasoningContent stay in
+// the same family.
+func TestAppendContent_OnlyAppendsToFirstMatch(t *testing.T) {
+	t.Parallel()
+
+	m := &Message{
+		Parts: []ContentPart{
+			TextContent{Text: "first"},
+			TextContent{Text: "second"},
+		},
+	}
+
+	m.AppendContent(" delta")
+
+	require.Len(t, m.Parts, 2)
+	require.Equal(t, "first delta", m.Parts[0].(TextContent).Text)
+	require.Equal(t, "second", m.Parts[1].(TextContent).Text,
+		"second TextContent part must be untouched; AppendContent multi-matched")
+}
+
+func TestAppendContent_CreatesPartWhenAbsent(t *testing.T) {
+	t.Parallel()
+
+	m := &Message{Parts: []ContentPart{ToolCall{ID: "tc1"}}}
+	m.AppendContent("hello")
+
+	require.Len(t, m.Parts, 2)
+	tc, ok := m.Parts[1].(TextContent)
+	require.True(t, ok, "expected TextContent appended after ToolCall")
+	require.Equal(t, "hello", tc.Text)
+}
+
+func TestAppendReasoningContent_OnlyAppendsToFirstMatch(t *testing.T) {
+	t.Parallel()
+
+	m := &Message{
+		Parts: []ContentPart{
+			ReasoningContent{Thinking: "a", StartedAt: 1},
+			ReasoningContent{Thinking: "b", StartedAt: 2},
+		},
+	}
+
+	m.AppendReasoningContent(" delta")
+
+	require.Len(t, m.Parts, 2)
+	require.Equal(t, "a delta", m.Parts[0].(ReasoningContent).Thinking)
+	require.Equal(t, "b", m.Parts[1].(ReasoningContent).Thinking,
+		"second ReasoningContent part must be untouched")
+}

@@ -44,7 +44,7 @@ func (v *ViewToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 
 	var params tools.ViewParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
+		return toolInvalidParamsError(sty, opts, cappedWidth)
 	}
 
 	file := fsext.PrettyPath(params.FilePath)
@@ -130,7 +130,7 @@ func (w *WriteToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 
 	var params tools.WriteParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
+		return toolInvalidParamsError(sty, opts, cappedWidth)
 	}
 
 	file := fsext.PrettyPath(params.FilePath)
@@ -185,7 +185,7 @@ func (e *EditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 
 	var params tools.EditParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
+		return toolInvalidParamsError(sty, opts, width)
 	}
 
 	file := fsext.PrettyPath(params.FilePath)
@@ -248,7 +248,7 @@ func (m *MultiEditToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 
 	var params tools.MultiEditParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
+		return toolInvalidParamsError(sty, opts, width)
 	}
 
 	file := fsext.PrettyPath(params.FilePath)
@@ -316,7 +316,7 @@ func (d *DownloadToolRenderContext) RenderTool(sty *styles.Styles, width int, op
 
 	var params tools.DownloadParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
+		return toolInvalidParamsError(sty, opts, cappedWidth)
 	}
 
 	toolParams := []string{params.URL}

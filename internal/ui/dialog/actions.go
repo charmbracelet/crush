@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/util"
 )
@@ -71,6 +72,7 @@ type (
 		Content   string
 		Arguments []commands.Argument
 		Args      map[string]string // Actual argument values
+		Skill     *skills.Skill     // Set when this is a skill command
 	}
 	// ActionRunMCPPrompt is a message to run a custom command.
 	ActionRunMCPPrompt struct {

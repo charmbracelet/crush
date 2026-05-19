@@ -259,3 +259,44 @@ func TestRecordRecentModel_TypeIsolation(t *testing.T) {
 	require.Equal(t, "anthropic", small[0].(map[string]any)["provider"])
 	require.Equal(t, "claude", small[0].(map[string]any)["model"])
 }
+
+// TestRecordRecentModel_WorkspaceScopeDoesNotInheritGlobalEntries is a
+// regression test ensuring workspace-scope writes are computed from the
+// workspace file's own recent_models array, not the merged in-memory list.
+// Otherwise picking a model when no workspace recents exist would copy
+// global entries into the workspace file.
+func TestRecordRecentModel_WorkspaceScopeDoesNotInheritGlobalEntries(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	globalPath := filepath.Join(dir, "global", "crush.json")
+	workspacePath := filepath.Join(dir, ".crush", "crush.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(globalPath), 0o755))
+	require.NoError(t, os.WriteFile(globalPath, []byte(
+		`{"recent_models":{"large":[{"provider":"openai","model":"gpt-4o"}]}}`,
+	), 0o600))
+
+	// In-memory config simulates the merged view (global recents present).
+	cfg := &Config{
+		RecentModels: map[SelectedModelType][]SelectedModel{
+			SelectedModelTypeLarge: {{Provider: "openai", Model: "gpt-4o"}},
+		},
+	}
+	store := &ConfigStore{
+		config:         cfg,
+		globalDataPath: globalPath,
+		workspacePath:  workspacePath,
+	}
+
+	picked := SelectedModel{Provider: "anthropic", Model: "claude"}
+	require.NoError(t, store.recordRecentModel(ScopeWorkspace, SelectedModelTypeLarge, picked))
+
+	// Workspace file must contain only the new entry, not the global one.
+	rm := readRecentModels(t, workspacePath)
+	large, ok := rm[string(SelectedModelTypeLarge)].([]any)
+	require.True(t, ok)
+	require.Len(t, large, 1, "workspace recent_models.large must not inherit global entries")
+	item := large[0].(map[string]any)
+	require.Equal(t, "anthropic", item["provider"])
+	require.Equal(t, "claude", item["model"])
+}

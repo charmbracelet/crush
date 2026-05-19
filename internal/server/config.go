@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/proto"
 )
 
@@ -65,6 +66,33 @@ func (c *controllerV1) handlePostWorkspaceConfigRemove(w http.ResponseWriter, r 
 	w.WriteHeader(http.StatusOK)
 }
 
+// handleGetWorkspaceConfigHas checks whether a configuration field exists.
+//
+//	@Summary		Check config field
+//	@Tags			config
+//	@Produce		json
+//	@Param			id		path	string	true	"Workspace ID"
+//	@Param			scope	query	string	true	"Config scope"
+//	@Param			key		query	string	true	"Config key"
+//	@Success		200	{object}	proto.ConfigHasFieldResponse
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/config/has [get]
+func (c *controllerV1) handleGetWorkspaceConfigHas(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	scope := config.ScopeGlobal
+	if r.URL.Query().Get("scope") == config.ScopeWorkspace.String() {
+		scope = config.ScopeWorkspace
+	}
+	key := r.URL.Query().Get("key")
+	exists, err := c.backend.HasConfigField(id, scope, key)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, proto.ConfigHasFieldResponse{Exists: exists})
+}
+
 // handlePostWorkspaceConfigModel updates the preferred model.
 //
 //	@Summary		Set the preferred model
@@ -88,6 +116,24 @@ func (c *controllerV1) handlePostWorkspaceConfigModel(w http.ResponseWriter, r *
 	}
 
 	if err := c.backend.UpdatePreferredModel(id, req.Scope, req.ModelType, req.Model); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// handlePostWorkspaceConfigModelDefault saves the current model choices as defaults.
+//
+//	@Summary		Save model choices as defaults
+//	@Tags			config
+//	@Param			id	path	string	true	"Workspace ID"
+//	@Success		200
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/config/model/default [post]
+func (c *controllerV1) handlePostWorkspaceConfigModelDefault(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := c.backend.SaveModelChoicesAsDefault(id); err != nil {
 		c.handleError(w, r, err)
 		return
 	}

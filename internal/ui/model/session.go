@@ -10,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
@@ -23,9 +24,10 @@ import (
 // loadSessionMsg is a message indicating that a session and its files have
 // been loaded.
 type loadSessionMsg struct {
-	session   *session.Session
-	files     []SessionFile
-	readFiles []string
+	session       *session.Session
+	files         []SessionFile
+	readFiles     []string
+	sessionModels []session.SessionModel
 }
 
 // lspFilePaths returns deduplicated file paths from both modified and read
@@ -81,10 +83,16 @@ func (m *UI) loadSession(sessionID string) tea.Cmd {
 			slog.Error("Failed to load read files for session", "error", err)
 		}
 
+		sessionModels, err := m.com.Workspace.ListSessionModels(context.Background(), sessionID)
+		if err != nil {
+			slog.Error("Failed to load session models", "session_id", sessionID, "error", err)
+		}
+
 		return loadSessionMsg{
-			session:   &session,
-			files:     sessionFiles,
-			readFiles: readFiles,
+			session:       &session,
+			files:         sessionFiles,
+			readFiles:     readFiles,
+			sessionModels: sessionModels,
 		}
 	}
 }
@@ -247,6 +255,66 @@ func (m *UI) startLSPs(paths []string) tea.Cmd {
 		ctx := context.Background()
 		for _, path := range paths {
 			m.com.Workspace.LSPStart(ctx, path)
+		}
+		return nil
+	}
+}
+
+// restoreSessionModels applies persisted session model selections to the
+// workspace-scoped config. If the saved row references a model type or
+// provider/model that is no longer available, the current selection for
+// that type is left unchanged and a warning is logged. If no rows are
+// provided, this is a no-op so the current project model choices are
+// preserved. After applying any valid rows, the agent model is refreshed
+// once via UpdateAgentModel.
+func (m *UI) restoreSessionModels(sessionID string, models []session.SessionModel) tea.Cmd {
+	if len(models) == 0 {
+		return nil
+	}
+	cfg := m.com.Workspace.Config()
+	applied := 0
+	for _, sm := range models {
+		switch sm.ModelType {
+		case config.SelectedModelTypeLarge, config.SelectedModelTypeSmall:
+		default:
+			slog.Warn(
+				"Skipping unknown session model type during restore",
+				"session_id", sessionID,
+				"model_type", string(sm.ModelType),
+				"provider_id", sm.Provider,
+				"model_id", sm.Model,
+			)
+			continue
+		}
+		if cfg == nil || cfg.GetModel(sm.Provider, sm.Model) == nil {
+			slog.Warn(
+				"Saved session model is unavailable; keeping current selection",
+				"session_id", sessionID,
+				"model_type", string(sm.ModelType),
+				"provider_id", sm.Provider,
+				"model_id", sm.Model,
+			)
+			continue
+		}
+		if err := m.com.Workspace.UpdatePreferredModel(config.ScopeWorkspace, sm.ModelType, sm.SelectedModel); err != nil {
+			slog.Error(
+				"Failed to restore session model",
+				"session_id", sessionID,
+				"model_type", string(sm.ModelType),
+				"provider_id", sm.Provider,
+				"model_id", sm.Model,
+				"error", err,
+			)
+			continue
+		}
+		applied++
+	}
+	if applied == 0 {
+		return nil
+	}
+	return func() tea.Msg {
+		if err := m.com.Workspace.UpdateAgentModel(context.Background()); err != nil {
+			return util.ReportError(err)
 		}
 		return nil
 	}

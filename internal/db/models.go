@@ -50,3 +50,13 @@ type Session struct {
 	SummaryMessageID sql.NullString `json:"summary_message_id"`
 	Todos            sql.NullString `json:"todos"`
 }
+
+type SessionModel struct {
+	SessionID         string         `json:"session_id"`
+	ModelType         string         `json:"model_type"`
+	Provider          string         `json:"provider"`
+	Model             string         `json:"model"`
+	SelectedModelJson sql.NullString `json:"selected_model_json"`
+	UpdatedAt         int64          `json:"updated_at"`
+	CreatedAt         int64          `json:"created_at"`
+}

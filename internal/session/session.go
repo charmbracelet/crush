@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -60,6 +61,16 @@ type Session struct {
 	UpdatedAt        int64
 }
 
+type SessionModel struct {
+	SessionID     string
+	ModelType     config.SelectedModelType
+	Provider      string
+	Model         string
+	SelectedModel config.SelectedModel
+	CreatedAt     int64
+	UpdatedAt     int64
+}
+
 type Service interface {
 	pubsub.Subscriber[Session]
 	Create(ctx context.Context, title string) (Session, error)
@@ -69,6 +80,8 @@ type Service interface {
 	GetLast(ctx context.Context) (Session, error)
 	List(ctx context.Context) ([]Session, error)
 	Save(ctx context.Context, session Session) (Session, error)
+	SaveModel(ctx context.Context, sessionID string, modelType config.SelectedModelType, model config.SelectedModel) error
+	ListModels(ctx context.Context, sessionID string) ([]SessionModel, error)
 	UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error
 	Rename(ctx context.Context, id string, title string) error
 	Delete(ctx context.Context, id string) error
@@ -146,6 +159,9 @@ func (s *service) Delete(ctx context.Context, id string) error {
 	if err = qtx.DeleteSessionFiles(ctx, dbSession.ID); err != nil {
 		return fmt.Errorf("deleting session files: %w", err)
 	}
+	if err = qtx.DeleteSessionModels(ctx, dbSession.ID); err != nil {
+		return fmt.Errorf("deleting session models: %w", err)
+	}
 	if err = qtx.DeleteSession(ctx, dbSession.ID); err != nil {
 		return fmt.Errorf("deleting session: %w", err)
 	}
@@ -204,6 +220,54 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 	return session, nil
 }
 
+func (s *service) SaveModel(ctx context.Context, sessionID string, modelType config.SelectedModelType, model config.SelectedModel) error {
+	if sessionID == "" {
+		return fmt.Errorf("session id is required")
+	}
+	if !validModelType(modelType) {
+		return fmt.Errorf("invalid model type: %s", modelType)
+	}
+	if model.Provider == "" {
+		return fmt.Errorf("provider is required")
+	}
+	if model.Model == "" {
+		return fmt.Errorf("model is required")
+	}
+
+	data, err := json.Marshal(model)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.q.UpsertSessionModel(ctx, db.UpsertSessionModelParams{
+		SessionID: sessionID,
+		ModelType: modelType.String(),
+		Provider:  model.Provider,
+		Model:     model.Model,
+		SelectedModelJson: sql.NullString{
+			String: string(data),
+			Valid:  true,
+		},
+	})
+	return err
+}
+
+func (s *service) ListModels(ctx context.Context, sessionID string) ([]SessionModel, error) {
+	if sessionID == "" {
+		return nil, fmt.Errorf("session id is required")
+	}
+
+	dbModels, err := s.q.ListSessionModels(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	models := make([]SessionModel, len(dbModels))
+	for i, dbModel := range dbModels {
+		models[i] = fromDBSessionModel(dbModel)
+	}
+	return models, nil
+}
+
 // UpdateTitleAndUsage updates only the title and usage fields atomically.
 // This is safer than fetching, modifying, and saving the entire session.
 func (s *service) UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error {
@@ -255,6 +319,41 @@ func (s service) fromDBItem(item db.Session) Session {
 		CreatedAt:        item.CreatedAt,
 		UpdatedAt:        item.UpdatedAt,
 	}
+}
+
+func fromDBSessionModel(item db.SessionModel) SessionModel {
+	selectedModel := config.SelectedModel{
+		Provider: item.Provider,
+		Model:    item.Model,
+	}
+	if item.SelectedModelJson.Valid && item.SelectedModelJson.String != "" {
+		if err := json.Unmarshal([]byte(item.SelectedModelJson.String), &selectedModel); err != nil {
+			slog.Warn("Failed to unmarshal session model", "session_id", item.SessionID, "model_type", item.ModelType, "provider", item.Provider, "model", item.Model, "error", err)
+			selectedModel = config.SelectedModel{
+				Provider: item.Provider,
+				Model:    item.Model,
+			}
+		}
+	}
+	if selectedModel.Provider == "" {
+		selectedModel.Provider = item.Provider
+	}
+	if selectedModel.Model == "" {
+		selectedModel.Model = item.Model
+	}
+	return SessionModel{
+		SessionID:     item.SessionID,
+		ModelType:     config.SelectedModelType(item.ModelType),
+		Provider:      item.Provider,
+		Model:         item.Model,
+		SelectedModel: selectedModel,
+		CreatedAt:     item.CreatedAt,
+		UpdatedAt:     item.UpdatedAt,
+	}
+}
+
+func validModelType(modelType config.SelectedModelType) bool {
+	return modelType == config.SelectedModelTypeLarge || modelType == config.SelectedModelTypeSmall
 }
 
 func marshalTodos(todos []Todo) (string, error) {

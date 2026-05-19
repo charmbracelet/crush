@@ -122,6 +122,12 @@ type Styles struct {
 		PromptYoloIconBlurred lipgloss.Style
 		PromptYoloDotsFocused lipgloss.Style
 		PromptYoloDotsBlurred lipgloss.Style
+
+		// Shell mode prompt (" $ " icon + ":::" dots for terminal commands).
+		PromptShellIconFocused lipgloss.Style
+		PromptShellIconBlurred lipgloss.Style
+		PromptShellDotsFocused lipgloss.Style
+		PromptShellDotsBlurred lipgloss.Style
 	}
 
 	// Radio

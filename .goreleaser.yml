@@ -217,12 +217,18 @@ npms:
     disable: "{{ with .Prerelease }}true{{ end }}"
 
 nfpms:
+  # NOTE: termux.deb is intentionally omitted (issue #2787). The control
+  # file currently ships `Architecture: arm64`, but Termux's dpkg expects
+  # `aarch64` and refuses to install. Termux users can install via the
+  # existing `crush_<ver>_Android_arm64.tar.gz` static binary instead.
+  # The format-conditional `dst` paths below are kept dead-code for now
+  # so re-enabling termux.deb (e.g. when goreleaser-pro applies the
+  # built-in arch replacement) is a single-line change.
   - formats:
       - apk
       - deb
       - rpm
       - archlinux
-      - termux.deb
     file_name_template: "{{ .ConventionalFileName }}"
     contents:
       - src: ./completions/crush.bash

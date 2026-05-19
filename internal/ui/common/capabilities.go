@@ -11,6 +11,8 @@ import (
 	xstrings "github.com/charmbracelet/x/exp/strings"
 )
 
+const osc99QueryID = "crush-osc99-query"
+
 // Capabilities define different terminal capabilities supported.
 type Capabilities struct {
 	// Profile is the terminal color profile used to determine how colors are
@@ -35,6 +37,8 @@ type Capabilities struct {
 	TerminalVersion string
 	// ReportFocusEvents indicates whether the terminal supports focus events.
 	ReportFocusEvents bool
+	// OSC99Notifications indicates whether the terminal supports OSC 99 notifications.
+	OSC99Notifications bool
 }
 
 // Update updates the capabilities based on the given message.
@@ -63,6 +67,11 @@ func (c *Capabilities) Update(msg any) {
 		case ansi.ModeFocusEvent:
 			c.ReportFocusEvents = modeSupported(m.Value)
 		}
+	case uv.UnknownOscEvent:
+		// NOTE: This detection should be upstreamed to Bubble Tea or Ultraviolet
+		if isOSC99Response(string(m)) {
+			c.OSC99Notifications = true
+		}
 	}
 }
 
@@ -72,12 +81,13 @@ func QueryCmd(env uv.Environ) tea.Cmd {
 	var sb strings.Builder
 	sb.WriteString(ansi.RequestPrimaryDeviceAttributes)
 	sb.WriteString(ansi.QueryModifyOtherKeys)
+	sb.WriteString(ansi.RequestModeFocusEvent)
+	sb.WriteString(ansi.DesktopNotification("", "i="+osc99QueryID, "p=?"))
 
 	// Queries that should only be sent to "smart" normal terminals.
 	shouldQueryFor := shouldQueryCapabilities(env)
 	if shouldQueryFor {
 		sb.WriteString(ansi.RequestNameVersion)
-		sb.WriteString(ansi.RequestModeFocusEvent)
 		sb.WriteString(ansi.WindowOp(14)) // Window size in pixels
 		kittyReq := ansi.KittyGraphics([]byte("AAAA"), "i=31", "s=1", "v=1", "a=q", "t=d", "f=24")
 		if _, isTmux := env.LookupEnv("TMUX"); isTmux {
@@ -114,6 +124,60 @@ func (c Capabilities) CellSize() (width, height int) {
 
 func modeSupported(v ansi.ModeSetting) bool {
 	return v.IsSet() || v.IsReset()
+}
+
+func isOSC99Response(seq string) bool {
+	var ok bool
+
+	p := ansi.NewParser()
+	p.SetHandler(ansi.Handler{
+		HandleOsc: func(cmd int, data []byte) {
+			if cmd != 99 {
+				return
+			}
+
+			response := strings.TrimPrefix(string(data), "99;")
+			metadata, payload, found := strings.Cut(response, ";")
+			if !found {
+				return
+			}
+
+			var hasID, hasQuery bool
+			for field := range strings.SplitSeq(metadata, ":") {
+				hasID = hasID || field == "i="+osc99QueryID
+				hasQuery = hasQuery || field == "p=?"
+			}
+			if !hasID || !hasQuery {
+				return
+			}
+
+			ok = isOSC99CapacityPayload(payload)
+
+		},
+	})
+
+	for i := 0; i < len(seq); i++ {
+		p.Advance(seq[i])
+	}
+
+	return ok
+}
+
+func isOSC99CapacityPayload(payload string) bool {
+	for field := range strings.SplitSeq(payload, ":") {
+		key, value, found := strings.Cut(field, "=")
+		if !found || key != "p" {
+			continue
+		}
+
+		for item := range strings.SplitSeq(value, ",") {
+			if item == "title" {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // kittyTerminals defines terminals supporting querying capabilities.

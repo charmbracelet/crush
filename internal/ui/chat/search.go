@@ -26,8 +26,9 @@ func NewGlobToolMessageItem(
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
+	reduceAnimations bool,
 ) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &GlobToolRenderContext{}, canceled)
+	return newBaseToolMessageItem(sty, toolCall, result, &GlobToolRenderContext{}, canceled, reduceAnimations)
 }
 
 // GlobToolRenderContext renders glob tool messages.
@@ -85,8 +86,9 @@ func NewGrepToolMessageItem(
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
+	reduceAnimations bool,
 ) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &GrepToolRenderContext{}, canceled)
+	return newBaseToolMessageItem(sty, toolCall, result, &GrepToolRenderContext{}, canceled, reduceAnimations)
 }
 
 // GrepToolRenderContext renders grep tool messages.
@@ -150,8 +152,9 @@ func NewLSToolMessageItem(
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
+	reduceAnimations bool,
 ) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &LSToolRenderContext{}, canceled)
+	return newBaseToolMessageItem(sty, toolCall, result, &LSToolRenderContext{}, canceled, reduceAnimations)
 }
 
 // LSToolRenderContext renders ls tool messages.
@@ -210,8 +213,9 @@ func NewSourcegraphToolMessageItem(
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
+	reduceAnimations bool,
 ) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &SourcegraphToolRenderContext{}, canceled)
+	return newBaseToolMessageItem(sty, toolCall, result, &SourcegraphToolRenderContext{}, canceled, reduceAnimations)
 }
 
 // SourcegraphToolRenderContext renders sourcegraph tool messages.

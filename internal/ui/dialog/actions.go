@@ -129,6 +129,18 @@ type ActionFilePickerSelected struct {
 	Path string
 }
 
+// ActionReduceSSHAAnimations reduces SSH animations for the current session.
+type ActionReduceSSHAAnimations struct{}
+
+// ActionKeepSSHAAnimations keeps animations over SSH for the current session.
+type ActionKeepSSHAAnimations struct{}
+
+// ActionPersistSSHAutoReduce persists the preference to auto-reduce SSH animations.
+type ActionPersistSSHAutoReduce struct{}
+
+// ActionPersistSSHNever persists the preference to never reduce SSH animations.
+type ActionPersistSSHNever struct{}
+
 // Cmd returns a command that reads the file at path and sends a
 // [message.Attachement] to the program.
 func (a ActionFilePickerSelected) Cmd() tea.Cmd {

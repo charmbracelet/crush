@@ -169,6 +169,7 @@ func newBaseToolMessageItem(
 	result *message.ToolResult,
 	toolRenderer ToolRenderer,
 	canceled bool,
+	reduceAnimations bool,
 ) *baseToolMessageItem {
 	// we only do full width for diffs (as far as I know)
 	hasCappedWidth := toolCall.Name != tools.EditToolName && toolCall.Name != tools.MultiEditToolName
@@ -192,12 +193,14 @@ func newBaseToolMessageItem(
 		hasCappedWidth:           hasCappedWidth,
 	}
 	t.anim = anim.New(anim.Settings{
-		ID:          toolCall.ID,
-		Size:        15,
-		GradColorA:  sty.WorkingGradFromColor,
-		GradColorB:  sty.WorkingGradToColor,
-		LabelColor:  sty.WorkingLabelColor,
-		CycleColors: true,
+		ID:            toolCall.ID,
+		Size:          15,
+		GradColorA:    sty.WorkingGradFromColor,
+		GradColorB:    sty.WorkingGradToColor,
+		LabelColor:    sty.WorkingLabelColor,
+		EllipsisColor: sty.WorkingEllipsisColor,
+		CycleColors:   true,
+		Static:        reduceAnimations,
 	})
 
 	return t
@@ -214,58 +217,59 @@ func NewToolMessageItem(
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
+	reduceAnimations bool,
 ) ToolMessageItem {
 	var item ToolMessageItem
 	switch toolCall.Name {
 	case tools.BashToolName:
-		item = NewBashToolMessageItem(sty, toolCall, result, canceled)
+		item = NewBashToolMessageItem(sty, toolCall, result, canceled, reduceAnimations)
 	case tools.JobOutputToolName:
-		item = NewJobOutputToolMessageItem(sty, toolCall, result, canceled)
+		item = NewJobOutputToolMessageItem(sty, toolCall, result, canceled, reduceAnimations)
 	case tools.JobKillToolName:
-		item = NewJobKillToolMessageItem(sty, toolCall, result, canceled)
+		item = NewJobKillToolMessageItem(sty, toolCall, result, canceled, reduceAnimations)
 	case tools.ViewToolName:
-		item = NewViewToolMessageItem(sty, toolCall, result, canceled)
+		item = NewViewToolMessageItem(sty, toolCall, result, canceled, reduceAnimations)
 	case tools.WriteToolName:
-		item = NewWriteToolMessageItem(sty, toolCall, result, canceled)
+		item = NewWriteToolMessageItem(sty, toolCall, result, canceled, reduceAnimations)
 	case tools.EditToolName:
-		item = NewEditToolMessageItem(sty, toolCall, result, canceled)
+		item = NewEditToolMessageItem(sty, toolCall, result, canceled, reduceAnimations)
 	case tools.MultiEditToolName:
-		item = NewMultiEditToolMessageItem(sty, toolCall, result, canceled)
+		item = NewMultiEditToolMessageItem(sty, toolCall, result, canceled, reduceAnimations)
 	case tools.GlobToolName:
-		item = NewGlobToolMessageItem(sty, toolCall, result, canceled)
+		item = NewGlobToolMessageItem(sty, toolCall, result, canceled, reduceAnimations)
 	case tools.GrepToolName:
-		item = NewGrepToolMessageItem(sty, toolCall, result, canceled)
+		item = NewGrepToolMessageItem(sty, toolCall, result, canceled, reduceAnimations)
 	case tools.LSToolName:
-		item = NewLSToolMessageItem(sty, toolCall, result, canceled)
+		item = NewLSToolMessageItem(sty, toolCall, result, canceled, reduceAnimations)
 	case tools.DownloadToolName:
-		item = NewDownloadToolMessageItem(sty, toolCall, result, canceled)
+		item = NewDownloadToolMessageItem(sty, toolCall, result, canceled, reduceAnimations)
 	case tools.FetchToolName:
-		item = NewFetchToolMessageItem(sty, toolCall, result, canceled)
+		item = NewFetchToolMessageItem(sty, toolCall, result, canceled, reduceAnimations)
 	case tools.SourcegraphToolName:
-		item = NewSourcegraphToolMessageItem(sty, toolCall, result, canceled)
+		item = NewSourcegraphToolMessageItem(sty, toolCall, result, canceled, reduceAnimations)
 	case tools.DiagnosticsToolName:
-		item = NewDiagnosticsToolMessageItem(sty, toolCall, result, canceled)
+		item = NewDiagnosticsToolMessageItem(sty, toolCall, result, canceled, reduceAnimations)
 	case agent.AgentToolName:
-		item = NewAgentToolMessageItem(sty, toolCall, result, canceled)
+		item = NewAgentToolMessageItem(sty, toolCall, result, canceled, reduceAnimations)
 	case tools.AgenticFetchToolName:
-		item = NewAgenticFetchToolMessageItem(sty, toolCall, result, canceled)
+		item = NewAgenticFetchToolMessageItem(sty, toolCall, result, canceled, reduceAnimations)
 	case tools.WebFetchToolName:
-		item = NewWebFetchToolMessageItem(sty, toolCall, result, canceled)
+		item = NewWebFetchToolMessageItem(sty, toolCall, result, canceled, reduceAnimations)
 	case tools.WebSearchToolName:
-		item = NewWebSearchToolMessageItem(sty, toolCall, result, canceled)
+		item = NewWebSearchToolMessageItem(sty, toolCall, result, canceled, reduceAnimations)
 	case tools.TodosToolName:
-		item = NewTodosToolMessageItem(sty, toolCall, result, canceled)
+		item = NewTodosToolMessageItem(sty, toolCall, result, canceled, reduceAnimations)
 	case tools.ReferencesToolName:
-		item = NewReferencesToolMessageItem(sty, toolCall, result, canceled)
+		item = NewReferencesToolMessageItem(sty, toolCall, result, canceled, reduceAnimations)
 	case tools.LSPRestartToolName:
-		item = NewLSPRestartToolMessageItem(sty, toolCall, result, canceled)
+		item = NewLSPRestartToolMessageItem(sty, toolCall, result, canceled, reduceAnimations)
 	default:
 		if IsDockerMCPTool(toolCall.Name) {
-			item = NewDockerMCPToolMessageItem(sty, toolCall, result, canceled)
+			item = NewDockerMCPToolMessageItem(sty, toolCall, result, canceled, reduceAnimations)
 		} else if strings.HasPrefix(toolCall.Name, "mcp_") {
-			item = NewMCPToolMessageItem(sty, toolCall, result, canceled)
+			item = NewMCPToolMessageItem(sty, toolCall, result, canceled, reduceAnimations)
 		} else {
-			item = NewGenericToolMessageItem(sty, toolCall, result, canceled)
+			item = NewGenericToolMessageItem(sty, toolCall, result, canceled, reduceAnimations)
 		}
 	}
 	item.SetMessageID(messageID)

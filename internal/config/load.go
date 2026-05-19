@@ -91,6 +91,12 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		assignIfNil(&cfg.Options.TUI.Transparent, true)
 	}
 
+	if str, ok := os.LookupEnv("CRUSH_REDUCE_ANIMATIONS"); ok {
+		if val, err := strconv.ParseBool(str); err == nil {
+			assignIfNil(&cfg.Options.TUI.ReduceAnimations, val)
+		}
+	}
+
 	// Load known providers, this loads the config from catwalk
 	providers, err := Providers(cfg)
 	if err != nil {
@@ -1029,4 +1035,36 @@ func (c *Config) ValidateHooks() error {
 		}
 	}
 	return nil
+}
+
+func isSSH() bool {
+	return os.Getenv("SSH_TTY") != ""
+}
+
+// ShouldReduceAnimations returns whether animations should be reduced based on config.
+func (c *Config) ShouldReduceAnimations() bool {
+	if c.Options == nil || c.Options.TUI == nil {
+		return false
+	}
+	// Explicit reduce_animations setting takes precedence.
+	if c.Options.TUI.ReduceAnimations != nil && *c.Options.TUI.ReduceAnimations {
+		return true
+	}
+	// Auto-reduce when SSH and ssh_animation_mode is "reduce".
+	if isSSH() && c.Options.TUI.SSHAnimationMode == "reduce" {
+		return true
+	}
+	return false
+}
+
+// ShouldPromptForSSHAnimations returns whether we should prompt the user about
+// reducing animations over SSH. This is true when:
+// - Running over SSH
+// - ssh_animation_mode is "ask" (default)
+// - reduce_animations is not explicitly set
+func (c *Config) ShouldPromptForSSHAnimations() bool {
+	if c.Options == nil || c.Options.TUI == nil {
+		return false
+	}
+	return isSSH() && (c.Options.TUI.SSHAnimationMode == "" || c.Options.TUI.SSHAnimationMode == "ask") && c.Options.TUI.ReduceAnimations == nil
 }

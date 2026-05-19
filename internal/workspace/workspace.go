@@ -120,6 +120,7 @@ type Workspace interface {
 	SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error
 	SetConfigField(scope config.Scope, key string, value any) error
 	RemoveConfigField(scope config.Scope, key string) error
+	SetSSHAnimationMode(scope config.Scope, mode string) error
 	ImportCopilot() (*oauth.Token, bool)
 	RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error
 

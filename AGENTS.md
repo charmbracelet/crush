@@ -18,6 +18,7 @@ main.go                            CLI entry point (cobra via internal/cmd)
 internal/
   app/app.go                       Top-level wiring: DB, config, agents, LSP, MCP, events
   cmd/                             CLI commands (root, run, login, models, stats, sessions)
+    critic-demo/                   Standalone demo binary for critic + replacer (no API keys)
   config/
     config.go                      Config struct, context file paths, agent definitions
     load.go                        crush.json loading and validation
@@ -34,6 +35,27 @@ internal/
     hooks.go                       Decision types, aggregation logic, event constants
     runner.go                      Parallel hook execution, timeout, dedup
     input.go                       Stdin payload builder, env vars, stdout parsing (Crush + Claude Code compat)
+  skills/
+    skills.go                      Skills discovery and loading (Agent Skills open standard)
+    critic/                        Self-critic middleware: reviews agent diffs, returns approve/revise/halt
+      middleware.go                Core decorator wrapping SessionAgent.Run()
+      service.go                   Review orchestration: cache, retry, pub/sub
+      checkpoint.go                Types and gating logic
+      config.go                    Runtime config with defaults
+      prompt.go                    Template rendering with injection defense
+      diff.go                      Git vs library diff with binary detection
+      snapshot.go                  File snapshot / rollback with size limits
+      cache.go                     SHA-256 keyed LRU cache
+      diagnostics.go               LSP diagnostic fetching
+      store.go                     SQLite persistence via sqlc
+      breaker.go                   Circuit breaker for retryable errors
+      parser.go                    JSON extraction with fallback strategies
+      prompt_message_test.go       Tests for message checkpoint prompts
+    replacer/                      Replacement agent middleware: conversation continuation coach
+      middleware.go                Core decorator wrapping primary agent
+      config.go                    Runtime config
+      prompt.go                    Template for evaluation decisions
+      parser.go                    Parses stop/continue decisions from LLM
   session/session.go               Session CRUD backed by SQLite
   message/                         Message model and content types
   db/                              SQLite via sqlc, with migrations
@@ -42,7 +64,6 @@ internal/
   lsp/                             LSP client manager, auto-discovery, on-demand startup
   ui/                              Bubble Tea v2 TUI (see internal/ui/AGENTS.md)
   permission/                      Tool permission checking and allow-lists
-  skills/                          Skill file discovery and loading
   shell/                           Bash command execution with background job support
   event/                           Telemetry (PostHog)
   pubsub/                          Internal pub/sub for cross-component messaging
@@ -83,22 +104,61 @@ internal/
   `HOOKS.md` for the user-facing protocol.
 - **CGO disabled**: builds with `CGO_ENABLED=0` and
   `GOEXPERIMENT=greenteagc`.
+- **Middleware pattern**: Skills wrap `SessionAgent` as decorators. The
+  middleware receives a primary agent and config, exposes `SetXxx` wiring
+  methods, and delegates all `SessionAgent` interface methods to the primary.
+- **Skill auto-enable**: When a skill config section is present in crush.json
+  (even with no fields), it auto-enables. Explicitly set `enabled: false` to
+  disable.
+- **Agent wrapper**: `AgentWrapper` func type in coordinator allows app layer
+  to inject middleware without import cycles.
 
 ## Build/Test/Lint Commands
 
+- **Install linter** (first time only): `task lint:install`
 - **Build**: `go build .` or `go run .`
-- **Test**: `task test` or `go test ./...` (run single test:
-  `go test ./internal/llm/prompt -run TestGetContextFromPaths`)
-- **Update Golden Files**: `go test ./... -update` (regenerates `.golden`
-  files when test output changes)
+- **Test**: `task test` or `go test -race -failfast ./...`
+- **Test specific package**: `go test ./internal/skills/critic/... -v`
+- **Test replacer package**: `go test ./internal/skills/replacer/... -v`
+- **Record VCR cassettes**: `task test:record` (re-records all agent VCR cassettes; takes ~1 hour)
+- **Update Golden Files**: `go test ./... -update`
   - Update specific package:
-    `go test ./internal/tui/components/core -update` (in this case,
-    we're updating "core")
-- **Lint**: `task lint:fix`
+    `go test ./internal/ui/components/core -update`
+- **Lint**: `task lint` (runs `task lint:log` + `golangci-lint run`)
+- **Lint log check**: `task lint:log` (checks that log messages start with capital letters)
+- **Lint:fix**: `task lint:fix` (runs linters with auto-fix)
 - **Format**: `task fmt` (`gofumpt -w .`)
 - **Modernize**: `task modernize` (runs `modernize` which makes code
   simplifications)
 - **Dev**: `task dev` (runs with profiling enabled)
+- **SQLC generate**: `task sqlc` (regenerates Go code from SQL queries)
+- **Schema generate**: `task schema` (regenerates JSON schema from config)
+- **Update Hyper provider**: `task hyper` (updates embedded provider.json)
+- **Update dependencies**: `task deps` (updates Fantasy and Catwalk)
+- **Demo binary**: `go run ./cmd/critic-demo` (runs standalone critic + replacer
+  demo with no API keys)
+
+### Interactive TUI
+
+```bash
+crush run "prompt"          # Start a new chat session
+crush login                  # Authenticate with providers
+crush models                 # List available models
+crush sessions               # Manage chat sessions
+crush logs                   # View request/response logs
+```
+
+### Critic Inspection
+
+```bash
+crush critic list --session <id>        # List reviews for a session
+crush critic show --message <id>         # Show a single review
+crush critic stats                       # Aggregate statistics
+```
+
+### Data Directory
+
+Use `--data-dir <path>` flag on critic commands to point to a specific crush data directory (defaults to `~/.crush`).
 
 ## Code Style Guidelines
 
@@ -139,7 +199,6 @@ providers to avoid API calls:
 
 ```go
 func TestYourFunction(t *testing.T) {
-    // Enable mock providers for testing
     originalUseMock := config.UseMockProviders
     config.UseMockProviders = true
     defer func() {
@@ -147,14 +206,95 @@ func TestYourFunction(t *testing.T) {
         config.ResetProviders()
     }()
 
-    // Reset providers to ensure fresh mock data
     config.ResetProviders()
-
-    // Your test code here - providers will now return mock data
     providers := config.Providers()
     // ... test logic
 }
 ```
+
+## Skills System
+
+### Overview
+
+Skills are middleware decorators that wrap the primary `SessionAgent`. Each
+skill implements the `agent.SessionAgent` interface by embedding the primary
+agent and delegating all methods, while intercepting `Run()` to add behavior.
+
+Two built-in skills:
+- **`critic`**: After each agent edit, a secondary LLM reviews the diff and
+  returns approve/revise/halt.
+- **`replacer`**: Evaluates whether the conversation should continue with a
+  follow-up prompt (conversation coach).
+
+### Skill Discovery
+
+The `skills` package implements the Agent Skills open standard
+(https://agentskills.io). Skills are discovered from configured paths by
+scanning for `SKILL.md` files with YAML frontmatter:
+
+```go
+skills.Discover(paths []string) []*Skill
+```
+
+Each skill has a name, description, compatibility, and instructions. The
+`ToPromptXML()` function generates XML for injection into system prompts.
+
+### Critic Skill
+
+Reviews agent output across six dimensions: correctness, safety, idiomatics,
+efficiency, testing, minimalism.
+
+**Config** (in `crush.json` under `options.critic`):
+```json
+{
+  "critic": {
+    "enabled": true,
+    "model": "anthropic/claude-sonnet-4",
+    "max_iterations": 3,
+    "auto_approve": false,
+    "threshold": 0.85,
+    "cache_size": 32,
+    "max_diff_size": 32768,
+    "max_file_size": 10485760,
+    "timeout": "10s",
+    "retention_days": 30
+  }
+}
+```
+
+**Environment overrides**: `CRUSH_CRITIC_DISABLED=1` (app-level disable, sets `Enabled=false` in config), `CRUSH_CRITIC_GLOBAL_DISABLE=1` (skill-level kill switch, forces `Enabled=false` in runtime config regardless of config), `CRUSH_CRITIC_MODEL`, `CRUSH_CRITIC_THRESHOLD`, `CRUSH_CRITIC_MAX_ITERATIONS`, `CRUSH_CRITIC_AUTO_APPROVE`, `CRUSH_CRITIC_TIMEOUT`, `CRUSH_CRITIC_MAX_DIFF_SIZE`, `CRUSH_CRITIC_MAX_FILE_SIZE`, `CRUSH_CRITIC_RETENTION_DAYS`.
+
+**Per-session disable**: Set `CriticEnabled: &falseVar` in
+`SessionAgentCall` (nil = use global, false = disable for this call).
+
+**Project overrides**: Place `.crush/skills/critic/config.json` or
+`.crush/skills/critic/prompt.md.tpl` in the working directory.
+
+**Prompt injection defense**: User content (diff, plan) is wrapped in
+delimiters (`<<<DIFF_BEGIN>>>` / `<<<DIFF_END>>>`). The
+`escapeDelimiters()` function replaces any user text that looks like a
+delimiter with visually similar Unicode alternatives (`««»»`).
+
+### Replacer Skill
+
+A conversation coach that decides whether the primary agent's response is
+complete or needs a follow-up. Evaluates the full conversation history and
+returns a `stop` or `continue` decision with an optional follow-up prompt.
+
+**Config** (in `crush.json` under `options.replacer`):
+```json
+{
+  "replacer": {
+    "enabled": true,
+    "max_iterations": 3
+  }
+}
+```
+
+The replacer auto-enables when the config section is present (if `enabled` is omitted it defaults to `true`; set `"enabled": false` to disable).
+
+**Environment variable**: `CRUSH_REPLACER_FORCE_CONTINUE=1` forces the
+replacer to continue in tests, bypassing model resolution.
 
 ## Formatting
 
@@ -177,7 +317,35 @@ func TestYourFunction(t *testing.T) {
 - Try to keep commits to one line, not including your attribution. Only use
   multi-line commits when additional context is truly necessary.
 
+## Provider Types
+
+Supported provider types (used in `crush.json` providers `type` field):
+- `openai` — OpenAI API
+- `anthropic` — Anthropic API
+- `openai-compat` — OpenAI-compatible REST API
+- `openrouter` — OpenRouter
+- `vercel` — Vercel AI SDK
+- `azure` — Azure OpenAI
+- `bedrock` — AWS Bedrock
+- `gemini` — Google Gemini
+- `google-vertex` — Google Vertex AI
+- `hyper` — Charm Hyper
+
 ## Working on the TUI (UI)
 
 Anytime you need to work on the TUI, read `internal/ui/AGENTS.md` before
 starting work.
+
+## Working on Skills
+
+Anytime you need to work on the critic or replacer skills, read the
+corresponding documentation:
+- `internal/skills/critic/SKILL.md` — user-facing feature docs
+- `internal/skills/critic/IMPLEMENTATION.md` — detailed implementation
+- `internal/skills/critic/TESTING.md` — test patterns and matrix
+
+Run skill tests with:
+```bash
+go test ./internal/skills/critic/... -v -race
+go test ./internal/skills/replacer/... -v -race
+```

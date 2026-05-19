@@ -139,6 +139,9 @@ type Message struct {
 	CreatedAt        int64
 	UpdatedAt        int64
 	IsSummaryMessage bool
+	// SpinnerLabel is an optional label shown next to the spinner animation
+	// when the message has no content. It is not persisted to the database.
+	SpinnerLabel string
 }
 
 func (m *Message) Content() TextContent {

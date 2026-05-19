@@ -244,8 +244,8 @@ func (a *AssistantMessageItem) Render(width int) string {
 			return cached
 		}
 	}
-	focused := a.sty.Messages.AssistantFocused.Render()
-	blurred := a.sty.Messages.AssistantBlurred.Render()
+	focused := a.sty.Chat.Message.AssistantFocused.Render()
+	blurred := a.sty.Chat.Message.AssistantBlurred.Render()
 	rendered := a.RawRender(width)
 	lines := strings.Split(rendered, "\n")
 	for i, line := range lines {
@@ -339,7 +339,7 @@ func (a *AssistantMessageItem) renderMessageContent(width int) (string, int) {
 	if a.message.IsFinished() {
 		switch a.message.FinishReason() {
 		case message.FinishReasonCanceled:
-			messageParts = append(messageParts, a.sty.Messages.AssistantCanceled.Render("Canceled"))
+			messageParts = append(messageParts, a.sty.Chat.Message.AssistantCanceled.Render("Canceled"))
 		case message.FinishReasonError:
 			messageParts = append(messageParts, a.cachedError(width))
 		}
@@ -463,7 +463,7 @@ func (a *AssistantMessageItem) renderThinking(thinking string, width int) string
 	case thinkingCollapsed:
 		if totalLines > maxCollapsedThinkingHeight {
 			lines = lines[totalLines-maxCollapsedThinkingHeight:]
-			hint := a.sty.Messages.ThinkingTruncationHint.Render(
+			hint := a.sty.Chat.Message.ThinkingTruncationHint.Render(
 				fmt.Sprintf(assistantMessageTruncateFormat, totalLines-maxCollapsedThinkingHeight),
 			)
 			lines = append([]string{hint, ""}, lines...)
@@ -471,14 +471,14 @@ func (a *AssistantMessageItem) renderThinking(thinking string, width int) string
 	case thinkingTailWindow:
 		if totalLines > maxExpandedThinkingTailLines {
 			lines = lines[totalLines-maxExpandedThinkingTailLines:]
-			hint := a.sty.Messages.ThinkingTruncationHint.Render(
+			hint := a.sty.Chat.Message.ThinkingTruncationHint.Render(
 				fmt.Sprintf(assistantMessageTailWindowFormat, totalLines-maxExpandedThinkingTailLines),
 			)
 			lines = append([]string{hint, ""}, lines...)
 		}
 	}
 
-	thinkingStyle := a.sty.Messages.ThinkingBox.Width(width)
+	thinkingStyle := a.sty.Chat.Message.ThinkingBox.Width(width)
 	result := thinkingStyle.Render(strings.Join(lines, "\n"))
 	a.thinkingBoxHeight = lipgloss.Height(result)
 
@@ -487,8 +487,8 @@ func (a *AssistantMessageItem) renderThinking(thinking string, width int) string
 	if !a.message.IsThinking() || len(a.message.ToolCalls()) > 0 {
 		duration := a.message.ThinkingDuration()
 		if duration.String() != "0s" {
-			footer = a.sty.Messages.ThinkingFooterTitle.Render("Thought for ") +
-				a.sty.Messages.ThinkingFooterDuration.Render(duration.String())
+			footer = a.sty.Chat.Message.ThinkingFooterTitle.Render("Thought for ") +
+				a.sty.Chat.Message.ThinkingFooterDuration.Render(duration.String())
 		}
 	}
 
@@ -518,6 +518,8 @@ func (a *AssistantMessageItem) renderSpinning() string {
 		a.anim.SetLabel("Thinking")
 	} else if a.message.IsSummaryMessage {
 		a.anim.SetLabel("Summarizing")
+	} else if a.message.SpinnerLabel != "" {
+		a.anim.SetLabel(a.message.SpinnerLabel)
 	}
 	return a.anim.Render()
 }
@@ -525,10 +527,10 @@ func (a *AssistantMessageItem) renderSpinning() string {
 // renderError renders an error message.
 func (a *AssistantMessageItem) renderError(width int) string {
 	finishPart := a.message.FinishPart()
-	errTag := a.sty.Messages.ErrorTag.Render("ERROR")
+	errTag := a.sty.Chat.Message.ErrorTag.Render("ERROR")
 	truncated := ansi.Truncate(finishPart.Message, width-2-lipgloss.Width(errTag), "...")
-	title := fmt.Sprintf("%s %s", errTag, a.sty.Messages.ErrorTitle.Render(truncated))
-	details := a.sty.Messages.ErrorDetails.Width(width - 2).Render(finishPart.Details)
+	title := fmt.Sprintf("%s %s", errTag, a.sty.Chat.Message.ErrorTitle.Render(truncated))
+	details := a.sty.Chat.Message.ErrorDetails.Width(width - 2).Render(finishPart.Details)
 	return fmt.Sprintf("%s\n\n%s", title, details)
 }
 
@@ -538,7 +540,7 @@ func (a *AssistantMessageItem) isSpinning() bool {
 	isFinished := a.message.IsFinished()
 	hasContent := strings.TrimSpace(a.message.Content().Text) != ""
 	hasToolCalls := len(a.message.ToolCalls()) > 0
-	return (isThinking || !isFinished) && !hasContent && !hasToolCalls
+	return (isThinking || !isFinished || a.message.SpinnerLabel != "") && !hasContent && !hasToolCalls
 }
 
 // SetMessage is used to update the underlying message. Only the

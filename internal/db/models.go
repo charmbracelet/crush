@@ -37,6 +37,19 @@ type ReadFile struct {
 	ReadAt    int64  `json:"read_at"`
 }
 
+type CriticReview struct {
+	ID             string  `json:"id"`
+	SessionID      string  `json:"session_id"`
+	MessageID      string  `json:"message_id"`
+	Verdict        string  `json:"verdict"`
+	Confidence     float64 `json:"confidence"`
+	Concerns       string  `json:"concerns"`
+	Summary        string  `json:"summary"`
+	DiffSnapshot   string  `json:"diff_snapshot"`
+	LspDiagnostics string  `json:"lsp_diagnostics"`
+	CreatedAt      int64   `json:"created_at"`
+}
+
 type Session struct {
 	ID               string         `json:"id"`
 	ParentSessionID  sql.NullString `json:"parent_session_id"`

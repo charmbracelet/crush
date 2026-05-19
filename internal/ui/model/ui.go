@@ -1000,6 +1000,19 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // setSessionMessages sets the messages for the current session in the chat
+// criticVerdictForMessage returns the critic verdict for a message, if any.
+func (m *UI) criticVerdictForMessage(msgID string) string {
+	store := m.com.CriticStore()
+	if store == nil {
+		return ""
+	}
+	review, err := store.GetByMessageID(context.Background(), msgID)
+	if err != nil {
+		return ""
+	}
+	return review.Verdict
+}
+
 func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	var cmds []tea.Cmd
 	// Build tool result map to link tool calls with their results
@@ -1023,6 +1036,9 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap)...)
 			if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
 				infoItem := chat.NewAssistantInfoItem(m.com.Styles, msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
+				if info, ok := infoItem.(*chat.AssistantInfoItem); ok {
+					info.SetCriticVerdict(m.criticVerdictForMessage(msg.ID))
+				}
 				items = append(items, infoItem)
 			}
 		default:
@@ -1152,6 +1168,9 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 		}
 		if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
 			infoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
+			if info, ok := infoItem.(*chat.AssistantInfoItem); ok {
+				info.SetCriticVerdict(m.criticVerdictForMessage(msg.ID))
+			}
 			m.chat.AppendMessages(infoItem)
 			if m.chat.Follow() {
 				if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
@@ -1229,6 +1248,9 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 	if isEndTurn {
 		if infoItem := m.chat.MessageItem(chat.AssistantInfoID(msg.ID)); infoItem == nil {
 			newInfoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
+			if info, ok := newInfoItem.(*chat.AssistantInfoItem); ok {
+				info.SetCriticVerdict(m.criticVerdictForMessage(msg.ID))
+			}
 			m.chat.AppendMessages(newInfoItem)
 		}
 	}
@@ -3167,6 +3189,7 @@ var workingPlaceholders = [...]string{
 	"Prrrrrrrr...",
 	"Processing...",
 	"Thinking...",
+	"Coach is thinking...",
 }
 
 // randomizePlaceholders selects random placeholder text for the textarea's

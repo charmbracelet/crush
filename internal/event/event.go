@@ -92,6 +92,31 @@ func send(event string, props ...any) {
 	}
 }
 
+// TrackCriticVerdict logs a critic verdict event to PostHog.
+func TrackCriticVerdict(sessionID, verdict string, confidence float64) {
+	send("critic.verdict",
+		"session_id", sessionID,
+		"verdict", verdict,
+		"confidence", confidence,
+	)
+}
+
+// TrackCriticLoopCompleted logs a critic loop completion event to PostHog.
+func TrackCriticLoopCompleted(sessionID string, iterations int, verdict string) {
+	send("critic.loop.completed",
+		"session_id", sessionID,
+		"iterations", iterations,
+		"verdict", verdict,
+	)
+}
+
+// TrackCriticRollback logs a critic rollback event to PostHog.
+func TrackCriticRollback(sessionID string) {
+	send("critic.rollback",
+		"session_id", sessionID,
+	)
+}
+
 // Error logs an error event to PostHog with the error type and message.
 func Error(errToLog any, props ...any) {
 	if client == nil || distinctId == "" || errToLog == nil {

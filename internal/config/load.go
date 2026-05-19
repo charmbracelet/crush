@@ -467,6 +467,21 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 		c.Options.DisableDefaultProviders, _ = strconv.ParseBool(str)
 	}
 
+	if str, ok := os.LookupEnv("CRUSH_CRITIC_DISABLED"); ok {
+		if c.Options.Critic == nil {
+			c.Options.Critic = &CriticConfig{}
+		}
+		if v, _ := strconv.ParseBool(str); v {
+			c.Options.Critic.Enabled = new(bool)
+		}
+	}
+	if str, ok := os.LookupEnv("CRUSH_CRITIC_MODEL"); ok {
+		if c.Options.Critic == nil {
+			c.Options.Critic = &CriticConfig{}
+		}
+		c.Options.Critic.Model = str
+	}
+
 	if c.Options.Attribution == nil {
 		c.Options.Attribution = &Attribution{
 			TrailerStyle:  TrailerStyleAssistedBy,

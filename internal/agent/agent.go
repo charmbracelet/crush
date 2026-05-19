@@ -103,6 +103,10 @@ type SessionAgentCall struct {
 	// recursion drains, so falling back to the default broker
 	// publish keeps the event visible to subscribers.
 	OnComplete func(notify.RunComplete)
+
+	// CriticEnabled overrides the global critic setting for this call.
+	// nil uses the global config; false disables; true enables.
+	CriticEnabled *bool
 }
 
 type SessionAgent interface {

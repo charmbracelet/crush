@@ -781,40 +781,40 @@ func quickStyle(o quickStyleOpts) Styles {
 		Left: "▌",
 	}
 
-	s.Messages.NoContent = lipgloss.NewStyle().Foreground(o.fgBase)
-	s.Messages.UserBlurred = s.Messages.NoContent.PaddingLeft(1).BorderLeft(true).
+	s.Chat.Message.NoContent = lipgloss.NewStyle().Foreground(o.fgBase)
+	s.Chat.Message.UserBlurred = s.Chat.Message.NoContent.PaddingLeft(1).BorderLeft(true).
 		BorderForeground(o.primary).BorderStyle(lipgloss.NormalBorder())
-	s.Messages.UserFocused = s.Messages.NoContent.PaddingLeft(1).BorderLeft(true).
+	s.Chat.Message.UserFocused = s.Chat.Message.NoContent.PaddingLeft(1).BorderLeft(true).
 		BorderForeground(o.primary).BorderStyle(messageFocussedBorder)
-	s.Messages.AssistantBlurred = s.Messages.NoContent.PaddingLeft(2)
-	s.Messages.AssistantFocused = s.Messages.NoContent.PaddingLeft(1).BorderLeft(true).
+	s.Chat.Message.AssistantBlurred = s.Chat.Message.NoContent.PaddingLeft(2)
+	s.Chat.Message.AssistantFocused = s.Chat.Message.NoContent.PaddingLeft(1).BorderLeft(true).
 		BorderForeground(o.successMostSubtle).BorderStyle(messageFocussedBorder)
-	s.Messages.Thinking = lipgloss.NewStyle().MaxHeight(10)
-	s.Messages.ErrorTag = lipgloss.NewStyle().Padding(0, 1).
+	s.Chat.Message.Thinking = lipgloss.NewStyle().MaxHeight(10)
+	s.Chat.Message.ErrorTag = lipgloss.NewStyle().Padding(0, 1).
 		Background(o.destructive).Foreground(o.onPrimary)
-	s.Messages.ErrorTitle = lipgloss.NewStyle().Foreground(o.fgSubtle)
-	s.Messages.ErrorDetails = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
+	s.Chat.Message.ErrorTitle = lipgloss.NewStyle().Foreground(o.fgSubtle)
+	s.Chat.Message.ErrorDetails = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 
 	// Message item styles
-	s.Messages.ToolCallFocused = muted.PaddingLeft(1).
+	s.Chat.Message.ToolCallFocused = muted.PaddingLeft(1).
 		BorderStyle(messageFocussedBorder).
 		BorderLeft(true).
 		BorderForeground(o.successMostSubtle)
-	s.Messages.ToolCallBlurred = muted.PaddingLeft(2)
+	s.Chat.Message.ToolCallBlurred = muted.PaddingLeft(2)
 	// No padding or border for compact tool calls within messages
-	s.Messages.ToolCallCompact = muted
-	s.Messages.SectionHeader = base.PaddingLeft(2)
-	s.Messages.AssistantInfoIcon = subtle
-	s.Messages.AssistantInfoModel = muted
-	s.Messages.AssistantInfoProvider = subtle
-	s.Messages.AssistantInfoDuration = subtle
-	s.Messages.AssistantCanceled = lipgloss.NewStyle().Foreground(o.fgBase).Italic(true)
+	s.Chat.Message.ToolCallCompact = muted
+	s.Chat.Message.SectionHeader = base.PaddingLeft(2)
+	s.Chat.Message.AssistantInfoIcon = subtle
+	s.Chat.Message.AssistantInfoModel = muted
+	s.Chat.Message.AssistantInfoProvider = subtle
+	s.Chat.Message.AssistantInfoDuration = subtle
+	s.Chat.Message.AssistantCanceled = lipgloss.NewStyle().Foreground(o.fgBase).Italic(true)
 
 	// Thinking section styles
-	s.Messages.ThinkingBox = subtle.Background(o.bgLeastVisible)
-	s.Messages.ThinkingTruncationHint = muted
-	s.Messages.ThinkingFooterTitle = muted
-	s.Messages.ThinkingFooterDuration = subtle
+	s.Chat.Message.ThinkingBox = subtle.Background(o.bgLeastVisible)
+	s.Chat.Message.ThinkingTruncationHint = muted
+	s.Chat.Message.ThinkingFooterTitle = muted
+	s.Chat.Message.ThinkingFooterDuration = subtle
 
 	// Text selection.
 	s.TextSelection = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.primary)

@@ -35,6 +35,8 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/skills/critic"
+	"github.com/charmbracelet/crush/internal/skills/replacer"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/update"
@@ -57,6 +59,7 @@ type App struct {
 	History     history.Service
 	Permissions permission.Service
 	FileTracker filetracker.Service
+	CriticStore *critic.Store
 
 	AgentCoordinator agent.Coordinator
 
@@ -100,12 +103,16 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		allowedTools = cfg.Permissions.AllowedTools
 	}
 
+	criticStore := critic.NewStore(q)
+	criticStore.SetDB(conn)
+
 	app := &App{
 		Sessions:    sessions,
 		Messages:    messages,
 		History:     files,
 		Permissions: permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools),
 		FileTracker: filetracker.NewService(q),
+		CriticStore: criticStore,
 		LSPManager:  lsp.NewManager(store),
 		Skills:      skillsMgr,
 
@@ -121,6 +128,17 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	}
 
 	app.setupEvents()
+
+	// Prune old critic reviews on startup.
+	criticCfg := critic.NewCriticSkillConfig(cfg)
+	if app.CriticStore != nil && criticCfg.RetentionDays > 0 {
+		cutoff := time.Now().AddDate(0, 0, -criticCfg.RetentionDays)
+		if n, err := app.CriticStore.Prune(ctx, cutoff); err != nil {
+			slog.Warn("Failed to prune critic reviews", "error", err)
+		} else if n > 0 {
+			slog.Info("Pruned old critic reviews", "count", n)
+		}
+	}
 
 	// Check for updates in the background.
 	go app.checkForUpdates(ctx)
@@ -570,6 +588,14 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 	if coderAgentCfg.ID == "" {
 		return fmt.Errorf("coder agent configuration is missing")
 	}
+
+	criticCfg := critic.NewCriticSkillConfig(app.config.Config())
+	replacerCfg := replacer.NewReplacerConfig(app.config.Config())
+	agentWrapper := app.composeWrappers(
+		app.buildCriticWrapper(criticCfg),
+		app.buildReplacerWrapper(replacerCfg),
+	)
+
 	var err error
 	app.AgentCoordinator, err = agent.NewCoordinator(
 		ctx,
@@ -583,12 +609,27 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.agentNotifications,
 		app.runCompletions,
 		app.Skills,
+		agentWrapper,
 	)
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)
 		return err
 	}
 	return nil
+}
+
+// composeWrappers chains multiple AgentWrappers into a single wrapper.
+// The first wrapper in the list is applied innermost (closest to the primary agent).
+func (app *App) composeWrappers(wrappers ...func(agent.SessionAgent) agent.SessionAgent) func(agent.SessionAgent) agent.SessionAgent {
+	return func(primary agent.SessionAgent) agent.SessionAgent {
+		result := primary
+		for _, w := range wrappers {
+			if w != nil {
+				result = w(result)
+			}
+		}
+		return result
+	}
 }
 
 // Subscribe sends events to the TUI as tea.Msgs.

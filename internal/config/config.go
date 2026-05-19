@@ -281,6 +281,59 @@ type Options struct {
 	DisableNotifications      bool         `json:"disable_notifications,omitempty" jsonschema:"description=Deprecated: Use notification_style instead. Disable desktop notifications,default=false"`
 	NotificationStyle         string       `json:"notification_style,omitempty" jsonschema:"description=Notification style to use. Options: auto (default), native, osc, bell, disabled. Auto selects based on environment: native for local sessions, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
 	DisabledSkills            []string     `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
+	Critic                    *CriticConfig `json:"critic,omitempty" jsonschema:"description=Self-critic agent configuration for automated review loops"`
+	Replacer                  *ReplacerConfig `json:"replacer,omitempty" jsonschema:"description=Replacement agent configuration for conversation continuation"`
+}
+
+// CriticConfig controls the self-critic improvement loop.
+// When the critic section is present in the config but enabled is omitted,
+// the critic is auto-enabled (defaults to true).
+type CriticConfig struct {
+	Enabled       *bool   `json:"enabled,omitempty" jsonschema:"description=Enable the critic agent for self-improvement loops"`
+	Model         string  `json:"model,omitempty" jsonschema:"description=Model override for the critic agent; defaults to a cheap heuristic"`
+	MaxIterations int     `json:"max_iterations,omitempty" jsonschema:"description=Maximum critic feedback loops per checkpoint,default=3"`
+	AutoApprove   bool    `json:"auto_approve,omitempty" jsonschema:"description=Automatically approve critic suggestions without user confirmation"`
+	Threshold     float64 `json:"threshold,omitempty" jsonschema:"description=Confidence threshold below which revise requires user confirmation,default=0.85"`
+	CacheSize     int     `json:"cache_size,omitempty" jsonschema:"description=LRU cache size for identical diff reviews,default=32"`
+	MaxDiffSize   int           `json:"max_diff_size,omitempty" jsonschema:"description=Maximum diff bytes to send to the critic,default=32768"`
+	MaxFileSize   int           `json:"max_file_size,omitempty" jsonschema:"description=Maximum file size to snapshot for critic review,default=10485760"`
+	Timeout       time.Duration `json:"timeout,omitempty" jsonschema:"description=Timeout for each critic LLM call,default=10s"`
+	RetentionDays int           `json:"retention_days,omitempty" jsonschema:"description=Days to retain critic reviews in the database,default=30"`
+}
+
+// IsEnabled reports whether the critic is enabled.
+// If the critic section exists in config but enabled is omitted, it defaults
+// to true (auto-enable). Explicit false disables it.
+func (cc *CriticConfig) IsEnabled() bool {
+	if cc == nil {
+		return false
+	}
+	if cc.Enabled == nil {
+		return true
+	}
+	return *cc.Enabled
+}
+
+// ReplacerConfig controls the replacement agent conversation continuation loop.
+// When the replacer section is present in the config but enabled is omitted,
+// the replacer is auto-enabled (defaults to true).
+type ReplacerConfig struct {
+	Enabled       *bool         `json:"enabled,omitempty" jsonschema:"description=Enable the replacement agent for conversation continuation"`
+	Model         string        `json:"model,omitempty" jsonschema:"description=Model override for the replacement agent; defaults to the small model"`
+	MaxIterations int           `json:"max_iterations,omitempty" jsonschema:"description=Maximum replacement agent turns per user message,default=3"`
+	Timeout       time.Duration `json:"timeout,omitempty" jsonschema:"description=Timeout for each replacement agent LLM call,default=10s"`
+}
+
+// IsEnabled reports whether the replacer is enabled.
+func (rc *ReplacerConfig) IsEnabled() bool {
+	if rc == nil {
+		return false
+	}
+	if rc.Enabled == nil {
+		return true
+	}
+	return *rc.Enabled
+}
 }
 
 type MCPs map[string]MCPConfig

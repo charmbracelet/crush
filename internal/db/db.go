@@ -24,6 +24,9 @@ func New(db DBTX) *Queries {
 func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	q := Queries{db: db}
 	var err error
+	if q.createCriticReviewStmt, err = db.PrepareContext(ctx, createCriticReview); err != nil {
+		return nil, fmt.Errorf("error preparing query CreateCriticReview: %w", err)
+	}
 	if q.createFileStmt, err = db.PrepareContext(ctx, createFile); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateFile: %w", err)
 	}
@@ -50,6 +53,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.getAverageResponseTimeStmt, err = db.PrepareContext(ctx, getAverageResponseTime); err != nil {
 		return nil, fmt.Errorf("error preparing query GetAverageResponseTime: %w", err)
+	}
+	if q.getCriticReviewByMessageIDStmt, err = db.PrepareContext(ctx, getCriticReviewByMessageID); err != nil {
+		return nil, fmt.Errorf("error preparing query GetCriticReviewByMessageID: %w", err)
 	}
 	if q.getFileStmt, err = db.PrepareContext(ctx, getFile); err != nil {
 		return nil, fmt.Errorf("error preparing query GetFile: %w", err)
@@ -96,6 +102,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listAllUserMessagesStmt, err = db.PrepareContext(ctx, listAllUserMessages); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAllUserMessages: %w", err)
 	}
+	if q.listCriticReviewsBySessionStmt, err = db.PrepareContext(ctx, listCriticReviewsBySession); err != nil {
+		return nil, fmt.Errorf("error preparing query ListCriticReviewsBySession: %w", err)
+	}
 	if q.listFilesByPathStmt, err = db.PrepareContext(ctx, listFilesByPath); err != nil {
 		return nil, fmt.Errorf("error preparing query ListFilesByPath: %w", err)
 	}
@@ -140,6 +149,11 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 
 func (q *Queries) Close() error {
 	var err error
+	if q.createCriticReviewStmt != nil {
+		if cerr := q.createCriticReviewStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing createCriticReviewStmt: %w", cerr)
+		}
+	}
 	if q.createFileStmt != nil {
 		if cerr := q.createFileStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing createFileStmt: %w", cerr)
@@ -183,6 +197,11 @@ func (q *Queries) Close() error {
 	if q.getAverageResponseTimeStmt != nil {
 		if cerr := q.getAverageResponseTimeStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getAverageResponseTimeStmt: %w", cerr)
+		}
+	}
+	if q.getCriticReviewByMessageIDStmt != nil {
+		if cerr := q.getCriticReviewByMessageIDStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getCriticReviewByMessageIDStmt: %w", cerr)
 		}
 	}
 	if q.getFileStmt != nil {
@@ -258,6 +277,11 @@ func (q *Queries) Close() error {
 	if q.listAllUserMessagesStmt != nil {
 		if cerr := q.listAllUserMessagesStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listAllUserMessagesStmt: %w", cerr)
+		}
+	}
+	if q.listCriticReviewsBySessionStmt != nil {
+		if cerr := q.listCriticReviewsBySessionStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listCriticReviewsBySessionStmt: %w", cerr)
 		}
 	}
 	if q.listFilesByPathStmt != nil {
@@ -364,6 +388,7 @@ func (q *Queries) queryRow(ctx context.Context, stmt *sql.Stmt, query string, ar
 type Queries struct {
 	db                             DBTX
 	tx                             *sql.Tx
+	createCriticReviewStmt         *sql.Stmt
 	createFileStmt                 *sql.Stmt
 	createMessageStmt              *sql.Stmt
 	createSessionStmt              *sql.Stmt
@@ -373,6 +398,7 @@ type Queries struct {
 	deleteSessionFilesStmt         *sql.Stmt
 	deleteSessionMessagesStmt      *sql.Stmt
 	getAverageResponseTimeStmt     *sql.Stmt
+	getCriticReviewByMessageIDStmt *sql.Stmt
 	getFileStmt                    *sql.Stmt
 	getFileByPathAndSessionStmt    *sql.Stmt
 	getFileReadStmt                *sql.Stmt
@@ -388,6 +414,7 @@ type Queries struct {
 	getUsageByHourStmt             *sql.Stmt
 	getUsageByModelStmt            *sql.Stmt
 	listAllUserMessagesStmt        *sql.Stmt
+	listCriticReviewsBySessionStmt *sql.Stmt
 	listFilesByPathStmt            *sql.Stmt
 	listFilesBySessionStmt         *sql.Stmt
 	listLatestSessionFilesStmt     *sql.Stmt
@@ -407,6 +434,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 	return &Queries{
 		db:                             tx,
 		tx:                             tx,
+		createCriticReviewStmt:         q.createCriticReviewStmt,
 		createFileStmt:                 q.createFileStmt,
 		createMessageStmt:              q.createMessageStmt,
 		createSessionStmt:              q.createSessionStmt,
@@ -416,6 +444,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		deleteSessionFilesStmt:         q.deleteSessionFilesStmt,
 		deleteSessionMessagesStmt:      q.deleteSessionMessagesStmt,
 		getAverageResponseTimeStmt:     q.getAverageResponseTimeStmt,
+		getCriticReviewByMessageIDStmt: q.getCriticReviewByMessageIDStmt,
 		getFileStmt:                    q.getFileStmt,
 		getFileByPathAndSessionStmt:    q.getFileByPathAndSessionStmt,
 		getFileReadStmt:                q.getFileReadStmt,
@@ -431,6 +460,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getUsageByHourStmt:             q.getUsageByHourStmt,
 		getUsageByModelStmt:            q.getUsageByModelStmt,
 		listAllUserMessagesStmt:        q.listAllUserMessagesStmt,
+		listCriticReviewsBySessionStmt: q.listCriticReviewsBySessionStmt,
 		listFilesByPathStmt:            q.listFilesByPathStmt,
 		listFilesBySessionStmt:         q.listFilesBySessionStmt,
 		listLatestSessionFilesStmt:     q.listLatestSessionFilesStmt,

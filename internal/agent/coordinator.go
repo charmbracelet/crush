@@ -88,6 +88,11 @@ type Coordinator interface {
 	UpdateModels(ctx context.Context) error
 }
 
+// AgentWrapper is a function that wraps a SessionAgent before it is used.
+// It is used by the app layer to inject middleware (e.g., critic) without
+// creating import cycles.
+type AgentWrapper func(SessionAgent) SessionAgent
+
 type coordinator struct {
 	cfg         *config.ConfigStore
 	sessions    session.Service
@@ -101,6 +106,7 @@ type coordinator struct {
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
+	agentWrapper AgentWrapper
 
 	// Skills discovery results (session-start snapshot).
 	allSkills    []*skills.Skill // Pre-filter: all discovered after dedup.
@@ -122,6 +128,7 @@ func NewCoordinator(
 	notify pubsub.Publisher[notify.Notification],
 	runComplete pubsub.Publisher[notify.RunComplete],
 	skillsMgr *skills.Manager,
+	agentWrapper AgentWrapper,
 ) (Coordinator, error) {
 	// Skills are pre-discovered by the caller (see app.New /
 	// backend.CreateWorkspace) and passed in via the manager. If no
@@ -150,6 +157,7 @@ func NewCoordinator(
 		allSkills:    allSkills,
 		activeSkills: activeSkills,
 		skillTracker: skillTracker,
+		agentWrapper: agentWrapper,
 	}
 
 	agentCfg, ok := cfg.Config().Agents[config.AgentCoder]
@@ -504,6 +512,10 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		result.SetTools(tools)
 		return nil
 	})
+
+	if c.agentWrapper != nil && !isSubAgent {
+		result = c.agentWrapper(result)
+	}
 
 	return result, nil
 }

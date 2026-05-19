@@ -274,6 +274,7 @@ type AssistantInfoItem struct {
 	sty                 *styles.Styles
 	cfg                 *config.Config
 	lastUserMessageTime time.Time
+	criticVerdict       string
 }
 
 // NewAssistantInfoItem creates a new AssistantInfoItem.
@@ -301,6 +302,12 @@ func (a *AssistantInfoItem) ID() string {
 	return a.id
 }
 
+// SetCriticVerdict sets the critic verdict badge to display alongside model info.
+func (a *AssistantInfoItem) SetCriticVerdict(verdict string) {
+	a.criticVerdict = verdict
+	a.clearCache()
+}
+
 // RawRender implements MessageItem.
 func (a *AssistantInfoItem) RawRender(width int) string {
 	innerWidth := max(0, width-MessageLeftPaddingTotal)
@@ -321,7 +328,7 @@ func (a *AssistantInfoItem) Render(width int) string {
 	if cached, ok := a.getCachedPrefixedRender(width, 0); ok {
 		return cached
 	}
-	prefix := a.sty.Messages.SectionHeader.Render()
+	prefix := a.sty.Chat.Message.SectionHeader.Render()
 	lines := strings.Split(a.RawRender(width), "\n")
 	for i, line := range lines {
 		lines[i] = prefix + line
@@ -338,19 +345,31 @@ func (a *AssistantInfoItem) renderContent(width int) string {
 	}
 	finishTime := time.Unix(finishData.Time, 0)
 	duration := finishTime.Sub(a.lastUserMessageTime)
-	infoMsg := a.sty.Messages.AssistantInfoDuration.Render(duration.String())
-	icon := a.sty.Messages.AssistantInfoIcon.Render(styles.ModelIcon)
+	infoMsg := a.sty.Chat.Message.AssistantInfoDuration.Render(duration.String())
+	icon := a.sty.Chat.Message.AssistantInfoIcon.Render(styles.ModelIcon)
 	model := a.cfg.GetModel(a.message.Provider, a.message.Model)
 	if model == nil {
 		model = &catwalk.Model{Name: "Unknown Model"}
 	}
-	modelFormatted := a.sty.Messages.AssistantInfoModel.Render(model.Name)
+	modelFormatted := a.sty.Chat.Message.AssistantInfoModel.Render(model.Name)
 	providerName := a.message.Provider
 	if providerConfig, ok := a.cfg.Providers.Get(a.message.Provider); ok {
 		providerName = providerConfig.Name
 	}
-	provider := a.sty.Messages.AssistantInfoProvider.Render(fmt.Sprintf("via %s", providerName))
+	provider := a.sty.Chat.Message.AssistantInfoProvider.Render(fmt.Sprintf("via %s", providerName))
+	var badge string
+	switch a.criticVerdict {
+	case "approve":
+		badge = a.sty.Chat.Message.CriticApproveBadge.Render(styles.CriticApproveIcon)
+	case "revise":
+		badge = a.sty.Chat.Message.CriticReviseBadge.Render(styles.CriticReviseIcon)
+	case "halt":
+		badge = a.sty.Chat.Message.CriticHaltBadge.Render(styles.CriticHaltIcon)
+	}
 	assistant := fmt.Sprintf("%s %s %s %s", icon, modelFormatted, provider, infoMsg)
+	if badge != "" {
+		assistant += " " + badge
+	}
 	return common.Section(a.sty, assistant, width)
 }
 
@@ -408,7 +427,7 @@ func ShouldRenderAssistantMessage(msg *message.Message) bool {
 	isError := msg.FinishReason() == message.FinishReasonError
 	isCancelled := msg.FinishReason() == message.FinishReasonCanceled
 	hasToolCalls := len(msg.ToolCalls()) > 0
-	return !hasToolCalls || content != "" || thinking != "" || msg.IsThinking() || isError || isCancelled
+	return !hasToolCalls || content != "" || thinking != "" || msg.IsThinking() || isError || isCancelled || msg.SpinnerLabel != ""
 }
 
 // BuildToolResultMap creates a map of tool call IDs to their results from a list of messages.

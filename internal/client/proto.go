@@ -168,6 +168,10 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 				var e pubsub.Event[proto.AgentEvent]
 				_ = json.Unmarshal(p.Payload, &e)
 				sendEvent(ctx, events, e)
+			case pubsub.PayloadTypeSkillsEvent:
+				var e pubsub.Event[proto.SkillsEvent]
+				_ = json.Unmarshal(p.Payload, &e)
+				sendEvent(ctx, events, e)
 			default:
 				slog.Warn("Unknown event type", "type", p.Type)
 				continue

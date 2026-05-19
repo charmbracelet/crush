@@ -62,6 +62,8 @@ type App struct {
 
 	LSPManager *lsp.Manager
 
+	Skills *skills.Manager
+
 	config *config.ConfigStore
 
 	serviceEventsWG *sync.WaitGroup
@@ -75,8 +77,11 @@ type App struct {
 	agentNotifications *pubsub.Broker[notify.Notification]
 }
 
-// New initializes a new application instance.
-func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, error) {
+// New initializes a new application instance. skillsMgr carries the
+// per-workspace skill discovery results computed by the caller; the
+// caller is responsible for constructing it (typically via
+// skills.NewManager + skills.DiscoverFromConfig).
+func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr *skills.Manager) (*App, error) {
 	q := db.New(conn)
 	sessions := session.NewService(q, conn)
 	messages := message.NewService(q)
@@ -95,6 +100,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 		Permissions: permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools),
 		FileTracker: filetracker.NewService(q),
 		LSPManager:  lsp.NewManager(store),
+		Skills:      skillsMgr,
 
 		globalCtx: ctx,
 
@@ -481,7 +487,9 @@ func (app *App) setupEvents() {
 	setupSubscriber(ctx, app.serviceEventsWG, "agent-notifications", app.agentNotifications.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "mcp", mcp.SubscribeEvents, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "lsp", SubscribeLSPEvents, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "skills", skills.SubscribeEvents, app.events)
+	if app.Skills != nil {
+		setupSubscriber(ctx, app.serviceEventsWG, "skills", app.Skills.SubscribeEvents, app.events)
+	}
 	cleanupFunc := func(context.Context) error {
 		cancel()
 		app.serviceEventsWG.Wait()
@@ -532,6 +540,7 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.FileTracker,
 		app.LSPManager,
 		app.agentNotifications,
+		app.Skills,
 	)
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)

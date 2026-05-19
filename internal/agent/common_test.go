@@ -103,12 +103,20 @@ func testSessionAgent(env fakeEnv, large, small fantasy.LanguageModel, systemPro
 			ContextWindow:    200000,
 			DefaultMaxTokens: 10000,
 		},
+		ModelCfg: config.SelectedModel{
+			Provider: "test-provider",
+			Model:    "test-large",
+		},
 	}
 	smallModel := Model{
 		Model: small,
 		CatwalkCfg: catwalk.Model{
 			ContextWindow:    200000,
 			DefaultMaxTokens: 10000,
+		},
+		ModelCfg: config.SelectedModel{
+			Provider: "test-provider",
+			Model:    "test-small",
 		},
 	}
 	agent := NewSessionAgent(SessionAgentOptions{

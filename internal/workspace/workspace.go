@@ -12,6 +12,7 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/goal"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
@@ -87,6 +88,14 @@ type Workspace interface {
 	UpdateAgentModel(ctx context.Context) error
 	InitCoderAgent(ctx context.Context) error
 	GetDefaultSmallModel(providerID string) config.SelectedModel
+
+	// Goals
+	GoalGet(ctx context.Context, sessionID string) (*goal.Goal, error)
+	GoalSet(ctx context.Context, sessionID, objective string) (*goal.Goal, error)
+	GoalPause(ctx context.Context, sessionID string) (*goal.Goal, error)
+	GoalResume(ctx context.Context, sessionID string) (*goal.Goal, error)
+	GoalStart(ctx context.Context, sessionID string) error
+	GoalClear(ctx context.Context, sessionID string) (*goal.Goal, error)
 
 	// Permissions
 	PermissionGrant(perm permission.PermissionRequest)

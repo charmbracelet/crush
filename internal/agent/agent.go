@@ -38,6 +38,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/charmbracelet/crush/internal/goal"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
@@ -317,6 +318,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 			if promptPrefix != "" {
 				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(promptPrefix)}, prepared.Messages...)
+			}
+
+			// Propagate goal ID if present in the caller context.
+			if goalID, ok := ctx.Value(goal.GoalIDContextKey).(string); ok {
+				callContext = context.WithValue(callContext, goal.GoalIDContextKey, goalID)
 			}
 
 			var assistantMsg message.Message

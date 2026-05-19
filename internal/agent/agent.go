@@ -255,7 +255,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	// guarantees the contract at every Run exit (success, error, panic
 	// recovery upstream) without callers needing to know.
 	defer func() {
-		if flushErr := a.messages.FlushAll(ctx); flushErr != nil {
+		flushCtx := context.WithoutCancel(ctx)
+		if flushErr := a.messages.FlushAll(flushCtx); flushErr != nil {
 			slog.Error("Failed to flush pending message updates after run", "error", flushErr)
 		}
 	}()
@@ -668,7 +669,8 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	defer a.activeRequests.Del(sessionID)
 	defer cancel()
 	defer func() {
-		if flushErr := a.messages.FlushAll(ctx); flushErr != nil {
+		flushCtx := context.WithoutCancel(ctx)
+		if flushErr := a.messages.FlushAll(flushCtx); flushErr != nil {
 			slog.Error("Failed to flush pending message updates after summarize", "error", flushErr)
 		}
 	}()

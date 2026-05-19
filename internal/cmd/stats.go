@@ -137,7 +137,9 @@ func runStats(cmd *cobra.Command, _ []string) error {
 
 	event.StatsViewed()
 
-	conn, err := db.Connect(ctx, dataDir)
+	conn, err := db.Connect(ctx, dataDir, db.ConnectOptions{
+		ExclusiveLock: cfg.Config().Options.SQLiteExclusiveLock,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to connect to database: %w", err)
 	}

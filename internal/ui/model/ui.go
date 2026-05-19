@@ -32,6 +32,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/home"
@@ -398,6 +399,13 @@ func (m *UI) Init() tea.Cmd {
 	}
 	if m.com.IsHyper() {
 		cmds = append(cmds, m.fetchHyperCredits())
+	}
+	// Show a persistent warning if the DB had to fall back to exclusive
+	// locking due to a blocked mmap (e.g. in a sandbox).
+	if db.MmapAutoEnabled() {
+		m.status.SetPersistentMsg(util.NewWarnMsg(
+			"SQLite exclusive locking enabled (mmap blocked by sandbox). Set sqlite_exclusive_lock to silence.",
+		))
 	}
 	return tea.Batch(cmds...)
 }

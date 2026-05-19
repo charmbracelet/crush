@@ -10,12 +10,12 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-func openDB(dbPath string) (*sql.DB, error) {
+func openDB(dbPath string, pragmaList []pragma) (*sql.DB, error) {
 	// Set pragmas for better performance via _pragma query params.
 	// Format: _pragma=name(value)
 	params := url.Values{}
-	for name, value := range pragmas {
-		params.Add("_pragma", fmt.Sprintf("%s(%s)", name, value))
+	for _, p := range pragmaList {
+		params.Add("_pragma", fmt.Sprintf("%s(%s)", p.name, p.value))
 	}
 	// Use BEGIN IMMEDIATE so writers acquire the reserved lock up front,
 	// preventing deferred-to-writer upgrade deadlocks.

@@ -504,6 +504,11 @@
           },
           "type": "array",
           "description": "List of skill names to disable and hide from the agent"
+        },
+        "sqlite_exclusive_lock": {
+          "type": "boolean",
+          "description": "Use exclusive locking mode for SQLite. Eliminates the shared-memory file and avoids mmap, which fixes 'unable to open database' errors in sandboxed environments. Only one Crush instance can access the database at a time when enabled.",
+          "default": false
         }
       },
       "additionalProperties": false,

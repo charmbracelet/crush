@@ -399,6 +399,7 @@ func (m *UI) Init() tea.Cmd {
 	if m.com.IsHyper() {
 		cmds = append(cmds, m.fetchHyperCredits())
 	}
+	cmds = append(cmds, m.checkPendingMCPAuth())
 	return tea.Batch(cmds...)
 }
 
@@ -570,6 +571,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case mcpStateChangedMsg:
 		m.mcpStates = msg.states
+		// Auto-open the MCP auth dialog if any servers need authentication.
+		if cmd := m.openMCPAuthDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case mcpPromptsLoadedMsg:
 		m.mcpPrompts = msg.Prompts
 		dia := m.dialog.Dialog(dialog.CommandsID)
@@ -902,6 +907,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			slog.Warn("Unexpected Kitty graphics response",
 				"response", string(msg.Payload),
 				"options", msg.Options)
+		}
+	case dialog.ActionMCPAuthStarted:
+		cmds = append(cmds, m.authenticateMCP(msg.Name))
+	case dialog.ActionMCPAuthComplete, dialog.ActionMCPAuthErrored:
+		if m.dialog.HasDialogs() {
+			if cmd := m.handleDialogMsg(msg); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 		}
 	default:
 		if m.dialog.HasDialogs() {
@@ -3815,6 +3828,66 @@ func (m *UI) disableDockerMCP() tea.Msg {
 	}
 
 	return util.NewInfoMsg("Docker MCP disabled successfully")
+}
+
+func (m *UI) authenticateMCP(name string) tea.Cmd {
+	ctx, cancel := context.WithCancel(context.Background())
+	userCancelled := false
+
+	// Give the dialog the cancel func so closing it stops the auth.
+	if d, ok := m.dialog.Dialog(dialog.MCPAuthID).(*dialog.MCPAuth); ok {
+		d.SetCancelFunc(func() {
+			userCancelled = true
+			cancel()
+		})
+	}
+
+	return func() tea.Msg {
+		defer cancel()
+		if err := m.com.Workspace.MCPAuthenticate(ctx, name); err != nil {
+			if userCancelled {
+				return nil
+			}
+			if errors.Is(err, context.DeadlineExceeded) {
+				return dialog.ActionMCPAuthErrored{Name: name, Error: fmt.Errorf("authentication timed out")}
+			}
+			if errors.Is(err, context.Canceled) {
+				return nil
+			}
+			return dialog.ActionMCPAuthErrored{Name: name, Error: err}
+		}
+		return dialog.ActionMCPAuthComplete{Name: name}
+	}
+}
+
+func (m *UI) openMCPAuthDialog() tea.Cmd {
+	pending := m.com.Workspace.MCPPendingAuth()
+	if len(pending) == 0 {
+		return nil
+	}
+	if m.dialog.ContainsDialog(dialog.MCPAuthID) {
+		m.dialog.BringToFront(dialog.MCPAuthID)
+		return nil
+	}
+	dlg, cmd := dialog.NewMCPAuth(m.com, pending, m.com.Workspace.MCPAuthURL)
+	m.dialog.OpenDialog(dlg)
+	return cmd
+}
+
+// checkPendingMCPAuth waits for MCP initialization to finish and then
+// checks whether any OAuth MCPs need authentication. This runs as a
+// Bubble Tea command so it doesn't block the UI.
+func (m *UI) checkPendingMCPAuth() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := mcp.WaitForInit(ctx); err != nil {
+			return nil
+		}
+		return mcpStateChangedMsg{
+			states: m.com.Workspace.MCPGetStates(),
+		}
+	}
 }
 
 // renderLogo renders the Crush logo with the given styles and dimensions.

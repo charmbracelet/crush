@@ -537,6 +537,21 @@ func (w *ClientWorkspace) DisableDockerMCP() error {
 	return w.client.DisableDockerMCP(context.Background(), w.workspaceID())
 }
 
+func (w *ClientWorkspace) MCPAuthenticate(ctx context.Context, name string) error {
+	// OAuth authentication requires local browser interaction and
+	// cannot be proxied through the server. Return an error so the
+	// caller knows to handle it differently in client mode.
+	return fmt.Errorf("MCP OAuth authentication is not supported in client mode")
+}
+
+func (w *ClientWorkspace) MCPPendingAuth() []mcp.PendingAuthServer {
+	return nil
+}
+
+func (w *ClientWorkspace) MCPAuthURL(_ string) string {
+	return ""
+}
+
 // -- Lifecycle --
 
 func (w *ClientWorkspace) Subscribe(program *tea.Program) {

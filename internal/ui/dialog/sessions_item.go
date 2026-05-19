@@ -184,7 +184,8 @@ func renderItem(t ListItemStyles, title string, info string, focused bool, width
 			// precisely via [ansi.AttrUnderline] and [ansi.AttrNoUnderline]
 			// which only affect the underline attribute without interfering
 			// with other style attributes.
-			parts = append(parts,
+			parts = append(
+				parts,
 				ansi.NewStyle().Underline(true).String(),
 				ansi.Cut(title, start, stop+1),
 				ansi.NewStyle().Underline(false).String(),

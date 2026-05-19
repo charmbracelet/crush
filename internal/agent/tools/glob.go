@@ -82,7 +82,8 @@ func NewGlobTool(workingDir string) fantasy.AgentTool {
 					Truncated:     truncated,
 				},
 			), nil
-		})
+		},
+	)
 }
 
 func globFiles(ctx context.Context, pattern, searchPath string, limit int) ([]string, bool, error) {

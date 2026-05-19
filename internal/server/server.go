@@ -168,7 +168,7 @@ func NewServer(cfg *config.ConfigStore, network, address string) *Server {
 	mux.Handle("/v1/docs/", httpswagger.WrapHandler)
 	s.h = &http.Server{
 		Protocols: &p,
-		Handler:   s.loggingHandler(mux),
+		Handler:   s.recoverHandler(s.loggingHandler(mux)),
 	}
 	if network == "tcp" {
 		s.h.Addr = address

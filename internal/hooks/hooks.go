@@ -128,7 +128,8 @@ func aggregate(results []HookResult, origToolInput string) AggregateResult {
 		if r.UpdatedInput != "" {
 			next, err := shallowMerge(merged, r.UpdatedInput)
 			if err != nil {
-				slog.Warn("Hook updated_input patch rejected; ignoring",
+				slog.Warn(
+					"Hook updated_input patch rejected; ignoring",
 					"error", err,
 					"patch", r.UpdatedInput,
 				)

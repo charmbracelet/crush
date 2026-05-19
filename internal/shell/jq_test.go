@@ -185,7 +185,8 @@ func TestJQ_Success(t *testing.T) {
 	t.Parallel()
 
 	var stdout bytes.Buffer
-	err := handleJQ(t.Context(),
+	err := handleJQ(
+		t.Context(),
 		[]string{"jq", "-c", ".a"},
 		strings.NewReader(`{"a":1}`),
 		&stdout, io.Discard,

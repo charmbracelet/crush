@@ -486,7 +486,8 @@ func perHostServerDir(hostURL *url.URL) (string, error) {
 // the --host flag so client and server compute the same key.
 func safeHostName(hostURL *url.URL) string {
 	return safeNameRegexp.ReplaceAllString(
-		hostURL.Scheme+"://"+hostURL.Host+hostURL.Path, "_")
+		hostURL.Scheme+"://"+hostURL.Host+hostURL.Path, "_",
+	)
 }
 
 // serverReadyTimeout returns the total budget for the readiness probe.

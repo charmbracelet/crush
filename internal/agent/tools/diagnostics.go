@@ -35,7 +35,8 @@ func NewDiagnosticsTool(lspManager *lsp.Manager) fantasy.AgentTool {
 			notifyLSPs(ctx, lspManager, params.FilePath)
 			output := getDiagnostics(params.FilePath, lspManager)
 			return fantasy.NewTextResponse(output), nil
-		})
+		},
+	)
 }
 
 // openInLSPs ensures LSP servers are running and aware of the file, but does

@@ -159,21 +159,20 @@ func TestResolvedEnv_RealShell_Deterministic(t *testing.T) {
 	require.True(t, slices.IsSorted(got), "env slice must be sorted; got %v", got)
 }
 
-// TestResolvedEnv_RealShell_UnsetExpandsEmpty pins Phase 2's lenient
+// TestResolvedEnv_RealShell_UnsetExpandsEmpty pins the lenient
 // default: an unset bare $VAR expands to the empty string, matching
-// bash. The silent-empty-credential class of bug that motivated Phase
-// 1's nounset-on default is already prevented by the pure-function
-// error-returning contract of ResolvedEnv, so we no longer rely on
-// nounset to catch typo'd variable names. Users who want strict
-// behaviour for a required credential opt in per-reference with
-// ${VAR:?msg}; see TestResolvedEnv_RealShell_ColonQuestionIsStrict.
+// bash. The silent-empty-credential class of bug is prevented by the
+// pure-function error-returning contract of ResolvedEnv, so we don't
+// rely on nounset to catch typo'd variable names. Users who want
+// strict behaviour for a required credential opt in per-reference
+// with ${VAR:?msg}; see TestResolvedEnv_RealShell_ColonQuestionIsStrict.
 func TestResolvedEnv_RealShell_UnsetExpandsEmpty(t *testing.T) {
 	t.Parallel()
 
 	m := MCPConfig{Env: map[string]string{
-		// Intentional typo: user meant $FORGEJO_TOKEN. Under Phase 2
-		// defaults this expands to "" rather than erroring, matching
-		// bash's behaviour on bare $VAR.
+		// Intentional typo: user meant $FORGEJO_TOKEN. Under the
+		// lenient default this expands to "" rather than erroring,
+		// matching bash's behaviour on bare $VAR.
 		"FORGEJO_ACCESS_TOKEN": "$FORGJO_TOKEN",
 	}}
 	got, err := m.ResolvedEnv(realShellResolver(nil))
@@ -259,13 +258,12 @@ func TestResolvedHeaders_RealShell_FailurePreservesOriginal(t *testing.T) {
 	require.Equal(t, orig, m.Headers, "receiver Headers must be preserved")
 }
 
-// TestResolvedHeaders_RealShell_DropEmpty pins Phase 2 design
-// decision #18 on the MCP side: a header whose value resolves to the
-// empty string is omitted from the returned map. Covers the three
-// ways a value can legitimately land on empty — unset bare $VAR
-// under lenient nounset, a literal "", and a non-failing command
-// whose stdout is empty — and also pins that a failing $(cmd) still
-// errors rather than silently dropping.
+// TestResolvedHeaders_RealShell_DropEmpty verifies that a header
+// whose value resolves to the empty string is omitted from the
+// returned map. Covers the three ways a value can legitimately land
+// on empty — unset bare $VAR under lenient nounset, a literal "",
+// and a non-failing command whose stdout is empty — and also pins
+// that a failing $(cmd) still errors rather than silently dropping.
 func TestResolvedHeaders_RealShell_DropEmpty(t *testing.T) {
 	t.Parallel()
 

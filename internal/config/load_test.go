@@ -248,7 +248,8 @@ func TestConfig_setDefaults(t *testing.T) {
 		cfg := &Config{}
 		cfg.setDefaults(child, "")
 
-		require.Equal(t,
+		require.Equal(
+			t,
 			filepath.Clean(filepath.Join(child, defaultDataDirectory)),
 			filepath.Clean(cfg.Options.DataDirectory),
 		)
@@ -1828,12 +1829,10 @@ func TestConfig_configureProviders_HyperAPIKeyFromConfigOverrides(t *testing.T) 
 	require.Equal(t, "env-api-key", pc.APIKey)
 }
 
-// TestConfig_configureProviders_ProviderHeaderResolveError pins
-// Phase 2 design decision #14: a failing $(cmd) in a provider header
-// must fail the provider load with a clear message that names the
-// offending header. The Phase 1 log-and-continue divergence at
-// load.go:225 is gone; provider headers now share the MCP error
-// contract.
+// TestConfig_configureProviders_ProviderHeaderResolveError verifies
+// that a failing $(cmd) in a provider header fails the provider load
+// with a clear message that names the offending header. Provider
+// headers share the MCP error contract.
 func TestConfig_configureProviders_ProviderHeaderResolveError(t *testing.T) {
 	knownProviders := []catwalk.Provider{
 		{
@@ -1868,12 +1867,11 @@ func TestConfig_configureProviders_ProviderHeaderResolveError(t *testing.T) {
 	require.Contains(t, err.Error(), "X-Broken", "error must name the offending header")
 }
 
-// TestConfig_configureProviders_CatwalkDefaultWithUnsetVarLoads pins
-// Phase 2 design decisions #11 and #18 from the provider angle: a
-// Catwalk-style default header like
-// "OpenAI-Organization": "$OPENAI_ORG_ID" must load cleanly under
-// lenient nounset (unset → "" → header dropped), not fail the load
-// and not leave the literal template on the wire.
+// TestConfig_configureProviders_CatwalkDefaultWithUnsetVarLoads
+// verifies that a Catwalk-style default header like
+// "OpenAI-Organization": "$OPENAI_ORG_ID" loads cleanly under lenient
+// nounset (unset → "" → header dropped), and does not fail the load
+// or leave the literal template on the wire.
 func TestConfig_configureProviders_CatwalkDefaultWithUnsetVarLoads(t *testing.T) {
 	knownProviders := []catwalk.Provider{
 		{
@@ -1979,11 +1977,11 @@ func TestConfig_configureProviders_EchoEmptyHeaderDropped(t *testing.T) {
 	require.Equal(t, "present", pc.ExtraHeaders["X-Kept"])
 }
 
-// TestConfig_configureProviders_UnsetAPIKeySkipsProvider pins Phase 2
-// Step 12 / design decision #15: under the lenient-nounset shell
-// resolver, $UNSET_API_KEY expands to ("", nil) rather than ("", err),
-// and the existing `v == "" || err != nil` skip path at load.go:331
-// still drops the provider. The slog.Warn line is emitted on the same
+// TestConfig_configureProviders_UnsetAPIKeySkipsProvider verifies that
+// under the lenient-nounset shell resolver, $UNSET_API_KEY expands to
+// ("", nil) rather than ("", err), and the existing
+// `v == "" || err != nil` skip path at load.go:331 still drops the
+// provider. The slog.Warn line is emitted on the same
 // path but is not asserted here — internal/config/load_test.go's
 // TestMain replaces the default slog handler with an io.Discard
 // writer, so capturing that log line would require mid-test handler

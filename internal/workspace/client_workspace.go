@@ -119,6 +119,14 @@ func (w *ClientWorkspace) DeleteSession(ctx context.Context, sessionID string) e
 	return w.client.DeleteSession(ctx, w.workspaceID(), sessionID)
 }
 
+// ListSessionModels returns the persisted model selections for a session.
+// In client/server mode this is not yet wired through proto, so it returns
+// an empty slice. The strict no-overwrite restore policy treats this as
+// "no saved models" and leaves current project model choices unchanged.
+func (w *ClientWorkspace) ListSessionModels(ctx context.Context, sessionID string) ([]session.SessionModel, error) {
+	return nil, nil
+}
+
 func (w *ClientWorkspace) CreateAgentToolSessionID(messageID, toolCallID string) string {
 	return fmt.Sprintf("%s$$%s", messageID, toolCallID)
 }

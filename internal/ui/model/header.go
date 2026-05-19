@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/exp/charmtone"
 )
 
 const (
@@ -148,7 +149,13 @@ func renderHeaderDetails(
 	model := com.Config().GetModelByType(agentCfg.Model)
 	if model != nil && model.ContextWindow > 0 {
 		percentage := (float64(session.CompletionTokens+session.PromptTokens) / float64(model.ContextWindow)) * 100
-		formattedPercentage := t.Header.Percentage.Render(fmt.Sprintf("%d%%", int(percentage)))
+		percentageText := fmt.Sprintf("%d%%", int(percentage))
+		percentageStyle := t.Header.Percentage
+		if session.EstimatedUsage {
+			percentageText = "~" + percentageText
+			percentageStyle = percentageStyle.Foreground(charmtone.Tang)
+		}
+		formattedPercentage := percentageStyle.Render(percentageText)
 		parts = append(parts, formattedPercentage)
 	}
 

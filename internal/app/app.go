@@ -113,10 +113,12 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 
 	go mcp.Initialize(ctx, app.Permissions, store)
 
-	// cleanup database upon app shutdown
+	// Release the shared database connection on shutdown. The pool
+	// closes the underlying *sql.DB when the last reference is released.
+	dataDir := cfg.Options.DataDirectory
 	app.cleanupFuncs = append(
 		app.cleanupFuncs,
-		func(context.Context) error { return conn.Close() },
+		func(context.Context) error { return db.Release(dataDir) },
 		func(ctx context.Context) error { return mcp.Close(ctx) },
 	)
 
@@ -582,12 +584,22 @@ func (app *App) Shutdown() {
 		app.AgentCoordinator.CancelAll()
 	}
 
-	// Now run remaining cleanup tasks in parallel.
-	var wg sync.WaitGroup
-
 	// Shared shutdown context for all timeout-bounded cleanup.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
+	// Drain any debounced message updates before the DB-close cleanup
+	// runs in the parallel block below. message.Service buffers
+	// streaming deltas (see internal/message/message.go) and we must
+	// land them while the connection is still open.
+	if app.Messages != nil {
+		if err := app.Messages.FlushAll(shutdownCtx); err != nil {
+			slog.Error("Failed to flush pending message updates on shutdown", "error", err)
+		}
+	}
+
+	// Now run remaining cleanup tasks in parallel.
+	var wg sync.WaitGroup
 
 	// Send exit event
 	wg.Go(func() {

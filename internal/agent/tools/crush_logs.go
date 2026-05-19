@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"io"
 	"os"
 	"path/filepath"
@@ -18,8 +19,25 @@ import (
 
 const CrushLogsToolName = "crush_logs"
 
-//go:embed crush_logs.md
-var crushLogsDescription []byte
+//go:embed crush_logs.md.tpl
+var crushLogsDescriptionTmpl []byte
+
+var crushLogsDescriptionTpl = template.Must(
+	template.New("crushLogsDescription").
+		Parse(string(crushLogsDescriptionTmpl)),
+)
+
+type crushLogsDescriptionData struct {
+	DefaultLines int
+	MaxLines     int
+}
+
+func crushLogsDescription() string {
+	return renderTemplate(crushLogsDescriptionTpl, crushLogsDescriptionData{
+		DefaultLines: defaultLogLines,
+		MaxLines:     maxLogLines,
+	})
+}
 
 // Max line size to prevent memory issues with very long log lines (1 MB).
 const maxLogLineSize = 1024 * 1024
@@ -58,7 +76,7 @@ type CrushLogsParams struct {
 func NewCrushLogsTool(logFile string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		CrushLogsToolName,
-		string(crushLogsDescription),
+		crushLogsDescription(),
 		func(ctx context.Context, params CrushLogsParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			result := runCrushLogs(logFile, params)
 			return fantasy.NewTextResponse(result), nil

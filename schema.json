@@ -264,6 +264,16 @@
           "type": "array",
           "description": "List of tools from this MCP server to disable"
         },
+        "enabled_tools": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "get-library-doc"
+            ]
+          },
+          "type": "array",
+          "description": "Allow list of tools from this MCP server"
+        },
         "timeout": {
           "type": "integer",
           "description": "Timeout in seconds for MCP server connections",
@@ -423,7 +433,7 @@
         },
         "data_directory": {
           "type": "string",
-          "description": "Directory for storing application data (relative to working directory)",
+          "description": "Directory for storing application data. Relative paths are resolved against the working directory; absolute paths are used as-is.",
           "default": ".crush",
           "examples": [
             ".crush"
@@ -447,7 +457,7 @@
         },
         "disable_default_providers": {
           "type": "boolean",
-          "description": "Ignore all default/embedded providers. When enabled",
+          "description": "Ignore all default/embedded providers. When enabled, providers must be fully specified in the config file with base_url, models, and api_key - no merging with defaults occurs",
           "default": false
         },
         "attribution": {
@@ -582,11 +592,15 @@
         },
         "extra_body": {
           "type": "object",
-          "description": "Additional fields to include in request bodies"
+          "description": "Additional fields to include in request bodies, only works with openai-compatible providers"
         },
         "provider_options": {
           "type": "object",
           "description": "Additional provider-specific options for this provider"
+        },
+        "flat_rate": {
+          "type": "boolean",
+          "description": "Flat-rate mode for this provider"
         },
         "models": {
           "items": {

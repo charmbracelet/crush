@@ -70,6 +70,12 @@ func (w *AppWorkspace) ParseAgentToolSessionID(sessionID string) (string, string
 // -- Messages --
 
 func (w *AppWorkspace) ListMessages(ctx context.Context, sessionID string) ([]message.Message, error) {
+	// Drain any debounced updates so the caller observes the latest
+	// in-memory state. message.Service buffers streaming deltas and a
+	// cold List would otherwise miss them at session-switch time.
+	if err := w.app.Messages.FlushAll(ctx); err != nil {
+		return nil, err
+	}
 	return w.app.Messages.List(ctx, sessionID)
 }
 

@@ -9,6 +9,8 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -63,6 +65,7 @@ func init() {
 		projectsCmd,
 		updateProvidersCmd,
 		logsCmd,
+		logoutCmd,
 		schemaCmd,
 		loginCmd,
 		statsCmd,
@@ -356,22 +359,7 @@ func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func
 
 	ws, err := c.CreateWorkspace(ctx, wsReq)
 	if err != nil {
-		// The server socket may exist before the HTTP handler is ready.
-		// Retry a few times with a short backoff.
-		for range 5 {
-			select {
-			case <-ctx.Done():
-				return nil, nil, nil, ctx.Err()
-			case <-time.After(200 * time.Millisecond):
-			}
-			ws, err = c.CreateWorkspace(ctx, wsReq)
-			if err == nil {
-				break
-			}
-		}
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to create workspace: %v", err)
-		}
+		return nil, nil, nil, fmt.Errorf("failed to create workspace: %v", err)
 	}
 
 	if shouldEnableMetrics(ws.Config) {
@@ -395,34 +383,33 @@ func ensureServer(cmd *cobra.Command, hostURL *url.URL) error {
 	switch hostURL.Scheme {
 	case "unix", "npipe":
 		needsStart := false
-		if _, err := os.Stat(hostURL.Host); err != nil && errors.Is(err, fs.ErrNotExist) {
-			needsStart = true
-		} else if err == nil {
-			if err := restartIfStale(cmd, hostURL); err != nil {
-				slog.Warn("Failed to check server version, restarting", "error", err)
-				needsStart = true
+		_, statErr := os.Stat(hostURL.Host)
+		switch {
+		case statErr == nil:
+			restarted, err := restartIfStale(cmd, hostURL)
+			if err != nil {
+				slog.Warn("Failed to check server version", "error", err)
 			}
+			needsStart = restarted || err != nil
+		case errors.Is(statErr, fs.ErrNotExist):
+			needsStart = true
+		default:
+			slog.Warn("Unexpected error stat'ing server socket, attempting cleanup",
+				"path", hostURL.Host, "error", statErr)
+			if err := os.Remove(hostURL.Host); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return fmt.Errorf("failed to remove stale server socket %q: %v", hostURL.Host, err)
+			}
+			needsStart = true
 		}
 
 		if needsStart {
-			if err := startDetachedServer(cmd); err != nil {
-				return err
+			if err := spawnAndWaitReady(cmd, hostURL); err != nil {
+				return fmt.Errorf("failed to initialize crush server: %v", err)
 			}
+			return nil
 		}
 
-		var err error
-		for range 10 {
-			_, err = os.Stat(hostURL.Host)
-			if err == nil {
-				break
-			}
-			select {
-			case <-cmd.Context().Done():
-				return cmd.Context().Err()
-			case <-time.After(100 * time.Millisecond):
-			}
-		}
-		if err != nil {
+		if err := waitForServerReady(cmd.Context(), hostURL); err != nil {
 			return fmt.Errorf("failed to initialize crush server: %v", err)
 		}
 	}
@@ -430,24 +417,213 @@ func ensureServer(cmd *cobra.Command, hostURL *url.URL) error {
 	return nil
 }
 
+// spawnAndWaitReady serializes the spawn-and-wait-for-readiness sequence
+// across concurrent clients via an exclusive flock on
+// $XDG_CACHE_HOME/crush/server-<safeHost>/start.lock.
+//
+// After acquiring the lock it re-probes readiness so that a client that
+// blocked while another client was spawning can skip its own spawn and
+// just use the now-running server. The lock is held only for the
+// duration of "spawn + readiness probe" and released before the caller
+// resumes its normal lifetime.
+func spawnAndWaitReady(cmd *cobra.Command, hostURL *url.URL) error {
+	chDir, err := perHostServerDir(hostURL)
+	if err != nil {
+		return err
+	}
+	release, err := acquireSpawnLock(filepath.Join(chDir, "start.lock"))
+	if err != nil {
+		// If the lock itself is unavailable, fall back to the
+		// unsynchronized path rather than blocking the user.
+		slog.Warn("Failed to acquire spawn lock, proceeding without single-flight", "error", err)
+		if err := startDetachedServer(cmd, hostURL); err != nil {
+			return err
+		}
+		return waitForServerReady(cmd.Context(), hostURL)
+	}
+	defer release()
+
+	// Another client may have just finished spawning while we were
+	// waiting on the lock; if the server is already responsive, skip
+	// the spawn entirely.
+	probeCtx, cancel := context.WithTimeout(cmd.Context(), 200*time.Millisecond)
+	probeErr := quickHealthProbe(probeCtx, hostURL)
+	cancel()
+	if probeErr == nil {
+		return nil
+	}
+
+	if err := startDetachedServer(cmd, hostURL); err != nil {
+		return err
+	}
+	return waitForServerReady(cmd.Context(), hostURL)
+}
+
+// quickHealthProbe issues a single readiness request with the caller's
+// context and returns nil iff the server is responsive right now.
+func quickHealthProbe(ctx context.Context, hostURL *url.URL) error {
+	httpClient, reqURL, err := readinessHTTPClient(hostURL)
+	if err != nil {
+		return err
+	}
+	return probeHealth(ctx, httpClient, reqURL, hostURL)
+}
+
+// perHostServerDir returns (and creates) the cache directory used for
+// per-host server state (logs, start.lock, etc.). The path is derived
+// from the parsed host URL rather than the global flag so the same key
+// is computed regardless of where the host came from.
+func perHostServerDir(hostURL *url.URL) (string, error) {
+	chDir := filepath.Join(config.GlobalCacheDir(), "server-"+safeHostName(hostURL))
+	if err := os.MkdirAll(chDir, 0o700); err != nil {
+		return "", fmt.Errorf("failed to create server working directory: %v", err)
+	}
+	return chDir, nil
+}
+
+// safeHostName returns a filesystem-safe identifier for hostURL,
+// suitable for use as a directory name. It mirrors the input shape of
+// the --host flag so client and server compute the same key.
+func safeHostName(hostURL *url.URL) string {
+	return safeNameRegexp.ReplaceAllString(
+		hostURL.Scheme+"://"+hostURL.Host+hostURL.Path, "_",
+	)
+}
+
+// serverReadyTimeout returns the total budget for the readiness probe.
+// Overridable via CRUSH_SERVER_READY_TIMEOUT (parsed as a Go duration).
+func serverReadyTimeout() time.Duration {
+	const def = 10 * time.Second
+	v := os.Getenv("CRUSH_SERVER_READY_TIMEOUT")
+	if v == "" {
+		return def
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		return def
+	}
+	return d
+}
+
+// waitForServerReady polls GET /v1/health until the server responds with
+// any 2xx status or the total timeout elapses. Each attempt uses a short
+// per-attempt timeout so a hung listener doesn't burn the whole budget.
+//
+// The HTTP transport is built to mirror how *client.Client dials so the
+// same unix socket / npipe / tcp setups all work uniformly here.
+func waitForServerReady(ctx context.Context, hostURL *url.URL) error {
+	httpClient, reqURL, err := readinessHTTPClient(hostURL)
+	if err != nil {
+		return err
+	}
+
+	const perAttempt = 100 * time.Millisecond
+	deadline := time.Now().Add(serverReadyTimeout())
+
+	var lastErr error
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if time.Now().After(deadline) {
+			if lastErr != nil {
+				return lastErr
+			}
+			return fmt.Errorf("timed out waiting for server readiness")
+		}
+
+		attemptCtx, cancel := context.WithTimeout(ctx, perAttempt)
+		err := probeHealth(attemptCtx, httpClient, reqURL, hostURL)
+		cancel()
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(perAttempt):
+		}
+	}
+}
+
+// readinessHTTPClient builds an *http.Client whose transport dials the
+// server using the same scheme-aware logic as *client.Client (unix
+// socket, named pipe, or tcp).
+func readinessHTTPClient(hostURL *url.URL) (*http.Client, string, error) {
+	c, err := client.NewClient("", hostURL.Scheme, hostURL.Host)
+	if err != nil {
+		return nil, "", err
+	}
+
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return c.Dial(ctx, network, addr)
+	}
+	if hostURL.Scheme == "unix" || hostURL.Scheme == "npipe" {
+		tr.DisableCompression = true
+	}
+
+	httpClient := &http.Client{Transport: tr}
+
+	// For unix sockets / named pipes we still need a syntactically valid
+	// HTTP URL; the actual address is resolved by the dialer.
+	host := hostURL.Host
+	if hostURL.Scheme == "unix" || hostURL.Scheme == "npipe" {
+		host = client.DummyHost
+	}
+	reqURL := (&url.URL{Scheme: "http", Host: host, Path: "/v1/health"}).String()
+	return httpClient, reqURL, nil
+}
+
+// probeHealth issues a single GET to the readiness endpoint and treats
+// any 2xx response as success.
+func probeHealth(ctx context.Context, h *http.Client, reqURL string, hostURL *url.URL) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return err
+	}
+	if hostURL.Scheme == "unix" || hostURL.Scheme == "npipe" {
+		req.Host = client.DummyHost
+	}
+	rsp, err := h.Do(req)
+	if err != nil {
+		return err
+	}
+	defer rsp.Body.Close()
+	_, _ = io.Copy(io.Discard, rsp.Body)
+	if rsp.StatusCode < 200 || rsp.StatusCode >= 300 {
+		return fmt.Errorf("server health check failed: %s", rsp.Status)
+	}
+	return nil
+}
+
 // restartIfStale checks whether the running server matches the current
 // client version. When they differ, it sends a shutdown command and
 // removes the stale socket so the caller can start a fresh server.
-func restartIfStale(cmd *cobra.Command, hostURL *url.URL) error {
+//
+// It returns restarted=true when it has shut down a stale server and the
+// caller must spawn a new one. When the server matches the client version
+// (or the check itself fails), restarted is false.
+func restartIfStale(cmd *cobra.Command, hostURL *url.URL) (restarted bool, err error) {
 	c, err := client.NewClient("", hostURL.Scheme, hostURL.Host)
 	if err != nil {
-		return err
+		return false, err
 	}
 	vi, err := c.VersionInfo(cmd.Context())
 	if err != nil {
-		return err
+		return false, err
 	}
-	if vi.Version == version.Version {
-		return nil
+	if vi.Version == version.Version && vi.BuildID == version.BuildID {
+		return false, nil
 	}
-	slog.Info("Server version mismatch, restarting",
-		"server", vi.Version,
-		"client", version.Version,
+	slog.Info(
+		"Server version mismatch, restarting",
+		"server_version", vi.Version,
+		"client_version", version.Version,
+		"server_build_id", vi.BuildID,
+		"client_build_id", version.BuildID,
 	)
 	_ = c.ShutdownServer(cmd.Context())
 	// Give the old process a moment to release the socket.
@@ -457,27 +633,26 @@ func restartIfStale(cmd *cobra.Command, hostURL *url.URL) error {
 		}
 		select {
 		case <-cmd.Context().Done():
-			return cmd.Context().Err()
+			return true, cmd.Context().Err()
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
 	// Force-remove if the socket is still lingering.
 	_ = os.Remove(hostURL.Host)
-	return nil
+	return true, nil
 }
 
 var safeNameRegexp = regexp.MustCompile(`[^a-zA-Z0-9._-]`)
 
-func startDetachedServer(cmd *cobra.Command) error {
+func startDetachedServer(cmd *cobra.Command, hostURL *url.URL) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("failed to get executable path: %v", err)
 	}
 
-	safeClientHost := safeNameRegexp.ReplaceAllString(clientHost, "_")
-	chDir := filepath.Join(config.GlobalCacheDir(), "server-"+safeClientHost)
-	if err := os.MkdirAll(chDir, 0o700); err != nil {
-		return fmt.Errorf("failed to create server working directory: %v", err)
+	chDir, err := perHostServerDir(hostURL)
+	if err != nil {
+		return err
 	}
 
 	cmdArgs := []string{"server"}
@@ -485,7 +660,11 @@ func startDetachedServer(cmd *cobra.Command) error {
 		cmdArgs = append(cmdArgs, "--host", clientHost)
 	}
 
-	c := exec.CommandContext(cmd.Context(), exe, cmdArgs...)
+	// Use context.Background() so the parent's context cancellation does not
+	// kill the spawned server. detachProcess (Setsid on !windows,
+	// DETACHED_PROCESS on windows) is what truly detaches the child from
+	// this process's lifetime.
+	c := exec.CommandContext(context.Background(), exe, cmdArgs...)
 	stdoutPath := filepath.Join(chDir, "stdout.log")
 	stderrPath := filepath.Join(chDir, "stderr.log")
 	detachProcess(c)

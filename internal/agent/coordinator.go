@@ -62,6 +62,15 @@ var (
 	errSmallModelNotFound              = errors.New("small model not found in provider config")
 )
 
+// Copilot models that use the Responses API instead of Chat Completions.
+var copilotResponsesModels = map[string]bool{
+	"gpt-5.2":       true,
+	"gpt-5.2-codex": true,
+	"gpt-5.3-codex": true,
+	"gpt-5.4-mini":  true,
+	"gpt-5-mini":    true,
+}
+
 type Coordinator interface {
 	// INFO: (kujtim) this is not used yet we will use this when we have multiple agents
 	// SetMainAgent(string)
@@ -268,7 +277,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 	switch providerCfg.Type {
 	case openai.Name, azure.Name:
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
-		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
+		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" && model.CatwalkCfg.CanReason {
 			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
 		}
 		if openai.IsResponsesModel(model.CatwalkCfg.ID) {
@@ -286,13 +295,13 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 				options[openai.Name] = parsed
 			}
 		}
-	case anthropic.Name:
+	case anthropic.Name, bedrock.Name:
 		var (
 			_, hasEffort = mergedOptions["effort"]
 			_, hasThink  = mergedOptions["thinking"]
 		)
 		switch {
-		case !hasEffort && model.ModelCfg.ReasoningEffort != "":
+		case !hasEffort && model.ModelCfg.ReasoningEffort != "" && model.CatwalkCfg.CanReason:
 			mergedOptions["effort"] = model.ModelCfg.ReasoningEffort
 		case !hasThink && model.ModelCfg.Think:
 			mergedOptions["thinking"] = map[string]any{"budget_tokens": 2000}
@@ -346,12 +355,17 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			options[google.Name] = parsed
 		}
 	case openaicompat.Name, hyper.Name:
-		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
-		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" {
-			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
-		}
-
 		extraBody := make(map[string]any)
+
+		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
+		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" && model.CatwalkCfg.CanReason {
+			switch providerCfg.ID {
+			case string(catwalk.InferenceProviderIoNet):
+				extraBody["reasoning"] = map[string]string{"effort": model.ModelCfg.ReasoningEffort}
+			default:
+				mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
+			}
+		}
 
 		// "reasoning effort" is a standard OpenAI field, but "thinking" is not.
 		// Setting it in the right way for each provider.
@@ -361,11 +375,15 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		case hyper.Name:
 			extraBody["thinking"] = model.ModelCfg.Think
 		case string(catwalk.InferenceProviderIoNet):
-			extraBody["chat_template_kwargs"] = map[string]any{
-				"thinking": model.ModelCfg.Think,
+			if _, ok := extraBody["reasoning"]; !ok && model.CatwalkCfg.CanReason {
+				if model.ModelCfg.Think {
+					extraBody["reasoning"] = map[string]string{"effort": "medium"}
+				} else {
+					extraBody["reasoning"] = map[string]string{"effort": "none"}
+				}
 			}
-		case string(catwalk.InferenceProviderZAI):
-			if model.ModelCfg.Think {
+		case string(catwalk.InferenceProviderZAI), string(catwalk.InferenceProviderDeepSeek):
+			if model.ModelCfg.Think || model.ModelCfg.ReasoningEffort != "" {
 				extraBody["thinking"] = map[string]any{
 					"type": "enabled",
 				}
@@ -373,6 +391,10 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 				extraBody["thinking"] = map[string]any{
 					"type": "disabled",
 				}
+			}
+		case string(catwalk.InferenceProviderAlibabaSingapore):
+			if model.CatwalkCfg.CanReason {
+				extraBody["enable_thinking"] = model.ModelCfg.Think
 			}
 		}
 
@@ -458,10 +480,10 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	}
 
 	// Get the model name for the agent
-	modelName := ""
+	modelID := ""
 	if modelCfg, ok := c.cfg.Config().Models[agent.Model]; ok {
 		if model := c.cfg.Config().GetModel(modelCfg.Provider, modelCfg.Model); model != nil {
-			modelName = model.Name
+			modelID = model.ID
 		}
 	}
 
@@ -473,8 +495,9 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		hookRunner = hooks.NewRunner(preToolHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
 	}
 
-	allTools = append(allTools,
-		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelName),
+	allTools = append(
+		allTools,
+		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelID),
 		tools.NewCrushInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
 		tools.NewCrushLogsTool(logFile),
 		tools.NewJobOutputTool(),
@@ -626,10 +649,12 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 			Model:      largeModel,
 			CatwalkCfg: *largeCatwalkModel,
 			ModelCfg:   largeModelCfg,
+			FlatRate:   largeProviderCfg.FlatRate,
 		}, Model{
 			Model:      smallModel,
 			CatwalkCfg: *smallCatwalkModel,
 			ModelCfg:   smallModelCfg,
+			FlatRate:   smallProviderCfg.FlatRate,
 		}, nil
 }
 
@@ -720,7 +745,13 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 	// Set HTTP client based on provider and debug mode.
 	var httpClient *http.Client
 	if providerID == string(catwalk.InferenceProviderCopilot) {
-		opts = append(opts, openaicompat.WithUseResponsesAPI())
+		opts = append(
+			opts,
+			openaicompat.WithUseResponsesAPI(),
+			openaicompat.WithResponsesAPIFunc(func(modelID string) bool {
+				return copilotResponsesModels[modelID]
+			}),
+		)
 		httpClient = copilot.NewClient(isSubAgent, c.cfg.Config().Options.Debug)
 	} else if c.cfg.Config().Options.Debug {
 		httpClient = log.NewHTTPClient()
@@ -1075,7 +1106,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		NonInteractive:   true,
 	})
 	if err != nil {
-		return fantasy.NewTextErrorResponse("error generating response"), nil
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to generate response: %s", err)), nil
 	}
 
 	// Update parent session cost
@@ -1142,6 +1173,17 @@ func discoverSkills(cfg *config.ConfigStore) (allSkills, activeSkills []*skills.
 	}
 	activeSkills = skills.Filter(allSkills, disabledSkills)
 
+	allStates := append([]*skills.SkillState(nil), builtinStates...)
+	allStates = append(allStates, userStates...)
+
+	allStates = skills.DeduplicateStates(allStates)
+
+	slices.SortStableFunc(allStates, func(a, b *skills.SkillState) int {
+		return strings.Compare(strings.ToLower(a.Path), strings.ToLower(b.Path))
+	})
+	skills.SetLatestStates(allStates)
+	skills.PublishStates(allStates)
+
 	logDiscoveryStats(builtin, builtinStates, userStates, userPaths, allSkills, activeSkills, disabledSkills)
 	return allSkills, activeSkills
 }
@@ -1177,7 +1219,8 @@ func logTurnSkillUsage(
 		}
 	}
 
-	slog.Info("Skill turn summary",
+	slog.Info(
+		"Skill turn summary",
 		"component", "skills",
 		"session_id", sessionID,
 		"prompt_len", len(prompt),
@@ -1221,7 +1264,8 @@ func logDiscoveryStats(
 
 	xml := skills.ToPromptXML(activeSkills)
 
-	slog.Info("Skill discovery complete",
+	slog.Info(
+		"Skill discovery complete",
 		"component", "skills",
 		"builtin_ok", len(builtin),
 		"builtin_errors", countErrors(builtinStates),

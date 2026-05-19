@@ -343,6 +343,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		notifyWindowFocused: true,
 		initialSessionID:    initialSessionID,
 		continueLastSession: continueLast,
+		skillStates:         skills.GetLatestStates(),
 	}
 
 	status := NewStatus(com, ui)
@@ -1632,7 +1633,8 @@ func (m *UI) fetchHyperCredits() tea.Cmd {
 func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 	var cmds []tea.Cmd
 
-	if m.isAgentBusy() {
+	// we ignore dialogs with the oauth id as they need to be able to be dismissed
+	if m.isAgentBusy() && !m.dialog.ContainsDialog(dialog.OAuthID) {
 		return util.ReportWarn("Agent is busy, please wait...")
 	}
 
@@ -2310,7 +2312,8 @@ func (m *UI) ShortHelp() []key.Binding {
 			tab.SetHelp("tab", "focus editor")
 		}
 
-		binds = append(binds,
+		binds = append(
+			binds,
 			tab,
 			commands,
 			k.Models,
@@ -2318,11 +2321,13 @@ func (m *UI) ShortHelp() []key.Binding {
 
 		switch m.focus {
 		case uiFocusEditor:
-			binds = append(binds,
+			binds = append(
+				binds,
 				k.Editor.Newline,
 			)
 		case uiFocusMain:
-			binds = append(binds,
+			binds = append(
+				binds,
 				k.Chat.UpDown,
 				k.Chat.UpDownOneItem,
 				k.Chat.PageUp,
@@ -2337,14 +2342,16 @@ func (m *UI) ShortHelp() []key.Binding {
 		// TODO: other states
 		// if m.session == nil {
 		// no session selected
-		binds = append(binds,
+		binds = append(
+			binds,
 			commands,
 			k.Models,
 			k.Editor.Newline,
 		)
 	}
 
-	binds = append(binds,
+	binds = append(
+		binds,
 		k.Quit,
 		k.Help,
 	)
@@ -2391,7 +2398,8 @@ func (m *UI) FullHelp() [][]key.Binding {
 			tab.SetHelp("tab", "focus editor")
 		}
 
-		mainBinds = append(mainBinds,
+		mainBinds = append(
+			mainBinds,
 			tab,
 			commands,
 			k.Models,
@@ -2415,7 +2423,8 @@ func (m *UI) FullHelp() [][]key.Binding {
 			}
 			binds = append(binds, editorBinds)
 			if hasAttachments {
-				binds = append(binds,
+				binds = append(
+					binds,
 					[]key.Binding{
 						k.Editor.AttachmentDeleteMode,
 						k.Editor.DeleteAllAttachments,
@@ -2424,7 +2433,8 @@ func (m *UI) FullHelp() [][]key.Binding {
 				)
 			}
 		case uiFocusMain:
-			binds = append(binds,
+			binds = append(
+				binds,
 				[]key.Binding{
 					k.Chat.UpDown,
 					k.Chat.UpDownOneItem,
@@ -2449,7 +2459,8 @@ func (m *UI) FullHelp() [][]key.Binding {
 	default:
 		if m.session == nil {
 			// no session selected
-			binds = append(binds,
+			binds = append(
+				binds,
 				[]key.Binding{
 					commands,
 					k.Models,
@@ -2466,7 +2477,8 @@ func (m *UI) FullHelp() [][]key.Binding {
 			}
 			binds = append(binds, editorBinds)
 			if hasAttachments {
-				binds = append(binds,
+				binds = append(
+					binds,
 					[]key.Binding{
 						k.Editor.AttachmentDeleteMode,
 						k.Editor.DeleteAllAttachments,
@@ -2477,7 +2489,8 @@ func (m *UI) FullHelp() [][]key.Binding {
 		}
 	}
 
-	binds = append(binds,
+	binds = append(
+		binds,
 		[]key.Binding{
 			help,
 			k.Quit,
@@ -3472,6 +3485,9 @@ func (m *UI) newSession() tea.Cmd {
 
 // handlePasteMsg handles a paste message.
 func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
+	// Normalize \r\n before the textarea sanitizer sees it.
+	msg.Content = strings.ReplaceAll(msg.Content, "\r\n", "\n")
+
 	if m.dialog.HasDialogs() {
 		return m.handleDialogMsg(msg)
 	}

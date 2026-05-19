@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"maps"
 	"net/http"
 	"net/url"
@@ -15,7 +14,6 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/invopop/jsonschema"
@@ -110,15 +108,30 @@ type ProviderConfig struct {
 	// Custom system prompt prefix.
 	SystemPromptPrefix string `json:"system_prompt_prefix,omitempty" jsonschema:"description=Custom prefix to add to system prompts for this provider"`
 
-	// Extra headers to send with each request to the provider.
+	// Extra headers to send with each request to the provider. Values
+	// run through shell expansion at config-load time, so $VAR and
+	// $(cmd) work the same way they do in MCP headers. A header whose
+	// value resolves to the empty string (unset bare $VAR under
+	// lenient nounset, $(echo), or literal "") is omitted from the
+	// outgoing request rather than sent as "Header:".
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty" jsonschema:"description=Additional HTTP headers to send with requests"`
-	// Extra body
-	ExtraBody map[string]any `json:"extra_body,omitempty" jsonschema:"description=Additional fields to include in request bodies, only works with openai-compatible providers"`
+	// ExtraBody is merged verbatim into OpenAI-compatible request
+	// bodies. String values are NOT shell-expanded: this is a plain
+	// JSON passthrough so that arbitrary provider-extension fields
+	// (numbers, nested objects, booleans) round-trip without a
+	// recursive walker guessing at intent. If you need an env-var-
+	// driven value at request time, put it in extra_headers, or in
+	// the provider's top-level api_key / base_url, all of which do
+	// expand.
+	ExtraBody map[string]any `json:"extra_body,omitempty" jsonschema:"description=Additional fields to include in request bodies\\, only works with openai-compatible providers"`
 
 	ProviderOptions map[string]any `json:"provider_options,omitempty" jsonschema:"description=Additional provider-specific options for this provider"`
 
 	// Used to pass extra parameters to the provider.
 	ExtraParams map[string]string `json:"-"`
+
+	// Skip cost accumulation for this provider when using subscription or flat rate billing.
+	FlatRate bool `json:"flat_rate,omitempty" jsonschema:"description=Flat-rate mode for this provider"`
 
 	// The provider models
 	Models []catwalk.Model `json:"models,omitempty" jsonschema:"description=List of models available from this provider"`
@@ -174,9 +187,15 @@ type MCPConfig struct {
 	URL           string            `json:"url,omitempty" jsonschema:"description=URL for HTTP or SSE MCP servers,format=uri,example=http://localhost:3000/mcp"`
 	Disabled      bool              `json:"disabled,omitempty" jsonschema:"description=Whether this MCP server is disabled,default=false"`
 	DisabledTools []string          `json:"disabled_tools,omitempty" jsonschema:"description=List of tools from this MCP server to disable,example=get-library-doc"`
+	EnabledTools  []string          `json:"enabled_tools,omitempty" jsonschema:"description=Allow list of tools from this MCP server,example=get-library-doc"`
 	Timeout       int               `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for MCP server connections,default=15,example=30,example=60,example=120"`
 
-	// TODO: maybe make it possible to get the value from the env
+	// Headers are HTTP headers for HTTP/SSE MCP servers. Values run
+	// through shell expansion at MCP startup, so $VAR and $(cmd)
+	// work. A header whose value resolves to the empty string (unset
+	// bare $VAR under lenient nounset, $(echo), or literal "") is
+	// omitted from the outgoing request rather than sent as
+	// "Header:".
 	Headers map[string]string `json:"headers,omitempty" jsonschema:"description=HTTP headers for HTTP/SSE MCP servers"`
 }
 
@@ -240,16 +259,20 @@ func (Attribution) JSONSchemaExtend(schema *jsonschema.Schema) {
 }
 
 type Options struct {
-	ContextPaths              []string     `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=CRUSH.md"`
-	SkillsPaths               []string     `json:"skills_paths,omitempty" jsonschema:"description=Paths to directories containing Agent Skills (folders with SKILL.md files),example=~/.config/crush/skills,example=./skills"`
-	TUI                       *TUIOptions  `json:"tui,omitempty" jsonschema:"description=Terminal user interface options"`
-	Debug                     bool         `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
-	DebugLSP                  bool         `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
-	DisableAutoSummarize      bool         `json:"disable_auto_summarize,omitempty" jsonschema:"description=Disable automatic conversation summarization,default=false"`
-	DataDirectory             string       `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data (relative to working directory),default=.crush,example=.crush"` // Relative to the cwd
+	ContextPaths         []string    `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=CRUSH.md"`
+	SkillsPaths          []string    `json:"skills_paths,omitempty" jsonschema:"description=Paths to directories containing Agent Skills (folders with SKILL.md files),example=~/.config/crush/skills,example=./skills"`
+	TUI                  *TUIOptions `json:"tui,omitempty" jsonschema:"description=Terminal user interface options"`
+	Debug                bool        `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
+	DebugLSP             bool        `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
+	DisableAutoSummarize bool        `json:"disable_auto_summarize,omitempty" jsonschema:"description=Disable automatic conversation summarization,default=false"`
+	// DataDirectory is where Crush keeps per-project state such as
+	// the SQLite database and workspace overrides. Relative paths are
+	// resolved against the working directory; absolute paths are used
+	// verbatim. After defaulting the stored value is always absolute.
+	DataDirectory             string       `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data. Relative paths are resolved against the working directory; absolute paths are used as-is.,default=.crush,example=.crush"`
 	DisabledTools             []string     `json:"disabled_tools,omitempty" jsonschema:"description=List of built-in tools to disable and hide from the agent,example=bash,example=sourcegraph"`
 	DisableProviderAutoUpdate bool         `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`
-	DisableDefaultProviders   bool         `json:"disable_default_providers,omitempty" jsonschema:"description=Ignore all default/embedded providers. When enabled, providers must be fully specified in the config file with base_url, models, and api_key - no merging with defaults occurs,default=false"`
+	DisableDefaultProviders   bool         `json:"disable_default_providers,omitempty" jsonschema:"description=Ignore all default/embedded providers. When enabled\\, providers must be fully specified in the config file with base_url\\, models\\, and api_key - no merging with defaults occurs,default=false"`
 	Attribution               *Attribution `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
 	DisableMetrics            bool         `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
 	InitializeAs              string       `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
@@ -301,25 +324,172 @@ func (l LSPs) Sorted() []LSP {
 	return sorted
 }
 
-func (l LSPConfig) ResolvedEnv() []string {
-	return resolveEnvs(l.Env)
+// ResolvedEnv returns m.Env with every value expanded through the
+// given resolver. The returned slice is of the form "KEY=value" sorted
+// by key so callers get deterministic output; the receiver's Env map is
+// not mutated. On the first resolution failure it returns nil and an
+// error that identifies the offending key; the inner resolver error is
+// already sanitized by ResolveValue and is wrapped with %w so
+// errors.Is/As continues to work. Callers are expected to surface it
+// (for MCP, via StateError on the status card) rather than silently
+// spawn the server with an empty credential.
+//
+// The resolver choice matters: in server mode pass the shell resolver
+// so $VAR / $(cmd) expand; in client mode pass IdentityResolver so the
+// template is forwarded verbatim and expansion happens on the server.
+func (m MCPConfig) ResolvedEnv(r VariableResolver) ([]string, error) {
+	return resolveEnvs(m.Env, r)
 }
 
-func (m MCPConfig) ResolvedEnv() []string {
-	return resolveEnvs(m.Env)
-}
-
-func (m MCPConfig) ResolvedHeaders() map[string]string {
-	resolver := NewShellVariableResolver(env.New())
-	for e, v := range m.Headers {
-		var err error
-		m.Headers[e], err = resolver.ResolveValue(v)
+// ResolvedArgs returns m.Args with every element expanded through the
+// given resolver. A fresh slice is allocated; m.Args is never mutated.
+// On the first resolution failure it returns nil and an error
+// identifying the offending positional index; the inner resolver error
+// is already sanitized by ResolveValue and is wrapped with %w so
+// errors.Is/As continues to work.
+//
+// See ResolvedEnv for guidance on picking a resolver.
+func (m MCPConfig) ResolvedArgs(r VariableResolver) ([]string, error) {
+	if len(m.Args) == 0 {
+		return nil, nil
+	}
+	out := make([]string, len(m.Args))
+	for i, a := range m.Args {
+		v, err := r.ResolveValue(a)
 		if err != nil {
-			slog.Error("Error resolving header variable", "error", err, "variable", e, "value", v)
+			return nil, fmt.Errorf("arg %d: %w", i, err)
+		}
+		out[i] = v
+	}
+	return out, nil
+}
+
+// ResolvedURL returns m.URL expanded through the given resolver. The
+// receiver is not mutated. Errors from the resolver are already
+// sanitized by ResolveValue and are wrapped with %w for errors.Is/As.
+//
+// URLs run through the same shell-expansion pipeline as the other
+// fields, so a literal '$' (e.g. OData query strings containing
+// $filter/$select) must be escaped as '\$' or '${DOLLAR:-$}' to avoid
+// being interpreted as a variable reference. Same constraint already
+// applies to command, args, env, and headers.
+//
+// See ResolvedEnv for guidance on picking a resolver.
+func (m MCPConfig) ResolvedURL(r VariableResolver) (string, error) {
+	if m.URL == "" {
+		return "", nil
+	}
+	v, err := r.ResolveValue(m.URL)
+	if err != nil {
+		return "", fmt.Errorf("url: %w", err)
+	}
+	return v, nil
+}
+
+// ResolvedHeaders returns m.Headers with every value expanded through
+// the given resolver. A fresh map is allocated; m.Headers is never
+// mutated. On the first resolution failure it returns nil and an error
+// identifying the offending header name; the inner resolver error is
+// already sanitized by ResolveValue and is wrapped with %w so
+// errors.Is/As continues to work.
+//
+// A header whose value resolves to the empty string (unset bare $VAR
+// under lenient nounset, $(echo), or literal "") is omitted from the
+// returned map — sending "X-Auth:" with an empty value is rejected by
+// some providers and the user's intent in "optional, env-gated
+// header" is clearly "absent when the var isn't set."
+//
+// See ResolvedEnv for guidance on picking a resolver.
+func (m MCPConfig) ResolvedHeaders(r VariableResolver) (map[string]string, error) {
+	if len(m.Headers) == 0 {
+		return map[string]string{}, nil
+	}
+	out := make(map[string]string, len(m.Headers))
+	// Sort keys so failures are reported deterministically when more
+	// than one header would fail.
+	keys := make([]string, 0, len(m.Headers))
+	for k := range m.Headers {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		v, err := r.ResolveValue(m.Headers[k])
+		if err != nil {
+			return nil, fmt.Errorf("header %s: %w", k, err)
+		}
+		if v == "" {
 			continue
 		}
+		out[k] = v
 	}
-	return m.Headers
+	return out, nil
+}
+
+// ResolvedArgs returns l.Args with every element expanded through the
+// given resolver. A fresh slice is allocated; l.Args is never mutated.
+// On the first resolution failure it returns nil and an error
+// identifying the offending positional index; the inner resolver error
+// is already sanitized by ResolveValue and is wrapped with %w so
+// errors.Is/As continues to work.
+//
+// Empty resolved values are kept (a deliberate "empty positional arg"
+// like --flag "" is sometimes valid), matching MCPConfig.ResolvedArgs.
+//
+// The resolver choice matters: in server mode pass the shell resolver
+// so $VAR / $(cmd) expand; in client mode pass IdentityResolver so the
+// template is forwarded verbatim.
+func (l LSPConfig) ResolvedArgs(r VariableResolver) ([]string, error) {
+	if len(l.Args) == 0 {
+		return nil, nil
+	}
+	out := make([]string, len(l.Args))
+	for i, a := range l.Args {
+		v, err := r.ResolveValue(a)
+		if err != nil {
+			return nil, fmt.Errorf("arg %d: %w", i, err)
+		}
+		out[i] = v
+	}
+	return out, nil
+}
+
+// ResolvedEnv returns l.Env with every value expanded through the
+// given resolver. A fresh map is allocated; l.Env is never mutated.
+// On the first resolution failure it returns nil and an error that
+// identifies the offending key; the inner resolver error is already
+// sanitized by ResolveValue and is wrapped with %w so errors.Is/As
+// continues to work.
+//
+// Empty resolved values are kept ("FOO=" is a legitimate request;
+// opt out via ${VAR:+...}), matching MCPConfig.ResolvedEnv.
+//
+// Shape note: this returns map[string]string rather than the []string
+// shape MCPConfig.ResolvedEnv uses because the consumer
+// (powernap.ClientConfig.Environment in internal/lsp/client.go) takes
+// a map directly — returning a []string here would only force a
+// round-trip back to a map at the call site.
+//
+// See ResolvedArgs for guidance on picking a resolver.
+func (l LSPConfig) ResolvedEnv(r VariableResolver) (map[string]string, error) {
+	if len(l.Env) == 0 {
+		return map[string]string{}, nil
+	}
+	out := make(map[string]string, len(l.Env))
+	// Sort keys so failures are reported deterministically when more
+	// than one value would fail.
+	keys := make([]string, 0, len(l.Env))
+	for k := range l.Env {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		v, err := r.ResolveValue(l.Env[k])
+		if err != nil {
+			return nil, fmt.Errorf("env %q: %w", k, err)
+		}
+		out[k] = v
+	}
+	return out, nil
 }
 
 type Agent struct {
@@ -575,6 +745,13 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	case catwalk.InferenceProviderMiniMax, catwalk.InferenceProviderMiniMaxChina:
 		// NOTE: MiniMax has no good endpoint we can use to validate the API key.
 		return nil
+	case catwalk.InferenceProviderAlibabaSingapore:
+		// NOTE: Alibaba has no good endpoint we can use to validate the API key.
+		// Let's at least check the pattern.
+		if !strings.HasPrefix(apiKey, "sk-") {
+			return fmt.Errorf("invalid API key format for provider %s", c.ID)
+		}
+		return nil
 	}
 
 	switch c.Type {
@@ -659,22 +836,29 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	return nil
 }
 
-func resolveEnvs(envs map[string]string) []string {
-	resolver := NewShellVariableResolver(env.New())
-	for e, v := range envs {
-		var err error
-		envs[e], err = resolver.ResolveValue(v)
-		if err != nil {
-			slog.Error("Error resolving environment variable", "error", err, "variable", e, "value", v)
-			continue
-		}
+// resolveEnvs expands every value in envs through the given resolver
+// and returns a fresh "KEY=value" slice sorted by key. The input map is
+// not mutated. On the first resolution failure it returns nil and an
+// error identifying the offending variable; the inner resolver error is
+// already sanitized by ResolveValue and is wrapped with %w.
+func resolveEnvs(envs map[string]string, r VariableResolver) ([]string, error) {
+	if len(envs) == 0 {
+		return nil, nil
 	}
-
+	keys := make([]string, 0, len(envs))
+	for k := range envs {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
 	res := make([]string, 0, len(envs))
-	for k, v := range envs {
+	for _, k := range keys {
+		v, err := r.ResolveValue(envs[k])
+		if err != nil {
+			return nil, fmt.Errorf("env %s: %w", k, err)
+		}
 		res = append(res, fmt.Sprintf("%s=%s", k, v))
 	}
-	return res
+	return res, nil
 }
 
 func ptrValOr[T any](t *T, el T) T {

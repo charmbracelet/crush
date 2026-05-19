@@ -60,67 +60,67 @@ func extractRawString(t *testing.T, cmd tea.Cmd) string {
 	return s
 }
 
-func TestOSCBackend_Send(t *testing.T) {
+func TestOSC99Backend_Send(t *testing.T) {
 	t.Parallel()
 
-	backend := notification.NewOSCBackend(nil)
+	backend := notification.NewOSC99Backend(nil)
 	s := extractRawString(t, backend.Send(notification.Notification{
 		Title:   "Crush is waiting...",
 		Message: "Agent's turn completed",
 	}))
 
-	// OSC 99
 	require.Contains(t, s, "p=title")
 	require.Contains(t, s, "p=body")
 	require.Contains(t, s, "Crush is waiting...")
 	require.Contains(t, s, "Agent's turn completed")
 	require.NotContains(t, s, "p=icon")
-
-	// OSC 777
-	require.Contains(t, s, "\x1b]777;notify;Crush is waiting...;Agent's turn completed\x07")
-
+	require.NotContains(t, s, "\x1b]777;")
 	require.NotContains(t, s, "\x1b]9;")
 }
 
-func TestOSCBackend_Send_TitleOnly(t *testing.T) {
+func TestOSC99Backend_Send_TitleOnly(t *testing.T) {
 	t.Parallel()
 
-	backend := notification.NewOSCBackend(nil)
+	backend := notification.NewOSC99Backend(nil)
 	s := extractRawString(t, backend.Send(notification.Notification{
 		Title: "Crush is waiting...",
 	}))
 
-	// OSC 99.
 	require.Contains(t, s, "p=title")
 	require.NotContains(t, s, "p=body")
-
-	// OSC 777 — title with empty body.
-	require.Contains(t, s, "\x1b]777;notify;Crush is waiting...;\x07")
-
-	// No OSC 9.
+	require.NotContains(t, s, "\x1b]777;")
 	require.NotContains(t, s, "\x1b]9;")
 }
 
-func TestOSCBackend_Send_WithIcon(t *testing.T) {
+func TestOSC99Backend_Send_WithIcon(t *testing.T) {
 	t.Parallel()
 
 	iconData := []byte("fake-png-data")
-	backend := notification.NewOSCBackend(iconData)
+	backend := notification.NewOSC99Backend(iconData)
 	s := extractRawString(t, backend.Send(notification.Notification{
 		Title:   "Test",
 		Message: "With icon",
 	}))
 
-	// OSC 99 icon payload.
 	require.Contains(t, s, "p=icon")
 	require.Contains(t, s, "e=1")
 
 	encoded := base64.StdEncoding.EncodeToString(iconData)
-	require.Contains(t, s, fmt.Sprintf("d=0:p=icon:e=1;%s\x07", encoded))
+	require.Contains(t, s, fmt.Sprintf(";%s\x07", encoded))
+	require.NotContains(t, s, "\x1b]777;")
+	require.NotContains(t, s, "\x1b]9;")
+}
 
-	// OSC 777.
-	require.Contains(t, s, "\x1b]777;notify;Test;With icon\x07")
+func TestOSC777Backend_Send(t *testing.T) {
+	t.Parallel()
 
-	// No OSC 9.
+	backend := notification.NewOSC777Backend()
+	s := extractRawString(t, backend.Send(notification.Notification{
+		Title:   "Test",
+		Message: "With body",
+	}))
+
+	require.Equal(t, "\x1b]777;notify;Test;With body\x07", s)
+	require.NotContains(t, s, "\x1b]99;")
 	require.NotContains(t, s, "\x1b]9;")
 }

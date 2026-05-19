@@ -432,6 +432,24 @@ func (m *UI) sendNotification(n notification.Notification) tea.Cmd {
 	return m.notifyBackend.Send(n)
 }
 
+func (m *UI) updateNotificationBackend() {
+	if !m.caps.ReportFocusEvents {
+		m.notifyBackend = notification.NoopBackend{}
+		return
+	}
+
+	if _, ok := m.caps.Env.LookupEnv("SSH_TTY"); ok {
+		if m.caps.OSC99Notifications {
+			m.notifyBackend = notification.NewOSC99Backend(notification.Icon)
+		} else {
+			m.notifyBackend = notification.NewOSC777Backend()
+		}
+		return
+	}
+
+	m.notifyBackend = notification.NewNativeBackend(notification.Icon)
+}
+
 // shouldSendNotification returns true if notifications should be sent based on
 // current state. Focus reporting must be supported, window must not focused,
 // and notifications must not be disabled in config.
@@ -499,13 +517,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmds = append(cmds, common.QueryCmd(uv.Environ(msg)))
 	case tea.ModeReportMsg:
-		if m.caps.ReportFocusEvents {
-			if _, ok := m.caps.Env.LookupEnv("SSH_TTY"); ok {
-				m.notifyBackend = notification.NewOSCBackend(notification.Icon)
-			} else {
-				m.notifyBackend = notification.NewNativeBackend(notification.Icon)
-			}
-		}
+		m.updateNotificationBackend()
+	case uv.UnknownOscEvent:
+		m.updateNotificationBackend()
 	case tea.FocusMsg:
 		m.notifyWindowFocused = true
 	case tea.BlurMsg:

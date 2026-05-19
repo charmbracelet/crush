@@ -31,6 +31,15 @@ func (b *Backend) SetConfigField(workspaceID string, scope config.Scope, key str
 	return ws.Cfg.SetConfigField(scope, key, value)
 }
 
+// SetConfigFields sets multiple key/value pairs in the config file.
+func (b *Backend) SetConfigFields(workspaceID string, scope config.Scope, kv map[string]any) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+	return ws.Cfg.SetConfigFields(scope, kv)
+}
+
 // RemoveConfigField removes a key from the config file for the given
 // scope.
 func (b *Backend) RemoveConfigField(workspaceID string, scope config.Scope, key string) error {
@@ -211,4 +220,20 @@ func (b *Backend) GetWorkingDir(workspaceID string) (string, error) {
 		return "", err
 	}
 	return ws.Cfg.WorkingDir(), nil
+}
+
+func (b *Backend) MCPInitializeSingle(ctx context.Context, workspaceID string, name string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+	return mcptools.InitializeSingle(ctx, name, ws.Cfg)
+}
+
+func (b *Backend) MCPDisableSingle(workspaceID string, name string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+	return mcptools.DisableSingle(ws.Cfg, name)
 }

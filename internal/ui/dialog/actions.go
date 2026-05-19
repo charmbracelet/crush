@@ -85,6 +85,16 @@ type (
 	ActionEnableDockerMCP struct{}
 	// ActionDisableDockerMCP is a message to disable Docker MCP.
 	ActionDisableDockerMCP struct{}
+
+	// ActionToggleMCPServer is a message to toggle a specific MCP server.
+	ActionToggleMCPServer struct {
+		Name    string
+		Enabled bool
+	}
+	// ActionToggleAllMCPServers is a message to toggle all MCP servers.
+	ActionToggleAllMCPServers struct {
+		Enable bool
+	}
 )
 
 // Messages for API key input dialog.

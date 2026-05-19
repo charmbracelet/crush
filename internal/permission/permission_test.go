@@ -97,6 +97,62 @@ func TestPermissionService_SkipMode(t *testing.T) {
 	}
 }
 
+// TestPermissionService_SkipRace ensures concurrent access to the skip flag is
+// race-free. Run with `go test -race`.
+//
+// Request() reads s.skip on its hot path; SetSkipRequests writes it.
+// Without synchronization the race detector flags the read/write pair.
+// Each Request call is auto-approved via the session allowlist so it
+// returns immediately regardless of which branch s.skip happens to take.
+func TestPermissionService_SkipRace(t *testing.T) {
+	service := NewPermissionService("/tmp", true, nil)
+	service.AutoApproveSession("race")
+
+	const goroutines = 8
+	const iterations = 500
+
+	var wg sync.WaitGroup
+	wg.Add(goroutines * 3)
+
+	// Writers flipping the flag.
+	for range goroutines {
+		go func() {
+			defer wg.Done()
+			for i := range iterations {
+				service.SetSkipRequests(i%2 == 0)
+			}
+		}()
+	}
+
+	// Readers calling SkipRequests().
+	for range goroutines {
+		go func() {
+			defer wg.Done()
+			for range iterations {
+				_ = service.SkipRequests()
+			}
+		}()
+	}
+
+	// Readers going through Request, which also reads s.skip.
+	for range goroutines {
+		go func() {
+			defer wg.Done()
+			for range iterations {
+				_, _ = service.Request(t.Context(), CreatePermissionRequest{
+					SessionID:  "race",
+					ToolCallID: "race",
+					ToolName:   "view",
+					Action:     "read",
+					Path:       "/tmp",
+				})
+			}
+		}()
+	}
+
+	wg.Wait()
+}
+
 func TestPermissionService_HookApproval(t *testing.T) {
 	t.Parallel()
 

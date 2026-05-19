@@ -548,6 +548,16 @@ func toolErrorContent(sty *styles.Styles, result *message.ToolResult, width int)
 	return fmt.Sprintf("%s %s", errTag, sty.Tool.ErrorMessage.Render(errContent))
 }
 
+// toolInvalidParamsError renders an error for invalid tool parameters.
+// When the tool has already returned an error result, it uses that content
+// instead of the generic "Invalid parameters" message.
+func toolInvalidParamsError(sty *styles.Styles, opts *ToolRenderOpts, width int) string {
+	if opts.Result != nil && opts.Result.Content != "" {
+		return toolErrorContent(sty, opts.Result, width)
+	}
+	return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
+}
+
 // toolIcon returns the status icon for a tool call.
 // toolIcon returns the status icon for a tool call based on its status.
 func toolIcon(sty *styles.Styles, status ToolStatus) string {

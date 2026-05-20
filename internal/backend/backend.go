@@ -470,6 +470,10 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 		}
 	}()
 
+	if err := config.ValidatePromptNames(args.Prompts); err != nil {
+		return nil, proto.Workspace{}, err
+	}
+
 	id := uuid.New().String()
 	cfg, err := config.Init(context.Background(), args.Path, args.DataDir, args.Debug)
 	if err != nil {
@@ -478,6 +482,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 
 	cfg.Overrides().EnabledChannels = args.Channels
 	cfg.Overrides().PermissionMode = proto.ProtoModeToPermission(args.PermissionMode)
+	cfg.Overrides().Prompts = args.Prompts
 
 	if err := createDotCrushDir(cfg.Config().Options.DataDirectory); err != nil {
 		return nil, proto.Workspace{}, fmt.Errorf("failed to create data directory: %w", err)
@@ -1375,6 +1380,7 @@ func workspaceToProto(ws *Workspace) proto.Workspace {
 		Path:           ws.Path,
 		PermissionMode: proto.PermissionModeToProto(ws.Permissions.PermissionMode()),
 		Channels:       ws.Cfg.Overrides().EnabledChannels,
+		Prompts:        ws.Cfg.Overrides().Prompts,
 		DataDir:        cfg.Options.DataDirectory,
 		Debug:          cfg.Options.Debug,
 		Config:         cfg,
@@ -1407,7 +1413,8 @@ func logFirstWinsMismatch(existing *Workspace, args proto.Workspace) {
 		existingCfg.Options.Debug == args.Debug &&
 		existingCfg.Options.DataDirectory == args.DataDir &&
 		stringSlicesEqual(existing.Env, args.Env) &&
-		stringSlicesEqual(existingChannels, args.Channels) {
+		stringSlicesEqual(existingChannels, args.Channels) &&
+		maps.Equal(existing.Cfg.Overrides().Prompts, args.Prompts) {
 		return
 	}
 	slog.Debug(
@@ -1424,6 +1431,8 @@ func logFirstWinsMismatch(existing *Workspace, args proto.Workspace) {
 		"requested_env", args.Env,
 		"existing_channels", existingChannels,
 		"requested_channels", args.Channels,
+		"existing_prompts", existing.Cfg.Overrides().Prompts,
+		"requested_prompts", args.Prompts,
 	)
 }
 

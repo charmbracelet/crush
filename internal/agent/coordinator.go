@@ -281,7 +281,11 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		return nil, errCoderAgentNotConfigured
 	}
 
-	coderPrompt, err := coderPrompt(c.skillOverrideOptions()...)
+	if err := checkPrompts(c.cfg); err != nil {
+		return nil, err
+	}
+
+	coderPrompt, err := loadPrompt(c.cfg, "coder", c.skillOverrideOptions()...)
 	if err != nil {
 		return nil, err
 	}
@@ -297,7 +301,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		return nil, errPlanAgentNotConfigured
 	}
 
-	planSystemPrompt, err := planPrompt(append(
+	planSystemPrompt, err := loadPrompt(c.cfg, "plan", append(
 		c.skillOverrideOptions(),
 		prompt.WithToolNames(c.effectiveToolNames(planCfg, false)),
 	)...)

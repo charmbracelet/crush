@@ -39,6 +39,9 @@ type Workspace struct {
 	// Channels lists the MCP servers opted in as channels for this workspace
 	// (from the --channels flag).
 	Channels []string `json:"channels,omitempty"`
+	// Prompts replaces built-in prompts for this workspace (from the
+	// --prompt flag), keyed by prompt name. Paths are absolute.
+	Prompts config.PromptPaths `json:"prompts,omitempty"`
 	// Skills carries the snapshot of skill discovery state at workspace
 	// creation time. Subsequent updates flow through the SSE event
 	// stream.

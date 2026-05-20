@@ -116,7 +116,7 @@ func (c *coordinator) taskAgentConfig(access string) (config.Agent, bool) {
 // modelsFn, when set, replaces the shared subagent model set; a dispatch
 // with a model override uses it to run the variant on the overridden model.
 func (c *coordinator) buildTaskAgent(ctx context.Context, ready *errgroup.Group, agentCfg config.Agent, canWrite bool, modelsFn func() ModelSet) (SessionAgent, error) {
-	pr, err := taskPrompt(
+	pr, err := loadPrompt(c.cfg, "task",
 		prompt.WithWorkingDir(c.cfg.WorkingDir()),
 		prompt.WithCanWrite(canWrite),
 	)

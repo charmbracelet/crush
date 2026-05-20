@@ -72,6 +72,10 @@ type RuntimeOverrides struct {
 	// selection made here always outranks whatever the shared config file
 	// happens to hold — see pinPreferredModelLocked.
 	Models map[SelectedModelType]SelectedModel
+	// Prompts replaces built-in prompts for this session only (via the
+	// --prompt flag). Entries win over options.prompts and hold absolute
+	// paths, since they were resolved against the invoking shell's cwd.
+	Prompts PromptPaths
 }
 
 // ConfigStore is the single entry point for all config access. It owns the

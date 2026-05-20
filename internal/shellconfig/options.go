@@ -54,6 +54,10 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		return optionUI(o, args, stderr)
 	}
 
+	if key == "prompt" {
+		return optionPrompt(o, args, stderr)
+	}
+
 	// "option reset <key>" wipes a list back to empty. Because the builder
 	// applies operations in execution order, this is just an assignment:
 	// values added after the reset are kept, earlier ones are dropped.
@@ -232,6 +236,21 @@ var uiBoolKeys = map[string]string{
 	"transparent": "transparent",
 	"mouse":       "mouse",
 	"nerd-fonts":  "nerd_fonts",
+}
+
+// optionPrompt implements "option prompt <name> <path>", pointing a built-in
+// prompt at a replacement file. Unknown names are rejected later, by config
+// validation, which owns the list of built-in prompts.
+func optionPrompt(options map[string]any, args []string, stderr io.Writer) error {
+	if len(args) != 4 {
+		return usage(stderr, "usage: option prompt <name> <path>")
+	}
+
+	name, path := args[2], args[3]
+	childMap(options, "prompts")[name] = path
+
+	slog.Info("Prompt override set in shell config", "prompt", name, "path", path)
+	return nil
 }
 
 // optionUI implements "option ui <key> <value>" for TUI-specific settings

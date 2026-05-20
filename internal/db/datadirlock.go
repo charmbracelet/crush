@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -63,13 +64,17 @@ func acquireDataDirLock(dataDir string) (*dataDirLock, error) {
 	// Record ownership metadata so a contending process can identify
 	// us. Failures here are non-fatal: the OS-level lock is what
 	// actually guarantees mutual exclusion, and a missing/partial JSON
-	// payload only degrades diagnostics.
+	// payload only degrades the diagnostic a contender prints.
 	if err := writeOwnerInfo(path); err != nil {
-		// Best-effort; log via stderr only when running in a debug
-		// context would be invasive here, so we silently swallow.
-		_ = err
+		slog.Debug("Failed to write data-dir owner info", "path", path, "error", err)
 	}
 
+	// The lock file itself is intentionally never unlinked. flock is
+	// keyed by inode, not by path, and any close-then-unlink (or
+	// unlink-then-close) ordering opens a window where two processes
+	// can each hold a flock on a different inode that lives at the
+	// same path. Leaving the file in place lets every acquirer see
+	// the same inode and lets the kernel arbitrate correctly.
 	return &dataDirLock{release: release}, nil
 }
 

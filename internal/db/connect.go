@@ -56,14 +56,37 @@ var (
 	poolMu sync.Mutex
 )
 
+// ConnectOption configures a Connect call. Options are applied in
+// order; later options override earlier ones for the same field.
+type ConnectOption func(*connectOptions)
+
+// connectOptions holds the resolved configuration for a Connect call.
+type connectOptions struct {
+	lockDataDir bool
+}
+
+// WithDataDirLock toggles acquisition of the per-data-directory lock
+// for this Connect call. The lock is off by default so local-mode
+// invocations do not regress today's behavior; the server's
+// workspace-bootstrap path opts in. CRUSH_SKIP_DATADIR_LOCK still
+// bypasses acquisition even when this option is set.
+func WithDataDirLock(enable bool) ConnectOption {
+	return func(o *connectOptions) { o.lockDataDir = enable }
+}
+
 // Connect opens a SQLite database connection for the given data
 // directory and runs migrations. If a connection to the same database
 // file already exists, the existing connection is returned with its
 // reference count incremented. Callers must pair each Connect with a
 // [Release] when they no longer need the connection.
-func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
+func Connect(ctx context.Context, dataDir string, opts ...ConnectOption) (*sql.DB, error) {
 	if dataDir == "" {
 		return nil, fmt.Errorf("data.dir is not set")
+	}
+
+	var cfg connectOptions
+	for _, opt := range opts {
+		opt(&cfg)
 	}
 
 	dbPath := filepath.Join(dataDir, "crush.db")
@@ -88,18 +111,25 @@ func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 	// crush process on the same SQLite file. The lock is released when
 	// the matching Release call drops the refcount to zero. Ensuring
 	// the data directory exists is required because the lock file
-	// lives inside it.
+	// lives inside it. Locking is opt-in via WithDataDirLock so that
+	// local-mode invocations do not refuse a second crush against the
+	// same data dir until client/server becomes the default.
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return nil, fmt.Errorf("failed to create data directory %q: %w", dataDir, err)
 	}
-	lock, err := acquireDataDirLock(dataDir)
-	if err != nil {
-		return nil, err
+	var lock *dataDirLock
+	if cfg.lockDataDir && !skipDataDirLock() {
+		lock, err = acquireDataDirLock(dataDir)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	conn, err := openDB(dbPath)
 	if err != nil {
-		lock.release()
+		if lock != nil {
+			lock.release()
+		}
 		return nil, err
 	}
 
@@ -110,22 +140,28 @@ func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 	// resulting in SQLITE_NOTADB (26) on the next open.
 	conn.SetMaxOpenConns(1)
 
+	releaseLock := func() {
+		if lock != nil {
+			lock.release()
+		}
+	}
+
 	if err = conn.PingContext(ctx); err != nil {
 		conn.Close()
-		lock.release()
+		releaseLock()
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
 	if err := initGoose(); err != nil {
 		conn.Close()
-		lock.release()
+		releaseLock()
 		slog.Error("Failed to initialize goose", "error", err)
 		return nil, fmt.Errorf("failed to initialize goose: %w", err)
 	}
 
 	if err := goose.Up(conn, "migrations"); err != nil {
 		conn.Close()
-		lock.release()
+		releaseLock()
 		slog.Error("Failed to apply migrations", "error", err)
 		return nil, fmt.Errorf("failed to apply migrations: %w", err)
 	}

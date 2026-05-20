@@ -51,6 +51,10 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		return optionUI(o, args, stderr)
 	}
 
+	if key == "prompt" {
+		return optionPrompt(o, args, stderr)
+	}
+
 	// "option reset <key>" wipes a list back to empty. Because the builder
 	// applies operations in execution order, this is just an assignment:
 	// values added after the reset are kept, earlier ones are dropped.
@@ -222,6 +226,23 @@ var optionSpecs = map[string]optionSpec{
 
 // optionUI implements "option ui <key> <value>" for TUI-specific settings
 // that live under options.tui rather than as top-level options.
+// optionPrompt implements "option prompt <name> <path>", pointing a built-in
+// prompt at a replacement file.
+// optionPrompt implements "option prompt <name> <path>", pointing a built-in
+// prompt at a replacement file. Unknown names are rejected later, by config
+// validation, which owns the list of built-in prompts.
+func optionPrompt(options map[string]any, args []string, stderr io.Writer) error {
+	if len(args) != 4 {
+		return usage(stderr, "usage: option prompt <coder|task|plan|summary|title|initialize> <path>")
+	}
+
+	name, path := args[2], args[3]
+	childMap(options, "prompts")[name] = path
+
+	slog.Info("Prompt override set in shell config", "prompt", name, "path", path)
+	return nil
+}
+
 func optionUI(options map[string]any, args []string, stderr io.Writer) error {
 	if len(args) != 4 {
 		return usage(stderr, "usage: option ui <compact|diff|transparent|mouse|scrollbar|completions-max-depth|completions-max-items|exit-banner> <value>")

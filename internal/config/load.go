@@ -85,6 +85,10 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		return nil, fmt.Errorf("invalid hook configuration: %w", err)
 	}
 
+	if err := cfg.ValidatePrompts(); err != nil {
+		return nil, fmt.Errorf("invalid prompt configuration: %w", err)
+	}
+
 	if !isInsideWorktree() {
 		const depth = 2
 		const items = 100
@@ -1444,6 +1448,20 @@ func normalizeHookEvent(name string) string {
 // compilation used for matching is owned by hooks.Runner; this function
 // only validates up front so the user sees config errors at load time
 // rather than on the first tool call.
+// ValidatePrompts rejects prompt names that do not name a built-in prompt, so
+// a typo fails at startup instead of silently leaving the built-in in place.
+func (c *Config) ValidatePrompts() error {
+	if c.Options == nil {
+		return nil
+	}
+	for name := range c.Options.Prompts {
+		if !slices.Contains(PromptNames, name) {
+			return fmt.Errorf("unknown prompt %q, expected one of %s", name, strings.Join(PromptNames, ", "))
+		}
+	}
+	return nil
+}
+
 func (c *Config) ValidateHooks() error {
 	// Normalize event name keys.
 	for event, eventHooks := range c.Hooks {

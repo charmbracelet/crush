@@ -96,6 +96,12 @@ func testEnv(t *testing.T) fakeEnv {
 	}
 }
 
+// testConfigStore is the minimal store a sessionAgent needs; production always
+// gets a real one.
+func testConfigStore() *config.ConfigStore {
+	return config.NewTestStore(&config.Config{Options: &config.Options{}})
+}
+
 func testSessionAgent(env fakeEnv, large, small fantasy.LanguageModel, systemPrompt string, tools ...fantasy.AgentTool) SessionAgent {
 	largeModel := Model{
 		Model: large,
@@ -119,6 +125,7 @@ func testSessionAgent(env fakeEnv, large, small fantasy.LanguageModel, systemPro
 		Sessions:     env.sessions,
 		Messages:     env.messages,
 		Tools:        tools,
+		Cfg:          testConfigStore(),
 	})
 	return agent
 }
@@ -128,15 +135,15 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 		t, _ := time.Parse("1/2/2006", "1/1/2025")
 		return t
 	}
-	prompt, err := coderPrompt(
+	cfg, err := config.Init(env.workingDir, "", false)
+	if err != nil {
+		return nil, err
+	}
+	prompt, err := loadPrompt(cfg, "coder",
 		prompt.WithTimeFunc(fixedTime),
 		prompt.WithPlatform("linux"),
 		prompt.WithWorkingDir(filepath.ToSlash(env.workingDir)),
 	)
-	if err != nil {
-		return nil, err
-	}
-	cfg, err := config.Init(env.workingDir, "", false)
 	if err != nil {
 		return nil, err
 	}

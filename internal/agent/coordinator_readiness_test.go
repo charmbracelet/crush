@@ -69,7 +69,7 @@ func TestBuildAgentReadinessSurvivesCallerCancellation(t *testing.T) {
 	mcp.ArmInit()
 	t.Cleanup(mcp.DisarmInit)
 
-	p, err := coderPrompt(prompt.WithWorkingDir(env.workingDir))
+	p, err := loadPrompt(cfg, "coder", prompt.WithWorkingDir(env.workingDir))
 	require.NoError(t, err)
 	agentCfg := cfg.Config().Agents[config.AgentCoder]
 

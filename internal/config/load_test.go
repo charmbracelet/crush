@@ -2558,3 +2558,28 @@ func TestConfig_LoadFromBytes_EnvMerge(t *testing.T) {
 	require.Equal(t, "second", loadedConfig.Env["AWS_PROFILE"])
 	require.Equal(t, "us-east-1", loadedConfig.Env["AWS_REGION"])
 }
+
+func TestConfig_PromptOverrides(t *testing.T) {
+	t.Setenv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE", "1")
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "crushrc")
+	require.NoError(t, os.WriteFile(cfgPath, []byte("option prompt coder /etc/crush/coder.md.tpl\n"), 0o644))
+
+	cfg, err := Init(dir, "", false)
+	require.NoError(t, err)
+	require.Equal(t, "/etc/crush/coder.md.tpl", cfg.Config().Options.Prompts["coder"])
+}
+
+// A typo'd prompt name must stop startup rather than silently leaving the
+// built-in prompt in place.
+func TestConfig_PromptOverrideUnknownNameFails(t *testing.T) {
+	t.Setenv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE", "1")
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "crushrc")
+	require.NoError(t, os.WriteFile(cfgPath, []byte("option prompt codr /etc/crush/coder.md.tpl\n"), 0o644))
+
+	_, err := Init(dir, "", false)
+	require.ErrorContains(t, err, `unknown prompt "codr"`)
+}

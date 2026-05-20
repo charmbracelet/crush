@@ -16,6 +16,7 @@ func newCancelTestAgent(t *testing.T) (*sessionAgent, fakeEnv) {
 	t.Helper()
 	env := testEnv(t)
 	sa := NewSessionAgent(SessionAgentOptions{
+		Cfg:      testConfigStore(),
 		Sessions: env.sessions,
 		Messages: env.messages,
 	}).(*sessionAgent)

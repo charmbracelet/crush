@@ -482,8 +482,9 @@ type Options struct {
 	// Crush dialog (loopback pinentry) instead of handing the terminal
 	// over to an external pinentry program. No GPG or git configuration
 	// is modified: the redirect only applies to processes Crush spawns.
-	PinentryIntegrated   *bool `json:"pinentry_integrated,omitempty" jsonschema:"description=Render GPG passphrase prompts as a native Crush dialog instead of an external pinentry program. Works with file-based keys and security keys and never modifies GPG or git configuration.,default=true"`
-	PinentryCacheTimeout *int  `json:"pinentry_cache_timeout,omitempty" jsonschema:"description=Seconds Crush keeps an entered GPG passphrase in memory so repeated signing operations do not re-prompt. 0 (the default) disables it; gpg-agent's own cache applies regardless.,default=0,example=300"`
+	PinentryIntegrated   *bool       `json:"pinentry_integrated,omitempty" jsonschema:"description=Render GPG passphrase prompts as a native Crush dialog instead of an external pinentry program. Works with file-based keys and security keys and never modifies GPG or git configuration.,default=true"`
+	PinentryCacheTimeout *int        `json:"pinentry_cache_timeout,omitempty" jsonschema:"description=Seconds Crush keeps an entered GPG passphrase in memory so repeated signing operations do not re-prompt. 0 (the default) disables it; gpg-agent's own cache applies regardless.,default=0,example=300"`
+	Prompts              PromptPaths `json:"prompts,omitempty" jsonschema:"description=Files that replace Crush's built-in prompts\\, keyed by prompt name. A replacement is used verbatim\\, so anything the built-in template injected (skills\\, context files\\, LSP status) is lost unless the replacement asks for it too."`
 }
 
 // DefaultMaxBackgroundJobs is how many background shell jobs may run at once
@@ -497,6 +498,13 @@ func (o *Options) GetMaxBackgroundJobs() int {
 	}
 	return *o.MaxBackgroundJobs
 }
+
+// PromptPaths maps a built-in prompt name to a file that replaces it.
+type PromptPaths map[string]string
+
+// PromptNames are the built-in prompts that options.prompts can replace. The
+// agent package owns the templates themselves and asserts it covers this list.
+var PromptNames = []string{"coder", "task", "plan", "summary", "title", "initialize"}
 
 // DefaultRequestTimeout bounds each LLM API request when the user has not
 // configured a timeout. Slow or unreachable providers fail after it instead

@@ -42,7 +42,7 @@ func TestPlanPromptListsConfiguredTools(t *testing.T) {
 		t.Helper()
 		c := &coordinator{interactive: interactive}
 		planCfg := cfg.Config().Agents[config.AgentPlan]
-		p, err := planPrompt(
+		p, err := loadPrompt(cfg, "plan",
 			prompt.WithWorkingDir(env.workingDir),
 			prompt.WithToolNames(c.effectiveToolNames(planCfg, false)),
 		)

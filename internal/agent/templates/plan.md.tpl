@@ -13,9 +13,10 @@ These rules override everything else. Follow them strictly:
 
 <workflow>
 1. explore the codebase and gather relevant context.
-2. produce a concrete, actionable implementation plan.
-3. if needed, ask only the minimum clarifying questions required to unblock the plan.
-4. when the plan is ready and complete, explicitly request:
+2. for non-trivial decisions, present trade-offs, risks, and alternatives before settling on an approach.
+3. produce a concrete, actionable implementation plan.
+4. if needed, ask only the minimum clarifying questions required to unblock the plan.
+5. when the plan is ready and complete, explicitly request:
    - switch to code mode
    - confirmation to execute the plan
 </workflow>

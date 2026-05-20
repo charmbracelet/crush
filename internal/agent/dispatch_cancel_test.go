@@ -209,6 +209,7 @@ func newCancelTestAgentWithRunComplete(t *testing.T) (*sessionAgent, fakeEnv, *p
 	broker := pubsub.NewBroker[notify.RunComplete]()
 	t.Cleanup(broker.Shutdown)
 	sa := NewSessionAgent(SessionAgentOptions{
+		Cfg:         testConfigStore(),
 		Sessions:    env.sessions,
 		Messages:    env.messages,
 		RunComplete: broker,

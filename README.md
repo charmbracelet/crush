@@ -368,6 +368,40 @@ which do expand.
 Crush has preliminary support for hooks. For details, see
 [the hook guide](./docs/hooks/).
 
+### Sharing a workspace across clients
+
+When Crush is run against a shared backend (for example two TUIs talking to
+the same `crush serve`), clients are grouped into **workspaces** keyed by
+their resolved `--cwd`. Two clients with the same `--cwd` join the same
+underlying workspace, so they share the session list, message history,
+permission queue, LSP, and MCP state.
+
+Joining is implicit: pointing a second client at the same working directory
+attaches it to the existing workspace. Each new invocation, however, starts
+in its own fresh session by default. To pick up the conversation another
+client already has open, use the session manager (the session picker) and
+select it. Sessions surface two signals there:
+
+- `IsBusy` is set while an agent turn is in flight for that session.
+- `AttachedClients` reports how many clients are currently viewing it.
+
+A non-zero `AttachedClients` (often combined with `IsBusy`) is the cue that a
+session is "in progress" on another client and joining it will mirror that
+view live.
+
+The first client to create a workspace fixes its process-wide flags. In
+particular, `--yolo` and `--debug` follow a **first-wins** rule: later
+clients that arrive at the same `--cwd` with different values for those
+flags do not change the running workspace. A debug log line is emitted
+recording the mismatch, and the workspace keeps the flags it was created
+with.
+
+A workspace lives as long as at least one client has an SSE event stream
+open against it. When the last stream disconnects, the workspace is torn
+down. There is a short grace window right after `POST /v1/workspaces` so a
+client that has created the workspace but not yet opened its event stream
+does not get reaped before it can attach.
+
 ### Ignoring Files
 
 Crush respects `.gitignore` files by default, but you can also create a

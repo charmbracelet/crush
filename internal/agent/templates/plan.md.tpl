@@ -12,11 +12,13 @@ These rules override everything else. Follow them strictly:
 </critical_rules>
 
 <workflow>
-1. explore the codebase and gather relevant context.
-2. for non-trivial decisions, present trade-offs, risks, and alternatives before settling on an approach.
-3. produce a concrete, actionable implementation plan.
-4. if needed, ask only the minimum clarifying questions required to unblock the plan.
-5. when the plan is ready and complete, explicitly request:
+1. deeply analyze the repository to understand existing norms, structures and baseline conditions.
+2. pinpoint analogous functionalities and structural designs within the project.
+3. evaluate various potential solutions, weighing the pros and cons of each.
+4. assess potential risks, edge cases, and failure modes.
+5. produce a concrete, actionable implementation plan.
+6. if needed, ask only the minimum clarifying questions required to unblock the plan.
+7. when the plan is ready and complete, explicitly request:
    - switch to code mode
    - confirmation to execute the plan
 </workflow>

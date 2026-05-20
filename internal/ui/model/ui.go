@@ -3950,7 +3950,9 @@ func (m *UI) toggleInputMode() tea.Cmd {
 
 		m.mode = targetMode
 		m.setEditorPrompt(m.com.Workspace.PermissionSkipRequests(), m.mode)
-		m.status.SetMode(m.mode == uiInputModePlan)
+		if m.status != nil {
+			m.status.SetMode(m.mode == uiInputModePlan)
+		}
 		if err := m.com.Workspace.UpdateAgentModel(context.Background()); err != nil {
 			return util.ReportError(err)()
 		}

@@ -3389,16 +3389,25 @@ func (m *UI) openPermissionsDialog(perm permission.PermissionRequest) tea.Cmd {
 
 // handlePermissionNotification updates tool items when permission state changes.
 func (m *UI) handlePermissionNotification(notification permission.PermissionNotification) {
-	toolItem := m.chat.MessageItem(notification.ToolCallID)
-	if toolItem == nil {
-		return
+	if toolItem := m.chat.MessageItem(notification.ToolCallID); toolItem != nil {
+		if permItem, ok := toolItem.(chat.ToolMessageItem); ok {
+			if notification.Granted {
+				permItem.SetStatus(chat.ToolStatusRunning)
+			} else {
+				permItem.SetStatus(chat.ToolStatusAwaitingPermission)
+			}
+		}
 	}
 
-	if permItem, ok := toolItem.(chat.ToolMessageItem); ok {
-		if notification.Granted {
-			permItem.SetStatus(chat.ToolStatusRunning)
-		} else {
-			permItem.SetStatus(chat.ToolStatusAwaitingPermission)
+	// If this notification reflects a final resolution (granted or denied),
+	// dismiss any open permissions dialog whose tool call ID matches. This
+	// covers the case where another client resolved the request remotely.
+	if !notification.Granted && !notification.Denied {
+		return
+	}
+	if d := m.dialog.Dialog(dialog.PermissionsID); d != nil {
+		if perm, ok := d.(*dialog.Permissions); ok && perm.ToolCallID() == notification.ToolCallID {
+			m.dialog.CloseDialog(dialog.PermissionsID)
 		}
 	}
 }

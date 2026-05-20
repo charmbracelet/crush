@@ -3,6 +3,8 @@
 // 8x sub-cell resolution per character.
 package progress
 
+import "math/rand/v2"
+
 // glyphs are the nine fill stages of a single braille cell, adding one dot at
 // a time bottom-up and left-before-right within each row.
 var glyphs = [9]rune{
@@ -46,6 +48,52 @@ func Render(width int, percent float64) string {
 			filled = 0
 		}
 		out[i] = glyphs[n]
+	}
+	return string(out)
+}
+
+// RenderSeeded is like [Render], but the seed deterministically permutes the
+// cell fill order so cells do not necessarily fill left to right. Within each
+// cell, dots still fill bottom-up and left-before-right.
+func RenderSeeded(width int, percent float64, seed int) string {
+	if width <= 0 {
+		return ""
+	}
+	switch {
+	case percent < 0:
+		percent = 0
+	case percent > 1:
+		percent = 1
+	}
+
+	order := make([]int, width)
+	for i := range order {
+		order[i] = i
+	}
+	s := uint64(seed)
+	r := rand.New(rand.NewPCG(s, s^0x9e3779b97f4a7c15))
+	r.Shuffle(width, func(i, j int) {
+		order[i], order[j] = order[j], order[i]
+	})
+
+	totalDots := width * 8
+	filled := int(percent*float64(totalDots) + 0.5)
+
+	out := make([]rune, width)
+	for i := range out {
+		out[i] = glyphs[0]
+	}
+	for _, idx := range order {
+		n := 0
+		switch {
+		case filled >= 8:
+			n = 8
+			filled -= 8
+		case filled > 0:
+			n = filled
+			filled = 0
+		}
+		out[idx] = glyphs[n]
 	}
 	return string(out)
 }

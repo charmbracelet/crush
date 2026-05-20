@@ -498,6 +498,7 @@ type Agent struct {
 	Description string `json:"description,omitempty"`
 	// This is the id of the system prompt used by the agent
 	Disabled bool `json:"disabled,omitempty"`
+	DisableMCP bool `json:"disable_mcp,omitempty"`
 
 	Model SelectedModelType `json:"model" jsonschema:"required,description=The model type to use for this agent,enum=large,enum=small,default=large"`
 

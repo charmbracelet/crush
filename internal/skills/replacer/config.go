@@ -8,7 +8,7 @@ import (
 
 const (
 	DefaultMaxIterations = 3
-	DefaultTimeout       = 10 * time.Second
+	DefaultTimeout       = 30 * time.Second
 )
 
 // ReplacerConfig holds runtime configuration for the replacement agent.

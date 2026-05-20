@@ -37,6 +37,12 @@ type ReadFile struct {
 	ReadAt    int64  `json:"read_at"`
 }
 
+type WrittenFile struct {
+	SessionID string `json:"session_id"`
+	Path      string `json:"path"`
+	WrittenAt int64  `json:"written_at"`
+}
+
 type CriticReview struct {
 	ID             string  `json:"id"`
 	SessionID      string  `json:"session_id"`

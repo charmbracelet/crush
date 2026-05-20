@@ -184,6 +184,7 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 	}
 
 	edit.filetracker.RecordRead(edit.ctx, sessionID, filePath)
+			edit.filetracker.RecordWrite(edit.ctx, sessionID, filePath)
 
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse("File created: "+filePath),
@@ -325,6 +326,7 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 	}
 
 	edit.filetracker.RecordRead(edit.ctx, sessionID, filePath)
+			edit.filetracker.RecordWrite(edit.ctx, sessionID, filePath)
 
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse("Content deleted from file: "+filePath),
@@ -466,6 +468,7 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 	}
 
 	edit.filetracker.RecordRead(edit.ctx, sessionID, filePath)
+			edit.filetracker.RecordWrite(edit.ctx, sessionID, filePath)
 
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse("Content replaced in file: "+filePath),

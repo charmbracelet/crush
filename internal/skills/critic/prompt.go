@@ -186,8 +186,10 @@ func escapeDelimiters(text string) string {
 	// string so the LLM does not treat them as block terminators.
 	text = strings.ReplaceAll(text, "<<<DIFF_END>>>", "««DIFF_END»»")
 	text = strings.ReplaceAll(text, "<<<PLAN_END>>>", "««PLAN_END»»")
+	text = strings.ReplaceAll(text, "<<<MESSAGE_END>>>", "««MESSAGE_END»»")
 	text = strings.ReplaceAll(text, "<<<DIFF_BEGIN>>>", "««DIFF_BEGIN»»")
 	text = strings.ReplaceAll(text, "<<<PLAN_BEGIN>>>", "««PLAN_BEGIN»»")
+	text = strings.ReplaceAll(text, "<<<MESSAGE_BEGIN>>>", "««MESSAGE_BEGIN»»")
 	text = strings.ReplaceAll(text, "<<<CONTEXT_END>>>", "««CONTEXT_END»»")
 	text = strings.ReplaceAll(text, "<<<CONTEXT_BEGIN>>>", "««CONTEXT_BEGIN»»")
 	return text

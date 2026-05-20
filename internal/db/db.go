@@ -66,6 +66,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getFileReadStmt, err = db.PrepareContext(ctx, getFileRead); err != nil {
 		return nil, fmt.Errorf("error preparing query GetFileRead: %w", err)
 	}
+	if q.getFileWriteStmt, err = db.PrepareContext(ctx, getFileWrite); err != nil {
+		return nil, fmt.Errorf("error preparing query GetFileWrite: %w", err)
+	}
 	if q.getHourDayHeatmapStmt, err = db.PrepareContext(ctx, getHourDayHeatmap); err != nil {
 		return nil, fmt.Errorf("error preparing query GetHourDayHeatmap: %w", err)
 	}
@@ -123,6 +126,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listSessionReadFilesStmt, err = db.PrepareContext(ctx, listSessionReadFiles); err != nil {
 		return nil, fmt.Errorf("error preparing query ListSessionReadFiles: %w", err)
 	}
+	if q.listSessionWrittenFilesStmt, err = db.PrepareContext(ctx, listSessionWrittenFiles); err != nil {
+		return nil, fmt.Errorf("error preparing query ListSessionWrittenFiles: %w", err)
+	}
 	if q.listSessionsStmt, err = db.PrepareContext(ctx, listSessions); err != nil {
 		return nil, fmt.Errorf("error preparing query ListSessions: %w", err)
 	}
@@ -131,6 +137,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.recordFileReadStmt, err = db.PrepareContext(ctx, recordFileRead); err != nil {
 		return nil, fmt.Errorf("error preparing query RecordFileRead: %w", err)
+	}
+	if q.recordFileWriteStmt, err = db.PrepareContext(ctx, recordFileWrite); err != nil {
+		return nil, fmt.Errorf("error preparing query RecordFileWrite: %w", err)
 	}
 	if q.renameSessionStmt, err = db.PrepareContext(ctx, renameSession); err != nil {
 		return nil, fmt.Errorf("error preparing query RenameSession: %w", err)
@@ -217,6 +226,11 @@ func (q *Queries) Close() error {
 	if q.getFileReadStmt != nil {
 		if cerr := q.getFileReadStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getFileReadStmt: %w", cerr)
+		}
+	}
+	if q.getFileWriteStmt != nil {
+		if cerr := q.getFileWriteStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getFileWriteStmt: %w", cerr)
 		}
 	}
 	if q.getHourDayHeatmapStmt != nil {
@@ -314,6 +328,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listSessionReadFilesStmt: %w", cerr)
 		}
 	}
+	if q.listSessionWrittenFilesStmt != nil {
+		if cerr := q.listSessionWrittenFilesStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listSessionWrittenFilesStmt: %w", cerr)
+		}
+	}
 	if q.listSessionsStmt != nil {
 		if cerr := q.listSessionsStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listSessionsStmt: %w", cerr)
@@ -327,6 +346,11 @@ func (q *Queries) Close() error {
 	if q.recordFileReadStmt != nil {
 		if cerr := q.recordFileReadStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing recordFileReadStmt: %w", cerr)
+		}
+	}
+	if q.recordFileWriteStmt != nil {
+		if cerr := q.recordFileWriteStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing recordFileWriteStmt: %w", cerr)
 		}
 	}
 	if q.renameSessionStmt != nil {
@@ -402,6 +426,7 @@ type Queries struct {
 	getFileStmt                    *sql.Stmt
 	getFileByPathAndSessionStmt    *sql.Stmt
 	getFileReadStmt                *sql.Stmt
+	getFileWriteStmt               *sql.Stmt
 	getHourDayHeatmapStmt          *sql.Stmt
 	getLastSessionStmt             *sql.Stmt
 	getMessageStmt                 *sql.Stmt
@@ -421,9 +446,11 @@ type Queries struct {
 	listMessagesBySessionStmt      *sql.Stmt
 	listNewFilesStmt               *sql.Stmt
 	listSessionReadFilesStmt       *sql.Stmt
+	listSessionWrittenFilesStmt    *sql.Stmt
 	listSessionsStmt               *sql.Stmt
 	listUserMessagesBySessionStmt  *sql.Stmt
 	recordFileReadStmt             *sql.Stmt
+	recordFileWriteStmt            *sql.Stmt
 	renameSessionStmt              *sql.Stmt
 	updateMessageStmt              *sql.Stmt
 	updateSessionStmt              *sql.Stmt
@@ -448,6 +475,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getFileStmt:                    q.getFileStmt,
 		getFileByPathAndSessionStmt:    q.getFileByPathAndSessionStmt,
 		getFileReadStmt:                q.getFileReadStmt,
+		getFileWriteStmt:               q.getFileWriteStmt,
 		getHourDayHeatmapStmt:          q.getHourDayHeatmapStmt,
 		getLastSessionStmt:             q.getLastSessionStmt,
 		getMessageStmt:                 q.getMessageStmt,
@@ -467,9 +495,11 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listMessagesBySessionStmt:      q.listMessagesBySessionStmt,
 		listNewFilesStmt:               q.listNewFilesStmt,
 		listSessionReadFilesStmt:       q.listSessionReadFilesStmt,
+		listSessionWrittenFilesStmt:    q.listSessionWrittenFilesStmt,
 		listSessionsStmt:               q.listSessionsStmt,
 		listUserMessagesBySessionStmt:  q.listUserMessagesBySessionStmt,
 		recordFileReadStmt:             q.recordFileReadStmt,
+		recordFileWriteStmt:            q.recordFileWriteStmt,
 		renameSessionStmt:              q.renameSessionStmt,
 		updateMessageStmt:              q.updateMessageStmt,
 		updateSessionStmt:              q.updateSessionStmt,

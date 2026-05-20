@@ -12,6 +12,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent"
+	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
 )
@@ -28,6 +29,10 @@ var (
 	coachStopDisplay     = 1500 * time.Millisecond
 	coachContinueDisplay = 500 * time.Millisecond
 )
+
+// flashDoneCh is signalled by async indicator goroutines when they finish.
+// Tests can drain it for synchronization.
+var flashDoneCh = make(chan struct{}, 10)
 
 // Middleware wraps a primary SessionAgent with replacement agent conversation
 // continuation support. After the primary agent responds, the replacement agent
@@ -72,6 +77,10 @@ func (m *Middleware) SetModelResolver(fn func(ctx context.Context) (fantasy.Lang
 // wired, it additionally evaluates the conversation and may inject follow-up
 // prompts to continue the dialogue until the replacement agent decides to stop.
 func (m *Middleware) Run(ctx context.Context, call agent.SessionAgentCall) (*fantasy.AgentResult, error) {
+	if call.ReplacerEnabled != nil && !*call.ReplacerEnabled {
+		slog.Debug("Replacer disabled for this session", "session_id", call.SessionID)
+		return m.primary.Run(ctx, call)
+	}
 	if !m.cfg.Enabled || m.messages == nil || m.resolveModel == nil {
 		slog.Debug("Replacer bypassed", "enabled", m.cfg.Enabled, "has_messages", m.messages != nil, "has_resolver", m.resolveModel != nil)
 		return m.primary.Run(ctx, call)
@@ -132,14 +141,23 @@ func (m *Middleware) Run(ctx context.Context, call agent.SessionAgentCall) (*fan
 
 		if evalErr != nil {
 			slog.Warn("Replacer evaluation failed", "session_id", call.SessionID, "error", evalErr)
+			event.TrackReplacerLoopCompleted(call.SessionID, iteration, "error")
 			return result, nil
 		}
 		if decision == nil || decision.Action == "stop" {
+			action := "stop"
+			if decision == nil {
+				action = "nil"
+			}
+			event.TrackReplacerDecision(call.SessionID, action, iteration)
+			event.TrackReplacerLoopCompleted(call.SessionID, iteration+1, action)
 			if decision != nil && decision.Action == "stop" {
 				m.flashStopIndicator(ctx, call.SessionID)
 			}
 			return result, nil
 		}
+
+		event.TrackReplacerDecision(call.SessionID, "continue", iteration)
 
 		// Show a brief continue indicator before re-running the primary.
 		m.flashContinueIndicator(ctx, call.SessionID)
@@ -150,14 +168,17 @@ func (m *Middleware) Run(ctx context.Context, call agent.SessionAgentCall) (*fan
 		newCall.Attachments = nil
 		result, err, evalMsg = m.runPrimaryWithEval(ctx, newCall)
 		if err != nil {
+			event.TrackReplacerLoopCompleted(call.SessionID, iteration+1, "primary_error")
 			return result, err
 		}
 		if result == nil {
+			event.TrackReplacerLoopCompleted(call.SessionID, iteration+1, "nil_result")
 			return nil, nil
 		}
 	}
 
 	slog.Info("Replacer max iterations reached", "session_id", call.SessionID, "max_iterations", m.cfg.MaxIterations)
+	event.TrackReplacerLoopCompleted(call.SessionID, m.cfg.MaxIterations, "max_iterations")
 	return result, nil
 }
 
@@ -305,6 +326,9 @@ func (m *Middleware) flashStopIndicator(ctx context.Context, sessionID string) {
 	if m.messages == nil {
 		return
 	}
+	if ctx.Err() != nil {
+		return
+	}
 	msg, err := m.messages.Create(ctx, sessionID, message.CreateMessageParams{
 		Role:         message.Assistant,
 		SpinnerLabel: coachStopLabel,
@@ -313,10 +337,13 @@ func (m *Middleware) flashStopIndicator(ctx context.Context, sessionID string) {
 		slog.Warn("Replacer failed to create stop indicator", "session_id", sessionID, "error", err)
 		return
 	}
-	time.Sleep(coachStopDisplay)
-	if delErr := m.messages.Delete(ctx, msg.ID); delErr != nil {
-		slog.Warn("Replacer failed to delete stop indicator", "session_id", sessionID, "error", delErr)
-	}
+	go func() {
+		defer func() { flashDoneCh <- struct{}{} }()
+		time.Sleep(coachStopDisplay)
+		if delErr := m.messages.Delete(ctx, msg.ID); delErr != nil {
+			slog.Warn("Replacer failed to delete stop indicator", "session_id", sessionID, "error", delErr)
+		}
+	}()
 }
 
 // flashContinueIndicator shows a brief transition spinner so the user sees
@@ -324,6 +351,9 @@ func (m *Middleware) flashStopIndicator(ctx context.Context, sessionID string) {
 // its next turn.
 func (m *Middleware) flashContinueIndicator(ctx context.Context, sessionID string) {
 	if m.messages == nil {
+		return
+	}
+	if ctx.Err() != nil {
 		return
 	}
 	msg, err := m.messages.Create(ctx, sessionID, message.CreateMessageParams{
@@ -334,10 +364,13 @@ func (m *Middleware) flashContinueIndicator(ctx context.Context, sessionID strin
 		slog.Warn("Replacer failed to create continue indicator", "session_id", sessionID, "error", err)
 		return
 	}
-	time.Sleep(coachContinueDisplay)
-	if delErr := m.messages.Delete(ctx, msg.ID); delErr != nil {
-		slog.Warn("Replacer failed to delete continue indicator", "session_id", sessionID, "error", delErr)
-	}
+	go func() {
+		defer func() { flashDoneCh <- struct{}{} }()
+		time.Sleep(coachContinueDisplay)
+		if delErr := m.messages.Delete(ctx, msg.ID); delErr != nil {
+			slog.Warn("Replacer failed to delete continue indicator", "session_id", sessionID, "error", delErr)
+		}
+	}()
 }
 
 // SetModels delegates to the primary agent.

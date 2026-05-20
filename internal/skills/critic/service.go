@@ -34,7 +34,12 @@ type CriticService struct {
 func NewCriticService(cfg CriticSkillConfig, pub pubsub.Publisher[any]) *CriticService {
 	var cache *FeedbackCache
 	if cfg.CacheSize > 0 {
-		cache, _ = NewFeedbackCache(cfg.CacheSize)
+		var err error
+		cache, err = NewFeedbackCache(cfg.CacheSize)
+		if err != nil {
+			slog.Warn("Failed to create critic feedback cache, caching disabled", "error", err)
+			cache = nil
+		}
 	}
 	return &CriticService{
 		cfg:      cfg,
@@ -66,6 +71,12 @@ func (cs *CriticService) Review(ctx context.Context, sessionID string, cp Checkp
 		}
 	}
 
+	// Check circuit breaker before attempting the call.
+	if breakerErr := cs.breakers.CanExecute(sessionID); breakerErr != nil {
+		slog.Warn("Critic circuit breaker open", "session_id", sessionID)
+		return nil, breakerErr
+	}
+
 	// Apply timeout.
 	ctx, cancel := context.WithTimeout(ctx, cs.cfg.Timeout)
 	defer cancel()
@@ -83,20 +94,19 @@ func (cs *CriticService) Review(ctx context.Context, sessionID string, cp Checkp
 			}
 		}
 		fb, err = cs.emitter(ctx, cp)
+		if breakerErr := cs.breakers.RecordResult(sessionID, err); breakerErr != nil {
+			if errors.Is(breakerErr, ErrCircuitOpen) {
+				slog.Warn("Critic circuit breaker open after attempt", "session_id", sessionID, "attempt", attempt)
+			}
+			// Stop retrying if the breaker opened.
+			return nil, breakerErr
+		}
 		if err == nil {
 			break
 		}
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("critic review timed out: %w", err)
 		}
-	}
-
-	// Record result in circuit breaker (success or failure).
-	if breakerErr := cs.breakers.RecordResult(sessionID, err); breakerErr != nil {
-		if errors.Is(breakerErr, ErrCircuitOpen) {
-			slog.Warn("Critic circuit breaker open", "session_id", sessionID)
-		}
-		return nil, breakerErr
 	}
 
 	if err != nil {

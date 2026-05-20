@@ -140,6 +140,10 @@ func (f *fakeFileTracker) LastReadTime(ctx context.Context, sessionID, path stri
 func (f *fakeFileTracker) ListReadFiles(ctx context.Context, sessionID string) ([]string, error) {
 	return f.paths, nil
 }
+func (f *fakeFileTracker) RecordWrite(ctx context.Context, sessionID, path string) {}
+func (f *fakeFileTracker) ListWrittenFiles(ctx context.Context, sessionID string) ([]string, error) {
+	return nil, nil
+}
 
 // fakeMessageService tracks created messages and returns them in List.
 type fakeMessageService struct {
@@ -171,6 +175,8 @@ func (f *fakeMessageService) Delete(ctx context.Context, id string) error { retu
 func (f *fakeMessageService) DeleteSessionMessages(ctx context.Context, sessionID string) error {
 	return nil
 }
+func (f *fakeMessageService) Flush(ctx context.Context, id string) error { return nil }
+func (f *fakeMessageService) FlushAll(ctx context.Context) error { return nil }
 func (f *fakeMessageService) Subscribe(ctx context.Context) <-chan pubsub.Event[message.Message] {
 	return nil
 }

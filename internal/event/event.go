@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/version"
@@ -77,7 +78,33 @@ func Alias(userID string) {
 }
 
 // send logs an event to PostHog with the given event name and properties.
+var (
+	testHook     func(event string, props ...any)
+	testHookMu   sync.RWMutex
+)
+
+// SetTestHook installs a hook that receives all events sent via the event
+// package. It is intended for testing only.
+func SetTestHook(hook func(event string, props ...any)) {
+	testHookMu.Lock()
+	defer testHookMu.Unlock()
+	testHook = hook
+}
+
+// ResetTestHook removes the test hook.
+func ResetTestHook() {
+	testHookMu.Lock()
+	defer testHookMu.Unlock()
+	testHook = nil
+}
+
 func send(event string, props ...any) {
+	testHookMu.RLock()
+	hook := testHook
+	testHookMu.RUnlock()
+	if hook != nil {
+		hook(event, props...)
+	}
 	if client == nil {
 		return
 	}
@@ -114,6 +141,24 @@ func TrackCriticLoopCompleted(sessionID string, iterations int, verdict string) 
 func TrackCriticRollback(sessionID string) {
 	send("critic.rollback",
 		"session_id", sessionID,
+	)
+}
+
+// TrackReplacerDecision logs a replacer decision event to PostHog.
+func TrackReplacerDecision(sessionID, action string, iteration int) {
+	send("replacer.decision",
+		"session_id", sessionID,
+		"action", action,
+		"iteration", iteration,
+	)
+}
+
+// TrackReplacerLoopCompleted logs a replacer loop completion event to PostHog.
+func TrackReplacerLoopCompleted(sessionID string, iterations int, finalAction string) {
+	send("replacer.loop.completed",
+		"session_id", sessionID,
+		"iterations", iterations,
+		"final_action", finalAction,
 	)
 }
 

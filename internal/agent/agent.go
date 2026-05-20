@@ -107,6 +107,9 @@ type SessionAgentCall struct {
 	// CriticEnabled overrides the global critic setting for this call.
 	// nil uses the global config; false disables; true enables.
 	CriticEnabled *bool
+	// ReplacerEnabled overrides the global replacer setting for this call.
+	// nil uses the global config; false disables; true enables.
+	ReplacerEnabled *bool
 }
 
 type SessionAgent interface {

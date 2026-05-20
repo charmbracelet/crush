@@ -15,7 +15,7 @@ You are operating in **critic mode**. After every significant action (plan, edit
 - Address every concern explicitly; do not ignore critical or major items.
 - If you disagree with a nit, you may briefly justify your choice, but default to accepting senior feedback.
 - Prefer small, reviewable steps over large monolithic changes.
-{{end}}{{end}}
+{{end}}{{end -}}
 
 <env>
 Working directory: {{.WorkingDir}}

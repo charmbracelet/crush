@@ -126,6 +126,58 @@
         "command"
       ]
     },
+    "CriticConfig": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable the critic agent for self-improvement loops"
+        },
+        "model": {
+          "type": "string",
+          "description": "Model override for the critic agent; defaults to a cheap heuristic"
+        },
+        "max_iterations": {
+          "type": "integer",
+          "description": "Maximum critic feedback loops per checkpoint",
+          "default": 3
+        },
+        "auto_approve": {
+          "type": "boolean",
+          "description": "Automatically approve critic suggestions without user confirmation"
+        },
+        "threshold": {
+          "type": "number",
+          "description": "Confidence threshold below which revise requires user confirmation",
+          "default": 0.85
+        },
+        "cache_size": {
+          "type": "integer",
+          "description": "LRU cache size for identical diff reviews",
+          "default": 32
+        },
+        "max_diff_size": {
+          "type": "integer",
+          "description": "Maximum diff bytes to send to the critic",
+          "default": 32768
+        },
+        "max_file_size": {
+          "type": "integer",
+          "description": "Maximum file size to snapshot for critic review",
+          "default": 10485760
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Timeout for each critic LLM call"
+        },
+        "retention_days": {
+          "type": "integer",
+          "description": "Days to retain critic reviews in the database",
+          "default": 30
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "LSPConfig": {
       "properties": {
         "disabled": {
@@ -516,6 +568,14 @@
           },
           "type": "array",
           "description": "List of skill names to disable and hide from the agent"
+        },
+        "critic": {
+          "$ref": "#/$defs/CriticConfig",
+          "description": "Self-critic agent configuration for automated review loops"
+        },
+        "replacer": {
+          "$ref": "#/$defs/ReplacerConfig",
+          "description": "Replacement agent configuration for conversation continuation"
         }
       },
       "additionalProperties": false,
@@ -620,6 +680,29 @@
           },
           "type": "array",
           "description": "List of models available from this provider"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "ReplacerConfig": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable the replacement agent for conversation continuation"
+        },
+        "model": {
+          "type": "string",
+          "description": "Model override for the replacement agent; defaults to the small model"
+        },
+        "max_iterations": {
+          "type": "integer",
+          "description": "Maximum replacement agent turns per user message",
+          "default": 3
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Timeout for each replacement agent LLM call"
         }
       },
       "additionalProperties": false,

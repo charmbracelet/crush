@@ -9,6 +9,40 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestBreakerRegistry_CanExecute_AllowsWhenClosed(t *testing.T) {
+	t.Parallel()
+	br := newBreakerRegistry()
+	require.NoError(t, br.CanExecute("s1"))
+}
+
+func TestBreakerRegistry_CanExecute_BlocksWhenOpen(t *testing.T) {
+	t.Parallel()
+	br := newBreakerRegistry()
+	retryable := context.DeadlineExceeded
+
+	for i := 0; i < breakerFailureThreshold; i++ {
+		require.ErrorIs(t, br.RecordResult("s1", retryable), retryable)
+	}
+	require.ErrorIs(t, br.CanExecute("s1"), ErrCircuitOpen)
+}
+
+func TestBreakerRegistry_CanExecute_AllowsAfterCooldown(t *testing.T) {
+	t.Parallel()
+	br := newBreakerRegistry()
+	retryable := context.DeadlineExceeded
+
+	for i := 0; i < breakerFailureThreshold; i++ {
+		_ = br.RecordResult("s1", retryable)
+	}
+	require.ErrorIs(t, br.CanExecute("s1"), ErrCircuitOpen)
+
+	br.mu.Lock()
+	br.breakers["s1"].lastFailureAt = time.Now().Add(-breakerCooldown - time.Second)
+	br.mu.Unlock()
+
+	require.NoError(t, br.CanExecute("s1"))
+}
+
 func TestBreakerRegistry_SuccessCloses(t *testing.T) {
 	t.Parallel()
 	br := newBreakerRegistry()

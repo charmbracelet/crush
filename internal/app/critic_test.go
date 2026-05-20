@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/skills/critic"
+	"github.com/charmbracelet/crush/internal/skills/replacer"
 	"github.com/stretchr/testify/require"
 )
 
@@ -63,6 +64,32 @@ func TestBuildCriticWrapper_Enabled(t *testing.T) {
 	require.True(t, ok, "expected wrapper to return *critic.Middleware")
 }
 
+func TestComposeWrappers_CriticThenReplacer(t *testing.T) {
+	t.Parallel()
+	app := &App{
+		FileTracker: &mockFileTracker{},
+		Messages:    &mockMessageService{},
+	}
+	criticCfg := critic.CriticSkillConfig{Enabled: true, MaxIterations: 1}
+	replacerCfg := replacer.ReplacerConfig{Enabled: false, MaxIterations: 1}
+
+	composed := app.composeWrappers(
+		app.buildCriticWrapper(criticCfg),
+		app.buildReplacerWrapper(replacerCfg),
+	)
+	require.NotNil(t, composed)
+
+	primary := &mockSessionAgent{}
+	wrapped := composed(primary)
+	require.NotNil(t, wrapped)
+
+	// With replacer disabled, the composed wrapper should delegate directly
+	// to the critic middleware, which then delegates to the primary.
+	result, err := wrapped.Run(context.Background(), agent.SessionAgentCall{SessionID: "sid", Prompt: "hi"})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+}
+
 // mockFileTracker implements filetracker.Service minimally.
 type mockFileTracker struct{}
 
@@ -71,6 +98,10 @@ func (m *mockFileTracker) LastReadTime(ctx context.Context, sessionID, path stri
 	return time.Time{}
 }
 func (m *mockFileTracker) ListReadFiles(ctx context.Context, sessionID string) ([]string, error) {
+	return nil, nil
+}
+func (m *mockFileTracker) RecordWrite(ctx context.Context, sessionID, path string) {}
+func (m *mockFileTracker) ListWrittenFiles(ctx context.Context, sessionID string) ([]string, error) {
 	return nil, nil
 }
 
@@ -97,6 +128,8 @@ func (m *mockMessageService) Delete(ctx context.Context, id string) error { retu
 func (m *mockMessageService) DeleteSessionMessages(ctx context.Context, sessionID string) error {
 	return nil
 }
+func (m *mockMessageService) Flush(ctx context.Context, id string) error { return nil }
+func (m *mockMessageService) FlushAll(ctx context.Context) error { return nil }
 func (m *mockMessageService) Subscribe(ctx context.Context) <-chan pubsub.Event[message.Message] {
 	return nil
 }

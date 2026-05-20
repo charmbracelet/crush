@@ -14,7 +14,7 @@ The module path is `github.com/charmbracelet/crush`.
 ## Architecture
 
 ```
-main.go                            CLI entry point (cobra via internal/cmd)
+main.go                            CLI entry point (fang v2 CLI framework via internal/cmd)
 internal/
   app/app.go                       Top-level wiring: DB, config, agents, LSP, MCP, events
   cmd/                             CLI commands (root, run, login, models, stats, sessions)
@@ -73,9 +73,11 @@ internal/
 
 ### Key Dependency Roles
 
+- **`charm.land/fang/v2`**: Minimal CLI framework powering the command-line interface. Used in `internal/cmd/root.go` for command registration and execution.
 - **`charm.land/fantasy`**: LLM provider abstraction layer. Handles protocol
   differences between Anthropic, OpenAI, Gemini, etc. Used in `internal/app`
   and `internal/agent`.
+- **`charm.land/bubbles/v2`**: Reusable TUI components (textarea, textinput, filepicker, help, spinner, viewport, key). Used extensively in the UI layer.
 - **`charm.land/bubbletea/v2`**: TUI framework powering the interactive UI.
 - **`charm.land/lipgloss/v2`**: Terminal styling.
 - **`charm.land/glamour/v2`**: Markdown rendering in the terminal.
@@ -94,6 +96,14 @@ internal/
   instructions.
 - **Persistence**: SQLite + sqlc. All queries live in `internal/db/sql/`,
   generated code in `internal/db/`. Migrations in `internal/db/migrations/`.
+  - **SQLC workflow**: Add queries to `internal/db/sql/*.sql`, then run `task sqlc`.
+    Generated code includes interfaces (querier, models) in `internal/db/`.
+  - **Migrations**: Numbered files in `internal/db/migrations/` (e.g., `20250514000000_*.sql`).
+    Applied automatically on startup via `goose`. Never edit applied migrations.
+  - **Query files**: One file per domain (`sessions.sql`, `messages.sql`, `files.sql`,
+    `critic_reviews.sql`, etc.).
+  - **sqlc.yaml config**: Schema from `internal/db/migrations`, queries from `internal/db/sql/`,
+    emits interface, exact table names off, empty slices on.
 - **Pub/sub**: `internal/pubsub` for decoupled communication between agent,
   UI, and services.
 - **Hooks**: User-defined shell commands in `crush.json` that fire before
@@ -107,11 +117,57 @@ internal/
 - **Middleware pattern**: Skills wrap `SessionAgent` as decorators. The
   middleware receives a primary agent and config, exposes `SetXxx` wiring
   methods, and delegates all `SessionAgent` interface methods to the primary.
+  Example:
+  ```go
+  type Middleware struct {
+      primary agent.SessionAgent  // embedded as decorator
+      cfg     SomeConfig
+      // wiring fields set via SetXxx methods
+  }
+  func (m *Middleware) SetFileTracker(ft filetracker.Service) { m.filetracker = ft }
+  func (m *Middleware) Run(ctx context.Context, call agent.SessionAgentCall) (*fantasy.AgentResult, error) {
+      // intercept Run(), then delegate to m.primary.Run()
+  }
+  // All other SessionAgent methods: delegate directly to m.primary
+  ```
 - **Skill auto-enable**: When a skill config section is present in crush.json
   (even with no fields), it auto-enables. Explicitly set `enabled: false` to
   disable.
 - **Agent wrapper**: `AgentWrapper` func type in coordinator allows app layer
   to inject middleware without import cycles.
+
+- **Hook `HaltExitCode`**: Exit code 49 halts the entire turn. It sits outside the generic-error range (1-30), sysexits range (64-78), and killed-by-signal range (128+) so it can't be hit accidentally.
+- **Skill Tracker**: `skillTracker` tracks which skills have been mentioned in the conversation. Skills marked as "loaded" are not re-injected into subsequent prompts.
+- **csync package**: Thread-safe wrappers (`csync.Value`, `csync.Map`, `csync.Slice`) avoid data races on agent state. Never use raw sync primitives for agent fields.
+
+### Context Files
+
+Crush reads context files from the working directory in priority order (first match wins):
+```
+.github/copilot-instructions.md  →  .cursorrules  →  .cursor/rules/  →
+CLAUDE.md  →  CLAUDE.local.md  →  GEMINI.md  →  gemini.md  →
+crush.md  →  crush.local.md  →  Crush.md  →  Crush.local.md  →
+CRUSH.md  →  CRUSH.local.md  →  AGENTS.md  →  agents.md  →  Agents.md
+```
+Only the first matching file is loaded; remaining files with the same base name are skipped.
+
+### Shell Builtins
+
+Crush implements some shell builtins in Go for performance and portability:
+- **jq**: Full jq syntax support via `gojq`. Available in both the Crush shell and the agent's Bash tool.
+  - Usage: `jq <filter>` (reads from stdin or file arguments)
+  - Example: `ls *.json | jq '.items[] | select(.active) | .name'`
+- Builtins are intercepted in `internal/shell/run.go` via `builtinHandler()` middleware in the shell interpreter stack.
+
+### Builtin Skills (`crush://skills/`)
+
+Builtin skills are embedded in the binary at `builtin/` and use the virtual `crush://skills/` URL prefix:
+- The prefix is NOT a URL, network address, or MCP resource — it is a special internal identifier.
+- The View tool understands this prefix and reads from the embedded `builtinFS` filesystem.
+- Builtin skills are discovered at startup via `fs.WalkDir(builtinFS, "builtin", ...)`.
+- User skills can override builtin skills of the same name (last occurrence wins in discovery order).
+- Current builtin skills: `crush-config`, `crush-hooks`, `jq`, `builtin-skills`, `shell-builtins`.
+- A `supervisor-impl` skill exists in `builtin/supervisor-impl/` as a development guide for implementing the Supervisor Agent extension.
 
 ## Build/Test/Lint Commands
 
@@ -132,6 +188,8 @@ internal/
   simplifications)
 - **Dev**: `task dev` (runs with profiling enabled)
 - **SQLC generate**: `task sqlc` (regenerates Go code from SQL queries)
+  - After adding new SQL queries to `internal/db/sql/*.sql`, run this command.
+  - Generated code appears in `internal/db/` matching the package name.
 - **Schema generate**: `task schema` (regenerates JSON schema from config)
 - **Update Hyper provider**: `task hyper` (updates embedded provider.json)
 - **Update dependencies**: `task deps` (updates Fantasy and Catwalk)
@@ -234,15 +292,36 @@ scanning for `SKILL.md` files with YAML frontmatter:
 
 ```go
 skills.Discover(paths []string) []*Skill
+// DiscoverBuiltin() reads from embedded builtin/ filesystem
+// DiscoverBuiltinWithStates() returns per-file discovery state + errors
 ```
+
+Discovery order: builtins first, then user-configured paths. When a user skill
+has the same name as a builtin, the user skill takes precedence (last wins).
 
 Each skill has a name, description, compatibility, and instructions. The
 `ToPromptXML()` function generates XML for injection into system prompts.
+
+Skills are enabled by:
+1. Adding a config section in `crush.json` under `options` (auto-enables even if empty)
+2. Setting `enabled: false` to explicitly disable
 
 ### Critic Skill
 
 Reviews agent output across six dimensions: correctness, safety, idiomatics,
 efficiency, testing, minimalism.
+
+**Checkpoint flow**:
+1. Middleware snapshots files via `filetracker` before agent runs.
+2. After agent produces diff, `CriticService.Review()` submits to LLM.
+3. LLM returns structured feedback: `approve`, `revise`, or `halt`.
+4. On `revise`: rollback changes, inject feedback into conversation, re-drive agent.
+5. On `halt`: rollback changes, return error to user.
+
+**Wiring in `internal/app/critic.go`**:
+- `buildCriticWrapper()` creates an `AgentWrapper` that injects the middleware.
+- Middleware is wired via `SetFileTracker()`, `SetLSPManager()`, `SetCriticService()`, `SetMessageService()`.
+- `composeWrappers()` chains critic + replacer wrappers together.
 
 **Config** (in `crush.json` under `options.critic`):
 ```json

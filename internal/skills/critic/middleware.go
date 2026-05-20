@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
@@ -95,7 +96,7 @@ func (m *Middleware) Run(ctx context.Context, call agent.SessionAgentCall) (*fan
 	}
 
 	var lastResult *fantasy.AgentResult
-	finalVerdict := "skipped"
+	finalVerdict := ""
 	var firstReviewID string
 
 	for iteration := 0; iteration <= m.cfg.MaxIterations; iteration++ {
@@ -103,14 +104,32 @@ func (m *Middleware) Run(ctx context.Context, call agent.SessionAgentCall) (*fan
 		snapshot := NewSnapshotStore()
 		snapshot.SetMaxFileSize(int64(m.cfg.MaxFileSize))
 
-		// 1. Snapshot files that the agent has read in this session.
+		// 1. Snapshot files that the agent has read or written in this session.
 		snapshotStart := time.Now()
 		if m.filetracker != nil {
 			readFiles, err := m.filetracker.ListReadFiles(ctx, call.SessionID)
 			if err != nil {
 				slog.Warn("Failed to list read files for critic snapshot", "error", err)
 			}
-			if capErr := snapshot.Capture(readFiles); capErr != nil {
+			writtenFiles, err := m.filetracker.ListWrittenFiles(ctx, call.SessionID)
+			if err != nil {
+				slog.Warn("Failed to list written files for critic snapshot", "error", err)
+			}
+			allFiles := make([]string, 0, len(readFiles)+len(writtenFiles))
+			seen := make(map[string]struct{})
+			for _, p := range readFiles {
+				if _, ok := seen[p]; !ok {
+					seen[p] = struct{}{}
+					allFiles = append(allFiles, p)
+				}
+			}
+			for _, p := range writtenFiles {
+				if _, ok := seen[p]; !ok {
+					seen[p] = struct{}{}
+					allFiles = append(allFiles, p)
+				}
+			}
+			if capErr := snapshot.Capture(allFiles); capErr != nil {
 				slog.Warn("Failed to capture critic snapshot", "error", capErr)
 			}
 		}
@@ -140,11 +159,64 @@ func (m *Middleware) Run(ctx context.Context, call agent.SessionAgentCall) (*fan
 			return result, nil
 		}
 
+		// 3b. Detect files that were read or written during this turn but were
+		// not in the pre-run snapshot. This eliminates the first-run blind spot
+		// where newly created files are missed because they weren't tracked yet
+		// when the snapshot was taken.
+		if m.filetracker != nil {
+			stashPaths := make(map[string]struct{}, len(snapshot.Paths()))
+			for _, p := range snapshot.Paths() {
+				stashPaths[p] = struct{}{}
+			}
+
+			newReadFiles, err := m.filetracker.ListReadFiles(ctx, call.SessionID)
+			if err != nil {
+				slog.Warn("Failed to list read files post-run", "error", err)
+			}
+			newWrittenFiles, err := m.filetracker.ListWrittenFiles(ctx, call.SessionID)
+			if err != nil {
+				slog.Warn("Failed to list written files post-run", "error", err)
+			}
+
+			for _, p := range newReadFiles {
+				if _, ok := stashPaths[p]; ok {
+					continue
+				}
+				b, readErr := os.ReadFile(p)
+				if readErr != nil {
+					if !os.IsNotExist(readErr) {
+						slog.Warn("Failed to read file for critic diff", "path", p, "error", readErr)
+					}
+					continue
+				}
+				changedPaths = append(changedPaths, p)
+				after[p] = b
+				stashPaths[p] = struct{}{}
+			}
+			for _, p := range newWrittenFiles {
+				if _, ok := stashPaths[p]; ok {
+					continue
+				}
+				b, readErr := os.ReadFile(p)
+				if readErr != nil {
+					if !os.IsNotExist(readErr) {
+						slog.Warn("Failed to read file for critic diff", "path", p, "error", readErr)
+					}
+					continue
+				}
+				changedPaths = append(changedPaths, p)
+				after[p] = b
+				stashPaths[p] = struct{}{}
+			}
+		}
+
 		var checkpoint Checkpoint
 		var diffStr string
 		var truncated bool
 		var diags []DiagnosticSnapshot
 		var diffMs, diagsMs int64
+
+		msgText := result.Response.Content.Text()
 
 		if len(changedPaths) > 0 {
 			// 4a. File-edit path: compute diff, fetch diagnostics.
@@ -177,13 +249,13 @@ func (m *Middleware) Run(ctx context.Context, call agent.SessionAgentCall) (*fan
 				Type:           CheckpointEdit,
 				UserPrompt:     call.Prompt,
 				PrimaryDiff:    diffStr,
+				MessageContent: msgText,
 				LSPDiagnostics: diags,
 				Iteration:      iteration,
 			}
-			slog.Debug("Critic edit checkpoint created", "session_id", call.SessionID, "changed_files", len(changedPaths))
+			slog.Debug("Critic edit checkpoint created", "session_id", call.SessionID, "changed_files", len(changedPaths), "message_len", len(msgText))
 		} else {
 			// 4b. Message-review path: no file changes, review the agent's response.
-			msgText := result.Response.Content.Text()
 			if msgText == "" {
 				slog.Debug("Critic skipping message review: empty response text", "session_id", call.SessionID)
 				snapshot.Clear()

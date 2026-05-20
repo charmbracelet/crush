@@ -6,8 +6,10 @@ import (
 	"log/slog"
 	"maps"
 	"os"
+	"strings"
 	"sync"
 
+	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/azure"
@@ -22,7 +24,7 @@ import (
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/skills/critic"
 	"github.com/charmbracelet/crush/internal/skills/replacer"
-	openaisdk "github.com/openai/openai-go/v3/option"
+	openaisdk "github.com/charmbracelet/openai-go/option"
 )
 
 // buildCriticWrapper creates an AgentWrapper that injects critic middleware
@@ -106,57 +108,13 @@ func (app *App) buildCriticEmitter(cfg critic.CriticSkillConfig) critic.Checkpoi
 // resolveCriticModel resolves the language model to use for the critic.
 // Priority: cfg.Model > small model from config.
 func (app *App) resolveCriticModel(cfg critic.CriticSkillConfig) (fantasy.LanguageModel, error) {
-	c := app.config.Config()
-
-	var providerCfg config.ProviderConfig
-	var modelCfg config.SelectedModel
-
-	if cfg.Model != "" {
-		// Try to resolve the explicitly configured critic model.
-		// Format is expected to be "provider/model".
-		for _, p := range c.EnabledProviders() {
-			for _, m := range p.Models {
-				if m.ID == cfg.Model {
-					providerCfg = p
-					modelCfg = config.SelectedModel{Provider: p.ID, Model: m.ID}
-					break
-				}
-			}
-		}
-	}
-
-	if modelCfg.Provider == "" {
-		// Fallback to the agent's small model.
-		small, ok := c.Models[config.SelectedModelTypeSmall]
-		if !ok {
-			return nil, fmt.Errorf("no small model configured and no critic model specified")
-		}
-		modelCfg = small
-		p, ok := c.Providers.Get(small.Provider)
-		if !ok {
-			return nil, fmt.Errorf("provider %s for small model not found", small.Provider)
-		}
-		providerCfg = p
-	}
-
-	provider, err := app.buildCriticProvider(providerCfg)
-	if err != nil {
-		return nil, fmt.Errorf("build critic provider: %w", err)
-	}
-
-	model, err := provider.LanguageModel(context.Background(), modelCfg.Model)
-	if err != nil {
-		return nil, fmt.Errorf("get critic language model: %w", err)
-	}
-
-	slog.Debug("Resolved critic model", "provider", providerCfg.ID, "model", modelCfg.Model)
-	return model, nil
+	return app.resolveSkillModel(cfg.Model, "critic")
 }
 
-// buildCriticProvider constructs a fantasy.Provider from config for the critic.
-// This is a simplified version of coordinator.buildProvider that covers the
-// common API-key-based providers.
-func (app *App) buildCriticProvider(providerCfg config.ProviderConfig) (fantasy.Provider, error) {
+// buildSkillProvider constructs a fantasy.Provider from config for a skill
+// (critic or replacer). This is a simplified version of coordinator.buildProvider
+// that covers the common API-key-based providers.
+func (app *App) buildSkillProvider(providerCfg config.ProviderConfig) (fantasy.Provider, error) {
 	apiKey, _ := app.config.Resolve(providerCfg.APIKey)
 	baseURL, _ := app.config.Resolve(providerCfg.BaseURL)
 
@@ -297,16 +255,25 @@ func (app *App) buildReplacerWrapper(cfg replacer.ReplacerConfig) func(agent.Ses
 }
 
 // resolveReplacerModel resolves the language model for the replacement agent.
+// It prefers small, fast models: explicit replacer config > user's small model >
+// auto-selected smallest available model.
 func (app *App) resolveReplacerModel(cfg replacer.ReplacerConfig) (fantasy.LanguageModel, error) {
+	return app.resolveSkillModel(cfg.Model, "replacer")
+}
+
+// resolveSkillModel resolves a language model for a skill (critic or replacer).
+// Priority: explicit model ID > small model from config.
+func (app *App) resolveSkillModel(modelID, skillName string) (fantasy.LanguageModel, error) {
 	c := app.config.Config()
 
 	var providerCfg config.ProviderConfig
 	var modelCfg config.SelectedModel
 
-	if cfg.Model != "" {
+	// 1. Explicit skill model override.
+	if modelID != "" {
 		for _, p := range c.EnabledProviders() {
 			for _, m := range p.Models {
-				if m.ID == cfg.Model {
+				if m.ID == modelID {
 					providerCfg = p
 					modelCfg = config.SelectedModel{Provider: p.ID, Model: m.ID}
 					break
@@ -315,29 +282,126 @@ func (app *App) resolveReplacerModel(cfg replacer.ReplacerConfig) (fantasy.Langu
 		}
 	}
 
+	// 2. User's configured small model — but validate it is actually small.
 	if modelCfg.Provider == "" {
-		small, ok := c.Models[config.SelectedModelTypeSmall]
-		if !ok {
-			return nil, fmt.Errorf("no small model configured and no replacer model specified")
+		if small, ok := c.Models[config.SelectedModelTypeSmall]; ok {
+			if p, ok := c.Providers.Get(small.Provider); ok {
+				if m := c.GetModel(small.Provider, small.Model); m != nil {
+					score := modelSmallnessScore(*m)
+					if score >= 50 {
+						modelCfg = small
+						providerCfg = p
+					} else {
+						slog.Warn("Configured small model scores poorly for coach, auto-selecting better one",
+							"configured_model", small.Model,
+							"configured_provider", small.Provider,
+							"score", score,
+						)
+					}
+				}
+			}
 		}
-		modelCfg = small
-		p, ok := c.Providers.Get(small.Provider)
-		if !ok {
-			return nil, fmt.Errorf("provider %s for small model not found", small.Provider)
-		}
-		providerCfg = p
 	}
 
-	provider, err := app.buildCriticProvider(providerCfg)
+	// 3. Auto-select the smallest/fastest available model.
+	if modelCfg.Provider == "" {
+		providerCfg, modelCfg = app.pickSmallestModel(c)
+	}
+
+	if modelCfg.Provider == "" {
+		return nil, fmt.Errorf("no small model configured and no replacer model specified")
+	}
+
+	provider, err := app.buildSkillProvider(providerCfg)
 	if err != nil {
-		return nil, fmt.Errorf("build replacer provider: %w", err)
+		return nil, fmt.Errorf("build %s provider: %w", skillName, err)
 	}
 
 	model, err := provider.LanguageModel(context.Background(), modelCfg.Model)
 	if err != nil {
-		return nil, fmt.Errorf("get replacer language model: %w", err)
+		return nil, fmt.Errorf("get %s language model: %w", skillName, err)
 	}
 
-	slog.Debug("Resolved replacer model", "provider", providerCfg.ID, "model", modelCfg.Model)
+	slog.Debug("Resolved skill model", "skill", skillName, "provider", providerCfg.ID, "model", modelCfg.Model)
 	return model, nil
+}
+
+// pickSmallestModel selects the smallest/fastest model from all enabled
+// providers using a heuristic based on model ID patterns and metadata.
+func (app *App) pickSmallestModel(c *config.Config) (config.ProviderConfig, config.SelectedModel) {
+	type candidate struct {
+		provider config.ProviderConfig
+		model    catwalk.Model
+		score    int
+	}
+	var candidates []candidate
+
+	for _, p := range c.EnabledProviders() {
+		for _, m := range p.Models {
+			candidates = append(candidates, candidate{
+				provider: p,
+				model:    m,
+				score:    modelSmallnessScore(m),
+			})
+		}
+	}
+
+	if len(candidates) == 0 {
+		return config.ProviderConfig{}, config.SelectedModel{}
+	}
+
+	// Highest score = smallest/fastest.
+	best := candidates[0]
+	for _, cand := range candidates[1:] {
+		if cand.score > best.score {
+			best = cand
+		}
+	}
+
+	return best.provider, config.SelectedModel{
+		Provider:  best.provider.ID,
+		Model:     best.model.ID,
+		MaxTokens: best.model.DefaultMaxTokens,
+	}
+}
+
+// modelSmallnessScore returns a heuristic score where higher values indicate
+// smaller, faster, cheaper models that are better suited for the coach.
+func modelSmallnessScore(m catwalk.Model) int {
+	score := 0
+	id := strings.ToLower(m.ID)
+
+	// Strong small-model signals.
+	smallKeywords := []string{"mini", "flash", "haiku", "nano", "small", "lite", "tiny"}
+	for _, kw := range smallKeywords {
+		if strings.Contains(id, kw) {
+			score += 100
+		}
+	}
+
+	// Large-model penalties.
+	largeKeywords := []string{"max", "pro", "ultra", "large", "heavy", "opus", "reasoning", "thinking"}
+	for _, kw := range largeKeywords {
+		if strings.Contains(id, kw) {
+			score -= 50
+		}
+	}
+
+	// Reasoning models are slower.
+	if m.CanReason {
+		score -= 30
+	}
+
+	// Prefer models with smaller default max tokens (proxy for size/speed).
+	if m.DefaultMaxTokens > 0 {
+		if m.DefaultMaxTokens <= 4096 {
+			score += 20
+		} else if m.DefaultMaxTokens <= 8192 {
+			score += 10
+		} else if m.DefaultMaxTokens >= 32768 {
+			score -= 10
+		}
+	}
+
+	return score
 }

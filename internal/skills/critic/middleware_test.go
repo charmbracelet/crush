@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent"
+	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/stretchr/testify/require"
@@ -206,6 +208,34 @@ func TestMiddleware_InterfaceCompliance(t *testing.T) {
 	_ = m.Model()
 }
 
+func TestMiddleware_Run_EmitsEvents(t *testing.T) {
+	// Not parallel because it sets a global event hook.
+	var events []string
+	var eventsMu sync.Mutex
+	event.SetTestHook(func(event string, props ...any) {
+		eventsMu.Lock()
+		events = append(events, event)
+		eventsMu.Unlock()
+	})
+	defer event.ResetTestHook()
+
+	cfg := CriticSkillConfig{Enabled: true, MaxIterations: 3}
+	m := NewMiddleware(&chatMockAgent{response: "hello"}, cfg)
+	cs := NewCriticService(cfg, (pubsub.Publisher[any])(nil))
+	cs.SetCheckpointEmitter(func(ctx context.Context, cp Checkpoint) (*CriticFeedback, error) {
+		return &CriticFeedback{Verdict: "approve", Confidence: 0.9}, nil
+	})
+	m.SetCriticService(cs)
+
+	_, err := m.Run(context.Background(), agent.SessionAgentCall{SessionID: "sid", Prompt: "test"})
+	require.NoError(t, err)
+
+	eventsMu.Lock()
+	defer eventsMu.Unlock()
+	require.Contains(t, events, "critic.verdict")
+	require.Contains(t, events, "critic.loop.completed")
+}
+
 // modifyingMockAgent mutates a file in Run().
 type modifyingMockAgent struct {
 	path    string
@@ -291,6 +321,10 @@ func (m *mockFileTracker) LastReadTime(ctx context.Context, sessionID, path stri
 func (m *mockFileTracker) ListReadFiles(ctx context.Context, sessionID string) ([]string, error) {
 	return m.files, nil
 }
+func (m *mockFileTracker) RecordWrite(ctx context.Context, sessionID, path string) {}
+func (m *mockFileTracker) ListWrittenFiles(ctx context.Context, sessionID string) ([]string, error) {
+	return nil, nil
+}
 
 type mockMessageService struct {
 	messages []message.Message
@@ -331,7 +365,8 @@ func (m *mockMessageService) Delete(ctx context.Context, id string) error {
 func (m *mockMessageService) DeleteSessionMessages(ctx context.Context, sessionID string) error {
 	return nil
 }
+func (m *mockMessageService) Flush(ctx context.Context, id string) error { return nil }
+func (m *mockMessageService) FlushAll(ctx context.Context) error { return nil }
 func (m *mockMessageService) Subscribe(ctx context.Context) <-chan pubsub.Event[message.Message] {
 	return nil
 }
-func (m *mockMessageService) Unsubscribe(ctx context.Context, ch <-chan message.Message) {}

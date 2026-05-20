@@ -47,8 +47,29 @@ func newBreakerRegistry() *breakerRegistry {
 	}
 }
 
+// CanExecute reports whether the circuit breaker allows a call for the given
+// session. It returns ErrCircuitOpen if the breaker is open and the cooldown
+// has not yet elapsed. This should be checked before making a call.
+func (br *breakerRegistry) CanExecute(sessionID string) error {
+	br.mu.Lock()
+	defer br.mu.Unlock()
+
+	br.cleanupLocked()
+
+	b, ok := br.breakers[sessionID]
+	if !ok {
+		return nil
+	}
+	b.lastAccessAt = time.Now()
+
+	if b.state == breakerOpen && time.Since(b.lastFailureAt) <= breakerCooldown {
+		return ErrCircuitOpen
+	}
+	return nil
+}
+
 // RecordResult updates the breaker for the given session based on whether the
-// call succeeded. It returns an error if the breaker is open.
+// call succeeded. It must be called after each attempt to keep state accurate.
 func (br *breakerRegistry) RecordResult(sessionID string, err error) error {
 	br.mu.Lock()
 	defer br.mu.Unlock()

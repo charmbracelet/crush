@@ -69,12 +69,6 @@ var userAgent = fmt.Sprintf("Charm-Crush/%s (https://charm.land/crush)", version
 // reasons) instead of completing it. Details are filled in per turn.
 const providerStoppedTurnMessage = "Provider stopped the response"
 
-//go:embed templates/title.md
-var titlePrompt []byte
-
-//go:embed templates/summary.md
-var summaryPrompt []byte
-
 // Used to remove <think> tags from generated titles.
 var (
 	thinkTagRegex       = regexp.MustCompile(`(?s)<think>.*?</think>`)
@@ -1527,9 +1521,13 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID, trigger string,
 		}
 	}()
 
+	sysPrompt, err := promptText(a.cfg, "summary")
+	if err != nil {
+		return err
+	}
 	agent := fantasy.NewAgent(
 		largeModel.Model,
-		fantasy.WithSystemPrompt(string(summaryPrompt)),
+		fantasy.WithSystemPrompt(sysPrompt),
 		fantasy.WithUserAgent(userAgent),
 	)
 	summaryMessage, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
@@ -1936,10 +1934,16 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	smallModel, largeModel := models.Small, models.Large
 	systemPromptPrefix := a.systemPromptPrefix.Get()
 
-	newAgent := func(m fantasy.LanguageModel, p []byte, tok int64) fantasy.Agent {
+	titlePrompt, err := promptText(a.cfg, "title")
+	if err != nil {
+		slog.Error("Failed to load title prompt", "error", err)
+		return
+	}
+
+	newAgent := func(m fantasy.LanguageModel, p string, tok int64) fantasy.Agent {
 		return fantasy.NewAgent(
 			m,
-			fantasy.WithSystemPrompt(string(p)+"\n /no_think"),
+			fantasy.WithSystemPrompt(p+"\n /no_think"),
 			fantasy.WithMaxOutputTokens(tok),
 			fantasy.WithUserAgent(userAgent),
 		)
@@ -1969,7 +1973,6 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	}
 
 	var resp *fantasy.AgentResult
-	var err error
 	var model Model
 	var success bool
 	for _, attempt := range attempts {

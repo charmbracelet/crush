@@ -284,6 +284,10 @@ func Load(ctx context.Context, workingDir, dataDir string, debug bool) (*ConfigS
 		return nil, fmt.Errorf("invalid hook configuration: %w", err)
 	}
 
+	if err := cfg.ValidatePrompts(); err != nil {
+		return nil, fmt.Errorf("invalid prompt configuration: %w", err)
+	}
+
 	if !isInsideWorktree() {
 		const depth = 2
 		const items = 100
@@ -1540,3 +1544,17 @@ func ProjectSkillsDir(workingDir string) []string {
 }
 
 func isAppleTerminal() bool { return os.Getenv("TERM_PROGRAM") == "Apple_Terminal" }
+
+// ValidatePrompts rejects prompt names that do not name a built-in prompt, so
+// a typo fails at startup instead of silently leaving the built-in in place.
+func (c *Config) ValidatePrompts() error {
+	if c.Options == nil {
+		return nil
+	}
+	for name := range c.Options.Prompts {
+		if !slices.Contains(PromptNames, name) {
+			return fmt.Errorf("unknown prompt %q, expected one of %s", name, strings.Join(PromptNames, ", "))
+		}
+	}
+	return nil
+}

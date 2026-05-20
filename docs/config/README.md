@@ -522,6 +522,59 @@ Available Keys:
   disable-skill         clear disabled skill names
 ```
 
+#### `option prompt`
+
+Replace one of Crush's built-in prompts with your own file.
+
+```text
+Usage:
+  option prompt <name> <path>
+
+Available Names:
+  coder        the main agent's system prompt
+  task         the sub-agent's system prompt
+  plan         the planning agent's system prompt
+  summary      the instructions used to compact a long conversation
+  title        the instructions used to name a session
+  initialize   the instructions used by crush init
+```
+
+```bash
+option prompt coder ~/.config/crush/prompts/coder.md.tpl
+option prompt summary ~/.config/crush/prompts/summary.md
+```
+
+Paths go through the shell, so `~` and `$VARS` work.
+
+Start from the prompt you are replacing rather than a blank file:
+[coder][coder], [task][task], [plan][plan], [summary][summary], [title][title],
+[initialize][initialize]. They all live in
+[`internal/agent/templates`](https://github.com/charmbracelet/crush/tree/main/internal/agent/templates).
+
+[coder]: https://github.com/charmbracelet/crush/blob/main/internal/agent/templates/coder.md.tpl
+[task]: https://github.com/charmbracelet/crush/blob/main/internal/agent/templates/task.md.tpl
+[plan]: https://github.com/charmbracelet/crush/blob/main/internal/agent/templates/plan.md.tpl
+[summary]: https://github.com/charmbracelet/crush/blob/main/internal/agent/templates/summary.md
+[title]: https://github.com/charmbracelet/crush/blob/main/internal/agent/templates/title.md
+[initialize]: https://github.com/charmbracelet/crush/blob/main/internal/agent/templates/initialize.md.tpl
+
+The `coder`, `task`, `plan`, and `initialize` prompts are Go templates. Your file
+replaces the built-in one completely, so anything the built-in asked for is gone
+unless you ask for it too. That includes the pieces you probably want:
+
+```text
+{{.AvailSkillXML}}        available skills
+{{.ContextFiles}}         AGENTS.md and friends from the project
+{{.GlobalContextFiles}}   the same from your global config
+{{.WorkingDir}}           where Crush is running
+{{.Platform}}             the host OS
+{{.GitStatus}}            branch, status, and recent commits
+{{.Config.LSP}}           configured language servers
+```
+
+A name that is not on the list above, and a template Crush cannot parse, both
+fail at startup rather than mid-conversation.
+
 #### `option ui`
 
 Configure terminal UI presentation and completion-list limits.

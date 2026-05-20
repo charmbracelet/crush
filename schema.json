@@ -652,6 +652,10 @@
             300,
             0
           ]
+        },
+        "prompts": {
+          "$ref": "#/$defs/PromptPaths",
+          "description": "Files that replace Crush's built-in prompts, keyed by prompt name. A replacement is used verbatim, so anything the built-in template injected (skills, context files, LSP status) is lost unless the replacement asks for it too."
         }
       },
       "additionalProperties": false,
@@ -672,6 +676,12 @@
         }
       },
       "additionalProperties": false,
+      "type": "object"
+    },
+    "PromptPaths": {
+      "additionalProperties": {
+        "type": "string"
+      },
       "type": "object"
     },
     "ProviderConfig": {

@@ -266,6 +266,57 @@ func (c *controllerV1) handleGetWorkspaceProjectInitPrompt(w http.ResponseWriter
 	jsonEncode(w, proto.ProjectInitPromptResponse{Prompt: prompt})
 }
 
+// handleGetWorkspaceSkills returns the effective visible skills for a workspace.
+//
+//	@Summary		List visible skills
+//	@Tags			skills
+//	@Produce		json
+//	@Param			id	path		string				true	"Workspace ID"
+//	@Success		200	{array}		proto.SkillInfo
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/skills [get]
+func (c *controllerV1) handleGetWorkspaceSkills(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	skills, err := c.backend.ListSkills(id)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, skills)
+}
+
+// handlePostWorkspaceSkillRead reads a skill's content by ID.
+//
+//	@Summary		Read skill content
+//	@Tags			skills
+//	@Accept			json
+//	@Produce		json
+//	@Param			id		path		string						true	"Workspace ID"
+//	@Param			request	body		proto.ReadSkillRequest		true	"Read skill request"
+//	@Success		200		{object}	proto.ReadSkillResponse
+//	@Failure		400		{object}	proto.Error
+//	@Failure		404		{object}	proto.Error
+//	@Failure		500		{object}	proto.Error
+//	@Router			/workspaces/{id}/skills/read [post]
+func (c *controllerV1) handlePostWorkspaceSkillRead(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var req proto.ReadSkillRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+
+	content, result, err := c.backend.ReadSkill(r.Context(), id, req.SkillID)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, proto.ReadSkillResponse{Content: content, Result: result})
+}
+
 // handlePostWorkspaceMCPEnableDocker enables the Docker MCP server.
 //
 //	@Summary		Enable Docker MCP

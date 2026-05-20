@@ -291,8 +291,13 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 	// workspace per process, so WithGlobalMirror keeps the package
 	// globals (which the TUI reads via skills.GetLatestStates) in sync
 	// with the manager.
-	allSkills, activeSkills, skillStates := skills.DiscoverFromConfig(localSkillsDiscoveryConfig(store))
-	skillsMgr := skills.NewManager(allSkills, activeSkills, skillStates, skills.WithGlobalMirror())
+	discoveryCfg := localSkillsDiscoveryConfig(store)
+	allSkills, activeSkills, skillStates := skills.DiscoverFromConfig(discoveryCfg)
+	skillsMgr := skills.NewManager(allSkills, activeSkills, skillStates,
+		skills.WithGlobalMirror(),
+		skills.WithResolvedPaths(discoveryCfg.ResolvePaths()),
+		skills.WithWorkingDir(discoveryCfg.WorkingDir),
+	)
 
 	appInstance, err := app.New(ctx, conn, store, skillsMgr)
 	if err != nil {
@@ -326,6 +331,7 @@ func localSkillsDiscoveryConfig(store *config.ConfigStore) skills.DiscoveryConfi
 	return skills.DiscoveryConfig{
 		SkillsPaths:    paths,
 		DisabledSkills: disabled,
+		WorkingDir:     store.WorkingDir(),
 		Resolver:       resolver,
 	}
 }

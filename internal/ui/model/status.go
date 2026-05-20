@@ -1,6 +1,7 @@
 package model
 
 import (
+	"image"
 	"strings"
 	"time"
 
@@ -23,6 +24,7 @@ type Status struct {
 	help     help.Model
 	helpKm   help.KeyMap
 	msg      util.InfoMsg
+	planMode bool
 }
 
 // NewStatus creates a new status bar and help model.
@@ -43,6 +45,11 @@ func (s *Status) SetInfoMsg(msg util.InfoMsg) {
 // ClearInfoMsg clears the status info message.
 func (s *Status) ClearInfoMsg() {
 	s.msg = util.InfoMsg{}
+}
+
+// SetMode updates the plan mode indicator shown in the status bar.
+func (s *Status) SetMode(plan bool) {
+	s.planMode = plan
 }
 
 // SetWidth sets the width of the status bar and help view.
@@ -67,6 +74,15 @@ func (s *Status) SetHideHelp(hideHelp bool) {
 	s.hideHelp = hideHelp
 }
 
+// renderModeBadge returns a short styled badge string when plan mode is active,
+// or an empty string otherwise.
+func (s *Status) renderModeBadge() string {
+	if s.planMode {
+		return s.com.Styles.Status.PlanBadge.Render("plan")
+	}
+	return ""
+}
+
 // Draw draws the status bar onto the screen.
 func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 	if !s.hideHelp {
@@ -76,6 +92,13 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 
 	// Render notifications
 	if s.msg.IsEmpty() {
+		badge := s.renderModeBadge()
+		if badge != "" {
+			bw := lipgloss.Width(badge)
+			bx := area.Max.X - bw
+			badgeArea := image.Rectangle{Min: image.Pt(bx, area.Min.Y), Max: area.Max}
+			uv.NewStyledString(badge).Draw(scr, badgeArea)
+		}
 		return
 	}
 
@@ -99,10 +122,13 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 		msgStyle = s.com.Styles.Status.SuccessMessage
 	}
 
+	badge := s.renderModeBadge()
+	badgeWidth := lipgloss.Width(badge)
+
 	ind := indStyle.String()
 	indWidth := lipgloss.Width(ind)
 	msgPad := msgStyle.GetPaddingLeft() + msgStyle.GetPaddingRight()
-	avail := max(0, area.Dx()-indWidth-msgPad)
+	avail := max(0, area.Dx()-indWidth-msgPad-badgeWidth)
 	msg := strings.Join(strings.Split(s.msg.Msg, "\n"), " ")
 	msg = ansi.Truncate(msg, avail, "…")
 	if w := lipgloss.Width(msg); w < avail {
@@ -112,6 +138,12 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 
 	// Draw the info message over the help view
 	uv.NewStyledString(ind+info).Draw(scr, area)
+
+	if badge != "" {
+		bx := area.Max.X - badgeWidth
+		badgeArea := image.Rectangle{Min: image.Pt(bx, area.Min.Y), Max: area.Max}
+		uv.NewStyledString(badge).Draw(scr, badgeArea)
+	}
 }
 
 // clearInfoMsgCmd returns a command that clears the info message after the

@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/backend"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
@@ -145,6 +146,18 @@ func sessionToProto(s session.Session) proto.Session {
 		CreatedAt:        s.CreatedAt,
 		UpdatedAt:        s.UpdatedAt,
 	}
+}
+
+// isSessionBusy reports whether the given workspace has an in-flight
+// agent run for sessionID. It tolerates a nil workspace (treating it as
+// "not busy") so REST handlers can pass GetWorkspace's result through
+// unconditionally — the workspace lookup error is already surfaced by
+// the prior ListSessions/GetSession call when relevant.
+func isSessionBusy(ws *backend.Workspace, sessionID string) bool {
+	if ws == nil || ws.App == nil || ws.AgentCoordinator == nil {
+		return false
+	}
+	return ws.AgentCoordinator.IsSessionBusy(sessionID)
 }
 
 func todosToProto(todos []session.Todo) []proto.Todo {

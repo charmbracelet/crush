@@ -303,9 +303,11 @@ func (c *controllerV1) handleGetWorkspaceSessions(w http.ResponseWriter, r *http
 		c.handleError(w, r, err)
 		return
 	}
+	ws, _ := c.backend.GetWorkspace(id)
 	result := make([]proto.Session, len(sessions))
 	for i, s := range sessions {
 		result[i] = sessionToProto(s)
+		result[i].IsBusy = isSessionBusy(ws, s.ID)
 	}
 	jsonEncode(w, result)
 }
@@ -338,7 +340,10 @@ func (c *controllerV1) handlePostWorkspaceSessions(w http.ResponseWriter, r *htt
 		c.handleError(w, r, err)
 		return
 	}
-	jsonEncode(w, sessionToProto(sess))
+	ws, _ := c.backend.GetWorkspace(id)
+	out := sessionToProto(sess)
+	out.IsBusy = isSessionBusy(ws, sess.ID)
+	jsonEncode(w, out)
 }
 
 // handleGetWorkspaceSession returns a single session.
@@ -360,7 +365,10 @@ func (c *controllerV1) handleGetWorkspaceSession(w http.ResponseWriter, r *http.
 		c.handleError(w, r, err)
 		return
 	}
-	jsonEncode(w, sessionToProto(sess))
+	ws, _ := c.backend.GetWorkspace(id)
+	out := sessionToProto(sess)
+	out.IsBusy = isSessionBusy(ws, sess.ID)
+	jsonEncode(w, out)
 }
 
 // handleGetWorkspaceSessionHistory returns the history for a session.
@@ -436,7 +444,10 @@ func (c *controllerV1) handlePutWorkspaceSession(w http.ResponseWriter, r *http.
 		c.handleError(w, r, err)
 		return
 	}
-	jsonEncode(w, sessionToProto(saved))
+	ws, _ := c.backend.GetWorkspace(id)
+	out := sessionToProto(saved)
+	out.IsBusy = isSessionBusy(ws, saved.ID)
+	jsonEncode(w, out)
 }
 
 // handleDeleteWorkspaceSession deletes a session.

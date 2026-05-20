@@ -683,6 +683,13 @@ func protoToMCPEventType(t proto.MCPEventType) mcp.EventType {
 	}
 }
 
+// protoToSession converts a wire-level proto.Session into the domain
+// session.Session. Fields that exist only on the wire (computed-on-read
+// signals like IsBusy, and any future presence counters) are
+// intentionally dropped here: session.Session models persisted state,
+// not transient runtime signals. UI features that need those signals
+// should either extend session.Session or read them from the proto
+// payload directly before this conversion runs.
 func protoToSession(s proto.Session) session.Session {
 	return session.Session{
 		ID:               s.ID,

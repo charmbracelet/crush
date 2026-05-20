@@ -1,6 +1,12 @@
 package proto
 
 // Session represents a session in the proto layer.
+//
+// IsBusy is computed on read (it is not persisted with the session) and
+// reflects whether an agent run is currently in flight for this session.
+// It is populated by REST handlers in internal/server/proto.go from the
+// workspace's AgentCoordinator. The Session SSE event path does not set
+// it, since SSE consumers can compute presence from other agent signals.
 type Session struct {
 	ID               string  `json:"id"`
 	ParentSessionID  string  `json:"parent_session_id"`
@@ -13,6 +19,7 @@ type Session struct {
 	Todos            []Todo  `json:"todos,omitempty"`
 	CreatedAt        int64   `json:"created_at"`
 	UpdatedAt        int64   `json:"updated_at"`
+	IsBusy           bool    `json:"is_busy"`
 }
 
 // Todo represents a single todo entry on a session in the proto layer.

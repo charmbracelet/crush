@@ -317,6 +317,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 			com.Styles.Attachments.Deleting,
 			com.Styles.Attachments.Image,
 			com.Styles.Attachments.Text,
+			com.Styles.Attachments.Skill,
 		),
 		attachments.Keymap{
 			DeleteMode: keyMap.Editor.AttachmentDeleteMode,
@@ -1551,6 +1552,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		cmds = append(cmds, m.sendMessage(content))
 		m.dialog.CloseFrontDialog()
+	case dialog.ActionAttachSkill:
+		m.dialog.CloseFrontDialog()
+		cmds = append(cmds, m.attachSkill(msg.ID, msg.Name))
 	case dialog.ActionRunMCPPrompt:
 		if len(msg.Arguments) > 0 && msg.Args == nil {
 			m.dialog.CloseFrontDialog()
@@ -3136,10 +3140,35 @@ func (m *UI) refreshStyles() {
 		t.Attachments.Deleting,
 		t.Attachments.Image,
 		t.Attachments.Text,
+		t.Attachments.Skill,
 	)
 	m.todoSpinner.Style = t.Pills.TodoSpinner
 	m.status.help.Styles = t.Help
 	m.chat.InvalidateRenderCaches()
+}
+
+// attachSkill reads a skill's content by ID and returns it as a markdown
+// attachment to be added to the attachment toolbar. The user can then
+// compose a message and send it with the skill attached.
+// The name parameter is used as a fallback when the server does not
+// return one.
+func (m *UI) attachSkill(skillID, name string) tea.Cmd {
+	return func() tea.Msg {
+		content, result, err := m.com.Workspace.ReadSkill(context.Background(), skillID)
+		if err != nil {
+			return util.NewErrorMsg(err)
+		}
+		fileName := result.Name
+		if fileName == "" {
+			fileName = name
+		}
+		return message.Attachment{
+			FilePath: fileName,
+			FileName: fileName,
+			MimeType: "text/markdown",
+			Content:  content,
+		}
+	}
 }
 
 // sendMessage sends a message with the given content and attachments.

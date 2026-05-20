@@ -29,6 +29,7 @@ import (
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
@@ -188,7 +189,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	}
 
 	// TODO: make this dynamic when we support multiple agents
-	prompt, err := coderPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	prompt, err := coderPrompt(c.cfg.Config(), prompt.WithWorkingDir(c.cfg.WorkingDir()))
 	if err != nil {
 		return nil, err
 	}
@@ -617,6 +618,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		SmallModel:           small,
 		SystemPromptPrefix:   largeProviderCfg.SystemPromptPrefix,
 		SystemPrompt:         "",
+		CustomSummaryPrompt:  loadCustomSummaryPrompt(c.cfg.Config()),
 		IsSubAgent:           isSubAgent,
 		DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
 		IsYolo:               c.permissions.SkipRequests(),
@@ -1610,4 +1612,18 @@ func logDiscoveryStats(
 		"prompt_tok_est", skills.ApproxTokenCount(xml),
 		"active_names", activeNames,
 	)
+}
+
+// loadCustomSummaryPrompt reads a custom summary prompt from the configured
+// path. Returns empty string if no custom path is set or the file can't be
+// read.
+func loadCustomSummaryPrompt(cfg *config.Config) string {
+	if cfg == nil || cfg.Options == nil || cfg.Options.CustomSummaryPromptPath == "" {
+		return ""
+	}
+	data, err := os.ReadFile(home.Long(cfg.Options.CustomSummaryPromptPath))
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }

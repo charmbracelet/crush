@@ -6,6 +6,7 @@ import (
 	"embed"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -38,10 +39,16 @@ func init() {
 	}
 }
 
-// connEntry holds a shared database connection and its reference count.
+// connEntry holds a shared database connection, its reference count,
+// and the data-directory lock that gates access to this entry. The
+// lock is acquired exactly once when the entry is created and released
+// when the last reference is dropped, which lets the same process open
+// the same data directory concurrently while still blocking a second
+// crush process from racing the storage.
 type connEntry struct {
 	db       *sql.DB
 	refCount int
+	lock     *dataDirLock
 }
 
 var (
@@ -76,8 +83,23 @@ func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 		return entry.db, nil
 	}
 
+	// Take the per-data-directory lock before opening the database so
+	// we fail fast and with a clear error rather than racing another
+	// crush process on the same SQLite file. The lock is released when
+	// the matching Release call drops the refcount to zero. Ensuring
+	// the data directory exists is required because the lock file
+	// lives inside it.
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		return nil, fmt.Errorf("failed to create data directory %q: %w", dataDir, err)
+	}
+	lock, err := acquireDataDirLock(dataDir)
+	if err != nil {
+		return nil, err
+	}
+
 	conn, err := openDB(dbPath)
 	if err != nil {
+		lock.release()
 		return nil, err
 	}
 
@@ -90,22 +112,25 @@ func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 
 	if err = conn.PingContext(ctx); err != nil {
 		conn.Close()
+		lock.release()
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
 	if err := initGoose(); err != nil {
 		conn.Close()
+		lock.release()
 		slog.Error("Failed to initialize goose", "error", err)
 		return nil, fmt.Errorf("failed to initialize goose: %w", err)
 	}
 
 	if err := goose.Up(conn, "migrations"); err != nil {
 		conn.Close()
+		lock.release()
 		slog.Error("Failed to apply migrations", "error", err)
 		return nil, fmt.Errorf("failed to apply migrations: %w", err)
 	}
 
-	pool[absPath] = &connEntry{db: conn, refCount: 1}
+	pool[absPath] = &connEntry{db: conn, refCount: 1, lock: lock}
 	return conn, nil
 }
 
@@ -133,7 +158,11 @@ func Release(dataDir string) error {
 	}
 
 	delete(pool, absPath)
-	return entry.db.Close()
+	closeErr := entry.db.Close()
+	if entry.lock != nil {
+		entry.lock.release()
+	}
+	return closeErr
 }
 
 // ResetPool closes all pooled connections and clears the pool. This is
@@ -143,6 +172,9 @@ func ResetPool() {
 	defer poolMu.Unlock()
 	for path, entry := range pool {
 		entry.db.Close()
+		if entry.lock != nil {
+			entry.lock.release()
+		}
 		delete(pool, path)
 	}
 }

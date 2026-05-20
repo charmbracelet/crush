@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -169,11 +168,21 @@ func (c *Client) createPowernapClient() error {
 		return fmt.Errorf("invalid lsp command: %w", err)
 	}
 
+	args, err := c.config.ResolvedArgs(c.resolver)
+	if err != nil {
+		return fmt.Errorf("invalid lsp args: %w", err)
+	}
+
+	envs, err := c.config.ResolvedEnv(c.resolver)
+	if err != nil {
+		return fmt.Errorf("invalid lsp env: %w", err)
+	}
+
 	clientConfig := powernap.ClientConfig{
 		Command:     home.Long(command),
-		Args:        c.config.Args,
+		Args:        args,
 		RootURI:     rootURI,
-		Environment: maps.Clone(c.config.Env),
+		Environment: envs,
 		Settings:    c.config.Options,
 		InitOptions: c.config.InitOptions,
 		WorkspaceFolders: []protocol.WorkspaceFolder{
@@ -530,23 +539,116 @@ func (c *Client) openKeyConfigFiles(ctx context.Context) {
 	}
 }
 
-// WaitForDiagnostics waits until diagnostics change or the timeout is reached.
-func (c *Client) WaitForDiagnostics(ctx context.Context, d time.Duration) {
+// NotifyWorkspaceChange sends a workspace-level file change notification to
+// trigger re-analysis of all files. This is useful when the overall project
+// state may have changed (e.g., after a project-wide refactoring) and
+// diagnostics for files not currently being edited may be stale.
+func (c *Client) NotifyWorkspaceChange(ctx context.Context) error {
+	if c == nil {
+		return nil
+	}
+	return c.client.NotifyDidChangeWatchedFiles(ctx, []protocol.FileEvent{
+		{URI: protocol.DocumentURI(protocol.URIFromPath(c.cwd)), Type: protocol.Changed},
+	})
+}
+
+// RefreshOpenFiles re-notifies the LSP server about all currently open files,
+// which triggers re-analysis and fresh diagnostics for the entire project.
+func (c *Client) RefreshOpenFiles(ctx context.Context) {
 	if c == nil {
 		return
 	}
-	ticker := time.NewTicker(200 * time.Millisecond)
+	for uri, info := range c.openFiles.Seq2() {
+		path, err := protocol.DocumentURI(uri).Path()
+		if err != nil {
+			slog.Warn("Failed to convert URI to path", "uri", uri, "error", err)
+			continue
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			slog.Warn("Failed to read file for refresh", "path", path, "error", err)
+			continue
+		}
+		info.Version++
+		changes := []protocol.TextDocumentContentChangeEvent{
+			{
+				Value: protocol.TextDocumentContentChangeWholeDocument{
+					Text: string(content),
+				},
+			},
+		}
+		if err := c.client.NotifyDidChangeTextDocument(ctx, uri, int(info.Version), changes); err != nil {
+			slog.Warn("Failed to notify file change", "uri", uri, "error", err)
+		}
+	}
+}
+
+// WaitForDiagnostics waits until diagnostics stop changing for a settling
+// period, indicating the LSP server has finished processing. If no
+// diagnostics change within firstChangeDuration, it returns early since the
+// server likely isn't going to republish.
+func (c *Client) WaitForDiagnostics(ctx context.Context, timeout time.Duration) {
+	if c == nil {
+		return
+	}
+
+	const (
+		firstChangeDuration = 1 * time.Second
+		settleDuration      = 300 * time.Millisecond
+	)
+
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	firstChangeTimer := time.NewTimer(min(timeout, firstChangeDuration))
+	defer firstChangeTimer.Stop()
+	previousVersion := c.diagnostics.Version()
+	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
-	timeout := time.After(d)
-	pv := c.diagnostics.Version()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-timeout:
+		case <-deadline.C:
+			return
+		case <-firstChangeTimer.C:
+			// No change arrived quickly — server isn't republishing.
 			return
 		case <-ticker.C:
-			if pv != c.diagnostics.Version() {
+			currentVersion := c.diagnostics.Version()
+			if currentVersion != previousVersion {
+				// Diagnostics changed — now wait for them to settle.
+				c.waitForDiagnosticsToSettle(ctx, deadline.C, settleDuration)
+				return
+			}
+		}
+	}
+}
+
+// waitForDiagnosticsToSettle waits until diagnostics version stays the same
+// for settleDuration, indicating the LSP server has finished publishing.
+func (c *Client) waitForDiagnosticsToSettle(ctx context.Context, deadline <-chan time.Time, settleDuration time.Duration) {
+	lastVersion := c.diagnostics.Version()
+	settleTicker := time.NewTicker(50 * time.Millisecond)
+	defer settleTicker.Stop()
+
+	// Track how long the version has been stable.
+	stableStart := time.Now()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-deadline:
+			return
+		case <-settleTicker.C:
+			currentVersion := c.diagnostics.Version()
+			if currentVersion != lastVersion {
+				// New change detected — reset the stable timer.
+				lastVersion = currentVersion
+				stableStart = time.Now()
+			} else if time.Since(stableStart) >= settleDuration {
+				// Diagnostics have been stable for the settle duration.
 				return
 			}
 		}

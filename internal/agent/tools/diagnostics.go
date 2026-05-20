@@ -22,12 +22,12 @@ type DiagnosticsParams struct {
 const DiagnosticsToolName = "lsp_diagnostics"
 
 //go:embed diagnostics.md
-var diagnosticsDescription []byte
+var diagnosticsDescription string
 
 func NewDiagnosticsTool(lspManager *lsp.Manager) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		DiagnosticsToolName,
-		FirstLineDescription(diagnosticsDescription),
+		diagnosticsDescription,
 		func(ctx context.Context, params DiagnosticsParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if lspManager.Clients().Len() == 0 {
 				return fantasy.NewTextErrorResponse("no LSP clients available"), nil
@@ -35,7 +35,8 @@ func NewDiagnosticsTool(lspManager *lsp.Manager) fantasy.AgentTool {
 			notifyLSPs(ctx, lspManager, params.FilePath)
 			output := getDiagnostics(params.FilePath, lspManager)
 			return fantasy.NewTextResponse(output), nil
-		})
+		},
+	)
 }
 
 // openInLSPs ensures LSP servers are running and aware of the file, but does
@@ -87,25 +88,46 @@ func waitForLSPDiagnostics(
 
 // notifyLSPs notifies LSP servers that a file has changed and waits for
 // updated diagnostics. Use this after edit/multiedit operations.
+// When filepath is empty, refreshes all open files across all LSP clients
+// and sends a workspace-level change notification for full re-analysis.
 func notifyLSPs(
 	ctx context.Context,
 	manager *lsp.Manager,
 	filepath string,
 ) {
-	if filepath == "" || manager == nil {
+	if manager == nil {
+		return
+	}
+	if filepath == "" {
+		// No specific file — refresh all open files for all clients.
+		var wg sync.WaitGroup
+		for client := range manager.Clients().Seq() {
+			wg.Go(func() {
+				client.RefreshOpenFiles(ctx)
+				if err := client.NotifyWorkspaceChange(ctx); err != nil {
+					slog.WarnContext(ctx, "Failed to notify workspace change", "error", err)
+				}
+				client.WaitForDiagnostics(ctx, 5*time.Second)
+			})
+		}
+		wg.Wait()
 		return
 	}
 
 	manager.Start(ctx, filepath)
 
+	var wg sync.WaitGroup
 	for client := range manager.Clients().Seq() {
 		if !client.HandlesFile(filepath) {
 			continue
 		}
 		_ = client.OpenFileOnDemand(ctx, filepath)
 		_ = client.NotifyChange(ctx, filepath)
-		client.WaitForDiagnostics(ctx, 5*time.Second)
+		wg.Go(func() {
+			client.WaitForDiagnostics(ctx, 5*time.Second)
+		})
 	}
+	wg.Wait()
 }
 
 func getDiagnostics(filePath string, manager *lsp.Manager) string {

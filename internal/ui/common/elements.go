@@ -4,9 +4,11 @@ import (
 	"cmp"
 	"fmt"
 	"image/color"
+	"strconv"
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/agent/hyper"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
@@ -18,7 +20,7 @@ import (
 // muted styling.
 func PrettyPath(t *styles.Styles, path string, width int) string {
 	formatted := home.Short(path)
-	return t.Muted.Width(width).Render(formatted)
+	return t.Sidebar.WorkingDir.Width(width).Render(formatted)
 }
 
 // FormatReasoningEffort formats a reasoning effort level for display.
@@ -38,14 +40,14 @@ type ModelContextInfo struct {
 
 // ModelInfo renders model information including name, provider, reasoning
 // settings, and optional context usage/cost.
-func ModelInfo(t *styles.Styles, modelName, providerName, reasoningInfo string, context *ModelContextInfo, width int) string {
-	modelIcon := t.Subtle.Render(styles.ModelIcon)
-	modelName = t.Base.Render(modelName)
+func ModelInfo(t *styles.Styles, modelName, providerName, reasoningInfo string, context *ModelContextInfo, width int, hyperCredits *int) string {
+	modelIcon := t.ModelInfo.Icon.Render(styles.ModelIcon)
+	modelName = t.ModelInfo.Name.Render(modelName)
 
 	// Build first line with model name and optionally provider on the same line
 	var firstLine string
 	if providerName != "" {
-		providerInfo := t.Muted.Render(fmt.Sprintf("via %s", providerName))
+		providerInfo := t.ModelInfo.Provider.Render(fmt.Sprintf("via %s", providerName))
 		modelWithProvider := fmt.Sprintf("%s %s %s", modelIcon, modelName, providerInfo)
 
 		// Check if it fits on one line
@@ -64,16 +66,23 @@ func ModelInfo(t *styles.Styles, modelName, providerName, reasoningInfo string, 
 	// If provider didn't fit on first line, add it as second line
 	if providerName != "" && !strings.Contains(firstLine, "via") {
 		providerInfo := fmt.Sprintf("via %s", providerName)
-		parts = append(parts, t.Muted.PaddingLeft(2).Render(providerInfo))
+		parts = append(parts, t.ModelInfo.ProviderFallback.Render(providerInfo))
 	}
 
 	if reasoningInfo != "" {
-		parts = append(parts, t.Subtle.PaddingLeft(2).Render(reasoningInfo))
+		parts = append(parts, t.ModelInfo.Reasoning.Render(reasoningInfo))
 	}
 
 	if context != nil {
 		formattedInfo := formatTokensAndCost(t, context.ContextUsed, context.ModelContext, context.Cost)
 		parts = append(parts, lipgloss.NewStyle().PaddingLeft(2).Render(formattedInfo))
+	}
+
+	if providerName == hyper.DisplayName && hyperCredits != nil {
+		hcInfo := t.ModelInfo.HypercreditIcon.Render(styles.HypercreditIcon)
+		hcInfo += " "
+		hcInfo += t.ModelInfo.HypercreditText.Render(fmt.Sprintf("%s Hypercredits", FormatCredits(*hyperCredits)))
+		parts = append(parts, "", hcInfo)
 	}
 
 	return lipgloss.NewStyle().Width(width).Render(
@@ -103,16 +112,38 @@ func formatTokensAndCost(t *styles.Styles, tokens, contextWindow int64, cost flo
 
 	percentage := (float64(tokens) / float64(contextWindow)) * 100
 
-	formattedCost := t.Muted.Render(fmt.Sprintf("$%.2f", cost))
+	formattedCost := t.ModelInfo.Cost.Render(fmt.Sprintf("$%.2f", cost))
 
-	formattedTokens = t.Subtle.Render(fmt.Sprintf("(%s)", formattedTokens))
-	formattedPercentage := t.Muted.Render(fmt.Sprintf("%d%%", int(percentage)))
+	formattedTokens = t.ModelInfo.TokenCount.Render(fmt.Sprintf("(%s)", formattedTokens))
+	formattedPercentage := t.ModelInfo.TokenPercentage.Render(fmt.Sprintf("%d%%", int(percentage)))
 	formattedTokens = fmt.Sprintf("%s %s", formattedPercentage, formattedTokens)
 	if percentage > 80 {
 		formattedTokens = fmt.Sprintf("%s %s", styles.LSPWarningIcon, formattedTokens)
 	}
 
 	return fmt.Sprintf("%s %s", formattedTokens, formattedCost)
+}
+
+// FormatCredits formats an integer with comma separators for thousands.
+func FormatCredits(n int) string {
+	s := strconv.FormatInt(int64(n), 10)
+	if n < 1000 {
+		return s
+	}
+	// Calculate how many digits before the first comma.
+	firstGroup := len(s) % 3
+	if firstGroup == 0 {
+		firstGroup = 3
+	}
+	var b []byte
+	for i := 0; i < len(s); i++ {
+		if i > 0 && i == firstGroup {
+			b = append(b, ',')
+			firstGroup += 3
+		}
+		b = append(b, s[i])
+	}
+	return string(b)
 }
 
 // StatusOpts defines options for rendering a status line with icon, title,
@@ -133,10 +164,10 @@ func Status(t *styles.Styles, opts StatusOpts, width int) string {
 	title := opts.Title
 	description := opts.Description
 
-	titleColor := cmp.Or(opts.TitleColor, t.Muted.GetForeground())
-	descriptionColor := cmp.Or(opts.DescriptionColor, t.Subtle.GetForeground())
+	titleColor := cmp.Or(opts.TitleColor, t.Resource.DefaultTitleFg)
+	descriptionColor := cmp.Or(opts.DescriptionColor, t.Resource.DefaultDescFg)
 
-	title = t.Base.Foreground(titleColor).Render(title)
+	title = t.Resource.RowTitleBase.Foreground(titleColor).Render(title)
 
 	if description != "" {
 		extraContentWidth := lipgloss.Width(opts.ExtraContent)
@@ -144,7 +175,7 @@ func Status(t *styles.Styles, opts StatusOpts, width int) string {
 			extraContentWidth += 1
 		}
 		description = ansi.Truncate(description, width-lipgloss.Width(icon)-lipgloss.Width(title)-2-extraContentWidth, "…")
-		description = t.Base.Foreground(descriptionColor).Render(description)
+		description = t.Resource.RowDescBase.Foreground(descriptionColor).Render(description)
 	}
 
 	var content []string
@@ -193,7 +224,7 @@ func DialogTitle(t *styles.Styles, title string, width int, fromColor, toColor c
 	remainingWidth := width - length
 	if remainingWidth > 0 {
 		lines := strings.Repeat(char, remainingWidth)
-		lines = styles.ApplyForegroundGrad(t, lines, fromColor, toColor)
+		lines = styles.ApplyForegroundGrad(t.Dialog.TitleLineBase, lines, fromColor, toColor)
 		title = title + " " + lines
 	}
 	return title

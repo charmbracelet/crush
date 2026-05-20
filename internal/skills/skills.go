@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 
@@ -30,19 +29,24 @@ const (
 var (
 	namePattern    = regexp.MustCompile(`^[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*$`)
 	promptReplacer = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\"", "&quot;", "'", "&apos;")
+
+	latestStates   []*SkillState
+	latestStatesMu sync.RWMutex
 )
 
 // Skill represents a parsed SKILL.md file.
 type Skill struct {
-	Name          string            `yaml:"name" json:"name"`
-	Description   string            `yaml:"description" json:"description"`
-	License       string            `yaml:"license,omitempty" json:"license,omitempty"`
-	Compatibility string            `yaml:"compatibility,omitempty" json:"compatibility,omitempty"`
-	Metadata      map[string]string `yaml:"metadata,omitempty" json:"metadata,omitempty"`
-	Instructions  string            `yaml:"-" json:"instructions"`
-	Path          string            `yaml:"-" json:"path"`
-	SkillFilePath string            `yaml:"-" json:"skill_file_path"`
-	Builtin       bool              `yaml:"-" json:"builtin"`
+	Name                   string            `yaml:"name" json:"name"`
+	Description            string            `yaml:"description" json:"description"`
+	UserInvocable          bool              `yaml:"user-invocable" json:"user_invocable"`
+	DisableModelInvocation bool              `yaml:"disable-model-invocation" json:"disable_model_invocation"`
+	License                string            `yaml:"license,omitempty" json:"license,omitempty"`
+	Compatibility          string            `yaml:"compatibility,omitempty" json:"compatibility,omitempty"`
+	Metadata               map[string]string `yaml:"metadata,omitempty" json:"metadata,omitempty"`
+	Instructions           string            `yaml:"-" json:"instructions"`
+	Path                   string            `yaml:"-" json:"path"`
+	SkillFilePath          string            `yaml:"-" json:"skill_file_path"`
+	Builtin                bool              `yaml:"-" json:"builtin"`
 }
 
 // DiscoveryState represents the outcome of discovering a single skill file.
@@ -73,6 +77,41 @@ var broker = pubsub.NewBroker[Event]()
 // SubscribeEvents returns a channel that receives events when skill discovery state changes.
 func SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {
 	return broker.Subscribe(ctx)
+}
+
+// PublishStates publishes a skill discovery event with the given states.
+func PublishStates(states []*SkillState) {
+	broker.Publish(pubsub.UpdatedEvent, Event{States: cloneStates(states)})
+}
+
+// cloneStates returns a deep copy of the given state slice so callers cannot
+// accidentally mutate the source.
+func cloneStates(states []*SkillState) []*SkillState {
+	if states == nil {
+		return nil
+	}
+	result := make([]*SkillState, len(states))
+	for i, s := range states {
+		clone := *s
+		result[i] = &clone
+	}
+	return result
+}
+
+// GetLatestStates returns the latest discovery states.
+func GetLatestStates() []*SkillState {
+	latestStatesMu.RLock()
+	defer latestStatesMu.RUnlock()
+	return cloneStates(latestStates)
+}
+
+// SetLatestStates stores the given states in the package-level cache so that
+// GetLatestStates can return them synchronously before the first pubsub event
+// arrives.
+func SetLatestStates(states []*SkillState) {
+	latestStatesMu.Lock()
+	latestStates = cloneStates(states)
+	latestStatesMu.Unlock()
 }
 
 // Validate checks if the skill meets spec requirements.
@@ -238,26 +277,25 @@ func DiscoverWithStates(paths []string) ([]*Skill, []*SkillState) {
 			addState(skill.Name, path, StateNormal, nil)
 			return nil
 		})
-		if err != nil {
+		if err != nil && !os.IsNotExist(err) {
 			slog.Warn("Failed to walk skills path", "path", base, "error", err)
 		}
 	}
 
 	// fastwalk traversal order is non-deterministic, so sort for stable output.
-	sort.SliceStable(skills, func(i, j int) bool {
-		left := strings.ToLower(skills[i].SkillFilePath)
-		right := strings.ToLower(skills[j].SkillFilePath)
-		if left == right {
-			return skills[i].SkillFilePath < skills[j].SkillFilePath
+	// Sort by path first, then alphabetically by name within each path.
+	slices.SortStableFunc(skills, func(a, b *Skill) int {
+		if c := strings.Compare(strings.ToLower(a.Path), strings.ToLower(b.Path)); c != 0 {
+			return c
 		}
-		return left < right
+		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
 	})
 
-	broker.Publish(pubsub.UpdatedEvent, Event{States: states})
 	return skills, states
 }
 
 // ToPromptXML generates XML for injection into the system prompt.
+// Skills with DisableModelInvocation set to true are excluded.
 func ToPromptXML(skills []*Skill) string {
 	if len(skills) == 0 {
 		return ""
@@ -266,6 +304,10 @@ func ToPromptXML(skills []*Skill) string {
 	var sb strings.Builder
 	sb.WriteString("<available_skills>\n")
 	for _, s := range skills {
+		// Skip skills that have disable-model-invocation set
+		if s.DisableModelInvocation {
+			continue
+		}
 		sb.WriteString("  <skill>\n")
 		fmt.Fprintf(&sb, "    <name>%s</name>\n", escape(s.Name))
 		fmt.Fprintf(&sb, "    <description>%s</description>\n", escape(s.Description))
@@ -279,8 +321,42 @@ func ToPromptXML(skills []*Skill) string {
 	return sb.String()
 }
 
+// FormatInvocation generates XML for a skill when invoked as a user command.
+func (s *Skill) FormatInvocation() string {
+	var sb strings.Builder
+	sb.WriteString("<loaded_skill>\n")
+	fmt.Fprintf(&sb, "  <name>%s</name>\n", escape(s.Name))
+	fmt.Fprintf(&sb, "  <description>%s</description>\n", escape(s.Description))
+	fmt.Fprintf(&sb, "  <location>%s</location>\n", escape(s.SkillFilePath))
+	sb.WriteString("  <instructions>\n")
+	sb.WriteString(escape(s.Instructions))
+	sb.WriteString("\n  </instructions>\n")
+	sb.WriteString("</loaded_skill>")
+	return sb.String()
+}
+
 func escape(s string) string {
 	return promptReplacer.Replace(s)
+}
+
+// DeduplicateStates removes duplicate skill states by name. When duplicates exist,
+// the last occurrence wins (consistent with Deduplicate for skills).
+func DeduplicateStates(all []*SkillState) []*SkillState {
+	seen := make(map[string]int, len(all))
+	for i, s := range all {
+		if s.Name != "" {
+			seen[s.Name] = i
+		}
+	}
+
+	result := make([]*SkillState, 0, len(seen))
+	for i, s := range all {
+		// If it's the last occurrence of this name, or it has no name (error state), keep it
+		if s.Name == "" || seen[s.Name] == i {
+			result = append(result, s)
+		}
+	}
+	return result
 }
 
 // Deduplicate removes duplicate skills by name. When duplicates exist, the

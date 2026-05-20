@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -22,6 +23,7 @@ import (
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
@@ -32,20 +34,29 @@ import (
 type ClientWorkspace struct {
 	client *client.Client
 
-	mu sync.RWMutex
-	ws proto.Workspace
+	mu     sync.RWMutex
+	ws     proto.Workspace
+	skills *skills.Manager
 }
 
 // NewClientWorkspace creates a new ClientWorkspace that proxies all
 // operations through the given client SDK. The ws parameter is the
-// proto.Workspace snapshot returned by the server at creation time.
+// proto.Workspace snapshot returned by the server at creation time. The
+// snapshot's Skills field seeds a process-local skills.Manager so the
+// TUI sees discovery state before the first SSE event arrives. The
+// manager is constructed with WithGlobalMirror because the client
+// process represents exactly one workspace and the TUI reads
+// skills.GetLatestStates directly at construction time.
 func NewClientWorkspace(c *client.Client, ws proto.Workspace) *ClientWorkspace {
 	if ws.Config != nil {
 		ws.Config.SetupAgents()
 	}
+	states := protoToSkillStates(ws.Skills)
+	mgr := skills.NewManager(nil, nil, states, skills.WithGlobalMirror())
 	return &ClientWorkspace{
 		client: c,
 		ws:     ws,
+		skills: mgr,
 	}
 }
 
@@ -552,7 +563,7 @@ func (w *ClientWorkspace) Subscribe(program *tea.Program) {
 	}
 
 	for ev := range evc {
-		translated := translateEvent(ev)
+		translated := w.translateEvent(ev)
 		if translated != nil {
 			program.Send(translated)
 		}
@@ -564,8 +575,10 @@ func (w *ClientWorkspace) Shutdown() {
 }
 
 // translateEvent converts proto-typed SSE events into the domain types
-// that the TUI's Update() method expects.
-func translateEvent(ev any) tea.Msg {
+// that the TUI's Update() method expects. Skills events also update the
+// process-local skills.Manager so callers reading
+// skills.GetLatestStates see fresh data.
+func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 	switch e := ev.(type) {
 	case pubsub.Event[proto.LSPEvent]:
 		return pubsub.Event[LSPEvent]{
@@ -640,6 +653,15 @@ func translateEvent(ev any) tea.Msg {
 				Type:         notify.Type(e.Payload.Type),
 			},
 		}
+	case pubsub.Event[proto.SkillsEvent]:
+		states := protoToSkillStates(e.Payload.States)
+		if w.skills != nil {
+			w.skills.SetLatestStates(states)
+		}
+		return pubsub.Event[skills.Event]{
+			Type:    e.Type,
+			Payload: skills.Event{States: states},
+		}
 	default:
 		slog.Warn("Unknown event type in translateEvent", "type", fmt.Sprintf("%T", ev))
 		return nil
@@ -671,9 +693,25 @@ func protoToSession(s proto.Session) session.Session {
 		PromptTokens:     s.PromptTokens,
 		CompletionTokens: s.CompletionTokens,
 		Cost:             s.Cost,
+		Todos:            protoToTodos(s.Todos),
 		CreatedAt:        s.CreatedAt,
 		UpdatedAt:        s.UpdatedAt,
 	}
+}
+
+func protoToTodos(todos []proto.Todo) []session.Todo {
+	if len(todos) == 0 {
+		return nil
+	}
+	out := make([]session.Todo, len(todos))
+	for i, t := range todos {
+		out[i] = session.Todo{
+			Content:    t.Content,
+			Status:     session.TodoStatus(t.Status),
+			ActiveForm: t.ActiveForm,
+		}
+	}
+	return out
 }
 
 func protoToFile(f proto.File) history.File {
@@ -722,6 +760,9 @@ func protoToMessage(m proto.Message) message.Message {
 				ToolCallID: v.ToolCallID,
 				Name:       v.Name,
 				Content:    v.Content,
+				Data:       v.Data,
+				MIMEType:   v.MIMEType,
+				Metadata:   v.Metadata,
 				IsError:    v.IsError,
 			})
 		case proto.Finish:
@@ -767,7 +808,45 @@ func sessionToProto(s session.Session) proto.Session {
 		PromptTokens:     s.PromptTokens,
 		CompletionTokens: s.CompletionTokens,
 		Cost:             s.Cost,
+		Todos:            todosToProto(s.Todos),
 		CreatedAt:        s.CreatedAt,
 		UpdatedAt:        s.UpdatedAt,
 	}
+}
+
+// protoToSkillStates reconstructs internal skill state slices from
+// their wire representation. Non-empty Error strings are turned into
+// synthetic error values; the TUI never type-asserts on Err.
+func protoToSkillStates(in []proto.SkillState) []*skills.SkillState {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]*skills.SkillState, len(in))
+	for i, s := range in {
+		state := &skills.SkillState{
+			Name:  s.Name,
+			Path:  s.Path,
+			State: skills.DiscoveryState(s.State),
+		}
+		if s.Error != "" {
+			state.Err = errors.New(s.Error)
+		}
+		out[i] = state
+	}
+	return out
+}
+
+func todosToProto(todos []session.Todo) []proto.Todo {
+	if len(todos) == 0 {
+		return nil
+	}
+	out := make([]proto.Todo, len(todos))
+	for i, t := range todos {
+		out[i] = proto.Todo{
+			Content:    t.Content,
+			Status:     string(t.Status),
+			ActiveForm: t.ActiveForm,
+		}
+	}
+	return out
 }

@@ -1,7 +1,6 @@
 package skills
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -216,7 +215,8 @@ func TestSkillValidate(t *testing.T) {
 }
 
 func TestDiscover(t *testing.T) {
-	// Not parallel: shares global broker with other Discover tests.
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 
 	// Create valid skill 1.
@@ -248,14 +248,8 @@ description: Name doesn't match directory.
 ---
 `), 0o644))
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	ch := SubscribeEvents(ctx)
+	skills, states := DiscoverWithStates([]string{tmpDir})
 
-	skills := Discover([]string{tmpDir})
-
-	evt := <-ch
-	states := evt.Payload.States
 	var normalCount int
 	var errorCount int
 	var hasInvalidDir bool
@@ -285,32 +279,20 @@ description: Name doesn't match directory.
 }
 
 func TestDiscoverEmptyDir(t *testing.T) {
-	// Not parallel: shares global broker with other Discover tests.
+	t.Parallel()
 
 	tmpDir := t.TempDir()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	ch := SubscribeEvents(ctx)
-
-	skills := Discover([]string{tmpDir})
-
-	evt := <-ch
-	require.Empty(t, evt.Payload.States)
+	skills, states := DiscoverWithStates([]string{tmpDir})
+	require.Empty(t, states)
 	require.Empty(t, skills)
 }
 
 func TestDiscoverMissingPath(t *testing.T) {
-	// Not parallel: shares global broker with other Discover tests.
+	t.Parallel()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	ch := SubscribeEvents(ctx)
-
-	skills := Discover([]string{filepath.Join(t.TempDir(), "missing")})
-
-	evt := <-ch
-	require.Empty(t, evt.Payload.States)
+	skills, states := DiscoverWithStates([]string{filepath.Join(t.TempDir(), "missing")})
+	require.Empty(t, states)
 	require.Empty(t, skills)
 }
 
@@ -328,6 +310,20 @@ func TestToPromptXML(t *testing.T) {
 	require.Contains(t, xml, "<name>pdf-processing</name>")
 	require.Contains(t, xml, "<description>Extracts text from PDFs.</description>")
 	require.Contains(t, xml, "&amp;") // XML escaping
+}
+
+func TestToPromptXMLDisableModelInvocation(t *testing.T) {
+	t.Parallel()
+
+	skills := []*Skill{
+		{Name: "visible-skill", Description: "This one appears.", SkillFilePath: "/skills/visible/SKILL.md"},
+		{Name: "hidden-skill", Description: "This one is hidden.", SkillFilePath: "/skills/hidden/SKILL.md", DisableModelInvocation: true},
+	}
+
+	xml := ToPromptXML(skills)
+
+	require.Contains(t, xml, "<name>visible-skill</name>")
+	require.NotContains(t, xml, "<name>hidden-skill</name>")
 }
 
 func TestToPromptXMLEmpty(t *testing.T) {
@@ -437,6 +433,19 @@ func TestDiscoverBuiltin(t *testing.T) {
 		}
 	}
 	require.True(t, foundJQ, "jq builtin skill not found")
+
+	var foundHooks bool
+	for _, s := range discovered {
+		if s.Name == "crush-hooks" {
+			foundHooks = true
+			require.Equal(t, "crush://skills/crush-hooks/SKILL.md", s.SkillFilePath)
+			require.Equal(t, "crush://skills/crush-hooks", s.Path)
+			require.NotEmpty(t, s.Description)
+			require.NotEmpty(t, s.Instructions)
+			require.True(t, s.Builtin)
+		}
+	}
+	require.True(t, foundHooks, "crush-hooks builtin skill not found")
 }
 
 func TestDeduplicate(t *testing.T) {

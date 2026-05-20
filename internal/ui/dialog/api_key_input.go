@@ -83,7 +83,7 @@ func NewAPIKeyInput(
 
 	m.spinner = spinner.New(
 		spinner.WithSpinner(spinner.Dot),
-		spinner.WithStyle(t.Base.Foreground(t.Green)),
+		spinner.WithStyle(t.Dialog.APIKey.Spinner),
 	)
 
 	m.help = help.New()
@@ -202,7 +202,7 @@ func (m *APIKeyInput) headerView() string {
 		return textStyle.Render(m.dialogTitle())
 	}
 	headerOffset := titleStyle.GetHorizontalFrameSize() + dialogStyle.GetHorizontalFrameSize()
-	return common.DialogTitle(t, titleStyle.Render(m.dialogTitle()), m.width-headerOffset, m.com.Styles.Primary, m.com.Styles.Secondary)
+	return common.DialogTitle(t, titleStyle.Render(m.dialogTitle()), m.width-headerOffset, m.com.Styles.Dialog.TitleGradFromColor, m.com.Styles.Dialog.TitleGradToColor)
 }
 
 func (m *APIKeyInput) dialogTitle() string {

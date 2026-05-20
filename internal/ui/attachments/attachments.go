@@ -78,6 +78,10 @@ func (m *Attachments) Render(width int) string {
 	return m.renderer.Render(m.list, m.deleting, width)
 }
 
+// Renderer returns the attachment renderer so callers can update its
+// styles in place.
+func (m *Attachments) Renderer() *Renderer { return m.renderer }
+
 func NewRenderer(normalStyle, deletingStyle, imageStyle, textStyle lipgloss.Style) *Renderer {
 	return &Renderer{
 		normalStyle:   normalStyle,
@@ -85,6 +89,14 @@ func NewRenderer(normalStyle, deletingStyle, imageStyle, textStyle lipgloss.Styl
 		imageStyle:    imageStyle,
 		deletingStyle: deletingStyle,
 	}
+}
+
+// SetStyles updates the renderer styles in place.
+func (r *Renderer) SetStyles(normalStyle, deletingStyle, imageStyle, textStyle lipgloss.Style) {
+	r.normalStyle = normalStyle
+	r.textStyle = textStyle
+	r.imageStyle = imageStyle
+	r.deletingStyle = deletingStyle
 }
 
 type Renderer struct {

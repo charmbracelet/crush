@@ -17,7 +17,7 @@ import (
 )
 
 //go:embed templates/agentic_fetch.md
-var agenticFetchToolDescription []byte
+var agenticFetchToolDescription string
 
 // agenticFetchValidationResult holds the validated parameters from the tool call context.
 type agenticFetchValidationResult struct {
@@ -65,7 +65,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 
 	return fantasy.NewParallelAgentTool(
 		tools.AgenticFetchToolName,
-		tools.FirstLineDescription(agenticFetchToolDescription),
+		agenticFetchToolDescription,
 		func(ctx context.Context, params tools.AgenticFetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			validationResult, err := validateAgenticFetchParams(ctx, params)
 			if err != nil {
@@ -80,7 +80,8 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				description = "Search the web and analyze results"
 			}
 
-			p, err := c.permissions.Request(ctx,
+			p, err := c.permissions.Request(
+				ctx,
 				permission.CreatePermissionRequest{
 					SessionID:   validationResult.SessionID,
 					Path:        c.cfg.WorkingDir(),
@@ -95,7 +96,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				return fantasy.ToolResponse{}, err
 			}
 			if !p {
-				return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
+				return tools.NewPermissionDeniedResponse(), nil
 			}
 
 			tmpDir, err := os.MkdirTemp(c.cfg.Config().Options.DataDirectory, "crush-fetch-*")
@@ -172,6 +173,11 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, nil, tmpDir),
 			}
 
+			// Sub-agent tools run without hook interception. The top-level
+			// `agentic_fetch` call itself is already wrapped from the coder's
+			// side; firing hooks again for every inner tool call would run
+			// the user's hooks N times per delegated turn.
+
 			agent := NewSessionAgent(SessionAgentOptions{
 				LargeModel:           small, // Use small model for both (fetch doesn't need large)
 				SmallModel:           small,
@@ -195,5 +201,6 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 					c.permissions.AutoApproveSession(sessionID)
 				},
 			})
-		}), nil
+		},
+	), nil
 }

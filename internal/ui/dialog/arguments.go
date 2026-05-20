@@ -314,7 +314,7 @@ func (a *Arguments) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	titleText := cmp.Or(a.title, "Arguments")
 
-	header := common.DialogTitle(s, titleText, width, s.Primary, s.Secondary)
+	header := common.DialogTitle(s, titleText, width, s.Dialog.TitleGradFromColor, s.Dialog.TitleGradToColor)
 
 	// Add description if available.
 	var description string

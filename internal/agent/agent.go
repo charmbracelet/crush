@@ -200,11 +200,12 @@ type activeCancel struct {
 }
 
 type sessionAgent struct {
-	largeModel         *csync.Value[Model]
-	smallModel         *csync.Value[Model]
-	systemPromptPrefix *csync.Value[string]
-	systemPrompt       *csync.Value[string]
-	tools              *csync.Slice[fantasy.AgentTool]
+	largeModel          *csync.Value[Model]
+	smallModel          *csync.Value[Model]
+	systemPromptPrefix  *csync.Value[string]
+	systemPrompt        *csync.Value[string]
+	tools               *csync.Slice[fantasy.AgentTool]
+	customSummaryPrompt string
 
 	isSubAgent bool
 	sessions   session.Service
@@ -264,6 +265,7 @@ type SessionAgentOptions struct {
 	SmallModel           Model
 	SystemPromptPrefix   string
 	SystemPrompt         string
+	CustomSummaryPrompt  string
 	IsSubAgent           bool
 	DisableAutoSummarize bool
 	IsYolo               bool
@@ -289,6 +291,7 @@ func NewSessionAgent(
 		cfg:                  opts.Cfg,
 		disableAutoSummarize: opts.DisableAutoSummarize,
 		tools:                csync.NewSliceFrom(opts.Tools),
+		customSummaryPrompt:  opts.CustomSummaryPrompt,
 		isYolo:               opts.IsYolo,
 		notify:               opts.Notify,
 		runComplete:          opts.RunComplete,
@@ -1438,9 +1441,13 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		}
 	}()
 
+	sysPrompt := string(summaryPrompt)
+	if a.customSummaryPrompt != "" {
+		sysPrompt = a.customSummaryPrompt
+	}
 	agent := fantasy.NewAgent(
 		largeModel.Model,
-		fantasy.WithSystemPrompt(string(summaryPrompt)),
+		fantasy.WithSystemPrompt(sysPrompt),
 		fantasy.WithUserAgent(userAgent),
 	)
 	summaryMessage, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{

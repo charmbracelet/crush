@@ -85,6 +85,7 @@ type Models struct {
 		UpDown   key.Binding
 		Select   key.Binding
 		Edit     key.Binding
+		Delete   key.Binding
 		Next     key.Binding
 		Previous key.Binding
 		Close    key.Binding
@@ -128,6 +129,10 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 	m.keyMap.Edit = key.NewBinding(
 		key.WithKeys("ctrl+e"),
 		key.WithHelp("ctrl+e", "edit"),
+	)
+	m.keyMap.Delete = key.NewBinding(
+		key.WithKeys("ctrl+x"),
+		key.WithHelp("ctrl+x", "delete"),
 	)
 	m.keyMap.UpDown = key.NewBinding(
 		key.WithKeys("up", "down"),
@@ -214,6 +219,30 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 			}
 			if err := m.setProviderItems(); err != nil {
 				return util.ReportError(err)
+			}
+		case key.Matches(msg, m.keyMap.Delete):
+			selectedItem := m.list.SelectedItem()
+			if selectedItem == nil {
+				break
+			}
+			selected := m.list.Selected()
+
+			modelItem, ok := selectedItem.(*ModelItem)
+			if !ok {
+				break
+			}
+
+			return ActionRemoveRecentModel{
+				Model:     modelItem.SelectedModel(),
+				ModelType: modelItem.SelectedModelType(),
+				Cmd: func() tea.Msg {
+					if err := m.setProviderItems(); err != nil {
+						return util.ReportError(err)
+					}
+					m.list.SetSelected(selected)
+					m.list.ScrollToSelected()
+					return nil
+				},
 			}
 		default:
 			var cmd tea.Cmd

@@ -1475,6 +1475,10 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		cmds = append(cmds, m.initializeProject())
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionRemoveRecentModel:
+		if cmd := m.handleRemoveRecentModel(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 
 	case dialog.ActionSelectModel:
 		if cmd := m.handleSelectModel(msg); cmd != nil {
@@ -1577,6 +1581,25 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		cmds = append(cmds, m.runMCPPrompt(msg.ClientID, msg.PromptID, msg.Args))
 	default:
 		cmds = append(cmds, util.CmdHandler(msg))
+	}
+
+	return tea.Batch(cmds...)
+}
+
+func (m *UI) handleRemoveRecentModel(msg dialog.ActionRemoveRecentModel) tea.Cmd {
+	var cmds []tea.Cmd
+
+	if err := m.com.Workspace.RemoveRecentModel(config.ScopeGlobal, msg.ModelType, msg.Model); err != nil {
+		cmds = append(cmds, util.ReportError(err))
+	} else {
+		if msg.Cmd != nil {
+			cmds = append(cmds, msg.Cmd)
+		}
+		cmds = append(cmds, func() tea.Msg {
+			modelMsg := fmt.Sprintf("removed %s from %s provider", msg.Model.Model, msg.ModelType)
+
+			return util.NewInfoMsg(modelMsg)
+		})
 	}
 
 	return tea.Batch(cmds...)

@@ -43,6 +43,15 @@ func (b *Backend) RemoveConfigField(workspaceID string, scope config.Scope, key 
 	return ws.Cfg.RemoveConfigField(scope, key)
 }
 
+// RemoveRecentModel removes a recently used model from the config file.
+func (b *Backend) RemoveRecentModel(workspaceID string, scope config.Scope, modelType config.SelectedModelType, model config.SelectedModel) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+	return ws.Cfg.RemoveRecentModel(scope, modelType, model)
+}
+
 // UpdatePreferredModel updates the preferred model for the given type
 // and persists it to the config file at the given scope.
 func (b *Backend) UpdatePreferredModel(workspaceID string, scope config.Scope, modelType config.SelectedModelType, model config.SelectedModel) error {

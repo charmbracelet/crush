@@ -212,6 +212,33 @@ func TestUpdatePreferredModel_UpdatesRecents(t *testing.T) {
 	require.Len(t, small, 1)
 }
 
+func TestUpdatePreferredModel_RemovesRecents(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfg := &Config{}
+	cfg.setDefaults(dir, "")
+	store := testStoreWithPath(cfg, dir)
+
+	notDeleted := SelectedModel{Provider: "openai", Model: "gpt-4o"}
+	require.NoError(t, store.recordRecentModel(ScopeGlobal, SelectedModelTypeSmall, notDeleted))
+
+	toDelete := SelectedModel{Provider: "openai", Model: "gpt-5"}
+	require.NoError(t, store.recordRecentModel(ScopeGlobal, SelectedModelTypeSmall, toDelete))
+
+	// in-memory
+	require.Len(t, cfg.RecentModels[SelectedModelTypeSmall], 2)
+	require.NoError(t, store.RemoveRecentModel(ScopeGlobal, SelectedModelTypeSmall, toDelete))
+	require.Len(t, cfg.RecentModels[SelectedModelTypeSmall], 1)
+	require.Equal(t, cfg.RecentModels[SelectedModelTypeSmall][0], notDeleted)
+
+	// persisted (read via fs.FS)
+	rm := readRecentModels(t, store.globalDataPath)
+	small, ok := rm[string(SelectedModelTypeSmall)].([]any)
+	require.True(t, ok)
+	require.Len(t, small, 1)
+}
+
 func TestRecordRecentModel_TypeIsolation(t *testing.T) {
 	t.Parallel()
 

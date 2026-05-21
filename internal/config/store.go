@@ -218,6 +218,37 @@ func (s *ConfigStore) UpdatePreferredModel(scope Scope, modelType SelectedModelT
 	return nil
 }
 
+// RemoveRecentModel removes a recently used model from the config file.
+func (s *ConfigStore) RemoveRecentModel(scope Scope, modelType SelectedModelType, model SelectedModel) error {
+	if model.Provider == "" || model.Model == "" {
+		return nil
+	}
+
+	if s.config.RecentModels == nil {
+		return nil
+	}
+
+	eq := func(a SelectedModel) bool {
+		return a.Provider == model.Provider && a.Model == model.Model
+	}
+
+	current := s.config.RecentModels[modelType]
+	updated := slices.DeleteFunc(slices.Clone(current), func(existing SelectedModel) bool {
+		return eq(existing)
+	})
+	if len(updated) == len(current) {
+		return fmt.Errorf("model %s:%s is not in recently used list", model.Provider, model.Model)
+	}
+
+	s.config.RecentModels[modelType] = updated
+
+	if err := s.SetConfigField(scope, fmt.Sprintf("recent_models.%s", modelType), updated); err != nil {
+		return fmt.Errorf("failed to persist recent models: %w", err)
+	}
+
+	return nil
+}
+
 // SetCompactMode sets the compact mode setting and persists it.
 func (s *ConfigStore) SetCompactMode(scope Scope, enabled bool) error {
 	if s.config.Options == nil {

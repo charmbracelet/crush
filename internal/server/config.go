@@ -94,6 +94,35 @@ func (c *controllerV1) handlePostWorkspaceConfigModel(w http.ResponseWriter, r *
 	w.WriteHeader(http.StatusOK)
 }
 
+// handleDeleteWorkspaceConfigRecentModel updates the preferred model.
+//
+//	@Summary		Set the preferred model
+//	@Tags			config
+//	@Accept			json
+//	@Param			id		path	string						true	"Workspace ID"
+//	@Param			request	body	proto.ConfigModelRequest	true	"Config model request"
+//	@Success		200
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/config/model [post]
+func (c *controllerV1) handleDeleteWorkspaceConfigRecentModel(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var req proto.ConfigModelRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+
+	if err := c.backend.RemoveRecentModel(id, req.Scope, req.ModelType, req.Model); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 // handlePostWorkspaceConfigCompact sets compact mode.
 //
 //	@Summary		Set compact mode

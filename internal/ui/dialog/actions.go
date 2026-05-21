@@ -43,6 +43,14 @@ type ActionSelectModel struct {
 	ReAuthenticate bool
 }
 
+// ActionRemoveRecentModel is a message indicating a model is to be removed from the recent models list.
+// It optionally stores a command to be executed if the model was successfully removed.
+type ActionRemoveRecentModel struct {
+	Model     config.SelectedModel
+	ModelType config.SelectedModelType
+	Cmd       tea.Cmd
+}
+
 // Messages for commands
 type (
 	ActionNewSession                  struct{}

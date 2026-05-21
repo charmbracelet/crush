@@ -267,6 +267,10 @@ func (w *AppWorkspace) UpdatePreferredModel(scope config.Scope, modelType config
 	return w.store.UpdatePreferredModel(scope, modelType, model)
 }
 
+func (w *AppWorkspace) RemoveRecentModel(scope config.Scope, modelType config.SelectedModelType, model config.SelectedModel) error {
+	return w.store.RemoveRecentModel(scope, modelType, model)
+}
+
 func (w *AppWorkspace) SetCompactMode(scope config.Scope, enabled bool) error {
 	return w.store.SetCompactMode(scope, enabled)
 }

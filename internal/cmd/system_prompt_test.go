@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
@@ -39,7 +38,7 @@ func TestRunCmd_SystemPromptInheritedFlagLookup(t *testing.T) {
 	require.NoError(t, root.Execute())
 }
 
-func TestSetupLocalWorkspace_SystemPromptOverride(t *testing.T) {
+func TestSetupLocalConfigStore_SystemPromptOverride(t *testing.T) {
 	workingDir := t.TempDir()
 	systemPromptPath := filepath.Join(workingDir, "system.md")
 	writeLocalWorkspaceConfig(t, workingDir)
@@ -48,14 +47,10 @@ func TestSetupLocalWorkspace_SystemPromptOverride(t *testing.T) {
 	cmd := newWorkspaceTestCommand(workingDir)
 	require.NoError(t, cmd.Flags().Set("sys-prompt", systemPromptPath))
 
-	ws, cleanup, err := setupLocalWorkspace(cmd)
+	store, err := setupLocalConfigStore(cmd)
 	require.NoError(t, err)
-	defer cleanup()
-
-	storeProvider, ok := ws.(interface{ Store() *config.ConfigStore })
-	require.True(t, ok)
-	require.Equal(t, systemPromptPath, storeProvider.Store().Overrides().SystemPromptPath)
-	require.Empty(t, storeProvider.Store().Config().Options.SystemPromptPath)
+	require.Equal(t, systemPromptPath, store.Overrides().SystemPromptPath)
+	require.Empty(t, store.Config().Options.SystemPromptPath)
 }
 
 func newWorkspaceTestCommand(workingDir string) *cobra.Command {

@@ -251,24 +251,15 @@ func setupWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error) {
 // AppWorkspace.
 func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error) {
 	debug, _ := cmd.Flags().GetBool("debug")
-	yolo, _ := cmd.Flags().GetBool("yolo")
-	systemPromptPath, _ := cmd.Flags().GetString("sys-prompt")
-	dataDir, _ := cmd.Flags().GetString("data-dir")
 	ctx := cmd.Context()
 
-	cwd, err := ResolveCwd(cmd)
+	store, err := setupLocalConfigStore(cmd)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	store, err := config.Init(cwd, dataDir, debug)
-	if err != nil {
-		return nil, nil, err
-	}
-
+	cwd := store.WorkingDir()
 	cfg := store.Config()
-	store.Overrides().SkipPermissionRequests = yolo
-	store.Overrides().SystemPromptPath = systemPromptPath
 
 	if err := os.MkdirAll(cfg.Options.DataDirectory, 0o700); err != nil {
 		return nil, nil, fmt.Errorf("failed to create data directory: %q %w", cfg.Options.DataDirectory, err)
@@ -314,6 +305,27 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 	ws := workspace.NewAppWorkspace(appInstance, store)
 	cleanup := func() { appInstance.Shutdown() }
 	return ws, cleanup, nil
+}
+
+func setupLocalConfigStore(cmd *cobra.Command) (*config.ConfigStore, error) {
+	debug, _ := cmd.Flags().GetBool("debug")
+	yolo, _ := cmd.Flags().GetBool("yolo")
+	systemPromptPath, _ := cmd.Flags().GetString("sys-prompt")
+	dataDir, _ := cmd.Flags().GetString("data-dir")
+
+	cwd, err := ResolveCwd(cmd)
+	if err != nil {
+		return nil, err
+	}
+
+	store, err := config.Init(cwd, dataDir, debug)
+	if err != nil {
+		return nil, err
+	}
+
+	store.Overrides().SkipPermissionRequests = yolo
+	store.Overrides().SystemPromptPath = systemPromptPath
+	return store, nil
 }
 
 // localSkillsDiscoveryConfig adapts a *config.ConfigStore to the inputs

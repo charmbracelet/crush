@@ -250,12 +250,13 @@ func (b *Backend) Shutdown() {
 func workspaceToProto(ws *Workspace) proto.Workspace {
 	cfg := ws.Cfg.Config()
 	out := proto.Workspace{
-		ID:      ws.ID,
-		Path:    ws.Path,
-		YOLO:    ws.Cfg.Overrides().SkipPermissionRequests,
-		DataDir: cfg.Options.DataDirectory,
-		Debug:   cfg.Options.Debug,
-		Config:  cfg,
+		ID:               ws.ID,
+		Path:             ws.Path,
+		YOLO:             ws.Cfg.Overrides().SkipPermissionRequests,
+		DataDir:          cfg.Options.DataDirectory,
+		SystemPromptPath: ws.Cfg.Overrides().SystemPromptPath,
+		Debug:            cfg.Options.Debug,
+		Config:           cfg,
 	}
 	if ws.Skills != nil {
 		out.Skills = skillStatesToProto(ws.Skills.States())

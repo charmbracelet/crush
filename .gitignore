@@ -46,6 +46,9 @@ Thumbs.db
 .direnv/
 
 **/.crush/**
+.agents/notes/
+.agents/review/
+.agents/tasks/
 
 /crush
 /tmp/

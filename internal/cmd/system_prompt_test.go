@@ -1,11 +1,10 @@
 package cmd
 
 import (
-	"context"
-	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
@@ -38,48 +37,14 @@ func TestRunCmd_SystemPromptInheritedFlagLookup(t *testing.T) {
 	require.NoError(t, root.Execute())
 }
 
-func TestSetupLocalConfigStore_SystemPromptOverride(t *testing.T) {
-	workingDir := t.TempDir()
-	systemPromptPath := filepath.Join(workingDir, "system.md")
-	writeLocalWorkspaceConfig(t, workingDir)
-	isolateCmdTestEnvironment(t)
+func TestApplyWorkspaceOverrides_SystemPromptOverride(t *testing.T) {
+	systemPromptPath := filepath.Join("testdata", "system.md")
+	store := config.NewTestStore(&config.Config{
+		Options: &config.Options{},
+	})
 
-	cmd := newWorkspaceTestCommand(workingDir)
-	require.NoError(t, cmd.Flags().Set("sys-prompt", systemPromptPath))
+	applyWorkspaceOverrides(store, false, systemPromptPath)
 
-	store, err := setupLocalConfigStore(cmd)
-	require.NoError(t, err)
 	require.Equal(t, systemPromptPath, store.Overrides().SystemPromptPath)
 	require.Empty(t, store.Config().Options.SystemPromptPath)
-}
-
-func newWorkspaceTestCommand(workingDir string) *cobra.Command {
-	cmd := &cobra.Command{}
-	cmd.SetContext(context.Background())
-	cmd.Flags().StringP("cwd", "c", workingDir, "")
-	cmd.Flags().StringP("data-dir", "D", filepath.Join(workingDir, ".crush"), "")
-	cmd.Flags().BoolP("debug", "d", false, "")
-	cmd.Flags().BoolP("yolo", "y", false, "")
-	cmd.Flags().StringP("sys-prompt", "p", "", "")
-	return cmd
-}
-
-func writeLocalWorkspaceConfig(t *testing.T, workingDir string) {
-	t.Helper()
-
-	content := `{"options":{"disable_metrics":true,"context_paths":[],"disabled_skills":["crush-config","crush-hooks","jq"]}}`
-	require.NoError(t, os.WriteFile(filepath.Join(workingDir, "crush.json"), []byte(content), 0o644))
-}
-
-func isolateCmdTestEnvironment(t *testing.T) {
-	t.Helper()
-
-	homeDir := t.TempDir()
-	t.Setenv("HOME", homeDir)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(homeDir, ".config"))
-	t.Setenv("XDG_DATA_HOME", filepath.Join(homeDir, ".local", "share"))
-	t.Setenv("XDG_CACHE_HOME", filepath.Join(homeDir, ".cache"))
-	t.Setenv("CRUSH_SKILLS_DIR", t.TempDir())
-	t.Setenv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE", "1")
-	t.Setenv("CRUSH_DISABLE_METRICS", "1")
 }

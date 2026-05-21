@@ -323,9 +323,13 @@ func setupLocalConfigStore(cmd *cobra.Command) (*config.ConfigStore, error) {
 		return nil, err
 	}
 
+	applyWorkspaceOverrides(store, yolo, systemPromptPath)
+	return store, nil
+}
+
+func applyWorkspaceOverrides(store *config.ConfigStore, yolo bool, systemPromptPath string) {
 	store.Overrides().SkipPermissionRequests = yolo
 	store.Overrides().SystemPromptPath = systemPromptPath
-	return store, nil
 }
 
 // localSkillsDiscoveryConfig adapts a *config.ConfigStore to the inputs

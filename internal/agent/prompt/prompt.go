@@ -21,16 +21,18 @@ import (
 
 // Prompt represents a template-based prompt generator.
 type Prompt struct {
-	name       string
-	template   string
-	now        func() time.Time
-	platform   string
-	workingDir string
+	name         string
+	template     string
+	systemPrompt string
+	now          func() time.Time
+	platform     string
+	workingDir   string
 }
 
 type PromptDat struct {
 	Provider      string
 	Model         string
+	SystemPrompt  string
 	Config        config.Config
 	WorkingDir    string
 	IsGitRepo     bool
@@ -63,6 +65,12 @@ func WithPlatform(platform string) Option {
 func WithWorkingDir(workingDir string) Option {
 	return func(p *Prompt) {
 		p.workingDir = workingDir
+	}
+}
+
+func WithSystemPrompt(systemPrompt string) Option {
+	return func(p *Prompt) {
+		p.systemPrompt = systemPrompt
 	}
 }
 
@@ -202,6 +210,7 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 	data := PromptDat{
 		Provider:      provider,
 		Model:         model,
+		SystemPrompt:  p.systemPrompt,
 		Config:        *cfg,
 		WorkingDir:    filepath.ToSlash(workingDir),
 		IsGitRepo:     isGit,

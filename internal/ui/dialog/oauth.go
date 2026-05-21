@@ -253,24 +253,34 @@ func (m *OAuth) innerDialogContent() string {
 			)
 
 	case OAuthStateDisplay:
+		// Browser (authorization-code) providers have no user code to
+		// display; they open a browser and wait for a loopback callback.
+		browserFlow := m.userCode == ""
+
+		instructionSuffix := " to copy the code below and open the browser."
+		if browserFlow {
+			instructionSuffix = " to open the browser and sign in."
+		}
 		instructions := lipgloss.NewStyle().
 			Margin(0, 1).
 			Width(m.width - 2).
 			Render(
 				instructionStyle.Render("Press ") +
 					enterKeyStyle.Render("enter") +
-					instructionStyle.Render(" to copy the code below and open the browser."),
+					instructionStyle.Render(instructionSuffix),
 			)
 
+		codeContent := t.Dialog.OAuth.UserCode.Render(m.userCode)
+		if browserFlow {
+			codeContent = statusTextStyle.Render("Waiting for your browser…")
+		}
 		codeBox := lipgloss.NewStyle().
 			Width(m.width-2).
 			Height(7).
 			Align(lipgloss.Center, lipgloss.Center).
 			Background(t.Dialog.OAuth.UserCodeBg).
 			Margin(0, 1).
-			Render(
-				t.Dialog.OAuth.UserCode.Render(m.userCode),
-			)
+			Render(codeContent)
 
 		link := linkStyle.Hyperlink(m.verificationURL, "id=oauth-verify").Render(m.verificationURL)
 		url := statusTextStyle.
@@ -278,11 +288,15 @@ func (m *OAuth) innerDialogContent() string {
 			Width(m.width - 2).
 			Render("Browser not opening? Pay a visit to:\n" + link)
 
+		waitingText := "Verifying..."
+		if browserFlow {
+			waitingText = "Waiting for authorization..."
+		}
 		waiting := lipgloss.NewStyle().
 			Margin(0, 1).
 			Width(m.width - 2).
 			Render(
-				successStyle.Render(m.spinner.View()) + statusTextStyle.Render("Verifying..."),
+				successStyle.Render(m.spinner.View()) + statusTextStyle.Render(waitingText),
 			)
 
 		return lipgloss.JoinVertical(
@@ -335,6 +349,17 @@ func (m *OAuth) ShortHelp() []key.Binding {
 		}
 
 	default:
+		// Browser flows have no user code: drop the copy binding and
+		// relabel submit.
+		if m.userCode == "" {
+			return []key.Binding{
+				key.NewBinding(
+					key.WithKeys("enter", "ctrl+y"),
+					key.WithHelp("enter", "open browser"),
+				),
+				m.keyMap.Close,
+			}
+		}
 		return []key.Binding{
 			m.keyMap.Copy,
 			m.keyMap.Submit,
@@ -344,25 +369,31 @@ func (m *OAuth) ShortHelp() []key.Binding {
 }
 
 func (d *OAuth) copyCode() tea.Cmd {
-	if d.State != OAuthStateDisplay {
+	if d.State != OAuthStateDisplay || d.userCode == "" {
 		return nil
 	}
 	return common.CopyToClipboard(d.userCode, "Code copied to clipboard")
+}
+
+func (d *OAuth) openURL() tea.Msg {
+	if err := browser.OpenURL(d.verificationURL); err != nil {
+		return ActionOAuthErrored{fmt.Errorf("failed to open browser: %w", err)}
+	}
+	return nil
 }
 
 func (d *OAuth) copyCodeAndOpenURL() tea.Cmd {
 	if d.State != OAuthStateDisplay {
 		return nil
 	}
+	// Browser flows have no code to copy; just open the authorization URL.
+	if d.userCode == "" {
+		return d.openURL
+	}
 	return common.CopyToClipboardWithCallback(
 		d.userCode,
 		"Code copied and URL opened",
-		func() tea.Msg {
-			if err := browser.OpenURL(d.verificationURL); err != nil {
-				return ActionOAuthErrored{fmt.Errorf("failed to open browser: %w", err)}
-			}
-			return nil
-		},
+		d.openURL,
 	)
 }
 

@@ -84,6 +84,7 @@ reviewed.
 ## Common Tasks
 
 - Add a custom provider: add an entry under `providers` with `type`, `base_url`, `api_key`, and `models`.
+- Configure a custom system prompt: set `options.system_prompt_path` to a Markdown file in global or project config.
 - Disable a builtin or local skill: add the skill name to `options.disabled_skills`.
 - Add an MCP server: add an entry under `mcp` with `type` and either `command` (stdio) or `url` (http/sse).
 
@@ -187,6 +188,7 @@ reviewed.
 {
   "options": {
     "skills_paths": ["./skills"],
+    "system_prompt_path": ".crush/system-prompt.md",
     "disabled_tools": ["bash", "sourcegraph"],
     "disabled_skills": ["crush-config"],
     "tui": {
@@ -210,6 +212,36 @@ reviewed.
 > `.agents/skills`, `.crush/skills`, `.claude/skills`, `.cursor/skills`
 
 Other options: `context_paths`, `progress`, `disable_notifications`, `disable_auto_summarize`, `disable_metrics`, `disable_provider_auto_update`, `disable_default_providers`, `data_directory`, `initialize_as`.
+
+## Custom System Prompt
+
+Set `options.system_prompt_path` to replace Crush's default coder system prompt body with a Markdown file. Crush still appends its managed runtime sections such as environment, memory, skills, and tool instructions.
+
+Project-level config applies only in that project:
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "system_prompt_path": ".crush/system-prompt.md"
+  }
+}
+```
+
+Use `.crush.json` or `crush.json` in the project root. You can also set the same option in the workspace data config at `.crush/crush.json`, which is loaded after project config and can override it. Relative paths are resolved from the project/workspace directory, so `.crush/system-prompt.md` should live inside the project.
+
+Global config applies by default across projects:
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "system_prompt_path": "~/prompts/crush-system-prompt.md"
+  }
+}
+```
+
+Put global config at `$XDG_CONFIG_HOME/crush/crush.json` or `$HOME/.config/crush/crush.json`. Project config has higher priority than global config. For a one-off run, `crush --sys-prompt /path/to/system-prompt.md` or `crush -p /path/to/system-prompt.md` overrides configured values.
 
 ## User-Invocable Skills
 

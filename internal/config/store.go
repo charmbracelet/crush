@@ -32,6 +32,7 @@ type fileSnapshot struct {
 // the lifetime of the process (or workspace).
 type RuntimeOverrides struct {
 	SkipPermissionRequests bool
+	SystemPromptPath       string
 }
 
 // ConfigStore is the single entry point for all config access. It owns the

@@ -161,11 +161,12 @@ func resolvePath(path string, store *config.ConfigStore) string {
 
 func (p *Prompt) systemPromptForConfig(store *config.ConfigStore) (string, error) {
 	cfg := store.Config()
-	if cfg.Options.SystemPromptPath == "" {
+	path := cmp.Or(store.Overrides().SystemPromptPath, cfg.Options.SystemPromptPath)
+	if path == "" {
 		return p.systemPrompt, nil
 	}
 
-	path := resolvePath(cfg.Options.SystemPromptPath, store)
+	path = resolvePath(path, store)
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return "", fmt.Errorf("reading system prompt file %s: %w", path, err)

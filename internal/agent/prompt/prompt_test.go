@@ -50,6 +50,20 @@ func TestPromptBuildRuntimeSystemPromptOverrideWins(t *testing.T) {
 	require.NotContains(t, rendered, "default body")
 }
 
+func TestPromptBuildSystemPromptPathUsesPromptWorkingDir(t *testing.T) {
+	storeWorkingDir := t.TempDir()
+	promptWorkingDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(promptWorkingDir, "custom.md"), []byte("prompt working dir body"), 0o644))
+	store := loadPromptTestConfig(t, storeWorkingDir, `"system_prompt_path":"custom.md"`)
+	p := newPromptForTest(t, promptWorkingDir, "default body")
+
+	rendered, err := p.Build(context.Background(), "provider", "model", store)
+	require.NoError(t, err)
+	require.Contains(t, rendered, "prompt working dir body")
+	require.NotContains(t, rendered, "default body")
+	require.Contains(t, rendered, "<env>"+filepath.ToSlash(promptWorkingDir)+"</env>")
+}
+
 func newPromptForTest(t *testing.T, workingDir, defaultBody string) *Prompt {
 	t.Helper()
 
@@ -72,6 +86,8 @@ func loadPromptTestConfig(t *testing.T, workingDir, options string) *config.Conf
 	t.Setenv("XDG_DATA_HOME", filepath.Join(homeDir, ".local", "share"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(homeDir, ".cache"))
 	t.Setenv("CRUSH_SKILLS_DIR", t.TempDir())
+	t.Setenv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE", "1")
+	t.Setenv("CRUSH_DISABLE_METRICS", "1")
 
 	optionFields := []string{
 		`"context_paths":[]`,

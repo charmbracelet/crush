@@ -12,8 +12,6 @@ import (
 )
 
 func TestRootCmd_SystemPromptFlag(t *testing.T) {
-	t.Parallel()
-
 	flag := rootCmd.PersistentFlags().Lookup("sys-prompt")
 	require.NotNil(t, flag)
 	require.Equal(t, "p", flag.Shorthand)

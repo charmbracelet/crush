@@ -156,7 +156,11 @@ func expandPath(path string, store *config.ConfigStore) string {
 }
 
 func resolvePath(path string, store *config.ConfigStore) string {
-	return filepathext.SmartJoin(store.WorkingDir(), expandPath(path, store))
+	return resolvePathFrom(path, store.WorkingDir(), store)
+}
+
+func resolvePathFrom(path, workingDir string, store *config.ConfigStore) string {
+	return filepathext.SmartJoin(workingDir, expandPath(path, store))
 }
 
 func (p *Prompt) systemPromptForConfig(store *config.ConfigStore) (string, error) {
@@ -166,7 +170,7 @@ func (p *Prompt) systemPromptForConfig(store *config.ConfigStore) (string, error
 		return p.systemPrompt, nil
 	}
 
-	path = resolvePath(path, store)
+	path = resolvePathFrom(path, cmp.Or(p.workingDir, store.WorkingDir()), store)
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return "", fmt.Errorf("reading system prompt file %s: %w", path, err)

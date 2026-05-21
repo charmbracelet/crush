@@ -116,7 +116,7 @@ func processFile(filePath string) *ContextFile {
 
 func processContextPath(p string, store *config.ConfigStore) []ContextFile {
 	var contexts []ContextFile
-	fullPath := filepathext.SmartJoin(store.WorkingDir(), p)
+	fullPath := resolvePath(p, store)
 	info, err := os.Stat(fullPath)
 	if err != nil {
 		return contexts
@@ -153,6 +153,24 @@ func expandPath(path string, store *config.ConfigStore) string {
 	}
 
 	return path
+}
+
+func resolvePath(path string, store *config.ConfigStore) string {
+	return filepathext.SmartJoin(store.WorkingDir(), expandPath(path, store))
+}
+
+func (p *Prompt) systemPromptForConfig(store *config.ConfigStore) (string, error) {
+	cfg := store.Config()
+	if cfg.Options.SystemPromptPath == "" {
+		return p.systemPrompt, nil
+	}
+
+	path := resolvePath(cfg.Options.SystemPromptPath, store)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("reading system prompt file %s: %w", path, err)
+	}
+	return string(content), nil
 }
 
 func (p *Prompt) promptData(ctx context.Context, provider, model string, store *config.ConfigStore) (PromptDat, error) {
@@ -206,11 +224,16 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		availSkillXML = skills.ToPromptXML(allSkills)
 	}
 
+	systemPrompt, err := p.systemPromptForConfig(store)
+	if err != nil {
+		return PromptDat{}, err
+	}
+
 	isGit := isGitRepo(store.WorkingDir())
 	data := PromptDat{
 		Provider:      provider,
 		Model:         model,
-		SystemPrompt:  p.systemPrompt,
+		SystemPrompt:  systemPrompt,
 		Config:        *cfg,
 		WorkingDir:    filepath.ToSlash(workingDir),
 		IsGitRepo:     isGit,

@@ -92,6 +92,9 @@ cat README.md | crush run "make this more glamorous" > GLAMOROUS_README.md
 # Run with debug logging in a specific directory
 crush --debug --cwd /path/to/project
 
+# Run with a custom system prompt
+crush --sys-prompt /path/to/system-prompt.md
+
 # Run in yolo mode (auto-accept all permissions; use with care)
 crush --yolo
 

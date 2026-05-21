@@ -266,6 +266,28 @@ $HOME/.local/share/crush/crush.json
 > - `CRUSH_GLOBAL_CONFIG`
 > - `CRUSH_GLOBAL_DATA`
 
+### System Prompt
+
+Crush uses its built-in coder system prompt by default. To replace it for a
+project or globally, set `options.system_prompt_path` to a Markdown file:
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "system_prompt_path": ".crush/system-prompt.md"
+  }
+}
+```
+
+You can also override the configured prompt for a single run with
+`--sys-prompt` or `-p`:
+
+```bash
+crush --sys-prompt /path/to/system-prompt.md
+crush -p /path/to/system-prompt.md run "review this change"
+```
+
 ### LSPs
 
 Crush can use LSPs for additional context to help inform its decisions, just

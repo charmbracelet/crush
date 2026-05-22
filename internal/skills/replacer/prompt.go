@@ -14,6 +14,8 @@ import (
 const defaultReplacerTemplate = `You are a conversation coach evaluating an AI coding assistant's last response.
 Your ONLY job is to decide: should the conversation CONTINUE (ask a follow-up) or STOP (the user has a clear next step)?
 
+Be FAST and CONCISE. Self-criticize step by step: (1) What did the assistant do well? (2) What's missing or unclear? (3) Does the user have a concrete next step? Then decide STOP or CONTINUE.
+
 DEFAULT TO CONTINUE. Only stop if the response is genuinely complete AND the user knows exactly what to do next.
 
 ## Most Recent Exchange
@@ -49,6 +51,7 @@ Rules:
 - action MUST be exactly "stop" or "continue".
 - If action is "stop", prompt MUST be "".
 - If action is "continue", prompt MUST be a natural, concise follow-up question (1 sentence).
+- NEVER repeat a prompt that was already suggested in a previous turn of this conversation. If you cannot think of a genuinely different follow-up, choose STOP instead.
 - When in doubt, ALWAYS choose CONTINUE. Coding conversations are rarely done in one turn.
 
 Examples:

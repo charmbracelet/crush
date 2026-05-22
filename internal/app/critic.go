@@ -69,7 +69,7 @@ func (app *App) buildCriticEmitter(cfg critic.CriticSkillConfig) critic.Checkpoi
 
 	return func(ctx context.Context, cp critic.Checkpoint) (*critic.CriticFeedback, error) {
 		once.Do(func() {
-			model, resolveErr = app.resolveCriticModel(cfg)
+			model, resolveErr = app.resolveCriticModel(ctx, cfg)
 		})
 		if resolveErr != nil {
 			event.Error(resolveErr, "critic_model_resolution_failed", true)
@@ -107,8 +107,8 @@ func (app *App) buildCriticEmitter(cfg critic.CriticSkillConfig) critic.Checkpoi
 
 // resolveCriticModel resolves the language model to use for the critic.
 // Priority: cfg.Model > small model from config.
-func (app *App) resolveCriticModel(cfg critic.CriticSkillConfig) (fantasy.LanguageModel, error) {
-	return app.resolveSkillModel(cfg.Model, "critic")
+func (app *App) resolveCriticModel(ctx context.Context, cfg critic.CriticSkillConfig) (fantasy.LanguageModel, error) {
+	return app.resolveSkillModel(ctx, cfg.Model, "critic")
 }
 
 // buildSkillProvider constructs a fantasy.Provider from config for a skill
@@ -247,8 +247,14 @@ func (app *App) buildReplacerWrapper(cfg replacer.ReplacerConfig) func(agent.Ses
 	return func(primary agent.SessionAgent) agent.SessionAgent {
 		mw := replacer.NewMiddleware(primary, cfg)
 		mw.SetMessageService(app.Messages)
+		var once sync.Once
+		var model fantasy.LanguageModel
+		var resolveErr error
 		mw.SetModelResolver(func(ctx context.Context) (fantasy.LanguageModel, error) {
-			return app.resolveReplacerModel(cfg)
+			once.Do(func() {
+				model, resolveErr = app.resolveReplacerModel(ctx, cfg)
+			})
+			return model, resolveErr
 		})
 		return mw
 	}
@@ -257,13 +263,13 @@ func (app *App) buildReplacerWrapper(cfg replacer.ReplacerConfig) func(agent.Ses
 // resolveReplacerModel resolves the language model for the replacement agent.
 // It prefers small, fast models: explicit replacer config > user's small model >
 // auto-selected smallest available model.
-func (app *App) resolveReplacerModel(cfg replacer.ReplacerConfig) (fantasy.LanguageModel, error) {
-	return app.resolveSkillModel(cfg.Model, "replacer")
+func (app *App) resolveReplacerModel(ctx context.Context, cfg replacer.ReplacerConfig) (fantasy.LanguageModel, error) {
+	return app.resolveSkillModel(ctx, cfg.Model, "replacer")
 }
 
 // resolveSkillModel resolves a language model for a skill (critic or replacer).
 // Priority: explicit model ID > small model from config.
-func (app *App) resolveSkillModel(modelID, skillName string) (fantasy.LanguageModel, error) {
+func (app *App) resolveSkillModel(ctx context.Context, modelID, skillName string) (fantasy.LanguageModel, error) {
 	c := app.config.Config()
 
 	var providerCfg config.ProviderConfig
@@ -317,7 +323,7 @@ func (app *App) resolveSkillModel(modelID, skillName string) (fantasy.LanguageMo
 		return nil, fmt.Errorf("build %s provider: %w", skillName, err)
 	}
 
-	model, err := provider.LanguageModel(context.Background(), modelCfg.Model)
+	model, err := provider.LanguageModel(ctx, modelCfg.Model)
 	if err != nil {
 		return nil, fmt.Errorf("get %s language model: %w", skillName, err)
 	}

@@ -2,6 +2,7 @@ package replacer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -19,6 +20,7 @@ import (
 
 // Visual indicator constants.
 const (
+	coachReadyLabel    = "Coach is ready..."
 	coachEvalLabel     = "Coach is evaluating..."
 	coachStopLabel     = "✅ Coach is satisfied"
 	coachContinueLabel = "🔄 Coach suggests continuing..."
@@ -97,9 +99,13 @@ func (m *Middleware) Run(ctx context.Context, call agent.SessionAgentCall) (*fan
 	m.evalSpinnerID = ""
 	m.evalMu.Unlock()
 	if oldSpinnerID != "" && m.messages != nil {
-		if delErr := m.messages.Delete(ctx, oldSpinnerID); delErr != nil {
-			slog.Warn("Replacer failed to delete stale eval indicator", "session_id", call.SessionID, "error", delErr)
-		}
+		go func(id string) {
+			delCtx, delCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer delCancel()
+			if delErr := m.messages.Delete(delCtx, id); delErr != nil {
+				slog.Warn("Replacer failed to delete stale eval indicator", "session_id", call.SessionID, "error", delErr)
+			}
+		}(oldSpinnerID)
 	}
 
 	slog.Info("Replacer started", "session_id", call.SessionID, "max_iterations", m.cfg.MaxIterations)
@@ -115,8 +121,33 @@ func (m *Middleware) Run(ctx context.Context, call agent.SessionAgentCall) (*fan
 		return nil, nil
 	}
 
+	// Track coach prompts used in this Run() call to avoid repeating them
+	// without needing an extra database round-trip.
+	seenPrompts := make(map[string]struct{})
+
 	// Replacement agent loop: evaluate and potentially continue.
 	for iteration := 0; iteration < m.cfg.MaxIterations; iteration++ {
+		// Fast-path: if the context is already cancelled, bail out before
+		// starting any work.
+		if ctx.Err() != nil {
+			slog.Info("Replacer evaluation skipped because context was cancelled", "session_id", call.SessionID, "iteration", iteration)
+			return result, nil
+		}
+
+		// Transition the indicator from "ready" to "evaluating" so the user
+		// sees exactly when the coach LLM call starts. Fire-and-forget so a
+		// stuck database write can never block the evaluation.
+		if evalMsg.ID != "" && m.messages != nil {
+			evalMsg.SpinnerLabel = coachEvalLabel
+			go func(msg message.Message) {
+				upCtx, upCancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer upCancel()
+				if upErr := m.messages.Update(upCtx, msg); upErr != nil {
+					slog.Warn("Replacer failed to update eval indicator", "session_id", call.SessionID, "error", upErr)
+				}
+			}(evalMsg)
+		}
+
 		evalCtx, cancel := context.WithCancel(ctx)
 		m.evalMu.Lock()
 		m.evalCancel = cancel
@@ -128,11 +159,16 @@ func (m *Middleware) Run(ctx context.Context, call agent.SessionAgentCall) (*fan
 		m.evalCancel = nil
 		m.evalMu.Unlock()
 
-		// Clean up the evaluating indicator.
+		// Clean up the evaluating indicator. Fire-and-forget so a stuck
+		// database delete can never block the loop.
 		if evalMsg.ID != "" && m.messages != nil {
-			if delErr := m.messages.Delete(ctx, evalMsg.ID); delErr != nil {
-				slog.Warn("Replacer failed to delete eval indicator", "session_id", call.SessionID, "error", delErr)
-			}
+			go func(id string) {
+				delCtx, delCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer delCancel()
+				if delErr := m.messages.Delete(delCtx, id); delErr != nil {
+					slog.Warn("Replacer failed to delete eval indicator", "session_id", call.SessionID, "error", delErr)
+				}
+			}(evalMsg.ID)
 			evalMsg.ID = ""
 			m.evalMu.Lock()
 			m.evalSpinnerID = ""
@@ -140,6 +176,14 @@ func (m *Middleware) Run(ctx context.Context, call agent.SessionAgentCall) (*fan
 		}
 
 		if evalErr != nil {
+			// If the coach timed out, treat it as satisfied rather than an error.
+			if errors.Is(evalErr, context.DeadlineExceeded) {
+				slog.Info("Replacer evaluation timed out, treating as satisfied", "session_id", call.SessionID, "iteration", iteration)
+				event.TrackReplacerDecision(call.SessionID, "timeout_stop", iteration)
+				event.TrackReplacerLoopCompleted(call.SessionID, iteration+1, "timeout_stop")
+				m.flashStopIndicator(ctx, call.SessionID)
+				return result, nil
+			}
 			slog.Warn("Replacer evaluation failed", "session_id", call.SessionID, "error", evalErr)
 			event.TrackReplacerLoopCompleted(call.SessionID, iteration, "error")
 			return result, nil
@@ -156,6 +200,26 @@ func (m *Middleware) Run(ctx context.Context, call agent.SessionAgentCall) (*fan
 			}
 			return result, nil
 		}
+
+		// Guard against repeating the same generic follow-up across turns.
+		// First check the in-memory map (no DB call), then fall back to the
+		// database scan.
+		normalized := strings.ToLower(strings.TrimSpace(decision.Prompt))
+		if _, dup := seenPrompts[normalized]; dup {
+			slog.Info("Replacer stopping to avoid repeating a prompt from this run", "session_id", call.SessionID, "prompt", decision.Prompt)
+			event.TrackReplacerDecision(call.SessionID, "duplicate_stop", iteration)
+			event.TrackReplacerLoopCompleted(call.SessionID, iteration+1, "duplicate_stop")
+			m.flashStopIndicator(ctx, call.SessionID)
+			return result, nil
+		}
+		if isDuplicateCoachPrompt(ctx, m.messages, call.SessionID, decision.Prompt) {
+			slog.Info("Replacer stopping to avoid repeating a previous coach prompt", "session_id", call.SessionID, "prompt", decision.Prompt)
+			event.TrackReplacerDecision(call.SessionID, "duplicate_stop", iteration)
+			event.TrackReplacerLoopCompleted(call.SessionID, iteration+1, "duplicate_stop")
+			m.flashStopIndicator(ctx, call.SessionID)
+			return result, nil
+		}
+		seenPrompts[normalized] = struct{}{}
 
 		event.TrackReplacerDecision(call.SessionID, "continue", iteration)
 
@@ -230,7 +294,7 @@ func (m *Middleware) runPrimaryWithEval(ctx context.Context, call agent.SessionA
 				if evalMsg.ID == "" {
 					created, createErr := m.messages.Create(ctx, call.SessionID, message.CreateMessageParams{
 						Role:         message.Assistant,
-						SpinnerLabel: coachEvalLabel,
+						SpinnerLabel: coachReadyLabel,
 					})
 					if createErr != nil {
 						slog.Warn("Replacer failed to create eval indicator", "session_id", call.SessionID, "error", createErr)
@@ -253,7 +317,7 @@ func (m *Middleware) runPrimaryWithEval(ctx context.Context, call agent.SessionA
 	if evalMsg.ID == "" {
 		created, createErr := m.messages.Create(ctx, call.SessionID, message.CreateMessageParams{
 			Role:         message.Assistant,
-			SpinnerLabel: coachEvalLabel,
+			SpinnerLabel: coachReadyLabel,
 		})
 		if createErr != nil {
 			slog.Warn("Replacer failed to create eval indicator", "session_id", call.SessionID, "error", createErr)
@@ -277,34 +341,110 @@ func (m *Middleware) evaluate(ctx context.Context, sessionID string, iteration i
 		return &Decision{Action: "continue", Prompt: "What would you like help with today?"}, nil
 	}
 
-	msgs, err := m.messages.List(ctx, sessionID)
+	slog.Info("Replacer evaluation starting", "session_id", sessionID, "iteration", iteration)
+
+	// List messages with a goroutine+timeout so a stuck database query
+	// cannot hang the evaluation indefinitely.
+	listCtx, listCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer listCancel()
+	type listResult struct {
+		msgs []message.Message
+		err  error
+	}
+	listDone := make(chan listResult, 1)
+	go func() {
+		msgs, err := m.messages.List(listCtx, sessionID)
+		listDone <- listResult{msgs: msgs, err: err}
+	}()
+	var msgs []message.Message
+	var err error
+	select {
+	case <-listCtx.Done():
+		select {
+		case lr := <-listDone:
+			msgs, err = lr.msgs, lr.err
+		default:
+			slog.Warn("Replacer list messages timed out", "session_id", sessionID, "iteration", iteration)
+			return nil, fmt.Errorf("list messages: %w", listCtx.Err())
+		}
+	case lr := <-listDone:
+		msgs, err = lr.msgs, lr.err
+	}
 	if err != nil {
+		slog.Warn("Replacer list messages failed", "session_id", sessionID, "iteration", iteration, "error", err)
 		return nil, fmt.Errorf("list messages: %w", err)
 	}
+	slog.Info("Replacer listed messages", "session_id", sessionID, "iteration", iteration, "count", len(msgs))
 
 	promptText, err := BuildReplacerPrompt(msgs)
 	if err != nil {
 		return nil, fmt.Errorf("build prompt: %w", err)
 	}
 
-	model, err := m.resolveModel(ctx)
+	// Resolve the model with a hard timeout so a stuck provider setup cannot
+	// hang the evaluation indefinitely.
+	resolveCtx, resolveCancel := context.WithTimeout(ctx, 5*time.Second)
+	model, err := m.resolveModel(resolveCtx)
+	resolveCancel()
 	if err != nil {
+		slog.Warn("Replacer resolve model failed", "session_id", sessionID, "iteration", iteration, "error", err)
 		return nil, fmt.Errorf("resolve model: %w", err)
 	}
+	slog.Info("Replacer model resolved", "session_id", sessionID, "iteration", iteration)
 
 	m.busy.Store(true)
-	ctx2, cancel := context.WithTimeout(ctx, m.cfg.Timeout)
+
+	timeout := m.cfg.Timeout
+	if timeout <= 0 {
+		timeout = DefaultTimeout
+	}
+	ctx2, cancel := context.WithTimeout(ctx, timeout)
+
 	maxTokens := int64(512)
 	temp := 0.3
-	resp, err := model.Generate(ctx2, fantasy.Call{
+	call := fantasy.Call{
 		Prompt:          fantasy.Prompt{fantasy.NewUserMessage(promptText)},
 		MaxOutputTokens: &maxTokens,
 		Temperature:     &temp,
-	})
-	cancel()
+	}
+
+	// Run generation in a goroutine so that even if the provider does not
+	// respect context cancellation we still return when the timeout fires.
+	type generateResult struct {
+		resp *fantasy.Response
+		err  error
+	}
+	done := make(chan generateResult, 1)
+	go func() {
+		resp, err := model.Generate(ctx2, call)
+		done <- generateResult{resp: resp, err: err}
+	}()
+
+	var resp *fantasy.Response
+	select {
+	case <-ctx2.Done():
+		cancel()
+		// The goroutine may have finished at the exact moment the timer
+		// fired. Try a non-blocking receive to avoid discarding a valid
+		// result and returning a spurious timeout error.
+		select {
+		case gr := <-done:
+			resp, err = gr.resp, gr.err
+		default:
+			err = ctx2.Err()
+		}
+	case gr := <-done:
+		cancel()
+		resp, err = gr.resp, gr.err
+	}
+
 	m.busy.Store(false)
 	if err != nil {
+		slog.Warn("Replacer generate failed", "session_id", sessionID, "iteration", iteration, "error", err)
 		return nil, fmt.Errorf("generate: %w", err)
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("generate: nil response")
 	}
 
 	raw := resp.Content.Text()
@@ -329,16 +469,16 @@ func (m *Middleware) flashStopIndicator(ctx context.Context, sessionID string) {
 	if ctx.Err() != nil {
 		return
 	}
-	msg, err := m.messages.Create(ctx, sessionID, message.CreateMessageParams{
-		Role:         message.Assistant,
-		SpinnerLabel: coachStopLabel,
-	})
-	if err != nil {
-		slog.Warn("Replacer failed to create stop indicator", "session_id", sessionID, "error", err)
-		return
-	}
 	go func() {
 		defer func() { flashDoneCh <- struct{}{} }()
+		msg, err := m.messages.Create(ctx, sessionID, message.CreateMessageParams{
+			Role:         message.Assistant,
+			SpinnerLabel: coachStopLabel,
+		})
+		if err != nil {
+			slog.Warn("Replacer failed to create stop indicator", "session_id", sessionID, "error", err)
+			return
+		}
 		time.Sleep(coachStopDisplay)
 		if delErr := m.messages.Delete(ctx, msg.ID); delErr != nil {
 			slog.Warn("Replacer failed to delete stop indicator", "session_id", sessionID, "error", delErr)
@@ -356,16 +496,16 @@ func (m *Middleware) flashContinueIndicator(ctx context.Context, sessionID strin
 	if ctx.Err() != nil {
 		return
 	}
-	msg, err := m.messages.Create(ctx, sessionID, message.CreateMessageParams{
-		Role:         message.Assistant,
-		SpinnerLabel: coachContinueLabel,
-	})
-	if err != nil {
-		slog.Warn("Replacer failed to create continue indicator", "session_id", sessionID, "error", err)
-		return
-	}
 	go func() {
 		defer func() { flashDoneCh <- struct{}{} }()
+		msg, err := m.messages.Create(ctx, sessionID, message.CreateMessageParams{
+			Role:         message.Assistant,
+			SpinnerLabel: coachContinueLabel,
+		})
+		if err != nil {
+			slog.Warn("Replacer failed to create continue indicator", "session_id", sessionID, "error", err)
+			return
+		}
 		time.Sleep(coachContinueDisplay)
 		if delErr := m.messages.Delete(ctx, msg.ID); delErr != nil {
 			slog.Warn("Replacer failed to delete continue indicator", "session_id", sessionID, "error", delErr)
@@ -454,4 +594,62 @@ func coachPrompt(prompt string) string {
 		return prompt
 	}
 	return "[Coach] " + prompt
+}
+
+// coachPrefix is the marker injected by coachPrompt. It is used by
+// isDuplicateCoachPrompt to identify prior coach-generated user prompts.
+const coachPrefix = "[Coach] "
+
+// isDuplicateCoachPrompt scans the session history for previous coach prompts
+// and returns true if the supplied prompt is substantially identical to one
+// that was already injected earlier in the session. The comparison is
+// case-insensitive and ignores leading/trailing whitespace.
+func isDuplicateCoachPrompt(ctx context.Context, svc message.Service, sessionID, prompt string) bool {
+	if svc == nil || prompt == "" {
+		return false
+	}
+	listCtx, listCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer listCancel()
+	type listResult struct {
+		msgs []message.Message
+		err  error
+	}
+	listDone := make(chan listResult, 1)
+	go func() {
+		msgs, err := svc.List(listCtx, sessionID)
+		listDone <- listResult{msgs: msgs, err: err}
+	}()
+	var msgs []message.Message
+	var err error
+	select {
+	case <-listCtx.Done():
+		select {
+		case lr := <-listDone:
+			msgs, err = lr.msgs, lr.err
+		default:
+			slog.Warn("Replacer deduplication list timed out", "session_id", sessionID)
+			return false
+		}
+	case lr := <-listDone:
+		msgs, err = lr.msgs, lr.err
+	}
+	if err != nil {
+		slog.Warn("Replacer failed to list messages for deduplication", "session_id", sessionID, "error", err)
+		return false
+	}
+	normalized := strings.ToLower(strings.TrimSpace(prompt))
+	for _, msg := range msgs {
+		if msg.Role != message.User {
+			continue
+		}
+		text := messageText(msg)
+		if !strings.HasPrefix(text, coachPrefix) {
+			continue
+		}
+		prev := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(text, coachPrefix)))
+		if prev == normalized {
+			return true
+		}
+	}
+	return false
 }

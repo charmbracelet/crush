@@ -166,8 +166,7 @@ Builtin skills are embedded in the binary at `builtin/` and use the virtual `cru
 - The View tool understands this prefix and reads from the embedded `builtinFS` filesystem.
 - Builtin skills are discovered at startup via `fs.WalkDir(builtinFS, "builtin", ...)`.
 - User skills can override builtin skills of the same name (last occurrence wins in discovery order).
-- Current builtin skills: `crush-config`, `crush-hooks`, `jq`, `builtin-skills`, `shell-builtins`.
-- A `supervisor-impl` skill exists in `builtin/supervisor-impl/` as a development guide for implementing the Supervisor Agent extension.
+- Current builtin skills: `crush-config`, `crush-hooks`, `jq`.
 
 ## Build/Test/Lint Commands
 

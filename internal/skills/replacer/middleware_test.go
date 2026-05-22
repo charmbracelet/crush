@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/agent"
@@ -36,11 +37,11 @@ func drainFlashIndicators(t *testing.T) {
 
 // mockAgent simulates a primary agent that returns a fixed response.
 type mockAgent struct {
-	response   string
-	calls      []agent.SessionAgentCall
-	err        error
-	busy       bool
-	returnNil  bool
+	response  string
+	calls     []agent.SessionAgentCall
+	err       error
+	busy      bool
+	returnNil bool
 }
 
 func (m *mockAgent) Run(ctx context.Context, call agent.SessionAgentCall) (*fantasy.AgentResult, error) {
@@ -135,7 +136,7 @@ func (m *mockMessageService) DeleteSessionMessages(ctx context.Context, sessionI
 	return nil
 }
 func (m *mockMessageService) Flush(ctx context.Context, id string) error { return nil }
-func (m *mockMessageService) FlushAll(ctx context.Context) error { return nil }
+func (m *mockMessageService) FlushAll(ctx context.Context) error         { return nil }
 func (m *mockMessageService) Subscribe(ctx context.Context) <-chan pubsub.Event[message.Message] {
 	if m.subscribeCh != nil {
 		return m.subscribeCh
@@ -196,6 +197,62 @@ func TestMiddleware_Run_Continue(t *testing.T) {
 	require.Equal(t, "hi", primary.calls[0].Prompt)
 	require.Equal(t, "[Coach] Tell me more about your project", primary.calls[1].Prompt)
 	require.Nil(t, primary.calls[1].Attachments)
+}
+
+func TestMiddleware_Run_DuplicatePromptStops(t *testing.T) {
+	t.Parallel()
+
+	msgSvc := &mockMessageService{}
+	// Seed a prior coach prompt into the message history.
+	_, _ = msgSvc.Create(context.Background(), "sid", message.CreateMessageParams{
+		Role:  message.User,
+		Parts: []message.ContentPart{message.TextContent{Text: "[Coach] What would you like help with today?"}},
+	})
+
+	primary := &mockAgent{response: "hello there"}
+	cfg := ReplacerConfig{Enabled: true, MaxIterations: 2}
+	mw := NewMiddleware(primary, cfg)
+	mw.SetMessageService(msgSvc)
+
+	mw.SetModelResolver(func(ctx context.Context) (fantasy.LanguageModel, error) {
+		return &mockLLM{decision: `{"action":"continue","prompt":"What would you like help with today?"}`}, nil
+	})
+
+	result, err := mw.Run(context.Background(), agent.SessionAgentCall{SessionID: "sid", Prompt: "hi"})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	// Primary called only once because the duplicate follow-up was blocked.
+	require.Len(t, primary.calls, 1)
+	require.Equal(t, "hi", primary.calls[0].Prompt)
+}
+
+func TestMiddleware_Run_DuplicatePromptInSameRunStops(t *testing.T) {
+	t.Parallel()
+
+	msgSvc := &mockMessageService{}
+	primary := &mockAgent{response: "hello there"}
+	cfg := ReplacerConfig{Enabled: true, MaxIterations: 3}
+	mw := NewMiddleware(primary, cfg)
+	mw.SetMessageService(msgSvc)
+
+	callCount := 0
+	mw.SetModelResolver(func(ctx context.Context) (fantasy.LanguageModel, error) {
+		callCount++
+		if callCount == 1 {
+			return &mockLLM{decision: `{"action":"continue","prompt":"Tell me more"}`}, nil
+		}
+		// Second evaluation suggests the exact same prompt again.
+		return &mockLLM{decision: `{"action":"continue","prompt":"Tell me more"}`}, nil
+	})
+
+	result, err := mw.Run(context.Background(), agent.SessionAgentCall{SessionID: "sid", Prompt: "hi"})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	// Primary called twice: original + one follow-up. The second evaluation
+	// returns the same prompt, which is caught by the in-memory seen map.
+	require.Len(t, primary.calls, 2)
+	require.Equal(t, "hi", primary.calls[0].Prompt)
+	require.Equal(t, "[Coach] Tell me more", primary.calls[1].Prompt)
 }
 
 func TestMiddleware_Run_Disabled(t *testing.T) {
@@ -430,6 +487,85 @@ func TestCoachPrompt(t *testing.T) {
 	require.Equal(t, "[Coach] ", coachPrompt(""))
 }
 
+func TestIsDuplicateCoachPrompt(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	t.Run("nil service", func(t *testing.T) {
+		t.Parallel()
+		require.False(t, isDuplicateCoachPrompt(ctx, nil, "sid", "hello"))
+	})
+
+	t.Run("empty prompt", func(t *testing.T) {
+		t.Parallel()
+		svc := &mockMessageService{}
+		require.False(t, isDuplicateCoachPrompt(ctx, svc, "sid", ""))
+	})
+
+	t.Run("no prior coach prompts", func(t *testing.T) {
+		t.Parallel()
+		svc := &mockMessageService{}
+		require.False(t, isDuplicateCoachPrompt(ctx, svc, "sid", "What would you like help with today?"))
+	})
+
+	t.Run("duplicate found", func(t *testing.T) {
+		t.Parallel()
+		svc := &mockMessageService{}
+		_, _ = svc.Create(ctx, "sid", message.CreateMessageParams{
+			Role:  message.User,
+			Parts: []message.ContentPart{message.TextContent{Text: "[Coach] What would you like help with today?"}},
+		})
+		require.True(t, isDuplicateCoachPrompt(ctx, svc, "sid", "What would you like help with today?"))
+	})
+
+	t.Run("duplicate with different case and spacing", func(t *testing.T) {
+		t.Parallel()
+		svc := &mockMessageService{}
+		_, _ = svc.Create(ctx, "sid", message.CreateMessageParams{
+			Role:  message.User,
+			Parts: []message.ContentPart{message.TextContent{Text: "[Coach]  what WOULD you like help with TODAY?  "}},
+		})
+		require.True(t, isDuplicateCoachPrompt(ctx, svc, "sid", "What would you like help with today?"))
+	})
+
+	t.Run("different prompt", func(t *testing.T) {
+		t.Parallel()
+		svc := &mockMessageService{}
+		_, _ = svc.Create(ctx, "sid", message.CreateMessageParams{
+			Role:  message.User,
+			Parts: []message.ContentPart{message.TextContent{Text: "[Coach] What would you like help with today?"}},
+		})
+		require.False(t, isDuplicateCoachPrompt(ctx, svc, "sid", "What are you working on right now?"))
+	})
+
+	t.Run("ignores non-user messages", func(t *testing.T) {
+		t.Parallel()
+		svc := &mockMessageService{}
+		_, _ = svc.Create(ctx, "sid", message.CreateMessageParams{
+			Role:  message.Assistant,
+			Parts: []message.ContentPart{message.TextContent{Text: "[Coach] What would you like help with today?"}},
+		})
+		require.False(t, isDuplicateCoachPrompt(ctx, svc, "sid", "What would you like help with today?"))
+	})
+
+	t.Run("ignores user messages without coach prefix", func(t *testing.T) {
+		t.Parallel()
+		svc := &mockMessageService{}
+		_, _ = svc.Create(ctx, "sid", message.CreateMessageParams{
+			Role:  message.User,
+			Parts: []message.ContentPart{message.TextContent{Text: "What would you like help with today?"}},
+		})
+		require.False(t, isDuplicateCoachPrompt(ctx, svc, "sid", "What would you like help with today?"))
+	})
+
+	t.Run("list error returns false", func(t *testing.T) {
+		t.Parallel()
+		svc := &mockMessageService{listErr: errors.New("list failed")}
+		require.False(t, isDuplicateCoachPrompt(ctx, svc, "sid", "hello"))
+	})
+}
+
 func TestFlashIndicators_NilMessages(t *testing.T) {
 	t.Parallel()
 
@@ -488,3 +624,42 @@ func (m *mockLLM) StreamObject(ctx context.Context, call fantasy.ObjectCall) (fa
 
 func (m *mockLLM) Provider() string { return "mock" }
 func (m *mockLLM) Model() string    { return "mock-model" }
+
+func TestMiddleware_Run_TimeoutTreatsAsStop(t *testing.T) {
+	t.Parallel()
+
+	msgSvc := &mockMessageService{}
+	primary := &mockAgent{response: "hello there"}
+	cfg := ReplacerConfig{Enabled: true, MaxIterations: 2, Timeout: 50 * time.Millisecond}
+	mw := NewMiddleware(primary, cfg)
+	mw.SetMessageService(msgSvc)
+
+	mw.SetModelResolver(func(ctx context.Context) (fantasy.LanguageModel, error) {
+		return &mockSlowLLM{}, nil
+	})
+
+	result, err := mw.Run(context.Background(), agent.SessionAgentCall{SessionID: "sid", Prompt: "hi"})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	// Primary called only once because the timeout was treated as satisfied (stop).
+	require.Len(t, primary.calls, 1)
+}
+
+// mockSlowLLM simulates a language model that waits for context cancellation.
+type mockSlowLLM struct{}
+
+func (m *mockSlowLLM) Generate(ctx context.Context, call fantasy.Call) (*fantasy.Response, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+func (m *mockSlowLLM) Stream(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
+	return func(yield func(fantasy.StreamPart) bool) {}, nil
+}
+func (m *mockSlowLLM) GenerateObject(ctx context.Context, call fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
+	return nil, nil
+}
+func (m *mockSlowLLM) StreamObject(ctx context.Context, call fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
+	return func(yield func(fantasy.ObjectStreamPart) bool) {}, nil
+}
+func (m *mockSlowLLM) Provider() string { return "mock" }
+func (m *mockSlowLLM) Model() string    { return "mock-model" }

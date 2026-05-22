@@ -157,6 +157,33 @@ func (l *List) Len() int {
 	return len(l.items)
 }
 
+// TotalHeight returns the total height of all items in the list.
+func (l *List) TotalHeight() int {
+	total := 0
+	for idx := range l.items {
+		item := l.getItem(idx)
+		total += item.height
+		if l.gap > 0 && idx < len(l.items)-1 {
+			total += l.gap
+		}
+	}
+	return total
+}
+
+// Offset returns the current scroll offset in lines from the top.
+func (l *List) Offset() int {
+	offset := 0
+	for idx := 0; idx < l.offsetIdx; idx++ {
+		item := l.getItem(idx)
+		offset += item.height
+		if l.gap > 0 && idx < len(l.items)-1 {
+			offset += l.gap
+		}
+	}
+	offset += l.offsetLine
+	return offset
+}
+
 // lastOffsetItem returns the index and line offsets of the last item that can
 // be partially visible in the viewport.
 func (l *List) lastOffsetItem() (int, int, int) {

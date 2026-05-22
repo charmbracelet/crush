@@ -47,6 +47,10 @@ Options:
 // github.com/itchyny/gojq, and we'd ideally get the CLI exposed upstream to
 // avoid this falling out of sync.
 func handleJQ(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	var (
 		rawOutput  bool
 		compact    bool

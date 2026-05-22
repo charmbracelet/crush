@@ -1592,13 +1592,12 @@ func (m *UI) handleRemoveRecentModel(msg dialog.ActionRemoveRecentModel) tea.Cmd
 	if err := m.com.Workspace.RemoveRecentModel(config.ScopeGlobal, msg.ModelType, msg.Model); err != nil {
 		cmds = append(cmds, util.ReportError(err))
 	} else {
-		if msg.Cmd != nil {
-			cmds = append(cmds, msg.Cmd)
+		// Send a refresh message to the models dialog
+		if modelsDialog, ok := m.dialog.Dialog(dialog.ModelsID).(*dialog.Models); ok {
+			modelsDialog.HandleMsg(dialog.ActionRefreshModels{})
 		}
 		cmds = append(cmds, func() tea.Msg {
-			modelMsg := fmt.Sprintf("removed %s from %s provider", msg.Model.Model, msg.ModelType)
-
-			return util.NewInfoMsg(modelMsg)
+			return util.NewInfoMsg(fmt.Sprintf("Removed %s from recent models", msg.Model.Model))
 		})
 	}
 

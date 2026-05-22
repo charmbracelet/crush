@@ -44,12 +44,13 @@ type ActionSelectModel struct {
 }
 
 // ActionRemoveRecentModel is a message indicating a model is to be removed from the recent models list.
-// It optionally stores a command to be executed if the model was successfully removed.
 type ActionRemoveRecentModel struct {
 	Model     config.SelectedModel
 	ModelType config.SelectedModelType
-	Cmd       tea.Cmd
 }
+
+// ActionRefreshModels is a message indicating the models dialog should refresh its list.
+type ActionRefreshModels struct{}
 
 // Messages for commands
 type (

@@ -233,13 +233,14 @@ func (s *ConfigStore) RemoveRecentModel(scope Scope, modelType SelectedModelType
 	}
 
 	current := s.config.RecentModels[modelType]
-	updated := slices.DeleteFunc(slices.Clone(current), func(existing SelectedModel) bool {
-		return eq(existing)
-	})
-	if len(updated) == len(current) {
+
+	// Check if the model exists in the list before attempting deletion
+	found := slices.ContainsFunc(current, eq)
+	if !found {
 		return fmt.Errorf("model %s:%s is not in recently used list", model.Provider, model.Model)
 	}
 
+	updated := slices.DeleteFunc(slices.Clone(current), eq)
 	s.config.RecentModels[modelType] = updated
 
 	if err := s.SetConfigField(scope, fmt.Sprintf("recent_models.%s", modelType), updated); err != nil {

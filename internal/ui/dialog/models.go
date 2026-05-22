@@ -120,7 +120,7 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 
 	m.keyMap.Tab = key.NewBinding(
 		key.WithKeys("tab", "shift+tab"),
-		key.WithHelp("tab", "toggle type"),
+		key.WithHelp("tab", "toggle"),
 	)
 	m.keyMap.Select = key.NewBinding(
 		key.WithKeys("enter", "ctrl+y"),
@@ -132,7 +132,7 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 	)
 	m.keyMap.Delete = key.NewBinding(
 		key.WithKeys("ctrl+x"),
-		key.WithHelp("ctrl+x", "delete"),
+		key.WithHelp("ctrl+x", "remove"),
 	)
 	m.keyMap.UpDown = key.NewBinding(
 		key.WithKeys("up", "down"),
@@ -169,6 +169,10 @@ func (m *Models) ID() string {
 // HandleMsg implements Dialog.
 func (m *Models) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
+	case ActionRefreshModels:
+		if err := m.setProviderItems(); err != nil {
+			return util.ReportError(err)
+		}
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, m.keyMap.Close):
@@ -225,24 +229,15 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 			if selectedItem == nil {
 				break
 			}
-			selected := m.list.Selected()
 
 			modelItem, ok := selectedItem.(*ModelItem)
-			if !ok {
+			if !ok || !modelItem.IsRecent() {
 				break
 			}
 
 			return ActionRemoveRecentModel{
 				Model:     modelItem.SelectedModel(),
 				ModelType: modelItem.SelectedModelType(),
-				Cmd: func() tea.Msg {
-					if err := m.setProviderItems(); err != nil {
-						return util.ReportError(err)
-					}
-					m.list.SetSelected(selected)
-					m.list.ScrollToSelected()
-					return nil
-				},
 			}
 		default:
 			var cmd tea.Cmd
@@ -356,6 +351,9 @@ func (m *Models) ShortHelp() []key.Binding {
 	if m.isSelectedConfigured() {
 		h = append(h, m.keyMap.Edit)
 	}
+	if m.isSelectedRecent() {
+		h = append(h, m.keyMap.Delete)
+	}
 	h = append(h, m.keyMap.Close)
 	return h
 }
@@ -377,6 +375,18 @@ func (m *Models) isSelectedConfigured() bool {
 	providerID := string(modelItem.prov.ID)
 	_, isConfigured := m.com.Config().Providers.Get(providerID)
 	return isConfigured
+}
+
+func (m *Models) isSelectedRecent() bool {
+	selectedItem := m.list.SelectedItem()
+	if selectedItem == nil {
+		return false
+	}
+	modelItem, ok := selectedItem.(*ModelItem)
+	if !ok {
+		return false
+	}
+	return modelItem.IsRecent()
 }
 
 // setProviderItems sets the provider items in the list.
@@ -424,7 +434,7 @@ func (m *Models) setProviderItems() error {
 
 			group := NewModelGroup(t, name, true)
 			for _, model := range p.Models {
-				item := NewModelItem(t, provider, model, m.modelType, false)
+				item := NewModelItem(t, provider, model, m.modelType, false, false)
 				group.AppendItems(item)
 				itemsMap[item.ID()] = item
 				if model.ID == currentModel.Model && string(provider.ID) == currentModel.Provider {
@@ -477,7 +487,7 @@ func (m *Models) setProviderItems() error {
 
 		group := NewModelGroup(t, name, providerConfigured)
 		for _, model := range displayProvider.Models {
-			item := NewModelItem(t, provider, model, m.modelType, false)
+			item := NewModelItem(t, provider, model, m.modelType, false, false)
 			group.AppendItems(item)
 			itemsMap[item.ID()] = item
 			if model.ID == currentModel.Model && string(provider.ID) == currentModel.Provider {
@@ -500,7 +510,7 @@ func (m *Models) setProviderItems() error {
 			}
 
 			// Show provider for recent items
-			item = NewModelItem(t, item.prov, item.model, m.modelType, true)
+			item = NewModelItem(t, item.prov, item.model, m.modelType, true, true)
 			item.showProvider = true
 
 			validRecentItems = append(validRecentItems, recent)

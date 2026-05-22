@@ -94,9 +94,9 @@ func (c *controllerV1) handlePostWorkspaceConfigModel(w http.ResponseWriter, r *
 	w.WriteHeader(http.StatusOK)
 }
 
-// handleDeleteWorkspaceConfigRecentModel updates the preferred model.
+// handleDeleteWorkspaceConfigRecentModel removes a model from the recently used list.
 //
-//	@Summary		Set the preferred model
+//	@Summary		Remove a recent model
 //	@Tags			config
 //	@Accept			json
 //	@Param			id		path	string						true	"Workspace ID"
@@ -105,7 +105,7 @@ func (c *controllerV1) handlePostWorkspaceConfigModel(w http.ResponseWriter, r *
 //	@Failure		400	{object}	proto.Error
 //	@Failure		404	{object}	proto.Error
 //	@Failure		500	{object}	proto.Error
-//	@Router			/workspaces/{id}/config/model [post]
+//	@Router			/workspaces/{id}/config/remove-recent-model [post]
 func (c *controllerV1) handleDeleteWorkspaceConfigRecentModel(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 

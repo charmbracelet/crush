@@ -69,12 +69,18 @@ type ModelItem struct {
 	m            fuzzy.Match
 	focused      bool
 	showProvider bool
+	isRecent     bool
 }
 
 // Finished implements list.Item. Model items are render-stable
 // outside of explicit SetFocused / SetMatch.
 func (m *ModelItem) Finished() bool {
 	return true
+}
+
+// IsRecent returns true if this item is in the recently used list.
+func (m *ModelItem) IsRecent() bool {
+	return m.isRecent
 }
 
 // SelectedModel returns this model item as a [config.SelectedModel] instance.
@@ -95,7 +101,7 @@ func (m *ModelItem) SelectedModelType() config.SelectedModelType {
 var _ ListItem = &ModelItem{}
 
 // NewModelItem creates a new ModelItem.
-func NewModelItem(t *styles.Styles, prov catwalk.Provider, model catwalk.Model, typ ModelType, showProvider bool) *ModelItem {
+func NewModelItem(t *styles.Styles, prov catwalk.Provider, model catwalk.Model, typ ModelType, showProvider bool, isRecent bool) *ModelItem {
 	return &ModelItem{
 		Versioned:    list.NewVersioned(),
 		prov:         prov,
@@ -104,6 +110,7 @@ func NewModelItem(t *styles.Styles, prov catwalk.Provider, model catwalk.Model, 
 		t:            t,
 		cache:        make(map[int]string),
 		showProvider: showProvider,
+		isRecent:     isRecent,
 	}
 }
 

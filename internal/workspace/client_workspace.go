@@ -424,7 +424,6 @@ func (w *ClientWorkspace) RemoveRecentModel(scope config.Scope, modelType config
 		w.refreshWorkspace()
 	}
 	return err
-
 }
 
 func (w *ClientWorkspace) SetCompactMode(scope config.Scope, enabled bool) error {

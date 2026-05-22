@@ -23,7 +23,7 @@ func Scrollbar(s *styles.Styles, height, contentSize, viewportSize, offset int) 
 	}
 
 	// Calculate where the thumb starts.
-	trackSpace := height - thumbSize
+	trackSpace := height - thumbSize + 1
 	thumbPos := 0
 	if trackSpace > 0 && maxOffset > 0 {
 		thumbPos = min(trackSpace, offset*trackSpace/maxOffset)

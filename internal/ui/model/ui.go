@@ -259,6 +259,7 @@ type UI struct {
 
 	// pills state
 	pillsExpanded      bool
+	pillsAutoExpanded  bool
 	focusedPillSection pillSection
 	promptQueue        int
 	pillsView          string
@@ -3471,6 +3472,7 @@ func (m *UI) newSession() tea.Cmd {
 	m.chat.Blur()
 	m.chat.ClearMessages()
 	m.pillsExpanded = false
+	m.pillsAutoExpanded = false
 	m.promptQueue = 0
 	m.pillsView = ""
 	m.historyReset()

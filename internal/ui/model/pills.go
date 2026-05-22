@@ -154,7 +154,11 @@ func (m *UI) autoExpandPillsIfReasonable() tea.Cmd {
 	if m.pillsExpanded {
 		return nil
 	}
+	if m.pillsAutoExpanded {
+		return nil
+	}
 	m.pillsExpanded = true
+	m.pillsAutoExpanded = true
 	if hasIncompleteTodos(m.session.Todos) {
 		m.focusedPillSection = pillSectionTodos
 	} else {

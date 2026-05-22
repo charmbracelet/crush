@@ -3449,15 +3449,15 @@ func (m *UI) toggleInputMode() tea.Cmd {
 		targetModeLabel = "code"
 	}
 
+	m.mode = targetMode
+	m.setEditorPrompt(m.com.Workspace.PermissionSkipRequests(), m.mode)
+	if m.status != nil {
+		m.status.SetMode(m.mode == uiInputModePlan)
+	}
+
 	return func() tea.Msg {
 		if err := m.com.Workspace.AgentSetMain(targetAgentID); err != nil {
 			return util.ReportError(err)()
-		}
-
-		m.mode = targetMode
-		m.setEditorPrompt(m.com.Workspace.PermissionSkipRequests(), m.mode)
-		if m.status != nil {
-			m.status.SetMode(m.mode == uiInputModePlan)
 		}
 		if err := m.com.Workspace.UpdateAgentModel(context.Background()); err != nil {
 			return util.ReportError(err)()

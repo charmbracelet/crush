@@ -21,16 +21,18 @@ import (
 
 // Prompt represents a template-based prompt generator.
 type Prompt struct {
-	name       string
-	template   string
-	now        func() time.Time
-	platform   string
-	workingDir string
+	name         string
+	template     string
+	systemPrompt string
+	now          func() time.Time
+	platform     string
+	workingDir   string
 }
 
 type PromptDat struct {
 	Provider      string
 	Model         string
+	SystemPrompt  string
 	Config        config.Config
 	WorkingDir    string
 	IsGitRepo     bool
@@ -63,6 +65,12 @@ func WithPlatform(platform string) Option {
 func WithWorkingDir(workingDir string) Option {
 	return func(p *Prompt) {
 		p.workingDir = workingDir
+	}
+}
+
+func WithSystemPrompt(systemPrompt string) Option {
+	return func(p *Prompt) {
+		p.systemPrompt = systemPrompt
 	}
 }
 
@@ -108,7 +116,7 @@ func processFile(filePath string) *ContextFile {
 
 func processContextPath(p string, store *config.ConfigStore) []ContextFile {
 	var contexts []ContextFile
-	fullPath := filepathext.SmartJoin(store.WorkingDir(), p)
+	fullPath := resolvePath(p, store)
 	info, err := os.Stat(fullPath)
 	if err != nil {
 		return contexts
@@ -145,6 +153,29 @@ func expandPath(path string, store *config.ConfigStore) string {
 	}
 
 	return path
+}
+
+func resolvePath(path string, store *config.ConfigStore) string {
+	return resolvePathFrom(path, store.WorkingDir(), store)
+}
+
+func resolvePathFrom(path, workingDir string, store *config.ConfigStore) string {
+	return filepathext.SmartJoin(workingDir, expandPath(path, store))
+}
+
+func (p *Prompt) systemPromptForConfig(store *config.ConfigStore) (string, error) {
+	cfg := store.Config()
+	path := cmp.Or(store.Overrides().SystemPromptPath, cfg.Options.SystemPromptPath)
+	if path == "" {
+		return p.systemPrompt, nil
+	}
+
+	path = resolvePathFrom(path, cmp.Or(p.workingDir, store.WorkingDir()), store)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("reading system prompt file %s: %w", path, err)
+	}
+	return string(content), nil
 }
 
 func (p *Prompt) promptData(ctx context.Context, provider, model string, store *config.ConfigStore) (PromptDat, error) {
@@ -198,10 +229,16 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		availSkillXML = skills.ToPromptXML(allSkills)
 	}
 
+	systemPrompt, err := p.systemPromptForConfig(store)
+	if err != nil {
+		return PromptDat{}, err
+	}
+
 	isGit := isGitRepo(store.WorkingDir())
 	data := PromptDat{
 		Provider:      provider,
 		Model:         model,
+		SystemPrompt:  systemPrompt,
 		Config:        *cfg,
 		WorkingDir:    filepath.ToSlash(workingDir),
 		IsGitRepo:     isGit,

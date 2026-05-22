@@ -98,6 +98,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	}
 
 	cfg.Overrides().SkipPermissionRequests = args.YOLO
+	cfg.Overrides().SystemPromptPath = args.SystemPromptPath
 
 	if err := createDotCrushDir(cfg.Config().Options.DataDirectory); err != nil {
 		return nil, proto.Workspace{}, fmt.Errorf("failed to create data directory: %w", err)
@@ -144,14 +145,15 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	}
 
 	result := proto.Workspace{
-		ID:      id,
-		Path:    args.Path,
-		DataDir: cfg.Config().Options.DataDirectory,
-		Debug:   cfg.Config().Options.Debug,
-		YOLO:    cfg.Overrides().SkipPermissionRequests,
-		Config:  cfg.Config(),
-		Env:     args.Env,
-		Skills:  skillStatesToProto(skillStates),
+		ID:               id,
+		Path:             args.Path,
+		DataDir:          cfg.Config().Options.DataDirectory,
+		SystemPromptPath: cfg.Overrides().SystemPromptPath,
+		Debug:            cfg.Config().Options.Debug,
+		YOLO:             cfg.Overrides().SkipPermissionRequests,
+		Config:           cfg.Config(),
+		Env:              args.Env,
+		Skills:           skillStatesToProto(skillStates),
 	}
 
 	return ws, result, nil
@@ -248,12 +250,13 @@ func (b *Backend) Shutdown() {
 func workspaceToProto(ws *Workspace) proto.Workspace {
 	cfg := ws.Cfg.Config()
 	out := proto.Workspace{
-		ID:      ws.ID,
-		Path:    ws.Path,
-		YOLO:    ws.Cfg.Overrides().SkipPermissionRequests,
-		DataDir: cfg.Options.DataDirectory,
-		Debug:   cfg.Options.Debug,
-		Config:  cfg,
+		ID:               ws.ID,
+		Path:             ws.Path,
+		YOLO:             ws.Cfg.Overrides().SkipPermissionRequests,
+		DataDir:          cfg.Options.DataDirectory,
+		SystemPromptPath: ws.Cfg.Overrides().SystemPromptPath,
+		Debug:            cfg.Options.Debug,
+		Config:           cfg,
 	}
 	if ws.Skills != nil {
 		out.Skills = skillStatesToProto(ws.Skills.States())

@@ -57,3 +57,32 @@ func TestSchemaProvidersHasAdditionalProperties(t *testing.T) {
 	require.True(t, strings.Contains(string(providers.AdditionalProperties), "ProviderConfig"),
 		"providers should use additionalProperties with a ProviderConfig ref, got: %s", string(providers.AdditionalProperties))
 }
+
+func TestSchemaOptionsIncludesSystemPromptPath(t *testing.T) {
+	t.Parallel()
+
+	reflector := new(jsonschema.Reflector)
+	bts, err := json.Marshal(reflector.Reflect(&config.Config{}))
+	require.NoError(t, err)
+
+	var schema struct {
+		Defs map[string]json.RawMessage `json:"$defs"`
+	}
+	require.NoError(t, json.Unmarshal(bts, &schema))
+
+	var options struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	require.NoError(t, json.Unmarshal(schema.Defs["Options"], &options))
+
+	systemPromptPathRaw, ok := options.Properties["system_prompt_path"]
+	require.True(t, ok, "Options should have a system_prompt_path property")
+
+	var systemPromptPath struct {
+		Type        string `json:"type"`
+		Description string `json:"description"`
+	}
+	require.NoError(t, json.Unmarshal(systemPromptPathRaw, &systemPromptPath))
+	require.Equal(t, "string", systemPromptPath.Type)
+	require.Contains(t, systemPromptPath.Description, "custom system prompt")
+}

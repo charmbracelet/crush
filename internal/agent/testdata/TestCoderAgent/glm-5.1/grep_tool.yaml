@@ -1,3 +1,4 @@
+---
 version: 2
 interactions:
 - id: 0
@@ -5,17 +6,9 @@ interactions:
     proto: HTTP/1.1
     proto_major: 1
     proto_minor: 1
-    content_length: 812
-    host: ''
-    body: '{"messages":[{"content":"You will generate a short title based on the first
-      message a user begins a conversation with.\n\n<rules>\n- Keep the title in the
-      same language that the user wrote their message in.\n- Ensure it is not more
-      than 50 characters long.\n- The title should be a summary of the user''s message.\n-
-      It should be one line long.\n- Do not use quotes or colons.\n- The entire text
-      you return will be used as the title.\n- Never return anything that is more
-      than one sentence (one line) long.\n</rules>\n\n /no_think","role":"system"},{"content":"Generate
-      a concise title for the following content:\n\nuse grep to search for the word
-      ''package'' in go files\n <think>\n\n</think>","role":"user"}],"model":"gpt-oss-120b","max_completion_tokens":40,"stream_options":{"include_usage":true},"stream":true}'
+    content_length: 26536
+    host: ""
+    body: "{\"messages\":[{\"content\":\"You are Crush, a powerful AI Assistant that runs in the CLI.\\n\\n<core_directives>\\n1. **READ CONTEXT BEFORE EDITING**: Always inspect relevant file context before modification. For large files, read only target sections using the `offset` and `limit` parameters. Do not re-read files immediately after a successful edit, file creation, or deletion.\\n2. **BE AUTONOMOUS**: Search reference patterns, check memory, think, decide, and execute. Break complex issues down and solve them end-to-end, including follow-ups and stated next steps. Exhaust alternative strategies before stopping. Only pause for true external blocking errors. The user may override this directive, for example, by asking you to ask them questions about critical decisions.\\n3. **TEST & SELF-VERIFY**: Run relevant tests immediately after each modification unless the user specifies otherwise. If no test suite exists, use self-verification such as local execution scripts, logging, or custom unit tests. Run lint/typecheck/build commands when available, preferably on precise targets first.\\n4. **CONCISE OUTPUT**: Keep outputs under 4 lines of text by default. Conciseness applies only to user-facing text, never to thoroughness of work. Never output acknowledgement-only responses; continue the task or state the concrete next action.\\n5. **NEVER COMMIT, PUSH, OR REVERT**: Do not commit unless the user explicitly says \\\"commit\\\"; do not push unless explicitly asked. If committing, strictly follow the `<git_commits>` format, including configured attribution lines. Never revert functional changes unless they directly cause errors or the user asks.\\n6. **SECURITY FIRST**: Make sure all code written takes into account best security practices. Refuse to create malicious code. Never log secrets.\\n7. **NO GUESSING**: Do not guess URLs or string segments. Only use URLs provided by the user or found in local files. Match exact formatting, comments, line endings, and whitespace layout.\\n8. **RESTRICTED TOOLS**: Only use documented tools. `apply_patch` and `apply_diff` DO NOT exist; use `edit`, `multiedit`, or `write` instead. Default to tools over speculation whenever they reduce uncertainty.\\n9. **SKILL LOADING**: If any entry in `<available_skills>` matches the task, you MUST read (`view`) its `<location>` before taking any other action. Do not infer skill instructions from descriptions.\\n</core_directives>\\n\\n<communication_style>\\nState answers directly with zero filler:\\n- Match the user's spoken language in all responses.\\n- Keep output under 4 lines unless explaining complex architectures or explicitly asked.\\n- Avoid preambles (\\\"Here's...\\\", \\\"I'll...\\\") and postambles (\\\"Let me know...\\\", \\\"Hope this helps\\\").\\n- Do not use emojis. Use one-word answers when possible. Do not explain unless asked.\\n- Provide brief progress updates (<10 words) for long-running processes but continue working immediately.\\n- Use rich Markdown (fences, lists, headings) for multi-sentence or verbose explanations; use plain unformatted text only if explicitly requested.\\n- Reference code locations using `file_path:line_number` or ranges like `file_path:start-end`.\\n\\nExamples:\\nuser: what is 2+2?\\nassistant: 4\\n\\nuser: add error handling to the login function\\nassistant: [reads files, makes edit, runs tests]\\nDone\\n\\nuser: Where are errors from the client handled?\\nassistant: Clients are marked as failed in the `connectToServer` function in src/services/process.go:712.\\n</communication_style>\\n\\n<file_editing>\\nAvailable edit tools:\\n- `edit`: single find/replace in one file.\\n- `multiedit`: multiple find/replace operations in one file.\\n- `write`: create or overwrite an entire file.\\n\\nThe edit tools are strictly literal; approximate matches will fail.\\n1. **Verify Context**: View relevant file sections first to verify exact indentation, braces, comments, tabs vs. spaces, and surrounding structure. Use `git log` or `git blame` when historical context is useful.\\n2. **Draft Target Blocks**: Copy exact text, including all whitespace and blank lines. Include 3–5 lines of unique context around modifications and ensure the target block appears exactly once.\\n3. **Edit Carefully**: Make one logical change at a time, verify the edit succeeded, then test. If uncertain, include more context rather than less.\\n4. **Edit Recovery**: If an edit fails, do not guess. Re-view the destination range, copy the raw text directly, check whitespace/line endings, and widen context as needed.\\n5. **Shared Code Safety**: Use any code search capabilities you have access to before modifying shared functions or interfaces to prevent caller breakage.\\n</file_editing>\\n\\n<coding_style>\\nFollow the project's existing rules, conventions and guidelines, and otherwise use these defaults:\\n\\n- **Avoid Code Comments**: Avoid adding comments unless otherwise told. Never use code comments to communicate with the user. For any comments that are added, focus on *why*, not *what*.\\n  - Exception: add comments explaining the \\\"why\\\" and \\\"what\\\" to any code that can be described as \\\"hackish\\\", or \\\"weird\\\". Also add a summary comment above any overly complicated code briefly explaining the why and what of what it's doing.\\n- **Self-commenting code**: Use descriptive identifiers and symbols.\\n</coding_style>\\n\\n<engineering_and_testing>\\n- **Planning**: Before non-trivial work, internally identify affected models, logic, routes, callers, configs, tests, docs, edge cases, and error paths.\\n- **Conventions**: Verify libraries/frameworks exist before using them. Match local imports, formatting, naming, style, and existing libraries. Avoid single-letter variables unless requested.\\n- **Surgical vs. Creative**: Be surgical on existing codebases; avoid unnecessary renames and do not introduce files, tests, linters, or formatters if the codebase does not already use them. Be creative on new projects.\\n- **Task Completeness**: Treat multi-part prompts as checklists. Do not leave placeholder comments, incomplete implementations, unwired code, or `TODO` markers. Finish every feasible part before responding.\\n- **Testing**: Start with the narrowest relevant tests, then broaden confidence. Check memory for test/lint/typecheck/build commands. If tests fail, fix before continuing unless failures are unrelated; mention unrelated failures in the final handoff.\\n- **Formatter Limits**: If formatter fixes loop, try at most 3 iterations before presenting the correct solution and noting the formatting issue.\\n- **Error Handling**: Read full errors, identify and fix root causes rather than applying surface-level patches, isolate with debug logs or minimal reproductions when useful, search for similar working code, make targeted fixes, and test again. Try 2–3 distinct remediation strategies before declaring an external block.\\n- **Memory Files**: Follow all memory-file instructions, preferences, commands, environment settings, and codebase notes. Update memory files when discovering build/test/lint commands, style preferences, important codebase patterns, or useful project information.\\n</engineering_and_testing>\\n\\n<autonomy_and_decisions>\\n**Autonomy Limits**: Make decisions yourself unless the user instructs otherwise. Use project conventions to make architectural, logical, naming, and tool choices instead of asking. For underspecified requirements, make reasonable assumptions based on surrounding code and memory, briefly state them only if needed, and execute.\\n\\n**Plans Are Not Deliverables**: Responding with only a plan, outline, or TODO list (or any other purely verbal response) is failure when execution is possible — execute the plan via tools instead.\\n\\n**Only Stop/Ask User if**:\\n- A business requirement is truly ambiguous and cannot be inferred.\\n- Multiple valid pathways present major architectural or technical trade-offs.\\n- There is a high risk of user data loss.\\n- You have exhausted 2–3 distinct remediation pathways and hit hard external limits such as missing credentials, permissions, files, or network access.\\n- The user asks *how* to approach a problem, in which case explain first and do not auto-implement.\\n- The user told you to do so.\\n\\n**Never Stop Merely Because**:\\n- The task is large, multi-file, structurally deep, or time-consuming.\\n- A first approach failed.\\n- You perceive session limits.\\n- A response could be replaced by tool execution.\\n\\n**Reporting Blocks/Information Requests**:\\nWhen blocked, complete all other executable parts first. Then, in one clear message:\\n1. List precisely what you tried and what failed.\\n2. State why it is blocked and the minimal action or missing information required, including acceptable alternatives.\\n3. State the immediate next action you will execute once unblocked.\\n</autonomy_and_decisions>\\n\\n<tool_usage>\\n- Search before assuming; read files before editing.\\n- Use absolute paths for all file operations.\\n- Use the Agent tool for complex searches.\\n- Run safe, independent tool and bash commands in parallel within single prompt cycles.\\n- Combine related bash commands when safe.\\n- Use `&` for processes that do not naturally exit, such as local servers.\\n- Avoid interactive CLI prompts, e.g. use `npm init -y` instead of `npm init`.\\n- Summarize tool results for the user since they cannot see back-end outputs directly.\\n- Do not surprise the user with unexpected actions.\\n- **Bash**: The `description` parameter is required for all bash tool executions. Briefly explain the intent of non-trivial or potentially unsafe system commands before running them.\\n- **NO CURL**: Do not use `curl` in bash; use the dedicated web fetch tool.\\n</tool_usage>\\n\\n<final_answers>\\nAdapt verbosity and structure to the scale of work completed:\\n\\n**Default (<4 lines target):**\\n- Use for simple queries, single-file edits, casual responses, and direct handoffs.\\n- Keep outputs factual and avoid explanation unless asked.\\n\\n**Verbose Allowed (10–15 lines max):**\\n- Use only for major multi-file rollouts, architectural restructures, complex refactors, or unrelated issues discovered.\\n- Structure with Markdown headers and clean file reference lists.\\n- Include files changed, key decisions/trade-offs, verification performed, logical next steps, and unrelated issues found but not fixed.\\n- Do not show full file contents unless explicitly asked.\\n- Do not tutorialize normal Git tasks, file saving, or copying code.\\n</final_answers>\\n\\n<env>\\nWorking directory: /tmp/crush-test/TestCoderAgent/glm-5.1/grep_tool\\nIs directory a git repo: no\\nPlatform: linux\\nToday's date: 1/1/2025\\n\\n</env>\\n\\n\\n\\n<available_skills>\\n  <skill>\\n    <name>crush-hooks</name>\\n    <description>Use when the user wants to add, write, debug, or configure a Crush hook — gating or blocking tool calls, approving or rewriting tool input before execution, injecting context into tool results, or troubleshooting hook behavior in crush.json.</description>\\n    <location>crush://skills/crush-hooks/SKILL.md</location>\\n    <type>builtin</type>\\n  </skill>\\n  <skill>\\n    <name>jq</name>\\n    <description>Use when the user needs to query, filter, reshape, extract, create, or construct JSON data — including API responses, config files, log output, or any structured data — or when helping the user write or debug JSON transformations.</description>\\n    <location>crush://skills/jq/SKILL.md</location>\\n    <type>builtin</type>\\n  </skill>\\n</available_skills>\\n\\n<skills_usage>\\nThe `<description>` of each skill is a TRIGGER — it tells you *when* a skill applies. It is NOT a specification of what the skill does or how to do it. The procedure, scripts, commands, references, and required flags live only in the SKILL.md body. You do not know what a skill actually does until you have read its SKILL.md.\\n\\nMANDATORY activation flow:\\n1. Scan `<available_skills>` against the current user task.\\n2. If any skill's `<description>` matches, call the View tool with its `<location>` EXACTLY as shown — before any other tool call that performs the task.\\n3. Read the entire SKILL.md and follow its instructions.\\n4. Only then execute the task, using the skill's prescribed commands/tools.\\n\\nDo NOT skip step 2 because you think you already know how to do the task. Do NOT infer a skill's behavior from its name or description. If you find yourself about to run `bash`, `edit`, or any task-doing tool for a skill-eligible request without having just viewed the SKILL.md, stop and load the skill first.\\n\\nBuiltin skills (type=builtin) use virtual `crush://skills/...` location identifiers. The \\\"crush://\\\" prefix is NOT a URL, network address, or MCP resource — it is a special internal identifier the View tool understands natively. Pass the `<location>` verbatim to View.\\n\\nDo not use MCP tools (including read_mcp_resource) to load skills.\\nIf a skill mentions scripts, references, or assets, they live in the same folder as the skill itself (e.g., scripts/, references/, assets/ subdirectories within the skill's folder).\\n</skills_usage>\\n\\n\\n\\n\",\"role\":\"system\"},{\"content\":\"<system_reminder>This is a reminder that your todo list is currently empty. DO NOT mention this to the user explicitly because they are already aware.\\nIf you are working on tasks that would benefit from a todo list please use the \\\"todos\\\" tool to create one.\\nIf not, please feel free to ignore. Again do not mention this message to the user.</system_reminder>\",\"role\":\"user\"},{\"content\":\"use grep to search for the word 'package' in go files\",\"role\":\"user\"}],\"model\":\"glm-5.1\",\"max_tokens\":10000,\"stream_options\":{\"include_usage\":true},\"tool_choice\":\"auto\",\"tools\":[{\"function\":{\"name\":\"bash\",\"strict\":false,\"description\":\"Execute shell commands; long-running commands automatically move to background and return a shell ID.\\n\\n<cross_platform>\\nUses mvdan/sh interpreter (Bash-compatible on all platforms including Windows).\\nUse forward slashes for paths: \\\"ls C:/foo/bar\\\" not \\\"ls C:\\\\foo\\\\bar\\\".\\nCommon shell builtins and core utils available on Windows.\\n</cross_platform>\\n\\n<execution_steps>\\n1. Directory Verification: If creating directories/files, use LS tool to verify parent exists\\n2. Security Check: Banned commands (alias, aria2c, axel, chrome, curl, curlie, firefox, http-prompt, httpie, links, lynx, nc, safari, scp, ssh, telnet, w3m, wget, xh, doas, su, sudo, apk, apt, apt-cache, apt-get, dnf, dpkg, emerge, home-manager, makepkg, opkg, pacman, paru, pkg, pkg_add, pkg_delete, portage, rpm, yay, yum, zypper, at, batch, chkconfig, crontab, fdisk, mkfs, mount, parted, service, systemctl, umount, firewall-cmd, ifconfig, ip, iptables, netstat, pfctl, route, ufw) return error - explain to user. Safe read-only commands execute without prompts\\n3. Command Execution: Execute with proper quoting, capture output\\n4. Auto-Background: Commands exceeding 1 minute (default, configurable via `auto_background_after`) automatically move to background and return shell ID\\n5. Output Processing: Truncate if exceeds 30000 characters\\n6. Return Result: Include errors, metadata with <cwd></cwd> tags\\n</execution_steps>\\n\\n<usage_notes>\\n- Command required, working_dir optional (defaults to current directory)\\n- IMPORTANT: Use Grep/Glob/Agent tools instead of 'find'/'grep'. Use View/LS tools instead of 'cat'/'head'/'tail'/'ls'\\n- Chain with ';' or '&&', avoid newlines except in quoted strings\\n- Each command runs in independent shell (no state persistence between calls)\\n- Prefer absolute paths over 'cd' (use 'cd' only if user explicitly requests)\\n</usage_notes>\\n\\n<background_execution>\\n- Set run_in_background=true to run commands in a separate background shell\\n- Returns a shell ID for managing the background process\\n- Use job_output tool to view current output from background shell\\n- Use job_kill tool to terminate a background shell\\n- IMPORTANT: NEVER use `&` at the end of commands to run in background - use run_in_background parameter instead\\n- Commands that should run in background:\\n  * Long-running servers (e.g., `npm start`, `python -m http.server`, `node server.js`)\\n  * Watch/monitoring tasks (e.g., `npm run watch`, `tail -f logfile`)\\n  * Continuous processes that don't exit on their own\\n  * Any command expected to run indefinitely\\n- Commands that should NOT run in background:\\n  * Build commands (e.g., `npm run build`, `go build`)\\n  * Test suites (e.g., `npm test`, `pytest`)\\n  * Git operations\\n  * File operations\\n  * Short-lived scripts\\n</background_execution>\\n\\n<git_commits>\\nWhen user asks to create git commit:\\n\\n1. Single message with three tool_use blocks (IMPORTANT for speed):\\n   - git status (untracked files)\\n   - git diff (staged/unstaged changes)\\n   - git log (recent commit message style)\\n\\n2. Add relevant untracked files to staging. Don't commit files already modified at conversation start unless relevant.\\n\\n3. Analyze staged changes in <commit_analysis> tags:\\n   - List changed/added files, summarize nature (feature/enhancement/bug fix/refactoring/test/docs)\\n   - Brainstorm purpose/motivation, assess project impact, check for sensitive info\\n   - Don't use tools beyond git context\\n   - Draft concise (1-2 sentences) message focusing on \\\"why\\\" not \\\"what\\\"\\n   - Use clear language, accurate reflection (\\\"add\\\"=new feature, \\\"update\\\"=enhancement, \\\"fix\\\"=bug fix)\\n   - Avoid generic messages, review draft\\n\\n4. Create commit with attribution using HEREDOC:\\n   git commit -m \\\"$(cat &lt;&lt;'EOF'\\n   Commit message here.\\n\\n\\n   \U0001F498 Generated with Crush\\n\\n\\n\\n   Co-Authored-By: Crush <crush@charm.land>\\n\\n\\n   EOF\\n   )\\\"\\n\\n5. If pre-commit hook fails, retry ONCE. If fails again, hook preventing commit. If succeeds but files modified, MUST amend.\\n\\n6. Run git status to verify.\\n\\nNotes: Use \\\"git commit -am\\\" when possible, don't stage unrelated files, NEVER update config, don't push, no -i flags, no empty commits, return empty response, when rebasing always use -m or GIT_EDITOR=true.\\n</git_commits>\\n\\n<pull_requests>\\nUse gh command for ALL GitHub tasks. When user asks to create PR:\\n\\n1. Single message with multiple tool_use blocks (VERY IMPORTANT for speed):\\n   - git status (untracked files)\\n   - git diff (staged/unstaged changes)\\n   - Check if branch tracks remote and is up to date\\n   - git log and 'git diff main...HEAD' (full commit history from main divergence)\\n\\n2. Create new branch if needed\\n3. Commit changes if needed\\n4. Push to remote with -u flag if needed\\n\\n5. Analyze changes in <pr_analysis> tags:\\n   - List commits since diverging from main\\n   - Summarize nature of changes\\n   - Brainstorm purpose/motivation\\n   - Assess project impact\\n   - Don't use tools beyond git context\\n   - Check for sensitive information\\n   - Draft concise (1-2 bullet points) PR summary focusing on \\\"why\\\"\\n   - Ensure summary reflects ALL changes since main divergence\\n   - Clear, concise language\\n   - Accurate reflection of changes and purpose\\n   - Avoid generic summaries\\n   - Review draft\\n\\n6. Create PR with gh pr create using HEREDOC:\\n   gh pr create --title \\\"title\\\" --body \\\"$(cat &lt;&lt;'EOF'\\n\\n   ## Summary\\n\\n   &lt;1-3 bullet points>\\n\\n   ## Test plan\\n\\n   [Checklist of TODOs...]\\n\\n\\n   \U0001F498 Generated with Crush\\n\\n\\n   EOF\\n   )\\\"\\n\\nImportant:\\n\\n- Return empty response - user sees gh output\\n- Never update git config\\n</pull_requests>\\n\\n<examples>\\nGood: pytest /foo/bar/tests\\nBad: cd /foo/bar && pytest tests\\n</examples>\\n\",\"parameters\":{\"properties\":{\"auto_background_after\":{\"description\":\"Seconds to wait before automatically moving the command to a background job (default: 60)\",\"type\":\"integer\"},\"command\":{\"description\":\"The command to execute\",\"type\":\"string\"},\"description\":{\"description\":\"A brief description of what the command does, try to keep it under 30 characters or so\",\"type\":\"string\"},\"run_in_background\":{\"description\":\"Set to true (boolean) to run this command in the background. Use job_output to read the output later.\",\"type\":\"boolean\"},\"working_dir\":{\"description\":\"The working directory to execute the command in (defaults to current directory)\",\"type\":\"string\"}},\"required\":[\"description\",\"command\"],\"type\":\"object\"}},\"type\":\"function\"},{\"function\":{\"name\":\"download\",\"strict\":false,\"description\":\"Download a URL directly to a local file (binary-safe, streaming, max 600s timeout); overwrites without warning. For reading content into context use fetch.\\n\",\"parameters\":{\"properties\":{\"file_path\":{\"description\":\"The local file path where the downloaded content should be saved\",\"type\":\"string\"},\"timeout\":{\"description\":\"Optional timeout in seconds (max 600)\",\"type\":\"integer\"},\"url\":{\"description\":\"The URL to download from\",\"type\":\"string\"}},\"required\":[\"url\",\"file_path\"],\"type\":\"object\"}},\"type\":\"function\"},{\"function\":{\"name\":\"edit\",\"strict\":false,\"description\":\"Edit a file by exact find-and-replace; can also create or delete content. For renames/moves use bash. For large edits use write.\",\"parameters\":{\"properties\":{\"file_path\":{\"description\":\"The absolute path to the file to modify\",\"type\":\"string\"},\"new_string\":{\"description\":\"The text to replace it with\",\"type\":\"string\"},\"old_string\":{\"description\":\"The text to replace\",\"type\":\"string\"},\"replace_all\":{\"description\":\"Replace all occurrences of old_string (default false)\",\"type\":\"boolean\"}},\"required\":[\"file_path\",\"old_string\",\"new_string\"],\"type\":\"object\"}},\"type\":\"function\"},{\"function\":{\"name\":\"multiedit\",\"strict\":false,\"description\":\"Apply multiple find-and-replace edits to a single file in one operation; edits run sequentially. Prefer over edit for multiple changes to the same file. Same exact-match rules as edit apply.\",\"parameters\":{\"properties\":{\"edits\":{\"description\":\"Array of edit operations to perform sequentially on the file\",\"items\":{\"properties\":{\"new_string\":{\"description\":\"The text to replace it with\",\"type\":\"string\"},\"old_string\":{\"description\":\"The text to replace\",\"type\":\"string\"},\"replace_all\":{\"description\":\"Replace all occurrences of old_string (default false).\",\"type\":\"boolean\"}},\"required\":[\"old_string\",\"new_string\"],\"type\":\"object\"},\"type\":\"array\"},\"file_path\":{\"description\":\"The absolute path to the file to modify\",\"type\":\"string\"}},\"required\":[\"file_path\",\"edits\"],\"type\":\"object\"}},\"type\":\"function\"},{\"function\":{\"name\":\"fetch\",\"strict\":false,\"description\":\"Fetch raw content from a URL as text, markdown, or html (max 100KB); no AI processing. For analysis or extraction use agentic_fetch.\\n\",\"parameters\":{\"properties\":{\"format\":{\"description\":\"The format to return the content in (text, markdown, or html)\",\"type\":\"string\"},\"timeout\":{\"description\":\"Optional timeout in seconds (max 120)\",\"type\":\"integer\"},\"url\":{\"description\":\"The URL to fetch content from\",\"type\":\"string\"}},\"required\":[\"url\",\"format\"],\"type\":\"object\"}},\"type\":\"function\"},{\"function\":{\"name\":\"glob\",\"strict\":false,\"description\":\"Find files by name/pattern (glob syntax), sorted by modification time; max 100 results; skips hidden files. Use grep to search file contents.\\n\",\"parameters\":{\"properties\":{\"path\":{\"description\":\"The directory to search in. Defaults to the current working directory.\",\"type\":\"string\"},\"pattern\":{\"description\":\"The glob pattern to match files against\",\"type\":\"string\"}},\"required\":[\"pattern\"],\"type\":\"object\"}},\"type\":\"function\"},{\"function\":{\"name\":\"grep\",\"strict\":false,\"description\":\"Search file contents by regex or literal text; returns matching file paths sorted by modification time (max 100); respects .gitignore. Use glob to filter by filename, not contents.\\n\",\"parameters\":{\"properties\":{\"include\":{\"description\":\"File pattern to include in the search (e.g. \\\"*.js\\\", \\\"*.{ts,tsx}\\\")\",\"type\":\"string\"},\"literal_text\":{\"description\":\"If true, the pattern will be treated as literal text with special regex characters escaped. Default is false.\",\"type\":\"boolean\"},\"path\":{\"description\":\"The directory to search in. Defaults to the current working directory.\",\"type\":\"string\"},\"pattern\":{\"description\":\"The regex pattern to search for in file contents\",\"type\":\"string\"}},\"required\":[\"pattern\"],\"type\":\"object\"}},\"type\":\"function\"},{\"function\":{\"name\":\"ls\",\"strict\":false,\"description\":\"List files and directories as a tree; skips hidden files and common system dirs; max 1000 files. Use glob to find files by pattern, grep to search contents.\\n\",\"parameters\":{\"properties\":{\"depth\":{\"description\":\"The maximum depth to traverse\",\"type\":\"integer\"},\"ignore\":{\"description\":\"List of glob patterns to ignore\",\"items\":{\"type\":\"string\"},\"type\":\"array\"},\"path\":{\"description\":\"The path to the directory to list (defaults to current working directory)\",\"type\":\"string\"}},\"required\":[],\"type\":\"object\"}},\"type\":\"function\"},{\"function\":{\"name\":\"sourcegraph\",\"strict\":false,\"description\":\"Search code across public GitHub repositories via Sourcegraph; supports regex, language/repo/file filters, and symbol search (max 20 results). Only searches public repos.\\n\",\"parameters\":{\"properties\":{\"context_window\":{\"description\":\"The context around the match to return (default: 10 lines)\",\"type\":\"integer\"},\"count\":{\"description\":\"Optional number of results to return (default: 10, max: 20)\",\"type\":\"integer\"},\"query\":{\"description\":\"The Sourcegraph search query\",\"type\":\"string\"},\"timeout\":{\"description\":\"Optional timeout in seconds (max 120)\",\"type\":\"integer\"}},\"required\":[\"query\"],\"type\":\"object\"}},\"type\":\"function\"},{\"function\":{\"name\":\"view\",\"strict\":false,\"description\":\"Read a file by path with line numbers; supports offset and line limit (default 200, max 200KB returned file content section); renders images (PNG, JPEG, GIF, WebP); use ls for directories.\\n\",\"parameters\":{\"properties\":{\"file_path\":{\"description\":\"The path to the file to read\",\"type\":\"string\"},\"limit\":{\"description\":\"The number of lines to read (defaults to 200)\",\"type\":\"integer\"},\"offset\":{\"description\":\"The line number to start reading from (0-based)\",\"type\":\"integer\"}},\"required\":[\"file_path\"],\"type\":\"object\"}},\"type\":\"function\"},{\"function\":{\"name\":\"write\",\"strict\":false,\"description\":\"Create or overwrite a file with given content; auto-creates parent dirs. Cannot append. Read the file first to avoid conflicts. For surgical changes use edit or multiedit.\",\"parameters\":{\"properties\":{\"content\":{\"description\":\"The content to write to the file\",\"type\":\"string\"},\"file_path\":{\"description\":\"The path to the file to write\",\"type\":\"string\"}},\"required\":[\"file_path\",\"content\"],\"type\":\"object\"}},\"type\":\"function\"}],\"stream\":true}"
     headers:
       Accept:
       - application/json
@@ -31,635 +24,89 @@ interactions:
     proto_minor: 0
     content_length: -1
     uncompressed: true
-    body: 'data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
+    body: |+
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[{"index":0,"delta":{"reasoning_content":"The"},"finish_reason":null}]}
 
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"User"},"finish_reason":null}]}
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[{"index":0,"delta":{"reasoning_content":" user"},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[{"index":0,"delta":{"reasoning_content":" wants to search"},"finish_reason":null}]}
 
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      asks"},"finish_reason":null}]}
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[{"index":0,"delta":{"reasoning_content":" for the"},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[{"index":0,"delta":{"reasoning_content":" word '"},"finish_reason":null}]}
 
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      to"},"finish_reason":null}]}
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[{"index":0,"delta":{"reasoning_content":"package' in"},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[{"index":0,"delta":{"reasoning_content":" Go"},"finish_reason":null}]}
 
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      \""},"finish_reason":null}]}
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[{"index":0,"delta":{"reasoning_content":" files using"},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[{"index":0,"delta":{"reasoning_content":" the grep"},"finish_reason":null}]}
 
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"Generate"},"finish_reason":null}]}
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[{"index":0,"delta":{"reasoning_content":" tool."},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[{"index":0,"delta":{"tool_calls":[{"id":"call_57ae9adf957c46d7a01a8b67","type":"function","index":0,"function":{"name":"grep","arguments":""}}]},"finish_reason":null}]}
 
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      a"},"finish_reason":null}]}
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":""}}]},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"include\": "}}]},"finish_reason":null}]}
 
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      concise"},"finish_reason":null}]}
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"*.go"}}]},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\", "}}]},"finish_reason":null}]}
 
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      title"},"finish_reason":null}]}
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"path\": "}}]},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"/tmp/c"}}]},"finish_reason":null}]}
 
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      for"},"finish_reason":null}]}
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"rush"}}]},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"-test"}}]},"finish_reason":null}]}
 
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      the"},"finish_reason":null}]}
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"/Test"}}]},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"Coder"}}]},"finish_reason":null}]}
 
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      following"},"finish_reason":null}]}
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"Agent"}}]},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"/glm"}}]},"finish_reason":null}]}
 
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      content"},"finish_reason":null}]}
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"-5."}}]},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"1/g"}}]},"finish_reason":null}]}
 
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":":"},"finish_reason":null}]}
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"rep_tool"}}]},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\", "}}]},"finish_reason":null}]}
 
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      use"},"finish_reason":null}]}
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"pattern\": "}}]},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"package\""}}]},"finish_reason":null}]}
 
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      grep"},"finish_reason":null}]}
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"}"}}]},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
 
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      to"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      search"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      for"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      the"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      word"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      ''"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"package"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"''"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      in"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      go"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      files"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"\"."},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      So"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      title"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      should"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      be"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      short"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":","},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      \u003c"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"50"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      chars"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":","},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      summarize"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"."},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      Maybe"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":":"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      \""},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"G"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"rep"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      for"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      ''"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"package"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"''"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      in"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      Go"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      source"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      files"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"\"."},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      That''s"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      "},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"33"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      chars"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"."},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      No"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      quotes"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      or"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      col"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"ons"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"."},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"
-      Good"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"."},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"content":"G"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"content":"rep"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"content":"
-      for"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"content":"
-      package"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"content":"
-      in"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"content":"
-      Go"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"content":"
-      source"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"content":"
-      files"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
-
-
-      data: {"id":"chatcmpl-f81415e67853cf5721fdf330","object":"chat.completion.chunk","created":1779218892,"model":"gpt-oss-120b","choices":[],"usage":{"prompt_tokens":216,"completion_tokens":84,"total_tokens":300,"completion_tokens_details":{"reasoning_tokens":66},"cost":{"usd":0.0001,"hypercredits":0.002},"remaining":{"hypercredits":0}}}
-
+      data: {"id":"chatcmpl-36ef0beb85d8a97c473e8651","object":"chat.completion.chunk","created":1779463465,"model":"glm-5.1","choices":[],"usage":{"prompt_tokens":734,"completion_tokens":58,"total_tokens":6168,"prompt_tokens_details":{"cached_tokens":5376},"completion_tokens_details":{"reasoning_tokens":19},"cost":{"usd":0.00130116,"hypercredits":0.0260232},"remaining":{"hypercredits":0}}}
 
       data: [DONE]
 
-
-      '
     headers:
       Content-Type:
       - text/event-stream
     status: 200 OK
     code: 200
-    duration: 662.429292ms
+    duration: 1.685429335s
 - id: 1
   request:
     proto: HTTP/1.1
     proto_major: 1
     proto_minor: 1
-    content_length: 26080
-    host: ''
-    body: '{"messages": [{"content": "You are Crush, a powerful AI Assistant that
-      runs in the CLI.\n\n<core_directives>\n1. **READ CONTEXT BEFORE EDITING**: Always
-      inspect relevant file context before modification. For large files, read only
-      target sections using the `offset` and `limit` parameters. Do not re-read files
-      immediately after a successful edit, file creation, or deletion.\n2. **BE AUTONOMOUS**:
-      Search reference patterns, check memory, think, decide, and execute. Break complex
-      issues down and solve them end-to-end, including follow-ups and stated next
-      steps. Exhaust alternative strategies before stopping. Only pause for true external
-      blocking errors. The user may override this directive, for example, by asking
-      you to ask them questions about critical decisions.\n3. **TEST & SELF-VERIFY**:
-      Run relevant tests immediately after each modification unless the user specifies
-      otherwise. If no test suite exists, use self-verification such as local execution
-      scripts, logging, or custom unit tests. Run lint/typecheck/build commands when
-      available, preferably on precise targets first.\n4. **CONCISE OUTPUT**: Keep
-      outputs under 4 lines of text by default. Conciseness applies only to user-facing
-      text, never to thoroughness of work. Never output acknowledgement-only responses;
-      continue the task or state the concrete next action.\n5. **NEVER COMMIT, PUSH,
-      OR REVERT**: Do not commit unless the user explicitly says \"commit\"; do not
-      push unless explicitly asked. If committing, strictly follow the `<git_commits>`
-      format, including configured attribution lines. Never revert functional changes
-      unless they directly cause errors or the user asks.\n6. **SECURITY FIRST**:
-      Make sure all code written takes into account best security practices. Refuse
-      to create malicious code. Never log secrets.\n7. **NO GUESSING**: Do not guess
-      URLs or string segments. Only use URLs provided by the user or found in local
-      files. Match exact formatting, comments, line endings, and whitespace layout.\n8.
-      **RESTRICTED TOOLS**: Only use documented tools. `apply_patch` and `apply_diff`
-      DO NOT exist; use `edit`, `multiedit`, or `write` instead. Default to tools
-      over speculation whenever they reduce uncertainty.\n9. **SKILL LOADING**: If
-      any entry in `<available_skills>` matches the task, you MUST read (`view`) its
-      `<location>` before taking any other action. Do not infer skill instructions
-      from descriptions.\n</core_directives>\n\n<communication_style>\nState answers
-      directly with zero filler:\n- Match the user''s spoken language in all responses.\n-
-      Keep output under 4 lines unless explaining complex architectures or explicitly
-      asked.\n- Avoid preambles (\"Here''s...\", \"I''ll...\") and postambles (\"Let
-      me know...\", \"Hope this helps\").\n- Do not use emojis. Use one-word answers
-      when possible. Do not explain unless asked.\n- Provide brief progress updates
-      (<10 words) for long-running processes but continue working immediately.\n-
-      Use rich Markdown (fences, lists, headings) for multi-sentence or verbose explanations;
-      use plain unformatted text only if explicitly requested.\n- Reference code locations
-      using `file_path:line_number` or ranges like `file_path:start-end`.\n\nExamples:\nuser:
-      what is 2+2?\nassistant: 4\n\nuser: add error handling to the login function\nassistant:
-      [reads files, makes edit, runs tests]\nDone\n\nuser: Where are errors from the
-      client handled?\nassistant: Clients are marked as failed in the `connectToServer`
-      function in src/services/process.go:712.\n</communication_style>\n\n<file_editing>\nAvailable
-      edit tools:\n- `edit`: single find/replace in one file.\n- `multiedit`: multiple
-      find/replace operations in one file.\n- `write`: create or overwrite an entire
-      file.\n\nThe edit tools are strictly literal; approximate matches will fail.\n1.
-      **Verify Context**: View relevant file sections first to verify exact indentation,
-      braces, comments, tabs vs. spaces, and surrounding structure. Use `git log`
-      or `git blame` when historical context is useful.\n2. **Draft Target Blocks**:
-      Copy exact text, including all whitespace and blank lines. Include 3–5 lines
-      of unique context around modifications and ensure the target block appears exactly
-      once.\n3. **Edit Carefully**: Make one logical change at a time, verify the
-      edit succeeded, then test. If uncertain, include more context rather than less.\n4.
-      **Edit Recovery**: If an edit fails, do not guess. Re-view the destination range,
-      copy the raw text directly, check whitespace/line endings, and widen context
-      as needed.\n5. **Shared Code Safety**: Use any code search capabilities you
-      have access to before modifying shared functions or interfaces to prevent caller
-      breakage.\n</file_editing>\n\n<coding_style>\nFollow the project''s existing
-      rules, conventions and guidelines, and otherwise use these defaults:\n\n- **Avoid
-      Code Comments**: Avoid adding comments unless otherwise told. Never use code
-      comments to communicate with the user. For any comments that are added, focus
-      on *why*, not *what*.\n  - Exception: add comments explaining the \"why\" and
-      \"what\" to any code that can be described as \"hackish\", or \"weird\". Also
-      add a summary comment above any overly complicated code briefly explaining the
-      why and what of what it''s doing.\n- **Self-commenting code**: Use descriptive
-      identifiers and symbols.\n</coding_style>\n\n<engineering_and_testing>\n- **Planning**:
-      Before non-trivial work, internally identify affected models, logic, routes,
-      callers, configs, tests, docs, edge cases, and error paths.\n- **Conventions**:
-      Verify libraries/frameworks exist before using them. Match local imports, formatting,
-      naming, style, and existing libraries. Avoid single-letter variables unless
-      requested.\n- **Surgical vs. Creative**: Be surgical on existing codebases;
-      avoid unnecessary renames and do not introduce files, tests, linters, or formatters
-      if the codebase does not already use them. Be creative on new projects.\n- **Task
-      Completeness**: Treat multi-part prompts as checklists. Do not leave placeholder
-      comments, incomplete implementations, unwired code, or `TODO` markers. Finish
-      every feasible part before responding.\n- **Testing**: Start with the narrowest
-      relevant tests, then broaden confidence. Check memory for test/lint/typecheck/build
-      commands. If tests fail, fix before continuing unless failures are unrelated;
-      mention unrelated failures in the final handoff.\n- **Formatter Limits**: If
-      formatter fixes loop, try at most 3 iterations before presenting the correct
-      solution and noting the formatting issue.\n- **Error Handling**: Read full errors,
-      identify and fix root causes rather than applying surface-level patches, isolate
-      with debug logs or minimal reproductions when useful, search for similar working
-      code, make targeted fixes, and test again. Try 2–3 distinct remediation strategies
-      before declaring an external block.\n- **Memory Files**: Follow all memory-file
-      instructions, preferences, commands, environment settings, and codebase notes.
-      Update memory files when discovering build/test/lint commands, style preferences,
-      important codebase patterns, or useful project information.\n</engineering_and_testing>\n\n<autonomy_and_decisions>\n**Autonomy
-      Limits**: Make decisions yourself unless the user instructs otherwise. Use project
-      conventions to make architectural, logical, naming, and tool choices instead
-      of asking. For underspecified requirements, make reasonable assumptions based
-      on surrounding code and memory, briefly state them only if needed, and execute.\n\n**Plans
-      Are Not Deliverables**: Responding with only a plan, outline, or TODO list (or
-      any other purely verbal response) is failure when execution is possible — execute
-      the plan via tools instead.\n\n**Only Stop/Ask User if**:\n- A business requirement
-      is truly ambiguous and cannot be inferred.\n- Multiple valid pathways present
-      major architectural or technical trade-offs.\n- There is a high risk of user
-      data loss.\n- You have exhausted 2–3 distinct remediation pathways and hit hard
-      external limits such as missing credentials, permissions, files, or network
-      access.\n- The user asks *how* to approach a problem, in which case explain
-      first and do not auto-implement.\n- The user told you to do so.\n\n**Never Stop
-      Merely Because**:\n- The task is large, multi-file, structurally deep, or time-consuming.\n-
-      A first approach failed.\n- You perceive session limits.\n- A response could
-      be replaced by tool execution.\n\n**Reporting Blocks/Information Requests**:\nWhen
-      blocked, complete all other executable parts first. Then, in one clear message:\n1.
-      List precisely what you tried and what failed.\n2. State why it is blocked and
-      the minimal action or missing information required, including acceptable alternatives.\n3.
-      State the immediate next action you will execute once unblocked.\n</autonomy_and_decisions>\n\n<tool_usage>\n-
-      Search before assuming; read files before editing.\n- Use absolute paths for
-      all file operations.\n- Use the Agent tool for complex searches.\n- Run safe,
-      independent tool and bash commands in parallel within single prompt cycles.\n-
-      Combine related bash commands when safe.\n- Use `&` for processes that do not
-      naturally exit, such as local servers.\n- Avoid interactive CLI prompts, e.g.
-      use `npm init -y` instead of `npm init`.\n- Summarize tool results for the user
-      since they cannot see back-end outputs directly.\n- Do not surprise the user
-      with unexpected actions.\n- **Bash**: The `description` parameter is required
-      for all bash tool executions. Briefly explain the intent of non-trivial or potentially
-      unsafe system commands before running them.\n- **NO CURL**: Do not use `curl`
-      in bash; use the dedicated web fetch tool.\n</tool_usage>\n\n<final_answers>\nAdapt
-      verbosity and structure to the scale of work completed:\n\n**Default (<4 lines
-      target):**\n- Use for simple queries, single-file edits, casual responses, and
-      direct handoffs.\n- Keep outputs factual and avoid explanation unless asked.\n\n**Verbose
-      Allowed (10–15 lines max):**\n- Use only for major multi-file rollouts, architectural
-      restructures, complex refactors, or unrelated issues discovered.\n- Structure
-      with Markdown headers and clean file reference lists.\n- Include files changed,
-      key decisions/trade-offs, verification performed, logical next steps, and unrelated
-      issues found but not fixed.\n- Do not show full file contents unless explicitly
-      asked.\n- Do not tutorialize normal Git tasks, file saving, or copying code.\n</final_answers>\n\n<env>\nWorking
-      directory: /tmp/crush-test/TestCoderAgent/glm-5.1/grep_tool\nIs directory a
-      git repo: no\nPlatform: linux\nToday''s date: 1/1/2025\n\n</env>\n\n\n\n<available_skills>\n  <skill>\n    <name>crush-hooks</name>\n    <description>Use
-      when the user wants to add, write, debug, or configure a Crush hook — gating
-      or blocking tool calls, approving or rewriting tool input before execution,
-      injecting context into tool results, or troubleshooting hook behavior in crush.json.</description>\n    <location>crush://skills/crush-hooks/SKILL.md</location>\n    <type>builtin</type>\n  </skill>\n  <skill>\n    <name>jq</name>\n    <description>Use
-      when the user needs to query, filter, reshape, extract, create, or construct
-      JSON data — including API responses, config files, log output, or any structured
-      data — or when helping the user write or debug JSON transformations.</description>\n    <location>crush://skills/jq/SKILL.md</location>\n    <type>builtin</type>\n  </skill>\n</available_skills>\n\n<skills_usage>\nThe
-      `<description>` of each skill is a TRIGGER — it tells you *when* a skill applies.
-      It is NOT a specification of what the skill does or how to do it. The procedure,
-      scripts, commands, references, and required flags live only in the SKILL.md
-      body. You do not know what a skill actually does until you have read its SKILL.md.\n\nMANDATORY
-      activation flow:\n1. Scan `<available_skills>` against the current user task.\n2.
-      If any skill''s `<description>` matches, call the View tool with its `<location>`
-      EXACTLY as shown — before any other tool call that performs the task.\n3. Read
-      the entire SKILL.md and follow its instructions.\n4. Only then execute the task,
-      using the skill''s prescribed commands/tools.\n\nDo NOT skip step 2 because
-      you think you already know how to do the task. Do NOT infer a skill''s behavior
-      from its name or description. If you find yourself about to run `bash`, `edit`,
-      or any task-doing tool for a skill-eligible request without having just viewed
-      the SKILL.md, stop and load the skill first.\n\nBuiltin skills (type=builtin)
-      use virtual `crush://skills/...` location identifiers. The \"crush://\" prefix
-      is NOT a URL, network address, or MCP resource — it is a special internal identifier
-      the View tool understands natively. Pass the `<location>` verbatim to View.\n\nDo
-      not use MCP tools (including read_mcp_resource) to load skills.\nIf a skill
-      mentions scripts, references, or assets, they live in the same folder as the
-      skill itself (e.g., scripts/, references/, assets/ subdirectories within the
-      skill''s folder).\n</skills_usage>\n\n\n\n", "role": "system"}, {"content":
-      "<system_reminder>This is a reminder that your todo list is currently empty.
-      DO NOT mention this to the user explicitly because they are already aware.\nIf
-      you are working on tasks that would benefit from a todo list please use the
-      \"todos\" tool to create one.\nIf not, please feel free to ignore. Again do
-      not mention this message to the user.</system_reminder>", "role": "user"}, {"content":
-      "use grep to search for the word ''package'' in go files", "role": "user"}],
-      "model": "glm-5.1", "max_tokens": 10000, "stream_options": {"include_usage":
-      true}, "tool_choice": "auto", "tools": [{"function": {"name": "bash", "strict":
-      false, "description": "Execute shell commands; long-running commands automatically
-      move to background and return a shell ID.\n\n<cross_platform>\nUses mvdan/sh
-      interpreter (Bash-compatible on all platforms including Windows).\nUse forward
-      slashes for paths: \"ls C:/foo/bar\" not \"ls C:\\foo\\bar\".\nCommon shell
-      builtins and core utils available on Windows.\n</cross_platform>\n\n<execution_steps>\n1.
-      Directory Verification: If creating directories/files, use LS tool to verify
-      parent exists\n2. Security Check: Banned commands (alias, aria2c, axel, chrome,
-      curl, curlie, firefox, http-prompt, httpie, links, lynx, nc, safari, scp, ssh,
-      telnet, w3m, wget, xh, doas, su, sudo, apk, apt, apt-cache, apt-get, dnf, dpkg,
-      emerge, home-manager, makepkg, opkg, pacman, paru, pkg, pkg_add, pkg_delete,
-      portage, rpm, yay, yum, zypper, at, batch, chkconfig, crontab, fdisk, mkfs,
-      mount, parted, service, systemctl, umount, firewall-cmd, ifconfig, ip, iptables,
-      netstat, pfctl, route, ufw) return error - explain to user. Safe read-only commands
-      execute without prompts\n3. Command Execution: Execute with proper quoting,
-      capture output\n4. Auto-Background: Commands exceeding 1 minute (default, configurable
-      via `auto_background_after`) automatically move to background and return shell
-      ID\n5. Output Processing: Truncate if exceeds 30000 characters\n6. Return Result:
-      Include errors, metadata with <cwd></cwd> tags\n</execution_steps>\n\n<usage_notes>\n-
-      Command required, working_dir optional (defaults to current directory)\n- IMPORTANT:
-      Use Grep/Glob/Agent tools instead of ''find''/''grep''. Use View/LS tools instead
-      of ''cat''/''head''/''tail''/''ls''\n- Chain with '';'' or ''&&'', avoid newlines
-      except in quoted strings\n- Each command runs in independent shell (no state
-      persistence between calls)\n- Prefer absolute paths over ''cd'' (use ''cd''
-      only if user explicitly requests)\n</usage_notes>\n\n<background_execution>\n-
-      Set run_in_background=true to run commands in a separate background shell\n-
-      Returns a shell ID for managing the background process\n- Use job_output tool
-      to view current output from background shell\n- Use job_kill tool to terminate
-      a background shell\n- IMPORTANT: NEVER use `&` at the end of commands to run
-      in background - use run_in_background parameter instead\n- Commands that should
-      run in background:\n  * Long-running servers (e.g., `npm start`, `python -m
-      http.server`, `node server.js`)\n  * Watch/monitoring tasks (e.g., `npm run
-      watch`, `tail -f logfile`)\n  * Continuous processes that don''t exit on their
-      own\n  * Any command expected to run indefinitely\n- Commands that should NOT
-      run in background:\n  * Build commands (e.g., `npm run build`, `go build`)\n  *
-      Test suites (e.g., `npm test`, `pytest`)\n  * Git operations\n  * File operations\n  *
-      Short-lived scripts\n</background_execution>\n\n<git_commits>\nWhen user asks
-      to create git commit:\n\n1. Single message with three tool_use blocks (IMPORTANT
-      for speed):\n   - git status (untracked files)\n   - git diff (staged/unstaged
-      changes)\n   - git log (recent commit message style)\n\n2. Add relevant untracked
-      files to staging. Don''t commit files already modified at conversation start
-      unless relevant.\n\n3. Analyze staged changes in <commit_analysis> tags:\n   -
-      List changed/added files, summarize nature (feature/enhancement/bug fix/refactoring/test/docs)\n   -
-      Brainstorm purpose/motivation, assess project impact, check for sensitive info\n   -
-      Don''t use tools beyond git context\n   - Draft concise (1-2 sentences) message
-      focusing on \"why\" not \"what\"\n   - Use clear language, accurate reflection
-      (\"add\"=new feature, \"update\"=enhancement, \"fix\"=bug fix)\n   - Avoid generic
-      messages, review draft\n\n4. Create commit with attribution using HEREDOC:\n   git
-      commit -m \"$(cat &lt;&lt;''EOF''\n   Commit message here.\n\n\n   💘 Generated
-      with Crush\n\n\n\n   Co-Authored-By: Crush <crush@charm.land>\n\n\n   EOF\n   )\"\n\n5.
-      If pre-commit hook fails, retry ONCE. If fails again, hook preventing commit.
-      If succeeds but files modified, MUST amend.\n\n6. Run git status to verify.\n\nNotes:
-      Use \"git commit -am\" when possible, don''t stage unrelated files, NEVER update
-      config, don''t push, no -i flags, no empty commits, return empty response, when
-      rebasing always use -m or GIT_EDITOR=true.\n</git_commits>\n\n<pull_requests>\nUse
-      gh command for ALL GitHub tasks. When user asks to create PR:\n\n1. Single message
-      with multiple tool_use blocks (VERY IMPORTANT for speed):\n   - git status (untracked
-      files)\n   - git diff (staged/unstaged changes)\n   - Check if branch tracks
-      remote and is up to date\n   - git log and ''git diff main...HEAD'' (full commit
-      history from main divergence)\n\n2. Create new branch if needed\n3. Commit changes
-      if needed\n4. Push to remote with -u flag if needed\n\n5. Analyze changes in
-      <pr_analysis> tags:\n   - List commits since diverging from main\n   - Summarize
-      nature of changes\n   - Brainstorm purpose/motivation\n   - Assess project impact\n   -
-      Don''t use tools beyond git context\n   - Check for sensitive information\n   -
-      Draft concise (1-2 bullet points) PR summary focusing on \"why\"\n   - Ensure
-      summary reflects ALL changes since main divergence\n   - Clear, concise language\n   -
-      Accurate reflection of changes and purpose\n   - Avoid generic summaries\n   -
-      Review draft\n\n6. Create PR with gh pr create using HEREDOC:\n   gh pr create
-      --title \"title\" --body \"$(cat &lt;&lt;''EOF''\n\n   ## Summary\n\n   &lt;1-3
-      bullet points>\n\n   ## Test plan\n\n   [Checklist of TODOs...]\n\n\n   💘 Generated
-      with Crush\n\n\n   EOF\n   )\"\n\nImportant:\n\n- Return empty response - user
-      sees gh output\n- Never update git config\n</pull_requests>\n\n<examples>\nGood:
-      pytest /foo/bar/tests\nBad: cd /foo/bar && pytest tests\n</examples>\n", "parameters":
-      {"properties": {"auto_background_after": {"description": "Seconds to wait before
-      automatically moving the command to a background job (default: 60)", "type":
-      "integer"}, "command": {"description": "The command to execute", "type": "string"},
-      "description": {"description": "A brief description of what the command does,
-      try to keep it under 30 characters or so", "type": "string"}, "run_in_background":
-      {"description": "Set to true (boolean) to run this command in the background.
-      Use job_output to read the output later.", "type": "boolean"}, "working_dir":
-      {"description": "The working directory to execute the command in (defaults to
-      current directory)", "type": "string"}}, "required": ["description", "command"],
-      "type": "object"}}, "type": "function"}, {"function": {"name": "download", "strict":
-      false, "description": "Download a URL directly to a local file (binary-safe,
-      streaming, max 600s timeout); overwrites without warning. For reading content
-      into context use fetch.\n", "parameters": {"properties": {"file_path": {"description":
-      "The local file path where the downloaded content should be saved", "type":
-      "string"}, "timeout": {"description": "Optional timeout in seconds (max 600)",
-      "type": "integer"}, "url": {"description": "The URL to download from", "type":
-      "string"}}, "required": ["url", "file_path"], "type": "object"}}, "type": "function"},
-      {"function": {"name": "edit", "strict": false, "description": "Edit a file by
-      exact find-and-replace; can also create or delete content. For renames/moves
-      use bash. For large edits use write.", "parameters": {"properties": {"file_path":
-      {"description": "The absolute path to the file to modify", "type": "string"},
-      "new_string": {"description": "The text to replace it with", "type": "string"},
-      "old_string": {"description": "The text to replace", "type": "string"}, "replace_all":
-      {"description": "Replace all occurrences of old_string (default false)", "type":
-      "boolean"}}, "required": ["file_path", "old_string", "new_string"], "type":
-      "object"}}, "type": "function"}, {"function": {"name": "multiedit", "strict":
-      false, "description": "Apply multiple find-and-replace edits to a single file
-      in one operation; edits run sequentially. Prefer over edit for multiple changes
-      to the same file. Same exact-match rules as edit apply.", "parameters": {"properties":
-      {"edits": {"description": "Array of edit operations to perform sequentially
-      on the file", "items": {"properties": {"new_string": {"description": "The text
-      to replace it with", "type": "string"}, "old_string": {"description": "The text
-      to replace", "type": "string"}, "replace_all": {"description": "Replace all
-      occurrences of old_string (default false).", "type": "boolean"}}, "required":
-      ["old_string", "new_string"], "type": "object"}, "type": "array"}, "file_path":
-      {"description": "The absolute path to the file to modify", "type": "string"}},
-      "required": ["file_path", "edits"], "type": "object"}}, "type": "function"},
-      {"function": {"name": "fetch", "strict": false, "description": "Fetch raw content
-      from a URL as text, markdown, or html (max 100KB); no AI processing. For analysis
-      or extraction use agentic_fetch.\n", "parameters": {"properties": {"format":
-      {"description": "The format to return the content in (text, markdown, or html)",
-      "type": "string"}, "timeout": {"description": "Optional timeout in seconds (max
-      120)", "type": "integer"}, "url": {"description": "The URL to fetch content
-      from", "type": "string"}}, "required": ["url", "format"], "type": "object"}},
-      "type": "function"}, {"function": {"name": "glob", "strict": false, "description":
-      "Find files by name/pattern (glob syntax), sorted by modification time; max
-      100 results; skips hidden files. Use grep to search file contents.\n", "parameters":
-      {"properties": {"path": {"description": "The directory to search in. Defaults
-      to the current working directory.", "type": "string"}, "pattern": {"description":
-      "The glob pattern to match files against", "type": "string"}}, "required": ["pattern"],
-      "type": "object"}}, "type": "function"}, {"function": {"name": "grep", "strict":
-      false, "description": "Search file contents by regex or literal text; returns
-      matching file paths sorted by modification time (max 100); respects .gitignore.
-      Use glob to filter by filename, not contents.\n", "parameters": {"properties":
-      {"include": {"description": "File pattern to include in the search (e.g. \"*.js\",
-      \"*.{ts,tsx}\")", "type": "string"}, "literal_text": {"description": "If true,
-      the pattern will be treated as literal text with special regex characters escaped.
-      Default is false.", "type": "boolean"}, "path": {"description": "The directory
-      to search in. Defaults to the current working directory.", "type": "string"},
-      "pattern": {"description": "The regex pattern to search for in file contents",
-      "type": "string"}}, "required": ["pattern"], "type": "object"}}, "type": "function"},
-      {"function": {"name": "ls", "strict": false, "description": "List files and
-      directories as a tree; skips hidden files and common system dirs; max 1000 files.
-      Use glob to find files by pattern, grep to search contents.\n", "parameters":
-      {"properties": {"depth": {"description": "The maximum depth to traverse", "type":
-      "integer"}, "ignore": {"description": "List of glob patterns to ignore", "items":
-      {"type": "string"}, "type": "array"}, "path": {"description": "The path to the
-      directory to list (defaults to current working directory)", "type": "string"}},
-      "required": [], "type": "object"}}, "type": "function"}, {"function": {"name":
-      "sourcegraph", "strict": false, "description": "Search code across public GitHub
-      repositories via Sourcegraph; supports regex, language/repo/file filters, and
-      symbol search (max 20 results). Only searches public repos.\n", "parameters":
-      {"properties": {"context_window": {"description": "The context around the match
-      to return (default: 10 lines)", "type": "integer"}, "count": {"description":
-      "Optional number of results to return (default: 10, max: 20)", "type": "integer"},
-      "query": {"description": "The Sourcegraph search query", "type": "string"},
-      "timeout": {"description": "Optional timeout in seconds (max 120)", "type":
-      "integer"}}, "required": ["query"], "type": "object"}}, "type": "function"},
-      {"function": {"name": "view", "strict": false, "description": "Read a file by
-      path with line numbers; supports offset and line limit (default 200, max 200KB
-      returned file content section); renders images (PNG, JPEG, GIF, WebP); use ls
-      for directories.\n", "parameters": {"properties": {"file_path": {"description":
-      "The path to the file to read", "type": "string"}, "limit": {"description":
-      "The number of lines to read (defaults to 200)", "type": "integer"}, "offset":
-      {"description": "The line number to start reading from (0-based)", "type": "integer"}},
-      "required": ["file_path"], "type": "object"}}, "type": "function"}, {"function":
-      {"name": "write", "strict": false, "description": "Create or overwrite a file
-      with given content; auto-creates parent dirs. Cannot append. Read the file first
-      to avoid conflicts. For surgical changes use edit or multiedit.", "parameters":
-      {"properties": {"content": {"description": "The content to write to the file",
-      "type": "string"}, "file_path": {"description": "The path to the file to write",
-      "type": "string"}}, "required": ["file_path", "content"], "type": "object"}},
-      "type": "function"}], "stream": true}'
+    content_length: 812
+    host: ""
+    body: '{"messages":[{"content":"You will generate a short title based on the first message a user begins a conversation with.\n\n<rules>\n- Keep the title in the same language that the user wrote their message in.\n- Ensure it is not more than 50 characters long.\n- The title should be a summary of the user''s message.\n- It should be one line long.\n- Do not use quotes or colons.\n- The entire text you return will be used as the title.\n- Never return anything that is more than one sentence (one line) long.\n</rules>\n\n /no_think","role":"system"},{"content":"Generate a concise title for the following content:\n\nuse grep to search for the word ''package'' in go files\n <think>\n\n</think>","role":"user"}],"model":"gpt-oss-120b","max_completion_tokens":40,"stream_options":{"include_usage":true},"stream":true}'
     headers:
       Accept:
       - application/json
@@ -675,398 +122,299 @@ interactions:
     proto_minor: 0
     content_length: -1
     uncompressed: true
-    body: 'data: {"id":"chatcmpl-2e94aef325f8c1f92b99f5a8","object":"chat.completion.chunk","created":1779218894,"model":"glm-5.1","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
+    body: |+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"The"},"finish_reason":null}]}
 
-      data: {"id":"chatcmpl-2e94aef325f8c1f92b99f5a8","object":"chat.completion.chunk","created":1779218894,"model":"glm-5.1","choices":[{"index":0,"delta":{"tool_calls":[{"id":"call_735d81ad9ab84c8a8477c7dc","type":"function","index":0,"function":{"name":"grep","arguments":""}}]},"finish_reason":null}]}
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" user"},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" wants"},"finish_reason":null}]}
 
-      data: {"id":"chatcmpl-2e94aef325f8c1f92b99f5a8","object":"chat.completion.chunk","created":1779218894,"model":"glm-5.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":""}}]},"finish_reason":null}]}
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" a"},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" concise"},"finish_reason":null}]}
 
-      data: {"id":"chatcmpl-2e94aef325f8c1f92b99f5a8","object":"chat.completion.chunk","created":1779218894,"model":"glm-5.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{"}}]},"finish_reason":null}]}
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" title"},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" for"},"finish_reason":null}]}
 
-      data: {"id":"chatcmpl-2e94aef325f8c1f92b99f5a8","object":"chat.completion.chunk","created":1779218894,"model":"glm-5.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"include\":
-      "}}]},"finish_reason":null}]}
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" the"},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" content"},"finish_reason":null}]}
 
-      data: {"id":"chatcmpl-2e94aef325f8c1f92b99f5a8","object":"chat.completion.chunk","created":1779218894,"model":"glm-5.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"*."}}]},"finish_reason":null}]}
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":":"},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" \""},"finish_reason":null}]}
 
-      data: {"id":"chatcmpl-2e94aef325f8c1f92b99f5a8","object":"chat.completion.chunk","created":1779218894,"model":"glm-5.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"go\""}}]},"finish_reason":null}]}
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"use"},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" grep"},"finish_reason":null}]}
 
-      data: {"id":"chatcmpl-2e94aef325f8c1f92b99f5a8","object":"chat.completion.chunk","created":1779218894,"model":"glm-5.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":",
-      \"pattern\": "}}]},"finish_reason":null}]}
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" to"},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" search"},"finish_reason":null}]}
 
-      data: {"id":"chatcmpl-2e94aef325f8c1f92b99f5a8","object":"chat.completion.chunk","created":1779218894,"model":"glm-5.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"package"}}]},"finish_reason":null}]}
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" for"},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" the"},"finish_reason":null}]}
 
-      data: {"id":"chatcmpl-2e94aef325f8c1f92b99f5a8","object":"chat.completion.chunk","created":1779218894,"model":"glm-5.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\""}}]},"finish_reason":null}]}
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" word"},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" '"},"finish_reason":null}]}
 
-      data: {"id":"chatcmpl-2e94aef325f8c1f92b99f5a8","object":"chat.completion.chunk","created":1779218894,"model":"glm-5.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"}"}}]},"finish_reason":null}]}
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"package"},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"'"},"finish_reason":null}]}
 
-      data: {"id":"chatcmpl-2e94aef325f8c1f92b99f5a8","object":"chat.completion.chunk","created":1779218894,"model":"glm-5.1","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" in"},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" go"},"finish_reason":null}]}
 
-      data: {"id":"chatcmpl-2e94aef325f8c1f92b99f5a8","object":"chat.completion.chunk","created":1779218894,"model":"glm-5.1","choices":[],"usage":{"prompt_tokens":714,"completion_tokens":18,"total_tokens":7836,"prompt_tokens_details":{"cached_tokens":7104},"completion_tokens_details":{"reasoning_tokens":17},"cost":{"usd":0.001225,"hypercredits":0.024499999999999997},"remaining":{"hypercredits":0}}}
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" files"},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"\"."},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" Title"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" should"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" be"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" short"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":","},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" under"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" "},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"50"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" characters"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":","},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" one"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" line"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":","},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" no"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" quotes"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" or"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" col"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"ons"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"."},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" Something"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" like"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":":"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" \""},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"G"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"rep"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" for"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" '"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"package"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"'"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" in"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" Go"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" source"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" files"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"\"."},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" That's"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" under"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" "},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"50"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" characters"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"."},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" Count"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":":"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" \""},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"G"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"rep"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" for"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" '"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"package"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"'"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" in"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" Go"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" source"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" files"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"\""},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" length"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" approx"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" "},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"33"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"."},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" No"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" quotes"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"?"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" It"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" includes"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" single"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" quotes"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" around"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" package"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":";"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" is"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" that"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" allowed"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"?"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" Probably"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" okay"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"."},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" Could"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" remove"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" quotes"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":":"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" Gre"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"p"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" for"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" package"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" in"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" Go"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" files"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"."},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" That's"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" even"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" shorter"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"."},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" Let's"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" output"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":":"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" Gre"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"p"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" for"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" package"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" in"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" Go"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":" files"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"reasoning_content":"."},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"content":"G"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"content":"rep"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"content":" for"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"content":" package"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"content":" in"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"content":" Go"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{"content":" files"},"finish_reason":null}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+      data: {"id":"chatcmpl-4e22101bf9ea02d6c3de21c0","object":"chat.completion.chunk","created":1779463464,"model":"gpt-oss-120b","choices":[],"usage":{"prompt_tokens":204,"completion_tokens":145,"total_tokens":349,"completion_tokens_details":{"reasoning_tokens":133},"cost":{"usd":0.000224868,"hypercredits":0.00449736},"remaining":{"hypercredits":0}}}
 
       data: [DONE]
 
-
-      '
     headers:
       Content-Type:
       - text/event-stream
     status: 200 OK
     code: 200
-    duration: 2.470623166s
+    duration: 576.140334ms
 - id: 2
   request:
     proto: HTTP/1.1
     proto_major: 1
     proto_minor: 1
-    content_length: 26448
-    host: ''
-    body: '{"messages": [{"content": "You are Crush, a powerful AI Assistant that
-      runs in the CLI.\n\n<core_directives>\n1. **READ CONTEXT BEFORE EDITING**: Always
-      inspect relevant file context before modification. For large files, read only
-      target sections using the `offset` and `limit` parameters. Do not re-read files
-      immediately after a successful edit, file creation, or deletion.\n2. **BE AUTONOMOUS**:
-      Search reference patterns, check memory, think, decide, and execute. Break complex
-      issues down and solve them end-to-end, including follow-ups and stated next
-      steps. Exhaust alternative strategies before stopping. Only pause for true external
-      blocking errors. The user may override this directive, for example, by asking
-      you to ask them questions about critical decisions.\n3. **TEST & SELF-VERIFY**:
-      Run relevant tests immediately after each modification unless the user specifies
-      otherwise. If no test suite exists, use self-verification such as local execution
-      scripts, logging, or custom unit tests. Run lint/typecheck/build commands when
-      available, preferably on precise targets first.\n4. **CONCISE OUTPUT**: Keep
-      outputs under 4 lines of text by default. Conciseness applies only to user-facing
-      text, never to thoroughness of work. Never output acknowledgement-only responses;
-      continue the task or state the concrete next action.\n5. **NEVER COMMIT, PUSH,
-      OR REVERT**: Do not commit unless the user explicitly says \"commit\"; do not
-      push unless explicitly asked. If committing, strictly follow the `<git_commits>`
-      format, including configured attribution lines. Never revert functional changes
-      unless they directly cause errors or the user asks.\n6. **SECURITY FIRST**:
-      Make sure all code written takes into account best security practices. Refuse
-      to create malicious code. Never log secrets.\n7. **NO GUESSING**: Do not guess
-      URLs or string segments. Only use URLs provided by the user or found in local
-      files. Match exact formatting, comments, line endings, and whitespace layout.\n8.
-      **RESTRICTED TOOLS**: Only use documented tools. `apply_patch` and `apply_diff`
-      DO NOT exist; use `edit`, `multiedit`, or `write` instead. Default to tools
-      over speculation whenever they reduce uncertainty.\n9. **SKILL LOADING**: If
-      any entry in `<available_skills>` matches the task, you MUST read (`view`) its
-      `<location>` before taking any other action. Do not infer skill instructions
-      from descriptions.\n</core_directives>\n\n<communication_style>\nState answers
-      directly with zero filler:\n- Match the user''s spoken language in all responses.\n-
-      Keep output under 4 lines unless explaining complex architectures or explicitly
-      asked.\n- Avoid preambles (\"Here''s...\", \"I''ll...\") and postambles (\"Let
-      me know...\", \"Hope this helps\").\n- Do not use emojis. Use one-word answers
-      when possible. Do not explain unless asked.\n- Provide brief progress updates
-      (<10 words) for long-running processes but continue working immediately.\n-
-      Use rich Markdown (fences, lists, headings) for multi-sentence or verbose explanations;
-      use plain unformatted text only if explicitly requested.\n- Reference code locations
-      using `file_path:line_number` or ranges like `file_path:start-end`.\n\nExamples:\nuser:
-      what is 2+2?\nassistant: 4\n\nuser: add error handling to the login function\nassistant:
-      [reads files, makes edit, runs tests]\nDone\n\nuser: Where are errors from the
-      client handled?\nassistant: Clients are marked as failed in the `connectToServer`
-      function in src/services/process.go:712.\n</communication_style>\n\n<file_editing>\nAvailable
-      edit tools:\n- `edit`: single find/replace in one file.\n- `multiedit`: multiple
-      find/replace operations in one file.\n- `write`: create or overwrite an entire
-      file.\n\nThe edit tools are strictly literal; approximate matches will fail.\n1.
-      **Verify Context**: View relevant file sections first to verify exact indentation,
-      braces, comments, tabs vs. spaces, and surrounding structure. Use `git log`
-      or `git blame` when historical context is useful.\n2. **Draft Target Blocks**:
-      Copy exact text, including all whitespace and blank lines. Include 3–5 lines
-      of unique context around modifications and ensure the target block appears exactly
-      once.\n3. **Edit Carefully**: Make one logical change at a time, verify the
-      edit succeeded, then test. If uncertain, include more context rather than less.\n4.
-      **Edit Recovery**: If an edit fails, do not guess. Re-view the destination range,
-      copy the raw text directly, check whitespace/line endings, and widen context
-      as needed.\n5. **Shared Code Safety**: Use any code search capabilities you
-      have access to before modifying shared functions or interfaces to prevent caller
-      breakage.\n</file_editing>\n\n<coding_style>\nFollow the project''s existing
-      rules, conventions and guidelines, and otherwise use these defaults:\n\n- **Avoid
-      Code Comments**: Avoid adding comments unless otherwise told. Never use code
-      comments to communicate with the user. For any comments that are added, focus
-      on *why*, not *what*.\n  - Exception: add comments explaining the \"why\" and
-      \"what\" to any code that can be described as \"hackish\", or \"weird\". Also
-      add a summary comment above any overly complicated code briefly explaining the
-      why and what of what it''s doing.\n- **Self-commenting code**: Use descriptive
-      identifiers and symbols.\n</coding_style>\n\n<engineering_and_testing>\n- **Planning**:
-      Before non-trivial work, internally identify affected models, logic, routes,
-      callers, configs, tests, docs, edge cases, and error paths.\n- **Conventions**:
-      Verify libraries/frameworks exist before using them. Match local imports, formatting,
-      naming, style, and existing libraries. Avoid single-letter variables unless
-      requested.\n- **Surgical vs. Creative**: Be surgical on existing codebases;
-      avoid unnecessary renames and do not introduce files, tests, linters, or formatters
-      if the codebase does not already use them. Be creative on new projects.\n- **Task
-      Completeness**: Treat multi-part prompts as checklists. Do not leave placeholder
-      comments, incomplete implementations, unwired code, or `TODO` markers. Finish
-      every feasible part before responding.\n- **Testing**: Start with the narrowest
-      relevant tests, then broaden confidence. Check memory for test/lint/typecheck/build
-      commands. If tests fail, fix before continuing unless failures are unrelated;
-      mention unrelated failures in the final handoff.\n- **Formatter Limits**: If
-      formatter fixes loop, try at most 3 iterations before presenting the correct
-      solution and noting the formatting issue.\n- **Error Handling**: Read full errors,
-      identify and fix root causes rather than applying surface-level patches, isolate
-      with debug logs or minimal reproductions when useful, search for similar working
-      code, make targeted fixes, and test again. Try 2–3 distinct remediation strategies
-      before declaring an external block.\n- **Memory Files**: Follow all memory-file
-      instructions, preferences, commands, environment settings, and codebase notes.
-      Update memory files when discovering build/test/lint commands, style preferences,
-      important codebase patterns, or useful project information.\n</engineering_and_testing>\n\n<autonomy_and_decisions>\n**Autonomy
-      Limits**: Make decisions yourself unless the user instructs otherwise. Use project
-      conventions to make architectural, logical, naming, and tool choices instead
-      of asking. For underspecified requirements, make reasonable assumptions based
-      on surrounding code and memory, briefly state them only if needed, and execute.\n\n**Plans
-      Are Not Deliverables**: Responding with only a plan, outline, or TODO list (or
-      any other purely verbal response) is failure when execution is possible — execute
-      the plan via tools instead.\n\n**Only Stop/Ask User if**:\n- A business requirement
-      is truly ambiguous and cannot be inferred.\n- Multiple valid pathways present
-      major architectural or technical trade-offs.\n- There is a high risk of user
-      data loss.\n- You have exhausted 2–3 distinct remediation pathways and hit hard
-      external limits such as missing credentials, permissions, files, or network
-      access.\n- The user asks *how* to approach a problem, in which case explain
-      first and do not auto-implement.\n- The user told you to do so.\n\n**Never Stop
-      Merely Because**:\n- The task is large, multi-file, structurally deep, or time-consuming.\n-
-      A first approach failed.\n- You perceive session limits.\n- A response could
-      be replaced by tool execution.\n\n**Reporting Blocks/Information Requests**:\nWhen
-      blocked, complete all other executable parts first. Then, in one clear message:\n1.
-      List precisely what you tried and what failed.\n2. State why it is blocked and
-      the minimal action or missing information required, including acceptable alternatives.\n3.
-      State the immediate next action you will execute once unblocked.\n</autonomy_and_decisions>\n\n<tool_usage>\n-
-      Search before assuming; read files before editing.\n- Use absolute paths for
-      all file operations.\n- Use the Agent tool for complex searches.\n- Run safe,
-      independent tool and bash commands in parallel within single prompt cycles.\n-
-      Combine related bash commands when safe.\n- Use `&` for processes that do not
-      naturally exit, such as local servers.\n- Avoid interactive CLI prompts, e.g.
-      use `npm init -y` instead of `npm init`.\n- Summarize tool results for the user
-      since they cannot see back-end outputs directly.\n- Do not surprise the user
-      with unexpected actions.\n- **Bash**: The `description` parameter is required
-      for all bash tool executions. Briefly explain the intent of non-trivial or potentially
-      unsafe system commands before running them.\n- **NO CURL**: Do not use `curl`
-      in bash; use the dedicated web fetch tool.\n</tool_usage>\n\n<final_answers>\nAdapt
-      verbosity and structure to the scale of work completed:\n\n**Default (<4 lines
-      target):**\n- Use for simple queries, single-file edits, casual responses, and
-      direct handoffs.\n- Keep outputs factual and avoid explanation unless asked.\n\n**Verbose
-      Allowed (10–15 lines max):**\n- Use only for major multi-file rollouts, architectural
-      restructures, complex refactors, or unrelated issues discovered.\n- Structure
-      with Markdown headers and clean file reference lists.\n- Include files changed,
-      key decisions/trade-offs, verification performed, logical next steps, and unrelated
-      issues found but not fixed.\n- Do not show full file contents unless explicitly
-      asked.\n- Do not tutorialize normal Git tasks, file saving, or copying code.\n</final_answers>\n\n<env>\nWorking
-      directory: /tmp/crush-test/TestCoderAgent/glm-5.1/grep_tool\nIs directory a
-      git repo: no\nPlatform: linux\nToday''s date: 1/1/2025\n\n</env>\n\n\n\n<available_skills>\n  <skill>\n    <name>crush-hooks</name>\n    <description>Use
-      when the user wants to add, write, debug, or configure a Crush hook — gating
-      or blocking tool calls, approving or rewriting tool input before execution,
-      injecting context into tool results, or troubleshooting hook behavior in crush.json.</description>\n    <location>crush://skills/crush-hooks/SKILL.md</location>\n    <type>builtin</type>\n  </skill>\n  <skill>\n    <name>jq</name>\n    <description>Use
-      when the user needs to query, filter, reshape, extract, create, or construct
-      JSON data — including API responses, config files, log output, or any structured
-      data — or when helping the user write or debug JSON transformations.</description>\n    <location>crush://skills/jq/SKILL.md</location>\n    <type>builtin</type>\n  </skill>\n</available_skills>\n\n<skills_usage>\nThe
-      `<description>` of each skill is a TRIGGER — it tells you *when* a skill applies.
-      It is NOT a specification of what the skill does or how to do it. The procedure,
-      scripts, commands, references, and required flags live only in the SKILL.md
-      body. You do not know what a skill actually does until you have read its SKILL.md.\n\nMANDATORY
-      activation flow:\n1. Scan `<available_skills>` against the current user task.\n2.
-      If any skill''s `<description>` matches, call the View tool with its `<location>`
-      EXACTLY as shown — before any other tool call that performs the task.\n3. Read
-      the entire SKILL.md and follow its instructions.\n4. Only then execute the task,
-      using the skill''s prescribed commands/tools.\n\nDo NOT skip step 2 because
-      you think you already know how to do the task. Do NOT infer a skill''s behavior
-      from its name or description. If you find yourself about to run `bash`, `edit`,
-      or any task-doing tool for a skill-eligible request without having just viewed
-      the SKILL.md, stop and load the skill first.\n\nBuiltin skills (type=builtin)
-      use virtual `crush://skills/...` location identifiers. The \"crush://\" prefix
-      is NOT a URL, network address, or MCP resource — it is a special internal identifier
-      the View tool understands natively. Pass the `<location>` verbatim to View.\n\nDo
-      not use MCP tools (including read_mcp_resource) to load skills.\nIf a skill
-      mentions scripts, references, or assets, they live in the same folder as the
-      skill itself (e.g., scripts/, references/, assets/ subdirectories within the
-      skill''s folder).\n</skills_usage>\n\n\n\n", "role": "system"}, {"content":
-      "<system_reminder>This is a reminder that your todo list is currently empty.
-      DO NOT mention this to the user explicitly because they are already aware.\nIf
-      you are working on tasks that would benefit from a todo list please use the
-      \"todos\" tool to create one.\nIf not, please feel free to ignore. Again do
-      not mention this message to the user.</system_reminder>", "role": "user"}, {"content":
-      "use grep to search for the word ''package'' in go files", "role": "user"},
-      {"tool_calls": [{"id": "call_735d81ad9ab84c8a8477c7dc", "function": {"arguments":
-      "{\"include\": \"*.go\", \"pattern\": \"package\"}", "name": "grep"}, "type":
-      "function"}], "role": "assistant"}, {"content": "Found 1 matches\n/tmp/crush-test/TestCoderAgent/glm-5.1/grep_tool/main.go:\n  Line
-      1, Char 1: package main\n", "tool_call_id": "call_735d81ad9ab84c8a8477c7dc",
-      "role": "tool"}], "model": "glm-5.1", "max_tokens": 10000, "stream_options":
-      {"include_usage": true}, "tool_choice": "auto", "tools": [{"function": {"name":
-      "bash", "strict": false, "description": "Execute shell commands; long-running
-      commands automatically move to background and return a shell ID.\n\n<cross_platform>\nUses
-      mvdan/sh interpreter (Bash-compatible on all platforms including Windows).\nUse
-      forward slashes for paths: \"ls C:/foo/bar\" not \"ls C:\\foo\\bar\".\nCommon
-      shell builtins and core utils available on Windows.\n</cross_platform>\n\n<execution_steps>\n1.
-      Directory Verification: If creating directories/files, use LS tool to verify
-      parent exists\n2. Security Check: Banned commands (alias, aria2c, axel, chrome,
-      curl, curlie, firefox, http-prompt, httpie, links, lynx, nc, safari, scp, ssh,
-      telnet, w3m, wget, xh, doas, su, sudo, apk, apt, apt-cache, apt-get, dnf, dpkg,
-      emerge, home-manager, makepkg, opkg, pacman, paru, pkg, pkg_add, pkg_delete,
-      portage, rpm, yay, yum, zypper, at, batch, chkconfig, crontab, fdisk, mkfs,
-      mount, parted, service, systemctl, umount, firewall-cmd, ifconfig, ip, iptables,
-      netstat, pfctl, route, ufw) return error - explain to user. Safe read-only commands
-      execute without prompts\n3. Command Execution: Execute with proper quoting,
-      capture output\n4. Auto-Background: Commands exceeding 1 minute (default, configurable
-      via `auto_background_after`) automatically move to background and return shell
-      ID\n5. Output Processing: Truncate if exceeds 30000 characters\n6. Return Result:
-      Include errors, metadata with <cwd></cwd> tags\n</execution_steps>\n\n<usage_notes>\n-
-      Command required, working_dir optional (defaults to current directory)\n- IMPORTANT:
-      Use Grep/Glob/Agent tools instead of ''find''/''grep''. Use View/LS tools instead
-      of ''cat''/''head''/''tail''/''ls''\n- Chain with '';'' or ''&&'', avoid newlines
-      except in quoted strings\n- Each command runs in independent shell (no state
-      persistence between calls)\n- Prefer absolute paths over ''cd'' (use ''cd''
-      only if user explicitly requests)\n</usage_notes>\n\n<background_execution>\n-
-      Set run_in_background=true to run commands in a separate background shell\n-
-      Returns a shell ID for managing the background process\n- Use job_output tool
-      to view current output from background shell\n- Use job_kill tool to terminate
-      a background shell\n- IMPORTANT: NEVER use `&` at the end of commands to run
-      in background - use run_in_background parameter instead\n- Commands that should
-      run in background:\n  * Long-running servers (e.g., `npm start`, `python -m
-      http.server`, `node server.js`)\n  * Watch/monitoring tasks (e.g., `npm run
-      watch`, `tail -f logfile`)\n  * Continuous processes that don''t exit on their
-      own\n  * Any command expected to run indefinitely\n- Commands that should NOT
-      run in background:\n  * Build commands (e.g., `npm run build`, `go build`)\n  *
-      Test suites (e.g., `npm test`, `pytest`)\n  * Git operations\n  * File operations\n  *
-      Short-lived scripts\n</background_execution>\n\n<git_commits>\nWhen user asks
-      to create git commit:\n\n1. Single message with three tool_use blocks (IMPORTANT
-      for speed):\n   - git status (untracked files)\n   - git diff (staged/unstaged
-      changes)\n   - git log (recent commit message style)\n\n2. Add relevant untracked
-      files to staging. Don''t commit files already modified at conversation start
-      unless relevant.\n\n3. Analyze staged changes in <commit_analysis> tags:\n   -
-      List changed/added files, summarize nature (feature/enhancement/bug fix/refactoring/test/docs)\n   -
-      Brainstorm purpose/motivation, assess project impact, check for sensitive info\n   -
-      Don''t use tools beyond git context\n   - Draft concise (1-2 sentences) message
-      focusing on \"why\" not \"what\"\n   - Use clear language, accurate reflection
-      (\"add\"=new feature, \"update\"=enhancement, \"fix\"=bug fix)\n   - Avoid generic
-      messages, review draft\n\n4. Create commit with attribution using HEREDOC:\n   git
-      commit -m \"$(cat &lt;&lt;''EOF''\n   Commit message here.\n\n\n   💘 Generated
-      with Crush\n\n\n\n   Co-Authored-By: Crush <crush@charm.land>\n\n\n   EOF\n   )\"\n\n5.
-      If pre-commit hook fails, retry ONCE. If fails again, hook preventing commit.
-      If succeeds but files modified, MUST amend.\n\n6. Run git status to verify.\n\nNotes:
-      Use \"git commit -am\" when possible, don''t stage unrelated files, NEVER update
-      config, don''t push, no -i flags, no empty commits, return empty response, when
-      rebasing always use -m or GIT_EDITOR=true.\n</git_commits>\n\n<pull_requests>\nUse
-      gh command for ALL GitHub tasks. When user asks to create PR:\n\n1. Single message
-      with multiple tool_use blocks (VERY IMPORTANT for speed):\n   - git status (untracked
-      files)\n   - git diff (staged/unstaged changes)\n   - Check if branch tracks
-      remote and is up to date\n   - git log and ''git diff main...HEAD'' (full commit
-      history from main divergence)\n\n2. Create new branch if needed\n3. Commit changes
-      if needed\n4. Push to remote with -u flag if needed\n\n5. Analyze changes in
-      <pr_analysis> tags:\n   - List commits since diverging from main\n   - Summarize
-      nature of changes\n   - Brainstorm purpose/motivation\n   - Assess project impact\n   -
-      Don''t use tools beyond git context\n   - Check for sensitive information\n   -
-      Draft concise (1-2 bullet points) PR summary focusing on \"why\"\n   - Ensure
-      summary reflects ALL changes since main divergence\n   - Clear, concise language\n   -
-      Accurate reflection of changes and purpose\n   - Avoid generic summaries\n   -
-      Review draft\n\n6. Create PR with gh pr create using HEREDOC:\n   gh pr create
-      --title \"title\" --body \"$(cat &lt;&lt;''EOF''\n\n   ## Summary\n\n   &lt;1-3
-      bullet points>\n\n   ## Test plan\n\n   [Checklist of TODOs...]\n\n\n   💘 Generated
-      with Crush\n\n\n   EOF\n   )\"\n\nImportant:\n\n- Return empty response - user
-      sees gh output\n- Never update git config\n</pull_requests>\n\n<examples>\nGood:
-      pytest /foo/bar/tests\nBad: cd /foo/bar && pytest tests\n</examples>\n", "parameters":
-      {"properties": {"auto_background_after": {"description": "Seconds to wait before
-      automatically moving the command to a background job (default: 60)", "type":
-      "integer"}, "command": {"description": "The command to execute", "type": "string"},
-      "description": {"description": "A brief description of what the command does,
-      try to keep it under 30 characters or so", "type": "string"}, "run_in_background":
-      {"description": "Set to true (boolean) to run this command in the background.
-      Use job_output to read the output later.", "type": "boolean"}, "working_dir":
-      {"description": "The working directory to execute the command in (defaults to
-      current directory)", "type": "string"}}, "required": ["description", "command"],
-      "type": "object"}}, "type": "function"}, {"function": {"name": "download", "strict":
-      false, "description": "Download a URL directly to a local file (binary-safe,
-      streaming, max 600s timeout); overwrites without warning. For reading content
-      into context use fetch.\n", "parameters": {"properties": {"file_path": {"description":
-      "The local file path where the downloaded content should be saved", "type":
-      "string"}, "timeout": {"description": "Optional timeout in seconds (max 600)",
-      "type": "integer"}, "url": {"description": "The URL to download from", "type":
-      "string"}}, "required": ["url", "file_path"], "type": "object"}}, "type": "function"},
-      {"function": {"name": "edit", "strict": false, "description": "Edit a file by
-      exact find-and-replace; can also create or delete content. For renames/moves
-      use bash. For large edits use write.", "parameters": {"properties": {"file_path":
-      {"description": "The absolute path to the file to modify", "type": "string"},
-      "new_string": {"description": "The text to replace it with", "type": "string"},
-      "old_string": {"description": "The text to replace", "type": "string"}, "replace_all":
-      {"description": "Replace all occurrences of old_string (default false)", "type":
-      "boolean"}}, "required": ["file_path", "old_string", "new_string"], "type":
-      "object"}}, "type": "function"}, {"function": {"name": "multiedit", "strict":
-      false, "description": "Apply multiple find-and-replace edits to a single file
-      in one operation; edits run sequentially. Prefer over edit for multiple changes
-      to the same file. Same exact-match rules as edit apply.", "parameters": {"properties":
-      {"edits": {"description": "Array of edit operations to perform sequentially
-      on the file", "items": {"properties": {"new_string": {"description": "The text
-      to replace it with", "type": "string"}, "old_string": {"description": "The text
-      to replace", "type": "string"}, "replace_all": {"description": "Replace all
-      occurrences of old_string (default false).", "type": "boolean"}}, "required":
-      ["old_string", "new_string"], "type": "object"}, "type": "array"}, "file_path":
-      {"description": "The absolute path to the file to modify", "type": "string"}},
-      "required": ["file_path", "edits"], "type": "object"}}, "type": "function"},
-      {"function": {"name": "fetch", "strict": false, "description": "Fetch raw content
-      from a URL as text, markdown, or html (max 100KB); no AI processing. For analysis
-      or extraction use agentic_fetch.\n", "parameters": {"properties": {"format":
-      {"description": "The format to return the content in (text, markdown, or html)",
-      "type": "string"}, "timeout": {"description": "Optional timeout in seconds (max
-      120)", "type": "integer"}, "url": {"description": "The URL to fetch content
-      from", "type": "string"}}, "required": ["url", "format"], "type": "object"}},
-      "type": "function"}, {"function": {"name": "glob", "strict": false, "description":
-      "Find files by name/pattern (glob syntax), sorted by modification time; max
-      100 results; skips hidden files. Use grep to search file contents.\n", "parameters":
-      {"properties": {"path": {"description": "The directory to search in. Defaults
-      to the current working directory.", "type": "string"}, "pattern": {"description":
-      "The glob pattern to match files against", "type": "string"}}, "required": ["pattern"],
-      "type": "object"}}, "type": "function"}, {"function": {"name": "grep", "strict":
-      false, "description": "Search file contents by regex or literal text; returns
-      matching file paths sorted by modification time (max 100); respects .gitignore.
-      Use glob to filter by filename, not contents.\n", "parameters": {"properties":
-      {"include": {"description": "File pattern to include in the search (e.g. \"*.js\",
-      \"*.{ts,tsx}\")", "type": "string"}, "literal_text": {"description": "If true,
-      the pattern will be treated as literal text with special regex characters escaped.
-      Default is false.", "type": "boolean"}, "path": {"description": "The directory
-      to search in. Defaults to the current working directory.", "type": "string"},
-      "pattern": {"description": "The regex pattern to search for in file contents",
-      "type": "string"}}, "required": ["pattern"], "type": "object"}}, "type": "function"},
-      {"function": {"name": "ls", "strict": false, "description": "List files and
-      directories as a tree; skips hidden files and common system dirs; max 1000 files.
-      Use glob to find files by pattern, grep to search contents.\n", "parameters":
-      {"properties": {"depth": {"description": "The maximum depth to traverse", "type":
-      "integer"}, "ignore": {"description": "List of glob patterns to ignore", "items":
-      {"type": "string"}, "type": "array"}, "path": {"description": "The path to the
-      directory to list (defaults to current working directory)", "type": "string"}},
-      "required": [], "type": "object"}}, "type": "function"}, {"function": {"name":
-      "sourcegraph", "strict": false, "description": "Search code across public GitHub
-      repositories via Sourcegraph; supports regex, language/repo/file filters, and
-      symbol search (max 20 results). Only searches public repos.\n", "parameters":
-      {"properties": {"context_window": {"description": "The context around the match
-      to return (default: 10 lines)", "type": "integer"}, "count": {"description":
-      "Optional number of results to return (default: 10, max: 20)", "type": "integer"},
-      "query": {"description": "The Sourcegraph search query", "type": "string"},
-      "timeout": {"description": "Optional timeout in seconds (max 120)", "type":
-      "integer"}}, "required": ["query"], "type": "object"}}, "type": "function"},
-      {"function": {"name": "view", "strict": false, "description": "Read a file by
-      path with line numbers; supports offset and line limit (default 200, max 200KB
-      returned file content section); renders images (PNG, JPEG, GIF, WebP); use ls
-      for directories.\n", "parameters": {"properties": {"file_path": {"description":
-      "The path to the file to read", "type": "string"}, "limit": {"description":
-      "The number of lines to read (defaults to 200)", "type": "integer"}, "offset":
-      {"description": "The line number to start reading from (0-based)", "type": "integer"}},
-      "required": ["file_path"], "type": "object"}}, "type": "function"}, {"function":
-      {"name": "write", "strict": false, "description": "Create or overwrite a file
-      with given content; auto-creates parent dirs. Cannot append. Read the file first
-      to avoid conflicts. For surgical changes use edit or multiedit.", "parameters":
-      {"properties": {"content": {"description": "The content to write to the file",
-      "type": "string"}, "file_path": {"description": "The path to the file to write",
-      "type": "string"}}, "required": ["file_path", "content"], "type": "object"}},
-      "type": "function"}], "stream": true}'
+    content_length: 27071
+    host: ""
+    body: "{\"messages\":[{\"content\":\"You are Crush, a powerful AI Assistant that runs in the CLI.\\n\\n<core_directives>\\n1. **READ CONTEXT BEFORE EDITING**: Always inspect relevant file context before modification. For large files, read only target sections using the `offset` and `limit` parameters. Do not re-read files immediately after a successful edit, file creation, or deletion.\\n2. **BE AUTONOMOUS**: Search reference patterns, check memory, think, decide, and execute. Break complex issues down and solve them end-to-end, including follow-ups and stated next steps. Exhaust alternative strategies before stopping. Only pause for true external blocking errors. The user may override this directive, for example, by asking you to ask them questions about critical decisions.\\n3. **TEST & SELF-VERIFY**: Run relevant tests immediately after each modification unless the user specifies otherwise. If no test suite exists, use self-verification such as local execution scripts, logging, or custom unit tests. Run lint/typecheck/build commands when available, preferably on precise targets first.\\n4. **CONCISE OUTPUT**: Keep outputs under 4 lines of text by default. Conciseness applies only to user-facing text, never to thoroughness of work. Never output acknowledgement-only responses; continue the task or state the concrete next action.\\n5. **NEVER COMMIT, PUSH, OR REVERT**: Do not commit unless the user explicitly says \\\"commit\\\"; do not push unless explicitly asked. If committing, strictly follow the `<git_commits>` format, including configured attribution lines. Never revert functional changes unless they directly cause errors or the user asks.\\n6. **SECURITY FIRST**: Make sure all code written takes into account best security practices. Refuse to create malicious code. Never log secrets.\\n7. **NO GUESSING**: Do not guess URLs or string segments. Only use URLs provided by the user or found in local files. Match exact formatting, comments, line endings, and whitespace layout.\\n8. **RESTRICTED TOOLS**: Only use documented tools. `apply_patch` and `apply_diff` DO NOT exist; use `edit`, `multiedit`, or `write` instead. Default to tools over speculation whenever they reduce uncertainty.\\n9. **SKILL LOADING**: If any entry in `<available_skills>` matches the task, you MUST read (`view`) its `<location>` before taking any other action. Do not infer skill instructions from descriptions.\\n</core_directives>\\n\\n<communication_style>\\nState answers directly with zero filler:\\n- Match the user's spoken language in all responses.\\n- Keep output under 4 lines unless explaining complex architectures or explicitly asked.\\n- Avoid preambles (\\\"Here's...\\\", \\\"I'll...\\\") and postambles (\\\"Let me know...\\\", \\\"Hope this helps\\\").\\n- Do not use emojis. Use one-word answers when possible. Do not explain unless asked.\\n- Provide brief progress updates (<10 words) for long-running processes but continue working immediately.\\n- Use rich Markdown (fences, lists, headings) for multi-sentence or verbose explanations; use plain unformatted text only if explicitly requested.\\n- Reference code locations using `file_path:line_number` or ranges like `file_path:start-end`.\\n\\nExamples:\\nuser: what is 2+2?\\nassistant: 4\\n\\nuser: add error handling to the login function\\nassistant: [reads files, makes edit, runs tests]\\nDone\\n\\nuser: Where are errors from the client handled?\\nassistant: Clients are marked as failed in the `connectToServer` function in src/services/process.go:712.\\n</communication_style>\\n\\n<file_editing>\\nAvailable edit tools:\\n- `edit`: single find/replace in one file.\\n- `multiedit`: multiple find/replace operations in one file.\\n- `write`: create or overwrite an entire file.\\n\\nThe edit tools are strictly literal; approximate matches will fail.\\n1. **Verify Context**: View relevant file sections first to verify exact indentation, braces, comments, tabs vs. spaces, and surrounding structure. Use `git log` or `git blame` when historical context is useful.\\n2. **Draft Target Blocks**: Copy exact text, including all whitespace and blank lines. Include 3–5 lines of unique context around modifications and ensure the target block appears exactly once.\\n3. **Edit Carefully**: Make one logical change at a time, verify the edit succeeded, then test. If uncertain, include more context rather than less.\\n4. **Edit Recovery**: If an edit fails, do not guess. Re-view the destination range, copy the raw text directly, check whitespace/line endings, and widen context as needed.\\n5. **Shared Code Safety**: Use any code search capabilities you have access to before modifying shared functions or interfaces to prevent caller breakage.\\n</file_editing>\\n\\n<coding_style>\\nFollow the project's existing rules, conventions and guidelines, and otherwise use these defaults:\\n\\n- **Avoid Code Comments**: Avoid adding comments unless otherwise told. Never use code comments to communicate with the user. For any comments that are added, focus on *why*, not *what*.\\n  - Exception: add comments explaining the \\\"why\\\" and \\\"what\\\" to any code that can be described as \\\"hackish\\\", or \\\"weird\\\". Also add a summary comment above any overly complicated code briefly explaining the why and what of what it's doing.\\n- **Self-commenting code**: Use descriptive identifiers and symbols.\\n</coding_style>\\n\\n<engineering_and_testing>\\n- **Planning**: Before non-trivial work, internally identify affected models, logic, routes, callers, configs, tests, docs, edge cases, and error paths.\\n- **Conventions**: Verify libraries/frameworks exist before using them. Match local imports, formatting, naming, style, and existing libraries. Avoid single-letter variables unless requested.\\n- **Surgical vs. Creative**: Be surgical on existing codebases; avoid unnecessary renames and do not introduce files, tests, linters, or formatters if the codebase does not already use them. Be creative on new projects.\\n- **Task Completeness**: Treat multi-part prompts as checklists. Do not leave placeholder comments, incomplete implementations, unwired code, or `TODO` markers. Finish every feasible part before responding.\\n- **Testing**: Start with the narrowest relevant tests, then broaden confidence. Check memory for test/lint/typecheck/build commands. If tests fail, fix before continuing unless failures are unrelated; mention unrelated failures in the final handoff.\\n- **Formatter Limits**: If formatter fixes loop, try at most 3 iterations before presenting the correct solution and noting the formatting issue.\\n- **Error Handling**: Read full errors, identify and fix root causes rather than applying surface-level patches, isolate with debug logs or minimal reproductions when useful, search for similar working code, make targeted fixes, and test again. Try 2–3 distinct remediation strategies before declaring an external block.\\n- **Memory Files**: Follow all memory-file instructions, preferences, commands, environment settings, and codebase notes. Update memory files when discovering build/test/lint commands, style preferences, important codebase patterns, or useful project information.\\n</engineering_and_testing>\\n\\n<autonomy_and_decisions>\\n**Autonomy Limits**: Make decisions yourself unless the user instructs otherwise. Use project conventions to make architectural, logical, naming, and tool choices instead of asking. For underspecified requirements, make reasonable assumptions based on surrounding code and memory, briefly state them only if needed, and execute.\\n\\n**Plans Are Not Deliverables**: Responding with only a plan, outline, or TODO list (or any other purely verbal response) is failure when execution is possible — execute the plan via tools instead.\\n\\n**Only Stop/Ask User if**:\\n- A business requirement is truly ambiguous and cannot be inferred.\\n- Multiple valid pathways present major architectural or technical trade-offs.\\n- There is a high risk of user data loss.\\n- You have exhausted 2–3 distinct remediation pathways and hit hard external limits such as missing credentials, permissions, files, or network access.\\n- The user asks *how* to approach a problem, in which case explain first and do not auto-implement.\\n- The user told you to do so.\\n\\n**Never Stop Merely Because**:\\n- The task is large, multi-file, structurally deep, or time-consuming.\\n- A first approach failed.\\n- You perceive session limits.\\n- A response could be replaced by tool execution.\\n\\n**Reporting Blocks/Information Requests**:\\nWhen blocked, complete all other executable parts first. Then, in one clear message:\\n1. List precisely what you tried and what failed.\\n2. State why it is blocked and the minimal action or missing information required, including acceptable alternatives.\\n3. State the immediate next action you will execute once unblocked.\\n</autonomy_and_decisions>\\n\\n<tool_usage>\\n- Search before assuming; read files before editing.\\n- Use absolute paths for all file operations.\\n- Use the Agent tool for complex searches.\\n- Run safe, independent tool and bash commands in parallel within single prompt cycles.\\n- Combine related bash commands when safe.\\n- Use `&` for processes that do not naturally exit, such as local servers.\\n- Avoid interactive CLI prompts, e.g. use `npm init -y` instead of `npm init`.\\n- Summarize tool results for the user since they cannot see back-end outputs directly.\\n- Do not surprise the user with unexpected actions.\\n- **Bash**: The `description` parameter is required for all bash tool executions. Briefly explain the intent of non-trivial or potentially unsafe system commands before running them.\\n- **NO CURL**: Do not use `curl` in bash; use the dedicated web fetch tool.\\n</tool_usage>\\n\\n<final_answers>\\nAdapt verbosity and structure to the scale of work completed:\\n\\n**Default (<4 lines target):**\\n- Use for simple queries, single-file edits, casual responses, and direct handoffs.\\n- Keep outputs factual and avoid explanation unless asked.\\n\\n**Verbose Allowed (10–15 lines max):**\\n- Use only for major multi-file rollouts, architectural restructures, complex refactors, or unrelated issues discovered.\\n- Structure with Markdown headers and clean file reference lists.\\n- Include files changed, key decisions/trade-offs, verification performed, logical next steps, and unrelated issues found but not fixed.\\n- Do not show full file contents unless explicitly asked.\\n- Do not tutorialize normal Git tasks, file saving, or copying code.\\n</final_answers>\\n\\n<env>\\nWorking directory: /tmp/crush-test/TestCoderAgent/glm-5.1/grep_tool\\nIs directory a git repo: no\\nPlatform: linux\\nToday's date: 1/1/2025\\n\\n</env>\\n\\n\\n\\n<available_skills>\\n  <skill>\\n    <name>crush-hooks</name>\\n    <description>Use when the user wants to add, write, debug, or configure a Crush hook — gating or blocking tool calls, approving or rewriting tool input before execution, injecting context into tool results, or troubleshooting hook behavior in crush.json.</description>\\n    <location>crush://skills/crush-hooks/SKILL.md</location>\\n    <type>builtin</type>\\n  </skill>\\n  <skill>\\n    <name>jq</name>\\n    <description>Use when the user needs to query, filter, reshape, extract, create, or construct JSON data — including API responses, config files, log output, or any structured data — or when helping the user write or debug JSON transformations.</description>\\n    <location>crush://skills/jq/SKILL.md</location>\\n    <type>builtin</type>\\n  </skill>\\n</available_skills>\\n\\n<skills_usage>\\nThe `<description>` of each skill is a TRIGGER — it tells you *when* a skill applies. It is NOT a specification of what the skill does or how to do it. The procedure, scripts, commands, references, and required flags live only in the SKILL.md body. You do not know what a skill actually does until you have read its SKILL.md.\\n\\nMANDATORY activation flow:\\n1. Scan `<available_skills>` against the current user task.\\n2. If any skill's `<description>` matches, call the View tool with its `<location>` EXACTLY as shown — before any other tool call that performs the task.\\n3. Read the entire SKILL.md and follow its instructions.\\n4. Only then execute the task, using the skill's prescribed commands/tools.\\n\\nDo NOT skip step 2 because you think you already know how to do the task. Do NOT infer a skill's behavior from its name or description. If you find yourself about to run `bash`, `edit`, or any task-doing tool for a skill-eligible request without having just viewed the SKILL.md, stop and load the skill first.\\n\\nBuiltin skills (type=builtin) use virtual `crush://skills/...` location identifiers. The \\\"crush://\\\" prefix is NOT a URL, network address, or MCP resource — it is a special internal identifier the View tool understands natively. Pass the `<location>` verbatim to View.\\n\\nDo not use MCP tools (including read_mcp_resource) to load skills.\\nIf a skill mentions scripts, references, or assets, they live in the same folder as the skill itself (e.g., scripts/, references/, assets/ subdirectories within the skill's folder).\\n</skills_usage>\\n\\n\\n\\n\",\"role\":\"system\"},{\"content\":\"<system_reminder>This is a reminder that your todo list is currently empty. DO NOT mention this to the user explicitly because they are already aware.\\nIf you are working on tasks that would benefit from a todo list please use the \\\"todos\\\" tool to create one.\\nIf not, please feel free to ignore. Again do not mention this message to the user.</system_reminder>\",\"role\":\"user\"},{\"content\":\"use grep to search for the word 'package' in go files\",\"role\":\"user\"},{\"tool_calls\":[{\"id\":\"call_57ae9adf957c46d7a01a8b67\",\"function\":{\"arguments\":\"{\\\"include\\\": \\\"*.go\\\", \\\"path\\\": \\\"/tmp/crush-test/TestCoderAgent/glm-5.1/grep_tool\\\", \\\"pattern\\\": \\\"package\\\"}\",\"name\":\"grep\"},\"type\":\"function\"}],\"role\":\"assistant\",\"reasoning_content\":\"The user wants to search for the word 'package' in Go files using the grep tool.\"},{\"content\":\"Found 1 matches\\n/tmp/crush-test/TestCoderAgent/glm-5.1/grep_tool/main.go:\\n  Line 1, Char 1: package main\\n\",\"tool_call_id\":\"call_57ae9adf957c46d7a01a8b67\",\"role\":\"tool\"}],\"model\":\"glm-5.1\",\"max_tokens\":10000,\"stream_options\":{\"include_usage\":true},\"tool_choice\":\"auto\",\"tools\":[{\"function\":{\"name\":\"bash\",\"strict\":false,\"description\":\"Execute shell commands; long-running commands automatically move to background and return a shell ID.\\n\\n<cross_platform>\\nUses mvdan/sh interpreter (Bash-compatible on all platforms including Windows).\\nUse forward slashes for paths: \\\"ls C:/foo/bar\\\" not \\\"ls C:\\\\foo\\\\bar\\\".\\nCommon shell builtins and core utils available on Windows.\\n</cross_platform>\\n\\n<execution_steps>\\n1. Directory Verification: If creating directories/files, use LS tool to verify parent exists\\n2. Security Check: Banned commands (alias, aria2c, axel, chrome, curl, curlie, firefox, http-prompt, httpie, links, lynx, nc, safari, scp, ssh, telnet, w3m, wget, xh, doas, su, sudo, apk, apt, apt-cache, apt-get, dnf, dpkg, emerge, home-manager, makepkg, opkg, pacman, paru, pkg, pkg_add, pkg_delete, portage, rpm, yay, yum, zypper, at, batch, chkconfig, crontab, fdisk, mkfs, mount, parted, service, systemctl, umount, firewall-cmd, ifconfig, ip, iptables, netstat, pfctl, route, ufw) return error - explain to user. Safe read-only commands execute without prompts\\n3. Command Execution: Execute with proper quoting, capture output\\n4. Auto-Background: Commands exceeding 1 minute (default, configurable via `auto_background_after`) automatically move to background and return shell ID\\n5. Output Processing: Truncate if exceeds 30000 characters\\n6. Return Result: Include errors, metadata with <cwd></cwd> tags\\n</execution_steps>\\n\\n<usage_notes>\\n- Command required, working_dir optional (defaults to current directory)\\n- IMPORTANT: Use Grep/Glob/Agent tools instead of 'find'/'grep'. Use View/LS tools instead of 'cat'/'head'/'tail'/'ls'\\n- Chain with ';' or '&&', avoid newlines except in quoted strings\\n- Each command runs in independent shell (no state persistence between calls)\\n- Prefer absolute paths over 'cd' (use 'cd' only if user explicitly requests)\\n</usage_notes>\\n\\n<background_execution>\\n- Set run_in_background=true to run commands in a separate background shell\\n- Returns a shell ID for managing the background process\\n- Use job_output tool to view current output from background shell\\n- Use job_kill tool to terminate a background shell\\n- IMPORTANT: NEVER use `&` at the end of commands to run in background - use run_in_background parameter instead\\n- Commands that should run in background:\\n  * Long-running servers (e.g., `npm start`, `python -m http.server`, `node server.js`)\\n  * Watch/monitoring tasks (e.g., `npm run watch`, `tail -f logfile`)\\n  * Continuous processes that don't exit on their own\\n  * Any command expected to run indefinitely\\n- Commands that should NOT run in background:\\n  * Build commands (e.g., `npm run build`, `go build`)\\n  * Test suites (e.g., `npm test`, `pytest`)\\n  * Git operations\\n  * File operations\\n  * Short-lived scripts\\n</background_execution>\\n\\n<git_commits>\\nWhen user asks to create git commit:\\n\\n1. Single message with three tool_use blocks (IMPORTANT for speed):\\n   - git status (untracked files)\\n   - git diff (staged/unstaged changes)\\n   - git log (recent commit message style)\\n\\n2. Add relevant untracked files to staging. Don't commit files already modified at conversation start unless relevant.\\n\\n3. Analyze staged changes in <commit_analysis> tags:\\n   - List changed/added files, summarize nature (feature/enhancement/bug fix/refactoring/test/docs)\\n   - Brainstorm purpose/motivation, assess project impact, check for sensitive info\\n   - Don't use tools beyond git context\\n   - Draft concise (1-2 sentences) message focusing on \\\"why\\\" not \\\"what\\\"\\n   - Use clear language, accurate reflection (\\\"add\\\"=new feature, \\\"update\\\"=enhancement, \\\"fix\\\"=bug fix)\\n   - Avoid generic messages, review draft\\n\\n4. Create commit with attribution using HEREDOC:\\n   git commit -m \\\"$(cat &lt;&lt;'EOF'\\n   Commit message here.\\n\\n\\n   \U0001F498 Generated with Crush\\n\\n\\n\\n   Co-Authored-By: Crush <crush@charm.land>\\n\\n\\n   EOF\\n   )\\\"\\n\\n5. If pre-commit hook fails, retry ONCE. If fails again, hook preventing commit. If succeeds but files modified, MUST amend.\\n\\n6. Run git status to verify.\\n\\nNotes: Use \\\"git commit -am\\\" when possible, don't stage unrelated files, NEVER update config, don't push, no -i flags, no empty commits, return empty response, when rebasing always use -m or GIT_EDITOR=true.\\n</git_commits>\\n\\n<pull_requests>\\nUse gh command for ALL GitHub tasks. When user asks to create PR:\\n\\n1. Single message with multiple tool_use blocks (VERY IMPORTANT for speed):\\n   - git status (untracked files)\\n   - git diff (staged/unstaged changes)\\n   - Check if branch tracks remote and is up to date\\n   - git log and 'git diff main...HEAD' (full commit history from main divergence)\\n\\n2. Create new branch if needed\\n3. Commit changes if needed\\n4. Push to remote with -u flag if needed\\n\\n5. Analyze changes in <pr_analysis> tags:\\n   - List commits since diverging from main\\n   - Summarize nature of changes\\n   - Brainstorm purpose/motivation\\n   - Assess project impact\\n   - Don't use tools beyond git context\\n   - Check for sensitive information\\n   - Draft concise (1-2 bullet points) PR summary focusing on \\\"why\\\"\\n   - Ensure summary reflects ALL changes since main divergence\\n   - Clear, concise language\\n   - Accurate reflection of changes and purpose\\n   - Avoid generic summaries\\n   - Review draft\\n\\n6. Create PR with gh pr create using HEREDOC:\\n   gh pr create --title \\\"title\\\" --body \\\"$(cat &lt;&lt;'EOF'\\n\\n   ## Summary\\n\\n   &lt;1-3 bullet points>\\n\\n   ## Test plan\\n\\n   [Checklist of TODOs...]\\n\\n\\n   \U0001F498 Generated with Crush\\n\\n\\n   EOF\\n   )\\\"\\n\\nImportant:\\n\\n- Return empty response - user sees gh output\\n- Never update git config\\n</pull_requests>\\n\\n<examples>\\nGood: pytest /foo/bar/tests\\nBad: cd /foo/bar && pytest tests\\n</examples>\\n\",\"parameters\":{\"properties\":{\"auto_background_after\":{\"description\":\"Seconds to wait before automatically moving the command to a background job (default: 60)\",\"type\":\"integer\"},\"command\":{\"description\":\"The command to execute\",\"type\":\"string\"},\"description\":{\"description\":\"A brief description of what the command does, try to keep it under 30 characters or so\",\"type\":\"string\"},\"run_in_background\":{\"description\":\"Set to true (boolean) to run this command in the background. Use job_output to read the output later.\",\"type\":\"boolean\"},\"working_dir\":{\"description\":\"The working directory to execute the command in (defaults to current directory)\",\"type\":\"string\"}},\"required\":[\"description\",\"command\"],\"type\":\"object\"}},\"type\":\"function\"},{\"function\":{\"name\":\"download\",\"strict\":false,\"description\":\"Download a URL directly to a local file (binary-safe, streaming, max 600s timeout); overwrites without warning. For reading content into context use fetch.\\n\",\"parameters\":{\"properties\":{\"file_path\":{\"description\":\"The local file path where the downloaded content should be saved\",\"type\":\"string\"},\"timeout\":{\"description\":\"Optional timeout in seconds (max 600)\",\"type\":\"integer\"},\"url\":{\"description\":\"The URL to download from\",\"type\":\"string\"}},\"required\":[\"url\",\"file_path\"],\"type\":\"object\"}},\"type\":\"function\"},{\"function\":{\"name\":\"edit\",\"strict\":false,\"description\":\"Edit a file by exact find-and-replace; can also create or delete content. For renames/moves use bash. For large edits use write.\",\"parameters\":{\"properties\":{\"file_path\":{\"description\":\"The absolute path to the file to modify\",\"type\":\"string\"},\"new_string\":{\"description\":\"The text to replace it with\",\"type\":\"string\"},\"old_string\":{\"description\":\"The text to replace\",\"type\":\"string\"},\"replace_all\":{\"description\":\"Replace all occurrences of old_string (default false)\",\"type\":\"boolean\"}},\"required\":[\"file_path\",\"old_string\",\"new_string\"],\"type\":\"object\"}},\"type\":\"function\"},{\"function\":{\"name\":\"multiedit\",\"strict\":false,\"description\":\"Apply multiple find-and-replace edits to a single file in one operation; edits run sequentially. Prefer over edit for multiple changes to the same file. Same exact-match rules as edit apply.\",\"parameters\":{\"properties\":{\"edits\":{\"description\":\"Array of edit operations to perform sequentially on the file\",\"items\":{\"properties\":{\"new_string\":{\"description\":\"The text to replace it with\",\"type\":\"string\"},\"old_string\":{\"description\":\"The text to replace\",\"type\":\"string\"},\"replace_all\":{\"description\":\"Replace all occurrences of old_string (default false).\",\"type\":\"boolean\"}},\"required\":[\"old_string\",\"new_string\"],\"type\":\"object\"},\"type\":\"array\"},\"file_path\":{\"description\":\"The absolute path to the file to modify\",\"type\":\"string\"}},\"required\":[\"file_path\",\"edits\"],\"type\":\"object\"}},\"type\":\"function\"},{\"function\":{\"name\":\"fetch\",\"strict\":false,\"description\":\"Fetch raw content from a URL as text, markdown, or html (max 100KB); no AI processing. For analysis or extraction use agentic_fetch.\\n\",\"parameters\":{\"properties\":{\"format\":{\"description\":\"The format to return the content in (text, markdown, or html)\",\"type\":\"string\"},\"timeout\":{\"description\":\"Optional timeout in seconds (max 120)\",\"type\":\"integer\"},\"url\":{\"description\":\"The URL to fetch content from\",\"type\":\"string\"}},\"required\":[\"url\",\"format\"],\"type\":\"object\"}},\"type\":\"function\"},{\"function\":{\"name\":\"glob\",\"strict\":false,\"description\":\"Find files by name/pattern (glob syntax), sorted by modification time; max 100 results; skips hidden files. Use grep to search file contents.\\n\",\"parameters\":{\"properties\":{\"path\":{\"description\":\"The directory to search in. Defaults to the current working directory.\",\"type\":\"string\"},\"pattern\":{\"description\":\"The glob pattern to match files against\",\"type\":\"string\"}},\"required\":[\"pattern\"],\"type\":\"object\"}},\"type\":\"function\"},{\"function\":{\"name\":\"grep\",\"strict\":false,\"description\":\"Search file contents by regex or literal text; returns matching file paths sorted by modification time (max 100); respects .gitignore. Use glob to filter by filename, not contents.\\n\",\"parameters\":{\"properties\":{\"include\":{\"description\":\"File pattern to include in the search (e.g. \\\"*.js\\\", \\\"*.{ts,tsx}\\\")\",\"type\":\"string\"},\"literal_text\":{\"description\":\"If true, the pattern will be treated as literal text with special regex characters escaped. Default is false.\",\"type\":\"boolean\"},\"path\":{\"description\":\"The directory to search in. Defaults to the current working directory.\",\"type\":\"string\"},\"pattern\":{\"description\":\"The regex pattern to search for in file contents\",\"type\":\"string\"}},\"required\":[\"pattern\"],\"type\":\"object\"}},\"type\":\"function\"},{\"function\":{\"name\":\"ls\",\"strict\":false,\"description\":\"List files and directories as a tree; skips hidden files and common system dirs; max 1000 files. Use glob to find files by pattern, grep to search contents.\\n\",\"parameters\":{\"properties\":{\"depth\":{\"description\":\"The maximum depth to traverse\",\"type\":\"integer\"},\"ignore\":{\"description\":\"List of glob patterns to ignore\",\"items\":{\"type\":\"string\"},\"type\":\"array\"},\"path\":{\"description\":\"The path to the directory to list (defaults to current working directory)\",\"type\":\"string\"}},\"required\":[],\"type\":\"object\"}},\"type\":\"function\"},{\"function\":{\"name\":\"sourcegraph\",\"strict\":false,\"description\":\"Search code across public GitHub repositories via Sourcegraph; supports regex, language/repo/file filters, and symbol search (max 20 results). Only searches public repos.\\n\",\"parameters\":{\"properties\":{\"context_window\":{\"description\":\"The context around the match to return (default: 10 lines)\",\"type\":\"integer\"},\"count\":{\"description\":\"Optional number of results to return (default: 10, max: 20)\",\"type\":\"integer\"},\"query\":{\"description\":\"The Sourcegraph search query\",\"type\":\"string\"},\"timeout\":{\"description\":\"Optional timeout in seconds (max 120)\",\"type\":\"integer\"}},\"required\":[\"query\"],\"type\":\"object\"}},\"type\":\"function\"},{\"function\":{\"name\":\"view\",\"strict\":false,\"description\":\"Read a file by path with line numbers; supports offset and line limit (default 200, max 200KB returned file content section); renders images (PNG, JPEG, GIF, WebP); use ls for directories.\\n\",\"parameters\":{\"properties\":{\"file_path\":{\"description\":\"The path to the file to read\",\"type\":\"string\"},\"limit\":{\"description\":\"The number of lines to read (defaults to 200)\",\"type\":\"integer\"},\"offset\":{\"description\":\"The line number to start reading from (0-based)\",\"type\":\"integer\"}},\"required\":[\"file_path\"],\"type\":\"object\"}},\"type\":\"function\"},{\"function\":{\"name\":\"write\",\"strict\":false,\"description\":\"Create or overwrite a file with given content; auto-creates parent dirs. Cannot append. Read the file first to avoid conflicts. For surgical changes use edit or multiedit.\",\"parameters\":{\"properties\":{\"content\":{\"description\":\"The content to write to the file\",\"type\":\"string\"},\"file_path\":{\"description\":\"The path to the file to write\",\"type\":\"string\"}},\"required\":[\"file_path\",\"content\"],\"type\":\"object\"}},\"type\":\"function\"}],\"stream\":true}"
     headers:
       Accept:
       - application/json
@@ -1082,50 +430,36 @@ interactions:
     proto_minor: 0
     content_length: -1
     uncompressed: true
-    body: 'data: {"id":"chatcmpl-911d6361c2318f054897ddfb","object":"chat.completion.chunk","created":1779218898,"model":"glm-5.1","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
+    body: |+
+      data: {"id":"chatcmpl-854d16a72c91ceab74841975","object":"chat.completion.chunk","created":1779463468,"model":"glm-5.1","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-854d16a72c91ceab74841975","object":"chat.completion.chunk","created":1779463468,"model":"glm-5.1","choices":[{"index":0,"delta":{"content":"1"},"finish_reason":null}]}
 
-      data: {"id":"chatcmpl-911d6361c2318f054897ddfb","object":"chat.completion.chunk","created":1779218898,"model":"glm-5.1","choices":[{"index":0,"delta":{"content":"1"},"finish_reason":null}]}
+      data: {"id":"chatcmpl-854d16a72c91ceab74841975","object":"chat.completion.chunk","created":1779463468,"model":"glm-5.1","choices":[{"index":0,"delta":{"content":" match"},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-854d16a72c91ceab74841975","object":"chat.completion.chunk","created":1779463468,"model":"glm-5.1","choices":[{"index":0,"delta":{"content":" found"},"finish_reason":null}]}
 
-      data: {"id":"chatcmpl-911d6361c2318f054897ddfb","object":"chat.completion.chunk","created":1779218898,"model":"glm-5.1","choices":[{"index":0,"delta":{"content":"
-      match found"},"finish_reason":null}]}
+      data: {"id":"chatcmpl-854d16a72c91ceab74841975","object":"chat.completion.chunk","created":1779463468,"model":"glm-5.1","choices":[{"index":0,"delta":{"content":": `main"},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-854d16a72c91ceab74841975","object":"chat.completion.chunk","created":1779463468,"model":"glm-5.1","choices":[{"index":0,"delta":{"content":".go"},"finish_reason":null}]}
 
-      data: {"id":"chatcmpl-911d6361c2318f054897ddfb","object":"chat.completion.chunk","created":1779218898,"model":"glm-5.1","choices":[{"index":0,"delta":{"content":":
-      `main"},"finish_reason":null}]}
+      data: {"id":"chatcmpl-854d16a72c91ceab74841975","object":"chat.completion.chunk","created":1779463468,"model":"glm-5.1","choices":[{"index":0,"delta":{"content":":1"},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-854d16a72c91ceab74841975","object":"chat.completion.chunk","created":1779463468,"model":"glm-5.1","choices":[{"index":0,"delta":{"content":"` —"},"finish_reason":null}]}
 
-      data: {"id":"chatcmpl-911d6361c2318f054897ddfb","object":"chat.completion.chunk","created":1779218898,"model":"glm-5.1","choices":[{"index":0,"delta":{"content":".go"},"finish_reason":null}]}
+      data: {"id":"chatcmpl-854d16a72c91ceab74841975","object":"chat.completion.chunk","created":1779463468,"model":"glm-5.1","choices":[{"index":0,"delta":{"content":" `package"},"finish_reason":null}]}
 
+      data: {"id":"chatcmpl-854d16a72c91ceab74841975","object":"chat.completion.chunk","created":1779463468,"model":"glm-5.1","choices":[{"index":0,"delta":{"content":" main`"},"finish_reason":null}]}
 
-      data: {"id":"chatcmpl-911d6361c2318f054897ddfb","object":"chat.completion.chunk","created":1779218898,"model":"glm-5.1","choices":[{"index":0,"delta":{"content":":"},"finish_reason":null}]}
+      data: {"id":"chatcmpl-854d16a72c91ceab74841975","object":"chat.completion.chunk","created":1779463468,"model":"glm-5.1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
 
-
-      data: {"id":"chatcmpl-911d6361c2318f054897ddfb","object":"chat.completion.chunk","created":1779218898,"model":"glm-5.1","choices":[{"index":0,"delta":{"content":"1"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-911d6361c2318f054897ddfb","object":"chat.completion.chunk","created":1779218898,"model":"glm-5.1","choices":[{"index":0,"delta":{"content":"`
-      — `package"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-911d6361c2318f054897ddfb","object":"chat.completion.chunk","created":1779218898,"model":"glm-5.1","choices":[{"index":0,"delta":{"content":"
-      main`"},"finish_reason":null}]}
-
-
-      data: {"id":"chatcmpl-911d6361c2318f054897ddfb","object":"chat.completion.chunk","created":1779218898,"model":"glm-5.1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
-
-
-      data: {"id":"chatcmpl-911d6361c2318f054897ddfb","object":"chat.completion.chunk","created":1779218898,"model":"glm-5.1","choices":[],"usage":{"prompt_tokens":68,"completion_tokens":17,"total_tokens":7893,"prompt_tokens_details":{"cached_tokens":7808},"completion_tokens_details":{"reasoning_tokens":16},"cost":{"usd":0.00024720000000000005,"hypercredits":0.0049440000000000005},"remaining":{"hypercredits":0}}}
-
+      data: {"id":"chatcmpl-854d16a72c91ceab74841975","object":"chat.completion.chunk","created":1779463468,"model":"glm-5.1","choices":[],"usage":{"prompt_tokens":109,"completion_tokens":17,"total_tokens":6206,"prompt_tokens_details":{"cached_tokens":6080},"completion_tokens_details":{"reasoning_tokens":16},"cost":{"usd":0.00028423,"hypercredits":0.0056846},"remaining":{"hypercredits":0}}}
 
       data: [DONE]
 
-
-      '
     headers:
       Content-Type:
       - text/event-stream
     status: 200 OK
     code: 200
-    duration: 3.423796667s
+    duration: 2.783915501s

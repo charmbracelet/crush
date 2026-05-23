@@ -681,8 +681,8 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	)
 	summaryMessage, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
 		Role:             message.Assistant,
-		Model:            largeModel.Model.Model(),
-		Provider:         largeModel.Model.Provider(),
+		Model:            largeModel.ModelCfg.Model,
+		Provider:         largeModel.ModelCfg.Provider,
 		IsSummaryMessage: true,
 	})
 	if err != nil {

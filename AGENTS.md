@@ -133,9 +133,9 @@ internal/
 - **Skill auto-enable**: When a skill config section is present in crush.json
   (even with no fields), it auto-enables. Explicitly set `enabled: false` to
   disable.
-- **Agent wrapper**: `AgentWrapper` func type in coordinator allows app layer
-  to inject middleware without import cycles.
-
+- **Agent wrapper**: `AgentWrapper` func type in coordinator allows app layer to inject middleware without import cycles.
+- **`composeWrappers` applies wrappers in list order**: first arg is innermost (wraps primary first), last arg is outermost. Critically: `buildCriticWrapper` wraps primary first (innermost), `buildReplacerWrapper` wraps that result, `buildToolcoachWrapper` wraps that result (outermost).
+- **`critic` skill override config search paths**: When loading `.crush/skills/critic/config.json`, the code searches in order: `.crush`, `.kimi`, `crush` (first match wins). Not `.github/` or other common directories.
 - **Hook `HaltExitCode`**: Exit code 49 halts the entire turn. It sits outside the generic-error range (1-30), sysexits range (64-78), and killed-by-signal range (128+) so it can't be hit accidentally.
 - **Skill Tracker**: `skillTracker` tracks which skills have been mentioned in the conversation. Skills marked as "loaded" are not re-injected into subsequent prompts.
 - **csync package**: Thread-safe wrappers (`csync.Value`, `csync.Map`, `csync.Slice`) avoid data races on agent state. Never use raw sync primitives for agent fields.
@@ -277,13 +277,33 @@ Skills are middleware decorators that wrap the primary `SessionAgent`. Each
 skill implements the `agent.SessionAgent` interface by embedding the primary
 agent and delegating all methods, while intercepting `Run()` to add behavior.
 
-Two built-in skills:
+Three middleware skills (wrappers):
 - **`critic`**: After each agent edit, a secondary LLM reviews the diff and
   returns approve/revise/halt.
 - **`replacer`**: Evaluates whether the conversation should continue with a
   follow-up prompt (conversation coach).
+- **`toolcoach`**: Zero-LLM heuristic pattern detector that coaches the agent
+  on anti-patterns (edit without view, destructive bash, missing multiedit, etc.)
+  in real-time with sub-millisecond overhead.
 
-### Skill Discovery
+Three built-in skills (prompt injectors via `crush://skills/` URL):
+- **`crush-config`**: Configuration help
+- **`crush-hooks`**: Hook authoring guide
+- **`jq`**: jq syntax reference
+
+### Middleware Stack Order
+
+In `composeWrappers`, wrappers are applied in list order — first is innermost (closest to primary), last is outermost:
+```
+outermost: ToolcoachMiddleware
+            ↓ wraps
+           ReplacerMiddleware
+            ↓ wraps
+           CriticMiddleware
+            ↓ wraps
+inner-most: SessionAgent (primary)
+```
+This means toolcoach intercepts every tool call first (outermost), and the critic reviews the already-coached conversation.
 
 The `skills` package implements the Agent Skills open standard
 (https://agentskills.io). Skills are discovered from configured paths by
@@ -305,6 +325,42 @@ Skills are enabled by:
 1. Adding a config section in `crush.json` under `options` (auto-enables even if empty)
 2. Setting `enabled: false` to explicitly disable
 
+### Toolcoach Skill
+
+A zero-LLM, heuristic-based skill that detects anti-patterns in the agent's
+real-time tool usage and injects coaching tips into tool results. Overhead is
+~2.7µs per tool call (benchmarked, well under 100µs target).
+
+**Anti-patterns detected**:
+
+| ID | Tool | Severity | Trigger | Suggestion |
+|----|------|----------|---------|------------|
+| `destructive_bash` | `bash` | critical | `rm -rf /`, `rm -rf ~`, fork bombs | Use edit/write for safer changes |
+| `write_over_existing` | `write` | warning | `write` to existing file | Consider edit to preserve content |
+| `edit_without_view` | `edit` | hint | `edit` on file never viewed | View the file first |
+| `repeated_view` | `view` | hint | Second+ view without edit | Use edit instead |
+| `broad_grep` | `grep` | hint | Pattern < 3 chars or only wildcards | More specific pattern |
+| `missing_multiedit` | `edit` | hint | 3+ consecutive edits to same file | Use multiedit to batch |
+
+**Config** (in `crush.json` under `options.toolcoach`):
+```json
+{
+  "toolcoach": {
+    "enabled": true,
+    "max_patterns_per_turn": 3,
+    "enabled_patterns": []
+  }
+}
+```
+
+**Environment override**: `CRUSH_TOOLCOACH_DISABLED=1`
+**Per-call disable**: Set `ToolcoachEnabled: &falseVar` in `SessionAgentCall`
+
+Coaching tips include timing: `(coach delay: 42µs, spent: 150µs)` so users
+can verify the overhead is negligible.
+
+See `internal/skills/toolcoach/IMPLEMENTATION.md` for full details.
+
 ### Critic Skill
 
 Reviews agent output across six dimensions: correctness, safety, idiomatics,
@@ -318,9 +374,12 @@ efficiency, testing, minimalism.
 5. On `halt`: rollback changes, return error to user.
 
 **Wiring in `internal/app/critic.go`**:
-- `buildCriticWrapper()` creates an `AgentWrapper` that injects the middleware.
-- Middleware is wired via `SetFileTracker()`, `SetLSPManager()`, `SetCriticService()`, `SetMessageService()`.
-- `composeWrappers()` chains critic + replacer wrappers together.
+- `buildCriticWrapper()` creates an `AgentWrapper` that injects the critic middleware.
+- `buildReplacerWrapper()` creates the replacer wrapper.
+- `buildToolcoachWrapper()` creates the toolcoach wrapper.
+- `composeWrappers()` chains all three wrappers (toolcoach outermost, critic innermost).
+
+**Critic–toolcoach integration**: The critic middleware implements the `CoachSummaryProvider` interface (`GetCoachSummary(sessionID) string`). The app wires `app.toolcoachMw` (an `atomic.Pointer[toolcoach.Middleware]`) as the critic's coach provider, so the critic can include real-time tool usage coaching summaries in its review context.
 
 **Config** (in `crush.json` under `options.critic`):
 ```json
@@ -345,13 +404,11 @@ efficiency, testing, minimalism.
 **Per-session disable**: Set `CriticEnabled: &falseVar` in
 `SessionAgentCall` (nil = use global, false = disable for this call).
 
-**Project overrides**: Place `.crush/skills/critic/config.json` or
-`.crush/skills/critic/prompt.md.tpl` in the working directory.
+**Project overrides**: Place `.crush/skills/critic/config.json` or `.crush/skills/critic/prompt.md.tpl` in the working directory. The skill config loader searches `.crush/`, `.kimi/`, and `crush/` subdirectories (in that order, first match wins).
 
-**Prompt injection defense**: User content (diff, plan) is wrapped in
-delimiters (`<<<DIFF_BEGIN>>>` / `<<<DIFF_END>>>`). The
-`escapeDelimiters()` function replaces any user text that looks like a
-delimiter with visually similar Unicode alternatives (`««»»`).
+**Prompt injection defense**: User content (diff, plan) is wrapped in delimiters (`<<<DIFF_BEGIN>>>` / `<<<DIFF_END>>>`). The `escapeDelimiters()` function replaces any user text that looks like a delimiter with visually similar Unicode alternatives (`««»»`).
+
+**Dual config structs**: The critic uses `critic.CriticSkillConfig` (in `internal/skills/critic/config.go`) internally, not `config.CriticConfig` (in `internal/config/config.go`). Both have the same fields, but `CriticSkillConfig` is the runtime struct used by the middleware. `NewCriticSkillConfig()` in `skillconfig.go` converts from `config.Config`.
 
 ### Replacer Skill
 
@@ -364,15 +421,18 @@ returns a `stop` or `continue` decision with an optional follow-up prompt.
 {
   "replacer": {
     "enabled": true,
-    "max_iterations": 3
+    "model": "anthropic/claude-haiku-4",
+    "max_iterations": 3,
+    "timeout": "10s"
   }
 }
 ```
 
-The replacer auto-enables when the config section is present (if `enabled` is omitted it defaults to `true`; set `"enabled": false` to disable).
+The replacer auto-enables when the config section is present (if `enabled` is omitted it defaults to `true`; set `"enabled": false` to disable). It uses the small model by default if `model` is not specified.
 
-**Environment variable**: `CRUSH_REPLACER_FORCE_CONTINUE=1` forces the
-replacer to continue in tests, bypassing model resolution.
+**Environment variable**: `CRUSH_REPLACER_FORCE_CONTINUE=1` forces the replacer to continue in tests, bypassing model resolution.
+
+**Dual config structs**: Like the critic, the replacer uses `replacer.ReplacerConfig` (in `internal/skills/replacer/config.go`) internally, not `config.ReplacerConfig` (in `internal/config/config.go`). Both have the same fields; `NewReplacerConfig()` in `config.go` converts from `config.Config`.
 
 ## Formatting
 
@@ -416,14 +476,16 @@ starting work.
 
 ## Working on Skills
 
-Anytime you need to work on the critic or replacer skills, read the
+Anytime you need to work on critic, replacer, or toolcoach skills, read the
 corresponding documentation:
 - `internal/skills/critic/SKILL.md` — user-facing feature docs
 - `internal/skills/critic/IMPLEMENTATION.md` — detailed implementation
 - `internal/skills/critic/TESTING.md` — test patterns and matrix
+- `internal/skills/toolcoach/IMPLEMENTATION.md` — toolcoach implementation
 
 Run skill tests with:
 ```bash
 go test ./internal/skills/critic/... -v -race
 go test ./internal/skills/replacer/... -v -race
+go test ./internal/skills/toolcoach/... -v -race
 ```

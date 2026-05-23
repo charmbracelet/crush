@@ -62,6 +62,21 @@ func TestLoadProjectContext_Truncation(t *testing.T) {
 	require.LessOrEqual(t, len(ctx), maxProjectContextBytes+20)
 }
 
+func TestBuildCriticPrompt_WithCoachSummary(t *testing.T) {
+	t.Parallel()
+	cp := Checkpoint{
+		Type:         CheckpointEdit,
+		PrimaryDiff:  "-old\n+new",
+		CoachSummary: "- Edit Without View: fired 2 time(s) this session (acted: 1, ignored: 1).",
+	}
+	prompt, err := BuildCriticPrompt(cp, "")
+	require.NoError(t, err)
+	require.Contains(t, prompt, "Coaching Observations")
+	require.Contains(t, prompt, "Edit Without View")
+	require.Contains(t, prompt, "<<<COACH_BEGIN>>>")
+	require.Contains(t, prompt, "<<<COACH_END>>>")
+}
+
 func TestLoadTemplate_Fallback(t *testing.T) {
 	t.Parallel()
 	text, err := loadTemplate()

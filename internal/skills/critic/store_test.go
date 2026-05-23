@@ -61,7 +61,8 @@ func setupTestDB(t *testing.T) *sql.DB {
 			summary TEXT NOT NULL DEFAULT '',
 			diff_snapshot TEXT NOT NULL DEFAULT '',
 			lsp_diagnostics TEXT NOT NULL DEFAULT '[]',
-			created_at INTEGER NOT NULL DEFAULT 0
+			created_at INTEGER NOT NULL DEFAULT 0,
+			revision_outcome TEXT NOT NULL DEFAULT ''
 		);
 		CREATE INDEX idx_critic_reviews_session_id ON critic_reviews (session_id);
 		CREATE INDEX idx_critic_reviews_message_id ON critic_reviews (message_id);

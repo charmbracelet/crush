@@ -11,8 +11,8 @@ import (
 
 // FeedbackCache deduplicates critic rounds for identical diffs and diagnostics.
 type FeedbackCache struct {
-	cache *lru.Cache[string, *CriticFeedback]
-	hits  atomic.Uint64
+	cache  *lru.Cache[string, *CriticFeedback]
+	hits   atomic.Uint64
 	misses atomic.Uint64
 }
 

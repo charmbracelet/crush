@@ -22,13 +22,14 @@ import (
 // snapshot files, compute diffs, fetch diagnostics, and submit checkpoints for
 // review.
 type Middleware struct {
-	primary     agent.SessionAgent  // The underlying agent being decorated.
-	cfg         CriticSkillConfig   // Runtime critic configuration.
-	filetracker filetracker.Service // Tracks which files the agent has read.
-	lspMgr      *lsp.Manager        // LSP client manager for diagnostic enrichment.
-	criticSvc   *CriticService      // Orchestrates checkpoint reviews.
-	messages    message.Service     // Used to inject feedback into conversation history.
-	store       *Store              // Persists critic reviews to the database.
+	primary       agent.SessionAgent   // The underlying agent being decorated.
+	cfg           CriticSkillConfig    // Runtime critic configuration.
+	filetracker   filetracker.Service  // Tracks which files the agent has read.
+	lspMgr        *lsp.Manager         // LSP client manager for diagnostic enrichment.
+	criticSvc     *CriticService       // Orchestrates checkpoint reviews.
+	messages      message.Service      // Used to inject feedback into conversation history.
+	store         *Store               // Persists critic reviews to the database.
+	coachProvider CoachSummaryProvider // Supplies coaching summaries for critic enrichment.
 }
 
 // NewMiddleware creates a critic middleware wrapping the given primary agent.
@@ -69,6 +70,12 @@ func (m *Middleware) SetMessageService(svc message.Service) {
 // SetStore configures the store used to persist critic reviews.
 func (m *Middleware) SetStore(store *Store) {
 	m.store = store
+}
+
+// SetCoachSummaryProvider configures the provider used to fetch coaching
+// summaries for critic review enrichment.
+func (m *Middleware) SetCoachSummaryProvider(provider CoachSummaryProvider) {
+	m.coachProvider = provider
 }
 
 // Run delegates to the primary agent. When critic mode is enabled and all
@@ -269,6 +276,14 @@ func (m *Middleware) Run(ctx context.Context, call agent.SessionAgentCall) (*fan
 				Iteration:      iteration,
 			}
 			slog.Debug("Critic message checkpoint created", "session_id", call.SessionID, "text_len", len(msgText))
+		}
+
+		// Enrich checkpoint with coaching observations from the primary agent turn.
+		if m.coachProvider != nil {
+			checkpoint.CoachSummary = m.coachProvider.GetCoachSummary(call.SessionID)
+			if checkpoint.CoachSummary != "" {
+				slog.Debug("Enriched critic checkpoint with coach summary", "session_id", call.SessionID, "summary_len", len(checkpoint.CoachSummary))
+			}
 		}
 
 		reviewStart := time.Now()

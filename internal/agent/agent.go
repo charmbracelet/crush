@@ -110,6 +110,9 @@ type SessionAgentCall struct {
 	// ReplacerEnabled overrides the global replacer setting for this call.
 	// nil uses the global config; false disables; true enables.
 	ReplacerEnabled *bool
+	// ToolcoachEnabled overrides the global toolcoach setting for this call.
+	// nil uses the global config; false disables; true enables.
+	ToolcoachEnabled *bool
 }
 
 type SessionAgent interface {

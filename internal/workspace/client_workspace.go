@@ -190,6 +190,10 @@ func (w *ClientWorkspace) AgentCancel(sessionID string) {
 	_ = w.client.CancelAgentSession(context.Background(), w.workspaceID(), sessionID)
 }
 
+func (w *ClientWorkspace) AgentSkipCoach(sessionID string) {
+	// TODO: add server endpoint for skip-coach when client-mode needs it.
+}
+
 func (w *ClientWorkspace) AgentIsBusy() bool {
 	info, err := w.client.GetAgentInfo(context.Background(), w.workspaceID())
 	if err != nil {

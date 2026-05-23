@@ -32,6 +32,16 @@ Your job is to audit the PRIMARY AGENT's planned or executed actions and provide
 6. **Tone**: Is the tone professional, helpful, and appropriate?
 {{end}}
 
+{{if .CoachSummary}}
+## Coaching Observations
+
+The following tool usage patterns were observed during this turn:
+
+<<<COACH_BEGIN>>>
+{{.CoachSummary}}
+<<<COACH_END>>>
+{{end}}
+
 {{if .ProjectContext}}
 ## Project Context
 
@@ -103,6 +113,7 @@ type CriticPromptData struct {
 	PrimaryDiff    string
 	PrimaryPlan    string
 	MessageContent string
+	CoachSummary   string
 }
 
 // BuildCriticPrompt assembles the critic prompt from a template and checkpoint.
@@ -131,6 +142,7 @@ func BuildCriticPrompt(cp Checkpoint, workDir string) (string, error) {
 		PrimaryDiff:    escapeDelimiters(cp.PrimaryDiff),
 		PrimaryPlan:    escapeDelimiters(cp.PrimaryPlan),
 		MessageContent: escapeDelimiters(cp.MessageContent),
+		CoachSummary:   escapeDelimiters(cp.CoachSummary),
 	}
 
 	var buf bytes.Buffer
@@ -192,6 +204,8 @@ func escapeDelimiters(text string) string {
 	text = strings.ReplaceAll(text, "<<<MESSAGE_BEGIN>>>", "««MESSAGE_BEGIN»»")
 	text = strings.ReplaceAll(text, "<<<CONTEXT_END>>>", "««CONTEXT_END»»")
 	text = strings.ReplaceAll(text, "<<<CONTEXT_BEGIN>>>", "««CONTEXT_BEGIN»»")
+	text = strings.ReplaceAll(text, "<<<COACH_END>>>", "««COACH_END»»")
+	text = strings.ReplaceAll(text, "<<<COACH_BEGIN>>>", "««COACH_BEGIN»»")
 	return text
 }
 

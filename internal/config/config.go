@@ -269,32 +269,33 @@ type Options struct {
 	// the SQLite database and workspace overrides. Relative paths are
 	// resolved against the working directory; absolute paths are used
 	// verbatim. After defaulting the stored value is always absolute.
-	DataDirectory             string       `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data. Relative paths are resolved against the working directory; absolute paths are used as-is.,default=.crush,example=.crush"`
-	DisabledTools             []string     `json:"disabled_tools,omitempty" jsonschema:"description=List of built-in tools to disable and hide from the agent,example=bash,example=sourcegraph"`
-	DisableProviderAutoUpdate bool         `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`
-	DisableDefaultProviders   bool         `json:"disable_default_providers,omitempty" jsonschema:"description=Ignore all default/embedded providers. When enabled\\, providers must be fully specified in the config file with base_url\\, models\\, and api_key - no merging with defaults occurs,default=false"`
-	Attribution               *Attribution `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
-	DisableMetrics            bool         `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
-	InitializeAs              string       `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
-	AutoLSP                   *bool        `json:"auto_lsp,omitempty" jsonschema:"description=Automatically setup LSPs based on root markers,default=true"`
-	Progress                  *bool        `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
-	DisableNotifications      bool         `json:"disable_notifications,omitempty" jsonschema:"description=Deprecated: Use notification_style instead. Disable desktop notifications,default=false"`
-	NotificationStyle         string       `json:"notification_style,omitempty" jsonschema:"description=Notification style to use. Options: auto (default), native, osc, bell, disabled. Auto selects based on environment: native for local sessions, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
-	DisabledSkills            []string     `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
-	Critic                    *CriticConfig `json:"critic,omitempty" jsonschema:"description=Self-critic agent configuration for automated review loops"`
-	Replacer                  *ReplacerConfig `json:"replacer,omitempty" jsonschema:"description=Replacement agent configuration for conversation continuation"`
+	DataDirectory             string           `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data. Relative paths are resolved against the working directory; absolute paths are used as-is.,default=.crush,example=.crush"`
+	DisabledTools             []string         `json:"disabled_tools,omitempty" jsonschema:"description=List of built-in tools to disable and hide from the agent,example=bash,example=sourcegraph"`
+	DisableProviderAutoUpdate bool             `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`
+	DisableDefaultProviders   bool             `json:"disable_default_providers,omitempty" jsonschema:"description=Ignore all default/embedded providers. When enabled\\, providers must be fully specified in the config file with base_url\\, models\\, and api_key - no merging with defaults occurs,default=false"`
+	Attribution               *Attribution     `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
+	DisableMetrics            bool             `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
+	InitializeAs              string           `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
+	AutoLSP                   *bool            `json:"auto_lsp,omitempty" jsonschema:"description=Automatically setup LSPs based on root markers,default=true"`
+	Progress                  *bool            `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
+	DisableNotifications      bool             `json:"disable_notifications,omitempty" jsonschema:"description=Deprecated: Use notification_style instead. Disable desktop notifications,default=false"`
+	NotificationStyle         string           `json:"notification_style,omitempty" jsonschema:"description=Notification style to use. Options: auto (default), native, osc, bell, disabled. Auto selects based on environment: native for local sessions, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
+	DisabledSkills            []string         `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
+	Critic                    *CriticConfig    `json:"critic,omitempty" jsonschema:"description=Self-critic agent configuration for automated review loops"`
+	Replacer                  *ReplacerConfig  `json:"replacer,omitempty" jsonschema:"description=Replacement agent configuration for conversation continuation"`
+	Toolcoach                 *ToolcoachConfig `json:"toolcoach,omitempty" jsonschema:"description=Tool pattern coach for real-time tool usage coaching"`
 }
 
 // CriticConfig controls the self-critic improvement loop.
 // When the critic section is present in the config but enabled is omitted,
 // the critic is auto-enabled (defaults to true).
 type CriticConfig struct {
-	Enabled       *bool   `json:"enabled,omitempty" jsonschema:"description=Enable the critic agent for self-improvement loops"`
-	Model         string  `json:"model,omitempty" jsonschema:"description=Model override for the critic agent; defaults to a cheap heuristic"`
-	MaxIterations int     `json:"max_iterations,omitempty" jsonschema:"description=Maximum critic feedback loops per checkpoint,default=3"`
-	AutoApprove   bool    `json:"auto_approve,omitempty" jsonschema:"description=Automatically approve critic suggestions without user confirmation"`
-	Threshold     float64 `json:"threshold,omitempty" jsonschema:"description=Confidence threshold below which revise requires user confirmation,default=0.85"`
-	CacheSize     int     `json:"cache_size,omitempty" jsonschema:"description=LRU cache size for identical diff reviews,default=32"`
+	Enabled       *bool         `json:"enabled,omitempty" jsonschema:"description=Enable the critic agent for self-improvement loops"`
+	Model         string        `json:"model,omitempty" jsonschema:"description=Model override for the critic agent; defaults to a cheap heuristic"`
+	MaxIterations int           `json:"max_iterations,omitempty" jsonschema:"description=Maximum critic feedback loops per checkpoint,default=3"`
+	AutoApprove   bool          `json:"auto_approve,omitempty" jsonschema:"description=Automatically approve critic suggestions without user confirmation"`
+	Threshold     float64       `json:"threshold,omitempty" jsonschema:"description=Confidence threshold below which revise requires user confirmation,default=0.85"`
+	CacheSize     int           `json:"cache_size,omitempty" jsonschema:"description=LRU cache size for identical diff reviews,default=32"`
 	MaxDiffSize   int           `json:"max_diff_size,omitempty" jsonschema:"description=Maximum diff bytes to send to the critic,default=32768"`
 	MaxFileSize   int           `json:"max_file_size,omitempty" jsonschema:"description=Maximum file size to snapshot for critic review,default=10485760"`
 	Timeout       time.Duration `json:"timeout,omitempty" jsonschema:"description=Timeout for each critic LLM call,default=10s"`
@@ -333,6 +334,32 @@ func (rc *ReplacerConfig) IsEnabled() bool {
 		return true
 	}
 	return *rc.Enabled
+}
+
+// ToolcoachConfig controls the tool pattern coach for real-time anti-pattern
+// detection and coaching.
+// When the toolcoach section is present in the config but enabled is omitted,
+// the toolcoach is auto-enabled (defaults to true).
+type ToolcoachConfig struct {
+	Enabled                   *bool    `json:"enabled,omitempty" jsonschema:"description=Enable the tool pattern coach for real-time tool usage coaching"`
+	MaxPatternsPerTurn        int      `json:"max_patterns_per_turn,omitempty" jsonschema:"description=Maximum coaching tips per agent turn,default=3"`
+	EnabledPatterns           []string `json:"enabled_patterns,omitempty" jsonschema:"description=List of pattern IDs to enable; empty enables all,example=edit_without_view,example=broad_grep"`
+	AdaptiveSeverity          *bool    `json:"adaptive_severity,omitempty" jsonschema:"description=Adjust tip severity based on historical pattern effectiveness"`
+	EffectivenessLookbackDays int      `json:"effectiveness_lookback_days,omitempty" jsonschema:"description=Days of historical effectiveness data to consider for adaptive severity,default=30"`
+	Intensity                 string   `json:"intensity,omitempty" jsonschema:"description=Coaching intensity: tutor, balanced, minimal (default tutor)"`
+	AutoRetry                 *bool    `json:"auto_retry,omitempty" jsonschema:"description=Allow coach to auto-retry tools with improved inputs (default false)"`
+	AutoRetrySessions         int      `json:"auto_retry_sessions,omitempty" jsonschema:"description=Sessions before auto-switch from tutor to balanced,default=3"`
+}
+
+// IsEnabled reports whether the toolcoach is enabled.
+func (tc *ToolcoachConfig) IsEnabled() bool {
+	if tc == nil {
+		return false
+	}
+	if tc.Enabled == nil {
+		return true
+	}
+	return *tc.Enabled
 }
 
 type MCPs map[string]MCPConfig

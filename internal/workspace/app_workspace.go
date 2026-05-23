@@ -111,6 +111,12 @@ func (w *AppWorkspace) AgentCancel(sessionID string) {
 	}
 }
 
+func (w *AppWorkspace) AgentSkipCoach(sessionID string) {
+	if w.app.AgentCoordinator != nil {
+		w.app.AgentCoordinator.SkipCoach(sessionID)
+	}
+}
+
 func (w *AppWorkspace) AgentIsBusy() bool {
 	if w.app.AgentCoordinator == nil {
 		return false

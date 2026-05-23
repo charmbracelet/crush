@@ -144,6 +144,14 @@ func (m *mockMessageService) Subscribe(ctx context.Context) <-chan pubsub.Event[
 	return nil
 }
 
+// MessageCount returns the number of messages currently stored, excluding the
+// base messages returned by List.
+func (m *mockMessageService) MessageCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.messages)
+}
+
 func TestNewMiddleware_NilPrimary(t *testing.T) {
 	t.Parallel()
 	require.Nil(t, NewMiddleware(nil, ReplacerConfig{Enabled: true}))
@@ -330,6 +338,9 @@ func TestMiddleware_Run_NilResult(t *testing.T) {
 	result, err := mw.Run(context.Background(), agent.SessionAgentCall{SessionID: "sid", Prompt: "hi"})
 	require.NoError(t, err)
 	require.Nil(t, result)
+	// Spinner should be cleaned up even when primary returns nil.
+	time.Sleep(50 * time.Millisecond)
+	require.Zero(t, msgSvc.MessageCount())
 }
 
 func TestMiddleware_Run_PrimaryError(t *testing.T) {
@@ -347,6 +358,36 @@ func TestMiddleware_Run_PrimaryError(t *testing.T) {
 	result, err := mw.Run(context.Background(), agent.SessionAgentCall{SessionID: "sid", Prompt: "hi"})
 	require.Error(t, err)
 	require.Nil(t, result)
+	// Spinner should be cleaned up even when primary returns an error.
+	time.Sleep(50 * time.Millisecond)
+	require.Zero(t, msgSvc.MessageCount())
+}
+
+func TestMiddleware_Run_ContextCancelledAfterPrimary(t *testing.T) {
+	t.Parallel()
+
+	msgSvc := &mockMessageService{}
+	primary := &mockAgent{response: "hello there"}
+	cfg := ReplacerConfig{Enabled: true, MaxIterations: 2}
+	mw := NewMiddleware(primary, cfg)
+	mw.SetMessageService(msgSvc)
+	mw.SetModelResolver(func(ctx context.Context) (fantasy.LanguageModel, error) {
+		return &mockLLM{decision: `{"action":"stop","prompt":""}`}, nil
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	// Cancel after primary returns but before evaluation starts.
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+
+	result, err := mw.Run(ctx, agent.SessionAgentCall{SessionID: "sid", Prompt: "hi"})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	// Spinner should be cleaned up when context is cancelled before evaluation.
+	time.Sleep(50 * time.Millisecond)
+	require.Zero(t, msgSvc.MessageCount())
 }
 
 func TestMiddleware_Run_MaxIterations(t *testing.T) {
@@ -663,3 +704,96 @@ func (m *mockSlowLLM) StreamObject(ctx context.Context, call fantasy.ObjectCall)
 }
 func (m *mockSlowLLM) Provider() string { return "mock" }
 func (m *mockSlowLLM) Model() string    { return "mock-model" }
+
+func TestMiddleware_SkipCoach_BeforeEval(t *testing.T) {
+	t.Parallel()
+
+	msgSvc := &mockMessageService{}
+	primary := &mockAgent{response: "hello there"}
+	cfg := ReplacerConfig{Enabled: true, MaxIterations: 2}
+	mw := NewMiddleware(primary, cfg)
+	mw.SetMessageService(msgSvc)
+
+	callCount := 0
+	mw.SetModelResolver(func(ctx context.Context) (fantasy.LanguageModel, error) {
+		callCount++
+		return &mockLLM{decision: `{"action":"stop","prompt":""}`}, nil
+	})
+
+	// Skip the coach before Run() starts.
+	mw.SkipCoach("sid")
+
+	result, err := mw.Run(context.Background(), agent.SessionAgentCall{SessionID: "sid", Prompt: "hi"})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "hello there", result.Response.Content.Text())
+	// Model resolver should never have been called because skip happened before eval.
+	require.Zero(t, callCount)
+	// Spinner should be cleaned up.
+	time.Sleep(50 * time.Millisecond)
+	require.Zero(t, msgSvc.MessageCount())
+}
+
+func TestMiddleware_SkipCoach_DuringEval(t *testing.T) {
+	t.Parallel()
+
+	msgSvc := &mockMessageService{}
+	primary := &mockAgent{response: "hello there"}
+	cfg := ReplacerConfig{Enabled: true, MaxIterations: 2}
+	mw := NewMiddleware(primary, cfg)
+	mw.SetMessageService(msgSvc)
+
+	mw.SetModelResolver(func(ctx context.Context) (fantasy.LanguageModel, error) {
+		return &mockSlowLLM{}, nil
+	})
+
+	// Start Run() in a goroutine and skip halfway through.
+	var result *fantasy.AgentResult
+	var runErr error
+	done := make(chan struct{})
+	go func() {
+		result, runErr = mw.Run(context.Background(), agent.SessionAgentCall{SessionID: "sid", Prompt: "hi"})
+		close(done)
+	}()
+
+	// Wait briefly for evaluation to start, then skip.
+	time.Sleep(50 * time.Millisecond)
+	mw.SkipCoach("sid")
+
+	select {
+	case <-done:
+		require.NoError(t, runErr)
+		require.NotNil(t, result)
+		require.Equal(t, "hello there", result.Response.Content.Text())
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run() did not return after SkipCoach")
+	}
+
+	// Spinner should be cleaned up.
+	time.Sleep(50 * time.Millisecond)
+	require.Zero(t, msgSvc.MessageCount())
+}
+
+func TestMiddleware_SkipCoach_ResetsFlag(t *testing.T) {
+	t.Parallel()
+
+	msgSvc := &mockMessageService{}
+	primary := &mockAgent{response: "hello there"}
+	cfg := ReplacerConfig{Enabled: true, MaxIterations: 2}
+	mw := NewMiddleware(primary, cfg)
+	mw.SetMessageService(msgSvc)
+
+	// First run: skip it.
+	mw.SkipCoach("sid")
+	result, err := mw.Run(context.Background(), agent.SessionAgentCall{SessionID: "sid", Prompt: "hi"})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	// Second run: should evaluate normally because the flag was reset.
+	mw.SetModelResolver(func(ctx context.Context) (fantasy.LanguageModel, error) {
+		return &mockLLM{decision: `{"action":"stop","prompt":""}`}, nil
+	})
+	result, err = mw.Run(context.Background(), agent.SessionAgentCall{SessionID: "sid", Prompt: "hi again"})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+}

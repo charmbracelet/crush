@@ -129,7 +129,7 @@ func (m *mockMessageService) DeleteSessionMessages(ctx context.Context, sessionI
 	return nil
 }
 func (m *mockMessageService) Flush(ctx context.Context, id string) error { return nil }
-func (m *mockMessageService) FlushAll(ctx context.Context) error { return nil }
+func (m *mockMessageService) FlushAll(ctx context.Context) error         { return nil }
 func (m *mockMessageService) Subscribe(ctx context.Context) <-chan pubsub.Event[message.Message] {
 	return nil
 }

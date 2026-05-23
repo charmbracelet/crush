@@ -53,6 +53,10 @@ type Middleware struct {
 	// delete it immediately when new input arrives.
 	evalSpinnerID string
 	evalMu        sync.Mutex
+
+	// skipCoach is set by SkipCoach() to interrupt the current evaluation
+	// without disabling the replacer permanently.
+	skipCoach atomic.Bool
 }
 
 // NewMiddleware creates a replacement agent middleware.
@@ -114,10 +118,12 @@ func (m *Middleware) Run(ctx context.Context, call agent.SessionAgentCall) (*fan
 	result, err, evalMsg := m.runPrimaryWithEval(ctx, call)
 	if err != nil {
 		slog.Info("Replacer primary returned error", "session_id", call.SessionID, "error", err)
+		m.deleteEvalIndicator(evalMsg.ID)
 		return result, err
 	}
 	if result == nil {
 		slog.Info("Replacer primary returned nil", "session_id", call.SessionID)
+		m.deleteEvalIndicator(evalMsg.ID)
 		return nil, nil
 	}
 
@@ -131,6 +137,17 @@ func (m *Middleware) Run(ctx context.Context, call agent.SessionAgentCall) (*fan
 		// starting any work.
 		if ctx.Err() != nil {
 			slog.Info("Replacer evaluation skipped because context was cancelled", "session_id", call.SessionID, "iteration", iteration)
+			m.deleteEvalIndicator(evalMsg.ID)
+			return result, nil
+		}
+
+		// Check if the user requested a one-time skip via /skipcoach.
+		if m.skipCoach.Load() {
+			m.skipCoach.Store(false)
+			slog.Info("Replacer evaluation skipped by user", "session_id", call.SessionID, "iteration", iteration)
+			m.deleteEvalIndicator(evalMsg.ID)
+			event.TrackReplacerDecision(call.SessionID, "user_skip", iteration)
+			event.TrackReplacerLoopCompleted(call.SessionID, iteration+1, "user_skip")
 			return result, nil
 		}
 
@@ -176,6 +193,14 @@ func (m *Middleware) Run(ctx context.Context, call agent.SessionAgentCall) (*fan
 		}
 
 		if evalErr != nil {
+			// Distinguish a user-initiated skip from genuine errors.
+			if m.skipCoach.Load() {
+				m.skipCoach.Store(false)
+				slog.Info("Replacer evaluation skipped by user", "session_id", call.SessionID, "iteration", iteration)
+				event.TrackReplacerDecision(call.SessionID, "user_skip", iteration)
+				event.TrackReplacerLoopCompleted(call.SessionID, iteration+1, "user_skip")
+				return result, nil
+			}
 			// If the coach timed out, treat it as satisfied rather than an error.
 			if errors.Is(evalErr, context.DeadlineExceeded) {
 				slog.Info("Replacer evaluation timed out, treating as satisfied", "session_id", call.SessionID, "iteration", iteration)
@@ -233,10 +258,12 @@ func (m *Middleware) Run(ctx context.Context, call agent.SessionAgentCall) (*fan
 		result, err, evalMsg = m.runPrimaryWithEval(ctx, newCall)
 		if err != nil {
 			event.TrackReplacerLoopCompleted(call.SessionID, iteration+1, "primary_error")
+			m.deleteEvalIndicator(evalMsg.ID)
 			return result, err
 		}
 		if result == nil {
 			event.TrackReplacerLoopCompleted(call.SessionID, iteration+1, "nil_result")
+			m.deleteEvalIndicator(evalMsg.ID)
 			return nil, nil
 		}
 	}
@@ -459,6 +486,24 @@ func (m *Middleware) evaluate(ctx context.Context, sessionID string, iteration i
 	return decision, nil
 }
 
+// deleteEvalIndicator removes a spinner message by ID. It uses a background
+// context so cancellation never blocks cleanup, and retries once on failure to
+// avoid leaving orphaned indicators in the UI.
+func (m *Middleware) deleteEvalIndicator(id string) {
+	if id == "" || m.messages == nil {
+		return
+	}
+	go func(msgID string) {
+		delCtx, delCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer delCancel()
+		if delErr := m.messages.Delete(delCtx, msgID); delErr != nil {
+			// Retry once after a short delay in case of transient errors.
+			time.Sleep(50 * time.Millisecond)
+			_ = m.messages.Delete(delCtx, msgID)
+		}
+	}(id)
+}
+
 // flashStopIndicator shows a brief "coach is satisfied" spinner and then
 // removes it after a short delay so the user gets feedback when the coach
 // decides to stop.
@@ -548,6 +593,19 @@ func (m *Middleware) CancelAll() {
 	}
 	m.evalMu.Unlock()
 	m.primary.CancelAll()
+}
+
+// SkipCoach interrupts the current evaluation without disabling the replacer
+// permanently. It sets a flag that the Run() loop checks so the next (or
+// in-flight) evaluation is treated as a user skip rather than an error.
+func (m *Middleware) SkipCoach(sessionID string) {
+	m.skipCoach.Store(true)
+	m.evalMu.Lock()
+	if m.evalCancel != nil {
+		m.evalCancel()
+		m.evalCancel = nil
+	}
+	m.evalMu.Unlock()
 }
 
 // IsSessionBusy delegates to the primary agent, but also reports busy when the

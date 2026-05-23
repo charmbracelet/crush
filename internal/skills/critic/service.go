@@ -23,10 +23,10 @@ type CriticVerdictEvent struct {
 // CriticService orchestrates the review loop between the primary agent and the
 // critic agent.
 type CriticService struct {
-	cfg     CriticSkillConfig
-	emitter CheckpointEmitter
-	cache   *FeedbackCache
-	pub     pubsub.Publisher[any]
+	cfg      CriticSkillConfig
+	emitter  CheckpointEmitter
+	cache    *FeedbackCache
+	pub      pubsub.Publisher[any]
 	breakers *breakerRegistry
 }
 

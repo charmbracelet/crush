@@ -162,6 +162,45 @@ func TrackReplacerLoopCompleted(sessionID string, iterations int, finalAction st
 	)
 }
 
+// TrackToolcoachPattern logs a toolcoach pattern detection event to PostHog.
+func TrackToolcoachPattern(sessionID, patternID, severity string) {
+	send("toolcoach.pattern",
+		"session_id", sessionID,
+		"pattern_id", patternID,
+		"severity", severity,
+	)
+}
+
+// TrackToolcoachTime logs a toolcoach timing event to PostHog.
+func TrackToolcoachTime(sessionID string, delayMicros int64, totalTimeMs float64) {
+	send("toolcoach.time",
+		"session_id", sessionID,
+		"delay_micros", delayMicros,
+		"total_time_ms", totalTimeMs,
+	)
+}
+
+// TrackToolcoachSessionSummary logs a toolcoach session summary event.
+func TrackToolcoachSessionSummary(sessionID string, toolCalls int64, totalTimeMs float64, avgDelayMicros int64) {
+	send("toolcoach.session.summary",
+		"session_id", sessionID,
+		"tool_calls_coached", toolCalls,
+		"total_time_ms", totalTimeMs,
+		"avg_delay_micros", avgDelayMicros,
+	)
+}
+
+// TrackToolcoachPatternDetail logs per-pattern effectiveness data.
+func TrackToolcoachPatternDetail(sessionID, patternID string, fired, acted, ignored int64) {
+	send("toolcoach.pattern.detail",
+		"session_id", sessionID,
+		"pattern_id", patternID,
+		"fired", fired,
+		"acted", acted,
+		"ignored", ignored,
+	)
+}
+
 // Error logs an error event to PostHog with the error type and message.
 func Error(errToLog any, props ...any) {
 	if client == nil || distinctId == "" || errToLog == nil {

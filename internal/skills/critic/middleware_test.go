@@ -208,6 +208,34 @@ func TestMiddleware_InterfaceCompliance(t *testing.T) {
 	_ = m.Model()
 }
 
+type mockCoachProvider struct {
+	summary string
+}
+
+func (m *mockCoachProvider) GetCoachSummary(sessionID string) string {
+	return m.summary
+}
+
+func TestMiddleware_Run_CoachSummaryEnrichment(t *testing.T) {
+	t.Parallel()
+	chatAgent := &chatMockAgent{response: "Hello!"}
+	cfg := CriticSkillConfig{Enabled: true, MaxIterations: 3}
+	m := NewMiddleware(chatAgent, cfg)
+
+	cs := NewCriticService(cfg, (pubsub.Publisher[any])(nil))
+	var capturedCheckpoint Checkpoint
+	cs.SetCheckpointEmitter(func(ctx context.Context, cp Checkpoint) (*CriticFeedback, error) {
+		capturedCheckpoint = cp
+		return &CriticFeedback{Verdict: "approve", Confidence: 0.9}, nil
+	})
+	m.SetCriticService(cs)
+	m.SetCoachSummaryProvider(&mockCoachProvider{summary: "- Pattern X: fired 3 times."})
+
+	_, err := m.Run(context.Background(), agent.SessionAgentCall{SessionID: "sid"})
+	require.NoError(t, err)
+	require.Contains(t, capturedCheckpoint.CoachSummary, "Pattern X")
+}
+
 func TestMiddleware_Run_EmitsEvents(t *testing.T) {
 	// Not parallel because it sets a global event hook.
 	var events []string
@@ -366,7 +394,7 @@ func (m *mockMessageService) DeleteSessionMessages(ctx context.Context, sessionI
 	return nil
 }
 func (m *mockMessageService) Flush(ctx context.Context, id string) error { return nil }
-func (m *mockMessageService) FlushAll(ctx context.Context) error { return nil }
+func (m *mockMessageService) FlushAll(ctx context.Context) error         { return nil }
 func (m *mockMessageService) Subscribe(ctx context.Context) <-chan pubsub.Event[message.Message] {
 	return nil
 }

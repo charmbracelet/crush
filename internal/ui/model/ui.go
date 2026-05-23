@@ -1551,6 +1551,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		cmds = append(cmds, m.initializeProject())
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionSkipCoach:
+		if m.hasSession() && m.com.Workspace.AgentIsReady() {
+			m.com.Workspace.AgentSkipCoach(m.session.ID)
+		}
+		m.dialog.CloseDialog(dialog.CommandsID)
 
 	case dialog.ActionSelectModel:
 		if cmd := m.handleSelectModel(msg); cmd != nil {
@@ -1996,6 +2001,13 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				value = strings.TrimSpace(value)
 				if value == "exit" || value == "quit" {
 					return m.openQuitDialog()
+				}
+
+				if value == "/skipcoach" || value == "skipcoach" {
+					if m.hasSession() && m.com.Workspace.AgentIsReady() {
+						m.com.Workspace.AgentSkipCoach(m.session.ID)
+					}
+					return nil
 				}
 
 				attachments := m.attachments.List()

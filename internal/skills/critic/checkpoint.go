@@ -53,6 +53,14 @@ type Checkpoint struct {
 	ToolCalls      []ToolCallSnapshot
 	LSPDiagnostics []DiagnosticSnapshot
 	Iteration      int
+	CoachSummary   string
+}
+
+// CoachSummaryProvider is implemented by middleware that can supply a coaching
+// summary for the current session turn. The critic uses this to enrich its
+// review with real-time tool usage observations.
+type CoachSummaryProvider interface {
+	GetCoachSummary(sessionID string) string
 }
 
 // Gate evaluates feedback and decides whether to proceed, revise, or halt.

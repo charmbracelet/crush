@@ -13,17 +13,17 @@ INSERT INTO critic_reviews (
 ) VALUES (
     ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now')
 )
-RETURNING id, session_id, message_id, verdict, confidence, concerns, summary, diff_snapshot, lsp_diagnostics, created_at
+RETURNING id, session_id, message_id, verdict, confidence, concerns, summary, diff_snapshot, lsp_diagnostics, created_at, revision_outcome
 ;
 
 -- name: GetCriticReviewByMessageID :one
-SELECT id, session_id, message_id, verdict, confidence, concerns, summary, diff_snapshot, lsp_diagnostics, created_at
+SELECT id, session_id, message_id, verdict, confidence, concerns, summary, diff_snapshot, lsp_diagnostics, created_at, revision_outcome
 FROM critic_reviews
 WHERE message_id = ? LIMIT 1
 ;
 
 -- name: ListCriticReviewsBySession :many
-SELECT id, session_id, message_id, verdict, confidence, concerns, summary, diff_snapshot, lsp_diagnostics, created_at
+SELECT id, session_id, message_id, verdict, confidence, concerns, summary, diff_snapshot, lsp_diagnostics, created_at, revision_outcome
 FROM critic_reviews
 WHERE session_id = ?
 ORDER BY created_at DESC

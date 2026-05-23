@@ -24,6 +24,7 @@ import (
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/skills/critic"
 	"github.com/charmbracelet/crush/internal/skills/replacer"
+	"github.com/charmbracelet/crush/internal/skills/toolcoach"
 	openaisdk "github.com/charmbracelet/openai-go/option"
 )
 
@@ -56,6 +57,7 @@ func (app *App) buildCriticWrapper(cfg critic.CriticSkillConfig) func(agent.Sess
 		mw.SetCriticService(criticSvc)
 		mw.SetMessageService(app.Messages)
 		mw.SetStore(app.CriticStore)
+		mw.SetCoachSummaryProvider(app)
 		return mw
 	}
 }
@@ -256,6 +258,25 @@ func (app *App) buildReplacerWrapper(cfg replacer.ReplacerConfig) func(agent.Ses
 			})
 			return model, resolveErr
 		})
+		return mw
+	}
+}
+
+// buildToolcoachWrapper creates an AgentWrapper that injects toolcoach middleware
+// around the primary agent when the tool pattern coach is enabled.
+func (app *App) buildToolcoachWrapper(cfg toolcoach.ToolcoachConfig) func(agent.SessionAgent) agent.SessionAgent {
+	if !cfg.Enabled {
+		slog.Info("Toolcoach disabled in config")
+		return nil
+	}
+
+	slog.Info("Toolcoach enabled", "max_patterns_per_turn", cfg.MaxPatternsPerTurn)
+
+	return func(primary agent.SessionAgent) agent.SessionAgent {
+		mw := toolcoach.NewMiddleware(primary, cfg)
+		mw.SetMessageService(app.Messages)
+		mw.SetStore(app.ToolcoachStore)
+		app.toolcoachMw.Store(mw)
 		return mw
 	}
 }

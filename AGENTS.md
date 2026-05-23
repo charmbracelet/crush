@@ -111,7 +111,7 @@ internal/
   and agent — it takes inputs, runs commands, returns decisions. The
   `hookedTool` decorator in `internal/agent/hooked_tool.go` wraps tools at
   the coordinator level. Hooks run before permission checks. See
-  `HOOKS.md` for the user-facing protocol.
+  `docs/hooks/README.md` for the user-facing protocol.
 - **CGO disabled**: builds with `CGO_ENABLED=0` and
   `GOEXPERIMENT=greenteagc`.
 - **Middleware pattern**: Skills wrap `SessionAgent` as decorators. The
@@ -290,6 +290,7 @@ Three built-in skills (prompt injectors via `crush://skills/` URL):
 - **`crush-config`**: Configuration help
 - **`crush-hooks`**: Hook authoring guide
 - **`jq`**: jq syntax reference
+- **`supervisor-impl`**: Implementation guide for the Supervisor Agent extension (stored in `builtin/supervisor-impl/` but **fails to parse** — has no YAML frontmatter; not injected into prompts until fixed)
 
 ### Middleware Stack Order
 
@@ -348,10 +349,24 @@ real-time tool usage and injects coaching tips into tool results. Overhead is
   "toolcoach": {
     "enabled": true,
     "max_patterns_per_turn": 3,
-    "enabled_patterns": []
+    "enabled_patterns": [],
+    "adaptive_severity": false,
+    "intensity": "tutor",
+    "auto_retry": false,
+    "auto_retry_sessions": 3
   }
 }
 ```
+
+| Config field | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | true (auto) | Enable/disable the coach |
+| `max_patterns_per_turn` | int | 3 | Max coaching tips per agent turn |
+| `enabled_patterns` | []string | [] (all) | Restrict to specific pattern IDs |
+| `adaptive_severity` | bool | false | Adjust severity based on historical effectiveness |
+| `intensity` | string | "tutor" | `tutor` (all tips), `balanced` (skip hints after 3 sessions), `minimal` (critical only) |
+| `auto_retry` | bool | false | Allow guided tool retry with improved inputs |
+| `auto_retry_sessions` | int | 3 | Sessions before tutor→balanced auto-switch |
 
 **Environment override**: `CRUSH_TOOLCOACH_DISABLED=1`
 **Per-call disable**: Set `ToolcoachEnabled: &falseVar` in `SessionAgentCall`

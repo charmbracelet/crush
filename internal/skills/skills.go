@@ -232,12 +232,25 @@ func DiscoverWithStates(paths []string) ([]*Skill, []*SkillState) {
 	}
 
 	for _, base := range paths {
-		entries, err := os.ReadDir(base)
+		info, err := os.Stat(base)
 		if err != nil {
 			if !os.IsNotExist(err) {
-				slog.Warn("Failed to read skills path", "path", base, "error", err)
+				slog.Warn("Failed to stat skills path", "path", base, "error", err)
 				addState("", base, StateError, err)
 			}
+			continue
+		}
+		if !info.IsDir() {
+			err := fmt.Errorf("skills path is not a directory: %s", base)
+			slog.Warn("Invalid skills path", "path", base, "error", err)
+			addState("", base, StateError, err)
+			continue
+		}
+
+		entries, err := os.ReadDir(base)
+		if err != nil {
+			slog.Warn("Failed to read skills path", "path", base, "error", err)
+			addState("", base, StateError, err)
 			continue
 		}
 		for _, entry := range entries {

@@ -8,6 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/logo"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/layout"
 )
@@ -141,6 +142,12 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 
 	title := t.Sidebar.SessionTitle.Width(width).MaxHeight(2).Render(m.session.Title)
 	cwd := common.PrettyPath(t, m.com.Workspace.WorkingDir(), width)
+	var branch string
+	if m.gitBranch != "" {
+		branch = t.Sidebar.GitBranch.Width(width).MaxHeight(1).Render(
+			styles.GitBranchIcon + " " + m.gitBranch,
+		)
+	}
 	sidebarLogo := m.sidebarLogo
 	if height < logoHeightBreakpoint {
 		sidebarLogo = logo.SmallRender(m.com.Styles, width, logo.Opts{
@@ -152,10 +159,15 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 		title,
 		"",
 		cwd,
+	}
+	if branch != "" {
+		blocks = append(blocks, branch)
+	}
+	blocks = append(blocks,
 		"",
 		m.modelInfo(width),
 		"",
-	}
+	)
 
 	sidebarHeader := lipgloss.JoinVertical(
 		lipgloss.Left,

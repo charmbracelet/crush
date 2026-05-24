@@ -1805,7 +1805,14 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	}
 
 	if key.Matches(msg, m.keyMap.Quit) && !m.dialog.ContainsDialog(dialog.QuitID) {
-		// Always handle quit keys first
+		// If the editor has text, clear it instead of quitting.
+		if m.focus == uiFocusEditor && m.textarea.Value() != "" {
+			prevHeight := m.textarea.Height()
+			m.textarea.Reset()
+			return tea.Batch(append(cmds, m.handleTextareaHeightChange(prevHeight))...)
+		}
+
+		// Otherwise, open the quit confirmation dialog.
 		if cmd := m.openQuitDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}

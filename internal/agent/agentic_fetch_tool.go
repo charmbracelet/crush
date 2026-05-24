@@ -185,6 +185,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				SystemPrompt:         systemPrompt,
 				DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
 				IsYolo:               c.permissions.SkipRequests(),
+				MaxRetries:           c.cfg.Config().Options.MaxRetries,
 				Sessions:             c.sessions,
 				Messages:             c.messages,
 				Tools:                fetchTools,

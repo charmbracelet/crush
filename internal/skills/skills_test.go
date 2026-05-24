@@ -320,6 +320,20 @@ func TestDiscoverMissingPath(t *testing.T) {
 	require.Empty(t, skills)
 }
 
+func TestDiscoverUnreadablePathState(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "file")
+	require.NoError(t, os.WriteFile(path, []byte("not a directory"), 0o644))
+
+	skills, states := DiscoverWithStates([]string{path})
+	require.Empty(t, skills)
+	require.Len(t, states, 1)
+	require.Empty(t, states[0].Name)
+	require.Equal(t, StateError, states[0].State)
+	require.Error(t, states[0].Err)
+}
+
 func TestToPromptXML(t *testing.T) {
 	t.Parallel()
 

@@ -208,15 +208,16 @@ func splitFrontmatter(content string) (frontmatter, body string, err error) {
 	return frontmatter, body, nil
 }
 
-// Discover finds all valid skills in the given paths.
+// Discover finds all valid skills in the immediate child directories of the
+// given paths.
 func Discover(paths []string) []*Skill {
 	skills, _ := DiscoverWithStates(paths)
 	return skills
 }
 
-// DiscoverWithStates finds all valid skills in the given paths and also
-// returns a per-file state slice describing parse/validation outcomes. Useful
-// for diagnostics and UI reporting.
+// DiscoverWithStates finds all valid skills in the immediate child directories
+// of the given paths and also returns a per-file state slice describing
+// parse/validation outcomes. Useful for diagnostics and UI reporting.
 func DiscoverWithStates(paths []string) ([]*Skill, []*SkillState) {
 	var skills []*Skill
 	var states []*SkillState
@@ -235,6 +236,7 @@ func DiscoverWithStates(paths []string) ([]*Skill, []*SkillState) {
 		if err != nil {
 			if !os.IsNotExist(err) {
 				slog.Warn("Failed to read skills path", "path", base, "error", err)
+				addState("", base, StateError, err)
 			}
 			continue
 		}

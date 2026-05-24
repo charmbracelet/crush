@@ -111,7 +111,7 @@ internal/
   and agent — it takes inputs, runs commands, returns decisions. The
   `hookedTool` decorator in `internal/agent/hooked_tool.go` wraps tools at
   the coordinator level. Hooks run before permission checks. See
-  `docs/hooks/README.md` for the user-facing protocol.
+  `HOOKS.md` for the user-facing protocol.
 - **CGO disabled**: builds with `CGO_ENABLED=0` and
   `GOEXPERIMENT=greenteagc`.
 - **Middleware pattern**: Skills wrap `SessionAgent` as decorators. The
@@ -135,6 +135,7 @@ internal/
   disable.
 - **Agent wrapper**: `AgentWrapper` func type in coordinator allows app layer to inject middleware without import cycles.
 - **`composeWrappers` applies wrappers in list order**: first arg is innermost (wraps primary first), last arg is outermost. Critically: `buildCriticWrapper` wraps primary first (innermost), `buildReplacerWrapper` wraps that result, `buildToolcoachWrapper` wraps that result (outermost).
+- **`SkipCoach` propagation**: The `SkipCoach(sessionID)` method propagates through the wrapper chain via interface type-assertion. Each wrapper (toolcoach, critic) delegates to its primary if the primary implements `interface{ SkipCoach(string) }`. Only the replacer (innermost) implements the actual skip logic (atomic flag + eval cancel). The coordinator type-asserts on `currentAgent` (outermost = toolcoach), so every wrapper in the chain must delegate for the signal to reach the replacer.
 - **`critic` skill override config search paths**: When loading `.crush/skills/critic/config.json`, the code searches in order: `.crush`, `.kimi`, `crush` (first match wins). Not `.github/` or other common directories.
 - **Hook `HaltExitCode`**: Exit code 49 halts the entire turn. It sits outside the generic-error range (1-30), sysexits range (64-78), and killed-by-signal range (128+) so it can't be hit accidentally.
 - **Skill Tracker**: `skillTracker` tracks which skills have been mentioned in the conversation. Skills marked as "loaded" are not re-injected into subsequent prompts.
@@ -290,7 +291,6 @@ Three built-in skills (prompt injectors via `crush://skills/` URL):
 - **`crush-config`**: Configuration help
 - **`crush-hooks`**: Hook authoring guide
 - **`jq`**: jq syntax reference
-- **`supervisor-impl`**: Implementation guide for the Supervisor Agent extension (stored in `builtin/supervisor-impl/` but **fails to parse** — has no YAML frontmatter; not injected into prompts until fixed)
 
 ### Middleware Stack Order
 
@@ -349,24 +349,10 @@ real-time tool usage and injects coaching tips into tool results. Overhead is
   "toolcoach": {
     "enabled": true,
     "max_patterns_per_turn": 3,
-    "enabled_patterns": [],
-    "adaptive_severity": false,
-    "intensity": "tutor",
-    "auto_retry": false,
-    "auto_retry_sessions": 3
+    "enabled_patterns": []
   }
 }
 ```
-
-| Config field | Type | Default | Description |
-|---|---|---|---|
-| `enabled` | bool | true (auto) | Enable/disable the coach |
-| `max_patterns_per_turn` | int | 3 | Max coaching tips per agent turn |
-| `enabled_patterns` | []string | [] (all) | Restrict to specific pattern IDs |
-| `adaptive_severity` | bool | false | Adjust severity based on historical effectiveness |
-| `intensity` | string | "tutor" | `tutor` (all tips), `balanced` (skip hints after 3 sessions), `minimal` (critical only) |
-| `auto_retry` | bool | false | Allow guided tool retry with improved inputs |
-| `auto_retry_sessions` | int | 3 | Sessions before tutor→balanced auto-switch |
 
 **Environment override**: `CRUSH_TOOLCOACH_DISABLED=1`
 **Per-call disable**: Set `ToolcoachEnabled: &falseVar` in `SessionAgentCall`
@@ -446,6 +432,8 @@ returns a `stop` or `continue` decision with an optional follow-up prompt.
 The replacer auto-enables when the config section is present (if `enabled` is omitted it defaults to `true`; set `"enabled": false` to disable). It uses the small model by default if `model` is not specified.
 
 **Environment variable**: `CRUSH_REPLACER_FORCE_CONTINUE=1` forces the replacer to continue in tests, bypassing model resolution.
+
+**`/skipcoach` command**: Users can type `/skipcoach` (or `skipcoach` without the leading `/` in the textarea) to interrupt the current evaluation without permanently disabling the replacer. This sets an atomic flag that `Run()` checks before and during evaluation, treating the interrupt as a user-initiated skip rather than an error. The skip signal propagates through the middleware chain: coordinator → toolcoach → replacer → critic → primary.
 
 **Dual config structs**: Like the critic, the replacer uses `replacer.ReplacerConfig` (in `internal/skills/replacer/config.go`) internally, not `config.ReplacerConfig` (in `internal/config/config.go`). Both have the same fields; `NewReplacerConfig()` in `config.go` converts from `config.Config`.
 

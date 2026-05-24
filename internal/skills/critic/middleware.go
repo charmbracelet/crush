@@ -466,6 +466,15 @@ func (m *Middleware) CancelAll() {
 	m.primary.CancelAll()
 }
 
+// SkipCoach delegates to the primary agent if it supports skipping coach
+// evaluation. This allows the skip signal to propagate through the wrapper
+// chain when critic sits between the coordinator and the replacer.
+func (m *Middleware) SkipCoach(sessionID string) {
+	if s, ok := m.primary.(interface{ SkipCoach(string) }); ok {
+		s.SkipCoach(sessionID)
+	}
+}
+
 // IsSessionBusy delegates to the primary agent.
 func (m *Middleware) IsSessionBusy(sessionID string) bool {
 	return m.primary.IsSessionBusy(sessionID)

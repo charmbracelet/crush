@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	_ "embed"
 
 	"github.com/charmbracelet/crush/internal/agent/prompt"
@@ -31,6 +32,19 @@ func taskPrompt(opts ...prompt.Option) (*prompt.Prompt, error) {
 		return nil, err
 	}
 	return systemPrompt, nil
+}
+
+var agentPrompts = map[string]func(...prompt.Option) (*prompt.Prompt, error){
+	config.AgentCoder: coderPrompt,
+	config.AgentTask:  taskPrompt,
+}
+
+func agentPrompt(id string, opts ...prompt.Option) (*prompt.Prompt, error) {
+	fn, ok := agentPrompts[id]
+	if !ok {
+		return nil, fmt.Errorf("unknown agent id: %s", id)
+	}
+	return fn(opts...)
 }
 
 func InitializePrompt(cfg *config.ConfigStore) (string, error) {

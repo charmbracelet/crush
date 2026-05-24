@@ -1992,7 +1992,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					break
 				}
 
-				// Otherwise, send the message
+				// Otherwise, send the message. If the coach is evaluating or
+				// ready, signal a skip so the user's new input takes priority.
+				if m.isAgentBusy() && m.hasSession() {
+					m.com.Workspace.AgentSkipCoach(m.session.ID)
+				}
 				m.textarea.Reset()
 				if cmd := m.handleTextareaHeightChange(prevHeight); cmd != nil {
 					cmds = append(cmds, cmd)
@@ -2072,6 +2076,12 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if handleGlobalKeys(msg) {
 					// Handle global keys first before passing to textarea.
 					break
+				}
+
+				// If the coach is evaluating or ready, user typing should
+				// interrupt it so the new input takes priority.
+				if m.isAgentBusy() && m.hasSession() {
+					m.com.Workspace.AgentSkipCoach(m.session.ID)
 				}
 
 				// Check for @ trigger before passing to textarea.

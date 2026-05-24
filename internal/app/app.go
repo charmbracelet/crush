@@ -133,7 +133,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		slog.Warn("No agent configuration found")
 		return app, nil
 	}
-	if err := app.InitCoderAgent(ctx); err != nil {
+	if err := app.InitAgent(ctx, config.AgentCoder); err != nil {
 		return nil, fmt.Errorf("failed to initialize coder agent: %w", err)
 	}
 
@@ -210,11 +210,15 @@ func (app *App) resolveSession(ctx context.Context, continueSessionID string, us
 
 // RunNonInteractive runs the application in non-interactive mode with the
 // given prompt, printing to stdout.
-func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt, largeModel, smallModel string, hideSpinner bool, continueSessionID string, useLast bool) error {
+func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt, largeModel, smallModel string, hideSpinner bool, continueSessionID string, useLast bool, agentID string) error {
 	slog.Info("Running in non-interactive mode")
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	if agentID != "" && app.AgentCoordinator != nil {
+		app.AgentCoordinator.SetMainAgent(agentID)
+	}
 
 	if largeModel != "" || smallModel != "" {
 		if err := app.overrideModelsForNonInteractive(ctx, largeModel, smallModel); err != nil {
@@ -524,10 +528,10 @@ func setupSubscriber[T any](
 	})
 }
 
-func (app *App) InitCoderAgent(ctx context.Context) error {
-	coderAgentCfg := app.config.Config().Agents[config.AgentCoder]
-	if coderAgentCfg.ID == "" {
-		return fmt.Errorf("coder agent configuration is missing")
+func (app *App) InitAgent(ctx context.Context, agentID string) error {
+	agentCfg := app.config.Config().Agents[agentID]
+	if agentCfg.ID == "" {
+		return fmt.Errorf("%s agent configuration is missing", agentID)
 	}
 	var err error
 	app.AgentCoordinator, err = agent.NewCoordinator(
@@ -543,10 +547,17 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.Skills,
 	)
 	if err != nil {
-		slog.Error("Failed to create coder agent", "err", err)
+		slog.Error("Failed to create agent", "agent_id", agentID, "err", err)
 		return err
 	}
+	app.AgentCoordinator.SetMainAgent(agentID)
 	return nil
+}
+
+// InitCoderAgent is a convenience wrapper for InitAgent("coder").
+// Deprecated: Use InitAgent with the specific agent ID instead.
+func (app *App) InitCoderAgent(ctx context.Context) error {
+	return app.InitAgent(ctx, config.AgentCoder)
 }
 
 // Subscribe sends events to the TUI as tea.Msgs.

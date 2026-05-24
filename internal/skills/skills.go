@@ -36,15 +36,17 @@ var (
 
 // Skill represents a parsed SKILL.md file.
 type Skill struct {
-	Name          string            `yaml:"name" json:"name"`
-	Description   string            `yaml:"description" json:"description"`
-	License       string            `yaml:"license,omitempty" json:"license,omitempty"`
-	Compatibility string            `yaml:"compatibility,omitempty" json:"compatibility,omitempty"`
-	Metadata      map[string]string `yaml:"metadata,omitempty" json:"metadata,omitempty"`
-	Instructions  string            `yaml:"-" json:"instructions"`
-	Path          string            `yaml:"-" json:"path"`
-	SkillFilePath string            `yaml:"-" json:"skill_file_path"`
-	Builtin       bool              `yaml:"-" json:"builtin"`
+	Name                   string            `yaml:"name" json:"name"`
+	Description            string            `yaml:"description" json:"description"`
+	UserInvocable          bool              `yaml:"user-invocable" json:"user_invocable"`
+	DisableModelInvocation bool              `yaml:"disable-model-invocation" json:"disable_model_invocation"`
+	License                string            `yaml:"license,omitempty" json:"license,omitempty"`
+	Compatibility          string            `yaml:"compatibility,omitempty" json:"compatibility,omitempty"`
+	Metadata               map[string]string `yaml:"metadata,omitempty" json:"metadata,omitempty"`
+	Instructions           string            `yaml:"-" json:"instructions"`
+	Path                   string            `yaml:"-" json:"path"`
+	SkillFilePath          string            `yaml:"-" json:"skill_file_path"`
+	Builtin                bool              `yaml:"-" json:"builtin"`
 }
 
 // DiscoveryState represents the outcome of discovering a single skill file.
@@ -297,6 +299,7 @@ func DiscoverWithStates(paths []string) ([]*Skill, []*SkillState) {
 }
 
 // ToPromptXML generates XML for injection into the system prompt.
+// Skills with DisableModelInvocation set to true are excluded.
 func ToPromptXML(skills []*Skill) string {
 	if len(skills) == 0 {
 		return ""
@@ -305,6 +308,10 @@ func ToPromptXML(skills []*Skill) string {
 	var sb strings.Builder
 	sb.WriteString("<available_skills>\n")
 	for _, s := range skills {
+		// Skip skills that have disable-model-invocation set
+		if s.DisableModelInvocation {
+			continue
+		}
 		sb.WriteString("  <skill>\n")
 		fmt.Fprintf(&sb, "    <name>%s</name>\n", escape(s.Name))
 		fmt.Fprintf(&sb, "    <description>%s</description>\n", escape(s.Description))
@@ -315,6 +322,20 @@ func ToPromptXML(skills []*Skill) string {
 		sb.WriteString("  </skill>\n")
 	}
 	sb.WriteString("</available_skills>")
+	return sb.String()
+}
+
+// FormatInvocation generates XML for a skill when invoked as a user command.
+func (s *Skill) FormatInvocation() string {
+	var sb strings.Builder
+	sb.WriteString("<loaded_skill>\n")
+	fmt.Fprintf(&sb, "  <name>%s</name>\n", escape(s.Name))
+	fmt.Fprintf(&sb, "  <description>%s</description>\n", escape(s.Description))
+	fmt.Fprintf(&sb, "  <location>%s</location>\n", escape(s.SkillFilePath))
+	sb.WriteString("  <instructions>\n")
+	sb.WriteString(escape(s.Instructions))
+	sb.WriteString("\n  </instructions>\n")
+	sb.WriteString("</loaded_skill>")
 	return sb.String()
 }
 

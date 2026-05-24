@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"sync/atomic"
 
 	"github.com/taigrr/crush/internal/csync"
 	"github.com/taigrr/crush/internal/pubsub"
@@ -90,7 +91,7 @@ type permissionService struct {
 	pendingRequests       *csync.Map[string, chan bool]
 	autoApproveSessions   map[string]bool
 	autoApproveSessionsMu sync.RWMutex
-	skip                  bool
+	skip                  atomic.Bool
 	allowedTools          []string
 
 	// used to make sure we only process one request at a time
@@ -159,7 +160,7 @@ func (s *permissionService) Deny(permission PermissionRequest) {
 }
 
 func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRequest) (bool, error) {
-	if s.skip {
+	if s.skip.Load() {
 		return true, nil
 	}
 
@@ -268,22 +269,23 @@ func (s *permissionService) SubscribeNotifications(ctx context.Context) <-chan p
 }
 
 func (s *permissionService) SetSkipRequests(skip bool) {
-	s.skip = skip
+	s.skip.Store(skip)
 }
 
 func (s *permissionService) SkipRequests() bool {
-	return s.skip
+	return s.skip.Load()
 }
 
 func NewPermissionService(workingDir string, skip bool, allowedTools []string) Service {
-	return &permissionService{
+	svc := &permissionService{
 		Broker:              pubsub.NewBroker[PermissionRequest](),
 		notificationBroker:  pubsub.NewBroker[PermissionNotification](),
 		workingDir:          workingDir,
 		sessionPermissions:  csync.NewMap[PermissionKey, bool](),
 		autoApproveSessions: make(map[string]bool),
-		skip:                skip,
 		allowedTools:        allowedTools,
 		pendingRequests:     csync.NewMap[string, chan bool](),
 	}
+	svc.skip.Store(skip)
+	return svc
 }

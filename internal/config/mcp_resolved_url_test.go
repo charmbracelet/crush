@@ -46,7 +46,7 @@ func TestMCPConfig_ResolvedURL(t *testing.T) {
 
 	t.Run("unset var expands to empty under lenient default", func(t *testing.T) {
 		t.Parallel()
-		// Phase 2 defaults to nounset-off: bare $VAR on an unset
+		// The default is nounset-off: bare $VAR on an unset
 		// variable expands to "" rather than erroring. Here the
 		// host collapses to empty, so the caller sees a malformed
 		// URL rather than a resolver error; that's the expected

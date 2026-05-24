@@ -94,3 +94,8 @@ func (s *SkillState) UnmarshalJSON(data []byte) error {
 type SkillEvent struct {
 	States []SkillState `json:"states"`
 }
+
+// SkillsEvent is the wire representation of skills.Event.
+type SkillsEvent struct {
+	States []SkillState `json:"states"`
+}

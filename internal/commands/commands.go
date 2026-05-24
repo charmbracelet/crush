@@ -12,6 +12,7 @@ import (
 	"github.com/taigrr/crush/internal/agent/tools/mcp"
 	"github.com/taigrr/crush/internal/config"
 	"github.com/taigrr/crush/internal/home"
+	"github.com/taigrr/crush/internal/skills"
 )
 
 var namedArgPattern = regexp.MustCompile(`\$([A-Z][A-Z0-9_]*)`)
@@ -45,6 +46,8 @@ type CustomCommand struct {
 	Name      string
 	Content   string
 	Arguments []Argument
+	// Skill is set when this command represents a user-invocable skill
+	Skill *skills.Skill
 }
 
 type commandSource struct {
@@ -56,6 +59,70 @@ type commandSource struct {
 // XDG config directory, home directory, and project directory.
 func LoadCustomCommands(cfg *config.Config) ([]CustomCommand, error) {
 	return loadAll(buildCommandSources(cfg))
+}
+
+// LoadSkillCommands loads user-invocable skills as custom commands.
+func LoadSkillCommands() []CustomCommand {
+	var commands []CustomCommand
+
+	// Load from global skills directories with "user:" prefix
+	for _, dir := range config.GlobalSkillsDirs() {
+		commands = append(commands, loadInvocableSkillsFromDir(dir, userCommandPrefix)...)
+	}
+
+	return commands
+}
+
+// LoadProjectSkillCommands loads user-invocable skills from project directories as custom commands.
+func LoadProjectSkillCommands(workingDir string) []CustomCommand {
+	var commands []CustomCommand
+
+	// Load from project skills directories with "project:" prefix
+	for _, dir := range config.ProjectSkillsDir(workingDir) {
+		commands = append(commands, loadInvocableSkillsFromDir(dir, projectCommandPrefix)...)
+	}
+
+	return commands
+}
+
+func loadInvocableSkillsFromDir(dir, prefix string) []CustomCommand {
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		return nil
+	}
+
+	var commands []CustomCommand
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		skillPath := filepath.Join(dir, entry.Name(), skills.SkillFileName)
+		skill, err := skills.Parse(skillPath)
+		if err != nil {
+			continue
+		}
+
+		if !skill.UserInvocable {
+			continue
+		}
+
+		name := prefix + skill.Name
+		commands = append(commands, CustomCommand{
+			ID:        name,
+			Name:      name,
+			Content:   skill.Instructions,
+			Arguments: nil,
+			Skill:     skill,
+		})
+	}
+
+	return commands
 }
 
 // LoadMCPPrompts loads custom commands from available MCP servers.

@@ -28,6 +28,7 @@ import (
 	crushlog "github.com/taigrr/crush/internal/log"
 	"github.com/taigrr/crush/internal/proto"
 	"github.com/taigrr/crush/internal/server"
+	"github.com/taigrr/crush/internal/skills"
 	"github.com/taigrr/crush/internal/session"
 	"github.com/taigrr/crush/internal/ui/common"
 	ui "github.com/taigrr/crush/internal/ui/model"
@@ -223,6 +224,27 @@ func setupWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error) {
 	return setupClientServerWorkspace(cmd)
 }
 
+// localSkillsDiscoveryConfig adapts a *config.ConfigStore to the inputs
+// skills.DiscoverFromConfig expects.
+func localSkillsDiscoveryConfig(store *config.ConfigStore) skills.DiscoveryConfig {
+	opts := store.Config().Options
+	var paths, disabled []string
+	if opts != nil {
+		paths = opts.SkillsPaths
+		disabled = opts.DisabledSkills
+	}
+	var resolver func(string) (string, error)
+	if r := store.Resolver(); r != nil {
+		resolver = r.ResolveValue
+	}
+	return skills.DiscoveryConfig{
+		SkillsPaths:    paths,
+		DisabledSkills: disabled,
+		WorkingDir:     store.WorkingDir(),
+		Resolver:       resolver,
+	}
+}
+
 // setupClientServerWorkspace connects to a server process and wraps the
 // result in a ClientWorkspace.
 func setupClientServerWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error) {
@@ -412,7 +434,8 @@ func perHostServerDir(hostURL *url.URL) (string, error) {
 // the --host flag so client and server compute the same key.
 func safeHostName(hostURL *url.URL) string {
 	return safeNameRegexp.ReplaceAllString(
-		hostURL.Scheme+"://"+hostURL.Host+hostURL.Path, "_")
+		hostURL.Scheme+"://"+hostURL.Host+hostURL.Path, "_",
+	)
 }
 
 // serverReadyTimeout returns the total budget for the readiness probe.

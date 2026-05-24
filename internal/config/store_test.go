@@ -318,10 +318,15 @@ func TestConfigStaleness_RefreshClearsDirtyState(t *testing.T) {
 // ReloadFromDisk updates store state BEFORE running model/agent setup,
 // so the new config values are used rather than stale pre-reload values.
 func TestReloadFromDisk_UsesNewConfigValues(t *testing.T) {
-	t.Parallel()
-
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "crush.json")
+
+	// Isolate from the host's global config so only test-provided
+	// providers are visible.
+	t.Setenv("CRUSH_GLOBAL_CONFIG", dir)
+	t.Setenv("CRUSH_GLOBAL_DATA", dir)
+	resetProviderState()
+	t.Cleanup(resetProviderState)
 
 	// Create initial config with one model preference
 	initialConfig := `{

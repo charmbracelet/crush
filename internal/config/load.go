@@ -228,8 +228,7 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 		// a failing $(...) aborts the provider load with a clear
 		// message, and a header that resolves to the empty string
 		// (unset bare $VAR under lenient nounset, $(echo), or literal
-		// "") is dropped from the outgoing request. See PLAN.md
-		// Phase 2 design decisions #14 and #18.
+		// "") is dropped from the outgoing request.
 		for k, v := range headers {
 			resolved, err := resolver.ResolveValue(v)
 			if err != nil {
@@ -297,21 +296,12 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 			prepared.BaseURL = endpoint
 			prepared.ExtraParams["apiVersion"] = env.Get("AZURE_OPENAI_API_VERSION")
 		case catwalk.InferenceProviderBedrock:
-			if !hasAWSCredentials(env) {
+			if p.APIKey == "" && !hasAWSCredentials(env) {
 				if configExists {
 					slog.Warn("Skipping Bedrock provider due to missing AWS credentials")
 					c.Providers.Del(string(p.ID))
 				}
 				continue
-			}
-			prepared.ExtraParams["region"] = env.Get("AWS_REGION")
-			if prepared.ExtraParams["region"] == "" {
-				prepared.ExtraParams["region"] = env.Get("AWS_DEFAULT_REGION")
-			}
-			for _, model := range p.Models {
-				if !strings.HasPrefix(model.ID, "anthropic.") {
-					return fmt.Errorf("bedrock provider only supports anthropic models for now, found: %s", model.ID)
-				}
 			}
 		case catwalk.InferenceProvider("hyper"):
 			if apiKey := env.Get("HYPER_API_KEY"); apiKey != "" {
@@ -388,8 +378,7 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 		}
 
 		// Custom-provider headers share the MCP error contract; see
-		// the known-provider loop above and PLAN.md Phase 2 design
-		// decisions #14 and #18.
+		// the known-provider loop above.
 		for k, v := range providerConfig.ExtraHeaders {
 			resolved, err := resolver.ResolveValue(v)
 			if err != nil {

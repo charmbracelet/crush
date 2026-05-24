@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"encoding/xml"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -12,6 +13,14 @@ import (
 	"github.com/taigrr/crush/internal/ui/list"
 	"github.com/taigrr/crush/internal/ui/styles"
 )
+
+// skillInvocation represents the XML structure for a loaded skill.
+type skillInvocation struct {
+	Name         string `xml:"name"`
+	Description  string `xml:"description"`
+	Location     string `xml:"location"`
+	Instructions string `xml:"instructions"`
+}
 
 // UserMessageItem represents a user message in the chat UI.
 type UserMessageItem struct {
@@ -55,13 +64,23 @@ func (m *UserMessageItem) RawRender(width int) string {
 		return m.renderHighlighted(content, cappedWidth, height)
 	}
 
-	renderer := common.MarkdownRenderer(m.sty, cappedWidth)
-
 	msgContent := strings.TrimSpace(m.message.Content().Text)
+
+	// Check if this is a skill invocation (loaded_skill XML)
+	if strings.HasPrefix(msgContent, "<loaded_skill>") {
+		content = m.renderSkillInvocation(msgContent, cappedWidth)
+		height = lipgloss.Height(content)
+		m.setCachedRender(content, cappedWidth, height)
+		return m.renderHighlighted(content, cappedWidth, height)
+	}
+
+	renderer := common.MarkdownRenderer(m.sty, cappedWidth)
 	mu := common.LockMarkdownRenderer(renderer)
+
 	mu.Lock()
 	result, err := renderer.Render(msgContent)
 	mu.Unlock()
+
 	if err != nil {
 		content = msgContent
 	} else {
@@ -80,6 +99,27 @@ func (m *UserMessageItem) RawRender(width int) string {
 	height = lipgloss.Height(content)
 	m.setCachedRender(content, cappedWidth, height)
 	return m.renderHighlighted(content, cappedWidth, height)
+}
+
+// renderSkillInvocation renders a loaded_skill XML as a special UI element.
+func (m *UserMessageItem) renderSkillInvocation(content string, width int) string {
+	var skill skillInvocation
+	if err := xml.Unmarshal([]byte(content), &skill); err != nil {
+		// If parsing fails, just render as markdown
+		renderer := common.MarkdownRenderer(m.sty, width)
+		mu := common.LockMarkdownRenderer(renderer)
+
+		mu.Lock()
+		result, err := renderer.Render(content)
+		mu.Unlock()
+
+		if err != nil {
+			return content
+		}
+		return strings.TrimSuffix(result, "\n")
+	}
+
+	return toolOutputSkillContent(m.sty, skill.Name, skill.Description)
 }
 
 // Render implements MessageItem.

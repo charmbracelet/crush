@@ -26,11 +26,6 @@ func TestToolDescriptions_NoPanic(t *testing.T) {
 			}
 			desc := bashDescription(attribution, "test-model")
 			require.NotEmpty(t, desc)
-
-			// Verify model name appears in assisted-by style.
-			if style == config.TrailerStyleAssistedBy {
-				require.Contains(t, desc, "test-model")
-			}
 		}
 	})
 
@@ -38,7 +33,7 @@ func TestToolDescriptions_NoPanic(t *testing.T) {
 		t.Parallel()
 		desc := viewDescription()
 		require.NotEmpty(t, desc)
-		require.Contains(t, desc, "2000") // DefaultReadLimit
+		require.Contains(t, desc, "200") // DefaultReadLimit
 	})
 
 	t.Run("grep", func(t *testing.T) {

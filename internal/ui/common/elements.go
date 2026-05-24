@@ -38,9 +38,10 @@ func FormatContextMode(mode string) string {
 
 // ModelContextInfo contains token usage and cost information for a model.
 type ModelContextInfo struct {
-	ContextUsed  int64
-	ModelContext int64
-	Cost         float64
+	ContextUsed    int64
+	ModelContext   int64
+	Cost           float64
+	EstimatedUsage bool
 }
 
 // ModelInfo renders model information including name, provider, reasoning
@@ -85,7 +86,7 @@ func ModelInfo(t *styles.Styles, modelName, providerName, reasoningInfo string, 
 	}
 
 	if context != nil {
-		formattedInfo := formatTokensAndCost(t, context.ContextUsed, context.ModelContext, context.Cost)
+		formattedInfo := formatTokensAndCost(t, context.ContextUsed, context.ModelContext, context.Cost, context.EstimatedUsage)
 		parts = append(parts, lipgloss.NewStyle().PaddingLeft(2).Render(formattedInfo))
 	}
 
@@ -103,7 +104,7 @@ func ModelInfo(t *styles.Styles, modelName, providerName, reasoningInfo string, 
 
 // formatTokensAndCost formats token usage and cost with appropriate units
 // (K/M) and percentage of context window.
-func formatTokensAndCost(t *styles.Styles, tokens, contextWindow int64, cost float64) string {
+func formatTokensAndCost(t *styles.Styles, tokens, contextWindow int64, cost float64, estimated bool) string {
 	var formattedTokens string
 	switch {
 	case tokens >= 1_000_000:
@@ -121,12 +122,19 @@ func formatTokensAndCost(t *styles.Styles, tokens, contextWindow int64, cost flo
 		formattedTokens = strings.Replace(formattedTokens, ".0M", "M", 1)
 	}
 
-	percentage := (float64(tokens) / float64(contextWindow)) * 100
+	var percentage float64
+	if contextWindow > 0 {
+		percentage = (float64(tokens) / float64(contextWindow)) * 100
+	}
 
 	formattedCost := t.ModelInfo.Cost.Render(fmt.Sprintf("$%.2f", cost))
 
 	formattedTokens = t.ModelInfo.TokenCount.Render(fmt.Sprintf("(%s)", formattedTokens))
-	formattedPercentage := t.ModelInfo.TokenPercentage.Render(fmt.Sprintf("%d%%", int(percentage)))
+	percentageText := fmt.Sprintf("%d%%", int(percentage))
+	if estimated {
+		percentageText = "~" + percentageText
+	}
+	formattedPercentage := t.ModelInfo.TokenPercentage.Render(percentageText)
 	formattedTokens = fmt.Sprintf("%s %s", formattedPercentage, formattedTokens)
 	if percentage > 80 {
 		formattedTokens = fmt.Sprintf("%s %s", styles.LSPWarningIcon, formattedTokens)

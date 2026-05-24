@@ -193,6 +193,7 @@ That said, you can also set environment variables for preferred providers.
 | `CEREBRAS_API_KEY`          | Cerebras                                           |
 | `OPENROUTER_API_KEY`        | OpenRouter                                         |
 | `IONET_API_KEY`             | io.net                                             |
+| `ALIBABA_SINGAPORE_API_KEY` | Alibaba (Singapore)                                |
 | `GROQ_API_KEY`              | Groq                                               |
 | `AVIAN_API_KEY`             | Avian                                              |
 | `OPENCODE_API_KEY`          | OpenCode Zen & Go                                  |
@@ -489,6 +490,37 @@ cd "$env:LOCALAPPDATA\crush\skills"
 git clone https://github.com/anthropics/skills.git _temp
 mv _temp/skills/* . ; rm -r -force _temp
 ```
+
+#### User-Invocable Skills
+
+Skills can be made invocable as commands from the commands palette (Ctrl+P). Add `user-invocable: true` to the skill's YAML frontmatter:
+
+```yaml
+---
+name: my-skill
+description: A skill that can be invoked as a command.
+user-invocable: true
+---
+```
+
+User-invocable skills appear in the commands palette with a `user:` or `project:` prefix:
+- Skills from global directories show as `user:skill-name`
+- Skills from project directories show as `project:skill-name`
+
+When invoked, the skill's instructions are loaded into the conversation context.
+
+To prevent the model from auto-triggering a skill (while still allowing user invocation), add `disable-model-invocation: true`:
+
+```yaml
+---
+name: my-skill
+description: Only invocable by users, not the model.
+user-invocable: true
+disable-model-invocation: true
+---
+```
+
+Skills with `disable-model-invocation` won't appear in the model's available skills list but can still be invoked manually by users.
 
 ### Desktop notifications
 

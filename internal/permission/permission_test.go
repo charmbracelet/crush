@@ -79,6 +79,21 @@ func TestPermissionService_AllowedCommands(t *testing.T) {
 	}
 }
 
+func TestSkipRace(t *testing.T) {
+	svc := NewPermissionService("/tmp", false, nil)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		svc.SetSkipRequests(true)
+	}()
+	go func() {
+		defer wg.Done()
+		svc.SkipRequests()
+	}()
+	wg.Wait()
+}
+
 func TestPermissionService_SkipMode(t *testing.T) {
 	service := NewPermissionService("/tmp", true, []string{})
 

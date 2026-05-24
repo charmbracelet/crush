@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"charm.land/bubbles/v2/help"
+	"charm.land/lipgloss/v2"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -265,8 +266,13 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		t.Dialog.View.GetVerticalFrameSize()
 
 	m.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding
-	m.list.SetSize(innerWidth, height-heightOffset)
 	m.help.SetWidth(innerWidth)
+
+	listHeight := height - heightOffset
+	m.list.SetSize(innerWidth, listHeight)
+	listTotalHeight := m.list.TotalHeight()
+	listWidth := max(0, innerWidth-3) // Reserve space for scrollbar.
+	m.list.SetSize(listWidth, listHeight)
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Switch Model"
@@ -281,6 +287,10 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc.AddPart(inputView)
 
 	listView := t.Dialog.List.Height(m.list.Height()).Render(m.list.Render())
+	scrollbar := common.Scrollbar(t, listHeight, listTotalHeight, listHeight, m.list.Offset())
+	if scrollbar != "" {
+		listView = lipgloss.JoinHorizontal(lipgloss.Top, listView, scrollbar)
+	}
 	rc.AddPart(listView)
 
 	rc.Help = m.help.View(m)
@@ -398,20 +408,8 @@ func (m *Models) setProviderItems() error {
 		}
 	}
 
-	// Move "Charm Hyper" to first position.
-	// (But still after recent models and custom providers).
-	slices.SortStableFunc(m.providers, func(a, b catwalk.Provider) int {
-		switch {
-		case a.ID == "hyper":
-			return -1
-		case b.ID == "hyper":
-			return 1
-		default:
-			return 0
-		}
-	})
-
-	// Now add known providers from the predefined list
+	// Now add known providers from the predefined list.
+	// Providers already has Hyper at the front of the list.
 	for _, provider := range m.providers {
 		providerID := string(provider.ID)
 		if _, ok := addedProviders[providerID]; ok {
@@ -498,7 +496,11 @@ func (m *Models) setProviderItems() error {
 	// Set model groups in the list.
 	m.list.SetGroups(groups...)
 	m.list.SetSelectedItem(selectedItemID)
-	m.list.ScrollToTop()
+	if selectedItemID != "" {
+		m.list.ScrollToSelected()
+	} else {
+		m.list.ScrollToTop()
+	}
 
 	// Update placeholder based on model type
 	if !m.isOnboarding {

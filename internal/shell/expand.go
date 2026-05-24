@@ -31,9 +31,6 @@ const maxInnerStderrBytes = 512
 // memory model regardless of test-level happens-before reasoning. The
 // atomic load on the hot path is negligible against the cost of parsing
 // and running through mvdan.
-//
-// See PLAN.md Phase 2 design decisions #11 and #12 for the full
-// rationale.
 var NoUnset atomic.Bool
 
 // ExpandValue expands shell-style substitutions in a single config value.

@@ -990,3 +990,34 @@ func protoToSkillEvent(e proto.SkillEvent) skills.Event {
 	}
 	return skills.Event{States: states}
 }
+
+func (w *ClientWorkspace) ListSkills(ctx context.Context) ([]skills.CatalogEntry, error) {
+	entries, err := w.client.ListSkills(ctx, w.workspaceID())
+	if err != nil {
+		return nil, err
+	}
+	result := make([]skills.CatalogEntry, len(entries))
+	for i, entry := range entries {
+		result[i] = skills.CatalogEntry{
+			ID:          entry.ID,
+			Name:        entry.Name,
+			Description: entry.Description,
+			Label:       entry.Label,
+			Source:      skills.SourceType(entry.Source),
+		}
+	}
+	return result, nil
+}
+
+func (w *ClientWorkspace) ReadSkill(ctx context.Context, skillID string) ([]byte, skills.SkillReadResult, error) {
+	resp, err := w.client.ReadSkill(ctx, w.workspaceID(), skillID)
+	if err != nil {
+		return nil, skills.SkillReadResult{}, err
+	}
+	return resp.Content, skills.SkillReadResult{
+		Name:        resp.Result.Name,
+		Description: resp.Result.Description,
+		Source:      skills.SourceType(resp.Result.Source),
+		Builtin:     resp.Result.Builtin,
+	}, nil
+}

@@ -18,6 +18,7 @@ var (
 		"foreign_keys":  "ON",
 		"journal_mode":  "WAL",
 		"page_size":     "4096",
+		"temp_store":    "MEMORY",
 		"cache_size":    "-8000",
 		"synchronous":   "NORMAL",
 		"secure_delete": "ON",

@@ -144,6 +144,8 @@ type Workspace interface {
 	ProjectNeedsInitialization() (bool, error)
 	MarkProjectInitialized() error
 	InitializePrompt() (string, error)
+	ListSkills(ctx context.Context) ([]skills.CatalogEntry, error)
+	ReadSkill(ctx context.Context, skillID string) ([]byte, skills.SkillReadResult, error)
 
 	// MCP operations (server-side in client mode)
 	MCPGetStates() map[string]mcptools.ClientInfo

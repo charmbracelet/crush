@@ -15,6 +15,7 @@ import (
 	"github.com/taigrr/crush/internal/permission"
 	"github.com/taigrr/crush/internal/session"
 	"github.com/taigrr/crush/internal/ui/common"
+	"github.com/taigrr/crush/internal/skills"
 	"github.com/taigrr/crush/internal/ui/util"
 )
 
@@ -76,6 +77,13 @@ type (
 		Content   string
 		Arguments []commands.Argument
 		Args      map[string]string // Actual argument values
+		Skill     *skills.Skill     // Set when this is a skill command
+	}
+	// ActionAttachSkill is sent when a skill is selected from the commands
+	// dialog to be attached to the conversation as a markdown attachment.
+	ActionAttachSkill struct {
+		ID   string
+		Name string
 	}
 	// ActionRunMCPPrompt is a message to run a custom command.
 	ActionRunMCPPrompt struct {

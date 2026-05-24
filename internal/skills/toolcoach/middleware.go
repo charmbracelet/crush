@@ -175,6 +175,7 @@ func (m *Middleware) SkipCoach(sessionID string) {
 		s.SkipCoach(sessionID)
 	}
 }
+
 // IsSessionBusy delegates to the primary agent.
 func (m *Middleware) IsSessionBusy(sessionID string) bool {
 	return m.primary.IsSessionBusy(sessionID)

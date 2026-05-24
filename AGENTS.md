@@ -111,7 +111,7 @@ internal/
   and agent — it takes inputs, runs commands, returns decisions. The
   `hookedTool` decorator in `internal/agent/hooked_tool.go` wraps tools at
   the coordinator level. Hooks run before permission checks. See
-  `HOOKS.md` for the user-facing protocol.
+  `docs/hooks/README.md` for the user-facing protocol.
 - **CGO disabled**: builds with `CGO_ENABLED=0` and
   `GOEXPERIMENT=greenteagc`.
 - **Middleware pattern**: Skills wrap `SessionAgent` as decorators. The
@@ -138,7 +138,10 @@ internal/
 - **`SkipCoach` propagation**: The `SkipCoach(sessionID)` method propagates through the wrapper chain via interface type-assertion. Each wrapper (toolcoach, critic) delegates to its primary if the primary implements `interface{ SkipCoach(string) }`. Only the replacer (innermost) implements the actual skip logic (atomic flag + eval cancel). The coordinator type-asserts on `currentAgent` (outermost = toolcoach), so every wrapper in the chain must delegate for the signal to reach the replacer.
 - **`critic` skill override config search paths**: When loading `.crush/skills/critic/config.json`, the code searches in order: `.crush`, `.kimi`, `crush` (first match wins). Not `.github/` or other common directories.
 - **Hook `HaltExitCode`**: Exit code 49 halts the entire turn. It sits outside the generic-error range (1-30), sysexits range (64-78), and killed-by-signal range (128+) so it can't be hit accidentally.
-- **Skill Tracker**: `skillTracker` tracks which skills have been mentioned in the conversation. Skills marked as "loaded" are not re-injected into subsequent prompts.
+- **Skill Tracker**: `skillTracker` in `internal/skills/tracker.go` tracks which
+  skills have been mentioned in the conversation. Once a skill has been injected
+  into the prompt (marked as "loaded"), it is not re-injected into subsequent
+  prompts for the same session.
 - **csync package**: Thread-safe wrappers (`csync.Value`, `csync.Map`, `csync.Slice`) avoid data races on agent state. Never use raw sync primitives for agent fields.
 
 ### Context Files
@@ -151,6 +154,19 @@ crush.md  →  crush.local.md  →  Crush.md  →  Crush.local.md  →
 CRUSH.md  →  CRUSH.local.md  →  AGENTS.md  →  agents.md  →  Agents.md
 ```
 Only the first matching file is loaded; remaining files with the same base name are skipped.
+
+### Key UI Interaction Patterns
+
+- **Textarea command interception**: In the chat textarea, certain strings are
+  intercepted before they would be sent as prompts: `exit`/`quit` open the quit
+  dialog; `/skipcoach` or `skipcoach` (without leading `/`) sends a skip signal
+  to the replacer. These are handled in `internal/ui/model/ui.go` before the
+  message-send path.
+- **Commands dialog**: Pressing the key binding for the commands dialog (e.g. Ctrl+K)
+  opens an overlay listing all available commands, including "Skip Coach" and "Toggle
+  Yolo Mode". Implemented in `internal/ui/dialog/commands.go`.
+- **Key bindings are in `model/keys.go`**: All keyboard shortcuts are defined there
+  as `keyMap` fields on the UI model.
 
 ### Shell Builtins
 
@@ -332,6 +348,14 @@ A zero-LLM, heuristic-based skill that detects anti-patterns in the agent's
 real-time tool usage and injects coaching tips into tool results. Overhead is
 ~2.7µs per tool call (benchmarked, well under 100µs target).
 
+The toolcoach was built in four incremental phases:
+- **Phase 0**: Telemetry & measurement infrastructure
+- **Phase 1a/1b**: Core performance (zero-allocation, pre-compiled regex, precision heuristics)
+- **Phase 2**: Critic integration (effectiveness DB, adaptive severity)
+- **Phase 3**: Steering & active correction (progressive coaching, guided retry)
+
+Each phase has a dedicated `PHASE*_IMPLEMENTATION.md` in `internal/skills/toolcoach/`.
+
 **Anti-patterns detected**:
 
 | ID | Tool | Severity | Trigger | Suggestion |
@@ -433,7 +457,13 @@ The replacer auto-enables when the config section is present (if `enabled` is om
 
 **Environment variable**: `CRUSH_REPLACER_FORCE_CONTINUE=1` forces the replacer to continue in tests, bypassing model resolution.
 
-**`/skipcoach` command**: Users can type `/skipcoach` (or `skipcoach` without the leading `/` in the textarea) to interrupt the current evaluation without permanently disabling the replacer. This sets an atomic flag that `Run()` checks before and during evaluation, treating the interrupt as a user-initiated skip rather than an error. The skip signal propagates through the middleware chain: coordinator → toolcoach → replacer → critic → primary.
+**`/skipcoach` command**: Users can type `/skipcoach` (or `skipcoach` without the leading
+  slash) in the textarea to interrupt the current evaluation without permanently
+  disabling the replacer. This sets an atomic flag that `Run()` checks before and
+  during evaluation, treating the interrupt as a user-initiated skip rather than an
+  error. The skip signal propagates through the middleware chain:
+  coordinator → toolcoach → replacer → critic → primary. It also appears as
+  "Skip Coach" in the commands dialog (Ctrl+K or equivalent).
 
 **Dual config structs**: Like the critic, the replacer uses `replacer.ReplacerConfig` (in `internal/skills/replacer/config.go`) internally, not `config.ReplacerConfig` (in `internal/config/config.go`). Both have the same fields; `NewReplacerConfig()` in `config.go` converts from `config.Config`.
 

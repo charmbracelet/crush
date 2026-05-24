@@ -1451,7 +1451,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		m.dialog.CloseDialog(dialog.NotificationsID)
 	case dialog.ActionNewSession:
-		if m.isAgentBusy() {
+		if m.trySkipCoach() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
 			break
 		}
@@ -1460,7 +1460,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSummarize:
-		if m.isAgentBusy() {
+		if m.trySkipCoach() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
 			break
 		}
@@ -1476,7 +1476,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.status.ToggleHelp()
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionExternalEditor:
-		if m.isAgentBusy() {
+		if m.trySkipCoach() {
 			cmds = append(cmds, util.ReportWarn("Agent is working, please wait..."))
 			break
 		}
@@ -1545,7 +1545,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.CommandsID)
 		cmds = append(cmds, m.disableDockerMCP)
 	case dialog.ActionInitializeProject:
-		if m.isAgentBusy() {
+		if m.trySkipCoach() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
 			break
 		}
@@ -1562,7 +1562,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.ActionSelectReasoningEffort:
-		if m.isAgentBusy() {
+		if m.trySkipCoach() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
 			break
 		}
@@ -1721,7 +1721,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 	var cmds []tea.Cmd
 
 	// we ignore dialogs with the oauth id as they need to be able to be dismissed
-	if m.isAgentBusy() && !m.dialog.ContainsDialog(dialog.OAuthID) {
+	if m.trySkipCoach() && !m.dialog.ContainsDialog(dialog.OAuthID) {
 		return util.ReportWarn("Agent is busy, please wait...")
 	}
 
@@ -1887,7 +1887,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				return true
 			}
 		case key.Matches(msg, m.keyMap.Suspend):
-			if m.isAgentBusy() {
+			if m.trySkipCoach() {
 				cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
 				return true
 			}
@@ -2028,7 +2028,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if !m.hasSession() {
 					break
 				}
-				if m.isAgentBusy() {
+				if m.trySkipCoach() {
 					cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
 					break
 				}
@@ -2043,7 +2043,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					m.chat.SetSelected(m.chat.Len() - 1)
 				}
 			case key.Matches(msg, m.keyMap.Editor.OpenEditor):
-				if m.isAgentBusy() {
+				if m.trySkipCoach() {
 					cmds = append(cmds, util.ReportWarn("Agent is working, please wait..."))
 					break
 				}
@@ -2147,7 +2147,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if !m.hasSession() {
 					break
 				}
-				if m.isAgentBusy() {
+				if m.trySkipCoach() {
 					cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
 					break
 				}
@@ -3184,6 +3184,17 @@ func isWhitespace(b byte) bool {
 func (m *UI) isAgentBusy() bool {
 	return m.com.Workspace.AgentIsReady() &&
 		m.com.Workspace.AgentIsBusy()
+}
+
+// trySkipCoach signals the coach to skip if the agent is busy and returns
+// whether the agent is still busy after the attempt. When the only busy
+// state is coach evaluation, the skip cancels it immediately and this
+// returns false so callers can proceed.
+func (m *UI) trySkipCoach() bool {
+	if m.isAgentBusy() && m.hasSession() && m.com.Workspace.AgentIsReady() {
+		m.com.Workspace.AgentSkipCoach(m.session.ID)
+	}
+	return m.isAgentBusy()
 }
 
 // hasSession returns true if there is an active session with a valid ID.

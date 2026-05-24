@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"regexp"
@@ -923,6 +924,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		},
 		OnRetry: func(err *fantasy.ProviderError, delay time.Duration) {
 			slog.Warn("Provider request failed, retrying", providerRetryLogFields(err, delay)...)
+			if a.notify != nil && !call.NonInteractive {
+				a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+					SessionID:    call.SessionID,
+					SessionTitle: currentSession.Title,
+					Type:         notify.TypeRetry,
+					ProviderID:   largeModel.ModelCfg.Provider,
+					RetryDelay:   delay,
+				})
+			}
 		},
 		OnToolCall: func(tc fantasy.ToolCallContent) error {
 			toolCall := message.ToolCall{
@@ -1138,7 +1148,17 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		} else if errors.As(err, &fantasyErr) {
 			currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(fantasyErr.Title), defaultTitle), fantasyErr.Message)
 		} else {
-			currentAssistant.AddFinish(message.FinishReasonError, defaultTitle, err.Error())
+			title := defaultTitle
+			msg := err.Error()
+			var retryErr *fantasy.RetryError
+			if errors.As(err, &retryErr) {
+				title = "Network Error"
+				if cause, ok := lastRetryableCause(retryErr); ok {
+					msg = cause
+				}
+				msg = fmt.Sprintf("%s (retried %d time(s))", msg, len(retryErr.Errors)-1)
+			}
+			currentAssistant.AddFinish(message.FinishReasonError, title, msg)
 		}
 		// Note: we use the cleanup context here because the genCtx has been
 		// cancelled.
@@ -2150,4 +2170,15 @@ func providerRetryLogFields(err *fantasy.ProviderError, delay time.Duration) []a
 		fields = append(fields, "message", err.Message)
 	}
 	return fields
+}
+
+// lastRetryableCause extracts a human-readable message from the last error
+// in a RetryError that is a net.Error (network-level failure). Returns empty
+// string and false if the last error is not a network error.
+func lastRetryableCause(retryErr *fantasy.RetryError) (string, bool) {
+	var netErr net.Error
+	if !errors.As(retryErr, &netErr) {
+		return "", false
+	}
+	return netErr.Error(), true
 }

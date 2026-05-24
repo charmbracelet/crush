@@ -3564,6 +3564,11 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 		return tea.Batch(cmds...)
 	case notify.TypeReAuthenticate:
 		return m.handleReAuthenticate(n.ProviderID)
+	case notify.TypeRetry:
+		return m.sendNotification(notification.Notification{
+			Title:   "Provider request failed, retrying...",
+			Message: fmt.Sprintf("Retrying in %s — \"%s\"", n.RetryDelay, n.SessionTitle),
+		})
 	case notify.TypeAgentError:
 		return m.sendNotification(notification.Notification{
 			Title:   "Crush encountered an error",

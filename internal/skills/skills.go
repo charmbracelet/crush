@@ -14,7 +14,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/charlievieth/fastwalk"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"gopkg.in/yaml.v3"
 )
@@ -221,68 +220,63 @@ func Discover(paths []string) []*Skill {
 func DiscoverWithStates(paths []string) ([]*Skill, []*SkillState) {
 	var skills []*Skill
 	var states []*SkillState
-	var mu sync.Mutex
 	seen := make(map[string]bool)
 	addState := func(name, path string, state DiscoveryState, err error) {
-		mu.Lock()
 		states = append(states, &SkillState{
 			Name:  name,
 			Path:  path,
 			State: state,
 			Err:   err,
 		})
-		mu.Unlock()
 	}
 
 	for _, base := range paths {
-		// We use fastwalk with Follow: true instead of filepath.WalkDir because
-		// WalkDir doesn't follow symlinked directories at any depth—only entry
-		// points. This ensures skills in symlinked subdirectories are discovered.
-		// fastwalk is concurrent, so we protect shared state (seen, skills) with mu.
-		conf := fastwalk.Config{
-			Follow:  true,
-			ToSlash: fastwalk.DefaultToSlash(),
+		entries, err := os.ReadDir(base)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				slog.Warn("Failed to read skills path", "path", base, "error", err)
+			}
+			continue
 		}
-		err := fastwalk.Walk(&conf, base, func(path string, d os.DirEntry, err error) error {
-			if err != nil {
-				slog.Warn("Failed to walk skills path entry", "base", base, "path", path, "error", err)
-				addState("", path, StateError, err)
-				return nil
+		for _, entry := range entries {
+			if !isSkillDirectoryEntry(base, entry) {
+				continue
 			}
-			if d.IsDir() || d.Name() != SkillFileName {
-				return nil
-			}
-			mu.Lock()
+			path := filepath.Join(base, entry.Name(), SkillFileName)
 			if seen[path] {
-				mu.Unlock()
-				return nil
+				continue
 			}
 			seen[path] = true
-			mu.Unlock()
+
+			info, err := os.Stat(path)
+			if err != nil {
+				if !os.IsNotExist(err) {
+					slog.Warn("Failed to stat skill file", "path", path, "error", err)
+					addState("", path, StateError, err)
+				}
+				continue
+			}
+			if info.IsDir() {
+				continue
+			}
+
 			skill, err := Parse(path)
 			if err != nil {
 				slog.Warn("Failed to parse skill file", "path", path, "error", err)
 				addState("", path, StateError, err)
-				return nil
+				continue
 			}
 			if err := skill.Validate(); err != nil {
 				slog.Warn("Skill validation failed", "path", path, "error", err)
 				addState(skill.Name, path, StateError, err)
-				return nil
+				continue
 			}
 			slog.Debug("Successfully loaded skill", "name", skill.Name, "path", path)
-			mu.Lock()
 			skills = append(skills, skill)
-			mu.Unlock()
 			addState(skill.Name, path, StateNormal, nil)
-			return nil
-		})
-		if err != nil && !os.IsNotExist(err) {
-			slog.Warn("Failed to walk skills path", "path", base, "error", err)
 		}
 	}
 
-	// fastwalk traversal order is non-deterministic, so sort for stable output.
 	// Sort by path first, then alphabetically by name within each path.
 	slices.SortStableFunc(skills, func(a, b *Skill) int {
 		if c := strings.Compare(strings.ToLower(a.Path), strings.ToLower(b.Path)); c != 0 {
@@ -292,6 +286,17 @@ func DiscoverWithStates(paths []string) ([]*Skill, []*SkillState) {
 	})
 
 	return skills, states
+}
+
+func isSkillDirectoryEntry(base string, entry os.DirEntry) bool {
+	if entry.IsDir() {
+		return true
+	}
+	if entry.Type()&os.ModeSymlink == 0 {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(base, entry.Name()))
+	return err == nil && info.IsDir()
 }
 
 // ToPromptXML generates XML for injection into the system prompt.

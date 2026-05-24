@@ -66,15 +66,6 @@ When user asks to create git commit:
 4. Create commit{{ if or (eq .Attribution.TrailerStyle "assisted-by") (eq .Attribution.TrailerStyle "co-authored-by")}} with attribution{{ end }} using HEREDOC:
    git commit -m "$(cat <<'EOF'
    Commit message here.
-
-{{if eq .Attribution.TrailerStyle "assisted-by" }}
-
-   Assisted-by: Crush:{{ .ModelName }}
-{{ else if eq .Attribution.TrailerStyle "co-authored-by" }}
-
-   Co-Authored-By: Crush <crush@charm.land>
-{{ end }}
-
    EOF
    )"
 

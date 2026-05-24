@@ -367,16 +367,27 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				return fantasy.WithResponseMetadata(fantasy.NewTextResponse(stdout), metadata), nil
 			}
 
-			// Still running - keep as background job
+			// Still running - keep as background job. Report how long it
+			// ran and the threshold that triggered backgrounding so the
+			// model (and the user, via the UI) can tell whether the command
+			// is simply slow or has stalled.
+			endTime := time.Now()
+			elapsed := endTime.Sub(startTime).Round(time.Second)
 			metadata := BashResponseMetadata{
 				StartTime:        startTime.UnixMilli(),
-				EndTime:          time.Now().UnixMilli(),
+				EndTime:          endTime.UnixMilli(),
 				Description:      params.Description,
 				WorkingDirectory: bgShell.WorkingDir,
 				Background:       true,
 				ShellID:          bgShell.ID,
 			}
-			response := fmt.Sprintf("Command is taking longer than expected and has been moved to background.\n\nBackground shell ID: %s\n\nUse job_output tool to view output or job_kill to terminate.", bgShell.ID)
+			response := fmt.Sprintf(
+				"Command ran for %s without completing and has been moved to background "+
+					"(commands are auto-backgrounded after %s; set auto_background_after to change this).\n\n"+
+					"Background shell ID: %s\n\n"+
+					"Use job_output tool to view output or job_kill to terminate.",
+				elapsed, autoBackgroundThreshold, bgShell.ID,
+			)
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(response), metadata), nil
 		},
 	)

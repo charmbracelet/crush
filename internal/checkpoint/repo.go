@@ -11,6 +11,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -345,11 +346,15 @@ func (r *Repo) ListSessionSnapshots(sessionID string) ([]string, error) {
 	return messageIDs, nil
 }
 
-// GC runs garbage collection on the repository.
+// GC runs garbage collection on the repository by shelling out to git gc.
+// This prunes unreachable objects and repacks the object store.
 func (r *Repo) GC() error {
-	// go-git doesn't have built-in GC, but we can prune unreachable objects
-	// by repacking. For now, this is a no-op placeholder.
-	// In the future, we could shell out to `git gc` or implement pruning.
+	cmd := exec.Command("git", "gc", "--prune=now", "--aggressive")
+	cmd.Dir = r.gitDir
+	cmd.Env = append(os.Environ(), "GIT_DIR="+r.gitDir)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git gc failed: %w: %s", err, output)
+	}
 	return nil
 }
 

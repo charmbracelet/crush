@@ -11,6 +11,10 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"charm.land/log/v2"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/exp/charmtone"
+	"github.com/charmbracelet/x/term"
+	"github.com/spf13/cobra"
 	"github.com/taigrr/crush/internal/client"
 	"github.com/taigrr/crush/internal/config"
 	"github.com/taigrr/crush/internal/format"
@@ -19,10 +23,6 @@ import (
 	"github.com/taigrr/crush/internal/session"
 	"github.com/taigrr/crush/internal/ui/anim"
 	"github.com/taigrr/crush/internal/ui/styles"
-	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/exp/charmtone"
-	"github.com/charmbracelet/x/term"
-	"github.com/spf13/cobra"
 )
 
 var runCmd = &cobra.Command{
@@ -83,18 +83,18 @@ crush run --continue "Follow up on your last response"
 			return fmt.Errorf("no prompt provided")
 		}
 
-
 		switch {
 		case sessionID != "":
 		case useLast:
 		}
 
-		c, ws, cleanup, err := connectToServer(cmd)
+		c, ws, cleanup, err := connectToServer(cmd, func(w *proto.Workspace) {
+			w.Isolated = true
+		})
 		if err != nil {
 			return err
 		}
 		defer cleanup()
-
 
 		if sessionID != "" {
 			sess, err := resolveSessionByID(ctx, c, ws.ID, sessionID)

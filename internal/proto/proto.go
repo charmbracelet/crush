@@ -17,6 +17,7 @@ type Workspace struct {
 	Path      string         `json:"path"`
 	GitBranch string         `json:"git_branch,omitempty"`
 	YOLO      bool           `json:"yolo,omitempty"`
+	Isolated  bool           `json:"isolated,omitempty"`
 	Debug     bool           `json:"debug,omitempty"`
 	DataDir   string         `json:"data_dir,omitempty"`
 	Version   string         `json:"version,omitempty"`

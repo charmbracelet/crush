@@ -265,7 +265,7 @@ func setupClientServerWorkspace(cmd *cobra.Command) (workspace.Workspace, func()
 
 // connectToServer ensures the server is running, creates a client and
 // workspace, and returns a cleanup function that deletes the workspace.
-func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func(), error) {
+func connectToServer(cmd *cobra.Command, opts ...func(*proto.Workspace)) (*client.Client, *proto.Workspace, func(), error) {
 	hostURL, err := server.ParseHostURL(clientHost)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("invalid host URL: %v", err)
@@ -297,6 +297,9 @@ func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func
 		YOLO:    yolo,
 		Version: version.Version,
 		Env:     os.Environ(),
+	}
+	for _, opt := range opts {
+		opt(&wsReq)
 	}
 
 	ws, err := c.CreateWorkspace(ctx, wsReq)

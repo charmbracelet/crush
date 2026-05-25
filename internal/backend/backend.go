@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/taigrr/crush/internal/app"
 	"github.com/taigrr/crush/internal/config"
 	"github.com/taigrr/crush/internal/csync"
@@ -20,7 +21,6 @@ import (
 	"github.com/taigrr/crush/internal/skills"
 	"github.com/taigrr/crush/internal/ui/util"
 	"github.com/taigrr/crush/internal/version"
-	"github.com/google/uuid"
 )
 
 // Common errors returned by backend operations.
@@ -114,21 +114,23 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 
 	dataDir := cfg.Config().Options.DataDirectory
 
-	// Check for existing workspace.
-	if existingID, ok := b.clients.workspaceForDataDir(dataDir); ok {
-		if ws, ok := b.workspaces.Get(existingID); ok {
-			count, _ := b.clients.addClient(clientID, existingID, dataDir)
-			slog.Info(
-				"Reusing existing workspace for data directory",
-				"client_id", clientID,
-				"workspace_id", existingID,
-				"data_dir", dataDir,
-				"client_count", count,
-			)
-			return ws, b.makeProtoWorkspace(clientID, args.Path, dataDir, args.Env, ws.Cfg), nil
+	// Check for existing workspace (unless the client requested isolation).
+	if !args.Isolated {
+		if existingID, ok := b.clients.workspaceForDataDir(dataDir); ok {
+			if ws, ok := b.workspaces.Get(existingID); ok {
+				count, _ := b.clients.addClient(clientID, existingID, dataDir)
+				slog.Info(
+					"Reusing existing workspace for data directory",
+					"client_id", clientID,
+					"workspace_id", existingID,
+					"data_dir", dataDir,
+					"client_count", count,
+				)
+				return ws, b.makeProtoWorkspace(clientID, args.Path, dataDir, args.Env, ws.Cfg), nil
+			}
+			// Stale entry - clean up.
+			b.clients.cleanupStaleWorkspace(existingID, dataDir)
 		}
-		// Stale entry - clean up.
-		b.clients.cleanupStaleWorkspace(existingID, dataDir)
 	}
 
 	// Create new workspace.
@@ -149,7 +151,8 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	// cross-talk between workspaces.
 	discoveryCfg := skillsDiscoveryConfig(cfg)
 	allSkills, activeSkills, skillStates := skills.DiscoverFromConfig(discoveryCfg)
-	skillsMgr := skills.NewManager(allSkills, activeSkills, skillStates,
+	skillsMgr := skills.NewManager(
+		allSkills, activeSkills, skillStates,
 		skills.WithResolvedPaths(discoveryCfg.ResolvePaths()),
 		skills.WithWorkingDir(discoveryCfg.WorkingDir),
 	)
@@ -286,23 +289,6 @@ func workspaceToProto(ws *Workspace) proto.Workspace {
 	}
 	return out
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 // skillsDiscoveryConfig adapts a *config.ConfigStore to the
 // skills.DiscoveryConfig that DiscoverFromConfig consumes.

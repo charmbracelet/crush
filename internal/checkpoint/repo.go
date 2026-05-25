@@ -22,13 +22,10 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/cache"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
+	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/storage/filesystem"
 )
-
-// maxBlobSize is the maximum file size (10MB) that will be included in a
-// snapshot. Larger files are skipped to prevent OOM.
-const maxBlobSize = 10 << 20
 
 // Common errors.
 var (
@@ -55,6 +52,7 @@ type Repo struct {
 	gitDir     string // .crush/git
 	projectDir string // User's project root
 	config     *Config
+	ignorer    gitignore.Matcher
 
 	// blobCache maps relative file paths to their last known state.
 	// Used to skip re-reading and re-compressing unchanged files.
@@ -139,11 +137,20 @@ func InitRepo(projectDir string, cfg *Config) (*Repo, error) {
 		}
 	}
 
+	// Load .gitignore patterns from the project directory.
+	var ignorer gitignore.Matcher
+	projectFS := osfs.New(projectDir)
+	patterns, err := gitignore.ReadPatterns(projectFS, nil)
+	if err == nil && len(patterns) > 0 {
+		ignorer = gitignore.NewMatcher(patterns)
+	}
+
 	return &Repo{
 		repo:       repo,
 		gitDir:     gitDir,
 		projectDir: projectDir,
 		config:     cfg,
+		ignorer:    ignorer,
 	}, nil
 }
 
@@ -379,6 +386,14 @@ func (r *Repo) buildTree(ctx context.Context, dir string, relPath string) (plumb
 			continue
 		}
 
+		// Check .gitignore patterns.
+		if r.ignorer != nil {
+			pathParts := strings.Split(filepath.ToSlash(entryRelPath), "/")
+			if r.ignorer.Match(pathParts, entry.IsDir()) {
+				continue
+			}
+		}
+
 		if entry.IsDir() {
 			// Recurse into directory.
 			subTreeHash, err := r.buildTree(ctx, entryPath, entryRelPath)
@@ -468,10 +483,6 @@ func (r *Repo) addBlob(path string, isSymlink bool) (plumbing.Hash, error) {
 		if relPath != "" {
 			info, err := os.Stat(path)
 			if err == nil {
-				// Skip files larger than maxBlobSize to prevent OOM.
-				if info.Size() > maxBlobSize {
-					return plumbing.ZeroHash, nil
-				}
 				if cached, ok := r.blobCache[relPath]; ok {
 					if info.ModTime().Equal(cached.ModTime) && info.Size() == cached.Size {
 						return cached.Hash, nil

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/taigrr/crush/internal/backend"
@@ -205,17 +206,27 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	c.server.logInfo(r, "SSE stream opened", slog.String("workspace_id", id))
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
+	var eventCount int64
 	for {
 		select {
 		case <-r.Context().Done():
-			c.server.logDebug(r, "Stopping event stream")
+			c.server.logInfo(r, "SSE stream closed (client disconnected)",
+				slog.String("workspace_id", id),
+				slog.Int64("events_sent", eventCount),
+			)
 			return
 		case ev, ok := <-events:
 			if !ok {
+				c.server.logInfo(r, "SSE stream closed (events channel closed)",
+					slog.String("workspace_id", id),
+					slog.Int64("events_sent", eventCount),
+				)
 				return
 			}
 			wrapped := wrapEvent(ev.Payload)
@@ -228,8 +239,23 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 				continue
 			}
 
-			fmt.Fprintf(w, "data: %s\n\n", data)
-			flusher.Flush()
+			if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
+				c.server.logError(r, "SSE write failed",
+					slog.String("workspace_id", id),
+					slog.String("error", err.Error()),
+					slog.Int64("events_sent", eventCount),
+				)
+				return
+			}
+			if err := flusher.Flush(); err != nil {
+				c.server.logError(r, "SSE flush failed",
+					slog.String("workspace_id", id),
+					slog.String("error", err.Error()),
+					slog.Int64("events_sent", eventCount),
+				)
+				return
+			}
+			eventCount++
 		}
 	}
 }

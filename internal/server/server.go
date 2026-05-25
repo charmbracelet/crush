@@ -11,10 +11,10 @@ import (
 	"runtime"
 	"strings"
 
+	httpswagger "github.com/swaggo/http-swagger/v2"
 	"github.com/taigrr/crush/internal/backend"
 	"github.com/taigrr/crush/internal/config"
 	_ "github.com/taigrr/crush/internal/swagger"
-	httpswagger "github.com/swaggo/http-swagger/v2"
 )
 
 // ErrServerClosed is returned when the server is closed.
@@ -255,5 +255,15 @@ func (s *Server) logError(r *http.Request, msg string, args ...any) {
 			slog.String("url", r.URL.String()),
 			slog.String("remote_addr", r.RemoteAddr),
 		).Error(msg, args...)
+	}
+}
+
+func (s *Server) logInfo(r *http.Request, msg string, args ...any) {
+	if s.logger != nil {
+		s.logger.With(
+			slog.String("method", r.Method),
+			slog.String("url", r.URL.String()),
+			slog.String("remote_addr", r.RemoteAddr),
+		).Info(msg, args...)
 	}
 }

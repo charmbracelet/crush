@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/oauth"
@@ -44,6 +45,26 @@ func (c *Client) RemoveConfigField(ctx context.Context, id string, scope config.
 	return nil
 }
 
+// HasConfigField checks whether a config key exists on the server.
+func (c *Client) HasConfigField(ctx context.Context, id string, scope config.Scope, key string) (bool, error) {
+	q := make(url.Values)
+	q.Set("scope", scope.String())
+	q.Set("key", key)
+	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/config/has", id), q, nil)
+	if err != nil {
+		return false, fmt.Errorf("failed to check config field: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("failed to check config field: status code %d", rsp.StatusCode)
+	}
+	var result proto.ConfigHasFieldResponse
+	if err := json.NewDecoder(rsp.Body).Decode(&result); err != nil {
+		return false, fmt.Errorf("failed to decode config field response: %w", err)
+	}
+	return result.Exists, nil
+}
+
 // UpdatePreferredModel updates the preferred model on the server.
 func (c *Client) UpdatePreferredModel(ctx context.Context, id string, scope config.Scope, modelType config.SelectedModelType, model config.SelectedModel) error {
 	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/config/model", id), nil, jsonBody(struct {
@@ -57,6 +78,31 @@ func (c *Client) UpdatePreferredModel(ctx context.Context, id string, scope conf
 	defer rsp.Body.Close()
 	if rsp.StatusCode != http.StatusOK {
 		return fmt.Errorf("failed to update preferred model: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
+// SaveModelChoicesAsDefault saves the current model choices as defaults on the server.
+func (c *Client) SaveModelChoicesAsDefault(ctx context.Context, id string) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/config/model/default", id), nil, nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to save model choices as defaults: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		var result proto.Error
+		if err := json.NewDecoder(rsp.Body).Decode(&result); err == nil {
+			// Match on stable error code rather than Message text so that
+			// future message changes don't silently break the sentinel
+			// detection.
+			if result.Code == proto.ErrCodeNoModelChoicesToSave {
+				return config.ErrNoModelChoicesToSave
+			}
+			if result.Message != "" {
+				return fmt.Errorf("failed to save model choices as defaults: status code %d: %s", rsp.StatusCode, result.Message)
+			}
+		}
+		return fmt.Errorf("failed to save model choices as defaults: status code %d", rsp.StatusCode)
 	}
 	return nil
 }

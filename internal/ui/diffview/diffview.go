@@ -227,14 +227,20 @@ func (dv *DiffView) String() string {
 		style = style.MaxHeight(dv.height)
 	}
 
+	var out string
 	switch dv.layout {
 	case layoutUnified:
-		return style.Render(strings.TrimSuffix(dv.renderUnified(), "\n"))
+		out = style.Render(strings.TrimSuffix(dv.renderUnified(), "\n"))
 	case layoutSplit:
-		return style.Render(strings.TrimSuffix(dv.renderSplit(), "\n"))
+		out = style.Render(strings.TrimSuffix(dv.renderSplit(), "\n"))
 	default:
 		panic("unknown diffview layout")
 	}
+	// Lipgloss styles can introduce CRLF line endings on Windows. Normalize the
+	// final output to LF to ensure consistent cross-platform rendering and to
+	// prevent golden-file comparison failures during CI runs on Windows (see
+	// https://github.com/charmbracelet/crush/actions/runs/26121914231/job/76825783822?pr=2830).
+	return strings.ReplaceAll(out, "\r\n", "\n")
 }
 
 // normalizeLineEndings ensures the file contents use Unix-style line endings.

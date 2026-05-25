@@ -30,7 +30,16 @@ type Workspace struct {
 // Error represents an error response.
 type Error struct {
 	Message string `json:"message"`
+	// Code is an optional stable identifier clients can match against to
+	// branch on specific error conditions without relying on Message text.
+	Code string `json:"code,omitempty"`
 }
+
+// Stable error codes returned by the server in proto.Error.Code. These are
+// part of the server/client contract; renaming them is a breaking change.
+const (
+	ErrCodeNoModelChoicesToSave = "no_model_choices_to_save"
+)
 
 // SkillInfo describes a visible skill exposed to a frontend.
 type SkillInfo struct {

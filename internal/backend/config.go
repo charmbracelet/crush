@@ -43,6 +43,16 @@ func (b *Backend) RemoveConfigField(workspaceID string, scope config.Scope, key 
 	return ws.Cfg.RemoveConfigField(scope, key)
 }
 
+// HasConfigField checks whether a key exists in the config file for the given
+// scope.
+func (b *Backend) HasConfigField(workspaceID string, scope config.Scope, key string) (bool, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return false, err
+	}
+	return ws.Cfg.HasConfigField(scope, key), nil
+}
+
 // UpdatePreferredModel updates the preferred model for the given type
 // and persists it to the config file at the given scope.
 func (b *Backend) UpdatePreferredModel(workspaceID string, scope config.Scope, modelType config.SelectedModelType, model config.SelectedModel) error {
@@ -51,6 +61,15 @@ func (b *Backend) UpdatePreferredModel(workspaceID string, scope config.Scope, m
 		return err
 	}
 	return ws.Cfg.UpdatePreferredModel(scope, modelType, model)
+}
+
+// SaveModelChoicesAsDefault saves the current model choices as defaults.
+func (b *Backend) SaveModelChoicesAsDefault(workspaceID string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+	return ws.Cfg.SaveModelChoicesAsDefault()
 }
 
 // SetCompactMode sets the compact mode setting and persists it.

@@ -2,9 +2,11 @@ package config
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,6 +14,67 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/stretchr/testify/require"
 )
+
+func isolateProviderStateForTest(t *testing.T) {
+	t.Helper()
+
+	// Mutates package-level provider singletons; callers must not use t.Parallel().
+	originalList := providerList
+	originalErr := providerErr
+	originalCatwalkSyncer := catwalkSyncer
+	originalHyperSyncer := hyperSyncer
+
+	providerOnce = sync.Once{}
+	providerList = nil
+	providerErr = nil
+	catwalkSyncer = &catwalkSync{}
+	hyperSyncer = &hyperSync{}
+
+	t.Cleanup(func() {
+		providerOnce = sync.Once{}
+		providerList = originalList
+		providerErr = originalErr
+		catwalkSyncer = originalCatwalkSyncer
+		hyperSyncer = originalHyperSyncer
+	})
+}
+
+func writeJSONFile(t *testing.T, path string, value any) {
+	t.Helper()
+
+	data, err := json.Marshal(value)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(t, os.WriteFile(path, data, 0o600))
+}
+
+func modelSelectionTestConfig(models map[string]any, recentModels map[string]any) map[string]any {
+	cfg := map[string]any{
+		"options": map[string]any{
+			"disable_default_providers": true,
+			"data_directory":            ".crush",
+		},
+		"providers": map[string]any{
+			"test-provider": map[string]any{
+				"api_key":  "test-key",
+				"base_url": "https://example.com/v1",
+				"models": []map[string]any{
+					{"id": "global-large", "name": "Global Large", "default_max_tokens": 1000},
+					{"id": "global-small", "name": "Global Small", "default_max_tokens": 500},
+					{"id": "workspace-large", "name": "Workspace Large", "default_max_tokens": 2000},
+					{"id": "workspace-small", "name": "Workspace Small", "default_max_tokens": 700},
+				},
+			},
+		},
+	}
+	if models != nil {
+		cfg["models"] = models
+	}
+	if recentModels != nil {
+		cfg["recent_models"] = recentModels
+	}
+	return cfg
+}
 
 func TestConfigStore_ConfigPath_GlobalAlwaysWorks(t *testing.T) {
 	t.Parallel()
@@ -153,6 +216,152 @@ func TestScope_String(t *testing.T) {
 	require.Equal(t, "global", ScopeGlobal.String())
 	require.Equal(t, "workspace", ScopeWorkspace.String())
 	require.Contains(t, Scope(99).String(), "Scope(99)")
+}
+
+func TestLoad_UsesGlobalModelsWithoutWorkspaceConfig(t *testing.T) {
+	isolateProviderStateForTest(t)
+
+	dir := t.TempDir()
+	globalDataDir := filepath.Join(dir, "global-data")
+	t.Setenv("CRUSH_GLOBAL_DATA", globalDataDir)
+
+	globalPath := filepath.Join(globalDataDir, "crush.json")
+	workspaceDir := filepath.Join(dir, ".crush")
+	workspacePath := filepath.Join(workspaceDir, "crush.json")
+	writeJSONFile(t, globalPath, modelSelectionTestConfig(map[string]any{
+		"large": map[string]any{"provider": "test-provider", "model": "global-large"},
+		"small": map[string]any{"provider": "test-provider", "model": "global-small"},
+	}, nil))
+
+	store, err := Load(dir, workspaceDir, false)
+	require.NoError(t, err)
+	require.Equal(t, workspacePath, store.workspacePath)
+	require.NoFileExists(t, workspacePath)
+	require.Equal(t, "global-large", store.config.Models[SelectedModelTypeLarge].Model)
+	require.Equal(t, "global-small", store.config.Models[SelectedModelTypeSmall].Model)
+}
+
+func TestLoad_WorkspaceModelsOverrideGlobalModels(t *testing.T) {
+	isolateProviderStateForTest(t)
+
+	dir := t.TempDir()
+	globalDataDir := filepath.Join(dir, "global-data")
+	t.Setenv("CRUSH_GLOBAL_DATA", globalDataDir)
+
+	globalPath := filepath.Join(globalDataDir, "crush.json")
+	workspaceDir := filepath.Join(dir, ".crush")
+	workspacePath := filepath.Join(workspaceDir, "crush.json")
+	writeJSONFile(t, globalPath, modelSelectionTestConfig(map[string]any{
+		"large": map[string]any{"provider": "test-provider", "model": "global-large"},
+		"small": map[string]any{"provider": "test-provider", "model": "global-small"},
+	}, nil))
+	writeJSONFile(t, workspacePath, map[string]any{
+		"models": map[string]any{
+			"large": map[string]any{"provider": "test-provider", "model": "workspace-large"},
+			"small": map[string]any{"provider": "test-provider", "model": "workspace-small"},
+		},
+	})
+
+	store, err := Load(dir, workspaceDir, false)
+	require.NoError(t, err)
+	require.Equal(t, "workspace-large", store.config.Models[SelectedModelTypeLarge].Model)
+	require.Equal(t, "workspace-small", store.config.Models[SelectedModelTypeSmall].Model)
+}
+
+func TestLoad_PartialWorkspaceModelOverrideFallsBackToGlobal(t *testing.T) {
+	isolateProviderStateForTest(t)
+
+	dir := t.TempDir()
+	globalDataDir := filepath.Join(dir, "global-data")
+	t.Setenv("CRUSH_GLOBAL_DATA", globalDataDir)
+
+	globalPath := filepath.Join(globalDataDir, "crush.json")
+	workspaceDir := filepath.Join(dir, ".crush")
+	workspacePath := filepath.Join(workspaceDir, "crush.json")
+	writeJSONFile(t, globalPath, modelSelectionTestConfig(map[string]any{
+		"large": map[string]any{"provider": "test-provider", "model": "global-large"},
+		"small": map[string]any{"provider": "test-provider", "model": "global-small"},
+	}, nil))
+	writeJSONFile(t, workspacePath, map[string]any{
+		"models": map[string]any{
+			"large": map[string]any{"provider": "test-provider", "model": "workspace-large"},
+		},
+	})
+
+	store, err := Load(dir, workspaceDir, false)
+	require.NoError(t, err)
+	require.Equal(t, "workspace-large", store.config.Models[SelectedModelTypeLarge].Model)
+	require.Equal(t, "global-small", store.config.Models[SelectedModelTypeSmall].Model)
+}
+
+func TestLoad_WorkspaceRecentModelsOverrideGlobalRecentModels(t *testing.T) {
+	isolateProviderStateForTest(t)
+
+	dir := t.TempDir()
+	globalDataDir := filepath.Join(dir, "global-data")
+	t.Setenv("CRUSH_GLOBAL_DATA", globalDataDir)
+
+	globalPath := filepath.Join(globalDataDir, "crush.json")
+	workspaceDir := filepath.Join(dir, ".crush")
+	workspacePath := filepath.Join(workspaceDir, "crush.json")
+	writeJSONFile(t, globalPath, modelSelectionTestConfig(map[string]any{
+		"large": map[string]any{"provider": "test-provider", "model": "global-large"},
+		"small": map[string]any{"provider": "test-provider", "model": "global-small"},
+	}, map[string]any{
+		"large": []map[string]any{{"provider": "test-provider", "model": "global-large"}},
+		"small": []map[string]any{{"provider": "test-provider", "model": "global-small"}},
+	}))
+	writeJSONFile(t, workspacePath, map[string]any{
+		"recent_models": map[string]any{
+			"large": []map[string]any{{"provider": "test-provider", "model": "workspace-large"}},
+		},
+	})
+
+	store, err := Load(dir, workspaceDir, false)
+	require.NoError(t, err)
+	require.Len(t, store.config.RecentModels[SelectedModelTypeLarge], 1)
+	require.Equal(t, "workspace-large", store.config.RecentModels[SelectedModelTypeLarge][0].Model)
+	require.Equal(t, "global-small", store.config.RecentModels[SelectedModelTypeSmall][0].Model)
+}
+
+// TestReloadFromDisk_WorkspaceRecentModelsOverrideGlobalRecentModels is a
+// regression test ensuring ReloadFromDisk applies the same workspace
+// recent_models override semantics as Load (workspace arrays replace global,
+// they do not concatenate).
+func TestReloadFromDisk_WorkspaceRecentModelsOverrideGlobalRecentModels(t *testing.T) {
+	isolateProviderStateForTest(t)
+
+	dir := t.TempDir()
+	globalDataDir := filepath.Join(dir, "global-data")
+	t.Setenv("CRUSH_GLOBAL_CONFIG", filepath.Join(dir, "no-such-global-config"))
+	t.Setenv("CRUSH_GLOBAL_DATA", globalDataDir)
+
+	globalPath := filepath.Join(globalDataDir, "crush.json")
+	workspaceDir := filepath.Join(dir, ".crush")
+	workspacePath := filepath.Join(workspaceDir, "crush.json")
+	writeJSONFile(t, globalPath, modelSelectionTestConfig(map[string]any{
+		"large": map[string]any{"provider": "test-provider", "model": "global-large"},
+		"small": map[string]any{"provider": "test-provider", "model": "global-small"},
+	}, map[string]any{
+		"large": []map[string]any{{"provider": "test-provider", "model": "global-large"}},
+		"small": []map[string]any{{"provider": "test-provider", "model": "global-small"}},
+	}))
+	writeJSONFile(t, workspacePath, map[string]any{
+		"recent_models": map[string]any{
+			"large": []map[string]any{{"provider": "test-provider", "model": "workspace-large"}},
+		},
+	})
+
+	store, err := Load(dir, workspaceDir, false)
+	require.NoError(t, err)
+	require.Len(t, store.config.RecentModels[SelectedModelTypeLarge], 1)
+	require.Equal(t, "workspace-large", store.config.RecentModels[SelectedModelTypeLarge][0].Model)
+
+	require.NoError(t, store.ReloadFromDisk(context.Background()))
+	require.Len(t, store.config.RecentModels[SelectedModelTypeLarge], 1,
+		"ReloadFromDisk must replace global recent_models.large with workspace value, not concatenate")
+	require.Equal(t, "workspace-large", store.config.RecentModels[SelectedModelTypeLarge][0].Model)
+	require.Equal(t, "global-small", store.config.RecentModels[SelectedModelTypeSmall][0].Model)
 }
 
 func TestConfigStaleness_CleanImmediatelyAfterSnapshot(t *testing.T) {
@@ -319,6 +528,7 @@ func TestConfigStaleness_RefreshClearsDirtyState(t *testing.T) {
 // so the new config values are used rather than stale pre-reload values.
 func TestReloadFromDisk_UsesNewConfigValues(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("CRUSH_GLOBAL_CONFIG", filepath.Join(dir, "no-such-global-config"))
 	configPath := filepath.Join(dir, "crush.json")
 
 	// Isolate from the host's global config so only test-provided
@@ -548,6 +758,214 @@ func TestSetConfigFields_AutoReloadsAtomically(t *testing.T) {
 
 	// Verify both fields are reflected in memory.
 	require.True(t, store.config.Options.Debug)
+}
+
+func TestConfigStore_UpdatePreferredModel_WorkspaceScopeKeepsGlobalUnchanged(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	globalPath := filepath.Join(dir, "global", "crush.json")
+	workspacePath := filepath.Join(dir, "workspace", ".crush", "crush.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(globalPath), 0o755))
+	require.NoError(t, os.WriteFile(globalPath, []byte(`{"models":{"large":{"provider":"openai","model":"global-large"}}}`), 0o600))
+	cfg := &Config{}
+	cfg.setDefaults(dir, "")
+	store := &ConfigStore{
+		config:         cfg,
+		globalDataPath: globalPath,
+		workspacePath:  workspacePath,
+	}
+
+	selected := SelectedModel{Provider: "anthropic", Model: "claude-3"}
+	require.NoError(t, store.UpdatePreferredModel(ScopeWorkspace, SelectedModelTypeLarge, selected))
+
+	// Models remain untouched in global (workspace models don't leak).
+	// Recent models are written to global so they're visible across
+	// projects, but global models are unchanged.
+	global := readConfigJSON(t, globalPath)
+	globalModels, ok := global["models"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "global-large", globalModels["large"].(map[string]any)["model"])
+	globalRecents, ok := global["recent_models"].(map[string]any)
+	require.True(t, ok)
+	require.Len(t, globalRecents[string(SelectedModelTypeLarge)].([]any), 1)
+
+	workspace := readConfigJSON(t, workspacePath)
+	models, ok := workspace["models"].(map[string]any)
+	require.True(t, ok)
+	large, ok := models[string(SelectedModelTypeLarge)].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "anthropic", large["provider"])
+	require.Equal(t, "claude-3", large["model"])
+
+	recentModels, ok := workspace["recent_models"].(map[string]any)
+	require.True(t, ok)
+	recentLarge, ok := recentModels[string(SelectedModelTypeLarge)].([]any)
+	require.True(t, ok)
+	require.Len(t, recentLarge, 1)
+}
+
+func TestConfigStore_SaveModelChoicesAsDefault_EmptyStateDoesNotClobberGlobal(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	globalPath := filepath.Join(dir, "global", "crush.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(globalPath), 0o755))
+	require.NoError(t, os.WriteFile(globalPath, []byte(`{"models":{"large":{"provider":"openai","model":"old-global"}},"recent_models":{"large":[{"provider":"openai","model":"old-global"}]}}`), 0o600))
+	beforeGlobal, err := os.ReadFile(globalPath)
+	require.NoError(t, err)
+
+	store := &ConfigStore{
+		config:         &Config{},
+		globalDataPath: globalPath,
+	}
+
+	err = store.SaveModelChoicesAsDefault()
+	require.ErrorIs(t, err, ErrNoModelChoicesToSave)
+	afterGlobal, err := os.ReadFile(globalPath)
+	require.NoError(t, err)
+	require.Equal(t, string(beforeGlobal), string(afterGlobal))
+}
+
+func TestConfigStore_SaveModelChoicesAsDefault(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	globalPath := filepath.Join(dir, "global", "crush.json")
+	workspacePath := filepath.Join(dir, "workspace", ".crush", "crush.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(globalPath), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Dir(workspacePath), 0o755))
+	require.NoError(t, os.WriteFile(globalPath, []byte(`{"models":{"large":{"provider":"openai","model":"old-global"}}}`), 0o600))
+	require.NoError(t, os.WriteFile(workspacePath, []byte(`{"models":{"large":{"provider":"openai","model":"workspace"}}}`), 0o600))
+	beforeWorkspace, err := os.ReadFile(workspacePath)
+	require.NoError(t, err)
+
+	cfg := &Config{
+		Models: map[SelectedModelType]SelectedModel{
+			SelectedModelTypeLarge: {Provider: "anthropic", Model: "claude-3"},
+			SelectedModelTypeSmall: {Provider: "openai", Model: "gpt-4o-mini"},
+		},
+		RecentModels: map[SelectedModelType][]SelectedModel{
+			SelectedModelTypeLarge: {{Provider: "anthropic", Model: "claude-3"}},
+			SelectedModelTypeSmall: {{Provider: "openai", Model: "gpt-4o-mini"}},
+		},
+	}
+	store := &ConfigStore{
+		config:         cfg,
+		globalDataPath: globalPath,
+		workspacePath:  workspacePath,
+	}
+
+	require.NoError(t, store.SaveModelChoicesAsDefault())
+
+	afterWorkspace, err := os.ReadFile(workspacePath)
+	require.NoError(t, err)
+	require.Equal(t, string(beforeWorkspace), string(afterWorkspace))
+
+	global := readConfigJSON(t, globalPath)
+	models, ok := global["models"].(map[string]any)
+	require.True(t, ok)
+	large, ok := models[string(SelectedModelTypeLarge)].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "anthropic", large["provider"])
+	require.Equal(t, "claude-3", large["model"])
+
+	recentModels, ok := global["recent_models"].(map[string]any)
+	require.True(t, ok)
+	recentLarge, ok := recentModels[string(SelectedModelTypeLarge)].([]any)
+	require.True(t, ok)
+	require.Len(t, recentLarge, 1)
+}
+
+// TestConfigStore_SaveModelChoicesAsDefault_PreservesExistingKeys is a
+// regression test ensuring SaveModelChoicesAsDefault merges per-key into the
+// existing global config rather than replacing the whole `models` /
+// `recent_models` objects (which would drop pre-existing entries that aren't
+// in the in-memory maps).
+func TestConfigStore_SaveModelChoicesAsDefault_PreservesExistingKeys(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	globalPath := filepath.Join(dir, "global", "crush.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(globalPath), 0o755))
+	// Pre-existing global file already has both large and small set.
+	require.NoError(t, os.WriteFile(globalPath, []byte(
+		`{"models":{"large":{"provider":"openai","model":"old-large"},"small":{"provider":"openai","model":"keep-small"}},`+
+			`"recent_models":{"large":[{"provider":"openai","model":"old-large"}],"small":[{"provider":"openai","model":"keep-small"}]}}`,
+	), 0o600))
+
+	// In-memory only has large; small must not be erased from disk.
+	cfg := &Config{
+		Models: map[SelectedModelType]SelectedModel{
+			SelectedModelTypeLarge: {Provider: "anthropic", Model: "claude-3"},
+		},
+		RecentModels: map[SelectedModelType][]SelectedModel{
+			SelectedModelTypeLarge: {{Provider: "anthropic", Model: "claude-3"}},
+		},
+	}
+	store := &ConfigStore{
+		config:         cfg,
+		globalDataPath: globalPath,
+	}
+
+	require.NoError(t, store.SaveModelChoicesAsDefault())
+
+	global := readConfigJSON(t, globalPath)
+	models, ok := global["models"].(map[string]any)
+	require.True(t, ok)
+	large, ok := models[string(SelectedModelTypeLarge)].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "anthropic", large["provider"])
+	require.Equal(t, "claude-3", large["model"])
+
+	small, ok := models[string(SelectedModelTypeSmall)].(map[string]any)
+	require.True(t, ok, "models.small must be preserved when in-memory has no small model")
+	require.Equal(t, "keep-small", small["model"])
+
+	recents, ok := global["recent_models"].(map[string]any)
+	require.True(t, ok)
+	recentSmall, ok := recents[string(SelectedModelTypeSmall)].([]any)
+	require.True(t, ok, "recent_models.small must be preserved")
+	require.Len(t, recentSmall, 1)
+	require.Equal(t, "keep-small", recentSmall[0].(map[string]any)["model"])
+}
+
+func TestConfigStore_ReloadAfterWorkspaceModelWrite(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	workspacePath := filepath.Join(dir, ".crush", "crush.json")
+	initialConfig := `{
+		"providers": {
+			"openai": {
+				"api_key": "test-key",
+				"models": [
+					{"id": "gpt-4", "name": "GPT-4"},
+					{"id": "gpt-4o", "name": "GPT-4o"}
+				]
+			}
+		},
+		"models": {
+			"large": {"provider": "openai", "model": "gpt-4"}
+		}
+	}`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "crush.json"), []byte(initialConfig), 0o600))
+
+	store, err := Load(dir, filepath.Join(dir, ".crush"), false)
+	require.NoError(t, err)
+	require.Equal(t, workspacePath, store.workspacePath)
+	require.Equal(t, "gpt-4", store.config.Models[SelectedModelTypeLarge].Model)
+
+	selected := SelectedModel{Provider: "openai", Model: "gpt-4o"}
+	require.NoError(t, store.UpdatePreferredModel(ScopeWorkspace, SelectedModelTypeLarge, selected))
+	require.Equal(t, "gpt-4o", store.config.Models[SelectedModelTypeLarge].Model)
+
+	workspace := readConfigJSON(t, workspacePath)
+	models, ok := workspace["models"].(map[string]any)
+	require.True(t, ok)
+	large, ok := models[string(SelectedModelTypeLarge)].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "gpt-4o", large["model"])
 }
 
 func TestLoadTokenFromDisk_ReturnsNewerToken(t *testing.T) {

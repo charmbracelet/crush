@@ -130,6 +130,14 @@ func (w *ClientWorkspace) DeleteSession(ctx context.Context, sessionID string) e
 	return w.client.DeleteSession(ctx, w.workspaceID(), sessionID)
 }
 
+// ListSessionModels returns the persisted model selections for a session.
+// In client/server mode this is not yet wired through proto, so it returns
+// an empty slice. The strict no-overwrite restore policy treats this as
+// "no saved models" and leaves current project model choices unchanged.
+func (w *ClientWorkspace) ListSessionModels(ctx context.Context, sessionID string) ([]session.SessionModel, error) {
+	return nil, nil
+}
+
 func (w *ClientWorkspace) CreateAgentToolSessionID(messageID, toolCallID string) string {
 	return fmt.Sprintf("%s$$%s", messageID, toolCallID)
 }
@@ -418,6 +426,14 @@ func (w *ClientWorkspace) UpdatePreferredModel(scope config.Scope, modelType con
 	return err
 }
 
+func (w *ClientWorkspace) SaveModelChoicesAsDefault() error {
+	err := w.client.SaveModelChoicesAsDefault(context.Background(), w.workspaceID())
+	if err == nil {
+		w.refreshWorkspace()
+	}
+	return err
+}
+
 func (w *ClientWorkspace) SetCompactMode(scope config.Scope, enabled bool) error {
 	err := w.client.SetCompactMode(context.Background(), w.workspaceID(), scope, enabled)
 	if err == nil {
@@ -440,6 +456,10 @@ func (w *ClientWorkspace) SetConfigField(scope config.Scope, key string, value a
 		w.refreshWorkspace()
 	}
 	return err
+}
+
+func (w *ClientWorkspace) HasConfigField(scope config.Scope, key string) (bool, error) {
+	return w.client.HasConfigField(context.Background(), w.workspaceID(), scope, key)
 }
 
 func (w *ClientWorkspace) RemoveConfigField(scope config.Scope, key string) error {

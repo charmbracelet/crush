@@ -180,6 +180,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	// Copy mutable fields under lock to avoid races with SetTools/SetModels.
 	agentTools := a.tools.Copy()
 	largeModel := a.largeModel.Get()
+	smallModel := a.smallModel.Get()
 	systemPrompt := a.systemPrompt.Get()
 	promptPrefix := a.systemPromptPrefix.Get()
 	var instructions strings.Builder
@@ -216,6 +217,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		return nil, fmt.Errorf("failed to get session: %w", err)
 	}
 
+	if err := a.persistSessionModels(ctx, currentSession, largeModel, smallModel); err != nil {
+		return nil, err
+	}
+
 	msgs, err := a.getSessionMessages(ctx, currentSession)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session messages: %w", err)
@@ -250,7 +255,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	// guarantees the contract at every Run exit (success, error, panic
 	// recovery upstream) without callers needing to know.
 	defer func() {
-		if flushErr := a.messages.FlushAll(ctx); flushErr != nil {
+		flushCtx := context.WithoutCancel(ctx)
+		if flushErr := a.messages.FlushAll(flushCtx); flushErr != nil {
 			slog.Error("Failed to flush pending message updates after run", "error", flushErr)
 		}
 	}()
@@ -669,7 +675,8 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	defer a.activeRequests.Del(sessionID)
 	defer cancel()
 	defer func() {
-		if flushErr := a.messages.FlushAll(ctx); flushErr != nil {
+		flushCtx := context.WithoutCancel(ctx)
+		if flushErr := a.messages.FlushAll(flushCtx); flushErr != nil {
 			slog.Error("Failed to flush pending message updates after summarize", "error", flushErr)
 		}
 	}()
@@ -997,6 +1004,27 @@ func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.S
 		}
 	}
 	return msgs, nil
+}
+
+// persistSessionModels saves the large and small model selections for the
+// given session so they can be restored when the session is reloaded. Only
+// top-level user-driven sessions are persisted; child sessions (title,
+// task/agent-tool, or any session with a parent) inherit selections from
+// their parent and must not write to the session_models table.
+func (a *sessionAgent) persistSessionModels(ctx context.Context, sess session.Session, large, small Model) error {
+	if a.isSubAgent || sess.ParentSessionID != "" {
+		return nil
+	}
+	if a.sessions.IsAgentToolSession(sess.ID) {
+		return nil
+	}
+	if err := a.sessions.SaveModel(ctx, sess.ID, config.SelectedModelTypeLarge, large.ModelCfg); err != nil {
+		return fmt.Errorf("failed to save large session model: %w", err)
+	}
+	if err := a.sessions.SaveModel(ctx, sess.ID, config.SelectedModelTypeSmall, small.ModelCfg); err != nil {
+		return fmt.Errorf("failed to save small session model: %w", err)
+	}
+	return nil
 }
 
 // generateTitle generates a session titled based on the initial prompt.

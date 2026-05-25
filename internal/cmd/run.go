@@ -90,6 +90,7 @@ crush run --continue "Follow up on your last response"
 
 		c, ws, cleanup, err := connectToServer(cmd, func(w *proto.Workspace) {
 			w.Isolated = true
+			w.YOLO = true
 		})
 		if err != nil {
 			return err

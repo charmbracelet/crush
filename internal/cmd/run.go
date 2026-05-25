@@ -220,9 +220,12 @@ func runNonInteractive(
 		return fmt.Errorf("failed to subscribe to events: %w", err)
 	}
 
-	if err := c.SendMessage(ctx, ws.ID, sess.ID, prompt); err != nil {
-		return fmt.Errorf("failed to send message: %w", err)
-	}
+	// Send message in background so the event loop can process streaming
+	// updates as they arrive.
+	sendErr := make(chan error, 1)
+	go func() {
+		sendErr <- c.SendMessage(ctx, ws.ID, sess.ID, prompt)
+	}()
 
 	messageReadBytes := make(map[string]int)
 	var printed bool
@@ -287,6 +290,12 @@ func runNonInteractive(
 		case <-ctx.Done():
 			stopSpinner()
 			return ctx.Err()
+		case err := <-sendErr:
+			if err != nil {
+				stopSpinner()
+				return fmt.Errorf("failed to send message: %w", err)
+			}
+			sendErr = nil
 		}
 	}
 }

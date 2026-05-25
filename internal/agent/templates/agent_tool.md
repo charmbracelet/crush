@@ -1,31 +1,27 @@
-Launch a specialized read-only agent to thoroughly search and explore the code and documentation.
-
-This agent has access to `glob`, `grep`, `ls`, `view`, and `sourcegraph`. It is optimized for finding files, searching code and documentation, and analyzing architecture — but it **cannot edit files or run commands**.
+Launch a specialized subagent to perform delegated work.
 
 ## When to use
-- Complex multi-step searches (finding a pattern across many files)
-- Understanding codebase architecture ("how does the auth system work?")
-- Finding all references to a function or type
-- Exploring an unfamiliar codebase
-- Cross-referencing between multiple packages/modules
+- Tasks that benefit from focused, parallel execution (e.g., searching one area while you work on another)
+- Multi-step work that would consume many turns if done sequentially
+- Complex investigations that require synthesizing information from many files or sources
+- Delegating well-scoped work where you can provide clear context and expectations
 
 ## When NOT to use
-- **Reading a specific file you already know the path to** → use `view` directly
-- **Searching for a specific function or string in code** → use `grep` directly
-- **Searching within 2-3 known files** → use `view` on each file directly
-- **Simple lookups** that don't require exploration or synthesis
+- **Simple lookups** that you can do in 1-2 direct tool calls → use the tool directly
+- **Tasks requiring your judgment or approval** at every step → do it yourself
+- **Work you haven't thought through** → first understand the problem, then delegate
 
 ## Parallel usage
-You can launch multiple agents in parallel for independent searches. For example, one agent searches for frontend code while another searches for backend code.
+You can launch multiple agents in parallel for independent tasks. For example, one agent searches the backend while another searches the frontend.
 
 ## Output
-The agent returns a concise report with absolute file paths and line numbers. If you need the agent to read specific sections in more detail, follow up with another agent call or use `view` directly.
+The agent returns a concise report of what it found or accomplished. If you need it to read specific sections in more detail, follow up with another agent call or use direct tools.
 
 ## Guidance
-Use this tool only when a simple, directed search proves insufficient or when the task will clearly require more than 3 separate queries.
+Use this tool when the task is clear enough to hand off, but large enough that doing it yourself would take many turns. Be specific about what the agent should deliver.
 
 ## How to prompt
-Be specific about what to find. Good prompts name the target (function, type, pattern) and what the caller needs to know about it. Vague prompts like "search for auth" waste turns.
+Be specific about what to accomplish. Good prompts explain the goal, the relevant context, and what success looks like. Vague prompts like "fix the bug" waste turns.
 
 ## Writing the prompt
 When spawning an agent, it starts with zero context. Brief the agent like a smart colleague who just walked into the room — it hasn't seen this conversation, doesn't know what you've tried, doesn't understand why this task matters.

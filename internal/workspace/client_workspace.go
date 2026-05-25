@@ -728,7 +728,35 @@ func (w *ClientWorkspace) GetWorktree(ctx context.Context, worktreeID string) (*
 }
 
 func (w *ClientWorkspace) GetActiveWorktree(ctx context.Context, sessionID string) (*worktree.Worktree, error) {
-	return w.client.GetActiveWorktree(ctx, w.workspaceID(), sessionID)
+	w.mu.RLock()
+	cached := w.cachedWorktree
+	cachedValid := w.cachedWorktreeValid
+	cachedAt := w.cachedWorktreeTime
+	currentSession := w.activeSessionID
+	w.mu.RUnlock()
+
+	// If asking about a different session than the active one, bypass cache.
+	if sessionID != currentSession {
+		return w.client.GetActiveWorktree(ctx, w.workspaceID(), sessionID)
+	}
+
+	// Return cached result if still fresh.
+	if cachedValid && time.Since(cachedAt) < worktreeCacheTTL {
+		if cached == nil {
+			return nil, fmt.Errorf("no active worktree")
+		}
+		return cached, nil
+	}
+
+	wt, err := w.client.GetActiveWorktree(ctx, w.workspaceID(), sessionID)
+
+	w.mu.Lock()
+	w.cachedWorktree = wt
+	w.cachedWorktreeValid = true
+	w.cachedWorktreeTime = time.Now()
+	w.mu.Unlock()
+
+	return wt, err
 }
 
 func (w *ClientWorkspace) CreateWorktree(ctx context.Context, sessionID, name, fromSnapshotID string) (*worktree.Worktree, error) {

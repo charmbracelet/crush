@@ -46,9 +46,11 @@ type ClientWorkspace struct {
 	activeSessionID string
 
 	// Cached active worktree to avoid HTTP round-trips on every
-	// WorkingDir() call.
-	cachedWorktree     *worktree.Worktree
-	cachedWorktreeTime time.Time
+	// WorkingDir() call. cachedWorktreeValid distinguishes "checked
+	// and no worktree" from "never checked".
+	cachedWorktree      *worktree.Worktree
+	cachedWorktreeValid bool
+	cachedWorktreeTime  time.Time
 }
 
 // NewClientWorkspace creates a new ClientWorkspace that proxies all
@@ -454,6 +456,7 @@ func (w *ClientWorkspace) WorkingDir() string {
 	w.mu.RLock()
 	sessionID := w.activeSessionID
 	cached := w.cachedWorktree
+	cachedValid := w.cachedWorktreeValid
 	cachedAt := w.cachedWorktreeTime
 	w.mu.RUnlock()
 
@@ -461,21 +464,25 @@ func (w *ClientWorkspace) WorkingDir() string {
 		return w.cached().Path
 	}
 
-	// Return cached worktree if still fresh.
-	if cached != nil && time.Since(cachedAt) < worktreeCacheTTL {
-		return cached.Path
-	}
-
-	wt, err := w.client.GetActiveWorktree(context.Background(), w.workspaceID(), sessionID)
-	if err != nil || wt == nil {
+	// Return cached result if still fresh (including cached "no worktree").
+	if cachedValid && time.Since(cachedAt) < worktreeCacheTTL {
+		if cached != nil {
+			return cached.Path
+		}
 		return w.cached().Path
 	}
 
+	wt, err := w.client.GetActiveWorktree(context.Background(), w.workspaceID(), sessionID)
+
 	w.mu.Lock()
 	w.cachedWorktree = wt
+	w.cachedWorktreeValid = true
 	w.cachedWorktreeTime = time.Now()
 	w.mu.Unlock()
 
+	if err != nil || wt == nil {
+		return w.cached().Path
+	}
 	return wt.Path
 }
 
@@ -491,6 +498,7 @@ func (w *ClientWorkspace) BaseDir() string {
 func (w *ClientWorkspace) invalidateWorktreeCache() {
 	w.mu.Lock()
 	w.cachedWorktree = nil
+	w.cachedWorktreeValid = false
 	w.cachedWorktreeTime = time.Time{}
 	w.mu.Unlock()
 }
@@ -515,6 +523,7 @@ func (w *ClientWorkspace) SetActiveSessionID(sessionID string) {
 	w.mu.Lock()
 	w.activeSessionID = sessionID
 	w.cachedWorktree = nil
+	w.cachedWorktreeValid = false
 	w.cachedWorktreeTime = time.Time{}
 	w.mu.Unlock()
 }

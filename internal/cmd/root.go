@@ -613,6 +613,7 @@ func startDetachedServer(cmd *cobra.Command, hostURL *url.URL) error {
 	// DETACHED_PROCESS on windows) is what truly detaches the child from
 	// this process's lifetime.
 	c := exec.CommandContext(context.Background(), exe, cmdArgs...)
+	c.Env = append(os.Environ(), "CRUSH_PROFILE_PORT=6061")
 	stdoutPath := filepath.Join(chDir, "stdout.log")
 	stderrPath := filepath.Join(chDir, "stderr.log")
 	detachProcess(c)

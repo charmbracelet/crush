@@ -8,9 +8,9 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/taigrr/crush/internal/db"
 	"github.com/taigrr/crush/internal/pubsub"
-	"github.com/google/uuid"
 )
 
 // Service coordinates snapshots with the database.
@@ -170,7 +170,7 @@ func (s *service) CreateSnapshot(ctx context.Context, sessionID, messageID, desc
 	}
 
 	// Create git snapshot.
-	commitHash, err := s.repo.CreateSnapshotRef(sessionID, messageID, description)
+	commitHash, err := s.repo.CreateSnapshotRefCtx(ctx, sessionID, messageID, description)
 	if err != nil {
 		return nil, fmt.Errorf("create git snapshot: %w", err)
 	}

@@ -5,6 +5,7 @@ package checkpoint
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -24,6 +25,10 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/storage/filesystem"
 )
+
+// maxBlobSize is the maximum file size (10MB) that will be included in a
+// snapshot. Larger files are skipped to prevent OOM.
+const maxBlobSize = 10 << 20
 
 // Common errors.
 var (
@@ -145,12 +150,17 @@ func InitRepo(projectDir string, cfg *Config) (*Repo, error) {
 // CreateSnapshot creates a snapshot of the current filesystem state.
 // Returns the git commit hash.
 func (r *Repo) CreateSnapshot(description string) (string, error) {
+	return r.CreateSnapshotCtx(context.Background(), description)
+}
+
+// CreateSnapshotCtx creates a snapshot with context support for cancellation.
+func (r *Repo) CreateSnapshotCtx(ctx context.Context, description string) (string, error) {
 	if r.repo == nil {
 		return "", ErrRepoNotInitialized
 	}
 
 	// Build tree from project directory.
-	treeHash, err := r.buildTree(r.projectDir, "")
+	treeHash, err := r.buildTree(ctx, r.projectDir, "")
 	if err != nil {
 		return "", fmt.Errorf("build tree: %w", err)
 	}
@@ -203,7 +213,12 @@ func (r *Repo) CreateSnapshot(description string) (string, error) {
 // CreateSnapshotRef creates a snapshot and stores it at a named ref.
 // The ref format is: refs/snapshots/{sessionID}/{messageID}
 func (r *Repo) CreateSnapshotRef(sessionID, messageID, description string) (string, error) {
-	commitHash, err := r.CreateSnapshot(description)
+	return r.CreateSnapshotRefCtx(context.Background(), sessionID, messageID, description)
+}
+
+// CreateSnapshotRefCtx creates a snapshot with context support.
+func (r *Repo) CreateSnapshotRefCtx(ctx context.Context, sessionID, messageID, description string) (string, error) {
+	commitHash, err := r.CreateSnapshotCtx(ctx, description)
 	if err != nil {
 		return "", err
 	}
@@ -332,7 +347,11 @@ func (r *Repo) GC() error {
 }
 
 // buildTree recursively builds a git tree from a directory.
-func (r *Repo) buildTree(dir string, relPath string) (plumbing.Hash, error) {
+func (r *Repo) buildTree(ctx context.Context, dir string, relPath string) (plumbing.Hash, error) {
+	if err := ctx.Err(); err != nil {
+		return plumbing.ZeroHash, err
+	}
+
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return plumbing.ZeroHash, fmt.Errorf("read dir %s: %w", dir, err)
@@ -362,7 +381,7 @@ func (r *Repo) buildTree(dir string, relPath string) (plumbing.Hash, error) {
 
 		if entry.IsDir() {
 			// Recurse into directory.
-			subTreeHash, err := r.buildTree(entryPath, entryRelPath)
+			subTreeHash, err := r.buildTree(ctx, entryPath, entryRelPath)
 			if err != nil {
 				return plumbing.ZeroHash, err
 			}
@@ -449,6 +468,10 @@ func (r *Repo) addBlob(path string, isSymlink bool) (plumbing.Hash, error) {
 		if relPath != "" {
 			info, err := os.Stat(path)
 			if err == nil {
+				// Skip files larger than maxBlobSize to prevent OOM.
+				if info.Size() > maxBlobSize {
+					return plumbing.ZeroHash, nil
+				}
 				if cached, ok := r.blobCache[relPath]; ok {
 					if info.ModTime().Equal(cached.ModTime) && info.Size() == cached.Size {
 						return cached.Hash, nil

@@ -24,15 +24,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/taigrr/catwalk/pkg/catwalk"
-	"github.com/taigrr/fantasy"
-	"github.com/taigrr/fantasy/providers/anthropic"
-	"github.com/taigrr/fantasy/providers/bedrock"
-	"github.com/taigrr/fantasy/providers/google"
-	"github.com/taigrr/fantasy/providers/openai"
-	"github.com/taigrr/fantasy/providers/openrouter"
-	"github.com/taigrr/fantasy/providers/vercel"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/exp/charmtone"
+	"github.com/taigrr/catwalk/pkg/catwalk"
 	"github.com/taigrr/crush/internal/agent/hyper"
 	"github.com/taigrr/crush/internal/agent/notify"
 	"github.com/taigrr/crush/internal/agent/tools"
@@ -45,7 +39,13 @@ import (
 	"github.com/taigrr/crush/internal/session"
 	"github.com/taigrr/crush/internal/stringext"
 	"github.com/taigrr/crush/internal/version"
-	"github.com/charmbracelet/x/exp/charmtone"
+	"github.com/taigrr/fantasy"
+	"github.com/taigrr/fantasy/providers/anthropic"
+	"github.com/taigrr/fantasy/providers/bedrock"
+	"github.com/taigrr/fantasy/providers/google"
+	"github.com/taigrr/fantasy/providers/openai"
+	"github.com/taigrr/fantasy/providers/openrouter"
+	"github.com/taigrr/fantasy/providers/vercel"
 )
 
 const (
@@ -254,6 +254,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	// Create snapshot of filesystem state (best-effort, don't block on failure).
 	if a.checkpoints != nil && a.checkpoints.IsEnabled() && !a.isSubAgent {
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("Panic in snapshot goroutine", "recover", r, "session_id", call.SessionID)
+				}
+			}()
 			// Use background context since this shouldn't be cancelled with the request.
 			snapshotCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
@@ -282,7 +287,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	}()
 
 	history, files := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages, call.Attachments...)
-
 
 	var currentAssistant *message.Message
 	var stepMessages []fantasy.Message
@@ -556,8 +560,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			},
 		},
 	})
-
-
 	if err != nil {
 		isHyper := largeModel.ModelCfg.Provider == hyper.Name
 		isCancelErr := errors.Is(err, context.Canceled)
@@ -1309,7 +1311,6 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 		modelConfig.CostPer1MOutCached/1e6*float64(usage.CacheReadTokens) +
 		costIn/1e6*float64(usage.InputTokens) +
 		costOut/1e6*float64(usage.OutputTokens)
-
 
 	// Use override cost if available (e.g., from OpenRouter).
 	if overrideCost != nil {

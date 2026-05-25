@@ -82,6 +82,16 @@ func InitRepo(projectDir string, cfg *Config) (*Repo, error) {
 		cfg = DefaultConfig()
 	}
 
+	// Don't snapshot if the project dir is the user's home directory or
+	// if there's no .git directory (not a project).
+	homeDir, _ := os.UserHomeDir()
+	if homeDir != "" && projectDir == homeDir {
+		return nil, fmt.Errorf("refusing to snapshot home directory")
+	}
+	if _, err := os.Stat(filepath.Join(projectDir, ".git")); err != nil {
+		return nil, fmt.Errorf("not a git repository: %w", err)
+	}
+
 	crushDir := filepath.Join(projectDir, ".crush")
 	gitDir := filepath.Join(crushDir, "git")
 

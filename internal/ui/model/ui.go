@@ -1804,6 +1804,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			yolo := !m.com.Workspace.PermissionSkipRequests()
 			m.com.Workspace.PermissionSetSkipRequests(yolo)
 			m.setEditorPrompt(yolo)
+			status := "disabled"
+			if yolo {
+				status = "enabled"
+			}
+			cmds = append(cmds, util.ReportInfo("Yolo mode "+status))
 			return true
 		}
 		return false

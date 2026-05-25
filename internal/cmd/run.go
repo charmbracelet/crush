@@ -189,6 +189,9 @@ func runNonInteractive(
 	}
 
 	// Wait for the agent to become ready (MCP init, etc).
+	if err := c.InitiateAgentProcessing(ctx, ws.ID); err != nil {
+		slog.Warn("Failed to initiate agent processing", "error", err)
+	}
 	if err := waitForAgent(ctx, c, ws.ID); err != nil {
 		stopSpinner()
 		return fmt.Errorf("agent not ready: %w", err)

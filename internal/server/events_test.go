@@ -1,10 +1,14 @@
 package server
 
 import (
+	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
+	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/stretchr/testify/require"
 )
 
@@ -43,4 +47,39 @@ func TestMessageToProtoToolResult(t *testing.T) {
 	require.Equal(t, "image/png", tr.MIMEType)
 	require.Equal(t, `{"file_path":"/tmp/x","content":"hi"}`, tr.Metadata)
 	require.False(t, tr.IsError)
+}
+
+// TestSkillsEventToProto_RoundTrip verifies that a pubsub.Event[skills.Event]
+// can be wrapped, marshaled, and unmarshaled back through the SSE
+// envelope without losing state values or error messages.
+func TestSkillsEventToProto_RoundTrip(t *testing.T) {
+	t.Parallel()
+
+	src := pubsub.Event[skills.Event]{
+		Type: pubsub.UpdatedEvent,
+		Payload: skills.Event{
+			States: []*skills.SkillState{
+				{Name: "ok", Path: "/p/ok", State: skills.StateNormal},
+				{Name: "broken", Path: "/p/broken", State: skills.StateError, Err: errors.New("bad frontmatter")},
+			},
+		},
+	}
+
+	env := wrapEvent(src)
+	require.NotNil(t, env)
+	require.Equal(t, pubsub.PayloadTypeSkillsEvent, env.Type)
+
+	var decoded pubsub.Event[proto.SkillsEvent]
+	require.NoError(t, json.Unmarshal(env.Payload, &decoded))
+	require.Equal(t, pubsub.UpdatedEvent, decoded.Type)
+	require.Len(t, decoded.Payload.States, 2)
+
+	require.Equal(t, "ok", decoded.Payload.States[0].Name)
+	require.Equal(t, "/p/ok", decoded.Payload.States[0].Path)
+	require.Equal(t, proto.SkillStateNormal, decoded.Payload.States[0].State)
+	require.Empty(t, decoded.Payload.States[0].Error)
+
+	require.Equal(t, "broken", decoded.Payload.States[1].Name)
+	require.Equal(t, proto.SkillStateError, decoded.Payload.States[1].State)
+	require.Equal(t, "bad frontmatter", decoded.Payload.States[1].Error)
 }

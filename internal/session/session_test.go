@@ -11,9 +11,10 @@ import (
 
 func newTestService(t *testing.T) Service {
 	t.Helper()
-	conn, err := db.Connect(t.Context(), t.TempDir())
+	dataDir := t.TempDir()
+	conn, err := db.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() { require.NoError(t, db.Release(dataDir)) })
 	return NewService(db.New(conn), conn)
 }
 
@@ -186,4 +187,59 @@ func TestSessionModels_ListEmptySession(t *testing.T) {
 	got, err := svc.ListModels(ctx, sess.ID)
 	require.NoError(t, err)
 	require.Empty(t, got)
+}
+
+func TestEstimatedUsageStateSurvivesFetchModifySave(t *testing.T) {
+	sessions := newTestService(t)
+
+	created, err := sessions.Create(t.Context(), "test")
+	require.NoError(t, err)
+	created.PromptTokens = 100
+	created.CompletionTokens = 50
+	created.EstimatedUsage = true
+
+	saved, err := sessions.Save(t.Context(), created)
+	require.NoError(t, err)
+	require.True(t, saved.EstimatedUsage)
+
+	fetched, err := sessions.Get(t.Context(), created.ID)
+	require.NoError(t, err)
+	require.True(t, fetched.EstimatedUsage)
+
+	fetched.Todos = []Todo{{
+		Content:    "Check estimate state",
+		Status:     TodoStatusInProgress,
+		ActiveForm: "Checking estimate state",
+	}}
+
+	updated, err := sessions.Save(t.Context(), fetched)
+	require.NoError(t, err)
+	require.True(t, updated.EstimatedUsage)
+
+	refetched, err := sessions.Get(t.Context(), created.ID)
+	require.NoError(t, err)
+	require.True(t, refetched.EstimatedUsage)
+}
+
+func TestEstimatedUsageStateCanBeClearedByExplicitSave(t *testing.T) {
+	sessions := newTestService(t)
+
+	created, err := sessions.Create(t.Context(), "test")
+	require.NoError(t, err)
+	created.PromptTokens = 100
+	created.CompletionTokens = 50
+	created.EstimatedUsage = true
+
+	saved, err := sessions.Save(t.Context(), created)
+	require.NoError(t, err)
+	require.True(t, saved.EstimatedUsage)
+
+	saved.EstimatedUsage = false
+	updated, err := sessions.Save(t.Context(), saved)
+	require.NoError(t, err)
+	require.False(t, updated.EstimatedUsage)
+
+	refetched, err := sessions.Get(t.Context(), created.ID)
+	require.NoError(t, err)
+	require.False(t, refetched.EstimatedUsage)
 }

@@ -34,6 +34,7 @@ import (
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/server"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	ui "github.com/charmbracelet/crush/internal/ui/model"
 	"github.com/charmbracelet/crush/internal/version"
@@ -286,7 +287,19 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 	logFile := filepath.Join(cfg.Options.DataDirectory, "logs", "crush.log")
 	crushlog.Setup(logFile, debug)
 
-	appInstance, err := app.New(ctx, conn, store)
+	// Discover skills once before app.New. Local mode hosts a single
+	// workspace per process, so WithGlobalMirror keeps the package
+	// globals (which the TUI reads via skills.GetLatestStates) in sync
+	// with the manager.
+	discoveryCfg := localSkillsDiscoveryConfig(store)
+	allSkills, activeSkills, skillStates := skills.DiscoverFromConfig(discoveryCfg)
+	skillsMgr := skills.NewManager(allSkills, activeSkills, skillStates,
+		skills.WithGlobalMirror(),
+		skills.WithResolvedPaths(discoveryCfg.ResolvePaths()),
+		skills.WithWorkingDir(discoveryCfg.WorkingDir),
+	)
+
+	appInstance, err := app.New(ctx, conn, store, skillsMgr)
 	if err != nil {
 		_ = conn.Close()
 		slog.Error("Failed to create app instance", "error", err)
@@ -300,6 +313,27 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 	ws := workspace.NewAppWorkspace(appInstance, store)
 	cleanup := func() { appInstance.Shutdown() }
 	return ws, cleanup, nil
+}
+
+// localSkillsDiscoveryConfig adapts a *config.ConfigStore to the inputs
+// skills.DiscoverFromConfig expects.
+func localSkillsDiscoveryConfig(store *config.ConfigStore) skills.DiscoveryConfig {
+	opts := store.Config().Options
+	var paths, disabled []string
+	if opts != nil {
+		paths = opts.SkillsPaths
+		disabled = opts.DisabledSkills
+	}
+	var resolver func(string) (string, error)
+	if r := store.Resolver(); r != nil {
+		resolver = r.ResolveValue
+	}
+	return skills.DiscoveryConfig{
+		SkillsPaths:    paths,
+		DisabledSkills: disabled,
+		WorkingDir:     store.WorkingDir(),
+		Resolver:       resolver,
+	}
 }
 
 // setupClientServerWorkspace connects to a server process and wraps the

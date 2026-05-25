@@ -531,6 +531,13 @@ func TestReloadFromDisk_UsesNewConfigValues(t *testing.T) {
 	t.Setenv("CRUSH_GLOBAL_CONFIG", filepath.Join(dir, "no-such-global-config"))
 	configPath := filepath.Join(dir, "crush.json")
 
+	// Isolate from the host's global config so only test-provided
+	// providers are visible.
+	t.Setenv("CRUSH_GLOBAL_CONFIG", dir)
+	t.Setenv("CRUSH_GLOBAL_DATA", dir)
+	resetProviderState()
+	t.Cleanup(resetProviderState)
+
 	// Create initial config with one model preference
 	initialConfig := `{
 		"models": {

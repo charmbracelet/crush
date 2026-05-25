@@ -21,6 +21,10 @@ type Workspace struct {
 	Version string         `json:"version,omitempty"`
 	Config  *config.Config `json:"config,omitempty"`
 	Env     []string       `json:"env,omitempty"`
+	// Skills carries the snapshot of skill discovery state at workspace
+	// creation time. Subsequent updates flow through the SSE event
+	// stream.
+	Skills []SkillState `json:"skills,omitempty"`
 }
 
 // Error represents an error response.
@@ -36,6 +40,35 @@ type Error struct {
 const (
 	ErrCodeNoModelChoicesToSave = "no_model_choices_to_save"
 )
+
+// SkillInfo describes a visible skill exposed to a frontend.
+type SkillInfo struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Label       string `json:"label"`
+	Source      string `json:"source"`
+}
+
+// ReadSkillRequest is the request body for reading a skill's content.
+type ReadSkillRequest struct {
+	SkillID string `json:"skill_id"`
+}
+
+// ReadSkillResponse is the response for reading a skill's content.
+type ReadSkillResponse struct {
+	Content []byte          `json:"content"`
+	Result  SkillReadResult `json:"result"`
+}
+
+// SkillReadResult holds metadata about a skill returned alongside its
+// content.
+type SkillReadResult struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Source      string `json:"source"`
+	Builtin     bool   `json:"builtin"`
+}
 
 // AgentInfo represents information about the agent.
 type AgentInfo struct {

@@ -26,7 +26,6 @@ import (
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/history"
-	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/lsp"
@@ -118,9 +117,19 @@ func NewCoordinator(
 	filetracker filetracker.Service,
 	lspManager *lsp.Manager,
 	notify pubsub.Publisher[notify.Notification],
+	skillsMgr *skills.Manager,
 ) (Coordinator, error) {
-	// Discover skills once at session start.
-	allSkills, activeSkills := discoverSkills(cfg)
+	// Skills are pre-discovered by the caller (see app.New /
+	// backend.CreateWorkspace) and passed in via the manager. If no
+	// manager was provided (legacy callers), fall back to an in-line
+	// discovery so the coordinator still works.
+	var allSkills, activeSkills []*skills.Skill
+	if skillsMgr != nil {
+		allSkills = skillsMgr.AllSkills()
+		activeSkills = skillsMgr.ActiveSkills()
+	} else {
+		allSkills, activeSkills = discoverSkills(cfg)
+	}
 	skillTracker := skills.NewTracker(activeSkills)
 
 	c := &coordinator{
@@ -274,10 +283,13 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		return options
 	}
 
+	shouldSetEffort := model.CatwalkCfg.CanReason &&
+		slices.Contains(model.CatwalkCfg.ReasoningLevels, model.ModelCfg.ReasoningEffort)
+
 	switch providerCfg.Type {
 	case openai.Name, azure.Name:
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
-		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" && model.CatwalkCfg.CanReason {
+		if !hasReasoningEffort && shouldSetEffort {
 			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
 		}
 		if openai.IsResponsesModel(model.CatwalkCfg.ID) {
@@ -301,7 +313,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			_, hasThink  = mergedOptions["thinking"]
 		)
 		switch {
-		case !hasEffort && model.ModelCfg.ReasoningEffort != "" && model.CatwalkCfg.CanReason:
+		case !hasEffort && shouldSetEffort:
 			mergedOptions["effort"] = model.ModelCfg.ReasoningEffort
 		case !hasThink && model.ModelCfg.Think:
 			mergedOptions["thinking"] = map[string]any{"budget_tokens": 2000}
@@ -313,7 +325,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 
 	case openrouter.Name:
 		_, hasReasoning := mergedOptions["reasoning"]
-		if !hasReasoning && model.ModelCfg.ReasoningEffort != "" {
+		if !hasReasoning && shouldSetEffort {
 			mergedOptions["reasoning"] = map[string]any{
 				"enabled": true,
 				"effort":  model.ModelCfg.ReasoningEffort,
@@ -325,7 +337,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		}
 	case vercel.Name:
 		_, hasReasoning := mergedOptions["reasoning"]
-		if !hasReasoning && model.ModelCfg.ReasoningEffort != "" {
+		if !hasReasoning && shouldSetEffort {
 			mergedOptions["reasoning"] = map[string]any{
 				"enabled": true,
 				"effort":  model.ModelCfg.ReasoningEffort,
@@ -358,7 +370,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		extraBody := make(map[string]any)
 
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
-		if !hasReasoningEffort && model.ModelCfg.ReasoningEffort != "" && model.CatwalkCfg.CanReason {
+		if !hasReasoningEffort && shouldSetEffort {
 			switch providerCfg.ID {
 			case string(catwalk.InferenceProviderIoNet):
 				extraBody["reasoning"] = map[string]string{"effort": model.ModelCfg.ReasoningEffort}
@@ -1138,53 +1150,31 @@ func (c *coordinator) updateParentSessionCost(ctx context.Context, childSessionI
 	return nil
 }
 
-// discoverSkills runs the skill discovery pipeline and returns both the
-// pre-filter (all discovered, after dedup) and post-filter (active) lists.
-// It also emits a single diagnostic log line summarising the outcome to
-// help track skill-loading health over time.
+// discoverSkills is a thin fallback wrapper used only when no
+// skills.Manager has been threaded through to the coordinator. All
+// production call sites (backend.CreateWorkspace, setupLocalWorkspace)
+// run discovery in advance and pass the results via the manager;
+// reaching this path means a caller bypassed both. It deliberately does
+// NOT publish to the package-level broker — there are no subscribers in
+// that case, so doing so would be misleading without delivering the
+// snapshot anywhere useful.
 func discoverSkills(cfg *config.ConfigStore) (allSkills, activeSkills []*skills.Skill) {
-	builtin, builtinStates := skills.DiscoverBuiltinWithStates()
-	discovered := append([]*skills.Skill(nil), builtin...)
-
-	var userStates []*skills.SkillState
-	var userPaths []string
-
 	opts := cfg.Config().Options
-	if opts != nil && len(opts.SkillsPaths) > 0 {
-		userPaths = make([]string, 0, len(opts.SkillsPaths))
-		for _, pth := range opts.SkillsPaths {
-			expanded := home.Long(pth)
-			if strings.HasPrefix(expanded, "$") {
-				if resolved, err := cfg.Resolver().ResolveValue(expanded); err == nil {
-					expanded = resolved
-				}
-			}
-			userPaths = append(userPaths, expanded)
-		}
-		var userSkills []*skills.Skill
-		userSkills, userStates = skills.DiscoverWithStates(userPaths)
-		discovered = append(discovered, userSkills...)
-	}
-
-	allSkills = skills.Deduplicate(discovered)
-	var disabledSkills []string
+	var paths, disabled []string
 	if opts != nil {
-		disabledSkills = opts.DisabledSkills
+		paths = opts.SkillsPaths
+		disabled = opts.DisabledSkills
 	}
-	activeSkills = skills.Filter(allSkills, disabledSkills)
-
-	allStates := append([]*skills.SkillState(nil), builtinStates...)
-	allStates = append(allStates, userStates...)
-
-	allStates = skills.DeduplicateStates(allStates)
-
-	slices.SortStableFunc(allStates, func(a, b *skills.SkillState) int {
-		return strings.Compare(strings.ToLower(a.Path), strings.ToLower(b.Path))
+	var resolver func(string) (string, error)
+	if r := cfg.Resolver(); r != nil {
+		resolver = r.ResolveValue
+	}
+	allSkills, activeSkills, states := skills.DiscoverFromConfig(skills.DiscoveryConfig{
+		SkillsPaths:    paths,
+		DisabledSkills: disabled,
+		Resolver:       resolver,
 	})
-	skills.SetLatestStates(allStates)
-	skills.PublishStates(allStates)
-
-	logDiscoveryStats(builtin, builtinStates, userStates, userPaths, allSkills, activeSkills, disabledSkills)
+	logDiscoveryStats(states, paths, allSkills, activeSkills, disabled)
 	return allSkills, activeSkills
 }
 
@@ -1232,28 +1222,26 @@ func logTurnSkillUsage(
 
 // logDiscoveryStats emits a single structured log line summarising skill
 // discovery for the current session. It is intentionally low-volume: one
-// line per session start.
+// line per session start. Builtin vs user counts are derived from the
+// SkillState.Path — builtin states use the "builtin/" embed prefix.
 func logDiscoveryStats(
-	builtin []*skills.Skill,
-	builtinStates, userStates []*skills.SkillState,
+	states []*skills.SkillState,
 	userPaths []string,
 	allSkills, activeSkills []*skills.Skill,
 	disabled []string,
 ) {
-	countErrors := func(states []*skills.SkillState) int {
-		n := 0
-		for _, s := range states {
-			if s.State == skills.StateError {
-				n++
-			}
-		}
-		return n
-	}
-
-	userOK := 0
-	for _, s := range userStates {
-		if s.State == skills.StateNormal {
+	var builtinOK, builtinErr, userOK, userErr int
+	for _, s := range states {
+		isBuiltin := strings.HasPrefix(s.Path, "builtin/")
+		switch {
+		case isBuiltin && s.State == skills.StateNormal:
+			builtinOK++
+		case isBuiltin && s.State == skills.StateError:
+			builtinErr++
+		case !isBuiltin && s.State == skills.StateNormal:
 			userOK++
+		case !isBuiltin && s.State == skills.StateError:
+			userErr++
 		}
 	}
 
@@ -1267,10 +1255,10 @@ func logDiscoveryStats(
 	slog.Info(
 		"Skill discovery complete",
 		"component", "skills",
-		"builtin_ok", len(builtin),
-		"builtin_errors", countErrors(builtinStates),
+		"builtin_ok", builtinOK,
+		"builtin_errors", builtinErr,
 		"user_ok", userOK,
-		"user_errors", countErrors(userStates),
+		"user_errors", userErr,
 		"user_paths", len(userPaths),
 		"deduped_total", len(allSkills),
 		"active", len(activeSkills),

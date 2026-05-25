@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -22,6 +23,9 @@ const (
 	maxHeight = 10
 	minWidth  = 10
 	maxWidth  = 100
+
+	debounceDuration = 150 * time.Millisecond
+	dirCacheTTL      = 5 * time.Second
 
 	tierExactName = iota
 	tierPrefixName
@@ -40,8 +44,33 @@ type ClosedMsg struct{}
 
 // CompletionItemsLoadedMsg is sent when files have been loaded for completions.
 type CompletionItemsLoadedMsg struct {
+	Gen       uint64
 	Files     []FileCompletionValue
 	Resources []ResourceCompletionValue
+}
+
+// DebouncedOpenMsg triggers a deferred completion load.
+type DebouncedOpenMsg struct {
+	Tag   uint64
+	Query string
+	Depth int
+	Limit int
+}
+
+// DirFromQuery extracts the directory portion from a completion query.
+func DirFromQuery(query string) string {
+	q := strings.TrimPrefix(query, "@")
+	if idx := strings.LastIndexAny(q, "/\\"); idx >= 0 {
+		if idx == 0 {
+			return string(filepath.Separator)
+		}
+		dir := filepath.Clean(q[:idx])
+		if dir == "" {
+			return "."
+		}
+		return dir
+	}
+	return "."
 }
 
 // Completions represents the completions popup component.
@@ -51,8 +80,16 @@ type Completions struct {
 	height int
 
 	// State
-	open  bool
-	query string
+	loadGen uint64
+	open    bool
+	query   string
+
+	// Cache
+	dirCache    map[string]dirCacheEntry
+	dirCacheMu  sync.Mutex
+	mcpCache    []ResourceCompletionValue
+	mcpCachedAt time.Time
+	mcpCacheMu  sync.Mutex
 
 	// Key bindings
 	keyMap KeyMap
@@ -67,6 +104,12 @@ type Completions struct {
 
 	allItems []list.FilterableItem
 	filtered []list.FilterableItem
+}
+
+// dirCacheEntry holds cached file listings for a directory.
+type dirCacheEntry struct {
+	files []FileCompletionValue
+	at    time.Time
 }
 
 type namePriorityRule struct {
@@ -107,6 +150,7 @@ func New(normalStyle, focusedStyle, matchStyle lipgloss.Style) *Completions {
 		normalStyle:  normalStyle,
 		focusedStyle: focusedStyle,
 		matchStyle:   matchStyle,
+		dirCache:     make(map[string]dirCacheEntry),
 	}
 }
 
@@ -141,19 +185,58 @@ func (c *Completions) KeyMap() KeyMap {
 }
 
 // Open opens the completions with file items from the filesystem.
-func (c *Completions) Open(depth, limit int) tea.Cmd {
+func (c *Completions) Open(query string, depth, limit int) tea.Cmd {
+	c.loadGen++
+	gen := c.loadGen
+	dir := DirFromQuery(query)
 	return func() tea.Msg {
 		var msg CompletionItemsLoadedMsg
+		msg.Gen = gen
+
 		var wg sync.WaitGroup
 		wg.Go(func() {
-			msg.Files = loadFiles(depth, limit)
+			msg.Files = c.loadCachedFiles(dir, depth, limit)
 		})
 		wg.Go(func() {
-			msg.Resources = loadMCPResources()
+			msg.Resources = c.loadCachedMCPResources()
 		})
 		wg.Wait()
 		return msg
 	}
+}
+
+// DebounceOpen schedules a deferred Open after a short delay.
+func (c *Completions) DebounceOpen(tag uint64, query string, depth, limit int) tea.Cmd {
+	return tea.Tick(debounceDuration, func(time.Time) tea.Msg {
+		return DebouncedOpenMsg{Tag: tag, Query: query, Depth: depth, Limit: limit}
+	})
+}
+
+func (c *Completions) loadCachedFiles(dir string, depth, limit int) []FileCompletionValue {
+	c.dirCacheMu.Lock()
+	entry, hit := c.dirCache[dir]
+	c.dirCacheMu.Unlock()
+	if hit && time.Since(entry.at) < dirCacheTTL {
+		return entry.files
+	}
+
+	files := loadFilesFromDir(dir, depth, limit)
+
+	c.dirCacheMu.Lock()
+	c.dirCache[dir] = dirCacheEntry{files: files, at: time.Now()}
+	c.dirCacheMu.Unlock()
+	return files
+}
+
+func (c *Completions) loadCachedMCPResources() []ResourceCompletionValue {
+	c.mcpCacheMu.Lock()
+	defer c.mcpCacheMu.Unlock()
+	if time.Since(c.mcpCachedAt) < dirCacheTTL {
+		return c.mcpCache
+	}
+	c.mcpCache = loadMCPResources()
+	c.mcpCachedAt = time.Now()
+	return c.mcpCache
 }
 
 // SetItems sets the files and MCP resources and rebuilds the merged list.
@@ -201,9 +284,16 @@ func (c *Completions) SetItems(files []FileCompletionValue, resources []Resource
 	c.updateSize()
 }
 
-// Close closes the completions popup.
+// Close closes the completions popup and clears caches.
 func (c *Completions) Close() {
 	c.open = false
+	c.dirCacheMu.Lock()
+	c.dirCache = make(map[string]dirCacheEntry)
+	c.dirCacheMu.Unlock()
+	c.mcpCacheMu.Lock()
+	c.mcpCache = nil
+	c.mcpCachedAt = time.Time{}
+	c.mcpCacheMu.Unlock()
 }
 
 // Filter filters the completions with the given query.
@@ -404,8 +494,8 @@ func (c *Completions) Render() string {
 	return c.list.List.Render()
 }
 
-func loadFiles(depth, limit int) []FileCompletionValue {
-	files, _, _ := fsext.ListDirectory(".", nil, depth, limit)
+func loadFilesFromDir(dir string, depth, limit int) []FileCompletionValue {
+	files, _, _ := fsext.ListDirectory(dir, nil, depth, limit)
 	slices.Sort(files)
 	result := make([]FileCompletionValue, 0, len(files))
 	for _, file := range files {

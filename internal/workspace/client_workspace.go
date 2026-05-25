@@ -10,6 +10,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/taigrr/crush/internal/agent/notify"
 	"github.com/taigrr/crush/internal/agent/tools/mcp"
 	"github.com/taigrr/crush/internal/checkpoint"
@@ -27,19 +28,27 @@ import (
 	"github.com/taigrr/crush/internal/session"
 	"github.com/taigrr/crush/internal/skills"
 	"github.com/taigrr/crush/internal/worktree"
-	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
 // ClientWorkspace implements the Workspace interface by delegating all
 // operations to a remote server via the client SDK. It caches the
 // proto.Workspace returned at creation time and refreshes it after
 // config-mutating operations.
+// worktreeCacheTTL is how long a cached worktree path remains valid.
+// The cache is also invalidated on any worktree mutation.
+const worktreeCacheTTL = 1 * time.Minute
+
 type ClientWorkspace struct {
 	client *client.Client
 
 	mu              sync.RWMutex
 	ws              proto.Workspace
 	activeSessionID string
+
+	// Cached active worktree to avoid HTTP round-trips on every
+	// WorkingDir() call.
+	cachedWorktree     *worktree.Worktree
+	cachedWorktreeTime time.Time
 }
 
 // NewClientWorkspace creates a new ClientWorkspace that proxies all
@@ -444,14 +453,30 @@ func (w *ClientWorkspace) WorkingDir() string {
 	// If there's an active session with an active worktree, use the worktree path.
 	w.mu.RLock()
 	sessionID := w.activeSessionID
+	cached := w.cachedWorktree
+	cachedAt := w.cachedWorktreeTime
 	w.mu.RUnlock()
 
-	if sessionID != "" {
-		if wt, err := w.GetActiveWorktree(context.Background(), sessionID); err == nil && wt != nil {
-			return wt.Path
-		}
+	if sessionID == "" {
+		return w.cached().Path
 	}
-	return w.cached().Path
+
+	// Return cached worktree if still fresh.
+	if cached != nil && time.Since(cachedAt) < worktreeCacheTTL {
+		return cached.Path
+	}
+
+	wt, err := w.client.GetActiveWorktree(context.Background(), w.workspaceID(), sessionID)
+	if err != nil || wt == nil {
+		return w.cached().Path
+	}
+
+	w.mu.Lock()
+	w.cachedWorktree = wt
+	w.cachedWorktreeTime = time.Now()
+	w.mu.Unlock()
+
+	return wt.Path
 }
 
 // BaseDir returns the project base directory (not worktree-aware).
@@ -461,6 +486,15 @@ func (w *ClientWorkspace) BaseDir() string {
 
 // GitBranch returns the current git branch name, or empty if not in a git repo.
 // Fetches live from git using WorkingDir (which is worktree-aware).
+// invalidateWorktreeCache clears the cached active worktree so the next
+// WorkingDir() call fetches fresh data from the server.
+func (w *ClientWorkspace) invalidateWorktreeCache() {
+	w.mu.Lock()
+	w.cachedWorktree = nil
+	w.cachedWorktreeTime = time.Time{}
+	w.mu.Unlock()
+}
+
 func (w *ClientWorkspace) GitBranch() string {
 	dir := w.WorkingDir()
 	cmd := exec.Command("git", "branch", "--show-current")
@@ -480,6 +514,8 @@ func (w *ClientWorkspace) Resolver() config.VariableResolver {
 func (w *ClientWorkspace) SetActiveSessionID(sessionID string) {
 	w.mu.Lock()
 	w.activeSessionID = sessionID
+	w.cachedWorktree = nil
+	w.cachedWorktreeTime = time.Time{}
 	w.mu.Unlock()
 }
 
@@ -687,15 +723,27 @@ func (w *ClientWorkspace) GetActiveWorktree(ctx context.Context, sessionID strin
 }
 
 func (w *ClientWorkspace) CreateWorktree(ctx context.Context, sessionID, name, fromSnapshotID string) (*worktree.Worktree, error) {
-	return w.client.CreateWorktree(ctx, w.workspaceID(), sessionID, name, fromSnapshotID)
+	wt, err := w.client.CreateWorktree(ctx, w.workspaceID(), sessionID, name, fromSnapshotID)
+	if err == nil {
+		w.invalidateWorktreeCache()
+	}
+	return wt, err
 }
 
 func (w *ClientWorkspace) SwitchWorktree(ctx context.Context, sessionID, worktreeID string) error {
-	return w.client.SwitchWorktree(ctx, w.workspaceID(), sessionID, worktreeID)
+	err := w.client.SwitchWorktree(ctx, w.workspaceID(), sessionID, worktreeID)
+	if err == nil {
+		w.invalidateWorktreeCache()
+	}
+	return err
 }
 
 func (w *ClientWorkspace) DeleteWorktree(ctx context.Context, worktreeID string) error {
-	return w.client.DeleteWorktree(ctx, w.workspaceID(), worktreeID)
+	err := w.client.DeleteWorktree(ctx, w.workspaceID(), worktreeID)
+	if err == nil {
+		w.invalidateWorktreeCache()
+	}
+	return err
 }
 
 func (w *ClientWorkspace) MergeWorktree(ctx context.Context, worktreeID, targetBranch string, rebase bool) error {

@@ -23,23 +23,23 @@ import (
 	fang "charm.land/fang/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
-	"github.com/taigrr/crush/internal/client"
-	"github.com/taigrr/crush/internal/config"
-	crushlog "github.com/taigrr/crush/internal/log"
-	"github.com/taigrr/crush/internal/proto"
-	"github.com/taigrr/crush/internal/server"
-	"github.com/taigrr/crush/internal/skills"
-	"github.com/taigrr/crush/internal/session"
-	"github.com/taigrr/crush/internal/ui/common"
-	ui "github.com/taigrr/crush/internal/ui/model"
-	"github.com/taigrr/crush/internal/version"
-	"github.com/taigrr/crush/internal/workspace"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
 	xstrings "github.com/charmbracelet/x/exp/strings"
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
+	"github.com/taigrr/crush/internal/client"
+	"github.com/taigrr/crush/internal/config"
+	crushlog "github.com/taigrr/crush/internal/log"
+	"github.com/taigrr/crush/internal/proto"
+	"github.com/taigrr/crush/internal/server"
+	"github.com/taigrr/crush/internal/session"
+	"github.com/taigrr/crush/internal/skills"
+	"github.com/taigrr/crush/internal/ui/common"
+	ui "github.com/taigrr/crush/internal/ui/model"
+	"github.com/taigrr/crush/internal/version"
+	"github.com/taigrr/crush/internal/workspace"
 )
 
 var clientHost string
@@ -115,7 +115,6 @@ crush --continue
 			}
 			sessionID = sess.ID
 		}
-
 
 		com := common.DefaultCommon(ws)
 		model := ui.New(com, sessionID, continueLast)

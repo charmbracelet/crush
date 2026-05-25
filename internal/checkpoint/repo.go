@@ -33,6 +33,15 @@ var (
 	ErrWorktreeNotFound   = errors.New("worktree not found")
 )
 
+// blobCacheEntry stores the mtime and size of a file at the time it was
+// last snapshotted, along with its git blob hash. If a file's mtime and
+// size haven't changed, we can skip reading and compressing it.
+type blobCacheEntry struct {
+	ModTime time.Time
+	Size    int64
+	Hash    plumbing.Hash
+}
+
 // Repo manages Crush's private git repository for snapshots.
 // It uses go-git with a custom GIT_DIR (.crush/git) while operating
 // on the user's project directory as the work tree.
@@ -41,6 +50,10 @@ type Repo struct {
 	gitDir     string // .crush/git
 	projectDir string // User's project root
 	config     *Config
+
+	// blobCache maps relative file paths to their last known state.
+	// Used to skip re-reading and re-compressing unchanged files.
+	blobCache map[string]blobCacheEntry
 }
 
 // Config holds snapshot configuration.
@@ -427,7 +440,24 @@ func (r *Repo) buildTree(dir string, relPath string) (plumbing.Hash, error) {
 }
 
 // addBlob adds a file's content as a blob and returns its hash.
+// It uses the blob cache to skip reading/compressing files whose mtime
+// and size haven't changed since the last snapshot.
 func (r *Repo) addBlob(path string, isSymlink bool) (plumbing.Hash, error) {
+	// For regular files, check the mtime cache.
+	if !isSymlink {
+		relPath, _ := filepath.Rel(r.projectDir, path)
+		if relPath != "" {
+			info, err := os.Stat(path)
+			if err == nil {
+				if cached, ok := r.blobCache[relPath]; ok {
+					if info.ModTime().Equal(cached.ModTime) && info.Size() == cached.Size {
+						return cached.Hash, nil
+					}
+				}
+			}
+		}
+	}
+
 	var content []byte
 	var err error
 
@@ -461,6 +491,23 @@ func (r *Repo) addBlob(path string, isSymlink bool) (plumbing.Hash, error) {
 	hash, err := r.repo.Storer.SetEncodedObject(obj)
 	if err != nil {
 		return plumbing.ZeroHash, fmt.Errorf("store blob: %w", err)
+	}
+
+	// Update the cache.
+	if !isSymlink {
+		relPath, _ := filepath.Rel(r.projectDir, path)
+		if relPath != "" {
+			if info, err := os.Stat(path); err == nil {
+				if r.blobCache == nil {
+					r.blobCache = make(map[string]blobCacheEntry)
+				}
+				r.blobCache[relPath] = blobCacheEntry{
+					ModTime: info.ModTime(),
+					Size:    info.Size(),
+					Hash:    hash,
+				}
+			}
+		}
 	}
 
 	return hash, nil

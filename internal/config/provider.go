@@ -147,6 +147,9 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		defer cancel()
 
+		var hyperProvider catwalk.Provider
+		var hyperFound bool
+
 		wg.Go(func() {
 			if customProvidersOnly {
 				return
@@ -177,12 +180,17 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 				errs = append(errs, fmt.Errorf("Crush was unable to fetch updated information from Hyper: %w", err)) //nolint:staticcheck
 				return
 			}
-			providers.Append(item)
+			hyperProvider = item
+			hyperFound = true
 		})
 
 		wg.Wait()
 
-		providerList = slices.Collect(providers.Seq())
+		if hyperFound {
+			providerList = append([]catwalk.Provider{hyperProvider}, slices.Collect(providers.Seq())...)
+		} else {
+			providerList = slices.Collect(providers.Seq())
+		}
 		providerErr = errors.Join(errs...)
 	})
 	return providerList, providerErr

@@ -43,6 +43,7 @@ const (
 
 	ImageIcon string = "■"
 	TextIcon  string = "≡"
+	SkillIcon string = "▲"
 
 	ScrollbarThumb string = "┃"
 	ScrollbarTrack string = "│"
@@ -502,6 +503,7 @@ type Styles struct {
 		Normal   lipgloss.Style
 		Image    lipgloss.Style
 		Text     lipgloss.Style
+		Skill    lipgloss.Style
 		Deleting lipgloss.Style
 	}
 

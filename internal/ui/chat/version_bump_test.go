@@ -83,6 +83,7 @@ func TestUserMessageItem_MutatorsBumpVersion(t *testing.T) {
 		sty.Attachments.Deleting,
 		sty.Attachments.Image,
 		sty.Attachments.Text,
+		sty.Attachments.Skill,
 	)
 	msg := &message.Message{
 		ID:   "u-mut",
@@ -253,6 +254,7 @@ func TestUserMessageItem_FinishedAlwaysTrue(t *testing.T) {
 		sty.Attachments.Deleting,
 		sty.Attachments.Image,
 		sty.Attachments.Text,
+		sty.Attachments.Skill,
 	)
 	msg := &message.Message{
 		ID:    "u-fin",

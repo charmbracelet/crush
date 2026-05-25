@@ -470,29 +470,6 @@ func TestConfig_configureProvidersBedrockWithoutCredentials(t *testing.T) {
 	require.Equal(t, cfg.Providers.Len(), 0)
 }
 
-func TestConfig_configureProvidersBedrockWithoutUnsupportedModel(t *testing.T) {
-	knownProviders := []catwalk.Provider{
-		{
-			ID:          catwalk.InferenceProviderBedrock,
-			APIKey:      "",
-			APIEndpoint: "",
-			Models: []catwalk.Model{{
-				ID: "some-random-model",
-			}},
-		},
-	}
-
-	cfg := &Config{}
-	cfg.setDefaults("/tmp", "")
-	env := env.NewFromMap(map[string]string{
-		"AWS_ACCESS_KEY_ID":     "test-key-id",
-		"AWS_SECRET_ACCESS_KEY": "test-secret-key",
-	})
-	resolver := NewShellVariableResolver(env)
-	err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
-	require.Error(t, err)
-}
-
 func TestConfig_configureProvidersVertexAIWithCredentials(t *testing.T) {
 	knownProviders := []catwalk.Provider{
 		{

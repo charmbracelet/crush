@@ -112,8 +112,12 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	// hosts multiple workspaces concurrently, so the manager is
 	// constructed WITHOUT WithGlobalMirror to prevent last-writer-wins
 	// cross-talk between workspaces.
-	allSkills, activeSkills, skillStates := skills.DiscoverFromConfig(skillsDiscoveryConfig(cfg))
-	skillsMgr := skills.NewManager(allSkills, activeSkills, skillStates)
+	discoveryCfg := skillsDiscoveryConfig(cfg)
+	allSkills, activeSkills, skillStates := skills.DiscoverFromConfig(discoveryCfg)
+	skillsMgr := skills.NewManager(allSkills, activeSkills, skillStates,
+		skills.WithResolvedPaths(discoveryCfg.ResolvePaths()),
+		skills.WithWorkingDir(discoveryCfg.WorkingDir),
+	)
 
 	appWorkspace, err := app.New(b.ctx, conn, cfg, skillsMgr)
 	if err != nil {
@@ -173,6 +177,7 @@ func skillsDiscoveryConfig(cfg *config.ConfigStore) skills.DiscoveryConfig {
 	return skills.DiscoveryConfig{
 		SkillsPaths:    paths,
 		DisabledSkills: disabled,
+		WorkingDir:     cfg.WorkingDir(),
 		Resolver:       resolver,
 	}
 }

@@ -142,7 +142,13 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	}
 
 	// Build the task tag and prompt.
-	taskTag := sty.Tool.AgentTaskTag.Render("Task")
+	taskLabel := params.Task
+	if taskLabel == "" {
+		taskLabel = "Task"
+	} else {
+		taskLabel = strings.ToUpper(taskLabel[:1]) + taskLabel[1:]
+	}
+	taskTag := sty.Tool.AgentTaskTag.Render(taskLabel)
 	taskTagWidth := lipgloss.Width(taskTag)
 
 	// Calculate remaining width for prompt.

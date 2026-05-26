@@ -23,6 +23,10 @@ Use this tool when the task is clear enough to hand off, but large enough that d
 ## How to prompt
 Be specific about what to accomplish. Good prompts explain the goal, the relevant context, and what success looks like. Vague prompts like "fix the bug" waste turns.
 
+You must specify the `task` parameter to select the right agent for the job:
+- Use `explore` for fast, read-only codebase searches (finding files, looking up usage, answering architectural questions). This subagent only has read-only tools and is optimized for speed.
+- Use `task` (the default) for general delegated work including editing files, running commands, fetching data, and multi-step investigations.
+
 ## Writing the prompt
 When spawning an agent, it starts with zero context. Brief the agent like a smart colleague who just walked into the room — it hasn't seen this conversation, doesn't know what you've tried, doesn't understand why this task matters.
 - Explain what you're trying to accomplish and why.

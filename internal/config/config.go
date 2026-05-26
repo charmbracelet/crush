@@ -57,8 +57,9 @@ const (
 )
 
 const (
-	AgentCoder string = "coder"
-	AgentTask  string = "task"
+	AgentCoder   string = "coder"
+	AgentTask    string = "task"
+	AgentExplore string = "explore"
 )
 
 type SelectedModel struct {
@@ -688,10 +689,37 @@ func resolveAllowedTools(allTools []string, disabledTools []string) []string {
 	return filterSlice(allTools, disabledTools, false)
 }
 
-func resolveReadOnlyTools(tools []string) []string {
-	readOnlyTools := []string{"glob", "grep", "ls", "sourcegraph", "view"}
-	// filter to only include tools that are in allowedtools (include mode)
-	return filterSlice(tools, readOnlyTools, true)
+func resolveExploreTools(tools []string) []string {
+	exploreTools := []string{"glob", "grep", "ls", "sourcegraph", "view"}
+	return filterSlice(tools, exploreTools, true)
+}
+
+func resolveTaskTools(tools []string) []string {
+	taskTools := []string{
+		"bash",
+		"crush_info",
+		"crush_logs",
+		"job_output",
+		"job_kill",
+		"download",
+		"edit",
+		"multiedit",
+		"lsp_diagnostics",
+		"lsp_references",
+		"lsp_restart",
+		"fetch",
+		"agentic_fetch",
+		"glob",
+		"grep",
+		"ls",
+		"sourcegraph",
+		"todos",
+		"view",
+		"write",
+		"list_mcp_resources",
+		"read_mcp_resource",
+	}
+	return filterSlice(tools, taskTools, true)
 }
 
 func filterSlice(data []string, mask []string, include bool) []string {
@@ -725,9 +753,19 @@ func (c *Config) SetupAgents() {
 			Description:  "An agent that helps with delegating work to a subagent.",
 			Model:        SelectedModelTypeLarge,
 			ContextPaths: c.Options.ContextPaths,
-			AllowedTools: resolveReadOnlyTools(allowedTools),
+			AllowedTools: resolveTaskTools(allowedTools),
 			// NO MCPs or LSPs by default
 			AllowedMCP: map[string][]string{},
+		},
+
+		AgentExplore: {
+			ID:           AgentExplore,
+			Name:         "Explore",
+			Description:  "A fast read-only agent specialized for exploring codebases.",
+			Model:        SelectedModelTypeSmall,
+			ContextPaths: nil,
+			AllowedTools: resolveExploreTools(allowedTools),
+			AllowedMCP:   map[string][]string{},
 		},
 	}
 	c.Agents = agents

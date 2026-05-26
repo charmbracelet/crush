@@ -1,6 +1,7 @@
 package model
 
 import (
+	"image"
 	"strings"
 	"time"
 
@@ -122,21 +123,47 @@ func (m *Chat) Height() int {
 // rendered string and the screen's width method; area / scroll changes do not
 // invalidate it.
 func (m *Chat) Draw(scr uv.Screen, area uv.Rectangle) {
+	// Reserve space for scrollbar if needed.
+	scrollbarWidth := 0
+	listHeight := m.list.Height()
+	listTotalHeight := m.list.TotalHeight()
+	if listTotalHeight > listHeight {
+		scrollbarWidth = 1
+	}
+
+	// Adjust list width to reserve space for scrollbar.
+	listArea := area
+	if scrollbarWidth > 0 {
+		listArea.Max.X -= scrollbarWidth
+	}
+
 	rendered := m.list.Render()
 	method, ok := scr.WidthMethod().(ansi.Method)
 	if !ok {
 		// Width method isn't an ansi.Method (unlikely in practice — both
 		// TerminalScreen and ScreenBuffer store ansi.Method). Fall back
 		// to the uncached path so behavior matches upstream exactly.
-		uv.NewStyledString(rendered).Draw(scr, area)
-		return
+		uv.NewStyledString(rendered).Draw(scr, listArea)
+	} else {
+		if m.drawCache == nil ||
+			m.drawCache.rendered != rendered ||
+			m.drawCache.method != method {
+			m.drawCache = newChatDrawCache(rendered, method)
+		}
+		drawCachedBuffer(scr, listArea, m.drawCache.buf)
 	}
-	if m.drawCache == nil ||
-		m.drawCache.rendered != rendered ||
-		m.drawCache.method != method {
-		m.drawCache = newChatDrawCache(rendered, method)
+
+	// Draw scrollbar if needed.
+	if scrollbarWidth > 0 {
+		scrollbar := common.Scrollbar(m.com.Styles, listHeight, listTotalHeight, listHeight, m.list.Offset())
+		if scrollbar != "" {
+			scrollbarArea := image.Rectangle{
+				Min: image.Point{X: area.Max.X - scrollbarWidth, Y: area.Min.Y},
+				Max: image.Point{X: area.Max.X, Y: area.Max.Y},
+			}
+			uv.NewStyledString(scrollbar).Draw(scr, scrollbarArea)
+		}
 	}
-	drawCachedBuffer(scr, area, m.drawCache.buf)
 }
 
 // newChatDrawCache builds a chatDrawCache for the given rendered string by
@@ -206,7 +233,12 @@ func drawCachedBuffer(scr uv.Screen, area uv.Rectangle, buf uv.ScreenBuffer) {
 
 // SetSize sets the size of the chat view port.
 func (m *Chat) SetSize(width, height int) {
-	m.list.SetSize(width, height)
+	// Reserve space for scrollbar if content exceeds viewport height.
+	listWidth := width
+	if m.list.TotalHeight() > height {
+		listWidth = max(0, width-1)
+	}
+	m.list.SetSize(listWidth, height)
 	// Anchor to bottom if we were at the bottom.
 	if m.AtBottom() {
 		m.ScrollToBottom()

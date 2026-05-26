@@ -216,14 +216,16 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 	for {
 		select {
 		case <-r.Context().Done():
-			c.server.logInfo(r, "SSE stream closed (client disconnected)",
+			c.server.logInfo(
+				r, "SSE stream closed (client disconnected)",
 				slog.String("workspace_id", id),
 				slog.Int64("events_sent", eventCount),
 			)
 			return
 		case ev, ok := <-events:
 			if !ok {
-				c.server.logInfo(r, "SSE stream closed (events channel closed)",
+				c.server.logInfo(
+					r, "SSE stream closed (events channel closed)",
 					slog.String("workspace_id", id),
 					slog.Int64("events_sent", eventCount),
 				)
@@ -240,7 +242,8 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 			}
 
 			if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
-				c.server.logError(r, "SSE write failed",
+				c.server.logError(
+					r, "SSE write failed",
 					slog.String("workspace_id", id),
 					slog.String("error", err.Error()),
 					slog.Int64("events_sent", eventCount),
@@ -248,7 +251,8 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 				return
 			}
 			if err := flusher.Flush(); err != nil {
-				c.server.logError(r, "SSE flush failed",
+				c.server.logError(
+					r, "SSE flush failed",
 					slog.String("workspace_id", id),
 					slog.String("error", err.Error()),
 					slog.Int64("events_sent", eventCount),
@@ -897,6 +901,40 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionSummarize(w http.ResponseW
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+// handlePostWorkspaceAgentSessionShell runs a shell command in the workspace.
+//
+//	@Summary		Run shell command
+//	@Tags			agent
+//	@Accept			json
+//	@Produce		json
+//	@Param			id		path		string						true	"Workspace ID"
+//	@Param			sid		path		string						true	"Session ID"
+//	@Param			request	body		proto.ShellCommandRequest	true	"Shell command"
+//	@Success		200		{object}	proto.ShellCommandResponse
+//	@Failure		400		{object}	proto.Error
+//	@Failure		404		{object}	proto.Error
+//	@Failure		500		{object}	proto.Error
+//	@Router			/workspaces/{id}/agent/sessions/{sid}/shell [post]
+func (c *controllerV1) handlePostWorkspaceAgentSessionShell(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	sid := r.PathValue("sid")
+
+	var req proto.ShellCommandRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+	req.SessionID = sid
+
+	resp, err := c.backend.RunShellCommand(r.Context(), id, req)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, resp)
 }
 
 // handleGetWorkspaceAgentSessionPromptList returns the list of queued prompts.

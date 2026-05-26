@@ -13,11 +13,11 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/taigrr/crush/internal/config"
 	"github.com/taigrr/crush/internal/message"
 	"github.com/taigrr/crush/internal/proto"
 	"github.com/taigrr/crush/internal/pubsub"
-	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 )
 
 // ListWorkspaces retrieves all workspaces from the server.
@@ -373,6 +373,25 @@ func (c *Client) SendMessage(ctx context.Context, id string, sessionID, prompt s
 		return fmt.Errorf("failed to send message to agent: status code %d", rsp.StatusCode)
 	}
 	return nil
+}
+
+// RunShellCommand runs a shell command in the workspace without triggering the agent.
+func (c *Client) RunShellCommand(ctx context.Context, id, sessionID, command string) (proto.ShellCommandResponse, error) {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent/sessions/%s/shell", id, sessionID), nil, jsonBody(proto.ShellCommandRequest{
+		Command: command,
+	}), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return proto.ShellCommandResponse{}, fmt.Errorf("failed to run shell command: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return proto.ShellCommandResponse{}, fmt.Errorf("failed to run shell command: status code %d", rsp.StatusCode)
+	}
+	var resp proto.ShellCommandResponse
+	if err := json.NewDecoder(rsp.Body).Decode(&resp); err != nil {
+		return proto.ShellCommandResponse{}, fmt.Errorf("failed to decode shell command response: %w", err)
+	}
+	return resp, nil
 }
 
 // GetAgentSessionInfo retrieves the agent session info for a workspace.

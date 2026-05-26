@@ -1,6 +1,8 @@
 package dialog
 
 import (
+	"slices"
+
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/config"
@@ -69,7 +71,6 @@ type ModelItem struct {
 	m            fuzzy.Match
 	focused      bool
 	showProvider bool
-	isRecent     bool
 }
 
 // Finished implements list.Item. Model items are render-stable
@@ -79,8 +80,11 @@ func (m *ModelItem) Finished() bool {
 }
 
 // IsRecent returns true if this item is in the recently used list.
-func (m *ModelItem) IsRecent() bool {
-	return m.isRecent
+func (m *ModelItem) IsRecent(cfg *config.Config) bool {
+	recentModels := cfg.RecentModels[m.SelectedModelType()]
+	return slices.ContainsFunc(recentModels, func(sm config.SelectedModel) bool {
+		return sm.Provider == m.SelectedModel().Provider && sm.Model == m.SelectedModel().Model
+	})
 }
 
 // SelectedModel returns this model item as a [config.SelectedModel] instance.
@@ -101,7 +105,7 @@ func (m *ModelItem) SelectedModelType() config.SelectedModelType {
 var _ ListItem = &ModelItem{}
 
 // NewModelItem creates a new ModelItem.
-func NewModelItem(t *styles.Styles, prov catwalk.Provider, model catwalk.Model, typ ModelType, showProvider bool, isRecent bool) *ModelItem {
+func NewModelItem(t *styles.Styles, prov catwalk.Provider, model catwalk.Model, typ ModelType, showProvider bool) *ModelItem {
 	return &ModelItem{
 		Versioned:    list.NewVersioned(),
 		prov:         prov,
@@ -110,7 +114,6 @@ func NewModelItem(t *styles.Styles, prov catwalk.Provider, model catwalk.Model, 
 		t:            t,
 		cache:        make(map[int]string),
 		showProvider: showProvider,
-		isRecent:     isRecent,
 	}
 }
 

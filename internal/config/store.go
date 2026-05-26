@@ -218,7 +218,23 @@ func (s *ConfigStore) UpdatePreferredModel(scope Scope, modelType SelectedModelT
 	return nil
 }
 
+// removeModelFromList removes a model from a list of recently used models.
+// It returns the updated list or an error if the model is not found.
+func removeModelFromList(current []SelectedModel, model SelectedModel) ([]SelectedModel, error) {
+	eq := func(a SelectedModel) bool {
+		return a.Provider == model.Provider && a.Model == model.Model
+	}
+
+	if !slices.ContainsFunc(current, eq) {
+		return nil, fmt.Errorf("model %s:%s is not in recently used list", model.Provider, model.Model)
+	}
+
+	return slices.DeleteFunc(slices.Clone(current), eq), nil
+}
+
 // RemoveRecentModel removes a recently used model from the config file.
+// If the model has an empty provider or model ID, this is a no-op (the UI
+// should prevent this case, but we handle it defensively).
 func (s *ConfigStore) RemoveRecentModel(scope Scope, modelType SelectedModelType, model SelectedModel) error {
 	if model.Provider == "" || model.Model == "" {
 		return nil
@@ -228,19 +244,12 @@ func (s *ConfigStore) RemoveRecentModel(scope Scope, modelType SelectedModelType
 		return nil
 	}
 
-	eq := func(a SelectedModel) bool {
-		return a.Provider == model.Provider && a.Model == model.Model
-	}
-
 	current := s.config.RecentModels[modelType]
-
-	// Check if the model exists in the list before attempting deletion
-	found := slices.ContainsFunc(current, eq)
-	if !found {
-		return fmt.Errorf("model %s:%s is not in recently used list", model.Provider, model.Model)
+	updated, err := removeModelFromList(current, model)
+	if err != nil {
+		return err
 	}
 
-	updated := slices.DeleteFunc(slices.Clone(current), eq)
 	s.config.RecentModels[modelType] = updated
 
 	if err := s.SetConfigField(scope, fmt.Sprintf("recent_models.%s", modelType), updated); err != nil {

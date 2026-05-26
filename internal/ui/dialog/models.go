@@ -173,8 +173,15 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 		if err := m.setProviderItems(); err != nil {
 			return util.ReportError(err)
 		}
+		// Select the item at the specified index, clamping to valid range
 		if msg.Selected >= 0 {
-			m.list.SetSelected(msg.Selected)
+			totalItems := m.list.Len()
+			if totalItems > 0 {
+				// Clamp to valid range
+				selected := min(msg.Selected, totalItems-1)
+				m.list.SetSelected(selected)
+				m.list.ScrollToSelected()
+			}
 		}
 	case tea.KeyPressMsg:
 		switch {
@@ -235,7 +242,7 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 			selected := m.list.Selected()
 
 			modelItem, ok := selectedItem.(*ModelItem)
-			if !ok || !modelItem.IsRecent() {
+			if !ok || !modelItem.IsRecent(m.com.Config()) {
 				break
 			}
 
@@ -391,7 +398,7 @@ func (m *Models) isSelectedRecent() bool {
 	if !ok {
 		return false
 	}
-	return modelItem.IsRecent()
+	return modelItem.IsRecent(m.com.Config())
 }
 
 // setProviderItems sets the provider items in the list.
@@ -439,7 +446,7 @@ func (m *Models) setProviderItems() error {
 
 			group := NewModelGroup(t, name, true)
 			for _, model := range p.Models {
-				item := NewModelItem(t, provider, model, m.modelType, false, false)
+				item := NewModelItem(t, provider, model, m.modelType, false)
 				group.AppendItems(item)
 				itemsMap[item.ID()] = item
 				if model.ID == currentModel.Model && string(provider.ID) == currentModel.Provider {
@@ -492,7 +499,7 @@ func (m *Models) setProviderItems() error {
 
 		group := NewModelGroup(t, name, providerConfigured)
 		for _, model := range displayProvider.Models {
-			item := NewModelItem(t, provider, model, m.modelType, false, false)
+			item := NewModelItem(t, provider, model, m.modelType, false)
 			group.AppendItems(item)
 			itemsMap[item.ID()] = item
 			if model.ID == currentModel.Model && string(provider.ID) == currentModel.Provider {
@@ -515,7 +522,7 @@ func (m *Models) setProviderItems() error {
 			}
 
 			// Show provider for recent items
-			item = NewModelItem(t, item.prov, item.model, m.modelType, true, true)
+			item = NewModelItem(t, item.prov, item.model, m.modelType, true)
 			item.showProvider = true
 
 			validRecentItems = append(validRecentItems, recent)

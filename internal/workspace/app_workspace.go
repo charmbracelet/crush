@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -17,7 +18,9 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
 )
 
@@ -103,6 +106,43 @@ func (w *AppWorkspace) AgentRun(ctx context.Context, sessionID, prompt string, a
 	}
 	_, err := w.app.AgentCoordinator.Run(ctx, sessionID, prompt, attachments...)
 	return err
+}
+
+func (w *AppWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, command string) (proto.ShellCommandResponse, error) {
+	var stdout, stderr bytes.Buffer
+	runErr := shell.Run(ctx, shell.RunOptions{
+		Command: command,
+		Cwd:     w.store.WorkingDir(),
+		Stdout:  &stdout,
+		Stderr:  &stderr,
+	})
+
+	exitCode := 0
+	if runErr != nil {
+		exitCode = shell.ExitCode(runErr)
+	}
+
+	output := stdout.String()
+	if stderr.Len() > 0 {
+		if output != "" {
+			output += "\n"
+		}
+		output += stderr.String()
+	}
+
+	// Persist as a user message so the LLM has context on follow-up.
+	msgContent := fmt.Sprintf("$ %s\n%s", command, output)
+	if sessionID != "" {
+		_, _ = w.app.Messages.Create(ctx, sessionID, message.CreateMessageParams{
+			Role:  message.User,
+			Parts: []message.ContentPart{message.TextContent{Text: msgContent}},
+		})
+	}
+
+	return proto.ShellCommandResponse{
+		Output:   output,
+		ExitCode: exitCode,
+	}, nil
 }
 
 func (w *AppWorkspace) AgentCancel(sessionID string) {

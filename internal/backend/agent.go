@@ -1,14 +1,19 @@
 package backend
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"os"
 
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/shell"
 )
 
 // SendMessage validates and accepts a prompt for the workspace's agent,
@@ -237,4 +242,49 @@ func (b *Backend) GetDefaultSmallModel(workspaceID, providerID string) (config.S
 	}
 
 	return ws.GetDefaultSmallModel(providerID), nil
+}
+
+// RunShellCommand runs a shell command in the workspace directory and
+// persists the command + output as a user message in the session.
+func (b *Backend) RunShellCommand(ctx context.Context, workspaceID string, req proto.ShellCommandRequest) (proto.ShellCommandResponse, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return proto.ShellCommandResponse{}, err
+	}
+
+	var stdout, stderr bytes.Buffer
+	runErr := shell.Run(ctx, shell.RunOptions{
+		Command: req.Command,
+		Cwd:     ws.Path,
+		Env:     append(os.Environ(), ws.Env...),
+		Stdout:  &stdout,
+		Stderr:  &stderr,
+	})
+
+	exitCode := 0
+	if runErr != nil {
+		exitCode = shell.ExitCode(runErr)
+	}
+
+	output := stdout.String()
+	if stderr.Len() > 0 {
+		if output != "" {
+			output += "\n"
+		}
+		output += stderr.String()
+	}
+
+	// Persist as a user message so the LLM has context on follow-up.
+	msgContent := fmt.Sprintf("$ %s\n%s", req.Command, output)
+	if req.SessionID != "" {
+		_, _ = ws.Messages.Create(ctx, req.SessionID, message.CreateMessageParams{
+			Role:  message.User,
+			Parts: []message.ContentPart{message.TextContent{Text: msgContent}},
+		})
+	}
+
+	return proto.ShellCommandResponse{
+		Output:   output,
+		ExitCode: exitCode,
+	}, nil
 }

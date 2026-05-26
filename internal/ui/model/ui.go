@@ -40,6 +40,7 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/stringext"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/chat"
@@ -1701,7 +1702,14 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 			return util.ReportError(err)
 		}
 
-		modelMsg := fmt.Sprintf("%s model changed to %s", msg.ModelType, msg.Model.Model)
+		var (
+			modelType = stringext.Capitalize(string(msg.ModelType))
+			modelName = msg.Model.Model
+		)
+		if catwalkModel := cfg.GetModel(msg.Model.Provider, msg.Model.Model); catwalkModel != nil && catwalkModel.Name != "" {
+			modelName = catwalkModel.Name
+		}
+		modelMsg := fmt.Sprintf("%s model changed to %s", modelType, modelName)
 
 		return util.NewInfoMsg(modelMsg)
 	})

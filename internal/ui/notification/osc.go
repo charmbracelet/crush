@@ -78,23 +78,37 @@ func OSC99QuerySequence() string {
 	return ansi.DesktopNotification("", "i="+osc99QueryID, "p=?")
 }
 
-// OSC99Backend sends desktop notifications using OSC 99.
-type OSC99Backend struct {
-	icon []byte
+// OSCBackend sends desktop notifications using OSC escape sequences. It
+// automatically selects the best available protocol: OSC 99 (modern standard)
+// if supported, falling back to OSC 777 (urxvt extension) otherwise.
+type OSCBackend struct {
+	icon       []byte
+	supports99 bool
 }
 
-// NewOSC99Backend creates a new OSC 99 notification backend.
-func NewOSC99Backend(icon any) *OSC99Backend {
-	b := &OSC99Backend{}
+// NewOSCBackend creates a new OSC notification backend with automatic protocol
+// detection. If supports99 is true, it uses OSC 99; otherwise it falls back to
+// OSC 777.
+func NewOSCBackend(icon any, supports99 bool) *OSCBackend {
+	b := &OSCBackend{
+		supports99: supports99,
+	}
 	if data, ok := icon.([]byte); ok && len(data) > 0 {
 		b.icon = data
 	}
 	return b
 }
 
-// Send returns a [tea.Raw] command that writes OSC 99 escape sequences to the
-// terminal.
-func (b *OSC99Backend) Send(n Notification) tea.Cmd {
+// Send returns a [tea.Cmd] that writes OSC escape sequences to the terminal.
+// Uses OSC 99 if supported, otherwise OSC 777.
+func (b *OSCBackend) Send(n Notification) tea.Cmd {
+	if b.supports99 {
+		return b.sendOSC99(n)
+	}
+	return b.sendOSC777(n)
+}
+
+func (b *OSCBackend) sendOSC99(n Notification) tea.Cmd {
 	slog.Debug("Sending OSC 99 notification", "title", n.Title, "message", n.Message)
 
 	var sb strings.Builder
@@ -119,17 +133,7 @@ func (b *OSC99Backend) Send(n Notification) tea.Cmd {
 	return tea.Raw(sb.String())
 }
 
-// OSC777Backend sends desktop notifications using OSC 777.
-type OSC777Backend struct{}
-
-// NewOSC777Backend creates a new OSC 777 notification backend.
-func NewOSC777Backend() *OSC777Backend {
-	return &OSC777Backend{}
-}
-
-// Send returns a [tea.Raw] command that writes an OSC 777 escape sequence to
-// the terminal.
-func (b *OSC777Backend) Send(n Notification) tea.Cmd {
+func (b *OSCBackend) sendOSC777(n Notification) tea.Cmd {
 	slog.Debug("Sending OSC 777 notification", "title", n.Title, "message", n.Message)
 
 	return tea.Raw(ansi.URxvtExt("notify", n.Title, n.Message))

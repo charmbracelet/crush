@@ -10,14 +10,14 @@ import (
 // NativeBackend sends desktop notifications using the native OS notification
 // system via beeep.
 type NativeBackend struct {
-	// icon is the notification icon data (platform-specific).
-	icon any
+	// icon is the notification icon data (PNG bytes).
+	icon []byte
 	// notifyFunc is the function used to send notifications (swappable for testing).
 	notifyFunc func(title, message string, icon any) error
 }
 
 // NewNativeBackend creates a new native notification backend.
-func NewNativeBackend(icon any) *NativeBackend {
+func NewNativeBackend(icon []byte) *NativeBackend {
 	beeep.AppName = "Crush"
 	return &NativeBackend{
 		icon:       icon,

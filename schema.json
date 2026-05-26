@@ -492,8 +492,20 @@
         },
         "disable_notifications": {
           "type": "boolean",
-          "description": "Disable desktop notifications",
+          "description": "Deprecated: Use notification_style instead. Disable desktop notifications",
           "default": false
+        },
+        "notification_style": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "native",
+            "osc",
+            "bell",
+            "disabled"
+          ],
+          "description": "Notification style to use. Options: auto (default)",
+          "default": "auto"
         },
         "disabled_skills": {
           "items": {

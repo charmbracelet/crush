@@ -2,8 +2,8 @@ package model
 
 import (
 	"fmt"
-	"log/slog"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -14,14 +14,18 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/util"
 )
 
-// markProjectInitialized marks the current project as initialized in the config.
-func (m *UI) markProjectInitialized() tea.Msg {
-	// TODO: handle error so we show it in the tui footer
-	err := m.com.Workspace.MarkProjectInitialized()
-	if err != nil {
-		slog.Error(err.Error())
+// markProjectInitializedCmd marks the current project as initialized in the config.
+func (m *UI) markProjectInitializedCmd() tea.Cmd {
+	return func() tea.Msg {
+		if err := m.com.Workspace.MarkProjectInitialized(); err != nil {
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
+				Msg:  fmt.Sprintf("Failed to mark project as initialized: %v", err),
+				TTL:  15 * time.Second,
+			}
+		}
+		return nil
 	}
-	return nil
 }
 
 // updateInitializeView handles keyboard input for the project initialization prompt.
@@ -61,7 +65,7 @@ func (m *UI) initializeProject() tea.Cmd {
 		return sendMessageMsg{Content: initPrompt}
 	}
 	// Mark the project as initialized
-	cmds = append(cmds, initialize, m.markProjectInitialized)
+	cmds = append(cmds, initialize, m.markProjectInitializedCmd())
 
 	return tea.Sequence(cmds...)
 }
@@ -71,7 +75,7 @@ func (m *UI) skipInitializeProject() tea.Cmd {
 	// TODO: initialize the project
 	m.setState(uiLanding, uiFocusEditor)
 	// mark the project as initialized
-	return m.markProjectInitialized
+	return m.markProjectInitializedCmd()
 }
 
 // initializeView renders the project initialization prompt with Yes/No buttons.

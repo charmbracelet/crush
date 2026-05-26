@@ -62,11 +62,13 @@ type App struct {
 
 	LSPManager *lsp.Manager
 
+	Skills *skills.Manager
+
 	config *config.ConfigStore
 
 	serviceEventsWG *sync.WaitGroup
 	eventsCtx       context.Context
-	events          chan tea.Msg
+	events          *pubsub.Broker[tea.Msg]
 	tuiWG           *sync.WaitGroup
 
 	// global context and cleanup functions
@@ -75,8 +77,11 @@ type App struct {
 	agentNotifications *pubsub.Broker[notify.Notification]
 }
 
-// New initializes a new application instance.
-func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, error) {
+// New initializes a new application instance. skillsMgr carries the
+// per-workspace skill discovery results computed by the caller; the
+// caller is responsible for constructing it (typically via
+// skills.NewManager + skills.DiscoverFromConfig).
+func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr *skills.Manager) (*App, error) {
 	q := db.New(conn)
 	sessions := session.NewService(q, conn)
 	messages := message.NewService(q)
@@ -95,12 +100,13 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 		Permissions: permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools),
 		FileTracker: filetracker.NewService(q),
 		LSPManager:  lsp.NewManager(store),
+		Skills:      skillsMgr,
 
 		globalCtx: ctx,
 
 		config: store,
 
-		events:             make(chan tea.Msg, 100),
+		events:             pubsub.NewBroker[tea.Msg](),
 		serviceEventsWG:    &sync.WaitGroup{},
 		tuiWG:              &sync.WaitGroup{},
 		agentNotifications: pubsub.NewBroker[notify.Notification](),
@@ -113,10 +119,12 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 
 	go mcp.Initialize(ctx, app.Permissions, store)
 
-	// cleanup database upon app shutdown
+	// Release the shared database connection on shutdown. The pool
+	// closes the underlying *sql.DB when the last reference is released.
+	dataDir := cfg.Options.DataDirectory
 	app.cleanupFuncs = append(
 		app.cleanupFuncs,
-		func(context.Context) error { return conn.Close() },
+		func(context.Context) error { return db.Release(dataDir) },
 		func(ctx context.Context) error { return mcp.Close(ctx) },
 	)
 
@@ -153,18 +161,15 @@ func (app *App) Store() *config.ConfigStore {
 	return app.config
 }
 
-// Events returns the events channel for the application.
-func (app *App) Events() <-chan tea.Msg {
-	return app.events
+// Events returns a per-caller subscription channel for application events.
+// Each caller receives its own channel; all callers receive every event.
+func (app *App) Events(ctx context.Context) <-chan pubsub.Event[tea.Msg] {
+	return app.events.Subscribe(ctx)
 }
 
-// SendEvent pushes a message into the application's events channel.
-// It is non-blocking; the message is dropped if the channel is full.
+// SendEvent publishes a message to all event subscribers.
 func (app *App) SendEvent(msg tea.Msg) {
-	select {
-	case app.events <- msg:
-	default:
-	}
+	app.events.Publish(pubsub.UpdatedEvent, msg)
 }
 
 // AgentNotifications returns the broker for agent notification events.
@@ -233,7 +238,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	progress = app.config.Config().Options.Progress == nil || *app.config.Config().Options.Progress
 
 	if !hideSpinner && stderrTTY {
-		t := styles.DefaultStyles()
+		t := styles.ThemeForProvider(app.config.Config().Models[config.SelectedModelTypeLarge].Provider)
 
 		// Detect background color to set the appropriate color for the
 		// spinner's 'Generating...' text. Without this, that text would be
@@ -242,14 +247,14 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 		if f, ok := output.(*os.File); ok && stdinTTY && stdoutTTY {
 			hasDarkBG = lipgloss.HasDarkBackground(os.Stdin, f)
 		}
-		defaultFG := lipgloss.LightDark(hasDarkBG)(charmtone.Pepper, t.FgBase)
+		defaultFG := lipgloss.LightDark(hasDarkBG)(charmtone.Pepper, t.WorkingLabelColor)
 
 		spinner = format.NewSpinner(ctx, cancel, anim.Settings{
 			Size:        10,
 			Label:       "Generating",
 			LabelColor:  defaultFG,
-			GradColorA:  t.Primary,
-			GradColorB:  t.Secondary,
+			GradColorA:  t.WorkingGradFromColor,
+			GradColorB:  t.WorkingGradToColor,
 			CycleColors: true,
 		})
 		spinner.Start()
@@ -482,30 +487,27 @@ func (app *App) setupEvents() {
 	setupSubscriber(ctx, app.serviceEventsWG, "agent-notifications", app.agentNotifications.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "mcp", mcp.SubscribeEvents, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "lsp", SubscribeLSPEvents, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "skills", skills.SubscribeEvents, app.events)
+	if app.Skills != nil {
+		setupSubscriber(ctx, app.serviceEventsWG, "skills", app.Skills.SubscribeEvents, app.events)
+	}
 	cleanupFunc := func(context.Context) error {
 		cancel()
 		app.serviceEventsWG.Wait()
+		app.events.Shutdown()
 		return nil
 	}
 	app.cleanupFuncs = append(app.cleanupFuncs, cleanupFunc)
 }
-
-const subscriberSendTimeout = 2 * time.Second
 
 func setupSubscriber[T any](
 	ctx context.Context,
 	wg *sync.WaitGroup,
 	name string,
 	subscriber func(context.Context) <-chan pubsub.Event[T],
-	outputCh chan<- tea.Msg,
+	broker *pubsub.Broker[tea.Msg],
 ) {
 	wg.Go(func() {
 		subCh := subscriber(ctx)
-		sendTimer := time.NewTimer(0)
-		<-sendTimer.C
-		defer sendTimer.Stop()
-
 		for {
 			select {
 			case event, ok := <-subCh:
@@ -513,23 +515,7 @@ func setupSubscriber[T any](
 					slog.Debug("Subscription channel closed", "name", name)
 					return
 				}
-				var msg tea.Msg = event
-				if !sendTimer.Stop() {
-					select {
-					case <-sendTimer.C:
-					default:
-					}
-				}
-				sendTimer.Reset(subscriberSendTimeout)
-
-				select {
-				case outputCh <- msg:
-				case <-sendTimer.C:
-					slog.Debug("Message dropped due to slow consumer", "name", name)
-				case <-ctx.Done():
-					slog.Debug("Subscription cancelled", "name", name)
-					return
-				}
+				broker.Publish(pubsub.UpdatedEvent, tea.Msg(event))
 			case <-ctx.Done():
 				slog.Debug("Subscription cancelled", "name", name)
 				return
@@ -554,6 +540,7 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.FileTracker,
 		app.LSPManager,
 		app.agentNotifications,
+		app.Skills,
 	)
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)
@@ -579,17 +566,18 @@ func (app *App) Subscribe(program *tea.Program) {
 	})
 	defer app.tuiWG.Done()
 
+	events := app.events.Subscribe(tuiCtx)
 	for {
 		select {
 		case <-tuiCtx.Done():
 			slog.Debug("TUI message handler shutting down")
 			return
-		case msg, ok := <-app.events:
+		case ev, ok := <-events:
 			if !ok {
 				slog.Debug("TUI message channel closed")
 				return
 			}
-			program.Send(msg)
+			program.Send(ev.Payload)
 		}
 	}
 }
@@ -605,12 +593,22 @@ func (app *App) Shutdown() {
 		app.AgentCoordinator.CancelAll()
 	}
 
-	// Now run remaining cleanup tasks in parallel.
-	var wg sync.WaitGroup
-
 	// Shared shutdown context for all timeout-bounded cleanup.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
+	// Drain any debounced message updates before the DB-close cleanup
+	// runs in the parallel block below. message.Service buffers
+	// streaming deltas (see internal/message/message.go) and we must
+	// land them while the connection is still open.
+	if app.Messages != nil {
+		if err := app.Messages.FlushAll(shutdownCtx); err != nil {
+			slog.Error("Failed to flush pending message updates on shutdown", "error", err)
+		}
+	}
+
+	// Now run remaining cleanup tasks in parallel.
+	var wg sync.WaitGroup
 
 	// Send exit event
 	wg.Go(func() {
@@ -649,9 +647,9 @@ func (app *App) checkForUpdates(ctx context.Context) {
 	if err != nil || !info.Available() {
 		return
 	}
-	app.events <- UpdateAvailableMsg{
+	app.events.Publish(pubsub.UpdatedEvent, UpdateAvailableMsg{
 		CurrentVersion: info.Current,
 		LatestVersion:  info.Latest,
 		IsDevelopment:  info.IsDevelopment(),
-	}
+	})
 }

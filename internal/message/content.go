@@ -32,12 +32,11 @@ const mediaLoadFailedPlaceholder = "[Image data could not be loaded]"
 type FinishReason string
 
 const (
-	FinishReasonEndTurn          FinishReason = "end_turn"
-	FinishReasonMaxTokens        FinishReason = "max_tokens"
-	FinishReasonToolUse          FinishReason = "tool_use"
-	FinishReasonCanceled         FinishReason = "canceled"
-	FinishReasonError            FinishReason = "error"
-	FinishReasonPermissionDenied FinishReason = "permission_denied"
+	FinishReasonEndTurn   FinishReason = "end_turn"
+	FinishReasonMaxTokens FinishReason = "max_tokens"
+	FinishReasonToolUse   FinishReason = "tool_use"
+	FinishReasonCanceled  FinishReason = "canceled"
+	FinishReasonError     FinishReason = "error"
 
 	// Should never happen
 	FinishReasonUnknown FinishReason = "unknown"

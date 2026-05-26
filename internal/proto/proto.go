@@ -21,11 +21,44 @@ type Workspace struct {
 	Version string         `json:"version,omitempty"`
 	Config  *config.Config `json:"config,omitempty"`
 	Env     []string       `json:"env,omitempty"`
+	// Skills carries the snapshot of skill discovery state at workspace
+	// creation time. Subsequent updates flow through the SSE event
+	// stream.
+	Skills []SkillState `json:"skills,omitempty"`
 }
 
 // Error represents an error response.
 type Error struct {
 	Message string `json:"message"`
+}
+
+// SkillInfo describes a visible skill exposed to a frontend.
+type SkillInfo struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Label       string `json:"label"`
+	Source      string `json:"source"`
+}
+
+// ReadSkillRequest is the request body for reading a skill's content.
+type ReadSkillRequest struct {
+	SkillID string `json:"skill_id"`
+}
+
+// ReadSkillResponse is the response for reading a skill's content.
+type ReadSkillResponse struct {
+	Content []byte          `json:"content"`
+	Result  SkillReadResult `json:"result"`
+}
+
+// SkillReadResult holds metadata about a skill returned alongside its
+// content.
+type SkillReadResult struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Source      string `json:"source"`
+	Builtin     bool   `json:"builtin"`
 }
 
 // AgentInfo represents information about the agent.
@@ -56,7 +89,7 @@ type AgentSession struct {
 
 // IsZero checks if the AgentSession is zero-valued.
 func (a AgentSession) IsZero() bool {
-	return a == AgentSession{}
+	return a.ID == "" && !a.IsBusy
 }
 
 // PermissionAction represents an action taken on a permission request.
@@ -131,7 +164,7 @@ func (e LSPEvent) MarshalJSON() ([]byte, error) {
 			}
 			return ""
 		}(),
-		Alias: (Alias)(e),
+		Alias: Alias(e),
 	})
 }
 
@@ -142,7 +175,7 @@ func (e *LSPEvent) UnmarshalJSON(data []byte) error {
 		Error string `json:"error,omitempty"`
 		Alias
 	}{
-		Alias: (Alias)(*e),
+		Alias: Alias(*e),
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
@@ -176,7 +209,7 @@ func (i LSPClientInfo) MarshalJSON() ([]byte, error) {
 			}
 			return ""
 		}(),
-		Alias: (Alias)(i),
+		Alias: Alias(i),
 	})
 }
 
@@ -187,7 +220,7 @@ func (i *LSPClientInfo) UnmarshalJSON(data []byte) error {
 		Error string `json:"error,omitempty"`
 		Alias
 	}{
-		Alias: (Alias)(*i),
+		Alias: Alias(*i),
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err

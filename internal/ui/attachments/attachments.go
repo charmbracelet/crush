@@ -78,17 +78,31 @@ func (m *Attachments) Render(width int) string {
 	return m.renderer.Render(m.list, m.deleting, width)
 }
 
-func NewRenderer(normalStyle, deletingStyle, imageStyle, textStyle lipgloss.Style) *Renderer {
+// Renderer returns the attachment renderer so callers can update its
+// styles in place.
+func (m *Attachments) Renderer() *Renderer { return m.renderer }
+
+func NewRenderer(normalStyle, deletingStyle, imageStyle, textStyle, skillStyle lipgloss.Style) *Renderer {
 	return &Renderer{
 		normalStyle:   normalStyle,
 		textStyle:     textStyle,
 		imageStyle:    imageStyle,
+		skillStyle:    skillStyle,
 		deletingStyle: deletingStyle,
 	}
 }
 
+// SetStyles updates the renderer styles in place.
+func (r *Renderer) SetStyles(normalStyle, deletingStyle, imageStyle, textStyle, skillStyle lipgloss.Style) {
+	r.normalStyle = normalStyle
+	r.textStyle = textStyle
+	r.imageStyle = imageStyle
+	r.skillStyle = skillStyle
+	r.deletingStyle = deletingStyle
+}
+
 type Renderer struct {
-	normalStyle, textStyle, imageStyle, deletingStyle lipgloss.Style
+	normalStyle, textStyle, imageStyle, skillStyle, deletingStyle lipgloss.Style
 }
 
 func (r *Renderer) Render(attachments []message.Attachment, deleting bool, width int) string {
@@ -130,6 +144,9 @@ func (r *Renderer) Render(attachments []message.Attachment, deleting bool, width
 func (r *Renderer) icon(a message.Attachment) lipgloss.Style {
 	if a.IsImage() {
 		return r.imageStyle
+	}
+	if a.IsMarkdown() {
+		return r.skillStyle
 	}
 	return r.textStyle
 }

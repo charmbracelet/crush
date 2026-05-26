@@ -22,7 +22,7 @@ import (
 )
 
 //go:embed write.md
-var writeDescription []byte
+var writeDescription string
 
 type WriteParams struct {
 	FilePath string `json:"file_path" description:"The path to the file to write"`
@@ -52,14 +52,10 @@ func NewWriteTool(
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		WriteToolName,
-		FirstLineDescription(writeDescription),
+		writeDescription,
 		func(ctx context.Context, params WriteParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.FilePath == "" {
 				return fantasy.NewTextErrorResponse("file_path is required"), nil
-			}
-
-			if params.Content == "" {
-				return fantasy.NewTextErrorResponse("content is required"), nil
 			}
 
 			sessionID := GetSessionFromContext(ctx)
@@ -109,7 +105,8 @@ func NewWriteTool(
 				strings.TrimPrefix(filePath, workingDir),
 			)
 
-			p, err := permissions.Request(ctx,
+			p, err := permissions.Request(
+				ctx,
 				permission.CreatePermissionRequest{
 					SessionID:   sessionID,
 					Path:        fsext.PathOrPrefix(filePath, workingDir),
@@ -128,7 +125,7 @@ func NewWriteTool(
 				return fantasy.ToolResponse{}, err
 			}
 			if !p {
-				return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
+				return NewPermissionDeniedResponse(), nil
 			}
 
 			err = os.WriteFile(filePath, []byte(params.Content), 0o644)
@@ -165,12 +162,14 @@ func NewWriteTool(
 			result := fmt.Sprintf("File successfully written: %s", filePath)
 			result = fmt.Sprintf("<result>\n%s\n</result>", result)
 			result += getDiagnostics(filePath, lspManager)
-			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(result),
+			return fantasy.WithResponseMetadata(
+				fantasy.NewTextResponse(result),
 				WriteResponseMetadata{
 					Diff:      diff,
 					Additions: additions,
 					Removals:  removals,
 				},
 			), nil
-		})
+		},
+	)
 }

@@ -26,12 +26,12 @@ type ListMCPResourcesPermissionsParams struct {
 const ListMCPResourcesToolName = "list_mcp_resources"
 
 //go:embed list_mcp_resources.md
-var listMCPResourcesDescription []byte
+var listMCPResourcesDescription string
 
 func NewListMCPResourcesTool(cfg *config.ConfigStore, permissions permission.Service) fantasy.AgentTool {
 	return fantasy.NewParallelAgentTool(
 		ListMCPResourcesToolName,
-		FirstLineDescription(listMCPResourcesDescription),
+		listMCPResourcesDescription,
 		func(ctx context.Context, params ListMCPResourcesParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			params.MCPName = strings.TrimSpace(params.MCPName)
 			if params.MCPName == "" {
@@ -44,7 +44,8 @@ func NewListMCPResourcesTool(cfg *config.ConfigStore, permissions permission.Ser
 			}
 
 			relPath := filepathext.SmartJoin(cfg.WorkingDir(), params.MCPName)
-			p, err := permissions.Request(ctx,
+			p, err := permissions.Request(
+				ctx,
 				permission.CreatePermissionRequest{
 					SessionID:   sessionID,
 					Path:        relPath,
@@ -59,7 +60,7 @@ func NewListMCPResourcesTool(cfg *config.ConfigStore, permissions permission.Ser
 				return fantasy.ToolResponse{}, err
 			}
 			if !p {
-				return fantasy.ToolResponse{}, permission.ErrorPermissionDenied
+				return NewPermissionDeniedResponse(), nil
 			}
 
 			resources, err := mcp.ListResources(ctx, cfg, params.MCPName)

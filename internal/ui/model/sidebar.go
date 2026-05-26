@@ -44,16 +44,17 @@ func (m *UI) modelInfo(width int) string {
 	var modelContext *common.ModelContextInfo
 	if model != nil && m.session != nil {
 		modelContext = &common.ModelContextInfo{
-			ContextUsed:  m.session.CompletionTokens + m.session.PromptTokens,
-			Cost:         m.session.Cost,
-			ModelContext: model.CatwalkCfg.ContextWindow,
+			ContextUsed:    m.session.CompletionTokens + m.session.PromptTokens,
+			Cost:           m.session.Cost,
+			ModelContext:   model.CatwalkCfg.ContextWindow,
+			EstimatedUsage: m.session.EstimatedUsage,
 		}
 	}
 	var modelName string
 	if model != nil {
 		modelName = model.CatwalkCfg.Name
 	}
-	return common.ModelInfo(m.com.Styles, modelName, providerName, reasoningInfo, modelContext, width)
+	return common.ModelInfo(m.com.Styles, modelName, providerName, reasoningInfo, modelContext, width, m.hyperCredits)
 }
 
 // getDynamicHeightLimits will give us the num of items to show in each section based on the height
@@ -138,11 +139,13 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	width := area.Dx()
 	height := area.Dy()
 
-	title := t.Muted.Width(width).MaxHeight(2).Render(m.session.Title)
+	title := t.Sidebar.SessionTitle.Width(width).MaxHeight(2).Render(m.session.Title)
 	cwd := common.PrettyPath(t, m.com.Workspace.WorkingDir(), width)
 	sidebarLogo := m.sidebarLogo
 	if height < logoHeightBreakpoint {
-		sidebarLogo = logo.SmallRender(m.com.Styles, width)
+		sidebarLogo = logo.SmallRender(m.com.Styles, width, logo.Opts{
+			Hyper: m.com.IsHyper(),
+		})
 	}
 	blocks := []string{
 		sidebarLogo,

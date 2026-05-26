@@ -138,20 +138,7 @@ func (d *DockerMCPToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 
 	// Handle text content.
 	if opts.Result.Content != "" {
-		var body string
-		var result json.RawMessage
-		if err := json.Unmarshal([]byte(opts.Result.Content), &result); err == nil {
-			prettyResult, err := json.MarshalIndent(result, "", "  ")
-			if err == nil {
-				body = sty.Tool.Body.Render(toolOutputCodeContent(sty, "result.json", string(prettyResult), 0, bodyWidth, opts.ExpandedContent))
-			} else {
-				body = sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
-			}
-		} else if looksLikeMarkdown(opts.Result.Content) {
-			body = sty.Tool.Body.Render(toolOutputCodeContent(sty, "result.md", opts.Result.Content, 0, bodyWidth, opts.ExpandedContent))
-		} else {
-			body = sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
-		}
+		body := renderToolResultTextContent(sty, opts.Result.Content, toolResultContentWidths{Body: bodyWidth, Diff: cappedWidth}, opts.ExpandedContent)
 		parts = append(parts, body)
 	}
 
@@ -186,7 +173,7 @@ func (d *DockerMCPToolRenderContext) renderMCPServers(sty *styles.Styles, opts *
 	}
 
 	if len(result.Servers) == 0 {
-		return sty.Subtle.Render("No MCP servers found.")
+		return sty.Tool.ResultEmpty.Render("No MCP servers found.")
 	}
 
 	bodyWidth := min(120, width) - toolBodyLeftPaddingTotal
@@ -194,10 +181,10 @@ func (d *DockerMCPToolRenderContext) renderMCPServers(sty *styles.Styles, opts *
 	moreServers := ""
 	for i, server := range result.Servers {
 		if i > 9 {
-			moreServers = sty.Subtle.Render(fmt.Sprintf("... and %d more", len(result.Servers)-10))
+			moreServers = sty.Tool.ResultTruncation.Render(fmt.Sprintf("... and %d more", len(result.Servers)-10))
 			break
 		}
-		rows = append(rows, []string{sty.Base.Render(server.Name), sty.Subtle.Render(server.Description)})
+		rows = append(rows, []string{sty.Tool.ResultItemName.Render(server.Name), sty.Tool.ResultItemDesc.Render(server.Description)})
 	}
 	serverTable := table.New().
 		Wrap(false).
@@ -249,10 +236,10 @@ func (d *DockerMCPToolRenderContext) formatToolName(sty *styles.Styles, tool str
 		action = "Find"
 	case "mcp-add":
 		action = "Add"
-		actionStyle = sty.Tool.DockerMCPActionAdd
+		actionStyle = sty.Tool.ActionCreate
 	case "mcp-remove":
 		action = "Remove"
-		actionStyle = sty.Tool.DockerMCPActionDel
+		actionStyle = sty.Tool.ActionDestroy
 	case "code-mode":
 		action = "Code Mode"
 	default:

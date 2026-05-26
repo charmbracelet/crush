@@ -39,7 +39,6 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/stringext"
@@ -104,6 +103,7 @@ type Model struct {
 	Model      fantasy.LanguageModel
 	CatwalkCfg catwalk.Model
 	ModelCfg   config.SelectedModel
+	FlatRate   bool
 }
 
 type sessionAgent struct {
@@ -245,13 +245,23 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	defer cancel()
 	defer a.activeRequests.Del(call.SessionID)
+	// Drain any debounced message updates before returning. message.Service
+	// already flushes synchronously on terminal updates, but a defer here
+	// guarantees the contract at every Run exit (success, error, panic
+	// recovery upstream) without callers needing to know.
+	defer func() {
+		if flushErr := a.messages.FlushAll(ctx); flushErr != nil {
+			slog.Error("Failed to flush pending message updates after run", "error", flushErr)
+		}
+	}()
 
-	history, files := a.preparePrompt(msgs, call.Attachments...)
+	history, files := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages, call.Attachments...)
 
 	startTime := time.Now()
 	a.eventPromptSent(call.SessionID)
 
 	var currentAssistant *message.Message
+	var stepMessages []fantasy.Message
 	var shouldSummarize bool
 	// Don't send MaxOutputTokens if 0 — some providers (e.g. LM Studio) reject it
 	var maxOutputTokens *int64
@@ -309,6 +319,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			if promptPrefix != "" {
 				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(promptPrefix)}, prepared.Messages...)
 			}
+
+			sessionLock.Lock()
+			stepMessages = cloneFantasyMessages(prepared.Messages)
+			sessionLock.Unlock()
 
 			var assistantMsg message.Message
 			assistantMsg, err = a.messages.Create(callContext, call.SessionID, message.CreateMessageParams{
@@ -378,7 +392,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return a.messages.Update(ctx, *currentAssistant)
 		},
 		OnRetry: func(err *fantasy.ProviderError, delay time.Duration) {
-			// TODO: implement
+			slog.Warn("Provider request failed, retrying", providerRetryLogFields(err, delay)...)
 		},
 		OnToolCall: func(tc fantasy.ToolCallContent) error {
 			toolCall := message.ToolCall{
@@ -415,6 +429,18 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			case fantasy.FinishReasonToolCalls:
 				finishReason = message.FinishReasonToolUse
 			}
+			// If a tool result halted the turn (e.g. a hook halt or a
+			// permission denial), the step ends on FinishReasonToolCalls but
+			// the model will not be called again. Treat it as the end of the
+			// turn so the UI can render the assistant footer.
+			if finishReason == message.FinishReasonToolUse {
+				for _, tr := range stepResult.Content.ToolResults() {
+					if tr.StopTurn {
+						finishReason = message.FinishReasonEndTurn
+						break
+					}
+				}
+			}
 			currentAssistant.AddFinish(finishReason, "", "")
 			sessionLock.Lock()
 			defer sessionLock.Unlock()
@@ -423,7 +449,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			if getSessionErr != nil {
 				return getSessionErr
 			}
-			a.updateSessionUsage(largeModel, &updatedSession, stepResult.Usage, a.openrouterCost(stepResult.ProviderMetadata))
+			usage, estimated := fallbackStepUsage(stepMessages, stepResult)
+			a.updateSessionUsage(largeModel, &updatedSession, usage, a.openrouterCost(stepResult.ProviderMetadata), estimated)
 			_, sessionErr := a.sessions.Save(ctx, updatedSession)
 			if sessionErr != nil {
 				return sessionErr
@@ -464,7 +491,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	if err != nil {
 		isHyper := largeModel.ModelCfg.Provider == hyper.Name
 		isCancelErr := errors.Is(err, context.Canceled)
-		isPermissionErr := errors.Is(err, permission.ErrorPermissionDenied)
 		if currentAssistant == nil {
 			return result, err
 		}
@@ -507,8 +533,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			content := "There was an error while executing the tool"
 			if isCancelErr {
 				content = "Error: user cancelled assistant tool calling"
-			} else if isPermissionErr {
-				content = "User denied permission"
 			}
 			toolResult := message.ToolResult{
 				ToolCallID: tc.ID,
@@ -532,8 +556,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		linkStyle := lipgloss.NewStyle().Foreground(charmtone.Guac).Underline(true)
 		if isCancelErr {
 			currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
-		} else if isPermissionErr {
-			currentAssistant.AddFinish(message.FinishReasonPermissionDenied, "User denied permission", "")
 		} else if isHyper && errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized {
 			currentAssistant.AddFinish(message.FinishReasonError, "Unauthorized", `Please re-authenticate with Hyper. You can also run "crush auth" to re-authenticate.`)
 			if a.notify != nil {
@@ -574,16 +596,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		return nil, err
 	}
 
-	// Send notification that agent has finished its turn (skip for
-	// nested/non-interactive sessions).
-	if !call.NonInteractive && a.notify != nil {
-		a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
-			SessionID:    call.SessionID,
-			SessionTitle: currentSession.Title,
-			Type:         notify.TypeAgentFinished,
-		})
-	}
-
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
 		if summarizeErr := a.Summarize(genCtx, call.SessionID, call.ProviderOptions); summarizeErr != nil {
@@ -601,9 +613,22 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		}
 	}
 
-	// Release active request before processing queued messages.
+	// Release active request before publishing the notification.
+	// TUI handlers poll IsSessionBusy() and only re-evaluate when a
+	// tea.Msg arrives, so the cleanup must precede the notify or
+	// subscribers see stale busy state at the moment of receipt.
 	a.activeRequests.Del(call.SessionID)
 	cancel()
+
+	// Send notification that agent has finished its turn (skip for
+	// nested/non-interactive sessions).
+	if !call.NonInteractive && a.notify != nil {
+		a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+			SessionID:    call.SessionID,
+			SessionTitle: currentSession.Title,
+			Type:         notify.TypeAgentFinished,
+		})
+	}
 
 	queuedMessages, ok := a.messageQueue.Get(call.SessionID)
 	if !ok || len(queuedMessages) == 0 {
@@ -637,14 +662,20 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return nil
 	}
 
-	aiMsgs, _ := a.preparePrompt(msgs)
+	aiMsgs, _ := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages)
 
 	genCtx, cancel := context.WithCancel(ctx)
 	a.activeRequests.Set(sessionID, cancel)
 	defer a.activeRequests.Del(sessionID)
 	defer cancel()
+	defer func() {
+		if flushErr := a.messages.FlushAll(ctx); flushErr != nil {
+			slog.Error("Failed to flush pending message updates after summarize", "error", flushErr)
+		}
+	}()
 
-	agent := fantasy.NewAgent(largeModel.Model,
+	agent := fantasy.NewAgent(
+		largeModel.Model,
 		fantasy.WithSystemPrompt(string(summaryPrompt)),
 		fantasy.WithUserAgent(userAgent),
 	)
@@ -697,6 +728,12 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 			deleteErr := a.messages.Delete(ctx, summaryMessage.ID)
 			return deleteErr
 		}
+		// Mark the summary message as finished with an error so the UI
+		// stops spinning.
+		summaryMessage.AddFinish(message.FinishReasonError, "Summarization Error", err.Error())
+		if updateErr := a.messages.Update(ctx, summaryMessage); updateErr != nil {
+			return updateErr
+		}
 		return err
 	}
 
@@ -718,15 +755,33 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		}
 	}
 
-	a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, openrouterCost)
+	a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, openrouterCost, false)
 
 	// Just in case, get just the last usage info.
 	usage := resp.Response.Usage
 	currentSession.SummaryMessageID = summaryMessage.ID
-	currentSession.CompletionTokens = usage.OutputTokens
+	currentSession.CompletionTokens = summaryCompletionTokens(usage, summaryMessage)
 	currentSession.PromptTokens = 0
+	currentSession.EstimatedUsage = usageIsZero(usage)
 	_, err = a.sessions.Save(genCtx, currentSession)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Release the active request before processing queued messages so that
+	// Run() does not see the session as busy.
+	a.activeRequests.Del(sessionID)
+	cancel()
+
+	// Process any messages that were queued while summarizing.
+	queuedMessages, ok := a.messageQueue.Get(sessionID)
+	if !ok || len(queuedMessages) == 0 {
+		return nil
+	}
+	firstQueuedMessage := queuedMessages[0]
+	a.messageQueue.Set(sessionID, queuedMessages[1:])
+	_, qErr := a.Run(ctx, firstQueuedMessage)
+	return qErr
 }
 
 func (a *sessionAgent) getCacheControlOptions() fantasy.ProviderOptions {
@@ -763,11 +818,12 @@ func (a *sessionAgent) createUserMessage(ctx context.Context, call SessionAgentC
 	return msg, nil
 }
 
-func (a *sessionAgent) preparePrompt(msgs []message.Message, attachments ...message.Attachment) ([]fantasy.Message, []fantasy.FilePart) {
+func (a *sessionAgent) preparePrompt(msgs []message.Message, supportsImages bool, attachments ...message.Attachment) ([]fantasy.Message, []fantasy.FilePart) {
 	var history []fantasy.Message
 	if !a.isSubAgent {
 		history = append(history, fantasy.NewUserMessage(
-			fmt.Sprintf("<system_reminder>%s</system_reminder>",
+			fmt.Sprintf(
+				"<system_reminder>%s</system_reminder>",
 				`This is a reminder that your todo list is currently empty. DO NOT mention this to the user explicitly because they are already aware.
 If you are working on tasks that would benefit from a todo list please use the "todos" tool to create one.
 If not, please feel free to ignore. Again do not mention this message to the user.`,
@@ -807,7 +863,15 @@ If not, please feel free to ignore. Again do not mention this message to the use
 			}
 			continue
 		}
-		history = append(history, m.ToAIMessage()...)
+		aiMsgs := m.ToAIMessage()
+		if !supportsImages {
+			for i := range aiMsgs {
+				if aiMsgs[i].Role == fantasy.MessageRoleUser {
+					aiMsgs[i].Content = filterFileParts(aiMsgs[i].Content)
+				}
+			}
+		}
+		history = append(history, aiMsgs...)
 
 		if m.Role == message.Assistant {
 			if msg, ok := syntheticToolResultsForOrphanedCalls(m, knownToolResultIDs); ok {
@@ -831,6 +895,20 @@ If not, please feel free to ignore. Again do not mention this message to the use
 	return history, files
 }
 
+// filterFileParts removes fantasy.FilePart entries from a slice of message
+// parts. Used to strip image attachments from historical user messages when
+// the current model does not support them.
+func filterFileParts(parts []fantasy.MessagePart) []fantasy.MessagePart {
+	filtered := make([]fantasy.MessagePart, 0, len(parts))
+	for _, part := range parts {
+		if _, ok := fantasy.AsMessagePart[fantasy.FilePart](part); ok {
+			continue
+		}
+		filtered = append(filtered, part)
+	}
+	return filtered
+}
+
 // filterOrphanedToolResults converts a tool message to a fantasy.Message,
 // dropping any tool result parts whose tool_call_id has no matching tool call
 // in the known set. An orphaned result causes API validation to fail on every
@@ -851,7 +929,8 @@ func filterOrphanedToolResults(m message.Message, knownToolCallIDs map[string]st
 		if _, known := knownToolCallIDs[tr.ToolCallID]; known {
 			validParts = append(validParts, part)
 		} else {
-			slog.Warn("Dropping orphaned tool result with no matching tool call",
+			slog.Warn(
+				"Dropping orphaned tool result with no matching tool call",
 				"tool_call_id", tr.ToolCallID,
 			)
 		}
@@ -877,7 +956,8 @@ func syntheticToolResultsForOrphanedCalls(m message.Message, knownToolResultIDs 
 		if _, hasResult := knownToolResultIDs[tc.ID]; hasResult {
 			continue
 		}
-		slog.Warn("Injecting synthetic tool result for orphaned tool call",
+		slog.Warn(
+			"Injecting synthetic tool result for orphaned tool call",
 			"tool_call_id", tc.ID,
 			"tool_name", tc.Name,
 		)
@@ -935,7 +1015,8 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	}
 
 	newAgent := func(m fantasy.LanguageModel, p []byte, tok int64) fantasy.Agent {
-		return fantasy.NewAgent(m,
+		return fantasy.NewAgent(
+			m,
 			fantasy.WithSystemPrompt(string(p)+"\n /no_think"),
 			fantasy.WithMaxOutputTokens(tok),
 			fantasy.WithUserAgent(userAgent),
@@ -1028,6 +1109,11 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		cost = *openrouterCost
 	}
 
+	// Skip cost accumulation
+	if model.FlatRate {
+		cost = 0
+	}
+
 	promptTokens := resp.TotalUsage.InputTokens + resp.TotalUsage.CacheCreationTokens
 	completionTokens := resp.TotalUsage.OutputTokens
 
@@ -1053,23 +1139,53 @@ func (a *sessionAgent) openrouterCost(metadata fantasy.ProviderMetadata) *float6
 	return &opts.Usage.Cost
 }
 
-func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session, usage fantasy.Usage, overrideCost *float64) {
+func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session, usage fantasy.Usage, overrideCost *float64, estimated bool) {
+	if !usageIsZero(usage) {
+		session.EstimatedUsage = estimated
+	}
+
 	modelConfig := model.CatwalkCfg
 	cost := modelConfig.CostPer1MInCached/1e6*float64(usage.CacheCreationTokens) +
 		modelConfig.CostPer1MOutCached/1e6*float64(usage.CacheReadTokens) +
 		modelConfig.CostPer1MIn/1e6*float64(usage.InputTokens) +
 		modelConfig.CostPer1MOut/1e6*float64(usage.OutputTokens)
 
-	a.eventTokensUsed(session.ID, model, usage, cost)
-
-	if overrideCost != nil {
-		session.Cost += *overrideCost
-	} else {
-		session.Cost += cost
+	if !estimated {
+		a.eventTokensUsed(session.ID, model, usage, cost)
 	}
 
-	session.CompletionTokens = usage.OutputTokens
-	session.PromptTokens = usage.InputTokens + usage.CacheReadTokens
+	if estimated {
+		cost = 0
+	} else {
+		// Use override cost if available (e.g., from OpenRouter).
+		if overrideCost != nil {
+			cost = *overrideCost
+		}
+
+		// Skip cost accumulation
+		if model.FlatRate {
+			cost = 0
+		}
+	}
+
+	session.Cost += cost
+	updateSessionTokenCounters(session, usage)
+}
+
+func updateSessionTokenCounters(session *session.Session, usage fantasy.Usage) {
+	if usage.OutputTokens != 0 {
+		session.CompletionTokens = usage.OutputTokens
+	}
+	if promptTokens := usage.InputTokens + usage.CacheReadTokens; promptTokens != 0 {
+		session.PromptTokens = promptTokens
+	}
+}
+
+func summaryCompletionTokens(usage fantasy.Usage, summaryMessage message.Message) int64 {
+	if usage.OutputTokens != 0 {
+		return usage.OutputTokens
+	}
+	return approxTokenCount(summaryMessage.Content().Text) + approxTokenCount(summaryMessage.ReasoningContent().String())
 }
 
 func (a *sessionAgent) Cancel(sessionID string) {
@@ -1194,7 +1310,8 @@ func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) mes
 	case fantasy.ToolResultContentTypeMedia:
 		if r, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentMedia](result.Result); ok {
 			if !stringext.IsValidBase64(r.Data) {
-				slog.Warn("Tool returned media with invalid base64 data, discarding image",
+				slog.Warn(
+					"Tool returned media with invalid base64 data, discarding image",
 					"tool", result.ToolName,
 					"tool_call_id", result.ToolCallID,
 				)
@@ -1317,4 +1434,21 @@ func buildSummaryPrompt(todos []session.Todo) string {
 		sb.WriteString("Instruct the resuming assistant to use the `todos` tool to continue tracking progress on these tasks.")
 	}
 	return sb.String()
+}
+
+func providerRetryLogFields(err *fantasy.ProviderError, delay time.Duration) []any {
+	fields := []any{
+		"retry_delay", delay.String(),
+	}
+	if err == nil {
+		return fields
+	}
+	fields = append(fields, "status_code", err.StatusCode)
+	if err.Title != "" {
+		fields = append(fields, "title", err.Title)
+	}
+	if err.Message != "" {
+		fields = append(fields, "message", err.Message)
+	}
+	return fields
 }

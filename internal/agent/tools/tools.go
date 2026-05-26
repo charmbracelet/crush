@@ -1,11 +1,13 @@
 package tools
 
 import (
+	"bytes"
 	"context"
-	"os"
-	"strconv"
-	"strings"
+	"html/template"
+	"os/exec"
 	"testing"
+
+	"charm.land/fantasy"
 )
 
 type (
@@ -59,20 +61,45 @@ func GetModelNameFromContext(ctx context.Context) string {
 	return getContextValue(ctx, ModelNameContextKey, "")
 }
 
-// FirstLineDescription returns just the first non-empty line from the embedded
-// markdown description when CRUSH_SHORT_TOOL_DESCRIPTIONS is set, significantly
-// reducing token usage. Otherwise returns the full description.
-func FirstLineDescription(content []byte) string {
-	if !testing.Testing() {
-		if v, _ := strconv.ParseBool(os.Getenv("CRUSH_SHORT_TOOL_DESCRIPTIONS")); !v {
-			return strings.TrimSpace(string(content))
-		}
+// NewPermissionDeniedResponse returns a tool response indicating the user
+// denied permission, with StopTurn set so the agent loop does not retry.
+func NewPermissionDeniedResponse() fantasy.ToolResponse {
+	resp := fantasy.NewTextErrorResponse("User denied permission")
+	resp.StopTurn = true
+	return resp
+}
+
+// ghAvailable indicates whether the `gh` CLI is available on PATH.
+var ghAvailable = func() bool {
+	if testing.Testing() {
+		return false
 	}
-	for line := range strings.SplitSeq(string(content), "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			return line
-		}
+	_, err := exec.LookPath("gh")
+	return err == nil
+}()
+
+// toolDescriptionData is the common data structure for tool description templates.
+type toolDescriptionData struct {
+	GhAvailable bool
+}
+
+// renderToolDescription renders a tool description template with the given data.
+func renderToolDescription(tmpl *template.Template) string {
+	data := toolDescriptionData{
+		GhAvailable: ghAvailable,
 	}
-	return ""
+	var out bytes.Buffer
+	if err := tmpl.Execute(&out, data); err != nil {
+		panic("failed to execute tool description template: " + err.Error())
+	}
+	return out.String()
+}
+
+// renderTemplate renders a Go template with the given data.
+func renderTemplate(tmpl *template.Template, data any) string {
+	var out bytes.Buffer
+	if err := tmpl.Execute(&out, data); err != nil {
+		panic("failed to execute tool description template: " + err.Error())
+	}
+	return out.String()
 }

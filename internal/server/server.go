@@ -157,6 +157,8 @@ func NewServer(cfg *config.ConfigStore, network, address string) *Server {
 	mux.HandleFunc("GET /v1/workspaces/{id}/project/needs-init", c.handleGetWorkspaceProjectNeedsInit)
 	mux.HandleFunc("POST /v1/workspaces/{id}/project/init", c.handlePostWorkspaceProjectInit)
 	mux.HandleFunc("GET /v1/workspaces/{id}/project/init-prompt", c.handleGetWorkspaceProjectInitPrompt)
+	mux.HandleFunc("GET /v1/workspaces/{id}/skills", c.handleGetWorkspaceSkills)
+	mux.HandleFunc("POST /v1/workspaces/{id}/skills/read", c.handlePostWorkspaceSkillRead)
 	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/refresh-tools", c.handlePostWorkspaceMCPRefreshTools)
 	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/read-resource", c.handlePostWorkspaceMCPReadResource)
 	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/get-prompt", c.handlePostWorkspaceMCPGetPrompt)
@@ -168,7 +170,7 @@ func NewServer(cfg *config.ConfigStore, network, address string) *Server {
 	mux.Handle("/v1/docs/", httpswagger.WrapHandler)
 	s.h = &http.Server{
 		Protocols: &p,
-		Handler:   s.loggingHandler(mux),
+		Handler:   s.recoverHandler(s.loggingHandler(mux)),
 	}
 	if network == "tcp" {
 		s.h.Addr = address

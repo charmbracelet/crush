@@ -1,6 +1,7 @@
 package shell
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -36,10 +37,16 @@ Options:
 // flags: -r (raw output), -c (compact output), -s (slurp), -n (null input),
 // -e (exit status), -R (raw input), and --arg name value.
 //
+// ctx is polled at each iteration of the output loop and at each reader in
+// [readInputs] so that hook timeouts or other cancellations can interrupt
+// long-running queries. A cancelled context surfaces as ctx.Err(), not an
+// [interp.ExitStatus], so callers (e.g. the hook runner) can distinguish
+// "filter exited non-zero" from "we ran out of time".
+//
 // Note that this is somewhat of a reimplmentation of the CLI of the glorious
 // github.com/itchyny/gojq, and we'd ideally get the CLI exposed upstream to
 // avoid this falling out of sync.
-func handleJQ(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+func handleJQ(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	var (
 		rawOutput  bool
 		compact    bool
@@ -143,8 +150,13 @@ func handleJQ(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	}
 
 	// Build input values.
-	inputs, err := readInputs(stdin, fileArgs, nullInput, rawInput, slurp)
+	inputs, err := readInputs(ctx, stdin, fileArgs, nullInput, rawInput, slurp)
 	if err != nil {
+		// Prefer surfacing ctx cancellation verbatim so timeouts are
+		// distinguishable from user input errors.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		fmt.Fprintf(stderr, "jq: %s\n", err)
 		return interp.ExitStatus(2)
 	}
@@ -153,6 +165,12 @@ func handleJQ(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	for _, input := range inputs {
 		iter := code.Run(input, argValues...)
 		for {
+			// Poll ctx on every value so a long-running filter (e.g. a
+			// generator over a slurped array) can be interrupted by hook
+			// timeouts without waiting for iter.Next to yield.
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			v, ok := iter.Next()
 			if !ok {
 				break
@@ -177,7 +195,22 @@ func handleJQ(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 }
 
 // readInputs reads JSON (or raw) input values from stdin or files.
-func readInputs(stdin io.Reader, files []string, nullInput, rawInput, slurp bool) ([]any, error) {
+//
+// ctx is polled in three places so that a cancellation observed mid-read
+// short-circuits promptly:
+//   - between readers (before opening the next file / consuming stdin);
+//   - on every io.Read call via ctxReader, so io.ReadAll on a large but
+//     non-blocking source (e.g. the bytes.NewReader payload the hook
+//     runner supplies) returns ctx.Err() on the next chunk boundary;
+//   - inside the post-read value accumulation loops (raw-input line
+//     split and JSON stream decode), which are otherwise unbounded in
+//     the size of the input.
+//
+// A reader that blocks forever in Read (e.g. an unterminated pipe) can
+// still outlast ctx; the outer abandon-goroutine path in the hook
+// runner (internal/hooks/runner.go) is the authoritative enforcer for
+// that case.
+func readInputs(ctx context.Context, stdin io.Reader, files []string, nullInput, rawInput, slurp bool) ([]any, error) {
 	if nullInput {
 		return []any{nil}, nil
 	}
@@ -198,8 +231,16 @@ func readInputs(stdin io.Reader, files []string, nullInput, rawInput, slurp bool
 
 	var vals []any
 	for _, r := range readers {
-		data, err := io.ReadAll(r)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		data, err := io.ReadAll(ctxReader{ctx: ctx, r: r})
 		if err != nil {
+			// ctxReader surfaces ctx.Err() verbatim; preserve it so the
+			// caller can distinguish cancellation from a parse error.
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
 			return nil, err
 		}
 
@@ -209,6 +250,9 @@ func readInputs(stdin io.Reader, files []string, nullInput, rawInput, slurp bool
 				vals = append(vals, strings.Join(lines, "\n"))
 			} else {
 				for _, line := range lines {
+					if err := ctx.Err(); err != nil {
+						return nil, err
+					}
 					if line != "" || !slurp {
 						vals = append(vals, line)
 					}
@@ -221,6 +265,9 @@ func readInputs(stdin io.Reader, files []string, nullInput, rawInput, slurp bool
 		dec := json.NewDecoder(strings.NewReader(string(data)))
 		var streamVals []any
 		for {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			var v any
 			if err := dec.Decode(&v); err != nil {
 				if err == io.EOF {
@@ -242,6 +289,24 @@ func readInputs(stdin io.Reader, files []string, nullInput, rawInput, slurp bool
 		return []any{nil}, nil
 	}
 	return vals, nil
+}
+
+// ctxReader wraps an io.Reader so that each Read call checks ctx first.
+// This makes io.ReadAll over a large but non-blocking source (e.g. a
+// bytes.Reader of the hook stdin payload) cancellable on the next chunk
+// boundary. A reader that itself blocks in Read will still outlast ctx —
+// the hook runner's abandon-goroutine path is the enforcer of last resort
+// for that case.
+type ctxReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (cr ctxReader) Read(p []byte) (int, error) {
+	if err := cr.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return cr.r.Read(p)
 }
 
 // writeValue writes a single jq output value.

@@ -10,7 +10,7 @@ import (
 )
 
 //go:embed todos.md
-var todosDescription []byte
+var todosDescription string
 
 const TodosToolName = "todos"
 
@@ -36,7 +36,7 @@ type TodosResponseMetadata struct {
 func NewTodosTool(sessions session.Service) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		TodosToolName,
-		FirstLineDescription(todosDescription),
+		todosDescription,
 		func(ctx context.Context, params TodosParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {
@@ -130,5 +130,6 @@ func NewTodosTool(sessions session.Service) fantasy.AgentTool {
 			}
 
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(response), metadata), nil
-		})
+		},
+	)
 }

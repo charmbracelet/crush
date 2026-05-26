@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
+	"github.com/charmbracelet/crush/internal/message"
 )
 
 // CreateMessageParams represents parameters for creating a message.
@@ -55,13 +56,12 @@ func (r *MessageRole) UnmarshalText(data []byte) error {
 type FinishReason string
 
 const (
-	FinishReasonEndTurn          FinishReason = "end_turn"
-	FinishReasonMaxTokens        FinishReason = "max_tokens"
-	FinishReasonToolUse          FinishReason = "tool_use"
-	FinishReasonCanceled         FinishReason = "canceled"
-	FinishReasonError            FinishReason = "error"
-	FinishReasonPermissionDenied FinishReason = "permission_denied"
-	FinishReasonUnknown          FinishReason = "unknown"
+	FinishReasonEndTurn   FinishReason = "end_turn"
+	FinishReasonMaxTokens FinishReason = "max_tokens"
+	FinishReasonToolUse   FinishReason = "tool_use"
+	FinishReasonCanceled  FinishReason = "canceled"
+	FinishReasonError     FinishReason = "error"
+	FinishReasonUnknown   FinishReason = "unknown"
 )
 
 // MarshalText implements the [encoding.TextMarshaler] interface.
@@ -154,6 +154,8 @@ type ToolResult struct {
 	ToolCallID string `json:"tool_call_id"`
 	Name       string `json:"name"`
 	Content    string `json:"content"`
+	Data       string `json:"data,omitempty"`
+	MIMEType   string `json:"mime_type,omitempty"`
 	Metadata   string `json:"metadata"`
 	IsError    bool   `json:"is_error"`
 }
@@ -618,6 +620,47 @@ type Attachment struct {
 	FileName string `json:"file_name"`
 	MimeType string `json:"mime_type"`
 	Content  []byte `json:"content"`
+}
+
+// ToMessage converts a proto Attachment to a [message.Attachment].
+func (a Attachment) ToMessage() message.Attachment {
+	return message.Attachment{
+		FilePath: a.FilePath,
+		FileName: a.FileName,
+		MimeType: a.MimeType,
+		Content:  a.Content,
+	}
+}
+
+// AttachmentFromMessage converts a [message.Attachment] to a proto
+// Attachment.
+func AttachmentFromMessage(a message.Attachment) Attachment {
+	return Attachment{
+		FilePath: a.FilePath,
+		FileName: a.FileName,
+		MimeType: a.MimeType,
+		Content:  a.Content,
+	}
+}
+
+// AttachmentsToMessage converts a slice of proto Attachments to a slice
+// of [message.Attachment].
+func AttachmentsToMessage(as []Attachment) []message.Attachment {
+	out := make([]message.Attachment, len(as))
+	for i, a := range as {
+		out[i] = a.ToMessage()
+	}
+	return out
+}
+
+// AttachmentsFromMessage converts a slice of [message.Attachment] to a
+// slice of proto Attachments.
+func AttachmentsFromMessage(as []message.Attachment) []Attachment {
+	out := make([]Attachment, len(as))
+	for i, a := range as {
+		out[i] = AttachmentFromMessage(a)
+	}
+	return out
 }
 
 // MarshalJSON implements the [json.Marshaler] interface.

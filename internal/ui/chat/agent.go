@@ -53,11 +53,21 @@ func NewAgentToolMessageItem(
 }
 
 // Animate progresses the message animation if it should be spinning.
+//
+// Bumps the parent's F6 list-cache version on both the parent-tick and
+// nested-tick branches. Nested tools are not list entries of their
+// own — their IDs map to this parent's index in idInxMap
+// (internal/ui/model/chat.go:240-246) and their renders are embedded
+// inline in this parent's output — so the list only checks the
+// parent's version. Without the bump, the list cache would serve the
+// previously rendered frame indefinitely and the spinner would appear
+// frozen.
 func (a *AgentToolMessageItem) Animate(msg anim.StepMsg) tea.Cmd {
 	if a.result != nil || a.Status() == ToolStatusCanceled {
 		return nil
 	}
 	if msg.ID == a.ID() {
+		a.Bump()
 		return a.anim.Animate(msg)
 	}
 	for _, nestedTool := range a.nestedTools {
@@ -65,6 +75,7 @@ func (a *AgentToolMessageItem) Animate(msg anim.StepMsg) tea.Cmd {
 			continue
 		}
 		if s, ok := nestedTool.(Animatable); ok {
+			a.Bump()
 			return s.Animate(msg)
 		}
 	}
@@ -77,9 +88,23 @@ func (a *AgentToolMessageItem) NestedTools() []ToolMessageItem {
 }
 
 // SetNestedTools sets the nested tools.
+//
+// SetNestedTools always bumps the version. The previous design
+// deduped when the slice's length and element pointers were
+// unchanged, but the live update path in internal/ui/model/ui.go
+// mutates existing children in place (SetToolCall / SetResult on the
+// same pointers) and then calls SetNestedTools with the same slice.
+// Pointer-equality dedupe in that case skips the parent Bump even
+// though the parent's rendered output (which embeds the children
+// inline) has changed, leaving a stale parent entry in the list
+// cache. Always bumping is cheap (one uint64 increment) and called
+// at most once per agent event; in the rare case the slice is
+// truly unchanged the worst case is one extra parent re-render
+// while every child cache hit stays warm.
 func (a *AgentToolMessageItem) SetNestedTools(tools []ToolMessageItem) {
 	a.nestedTools = tools
 	a.clearCache()
+	a.Bump()
 }
 
 // AddNestedTool adds a nested tool.
@@ -90,6 +115,7 @@ func (a *AgentToolMessageItem) AddNestedTool(tool ToolMessageItem) {
 	}
 	a.nestedTools = append(a.nestedTools, tool)
 	a.clearCache()
+	a.Bump()
 }
 
 // AgentToolRenderContext renders agent tool messages.
@@ -196,15 +222,44 @@ func NewAgenticFetchToolMessageItem(
 	return t
 }
 
+// Animate progresses the message animation if it should be spinning.
+// See [AgentToolMessageItem.Animate] for the parent-bump rationale —
+// without an override, the embedded base.Animate would (a) drop
+// StepMsgs whose ID matches a nested child instead of the parent
+// (anim.Animate's ID check at internal/ui/anim/anim.go:326-329
+// silently returns nil), and (b) never invalidate the parent's
+// list-cache entry on a parent tick.
+func (a *AgenticFetchToolMessageItem) Animate(msg anim.StepMsg) tea.Cmd {
+	if a.result != nil || a.Status() == ToolStatusCanceled {
+		return nil
+	}
+	if msg.ID == a.ID() {
+		a.Bump()
+		return a.anim.Animate(msg)
+	}
+	for _, nestedTool := range a.nestedTools {
+		if msg.ID != nestedTool.ID() {
+			continue
+		}
+		if s, ok := nestedTool.(Animatable); ok {
+			a.Bump()
+			return s.Animate(msg)
+		}
+	}
+	return nil
+}
+
 // NestedTools returns the nested tools.
 func (a *AgenticFetchToolMessageItem) NestedTools() []ToolMessageItem {
 	return a.nestedTools
 }
 
-// SetNestedTools sets the nested tools.
+// SetNestedTools sets the nested tools. Always bumps the version;
+// see [AgentToolMessageItem.SetNestedTools] for the rationale.
 func (a *AgenticFetchToolMessageItem) SetNestedTools(tools []ToolMessageItem) {
 	a.nestedTools = tools
 	a.clearCache()
+	a.Bump()
 }
 
 // AddNestedTool adds a nested tool.
@@ -215,6 +270,7 @@ func (a *AgenticFetchToolMessageItem) AddNestedTool(tool ToolMessageItem) {
 	}
 	a.nestedTools = append(a.nestedTools, tool)
 	a.clearCache()
+	a.Bump()
 }
 
 // AgenticFetchToolRenderContext renders agentic fetch tool messages.

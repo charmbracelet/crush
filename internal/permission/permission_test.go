@@ -79,6 +79,21 @@ func TestPermissionService_AllowedCommands(t *testing.T) {
 	}
 }
 
+func TestSkipRace(t *testing.T) {
+	svc := NewPermissionService("/tmp", false, nil)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		svc.SetSkipRequests(true)
+	}()
+	go func() {
+		defer wg.Done()
+		svc.SkipRequests()
+	}()
+	wg.Wait()
+}
+
 func TestPermissionService_SkipMode(t *testing.T) {
 	service := NewPermissionService("/tmp", true, []string{})
 
@@ -95,6 +110,82 @@ func TestPermissionService_SkipMode(t *testing.T) {
 	if !result {
 		t.Error("expected permission to be granted in skip mode")
 	}
+}
+
+func TestPermissionService_HookApproval(t *testing.T) {
+	t.Parallel()
+
+	t.Run("matching tool call ID short-circuits the prompt", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, nil)
+
+		ctx := WithHookApproval(t.Context(), "call-42")
+		granted, err := service.Request(ctx, CreatePermissionRequest{
+			SessionID:   "s1",
+			ToolCallID:  "call-42",
+			ToolName:    "bash",
+			Action:      "execute",
+			Description: "hook-approved command",
+			Path:        "/tmp",
+		})
+		require.NoError(t, err)
+		assert.True(t, granted, "hook-approved call should bypass the prompt")
+	})
+
+	t.Run("approval is scoped to the stamped tool call ID", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, nil)
+
+		// Stamp for call-42, ask for a different call ID — must not leak.
+		ctx := WithHookApproval(t.Context(), "call-42")
+
+		// Kick off a real request that will need a subscriber to resolve it.
+		events := service.Subscribe(t.Context())
+		var (
+			wg      sync.WaitGroup
+			granted bool
+			err     error
+		)
+		wg.Go(func() {
+			granted, err = service.Request(ctx, CreatePermissionRequest{
+				SessionID:   "s1",
+				ToolCallID:  "call-other",
+				ToolName:    "bash",
+				Action:      "execute",
+				Description: "unrelated call",
+				Path:        "/tmp",
+			})
+		})
+
+		// Confirm the service published a real request (i.e. didn't bypass).
+		event := <-events
+		service.Deny(event.Payload)
+		wg.Wait()
+		require.NoError(t, err)
+		assert.False(t, granted, "stamped approval must not apply to a different tool call")
+	})
+
+	t.Run("notifies subscribers that permission was granted", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, nil)
+
+		notifications := service.SubscribeNotifications(t.Context())
+
+		ctx := WithHookApproval(t.Context(), "call-99")
+		granted, err := service.Request(ctx, CreatePermissionRequest{
+			SessionID:  "s1",
+			ToolCallID: "call-99",
+			ToolName:   "view",
+			Action:     "read",
+			Path:       "/tmp",
+		})
+		require.NoError(t, err)
+		assert.True(t, granted)
+
+		event := <-notifications
+		assert.Equal(t, "call-99", event.Payload.ToolCallID)
+		assert.True(t, event.Payload.Granted, "subscribers should see a granted notification")
+	})
 }
 
 func TestPermissionService_SequentialProperties(t *testing.T) {

@@ -21,7 +21,16 @@ func BuiltinFS() embed.FS {
 
 // DiscoverBuiltin finds all valid skills embedded in the binary.
 func DiscoverBuiltin() []*Skill {
+	skills, _ := DiscoverBuiltinWithStates()
+	return skills
+}
+
+// DiscoverBuiltinWithStates is like DiscoverBuiltin but additionally returns
+// a per-file state slice describing parse/validation outcomes. Useful for
+// diagnostics.
+func DiscoverBuiltinWithStates() ([]*Skill, []*SkillState) {
 	var discovered []*Skill
+	var states []*SkillState
 
 	fs.WalkDir(builtinFS, "builtin", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -34,12 +43,14 @@ func DiscoverBuiltin() []*Skill {
 		content, err := builtinFS.ReadFile(path)
 		if err != nil {
 			slog.Warn("Failed to read builtin skill file", "path", path, "error", err)
+			states = append(states, &SkillState{Path: path, State: StateError, Err: err})
 			return nil
 		}
 
 		skill, err := ParseContent(content)
 		if err != nil {
 			slog.Warn("Failed to parse builtin skill file", "path", path, "error", err)
+			states = append(states, &SkillState{Path: path, State: StateError, Err: err})
 			return nil
 		}
 
@@ -54,13 +65,15 @@ func DiscoverBuiltin() []*Skill {
 
 		if err := skill.Validate(); err != nil {
 			slog.Warn("Builtin skill validation failed", "path", path, "error", err)
+			states = append(states, &SkillState{Name: skill.Name, Path: path, State: StateError, Err: err})
 			return nil
 		}
 
 		slog.Debug("Successfully loaded builtin skill", "name", skill.Name, "path", skill.SkillFilePath)
 		discovered = append(discovered, skill)
+		states = append(states, &SkillState{Name: skill.Name, Path: skill.SkillFilePath, State: StateNormal})
 		return nil
 	})
 
-	return discovered
+	return discovered, states
 }

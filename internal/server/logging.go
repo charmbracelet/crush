@@ -15,7 +15,8 @@ func (s *Server) loggingHandler(next http.Handler) http.Handler {
 
 		start := time.Now()
 		lrw := &loggingResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
-		s.logger.Debug("HTTP request",
+		s.logger.Debug(
+			"HTTP request",
 			slog.String("method", r.Method),
 			slog.String("path", r.URL.Path),
 			slog.String("remote_addr", r.RemoteAddr),
@@ -25,7 +26,8 @@ func (s *Server) loggingHandler(next http.Handler) http.Handler {
 		next.ServeHTTP(lrw, r)
 		duration := time.Since(start)
 
-		s.logger.Debug("HTTP response",
+		s.logger.Debug(
+			"HTTP response",
 			slog.String("method", r.Method),
 			slog.String("path", r.URL.Path),
 			slog.Int("status", lrw.statusCode),

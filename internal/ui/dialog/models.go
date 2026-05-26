@@ -173,6 +173,9 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 		if err := m.setProviderItems(); err != nil {
 			return util.ReportError(err)
 		}
+		if msg.Selected >= 0 {
+			m.list.SetSelected(msg.Selected)
+		}
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, m.keyMap.Close):
@@ -229,6 +232,7 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 			if selectedItem == nil {
 				break
 			}
+			selected := m.list.Selected()
 
 			modelItem, ok := selectedItem.(*ModelItem)
 			if !ok || !modelItem.IsRecent() {
@@ -236,6 +240,7 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 			}
 
 			return ActionRemoveRecentModel{
+				Selected:  selected,
 				Model:     modelItem.SelectedModel(),
 				ModelType: modelItem.SelectedModelType(),
 			}

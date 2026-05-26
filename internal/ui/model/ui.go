@@ -1594,7 +1594,9 @@ func (m *UI) handleRemoveRecentModel(msg dialog.ActionRemoveRecentModel) tea.Cmd
 	} else {
 		// Send a refresh message to the models dialog
 		if modelsDialog, ok := m.dialog.Dialog(dialog.ModelsID).(*dialog.Models); ok {
-			modelsDialog.HandleMsg(dialog.ActionRefreshModels{})
+			modelsDialog.HandleMsg(dialog.ActionRefreshModels{
+				Selected: msg.Selected,
+			})
 		}
 		cmds = append(cmds, func() tea.Msg {
 			return util.NewInfoMsg(fmt.Sprintf("Removed %s from recent models", msg.Model.Model))

@@ -13,9 +13,6 @@ import (
 
 const osc99QueryID = "crush-osc99-query"
 
-// notifySeq is a counter for generating unique notification IDs.
-var notifySeq uint64
-
 // DetectOSC99Support parses an OSC response sequence and returns true if it
 // indicates OSC 99 notification support. This function should be called from
 // the capabilities detection layer to determine terminal support.
@@ -84,19 +81,17 @@ func OSC99QuerySequence() string {
 type OSCBackend struct {
 	icon       []byte
 	supports99 bool
+	notifySeq  uint64
 }
 
 // NewOSCBackend creates a new OSC notification backend with automatic protocol
 // detection. If supports99 is true, it uses OSC 99; otherwise it falls back to
 // OSC 777.
-func NewOSCBackend(icon any, supports99 bool) *OSCBackend {
-	b := &OSCBackend{
+func NewOSCBackend(icon []byte, supports99 bool) *OSCBackend {
+	return &OSCBackend{
+		icon:       icon,
 		supports99: supports99,
 	}
-	if data, ok := icon.([]byte); ok && len(data) > 0 {
-		b.icon = data
-	}
-	return b
 }
 
 // Send returns a [tea.Cmd] that writes OSC escape sequences to the terminal.
@@ -112,8 +107,8 @@ func (b *OSCBackend) sendOSC99(n Notification) tea.Cmd {
 	slog.Debug("Sending OSC 99 notification", "title", n.Title, "message", n.Message)
 
 	var sb strings.Builder
-	notifySeq++
-	id := fmt.Sprintf("crush-%d", notifySeq)
+	b.notifySeq++
+	id := fmt.Sprintf("crush-%d", b.notifySeq)
 
 	appName := "Crush"
 	notificationType := "crush-notification"

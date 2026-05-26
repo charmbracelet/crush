@@ -495,14 +495,10 @@ func (m *UI) updateNotificationBackend() {
 }
 
 // shouldSendNotification returns true if notifications should be sent based on
-// current state. Focus reporting must be supported, window must not focused,
-// and notifications must not be disabled in config.
+// current state. Focus reporting must be supported, window must not be
+// focused, and notifications must not be disabled in config.
 func (m *UI) shouldSendNotification() bool {
 	cfg := m.com.Config()
-	if cfg != nil && cfg.Options != nil && cfg.Options.DisableNotifications {
-		return false
-	}
-	// If the user explicitly set style to "disabled", skip sending.
 	if cfg != nil && cfg.Options != nil && cfg.Options.NotificationStyle == "disabled" {
 		return false
 	}
@@ -1408,22 +1404,19 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.com.Workspace.PermissionSetSkipRequests(yolo)
 		m.setEditorPrompt(yolo)
 		m.dialog.CloseDialog(dialog.CommandsID)
-	case dialog.ActionToggleNotifications:
+	case dialog.ActionSelectNotificationStyle:
 		cfg := m.com.Config()
 		if cfg != nil && cfg.Options != nil {
-			disabled := !cfg.Options.DisableNotifications
-			cfg.Options.DisableNotifications = disabled
-			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.disable_notifications", disabled); err != nil {
+			cfg.Options.NotificationStyle = msg.Style
+			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.notification_style", msg.Style); err != nil {
 				cmds = append(cmds, util.ReportError(err))
 			} else {
-				status := "enabled"
-				if disabled {
-					status = "disabled"
-				}
-				cmds = append(cmds, util.CmdHandler(util.NewInfoMsg("Notifications "+status)))
+				cmds = append(cmds, util.CmdHandler(util.NewInfoMsg("Notifications set to: "+msg.Style)))
 			}
+			// Reinitialize notification backend with new style.
+			m.notifyBackend = selectNotificationBackend(m.caps, cfg)
 		}
-		m.dialog.CloseDialog(dialog.CommandsID)
+		m.dialog.CloseDialog(dialog.NotificationsID)
 	case dialog.ActionNewSession:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
@@ -3306,6 +3299,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openReasoningDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.NotificationsID:
+		if cmd := m.openNotificationsDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.FilePickerID:
 		if cmd := m.openFilesDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -3392,6 +3389,18 @@ func (m *UI) openReasoningDialog() tea.Cmd {
 	}
 
 	m.dialog.OpenDialog(reasoningDialog)
+	return nil
+}
+
+// openNotificationsDialog opens the notification style picker dialog.
+func (m *UI) openNotificationsDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.NotificationsID) {
+		m.dialog.BringToFront(dialog.NotificationsID)
+		return nil
+	}
+
+	notificationsDialog := dialog.NewNotifications(m.com)
+	m.dialog.OpenDialog(notificationsDialog)
 	return nil
 }
 

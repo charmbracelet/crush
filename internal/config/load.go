@@ -26,6 +26,8 @@ import (
 	"github.com/charmbracelet/crush/internal/home"
 	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
 	"github.com/qjebbs/go-jsons"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 const defaultCatwalkURL = "https://catwalk.charm.land"
@@ -33,6 +35,9 @@ const defaultCatwalkURL = "https://catwalk.charm.land"
 // Load loads the configuration from the default paths and returns a
 // ConfigStore that owns both the pure-data Config and all runtime state.
 func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
+	// Migrate deprecated disable_notifications before loading config.
+	migrateDisableNotifications()
+
 	configPaths := lookupConfigs(workingDir)
 
 	cfg, loadedPaths, err := loadFromConfigPaths(configPaths)
@@ -488,6 +493,7 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 			c.Options.Attribution.TrailerStyle = TrailerStyleAssistedBy
 		}
 	}
+
 	c.Options.InitializeAs = cmp.Or(c.Options.InitializeAs, defaultInitializeAs)
 }
 
@@ -818,6 +824,69 @@ func hasAWSCredentials(env env.Env) bool {
 	}
 
 	return false
+}
+
+// migrateDisableNotifications migrates the deprecated disable_notifications
+// field to notification_style. It checks both the user config (~/.config) and
+// data config (~/.local) files. If disable_notifications is true, it sets
+// notification_style to "disabled" in the data file. Regardless of value, it
+// removes disable_notifications from any file that contains it.
+func migrateDisableNotifications() {
+	globalConfig := GlobalConfig()
+	dataConfig := GlobalConfigData()
+
+	var wasDisabled bool
+	filesToClean := []string{}
+
+	for _, path := range []string{globalConfig, dataConfig} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		if gjson.Get(string(data), "options.disable_notifications").Exists() {
+			filesToClean = append(filesToClean, path)
+			if gjson.Get(string(data), "options.disable_notifications").Bool() {
+				wasDisabled = true
+			}
+		}
+	}
+
+	if len(filesToClean) == 0 {
+		return
+	}
+
+	// If notifications were disabled, persist the equivalent notification_style.
+	if wasDisabled {
+		data, err := os.ReadFile(dataConfig)
+		if err == nil {
+			if !gjson.Get(string(data), "options.notification_style").Exists() {
+				updated, err := sjson.Set(string(data), "options.notification_style", "disabled")
+				if err == nil {
+					if err := atomicWriteFile(dataConfig, []byte(updated), 0o600); err != nil {
+						slog.Warn("Failed to migrate disable_notifications to notification_style", "error", err)
+					} else {
+						slog.Info("Migrated disable_notifications: true to notification_style: disabled")
+					}
+				}
+			}
+		}
+	}
+
+	// Remove disable_notifications from all files that contain it.
+	for _, path := range filesToClean {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		updated, err := sjson.Delete(string(data), "options.disable_notifications")
+		if err != nil {
+			slog.Warn("Failed to remove deprecated disable_notifications field", "path", path, "error", err)
+			continue
+		}
+		if err := atomicWriteFile(path, []byte(updated), 0o600); err != nil {
+			slog.Warn("Failed to write migrated config", "path", path, "error", err)
+		}
+	}
 }
 
 // GlobalConfig returns the global configuration file path for the application.

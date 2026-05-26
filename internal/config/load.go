@@ -349,7 +349,9 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 		providerConfig.Name = cmp.Or(providerConfig.Name, id) // Use ID as name if not set
 		// default to OpenAI if not set
 		providerConfig.Type = cmp.Or(providerConfig.Type, catwalk.TypeOpenAICompat)
-		if !slices.Contains(catwalk.KnownProviderTypes(), providerConfig.Type) && providerConfig.Type != hyper.Name {
+		if !slices.Contains(catwalk.KnownProviderTypes(), providerConfig.Type) &&
+			providerConfig.Type != hyper.Name &&
+			providerConfig.Type != LiteLLMType {
 			slog.Warn("Skipping custom provider due to unsupported provider type", "provider", id)
 			c.Providers.Del(id)
 			continue
@@ -368,11 +370,7 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 			c.Providers.Del(id)
 			continue
 		}
-		if len(providerConfig.Models) == 0 {
-			slog.Warn("Skipping custom provider because the provider has no models", "provider", id)
-			c.Providers.Del(id)
-			continue
-		}
+
 		apiKey, err := resolver.ResolveValue(providerConfig.APIKey)
 		if apiKey == "" || err != nil {
 			slog.Warn("Provider is missing API key, this might be OK for local providers", "provider", id)
@@ -380,6 +378,41 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 		baseURL, err := resolver.ResolveValue(providerConfig.BaseURL)
 		if baseURL == "" || err != nil {
 			slog.Warn("Skipping custom provider due to missing API endpoint", "provider", id, "error", err)
+			c.Providers.Del(id)
+			continue
+		}
+
+		// LiteLLM: auto-discover models from the proxy and use
+		// openai-compat for the actual LLM calls.
+		if providerConfig.Type == LiteLLMType {
+			discovered, fetchErr := fetchLiteLLMModels(baseURL, apiKey)
+			if fetchErr != nil {
+				slog.Warn("Failed to fetch models from LiteLLM, skipping provider", "provider", id, "error", fetchErr)
+				c.Providers.Del(id)
+				continue
+			}
+			// Prepend any user-defined models so they take
+			// precedence (e.g. custom context_window overrides).
+			seen := make(map[string]bool)
+			merged := make([]catwalk.Model, 0, len(providerConfig.Models)+len(discovered))
+			for _, m := range providerConfig.Models {
+				if !seen[m.ID] {
+					seen[m.ID] = true
+					merged = append(merged, m)
+				}
+			}
+			for _, m := range discovered {
+				if !seen[m.ID] {
+					seen[m.ID] = true
+					merged = append(merged, m)
+				}
+			}
+			providerConfig.Models = merged
+			providerConfig.Type = catwalk.TypeOpenAICompat
+		}
+
+		if len(providerConfig.Models) == 0 {
+			slog.Warn("Skipping custom provider because the provider has no models", "provider", id)
 			c.Providers.Del(id)
 			continue
 		}

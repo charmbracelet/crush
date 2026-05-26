@@ -186,6 +186,10 @@ func (w *ClientWorkspace) AgentRun(ctx context.Context, sessionID, prompt string
 	return w.client.SendMessage(ctx, w.workspaceID(), sessionID, "", prompt, attachments...)
 }
 
+func (w *ClientWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, command string) (proto.ShellCommandResponse, error) {
+	return w.client.RunShellCommand(ctx, w.workspaceID(), sessionID, command)
+}
+
 func (w *ClientWorkspace) AgentCancel(sessionID string) {
 	_ = w.client.CancelAgentSession(context.Background(), w.workspaceID(), sessionID)
 }

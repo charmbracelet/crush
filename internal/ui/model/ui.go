@@ -1978,6 +1978,12 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					return m.openQuitDialog()
 				}
 
+				if command, ok := strings.CutPrefix(value, "!"); ok && command != "" {
+					m.randomizePlaceholders()
+					m.historyReset()
+					return tea.Batch(m.runShellCommand(command), m.loadPromptHistory())
+				}
+
 				attachments := m.attachments.List()
 				m.attachments.Reset()
 				if len(value) == 0 && !message.ContainsTextAttachment(attachments) {
@@ -3299,6 +3305,25 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 		return nil
 	})
 	return tea.Batch(cmds...)
+}
+
+// runShellCommand executes a shell command server-side without triggering
+// the LLM. The command and output are persisted as a user message.
+func (m *UI) runShellCommand(command string) tea.Cmd {
+	if !m.hasSession() {
+		return util.ReportError(fmt.Errorf("no active session"))
+	}
+	sessionID := m.session.ID
+	return func() tea.Msg {
+		_, err := m.com.Workspace.AgentRunShellCommand(context.Background(), sessionID, command)
+		if err != nil {
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
+				Msg:  fmt.Sprintf("shell: %v", err),
+			}
+		}
+		return nil
+	}
 }
 
 const cancelTimerDuration = 2 * time.Second

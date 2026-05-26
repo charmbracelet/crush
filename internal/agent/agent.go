@@ -501,6 +501,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				if cw == 0 {
 					return false
 				}
+				// When extended mode is active (always-on 1M), use the
+				// extended window size for summarization thresholds.
+				if largeModel.ModelCfg.ContextMode == config.ContextModeExtended && largeModel.CatwalkCfg.Supports1MContext {
+					cw = extendedContextWindow
+				}
 				// Use the most recent step's input usage as a proxy for the
 				// current context size. Cumulative session tokens grow
 				// monotonically and would falsely trigger summarization even

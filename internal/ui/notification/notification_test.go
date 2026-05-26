@@ -60,10 +60,10 @@ func extractRawString(t *testing.T, cmd tea.Cmd) string {
 	return s
 }
 
-func TestOSC99Backend_Send(t *testing.T) {
+func TestOSCBackend_Send_OSC99(t *testing.T) {
 	t.Parallel()
 
-	backend := notification.NewOSC99Backend(nil)
+	backend := notification.NewOSCBackend(nil, true)
 	s := extractRawString(t, backend.Send(notification.Notification{
 		Title:   "Crush is waiting...",
 		Message: "Agent's turn completed",
@@ -78,10 +78,10 @@ func TestOSC99Backend_Send(t *testing.T) {
 	require.NotContains(t, s, "\x1b]9;")
 }
 
-func TestOSC99Backend_Send_TitleOnly(t *testing.T) {
+func TestOSCBackend_Send_OSC99_TitleOnly(t *testing.T) {
 	t.Parallel()
 
-	backend := notification.NewOSC99Backend(nil)
+	backend := notification.NewOSCBackend(nil, true)
 	s := extractRawString(t, backend.Send(notification.Notification{
 		Title: "Crush is waiting...",
 	}))
@@ -92,11 +92,11 @@ func TestOSC99Backend_Send_TitleOnly(t *testing.T) {
 	require.NotContains(t, s, "\x1b]9;")
 }
 
-func TestOSC99Backend_Send_WithIcon(t *testing.T) {
+func TestOSCBackend_Send_OSC99_WithIcon(t *testing.T) {
 	t.Parallel()
 
 	iconData := []byte("fake-png-data")
-	backend := notification.NewOSC99Backend(iconData)
+	backend := notification.NewOSCBackend(iconData, true)
 	s := extractRawString(t, backend.Send(notification.Notification{
 		Title:   "Test",
 		Message: "With icon",
@@ -111,10 +111,10 @@ func TestOSC99Backend_Send_WithIcon(t *testing.T) {
 	require.NotContains(t, s, "\x1b]9;")
 }
 
-func TestOSC777Backend_Send(t *testing.T) {
+func TestOSCBackend_Send_OSC777(t *testing.T) {
 	t.Parallel()
 
-	backend := notification.NewOSC777Backend()
+	backend := notification.NewOSCBackend(nil, false)
 	s := extractRawString(t, backend.Send(notification.Notification{
 		Title:   "Test",
 		Message: "With body",
@@ -195,4 +195,19 @@ func TestOSC99QuerySequence(t *testing.T) {
 	require.Contains(t, seq, "i=crush-osc99-query")
 	require.Contains(t, seq, "p=?")
 	require.Contains(t, seq, "\x07")
+}
+
+func TestBellBackend_Send(t *testing.T) {
+	t.Parallel()
+
+	backend := notification.NewBellBackend()
+	s := extractRawString(t, backend.Send(notification.Notification{
+		Title:   "Test",
+		Message: "Ignored by bell",
+	}))
+
+	// Bell backend only sends the bell character.
+	require.Equal(t, "\x07", s)
+	require.NotContains(t, s, "Test")
+	require.NotContains(t, s, "Ignored")
 }

@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -433,31 +434,64 @@ func (m *UI) sendNotification(n notification.Notification) tea.Cmd {
 }
 
 // selectNotificationBackend chooses the appropriate notification backend based
-// on terminal capabilities and environment. This is a pure function that should
-// be called once during initialization or when capabilities change.
-func selectNotificationBackend(caps common.Capabilities) notification.Backend {
+// on terminal capabilities, environment, and user configuration. This is a pure
+// function that should be called once during initialization or when capabilities
+// change.
+func selectNotificationBackend(caps common.Capabilities, cfg *config.Config) notification.Backend {
+	// Check for explicit user preference first.
+	if cfg != nil && cfg.Options != nil && cfg.Options.NotificationStyle != "" {
+		switch cfg.Options.NotificationStyle {
+		case "native":
+			slog.Debug("Using native backend (user preference)")
+			return notification.NewNativeBackend(notification.Icon)
+		case "osc":
+			slog.Debug("Using OSC backend (user preference)", "osc99_supported", caps.OSC99Notifications)
+			return notification.NewOSCBackend(notification.Icon, caps.OSC99Notifications)
+		case "bell":
+			slog.Debug("Using bell backend (user preference)")
+			return notification.NewBellBackend()
+		case "disabled":
+			slog.Debug("Notifications disabled (user preference)")
+			return notification.NoopBackend{}
+		case "auto":
+			// Fall through to auto-detection below.
+		default:
+			slog.Warn("Unknown notification style, using auto", "style", cfg.Options.NotificationStyle)
+		}
+	}
+
+	// Auto-detect based on environment and capabilities.
 	_, isSSH := caps.Env.LookupEnv("SSH_TTY")
 
 	// SSH sessions use terminal-based notifications (OSC 99 or 777).
 	if isSSH {
-		if caps.OSC99Notifications {
-			return notification.NewOSC99Backend(notification.Icon)
-		}
-		return notification.NewOSC777Backend()
+		slog.Debug("Selected OSCBackend for SSH session", "osc99_supported", caps.OSC99Notifications)
+		return notification.NewOSCBackend(notification.Icon, caps.OSC99Notifications)
 	}
 
-	// Local sessions use native OS notifications if focus events are supported.
+	// Local sessions: prefer OSC on macOS because the native backend (beeep)
+	// uses terminal-notifier or AppleScript, which is slow and doesn't display
+	// icons properly. OSC 99 provides a more polished experience with icon support.
+	if runtime.GOOS == "darwin" {
+		slog.Debug("Selected OSCBackend for local macOS session", "osc99_supported", caps.OSC99Notifications)
+		return notification.NewOSCBackend(notification.Icon, caps.OSC99Notifications)
+	}
+
+	// Non-macOS local sessions use native OS notifications if focus events are supported.
 	// Without focus events, we can't suppress notifications when focused, so
 	// we disable them entirely to avoid spamming the user.
 	if caps.ReportFocusEvents {
+		slog.Debug("Selected NativeBackend for local session")
 		return notification.NewNativeBackend(notification.Icon)
 	}
 
+	slog.Debug("Selected NoopBackend (focus events not supported)")
 	return notification.NoopBackend{}
 }
 
 func (m *UI) updateNotificationBackend() {
-	m.notifyBackend = selectNotificationBackend(m.caps)
+	cfg := m.com.Config()
+	m.notifyBackend = selectNotificationBackend(m.caps, cfg)
 }
 
 // shouldSendNotification returns true if notifications should be sent based on
@@ -466,6 +500,10 @@ func (m *UI) updateNotificationBackend() {
 func (m *UI) shouldSendNotification() bool {
 	cfg := m.com.Config()
 	if cfg != nil && cfg.Options != nil && cfg.Options.DisableNotifications {
+		return false
+	}
+	// If the user explicitly set style to "disabled", skip sending.
+	if cfg != nil && cfg.Options != nil && cfg.Options.NotificationStyle == "disabled" {
 		return false
 	}
 	return m.caps.ReportFocusEvents && !m.notifyWindowFocused

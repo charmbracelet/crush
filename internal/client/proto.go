@@ -131,6 +131,7 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 
 	go func() {
 		defer rsp.Body.Close()
+		defer close(events)
 
 		scr := bufio.NewReader(rsp.Body)
 		for {
@@ -139,8 +140,15 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 				break
 			}
 			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
 				slog.Error("Reading from events stream", "error", err)
-				time.Sleep(time.Second * 2)
+				select {
+				case <-time.After(time.Second * 2):
+				case <-ctx.Done():
+					return
+				}
 				continue
 			}
 			line = bytes.TrimSpace(line)
@@ -166,43 +174,63 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 			case pubsub.PayloadTypeLSPEvent:
 				var e pubsub.Event[proto.LSPEvent]
 				_ = json.Unmarshal(p.Payload, &e)
-				sendEvent(ctx, events, e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
 			case pubsub.PayloadTypeMCPEvent:
 				var e pubsub.Event[proto.MCPEvent]
 				_ = json.Unmarshal(p.Payload, &e)
-				sendEvent(ctx, events, e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
 			case pubsub.PayloadTypePermissionRequest:
 				var e pubsub.Event[proto.PermissionRequest]
 				_ = json.Unmarshal(p.Payload, &e)
-				sendEvent(ctx, events, e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
 			case pubsub.PayloadTypePermissionNotification:
 				var e pubsub.Event[proto.PermissionNotification]
 				_ = json.Unmarshal(p.Payload, &e)
-				sendEvent(ctx, events, e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
 			case pubsub.PayloadTypeMessage:
 				var e pubsub.Event[proto.Message]
 				_ = json.Unmarshal(p.Payload, &e)
-				sendEvent(ctx, events, e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
 			case pubsub.PayloadTypeSession:
 				var e pubsub.Event[proto.Session]
 				_ = json.Unmarshal(p.Payload, &e)
-				sendEvent(ctx, events, e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
 			case pubsub.PayloadTypeFile:
 				var e pubsub.Event[proto.File]
 				_ = json.Unmarshal(p.Payload, &e)
-				sendEvent(ctx, events, e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
 			case pubsub.PayloadTypeAgentEvent:
 				var e pubsub.Event[proto.AgentEvent]
 				_ = json.Unmarshal(p.Payload, &e)
-				sendEvent(ctx, events, e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
 			case pubsub.PayloadTypeConfigChanged:
 				var e pubsub.Event[proto.ConfigChanged]
 				_ = json.Unmarshal(p.Payload, &e)
-				sendEvent(ctx, events, e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
 			case pubsub.PayloadTypeSkillsEvent:
 				var e pubsub.Event[proto.SkillsEvent]
 				_ = json.Unmarshal(p.Payload, &e)
-				sendEvent(ctx, events, e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
 			default:
 				slog.Warn("Unknown event type", "type", p.Type)
 				continue
@@ -213,12 +241,15 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 	return events, nil
 }
 
-func sendEvent(ctx context.Context, evc chan any, ev any) {
+func sendEvent(ctx context.Context, evc chan any, ev any) bool {
+	if ctx.Err() != nil {
+		return false
+	}
 	select {
 	case evc <- ev:
+		return true
 	case <-ctx.Done():
-		close(evc)
-		return
+		return false
 	}
 }
 

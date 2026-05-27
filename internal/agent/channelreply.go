@@ -231,6 +231,13 @@ func autoReplyDelivered(reply *config.MCPChannelReply, channel string, completed
 	return channelReplyDelivered(reply, channel, completedTools)
 }
 
+// skipsPermissionPrompts reports whether tool calls are being auto-approved
+// rather than put in front of the user, which is what makes an
+// auto-discovered reply route safe to use unasked.
+func (a *sessionAgent) skipsPermissionPrompts() bool {
+	return a.permissions != nil && a.permissions.PermissionMode().SkipsPrompts()
+}
+
 // sendChannelReply routes the final assistant text of a channel-originated
 // turn back through the channel's configured reply tool. It is a no-op for
 // local turns, channels without a channel_reply config, empty responses,
@@ -281,12 +288,12 @@ func (a *sessionAgent) sendChannelReply(ctx context.Context, call SessionAgentCa
 	}
 	// An explicit channel_reply config is itself the consent to use the
 	// tool for replies. An auto-discovered route, however, was not
-	// explicitly opted into — only proceed when permissions are globally
-	// skipped (--dangerously-skip-permissions), so a user who has
+	// explicitly opted into — only proceed when the user has turned tool
+	// prompts off altogether (yolo or sysadmin mode), so someone who has
 	// declined the tool in a normal turn does not get a message sent on
 	// their behalf without consent.
-	if autoDiscovered && !a.isYolo {
-		slog.Info("Channel reply skipped: auto-discovered route requires --dangerously-skip-permissions or explicit channel_reply config",
+	if autoDiscovered && !a.skipsPermissionPrompts() {
+		slog.Info("Channel reply skipped: auto-discovered route requires yolo or sysadmin mode, or explicit channel_reply config",
 			"channel", call.Channel, "tool", tool)
 		return
 	}

@@ -236,7 +236,8 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	// cross-talk between workspaces.
 	discoveryCfg := skillsDiscoveryConfig(cfg)
 	allSkills, activeSkills, skillStates := skills.DiscoverFromConfig(discoveryCfg)
-	skillsMgr := skills.NewManager(allSkills, activeSkills, skillStates,
+	skillsMgr := skills.NewManager(
+		allSkills, activeSkills, skillStates,
 		skills.WithResolvedPaths(discoveryCfg.ResolvePaths()),
 		skills.WithWorkingDir(discoveryCfg.WorkingDir),
 	)

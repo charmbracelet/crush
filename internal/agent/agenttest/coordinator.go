@@ -68,6 +68,6 @@ func NewCoordinator(
 		Config:      cfg,
 		Sessions:    sessions,
 		Messages:    messages,
-		Permissions: permission.NewPermissionService(workingDir, true, nil),
+		Permissions: permission.NewPermissionService(workingDir, nil),
 	})
 }

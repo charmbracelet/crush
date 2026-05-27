@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/chat"
@@ -151,9 +152,16 @@ func (w *testWorkspace) UpdateAgentModel(context.Context) error {
 	return nil
 }
 
-func (w *testWorkspace) PermissionSkipRequests() bool { return w.yolo }
+func (w *testWorkspace) PermissionMode() permission.PermissionMode {
+	if w.yolo {
+		return permission.PermissionModeYolo
+	}
+	return permission.PermissionModeNormal
+}
 
-func (w *testWorkspace) PermissionSetSkipRequests(skip bool) { w.yolo = skip }
+func (w *testWorkspace) PermissionSetMode(mode permission.PermissionMode) {
+	w.yolo = mode != permission.PermissionModeNormal
+}
 
 func (w *testWorkspace) AgentIsReady() bool {
 	return w.agentReady
@@ -228,6 +236,18 @@ func newPlanUI(t *testing.T, sessionID string) (*UI, *testWorkspace) {
 		chat:     NewChat(com, config.ScrollbarDefault),
 	}
 	return u, ws
+}
+
+// seedYolo puts the workspace and the UI's memoized permission mode in the
+// same state the running UI keeps them in: every write goes through
+// setPermissionMode, so the cache never trails the workspace.
+func seedYolo(u *UI, ws *testWorkspace, on bool) {
+	mode := permission.PermissionModeNormal
+	if on {
+		mode = permission.PermissionModeYolo
+	}
+	ws.PermissionSetMode(mode)
+	u.permModeCache.set(mode)
 }
 
 // applyModeSwitchMsg runs a setInputMode command to completion the way the
@@ -655,7 +675,7 @@ func TestPlanHandoffExplicitPermissionMode(t *testing.T) {
 	t.Parallel()
 	for _, yolo := range []bool{false, true} {
 		u, ws := newPlanUI(t, "sess-1")
-		ws.yolo = !yolo
+		seedYolo(u, ws, !yolo)
 		u.openPlanHandoff()
 		inline := u.activeInline.(*dialog.PlanHandoffInline)
 		cmd := inline.OnConfirm(yolo)
@@ -672,7 +692,7 @@ func TestPlanPromptIgnoresYOLO(t *testing.T) {
 	u, _ := newPlanUI(t, "sess-1")
 	u.textarea.SetWidth(40)
 	u.textarea.Focus()
-	u.setEditorPrompt(true)
+	u.setEditorPrompt(permission.PermissionModeYolo)
 	require.Contains(t, u.textarea.View(), "⏸")
 	require.NotContains(t, u.textarea.View(), " ! ")
 }
@@ -697,7 +717,7 @@ func TestToggleInputModePreservesExistingYOLOOnEntry(t *testing.T) {
 	t.Parallel()
 	u, ws := newPlanUI(t, "sess-1")
 	u.mode = uiInputModeCode
-	ws.yolo = true
+	seedYolo(u, ws, true)
 	applyModeSwitchMsg(u, u.toggleInputMode())
 	require.Equal(t, uiInputModePlan, u.mode)
 	require.True(t, ws.yolo)
@@ -707,7 +727,7 @@ func TestSwitchPlanToYolo(t *testing.T) {
 	t.Parallel()
 	for _, carriedYolo := range []bool{false, true} {
 		u, ws := newPlanUI(t, "sess-1")
-		ws.yolo = carriedYolo
+		seedYolo(u, ws, carriedYolo)
 		u.cycleYolo = carriedYolo
 
 		applyModeSwitchMsg(u, u.switchPlanToYolo())

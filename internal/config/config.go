@@ -133,6 +133,13 @@ type ProviderConfig struct {
 	// Skip cost accumulation for this provider when using subscription or flat rate billing.
 	FlatRate bool `json:"flat_rate,omitempty" jsonschema:"description=Flat-rate mode for this provider"`
 
+	// AutoDiscoverModels controls model discovery via /v1/models endpoint.
+	// When Models is empty and this is nil or true, Crush auto-discovers
+	// models. When true and Models is non-empty, discovered models are
+	// merged in (user-specified models take precedence). When false,
+	// only explicitly listed models are used.
+	AutoDiscoverModels *bool `json:"discover_models,omitempty" jsonschema:"description=Auto-discover models from /v1/models endpoint. When true with existing models they are merged (yours win),default=true"`
+
 	// The provider models
 	Models []catwalk.Model `json:"models,omitempty" jsonschema:"description=List of models available from this provider"`
 }

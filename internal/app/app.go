@@ -113,7 +113,6 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	messages := message.NewService(q)
 	files := history.NewService(q, conn)
 	cfg := store.Config()
-	skipPermissionsRequests := store.Overrides().SkipPermissionRequests
 	var allowedTools []string
 	if cfg.Permissions != nil && cfg.Permissions.AllowedTools != nil {
 		allowedTools = cfg.Permissions.AllowedTools
@@ -123,11 +122,16 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		return store.Config().Hooks
 	}, store.WorkingDir(), store.WorkingDir())
 
+	permSvc := permission.NewPermissionService(store.WorkingDir(), allowedTools, permissionHooks{hookRunner})
+	if store.Overrides().PermissionMode != 0 {
+		permSvc.SetPermissionMode(store.Overrides().PermissionMode)
+	}
+
 	app := &App{
 		Sessions:    sessions,
 		Messages:    messages,
 		History:     files,
-		Permissions: permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools, permissionHooks{hookRunner}),
+		Permissions: permSvc,
 		Questions:   question.NewService(),
 		FileTracker: filetracker.NewService(q),
 		Pinentry:    pinentry.DefaultService(),
@@ -774,6 +778,7 @@ func (app *App) setupEvents() {
 	// the fan-in must not drop them.
 	app.subscribeMustDeliver(ctx, "ssh-prompts", sshaskpass.DefaultPrompts().Subscribe)
 	app.subscribeMustDeliver(ctx, "ssh-notifications", sshaskpass.DefaultPrompts().SubscribeNotifications)
+	app.subscribeMustDeliver(ctx, "permissions-mode", app.Permissions.SubscribeModeChanges)
 	app.subscribe(ctx, "history", app.History.Subscribe)
 	app.subscribe(ctx, "agent-notifications", app.agentNotifications.Subscribe)
 	// Pinentry transitions are rare and drive the terminal handover, so

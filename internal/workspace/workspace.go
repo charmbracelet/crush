@@ -193,8 +193,8 @@ type Workspace interface {
 	PermissionGrant(perm permission.PermissionRequest) bool
 	PermissionGrantPersistent(perm permission.PermissionRequest) bool
 	PermissionDeny(perm permission.PermissionRequest) bool
-	PermissionSkipRequests() bool
-	PermissionSetSkipRequests(skip bool)
+	PermissionMode() permission.PermissionMode
+	PermissionSetMode(mode permission.PermissionMode)
 
 	// HostContext returns what the host application has in view, such
 	// as its open files, or the zero context when there is no host.

@@ -94,7 +94,6 @@ func TestRun_QueuedRunIDPromptRunsRecursivelyAndPublishesRunComplete(t *testing.
 			Model{Model: large, CatwalkCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
 			Model{Model: small, CatwalkCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
 		),
-		IsYolo:      true,
 		Sessions:    env.sessions,
 		Messages:    env.messages,
 		RunComplete: broker,

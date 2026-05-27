@@ -28,7 +28,7 @@ import (
 // tear down the fan-in goroutines and the events broker.
 func NewForTest(ctx context.Context) *App {
 	app := &App{
-		Permissions:        permission.NewPermissionService("", false, nil, nil),
+		Permissions:        permission.NewPermissionService("", nil, nil),
 		Questions:          question.NewService(),
 		globalCtx:          ctx,
 		events:             pubsub.NewCoalescingBroker(eventCoalesceKey),

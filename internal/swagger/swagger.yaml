@@ -781,6 +781,8 @@ definitions:
     properties:
       action:
         type: string
+      dangerous:
+        type: boolean
       description:
         type: string
       id:
@@ -795,10 +797,10 @@ definitions:
       tool_name:
         type: string
     type: object
-  proto.PermissionSkipRequest:
+  proto.PermissionSetModeRequest:
     properties:
-      skip:
-        type: boolean
+      mode:
+        $ref: '#/definitions/proto.WorkspacePermissionMode'
     type: object
   proto.ProjectInitPromptResponse:
     properties:
@@ -999,6 +1001,8 @@ definitions:
         type: string
       path:
         type: string
+      permission_mode:
+        $ref: '#/definitions/proto.WorkspacePermissionMode'
       skills:
         description: |-
           Skills carries the snapshot of skill discovery state at workspace
@@ -1009,9 +1013,17 @@ definitions:
         type: array
       version:
         type: string
-      yolo:
-        type: boolean
     type: object
+  proto.WorkspacePermissionMode:
+    enum:
+    - normal
+    - yolo
+    - super_yolo
+    type: string
+    x-enum-varnames:
+    - WorkspacePermissionModeNormal
+    - WorkspacePermissionModeYolo
+    - WorkspacePermissionModeSuperYolo
   time.Duration:
     enum:
     - -9223372036854775808
@@ -2405,32 +2417,7 @@ paths:
       summary: Grant permission
       tags:
       - permissions
-  /workspaces/{id}/permissions/skip:
-    get:
-      parameters:
-      - description: Workspace ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/proto.PermissionSkipRequest'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/proto.Error'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/proto.Error'
-      summary: Get skip permissions status
-      tags:
-      - permissions
+  /workspaces/{id}/permissions/mode:
     post:
       consumes:
       - application/json
@@ -2440,12 +2427,12 @@ paths:
         name: id
         required: true
         type: string
-      - description: Permission skip request
+      - description: Permission mode request
         in: body
         name: request
         required: true
         schema:
-          $ref: '#/definitions/proto.PermissionSkipRequest'
+          $ref: '#/definitions/proto.PermissionSetModeRequest'
       responses:
         "200":
           description: OK
@@ -2461,7 +2448,7 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/proto.Error'
-      summary: Set skip permissions
+      summary: Set permission mode
       tags:
       - permissions
   /workspaces/{id}/project/init:

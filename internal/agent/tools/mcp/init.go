@@ -168,6 +168,10 @@ func Close(ctx context.Context) error {
 		})
 	}
 	wg.Wait()
+	// Clean up any remaining OAuth handlers.
+	for _, h := range authURLs.Seq2() {
+		h.Close()
+	}
 	broker.Shutdown()
 	return nil
 }
@@ -256,53 +260,12 @@ func AuthenticateMCP(ctx context.Context, cfg *config.ConfigStore, name string) 
 
 	updateState(name, StateStarting, nil, nil, Counts{})
 
-	session, err := createSession(ctx, name, m, cfg.Resolver())
+	session, err := connectAndRegister(ctx, cfg, name, m, cfg.Resolver())
 	if err != nil {
 		return err
 	}
 
-	tools, err := getTools(ctx, session)
-	if err != nil {
-		slog.Error("Error listing tools", "error", err)
-		updateState(name, StateError, err, nil, Counts{})
-		session.Close()
-		return err
-	}
-
-	prompts, err := getPrompts(ctx, session)
-	if err != nil {
-		slog.Error("Error listing prompts", "error", err)
-		updateState(name, StateError, err, nil, Counts{})
-		session.Close()
-		return err
-	}
-
-	toolCount := updateTools(cfg, name, tools)
-	updatePrompts(name, prompts)
-	sessions.Set(name, session)
-
-	// Persist the OAuth token so it survives restarts.
-	if session.oauthHandler != nil {
-		if tok := session.oauthHandler.Token(); tok != nil {
-			oauthToken := &oauth.Token{
-				AccessToken:  tok.AccessToken,
-				RefreshToken: tok.RefreshToken,
-				ExpiresIn:    int(time.Until(tok.Expiry).Seconds()),
-			}
-			oauthToken.SetExpiresAt()
-			if err := cfg.SetConfigField(config.ScopeGlobal, fmt.Sprintf("mcp.%s.oauth_token", name), oauthToken); err != nil {
-				slog.Warn("Failed to persist MCP OAuth token", "name", name, "error", err)
-			} else {
-				slog.Info("Persisted MCP OAuth token", "name", name)
-			}
-		}
-	}
-
-	updateState(name, StateConnected, nil, session, Counts{
-		Tools:   toolCount,
-		Prompts: len(prompts),
-	})
-
+	persistOAuthToken(cfg, name, session)
 	return nil
 }
 
@@ -352,13 +315,19 @@ func initClient(ctx context.Context, cfg *config.ConfigStore, name string, m con
 		return nil
 	}
 
-	// Set initial starting state.
 	updateState(name, StateStarting, nil, nil, Counts{})
+	_, err := connectAndRegister(ctx, cfg, name, m, resolver)
+	return err
+}
 
-	// createSession handles its own timeout internally.
+// connectAndRegister creates a session, lists tools and prompts,
+// registers them in global state, and transitions to StateConnected.
+// Returns the session so callers can perform post-processing (e.g.
+// token persistence).
+func connectAndRegister(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, resolver config.VariableResolver) (*ClientSession, error) {
 	session, err := createSession(ctx, name, m, resolver)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	tools, err := getTools(ctx, session)
@@ -366,7 +335,7 @@ func initClient(ctx context.Context, cfg *config.ConfigStore, name string, m con
 		slog.Error("Error listing tools", "error", err)
 		updateState(name, StateError, err, nil, Counts{})
 		session.Close()
-		return err
+		return nil, err
 	}
 
 	prompts, err := getPrompts(ctx, session)
@@ -374,7 +343,7 @@ func initClient(ctx context.Context, cfg *config.ConfigStore, name string, m con
 		slog.Error("Error listing prompts", "error", err)
 		updateState(name, StateError, err, nil, Counts{})
 		session.Close()
-		return err
+		return nil, err
 	}
 
 	toolCount := updateTools(cfg, name, tools)
@@ -386,7 +355,30 @@ func initClient(ctx context.Context, cfg *config.ConfigStore, name string, m con
 		Prompts: len(prompts),
 	})
 
-	return nil
+	return session, nil
+}
+
+// persistOAuthToken saves the OAuth token from a session to the global
+// config so it survives restarts.
+func persistOAuthToken(cfg *config.ConfigStore, name string, session *ClientSession) {
+	if session.oauthHandler == nil {
+		return
+	}
+	tok := session.oauthHandler.Token()
+	if tok == nil {
+		return
+	}
+	oauthToken := &oauth.Token{
+		AccessToken:  tok.AccessToken,
+		RefreshToken: tok.RefreshToken,
+		ExpiresIn:    int(time.Until(tok.Expiry).Seconds()),
+	}
+	oauthToken.SetExpiresAt()
+	if err := cfg.SetConfigField(config.ScopeGlobal, fmt.Sprintf("mcp.%s.oauth_token", name), oauthToken); err != nil {
+		slog.Warn("Failed to persist MCP OAuth token", "name", name, "error", err)
+	} else {
+		slog.Info("Persisted MCP OAuth token", "name", name)
+	}
 }
 
 // DisableSingle disables and closes a single MCP client by name.
@@ -402,10 +394,8 @@ func DisableSingle(cfg *config.ConfigStore, name string) error {
 		sessions.Del(name)
 	}
 
-	// Clear tools, prompts, and resources for this MCP.
-	updateTools(cfg, name, nil)
-	updatePrompts(name, nil)
-	allResources.Del(name)
+	// Clear tools, prompts, resources, and auth state for this MCP.
+	clearMCPData(name)
 
 	// Update state to disabled.
 	updateState(name, StateDisabled, nil, nil, Counts{})
@@ -434,14 +424,12 @@ func getOrRenewClient(ctx context.Context, cfg *config.ConfigStore, name string)
 
 	sess, err = createSession(ctx, name, m, cfg.Resolver())
 	if err != nil {
+		clearMCPData(name)
 		// If an OAuth MCP fails to reconnect, prompt the user to
 		// re-authenticate instead of leaving it in an error state.
 		if m.OAuth && m.Type == config.MCPHttp {
 			updateState(name, StateNeedsAuth, nil, nil, Counts{})
-			clearMCPData(name)
 			slog.Info("MCP OAuth session expired, re-authentication required", "name", name)
-		} else {
-			clearMCPData(name)
 		}
 		return nil, err
 	}
@@ -678,12 +666,17 @@ func mcpTimeout(m config.MCPConfig) time.Duration {
 	return 15 * time.Second
 }
 
-// clearMCPData removes a stale MCP server's tools, prompts, and
-// resources from global state so they are not served to the agent.
+// clearMCPData removes a stale MCP server's tools, prompts,
+// resources, and auth handlers from global state so they are not
+// served to the agent.
 func clearMCPData(name string) {
 	allTools.Del(name)
 	allPrompts.Del(name)
 	allResources.Del(name)
+	if h, ok := authURLs.Get(name); ok {
+		h.Close()
+		authURLs.Del(name)
+	}
 }
 
 func stdioCheck(old *exec.Cmd) error {

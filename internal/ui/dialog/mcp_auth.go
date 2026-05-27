@@ -103,11 +103,6 @@ func (m *MCPAuth) CancelAuth() {
 	}
 }
 
-// SetCancelFunc sets the cancel function for the current auth flow.
-func (m *MCPAuth) SetCancelFunc(cancel context.CancelFunc) {
-	m.cancelAuth = cancel
-}
-
 // HandleMsg processes messages and returns actions.
 func (m *MCPAuth) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
@@ -169,10 +164,17 @@ func (m *MCPAuth) startAuth() Action {
 	m.state = MCPAuthStateAuthenticating
 	m.err = nil
 	name := m.pending[m.current].Name
+
+	// Create a cancellable context owned by the dialog. The UI will
+	// use this context for the auth call, and we cancel it if the
+	// user closes the dialog or moves on.
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancelAuth = cancel
+
 	return ActionCmd{tea.Batch(
 		m.spinner.Tick,
 		func() tea.Msg {
-			return ActionMCPAuthStarted{Name: name}
+			return ActionMCPAuthStarted{Name: name, Ctx: ctx}
 		},
 	)}
 }

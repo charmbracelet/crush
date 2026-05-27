@@ -159,6 +159,12 @@ type Styles struct {
 		QuestionRadioOff   lipgloss.Style // Unselected single-choice radio.
 		QuestionCheckOn    lipgloss.Style // Checked multi-choice indicator.
 		QuestionCheckOff   lipgloss.Style // Unchecked multi-choice indicator.
+
+		// Super YOLO mode prompt (" # " icon + ":::" dots).
+		PromptSuperYoloIconFocused lipgloss.Style
+		PromptSuperYoloIconBlurred lipgloss.Style
+		PromptSuperYoloDotsFocused lipgloss.Style
+		PromptSuperYoloDotsBlurred lipgloss.Style
 	}
 
 	// Radio

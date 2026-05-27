@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/message"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
@@ -30,7 +31,7 @@ type countingWorkspace struct {
 
 	ready     bool
 	agentBusy bool
-	yolo      bool
+	permMode  permission.PermissionMode
 	queued    []string
 
 	readyCalls      int
@@ -64,11 +65,14 @@ func (w *countingWorkspace) AgentQueuedPromptsList(string) []string {
 	return w.queued
 }
 
-func (w *countingWorkspace) PermissionSkipRequests() bool { w.permCalls++; return w.yolo }
+func (w *countingWorkspace) PermissionMode() permission.PermissionMode {
+	w.permCalls++
+	return w.permMode
+}
 
-func (w *countingWorkspace) PermissionSetSkipRequests(skip bool) {
+func (w *countingWorkspace) PermissionSetMode(mode permission.PermissionMode) {
 	w.permSetCalls++
-	w.yolo = skip
+	w.permMode = mode
 }
 
 func (w *countingWorkspace) AgentClearQueue(string) { w.clearQueueCalls++; w.queued = nil }
@@ -135,7 +139,7 @@ func pinTTLs(t *testing.T) {
 // invalidation (not startup staleness) can trigger refresh dispatches.
 func warmCaches(m *UI, busy bool) {
 	m.agentBusyCache.set(busy)
-	m.yoloCache.set(false)
+	m.permModeCache.set(permission.PermissionModeNormal)
 	m.promptQueueCheckedAt = time.Now()
 }
 
@@ -194,7 +198,7 @@ func TestReadsNeverProbeWorkspace(t *testing.T) {
 
 	for range 10 {
 		m.isAgentBusy()
-		m.yoloModeCached()
+		m.permModeCached()
 	}
 	require.Zero(t, ws.syncProbes(), "cache reads must never probe the workspace")
 }
@@ -303,55 +307,55 @@ func TestSessionSwitchRefreshesQueueAndBusy(t *testing.T) {
 	require.Equal(t, []string{"a", "b"}, m.promptQueueItems)
 }
 
-// TestToggleYoloWritesThroughCache: both yolo toggle paths share
-// toggleYoloMode, which must write the known new value through the cache —
+// TestToggleYoloWritesThroughCache: both permission-mode toggle paths share
+// toggleMode, which must write the known new value through the cache —
 // no invalidation, no re-probe.
 func TestToggleYoloWritesThroughCache(t *testing.T) {
 	pinTTLs(t)
 
-	ws := &countingWorkspace{ready: true, yolo: false}
+	ws := &countingWorkspace{ready: true, permMode: permission.PermissionModeNormal}
 	m := newBusyUI(ws)
 
-	got := m.toggleYoloMode()
+	got := m.toggleMode(permission.PermissionModeYolo)
 	require.True(t, got)
 	require.Equal(t, 1, ws.permSetCalls)
 	readsAfterToggle := ws.permCalls
 	require.Equal(t, 1, readsAfterToggle, "toggle reads the authoritative value exactly once")
 
-	require.True(t, m.yoloModeCached(), "the new value must be served from the cache")
-	require.True(t, m.yoloCache.fresh(busyCacheTTL), "write-through must stamp the cache fresh")
-	m.yoloModeCached()
+	require.Equal(t, permission.PermissionModeYolo, m.permModeCached(), "the new value must be served from the cache")
+	require.True(t, m.permModeCache.fresh(busyCacheTTL), "write-through must stamp the cache fresh")
+	m.permModeCached()
 	require.Equal(t, readsAfterToggle, ws.permCalls, "reads after the toggle must not re-probe")
 
-	got = m.toggleYoloMode()
+	got = m.toggleMode(permission.PermissionModeYolo)
 	require.False(t, got)
-	require.False(t, m.yoloModeCached())
+	require.Equal(t, permission.PermissionModeNormal, m.permModeCached())
 }
 
 // TestLocalYoloToggleSupersedesInFlightProbe pins the generation bump in
-// toggleYoloMode: a busy/yolo probe dispatched before the toggle carries the
-// old generation. Without advancing busyFetchGen its stale result would land
-// with a still-matching generation and clobber the just-toggled value.
+// toggleMode: a busy/permission probe dispatched before the toggle carries
+// the old generation. Without advancing busyFetchGen its stale result would
+// land with a still-matching generation and clobber the just-toggled value.
 func TestLocalYoloToggleSupersedesInFlightProbe(t *testing.T) {
 	pinTTLs(t)
 
-	ws := &countingWorkspace{ready: true, yolo: false}
+	ws := &countingWorkspace{ready: true, permMode: permission.PermissionModeNormal}
 	m := newBusyUI(ws)
 	warmCaches(m, false)
 
-	// A busy/yolo probe carrying the pre-toggle generation is in flight.
+	// A busy/permission probe carrying the pre-toggle generation is in flight.
 	m.busyFetchInFlight = true
 	staleGen := m.busyFetchGen
 
-	require.True(t, m.toggleYoloMode())
+	require.True(t, m.toggleMode(permission.PermissionModeYolo))
 	require.NotEqual(t, staleGen, m.busyFetchGen,
 		"toggle must advance the busy generation to supersede in-flight probes")
-	require.True(t, m.yoloModeCached(), "toggle must write the new value through the cache")
+	require.Equal(t, permission.PermissionModeYolo, m.permModeCached(), "toggle must write the new value through the cache")
 
-	// The stale probe (old generation, old yolo=false) lands.
+	// The stale probe (old generation, old mode=normal) lands.
 	m.busyFetchInFlight = true
-	cmds := m.applyBusyState(busyStateMsg{gen: staleGen, yolo: false})
-	require.True(t, m.yoloModeCached(),
+	cmds := m.applyBusyState(busyStateMsg{gen: staleGen, permMode: permission.PermissionModeNormal})
+	require.Equal(t, permission.PermissionModeYolo, m.permModeCached(),
 		"stale probe must not overwrite the freshly toggled value")
 	require.NotEmpty(t, cmds, "stale probe must re-dispatch an authoritative refresh")
 	require.True(t, m.busyFetchInFlight, "re-dispatched refresh must be in flight")
@@ -541,13 +545,13 @@ func TestRemoteYoloToggleUpdatesEditorPrompt(t *testing.T) {
 	m := newBusyUI(ws)
 	m.textarea.Focus()
 	m.textarea.SetWidth(40)
-	m.yoloCache.set(false)
-	m.setEditorPrompt(false)
+	m.permModeCache.set(permission.PermissionModeNormal)
+	m.setEditorPrompt(permission.PermissionModeNormal)
 	normalPrompt := ansi.Strip(m.textarea.View())
 
 	// A remote toggle flips yolo on; delivered via an off-thread refresh.
-	m.applyBusyState(busyStateMsg{gen: m.busyFetchGen, yolo: true})
-	require.True(t, m.yoloModeCached(), "the refresh must write the new yolo value through the cache")
+	m.applyBusyState(busyStateMsg{gen: m.busyFetchGen, permMode: permission.PermissionModeYolo})
+	require.Equal(t, permission.PermissionModeYolo, m.permModeCached(), "the refresh must write the new mode through the cache")
 	yoloPrompt := ansi.Strip(m.textarea.View())
 	require.NotEqual(t, normalPrompt, yoloPrompt,
 		"a remote yolo toggle must change the rendered editor prompt")
@@ -555,8 +559,8 @@ func TestRemoteYoloToggleUpdatesEditorPrompt(t *testing.T) {
 		"the yolo prompt icon must render after a remote toggle")
 
 	// Flipping back off must restore the normal prompt.
-	m.applyBusyState(busyStateMsg{gen: m.busyFetchGen, yolo: false})
-	require.False(t, m.yoloModeCached())
+	m.applyBusyState(busyStateMsg{gen: m.busyFetchGen, permMode: permission.PermissionModeNormal})
+	require.Equal(t, permission.PermissionModeNormal, m.permModeCached())
 	require.Equal(t, normalPrompt, ansi.Strip(m.textarea.View()),
 		"toggling yolo off must restore the normal editor prompt")
 }

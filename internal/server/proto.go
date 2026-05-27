@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -754,7 +755,14 @@ func (c *controllerV1) handlePostWorkspaceAgent(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if err := c.backend.SendMessage(r.Context(), id, msg); err != nil {
+	// Detach the run's lifetime from the prompting client's HTTP
+	// request. Without this, A dropping its TCP connection (network
+	// blip, TUI restart) or B canceling the session via the explicit
+	// cancel endpoint would also cancel A's request context and tear
+	// down a turn that other subscribed clients are still watching.
+	// Only the explicit cancel endpoint should be able to end a run.
+	ctx := context.WithoutCancel(r.Context())
+	if err := c.backend.SendMessage(ctx, id, msg); err != nil {
 		c.handleError(w, r, err)
 		return
 	}
@@ -1026,6 +1034,14 @@ func (c *controllerV1) handleGetWorkspacePermissionsSkip(w http.ResponseWriter, 
 // handleError maps backend errors to HTTP status codes and writes the
 // JSON error response.
 func (c *controllerV1) handleError(w http.ResponseWriter, r *http.Request, err error) {
+	// A canceled agent run is not an error from the prompting
+	// client's perspective. The cancellation reaches every SSE
+	// subscriber via the FinishReasonCanceled marker on the assistant
+	// message; the still-open POST should not surface a 500.
+	if errors.Is(err, context.Canceled) {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 	status := http.StatusInternalServerError
 	switch {
 	case errors.Is(err, backend.ErrWorkspaceNotFound):

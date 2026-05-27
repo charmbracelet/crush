@@ -33,7 +33,15 @@ func (m *UI) loadPromptHistory() tea.Cmd {
 
 		texts := make([]string, 0, len(messages))
 		for _, msg := range messages {
-			if text := msg.Content().Text; text != "" {
+			text := msg.Content().Text
+			if text == "" {
+				continue
+			}
+			// For shell messages, only show the command (first part)
+			// prefixed with ! so it can be re-executed.
+			if msg.Role == message.Shell {
+				texts = append(texts, "!"+text)
+			} else {
 				texts = append(texts, text)
 			}
 		}

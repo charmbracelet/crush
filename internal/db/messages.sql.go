@@ -110,7 +110,7 @@ func (q *Queries) GetMessage(ctx context.Context, id string) (Message, error) {
 const listAllUserMessages = `-- name: ListAllUserMessages :many
 SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message
 FROM messages
-WHERE role = 'user'
+WHERE role IN ('user', 'shell')
 ORDER BY created_at DESC
 `
 
@@ -192,7 +192,7 @@ func (q *Queries) ListMessagesBySession(ctx context.Context, sessionID string) (
 const listUserMessagesBySession = `-- name: ListUserMessagesBySession :many
 SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message
 FROM messages
-WHERE session_id = ? AND role = 'user'
+WHERE session_id = ? AND role IN ('user', 'shell')
 ORDER BY created_at DESC
 `
 

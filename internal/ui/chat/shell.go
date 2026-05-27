@@ -63,7 +63,7 @@ func (m *ShellMessageItem) RawRender(width int) string {
 	}
 
 	text := strings.TrimSpace(m.message.Content().Text)
-	command, output := parseShellMessage(text)
+	command, output := shellMessageParts(m.message, text)
 
 	header := toolHeader(m.sty, ToolStatusSuccess, "Shell", cappedWidth, false, command)
 
@@ -85,16 +85,26 @@ func (m *ShellMessageItem) Render(width int) string {
 	return m.RawRender(width)
 }
 
-// parseShellMessage splits the stored "$ cmd\noutput" format.
-func parseShellMessage(text string) (command, output string) {
-	if !strings.HasPrefix(text, "$ ") {
-		return text, ""
+// shellMessageParts extracts the command and output from a shell message.
+// New format: two TextContent parts (command, output).
+// Legacy format: single "$ cmd\noutput" text part.
+func shellMessageParts(msg *message.Message, firstPartText string) (command, output string) {
+	// Try new format: second TextContent part is the output.
+	partIdx := 0
+	for _, part := range msg.Parts {
+		if tc, ok := part.(message.TextContent); ok {
+			if partIdx == 1 {
+				return firstPartText, tc.Text
+			}
+			partIdx++
+		}
 	}
-	text = strings.TrimPrefix(text, "$ ")
-	if cmd, rest, ok := strings.Cut(text, "\n"); ok {
+	// Legacy single-part format: "$ cmd\noutput".
+	if cmd, rest, ok := strings.Cut(firstPartText, "\n"); ok {
+		cmd = strings.TrimPrefix(cmd, "$ ")
 		return cmd, rest
 	}
-	return text, ""
+	return strings.TrimPrefix(firstPartText, "$ "), ""
 }
 
 // ID implements Identifiable.

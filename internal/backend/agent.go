@@ -3,7 +3,6 @@ package backend
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"os"
 
 	"github.com/taigrr/crush/internal/config"
@@ -188,12 +187,17 @@ func (b *Backend) RunShellCommand(ctx context.Context, workspaceID string, req p
 		output += stderr.String()
 	}
 
-	// Persist as a shell message so the LLM has context on follow-up.
-	msgContent := fmt.Sprintf("$ %s\n%s", req.Command, output)
+	// Persist as a shell message. First part is the command, second is
+	// the output. This lets the UI show only the command in history
+	// while ToAIMessage joins them for the LLM.
 	if req.SessionID != "" {
+		parts := []message.ContentPart{
+			message.TextContent{Text: req.Command},
+			message.TextContent{Text: output},
+		}
 		_, _ = ws.Messages.Create(ctx, req.SessionID, message.CreateMessageParams{
 			Role:  message.Shell,
-			Parts: []message.ContentPart{message.TextContent{Text: msgContent}},
+			Parts: parts,
 		})
 	}
 

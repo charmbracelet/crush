@@ -469,13 +469,26 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 	var messages []fantasy.Message
 	switch m.Role {
 	case Shell:
-		text := strings.TrimSpace(m.Content().Text)
-		if text != "" {
-			messages = append(messages, fantasy.Message{
-				Role:    fantasy.MessageRoleUser,
-				Content: []fantasy.MessagePart{fantasy.TextPart{Text: text}},
-			})
+		// Shell messages store command (part 0) and output (part 1)
+		// separately. Join them for the LLM as "$ cmd\noutput".
+		var command, output string
+		for i, part := range m.Parts {
+			if tc, ok := part.(TextContent); ok {
+				if i == 0 {
+					command = tc.Text
+				} else {
+					output = tc.Text
+				}
+			}
 		}
+		text := "$ " + command
+		if output != "" {
+			text += "\n" + output
+		}
+		messages = append(messages, fantasy.Message{
+			Role:    fantasy.MessageRoleUser,
+			Content: []fantasy.MessagePart{fantasy.TextPart{Text: text}},
+		})
 	case User:
 		var parts []fantasy.MessagePart
 		text := strings.TrimSpace(m.Content().Text)

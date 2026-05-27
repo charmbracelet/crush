@@ -247,21 +247,13 @@ func (c *controllerV1) endpoints() []apigen.Endpoint {
 			Fails(404, 500).
 			Handle(c.handlePostWorkspaceLSPStopAll),
 
-		apigen.Get("/v1/workspaces/{id}/permissions/skip").
-			Summary("Get skip permissions status").
+		apigen.Post("/v1/workspaces/{id}/permissions/mode").
+			Summary("Set permission mode").
 			Tags("permissions").
 			PathParam("id", "Workspace ID").
-			Responds(proto.PermissionSkipRequest{}).
-			Fails(404, 500).
-			Handle(c.handleGetWorkspacePermissionsSkip),
-
-		apigen.Post("/v1/workspaces/{id}/permissions/skip").
-			Summary("Set skip permissions").
-			Tags("permissions").
-			PathParam("id", "Workspace ID").
-			Accepts(proto.PermissionSkipRequest{}).
+			Accepts(proto.PermissionSetModeRequest{}).
 			Fails(400, 404, 500).
-			Handle(c.handlePostWorkspacePermissionsSkip),
+			Handle(c.handlePostWorkspacePermissionsMode),
 
 		apigen.Post("/v1/workspaces/{id}/permissions/grant").
 			Summary("Grant permission").

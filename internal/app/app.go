@@ -100,17 +100,21 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	messages := message.NewService(q)
 	files := history.NewService(q, conn)
 	cfg := store.Config()
-	skipPermissionsRequests := store.Overrides().SkipPermissionRequests
 	var allowedTools []string
 	if cfg.Permissions != nil && cfg.Permissions.AllowedTools != nil {
 		allowedTools = cfg.Permissions.AllowedTools
+	}
+
+	permSvc := permission.NewPermissionService(store.WorkingDir(), allowedTools)
+	if store.Overrides().PermissionMode != 0 {
+		permSvc.SetPermissionMode(store.Overrides().PermissionMode)
 	}
 
 	app := &App{
 		Sessions:    sessions,
 		Messages:    messages,
 		History:     files,
-		Permissions: permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools),
+		Permissions: permSvc,
 		Questions:   question.NewService(),
 		FileTracker: filetracker.NewService(q),
 		LSPManager:  lsp.NewManager(store),
@@ -666,6 +670,7 @@ func (app *App) setupEvents() {
 	app.subscribeMustDeliver(ctx, "permissions-notifications", app.Permissions.SubscribeNotifications)
 	app.subscribeMustDeliver(ctx, "question-batches", app.Questions.Subscribe)
 	app.subscribeMustDeliver(ctx, "question-notifications", app.Questions.SubscribeNotifications)
+	app.subscribeMustDeliver(ctx, "permissions-mode", app.Permissions.SubscribeModeChanges)
 	app.subscribe(ctx, "history", app.History.Subscribe)
 	app.subscribe(ctx, "agent-notifications", app.agentNotifications.Subscribe)
 	app.subscribeMustDeliver(ctx, "run-completions", app.runCompletions.Subscribe)

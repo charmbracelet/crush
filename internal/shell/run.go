@@ -89,6 +89,7 @@ func Run(ctx context.Context, opts RunOptions) (err error) {
 // Crush handler stack. Shared by the stateless [Run] entrypoint and the
 // stateful [Shell] so the two surfaces cannot drift.
 func newRunner(cwd string, env []string, stdin io.Reader, stdout, stderr io.Writer, blockFuncs []BlockFunc) (*interp.Runner, error) {
+	env = withNonInteractiveEnv(env)
 	return interp.New(
 		interp.StdIO(stdin, stdout, stderr),
 		interp.Interactive(false),
@@ -96,6 +97,34 @@ func newRunner(cwd string, env []string, stdin io.Reader, stdout, stderr io.Writ
 		interp.Dir(cwd),
 		interp.ExecHandlers(standardHandlers(blockFuncs)...),
 	)
+}
+
+// withNonInteractiveEnv ensures commands that spawn editors or pagers
+// fail fast instead of hanging on a TTY that doesn't exist.
+func withNonInteractiveEnv(env []string) []string {
+	overrides := map[string]string{
+		"TERM":       "dumb",
+		"GIT_EDITOR": "true",
+		"EDITOR":     "true",
+		"VISUAL":     "true",
+		"GIT_PAGER":  "cat",
+		"PAGER":      "cat",
+	}
+	// Only set if not already present in env.
+	present := make(map[string]bool, len(overrides))
+	for _, e := range env {
+		for k := range overrides {
+			if strings.HasPrefix(e, k+"=") {
+				present[k] = true
+			}
+		}
+	}
+	for k, v := range overrides {
+		if !present[k] {
+			env = append(env, k+"="+v)
+		}
+	}
+	return env
 }
 
 // standardHandlers returns the exec-handler middleware chain used by both

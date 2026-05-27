@@ -172,14 +172,6 @@ definitions:
           type: string
         type: array
     type: object
-  config.Scope:
-    enum:
-    - 0
-    - 1
-    type: integer
-    x-enum-varnames:
-    - ScopeGlobal
-    - ScopeWorkspace
   config.SelectedModel:
     properties:
       frequency_penalty:
@@ -355,6 +347,14 @@ definitions:
       tui:
         $ref: '#/definitions/config.TUIOptions'
     type: object
+  github_com_charmbracelet_crush_internal_config.Scope:
+    enum:
+    - 0
+    - 1
+    type: integer
+    x-enum-varnames:
+    - ScopeGlobal
+    - ScopeWorkspace
   github_com_charmbracelet_crush_internal_proto.Message:
     properties:
       created_at:
@@ -443,6 +443,10 @@ definitions:
         type: string
       title:
         type: string
+      todos:
+        items:
+          $ref: '#/definitions/proto.Todo'
+        type: array
       updated_at:
         type: integer
     type: object
@@ -464,7 +468,7 @@ definitions:
       enabled:
         type: boolean
       scope:
-        $ref: '#/definitions/config.Scope'
+        $ref: '#/definitions/github_com_charmbracelet_crush_internal_config.Scope'
     type: object
   proto.ConfigModelRequest:
     properties:
@@ -473,7 +477,7 @@ definitions:
       model_type:
         $ref: '#/definitions/config.SelectedModelType'
       scope:
-        $ref: '#/definitions/config.Scope'
+        $ref: '#/definitions/github_com_charmbracelet_crush_internal_config.Scope'
     type: object
   proto.ConfigProviderKeyRequest:
     properties:
@@ -486,28 +490,28 @@ definitions:
       provider_id:
         type: string
       scope:
-        $ref: '#/definitions/config.Scope'
+        $ref: '#/definitions/github_com_charmbracelet_crush_internal_config.Scope'
     type: object
   proto.ConfigRefreshOAuthRequest:
     properties:
       provider_id:
         type: string
       scope:
-        $ref: '#/definitions/config.Scope'
+        $ref: '#/definitions/github_com_charmbracelet_crush_internal_config.Scope'
     type: object
   proto.ConfigRemoveRequest:
     properties:
       key:
         type: string
       scope:
-        $ref: '#/definitions/config.Scope'
+        $ref: '#/definitions/github_com_charmbracelet_crush_internal_config.Scope'
     type: object
   proto.ConfigSetRequest:
     properties:
       key:
         type: string
       scope:
-        $ref: '#/definitions/config.Scope'
+        $ref: '#/definitions/github_com_charmbracelet_crush_internal_config.Scope'
       value: {}
     type: object
   proto.Error:
@@ -680,6 +684,20 @@ definitions:
       needs_init:
         type: boolean
     type: object
+  proto.ReadSkillRequest:
+    properties:
+      skill_id:
+        type: string
+    type: object
+  proto.ReadSkillResponse:
+    properties:
+      content:
+        items:
+          type: integer
+        type: array
+      result:
+        $ref: '#/definitions/proto.SkillReadResult'
+    type: object
   proto.ServerControl:
     properties:
       command:
@@ -705,8 +723,64 @@ definitions:
         type: string
       title:
         type: string
+      todos:
+        items:
+          $ref: '#/definitions/proto.Todo'
+        type: array
       updated_at:
         type: integer
+    type: object
+  proto.SkillDiscoveryState:
+    enum:
+    - 0
+    - 1
+    type: integer
+    x-enum-varnames:
+    - SkillStateNormal
+    - SkillStateError
+  proto.SkillInfo:
+    properties:
+      description:
+        type: string
+      id:
+        type: string
+      label:
+        type: string
+      name:
+        type: string
+      source:
+        type: string
+    type: object
+  proto.SkillReadResult:
+    properties:
+      builtin:
+        type: boolean
+      description:
+        type: string
+      name:
+        type: string
+      source:
+        type: string
+    type: object
+  proto.SkillState:
+    properties:
+      error:
+        type: string
+      name:
+        type: string
+      path:
+        type: string
+      state:
+        $ref: '#/definitions/proto.SkillDiscoveryState'
+    type: object
+  proto.Todo:
+    properties:
+      active_form:
+        type: string
+      content:
+        type: string
+      status:
+        type: string
     type: object
   proto.VersionInfo:
     properties:
@@ -737,11 +811,29 @@ definitions:
         type: string
       path:
         type: string
+      permission_mode:
+        $ref: '#/definitions/proto.WorkspacePermissionMode'
+      skills:
+        description: |-
+          Skills carries the snapshot of skill discovery state at workspace
+          creation time. Subsequent updates flow through the SSE event
+          stream.
+        items:
+          $ref: '#/definitions/proto.SkillState'
+        type: array
       version:
         type: string
-      yolo:
-        type: boolean
     type: object
+  proto.WorkspacePermissionMode:
+    enum:
+    - normal
+    - yolo
+    - super_yolo
+    type: string
+    x-enum-varnames:
+    - WorkspacePermissionModeNormal
+    - WorkspacePermissionModeYolo
+    - WorkspacePermissionModeSuperYolo
   time.Duration:
     enum:
     - -9223372036854775808
@@ -2454,4 +2546,70 @@ paths:
       summary: Get user messages for session
       tags:
       - sessions
+  /workspaces/{id}/skills:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/proto.SkillInfo'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: List visible skills
+      tags:
+      - skills
+  /workspaces/{id}/skills/read:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Read skill request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.ReadSkillRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/proto.ReadSkillResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Read skill content
+      tags:
+      - skills
 swagger: "2.0"

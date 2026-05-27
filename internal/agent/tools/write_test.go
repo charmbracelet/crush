@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/permission/testutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -30,7 +31,7 @@ func TestWriteToolWritesEmptyNewFile(t *testing.T) {
 	workingDir := t.TempDir()
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
 
-	tool := NewWriteTool(nil, &mockPermissionService{}, &mockHistoryService{}, mockFileTrackerService{}, workingDir)
+	tool := NewWriteTool(nil, &testutil.MockPermissionService{}, &mockHistoryService{}, mockFileTrackerService{}, workingDir)
 
 	input, err := json.Marshal(WriteParams{FilePath: "empty.txt", Content: ""})
 	require.NoError(t, err)

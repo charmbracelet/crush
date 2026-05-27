@@ -107,8 +107,8 @@ type Workspace interface {
 	PermissionGrant(perm permission.PermissionRequest) bool
 	PermissionGrantPersistent(perm permission.PermissionRequest) bool
 	PermissionDeny(perm permission.PermissionRequest) bool
-	PermissionSkipRequests() bool
-	PermissionSetSkipRequests(skip bool)
+	PermissionMode() permission.PermissionMode
+	PermissionSetMode(mode permission.PermissionMode)
 
 	// FileTracker
 	FileTrackerRecordRead(ctx context.Context, sessionID, path string)

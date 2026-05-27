@@ -84,6 +84,13 @@ func wrapEvent(ev any) *pubsub.Payload {
 				Cancelled:  e.Payload.Cancelled,
 			},
 		})
+	case pubsub.Event[permission.ModeChangedEvent]:
+		return envelope(pubsub.PayloadTypePermissionModeChanged, pubsub.Event[proto.PermissionModeEvent]{
+			Type: e.Type,
+			Payload: proto.PermissionModeEvent{
+				Mode: proto.PermissionModeToProto(e.Payload.Mode),
+			},
+		})
 	case pubsub.Event[question.Request]:
 		slog.Info("Wrapping question batch event for SSE", "id", e.Payload.ID, "questions", len(e.Payload.Questions))
 		return envelope(pubsub.PayloadTypeQuestionRequest, pubsub.Event[proto.QuestionRequest]{

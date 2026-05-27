@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
-	"sync/atomic"
 
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/pubsub"
@@ -35,6 +34,27 @@ func hookApproved(ctx context.Context, toolCallID string) bool {
 	return v == toolCallID
 }
 
+// PermissionMode represents the current permission mode.
+type PermissionMode int
+
+const (
+	// PermissionModeNormal prompts for all non-safe commands.
+	PermissionModeNormal PermissionMode = iota
+	// PermissionModeYolo auto-approves non-dangerous commands, prompts for
+	// dangerous ones.
+	PermissionModeYolo
+	// PermissionModeSysadmin auto-approves everything including dangerous
+	// commands.
+	PermissionModeSysadmin
+)
+
+// SkipsPrompts reports whether the mode answers requests itself instead of
+// putting them in front of the user. Yolo and sysadmin both do; they part
+// ways only later, at exec time, over the block list.
+func (m PermissionMode) SkipsPrompts() bool {
+	return m == PermissionModeYolo || m == PermissionModeSysadmin
+}
+
 type CreatePermissionRequest struct {
 	SessionID   string `json:"session_id"`
 	ToolCallID  string `json:"tool_call_id"`
@@ -43,6 +63,7 @@ type CreatePermissionRequest struct {
 	Action      string `json:"action"`
 	Params      any    `json:"params"`
 	Path        string `json:"path"`
+	Dangerous   bool   `json:"dangerous"`
 }
 
 type PermissionNotification struct {
@@ -73,6 +94,11 @@ type PromptObserver interface {
 	PromptResolved(ctx context.Context, req PermissionRequest, outcome Outcome)
 }
 
+// ModeChangedEvent is published whenever the permission mode changes.
+type ModeChangedEvent struct {
+	Mode PermissionMode `json:"mode"`
+}
+
 type PermissionRequest struct {
 	ID          string `json:"id"`
 	SessionID   string `json:"session_id"`
@@ -82,6 +108,7 @@ type PermissionRequest struct {
 	Action      string `json:"action"`
 	Params      any    `json:"params"`
 	Path        string `json:"path"`
+	Dangerous   bool   `json:"dangerous"`
 }
 
 type Service interface {
@@ -106,9 +133,10 @@ type Service interface {
 	// was cancelled is not returned.
 	ActiveRequest() (PermissionRequest, bool)
 	AutoApproveSession(sessionID string)
-	SetSkipRequests(skip bool)
-	SkipRequests() bool
+	SetPermissionMode(mode PermissionMode)
+	PermissionMode() PermissionMode
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
+	SubscribeModeChanges(ctx context.Context) <-chan pubsub.Event[ModeChangedEvent]
 }
 
 // PermissionKey is a composite key for session permission lookups.
@@ -123,14 +151,16 @@ type permissionService struct {
 	*pubsub.Broker[PermissionRequest]
 
 	notificationBroker    *pubsub.Broker[PermissionNotification]
+	modeBroker            *pubsub.Broker[ModeChangedEvent]
 	workingDir            string
 	sessionPermissions    *csync.Map[PermissionKey, bool]
 	pendingRequests       *csync.Map[string, chan bool]
 	autoApproveSessions   map[string]bool
 	autoApproveSessionsMu sync.RWMutex
-	skip                  atomic.Bool
 	allowedTools          []string
 	observer              PromptObserver
+	mode                  PermissionMode
+	modeMu                sync.RWMutex
 
 	// used to make sure we only process one request at a time
 	requestMu       sync.Mutex
@@ -208,7 +238,17 @@ func (s *permissionService) Deny(permission PermissionRequest) bool {
 }
 
 func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRequest) (bool, error) {
-	if s.skip.Load() {
+	s.modeMu.RLock()
+	mode := s.mode
+	s.modeMu.RUnlock()
+
+	// Sysadmin mode: auto-approve everything including dangerous commands.
+	if mode == PermissionModeSysadmin {
+		return true, nil
+	}
+	// In yolo mode, auto-approve non-dangerous commands but still prompt for
+	// dangerous ones.
+	if mode == PermissionModeYolo && !opts.Dangerous {
 		return true, nil
 	}
 
@@ -275,6 +315,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		Description: opts.Description,
 		Action:      opts.Action,
 		Params:      opts.Params,
+		Dangerous:   opts.Dangerous,
 	}
 
 	if _, ok := s.sessionPermissions.Get(PermissionKey{
@@ -377,27 +418,34 @@ func (s *permissionService) SubscribeNotifications(ctx context.Context) <-chan p
 	return s.notificationBroker.Subscribe(ctx)
 }
 
-func (s *permissionService) SetSkipRequests(skip bool) {
-	s.skip.Store(skip)
+func (s *permissionService) SetPermissionMode(mode PermissionMode) {
+	s.modeMu.Lock()
+	s.mode = mode
+	s.modeMu.Unlock()
+	s.modeBroker.Publish(pubsub.UpdatedEvent, ModeChangedEvent{Mode: mode})
 }
 
-func (s *permissionService) SkipRequests() bool {
-	return s.skip.Load()
+func (s *permissionService) SubscribeModeChanges(ctx context.Context) <-chan pubsub.Event[ModeChangedEvent] {
+	return s.modeBroker.Subscribe(ctx)
 }
 
-// NewPermissionService creates the permission service. observer may be
-// nil.
-func NewPermissionService(workingDir string, skip bool, allowedTools []string, observer PromptObserver) Service {
-	svc := &permissionService{
+func (s *permissionService) PermissionMode() PermissionMode {
+	s.modeMu.RLock()
+	defer s.modeMu.RUnlock()
+	return s.mode
+}
+
+func NewPermissionService(workingDir string, allowedTools []string, observer PromptObserver) Service {
+	return &permissionService{
 		Broker:              pubsub.NewBroker[PermissionRequest](),
 		notificationBroker:  pubsub.NewBroker[PermissionNotification](),
+		modeBroker:          pubsub.NewBroker[ModeChangedEvent](),
 		workingDir:          workingDir,
 		sessionPermissions:  csync.NewMap[PermissionKey, bool](),
 		autoApproveSessions: make(map[string]bool),
+		mode:                PermissionModeNormal,
 		allowedTools:        allowedTools,
 		pendingRequests:     csync.NewMap[string, chan bool](),
 		observer:            observer,
 	}
-	svc.skip.Store(skip)
-	return svc
 }

@@ -146,6 +146,7 @@ type callbackReceiver struct {
 	errChan  chan error
 	server   *http.Server
 	mu       sync.Mutex
+	once     sync.Once
 }
 
 func (r *callbackReceiver) serve(listener net.Listener) {
@@ -157,14 +158,18 @@ func (r *callbackReceiver) serve(listener net.Listener) {
 		if errParam := req.URL.Query().Get("error"); errParam != "" {
 			desc := req.URL.Query().Get("error_description")
 			fmt.Fprintf(w, "Authentication failed: %s — %s\nYou can close this window.", errParam, desc)
-			r.errChan <- fmt.Errorf("OAuth error: %s: %s", errParam, desc)
+			r.once.Do(func() {
+				r.errChan <- fmt.Errorf("OAuth error: %s: %s", errParam, desc)
+			})
 			return
 		}
 
-		r.authChan <- &auth.AuthorizationResult{
-			Code:  code,
-			State: state,
-		}
+		r.once.Do(func() {
+			r.authChan <- &auth.AuthorizationResult{
+				Code:  code,
+				State: state,
+			}
+		})
 
 		fmt.Fprint(w, "Authentication successful! You can close this window.")
 	})

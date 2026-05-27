@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -101,9 +102,12 @@ type (
 // Messages for MCP OAuth authentication dialog.
 type (
 	// ActionMCPAuthStarted is sent when the user approves authentication
-	// for an MCP server. The UI should initiate the actual auth flow.
+	// for an MCP server. The UI should initiate the actual auth flow
+	// using the provided context, which the dialog will cancel if the
+	// user closes it.
 	ActionMCPAuthStarted struct {
 		Name string
+		Ctx  context.Context
 	}
 
 	// ActionMCPAuthComplete is sent when MCP authentication succeeds.

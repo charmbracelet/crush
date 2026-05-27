@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/taigrr/catwalk/pkg/catwalk"
+	"github.com/taigrr/crush/internal/stringext"
 	"github.com/taigrr/fantasy"
 	"github.com/taigrr/fantasy/providers/anthropic"
 	"github.com/taigrr/fantasy/providers/google"
 	"github.com/taigrr/fantasy/providers/openai"
-	"github.com/taigrr/crush/internal/stringext"
 )
 
 type MessageRole string
@@ -23,6 +23,7 @@ const (
 	User      MessageRole = "user"
 	System    MessageRole = "system"
 	Tool      MessageRole = "tool"
+	Shell     MessageRole = "shell"
 )
 
 // mediaLoadFailedPlaceholder is the text substituted for image data that
@@ -467,6 +468,14 @@ func PromptWithTextAttachments(prompt string, attachments []Attachment) string {
 func (m *Message) ToAIMessage() []fantasy.Message {
 	var messages []fantasy.Message
 	switch m.Role {
+	case Shell:
+		text := strings.TrimSpace(m.Content().Text)
+		if text != "" {
+			messages = append(messages, fantasy.Message{
+				Role:    fantasy.MessageRoleUser,
+				Content: []fantasy.MessagePart{fantasy.TextPart{Text: text}},
+			})
+		}
 	case User:
 		var parts []fantasy.MessagePart
 		text := strings.TrimSpace(m.Content().Text)

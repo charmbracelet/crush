@@ -7,8 +7,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/taigrr/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
+	"github.com/taigrr/catwalk/pkg/catwalk"
 	"github.com/taigrr/crush/internal/config"
 	"github.com/taigrr/crush/internal/message"
 	"github.com/taigrr/crush/internal/ui/anim"
@@ -394,6 +394,8 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 			))
 		}
 		return items
+	case message.Shell:
+		return []MessageItem{NewShellMessageItem(sty, msg)}
 	}
 	return []MessageItem{}
 }

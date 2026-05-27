@@ -188,11 +188,11 @@ func (b *Backend) RunShellCommand(ctx context.Context, workspaceID string, req p
 		output += stderr.String()
 	}
 
-	// Persist as a user message so the LLM has context on follow-up.
+	// Persist as a shell message so the LLM has context on follow-up.
 	msgContent := fmt.Sprintf("$ %s\n%s", req.Command, output)
 	if req.SessionID != "" {
 		_, _ = ws.Messages.Create(ctx, req.SessionID, message.CreateMessageParams{
-			Role:  message.User,
+			Role:  message.Shell,
 			Parts: []message.ContentPart{message.TextContent{Text: msgContent}},
 		})
 	}

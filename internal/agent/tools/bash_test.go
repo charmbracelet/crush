@@ -43,6 +43,16 @@ func (m *mockBashPermissionService) SubscribeNotifications(ctx context.Context) 
 	return make(<-chan pubsub.Event[permission.PermissionNotification])
 }
 
+func (m *mockBashPermissionService) SetPermissionMode(mode permission.PermissionMode) {}
+
+func (m *mockBashPermissionService) PermissionMode() permission.PermissionMode {
+	return permission.PermissionModeNormal
+}
+
+func (m *mockBashPermissionService) SubscribeModeChanges(ctx context.Context) <-chan pubsub.Event[permission.ModeChangedEvent] {
+	return make(<-chan pubsub.Event[permission.ModeChangedEvent])
+}
+
 func TestBashTool_DefaultAutoBackgroundThreshold(t *testing.T) {
 	workingDir := t.TempDir()
 	tool := newBashToolForTest(workingDir)
@@ -114,6 +124,16 @@ func (m *recordingPermissionService) SubscribeNotifications(ctx context.Context)
 	return make(<-chan pubsub.Event[permission.PermissionNotification])
 }
 
+func (m *recordingPermissionService) SetPermissionMode(mode permission.PermissionMode) {}
+
+func (m *recordingPermissionService) PermissionMode() permission.PermissionMode {
+	return permission.PermissionModeNormal
+}
+
+func (m *recordingPermissionService) SubscribeModeChanges(ctx context.Context) <-chan pubsub.Event[permission.ModeChangedEvent] {
+	return make(<-chan pubsub.Event[permission.ModeChangedEvent])
+}
+
 func newBashToolForTest(workingDir string) fantasy.AgentTool {
 	permissions := &mockBashPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
 	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
@@ -166,6 +186,87 @@ func TestBashTool_ChainedCommandsDenied(t *testing.T) {
 
 	require.Equal(t, 1, perms.requestCount)
 	require.Contains(t, resp.Content, "User denied permission")
+}
+
+func TestIsDangerousCommand(t *testing.T) {
+	tests := []struct {
+		name      string
+		command   string
+		dangerous bool
+	}{
+		{
+			name:      "simple banned command - curl",
+			command:   "curl https://example.com",
+			dangerous: true,
+		},
+		{
+			name:      "simple banned command - sudo",
+			command:   "sudo apt-get update",
+			dangerous: true,
+		},
+		{
+			name:      "npm global install with --global",
+			command:   "npm install --global typescript",
+			dangerous: true,
+		},
+		{
+			name:      "npm global install with -g",
+			command:   "npm install -g typescript",
+			dangerous: true,
+		},
+		{
+			name:      "npm local install",
+			command:   "npm install typescript",
+			dangerous: false,
+		},
+		{
+			name:      "go test with -exec",
+			command:   "go test -exec ./malicious ./...",
+			dangerous: true,
+		},
+		{
+			name:      "go test without -exec",
+			command:   "go test ./...",
+			dangerous: false,
+		},
+		{
+			name:      "safe command - ls",
+			command:   "ls -la",
+			dangerous: false,
+		},
+		{
+			name:      "safe command - echo",
+			command:   "echo hello",
+			dangerous: false,
+		},
+		{
+			name:      "safe command - git",
+			command:   "git status",
+			dangerous: false,
+		},
+		{
+			name:      "pip install with --user",
+			command:   "pip install --user requests",
+			dangerous: true,
+		},
+		{
+			name:      "pip install without --user",
+			command:   "pip install requests",
+			dangerous: false,
+		},
+		{
+			name:      "brew install",
+			command:   "brew install wget",
+			dangerous: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := shell.IsCommandBlocked(tt.command, blockFuncs())
+			require.Equal(t, tt.dangerous, result, "command: %s", tt.command)
+		})
+	}
 }
 
 func runBashTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, params BashParams) fantasy.ToolResponse {

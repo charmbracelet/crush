@@ -293,7 +293,8 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 	// with the manager.
 	discoveryCfg := localSkillsDiscoveryConfig(store)
 	allSkills, activeSkills, skillStates := skills.DiscoverFromConfig(discoveryCfg)
-	skillsMgr := skills.NewManager(allSkills, activeSkills, skillStates,
+	skillsMgr := skills.NewManager(
+		allSkills, activeSkills, skillStates,
 		skills.WithGlobalMirror(),
 		skills.WithResolvedPaths(discoveryCfg.ResolvePaths()),
 		skills.WithWorkingDir(discoveryCfg.WorkingDir),

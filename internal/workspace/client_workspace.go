@@ -329,16 +329,12 @@ func (w *ClientWorkspace) PermissionDeny(perm permission.PermissionRequest) bool
 	return resolved
 }
 
-func (w *ClientWorkspace) PermissionSkipRequests() bool {
-	skip, err := w.client.GetPermissionsSkipRequests(context.Background(), w.workspaceID())
-	if err != nil {
-		return false
-	}
-	return skip
+func (w *ClientWorkspace) PermissionMode() permission.PermissionMode {
+	return proto.ProtoModeToPermission(w.cached().PermissionMode)
 }
 
-func (w *ClientWorkspace) PermissionSetSkipRequests(skip bool) {
-	_ = w.client.SetPermissionsSkipRequests(context.Background(), w.workspaceID(), skip)
+func (w *ClientWorkspace) PermissionSetMode(mode permission.PermissionMode) {
+	_ = w.client.SetPermissionMode(context.Background(), w.workspaceID(), proto.PermissionModeToProto(mode))
 }
 
 // -- FileTracker --
@@ -761,6 +757,13 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 			Type:    e.Type,
 			Payload: skills.Event{States: states},
 		}
+	case pubsub.Event[proto.PermissionModeEvent]:
+		// Keep the cached workspace in sync so PermissionMode() never goes
+		// stale when another client or the server changes the mode.
+		w.mu.Lock()
+		w.ws.PermissionMode = e.Payload.Mode
+		w.mu.Unlock()
+		return nil
 	default:
 		slog.Warn("Unknown event type in translateEvent", "type", fmt.Sprintf("%T", ev))
 		return nil

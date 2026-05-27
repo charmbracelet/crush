@@ -2587,6 +2587,107 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/workspaces/{id}/skills": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "skills"
+                ],
+                "summary": "List visible skills",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/proto.SkillInfo"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/workspaces/{id}/skills/read": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "skills"
+                ],
+                "summary": "Read skill content",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Read skill request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/proto.ReadSkillRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/proto.ReadSkillResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -2836,17 +2937,6 @@ const docTemplate = `{
                 }
             }
         },
-        "config.Scope": {
-            "type": "integer",
-            "enum": [
-                0,
-                1
-            ],
-            "x-enum-varnames": [
-                "ScopeGlobal",
-                "ScopeWorkspace"
-            ]
-        },
         "config.SelectedModel": {
             "type": "object",
             "properties": {
@@ -3092,6 +3182,17 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_charmbracelet_crush_internal_config.Scope": {
+            "type": "integer",
+            "enum": [
+                0,
+                1
+            ],
+            "x-enum-varnames": [
+                "ScopeGlobal",
+                "ScopeWorkspace"
+            ]
+        },
         "github_com_charmbracelet_crush_internal_proto.Message": {
             "type": "object",
             "properties": {
@@ -3219,6 +3320,12 @@ const docTemplate = `{
                 "title": {
                     "type": "string"
                 },
+                "todos": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/proto.Todo"
+                    }
+                },
                 "updated_at": {
                     "type": "integer"
                 }
@@ -3251,7 +3358,7 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "scope": {
-                    "$ref": "#/definitions/config.Scope"
+                    "$ref": "#/definitions/github_com_charmbracelet_crush_internal_config.Scope"
                 }
             }
         },
@@ -3265,7 +3372,7 @@ const docTemplate = `{
                     "$ref": "#/definitions/config.SelectedModelType"
                 },
                 "scope": {
-                    "$ref": "#/definitions/config.Scope"
+                    "$ref": "#/definitions/github_com_charmbracelet_crush_internal_config.Scope"
                 }
             }
         },
@@ -3285,7 +3392,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "scope": {
-                    "$ref": "#/definitions/config.Scope"
+                    "$ref": "#/definitions/github_com_charmbracelet_crush_internal_config.Scope"
                 }
             }
         },
@@ -3296,7 +3403,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "scope": {
-                    "$ref": "#/definitions/config.Scope"
+                    "$ref": "#/definitions/github_com_charmbracelet_crush_internal_config.Scope"
                 }
             }
         },
@@ -3307,7 +3414,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "scope": {
-                    "$ref": "#/definitions/config.Scope"
+                    "$ref": "#/definitions/github_com_charmbracelet_crush_internal_config.Scope"
                 }
             }
         },
@@ -3318,7 +3425,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "scope": {
-                    "$ref": "#/definitions/config.Scope"
+                    "$ref": "#/definitions/github_com_charmbracelet_crush_internal_config.Scope"
                 },
                 "value": {}
             }
@@ -3576,6 +3683,28 @@ const docTemplate = `{
                 }
             }
         },
+        "proto.ReadSkillRequest": {
+            "type": "object",
+            "properties": {
+                "skill_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "proto.ReadSkillResponse": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "result": {
+                    "$ref": "#/definitions/proto.SkillReadResult"
+                }
+            }
+        },
         "proto.ServerControl": {
             "type": "object",
             "properties": {
@@ -3614,8 +3743,93 @@ const docTemplate = `{
                 "title": {
                     "type": "string"
                 },
+                "todos": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/proto.Todo"
+                    }
+                },
                 "updated_at": {
                     "type": "integer"
+                }
+            }
+        },
+        "proto.SkillDiscoveryState": {
+            "type": "integer",
+            "enum": [
+                0,
+                1
+            ],
+            "x-enum-varnames": [
+                "SkillStateNormal",
+                "SkillStateError"
+            ]
+        },
+        "proto.SkillInfo": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                }
+            }
+        },
+        "proto.SkillReadResult": {
+            "type": "object",
+            "properties": {
+                "builtin": {
+                    "type": "boolean"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                }
+            }
+        },
+        "proto.SkillState": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "state": {
+                    "$ref": "#/definitions/proto.SkillDiscoveryState"
+                }
+            }
+        },
+        "proto.Todo": {
+            "type": "object",
+            "properties": {
+                "active_form": {
+                    "type": "string"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
                 }
             }
         },
@@ -3663,13 +3877,33 @@ const docTemplate = `{
                 "path": {
                     "type": "string"
                 },
+                "permission_mode": {
+                    "$ref": "#/definitions/proto.WorkspacePermissionMode"
+                },
+                "skills": {
+                    "description": "Skills carries the snapshot of skill discovery state at workspace\ncreation time. Subsequent updates flow through the SSE event\nstream.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/proto.SkillState"
+                    }
+                },
                 "version": {
                     "type": "string"
-                },
-                "yolo": {
-                    "type": "boolean"
                 }
             }
+        },
+        "proto.WorkspacePermissionMode": {
+            "type": "string",
+            "enum": [
+                "normal",
+                "yolo",
+                "super_yolo"
+            ],
+            "x-enum-varnames": [
+                "WorkspacePermissionModeNormal",
+                "WorkspacePermissionModeYolo",
+                "WorkspacePermissionModeSuperYolo"
+            ]
         },
         "time.Duration": {
             "type": "integer",

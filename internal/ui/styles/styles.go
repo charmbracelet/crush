@@ -139,6 +139,12 @@ type Styles struct {
 		PromptBangIconBlurred lipgloss.Style
 		PromptBangDotsFocused lipgloss.Style
 		PromptBangDotsBlurred lipgloss.Style
+
+		// Super YOLO mode prompt (" # " icon + ":::" dots).
+		PromptSuperYoloIconFocused lipgloss.Style
+		PromptSuperYoloIconBlurred lipgloss.Style
+		PromptSuperYoloDotsFocused lipgloss.Style
+		PromptSuperYoloDotsBlurred lipgloss.Style
 	}
 
 	// Radio

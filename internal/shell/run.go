@@ -119,12 +119,15 @@ func withNonInteractiveEnv(env []string) []string {
 			}
 		}
 	}
+	// Copy to avoid racing when the caller shares the slice across goroutines.
+	result := make([]string, len(env), len(env)+len(overrides))
+	copy(result, env)
 	for k, v := range overrides {
 		if !present[k] {
-			env = append(env, k+"="+v)
+			result = append(result, k+"="+v)
 		}
 	}
-	return env
+	return result
 }
 
 // standardHandlers returns the exec-handler middleware chain used by both

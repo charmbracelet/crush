@@ -2103,45 +2103,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/workspaces/{id}/permissions/skip": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "permissions"
-                ],
-                "summary": "Get skip permissions status",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Workspace ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/proto.PermissionSkipRequest"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/proto.Error"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/proto.Error"
-                        }
-                    }
-                }
-            },
+        "/workspaces/{id}/permissions/mode": {
             "post": {
                 "consumes": [
                     "application/json"
@@ -2149,7 +2111,7 @@ const docTemplate = `{
                 "tags": [
                     "permissions"
                 ],
-                "summary": "Set skip permissions",
+                "summary": "Set permission mode",
                 "parameters": [
                     {
                         "type": "string",
@@ -2159,12 +2121,12 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "Permission skip request",
+                        "description": "Permission mode request",
                         "name": "request",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/proto.PermissionSkipRequest"
+                            "$ref": "#/definitions/proto.PermissionSetModeRequest"
                         }
                     }
                 ],
@@ -4105,6 +4067,9 @@ const docTemplate = `{
                 "action": {
                     "type": "string"
                 },
+                "dangerous": {
+                    "type": "boolean"
+                },
                 "description": {
                     "type": "string"
                 },
@@ -4126,11 +4091,11 @@ const docTemplate = `{
                 }
             }
         },
-        "proto.PermissionSkipRequest": {
+        "proto.PermissionSetModeRequest": {
             "type": "object",
             "properties": {
-                "skip": {
-                    "type": "boolean"
+                "mode": {
+                    "$ref": "#/definitions/proto.WorkspacePermissionMode"
                 }
             }
         },
@@ -4436,6 +4401,9 @@ const docTemplate = `{
                 "path": {
                     "type": "string"
                 },
+                "permission_mode": {
+                    "$ref": "#/definitions/proto.WorkspacePermissionMode"
+                },
                 "skills": {
                     "description": "Skills carries the snapshot of skill discovery state at workspace\ncreation time. Subsequent updates flow through the SSE event\nstream.",
                     "type": "array",
@@ -4445,11 +4413,21 @@ const docTemplate = `{
                 },
                 "version": {
                     "type": "string"
-                },
-                "yolo": {
-                    "type": "boolean"
                 }
             }
+        },
+        "proto.WorkspacePermissionMode": {
+            "type": "string",
+            "enum": [
+                "normal",
+                "yolo",
+                "super_yolo"
+            ],
+            "x-enum-varnames": [
+                "WorkspacePermissionModeNormal",
+                "WorkspacePermissionModeYolo",
+                "WorkspacePermissionModeSuperYolo"
+            ]
         },
         "time.Duration": {
             "type": "integer",

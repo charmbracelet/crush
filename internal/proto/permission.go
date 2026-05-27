@@ -2,7 +2,35 @@ package proto
 
 import (
 	"encoding/json"
+
+	"github.com/charmbracelet/crush/internal/permission"
 )
+
+// PermissionModeToProto converts an internal permission.PermissionMode to the
+// proto wire representation.
+func PermissionModeToProto(mode permission.PermissionMode) WorkspacePermissionMode {
+	switch mode {
+	case permission.PermissionModeSuperYolo:
+		return WorkspacePermissionModeSuperYolo
+	case permission.PermissionModeYolo:
+		return WorkspacePermissionModeYolo
+	default:
+		return WorkspacePermissionModeNormal
+	}
+}
+
+// ProtoModeToPermission converts a proto WorkspacePermissionMode to an
+// internal permission.PermissionMode.
+func ProtoModeToPermission(mode WorkspacePermissionMode) permission.PermissionMode {
+	switch mode {
+	case WorkspacePermissionModeSuperYolo:
+		return permission.PermissionModeSuperYolo
+	case WorkspacePermissionModeYolo:
+		return permission.PermissionModeYolo
+	default:
+		return permission.PermissionModeNormal
+	}
+}
 
 // CreatePermissionRequest represents a request to create a permission.
 type CreatePermissionRequest struct {
@@ -13,6 +41,7 @@ type CreatePermissionRequest struct {
 	Action      string `json:"action"`
 	Params      any    `json:"params"`
 	Path        string `json:"path"`
+	Dangerous   bool   `json:"dangerous,omitempty"`
 }
 
 // PermissionNotification represents a notification about a permission change.
@@ -32,6 +61,7 @@ type PermissionRequest struct {
 	Action      string `json:"action"`
 	Params      any    `json:"params"`
 	Path        string `json:"path"`
+	Dangerous   bool   `json:"dangerous,omitempty"`
 }
 
 // UnmarshalJSON implements the json.Unmarshaler interface. This is needed

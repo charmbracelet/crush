@@ -9,9 +9,9 @@
     {
       "id": "deepseek-v4-flash",
       "name": "DeepSeek V4 Flash",
-      "cost_per_1m_in": 0.14,
-      "cost_per_1m_out": 0.28,
-      "cost_per_1m_in_cached": 0.07,
+      "cost_per_1m_in": 0.1416,
+      "cost_per_1m_out": 0.2832,
+      "cost_per_1m_in_cached": 0.0708,
       "cost_per_1m_out_cached": 0,
       "context_window": 1048576,
       "default_max_tokens": 104857,
@@ -21,9 +21,9 @@
     {
       "id": "deepseek-v4-pro",
       "name": "DeepSeek V4 Pro",
-      "cost_per_1m_in": 1.7562,
-      "cost_per_1m_out": 3.5524,
-      "cost_per_1m_in_cached": 0.8781,
+      "cost_per_1m_in": 1.7422,
+      "cost_per_1m_out": 3.6396,
+      "cost_per_1m_in_cached": 0.8711,
       "cost_per_1m_out_cached": 0,
       "context_window": 1048576,
       "default_max_tokens": 60000,
@@ -33,9 +33,9 @@
     {
       "id": "gemma-4-26b-a4b-it",
       "name": "Gemma 4 26B A4B",
-      "cost_per_1m_in": 0.102,
-      "cost_per_1m_out": 0.394,
-      "cost_per_1m_in_cached": 0.051,
+      "cost_per_1m_in": 0.12,
+      "cost_per_1m_out": 0.408,
+      "cost_per_1m_in_cached": 0.06,
       "cost_per_1m_out_cached": 0,
       "context_window": 256000,
       "default_max_tokens": 25600,
@@ -57,9 +57,9 @@
     {
       "id": "glm-5.1",
       "name": "GLM-5.1",
-      "cost_per_1m_in": 1.31,
-      "cost_per_1m_out": 4.2,
-      "cost_per_1m_in_cached": 0.655,
+      "cost_per_1m_in": 1.33,
+      "cost_per_1m_out": 4.22,
+      "cost_per_1m_in_cached": 0.665,
       "cost_per_1m_out_cached": 0,
       "context_window": 202750,
       "default_max_tokens": 3276,
@@ -69,9 +69,9 @@
     {
       "id": "gpt-oss-120b",
       "name": "gpt-oss-120b",
-      "cost_per_1m_in": 0.166,
-      "cost_per_1m_out": 0.632,
-      "cost_per_1m_in_cached": 0.083,
+      "cost_per_1m_in": 0.178,
+      "cost_per_1m_out": 0.68,
+      "cost_per_1m_in_cached": 0.089,
       "cost_per_1m_out_cached": 0,
       "context_window": 131072,
       "default_max_tokens": 13107,
@@ -87,33 +87,33 @@
     {
       "id": "kimi-k2.5",
       "name": "Kimi K2.5",
-      "cost_per_1m_in": 0.552,
-      "cost_per_1m_out": 2.84,
-      "cost_per_1m_in_cached": 0.276,
+      "cost_per_1m_in": 0.556,
+      "cost_per_1m_out": 2.88,
+      "cost_per_1m_in_cached": 0.278,
       "cost_per_1m_out_cached": 0,
       "context_window": 262144,
       "default_max_tokens": 26214,
       "can_reason": true,
-      "supports_attachments": true
+      "supports_attachments": false
     },
     {
       "id": "kimi-k2.6",
       "name": "Kimi K2.6",
-      "cost_per_1m_in": 0.978,
-      "cost_per_1m_out": 4.12,
-      "cost_per_1m_in_cached": 0.489,
+      "cost_per_1m_in": 0.918,
+      "cost_per_1m_out": 4.151,
+      "cost_per_1m_in_cached": 0.459,
       "cost_per_1m_out_cached": 0,
       "context_window": 262142,
       "default_max_tokens": 26214,
       "can_reason": true,
-      "supports_attachments": true
+      "supports_attachments": false
     },
     {
       "id": "llama-3.3-70b-instruct",
       "name": "Llama 3.3 70B Instruct",
-      "cost_per_1m_in": 0.614,
-      "cost_per_1m_out": 0.864,
-      "cost_per_1m_in_cached": 0.307,
+      "cost_per_1m_in": 0.638,
+      "cost_per_1m_out": 0.768,
+      "cost_per_1m_in_cached": 0.319,
       "cost_per_1m_out_cached": 0,
       "context_window": 128000,
       "default_max_tokens": 12800,
@@ -130,7 +130,7 @@
       "context_window": 430000,
       "default_max_tokens": 43000,
       "can_reason": true,
-      "supports_attachments": true
+      "supports_attachments": false
     },
     {
       "id": "minimax-m2.7",
@@ -154,7 +154,7 @@
       "context_window": 128000,
       "default_max_tokens": 12800,
       "can_reason": false,
-      "supports_attachments": true
+      "supports_attachments": false
     },
     {
       "id": "qwen3.6-flash",
@@ -195,9 +195,9 @@
     {
       "id": "qwen3-coder-480b-a35b-instruct-int4-mixed-ar",
       "name": "Qwen3 Coder 480B A35B Instruct INT4 Mixed AR",
-      "cost_per_1m_in": 0.769,
-      "cost_per_1m_out": 2.235,
-      "cost_per_1m_in_cached": 0.3845,
+      "cost_per_1m_in": 0.871,
+      "cost_per_1m_out": 2.805,
+      "cost_per_1m_in_cached": 0.4355,
       "cost_per_1m_out_cached": 0,
       "context_window": 106000,
       "default_max_tokens": 10600,
@@ -207,9 +207,9 @@
     {
       "id": "qwen3-next-80b-a3b-instruct",
       "name": "Qwen3 Next 80B A3B Instruct",
-      "cost_per_1m_in": 0.1175,
-      "cost_per_1m_out": 1.136,
-      "cost_per_1m_in_cached": 0.05875,
+      "cost_per_1m_in": 0.128,
+      "cost_per_1m_out": 1.28,
+      "cost_per_1m_in_cached": 0.064,
       "cost_per_1m_out_cached": 0,
       "context_window": 262144,
       "default_max_tokens": 26214,

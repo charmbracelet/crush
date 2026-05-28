@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestConfigStore_ConfigPath_GlobalAlwaysWorks(t *testing.T) {
@@ -728,4 +730,59 @@ func TestRefreshOAuthToken_UsesDiskTokenWhenDifferent(t *testing.T) {
 	require.Equal(t, "newer-access-token", updatedConfig.APIKey)
 	require.Equal(t, "newer-access-token", updatedConfig.OAuthToken.AccessToken)
 	require.Equal(t, "refresh-abc", updatedConfig.OAuthToken.RefreshToken)
+}
+
+// TestConfigStore_SetConfigFields_concurrent verifies that concurrent writes do
+// not lose data when protected by the in-process mutex and cross-process flock.
+func TestConfigStore_SetConfigFields_concurrent(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "crush.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(configPath), 0o755))
+	require.NoError(t, os.WriteFile(configPath, []byte("{}"), 0o600))
+
+	store := &ConfigStore{
+		config: &Config{
+			Providers: csync.NewMap[string, ProviderConfig](),
+			Models:    make(map[SelectedModelType]SelectedModel),
+		},
+		globalDataPath: configPath,
+		workingDir:     dir,
+	}
+
+	const (
+		numGoroutines    = 20
+		fieldsPerRoutine = 5
+	)
+
+	errs := make(chan error, numGoroutines)
+	for i := 0; i < numGoroutines; i++ {
+		go func(id int) {
+			kv := make(map[string]any, fieldsPerRoutine)
+			for j := 0; j < fieldsPerRoutine; j++ {
+				key := fmt.Sprintf("goroutine_%d_field_%d", id, j)
+				kv[key] = fmt.Sprintf("value_%d_%d", id, j)
+			}
+			errs <- store.SetConfigFields(ScopeGlobal, kv)
+		}(i)
+	}
+
+	for i := 0; i < numGoroutines; i++ {
+		require.NoError(t, <-errs)
+	}
+
+	// Verify all fields are present in the config file.
+	data, err := os.ReadFile(configPath)
+	require.NoError(t, err)
+
+	for i := 0; i < numGoroutines; i++ {
+		for j := 0; j < fieldsPerRoutine; j++ {
+			key := fmt.Sprintf("goroutine_%d_field_%d", i, j)
+			expectedValue := fmt.Sprintf("value_%d_%d", i, j)
+			result := gjson.Get(string(data), key)
+			require.True(t, result.Exists(), "key %s should exist", key)
+			require.Equal(t, expectedValue, result.String(), "key %s should have the correct value", key)
+		}
+	}
 }

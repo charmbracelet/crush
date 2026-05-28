@@ -813,6 +813,9 @@ func hasAWSCredentials(env env.Env) bool {
 	if _, err := os.Stat(filepath.Join(home.Dir(), ".aws/credentials")); err == nil && !testing.Testing() {
 		return true
 	}
+	if _, err := os.Stat(filepath.Join(home.Dir(), ".aws/login")); err == nil && !testing.Testing() {
+		return true
+	}
 
 	return false
 }

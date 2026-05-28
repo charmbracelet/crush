@@ -461,6 +461,15 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	// Project specific skills dirs.
 	c.Options.SkillsPaths = append(c.Options.SkillsPaths, ProjectSkillsDir(workingDir)...)
 
+	// Add the default subagents directories if not already present.
+	for _, dir := range GlobalSubagentsDirs() {
+		if !slices.Contains(c.Options.SubagentsPaths, dir) {
+			c.Options.SubagentsPaths = append(c.Options.SubagentsPaths, dir)
+		}
+	}
+	// Project specific subagents dirs.
+	c.Options.SubagentsPaths = append(c.Options.SubagentsPaths, ProjectSubagentsDir(workingDir)...)
+
 	if str, ok := os.LookupEnv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE"); ok {
 		c.Options.DisableProviderAutoUpdate, _ = strconv.ParseBool(str)
 	}
@@ -1077,6 +1086,35 @@ func ProjectSkillsDir(workingDir string) []string {
 	}
 
 	return dirs
+}
+
+// GlobalSubagentsDirs returns the default global directories for subagent definitions.
+func GlobalSubagentsDirs() []string {
+	paths := []string{
+		filepath.Join(home.Config(), appName, "agents"),
+		filepath.Join(home.Config(), "agents", "agents"),
+		filepath.Join(home.Dir(), ".agents", "agents"),
+		filepath.Join(home.Dir(), ".claude", "agents"),
+	}
+	if runtime.GOOS == "windows" {
+		appData := cmp.Or(
+			os.Getenv("LOCALAPPDATA"),
+			filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local"),
+		)
+		paths = append(paths,
+			filepath.Join(appData, appName, "agents"),
+			filepath.Join(appData, "agents", "agents"),
+		)
+	}
+	return paths
+}
+
+// ProjectSubagentsDir returns the default project directories for subagent definitions.
+func ProjectSubagentsDir(workingDir string) []string {
+	return []string{
+		filepath.Join(workingDir, ".agents/agents"),
+		filepath.Join(workingDir, ".claude/agents"),
+	}
 }
 
 func isAppleTerminal() bool { return os.Getenv("TERM_PROGRAM") == "Apple_Terminal" }

@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
-	"path/filepath"
-	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -22,10 +20,6 @@ import (
 type ReferencesParams struct {
 	Symbol string `json:"symbol" description:"The symbol name to search for (e.g., function name, variable name, type name)"`
 	Path   string `json:"path,omitempty" description:"The directory to search in. Use a directory/file to narrow down the symbol search. Defaults to the current working directory."`
-}
-
-type referencesTool struct {
-	lspManager *lsp.Manager
 }
 
 const ReferencesToolName = "lsp_references"
@@ -42,37 +36,26 @@ func NewReferencesTool(lspManager *lsp.Manager) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse("symbol is required"), nil
 			}
 
-			if lspManager.Clients().Len() == 0 {
-				return fantasy.NewTextErrorResponse("no LSP clients available"), nil
-			}
-
 			workingDir := cmp.Or(params.Path, ".")
-
-			matches, _, err := searchFiles(ctx, regexp.QuoteMeta(params.Symbol), workingDir, "", 100)
+			results, err := resolveSymbolResults(ctx, lspManager, params.Symbol, workingDir)
 			if err != nil {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to search for symbol: %s", err)), nil
-			}
-
-			if len(matches) == 0 {
 				return fantasy.NewTextResponse(fmt.Sprintf("Symbol '%s' not found", params.Symbol)), nil
 			}
 
 			var allLocations []protocol.Location
 			var allErrs error
-			for _, match := range matches {
-				locations, err := find(ctx, lspManager, params.Symbol, match)
+			for _, r := range results {
+				locations, err := r.client.FindReferences(ctx, r.path, r.line, r.char, true)
 				if err != nil {
 					if strings.Contains(err.Error(), "no identifier found") {
-						// grep probably matched a comment, string value, or something else that's irrelevant
 						continue
 					}
-					slog.Error("Failed to find references", "error", err, "symbol", params.Symbol, "path", match.path, "line", match.lineNum, "char", match.charNum)
+					slog.Error("Failed to find references", "error", err, "symbol", params.Symbol, "path", r.path, "line", r.line)
 					allErrs = errors.Join(allErrs, err)
 					continue
 				}
 				allLocations = append(allLocations, locations...)
-				// Once we have results, we're done - LSP returns all references
-				// for the symbol, not just from this file.
+				// LSP returns all references for the symbol, not just from this file.
 				if len(locations) > 0 {
 					break
 				}
@@ -89,73 +72,6 @@ func NewReferencesTool(lspManager *lsp.Manager) fantasy.AgentTool {
 			return fantasy.NewTextResponse(fmt.Sprintf("No references found for symbol '%s'", params.Symbol)), nil
 		},
 	)
-}
-
-func (r *referencesTool) Name() string {
-	return ReferencesToolName
-}
-
-func find(ctx context.Context, lspManager *lsp.Manager, symbol string, match grepMatch) ([]protocol.Location, error) {
-	absPath, err := filepath.Abs(match.path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get absolute path: %s", err)
-	}
-
-	var client *lsp.Client
-	for c := range lspManager.Clients().Seq() {
-		if c.HandlesFile(absPath) {
-			client = c
-			break
-		}
-	}
-
-	if client == nil {
-		slog.Warn("No LSP clients to handle", "path", match.path)
-		return nil, nil
-	}
-
-	return client.FindReferences(
-		ctx,
-		absPath,
-		match.lineNum,
-		match.charNum+getSymbolOffset(symbol),
-		true,
-	)
-}
-
-// getSymbolOffset returns the character offset to the actual symbol name
-// in a qualified symbol (e.g., "Bar" in "foo.Bar" or "method" in "Class::method").
-func getSymbolOffset(symbol string) int {
-	// Check for :: separator (Rust, C++, Ruby modules/classes, PHP static).
-	if idx := strings.LastIndex(symbol, "::"); idx != -1 {
-		return idx + 2
-	}
-	// Check for . separator (Go, Python, JavaScript, Java, C#, Ruby methods).
-	if idx := strings.LastIndex(symbol, "."); idx != -1 {
-		return idx + 1
-	}
-	// Check for \ separator (PHP namespaces).
-	if idx := strings.LastIndex(symbol, "\\"); idx != -1 {
-		return idx + 1
-	}
-	return 0
-}
-
-func cleanupLocations(locations []protocol.Location) []protocol.Location {
-	slices.SortFunc(locations, func(a, b protocol.Location) int {
-		if a.URI != b.URI {
-			return strings.Compare(string(a.URI), string(b.URI))
-		}
-		if a.Range.Start.Line != b.Range.Start.Line {
-			return cmp.Compare(a.Range.Start.Line, b.Range.Start.Line)
-		}
-		return cmp.Compare(a.Range.Start.Character, b.Range.Start.Character)
-	})
-	return slices.CompactFunc(locations, func(a, b protocol.Location) bool {
-		return a.URI == b.URI &&
-			a.Range.Start.Line == b.Range.Start.Line &&
-			a.Range.Start.Character == b.Range.Start.Character
-	})
 }
 
 func groupByFilename(locations []protocol.Location) map[string][]protocol.Location {

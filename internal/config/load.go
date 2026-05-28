@@ -302,7 +302,7 @@ func (c *Config) configureProviders(store *ConfigStore, env env.Env, resolver Va
 			}
 			prepared.BaseURL = endpoint
 			prepared.ExtraParams["apiVersion"] = env.Get("AZURE_OPENAI_API_VERSION")
-		case catwalk.InferenceProviderBedrock:
+		case catwalk.InferenceProviderBedrock, catwalk.InferenceProviderBedrockEurope:
 			if p.APIKey == "" && !hasAWSCredentials(env) {
 				if configExists {
 					slog.Warn("Skipping Bedrock provider due to missing AWS credentials")

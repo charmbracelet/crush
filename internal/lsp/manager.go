@@ -81,11 +81,12 @@ func (s *Manager) SetCallback(cb func(name string, client *Client)) {
 	s.callback = cb
 }
 
-// TrackConfigured will callback the user-configured LSPs, but will not create
-// any clients.
-func (s *Manager) TrackConfigured() {
+// TrackConfigured notifies the UI about user-configured LSP servers without
+// starting them. Servers start on demand via Start().
+func (s *Manager) TrackConfigured(ctx context.Context) {
 	var wg sync.WaitGroup
-	for name := range s.manager.GetServers() {
+	servers := s.manager.GetServers()
+	for name := range servers {
 		if !s.isUserConfigured(name) {
 			continue
 		}
@@ -99,6 +100,9 @@ func (s *Manager) TrackConfigured() {
 // Start starts an LSP server that can handle the given file path.
 // If an appropriate LSP is already running, this is a no-op.
 func (s *Manager) Start(ctx context.Context, path string) {
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
 	if !fsext.HasPrefix(path, s.cfg.WorkingDir()) {
 		return
 	}

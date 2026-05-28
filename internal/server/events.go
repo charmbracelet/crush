@@ -93,6 +93,18 @@ func wrapEvent(ev any) *pubsub.Payload {
 				Type:         proto.AgentEventType(e.Payload.Type),
 			},
 		})
+	case pubsub.Event[notify.RunComplete]:
+		return envelope(pubsub.PayloadTypeRunComplete, pubsub.Event[proto.RunComplete]{
+			Type: e.Type,
+			Payload: proto.RunComplete{
+				SessionID: e.Payload.SessionID,
+				RunID:     e.Payload.RunID,
+				MessageID: e.Payload.MessageID,
+				Text:      e.Payload.Text,
+				Error:     e.Payload.Error,
+				Cancelled: e.Payload.Cancelled,
+			},
+		})
 	case pubsub.Event[proto.ConfigChanged]:
 		return envelope(pubsub.PayloadTypeConfigChanged, e)
 	case pubsub.Event[skills.Event]:

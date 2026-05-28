@@ -26,6 +26,7 @@ const (
 	PayloadTypeAgentEvent             PayloadType = "agent_event"
 	PayloadTypeConfigChanged          PayloadType = "config_changed"
 	PayloadTypeSkillsEvent            PayloadType = "skills_event"
+	PayloadTypeRunComplete            PayloadType = "run_complete"
 )
 
 // Payload wraps a discriminated JSON payload with a type tag.
@@ -50,7 +51,14 @@ type (
 	}
 
 	// Publisher can publish events of type T.
+	//
+	// Publish is best-effort and lossy under back-pressure;
+	// PublishMustDeliver applies the bounded-blocking semantics used
+	// for terminal events that must reach subscribers (finish, tool
+	// result, error, cancel, RunComplete). See [Broker.Publish] and
+	// [Broker.PublishMustDeliver].
 	Publisher[T any] interface {
 		Publish(EventType, T)
+		PublishMustDeliver(context.Context, EventType, T)
 	}
 )

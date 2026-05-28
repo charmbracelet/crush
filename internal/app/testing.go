@@ -34,6 +34,7 @@ func NewForTest(ctx context.Context) *App {
 		serviceEventsWG:    &sync.WaitGroup{},
 		tuiWG:              &sync.WaitGroup{},
 		agentNotifications: pubsub.NewBroker[notify.Notification](),
+		runCompletions:     pubsub.NewBroker[notify.RunComplete](),
 	}
 
 	eventsCtx, cancel := context.WithCancel(ctx)
@@ -44,6 +45,8 @@ func NewForTest(ctx context.Context) *App {
 		app.Permissions.SubscribeNotifications, app.events)
 	setupSubscriber(eventsCtx, app.serviceEventsWG, "agent-notifications",
 		app.agentNotifications.Subscribe, app.events)
+	setupSubscriber(eventsCtx, app.serviceEventsWG, "run-completions",
+		app.runCompletions.Subscribe, app.events)
 	app.cleanupFuncs = append(app.cleanupFuncs, func(context.Context) error {
 		cancel()
 		app.serviceEventsWG.Wait()

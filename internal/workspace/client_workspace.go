@@ -179,7 +179,11 @@ func (w *ClientWorkspace) ListAllUserMessages(ctx context.Context) ([]message.Me
 // -- Agent --
 
 func (w *ClientWorkspace) AgentRun(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) error {
-	return w.client.SendMessage(ctx, w.workspaceID(), sessionID, prompt, attachments...)
+	// The interactive TUI does not consume notify.RunComplete for
+	// completion detection (it observes message events directly),
+	// so passing an empty RunID is correct here: it skips the
+	// correlator stamping path without functional consequences.
+	return w.client.SendMessage(ctx, w.workspaceID(), sessionID, "", prompt, attachments...)
 }
 
 func (w *ClientWorkspace) AgentCancel(sessionID string) {
@@ -705,6 +709,24 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 				SessionID:    e.Payload.SessionID,
 				SessionTitle: e.Payload.SessionTitle,
 				Type:         notify.Type(e.Payload.Type),
+			},
+		}
+	case pubsub.Event[proto.RunComplete]:
+		// Translate the wire-level proto.RunComplete back into the
+		// agent's domain notify.RunComplete. Without this case the
+		// default branch below warns on every run completion in the
+		// server-mode TUI, even though the TUI itself doesn't act
+		// on RunComplete — converting silently keeps the workspace
+		// event bridge symmetric with the server-side wrapEvent.
+		return pubsub.Event[notify.RunComplete]{
+			Type: e.Type,
+			Payload: notify.RunComplete{
+				SessionID: e.Payload.SessionID,
+				RunID:     e.Payload.RunID,
+				MessageID: e.Payload.MessageID,
+				Text:      e.Payload.Text,
+				Error:     e.Payload.Error,
+				Cancelled: e.Payload.Cancelled,
 			},
 		}
 	case pubsub.Event[proto.SkillsEvent]:

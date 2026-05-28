@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"strings"
 
 	"charm.land/fantasy"
 
@@ -26,9 +27,20 @@ const (
 	AgentTaskExplore = "explore"
 )
 
-func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) {
+// IsAgentTool reports whether name is the universal agent tool or a
+// scoped variant such as "agent:explore" or "agent:task".
+func IsAgentTool(name string) bool {
+	return name == AgentToolName || strings.HasPrefix(name, AgentToolName+":")
+}
+
+func (c *coordinator) agentTool(ctx context.Context, fixedTask string) (fantasy.AgentTool, error) {
+	name := AgentToolName
+	if fixedTask != "" {
+		name = AgentToolName + ":" + fixedTask
+	}
+
 	return fantasy.NewParallelAgentTool(
-		AgentToolName,
+		name,
 		agentToolDescription,
 		func(ctx context.Context, params AgentParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Prompt == "" {
@@ -45,9 +57,12 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 				return fantasy.ToolResponse{}, errors.New("agent message id missing from context")
 			}
 
-			task := params.Task
+			task := fixedTask
 			if task == "" {
-				task = "task"
+				task = params.Task
+				if task == "" {
+					task = "task"
+				}
 			}
 
 			var agentCfg config.Agent

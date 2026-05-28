@@ -47,6 +47,7 @@ func newTestCoordinator(t *testing.T, env fakeEnv, providerID string, providerCf
 	cfg, err := config.Init(env.workingDir, "", false)
 	require.NoError(t, err)
 	cfg.Config().Providers.Set(providerID, providerCfg)
+	cfg.Config().SetupAgents()
 	return &coordinator{
 		cfg:      cfg,
 		sessions: env.sessions,
@@ -383,6 +384,63 @@ func TestUpdateParentSessionCost(t *testing.T) {
 		updated, err := env.sessions.Get(t.Context(), parent.ID)
 		require.NoError(t, err)
 		assert.InDelta(t, 0.0, updated.Cost, 1e-9)
+	})
+}
+
+func TestAgentToolScope(t *testing.T) {
+	t.Run("agent:explore tool has correct name", func(t *testing.T) {
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, "test-provider", config.ProviderConfig{ID: "test-provider"})
+
+		tool, err := coord.agentTool(t.Context(), AgentTaskExplore)
+		require.NoError(t, err)
+		assert.Equal(t, "agent:explore", tool.Info().Name)
+	})
+
+	t.Run("agent:task tool has correct name", func(t *testing.T) {
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, "test-provider", config.ProviderConfig{ID: "test-provider"})
+
+		tool, err := coord.agentTool(t.Context(), "task")
+		require.NoError(t, err)
+		assert.Equal(t, "agent:task", tool.Info().Name)
+	})
+
+	t.Run("buildTools includes scoped agent tools", func(t *testing.T) {
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, "test-provider", config.ProviderConfig{ID: "test-provider"})
+
+		agentCfg := config.Agent{
+			AllowedTools: []string{"agent:explore", "agent:task", "bash"},
+		}
+		tools, err := coord.buildTools(t.Context(), agentCfg, false)
+		require.NoError(t, err)
+
+		names := make([]string, len(tools))
+		for i, tool := range tools {
+			names[i] = tool.Info().Name
+		}
+		assert.Contains(t, names, "agent:explore")
+		assert.Contains(t, names, "agent:task")
+		assert.Contains(t, names, "bash")
+	})
+
+	t.Run("buildTools includes universal agent when allowed", func(t *testing.T) {
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, "test-provider", config.ProviderConfig{ID: "test-provider"})
+
+		agentCfg := config.Agent{
+			AllowedTools: []string{"agent", "bash"},
+		}
+		tools, err := coord.buildTools(t.Context(), agentCfg, false)
+		require.NoError(t, err)
+
+		names := make([]string, len(tools))
+		for i, tool := range tools {
+			names[i] = tool.Info().Name
+		}
+		assert.Contains(t, names, "agent")
+		assert.Contains(t, names, "bash")
 	})
 }
 

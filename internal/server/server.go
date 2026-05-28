@@ -100,7 +100,18 @@ func NewServer(cfg *config.ConfigStore, network, address string) *Server {
 			}
 		}()
 	})
+	s.installHandler()
+	if network == "tcp" {
+		s.h.Addr = address
+	}
+	return s
+}
 
+// installHandler builds the protocol/router around s.backend and
+// assigns the resulting http.Server to s.h. Extracted from
+// [NewServer] so test harnesses can wire a Server around a
+// pre-constructed backend.
+func (s *Server) installHandler() {
 	var p http.Protocols
 	p.SetHTTP1(true)
 	p.SetUnencryptedHTTP2(true)
@@ -113,6 +124,7 @@ func NewServer(cfg *config.ConfigStore, network, address string) *Server {
 	mux.HandleFunc("GET /v1/workspaces", c.handleGetWorkspaces)
 	mux.HandleFunc("POST /v1/workspaces", c.handlePostWorkspaces)
 	mux.HandleFunc("DELETE /v1/workspaces/{id}", c.handleDeleteWorkspaces)
+	mux.HandleFunc("POST /v1/workspaces/{id}/current-session", c.handlePostWorkspaceCurrentSession)
 	mux.HandleFunc("GET /v1/workspaces/{id}", c.handleGetWorkspace)
 	mux.HandleFunc("GET /v1/workspaces/{id}/config", c.handleGetWorkspaceConfig)
 	mux.HandleFunc("GET /v1/workspaces/{id}/events", c.handleGetWorkspaceEvents)
@@ -172,10 +184,13 @@ func NewServer(cfg *config.ConfigStore, network, address string) *Server {
 		Protocols: &p,
 		Handler:   s.recoverHandler(s.loggingHandler(mux)),
 	}
-	if network == "tcp" {
-		s.h.Addr = address
-	}
-	return s
+}
+
+// Handler returns the server's HTTP handler. Exposed so test harnesses
+// can wrap it in an httptest.Server without going through the
+// production listener setup.
+func (s *Server) Handler() http.Handler {
+	return s.h.Handler
 }
 
 // Serve accepts incoming connections on the listener.

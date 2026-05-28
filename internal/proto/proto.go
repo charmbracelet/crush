@@ -13,14 +13,15 @@ import (
 // Workspace represents a running app.App workspace with its associated
 // resources and state.
 type Workspace struct {
-	ID      string         `json:"id"`
-	Path    string         `json:"path"`
-	YOLO    bool           `json:"yolo,omitempty"`
-	Debug   bool           `json:"debug,omitempty"`
-	DataDir string         `json:"data_dir,omitempty"`
-	Version string         `json:"version,omitempty"`
-	Config  *config.Config `json:"config,omitempty"`
-	Env     []string       `json:"env,omitempty"`
+	ID       string         `json:"id"`
+	Path     string         `json:"path"`
+	YOLO     bool           `json:"yolo,omitempty"`
+	Debug    bool           `json:"debug,omitempty"`
+	DataDir  string         `json:"data_dir,omitempty"`
+	Version  string         `json:"version,omitempty"`
+	ClientID string         `json:"client_id,omitempty"`
+	Config   *config.Config `json:"config,omitempty"`
+	Env      []string       `json:"env,omitempty"`
 	// Skills carries the snapshot of skill discovery state at workspace
 	// creation time. Subsequent updates flow through the SSE event
 	// stream.
@@ -30,6 +31,19 @@ type Workspace struct {
 // Error represents an error response.
 type Error struct {
 	Message string `json:"message"`
+}
+
+// ConfigChanged is published whenever the workspace's configuration is
+// mutated by a backend operation. Clients react by re-fetching the
+// workspace snapshot so cached config stays in sync across subscribers.
+type ConfigChanged struct {
+	WorkspaceID string `json:"workspace_id"`
+}
+
+// CurrentSession is the request body for the per-client
+// current-session endpoint. An empty SessionID clears the entry.
+type CurrentSession struct {
+	SessionID string `json:"session_id"`
 }
 
 // SkillInfo describes a visible skill exposed to a frontend.
@@ -116,6 +130,15 @@ func (p *PermissionAction) UnmarshalText(text []byte) error {
 type PermissionGrant struct {
 	Permission PermissionRequest `json:"permission"`
 	Action     PermissionAction  `json:"action"`
+}
+
+// PermissionGrantResponse is the server's response to a permission
+// grant call. Resolved is true when this call resolved the pending
+// request, and false when the request had already been resolved by a
+// previous caller (e.g., another client in a multi-subscriber UI). A
+// false value is not an error.
+type PermissionGrantResponse struct {
+	Resolved bool `json:"resolved"`
 }
 
 // PermissionSkipRequest represents a request to skip permission prompts.

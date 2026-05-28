@@ -806,7 +806,7 @@ func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[str
 	return azure.New(opts...)
 }
 
-func (c *coordinator) buildBedrockProvider(apiKey string, headers map[string]string) (fantasy.Provider, error) {
+func (c *coordinator) buildBedrockProvider(apiKey string, headers map[string]string, providerID string) (fantasy.Provider, error) {
 	var opts []bedrock.Option
 	if c.cfg.Config().Options.Debug {
 		httpClient := log.NewHTTPClient()
@@ -815,6 +815,7 @@ func (c *coordinator) buildBedrockProvider(apiKey string, headers map[string]str
 	if len(headers) > 0 {
 		opts = append(opts, bedrock.WithHeaders(headers))
 	}
+
 	switch {
 	case apiKey != "":
 		opts = append(opts, bedrock.WithAPIKey(apiKey))
@@ -823,6 +824,14 @@ func (c *coordinator) buildBedrockProvider(apiKey string, headers map[string]str
 	default:
 		// Skip, let the SDK do authentication.
 	}
+
+	switch providerID {
+	case string(catwalk.InferenceProviderBedrockEurope):
+		opts = append(opts, bedrock.WithRegion("eu-west-1"))
+	default:
+		opts = append(opts, bedrock.WithRegion("us-east-1"))
+	}
+
 	return bedrock.New(opts...)
 }
 
@@ -897,7 +906,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 	case azure.Name:
 		return c.buildAzureProvider(baseURL, apiKey, headers, providerCfg.ExtraParams)
 	case bedrock.Name:
-		return c.buildBedrockProvider(apiKey, headers)
+		return c.buildBedrockProvider(apiKey, headers, providerCfg.ID)
 	case google.Name:
 		return c.buildGoogleProvider(baseURL, apiKey, headers)
 	case "google-vertex":

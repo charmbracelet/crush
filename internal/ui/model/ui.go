@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -40,6 +41,7 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/stringext"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/chat"
@@ -431,21 +433,76 @@ func (m *UI) sendNotification(n notification.Notification) tea.Cmd {
 		return nil
 	}
 
-	backend := m.notifyBackend
-	return func() tea.Msg {
-		if err := backend.Send(n); err != nil {
-			slog.Error("Failed to send notification", "error", err)
+	return m.notifyBackend.Send(n)
+}
+
+// selectNotificationBackend chooses the appropriate notification backend based
+// on terminal capabilities, environment, and user configuration. This is a pure
+// function that should be called once during initialization or when capabilities
+// change.
+func selectNotificationBackend(caps common.Capabilities, cfg *config.Config) notification.Backend {
+	// Check for explicit user preference first.
+	if cfg != nil && cfg.Options != nil && cfg.Options.NotificationStyle != "" {
+		switch cfg.Options.NotificationStyle {
+		case "native":
+			slog.Debug("Using native backend (user preference)")
+			return notification.NewNativeBackend(notification.Icon)
+		case "osc":
+			slog.Debug("Using OSC backend (user preference)", "osc99_supported", caps.OSC99Notifications)
+			return notification.NewOSCBackend(notification.Icon, caps.OSC99Notifications)
+		case "bell":
+			slog.Debug("Using bell backend (user preference)")
+			return notification.NewBellBackend()
+		case "disabled":
+			slog.Debug("Notifications disabled (user preference)")
+			return notification.NoopBackend{}
+		case "auto":
+			// Fall through to auto-detection below.
+		default:
+			slog.Warn("Unknown notification style, using auto", "style", cfg.Options.NotificationStyle)
 		}
-		return nil
 	}
+
+	// Auto-detect based on environment and capabilities.
+	_, isSSH := caps.Env.LookupEnv("SSH_TTY")
+
+	// SSH sessions use terminal-based notifications (OSC 99 or 777).
+	if isSSH {
+		slog.Debug("Selected OSCBackend for SSH session", "osc99_supported", caps.OSC99Notifications)
+		return notification.NewOSCBackend(notification.Icon, caps.OSC99Notifications)
+	}
+
+	// Local sessions: prefer OSC on macOS because the native backend (beeep)
+	// uses terminal-notifier or AppleScript, which is slow and doesn't display
+	// icons properly. OSC 99 provides a more polished experience with icon support.
+	if runtime.GOOS == "darwin" {
+		slog.Debug("Selected OSCBackend for local macOS session", "osc99_supported", caps.OSC99Notifications)
+		return notification.NewOSCBackend(notification.Icon, caps.OSC99Notifications)
+	}
+
+	// Non-macOS local sessions use native OS notifications if focus events are supported.
+	// Without focus events, we can't suppress notifications when focused, so
+	// we disable them entirely to avoid spamming the user.
+	if caps.ReportFocusEvents {
+		slog.Debug("Selected NativeBackend for local session")
+		return notification.NewNativeBackend(notification.Icon)
+	}
+
+	slog.Debug("Selected NoopBackend (focus events not supported)")
+	return notification.NoopBackend{}
+}
+
+func (m *UI) updateNotificationBackend() {
+	cfg := m.com.Config()
+	m.notifyBackend = selectNotificationBackend(m.caps, cfg)
 }
 
 // shouldSendNotification returns true if notifications should be sent based on
-// current state. Focus reporting must be supported, window must not focused,
-// and notifications must not be disabled in config.
+// current state. Focus reporting must be supported, window must not be
+// focused, and notifications must not be disabled in config.
 func (m *UI) shouldSendNotification() bool {
 	cfg := m.com.Config()
-	if cfg != nil && cfg.Options != nil && cfg.Options.DisableNotifications {
+	if cfg != nil && cfg.Options != nil && cfg.Options.NotificationStyle == "disabled" {
 		return false
 	}
 	return m.caps.ReportFocusEvents && !m.notifyWindowFocused
@@ -511,9 +568,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmds = append(cmds, common.QueryCmd(uv.Environ(msg)))
 	case tea.ModeReportMsg:
-		if m.caps.ReportFocusEvents {
-			m.notifyBackend = notification.NewNativeBackend(notification.Icon)
-		}
+		m.updateNotificationBackend()
+	case uv.UnknownOscEvent:
+		m.updateNotificationBackend()
 	case tea.FocusMsg:
 		m.notifyWindowFocused = true
 	case tea.BlurMsg:
@@ -1358,22 +1415,19 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.com.Workspace.PermissionSetSkipRequests(yolo)
 		m.setEditorPrompt(yolo)
 		m.dialog.CloseDialog(dialog.CommandsID)
-	case dialog.ActionToggleNotifications:
+	case dialog.ActionSelectNotificationStyle:
 		cfg := m.com.Config()
 		if cfg != nil && cfg.Options != nil {
-			disabled := !cfg.Options.DisableNotifications
-			cfg.Options.DisableNotifications = disabled
-			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.disable_notifications", disabled); err != nil {
+			cfg.Options.NotificationStyle = msg.Style
+			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.notification_style", msg.Style); err != nil {
 				cmds = append(cmds, util.ReportError(err))
 			} else {
-				status := "enabled"
-				if disabled {
-					status = "disabled"
-				}
-				cmds = append(cmds, util.CmdHandler(util.NewInfoMsg("Notifications "+status)))
+				cmds = append(cmds, util.CmdHandler(util.NewInfoMsg("Notifications set to: "+msg.Style)))
 			}
+			// Reinitialize notification backend with new style.
+			m.notifyBackend = selectNotificationBackend(m.caps, cfg)
 		}
-		m.dialog.CloseDialog(dialog.CommandsID)
+		m.dialog.CloseDialog(dialog.NotificationsID)
 	case dialog.ActionNewSession:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
@@ -1701,7 +1755,14 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 			return util.ReportError(err)
 		}
 
-		modelMsg := fmt.Sprintf("%s model changed to %s", msg.ModelType, msg.Model.Model)
+		var (
+			modelType = stringext.Capitalize(string(msg.ModelType))
+			modelName = msg.Model.Model
+		)
+		if catwalkModel := cfg.GetModel(msg.Model.Provider, msg.Model.Model); catwalkModel != nil && catwalkModel.Name != "" {
+			modelName = catwalkModel.Name
+		}
+		modelMsg := fmt.Sprintf("%s model changed to %s", modelType, modelName)
 
 		return util.NewInfoMsg(modelMsg)
 	})
@@ -3300,6 +3361,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openReasoningDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.NotificationsID:
+		if cmd := m.openNotificationsDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.FilePickerID:
 		if cmd := m.openFilesDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -3389,6 +3454,18 @@ func (m *UI) openReasoningDialog() tea.Cmd {
 	return nil
 }
 
+// openNotificationsDialog opens the notification style picker dialog.
+func (m *UI) openNotificationsDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.NotificationsID) {
+		m.dialog.BringToFront(dialog.NotificationsID)
+		return nil
+	}
+
+	notificationsDialog := dialog.NewNotifications(m.com)
+	m.dialog.OpenDialog(notificationsDialog)
+	return nil
+}
+
 // openSessionsDialog opens the sessions dialog. If the dialog is already open,
 // it brings it to the front. Otherwise, it will list all the sessions and open
 // the dialog.
@@ -3446,16 +3523,25 @@ func (m *UI) openPermissionsDialog(perm permission.PermissionRequest) tea.Cmd {
 
 // handlePermissionNotification updates tool items when permission state changes.
 func (m *UI) handlePermissionNotification(notification permission.PermissionNotification) {
-	toolItem := m.chat.MessageItem(notification.ToolCallID)
-	if toolItem == nil {
-		return
+	if toolItem := m.chat.MessageItem(notification.ToolCallID); toolItem != nil {
+		if permItem, ok := toolItem.(chat.ToolMessageItem); ok {
+			if notification.Granted {
+				permItem.SetStatus(chat.ToolStatusRunning)
+			} else {
+				permItem.SetStatus(chat.ToolStatusAwaitingPermission)
+			}
+		}
 	}
 
-	if permItem, ok := toolItem.(chat.ToolMessageItem); ok {
-		if notification.Granted {
-			permItem.SetStatus(chat.ToolStatusRunning)
-		} else {
-			permItem.SetStatus(chat.ToolStatusAwaitingPermission)
+	// If this notification reflects a final resolution (granted or denied),
+	// dismiss any open permissions dialog whose tool call ID matches. This
+	// covers the case where another client resolved the request remotely.
+	if !notification.Granted && !notification.Denied {
+		return
+	}
+	if d := m.dialog.Dialog(dialog.PermissionsID); d != nil {
+		if perm, ok := d.(*dialog.Permissions); ok && perm.ToolCallID() == notification.ToolCallID {
+			m.dialog.CloseDialog(dialog.PermissionsID)
 		}
 	}
 }
@@ -3524,6 +3610,7 @@ func (m *UI) newSession() tea.Cmd {
 			return nil
 		},
 		m.loadPromptHistory(),
+		m.reportCurrentSession(""),
 	)
 }
 

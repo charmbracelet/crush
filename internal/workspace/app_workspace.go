@@ -68,6 +68,13 @@ func (w *AppWorkspace) ParseAgentToolSessionID(sessionID string) (string, string
 	return w.app.Sessions.ParseAgentToolSessionID(sessionID)
 }
 
+// SetCurrentSession is a no-op in single-client local mode. The
+// presence concept only matters when multiple clients can share a
+// workspace via the HTTP server.
+func (w *AppWorkspace) SetCurrentSession(ctx context.Context, sessionID string) error {
+	return nil
+}
+
 // -- Messages --
 
 func (w *AppWorkspace) ListMessages(ctx context.Context, sessionID string) ([]message.Message, error) {
@@ -174,16 +181,16 @@ func (w *AppWorkspace) GetDefaultSmallModel(providerID string) config.SelectedMo
 
 // -- Permissions --
 
-func (w *AppWorkspace) PermissionGrant(perm permission.PermissionRequest) {
-	w.app.Permissions.Grant(perm)
+func (w *AppWorkspace) PermissionGrant(perm permission.PermissionRequest) bool {
+	return w.app.Permissions.Grant(perm)
 }
 
-func (w *AppWorkspace) PermissionGrantPersistent(perm permission.PermissionRequest) {
-	w.app.Permissions.GrantPersistent(perm)
+func (w *AppWorkspace) PermissionGrantPersistent(perm permission.PermissionRequest) bool {
+	return w.app.Permissions.GrantPersistent(perm)
 }
 
-func (w *AppWorkspace) PermissionDeny(perm permission.PermissionRequest) {
-	w.app.Permissions.Deny(perm)
+func (w *AppWorkspace) PermissionDeny(perm permission.PermissionRequest) bool {
+	return w.app.Permissions.Deny(perm)
 }
 
 func (w *AppWorkspace) PermissionSkipRequests() bool {

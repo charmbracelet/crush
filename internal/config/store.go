@@ -649,6 +649,9 @@ func (s *ConfigStore) ReloadFromDisk(ctx context.Context) error {
 		s.reloadInProgress = false
 	}()
 
+	// Migrate deprecated disable_notifications before reloading config.
+	migrateDisableNotifications()
+
 	configPaths := lookupConfigs(s.workingDir)
 	cfg, loadedPaths, err := loadFromConfigPaths(configPaths)
 	if err != nil {

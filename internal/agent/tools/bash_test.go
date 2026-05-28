@@ -21,11 +21,13 @@ func (m *mockBashPermissionService) Request(ctx context.Context, req permission.
 	return true, nil
 }
 
-func (m *mockBashPermissionService) Grant(req permission.PermissionRequest) {}
+func (m *mockBashPermissionService) Grant(req permission.PermissionRequest) bool { return true }
 
-func (m *mockBashPermissionService) Deny(req permission.PermissionRequest) {}
+func (m *mockBashPermissionService) Deny(req permission.PermissionRequest) bool { return true }
 
-func (m *mockBashPermissionService) GrantPersistent(req permission.PermissionRequest) {}
+func (m *mockBashPermissionService) GrantPersistent(req permission.PermissionRequest) bool {
+	return true
+}
 
 func (m *mockBashPermissionService) AutoApproveSession(sessionID string) {}
 
@@ -90,11 +92,13 @@ func (m *recordingPermissionService) Request(ctx context.Context, req permission
 	return m.allow, nil
 }
 
-func (m *recordingPermissionService) Grant(req permission.PermissionRequest) {}
+func (m *recordingPermissionService) Grant(req permission.PermissionRequest) bool { return true }
 
-func (m *recordingPermissionService) Deny(req permission.PermissionRequest) {}
+func (m *recordingPermissionService) Deny(req permission.PermissionRequest) bool { return true }
 
-func (m *recordingPermissionService) GrantPersistent(req permission.PermissionRequest) {}
+func (m *recordingPermissionService) GrantPersistent(req permission.PermissionRequest) bool {
+	return true
+}
 
 func (m *recordingPermissionService) AutoApproveSession(sessionID string) {}
 

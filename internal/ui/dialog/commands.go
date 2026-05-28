@@ -511,14 +511,9 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_pills", label, "ctrl+t", ActionTogglePills{}))
 	}
 
-	// Add a command for toggling notifications.
-	cfg = c.com.Config()
-	notificationsDisabled := cfg != nil && cfg.Options != nil && cfg.Options.DisableNotifications
-	notificationLabel := "Disable Notifications"
-	if notificationsDisabled {
-		notificationLabel = "Enable Notifications"
-	}
-	commands = append(commands, NewCommandItem(c.com.Styles, "toggle_notifications", notificationLabel, "", ActionToggleNotifications{}))
+	// Add a command for selecting notification style via picker dialog.
+	notificationLabel := "Notification Style"
+	commands = append(commands, NewCommandItem(c.com.Styles, "select_notifications", notificationLabel, "", ActionOpenDialog{DialogID: NotificationsID}))
 
 	commands = append(
 		commands,

@@ -165,7 +165,7 @@ func Parse(path string) (*Skill, error) {
 
 // ParseContent parses a SKILL.md from raw bytes.
 func ParseContent(content []byte) (*Skill, error) {
-	frontmatter, body, err := splitFrontmatter(string(content))
+	frontmatter, body, err := SplitFrontmatter(string(content))
 	if err != nil {
 		return nil, err
 	}
@@ -180,8 +180,9 @@ func ParseContent(content []byte) (*Skill, error) {
 	return &skill, nil
 }
 
-// splitFrontmatter extracts YAML frontmatter and body from markdown content.
-func splitFrontmatter(content string) (frontmatter, body string, err error) {
+// SplitFrontmatter extracts YAML frontmatter and body from markdown content.
+// Subagent definitions share the format and parse with it too.
+func SplitFrontmatter(content string) (frontmatter, body string, err error) {
 	// Strip UTF-8 BOM for compatibility with editors that include it.
 	content = strings.TrimPrefix(content, "\uFEFF")
 	// Normalize line endings to \n for consistent parsing.

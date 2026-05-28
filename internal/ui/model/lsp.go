@@ -25,6 +25,8 @@ type LSPInfo struct {
 func (m *UI) lspInfo(width, maxItems int, isSection bool) string {
 	t := m.com.Styles
 
+	// Always pull fresh state to avoid race with async TrackConfigured.
+	m.lspStates = m.com.Workspace.LSPGetStates()
 	states := slices.SortedFunc(maps.Values(m.lspStates), func(a, b workspace.LSPClientInfo) int {
 		return strings.Compare(a.Name, b.Name)
 	})

@@ -232,6 +232,12 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 		if err := c.retryAfterUnauthorized(ctx, providerCfg); err == nil {
 			return run()
 		}
+		if c.notify != nil && model.ModelCfg.Provider == hyper.Name {
+			c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+				Type:       notify.TypeReAuthenticate,
+				ProviderID: model.ModelCfg.Provider,
+			})
+		}
 	}
 
 	return result, originalErr

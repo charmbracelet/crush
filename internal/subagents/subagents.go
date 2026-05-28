@@ -4,11 +4,14 @@ package subagents
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 
+	"github.com/charlievieth/fastwalk"
 	"gopkg.in/yaml.v3"
 )
 
@@ -204,10 +207,144 @@ func Deduplicate(all []*Subagent) []*Subagent {
 	return result
 }
 
+// DiscoveryState represents the outcome of discovering a single subagent file.
+type DiscoveryState int
+
+const (
+	// StateNormal indicates the subagent was parsed and validated successfully.
+	StateNormal DiscoveryState = iota
+	// StateError indicates discovery encountered a scan/parse/validate error.
+	StateError
+)
+
+// SubagentState represents the latest discovery status of a subagent file.
+type SubagentState struct {
+	Name  string
+	Path  string
+	State DiscoveryState
+	Err   error
+}
+
+// Event is published when subagent discovery completes.
+type Event struct {
+	States []*SubagentState
+}
+
+// cloneStates returns a deep copy of the given state slice so callers cannot
+// accidentally mutate the source.
+func cloneStates(states []*SubagentState) []*SubagentState {
+	if states == nil {
+		return nil
+	}
+	result := make([]*SubagentState, len(states))
+	for i, s := range states {
+		clone := *s
+		result[i] = &clone
+	}
+	return result
+}
+
+// DeduplicateStates removes duplicate subagent states by name. When duplicates
+// exist, the last occurrence wins (consistent with Deduplicate for subagents).
+func DeduplicateStates(all []*SubagentState) []*SubagentState {
+	seen := make(map[string]int, len(all))
+	for i, s := range all {
+		if s.Name != "" {
+			seen[s.Name] = i
+		}
+	}
+
+	result := make([]*SubagentState, 0, len(seen))
+	for i, s := range all {
+		// If it's the last occurrence of this name, or it has no name (error state), keep it
+		if s.Name == "" || seen[s.Name] == i {
+			result = append(result, s)
+		}
+	}
+	return result
+}
+
+// DiscoverWithStates finds all valid subagent definition files (*.md) in the
+// given paths recursively, and returns both the discovered subagents and a
+// per-file state slice describing parse/validation outcomes.
+func DiscoverWithStates(paths []string) ([]*Subagent, []*SubagentState) {
+	var agents []*Subagent
+	var states []*SubagentState
+	var mu sync.Mutex
+	seen := make(map[string]bool)
+
+	addState := func(name, path string, state DiscoveryState, err error) {
+		mu.Lock()
+		states = append(states, &SubagentState{
+			Name:  name,
+			Path:  path,
+			State: state,
+			Err:   err,
+		})
+		mu.Unlock()
+	}
+
+	for _, base := range paths {
+		conf := fastwalk.Config{
+			Follow:  true,
+			ToSlash: fastwalk.DefaultToSlash(),
+		}
+		err := fastwalk.Walk(&conf, base, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				slog.Warn("Failed to walk subagents path entry", "base", base, "path", path, "error", err)
+				addState("", path, StateError, err)
+				return nil
+			}
+			if d.IsDir() || !strings.HasSuffix(d.Name(), ".md") {
+				return nil
+			}
+			mu.Lock()
+			if seen[path] {
+				mu.Unlock()
+				return nil
+			}
+			seen[path] = true
+			mu.Unlock()
+
+			agent, err := Parse(path)
+			if err != nil {
+				slog.Warn("Failed to parse subagent file", "path", path, "error", err)
+				addState("", path, StateError, err)
+				return nil
+			}
+			if err := agent.Validate(); err != nil {
+				slog.Warn("Subagent validation failed", "path", path, "error", err)
+				addState(agent.Name, path, StateError, err)
+				return nil
+			}
+			slog.Debug("Successfully loaded subagent", "name", agent.Name, "path", path)
+			mu.Lock()
+			agents = append(agents, agent)
+			mu.Unlock()
+			addState(agent.Name, path, StateNormal, nil)
+			return nil
+		})
+		if err != nil && !os.IsNotExist(err) {
+			slog.Warn("Failed to walk subagents path", "path", base, "error", err)
+		}
+	}
+
+	// fastwalk traversal order is non-deterministic, so sort for stable output.
+	// Sort by filepath first, then alphabetically by name within each path.
+	slices.SortStableFunc(agents, func(a, b *Subagent) int {
+		if c := strings.Compare(strings.ToLower(a.FilePath), strings.ToLower(b.FilePath)); c != 0 {
+			return c
+		}
+		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+	})
+
+	return agents, states
+}
+
 // splitFrontmatter extracts YAML frontmatter and body from markdown content.
 func splitFrontmatter(content string) (frontmatter, body string, err error) {
 	// Strip UTF-8 BOM for compatibility with editors that include it.
-	content = strings.TrimPrefix(content, "\uFEFF")
+	content = strings.TrimPrefix(content, "\ufeff")
 	// Normalize line endings to \n for consistent parsing.
 	content = strings.ReplaceAll(content, "\r\n", "\n")
 	content = strings.ReplaceAll(content, "\r", "\n")

@@ -380,3 +380,91 @@ func TestDeduplicate(t *testing.T) {
 		require.Empty(t, result)
 	})
 }
+
+func TestDiscoverWithStates(t *testing.T) {
+	t.Parallel()
+
+	const validAgent = "---\nname: %s\ndescription: Does the thing.\n---\n\nYou are a specialist agent.\n"
+
+	t.Run("discovers_valid_agents_recursively", func(t *testing.T) {
+		t.Parallel()
+
+		tmp := t.TempDir()
+		subdir := filepath.Join(tmp, "subdir")
+		require.NoError(t, os.MkdirAll(subdir, 0o755))
+
+		require.NoError(t, os.WriteFile(
+			filepath.Join(tmp, "top-agent.md"),
+			[]byte("---\nname: top-agent\ndescription: Top level agent.\n---\n\nYou are a specialist agent.\n"),
+			0o644,
+		))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(subdir, "sub-agent.md"),
+			[]byte("---\nname: sub-agent\ndescription: Nested agent.\n---\n\nYou are a nested specialist agent.\n"),
+			0o644,
+		))
+
+		agents, states := DiscoverWithStates([]string{tmp})
+
+		require.Len(t, agents, 2)
+		names := make([]string, 0, len(agents))
+		for _, a := range agents {
+			names = append(names, a.Name)
+		}
+		require.Contains(t, names, "top-agent")
+		require.Contains(t, names, "sub-agent")
+		require.Len(t, states, 2)
+	})
+
+	t.Run("invalid_agent_no_frontmatter_appears_as_error_not_in_agents", func(t *testing.T) {
+		t.Parallel()
+
+		tmp := t.TempDir()
+		require.NoError(t, os.WriteFile(
+			filepath.Join(tmp, "bad-agent.md"),
+			[]byte("# No frontmatter here\n\nJust markdown.\n"),
+			0o644,
+		))
+
+		agents, states := DiscoverWithStates([]string{tmp})
+
+		require.Empty(t, agents)
+		require.Len(t, states, 1)
+		require.Equal(t, StateError, states[0].State)
+		require.Error(t, states[0].Err)
+	})
+
+	t.Run("nonexistent_path_silently_skipped", func(t *testing.T) {
+		t.Parallel()
+
+		agents, states := DiscoverWithStates([]string{filepath.Join(t.TempDir(), "does-not-exist")})
+
+		require.Empty(t, agents)
+		require.Empty(t, states)
+	})
+
+	t.Run("empty_dir_returns_no_results", func(t *testing.T) {
+		t.Parallel()
+
+		agents, states := DiscoverWithStates([]string{t.TempDir()})
+
+		require.Empty(t, agents)
+		require.Empty(t, states)
+	})
+
+	t.Run("non_md_files_ignored", func(t *testing.T) {
+		t.Parallel()
+
+		tmp := t.TempDir()
+		require.NoError(t, os.WriteFile(
+			filepath.Join(tmp, "agent.txt"),
+			[]byte("---\nname: txt-agent\ndescription: Should be ignored.\n---\n\nBody.\n"),
+			0o644,
+		))
+
+		agents, states := DiscoverWithStates([]string{tmp})
+
+		require.Empty(t, agents)
+		require.Empty(t, states)
+	})
+}

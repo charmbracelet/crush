@@ -37,14 +37,14 @@ func DefaultLightStyle() Style {
 		},
 		MissingLine: LineStyle{
 			LineNumber: lipgloss.NewStyle().
-				Background(charmtone.Ash),
+				Background(charmtone.Sash),
 			Code: lipgloss.NewStyle().
-				Background(charmtone.Ash),
+				Background(charmtone.Sash),
 		},
 		EqualLine: LineStyle{
 			LineNumber: lipgloss.NewStyle().
-				Foreground(charmtone.Charcoal).
-				Background(charmtone.Ash),
+				Foreground(charmtone.Char).
+				Background(charmtone.Sash),
 			Code: lipgloss.NewStyle().
 				Foreground(charmtone.Pepper).
 				Background(charmtone.Salt),
@@ -95,14 +95,14 @@ func DefaultDarkStyle() Style {
 		},
 		MissingLine: LineStyle{
 			LineNumber: lipgloss.NewStyle().
-				Background(charmtone.Charcoal),
+				Background(charmtone.Char),
 			Code: lipgloss.NewStyle().
-				Background(charmtone.Charcoal),
+				Background(charmtone.Char),
 		},
 		EqualLine: LineStyle{
 			LineNumber: lipgloss.NewStyle().
-				Foreground(charmtone.Ash).
-				Background(charmtone.Charcoal),
+				Foreground(charmtone.Sash).
+				Background(charmtone.Char),
 			Code: lipgloss.NewStyle().
 				Foreground(charmtone.Salt).
 				Background(charmtone.Pepper),

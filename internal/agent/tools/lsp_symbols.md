@@ -1,0 +1,1 @@
+List document symbols (functions, types, methods, etc.) for a file via LSP. Returns a structured outline showing symbol names, kinds, and line ranges. Useful for understanding file structure before editing or navigating unfamiliar code.

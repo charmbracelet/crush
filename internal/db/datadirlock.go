@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/charmbracelet/crush/internal/lock"
 	"github.com/charmbracelet/crush/internal/version"
 )
 
@@ -53,9 +54,9 @@ func acquireDataDirLock(dataDir string) (*dataDirLock, error) {
 	}
 
 	path := filepath.Join(dataDir, dataDirLockFile)
-	release, err := tryFileLock(path)
+	release, err := lock.TryFile(path)
 	if err != nil {
-		if errors.Is(err, errLockContended) {
+		if errors.Is(err, lock.ErrContended) {
 			return nil, contendedLockError(dataDir, path)
 		}
 		return nil, fmt.Errorf("failed to lock data directory %q: %w", dataDir, err)

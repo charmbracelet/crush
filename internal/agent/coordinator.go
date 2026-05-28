@@ -66,7 +66,9 @@ var copilotResponsesModels = map[string]bool{
 	"gpt-5.2":       true,
 	"gpt-5.2-codex": true,
 	"gpt-5.3-codex": true,
+	"gpt-5.4":       true,
 	"gpt-5.4-mini":  true,
+	"gpt-5.5":       true,
 	"gpt-5-mini":    true,
 }
 

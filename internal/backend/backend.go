@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/crush/internal/db"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/subagents"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/google/uuid"
@@ -294,7 +295,15 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 		skills.WithWorkingDir(discoveryCfg.WorkingDir),
 	)
 
-	appWorkspace, err := app.New(b.ctx, conn, cfg, skillsMgr)
+	subagentsCfg := subagents.DiscoveryConfig{
+		SubagentsPaths:    cfg.Config().Options.SubagentsPaths,
+		DisabledSubagents: cfg.Config().Options.DisabledSubagents,
+		WorkingDir:        cfg.WorkingDir(),
+	}
+	allSubagents, activeSubagents, subagentStates := subagents.DiscoverFromConfig(subagentsCfg)
+	subagentsMgr := subagents.NewManager(allSubagents, activeSubagents, subagentStates)
+
+	appWorkspace, err := app.New(b.ctx, conn, cfg, skillsMgr, subagentsMgr)
 	if err != nil {
 		return nil, proto.Workspace{}, fmt.Errorf("failed to create app workspace: %w", err)
 	}

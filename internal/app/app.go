@@ -35,6 +35,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/subagents"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/update"
@@ -62,7 +63,8 @@ type App struct {
 
 	LSPManager *lsp.Manager
 
-	Skills *skills.Manager
+	Skills    *skills.Manager
+	Subagents *subagents.Manager
 
 	config *config.ConfigStore
 
@@ -87,8 +89,9 @@ type App struct {
 // New initializes a new application instance. skillsMgr carries the
 // per-workspace skill discovery results computed by the caller; the
 // caller is responsible for constructing it (typically via
-// skills.NewManager + skills.DiscoverFromConfig).
-func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr *skills.Manager) (*App, error) {
+// skills.NewManager + skills.DiscoverFromConfig). subagentsMgr carries
+// the per-workspace subagent discovery results; may be nil.
+func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr *skills.Manager, subagentsMgr *subagents.Manager) (*App, error) {
 	q := db.New(conn)
 	sessions := session.NewService(q, conn)
 	messages := message.NewService(q)
@@ -108,6 +111,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		FileTracker: filetracker.NewService(q),
 		LSPManager:  lsp.NewManager(store),
 		Skills:      skillsMgr,
+		Subagents:   subagentsMgr,
 
 		globalCtx: ctx,
 
@@ -591,6 +595,7 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.agentNotifications,
 		app.runCompletions,
 		app.Skills,
+		app.Subagents,
 	)
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)

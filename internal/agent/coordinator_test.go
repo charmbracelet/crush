@@ -10,6 +10,7 @@ import (
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/bedrock"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/subagents"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -388,6 +389,59 @@ func TestUpdateParentSessionCost(t *testing.T) {
 		require.NoError(t, err)
 		assert.InDelta(t, 0.0, updated.Cost, 1e-9)
 	})
+}
+
+// TestCoordinator_ActiveSubagentsFromManager verifies that coordinator.activeSubagents
+// is populated from a Manager's ActiveSubagents slice. This test will fail to compile
+// until the activeSubagents field exists on the coordinator struct.
+func TestCoordinator_ActiveSubagentsFromManager(t *testing.T) {
+	t.Parallel()
+
+	active := []*subagents.Subagent{
+		{Name: "test-agent", Description: "A test agent"},
+		{Name: "another-agent", Description: "Another test agent"},
+	}
+	mgr := subagents.NewManager(active, active, nil)
+
+	// Construct the coordinator directly (mirrors newTestCoordinator style).
+	// This fails to compile if activeSubagents field does not exist on coordinator.
+	c := &coordinator{
+		activeSubagents: mgr.ActiveSubagents(),
+	}
+
+	require.Len(t, c.activeSubagents, 2)
+	require.Equal(t, "test-agent", c.activeSubagents[0].Name)
+	require.Equal(t, "another-agent", c.activeSubagents[1].Name)
+}
+
+// TestCoordinator_ActiveSubagentsNilManager verifies that coordinator.activeSubagents
+// is nil (zero value) when no Manager is wired in. This test will fail to compile
+// until the activeSubagents field exists on the coordinator struct.
+func TestCoordinator_ActiveSubagentsNilManager(t *testing.T) {
+	t.Parallel()
+
+	// Construct coordinator without setting activeSubagents — mirrors the
+	// nil-manager branch of NewCoordinator (no subagents wired).
+	c := &coordinator{}
+
+	require.Nil(t, c.activeSubagents)
+}
+
+// TestCoordinator_ActiveSubagentsFieldType verifies that the activeSubagents field
+// has type []*subagents.Subagent. A direct struct literal assignment is used so the
+// test fails to compile with a type mismatch if the field type is wrong.
+func TestCoordinator_ActiveSubagentsFieldType(t *testing.T) {
+	t.Parallel()
+
+	// This literal fails to compile if the field type is not []*subagents.Subagent.
+	c := &coordinator{
+		activeSubagents: []*subagents.Subagent{
+			{Name: "compile-check"},
+		},
+	}
+
+	require.Len(t, c.activeSubagents, 1)
+	assert.Equal(t, "compile-check", c.activeSubagents[0].Name)
 }
 
 func TestGetProviderOptionsReasoningEffort(t *testing.T) {

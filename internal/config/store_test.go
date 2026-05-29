@@ -732,9 +732,11 @@ func TestRefreshOAuthToken_UsesDiskTokenWhenDifferent(t *testing.T) {
 	require.Equal(t, "refresh-abc", updatedConfig.OAuthToken.RefreshToken)
 }
 
-// TestConfigStore_SetConfigFields_concurrent verifies that concurrent writes do
-// not lose data when protected by the in-process mutex and cross-process flock.
-func TestConfigStore_SetConfigFields_concurrent(t *testing.T) {
+// TestConfigStore_SetConfigFields_concurrentInProcess verifies that
+// concurrent in-process writes do not lose data when serialized by the
+// s.mu mutex. This does not exercise the cross-process flock; testing
+// that would require spawning a separate OS process.
+func TestConfigStore_SetConfigFields_concurrentInProcess(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()

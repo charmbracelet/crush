@@ -172,9 +172,6 @@ func (s *ConfigStore) atomicWrite(scope Scope, fn func(current []byte) ([]byte, 
 		return err
 	}
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create config directory: %w", err)
-	}
 	return atomicWriteFile(path, newData, 0o600)
 }
 
@@ -221,11 +218,20 @@ func (s *ConfigStore) SetConfigField(scope Scope, key string, value any) error {
 // The write is protected by an in-process mutex and a cross-process flock
 // to prevent races between concurrent writers in different processes.
 func (s *ConfigStore) SetConfigFields(scope Scope, kv map[string]any) error {
+	// Sort keys for deterministic output regardless of map iteration
+	// order. This also ensures consistent results when callers pass
+	// overlapping JSONPath keys (e.g. "a" and "a.b").
+	keys := make([]string, 0, len(kv))
+	for k := range kv {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+
 	err := s.atomicWrite(scope, func(data []byte) ([]byte, error) {
 		v := string(data)
-		for key, value := range kv {
+		for _, key := range keys {
 			var sErr error
-			v, sErr = sjson.Set(v, key, value)
+			v, sErr = sjson.Set(v, key, kv[key])
 			if sErr != nil {
 				return nil, fmt.Errorf("failed to set config field %s: %w", key, sErr)
 			}

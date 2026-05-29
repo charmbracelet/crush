@@ -23,12 +23,15 @@ import (
 type Prompt struct {
 	name               string
 	template           string
-	literal            bool
 	now                func() time.Time
 	platform           string
 	workingDir         string
 	subagentBody       string
 	preloadedSkillsXML string
+	// suppressAvailableSkills omits the <available_skills> discovery list. Set
+	// for subagents that pin an explicit skills set, so the preloaded skills are
+	// their only skill exposure.
+	suppressAvailableSkills bool
 }
 
 type PromptDat struct {
@@ -72,6 +75,10 @@ func WithWorkingDir(workingDir string) Option {
 	}
 }
 
+func WithSuppressAvailableSkills(suppress bool) Option {
+	return func(p *Prompt) { p.suppressAvailableSkills = suppress }
+}
+
 func WithSubagentBody(body string) Option {
 	return func(p *Prompt) { p.subagentBody = body }
 }
@@ -92,22 +99,7 @@ func NewPrompt(name, promptTemplate string, opts ...Option) (*Prompt, error) {
 	return p, nil
 }
 
-// NewLiteralPrompt creates a Prompt that returns its content verbatim without
-// any template processing. This is useful when the prompt body is already
-// fully rendered (e.g. loaded from a subagent markdown file).
-func NewLiteralPrompt(content string) *Prompt {
-	return &Prompt{
-		name:     "literal",
-		template: content,
-		literal:  true,
-		now:      time.Now,
-	}
-}
-
 func (p *Prompt) Build(ctx context.Context, provider, model string, store *config.ConfigStore) (string, error) {
-	if p.literal {
-		return p.template, nil
-	}
 	t, err := template.New(p.name).Parse(p.template)
 	if err != nil {
 		return "", fmt.Errorf("parsing template: %w", err)
@@ -207,38 +199,41 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 	contextFiles := loadContextFiles(cfg.Options.ContextPaths, store)
 	globalContextFiles := loadContextFiles(cfg.Options.GlobalContextPaths, store)
 
-	// Discover and load skills metadata.
+	// Discover and load skills metadata. Skipped entirely when the prompt
+	// suppresses the available-skills list (subagents that pin an explicit
+	// skills set), which also avoids the discovery filesystem walk.
 	var availSkillXML string
-
-	// Start with builtin skills.
-	allSkills := skills.DiscoverBuiltin()
-	builtinNames := make(map[string]bool, len(allSkills))
-	for _, s := range allSkills {
-		builtinNames[s.Name] = true
-	}
-
-	// Discover user skills from configured paths.
-	if len(cfg.Options.SkillsPaths) > 0 {
-		expandedPaths := make([]string, 0, len(cfg.Options.SkillsPaths))
-		for _, pth := range cfg.Options.SkillsPaths {
-			expandedPaths = append(expandedPaths, expandPath(pth, store))
+	if !p.suppressAvailableSkills {
+		// Start with builtin skills.
+		allSkills := skills.DiscoverBuiltin()
+		builtinNames := make(map[string]bool, len(allSkills))
+		for _, s := range allSkills {
+			builtinNames[s.Name] = true
 		}
-		for _, userSkill := range skills.Discover(expandedPaths) {
-			if builtinNames[userSkill.Name] {
-				slog.Warn("User skill overrides builtin skill", "name", userSkill.Name)
+
+		// Discover user skills from configured paths.
+		if len(cfg.Options.SkillsPaths) > 0 {
+			expandedPaths := make([]string, 0, len(cfg.Options.SkillsPaths))
+			for _, pth := range cfg.Options.SkillsPaths {
+				expandedPaths = append(expandedPaths, expandPath(pth, store))
 			}
-			allSkills = append(allSkills, userSkill)
+			for _, userSkill := range skills.Discover(expandedPaths) {
+				if builtinNames[userSkill.Name] {
+					slog.Warn("User skill overrides builtin skill", "name", userSkill.Name)
+				}
+				allSkills = append(allSkills, userSkill)
+			}
 		}
-	}
 
-	// Deduplicate: user skills override builtins with the same name.
-	allSkills = skills.Deduplicate(allSkills)
+		// Deduplicate: user skills override builtins with the same name.
+		allSkills = skills.Deduplicate(allSkills)
 
-	// Filter out disabled skills.
-	allSkills = skills.Filter(allSkills, cfg.Options.DisabledSkills)
+		// Filter out disabled skills.
+		allSkills = skills.Filter(allSkills, cfg.Options.DisabledSkills)
 
-	if len(allSkills) > 0 {
-		availSkillXML = skills.ToPromptXML(allSkills)
+		if len(allSkills) > 0 {
+			availSkillXML = skills.ToPromptXML(allSkills)
+		}
 	}
 
 	isGit := isGitRepo(store.WorkingDir())

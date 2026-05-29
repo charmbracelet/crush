@@ -3,44 +3,110 @@ package agent
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 
 	"charm.land/fantasy"
 
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/subagents"
 )
 
 //go:embed templates/agent_tool.md
 var agentToolDescription string
 
+// AgentParams is kept for backward compatibility; new code uses AgentDispatchParams.
 type AgentParams struct {
 	Prompt string `json:"prompt" description:"The task for the agent to perform"`
+}
+
+// AgentDispatchParams is the input to the dispatcher agent tool.
+type AgentDispatchParams struct {
+	SubagentType string `json:"subagent_type,omitempty"`
+	Prompt       string `json:"prompt"`
 }
 
 const (
 	AgentToolName = "agent"
 )
 
+// dispatcherTool implements fantasy.AgentTool with a dynamically-built schema.
+type dispatcherTool struct {
+	info         fantasy.ToolInfo
+	dispatch     func(ctx context.Context, params AgentDispatchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error)
+	providerOpts fantasy.ProviderOptions
+}
+
+func (d *dispatcherTool) Info() fantasy.ToolInfo                          { return d.info }
+func (d *dispatcherTool) ProviderOptions() fantasy.ProviderOptions        { return d.providerOpts }
+func (d *dispatcherTool) SetProviderOptions(opts fantasy.ProviderOptions) { d.providerOpts = opts }
+func (d *dispatcherTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+	var params AgentDispatchParams
+	if err := json.Unmarshal([]byte(call.Input), &params); err != nil {
+		return fantasy.NewTextErrorResponse("invalid parameters: " + err.Error()), nil
+	}
+	return d.dispatch(ctx, params, call)
+}
+
+// buildAgentDispatchInfo builds the ToolInfo for the agent dispatcher tool with
+// a dynamic subagent_type enum derived from the currently active subagents.
+func buildAgentDispatchInfo(activeSubagents []*subagents.Subagent) fantasy.ToolInfo {
+	enumValues := []string{"task"}
+	for _, sa := range activeSubagents {
+		enumValues = append(enumValues, sa.Name)
+	}
+
+	typeDesc := `The type of agent to use. Use "task" for general search and research tasks.`
+	if len(activeSubagents) > 0 {
+		lines := make([]string, 0, len(activeSubagents))
+		for _, sa := range activeSubagents {
+			lines = append(lines, fmt.Sprintf("- %s: %s", sa.Name, sa.Description))
+		}
+		typeDesc += "\n\nAvailable specialized agents:\n" + strings.Join(lines, "\n")
+	}
+
+	return fantasy.ToolInfo{
+		Name:        AgentToolName,
+		Description: agentToolDescription,
+		Parameters: map[string]any{
+			"subagent_type": map[string]any{
+				"type":        "string",
+				"enum":        enumValues,
+				"description": typeDesc,
+			},
+			"prompt": map[string]any{
+				"type":        "string",
+				"description": "The task for the agent to perform",
+			},
+		},
+		Required: []string{"prompt"},
+		Parallel: true,
+	}
+}
+
 func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) {
-	agentCfg, ok := c.cfg.Config().Agents[config.AgentTask]
+	taskCfg, ok := c.cfg.Config().Agents[config.AgentTask]
 	if !ok {
 		return nil, errors.New("task agent not configured")
 	}
-	prompt, err := taskPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	taskPr, err := taskPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	if err != nil {
+		return nil, err
+	}
+	taskAgent, err := c.buildAgent(ctx, taskPr, taskCfg, true)
 	if err != nil {
 		return nil, err
 	}
 
-	agent, err := c.buildAgent(ctx, prompt, agentCfg, true)
-	if err != nil {
-		return nil, err
-	}
-	return fantasy.NewParallelAgentTool(
-		AgentToolName,
-		agentToolDescription,
-		func(ctx context.Context, params AgentParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+	info := buildAgentDispatchInfo(c.activeSubagents)
+
+	return &dispatcherTool{
+		info: info,
+		dispatch: func(ctx context.Context, params AgentDispatchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Prompt == "" {
 				return fantasy.NewTextErrorResponse("prompt is required"), nil
 			}
@@ -49,10 +115,39 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 			if sessionID == "" {
 				return fantasy.ToolResponse{}, errors.New("session id missing from context")
 			}
-
 			agentMessageID := tools.GetMessageFromContext(ctx)
 			if agentMessageID == "" {
 				return fantasy.ToolResponse{}, errors.New("agent message id missing from context")
+			}
+
+			subagentType := params.SubagentType
+			if subagentType == "" || subagentType == config.AgentTask {
+				return c.runSubAgent(ctx, subAgentParams{
+					Agent:          taskAgent,
+					SessionID:      sessionID,
+					AgentMessageID: agentMessageID,
+					ToolCallID:     call.ID,
+					Prompt:         params.Prompt,
+					SessionTitle:   "New Agent Session",
+				})
+			}
+
+			var sa *subagents.Subagent
+			for _, active := range c.activeSubagents {
+				if active.Name == subagentType {
+					sa = active
+					break
+				}
+			}
+			if sa == nil {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("unknown subagent type: %q", subagentType)), nil
+			}
+
+			agentCfg := sa.ToConfigAgent(taskCfg)
+			subPr := subagentBodyPrompt(sa.Body, prompt.WithWorkingDir(c.cfg.WorkingDir()))
+			agent, err := c.buildAgent(ctx, subPr, agentCfg, true)
+			if err != nil {
+				return fantasy.ToolResponse{}, fmt.Errorf("build subagent %q: %w", sa.Name, err)
 			}
 
 			return c.runSubAgent(ctx, subAgentParams{
@@ -61,8 +156,8 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 				AgentMessageID: agentMessageID,
 				ToolCallID:     call.ID,
 				Prompt:         params.Prompt,
-				SessionTitle:   "New Agent Session",
+				SessionTitle:   sa.Name + " Agent Session",
 			})
 		},
-	), nil
+	}, nil
 }

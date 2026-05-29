@@ -386,7 +386,7 @@ func TestValidateAgainst(t *testing.T) {
 	t.Parallel()
 
 	knownModels := map[string]bool{"gpt-4o": true, "claude-opus-4-7": true}
-	isKnown := func(id string) bool { return knownModels[id] }
+	isKnown := func(provider, id string) bool { return knownModels[id] }
 
 	tests := []struct {
 		name    string
@@ -446,6 +446,163 @@ func TestValidateAgainst_NilResolver_AcceptsAnyNonEmptyModel(t *testing.T) {
 	// should accept any non-empty model string and defer enforcement.
 	s := Subagent{Name: "a", Description: "d", Model: "gpt-99-future"}
 	require.NoError(t, s.ValidateAgainst(nil))
+}
+
+// TestValidateAgainst_ProviderPropagated verifies that ValidateAgainst forwards
+// the subagent's Provider field as the first argument to the resolver.
+func TestValidateAgainst_ProviderPropagated(t *testing.T) {
+	t.Parallel()
+
+	var capturedProvider, capturedModel string
+	isKnown := func(provider, model string) bool {
+		capturedProvider = provider
+		capturedModel = model
+		return true
+	}
+
+	s := Subagent{Name: "a", Description: "d", Provider: "openai", Model: "gpt-4o"}
+	require.NoError(t, s.ValidateAgainst(isKnown))
+	require.Equal(t, "openai", capturedProvider)
+	require.Equal(t, "gpt-4o", capturedModel)
+}
+
+// TestValidateAgainst_EmptyProviderPropagated verifies that when Provider is
+// empty, ValidateAgainst calls the resolver with an empty provider string
+// (allowing callers to perform an all-provider scan).
+func TestValidateAgainst_EmptyProviderPropagated(t *testing.T) {
+	t.Parallel()
+
+	var capturedProvider string
+	isKnown := func(provider, model string) bool {
+		capturedProvider = provider
+		return true
+	}
+
+	s := Subagent{Name: "a", Description: "d", Provider: "", Model: "gpt-4o"}
+	require.NoError(t, s.ValidateAgainst(isKnown))
+	require.Equal(t, "", capturedProvider)
+}
+
+// TestParseContent_ProviderField verifies that the provider field round-trips
+// through YAML frontmatter parsing.
+func TestParseContent_ProviderField(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		content      string
+		wantProvider string
+	}{
+		{
+			name: "provider_set",
+			content: `---
+name: my-agent
+description: A test agent.
+provider: openai
+model: gpt-4o
+---
+`,
+			wantProvider: "openai",
+		},
+		{
+			name: "provider_absent_is_empty",
+			content: `---
+name: my-agent
+description: A test agent.
+---
+`,
+			wantProvider: "",
+		},
+		{
+			name: "provider_explicit_empty",
+			content: `---
+name: my-agent
+description: A test agent.
+provider: ""
+---
+`,
+			wantProvider: "",
+		},
+		{
+			name: "provider_anthropic",
+			content: `---
+name: my-agent
+description: A test agent.
+provider: anthropic
+model: claude-opus-4-7
+---
+`,
+			wantProvider: "anthropic",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			agent, err := ParseContent([]byte(tt.content))
+			require.NoError(t, err)
+			require.Equal(t, tt.wantProvider, agent.Provider)
+		})
+	}
+}
+
+// TestValidate_ProviderRequiresSpecificModel verifies that when provider is set,
+// model must be a specific model ID (not empty, "large", or "small").
+func TestValidate_ProviderRequiresSpecificModel(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		agent   Subagent
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name:    "provider_set_no_model",
+			agent:   Subagent{Name: "my-agent", Description: "Does something.", Provider: "openai"},
+			wantErr: true,
+			errMsg:  "model",
+		},
+		{
+			name:    "provider_set_model_large",
+			agent:   Subagent{Name: "my-agent", Description: "Does something.", Provider: "openai", Model: "large"},
+			wantErr: true,
+			errMsg:  "model",
+		},
+		{
+			name:    "provider_set_model_small",
+			agent:   Subagent{Name: "my-agent", Description: "Does something.", Provider: "openai", Model: "small"},
+			wantErr: true,
+			errMsg:  "model",
+		},
+		{
+			name:  "provider_set_specific_model_ok",
+			agent: Subagent{Name: "my-agent", Description: "Does something.", Provider: "openai", Model: "gpt-4o"},
+		},
+		{
+			name:  "no_provider_model_large_ok",
+			agent: Subagent{Name: "my-agent", Description: "Does something.", Provider: "", Model: "large"},
+		},
+		{
+			name:  "no_provider_no_model_ok",
+			agent: Subagent{Name: "my-agent", Description: "Does something.", Provider: "", Model: ""},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tt.agent.Validate()
+			if tt.wantErr {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tt.errMsg)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 }
 
 func TestFilter(t *testing.T) {
@@ -509,10 +666,206 @@ func TestDeduplicate(t *testing.T) {
 	})
 }
 
-func TestDiscoverWithStates(t *testing.T) {
+// TestParseContent_ColorField verifies that the color field round-trips through
+// YAML frontmatter parsing for all defined color values plus absent/empty.
+func TestParseContent_ColorField(t *testing.T) {
 	t.Parallel()
 
-	const validAgent = "---\nname: %s\ndescription: Does the thing.\n---\n\nYou are a specialist agent.\n"
+	tests := []struct {
+		name      string
+		content   string
+		wantColor string
+	}{
+		{
+			name: "color_red",
+			content: `---
+name: my-agent
+description: A test agent.
+color: red
+---
+`,
+			wantColor: "red",
+		},
+		{
+			name: "color_orange",
+			content: `---
+name: my-agent
+description: A test agent.
+color: orange
+---
+`,
+			wantColor: "orange",
+		},
+		{
+			name: "color_yellow",
+			content: `---
+name: my-agent
+description: A test agent.
+color: yellow
+---
+`,
+			wantColor: "yellow",
+		},
+		{
+			name: "color_green",
+			content: `---
+name: my-agent
+description: A test agent.
+color: green
+---
+`,
+			wantColor: "green",
+		},
+		{
+			name: "color_cyan",
+			content: `---
+name: my-agent
+description: A test agent.
+color: cyan
+---
+`,
+			wantColor: "cyan",
+		},
+		{
+			name: "color_blue",
+			content: `---
+name: my-agent
+description: A test agent.
+color: blue
+---
+`,
+			wantColor: "blue",
+		},
+		{
+			name: "color_purple",
+			content: `---
+name: my-agent
+description: A test agent.
+color: purple
+---
+`,
+			wantColor: "purple",
+		},
+		{
+			name: "color_pink",
+			content: `---
+name: my-agent
+description: A test agent.
+color: pink
+---
+`,
+			wantColor: "pink",
+		},
+		{
+			name: "color_absent_is_empty",
+			content: `---
+name: my-agent
+description: A test agent.
+---
+`,
+			wantColor: "",
+		},
+		{
+			name: "color_explicit_empty_string",
+			content: `---
+name: my-agent
+description: A test agent.
+color: ""
+---
+`,
+			wantColor: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			agent, err := ParseContent([]byte(tt.content))
+			require.NoError(t, err)
+			require.Equal(t, tt.wantColor, agent.Color)
+		})
+	}
+}
+
+// TestValidate_ColorField verifies that Validate accepts all eight defined
+// color constants and empty, and rejects everything else with an error
+// mentioning "color".
+func TestValidate_ColorField(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		color   string
+		wantErr bool
+	}{
+		{name: "empty_accepted", color: ""},
+		{name: "red_accepted", color: ColorRed},
+		{name: "orange_accepted", color: ColorOrange},
+		{name: "yellow_accepted", color: ColorYellow},
+		{name: "green_accepted", color: ColorGreen},
+		{name: "cyan_accepted", color: ColorCyan},
+		{name: "blue_accepted", color: ColorBlue},
+		{name: "purple_accepted", color: ColorPurple},
+		{name: "pink_accepted", color: ColorPink},
+		{name: "ultra_rejected", color: "ultra", wantErr: true},
+		{name: "RED_rejected_case_sensitive", color: "RED", wantErr: true},
+		{name: "lime_rejected", color: "lime", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			s := Subagent{
+				Name:        "test-agent",
+				Description: "Does something.",
+				Color:       tt.color,
+			}
+			err := s.Validate()
+			if tt.wantErr {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), "color")
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestResolvedColor_ExplicitColor verifies that ResolvedColor returns the
+// explicitly set Color value when it is non-empty.
+func TestResolvedColor_ExplicitColor(t *testing.T) {
+	t.Parallel()
+
+	s := Subagent{
+		Name:        "my-agent",
+		Description: "Does something.",
+		Color:       ColorBlue,
+	}
+	require.Equal(t, ColorBlue, s.ResolvedColor())
+}
+
+// TestResolvedColor_AutoFallback verifies that when Color is empty,
+// ResolvedColor returns AutoColor(Name): a non-empty string that is one of the
+// eight valid color names.
+func TestResolvedColor_AutoFallback(t *testing.T) {
+	t.Parallel()
+
+	s := Subagent{
+		Name:        "my-agent",
+		Description: "Does something.",
+		Color:       "",
+	}
+
+	result := s.ResolvedColor()
+	require.NotEmpty(t, result, "ResolvedColor must not return empty when Color is unset")
+	require.True(t, IsValidColor(result), "ResolvedColor fallback %q must be a valid color", result)
+	require.Equal(t, AutoColor(s.Name), result, "ResolvedColor must equal AutoColor(Name) when Color is empty")
+}
+
+func TestDiscoverWithStates(t *testing.T) {
+	t.Parallel()
 
 	t.Run("discovers_valid_agents_recursively", func(t *testing.T) {
 		t.Parallel()
@@ -594,5 +947,51 @@ func TestDiscoverWithStates(t *testing.T) {
 
 		require.Empty(t, agents)
 		require.Empty(t, states)
+	})
+
+	t.Run("resolver_receives_provider_and_model", func(t *testing.T) {
+		t.Parallel()
+
+		tmp := t.TempDir()
+		require.NoError(t, os.WriteFile(
+			filepath.Join(tmp, "specific-agent.md"),
+			[]byte("---\nname: specific-agent\ndescription: Uses a specific model.\nprovider: openai\nmodel: gpt-4o\n---\n\nBody.\n"),
+			0o644,
+		))
+
+		var capturedProvider, capturedModel string
+		isKnown := func(provider, model string) bool {
+			capturedProvider = provider
+			capturedModel = model
+			return true
+		}
+
+		agents, states := DiscoverWithStates([]string{tmp}, isKnown)
+
+		require.Len(t, agents, 1)
+		require.Len(t, states, 1)
+		require.Equal(t, StateNormal, states[0].State)
+		require.Equal(t, "openai", capturedProvider)
+		require.Equal(t, "gpt-4o", capturedModel)
+	})
+
+	t.Run("unknown_model_with_resolver_produces_error_state", func(t *testing.T) {
+		t.Parallel()
+
+		tmp := t.TempDir()
+		require.NoError(t, os.WriteFile(
+			filepath.Join(tmp, "unknown-model-agent.md"),
+			[]byte("---\nname: unknown-model-agent\ndescription: Uses an unknown model.\nmodel: no-such-model-99\n---\n\nBody.\n"),
+			0o644,
+		))
+
+		isKnown := func(provider, model string) bool { return false }
+
+		agents, states := DiscoverWithStates([]string{tmp}, isKnown)
+
+		require.Empty(t, agents)
+		require.Len(t, states, 1)
+		require.Equal(t, StateError, states[0].State)
+		require.Error(t, states[0].Err)
 	})
 }

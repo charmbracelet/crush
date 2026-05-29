@@ -115,7 +115,10 @@ func TestToConfigAgent(t *testing.T) {
 			},
 		},
 		{
-			name: "model_small",
+			// The `model:` field no longer drives config.Agent.Model — model
+			// selection moved to the coordinator (buildAgent). ToConfigAgent
+			// inherits the base type regardless of the subagent's model alias.
+			name: "model_small_alias_inherits_base",
 			subagent: Subagent{
 				Name:        "my-agent",
 				Description: "Does something.",
@@ -126,11 +129,11 @@ func TestToConfigAgent(t *testing.T) {
 			},
 			check: func(t *testing.T, result config.Agent) {
 				t.Helper()
-				require.Equal(t, config.SelectedModelType("small"), result.Model)
+				require.Equal(t, config.SelectedModelTypeLarge, result.Model)
 			},
 		},
 		{
-			name: "model_large",
+			name: "model_large_alias_inherits_base",
 			subagent: Subagent{
 				Name:        "my-agent",
 				Description: "Does something.",
@@ -141,7 +144,7 @@ func TestToConfigAgent(t *testing.T) {
 			},
 			check: func(t *testing.T, result config.Agent) {
 				t.Helper()
-				require.Equal(t, config.SelectedModelType("large"), result.Model)
+				require.Equal(t, config.SelectedModelTypeSmall, result.Model)
 			},
 		},
 		{

@@ -7,11 +7,11 @@ import (
 	"image"
 
 	"charm.land/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/ultraviolet/layout"
 	"github.com/taigrr/crush/internal/ui/common"
 	"github.com/taigrr/crush/internal/ui/logo"
 	"github.com/taigrr/crush/internal/worktree"
-	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/charmbracelet/ultraviolet/layout"
 )
 
 // modelInfo renders the current model information including reasoning
@@ -166,7 +166,7 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	width := area.Dx()
 	height := area.Dy()
 
-	title := t.Sidebar.SessionTitle.Width(width).MaxHeight(2).Render(m.session.Title)
+	title := m.renderSessionTitle(t.Sidebar.SessionTitle, width)
 	// Use BaseDir to show project root, not worktree path.
 	cwd := common.PrettyPath(t, m.com.Workspace.BaseDir(), width)
 	sidebarLogo := m.sidebarLogo

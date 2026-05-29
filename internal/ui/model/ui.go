@@ -278,6 +278,9 @@ type UI struct {
 	todoSpinner    spinner.Model
 	todoIsSpinning bool
 
+	// titleAnim drives the session-title reveal animation.
+	titleAnim titleAnimState
+
 	// mouse highlighting related state
 	lastClickTime time.Time
 
@@ -654,7 +657,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.session != nil && msg.Payload.ID == m.session.ID {
 			prevHasInProgress := hasInProgressTodo(m.session.Todos)
+			prevTitle := m.session.Title
 			m.session = &msg.Payload
+			if msg.Payload.Title != "" && msg.Payload.Title != prevTitle {
+				cmds = append(cmds, m.startTitleAnimation(msg.Payload.Title))
+			}
 			if !prevHasInProgress && hasInProgressTodo(m.session.Todos) {
 				m.todoIsSpinning = true
 				cmds = append(cmds, m.todoSpinner.Tick)
@@ -886,6 +893,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					cmds = append(cmds, cmd)
 				}
 			}
+		}
+	case titleAnimTickMsg:
+		if cmd := m.handleTitleAnimTick(msg); cmd != nil {
+			cmds = append(cmds, cmd)
 		}
 	case spinner.TickMsg:
 		if m.dialog.HasDialogs() {
@@ -4119,7 +4130,7 @@ func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
 	width := area.Dx() - s.CompactDetails.View.GetHorizontalFrameSize()
 	height := area.Dy() - s.CompactDetails.View.GetVerticalFrameSize()
 
-	title := s.CompactDetails.Title.Width(width).MaxHeight(2).Render(m.session.Title)
+	title := m.renderSessionTitle(s.CompactDetails.Title, width)
 	blocks := []string{
 		title,
 		"",

@@ -144,7 +144,10 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 			}
 
 			agentCfg := sa.ToConfigAgent(taskCfg)
-			subPr := subagentBodyPrompt(sa.Body, prompt.WithWorkingDir(c.cfg.WorkingDir()))
+			subPr, err := subagentPrompt(sa, c.activeSkills, prompt.WithWorkingDir(c.cfg.WorkingDir()))
+			if err != nil {
+				return fantasy.ToolResponse{}, fmt.Errorf("build subagent prompt %q: %w", sa.Name, err)
+			}
 			agent, err := c.buildAgent(ctx, subPr, agentCfg, true)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("build subagent %q: %w", sa.Name, err)

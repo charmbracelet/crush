@@ -259,19 +259,21 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 		})
 	}
 	beforeLoaded := c.skillTracker.LoadedNames()
-	result, originalErr := run()
+	var result *fantasy.AgentResult
+	var originalErr error = c.runWithUnauthorizedRetry(ctx, providerCfg, func() error {
+		var err error
+		result, err = run()
+		return err
+	})
 	logTurnSkillUsage(sessionID, prompt, c.activeSkills, c.skillTracker, beforeLoaded)
 
-	if c.isUnauthorized(originalErr) {
-		if err := c.retryAfterUnauthorized(ctx, providerCfg); err == nil {
-			result, originalErr = run()
-		}
-		if c.notify != nil && model.ModelCfg.Provider == hyper.Name {
-			c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
-				Type:       notify.TypeReAuthenticate,
-				ProviderID: model.ModelCfg.Provider,
-			})
-		}
+	// Notify only if still unauthorized after retry — a successful
+	// retry means the user doesn't need to re-authenticate.
+	if originalErr != nil && c.isUnauthorized(originalErr) && c.notify != nil && model.ModelCfg.Provider == hyper.Name {
+		c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+			Type:       notify.TypeReAuthenticate,
+			ProviderID: model.ModelCfg.Provider,
+		})
 	}
 
 	if hasLatest && c.runComplete != nil {
@@ -1062,14 +1064,7 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 		return c.currentAgent.Summarize(ctx, sessionID, getProviderOptions(c.currentAgent.Model(), providerCfg))
 	}
 
-	err := summarize()
-	if err != nil && c.isUnauthorized(err) {
-		if retryErr := c.retryAfterUnauthorized(ctx, providerCfg); retryErr == nil {
-			return summarize()
-		}
-	}
-
-	return err
+	return c.runWithUnauthorizedRetry(ctx, providerCfg, summarize)
 }
 
 // refreshTokenIfExpired proactively refreshes the OAuth token if it has expired.
@@ -1079,6 +1074,21 @@ func (c *coordinator) refreshTokenIfExpired(ctx context.Context, providerCfg con
 	}
 	slog.Debug("Token needs to be refreshed", "provider", providerCfg.ID)
 	return c.refreshOAuth2Token(ctx, providerCfg)
+}
+
+// runWithUnauthorizedRetry executes fn. If fn returns a 401 error, it
+// attempts to refresh credentials and re-runs fn once. Returns the
+// final error: from the retry if a retry was attempted, otherwise from
+// the original run. Callers that need to notify the user on persistent
+// failure should check isUnauthorized on the returned error.
+func (c *coordinator) runWithUnauthorizedRetry(ctx context.Context, providerCfg config.ProviderConfig, fn func() error) error {
+	err := fn()
+	if err != nil && c.isUnauthorized(err) {
+		if retryErr := c.retryAfterUnauthorized(ctx, providerCfg); retryErr == nil {
+			return fn()
+		}
+	}
+	return err
 }
 
 // retryAfterUnauthorized attempts to refresh credentials after receiving a 401
@@ -1184,16 +1194,18 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 			NonInteractive:   true,
 		})
 	}
-	result, err := run()
-	if err != nil && c.isUnauthorized(err) {
-		if retryErr := c.retryAfterUnauthorized(ctx, providerCfg); retryErr == nil {
-			result, err = run()
-		} else if c.notify != nil && model.ModelCfg.Provider == hyper.Name {
-			c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
-				Type:       notify.TypeReAuthenticate,
-				ProviderID: model.ModelCfg.Provider,
-			})
-		}
+	var result *fantasy.AgentResult
+	err = c.runWithUnauthorizedRetry(ctx, providerCfg, func() error {
+		var runErr error
+		result, runErr = run()
+		return runErr
+	})
+	// Notify only if still unauthorized after retry.
+	if err != nil && c.isUnauthorized(err) && c.notify != nil && model.ModelCfg.Provider == hyper.Name {
+		c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+			Type:       notify.TypeReAuthenticate,
+			ProviderID: model.ModelCfg.Provider,
+		})
 	}
 	if err != nil {
 		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to generate response: %s", err)), nil

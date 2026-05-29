@@ -57,8 +57,15 @@ type (
 		Style string
 	}
 	ActionToggleTransparentBackground struct{}
-	ActionInitializeProject           struct{}
-	ActionSummarize                   struct {
+	ActionSwitchTheme                 struct {
+		Theme string
+	}
+	ActionPreviewTheme struct {
+		Theme string
+	}
+	ActionRevertThemePreview struct{}
+	ActionInitializeProject  struct{}
+	ActionSummarize          struct {
 		SessionID string
 	}
 	// ActionSelectReasoningEffort is a message indicating a reasoning effort

@@ -23,6 +23,29 @@ func PrettyPath(t *styles.Styles, path string, width int) string {
 	return t.Sidebar.WorkingDir.Width(width).Render(formatted)
 }
 
+// PrettyPathWithBranch formats a file path with an optional git branch prefix.
+// When a branch is present, it is displayed on its own line above the path.
+func PrettyPathWithBranch(t *styles.Styles, path, branch string, width int) string {
+	formatted := home.Short(path)
+	if branch != "" {
+		branchLine := t.Sidebar.WorkingDir.Width(width).Render(branch)
+		pathLine := t.Sidebar.WorkingDir.Width(width).Render(formatted)
+		return branchLine + "\n" + pathLine
+	}
+	return t.Sidebar.WorkingDir.Width(width).Render(formatted)
+}
+
+// PrettyPathInline formats a file path with an optional git branch on the same
+// line, truncating to fit the given width.
+func PrettyPathInline(t *styles.Styles, path, branch string, width int) string {
+	formatted := home.Short(path)
+	if branch != "" {
+		combined := branch + " " + formatted
+		formatted = ansi.Truncate(combined, width, "…")
+	}
+	return t.Sidebar.WorkingDir.Width(width).Render(formatted)
+}
+
 // FormatReasoningEffort formats a reasoning effort level for display.
 func FormatReasoningEffort(effort string) string {
 	if effort == "xhigh" {

@@ -36,6 +36,7 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/subagents"
 	"golang.org/x/sync/errgroup"
 
 	"charm.land/fantasy/providers/anthropic"
@@ -123,6 +124,9 @@ type coordinator struct {
 	activeSkills []*skills.Skill // Post-filter: active skills only.
 	skillTracker *skills.Tracker
 
+	// Subagents discovery results (session-start snapshot).
+	activeSubagents []*subagents.Subagent
+
 	readyWg errgroup.Group
 }
 
@@ -138,6 +142,7 @@ func NewCoordinator(
 	notify pubsub.Publisher[notify.Notification],
 	runComplete pubsub.Publisher[notify.RunComplete],
 	skillsMgr *skills.Manager,
+	subagentsMgr *subagents.Manager,
 ) (Coordinator, error) {
 	// Skills are pre-discovered by the caller (see app.New /
 	// backend.CreateWorkspace) and passed in via the manager. If no
@@ -166,6 +171,10 @@ func NewCoordinator(
 		allSkills:    allSkills,
 		activeSkills: activeSkills,
 		skillTracker: skillTracker,
+	}
+
+	if subagentsMgr != nil {
+		c.activeSubagents = subagentsMgr.ActiveSubagents()
 	}
 
 	agentCfg, ok := cfg.Config().Agents[config.AgentCoder]

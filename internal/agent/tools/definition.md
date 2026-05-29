@@ -1,0 +1,1 @@
+Find the definition of a symbol via LSP. Returns the location(s) where the symbol is declared. More accurate than grep for code symbols and follows the import graph (e.g. resolves to the declaration in another file or module). Pairs with `lsp_references` for symbol-level navigation.

@@ -669,3 +669,17 @@ func (c *Client) FindReferences(ctx context.Context, filepath string, line, char
 	// See: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#position
 	return c.client.FindReferences(ctx, filepath, line-1, character-1, includeDeclaration)
 }
+
+// FindDefinition resolves the definition of the symbol at the given
+// position. Inputs are 1-based to match grep output; powernap converts
+// to LSP's 0-based internally.
+func (c *Client) FindDefinition(ctx context.Context, filepath string, line, character int) ([]protocol.Location, error) {
+	if err := c.OpenFileOnDemand(ctx, filepath); err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	return c.client.RequestDefinition(ctx, filepath, line-1, character-1)
+}

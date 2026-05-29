@@ -551,7 +551,12 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	// Add LSP tools if user has configured LSPs or auto_lsp is enabled (nil or true).
 	if len(c.cfg.Config().LSP) > 0 || c.cfg.Config().Options.AutoLSP == nil || *c.cfg.Config().Options.AutoLSP {
-		allTools = append(allTools, tools.NewDiagnosticsTool(c.lspManager), tools.NewReferencesTool(c.lspManager), tools.NewLSPRestartTool(c.lspManager))
+		allTools = append(allTools,
+			tools.NewDiagnosticsTool(c.lspManager),
+			tools.NewReferencesTool(c.lspManager),
+			tools.NewDefinitionTool(c.lspManager),
+			tools.NewLSPRestartTool(c.lspManager),
+		)
 	}
 
 	if len(c.cfg.Config().MCP) > 0 {

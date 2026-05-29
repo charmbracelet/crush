@@ -272,7 +272,7 @@ type UI struct {
 	// skills
 	skillStates []*skills.SkillState
 
-	// subagents — cached at init, static for session lifetime
+	// Subagents — cached at init, static for session lifetime.
 	activeSubagentItems []completions.SubagentCompletionValue
 	activeSubagentNames map[string]bool
 

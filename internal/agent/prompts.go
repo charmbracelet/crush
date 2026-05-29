@@ -44,6 +44,14 @@ func planPrompt(opts ...prompt.Option) (*prompt.Prompt, error) {
 	return systemPrompt, nil
 }
 
+func subagentBodyPrompt(body string, opts ...prompt.Option) *prompt.Prompt {
+	p := prompt.NewLiteralPrompt(body)
+	for _, opt := range opts {
+		opt(p)
+	}
+	return p
+}
+
 func InitializePrompt(cfg *config.ConfigStore) (string, error) {
 	systemPrompt, err := prompt.NewPrompt("initialize", string(initializePromptTmpl))
 	if err != nil {

@@ -156,6 +156,7 @@ type Workspace interface {
 	InitializePrompt() (string, error)
 	ListSkills(ctx context.Context) ([]skills.CatalogEntry, error)
 	ReadSkill(ctx context.Context, skillID string) ([]byte, skills.SkillReadResult, error)
+	ActiveSubagents() []SubagentInfo
 
 	// MCP operations (server-side in client mode)
 	MCPGetStates() map[string]mcptools.ClientInfo
@@ -170,6 +171,12 @@ type Workspace interface {
 	// Events
 	Subscribe(program *tea.Program)
 	Shutdown()
+}
+
+// SubagentInfo holds the minimal frontend-facing data for an active subagent.
+type SubagentInfo struct {
+	Name        string
+	Description string
 }
 
 // MCPResourceContents holds the contents of an MCP resource.

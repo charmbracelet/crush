@@ -1,0 +1,1 @@
+Search past conversation history for a substring. Useful for "did the user already tell me how to deploy this" or "what was the rationale for that change". Searches user messages across all sessions by default; pass `session_id` to scope to one session and include all roles. Returns the matching messages with session title, timestamp, role, and a snippet.

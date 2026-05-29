@@ -534,6 +534,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewGrepTool(c.cfg.WorkingDir, c.cfg.Config().Tools.Grep),
 		tools.NewLsTool(c.permissions, c.cfg.WorkingDir, c.cfg.Config().Tools.Ls),
 		tools.NewSourcegraphTool(nil),
+		tools.NewSearchHistoryTool(c.messages, c.sessions),
 		tools.NewTodosTool(c.sessions),
 	)
 

@@ -419,6 +419,10 @@ func (w *ClientWorkspace) WorkingDir() string {
 	return w.cached().Path
 }
 
+func (w *ClientWorkspace) GitBranch() string {
+	return ""
+}
+
 func (w *ClientWorkspace) Resolver() config.VariableResolver {
 	return config.IdentityResolver()
 }

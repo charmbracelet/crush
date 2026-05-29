@@ -1,0 +1,4 @@
+# This file intentionally uses text/template (not html/template) because it
+# generates LLM prompts (plain text), not HTML for web browsers.
+# The XSS rule does not apply here.
+internal/agent/prompt/prompt.go

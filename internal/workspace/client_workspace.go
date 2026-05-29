@@ -530,6 +530,10 @@ func (w *ClientWorkspace) ReadSkill(ctx context.Context, skillID string) ([]byte
 	}, nil
 }
 
+func (w *ClientWorkspace) ActiveSubagents() []SubagentInfo {
+	return nil
+}
+
 // -- MCP operations --
 
 func (w *ClientWorkspace) MCPGetStates() map[string]mcp.ClientInfo {

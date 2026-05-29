@@ -322,6 +322,19 @@ func (w *AppWorkspace) ReadSkill(_ context.Context, skillID string) ([]byte, ski
 	return skills.ReadContent(mgr.ActiveSkills(), mgr.ResolvedPaths(), mgr.WorkingDir(), skillID)
 }
 
+func (w *AppWorkspace) ActiveSubagents() []SubagentInfo {
+	mgr := w.app.Subagents
+	if mgr == nil {
+		return nil
+	}
+	active := mgr.ActiveSubagents()
+	result := make([]SubagentInfo, len(active))
+	for i, sa := range active {
+		result[i] = SubagentInfo{Name: sa.Name, Description: sa.Description}
+	}
+	return result
+}
+
 // -- MCP operations --
 
 func (w *AppWorkspace) MCPGetStates() map[string]mcptools.ClientInfo {

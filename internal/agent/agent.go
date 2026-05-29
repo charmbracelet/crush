@@ -70,7 +70,16 @@ var (
 )
 
 type SessionAgentCall struct {
-	SessionID        string
+	SessionID string
+	// RunID, when non-empty, is the caller-supplied correlator that
+	// gets echoed back on the notify.RunComplete event emitted for
+	// this turn. It is preserved when the call is enqueued behind a
+	// busy session so the queued turn's terminal event is still
+	// recognisable to the original caller. Callers that need a
+	// reliable completion contract (e.g. `crush run` against a
+	// session that may be busy) MUST set it; SessionID alone is
+	// ambiguous when concurrent turns share the same session.
+	RunID            string
 	Prompt           string
 	ProviderOptions  fantasy.ProviderOptions
 	Attachments      []message.Attachment
@@ -81,6 +90,19 @@ type SessionAgentCall struct {
 	FrequencyPenalty *float64
 	PresencePenalty  *float64
 	NonInteractive   bool
+	// OnComplete, when non-nil, replaces the default RunComplete
+	// publish path: the inner Run hands the terminal payload to this
+	// callback instead of emitting it on the RunComplete broker. The
+	// coordinator uses this hook to coalesce the unauthorized →
+	// re-auth → retry chain into a single user-visible terminal
+	// event, so non-interactive clients (e.g. `crush run`) don't
+	// exit on a stale failed-attempt RunComplete before the
+	// successful retry. It is intentionally stripped when queueing
+	// a busy-session call (see Run): the originating
+	// coordinator.Run has long returned by the time the queued
+	// recursion drains, so falling back to the default broker
+	// publish keeps the event visible to subscribers.
+	OnComplete func(notify.RunComplete)
 }
 
 type SessionAgent interface {
@@ -119,6 +141,7 @@ type sessionAgent struct {
 	disableAutoSummarize bool
 	isYolo               bool
 	notify               pubsub.Publisher[notify.Notification]
+	runComplete          pubsub.Publisher[notify.RunComplete]
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, context.CancelFunc]
@@ -136,6 +159,7 @@ type SessionAgentOptions struct {
 	Messages             message.Service
 	Tools                []fantasy.AgentTool
 	Notify               pubsub.Publisher[notify.Notification]
+	RunComplete          pubsub.Publisher[notify.RunComplete]
 }
 
 func NewSessionAgent(
@@ -153,12 +177,13 @@ func NewSessionAgent(
 		tools:                csync.NewSliceFrom(opts.Tools),
 		isYolo:               opts.IsYolo,
 		notify:               opts.Notify,
+		runComplete:          opts.RunComplete,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, context.CancelFunc](),
 	}
 }
 
-func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
+func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *fantasy.AgentResult, retErr error) {
 	if call.Prompt == "" && !message.ContainsTextAttachment(call.Attachments) {
 		return nil, ErrEmptyPrompt
 	}
@@ -166,13 +191,21 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		return nil, ErrSessionMissing
 	}
 
-	// Queue the message if busy
+	// Queue the message if busy. Strip OnComplete: the caller that
+	// supplied the hook (typically coordinator.Run) has its own
+	// retry/coalesce scope that ends when it returns, so by the time
+	// the queue drains nobody is left to consume the buffered
+	// terminal event. The recursive Run will fall back to the
+	// default broker publish, which is what existing subscribers
+	// expect for queued turns.
 	if a.IsSessionBusy(call.SessionID) {
 		existing, ok := a.messageQueue.Get(call.SessionID)
 		if !ok {
 			existing = []SessionAgentCall{}
 		}
-		existing = append(existing, call)
+		queued := call
+		queued.OnComplete = nil
+		existing = append(existing, queued)
 		a.messageQueue.Set(call.SessionID, existing)
 		return nil, nil
 	}
@@ -245,14 +278,65 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 
 	defer cancel()
 	defer a.activeRequests.Del(call.SessionID)
+	// skipRunComplete is set just before the queued-recursion path so
+	// the outer Run doesn't publish a RunComplete that would race
+	// with — and be superseded by — the recursive call's own
+	// RunComplete (each queued user prompt is its own turn and
+	// publishes exactly one terminal event).
+	var skipRunComplete bool
+	// currentAssistant is declared here so the deferred RunComplete
+	// publish below can capture the pointer that PrepareStep will
+	// later (re)assign for each streaming step. The final assistant
+	// message of the turn is the value reachable through this
+	// pointer when the defer runs.
+	var currentAssistant *message.Message
 	// Drain any debounced message updates before returning. message.Service
 	// already flushes synchronously on terminal updates, but a defer here
 	// guarantees the contract at every Run exit (success, error, panic
 	// recovery upstream) without callers needing to know.
+	//
+	// After the flush completes — meaning all per-message
+	// Publish(UpdatedEvent) calls have fired and been buffered into
+	// every subscriber's channel — publish the authoritative
+	// RunComplete event for this turn. The flush-then-publish order
+	// gives well-behaved clients the best chance of seeing the final
+	// message event before RunComplete; the embedded Text field
+	// reconciles for clients that observe the events out of order
+	// (the pubsub broker fan-in does not serialize publishes from
+	// different upstream brokers).
 	defer func() {
 		if flushErr := a.messages.FlushAll(ctx); flushErr != nil {
 			slog.Error("Failed to flush pending message updates after run", "error", flushErr)
 		}
+		if skipRunComplete {
+			return
+		}
+		complete := notify.RunComplete{SessionID: call.SessionID, RunID: call.RunID}
+		if currentAssistant != nil {
+			complete.MessageID = currentAssistant.ID
+			complete.Text = currentAssistant.Content().String()
+		}
+		if retErr != nil {
+			complete.Error = retErr.Error()
+			complete.Cancelled = errors.Is(retErr, context.Canceled)
+		} else if ctx.Err() != nil {
+			complete.Cancelled = true
+		}
+		// Prefer the per-call hook when supplied so the coordinator
+		// can coalesce retries (e.g. unauthorized → re-auth → retry)
+		// into a single user-visible terminal event. The fallback
+		// must-deliver publish applies bounded-blocking semantics to
+		// the authoritative terminal event so a momentarily-full
+		// subscriber channel can't silently drop it and hang
+		// non-interactive clients waiting on RunComplete.
+		if call.OnComplete != nil {
+			call.OnComplete(complete)
+			return
+		}
+		if a.runComplete == nil {
+			return
+		}
+		a.runComplete.PublishMustDeliver(ctx, pubsub.UpdatedEvent, complete)
 	}()
 
 	history, files := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages, call.Attachments...)
@@ -260,7 +344,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	startTime := time.Now()
 	a.eventPromptSent(call.SessionID)
 
-	var currentAssistant *message.Message
 	var stepMessages []fantasy.Message
 	var shouldSummarize bool
 	// Don't send MaxOutputTokens if 0 — some providers (e.g. LM Studio) reject it
@@ -268,7 +351,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	if call.MaxOutputTokens > 0 {
 		maxOutputTokens = &call.MaxOutputTokens
 	}
-	result, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
+	result, err = agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
 		Files:            files,
 		Messages:         history,
@@ -634,7 +717,12 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	if !ok || len(queuedMessages) == 0 {
 		return result, err
 	}
-	// There are queued messages restart the loop.
+	// There are queued messages restart the loop. The recursive Run
+	// publishes its own RunComplete for the queued prompt, so suppress
+	// the outer defer's emit to avoid a duplicate event whose Error
+	// field would belong to the recursive turn but whose MessageID/Text
+	// would belong to the outer turn.
+	skipRunComplete = true
 	firstQueuedMessage := queuedMessages[0]
 	a.messageQueue.Set(call.SessionID, queuedMessages[1:])
 	return a.Run(ctx, firstQueuedMessage)
@@ -1355,7 +1443,8 @@ func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) mes
 //	AFTER:  [tool result: "Image loaded - see attached"], [user: image attachment]
 func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Message, largeModel Model) []fantasy.Message {
 	providerSupportsMedia := largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderAnthropic) ||
-		largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderBedrock)
+		largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderBedrock) ||
+		largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderBedrockEurope)
 
 	if providerSupportsMedia {
 		return messages

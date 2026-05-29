@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -24,6 +25,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/charmbracelet/x/term"
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
@@ -243,12 +245,22 @@ func runNonInteractive(
 		return fmt.Errorf("failed to subscribe to events: %w", err)
 	}
 
-	if err := c.SendMessage(ctx, ws.ID, sess.ID, prompt); err != nil {
+	// Mint a per-call RunID so we can correlate the terminal
+	// RunComplete with *this* SendMessage even if the session was
+	// busy and another turn finished first. Without it the stream
+	// loop would exit on whichever RunComplete arrived first for
+	// the same session and drop the queued prompt's output.
+	runID := uuid.New().String()
+	if err := c.SendMessage(ctx, ws.ID, sess.ID, runID, prompt); err != nil {
 		return fmt.Errorf("failed to send message: %w", err)
 	}
 
-	messageReadBytes := make(map[string]int)
-	var printed bool
+	stream := &runStream{
+		sessionID: sess.ID,
+		runID:     runID,
+		out:       os.Stdout,
+		read:      make(map[string]int),
+	}
 
 	defer func() {
 		if progress && stderrTTY {
@@ -269,42 +281,12 @@ func runNonInteractive(
 				return nil
 			}
 
-			switch e := ev.(type) {
-			case pubsub.Event[proto.Message]:
-				msg := e.Payload
-				if msg.SessionID != sess.ID || msg.Role != proto.Assistant || len(msg.Parts) == 0 {
-					continue
-				}
-				stopSpinner()
-
-				content := msg.Content().String()
-				readBytes := messageReadBytes[msg.ID]
-
-				if len(content) < readBytes {
-					slog.Error("Non-interactive: message content shorter than read bytes",
-						"message_length", len(content), "read_bytes", readBytes)
-					return fmt.Errorf("message content is shorter than read bytes: %d < %d", len(content), readBytes)
-				}
-
-				part := content[readBytes:]
-				if readBytes == 0 {
-					part = strings.TrimLeft(part, " \t")
-				}
-				if printed || strings.TrimSpace(part) != "" {
-					printed = true
-					fmt.Fprint(os.Stdout, part)
-				}
-				messageReadBytes[msg.ID] = len(content)
-
-				if msg.IsFinished() {
-					return nil
-				}
-
-			case pubsub.Event[proto.AgentEvent]:
-				if e.Payload.Error != nil {
-					stopSpinner()
-					return fmt.Errorf("agent error: %w", e.Payload.Error)
-				}
+			done, err := stream.handle(ev, stopSpinner)
+			if err != nil {
+				return err
+			}
+			if done {
+				return nil
 			}
 
 		case <-ctx.Done():
@@ -312,6 +294,128 @@ func runNonInteractive(
 			return ctx.Err()
 		}
 	}
+}
+
+// runStream tracks the per-message stdout cursor and the
+// reconciliation state used by [runNonInteractive] to translate
+// streaming SSE events into a final, complete stdout for `crush run`.
+// It is split out so the state machine can be exercised in unit tests
+// without spinning up the full server/client harness.
+//
+// runID, when non-empty, is the authoritative correlator for the
+// terminal RunComplete event: the stream suppresses live message
+// events and only exits on a RunComplete whose RunID matches, so a
+// turn that finishes first on the same session (e.g. when our prompt
+// was queued behind a busy session) cannot contaminate stdout or
+// terminate us prematurely. When empty (older servers, tests that
+// don't supply one) the stream falls back to SessionID-only matching
+// and live message streaming, which is still correct for the
+// single-turn case.
+type runStream struct {
+	sessionID string
+	runID     string
+	out       io.Writer
+	read      map[string]int
+	printed   bool
+}
+
+// handle processes one SSE event. Returns done=true when the run
+// loop should exit (RunComplete observed); returns an error only
+// when the agent run failed (not on context cancel — that path is
+// handled by the caller's select). stopSpinner is called on the
+// first observable assistant output and on completion; passing nil
+// is safe for tests.
+func (s *runStream) handle(ev any, stopSpinner func()) (done bool, err error) {
+	stop := func() {
+		if stopSpinner != nil {
+			stopSpinner()
+		}
+	}
+	switch e := ev.(type) {
+	case pubsub.Event[proto.Message]:
+		msg := e.Payload
+		if msg.SessionID != s.sessionID || msg.Role != proto.Assistant || len(msg.Parts) == 0 {
+			return false, nil
+		}
+		if s.runID != "" {
+			return false, nil
+		}
+		stop()
+
+		content := msg.Content().String()
+		readBytes := s.read[msg.ID]
+		if len(content) < readBytes {
+			slog.Error("Non-interactive: message content shorter than read bytes",
+				"message_length", len(content), "read_bytes", readBytes)
+			return false, fmt.Errorf("message content is shorter than read bytes: %d < %d", len(content), readBytes)
+		}
+
+		part := content[readBytes:]
+		if readBytes == 0 {
+			part = strings.TrimLeft(part, " \t")
+		}
+		if s.printed || strings.TrimSpace(part) != "" {
+			s.printed = true
+			fmt.Fprint(s.out, part)
+		}
+		s.read[msg.ID] = len(content)
+		return false, nil
+
+	case pubsub.Event[proto.RunComplete]:
+		// RunComplete is the authoritative end-of-run signal. We
+		// exit on it instead of guessing from message finish parts,
+		// which fire on every tool-call step too and were the
+		// source of the regression where `crush run` exited
+		// mid-turn on finish.reason == tool_use.
+		//
+		// Correlation:
+		//   - if we minted a RunID for this SendMessage, only the
+		//     event whose RunID matches is ours; any other turn
+		//     finishing first on the same session (busy-session
+		//     queue path) must be ignored.
+		//   - if we have no RunID (older server, tests), fall back
+		//     to SessionID matching.
+		if s.runID != "" {
+			if e.Payload.RunID != s.runID {
+				return false, nil
+			}
+		} else if e.Payload.SessionID != s.sessionID {
+			return false, nil
+		}
+		stop()
+		if e.Payload.Error != "" && !e.Payload.Cancelled {
+			return true, fmt.Errorf("agent run failed: %s", e.Payload.Error)
+		}
+		// Reconcile stdout against the authoritative final
+		// assistant text carried in the event. The pubsub fan-in
+		// does not serialize publishes across upstream brokers, so
+		// the final message event may not have reached this loop
+		// yet; the embedded Text field is the backstop that
+		// guarantees the full final text always appears on stdout.
+		if e.Payload.MessageID != "" {
+			full := e.Payload.Text
+			readBytes := s.read[e.Payload.MessageID]
+			if readBytes < len(full) {
+				tail := full[readBytes:]
+				if readBytes == 0 {
+					tail = strings.TrimLeft(tail, " \t")
+				}
+				if s.printed || strings.TrimSpace(tail) != "" {
+					s.printed = true
+					fmt.Fprint(s.out, tail)
+				}
+			}
+		}
+		return true, nil
+
+	case pubsub.Event[proto.AgentEvent]:
+		if e.Payload.Error != nil {
+			stop()
+			return true, fmt.Errorf("agent error: %w", e.Payload.Error)
+		}
+		return false, nil
+	}
+	return false, nil
 }
 
 // waitForAgent polls GetAgentInfo until the agent is ready, with a

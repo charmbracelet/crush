@@ -231,6 +231,12 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 				if !sendEvent(ctx, events, e) {
 					return
 				}
+			case pubsub.PayloadTypeRunComplete:
+				var e pubsub.Event[proto.RunComplete]
+				_ = json.Unmarshal(p.Payload, &e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
 			default:
 				slog.Warn("Unknown event type", "type", p.Type)
 				continue
@@ -400,9 +406,16 @@ func (c *Client) UpdateAgent(ctx context.Context, id string) error {
 }
 
 // SendMessage sends a message to the agent for a workspace.
-func (c *Client) SendMessage(ctx context.Context, id string, sessionID, prompt string, attachments ...message.Attachment) error {
+//
+// When runID is non-empty it is echoed back on the resulting
+// proto.RunComplete event, giving the caller a unique correlator
+// for completion detection. Pass "" when the caller does not need
+// to distinguish its own turn's terminal event from any concurrent
+// turn on the same session (e.g. interactive TUI usage).
+func (c *Client) SendMessage(ctx context.Context, id string, sessionID, runID, prompt string, attachments ...message.Attachment) error {
 	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent", id), nil, jsonBody(proto.AgentMessage{
 		SessionID:   sessionID,
+		RunID:       runID,
 		Prompt:      prompt,
 		Attachments: proto.AttachmentsFromMessage(attachments),
 	}), http.Header{"Content-Type": []string{"application/json"}})

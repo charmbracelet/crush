@@ -75,6 +75,13 @@ type App struct {
 	globalCtx          context.Context
 	cleanupFuncs       []func(context.Context) error
 	agentNotifications *pubsub.Broker[notify.Notification]
+	// runCompletions is the authoritative per-run completion signal,
+	// emitted once per top-level agent turn after all message
+	// updates have been flushed. Bridged into app.events so SSE
+	// subscribers (notably `crush run` in client/server mode) can
+	// drive their exit on a deterministic, payload-bearing event
+	// instead of guessing from message finish parts.
+	runCompletions *pubsub.Broker[notify.RunComplete]
 }
 
 // New initializes a new application instance. skillsMgr carries the
@@ -110,6 +117,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		serviceEventsWG:    &sync.WaitGroup{},
 		tuiWG:              &sync.WaitGroup{},
 		agentNotifications: pubsub.NewBroker[notify.Notification](),
+		runCompletions:     pubsub.NewBroker[notify.RunComplete](),
 	}
 
 	app.setupEvents()
@@ -485,6 +493,7 @@ func (app *App) setupEvents() {
 	setupSubscriber(ctx, app.serviceEventsWG, "permissions-notifications", app.Permissions.SubscribeNotifications, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "history", app.History.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "agent-notifications", app.agentNotifications.Subscribe, app.events)
+	setupSubscriberMustDeliver(ctx, app.serviceEventsWG, "run-completions", app.runCompletions.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "mcp", mcp.SubscribeEvents, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "lsp", SubscribeLSPEvents, app.events)
 	if app.Skills != nil {
@@ -524,6 +533,38 @@ func setupSubscriber[T any](
 	})
 }
 
+// setupSubscriberMustDeliver is the bounded-blocking fan-in variant of
+// setupSubscriber: it re-publishes upstream events onto the shared
+// app.events broker using PublishMustDeliver instead of Publish. Use
+// this for terminal events that subscribers cannot tolerate losing —
+// notably RunComplete, which is the authoritative end-of-run signal
+// for `crush run`. A lossy fan-in here can drop the only terminal
+// event and hang non-interactive clients waiting on it.
+func setupSubscriberMustDeliver[T any](
+	ctx context.Context,
+	wg *sync.WaitGroup,
+	name string,
+	subscriber func(context.Context) <-chan pubsub.Event[T],
+	broker *pubsub.Broker[tea.Msg],
+) {
+	wg.Go(func() {
+		subCh := subscriber(ctx)
+		for {
+			select {
+			case event, ok := <-subCh:
+				if !ok {
+					slog.Debug("Subscription channel closed", "name", name)
+					return
+				}
+				broker.PublishMustDeliver(ctx, pubsub.UpdatedEvent, tea.Msg(event))
+			case <-ctx.Done():
+				slog.Debug("Subscription cancelled", "name", name)
+				return
+			}
+		}
+	})
+}
+
 func (app *App) InitCoderAgent(ctx context.Context) error {
 	coderAgentCfg := app.config.Config().Agents[config.AgentCoder]
 	if coderAgentCfg.ID == "" {
@@ -540,6 +581,7 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.FileTracker,
 		app.LSPManager,
 		app.agentNotifications,
+		app.runCompletions,
 		app.Skills,
 	)
 	if err != nil {

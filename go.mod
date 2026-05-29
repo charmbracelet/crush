@@ -5,9 +5,9 @@ go 1.26.3
 require (
 	charm.land/bubbles/v2 v2.1.0
 	charm.land/bubbletea/v2 v2.0.6
-	charm.land/catwalk v0.43.0
+	charm.land/catwalk v0.44.2
 	charm.land/fang/v2 v2.0.1
-	charm.land/fantasy v0.26.0
+	charm.land/fantasy v0.27.0
 	charm.land/glamour/v2 v2.0.0
 	charm.land/lipgloss/v2 v2.0.3
 	charm.land/log/v2 v2.0.0
@@ -28,7 +28,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/charmbracelet/x/editor v0.2.0
 	github.com/charmbracelet/x/etag v0.2.0
-	github.com/charmbracelet/x/exp/charmtone v0.0.0-20260109001716-2fbdffcb221f
+	github.com/charmbracelet/x/exp/charmtone v0.0.0-20260527151214-009e6338d40d
 	github.com/charmbracelet/x/exp/golden v0.0.0-20250806222409-83e3a29d542f
 	github.com/charmbracelet/x/exp/ordered v0.1.0
 	github.com/charmbracelet/x/exp/slice v0.0.0-20260422141420-a6cbdff8a7e2

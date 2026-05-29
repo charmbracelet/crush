@@ -3,12 +3,20 @@ package backend
 import (
 	"context"
 
+	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/proto"
 )
 
 // SendMessage sends a prompt to the agent coordinator for the given
 // workspace and session.
+//
+// When msg.RunID is non-empty it is attached to the context via
+// agent.WithRunID so the coordinator can stamp the resulting
+// SessionAgentCall (and therefore the terminal notify.RunComplete
+// event) with that correlator. This is the only way for the
+// originating client to distinguish its own turn's RunComplete from
+// any concurrent turn that finishes on the same session.
 func (b *Backend) SendMessage(ctx context.Context, workspaceID string, msg proto.AgentMessage) error {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
@@ -19,6 +27,9 @@ func (b *Backend) SendMessage(ctx context.Context, workspaceID string, msg proto
 		return ErrAgentNotInitialized
 	}
 
+	if msg.RunID != "" {
+		ctx = agent.WithRunID(ctx, msg.RunID)
+	}
 	_, err = ws.AgentCoordinator.Run(ctx, msg.SessionID, msg.Prompt, proto.AttachmentsToMessage(msg.Attachments)...)
 	return err
 }

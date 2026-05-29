@@ -510,12 +510,23 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 
 func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool) ([]fantasy.AgentTool, error) {
 	var allTools []fantasy.AgentTool
+
 	if slices.Contains(agent.AllowedTools, AgentToolName) {
-		agentTool, err := c.agentTool(ctx)
+		agentTool, err := c.agentTool(ctx, "")
 		if err != nil {
 			return nil, err
 		}
 		allTools = append(allTools, agentTool)
+	}
+
+	for _, toolName := range agent.AllowedTools {
+		if task, ok := strings.CutPrefix(toolName, AgentToolName+":"); ok {
+			agentTool, err := c.agentTool(ctx, task)
+			if err != nil {
+				return nil, err
+			}
+			allTools = append(allTools, agentTool)
+		}
 	}
 
 	if slices.Contains(agent.AllowedTools, tools.AgenticFetchToolName) {

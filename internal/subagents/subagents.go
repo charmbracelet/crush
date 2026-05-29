@@ -1,4 +1,5 @@
-// Package subagents implements parsing and validation of subagent definition files.
+// Package subagents implements parsing and validation of subagent definition
+// files.
 package subagents
 
 import (
@@ -18,14 +19,15 @@ import (
 )
 
 const (
-	// MaxNameLength is the maximum number of characters allowed in a subagent name.
+	// MaxNameLength is the max characters allowed in a subagent name.
 	MaxNameLength = 64
-	// MaxDescriptionLength is the maximum number of characters allowed in a subagent description.
+	// MaxDescriptionLength is the max characters allowed in a subagent
+	// description.
 	MaxDescriptionLength = 1024
 )
 
-// namePattern matches valid subagent names: lowercase alphanumeric with single hyphens,
-// no leading or trailing hyphens, no consecutive hyphens.
+// namePattern matches valid subagent names: lowercase alphanumeric with single
+// hyphens, no leading or trailing hyphens, no consecutive hyphens.
 var namePattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
 // reservedNames is the set of names that may not be used for subagents.
@@ -354,7 +356,8 @@ func DeduplicateStates(all []*SubagentState) []*SubagentState {
 
 	result := make([]*SubagentState, 0, len(seen))
 	for i, s := range all {
-		// If it's the last occurrence of this name, or it has no name (error state), keep it
+		// Keep the last occurrence of this name, or anything without a
+		// name (error state).
 		if s.Name == "" || seen[s.Name] == i {
 			result = append(result, s)
 		}

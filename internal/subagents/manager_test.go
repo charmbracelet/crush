@@ -168,7 +168,7 @@ func TestManager_ConcurrentWorkspacesAreIsolated(t *testing.T) {
 }
 
 // Compile-time assertion: SubscribeEvents must return the correct channel type.
-var _ <-chan pubsub.Event[Event] = ((*Manager)(nil)).SubscribeEvents(context.Background())
+var _ <-chan pubsub.Event[Event] = (*Manager)(nil).SubscribeEvents(context.Background())
 
 func TestDiscoverFromConfig(t *testing.T) {
 	t.Parallel()

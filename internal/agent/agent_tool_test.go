@@ -205,4 +205,3 @@ func TestDispatcherTool_Run_UnknownSubagent_ReturnsErrorResponse(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, resp.IsError)
 }
-

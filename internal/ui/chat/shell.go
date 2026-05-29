@@ -1,7 +1,6 @@
 package chat
 
 import (
-	"fmt"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -109,5 +108,5 @@ func shellMessageParts(msg *message.Message, firstPartText string) (command, out
 
 // ID implements Identifiable.
 func (m *ShellMessageItem) ID() string {
-	return fmt.Sprintf("shell-%s", m.message.ID)
+	return m.message.ID
 }

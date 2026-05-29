@@ -66,8 +66,15 @@ func resolvePreloadedSkillsXML(skillNames []string, activeSkills []*skills.Skill
 
 func subagentPrompt(sa *subagents.Subagent, activeSkills []*skills.Skill, opts ...prompt.Option) (*prompt.Prompt, error) {
 	preloadedXML := resolvePreloadedSkillsXML(sa.Skills, activeSkills)
-	allOpts := make([]prompt.Option, 0, len(opts)+2)
-	allOpts = append(allOpts, prompt.WithSubagentBody(sa.Body), prompt.WithPreloadedSkillsXML(preloadedXML))
+	allOpts := make([]prompt.Option, 0, len(opts)+3)
+	allOpts = append(
+		allOpts,
+		prompt.WithSubagentBody(sa.Body),
+		prompt.WithPreloadedSkillsXML(preloadedXML),
+		// A pinned skills set is the subagent's only skill exposure: suppress
+		// the broad <available_skills> discovery list so it can't reach others.
+		prompt.WithSuppressAvailableSkills(len(sa.Skills) > 0),
+	)
 	allOpts = append(allOpts, opts...)
 	return prompt.NewPrompt("subagent", string(subagentPromptTmpl), allOpts...)
 }

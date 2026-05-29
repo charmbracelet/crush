@@ -4,8 +4,33 @@ import (
 	"context"
 	"testing"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/stretchr/testify/require"
 )
+
+// TestWithSuppressAvailableSkills verifies the option omits <available_skills>
+// from the rendered prompt even though builtin skills exist. Needs a real store
+// because the nil-store path never computes AvailSkillXML.
+func TestWithSuppressAvailableSkills(t *testing.T) {
+	t.Parallel()
+
+	store, err := config.Init(t.TempDir(), "", false)
+	require.NoError(t, err)
+
+	const tmpl = `{{.AvailSkillXML}}`
+
+	open, err := NewPrompt("t", tmpl)
+	require.NoError(t, err)
+	got, err := open.Build(context.Background(), "p", "m", store)
+	require.NoError(t, err)
+	require.Contains(t, got, "<available_skills>", "available skills render by default")
+
+	suppressed, err := NewPrompt("t", tmpl, WithSuppressAvailableSkills(true))
+	require.NoError(t, err)
+	got, err = suppressed.Build(context.Background(), "p", "m", store)
+	require.NoError(t, err)
+	require.NotContains(t, got, "<available_skills>", "available skills suppressed by option")
+}
 
 // TestWithSubagentBody verifies that WithSubagentBody stores the body string in
 // PromptDat.SubagentBody and that the template can render it.
@@ -19,8 +44,8 @@ func TestWithSubagentBody(t *testing.T) {
 	p, err := NewPrompt("test", `{{.SubagentBody}}`, WithSubagentBody(body))
 	require.NoError(t, err)
 
-	// NewLiteralPrompt path accepts nil store. Template path calls promptData
-	// which uses store.WorkingDir(); use a real config store instead.
+	// A nil store makes promptData return a minimal PromptDat (it otherwise
+	// needs store.WorkingDir()), which still carries the subagent option fields.
 	result, err := p.Build(context.Background(), "test-provider", "test-model", nil)
 	require.NoError(t, err)
 	require.Equal(t, body, result)

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"charm.land/fantasy"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/subagents"
 	"github.com/stretchr/testify/require"
 )
@@ -204,4 +205,40 @@ func TestDispatcherTool_Run_UnknownSubagent_ReturnsErrorResponse(t *testing.T) {
 
 	require.NoError(t, err)
 	require.True(t, resp.IsError)
+}
+
+// recordingPermissions stubs permission.Service to capture
+// AutoApproveSession calls for subagent dispatch tests. All other methods
+// are no-ops or return zero values.
+type recordingPermissions struct {
+	permission.Service
+	autoApproved []string
+}
+
+func (r *recordingPermissions) AutoApproveSession(sessionID string) {
+	r.autoApproved = append(r.autoApproved, sessionID)
+}
+
+func TestSubagentSessionSetup(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil_when_no_bypass", func(t *testing.T) {
+		t.Parallel()
+		c := &coordinator{}
+		require.Nil(t, c.subagentSessionSetup(&subagents.Subagent{Name: "a"}))
+		require.Nil(t, c.subagentSessionSetup(&subagents.Subagent{Name: "a", PermissionMode: subagents.PermissionModeDefault}))
+	})
+
+	t.Run("bypass_calls_auto_approve", func(t *testing.T) {
+		t.Parallel()
+		rec := &recordingPermissions{}
+		c := &coordinator{permissions: rec}
+		sa := &subagents.Subagent{Name: "a", PermissionMode: subagents.PermissionModeBypassPermissions}
+
+		setup := c.subagentSessionSetup(sa)
+		require.NotNil(t, setup)
+
+		setup("session-123")
+		require.Equal(t, []string{"session-123"}, rec.autoApproved)
+	})
 }

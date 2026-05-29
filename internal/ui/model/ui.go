@@ -377,6 +377,9 @@ type UI struct {
 	// skills
 	skillStates []*skills.SkillState
 
+	// subagent @-mention completions, cached at init
+	activeSubagentItems []completions.SubagentCompletionValue
+
 	// sidebarLogo keeps a cached version of the sidebar sidebarLogo.
 	sidebarLogo string
 
@@ -513,7 +516,6 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		com.Styles.Completions.Focused,
 		com.Styles.Completions.Match,
 	)
-
 	todoSpinner := spinner.New(
 		spinner.WithSpinner(spinner.MiniDot),
 		spinner.WithStyle(com.Styles.Pills.TodoSpinner),
@@ -549,6 +551,13 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		initialSessionID:    initialSessionID,
 		continueLastSession: continueLast,
 		skillStates:         skills.GetLatestStates(),
+	}
+
+	// Cache active subagents for @-mention completions.
+	activeSubagents := com.Workspace.ActiveSubagents()
+	ui.activeSubagentItems = make([]completions.SubagentCompletionValue, len(activeSubagents))
+	for i, sa := range activeSubagents {
+		ui.activeSubagentItems[i] = completions.SubagentCompletionValue{Name: sa.Name, Description: sa.Description}
 	}
 
 	status := NewStatus(com, ui)
@@ -1545,7 +1554,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status.ClearInfoMsg()
 	case completions.CompletionItemsLoadedMsg:
 		if m.completionsOpen {
-			m.completions.SetItems(msg.Files, msg.Resources)
+			m.completions.SetItems(msg.Files, msg.Resources, msg.Subagents)
 		}
 	case uv.KittyGraphicsEvent:
 		if !bytes.HasPrefix(msg.Payload, []byte("OK")) {
@@ -3201,6 +3210,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 						if !msg.KeepOpen {
 							m.closeCompletions()
 						}
+					case completions.SelectionMsg[completions.SubagentCompletionValue]:
+						cmds = append(cmds, m.insertSubagentCompletion(msg.Value.Name))
+						if !msg.KeepOpen {
+							m.closeCompletions()
+						}
 					case completions.ClosedMsg:
 						m.completionsOpen = false
 					}
@@ -3380,7 +3394,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 						m.completionsStartIndex = curIdx
 						m.completionsPositionStart = m.completionsPosition()
 						depth, limit := m.com.Config().Options.TUI.Completions.Limits()
-						cmds = append(cmds, m.completions.Open(depth, limit))
+						cmds = append(cmds, m.completions.Open(depth, limit, m.activeSubagentItems))
 					}
 				}
 
@@ -4855,6 +4869,15 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 		}
 	}
 	return tea.Batch(heightCmd, fileCmd)
+}
+
+// insertSubagentCompletion inserts @name into the textarea, replacing the @query.
+func (m *UI) insertSubagentCompletion(name string) tea.Cmd {
+	prevHeight := m.textarea.Height()
+	if !m.insertCompletionText("@" + name) {
+		return nil
+	}
+	return m.handleTextareaHeightChange(prevHeight)
 }
 
 // insertMCPResourceCompletion inserts the selected resource into the textarea,

@@ -666,6 +666,10 @@ func (w *ClientWorkspace) ReadSkill(ctx context.Context, skillID string) ([]byte
 	}, nil
 }
 
+func (w *ClientWorkspace) ActiveSubagents() []SubagentInfo {
+	return nil
+}
+
 // -- MCP operations --
 
 // mcpStatesTimeout bounds a single MCP state probe. The client SDK sets no

@@ -36,6 +36,7 @@ type Theme struct {
 
 // ThemeItem represents a single theme entry in the picker.
 type ThemeItem struct {
+	*list.Versioned
 	name      string
 	label     string
 	isCurrent bool
@@ -43,6 +44,12 @@ type ThemeItem struct {
 	m         fuzzy.Match
 	cache     map[int]string
 	focused   bool
+}
+
+// Finished implements list.Item. Theme items are render-stable outside
+// of explicit SetFocused / SetMatch calls.
+func (r *ThemeItem) Finished() bool {
+	return true
 }
 
 var (
@@ -234,6 +241,7 @@ func (th *Theme) setThemeItems() {
 
 	for i, name := range builtins {
 		item := &ThemeItem{
+			Versioned: &list.Versioned{},
 			name:      name,
 			label:     name,
 			isCurrent: name == currentTheme,
@@ -261,12 +269,16 @@ func (r *ThemeItem) ID() string {
 func (r *ThemeItem) SetFocused(focused bool) {
 	if r.focused != focused {
 		r.cache = nil
+		r.Bump()
 	}
 	r.focused = focused
 }
 
 func (r *ThemeItem) SetMatch(m fuzzy.Match) {
-	r.cache = nil
+	if !sameFuzzyMatch(r.m, m) {
+		r.cache = nil
+		r.Bump()
+	}
 	r.m = m
 }
 

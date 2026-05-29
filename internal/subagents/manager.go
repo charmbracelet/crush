@@ -139,7 +139,13 @@ func (c DiscoveryConfig) ResolvePaths() []string {
 //   - states: per-file discovery outcome for diagnostics/UI.
 func DiscoverFromConfig(cfg DiscoveryConfig) (all, active []*Subagent, states []*SubagentState) {
 	userPaths := cfg.ResolvePaths()
-	discovered, allStates := DiscoverWithStates(userPaths, cfg.IsKnownModelID)
+	isKnown := cfg.IsKnownModelID
+	discovered, allStates := DiscoverWithStates(userPaths, func(_, model string) bool {
+		if isKnown == nil {
+			return false
+		}
+		return isKnown(model)
+	})
 	all = Deduplicate(discovered)
 	active = Filter(all, cfg.DisabledSubagents)
 	allStates = DeduplicateStates(allStates)

@@ -67,6 +67,18 @@ func findSubagentByName(active []*subagents.Subagent, name string) *subagents.Su
 	return nil
 }
 
+// subagentSessionSetup returns a SessionSetup callback that applies the
+// subagent's permission mode to the freshly-created sub-session. Returns
+// nil when no setup is needed.
+func (c *coordinator) subagentSessionSetup(sa *subagents.Subagent) func(sessionID string) {
+	if sa.PermissionMode != subagents.PermissionModeBypassPermissions {
+		return nil
+	}
+	return func(sessionID string) {
+		c.permissions.AutoApproveSession(sessionID)
+	}
+}
+
 // buildAgentDispatchInfo builds the ToolInfo for the agent dispatcher tool with
 // a dynamic subagent_type enum derived from the currently active subagents.
 func buildAgentDispatchInfo(activeSubagents []*subagents.Subagent) fantasy.ToolInfo {
@@ -173,6 +185,7 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 				ToolCallID:     call.ID,
 				Prompt:         params.Prompt,
 				SessionTitle:   sa.Name + " Agent Session",
+				SessionSetup:   c.subagentSessionSetup(sa),
 			})
 		},
 	}, nil

@@ -22,6 +22,7 @@ func TestParseContent(t *testing.T) {
 		wantModel       string
 		wantSkills      []string
 		wantMCPServers  []string
+		wantPermMode    string
 		wantBody        string
 		wantErr         bool
 	}{
@@ -101,6 +102,21 @@ This is the system prompt body.
 			wantSkills:      []string{"pdf-processing", "data-analysis"},
 			wantMCPServers:  []string{"filesystem"},
 			wantBody:        "This is the system prompt body.",
+		},
+		{
+			name: "permission_mode_bypass_decoded",
+			content: `---
+name: bypass-agent
+description: An agent with bypass permissions.
+permissionMode: bypassPermissions
+---
+
+Body.
+`,
+			wantName:        "bypass-agent",
+			wantDescription: "An agent with bypass permissions.",
+			wantPermMode:    PermissionModeBypassPermissions,
+			wantBody:        "Body.",
 		},
 		{
 			name: "body_extracted",
@@ -209,6 +225,7 @@ description: Never closed.
 			if tt.wantMCPServers != nil {
 				require.Equal(t, tt.wantMCPServers, agent.MCPServers)
 			}
+			require.Equal(t, tt.wantPermMode, agent.PermissionMode)
 			if tt.wantBody != "" {
 				require.Equal(t, tt.wantBody, agent.Body)
 			}
@@ -331,6 +348,22 @@ func TestValidate(t *testing.T) {
 			agent:   Subagent{Name: "my--agent", Description: "Something."},
 			wantErr: true,
 			errMsg:  "lowercase",
+		},
+		{
+			name:    "permission_mode_default_valid",
+			agent:   Subagent{Name: "my-agent", Description: "Something.", PermissionMode: PermissionModeDefault},
+			wantErr: false,
+		},
+		{
+			name:    "permission_mode_bypass_valid",
+			agent:   Subagent{Name: "my-agent", Description: "Something.", PermissionMode: PermissionModeBypassPermissions},
+			wantErr: false,
+		},
+		{
+			name:    "permission_mode_accept_edits_rejected",
+			agent:   Subagent{Name: "my-agent", Description: "Something.", PermissionMode: "acceptEdits"},
+			wantErr: true,
+			errMsg:  "permissionMode",
 		},
 	}
 

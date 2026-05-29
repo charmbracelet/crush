@@ -730,6 +730,7 @@ func allToolNames() []string {
 		"lsp_references",
 		"lsp_definition",
 		"lsp_document_symbols",
+		"lsp_rename",
 		"lsp_restart",
 		"fetch",
 		"agentic_fetch",

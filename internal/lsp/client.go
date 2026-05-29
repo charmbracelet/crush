@@ -698,3 +698,26 @@ func (c *Client) DocumentSymbols(ctx context.Context, filepath string) ([]protoc
 
 	return c.client.RequestDocumentSymbols(ctx, filepath)
 }
+
+// Rename returns the WorkspaceEdit the LSP server proposes for renaming
+// the symbol at (line, character) to newName. Inputs are 1-based.
+//
+// The caller is responsible for applying the edit on disk (typically via
+// internal/lsp/util.ApplyWorkspaceEdit) and gating it behind a permission
+// prompt — Rename can touch arbitrary files in the workspace.
+func (c *Client) Rename(ctx context.Context, filepath string, line, character int, newName string) (*protocol.WorkspaceEdit, error) {
+	if err := c.OpenFileOnDemand(ctx, filepath); err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	return c.client.RequestRename(ctx, filepath, line-1, character-1, newName)
+}
+
+// OffsetEncoding exposes the negotiated UTF-16/UTF-8/UTF-32 encoding so
+// callers (e.g. the rename tool) can hand it to lsp/util.ApplyWorkspaceEdit.
+func (c *Client) OffsetEncoding() powernap.OffsetEncoding {
+	return c.client.GetOffsetEncoding()
+}

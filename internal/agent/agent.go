@@ -51,6 +51,10 @@ import (
 const (
 	DefaultSessionName = "Untitled Session"
 
+	// retitleAfterUserMessages is the user-message count at which the session
+	// title is regenerated from accumulated conversation context.
+	retitleAfterUserMessages = 10
+
 	// Constants for auto-summarization thresholds
 	largeContextWindowThreshold = 200_000
 	largeContextWindowBuffer    = 20_000
@@ -236,11 +240,29 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	}
 
 	var wg sync.WaitGroup
-	// Generate title if first message.
-	if len(msgs) == 0 {
+	// Generate a title on the first message, then refresh it once the
+	// conversation has more context. By the retitleAfterUserMessages-th user
+	// message the conversation usually has enough substance for a sharper
+	// title than the one derived from the opening prompt alone.
+	userMsgCount := 0
+	for _, msg := range msgs {
+		if msg.Role == message.User {
+			userMsgCount++
+		}
+	}
+	// msgs excludes the prompt we are about to add, so the incoming message is
+	// user message number userMsgCount+1.
+	switch userMsgCount + 1 {
+	case 1:
 		titleCtx := ctx // Copy to avoid race with ctx reassignment below.
 		wg.Go(func() {
 			a.generateTitle(titleCtx, call.SessionID, call.Prompt)
+		})
+	case retitleAfterUserMessages:
+		titleCtx := ctx // Copy to avoid race with ctx reassignment below.
+		prompt := titlePromptFromMessages(msgs, call.Prompt)
+		wg.Go(func() {
+			a.generateTitle(titleCtx, call.SessionID, prompt)
 		})
 	}
 	defer wg.Wait()
@@ -1134,6 +1156,27 @@ func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.S
 		}
 	}
 	return msgs, nil
+}
+
+// titlePromptFromMessages builds the content used to regenerate a session
+// title from the existing user messages plus the latest prompt. Concatenating
+// the user turns gives the title model enough context to summarize where the
+// conversation has actually gone, rather than only its opening line.
+func titlePromptFromMessages(msgs []message.Message, latestPrompt string) string {
+	var sb strings.Builder
+	for _, msg := range msgs {
+		if msg.Role != message.User {
+			continue
+		}
+		text := strings.TrimSpace(msg.Content().Text)
+		if text == "" {
+			continue
+		}
+		sb.WriteString(text)
+		sb.WriteString("\n\n")
+	}
+	sb.WriteString(strings.TrimSpace(latestPrompt))
+	return strings.TrimSpace(sb.String())
 }
 
 // generateTitle generates a session titled based on the initial prompt.

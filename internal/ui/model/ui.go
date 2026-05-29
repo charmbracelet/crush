@@ -3405,11 +3405,23 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 // runShellCommand executes a shell command server-side without triggering
 // the LLM. The command and output are persisted as a user message.
 func (m *UI) runShellCommand(command string) tea.Cmd {
+	var cmds []tea.Cmd
 	if !m.hasSession() {
-		return util.ReportError(fmt.Errorf("no active session"))
+		newSession, err := m.com.Workspace.CreateSession(context.Background(), "New Session")
+		if err != nil {
+			return util.ReportError(err)
+		}
+		if m.forceCompactMode {
+			m.isCompact = true
+		}
+		if newSession.ID != "" {
+			m.session = &newSession
+			cmds = append(cmds, m.loadSession(newSession.ID))
+		}
+		m.setState(uiChat, m.focus)
 	}
 	sessionID := m.session.ID
-	return func() tea.Msg {
+	cmds = append(cmds, func() tea.Msg {
 		_, err := m.com.Workspace.AgentRunShellCommand(context.Background(), sessionID, command)
 		if err != nil {
 			return util.InfoMsg{
@@ -3418,7 +3430,8 @@ func (m *UI) runShellCommand(command string) tea.Cmd {
 			}
 		}
 		return nil
-	}
+	})
+	return tea.Batch(cmds...)
 }
 
 const cancelTimerDuration = 2 * time.Second

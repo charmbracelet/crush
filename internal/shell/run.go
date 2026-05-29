@@ -89,6 +89,7 @@ func Run(ctx context.Context, opts RunOptions) (err error) {
 // Crush handler stack. Shared by the stateless [Run] entrypoint and the
 // stateful [Shell] so the two surfaces cannot drift.
 func newRunner(cwd string, env []string, stdin io.Reader, stdout, stderr io.Writer, blockFuncs []BlockFunc) (*interp.Runner, error) {
+	env = withNonInteractiveEnv(env)
 	return interp.New(
 		interp.StdIO(stdin, stdout, stderr),
 		interp.Interactive(false),
@@ -96,6 +97,46 @@ func newRunner(cwd string, env []string, stdin io.Reader, stdout, stderr io.Writ
 		interp.Dir(cwd),
 		interp.ExecHandlers(standardHandlers(blockFuncs)...),
 	)
+}
+
+// nonInteractiveEnvVars are forced on every shell execution to prevent
+// commands from hanging on a nonexistent TTY. These are always applied
+// regardless of the caller's environment because Crush shells are never
+// interactive — preserving user preferences like EDITOR=nvim only causes
+// hangs, not useful behavior.
+var nonInteractiveEnvVars = []string{
+	"TERM=xterm-256color",
+	"GIT_EDITOR=false",
+	"EDITOR=false",
+	"VISUAL=false",
+	"JJ_EDITOR=false",
+	"JJ_PAGER=cat",
+	"GIT_PAGER=cat",
+	"PAGER=cat",
+}
+
+// withNonInteractiveEnv returns env with nonInteractiveEnvVars forced in,
+// replacing any existing values for those keys. The returned slice is a
+// new allocation safe to use concurrently with the input.
+func withNonInteractiveEnv(env []string) []string {
+	// Build a set of override keys for fast lookup.
+	overrideKeys := make(map[string]bool, len(nonInteractiveEnvVars))
+	for _, kv := range nonInteractiveEnvVars {
+		if key, _, ok := strings.Cut(kv, "="); ok {
+			overrideKeys[key] = true
+		}
+	}
+
+	// Copy env, filtering out any keys we will override.
+	result := make([]string, 0, len(env)+len(nonInteractiveEnvVars))
+	for _, e := range env {
+		if key, _, ok := strings.Cut(e, "="); ok && overrideKeys[key] {
+			continue
+		}
+		result = append(result, e)
+	}
+
+	return append(result, nonInteractiveEnvVars...)
 }
 
 // standardHandlers returns the exec-handler middleware chain used by both

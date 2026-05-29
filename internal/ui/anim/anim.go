@@ -200,6 +200,12 @@ func New(opts Settings) *Anim {
 		return a
 	}
 
+	// Always store the raw label so a normal-mode Anim can downshift to
+	// the low-bandwidth render path live (e.g. user toggles the palette
+	// option mid-stream). The styled per-rune `a.label` slice is built
+	// further down for the cycling-char path.
+	a.rawLabel = opts.Label
+
 	// Check cache first
 	cacheKey := settingsHash(opts)
 	cached, exists := animCacheMap.Get(cacheKey)
@@ -397,13 +403,22 @@ func (a *Anim) Start() tea.Cmd {
 	return a.Step()
 }
 
+// isLowBandwidth reports whether this Anim should render and tick in
+// reduced-motion mode at the moment of the call. We re-check the
+// process-wide flag on every call so toggling the palette option
+// downshifts already-running spinners immediately, not just newly
+// constructed ones.
+func (a *Anim) isLowBandwidth() bool {
+	return a.lowBandwidth || defaultLowBandwidth.Load()
+}
+
 // Animate advances the animation to the next step.
 func (a *Anim) Animate(msg StepMsg) tea.Cmd {
 	if msg.ID != a.id {
 		return nil
 	}
 
-	if a.lowBandwidth {
+	if a.isLowBandwidth() {
 		// Single counter is enough; we use it as both ellipsis frame and
 		// monotonic step. Wraps modulo len(lowBandwidthFrames) at render.
 		a.ellipsisStep.Add(1)
@@ -430,7 +445,7 @@ func (a *Anim) Animate(msg StepMsg) tea.Cmd {
 
 // Render renders the current state of the animation.
 func (a *Anim) Render() string {
-	if a.lowBandwidth {
+	if a.isLowBandwidth() {
 		return a.renderLowBandwidth()
 	}
 
@@ -482,7 +497,7 @@ func (a *Anim) renderLowBandwidth() string {
 
 // Step is a command that triggers the next step in the animation.
 func (a *Anim) Step() tea.Cmd {
-	if a.lowBandwidth {
+	if a.isLowBandwidth() {
 		return tea.Tick(lowBandwidthFrameInterval, func(time.Time) tea.Msg {
 			return StepMsg{ID: a.id}
 		})

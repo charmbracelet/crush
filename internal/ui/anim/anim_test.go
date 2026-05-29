@@ -104,3 +104,34 @@ func TestLowBandwidthLabelStaysVisible(t *testing.T) {
 		a.Animate(StepMsg{ID: a.id})
 	}
 }
+
+// TestLowBandwidthLiveToggleDownshiftsExistingAnim is the regression
+// test for the user-reported bug: toggling the package-wide flag must
+// downshift a *normal-mode* Anim that was constructed before the
+// toggle. Without it, in-flight assistant/tool spinners keep showing
+// the gradient scrambler until the next message item is created.
+func TestLowBandwidthLiveToggleDownshiftsExistingAnim(t *testing.T) {
+	// Cannot t.Parallel: mutates package state.
+	t.Cleanup(func() { SetDefaultLowBandwidth(false) })
+
+	a := New(Settings{Label: "Generating"})
+	require.False(t, a.lowBandwidth, "constructed in normal mode")
+
+	// Normal-mode render contains gradient cycling chars; nothing about
+	// the visible output should match the calm-dots renderer yet.
+	plainBefore := ansi.Strip(a.Render())
+	require.NotEqual(t, "Generating .", plainBefore)
+	require.NotEqual(t, "Generating ..", plainBefore)
+	require.NotEqual(t, "Generating ...", plainBefore)
+
+	// Toggle the package flag mid-flight (palette toggle path).
+	SetDefaultLowBandwidth(true)
+
+	plainAfter := ansi.Strip(a.Render())
+	require.Contains(t, plainAfter, "Generating", "label preserved after toggle")
+	require.Contains(t, plainAfter, ".", "dots renderer engaged after toggle")
+	// Width of the calm renderer is bounded; the scrambler's 15-char
+	// cycling area is gone.
+	require.LessOrEqual(t, len(plainAfter), len("Generating ..."),
+		"after toggle, render should be short calm form, got %q", plainAfter)
+}

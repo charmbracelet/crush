@@ -267,7 +267,7 @@ func TestAgentTool_SubagentToolsCappedByOwner(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cfg, err := config.Init(env.workingDir, "", false)
+	cfg, err := config.Init(t.Context(), env.workingDir, "", false)
 	require.NoError(t, err)
 
 	const (

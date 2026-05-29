@@ -266,7 +266,7 @@ func TestSubagentPrompt_Build_OmitsPreloadWhenEmpty(t *testing.T) {
 func TestSubagentPrompt_Build_SuppressesAvailableWhenSkillsPinned(t *testing.T) {
 	t.Parallel()
 
-	store, err := config.Init(t.TempDir(), "", false)
+	store, err := config.Init(t.Context(), t.TempDir(), "", false)
 	require.NoError(t, err)
 
 	sk := newTestSkill("preload-me", false)
@@ -287,7 +287,7 @@ func TestSubagentPrompt_Build_SuppressesAvailableWhenSkillsPinned(t *testing.T) 
 func TestSubagentPrompt_Build_RendersAvailableWhenNoSkillsPinned(t *testing.T) {
 	t.Parallel()
 
-	store, err := config.Init(t.TempDir(), "", false)
+	store, err := config.Init(t.Context(), t.TempDir(), "", false)
 	require.NoError(t, err)
 
 	sa := newTestSubagent("open", nil, "Body.")
@@ -307,7 +307,7 @@ func TestSubagentPrompt_Build_RendersAvailableWhenNoSkillsPinned(t *testing.T) {
 func TestSubagentPrompt_Build_SuppressesEvenWhenSkillsUnresolved(t *testing.T) {
 	t.Parallel()
 
-	store, err := config.Init(t.TempDir(), "", false)
+	store, err := config.Init(t.Context(), t.TempDir(), "", false)
 	require.NoError(t, err)
 
 	sa := newTestSubagent("scoped-typo", []string{"does-not-exist"}, "Body.")

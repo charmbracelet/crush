@@ -126,7 +126,7 @@ func (c *coordinator) agentTool(ctx context.Context, owner config.Agent) (fantas
 	if err != nil {
 		return nil, err
 	}
-	taskAgent, err := c.buildAgent(ctx, taskPr, taskCfg, true)
+	taskAgent, err := c.buildAgent(ctx, taskPr, taskCfg, true, "")
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +171,7 @@ func (c *coordinator) agentTool(ctx context.Context, owner config.Agent) (fantas
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("build subagent prompt %q: %w", sa.Name, err)
 			}
-			agent, err := c.buildAgent(ctx, subPr, agentCfg, true)
+			agent, err := c.buildAgent(ctx, subPr, agentCfg, true, sa.Effort)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("build subagent %q: %w", sa.Name, err)
 			}

@@ -14,7 +14,7 @@ import (
 func TestWithSuppressAvailableSkills(t *testing.T) {
 	t.Parallel()
 
-	store, err := config.Init(t.TempDir(), "", false)
+	store, err := config.Init(t.Context(), t.TempDir(), "", false)
 	require.NoError(t, err)
 
 	const tmpl = `{{.AvailSkillXML}}`

@@ -90,11 +90,23 @@ type Subagent struct {
 	Tools           ToolList `yaml:"tools"`
 	DisallowedTools ToolList `yaml:"disallowedTools"`
 	Model           string   `yaml:"model"`
+	Effort          string   `yaml:"effort"`
 	Skills          []string `yaml:"skills"`
 	MCPServers      []string `yaml:"mcpServers"`
 	PermissionMode  string   `yaml:"permissionMode"`
+	Color           string   `yaml:"color"`
+	Provider        string   `yaml:"provider"`
 	Body            string   // set from markdown body after frontmatter
 	FilePath        string   // set from the file path passed to Parse
+}
+
+// ResolvedColor returns the subagent's explicit Color if set, or falls back to
+// AutoColor(Name) for a deterministic palette assignment.
+func (s Subagent) ResolvedColor() string {
+	if s.Color != "" {
+		return s.Color
+	}
+	return AutoColor(s.Name)
 }
 
 // PermissionMode values accepted in the PermissionMode field.
@@ -158,19 +170,16 @@ func (s *Subagent) ToConfigAgent(base config.Agent) config.Agent {
 		}
 	}
 
-	// Determine model: use subagent preference only for the two recognised values.
-	model := base.Model
-	if s.Model == "large" || s.Model == "small" {
-		model = config.SelectedModelType(s.Model)
-	}
-
 	return config.Agent{
 		ID:           s.Name,
 		Name:         s.Name,
 		Description:  s.Description,
 		AllowedTools: pool,
 		AllowedMCP:   allowedMCP,
-		Model:        model,
+		// Unused for subagents: the coordinator resolves the model from the
+		// raw `model:` value (alias or specific id). Inherit the base type so
+		// the field stays a valid selection.
+		Model: base.Model,
 	}
 }
 
@@ -212,7 +221,7 @@ func Parse(path string) (*Subagent, error) {
 // is non-nil and Model is a non-empty value other than "large"/"small", the
 // resolver must return true or validation fails. A nil resolver skips the
 // model check (used when the caller has no config context).
-func (s *Subagent) ValidateAgainst(isKnownModel func(string) bool) error {
+func (s *Subagent) ValidateAgainst(isKnownModel func(provider, model string) bool) error {
 	err := s.Validate()
 	if isKnownModel == nil {
 		return err
@@ -220,7 +229,7 @@ func (s *Subagent) ValidateAgainst(isKnownModel func(string) bool) error {
 	if s.Model == "" || s.Model == "large" || s.Model == "small" {
 		return err
 	}
-	if !isKnownModel(s.Model) {
+	if !isKnownModel(s.Provider, s.Model) {
 		modelErr := fmt.Errorf("model %q is not a known model id; use \"large\", \"small\", or a valid provider model id", s.Model)
 		if err == nil {
 			return modelErr
@@ -267,10 +276,24 @@ func (s *Subagent) Validate() error {
 		}
 	}
 
+	switch s.Effort {
+	case "", EffortNone, EffortMinimal, EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax:
+	default:
+		errs = append(errs, fmt.Errorf("effort %q is not valid; use one of: %q, %q, %q, %q, %q, %q, %q", s.Effort, EffortNone, EffortMinimal, EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax))
+	}
+
 	switch s.PermissionMode {
 	case "", PermissionModeDefault, PermissionModeBypassPermissions:
 	default:
 		errs = append(errs, fmt.Errorf("permissionMode %q is not valid; use %q or %q", s.PermissionMode, PermissionModeDefault, PermissionModeBypassPermissions))
+	}
+
+	if s.Color != "" && !IsValidColor(s.Color) {
+		errs = append(errs, fmt.Errorf("color %q is not valid; use one of: %s", s.Color, strings.Join(colorPalette[:], ", ")))
+	}
+
+	if s.Provider != "" && (s.Model == "" || s.Model == "large" || s.Model == "small") {
+		errs = append(errs, fmt.Errorf("provider requires a specific model id; use a valid provider model id (not empty, %q, or %q)", "large", "small"))
 	}
 
 	return errors.Join(errs...)
@@ -390,7 +413,7 @@ func DeduplicateStates(all []*SubagentState) []*SubagentState {
 // DiscoverWithStates finds all valid subagent definition files (*.md) in the
 // given paths recursively, and returns both the discovered subagents and a
 // per-file state slice describing parse/validation outcomes. When
-// isKnownModelID is non-nil it is used to validate non-alias model ids; nil
+// isKnownModel is non-nil it is used to validate non-alias model ids; nil
 // skips that check.
 //
 // The returned agents preserve the caller's path order: all subagents from
@@ -398,7 +421,7 @@ func DeduplicateStates(all []*SubagentState) []*SubagentState {
 // the last occurrence of a name, so this ordering is what makes later paths —
 // the working directory, per ProjectSubagentsDir — override earlier ones
 // (monorepo root, global dirs) on a name collision.
-func DiscoverWithStates(paths []string, isKnownModelID func(string) bool) ([]*Subagent, []*SubagentState) {
+func DiscoverWithStates(paths []string, isKnownModel func(provider, model string) bool) ([]*Subagent, []*SubagentState) {
 	var agents []*Subagent
 	var states []*SubagentState
 	var mu sync.Mutex
@@ -444,7 +467,7 @@ func DiscoverWithStates(paths []string, isKnownModelID func(string) bool) ([]*Su
 				addState("", path, StateError, err)
 				return nil
 			}
-			if err := agent.ValidateAgainst(isKnownModelID); err != nil {
+			if err := agent.ValidateAgainst(isKnownModel); err != nil {
 				slog.Warn("Subagent validation failed", "path", path, "error", err)
 				addState(agent.Name, path, StateError, err)
 				return nil

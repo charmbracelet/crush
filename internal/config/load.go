@@ -1101,7 +1101,8 @@ func GlobalSubagentsDirs() []string {
 			os.Getenv("LOCALAPPDATA"),
 			filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local"),
 		)
-		paths = append(paths,
+		paths = append(
+			paths,
 			filepath.Join(appData, appName, "agents"),
 			filepath.Join(appData, "agents", "agents"),
 		)

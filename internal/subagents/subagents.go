@@ -92,9 +92,16 @@ type Subagent struct {
 	Model           string   `yaml:"model"`
 	Skills          []string `yaml:"skills"`
 	MCPServers      []string `yaml:"mcpServers"`
+	PermissionMode  string   `yaml:"permissionMode"`
 	Body            string   // set from markdown body after frontmatter
 	FilePath        string   // set from the file path passed to Parse
 }
+
+// PermissionMode values accepted in the PermissionMode field.
+const (
+	PermissionModeDefault           = "default"
+	PermissionModeBypassPermissions = "bypassPermissions"
+)
 
 // ToConfigAgent converts the Subagent into a config.Agent by applying the
 // subagent's tool restrictions and model preference on top of the provided
@@ -258,6 +265,12 @@ func (s *Subagent) Validate() error {
 				errs = append(errs, fmt.Errorf("tool %q appears in both tools and disallowedTools", tool))
 			}
 		}
+	}
+
+	switch s.PermissionMode {
+	case "", PermissionModeDefault, PermissionModeBypassPermissions:
+	default:
+		errs = append(errs, fmt.Errorf("permissionMode %q is not valid; use %q or %q", s.PermissionMode, PermissionModeDefault, PermissionModeBypassPermissions))
 	}
 
 	return errors.Join(errs...)

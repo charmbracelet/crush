@@ -67,7 +67,7 @@ description: A test agent.
 			content: `---
 name: my-agent
 description: A test agent.
-disallowed_tools: Write, Edit
+disallowedTools: Write, Edit
 ---
 `,
 			wantName:        "my-agent",
@@ -83,7 +83,7 @@ model: large
 tools:
   - Read
   - Bash
-disallowed_tools: Write, Edit
+disallowedTools: Write, Edit
 skills:
   - pdf-processing
   - data-analysis

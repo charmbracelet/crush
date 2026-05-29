@@ -10,12 +10,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/taigrr/fantasy"
 	"github.com/taigrr/crush/internal/diff"
+	"github.com/taigrr/crush/internal/editor"
 	"github.com/taigrr/crush/internal/filepathext"
 	"github.com/taigrr/crush/internal/filetracker"
 	"github.com/taigrr/crush/internal/fsext"
 	"github.com/taigrr/crush/internal/history"
+	"github.com/taigrr/fantasy"
 
 	"github.com/taigrr/crush/internal/lsp"
 	"github.com/taigrr/crush/internal/permission"
@@ -49,6 +50,7 @@ func NewWriteTool(
 	files history.Service,
 	filetracker filetracker.Service,
 	workingDir WorkingDirFunc,
+	bridge editor.Bridge,
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		WriteToolName,
@@ -159,6 +161,7 @@ func NewWriteTool(
 			filetracker.RecordRead(ctx, sessionID, filePath)
 
 			notifyLSPs(ctx, lspManager, params.FilePath)
+			notifyEditor(ctx, bridge, filePath, oldContent, params.Content)
 
 			result := fmt.Sprintf("File successfully written: %s", filePath)
 			result = fmt.Sprintf("<result>\n%s\n</result>", result)

@@ -10,14 +10,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/taigrr/fantasy"
 	"github.com/taigrr/crush/internal/diff"
+	"github.com/taigrr/crush/internal/editor"
 	"github.com/taigrr/crush/internal/filepathext"
 	"github.com/taigrr/crush/internal/filetracker"
 	"github.com/taigrr/crush/internal/fsext"
 	"github.com/taigrr/crush/internal/history"
 	"github.com/taigrr/crush/internal/lsp"
 	"github.com/taigrr/crush/internal/permission"
+	"github.com/taigrr/fantasy"
 )
 
 type MultiEditOperation struct {
@@ -63,6 +64,7 @@ func NewMultiEditTool(
 	files history.Service,
 	filetracker filetracker.Service,
 	workingDir WorkingDirFunc,
+	bridge editor.Bridge,
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		MultiEditToolName,
@@ -87,7 +89,7 @@ func NewMultiEditTool(
 			var response fantasy.ToolResponse
 			var err error
 
-			editCtx := editContext{ctx, permissions, files, filetracker, wd}
+			editCtx := editContext{ctx, permissions, files, filetracker, wd, bridge}
 			// Handle file creation case (first edit has empty old_string)
 			if len(params.Edits) > 0 && params.Edits[0].OldString == "" {
 				response, err = processMultiEditWithCreation(editCtx, params, call)
@@ -218,6 +220,8 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 	}
 
 	edit.filetracker.RecordRead(edit.ctx, sessionID, params.FilePath)
+
+	notifyEditor(edit.ctx, edit.bridge, params.FilePath, "", currentContent)
 
 	var message string
 	if len(failedEdits) > 0 {
@@ -377,6 +381,8 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 	}
 
 	edit.filetracker.RecordRead(edit.ctx, sessionID, params.FilePath)
+
+	notifyEditor(edit.ctx, edit.bridge, params.FilePath, oldContent, currentContent)
 
 	var message string
 	if len(failedEdits) > 0 {

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/taigrr/fantasy"
 	"github.com/stretchr/testify/require"
+	"github.com/taigrr/fantasy"
 )
 
 type mockFileTrackerService struct{}
@@ -30,7 +30,7 @@ func TestWriteToolWritesEmptyNewFile(t *testing.T) {
 	workingDir := t.TempDir()
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
 
-	tool := NewWriteTool(nil, &mockPermissionService{}, &mockHistoryService{}, mockFileTrackerService{}, func() string { return workingDir })
+	tool := NewWriteTool(nil, &mockPermissionService{}, &mockHistoryService{}, mockFileTrackerService{}, func() string { return workingDir }, nil)
 
 	input, err := json.Marshal(WriteParams{FilePath: "empty.txt", Content: ""})
 	require.NoError(t, err)

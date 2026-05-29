@@ -12,11 +12,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/invopop/jsonschema"
 	"github.com/taigrr/catwalk/pkg/catwalk"
 	"github.com/taigrr/crush/internal/csync"
 	"github.com/taigrr/crush/internal/oauth"
 	"github.com/taigrr/crush/internal/oauth/copilot"
-	"github.com/invopop/jsonschema"
 )
 
 const (
@@ -740,6 +740,8 @@ func allToolNames() []string {
 		"write",
 		"list_mcp_resources",
 		"read_mcp_resource",
+		"editor_context",
+		"show_locations",
 	}
 }
 
@@ -752,7 +754,7 @@ func resolveAllowedTools(allTools []string, disabledTools []string) []string {
 }
 
 func resolveReadOnlyTools(tools []string) []string {
-	readOnlyTools := []string{"glob", "grep", "ls", "sourcegraph", "view"}
+	readOnlyTools := []string{"editor_context", "glob", "grep", "ls", "show_locations", "sourcegraph", "view"}
 	// filter to only include tools that are in allowedtools (include mode)
 	return filterSlice(tools, readOnlyTools, true)
 }

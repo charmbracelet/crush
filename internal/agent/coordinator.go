@@ -17,13 +17,13 @@ import (
 	"strings"
 
 	"github.com/taigrr/catwalk/pkg/catwalk"
-	"github.com/taigrr/fantasy"
 	"github.com/taigrr/crush/internal/agent/hyper"
 	"github.com/taigrr/crush/internal/agent/notify"
 	"github.com/taigrr/crush/internal/agent/prompt"
 	"github.com/taigrr/crush/internal/agent/tools"
 	"github.com/taigrr/crush/internal/checkpoint"
 	"github.com/taigrr/crush/internal/config"
+	"github.com/taigrr/crush/internal/editor"
 	"github.com/taigrr/crush/internal/filetracker"
 	"github.com/taigrr/crush/internal/history"
 	"github.com/taigrr/crush/internal/hooks"
@@ -35,8 +35,11 @@ import (
 	"github.com/taigrr/crush/internal/pubsub"
 	"github.com/taigrr/crush/internal/session"
 	"github.com/taigrr/crush/internal/skills"
+	"github.com/taigrr/fantasy"
 	"golang.org/x/sync/errgroup"
 
+	openaisdk "github.com/charmbracelet/openai-go/option"
+	"github.com/qjebbs/go-jsons"
 	"github.com/taigrr/fantasy/providers/anthropic"
 	"github.com/taigrr/fantasy/providers/azure"
 	"github.com/taigrr/fantasy/providers/bedrock"
@@ -45,8 +48,6 @@ import (
 	"github.com/taigrr/fantasy/providers/openaicompat"
 	"github.com/taigrr/fantasy/providers/openrouter"
 	"github.com/taigrr/fantasy/providers/vercel"
-	openaisdk "github.com/charmbracelet/openai-go/option"
-	"github.com/qjebbs/go-jsons"
 )
 
 // Coordinator errors.
@@ -97,6 +98,7 @@ type coordinator struct {
 	filetracker filetracker.Service
 	lspManager  *lsp.Manager
 	notify      pubsub.Publisher[notify.Notification]
+	editor      editor.Bridge
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
@@ -121,6 +123,7 @@ func NewCoordinator(
 	lspManager *lsp.Manager,
 	notify pubsub.Publisher[notify.Notification],
 	skillsMgr *skills.Manager,
+	editorBridge editor.Bridge,
 ) (Coordinator, error) {
 	// Skills are pre-discovered by the caller (see app.New /
 	// backend.CreateWorkspace) and passed in via the manager. If no
@@ -135,6 +138,9 @@ func NewCoordinator(
 	}
 	skillTracker := skills.NewTracker(activeSkills)
 
+	if editorBridge == nil {
+		editorBridge = editor.Noop{}
+	}
 	c := &coordinator{
 		cfg:          cfg,
 		sessions:     sessions,
@@ -145,6 +151,7 @@ func NewCoordinator(
 		filetracker:  filetracker,
 		lspManager:   lspManager,
 		notify:       notify,
+		editor:       editorBridge,
 		agents:       make(map[string]SessionAgent),
 		allSkills:    allSkills,
 		activeSkills: activeSkills,
@@ -520,8 +527,8 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewJobOutputTool(),
 		tools.NewJobKillTool(),
 		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir, nil),
-		tools.NewEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir),
-		tools.NewMultiEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir),
+		tools.NewEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir, c.editor),
+		tools.NewMultiEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir, c.editor),
 		tools.NewFetchTool(c.permissions, c.cfg.WorkingDir, nil),
 		tools.NewGlobTool(c.cfg.WorkingDir),
 		tools.NewGrepTool(c.cfg.WorkingDir, c.cfg.Config().Tools.Grep),
@@ -529,8 +536,18 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewSourcegraphTool(nil),
 		tools.NewTodosTool(c.sessions),
 		tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, c.skillTracker, c.cfg.WorkingDir, c.cfg.Config().Options.SkillsPaths...),
-		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir),
+		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir, c.editor),
 	)
+
+	// Editor bridge tools — only registered when an editor is actually
+	// attached, so the model never sees them in non-editor sessions.
+	if c.editor != nil && c.editor.Available() {
+		allTools = append(
+			allTools,
+			tools.NewEditorContextTool(c.editor),
+			tools.NewShowLocationsTool(c.editor),
+		)
+	}
 
 	// Add LSP tools if user has configured LSPs or auto_lsp is enabled (nil or true).
 	if len(c.cfg.Config().LSP) > 0 || c.cfg.Config().Options.AutoLSP == nil || *c.cfg.Config().Options.AutoLSP {

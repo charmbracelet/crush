@@ -10,12 +10,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/taigrr/fantasy"
 	"github.com/taigrr/crush/internal/diff"
+	"github.com/taigrr/crush/internal/editor"
 	"github.com/taigrr/crush/internal/filepathext"
 	"github.com/taigrr/crush/internal/filetracker"
 	"github.com/taigrr/crush/internal/fsext"
 	"github.com/taigrr/crush/internal/history"
+	"github.com/taigrr/fantasy"
 
 	"github.com/taigrr/crush/internal/lsp"
 	"github.com/taigrr/crush/internal/permission"
@@ -57,6 +58,7 @@ type editContext struct {
 	files       history.Service
 	filetracker filetracker.Service
 	workingDir  string
+	bridge      editor.Bridge
 }
 
 func NewEditTool(
@@ -65,6 +67,7 @@ func NewEditTool(
 	files history.Service,
 	filetracker filetracker.Service,
 	workingDir WorkingDirFunc,
+	bridge editor.Bridge,
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		EditToolName,
@@ -80,7 +83,7 @@ func NewEditTool(
 			var response fantasy.ToolResponse
 			var err error
 
-			editCtx := editContext{ctx, permissions, files, filetracker, wd}
+			editCtx := editContext{ctx, permissions, files, filetracker, wd, bridge}
 
 			if params.OldString == "" {
 				response, err = createNewFile(editCtx, params.FilePath, params.NewString, call)
@@ -178,6 +181,8 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 	}
 
 	edit.filetracker.RecordRead(edit.ctx, sessionID, filePath)
+
+	notifyEditor(edit.ctx, edit.bridge, filePath, "", content)
 
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse("File created: "+filePath),
@@ -313,6 +318,8 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 
 	edit.filetracker.RecordRead(edit.ctx, sessionID, filePath)
 
+	notifyEditor(edit.ctx, edit.bridge, filePath, oldContent, newContent)
+
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse("Content deleted from file: "+filePath),
 		EditResponseMetadata{
@@ -446,6 +453,8 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 	}
 
 	edit.filetracker.RecordRead(edit.ctx, sessionID, filePath)
+
+	notifyEditor(edit.ctx, edit.bridge, filePath, oldContent, newContent)
 
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse("Content replaced in file: "+filePath),

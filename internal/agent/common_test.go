@@ -8,10 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/taigrr/catwalk/pkg/catwalk"
-	"github.com/taigrr/fantasy"
-	"github.com/taigrr/fantasy/providers/openaicompat"
 	"charm.land/x/vcr"
+	"github.com/stretchr/testify/require"
+	"github.com/taigrr/catwalk/pkg/catwalk"
 	"github.com/taigrr/crush/internal/agent/prompt"
 	"github.com/taigrr/crush/internal/agent/tools"
 	"github.com/taigrr/crush/internal/config"
@@ -23,7 +22,8 @@ import (
 	"github.com/taigrr/crush/internal/message"
 	"github.com/taigrr/crush/internal/permission"
 	"github.com/taigrr/crush/internal/session"
-	"github.com/stretchr/testify/require"
+	"github.com/taigrr/fantasy"
+	"github.com/taigrr/fantasy/providers/openaicompat"
 
 	_ "github.com/joho/godotenv/autoload"
 )
@@ -169,15 +169,15 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 	allTools := []fantasy.AgentTool{
 		tools.NewBashTool(env.permissions, wdFunc, cfg.Config().Options.Attribution, modelName),
 		tools.NewDownloadTool(env.permissions, wdFunc, r.GetDefaultClient()),
-		tools.NewEditTool(nil, env.permissions, env.history, *env.filetracker, wdFunc),
-		tools.NewMultiEditTool(nil, env.permissions, env.history, *env.filetracker, wdFunc),
+		tools.NewEditTool(nil, env.permissions, env.history, *env.filetracker, wdFunc, nil),
+		tools.NewMultiEditTool(nil, env.permissions, env.history, *env.filetracker, wdFunc, nil),
 		tools.NewFetchTool(env.permissions, wdFunc, r.GetDefaultClient()),
 		tools.NewGlobTool(wdFunc),
 		tools.NewGrepTool(wdFunc, cfg.Config().Tools.Grep),
 		tools.NewLsTool(env.permissions, wdFunc, cfg.Config().Tools.Ls),
 		tools.NewSourcegraphTool(r.GetDefaultClient()),
 		tools.NewViewTool(nil, env.permissions, *env.filetracker, nil, wdFunc),
-		tools.NewWriteTool(nil, env.permissions, env.history, *env.filetracker, wdFunc),
+		tools.NewWriteTool(nil, env.permissions, env.history, *env.filetracker, wdFunc, nil),
 	}
 
 	return testSessionAgent(env, large, small, systemPrompt, allTools...), nil

@@ -15,15 +15,19 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/taigrr/catwalk/pkg/catwalk"
-	"github.com/taigrr/fantasy"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/exp/charmtone"
+	"github.com/charmbracelet/x/term"
+	"github.com/taigrr/catwalk/pkg/catwalk"
 	"github.com/taigrr/crush/internal/agent"
 	"github.com/taigrr/crush/internal/agent/notify"
 	"github.com/taigrr/crush/internal/agent/tools/mcp"
 	"github.com/taigrr/crush/internal/checkpoint"
 	"github.com/taigrr/crush/internal/config"
 	"github.com/taigrr/crush/internal/db"
+	"github.com/taigrr/crush/internal/editor"
+	editornvim "github.com/taigrr/crush/internal/editor/nvim"
 	"github.com/taigrr/crush/internal/filetracker"
 	"github.com/taigrr/crush/internal/fork"
 	"github.com/taigrr/crush/internal/format"
@@ -41,9 +45,7 @@ import (
 	"github.com/taigrr/crush/internal/update"
 	"github.com/taigrr/crush/internal/version"
 	"github.com/taigrr/crush/internal/worktree"
-	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/exp/charmtone"
-	"github.com/charmbracelet/x/term"
+	"github.com/taigrr/fantasy"
 )
 
 // UpdateAvailableMsg is sent when a new version is available.
@@ -68,6 +70,11 @@ type App struct {
 	LSPManager *lsp.Manager
 
 	Skills *skills.Manager
+
+	// Editor is the bridge to an external editor (currently Neovim) when
+	// Crush was launched from inside one. Always non-nil; defaults to a
+	// Noop bridge when no editor is detected.
+	Editor editor.Bridge
 
 	config *config.ConfigStore
 
@@ -140,6 +147,14 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	// Initialize fork service.
 	forks := fork.NewService(q, conn, sessions, messages, checkpoints, worktrees)
 
+	// Detect an attached editor (e.g. Neovim via $NVIM). Falls back to a
+	// Noop bridge so call sites never need a nil check.
+	var editorBridge editor.Bridge = editor.Noop{}
+	if b, ok := editornvim.New(); ok {
+		editorBridge = b
+		slog.Info("Editor bridge connected", "editor", "neovim")
+	}
+
 	app := &App{
 		Sessions:    sessions,
 		Messages:    messages,
@@ -151,6 +166,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		Forks:       forks,
 		LSPManager:  lsp.NewManager(store),
 		Skills:      skillsMgr,
+		Editor:      editorBridge,
 
 		globalCtx: ctx,
 
@@ -177,6 +193,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		app.cleanupFuncs,
 		func(context.Context) error { return db.Release(dataDir) },
 		func(ctx context.Context) error { return mcp.Close(ctx) },
+		func(context.Context) error { return app.Editor.Close() },
 	)
 
 	// TODO: remove the concept of agent config, most likely.
@@ -616,6 +633,7 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.LSPManager,
 		app.agentNotifications,
 		app.Skills,
+		app.Editor,
 	)
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)

@@ -202,7 +202,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		return nil, err
 	}
 
-	agent, err := c.buildAgent(ctx, prompt, agentCfg, false)
+	agent, err := c.buildAgent(ctx, prompt, agentCfg, false, "")
 	if err != nil {
 		return nil, err
 	}
@@ -614,11 +614,24 @@ func mergeCallOptions(model Model, cfg config.ProviderConfig) (fantasy.ProviderO
 	return modelOptions, temp, topP, topK, freqPenalty, presPenalty
 }
 
-func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool) (SessionAgent, error) {
+// applyEffortToBuiltModels returns copies of large and small with the given
+// effort level applied to the large model's config. The small model is returned
+// unchanged. It is a no-op when effort is empty.
+func applyEffortToBuiltModels(effort string, large, small Model) (Model, Model) {
+	if effort == "" {
+		return large, small
+	}
+	large.ModelCfg = subagents.ApplyEffortToModel(effort, large.ModelCfg, large.CatwalkCfg)
+	return large, small
+}
+
+func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool, effort string) (SessionAgent, error) {
 	large, small, err := c.buildAgentModels(ctx, isSubAgent)
 	if err != nil {
 		return nil, err
 	}
+
+	large, small = applyEffortToBuiltModels(effort, large, small)
 
 	largeProviderCfg, _ := c.cfg.Config().Providers.Get(large.ModelCfg.Provider)
 	result := NewSessionAgent(SessionAgentOptions{

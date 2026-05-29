@@ -392,6 +392,9 @@ func (w *AppWorkspace) ReadSkill(_ context.Context, skillID string) ([]byte, ski
 	return skills.ReadContent(mgr.ActiveSkills(), mgr.ResolvedPaths(), mgr.WorkingDir(), skillID)
 }
 
+// ActiveSubagents returns the workspace's post-filter list of active subagents
+// projected to the frontend-facing SubagentInfo shape. Returns nil when the
+// workspace has no Subagents manager configured.
 func (w *AppWorkspace) ActiveSubagents() []SubagentInfo {
 	mgr := w.app.Subagents
 	if mgr == nil {

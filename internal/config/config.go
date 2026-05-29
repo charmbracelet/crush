@@ -694,6 +694,24 @@ func (c *Config) GetModel(provider, model string) *catwalk.Model {
 	return nil
 }
 
+// IsKnownModelID reports whether modelID matches the ID of any model offered
+// by any provider in the config. Walks every provider since model IDs are
+// unique per provider but callers identifying a model by ID alone do not have
+// provider context.
+func (c *Config) IsKnownModelID(modelID string) bool {
+	if modelID == "" {
+		return false
+	}
+	for p := range c.Providers.Seq() {
+		for _, m := range p.Models {
+			if m.ID == modelID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (c *Config) GetProviderForModel(modelType SelectedModelType) *ProviderConfig {
 	model, ok := c.Models[modelType]
 	if !ok {

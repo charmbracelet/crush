@@ -34,6 +34,39 @@ func TestManager_ActiveSubagents(t *testing.T) {
 	require.Equal(t, "b", got[0].Name)
 }
 
+func TestManager_AllSubagents_ReturnsClone(t *testing.T) {
+	t.Parallel()
+
+	original := &Subagent{Name: "a"}
+	mgr := NewManager([]*Subagent{original}, nil, nil)
+	t.Cleanup(mgr.Shutdown)
+
+	got := mgr.AllSubagents()
+	require.Len(t, got, 1)
+	// Mutate returned slice; subsequent read must see original content.
+	got[0] = &Subagent{Name: "mutated"}
+	got = append(got, &Subagent{Name: "appended"})
+
+	after := mgr.AllSubagents()
+	require.Len(t, after, 1, "mutating returned slice must not change manager state")
+	require.Equal(t, "a", after[0].Name)
+}
+
+func TestManager_ActiveSubagents_ReturnsClone(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewManager(nil, []*Subagent{{Name: "b"}}, nil)
+	t.Cleanup(mgr.Shutdown)
+
+	got := mgr.ActiveSubagents()
+	got[0] = &Subagent{Name: "mutated"}
+	got = append(got, &Subagent{Name: "extra"})
+
+	after := mgr.ActiveSubagents()
+	require.Len(t, after, 1)
+	require.Equal(t, "b", after[0].Name)
+}
+
 func TestManager_States(t *testing.T) {
 	t.Parallel()
 
@@ -43,6 +76,40 @@ func TestManager_States(t *testing.T) {
 	got := mgr.States()
 	require.Len(t, got, 1)
 	require.Equal(t, "x", got[0].Name)
+}
+
+func TestManager_SetLatestStates_UpdatesCacheWithoutPublishing(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewManager(nil, nil, []*SubagentState{{Name: "old"}})
+	t.Cleanup(mgr.Shutdown)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	ch := mgr.SubscribeEvents(ctx)
+
+	mgr.SetLatestStates([]*SubagentState{{Name: "new"}})
+
+	got := mgr.States()
+	require.Len(t, got, 1)
+	require.Equal(t, "new", got[0].Name)
+
+	select {
+	case ev := <-ch:
+		t.Fatalf("SetLatestStates must not publish events, got %+v", ev)
+	case <-time.After(50 * time.Millisecond):
+		// expected: no event delivered
+	}
+}
+
+func TestManager_Shutdown_IsIdempotent(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewManager(nil, nil, nil)
+	require.NotPanics(t, func() {
+		mgr.Shutdown()
+		mgr.Shutdown()
+	})
 }
 
 func TestManager_PublishStatesUpdatesCache(t *testing.T) {
@@ -147,6 +214,57 @@ func TestDiscoverFromConfig(t *testing.T) {
 		}
 	}
 	require.True(t, foundState, "states must include my-agent with StateNormal")
+}
+
+func TestDiscoverFromConfig_RejectsUnknownModelViaResolver(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmp, "good-model.md"),
+		[]byte("---\nname: good-model\ndescription: ok\nmodel: gpt-4o\n---\n\nBody.\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmp, "bad-model.md"),
+		[]byte("---\nname: bad-model\ndescription: bad\nmodel: imaginary-99\n---\n\nBody.\n"),
+		0o644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmp, "alias.md"),
+		[]byte("---\nname: alias-model\ndescription: alias\nmodel: large\n---\n\nBody.\n"),
+		0o644,
+	))
+
+	knownModels := map[string]bool{"gpt-4o": true}
+	all, active, states := DiscoverFromConfig(DiscoveryConfig{
+		SubagentsPaths: []string{tmp},
+		IsKnownModelID: func(id string) bool { return knownModels[id] },
+	})
+
+	activeNames := make(map[string]bool, len(active))
+	for _, a := range active {
+		activeNames[a.Name] = true
+	}
+	require.True(t, activeNames["good-model"], "good-model must be active")
+	require.True(t, activeNames["alias-model"], "alias-model (large) must be active")
+	require.False(t, activeNames["bad-model"], "bad-model must be dropped on validation failure")
+
+	allNames := make(map[string]bool, len(all))
+	for _, a := range all {
+		allNames[a.Name] = true
+	}
+	require.False(t, allNames["bad-model"], "bad-model must not appear in all (validation failed)")
+
+	var badState *SubagentState
+	for _, s := range states {
+		if s.Name == "bad-model" {
+			badState = s
+		}
+	}
+	require.NotNil(t, badState, "states must include bad-model entry")
+	require.Equal(t, StateError, badState.State)
+	require.ErrorContains(t, badState.Err, "model")
 }
 
 func TestDiscoverFromConfig_DisabledFiltered(t *testing.T) {

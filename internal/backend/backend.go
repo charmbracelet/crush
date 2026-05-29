@@ -298,7 +298,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	subagentsCfg := subagents.DiscoveryConfig{
 		SubagentsPaths:    cfg.Config().Options.SubagentsPaths,
 		DisabledSubagents: cfg.Config().Options.DisabledSubagents,
-		WorkingDir:        cfg.WorkingDir(),
+		IsKnownModelID:    cfg.Config().IsKnownModelID,
 	}
 	allSubagents, activeSubagents, subagentStates := subagents.DiscoverFromConfig(subagentsCfg)
 	subagentsMgr := subagents.NewManager(allSubagents, activeSubagents, subagentStates)

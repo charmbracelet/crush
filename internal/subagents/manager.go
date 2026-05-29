@@ -41,19 +41,21 @@ func NewManager(all, active []*Subagent, states []*SubagentState, opts ...Manage
 	return m
 }
 
-// AllSubagents returns the deduplicated list of all discovered subagents.
+// AllSubagents returns a copy of the deduplicated list of all discovered
+// subagents. The returned slice is safe for the caller to mutate.
 func (m *Manager) AllSubagents() []*Subagent {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.allSubagents
+	return cloneSubagents(m.allSubagents)
 }
 
-// ActiveSubagents returns the post-filter list of active subagents (after
-// removing disabled entries).
+// ActiveSubagents returns a copy of the post-filter list of active subagents
+// (after removing disabled entries). The returned slice is safe for the caller
+// to mutate.
 func (m *Manager) ActiveSubagents() []*Subagent {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.activeSubagents
+	return cloneSubagents(m.activeSubagents)
 }
 
 // States returns a clone of the latest discovery state snapshot.
@@ -101,9 +103,13 @@ func (m *Manager) Shutdown() {
 type DiscoveryConfig struct {
 	SubagentsPaths    []string
 	DisabledSubagents []string
-	WorkingDir        string
 	// Resolver expands $VAR-style references in paths. May be nil.
 	Resolver func(string) (string, error)
+	// IsKnownModelID validates that a model id (anything other than the
+	// "large"/"small" aliases) resolves to a real provider model. May be nil
+	// during discovery in contexts where the config is not yet loaded; in that
+	// case model-id validation is skipped.
+	IsKnownModelID func(string) bool
 }
 
 // ResolvePaths expands home-directory and $VAR references in SubagentsPaths.
@@ -133,7 +139,7 @@ func (c DiscoveryConfig) ResolvePaths() []string {
 //   - states: per-file discovery outcome for diagnostics/UI.
 func DiscoverFromConfig(cfg DiscoveryConfig) (all, active []*Subagent, states []*SubagentState) {
 	userPaths := cfg.ResolvePaths()
-	discovered, allStates := DiscoverWithStates(userPaths)
+	discovered, allStates := DiscoverWithStates(userPaths, cfg.IsKnownModelID)
 	all = Deduplicate(discovered)
 	active = Filter(all, cfg.DisabledSubagents)
 	allStates = DeduplicateStates(allStates)

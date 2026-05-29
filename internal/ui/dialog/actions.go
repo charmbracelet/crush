@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/util"
 )
 
@@ -63,7 +64,16 @@ type (
 	ActionPreviewTheme struct {
 		Theme string
 	}
-	ActionRevertThemePreview struct{}
+	ActionRevertThemePreview  struct{}
+	ActionPreviewThemePalette struct {
+		Base    string
+		Palette styles.Palette
+	}
+	ActionSaveThemePalette struct {
+		Base    string
+		Palette styles.Palette
+	}
+	ActionRevertThemePalette struct{}
 	ActionInitializeProject  struct{}
 	ActionSummarize          struct {
 		SessionID string

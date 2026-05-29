@@ -179,20 +179,30 @@ func ThemePalette(name string) (Palette, error) {
 	return PaletteFromOpts(optsFn()), nil
 }
 
-// LoadPaletteTheme builds Styles by applying palette overrides on top of
-// a built-in base theme. Empty baseName uses the default Charmtone theme.
-func LoadPaletteTheme(baseName string, palette Palette) (Styles, error) {
+// MergePalette applies palette overrides on top of a built-in base theme
+// and returns the fully resolved palette. Empty baseName uses Charmtone.
+func MergePalette(baseName string, palette Palette) (Palette, error) {
 	if err := palette.Validate(); err != nil {
-		return Styles{}, err
+		return Palette{}, err
 	}
 	if baseName == "" {
 		baseName = "charmtone"
 	}
 	optsFn, ok := builtinThemes[strings.ToLower(baseName)]
 	if !ok {
-		return Styles{}, fmt.Errorf("unknown theme %q; available themes: %s", baseName, strings.Join(BuiltinThemeNames(), ", "))
+		return Palette{}, fmt.Errorf("unknown theme %q; available themes: %s", baseName, strings.Join(BuiltinThemeNames(), ", "))
 	}
-	return quickStyle(palette.ToQuickStyleOpts(optsFn())), nil
+	return PaletteFromOpts(palette.ToQuickStyleOpts(optsFn())), nil
+}
+
+// LoadPaletteTheme builds Styles by applying palette overrides on top of
+// a built-in base theme. Empty baseName uses the default Charmtone theme.
+func LoadPaletteTheme(baseName string, palette Palette) (Styles, error) {
+	merged, err := MergePalette(baseName, palette)
+	if err != nil {
+		return Styles{}, err
+	}
+	return quickStyle(merged.ToQuickStyleOpts(quickStyleOpts{})), nil
 }
 
 // colorToHex converts a color.Color to its "#rrggbb" hex string.

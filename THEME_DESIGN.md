@@ -3,7 +3,8 @@
 ## Status
 
 **Phase 1 (shipped):** Built-in theme switching with live preview.
-**Phase 2 (next):** Realtime editing of existing themes from within Crush.
+**Phase 2 (shipped):** Realtime editing of existing theme palettes from within Crush.
+**Phase 3 (next):** Polish editor UX, add named custom themes, and support sharing theme files.
 
 ---
 

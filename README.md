@@ -276,6 +276,12 @@ Open the command palette with `ctrl+p`, select **Switch Theme**, and browse
 the list. The UI previews each theme as you navigate, and pressing `enter`
 confirms the selection. Press `esc` to cancel and revert.
 
+#### Editing Themes
+
+Open the command palette with `ctrl+p`, select **Edit Theme**, and edit the
+active theme palette. Changes preview live as you type. Press `enter` or
+`ctrl+s` to save, or `esc` to cancel and revert.
+
 You can also set a theme directly in your config:
 
 ```json
@@ -284,6 +290,23 @@ You can also set a theme directly in your config:
   "options": {
     "tui": {
       "theme": "gruvbox-dark"
+    }
+  }
+}
+```
+
+Or override colors on top of a built-in theme:
+
+```json
+{
+  "$schema": "https://charm.land/crush.json",
+  "options": {
+    "tui": {
+      "theme": {
+        "base": "gruvbox-dark",
+        "primary": "#ff6b6b",
+        "bg_base": "#1a1a2e"
+      }
     }
   }
 }

@@ -620,9 +620,19 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	return result, nil
 }
 
+// shouldExposeDispatcher reports whether the dispatcher agent tool should be
+// included for an agent. Sub-agents never receive it — that prevents recursive
+// delegation regardless of what their AllowedTools list contains.
+func shouldExposeDispatcher(allowed []string, isSubAgent bool) bool {
+	if isSubAgent {
+		return false
+	}
+	return slices.Contains(allowed, AgentToolName)
+}
+
 func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool) ([]fantasy.AgentTool, error) {
 	var allTools []fantasy.AgentTool
-	if slices.Contains(agent.AllowedTools, AgentToolName) {
+	if shouldExposeDispatcher(agent.AllowedTools, isSubAgent) {
 		agentTool, err := c.agentTool(ctx)
 		if err != nil {
 			return nil, err

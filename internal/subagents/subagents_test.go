@@ -152,6 +152,35 @@ description: Never closed.
 `,
 			wantErr: true,
 		},
+		{
+			name:    "empty_content",
+			content: "",
+			wantErr: true,
+		},
+		{
+			name:    "only_bom",
+			content: "\ufeff",
+			wantErr: true,
+		},
+		{
+			name:    "only_whitespace",
+			content: "   \n\n   \t\n",
+			wantErr: true,
+		},
+		{
+			name:            "empty_frontmatter_no_body",
+			content:         "---\n---\n",
+			wantName:        "",
+			wantDescription: "",
+		},
+		{
+			name: "crlf_line_endings",
+			content: "---\r\nname: crlf-agent\r\n" +
+				"description: Uses CRLF endings.\r\n---\r\n\r\nBody.\r\n",
+			wantName:        "crlf-agent",
+			wantDescription: "Uses CRLF endings.",
+			wantBody:        "Body.",
+		},
 	}
 
 	for _, tt := range tests {
@@ -320,6 +349,72 @@ func TestValidate(t *testing.T) {
 	}
 }
 
+func TestValidateAgainst(t *testing.T) {
+	t.Parallel()
+
+	knownModels := map[string]bool{"gpt-4o": true, "claude-opus-4-7": true}
+	isKnown := func(id string) bool { return knownModels[id] }
+
+	tests := []struct {
+		name    string
+		agent   Subagent
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name:  "model_empty_ok",
+			agent: Subagent{Name: "a", Description: "d", Model: ""},
+		},
+		{
+			name:  "model_large_ok",
+			agent: Subagent{Name: "a", Description: "d", Model: "large"},
+		},
+		{
+			name:  "model_small_ok",
+			agent: Subagent{Name: "a", Description: "d", Model: "small"},
+		},
+		{
+			name:  "known_model_id_ok",
+			agent: Subagent{Name: "a", Description: "d", Model: "gpt-4o"},
+		},
+		{
+			name:    "unknown_model_rejected",
+			agent:   Subagent{Name: "a", Description: "d", Model: "imaginary-99"},
+			wantErr: true,
+			errMsg:  "model",
+		},
+		{
+			name:    "still_runs_base_validation",
+			agent:   Subagent{Name: "", Description: "d", Model: "large"},
+			wantErr: true,
+			errMsg:  "name is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tt.agent.ValidateAgainst(isKnown)
+			if tt.wantErr {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tt.errMsg)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestValidateAgainst_NilResolver_AcceptsAnyNonEmptyModel(t *testing.T) {
+	t.Parallel()
+
+	// Without a resolver, model id strings cannot be validated; ValidateAgainst
+	// should accept any non-empty model string and defer enforcement.
+	s := Subagent{Name: "a", Description: "d", Model: "gpt-99-future"}
+	require.NoError(t, s.ValidateAgainst(nil))
+}
+
 func TestFilter(t *testing.T) {
 	t.Parallel()
 
@@ -404,7 +499,7 @@ func TestDiscoverWithStates(t *testing.T) {
 			0o644,
 		))
 
-		agents, states := DiscoverWithStates([]string{tmp})
+		agents, states := DiscoverWithStates([]string{tmp}, nil)
 
 		require.Len(t, agents, 2)
 		names := make([]string, 0, len(agents))
@@ -426,7 +521,7 @@ func TestDiscoverWithStates(t *testing.T) {
 			0o644,
 		))
 
-		agents, states := DiscoverWithStates([]string{tmp})
+		agents, states := DiscoverWithStates([]string{tmp}, nil)
 
 		require.Empty(t, agents)
 		require.Len(t, states, 1)
@@ -437,7 +532,7 @@ func TestDiscoverWithStates(t *testing.T) {
 	t.Run("nonexistent_path_silently_skipped", func(t *testing.T) {
 		t.Parallel()
 
-		agents, states := DiscoverWithStates([]string{filepath.Join(t.TempDir(), "does-not-exist")})
+		agents, states := DiscoverWithStates([]string{filepath.Join(t.TempDir(), "does-not-exist")}, nil)
 
 		require.Empty(t, agents)
 		require.Empty(t, states)
@@ -446,7 +541,7 @@ func TestDiscoverWithStates(t *testing.T) {
 	t.Run("empty_dir_returns_no_results", func(t *testing.T) {
 		t.Parallel()
 
-		agents, states := DiscoverWithStates([]string{t.TempDir()})
+		agents, states := DiscoverWithStates([]string{t.TempDir()}, nil)
 
 		require.Empty(t, agents)
 		require.Empty(t, states)
@@ -462,7 +557,7 @@ func TestDiscoverWithStates(t *testing.T) {
 			0o644,
 		))
 
-		agents, states := DiscoverWithStates([]string{tmp})
+		agents, states := DiscoverWithStates([]string{tmp}, nil)
 
 		require.Empty(t, agents)
 		require.Empty(t, states)

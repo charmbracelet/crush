@@ -13,6 +13,8 @@ import (
 
 	"github.com/charlievieth/fastwalk"
 	"gopkg.in/yaml.v3"
+
+	"github.com/charmbracelet/crush/internal/config"
 )
 
 const (
@@ -89,6 +91,68 @@ type Subagent struct {
 	MCPServers      []string `yaml:"mcp_servers"`
 	Body            string   // set from markdown body after frontmatter
 	FilePath        string   // set from the file path passed to Parse
+}
+
+// ToConfigAgent converts the Subagent into a config.Agent by applying the
+// subagent's tool restrictions and model preference on top of the provided
+// base agent configuration.
+func (s *Subagent) ToConfigAgent(base config.Agent) config.Agent {
+	// Start with a copy of the base allowed tools — never mutate the original.
+	pool := append([]string(nil), base.AllowedTools...)
+
+	// Apply disallowed tools first.
+	if len(s.DisallowedTools) > 0 {
+		disallowed := make(map[string]bool, len(s.DisallowedTools))
+		for _, t := range s.DisallowedTools {
+			disallowed[t] = true
+		}
+		filtered := pool[:0:0]
+		for _, t := range pool {
+			if !disallowed[t] {
+				filtered = append(filtered, t)
+			}
+		}
+		pool = filtered
+	}
+
+	// Intersect with the explicit tools allowlist (cannot widen beyond base).
+	if len(s.Tools) > 0 {
+		allowed := make(map[string]bool, len(s.Tools))
+		for _, t := range s.Tools {
+			allowed[t] = true
+		}
+		filtered := pool[:0:0]
+		for _, t := range pool {
+			if allowed[t] {
+				filtered = append(filtered, t)
+			}
+		}
+		pool = filtered
+	}
+
+	// Build AllowedMCP only when MCP servers are specified.
+	var allowedMCP map[string][]string
+	if len(s.MCPServers) > 0 {
+		allowedMCP = make(map[string][]string, len(s.MCPServers))
+		for _, srv := range s.MCPServers {
+			allowedMCP[srv] = nil
+		}
+	}
+
+	// Determine model: use subagent preference only for the two recognised values.
+	model := base.Model
+	if s.Model == "large" || s.Model == "small" {
+		model = config.SelectedModelType(s.Model)
+	}
+
+	return config.Agent{
+		ID:           s.Name,
+		Name:         s.Name,
+		Description:  s.Description,
+		AllowedTools: pool,
+		AllowedMCP:   allowedMCP,
+		Model:        model,
+	}
 }
 
 // ParseContent parses a subagent definition from raw bytes.

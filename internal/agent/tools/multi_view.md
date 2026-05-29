@@ -1,0 +1,1 @@
+Read multiple files in a single tool call. Pass an array of paths; each is read with the same logic as `view` (line offsets and limits not supported here — request specific ranges via `view` if needed). Use this when you need to read several files to understand a task — one call instead of N is dramatically faster and uses fewer tokens.

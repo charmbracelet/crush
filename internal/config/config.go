@@ -737,6 +737,7 @@ func allToolNames() []string {
 		"glob",
 		"grep",
 		"ls",
+		"multi_view",
 		"sourcegraph",
 		"todos",
 		"view",
@@ -757,7 +758,7 @@ func resolveAllowedTools(allTools []string, disabledTools []string) []string {
 }
 
 func resolveReadOnlyTools(tools []string) []string {
-	readOnlyTools := []string{"editor_context", "glob", "grep", "ls", "show_locations", "sourcegraph", "view"}
+	readOnlyTools := []string{"editor_context", "glob", "grep", "ls", "multi_view", "show_locations", "sourcegraph", "view"}
 	// filter to only include tools that are in allowedtools (include mode)
 	return filterSlice(tools, readOnlyTools, true)
 }

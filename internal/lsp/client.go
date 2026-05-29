@@ -683,3 +683,18 @@ func (c *Client) FindDefinition(ctx context.Context, filepath string, line, char
 
 	return c.client.RequestDefinition(ctx, filepath, line-1, character-1)
 }
+
+// DocumentSymbols returns the outline of a file: top-level declarations
+// and their nested children when the server emits hierarchical results.
+// Inputs and ranges are LSP-native (0-based) here; the consumer renders
+// them.
+func (c *Client) DocumentSymbols(ctx context.Context, filepath string) ([]protocol.DocumentSymbolResult, error) {
+	if err := c.OpenFileOnDemand(ctx, filepath); err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	return c.client.RequestDocumentSymbols(ctx, filepath)
+}

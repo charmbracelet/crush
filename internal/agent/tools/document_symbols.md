@@ -1,0 +1,1 @@
+Get the outline of a file: top-level symbols (functions, types, classes, methods) and their nested children when the LSP server reports a hierarchical view. Use this instead of `view`-ing the entire file when you only need to know what's defined and where, or to navigate a large file. Returns one line per symbol with kind, name, and 1-based line number.

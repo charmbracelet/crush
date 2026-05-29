@@ -555,6 +555,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 			tools.NewDiagnosticsTool(c.lspManager),
 			tools.NewReferencesTool(c.lspManager),
 			tools.NewDefinitionTool(c.lspManager),
+			tools.NewDocumentSymbolsTool(c.lspManager, c.cfg.WorkingDir),
 			tools.NewLSPRestartTool(c.lspManager),
 		)
 	}

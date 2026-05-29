@@ -688,7 +688,7 @@ func TestConfig_setupAgentsWithNoDisabledTools(t *testing.T) {
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
-	assert.Equal(t, []string{"glob", "grep", "ls", "multi_view", "sourcegraph", "search_history", "view", "editor_context", "show_locations"}, taskAgent.AllowedTools)
+	assert.Equal(t, []string{"glob", "grep", "ls", "multi_view", "sourcegraph", "context7", "search_history", "view", "editor_context", "show_locations"}, taskAgent.AllowedTools)
 }
 
 func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
@@ -706,17 +706,18 @@ func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
 
-	assert.Equal(t, []string{"agent", "bash", "crush_info", "crush_logs", "job_output", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_definition", "lsp_document_symbols", "lsp_rename", "lsp_restart", "fetch", "agentic_fetch", "glob", "ls", "multi_view", "sourcegraph", "search_history", "todos", "view", "write", "list_mcp_resources", "read_mcp_resource", "editor_context", "show_locations"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "bash", "crush_info", "crush_logs", "job_output", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_definition", "lsp_document_symbols", "lsp_rename", "lsp_restart", "fetch", "agentic_fetch", "glob", "ls", "multi_view", "sourcegraph", "context7", "search_history", "todos", "view", "write", "list_mcp_resources", "read_mcp_resource", "editor_context", "show_locations"}, coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
-	assert.Equal(t, []string{"glob", "ls", "multi_view", "sourcegraph", "search_history", "view", "editor_context", "show_locations"}, taskAgent.AllowedTools)
+	assert.Equal(t, []string{"glob", "ls", "multi_view", "sourcegraph", "context7", "search_history", "view", "editor_context", "show_locations"}, taskAgent.AllowedTools)
 }
 
 func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 	cfg := &Config{
 		Options: &Options{
 			DisabledTools: []string{
+				"context7",
 				"editor_context",
 				"glob",
 				"grep",

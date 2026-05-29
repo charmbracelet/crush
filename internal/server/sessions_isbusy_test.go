@@ -42,6 +42,7 @@ func (s *stubCoordinator) ClearQueue(string)                 {}
 func (s *stubCoordinator) Summarize(context.Context, string) error {
 	return nil
 }
+func (s *stubCoordinator) SkipCoach(string) {}
 func (s *stubCoordinator) Model() agent.Model                 { return agent.Model{} }
 func (s *stubCoordinator) UpdateModels(context.Context) error { return nil }
 

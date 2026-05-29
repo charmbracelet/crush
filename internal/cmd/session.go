@@ -440,8 +440,7 @@ func outputSessionJSON(w io.Writer, sess session.Session, msgs []*message.Messag
 }
 
 func outputSessionHuman(ctx context.Context, cfg *config.ConfigStore, sess session.Session, msgs []*message.Message) error {
-	themeName := common.ThemeNameFromConfig(cfg.Config())
-	styles := common.LoadThemeStyles(themeName)
+	styles := common.ThemeStylesFromConfig(cfg.Config())
 	toolResults := chat.BuildToolResultMap(msgs)
 
 	width := sessionOutputWidth

@@ -191,7 +191,7 @@ func runNonInteractive(
 	progress = ws.Config.Options.Progress == nil || *ws.Config.Options.Progress
 
 	if !hideSpinner && stderrTTY {
-		t := common.LoadThemeStyles(common.ThemeNameFromConfig(ws.Config))
+		t := common.ThemeStylesFromConfig(ws.Config)
 
 		hasDarkBG := true
 		if stdinTTY && stdoutTTY {

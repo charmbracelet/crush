@@ -3,6 +3,7 @@ package config
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -212,12 +213,71 @@ type LSPConfig struct {
 }
 
 type TUIOptions struct {
-	CompactMode bool   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
-	DiffMode    string `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
-	Theme       string `json:"theme,omitempty" jsonschema:"description=Color theme for the TUI interface. Use a built-in theme name.,default=charmtone,example=charmtone,example=gruvbox-dark"`
+	CompactMode bool        `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
+	DiffMode    string      `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
+	Theme       ThemeConfig `json:"theme,omitzero" jsonschema:"description=Color theme for the TUI interface. Use a built-in theme name or custom palette object.,default=charmtone,example=charmtone,example=gruvbox-dark"`
 
 	Completions Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
 	Transparent *bool       `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
+}
+
+// ThemeConfig stores either a built-in theme name or a raw custom theme
+// object. Custom theme objects are interpreted by the UI layer so config
+// stays independent of UI styling types.
+type ThemeConfig struct {
+	ThemeName string          `json:"-"`
+	Base      string          `json:"-"`
+	RawObject json.RawMessage `json:"-"`
+}
+
+// UnmarshalJSON accepts either a string theme name or an object containing
+// a custom palette plus optional base field.
+func (t *ThemeConfig) UnmarshalJSON(data []byte) error {
+	*t = ThemeConfig{}
+	if string(data) == "null" {
+		return nil
+	}
+	var name string
+	if err := json.Unmarshal(data, &name); err == nil {
+		t.ThemeName = name
+		return nil
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return fmt.Errorf("theme must be a string or object: %w", err)
+	}
+	if base, ok := obj["base"].(string); ok {
+		t.Base = base
+	}
+	t.RawObject = append(t.RawObject[:0], data...)
+	return nil
+}
+
+// MarshalJSON preserves the original representation shape.
+func (t ThemeConfig) MarshalJSON() ([]byte, error) {
+	if len(t.RawObject) > 0 {
+		return t.RawObject, nil
+	}
+	return json.Marshal(t.ThemeName)
+}
+
+// Name returns the configured built-in theme name, or the object's base
+// theme name when using a custom palette object.
+func (t ThemeConfig) Name() string {
+	if t.ThemeName != "" {
+		return t.ThemeName
+	}
+	return t.Base
+}
+
+// IsObject reports whether this theme config was provided as an object.
+func (t ThemeConfig) IsObject() bool {
+	return len(t.RawObject) > 0
+}
+
+// IsZero reports whether the theme config is unset.
+func (t ThemeConfig) IsZero() bool {
+	return t.ThemeName == "" && t.Base == "" && len(t.RawObject) == 0
 }
 
 // Completions defines options for the completions UI.

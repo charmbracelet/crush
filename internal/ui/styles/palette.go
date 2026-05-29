@@ -179,6 +179,22 @@ func ThemePalette(name string) (Palette, error) {
 	return PaletteFromOpts(optsFn()), nil
 }
 
+// LoadPaletteTheme builds Styles by applying palette overrides on top of
+// a built-in base theme. Empty baseName uses the default Charmtone theme.
+func LoadPaletteTheme(baseName string, palette Palette) (Styles, error) {
+	if err := palette.Validate(); err != nil {
+		return Styles{}, err
+	}
+	if baseName == "" {
+		baseName = "charmtone"
+	}
+	optsFn, ok := builtinThemes[strings.ToLower(baseName)]
+	if !ok {
+		return Styles{}, fmt.Errorf("unknown theme %q; available themes: %s", baseName, strings.Join(BuiltinThemeNames(), ", "))
+	}
+	return quickStyle(palette.ToQuickStyleOpts(optsFn())), nil
+}
+
 // colorToHex converts a color.Color to its "#rrggbb" hex string.
 // Returns empty string for nil colors.
 func colorToHex(c color.Color) string {

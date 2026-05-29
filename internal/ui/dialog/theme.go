@@ -229,7 +229,7 @@ func (th *Theme) setThemeItems() {
 	currentTheme := ""
 	cfg := th.com.Config()
 	if cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil {
-		currentTheme = cfg.Options.TUI.Theme
+		currentTheme = cfg.Options.TUI.Theme.Name()
 	}
 	if currentTheme == "" {
 		currentTheme = "charmtone"

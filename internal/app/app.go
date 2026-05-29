@@ -5,6 +5,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -246,11 +247,10 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	progress = app.config.Config().Options.Progress == nil || *app.config.Config().Options.Progress
 
 	if !hideSpinner && stderrTTY {
-		themeName := ""
+		t := styles.CharmtonePantera()
 		if cfg := app.config.Config(); cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil {
-			themeName = cfg.Options.TUI.Theme
+			t = themeStyles(cfg.Options.TUI.Theme)
 		}
-		t, _ := styles.LoadTheme(themeName)
 
 		// Detect background color to set the appropriate color for the
 		// spinner's 'Generating...' text. Without this, that text would be
@@ -567,6 +567,28 @@ func setupSubscriberMustDeliver[T any](
 			}
 		}
 	})
+}
+
+func themeStyles(theme config.ThemeConfig) styles.Styles {
+	if !theme.IsObject() {
+		s, err := styles.LoadTheme(theme.Name())
+		if err != nil {
+			return styles.CharmtonePantera()
+		}
+		return s
+	}
+	var custom struct {
+		Base string `json:"base,omitempty"`
+		styles.Palette
+	}
+	if err := json.Unmarshal(theme.RawObject, &custom); err != nil {
+		return styles.CharmtonePantera()
+	}
+	s, err := styles.LoadPaletteTheme(custom.Base, custom.Palette)
+	if err != nil {
+		return styles.CharmtonePantera()
+	}
+	return s
 }
 
 func (app *App) InitCoderAgent(ctx context.Context) error {

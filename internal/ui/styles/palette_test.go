@@ -155,6 +155,27 @@ func TestThemePalette_CaseInsensitive(t *testing.T) {
 	require.Equal(t, "#fabd2f", p.Primary)
 }
 
+func TestLoadPaletteTheme_PartialOverride(t *testing.T) {
+	t.Parallel()
+	s, err := LoadPaletteTheme("gruvbox-dark", Palette{Primary: "#ff0000"})
+	require.NoError(t, err)
+	require.Equal(t, lipgloss.Color("#ff0000"), s.WorkingGradFromColor)
+}
+
+func TestLoadPaletteTheme_UnknownBase(t *testing.T) {
+	t.Parallel()
+	_, err := LoadPaletteTheme("nonexistent", Palette{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unknown theme")
+}
+
+func TestLoadPaletteTheme_InvalidPalette(t *testing.T) {
+	t.Parallel()
+	_, err := LoadPaletteTheme("charmtone", Palette{Primary: "not-a-color"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "primary")
+}
+
 func TestColorToHex_Nil(t *testing.T) {
 	t.Parallel()
 	require.Empty(t, colorToHex(nil))

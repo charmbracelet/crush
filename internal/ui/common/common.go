@@ -1,6 +1,7 @@
 package common
 
 import (
+	"encoding/json"
 	"fmt"
 	"image"
 	"os"
@@ -34,11 +35,12 @@ func (c *Common) Config() *config.Config {
 // DefaultCommon returns the default common UI configurations using the
 // theme from config (or the default Charmtone theme if unset).
 func DefaultCommon(ws workspace.Workspace) *Common {
-	var themeName string
+	var s styles.Styles
 	if ws != nil {
-		themeName = ThemeNameFromConfig(ws.Config())
+		s = ThemeStylesFromConfig(ws.Config())
+	} else {
+		s = LoadThemeStyles("")
 	}
-	s := LoadThemeStyles(themeName)
 	return &Common{
 		Workspace: ws,
 		Styles:    &s,
@@ -73,7 +75,7 @@ func ThemeNameFromConfig(cfg *config.Config) string {
 	if cfg == nil || cfg.Options == nil || cfg.Options.TUI == nil {
 		return ""
 	}
-	return cfg.Options.TUI.Theme
+	return cfg.Options.TUI.Theme.Name()
 }
 
 // LoadThemeStyles resolves a theme name to Styles, falling back to
@@ -82,6 +84,31 @@ func LoadThemeStyles(name string) styles.Styles {
 	s, err := styles.LoadTheme(name)
 	if err != nil {
 		return styles.CharmtonePantera()
+	}
+	return s
+}
+
+// ThemeStylesFromConfig resolves the configured theme to Styles. String
+// themes load a built-in theme directly; object themes apply palette
+// overrides on top of their base theme.
+func ThemeStylesFromConfig(cfg *config.Config) styles.Styles {
+	if cfg == nil || cfg.Options == nil || cfg.Options.TUI == nil {
+		return LoadThemeStyles("")
+	}
+	theme := cfg.Options.TUI.Theme
+	if !theme.IsObject() {
+		return LoadThemeStyles(theme.Name())
+	}
+	var custom struct {
+		Base string `json:"base,omitempty"`
+		styles.Palette
+	}
+	if err := json.Unmarshal(theme.RawObject, &custom); err != nil {
+		return LoadThemeStyles(theme.Name())
+	}
+	s, err := styles.LoadPaletteTheme(custom.Base, custom.Palette)
+	if err != nil {
+		return LoadThemeStyles(theme.Name())
 	}
 	return s
 }

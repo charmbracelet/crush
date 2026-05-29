@@ -1133,20 +1133,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			url := hyper.BaseURL()
 			link := linkStyle.Hyperlink(url, "id=hyper").Render(url)
 			currentAssistant.AddFinish(message.FinishReasonError, "No credits", "You're out of credits. Add more at "+link)
-		} else if errors.As(err, &providerErr) {
-			if providerErr.Message == "The requested model is not supported." {
-				url := "https://github.com/settings/copilot/features"
-				link := linkStyle.Hyperlink(url, "id=copilot").Render(url)
-				currentAssistant.AddFinish(
-					message.FinishReasonError,
-					"Copilot model not enabled",
-					fmt.Sprintf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", largeModel.CatwalkCfg.Name, link),
-				)
-			} else {
-				currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), providerErr.Message)
-			}
-		} else if errors.As(err, &fantasyErr) {
-			currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(fantasyErr.Title), defaultTitle), fantasyErr.Message)
 		} else {
 			title := defaultTitle
 			msg := err.Error()
@@ -1155,10 +1141,29 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				title = "Network Error"
 				if cause, ok := lastRetryableCause(retryErr); ok {
 					msg = cause
+				} else if lastProviderErr, ok := lastProviderError(retryErr); ok {
+					title = cmp.Or(stringext.Capitalize(lastProviderErr.Title), defaultTitle)
+					msg = lastProviderErr.Message
 				}
 				msg = fmt.Sprintf("%s (retried %d time(s))", msg, len(retryErr.Errors)-1)
+				currentAssistant.AddFinish(message.FinishReasonError, title, msg)
+			} else if errors.As(err, &providerErr) {
+				if providerErr.Message == "The requested model is not supported." {
+					url := "https://github.com/settings/copilot/features"
+					link := linkStyle.Hyperlink(url, "id=copilot").Render(url)
+					currentAssistant.AddFinish(
+						message.FinishReasonError,
+						"Copilot model not enabled",
+						fmt.Sprintf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", largeModel.CatwalkCfg.Name, link),
+					)
+				} else {
+					currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), providerErr.Message)
+				}
+			} else if errors.As(err, &fantasyErr) {
+				currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(fantasyErr.Title), defaultTitle), fantasyErr.Message)
+			} else {
+				currentAssistant.AddFinish(message.FinishReasonError, title, msg)
 			}
-			currentAssistant.AddFinish(message.FinishReasonError, title, msg)
 		}
 		// Note: we use the cleanup context here because the genCtx has been
 		// cancelled.
@@ -2181,4 +2186,16 @@ func lastRetryableCause(retryErr *fantasy.RetryError) (string, bool) {
 		return "", false
 	}
 	return netErr.Error(), true
+}
+
+// lastProviderError extracts the last ProviderError from a RetryError's error
+// chain. Returns false if no ProviderError is found.
+func lastProviderError(retryErr *fantasy.RetryError) (*fantasy.ProviderError, bool) {
+	for i := len(retryErr.Errors) - 1; i >= 0; i-- {
+		var pErr *fantasy.ProviderError
+		if errors.As(retryErr.Errors[i], &pErr) {
+			return pErr, true
+		}
+	}
+	return nil, false
 }

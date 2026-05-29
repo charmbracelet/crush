@@ -162,3 +162,47 @@ func TestDispatcherTool_ProviderOptions_RoundTrip(t *testing.T) {
 	require.NotNil(t, dt.ProviderOptions())
 }
 
+func TestFindSubagentByName(t *testing.T) {
+	t.Parallel()
+
+	active := []*subagents.Subagent{
+		{Name: "alpha"},
+		{Name: "beta"},
+	}
+
+	require.NotNil(t, findSubagentByName(active, "alpha"))
+	require.Equal(t, "alpha", findSubagentByName(active, "alpha").Name)
+	require.Equal(t, "beta", findSubagentByName(active, "beta").Name)
+	require.Nil(t, findSubagentByName(active, "missing"))
+	require.Nil(t, findSubagentByName(active, ""))
+	require.Nil(t, findSubagentByName(nil, "alpha"))
+}
+
+// TestDispatcherTool_Run_UnknownSubagent_ReturnsErrorResponse exercises the
+// dispatcher routing for a subagent_type not in the active list. The closure
+// here mirrors the lookup performed by (*coordinator).agentTool.
+func TestDispatcherTool_Run_UnknownSubagent_ReturnsErrorResponse(t *testing.T) {
+	t.Parallel()
+
+	active := []*subagents.Subagent{
+		{Name: "code-reviewer", Description: "ok"},
+	}
+
+	dt := &dispatcherTool{
+		info: buildAgentDispatchInfo(active),
+		dispatch: func(_ context.Context, params AgentDispatchParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			sa := findSubagentByName(active, params.SubagentType)
+			if sa == nil {
+				return fantasy.NewTextErrorResponse("unknown subagent type: \"" + params.SubagentType + "\""), nil
+			}
+			return fantasy.NewTextResponse("would have run " + sa.Name), nil
+		},
+	}
+
+	input, _ := json.Marshal(AgentDispatchParams{SubagentType: "imaginary", Prompt: "do thing"})
+	resp, err := dt.Run(context.Background(), fantasy.ToolCall{Input: string(input)})
+
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+}
+

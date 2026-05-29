@@ -17,6 +17,8 @@ import (
 	"strings"
 	"testing"
 
+	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
+	"github.com/qjebbs/go-jsons"
 	"github.com/taigrr/catwalk/pkg/catwalk"
 	"github.com/taigrr/crush/internal/agent/hyper"
 	"github.com/taigrr/crush/internal/csync"
@@ -24,8 +26,6 @@ import (
 	"github.com/taigrr/crush/internal/filepathext"
 	"github.com/taigrr/crush/internal/fsext"
 	"github.com/taigrr/crush/internal/home"
-	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
-	"github.com/qjebbs/go-jsons"
 )
 
 // Load loads the configuration from the default paths and returns a
@@ -474,6 +474,15 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 
 	if str, ok := os.LookupEnv("CRUSH_DISABLE_DEFAULT_PROVIDERS"); ok {
 		c.Options.DisableDefaultProviders, _ = strconv.ParseBool(str)
+	}
+
+	// CRUSH_LOW_BANDWIDTH forces reduced-motion mode on regardless of
+	// the persisted config. Useful when SSH'd into a slow link that
+	// the user wouldn't want to persist back to disk.
+	if str, ok := os.LookupEnv("CRUSH_LOW_BANDWIDTH"); ok {
+		if v, err := strconv.ParseBool(str); err == nil {
+			c.Options.TUI.LowBandwidth = &v
+		}
 	}
 
 	if c.Options.Attribution == nil {

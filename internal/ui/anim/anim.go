@@ -46,6 +46,11 @@ const (
 
 	// Default number of cycling chars.
 	defaultNumCyclingChars = 10
+
+	// lowBandwidthFrameInterval is how long each ".", "..", "..." frame
+	// stays on screen in reduced-motion mode. Slow enough to feel calm,
+	// fast enough that the user knows something is happening.
+	lowBandwidthFrameInterval = 350 * time.Millisecond
 )
 
 // Default colors for gradient.
@@ -58,11 +63,28 @@ var (
 var (
 	availableRunes = []rune("0123456789abcdefABCDEF~!@#$£€%^&*()+=_")
 	ellipsisFrames = []string{".", "..", "...", ""}
+	// lowBandwidthFrames cycles through 1, 2, 3 stops with no empty frame
+	// — the user always sees at least one dot so the spinner never
+	// flickers off completely.
+	lowBandwidthFrames = []string{".", "..", "..."}
 )
 
 // Internal ID management. Used during animating to ensure that frame messages
 // are received only by spinner components that sent them.
 var lastID atomic.Int64
+
+// defaultLowBandwidth is the process-wide reduced-motion flag. New
+// Anim instances inherit it when their Settings.LowBandwidth is false,
+// so deep call sites (e.g. per-assistant-message spinners) follow the
+// global setting without plumbing config through every constructor.
+var defaultLowBandwidth atomic.Bool
+
+// SetDefaultLowBandwidth flips the package-level reduced-motion flag.
+// Affects only Anim instances created after the call; existing ones
+// keep the mode they were built with. Safe for concurrent callers.
+func SetDefaultLowBandwidth(v bool) {
+	defaultLowBandwidth.Store(v)
+}
 
 func nextID() int {
 	return int(lastID.Add(1))
@@ -100,6 +122,10 @@ type Settings struct {
 	GradColorA  color.Color
 	GradColorB  color.Color
 	CycleColors bool
+	// LowBandwidth swaps the cycling-character spinner for a plain
+	// "Label .", "..", "..." cycle that ticks slowly. Skips all
+	// pre-rendering and gradient work.
+	LowBandwidth bool
 }
 
 // Default settings.
@@ -121,11 +147,23 @@ type Anim struct {
 	ellipsisStep     atomic.Int64         // current ellipsis frame step
 	ellipsisFrames   *csync.Slice[string] // ellipsis animation frames
 	id               string
+
+	// lowBandwidth, when true, skips the gradient/cycling-char machinery
+	// entirely and renders "<label> <ellipsisFrame>" with a slower tick.
+	lowBandwidth bool
+	// rawLabel is the un-styled label string, used by the low-bandwidth
+	// renderer (which doesn't carry a per-rune lipgloss style cache).
+	rawLabel string
 }
 
 // New creates a new Anim instance with the specified width and label.
 func New(opts Settings) *Anim {
 	a := &Anim{}
+	// Inherit the process-wide reduced-motion flag if the caller didn't
+	// set one explicitly.
+	if !opts.LowBandwidth && defaultLowBandwidth.Load() {
+		opts.LowBandwidth = true
+	}
 	// Validate settings.
 	if opts.Size < 1 {
 		opts.Size = defaultNumCyclingChars
@@ -147,6 +185,20 @@ func New(opts Settings) *Anim {
 	}
 	a.cyclingCharWidth = opts.Size
 	a.labelColor = opts.LabelColor
+
+	// Low-bandwidth mode: skip every prerender + gradient step. We only
+	// need the label, the colour, and the three ellipsis frames. Render
+	// stays trivially cheap and the tick rate (set in Step) is much
+	// slower so this also reduces redraws downstream.
+	if opts.LowBandwidth {
+		a.lowBandwidth = true
+		a.rawLabel = opts.Label
+		a.labelWidth = lipgloss.Width(opts.Label)
+		a.width = a.labelWidth + labelGapWidth + lipgloss.Width(lowBandwidthFrames[len(lowBandwidthFrames)-1])
+		// Skip color cycling, gradient ramps, and birth-step staggering
+		// entirely; the existing fields keep their zero values.
+		return a
+	}
 
 	// Check cache first
 	cacheKey := settingsHash(opts)
@@ -321,6 +373,9 @@ func (a *Anim) renderLabel(label string) {
 
 // Width returns the total width of the animation.
 func (a *Anim) Width() (w int) {
+	if a.lowBandwidth {
+		return a.width
+	}
 	w = a.width
 	if a.labelWidth > 0 {
 		w += labelGapWidth + a.labelWidth
@@ -348,6 +403,13 @@ func (a *Anim) Animate(msg StepMsg) tea.Cmd {
 		return nil
 	}
 
+	if a.lowBandwidth {
+		// Single counter is enough; we use it as both ellipsis frame and
+		// monotonic step. Wraps modulo len(lowBandwidthFrames) at render.
+		a.ellipsisStep.Add(1)
+		return a.Step()
+	}
+
 	step := a.step.Add(1)
 	if int(step) >= len(a.cyclingFrames) {
 		a.step.Store(0)
@@ -368,6 +430,10 @@ func (a *Anim) Animate(msg StepMsg) tea.Cmd {
 
 // Render renders the current state of the animation.
 func (a *Anim) Render() string {
+	if a.lowBandwidth {
+		return a.renderLowBandwidth()
+	}
+
 	var b strings.Builder
 	step := int(a.step.Load())
 	frames := int(a.framesSinceStart.Load())
@@ -401,8 +467,26 @@ func (a *Anim) Render() string {
 	return b.String()
 }
 
+// renderLowBandwidth produces "<label> <dots>" where dots cycles
+// through ".", "..", "..." \u2014 no gradient, no birth animation, no
+// per-rune styling.
+func (a *Anim) renderLowBandwidth() string {
+	idx := int(a.ellipsisStep.Load()) % len(lowBandwidthFrames)
+	dots := lowBandwidthFrames[idx]
+	style := lipgloss.NewStyle().Foreground(a.labelColor)
+	if a.rawLabel == "" {
+		return style.Render(dots)
+	}
+	return style.Render(a.rawLabel + labelGap + dots)
+}
+
 // Step is a command that triggers the next step in the animation.
 func (a *Anim) Step() tea.Cmd {
+	if a.lowBandwidth {
+		return tea.Tick(lowBandwidthFrameInterval, func(time.Time) tea.Msg {
+			return StepMsg{ID: a.id}
+		})
+	}
 	return tea.Tick(time.Second/time.Duration(fps), func(t time.Time) tea.Msg {
 		return StepMsg{ID: a.id}
 	})

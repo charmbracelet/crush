@@ -9,12 +9,12 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/taigrr/crush/internal/commands"
 	"github.com/taigrr/crush/internal/config"
 	"github.com/taigrr/crush/internal/ui/common"
 	"github.com/taigrr/crush/internal/ui/list"
 	"github.com/taigrr/crush/internal/ui/styles"
-	uv "github.com/charmbracelet/ultraviolet"
 )
 
 // CommandsID is the identifier for the commands dialog.
@@ -560,6 +560,15 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		transparentLabel = "Enable Background Color"
 	}
 	commands = append(commands, NewCommandItem(c.com.Styles, "toggle_transparent", transparentLabel, "", ActionToggleTransparentBackground{}))
+
+	// Reduced-motion / low-bandwidth toggle. Mirrors the
+	// CRUSH_LOW_BANDWIDTH env var; the persisted value lives in
+	// options.tui.low_bandwidth.
+	lowBandwidthLabel := "Enable Low Bandwidth Mode"
+	if cfg.LowBandwidthEnabled() {
+		lowBandwidthLabel = "Disable Low Bandwidth Mode"
+	}
+	commands = append(commands, NewCommandItem(c.com.Styles, "toggle_low_bandwidth", lowBandwidthLabel, "", ActionToggleLowBandwidth{}))
 
 	commands = append(
 		commands,

@@ -236,6 +236,12 @@ type TUIOptions struct {
 
 	Completions Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
 	Transparent *bool       `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
+	// LowBandwidth, when true, swaps the animated spinner for a simple
+	// "Generating .", "..", "..." cycle, halves the renderer FPS, and
+	// disables the session-title reveal animation. Useful over slow
+	// links or when the user wants reduced motion. Toggleable from the
+	// command palette and forced on by the CRUSH_LOW_BANDWIDTH env var.
+	LowBandwidth *bool `json:"low_bandwidth,omitempty" jsonschema:"description=Reduced-motion mode: simpler spinner and slower framerate,default=false"`
 }
 
 // Completions defines options for the completions UI.
@@ -711,6 +717,16 @@ func (c *Config) SmallModel() *catwalk.Model {
 		return nil
 	}
 	return c.GetModel(model.Provider, model.Model)
+}
+
+// LowBandwidthEnabled reports whether the user has opted into the
+// reduced-motion / low-bandwidth TUI mode. Safe to call on a nil
+// Config or with empty Options/TUI sub-structs.
+func (c *Config) LowBandwidthEnabled() bool {
+	if c == nil || c.Options == nil || c.Options.TUI == nil || c.Options.TUI.LowBandwidth == nil {
+		return false
+	}
+	return *c.Options.TUI.LowBandwidth
 }
 
 const maxRecentModelsPerType = 5

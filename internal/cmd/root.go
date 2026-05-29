@@ -36,6 +36,7 @@ import (
 	"github.com/taigrr/crush/internal/server"
 	"github.com/taigrr/crush/internal/session"
 	"github.com/taigrr/crush/internal/skills"
+	"github.com/taigrr/crush/internal/ui/anim"
 	"github.com/taigrr/crush/internal/ui/common"
 	ui "github.com/taigrr/crush/internal/ui/model"
 	"github.com/taigrr/crush/internal/version"
@@ -117,15 +118,25 @@ crush --continue
 		}
 
 		com := common.DefaultCommon(ws)
+		// Propagate the persisted low-bandwidth flag to the spinner
+		// package before any model is built; per-message anims pick it
+		// up via Settings inheritance.
+		anim.SetDefaultLowBandwidth(com.Config().LowBandwidthEnabled())
 		model := ui.New(com, sessionID, continueLast)
 
 		var env uv.Environ = os.Environ()
-		program := tea.NewProgram(
-			model,
+		opts := []tea.ProgramOption{
 			tea.WithEnvironment(env),
 			tea.WithContext(cmd.Context()),
 			tea.WithFilter(ui.MouseEventFilter),
-		)
+		}
+		// In low-bandwidth mode halve the renderer FPS (default 60 -> 30)
+		// to cut wire traffic over slow links. Animations on top still
+		// drive their own ticks; this caps the global redraw rate.
+		if com.Config().LowBandwidthEnabled() {
+			opts = append(opts, tea.WithFPS(30))
+		}
+		program := tea.NewProgram(model, opts...)
 		go ws.Subscribe(program)
 
 		if _, err := program.Run(); err != nil {

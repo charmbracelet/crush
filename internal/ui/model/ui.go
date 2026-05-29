@@ -1539,6 +1539,29 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			return util.NewInfoMsg("Transparent background " + status)
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionToggleLowBandwidth:
+		cmds = append(cmds, func() tea.Msg {
+			cfg := m.com.Config()
+			if cfg == nil {
+				return util.ReportError(errors.New("configuration not found"))()
+			}
+			newValue := !cfg.LowBandwidthEnabled()
+			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.low_bandwidth", newValue); err != nil {
+				return util.ReportError(err)()
+			}
+			// Update the package-level flag so any new spinners
+			// (assistant message, tool call) created after this point
+			// pick up the change. Existing spinners keep their original
+			// mode until the next message.
+			anim.SetDefaultLowBandwidth(newValue)
+
+			status := "disabled"
+			if newValue {
+				status = "enabled. Restart Crush for the FPS change to take effect."
+			}
+			return util.NewInfoMsg("Low-bandwidth mode " + status)
+		})
+		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionQuit:
 		cmds = append(cmds, tea.Quit)
 	case dialog.ActionEnableDockerMCP:

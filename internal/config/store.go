@@ -236,6 +236,18 @@ func (s *ConfigStore) SetTransparentBackground(scope Scope, enabled bool) error 
 	return s.SetConfigField(scope, "options.tui.transparent", enabled)
 }
 
+// SetLowBandwidth sets the reduced-motion TUI mode and persists it.
+func (s *ConfigStore) SetLowBandwidth(scope Scope, enabled bool) error {
+	if s.config.Options == nil {
+		s.config.Options = &Options{}
+	}
+	if s.config.Options.TUI == nil {
+		s.config.Options.TUI = &TUIOptions{}
+	}
+	s.config.Options.TUI.LowBandwidth = &enabled
+	return s.SetConfigField(scope, "options.tui.low_bandwidth", enabled)
+}
+
 // SetProviderAPIKey sets the API key for a provider and persists it.
 func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey any) error {
 	var providerConfig ProviderConfig

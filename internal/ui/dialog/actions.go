@@ -14,8 +14,8 @@ import (
 	"github.com/taigrr/crush/internal/oauth"
 	"github.com/taigrr/crush/internal/permission"
 	"github.com/taigrr/crush/internal/session"
-	"github.com/taigrr/crush/internal/ui/common"
 	"github.com/taigrr/crush/internal/skills"
+	"github.com/taigrr/crush/internal/ui/common"
 	"github.com/taigrr/crush/internal/ui/util"
 )
 
@@ -54,6 +54,7 @@ type (
 	ActionToggleYoloMode              struct{}
 	ActionToggleNotifications         struct{}
 	ActionToggleTransparentBackground struct{}
+	ActionToggleLowBandwidth          struct{}
 	ActionInitializeProject           struct{}
 	ActionSummarize                   struct {
 		SessionID string

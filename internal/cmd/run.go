@@ -172,12 +172,13 @@ func runNonInteractive(
 		defaultFG := lipgloss.LightDark(hasDarkBG)(charmtone.Pepper, t.WorkingLabelColor)
 
 		spinner = format.NewSpinner(ctx, cancel, anim.Settings{
-			Size:        10,
-			Label:       "Generating",
-			LabelColor:  defaultFG,
-			GradColorA:  t.WorkingGradFromColor,
-			GradColorB:  t.WorkingGradToColor,
-			CycleColors: true,
+			Size:         10,
+			Label:        "Generating",
+			LabelColor:   defaultFG,
+			GradColorA:   t.WorkingGradFromColor,
+			GradColorB:   t.WorkingGradToColor,
+			CycleColors:  true,
+			LowBandwidth: ws.Config.LowBandwidthEnabled(),
 		})
 		spinner.Start()
 	}

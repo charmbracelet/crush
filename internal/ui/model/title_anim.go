@@ -54,9 +54,20 @@ func titleAnimTickCmd(gen int, d time.Duration) tea.Cmd {
 }
 
 // startTitleAnimation begins animating the reveal of newTitle. It supersedes
-// any in-flight animation.
+// any in-flight animation. In low-bandwidth mode the reveal is skipped
+// entirely and the title appears at once on the next render.
 func (m *UI) startTitleAnimation(newTitle string) tea.Cmd {
 	gen := m.titleAnim.gen + 1
+	if m.lowBandwidthEnabled() {
+		// No tick scheduled; renderSessionTitle will fall through to
+		// the static path because active=false.
+		m.titleAnim = titleAnimState{
+			active: false,
+			target: newTitle,
+			gen:    gen,
+		}
+		return nil
+	}
 	m.titleAnim = titleAnimState{
 		active:   true,
 		target:   newTitle,
@@ -65,6 +76,16 @@ func (m *UI) startTitleAnimation(newTitle string) tea.Cmd {
 		gen:      gen,
 	}
 	return titleAnimTickCmd(gen, titleBlinkInterval)
+}
+
+// lowBandwidthEnabled is a nil-safe accessor used by the title animation
+// path. The UI struct may have a zero `com` field in unit tests; treat
+// that the same as "config not yet available" \u2014 default to motion.
+func (m *UI) lowBandwidthEnabled() bool {
+	if m == nil || m.com == nil {
+		return false
+	}
+	return m.com.Config().LowBandwidthEnabled()
 }
 
 // handleTitleAnimTick advances the title animation one step and schedules the

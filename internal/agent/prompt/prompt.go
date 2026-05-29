@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"text/template"
+	"text/template" //nosemgrep: go.lang.security.audit.xss.import-text-template.import-text-template
 	"time"
 
 	"github.com/charmbracelet/crush/internal/config"
@@ -23,6 +23,7 @@ import (
 type Prompt struct {
 	name       string
 	template   string
+	literal    bool
 	now        func() time.Time
 	platform   string
 	workingDir string
@@ -79,7 +80,22 @@ func NewPrompt(name, promptTemplate string, opts ...Option) (*Prompt, error) {
 	return p, nil
 }
 
+// NewLiteralPrompt creates a Prompt that returns its content verbatim without
+// any template processing. This is useful when the prompt body is already
+// fully rendered (e.g. loaded from a subagent markdown file).
+func NewLiteralPrompt(content string) *Prompt {
+	return &Prompt{
+		name:     "literal",
+		template: content,
+		literal:  true,
+		now:      time.Now,
+	}
+}
+
 func (p *Prompt) Build(ctx context.Context, provider, model string, store *config.ConfigStore) (string, error) {
+	if p.literal {
+		return p.template, nil
+	}
 	t, err := template.New(p.name).Parse(p.template)
 	if err != nil {
 		return "", fmt.Errorf("parsing template: %w", err)

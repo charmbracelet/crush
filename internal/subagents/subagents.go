@@ -87,7 +87,7 @@ type Subagent struct {
 	Name            string   `yaml:"name"`
 	Description     string   `yaml:"description"`
 	Tools           ToolList `yaml:"tools"`
-	DisallowedTools ToolList `yaml:"disallowed_tools"`
+	DisallowedTools ToolList `yaml:"disallowedTools"`
 	Model           string   `yaml:"model"`
 	Skills          []string `yaml:"skills"`
 	MCPServers      []string `yaml:"mcp_servers"`
@@ -245,7 +245,7 @@ func (s *Subagent) Validate() error {
 		}
 		for _, tool := range s.Tools {
 			if disallowedSet[tool] {
-				errs = append(errs, fmt.Errorf("tool %q appears in both tools and disallowed_tools", tool))
+				errs = append(errs, fmt.Errorf("tool %q appears in both tools and disallowedTools", tool))
 				break
 			}
 		}

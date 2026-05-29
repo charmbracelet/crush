@@ -108,6 +108,10 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 	if !ok {
 		return nil, errors.New("task agent not configured")
 	}
+	coderCfg, ok := c.cfg.Config().Agents[config.AgentCoder]
+	if !ok {
+		return nil, errors.New("coder agent not configured")
+	}
 	taskPr, err := taskPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
 	if err != nil {
 		return nil, err
@@ -152,7 +156,7 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("unknown subagent type: %q", subagentType)), nil
 			}
 
-			agentCfg := sa.ToConfigAgent(taskCfg)
+			agentCfg := sa.ToConfigAgent(coderCfg)
 			subPr, err := subagentPrompt(sa, c.activeSkills, prompt.WithWorkingDir(c.cfg.WorkingDir()))
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("build subagent prompt %q: %w", sa.Name, err)

@@ -50,6 +50,10 @@ type RuntimeOverrides struct {
 // RemoveConfigField, RefreshOAuthToken) to prevent both in-process
 // goroutine races and, together with the shared lock.File, cross-process
 // races on the config file.
+//
+// reloadMu serialises ReloadFromDisk calls to prevent concurrent reloads
+// from racing on store fields. autoReload uses TryLock on reloadMu to
+// skip redundant reloads when one is already in progress.
 type ConfigStore struct {
 	config             *Config
 	workingDir         string
@@ -61,10 +65,9 @@ type ConfigStore struct {
 	overrides          RuntimeOverrides
 	trackedConfigPaths []string                // unique, normalized config file paths
 	snapshots          map[string]fileSnapshot // path -> snapshot at last capture
-	autoReloadDisabled bool                    // set during load/reload to prevent re-entrancy
-	reloadInProgress   bool                    // set during reload to avoid disk writes mid-reload
 
-	mu sync.Mutex
+	mu       sync.Mutex // serialises config file writes
+	reloadMu sync.Mutex // serialises ReloadFromDisk calls
 }
 
 // Config returns the pure-data config struct (read-only after load).
@@ -720,19 +723,18 @@ func (s *ConfigStore) captureStalenessSnapshot(paths []string) {
 // ReloadFromDisk re-runs the config load/merge flow and updates the in-memory
 // config atomically. It rebuilds the staleness snapshot after successful reload.
 // On failure, the store state is rolled back to its previous state.
+// Concurrent calls are serialised via reloadMu.
 func (s *ConfigStore) ReloadFromDisk(ctx context.Context) error {
 	if s.workingDir == "" {
 		return fmt.Errorf("cannot reload: working directory not set")
 	}
+	s.reloadMu.Lock()
+	defer s.reloadMu.Unlock()
+	return s.reloadFromDiskLocked(ctx)
+}
 
-	// Disable auto-reload during reload to prevent nested/re-entrant calls.
-	s.autoReloadDisabled = true
-	s.reloadInProgress = true
-	defer func() {
-		s.autoReloadDisabled = false
-		s.reloadInProgress = false
-	}()
-
+// reloadFromDiskLocked performs the actual reload. Caller must hold reloadMu.
+func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 	// Migrate deprecated disable_notifications before reloading config.
 	migrateDisableNotifications()
 
@@ -835,11 +837,22 @@ func (s *ConfigStore) ReloadFromDisk(ctx context.Context) error {
 // disabled during load/reload flows, or when working directory is not set
 // (e.g., during testing). Only actual reload failures return an error.
 func (s *ConfigStore) autoReload(ctx context.Context) error {
-	if s.autoReloadDisabled {
-		return nil // Expected skip: already in load/reload flow
-	}
 	if s.workingDir == "" {
 		return nil // Expected skip: working directory not set
 	}
-	return s.ReloadFromDisk(ctx)
+	// Skip if a reload is already in progress. This handles both
+	// concurrent auto-reloads after parallel writes and re-entrant
+	// calls from configureProviders during a reload.
+	//
+	// Note: if a write completes after the in-progress reload has
+	// already read the config file, that write won't be reflected in
+	// memory until the next reload. This is acceptable because writes
+	// are rare and the next user action or file-watch tick will pick
+	// up the change. Callers that need guaranteed fresh state after a
+	// write should call ReloadFromDisk explicitly.
+	if !s.reloadMu.TryLock() {
+		return nil
+	}
+	defer s.reloadMu.Unlock()
+	return s.reloadFromDiskLocked(ctx)
 }

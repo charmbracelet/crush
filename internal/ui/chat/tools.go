@@ -1253,6 +1253,9 @@ func (t *baseToolMessageItem) formatParametersForCopy() string {
 	case agent.AgentToolName:
 		var params agent.AgentParams
 		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
+			if params.SubagentType != "" && params.SubagentType != "task" {
+				return fmt.Sprintf("**Subagent:** %s\n\n**Task:**\n%s", params.SubagentType, params.Prompt)
+			}
 			return fmt.Sprintf("**Task:**\n%s", params.Prompt)
 		}
 	}

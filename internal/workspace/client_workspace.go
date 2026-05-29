@@ -530,6 +530,8 @@ func (w *ClientWorkspace) ReadSkill(ctx context.Context, skillID string) ([]byte
 	}, nil
 }
 
+// ActiveSubagents returns nil in client mode. Subagent discovery is a server
+// concern; the client surface does not expose them today.
 func (w *ClientWorkspace) ActiveSubagents() []SubagentInfo {
 	return nil
 }

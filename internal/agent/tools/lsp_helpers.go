@@ -22,12 +22,26 @@ type resolvedSymbol struct {
 }
 
 // resolveSymbol greps for a symbol name, triggers lazy LSP startup, and
-// returns the first match position that a running client can serve.
+// returns the first match position that a running LSP client confirms
+// is a valid identifier. Matches inside comments or strings are skipped
+// automatically because the LSP will reject them.
 func resolveSymbol(ctx context.Context, lspManager *lsp.Manager, symbol, workingDir string) (*resolvedSymbol, error) {
 	results, err := resolveSymbolResults(ctx, lspManager, symbol, workingDir)
 	if err != nil {
 		return nil, err
 	}
+
+	// Try each candidate until the LSP confirms it's a real identifier.
+	// This filters out grep matches in comments, strings, or partial
+	// identifiers that slipped past the word-boundary filter.
+	for _, r := range results {
+		_, err := r.client.Definition(ctx, r.path, r.line, r.char)
+		if err == nil || !isNoIdentifierError(err) {
+			return r, nil
+		}
+	}
+	// All candidates were rejected by the LSP; return the first one
+	// so the caller gets a meaningful error from their own LSP call.
 	return results[0], nil
 }
 
@@ -38,7 +52,11 @@ func resolveSymbol(ctx context.Context, lspManager *lsp.Manager, symbol, working
 func resolveSymbolResults(ctx context.Context, lspManager *lsp.Manager, symbol, workingDir string) ([]*resolvedSymbol, error) {
 	lspManager.Start(ctx, workingDir)
 
-	matches, _, err := searchFiles(ctx, regexp.QuoteMeta(symbol), workingDir, "", 100)
+	// Use word boundaries to avoid matching inside larger identifiers
+	// (e.g. "Bar" inside "myBar"). The symbol is already QuoteMeta'd
+	// so dots and other regex metacharacters are escaped.
+	pattern := `\b` + regexp.QuoteMeta(symbol) + `\b`
+	matches, _, err := searchFiles(ctx, pattern, workingDir, "", 100)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search for symbol: %w", err)
 	}

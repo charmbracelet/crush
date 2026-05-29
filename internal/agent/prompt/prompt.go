@@ -21,25 +21,29 @@ import (
 
 // Prompt represents a template-based prompt generator.
 type Prompt struct {
-	name       string
-	template   string
-	literal    bool
-	now        func() time.Time
-	platform   string
-	workingDir string
+	name               string
+	template           string
+	literal            bool
+	now                func() time.Time
+	platform           string
+	workingDir         string
+	subagentBody       string
+	preloadedSkillsXML string
 }
 
 type PromptDat struct {
-	Provider      string
-	Model         string
-	Config        config.Config
-	WorkingDir    string
-	IsGitRepo     bool
-	Platform      string
-	Date          string
-	GitStatus     string
-	ContextFiles  []ContextFile
-	AvailSkillXML string
+	Provider           string
+	Model              string
+	Config             config.Config
+	WorkingDir         string
+	IsGitRepo          bool
+	Platform           string
+	Date               string
+	GitStatus          string
+	ContextFiles       []ContextFile
+	AvailSkillXML      string
+	SubagentBody       string
+	PreloadedSkillsXML string
 }
 
 type ContextFile struct {
@@ -65,6 +69,14 @@ func WithWorkingDir(workingDir string) Option {
 	return func(p *Prompt) {
 		p.workingDir = workingDir
 	}
+}
+
+func WithSubagentBody(body string) Option {
+	return func(p *Prompt) { p.subagentBody = body }
+}
+
+func WithPreloadedSkillsXML(xml string) Option {
+	return func(p *Prompt) { p.preloadedSkillsXML = xml }
 }
 
 func NewPrompt(name, promptTemplate string, opts ...Option) (*Prompt, error) {
@@ -164,6 +176,15 @@ func expandPath(path string, store *config.ConfigStore) string {
 }
 
 func (p *Prompt) promptData(ctx context.Context, provider, model string, store *config.ConfigStore) (PromptDat, error) {
+	if store == nil {
+		return PromptDat{
+			Provider:           provider,
+			Model:              model,
+			SubagentBody:       p.subagentBody,
+			PreloadedSkillsXML: p.preloadedSkillsXML,
+		}, nil
+	}
+
 	workingDir := cmp.Or(p.workingDir, store.WorkingDir())
 	platform := cmp.Or(p.platform, runtime.GOOS)
 
@@ -216,14 +237,16 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 
 	isGit := isGitRepo(store.WorkingDir())
 	data := PromptDat{
-		Provider:      provider,
-		Model:         model,
-		Config:        *cfg,
-		WorkingDir:    filepath.ToSlash(workingDir),
-		IsGitRepo:     isGit,
-		Platform:      platform,
-		Date:          p.now().Format("1/2/2006"),
-		AvailSkillXML: availSkillXML,
+		Provider:           provider,
+		Model:              model,
+		Config:             *cfg,
+		WorkingDir:         filepath.ToSlash(workingDir),
+		IsGitRepo:          isGit,
+		Platform:           platform,
+		Date:               p.now().Format("1/2/2006"),
+		AvailSkillXML:      availSkillXML,
+		SubagentBody:       p.subagentBody,
+		PreloadedSkillsXML: p.preloadedSkillsXML,
 	}
 	if isGit {
 		var err error

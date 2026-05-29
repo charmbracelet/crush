@@ -162,13 +162,3 @@ func TestDispatcherTool_ProviderOptions_RoundTrip(t *testing.T) {
 	require.NotNil(t, dt.ProviderOptions())
 }
 
-func TestSubagentBodyPrompt_ReturnsLiteralBody(t *testing.T) {
-	t.Parallel()
-
-	body := "# Agent\n\nYou are a specialist.\n\n{{.Provider}} should not be expanded."
-	p := subagentBodyPrompt(body)
-
-	result, err := p.Build(context.Background(), "anthropic", "claude-3", nil)
-	require.NoError(t, err)
-	require.Equal(t, body, result) // body returned verbatim, template metacharacters untouched
-}

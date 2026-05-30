@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -19,9 +21,11 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/subagents"
 )
 
 // AppWorkspace implements the Workspace interface by delegating
@@ -387,6 +391,145 @@ func (w *AppWorkspace) ActiveSubagents() []SubagentInfo {
 		result[i] = SubagentInfo{Name: sa.Name, Description: sa.Description}
 	}
 	return result
+}
+
+// RunningSubagents returns info about all subagent sessions currently running
+// under the given parentSessionID, enriched with token counts from the session
+// service where available. Returns nil when SubagentRuntime is nil.
+func (w *AppWorkspace) RunningSubagents(parentSessionID string) []RunningSubagentInfo {
+	if w.app.SubagentRuntime == nil {
+		return nil
+	}
+	entries := w.app.SubagentRuntime.List(parentSessionID)
+	if len(entries) == 0 {
+		return nil
+	}
+	result := make([]RunningSubagentInfo, len(entries))
+	for i, e := range entries {
+		info := RunningSubagentInfo{
+			ChildSessionID:  e.ChildSessionID,
+			ParentSessionID: e.ParentSessionID,
+			Name:            e.Name,
+			Color:           e.Color,
+			Status:          e.Status,
+			StartedAt:       e.StartedAt,
+		}
+		if w.app.Sessions != nil {
+			if sess, err := w.app.Sessions.Get(context.Background(), e.ChildSessionID); err == nil {
+				info.PromptTokens = sess.PromptTokens
+				info.CompletionTokens = sess.CompletionTokens
+			}
+		}
+		result[i] = info
+	}
+	return result
+}
+
+// SubscribeSubagentRuntime returns a channel of RuntimeEvents from the
+// SubagentRuntime. Returns a closed channel when SubagentRuntime is nil.
+func (w *AppWorkspace) SubscribeSubagentRuntime(ctx context.Context) <-chan pubsub.Event[subagents.RuntimeEvent] {
+	if w.app.SubagentRuntime == nil {
+		ch := make(chan pubsub.Event[subagents.RuntimeEvent])
+		close(ch)
+		return ch
+	}
+	return w.app.SubagentRuntime.Subscribe(ctx)
+}
+
+// CancelSubagent cancels the subagent session with the given childSessionID.
+// It is a no-op when AgentCoordinator is nil.
+func (w *AppWorkspace) CancelSubagent(childSessionID string) {
+	if w.app.AgentCoordinator == nil {
+		return
+	}
+	w.app.AgentCoordinator.Cancel(childSessionID)
+}
+
+// AllSubagents returns all discovered subagent definitions projected to the
+// frontend-facing SubagentDefInfo shape, with scope detection relative to the
+// workspace working directory. Returns nil when the Subagents manager is nil.
+func (w *AppWorkspace) AllSubagents() []SubagentDefInfo {
+	mgr := w.app.Subagents
+	if mgr == nil {
+		return nil
+	}
+	all := mgr.AllSubagents()
+	cfg := w.store.Config()
+	workingDir := w.store.WorkingDir()
+
+	var disabledSubagents []string
+	if cfg.Options != nil {
+		disabledSubagents = cfg.Options.DisabledSubagents
+	}
+	disabledSet := make(map[string]bool, len(disabledSubagents))
+	for _, name := range disabledSubagents {
+		disabledSet[name] = true
+	}
+
+	result := make([]SubagentDefInfo, len(all))
+	for i, s := range all {
+		scope := "user"
+		if s.FilePath == "" {
+			scope = "builtin"
+		} else if workingDir != "" && (strings.HasPrefix(s.FilePath, workingDir+"/") || s.FilePath == workingDir) {
+			scope = "project"
+		}
+		result[i] = SubagentDefInfo{
+			Name:        s.Name,
+			Description: s.Description,
+			Color:       s.ResolvedColor(),
+			FilePath:    s.FilePath,
+			Scope:       scope,
+			Disabled:    disabledSet[s.Name],
+		}
+	}
+	return result
+}
+
+// DeleteUserSubagent removes a user-scoped subagent by name. It returns an
+// error if the subagent is not found or is not user-scoped. On success it
+// deletes the file from disk and reloads the Subagents manager.
+func (w *AppWorkspace) DeleteUserSubagent(name string) error {
+	var target *SubagentDefInfo
+	for _, info := range w.AllSubagents() {
+		if info.Name == name {
+			cp := info
+			target = &cp
+			break
+		}
+	}
+	if target == nil {
+		return fmt.Errorf("subagent %q not found", name)
+	}
+	if target.Scope != "user" {
+		return fmt.Errorf("subagent %q is not user-scoped and cannot be deleted", name)
+	}
+	if err := os.Remove(target.FilePath); err != nil {
+		return err
+	}
+	cfg := w.store.Config()
+	var subagentsPaths, disabledSubagents []string
+	if cfg.Options != nil {
+		subagentsPaths = cfg.Options.SubagentsPaths
+		disabledSubagents = cfg.Options.DisabledSubagents
+	}
+	all, active, states := subagents.DiscoverFromConfig(subagents.DiscoveryConfig{
+		SubagentsPaths:    subagentsPaths,
+		DisabledSubagents: disabledSubagents,
+		IsKnownModelID:    nil,
+	})
+	w.app.Subagents.Reload(all, active, states)
+	return nil
+}
+
+// SessionTokens returns the prompt and completion token counts for the given
+// session. It delegates to the session service and propagates any error.
+func (w *AppWorkspace) SessionTokens(ctx context.Context, sessionID string) (prompt, completion int64, err error) {
+	sess, err := w.app.Sessions.Get(ctx, sessionID)
+	if err != nil {
+		return 0, 0, err
+	}
+	return sess.PromptTokens, sess.CompletionTokens, nil
 }
 
 // -- MCP operations --

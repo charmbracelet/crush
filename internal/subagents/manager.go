@@ -92,6 +92,21 @@ func (m *Manager) SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event
 	return m.broker.Subscribe(ctx)
 }
 
+// Reload atomically replaces the manager's allSubagents, activeSubagents, and
+// states with the provided slices, then publishes an UpdatedEvent to
+// subscribers. It is a no-op when m is nil.
+func (m *Manager) Reload(all, active []*Subagent, states []*SubagentState) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.allSubagents = cloneSubagents(all)
+	m.activeSubagents = cloneSubagents(active)
+	m.states = cloneStates(states)
+	m.mu.Unlock()
+	m.broker.Publish(pubsub.UpdatedEvent, Event{States: cloneStates(states)})
+}
+
 // Shutdown releases broker resources.
 func (m *Manager) Shutdown() {
 	if m.broker != nil {

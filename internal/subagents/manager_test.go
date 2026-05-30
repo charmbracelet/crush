@@ -340,3 +340,46 @@ func TestDiscoverFromConfig_EmptyPaths(t *testing.T) {
 	require.Empty(t, all)
 	require.Empty(t, active)
 }
+
+func TestManager_Reload(t *testing.T) {
+	t.Parallel()
+
+	initial := []*Subagent{{Name: "old-all"}}
+	initialActive := []*Subagent{{Name: "old-active"}}
+	mgr := NewManager(initial, initialActive, nil)
+	t.Cleanup(mgr.Shutdown)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	ch := mgr.SubscribeEvents(ctx)
+
+	newAll := []*Subagent{{Name: "new-all-a"}, {Name: "new-all-b"}}
+	newActive := []*Subagent{{Name: "new-active"}}
+	newStates := []*SubagentState{{Name: "new-state"}}
+
+	mgr.Reload(newAll, newActive, newStates)
+
+	// AllSubagents reflects the new slice.
+	gotAll := mgr.AllSubagents()
+	require.Len(t, gotAll, 2)
+	require.Equal(t, "new-all-a", gotAll[0].Name)
+	require.Equal(t, "new-all-b", gotAll[1].Name)
+
+	// ActiveSubagents reflects the new slice.
+	gotActive := mgr.ActiveSubagents()
+	require.Len(t, gotActive, 1)
+	require.Equal(t, "new-active", gotActive[0].Name)
+
+	// States reflects the new slice.
+	gotStates := mgr.States()
+	require.Len(t, gotStates, 1)
+	require.Equal(t, "new-state", gotStates[0].Name)
+
+	// An event must be published to subscribers.
+	select {
+	case ev := <-ch:
+		require.Equal(t, pubsub.UpdatedEvent, ev.Type)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for Reload event")
+	}
+}

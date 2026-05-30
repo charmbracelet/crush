@@ -127,6 +127,9 @@ type coordinator struct {
 	// Subagents discovery results (session-start snapshot).
 	activeSubagents []*subagents.Subagent
 
+	// runtime tracks which sub-agents are currently running.
+	runtime *subagents.Runtime
+
 	readyWg errgroup.Group
 }
 
@@ -143,6 +146,7 @@ func NewCoordinator(
 	runComplete pubsub.Publisher[notify.RunComplete],
 	skillsMgr *skills.Manager,
 	subagentsMgr *subagents.Manager,
+	runtime *subagents.Runtime,
 ) (Coordinator, error) {
 	// Skills are pre-discovered by the caller (see app.New /
 	// backend.CreateWorkspace) and passed in via the manager. If no
@@ -176,6 +180,7 @@ func NewCoordinator(
 	if subagentsMgr != nil {
 		c.activeSubagents = subagentsMgr.ActiveSubagents()
 	}
+	c.runtime = runtime
 
 	agentCfg, ok := cfg.Config().Agents[config.AgentCoder]
 	if !ok {
@@ -1290,6 +1295,8 @@ type subAgentParams struct {
 	ToolCallID     string
 	Prompt         string
 	SessionTitle   string
+	AgentName      string
+	AgentColor     string
 	// SessionSetup is an optional callback invoked after session creation
 	// but before agent execution, for custom session configuration.
 	SessionSetup func(sessionID string)
@@ -1310,6 +1317,10 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	if params.SessionSetup != nil {
 		params.SessionSetup(session.ID)
 	}
+
+	// Register with the runtime tracker and remove on return.
+	c.runtime.Register(params.SessionID, session.ID, params.AgentName, params.AgentColor)
+	defer c.runtime.Unregister(session.ID)
 
 	// Get model configuration
 	model := params.Agent.Model()

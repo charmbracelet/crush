@@ -186,6 +186,8 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 				Prompt:         params.Prompt,
 				SessionTitle:   sa.Name + " Agent Session",
 				SessionSetup:   c.subagentSessionSetup(sa),
+				AgentName:      sa.Name,
+				AgentColor:     sa.ResolvedColor(),
 			})
 		},
 	}, nil

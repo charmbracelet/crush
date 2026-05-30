@@ -133,6 +133,9 @@ type coordinator struct {
 	// Subagents discovery results (session-start snapshot).
 	activeSubagents []*subagents.Subagent
 
+	// runtime tracks which sub-agents are currently running.
+	runtime *subagents.Runtime
+
 	readyWg errgroup.Group
 }
 
@@ -140,19 +143,20 @@ type coordinator struct {
 // struct keeps the constructor self-documenting and avoids a long
 // positional parameter list.
 type CoordinatorOptions struct {
-	Config      *config.ConfigStore
-	Sessions    session.Service
-	Messages    message.Service
-	Permissions permission.Service
-	Questions   question.Service
-	History     history.Service
-	FileTracker filetracker.Service
-	LSPManager  *lsp.Manager
-	Notify      pubsub.Publisher[notify.Notification]
-	RunComplete pubsub.Publisher[notify.RunComplete]
-	Skills      *skills.Manager
+	Config       *config.ConfigStore
+	Sessions     session.Service
+	Messages     message.Service
+	Permissions  permission.Service
+	Questions    question.Service
+	History      history.Service
+	FileTracker  filetracker.Service
+	LSPManager   *lsp.Manager
+	Notify       pubsub.Publisher[notify.Notification]
+	RunComplete  pubsub.Publisher[notify.RunComplete]
+	Skills       *skills.Manager
 	SubagentsMgr *subagents.Manager
-	Interactive bool
+	Runtime      *subagents.Runtime
+	Interactive  bool
 }
 
 func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, error) {
@@ -190,6 +194,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	if opts.SubagentsMgr != nil {
 		c.activeSubagents = opts.SubagentsMgr.ActiveSubagents()
 	}
+	c.runtime = opts.Runtime
 
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
 	if !ok {
@@ -1418,6 +1423,8 @@ type subAgentParams struct {
 	ToolCallID     string
 	Prompt         string
 	SessionTitle   string
+	AgentName      string
+	AgentColor     string
 	// SessionSetup is an optional callback invoked after session creation
 	// but before agent execution, for custom session configuration.
 	SessionSetup func(sessionID string)
@@ -1438,6 +1445,10 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	if params.SessionSetup != nil {
 		params.SessionSetup(session.ID)
 	}
+
+	// Register with the runtime tracker and remove on return.
+	c.runtime.Register(params.SessionID, session.ID, params.AgentName, params.AgentColor)
+	defer c.runtime.Unregister(session.ID)
 
 	// Get model configuration
 	model := params.Agent.Model()

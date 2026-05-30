@@ -67,8 +67,9 @@ type App struct {
 
 	LSPManager *lsp.Manager
 
-	Skills    *skills.Manager
-	Subagents *subagents.Manager
+	Skills          *skills.Manager
+	Subagents       *subagents.Manager
+	SubagentRuntime *subagents.Runtime
 
 	config *config.ConfigStore
 
@@ -642,6 +643,9 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 	if coderAgentCfg.ID == "" {
 		return fmt.Errorf("coder agent configuration is missing")
 	}
+	if app.SubagentRuntime == nil {
+		app.SubagentRuntime = subagents.NewRuntime()
+	}
 	var err error
 	app.AgentCoordinator, err = agent.NewCoordinator(ctx, agent.CoordinatorOptions{
 		Config:       app.config,
@@ -656,6 +660,7 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 		RunComplete:  app.runCompletions,
 		Skills:       app.Skills,
 		SubagentsMgr: app.Subagents,
+		Runtime:      app.SubagentRuntime,
 		Interactive:  interactive,
 	})
 	if err != nil {

@@ -444,6 +444,76 @@ func TestCoordinator_ActiveSubagentsFieldType(t *testing.T) {
 	assert.Equal(t, "compile-check", c.activeSubagents[0].Name)
 }
 
+// TestRunSubAgent_RegistersAndUnregistersRuntime verifies that runSubAgent
+// calls Register on the coordinator's Runtime after session creation and
+// Unregister when it returns, using the AgentName and AgentColor from params.
+func TestRunSubAgent_RegistersAndUnregistersRuntime(t *testing.T) {
+	t.Parallel()
+
+	const providerID = "test-provider"
+	providerCfg := config.ProviderConfig{ID: providerID}
+
+	env := testEnv(t)
+	cfg, err := config.Init(env.workingDir, "", false)
+	require.NoError(t, err)
+	cfg.Config().Providers.Set(providerID, providerCfg)
+
+	rt := subagents.NewRuntime()
+	t.Cleanup(rt.Shutdown)
+
+	// Channel to capture the session ID used during the agent run so we can
+	// assert that List sees the entry while runSubAgent is in-flight.
+	type snapshot struct {
+		entries []subagents.RunningEntry
+	}
+	snapCh := make(chan snapshot, 1)
+
+	parentSession, err := env.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+
+	agent := newMockAgent(providerID, 4096, func(_ context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
+		// Capture a snapshot of the Runtime state while the sub-agent is running.
+		snapCh <- snapshot{entries: rt.List(parentSession.ID)}
+		return agentResultWithText("done"), nil
+	})
+
+	coord := &coordinator{
+		cfg:      cfg,
+		sessions: env.sessions,
+		runtime:  rt,
+	}
+
+	_, err = coord.runSubAgent(t.Context(), subAgentParams{
+		Agent:          agent,
+		SessionID:      parentSession.ID,
+		AgentMessageID: "msg-1",
+		ToolCallID:     "call-1",
+		Prompt:         "do something",
+		SessionTitle:   "Runtime Test",
+		AgentName:      "my-agent",
+		AgentColor:     "blue",
+	})
+	require.NoError(t, err)
+
+	// Verify the in-flight snapshot captured exactly one entry with correct fields.
+	select {
+	case snap := <-snapCh:
+		require.Len(t, snap.entries, 1, "Runtime must have one entry while runSubAgent is in-flight")
+		e := snap.entries[0]
+		require.Equal(t, parentSession.ID, e.ParentSessionID)
+		require.Equal(t, "my-agent", e.Name)
+		require.Equal(t, "blue", e.Color)
+		require.Equal(t, "running", e.Status)
+		require.False(t, e.StartedAt.IsZero())
+	default:
+		t.Fatal("agent run function was never called")
+	}
+
+	// After runSubAgent returns, the entry must be gone.
+	after := rt.List(parentSession.ID)
+	require.Empty(t, after, "Runtime must have no entries after runSubAgent returns")
+}
+
 func TestGetProviderOptionsReasoningEffort(t *testing.T) {
 	// Bedrock is Fantasy's Anthropic under a different provider name; options
 	// must land under anthropic.Name so the Anthropic language model picks them up.

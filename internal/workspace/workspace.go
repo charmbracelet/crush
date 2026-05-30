@@ -18,9 +18,11 @@ import (
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
+	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/subagents"
 )
 
 // LSPClientInfo holds information about an LSP client's state. This is
@@ -157,6 +159,12 @@ type Workspace interface {
 	ListSkills(ctx context.Context) ([]skills.CatalogEntry, error)
 	ReadSkill(ctx context.Context, skillID string) ([]byte, skills.SkillReadResult, error)
 	ActiveSubagents() []SubagentInfo
+	RunningSubagents(parentSessionID string) []RunningSubagentInfo
+	SubscribeSubagentRuntime(ctx context.Context) <-chan pubsub.Event[subagents.RuntimeEvent]
+	CancelSubagent(childSessionID string)
+	AllSubagents() []SubagentDefInfo
+	DeleteUserSubagent(name string) error
+	SessionTokens(ctx context.Context, sessionID string) (prompt, completion int64, err error)
 
 	// MCP operations (server-side in client mode)
 	MCPGetStates() map[string]mcptools.ClientInfo
@@ -177,6 +185,30 @@ type Workspace interface {
 type SubagentInfo struct {
 	Name        string
 	Description string
+}
+
+// RunningSubagentInfo holds frontend-facing data for a currently running
+// subagent instance, enriched with session token counts.
+type RunningSubagentInfo struct {
+	ChildSessionID   string
+	ParentSessionID  string
+	Name             string
+	Color            string
+	Status           string
+	StartedAt        time.Time
+	PromptTokens     int64
+	CompletionTokens int64
+}
+
+// SubagentDefInfo holds frontend-facing data for a discovered subagent
+// definition, including its scope relative to the workspace.
+type SubagentDefInfo struct {
+	Name        string
+	Description string
+	Color       string
+	FilePath    string
+	Scope       string // "user", "project", or "builtin"
+	Disabled    bool
 }
 
 // MCPResourceContents holds the contents of an MCP resource.

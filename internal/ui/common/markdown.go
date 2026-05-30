@@ -57,8 +57,8 @@ func MarkdownRenderer(sty *styles.Styles, width int) *glamour.TermRenderer {
 	return r
 }
 
-// QuietMarkdownRenderer returns a glamour [glamour.TermRenderer] with no colors
-// (plain text with structure) and the given width. Renderers are memoized per
+// QuietMarkdownRenderer returns a glamour [glamour.TermRenderer] with muted
+// colors for tool output and the given width. Renderers are memoized per
 // width and shared across callers. Same concurrency contract as
 // [MarkdownRenderer]: serialize via [LockMarkdownRenderer].
 func QuietMarkdownRenderer(sty *styles.Styles, width int) *glamour.TermRenderer {

@@ -46,10 +46,10 @@ WHERE session_id = ?;
 SELECT *
 FROM messages
 WHERE session_id = ? AND role = 'user'
-ORDER BY created_at DESC;
+ORDER BY created_at DESC, rowid DESC;
 
 -- name: ListAllUserMessages :many
 SELECT *
 FROM messages
 WHERE role = 'user'
-ORDER BY created_at DESC;
+ORDER BY created_at DESC, rowid DESC;

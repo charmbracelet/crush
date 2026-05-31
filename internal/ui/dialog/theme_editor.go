@@ -125,13 +125,19 @@ func (ed *ThemeEditor) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	listHeight := max(1, height-heightOffset)
 	ed.keepSelectedVisible(listHeight)
 
-	ed.input.SetWidth(innerWidth - t.Dialog.InputPrompt.GetHorizontalFrameSize() - 1)
+	listWidth := max(0, innerWidth-3) // Reserve space for scrollbar.
+	ed.input.SetWidth(listWidth - t.Dialog.InputPrompt.GetHorizontalFrameSize() - 1)
 	ed.help.SetWidth(innerWidth)
 
 	rc := NewRenderContext(t, width)
 	rc.Title = fmt.Sprintf("Edit Theme: %s", ed.base)
 	rc.AddPart(t.Dialog.InputPrompt.Render(ed.input.View()))
-	rc.AddPart(t.Dialog.List.Height(listHeight).Render(ed.renderSlots(innerWidth, listHeight)))
+	listView := t.Dialog.List.Height(listHeight).Render(ed.renderSlots(listWidth, listHeight))
+	scrollbar := common.Scrollbar(t, listHeight, len(ed.slots), listHeight, ed.scroll)
+	if scrollbar != "" {
+		listView = lipgloss.JoinHorizontal(lipgloss.Top, listView, scrollbar)
+	}
+	rc.AddPart(listView)
 	rc.Help = ed.help.View(ed)
 
 	view := rc.Render()

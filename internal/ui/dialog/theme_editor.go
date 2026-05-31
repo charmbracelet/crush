@@ -189,16 +189,20 @@ func (ed *ThemeEditor) loadCurrentTheme() {
 		ed.loadBuiltin("charmtone")
 		return
 	}
-	theme := cfg.Options.TUI.Theme
+	activeTheme := cfg.Options.TUI.ActiveTheme
+	if activeTheme == "" {
+		activeTheme = "charmtone"
+	}
+	theme, ok := cfg.Options.TUI.Theme[activeTheme]
+	if !ok {
+		ed.loadBuiltin(activeTheme)
+		return
+	}
 	if theme.IsObject() {
 		ed.loadObject(theme)
 		return
 	}
-	name := theme.Name()
-	if name == "" {
-		name = "charmtone"
-	}
-	ed.loadBuiltin(name)
+	ed.loadBuiltin(activeTheme)
 }
 
 func (ed *ThemeEditor) loadBuiltin(name string) {

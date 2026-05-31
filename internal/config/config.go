@@ -213,38 +213,44 @@ type LSPConfig struct {
 }
 
 type TUIOptions struct {
-	CompactMode bool        `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
-	DiffMode    string      `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
-	Theme       ThemeConfig `json:"theme,omitzero" jsonschema:"description=Color theme for the TUI interface. Use a built-in theme name or custom palette object.,default=charmtone,example=charmtone,example=gruvbox-dark"`
-
-	Completions Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
-	Transparent *bool       `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
+	CompactMode bool                   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
+	DiffMode    string                 `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
+	ActiveTheme string                 `json:"active_theme,omitempty" jsonschema:"description=Name of the currently active theme,default=charmtone,example=charmtone,example=gruvbox-dark"`
+	Theme       map[string]ThemeConfig `json:"theme,omitempty" jsonschema:"description=Map of theme name to palette overrides. Built-in themes use empty objects; custom themes specify palette colors."`
+	Completions Completions            `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
+	Transparent *bool                  `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
 }
 
-// ThemeConfig stores either a built-in theme name or a raw custom theme
-// object. Custom theme objects are interpreted by the UI layer so config
-// stays independent of UI styling types.
+// ThemeConfig stores palette overrides for a single theme. Empty objects
+// use the built-in theme with no modifications. Objects with fields
+// override specific palette colors on top of the base theme (if specified).
 type ThemeConfig struct {
-	ThemeName string          `json:"-"`
-	Base      string          `json:"-"`
+	Base      string          `json:"base,omitempty"`
 	RawObject json.RawMessage `json:"-"`
 }
 
-// UnmarshalJSON accepts either a string theme name or an object containing
-// a custom palette plus optional base field.
+// UnmarshalJSON accepts an object containing palette overrides plus an
+// optional base field. For backward compatibility, also accepts a string
+// (theme name) which is converted to {"base": "theme_name"}.
 func (t *ThemeConfig) UnmarshalJSON(data []byte) error {
 	*t = ThemeConfig{}
 	if string(data) == "null" {
 		return nil
 	}
-	var name string
-	if err := json.Unmarshal(data, &name); err == nil {
-		t.ThemeName = name
+
+	// Backward compatibility: accept string format
+	var str string
+	if err := json.Unmarshal(data, &str); err == nil {
+		// Old format: "theme": "charmtone"
+		// Convert to new format: {"base": "charmtone"}
+		t.Base = str
+		t.RawObject = append(t.RawObject[:0], []byte(`{"base":"`+str+`"}`)...)
 		return nil
 	}
+
 	var obj map[string]any
 	if err := json.Unmarshal(data, &obj); err != nil {
-		return fmt.Errorf("theme must be a string or object: %w", err)
+		return fmt.Errorf("theme config must be an object: %w", err)
 	}
 	if base, ok := obj["base"].(string); ok {
 		t.Base = base
@@ -253,31 +259,53 @@ func (t *ThemeConfig) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// MarshalJSON preserves the original representation shape.
+// MarshalJSON preserves the original representation.
 func (t ThemeConfig) MarshalJSON() ([]byte, error) {
 	if len(t.RawObject) > 0 {
 		return t.RawObject, nil
 	}
-	return json.Marshal(t.ThemeName)
+	return json.Marshal(struct{}{})
 }
 
-// Name returns the configured built-in theme name, or the object's base
-// theme name when using a custom palette object.
+// Name returns the base theme name if specified, otherwise empty string.
 func (t ThemeConfig) Name() string {
-	if t.ThemeName != "" {
-		return t.ThemeName
-	}
 	return t.Base
 }
 
-// IsObject reports whether this theme config was provided as an object.
+// IsObject reports whether this theme config has palette overrides.
+// IsObject reports whether this theme config has palette overrides.
 func (t ThemeConfig) IsObject() bool {
-	return len(t.RawObject) > 0
+	if len(t.RawObject) == 0 {
+		return false
+	}
+	// Check if RawObject has any fields beyond "base"
+	var obj map[string]any
+	if err := json.Unmarshal(t.RawObject, &obj); err != nil {
+		return false
+	}
+	// Has overrides if there are fields other than "base"
+	for key := range obj {
+		if key != "base" {
+			return true
+		}
+	}
+	return false
 }
 
-// IsZero reports whether the theme config is unset.
+// IsZero reports whether the theme config is unset (empty object).
 func (t ThemeConfig) IsZero() bool {
-	return t.ThemeName == "" && t.Base == "" && len(t.RawObject) == 0
+	if t.Base != "" {
+		return false
+	}
+	if len(t.RawObject) == 0 {
+		return true
+	}
+	// Check if RawObject is an empty object {}
+	var obj map[string]any
+	if err := json.Unmarshal(t.RawObject, &obj); err != nil {
+		return false
+	}
+	return len(obj) == 0
 }
 
 // Completions defines options for the completions UI.

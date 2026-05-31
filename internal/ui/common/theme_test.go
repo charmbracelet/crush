@@ -10,12 +10,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestThemeStylesFromConfig_StringTheme(t *testing.T) {
+func TestThemeStylesFromConfig_ActiveTheme(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{
 		Options: &config.Options{
 			TUI: &config.TUIOptions{
-				Theme: config.ThemeConfig{ThemeName: "gruvbox-dark"},
+				ActiveTheme: "gruvbox-dark",
+				Theme: map[string]config.ThemeConfig{
+					"gruvbox-dark": {},
+				},
 			},
 		},
 	}
@@ -29,9 +32,12 @@ func TestThemeStylesFromConfig_ObjectTheme(t *testing.T) {
 	cfg := &config.Config{
 		Options: &config.Options{
 			TUI: &config.TUIOptions{
-				Theme: config.ThemeConfig{
-					Base:      "gruvbox-dark",
-					RawObject: json.RawMessage(`{"base":"gruvbox-dark","primary":"#ff0000"}`),
+				ActiveTheme: "custom",
+				Theme: map[string]config.ThemeConfig{
+					"custom": {
+						Base:      "gruvbox-dark",
+						RawObject: json.RawMessage(`{"base":"gruvbox-dark","primary":"#ff0000"}`),
+					},
 				},
 			},
 		},
@@ -46,9 +52,12 @@ func TestThemeStylesFromConfig_InvalidObjectFallsBackToBase(t *testing.T) {
 	cfg := &config.Config{
 		Options: &config.Options{
 			TUI: &config.TUIOptions{
-				Theme: config.ThemeConfig{
-					Base:      "gruvbox-dark",
-					RawObject: json.RawMessage(`{"base":"gruvbox-dark","primary":"not-a-color"}`),
+				ActiveTheme: "custom",
+				Theme: map[string]config.ThemeConfig{
+					"custom": {
+						Base:      "gruvbox-dark",
+						RawObject: json.RawMessage(`{"base":"gruvbox-dark","primary":"not-a-color"}`),
+					},
 				},
 			},
 		},

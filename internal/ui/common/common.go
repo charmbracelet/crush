@@ -75,7 +75,7 @@ func ThemeNameFromConfig(cfg *config.Config) string {
 	if cfg == nil || cfg.Options == nil || cfg.Options.TUI == nil {
 		return ""
 	}
-	return cfg.Options.TUI.Theme.Name()
+	return cfg.Options.TUI.ActiveTheme
 }
 
 // LoadThemeStyles resolves a theme name to Styles, falling back to
@@ -88,27 +88,37 @@ func LoadThemeStyles(name string) styles.Styles {
 	return s
 }
 
-// ThemeStylesFromConfig resolves the configured theme to Styles. String
-// themes load a built-in theme directly; object themes apply palette
-// overrides on top of their base theme.
+// ThemeStylesFromConfig resolves the configured theme to Styles. The
+// active_theme field selects which theme to use; the theme map provides
+// palette overrides.
 func ThemeStylesFromConfig(cfg *config.Config) styles.Styles {
 	if cfg == nil || cfg.Options == nil || cfg.Options.TUI == nil {
 		return LoadThemeStyles("")
 	}
-	theme := cfg.Options.TUI.Theme
+	activeTheme := cfg.Options.TUI.ActiveTheme
+	if activeTheme == "" {
+		activeTheme = "charmtone"
+	}
+	theme, ok := cfg.Options.TUI.Theme[activeTheme]
+	if !ok {
+		return LoadThemeStyles(activeTheme)
+	}
 	if !theme.IsObject() {
-		return LoadThemeStyles(theme.Name())
+		return LoadThemeStyles(activeTheme)
 	}
 	var custom struct {
 		Base string `json:"base,omitempty"`
 		styles.Palette
 	}
 	if err := json.Unmarshal(theme.RawObject, &custom); err != nil {
-		return LoadThemeStyles(theme.Name())
+		return LoadThemeStyles(activeTheme)
+	}
+	if custom.Base == "" {
+		custom.Base = activeTheme
 	}
 	s, err := styles.LoadPaletteTheme(custom.Base, custom.Palette)
 	if err != nil {
-		return LoadThemeStyles(theme.Name())
+		return LoadThemeStyles(custom.Base)
 	}
 	return s
 }

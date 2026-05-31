@@ -1527,7 +1527,10 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		m.applyTheme(newStyles)
 		m.preThemeStyles = nil
-		if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.theme", themeName); err != nil {
+		if err := m.com.Workspace.SetConfigFields(config.ScopeGlobal, map[string]any{
+			"options.tui.active_theme": themeName,
+			"options.tui.theme." + themeName: map[string]any{},
+		}); err != nil {
 			cmds = append(cmds, util.ReportError(err))
 			break
 		}
@@ -1574,7 +1577,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, util.ReportError(err))
 			break
 		}
-		if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.theme", value); err != nil {
+		if err := m.com.Workspace.SetConfigFields(config.ScopeGlobal, map[string]any{
+			"options.tui.theme." + msg.Base: value,
+		}); err != nil {
 			cmds = append(cmds, util.ReportError(err))
 			break
 		}

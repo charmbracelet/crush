@@ -249,7 +249,13 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	if !hideSpinner && stderrTTY {
 		t := styles.CharmtonePantera()
 		if cfg := app.config.Config(); cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil {
-			t = themeStyles(cfg.Options.TUI.Theme)
+			activeTheme := cfg.Options.TUI.ActiveTheme
+			if activeTheme == "" {
+				activeTheme = "charmtone"
+			}
+			if themeCfg, ok := cfg.Options.TUI.Theme[activeTheme]; ok {
+				t = themeStyles(themeCfg, activeTheme)
+			}
 		}
 
 		// Detect background color to set the appropriate color for the
@@ -569,9 +575,9 @@ func setupSubscriberMustDeliver[T any](
 	})
 }
 
-func themeStyles(theme config.ThemeConfig) styles.Styles {
+func themeStyles(theme config.ThemeConfig, themeName string) styles.Styles {
 	if !theme.IsObject() {
-		s, err := styles.LoadTheme(theme.Name())
+		s, err := styles.LoadTheme(themeName)
 		if err != nil {
 			return styles.CharmtonePantera()
 		}
@@ -583,6 +589,9 @@ func themeStyles(theme config.ThemeConfig) styles.Styles {
 	}
 	if err := json.Unmarshal(theme.RawObject, &custom); err != nil {
 		return styles.CharmtonePantera()
+	}
+	if custom.Base == "" {
+		custom.Base = themeName
 	}
 	s, err := styles.LoadPaletteTheme(custom.Base, custom.Palette)
 	if err != nil {

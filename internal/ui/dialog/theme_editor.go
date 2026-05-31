@@ -234,9 +234,18 @@ func (ed *ThemeEditor) renderSlots(width, height int) string {
 	for i := ed.scroll; i < end; i++ {
 		slot := ed.slots[i]
 		value := slot.get(ed.palette)
-		swatch := lipgloss.NewStyle().Foreground(lipgloss.Color(value)).Render("■")
-		label := fmt.Sprintf("%-20s %s %s", slot.name, value, swatch)
-		if i == ed.index {
+		selected := i == ed.index
+
+		var swatch string
+		if selected {
+			swatch = styles.ColorSwatchIcon
+		} else {
+			colorStr := styles.ColorString(value)
+			swatch = lipgloss.NewStyle().Foreground(lipgloss.Color(colorStr)).Render(styles.ColorSwatchIcon)
+		}
+
+		label := fmt.Sprintf("%-20s %s %s", slot.name, swatch, value)
+		if selected {
 			lines = append(lines, ed.com.Styles.Dialog.SelectedItem.Width(width).Render(label))
 			continue
 		}

@@ -2,7 +2,6 @@ package styles
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
@@ -261,6 +260,14 @@ func TestParseColor_Hex(t *testing.T) {
 	require.Empty(t, ParseColor("#xyz"))
 }
 
+func TestParseColor_HexNormalizesToCharmtone(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, "Charple", ParseColor("#6b50ff"))
+	require.Equal(t, "Charple", ParseColor("#6B50FF"))
+	require.Equal(t, "Pepper", ParseColor("#201f26"))
+	require.Equal(t, "Dolly", ParseColor("#ff60ff"))
+}
+
 func TestParseColor_ANSI(t *testing.T) {
 	t.Parallel()
 	require.Equal(t, "0", ParseColor("0"))
@@ -272,17 +279,15 @@ func TestParseColor_ANSI(t *testing.T) {
 
 func TestParseColor_CharmtoneNames(t *testing.T) {
 	t.Parallel()
-	hex := ParseColor("Charple")
-	require.NotEmpty(t, hex)
-	require.True(t, strings.HasPrefix(hex, "#"))
+	require.Equal(t, "Charple", ParseColor("Charple"))
 
 	// Case-insensitive.
 	require.Equal(t, ParseColor("charple"), ParseColor("Charple"))
 	require.Equal(t, ParseColor("CHARPLE"), ParseColor("Charple"))
 
-	// Aliases.
-	require.Equal(t, ParseColor("Sash"), ParseColor("Ash"))
-	require.Equal(t, ParseColor("Char"), ParseColor("Charcoal"))
+	// Aliases resolve to canonical name.
+	require.Equal(t, "Sash", ParseColor("Ash"))
+	require.Equal(t, "Char", ParseColor("Charcoal"))
 }
 
 func TestParseColor_Invalid(t *testing.T) {

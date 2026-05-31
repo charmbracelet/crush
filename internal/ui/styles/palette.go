@@ -170,6 +170,9 @@ func ParseColor(s string) string {
 	}
 	if strings.HasPrefix(s, "#") {
 		if validHexColor.MatchString(s) {
+			if name := charmtone.NameFromHex(s); name != "" {
+				return name
+			}
 			return s
 		}
 		return ""
@@ -178,6 +181,9 @@ func ParseColor(s string) string {
 		return s
 	}
 	if hex, ok := charmtoneByName[strings.ToLower(s)]; ok {
+		if name := charmtone.NameFromHex(hex); name != "" {
+			return name
+		}
 		return hex
 	}
 	return ""
@@ -266,14 +272,34 @@ func LoadPaletteTheme(baseName string, palette Palette) (Styles, error) {
 	return quickStyle(merged.ToQuickStyleOpts(quickStyleOpts{})), nil
 }
 
-// colorToHex converts a color.Color to its "#rrggbb" hex string.
+// colorToHex converts a color.Color to its display string. If the color
+// matches a CharmTone palette entry, the canonical name is returned
+// (e.g. "Charple"). Otherwise the "#rrggbb" hex string is returned.
 // Returns empty string for nil colors.
 func colorToHex(c color.Color) string {
 	if c == nil {
 		return ""
 	}
 	r, g, b, _ := c.RGBA()
-	return fmt.Sprintf("#%02x%02x%02x", r>>8, g>>8, b>>8)
+	hex := fmt.Sprintf("#%02x%02x%02x", r>>8, g>>8, b>>8)
+	if name := charmtone.NameFromHex(hex); name != "" {
+		return name
+	}
+	return hex
+}
+
+// ColorString returns a lipgloss-compatible color string for the given
+// input. Charmtone names are converted to hex; hex and ANSI values are
+// returned as-is. Returns empty string for unrecognized input.
+func ColorString(s string) string {
+	resolved := ParseColor(s)
+	if resolved == "" {
+		return ""
+	}
+	if hex, ok := charmtoneByName[strings.ToLower(resolved)]; ok {
+		return hex
+	}
+	return resolved
 }
 
 // resolveColor parses a color string into a color.Color, falling back
@@ -283,9 +309,9 @@ func resolveColor(s string, fallback color.Color) color.Color {
 	if s == "" {
 		return fallback
 	}
-	resolved := ParseColor(s)
-	if resolved == "" {
+	cs := ColorString(s)
+	if cs == "" {
 		return fallback
 	}
-	return lipgloss.Color(resolved)
+	return lipgloss.Color(cs)
 }

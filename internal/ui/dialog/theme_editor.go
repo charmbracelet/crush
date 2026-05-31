@@ -202,7 +202,10 @@ func (ed *ThemeEditor) selectedSlot() paletteSlot {
 }
 
 func (ed *ThemeEditor) applyInput() {
-	ed.selectedSlot().set(&ed.palette, strings.TrimSpace(ed.input.Value()))
+	raw := strings.TrimSpace(ed.input.Value())
+	if resolved := styles.ParseColor(raw); resolved != "" {
+		ed.selectedSlot().set(&ed.palette, resolved)
+	}
 }
 
 func (ed *ThemeEditor) syncInput() {

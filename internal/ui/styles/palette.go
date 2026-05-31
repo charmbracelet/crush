@@ -7,10 +7,28 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/exp/charmtone"
 )
 
 // validHexColor matches "#rgb", "#rrggbb", "#rgba", or "#rrggbbaa".
 var validHexColor = regexp.MustCompile(`^#([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$`)
+
+// validANSIColor matches ANSI color indices 0-255.
+var validANSIColor = regexp.MustCompile(`^([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$`)
+
+// charmtoneByName maps lowercase charmtone color names to their hex values.
+// Built once at init time from the charmtone package.
+var charmtoneByName map[string]string
+
+func init() {
+	charmtoneByName = make(map[string]string, len(charmtone.Keys()))
+	for _, k := range charmtone.Keys() {
+		charmtoneByName[strings.ToLower(k.String())] = k.Hex()
+	}
+	// Include aliases.
+	charmtoneByName["ash"] = charmtone.Sash.Hex()
+	charmtoneByName["charcoal"] = charmtone.Char.Hex()
+}
 
 // Palette is a JSON-serializable theme palette. Each field maps to a
 // quickStyleOpts color, stored as a hex string ("#rrggbb"). Empty
@@ -123,15 +141,58 @@ func (p Palette) ToQuickStyleOpts(base quickStyleOpts) quickStyleOpts {
 	}
 }
 
-// Validate checks that all non-empty hex strings in the palette are
-// valid color values. Returns an error listing all invalid fields.
+// IsValidColor reports whether s is a valid color value: a hex code
+// (#rgb, #rrggbb, #rgba, #rrggbbaa), an ANSI index (0-255), or a named
+// charmtone color (case-insensitive).
+func IsValidColor(s string) bool {
+	if s == "" {
+		return false
+	}
+	if strings.HasPrefix(s, "#") {
+		return validHexColor.MatchString(s)
+	}
+	if validANSIColor.MatchString(s) {
+		return true
+	}
+	_, ok := charmtoneByName[strings.ToLower(s)]
+	return ok
+}
+
+// ParseColor resolves a color string to its hex representation. It
+// accepts hex codes, ANSI indices (0-255), and named charmtone colors.
+// Returns the original string unchanged for hex and ANSI values (which
+// lipgloss.Color handles natively), and the hex value for charmtone
+// names. Returns empty string for unrecognized input.
+func ParseColor(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if strings.HasPrefix(s, "#") {
+		if validHexColor.MatchString(s) {
+			return s
+		}
+		return ""
+	}
+	if validANSIColor.MatchString(s) {
+		return s
+	}
+	if hex, ok := charmtoneByName[strings.ToLower(s)]; ok {
+		return hex
+	}
+	return ""
+}
+
+// Validate checks that all non-empty color strings in the palette are
+// valid color values (hex, ANSI 0-255, or charmtone name). Returns an
+// error listing all invalid fields.
 func (p Palette) Validate() error {
 	var errs []string
 	validate := func(field, value string) {
 		if value == "" {
 			return
 		}
-		if !validHexColor.MatchString(value) {
+		if !IsValidColor(value) {
 			errs = append(errs, fmt.Sprintf("%s: invalid color %q", field, value))
 		}
 	}
@@ -215,11 +276,16 @@ func colorToHex(c color.Color) string {
 	return fmt.Sprintf("#%02x%02x%02x", r>>8, g>>8, b>>8)
 }
 
-// resolveColor parses a hex string into a color.Color, falling back to
-// the provided default when the string is empty.
-func resolveColor(hexStr string, fallback color.Color) color.Color {
-	if hexStr == "" {
+// resolveColor parses a color string into a color.Color, falling back
+// to the provided default when the string is empty. Supports hex codes,
+// ANSI indices, and charmtone names.
+func resolveColor(s string, fallback color.Color) color.Color {
+	if s == "" {
 		return fallback
 	}
-	return lipgloss.Color(hexStr)
+	resolved := ParseColor(s)
+	if resolved == "" {
+		return fallback
+	}
+	return lipgloss.Color(resolved)
 }

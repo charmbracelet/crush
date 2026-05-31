@@ -2,6 +2,7 @@ package styles
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
@@ -193,5 +194,145 @@ func TestResolveColor_NonEmptyParsesHex(t *testing.T) {
 	fallback := lipgloss.Color("#AABBCC")
 	result := resolveColor("#FF0000", fallback)
 	require.Equal(t, lipgloss.Color("#FF0000"), result)
+	require.NotEqual(t, fallback, result)
+}
+
+func TestIsValidColor_ShortHex(t *testing.T) {
+	t.Parallel()
+	require.True(t, IsValidColor("#f00"))
+	require.True(t, IsValidColor("#FFF"))
+	require.True(t, IsValidColor("#abc"))
+	require.False(t, IsValidColor("#gg0"))
+	require.False(t, IsValidColor("#12"))
+}
+
+func TestIsValidColor_FullHex(t *testing.T) {
+	t.Parallel()
+	require.True(t, IsValidColor("#ff0000"))
+	require.True(t, IsValidColor("#FF0000"))
+	require.True(t, IsValidColor("#aabbcc"))
+	require.False(t, IsValidColor("#gggggg"))
+	require.False(t, IsValidColor("#12345"))
+}
+
+func TestIsValidColor_ANSI16(t *testing.T) {
+	t.Parallel()
+	require.True(t, IsValidColor("0"))
+	require.True(t, IsValidColor("7"))
+	require.True(t, IsValidColor("15"))
+}
+
+func TestIsValidColor_ANSI256(t *testing.T) {
+	t.Parallel()
+	require.True(t, IsValidColor("16"))
+	require.True(t, IsValidColor("100"))
+	require.True(t, IsValidColor("255"))
+	require.False(t, IsValidColor("256"))
+	require.False(t, IsValidColor("-1"))
+}
+
+func TestIsValidColor_CharmtoneNames(t *testing.T) {
+	t.Parallel()
+	require.True(t, IsValidColor("Charple"))
+	require.True(t, IsValidColor("charple"))
+	require.True(t, IsValidColor("CHARPLE"))
+	require.True(t, IsValidColor("Dolly"))
+	require.True(t, IsValidColor("Pepper"))
+	require.True(t, IsValidColor("BBQ"))
+	require.True(t, IsValidColor("Ash"))      // alias for Sash
+	require.True(t, IsValidColor("Charcoal")) // alias for Char
+	require.False(t, IsValidColor("Notacolor"))
+}
+
+func TestIsValidColor_Invalid(t *testing.T) {
+	t.Parallel()
+	require.False(t, IsValidColor(""))
+	require.False(t, IsValidColor("not-a-color"))
+	require.False(t, IsValidColor("red"))
+	require.False(t, IsValidColor("#"))
+	require.False(t, IsValidColor("256"))
+}
+
+func TestParseColor_Hex(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, "#f00", ParseColor("#f00"))
+	require.Equal(t, "#ff0000", ParseColor("#ff0000"))
+	require.Equal(t, "#FF0000", ParseColor("#FF0000"))
+	require.Empty(t, ParseColor("#xyz"))
+}
+
+func TestParseColor_ANSI(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, "0", ParseColor("0"))
+	require.Equal(t, "15", ParseColor("15"))
+	require.Equal(t, "200", ParseColor("200"))
+	require.Equal(t, "255", ParseColor("255"))
+	require.Empty(t, ParseColor("256"))
+}
+
+func TestParseColor_CharmtoneNames(t *testing.T) {
+	t.Parallel()
+	hex := ParseColor("Charple")
+	require.NotEmpty(t, hex)
+	require.True(t, strings.HasPrefix(hex, "#"))
+
+	// Case-insensitive.
+	require.Equal(t, ParseColor("charple"), ParseColor("Charple"))
+	require.Equal(t, ParseColor("CHARPLE"), ParseColor("Charple"))
+
+	// Aliases.
+	require.Equal(t, ParseColor("Sash"), ParseColor("Ash"))
+	require.Equal(t, ParseColor("Char"), ParseColor("Charcoal"))
+}
+
+func TestParseColor_Invalid(t *testing.T) {
+	t.Parallel()
+	require.Empty(t, ParseColor(""))
+	require.Empty(t, ParseColor("not-a-color"))
+	require.Empty(t, ParseColor("#xyz"))
+	require.Empty(t, ParseColor("999"))
+}
+
+func TestPalette_Validate_ANSIColors(t *testing.T) {
+	t.Parallel()
+	p := Palette{
+		Primary: "200",
+		BgBase:  "0",
+	}
+	require.NoError(t, p.Validate())
+}
+
+func TestPalette_Validate_CharmtoneNames(t *testing.T) {
+	t.Parallel()
+	p := Palette{
+		Primary: "Charple",
+		BgBase:  "Pepper",
+		Accent:  "Dolly",
+	}
+	require.NoError(t, p.Validate())
+}
+
+func TestPalette_Validate_MixedFormats(t *testing.T) {
+	t.Parallel()
+	p := Palette{
+		Primary:   "#ff0000",
+		Secondary: "Charple",
+		Accent:    "100",
+		Keyword:   "#f00",
+	}
+	require.NoError(t, p.Validate())
+}
+
+func TestResolveColor_CharmtoneName(t *testing.T) {
+	t.Parallel()
+	fallback := lipgloss.Color("#000000")
+	result := resolveColor("Charple", fallback)
+	require.NotEqual(t, fallback, result)
+}
+
+func TestResolveColor_ANSI(t *testing.T) {
+	t.Parallel()
+	fallback := lipgloss.Color("#000000")
+	result := resolveColor("200", fallback)
 	require.NotEqual(t, fallback, result)
 }

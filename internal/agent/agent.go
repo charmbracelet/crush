@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"os"
 	"regexp"
@@ -978,6 +979,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			}
 			usage, estimated := fallbackStepUsage(stepMessages, stepResult)
 			a.updateSessionUsage(largeModel, &updatedSession, usage, a.openrouterCost(stepResult.ProviderMetadata), estimated)
+			extractHyperCredits(stepResult.ProviderMetadata)
 			_, sessionErr := a.sessions.Save(ctx, updatedSession)
 			if sessionErr != nil {
 				return sessionErr
@@ -1386,6 +1388,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 			}
 			openrouterCost = &newCost
 		}
+		extractHyperCredits(step.ProviderMetadata)
 	}
 
 	a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, openrouterCost, false)
@@ -1752,6 +1755,7 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 			}
 			openrouterCost = &newCost
 		}
+		extractHyperCredits(step.ProviderMetadata)
 	}
 
 	modelConfig := model.CatwalkCfg
@@ -1794,6 +1798,25 @@ func (a *sessionAgent) openrouterCost(metadata fantasy.ProviderMetadata) *float6
 		return nil
 	}
 	return &opts.Usage.Cost
+}
+
+// extractHyperCredits reads usage.remaining.hypercredits from OpenAI
+// provider metadata and stores it for the next FetchCredits call.
+func extractHyperCredits(metadata fantasy.ProviderMetadata) {
+	openaiMeta, ok := metadata[openai.Name]
+	if !ok {
+		return
+	}
+	pm, ok := openaiMeta.(*openai.ProviderMetadata)
+	if !ok {
+		return
+	}
+	var remaining struct {
+		Hypercredits float64 `json:"hypercredits"`
+	}
+	if pm.ExtraField("remaining", &remaining) && remaining.Hypercredits > 0 {
+		hyper.SetBalance(int(math.Round(remaining.Hypercredits)))
+	}
 }
 
 func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session, usage fantasy.Usage, overrideCost *float64, estimated bool) {

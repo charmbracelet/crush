@@ -1808,7 +1808,7 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 		return nil
 	}
 
-	m.dialog.OpenDialog(dlg)
+	m.dialog.OpenDialogWithGrace(dlg)
 	return cmd
 }
 
@@ -3519,7 +3519,7 @@ func (m *UI) openPermissionsDialog(perm permission.PermissionRequest) tea.Cmd {
 	}
 
 	permDialog := dialog.NewPermissions(m.com, perm, opts...)
-	m.dialog.OpenDialog(permDialog)
+	m.dialog.OpenDialogWithGrace(permDialog)
 	return nil
 }
 

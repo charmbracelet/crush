@@ -12,6 +12,9 @@ const (
 	// TypeReAuthenticate indicates the agent encountered an
 	// authentication error and the user needs to re-authenticate.
 	TypeReAuthenticate Type = "re_authenticate"
+	// TypeAgentError indicates the agent's turn terminated with an
+	// error. The error text is carried in Notification.Message.
+	TypeAgentError Type = "error"
 )
 
 // Notification represents a domain event published by the agent.
@@ -20,4 +23,7 @@ type Notification struct {
 	SessionTitle string
 	Type         Type
 	ProviderID   string
+	// Message carries the error text for TypeAgentError. Other
+	// notification types ignore it.
+	Message string
 }

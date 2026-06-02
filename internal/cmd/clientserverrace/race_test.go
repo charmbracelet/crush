@@ -111,13 +111,9 @@ func TestClientServerSpawnRace(t *testing.T) {
 	results := make(chan result, numClients)
 
 	// Probe /v1/health concurrently while the clients are still
-	// running. The server self-shuts-down when the last workspace is
-	// released (internal/backend/backend.go:DeleteWorkspace), so once
-	// all clients exit cleanly the socket may legitimately be gone —
-	// asserting the socket post-hoc would race with that documented
-	// self-shutdown. Instead we require that during the parallel run
-	// at least one /v1/health probe got a 2xx, which proves the
-	// spawn-and-readiness path actually produced a live server.
+	// running. We require that during the parallel run at least one
+	// /v1/health probe gets a 2xx, which proves the spawn-and-readiness
+	// path produced a live server under contention.
 	var sawHealthy atomic.Bool
 	probeDone := make(chan struct{})
 	stopProbe := make(chan struct{})
@@ -216,16 +212,15 @@ func TestClientServerSpawnRace(t *testing.T) {
 		)
 	}
 
-	// Positive sanity check: at some point during the parallel run a
-	// /v1/health probe must have succeeded. We deliberately do *not*
-	// stat the socket post-hoc: when every client returns cleanly
-	// (e.g. exits early because no providers are configured), the
-	// last DeleteWorkspace triggers the server's self-shutdown and
-	// the socket disappears. That is correct behaviour, not a race
-	// regression.
+	// Positive sanity checks: at some point during the parallel run a
+	// /v1/health probe must have succeeded, and the daemon should still
+	// be up after the clients exit.
 	if !sawHealthy.Load() {
 		t.Fatalf("no /v1/health probe succeeded on %s while %d clients were running",
 			socketPath, numClients)
+	}
+	if err := pingHealth(socketPath); err != nil {
+		t.Fatalf("daemon did not remain healthy after clients exited: %v", err)
 	}
 }
 

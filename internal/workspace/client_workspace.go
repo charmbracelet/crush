@@ -506,11 +506,12 @@ func (w *ClientWorkspace) ListSkills(ctx context.Context) ([]skills.CatalogEntry
 	result := make([]skills.CatalogEntry, len(entries))
 	for i, entry := range entries {
 		result[i] = skills.CatalogEntry{
-			ID:          entry.ID,
-			Name:        entry.Name,
-			Description: entry.Description,
-			Label:       entry.Label,
-			Source:      skills.SourceType(entry.Source),
+			ID:            entry.ID,
+			Name:          entry.Name,
+			Description:   entry.Description,
+			Label:         entry.Label,
+			Source:        skills.SourceType(entry.Source),
+			UserInvocable: entry.UserInvocable,
 		}
 	}
 	return result, nil

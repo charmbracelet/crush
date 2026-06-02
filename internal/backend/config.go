@@ -196,11 +196,12 @@ func (b *Backend) ListSkills(workspaceID string) ([]proto.SkillInfo, error) {
 	result := make([]proto.SkillInfo, len(entries))
 	for i, entry := range entries {
 		result[i] = proto.SkillInfo{
-			ID:          entry.ID,
-			Name:        entry.Name,
-			Description: entry.Description,
-			Label:       entry.Label,
-			Source:      string(entry.Source),
+			ID:            entry.ID,
+			Name:          entry.Name,
+			Description:   entry.Description,
+			Label:         entry.Label,
+			Source:        string(entry.Source),
+			UserInvocable: entry.UserInvocable,
 		}
 	}
 	return result, nil

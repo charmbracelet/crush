@@ -527,10 +527,12 @@ func (m *UI) loadCustomCommands() tea.Cmd {
 		if err != nil {
 			slog.Error("Failed to load custom commands", "error", err)
 		}
-		// Append user-invocable skills as commands
-		skillCommands := commands.LoadSkillCommands()
-		skillCommands = append(skillCommands, commands.LoadProjectSkillCommands(m.com.Workspace.WorkingDir())...)
-		customCommands = append(customCommands, skillCommands...)
+		// Append user-invocable skills as commands.
+		skillEntries, err := m.com.Workspace.ListSkills(context.Background())
+		if err != nil {
+			slog.Error("Failed to load skill commands", "error", err)
+		}
+		customCommands = append(customCommands, commands.FromSkillCatalog(skillEntries)...)
 		return userCommandsLoadedMsg{Commands: customCommands}
 	}
 }

@@ -140,7 +140,7 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	height := area.Dy()
 
 	title := t.Sidebar.SessionTitle.Width(width).MaxHeight(2).Render(m.session.Title)
-	cwd := common.PrettyPath(t, m.com.Workspace.WorkingDir(), width)
+	cwd := common.PrettyPathWithBranch(t, m.com.Workspace.WorkingDir(), m.com.Workspace.GitBranch(), width)
 	sidebarLogo := m.sidebarLogo
 	if height < logoHeightBreakpoint {
 		sidebarLogo = logo.SmallRender(m.com.Styles, width, logo.Opts{

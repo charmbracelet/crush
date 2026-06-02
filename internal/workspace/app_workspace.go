@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/gitutil"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
@@ -262,6 +263,10 @@ func (w *AppWorkspace) Config() *config.Config {
 
 func (w *AppWorkspace) WorkingDir() string {
 	return w.store.WorkingDir()
+}
+
+func (w *AppWorkspace) GitBranch() string {
+	return gitutil.CurrentBranch(w.store.WorkingDir())
 }
 
 func (w *AppWorkspace) Resolver() config.VariableResolver {

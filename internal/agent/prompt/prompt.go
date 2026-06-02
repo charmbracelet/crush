@@ -14,6 +14,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/filepathext"
+	"github.com/charmbracelet/crush/internal/gitutil"
 	"github.com/charmbracelet/crush/internal/home"
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
@@ -248,15 +249,11 @@ func getGitStatus(ctx context.Context, dir string) (string, error) {
 }
 
 func getGitBranch(ctx context.Context, sh *shell.Shell) (string, error) {
-	out, _, err := sh.Exec(ctx, "git branch --show-current 2>/dev/null")
-	if err != nil {
+	branch := gitutil.CurrentBranch(sh.GetWorkingDir())
+	if branch == "" {
 		return "", nil
 	}
-	out = strings.TrimSpace(out)
-	if out == "" {
-		return "", nil
-	}
-	return fmt.Sprintf("Current branch: %s\n", out), nil
+	return fmt.Sprintf("Current branch: %s\n", branch), nil
 }
 
 func getGitStatusSummary(ctx context.Context, sh *shell.Shell) (string, error) {

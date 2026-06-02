@@ -24,7 +24,7 @@ func (m *UI) selectedLargeModel() *workspace.AgentModel {
 func (m *UI) landingView() string {
 	t := m.com.Styles
 	width := m.layout.main.Dx()
-	cwd := common.PrettyPath(t, m.com.Workspace.WorkingDir(), width)
+	cwd := common.PrettyPathInline(t, m.com.Workspace.WorkingDir(), m.com.Workspace.GitBranch(), width)
 
 	parts := []string{
 		cwd,

@@ -9,6 +9,10 @@ const (
 	CreatedEvent EventType = "created"
 	UpdatedEvent EventType = "updated"
 	DeletedEvent EventType = "deleted"
+
+	CriticReviewTriggeredEvent EventType = "critic.review.triggered"
+	CriticVerdictRenderedEvent EventType = "critic.verdict.rendered"
+	CriticLoopCompletedEvent   EventType = "critic.loop.completed"
 )
 
 // PayloadType identifies the type of event payload for discriminated
@@ -33,6 +37,13 @@ const (
 type Payload struct {
 	Type    PayloadType     `json:"type"`
 	Payload json.RawMessage `json:"payload"`
+}
+
+// CriticLoopEvent is published when a critic review loop terminates.
+type CriticLoopEvent struct {
+	SessionID    string
+	Iterations   int
+	FinalVerdict string
 }
 
 // Subscriber can subscribe to events of type T.

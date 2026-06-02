@@ -24,6 +24,12 @@ func (m mockFileTrackerService) ListReadFiles(ctx context.Context, sessionID str
 	return nil, nil
 }
 
+func (m mockFileTrackerService) RecordWrite(ctx context.Context, sessionID, path string) {}
+
+func (m mockFileTrackerService) ListWrittenFiles(ctx context.Context, sessionID string) ([]string, error) {
+	return nil, nil
+}
+
 func TestWriteToolWritesEmptyNewFile(t *testing.T) {
 	t.Parallel()
 

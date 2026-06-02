@@ -52,6 +52,10 @@ const (
 	LSPWarningIcon string = "W"
 	LSPInfoIcon    string = "I"
 	LSPHintIcon    string = "H"
+
+	CriticApproveIcon string = "✓"
+	CriticReviseIcon  string = "↻"
+	CriticHaltIcon    string = "✕"
 )
 
 const (
@@ -227,32 +231,38 @@ type Styles struct {
 	}
 
 	// Chat
-	// Messages - chat message item styles
-	Messages struct {
-		UserBlurred      lipgloss.Style
-		UserFocused      lipgloss.Style
-		AssistantBlurred lipgloss.Style
-		AssistantFocused lipgloss.Style
-		NoContent        lipgloss.Style
-		Thinking         lipgloss.Style
-		ErrorTag         lipgloss.Style
-		ErrorTitle       lipgloss.Style
-		ErrorDetails     lipgloss.Style
-		ToolCallFocused  lipgloss.Style
-		ToolCallCompact  lipgloss.Style
-		ToolCallBlurred  lipgloss.Style
-		SectionHeader    lipgloss.Style
+	Chat struct {
+		// Message item styles
+		Message struct {
+			UserBlurred      lipgloss.Style
+			UserFocused      lipgloss.Style
+			AssistantBlurred lipgloss.Style
+			AssistantFocused lipgloss.Style
+			NoContent        lipgloss.Style
+			Thinking         lipgloss.Style
+			ErrorTag         lipgloss.Style
+			ErrorTitle       lipgloss.Style
+			ErrorDetails     lipgloss.Style
+			ToolCallFocused  lipgloss.Style
+			ToolCallCompact  lipgloss.Style
+			ToolCallBlurred  lipgloss.Style
+			SectionHeader    lipgloss.Style
 
-		// Thinking section styles
-		ThinkingBox            lipgloss.Style // Background for thinking content
-		ThinkingTruncationHint lipgloss.Style // "… (N lines hidden)" hint
-		ThinkingFooterTitle    lipgloss.Style // "Thought for" text
-		ThinkingFooterDuration lipgloss.Style // Duration value
-		AssistantInfoIcon      lipgloss.Style
-		AssistantInfoModel     lipgloss.Style
-		AssistantInfoProvider  lipgloss.Style
-		AssistantInfoDuration  lipgloss.Style
-		AssistantCanceled      lipgloss.Style // Italic "Canceled" footer
+			// Thinking section styles
+			ThinkingBox            lipgloss.Style // Background for thinking content
+			ThinkingTruncationHint lipgloss.Style // "… (N lines hidden)" hint
+			ThinkingFooterTitle    lipgloss.Style // "Thought for" text
+			ThinkingFooterDuration lipgloss.Style // Duration value
+			AssistantInfoIcon      lipgloss.Style
+			AssistantInfoModel     lipgloss.Style
+			AssistantInfoProvider  lipgloss.Style
+			AssistantInfoDuration  lipgloss.Style
+			AssistantCanceled      lipgloss.Style // Italic "Canceled" footer
+
+			CriticApproveBadge lipgloss.Style
+			CriticReviseBadge  lipgloss.Style
+			CriticHaltBadge    lipgloss.Style
+		}
 	}
 
 	// Tool - styles for tool call rendering
@@ -585,6 +595,12 @@ func hex(c color.Color) *string {
 	s := fmt.Sprintf("#%02x%02x%02x", r>>8, g>>8, b>>8)
 	return &s
 }
+
+// DefaultStyles returns the default styles for the UI.
+func DefaultStyles() Styles {
+	return CharmtonePantera()
+}
+
 
 func chromaStyle(style ansi.StylePrimitive) string {
 	var s strings.Builder

@@ -96,6 +96,8 @@ type (
 	ActionEnableDockerMCP struct{}
 	// ActionDisableDockerMCP is a message to disable Docker MCP.
 	ActionDisableDockerMCP struct{}
+	// ActionSkipCoach is a message to skip the current coach evaluation.
+	ActionSkipCoach struct{}
 )
 
 // Messages for API key input dialog.

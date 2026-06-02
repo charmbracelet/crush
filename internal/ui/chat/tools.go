@@ -372,11 +372,11 @@ func (t *baseToolMessageItem) Render(width int) string {
 	}
 	var prefix string
 	if t.isCompact {
-		prefix = t.sty.Messages.ToolCallCompact.Render()
+		prefix = t.sty.Chat.Message.ToolCallCompact.Render()
 	} else if t.focused {
-		prefix = t.sty.Messages.ToolCallFocused.Render()
+		prefix = t.sty.Chat.Message.ToolCallFocused.Render()
 	} else {
-		prefix = t.sty.Messages.ToolCallBlurred.Render()
+		prefix = t.sty.Chat.Message.ToolCallBlurred.Render()
 	}
 	lines := strings.Split(t.RawRender(width), "\n")
 	for i, ln := range lines {

@@ -12,6 +12,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -35,6 +36,9 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/charmbracelet/crush/internal/skills/critic"
+	"github.com/charmbracelet/crush/internal/skills/replacer"
+	"github.com/charmbracelet/crush/internal/skills/toolcoach"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/update"
@@ -52,11 +56,13 @@ type UpdateAvailableMsg struct {
 }
 
 type App struct {
-	Sessions    session.Service
-	Messages    message.Service
-	History     history.Service
-	Permissions permission.Service
-	FileTracker filetracker.Service
+	Sessions       session.Service
+	Messages       message.Service
+	History        history.Service
+	Permissions    permission.Service
+	FileTracker    filetracker.Service
+	CriticStore    *critic.Store
+	ToolcoachStore *toolcoach.Store
 
 	AgentCoordinator agent.Coordinator
 
@@ -82,6 +88,10 @@ type App struct {
 	// drive their exit on a deterministic, payload-bearing event
 	// instead of guessing from message finish parts.
 	runCompletions *pubsub.Broker[notify.RunComplete]
+
+	// toolcoachMw holds the toolcoach middleware so the app can act as a
+	// CoachSummaryProvider for the critic. Written once during agent setup.
+	toolcoachMw atomic.Pointer[toolcoach.Middleware]
 }
 
 // New initializes a new application instance. skillsMgr carries the
@@ -100,14 +110,22 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		allowedTools = cfg.Permissions.AllowedTools
 	}
 
+	criticStore := critic.NewStore(q)
+	criticStore.SetDB(conn)
+
+	toolcoachStore := toolcoach.NewStore(q)
+	toolcoachStore.SetDB(conn)
+
 	app := &App{
-		Sessions:    sessions,
-		Messages:    messages,
-		History:     files,
-		Permissions: permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools),
-		FileTracker: filetracker.NewService(q),
-		LSPManager:  lsp.NewManager(store),
-		Skills:      skillsMgr,
+		Sessions:       sessions,
+		Messages:       messages,
+		History:        files,
+		Permissions:    permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools),
+		FileTracker:    filetracker.NewService(q),
+		CriticStore:    criticStore,
+		ToolcoachStore: toolcoachStore,
+		LSPManager:     lsp.NewManager(store),
+		Skills:         skillsMgr,
 
 		globalCtx: ctx,
 
@@ -121,6 +139,17 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	}
 
 	app.setupEvents()
+
+	// Prune old critic reviews on startup.
+	criticCfg := critic.NewCriticSkillConfig(cfg)
+	if app.CriticStore != nil && criticCfg.RetentionDays > 0 {
+		cutoff := time.Now().AddDate(0, 0, -criticCfg.RetentionDays)
+		if n, err := app.CriticStore.Prune(ctx, cutoff); err != nil {
+			slog.Warn("Failed to prune critic reviews", "error", err)
+		} else if n > 0 {
+			slog.Info("Pruned old critic reviews", "count", n)
+		}
+	}
 
 	// Check for updates in the background.
 	go app.checkForUpdates(ctx)
@@ -570,6 +599,16 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 	if coderAgentCfg.ID == "" {
 		return fmt.Errorf("coder agent configuration is missing")
 	}
+
+	criticCfg := critic.NewCriticSkillConfig(app.config.Config())
+	replacerCfg := replacer.NewReplacerConfig(app.config.Config())
+	toolcoachCfg := toolcoach.NewToolcoachConfig(app.config.Config())
+	agentWrapper := app.composeWrappers(
+		app.buildCriticWrapper(criticCfg),
+		app.buildReplacerWrapper(replacerCfg),
+		app.buildToolcoachWrapper(toolcoachCfg),
+	)
+
 	var err error
 	app.AgentCoordinator, err = agent.NewCoordinator(
 		ctx,
@@ -583,12 +622,36 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 		app.agentNotifications,
 		app.runCompletions,
 		app.Skills,
+		agentWrapper,
 	)
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)
 		return err
 	}
 	return nil
+}
+
+// GetCoachSummary implements critic.CoachSummaryProvider by delegating to the
+// toolcoach middleware, if one is active.
+func (app *App) GetCoachSummary(sessionID string) string {
+	if mw := app.toolcoachMw.Load(); mw != nil {
+		return mw.GetCoachSummary(sessionID)
+	}
+	return ""
+}
+
+// composeWrappers chains multiple AgentWrappers into a single wrapper.
+// The first wrapper in the list is applied innermost (closest to the primary agent).
+func (app *App) composeWrappers(wrappers ...func(agent.SessionAgent) agent.SessionAgent) func(agent.SessionAgent) agent.SessionAgent {
+	return func(primary agent.SessionAgent) agent.SessionAgent {
+		result := primary
+		for _, w := range wrappers {
+			if w != nil {
+				result = w(result)
+			}
+		}
+		return result
+	}
 }
 
 // Subscribe sends events to the TUI as tea.Msgs.

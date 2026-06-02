@@ -1000,6 +1000,19 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // setSessionMessages sets the messages for the current session in the chat
+// criticVerdictForMessage returns the critic verdict for a message, if any.
+func (m *UI) criticVerdictForMessage(msgID string) string {
+	store := m.com.CriticStore()
+	if store == nil {
+		return ""
+	}
+	review, err := store.GetByMessageID(context.Background(), msgID)
+	if err != nil {
+		return ""
+	}
+	return review.Verdict
+}
+
 func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	var cmds []tea.Cmd
 	// Build tool result map to link tool calls with their results
@@ -1023,6 +1036,9 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap)...)
 			if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
 				infoItem := chat.NewAssistantInfoItem(m.com.Styles, msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
+				if info, ok := infoItem.(*chat.AssistantInfoItem); ok {
+					info.SetCriticVerdict(m.criticVerdictForMessage(msg.ID))
+				}
 				items = append(items, infoItem)
 			}
 		default:
@@ -1152,6 +1168,9 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 		}
 		if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
 			infoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
+			if info, ok := infoItem.(*chat.AssistantInfoItem); ok {
+				info.SetCriticVerdict(m.criticVerdictForMessage(msg.ID))
+			}
 			m.chat.AppendMessages(infoItem)
 			if m.chat.Follow() {
 				if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
@@ -1229,6 +1248,9 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 	if isEndTurn {
 		if infoItem := m.chat.MessageItem(chat.AssistantInfoID(msg.ID)); infoItem == nil {
 			newInfoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
+			if info, ok := newInfoItem.(*chat.AssistantInfoItem); ok {
+				info.SetCriticVerdict(m.criticVerdictForMessage(msg.ID))
+			}
 			m.chat.AppendMessages(newInfoItem)
 		}
 	}
@@ -1429,19 +1451,13 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		m.dialog.CloseDialog(dialog.NotificationsID)
 	case dialog.ActionNewSession:
-		if m.isAgentBusy() {
-			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
-			break
-		}
+		m.trySkipCoach()
 		if cmd := m.newSession(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSummarize:
-		if m.isAgentBusy() {
-			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
-			break
-		}
+		m.trySkipCoach()
 		cmds = append(cmds, func() tea.Msg {
 			err := m.com.Workspace.AgentSummarize(context.Background(), msg.SessionID)
 			if err != nil {
@@ -1454,10 +1470,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.status.ToggleHelp()
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionExternalEditor:
-		if m.isAgentBusy() {
-			cmds = append(cmds, util.ReportWarn("Agent is working, please wait..."))
-			break
-		}
+		m.trySkipCoach()
 		cmds = append(cmds, m.openEditor(m.textarea.Value()))
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleCompactMode:
@@ -1523,11 +1536,13 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.CommandsID)
 		cmds = append(cmds, m.disableDockerMCP)
 	case dialog.ActionInitializeProject:
-		if m.isAgentBusy() {
-			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
-			break
-		}
+		m.trySkipCoach()
 		cmds = append(cmds, m.initializeProject())
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionSkipCoach:
+		if m.hasSession() && m.com.Workspace.AgentIsReady() {
+			m.com.Workspace.AgentSkipCoach(m.session.ID)
+		}
 		m.dialog.CloseDialog(dialog.CommandsID)
 
 	case dialog.ActionSelectModel:
@@ -1535,10 +1550,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.ActionSelectReasoningEffort:
-		if m.isAgentBusy() {
-			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
-			break
-		}
+		m.trySkipCoach()
 
 		cfg := m.com.Config()
 		if cfg == nil {
@@ -1694,9 +1706,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 	var cmds []tea.Cmd
 
 	// we ignore dialogs with the oauth id as they need to be able to be dismissed
-	if m.isAgentBusy() && !m.dialog.ContainsDialog(dialog.OAuthID) {
-		return util.ReportWarn("Agent is busy, please wait...")
-	}
+	m.trySkipCoach()
 
 	cfg := m.com.Config()
 	if cfg == nil {
@@ -1860,10 +1870,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				return true
 			}
 		case key.Matches(msg, m.keyMap.Suspend):
-			if m.isAgentBusy() {
-				cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
-				return true
-			}
+			m.trySkipCoach()
 			cmds = append(cmds, tea.Suspend)
 			return true
 		case key.Matches(msg, m.keyMap.ToggleYolo):
@@ -1965,7 +1972,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					break
 				}
 
-				// Otherwise, send the message
+				// Otherwise, send the message. If the coach is evaluating or
+				// ready, signal a skip so the user's new input takes priority.
+				if m.isAgentBusy() && m.hasSession() {
+					m.com.Workspace.AgentSkipCoach(m.session.ID)
+				}
 				m.textarea.Reset()
 				if cmd := m.handleTextareaHeightChange(prevHeight); cmd != nil {
 					cmds = append(cmds, cmd)
@@ -1974,6 +1985,13 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				value = strings.TrimSpace(value)
 				if value == "exit" || value == "quit" {
 					return m.openQuitDialog()
+				}
+
+				if value == "/skipcoach" || value == "skipcoach" {
+					if m.hasSession() && m.com.Workspace.AgentIsReady() {
+						m.com.Workspace.AgentSkipCoach(m.session.ID)
+					}
+					return nil
 				}
 
 				attachments := m.attachments.List()
@@ -1990,10 +2008,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if !m.hasSession() {
 					break
 				}
-				if m.isAgentBusy() {
-					cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
-					break
-				}
+				m.trySkipCoach()
 				if cmd := m.newSession(); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
@@ -2005,10 +2020,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					m.chat.SetSelected(m.chat.Len() - 1)
 				}
 			case key.Matches(msg, m.keyMap.Editor.OpenEditor):
-				if m.isAgentBusy() {
-					cmds = append(cmds, util.ReportWarn("Agent is working, please wait..."))
-					break
-				}
+				m.trySkipCoach()
 				cmds = append(cmds, m.openEditor(m.textarea.Value()))
 			case key.Matches(msg, m.keyMap.Editor.Newline):
 				prevHeight := m.textarea.Height()
@@ -2038,6 +2050,12 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if handleGlobalKeys(msg) {
 					// Handle global keys first before passing to textarea.
 					break
+				}
+
+				// If the coach is evaluating or ready, user typing should
+				// interrupt it so the new input takes priority.
+				if m.isAgentBusy() && m.hasSession() {
+					m.com.Workspace.AgentSkipCoach(m.session.ID)
 				}
 
 				// Check for @ trigger before passing to textarea.
@@ -2103,10 +2121,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if !m.hasSession() {
 					break
 				}
-				if m.isAgentBusy() {
-					cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
-					break
-				}
+				m.trySkipCoach()
 				m.focus = uiFocusEditor
 				if cmd := m.newSession(); cmd != nil {
 					cmds = append(cmds, cmd)
@@ -3142,6 +3157,15 @@ func (m *UI) isAgentBusy() bool {
 		m.com.Workspace.AgentIsBusy()
 }
 
+// trySkipCoach signals the coach to skip if the agent is busy. Callers
+// should proceed with their command after calling this; the warning is
+// never shown because coach evaluation should not block user actions.
+func (m *UI) trySkipCoach() {
+	if m.isAgentBusy() && m.hasSession() && m.com.Workspace.AgentIsReady() {
+		m.com.Workspace.AgentSkipCoach(m.session.ID)
+	}
+}
+
 // hasSession returns true if there is an active session with a valid ID.
 func (m *UI) hasSession() bool {
 	return m.session != nil && m.session.ID != ""
@@ -3167,6 +3191,7 @@ var workingPlaceholders = [...]string{
 	"Prrrrrrrr...",
 	"Processing...",
 	"Thinking...",
+	"Coach is thinking...",
 }
 
 // randomizePlaceholders selects random placeholder text for the textarea's

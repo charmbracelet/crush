@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/charmbracelet/crush/internal/agent/hyper"
@@ -467,6 +468,108 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 
 	if str, ok := os.LookupEnv("CRUSH_DISABLE_DEFAULT_PROVIDERS"); ok {
 		c.Options.DisableDefaultProviders, _ = strconv.ParseBool(str)
+	}
+
+	if str, ok := os.LookupEnv("CRUSH_CRITIC_DISABLED"); ok {
+		if c.Options.Critic == nil {
+			c.Options.Critic = &CriticConfig{}
+		}
+		if v, _ := strconv.ParseBool(str); v {
+			c.Options.Critic.Enabled = new(bool)
+		}
+	}
+	if str, ok := os.LookupEnv("CRUSH_CRITIC_MODEL"); ok {
+		if c.Options.Critic == nil {
+			c.Options.Critic = &CriticConfig{}
+		}
+		c.Options.Critic.Model = str
+	}
+	if str, ok := os.LookupEnv("CRUSH_CRITIC_THRESHOLD"); ok {
+		if c.Options.Critic == nil {
+			c.Options.Critic = &CriticConfig{}
+		}
+		if v, err := strconv.ParseFloat(str, 64); err == nil {
+			c.Options.Critic.Threshold = v
+		}
+	}
+	if str, ok := os.LookupEnv("CRUSH_CRITIC_MAX_ITERATIONS"); ok {
+		if c.Options.Critic == nil {
+			c.Options.Critic = &CriticConfig{}
+		}
+		if v, err := strconv.Atoi(str); err == nil {
+			c.Options.Critic.MaxIterations = v
+		}
+	}
+	if str, ok := os.LookupEnv("CRUSH_CRITIC_AUTO_APPROVE"); ok {
+		if c.Options.Critic == nil {
+			c.Options.Critic = &CriticConfig{}
+		}
+		if v, err := strconv.ParseBool(str); err == nil {
+			c.Options.Critic.AutoApprove = v
+		}
+	}
+	if str, ok := os.LookupEnv("CRUSH_CRITIC_TIMEOUT"); ok {
+		if c.Options.Critic == nil {
+			c.Options.Critic = &CriticConfig{}
+		}
+		if v, err := time.ParseDuration(str); err == nil {
+			c.Options.Critic.Timeout = v
+		}
+	}
+	if str, ok := os.LookupEnv("CRUSH_CRITIC_MAX_DIFF_SIZE"); ok {
+		if c.Options.Critic == nil {
+			c.Options.Critic = &CriticConfig{}
+		}
+		if v, err := strconv.Atoi(str); err == nil {
+			c.Options.Critic.MaxDiffSize = v
+		}
+	}
+	if str, ok := os.LookupEnv("CRUSH_CRITIC_MAX_FILE_SIZE"); ok {
+		if c.Options.Critic == nil {
+			c.Options.Critic = &CriticConfig{}
+		}
+		if v, err := strconv.Atoi(str); err == nil {
+			c.Options.Critic.MaxFileSize = v
+		}
+	}
+	if str, ok := os.LookupEnv("CRUSH_CRITIC_RETENTION_DAYS"); ok {
+		if c.Options.Critic == nil {
+			c.Options.Critic = &CriticConfig{}
+		}
+		if v, err := strconv.Atoi(str); err == nil {
+			c.Options.Critic.RetentionDays = v
+		}
+	}
+
+	if str, ok := os.LookupEnv("CRUSH_REPLACER_DISABLED"); ok {
+		if c.Options.Replacer == nil {
+			c.Options.Replacer = &ReplacerConfig{}
+		}
+		if v, _ := strconv.ParseBool(str); v {
+			c.Options.Replacer.Enabled = new(bool)
+		}
+	}
+	if str, ok := os.LookupEnv("CRUSH_REPLACER_MODEL"); ok {
+		if c.Options.Replacer == nil {
+			c.Options.Replacer = &ReplacerConfig{}
+		}
+		c.Options.Replacer.Model = str
+	}
+	if str, ok := os.LookupEnv("CRUSH_REPLACER_MAX_ITERATIONS"); ok {
+		if c.Options.Replacer == nil {
+			c.Options.Replacer = &ReplacerConfig{}
+		}
+		if v, err := strconv.Atoi(str); err == nil {
+			c.Options.Replacer.MaxIterations = v
+		}
+	}
+	if str, ok := os.LookupEnv("CRUSH_REPLACER_TIMEOUT"); ok {
+		if c.Options.Replacer == nil {
+			c.Options.Replacer = &ReplacerConfig{}
+		}
+		if v, err := time.ParseDuration(str); err == nil {
+			c.Options.Replacer.Timeout = v
+		}
 	}
 
 	if c.Options.Attribution == nil {

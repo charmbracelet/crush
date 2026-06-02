@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/version"
@@ -77,7 +78,33 @@ func Alias(userID string) {
 }
 
 // send logs an event to PostHog with the given event name and properties.
+var (
+	testHook     func(event string, props ...any)
+	testHookMu   sync.RWMutex
+)
+
+// SetTestHook installs a hook that receives all events sent via the event
+// package. It is intended for testing only.
+func SetTestHook(hook func(event string, props ...any)) {
+	testHookMu.Lock()
+	defer testHookMu.Unlock()
+	testHook = hook
+}
+
+// ResetTestHook removes the test hook.
+func ResetTestHook() {
+	testHookMu.Lock()
+	defer testHookMu.Unlock()
+	testHook = nil
+}
+
 func send(event string, props ...any) {
+	testHookMu.RLock()
+	hook := testHook
+	testHookMu.RUnlock()
+	if hook != nil {
+		hook(event, props...)
+	}
 	if client == nil {
 		return
 	}
@@ -90,6 +117,88 @@ func send(event string, props ...any) {
 		slog.Error("Failed to enqueue PostHog event", "event", event, "props", props, "error", err)
 		return
 	}
+}
+
+// TrackCriticVerdict logs a critic verdict event to PostHog.
+func TrackCriticVerdict(sessionID, verdict string, confidence float64) {
+	send("critic.verdict",
+		"session_id", sessionID,
+		"verdict", verdict,
+		"confidence", confidence,
+	)
+}
+
+// TrackCriticLoopCompleted logs a critic loop completion event to PostHog.
+func TrackCriticLoopCompleted(sessionID string, iterations int, verdict string) {
+	send("critic.loop.completed",
+		"session_id", sessionID,
+		"iterations", iterations,
+		"verdict", verdict,
+	)
+}
+
+// TrackCriticRollback logs a critic rollback event to PostHog.
+func TrackCriticRollback(sessionID string) {
+	send("critic.rollback",
+		"session_id", sessionID,
+	)
+}
+
+// TrackReplacerDecision logs a replacer decision event to PostHog.
+func TrackReplacerDecision(sessionID, action string, iteration int) {
+	send("replacer.decision",
+		"session_id", sessionID,
+		"action", action,
+		"iteration", iteration,
+	)
+}
+
+// TrackReplacerLoopCompleted logs a replacer loop completion event to PostHog.
+func TrackReplacerLoopCompleted(sessionID string, iterations int, finalAction string) {
+	send("replacer.loop.completed",
+		"session_id", sessionID,
+		"iterations", iterations,
+		"final_action", finalAction,
+	)
+}
+
+// TrackToolcoachPattern logs a toolcoach pattern detection event to PostHog.
+func TrackToolcoachPattern(sessionID, patternID, severity string) {
+	send("toolcoach.pattern",
+		"session_id", sessionID,
+		"pattern_id", patternID,
+		"severity", severity,
+	)
+}
+
+// TrackToolcoachTime logs a toolcoach timing event to PostHog.
+func TrackToolcoachTime(sessionID string, delayMicros int64, totalTimeMs float64) {
+	send("toolcoach.time",
+		"session_id", sessionID,
+		"delay_micros", delayMicros,
+		"total_time_ms", totalTimeMs,
+	)
+}
+
+// TrackToolcoachSessionSummary logs a toolcoach session summary event.
+func TrackToolcoachSessionSummary(sessionID string, toolCalls int64, totalTimeMs float64, avgDelayMicros int64) {
+	send("toolcoach.session.summary",
+		"session_id", sessionID,
+		"tool_calls_coached", toolCalls,
+		"total_time_ms", totalTimeMs,
+		"avg_delay_micros", avgDelayMicros,
+	)
+}
+
+// TrackToolcoachPatternDetail logs per-pattern effectiveness data.
+func TrackToolcoachPatternDetail(sessionID, patternID string, fired, acted, ignored int64) {
+	send("toolcoach.pattern.detail",
+		"session_id", sessionID,
+		"pattern_id", patternID,
+		"fired", fired,
+		"acted", acted,
+		"ignored", ignored,
+	)
 }
 
 // Error logs an error event to PostHog with the error type and message.

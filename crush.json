@@ -1,5 +1,11 @@
 {
   "$schema": "https://charm.land/crush.json",
+  "options": {
+    "replacer": {
+      "enabled": true,
+      "max_iterations": 3
+    }
+  },
   "lsp": {
     "gopls": {
       "options": {

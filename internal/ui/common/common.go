@@ -7,7 +7,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/atotto/clipboard"
+	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/skills/critic"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/util"
 	"github.com/charmbracelet/crush/internal/workspace"
@@ -24,6 +26,7 @@ var AllowedImageTypes = []string{".jpg", ".jpeg", ".png"}
 type Common struct {
 	Workspace workspace.Workspace
 	Styles    *styles.Styles
+	App       *app.App
 }
 
 // Config returns the pure-data configuration associated with this [Common] instance.
@@ -36,10 +39,22 @@ func (c *Common) Config() *config.Config {
 // provider; otherwise the default theme is used.
 func DefaultCommon(ws workspace.Workspace) *Common {
 	s := styles.ThemeForProvider(largeModelProviderID(ws))
-	return &Common{
+	c := &Common{
 		Workspace: ws,
 		Styles:    &s,
 	}
+	if aw, ok := ws.(*workspace.AppWorkspace); ok {
+		c.App = aw.App()
+	}
+	return c
+}
+
+// CriticStore returns the critic review store associated with this [Common] instance.
+func (c *Common) CriticStore() *critic.Store {
+	if c.App == nil {
+		return nil
+	}
+	return c.App.CriticStore
 }
 
 // largeModelProviderID returns the provider ID of the currently selected

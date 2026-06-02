@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"github.com/taigrr/crush/internal/config"
 	"github.com/taigrr/crush/internal/proto"
-	"github.com/stretchr/testify/require"
 )
 
 func TestCreateWorkspace_DeduplicatesByDataDir(t *testing.T) {
@@ -82,7 +82,22 @@ func TestDeleteWorkspace_OnlyDeletesWhenLastClientDisconnects(t *testing.T) {
 	// Now workspace should be gone.
 	_, err = b.GetWorkspace(result2.ID)
 	require.Error(t, err, "workspace should be deleted after last client disconnects")
-	require.True(t, shutdownCalled, "shutdown should be called when last workspace removed")
+	require.False(t, shutdownCalled, "server should remain alive after last workspace removed")
+}
+
+func TestShutdown_InvokesShutdownCallback(t *testing.T) {
+	tempDir := t.TempDir()
+
+	cfg, err := config.Init(tempDir, "", false)
+	require.NoError(t, err)
+
+	shutdownCalls := 0
+	b := New(context.Background(), cfg, func() {
+		shutdownCalls++
+	})
+
+	b.Shutdown()
+	require.Equal(t, 1, shutdownCalls)
 }
 
 func TestDeleteWorkspace_CleansUpDataDirMapping(t *testing.T) {

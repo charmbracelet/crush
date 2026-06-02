@@ -361,10 +361,7 @@ func ensureServer(cmd *cobra.Command, hostURL *url.URL) error {
 			// Remove any stale socket before starting a new server.
 			// The socket might exist without a running server (e.g., after a crash).
 			_ = os.Remove(hostURL.Host)
-			if err := startDetachedServer(cmd, hostURL); err != nil {
-				return err
-			}
-			if err := waitForServerReady(cmd.Context(), hostURL); err != nil {
+			if err := spawnAndWaitReady(cmd, hostURL); err != nil {
 				return fmt.Errorf("failed to initialize crush server: %v", err)
 			}
 			return nil
@@ -604,6 +601,10 @@ func restartIfStale(cmd *cobra.Command, hostURL *url.URL) (restarted bool, err e
 }
 
 var safeNameRegexp = regexp.MustCompile(`[^a-zA-Z0-9._-]`)
+
+func newControlClient(hostURL *url.URL) (*client.Client, error) {
+	return client.NewClient("", hostURL.Scheme, hostURL.Host)
+}
 
 func startDetachedServer(cmd *cobra.Command, hostURL *url.URL) error {
 	exe, err := os.Executable()

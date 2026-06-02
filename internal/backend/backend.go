@@ -33,8 +33,8 @@ var (
 	ErrUnknownCommand          = errors.New("unknown command")
 )
 
-// ShutdownFunc is called when the backend needs to trigger a server
-// shutdown (e.g. when the last workspace is removed).
+// ShutdownFunc is called when the backend needs to trigger an explicit server
+// shutdown.
 type ShutdownFunc func()
 
 // Backend provides transport-agnostic business logic for the Crush
@@ -198,7 +198,6 @@ func (b *Backend) DeleteWorkspace(clientID string) {
 			ws.Shutdown()
 			b.workspaces.Del(clientID)
 		}
-		b.maybeShutdown()
 		return
 	}
 
@@ -217,14 +216,6 @@ func (b *Backend) DeleteWorkspace(clientID string) {
 		ws.Shutdown()
 	}
 	b.workspaces.Del(workspaceID)
-	b.maybeShutdown()
-}
-
-func (b *Backend) maybeShutdown() {
-	if b.workspaces.Len() == 0 && b.shutdownFn != nil {
-		slog.Info("Last workspace removed, shutting down server...")
-		b.shutdownFn()
-	}
 }
 
 func (b *Backend) makeProtoWorkspace(clientID, path, dataDir string, env []string, cfg *config.ConfigStore) proto.Workspace {

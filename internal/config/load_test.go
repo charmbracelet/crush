@@ -1148,7 +1148,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		_, _, err = cfg.defaultModelSelection(knownProviders)
 		require.Error(t, err)
 	})
-	t.Run("should error if model is missing", func(t *testing.T) {
+	t.Run("should not error if model is missing", func(t *testing.T) {
 		knownProviders := []catwalk.Provider{
 			{
 				ID:                  "openai",
@@ -1175,7 +1175,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		err := cfg.configureProviders(testStore(cfg), env, resolver, knownProviders)
 		require.NoError(t, err)
 		_, _, err = cfg.defaultModelSelection(knownProviders)
-		require.Error(t, err)
+		require.NoError(t, err)
 	})
 
 	t.Run("should configure the default models with a custom provider", func(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/charmbracelet/crush/internal/lock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -65,7 +66,7 @@ func TestConnect_FailsWhenDataDirLocked(t *testing.T) {
 	dataDir := t.TempDir()
 	lockPath := filepath.Join(dataDir, dataDirLockFile)
 
-	release, err := tryFileLock(lockPath)
+	release, err := lock.TryFile(lockPath)
 	require.NoError(t, err, "expected to take the data-dir lock for the first time")
 	t.Cleanup(release)
 
@@ -82,7 +83,7 @@ func TestConnect_SucceedsAfterContenderReleases(t *testing.T) {
 	dataDir := t.TempDir()
 	lockPath := filepath.Join(dataDir, dataDirLockFile)
 
-	release, err := tryFileLock(lockPath)
+	release, err := lock.TryFile(lockPath)
 	require.NoError(t, err)
 
 	_, err = Connect(context.Background(), dataDir, WithDataDirLock(true))
@@ -110,16 +111,16 @@ func TestConnect_LockReleasedOnFinalRelease(t *testing.T) {
 	require.NoError(t, conn.PingContext(context.Background()))
 
 	// Holding the in-process entry must keep the OS lock held so a
-	// "second process" (simulated by a fresh tryFileLock call) is
+	// "second process" (simulated by a fresh lock.TryFile call) is
 	// rejected.
-	_, lockErr := tryFileLock(lockPath)
+	_, lockErr := lock.TryFile(lockPath)
 	require.Error(t, lockErr)
-	require.True(t, errors.Is(lockErr, errLockContended), "expected contended lock while pool entry is live")
+	require.True(t, errors.Is(lockErr, lock.ErrContended), "expected contended lock while pool entry is live")
 
 	require.NoError(t, Release(dataDir))
 
 	// After the final release the lock is free again.
-	release, err := tryFileLock(lockPath)
+	release, err := lock.TryFile(lockPath)
 	require.NoError(t, err, "expected lock to be released after final Release")
 	release()
 }
@@ -143,8 +144,8 @@ func TestConnect_SharedPoolDoesNotReacquireLock(t *testing.T) {
 
 	// Drop one reference; lock must still be held.
 	require.NoError(t, Release(dataDir))
-	_, lockErr := tryFileLock(lockPath)
-	require.ErrorIs(t, lockErr, errLockContended)
+	_, lockErr := lock.TryFile(lockPath)
+	require.ErrorIs(t, lockErr, lock.ErrContended)
 
 	require.NoError(t, Release(dataDir))
 }
@@ -157,7 +158,7 @@ func TestConnect_SkipLockEnvBypassesAcquisition(t *testing.T) {
 	dataDir := t.TempDir()
 	lockPath := filepath.Join(dataDir, dataDirLockFile)
 
-	release, err := tryFileLock(lockPath)
+	release, err := lock.TryFile(lockPath)
 	require.NoError(t, err)
 	t.Cleanup(release)
 
@@ -171,7 +172,7 @@ func TestConnect_SkipLockEnvBypassesAcquisition(t *testing.T) {
 
 // TestConnect_DefaultIgnoresContendedLock confirms that without
 // WithDataDirLock(true) the lock file is irrelevant: a contender can
-// hold tryFileLock and Connect still succeeds. This pins the
+// hold lock.TryFile and Connect still succeeds. This pins the
 // local-mode default to its pre-lock behavior.
 func TestConnect_DefaultIgnoresContendedLock(t *testing.T) {
 	t.Cleanup(ResetPool)
@@ -179,7 +180,7 @@ func TestConnect_DefaultIgnoresContendedLock(t *testing.T) {
 	dataDir := t.TempDir()
 	lockPath := filepath.Join(dataDir, dataDirLockFile)
 
-	release, err := tryFileLock(lockPath)
+	release, err := lock.TryFile(lockPath)
 	require.NoError(t, err, "expected to take the data-dir lock for the first time")
 	t.Cleanup(release)
 
@@ -199,7 +200,7 @@ func TestConnect_ServerPathFailsWhenDataDirLocked(t *testing.T) {
 	dataDir := t.TempDir()
 	lockPath := filepath.Join(dataDir, dataDirLockFile)
 
-	release, err := tryFileLock(lockPath)
+	release, err := lock.TryFile(lockPath)
 	require.NoError(t, err, "expected to take the data-dir lock for the first time")
 	t.Cleanup(release)
 

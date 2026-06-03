@@ -25,6 +25,7 @@ import (
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/filetracker"
+	"github.com/charmbracelet/crush/internal/goal"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/charmbracelet/crush/internal/log"
@@ -91,6 +92,7 @@ type Coordinator interface {
 	Summarize(context.Context, string) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
+	GoalRuntime() *goal.Runtime
 }
 
 type coordinator struct {
@@ -100,6 +102,8 @@ type coordinator struct {
 	permissions permission.Service
 	history     history.Service
 	filetracker filetracker.Service
+	goalService goal.Service
+	goalRuntime *goal.Runtime
 	lspManager  *lsp.Manager
 	notify      pubsub.Publisher[notify.Notification]
 	runComplete pubsub.Publisher[notify.RunComplete]
@@ -123,6 +127,7 @@ func NewCoordinator(
 	permissions permission.Service,
 	history history.Service,
 	filetracker filetracker.Service,
+	goalService goal.Service,
 	lspManager *lsp.Manager,
 	notify pubsub.Publisher[notify.Notification],
 	runComplete pubsub.Publisher[notify.RunComplete],
@@ -148,6 +153,7 @@ func NewCoordinator(
 		permissions:  permissions,
 		history:      history,
 		filetracker:  filetracker,
+		goalService:  goalService,
 		lspManager:   lspManager,
 		notify:       notify,
 		runComplete:  runComplete,
@@ -156,6 +162,7 @@ func NewCoordinator(
 		activeSkills: activeSkills,
 		skillTracker: skillTracker,
 	}
+	c.goalRuntime = goal.NewRuntime(goalService, c, notify)
 
 	agentCfg, ok := cfg.Config().Agents[config.AgentCoder]
 	if !ok {
@@ -177,7 +184,6 @@ func NewCoordinator(
 	return c, nil
 }
 
-// Run implements Coordinator.
 func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
 	if err := c.readyWg.Wait(); err != nil {
 		return nil, err
@@ -274,6 +280,14 @@ func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, 
 			Type:       notify.TypeReAuthenticate,
 			ProviderID: model.ModelCfg.Provider,
 		})
+	}
+
+	if originalErr == nil {
+		go func() {
+			c.goalRuntime.OnTurnFinished(context.Background(), sessionID)
+		}()
+	} else {
+		slog.Warn("Goal continuation skipped due to agent error; use /goal resume to continue", "session_id", sessionID, "error", originalErr)
 	}
 
 	if hasLatest && c.runComplete != nil {
@@ -576,6 +590,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	allTools = append(
 		allTools,
+		tools.NewUpdateGoalTool(c.goalService),
 		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelID),
 		tools.NewCrushInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
 		tools.NewCrushLogsTool(logFile),
@@ -1038,6 +1053,10 @@ func (c *coordinator) IsSessionBusy(sessionID string) bool {
 
 func (c *coordinator) Model() Model {
 	return c.currentAgent.Model()
+}
+
+func (c *coordinator) GoalRuntime() *goal.Runtime {
+	return c.goalRuntime
 }
 
 func (c *coordinator) UpdateModels(ctx context.Context) error {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -12,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/goal"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
@@ -177,6 +179,63 @@ func (w *AppWorkspace) InitCoderAgent(ctx context.Context) error {
 
 func (w *AppWorkspace) GetDefaultSmallModel(providerID string) config.SelectedModel {
 	return w.app.GetDefaultSmallModel(providerID)
+}
+
+// -- Goals --
+
+func (w *AppWorkspace) GoalGet(ctx context.Context, sessionID string) (*goal.Goal, error) {
+	return w.app.GoalService.Get(ctx, sessionID)
+}
+
+func (w *AppWorkspace) GoalSet(ctx context.Context, sessionID, objective string) (*goal.Goal, error) {
+	g, err := w.app.GoalService.Create(ctx, sessionID, objective)
+	if err != nil {
+		return nil, err
+	}
+	go func() {
+		if err := w.app.GoalRuntime.MaybeContinue(context.Background(), sessionID); err != nil {
+			slog.Error("Goal continuation failed after set", "session_id", sessionID, "error", err)
+		}
+	}()
+	return g, nil
+}
+
+func (w *AppWorkspace) GoalPause(ctx context.Context, sessionID string) (*goal.Goal, error) {
+	g, err := w.app.GoalService.Get(ctx, sessionID)
+	if err != nil || g == nil {
+		return nil, err
+	}
+	return w.app.GoalService.UpdateStatus(ctx, sessionID, g.GoalID, goal.GoalPaused)
+}
+
+func (w *AppWorkspace) GoalResume(ctx context.Context, sessionID string) (*goal.Goal, error) {
+	g, err := w.app.GoalService.Get(ctx, sessionID)
+	if err != nil || g == nil {
+		return nil, err
+	}
+	updated, err := w.app.GoalService.UpdateStatus(ctx, sessionID, g.GoalID, goal.GoalActive)
+	if err != nil {
+		return nil, err
+	}
+	go func() {
+		if err := w.app.GoalRuntime.MaybeContinue(context.Background(), sessionID); err != nil {
+			slog.Error("Goal continuation failed after resume", "session_id", sessionID, "error", err)
+		}
+	}()
+	return updated, nil
+}
+
+func (w *AppWorkspace) GoalStart(ctx context.Context, sessionID string) error {
+	go func() {
+		if err := w.app.GoalRuntime.MaybeContinue(context.Background(), sessionID); err != nil {
+			slog.Error("Goal continuation failed on start", "session_id", sessionID, "error", err)
+		}
+	}()
+	return nil
+}
+
+func (w *AppWorkspace) GoalClear(ctx context.Context, sessionID string) (*goal.Goal, error) {
+	return w.app.GoalService.Clear(ctx, sessionID)
 }
 
 // -- Permissions --

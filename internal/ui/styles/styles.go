@@ -178,8 +178,9 @@ type Styles struct {
 
 	// Sidebar
 	Sidebar struct {
-		SessionTitle lipgloss.Style // Current session title at top of sidebar
-		WorkingDir   lipgloss.Style // Working directory path (PrettyPath)
+		SessionTitle  lipgloss.Style // Current session title at top of sidebar
+		WorkingDir    lipgloss.Style // Working directory path (PrettyPath)
+		SectionHeader lipgloss.Style // Section header style for Sidebar
 	}
 
 	// ModelInfo (model name, provider, reasoning, token/cost summary)
@@ -525,6 +526,7 @@ type Styles struct {
 		TodoLabel          lipgloss.Style // "To-Do" label
 		TodoProgress       lipgloss.Style // Todo ratio (e.g. "2/5")
 		TodoCurrentTask    lipgloss.Style // Current in-progress task name
+		GoalElapsedTime    lipgloss.Style // Goal elapsed time counter
 		TodoSpinner        lipgloss.Style // Todo spinner style
 		HelpKey            lipgloss.Style // Keystroke hint style
 		HelpText           lipgloss.Style // Help action text style

@@ -664,6 +664,7 @@ func allToolNames() []string {
 		"download",
 		"edit",
 		"multiedit",
+		"update_goal",
 		"lsp_diagnostics",
 		"lsp_references",
 		"lsp_restart",

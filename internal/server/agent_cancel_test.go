@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/backend"
+	"github.com/charmbracelet/crush/internal/goal"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/google/uuid"
@@ -74,6 +75,7 @@ func (s *runCoordinator) Summarize(context.Context, string) error {
 }
 func (s *runCoordinator) Model() agent.Model                 { return agent.Model{} }
 func (s *runCoordinator) UpdateModels(context.Context) error { return nil }
+func (s *runCoordinator) GoalRuntime() *goal.Runtime         { return nil }
 
 func (s *runCoordinator) capturedCtx() context.Context {
 	s.mu.Lock()

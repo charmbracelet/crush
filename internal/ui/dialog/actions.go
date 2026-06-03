@@ -96,6 +96,16 @@ type (
 	ActionEnableDockerMCP struct{}
 	// ActionDisableDockerMCP is a message to disable Docker MCP.
 	ActionDisableDockerMCP struct{}
+	// ActionSetGoal is a message to set a new goal objective.
+	ActionSetGoal struct {
+		Args map[string]string
+	}
+	// ActionGoalClear is a message to clear the current goal.
+	ActionGoalClear struct{}
+	// ActionGoalPause is a message to pause the current goal.
+	ActionGoalPause struct{}
+	// ActionGoalResume is a message to resume the current paused goal.
+	ActionGoalResume struct{}
 )
 
 // Messages for API key input dialog.

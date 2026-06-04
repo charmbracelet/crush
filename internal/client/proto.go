@@ -195,6 +195,18 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 				if !sendEvent(ctx, events, e) {
 					return
 				}
+			case pubsub.PayloadTypeQuestionRequest:
+				var e pubsub.Event[proto.QuestionRequest]
+				_ = json.Unmarshal(p.Payload, &e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
+			case pubsub.PayloadTypeQuestionNotification:
+				var e pubsub.Event[proto.QuestionNotification]
+				_ = json.Unmarshal(p.Payload, &e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
 			case pubsub.PayloadTypeMessage:
 				var e pubsub.Event[proto.Message]
 				_ = json.Unmarshal(p.Payload, &e)
@@ -610,6 +622,25 @@ func (c *Client) GrantPermission(ctx context.Context, id string, req proto.Permi
 	var resp proto.PermissionGrantResponse
 	if err := json.NewDecoder(rsp.Body).Decode(&resp); err != nil {
 		return false, fmt.Errorf("failed to decode grant permission response: %w", err)
+	}
+	return resp.Resolved, nil
+}
+
+// AnswerQuestionBatch submits answers for a batch question on a
+// workspace. Returns true if this call resolved the pending
+// request, false if already resolved by another caller.
+func (c *Client) AnswerQuestionBatch(ctx context.Context, id string, req proto.QuestionAnswer) (bool, error) {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/questions/answer", id), nil, jsonBody(req), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return false, fmt.Errorf("failed to answer question batch: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("failed to answer question batch: status code %d", rsp.StatusCode)
+	}
+	var resp proto.QuestionAnswerResponse
+	if err := json.NewDecoder(rsp.Body).Decode(&resp); err != nil {
+		return false, fmt.Errorf("failed to decode answer question batch response: %w", err)
 	}
 	return resp.Resolved, nil
 }

@@ -10,6 +10,7 @@ package question
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
@@ -150,10 +151,20 @@ const (
 	MaxQuestions               = 5
 )
 
+// Notification is published when a question batch is resolved so
+// that non-answering clients can dismiss their open forms.
+type Notification struct {
+	BatchID string `json:"batch_id"`
+}
+
 // Service manages the lifecycle of question requests. Only one
 // question can be pending at a time.
 type Service interface {
 	pubsub.Subscriber[Request]
+
+	// SubscribeNotifications returns a channel for question
+	// resolution notifications.
+	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[Notification]
 
 	// Ask publishes questions and blocks until the user answers
 	// or the context is cancelled.
@@ -164,20 +175,30 @@ type Service interface {
 }
 
 type questionService struct {
-	broker  *pubsub.Broker[Request]
-	pending chan []Answer
+	broker             *pubsub.Broker[Request]
+	notificationBroker *pubsub.Broker[Notification]
+	mu                 sync.Mutex
+	pending            chan []Answer
+	pendingID          string
 }
 
 // NewService creates a new question service.
 func NewService() *questionService {
 	return &questionService{
-		broker: pubsub.NewBroker[Request](),
+		broker:             pubsub.NewBroker[Request](),
+		notificationBroker: pubsub.NewBroker[Notification](),
 	}
 }
 
 // Subscribe returns a channel for question events.
 func (s *questionService) Subscribe(ctx context.Context) <-chan pubsub.Event[Request] {
 	return s.broker.Subscribe(ctx)
+}
+
+// SubscribeNotifications returns a channel for question resolution
+// notifications.
+func (s *questionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[Notification] {
+	return s.notificationBroker.Subscribe(ctx)
 }
 
 // Ask publishes a request and blocks until the user answers.
@@ -195,8 +216,17 @@ func (s *questionService) Ask(ctx context.Context, req Request) ([]Answer, error
 		return nil, err
 	}
 
+	s.mu.Lock()
 	s.pending = make(chan []Answer, 1)
-	defer func() { s.pending = nil }()
+	s.pendingID = req.ID
+	s.mu.Unlock()
+
+	defer func() {
+		s.mu.Lock()
+		s.pending = nil
+		s.pendingID = ""
+		s.mu.Unlock()
+	}()
 
 	s.broker.Publish(pubsub.CreatedEvent, req)
 
@@ -211,9 +241,22 @@ func (s *questionService) Ask(ctx context.Context, req Request) ([]Answer, error
 // Answer resolves the pending question. Returns false if no
 // question is pending (already answered or cancelled).
 func (s *questionService) Answer(answers []Answer) bool {
-	if s.pending == nil {
+	s.mu.Lock()
+	batchID := s.pendingID
+	ch := s.pending
+	s.mu.Unlock()
+
+	if ch == nil {
 		return false
 	}
-	s.pending <- answers
+	ch <- answers
+
+	// Publish a notification so non-answering clients can dismiss
+	// their open question forms.
+	if batchID != "" {
+		s.notificationBroker.Publish(pubsub.CreatedEvent, Notification{
+			BatchID: batchID,
+		})
+	}
 	return true
 }

@@ -821,6 +821,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case pubsub.Event[question.Notification]:
+		m.handleQuestionNotification(msg.Payload)
 	case cancelTimerExpiredMsg:
 		m.isCanceling = false
 	case tea.TerminalVersionMsg:
@@ -3987,6 +3989,11 @@ func (m *UI) openPermissionsDialog(perm permission.PermissionRequest) tea.Cmd {
 // openBatchFormDialog activates a tabbed multi-question form in
 // the editor area. Single questions render without tabs or confirm.
 func (m *UI) openBatchFormDialog(batch question.Request) {
+	// Close any existing question form first to prevent stacking.
+	if qf, ok := m.activeInline.(*dialog.QuestionForm); ok && qf != nil {
+		m.activeInline = nil
+	}
+
 	form := dialog.NewQuestionForm(m.com.Styles, batch)
 	form.OnAnswer = func(responses []question.Answer) {
 		m.com.Workspace.QuestionAnswer(responses)
@@ -3996,6 +4003,18 @@ func (m *UI) openBatchFormDialog(batch question.Request) {
 	m.focus = uiFocusEditor
 	m.activeInline.SetFocused(true)
 	m.updateLayoutAndSize()
+}
+
+// handleQuestionNotification dismisses an open question form when
+// any client resolved the pending batch. Only one question can be
+// pending at a time, so any notification means the current form
+// is stale regardless of BatchID.
+func (m *UI) handleQuestionNotification(_ question.Notification) {
+	if _, ok := m.activeInline.(*dialog.QuestionForm); ok {
+		m.activeInline = nil
+		m.textarea.Focus()
+		m.updateLayoutAndSize()
+	}
 }
 
 // shouldCollapseQuestion reports whether a question form should render

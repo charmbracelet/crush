@@ -45,6 +45,10 @@ func NewForTest(ctx context.Context) *App {
 		app.Permissions.Subscribe, app.events)
 	setupSubscriber(eventsCtx, app.serviceEventsWG, "permissions-notifications",
 		app.Permissions.SubscribeNotifications, app.events)
+	setupSubscriber(eventsCtx, app.serviceEventsWG, "question-batches",
+		app.Questions.Subscribe, app.events)
+	setupSubscriber(eventsCtx, app.serviceEventsWG, "question-notifications",
+		app.Questions.SubscribeNotifications, app.events)
 	setupSubscriber(eventsCtx, app.serviceEventsWG, "agent-notifications",
 		app.agentNotifications.Subscribe, app.events)
 	setupSubscriber(eventsCtx, app.serviceEventsWG, "run-completions",

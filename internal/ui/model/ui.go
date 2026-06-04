@@ -39,6 +39,7 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/stringext"
@@ -208,6 +209,12 @@ type UI struct {
 
 	// Editor components
 	textarea textarea.Model
+
+	// Active inline editor replaces the textarea when non-nil.
+	activeInline dialog.InlineEditor
+	// inlineCursor stores the cursor from the last inline editor
+	// Draw call, used by the cursor positioning logic below.
+	inlineCursor *tea.Cursor
 
 	// Attachment list
 	attachments *attachments.Attachments
@@ -740,6 +747,17 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case pubsub.Event[permission.PermissionNotification]:
 		m.handlePermissionNotification(msg.Payload)
+	case pubsub.Event[question.Request]:
+		m.openBatchFormDialog(msg.Payload)
+		if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		if cmd := m.sendNotification(notification.Notification{
+			Title:   "Crush is waiting...",
+			Message: fmt.Sprintf("%d questions need your input", len(msg.Payload.Questions)),
+		}); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case cancelTimerExpiredMsg:
 		m.isCanceling = false
 	case tea.TerminalVersionMsg:
@@ -1189,7 +1207,11 @@ func (m *UI) handleClickFocus(msg tea.MouseClickMsg) (cmd tea.Cmd) {
 		return nil
 	case m.focus != uiFocusEditor && image.Pt(msg.X, msg.Y).In(m.layout.editor):
 		m.focus = uiFocusEditor
-		cmd = m.textarea.Focus()
+		if m.activeInline != nil {
+			m.activeInline.SetFocused(true)
+		} else {
+			cmd = m.textarea.Focus()
+		}
 		m.chat.Blur()
 	case m.focus != uiFocusMain && image.Pt(msg.X, msg.Y).In(m.layout.main):
 		m.focus = uiFocusMain
@@ -1896,6 +1918,41 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		return m.handleDialogMsg(msg)
 	}
 
+	// Tab always toggles focus between editor and chat, even when
+	// an inline editor is active. This lets users collapse the
+	// question form to view chat.
+	if m.activeInline != nil && key.Matches(msg, m.keyMap.Tab) {
+		if m.focus == uiFocusEditor {
+			m.focus = uiFocusMain
+			m.activeInline.SetFocused(false)
+			m.chat.Focus()
+			m.chat.SetSelected(m.chat.Len() - 1)
+		} else {
+			m.focus = uiFocusEditor
+			m.activeInline.SetFocused(true)
+			m.chat.Blur()
+		}
+		m.updateLayoutAndSize()
+		return tea.Batch(cmds...)
+	}
+
+	// Route keys to active inline editor if one is showing.
+	if m.activeInline != nil && m.focus == uiFocusEditor {
+		if done, cmd := m.activeInline.HandleKey(msg); done {
+			m.activeInline = nil
+			m.textarea.Focus()
+			m.updateLayoutAndSize()
+		} else {
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			if m.activeInline.HeightChanged() {
+				m.updateLayoutAndSize()
+			}
+		}
+		return tea.Batch(cmds...)
+	}
+
 	// Handle cancel key when agent is busy.
 	if key.Matches(msg, m.keyMap.Chat.Cancel) {
 		if m.isAgentBusy() {
@@ -2235,8 +2292,21 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		main := uv.NewStyledString(m.landingView())
 		main.Draw(scr, layout.main)
 
-		editor := uv.NewStyledString(m.renderEditorView(scr.Bounds().Dx()))
-		editor.Draw(scr, layout.editor)
+		if m.activeInline != nil {
+			m.activeInline.SetFocused(m.focus == uiFocusEditor)
+			if m.focus == uiFocusEditor {
+				m.inlineCursor = m.activeInline.Draw(scr, layout.editor)
+			} else if qf, ok := m.activeInline.(*dialog.QuestionForm); ok && m.shouldCollapseQuestion(qf) {
+				qf.DrawCollapsed(scr, layout.editor)
+				m.inlineCursor = nil
+			} else {
+				m.inlineCursor = m.activeInline.Draw(scr, layout.editor)
+			}
+		} else {
+			editor := uv.NewStyledString(m.renderEditorView(scr.Bounds().Dx()))
+			editor.Draw(scr, layout.editor)
+			m.inlineCursor = nil
+		}
 
 	case uiChat:
 		if m.isCompact {
@@ -2250,12 +2320,25 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			uv.NewStyledString(m.pillsView).Draw(scr, layout.pills)
 		}
 
-		editorWidth := scr.Bounds().Dx()
-		if !m.isCompact {
-			editorWidth -= layout.sidebar.Dx()
+		if m.activeInline != nil {
+			m.activeInline.SetFocused(m.focus == uiFocusEditor)
+			if m.focus == uiFocusEditor {
+				m.inlineCursor = m.activeInline.Draw(scr, layout.editor)
+			} else if qf, ok := m.activeInline.(*dialog.QuestionForm); ok && m.shouldCollapseQuestion(qf) {
+				qf.DrawCollapsed(scr, layout.editor)
+				m.inlineCursor = nil
+			} else {
+				m.inlineCursor = m.activeInline.Draw(scr, layout.editor)
+			}
+		} else {
+			editorWidth := scr.Bounds().Dx()
+			if !m.isCompact {
+				editorWidth -= layout.sidebar.Dx()
+			}
+			editor := uv.NewStyledString(m.renderEditorView(editorWidth))
+			editor.Draw(scr, layout.editor)
+			m.inlineCursor = nil
 		}
-		editor := uv.NewStyledString(m.renderEditorView(editorWidth))
-		editor.Draw(scr, layout.editor)
 
 		// Draw details overlay in compact mode when open
 		if m.isCompact && m.detailsOpen {
@@ -2317,6 +2400,15 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			return nil
 		}
 
+		if m.activeInline != nil {
+			if cur := m.inlineCursor; cur != nil {
+				cur.X++                        // Adjust for app margins
+				cur.Y += m.layout.editor.Min.Y // Inline editor draws from area top
+				return cur
+			}
+			return nil
+		}
+
 		if m.textarea.Focused() {
 			cur := m.textarea.Cursor()
 			cur.X++                            // Adjust for app margins
@@ -2364,6 +2456,12 @@ func (m *UI) View() tea.View {
 func (m *UI) ShortHelp() []key.Binding {
 	var binds []key.Binding
 	k := &m.keyMap
+
+	// When an inline editor is active, show its help.
+	if m.activeInline != nil {
+		return m.activeInline.ShortHelp()
+	}
+
 	tab := k.Tab
 	commands := k.Commands
 	if m.focus == uiFocusEditor && m.textarea.Value() == "" {
@@ -2440,6 +2538,11 @@ func (m *UI) ShortHelp() []key.Binding {
 
 // FullHelp implements [help.KeyMap].
 func (m *UI) FullHelp() [][]key.Binding {
+	// When an inline editor is active, show its help.
+	if m.activeInline != nil {
+		return [][]key.Binding{m.activeInline.ShortHelp()}
+	}
+
 	var binds [][]key.Binding
 	k := &m.keyMap
 	help := k.Help
@@ -2697,7 +2800,17 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 	// The help height
 	helpHeight := 1
 	// The editor height: textarea height + margin for attachments and bottom spacing.
+	// When an inline editor is active, use its height instead.
 	editorHeight := m.textarea.Height() + editorHeightMargin
+	if m.activeInline != nil {
+		if m.focus == uiFocusEditor {
+			editorHeight = m.activeInline.Height()
+		} else if qf, ok := m.activeInline.(*dialog.QuestionForm); ok && m.shouldCollapseQuestion(qf) {
+			editorHeight = qf.CollapsedHeight() + 1
+		} else {
+			editorHeight = m.activeInline.Height()
+		}
+	}
 	// The sidebar width
 	sidebarWidth := 30
 	// The header height
@@ -2947,8 +3060,8 @@ func (m *UI) openEditor(value string) tea.Cmd {
 	})
 }
 
-// setEditorPrompt configures the textarea prompt function based on whether
-// yolo mode is enabled.
+// setEditorPrompt configures the textarea prompt icon based on
+// whether yolo mode is enabled.
 func (m *UI) setEditorPrompt(yolo bool) {
 	if yolo {
 		m.textarea.SetPromptFunc(4, m.yoloPromptFunc)
@@ -3521,6 +3634,27 @@ func (m *UI) openPermissionsDialog(perm permission.PermissionRequest) tea.Cmd {
 	permDialog := dialog.NewPermissions(m.com, perm, opts...)
 	m.dialog.OpenDialogWithGrace(permDialog)
 	return nil
+}
+
+// openBatchFormDialog activates a tabbed multi-question form in
+// the editor area. Single questions render without tabs or confirm.
+func (m *UI) openBatchFormDialog(batch question.Request) {
+	form := dialog.NewQuestionForm(m.com.Styles, batch)
+	form.OnAnswer = func(responses []question.Answer) {
+		m.com.Workspace.QuestionAnswer(responses)
+	}
+	m.activeInline = form
+	m.textarea.Blur()
+	m.focus = uiFocusEditor
+	m.activeInline.SetFocused(true)
+	m.updateLayoutAndSize()
+}
+
+// shouldCollapseQuestion reports whether a question form should render
+// in its collapsed one-line view. This is true only when the form is
+// unfocused and would consume more than half the terminal height.
+func (m *UI) shouldCollapseQuestion(qf *dialog.QuestionForm) bool {
+	return m.focus != uiFocusEditor && m.height > 0 && qf.Height() > m.height*2/5
 }
 
 // handlePermissionNotification updates tool items when permission state changes.

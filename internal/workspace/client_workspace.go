@@ -278,6 +278,7 @@ func (w *ClientWorkspace) PermissionGrant(perm permission.PermissionRequest) boo
 			Action:      perm.Action,
 			Path:        perm.Path,
 			Params:      perm.Params,
+			Contexts:    perm.Contexts,
 		},
 		Action: proto.PermissionAllow,
 	})
@@ -295,6 +296,7 @@ func (w *ClientWorkspace) PermissionGrantPersistent(perm permission.PermissionRe
 			Action:      perm.Action,
 			Path:        perm.Path,
 			Params:      perm.Params,
+			Contexts:    perm.Contexts,
 		},
 		Action: proto.PermissionAllowForSession,
 	})
@@ -312,6 +314,7 @@ func (w *ClientWorkspace) PermissionDeny(perm permission.PermissionRequest) bool
 			Action:      perm.Action,
 			Path:        perm.Path,
 			Params:      perm.Params,
+			Contexts:    perm.Contexts,
 		},
 		Action: proto.PermissionDeny,
 	})
@@ -669,14 +672,16 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 		return pubsub.Event[permission.PermissionRequest]{
 			Type: e.Type,
 			Payload: permission.PermissionRequest{
-				ID:          e.Payload.ID,
-				SessionID:   e.Payload.SessionID,
-				ToolCallID:  e.Payload.ToolCallID,
-				ToolName:    e.Payload.ToolName,
-				Description: e.Payload.Description,
-				Action:      e.Payload.Action,
-				Path:        e.Payload.Path,
-				Params:      e.Payload.Params,
+				ID:              e.Payload.ID,
+				SessionID:       e.Payload.SessionID,
+				ToolCallID:      e.Payload.ToolCallID,
+				ToolName:        e.Payload.ToolName,
+				Description:     e.Payload.Description,
+				Action:          e.Payload.Action,
+				Path:            e.Payload.Path,
+				Params:          e.Payload.Params,
+				Contexts:        e.Payload.Contexts,
+				PendingContexts: e.Payload.PendingContexts,
 			},
 		}
 	case pubsub.Event[proto.PermissionNotification]:

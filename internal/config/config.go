@@ -232,7 +232,9 @@ func (c Completions) Limits() (depth, items int) {
 }
 
 type Permissions struct {
-	AllowedTools []string `json:"allowed_tools,omitempty" jsonschema:"description=List of tools that don't require permission prompts,example=bash,example=view"`
+	AllowedTools    []string `json:"allowed_tools,omitempty" jsonschema:"description=List of tools that don't require permission prompts,example=bash,example=view"`
+	AllowedCommands []string `json:"allowed_commands,omitempty" jsonschema:"description=List of shell commands that do not require permission prompts,example=go test,example=git diff"`
+	AllowedPaths    []string `json:"allowed_paths,omitempty" jsonschema:"description=List of filesystem paths that do not require permission prompts; subpaths are also auto-approved,example=/tmp,example=/home/user/projects"`
 }
 
 type TrailerStyle string

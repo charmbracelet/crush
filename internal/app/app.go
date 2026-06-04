@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/agent"
 	"github.com/charmbracelet/crush/internal/agent/notify"
+	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/db"
@@ -96,15 +98,27 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	cfg := store.Config()
 	skipPermissionsRequests := store.Overrides().SkipPermissionRequests
 	var allowedTools []string
-	if cfg.Permissions != nil && cfg.Permissions.AllowedTools != nil {
-		allowedTools = cfg.Permissions.AllowedTools
+	var allowedContexts []string
+	if cfg.Permissions != nil {
+		if cfg.Permissions.AllowedTools != nil {
+			allowedTools = cfg.Permissions.AllowedTools
+		}
+		for _, cmd := range cfg.Permissions.AllowedCommands {
+			allowedContexts = append(allowedContexts, tools.MakeCommandToken(cmd))
+		}
+		for _, p := range cfg.Permissions.AllowedPaths {
+			if !filepath.IsAbs(p) {
+				p = filepath.Join(store.WorkingDir(), p)
+			}
+			allowedContexts = append(allowedContexts, tools.MakePathToken(p))
+		}
 	}
 
 	app := &App{
 		Sessions:    sessions,
 		Messages:    messages,
 		History:     files,
-		Permissions: permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools),
+		Permissions: permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools, allowedContexts),
 		FileTracker: filetracker.NewService(q),
 		LSPManager:  lsp.NewManager(store),
 		Skills:      skillsMgr,

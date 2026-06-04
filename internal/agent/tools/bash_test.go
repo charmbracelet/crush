@@ -76,6 +76,10 @@ func TestBashTool_CustomAutoBackgroundThreshold(t *testing.T) {
 	require.True(t, meta.Background)
 	require.NotEmpty(t, meta.ShellID)
 	require.Contains(t, resp.Content, "moved to background")
+	// The message must tell the model how long the command ran and the
+	// threshold that backgrounded it (see issue #2977).
+	require.Contains(t, resp.Content, "Command ran for")
+	require.Contains(t, resp.Content, "auto-backgrounded after 1s")
 
 	bgManager := shell.GetBackgroundShellManager()
 	require.NoError(t, bgManager.Kill(meta.ShellID))

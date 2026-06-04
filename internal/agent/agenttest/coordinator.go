@@ -70,11 +70,13 @@ func NewCoordinator(
 		sessions,
 		messages,
 		permission.NewPermissionService(workingDir, true, nil),
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
+		nil,   // questions
+		nil,   // history
+		nil,   // filetracker
+		nil,   // lsp
+		nil,   // notifications
+		nil,   // run completions
+		nil,   // skills
+		false, // interactive
 	)
 }

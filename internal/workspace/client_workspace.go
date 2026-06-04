@@ -24,6 +24,7 @@ import (
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/crush/internal/question"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
@@ -340,6 +341,12 @@ func (w *ClientWorkspace) PermissionSkipRequests() bool {
 
 func (w *ClientWorkspace) PermissionSetSkipRequests(skip bool) {
 	_ = w.client.SetPermissionsSkipRequests(context.Background(), w.workspaceID(), skip)
+}
+
+// -- Questions --
+
+func (w *ClientWorkspace) QuestionAnswer(responses []question.Answer) bool {
+	return false
 }
 
 // -- FileTracker --

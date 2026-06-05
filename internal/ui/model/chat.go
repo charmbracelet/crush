@@ -31,6 +31,18 @@ type DelayedClickMsg struct {
 	X, Y    int
 }
 
+// scrollbarHideMsg is sent to hide the scrollbar after the timeout period.
+type scrollbarHideMsg struct {
+	seq int // sequence number to ignore stale messages
+}
+
+// scrollbarHideCmd returns a command that sends a scrollbarHideMsg after the timeout.
+func scrollbarHideCmd(seq int) tea.Cmd {
+	return tea.Tick(scrollbarHideDuration, func(_ time.Time) tea.Msg {
+		return scrollbarHideMsg{seq: seq}
+	})
+}
+
 // Chat represents the chat UI model that handles chat interactions and
 // messages.
 type Chat struct {
@@ -71,7 +83,14 @@ type Chat struct {
 	// (docs/notes/2026-05-12-chat-rendering-perf.md §4.8). Bounded to one
 	// entry; invalidated implicitly by string inequality on the next Draw.
 	drawCache *chatDrawCache
+
+	// Scrollbar visibility state
+	scrollbarVisible   bool
+	scrollbarHideSeq   int // current sequence number for hide timer
 }
+
+// scrollbarHideDuration is how long the scrollbar remains visible after scroll activity.
+const scrollbarHideDuration = 2 * time.Second
 
 // chatDrawCache holds the pre-decoded form of the last list.Render output.
 // The cache is keyed by the rendered string and the screen's width method
@@ -123,11 +142,14 @@ func (m *Chat) Height() int {
 // rendered string and the screen's width method; area / scroll changes do not
 // invalidate it.
 func (m *Chat) Draw(scr uv.Screen, area uv.Rectangle) {
-	// Reserve space for scrollbar if needed.
+	// Check if scrollbar should be visible.
+	listHeight := m.list.Height() - 1
+	listTotalHeight := m.list.TotalHeight() - 1
+	needsScrollbar := listTotalHeight > listHeight
+
+	// Reserve space for scrollbar only when visible.
 	scrollbarWidth := 0
-	listHeight := m.list.Height()
-	listTotalHeight := m.list.TotalHeight()
-	if listTotalHeight > listHeight {
+	if needsScrollbar && m.scrollbarVisible {
 		scrollbarWidth = 1
 	}
 
@@ -153,7 +175,7 @@ func (m *Chat) Draw(scr uv.Screen, area uv.Rectangle) {
 		drawCachedBuffer(scr, listArea, m.drawCache.buf)
 	}
 
-	// Draw scrollbar if needed.
+	// Draw scrollbar if visible and needed.
 	if scrollbarWidth > 0 {
 		scrollbar := common.Scrollbar(m.com.Styles, listHeight, listTotalHeight, listHeight, m.list.Offset())
 		if scrollbar != "" {
@@ -263,7 +285,7 @@ func (m *Chat) InvalidateRenderCaches() {
 }
 
 // SetMessages sets the chat messages to the provided list of message items.
-func (m *Chat) SetMessages(msgs ...chat.MessageItem) {
+func (m *Chat) SetMessages(msgs ...chat.MessageItem) tea.Cmd {
 	m.idInxMap = make(map[string]int)
 	m.pausedAnimations = make(map[string]struct{})
 
@@ -279,7 +301,7 @@ func (m *Chat) SetMessages(msgs ...chat.MessageItem) {
 		items[i] = msg
 	}
 	m.list.SetItems(items...)
-	m.ScrollToBottom()
+	return m.ScrollToBottom()
 }
 
 // AppendMessages appends a new message item to the chat list.
@@ -410,61 +432,76 @@ func (m *Chat) Follow() bool {
 }
 
 // ScrollToBottom scrolls the chat view to the bottom.
-func (m *Chat) ScrollToBottom() {
+func (m *Chat) ScrollToBottom() tea.Cmd {
 	m.list.ScrollToBottom()
 	m.follow = true // Enable follow mode when user scrolls to bottom
+	return m.showScrollbar()
 }
 
 // ScrollToTop scrolls the chat view to the top.
-func (m *Chat) ScrollToTop() {
+func (m *Chat) ScrollToTop() tea.Cmd {
 	m.list.ScrollToTop()
 	m.follow = false // Disable follow mode when user scrolls up
+	return m.showScrollbar()
 }
 
 // ScrollBy scrolls the chat view by the given number of line deltas.
-func (m *Chat) ScrollBy(lines int) {
+func (m *Chat) ScrollBy(lines int) tea.Cmd {
 	m.list.ScrollBy(lines)
 	m.follow = lines > 0 && m.AtBottom() // Disable follow mode if user scrolls up
+	return m.showScrollbar()
 }
 
 // ScrollToSelected scrolls the chat view to the selected item.
-func (m *Chat) ScrollToSelected() {
+func (m *Chat) ScrollToSelected() tea.Cmd {
 	m.list.ScrollToSelected()
 	m.follow = m.AtBottom() // Disable follow mode if user scrolls up
+	return m.showScrollbar()
 }
 
 // ScrollToIndex scrolls the chat view to the item at the given index.
-func (m *Chat) ScrollToIndex(index int) {
+func (m *Chat) ScrollToIndex(index int) tea.Cmd {
 	m.list.ScrollToIndex(index)
 	m.follow = m.AtBottom() // Disable follow mode if user scrolls up
+	return m.showScrollbar()
+}
+
+// showScrollbar makes the scrollbar visible and returns a command to hide it after timeout.
+func (m *Chat) showScrollbar() tea.Cmd {
+	m.scrollbarVisible = true
+	m.scrollbarHideSeq++
+	return scrollbarHideCmd(m.scrollbarHideSeq)
+}
+
+// HideScrollbar hides the scrollbar if the sequence matches.
+func (m *Chat) HideScrollbar(seq int) {
+	if seq == m.scrollbarHideSeq {
+		m.scrollbarVisible = false
+	}
 }
 
 // ScrollToTopAndAnimate scrolls the chat view to the top and returns a command to restart
 // any paused animations that are now visible.
 func (m *Chat) ScrollToTopAndAnimate() tea.Cmd {
-	m.ScrollToTop()
-	return m.RestartPausedVisibleAnimations()
+	return tea.Batch(m.ScrollToTop(), m.RestartPausedVisibleAnimations())
 }
 
 // ScrollToBottomAndAnimate scrolls the chat view to the bottom and returns a command to
 // restart any paused animations that are now visible.
 func (m *Chat) ScrollToBottomAndAnimate() tea.Cmd {
-	m.ScrollToBottom()
-	return m.RestartPausedVisibleAnimations()
+	return tea.Batch(m.ScrollToBottom(), m.RestartPausedVisibleAnimations())
 }
 
 // ScrollByAndAnimate scrolls the chat view by the given number of line deltas and returns
 // a command to restart any paused animations that are now visible.
 func (m *Chat) ScrollByAndAnimate(lines int) tea.Cmd {
-	m.ScrollBy(lines)
-	return m.RestartPausedVisibleAnimations()
+	return tea.Batch(m.ScrollBy(lines), m.RestartPausedVisibleAnimations())
 }
 
 // ScrollToSelectedAndAnimate scrolls the chat view to the selected item and returns a
 // command to restart any paused animations that are now visible.
 func (m *Chat) ScrollToSelectedAndAnimate() tea.Cmd {
-	m.ScrollToSelected()
-	return m.RestartPausedVisibleAnimations()
+	return tea.Batch(m.ScrollToSelected(), m.RestartPausedVisibleAnimations())
 }
 
 // SelectedItemInView returns whether the selected item is currently in view.

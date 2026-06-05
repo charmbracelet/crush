@@ -2427,8 +2427,6 @@ func (m *UI) ShortHelp() []key.Binding {
 			binds = append(
 				binds,
 				k.Editor.Newline,
-				k.Editor.ClearInput,
-				k.Editor.RestoreInput,
 			)
 		case uiFocusMain:
 			binds = append(

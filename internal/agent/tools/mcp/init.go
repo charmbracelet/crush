@@ -25,6 +25,7 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/version"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"golang.org/x/oauth2"
 )
 
 func parseLevel(level mcp.LoggingLevel) slog.Level {
@@ -305,10 +306,11 @@ func PendingAuthMCPs(cfg *config.ConfigStore) []PendingAuthServer {
 
 // initClient initializes a single MCP client with the given configuration.
 func initClient(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, resolver config.VariableResolver) error {
-	// OAuth MCPs without a cached token require user interaction (browser
-	// auth). Defer them so the UI can show a dialog and let the user
-	// approve. If a cached token exists, try connecting with it directly.
-	if m.OAuth && m.Type == config.MCPHttp && (m.OAuthToken == nil || m.OAuthToken.IsExpired()) {
+	// OAuth MCPs without any cached token require user interaction
+	// (browser auth). If a cached token exists (even if expired), try
+	// connecting first so the SDK can attempt a silent refresh. Only
+	// defer to the UI if no token is available at all.
+	if m.OAuth && m.Type == config.MCPHttp && m.OAuthToken == nil {
 		updateState(name, StateNeedsAuth, nil, nil, Counts{})
 		clearMCPData(name)
 		slog.Info("MCP server requires OAuth authentication", "name", name)
@@ -325,7 +327,7 @@ func initClient(ctx context.Context, cfg *config.ConfigStore, name string, m con
 // Returns the session so callers can perform post-processing (e.g.
 // token persistence).
 func connectAndRegister(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, resolver config.VariableResolver) (*ClientSession, error) {
-	session, err := createSession(ctx, name, m, resolver)
+	session, err := createSession(ctx, cfg, name, m, resolver)
 	if err != nil {
 		return nil, err
 	}
@@ -422,7 +424,7 @@ func getOrRenewClient(ctx context.Context, cfg *config.ConfigStore, name string)
 	}
 	updateState(name, StateError, maybeTimeoutErr(err, timeout), nil, state.Counts)
 
-	sess, err = createSession(ctx, name, m, cfg.Resolver())
+	sess, err = createSession(ctx, cfg, name, m, cfg.Resolver())
 	if err != nil {
 		clearMCPData(name)
 		// If an OAuth MCP fails to reconnect, prompt the user to
@@ -466,12 +468,12 @@ func updateState(name string, state State, err error, client *ClientSession, cou
 	})
 }
 
-func createSession(ctx context.Context, name string, m config.MCPConfig, resolver config.VariableResolver) (*ClientSession, error) {
+func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, resolver config.VariableResolver) (*ClientSession, error) {
 	timeout := mcpTimeout(m)
 	mcpCtx, cancel := context.WithCancel(ctx)
 	cancelTimer := time.AfterFunc(timeout, cancel)
 
-	transport, oauthHandler, err := createTransport(mcpCtx, name, m, resolver)
+	transport, oauthHandler, err := createTransport(mcpCtx, cfg, name, m, resolver)
 	if err != nil {
 		updateState(name, StateError, err, nil, Counts{})
 		slog.Error("Error creating MCP client", "error", err, "name", name)
@@ -559,7 +561,7 @@ func maybeTimeoutErr(err error, timeout time.Duration) error {
 	return err
 }
 
-func createTransport(ctx context.Context, name string, m config.MCPConfig, resolver config.VariableResolver) (mcp.Transport, *mcpoauth.Handler, error) {
+func createTransport(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, resolver config.VariableResolver) (mcp.Transport, *mcpoauth.Handler, error) {
 	switch m.Type {
 	case config.MCPStdio:
 		command, err := resolver.ResolveValue(m.Command)
@@ -593,7 +595,20 @@ func createTransport(ctx context.Context, name string, m config.MCPConfig, resol
 
 		// OAuth-enabled HTTP transport.
 		if m.OAuth {
-			oauthHandler, oauthErr := mcpoauth.NewHandler(name, m.OAuthToken)
+			tokenSaver := func(tok *oauth2.Token) {
+				oauthToken := &oauth.Token{
+					AccessToken:  tok.AccessToken,
+					RefreshToken: tok.RefreshToken,
+					ExpiresIn:    int(time.Until(tok.Expiry).Seconds()),
+				}
+				oauthToken.SetExpiresAt()
+				if err := cfg.SetConfigField(config.ScopeGlobal, fmt.Sprintf("mcp.%s.oauth_token", name), oauthToken); err != nil {
+					slog.Warn("Failed to persist MCP OAuth token", "name", name, "error", err)
+				} else {
+					slog.Info("Persisted MCP OAuth token", "name", name)
+				}
+			}
+			oauthHandler, oauthErr := mcpoauth.NewHandler(name, url, m.OAuthToken, tokenSaver)
 			if oauthErr != nil {
 				return nil, nil, fmt.Errorf("failed to create OAuth handler for mcp %q: %w", name, oauthErr)
 			}

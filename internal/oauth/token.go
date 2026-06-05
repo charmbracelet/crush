@@ -10,12 +10,21 @@ import (
 // tokens from having a meaningless refresh window.
 const minRefreshBuffer = 30
 
+// OAuthClient stores the client credentials returned after the first
+// dynamic registration. Supplying these on subsequent connections as a
+// preregistered client avoids re-registration.
+type OAuthClient struct {
+	ClientID     string `json:"client_id,omitempty"`
+	ClientSecret string `json:"client_secret,omitempty"`
+}
+
 // Token represents an OAuth2 token.
 type Token struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
-	ExpiresIn    int    `json:"expires_in"`
-	ExpiresAt    int64  `json:"expires_at"`
+	AccessToken  string       `json:"access_token"`
+	RefreshToken string       `json:"refresh_token,omitempty"`
+	ExpiresIn    int          `json:"expires_in"`
+	ExpiresAt    int64        `json:"expires_at"`
+	Client       *OAuthClient `json:"client,omitempty"`
 }
 
 // SetExpiresAt calculates and sets the ExpiresAt field based on the

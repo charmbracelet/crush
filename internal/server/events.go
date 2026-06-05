@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -85,13 +86,19 @@ func wrapEvent(ev any) *pubsub.Payload {
 			Payload: fileToProto(e.Payload),
 		})
 	case pubsub.Event[notify.Notification]:
+		payload := proto.AgentEvent{
+			SessionID:    e.Payload.SessionID,
+			SessionTitle: e.Payload.SessionTitle,
+			RunID:        e.Payload.RunID,
+			Type:         proto.AgentEventType(e.Payload.Type),
+		}
+		if e.Payload.Type == notify.TypeAgentError {
+			payload.Type = proto.AgentEventTypeError
+			payload.Error = errors.New(e.Payload.Message)
+		}
 		return envelope(pubsub.PayloadTypeAgentEvent, pubsub.Event[proto.AgentEvent]{
-			Type: e.Type,
-			Payload: proto.AgentEvent{
-				SessionID:    e.Payload.SessionID,
-				SessionTitle: e.Payload.SessionTitle,
-				Type:         proto.AgentEventType(e.Payload.Type),
-			},
+			Type:    e.Type,
+			Payload: payload,
 		})
 	case pubsub.Event[notify.RunComplete]:
 		return envelope(pubsub.PayloadTypeRunComplete, pubsub.Event[proto.RunComplete]{

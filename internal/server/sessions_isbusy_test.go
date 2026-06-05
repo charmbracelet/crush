@@ -30,6 +30,14 @@ type stubCoordinator struct {
 func (s *stubCoordinator) Run(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
 	return nil, nil
 }
+
+func (s *stubCoordinator) RunAccepted(ctx context.Context, accept *agent.AcceptedRun, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
+	return nil, nil
+}
+
+func (s *stubCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun {
+	return nil
+}
 func (s *stubCoordinator) Cancel(string) {}
 func (s *stubCoordinator) CancelAll()    {}
 func (s *stubCoordinator) IsBusy() bool  { return false }

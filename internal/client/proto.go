@@ -423,10 +423,26 @@ func (c *Client) SendMessage(ctx context.Context, id string, sessionID, runID, p
 		return fmt.Errorf("failed to send message to agent: %w", err)
 	}
 	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
+	if rsp.StatusCode != http.StatusOK && rsp.StatusCode != http.StatusAccepted {
+		if msg := decodeErrorMessage(rsp.Body); msg != "" {
+			return fmt.Errorf("failed to send message to agent: status code %d: %s", rsp.StatusCode, msg)
+		}
 		return fmt.Errorf("failed to send message to agent: status code %d", rsp.StatusCode)
 	}
 	return nil
+}
+
+// decodeErrorMessage attempts to decode the response body as a
+// proto.Error and returns its message. It returns an empty string
+// when the body is empty or cannot be decoded into a proto.Error
+// with a non-empty message, letting callers fall back to a
+// status-only error.
+func decodeErrorMessage(body io.Reader) string {
+	var e proto.Error
+	if err := json.NewDecoder(body).Decode(&e); err != nil {
+		return ""
+	}
+	return e.Message
 }
 
 // GetAgentSessionInfo retrieves the agent session info for a workspace.

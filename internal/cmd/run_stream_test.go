@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 	"time"
 
@@ -305,6 +306,93 @@ func TestRunStream_RunIDSuppressesLiveMessagesAndPrintsRunComplete(t *testing.T)
 	require.NoError(t, err)
 	require.True(t, done)
 	require.Equal(t, "streamed prefix final", buf.String())
+}
+
+// TestRunStream_AgentErrorRunIDFiltersForeign verifies that an async
+// agent error carrying a non-empty RunID is fatal only when it matches
+// our run. A foreign RunID is ignored regardless of the event's
+// SessionID, because RunID is the authoritative correlator and async
+// errors share the agent event channel: without strict RunID matching
+// an unrelated workspace failure would abort our run.
+func TestRunStream_AgentErrorRunIDFiltersForeign(t *testing.T) {
+	t.Parallel()
+
+	// Foreign RunID with a matching session is still foreign.
+	s := &runStream{sessionID: "S", runID: "run-mine", out: &bytes.Buffer{}, read: map[string]int{}}
+	done, err := s.handle(pubsub.Event[proto.AgentEvent]{Payload: proto.AgentEvent{
+		Type:      proto.AgentEventTypeError,
+		SessionID: "S",
+		RunID:     "run-other",
+		Error:     errors.New("foreign boom"),
+	}}, nil)
+	require.NoError(t, err, "foreign RunID error must not abort our run")
+	require.False(t, done)
+
+	// Foreign RunID with a different session is ignored.
+	done, err = s.handle(pubsub.Event[proto.AgentEvent]{Payload: proto.AgentEvent{
+		Type:      proto.AgentEventTypeError,
+		SessionID: "other",
+		RunID:     "run-other",
+		Error:     errors.New("foreign boom"),
+	}}, nil)
+	require.NoError(t, err, "foreign RunID error must not abort our run")
+	require.False(t, done)
+
+	// Foreign RunID with a missing session is ignored.
+	done, err = s.handle(pubsub.Event[proto.AgentEvent]{Payload: proto.AgentEvent{
+		Type:  proto.AgentEventTypeError,
+		RunID: "run-other",
+		Error: errors.New("foreign boom"),
+	}}, nil)
+	require.NoError(t, err, "foreign RunID error must not abort our run")
+	require.False(t, done)
+
+	// Matching RunID is fatal.
+	done, err = s.handle(pubsub.Event[proto.AgentEvent]{Payload: proto.AgentEvent{
+		Type:      proto.AgentEventTypeError,
+		SessionID: "S",
+		RunID:     "run-mine",
+		Error:     errors.New("my boom"),
+	}}, nil)
+	require.Error(t, err, "matching RunID error must be fatal")
+	require.True(t, done)
+}
+
+// TestRunStream_AgentErrorNoRunIDFiltersBySession verifies the
+// compatibility fallback: when the event carries no RunID, attribution
+// falls back to SessionID. An error for another session or with an
+// empty session is ignored, while an error for our own session is fatal
+// so a real failure is never dropped.
+func TestRunStream_AgentErrorNoRunIDFiltersBySession(t *testing.T) {
+	t.Parallel()
+
+	s := &runStream{sessionID: "S", out: &bytes.Buffer{}, read: map[string]int{}}
+
+	// Empty RunID for another session is ignored.
+	done, err := s.handle(pubsub.Event[proto.AgentEvent]{Payload: proto.AgentEvent{
+		Type:      proto.AgentEventTypeError,
+		SessionID: "other",
+		Error:     errors.New("foreign boom"),
+	}}, nil)
+	require.NoError(t, err, "error for another session must not abort our run")
+	require.False(t, done)
+
+	// Empty RunID with an empty session is ignored.
+	done, err = s.handle(pubsub.Event[proto.AgentEvent]{Payload: proto.AgentEvent{
+		Type:  proto.AgentEventTypeError,
+		Error: errors.New("foreign boom"),
+	}}, nil)
+	require.NoError(t, err, "error with no session must not abort our run")
+	require.False(t, done)
+
+	// Empty RunID with a matching session is fatal.
+	done, err = s.handle(pubsub.Event[proto.AgentEvent]{Payload: proto.AgentEvent{
+		Type:      proto.AgentEventTypeError,
+		SessionID: "S",
+		Error:     errors.New("my boom"),
+	}}, nil)
+	require.Error(t, err, "error for our own session must be fatal")
+	require.True(t, done)
 }
 
 // TestRunStream_NoRunIDFallsBackToSessionID preserves the older

@@ -123,6 +123,38 @@ func TestRunCompleteToProto_RoundTrip(t *testing.T) {
 	require.False(t, decoded.Payload.Cancelled)
 }
 
+// TestAgentErrorToProto_PreservesRunID verifies that an async agent
+// error notification carries its originating RunID (and SessionID)
+// through the SSE envelope. Without these correlators, `crush run`
+// cannot tell whether an error event belongs to its own run and
+// would abort on any unrelated workspace failure.
+func TestAgentErrorToProto_PreservesRunID(t *testing.T) {
+	t.Parallel()
+
+	src := pubsub.Event[notify.Notification]{
+		Type: pubsub.CreatedEvent,
+		Payload: notify.Notification{
+			SessionID: "S",
+			RunID:     "run-99",
+			Type:      notify.TypeAgentError,
+			Message:   "boom",
+		},
+	}
+
+	env := wrapEvent(src)
+	require.NotNil(t, env)
+	require.Equal(t, pubsub.PayloadTypeAgentEvent, env.Type)
+
+	var decoded pubsub.Event[proto.AgentEvent]
+	require.NoError(t, json.Unmarshal(env.Payload, &decoded))
+	require.Equal(t, proto.AgentEventTypeError, decoded.Payload.Type)
+	require.Equal(t, "S", decoded.Payload.SessionID)
+	require.Equal(t, "run-99", decoded.Payload.RunID,
+		"RunID must survive so observers can attribute the error to its run")
+	require.NotNil(t, decoded.Payload.Error)
+	require.Equal(t, "boom", decoded.Payload.Error.Error())
+}
+
 // TestRunCompleteToProto_Error verifies that error- and cancel-shaped
 // RunComplete events round-trip cleanly so clients can distinguish
 // "agent failed" (returns non-zero from `crush run`) from "agent

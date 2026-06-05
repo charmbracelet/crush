@@ -88,6 +88,76 @@ func TestSubscribeEventsContextCancelClosesEvents(t *testing.T) {
 	}
 }
 
+func TestSendMessageAcceptsStatusAccepted(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	c := captureClient(t, srv)
+	require.NoError(t, c.SendMessage(context.Background(), "ws1", "sess1", "", "hello"))
+}
+
+func TestSendMessageAcceptsStatusOK(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := captureClient(t, srv)
+	require.NoError(t, c.SendMessage(context.Background(), "ws1", "sess1", "", "hello"))
+}
+
+func TestSendMessageDecodesErrorBody(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(proto.Error{Message: "session id is required"})
+	}))
+	defer srv.Close()
+
+	c := captureClient(t, srv)
+	err := c.SendMessage(context.Background(), "ws1", "", "", "hello")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "status code 400")
+	require.Contains(t, err.Error(), "session id is required")
+}
+
+func TestSendMessageFallsBackOnMalformedErrorBody(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("not json"))
+	}))
+	defer srv.Close()
+
+	c := captureClient(t, srv)
+	err := c.SendMessage(context.Background(), "ws1", "sess1", "", "hello")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "status code 500")
+	require.NotContains(t, err.Error(), "not json")
+}
+
+func TestSendMessageFallsBackOnEmptyErrorBody(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	c := captureClient(t, srv)
+	err := c.SendMessage(context.Background(), "ws1", "sess1", "", "hello")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "status code 500")
+}
+
 func marshalSSEPayload(t *testing.T) []byte {
 	t.Helper()
 

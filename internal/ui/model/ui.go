@@ -531,10 +531,12 @@ func (m *UI) loadCustomCommands() tea.Cmd {
 		if err != nil {
 			slog.Error("Failed to load custom commands", "error", err)
 		}
-		// Append user-invocable skills as commands
-		skillCommands := commands.LoadSkillCommands()
-		skillCommands = append(skillCommands, commands.LoadProjectSkillCommands(m.com.Workspace.WorkingDir())...)
-		customCommands = append(customCommands, skillCommands...)
+		// Append user-invocable skills as commands.
+		skillEntries, err := m.com.Workspace.ListSkills(context.Background())
+		if err != nil {
+			slog.Error("Failed to load skill commands", "error", err)
+		}
+		customCommands = append(customCommands, commands.FromSkillCatalog(skillEntries)...)
 		return userCommandsLoadedMsg{Commands: customCommands}
 	}
 }
@@ -3392,12 +3394,12 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 	// Capture session ID to avoid race with main goroutine updating m.session.
 	sessionID := m.session.ID
 	cmds = append(cmds, func() tea.Msg {
+		// AgentRun is fire-and-forget: it returns once the prompt has
+		// been accepted (HTTP 202) or synchronously with a validation
+		// or transport error. Run failures and cancellation surface
+		// through SSE-derived events, not this return value.
 		err := m.com.Workspace.AgentRun(context.Background(), sessionID, content, attachments...)
 		if err != nil {
-			isCancelErr := errors.Is(err, context.Canceled)
-			if isCancelErr {
-				return nil
-			}
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
 				Msg:  fmt.Sprintf("%v", err),

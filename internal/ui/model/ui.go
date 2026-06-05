@@ -312,6 +312,8 @@ type UI struct {
 
 	// mouse highlighting related state
 	lastClickTime time.Time
+	hoverX        int
+	hoverY        int
 
 	// hyperCredits is the remaining Hyper credits, updated after each prompt.
 	hyperCredits *int
@@ -858,6 +860,20 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 		}
 
+		// Route clicks to inline editors that support mouse interaction.
+		if m.activeInline != nil {
+			if clickable, ok := m.activeInline.(dialog.MouseClickableEditor); ok {
+				if done, handled := clickable.HandleMouseClick(msg.X, msg.Y); handled {
+					if done {
+						m.activeInline = nil
+						m.textarea.Focus()
+						m.updateLayoutAndSize()
+					}
+					return m, tea.Batch(cmds...)
+				}
+			}
+		}
+
 		if cmd := m.handleClickFocus(msg); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -883,6 +899,17 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.dialog.HasDialogs() {
 			m.dialog.Update(msg)
 			return m, tea.Batch(cmds...)
+		}
+
+		// Track hover position for inline editors.
+		if m.activeInline != nil {
+			if m.hoverX != msg.X || m.hoverY != msg.Y {
+				m.hoverX = msg.X
+				m.hoverY = msg.Y
+				if clickable, ok := m.activeInline.(dialog.MouseClickableEditor); ok {
+					clickable.SetHover(msg.X, msg.Y)
+				}
+			}
 		}
 
 		switch m.state {
@@ -2640,7 +2667,11 @@ func (m *UI) View() tea.View {
 	if !m.isTransparent {
 		v.BackgroundColor = m.com.Styles.Background
 	}
-	v.MouseMode = tea.MouseModeCellMotion
+	if m.activeInline != nil {
+		v.MouseMode = tea.MouseModeAllMotion
+	} else {
+		v.MouseMode = tea.MouseModeCellMotion
+	}
 	v.ReportFocus = m.caps.ReportFocusEvents
 	v.WindowTitle = "crush " + home.Short(m.com.Workspace.WorkingDir())
 

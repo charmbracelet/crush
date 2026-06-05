@@ -35,3 +35,19 @@ type InlineEditor interface {
 	// focused.
 	SetFocused(focused bool)
 }
+
+// MouseClickableEditor is an optional interface for inline editors
+// that handle mouse clicks and hover highlighting. The UI
+// type-asserts for this before routing click and motion events.
+type MouseClickableEditor interface {
+	InlineEditor
+	// HandleMouseClick processes a mouse click at the given screen
+	// coordinates. Returns done=true when the editor has completed
+	// (answer submitted or dismissed), and handled=true if the click
+	// was consumed (even if not done).
+	HandleMouseClick(x, y int) (done bool, handled bool)
+	// SetHover updates the current mouse position for hover
+	// highlighting. Called on every MouseMotionMsg while the
+	// editor is active.
+	SetHover(x, y int)
+}

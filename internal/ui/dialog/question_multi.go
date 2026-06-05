@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"fmt"
 	"maps"
 	"strings"
 
@@ -50,6 +51,7 @@ func (d *MultiChoice) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 
 	if !d.fillIn.Focused() && d.activeNoteKey == "" {
 		if idx := d.numberKeyIndex(msg); idx >= 0 {
+			d.mouseActive = false
 			d.cursorIdx = idx
 			d.selected[idx] = !d.selected[idx]
 			if !d.selected[idx] {
@@ -113,7 +115,9 @@ func (d *MultiChoice) answer(resp question.Answer) {
 
 // Response returns the last response. Used by QuestionForm to
 // collect answers from child components.
-func (d *MultiChoice) Response() question.Answer { return d.lastResponse }
+// Response returns the current answer, reflecting live toggle
+// state so that tabbing away preserves selections.
+func (d *MultiChoice) Response() question.Answer { return d.respond() }
 
 // GetRequest returns the underlying question request.
 func (d *MultiChoice) GetRequest() question.Question { return d.Request }
@@ -150,6 +154,44 @@ func (d *MultiChoice) ShortHelp() []key.Binding {
 func (d *MultiChoice) Height() int         { return d.height(choiceListMaxWidth + 4) }
 func (d *MultiChoice) HeightChanged() bool { return d.heightChanged() }
 func (d *MultiChoice) SetFocused(f bool)   { d.setFocused(f) }
+func (d *MultiChoice) SetHover(x, y int)   { d.setHover(x, y) }
+
+// HandleMouseClick checks if the click landed on a choice item and
+// toggles it, or focuses the fill-in. Returns done=false since
+// multi-choice requires explicit submission.
+func (d *MultiChoice) HandleMouseClick(x, y int) (bool, bool) {
+	if d.choiceCompositor == nil {
+		return false, false
+	}
+	hit := d.choiceCompositor.Hit(x, y)
+	if hit.Empty() {
+		return false, false
+	}
+	var idx int
+	if _, err := fmt.Sscanf(hit.ID(), "choice_%d", &idx); err != nil {
+		return false, false
+	}
+	if idx == len(d.Request.Choices) {
+		// Fill-in item.
+		d.cursorIdx = idx
+		d.mouseActive = false
+		d.suppressScroll = true
+		d.fillIn.Focus()
+		return false, true
+	}
+	if idx >= 0 && idx < len(d.Request.Choices) {
+		d.cursorIdx = idx
+		d.mouseActive = false
+		d.suppressScroll = true
+		d.fillIn.Blur()
+		d.selected[idx] = !d.selected[idx]
+		if !d.selected[idx] {
+			delete(d.selected, idx)
+		}
+		return false, true
+	}
+	return false, false
+}
 
 // Draw renders the multi-choice question directly to screen.
 // Returns the cursor position relative to area, or nil.
@@ -168,9 +210,9 @@ func (d *MultiChoice) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		if active {
 			style = selectedStyle
 		}
-		check := d.Styles.Editor.QuestionRadioOff.Render() + " "
+		check := d.Styles.Editor.QuestionCheckOff.Render() + " "
 		if d.selected[i] {
-			check = d.Styles.Editor.QuestionRadioOn.Render() + " "
+			check = d.Styles.Editor.QuestionCheckOn.Render() + " "
 		}
 		checkWidth := lipgloss.Width(check)
 		barWidth := 2 // "┃ " or "  ", applied by buildLines

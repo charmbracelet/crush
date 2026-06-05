@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"fmt"
 	"image"
 	"strconv"
 	"strings"
@@ -36,10 +37,15 @@ type choiceList struct {
 	questionEditor
 	Request question.Question
 
-	cursorIdx    int
-	scrollOffset int // lines scrolled past the top of the viewport
-	focused      bool
-	lastWidth    int
+	cursorIdx        int
+	scrollOffset     int // lines scrolled past the top of the viewport
+	focused          bool
+	lastWidth        int
+	choiceCompositor *lipgloss.Compositor
+	suppressScroll   bool // skip scroll clamping after mouse click
+	hoverX, hoverY   int  // current mouse position for hover highlight
+	hoveredChoice    int  // choice index under mouse, or -1
+	mouseActive      bool // true when last interaction was mouse (hover mode)
 
 	// styleFillInAsSelected controls whether non-empty fill-in text
 	// gets the selected (pink) style. True for single-choice where
@@ -71,6 +77,9 @@ func newChoiceList(sty *styles.Styles, req question.Question) choiceList {
 	return choiceList{
 		questionEditor: newQuestionEditor(sty),
 		Request:        req,
+		hoveredChoice:  -1,
+		hoverX:         -1,
+		hoverY:         -1,
 		keyUp:          key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑", "up")),
 		keyDown:        key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓", "down")),
 		keyClose:       CloseKey,
@@ -88,6 +97,7 @@ func (c *choiceList) isFillIn() bool {
 // moveUp moves the cursor up, wrapping around. Closes any active
 // note editor since the note context changes with the cursor.
 func (c *choiceList) moveUp() {
+	c.mouseActive = false
 	c.fillIn.Blur()
 	if c.activeNoteKey != "" {
 		c.closeNote(c.noteKey())
@@ -101,6 +111,7 @@ func (c *choiceList) moveUp() {
 // moveDown moves the cursor down, wrapping around. Closes any
 // active note editor since the note context changes with the cursor.
 func (c *choiceList) moveDown() {
+	c.mouseActive = false
 	c.fillIn.Blur()
 	if c.activeNoteKey != "" {
 		c.closeNote(c.noteKey())
@@ -179,6 +190,13 @@ type contentLine struct {
 	fillInRow  bool
 	noteRow    bool
 	cursorItem bool // belongs to the currently selected item
+	choiceIdx  int  // zero-based choice index, or -1 if not a choice row
+}
+
+// newContentLine creates a contentLine with choiceIdx initialized
+// to -1 so non-choice rows don't accidentally match choice_0.
+func newContentLine(text string) contentLine {
+	return contentLine{text: text, choiceIdx: -1}
 }
 
 // sectionHeight returns the visual line count of a text block
@@ -226,7 +244,7 @@ func (c *choiceList) buildLines(innerWidth int, fillInPrefix string, itemFn choi
 
 	var lines []contentLine
 	push := func(text string, flags ...bool) {
-		cl := contentLine{text: text}
+		cl := newContentLine(text)
 		if len(flags) > 0 {
 			cl.fillInRow = flags[0]
 		}
@@ -256,9 +274,10 @@ func (c *choiceList) buildLines(innerWidth int, fillInPrefix string, itemFn choi
 
 	// Choices: label row(s), optional wrapped description, note, blank.
 	for i, ch := range c.Request.Choices {
-		active := i == c.cursorIdx
+		active := i == c.cursorIdx && !c.mouseActive
+		hovered := i == c.hoveredChoice && c.mouseActive
 		bar := barInactive
-		if active {
+		if active || hovered {
 			bar = barActive
 		}
 		content := itemFn(i, ch, active)
@@ -269,7 +288,7 @@ func (c *choiceList) buildLines(innerWidth int, fillInPrefix string, itemFn choi
 			if j > 0 && !active {
 				b = barInactive
 			}
-			lines = append(lines, contentLine{text: b + ln, cursorItem: active})
+			lines = append(lines, contentLine{text: b + ln, cursorItem: active, choiceIdx: i})
 		}
 
 		if ch.Description != "" {
@@ -279,14 +298,16 @@ func (c *choiceList) buildLines(innerWidth int, fillInPrefix string, itemFn choi
 				if j > 0 && !active {
 					b = barInactive
 				}
-				lines = append(lines, contentLine{text: b + ln, cursorItem: active})
+				lines = append(lines, contentLine{text: b + ln, cursorItem: active, choiceIdx: i})
 			}
 		}
 
 		// Inline note editor or saved note for this choice.
 		c.drawNote(&lines, innerWidth, bar, barInactive, ch.ID, active)
 
-		push("")
+		// Blank separator — tag with current choice index so it's
+		// part of the clickable/hoverable zone.
+		lines = append(lines, contentLine{text: "", choiceIdx: i})
 	}
 
 	// Fill-in: live textarea when focused, otherwise placeholder.
@@ -301,7 +322,15 @@ func (c *choiceList) buildLines(innerWidth int, fillInPrefix string, itemFn choi
 	if fillActive {
 		fillBar = barActive
 	}
+	linesBeforeFillIn := len(lines)
 	c.drawFillIn(&lines, innerWidth, fillBar, barInactive, fillPrefix, c.isFillIn(), false)
+
+	// Tag fill-in rows with the fill-in item index so clicks can
+	// navigate to it.
+	fillInIdx := len(c.Request.Choices)
+	for i := linesBeforeFillIn; i < len(lines); i++ {
+		lines[i].choiceIdx = fillInIdx
+	}
 
 	// Trailing blank line for bottom padding.
 	push("")
@@ -346,6 +375,25 @@ func (c *choiceList) heightChanged() bool {
 
 func (c *choiceList) setFocused(focused bool) {
 	c.focused = focused
+}
+
+// setHover updates the hover position and resolves which choice
+// is under the cursor using the compositor.
+func (c *choiceList) setHover(x, y int) {
+	c.hoverX = x
+	c.hoverY = y
+	c.mouseActive = true
+	c.hoveredChoice = -1
+	if c.choiceCompositor == nil {
+		return
+	}
+	hit := c.choiceCompositor.Hit(x, y)
+	if !hit.Empty() {
+		var idx int
+		if _, err := fmt.Sscanf(hit.ID(), "choice_%d", &idx); err == nil {
+			c.hoveredChoice = idx
+		}
+	}
 }
 
 // iconPrompt returns the themed question icon based on focus.
@@ -411,7 +459,54 @@ func (c *choiceList) drawContent(scr uv.Screen, area uv.Rectangle, fillInPrefix 
 		}
 	}
 
+	// Build hit layers for choice rows.
+	c.buildChoiceCompositor(lines, area, contentWidth)
+
 	return cur
+}
+
+// buildChoiceCompositor creates hit layers for each visible choice
+// row so that mouse clicks can select choices directly. Each choice
+// gets a single layer spanning all its visible rows.
+func (c *choiceList) buildChoiceCompositor(lines []contentLine, area uv.Rectangle, contentWidth int) {
+	// Collect the screen-row range for each choice index.
+	type rowRange struct{ min, max int }
+	ranges := make(map[int]*rowRange)
+	for screenRow := range area.Dy() {
+		idx := c.scrollOffset + screenRow
+		if idx >= len(lines) {
+			break
+		}
+		ln := lines[idx]
+		if ln.choiceIdx < 0 {
+			continue
+		}
+		r, ok := ranges[ln.choiceIdx]
+		if !ok {
+			r = &rowRange{min: screenRow, max: screenRow}
+			ranges[ln.choiceIdx] = r
+		} else {
+			if screenRow < r.min {
+				r.min = screenRow
+			}
+			if screenRow > r.max {
+				r.max = screenRow
+			}
+		}
+	}
+
+	var layers []*lipgloss.Layer
+	for choiceIdx, r := range ranges {
+		height := r.max - r.min + 1
+		hitStr := strings.Repeat(strings.Repeat(" ", contentWidth)+"\n", height-1) + strings.Repeat(" ", contentWidth)
+		y := area.Min.Y + r.min
+		layers = append(layers, lipgloss.NewLayer(hitStr).X(area.Min.X).Y(y).ID(fmt.Sprintf("choice_%d", choiceIdx)))
+	}
+	if len(layers) > 0 {
+		c.choiceCompositor = lipgloss.NewCompositor(layers...)
+	} else {
+		c.choiceCompositor = nil
+	}
 }
 
 // clampScroll keeps the cursor item visible using a sliding
@@ -420,6 +515,10 @@ func (c *choiceList) drawContent(scr uv.Screen, area uv.Rectangle, fillInPrefix 
 // the bottom; going up pushes the top until the start (header and
 // description) comes back into view.
 func (c *choiceList) clampScroll(lines []contentLine, viewport int) {
+	if c.suppressScroll {
+		c.suppressScroll = false
+		return
+	}
 	limit := max(0, len(lines)-viewport)
 	if limit == 0 {
 		c.scrollOffset = 0

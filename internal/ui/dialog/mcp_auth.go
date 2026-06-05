@@ -247,7 +247,11 @@ func (m *MCPAuth) innerContent() string {
 	statusStyle := t.Dialog.OAuth.StatusText
 
 	server := m.currentServer()
-	cw := m.width - 2
+	// m.width is the outer dialog width (including the 2-char
+	// rounded border). Each content block has Margin(0, 1), so the
+	// usable text width is m.width minus 2 for the border and 2 for
+	// the margin.
+	cw := m.width - 4
 
 	url := lipgloss.NewStyle().
 		Margin(0, 1).

@@ -1,13 +1,13 @@
 module github.com/charmbracelet/crush
 
-go 1.26.3
+go 1.26.4
 
 require (
 	charm.land/bubbles/v2 v2.1.0
 	charm.land/bubbletea/v2 v2.0.7
-	charm.land/catwalk v0.44.7
+	charm.land/catwalk v0.44.13
 	charm.land/fang/v2 v2.0.1
-	charm.land/fantasy v0.29.0
+	charm.land/fantasy v0.31.0
 	charm.land/glamour/v2 v2.0.0
 	charm.land/lipgloss/v2 v2.0.3
 	charm.land/log/v2 v2.0.0

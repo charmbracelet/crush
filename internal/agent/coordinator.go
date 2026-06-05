@@ -233,7 +233,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 		return nil, errModelProviderNotConfigured
 	}
 
-	mergedOptions, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(model, providerCfg)
+	mergedOptions, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(model, providerCfg, sessionID)
 
 	if err := c.refreshTokenIfExpired(ctx, providerCfg); err != nil {
 		// NOTE(@andreynering): We don't return here because the event handling to ask the user to reauthenticate
@@ -311,7 +311,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	return result, originalErr
 }
 
-func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.ProviderOptions {
+func getProviderOptions(model Model, providerCfg config.ProviderConfig, sessionID string) fantasy.ProviderOptions {
 	options := fantasy.ProviderOptions{}
 
 	cfgOpts := []byte("{}")
@@ -367,6 +367,9 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
 		if !hasReasoningEffort && shouldSetEffort {
 			mergedOptions["reasoning_effort"] = model.ModelCfg.ReasoningEffort
+		}
+		if _, hasCacheKey := mergedOptions["prompt_cache_key"]; !hasCacheKey && sessionID != "" {
+			mergedOptions["prompt_cache_key"] = sessionID
 		}
 		if openai.IsResponsesModel(model.CatwalkCfg.ID) {
 			if openai.IsResponsesReasoningModel(model.CatwalkCfg.ID) {
@@ -516,8 +519,8 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 	return options
 }
 
-func mergeCallOptions(model Model, cfg config.ProviderConfig) (fantasy.ProviderOptions, *float64, *float64, *int64, *float64, *float64) {
-	modelOptions := getProviderOptions(model, cfg)
+func mergeCallOptions(model Model, cfg config.ProviderConfig, sessionID string) (fantasy.ProviderOptions, *float64, *float64, *int64, *float64, *float64) {
+	modelOptions := getProviderOptions(model, cfg, sessionID)
 	temp := cmp.Or(model.ModelCfg.Temperature, model.CatwalkCfg.Options.Temperature)
 	topP := cmp.Or(model.ModelCfg.TopP, model.CatwalkCfg.Options.TopP)
 	topK := cmp.Or(model.ModelCfg.TopK, model.CatwalkCfg.Options.TopK)
@@ -1118,7 +1121,8 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 	}
 
 	summarize := func() error {
-		return c.currentAgent.Summarize(ctx, sessionID, getProviderOptions(c.currentAgent.Model(), providerCfg))
+		model := c.currentAgent.Model()
+		return c.currentAgent.Summarize(ctx, sessionID, getProviderOptions(model, providerCfg, sessionID))
 	}
 
 	return c.runWithUnauthorizedRetry(ctx, providerCfg, summarize)
@@ -1242,7 +1246,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 			SessionID:        session.ID,
 			Prompt:           params.Prompt,
 			MaxOutputTokens:  maxTokens,
-			ProviderOptions:  getProviderOptions(model, providerCfg),
+			ProviderOptions:  getProviderOptions(model, providerCfg, session.ID),
 			Temperature:      model.ModelCfg.Temperature,
 			TopP:             model.ModelCfg.TopP,
 			TopK:             model.ModelCfg.TopK,

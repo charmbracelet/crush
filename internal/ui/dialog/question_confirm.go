@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"fmt"
 	"image"
 	"strings"
 
@@ -32,8 +33,11 @@ type ConfirmComponent struct {
 	keyEnter key.Binding
 	keyClose key.Binding
 
-	focused   bool
-	lastWidth int
+	focused    bool
+	lastWidth  int
+	compositor *lipgloss.Compositor
+	hoverX     int
+	hoverY     int
 
 	// OnConfirm is called when the user confirms.
 	OnConfirm func()
@@ -100,6 +104,17 @@ func (c *ConfirmComponent) ShortHelp() []key.Binding {
 	return []key.Binding{c.keyLeft, c.keyEnter, c.keyClose}
 }
 
+// unansweredCount returns how many questions have no meaningful answer.
+func (c *ConfirmComponent) unansweredCount() int {
+	n := 0
+	for _, ans := range c.Answers {
+		if ans == nil || (len(ans.SelectedIDs) == 0 && ans.FillInText == "" && ans.Yes == nil) {
+			n++
+		}
+	}
+	return n
+}
+
 // Height returns the visual height of the confirm content.
 func (c *ConfirmComponent) Height() int {
 	w := c.lastWidth
@@ -125,8 +140,12 @@ func (c *ConfirmComponent) Height() int {
 	}
 	h += len(c.QuestionLabels) // one bullet per question
 	h++                        // blank
-	h++                        // buttons
-	h++                        // bottom margin
+	if c.unansweredCount() > 0 {
+		h++ // warning line
+		h++ // blank after warning
+	}
+	h++ // buttons
+	h++ // bottom margin
 	return h
 }
 
@@ -168,12 +187,29 @@ func (c *ConfirmComponent) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	}
 	y++ // blank
 
-	// Buttons.
-	buttonOpts := []common.ButtonOpts{
+	// Warning if some questions are unanswered.
+	if missed := c.unansweredCount(); missed > 0 {
+		warnStyle := c.Styles.Tool.WarnTag
+		msgStyle := c.Styles.Tool.WarnMessage
+		word := "question"
+		if missed > 1 {
+			word = "questions"
+		}
+		warn := warnStyle.Render("WARN") + " " + msgStyle.Render(fmt.Sprintf("%d %s unanswered", missed, word))
+		y += drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), warn)
+		y++ // blank
+	}
+
+	// Buttons. Build compositor first so hover uses current geometry.
+	confirmButtonOpts := []common.ButtonOpts{
 		{Text: "Yup!", Selected: c.confirmYes, Padding: 3, UnderlineIndex: -1},
 		{Text: "Not yet", Selected: !c.confirmYes, Padding: 3, UnderlineIndex: -1},
 	}
-	buttons := common.ButtonGroup(c.Styles, buttonOpts, " ")
+	c.compositor = common.ButtonHitCompositor(c.Styles, confirmButtonOpts, " ", area.Min.X, y)
+	hoveredBtn := common.HitButtonIndex(c.compositor, c.hoverX, c.hoverY)
+	confirmButtonOpts[0].Hovered = hoveredBtn == 0
+	confirmButtonOpts[1].Hovered = hoveredBtn == 1
+	buttons := common.ButtonGroup(c.Styles, confirmButtonOpts, " ")
 	drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), buttons)
 
 	return nil
@@ -184,6 +220,30 @@ func (c *ConfirmComponent) HeightChanged() bool { return false }
 
 // SetFocused updates focus state.
 func (c *ConfirmComponent) SetFocused(focused bool) { c.focused = focused }
+
+// SetHover updates the hover position for button highlighting.
+func (c *ConfirmComponent) SetHover(x, y int) { c.hoverX = x; c.hoverY = y }
+
+// HandleMouseClick checks if the click landed on a button and
+// triggers the corresponding action. Returns done=true for Yup!,
+// done=false for Not yet (goes back to editing).
+func (c *ConfirmComponent) HandleMouseClick(x, y int) (bool, bool) {
+	switch common.HitButtonIndex(c.compositor, x, y) {
+	case 0: // Yup!
+		c.confirmYes = true
+		if c.OnConfirm != nil {
+			c.OnConfirm()
+		}
+		return true, true
+	case 1: // Not yet
+		c.confirmYes = false
+		if c.OnReject != nil {
+			c.OnReject()
+		}
+		return false, true
+	}
+	return false, false
+}
 
 // UpdateAnswers replaces the answer slice. Called by QuestionForm
 // when tabbing away from a question so the summary stays current.

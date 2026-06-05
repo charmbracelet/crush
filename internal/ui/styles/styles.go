@@ -107,8 +107,10 @@ type Styles struct {
 
 	// Buttons
 	Button struct {
-		Focused lipgloss.Style
-		Blurred lipgloss.Style
+		Focused  lipgloss.Style
+		Blurred  lipgloss.Style
+		Hovered  lipgloss.Style
+		Negative lipgloss.Style // Selected negative/destructive action.
 	}
 
 	// Editor
@@ -136,8 +138,10 @@ type Styles struct {
 		QuestionConfirm    lipgloss.Style // Confirm tab title (primary).
 		QuestionNote       lipgloss.Style // Saved note text (dimmer than body).
 		QuestionCursorBar  lipgloss.Style // Active cursor indicator bar.
-		QuestionRadioOn    lipgloss.Style // Selected multi-choice bullet.
-		QuestionRadioOff   lipgloss.Style // Unselected multi-choice bullet.
+		QuestionRadioOn    lipgloss.Style // Selected single-choice radio.
+		QuestionRadioOff   lipgloss.Style // Unselected single-choice radio.
+		QuestionCheckOn    lipgloss.Style // Checked multi-choice indicator.
+		QuestionCheckOff   lipgloss.Style // Unchecked multi-choice indicator.
 	}
 
 	// Radio

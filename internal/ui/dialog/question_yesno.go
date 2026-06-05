@@ -22,6 +22,9 @@ type YesNo struct {
 	Request    question.Question
 	selectedNo bool
 	focused    bool
+	compositor *lipgloss.Compositor
+	hoverX     int
+	hoverY     int
 
 	keyLeftRight key.Binding
 	keyEnter     key.Binding
@@ -86,7 +89,9 @@ func (d *YesNo) answer(resp question.Answer) {
 
 // Response returns the last response. Used by QuestionForm to
 // collect answers from child components.
-func (d *YesNo) Response() question.Answer { return d.lastResponse }
+// Response returns the current answer, reflecting live selection
+// state so that tabbing away preserves the choice.
+func (d *YesNo) Response() question.Answer { return d.respond(!d.selectedNo) }
 
 // GetRequest returns the underlying question request.
 func (d *YesNo) GetRequest() question.Question { return d.Request }
@@ -136,6 +141,7 @@ func (d *YesNo) Height() int {
 		h++ // blank
 	}
 	h++ // buttons
+	h++ // trailing blank for bottom padding
 	// Note line if present.
 	if d.activeNoteKey != "" || len(d.notes) > 0 {
 		h++
@@ -173,12 +179,16 @@ func (d *YesNo) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		y++ // blank
 	}
 
-	// Draw buttons.
-	buttonOpts := []common.ButtonOpts{
-		{Text: "Yes", Selected: !d.selectedNo, Padding: 3},
-		{Text: "No", Selected: d.selectedNo, Padding: 3},
+	// Draw buttons. Build compositor first so hover uses current geometry.
+	buttonOptsList := []common.ButtonOpts{
+		{Text: "Yes", Selected: !d.selectedNo, Padding: 3, UnderlineIndex: -1},
+		{Text: "No", Selected: d.selectedNo, Padding: 3, UnderlineIndex: -1},
 	}
-	buttons := common.ButtonGroup(d.Styles, buttonOpts, " ")
+	d.compositor = common.ButtonHitCompositor(d.Styles, buttonOptsList, " ", area.Min.X, y)
+	hoveredBtn := common.HitButtonIndex(d.compositor, d.hoverX, d.hoverY)
+	buttonOptsList[0].Hovered = hoveredBtn == 0
+	buttonOptsList[1].Hovered = hoveredBtn == 1
+	buttons := common.ButtonGroup(d.Styles, buttonOptsList, " ")
 	y += drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), buttons)
 
 	// Draw note editor or saved note.
@@ -192,3 +202,22 @@ func (d *YesNo) HeightChanged() bool { return false }
 // SetFocused updates the icon style based on whether the editor
 // area is focused.
 func (d *YesNo) SetFocused(focused bool) { d.focused = focused }
+
+// SetHover updates the hover position for button highlighting.
+func (d *YesNo) SetHover(x, y int) { d.hoverX = x; d.hoverY = y }
+
+// HandleMouseClick checks if the click landed on a button and
+// triggers the corresponding answer.
+func (d *YesNo) HandleMouseClick(x, y int) (bool, bool) {
+	switch common.HitButtonIndex(d.compositor, x, y) {
+	case 0: // Yes
+		d.selectedNo = false
+		d.answer(d.respond(true))
+		return false, true
+	case 1: // No
+		d.selectedNo = true
+		d.answer(d.respond(false))
+		return false, true
+	}
+	return false, false
+}

@@ -74,8 +74,14 @@ func (d *FreeText) answer(resp question.Answer) {
 	d.lastResponse = resp
 }
 
-// Response returns the last response.
-func (d *FreeText) Response() question.Answer { return d.lastResponse }
+// Response returns the current answer, including any unsaved
+// editor content so that tabbing away preserves typed text.
+func (d *FreeText) Response() question.Answer {
+	if val := strings.TrimSpace(d.editor.Value()); val != "" {
+		return question.Answer{QuestionID: d.Request.ID, FillInText: val}
+	}
+	return d.lastResponse
+}
 
 // GetRequest returns the underlying question request.
 func (d *FreeText) GetRequest() question.Question { return d.Request }
@@ -179,3 +185,9 @@ func (d *FreeText) SetFocused(focused bool) {
 		d.editor.Blur()
 	}
 }
+
+// SetHover is a no-op for free text questions.
+func (d *FreeText) SetHover(x, y int) {}
+
+// HandleMouseClick is a no-op for free text questions.
+func (d *FreeText) HandleMouseClick(x, y int) (bool, bool) { return false, false }

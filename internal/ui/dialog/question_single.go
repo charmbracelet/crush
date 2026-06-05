@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"fmt"
 	"maps"
 	"strconv"
 	"strings"
@@ -44,6 +45,7 @@ func (d *SingleChoice) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 
 	if !d.fillIn.Focused() && d.activeNoteKey == "" {
 		if idx := d.numberKeyIndex(msg); idx >= 0 {
+			d.mouseActive = false
 			d.cursorIdx = idx
 			return false, nil
 		}
@@ -86,7 +88,9 @@ func (d *SingleChoice) answer(resp question.Answer) {
 
 // Response returns the last response. Used by QuestionForm to
 // collect answers from child components.
-func (d *SingleChoice) Response() question.Answer { return d.lastResponse }
+// Response returns the current answer, reflecting live cursor
+// and fill-in state so that tabbing away preserves selections.
+func (d *SingleChoice) Response() question.Answer { return d.respond() }
 
 // GetRequest returns the underlying question request.
 func (d *SingleChoice) GetRequest() question.Question { return d.Request }
@@ -95,6 +99,9 @@ func (d *SingleChoice) respond() question.Answer {
 	resp := question.Answer{QuestionID: d.Request.ID}
 	if !d.isFillIn() && len(d.Request.Choices) > 0 {
 		resp.SelectedIDs = []string{d.Request.Choices[d.cursorIdx].ID}
+	}
+	if val := strings.TrimSpace(d.fillIn.Value()); val != "" {
+		resp.FillInText = val
 	}
 	if len(d.notes) > 0 {
 		resp.Notes = make(map[string]string, len(d.notes))
@@ -134,6 +141,41 @@ func (d *SingleChoice) ShortHelp() []key.Binding {
 func (d *SingleChoice) Height() int         { return d.height(choiceListMaxWidth + 4) }
 func (d *SingleChoice) HeightChanged() bool { return d.heightChanged() }
 func (d *SingleChoice) SetFocused(f bool)   { d.setFocused(f) }
+func (d *SingleChoice) SetHover(x, y int)   { d.setHover(x, y) }
+
+// HandleMouseClick checks if the click landed on a choice item and
+// selects it. Does not advance — user can change their selection
+// before pressing Enter or clicking another option.
+func (d *SingleChoice) HandleMouseClick(x, y int) (bool, bool) {
+	if d.choiceCompositor == nil {
+		return false, false
+	}
+	hit := d.choiceCompositor.Hit(x, y)
+	if hit.Empty() {
+		return false, false
+	}
+	var idx int
+	if _, err := fmt.Sscanf(hit.ID(), "choice_%d", &idx); err != nil {
+		return false, false
+	}
+	if idx >= 0 && idx < len(d.Request.Choices) {
+		d.cursorIdx = idx
+		d.mouseActive = false
+		d.suppressScroll = true
+		d.fillIn.Blur()
+		d.answer(d.respond())
+		return false, true
+	}
+	if idx == len(d.Request.Choices) {
+		// Fill-in: focus but don't submit.
+		d.cursorIdx = idx
+		d.mouseActive = false
+		d.suppressScroll = true
+		d.fillIn.Focus()
+		return false, true
+	}
+	return false, false
+}
 
 // Draw renders the single-choice question directly to screen.
 // Returns the cursor position relative to area, or nil.
@@ -148,8 +190,12 @@ func (d *SingleChoice) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	selectedStyle := d.Styles.Editor.QuestionSelected
 
 	return d.drawContent(scr, area, fillPrefix, func(i int, ch question.Choice, active bool) string {
+		isSelected := false
+		if len(d.lastResponse.SelectedIDs) > 0 {
+			isSelected = d.lastResponse.SelectedIDs[0] == ch.ID
+		}
 		style := unselectedHeader
-		if active {
+		if active || (isSelected && d.mouseActive) {
 			style = selectedStyle
 		}
 		barWidth := 2 // "┃ " or "  ", applied by buildLines

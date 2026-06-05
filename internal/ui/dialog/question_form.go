@@ -19,6 +19,8 @@ import (
 type questionResponder interface {
 	InlineEditor
 	Response() question.Answer
+	SetHover(x, y int)
+	HandleMouseClick(x, y int) (done bool, handled bool)
 }
 
 // QuestionForm presents multiple questions as a tabbed form.
@@ -42,6 +44,13 @@ type QuestionForm struct {
 	keyPrevTab key.Binding
 	keyNextTab key.Binding
 	keyClose   key.Binding
+
+	// Compositor for tab hit detection. Built during Draw() from
+	// tab layers positioned at their screen coordinates.
+	compositor *lipgloss.Compositor
+
+	// Hover position for highlighting interactive elements.
+	hoverX, hoverY int
 
 	// OnAnswer is called when the form is submitted. The UI sets
 	// this to wire up workspace submission.
@@ -423,9 +432,27 @@ func (f *QuestionForm) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			}
 		}
 
+		// Build tab layers for click hit detection.
+		var layers []*lipgloss.Layer
 		x := area.Min.X
+
+		// Determine hovered tab via simple bounds check.
+		hoveredTab := -1
+		if f.hoverY >= area.Min.Y && f.hoverY < area.Min.Y+tabHeight {
+			tx := area.Min.X
+			for i, label := range labels {
+				tw := len(label) + tabPadX*2 + 2
+				if f.hoverX >= tx && f.hoverX < tx+tw {
+					hoveredTab = i
+					break
+				}
+				tx += tw
+			}
+		}
+
 		for i, label := range labels {
 			isActive := i == f.activeIdx
+			isHovered := i == hoveredTab && !isActive
 			labelWidth := len(label)
 			tabWidth := labelWidth + tabPadX*2 + 2
 
@@ -444,6 +471,11 @@ func (f *QuestionForm) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 				}
 			} else if i < f.numQuestions && f.isAnswered(i) {
 				textStyle = f.Styles.Tab.ActiveStyle
+			}
+			if isHovered {
+				hovered := textStyle
+				hovered.Attrs |= uv.AttrBold
+				textStyle = hovered
 			}
 
 			if i == 0 {
@@ -464,8 +496,14 @@ func (f *QuestionForm) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			)
 			uv.NewStyledString(textStyle.Styled(label)).Draw(scr, innerArea)
 
+			// Create an invisible hit layer for this tab.
+			hitStr := strings.Repeat(strings.Repeat(" ", tabWidth)+"\n", tabHeight-1) + strings.Repeat(" ", tabWidth)
+			layers = append(layers, lipgloss.NewLayer(hitStr).X(x).Y(area.Min.Y).ID(fmt.Sprintf("tab_%d", i)))
+
 			x += tabWidth
 		}
+
+		f.compositor = lipgloss.NewCompositor(layers...)
 
 		lineY := area.Min.Y + tabHeight - 1
 		lineSide := f.Styles.Tab.InactiveBorder.Bottom
@@ -481,6 +519,8 @@ func (f *QuestionForm) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		}
 
 		contentY = area.Min.Y + tabHeight + 1
+	} else {
+		f.compositor = nil
 	}
 
 	contentArea := image.Rect(area.Min.X, contentY, area.Max.X, area.Max.Y)
@@ -519,4 +559,59 @@ func (f *QuestionForm) SetFocused(focused bool) {
 	} else if f.activeIdx < f.numQuestions {
 		f.questions[f.activeIdx].SetFocused(focused)
 	}
+}
+
+// SetHover implements MouseClickableEditor. Stores the hover
+// position and propagates it to the active component.
+func (f *QuestionForm) SetHover(x, y int) {
+	f.hoverX = x
+	f.hoverY = y
+	if f.isConfirmTab() && f.confirmComp != nil {
+		f.confirmComp.SetHover(x, y)
+	} else if f.activeIdx < len(f.questions) {
+		f.questions[f.activeIdx].SetHover(x, y)
+	}
+}
+
+// HandleMouseClick implements MouseClickableEditor. It checks if
+// the click landed on a tab and switches to it, or delegates to
+// the active component for content-area clicks.
+func (f *QuestionForm) HandleMouseClick(x, y int) (bool, bool) {
+	// Check tabs first.
+	if f.showTabs && f.compositor != nil {
+		hit := f.compositor.Hit(x, y)
+		if !hit.Empty() {
+			var idx int
+			if _, err := fmt.Sscanf(hit.ID(), "tab_%d", &idx); err == nil {
+				if idx >= 0 && idx < len(f.labels) && idx != f.activeIdx {
+					f.switchTab(idx)
+				}
+				return false, true
+			}
+		}
+	}
+
+	// Delegate to active component.
+	if f.isConfirmTab() && f.confirmComp != nil {
+		return f.confirmComp.HandleMouseClick(x, y)
+	}
+	if f.activeIdx < len(f.questions) {
+		done, handled := f.questions[f.activeIdx].HandleMouseClick(x, y)
+		if handled {
+			resp := f.questions[f.activeIdx].Response()
+			f.answers[f.activeIdx] = &resp
+			f.syncConfirmAnswers()
+			if done {
+				if f.activeIdx < len(f.labels)-1 {
+					f.switchTab(f.activeIdx + 1)
+					return false, true
+				} else if !f.hasConfirm {
+					f.submit()
+					return true, true
+				}
+			}
+			return false, true
+		}
+	}
+	return false, false
 }

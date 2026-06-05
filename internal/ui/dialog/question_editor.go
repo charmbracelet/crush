@@ -130,7 +130,7 @@ func (e *questionEditor) drawFillIn(lines *[]contentLine, innerWidth int, bar, b
 			if j > 0 {
 				text = barInactive + indent + tl
 			}
-			*lines = append(*lines, contentLine{text: text, fillInRow: j == 0, cursorItem: true})
+			*lines = append(*lines, contentLine{text: text, fillInRow: j == 0, cursorItem: true, choiceIdx: -1})
 		}
 		return
 	}
@@ -141,10 +141,10 @@ func (e *questionEditor) drawFillIn(lines *[]contentLine, innerWidth int, bar, b
 		if styleFilled {
 			rendered = e.Styles.Editor.QuestionSelected.Render(val)
 		}
-		*lines = append(*lines, contentLine{text: bar + fillPrefix + rendered, cursorItem: isActive})
+		*lines = append(*lines, contentLine{text: bar + fillPrefix + rendered, cursorItem: isActive, choiceIdx: -1})
 		return
 	}
-	*lines = append(*lines, contentLine{text: bar + fillPrefix + bodyStyle.Render("Something else?"), cursorItem: isActive})
+	*lines = append(*lines, contentLine{text: bar + fillPrefix + bodyStyle.Render("Something else?"), cursorItem: isActive, choiceIdx: -1})
 }
 
 // drawNote appends note rows to lines for the given key. When the
@@ -164,7 +164,7 @@ func (e *questionEditor) drawNote(lines *[]contentLine, innerWidth int, bar, bar
 			if j > 0 {
 				text = barInactive + indent + tl
 			}
-			*lines = append(*lines, contentLine{text: text, noteRow: j == 0, cursorItem: true})
+			*lines = append(*lines, contentLine{text: text, noteRow: j == 0, cursorItem: true, choiceIdx: -1})
 		}
 		return
 	}
@@ -172,7 +172,7 @@ func (e *questionEditor) drawNote(lines *[]contentLine, innerWidth int, bar, bar
 	if saved, ok := e.notes[noteKey]; ok && saved != "" {
 		dimmed := noteStyle.Render(saved)
 		for _, ln := range strings.Split(dimmed, "\n") {
-			*lines = append(*lines, contentLine{text: bar + notePrefix + ln, cursorItem: isActive})
+			*lines = append(*lines, contentLine{text: bar + notePrefix + ln, cursorItem: isActive, choiceIdx: -1})
 		}
 	}
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/charmbracelet/crush/internal/event"
 	"github.com/charmbracelet/crush/internal/filetracker"
 	"github.com/charmbracelet/crush/internal/history"
@@ -415,6 +416,15 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		parsed, err := openaicompat.ParseOptions(mergedOptions)
 		if err == nil {
 			options[openaicompat.Name] = parsed
+		}
+	default:
+		// Known custom providers (litellm, ollama, etc.) are
+		// openai-compat under the hood.
+		if discover.IsKnownCustomProvider(string(providerCfg.Type)) {
+			parsed, err := openaicompat.ParseOptions(mergedOptions)
+			if err == nil {
+				options[openaicompat.Name] = parsed
+			}
 		}
 	}
 
@@ -924,6 +934,11 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		}
 		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent)
 	default:
+		// Known custom providers (litellm, ollama, etc.) are
+		// openai-compat under the hood.
+		if discover.IsKnownCustomProvider(string(providerCfg.Type)) {
+			return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent)
+		}
 		return nil, fmt.Errorf("provider type not supported: %q", providerCfg.Type)
 	}
 }

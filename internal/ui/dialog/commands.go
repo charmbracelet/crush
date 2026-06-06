@@ -534,6 +534,11 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		NewCommandItem(c.com.Styles, "quit", "Quit", "ctrl+c", tea.QuitMsg{}).WithAliases("exit"),
 	)
 
+	// Add the MCP Toggle option
+	if len(c.com.Config().MCP) > 0 {
+		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_mcp", "Toggle MCP Servers", "", ActionOpenDialog{DialogID: MCPToggleID}))
+	}
+
 	return commands
 }
 

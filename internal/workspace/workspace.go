@@ -134,6 +134,7 @@ type Workspace interface {
 	SetCompactMode(scope config.Scope, enabled bool) error
 	SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error
 	SetConfigField(scope config.Scope, key string, value any) error
+	SetConfigFields(scope config.Scope, kv map[string]any) error
 	RemoveConfigField(scope config.Scope, key string) error
 	ImportCopilot() (*oauth.Token, bool)
 	RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error
@@ -154,6 +155,10 @@ type Workspace interface {
 	GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error)
 	EnableDockerMCP(ctx context.Context) error
 	DisableDockerMCP() error
+
+	// MCP operations
+	MCPInitializeSingle(ctx context.Context, name string) error
+	MCPDisableSingle(name string) error
 
 	// Events
 	Subscribe(program *tea.Program)

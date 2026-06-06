@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/proto"
 )
 
@@ -33,6 +34,41 @@ func (c *controllerV1) handlePostWorkspaceConfigSet(w http.ResponseWriter, r *ht
 		c.handleError(w, r, err)
 		return
 	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// handlePostWorkspaceConfigSetBulk sets multiple configuration fields at once.
+//
+//	@Summary		Bulk set config fields
+//	@Tags			config
+//	@Accept			json
+//	@Param			id		path	string	true	"Workspace ID"
+//	@Param			request	body	object	true	"Bulk config set request (expects Scope and KV map)"
+//	@Success		200
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/config/set-bulk [post]
+func (c *controllerV1) handlePostWorkspaceConfigSetBulk(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.PathValue("id") // Use the ID from the path
+
+	var req struct {
+		Scope config.Scope   `json:"scope"`
+		KV    map[string]any `json:"kv"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode bulk config request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+
+	// Call the method we just added to the backend
+	if err := c.backend.SetConfigFields(workspaceID, req.Scope, req.KV); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -521,5 +557,57 @@ func (c *controllerV1) handlePostWorkspaceMCPRefreshResources(w http.ResponseWri
 	}
 
 	c.backend.MCPRefreshResources(r.Context(), id, req.Name)
+	w.WriteHeader(http.StatusOK)
+}
+
+// handlePostWorkspaceMCPInitializeSingle initializes a single MCP server.
+//
+//	@Summary		Initialize MCP server
+//	@Tags			mcp
+//	@Accept			json
+//	@Param			id		path	string					true	"Workspace ID"
+//	@Param			request	body	proto.MCPNameRequest	true	"MCP name request"
+//	@Success		200
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/mcp/initialize-single [post]
+func (c *controllerV1) handlePostWorkspaceMCPInitializeSingle(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req proto.MCPNameRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+	if err := c.backend.MCPInitializeSingle(r.Context(), id, req.Name); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// handlePostWorkspaceMCPDisableSingle disables a single MCP server.
+//
+//	@Summary		Disable MCP server
+//	@Tags			mcp
+//	@Accept			json
+//	@Param			id		path	string					true	"Workspace ID"
+//	@Param			request	body	proto.MCPNameRequest	true	"MCP name request"
+//	@Success		200
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/mcp/disable-single [post]
+func (c *controllerV1) handlePostWorkspaceMCPDisableSingle(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req proto.MCPNameRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+	if err := c.backend.MCPDisableSingle(id, req.Name); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 }

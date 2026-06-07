@@ -687,6 +687,15 @@ func (app *App) Subscribe(program *tea.Program) {
 	})
 	defer app.tuiWG.Done()
 
+	if app.SubagentRuntime != nil {
+		rtEvents := app.SubagentRuntime.Subscribe(tuiCtx)
+		go func() {
+			for ev := range rtEvents {
+				program.Send(ev)
+			}
+		}()
+	}
+
 	events := app.events.Subscribe(tuiCtx)
 	for {
 		select {

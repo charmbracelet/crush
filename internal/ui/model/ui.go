@@ -46,6 +46,7 @@ import (
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/charmbracelet/crush/internal/stringext"
+	"github.com/charmbracelet/crush/internal/subagents"
 	"github.com/charmbracelet/crush/internal/ui/anim"
 	"github.com/charmbracelet/crush/internal/ui/attachments"
 	"github.com/charmbracelet/crush/internal/ui/chat"
@@ -280,6 +281,10 @@ type UI struct {
 
 	// skills
 	skillStates []*skills.SkillState
+
+	// runningSubagents holds the live subagent list for the current session,
+	// refreshed on each RuntimeEvent.
+	runningSubagents []workspace.RunningSubagentInfo
 
 	// Subagents — cached at init, static for session lifetime.
 	activeSubagentItems []completions.SubagentCompletionValue
@@ -878,6 +883,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lspStates = m.com.Workspace.LSPGetStates()
 	case pubsub.Event[skills.Event]:
 		m.skillStates = msg.Payload.States
+	case pubsub.Event[subagents.RuntimeEvent]:
+		if m.session != nil {
+			m.runningSubagents = m.com.Workspace.RunningSubagents(m.session.ID)
+		} else {
+			m.runningSubagents = nil
+		}
 	case pubsub.Event[mcp.Event]:
 		switch msg.Payload.Type {
 		case mcp.EventStateChanged:
@@ -4729,14 +4740,24 @@ func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
 	remainingHeight := height - lipgloss.Height(detailsHeader) - lipgloss.Height(version)
 
 	const maxSectionWidth = 50
-	sectionWidth := max(1, min(maxSectionWidth, width/4-2)) // account for spacing between sections
-	maxItemsPerSection := remainingHeight - 3               // Account for section title and spacing
+	numSections := 4
+	if len(m.runningSubagents) > 0 {
+		numSections = 5
+	}
+	sectionWidth := max(1, min(maxSectionWidth, width/numSections-2)) // account for spacing between sections
+	maxItemsPerSection := remainingHeight - 3                         // Account for section title and spacing
 
 	lspSection := m.lspInfo(sectionWidth, maxItemsPerSection, false)
 	mcpSection := m.mcpInfo(sectionWidth, maxItemsPerSection, false)
 	skillsSection := m.skillsInfo(sectionWidth, maxItemsPerSection, false)
 	filesSection := m.filesInfo(m.com.Workspace.WorkingDir(), sectionWidth, maxItemsPerSection, false)
-	sections := lipgloss.JoinHorizontal(lipgloss.Top, filesSection, " ", lspSection, " ", mcpSection, " ", skillsSection)
+	var sections string
+	if len(m.runningSubagents) > 0 {
+		subagentsSection := m.subagentsInfo(sectionWidth, maxItemsPerSection, false)
+		sections = lipgloss.JoinHorizontal(lipgloss.Top, filesSection, " ", lspSection, " ", mcpSection, " ", skillsSection, " ", subagentsSection)
+	} else {
+		sections = lipgloss.JoinHorizontal(lipgloss.Top, filesSection, " ", lspSection, " ", mcpSection, " ", skillsSection)
+	}
 	uv.NewStyledString(
 		s.CompactDetails.View.
 			Width(area.Dx()).

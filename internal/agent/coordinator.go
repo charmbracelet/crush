@@ -1425,6 +1425,7 @@ type subAgentParams struct {
 	SessionTitle   string
 	AgentName      string
 	AgentColor     string
+	AgentModel     string
 	// SessionSetup is an optional callback invoked after session creation
 	// but before agent execution, for custom session configuration.
 	SessionSetup func(sessionID string)
@@ -1447,7 +1448,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	}
 
 	// Register with the runtime tracker and remove on return.
-	c.runtime.Register(params.SessionID, session.ID, params.AgentName, params.AgentColor)
+	c.runtime.Register(params.SessionID, session.ID, params.AgentName, params.AgentColor, params.AgentModel)
 	defer c.runtime.Unregister(session.ID)
 
 	// Get model configuration

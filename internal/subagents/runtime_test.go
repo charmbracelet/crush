@@ -16,7 +16,7 @@ func TestRuntime_Register(t *testing.T) {
 	rt := NewRuntime()
 	t.Cleanup(rt.Shutdown)
 
-	entry := rt.Register("parent-1", "child-1", "my-agent", "blue")
+	entry := rt.Register("parent-1", "child-1", "my-agent", "blue", "")
 
 	require.Equal(t, "parent-1", entry.ParentSessionID)
 	require.Equal(t, "child-1", entry.ChildSessionID)
@@ -36,7 +36,7 @@ func TestRuntime_Unregister(t *testing.T) {
 	rt := NewRuntime()
 	t.Cleanup(rt.Shutdown)
 
-	rt.Register("parent-1", "child-1", "my-agent", "red")
+	rt.Register("parent-1", "child-1", "my-agent", "red", "")
 	rt.Unregister("child-1")
 
 	entries := rt.List("parent-1")
@@ -49,7 +49,7 @@ func TestRuntime_SetStatus(t *testing.T) {
 	rt := NewRuntime()
 	t.Cleanup(rt.Shutdown)
 
-	rt.Register("parent-1", "child-1", "my-agent", "green")
+	rt.Register("parent-1", "child-1", "my-agent", "green", "")
 	rt.SetStatus("child-1", "queued")
 
 	entries := rt.List("parent-1")
@@ -63,8 +63,8 @@ func TestRuntime_List_IsolatedByParent(t *testing.T) {
 	rt := NewRuntime()
 	t.Cleanup(rt.Shutdown)
 
-	rt.Register("parent-A", "child-A", "agent-a", "cyan")
-	rt.Register("parent-B", "child-B", "agent-b", "magenta")
+	rt.Register("parent-A", "child-A", "agent-a", "cyan", "")
+	rt.Register("parent-B", "child-B", "agent-b", "magenta", "")
 
 	entriesA := rt.List("parent-A")
 	require.Len(t, entriesA, 1)
@@ -81,7 +81,7 @@ func TestRuntime_List_ReturnsCopy(t *testing.T) {
 	rt := NewRuntime()
 	t.Cleanup(rt.Shutdown)
 
-	rt.Register("parent-1", "child-1", "my-agent", "yellow")
+	rt.Register("parent-1", "child-1", "my-agent", "yellow", "")
 
 	first := rt.List("parent-1")
 	require.Len(t, first, 1)
@@ -107,7 +107,7 @@ func TestRuntime_Subscribe_ReceivesRegisterEvent(t *testing.T) {
 
 	ch := rt.Subscribe(ctx)
 
-	rt.Register("parent-1", "child-1", "my-agent", "blue")
+	rt.Register("parent-1", "child-1", "my-agent", "blue", "")
 
 	select {
 	case ev := <-ch:
@@ -128,7 +128,7 @@ func TestRuntime_Subscribe_ReceivesUnregisterEvent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	rt.Register("parent-1", "child-1", "my-agent", "blue")
+	rt.Register("parent-1", "child-1", "my-agent", "blue", "")
 
 	ch := rt.Subscribe(ctx)
 
@@ -149,7 +149,7 @@ func TestRuntime_NilSafe(t *testing.T) {
 	var rt *Runtime
 
 	require.NotPanics(t, func() {
-		rt.Register("parent-1", "child-1", "agent", "red")
+		rt.Register("parent-1", "child-1", "agent", "red", "")
 	})
 	require.NotPanics(t, func() {
 		rt.Unregister("child-1")
@@ -211,7 +211,7 @@ func TestRuntime_ConcurrentAccess(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			childID := "child-" + string(rune('A'+i))
-			rt.Register("parent-shared", childID, "agent", "white")
+			rt.Register("parent-shared", childID, "agent", "white", "")
 			rt.List("parent-shared")
 			rt.SetStatus(childID, "queued")
 			rt.List("parent-shared")

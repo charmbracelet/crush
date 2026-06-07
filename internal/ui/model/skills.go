@@ -17,7 +17,8 @@ type skillStatusItem struct {
 	icon  string
 	name  string
 	title string
-	// description is reserved for future use (e.g. showing error details).
+	// description is optional detail rendered after the title (the
+	// subagents panel shows model and token counts here).
 	description string
 }
 

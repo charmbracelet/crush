@@ -184,6 +184,7 @@ type RunningSubagentInfo struct {
 	ParentSessionID  string
 	Name             string
 	Color            string
+	Model            string
 	Status           string
 	StartedAt        time.Time
 	PromptTokens     int64

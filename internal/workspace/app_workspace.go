@@ -411,6 +411,7 @@ func (w *AppWorkspace) RunningSubagents(parentSessionID string) []RunningSubagen
 			ParentSessionID: e.ParentSessionID,
 			Name:            e.Name,
 			Color:           e.Color,
+			Model:           e.Model,
 			Status:          e.Status,
 			StartedAt:       e.StartedAt,
 		}
@@ -516,7 +517,9 @@ func (w *AppWorkspace) DeleteUserSubagent(name string) error {
 	all, active, states := subagents.DiscoverFromConfig(subagents.DiscoveryConfig{
 		SubagentsPaths:    subagentsPaths,
 		DisabledSubagents: disabledSubagents,
-		IsKnownModelID:    nil,
+		// Match startup discovery (cmd/root.go, backend.go): validate model
+		// ids so a subagent with an invalid model stays rejected after reload.
+		IsKnownModelID: cfg.IsKnownModelID,
 	})
 	w.app.Subagents.Reload(all, active, states)
 	return nil

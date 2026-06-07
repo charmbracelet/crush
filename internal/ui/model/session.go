@@ -95,6 +95,18 @@ func (m *UI) loadSession(sessionID string) tea.Cmd {
 	return tea.Batch(load, m.reportCurrentSession(sessionID))
 }
 
+// fetchParentTitle fetches the title of the parent session and returns it as a
+// parentTitleMsg for the breadcrumb in the sidebar.
+func (m *UI) fetchParentTitle(parentSessionID string) tea.Cmd {
+	return func() tea.Msg {
+		sess, err := m.com.Workspace.GetSession(context.Background(), parentSessionID)
+		if err != nil {
+			return nil
+		}
+		return parentTitleMsg{title: sess.Title}
+	}
+}
+
 // reportCurrentSession returns a fire-and-forget tea.Cmd that
 // informs the workspace which session this client is currently
 // viewing. Errors are logged at debug only; the call is a hint

@@ -22,25 +22,12 @@ func TestRuntime_Register(t *testing.T) {
 	require.Equal(t, "child-1", entry.ChildSessionID)
 	require.Equal(t, "my-agent", entry.Name)
 	require.Equal(t, "blue", entry.Color)
-	require.Equal(t, "running", entry.Status)
+	require.Equal(t, StatusRunning, entry.Status)
 	require.False(t, entry.StartedAt.IsZero(), "StartedAt must be set")
 
 	entries := rt.List("parent-1")
 	require.Len(t, entries, 1)
 	require.Equal(t, entry, entries[0])
-}
-
-func TestRuntime_Unregister(t *testing.T) {
-	t.Parallel()
-
-	rt := NewRuntime()
-	t.Cleanup(rt.Shutdown)
-
-	rt.Register("parent-1", "child-1", "my-agent", "red", "")
-	rt.Unregister("child-1")
-
-	entries := rt.List("parent-1")
-	require.Empty(t, entries)
 }
 
 func TestRuntime_SetStatus(t *testing.T) {
@@ -119,7 +106,19 @@ func TestRuntime_Subscribe_ReceivesRegisterEvent(t *testing.T) {
 	}
 }
 
-func TestRuntime_Subscribe_ReceivesUnregisterEvent(t *testing.T) {
+func TestRuntime_Finish_RemovesEntry(t *testing.T) {
+	t.Parallel()
+
+	rt := NewRuntime()
+	t.Cleanup(rt.Shutdown)
+
+	rt.Register("parent-1", "child-1", "my-agent", "blue", "")
+	rt.Finish("child-1", StatusCompleted)
+
+	require.Empty(t, rt.List("parent-1"))
+}
+
+func TestRuntime_Finish_PublishesFinishedEvent(t *testing.T) {
 	t.Parallel()
 
 	rt := NewRuntime()
@@ -128,19 +127,62 @@ func TestRuntime_Subscribe_ReceivesUnregisterEvent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	rt.Register("parent-1", "child-1", "my-agent", "blue", "")
+	rt.Register("parent-1", "child-1", "my-agent", "blue", "claude")
 
 	ch := rt.Subscribe(ctx)
 
-	rt.Unregister("child-1")
+	rt.Finish("child-1", StatusCompleted)
 
 	select {
 	case ev := <-ch:
-		require.Equal(t, "parent-1", ev.Payload.ParentSessionID)
+		require.NotNil(t, ev.Payload.Finished, "Finished must be set when sub-agent finishes")
+		require.Equal(t, "child-1", ev.Payload.Finished.ChildSessionID)
+		require.Equal(t, StatusCompleted, ev.Payload.Finished.Status)
 		require.Empty(t, ev.Payload.Entries)
 	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for unregister event")
+		t.Fatal("timed out waiting for finish event")
 	}
+}
+
+func TestRuntime_Finish_StatusFlowsThrough(t *testing.T) {
+	t.Parallel()
+
+	cases := []string{StatusCompleted, StatusCancelled, StatusFailed}
+	for _, status := range cases {
+		t.Run(status, func(t *testing.T) {
+			t.Parallel()
+
+			rt := NewRuntime()
+			t.Cleanup(rt.Shutdown)
+
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+
+			rt.Register("parent-1", "child-1", "agent", "red", "")
+			ch := rt.Subscribe(ctx)
+
+			rt.Finish("child-1", status)
+
+			select {
+			case ev := <-ch:
+				require.NotNil(t, ev.Payload.Finished)
+				require.Equal(t, status, ev.Payload.Finished.Status)
+			case <-time.After(2 * time.Second):
+				t.Fatalf("timed out waiting for finish event with status %q", status)
+			}
+		})
+	}
+}
+
+func TestRuntime_Finish_UnknownChildIsNoOp(t *testing.T) {
+	t.Parallel()
+
+	rt := NewRuntime()
+	t.Cleanup(rt.Shutdown)
+
+	require.NotPanics(t, func() {
+		rt.Finish("missing", StatusCompleted)
+	})
 }
 
 func TestRuntime_NilSafe(t *testing.T) {
@@ -152,7 +194,7 @@ func TestRuntime_NilSafe(t *testing.T) {
 		rt.Register("parent-1", "child-1", "agent", "red", "")
 	})
 	require.NotPanics(t, func() {
-		rt.Unregister("child-1")
+		rt.Finish("child-1", StatusCompleted)
 	})
 	require.NotPanics(t, func() {
 		rt.SetStatus("child-1", "queued")
@@ -215,7 +257,7 @@ func TestRuntime_ConcurrentAccess(t *testing.T) {
 			rt.List("parent-shared")
 			rt.SetStatus(childID, "queued")
 			rt.List("parent-shared")
-			rt.Unregister(childID)
+			rt.Finish(childID, StatusCompleted)
 		}(i)
 	}
 

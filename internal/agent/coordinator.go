@@ -1174,11 +1174,15 @@ func (c *coordinator) refreshTokenIfExpired(ctx context.Context, providerCfg con
 // attempts to refresh credentials and re-runs fn once. Returns the
 // final error: from the retry if a retry was attempted, otherwise from
 // the original run. Callers that need to notify the user on persistent
-// failure should check isUnauthorized on the returned error.
-func (c *coordinator) runWithUnauthorizedRetry(ctx context.Context, providerCfg config.ProviderConfig, fn func() error) error {
+// failure should check isUnauthorized on the returned error. The optional
+// onRetry callback is invoked once just before the retry attempt.
+func (c *coordinator) runWithUnauthorizedRetry(ctx context.Context, providerCfg config.ProviderConfig, fn func() error, onRetry ...func()) error {
 	err := fn()
 	if err != nil && c.isUnauthorized(err) {
 		if retryErr := c.retryAfterUnauthorized(ctx, providerCfg); retryErr == nil {
+			for _, cb := range onRetry {
+				cb()
+			}
 			return fn()
 		}
 	}
@@ -1264,9 +1268,11 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		params.SessionSetup(session.ID)
 	}
 
-	// Register with the runtime tracker and remove on return.
+	// Register with the runtime tracker and finish on return. finalStatus is
+	// captured by the deferred call and updated below based on the outcome.
 	c.runtime.Register(params.SessionID, session.ID, params.AgentName, params.AgentColor, params.AgentModel)
-	defer c.runtime.Unregister(session.ID)
+	finalStatus := subagents.StatusCompleted
+	defer func() { c.runtime.Finish(session.ID, finalStatus) }()
 
 	// Get model configuration
 	model := params.Agent.Model()
@@ -1300,6 +1306,8 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		var runErr error
 		result, runErr = run()
 		return runErr
+	}, func() {
+		c.runtime.SetStatus(session.ID, "retrying")
 	})
 	// Notify only if still unauthorized after retry.
 	if err != nil && c.isUnauthorized(err) && c.notify != nil && model.ModelCfg.Provider == hyper.Name {
@@ -1309,6 +1317,11 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		})
 	}
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			finalStatus = subagents.StatusCancelled
+			return fantasy.NewTextErrorResponse("Subagent cancelled by user"), nil
+		}
+		finalStatus = subagents.StatusFailed
 		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to generate response: %s", err)), nil
 	}
 

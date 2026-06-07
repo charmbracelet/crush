@@ -1455,9 +1455,11 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		params.SessionSetup(session.ID)
 	}
 
-	// Register with the runtime tracker and remove on return.
+	// Register with the runtime tracker and finish on return. finalStatus is
+	// captured by the deferred call and updated below based on the outcome.
 	c.runtime.Register(params.SessionID, session.ID, params.AgentName, params.AgentColor, params.AgentModel)
-	defer c.runtime.Unregister(session.ID)
+	finalStatus := subagents.StatusCompleted
+	defer func() { c.runtime.Finish(session.ID, finalStatus) }()
 
 	// Get model configuration
 	model := params.Agent.Model()
@@ -1469,6 +1471,17 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
 	if !ok {
 		return fantasy.ToolResponse{}, errModelProviderNotConfigured
+	}
+
+	// Surface a "retrying" status on the subagent while OnAuthRefresh
+	// transparently refreshes credentials and fantasy retries the request.
+	authRefresh := c.makeAuthRefreshCallback(providerCfg)
+	if authRefresh != nil {
+		inner := authRefresh
+		authRefresh = func(ctx context.Context, pe *fantasy.ProviderError) error {
+			c.runtime.SetStatus(session.ID, "retrying")
+			return inner(ctx, pe)
+		}
 	}
 
 	// Run the agent
@@ -1484,7 +1497,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 			FrequencyPenalty: model.ModelCfg.FrequencyPenalty,
 			PresencePenalty:  model.ModelCfg.PresencePenalty,
 			NonInteractive:   true,
-			OnAuthRefresh:    c.makeAuthRefreshCallback(providerCfg),
+			OnAuthRefresh:    authRefresh,
 		})
 	}
 	result, err := run()
@@ -1497,6 +1510,11 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		})
 	}
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			finalStatus = subagents.StatusCancelled
+			return fantasy.NewTextErrorResponse("Subagent cancelled by user"), nil
+		}
+		finalStatus = subagents.StatusFailed
 		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to generate response: %s", err)), nil
 	}
 

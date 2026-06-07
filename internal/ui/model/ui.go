@@ -160,6 +160,11 @@ type (
 	creditsUpdatedMsg struct {
 		credits int
 	}
+
+	// parentTitleMsg is sent when the parent session title has been fetched.
+	parentTitleMsg struct {
+		title string
+	}
 )
 
 // UI represents the main user interface model.
@@ -291,6 +296,12 @@ type UI struct {
 		index    int
 		draft    string
 	}
+
+	// parentTitle holds the resolved parent session title for the breadcrumb.
+	// subagentColor holds this child session's subagent color, looked up from
+	// the runtime when the session loads.
+	parentTitle   string
+	subagentColor string
 }
 
 // New creates a new instance of the [UI] model.
@@ -599,6 +610,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setState(uiChat, m.focus)
 		m.session = msg.session
 		m.sessionFiles = msg.files
+		m.parentTitle = ""
+		m.subagentColor = ""
 		cmds = append(cmds, m.startLSPs(msg.lspFilePaths()))
 		msgs, err := m.com.Workspace.ListMessages(context.Background(), m.session.ID)
 		if err != nil {
@@ -622,7 +635,21 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Reload prompt history for the new session.
 		m.historyReset()
 		cmds = append(cmds, m.loadPromptHistory())
+		if m.session.ParentSessionID != "" {
+			// Look up this child session's subagent color from the in-memory
+			// runtime (sync, not IO).
+			for _, entry := range m.com.Workspace.RunningSubagents(m.session.ParentSessionID) {
+				if entry.ChildSessionID == m.session.ID {
+					m.subagentColor = entry.Color
+					break
+				}
+			}
+			cmds = append(cmds, m.fetchParentTitle(m.session.ParentSessionID))
+		}
 		m.updateLayoutAndSize()
+
+	case parentTitleMsg:
+		m.parentTitle = msg.title
 
 	case sessionFilesUpdatesMsg:
 		m.sessionFiles = msg.sessionFiles
@@ -1895,6 +1922,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			}
 			cmds = append(cmds, util.ReportInfo("Yolo mode "+status))
 			return true
+		case key.Matches(msg, m.keyMap.ParentSession):
+			if m.session != nil && m.session.ParentSessionID != "" {
+				cmds = append(cmds, m.loadSession(m.session.ParentSessionID))
+				return true
+			}
 		}
 		return false
 	}

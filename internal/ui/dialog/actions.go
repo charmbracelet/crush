@@ -32,6 +32,11 @@ type ActionOpenDialog struct {
 	DialogID string
 }
 
+// ActionGoToParentSession is a message to load a subagent session's parent.
+type ActionGoToParentSession struct {
+	SessionID string
+}
+
 // ActionSelectSession is a message indicating a session has been selected.
 type ActionSelectSession struct {
 	Session session.Session

@@ -77,15 +77,16 @@ type KeyMap struct {
 	}
 
 	// Global key maps
-	Quit       key.Binding
-	Help       key.Binding
-	Commands   key.Binding
-	Models     key.Binding
-	Suspend    key.Binding
-	Sessions   key.Binding
-	Tab        key.Binding
-	ToggleYolo key.Binding
-	ShiftTab   key.Binding
+	Quit          key.Binding
+	Help          key.Binding
+	Commands      key.Binding
+	Models        key.Binding
+	Suspend       key.Binding
+	Sessions      key.Binding
+	Tab           key.Binding
+	ToggleYolo    key.Binding
+	ShiftTab      key.Binding
+	ParentSession key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -125,6 +126,12 @@ func DefaultKeyMap() KeyMap {
 		ShiftTab: key.NewBinding(
 			key.WithKeys("shift+tab"),
 			key.WithHelp("shift+tab", "mode"),
+		),
+		// Ctrl+Up is Mission Control on macOS by default and never reaches
+		// the terminal there, so alt+up is bound too.
+		ParentSession: key.NewBinding(
+			key.WithKeys("ctrl+up", "alt+up"),
+			key.WithHelp("ctrl/alt+up", "go to parent session"),
 		),
 	}
 

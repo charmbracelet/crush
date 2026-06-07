@@ -210,6 +210,11 @@ type (
 
 	// gitBranchPollMsg is sent by the git branch poll timer.
 	gitBranchPollMsg struct{}
+
+	// parentTitleMsg is sent when the parent session title has been fetched.
+	parentTitleMsg struct {
+		title string
+	}
 )
 
 // UI represents the main user interface model.
@@ -495,6 +500,12 @@ type UI struct {
 		index    int
 		draft    string
 	}
+
+	// parentTitle holds the resolved parent session title for the breadcrumb.
+	// subagentColor holds this child session's subagent color, looked up from
+	// the runtime when the session loads.
+	parentTitle   string
+	subagentColor string
 }
 
 // New creates a new instance of the [UI] model.
@@ -954,6 +965,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.dispatchPromptQueueRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+		m.parentTitle = ""
+		m.subagentColor = ""
 		cmds = append(cmds, m.startLSPs(msg.lspFilePaths()))
 		msgs := msg.messages
 		if cmd := m.setSessionMessages(msgs); cmd != nil {
@@ -982,7 +995,21 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Reload prompt history for the new session.
 		m.historyReset()
 		cmds = append(cmds, m.loadPromptHistory())
+		if m.session.ParentSessionID != "" {
+			// Look up this child session's subagent color from the in-memory
+			// runtime (sync, not IO).
+			for _, entry := range m.com.Workspace.RunningSubagents(m.session.ParentSessionID) {
+				if entry.ChildSessionID == m.session.ID {
+					m.subagentColor = entry.Color
+					break
+				}
+			}
+			cmds = append(cmds, m.fetchParentTitle(m.session.ParentSessionID))
+		}
 		m.updateLayoutAndSize()
+
+	case parentTitleMsg:
+		m.parentTitle = msg.title
 
 	case sessionFilesUpdatesMsg:
 		m.sessionFiles = msg.sessionFiles
@@ -2238,6 +2265,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionGoToParentSession:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		cmds = append(cmds, m.loadSession(msg.SessionID))
 	case dialog.ActionSummarize:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
@@ -3163,6 +3193,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				cmds = append(cmds, util.ReportInfo("Yolo mode disabled"))
 			}
 			return true
+		case key.Matches(msg, m.keyMap.ParentSession):
+			if m.session != nil && m.session.ParentSessionID != "" {
+				cmds = append(cmds, m.loadSession(m.session.ParentSessionID))
+				return true
+			}
 		}
 		return false
 	}
@@ -3927,6 +3962,9 @@ func (m *UI) ShortHelp() []key.Binding {
 			commands,
 			k.Models,
 		)
+		if m.session != nil && m.session.ParentSessionID != "" {
+			binds = append(binds, k.ParentSession)
+		}
 
 		if m.canToggleSidebar() {
 			binds = append(binds, k.Chat.ToggleSidebar)
@@ -4052,6 +4090,9 @@ func (m *UI) FullHelp() [][]key.Binding {
 		)
 		if hasSession {
 			mainBinds = append(mainBinds, k.Chat.NewSession, k.Chat.EndFollow)
+			if m.session.ParentSessionID != "" {
+				mainBinds = append(mainBinds, k.ParentSession)
+			}
 		}
 		if m.canToggleSidebar() {
 			mainBinds = append(mainBinds, k.Chat.ToggleSidebar)
@@ -5680,15 +5721,16 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 		return nil
 	}
 
-	var sessionID string
+	var sessionID, parentSessionID string
 	hasSession := m.session != nil
 	if hasSession {
 		sessionID = m.session.ID
+		parentSessionID = m.session.ParentSessionID
 	}
 	hasTodos := hasSession && hasIncompleteTodos(m.session.Todos)
 	hasQueue := m.promptQueue > 0
 
-	commands, err := dialog.NewCommands(m.com, sessionID, hasSession, hasTodos, hasQueue, m.customCommands, m.mcpPrompts)
+	commands, err := dialog.NewCommands(m.com, sessionID, parentSessionID, hasSession, hasTodos, hasQueue, m.customCommands, m.mcpPrompts)
 	if err != nil {
 		return util.ReportError(err)
 	}

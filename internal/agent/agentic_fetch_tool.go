@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/subagents"
 )
 
 //go:embed templates/agentic_fetch.md
@@ -193,6 +194,9 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				ToolCallID:     call.ID,
 				Prompt:         fullPrompt,
 				SessionTitle:   "Fetch Analysis",
+				AgentName:      tools.AgenticFetchToolName,
+				AgentColor:     subagents.AutoColor(tools.AgenticFetchToolName),
+				AgentModel:     agent.Model().ModelCfg.Model,
 				SessionSetup: func(sessionID string) {
 					c.permissions.AutoApproveSession(sessionID)
 				},

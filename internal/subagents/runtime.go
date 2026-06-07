@@ -14,6 +14,7 @@ type RunningEntry struct {
 	ParentSessionID string
 	Name            string
 	Color           string
+	Model           string
 	Status          string
 	StartedAt       time.Time
 }
@@ -42,7 +43,7 @@ func NewRuntime() *Runtime {
 
 // Register records a new running sub-agent and publishes a RuntimeEvent.
 // It is a no-op when r is nil.
-func (r *Runtime) Register(parentSessionID, childSessionID, name, color string) RunningEntry {
+func (r *Runtime) Register(parentSessionID, childSessionID, name, color, model string) RunningEntry {
 	if r == nil {
 		return RunningEntry{}
 	}
@@ -51,6 +52,7 @@ func (r *Runtime) Register(parentSessionID, childSessionID, name, color string) 
 		ParentSessionID: parentSessionID,
 		Name:            name,
 		Color:           color,
+		Model:           model,
 		Status:          "running",
 		StartedAt:       time.Now(),
 	}

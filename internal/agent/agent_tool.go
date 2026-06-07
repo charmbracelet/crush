@@ -186,6 +186,7 @@ func (c *coordinator) agentTool(ctx context.Context, owner config.Agent) (fantas
 				SessionSetup:   c.subagentSessionSetup(sa),
 				AgentName:      sa.Name,
 				AgentColor:     sa.ResolvedColor(),
+				AgentModel:     agent.Model().ModelCfg.Model,
 			})
 		},
 	}, nil

@@ -13,6 +13,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/app"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/subagents"
@@ -111,8 +112,8 @@ func TestAppWorkspace_RunningSubagents_WithEntries(t *testing.T) {
 	rt := subagents.NewRuntime()
 	t.Cleanup(rt.Shutdown)
 
-	rt.Register("parent-1", "child-A", "agent-alpha", "blue")
-	rt.Register("parent-1", "child-B", "agent-beta", "red")
+	rt.Register("parent-1", "child-A", "agent-alpha", "blue", "")
+	rt.Register("parent-1", "child-B", "agent-beta", "red", "")
 
 	w := &AppWorkspace{
 		app: &app.App{
@@ -151,7 +152,7 @@ func TestAppWorkspace_RunningSubagents_TokenEnrichment(t *testing.T) {
 	rt := subagents.NewRuntime()
 	t.Cleanup(rt.Shutdown)
 
-	rt.Register("parent-1", "child-tok", "agent-tok", "green")
+	rt.Register("parent-1", "child-tok", "agent-tok", "green", "")
 
 	sessions := &stubSessionService{
 		sessions: map[string]session.Session{
@@ -241,14 +242,16 @@ func TestAppWorkspace_AllSubagents_ScopeDetection(t *testing.T) {
 
 	projectFile := filepath.Join(workDir, ".crush", "agents", "proj-agent.md")
 	require.NoError(t, os.MkdirAll(filepath.Dir(projectFile), 0o755))
-	require.NoError(t, os.WriteFile(projectFile,
+	require.NoError(t, os.WriteFile(
+		projectFile,
 		[]byte("---\nname: proj-agent\ndescription: Project agent.\n---\n\nBody.\n"),
 		0o644,
 	))
 
 	userDir := t.TempDir()
 	userFile := filepath.Join(userDir, "user-agent.md")
-	require.NoError(t, os.WriteFile(userFile,
+	require.NoError(t, os.WriteFile(
+		userFile,
 		[]byte("---\nname: user-agent\ndescription: User agent.\n---\n\nBody.\n"),
 		0o644,
 	))
@@ -308,7 +311,8 @@ func TestAppWorkspace_DeleteUserSubagent_NonUserScope(t *testing.T) {
 
 	projectFile := filepath.Join(workDir, ".crush", "agents", "proj-agent.md")
 	require.NoError(t, os.MkdirAll(filepath.Dir(projectFile), 0o755))
-	require.NoError(t, os.WriteFile(projectFile,
+	require.NoError(t, os.WriteFile(
+		projectFile,
 		[]byte("---\nname: proj-agent\ndescription: Project agent.\n---\n\nBody.\n"),
 		0o644,
 	))
@@ -340,7 +344,8 @@ func TestAppWorkspace_DeleteUserSubagent_Success(t *testing.T) {
 	userDir := t.TempDir()
 
 	userFile := filepath.Join(userDir, "user-agent.md")
-	require.NoError(t, os.WriteFile(userFile,
+	require.NoError(t, os.WriteFile(
+		userFile,
 		[]byte("---\nname: user-agent\ndescription: User agent.\n---\n\nBody.\n"),
 		0o644,
 	))
@@ -413,4 +418,56 @@ func TestAppWorkspace_SessionTokens_NotFound(t *testing.T) {
 
 	_, _, err := w.SessionTokens(context.Background(), "does-not-exist")
 	require.Error(t, err)
+}
+
+// TestAppWorkspace_DeleteUserSubagent_ReloadValidatesModel verifies that the
+// reload after a delete validates model ids (passes cfg.IsKnownModelID, not
+// nil). A subagent referencing an unknown model must NOT become active after
+// the reload — with a nil validator it would be wrongly accepted.
+func TestAppWorkspace_DeleteUserSubagent_ReloadValidatesModel(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+	userDir := t.TempDir()
+
+	// One valid user subagent to delete, and one with an unknown model id.
+	keepFile := filepath.Join(userDir, "keep-agent.md")
+	require.NoError(t, os.WriteFile(
+		keepFile,
+		[]byte("---\nname: keep-agent\ndescription: Keep.\n---\n\nBody.\n"),
+		0o644,
+	))
+	badFile := filepath.Join(userDir, "bad-agent.md")
+	require.NoError(t, os.WriteFile(
+		badFile,
+		[]byte("---\nname: bad-agent\ndescription: Bad model.\nmodel: not-a-real-model-id\n---\n\nBody.\n"),
+		0o644,
+	))
+
+	keepAgent := &subagents.Subagent{Name: "keep-agent", Description: "Keep.", FilePath: keepFile}
+	mgr := subagents.NewManager(
+		[]*subagents.Subagent{keepAgent},
+		[]*subagents.Subagent{keepAgent},
+		nil,
+	)
+	t.Cleanup(mgr.Shutdown)
+
+	// Empty (but non-nil) providers => IsKnownModelID returns false for any
+	// specific id, so bad-agent must be rejected on reload. SubagentsPaths
+	// drives rediscovery.
+	cfg := &config.Config{
+		Options:   &config.Options{SubagentsPaths: []string{userDir}},
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+	}
+	w := &AppWorkspace{
+		app:   &app.App{Subagents: mgr},
+		store: config.NewTestStoreWithWorkingDir(cfg, workDir),
+	}
+
+	require.NoError(t, w.DeleteUserSubagent("keep-agent"))
+
+	for _, info := range w.AllSubagents() {
+		require.NotEqual(t, "bad-agent", info.Name,
+			"subagent with an unknown model must stay rejected after reload")
+	}
 }

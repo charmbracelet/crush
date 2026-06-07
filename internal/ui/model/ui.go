@@ -1155,6 +1155,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.runningSubagents = nil
 		}
+		// A successful result already shows as the tool result; only report
+		// failed and cancelled runs, or every agentic_fetch and task call
+		// would flash a status message.
+		if f := msg.Payload.Finished; f != nil && m.session != nil && f.ParentSessionID == m.session.ID && f.Status != subagents.StatusCompleted {
+			cmds = append(cmds, util.ReportInfo(fmt.Sprintf("Subagent %s %s", f.Name, f.Status)))
+		}
 	case pubsub.Event[mcp.Event]:
 		switch msg.Payload.Type {
 		case mcp.EventStateChanged:

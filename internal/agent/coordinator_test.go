@@ -14,6 +14,7 @@ import (
 	"charm.land/fantasy/providers/openaicompat"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/discover"
+	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/subagents"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -620,6 +621,170 @@ func TestRunSubAgent_RegistersAndUnregistersRuntime(t *testing.T) {
 	// After runSubAgent returns, the entry must be gone.
 	after := rt.List(parentSession.ID)
 	require.Empty(t, after, "Runtime must have no entries after runSubAgent returns")
+}
+
+// TestRunSubAgent_UnfinishedRunRollsUpParentCost verifies that a sub-agent
+// run that ends without a result still rolls up whatever cost it accrued
+// into the parent session, the same roll-up the success path performs. The
+// cancelled case cancels the very ctx runSubAgent was called with, as a user
+// cancel does, so the roll-up must not run on that ctx.
+func TestRunSubAgent_UnfinishedRunRollsUpParentCost(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		runErr      error
+		wantContent string
+	}{
+		{name: "cancelled", runErr: context.Canceled, wantContent: "Subagent cancelled by user"},
+		{name: "failed", runErr: errors.New("provider exploded"), wantContent: "Failed to generate response: provider exploded"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			const providerID = "test-provider"
+			env := testEnv(t)
+			cfg, err := config.Init(env.workingDir, "", false)
+			require.NoError(t, err)
+			cfg.Config().Providers.Set(providerID, config.ProviderConfig{ID: providerID})
+
+			rt := subagents.NewRuntime()
+			t.Cleanup(rt.Shutdown)
+
+			parentSession, err := env.sessions.Create(t.Context(), "Parent")
+			require.NoError(t, err)
+
+			parentCtx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+
+			agent := newMockAgent(providerID, 4096, func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
+				// Simulate the sub-agent incurring cost before it stops.
+				childSession, err := env.sessions.Get(ctx, call.SessionID)
+				if err != nil {
+					return nil, err
+				}
+				childSession.Cost = 0.05
+				if _, err := env.sessions.Save(ctx, childSession); err != nil {
+					return nil, err
+				}
+				if errors.Is(tt.runErr, context.Canceled) {
+					cancel()
+				}
+				return nil, tt.runErr
+			})
+
+			coord := &coordinator{cfg: cfg, sessions: env.sessions, runtime: rt}
+
+			resp, err := coord.runSubAgent(parentCtx, subAgentParams{
+				Agent:          agent,
+				SessionID:      parentSession.ID,
+				AgentMessageID: "msg-1",
+				ToolCallID:     "call-1",
+				Prompt:         "do something",
+				SessionTitle:   "Unfinished Run Test",
+				AgentName:      "a",
+				AgentColor:     "red",
+			})
+			require.NoError(t, err)
+			require.True(t, resp.IsError)
+			require.Equal(t, tt.wantContent, resp.Content)
+
+			updated, err := env.sessions.Get(t.Context(), parentSession.ID)
+			require.NoError(t, err)
+			assert.InDelta(t, 0.05, updated.Cost, 1e-9,
+				"an unfinished sub-agent's accrued cost must still roll up into the parent session")
+		})
+	}
+}
+
+// TestRunSubAgent_AuthRefreshWrapper_ResetsStatusAfterSuccess verifies that
+// once the OnAuthRefresh wrapper's inner refresh succeeds, the runtime
+// status for the child session is set back to StatusRunning rather than
+// staying at StatusRetrying for the remainder of the run.
+func TestRunSubAgent_AuthRefreshWrapper_ResetsStatusAfterSuccess(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	cfg, err := config.Init(env.workingDir, "", false)
+	require.NoError(t, err)
+
+	const (
+		providerID = "test-openai-compat"
+		modelID    = "test-model"
+	)
+	cfg.Config().Providers.Set(providerID, config.ProviderConfig{
+		ID:      providerID,
+		Name:    "Test",
+		Type:    openaicompat.Name,
+		BaseURL: "http://127.0.0.1:0/v1",
+		APIKey:  "test",
+		Models:  []catwalk.Model{{ID: modelID, DefaultMaxTokens: 4096}},
+	})
+	selected := config.SelectedModel{Provider: providerID, Model: modelID}
+	cfg.Config().Models[config.SelectedModelTypeLarge] = selected
+	cfg.Config().Models[config.SelectedModelTypeSmall] = selected
+	cfg.SetupAgents()
+	for _, agentID := range []string{config.AgentCoder, config.AgentTask} {
+		a := cfg.Config().Agents[agentID]
+		a.AllowedTools = nil
+		cfg.Config().Agents[agentID] = a
+	}
+	c, err := NewCoordinator(t.Context(), CoordinatorOptions{
+		Config:      cfg,
+		Sessions:    env.sessions,
+		Messages:    env.messages,
+		Permissions: permission.NewPermissionService(env.workingDir, true, nil),
+	})
+	require.NoError(t, err)
+	coord := c.(*coordinator)
+	require.NoError(t, coord.readyWg.Wait())
+
+	providerCfg, ok := coord.cfg.Config().Providers.Get(providerID)
+	require.True(t, ok)
+	// Any "$"-containing APIKeyTemplate is enough for makeAuthRefreshCallback
+	// to wire a non-nil refresh callback. The shell resolver defaults an
+	// unset variable to the empty string rather than erroring, so this
+	// resolves (and thus the refresh "succeeds") without any real secret.
+	providerCfg.APIKeyTemplate = "$CRUSH_TEST_UNSET_API_KEY_VAR"
+	coord.cfg.Config().Providers.Set(providerID, providerCfg)
+
+	rt := subagents.NewRuntime()
+	t.Cleanup(rt.Shutdown)
+	coord.runtime = rt
+
+	parentSession, err := env.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+
+	var statusDuringRefresh string
+	agent := newMockAgent(providerID, 4096, func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
+		require.NotNil(t, call.OnAuthRefresh, "authRefresh callback must be wired for a templated API key")
+
+		require.NoError(t, call.OnAuthRefresh(ctx, nil))
+
+		entries := rt.List(parentSession.ID)
+		require.Len(t, entries, 1)
+		statusDuringRefresh = entries[0].Status
+
+		return agentResultWithText("done"), nil
+	})
+
+	resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+		Agent:          agent,
+		SessionID:      parentSession.ID,
+		AgentMessageID: "msg-1",
+		ToolCallID:     "call-1",
+		Prompt:         "do something",
+		SessionTitle:   "Auth Refresh Test",
+		AgentName:      "a",
+		AgentColor:     "red",
+	})
+	require.NoError(t, err)
+	require.False(t, resp.IsError)
+
+	require.Equal(t, subagents.StatusRunning, statusDuringRefresh,
+		"runtime status must return to running once OnAuthRefresh succeeds, not stay stuck at retrying")
 }
 
 func TestGetProviderOptionsReasoningEffort(t *testing.T) {

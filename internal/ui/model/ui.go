@@ -2683,6 +2683,7 @@ func (m *UI) ShortHelp() []key.Binding {
 			tab,
 			commands,
 			k.Models,
+			k.Subagents,
 		)
 
 		switch m.focus {
@@ -2712,6 +2713,7 @@ func (m *UI) ShortHelp() []key.Binding {
 			binds,
 			commands,
 			k.Models,
+			k.Subagents,
 			k.Editor.Newline,
 		)
 	}
@@ -2769,6 +2771,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 			tab,
 			commands,
 			k.Models,
+			k.Subagents,
 			k.Sessions,
 			k.ToggleYolo,
 		)
@@ -2831,6 +2834,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 				[]key.Binding{
 					commands,
 					k.Models,
+					k.Subagents,
 					k.Sessions,
 					k.ToggleYolo,
 				},

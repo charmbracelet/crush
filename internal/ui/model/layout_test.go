@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"charm.land/bubbles/v2/textarea"
+	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/charmbracelet/crush/internal/ui/common"
 )
@@ -20,6 +21,8 @@ type testMessageItem struct {
 func (m testMessageItem) ID() string           { return m.id }
 func (m testMessageItem) Render(int) string    { return m.text }
 func (m testMessageItem) RawRender(int) string { return m.text }
+func (m testMessageItem) Version() uint64      { return 0 }
+func (m testMessageItem) Finished() bool       { return true }
 
 var _ chat.MessageItem = testMessageItem{}
 
@@ -115,4 +118,110 @@ func TestHandleTextareaHeightChange_FollowModeStaysAtBottom(t *testing.T) {
 	if !u.chat.AtBottom() {
 		t.Fatal("expected chat to remain at bottom after editor resize in follow mode")
 	}
+}
+
+func TestAutoExpandPillsIfReasonable(t *testing.T) {
+	t.Parallel()
+
+	t.Run("expands when terminal is tall enough and todos exist", func(t *testing.T) {
+		t.Parallel()
+
+		u := newTestUI()
+		u.height = 50
+		u.session = &session.Session{ID: "s1", Todos: []session.Todo{
+			{Status: session.TodoStatusInProgress, Content: "do work"},
+			{Status: session.TodoStatusPending, Content: "do more"},
+		}}
+
+		u.autoExpandPillsIfReasonable()
+
+		if !u.pillsExpanded {
+			t.Fatal("expected pillsExpanded to be true")
+		}
+		if u.focusedPillSection != pillSectionTodos {
+			t.Fatalf("expected focusedPillSection to be pillSectionTodos, got %d", u.focusedPillSection)
+		}
+	})
+
+	t.Run("does not expand when terminal is too short", func(t *testing.T) {
+		t.Parallel()
+
+		u := newTestUI()
+		u.height = 30
+		u.session = &session.Session{ID: "s1", Todos: []session.Todo{
+			{Status: session.TodoStatusInProgress, Content: "do work"},
+		}}
+
+		u.autoExpandPillsIfReasonable()
+
+		if u.pillsExpanded {
+			t.Fatal("expected pillsExpanded to be false when terminal height is below threshold")
+		}
+	})
+
+	t.Run("does not expand when all todos are completed", func(t *testing.T) {
+		t.Parallel()
+
+		u := newTestUI()
+		u.height = 50
+		u.session = &session.Session{ID: "s1", Todos: []session.Todo{
+			{Status: session.TodoStatusCompleted, Content: "done"},
+		}}
+
+		u.autoExpandPillsIfReasonable()
+
+		if u.pillsExpanded {
+			t.Fatal("expected pillsExpanded to be false when all todos are completed")
+		}
+	})
+
+	t.Run("does not expand when already expanded", func(t *testing.T) {
+		t.Parallel()
+
+		u := newTestUI()
+		u.height = 50
+		u.pillsExpanded = true
+		u.session = &session.Session{ID: "s1", Todos: []session.Todo{
+			{Status: session.TodoStatusInProgress, Content: "do work"},
+		}}
+		u.updateLayoutAndSize()
+
+		u.autoExpandPillsIfReasonable()
+
+		if !u.pillsExpanded {
+			t.Fatal("expected pillsExpanded to stay true")
+		}
+	})
+
+	t.Run("expands for prompt queue when no todos", func(t *testing.T) {
+		t.Parallel()
+
+		u := newTestUI()
+		u.height = 50
+		u.session = &session.Session{ID: "s1", Todos: []session.Todo{}}
+		u.promptQueue = 2
+
+		u.autoExpandPillsIfReasonable()
+
+		if !u.pillsExpanded {
+			t.Fatal("expected pillsExpanded to be true for prompt queue")
+		}
+		if u.focusedPillSection != pillSectionQueue {
+			t.Fatalf("expected focusedPillSection to be pillSectionQueue, got %d", u.focusedPillSection)
+		}
+	})
+
+	t.Run("does not expand when no session", func(t *testing.T) {
+		t.Parallel()
+
+		u := newTestUI()
+		u.height = 50
+		u.session = nil
+
+		u.autoExpandPillsIfReasonable()
+
+		if u.pillsExpanded {
+			t.Fatal("expected pillsExpanded to be false when there is no session")
+		}
+	})
 }

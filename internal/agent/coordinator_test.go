@@ -7,6 +7,8 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
+	"charm.land/fantasy/providers/anthropic"
+	"charm.land/fantasy/providers/bedrock"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -21,6 +23,10 @@ type mockSessionAgent struct {
 
 func (m *mockSessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
 	return m.runFunc(ctx, call)
+}
+
+func (m *mockSessionAgent) BeginAccepted(sessionID string) *AcceptedRun {
+	return &AcceptedRun{sessionID: sessionID}
 }
 
 func (m *mockSessionAgent) Model() Model                        { return m.model }
@@ -196,7 +202,7 @@ func TestRunSubAgent(t *testing.T) {
 		require.NoError(t, err)
 
 		agent := newMockAgent(providerID, 4096, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
-			return nil, errors.New("agent exploded")
+			return nil, errors.New("provider request failed")
 		})
 
 		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
@@ -210,7 +216,7 @@ func TestRunSubAgent(t *testing.T) {
 		// runSubAgent returns (errorResponse, nil) when agent.Run fails — not a Go error.
 		require.NoError(t, err)
 		assert.True(t, resp.IsError)
-		assert.Equal(t, "error generating response", resp.Content)
+		assert.Equal(t, "Failed to generate response: provider request failed", resp.Content)
 	})
 
 	t.Run("session setup callback is invoked", func(t *testing.T) {
@@ -382,4 +388,41 @@ func TestUpdateParentSessionCost(t *testing.T) {
 		require.NoError(t, err)
 		assert.InDelta(t, 0.0, updated.Cost, 1e-9)
 	})
+}
+
+func TestGetProviderOptionsReasoningEffort(t *testing.T) {
+	// Bedrock is Fantasy's Anthropic under a different provider name; options
+	// must land under anthropic.Name so the Anthropic language model picks them up.
+	tests := []struct {
+		name         string
+		providerType catwalk.Type
+	}{
+		{"anthropic honors reasoning_effort", catwalk.Type(anthropic.Name)},
+		{"bedrock honors reasoning_effort", catwalk.Type(bedrock.Name)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			model := Model{
+				CatwalkCfg: catwalk.Model{
+					ID:              "claude-opus-4-7",
+					CanReason:       true,
+					ReasoningLevels: []string{"max"},
+				},
+				ModelCfg: config.SelectedModel{
+					Provider:        "test",
+					ReasoningEffort: "max",
+				},
+			}
+			providerCfg := config.ProviderConfig{ID: "test", Type: tc.providerType}
+
+			opts := getProviderOptions(model, providerCfg)
+
+			raw, ok := opts[anthropic.Name]
+			require.True(t, ok, "options should be keyed under anthropic.Name for type %q", tc.providerType)
+			parsed, ok := raw.(*anthropic.ProviderOptions)
+			require.True(t, ok)
+			require.NotNil(t, parsed.Effort)
+			assert.Equal(t, anthropic.Effort("max"), *parsed.Effort)
+		})
+	}
 }

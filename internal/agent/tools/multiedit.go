@@ -55,7 +55,7 @@ type MultiEditResponseMetadata struct {
 const MultiEditToolName = "multiedit"
 
 //go:embed multiedit.md
-var multieditDescription []byte
+var multieditDescription string
 
 func NewMultiEditTool(
 	lspManager *lsp.Manager,
@@ -66,7 +66,7 @@ func NewMultiEditTool(
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		MultiEditToolName,
-		FirstLineDescription(multieditDescription),
+		multieditDescription,
 		func(ctx context.Context, params MultiEditParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.FilePath == "" {
 				return fantasy.NewTextErrorResponse("file_path is required"), nil
@@ -110,7 +110,8 @@ func NewMultiEditTool(
 			text += getDiagnostics(params.FilePath, lspManager)
 			response.Content = text
 			return response, nil
-		})
+		},
+	)
 }
 
 func validateEdits(edits []MultiEditOperation) error {
@@ -195,7 +196,16 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 		return fantasy.ToolResponse{}, err
 	}
 	if !p {
-		return NewPermissionDeniedResponse(), nil
+		resp := NewPermissionDeniedResponse()
+		resp = fantasy.WithResponseMetadata(resp, MultiEditResponseMetadata{
+			OldContent:   "",
+			NewContent:   currentContent,
+			Additions:    additions,
+			Removals:     removals,
+			EditsApplied: editsApplied,
+			EditsFailed:  failedEdits,
+		})
+		return resp, nil
 	}
 
 	// Write the file
@@ -266,9 +276,11 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 	modTime := fileInfo.ModTime().Truncate(time.Second)
 	if modTime.After(lastRead) {
 		return fantasy.NewTextErrorResponse(
-			fmt.Sprintf("file %s has been modified since it was last read (mod time: %s, last read: %s)",
+			fmt.Sprintf(
+				"file %s has been modified since it was last read (mod time: %s, last read: %s)",
 				params.FilePath, modTime.Format(time.RFC3339), lastRead.Format(time.RFC3339),
-			)), nil
+			),
+		), nil
 	}
 
 	// Read current file content
@@ -337,7 +349,16 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 		return fantasy.ToolResponse{}, err
 	}
 	if !p {
-		return NewPermissionDeniedResponse(), nil
+		resp := NewPermissionDeniedResponse()
+		resp = fantasy.WithResponseMetadata(resp, MultiEditResponseMetadata{
+			OldContent:   oldContent,
+			NewContent:   currentContent,
+			Additions:    additions,
+			Removals:     removals,
+			EditsApplied: editsApplied,
+			EditsFailed:  failedEdits,
+		})
+		return resp, nil
 	}
 
 	if isCrlf {

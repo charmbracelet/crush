@@ -2,18 +2,21 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 
 	"github.com/charmbracelet/crush/internal/agent/notify"
 	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/app"
+	"github.com/charmbracelet/crush/internal/backend"
 	"github.com/charmbracelet/crush/internal/history"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
+	"github.com/charmbracelet/crush/internal/skills"
 )
 
 // wrapEvent converts a raw tea.Msg (a pubsub.Event[T] from the app
@@ -83,13 +86,38 @@ func wrapEvent(ev any) *pubsub.Payload {
 			Payload: fileToProto(e.Payload),
 		})
 	case pubsub.Event[notify.Notification]:
+		payload := proto.AgentEvent{
+			SessionID:    e.Payload.SessionID,
+			SessionTitle: e.Payload.SessionTitle,
+			RunID:        e.Payload.RunID,
+			Type:         proto.AgentEventType(e.Payload.Type),
+		}
+		if e.Payload.Type == notify.TypeAgentError {
+			payload.Type = proto.AgentEventTypeError
+			payload.Error = errors.New(e.Payload.Message)
+		}
 		return envelope(pubsub.PayloadTypeAgentEvent, pubsub.Event[proto.AgentEvent]{
+			Type:    e.Type,
+			Payload: payload,
+		})
+	case pubsub.Event[notify.RunComplete]:
+		return envelope(pubsub.PayloadTypeRunComplete, pubsub.Event[proto.RunComplete]{
 			Type: e.Type,
-			Payload: proto.AgentEvent{
-				SessionID:    e.Payload.SessionID,
-				SessionTitle: e.Payload.SessionTitle,
-				Type:         proto.AgentEventType(e.Payload.Type),
+			Payload: proto.RunComplete{
+				SessionID: e.Payload.SessionID,
+				RunID:     e.Payload.RunID,
+				MessageID: e.Payload.MessageID,
+				Text:      e.Payload.Text,
+				Error:     e.Payload.Error,
+				Cancelled: e.Payload.Cancelled,
 			},
+		})
+	case pubsub.Event[proto.ConfigChanged]:
+		return envelope(pubsub.PayloadTypeConfigChanged, e)
+	case pubsub.Event[skills.Event]:
+		return envelope(pubsub.PayloadTypeSkillsEvent, pubsub.Event[proto.SkillsEvent]{
+			Type:    e.Type,
+			Payload: skillsEventToProto(e.Payload),
 		})
 	default:
 		slog.Warn("Unrecognized event type for SSE wrapping", "type", fmt.Sprintf("%T", ev))
@@ -135,9 +163,48 @@ func sessionToProto(s session.Session) proto.Session {
 		PromptTokens:     s.PromptTokens,
 		CompletionTokens: s.CompletionTokens,
 		Cost:             s.Cost,
+		Todos:            todosToProto(s.Todos),
 		CreatedAt:        s.CreatedAt,
 		UpdatedAt:        s.UpdatedAt,
 	}
+}
+
+// isSessionBusy reports whether the given workspace has an in-flight
+// agent run for sessionID. It tolerates a nil workspace (treating it as
+// "not busy") so REST handlers can pass GetWorkspace's result through
+// unconditionally — the workspace lookup error is already surfaced by
+// the prior ListSessions/GetSession call when relevant.
+func isSessionBusy(ws *backend.Workspace, sessionID string) bool {
+	if ws == nil || ws.App == nil || ws.AgentCoordinator == nil {
+		return false
+	}
+	return ws.AgentCoordinator.IsSessionBusy(sessionID)
+}
+
+// attachedClients returns the number of clients currently viewing
+// sessionID in ws. Hold-only clients (streams == 0) do not contribute.
+// A nil workspace is treated as zero so handlers can pass GetWorkspace's
+// result through without an extra guard.
+func attachedClients(ws *backend.Workspace, sessionID string) int {
+	if ws == nil {
+		return 0
+	}
+	return ws.AttachedClientsForSession(sessionID)
+}
+
+func todosToProto(todos []session.Todo) []proto.Todo {
+	if len(todos) == 0 {
+		return nil
+	}
+	out := make([]proto.Todo, len(todos))
+	for i, t := range todos {
+		out[i] = proto.Todo{
+			Content:    t.Content,
+			Status:     string(t.Status),
+			ActiveForm: t.ActiveForm,
+		}
+	}
+	return out
 }
 
 func fileToProto(f history.File) proto.File {
@@ -186,6 +253,9 @@ func messageToProto(m message.Message) proto.Message {
 				ToolCallID: v.ToolCallID,
 				Name:       v.Name,
 				Content:    v.Content,
+				Data:       v.Data,
+				MIMEType:   v.MIMEType,
+				Metadata:   v.Metadata,
 				IsError:    v.IsError,
 			})
 		case message.Finish:
@@ -203,6 +273,27 @@ func messageToProto(m message.Message) proto.Message {
 	}
 
 	return msg
+}
+
+// skillsEventToProto converts a skills.Event into its wire form. Errors
+// are flattened to strings because error does not round-trip over JSON.
+func skillsEventToProto(e skills.Event) proto.SkillsEvent {
+	if len(e.States) == 0 {
+		return proto.SkillsEvent{}
+	}
+	out := proto.SkillsEvent{States: make([]proto.SkillState, len(e.States))}
+	for i, s := range e.States {
+		entry := proto.SkillState{
+			Name:  s.Name,
+			Path:  s.Path,
+			State: proto.SkillDiscoveryState(s.State),
+		}
+		if s.Err != nil {
+			entry.Error = s.Err.Error()
+		}
+		out.States[i] = entry
+	}
+	return out
 }
 
 func messagesToProto(msgs []message.Message) []proto.Message {

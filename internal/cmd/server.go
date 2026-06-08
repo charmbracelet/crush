@@ -42,17 +42,17 @@ var serverCmd = &cobra.Command{
 			return fmt.Errorf("failed to load configuration: %v", err)
 		}
 
-		logFile := filepath.Join(config.GlobalCacheDir(), "server-"+safeNameRegexp.ReplaceAllString(serverHost, "_"), "crush.log")
+		hostURL, err := server.ParseHostURL(serverHost)
+		if err != nil {
+			return fmt.Errorf("invalid server host: %v", err)
+		}
+
+		logFile := filepath.Join(config.GlobalCacheDir(), "server-"+safeHostName(hostURL), "crush.log")
 
 		if term.IsTerminal(os.Stderr.Fd()) {
 			crushlog.Setup(logFile, debug, os.Stderr)
 		} else {
 			crushlog.Setup(logFile, debug)
-		}
-
-		hostURL, err := server.ParseHostURL(serverHost)
-		if err != nil {
-			return fmt.Errorf("invalid server host: %v", err)
 		}
 
 		srv := server.NewServer(cfg, hostURL.Scheme, hostURL.Host)

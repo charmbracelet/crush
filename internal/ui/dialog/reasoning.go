@@ -40,6 +40,7 @@ type Reasoning struct {
 
 // ReasoningItem represents a reasoning effort list item.
 type ReasoningItem struct {
+	*list.Versioned
 	effort    string
 	title     string
 	isCurrent bool
@@ -47,6 +48,12 @@ type ReasoningItem struct {
 	m         fuzzy.Match
 	cache     map[int]string
 	focused   bool
+}
+
+// Finished implements list.Item. Reasoning items are render-stable
+// outside of explicit SetFocused / SetMatch.
+func (r *ReasoningItem) Finished() bool {
+	return true
 }
 
 var (
@@ -243,6 +250,7 @@ func (r *Reasoning) setReasoningItems() error {
 	selectedIndex := 0
 	for i, effort := range model.ReasoningLevels {
 		item := &ReasoningItem{
+			Versioned: list.NewVersioned(),
 			effort:    effort,
 			title:     common.FormatReasoningEffort(effort),
 			isCurrent: effort == currentEffort,
@@ -272,16 +280,26 @@ func (r *ReasoningItem) ID() string {
 
 // SetFocused sets the focus state of the reasoning item.
 func (r *ReasoningItem) SetFocused(focused bool) {
-	if r.focused != focused {
-		r.cache = nil
+	if r.focused == focused {
+		return
 	}
+	r.cache = nil
 	r.focused = focused
+	if r.Versioned != nil {
+		r.Bump()
+	}
 }
 
 // SetMatch sets the fuzzy match for the reasoning item.
 func (r *ReasoningItem) SetMatch(m fuzzy.Match) {
+	if sameFuzzyMatch(r.m, m) {
+		return
+	}
 	r.cache = nil
 	r.m = m
+	if r.Versioned != nil {
+		r.Bump()
+	}
 }
 
 // Render returns the string representation of the reasoning item.

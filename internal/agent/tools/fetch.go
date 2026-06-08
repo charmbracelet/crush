@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"html/template"
 	"io"
 	"net/http"
 	"strings"
@@ -21,8 +22,25 @@ const (
 	MaxFetchSize  = 100 * 1024 // 100KB
 )
 
-//go:embed fetch.md
-var fetchDescription []byte
+//go:embed fetch.md.tpl
+var fetchDescriptionTmpl []byte
+
+var fetchDescriptionTpl = template.Must(
+	template.New("fetchDescription").
+		Parse(string(fetchDescriptionTmpl)),
+)
+
+type fetchDescriptionData struct {
+	GhAvailable    bool
+	MaxFetchSizeKB int
+}
+
+func fetchDescription() string {
+	return renderTemplate(fetchDescriptionTpl, fetchDescriptionData{
+		GhAvailable:    ghAvailable,
+		MaxFetchSizeKB: MaxFetchSize / 1024,
+	})
+}
 
 func NewFetchTool(permissions permission.Service, workingDir string, client *http.Client) fantasy.AgentTool {
 	if client == nil {
@@ -39,7 +57,7 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 
 	return fantasy.NewParallelAgentTool(
 		FetchToolName,
-		FirstLineDescription(fetchDescription),
+		fetchDescription(),
 		func(ctx context.Context, params FetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.URL == "" {
 				return fantasy.NewTextErrorResponse("URL parameter is required"), nil
@@ -59,7 +77,8 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for creating a new file")
 			}
 
-			p, err := permissions.Request(ctx,
+			p, err := permissions.Request(
+				ctx,
 				permission.CreatePermissionRequest{
 					SessionID:   sessionID,
 					Path:        workingDir,
@@ -166,7 +185,8 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 			}
 
 			return fantasy.NewTextResponse(content), nil
-		})
+		},
+	)
 }
 
 func extractTextFromHTML(html string) (string, error) {

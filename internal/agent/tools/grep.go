@@ -8,6 +8,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"io"
 	"net/http"
 	"os"
@@ -38,14 +39,16 @@ func newRegexCache() *regexCache {
 
 // get retrieves a compiled regex from cache or compiles and caches it
 func (rc *regexCache) get(pattern string) (*regexp.Regexp, error) {
-	var rerr error
-	return rc.GetOrSet(pattern, func() *regexp.Regexp {
-		regex, err := regexp.Compile(pattern)
-		if err != nil {
-			rerr = err
-		}
-		return regex
-	}), rerr
+	re, ok := rc.Get(pattern)
+	if ok && re != nil {
+		return re, nil
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, err
+	}
+	rc.Set(pattern, re)
+	return re, nil
 }
 
 // ResetCache clears compiled regex caches to prevent unbounded growth across sessions.
@@ -87,8 +90,23 @@ const (
 	maxGrepContentWidth = 500
 )
 
-//go:embed grep.md
-var grepDescription []byte
+//go:embed grep.md.tpl
+var grepDescriptionTmpl []byte
+
+var grepDescriptionTpl = template.Must(
+	template.New("grepDescription").
+		Parse(string(grepDescriptionTmpl)),
+)
+
+type grepDescriptionData struct {
+	MaxResults int
+}
+
+func grepDescription() string {
+	return renderTemplate(grepDescriptionTpl, grepDescriptionData{
+		MaxResults: 100,
+	})
+}
 
 // escapeRegexPattern escapes special regex characters so they're treated as literal characters
 func escapeRegexPattern(pattern string) string {
@@ -105,7 +123,7 @@ func escapeRegexPattern(pattern string) string {
 func NewGrepTool(workingDir string, config config.ToolGrep) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		GrepToolName,
-		FirstLineDescription(grepDescription),
+		grepDescription(),
 		func(ctx context.Context, params GrepParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Pattern == "" {
 				return fantasy.NewTextErrorResponse("pattern is required"), nil
@@ -168,7 +186,8 @@ func NewGrepTool(workingDir string, config config.ToolGrep) fantasy.AgentTool {
 					Truncated:       truncated,
 				},
 			), nil
-		})
+		},
+	)
 }
 
 func searchFiles(ctx context.Context, pattern, rootPath, include string, limit int) ([]grepMatch, bool, error) {
@@ -339,6 +358,9 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 }
 
 func fileContainsPattern(filePath string, pattern *regexp.Regexp) (bool, int, int, string, error) {
+	if pattern == nil {
+		return false, 0, 0, "", nil
+	}
 	// Only search text files.
 	if !isTextFile(filePath) {
 		return false, 0, 0, "", nil
@@ -350,18 +372,26 @@ func fileContainsPattern(filePath string, pattern *regexp.Regexp) (bool, int, in
 	}
 	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
+	reader := bufio.NewReader(file)
 	lineNum := 0
-	for scanner.Scan() {
+	for {
+		line, err := reader.ReadString('\n')
 		lineNum++
-		line := scanner.Text()
+		line = strings.TrimSuffix(line, "\n")
+		line = strings.TrimSuffix(line, "\r")
 		if loc := pattern.FindStringIndex(line); loc != nil {
 			charNum := loc[0] + 1
 			return true, lineNum, charNum, line, nil
 		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return false, 0, 0, "", err
+		}
 	}
 
-	return false, 0, 0, "", scanner.Err()
+	return false, 0, 0, "", nil
 }
 
 // isTextFile checks if a file is a text file by examining its MIME type.

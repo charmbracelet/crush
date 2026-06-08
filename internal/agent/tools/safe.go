@@ -1,6 +1,10 @@
 package tools
 
-import "runtime"
+import (
+	"runtime"
+	"slices"
+	"strings"
+)
 
 var safeCommands = []string{
 	// Bash builtins and core utils
@@ -52,6 +56,22 @@ var safeCommands = []string{
 	"git show",
 	"git status",
 	"git tag",
+}
+
+var chainingMetacharacters = []string{
+	";",
+	"|",
+	"&&",
+	"$(",
+	"`",
+}
+
+// containsCommandChaining reports whether s contains shell metacharacters
+// that enable command chaining or substitution.
+func containsCommandChaining(s string) bool {
+	return slices.ContainsFunc(chainingMetacharacters, func(c string) bool {
+		return strings.Contains(s, c)
+	})
 }
 
 func init() {

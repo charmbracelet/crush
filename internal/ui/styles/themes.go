@@ -23,7 +23,7 @@ func CharmtonePantera() Styles {
 		accent:    charmtone.Bok,
 		keyword:   charmtone.Blush,
 
-		fgBase:       charmtone.Ash,
+		fgBase:       charmtone.Sash,
 		fgMoreSubtle: charmtone.Squid,
 		fgSubtle:     charmtone.Smoke,
 		fgMostSubtle: charmtone.Oyster,
@@ -32,15 +32,16 @@ func CharmtonePantera() Styles {
 
 		bgBase:         charmtone.Pepper,
 		bgLeastVisible: charmtone.BBQ,
-		bgLessVisible:  charmtone.Charcoal,
+		bgLessVisible:  charmtone.Char,
 		bgMostVisible:  charmtone.Iron,
 
-		separator: charmtone.Charcoal,
+		separator: charmtone.Char,
 
 		destructive:       charmtone.Coral,
 		error:             charmtone.Sriracha,
 		warningSubtle:     charmtone.Zest,
 		warning:           charmtone.Mustard,
+		denied:            charmtone.Tang,
 		busy:              charmtone.Citron,
 		info:              charmtone.Malibu,
 		infoMoreSubtle:    charmtone.Sardine,
@@ -58,7 +59,7 @@ func HypercrushObsidiana() Styles {
 		secondary: charmtone.Dolly,
 		accent:    charmtone.Bok,
 
-		fgBase:       charmtone.Ash,
+		fgBase:       charmtone.Sash,
 		fgMoreSubtle: charmtone.Squid,
 		fgSubtle:     charmtone.Smoke,
 		fgMostSubtle: charmtone.Oyster,
@@ -67,15 +68,16 @@ func HypercrushObsidiana() Styles {
 
 		bgBase:         charmtone.Pepper,
 		bgLeastVisible: charmtone.BBQ,
-		bgLessVisible:  charmtone.Charcoal,
+		bgLessVisible:  charmtone.Char,
 		bgMostVisible:  charmtone.Iron,
 
-		separator: charmtone.Charcoal,
+		separator: charmtone.Char,
 
 		destructive:       charmtone.Coral,
 		error:             charmtone.Sriracha,
 		warningSubtle:     charmtone.Zest,
 		warning:           charmtone.Mustard,
+		denied:            charmtone.Tang,
 		busy:              charmtone.Citron,
 		info:              charmtone.Malibu,
 		infoMoreSubtle:    charmtone.Sardine,

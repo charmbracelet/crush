@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -169,11 +168,21 @@ func (c *Client) createPowernapClient() error {
 		return fmt.Errorf("invalid lsp command: %w", err)
 	}
 
+	args, err := c.config.ResolvedArgs(c.resolver)
+	if err != nil {
+		return fmt.Errorf("invalid lsp args: %w", err)
+	}
+
+	envs, err := c.config.ResolvedEnv(c.resolver)
+	if err != nil {
+		return fmt.Errorf("invalid lsp env: %w", err)
+	}
+
 	clientConfig := powernap.ClientConfig{
 		Command:     home.Long(command),
-		Args:        c.config.Args,
+		Args:        args,
 		RootURI:     rootURI,
-		Environment: maps.Clone(c.config.Env),
+		Environment: envs,
 		Settings:    c.config.Options,
 		InitOptions: c.config.InitOptions,
 		WorkspaceFolders: []protocol.WorkspaceFolder{

@@ -13,19 +13,92 @@ import (
 // Workspace represents a running app.App workspace with its associated
 // resources and state.
 type Workspace struct {
-	ID      string         `json:"id"`
-	Path    string         `json:"path"`
-	YOLO    bool           `json:"yolo,omitempty"`
-	Debug   bool           `json:"debug,omitempty"`
-	DataDir string         `json:"data_dir,omitempty"`
-	Version string         `json:"version,omitempty"`
-	Config  *config.Config `json:"config,omitempty"`
-	Env     []string       `json:"env,omitempty"`
+	ID       string         `json:"id"`
+	Path     string         `json:"path"`
+	YOLO     bool           `json:"yolo,omitempty"`
+	Debug    bool           `json:"debug,omitempty"`
+	DataDir  string         `json:"data_dir,omitempty"`
+	Version  string         `json:"version,omitempty"`
+	ClientID string         `json:"client_id,omitempty"`
+	Config   *config.Config `json:"config,omitempty"`
+	Env      []string       `json:"env,omitempty"`
+	// Skills carries the snapshot of skill discovery state at workspace
+	// creation time. Subsequent updates flow through the SSE event
+	// stream.
+	Skills []SkillState `json:"skills,omitempty"`
 }
 
 // Error represents an error response.
 type Error struct {
 	Message string `json:"message"`
+}
+
+// ConfigChanged is published whenever the workspace's configuration is
+// mutated by a backend operation. Clients react by re-fetching the
+// workspace snapshot so cached config stays in sync across subscribers.
+type ConfigChanged struct {
+	WorkspaceID string `json:"workspace_id"`
+}
+
+// CurrentSession is the request body for the per-client
+// current-session endpoint. An empty SessionID clears the entry.
+type CurrentSession struct {
+	SessionID string `json:"session_id"`
+}
+
+// RunComplete is the authoritative end-of-run signal for a session,
+// emitted exactly once per top-level agent turn after all message
+// updates for the turn have flushed. Clients that need a reliable
+// completion contract (notably `crush run` in client/server mode)
+// should listen for this event filtered by RunID (preferred) — or
+// by SessionID when no RunID was supplied — and use Text and
+// MessageID to reconcile any output they have already streamed from
+// earlier message events. Error is non-empty when the run terminated
+// with an error; Cancelled is true when terminated due to context
+// cancellation.
+//
+// RunID echoes the value the caller set on AgentMessage.RunID. It is
+// the only safe correlator when the caller's prompt was queued
+// behind a busy session: another turn's RunComplete for the same
+// SessionID may arrive first, and filtering by SessionID alone
+// would terminate the caller before its own turn ran.
+type RunComplete struct {
+	SessionID string `json:"session_id"`
+	RunID     string `json:"run_id,omitempty"`
+	MessageID string `json:"message_id"`
+	Text      string `json:"text,omitempty"`
+	Error     string `json:"error,omitempty"`
+	Cancelled bool   `json:"cancelled,omitempty"`
+}
+
+// SkillInfo describes a visible skill exposed to a frontend.
+type SkillInfo struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Description   string `json:"description"`
+	Label         string `json:"label"`
+	Source        string `json:"source"`
+	UserInvocable bool   `json:"user_invocable"`
+}
+
+// ReadSkillRequest is the request body for reading a skill's content.
+type ReadSkillRequest struct {
+	SkillID string `json:"skill_id"`
+}
+
+// ReadSkillResponse is the response for reading a skill's content.
+type ReadSkillResponse struct {
+	Content []byte          `json:"content"`
+	Result  SkillReadResult `json:"result"`
+}
+
+// SkillReadResult holds metadata about a skill returned alongside its
+// content.
+type SkillReadResult struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Source      string `json:"source"`
+	Builtin     bool   `json:"builtin"`
 }
 
 // AgentInfo represents information about the agent.
@@ -42,8 +115,22 @@ func (a AgentInfo) IsZero() bool {
 }
 
 // AgentMessage represents a message sent to the agent.
+//
+// RunID, when non-empty, is echoed back on the [RunComplete] event
+// emitted for the resulting turn. Callers that need to correlate a
+// specific SendMessage with its terminal event (notably
+// `crush run`, which may attach to a busy session whose currently
+// running turn finishes first) should set it to a fresh unique
+// value before the request. Server-side propagation flows through
+// agent.WithRunID on the request context into the
+// SessionAgentCall; it is preserved across the busy-session queue.
+// When empty the resulting RunComplete carries an empty RunID and
+// callers must fall back to SessionID-only filtering, which
+// remains correct only when no other turns are in flight for the
+// same session.
 type AgentMessage struct {
 	SessionID   string       `json:"session_id"`
+	RunID       string       `json:"run_id,omitempty"`
 	Prompt      string       `json:"prompt"`
 	Attachments []Attachment `json:"attachments,omitempty"`
 }
@@ -56,7 +143,7 @@ type AgentSession struct {
 
 // IsZero checks if the AgentSession is zero-valued.
 func (a AgentSession) IsZero() bool {
-	return a == AgentSession{}
+	return a.ID == "" && !a.IsBusy
 }
 
 // PermissionAction represents an action taken on a permission request.
@@ -83,6 +170,15 @@ func (p *PermissionAction) UnmarshalText(text []byte) error {
 type PermissionGrant struct {
 	Permission PermissionRequest `json:"permission"`
 	Action     PermissionAction  `json:"action"`
+}
+
+// PermissionGrantResponse is the server's response to a permission
+// grant call. Resolved is true when this call resolved the pending
+// request, and false when the request had already been resolved by a
+// previous caller (e.g., another client in a multi-subscriber UI). A
+// false value is not an error.
+type PermissionGrantResponse struct {
+	Resolved bool `json:"resolved"`
 }
 
 // PermissionSkipRequest represents a request to skip permission prompts.
@@ -131,7 +227,7 @@ func (e LSPEvent) MarshalJSON() ([]byte, error) {
 			}
 			return ""
 		}(),
-		Alias: (Alias)(e),
+		Alias: Alias(e),
 	})
 }
 
@@ -142,7 +238,7 @@ func (e *LSPEvent) UnmarshalJSON(data []byte) error {
 		Error string `json:"error,omitempty"`
 		Alias
 	}{
-		Alias: (Alias)(*e),
+		Alias: Alias(*e),
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
@@ -176,7 +272,7 @@ func (i LSPClientInfo) MarshalJSON() ([]byte, error) {
 			}
 			return ""
 		}(),
-		Alias: (Alias)(i),
+		Alias: Alias(i),
 	})
 }
 
@@ -187,7 +283,7 @@ func (i *LSPClientInfo) UnmarshalJSON(data []byte) error {
 		Error string `json:"error,omitempty"`
 		Alias
 	}{
-		Alias: (Alias)(*i),
+		Alias: Alias(*i),
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err

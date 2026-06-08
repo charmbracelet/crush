@@ -224,6 +224,12 @@ func (*Permissions) ID() string {
 	return PermissionsID
 }
 
+// ToolCallID returns the tool call ID associated with this dialog's
+// permission request.
+func (p *Permissions) ToolCallID() string {
+	return p.permission.ToolCallID
+}
+
 // HandleMsg implements [Dialog].
 func (p *Permissions) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
@@ -775,7 +781,8 @@ func (p *Permissions) ShortHelp() []key.Binding {
 	}
 
 	if p.hasDiffView() {
-		bindings = append(bindings,
+		bindings = append(
+			bindings,
 			p.keyMap.ToggleDiffMode,
 			p.keyMap.ToggleFullscreen,
 		)

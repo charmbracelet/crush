@@ -26,7 +26,7 @@ func TestClient(t *testing.T) {
 
 	// Test creating a powernap client - this will likely fail with echo
 	// but we can still test the basic structure
-	client, err := New(ctx, "test", cfg, config.NewEnvironmentVariableResolver(env.NewFromMap(map[string]string{
+	client, err := New(ctx, "test", cfg, config.NewShellVariableResolver(env.NewFromMap(map[string]string{
 		"THE_CMD": "echo",
 	})), ".", false)
 	if err != nil {
@@ -59,6 +59,42 @@ func TestClient(t *testing.T) {
 		// Expected to fail with echo command
 		t.Logf("Close failed as expected with dummy command: %v", err)
 	}
+}
+
+// TestNew_ExpansionFailure_Args pins that a failing $(cmd) in LSP
+// args surfaces as a load error prefixed "invalid lsp args:" and that
+// no client is returned. Mirrors the MCP contract where expansion
+// failure hard-stops transport creation rather than silently running
+// with an empty or literal value.
+func TestNew_ExpansionFailure_Args(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.LSPConfig{
+		Command: "echo",
+		Args:    []string{"--root", "$(false)"},
+	}
+	resolver := config.NewShellVariableResolver(env.NewFromMap(map[string]string{}))
+
+	client, err := New(t.Context(), "test-args-fail", cfg, resolver, ".", false)
+	require.Error(t, err)
+	require.Nil(t, client, "client must not start when args expansion fails")
+	require.Contains(t, err.Error(), "invalid lsp args")
+}
+
+// TestNew_ExpansionFailure_Env pins the same contract for env values.
+func TestNew_ExpansionFailure_Env(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.LSPConfig{
+		Command: "echo",
+		Env:     map[string]string{"BAD": "$(false)"},
+	}
+	resolver := config.NewShellVariableResolver(env.NewFromMap(map[string]string{}))
+
+	client, err := New(t.Context(), "test-env-fail", cfg, resolver, ".", false)
+	require.Error(t, err)
+	require.Nil(t, client, "client must not start when env expansion fails")
+	require.Contains(t, err.Error(), "invalid lsp env")
 }
 
 func TestNilClient(t *testing.T) {

@@ -31,6 +31,13 @@ type AgentEvent struct {
 	Message Message        `json:"message"`
 	Error   error          `json:"error,omitempty"`
 
+	// RunID echoes the caller-supplied AgentMessage.RunID for the run
+	// that produced this event. It lets observers (notably
+	// `crush run`) attribute an error event to a specific request
+	// instead of to any in-flight run on the session. Empty when no
+	// caller set one.
+	RunID string `json:"run_id,omitempty"`
+
 	// When summarizing.
 	SessionID    string `json:"session_id,omitempty"`
 	SessionTitle string `json:"session_title,omitempty"`
@@ -51,7 +58,7 @@ func (e AgentEvent) MarshalJSON() ([]byte, error) {
 			}
 			return ""
 		}(),
-		Alias: (Alias)(e),
+		Alias: Alias(e),
 	})
 }
 
@@ -62,7 +69,7 @@ func (e *AgentEvent) UnmarshalJSON(data []byte) error {
 		Error string `json:"error,omitempty"`
 		Alias
 	}{
-		Alias: (Alias)(*e),
+		Alias: Alias(*e),
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err

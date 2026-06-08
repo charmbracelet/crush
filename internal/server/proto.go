@@ -261,16 +261,21 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 	if !ok {
 		return
 	}
-	if err := c.backend.AttachClient(id, clientID); err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	defer c.backend.DetachClient(id, clientID)
+	// Subscribe to the event broker BEFORE attaching the client.
+	// AttachClient bumps the stream count that observers use to
+	// detect a live subscriber; subscribing first guarantees that
+	// once a client appears attached, any published event is
+	// delivered rather than dropped on a not-yet-registered stream.
 	events, err := c.backend.SubscribeEvents(r.Context(), id)
 	if err != nil {
 		c.handleError(w, r, err)
 		return
 	}
+	if err := c.backend.AttachClient(id, clientID); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	defer c.backend.DetachClient(id, clientID)
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")

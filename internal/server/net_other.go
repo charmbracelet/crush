@@ -32,7 +32,7 @@ func listen(network, address string) (net.Listener, bool, error) {
 	var removedStale bool
 	if network == "unix" && address != "" {
 		if _, err := os.Stat(address); err == nil {
-			conn, dialErr := net.DialTimeout(network, address, staleSocketDialTimeout)
+			conn, dialErr := net.DialTimeout(network, address, staleSocketDialTimeout) //nolint:noctx
 			if dialErr == nil {
 				// A live server owns the socket. Fall through to
 				// net.Listen so the caller sees the standard

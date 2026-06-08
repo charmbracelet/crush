@@ -71,8 +71,12 @@ func TestDefaultHost_XDGRuntimeDir(t *testing.T) {
 	path := strings.TrimPrefix(host, "unix://")
 
 	// The composed path may exceed maxUnixSocketPathLen and fall back
-	// to /tmp; only assert containment when it did not.
-	if len(filepath.Join(dir, "crush.sock")) <= maxUnixSocketPathLen {
+	// to /tmp; only assert containment when it did not. Recompose the
+	// path under dir (rather than checking the returned path length,
+	// which is short again after a /tmp fallback) to decide whether a
+	// fallback happened. The socket is named crush-<uid>.sock.
+	composed := filepath.Join(dir, filepath.Base(path))
+	if len(composed) <= maxUnixSocketPathLen {
 		require.True(t, strings.HasPrefix(path, dir),
 			"socket path %q should live under %q", path, dir)
 	}
@@ -104,7 +108,7 @@ func TestDefaultHost_FallbackTemp(t *testing.T) {
 // it. A leftover file is best-effort removed via t.Cleanup.
 func staleSocketPath(t *testing.T, path string) {
 	t.Helper()
-	ln, err := net.Listen("unix", path)
+	ln, err := net.Listen("unix", path) //nolint:noctx
 	require.NoError(t, err)
 	ul, ok := ln.(*net.UnixListener)
 	require.True(t, ok, "expected *net.UnixListener, got %T", ln)
@@ -112,7 +116,7 @@ func staleSocketPath(t *testing.T, path string) {
 	require.NoError(t, ul.Close())
 
 	// Verify it is actually stale: dialing should fail.
-	conn, dialErr := net.DialTimeout("unix", path, 200*time.Millisecond)
+	conn, dialErr := net.DialTimeout("unix", path, 200*time.Millisecond) //nolint:noctx
 	if dialErr == nil {
 		conn.Close()
 		t.Fatalf("expected stale socket at %q to refuse connections", path)
@@ -150,7 +154,7 @@ func TestListen_LiveSocketNotRemoved(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "s.sock")
 
-	ln1, err := net.Listen("unix", path)
+	ln1, err := net.Listen("unix", path) //nolint:noctx
 	require.NoError(t, err)
 
 	// Drain accepts so the listener stays alive and responsive without
@@ -183,7 +187,7 @@ func TestListen_LiveSocketNotRemoved(t *testing.T) {
 	// The live socket file must still be on disk and dialable.
 	_, statErr := os.Stat(path)
 	require.NoError(t, statErr, "live socket file should still exist")
-	conn, dialErr := net.DialTimeout("unix", path, 200*time.Millisecond)
+	conn, dialErr := net.DialTimeout("unix", path, 200*time.Millisecond) //nolint:noctx
 	require.NoError(t, dialErr, "live socket should still accept dials")
 	_ = conn.Close()
 }

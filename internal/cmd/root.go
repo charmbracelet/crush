@@ -437,7 +437,7 @@ func ensureServer(cmd *cobra.Command, hostURL *url.URL) error {
 			// we detect it with a short DialTimeout and remove the
 			// orphaned file so the normal spawn path can run.
 			if hostURL.Scheme == "unix" {
-				conn, dialErr := net.DialTimeout(
+				conn, dialErr := net.DialTimeout( //nolint:noctx
 					hostURL.Scheme, hostURL.Host, 200*time.Millisecond,
 				)
 				if dialErr == nil {

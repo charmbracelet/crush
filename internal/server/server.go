@@ -234,9 +234,12 @@ func (s *Server) ListenAndServe() error {
 	if s.ln != nil {
 		return fmt.Errorf("server already started")
 	}
-	ln, err := listen(s.network, s.Addr)
+	ln, removedStale, err := listen(s.network, s.Addr)
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %w", s.Addr, err)
+	}
+	if removedStale && s.logger != nil {
+		s.logger.Warn("Removed stale socket before binding", "address", s.Addr)
 	}
 	return s.Serve(ln)
 }

@@ -5,7 +5,11 @@ import (
 	"encoding/json"
 	"testing"
 
+	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
+	"charm.land/fantasy/providers/openaicompat"
+	"github.com/charmbracelet/crush/internal/agent/tools"
+	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/subagents"
 	"github.com/stretchr/testify/require"
@@ -241,4 +245,86 @@ func TestSubagentSessionSetup(t *testing.T) {
 		setup("session-123")
 		require.Equal(t, []string{"session-123"}, rec.autoApproved)
 	})
+}
+
+// TestAgentTool_SubagentBuildFailure_SurfacedAsToolError verifies that when a
+// named subagent fails to build (because its model: names a model no provider
+// offers), the dispatcher returns a ToolResponse with IsError==true and a nil
+// Go error. A nil Go error is critical: fantasy treats a non-nil error as a
+// hard abort of the whole agent turn, whereas an error response lets the
+// parent model see the failure and continue.
+func TestAgentTool_SubagentBuildFailure_SurfacedAsToolError(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+
+	// Build a minimal offline config with one provider and one model, mirroring
+	// agenttest.NewCoordinator so no network call is needed.
+	cfg, err := config.Init(env.workingDir, "", false)
+	require.NoError(t, err)
+
+	const (
+		providerID = "test-openai-compat"
+		modelID    = "test-model"
+	)
+	cfg.Config().Providers.Set(providerID, config.ProviderConfig{
+		ID:      providerID,
+		Name:    "Test",
+		Type:    openaicompat.Name,
+		BaseURL: "http://127.0.0.1:0/v1",
+		APIKey:  "test",
+		Models:  []catwalk.Model{{ID: modelID, DefaultMaxTokens: 4096}},
+	})
+	selected := config.SelectedModel{Provider: providerID, Model: modelID}
+	cfg.Config().Models[config.SelectedModelTypeLarge] = selected
+	cfg.Config().Models[config.SelectedModelTypeSmall] = selected
+	cfg.SetupAgents()
+
+	// Clear AllowedTools on both agents so buildTools stays cheap and offline.
+	for _, agentID := range []string{config.AgentCoder, config.AgentTask} {
+		a := cfg.Config().Agents[agentID]
+		a.AllowedTools = nil
+		cfg.Config().Agents[agentID] = a
+	}
+
+	c, err := NewCoordinator(t.Context(), CoordinatorOptions{
+		Config:      cfg,
+		Sessions:    env.sessions,
+		Messages:    env.messages,
+		Permissions: permission.NewPermissionService(env.workingDir, true, nil),
+	})
+	require.NoError(t, err)
+
+	// Type-assert to *coordinator so we can access unexported fields and methods.
+	coord := c.(*coordinator)
+
+	// Inject a broken subagent whose model is not offered by any provider.
+	// activeSubagentsList falls back to activeSubagents when subagentsMgr is nil.
+	coord.activeSubagents = []*subagents.Subagent{
+		{Name: "broken", Description: "intentionally broken", Model: "no-such-model"},
+	}
+
+	// Retrieve the real dispatcher tool built by agentTool.
+	tool, err := coord.agentTool(t.Context())
+	require.NoError(t, err)
+
+	dt := tool.(*dispatcherTool)
+
+	// Inject session and message IDs into context; the dispatch closure returns
+	// a hard error when either is absent, which is a different code path.
+	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "sess-1")
+	ctx = context.WithValue(ctx, tools.MessageIDContextKey, "msg-1")
+
+	input, err := json.Marshal(AgentDispatchParams{SubagentType: "broken", Prompt: "do it"})
+	require.NoError(t, err)
+
+	resp, err := dt.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
+
+	// The turn must not abort: fantasy treats a non-nil error as critical.
+	require.NoError(t, err)
+	// The build failure must be surfaced as a tool-error response so the
+	// parent model can report it and continue.
+	require.True(t, resp.IsError)
+	// The subagent name must appear in the error message.
+	require.Contains(t, resp.Content, "broken")
 }

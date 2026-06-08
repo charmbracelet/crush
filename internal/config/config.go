@@ -587,7 +587,7 @@ type Config struct {
 
 	Hooks map[string][]HookConfig `json:"hooks,omitempty" jsonschema:"description=User-defined shell commands that fire on hook events (e.g. PreToolUse)"`
 
-	Agents map[string]Agent `json:"-"`
+	Agents map[string]Agent `json:"agents,omitempty" jsonschema:"description=Agent configurations"`
 }
 
 func (c *Config) EnabledProviders() []ProviderConfig {
@@ -710,12 +710,21 @@ func filterSlice(data []string, mask []string, include bool) []string {
 func (c *Config) SetupAgents() {
 	allowedTools := resolveAllowedTools(allToolNames(), c.Options.DisabledTools)
 
+	coderModel := SelectedModelTypeLarge
+	if agentCfg, ok := c.Agents[AgentCoder]; ok && agentCfg.Model != "" {
+		coderModel = agentCfg.Model
+	}
+	taskModel := SelectedModelTypeLarge
+	if agentCfg, ok := c.Agents[AgentTask]; ok && agentCfg.Model != "" {
+		taskModel = agentCfg.Model
+	}
+
 	agents := map[string]Agent{
 		AgentCoder: {
 			ID:           AgentCoder,
 			Name:         "Coder",
 			Description:  "An agent that helps with executing coding tasks.",
-			Model:        SelectedModelTypeLarge,
+			Model:        coderModel,
 			ContextPaths: c.Options.ContextPaths,
 			AllowedTools: allowedTools,
 		},
@@ -724,7 +733,7 @@ func (c *Config) SetupAgents() {
 			ID:           AgentTask,
 			Name:         "Task",
 			Description:  "An agent that helps with searching for context and finding implementation details.",
-			Model:        SelectedModelTypeLarge,
+			Model:        taskModel,
 			ContextPaths: c.Options.ContextPaths,
 			AllowedTools: resolveReadOnlyTools(allowedTools),
 			// NO MCPs or LSPs by default

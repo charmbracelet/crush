@@ -221,6 +221,9 @@ type UI struct {
 	completionsStartIndex    int
 	completionsQuery         string
 	completionsPositionStart image.Point // x,y where user typed '@'
+	completionsLastDir       string      // directory that was last loaded for completions
+	completionsLoadGen       uint64      // generation counter for async load dedup
+	completionsDebounceTag   uint64      // monotonic tag for debouncing directory-change loads
 
 	// Chat components
 	chat *Chat
@@ -962,9 +965,17 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, clearInfoMsgCmd(ttl))
 	case util.ClearStatusMsg:
 		m.status.ClearInfoMsg()
+	case completions.DebouncedOpenMsg:
+		if m.completionsOpen && msg.Tag == m.completionsDebounceTag {
+			cmds = append(cmds, m.completions.Open(msg.Query, msg.Depth, msg.Limit))
+		}
 	case completions.CompletionItemsLoadedMsg:
-		if m.completionsOpen {
+		if m.completionsOpen && msg.Gen >= m.completionsLoadGen {
+			m.completionsLoadGen = msg.Gen
 			m.completions.SetItems(msg.Files, msg.Resources)
+			if m.completionsQuery != "" {
+				m.completions.Filter(m.completionsQuery)
+			}
 		}
 	case uv.KittyGraphicsEvent:
 		if !bytes.HasPrefix(msg.Payload, []byte("OK")) {
@@ -2042,21 +2053,8 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					break
 				}
 
-				// Check for @ trigger before passing to textarea.
-				curValue := m.textarea.Value()
-				curIdx := len(curValue)
-
-				// Trigger completions on @.
-				if msg.String() == "@" && !m.completionsOpen {
-					// Only show if beginning of prompt or after whitespace.
-					if curIdx == 0 || (curIdx > 0 && isWhitespace(curValue[curIdx-1])) {
-						m.completionsOpen = true
-						m.completionsQuery = ""
-						m.completionsStartIndex = curIdx
-						m.completionsPositionStart = m.completionsPosition()
-						depth, limit := m.com.Config().Options.TUI.Completions.Limits()
-						cmds = append(cmds, m.completions.Open(depth, limit))
-					}
+				if cmd := m.handleCompletionTrigger(msg); cmd != nil {
+					cmds = append(cmds, cmd)
 				}
 
 				// remove the details if they are open when user starts typing
@@ -2069,30 +2067,12 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
 
 				// Any text modification becomes the current draft.
-				m.updateHistoryDraft(curValue)
+				m.updateHistoryDraft(m.textarea.Value())
 
 				// After updating textarea, check if we need to filter completions.
 				// Skip filtering on the initial @ keystroke since items are loading async.
 				if m.completionsOpen && msg.String() != "@" {
-					newValue := m.textarea.Value()
-					newIdx := len(newValue)
-
-					// Close completions if cursor moved before start.
-					if newIdx <= m.completionsStartIndex {
-						m.closeCompletions()
-					} else if msg.String() == "space" {
-						// Close on space.
-						m.closeCompletions()
-					} else {
-						// Extract current word and filter.
-						word := m.textareaWord()
-						if strings.HasPrefix(word, "@") {
-							m.completionsQuery = word[1:]
-							m.completions.Filter(m.completionsQuery)
-						} else if m.completionsOpen {
-							m.closeCompletions()
-						}
-					}
+					cmds = append(cmds, m.handleCompletionFilter(msg))
 				}
 			}
 		case uiFocusMain:
@@ -2990,11 +2970,90 @@ func (m *UI) yoloPromptFunc(info textarea.PromptInfo) string {
 	return t.Editor.PromptYoloDotsBlurred.Render()
 }
 
+// handleCompletionTrigger checks for the @ trigger and opens completions if
+// the character before the cursor is at the start of the prompt or is
+// whitespace. Returns a tea.Cmd to open completions when triggered.
+func (m *UI) handleCompletionTrigger(msg tea.KeyPressMsg) tea.Cmd {
+	if msg.String() != "@" || m.completionsOpen {
+		return nil
+	}
+
+	li := m.textarea.LineInfo()
+	curLine := m.textarea.Line()
+	curCol := li.ColumnOffset
+
+	// If not at column 0, check if the character before the cursor is whitespace.
+	if curCol > 0 {
+		lines := strings.Split(m.textarea.Value(), "\n")
+		if curLine >= 0 && curLine < len(lines) && curCol <= len(lines[curLine]) {
+			if !isWhitespace(lines[curLine][curCol-1]) {
+				return nil
+			}
+		}
+	}
+
+	m.completionsOpen = true
+	m.completionsQuery = ""
+	m.completionsLastDir = "."
+	m.completionsStartIndex = cursorByteIndex(m.textarea)
+	m.completionsPositionStart = m.completionsPosition()
+	depth, limit := m.com.Config().Options.TUI.Completions.Limits()
+	m.completionsDebounceTag++
+	tag := m.completionsDebounceTag
+	return m.completions.DebounceOpen(tag, "", depth, limit)
+}
+
+// handleCompletionFilter updates completion query and reloads items when the
+// directory changes. Returns a tea.Cmd if a directory reload is needed.
+func (m *UI) handleCompletionFilter(_ tea.KeyPressMsg) tea.Cmd {
+	// Extract current word and filter.
+	word := m.textarea.Word()
+	if !strings.HasPrefix(word, "@") {
+		m.closeCompletions()
+		return nil
+	}
+
+	m.completionsQuery = word[1:]
+	newDir := completions.DirFromQuery(m.completionsQuery)
+	if newDir != m.completionsLastDir {
+		m.completionsLastDir = newDir
+		depth, limit := m.com.Config().Options.TUI.Completions.Limits()
+		m.completionsDebounceTag++
+		tag := m.completionsDebounceTag
+		return m.completions.DebounceOpen(tag, m.completionsQuery, depth, limit)
+	}
+	m.completions.Filter(m.completionsQuery)
+	return nil
+}
+
+// cursorByteIndex returns the byte offset of the cursor in the textarea
+// value by summing byte lengths of preceding lines and adding the column
+// offset on the current line.
+func cursorByteIndex(ta textarea.Model) int {
+	lines := strings.Split(ta.Value(), "\n")
+	row := ta.Line()
+	col := ta.Column()
+	idx := 0
+	for i := 0; i < row && i < len(lines); i++ {
+		idx += len(lines[i]) + 1 // +1 for the newline character
+	}
+	if row >= 0 && row < len(lines) {
+		runes := []rune(lines[row])
+		if col <= len(runes) {
+			idx += len(string(runes[:col]))
+		} else {
+			idx += len(lines[row])
+		}
+	}
+	return idx
+}
+
 // closeCompletions closes the completions popup and resets state.
 func (m *UI) closeCompletions() {
 	m.completionsOpen = false
 	m.completionsQuery = ""
 	m.completionsStartIndex = 0
+	m.completionsLastDir = "."
 	m.completions.Close()
 }
 
@@ -3006,7 +3065,7 @@ func (m *UI) insertCompletionText(text string) bool {
 		return false
 	}
 
-	word := m.textareaWord()
+	word := m.textarea.Word()
 	endIdx := min(m.completionsStartIndex+len(word), len(value))
 	newValue := value[:m.completionsStartIndex] + text + value[endIdx:]
 	m.textarea.SetValue(newValue)
@@ -3015,16 +3074,19 @@ func (m *UI) insertCompletionText(text string) bool {
 	return true
 }
 
-// insertFileCompletion inserts the selected file path into the textarea,
-// replacing the @query, and adds the file as an attachment.
-func (m *UI) insertFileCompletion(path string) tea.Cmd {
+func (m *UI) insertCompletion(displayText string, loadAttachment func() tea.Msg) tea.Cmd {
 	prevHeight := m.textarea.Height()
-	if !m.insertCompletionText(path) {
+	if !m.insertCompletionText(displayText) {
 		return nil
 	}
 	heightCmd := m.handleTextareaHeightChange(prevHeight)
+	return tea.Batch(heightCmd, loadAttachment)
+}
 
-	fileCmd := func() tea.Msg {
+// insertFileCompletion inserts the selected file path into the textarea,
+// replacing the @query, and adds the file as an attachment.
+func (m *UI) insertFileCompletion(path string) tea.Cmd {
+	return m.insertCompletion(path, func() tea.Msg {
 		absPath, _ := filepath.Abs(path)
 
 		if m.hasSession() {
@@ -3054,8 +3116,7 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 			MimeType: mimeOf(content),
 			Content:  content,
 		}
-	}
-	return tea.Batch(heightCmd, fileCmd)
+	})
 }
 
 // insertMCPResourceCompletion inserts the selected resource into the textarea,
@@ -3063,13 +3124,7 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValue) tea.Cmd {
 	displayText := cmp.Or(item.Title, item.URI)
 
-	prevHeight := m.textarea.Height()
-	if !m.insertCompletionText(displayText) {
-		return nil
-	}
-	heightCmd := m.handleTextareaHeightChange(prevHeight)
-
-	resourceCmd := func() tea.Msg {
+	return m.insertCompletion(displayText, func() tea.Msg {
 		contents, err := m.com.Workspace.ReadMCPResource(
 			context.Background(),
 			item.MCPName,
@@ -3108,8 +3163,7 @@ func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValu
 			MimeType: mimeType,
 			Content:  data,
 		}
-	}
-	return tea.Batch(heightCmd, resourceCmd)
+	})
 }
 
 // completionsPosition returns the X and Y position for the completions popup.
@@ -3125,11 +3179,6 @@ func (m *UI) completionsPosition() image.Point {
 		X: cur.X + m.layout.editor.Min.X,
 		Y: m.layout.editor.Min.Y + cur.Y,
 	}
-}
-
-// textareaWord returns the current word at the cursor position.
-func (m *UI) textareaWord() string {
-	return m.textarea.Word()
 }
 
 // isWhitespace returns true if the byte is a whitespace character.

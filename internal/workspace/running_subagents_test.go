@@ -420,6 +420,18 @@ func TestAppWorkspace_SessionTokens_NotFound(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestAddOrRemove covers the pure list helper backing SetSubagentDisabled.
+func TestAddOrRemove(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, []string{"a"}, addOrRemove(nil, "a", true), "add to empty")
+	require.Equal(t, []string{"a"}, addOrRemove([]string{"a"}, "a", true), "add dedups")
+	require.Equal(t, []string{}, addOrRemove([]string{"a"}, "a", false), "remove last")
+	require.Equal(t, []string{"b", "c"}, addOrRemove([]string{"b", "a", "c", "a"}, "a", false),
+		"remove drops all occurrences, keeps others")
+	require.Equal(t, []string{"b", "a"}, addOrRemove([]string{"b"}, "a", true), "add appends")
+}
+
 // TestAppWorkspace_DeleteUserSubagent_ReloadValidatesModel verifies that the
 // reload after a delete validates model ids (passes cfg.IsKnownModel, not
 // nil). A subagent referencing an unknown model must NOT become active after

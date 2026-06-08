@@ -262,7 +262,6 @@ func (s *Subagent) Validate() error {
 		for _, tool := range s.Tools {
 			if disallowedSet[tool] {
 				errs = append(errs, fmt.Errorf("tool %q appears in both tools and disallowedTools", tool))
-				break
 			}
 		}
 	}

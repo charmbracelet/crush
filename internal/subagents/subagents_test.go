@@ -995,3 +995,24 @@ func TestDiscoverWithStates(t *testing.T) {
 		require.Error(t, states[0].Err)
 	})
 }
+
+// TestValidate_ReportsAllToolOverlaps verifies that when multiple tools appear
+// in both Tools and DisallowedTools, Validate reports every overlapping tool
+// rather than stopping at the first. The fix removed a break so all overlaps
+// are joined via errors.Join.
+func TestValidate_ReportsAllToolOverlaps(t *testing.T) {
+	t.Parallel()
+
+	sa := Subagent{
+		Name:            "reviewer",
+		Description:     "Reviews things.",
+		Tools:           ToolList{"view", "edit", "bash"},
+		DisallowedTools: ToolList{"view", "edit", "bash"},
+	}
+
+	err := sa.Validate()
+	require.Error(t, err)
+	require.ErrorContains(t, err, "view")
+	require.ErrorContains(t, err, "edit")
+	require.ErrorContains(t, err, "bash")
+}

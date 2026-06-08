@@ -416,6 +416,14 @@ func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func
 // version matches the client; on mismatch it shuts down the old server
 // and starts a fresh one.
 func ensureServer(cmd *cobra.Command, hostURL *url.URL) error {
+	// Initialize the persistent log here so stale-socket diagnostics
+	// emitted before connectToServer runs are captured in the per-host
+	// server log file. crushlog.Setup uses sync.Once internally, so the
+	// later call from connectToServer becomes a no-op.
+	debug, _ := cmd.Flags().GetBool("debug")
+	logFile := filepath.Join(config.GlobalCacheDir(), "server-"+safeHostName(hostURL), "crush.log")
+	crushlog.Setup(logFile, debug)
+
 	switch hostURL.Scheme {
 	case "unix", "npipe":
 		needsStart := false

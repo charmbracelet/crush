@@ -221,6 +221,7 @@ type UI struct {
 	completionsStartIndex    int
 	completionsQuery         string
 	completionsPositionStart image.Point // x,y where user typed '@'
+	completionsLastAttachmentPath string // path of last file completion inserted
 
 	// Chat components
 	chat *Chat
@@ -1980,6 +1981,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 				attachments := m.attachments.List()
 				m.attachments.Reset()
+				m.completionsLastAttachmentPath = ""
 				if len(value) == 0 && !message.ContainsTextAttachment(attachments) {
 					return nil
 				}
@@ -2092,6 +2094,22 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 						} else if m.completionsOpen {
 							m.closeCompletions()
 						}
+					}
+				}
+
+				// Re-open completions if the cursor landed inside an @word.
+				if !m.completionsOpen {
+					word := m.textareaWord()
+					if strings.HasPrefix(word, "@") {
+						m.completionsOpen = true
+						m.completionsQuery = word[1:]
+						value := m.textarea.Value()
+						if idx := strings.LastIndex(value, word); idx >= 0 {
+							m.completionsStartIndex = idx
+						}
+						m.completionsPositionStart = m.completionsPosition()
+						depth, limit := m.com.Config().Options.TUI.Completions.Limits()
+						cmds = append(cmds, m.completions.Open(depth, limit))
 					}
 				}
 			}
@@ -3008,21 +3026,27 @@ func (m *UI) insertCompletionText(text string) bool {
 
 	word := m.textareaWord()
 	endIdx := min(m.completionsStartIndex+len(word), len(value))
-	newValue := value[:m.completionsStartIndex] + text + value[endIdx:]
+	newValue := value[:m.completionsStartIndex] + "@" + text + value[endIdx:]
 	m.textarea.SetValue(newValue)
 	m.textarea.MoveToEnd()
-	m.textarea.InsertRune(' ')
 	return true
 }
 
 // insertFileCompletion inserts the selected file path into the textarea,
-// replacing the @query, and adds the file as an attachment.
+// replacing the @query, and adds the file as an attachment. If a previous
+// file completion was inserted, its attachment is removed first.
 func (m *UI) insertFileCompletion(path string) tea.Cmd {
 	prevHeight := m.textarea.Height()
 	if !m.insertCompletionText(path) {
 		return nil
 	}
 	heightCmd := m.handleTextareaHeightChange(prevHeight)
+
+	// Remove the previous file-completion attachment, if any.
+	if m.completionsLastAttachmentPath != "" {
+		m.attachments.RemoveByPath(m.completionsLastAttachmentPath)
+	}
+	m.completionsLastAttachmentPath = path
 
 	fileCmd := func() tea.Msg {
 		absPath, _ := filepath.Abs(path)

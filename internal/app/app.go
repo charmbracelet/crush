@@ -696,6 +696,15 @@ func (app *App) Subscribe(program *tea.Program) {
 		}()
 	}
 
+	if app.Subagents != nil {
+		discEvents := app.Subagents.SubscribeEvents(tuiCtx)
+		go func() {
+			for ev := range discEvents {
+				program.Send(ev)
+			}
+		}()
+	}
+
 	events := app.events.Subscribe(tuiCtx)
 	for {
 		select {

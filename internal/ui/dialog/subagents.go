@@ -40,6 +40,7 @@ type Subagents struct {
 		Enter         key.Binding
 		Cancel        key.Binding
 		Delete        key.Binding
+		Toggle        key.Binding
 		ConfirmDelete key.Binding
 		CancelDelete  key.Binding
 		Close         key.Binding
@@ -125,6 +126,10 @@ func NewSubagents(com *common.Common, parentSessionID string) *Subagents {
 	s.keyMap.Delete = key.NewBinding(
 		key.WithKeys("d"),
 		key.WithHelp("d", "delete"),
+	)
+	s.keyMap.Toggle = key.NewBinding(
+		key.WithKeys("space"),
+		key.WithHelp("space", "enable/disable"),
 	)
 	s.keyMap.ConfirmDelete = key.NewBinding(
 		key.WithKeys("y"),
@@ -214,11 +219,42 @@ func (s *Subagents) HandleMsg(msg tea.Msg) Action {
 	case s.tab == SubagentsTabRunning && key.Matches(keyMsg, s.keyMap.Cancel):
 		s.cancelSelectedRunning()
 
+	case s.tab == SubagentsTabLibrary && key.Matches(keyMsg, s.keyMap.Toggle):
+		return s.toggleSelectedLibrary()
+
 	case s.tab == SubagentsTabLibrary && key.Matches(keyMsg, s.keyMap.Delete):
 		s.enterConfirmDelete()
 	}
 
 	return nil
+}
+
+// toggleSelectedLibrary flips the enabled/disabled state of the selected
+// library item, optimistically dimming/undimming it, and issues a cmd that
+// persists the change via the workspace.
+func (s *Subagents) toggleSelectedLibrary() Action {
+	item := s.libraryList.SelectedItem()
+	if item == nil {
+		return nil
+	}
+	li, ok := item.(*LibrarySubagentItem)
+	if !ok {
+		return nil
+	}
+	li.data.Disabled = !li.data.Disabled
+	li.Bump()
+	return ActionCmd{s.setDisabledCmd(li.ID(), li.data.Disabled)}
+}
+
+// setDisabledCmd returns a cmd that persists the disabled state for name and
+// reports any error back to the program.
+func (s *Subagents) setDisabledCmd(name string, disabled bool) tea.Cmd {
+	return func() tea.Msg {
+		if err := s.com.Workspace.SetSubagentDisabled(name, disabled); err != nil {
+			return util.ReportError(err)()
+		}
+		return nil
+	}
 }
 
 // toggleTab switches between the Running and Library tabs.
@@ -403,6 +439,7 @@ func (s *Subagents) ShortHelp() []key.Binding {
 	}
 	return []key.Binding{
 		s.keyMap.Next,
+		s.keyMap.Toggle,
 		s.keyMap.Delete,
 		s.keyMap.Tab,
 		s.keyMap.Close,

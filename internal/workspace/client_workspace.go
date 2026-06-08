@@ -619,6 +619,11 @@ func (w *ClientWorkspace) DeleteUserSubagent(_ string) error {
 	return nil
 }
 
+// SetSubagentDisabled is a no-op in client mode.
+func (w *ClientWorkspace) SetSubagentDisabled(_ string, _ bool) error {
+	return nil
+}
+
 // SessionTokens returns zero token counts in client mode.
 func (w *ClientWorkspace) SessionTokens(_ context.Context, _ string) (int64, int64, error) {
 	return 0, 0, nil

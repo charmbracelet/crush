@@ -20,6 +20,17 @@ type subagentsWorkspace struct {
 	cancelledIDs  []string
 	deletedNames  []string
 	deleteUserErr error
+	disabledCalls []disabledCall
+}
+
+type disabledCall struct {
+	name     string
+	disabled bool
+}
+
+func (w *subagentsWorkspace) SetSubagentDisabled(name string, disabled bool) error {
+	w.disabledCalls = append(w.disabledCalls, disabledCall{name: name, disabled: disabled})
+	return nil
 }
 
 func (w *subagentsWorkspace) RunningSubagents(_ string) []workspace.RunningSubagentInfo {
@@ -176,6 +187,38 @@ func TestSubagentsDialog_DeleteLibraryItem_Cancel(t *testing.T) {
 	d.HandleMsg(keyMsg('n'))
 	require.False(t, d.IsConfirmingDelete(), "pressing n should exit confirm-delete mode")
 	require.Empty(t, ws.deletedNames, "DeleteUserSubagent must not be called when deletion is cancelled")
+}
+
+// TestSubagentsDialog_ToggleLibraryItem verifies that pressing space on a
+// library item toggles its disabled state, calling SetSubagentDisabled with
+// alternating values (disable then re-enable).
+func TestSubagentsDialog_ToggleLibraryItem(t *testing.T) {
+	t.Parallel()
+
+	ws := &subagentsWorkspace{
+		defs: []workspace.SubagentDefInfo{
+			{Name: "lib-agent", Description: "does stuff", Scope: "user", Disabled: false},
+		},
+	}
+	d := newTestSubagentsDialog(t, ws)
+
+	d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab})
+	require.Equal(t, SubagentsTabLibrary, d.ActiveTab())
+
+	runCmd := func(action Action) {
+		if ac, ok := action.(ActionCmd); ok && ac.Cmd != nil {
+			ac.Cmd()
+		}
+	}
+
+	runCmd(d.HandleMsg(keyMsg(' ')))
+	require.Len(t, ws.disabledCalls, 1)
+	require.Equal(t, "lib-agent", ws.disabledCalls[0].name)
+	require.True(t, ws.disabledCalls[0].disabled, "first toggle must disable")
+
+	runCmd(d.HandleMsg(keyMsg(' ')))
+	require.Len(t, ws.disabledCalls, 2)
+	require.False(t, ws.disabledCalls[1].disabled, "second toggle must re-enable")
 }
 
 // stripANSIDialog strips ANSI escape sequences from a string for plain-text

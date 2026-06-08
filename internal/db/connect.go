@@ -216,6 +216,28 @@ func ResetPool() {
 	}
 }
 
+// ConnectReadOnly opens a read-only SQLite database connection without running
+// migrations. Used for aggregating stats across multiple project databases.
+func ConnectReadOnly(ctx context.Context, dbPath string) (*sql.DB, error) {
+	if dbPath == "" {
+		return nil, fmt.Errorf("database path is empty")
+	}
+
+	db, err := openDBReadOnly(dbPath)
+	if err != nil {
+		return nil, err
+	}
+
+	db.SetMaxOpenConns(1)
+
+	if err = db.PingContext(ctx); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to connect to database: %w", err)
+	}
+
+	return db, nil
+}
+
 func initGoose() error {
 	gooseInitOnce.Do(func() {
 		goose.SetBaseFS(FS)

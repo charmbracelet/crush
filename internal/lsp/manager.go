@@ -21,7 +21,8 @@ import (
 	"github.com/sourcegraph/jsonrpc2"
 )
 
-const unavailableRetryDelay = 30 * time.Second
+// defaultUnavailableRetryDelay is the fallback when config doesn't specify one.
+const defaultUnavailableRetryDelay = 999999 * time.Second
 
 // Manager handles lazy initialization of LSP clients based on file types.
 type Manager struct {
@@ -31,6 +32,7 @@ type Manager struct {
 	manager     *powernapconfig.Manager
 	callback    func(name string, client *Client)
 	now         func() time.Time
+	unavailableRetry   time.Duration
 }
 
 // NewManager creates a new LSP manager service.
@@ -60,6 +62,11 @@ func NewManager(cfg *config.ConfigStore) *Manager {
 		})
 	}
 
+	retryDelay := defaultUnavailableRetryDelay
+	if cfg != nil && cfg.Config() != nil && cfg.Config().Options != nil && cfg.Config().Options.LSPUnavailableRetryDelay > 0 {
+		retryDelay = time.Duration(cfg.Config().Options.LSPUnavailableRetryDelay) * time.Second
+	}
+
 	return &Manager{
 		clients:     csync.NewMap[string, *Client](),
 		unavailable: csync.NewMap[string, time.Time](),
@@ -67,6 +74,7 @@ func NewManager(cfg *config.ConfigStore) *Manager {
 		manager:     manager,
 		callback:    func(string, *Client) {}, // default no-op callback
 		now:         time.Now,
+		unavailableRetry: retryDelay,
 	}
 }
 
@@ -264,7 +272,7 @@ func (s *Manager) recentlyUnavailable(name string) bool {
 	if !exists {
 		return false
 	}
-	if s.now().Sub(lastUnavailableAt) < unavailableRetryDelay {
+	if s.now().Sub(lastUnavailableAt) < s.unavailableRetry {
 		return true
 	}
 	s.unavailable.Del(name)

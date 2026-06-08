@@ -17,6 +17,7 @@ func TestUnavailableBackoff(t *testing.T) {
 	manager := &Manager{
 		unavailable: csync.NewMap[string, time.Time](),
 		now:         func() time.Time { return now },
+		unavailableRetry: defaultUnavailableRetryDelay,
 	}
 
 	require.False(t, manager.recentlyUnavailable("gopls"))
@@ -24,7 +25,7 @@ func TestUnavailableBackoff(t *testing.T) {
 	manager.markUnavailable("gopls")
 	require.True(t, manager.recentlyUnavailable("gopls"))
 
-	now = now.Add(unavailableRetryDelay + time.Second)
+	now = now.Add(defaultUnavailableRetryDelay + time.Second)
 	require.False(t, manager.recentlyUnavailable("gopls"))
 	_, exists := manager.unavailable.Get("gopls")
 	require.False(t, exists)

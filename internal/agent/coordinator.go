@@ -124,7 +124,10 @@ type coordinator struct {
 	activeSkills []*skills.Skill // Post-filter: active skills only.
 	skillTracker *skills.Tracker
 
-	// Subagents discovery results (session-start snapshot).
+	// Subagents discovery. subagentsMgr is the live source of truth (its
+	// snapshot changes when the Library reloads); activeSubagents is a
+	// fallback snapshot used only when no manager was supplied (e.g. tests).
+	subagentsMgr    *subagents.Manager
 	activeSubagents []*subagents.Subagent
 
 	// runtime tracks which sub-agents are currently running.
@@ -177,6 +180,7 @@ func NewCoordinator(
 		skillTracker: skillTracker,
 	}
 
+	c.subagentsMgr = subagentsMgr
 	if subagentsMgr != nil {
 		c.activeSubagents = subagentsMgr.ActiveSubagents()
 	}
@@ -193,7 +197,7 @@ func NewCoordinator(
 		return nil, err
 	}
 
-	agent, err := c.buildAgent(ctx, prompt, agentCfg, false, "")
+	agent, err := c.buildAgent(ctx, prompt, agentCfg, false, subagentModel{})
 	if err != nil {
 		return nil, err
 	}
@@ -582,30 +586,144 @@ func mergeCallOptions(model Model, cfg config.ProviderConfig) (fantasy.ProviderO
 	return modelOptions, temp, topP, topK, freqPenalty, presPenalty
 }
 
-// applyEffortToBuiltModels returns copies of large and small with the given
-// effort level applied to the large model's config. The small model is returned
-// unchanged. It is a no-op when effort is empty.
-func applyEffortToBuiltModels(effort string, large, small Model) (Model, Model) {
-	if effort == "" {
-		return large, small
+// activeSubagentsList returns the current active subagents. It reads the live
+// manager snapshot when available (so Library reloads are reflected without a
+// restart) and falls back to the construction-time snapshot otherwise.
+func (c *coordinator) activeSubagentsList() []*subagents.Subagent {
+	if c.subagentsMgr != nil {
+		return c.subagentsMgr.ActiveSubagents()
 	}
-	large.ModelCfg = subagents.ApplyEffortToModel(effort, large.ModelCfg, large.CatwalkCfg)
-	return large, small
+	return c.activeSubagents
 }
 
-func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool, effort string) (SessionAgent, error) {
-	large, small, err := c.buildAgentModels(ctx, isSubAgent)
+// findModelProvider returns the provider config and catwalk model for the
+// provider that offers modelID. When providerOverride is non-empty only that
+// provider is searched. ok is false when no matching provider/model is found.
+func (c *coordinator) findModelProvider(modelID, providerOverride string) (config.ProviderConfig, catwalk.Model, bool) {
+	if providerOverride != "" {
+		p, ok := c.cfg.Config().Providers.Get(providerOverride)
+		if !ok {
+			return config.ProviderConfig{}, catwalk.Model{}, false
+		}
+		m, ok := findCatwalkModel(p, modelID)
+		if !ok {
+			return config.ProviderConfig{}, catwalk.Model{}, false
+		}
+		return p, m, true
+	}
+	for p := range c.cfg.Config().Providers.Seq() {
+		if m, ok := findCatwalkModel(p, modelID); ok {
+			return p, m, true
+		}
+	}
+	return config.ProviderConfig{}, catwalk.Model{}, false
+}
+
+// findCatwalkModel returns the catwalk model with the given id from a provider.
+func findCatwalkModel(providerCfg config.ProviderConfig, modelID string) (catwalk.Model, bool) {
+	for _, m := range providerCfg.Models {
+		if m.ID == modelID {
+			return m, true
+		}
+	}
+	return catwalk.Model{}, false
+}
+
+// buildModel constructs a Model from an already-resolved provider, selected
+// model, and catwalk model. Shared by buildNamedModel and resolveModelByID.
+func (c *coordinator) buildModel(ctx context.Context, providerCfg config.ProviderConfig, selModel config.SelectedModel, catwalkModel catwalk.Model, isSubAgent bool) (Model, error) {
+	provider, err := c.buildProvider(providerCfg, selModel, isSubAgent)
+	if err != nil {
+		return Model{}, err
+	}
+	modelID := selModel.Model
+	if providerCfg.ID == openrouter.Name && isExactoSupported(modelID) {
+		modelID += ":exacto"
+	}
+	lm, err := provider.LanguageModel(ctx, modelID)
+	if err != nil {
+		return Model{}, err
+	}
+	return Model{Model: lm, CatwalkCfg: catwalkModel, ModelCfg: selModel, FlatRate: providerCfg.FlatRate}, nil
+}
+
+// buildNamedModel builds the large or small model selected in config. Errors
+// distinguish the two so callers and tests can tell which model failed.
+func (c *coordinator) buildNamedModel(ctx context.Context, modelType config.SelectedModelType, isSubAgent bool) (Model, error) {
+	isSmall := modelType == config.SelectedModelTypeSmall
+	selModel, ok := c.cfg.Config().Models[modelType]
+	if !ok {
+		if isSmall {
+			return Model{}, errSmallModelNotSelected
+		}
+		return Model{}, errLargeModelNotSelected
+	}
+	providerCfg, ok := c.cfg.Config().Providers.Get(selModel.Provider)
+	if !ok {
+		if isSmall {
+			return Model{}, errSmallModelProviderNotConfigured
+		}
+		return Model{}, errLargeModelProviderNotConfigured
+	}
+	catwalkModel, ok := findCatwalkModel(providerCfg, selModel.Model)
+	if !ok {
+		if isSmall {
+			return Model{}, errSmallModelNotFound
+		}
+		return Model{}, errLargeModelNotFound
+	}
+	return c.buildModel(ctx, providerCfg, selModel, catwalkModel, isSubAgent)
+}
+
+// resolveModelByID finds the provider that offers modelID and builds a Model
+// for it. It lets a subagent run on the specific model named in its `model:`
+// frontmatter (validated at discovery via Config.IsKnownModel). When
+// providerOverride is non-empty only that provider is searched.
+func (c *coordinator) resolveModelByID(ctx context.Context, modelID, providerOverride string, isSubAgent bool) (Model, error) {
+	providerCfg, catwalkModel, ok := c.findModelProvider(modelID, providerOverride)
+	if !ok {
+		return Model{}, fmt.Errorf("model %q not found in any configured provider", modelID)
+	}
+	selModel := config.SelectedModel{Provider: providerCfg.ID, Model: modelID}
+	return c.buildModel(ctx, providerCfg, selModel, catwalkModel, isSubAgent)
+}
+
+// buildAgent constructs a SessionAgent. sm carries the model-selection fields
+// from subagent frontmatter (zero value for the coder/task agents): sm.Model is
+// "" or "large" (global large), "small" (global small), or a specific model id
+// resolved via resolveModelByID. sm.Effort is applied to the resolved primary,
+// which is also the only large/specific model built — small always backs
+// titles/summaries, so it is built unconditionally.
+func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool, sm subagentModel) (SessionAgent, error) {
+	small, err := c.buildNamedModel(ctx, config.SelectedModelTypeSmall, true)
 	if err != nil {
 		return nil, err
 	}
 
-	large, small = applyEffortToBuiltModels(effort, large, small)
+	var primary Model
+	switch sm.Model {
+	case "small":
+		primary = small
+	case "", "large":
+		primary, err = c.buildNamedModel(ctx, config.SelectedModelTypeLarge, isSubAgent)
+	default:
+		primary, err = c.resolveModelByID(ctx, sm.Model, sm.Provider, isSubAgent)
+	}
+	if err != nil {
+		return nil, err
+	}
 
-	largeProviderCfg, _ := c.cfg.Config().Providers.Get(large.ModelCfg.Provider)
+	if subagents.EffortIgnored(sm.Effort, primary.CatwalkCfg) {
+		slog.Warn("Subagent effort ignored: model does not support reasoning",
+			"model", primary.ModelCfg.Model, "effort", sm.Effort)
+	}
+	primary.ModelCfg = subagents.ApplyEffortToModel(sm.Effort, primary.ModelCfg, primary.CatwalkCfg)
+
+	primaryProviderCfg, _ := c.cfg.Config().Providers.Get(primary.ModelCfg.Provider)
 	result := NewSessionAgent(SessionAgentOptions{
-		LargeModel:           large,
+		LargeModel:           primary,
 		SmallModel:           small,
-		SystemPromptPrefix:   largeProviderCfg.SystemPromptPrefix,
+		SystemPromptPrefix:   primaryProviderCfg.SystemPromptPrefix,
 		SystemPrompt:         "",
 		IsSubAgent:           isSubAgent,
 		DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
@@ -618,7 +736,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	})
 
 	c.readyWg.Go(func() error {
-		systemPrompt, err := prompt.Build(ctx, large.Model.Provider(), large.Model.Model(), c.cfg)
+		systemPrompt, err := prompt.Build(ctx, primary.Model.Provider(), primary.Model.Model(), c.cfg)
 		if err != nil {
 			return err
 		}
@@ -627,7 +745,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	})
 
 	c.readyWg.Go(func() error {
-		tools, err := c.buildTools(ctx, agent, isSubAgent)
+		tools, err := c.buildTools(ctx, agent, isSubAgent, primary.CatwalkCfg.ID)
 		if err != nil {
 			return err
 		}
@@ -648,7 +766,10 @@ func shouldExposeDispatcher(allowed []string, isSubAgent bool) bool {
 	return slices.Contains(allowed, AgentToolName)
 }
 
-func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool) ([]fantasy.AgentTool, error) {
+// buildTools assembles the agent's tool set. modelID is the catwalk id of the
+// model the agent actually runs on (the resolved primary), used for
+// model-specific tool guidance such as the bash tool description.
+func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool, modelID string) ([]fantasy.AgentTool, error) {
 	var allTools []fantasy.AgentTool
 	if shouldExposeDispatcher(agent.AllowedTools, isSubAgent) {
 		agentTool, err := c.agentTool(ctx)
@@ -664,14 +785,6 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 			return nil, err
 		}
 		allTools = append(allTools, agenticFetchTool)
-	}
-
-	// Get the model name for the agent
-	modelID := ""
-	if modelCfg, ok := c.cfg.Config().Models[agent.Model]; ok {
-		if model := c.cfg.Config().GetModel(modelCfg.Provider, modelCfg.Model); model != nil {
-			modelID = model.ID
-		}
 	}
 
 	logFile := filepath.Join(c.cfg.Config().Options.DataDirectory, "logs", "crush.log")
@@ -761,88 +874,15 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 // TODO: when we support multiple agents we need to change this so that we pass in the agent specific model config
 func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Model, Model, error) {
-	largeModelCfg, ok := c.cfg.Config().Models[config.SelectedModelTypeLarge]
-	if !ok {
-		return Model{}, Model{}, errLargeModelNotSelected
-	}
-	smallModelCfg, ok := c.cfg.Config().Models[config.SelectedModelTypeSmall]
-	if !ok {
-		return Model{}, Model{}, errSmallModelNotSelected
-	}
-
-	largeProviderCfg, ok := c.cfg.Config().Providers.Get(largeModelCfg.Provider)
-	if !ok {
-		return Model{}, Model{}, errLargeModelProviderNotConfigured
-	}
-
-	largeProvider, err := c.buildProvider(largeProviderCfg, largeModelCfg, isSubAgent)
+	large, err := c.buildNamedModel(ctx, config.SelectedModelTypeLarge, isSubAgent)
 	if err != nil {
 		return Model{}, Model{}, err
 	}
-
-	smallProviderCfg, ok := c.cfg.Config().Providers.Get(smallModelCfg.Provider)
-	if !ok {
-		return Model{}, Model{}, errSmallModelProviderNotConfigured
-	}
-
-	smallProvider, err := c.buildProvider(smallProviderCfg, smallModelCfg, true)
+	small, err := c.buildNamedModel(ctx, config.SelectedModelTypeSmall, true)
 	if err != nil {
 		return Model{}, Model{}, err
 	}
-
-	var largeCatwalkModel *catwalk.Model
-	var smallCatwalkModel *catwalk.Model
-
-	for _, m := range largeProviderCfg.Models {
-		if m.ID == largeModelCfg.Model {
-			largeCatwalkModel = &m
-		}
-	}
-	for _, m := range smallProviderCfg.Models {
-		if m.ID == smallModelCfg.Model {
-			smallCatwalkModel = &m
-		}
-	}
-
-	if largeCatwalkModel == nil {
-		return Model{}, Model{}, errLargeModelNotFound
-	}
-
-	if smallCatwalkModel == nil {
-		return Model{}, Model{}, errSmallModelNotFound
-	}
-
-	largeModelID := largeModelCfg.Model
-	smallModelID := smallModelCfg.Model
-
-	if largeModelCfg.Provider == openrouter.Name && isExactoSupported(largeModelID) {
-		largeModelID += ":exacto"
-	}
-
-	if smallModelCfg.Provider == openrouter.Name && isExactoSupported(smallModelID) {
-		smallModelID += ":exacto"
-	}
-
-	largeModel, err := largeProvider.LanguageModel(ctx, largeModelID)
-	if err != nil {
-		return Model{}, Model{}, err
-	}
-	smallModel, err := smallProvider.LanguageModel(ctx, smallModelID)
-	if err != nil {
-		return Model{}, Model{}, err
-	}
-
-	return Model{
-			Model:      largeModel,
-			CatwalkCfg: *largeCatwalkModel,
-			ModelCfg:   largeModelCfg,
-			FlatRate:   largeProviderCfg.FlatRate,
-		}, Model{
-			Model:      smallModel,
-			CatwalkCfg: *smallCatwalkModel,
-			ModelCfg:   smallModelCfg,
-			FlatRate:   smallProviderCfg.FlatRate,
-		}, nil
+	return large, small, nil
 }
 
 func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID string) (fantasy.Provider, error) {
@@ -1175,7 +1215,7 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 		return errCoderAgentNotConfigured
 	}
 
-	tools, err := c.buildTools(ctx, agentCfg, false)
+	tools, err := c.buildTools(ctx, agentCfg, false, large.CatwalkCfg.ID)
 	if err != nil {
 		return err
 	}
@@ -1289,6 +1329,14 @@ func (c *coordinator) refreshApiKeyTemplate(ctx context.Context, providerCfg con
 		return err
 	}
 	return nil
+}
+
+// subagentModel carries the model-selection fields from subagent frontmatter.
+// The zero value selects the global large model.
+type subagentModel struct {
+	Effort   string
+	Model    string
+	Provider string
 }
 
 // subAgentParams holds the parameters for running a sub-agent.

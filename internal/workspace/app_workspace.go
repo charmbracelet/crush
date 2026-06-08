@@ -517,9 +517,10 @@ func (w *AppWorkspace) DeleteUserSubagent(name string) error {
 	all, active, states := subagents.DiscoverFromConfig(subagents.DiscoveryConfig{
 		SubagentsPaths:    subagentsPaths,
 		DisabledSubagents: disabledSubagents,
+
 		// Match startup discovery (cmd/root.go, backend.go): validate model
 		// ids so a subagent with an invalid model stays rejected after reload.
-		IsKnownModelID: cfg.IsKnownModelID,
+		IsKnownModel: cfg.IsKnownModel,
 	})
 	w.app.Subagents.Reload(all, active, states)
 	return nil

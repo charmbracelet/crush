@@ -65,8 +65,8 @@ type App struct {
 
 	LSPManager *lsp.Manager
 
-	Skills         *skills.Manager
-	Subagents      *subagents.Manager
+	Skills          *skills.Manager
+	Subagents       *subagents.Manager
 	SubagentRuntime *subagents.Runtime
 
 	config *config.ConfigStore
@@ -663,6 +663,15 @@ func (app *App) Subscribe(program *tea.Program) {
 		rtEvents := app.SubagentRuntime.Subscribe(tuiCtx)
 		go func() {
 			for ev := range rtEvents {
+				program.Send(ev)
+			}
+		}()
+	}
+
+	if app.Subagents != nil {
+		discEvents := app.Subagents.SubscribeEvents(tuiCtx)
+		go func() {
+			for ev := range discEvents {
 				program.Send(ev)
 			}
 		}()

@@ -176,13 +176,17 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 			}
 
 			agentCfg := sa.ToConfigAgent(coderCfg)
+			// Config-driven setup failures (prompt build, model/provider that
+			// passed discovery but fails at build) are surfaced as tool-error
+			// responses so the parent agent can report them and continue; a
+			// bare error would abort the whole turn.
 			subPr, err := subagentPrompt(sa, c.activeSkills, prompt.WithWorkingDir(c.cfg.WorkingDir()))
 			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("build subagent prompt %q: %w", sa.Name, err)
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("build subagent prompt %q: %v", sa.Name, err)), nil
 			}
 			agent, err := c.buildAgent(ctx, subPr, agentCfg, true, subagentModel{Effort: sa.Effort, Model: sa.Model, Provider: sa.Provider})
 			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("build subagent %q: %w", sa.Name, err)
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("build subagent %q: %v", sa.Name, err)), nil
 			}
 
 			return c.runSubAgent(ctx, subAgentParams{

@@ -7,7 +7,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"os/user"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -16,6 +18,23 @@ import (
 	_ "github.com/charmbracelet/crush/internal/swagger"
 	httpswagger "github.com/swaggo/http-swagger/v2"
 )
+
+// maxUnixSocketPathLen is the maximum length of a Unix domain socket
+// path. The macOS sun_path field is 104 bytes; Linux allows 108. We
+// use 104 so the resulting path is portable across both platforms.
+const maxUnixSocketPathLen = 104
+
+// socketDir returns the directory used for the Crush Unix socket.
+// It prefers $XDG_RUNTIME_DIR when set (systemd's per-user runtime
+// directory on Linux), and otherwise falls back to [os.TempDir],
+// which resolves to the per-user private $TMPDIR on macOS and to
+// /tmp on Linux.
+func socketDir() string {
+	if dir := os.Getenv("XDG_RUNTIME_DIR"); dir != "" {
+		return dir
+	}
+	return os.TempDir()
+}
 
 // ErrServerClosed is returned when the server is closed.
 var ErrServerClosed = http.ErrServerClosed
@@ -44,6 +63,14 @@ func ParseHostURL(host string) (*url.URL, error) {
 }
 
 // DefaultHost returns the default server host.
+//
+// On Windows the address is a named pipe under \\.\pipe\. On Unix
+// platforms the socket lives in the per-user runtime directory
+// returned by [socketDir] and is named crush-<uid>.sock, falling
+// back to crush.sock when the current uid cannot be determined. If
+// the composed path would exceed [maxUnixSocketPathLen] bytes (the
+// macOS sun_path limit), we fall back to /tmp/crush-<uid>.sock so
+// the socket remains bindable.
 func DefaultHost() string {
 	sock := "crush.sock"
 	usr, err := user.Current()
@@ -53,7 +80,11 @@ func DefaultHost() string {
 	if runtime.GOOS == "windows" {
 		return fmt.Sprintf("npipe:////./pipe/%s", sock)
 	}
-	return fmt.Sprintf("unix:///tmp/%s", sock)
+	path := filepath.Join(socketDir(), sock)
+	if len(path) > maxUnixSocketPathLen {
+		path = filepath.Join("/tmp", sock)
+	}
+	return "unix://" + path
 }
 
 // Server represents a Crush server bound to a specific address.

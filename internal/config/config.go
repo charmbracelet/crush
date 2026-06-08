@@ -481,6 +481,7 @@ type Options struct {
 	RequestTimeout            *int         `json:"request_timeout,omitempty" jsonschema:"description=Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity\\, so slow but active streams are never killed. 0 disables it\\, negative values are invalid.,default=60,example=120,example=300,example=0"`
 	SubagentsPaths            []string     `json:"subagents_paths,omitempty" jsonschema:"description=Paths to directories containing subagent definition files (*.md files with YAML frontmatter)"`
 	DisabledSubagents         []string     `json:"disabled_subagents,omitempty" jsonschema:"description=List of subagent names to disable and hide from the agent"`
+	EnabledSubagents          []string     `json:"enabled_subagents,omitempty" jsonschema:"description=List of subagent names to force-enable\\, overriding a disable set at a broader config scope"`
 }
 
 // DefaultRequestTimeout bounds each LLM API request when the user has not
@@ -503,6 +504,28 @@ func (o *Options) GetRequestTimeout() time.Duration {
 		return 0
 	}
 	return time.Duration(*o.RequestTimeout) * time.Second
+}
+
+// EffectiveDisabledSubagents returns the subagent names that are disabled
+// after enabled_subagents has subtracted out any names re-enabled at a
+// narrower scope. jsons.Merge concatenates arrays across config layers
+// rather than overriding them, so options.enabled_subagents is the only way
+// a narrower scope can cancel out a name disabled at a broader one.
+func EffectiveDisabledSubagents(opts *Options) []string {
+	if opts == nil {
+		return nil
+	}
+	enabled := make(map[string]bool, len(opts.EnabledSubagents))
+	for _, name := range opts.EnabledSubagents {
+		enabled[name] = true
+	}
+	var effective []string
+	for _, name := range opts.DisabledSubagents {
+		if !enabled[name] {
+			effective = append(effective, name)
+		}
+	}
+	return effective
 }
 
 type MCPs map[string]MCPConfig

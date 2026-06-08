@@ -512,10 +512,7 @@ func (w *AppWorkspace) AllSubagents() []SubagentDefInfo {
 	cfg := w.store.Config()
 	workingDir := w.store.WorkingDir()
 
-	var disabledSubagents []string
-	if cfg.Options != nil {
-		disabledSubagents = cfg.Options.DisabledSubagents
-	}
+	disabledSubagents := config.EffectiveDisabledSubagents(cfg.Options)
 	disabledSet := make(map[string]bool, len(disabledSubagents))
 	for _, name := range disabledSubagents {
 		disabledSet[name] = true
@@ -562,11 +559,54 @@ func (w *AppWorkspace) DeleteUserSubagent(name string) error {
 	if err := os.Remove(target.FilePath); err != nil {
 		return err
 	}
+	w.reloadSubagents()
+	return nil
+}
+
+// SetSubagentDisabled enables or disables a subagent by name, persisting the
+// change to options.disabled_subagents (and its counterpart,
+// options.enabled_subagents) at workspace scope and reloading discovery. A
+// disabled subagent is filtered out of the active set, which is what the
+// dispatcher enum, dispatch lookup and @-mention completions all derive from,
+// so it can be neither auto-selected by the main agent nor invoked manually.
+// Enabling always writes workspace scope only; it never rewrites whichever
+// scope actually disabled the name. Instead it records the name in
+// options.enabled_subagents, which config.EffectiveDisabledSubagents
+// subtracts from disabled_subagents at read time — the only way a narrower
+// scope can cancel out a disable set at a broader one, since jsons.Merge
+// concatenates arrays across scopes rather than overriding them.
+func (w *AppWorkspace) SetSubagentDisabled(name string, disabled bool) error {
+	var currentDisabled, currentEnabled []string
+	if cfg := w.store.Config(); cfg.Options != nil {
+		currentDisabled = cfg.Options.DisabledSubagents
+		currentEnabled = cfg.Options.EnabledSubagents
+	}
+	// enabled_subagents cancels out a disable set at a broader scope (see
+	// config.EffectiveDisabledSubagents); jsons.Merge concatenates arrays
+	// across scopes rather than overriding them, so subtracting from
+	// disabled_subagents alone can never re-enable a name disabled globally.
+	nextDisabled := addOrRemove(currentDisabled, name, disabled)
+	nextEnabled := addOrRemove(currentEnabled, name, !disabled)
+	if err := w.store.SetConfigFields(config.ScopeWorkspace, map[string]any{
+		"options.disabled_subagents": nextDisabled,
+		"options.enabled_subagents":  nextEnabled,
+	}); err != nil {
+		return err
+	}
+	w.reloadSubagents()
+	return nil
+}
+
+// reloadSubagents re-runs discovery from the current config and swaps the
+// Manager's snapshot, publishing a discovery event. Model ids are validated
+// against the config (matching startup) so an invalid model stays rejected.
+func (w *AppWorkspace) reloadSubagents() {
 	cfg := w.store.Config()
-	var subagentsPaths, disabledSubagents []string
+	var subagentsPaths []string
+	var disabledSubagents []string
 	if cfg.Options != nil {
 		subagentsPaths = cfg.Options.SubagentsPaths
-		disabledSubagents = cfg.Options.DisabledSubagents
+		disabledSubagents = config.EffectiveDisabledSubagents(cfg.Options)
 	}
 	all, active, states := subagents.DiscoverFromConfig(subagents.DiscoveryConfig{
 		SubagentsPaths:    subagentsPaths,
@@ -577,7 +617,21 @@ func (w *AppWorkspace) DeleteUserSubagent(name string) error {
 		ValidateModel: cfg.ValidateModel,
 	})
 	w.app.Subagents.Reload(all, active, states)
-	return nil
+}
+
+// addOrRemove returns list with name added (when add) or all occurrences
+// removed (when !add). The result is a fresh slice; order is otherwise stable.
+func addOrRemove(list []string, name string, add bool) []string {
+	next := make([]string, 0, len(list)+1)
+	for _, n := range list {
+		if n != name {
+			next = append(next, n)
+		}
+	}
+	if add {
+		next = append(next, name)
+	}
+	return next
 }
 
 // SessionTokens returns the prompt and completion token counts for the given

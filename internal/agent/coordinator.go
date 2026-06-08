@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
@@ -131,6 +132,11 @@ type coordinator struct {
 	// runtime tracks which sub-agents are currently running.
 	runtime *subagents.Runtime
 
+	// subagentModelCache memoizes resolveModelByID results within a config
+	// generation. Cleared by UpdateModels to avoid reusing stale clients.
+	subagentModelCache   map[subagentModelKey]Model
+	subagentModelCacheMu sync.RWMutex
+
 	readyWg errgroup.Group
 }
 
@@ -163,19 +169,20 @@ func NewCoordinator(
 	skillTracker := skills.NewTracker(activeSkills)
 
 	c := &coordinator{
-		cfg:          cfg,
-		sessions:     sessions,
-		messages:     messages,
-		permissions:  permissions,
-		history:      history,
-		filetracker:  filetracker,
-		lspManager:   lspManager,
-		notify:       notify,
-		runComplete:  runComplete,
-		agents:       make(map[string]SessionAgent),
-		allSkills:    allSkills,
-		activeSkills: activeSkills,
-		skillTracker: skillTracker,
+		cfg:                cfg,
+		sessions:           sessions,
+		messages:           messages,
+		permissions:        permissions,
+		history:            history,
+		filetracker:        filetracker,
+		lspManager:         lspManager,
+		notify:             notify,
+		runComplete:        runComplete,
+		agents:             make(map[string]SessionAgent),
+		allSkills:          allSkills,
+		activeSkills:       activeSkills,
+		skillTracker:       skillTracker,
+		subagentModelCache: make(map[subagentModelKey]Model),
 	}
 
 	c.subagentsMgr = subagentsMgr
@@ -637,13 +644,35 @@ func (c *coordinator) buildNamedModel(ctx context.Context, modelType config.Sele
 // for it. It lets a subagent run on the specific model named in its `model:`
 // frontmatter (validated at discovery via Config.IsKnownModel). When
 // providerOverride is non-empty only that provider is searched.
+//
+// Results are memoized in subagentModelCache for the lifetime of the current
+// config generation. UpdateModels clears the cache on config reload.
 func (c *coordinator) resolveModelByID(ctx context.Context, modelID, providerOverride string, isSubAgent bool) (Model, error) {
+	key := subagentModelKey{modelID: modelID, provider: providerOverride, isSubAgent: isSubAgent}
+
+	c.subagentModelCacheMu.RLock()
+	if m, ok := c.subagentModelCache[key]; ok {
+		c.subagentModelCacheMu.RUnlock()
+		return m, nil
+	}
+	c.subagentModelCacheMu.RUnlock()
+
 	providerCfg, catwalkModel, ok := c.findModelProvider(modelID, providerOverride)
 	if !ok {
 		return Model{}, fmt.Errorf("model %q not found in any configured provider", modelID)
 	}
 	selModel := config.SelectedModel{Provider: providerCfg.ID, Model: modelID}
-	return c.buildModel(ctx, providerCfg, selModel, catwalkModel, isSubAgent)
+	m, err := c.buildModel(ctx, providerCfg, selModel, catwalkModel, isSubAgent)
+	if err != nil {
+		return Model{}, err
+	}
+
+	if c.subagentModelCache != nil {
+		c.subagentModelCacheMu.Lock()
+		c.subagentModelCache[key] = m
+		c.subagentModelCacheMu.Unlock()
+	}
+	return m, nil
 }
 
 // buildAgent constructs a SessionAgent. sm carries the model-selection fields
@@ -1156,6 +1185,12 @@ func (c *coordinator) Model() Model {
 }
 
 func (c *coordinator) UpdateModels(ctx context.Context) error {
+	// Clear the subagent model cache so that any stale LanguageModel instances
+	// (built against the old config) are not reused after a config reload.
+	c.subagentModelCacheMu.Lock()
+	c.subagentModelCache = make(map[subagentModelKey]Model)
+	c.subagentModelCacheMu.Unlock()
+
 	// build the models again so we make sure we get the latest config
 	large, small, err := c.buildAgentModels(ctx, false)
 	if err != nil {
@@ -1282,6 +1317,13 @@ type subagentModel struct {
 	Effort   string
 	Model    string
 	Provider string
+}
+
+// subagentModelKey is the cache key for resolveModelByID results.
+type subagentModelKey struct {
+	modelID    string
+	provider   string
+	isSubAgent bool
 }
 
 // subAgentParams holds the parameters for running a sub-agent.

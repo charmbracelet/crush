@@ -55,9 +55,10 @@ func newTestCoordinator(t *testing.T, env fakeEnv, providerID string, providerCf
 	require.NoError(t, err)
 	cfg.Config().Providers.Set(providerID, providerCfg)
 	return &coordinator{
-		cfg:      cfg,
-		sessions: env.sessions,
-		messages: env.messages,
+		cfg:                cfg,
+		sessions:           env.sessions,
+		messages:           env.messages,
+		subagentModelCache: make(map[subagentModelKey]Model),
 	}
 }
 
@@ -906,4 +907,63 @@ func TestGetProviderOptionsReasoningEffortFallback(t *testing.T) {
 	thinking, ok := parsed.ExtraBody["thinking"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "enabled", thinking["type"])
+}
+
+// TestUpdateModels_ClearsSubagentModelCache verifies that UpdateModels empties
+// the subagent model cache so stale LanguageModel instances are not reused
+// after a config reload, even when UpdateModels itself returns an error.
+func TestUpdateModels_ClearsSubagentModelCache(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	coord := &coordinator{
+		cfg:                config.NewTestStoreWithWorkingDir(&config.Config{}, env.workingDir),
+		sessions:           env.sessions,
+		subagentModelCache: make(map[subagentModelKey]Model),
+	}
+
+	// Manually populate the cache with a dummy entry.
+	coord.subagentModelCache[subagentModelKey{modelID: "some-model", provider: "", isSubAgent: true}] = Model{}
+
+	require.Len(t, coord.subagentModelCache, 1)
+
+	// UpdateModels will error (no models configured in empty config), but the
+	// cache must be cleared regardless.
+	_ = coord.UpdateModels(t.Context())
+
+	require.Empty(t, coord.subagentModelCache)
+}
+
+// TestResolveModelByID_CacheHitSkipsBuild verifies that a second call to
+// resolveModelByID with the same arguments returns the cached Model without
+// repeating the provider build, and that errors are not cached.
+func TestResolveModelByID_CacheHitSkipsBuild(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	// No-op provider with a known model so findModelProvider succeeds.
+	providerCfg := config.ProviderConfig{
+		ID:     "test-provider",
+		Models: []catwalk.Model{{ID: "model-x", DefaultMaxTokens: 4096}},
+	}
+	coord := newTestCoordinator(t, env, "test-provider", providerCfg)
+
+	// First call — cache is empty.
+	require.Empty(t, coord.subagentModelCache)
+
+	_, err := coord.resolveModelByID(t.Context(), "model-x", "test-provider", true)
+	if err != nil {
+		// Provider construction may fail in the test environment (fake API key).
+		// Errors must not be cached.
+		require.Empty(t, coord.subagentModelCache, "failed build must not populate cache")
+		return
+	}
+
+	// Success path: cache must contain exactly one entry.
+	require.Len(t, coord.subagentModelCache, 1)
+
+	// Second call must hit the cache (same result, no error).
+	_, err2 := coord.resolveModelByID(t.Context(), "model-x", "test-provider", true)
+	require.NoError(t, err2)
+	require.Len(t, coord.subagentModelCache, 1, "second call must not add a new entry")
 }

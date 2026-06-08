@@ -430,6 +430,28 @@ func ensureServer(cmd *cobra.Command, hostURL *url.URL) error {
 		_, statErr := os.Stat(hostURL.Host)
 		switch {
 		case statErr == nil:
+			// Probe the socket explicitly before the version-check
+			// path. A stale unix socket file (the previous server
+			// exited without cleaning up) would otherwise make
+			// restartIfStale spin on a non-responsive endpoint; here
+			// we detect it with a short DialTimeout and remove the
+			// orphaned file so the normal spawn path can run.
+			if hostURL.Scheme == "unix" {
+				conn, dialErr := net.DialTimeout(
+					hostURL.Scheme, hostURL.Host, 200*time.Millisecond,
+				)
+				if dialErr == nil {
+					conn.Close()
+				} else if server.IsStaleSocketErr(dialErr) {
+					slog.Warn("Stale socket detected, removing",
+						"path", hostURL.Host, "error", dialErr)
+					if err := os.Remove(hostURL.Host); err != nil && !errors.Is(err, fs.ErrNotExist) {
+						return fmt.Errorf("failed to remove stale server socket %q: %v", hostURL.Host, err)
+					}
+					needsStart = true
+					break
+				}
+			}
 			restarted, err := restartIfStale(cmd, hostURL)
 			if err != nil {
 				slog.Warn("Failed to check server version", "error", err)

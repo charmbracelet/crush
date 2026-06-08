@@ -457,6 +457,33 @@ func (w *AppWorkspace) DeleteUserSubagent(name string) error {
 	if err := os.Remove(target.FilePath); err != nil {
 		return err
 	}
+	w.reloadSubagents()
+	return nil
+}
+
+// SetSubagentDisabled enables or disables a subagent by name, persisting the
+// change to options.disabled_subagents at project scope and reloading
+// discovery. A disabled subagent is filtered out of the active set, which is
+// what the dispatcher enum, dispatch lookup, @-mention completions, and the
+// @-rewrite all derive from — so it can be neither auto-selected by the main
+// agent nor invoked manually.
+func (w *AppWorkspace) SetSubagentDisabled(name string, disabled bool) error {
+	var current []string
+	if cfg := w.store.Config(); cfg.Options != nil {
+		current = cfg.Options.DisabledSubagents
+	}
+	next := addOrRemove(current, name, disabled)
+	if err := w.store.SetConfigField(config.ScopeWorkspace, "options.disabled_subagents", next); err != nil {
+		return err
+	}
+	w.reloadSubagents()
+	return nil
+}
+
+// reloadSubagents re-runs discovery from the current config and swaps the
+// Manager's snapshot, publishing a discovery event. Model ids are validated
+// against the config (matching startup) so an invalid model stays rejected.
+func (w *AppWorkspace) reloadSubagents() {
 	cfg := w.store.Config()
 	var subagentsPaths, disabledSubagents []string
 	if cfg.Options != nil {
@@ -472,7 +499,21 @@ func (w *AppWorkspace) DeleteUserSubagent(name string) error {
 		IsKnownModel: cfg.IsKnownModel,
 	})
 	w.app.Subagents.Reload(all, active, states)
-	return nil
+}
+
+// addOrRemove returns list with name added (when add) or all occurrences
+// removed (when !add). The result is a fresh slice; order is otherwise stable.
+func addOrRemove(list []string, name string, add bool) []string {
+	next := make([]string, 0, len(list)+1)
+	for _, n := range list {
+		if n != name {
+			next = append(next, n)
+		}
+	}
+	if add {
+		next = append(next, name)
+	}
+	return next
 }
 
 // SessionTokens returns the prompt and completion token counts for the given

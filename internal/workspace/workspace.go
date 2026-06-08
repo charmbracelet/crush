@@ -152,6 +152,7 @@ type Workspace interface {
 	CancelSubagent(childSessionID string)
 	AllSubagents() []SubagentDefInfo
 	DeleteUserSubagent(name string) error
+	SetSubagentDisabled(name string, disabled bool) error
 	SessionTokens(ctx context.Context, sessionID string) (prompt, completion int64, err error)
 
 	// MCP operations (server-side in client mode)

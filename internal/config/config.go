@@ -636,6 +636,16 @@ func (c *Config) IsKnownModelID(modelID string) bool {
 	return false
 }
 
+// IsKnownModel reports whether the given model is offered by the given
+// provider. When provider is empty, it scans all providers (equivalent to
+// IsKnownModelID).
+func (c *Config) IsKnownModel(provider, modelID string) bool {
+	if provider == "" {
+		return c.IsKnownModelID(modelID)
+	}
+	return c.GetModel(provider, modelID) != nil
+}
+
 func (c *Config) GetProviderForModel(modelType SelectedModelType) *ProviderConfig {
 	model, ok := c.Models[modelType]
 	if !ok {

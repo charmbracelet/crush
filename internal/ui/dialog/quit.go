@@ -24,6 +24,10 @@ type Quit struct {
 		Close,
 		Quit key.Binding
 	}
+
+	// Compositor for button hit detection. Built during Draw() from
+	// button layers positioned at their screen coordinates.
+	compositor *lipgloss.Compositor
 }
 
 var _ Dialog = (*Quit)(nil)
@@ -88,6 +92,18 @@ func (q *Quit) HandleMsg(msg tea.Msg) Action {
 		case key.Matches(msg, q.keyMap.No, q.keyMap.Close):
 			return ActionClose{}
 		}
+	case tea.MouseClickMsg:
+		if msg.Button != tea.MouseLeft {
+			break
+		}
+		if q.compositor != nil {
+			switch q.compositor.Hit(msg.X, msg.Y).ID() {
+			case "yep":
+				return ActionQuit{}
+			case "nope":
+				return ActionClose{}
+			}
+		}
 	}
 
 	return nil
@@ -112,6 +128,34 @@ func (q *Quit) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	)
 
 	view := q.com.Styles.Dialog.Quit.Frame.Render(content)
+
+	// Build compositor for button hit detection using lipgloss layers.
+	viewW, viewH := lipgloss.Size(view)
+	dialogRect := common.CenterRect(area, viewW, viewH)
+
+	frameStyle := q.com.Styles.Dialog.Quit.Frame
+	innerMinX := dialogRect.Min.X + frameStyle.GetHorizontalFrameSize()/2
+	innerMinY := dialogRect.Min.Y + frameStyle.GetVerticalFrameSize()/2
+
+	// Buttons are at line 2 within inner content (question=0,
+	// blank=1, buttons=2).
+	yButtonsTop := innerMinY + 2
+
+	b0 := common.Button(q.com.Styles, buttonOpts[0])
+	b1 := common.Button(q.com.Styles, buttonOpts[1])
+	w0 := lipgloss.Width(b0)
+	w1 := lipgloss.Width(b1)
+	spacingW := lipgloss.Width(" ")
+	buttonGroupW := w0 + spacingW + w1
+
+	contentW := lipgloss.Width(content)
+	buttonStartX := innerMinX + (contentW-buttonGroupW)/2
+
+	q.compositor = lipgloss.NewCompositor(
+		lipgloss.NewLayer(b0).X(buttonStartX).Y(yButtonsTop).ID("yep"),
+		lipgloss.NewLayer(b1).X(buttonStartX+w0+spacingW).Y(yButtonsTop).ID("nope"),
+	)
+
 	DrawCenter(scr, area, view)
 	return nil
 }

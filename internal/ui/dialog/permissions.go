@@ -76,6 +76,10 @@ type Permissions struct {
 
 	help   help.Model
 	keyMap permissionsKeyMap
+
+	// Compositor for button hit detection. Built during Draw() from
+	// button layers positioned at their screen coordinates.
+	compositor *lipgloss.Compositor
 }
 
 type permissionsKeyMap struct {
@@ -278,6 +282,23 @@ func (p *Permissions) HandleMsg(msg tea.Msg) Action {
 				p.viewport, _ = p.viewport.Update(msg)
 			}
 		}
+	case tea.MouseClickMsg:
+		if msg.Button != tea.MouseLeft {
+			break
+		}
+		if p.compositor != nil {
+			switch p.compositor.Hit(msg.X, msg.Y).ID() {
+			case "allow":
+				p.selectedOption = 0
+				return p.respond(PermissionAllow)
+			case "allow_session":
+				p.selectedOption = 1
+				return p.respond(PermissionAllowForSession)
+			case "deny":
+				p.selectedOption = 2
+				return p.respond(PermissionDeny)
+			}
+		}
 	case tea.MouseWheelMsg:
 		if p.hasDiffView() {
 			switch msg.Button {
@@ -442,7 +463,13 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	parts = append(parts, "", buttons, "", helpView)
 
 	innerContent := lipgloss.JoinVertical(lipgloss.Left, parts...)
-	DrawCenterCursor(scr, area, dialogStyle.Render(innerContent), nil)
+
+	viewStr := dialogStyle.Render(innerContent)
+
+	// Build compositor for button hit detection using lipgloss layers.
+	p.buildButtonCompositor(t, area, viewStr, dialogStyle, contentWidth, content, headerHeight)
+
+	DrawCenterCursor(scr, area, viewStr, nil)
 	return nil
 }
 
@@ -735,12 +762,21 @@ func (p *Permissions) renderContentPanel(content string, width int) string {
 	return panelStyle.Width(width).Render(content)
 }
 
-func (p *Permissions) renderButtons(contentWidth int) string {
-	buttons := []common.ButtonOpts{
+// permissionButtonIDs maps button index to the layer ID used for hit
+// detection. This is the single source of truth shared by renderButtons
+// and buildButtonCompositor.
+var permissionButtonIDs = [3]string{"allow", "allow_session", "deny"}
+
+func (p *Permissions) buttonOpts() []common.ButtonOpts {
+	return []common.ButtonOpts{
 		{Text: "Allow", UnderlineIndex: 0, Selected: p.selectedOption == 0},
 		{Text: "Allow for Session", UnderlineIndex: 10, Selected: p.selectedOption == 1},
 		{Text: "Deny", UnderlineIndex: 0, Selected: p.selectedOption == 2},
 	}
+}
+
+func (p *Permissions) renderButtons(contentWidth int) string {
+	buttons := p.buttonOpts()
 
 	content := common.ButtonGroup(p.com.Styles, buttons, "  ")
 
@@ -757,6 +793,67 @@ func (p *Permissions) renderButtons(contentWidth int) string {
 		Width(contentWidth).
 		Align(lipgloss.Right).
 		Render(content)
+}
+
+// buildButtonCompositor creates a lipgloss Compositor with a layer per
+// button so that Compositor.Hit can identify which button was clicked.
+func (p *Permissions) buildButtonCompositor(
+	t *styles.Styles,
+	area uv.Rectangle,
+	viewStr string,
+	dialogStyle lipgloss.Style,
+	contentWidth int,
+	content string,
+	headerHeight int,
+) {
+	contentIncluded := content != ""
+	contentHeightActual := 0
+	if contentIncluded {
+		contentHeightActual = lipgloss.Height(content)
+	}
+
+	viewW, viewH := lipgloss.Size(viewStr)
+	dialogRect := common.CenterRect(area, viewW, viewH)
+
+	innerMinX := dialogRect.Min.X + dialogStyle.GetHorizontalFrameSize()/2
+	innerMinY := dialogRect.Min.Y + dialogStyle.GetVerticalFrameSize()/2
+
+	buttonTopInInner := headerHeight + 1
+	if contentIncluded {
+		buttonTopInInner += contentHeightActual + 2
+	}
+
+	opts := p.buttonOpts()
+	yButtonsTop := innerMinY + buttonTopInInner
+
+	buttonGroupHorizontal := common.ButtonGroup(t, opts, "  ")
+	buttonsAreStacked := lipgloss.Width(buttonGroupHorizontal) > contentWidth
+
+	var layers []*lipgloss.Layer
+	if buttonsAreStacked {
+		y := yButtonsTop
+		for i, o := range opts {
+			b := common.Button(t, o)
+			w := lipgloss.Width(b)
+			h := lipgloss.Height(b)
+			x := innerMinX + (contentWidth-w)/2
+			layers = append(layers, lipgloss.NewLayer(b).X(x).Y(y).ID(permissionButtonIDs[i]))
+			y += h
+		}
+	} else {
+		spacingWidth := lipgloss.Width("  ")
+		buttonGroupWidth := lipgloss.Width(buttonGroupHorizontal)
+		x := innerMinX + (contentWidth - buttonGroupWidth)
+
+		for i, o := range opts {
+			b := common.Button(t, o)
+			w := lipgloss.Width(b)
+			layers = append(layers, lipgloss.NewLayer(b).X(x).Y(yButtonsTop).ID(permissionButtonIDs[i]))
+			x += w + spacingWidth
+		}
+	}
+
+	p.compositor = lipgloss.NewCompositor(layers...)
 }
 
 func (p *Permissions) canScroll() bool {

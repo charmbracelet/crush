@@ -967,3 +967,22 @@ func TestResolveModelByID_CacheHitSkipsBuild(t *testing.T) {
 	require.NoError(t, err2)
 	require.Len(t, coord.subagentModelCache, 1, "second call must not add a new entry")
 }
+
+// TestResolveModelByID_ModelNotFound verifies that resolveModelByID returns an
+// error containing "not found" when no configured provider offers the requested
+// model id, and that the cache is not populated on failure.
+func TestResolveModelByID_ModelNotFound(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	providerCfg := config.ProviderConfig{
+		ID:     "test-provider",
+		Models: []catwalk.Model{{ID: "model-x", DefaultMaxTokens: 4096}},
+	}
+	coord := newTestCoordinator(t, env, "test-provider", providerCfg)
+
+	_, err := coord.resolveModelByID(t.Context(), "does-not-exist", "", true)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "not found")
+	require.Empty(t, coord.subagentModelCache)
+}

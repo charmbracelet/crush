@@ -44,6 +44,23 @@ func (c *Client) RemoveConfigField(ctx context.Context, id string, scope config.
 	return nil
 }
 
+// RemoveRecentModel updates the preferred model on the server.
+func (c *Client) RemoveRecentModel(ctx context.Context, id string, scope config.Scope, modelType config.SelectedModelType, model config.SelectedModel) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/config/remove-recent-model", id), nil, jsonBody(struct {
+		Scope     config.Scope             `json:"scope"`
+		ModelType config.SelectedModelType `json:"model_type"`
+		Model     config.SelectedModel     `json:"model"`
+	}{Scope: scope, ModelType: modelType, Model: model}), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to update preferred model: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to update preferred model: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
 // UpdatePreferredModel updates the preferred model on the server.
 func (c *Client) UpdatePreferredModel(ctx context.Context, id string, scope config.Scope, modelType config.SelectedModelType, model config.SelectedModel) error {
 	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/config/model", id), nil, jsonBody(struct {

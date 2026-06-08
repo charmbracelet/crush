@@ -1,6 +1,8 @@
 package dialog
 
 import (
+	"slices"
+
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/config"
@@ -75,6 +77,14 @@ type ModelItem struct {
 // outside of explicit SetFocused / SetMatch.
 func (m *ModelItem) Finished() bool {
 	return true
+}
+
+// IsRecent returns true if this item is in the recently used list.
+func (m *ModelItem) IsRecent(cfg *config.Config) bool {
+	recentModels := cfg.RecentModels[m.SelectedModelType()]
+	return slices.ContainsFunc(recentModels, func(sm config.SelectedModel) bool {
+		return sm.Provider == m.SelectedModel().Provider && sm.Model == m.SelectedModel().Model
+	})
 }
 
 // SelectedModel returns this model item as a [config.SelectedModel] instance.

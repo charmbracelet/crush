@@ -1531,6 +1531,10 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		cmds = append(cmds, m.initializeProject())
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionRemoveRecentModel:
+		if cmd := m.handleRemoveRecentModel(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 
 	case dialog.ActionSelectModel:
 		if cmd := m.handleSelectModel(msg); cmd != nil {
@@ -1636,6 +1640,23 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	}
 
 	return tea.Batch(cmds...)
+}
+
+func (m *UI) handleRemoveRecentModel(msg dialog.ActionRemoveRecentModel) tea.Cmd {
+	if err := m.com.Workspace.RemoveRecentModel(config.ScopeGlobal, msg.ModelType, msg.Model); err != nil {
+		return util.ReportError(err)
+	}
+
+	return tea.Batch(
+		func() tea.Msg {
+			return dialog.ActionRefreshModels{
+				Selected: msg.Selected,
+			}
+		},
+		func() tea.Msg {
+			return util.NewInfoMsg(fmt.Sprintf("Removed %s from recent models", msg.Model.Model))
+		},
+	)
 }
 
 // substituteArgs replaces $ARG_NAME placeholders in content with actual values.

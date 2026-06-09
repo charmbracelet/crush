@@ -19,12 +19,13 @@ const DefaultStatusTTL = 5 * time.Second
 
 // Status is the status bar and help model.
 type Status struct {
-	com      *common.Common
-	hideHelp bool
-	help     help.Model
-	helpKm   help.KeyMap
-	msg      util.InfoMsg
-	planMode bool
+	com       *common.Common
+	hideHelp  bool
+	help      help.Model
+	helpKm    help.KeyMap
+	msg       util.InfoMsg
+	planMode  bool
+	planReady bool
 }
 
 // NewStatus creates a new status bar and help model.
@@ -52,6 +53,12 @@ func (s *Status) SetMode(plan bool) {
 	s.planMode = plan
 }
 
+// SetPlanReady marks whether the current plan-mode session has a ready,
+// not-yet-confirmed plan; the badge then reads "plan ready" instead of "plan".
+func (s *Status) SetPlanReady(ready bool) {
+	s.planReady = ready
+}
+
 // SetWidth sets the width of the status bar and help view.
 func (s *Status) SetWidth(width int) {
 	helpStyle := s.com.Styles.Status.Help
@@ -77,10 +84,13 @@ func (s *Status) SetHideHelp(hideHelp bool) {
 // renderModeBadge returns a short styled badge string when plan mode is active,
 // or an empty string otherwise.
 func (s *Status) renderModeBadge() string {
-	if s.planMode {
-		return s.com.Styles.Status.PlanBadge.Render("plan")
+	if !s.planMode {
+		return ""
 	}
-	return ""
+	if s.planReady {
+		return s.com.Styles.Status.PlanBadge.Render("plan ready")
+	}
+	return s.com.Styles.Status.PlanBadge.Render("plan")
 }
 
 // Draw draws the status bar onto the screen.

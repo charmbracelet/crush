@@ -19,7 +19,7 @@ func init() {
 	formatters.Register(formatterName, xchroma.Formatter(zero, nil))
 }
 
-// mdCacheMu guards mdCache and quietMDCache.
+// mdCacheMu guards mdCache, quietMDCache, and planMDCache.
 //
 // Lock ordering: when both mdCacheMu and rendererLocksMu are
 // needed (only in InvalidateMarkdownRendererCache), acquire
@@ -29,6 +29,7 @@ var (
 	mdCacheMu    sync.Mutex
 	mdCache      = map[int]*glamour.TermRenderer{}
 	quietMDCache = map[int]*glamour.TermRenderer{}
+	planMDCache  = map[int]*glamour.TermRenderer{}
 )
 
 // MarkdownRenderer returns a glamour [glamour.TermRenderer] configured with
@@ -76,6 +77,26 @@ func QuietMarkdownRenderer(sty *styles.Styles, width int) *glamour.TermRenderer 
 	return r
 }
 
+// PlanMarkdownRenderer returns a glamour [glamour.TermRenderer] that keeps the
+// rich markdown colors but paints the plan-card background under every
+// primitive, for the final plan message card. Renderers are memoized per width
+// and shared across callers. Same concurrency contract as [MarkdownRenderer]:
+// serialize via [LockMarkdownRenderer].
+func PlanMarkdownRenderer(sty *styles.Styles, width int) *glamour.TermRenderer {
+	mdCacheMu.Lock()
+	defer mdCacheMu.Unlock()
+	if r, ok := planMDCache[width]; ok {
+		return r
+	}
+	r, _ := glamour.NewTermRenderer(
+		glamour.WithStyles(sty.PlanMarkdown),
+		glamour.WithWordWrap(width),
+		glamour.WithChromaFormatter(formatterName),
+	)
+	planMDCache[width] = r
+	return r
+}
+
 // InvalidateMarkdownRendererCache drops every cached renderer
 // AND every per-renderer mutex in a single atomic critical
 // section so the two maps cannot disagree mid-toggle. Call this
@@ -96,6 +117,7 @@ func InvalidateMarkdownRendererCache() {
 
 	mdCache = map[int]*glamour.TermRenderer{}
 	quietMDCache = map[int]*glamour.TermRenderer{}
+	planMDCache = map[int]*glamour.TermRenderer{}
 	rendererLocks = map[*glamour.TermRenderer]*sync.Mutex{}
 }
 

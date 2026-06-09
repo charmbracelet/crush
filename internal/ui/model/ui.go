@@ -1765,7 +1765,10 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		cmds = append(cmds, tea.Quit)
 	case dialog.ActionSwitchToCodeMode:
 		m.dialog.CloseFrontDialog()
-		cmds = append(cmds, m.setInputMode(uiInputModeCode))
+		cmds = append(cmds, tea.Sequence(
+			m.setInputMode(uiInputModeCode),
+			m.sendMessage("Implement the plan."),
+		))
 	case dialog.ActionEnableDockerMCP:
 		m.dialog.CloseDialog(dialog.CommandsID)
 		cmds = append(cmds, m.enableDockerMCP)

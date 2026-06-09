@@ -905,6 +905,9 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Messages.AssistantInfoDuration = subtle
 	s.Messages.AssistantCanceled = lipgloss.NewStyle().Foreground(o.fgBase).Italic(true)
 
+	// Plan section styles
+	s.Messages.PlanBox = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.bgLeastVisible).Padding(1, 2)
+
 	// Thinking section styles
 	s.Messages.ThinkingBox = subtle.Background(o.bgLeastVisible)
 	s.Messages.ThinkingTruncationHint = muted

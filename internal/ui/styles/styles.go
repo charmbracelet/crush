@@ -299,6 +299,9 @@ type Styles struct {
 		ShellTruncation    lipgloss.Style // "N more lines" hint.
 		SectionHeader      lipgloss.Style
 
+		// Plan section styles
+		PlanBox lipgloss.Style // Background+padding for the final plan message
+
 		// Thinking section styles
 		ThinkingBox            lipgloss.Style // Background for thinking content
 		ThinkingTruncationHint lipgloss.Style // "… (N lines hidden)" hint

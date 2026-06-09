@@ -433,6 +433,12 @@ func (a *AssistantMessageItem) cachedContent(width int) string {
 		return a.contentSec.out
 	}
 	out := a.renderMarkdown(a.message.Content().Text, width)
+	// In plan mode the agent ends its final plan with a sentinel marker.
+	// Wrap that message in a background "card" so the plan stands out from
+	// regular assistant replies. Mirrors the ThinkingBox treatment.
+	if common.PlanReadyMarkerPresent(a.message.Content().Text) {
+		out = a.sty.Messages.PlanBox.Width(width).Render(strings.TrimSpace(out))
+	}
 	a.contentSec.store(width, srcHash, extra, out, 0)
 	return out
 }
